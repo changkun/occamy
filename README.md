@@ -1,6 +1,6 @@
 # Occamy
 
-a modern remote desktop proxy
+Occamy is a modern remote desktop proxy written in Go.
 
 ## License
 
