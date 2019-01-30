@@ -1,0 +1,11 @@
+# Copyright 2019 Changkun Ou. All rights reserved.
+# Use of this source code is governed by a MIT
+# license that can be found in the LICENSE file.
+
+---
+address: 0.0.0.0:5636
+mode: debug #debug/release/test
+max_log_level: info #info/error/warning/debug/trace
+auth:
+  jwt_secret: occamy
+  jwt_alg: HS256
