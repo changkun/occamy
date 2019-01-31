@@ -28,10 +28,10 @@ void init_client_log(guac_client* client, int level) {
 	max_log_level = level;
 }
 
-// TODO: Cgo somehow gives error message:
+// FIXME: Cgo somehow gives error message:
 // c.guacClient.connection_id undefined (type *_Ctype_struct_guac_client has no field or method connection_id)
 //
-// Therefore, we need the following helper:
+// Therefore, we need the following helper to obtain connection_id:
 char *guac_client_get_identifier(guac_client *client) {
 	return client->connection_id;
 }

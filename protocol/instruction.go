@@ -57,6 +57,14 @@ func (i Instruction) Expect(op string) bool {
 	return i.elements[0] == op
 }
 
+// Args returns the arguments of an instruction
+func (i Instruction) Args() []string {
+	if len(i.elements) < 1 {
+		return []string{}
+	}
+	return i.elements[1:]
+}
+
 // InstructionIO ...
 type InstructionIO struct {
 	conn   *IO

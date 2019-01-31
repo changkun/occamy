@@ -20,7 +20,7 @@ import (
 type JWT struct {
 	Protocol string `form:"protocol" json:"protocol" binding:"required"`
 	Host     string `form:"host"     json:"host"     binding:"required"`
-	Username string `form:"username" json:"username" binding:"required"`
+	Username string `form:"username" json:"username"`
 	Password string `form:"password" json:"password" binding:"required"`
 }
 
