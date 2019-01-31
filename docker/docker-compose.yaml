@@ -1,0 +1,33 @@
+version: '3'
+services:
+  vnc:
+    image: consol/ubuntu-xfce-vnc:1.4.0
+    container_name: vnc
+    networks:
+      occamy_network:
+        ipv4_address: 172.16.238.11
+  occamy:
+    image: occamy:latest
+    restart: always
+    working_dir: /go/src/github.com/changkun/occamy
+    environment:
+      - "USERNAME:root"
+      - "PASSWORD:Docker"
+    networks:
+      occamy_network:
+        ipv4_address: 172.16.238.10
+    cap_add:
+      - SYS_PTRACE
+    ports:
+      - "5636:5636"
+    depends_on:
+      - vnc
+      - rdp
+    command: /go/src/github.com/changkun/occamy/occamyd -conf=./conf.yaml
+networks:
+  occamy_network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.16.238.0/24
