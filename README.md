@@ -21,6 +21,12 @@ without any changes.
 
 Read more details in [docs](./docs/README.md)
 
+## Contributing
+
+Easiest way to contribute is to provide feedback! 
+We would love to hear what you like and what you think is missing.
+PRs are welcome. Please follow the given PR template before you send your pull request.
+
 ## Development
 
 ```
