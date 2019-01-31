@@ -174,7 +174,6 @@ func (s *Session) serveIO(conn *protocol.InstructionIO, ws *websocket.Conn) (err
 			if err != nil {
 				break
 			}
-			logrus.Info("from libguac: ", string(raw))
 			err = ws.WriteMessage(websocket.TextMessage, raw)
 			if err != nil {
 				break
@@ -190,7 +189,6 @@ func (s *Session) serveIO(conn *protocol.InstructionIO, ws *websocket.Conn) (err
 			if err != nil {
 				break
 			}
-			logrus.Info("from client: ", string(buf))
 			_, err = conn.WriteRaw(buf)
 			if err != nil {
 				break
