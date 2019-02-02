@@ -9,32 +9,36 @@ Futhermore, `guacd` manages connection in different processes, which can limits 
 connection of Guacamole application.
 
 ```
-|-- Browser --|----- Guacamole Server ------|--- Intranet ---|
+|-- Browser --|-------- Guacamole Server -----------|--- Intranet ---|
 
-UserA ---+                                      +---- RDP server
-         +------ Guacamole Servlet              |
-UserB ---+                |                     +---- VNC server
-                          +------- guacd -------+
-                                                +---- Others
+UserA --------+                                      +---- RDP server
+              +------ Guacamole Servlet              |
+UserB --------+                |                     +---- VNC server
+                               +------- guacd -------+
+                                                     +---- Others
 ```
 
 _Figure 1: Guacamole Architecture_
 
-Occamy solves these issue, and it uses JWT for authentication as default option, manages
-all connection in mutiple thread rather than multiple processes.
+Occamy solves these issues, and it uses JWT for authentication as default option, manages
+all connection in mutiple thread rather than multiple processes, as shown in Figure 2.
 
 ```
-|-- Browser --|-- Occamy Server --|--- Intranet ---|
+|-- Browser --|---- Occamy Server -----|--- Intranet ---|
 
 
-UserA ---+                        +---- RDP server
-         +------ Occamy ----------+
-UserB ---+                        +---- VNC server
-                                  |
-                                  +---- Others
+UserA --------+                        +---- RDP server
+              +------ Occamy ----------+
+UserB --------+                        +---- VNC server
+                                       |
+                                       +---- Others
 ```
 
 _Figure 2: Occamy Architecture_
+
+## Protocol Instructions
+
+Refer to [Guacamole protocol reference](https://guacamole.apache.org/doc/gug/protocol-reference.html). Note that Occamy has no handshake process between client and Occamy, one can simply POST the connection information to Occamy for getting authentication tokens. 
 
 
 ## License

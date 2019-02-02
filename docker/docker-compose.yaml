@@ -26,7 +26,6 @@ services:
       - "5636:5636"
     depends_on:
       - vnc
-      - rdp
     command: /go/src/github.com/changkun/occamy/occamyd -conf=./conf.yaml
 networks:
   occamy_network:

@@ -19,13 +19,15 @@ in a single middleware application. Any client that involves Guacamole protocol 
 uses WebSocket for authentication can directly switch to interact to Occamy 
 without any changes.
 
-Read more details in [docs](./docs/README.md)
+Read more details in [docs](./docs/README.md).
+
+## Routers
+
+Occamy offers two APIs `/api/v1/login`, which distribute JWT tokens for authentication and `/api/v1/connect` for WebSocket based Guacamole connection. These two APIs are simple enough to serve all users.
 
 ## Contributing
 
-Easiest way to contribute is to provide feedback! 
-We would love to hear what you like and what you think is missing.
-PRs are welcome. Please follow the given PR template before you send your pull request.
+Easiest way to contribute is to provide feedback! We would love to hear what you like and what you think is missing. PRs are welcome. Please follow the given PR template before you send your pull request.
 
 ## Development
 
