@@ -10,12 +10,17 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
-	"github.com/appleboy/gin-jwt"
 	"github.com/changkun/occamy/config"
+	"github.com/changkun/occamy/lib"
 	"github.com/changkun/occamy/protocol"
+
+	"github.com/appleboy/gin-jwt"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
@@ -45,14 +50,14 @@ func Run() {
 // proxy is an occamy proxy that serves all sessions
 // connects to occamy
 type proxy struct {
+	upgrader *websocket.Upgrader
 	sessions map[string]*Session
 	mu       sync.Mutex
-	upgrader *websocket.Upgrader
 }
 
 func (p *proxy) serve() {
 	server := &http.Server{
-		Handler: p.setupRouter(),
+		Handler: p.router(),
 		Addr:    fmt.Sprintf("%s", config.Runtime.Address),
 	}
 	go func() {
@@ -75,7 +80,7 @@ func (p *proxy) serve() {
 	return
 }
 
-func (p *proxy) setupRouter() (r *gin.Engine) {
+func (p *proxy) router() (r *gin.Engine) {
 	r = gin.Default()
 
 	jwtm, err := jwt.New(&jwt.GinJWTMiddleware{
@@ -133,14 +138,6 @@ func (p *proxy) setupRouter() (r *gin.Engine) {
 }
 
 func (p *proxy) serveWS(c *gin.Context) {
-	claims := jwt.ExtractClaims(c)
-	conf := &config.JWT{
-		Protocol: claims["protocol"].(string),
-		Host:     claims["host"].(string),
-		Username: claims["username"].(string),
-		Password: claims["password"].(string),
-	}
-
 	ws, err := p.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		logrus.Errorf("occamy-proxy: upgrade websocket failed: %v", err)
@@ -148,7 +145,13 @@ func (p *proxy) serveWS(c *gin.Context) {
 		return
 	}
 
-	err = p.routeConn(ws, conf)
+	claims := jwt.ExtractClaims(c)
+	err = p.routeConn(ws, &config.JWT{
+		Protocol: claims["protocol"].(string),
+		Host:     claims["host"].(string),
+		Username: claims["username"].(string),
+		Password: claims["password"].(string),
+	})
 	if err != nil {
 		ws.WriteMessage(websocket.CloseMessage, []byte(err.Error()))
 	}
@@ -159,7 +162,7 @@ func (p *proxy) routeConn(ws *websocket.Conn, conf *config.JWT) (err error) {
 	// fast path
 	sess, ok := p.sessions[conf.GenerateID()]
 	if ok {
-		err = sess.Join(ws, conf, false)
+		err = sess.Join(ws, conf, false) // block here
 		return
 	}
 
@@ -168,7 +171,7 @@ func (p *proxy) routeConn(ws *websocket.Conn, conf *config.JWT) (err error) {
 	sess, ok = p.sessions[conf.GenerateID()]
 	if ok {
 		p.mu.Unlock()
-		err = sess.Join(ws, conf, false)
+		err = sess.Join(ws, conf, false) // block here
 		return
 	}
 
@@ -186,5 +189,140 @@ func (p *proxy) routeConn(ws *websocket.Conn, conf *config.JWT) (err error) {
 	p.mu.Lock()
 	delete(p.sessions, conf.GenerateID())
 	p.mu.Unlock()
+	return
+}
+
+// Session is an occamy proxy session that shares connection
+// within an user group
+type Session struct {
+	connectedUsers uint64
+	id             string
+	once           sync.Once
+	client         *lib.Client // shared client in a session
+}
+
+// NewSession creates a new occamy proxy session
+func NewSession(proto string) (*Session, error) {
+	runtime.LockOSThread() // without unlock to exit the Go thread
+
+	cli, err := lib.NewClient()
+	if err != nil {
+		return nil, fmt.Errorf("occamy-lib: new client error: %v", err)
+	}
+
+	s := &Session{client: cli}
+	if err = s.initialize(proto); err != nil {
+		s.close()
+		return nil, fmt.Errorf("occamy-lib: session initialization failed with error: %v", err)
+	}
+	return s, nil
+}
+
+// ID reports the session id
+func (s *Session) ID() string {
+	return s.id
+}
+
+// Join adds the given socket as a new user to the given process, automatically
+// reading/writing from the socket via read/write threads. The given socket,
+// parser, and any associated resources will be freed unless the user is not
+// added successfully.
+func (s *Session) Join(ws *websocket.Conn, conf *config.JWT, owner bool) error {
+	defer s.close()
+	lib.ResetErrors()
+
+	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		return fmt.Errorf("occamy-proxy: new socket pair error: %v", err)
+	}
+	sock, err := lib.NewSocket(fds[0])
+	if err != nil {
+		logrus.Errorf("occamy-lib: create guac socket error: %v", err)
+		return err
+	}
+	defer sock.Close()
+	u, err := lib.NewUser(sock, s.client, owner, conf)
+	if err != nil {
+		logrus.Errorf("occamy-lib: create guac user error: %v", err)
+		return err
+	}
+	defer u.Close()
+	s.addUser()
+	defer s.delUser()
+
+	// 1. user goroutine
+	go func(u *lib.User) {
+		err := u.HandleConnectionWithHandshake() // block until disconnect/completion
+		if err != nil {
+			logrus.Errorf("occamy-lib: handle user connection error: %v", err)
+		}
+	}(u)
+
+	// 2. proxy io
+	conn := protocol.NewInstructionIO(fds[1])
+	defer conn.Close()
+	return s.serveIO(conn, ws)
+}
+
+func (s *Session) addUser() {
+	atomic.AddUint64(&s.connectedUsers, 1)
+}
+func (s *Session) delUser() {
+	atomic.AddUint64(&s.connectedUsers, ^uint64(0))
+}
+
+func (s *Session) initialize(proto string) error {
+	s.client.InitLogLevel(config.Runtime.MaxLogLevel)
+	err := s.client.LoadProtocolPlugin(proto)
+	if err != nil {
+		return err
+	}
+	s.id = s.client.Identifier()
+	return nil
+}
+
+func (s *Session) close() {
+	if atomic.LoadUint64(&s.connectedUsers) > 0 {
+		return
+	}
+	s.client.Close()
+}
+
+func (s *Session) serveIO(conn *protocol.InstructionIO, ws *websocket.Conn) (err error) {
+	wg := sync.WaitGroup{}
+	exit := make(chan error, 2)
+	wg.Add(2)
+	go func(conn *protocol.InstructionIO, ws *websocket.Conn) {
+		var err error
+		for {
+			raw, err := conn.ReadRaw()
+			if err != nil {
+				break
+			}
+			err = ws.WriteMessage(websocket.TextMessage, raw)
+			if err != nil {
+				break
+			}
+		}
+		exit <- err
+		wg.Done()
+	}(conn, ws)
+	go func(conn *protocol.InstructionIO, ws *websocket.Conn) {
+		var err error
+		for {
+			_, buf, err := ws.ReadMessage()
+			if err != nil {
+				break
+			}
+			_, err = conn.WriteRaw(buf)
+			if err != nil {
+				break
+			}
+		}
+		exit <- err
+		wg.Done()
+	}(conn, ws)
+	err = <-exit
+	wg.Wait()
 	return
 }

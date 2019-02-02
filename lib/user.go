@@ -6,24 +6,75 @@ package lib
 
 /*
 #cgo LDFLAGS: -L/usr/local/lib -lguac
+#include <stdlib.h>
+#include "../guacamole/src/libguac/guacamole/parser.h"
 #include "../guacamole/src/libguac/guacamole/user.h"
+#include "../guacamole/src/libguac/guacamole/client.h"
+
+const char *mimetypes[] = {"", NULL};
+
+void set_user_info(guac_user* user) {
+	user->info.optimal_width = 1024;
+	user->info.optimal_height = 768;
+	user->info.optimal_resolution = 96;
+	user->info.audio_mimetypes = (const char**) mimetypes;
+	user->info.video_mimetypes = (const char**) mimetypes;
+	user->info.image_mimetypes = (const char**) mimetypes;
+}
+int get_args_length(const char** args) {
+	int i = 0;
+	int argc = 0;
+	for (i=0; args[i] != NULL; i++) {
+		argc++;
+	}
+	return argc;
+}
+
+static char** makeCharArray(int size) {
+	return calloc(sizeof(char*), size);
+}
+
+static void setArrayString(char **a, char *s, int n) {
+	a[n] = s;
+}
+
+static void freeCharArray(char **a, int size) {
+	int i;
+	for (i = 0; i < size; i++)
+		free(a[i]);
+	free(a);
+}
 */
 import "C"
 import (
 	"errors"
+	"net"
 	"sync"
 	"time"
+	"unsafe"
+
+	"github.com/changkun/occamy/config"
+	"github.com/sirupsen/logrus"
 )
 
 // User is the representation of a physical connection within a larger logical connection
 // which may be shared. Logical connections are represented by guac_client.
 type User struct {
-	guacUser *C.struct_guac_user
-	once     sync.Once
+	guacUser   *C.struct_guac_user
+	guacClient *C.struct_guac_client
+	info       connectInformation
+	once       sync.Once
+}
+
+type connectInformation struct {
+	Host     string
+	Port     string
+	Username string
+	Password string
 }
 
 // NewUser creates a user and associate the user with any specific client
-func NewUser(s *Socket, c *Client, owner bool) (*User, error) {
+func NewUser(s *Socket, c *Client, owner bool, conf *config.JWT) (*User, error) {
 	user := C.guac_user_alloc()
 	if user == nil {
 		return nil, errors.New(errorStatus())
@@ -35,7 +86,22 @@ func NewUser(s *Socket, c *Client, owner bool) (*User, error) {
 	} else {
 		user.owner = C.int(0)
 	}
-	return &User{guacUser: user}, nil
+
+	host, port, err := net.SplitHostPort(conf.Host)
+	if err != nil {
+		return nil, err
+	}
+
+	return &User{
+		guacUser:   user,
+		guacClient: c.guacClient,
+		info: connectInformation{
+			Host:     host,
+			Port:     port,
+			Username: conf.Username,
+			Password: conf.Password,
+		},
+	}, nil
 }
 
 // Close frees the user and detach the association to the attached client
@@ -56,6 +122,50 @@ const usecTimeout time.Duration = 15 * time.Millisecond
 func (u *User) HandleConnection() error {
 	if int(C.guac_user_handle_connection(u.guacUser, C.int(int(usecTimeout)))) != 0 {
 		return errors.New(errorStatus())
+	}
+	return nil
+}
+
+// HandleConnectionWithHandshake ...
+func (u *User) HandleConnectionWithHandshake() error {
+	// general args
+	C.set_user_info(u.guacUser)
+
+	// client args
+	length := int(C.get_args_length(u.guacClient.args))
+	tmpslice := (*[1 << 30]*C.char)(unsafe.Pointer(u.guacClient.args))[:length:length]
+	args := make([]string, length)
+	for i, s := range tmpslice {
+		args[i] = C.GoString(s)
+	}
+	for i := range args {
+		switch args[i] {
+		case "hostname":
+			args[i] = u.info.Host
+		case "port":
+			args[i] = u.info.Port
+		case "username":
+			args[i] = u.info.Username
+		case "password":
+			args[i] = u.info.Password
+		default:
+			args[i] = ""
+		}
+	}
+	cargs := C.makeCharArray(C.int(len(args)))
+	defer C.freeCharArray(cargs, C.int(len(args)))
+
+	if int(C.guac_client_add_user(u.guacClient, u.guacUser, C.int(len(args)), cargs)) == 0 {
+		parser := C.guac_parser_alloc()
+		C.guac_user_start(parser, u.guacUser, C.int(int(usecTimeout))) // block here
+		C.guac_client_remove_user(u.guacClient, u.guacUser)
+		C.guac_parser_free(parser)
+		logrus.Infof("User %s disconnected (%i users remain)",
+			u.guacUser.user_id, u.guacClient.connected_users)
+
+	} else {
+		logrus.Errorf("User %s could NOT join connection %s",
+			u.guacUser.user_id, u.guacClient.connected_users)
 	}
 	return nil
 }
