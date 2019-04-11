@@ -114,8 +114,9 @@ func (p *proxy) router() (r *gin.Engine) {
 	if err != nil {
 		logrus.Fatalf("occamy-proxy: initialize router error: %v", err)
 	}
-
-	r.StaticFS("/static", http.Dir("./client/static"))
+	if config.Runtime.Client {
+		r.StaticFS("/static", http.Dir("./client/occamy-web/dist"))
+	}
 	v1 := r.Group("/api/v1")
 	{
 		v1.GET("/ping", func(c *gin.Context) {
@@ -129,7 +130,9 @@ func (p *proxy) router() (r *gin.Engine) {
 				BuildTime: config.BuildTime,
 			})
 		})
-		v1.POST("/login", jwtm.LoginHandler)
+		if config.Runtime.Client {
+			v1.POST("/login", jwtm.LoginHandler)
+		}
 		auth := v1.Group("/connect")
 		auth.Use(jwtm.MiddlewareFunc())
 		auth.GET("", p.serveWS)
