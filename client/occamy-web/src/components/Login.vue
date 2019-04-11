@@ -1,6 +1,8 @@
 <template>
+<div>
 <div class="login">
-    <el-form ref="form" :model="form" labelPosition="left" label-width="100px">
+    <h1>Occamy Web Client</h1>
+    <el-form ref="form" :model="form" labelPosition="left" label-width="200px">
         <el-form-item label="Protocol">
             <el-select v-model="form.protocol" class="protocols">
             <el-option label="VNC" value="vnc"></el-option>
@@ -22,6 +24,7 @@
         </el-form-item>
     </el-form>
 </div>
+</div>
 </template>
 <script>
 import axios from 'axios'
@@ -41,28 +44,28 @@ export default {
   methods: {
     login() {
         axios.post('/api/v1/login', this.form).then((response) => {
-            win.location = this.$router.resolve({
+            window.location = this.$router.resolve({
                 name: 'desktop', 
                 query:{token: response.data.token}
             }).href
         }).catch((err) => {
-            this.$message({message: 'login fail', type: 'error'})
+            this.$message({message: `login fail: ${err}`, type: 'error'})
         })
     },
   },
   computed: {
     showUsername() {
-        if (this.form.protocol != 'vnc') {
-            this.form.username = ''
-        }
-        return 
+        return this.form.protocol != 'vnc'
     }
-  },
+  }
 };
 </script>
 
 <style>
 .login {
+    margin-left: 50px;
+    text-align: left;
     padding: 50px;
+    width: 500px;
 }
 </style>

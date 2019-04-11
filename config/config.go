@@ -40,6 +40,7 @@ type config struct {
 		JWTSecret    string `yaml:"jwt_secret"`
 		JWTAlgorithm string `yaml:"jwt_alg"`
 	} `yaml:"auth"`
+	Client bool `yaml:"client"`
 }
 
 // Runtime configurations

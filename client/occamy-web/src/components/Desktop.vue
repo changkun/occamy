@@ -6,28 +6,31 @@ import Guacamole from 'guacamole-client'
 export default {
   data () { return {} },
   methods: {},
-  mounted (){
+  mounted () {
     const url = 'ws://0.0.0.0:5636/api/v1/connect'
     let guac = new Guacamole.Client(new Guacamole.WebSocketTunnel(url));
-    document.getElementById('desktop').appendChild(guac.getDisplay().getElement());
-    guac.onerror = (error) => { console.log(error) };
+    let display = guac.getDisplay()
+    document.getElementById('desktop').appendChild(display.getElement());
+    guac.onerror = null;
     guac.connect(`token=${this.$route.query.token}`)
-    guac.getDisplay().scale(Math.min(window.innerWidth/1024, window.innerHeight/768))
-    window.display = guac.getDisplay();
-    window.guac = guac
+    window.display = display;
+    display.scale(Math.min(
+      window.innerHeight / 1024,
+      window.innerWidth / 768
+    ))
     window.onunload = () => { guac.disconnect() }
     window.onresize = () => {
-      guac.getDisplay().scale(Math.min(
-        window.innerHeight / guac.getDisplay().getHeight(),
-        window.innerWidth / guac.getDisplay().getWidth()
+      display.scale(Math.min(
+        window.innerHeight / display.getHeight(),
+        window.innerWidth / display.getWidth()
       ))
     }
-    var mouse = new Guacamole.Mouse(guac.getDisplay().getElement());
+    var mouse = new Guacamole.Mouse(display.getElement());
     mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = (mouseState) => {
-      guac.getDisplay().showCursor(false);
+      display.showCursor(false);
       const scaledState = new Guacamole.Mouse.State(
-          mouseState.x / guac.getDisplay().getScale(),
-          mouseState.y / guac.getDisplay().getScale(),
+          mouseState.x / display.getScale(),
+          mouseState.y / display.getScale(),
           mouseState.left,
           mouseState.middle,
           mouseState.right,
