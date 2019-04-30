@@ -7,6 +7,7 @@ package lib
 /*
 #cgo LDFLAGS: -L/usr/local/lib -lguac
 #include "../guacamole/src/libguac/guacamole/socket.h"
+#include "../guacamole/src/libguac/guacamole/client.h"
 */
 import "C"
 import (
