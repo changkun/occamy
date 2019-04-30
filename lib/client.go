@@ -27,14 +27,6 @@ void init_client_log(guac_client* client, int level) {
 	client->log_handler = occamy_client_log;
 	max_log_level = level;
 }
-
-// FIXME: Cgo somehow gives error message:
-// c.guacClient.connection_id undefined (type *_Ctype_struct_guac_client has no field or method connection_id)
-//
-// Therefore, we need the following helper to obtain connection_id:
-char *guac_client_get_identifier(guac_client *client) {
-	return client->connection_id;
-}
 */
 import "C"
 import (
@@ -79,9 +71,8 @@ var clientLogLevelTable = map[string]clientLogLevel{
 
 // Client is a guacamole client container
 type Client struct {
-	guacClient   *C.struct_guac_client
-	connectionID string
-	once         sync.Once
+	guacClient *C.struct_guac_client
+	once       sync.Once
 }
 
 // NewClient creates a new guacamole client
@@ -130,5 +121,5 @@ func (c *Client) LoadProtocolPlugin(proto string) error {
 // Identifier returns the connection id of a guacamole client. the id will be allocated
 // after calling c.LoadPlugin.
 func (c *Client) Identifier() string {
-	return C.GoString(C.guac_client_get_identifier(c.guacClient))
+	return C.GoString(c.guacClient.connection_id)
 }
