@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	jwt "github.com/appleboy/gin-jwt"
+	jwt "github.com/appleboy/gin-jwt/v2"
 	"github.com/changkun/occamy/config"
 	"github.com/changkun/occamy/protocol"
 	"github.com/gin-gonic/gin"
