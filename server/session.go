@@ -55,10 +55,11 @@ func (s *Session) ID() string {
 // reading/writing from the socket via read/write threads. The given socket,
 // parser, and any associated resources will be freed unless the user is not
 // added successfully.
-func (s *Session) Join(ws *websocket.Conn, conf *config.JWT, owner bool) error {
+func (s *Session) Join(ws *websocket.Conn, conf *config.JWT, owner bool, unlock func()) error {
 
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
+		unlock()
 		return fmt.Errorf("occamy-proxy: new socket pair error: %v", err)
 	}
 	lib.ResetErrors()
@@ -95,9 +96,10 @@ func (s *Session) Join(ws *websocket.Conn, conf *config.JWT, owner bool) error {
 	err = s.handshake(conn, ws, conf)
 	if err != nil {
 		conn.Close()
+		unlock()
 		return err
 	}
-
+	unlock()
 	// 3. proxy io
 	return s.serveIO(conn, ws)
 }
@@ -106,7 +108,7 @@ func (s *Session) initialize(proto string) error {
 	s.client.InitLogLevel(config.Runtime.MaxLogLevel)
 	err := s.client.LoadProtocolPlugin(proto)
 	if err != nil {
-		return err
+		return fmt.Errorf("occamy-lib: load protocol plugin failed: %v", err)
 	}
 	s.id = s.client.Identifier()
 	return nil
