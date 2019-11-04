@@ -1042,18 +1042,6 @@ AM_COND_IF([ENABLE_SSH],    [build_ssh=yes],    [build_ssh=no])
 AM_COND_IF([ENABLE_VNC],    [build_vnc=yes],    [build_vnc=no])
 
 #
-# Init scripts
-#
-
-AM_COND_IF([ENABLE_INIT], [build_init="${init_dir}"], [build_init=no])
-
-#
-# Systemd units
-#
-
-AM_COND_IF([ENABLE_SYSTEMD], [build_systemd="${systemd_dir}"], [build_systemd=no])
-
-#
 # Display summary
 #
 
@@ -1077,9 +1065,6 @@ $PACKAGE_NAME version $PACKAGE_VERSION
       RDP ....... ${build_rdp}
       SSH ....... ${build_ssh}
       VNC ....... ${build_vnc}
-
-   Init scripts: ${build_init}
-   Systemd units: ${build_systemd}
 
 Type \"make\" to compile $PACKAGE_NAME.
 "
