@@ -153,25 +153,17 @@ func (p *proxy) serveWS(c *gin.Context) {
 
 	err = p.routeConn(ws, conf)
 	if err != nil {
+		logrus.Errorf("occamy-proxy: route connection failed: %v", err)
 		ws.WriteMessage(websocket.CloseMessage, []byte(err.Error()))
 	}
 	ws.Close()
 }
 
 func (p *proxy) routeConn(ws *websocket.Conn, conf *config.JWT) (err error) {
-	// fast path
+	p.mu.Lock()
 	sess, ok := p.sessions[conf.GenerateID()]
 	if ok {
-		err = sess.Join(ws, conf, false)
-		return
-	}
-
-	// slow path
-	p.mu.Lock()
-	sess, ok = p.sessions[conf.GenerateID()]
-	if ok {
-		p.mu.Unlock()
-		err = sess.Join(ws, conf, false)
+		err = sess.Join(ws, conf, false, func() { p.mu.Unlock() })
 		return
 	}
 
@@ -182,10 +174,9 @@ func (p *proxy) routeConn(ws *websocket.Conn, conf *config.JWT) (err error) {
 	}
 
 	p.sessions[conf.GenerateID()] = sess
-	p.mu.Unlock()
-
 	logrus.Infof("occamy-proxy: new session was created: %s", sess.ID())
-	err = sess.Join(ws, conf, true) // block here
+	err = sess.Join(ws, conf, true, func() { p.mu.Unlock() }) // block here
+
 	p.mu.Lock()
 	delete(p.sessions, conf.GenerateID())
 	p.mu.Unlock()
