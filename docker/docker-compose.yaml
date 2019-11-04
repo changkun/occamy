@@ -4,28 +4,14 @@
 
 version: '3'
 services:
-  vnc:
-    image: consol/ubuntu-xfce-vnc:1.4.0
-    container_name: vnc
-    networks:
-      occamy_network:
-        ipv4_address: 172.16.238.10
-  rdp:
-    image: umis/xubuntu-office-xrdp-desktop:v1.0
-    container_name: rdp
-    environment:
-      - "USERNAME:root"
-      - "PASSWORD:Docker"
-    networks:
-      occamy_network:
-        ipv4_address: 172.16.238.11
   occamy:
+    container_name: occamy
     image: occamy:latest
     restart: always
     working_dir: /go/src/github.com/changkun/occamy
     networks:
       occamy_network:
-        ipv4_address: 172.16.238.12
+        ipv4_address: 172.16.238.10
     cap_add:
       - SYS_PTRACE
     ports:
@@ -33,6 +19,33 @@ services:
     depends_on:
       - vnc
     command: /go/src/github.com/changkun/occamy/occamyd -conf=./conf.yaml
+
+  vnc:
+    # password: vncpassword
+    image: consol/ubuntu-xfce-vnc:1.4.0
+    container_name: vnc
+    networks:
+      occamy_network:
+        ipv4_address: 172.16.238.11
+  rdp:
+    # user: root, password: Docker
+    image: umis/xubuntu-office-xrdp-desktop:v1.0
+    container_name: rdp
+    environment:
+      - "USERNAME:root"
+      - "PASSWORD:Docker"
+    networks:
+      occamy_network:
+        ipv4_address: 172.16.238.12
+
+  ssh:
+    # user: root, password: root
+    image: rastasheep/ubuntu-sshd:14.04
+    container_name: ssh
+    networks:
+      occamy_network:
+        ipv4_address: 172.16.238.13
+
 networks:
   occamy_network:
     driver: bridge
