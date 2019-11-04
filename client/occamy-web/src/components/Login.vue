@@ -11,13 +11,13 @@
             </el-select>
         </el-form-item>
         <el-form-item label="Host" prop="host">
-            <el-input v-model="form.host"></el-input>
+            <el-input v-model="credentials[form.protocol].host"></el-input>
         </el-form-item>
         <el-form-item label="Username" v-show="showUsername">
-            <el-input v-model="form.username"></el-input>
+            <el-input v-model="credentials[form.protocol].username"></el-input>
         </el-form-item>
         <el-form-item label="Password" prop="password">
-            <el-input v-model="form.password"></el-input>
+            <el-input v-model="credentials[form.protocol].password"></el-input>
         </el-form-item>
         <el-form-item>
             <el-button type="primary" @click.native="login">Login</el-button>
@@ -35,15 +35,32 @@ export default {
       exists: [],
       form: {
         protocol: 'vnc',
-        host: '172.16.238.11:5901',
-        username: '',
-        password: 'vncpassword'
       },
+      credentials: {
+          'vnc': {
+            protocol: 'vnc',
+            host: '172.16.238.11:5901',
+            username: '',
+            password: 'vncpassword'
+          },
+          'rdp': {
+            protocol: 'rdp',
+            host: '172.16.238.12:3389',
+            username: 'root',
+            password: 'Docker'
+          },
+          'ssh': {
+            protocol: 'ssh',
+            host: '172.16.238.13:22',
+            username: 'root',
+            password: 'root'
+          }
+      }
     };
   },
   methods: {
     login() {
-        axios.post('/api/v1/login', this.form).then((response) => {
+        axios.post('/api/v1/login', this.credentials[this.form.protocol]).then((response) => {
             window.location = this.$router.resolve({
                 name: 'desktop', 
                 query:{token: response.data.token}
