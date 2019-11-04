@@ -1,2 +1,2 @@
-*.c linguist-vendored=false
-*.h linguist-vendored=false
+*.c linguist-language=Go
+*.h linguist-language=Go
