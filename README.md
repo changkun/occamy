@@ -24,7 +24,7 @@ Read more details in [docs](./docs/README.md).
 ## Demo
 
 <div align="center">
-  <a href="https://www.youtube.com/watch?v=I3OJkFiebR4"><img src="https://img.youtube.com/vi/I3OJkFiebR4/0.jpg" alt="IMAGE ALT TEXT"></a>
+  <a href="https://youtu.be/e24WHo4Kpx8"><img src="https://img.youtube.com/vi/e24WHo4Kpx8/0.jpg" alt="IMAGE ALT TEXT"></a>
 </div>
 
 ## Routers
