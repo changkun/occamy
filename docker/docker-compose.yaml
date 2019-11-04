@@ -9,17 +9,23 @@ services:
     container_name: vnc
     networks:
       occamy_network:
-        ipv4_address: 172.16.238.11
-  occamy:
-    image: occamy:latest
-    restart: always
-    working_dir: /go/src/github.com/changkun/occamy
+        ipv4_address: 172.16.238.10
+  rdp:
+    image: umis/xubuntu-office-xrdp-desktop:v1.0
+    container_name: rdp
     environment:
       - "USERNAME:root"
       - "PASSWORD:Docker"
     networks:
       occamy_network:
-        ipv4_address: 172.16.238.10
+        ipv4_address: 172.16.238.11
+  occamy:
+    image: occamy:latest
+    restart: always
+    working_dir: /go/src/github.com/changkun/occamy
+    networks:
+      occamy_network:
+        ipv4_address: 172.16.238.12
     cap_add:
       - SYS_PTRACE
     ports:
