@@ -1,3 +1,0 @@
-[submodule "guacamole"]
-	path = guacamole
-	url = https://github.com/apache/guacamole-server.git
