@@ -9,7 +9,7 @@ GOPATH=$(shell go env GOPATH)
 HOME = github.com/changkun/occamy
 IMAGE = occamy
 
-build:
+build: clean
 	docker build -t $(IMAGE):$(VERSION) -t $(IMAGE):latest -f docker/Dockerfile .
 .PHONY: occamy
 

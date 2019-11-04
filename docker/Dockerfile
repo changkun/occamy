@@ -47,11 +47,10 @@ ENV \
 RUN yum -y update                                                         && \
     yum -y install epel-release $RUNTIME_DEPENDENCIES $BUILD_DEPENDENCIES
 WORKDIR /go/src/github.com/changkun/occamy
-
 RUN mkdir /go-download                                      && \
     cd /go-download                                         && \
-    wget https://dl.google.com/go/go1.11.5.linux-amd64.tar.gz && \
-    tar -xvf go1.11.5.linux-amd64.tar.gz                      && \
+    wget https://dl.google.com/go/go1.13.4.linux-amd64.tar.gz && \
+    tar -xvf go1.13.4.linux-amd64.tar.gz                      && \
     mv go /usr/local && \
     cp /usr/lib64/glib-2.0/include/glibconfig.h /usr/include/glib-2.0/
 ENV GOROOT=/usr/local/go
@@ -60,13 +59,10 @@ ENV PATH=$GOPATH/bin:$GOROOT/bin:$PATH
 
 COPY . .
 
-# build guacamole-server from local source
-RUN cd /go/src/github.com/changkun/occamy/guacamole && \
-    # fix https://issues.apache.org/jira/plugins/servlet/mobile#issue/GUACAMOLE-213
-    echo "/usr/local/lib" >> /etc/ld.so.conf             && \
-    ./src/guacd-docker/bin/build-guacd.sh /go/src/github.com/changkun/occamy/guacamole
+RUN /go/src/github.com/changkun/occamy/guacamole/src/guacd-docker/bin/build-guacd.sh \
+    /go/src/github.com/changkun/occamy/guacamole
 
-RUN go build -x -ldflags \
+RUN go build -mod vendor -x -ldflags \
 "-X github.com/changkun/occamy/config.Version=v$(git describe --always --tags) \
 -X github.com/changkun/occamy/config.BuildTime=$(date +%F) \
 -X github.com/changkun/occamy/config.GitCommit=$(git rev-parse HEAD)" \
