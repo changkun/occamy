@@ -85,9 +85,14 @@ int guac_rdp_user_join_handler(guac_user* user, int argc, char** argv) {
         guac_rdp_svc_send_pipes(user);
 
         /* Synchronize with current display */
-        guac_common_display_dup(rdp_client->display, user, user->socket);
+        // FIXME: occamy: this is a temporal solution.
+        // If two users race on same connection, the client->display is
+        // a NULL pointer, which can cause segment fault.
+        // see bug report: https://issues.apache.org/jira/browse/GUACAMOLE-898
+        if (rdp_client->display != NULL) {
+            guac_common_display_dup(rdp_client->display, user, user->socket);
+        }
         guac_socket_flush(user->socket);
-
     }
 
     /* Only handle events if not read-only */
