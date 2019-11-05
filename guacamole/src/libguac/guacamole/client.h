@@ -256,7 +256,6 @@ struct guac_client {
      * is used.
      */
     void* __plugin_handle;
-    pthread_mutex_t* guacd_openssl_locks;
 };
 
 /**
