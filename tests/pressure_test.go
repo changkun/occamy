@@ -10,7 +10,7 @@ import (
 
 const (
 	maxc   = 10
-	urlVNC = "ws://0.0.0.0:5636/api/v1/connect?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE1NzI5NTUwMzUsImhvc3QiOiIxNzIuMTYuMjM4LjExOjU5MDEiLCJvcmlnX2lhdCI6MTU3Mjk1MTQzNSwicGFzc3dvcmQiOiJ2bmNwYXNzd29yZCIsInByb3RvY29sIjoidm5jIiwidXNlcm5hbWUiOiIifQ.TM0-yt5kGmoBSvzMzmJXiear7rDVKdMewcxdccmm9Zs"
+	urlVNC = "ws://0.0.0.0:5636/api/v1/connect?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE1NzI5NjQzNDAsImhvc3QiOiIxNzIuMTYuMjM4LjExOjU5MDEiLCJvcmlnX2lhdCI6MTU3Mjk2MDc0MCwicGFzc3dvcmQiOiJ2bmNwYXNzd29yZCIsInByb3RvY29sIjoidm5jIiwidXNlcm5hbWUiOiIifQ.YTfZV68lChFeJboar52qjdy0NCWmRm18HSVzLS3pW2c"
 	urlRDP = "ws://0.0.0.0:5636/api/v1/connect?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE1NzI5NTc5MzgsImhvc3QiOiIxNzIuMTYuMjM4LjEyOjMzODkiLCJvcmlnX2lhdCI6MTU3Mjk1NDMzOCwicGFzc3dvcmQiOiJEb2NrZXIiLCJwcm90b2NvbCI6InJkcCIsInVzZXJuYW1lIjoicm9vdCJ9.FISbcjJ2J8hUpFphIvjE9C-PFSzEuVSPapll1BKvnNU"
 	urlSSH = "ws://0.0.0.0:5636/api/v1/connect?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE1NzI5NTY4MzUsImhvc3QiOiIxNzIuMTYuMjM4LjEzOjIyIiwib3JpZ19pYXQiOjE1NzI5NTMyMzUsInBhc3N3b3JkIjoicm9vdCIsInByb3RvY29sIjoic3NoIiwidXNlcm5hbWUiOiJyb290In0.JxyTAxWPuXBnvBsU0aqR75sskk8KpB9kQPFhoUNL7RQ"
 	debug  = false
@@ -87,14 +87,16 @@ func failConnect(url string) error {
 //  go test -v -count=1 .
 func TestConnectionPressure(t *testing.T) {
 	protos := []string{"vnc", "rdp", "ssh"}
-	connectors := []func(string) error{successConnect, failConnect}
+	connectors := map[string]func(string) error{"success": successConnect, "fail": failConnect}
 	var wg sync.WaitGroup
 	for i := 1; i <= maxc; i++ {
 		for _, proto := range protos {
-			for _, connector := range connectors {
+			for name, connector := range connectors {
 				wg.Add(1)
-				go func(connector func(string) error, proto string, i int) {
-					fmt.Printf("%s-%d start...\n", proto, i)
+				go func(name string, connector func(string) error, proto string, i int) {
+					defer wg.Done()
+
+					fmt.Printf("%s-%s-%d start...\n", proto, name, i)
 					var url string
 					switch proto {
 					case "vnc":
@@ -106,12 +108,11 @@ func TestConnectionPressure(t *testing.T) {
 					}
 					err := connector(url)
 					if err != nil {
-						fmt.Println("err: ", err)
+						fmt.Printf("%s-%s-%d err: %v\n", proto, name, i, err)
+						return
 					}
-
-					fmt.Printf("%s-%d done.\n", proto, i)
-					wg.Done()
-				}(connector, proto, i)
+					fmt.Printf("%s-%s-%d done.\n", proto, name, i)
+				}(name, connector, proto, i)
 			}
 		}
 	}
