@@ -70,7 +70,13 @@ int guac_ssh_user_join_handler(guac_user* user, int argc, char** argv) {
 
     /* If not owner, synchronize with current display */
     else {
-        guac_terminal_dup(ssh_client->term, user, user->socket);
+        // FIXME: occamy: this is a temporal solution.
+        // If two users race on same connection, the client->display is
+        // a NULL pointer, which can cause segment fault.
+        // see bug report: https://issues.apache.org/jira/browse/GUACAMOLE-898
+        if (ssh_client->term != NULL) {
+            guac_terminal_dup(ssh_client->term, user, user->socket);
+        }
         guac_socket_flush(user->socket);
     }
 
