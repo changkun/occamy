@@ -10,8 +10,6 @@ package lib
 #include "../guacamole/src/libguac/guacamole/parser.h"
 #include "../guacamole/src/libguac/guacamole/user.h"
 #include "../guacamole/src/libguac/guacamole/client.h"
-#include <stdio.h>
-#include <syslog.h>
 
 const char *mimetypes[] = {"", NULL};
 void set_user_info(guac_user* user) {
@@ -41,28 +39,6 @@ static void freeCharArray(char **a, int size) {
 	for (i = 0; i < size; i++)
 		free(a[i]);
 	free(a);
-}
-
-
-
-void _occamy_log(const char* format, va_list args) {
-    int priority;
-    char message[2048];
-    vsnprintf(message, sizeof(message), format, args);
-    syslog(priority, "%s", message);
-    fprintf(stderr, "occamy-lib[%li]: %s\n", (unsigned long int)pthread_self(), message);
-}
-void occamy_log(const char* format, ...) {
-    va_list args;
-    va_start(args, format);
-	_occamy_log(format, args);
-	va_end(args);
-}
-static void printArray(char **a, int size) {
-	int i;
-	for (i = 0; i < size; i++) {
-		occamy_log("arg: %s", a[i]);
-	}
 }
 */
 import "C"
@@ -134,19 +110,9 @@ func (u *User) Close() {
 const usecTimeout time.Duration = 15 * time.Millisecond
 
 // HandleConnection handles all I/O for the portion of a user's Guacamole connection
-// following the initial "select" instruction, including the rest of the handshake.
-// The handshake-related properties of the given guac_user are automatically
-// populated, and HandleConnection() is invoked for all instructions received after
-// the handshake has completed. This function blocks until the connection/user is aborted
-// or the user disconnects.
+// without the handshake process. This function blocks until the connection/user is
+// aborted or the user disconnects.
 func (u *User) HandleConnection() error {
-	if int(C.guac_user_handle_connection(u.guacUser, C.int(int(usecTimeout)))) != 0 {
-		return errors.New(errorStatus())
-	}
-	return nil
-}
-
-func (u *User) HandleConnectionWithHandshake() error {
 	// general args
 	C.set_user_info(u.guacUser)
 
@@ -171,16 +137,14 @@ func (u *User) HandleConnectionWithHandshake() error {
 			args[i] = ""
 		}
 	}
-	logrus.Info("args: ", args)
 
+	// create args for C
 	cargs := C.makeCharArray(C.int(len(args)))
 	defer C.freeCharArray(cargs, C.int(len(args)))
-
 	for i, arg := range args {
 		cstr := C.CString(arg)
 		C.setArrayString(cargs, cstr, C.int(i))
 	}
-	C.printArray(cargs, C.int(len(args)))
 
 	if int(C.guac_client_add_user(u.guacClient, u.guacUser, C.int(len(args)), cargs)) != 0 {
 		logrus.Errorf("User %s could NOT join connection %s",

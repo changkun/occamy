@@ -5,9 +5,7 @@
 package server
 
 import (
-	"errors"
 	"fmt"
-	"net"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -56,7 +54,6 @@ func (s *Session) ID() string {
 // parser, and any associated resources will be freed unless the user is not
 // added successfully.
 func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock func()) error {
-
 	lib.ResetErrors()
 
 	// 1. prepare socket pair
@@ -67,7 +64,6 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 	}
 
 	go func(fd int, owner bool, jwt *config.JWT) {
-
 		defer s.close()
 
 		// 2. create guac socket using fds[0]
@@ -90,7 +86,7 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 		atomic.AddUint64(&s.connectedUsers, 1)
 		defer atomic.AddUint64(&s.connectedUsers, ^uint64(0))
 
-		err = u.HandleConnectionWithHandshake() // block until disconnect/completion
+		err = u.HandleConnection() // block until disconnect/completion
 		if err != nil {
 			logrus.Errorf("occamy-lib: handle user connection error: %v", err)
 		}
@@ -99,11 +95,6 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 	// 5. handshake using fds[1]
 	conn := protocol.NewInstructionIO(fds[1])
 	defer conn.Close()
-	// err = s.handshake(conn, ws, jwt)
-	// if err != nil {
-	// 	unlock()
-	// 	return fmt.Errorf("occamy-proxy: handshake error: %v", err)
-	// }
 	unlock()
 
 	// 7. proxy io
@@ -127,50 +118,6 @@ func (s *Session) close() {
 	}
 	s.client.Close()
 }
-
-func (s *Session) handshake(conn *protocol.InstructionIO, ws *websocket.Conn, jwt *config.JWT) error {
-	ins, err := conn.Read()
-	if err != nil {
-		return err
-	}
-
-	// FIXME: try to remove handshake via reimplement libguac
-	conn.Write(protocol.NewInstruction([]string{"size", "1204", "768", "96"}))
-	conn.Write(protocol.NewInstruction([]string{"audio", ""}))
-	conn.Write(protocol.NewInstruction([]string{"video", ""}))
-	conn.Write(protocol.NewInstruction([]string{"image", ""}))
-
-	// prepare coresponding arg values
-	host, port, err := net.SplitHostPort(jwt.Host)
-	if err != nil {
-		return err
-	}
-	args := ins.Args()
-	connectIns := []string{"connect"}
-	connectIns = append(connectIns, make([]string, len(args))...)
-	for i := 0; i < len(args); i++ {
-		var value string
-		switch args[i] {
-		case "hostname":
-			value = host
-		case "port":
-			value = port
-		case "username":
-			value = jwt.Username
-		case "password":
-			value = jwt.Password
-		}
-		connectIns[i+1] = value
-	}
-	conn.Write(protocol.NewInstruction(connectIns))
-
-	ins, err = conn.Read()
-	if !ins.Expect("ready") {
-		return errors.New("not ready")
-	}
-	return nil
-}
-
 func (s *Session) serveIO(conn *protocol.InstructionIO, ws *websocket.Conn) (err error) {
 	wg := sync.WaitGroup{}
 	exit := make(chan error, 2)
