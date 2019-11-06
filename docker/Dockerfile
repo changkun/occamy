@@ -7,7 +7,6 @@ FROM centos:centos7
 ENV \
     LC_ALL=en_US.UTF-8                \
     RUNTIME_DEPENDENCIES="            \
-        htop                          \
         gcc                           \
         gdb                           \
         wget                          \
