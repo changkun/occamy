@@ -18,7 +18,7 @@
  */
 
 #include "config.h"
-#include "terminal/palette.h"
+#include "terminal_palette.h"
 
 #include <ctype.h>
 #include <stdlib.h>

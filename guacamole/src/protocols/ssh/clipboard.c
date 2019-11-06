@@ -21,7 +21,7 @@
 #include "clipboard.h"
 #include "common/clipboard.h"
 #include "ssh.h"
-#include "terminal/terminal.h"
+#include "terminal.h"
 
 #include <guacamole/client.h>
 #include <guacamole/stream.h>

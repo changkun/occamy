@@ -23,13 +23,13 @@
 
 #include "config.h"
 
-#include "buffer.h"
+#include "terminal_buffer.h"
 #include "common/clipboard.h"
 #include "common/cursor.h"
-#include "display.h"
-#include "scrollbar.h"
-#include "types.h"
-#include "typescript.h"
+#include "terminal_display.h"
+#include "terminal_scrollbar.h"
+#include "terminal_types.h"
+#include "terminal_typescript.h"
 
 #include <pthread.h>
 #include <stdbool.h>

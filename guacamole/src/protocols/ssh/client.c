@@ -23,7 +23,7 @@
 #include "common/clipboard.h"
 #include "common/recording.h"
 #include "ssh.h"
-#include "terminal/terminal.h"
+#include "terminal.h"
 #include "user.h"
 
 #include <langinfo.h>

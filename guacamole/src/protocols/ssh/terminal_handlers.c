@@ -19,12 +19,12 @@
 
 #include "config.h"
 
-#include "terminal/char_mappings.h"
-#include "terminal/palette.h"
-#include "terminal/terminal.h"
-#include "terminal/terminal_handlers.h"
-#include "terminal/types.h"
-#include "terminal/xparsecolor.h"
+#include "terminal_char_mappings.h"
+#include "terminal_palette.h"
+#include "terminal.h"
+#include "terminal_handlers.h"
+#include "terminal_types.h"
+#include "terminal_xparsecolor.h"
 
 #include <guacamole/client.h>
 #include <guacamole/protocol.h>
