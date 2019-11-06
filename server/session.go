@@ -66,7 +66,7 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 		return fmt.Errorf("occamy-proxy: new socket pair error: %v", err)
 	}
 
-	go func(fd int, owner bool) {
+	go func(fd int, owner bool, jwt *config.JWT) {
 
 		defer s.close()
 
@@ -79,7 +79,7 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 		defer sock.Close()
 
 		// 3. create guac user using created guac socket
-		u, err := lib.NewUser(sock, s.client, owner)
+		u, err := lib.NewUser(sock, s.client, owner, jwt)
 		if err != nil {
 			logrus.Errorf("occamy-lib: create guac user error: %v", err)
 			return
@@ -90,20 +90,20 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 		atomic.AddUint64(&s.connectedUsers, 1)
 		defer atomic.AddUint64(&s.connectedUsers, ^uint64(0))
 
-		err = u.HandleConnection() // block until disconnect/completion
+		err = u.HandleConnectionWithHandshake() // block until disconnect/completion
 		if err != nil {
 			logrus.Errorf("occamy-lib: handle user connection error: %v", err)
 		}
-	}(fds[0], owner)
+	}(fds[0], owner, jwt)
 
 	// 5. handshake using fds[1]
 	conn := protocol.NewInstructionIO(fds[1])
-	err = s.handshake(conn, ws, jwt)
-	if err != nil {
-		conn.Close()
-		unlock()
-		return fmt.Errorf("occamy-proxy: handshake error: %v", err)
-	}
+	defer conn.Close()
+	// err = s.handshake(conn, ws, jwt)
+	// if err != nil {
+	// 	unlock()
+	// 	return fmt.Errorf("occamy-proxy: handshake error: %v", err)
+	// }
 	unlock()
 
 	// 7. proxy io

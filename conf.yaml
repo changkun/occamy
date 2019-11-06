@@ -4,8 +4,8 @@
 
 ---
 address: 0.0.0.0:5636
-mode: release # options: debug/release/test
-max_log_level: error # options: info/error/warning/debug/trace
+mode: debug # options: debug/release/test
+max_log_level: debug # options: info/error/warning/debug/trace
 auth:
   jwt_secret: occamy
   jwt_alg: HS256

@@ -257,7 +257,7 @@ static void* guac_user_input_thread(void* data) {
  *     Zero if the I/O threads started successfully and user has disconnected,
  *     or non-zero if the I/O threads could not be started.
  */
-static int guac_user_start(guac_parser* parser, guac_user* user,
+int guac_user_start(guac_parser* parser, guac_user* user,
         int usec_timeout) {
 
     guac_user_input_thread_params params = {
