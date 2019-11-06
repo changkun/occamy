@@ -128,6 +128,10 @@ AC_SUBST([LIBGUAC_INCLUDE], '-I$(top_srcdir)/src/libguac')
 AC_SUBST([COMMON_LTLIB],   '$(top_builddir)/src/common/libguac_common.la')
 AC_SUBST([COMMON_INCLUDE], '-I$(top_srcdir)/src/common')
 
+# Terminal emulator	
+AC_SUBST([TERMINAL_LTLIB],   '$(top_builddir)/src/terminal/libguac_terminal.la')	
+AC_SUBST([TERMINAL_INCLUDE], '-I$(top_srcdir)/src/terminal $(PANGO_CFLAGS) $(PANGOCAIRO_CFLAGS) $(COMMON_INCLUDE)')
+
 # Init directory
 AC_ARG_WITH(init_dir,
             [AS_HELP_STRING([--with-init-dir=<path>],
@@ -239,6 +243,28 @@ then
     PKG_CHECK_MODULES([PANGO], [pango],, [have_pango=no]);
     PKG_CHECK_MODULES([PANGOCAIRO], [pangocairo],, [have_pango=no]);
 fi
+
+#	
+# Terminal emulator	
+#	
+
+have_terminal=disabled	
+AC_ARG_WITH([terminal],	
+            [AS_HELP_STRING([--with-terminal],	
+                            [support text-based protocols @<:@default=check@:>@])],	
+            [],	
+            [with_terminal=check])	
+
+if test "x$with_terminal" != "xno"	
+then	
+    have_terminal=yes	
+    if test "x${have_pango}" != "xyes"	
+    then	
+        have_terminal=no	
+    fi	
+fi	
+
+AM_CONDITIONAL([ENABLE_TERMINAL], [test "x${have_terminal}" = "xyes"])	
 
 #
 # libVNCServer

@@ -31,29 +31,6 @@
 #include <string.h>
 
 /**
- * Parameters required by the user input thread.
- */
-typedef struct guac_user_input_thread_params {
-
-    /**
-     * The parser which will be used throughout the user's session.
-     */
-    guac_parser* parser;
-
-    /**
-     * A reference to the connected user.
-     */
-    guac_user* user;
-
-    /**
-     * The number of microseconds to wait for instructions from a connected
-     * user before closing the connection with an error.
-     */
-    int usec_timeout;
-
-} guac_user_input_thread_params;
-
-/**
  * Prints an error message using the logging facilities of the given user,
  * automatically including any information present in guac_error.
  *
@@ -101,14 +78,9 @@ static void guac_user_log_guac_error(guac_user* user,
  * @return
  *     Always NULL.
  */
-static void* guac_user_input_thread(void* data) {
+void* guac_user_input_thread(guac_parser* parser, guac_user* user,
+        int usec_timeout) {
 
-    guac_user_input_thread_params* params =
-        (guac_user_input_thread_params*) data;
-
-    int usec_timeout = params->usec_timeout;
-    guac_user* user = params->user;
-    guac_parser* parser = params->parser;
     guac_client* client = user->client;
     guac_socket* socket = user->socket;
 
@@ -155,52 +127,3 @@ static void* guac_user_input_thread(void* data) {
     return NULL;
 
 }
-
-/**
- * Starts the input/output threads of a new user. This function will block
- * until the user disconnects. If an error prevents the input/output threads
- * from starting, guac_user_stop() will be invoked on the given user.
- *
- * @param parser
- *     The guac_parser to use to handle all input from the given user.
- *
- * @param user
- *     The user whose associated I/O transfer threads should be started.
- *
- * @param usec_timeout
- *     The number of microseconds to wait for instructions from the given
- *     user before closing the connection with an error.
- *
- * @return
- *     Zero if the I/O threads started successfully and user has disconnected,
- *     or non-zero if the I/O threads could not be started.
- */
-int guac_user_start(guac_parser* parser, guac_user* user,
-        int usec_timeout) {
-
-    guac_user_input_thread_params params = {
-        .parser = parser,
-        .user = user,
-        .usec_timeout = usec_timeout
-    };
-
-    pthread_t input_thread;
-
-    if (pthread_create(&input_thread, NULL, guac_user_input_thread, (void*) &params)) {
-        guac_user_log(user, GUAC_LOG_ERROR, "Unable to start input thread");
-        guac_user_stop(user);
-        return -1;
-    }
-
-    /* Wait for I/O threads */
-    pthread_join(input_thread, NULL);
-
-    /* Explicitly signal disconnect */
-    guac_protocol_send_disconnect(user->socket);
-    guac_socket_flush(user->socket);
-
-    /* Done */
-    return 0;
-
-}
-
