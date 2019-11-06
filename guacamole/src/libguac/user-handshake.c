@@ -78,17 +78,14 @@ static void guac_user_log_guac_error(guac_user* user,
  * @return
  *     Always NULL.
  */
-void* guac_user_input_thread(guac_parser* parser, guac_user* user,
-        int usec_timeout) {
-
-    guac_client* client = user->client;
-    guac_socket* socket = user->socket;
+void guac_user_input_thread(guac_user* user, int usec_timeout) {
+    guac_parser* parser = guac_parser_alloc();
 
     /* Guacamole user input loop */
-    while (client->state == GUAC_CLIENT_RUNNING && user->active) {
+    while (user->client->state == GUAC_CLIENT_RUNNING && user->active) {
 
         /* Read instruction, stop on error */
-        if (guac_parser_read(parser, socket, usec_timeout)) {
+        if (guac_parser_read(parser, user->socket, usec_timeout)) {
 
             if (guac_error == GUAC_STATUS_TIMEOUT)
                 guac_user_abort(user, GUAC_PROTOCOL_STATUS_CLIENT_TIMEOUT, "User is not responding.");
@@ -99,8 +96,8 @@ void* guac_user_input_thread(guac_parser* parser, guac_user* user,
                             "Guacamole connection failure");
                 guac_user_stop(user);
             }
-
-            return NULL;
+            guac_parser_free(parser);
+            return;
         }
 
         /* Reset guac_error and guac_error_message (user/client handlers are not
@@ -119,11 +116,11 @@ void* guac_user_input_thread(guac_parser* parser, guac_user* user,
             guac_user_log(user, GUAC_LOG_DEBUG, "Failing instruction handler in user was \"%s\"", parser->opcode);
 
             guac_user_stop(user);
-            return NULL;
+            guac_parser_free(parser);
+            return;
         }
 
     }
-
-    return NULL;
-
+    guac_parser_free(parser);
+    return;
 }

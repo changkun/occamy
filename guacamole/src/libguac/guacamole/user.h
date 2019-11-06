@@ -521,8 +521,7 @@ int guac_user_handle_connection(guac_user* user, int usec_timeout);
 FIXME: this file is used for occamy, which temporaly exports the 
 guac_user_start function.
 */
-void* guac_user_input_thread(guac_parser* parser, guac_user* user,
-        int usec_timeout);
+void guac_user_input_thread(guac_user* user, int usec_timeout);
 
 /**
  * Call the appropriate handler defined by the given user for the given
