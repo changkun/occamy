@@ -34,10 +34,6 @@ func Run() {
 			ReadBufferSize:  protocol.MaxInstructionLength,
 			WriteBufferSize: protocol.MaxInstructionLength,
 			Subprotocols:    []string{"guacamole"}, // fixed by guacamole-client
-			CheckOrigin: func(r *http.Request) bool {
-				// FIXME: add origin check
-				return true
-			},
 		},
 	}
 	proxy.serve()
