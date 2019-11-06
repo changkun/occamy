@@ -19,10 +19,9 @@
 
 #include "config.h"
 
-#include "common-ssh/buffer.h"
-#include "common-ssh/dsa-compat.h"
-#include "common-ssh/key.h"
-#include "common-ssh/rsa-compat.h"
+#include "dsa-compat.h"
+#include "key.h"
+#include "rsa-compat.h"
 
 #include <openssl/bio.h>
 #include <openssl/bn.h>
@@ -36,6 +35,207 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <openssl/bn.h>
+#include <openssl/ossl_typ.h>
+
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+
+/**
+ * Writes the given byte to the given buffer, advancing the buffer pointer by
+ * one byte.
+ *
+ * @param buffer
+ *     The buffer to write to.
+ *
+ * @param value
+ *     The value to write.
+ */
+void guac_common_ssh_buffer_write_byte(char** buffer, uint8_t value) {
+
+    uint8_t* data = (uint8_t*) *buffer;
+    *data = value;
+
+    (*buffer)++;
+
+}
+
+/**
+ * Writes the given integer to the given buffer, advancing the buffer pointer
+ * four bytes.
+ *
+ * @param buffer
+ *     The buffer to write to.
+ *
+ * @param value
+ *     The value to write.
+ */
+void guac_common_ssh_buffer_write_uint32(char** buffer, uint32_t value) {
+
+    uint8_t* data = (uint8_t*) *buffer;
+
+    data[0] = (value & 0xFF000000) >> 24;
+    data[1] = (value & 0x00FF0000) >> 16;
+    data[2] = (value & 0x0000FF00) >> 8;
+    data[3] =  value & 0x000000FF;
+
+    *buffer += 4;
+
+}
+
+/**
+ * Writes the given data the given buffer, advancing the buffer pointer by the
+ * given length.
+ *
+ * @param data
+ *     The arbitrary data to write.
+ *
+ * @param length
+ *     The length of data to write, in bytes.
+ */
+void guac_common_ssh_buffer_write_data(char** buffer, const char* data,
+        int length) {
+    memcpy(*buffer, data, length);
+    *buffer += length;
+}
+
+/**
+ * Writes the given BIGNUM the given buffer, advancing the buffer pointer by
+ * the size of the length (four bytes) and the size of the BIGNUM.
+ *
+ * @param buffer
+ *     The buffer to write to.
+ *
+ * @param value
+ *     The value to write.
+ */
+void guac_common_ssh_buffer_write_bignum(char** buffer, const BIGNUM* value) {
+
+    unsigned char* bn_buffer;
+    int length;
+
+    /* If zero, just write zero length */
+    if (BN_is_zero(value)) {
+        guac_common_ssh_buffer_write_uint32(buffer, 0);
+        return;
+    }
+
+    /* Allocate output buffer, add padding byte */
+    length = BN_num_bytes(value);
+    bn_buffer = malloc(length);
+
+    /* Convert BIGNUM */
+    BN_bn2bin(value, bn_buffer);
+
+    /* If first byte has high bit set, write padding byte */
+    if (bn_buffer[0] & 0x80) {
+        guac_common_ssh_buffer_write_uint32(buffer, length+1);
+        guac_common_ssh_buffer_write_byte(buffer, 0);
+    }
+    else
+        guac_common_ssh_buffer_write_uint32(buffer, length);
+
+    /* Write data */
+    memcpy(*buffer, bn_buffer, length);
+    *buffer += length;
+
+    free(bn_buffer);
+
+}
+
+/**
+ * Writes the given string and its length to the given buffer, advancing the
+ * buffer pointer by the size of the length (four bytes) and the size of the
+ * string.
+ *
+ * @param buffer
+ *     The buffer to write to.
+ *
+ * @param string
+ *     The string value to write.
+ *
+ * @param length
+ *     The length of the string to write, in bytes.
+ */
+void guac_common_ssh_buffer_write_string(char** buffer, const char* string,
+        int length) {
+    guac_common_ssh_buffer_write_uint32(buffer, length);
+    guac_common_ssh_buffer_write_data(buffer, string, length);
+}
+
+/**
+ * Reads a single byte from the given buffer, advancing the buffer by one byte.
+ *
+ * @param buffer
+ *     The buffer to read from.
+ *
+ * @return
+ *     The value read from the buffer.
+ */
+uint8_t guac_common_ssh_buffer_read_byte(char** buffer) {
+
+    uint8_t* data = (uint8_t*) *buffer;
+    uint8_t value = *data;
+
+    (*buffer)++;
+
+    return value;
+
+}
+
+/**
+ * Reads an integer from the given buffer, advancing the buffer by four bytes.
+ *
+ * @param buffer
+ *     The buffer to read from.
+ *
+ * @return
+ *     The value read from the buffer.
+ */
+uint32_t guac_common_ssh_buffer_read_uint32(char** buffer) {
+
+    uint8_t* data = (uint8_t*) *buffer;
+    uint32_t value =
+          (data[0] << 24)
+        | (data[1] << 16)
+        | (data[2] <<  8)
+        |  data[3];
+
+    *buffer += 4;
+
+    return value;
+
+}
+
+/**
+ * Reads a string and its length from the given buffer, advancing the buffer
+ * by the size of the length (four bytes) and the size of the string, and
+ * returning a pointer to the buffer. The length of the string is stored in
+ * the given int.
+ *
+ * @param buffer
+ *     The buffer to read from.
+ *
+ * @param length
+ *     A pointer to an integer into which the length of the read string will
+ *     be stored.
+ *
+ * @return
+ *     A pointer to the value within the buffer.
+ */
+char* guac_common_ssh_buffer_read_string(char** buffer, int* length) {
+
+    char* value;
+
+    *length = guac_common_ssh_buffer_read_uint32(buffer);
+    value = *buffer;
+
+    *buffer += *length;
+
+    return value;
+
+}
 
 guac_common_ssh_key* guac_common_ssh_key_alloc(char* data, int length,
         char* passphrase) {

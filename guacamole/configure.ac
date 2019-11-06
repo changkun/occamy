@@ -132,10 +132,6 @@ AC_SUBST([COMMON_INCLUDE], '-I$(top_srcdir)/src/common')
 AC_SUBST([PULSE_LTLIB],   '$(top_builddir)/src/pulse/libguac_pulse.la')
 AC_SUBST([PULSE_INCLUDE], '-I$(top_srcdir)/src/pulse')
 
-# Common base SSH client
-AC_SUBST([COMMON_SSH_LTLIB],   '$(top_builddir)/src/common-ssh/libguac_common_ssh.la')
-AC_SUBST([COMMON_SSH_INCLUDE], '-I$(top_srcdir)/src/common-ssh')
-
 # Terminal emulator
 AC_SUBST([TERMINAL_LTLIB],   '$(top_builddir)/src/terminal/libguac_terminal.la')
 AC_SUBST([TERMINAL_INCLUDE], '-I$(top_srcdir)/src/terminal $(PANGO_CFLAGS) $(PANGOCAIRO_CFLAGS) $(COMMON_INCLUDE)')
@@ -922,12 +918,6 @@ then
                          [have_libssh2=no])
 fi
 
-AM_CONDITIONAL([ENABLE_COMMON_SSH], [test "x${have_libssh2}"  = "xyes" \
-                                       -a "x${have_ssl}"      = "xyes"])
-AM_COND_IF([ENABLE_COMMON_SSH],
-           [AC_DEFINE([ENABLE_COMMON_SSH],,
-                      [Whether support for the common SSH core is enabled])])
-
 AM_CONDITIONAL([ENABLE_SSH], [test "x${have_libssh2}"  = "xyes" \
                                 -a "x${have_terminal}" = "xyes" \
                                 -a "x${have_ssl}"      = "xyes"])
@@ -1024,7 +1014,6 @@ AC_SUBST(WEBP_LIBS)
 
 AC_CONFIG_FILES([Makefile
                  src/common/Makefile
-                 src/common-ssh/Makefile
                  src/terminal/Makefile
                  src/libguac/Makefile
                  src/pulse/Makefile

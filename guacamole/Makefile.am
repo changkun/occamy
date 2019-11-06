@@ -23,7 +23,6 @@ ACLOCAL_AMFLAGS = -I m4
 DIST_SUBDIRS =           \
     src/libguac          \
     src/common           \
-    src/common-ssh       \
     src/terminal         \
     src/pulse            \
     src/protocols/rdp    \
@@ -33,10 +32,6 @@ DIST_SUBDIRS =           \
 SUBDIRS =        \
     src/libguac  \
     src/common
-
-if ENABLE_COMMON_SSH
-SUBDIRS += src/common-ssh
-endif
 
 if ENABLE_TERMINAL
 SUBDIRS += src/terminal
