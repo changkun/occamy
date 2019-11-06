@@ -24,8 +24,8 @@
 
 #include "common/clipboard.h"
 #include "common/recording.h"
-#include "common-ssh/ssh.h"
-#include "common-ssh/user.h"
+#include "_ssh.h"
+#include "user.h"
 #include "settings.h"
 #include "terminal/terminal.h"
 
