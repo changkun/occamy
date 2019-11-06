@@ -403,14 +403,13 @@ void guac_client_free_stream(guac_client* client, guac_stream* stream);
  * to the broadcast socket stored within guac_client will also write to this
  * user. The join handler of this guac_client will be called.
  *
- * @param client The proxy client to add the user to.
  * @param user The user to add.
  * @param argc The number of arguments to pass to the new user.
  * @param argv An array of strings containing the argument values being passed.
  * @return Zero if the user was added successfully, non-zero if the user could
  *         not join the connection.
  */
-int guac_client_add_user(guac_client* client, guac_user* user, int argc, char** argv);
+int guac_client_add_user(guac_user* user, int argc, char** argv);
 
 /**
  * Removes the given user, removing the user from the internally-tracked list
