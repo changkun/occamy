@@ -10,6 +10,8 @@ package lib
 #include "../guacamole/src/libguac/guacamole/parser.h"
 #include "../guacamole/src/libguac/guacamole/user.h"
 #include "../guacamole/src/libguac/guacamole/client.h"
+#include "../guacamole/src/libguac/guacamole/protocol.h"
+#include "../guacamole/src/libguac/guacamole/socket.h"
 
 const char *mimetypes[] = {"", NULL};
 void set_user_info(guac_user* user) {
@@ -149,14 +151,16 @@ func (u *User) HandleConnection() error {
 	if int(C.guac_client_add_user(u.guacClient, u.guacUser, C.int(len(args)), cargs)) != 0 {
 		logrus.Errorf("User %s could NOT join connection %s",
 			C.GoString(u.guacUser.user_id), C.GoString(u.guacClient.connection_id))
-		return errors.New(errorStatus())
+	} else {
+		parser := C.guac_parser_alloc()
+		C.guac_user_input_thread(parser, u.guacUser, C.int(int(usecTimeout))) // block here
+		C.guac_client_remove_user(u.guacClient, u.guacUser)
+		C.guac_parser_free(parser)
+		logrus.Infof("User %s disconnected (%d users remain)",
+			C.GoString(u.guacUser.user_id), int(u.guacClient.connected_users))
+		C.guac_protocol_send_disconnect(u.guacUser.socket)
+		C.guac_socket_flush(u.guacUser.socket)
 	}
 
-	parser := C.guac_parser_alloc()
-	C.guac_user_start(parser, u.guacUser, C.int(int(usecTimeout))) // block here
-	C.guac_client_remove_user(u.guacClient, u.guacUser)
-	C.guac_parser_free(parser)
-	logrus.Infof("User %s disconnected (%d users remain)",
-		C.GoString(u.guacUser.user_id), int(u.guacClient.connected_users))
 	return nil
 }
