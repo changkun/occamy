@@ -22,7 +22,7 @@
 
 #include "config.h"
 
-#include "terminal/palette.h"
+#include "terminal_palette.h"
 
 /**
  * Parses an X11 color spec, as defined by Xlib's XParseColor(), storing the

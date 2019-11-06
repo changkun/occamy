@@ -23,7 +23,7 @@
 
 #include "config.h"
 
-#include "types.h"
+#include "terminal_types.h"
 
 /**
  * A single variable-length row of terminal data.

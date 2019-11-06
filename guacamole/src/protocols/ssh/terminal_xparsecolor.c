@@ -19,8 +19,8 @@
 
 #include "config.h"
 
-#include "terminal/named-colors.h"
-#include "terminal/palette.h"
+#include "terminal_named-colors.h"
+#include "terminal_palette.h"
 
 #include <stdio.h>
 
