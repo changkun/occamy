@@ -33,7 +33,18 @@ libguac_client_ssh_la_SOURCES = \
     key.c                       \
     _ssh.c                      \
     dsa-compat.c                \
-    rsa-compat.c
+    rsa-compat.c                \
+    terminal_buffer.c           \
+    terminal_char_mappings.c    \
+    terminal_common.c           \
+    terminal_display.c          \
+    terminal_named-colors.c     \
+    terminal_palette.c          \
+    terminal_scrollbar.c        \
+    terminal.c                  \
+    terminal_handlers.c         \
+    terminal_typescript.c       \
+    terminal_xparsecolor.c
 
 noinst_HEADERS =                \
     client.h                    \
@@ -46,7 +57,19 @@ noinst_HEADERS =                \
     key.h                       \
     _ssh.h                      \
     dsa-compat.h                \
-    rsa-compat.h
+    rsa-compat.h                \
+    terminal_buffer.h           \
+    terminal_char_mappings.h    \
+    terminal_common.h           \
+    terminal_display.h          \
+    terminal_named-colors.h     \
+    terminal_palette.h          \
+    terminal_scrollbar.h        \
+    terminal.h                  \
+    terminal_handlers.h         \
+    terminal_types.h            \
+    terminal_typescript.h       \
+    terminal_xparsecolor.h
 
 # Add agent sources if enabled
 if ENABLE_SSH_AGENT
@@ -56,17 +79,24 @@ endif
 
 libguac_client_ssh_la_CFLAGS = \
     -Werror -Wall -Iinclude    \
+    @COMMON_INCLUDE@           \
     @LIBGUAC_INCLUDE@          \
-    @TERMINAL_INCLUDE@
+    @PANGO_CFLAGS@             \
+    @PANGOCAIRO_CFLAGS@
 
 libguac_client_ssh_la_LIBADD = \
     @COMMON_LTLIB@             \
-    @LIBGUAC_LTLIB@            \
-    @TERMINAL_LTLIB@
+    @LIBGUAC_LTLIB@
 
 libguac_client_ssh_la_LDFLAGS = \
     -version-info 0:0:0         \
     @PTHREAD_LIBS@              \
     @SSH_LIBS@                  \
-    @SSL_LIBS@
+    @SSL_LIBS@                  \
+    @CAIRO_LIBS@              \
+    @MATH_LIBS@               \
+    @PANGO_LIBS@              \
+    @PANGOCAIRO_LIBS@         \
+    @PTHREAD_LIBS@
+
 

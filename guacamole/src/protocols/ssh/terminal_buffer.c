@@ -19,8 +19,8 @@
 
 #include "config.h"
 
-#include "terminal/buffer.h"
-#include "terminal/common.h"
+#include "terminal_buffer.h"
+#include "terminal_common.h"
 
 #include <stdlib.h>
 #include <string.h>

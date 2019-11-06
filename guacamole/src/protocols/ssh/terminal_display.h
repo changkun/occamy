@@ -24,8 +24,8 @@
 #include "config.h"
 
 #include "common/surface.h"
-#include "palette.h"
-#include "types.h"
+#include "terminal_palette.h"
+#include "terminal_types.h"
 
 #include <guacamole/client.h>
 #include <guacamole/layer.h>

@@ -20,10 +20,10 @@
 #include "config.h"
 
 #include "common/surface.h"
-#include "terminal/common.h"
-#include "terminal/display.h"
-#include "terminal/palette.h"
-#include "terminal/types.h"
+#include "terminal_common.h"
+#include "terminal_display.h"
+#include "terminal_palette.h"
+#include "terminal_types.h"
 
 #include <math.h>
 #include <stdlib.h>

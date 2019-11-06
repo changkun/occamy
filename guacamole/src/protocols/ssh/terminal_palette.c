@@ -18,7 +18,7 @@
  */
 
 #include "config.h"
-#include "terminal/palette.h"
+#include "terminal_palette.h"
 
 const guac_terminal_color GUAC_TERMINAL_INITIAL_PALETTE[256] = {
 

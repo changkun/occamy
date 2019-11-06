@@ -23,7 +23,7 @@
 #include "_ssh.h"
 #include "settings.h"
 #include "ssh.h"
-#include "terminal/terminal.h"
+#include "terminal.h"
 #include "ttymode.h"
 
 #ifdef ENABLE_SSH_AGENT

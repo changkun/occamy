@@ -23,7 +23,7 @@
 #include "common/display.h"
 #include "common/recording.h"
 #include "ssh.h"
-#include "terminal/terminal.h"
+#include "terminal.h"
 
 #include <guacamole/client.h>
 #include <guacamole/user.h>

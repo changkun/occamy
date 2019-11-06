@@ -22,7 +22,7 @@
 #define _GUAC_TERMINAL_TYPES_H
 
 #include "config.h"
-#include "palette.h"
+#include "terminal_palette.h"
 
 #include <stdbool.h>
 #include <stdint.h>

@@ -21,15 +21,15 @@
 
 #include "common/clipboard.h"
 #include "common/cursor.h"
-#include "terminal/buffer.h"
-#include "terminal/common.h"
-#include "terminal/display.h"
-#include "terminal/palette.h"
-#include "terminal/terminal.h"
-#include "terminal/terminal_handlers.h"
-#include "terminal/types.h"
-#include "terminal/typescript.h"
-#include "terminal/xparsecolor.h"
+#include "terminal_buffer.h"
+#include "terminal_common.h"
+#include "terminal_display.h"
+#include "terminal_palette.h"
+#include "terminal.h"
+#include "terminal_handlers.h"
+#include "terminal_types.h"
+#include "terminal_typescript.h"
+#include "terminal_xparsecolor.h"
 
 #include <ctype.h>
 #include <errno.h>
