@@ -54,9 +54,6 @@ otherwise.
     VNC:
         * libVNCserver (http://libvnc.github.io/)
 
-    Support for audio within VNC:
-        * PulseAudio (http://www.freedesktop.org/wiki/Software/PulseAudio/)
-
     Support for WebP image compression:
         * libwebp (https://developers.google.com/speed/webp/)
 

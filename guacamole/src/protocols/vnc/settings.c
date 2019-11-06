@@ -47,11 +47,6 @@ const char* GUAC_VNC_CLIENT_ARGS[] = {
     "dest-port",
 #endif
 
-#ifdef ENABLE_PULSE
-    "enable-audio",
-    "audio-servername",
-#endif
-
 #ifdef ENABLE_VNC_LISTEN
     "reverse-connect",
     "listen-timeout",
@@ -140,19 +135,6 @@ enum VNC_ARGS_IDX {
      * The VNC port to connect to, if using a repeater.
      */
     IDX_DEST_PORT,
-#endif
-
-#ifdef ENABLE_PULSE
-    /**
-     * "true" if audio should be enabled, "false" or blank otherwise.
-     */
-    IDX_ENABLE_AUDIO,
-
-    /**
-     * The name of the PulseAudio server to connect to. If left blank, the
-     * default sink of the local machine will be used as the source for audio.
-     */
-    IDX_AUDIO_SERVERNAME,
 #endif
 
 #ifdef ENABLE_VNC_LISTEN
@@ -304,19 +286,6 @@ guac_vnc_settings* guac_vnc_parse_args(guac_user* user,
                 IDX_LISTEN_TIMEOUT, 5000);
 #endif
 
-#ifdef ENABLE_PULSE
-    /* Audio enable/disable */
-    settings->audio_enabled =
-        guac_user_parse_args_boolean(user, GUAC_VNC_CLIENT_ARGS, argv,
-                IDX_ENABLE_AUDIO, false);
-
-    /* Load servername if specified and applicable */
-    if (settings->audio_enabled)
-        settings->pa_servername =
-            guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
-                    IDX_AUDIO_SERVERNAME, NULL);
-#endif
-
     /* Set clipboard encoding if specified */
     settings->clipboard_encoding =
         guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
@@ -368,11 +337,6 @@ void guac_vnc_settings_free(guac_vnc_settings* settings) {
 #ifdef ENABLE_VNC_REPEATER
     /* Free VNC repeater settings */
     free(settings->dest_host);
-#endif
-
-#ifdef ENABLE_PULSE
-    /* Free PulseAudio settings */
-    free(settings->pa_servername);
 #endif
 
     /* Free settings structure */
