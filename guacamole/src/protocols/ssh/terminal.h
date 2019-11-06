@@ -512,7 +512,7 @@ void guac_terminal_free(guac_terminal* term);
  * Renders a single frame of terminal data. If data is not yet available,
  * this function will block until data is written.
  */
-int guac_terminal_render_frame(guac_terminal* terminal);
+int guac_terminal_render_frame(guac_terminal* terminal, guac_client* client);
 
 /**
  * Reads from this terminal's STDIN. Input comes from key and mouse events
