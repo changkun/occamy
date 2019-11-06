@@ -819,6 +819,10 @@ static int guac_rdp_handle_connection(guac_client* client) {
              * excluded from the required wait period of the next frame). */
             last_frame_end = frame_start;
 
+            /* Flush frame */
+            guac_common_display_flush(rdp_client->display);
+            guac_client_end_frame(client);
+            guac_socket_flush(client->socket);
         }
 
         /* Test whether the RDP server is closing the connection */
@@ -834,13 +838,6 @@ static int guac_rdp_handle_connection(guac_client* client) {
         else if (wait_result < 0)
             guac_client_abort(client, GUAC_PROTOCOL_STATUS_UPSTREAM_UNAVAILABLE,
                     "Connection closed.");
-
-        /* Flush frame only if successful */
-        else {
-            guac_common_display_flush(rdp_client->display);
-            guac_client_end_frame(client);
-            guac_socket_flush(client->socket);
-        }
 
     }
 
