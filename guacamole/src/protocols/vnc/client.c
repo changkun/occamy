@@ -24,10 +24,6 @@
 #include "user.h"
 #include "vnc.h"
 
-#ifdef ENABLE_PULSE
-#include "pulse/pulse.h"
-#endif
-
 #include <guacamole/client.h>
 
 #include <stdlib.h>
@@ -89,12 +85,6 @@ int guac_vnc_client_free_handler(guac_client* client) {
     /* Free display */
     if (vnc_client->display != NULL)
         guac_common_display_free(vnc_client->display);
-
-#ifdef ENABLE_PULSE
-    /* If audio enabled, stop streaming */
-    if (vnc_client->audio)
-        guac_pa_stream_free(vnc_client->audio);
-#endif
 
     /* Free parsed settings */
     if (settings != NULL)

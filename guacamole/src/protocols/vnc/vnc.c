@@ -32,10 +32,6 @@
 #include "settings.h"
 #include "vnc.h"
 
-#ifdef ENABLE_PULSE
-#include "pulse/pulse.h"
-#endif
-
 #include <guacamole/client.h>
 #include <guacamole/protocol.h>
 #include <guacamole/socket.h>
@@ -200,13 +196,6 @@ void* guac_vnc_client_thread(void* data) {
                 "Unable to connect to VNC server.");
         return NULL;
     }
-
-#ifdef ENABLE_PULSE
-    /* If audio is enabled, start streaming via PulseAudio */
-    if (settings->audio_enabled)
-        vnc_client->audio = guac_pa_stream_alloc(client, 
-                settings->pa_servername);
-#endif
 
     /* Set remaining client data */
     vnc_client->rfb_client = rfb_client;

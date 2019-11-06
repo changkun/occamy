@@ -128,10 +128,6 @@ AC_SUBST([LIBGUAC_INCLUDE], '-I$(top_srcdir)/src/libguac')
 AC_SUBST([COMMON_LTLIB],   '$(top_builddir)/src/common/libguac_common.la')
 AC_SUBST([COMMON_INCLUDE], '-I$(top_srcdir)/src/common')
 
-# Common PulseAudio utility library
-AC_SUBST([PULSE_LTLIB],   '$(top_builddir)/src/pulse/libguac_pulse.la')
-AC_SUBST([PULSE_INCLUDE], '-I$(top_srcdir)/src/pulse')
-
 # Terminal emulator
 AC_SUBST([TERMINAL_LTLIB],   '$(top_builddir)/src/terminal/libguac_terminal.la')
 AC_SUBST([TERMINAL_INCLUDE], '-I$(top_srcdir)/src/terminal $(PANGO_CFLAGS) $(PANGOCAIRO_CFLAGS) $(COMMON_INCLUDE)')
@@ -229,39 +225,6 @@ fi
 
 AM_CONDITIONAL([ENABLE_SSL], [test "x${have_ssl}" = "xyes"])
 AC_SUBST(SSL_LIBS)
-
-#
-# PulseAudio
-#
-
-have_pulse=disabled
-PULSE_LIBS=
-AC_ARG_WITH([pulse],
-            [AS_HELP_STRING([--with-pulse],
-                            [support PulseAudio @<:@default=check@:>@])],
-            [],
-            [with_pulse=check])
-
-if test "x$with_pulse" != "xno"
-then
-    have_pulse=yes
-
-    AC_CHECK_LIB([pulse], [pa_context_new], [PULSE_LIBS="$PULSE_LIBS -lpulse"], [have_pulse=no])
-
-    if test "x${have_pulse}" = "xno"
-    then
-        AC_MSG_WARN([
-  --------------------------------------------
-   Unable to find libpulse
-   Sound support for VNC will be disabled
-  --------------------------------------------])
-    else
-        AC_DEFINE([ENABLE_PULSE],, [Whether PulseAudio support is enabled])
-    fi
-fi
-
-AM_CONDITIONAL([ENABLE_PULSE], [test "x${have_pulse}" = "xyes"])
-AC_SUBST(PULSE_LIBS)
 
 #
 # PANGO
@@ -1016,7 +979,6 @@ AC_CONFIG_FILES([Makefile
                  src/common/Makefile
                  src/terminal/Makefile
                  src/libguac/Makefile
-                 src/pulse/Makefile
                  src/protocols/rdp/Makefile
                  src/protocols/ssh/Makefile
                  src/protocols/vnc/Makefile])
@@ -1046,7 +1008,6 @@ $PACKAGE_NAME version $PACKAGE_VERSION
      libssh2 ............. ${have_libssh2}
      libssl .............. ${have_ssl}
      libVNCServer ........ ${have_libvncserver}
-     libpulse ............ ${have_pulse}
      libwebp ............. ${have_webp}
 
    Protocol support:
