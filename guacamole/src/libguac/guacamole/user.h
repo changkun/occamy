@@ -37,6 +37,7 @@
 #include "user-constants.h"
 #include "user-fntypes.h"
 #include "user-types.h"
+#include "parser.h"
 
 #include <cairo/cairo.h>
 
@@ -515,6 +516,13 @@ void guac_user_free(guac_user* user);
  *     connection from being handled properly.
  */
 int guac_user_handle_connection(guac_user* user, int usec_timeout);
+
+/*
+FIXME: this file is used for occamy, which temporaly exports the 
+guac_user_start function.
+*/
+int guac_user_start(guac_parser* parser, guac_user* user,
+        int usec_timeout);
 
 /**
  * Call the appropriate handler defined by the given user for the given
