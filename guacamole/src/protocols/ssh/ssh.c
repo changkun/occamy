@@ -20,7 +20,7 @@
 #include "config.h"
 
 #include "common/recording.h"
-#include "common-ssh/ssh.h"
+#include "_ssh.h"
 #include "settings.h"
 #include "ssh.h"
 #include "terminal/terminal.h"

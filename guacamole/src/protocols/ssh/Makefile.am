@@ -29,7 +29,11 @@ libguac_client_ssh_la_SOURCES = \
     settings.c                  \
     ssh.c                       \
     ttymode.c                   \
-    user.c
+    user.c                      \
+    key.c                       \
+    _ssh.c                      \
+    dsa-compat.c                \
+    rsa-compat.c
 
 noinst_HEADERS =                \
     client.h                    \
@@ -38,7 +42,11 @@ noinst_HEADERS =                \
     settings.h                  \
     ssh.h                       \
     ttymode.h                   \
-    user.h
+    user.h                      \
+    key.h                       \
+    _ssh.h                      \
+    dsa-compat.h                \
+    rsa-compat.h
 
 # Add agent sources if enabled
 if ENABLE_SSH_AGENT
@@ -48,13 +56,11 @@ endif
 
 libguac_client_ssh_la_CFLAGS = \
     -Werror -Wall -Iinclude    \
-    @COMMON_SSH_INCLUDE@       \
     @LIBGUAC_INCLUDE@          \
     @TERMINAL_INCLUDE@
 
 libguac_client_ssh_la_LIBADD = \
     @COMMON_LTLIB@             \
-    @COMMON_SSH_LTLIB@         \
     @LIBGUAC_LTLIB@            \
     @TERMINAL_LTLIB@
 
