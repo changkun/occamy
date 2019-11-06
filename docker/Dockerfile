@@ -24,7 +24,6 @@ ENV \
         libwebp                       \
         pango                         \
         terminus-fonts                \
-        pulseaudio-libs               \
         git                           \
         uuid"                         \
     BUILD_DEPENDENCIES="              \
@@ -35,7 +34,6 @@ ENV \
         libjpeg-turbo-devel           \
         uuid-devel                    \
         pango-devel                   \
-        pulseaudio-libs-devel         \
         libssh2-devel                 \
         libtool                       \
         libvncserver-devel            \

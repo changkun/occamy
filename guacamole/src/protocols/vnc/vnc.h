@@ -33,10 +33,6 @@
 #include <guacamole/layer.h>
 #include <rfb/rfbclient.h>
 
-#ifdef ENABLE_PULSE
-#include "pulse/pulse.h"
-#endif
-
 #include <pthread.h>
 
 /**
@@ -80,13 +76,6 @@ typedef struct guac_vnc_client {
      * Internal clipboard.
      */
     guac_common_clipboard* clipboard;
-
-#ifdef ENABLE_PULSE
-    /**
-     * PulseAudio output, if any.
-     */
-    guac_pa_stream* audio;
-#endif
 
     /**
      * The in-progress session recording, or NULL if no recording is in

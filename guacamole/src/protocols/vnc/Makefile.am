@@ -49,8 +49,7 @@ noinst_HEADERS =      \
 libguac_client_vnc_la_CFLAGS =        \
     -Werror -Wall -pedantic -Iinclude \
     @COMMON_INCLUDE@                  \
-    @LIBGUAC_INCLUDE@                 \
-    @PULSE_INCLUDE@
+    @LIBGUAC_INCLUDE@
 
 libguac_client_vnc_la_LDFLAGS = \
     -version-info 0:0:0         \
@@ -61,8 +60,4 @@ libguac_client_vnc_la_LIBADD = \
     @COMMON_LTLIB@             \
     @LIBGUAC_LTLIB@
 
-# Optional PulseAudio support
-if ENABLE_PULSE
-libguac_client_vnc_la_LIBADD += @PULSE_LTLIB@
-endif
 

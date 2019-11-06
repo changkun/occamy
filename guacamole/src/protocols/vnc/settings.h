@@ -103,18 +103,6 @@ typedef struct guac_vnc_settings {
      * client (local).
      */
     bool remote_cursor;
-   
-#ifdef ENABLE_PULSE
-    /**
-     * Whether audio is enabled.
-     */
-    bool audio_enabled;
- 
-    /**
-     * The name of the PulseAudio server to connect to.
-     */
-    char* pa_servername;
-#endif
 
     /**
      * The number of connection attempts to make before giving up.
