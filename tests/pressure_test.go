@@ -1,20 +1,88 @@
 package tests
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
+	"net/http"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/gorilla/websocket"
 )
 
 const (
-	maxc   = 10
-	urlVNC = "ws://0.0.0.0:5636/api/v1/connect?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE1NzI5NjQzNDAsImhvc3QiOiIxNzIuMTYuMjM4LjExOjU5MDEiLCJvcmlnX2lhdCI6MTU3Mjk2MDc0MCwicGFzc3dvcmQiOiJ2bmNwYXNzd29yZCIsInByb3RvY29sIjoidm5jIiwidXNlcm5hbWUiOiIifQ.YTfZV68lChFeJboar52qjdy0NCWmRm18HSVzLS3pW2c"
-	urlRDP = "ws://0.0.0.0:5636/api/v1/connect?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE1NzI5NTc5MzgsImhvc3QiOiIxNzIuMTYuMjM4LjEyOjMzODkiLCJvcmlnX2lhdCI6MTU3Mjk1NDMzOCwicGFzc3dvcmQiOiJEb2NrZXIiLCJwcm90b2NvbCI6InJkcCIsInVzZXJuYW1lIjoicm9vdCJ9.FISbcjJ2J8hUpFphIvjE9C-PFSzEuVSPapll1BKvnNU"
-	urlSSH = "ws://0.0.0.0:5636/api/v1/connect?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE1NzI5NTY4MzUsImhvc3QiOiIxNzIuMTYuMjM4LjEzOjIyIiwib3JpZ19pYXQiOjE1NzI5NTMyMzUsInBhc3N3b3JkIjoicm9vdCIsInByb3RvY29sIjoic3NoIiwidXNlcm5hbWUiOiJyb290In0.JxyTAxWPuXBnvBsU0aqR75sskk8KpB9kQPFhoUNL7RQ"
-	debug  = false
+	maxc            = 10
+	debug           = false
+	endpointLogin   = "http://0.0.0.0:5636/api/v1/login"
+	endpointConnect = "ws://0.0.0.0:5636/api/v1/connect"
 )
+
+type jwtInput struct {
+	Protocol string `json:"protocol"`
+	Host     string `json:"host"`
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
+type jwtOutput struct {
+	Code   int       `json:"code"`
+	Expire time.Time `json:"expire"`
+	Token  string    `json:"token"`
+}
+
+var credentials = map[string]jwtInput{
+	"vnc": jwtInput{
+		Protocol: "vnc",
+		Host:     "172.16.238.11:5901",
+		Username: "",
+		Password: "vncpassword",
+	},
+	"rdp": jwtInput{
+		Protocol: "rdp",
+		Host:     "172.16.238.12:3389",
+		Username: "root",
+		Password: "Docker",
+	},
+	"ssh": jwtInput{
+		Protocol: "ssh",
+		Host:     "172.16.238.13:22",
+		Username: "root",
+		Password: "root",
+	},
+}
+
+func login(protocol string) string {
+	credential, ok := credentials[protocol]
+	if !ok {
+		panic(fmt.Sprintf("login: protocol %s is not supported.", protocol))
+	}
+
+	b, err := json.Marshal(credential)
+	if err != nil {
+		panic(fmt.Sprintf("login: marshal credentials failed: %v", err))
+	}
+
+	resp, err := http.Post(endpointLogin, "application/json", bytes.NewReader(b))
+	if err != nil {
+		panic(fmt.Sprintf("login: applying credentials failed: %v", err))
+	}
+	defer resp.Body.Close()
+
+	d, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		panic(fmt.Sprintf("login: reading respons failed: %v", err))
+	}
+
+	var out jwtOutput
+	err = json.Unmarshal(d, &out)
+	if err != nil {
+		panic(fmt.Sprintf("login: unmarshal response failed: %v", err))
+	}
+	return endpointConnect + "?token=" + out.Token
+}
 
 func successConnect(url string) error {
 	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
@@ -86,27 +154,23 @@ func failConnect(url string) error {
 //
 //  go test -v -count=1 .
 func TestConnectionPressure(t *testing.T) {
-	protos := []string{"vnc", "rdp", "ssh"}
+	protos := []string{
+		"vnc",
+		"rdp",
+		"ssh",
+	}
 	connectors := map[string]func(string) error{"success": successConnect, "fail": failConnect}
 	var wg sync.WaitGroup
 	for i := 1; i <= maxc; i++ {
 		for _, proto := range protos {
 			for name, connector := range connectors {
 				wg.Add(1)
+				// time.Sleep(time.Second)
 				go func(name string, connector func(string) error, proto string, i int) {
 					defer wg.Done()
 
 					fmt.Printf("%s-%s-%d start...\n", proto, name, i)
-					var url string
-					switch proto {
-					case "vnc":
-						url = urlVNC
-					case "rdp":
-						url = urlRDP
-					case "ssh":
-						url = urlSSH
-					}
-					err := connector(url)
+					err := connector(login(proto))
 					if err != nil {
 						fmt.Printf("%s-%s-%d err: %v\n", proto, name, i, err)
 						return
