@@ -282,15 +282,16 @@ void* guac_vnc_client_thread(void* data) {
              * excluded from the required wait period of the next frame). */
             last_frame_end = frame_start;
 
-            /* Flush frame */
-            guac_common_surface_flush(vnc_client->display->default_surface);
-            guac_client_end_frame(client);
-            guac_socket_flush(client->socket);
         }
 
         /* If an error occurs, log it and fail */
         if (wait_result < 0)
             guac_client_abort(client, GUAC_PROTOCOL_STATUS_UPSTREAM_ERROR, "Connection closed.");
+
+        /* Flush frame */
+        guac_common_surface_flush(vnc_client->display->default_surface);
+        guac_client_end_frame(client);
+        guac_socket_flush(client->socket);
 
     }
 
