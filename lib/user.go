@@ -41,6 +41,12 @@ static void freeCharArray(char **a, int size) {
 		free(a[i]);
 	free(a);
 }
+static int join_handler_bridge(guac_user* user, int argc, char** argv) {
+	int retval = 0;
+	if (user->client->join_handler)
+		retval = user->client->join_handler(user, argc, argv);
+	return retval;
+}
 */
 import "C"
 import (
@@ -110,10 +116,7 @@ func (u *User) Close() {
 
 const usecTimeout time.Duration = 15 * time.Millisecond
 
-// HandleConnection handles all I/O for the portion of a user's Guacamole connection
-// without the handshake process. This function blocks until the connection/user is
-// aborted or the user disconnects.
-func (u *User) HandleConnection() error {
+func (u *User) MockHandshake() error {
 	// general args
 	C.set_user_info(u.guacUser)
 
@@ -147,17 +150,32 @@ func (u *User) HandleConnection() error {
 		C.setArrayString(cargs, cstr, C.int(i))
 	}
 
-	if int(C.guac_client_add_user(u.guacUser, C.int(len(args)), cargs)) != 0 {
+	var ret C.int = 0
+	// initiate join handler
+	if u.guacClient.join_handler != nil {
+		ret = C.join_handler_bridge(u.guacUser, C.int(len(args)), cargs)
+	}
+
+	if int(ret) != 0 {
 		logrus.Errorf("User %s could NOT join connection %s",
 			C.GoString(u.guacUser.user_id), C.GoString(u.guacClient.connection_id))
-	} else {
-		C.guac_user_input_thread(u.guacUser, C.int(int(usecTimeout))) // block here
-		C.guac_client_remove_user(u.guacClient, u.guacUser)
-		logrus.Infof("User %s disconnected (%d users remain)",
-			C.GoString(u.guacUser.user_id), int(u.guacClient.connected_users))
-		C.guac_protocol_send_disconnect(u.guacUser.socket)
-		C.guac_socket_flush(u.guacUser.socket)
+		return errors.New("occamy-lib: user cannot join")
 	}
 
 	return nil
+}
+
+// HandleConnection handles all I/O for the portion of a user's Guacamole connection
+// without the handshake process. This function blocks until the connection/user is
+// aborted or the user disconnects.
+func (u *User) HandleConnection(done chan struct{}) {
+	// this should be called only if handshake is success.
+	C.guac_client_add_user(u.guacUser)
+	C.guac_user_input_thread(u.guacUser, C.int(int(usecTimeout))) // block here
+	C.guac_client_remove_user(u.guacClient, u.guacUser)
+	logrus.Infof("User %s disconnected (%d users remain)",
+		C.GoString(u.guacUser.user_id), int(u.guacClient.connected_users))
+	C.guac_protocol_send_disconnect(u.guacUser.socket)
+	C.guac_socket_flush(u.guacUser.socket)
+	close(done)
 }

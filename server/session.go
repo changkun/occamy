@@ -15,7 +15,6 @@ import (
 	"github.com/changkun/occamy/lib"
 	"github.com/changkun/occamy/protocol"
 	"github.com/gorilla/websocket"
-	"github.com/sirupsen/logrus"
 )
 
 // Session is an occamy proxy session that shares connection
@@ -53,50 +52,54 @@ func (s *Session) ID() string {
 // reading/writing from the socket via read/write threads. The given socket,
 // parser, and any associated resources will be freed unless the user is not
 // added successfully.
-func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool) error {
+func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock func()) error {
+	defer s.close()
 	lib.ResetErrors()
 
 	// 1. prepare socket pair
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
+		unlock()
 		return fmt.Errorf("occamy-proxy: new socket pair error: %v", err)
 	}
 
-	go func(fd int, owner bool, jwt *config.JWT) {
-		defer s.close()
+	// 2. create guac socket using fds[0]
+	sock, err := lib.NewSocket(fds[0])
+	if err != nil {
+		return fmt.Errorf("occamy-lib: create guac socket error: %v", err)
+	}
+	defer sock.Close()
 
-		// 2. create guac socket using fds[0]
-		sock, err := lib.NewSocket(fd)
-		if err != nil {
-			logrus.Errorf("occamy-lib: create guac socket error: %v", err)
-			return
-		}
-		defer sock.Close()
+	// 3. create guac user using created guac socket
+	u, err := lib.NewUser(sock, s.client, owner, jwt)
+	if err != nil {
+		return fmt.Errorf("occamy-lib: create guac user error: %v", err)
+	}
+	defer u.Close()
 
-		// 3. create guac user using created guac socket
-		u, err := lib.NewUser(sock, s.client, owner, jwt)
-		if err != nil {
-			logrus.Errorf("occamy-lib: create guac user error: %v", err)
-			return
-		}
-		defer u.Close()
+	// 4. count new user
+	atomic.AddUint64(&s.connectedUsers, 1)
+	defer atomic.AddUint64(&s.connectedUsers, ^uint64(0))
 
-		// 4. count new user
-		atomic.AddUint64(&s.connectedUsers, 1)
-		defer atomic.AddUint64(&s.connectedUsers, ^uint64(0))
+	// 5. mock handshake
+	err = u.MockHandshake()
+	if err != nil {
+		unlock()
+		return fmt.Errorf("occamy-lib: handle user connection error: %v", err)
+	}
+	unlock()
 
-		err = u.HandleConnection() // block until disconnect/completion
-		if err != nil {
-			logrus.Errorf("occamy-lib: handle user connection error: %v", err)
-		}
-	}(fds[0], owner, jwt)
+	// 6. handle connection
+	done := make(chan struct{}, 1)
+	go u.HandleConnection(done) // block until disconnect/completion
 
-	// 5. handshake using fds[1]
+	// 7. proxy io
 	conn := protocol.NewInstructionIO(fds[1])
 	defer conn.Close()
 
-	// 7. proxy io
-	return s.serveIO(conn, ws)
+	err = s.serveIO(conn, ws)
+	<-done
+	return err
 }
 
 func (s *Session) initialize(proto string) error {

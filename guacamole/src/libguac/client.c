@@ -276,38 +276,25 @@ void guac_client_abort(guac_client* client, guac_protocol_status status,
 
 }
 
-int guac_client_add_user(guac_user* user, int argc, char** argv) {
+void guac_client_add_user(guac_user* user) {
 
-    int retval = 0;
-
-    /* Call handler, if defined */
-    if (user->client->join_handler)
-        retval = user->client->join_handler(user, argc, argv);
-
+    /* Only called if join was successful */
     pthread_rwlock_wrlock(&(user->client->__users_lock));
 
-    /* Add to list if join was successful */
-    if (retval == 0) {
+    user->__prev = NULL;
+    user->__next = user->client->__users;
 
-        user->__prev = NULL;
-        user->__next = user->client->__users;
+    if (user->client->__users != NULL)
+        user->client->__users->__prev = user;
 
-        if (user->client->__users != NULL)
-            user->client->__users->__prev = user;
+    user->client->__users = user;
+    user->client->connected_users++;
 
-        user->client->__users = user;
-        user->client->connected_users++;
-
-        /* Update owner pointer if user is owner */
-        if (user->owner)
-            user->client->__owner = user;
-
-    }
+    /* Update owner pointer if user is owner */
+    if (user->owner)
+        user->client->__owner = user;
 
     pthread_rwlock_unlock(&(user->client->__users_lock));
-
-    return retval;
-
 }
 
 void guac_client_remove_user(guac_client* client, guac_user* user) {
