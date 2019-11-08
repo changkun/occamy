@@ -200,8 +200,7 @@ func (p *proxy) routeConn(ws *websocket.Conn, jwt *config.JWT) (err error) {
 	p.mu.Lock()
 	sess, ok := p.sessions[jwt.GenerateID()]
 	if ok {
-		p.mu.Unlock()
-		err = sess.Join(ws, jwt, false)
+		err = sess.Join(ws, jwt, false, func() { p.mu.Unlock() })
 		return
 	}
 
@@ -212,9 +211,8 @@ func (p *proxy) routeConn(ws *websocket.Conn, jwt *config.JWT) (err error) {
 	}
 
 	p.sessions[jwt.GenerateID()] = sess
-	p.mu.Unlock()
 	logrus.Infof("occamy-proxy: new session was created: %s", sess.ID())
-	err = sess.Join(ws, jwt, true) // block here
+	err = sess.Join(ws, jwt, true, func() { p.mu.Unlock() }) // block here
 
 	p.mu.Lock()
 	delete(p.sessions, jwt.GenerateID())

@@ -409,7 +409,7 @@ void guac_client_free_stream(guac_client* client, guac_stream* stream);
  * @return Zero if the user was added successfully, non-zero if the user could
  *         not join the connection.
  */
-int guac_client_add_user(guac_user* user, int argc, char** argv);
+void guac_client_add_user(guac_user* user);
 
 /**
  * Removes the given user, removing the user from the internally-tracked list
