@@ -1,4 +1,4 @@
-name: Testing Occamy Builds
+name: Builds
 
 on: [push]
 

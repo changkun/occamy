@@ -1,5 +1,9 @@
 # Occamy
 
+[![Latest relsease](https://img.shields.io/github/v/tag/changkun/occamy?label=latest)](https://github.com/changkun/occamy/releases)
+[![Build Status](https://github.com/changkun/occamy/workflows/Builds/badge.svg)](https://github.com/changkun/occamy/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/changkun/occamy)](https://goreportcard.com/report/github.com/changkun/occamy)
+
 Occamy is a modern remote desktop proxy written in Go.
 
 ## Why Occamy and how it works?
