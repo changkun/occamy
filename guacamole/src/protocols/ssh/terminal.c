@@ -246,8 +246,13 @@ void* guac_terminal_thread(void* data) {
     while (client->state == GUAC_CLIENT_RUNNING) {
 
         /* Stop rendering if an error occurs */
-        if (guac_terminal_render_frame(terminal, client))
+        if (guac_terminal_render_frame(terminal))
             break;
+
+        /* Signal end of frame */
+        guac_client_end_frame(client);
+        guac_socket_flush(client->socket);
+
     }
 
     /* The client has stopped or an error has occurred */
@@ -769,7 +774,7 @@ wait_complete:
 
 }
 
-int guac_terminal_render_frame(guac_terminal* terminal, guac_client* client) {
+int guac_terminal_render_frame(guac_terminal* terminal) {
 
     int wait_result;
 
@@ -800,9 +805,6 @@ int guac_terminal_render_frame(guac_terminal* terminal, guac_client* client) {
         guac_terminal_flush(terminal);
         guac_terminal_unlock(terminal);
 
-        /* Signal end of frame */
-        guac_client_end_frame(client);
-        guac_socket_flush(client->socket);
     }
 
     return 0;
