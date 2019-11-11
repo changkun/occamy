@@ -1,3 +1,5 @@
+<img src="./docs/occamy.png" alt="logo" height="150" align="right" />
+
 # Occamy
 
 [![Latest relsease](https://img.shields.io/github/v/tag/changkun/occamy?label=latest)](https://github.com/changkun/occamy/releases)
