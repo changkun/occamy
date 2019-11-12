@@ -85,20 +85,12 @@ libguac_la_SOURCES =   \
     socket.c           \
     socket-broadcast.c \
     socket-fd.c        \
-    socket-nest.c      \
-    socket-tee.c       \
     timestamp.c        \
     unicode.c          \
     user.c             \
     user-handlers.c    \
     user-handshake.c   \
     wait-fd.c
-
-# SSL support
-if ENABLE_SSL
-libguac_la_SOURCES += socket-ssl.c
-libguacinc_HEADERS += guacamole/socket-ssl.h
-endif
 
 libguac_la_CFLAGS = \
     -Werror -Wall -pedantic -I$(srcdir)/guacamole
