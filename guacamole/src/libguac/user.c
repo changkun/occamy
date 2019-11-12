@@ -20,7 +20,6 @@
 #include "config.h"
 
 #include "client.h"
-#include "encode-jpeg.h"
 #include "encode-png.h"
 #include "id.h"
 #include "object.h"
@@ -251,27 +250,6 @@ void guac_user_stream_png(guac_user* user, guac_socket* socket,
 
     /* Write PNG data */
     guac_png_write(socket, stream, surface);
-
-    /* Terminate stream */
-    guac_protocol_send_end(socket, stream);
-
-    /* Free allocated stream */
-    guac_user_free_stream(user, stream);
-
-}
-
-void guac_user_stream_jpeg(guac_user* user, guac_socket* socket,
-        guac_composite_mode mode, const guac_layer* layer, int x, int y,
-        cairo_surface_t* surface, int quality) {
-
-    /* Allocate new stream for image */
-    guac_stream* stream = guac_user_alloc_stream(user);
-
-    /* Declare stream as containing image data */
-    guac_protocol_send_img(socket, stream, mode, layer, "image/jpeg", x, y);
-
-    /* Write JPEG data */
-    guac_jpeg_write(socket, stream, surface, quality);
 
     /* Terminate stream */
     guac_protocol_send_end(socket, stream);

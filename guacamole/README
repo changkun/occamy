@@ -25,12 +25,9 @@ the following required dependencies must already be installed:
 
     1) Cairo (http://cairographics.org/)
 
-    2) libjpeg-turbo (http://libjpeg-turbo.virtualgl.org/)
-       OR libjpeg (http://www.ijg.org/)
+    2) libpng (http://www.libpng.org/pub/png/libpng.html)
 
-    3) libpng (http://www.libpng.org/pub/png/libpng.html)
-
-    4) OSSP UUID (http://www.ossp.org/pkg/lib/uuid/)
+    3) OSSP UUID (http://www.ossp.org/pkg/lib/uuid/)
 
 
 ------------------------------------------------------------

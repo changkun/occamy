@@ -16,7 +16,6 @@ ENV \
         freerdp                       \
         freerdp-plugins               \
         ghostscript                   \
-        libjpeg-turbo                 \
         libssh2                       \
         liberation-mono-fonts         \
         libvncserver                  \
@@ -29,7 +28,6 @@ ENV \
         automake                      \
         cairo-devel                   \
         freerdp-devel                 \
-        libjpeg-turbo-devel           \
         uuid-devel                    \
         pango-devel                   \
         libssh2-devel                 \

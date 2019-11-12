@@ -64,7 +64,6 @@ libguacinc_HEADERS =                  \
 
 noinst_HEADERS =      \
     id.h              \
-    encode-jpeg.h     \
     encode-png.h      \
     palette.h         \
     user-handlers.h   \
@@ -74,7 +73,6 @@ noinst_HEADERS =      \
 libguac_la_SOURCES =   \
     audio.c            \
     client.c           \
-    encode-jpeg.c      \
     encode-png.c       \
     error.c            \
     hash.c             \
@@ -110,7 +108,6 @@ libguac_la_LDFLAGS =     \
     -no-undefined        \
     @CAIRO_LIBS@         \
     @DL_LIBS@            \
-    @JPEG_LIBS@          \
     @PNG_LIBS@           \
     @PTHREAD_LIBS@       \
     @SSL_LIBS@           \

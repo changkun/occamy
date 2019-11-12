@@ -50,10 +50,6 @@ AC_CHECK_LIB([m], [cos],
 AC_CHECK_LIB([png], [png_write_png], [PNG_LIBS=-lpng],
              AC_MSG_ERROR("libpng is required for writing png messages"))
 
-# libjpeg
-AC_CHECK_LIB([jpeg], [jpeg_start_compress], [JPEG_LIBS=-ljpeg],
-             AC_MSG_ERROR("libjpeg is required for writing jpeg messages"))
-
 # Cairo
 AC_CHECK_LIB([cairo], [cairo_create], [CAIRO_LIBS=-lcairo],
              AC_MSG_ERROR("Cairo is required for drawing instructions"))
@@ -92,7 +88,6 @@ AC_CHECK_LIB([cunit], [CU_run_test], [CUNIT_LIBS=-lcunit])
 AC_SUBST(DL_LIBS)
 AC_SUBST(MATH_LIBS)
 AC_SUBST(PNG_LIBS)
-AC_SUBST(JPEG_LIBS)
 AC_SUBST(CAIRO_LIBS)
 AC_SUBST(PTHREAD_LIBS)
 AC_SUBST(UUID_LIBS)
