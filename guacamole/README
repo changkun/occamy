@@ -54,9 +54,6 @@ otherwise.
     VNC:
         * libVNCserver (http://libvnc.github.io/)
 
-    Support for WebP image compression:
-        * libwebp (https://developers.google.com/speed/webp/)
-
 
 ------------------------------------------------------------
  Compiling and installing libguac, etc.

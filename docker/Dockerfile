@@ -20,7 +20,6 @@ ENV \
         libssh2                       \
         liberation-mono-fonts         \
         libvncserver                  \
-        libwebp                       \
         pango                         \
         terminus-fonts                \
         git                           \
@@ -36,7 +35,6 @@ ENV \
         libssh2-devel                 \
         libtool                       \
         libvncserver-devel            \
-        libwebp-devel                 \
         make"                         \
     GO_VERSION=1.13.4
 RUN yum -y update                                                         && \
