@@ -52,13 +52,6 @@ const char* GUAC_VNC_CLIENT_ARGS[] = {
     "listen-timeout",
 #endif
 
-    "recording-path",
-    "recording-name",
-    "recording-exclude-output",
-    "recording-exclude-mouse",
-    "recording-include-keys",
-    "create-recording-path",
-
     NULL
 };
 
@@ -151,50 +144,6 @@ enum VNC_ARGS_IDX {
      */
     IDX_LISTEN_TIMEOUT,
 #endif
-
-    /**
-     * The full absolute path to the directory in which screen recordings
-     * should be written.
-     */
-    IDX_RECORDING_PATH,
-
-    /**
-     * The name that should be given to screen recordings which are written in
-     * the given path.
-     */
-    IDX_RECORDING_NAME,
-
-    /**
-     * Whether output which is broadcast to each connected client (graphics,
-     * streams, etc.) should NOT be included in the session recording. Output
-     * is included by default, as it is necessary for any recording which must
-     * later be viewable as video.
-     */
-    IDX_RECORDING_EXCLUDE_OUTPUT,
-
-    /**
-     * Whether changes to mouse state, such as position and buttons pressed or
-     * released, should NOT be included in the session recording. Mouse state
-     * is included by default, as it is necessary for the mouse cursor to be
-     * rendered in any resulting video.
-     */
-    IDX_RECORDING_EXCLUDE_MOUSE,
-
-    /**
-     * Whether keys pressed and released should be included in the session
-     * recording. Key events are NOT included by default within the recording,
-     * as doing so has privacy and security implications.  Including key events
-     * may be necessary in certain auditing contexts, but should only be done
-     * with caution. Key events can easily contain sensitive information, such
-     * as passwords, credit card numbers, etc.
-     */
-    IDX_RECORDING_INCLUDE_KEYS,
-
-    /**
-     * Whether the specified screen recording path should automatically be
-     * created if it does not yet exist.
-     */
-    IDX_CREATE_RECORDING_PATH,
 
     VNC_ARGS_COUNT
 };
@@ -291,36 +240,6 @@ guac_vnc_settings* guac_vnc_parse_args(guac_user* user,
         guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
                 IDX_CLIPBOARD_ENCODING, NULL);
 
-    /* Read recording path */
-    settings->recording_path =
-        guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
-                IDX_RECORDING_PATH, NULL);
-
-    /* Read recording name */
-    settings->recording_name =
-        guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
-                IDX_RECORDING_NAME, GUAC_VNC_DEFAULT_RECORDING_NAME);
-
-    /* Parse output exclusion flag */
-    settings->recording_exclude_output =
-        guac_user_parse_args_boolean(user, GUAC_VNC_CLIENT_ARGS, argv,
-                IDX_RECORDING_EXCLUDE_OUTPUT, false);
-
-    /* Parse mouse exclusion flag */
-    settings->recording_exclude_mouse =
-        guac_user_parse_args_boolean(user, GUAC_VNC_CLIENT_ARGS, argv,
-                IDX_RECORDING_EXCLUDE_MOUSE, false);
-
-    /* Parse key event inclusion flag */
-    settings->recording_include_keys =
-        guac_user_parse_args_boolean(user, GUAC_VNC_CLIENT_ARGS, argv,
-                IDX_RECORDING_INCLUDE_KEYS, false);
-
-    /* Parse path creation flag */
-    settings->create_recording_path =
-        guac_user_parse_args_boolean(user, GUAC_VNC_CLIENT_ARGS, argv,
-                IDX_CREATE_RECORDING_PATH, false);
-
     return settings;
 
 }
@@ -331,8 +250,6 @@ void guac_vnc_settings_free(guac_vnc_settings* settings) {
     free(settings->clipboard_encoding);
     free(settings->encodings);
     free(settings->hostname);
-    free(settings->recording_name);
-    free(settings->recording_path);
 
 #ifdef ENABLE_VNC_REPEATER
     /* Free VNC repeater settings */

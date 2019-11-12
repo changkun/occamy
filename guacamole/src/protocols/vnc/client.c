@@ -19,7 +19,6 @@
 
 #include "config.h"
 
-#include "common/recording.h"
 #include "client.h"
 #include "user.h"
 #include "vnc.h"
@@ -73,10 +72,6 @@ int guac_vnc_client_free_handler(guac_client* client) {
         }
         rfbClientCleanup(rfb_client);
     }
-
-    /* Clean up recording, if in progress */
-    if (vnc_client->recording != NULL)
-        guac_common_recording_free(vnc_client->recording);
 
     /* Free clipboard */
     if (vnc_client->clipboard != NULL)

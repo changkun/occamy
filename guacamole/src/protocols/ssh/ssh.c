@@ -19,7 +19,6 @@
 
 #include "config.h"
 
-#include "common/recording.h"
 #include "_ssh.h"
 #include "settings.h"
 #include "ssh.h"
@@ -190,17 +189,6 @@ void* ssh_client_thread(void* data) {
     }
 
     char ssh_ttymodes[GUAC_SSH_TTYMODES_SIZE(1)];
-
-    /* Set up screen recording, if requested */
-    if (settings->recording_path != NULL) {
-        ssh_client->recording = guac_common_recording_create(client,
-                settings->recording_path,
-                settings->recording_name,
-                settings->create_recording_path,
-                !settings->recording_exclude_output,
-                !settings->recording_exclude_mouse,
-                settings->recording_include_keys);
-    }
 
     /* Create terminal */
     ssh_client->term = guac_terminal_create(client, ssh_client->clipboard,

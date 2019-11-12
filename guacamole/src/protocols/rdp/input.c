@@ -20,7 +20,6 @@
 #include "config.h"
 
 #include "client.h"
-#include "common/recording.h"
 #include "input.h"
 #include "keyboard.h"
 #include "rdp.h"
@@ -49,10 +48,6 @@ int guac_rdp_user_mouse_handler(guac_user* user, int x, int y, int mask) {
 
     /* Store current mouse location/state */
     guac_common_cursor_update(rdp_client->display->cursor, user, x, y, mask);
-
-    /* Report mouse position within recording */
-    if (rdp_client->recording != NULL)
-        guac_common_recording_report_mouse(rdp_client->recording, x, y, mask);
 
     /* If button mask unchanged, just send move event */
     if (mask == rdp_client->mouse_button_mask)
@@ -127,11 +122,6 @@ int guac_rdp_user_key_handler(guac_user* user, int keysym, int pressed) {
 
     guac_client* client = user->client;
     guac_rdp_client* rdp_client = (guac_rdp_client*) client->data;
-
-    /* Report key state within recording */
-    if (rdp_client->recording != NULL)
-        guac_common_recording_report_key(rdp_client->recording,
-                keysym, pressed);
 
     /* Skip if keyboard not yet ready */
     if (rdp_client->keyboard == NULL)

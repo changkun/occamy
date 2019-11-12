@@ -80,12 +80,6 @@ const char* GUAC_RDP_CLIENT_ARGS[] = {
     "preconnection-id",
     "preconnection-blob",
 
-    "recording-path",
-    "recording-name",
-    "recording-exclude-output",
-    "recording-exclude-mouse",
-    "recording-include-keys",
-    "create-recording-path",
     "resize-method",
     "enable-audio-input",
     "read-only",
@@ -341,50 +335,6 @@ enum RDP_ARGS_IDX {
      * destination VM.
      */
     IDX_PRECONNECTION_BLOB,
-
-    /**
-     * The full absolute path to the directory in which screen recordings
-     * should be written.
-     */
-    IDX_RECORDING_PATH,
-
-    /**
-     * The name that should be given to screen recordings which are written in
-     * the given path.
-     */
-    IDX_RECORDING_NAME,
-
-    /**
-     * Whether output which is broadcast to each connected client (graphics,
-     * streams, etc.) should NOT be included in the session recording. Output
-     * is included by default, as it is necessary for any recording which must
-     * later be viewable as video.
-     */
-    IDX_RECORDING_EXCLUDE_OUTPUT,
-
-    /**
-     * Whether changes to mouse state, such as position and buttons pressed or
-     * released, should NOT be included in the session recording. Mouse state
-     * is included by default, as it is necessary for the mouse cursor to be
-     * rendered in any resulting video.
-     */
-    IDX_RECORDING_EXCLUDE_MOUSE,
-
-    /**
-     * Whether keys pressed and released should be included in the session
-     * recording. Key events are NOT included by default within the recording,
-     * as doing so has privacy and security implications.  Including key events
-     * may be necessary in certain auditing contexts, but should only be done
-     * with caution. Key events can easily contain sensitive information, such
-     * as passwords, credit card numbers, etc.
-     */
-    IDX_RECORDING_INCLUDE_KEYS,
-
-    /**
-     * Whether the specified screen recording path should automatically be
-     * created if it does not yet exist.
-     */
-    IDX_CREATE_RECORDING_PATH,
 
     /**
      * The method to use to apply screen size changes requested by the user.
@@ -756,36 +706,6 @@ guac_rdp_settings* guac_rdp_parse_args(guac_user* user,
     if (settings->server_layout == NULL)
         settings->server_layout = guac_rdp_keymap_find(GUAC_DEFAULT_KEYMAP);
 
-    /* Read recording path */
-    settings->recording_path =
-        guac_user_parse_args_string(user, GUAC_RDP_CLIENT_ARGS, argv,
-                IDX_RECORDING_PATH, NULL);
-
-    /* Read recording name */
-    settings->recording_name =
-        guac_user_parse_args_string(user, GUAC_RDP_CLIENT_ARGS, argv,
-                IDX_RECORDING_NAME, GUAC_RDP_DEFAULT_RECORDING_NAME);
-
-    /* Parse output exclusion flag */
-    settings->recording_exclude_output =
-        guac_user_parse_args_boolean(user, GUAC_RDP_CLIENT_ARGS, argv,
-                IDX_RECORDING_EXCLUDE_OUTPUT, 0);
-
-    /* Parse mouse exclusion flag */
-    settings->recording_exclude_mouse =
-        guac_user_parse_args_boolean(user, GUAC_RDP_CLIENT_ARGS, argv,
-                IDX_RECORDING_EXCLUDE_MOUSE, 0);
-
-    /* Parse key event inclusion flag */
-    settings->recording_include_keys =
-        guac_user_parse_args_boolean(user, GUAC_RDP_CLIENT_ARGS, argv,
-                IDX_RECORDING_INCLUDE_KEYS, 0);
-
-    /* Parse path creation flag */
-    settings->create_recording_path =
-        guac_user_parse_args_boolean(user, GUAC_RDP_CLIENT_ARGS, argv,
-                IDX_CREATE_RECORDING_PATH, 0);
-
     /* No resize method */
     if (strcmp(argv[IDX_RESIZE_METHOD], "") == 0) {
         guac_user_log(user, GUAC_LOG_INFO, "Resize method: none");
@@ -866,8 +786,6 @@ void guac_rdp_settings_free(guac_rdp_settings* settings) {
     free(settings->initial_program);
     free(settings->password);
     free(settings->preconnection_blob);
-    free(settings->recording_name);
-    free(settings->recording_path);
     free(settings->remote_app);
     free(settings->remote_app_args);
     free(settings->remote_app_dir);

@@ -25,7 +25,6 @@
 #include "common/clipboard.h"
 #include "common/display.h"
 #include "common/iconv.h"
-#include "common/recording.h"
 #include "common/surface.h"
 #include "settings.h"
 
@@ -76,12 +75,6 @@ typedef struct guac_vnc_client {
      * Internal clipboard.
      */
     guac_common_clipboard* clipboard;
-
-    /**
-     * The in-progress session recording, or NULL if no recording is in
-     * progress.
-     */
-    guac_common_recording* recording;
 
     /**
      * Clipboard encoding-specific reader.

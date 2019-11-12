@@ -26,11 +26,6 @@
 #include <stdbool.h>
 
 /**
- * The filename to use for the screen recording, if not specified.
- */
-#define GUAC_VNC_DEFAULT_RECORDING_NAME "recording"
-
-/**
  * VNC-specific client data.
  */
 typedef struct guac_vnc_settings {
@@ -114,49 +109,6 @@ typedef struct guac_vnc_settings {
      * to use the encoding required by the VNC standard.
      */
     char* clipboard_encoding;
-
-    /**
-     * The path in which the screen recording should be saved, if enabled. If
-     * no screen recording should be saved, this will be NULL.
-     */
-    char* recording_path;
-
-    /**
-     * The filename to use for the screen recording, if enabled.
-     */
-    char* recording_name;
-
-    /**
-     * Whether the screen recording path should be automatically created if it
-     * does not already exist.
-     */
-    bool create_recording_path;
-
-    /**
-     * Whether output which is broadcast to each connected client (graphics,
-     * streams, etc.) should NOT be included in the session recording. Output
-     * is included by default, as it is necessary for any recording which must
-     * later be viewable as video.
-     */
-    bool recording_exclude_output;
-
-    /**
-     * Whether changes to mouse state, such as position and buttons pressed or
-     * released, should NOT be included in the session recording. Mouse state
-     * is included by default, as it is necessary for the mouse cursor to be
-     * rendered in any resulting video.
-     */
-    bool recording_exclude_mouse;
-
-    /**
-     * Whether keys pressed and released should be included in the session
-     * recording. Key events are NOT included by default within the recording,
-     * as doing so has privacy and security implications.  Including key events
-     * may be necessary in certain auditing contexts, but should only be done
-     * with caution. Key events can easily contain sensitive information, such
-     * as passwords, credit card numbers, etc.
-     */
-    bool recording_include_keys;
 
 } guac_vnc_settings;
 
