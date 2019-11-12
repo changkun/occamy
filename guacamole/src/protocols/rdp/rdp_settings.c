@@ -20,7 +20,6 @@
 #include "config.h"
 
 #include "client.h"
-#include "common/string.h"
 #include "rdp.h"
 #include "rdp_settings.h"
 #include "resolution.h"
@@ -403,6 +402,70 @@ enum RDP_ARGS_IDX {
 
     RDP_ARGS_COUNT
 };
+
+int guac_count_occurrences(const char* string, char c) {
+
+    int count = 0;
+
+    while (*string != 0) {
+
+        /* Count each occurrence */
+        if (*string == c)
+            count++;
+
+        /* Next character */
+        string++;
+
+    }
+
+    return count;
+
+}
+
+char** guac_split(const char* string, char delim) {
+
+    int i = 0;
+
+    int token_count = guac_count_occurrences(string, delim) + 1;
+    const char* token_start = string;
+
+    /* Allocate space for tokens */
+    char** tokens = malloc(sizeof(char*) * (token_count+1));
+
+    do {
+
+        int length;
+        char* token;
+
+        /* Find end of token */
+        while (*string != 0 && *string != delim)
+            string++;
+
+        /* Calculate token length */
+        length = string - token_start;
+
+        /* Allocate space for token and NULL terminator */
+        tokens[i++] = token = malloc(length + 1);
+
+        /* Copy token, store null */
+        memcpy(token, token_start, length);
+        token[length] = 0;
+
+        /* Stop at end of string */
+        if (*string == 0)
+            break;
+
+        /* Next token */
+        token_start = ++string;
+
+    } while (i < token_count);
+
+    /* NULL terminator */
+    tokens[i] = NULL;
+
+    return tokens;
+
+}
 
 guac_rdp_settings* guac_rdp_parse_args(guac_user* user,
         int argc, const char** argv) {
