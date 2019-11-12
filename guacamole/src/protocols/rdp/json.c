@@ -19,7 +19,7 @@
 
 #include "config.h"
 
-#include "common/json.h"
+#include "json.h"
 
 #include <assert.h>
 #include <stdlib.h>

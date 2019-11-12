@@ -10,11 +10,6 @@ Source archives are available from the downloads section of the project website:
  
     http://guacamole.apache.org/
 
-A full manual is available as well:
-
-    http://guacamole.apache.org/doc/gug/
-
-
 ------------------------------------------------------------
  Required dependencies
 ------------------------------------------------------------
@@ -50,51 +45,3 @@ otherwise.
 
     VNC:
         * libVNCserver (http://libvnc.github.io/)
-
-
-------------------------------------------------------------
- Compiling and installing libguac, etc.
-------------------------------------------------------------
-
-All software within guacamole-server is built using the popular GNU Automake,
-and thus provides the standard configure script.
-
-1) Run configure
-
-    $ ./configure
-
-    Assuming all dependencies have been installed, this should succeed without
-    errors. If you wish to install the init script as well, you need to specify
-    the location where your system init scripts are located (typically
-    /etc/init.d):
-
-    $ ./configure --with-init-dir=/etc/init.d
-
-    Running configure in this manner will cause the "make install" step to
-    install an init script to the specified directory, which you can then
-    activate using the service management mechanism provided by your
-    distribution).
-
-2) Run make
-
-    $ make
-
-    libguac, and any available protocol support libraries will now
-    compile.
-
-3) Install (as root)
-
-    # make install
-
-    All software that was just built, including documentation, will be
-    installed.
-
-------------------------------------------------------------
- Reporting problems
-------------------------------------------------------------
-
-Please report any bugs encountered by opening a new issue in the JIRA system
-hosted at:
-    
-    https://issues.apache.org/jira/browse/GUACAMOLE
-
