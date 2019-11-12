@@ -938,40 +938,6 @@ AM_CONDITIONAL([ENABLE_SSH_AGENT],
 	      -a "x${enable_ssh_agent}" = "xyes"])
 
 #
-# libwebp
-#
-
-have_webp=disabled
-WEBP_LIBS=
-AC_ARG_WITH([webp],
-            [AS_HELP_STRING([--with-webp],
-                            [support WebP image encoding @<:@default=check@:>@])],
-            [],
-            [with_webp=check])
-
-if test "x$with_webp" != "xno"
-then
-    have_webp=yes
-
-    AC_CHECK_HEADER(webp/encode.h,, [have_webp=no])
-    AC_CHECK_LIB([webp], [WebPEncode], [WEBP_LIBS="$WEBP_LIBS -lwebp"], [have_webp=no])
-
-    if test "x${have_webp}" = "xno"
-    then
-        AC_MSG_WARN([
-  --------------------------------------------
-   Unable to find libwebp.
-   Images will not be encoded using WebP.
-  --------------------------------------------])
-    else
-        AC_DEFINE([ENABLE_WEBP],, [Whether WebP support is enabled])
-    fi
-fi
-
-AM_CONDITIONAL([ENABLE_WEBP], [test "x${have_webp}" = "xyes"])
-AC_SUBST(WEBP_LIBS)
-
-#
 # Output Makefiles
 #
 
@@ -1007,7 +973,6 @@ $PACKAGE_NAME version $PACKAGE_VERSION
      libssh2 ............. ${have_libssh2}
      libssl .............. ${have_ssl}
      libVNCServer ........ ${have_libvncserver}
-     libwebp ............. ${have_webp}
 
    Protocol support:
 

@@ -96,12 +96,6 @@ libguac_la_SOURCES =   \
     user-handshake.c   \
     wait-fd.c
 
-# Compile WebP support if available
-if ENABLE_WEBP
-libguac_la_SOURCES += encode-webp.c
-noinst_HEADERS += encode-webp.h
-endif
-
 # SSL support
 if ENABLE_SSL
 libguac_la_SOURCES += socket-ssl.c
@@ -120,6 +114,5 @@ libguac_la_LDFLAGS =     \
     @PNG_LIBS@           \
     @PTHREAD_LIBS@       \
     @SSL_LIBS@           \
-    @UUID_LIBS@          \
-    @WEBP_LIBS@
+    @UUID_LIBS@
 

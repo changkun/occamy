@@ -97,25 +97,12 @@
 #define GUAC_SURFACE_JPEG_MIN_BITMAP_SIZE 4096
 
 /**
- * The WebP image quality ('quantization') setting to use. Range 0-100 where
- * 100 is the highest quality/largest file size, and 0 is the lowest
- * quality/smallest file size.
- */
-#define GUAC_SURFACE_WEBP_IMAGE_QUALITY 90
-
-/**
  * The JPEG compression min block size. This defines the optimal rectangle block
  * size factor for JPEG compression. Usually 8x8 would suffice, but use 16 to
  * reduce the occurrence of ringing artifacts further.
  */
 #define GUAC_SURFACE_JPEG_BLOCK_SIZE 16
 
-/**
- * The WebP compression min block size. This defines the optimal rectangle block
- * size factor for WebP compression. WebP does utilize variable block size, but
- * ensuring a block size factor reduces any noise on the image edges.
- */
-#define GUAC_SURFACE_WEBP_BLOCK_SIZE 8
 
 void guac_common_surface_move(guac_common_surface* surface, int x, int y) {
 
@@ -533,38 +520,6 @@ static int __guac_common_surface_should_use_jpeg(guac_common_surface* surface,
      * - PNG is not more optimal based on image contents */
     return framerate >= GUAC_COMMON_SURFACE_JPEG_FRAMERATE
         && rect_size > GUAC_SURFACE_JPEG_MIN_BITMAP_SIZE
-        && __guac_common_surface_png_optimality(surface, rect) < 0;
-
-}
-
-/**
- * Returns whether the given rectangle would be optimally encoded as WebP
- * rather than PNG.
- *
- * @param surface
- *     The surface to be queried.
- *
- * @param rect
- *     The rectangle to check.
- *
- * @return
- *     Non-zero if the rectangle would be optimally encoded as WebP, zero
- *     otherwise.
- */
-static int __guac_common_surface_should_use_webp(guac_common_surface* surface,
-        const guac_common_rect* rect) {
-
-    /* Do not use WebP if not supported */
-    if (!guac_client_supports_webp(surface->client))
-        return 0;
-
-    /* Calculate the average framerate for the given rect */
-    int framerate = __guac_common_surface_calculate_framerate(surface, rect);
-
-    /* WebP is preferred if:
-     * - frame rate is high enough
-     * - PNG is not more optimal based on image contents */
-    return framerate >= GUAC_COMMON_SURFACE_JPEG_FRAMERATE
         && __guac_common_surface_png_optimality(surface, rect) < 0;
 
 }
@@ -1715,68 +1670,6 @@ static void __guac_common_surface_flush_to_jpeg(guac_common_surface* surface) {
 }
 
 /**
- * Flushes the bitmap update currently described by the dirty rectangle within
- * the given surface directly via an "img" instruction as WebP data. The
- * resulting instructions will be sent over the socket associated with the
- * given surface.
- *
- * @param surface
- *     The surface to flush.
- *
- * @param opaque
- *     Whether the rectangle being flushed contains only fully-opaque pixels.
- */
-static void __guac_common_surface_flush_to_webp(guac_common_surface* surface,
-        int opaque) {
-
-    if (surface->dirty) {
-
-        guac_socket* socket = surface->socket;
-        const guac_layer* layer = surface->layer;
-
-        guac_common_rect max;
-        guac_common_rect_init(&max, 0, 0, surface->width, surface->height);
-
-        /* Expand the dirty rect size to fit in a grid with cells equal to the
-         * minimum WebP block size */
-        guac_common_rect_expand_to_grid(GUAC_SURFACE_WEBP_BLOCK_SIZE,
-                                        &surface->dirty_rect, &max);
-
-        /* Get Cairo surface for specified rect */
-        unsigned char* buffer = surface->buffer
-                              + surface->dirty_rect.y * surface->stride
-                              + surface->dirty_rect.x * 4;
-
-        cairo_surface_t* rect;
-
-        /* Use RGB24 if the image is fully opaque */
-        if (opaque)
-            rect = cairo_image_surface_create_for_data(buffer,
-                    CAIRO_FORMAT_RGB24, surface->dirty_rect.width,
-                    surface->dirty_rect.height, surface->stride);
-
-        /* Otherwise ARGB32 is needed */
-        else
-            rect = cairo_image_surface_create_for_data(buffer,
-                    CAIRO_FORMAT_ARGB32, surface->dirty_rect.width,
-                    surface->dirty_rect.height, surface->stride);
-
-        /* Send WebP for rect */
-        guac_client_stream_webp(surface->client, socket, GUAC_COMP_OVER, layer,
-                surface->dirty_rect.x, surface->dirty_rect.y, rect,
-                GUAC_SURFACE_WEBP_IMAGE_QUALITY, 0);
-
-        cairo_surface_destroy(rect);
-        surface->realized = 1;
-
-        /* Surface is no longer dirty */
-        surface->dirty = 0;
-
-    }
-
-}
-
-/**
  * Comparator for instances of guac_common_surface_bitmap_rect, the elements
  * which make up a surface's bitmap buffer.
  *
@@ -1892,13 +1785,7 @@ static void __guac_common_surface_flush(guac_common_surface* surface) {
                 int opaque = __guac_common_surface_is_opaque(surface,
                             &surface->dirty_rect);
 
-                /* Prefer WebP when reasonable */
-                if (__guac_common_surface_should_use_webp(surface,
-                            &surface->dirty_rect))
-                    __guac_common_surface_flush_to_webp(surface, opaque);
-
-                /* If not WebP, JPEG is the next best (lossy) choice */
-                else if (opaque && __guac_common_surface_should_use_jpeg(
+                if (opaque && __guac_common_surface_should_use_jpeg(
                             surface, &surface->dirty_rect))
                     __guac_common_surface_flush_to_jpeg(surface);
 

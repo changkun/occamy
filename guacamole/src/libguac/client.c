@@ -22,7 +22,6 @@
 #include "client.h"
 #include "encode-jpeg.h"
 #include "encode-png.h"
-#include "encode-webp.h"
 #include "error.h"
 #include "id.h"
 #include "layer.h"
@@ -538,75 +537,3 @@ void guac_client_stream_jpeg(guac_client* client, guac_socket* socket,
     guac_client_free_stream(client, stream);
 
 }
-
-void guac_client_stream_webp(guac_client* client, guac_socket* socket,
-        guac_composite_mode mode, const guac_layer* layer, int x, int y,
-        cairo_surface_t* surface, int quality, int lossless) {
-
-#ifdef ENABLE_WEBP
-    /* Allocate new stream for image */
-    guac_stream* stream = guac_client_alloc_stream(client);
-
-    /* Declare stream as containing image data */
-    guac_protocol_send_img(socket, stream, mode, layer, "image/webp", x, y);
-
-    /* Write WebP data */
-    guac_webp_write(socket, stream, surface, quality, lossless);
-
-    /* Terminate stream */
-    guac_protocol_send_end(socket, stream);
-
-    /* Free allocated stream */
-    guac_client_free_stream(client, stream);
-#else
-    /* Do nothing if WebP support is not built in */
-#endif
-
-}
-
-#ifdef ENABLE_WEBP
-/**
- * Callback which is invoked by guac_client_supports_webp() for each user
- * associated with the given client, thus updating an overall support flag
- * describing the WebP support state for the client as a whole.
- *
- * @param user
- *     The user to check for WebP support.
- *
- * @param data
- *     Pointer to an int containing the current WebP support status for the
- *     client associated with the given user. This flag will be 0 if any user
- *     already checked has lacked WebP support, or 1 otherwise.
- *
- * @return
- *     Always NULL.
- */
-static void* __webp_support_callback(guac_user* user, void* data) {
-
-    int* webp_supported = (int*) data;
-
-    /* Check whether current user supports WebP */
-    if (*webp_supported)
-        *webp_supported = guac_user_supports_webp(user);
-
-    return NULL;
-
-}
-#endif
-
-int guac_client_supports_webp(guac_client* client) {
-
-#ifdef ENABLE_WEBP
-    int webp_supported = 1;
-
-    /* WebP is supported for entire client only if each user supports it */
-    guac_client_foreach_user(client, __webp_support_callback, &webp_supported);
-
-    return webp_supported;
-#else
-    /* Support for WebP is completely absent */
-    return 0;
-#endif
-
-}
-
