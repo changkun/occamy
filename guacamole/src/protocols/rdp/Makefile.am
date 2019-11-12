@@ -32,6 +32,7 @@ libguac_client_rdp_la_SOURCES = \
     dvc.c                       \
     error.c                     \
     input.c                     \
+    json.c                      \
     keyboard.c                  \
     ptr_string.c                \
     rdp.c                       \
@@ -103,6 +104,7 @@ noinst_HEADERS =                             \
     dvc.h                                    \
     error.h                                  \
     input.h                                  \
+    json.h                                   \
     keyboard.h                               \
     ptr_string.h                             \
     rdp.h                                    \

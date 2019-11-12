@@ -31,7 +31,6 @@ noinst_HEADERS =            \
     common/dot_cursor.h     \
     common/ibar_cursor.h    \
     common/iconv.h          \
-    common/json.h           \
     common/list.h           \
     common/pointer_cursor.h \
     common/rect.h           \
@@ -47,7 +46,6 @@ libguac_common_la_SOURCES = \
     dot_cursor.c            \
     ibar_cursor.c           \
     iconv.c                 \
-    json.c                  \
     list.c                  \
     pointer_cursor.c        \
     rect.c                  \
