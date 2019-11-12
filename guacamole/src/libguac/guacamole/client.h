@@ -580,44 +580,6 @@ void guac_client_stream_png(guac_client* client, guac_socket* socket,
         cairo_surface_t* surface);
 
 /**
- * Streams the image data of the given surface over an image stream ("img"
- * instruction) as JPEG-encoded data at the given quality. The image stream
- * will be automatically allocated and freed.
- *
- * @param client
- *     The Guacamole client for which the image stream should be allocated.
- *
- * @param socket
- *     The socket over which instructions associated with the image stream
- *     should be sent.
- *
- * @param mode
- *     The composite mode to use when rendering the image over the given layer.
- *
- * @param layer
- *     The destination layer.
- *
- * @param x
- *     The X coordinate of the upper-left corner of the destination rectangle
- *     within the given layer.
- *
- * @param y
- *     The Y coordinate of the upper-left corner of the destination rectangle
- *     within the given layer.
- *
- * @param surface
- *     A Cairo surface containing the image data to be streamed.
- *
- * @param quality
- *     The JPEG image quality, which must be an integer value between 0 and 100
- *     inclusive. Larger values indicate improving quality at the expense of
- *     larger file size.
- */
-void guac_client_stream_jpeg(guac_client* client, guac_socket* socket,
-        guac_composite_mode mode, const guac_layer* layer, int x, int y,
-        cairo_surface_t* surface, int quality);
-
-/**
  * The default Guacamole client layer, layer 0.
  */
 extern const guac_layer* GUAC_DEFAULT_LAYER;

@@ -78,31 +78,6 @@
 #define cairo_format_stride_for_width(format, width) (width*4)
 #endif
 
-/**
- * The JPEG image quality ('quantization') setting to use. Range 0-100 where
- * 100 is the highest quality/largest file size, and 0 is the lowest
- * quality/smallest file size.
- */
-#define GUAC_SURFACE_JPEG_IMAGE_QUALITY 90
-
-/**
- * The framerate which, if exceeded, indicates that JPEG is preferred.
- */
-#define GUAC_COMMON_SURFACE_JPEG_FRAMERATE 3
-
-/**
- * Minimum JPEG bitmap size (area). If the bitmap is smaller than this threshold,
- * it should be compressed as a PNG image to avoid the JPEG compression tax.
- */
-#define GUAC_SURFACE_JPEG_MIN_BITMAP_SIZE 4096
-
-/**
- * The JPEG compression min block size. This defines the optimal rectangle block
- * size factor for JPEG compression. Usually 8x8 would suffice, but use 16 to
- * reduce the occurrence of ringing artifacts further.
- */
-#define GUAC_SURFACE_JPEG_BLOCK_SIZE 16
-
 
 void guac_common_surface_move(guac_common_surface* surface, int x, int y) {
 
@@ -340,187 +315,6 @@ static void __guac_common_mark_dirty(guac_common_surface* surface, const guac_co
         surface->dirty_rect = *rect;
         surface->dirty = 1;
     }
-
-}
-
-/**
- * Calculate the current average framerate for a given area on the surface.
- *
- * @param surface
- *     The surface on which the framerate will be calculated.
- *
- * @param rect
- *     The rect containing the area for which the average framerate will be
- *     calculated.
- *
- * @return
- *     The average framerate of the given area, in frames per second.
- */
-static unsigned int __guac_common_surface_calculate_framerate(
-        guac_common_surface* surface, const guac_common_rect* rect) {
-
-    int x, y;
-
-    /* Calculate heat map dimensions */
-    int heat_width = GUAC_COMMON_SURFACE_HEAT_DIMENSION(surface->width);
-
-    /* Calculate minimum X/Y coordinates intersecting given rect */
-    int min_x = rect->x / GUAC_COMMON_SURFACE_HEAT_CELL_SIZE;
-    int min_y = rect->y / GUAC_COMMON_SURFACE_HEAT_CELL_SIZE;
-
-    /* Calculate maximum X/Y coordinates intersecting given rect */
-    int max_x = min_x + (rect->width  - 1) / GUAC_COMMON_SURFACE_HEAT_CELL_SIZE;
-    int max_y = min_y + (rect->height - 1) / GUAC_COMMON_SURFACE_HEAT_CELL_SIZE;
-
-    unsigned int sum_framerate = 0;
-    unsigned int count = 0;
-
-    /* Get start of buffer at given coordinates */
-    const guac_common_surface_heat_cell* heat_row =
-        surface->heat_map + min_y * heat_width + min_x;
-
-    /* Iterate over all the heat map cells for the area
-     * and calculate the average framerate */
-    for (y = min_y; y < max_y; y++) {
-
-        /* Get current row of heat map */
-        const guac_common_surface_heat_cell* heat_cell = heat_row;
-
-        /* For each cell in subset of row */
-        for (x = min_x; x < max_x; x++) {
-
-            /* Calculate indicies for latest and oldest history entries */
-            int oldest_entry = heat_cell->oldest_entry;
-            int latest_entry = oldest_entry - 1;
-            if (latest_entry < 0)
-                latest_entry = GUAC_COMMON_SURFACE_HEAT_CELL_HISTORY_SIZE - 1;
-
-            /* Calculate elapsed time covering entire history for this cell */
-            int elapsed_time = heat_cell->history[latest_entry]
-                             - heat_cell->history[oldest_entry];
-
-            /* Calculate and add framerate */
-            if (elapsed_time)
-                sum_framerate += GUAC_COMMON_SURFACE_HEAT_CELL_HISTORY_SIZE
-                    * 1000 / elapsed_time;
-
-            /* Next heat map cell */
-            heat_cell++;
-            count++;
-
-        }
-
-        /* Next heat map row */
-        heat_row += heat_width;
-
-    }
-
-    /* Calculate the average framerate over entire rect */
-    if (count)
-        return sum_framerate / count;
-
-    return 0;
-
-}
-
- /**
- * Guesses whether a rectangle within a particular surface would be better
- * compressed as PNG or using a lossy format like JPEG. Positive values
- * indicate PNG is likely to be superior, while negative values indicate the
- * opposite.
- *
- * @param surface
- *     The surface containing the image data to check.
- *
- * @param rect
- *     The rect to check within the given surface.
- *
- * @return
- *     Positive values if PNG compression is likely to perform better than
- *     lossy alternatives, or negative values if PNG is likely to perform
- *     worse.
- */
-static int __guac_common_surface_png_optimality(guac_common_surface* surface,
-        const guac_common_rect* rect) {
-
-    int x, y;
-
-    int num_same = 0;
-    int num_different = 1;
-
-    /* Get image/buffer metrics */
-    int width = rect->width;
-    int height = rect->height;
-    int stride = surface->stride;
-
-    /* Get buffer from surface */
-    unsigned char* buffer = surface->buffer + rect->y * stride + rect->x * 4;
-
-    /* Image must be at least 1x1 */
-    if (width < 1 || height < 1)
-        return 0;
-
-    /* For each row */
-    for (y = 0; y < height; y++) {
-
-        uint32_t* row = (uint32_t*) buffer;
-        uint32_t last_pixel = *(row++) | 0xFF000000;
-
-        /* For each pixel in current row */
-        for (x = 1; x < width; x++) {
-
-            /* Get next pixel */
-            uint32_t current_pixel = *(row++) | 0xFF000000;
-
-            /* Update same/different counts according to pixel value */
-            if (current_pixel == last_pixel)
-                num_same++;
-            else
-                num_different++;
-
-            last_pixel = current_pixel;
-
-        }
-
-        /* Advance to next row */
-        buffer += stride;
-
-    }
-
-    /* Return rough approximation of optimality for PNG compression */
-    return 0x100 * num_same / num_different - 0x400;
-
-}
-
-/**
- * Returns whether the given rectangle would be optimally encoded as JPEG
- * rather than PNG.
- *
- * @param surface
- *     The surface to be queried.
- *
- * @param rect
- *     The rectangle to check.
- *
- * @return
- *     Non-zero if the rectangle would be optimally encoded as JPEG, zero
- *     otherwise.
- */
-static int __guac_common_surface_should_use_jpeg(guac_common_surface* surface,
-        const guac_common_rect* rect) {
-
-    /* Calculate the average framerate for the given rect */
-    int framerate = __guac_common_surface_calculate_framerate(surface, rect);
-
-    int rect_size = rect->width * rect->height;
-
-    /* JPEG is preferred if:
-     * - frame rate is high enough
-     * - image size is large enough
-     * - PNG is not more optimal based on image contents */
-    return framerate >= GUAC_COMMON_SURFACE_JPEG_FRAMERATE
-        && rect_size > GUAC_SURFACE_JPEG_MIN_BITMAP_SIZE
-        && __guac_common_surface_png_optimality(surface, rect) < 0;
 
 }
 
@@ -1622,54 +1416,6 @@ static void __guac_common_surface_flush_to_png(guac_common_surface* surface,
 }
 
 /**
- * Flushes the bitmap update currently described by the dirty rectangle within
- * the given surface directly via an "img" instruction as JPEG data. The
- * resulting instructions will be sent over the socket associated with the
- * given surface.
- *
- * @param surface
- *     The surface to flush.
- */
-static void __guac_common_surface_flush_to_jpeg(guac_common_surface* surface) {
-
-    if (surface->dirty) {
-
-        guac_socket* socket = surface->socket;
-        const guac_layer* layer = surface->layer;
-
-        guac_common_rect max;
-        guac_common_rect_init(&max, 0, 0, surface->width, surface->height);
-
-        /* Expand the dirty rect size to fit in a grid with cells equal to the
-         * minimum JPEG block size */
-        guac_common_rect_expand_to_grid(GUAC_SURFACE_JPEG_BLOCK_SIZE,
-                                        &surface->dirty_rect, &max);
-
-        /* Get Cairo surface for specified rect */
-        unsigned char* buffer = surface->buffer
-                              + surface->dirty_rect.y * surface->stride
-                              + surface->dirty_rect.x * 4;
-
-        cairo_surface_t* rect = cairo_image_surface_create_for_data(buffer,
-                CAIRO_FORMAT_RGB24, surface->dirty_rect.width,
-                surface->dirty_rect.height, surface->stride);
-
-        /* Send JPEG for rect */
-        guac_client_stream_jpeg(surface->client, socket, GUAC_COMP_OVER, layer,
-                surface->dirty_rect.x, surface->dirty_rect.y, rect,
-                GUAC_SURFACE_JPEG_IMAGE_QUALITY);
-
-        cairo_surface_destroy(rect);
-        surface->realized = 1;
-
-        /* Surface is no longer dirty */
-        surface->dirty = 0;
-
-    }
-
-}
-
-/**
  * Comparator for instances of guac_common_surface_bitmap_rect, the elements
  * which make up a surface's bitmap buffer.
  *
@@ -1785,13 +1531,7 @@ static void __guac_common_surface_flush(guac_common_surface* surface) {
                 int opaque = __guac_common_surface_is_opaque(surface,
                             &surface->dirty_rect);
 
-                if (opaque && __guac_common_surface_should_use_jpeg(
-                            surface, &surface->dirty_rect))
-                    __guac_common_surface_flush_to_jpeg(surface);
-
-                /* Use PNG if no lossy formats are appropriate */
-                else
-                    __guac_common_surface_flush_to_png(surface, opaque);
+                __guac_common_surface_flush_to_png(surface, opaque);
 
             }
 

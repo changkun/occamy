@@ -77,7 +77,7 @@ struct guac_user_info {
     /**
      * NULL-terminated array of client-supported image mimetypes. Though all
      * supported image mimetypes will be listed here, it can be safely assumed
-     * that all clients will support at least "image/png" and "image/jpeg".
+     * that all clients will support at least "image/png".
      */
     const char** image_mimetypes;
 
@@ -687,44 +687,6 @@ void guac_user_free_object(guac_user* user, guac_object* object);
 void guac_user_stream_png(guac_user* user, guac_socket* socket,
         guac_composite_mode mode, const guac_layer* layer, int x, int y,
         cairo_surface_t* surface);
-
-/**
- * Streams the image data of the given surface over an image stream ("img"
- * instruction) as JPEG-encoded data at the given quality. The image stream
- * will be automatically allocated and freed.
- *
- * @param user
- *     The Guacamole user for whom the image stream should be allocated.
- *
- * @param socket
- *     The socket over which instructions associated with the image stream
- *     should be sent.
- *
- * @param mode
- *     The composite mode to use when rendering the image over the given layer.
- *
- * @param layer
- *     The destination layer.
- *
- * @param x
- *     The X coordinate of the upper-left corner of the destination rectangle
- *     within the given layer.
- *
- * @param y
- *     The Y coordinate of the upper-left corner of the destination rectangle
- *     within the given layer.
- *
- * @param surface
- *     A Cairo surface containing the image data to be streamed.
- *
- * @param quality
- *     The JPEG image quality, which must be an integer value between 0 and 100
- *     inclusive. Larger values indicate improving quality at the expense of
- *     larger file size.
- */
-void guac_user_stream_jpeg(guac_user* user, guac_socket* socket,
-        guac_composite_mode mode, const guac_layer* layer, int x, int y,
-        cairo_surface_t* surface, int quality);
 
 /**
  * Automatically handles a single argument received from a joining user,
