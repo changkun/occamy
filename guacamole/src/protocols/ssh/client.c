@@ -21,7 +21,6 @@
 
 #include "client.h"
 #include "common/clipboard.h"
-#include "common/recording.h"
 #include "ssh.h"
 #include "terminal.h"
 #include "user.h"
@@ -85,10 +84,6 @@ int guac_ssh_client_free_handler(guac_client* client) {
     /* Free terminal channel now that the terminal is finished */
     if (ssh_client->term_channel != NULL)
         libssh2_channel_free(ssh_client->term_channel);
-
-    /* Clean up recording, if in progress */
-    if (ssh_client->recording != NULL)
-        guac_common_recording_free(ssh_client->recording);
 
     /* Free interactive SSH session */
     if (ssh_client->session != NULL)

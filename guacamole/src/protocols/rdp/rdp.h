@@ -26,7 +26,6 @@
 #include "common/clipboard.h"
 #include "common/display.h"
 #include "common/list.h"
-#include "common/recording.h"
 #include "common/surface.h"
 #include "keyboard.h"
 #include "rdp_disp.h"
@@ -120,12 +119,6 @@ typedef struct guac_rdp_client {
      * The currently-active print job, or NULL if no print job is active.
      */
     guac_rdp_print_job* active_job;
-
-    /**
-     * The in-progress session recording, or NULL if no recording is in
-     * progress.
-     */
-    guac_common_recording* recording;
 
     /**
      * Display size update module.

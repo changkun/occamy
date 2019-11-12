@@ -25,7 +25,6 @@
 #include "common/clipboard.h"
 #include "common/cursor.h"
 #include "common/display.h"
-#include "common/recording.h"
 #include "cursor.h"
 #include "display.h"
 #include "log.h"
@@ -199,17 +198,6 @@ void* guac_vnc_client_thread(void* data) {
 
     /* Set remaining client data */
     vnc_client->rfb_client = rfb_client;
-
-    /* Set up screen recording, if requested */
-    if (settings->recording_path != NULL) {
-        vnc_client->recording = guac_common_recording_create(client,
-                settings->recording_path,
-                settings->recording_name,
-                settings->create_recording_path,
-                !settings->recording_exclude_output,
-                !settings->recording_exclude_mouse,
-                settings->recording_include_keys);
-    }
 
     /* Create display */
     vnc_client->display = guac_common_display_alloc(client,

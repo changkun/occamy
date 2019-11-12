@@ -23,7 +23,6 @@
 #include "config.h"
 
 #include "common/clipboard.h"
-#include "common/recording.h"
 #include "_ssh.h"
 #include "user.h"
 #include "settings.h"
@@ -88,12 +87,6 @@ typedef struct guac_ssh_client {
      * The terminal which will render all output from the SSH client.
      */
     guac_terminal* term;
-   
-    /**
-     * The in-progress session recording, or NULL if no recording is in
-     * progress.
-     */
-    guac_common_recording* recording;
 
 } guac_ssh_client ;
 

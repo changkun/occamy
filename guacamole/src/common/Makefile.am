@@ -34,7 +34,6 @@ noinst_HEADERS =            \
     common/json.h           \
     common/list.h           \
     common/pointer_cursor.h \
-    common/recording.h      \
     common/rect.h           \
     common/string.h         \
     common/surface.h
@@ -51,7 +50,6 @@ libguac_common_la_SOURCES = \
     json.c                  \
     list.c                  \
     pointer_cursor.c        \
-    recording.c             \
     rect.c                  \
     string.c                \
     surface.c
