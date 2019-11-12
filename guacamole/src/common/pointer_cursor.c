@@ -36,7 +36,6 @@ const int guac_common_pointer_cursor_width  = 11;
 const int guac_common_pointer_cursor_height = 16;
 
 /* Format */
-const cairo_format_t guac_common_pointer_cursor_format = CAIRO_FORMAT_ARGB32;
 const int guac_common_pointer_cursor_stride = 44;
 
 /* Embedded pointer graphic */
@@ -60,37 +59,3 @@ unsigned char guac_common_pointer_cursor[] = {
         _,_,_,_,_,O,O,O,O,_,_
 
 };
-
-void guac_common_set_pointer_cursor(guac_user* user) {
-
-    guac_client* client = user->client;
-    guac_socket* socket = user->socket;
-
-    /* Draw to buffer */
-    guac_layer* cursor = guac_client_alloc_buffer(client);
-
-    cairo_surface_t* graphic = cairo_image_surface_create_for_data(
-            guac_common_pointer_cursor,
-            guac_common_pointer_cursor_format,
-            guac_common_pointer_cursor_width,
-            guac_common_pointer_cursor_height,
-            guac_common_pointer_cursor_stride);
-
-    guac_user_stream_png(user, socket, GUAC_COMP_SRC, cursor,
-            0, 0, graphic);
-    cairo_surface_destroy(graphic);
-
-    /* Set cursor */
-    guac_protocol_send_cursor(socket, 0, 0, cursor,
-            0, 0,
-            guac_common_pointer_cursor_width,
-            guac_common_pointer_cursor_height);
-
-    /* Free buffer */
-    guac_client_free_buffer(client, cursor);
-
-    guac_client_log(client, GUAC_LOG_DEBUG,
-            "Client cursor image set to generic built-in pointer.");
-
-}
-

@@ -18,7 +18,6 @@
  */
 
 #include "config.h"
-#include "common/io.h"
 #include "terminal_typescript.h"
 
 #include <guacamole/timestamp.h>
@@ -108,6 +107,28 @@ static int guac_terminal_typescript_open_data_file(const char* path,
 
 }
 
+int guac_write(int fd, void* buffer, int length) {
+    
+    unsigned char* bytes = (unsigned char*) buffer;
+
+    while (length > 0) {
+
+        /* Attempt write */
+        int bytes_written = write(fd, bytes, length);
+        if (bytes_written < 0)
+            return bytes_written;
+
+        /* Update buffer */
+        length -= bytes_written;
+        bytes += bytes_written;
+
+    }
+
+    /* Success */
+    return length;
+
+}
+
 guac_terminal_typescript* guac_terminal_typescript_alloc(const char* path,
         const char* name, int create_path) {
 
@@ -153,7 +174,7 @@ guac_terminal_typescript* guac_terminal_typescript_alloc(const char* path,
     typescript->last_flush = guac_timestamp_current();
 
     /* Write header */
-    guac_common_write(typescript->data_fd, GUAC_TERMINAL_TYPESCRIPT_HEADER,
+    guac_write(typescript->data_fd, GUAC_TERMINAL_TYPESCRIPT_HEADER,
             sizeof(GUAC_TERMINAL_TYPESCRIPT_HEADER) - 1);
 
     return typescript;
@@ -197,11 +218,11 @@ void guac_terminal_typescript_flush(guac_terminal_typescript* typescript) {
         timestamp_length = sizeof(timestamp_buffer);
 
     /* Write timestamp to timing file */
-    guac_common_write(typescript->timing_fd,
+    guac_write(typescript->timing_fd,
             timestamp_buffer, timestamp_length);
 
     /* Empty buffer into data file */
-    guac_common_write(typescript->data_fd,
+    guac_write(typescript->data_fd,
             typescript->buffer, typescript->length);
 
     /* Buffer is now flushed */
@@ -220,7 +241,7 @@ void guac_terminal_typescript_free(guac_terminal_typescript* typescript) {
     guac_terminal_typescript_flush(typescript);
 
     /* Write footer */
-    guac_common_write(typescript->data_fd, GUAC_TERMINAL_TYPESCRIPT_FOOTER,
+    guac_write(typescript->data_fd, GUAC_TERMINAL_TYPESCRIPT_FOOTER,
             sizeof(GUAC_TERMINAL_TYPESCRIPT_FOOTER) - 1);
 
     /* Close file descriptors */

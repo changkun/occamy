@@ -42,20 +42,8 @@ extern const int guac_common_pointer_cursor_height;
 extern const int guac_common_pointer_cursor_stride;
 
 /**
- * The Cairo grapic format of the mouse cursor graphic.
- */
-extern const cairo_format_t guac_common_pointer_cursor_format;
-
-/**
  * Embedded mouse cursor graphic.
  */
 extern unsigned char guac_common_pointer_cursor[];
-
-/**
- * Set the cursor of the remote display to the embedded cursor graphic.
- *
- * @param user The guac_user to send the cursor to.
- */
-void guac_common_set_pointer_cursor(guac_user* user);
 
 #endif
