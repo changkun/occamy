@@ -21,7 +21,6 @@
 
 #include "error.h"
 #include "socket.h"
-#include "wait-fd.h"
 
 #include <pthread.h>
 #include <stddef.h>
@@ -30,6 +29,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <poll.h>
 
 /**
  * Data associated with an open socket which writes to a file descriptor.
@@ -306,6 +306,24 @@ static ssize_t guac_socket_fd_write_handler(guac_socket* socket,
     pthread_mutex_unlock(&(data->buffer_lock));
 
     return retval;
+
+}
+
+int guac_wait_for_fd(int fd, int usec_timeout) {
+
+    /* Initialize with single underlying file descriptor */
+    struct pollfd fds[1] = {{
+        .fd      = fd,
+        .events  = POLLIN,
+        .revents = 0
+    }};
+
+    /* No timeout if usec_timeout is negative */
+    if (usec_timeout < 0)
+        return poll(fds, 1, -1);
+
+    /* Handle timeout if specified, rounding up to poll()'s granularity */
+    return poll(fds, 1, (usec_timeout + 999) / 1000);
 
 }
 

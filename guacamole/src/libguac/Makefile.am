@@ -67,8 +67,7 @@ noinst_HEADERS =      \
     encode-png.h      \
     palette.h         \
     user-handlers.h   \
-    raw_encoder.h     \
-    wait-fd.h
+    raw_encoder.h
 
 libguac_la_SOURCES =   \
     audio.c            \
@@ -89,8 +88,7 @@ libguac_la_SOURCES =   \
     unicode.c          \
     user.c             \
     user-handlers.c    \
-    user-handshake.c   \
-    wait-fd.c
+    user-handshake.c
 
 libguac_la_CFLAGS = \
     -Werror -Wall -pedantic -I$(srcdir)/guacamole
