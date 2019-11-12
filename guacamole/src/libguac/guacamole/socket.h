@@ -173,55 +173,6 @@ void guac_socket_instruction_end(guac_socket* socket);
 guac_socket* guac_socket_open(int fd);
 
 /**
- * Allocates and initializes a new guac_socket which writes all data via
- * nest instructions to the given existing, open guac_socket. Freeing the
- * returned guac_socket has no effect on the underlying, nested guac_socket.
- *
- * If an error occurs while allocating the guac_socket object, NULL is returned,
- * and guac_error is set appropriately.
- *
- * @param parent The guac_socket this new guac_socket should write nest
- *               instructions to.
- * @param index The stream index to use for the written nest instructions.
- * @return A newly allocated guac_socket object associated with the given
- *         guac_socket and stream index, or NULL if an error occurs while
- *         allocating the guac_socket object.
- */
-guac_socket* guac_socket_nest(guac_socket* parent, int index);
-
-/**
- * Allocates and initializes a new guac_socket which delegates all socket
- * operations to the given primary socket, while simultaneously duplicating all
- * written data to the secondary socket. Freeing the returned guac_socket will
- * free both primary and secondary sockets.
- *
- * Return values (error codes) will come only from the primary socket. Locks
- * (like those used by guac_socket_instruction_begin() and
- * guac_socket_instruction_end()) will affect only the primary socket.
- *
- * If an error occurs while allocating the guac_socket object, NULL is returned,
- * and guac_error is set appropriately.
- *
- * @param primary
- *     The primary guac_socket to which all socket operations should be
- *     delegated. The error codes returned by socket operations, if any, will
- *     always come from this socket. This socket will also be the only socket
- *     locked when instructions begin (or unlocked when instructions end).
- *
- * @param secondary
- *     The secondary guac_socket to which all data written to the primary
- *     guac_socket should be copied. If an error prevents the write from
- *     succeeding, that error will be ignored. Only errors from the primary
- *     guac_socket will be acknowledged.
- *
- * @return
- *     A newly allocated guac_socket object associated with the given primary
- *     and secondary sockets, or NULL if an error occurs while allocating the
- *     guac_socket object.
- */
-guac_socket* guac_socket_tee(guac_socket* primary, guac_socket* secondary);
-
-/**
  * Allocates and initializes a new guac_socket which duplicates all
  * instructions written across the sockets of each connected user of the given
  * guac_client. The returned socket is a write-only socket. Attempts to read

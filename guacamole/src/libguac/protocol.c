@@ -763,24 +763,6 @@ int guac_protocol_send_name(guac_socket* socket, const char* name) {
 
 }
 
-int guac_protocol_send_nest(guac_socket* socket, int index,
-        const char* data) {
-
-    int ret_val;
-
-    guac_socket_instruction_begin(socket);
-    ret_val =
-           guac_socket_write_string(socket, "4.nest,")
-        || __guac_socket_write_length_int(socket, index)
-        || guac_socket_write_string(socket, ",")
-        || __guac_socket_write_length_string(socket, data)
-        || guac_socket_write_string(socket, ";");
-
-    guac_socket_instruction_end(socket);
-    return ret_val;
-
-}
-
 int guac_protocol_send_nop(guac_socket* socket) {
 
     int ret_val;
