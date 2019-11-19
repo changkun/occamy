@@ -146,13 +146,15 @@ func (c *Client) LoadProtocolPlugin(proto string) error {
 }
 
 // ForeachUser ...
-func (c *Client) ForeachUser(callback UserCallback, data interface{}) {
+func (c *Client) ForeachUser(
+	callback func(u *User, data interface{}) interface{},
+	data interface{},
+) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
-
 	u := c.users
 	for u != nil {
 		callback(u, data)
 		u = u.next
 	}
+	c.mu.RUnlock()
 }

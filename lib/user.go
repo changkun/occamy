@@ -61,9 +61,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// UserCallback ...
-type UserCallback func(u *User, data interface{}) interface{}
-
 // User is the representation of a physical connection within a larger logical connection
 // which may be shared. Logical connections are represented by guac_client.
 type User struct {
@@ -219,4 +216,9 @@ func (u *User) HandleConnection(done chan struct{}) {
 	C.guac_protocol_send_disconnect(u.guacUser.socket)
 	C.guac_socket_flush(u.guacUser.socket)
 	close(done)
+}
+
+// Debug logs debug information
+func (u *User) Debug(fotmat string, args ...interface{}) {
+	logrus.Debugf(fmt.Sprintf("[u:%s] %s", u.ID, format), args)
 }
