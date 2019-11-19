@@ -26,11 +26,7 @@ libguacincdir = $(includedir)/guacamole
 
 libguacinc_HEADERS =                  \
     guacamole/audio.h                 \
-    guacamole/audio-fntypes.h         \
-    guacamole/audio-types.h           \
-    guacamole/client-constants.h      \
     guacamole/client.h                \
-    guacamole/client-fntypes.h        \
     guacamole/client-types.h          \
     guacamole/error.h                 \
     guacamole/error-types.h           \

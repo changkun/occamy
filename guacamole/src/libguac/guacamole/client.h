@@ -26,9 +26,7 @@
  * @file client.h
  */
 
-#include "client-fntypes.h"
 #include "client-types.h"
-#include "client-constants.h"
 #include "layer-types.h"
 #include "object-types.h"
 #include "pool-types.h"
@@ -37,11 +35,108 @@
 #include "timestamp-types.h"
 #include "user-fntypes.h"
 #include "user-types.h"
+#include "protocol-types.h"
 
 #include <cairo/cairo.h>
 
 #include <pthread.h>
 #include <stdarg.h>
+
+/**
+ * Handler for freeing up any extra data allocated by the client
+ * implementation.
+ *
+ * @param client
+ *     The client whose extra data should be freed (if any).
+ *
+ * @return
+ *     Zero if the data was successfully freed, non-zero if an error prevents
+ *     the data from being freed.
+ */
+typedef int guac_client_free_handler(guac_client* client);
+
+/**
+ * Handler for logging messages related to a given guac_client instance.
+ *
+ * @param client
+ *     The client related to the message being logged.
+ *
+ * @param level
+ *     The log level at which to log the given message.
+ *
+ * @param format
+ *     A printf-style format string, defining the message to be logged.
+ *
+ * @param args
+ *     The va_list containing the arguments to be used when filling the
+ *     conversion specifiers ("%s", "%i", etc.) within the format string.
+ */
+typedef void guac_client_log_handler(guac_client* client,
+        guac_client_log_level level, const char* format, va_list args);
+
+/**
+ * The entry point of a client plugin which must initialize the given
+ * guac_client. In practice, this function will be called "guac_client_init".
+ *
+ * @param client
+ *     The guac_client that must be initialized.
+ *
+ * @return
+ *     Zero on success, non-zero if initialization fails for any reason.
+ */
+typedef int guac_client_init_handler(guac_client* client);
+
+/**
+ * The maximum number of inbound or outbound streams supported by any one
+ * guac_client.
+ */
+#define GUAC_CLIENT_MAX_STREAMS 64
+
+/**
+ * The index of a closed stream.
+ */
+#define GUAC_CLIENT_CLOSED_STREAM_INDEX -1
+
+/**
+ * The flag set in the mouse button mask when the left mouse button is down.
+ */
+#define GUAC_CLIENT_MOUSE_LEFT 0x01
+
+/**
+ * The flag set in the mouse button mask when the middle mouse button is down.
+ */
+#define GUAC_CLIENT_MOUSE_MIDDLE 0x02
+
+/**
+ * The flag set in the mouse button mask when the right mouse button is down.
+ */
+#define GUAC_CLIENT_MOUSE_RIGHT 0x04
+
+/**
+ * The flag set in the mouse button mask when the mouse scrollwheel is scrolled
+ * up. Note that mouse scrollwheels are actually sets of two buttons. One
+ * button is pressed and released for an upward scroll, and the other is
+ * pressed and released for a downward scroll. Some mice may actually implement
+ * these as separate buttons, not a wheel.
+ */
+#define GUAC_CLIENT_MOUSE_SCROLL_UP 0x08
+
+/**
+ * The flag set in the mouse button mask when the mouse scrollwheel is scrolled
+ * down. Note that mouse scrollwheels are actually sets of two buttons. One
+ * button is pressed and released for an upward scroll, and the other is
+ * pressed and released for a downward scroll. Some mice may actually implement
+ * these as separate buttons, not a wheel.
+ */
+#define GUAC_CLIENT_MOUSE_SCROLL_DOWN 0x10
+
+/**
+ * The minimum number of buffers to create before allowing free'd buffers to
+ * be reclaimed. In the case a protocol rapidly creates, uses, and destroys
+ * buffers, this can prevent unnecessary reuse of the same buffer (which
+ * would make draw operations unnecessarily synchronous).
+ */
+#define GUAC_BUFFER_POOL_INITIAL_SIZE 1024
 
 struct guac_client {
 

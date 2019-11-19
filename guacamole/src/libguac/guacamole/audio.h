@@ -27,10 +27,76 @@
  * @file audio.h
  */
 
-#include "audio-fntypes.h"
-#include "audio-types.h"
 #include "client-types.h"
 #include "stream-types.h"
+#include "user-types.h"
+
+/**
+ * Basic audio stream. PCM data is added to the stream. When the stream is
+ * flushed, a write handler receives PCM data packets and, presumably, streams
+ * them to the guac_stream provided.
+ */
+typedef struct guac_audio_stream guac_audio_stream;
+
+/**
+ * Arbitrary audio codec encoder.
+ */
+typedef struct guac_audio_encoder guac_audio_encoder;
+
+/**
+ * Handler which is called when the audio stream is opened.
+ *
+ * @param audio
+ *     The audio stream being opened.
+ */
+typedef void guac_audio_encoder_begin_handler(guac_audio_stream* audio);
+
+/**
+ * Handler which is called when the audio stream needs to be flushed.
+ *
+ * @param audio
+ *     The audio stream being flushed.
+ */
+typedef void guac_audio_encoder_flush_handler(guac_audio_stream* audio);
+
+/**
+ * Handler which is called when the audio stream is closed.
+ *
+ * @param audio
+ *     The audio stream being closed.
+ */
+typedef void guac_audio_encoder_end_handler(guac_audio_stream* audio);
+
+/**
+ * Handler which is called when a new user has joined the Guacamole
+ * connection associated with the audio stream.
+ *
+ * @param audio
+ *     The audio stream associated with the Guacamole connection being
+ *     joined.
+ *
+ * @param user
+ *     The user that joined the connection.
+ */
+typedef void guac_audio_encoder_join_handler(guac_audio_stream* audio,
+        guac_user* user);
+
+/**
+ * Handler which is called when PCM data is written to the audio stream. The
+ * format of the PCM data is dictated by the properties of the audio stream.
+ *
+ * @param audio
+ *     The audio stream to which data is being written.
+ *
+ * @param pcm_data
+ *     A buffer containing the raw PCM data to be written.
+ *
+ * @param length
+ *     The number of bytes within the buffer that should be written to the
+ *     audio stream.
+ */
+typedef void guac_audio_encoder_write_handler(guac_audio_stream* audio,
+        const unsigned char* pcm_data, int length);
 
 struct guac_audio_encoder {
 
