@@ -18,7 +18,7 @@
  */
 
 #include "config.h"
-#include "common/list.h"
+#include "list.h"
 
 #include <stdlib.h>
 #include <pthread.h>

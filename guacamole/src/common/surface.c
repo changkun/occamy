@@ -18,7 +18,6 @@
  */
 
 #include "config.h"
-#include "common/rect.h"
 #include "common/surface.h"
 
 #include <cairo/cairo.h>
@@ -33,6 +32,86 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <string.h>
+
+/**
+ * Initialize the given rect with the given coordinates and dimensions.
+ *
+ * @param rect The rect to initialize.
+ * @param x The X coordinate of the upper-left corner of the rect.
+ * @param y The Y coordinate of the upper-left corner of the rect.
+ * @param width The width of the rect.
+ * @param height The height of the rect.
+ */
+void guac_common_rect_init(guac_common_rect* rect, int x, int y, int width, int height) {
+    rect->x      = x;
+    rect->y      = y;
+    rect->width  = width;
+    rect->height = height;
+}
+
+/**
+ * Extend the given rect such that it contains at least the specified minimum
+ * rect.
+ *
+ * @param rect The rect to extend.
+ * @param min The minimum area which must be contained within the given rect.
+ */
+void guac_common_rect_extend(guac_common_rect* rect, const guac_common_rect* min) {
+
+    /* Calculate extents of existing dirty rect */
+    int left   = rect->x;
+    int top    = rect->y;
+    int right  = left + rect->width;
+    int bottom = top  + rect->height;
+
+    /* Calculate missing extents of given new rect */
+    int min_left   = min->x;
+    int min_top    = min->y;
+    int min_right  = min_left + min->width;
+    int min_bottom = min_top  + min->height;
+
+    /* Update minimums */
+    if (min_left   < left)   left   = min_left;
+    if (min_top    < top)    top    = min_top;
+    if (min_right  > right)  right  = min_right;
+    if (min_bottom > bottom) bottom = min_bottom;
+
+    /* Commit rect */
+    guac_common_rect_init(rect, left, top, right - left, bottom - top);
+
+}
+
+/**
+ * Collapse the given rect such that it exists only within the given maximum
+ * rect.
+ *
+ * @param rect The rect to extend.
+ * @param max The maximum area in which the given rect can exist.
+ */
+void guac_common_rect_constrain(guac_common_rect* rect, const guac_common_rect* max) {
+
+    /* Calculate extents of existing dirty rect */
+    int left   = rect->x;
+    int top    = rect->y;
+    int right  = left + rect->width;
+    int bottom = top  + rect->height;
+
+    /* Calculate missing extents of given new rect */
+    int max_left   = max->x;
+    int max_top    = max->y;
+    int max_right  = max_left + max->width;
+    int max_bottom = max_top  + max->height;
+
+    /* Update maximums */
+    if (max_left   > left)   left   = max_left;
+    if (max_top    > top)    top    = max_top;
+    if (max_right  < right)  right  = max_right;
+    if (max_bottom < bottom) bottom = max_bottom;
+
+    /* Commit rect */
+    guac_common_rect_init(rect, left, top, right - left, bottom - top);
+
+}
 
 /**
  * The width of an update which should be considered negible and thus
