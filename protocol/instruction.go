@@ -16,7 +16,7 @@ import (
 // MaxInstructionLength is the maximum number of characters per instruction.
 const MaxInstructionLength = 8192
 
-// Errors
+// Errors while parsing instruction
 var (
 	ErrInstructionMissDot   = errors.New("instruction without dot")
 	ErrInstructionMissComma = errors.New("instruction without comma")
@@ -25,12 +25,12 @@ var (
 	ErrInstructionBadRune   = errors.New("instruction with bad rune")
 )
 
-// Instruction ...
+// Instruction is a guacamole instruction
 type Instruction struct {
-	elements []string
+	elements []string // [0] is the opcode of instruction
 }
 
-// NewInstruction ...
+// NewInstruction creates a instruction with given elements
 func NewInstruction(elements []string) *Instruction {
 	return &Instruction{elements}
 }
@@ -121,7 +121,7 @@ func (i Instruction) Args() []string {
 	return i.elements[1:]
 }
 
-// InstructionIO ...
+// InstructionIO implements io.Reader and io.Writer
 type InstructionIO struct {
 	conn   *IO
 	input  *bufio.Reader
