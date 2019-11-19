@@ -56,7 +56,7 @@ func (c *Clipboard) Reset(mimetype string) {
 func (c *Clipboard) Append(data []byte) {
 	c.mu.Lock()
 	if len(c.Buffer) < c.MaxSize {
-		c.Buffer = append(c.Buffer, data[:MaxSize-len(c.Buffer)])
+		c.Buffer = append(c.Buffer, data[:c.MaxSize-len(c.Buffer)]...)
 	}
 	c.mu.Unlock()
 }
