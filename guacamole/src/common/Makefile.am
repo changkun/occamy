@@ -27,8 +27,6 @@ noinst_HEADERS =            \
     common/cursor.h         \
     common/display.h        \
     common/iconv.h          \
-    common/list.h           \
-    common/rect.h           \
     common/surface.h
 
 libguac_common_la_SOURCES = \
@@ -36,8 +34,6 @@ libguac_common_la_SOURCES = \
     cursor.c                \
     display.c               \
     iconv.c                 \
-    list.c                  \
-    rect.c                  \
     surface.c
 
 libguac_common_la_CFLAGS =  \

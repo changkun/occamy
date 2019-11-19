@@ -18,7 +18,7 @@
  */
 
 #include "config.h"
-#include "common/list.h"
+#include "list.h"
 #include "dvc.h"
 #include "rdp.h"
 

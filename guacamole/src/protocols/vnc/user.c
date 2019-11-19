@@ -22,8 +22,6 @@
 #include "clipboard.h"
 #include "input.h"
 #include "common/display.h"
-#include "common/dot_cursor.h"
-#include "common/pointer_cursor.h"
 #include "user.h"
 #include "vnc.h"
 

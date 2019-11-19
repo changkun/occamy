@@ -25,7 +25,7 @@
 #include "audio_input.h"
 #include "common/clipboard.h"
 #include "common/display.h"
-#include "common/list.h"
+#include "list.h"
 #include "common/surface.h"
 #include "keyboard.h"
 #include "rdp_disp.h"

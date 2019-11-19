@@ -21,7 +21,6 @@
 #define __GUAC_COMMON_SURFACE_H
 
 #include "config.h"
-#include "rect.h"
 
 #include <cairo/cairo.h>
 #include <guacamole/client.h>
@@ -30,6 +29,34 @@
 #include <guacamole/socket.h>
 
 #include <pthread.h>
+
+
+/**
+ * Simple representation of a rectangle, having a defined corner and dimensions.
+ */
+typedef struct guac_common_rect {
+
+    /**
+     * The X coordinate of the upper-left corner of this rectangle.
+     */
+    int x;
+
+    /**
+     * The Y coordinate of the upper-left corner of this rectangle.
+     */
+    int y;
+
+    /**
+     * The width of this rectangle.
+     */
+    int width;
+
+    /**
+     * The height of this rectangle.
+     */
+    int height;
+
+} guac_common_rect;
 
 /**
  * The maximum number of updates to allow within the bitmap queue.
