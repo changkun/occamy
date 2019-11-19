@@ -26,10 +26,57 @@
  *
  * @file parser.h
  */
-
-#include "parser-types.h"
-#include "parser-constants.h"
 #include "socket-types.h"
+
+/**
+ * The maximum number of characters per instruction.
+ */
+#define GUAC_INSTRUCTION_MAX_LENGTH 8192
+
+/**
+ * The maximum number of digits to allow per length prefix.
+ */
+#define GUAC_INSTRUCTION_MAX_DIGITS 5
+
+/**
+ * The maximum number of elements per instruction, including the opcode.
+ */
+#define GUAC_INSTRUCTION_MAX_ELEMENTS 128
+
+/**
+ * All possible states of the instruction parser.
+ */
+typedef enum guac_parse_state {
+
+    /**
+     * The parser is currently waiting for data to complete the length prefix
+     * of the current element of the instruction.
+     */
+    GUAC_PARSE_LENGTH,
+
+    /**
+     * The parser has finished reading the length prefix and is currently
+     * waiting for data to complete the content of the instruction.
+     */
+    GUAC_PARSE_CONTENT,
+
+    /**
+     * The instruction has been fully parsed.
+     */
+    GUAC_PARSE_COMPLETE,
+
+    /**
+     * The instruction cannot be parsed because of a protocol error.
+     */
+    GUAC_PARSE_ERROR
+
+} guac_parse_state;
+
+/**
+ * A Guacamole protocol parser, which reads individual instructions, filling
+ * its own internal structure with the most recently read instruction data.
+ */
+typedef struct guac_parser guac_parser;
 
 struct guac_parser {
 
@@ -95,22 +142,6 @@ struct guac_parser {
  *         allocation, in which case guac_error will be set appropriately.
  */
 guac_parser* guac_parser_alloc();
-
-/**
- * Appends data from the given buffer to the given parser. The data will be
- * appended, if possible, to the in-progress instruction as a reference and
- * thus the buffer must remain valid throughout the life of the current
- * instruction. This function may modify the contents of the buffer when those
- * contents are part of an element within the instruction being read.
- *
- * @param parser The parser to append data to.
- * @param buffer A buffer containing data that should be appended to this
- *               parser.
- * @param length The number of bytes available for appending within the buffer.
- * @return The number of bytes appended to this parser, which may be
- *         zero if more data is needed.
- */
-int guac_parser_append(guac_parser* parser, void* buffer, int length);
 
 /**
  * Frees all memory allocated to the given parser.

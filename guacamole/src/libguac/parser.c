@@ -55,6 +55,21 @@ guac_parser* guac_parser_alloc() {
 
 }
 
+
+/**
+ * Appends data from the given buffer to the given parser. The data will be
+ * appended, if possible, to the in-progress instruction as a reference and
+ * thus the buffer must remain valid throughout the life of the current
+ * instruction. This function may modify the contents of the buffer when those
+ * contents are part of an element within the instruction being read.
+ *
+ * @param parser The parser to append data to.
+ * @param buffer A buffer containing data that should be appended to this
+ *               parser.
+ * @param length The number of bytes available for appending within the buffer.
+ * @return The number of bytes appended to this parser, which may be
+ *         zero if more data is needed.
+ */
 int guac_parser_append(guac_parser* parser, void* buffer, int length) {
 
     char* char_buffer = (char*) buffer;
