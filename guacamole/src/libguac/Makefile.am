@@ -40,7 +40,6 @@ libguacinc_HEADERS =                  \
     guacamole/parser-types.h          \
     guacamole/plugin.h                \
     guacamole/pool.h                  \
-    guacamole/pool-types.h            \
     guacamole/protocol.h              \
     guacamole/protocol-types.h        \
     guacamole/socket-constants.h      \

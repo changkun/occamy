@@ -163,26 +163,6 @@ void guac_common_display_dup(guac_common_display* display, guac_user* user,
 void guac_common_display_flush(guac_common_display* display);
 
 /**
- * Allocates a new layer, returning a new wrapped layer and corresponding
- * surface. The layer may be reused from a previous allocation, if that layer
- * has since been freed.
- *
- * @param display
- *     The display to allocate a new layer from.
- *
- * @param width
- *     The width of the layer to allocate, in pixels.
- *
- * @param height
- *     The height of the layer to allocate, in pixels.
- *
- * @return
- *     A newly-allocated layer.
- */
-guac_common_display_layer* guac_common_display_alloc_layer(
-        guac_common_display* display, int width, int height);
-
-/**
  * Allocates a new buffer, returning a new wrapped buffer and corresponding
  * surface. The buffer may be reused from a previous allocation, if that buffer
  * has since been freed.
@@ -201,19 +181,6 @@ guac_common_display_layer* guac_common_display_alloc_layer(
  */
 guac_common_display_layer* guac_common_display_alloc_buffer(
         guac_common_display* display, int width, int height);
-
-/**
- * Frees the given surface and associated layer, returning the layer to the
- * given display for future use.
- *
- * @param display
- *     The display originally allocating the layer.
- *
- * @param display_layer
- *     The layer to free.
- */
-void guac_common_display_free_layer(guac_common_display* display,
-        guac_common_display_layer* display_layer);
 
 /**
  * Frees the given surface and associated buffer, returning the buffer to the
