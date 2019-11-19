@@ -26,4 +26,6 @@ test:
 clean:
 	docker images -f "dangling=true" -q | xargs docker rmi -f
 	docker image prune -f
+	# docker rm $(docker ps -a -q)
+	# docker rmi $(docker images | grep occamy)
 .PHONY: clean
