@@ -266,52 +266,6 @@ int guac_parser_read(guac_parser* parser, guac_socket* socket, int usec_timeout)
 
 }
 
-int guac_parser_expect(guac_parser* parser, guac_socket* socket, int usec_timeout, const char* opcode) {
-
-    /* Read next instruction */
-    if (guac_parser_read(parser, socket, usec_timeout) != 0)
-        return -1;
-
-    /* Validate instruction */
-    if (strcmp(parser->opcode, opcode) != 0) {
-        guac_error = GUAC_STATUS_PROTOCOL_ERROR;
-        guac_error_message = "Instruction read did not have expected opcode";
-        return -1;
-    }
-
-    /* Return non-zero only if valid instruction read */
-    return parser->state != GUAC_PARSE_COMPLETE;
-
-}
-
-int guac_parser_length(guac_parser* parser) {
-
-    char* unparsed_end   = parser->__instructionbuf_unparsed_end;
-    char* unparsed_start = parser->__instructionbuf_unparsed_start;
-
-    return unparsed_end - unparsed_start;
-
-}
-
-int guac_parser_shift(guac_parser* parser, void* buffer, int length) {
-
-    char* copy_end   = parser->__instructionbuf_unparsed_end;
-    char* copy_start = parser->__instructionbuf_unparsed_start;
-
-    /* Contain copy region within length */
-    if (copy_end - copy_start > length)
-        copy_end = copy_start + length;
-
-    /* Copy buffer */
-    length = copy_end - copy_start;
-    memcpy(buffer, copy_start, length);
-
-    parser->__instructionbuf_unparsed_start = copy_end;
-
-    return length;
-
-}
-
 void guac_parser_free(guac_parser* parser) {
     free(parser);
 }

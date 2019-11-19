@@ -113,26 +113,6 @@ guac_parser* guac_parser_alloc();
 int guac_parser_append(guac_parser* parser, void* buffer, int length);
 
 /**
- * Returns the number of unparsed bytes stored in the given parser's internal
- * buffers.
- *
- * @param parser The parser to return the length of.
- * @return The number of unparsed bytes stored in the given parser.
- */
-int guac_parser_length(guac_parser* parser);
-
-/**
- * Removes up to length bytes from internal buffer of unparsed bytes, storing
- * them in the given buffer.
- *
- * @param parser The parser to remove unparsed bytes from.
- * @param buffer The buffer to store the unparsed bytes within.
- * @param length The length of the given buffer.
- * @return The number of bytes stored in the given buffer.
- */
-int guac_parser_shift(guac_parser* parser, void* buffer, int length);
-
-/**
  * Frees all memory allocated to the given parser.
  *
  * @param parser The parser to free.
@@ -162,28 +142,6 @@ void guac_parser_free(guac_parser* parser);
  */
 int guac_parser_read(guac_parser* parser, guac_socket* socket, int usec_timeout);
 
-/**
- * Reads a single instruction from the given guac_socket. This operates
- * identically to guac_parser_read(), except that an error is returned if
- * the expected opcode is not received.
- *
- * If an error occurs reading the instruction, NULL is returned,
- * and guac_error is set appropriately.
- *
- * If the instruction read is not the expected instruction, NULL is returned,
- * and guac_error is set to GUAC_STATUS_BAD_STATE.
- *
- * @param parser The guac_parser to read instruction data from.
- * @param socket The guac_socket connection to use.
- * @param usec_timeout The maximum number of microseconds to wait before
- *                     giving up.
- * @param opcode The opcode of the instruction to read.
- * @return Zero if an instruction with the given opcode was read, non-zero
- *         otherwise. If an instruction was read, but the instruction had a
- *         different opcode, non-zero is returned and guac_error is set to
- *         GUAC_STATUS_BAD_STATE.
- */
-int guac_parser_expect(guac_parser* parser, guac_socket* socket, int usec_timeout, const char* opcode);
 
 #endif
 
