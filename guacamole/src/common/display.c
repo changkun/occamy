@@ -275,27 +275,6 @@ static void guac_common_display_remove_layer(guac_common_display_layer** head,
 
 }
 
-guac_common_display_layer* guac_common_display_alloc_layer(
-        guac_common_display* display, int width, int height) {
-
-    pthread_mutex_lock(&display->_lock);
-
-    /* Allocate Guacamole layer */
-    guac_layer* layer = guac_client_alloc_layer(display->client);
-
-    /* Allocate corresponding surface */
-    guac_common_surface* surface = guac_common_surface_alloc(display->client,
-            display->client->socket, layer, width, height);
-
-    /* Add layer and surface to list */
-    guac_common_display_layer* display_layer =
-        guac_common_display_add_layer(&display->layers, layer, surface);
-
-    pthread_mutex_unlock(&display->_lock);
-    return display_layer;
-
-}
-
 guac_common_display_layer* guac_common_display_alloc_buffer(
         guac_common_display* display, int width, int height) {
 
@@ -317,6 +296,16 @@ guac_common_display_layer* guac_common_display_alloc_buffer(
 
 }
 
+/**
+ * Frees the given surface and associated layer, returning the layer to the
+ * given display for future use.
+ *
+ * @param display
+ *     The display originally allocating the layer.
+ *
+ * @param display_layer
+ *     The layer to free.
+ */
 void guac_common_display_free_layer(guac_common_display* display,
         guac_common_display_layer* display_layer) {
 

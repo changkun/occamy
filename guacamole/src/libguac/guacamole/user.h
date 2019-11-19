@@ -30,7 +30,7 @@
 
 #include "client-types.h"
 #include "layer-types.h"
-#include "pool-types.h"
+#include "pool.h"
 #include "socket-types.h"
 #include "stream-types.h"
 #include "timestamp-types.h"

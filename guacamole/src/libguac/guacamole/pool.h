@@ -27,9 +27,20 @@
  * @file pool.h
  */
 
-#include "pool-types.h"
-
 #include <pthread.h>
+
+/**
+ * Represents a single integer within a larger pool of integers.
+ */
+typedef struct guac_pool_int guac_pool_int;
+
+/**
+ * A pool of integers. Integers can be removed from and later free'd back
+ * into the pool. New integers are returned when the pool is exhausted,
+ * or when the pool has not met some minimum size. Old, free'd integers
+ * are returned otherwise.
+ */
+typedef struct guac_pool guac_pool;
 
 struct guac_pool {
 
