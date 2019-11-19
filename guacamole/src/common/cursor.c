@@ -17,11 +17,7 @@
  * under the License.
  */
 
-#include "common/blank_cursor.h"
-#include "common/dot_cursor.h"
 #include "common/cursor.h"
-#include "common/ibar_cursor.h"
-#include "common/pointer_cursor.h"
 #include "common/surface.h"
 
 #include <cairo/cairo.h>
@@ -34,6 +30,106 @@
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* ------ blank cursor ------ */
+
+/* Dimensions */
+const int guac_common_blank_cursor_width  = 1;
+const int guac_common_blank_cursor_height = 1;
+
+/* Format */
+const int guac_common_blank_cursor_stride = 4;
+
+/* Embedded blank cursor graphic */
+unsigned char guac_common_blank_cursor[] = {
+    0x00,0x00,0x00,0x00
+};
+
+/* ------ dot cursor ------ */
+
+/* Macros for prettying up the embedded image. */
+#define X 0x00,0x00,0x00,0xFF
+#define U 0x80,0x80,0x80,0xFF
+#define O 0xFF,0xFF,0xFF,0xFF
+#define _ 0x00,0x00,0x00,0x00
+
+/* Dimensions */
+const int guac_common_dot_cursor_width  = 5;
+const int guac_common_dot_cursor_height = 5;
+
+/* Format */
+const int guac_common_dot_cursor_stride = 20;
+
+/* Embedded pointer graphic */
+unsigned char guac_common_dot_cursor[] = {
+        _,O,O,O,_,
+        O,X,X,X,O,
+        O,X,X,X,O,
+        O,X,X,X,O,
+        _,O,O,O,_
+};
+
+/* ------ pointer cursor ------ */
+
+/* Dimensions */
+const int guac_common_pointer_cursor_width  = 11;
+const int guac_common_pointer_cursor_height = 16;
+
+/* Format */
+const int guac_common_pointer_cursor_stride = 44;
+
+/* Embedded pointer graphic */
+unsigned char guac_common_pointer_cursor[] = {
+
+        O,_,_,_,_,_,_,_,_,_,_,
+        O,O,_,_,_,_,_,_,_,_,_,
+        O,X,O,_,_,_,_,_,_,_,_,
+        O,X,X,O,_,_,_,_,_,_,_,
+        O,X,X,X,O,_,_,_,_,_,_,
+        O,X,X,X,X,O,_,_,_,_,_,
+        O,X,X,X,X,X,O,_,_,_,_,
+        O,X,X,X,X,X,X,O,_,_,_,
+        O,X,X,X,X,X,X,X,O,_,_,
+        O,X,X,X,X,X,X,X,X,O,_,
+        O,X,X,X,X,X,O,O,O,O,O,
+        O,X,X,O,X,X,O,_,_,_,_,
+        O,X,O,_,O,X,X,O,_,_,_,
+        O,O,_,_,O,X,X,O,_,_,_,
+        O,_,_,_,_,O,X,X,O,_,_,
+        _,_,_,_,_,O,O,O,O,_,_
+
+};
+
+/* ------ ibar cursor ------ */
+
+/* Dimensions */
+const int guac_common_ibar_cursor_width  = 7;
+const int guac_common_ibar_cursor_height = 16;
+
+/* Format */
+const int guac_common_ibar_cursor_stride = 28;
+
+/* Embedded I-bar graphic */
+unsigned char guac_common_ibar_cursor[] = {
+
+        X,X,X,X,X,X,X,
+        X,O,O,U,O,O,X,
+        X,X,X,O,X,X,X,
+        _,_,X,O,X,_,_,
+        _,_,X,O,X,_,_,
+        _,_,X,O,X,_,_,
+        _,_,X,O,X,_,_,
+        _,_,X,O,X,_,_,
+        _,_,X,O,X,_,_,
+        _,_,X,O,X,_,_,
+        _,_,X,O,X,_,_,
+        _,_,X,O,X,_,_,
+        _,_,X,O,X,_,_,
+        X,X,X,O,X,X,X,
+        X,O,O,U,O,O,X,
+        X,X,X,X,X,X,X
+
+};
 
 
 /**

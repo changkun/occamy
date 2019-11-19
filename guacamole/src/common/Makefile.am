@@ -23,28 +23,20 @@ ACLOCAL_AMFLAGS = -I m4
 noinst_LTLIBRARIES = libguac_common.la
 
 noinst_HEADERS =            \
-    common/blank_cursor.h   \
     common/clipboard.h      \
     common/cursor.h         \
     common/display.h        \
-    common/dot_cursor.h     \
-    common/ibar_cursor.h    \
     common/iconv.h          \
     common/list.h           \
-    common/pointer_cursor.h \
     common/rect.h           \
     common/surface.h
 
 libguac_common_la_SOURCES = \
-    blank_cursor.c          \
     clipboard.c             \
     cursor.c                \
     display.c               \
-    dot_cursor.c            \
-    ibar_cursor.c           \
     iconv.c                 \
     list.c                  \
-    pointer_cursor.c        \
     rect.c                  \
     surface.c
 
