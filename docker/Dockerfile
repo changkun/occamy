@@ -56,7 +56,7 @@ ENV GOROOT=/usr/local/go
 ENV GOPATH=/go
 ENV PATH=$GOPATH/bin:$GOROOT/bin:$PATH
 
-COPY . .
+ADD . .
 
 RUN ./guacamole/src/build-libguac.sh /go/src/github.com/changkun/occamy/guacamole
 
