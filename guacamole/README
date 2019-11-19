@@ -22,9 +22,6 @@ the following required dependencies must already be installed:
 
     2) libpng (http://www.libpng.org/pub/png/libpng.html)
 
-    3) OSSP UUID (http://www.ossp.org/pkg/lib/uuid/)
-
-
 ------------------------------------------------------------
  Optional dependencies
 ------------------------------------------------------------

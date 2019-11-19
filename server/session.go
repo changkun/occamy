@@ -20,8 +20,8 @@ import (
 // Session is an occamy proxy session that shares connection
 // within an user group
 type Session struct {
+	ID             string
 	connectedUsers uint64
-	id             string
 	once           sync.Once
 	client         *lib.Client // shared client in a session
 }
@@ -41,11 +41,6 @@ func NewSession(proto string) (*Session, error) {
 		return nil, fmt.Errorf("occamy-lib: session initialization failed with error: %v", err)
 	}
 	return s, nil
-}
-
-// ID reports the session id
-func (s *Session) ID() string {
-	return s.id
 }
 
 // Join adds the given socket as a new user to the given process, automatically
@@ -108,7 +103,7 @@ func (s *Session) initialize(proto string) error {
 	if err != nil {
 		return fmt.Errorf("occamy-lib: load protocol plugin failed: %v", err)
 	}
-	s.id = s.client.Identifier()
+	s.ID = s.client.ID
 	return nil
 }
 

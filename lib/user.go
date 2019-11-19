@@ -7,6 +7,7 @@ package lib
 /*
 #cgo LDFLAGS: -L/usr/local/lib -lguac
 #include <stdlib.h>
+#include "../guacamole/src/libguac/guacamole/parser.h"
 #include "../guacamole/src/libguac/guacamole/user.h"
 #include "../guacamole/src/libguac/guacamole/client.h"
 #include "../guacamole/src/libguac/guacamole/protocol.h"
@@ -60,13 +61,20 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// UserCallback ...
+type UserCallback func(u *User, data interface{}) interface{}
+
 // User is the representation of a physical connection within a larger logical connection
 // which may be shared. Logical connections are represented by guac_client.
 type User struct {
+	ID         string
 	guacUser   *C.struct_guac_user
 	guacClient *C.struct_guac_client
 	info       connectInformation
 	once       sync.Once
+
+	client *Client
+	next   *User // points to next connected user
 }
 
 type connectInformation struct {
@@ -78,8 +86,12 @@ type connectInformation struct {
 
 // NewUser creates a user and associate the user with any specific client
 func NewUser(s *Socket, c *Client, owner bool, jwt *config.JWT) (*User, error) {
-	user := C.guac_user_alloc()
+	id := NewID(prefixUser)
+	uid := C.CString(id)
+
+	user := C.guac_user_alloc(uid)
 	if user == nil {
+		C.free(unsafe.Pointer(uid))
 		return nil, errors.New(errorStatus())
 	}
 	user.socket = s.guacSocket
@@ -92,10 +104,12 @@ func NewUser(s *Socket, c *Client, owner bool, jwt *config.JWT) (*User, error) {
 
 	host, port, err := net.SplitHostPort(jwt.Host)
 	if err != nil {
+		C.free(unsafe.Pointer(uid))
 		return nil, err
 	}
 
 	return &User{
+		ID:         id,
 		guacUser:   user,
 		guacClient: c.guacClient,
 		info: connectInformation{
@@ -104,6 +118,7 @@ func NewUser(s *Socket, c *Client, owner bool, jwt *config.JWT) (*User, error) {
 			Username: jwt.Username,
 			Password: jwt.Password,
 		},
+		client: c,
 	}, nil
 }
 
@@ -112,6 +127,14 @@ func (u *User) Close() {
 	u.once.Do(func() {
 		C.guac_user_free(u.guacUser)
 	})
+}
+
+// isActive checks if a user is still active
+func (u *User) isActive() bool {
+	if u.guacUser.active != 0 {
+		return true
+	}
+	return false
 }
 
 const usecTimeout time.Duration = 15 * time.Millisecond
@@ -172,9 +195,27 @@ func (u *User) HandleConnection(done chan struct{}) {
 	// this should be called only if handshake is success.
 	C.guac_client_add_user(u.guacUser)
 	C.guac_user_input_thread(u.guacUser, C.int(int(usecTimeout))) // block here
+
+	// FIXME: THIS IS A TIGHT CGO CALL LOOP
+	// p := C.guac_parser_alloc()
+	// defer C.guac_parser_free(p)
+	// for u.client.isRunning() && u.isActive() {
+	// 	if int(C.guac_parser_read(p, u.guacUser.socket, C.int(int(usecTimeout)))) != 0 {
+	// 		logrus.Info("Guacamole connection failure.")
+	// 		C.guac_user_stop(u.guacUser)
+	// 		break
+	// 	}
+
+	// 	if C.guac_user_handle_instruction(u.guacUser, p.opcode, p.argc, p.argv) < 0 {
+	// 		logrus.Error("occamy-lib: user connection aborted.")
+	// 		logrus.Error("occamy-lib: Failing instruction handler in user was XXX")
+	// 		C.guac_user_stop(u.guacUser)
+	// 		break
+	// 	}
+	// }
+
 	C.guac_client_remove_user(u.guacClient, u.guacUser)
-	logrus.Infof("User %s disconnected (%d users remain)",
-		C.GoString(u.guacUser.user_id), int(u.guacClient.connected_users))
+	logrus.Infof("User %s disconnected (%d users remain)", u.ID, int(u.guacClient.connected_users))
 	C.guac_protocol_send_disconnect(u.guacUser.socket)
 	C.guac_socket_flush(u.guacUser.socket)
 	close(done)

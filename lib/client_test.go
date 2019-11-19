@@ -25,7 +25,7 @@ func TestNewClient(t *testing.T) {
 		if err != nil {
 			t.FailNow()
 		}
-		if cli.Identifier() == "" {
+		if cli.ID == "" {
 			t.FailNow()
 		}
 	})
