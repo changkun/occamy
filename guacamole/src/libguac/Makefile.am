@@ -35,9 +35,7 @@ libguacinc_HEADERS =                  \
     guacamole/layer-types.h           \
     guacamole/object.h                \
     guacamole/object-types.h          \
-    guacamole/parser-constants.h      \
     guacamole/parser.h                \
-    guacamole/parser-types.h          \
     guacamole/plugin.h                \
     guacamole/pool.h                  \
     guacamole/protocol.h              \
