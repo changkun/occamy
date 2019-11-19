@@ -15,6 +15,7 @@ import (
 	"github.com/changkun/occamy/lib"
 	"github.com/changkun/occamy/protocol"
 	"github.com/gorilla/websocket"
+	"github.com/sirupsen/logrus"
 )
 
 // Session is an occamy proxy session that shares connection
@@ -32,14 +33,17 @@ func NewSession(proto string) (*Session, error) {
 
 	cli, err := lib.NewClient()
 	if err != nil {
-		return nil, fmt.Errorf("occamy-lib: new client error: %v", err)
+		return nil, fmt.Errorf("occamy-lib: new client error: %w", err)
 	}
 
 	s := &Session{client: cli}
-	if err = s.initialize(proto); err != nil {
+	s.client.InitLogLevel(config.Runtime.MaxLogLevel)
+	err = s.client.LoadProtocolPlugin(proto)
+	if err != nil {
 		s.close()
-		return nil, fmt.Errorf("occamy-lib: session initialization failed with error: %v", err)
+		return nil, fmt.Errorf("occamy-lib: load protocol plugin failed: %w", err)
 	}
+	s.ID = s.client.ID
 	return s, nil
 }
 
@@ -97,16 +101,6 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 	return err
 }
 
-func (s *Session) initialize(proto string) error {
-	s.client.InitLogLevel(config.Runtime.MaxLogLevel)
-	err := s.client.LoadProtocolPlugin(proto)
-	if err != nil {
-		return fmt.Errorf("occamy-lib: load protocol plugin failed: %v", err)
-	}
-	s.ID = s.client.ID
-	return nil
-}
-
 // Close closes a session.
 func (s *Session) close() {
 	if atomic.LoadUint64(&s.connectedUsers) > 0 {
@@ -114,6 +108,7 @@ func (s *Session) close() {
 	}
 	s.client.Close()
 }
+
 func (s *Session) serveIO(conn *protocol.InstructionIO, ws *websocket.Conn) (err error) {
 	wg := sync.WaitGroup{}
 	exit := make(chan error, 2)
@@ -131,6 +126,7 @@ func (s *Session) serveIO(conn *protocol.InstructionIO, ws *websocket.Conn) (err
 			}
 		}
 		exit <- err
+		logrus.Info("occamy-proxy: reading from desktop terminated.")
 		wg.Done()
 	}(conn, ws)
 	go func(conn *protocol.InstructionIO, ws *websocket.Conn) {
@@ -146,9 +142,12 @@ func (s *Session) serveIO(conn *protocol.InstructionIO, ws *websocket.Conn) (err
 			}
 		}
 		exit <- err
+		logrus.Info("occamy-proxy: reading from client terminated.")
 		wg.Done()
 	}(conn, ws)
 	err = <-exit
 	conn.Close()
+	wg.Wait()
+	logrus.Info("occamy-proxy: IO goroutines are terminated.")
 	return
 }

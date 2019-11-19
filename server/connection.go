@@ -42,6 +42,7 @@ func Run() {
 // proxy is an occamy proxy that serves all sessions
 // connects to occamy
 type proxy struct {
+	jwtm     *jwt.GinJWTMiddleware
 	sessions map[string]*Session
 	mu       sync.Mutex
 	upgrader *websocket.Upgrader
@@ -52,6 +53,7 @@ func (p *proxy) serve() {
 		Handler: p.routers(),
 		Addr:    fmt.Sprintf("%s", config.Runtime.Address),
 	}
+	done := make(chan struct{})
 	go func() {
 		quit := make(chan os.Signal, 1)
 		signal.Notify(quit, os.Interrupt, os.Kill)
@@ -62,19 +64,40 @@ func (p *proxy) serve() {
 			logrus.Errorf("occamy-proxy: server shutdown with error: %v", err)
 		}
 		cancel()
+		done <- struct{}{}
 	}()
 	logrus.Infof("occamy-proxy: starting at http://%s...", config.Runtime.Address)
 	err := server.ListenAndServe()
 	if err != http.ErrServerClosed {
 		logrus.Errorf("occamy-proxy: close with error: %v", err)
 	}
+	<-done
 	logrus.Info("occamy-proxy: occamy proxy is down, good bye!")
 	return
 }
 
 func (p *proxy) routers() (r *gin.Engine) {
 	r = gin.Default()
+	p.initJWT()
+	if config.Runtime.Client {
+		r.StaticFS("/static", http.Dir("./client/occamy-web/dist"))
+	}
+	v1 := r.Group("/api/v1")
+	v1.GET("/ping", p.Ping)
+	if config.Runtime.Client {
+		v1.POST("/login", p.jwtm.LoginHandler)
+	}
+	auth := v1.Group("/connect")
+	auth.Use(p.jwtm.MiddlewareFunc())
+	auth.GET("", p.serveWS)
+	if gin.Mode() != gin.DebugMode {
+		return
+	}
+	profile(r)
+	return
+}
 
+func (p *proxy) initJWT() {
 	jwtm, err := jwt.New(&jwt.GinJWTMiddleware{
 		Realm:            "occamy-proxy",
 		Key:              []byte(config.Runtime.Auth.JWTSecret),
@@ -90,49 +113,22 @@ func (p *proxy) routers() (r *gin.Engine) {
 			return &conf, nil
 		},
 		PayloadFunc: func(data interface{}) jwt.MapClaims {
-			v, ok := data.(*config.JWT)
-			if !ok {
-				return jwt.MapClaims{}
+			if v, ok := data.(*config.JWT); ok {
+				return jwt.MapClaims{
+					"protocol": v.Protocol,
+					"host":     v.Host,
+					"username": v.Username,
+					"password": v.Password,
+				}
 			}
-			return jwt.MapClaims{
-				"protocol": v.Protocol,
-				"host":     v.Host,
-				"username": v.Username,
-				"password": v.Password,
-			}
+			return jwt.MapClaims{}
 		},
 		TokenLookup: "header: Authorization, query: token, cookie: jwt",
 	})
 	if err != nil {
 		logrus.Fatalf("occamy-proxy: initialize router error: %v", err)
 	}
-	if config.Runtime.Client {
-		r.StaticFS("/static", http.Dir("./client/occamy-web/dist"))
-	}
-	v1 := r.Group("/api/v1")
-	{
-		v1.GET("/ping", func(c *gin.Context) {
-			c.JSON(http.StatusOK, struct {
-				Version   string `json:"version"`
-				BuildTime string `json:"build_time"`
-				GitCommit string `json:"git_commit"`
-			}{
-				Version:   config.Version,
-				GitCommit: config.GitCommit,
-				BuildTime: config.BuildTime,
-			})
-		})
-		if config.Runtime.Client {
-			v1.POST("/login", jwtm.LoginHandler)
-		}
-		auth := v1.Group("/connect")
-		auth.Use(jwtm.MiddlewareFunc())
-		auth.GET("", p.serveWS)
-	}
-	if gin.Mode() == gin.DebugMode {
-		profile(r)
-	}
-	return
+	p.jwtm = jwtm
 }
 
 // profile the standard HandlerFuncs from the net/http/pprof package with
@@ -171,51 +167,4 @@ func profile(r *gin.Engine) {
 		prefixRouter.GET("/mutex", pprofHandler(pprof.Handler("mutex").ServeHTTP))
 		prefixRouter.GET("/threadcreate", pprofHandler(pprof.Handler("threadcreate").ServeHTTP))
 	}
-}
-
-func (p *proxy) serveWS(c *gin.Context) {
-	ws, err := p.upgrader.Upgrade(c.Writer, c.Request, nil)
-	if err != nil {
-		logrus.Errorf("occamy-proxy: upgrade websocket failed: %v", err)
-		c.Writer.Write([]byte(http.StatusText(http.StatusBadRequest)))
-		return
-	}
-
-	claims := jwt.ExtractClaims(c)
-	jwt := &config.JWT{
-		Protocol: claims["protocol"].(string),
-		Host:     claims["host"].(string),
-		Username: claims["username"].(string),
-		Password: claims["password"].(string),
-	}
-	err = p.routeConn(ws, jwt)
-	if err != nil {
-		logrus.Errorf("occamy-proxy: route connection failed: %v", err)
-		ws.WriteMessage(websocket.CloseMessage, []byte(err.Error()))
-	}
-	ws.Close()
-}
-
-func (p *proxy) routeConn(ws *websocket.Conn, jwt *config.JWT) (err error) {
-	p.mu.Lock()
-	sess, ok := p.sessions[jwt.GenerateID()]
-	if ok {
-		err = sess.Join(ws, jwt, false, func() { p.mu.Unlock() })
-		return
-	}
-
-	sess, err = NewSession(jwt.Protocol)
-	if err != nil {
-		p.mu.Unlock()
-		return
-	}
-
-	p.sessions[jwt.GenerateID()] = sess
-	logrus.Infof("occamy-proxy: new session was created: %s", sess.ID)
-	err = sess.Join(ws, jwt, true, func() { p.mu.Unlock() }) // block here
-
-	p.mu.Lock()
-	delete(p.sessions, jwt.GenerateID())
-	p.mu.Unlock()
-	return
 }
