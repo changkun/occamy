@@ -22,7 +22,6 @@
 #include "client.h"
 #include "encode-png.h"
 #include "error.h"
-#include "id.h"
 #include "layer.h"
 #include "pool.h"
 #include "plugin.h"
@@ -125,7 +124,7 @@ void guac_client_free_stream(guac_client* client, guac_stream* stream) {
 
 }
 
-guac_client* guac_client_alloc() {
+guac_client* guac_client_alloc(char* cid) {
 
     int i;
     pthread_rwlockattr_t lock_attributes;
@@ -146,7 +145,7 @@ guac_client* guac_client_alloc() {
     client->last_sent_timestamp = guac_timestamp_current();
 
     /* Generate ID */
-    client->connection_id = guac_generate_id(GUAC_CLIENT_ID_PREFIX);
+    client->connection_id = cid;
     if (client->connection_id == NULL) {
         free(client);
         return NULL;

@@ -35,6 +35,18 @@ import (
 	"unsafe"
 )
 
+// ClientMouse ...
+type ClientMouse int
+
+// ClientMouse constants
+const (
+	ClientMouseLeft       ClientMouse = 0x01
+	ClientMouseMiddle     ClientMouse = 0x02
+	ClientMouseRight      ClientMouse = 0x04
+	ClientMouseScrollUp   ClientMouse = 0x08
+	ClientMouseScrollDown ClientMouse = 0x10
+)
+
 // clientLogLevel All supported log levels used by the logging subsystem of each Guacamole
 // client. With the exception of GUAC_LOG_TRACE, these log levels correspond to
 // a subset of the log levels defined by RFC 5424.
@@ -71,17 +83,32 @@ var clientLogLevelTable = map[string]clientLogLevel{
 
 // Client is a guacamole client container
 type Client struct {
+	ID         string
 	guacClient *C.struct_guac_client
 	once       sync.Once
+
+	users *User // list of all connected users
+	mu    sync.RWMutex
 }
 
 // NewClient creates a new guacamole client
 func NewClient() (*Client, error) {
-	cli := C.guac_client_alloc()
+	id := NewID(prefixClient)
+	cid := C.CString(id)
+	cli := C.guac_client_alloc(cid)
 	if cli == nil {
+		C.free(unsafe.Pointer(cid))
 		return nil, errors.New(errorStatus())
 	}
-	return &Client{guacClient: cli}, nil
+	return &Client{ID: id, guacClient: cli}, nil
+}
+
+// isRunning checks if a client is still running
+func (c *Client) isRunning() bool {
+	if c.guacClient.state == C.GUAC_CLIENT_RUNNING {
+		return true
+	}
+	return false
 }
 
 // Close closes the corresponding guacamole client
@@ -118,8 +145,14 @@ func (c *Client) LoadProtocolPlugin(proto string) error {
 	return nil
 }
 
-// Identifier returns the connection id of a guacamole client. the id will be allocated
-// after calling c.LoadPlugin.
-func (c *Client) Identifier() string {
-	return C.GoString(c.guacClient.connection_id)
+// ForeachUser ...
+func (c *Client) ForeachUser(callback UserCallback, data interface{}) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	u := c.users
+	for u != nil {
+		callback(u, data)
+		u = u.next
+	}
 }

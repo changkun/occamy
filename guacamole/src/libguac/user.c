@@ -21,7 +21,6 @@
 
 #include "client.h"
 #include "encode-png.h"
-#include "id.h"
 #include "object.h"
 #include "pool.h"
 #include "protocol.h"
@@ -36,13 +35,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-guac_user* guac_user_alloc() {
+guac_user* guac_user_alloc(char* uid) {
 
     guac_user* user = calloc(1, sizeof(guac_user));
     int i;
 
     /* Generate ID */
-    user->user_id = guac_generate_id(GUAC_USER_ID_PREFIX);
+    user->user_id = uid;
     if (user->user_id == NULL) {
         free(user);
         return NULL;

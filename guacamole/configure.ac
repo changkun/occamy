@@ -66,22 +66,6 @@ AC_CHECK_LIB([dl], [dlopen],
                             AC_MSG_ERROR("libdl is required on systems which do not otherwise provide dlopen()"),
                             [#include <dlfcn.h>])])
 
-# OSSP UUID
-AC_CHECK_LIB([ossp-uuid], [uuid_make], [UUID_LIBS=-lossp-uuid],
-             AC_CHECK_LIB([uuid], [uuid_make], [UUID_LIBS=-luuid],
-                          AC_MSG_ERROR("The OSSP UUID library is required")))
-
-# Check for and validate OSSP uuid.h header
-AC_CHECK_HEADERS([ossp/uuid.h])
-AC_CHECK_DECL([uuid_make],,
-              AC_MSG_ERROR("No OSSP uuid.h found in include path"),
-              [#ifdef HAVE_OSSP_UUID_H
-               #include <ossp/uuid.h>
-               #else
-               #include <uuid.h>
-               #endif
-               ])
-
 # cunit
 AC_CHECK_LIB([cunit], [CU_run_test], [CUNIT_LIBS=-lcunit])
 
@@ -90,7 +74,6 @@ AC_SUBST(MATH_LIBS)
 AC_SUBST(PNG_LIBS)
 AC_SUBST(CAIRO_LIBS)
 AC_SUBST(PTHREAD_LIBS)
-AC_SUBST(UUID_LIBS)
 AC_SUBST(CUNIT_LIBS)
 
 # Library functions

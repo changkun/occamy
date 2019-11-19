@@ -42,7 +42,6 @@ libguacinc_HEADERS =                  \
     guacamole/parser-constants.h      \
     guacamole/parser.h                \
     guacamole/parser-types.h          \
-    guacamole/plugin-constants.h      \
     guacamole/plugin.h                \
     guacamole/pool.h                  \
     guacamole/pool-types.h            \
@@ -63,7 +62,6 @@ libguacinc_HEADERS =                  \
     guacamole/user-types.h
 
 noinst_HEADERS =      \
-    id.h              \
     encode-png.h      \
     palette.h         \
     user-handlers.h   \
@@ -75,7 +73,6 @@ libguac_la_SOURCES =   \
     encode-png.c       \
     error.c            \
     hash.c             \
-    id.c               \
     palette.c          \
     parser.c           \
     pool.c             \
@@ -100,6 +97,5 @@ libguac_la_LDFLAGS =     \
     @DL_LIBS@            \
     @PNG_LIBS@           \
     @PTHREAD_LIBS@       \
-    @SSL_LIBS@           \
-    @UUID_LIBS@
+    @SSL_LIBS@
 
