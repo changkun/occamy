@@ -52,6 +52,7 @@ static int join_handler_bridge(guac_user* user, int argc, char** argv) {
 import "C"
 import (
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -219,6 +220,6 @@ func (u *User) HandleConnection(done chan struct{}) {
 }
 
 // Debug logs debug information
-func (u *User) Debug(fotmat string, args ...interface{}) {
+func (u *User) Debug(format string, args ...interface{}) {
 	logrus.Debugf(fmt.Sprintf("[u:%s] %s", u.ID, format), args)
 }
