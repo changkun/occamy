@@ -59,6 +59,7 @@ import (
 	"unsafe"
 
 	"github.com/changkun/occamy/config"
+	"github.com/changkun/occamy/protocol"
 	"github.com/sirupsen/logrus"
 )
 
@@ -212,11 +213,44 @@ func (u *User) HandleConnection(done chan struct{}) {
 	// 	}
 	// }
 
+	// FIXME: Go version
+	// p := protocol.NewParser()
+	// for u.client.isRunning() && u.isActive() {
+	// 	raw, err := reader.ReadBytes(byte(';'))
+	// 	if err != nil {
+	// 		break
+	// 	}
+	// 	ins := protocol.Instruction{}
+	// 	err = p.Parse(raw, &ins)
+	// 	if err != nil {
+	// 		break
+	// 	}
+
+	// 	err = u.HandleInstruction(ins)
+	// 	if err != nil {
+	// 		break
+	// 	}
+	// }
+
 	C.guac_client_remove_user(u.guacClient, u.guacUser)
 	logrus.Infof("User %s disconnected (%d users remain)", u.ID, int(u.guacClient.connected_users))
 	C.guac_protocol_send_disconnect(u.guacUser.socket)
 	C.guac_socket_flush(u.guacUser.socket)
 	close(done)
+}
+
+// HandleInstruction calls the appropriate handler defined by the given
+// user for the given instruction. A comparison is made between the
+// instruction opcode and the initial handler lookup table defined in
+// user_handlers.go. The intial handlers will in turn call the user's
+// handler (if defined).
+func (u *User) HandleInstruction(ins *protocol.Instruction) error {
+	handler, ok := instructionHandlers[ins.Opcode()]
+	if !ok {
+		return errors.New("unknown opcode")
+	}
+
+	return handler(u, ins)
 }
 
 // Debug logs debug information
