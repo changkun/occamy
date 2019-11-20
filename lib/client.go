@@ -54,21 +54,21 @@ type clientLogLevel int
 
 const (
 	// ClientLogError represents fatal errors.
-	clientLogError clientLogLevel = C.GUAC_LOG_ERROR
+	clientLogError clientLogLevel = 3
 	// ClientLogWarning represents non-fatal conditions that indicate problems.
-	clientLogWarning clientLogLevel = C.GUAC_LOG_WARNING
+	clientLogWarning clientLogLevel = 4
 	// ClientLogInfo represents informational messages of general interest to users or
 	// administrators.
-	clientLogInfo clientLogLevel = C.GUAC_LOG_INFO
+	clientLogInfo clientLogLevel = 6
 	// ClientLogDebug represents informational messages which can be useful for debugging,
 	// but are otherwise not useful to users or administrators. It is expected that
 	// debug level messages, while verbose, will not negatively affect
 	// performance.
-	clientLogDebug clientLogLevel = C.GUAC_LOG_DEBUG
+	clientLogDebug clientLogLevel = 7
 	// ClientLogTrace represents informational messages which can be useful for debugging,
 	// like GUAC_LOG_DEBUG, but which are so low-level that they may affect
 	// performance.
-	clientLogTrace clientLogLevel = C.GUAC_LOG_TRACE
+	clientLogTrace clientLogLevel = 8
 )
 
 // clientLogLevelTable provides a mapping from configuration string to guacamole
@@ -83,12 +83,22 @@ var clientLogLevelTable = map[string]clientLogLevel{
 
 // Client is a guacamole client container
 type Client struct {
-	ID         string
 	guacClient *C.struct_guac_client
 	once       sync.Once
 
-	users *User // list of all connected users
-	mu    sync.RWMutex
+	poolBuffer     *Pool
+	poolLayer      *Pool
+	poolStream     *Pool
+	outputStreams  []Stream
+	ID             string
+	mu             sync.RWMutex
+	users          *User // list of all connected users
+	owner          *User
+	connectedUsers int64
+	handlerJoin    func()
+	handlerLeave   func()
+	args           []string
+	pluginHandle   interface{}
 }
 
 // NewClient creates a new guacamole client
@@ -145,7 +155,10 @@ func (c *Client) LoadProtocolPlugin(proto string) error {
 	return nil
 }
 
-// ForeachUser ...
+// ForeachUser calls the given function on all currently-connected users
+// of the given client. The function will be given a reference to a
+// lib.User and the specified arbitrary data. The value returned by the
+// callback will be ignored.
 func (c *Client) ForeachUser(
 	callback func(u *User, data interface{}) interface{},
 	data interface{},
@@ -157,4 +170,12 @@ func (c *Client) ForeachUser(
 		u = u.next
 	}
 	c.mu.RUnlock()
+}
+
+// StreamPNG streams the image data of the given surface over an image
+// stream ("img" instruction) as PNG-encoded data. The image stream will
+// be automatically allocated and freed.
+func (c *Client) StreamPNG(s *Socket, mode CompositeMode, layer *Layer, x, y int, surface interface{}) {
+	// stream := NewStreamFromClient(c)
+	// protocol.SendImg(s, stream, mode, layer, "image/png", x, y)
 }
