@@ -134,7 +134,7 @@ func NewClient() (*Client, error) {
 	}
 
 	// initialize streams
-	streams := [64]Streams{}
+	streams := [64]Stream{}
 	for i := 0; i < 64; i++ {
 		streams[i] = Stream{Index: ClientClosedStreamIndex}
 	}
@@ -143,12 +143,12 @@ func NewClient() (*Client, error) {
 		guacClient: cli,
 
 		ID:            id,
-		Socket:        nil, // TODO: Set up socket to broadcast to all users
+		socket:        nil, // TODO: Set up socket to broadcast to all users
 		state:         ClientStateRunning,
 		lastSent:      time.Now(),
-		poolBuffer:    &NewPool(BufferPoolInitialSize),
-		poolLayer:     &NewPool(BufferPoolInitialSize),
-		poolStream:    &NewPool(0),
+		poolBuffer:    NewPool(BufferPoolInitialSize),
+		poolLayer:     NewPool(BufferPoolInitialSize),
+		poolStream:    NewPool(0),
 		outputStreams: streams,
 		args:          []string{},
 	}, nil
