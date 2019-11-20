@@ -8,7 +8,7 @@ services:
     container_name: occamy
     image: occamy:latest
     restart: always
-    working_dir: /go/src/github.com/changkun/occamy
+    working_dir: /occamy
     networks:
       occamy_network:
         ipv4_address: 172.16.238.10
@@ -18,7 +18,7 @@ services:
       - "5636:5636"
     depends_on:
       - vnc
-    command: /go/src/github.com/changkun/occamy/occamyd -conf=./conf.yaml
+    command: /occamy/occamyd -conf=./conf.yaml
 
   vnc:
     # password: vncpassword
