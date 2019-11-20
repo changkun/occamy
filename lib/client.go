@@ -32,6 +32,7 @@ import "C"
 import (
 	"errors"
 	"sync"
+	"time"
 	"unsafe"
 )
 
@@ -47,7 +48,20 @@ const (
 	ClientMouseScrollDown ClientMouse = 0x10
 )
 
-// clientLogLevel All supported log levels used by the logging subsystem of each Guacamole
+// ClientState gives current states of the Occamy client. Currently,
+// the only two states are ClientStateRunning and ClientStateStopping.
+type ClientState int
+
+const (
+	// ClientStateRunning is the state of the client from when it has
+	// been allocated by the main daemon until it is killed or disconnected.
+	ClientStateRunning ClientState = iota
+	// ClientStateStopping is the state of the client when a stop has
+	// been requested, signalling the I/O threads to shutdown.
+	ClientStateStopping
+)
+
+// clientLogLevel All supported log levels used by the logging subsystem of each Occamy
 // client. With the exception of GUAC_LOG_TRACE, these log levels correspond to
 // a subset of the log levels defined by RFC 5424.
 type clientLogLevel int
@@ -86,19 +100,27 @@ type Client struct {
 	guacClient *C.struct_guac_client
 	once       sync.Once
 
-	poolBuffer     *Pool
-	poolLayer      *Pool
-	poolStream     *Pool
-	outputStreams  []Stream
-	ID             string
+	ID            string
+	socket        *Socket
+	state         ClientState
+	data          interface{}
+	lastSent      time.Time
+	poolBuffer    *Pool
+	poolLayer     *Pool
+	poolStream    *Pool
+	outputStreams [64]Stream
+
 	mu             sync.RWMutex
 	users          *User // list of all connected users
 	owner          *User
 	connectedUsers int64
-	handlerJoin    func()
-	handlerLeave   func()
-	args           []string
-	pluginHandle   interface{}
+
+	handlerFree  func()
+	handlerLog   func()
+	handlerJoin  func()
+	handlerLeave func()
+	args         []string
+	pluginHandle interface{}
 }
 
 // NewClient creates a new guacamole client
@@ -110,7 +132,26 @@ func NewClient() (*Client, error) {
 		C.free(unsafe.Pointer(cid))
 		return nil, errors.New(errorStatus())
 	}
-	return &Client{ID: id, guacClient: cli}, nil
+
+	// initialize streams
+	streams := [64]Streams{}
+	for i := 0; i < 64; i++ {
+		streams[i] = Stream{Index: ClientClosedStreamIndex}
+	}
+
+	return &Client{
+		guacClient: cli,
+
+		ID:            id,
+		Socket:        nil, // TODO: Set up socket to broadcast to all users
+		state:         ClientStateRunning,
+		lastSent:      time.Now(),
+		poolBuffer:    &NewPool(BufferPoolInitialSize),
+		poolLayer:     &NewPool(BufferPoolInitialSize),
+		poolStream:    &NewPool(0),
+		outputStreams: streams,
+		args:          []string{},
+	}, nil
 }
 
 // isRunning checks if a client is still running

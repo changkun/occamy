@@ -7,5 +7,4 @@ const (
 	ClientMouseRight      = 0x04
 	ClientMouseScrollUp   = 0x08
 	ClientMouseScrollDown = 0x10
-	BufferPoolInitialSize = 1024
 )
