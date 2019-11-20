@@ -30,13 +30,11 @@ libguacinc_HEADERS =                  \
     guacamole/client-types.h          \
     guacamole/error.h                 \
     guacamole/error-types.h           \
-    guacamole/hash.h                  \
     guacamole/layer.h                 \
     guacamole/layer-types.h           \
     guacamole/object.h                \
     guacamole/object-types.h          \
     guacamole/parser.h                \
-    guacamole/plugin.h                \
     guacamole/pool.h                  \
     guacamole/protocol.h              \
     guacamole/protocol-types.h        \
@@ -50,7 +48,6 @@ libguacinc_HEADERS =                  \
     guacamole/timestamp-types.h       \
     guacamole/unicode.h               \
     guacamole/user.h                  \
-    guacamole/user-constants.h        \
     guacamole/user-fntypes.h          \
     guacamole/user-types.h
 
@@ -65,7 +62,6 @@ libguac_la_SOURCES =   \
     client.c           \
     encode-png.c       \
     error.c            \
-    hash.c             \
     palette.c          \
     parser.c           \
     pool.c             \
