@@ -113,6 +113,14 @@ func (i Instruction) Expect(op string) bool {
 	return i.elements[0] == op
 }
 
+// Opcode returns the opcode of an instruction
+func (i Instruction) Opcode() string {
+	if len(i.elements) < 1 {
+		return ""
+	}
+	return i.elements[0]
+}
+
 // Args returns the arguments of an instruction
 func (i Instruction) Args() []string {
 	if len(i.elements) < 1 {
