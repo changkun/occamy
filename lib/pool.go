@@ -2,6 +2,13 @@ package lib
 
 import "sync"
 
+// BufferPoolInitialSize is the minimum number of buffers to create
+// before allowing free'd buffers to be reclaimed. In the case a
+// protocol rapidly creates, uses, and destroys buffers, this can
+// prevent unnecessary reuse of the same buffer (which would make draw
+// operations unnecessarily synchronous).
+const BufferPoolInitialSize = 1024
+
 // poolInt represents a single integer within a larger pool of integers.
 type poolInt struct {
 	value int
