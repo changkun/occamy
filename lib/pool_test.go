@@ -1,13 +1,13 @@
-package common_test
+package lib_test
 
 import (
 	"testing"
 
-	"github.com/changkun/occamy/common"
+	"github.com/changkun/occamy/lib"
 )
 
 func TestNewPool(t *testing.T) {
-	p := common.NewPool(10)
+	p := lib.NewPool(10)
 
 	for i := 0; i < 100; i++ {
 		ii := p.Next()
