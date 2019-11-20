@@ -32,8 +32,8 @@ type Pool struct {
 }
 
 // NewPool allocates a new guac_pool having the given minimum size.
-func NewPool(size int) Pool {
-	return Pool{minSize: size}
+func NewPool(size int) *Pool {
+	return &Pool{minSize: size}
 }
 
 // Next returns the next available integer from the given guac_pool.
