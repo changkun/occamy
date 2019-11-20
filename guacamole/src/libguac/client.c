@@ -24,7 +24,6 @@
 #include "error.h"
 #include "layer.h"
 #include "pool.h"
-#include "plugin.h"
 #include "protocol.h"
 #include "socket.h"
 #include "stream.h"
@@ -414,8 +413,7 @@ int guac_client_load_plugin(guac_client* client, const char* protocol) {
     void* client_plugin_handle;
 
     /* Pluggable client */
-    char protocol_lib[GUAC_PROTOCOL_LIBRARY_LIMIT] =
-        GUAC_PROTOCOL_LIBRARY_PREFIX;
+    char protocol_lib[sizeof("libguac-client-.so")+254] = "libguac-client-";
 
     /* Type-pun for the sake of dlsym() - cannot typecast a void* to a function
      * pointer otherwise */ 
@@ -425,8 +423,8 @@ int guac_client_load_plugin(guac_client* client, const char* protocol) {
     } alias;
 
     /* Add protocol and .so suffix to protocol_lib */
-    strncat(protocol_lib, protocol, GUAC_PROTOCOL_NAME_LIMIT-1);
-    strcat(protocol_lib, GUAC_PROTOCOL_LIBRARY_SUFFIX);
+    strncat(protocol_lib, protocol, 255);
+    strcat(protocol_lib, ".so");
 
     /* Load client plugin */
     client_plugin_handle = dlopen(protocol_lib, RTLD_LAZY);
