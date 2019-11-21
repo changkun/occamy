@@ -31,11 +31,5 @@
  */
 #define GUAC_SOCKET_OUTPUT_BUFFER_SIZE 8192
 
-/**
- * The number of milliseconds to wait between keep-alive pings on a socket
- * with keep-alive enabled.
- */
-#define GUAC_SOCKET_KEEP_ALIVE_INTERVAL 5000
-
 #endif
 

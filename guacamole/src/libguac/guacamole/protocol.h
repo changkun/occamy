@@ -121,18 +121,6 @@ int guac_protocol_send_mouse(guac_socket* socket, int x, int y,
         int button_mask, guac_timestamp timestamp);
 
 /**
- * Sends a nop instruction (null-operation) over the given guac_socket
- * connection.
- *
- * If an error occurs sending the instruction, a non-zero value is
- * returned, and guac_error is set appropriately.
- *
- * @param socket The guac_socket connection to use.
- * @return Zero on success, non-zero on error.
- */
-int guac_protocol_send_nop(guac_socket* socket);
-
-/**
  * Sends a sync instruction over the given guac_socket connection. The
  * current time in milliseconds should be passed in as the timestamp.
  *

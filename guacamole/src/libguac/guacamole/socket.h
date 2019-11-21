@@ -103,16 +103,6 @@ struct guac_socket {
      */
     int __ready_buf[3];
 
-    /**
-     * Whether automatic keep-alive is enabled.
-     */
-    int __keep_alive_enabled;
-
-    /**
-     * The keep-alive thread.
-     */
-    pthread_t __keep_alive_thread;
-
 };
 
 /**
@@ -131,15 +121,6 @@ guac_socket* guac_socket_alloc();
  */
 void guac_socket_free(guac_socket* socket);
 
-/**
- * Declares that the given socket must automatically send a keep-alive ping
- * to ensure neither side of the socket times out while the socket is open.
- * This ping will take the form of a "nop" instruction.
- *
- * @param socket
- *     The guac_socket to declare as requiring an automatic keep-alive ping.
- */
-void guac_socket_require_keep_alive(guac_socket* socket);
 
 /**
  * Marks the beginning of a Guacamole protocol instruction.
