@@ -59,20 +59,20 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
 		unlock()
-		return fmt.Errorf("occamy-proxy: new socket pair error: %v", err)
+		return fmt.Errorf("occamy-proxy: new socket pair error: %w", err)
 	}
 
 	// 2. create guac socket using fds[0]
 	sock, err := lib.NewSocket(fds[0])
 	if err != nil {
-		return fmt.Errorf("occamy-lib: create guac socket error: %v", err)
+		return fmt.Errorf("occamy-lib: create guac socket error: %w", err)
 	}
 	defer sock.Close()
 
 	// 3. create guac user using created guac socket
 	u, err := lib.NewUser(sock, s.client, owner, jwt)
 	if err != nil {
-		return fmt.Errorf("occamy-lib: create guac user error: %v", err)
+		return fmt.Errorf("occamy-lib: create guac user error: %w", err)
 	}
 	defer u.Close()
 
@@ -84,7 +84,7 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 	err = u.MockHandshake()
 	if err != nil {
 		unlock()
-		return fmt.Errorf("occamy-lib: handle user connection error: %v", err)
+		return fmt.Errorf("occamy-lib: handle user connection error: %w", err)
 	}
 	unlock()
 
