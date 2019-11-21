@@ -63,17 +63,35 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// UserMaxStreams is the character prefix which identifies a user ID.
+const UserMaxStreams = 64
+
+// UserClosedStreamIndex is the maximum number of inbound or
+// outbound streams supported by any one lib.User
+const UserClosedStreamIndex = -1
+
 // User is the representation of a physical connection within a larger logical connection
 // which may be shared. Logical connections are represented by guac_client.
 type User struct {
-	ID         string
 	guacUser   *C.struct_guac_user
 	guacClient *C.struct_guac_client
-	info       connectInformation
 	once       sync.Once
 
-	client *Client
-	next   *User // points to next connected user
+	ID                string
+	owner             bool
+	active            bool
+	lastReceived      time.Time
+	lastFrameDuration time.Duration
+	processingLag     time.Duration
+	info              connectInformation
+	client            *Client
+	sock              *Socket
+	poolStream        *Pool
+	poolObject        *Pool
+	inputStreams      [UserMaxStreams]Stream
+	outputStreams     [UserMaxStreams]Stream
+	prev, next        *User // points to next connected user
+	data              interface{}
 }
 
 type connectInformation struct {
@@ -81,6 +99,13 @@ type connectInformation struct {
 	Port     string
 	Username string
 	Password string
+
+	optimalWidth      int
+	optimalHeight     int
+	optimalResolution int
+	audioMimetypes    []string
+	videoMimetypes    []string
+	imageMimetypes    []string
 }
 
 // NewUser creates a user and associate the user with any specific client
@@ -107,10 +132,29 @@ func NewUser(s *Socket, c *Client, owner bool, jwt *config.JWT) (*User, error) {
 		return nil, err
 	}
 
+	// initialize streams
+	istreams := [UserMaxStreams]Stream{}
+	for i := 0; i < UserMaxStreams; i++ {
+		istreams[i] = Stream{Index: UserClosedStreamIndex}
+	}
+	ostreams := [UserMaxStreams]Stream{}
+	for i := 0; i < UserMaxStreams; i++ {
+		ostreams[i] = Stream{Index: UserClosedStreamIndex}
+	}
+
 	return &User{
-		ID:         id,
 		guacUser:   user,
 		guacClient: c.guacClient,
+
+		ID:                id,
+		owner:             owner,
+		active:            true,
+		lastReceived:      time.Now(),
+		lastFrameDuration: 0,
+		processingLag:     0,
+		poolStream:        NewPool(0),
+		inputStreams:      istreams,
+		outputStreams:     ostreams,
 		info: connectInformation{
 			Host:     host,
 			Port:     port,
@@ -138,7 +182,7 @@ func (u *User) isActive() bool {
 
 const usecTimeout time.Duration = 15 * time.Millisecond
 
-func (u *User) MockHandshake() error {
+func (u *User) Prepare() error {
 	// general args
 	C.set_user_info(u.guacUser)
 

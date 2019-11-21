@@ -3,11 +3,6 @@ package lib
 import "github.com/changkun/occamy/protocol"
 
 const (
-	// UserMaxStreams is the character prefix which identifies a user ID.
-	UserMaxStreams = 64
-	// UserClosedStreamIndex is the maximum number of inbound or
-	// outbound streams supported by any one lib.User
-	UserClosedStreamIndex = -1
 	// UserMaxObjects is the index of a closed stream.
 	UserMaxObjects = 64
 	// UserUndefinedObjectIndex is the index of an object which has not

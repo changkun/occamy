@@ -21,7 +21,21 @@ type Stream struct {
 // automatically assigned if no previously-allocated stream is available
 // for use.
 func NewStreamFromUser(u *User) *Stream {
-	return &Stream{}
+	streamIndex := u.poolStream.Next()
+	s := &u.outputStreams[streamIndex]
+	s.Index = streamIndex * 2
+	s.data = nil
+	s.HandlerAck = nil
+	s.HandlerBlob = nil
+	s.HandlerEnd = nil
+	return s
+}
+
+// FreeToUser Returns the given stream to the pool of available streams,
+// such that it can be reused by any subsequent call to NewStreamFromUser().
+func (s *Stream) FreeToUser(u *User) {
+	u.poolStream.Free(s.Index / 2)
+	s.Index = ClientClosedStreamIndex
 }
 
 // NewStreamFromClient allocates a new stream. An arbitrary index is

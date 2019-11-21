@@ -80,8 +80,8 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 	atomic.AddUint64(&s.connectedUsers, 1)
 	defer atomic.AddUint64(&s.connectedUsers, ^uint64(0))
 
-	// 5. mock handshake
-	err = u.MockHandshake()
+	// 5. preparing connection
+	err = u.Prepare()
 	if err != nil {
 		unlock()
 		return fmt.Errorf("occamy-lib: handle user connection error: %w", err)
