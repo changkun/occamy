@@ -420,18 +420,6 @@ int guac_protocol_send_name(guac_socket* socket, const char* name) {
 
 }
 
-int guac_protocol_send_nop(guac_socket* socket) {
-
-    int ret_val;
-
-    guac_socket_instruction_begin(socket);
-    ret_val = guac_socket_write_string(socket, "3.nop;");
-    guac_socket_instruction_end(socket);
-
-    return ret_val;
-
-}
-
 int guac_protocol_send_pipe(guac_socket* socket, const guac_stream* stream,
         const char* mimetype, const char* name) {
 
