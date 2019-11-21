@@ -34,6 +34,8 @@ import (
 	"sync"
 	"time"
 	"unsafe"
+
+	"github.com/changkun/occamy/plugins"
 )
 
 // ClientMouse ...
@@ -120,7 +122,7 @@ type Client struct {
 	handlerJoin  func()
 	handlerLeave func()
 	args         []string
-	pluginHandle interface{}
+	plugin       plugins.Client
 }
 
 // NewClient creates a new guacamole client
@@ -193,6 +195,12 @@ func (c *Client) LoadProtocolPlugin(proto string) error {
 	if int(C.guac_client_load_plugin(c.guacClient, cproto)) != 0 {
 		return errors.New(errorStatus())
 	}
+
+	plugin, err := plugins.NewPlugin(plugins.SupportedProtocols(proto))
+	if err != nil {
+		return err
+	}
+	c.plugin = plugin
 	return nil
 }
 
