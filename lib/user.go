@@ -53,6 +53,7 @@ import "C"
 import (
 	"errors"
 	"fmt"
+	"image"
 	"net"
 	"sync"
 	"time"
@@ -116,7 +117,7 @@ func NewUser(s *Socket, c *Client, owner bool, jwt *config.JWT) (*User, error) {
 	user := C.guac_user_alloc(uid)
 	if user == nil {
 		C.free(unsafe.Pointer(uid))
-		return nil, errors.New(errorStatus())
+		return nil, errorStatus()
 	}
 	user.socket = s.guacSocket
 	user.client = c.guacClient
@@ -231,56 +232,68 @@ func (u *User) Prepare() error {
 	return nil
 }
 
-// HandleConnection handles all I/O for the portion of a user's Guacamole connection
-// without the handshake process. This function blocks until the connection/user is
-// aborted or the user disconnects.
+// HandleConnection handles all I/O for the portion of a user's Occamy
+// connection without the handshake process. This function blocks until
+// the connection/user is aborted or the user disconnects.
 func (u *User) HandleConnection(done chan struct{}) {
 	// this should be called only if handshake is success.
 	C.guac_client_add_user(u.guacUser)
 	C.guac_user_input_thread(u.guacUser, C.int(int(usecTimeout))) // block here
-
-	// FIXME: THIS IS A TIGHT CGO CALL LOOP
-	// p := C.guac_parser_alloc()
-	// defer C.guac_parser_free(p)
-	// for u.client.isRunning() && u.isActive() {
-	// 	if int(C.guac_parser_read(p, u.guacUser.socket, C.int(int(usecTimeout)))) != 0 {
-	// 		logrus.Info("Guacamole connection failure.")
-	// 		C.guac_user_stop(u.guacUser)
-	// 		break
-	// 	}
-
-	// 	if C.guac_user_handle_instruction(u.guacUser, p.opcode, p.argc, p.argv) < 0 {
-	// 		logrus.Error("occamy-lib: user connection aborted.")
-	// 		logrus.Error("occamy-lib: Failing instruction handler in user was XXX")
-	// 		C.guac_user_stop(u.guacUser)
-	// 		break
-	// 	}
-	// }
-
-	// FIXME: Go version
-	// p := protocol.NewParser()
-	// for u.client.isRunning() && u.isActive() {
-	// 	raw, err := reader.ReadBytes(byte(';'))
-	// 	if err != nil {
-	// 		break
-	// 	}
-	// 	ins := protocol.Instruction{}
-	// 	err = p.Parse(raw, &ins)
-	// 	if err != nil {
-	// 		break
-	// 	}
-
-	// 	err = u.HandleInstruction(ins)
-	// 	if err != nil {
-	// 		break
-	// 	}
-	// }
-
 	C.guac_client_remove_user(u.guacClient, u.guacUser)
 	logrus.Infof("User %s disconnected (%d users remain)", u.ID, int(u.guacClient.connected_users))
 	C.guac_protocol_send_disconnect(u.guacUser.socket)
 	C.guac_socket_flush(u.guacUser.socket)
 	close(done)
+}
+
+// HandleConnectionGo handles all I/O for the portion of a user's Occamy
+// connection without the handshake process. This function blocks until
+// the connection/user is aborted or the user disconnects.
+func (u *User) HandleConnectionGo(done chan error) {
+	// FIXME: Go version, this does not work at the moment
+	p := protocol.NewParser()
+
+	// Occamy user input loop
+	for u.client.isRunning() && u.isActive() {
+		raw, err := u.sock.reader.ReadBytes(byte(';'))
+		if err != nil {
+			if errors.Is(err, Err(statusTimeout)) {
+				u.Debug("User is not responding.")
+				u.Abort(err)
+			} else {
+				if errors.Is(err, Err(statusClosed)) {
+					u.Debug("Occamy connection failure")
+				}
+				u.Stop()
+			}
+			done <- err
+			return
+		}
+		ins := protocol.Instruction{}
+		err = p.Parse(raw, &ins)
+		if err != nil {
+			u.Debug("Parse instruction error: %v", err)
+			done <- err
+			return
+		}
+
+		err = u.HandleInstruction(&ins)
+		if err != nil {
+			u.Debug("User connection aborted.", err)
+			u.Debug("Failing instruction handler in user was %s", ins.Opcode())
+			u.Stop()
+			done <- err
+			return
+		}
+	}
+
+	close(done)
+}
+
+// Stop signals the given user that it must disconnect, or advises
+// cooperating services that the given user is no longer connected.
+func (u *User) Stop() {
+	u.active = false
 }
 
 // HandleInstruction calls the appropriate handler defined by the given
@@ -297,7 +310,24 @@ func (u *User) HandleInstruction(ins *protocol.Instruction) error {
 	return handler(u, ins)
 }
 
+// StreamPNG streams the image data of the given surface over an image
+// stream ("img" instruction) as PNG-encoded data. The image stream will
+// be automatically allocated and freed.
+func (u *User) StreamPNG(mode CompositeMode, layer *Layer, x, y int, img *image.RGBA) {
+	s := NewStreamFromUser(u)
+	u.sock.SendImg(mode, layer, "image/png", x, y)
+	u.sock.WritePNG(s, img)
+	u.sock.SendEnd(s)
+	s.FreeToUser(u)
+}
+
 // Debug logs debug information
 func (u *User) Debug(format string, args ...interface{}) {
 	logrus.Debugf(fmt.Sprintf("[u:%s] %s", u.ID, format), args)
+}
+
+// Abort sends error message to client and stops the connection
+func (u *User) Abort(err error) {
+	u.client.SendError("Aborted. Error: ", err)
+	u.Stop()
 }
