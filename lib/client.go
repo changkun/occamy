@@ -30,7 +30,6 @@ void init_client_log(guac_client* client, int level) {
 */
 import "C"
 import (
-	"errors"
 	"sync"
 	"time"
 	"unsafe"
@@ -132,7 +131,7 @@ func NewClient() (*Client, error) {
 	cli := C.guac_client_alloc(cid)
 	if cli == nil {
 		C.free(unsafe.Pointer(cid))
-		return nil, errors.New(errorStatus())
+		return nil, errorStatus()
 	}
 
 	// initialize streams
@@ -182,6 +181,10 @@ func (c *Client) InitLogLevel(level string) {
 	C.init_client_log(c.guacClient, C.int(maxLevel))
 }
 
+func (c *Client) SendError(format string, err error) {
+
+}
+
 // LoadProtocolPlugin initializes the given guac_client using the initialization routine
 // provided by the plugin corresponding to the named protocol. This will automatically
 // invoke guac_client_init within the plugin for the given protocol.
@@ -193,7 +196,7 @@ func (c *Client) LoadProtocolPlugin(proto string) error {
 	defer C.free(unsafe.Pointer(cproto))
 
 	if int(C.guac_client_load_plugin(c.guacClient, cproto)) != 0 {
-		return errors.New(errorStatus())
+		return errorStatus()
 	}
 
 	plugin, err := plugins.NewPlugin(plugins.SupportedProtocols(proto))

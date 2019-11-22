@@ -17,7 +17,10 @@ void guac_error_reset() {
 }
 */
 import "C"
-import "unsafe"
+import (
+	"errors"
+	"unsafe"
+)
 
 // status defines all consts in guac_status
 type status int
@@ -108,48 +111,53 @@ const (
 	statusWouldBlock
 )
 
-var statusString = map[status]string{
-	statusSuccess:          "Success",
-	statusNoMemory:         "Insufficient memory",
-	statusClosed:           "Closed",
-	statusTimeout:          "Timed out",
-	statusSeeErrno:         "Input/output error",
-	statusIOError:          "Invalid argument",
-	statusInvalidArgument:  "Internal error",
-	statusInternalError:    "UNKNOWN STATUS CODE",
-	statusNoSpace:          "Insufficient space",
-	statusInputTooLarge:    "Input too large",
-	statusResultTooLarge:   "Result too large",
-	statusPermissionDenied: "Permission denied",
-	statusBusy:             "Resource busy",
-	statusNotAvailable:     "Resource not available",
-	statusNotSupported:     "Not supported",
-	statusNotImplemented:   "Not implemented",
-	statusTryAgain:         "Temporary failure",
-	statusProtocolError:    "Protocol violation",
-	statusNotFound:         "Not found",
-	statusCanceled:         "Canceled",
-	statusOutOfRange:       "Value out of range",
-	statusRefused:          "Operation refused",
-	statusTooMany:          "Insufficient resources",
-	statusWouldBlock:       "Operation would block",
+// Err returns a status error given a status
+func Err(status status) error {
+	return statusError[status]
+}
+
+var statusError = map[status]error{
+	statusSuccess:          errors.New("Success"),
+	statusNoMemory:         errors.New("Insufficient memory"),
+	statusClosed:           errors.New("Closed"),
+	statusTimeout:          errors.New("Timed out"),
+	statusSeeErrno:         errors.New("Input/output error"),
+	statusIOError:          errors.New("Invalid argument"),
+	statusInvalidArgument:  errors.New("Internal error"),
+	statusInternalError:    errors.New("UNKNOWN STATUS CODE"),
+	statusNoSpace:          errors.New("Insufficient space"),
+	statusInputTooLarge:    errors.New("Input too large"),
+	statusResultTooLarge:   errors.New("Result too large"),
+	statusPermissionDenied: errors.New("Permission denied"),
+	statusBusy:             errors.New("Resource busy"),
+	statusNotAvailable:     errors.New("Resource not available"),
+	statusNotSupported:     errors.New("Not supported"),
+	statusNotImplemented:   errors.New("Not implemented"),
+	statusTryAgain:         errors.New("Temporary failure"),
+	statusProtocolError:    errors.New("Protocol violation"),
+	statusNotFound:         errors.New("Not found"),
+	statusCanceled:         errors.New("Canceled"),
+	statusOutOfRange:       errors.New("Value out of range"),
+	statusRefused:          errors.New("Operation refused"),
+	statusTooMany:          errors.New("Insufficient resources"),
+	statusWouldBlock:       errors.New("Operation would block"),
 }
 
 // errorStatus reports a message describing the error which occurred during the last
 // function call. If an error occurred, but no message is associated with it,
 // NULL is returned. This value is undefined if no error occurred.
-func errorStatus() string {
+func errorStatus() error {
 	s := status((*(*C.guac_status)(unsafe.Pointer(C.__guac_error()))))
-	val, ok := statusString[s]
+	err, ok := statusError[s]
 	if !ok {
-		return "Invalid status code"
+		return errors.New("Invalid status code")
 	}
-	return val
+	return err
 }
 
 // ResetErrors resets guacamole runtime error
 // and returns the former error message
-func ResetErrors() string {
+func ResetErrors() error {
 	old := errorStatus()
 	C.guac_error_reset()
 	return old
