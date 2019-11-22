@@ -25,7 +25,6 @@
 #include "user.h"
 #include "vnc.h"
 
-#include <guacamole/audio.h>
 #include <guacamole/client.h>
 #include <guacamole/socket.h>
 #include <guacamole/user.h>

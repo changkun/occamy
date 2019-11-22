@@ -19,7 +19,6 @@
 
 #include "config.h"
 
-#include "audio_input.h"
 #include "client.h"
 #include "rdp.h"
 #include "rdp_disp.h"
@@ -29,7 +28,6 @@
 #include <freerdp/cache/cache.h>
 #include <freerdp/channels/channels.h>
 #include <freerdp/freerdp.h>
-#include <guacamole/audio.h>
 #include <guacamole/client.h>
 #include <guacamole/socket.h>
 
@@ -95,14 +93,6 @@ int guac_rdp_client_free_handler(guac_client* client) {
     /* Clean up filesystem, if allocated */
     if (rdp_client->filesystem != NULL)
         guac_rdp_fs_free(rdp_client->filesystem);
-
-    /* Clean up audio stream, if allocated */
-    if (rdp_client->audio != NULL)
-        guac_audio_stream_free(rdp_client->audio);
-
-    /* Clean up audio input buffer, if allocated */
-    if (rdp_client->audio_input != NULL)
-        guac_rdp_audio_buffer_free(rdp_client->audio_input);
 
     /* Free client data */
     guac_common_clipboard_free(rdp_client->clipboard);

@@ -49,7 +49,6 @@ const char* GUAC_RDP_CLIENT_ARGS[] = {
     "dpi",
     "initial-program",
     "color-depth",
-    "disable-audio",
     "enable-printing",
     "printer-name",
     "enable-drive",
@@ -57,7 +56,6 @@ const char* GUAC_RDP_CLIENT_ARGS[] = {
     "drive-path",
     "create-drive-path",
     "console",
-    "console-audio",
     "server-layout",
     "security",
     "ignore-cert",
@@ -80,7 +78,6 @@ const char* GUAC_RDP_CLIENT_ARGS[] = {
     "preconnection-blob",
 
     "resize-method",
-    "enable-audio-input",
     "read-only",
 
 #ifdef HAVE_FREERDP_GATEWAY_SUPPORT
@@ -158,12 +155,6 @@ enum RDP_ARGS_IDX {
     IDX_COLOR_DEPTH,
 
     /**
-     * "true" if audio should be disabled, "false" or blank to leave audio
-     * enabled.
-     */
-    IDX_DISABLE_AUDIO,
-
-    /**
      * "true" if printing should be enabled, "false" or blank otherwise.
      */
     IDX_ENABLE_PRINTING,
@@ -201,12 +192,6 @@ enum RDP_ARGS_IDX {
      * "true" if this session is a console session, "false" or blank otherwise.
      */
     IDX_CONSOLE,
-
-    /**
-     * "true" if audio should be allowed in console sessions, "false" or blank
-     * otherwise.
-     */
-    IDX_CONSOLE_AUDIO,
 
     /**
      * The name of the keymap chosen as the layout of the server. Legal names
@@ -340,12 +325,6 @@ enum RDP_ARGS_IDX {
      * Valid values are blank, "display-update", and "reconnect".
      */
     IDX_RESIZE_METHOD,
-
-    /**
-     * "true" if audio input (microphone) should be enabled for the RDP
-     * connection, "false" or blank otherwise.
-     */
-    IDX_ENABLE_AUDIO_INPUT,
 
     /**
      * "true" if this connection should be read-only (user input should be
@@ -484,11 +463,6 @@ guac_rdp_settings* guac_rdp_parse_args(guac_user* user,
     settings->console =
         guac_user_parse_args_boolean(user, GUAC_RDP_CLIENT_ARGS, argv,
                 IDX_CONSOLE, 0);
-
-    /* Enable/disable console audio */
-    settings->console_audio =
-        guac_user_parse_args_boolean(user, GUAC_RDP_CLIENT_ARGS, argv,
-                IDX_CONSOLE_AUDIO, 0);
 
     /* Ignore SSL/TLS certificate */
     settings->ignore_certificate =
@@ -726,11 +700,6 @@ guac_rdp_settings* guac_rdp_parse_args(guac_user* user,
     }
 #endif
 
-    /* Audio enable/disable */
-    settings->audio_enabled =
-        !guac_user_parse_args_boolean(user, GUAC_RDP_CLIENT_ARGS, argv,
-                IDX_DISABLE_AUDIO, 0);
-
     /* Printing enable/disable */
     settings->printing_enabled =
         guac_user_parse_args_boolean(user, GUAC_RDP_CLIENT_ARGS, argv,
@@ -793,11 +762,6 @@ guac_rdp_settings* guac_rdp_parse_args(guac_user* user,
                 "Defaulting to no resize method.", argv[IDX_RESIZE_METHOD]);
         settings->resize_method = GUAC_RESIZE_NONE;
     }
-
-    /* Audio input enable/disable */
-    settings->enable_audio_input =
-        guac_user_parse_args_boolean(user, GUAC_RDP_CLIENT_ARGS, argv,
-                IDX_ENABLE_AUDIO_INPUT, 0);
 
 #ifdef HAVE_FREERDP_GATEWAY_SUPPORT
     /* Set gateway hostname */
@@ -1062,45 +1026,19 @@ void guac_rdp_push_settings(guac_rdp_settings* guac_settings, freerdp* rdp) {
     /* Console */
 #ifdef LEGACY_RDPSETTINGS
     rdp_settings->console_session = guac_settings->console;
-    rdp_settings->console_audio = guac_settings->console_audio;
 #else
     rdp_settings->ConsoleSession = guac_settings->console;
-    rdp_settings->RemoteConsoleAudio = guac_settings->console_audio;
-#endif
-
-    /* Audio */
-#ifdef LEGACY_RDPSETTINGS
-#ifdef HAVE_RDPSETTINGS_AUDIOPLAYBACK
-    rdp_settings->audio_playback = guac_settings->audio_enabled;
-#endif
-#else
-#ifdef HAVE_RDPSETTINGS_AUDIOPLAYBACK
-    rdp_settings->AudioPlayback = guac_settings->audio_enabled;
-#endif
-#endif
-
-    /* Audio capture */
-#ifdef LEGACY_RDPSETTINGS
-#ifdef HAVE_RDPSETTINGS_AUDIOCAPTURE
-    rdp_settings->audio_capture = guac_settings->enable_audio_input;
-#endif
-#else
-#ifdef HAVE_RDPSETTINGS_AUDIOCAPTURE
-    rdp_settings->AudioCapture = guac_settings->enable_audio_input;
-#endif
 #endif
 
     /* Device redirection */
 #ifdef LEGACY_RDPSETTINGS
 #ifdef HAVE_RDPSETTINGS_DEVICEREDIRECTION
-    rdp_settings->device_redirection =  guac_settings->audio_enabled
-                                     || guac_settings->drive_enabled
+    rdp_settings->device_redirection =  guac_settings->drive_enabled
                                      || guac_settings->printing_enabled;
 #endif
 #else
 #ifdef HAVE_RDPSETTINGS_DEVICEREDIRECTION
-    rdp_settings->DeviceRedirection =  guac_settings->audio_enabled
-                                    || guac_settings->drive_enabled
+    rdp_settings->DeviceRedirection =  guac_settings->drive_enabled
                                     || guac_settings->printing_enabled;
 #endif
 #endif

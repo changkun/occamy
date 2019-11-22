@@ -19,7 +19,6 @@
 
 #include "config.h"
 
-#include "audio_input.h"
 #include "client.h"
 #include "common/cursor.h"
 #include "common/display.h"
@@ -47,7 +46,6 @@
 #include <freerdp/cache/pointer.h>
 #include <freerdp/channels/channels.h>
 #include <freerdp/freerdp.h>
-#include <guacamole/audio.h>
 #include <guacamole/client.h>
 #include <guacamole/protocol.h>
 #include <guacamole/socket.h>
@@ -227,39 +225,11 @@ BOOL rdp_freerdp_pre_connect(freerdp* instance) {
         guac_rdp_disp_load_plugin(instance->context, dvc_list);
 #endif
 
-    /* Load "AUDIO_INPUT" plugin for audio input*/
-    if (settings->enable_audio_input) {
-        rdp_client->audio_input = guac_rdp_audio_buffer_alloc();
-        guac_rdp_audio_load_plugin(instance->context, dvc_list);
-    }
-
     /* Load clipboard plugin */
     if (freerdp_channels_load_plugin(channels, instance->settings,
                 "cliprdr", NULL))
         guac_client_log(client, GUAC_LOG_WARNING,
                 "Failed to load cliprdr plugin. Clipboard will not work.");
-
-    /* If RDPSND/RDPDR required, load them */
-    if (settings->printing_enabled
-        || settings->drive_enabled
-        || settings->audio_enabled) {
-
-        /* Load RDPDR plugin */
-        if (freerdp_channels_load_plugin(channels, instance->settings,
-                    "guacdr", client))
-            guac_client_log(client, GUAC_LOG_WARNING,
-                    "Failed to load guacdr plugin. Drive redirection and "
-                    "printing will not work. Sound MAY not work.");
-
-        /* Load RDPSND plugin */
-        if (freerdp_channels_load_plugin(channels, instance->settings,
-                    "guacsnd", client))
-            guac_client_log(client, GUAC_LOG_WARNING,
-                    "Failed to load guacsnd alongside guacdr plugin. Sound "
-                    "will not work. Drive redirection and printing MAY not "
-                    "work.");
-
-    }
 
     /* Load RAIL plugin if RemoteApp in use */
     if (settings->remote_app != NULL) {
@@ -877,21 +847,6 @@ void* guac_rdp_client_thread(void* data) {
     guac_client* client = (guac_client*) data;
     guac_rdp_client* rdp_client = (guac_rdp_client*) client->data;
     guac_rdp_settings* settings = rdp_client->settings;
-
-    /* If audio enabled, choose an encoder */
-    if (settings->audio_enabled) {
-
-        rdp_client->audio = guac_audio_stream_alloc(client, NULL,
-                GUAC_RDP_AUDIO_RATE,
-                GUAC_RDP_AUDIO_CHANNELS,
-                GUAC_RDP_AUDIO_BPS);
-
-        /* Warn if no audio encoding is available */
-        if (rdp_client->audio == NULL)
-            guac_client_log(client, GUAC_LOG_INFO,
-                    "No available audio encoding. Sound disabled.");
-
-    } /* end if audio enabled */
 
     /* Load filesystem if drive enabled */
     if (settings->drive_enabled) {

@@ -18,7 +18,6 @@ void set_user_info(guac_user* user) {
 	user->info.optimal_width = 1024;
 	user->info.optimal_height = 768;
 	user->info.optimal_resolution = 96;
-	user->info.audio_mimetypes = (const char**) mimetypes;
 	user->info.video_mimetypes = (const char**) mimetypes;
 	user->info.image_mimetypes = (const char**) mimetypes;
 }
@@ -104,7 +103,6 @@ type connectInformation struct {
 	optimalWidth      int
 	optimalHeight     int
 	optimalResolution int
-	audioMimetypes    []string
 	videoMimetypes    []string
 	imageMimetypes    []string
 }

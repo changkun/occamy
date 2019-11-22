@@ -163,11 +163,6 @@ typedef struct guac_rdp_settings {
     int resolution;
 
     /**
-     * Whether audio is enabled.
-     */
-    int audio_enabled;
-
-    /**
      * Whether printing is enabled.
      */
     int printing_enabled;
@@ -203,11 +198,6 @@ typedef struct guac_rdp_settings {
      * Whether this session is a console session.
      */
     int console;
-
-    /**
-     * Whether to allow audio in the console session.
-     */
-    int console_audio;
 
     /**
      * The keymap chosen as the layout of the server.
@@ -340,11 +330,6 @@ typedef struct guac_rdp_settings {
      * The method to apply when the user's display changes size.
      */
     guac_rdp_resize_method resize_method;
-
-    /**
-     * Whether audio input (microphone) is enabled.
-     */
-    int enable_audio_input;
 
 #ifdef HAVE_FREERDP_GATEWAY_SUPPORT
     /**
