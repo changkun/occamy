@@ -29,6 +29,8 @@
 #include "timestamp.h"
 #include "user.h"
 #include "user-handlers.h"
+#include "error.h"
+#include "parser.h"
 
 #include <errno.h>
 #include <limits.h>
@@ -362,3 +364,49 @@ int guac_user_parse_args_boolean(guac_user* user, const char** arg_names,
 
 }
 
+void guac_user_input_thread(guac_user* user, int usec_timeout) {
+    guac_parser* parser = guac_parser_alloc();
+
+    /* Guacamole user input loop */
+    while (user->client->state == GUAC_CLIENT_RUNNING && user->active) {
+
+        /* Read instruction, stop on error */
+        if (guac_parser_read(parser, user->socket, usec_timeout)) {
+
+            if (guac_error == GUAC_STATUS_TIMEOUT)
+                guac_user_abort(user, GUAC_PROTOCOL_STATUS_CLIENT_TIMEOUT, "User is not responding.");
+
+            else {
+                if (guac_error != GUAC_STATUS_CLOSED)
+                    guac_user_log(user, GUAC_LOG_WARNING,
+                            "Guacamole connection failure");
+                guac_user_stop(user);
+            }
+            guac_parser_free(parser);
+            return;
+        }
+
+        /* Reset guac_error and guac_error_message (user/client handlers are not
+         * guaranteed to set these) */
+        guac_error = GUAC_STATUS_SUCCESS;
+        guac_error_message = NULL;
+
+        /* Call handler, stop on error */
+        if (guac_user_handle_instruction(user, parser->opcode, parser->argc, parser->argv) < 0) {
+
+            /* Log error */
+            guac_user_log(user, GUAC_LOG_WARNING,
+                    "User connection aborted");
+
+            /* Log handler details */
+            guac_user_log(user, GUAC_LOG_DEBUG, "Failing instruction handler in user was \"%s\"", parser->opcode);
+
+            guac_user_stop(user);
+            guac_parser_free(parser);
+            return;
+        }
+
+    }
+    guac_parser_free(parser);
+    return;
+}

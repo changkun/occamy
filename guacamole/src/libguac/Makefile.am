@@ -73,8 +73,7 @@ libguac_la_SOURCES =   \
     timestamp.c        \
     unicode.c          \
     user.c             \
-    user-handlers.c    \
-    user-handshake.c
+    user-handlers.c
 
 libguac_la_CFLAGS = \
     -Werror -Wall -pedantic -I$(srcdir)/guacamole
