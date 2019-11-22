@@ -49,19 +49,6 @@ const (
 	ClientMouseScrollDown ClientMouse = 0x10
 )
 
-// ClientState gives current states of the Occamy client. Currently,
-// the only two states are ClientStateRunning and ClientStateStopping.
-type ClientState int
-
-const (
-	// ClientStateRunning is the state of the client from when it has
-	// been allocated by the main daemon until it is killed or disconnected.
-	ClientStateRunning ClientState = iota
-	// ClientStateStopping is the state of the client when a stop has
-	// been requested, signalling the I/O threads to shutdown.
-	ClientStateStopping
-)
-
 // clientLogLevel All supported log levels used by the logging subsystem of each Occamy
 // client. With the exception of GUAC_LOG_TRACE, these log levels correspond to
 // a subset of the log levels defined by RFC 5424.
@@ -103,7 +90,7 @@ type Client struct {
 
 	ID            string
 	socket        *Socket
-	state         ClientState
+	running       bool
 	data          interface{}
 	lastSent      time.Time
 	poolBuffer    *Pool
@@ -145,7 +132,7 @@ func NewClient() (*Client, error) {
 
 		ID:            id,
 		socket:        nil, // TODO: Set up socket to broadcast to all users
-		state:         ClientStateRunning,
+		running:       true,
 		lastSent:      time.Now(),
 		poolBuffer:    NewPool(BufferPoolInitialSize),
 		poolLayer:     NewPool(BufferPoolInitialSize),
