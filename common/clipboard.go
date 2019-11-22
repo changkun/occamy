@@ -36,16 +36,6 @@ func NewClipboard(size int) *Clipboard {
 	return &Clipboard{MaxSize: size}
 }
 
-// Send sends the contents of the clipboard along the given client,
-// splitting the contents as necessary.
-func (c *Clipboard) Send(client *lib.Client) {
-	c.mu.Lock()
-	logrus.Debug("Broadcasting clipboard to all connected users.")
-	client.ForEachUser(sendUserClipboard, c)
-	logrus.Debug("Broadcast of clipboard complete.")
-	c.mu.Unlock()
-}
-
 // Reset clears the clipboard contents and assigns a new mimetype for
 // future data.
 func (c *Clipboard) Reset(mimetype string) {
@@ -65,10 +55,44 @@ func (c *Clipboard) Append(data []byte) {
 	c.mu.Unlock()
 }
 
-// Callback for u.ForEach() which sends clipboard data to each connected
-// client.
-func sendUserClipboard(u *lib.User, data interface{}) {
-	// TODO: need implement GuacStream
-	// clipboard := data.(*Clipboard)
-	// current := clipboard.Buffer
+// Send sends the contents of the clipboard along the given client,
+// splitting the contents as necessary.
+func (c *Clipboard) Send(cli *lib.Client) {
+	c.mu.Lock()
+	logrus.Debug("Broadcasting clipboard to call all connected users.")
+	cli.ForeachUser(sendFunc, c)
+	logrus.Debug("Broadcast of clipboard complete.")
+	c.mu.Unlock()
+}
+
+func sendFunc(u *User, data interface{}) interface{} {
+	clipboard := data.(*Clipboard)
+
+	buf := clipboard.Buffer
+	remaining := len(current)
+	stream := NewStreamFromUser(u)
+
+	u.sock.SendClipboard(stream, clipboard.Mimetype)
+	logrus.Debugf("Created stream %i for %s clipboard data.", stream.Index, clipboard.Mimetype)
+
+	// split clipboard into chunks
+	for remaining > 0 {
+
+		// calculate size of next block
+		blockSize := ClipboardBlockSize
+		if remaining < blockSize {
+			blockSize = remaining
+		}
+
+		// send block
+		u.sock.SendBlob(stream, buf[:blockSize])
+		logrus.Debugf("Sent %i bytes of clipboard data on stream %i.", blockSize, stream.Index)
+
+		remaining -= blockSize
+		buf = buf[blockSize:]
+	}
+
+	logrus.Debugf("Clipboard stream %i complete.", stream.Index)
+	u.sock.SendEnd(stream)
+	u.Free(stream)
 }
