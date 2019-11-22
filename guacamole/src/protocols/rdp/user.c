@@ -19,7 +19,6 @@
 
 #include "config.h"
 
-#include "audio_input.h"
 #include "common/display.h"
 #include "input.h"
 #include "user.h"
@@ -28,7 +27,6 @@
 #include "rdp_stream.h"
 #include "rdp_svc.h"
 
-#include <guacamole/audio.h>
 #include <guacamole/client.h>
 #include <guacamole/protocol.h>
 #include <guacamole/socket.h>
@@ -68,18 +66,10 @@ int guac_rdp_user_join_handler(guac_user* user, int argc, char** argv) {
             return 1;
         }
 
-        /* Handle inbound audio streams if audio input is enabled */
-        if (settings->enable_audio_input)
-            user->audio_handler = guac_rdp_audio_handler;
-
     }
 
     /* If not owner, synchronize with current state */
     else {
-
-        /* Synchronize any audio stream */
-        if (rdp_client->audio)
-            guac_audio_stream_add_user(rdp_client->audio, user);
 
         /* Bring user up to date with any registered static channels */
         guac_rdp_svc_send_pipes(user);

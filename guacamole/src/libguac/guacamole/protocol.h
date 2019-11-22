@@ -187,27 +187,6 @@ int guac_protocol_send_filesystem(guac_socket* socket,
 /* MEDIA INSTRUCTIONS */
 
 /**
- * Sends an audio instruction over the given guac_socket connection.
- *
- * If an error occurs sending the instruction, a non-zero value is
- * returned, and guac_error is set appropriately.
- *
- * @param socket
- *     The guac_socket connection to use when sending the audio instruction.
- *
- * @param stream
- *     The stream to use for future audio data.
- *
- * @param mimetype
- *     The mimetype of the audio data which will be sent over the given stream.
- *
- * @return
- *     Zero on success, non-zero on error.
- */
-int guac_protocol_send_audio(guac_socket* socket, const guac_stream* stream,
-        const char* mimetype);
-
-/**
  * Sends a file instruction over the given guac_socket connection.
  *
  * If an error occurs sending the instruction, a non-zero value is

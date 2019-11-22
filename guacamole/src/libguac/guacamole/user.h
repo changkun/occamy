@@ -95,12 +95,6 @@ struct guac_user_info {
     int optimal_height;
 
     /**
-     * NULL-terminated array of client-supported audio mimetypes. If the client
-     * does not support audio at all, this will be NULL.
-     */
-    const char** audio_mimetypes;
-
-    /**
      * NULL-terminated array of client-supported video mimetypes. If the client
      * does not support video at all, this will be NULL.
      */
@@ -485,28 +479,6 @@ struct guac_user {
      * @endcode
      */
     guac_user_put_handler* put_handler;
-
-    /**
-     * Handler for audio events sent by the Guacamole web-client. This handler
-     * will be called whenever the web-client wishes to send a continuous
-     * stream of audio data from some arbitrary source (a microphone, for
-     * example).
-     *
-     * The handler takes a guac_stream, which contains the stream index and
-     * will persist through the duration of the transfer, and the mimetype
-     * of the data being transferred.
-     *
-     * Example:
-     * @code
-     *     int audio_handler(guac_user* user, guac_stream* stream,
-     *             char* mimetype);
-     *
-     *     int guac_user_init(guac_user* user, int argc, char** argv) {
-     *         user->audio_handler = audio_handler;
-     *     }
-     * @endcode
-     */
-    guac_user_audio_handler* audio_handler;
 
 };
 

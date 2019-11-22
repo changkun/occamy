@@ -33,7 +33,6 @@ var instructionHandlers = map[string]func(u *User, ins *protocol.Instruction) er
 	"end":        handleEnd,
 	"get":        handleGet,
 	"put":        handlePut,
-	"audio":      handleAudio,
 }
 
 func handleSync(u *User, ins *protocol.Instruction) error {
@@ -97,10 +96,6 @@ func handleGet(u *User, ins *protocol.Instruction) error {
 }
 
 func handlePut(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-func handleAudio(u *User, ins *protocol.Instruction) error {
 	// TODO:
 	return nil
 }

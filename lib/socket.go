@@ -92,7 +92,6 @@ func (s *Socket) Write(buf []byte) error {
 }
 
 func (s *Socket) SendAck()                                                    {}
-func (s *Socket) SendAudio()                                                  {}
 func (s *Socket) SendBolb()                                                   {}
 func (s *Socket) SendBody()                                                   {}
 func (s *Socket) SendCfill()                                                  {}

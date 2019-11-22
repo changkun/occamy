@@ -22,7 +22,6 @@
 
 #include "config.h"
 
-#include "audio_input.h"
 #include "common/clipboard.h"
 #include "common/display.h"
 #include "list.h"
@@ -35,7 +34,6 @@
 
 #include <freerdp/freerdp.h>
 #include <freerdp/codec/color.h>
-#include <guacamole/audio.h>
 #include <guacamole/client.h>
 
 #include <pthread.h>
@@ -99,16 +97,6 @@ typedef struct guac_rdp_client {
      * CB_FORMAT_TEXT.
      */
     int requested_clipboard_format;
-
-    /**
-     * Audio output, if any.
-     */
-    guac_audio_stream* audio;
-
-    /**
-     * Audio input buffer, if audio input is enabled.
-     */
-    guac_rdp_audio_buffer* audio_input;
 
     /**
      * The filesystem being shared, if any.

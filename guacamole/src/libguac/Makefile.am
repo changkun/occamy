@@ -25,7 +25,6 @@ lib_LTLIBRARIES = libguac.la
 libguacincdir = $(includedir)/guacamole
 
 libguacinc_HEADERS =                  \
-    guacamole/audio.h                 \
     guacamole/client.h                \
     guacamole/client-types.h          \
     guacamole/error.h                 \
@@ -54,11 +53,9 @@ libguacinc_HEADERS =                  \
 noinst_HEADERS =      \
     encode-png.h      \
     palette.h         \
-    user-handlers.h   \
-    raw_encoder.h
+    user-handlers.h
 
 libguac_la_SOURCES =   \
-    audio.c            \
     client.c           \
     encode-png.c       \
     error.c            \
@@ -66,7 +63,6 @@ libguac_la_SOURCES =   \
     parser.c           \
     pool.c             \
     protocol.c         \
-    raw_encoder.c      \
     socket.c           \
     socket-broadcast.c \
     socket-fd.c        \
