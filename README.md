@@ -6,62 +6,85 @@
 [![Build Status](https://github.com/changkun/occamy/workflows/Builds/badge.svg)](https://github.com/changkun/occamy/actions)
 [![Go Report Card](https://goreportcard.com/badge/github.com/changkun/occamy)](https://goreportcard.com/report/github.com/changkun/occamy)
 
-Occamy is a modern remote desktop proxy written in Go.
+Occamy is an open source protocol and proxy for modern remote desktop control that written in Go.
 
-## Why Occamy and how it works?
+## To start using Occamy
 
-Occamy implements a generic remote desktop protocol with a modern approach, i.e. Go. 
-It currently performs [Guacamole](https://guacamole.apache.org/) protocol and eventually 
-intends to redesign and propose Occamy protocol.
+### Build
 
-The benefits of Occamy that differ from Guacamole are:
+Occamy support deployment with Docker or container orchestration tool, e.g. K8s. 
+To build Occamy, you need:
 
-- Authentication supports
-- Simplified architecture
-- Modern with Go
+```
+git clone https://github.com/changkun/occamy.git
+cd occamy
+make build
+```
 
-Occamy server side currently simplifies Guacamole proxy and Guacamole servlet client 
-in a single middleware application. Any client that involves Guacamole protocol and 
-uses WebSocket for authentication can directly switch to interact to Occamy 
-without any changes.
+Then you should be able to run occamy with:
 
-Read more details in [docs](./docs/README.md).
+```
+docker run -itd occamy:latest
+```
 
-## Demo
+### APIs
+
+Occamy offers two APIs:
+
+- `/api/v1/login` distributes JWT tokens for authentication and
+- `/api/v1/connect` is used for WebSocket based Occamy connection.
+
+If you build Occamy with web client, you can also access `/static` for web client demo.
+
+### Demo
+
+To run a demo, you need build an occamy client first:
+
+```
+cd client/occamy-web
+npm install && npm run build
+```
+
+With docker-compose, you should be able to run a working demo with:
+
+```
+make build
+make run
+make stop
+```
+
+Here is a working video demo:
 
 <div align="center">
   <a href="https://youtu.be/e24WHo4Kpx8"><img src="https://img.youtube.com/vi/e24WHo4Kpx8/0.jpg" alt="IMAGE ALT TEXT"></a>
 </div>
 
-## Routers
-
-Occamy offers two APIs `/api/v1/login`, 
-which distribute JWT tokens for authentication and `/api/v1/connect` 
-for WebSocket based Guacamole connection. 
-These two APIs are simple enough to serve all users.
-
-If you build Occamy with web client, you can also access `/static` for web client demo.
-
 ## Contributing
 
-Easiest way to contribute is to provide feedback! We would love to hear what you like and what you think is missing. PRs are welcome. Please follow the given PR template before you send your pull request.
+Easiest way to contribute is to provide feedback! We would love to hear 
+what you like and what you think is missing. PRs are welcome. 
+Please follow the given PR template before you send your pull request.
 
-## Development
+## Why Occamy and how it works?
 
-- Build web client if you need:
+Occamy implements a generic remote desktop protocol with modern approaches. 
+It currently performs [Guacamole](https://guacamole.apache.org/) protocol 
+and eventually intends to redesign and propose Occamy protocol.
 
-    ```
-    cd client/occamy-web
-    npm install && npm run build
-    ```
+The benefits of Occamy that differ from Guacamole are:
 
-- Build Occamy docker image:
+- Authentication supports
+- Simplified architecture
+- Streaming compression and optimization
+- Modern with Go
 
-    ```
-    make build
-    make run
-    make stop
-    ```
+Occamy server side currently simplifies Guacamole proxy and 
+Guacamole servlet client in a single middleware application. 
+Any client that involves Guacamole protocol and uses WebSocket 
+for authentication can directly switch to interact to Occamy 
+without any changes.
+
+Read more details in [docs](./docs/README.md).
 
 ## License
 
