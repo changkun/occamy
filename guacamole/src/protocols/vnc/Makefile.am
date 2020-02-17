@@ -23,7 +23,6 @@ ACLOCAL_AMFLAGS = -I m4
 lib_LTLIBRARIES = libguac-client-vnc.la
 
 libguac_client_vnc_la_SOURCES = \
-    auth.c                      \
     client.c                    \
     clipboard.c                 \
     cursor.c                    \
@@ -35,7 +34,6 @@ libguac_client_vnc_la_SOURCES = \
     vnc.c
     
 noinst_HEADERS =      \
-    auth.h            \
     client.h          \
     clipboard.h       \
     cursor.h          \
