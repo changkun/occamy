@@ -44,6 +44,41 @@
 #include <stdio.h>
 #include <syslog.h>
 
+/**
+ * The maximum duration of a frame in milliseconds.
+ */
+#define GUAC_VNC_FRAME_DURATION 40
+
+/**
+ * The amount of time to allow per message read within a frame, in
+ * milliseconds. If the server is silent for at least this amount of time, the
+ * frame will be considered finished.
+ */
+#define GUAC_VNC_FRAME_TIMEOUT 0
+
+/**
+ * The amount of time to wait for a new message from the VNC server when
+ * beginning a new frame. This value must be kept reasonably small such that
+ * a slow VNC server will not prevent external events from being handled (such
+ * as the stop signal from guac_client_stop()), but large enough that the
+ * message handling loop does not eat up CPU spinning.
+ */
+#define GUAC_VNC_FRAME_START_TIMEOUT 1000000
+
+/**
+ * The number of milliseconds to wait between connection attempts.
+ */
+#define GUAC_VNC_CONNECT_INTERVAL 1000
+
+/**
+ * The maximum number of bytes to allow within the clipboard.
+ */
+#define GUAC_VNC_CLIPBOARD_MAX_LENGTH 262144
+
+/**
+ * Key which can be used with the rfbClientGetClientData function to return
+ * the associated guac_client.
+ */
 char* GUAC_VNC_CLIENT_KEY = "GUAC_VNC";
 
 /**
@@ -134,110 +169,6 @@ int guac_vnc_clipboard_handler(guac_user* user, guac_stream* stream,
 
     return 0;
 }
-
-int guac_vnc_user_join_handler(guac_user* user, int argc, char** argv) {
-
-    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
-
-    /* Parse provided arguments */
-    guac_vnc_settings* settings = guac_vnc_parse_args(user,
-            argc, (const char**) argv);
-
-    /* Fail if settings cannot be parsed */
-    if (settings == NULL) {
-        guac_user_log(user, GUAC_LOG_INFO,
-                "Badly formatted client arguments.");
-        return 1;
-    }
-
-    /* Store settings at user level */
-    user->data = settings;
-
-    /* Connect via VNC if owner */
-    if (user->owner) {
-
-        /* Store owner's settings at client level */
-        vnc_client->settings = settings;
-
-        /* Start client thread */
-        if (pthread_create(&vnc_client->client_thread, NULL, guac_vnc_client_thread, user->client)) {
-            guac_user_log(user, GUAC_LOG_ERROR, "Unable to start VNC client thread.");
-            return 1;
-        }
-
-    }
-
-    /* If not owner, synchronize with current state */
-    else {
-        /* Synchronize with current display */
-        // FIXME: occamy: this is a temporal solution.
-        // If two users race on same connection, the client->display is
-        // a NULL pointer, which can cause segment fault.
-        // see bug report: https://issues.apache.org/jira/browse/GUACAMOLE-898
-        if (vnc_client->display != NULL) {
-            guac_common_display_dup(vnc_client->display, user, user->socket);
-        }
-        guac_socket_flush(user->socket);
-
-    }
-
-    /* Only handle events if not read-only */
-    if (!settings->read_only) {
-
-        /* General mouse/keyboard/clipboard events */
-        user->mouse_handler     = guac_vnc_user_mouse_handler;
-        user->key_handler       = guac_vnc_user_key_handler;
-        user->clipboard_handler = guac_vnc_clipboard_handler;
-
-    }
-
-    return 0;
-
-}
-
-int guac_vnc_user_leave_handler(guac_user* user) {
-
-    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
-
-    if (vnc_client->display) {
-        /* Update shared cursor state */
-        guac_common_cursor_remove_user(vnc_client->display->cursor, user);
-    }
-
-    /* Free settings if not owner (owner settings will be freed with client) */
-    if (!user->owner) {
-        guac_vnc_settings* settings = (guac_vnc_settings*) user->data;
-        guac_vnc_settings_free(settings);
-    }
-
-    return 0;
-}
-
-/* Client plugin arguments */
-const char* GUAC_VNC_CLIENT_ARGS[] = {
-    "hostname",
-    "port",
-    "read-only",
-    "encodings",
-    "password",
-    "swap-red-blue",
-    "color-depth",
-    "cursor",
-    "autoretry",
-    "clipboard-encoding",
-
-#ifdef ENABLE_VNC_REPEATER
-    "dest-host",
-    "dest-port",
-#endif
-
-#ifdef ENABLE_VNC_LISTEN
-    "reverse-connect",
-    "listen-timeout",
-#endif
-
-    NULL
-};
 
 enum VNC_ARGS_IDX {
 
@@ -332,6 +263,56 @@ enum VNC_ARGS_IDX {
     VNC_ARGS_COUNT
 };
 
+
+/**
+ * NULL-terminated array of accepted client args.
+ */
+/* Client plugin arguments */
+const char* GUAC_VNC_CLIENT_ARGS[] = {
+    "hostname",
+    "port",
+    "read-only",
+    "encodings",
+    "password",
+    "swap-red-blue",
+    "color-depth",
+    "cursor",
+    "autoretry",
+    "clipboard-encoding",
+
+#ifdef ENABLE_VNC_REPEATER
+    "dest-host",
+    "dest-port",
+#endif
+
+#ifdef ENABLE_VNC_LISTEN
+    "reverse-connect",
+    "listen-timeout",
+#endif
+
+    NULL
+};
+
+
+/**
+ * Parses all given args, storing them in a newly-allocated settings object. If
+ * the args fail to parse, NULL is returned.
+ *
+ * @param user
+ *     The user who submitted the given arguments while joining the
+ *     connection.
+ *
+ * @param argc
+ *     The number of arguments within the argv array.
+ *
+ * @param argv
+ *     The values of all arguments provided by the user.
+ *
+ * @return
+ *     A newly-allocated settings object which must be freed with
+ *     guac_vnc_settings_free() when no longer needed. If the arguments fail
+ *     to parse, NULL is returned.
+ */
 guac_vnc_settings* guac_vnc_parse_args(guac_user* user,
         int argc, const char** argv) {
 
@@ -428,6 +409,73 @@ guac_vnc_settings* guac_vnc_parse_args(guac_user* user,
 
 }
 
+int guac_vnc_user_join_handler(guac_user* user, int argc, char** argv) {
+
+    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
+
+    /* Parse provided arguments */
+    guac_vnc_settings* settings = guac_vnc_parse_args(user,
+            argc, (const char**) argv);
+
+    /* Fail if settings cannot be parsed */
+    if (settings == NULL) {
+        guac_user_log(user, GUAC_LOG_INFO,
+                "Badly formatted client arguments.");
+        return 1;
+    }
+
+    /* Store settings at user level */
+    user->data = settings;
+
+    /* Connect via VNC if owner */
+    if (user->owner) {
+
+        /* Store owner's settings at client level */
+        vnc_client->settings = settings;
+
+        /* Start client thread */
+        if (pthread_create(&vnc_client->client_thread, NULL, guac_vnc_client_thread, user->client)) {
+            guac_user_log(user, GUAC_LOG_ERROR, "Unable to start VNC client thread.");
+            return 1;
+        }
+
+    }
+
+    /* If not owner, synchronize with current state */
+    else {
+        /* Synchronize with current display */
+        // FIXME: occamy: this is a temporal solution.
+        // If two users race on same connection, the client->display is
+        // a NULL pointer, which can cause segment fault.
+        // see bug report: https://issues.apache.org/jira/browse/GUACAMOLE-898
+        if (vnc_client->display != NULL) {
+            guac_common_display_dup(vnc_client->display, user, user->socket);
+        }
+        guac_socket_flush(user->socket);
+
+    }
+
+    /* Only handle events if not read-only */
+    if (!settings->read_only) {
+
+        /* General mouse/keyboard/clipboard events */
+        user->mouse_handler     = guac_vnc_user_mouse_handler;
+        user->key_handler       = guac_vnc_user_key_handler;
+        user->clipboard_handler = guac_vnc_clipboard_handler;
+
+    }
+
+    return 0;
+
+}
+
+/**
+ * Frees the given guac_vnc_settings object, having been previously allocated
+ * via guac_vnc_parse_args().
+ *
+ * @param settings
+ *     The settings object to free.
+ */
 void guac_vnc_settings_free(guac_vnc_settings* settings) {
 
     /* Free settings strings */
@@ -443,6 +491,24 @@ void guac_vnc_settings_free(guac_vnc_settings* settings) {
     /* Free settings structure */
     free(settings);
 
+}
+
+int guac_vnc_user_leave_handler(guac_user* user) {
+
+    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
+
+    if (vnc_client->display) {
+        /* Update shared cursor state */
+        guac_common_cursor_remove_user(vnc_client->display->cursor, user);
+    }
+
+    /* Free settings if not owner (owner settings will be freed with client) */
+    if (!user->owner) {
+        guac_vnc_settings* settings = (guac_vnc_settings*) user->data;
+        guac_vnc_settings_free(settings);
+    }
+
+    return 0;
 }
 
 int guac_vnc_client_free_handler(guac_client* client) {
@@ -965,6 +1031,19 @@ char* guac_vnc_get_password(rfbClient* client) {
     return ((guac_vnc_client*) gc->data)->settings->password;
 }
 
+/**
+ * Allocates a new rfbClient instance given the parameters stored within the
+ * client, returning NULL on failure.
+ *
+ * @param client
+ *     The guac_client associated with the settings of the desired VNC
+ *     connection.
+ *
+ * @return
+ *     A new rfbClient instance allocated and connected according to the
+ *     parameters stored within the given client, or NULL if connecting to the
+ *     VNC server fails.
+ */
 rfbClient* guac_vnc_get_client(guac_client* client) {
 
     rfbClient* rfb_client = rfbGetClient(8, 3, 4); /* 32-bpp client */
