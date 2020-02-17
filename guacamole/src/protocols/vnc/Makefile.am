@@ -26,9 +26,6 @@ libguac_client_vnc_la_SOURCES = \
     client.c                    \
     clipboard.c                 \
     cursor.c                    \
-    display.c                   \
-    input.c                     \
-    log.c                       \
     settings.c                  \
     user.c                      \
     vnc.c
@@ -37,9 +34,6 @@ noinst_HEADERS =      \
     client.h          \
     clipboard.h       \
     cursor.h          \
-    display.h         \
-    input.h           \
-    log.h             \
     settings.h        \
     user.h            \
     vnc.h
@@ -57,5 +51,3 @@ libguac_client_vnc_la_LDFLAGS = \
 libguac_client_vnc_la_LIBADD = \
     @COMMON_LTLIB@             \
     @LIBGUAC_LTLIB@
-
-

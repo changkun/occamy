@@ -20,7 +20,6 @@
 #include "config.h"
 
 #include "clipboard.h"
-#include "input.h"
 #include "common/display.h"
 #include "user.h"
 #include "vnc.h"
@@ -32,6 +31,40 @@
 #include <rfb/rfbproto.h>
 
 #include <pthread.h>
+
+/**
+ * Handler for Guacamole user mouse events.
+ */
+int guac_vnc_user_mouse_handler(guac_user* user, int x, int y, int mask) {
+
+    guac_client* client = user->client;
+    guac_vnc_client* vnc_client = (guac_vnc_client*) client->data;
+    rfbClient* rfb_client = vnc_client->rfb_client;
+
+    /* Store current mouse location/state */
+    guac_common_cursor_update(vnc_client->display->cursor, user, x, y, mask);
+
+    /* Send VNC event only if finished connecting */
+    if (rfb_client != NULL)
+        SendPointerEvent(rfb_client, x, y, mask);
+
+    return 0;
+}
+
+/**
+ * Handler for Guacamole user key events.
+ */
+int guac_vnc_user_key_handler(guac_user* user, int keysym, int pressed) {
+
+    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
+    rfbClient* rfb_client = vnc_client->rfb_client;
+
+    /* Send VNC event only if finished connecting */
+    if (rfb_client != NULL)
+        SendKeyEvent(rfb_client, keysym, pressed);
+
+    return 0;
+}
 
 int guac_vnc_user_join_handler(guac_user* user, int argc, char** argv) {
 
