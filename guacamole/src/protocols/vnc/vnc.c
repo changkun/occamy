@@ -19,7 +19,6 @@
 
 #include "config.h"
 
-#include "auth.h"
 #include "client.h"
 #include "clipboard.h"
 #include "common/clipboard.h"
@@ -43,6 +42,22 @@
 #include <time.h>
 
 char* GUAC_VNC_CLIENT_KEY = "GUAC_VNC";
+
+/**
+ * Callback which is invoked by libVNCServer when it needs to read the user's
+ * VNC password. As ths user's password, if any, will be stored in the
+ * connection settings, this function does nothing more than return that value.
+ *
+ * @param client
+ *     The rfbClient associated with the VNC connection requiring the password.
+ *
+ * @return
+ *     The password to provide to the VNC server.
+ */
+char* guac_vnc_get_password(rfbClient* client) {
+    guac_client* gc = rfbClientGetClientData(client, GUAC_VNC_CLIENT_KEY);
+    return ((guac_vnc_client*) gc->data)->settings->password;
+}
 
 rfbClient* guac_vnc_get_client(guac_client* client) {
 
