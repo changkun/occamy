@@ -25,11 +25,11 @@
 #include "common/cursor.h"
 #include "common/display.h"
 #include "cursor.h"
-#include "display.h"
-#include "log.h"
 #include "settings.h"
 #include "vnc.h"
 
+#include <cairo/cairo.h>
+#include <guacamole/layer.h>
 #include <guacamole/client.h>
 #include <guacamole/protocol.h>
 #include <guacamole/socket.h>
@@ -40,8 +40,304 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <stdarg.h>
+#include <stdio.h>
+#include <syslog.h>
 
 char* GUAC_VNC_CLIENT_KEY = "GUAC_VNC";
+
+
+/**
+ * Callback invoked by libVNCServer when an informational message needs to be
+ * logged.
+ *
+ * @param format
+ *     A printf-style format string to log.
+ *
+ * @param ...
+ *     The values to use when filling the conversion specifiers within the
+ *     format string.
+ */
+void guac_vnc_client_log_info(const char* format, ...) {
+
+    char message[2048];
+
+    /* Copy log message into buffer */
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+
+    /* Log to syslog */
+    syslog(LOG_INFO, "%s", message);
+
+}
+
+/**
+ * Callback invoked by libVNCServer when an error message needs to be logged.
+ *
+ * @param format
+ *     A printf-style format string to log.
+ *
+ * @param ...
+ *     The values to use when filling the conversion specifiers within the
+ *     format string.
+ */
+void guac_vnc_client_log_error(const char* format, ...) {
+
+    char message[2048];
+
+    /* Copy log message into buffer */
+    va_list args;
+    va_start(args, format);
+    vsnprintf(message, sizeof(message), format, args);
+    va_end(args);
+
+    /* Log to syslog */
+    syslog(LOG_ERR, "%s", message);
+
+}
+
+/**
+ * Sets the pixel format to request of the VNC server. The request will be made
+ * during the connection handshake with the VNC server using the values
+ * specified by this function. Note that the VNC server is not required to
+ * honor this request.
+ *
+ * @param client
+ *     The VNC client associated with the VNC session whose desired pixel
+ *     format should be set.
+ *
+ * @param color_depth
+ *     The desired new color depth, in bits per pixel. Valid values are 8, 16,
+ *     24, and 32.
+ */
+void guac_vnc_set_pixel_format(rfbClient* client, int color_depth) {
+    client->format.trueColour = 1;
+    switch(color_depth) {
+        case 8:
+            client->format.depth        = 8;
+            client->format.bitsPerPixel = 8;
+            client->format.blueShift    = 6;
+            client->format.redShift     = 0;
+            client->format.greenShift   = 3;
+            client->format.blueMax      = 3;
+            client->format.redMax       = 7;
+            client->format.greenMax     = 7;
+            break;
+
+        case 16:
+            client->format.depth        = 16;
+            client->format.bitsPerPixel = 16;
+            client->format.blueShift    = 0;
+            client->format.redShift     = 11;
+            client->format.greenShift   = 5;
+            client->format.blueMax      = 0x1f;
+            client->format.redMax       = 0x1f;
+            client->format.greenMax     = 0x3f;
+            break;
+
+        case 24:
+        case 32:
+        default:
+            client->format.depth        = 24;
+            client->format.bitsPerPixel = 32;
+            client->format.blueShift    = 0;
+            client->format.redShift     = 16;
+            client->format.greenShift   = 8;
+            client->format.blueMax      = 0xff;
+            client->format.redMax       = 0xff;
+            client->format.greenMax     = 0xff;
+    }
+}
+
+/**
+ * Callback invoked by libVNCServer when it receives a new binary image data.
+ * the VNC server. The image itself will be stored in the designated sub-
+ * rectangle of client->framebuffer.
+ *
+ * @param client
+ *     The VNC client associated with the VNC session in which the new image
+ *     was received.
+ *
+ * @param x
+ *     The X coordinate of the upper-left corner of the destination rectangle
+ *     in which the image should be drawn, in pixels.
+ *
+ * @param y
+ *     The Y coordinate of the upper-left corner of the destination rectangle
+ *     in which the image should be drawn, in pixels.
+ *
+ * @param w
+ *     The width of the image, in pixels.
+ *
+ * @param h
+ *     The height of the image, in pixels.
+ */
+void guac_vnc_update(rfbClient* client, int x, int y, int w, int h) {
+
+    guac_client* gc = rfbClientGetClientData(client, GUAC_VNC_CLIENT_KEY);
+    guac_vnc_client* vnc_client = (guac_vnc_client*) gc->data;
+
+    int dx, dy;
+
+    /* Cairo image buffer */
+    int stride;
+    unsigned char* buffer;
+    unsigned char* buffer_row_current;
+    cairo_surface_t* surface;
+
+    /* VNC framebuffer */
+    unsigned int bpp;
+    unsigned int fb_stride;
+    unsigned char* fb_row_current;
+
+    /* Ignore extra update if already handled by copyrect */
+    if (vnc_client->copy_rect_used) {
+        vnc_client->copy_rect_used = 0;
+        return;
+    }
+
+    /* Init Cairo buffer */
+    stride = cairo_format_stride_for_width(CAIRO_FORMAT_RGB24, w);
+    buffer = malloc(h*stride);
+    buffer_row_current = buffer;
+
+    bpp = client->format.bitsPerPixel/8;
+    fb_stride = bpp * client->width;
+    fb_row_current = client->frameBuffer + (y * fb_stride) + (x * bpp);
+
+    /* Copy image data from VNC client to PNG */
+    for (dy = y; dy<y+h; dy++) {
+
+        unsigned int*  buffer_current;
+        unsigned char* fb_current;
+        
+        /* Get current buffer row, advance to next */
+        buffer_current      = (unsigned int*) buffer_row_current;
+        buffer_row_current += stride;
+
+        /* Get current framebuffer row, advance to next */
+        fb_current      = fb_row_current;
+        fb_row_current += fb_stride;
+
+        for (dx = x; dx<x+w; dx++) {
+
+            unsigned char red, green, blue;
+            unsigned int v;
+
+            switch (bpp) {
+                case 4:
+                    v = *((uint32_t*)  fb_current);
+                    break;
+
+                case 2:
+                    v = *((uint16_t*) fb_current);
+                    break;
+
+                default:
+                    v = *((uint8_t*)  fb_current);
+            }
+
+            /* Translate value to RGB */
+            red   = (v >> client->format.redShift)   * 0x100 / (client->format.redMax  + 1);
+            green = (v >> client->format.greenShift) * 0x100 / (client->format.greenMax+ 1);
+            blue  = (v >> client->format.blueShift)  * 0x100 / (client->format.blueMax + 1);
+
+            /* Output RGB */
+            if (vnc_client->settings->swap_red_blue)
+                *(buffer_current++) = (blue << 16) | (green << 8) | red;
+            else
+                *(buffer_current++) = (red  << 16) | (green << 8) | blue;
+
+            fb_current += bpp;
+
+        }
+    }
+
+    /* Create surface from decoded buffer */
+    surface = cairo_image_surface_create_for_data(buffer, CAIRO_FORMAT_RGB24,
+            w, h, stride);
+
+    /* Draw directly to default layer */
+    guac_common_surface_draw(vnc_client->display->default_surface,
+            x, y, surface);
+
+    /* Free surface */
+    cairo_surface_destroy(surface);
+    free(buffer);
+
+}
+
+/**
+ * Callback invoked by libVNCServer when it receives a CopyRect message.
+ * CopyRect specified a rectangle of source data within the display and a
+ * set of X/Y coordinates to which that rectangle should be copied.
+ *
+ * @param client
+ *     The VNC client associated with the VNC session in which the CopyRect
+ *     was received.
+ *
+ * @param src_x
+ *     The X coordinate of the upper-left corner of the source rectangle
+ *     from which the image data should be copied, in pixels.
+ *
+ * @param src_y
+ *     The Y coordinate of the upper-left corner of the source rectangle
+ *     from which the image data should be copied, in pixels.
+ *
+ * @param w
+ *     The width of the source and destination rectangles, in pixels.
+ *
+ * @param h
+ *     The height of the source and destination rectangles, in pixels.
+ *
+ * @param dest_x
+ *     The X coordinate of the upper-left corner of the destination rectangle
+ *     in which the copied image data should be drawn, in pixels.
+ *
+ * @param dest_y
+ *     The Y coordinate of the upper-left corner of the destination rectangle
+ *     in which the copied image data should be drawn, in pixels.
+ */
+void guac_vnc_copyrect(rfbClient* client, int src_x, int src_y, int w, int h, int dest_x, int dest_y) {
+
+    guac_client* gc = rfbClientGetClientData(client, GUAC_VNC_CLIENT_KEY);
+    guac_vnc_client* vnc_client = (guac_vnc_client*) gc->data;
+
+    /* Copy specified rectangle within default layer */
+    guac_common_surface_copy(vnc_client->display->default_surface,
+            src_x, src_y, w, h,
+            vnc_client->display->default_surface, dest_x, dest_y);
+
+    vnc_client->copy_rect_used = 1;
+
+}
+
+/**
+ * Overridden implementation of the rfb_MallocFrameBuffer function invoked by
+ * libVNCServer when the display is being resized (or initially allocated).
+ *
+ * @param client
+ *     The VNC client associated with the VNC session whose display needs to be
+ *     allocated or reallocated.
+ *
+ * @return
+ *     The original value returned by rfb_MallocFrameBuffer().
+ */
+rfbBool guac_vnc_malloc_framebuffer(rfbClient* rfb_client) {
+
+    guac_client* gc = rfbClientGetClientData(rfb_client, GUAC_VNC_CLIENT_KEY);
+    guac_vnc_client* vnc_client = (guac_vnc_client*) gc->data;
+
+    /* Resize surface */
+    if (vnc_client->display != NULL)
+        guac_common_surface_resize(vnc_client->display->default_surface,
+                rfb_client->width, rfb_client->height);
+
+    /* Use original, wrapped proc */
+    return vnc_client->rfb_MallocFrameBuffer(rfb_client);
+}
 
 /**
  * Callback which is invoked by libVNCServer when it needs to read the user's
