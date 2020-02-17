@@ -23,21 +23,11 @@ ACLOCAL_AMFLAGS = -I m4
 DIST_SUBDIRS =           \
     src/libguac          \
     src/common           \
-    src/protocols/rdp    \
-    src/protocols/ssh    \
     src/protocols/vnc
 
 SUBDIRS =        \
     src/libguac  \
     src/common
-
-if ENABLE_RDP
-SUBDIRS += src/protocols/rdp
-endif
-
-if ENABLE_SSH
-SUBDIRS += src/protocols/ssh
-endif
 
 if ENABLE_VNC
 SUBDIRS += src/protocols/vnc

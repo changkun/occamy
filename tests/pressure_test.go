@@ -44,18 +44,6 @@ var credentials = map[string]jwtInput{
 		Username: "",
 		Password: "vncpassword",
 	},
-	"rdp": jwtInput{
-		Protocol: "rdp",
-		Host:     "172.16.238.12:3389",
-		Username: "root",
-		Password: "Docker",
-	},
-	"ssh": jwtInput{
-		Protocol: "ssh",
-		Host:     "172.16.238.13:22",
-		Username: "root",
-		Password: "root",
-	},
 }
 
 func login(protocol string) string {
@@ -160,8 +148,6 @@ func failConnect(url string) error {
 func TestConnectionPressure(t *testing.T) {
 	protos := []string{
 		"vnc",
-		"rdp",
-		"ssh",
 	}
 	connectors := map[string]func(string) error{"success": successConnect, "fail": failConnect}
 	var wg sync.WaitGroup

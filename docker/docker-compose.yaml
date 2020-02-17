@@ -27,24 +27,6 @@ services:
     networks:
       occamy_network:
         ipv4_address: 172.16.238.11
-  rdp:
-    # user: root, password: Docker
-    image: umis/xubuntu-office-xrdp-desktop:v1.0
-    container_name: rdp
-    environment:
-      - "USERNAME:root"
-      - "PASSWORD:Docker"
-    networks:
-      occamy_network:
-        ipv4_address: 172.16.238.12
-
-  ssh:
-    # user: root, password: root
-    image: rastasheep/ubuntu-sshd:14.04
-    container_name: ssh
-    networks:
-      occamy_network:
-        ipv4_address: 172.16.238.13
 
 networks:
   occamy_network:

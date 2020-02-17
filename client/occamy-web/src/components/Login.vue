@@ -6,8 +6,6 @@
         <el-form-item label="Protocol">
             <el-select v-model="form.protocol" class="protocols">
             <el-option label="VNC" value="vnc"></el-option>
-            <el-option label="RDP" value="rdp"></el-option>
-            <el-option label="SSH" value="ssh"></el-option>
             </el-select>
         </el-form-item>
         <el-form-item label="Host" prop="host">
@@ -42,18 +40,6 @@ export default {
             host: '172.16.238.11:5901',
             username: '',
             password: 'vncpassword'
-          },
-          'rdp': {
-            protocol: 'rdp',
-            host: '172.16.238.12:3389',
-            username: 'root',
-            password: 'Docker'
-          },
-          'ssh': {
-            protocol: 'ssh',
-            host: '172.16.238.13:22',
-            username: 'root',
-            password: 'root'
           }
       }
     };

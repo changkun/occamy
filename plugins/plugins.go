@@ -7,8 +7,6 @@ package plugins
 import (
 	"errors"
 
-	"github.com/changkun/occamy/plugins/rdp"
-	"github.com/changkun/occamy/plugins/ssh"
 	"github.com/changkun/occamy/plugins/vnc"
 )
 
@@ -18,8 +16,6 @@ type SupportedProtocols string
 // all supported protocols
 const (
 	ProtocolVNC SupportedProtocols = "vnc"
-	ProtocolRDP SupportedProtocols = "rdp"
-	ProtocolSSH SupportedProtocols = "ssh"
 )
 
 // Client is a interface that defines all needed function of a client
@@ -34,10 +30,6 @@ func NewPlugin(proto SupportedProtocols) (Client, error) {
 	switch proto {
 	case ProtocolVNC:
 		return vnc.NewClient(), nil
-	case ProtocolRDP:
-		return rdp.NewClient(), nil
-	case ProtocolSSH:
-		return ssh.NewClient(), nil
 	}
 	return nil, errors.New("unsupported protocol")
 }

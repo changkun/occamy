@@ -80,6 +80,5 @@ libguac_la_LDFLAGS =     \
     @CAIRO_LIBS@         \
     @DL_LIBS@            \
     @PNG_LIBS@           \
-    @PTHREAD_LIBS@       \
-    @SSL_LIBS@
+    @PTHREAD_LIBS@
 

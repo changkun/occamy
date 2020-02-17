@@ -11,37 +11,18 @@ ENV LC_ALL=en_US.UTF-8                \
         wget                          \
         glib                          \
         cairo                         \
-        dejavu-sans-mono-fonts        \
-        freerdp                       \
-        freerdp-plugins               \
-        ghostscript                   \
-        libssh2                       \
-        liberation-mono-fonts         \
         libvncserver                  \
-        pango                         \
-        terminus-fonts                \
         git"                          \
     BUILD_DEPENDENCIES="              \
         autoconf                      \
         automake                      \
         cairo-devel                   \
-        freerdp-devel                 \
-        pango-devel                   \
-        libssh2-devel                 \
         libtool                       \
         libvncserver-devel            \
         make"                         \
     GO_VERSION=1.13.8
 RUN yum -y update                                                         && \
-    yum -y install epel-release $RUNTIME_DEPENDENCIES $BUILD_DEPENDENCIES && \
-    # see: https://github.com/Zer0CoolX/guacamole-install-rhel/issues/78#issuecomment-534620524
-    yum -y remove freerdp-devel && \
-    yum -y remove freerdp-libs && \
-    yum -y install freerdp-devel-1.0.2-15.el7 \
-                freerdp-plugins-1.0.2-15.el7 \
-                --enablerepo=C7.6.1810-base \
-                --disablerepo=base \
-                --disablerepo=updates
+    yum -y install epel-release $RUNTIME_DEPENDENCIES $BUILD_DEPENDENCIES
 WORKDIR /occamy
 RUN mkdir /golang                                      && \
     cd /golang                                         && \
