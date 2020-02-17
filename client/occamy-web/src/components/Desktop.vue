@@ -2,13 +2,13 @@
   <div id="desktop"></div>
 </template>
 <script>
-import Guacamole from 'guacamole-client'
+import occamy from './occamy'
 export default {
   data () { return {} },
   methods: {},
   mounted () {
     const url = 'ws://0.0.0.0:5636/api/v1/connect'
-    let guac = new Guacamole.Client(new Guacamole.WebSocketTunnel(url));
+    let guac = new occamy.Client(new occamy.WebSocketTunnel(url));
     let display = guac.getDisplay()
     document.getElementById('desktop').appendChild(display.getElement());
     guac.onerror = null;
@@ -25,10 +25,10 @@ export default {
         window.innerWidth / display.getWidth()
       ))
     }
-    var mouse = new Guacamole.Mouse(display.getElement());
+    var mouse = new occamy.Mouse(display.getElement());
     mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = (mouseState) => {
       display.showCursor(false);
-      const scaledState = new Guacamole.Mouse.State(
+      const scaledState = new occamy.Mouse.State(
           mouseState.x / display.getScale(),
           mouseState.y / display.getScale(),
           mouseState.left,
@@ -39,7 +39,7 @@ export default {
       );
       guac.sendMouseState(scaledState);
     };
-    var keyboard = new Guacamole.Keyboard(document);
+    var keyboard = new occamy.Keyboard(document);
     keyboard.onkeydown = (k) => { guac.sendKeyEvent(1, k) };
     keyboard.onkeyup = (k) => { guac.sendKeyEvent(0, k) };
   }
