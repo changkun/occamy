@@ -734,6 +734,23 @@ Occamy.Client = function(tunnel) {
     };
 
     /**
+     * Sends a key event having the given properties as if the user
+     * pressed or released a key.
+     * 
+     * @param {Boolean} pressed Whether the key is pressed (true) or released
+     *                          (false).
+     * @param {Number} keysym The keysym of the key being pressed or released.
+     */
+    this.sendKeyEvent = function(pressed, keysym) {
+        // Do not send requests if not connected
+        if (!isConnected())
+            return;
+
+        tunnel.sendMessage("key", keysym, pressed);
+    };
+
+
+    /**
      * Sends a mouse event having the properties provided by the given mouse
      * state.
      * 
