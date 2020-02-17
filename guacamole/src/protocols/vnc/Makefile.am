@@ -22,17 +22,9 @@ ACLOCAL_AMFLAGS = -I m4
 
 lib_LTLIBRARIES = libguac-client-vnc.la
 
-libguac_client_vnc_la_SOURCES = \
-    client.c                    \
-    settings.c                  \
-    user.c                      \
-    vnc.c
+libguac_client_vnc_la_SOURCES = vnc.c
     
-noinst_HEADERS =      \
-    client.h          \
-    settings.h        \
-    user.h            \
-    vnc.h
+noinst_HEADERS = vnc.h
 
 libguac_client_vnc_la_CFLAGS =        \
     -Werror -Wall -pedantic -Iinclude \

@@ -19,22 +19,24 @@
 
 #include "config.h"
 
-#include "client.h"
 #include "common/clipboard.h"
 #include "common/cursor.h"
 #include "common/display.h"
-#include "settings.h"
+#include "common/iconv.h"
 #include "vnc.h"
 
+#include <pthread.h>
 #include <cairo/cairo.h>
+#include <guacamole/user.h>
 #include <guacamole/layer.h>
 #include <guacamole/client.h>
+#include <guacamole/stream.h>
 #include <guacamole/protocol.h>
 #include <guacamole/socket.h>
 #include <guacamole/timestamp.h>
 #include <rfb/rfbclient.h>
 #include <rfb/rfbproto.h>
-
+#include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -44,6 +46,466 @@
 
 char* GUAC_VNC_CLIENT_KEY = "GUAC_VNC";
 
+/**
+ * Handler for Guacamole user mouse events.
+ */
+int guac_vnc_user_mouse_handler(guac_user* user, int x, int y, int mask) {
+
+    guac_client* client = user->client;
+    guac_vnc_client* vnc_client = (guac_vnc_client*) client->data;
+    rfbClient* rfb_client = vnc_client->rfb_client;
+
+    /* Store current mouse location/state */
+    guac_common_cursor_update(vnc_client->display->cursor, user, x, y, mask);
+
+    /* Send VNC event only if finished connecting */
+    if (rfb_client != NULL)
+        SendPointerEvent(rfb_client, x, y, mask);
+
+    return 0;
+}
+
+/**
+ * Handler for Guacamole user key events.
+ */
+int guac_vnc_user_key_handler(guac_user* user, int keysym, int pressed) {
+
+    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
+    rfbClient* rfb_client = vnc_client->rfb_client;
+
+    /* Send VNC event only if finished connecting */
+    if (rfb_client != NULL)
+        SendKeyEvent(rfb_client, keysym, pressed);
+
+    return 0;
+}
+
+/**
+ * Handler for stream data related to clipboard.
+ */
+int guac_vnc_clipboard_blob_handler(guac_user* user, guac_stream* stream,
+        void* data, int length) {
+
+    /* Append new data */
+    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
+    guac_common_clipboard_append(vnc_client->clipboard, (char*) data, length);
+
+    return 0;
+}
+
+/**
+ * Handler for end-of-stream related to clipboard.
+ */
+int guac_vnc_clipboard_end_handler(guac_user* user, guac_stream* stream) {
+
+    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
+    rfbClient* rfb_client = vnc_client->rfb_client;
+
+    char output_data[GUAC_VNC_CLIPBOARD_MAX_LENGTH];
+
+    const char* input = vnc_client->clipboard->buffer;
+    char* output = output_data;
+    guac_iconv_write* writer = vnc_client->clipboard_writer;
+
+    /* Convert clipboard contents */
+    guac_iconv(GUAC_READ_UTF8, &input, vnc_client->clipboard->length,
+               writer, &output, sizeof(output_data));
+
+    /* Send via VNC only if finished connecting */
+    if (rfb_client != NULL)
+        SendClientCutText(rfb_client, output_data, output - output_data);
+
+    return 0;
+}
+
+/**
+ * Handler for inbound clipboard data from Guacamole users.
+ */
+int guac_vnc_clipboard_handler(guac_user* user, guac_stream* stream,
+        char* mimetype) {
+
+    /* Clear clipboard and prepare for new data */
+    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
+    guac_common_clipboard_reset(vnc_client->clipboard, mimetype);
+
+    /* Set handlers for clipboard stream */
+    stream->blob_handler = guac_vnc_clipboard_blob_handler;
+    stream->end_handler = guac_vnc_clipboard_end_handler;
+
+    return 0;
+}
+
+int guac_vnc_user_join_handler(guac_user* user, int argc, char** argv) {
+
+    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
+
+    /* Parse provided arguments */
+    guac_vnc_settings* settings = guac_vnc_parse_args(user,
+            argc, (const char**) argv);
+
+    /* Fail if settings cannot be parsed */
+    if (settings == NULL) {
+        guac_user_log(user, GUAC_LOG_INFO,
+                "Badly formatted client arguments.");
+        return 1;
+    }
+
+    /* Store settings at user level */
+    user->data = settings;
+
+    /* Connect via VNC if owner */
+    if (user->owner) {
+
+        /* Store owner's settings at client level */
+        vnc_client->settings = settings;
+
+        /* Start client thread */
+        if (pthread_create(&vnc_client->client_thread, NULL, guac_vnc_client_thread, user->client)) {
+            guac_user_log(user, GUAC_LOG_ERROR, "Unable to start VNC client thread.");
+            return 1;
+        }
+
+    }
+
+    /* If not owner, synchronize with current state */
+    else {
+        /* Synchronize with current display */
+        // FIXME: occamy: this is a temporal solution.
+        // If two users race on same connection, the client->display is
+        // a NULL pointer, which can cause segment fault.
+        // see bug report: https://issues.apache.org/jira/browse/GUACAMOLE-898
+        if (vnc_client->display != NULL) {
+            guac_common_display_dup(vnc_client->display, user, user->socket);
+        }
+        guac_socket_flush(user->socket);
+
+    }
+
+    /* Only handle events if not read-only */
+    if (!settings->read_only) {
+
+        /* General mouse/keyboard/clipboard events */
+        user->mouse_handler     = guac_vnc_user_mouse_handler;
+        user->key_handler       = guac_vnc_user_key_handler;
+        user->clipboard_handler = guac_vnc_clipboard_handler;
+
+    }
+
+    return 0;
+
+}
+
+int guac_vnc_user_leave_handler(guac_user* user) {
+
+    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
+
+    if (vnc_client->display) {
+        /* Update shared cursor state */
+        guac_common_cursor_remove_user(vnc_client->display->cursor, user);
+    }
+
+    /* Free settings if not owner (owner settings will be freed with client) */
+    if (!user->owner) {
+        guac_vnc_settings* settings = (guac_vnc_settings*) user->data;
+        guac_vnc_settings_free(settings);
+    }
+
+    return 0;
+}
+
+/* Client plugin arguments */
+const char* GUAC_VNC_CLIENT_ARGS[] = {
+    "hostname",
+    "port",
+    "read-only",
+    "encodings",
+    "password",
+    "swap-red-blue",
+    "color-depth",
+    "cursor",
+    "autoretry",
+    "clipboard-encoding",
+
+#ifdef ENABLE_VNC_REPEATER
+    "dest-host",
+    "dest-port",
+#endif
+
+#ifdef ENABLE_VNC_LISTEN
+    "reverse-connect",
+    "listen-timeout",
+#endif
+
+    NULL
+};
+
+enum VNC_ARGS_IDX {
+
+    /**
+     * The hostname of the VNC server (or repeater) to connect to.
+     */
+    IDX_HOSTNAME,
+
+    /**
+     * The port of the VNC server (or repeater) to connect to.
+     */
+    IDX_PORT,
+
+    /**
+     * "true" if this connection should be read-only (user input should be
+     * dropped), "false" or blank otherwise.
+     */
+    IDX_READ_ONLY,
+
+    /**
+     * Space-separated list of encodings to use within the VNC session. If not
+     * specified, this will be:
+     *
+     *     "zrle ultra copyrect hextile zlib corre rre raw".
+     */
+    IDX_ENCODINGS,
+
+    /**
+     * The password to send to the VNC server if authentication is requested.
+     */
+    IDX_PASSWORD,
+
+    /**
+     * "true" if the red and blue components of each color should be swapped,
+     * "false" or blank otherwise. This is mainly used for VNC servers that do
+     * not properly handle colors.
+     */
+    IDX_SWAP_RED_BLUE,
+
+    /**
+     * The color depth to request, in bits.
+     */
+    IDX_COLOR_DEPTH,
+
+    /**
+     * "remote" if the cursor should be rendered on the server instead of the
+     * client. All other values will default to local rendering.
+     */
+    IDX_CURSOR,
+
+    /**
+     * The number of connection attempts to make before giving up. By default,
+     * this will be 0.
+     */
+    IDX_AUTORETRY,
+
+    /**
+     * The encoding to use for clipboard data sent to the VNC server if we are
+     * going to be deviating from the standard (which mandates ISO 8829-1).
+     * Valid values are "ISO8829-1" (the only legal value with respect to the
+     * VNC standard), "UTF-8", "UTF-16", and "CP2252".
+     */
+    IDX_CLIPBOARD_ENCODING,
+
+#ifdef ENABLE_VNC_REPEATER
+    /**
+     * The VNC host to connect to, if using a repeater.
+     */
+    IDX_DEST_HOST,
+
+    /**
+     * The VNC port to connect to, if using a repeater.
+     */
+    IDX_DEST_PORT,
+#endif
+
+#ifdef ENABLE_VNC_LISTEN
+    /**
+     * "true" if not actually connecting to a VNC server, but rather listening
+     * for a connection from the VNC server (reverse connection), "false" or
+     * blank otherwise.
+     */
+    IDX_REVERSE_CONNECT,
+
+    /**
+     * The maximum amount of time to wait when listening for connections, in
+     * milliseconds. If unspecified, this will default to 5000.
+     */
+    IDX_LISTEN_TIMEOUT,
+#endif
+
+    VNC_ARGS_COUNT
+};
+
+guac_vnc_settings* guac_vnc_parse_args(guac_user* user,
+        int argc, const char** argv) {
+
+    /* Validate arg count */
+    if (argc != VNC_ARGS_COUNT) {
+        guac_user_log(user, GUAC_LOG_WARNING, "Incorrect number of connection "
+                "parameters provided: expected %i, got %i.",
+                VNC_ARGS_COUNT, argc);
+        return NULL;
+    }
+
+    guac_vnc_settings* settings = calloc(1, sizeof(guac_vnc_settings));
+
+    settings->hostname =
+        guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_HOSTNAME, "");
+
+    settings->port =
+        guac_user_parse_args_int(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_PORT, 0);
+
+    settings->password =
+        guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_PASSWORD, ""); /* NOTE: freed by libvncclient */
+
+    /* Remote cursor */
+    if (strcmp(argv[IDX_CURSOR], "remote") == 0) {
+        guac_user_log(user, GUAC_LOG_INFO, "Cursor rendering: remote");
+        settings->remote_cursor = true;
+    }
+
+    /* Local cursor */
+    else {
+        guac_user_log(user, GUAC_LOG_INFO, "Cursor rendering: local");
+        settings->remote_cursor = false;
+    }
+
+    /* Swap red/blue (for buggy VNC servers) */
+    settings->swap_red_blue =
+        guac_user_parse_args_boolean(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_SWAP_RED_BLUE, false);
+
+    /* Read-only mode */
+    settings->read_only =
+        guac_user_parse_args_boolean(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_READ_ONLY, false);
+
+    /* Parse color depth */
+    settings->color_depth =
+        guac_user_parse_args_int(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_COLOR_DEPTH, 0);
+
+#ifdef ENABLE_VNC_REPEATER
+    /* Set repeater parameters if specified */
+    settings->dest_host =
+        guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_DEST_HOST, NULL);
+
+    /* VNC repeater port */
+    settings->dest_port =
+        guac_user_parse_args_int(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_DEST_PORT, 0);
+#endif
+
+    /* Set encodings if specified */
+    settings->encodings =
+        guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_ENCODINGS,
+                "zrle ultra copyrect hextile zlib corre rre raw");
+
+    /* Parse autoretry */
+    settings->retries =
+        guac_user_parse_args_int(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_AUTORETRY, 0);
+
+#ifdef ENABLE_VNC_LISTEN
+    /* Set reverse-connection flag */
+    settings->reverse_connect =
+        guac_user_parse_args_boolean(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_REVERSE_CONNECT, false);
+
+    /* Parse listen timeout */
+    settings->listen_timeout =
+        guac_user_parse_args_int(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_LISTEN_TIMEOUT, 5000);
+#endif
+
+    /* Set clipboard encoding if specified */
+    settings->clipboard_encoding =
+        guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
+                IDX_CLIPBOARD_ENCODING, NULL);
+
+    return settings;
+
+}
+
+void guac_vnc_settings_free(guac_vnc_settings* settings) {
+
+    /* Free settings strings */
+    free(settings->clipboard_encoding);
+    free(settings->encodings);
+    free(settings->hostname);
+
+#ifdef ENABLE_VNC_REPEATER
+    /* Free VNC repeater settings */
+    free(settings->dest_host);
+#endif
+
+    /* Free settings structure */
+    free(settings);
+
+}
+
+int guac_vnc_client_free_handler(guac_client* client) {
+
+    guac_vnc_client* vnc_client = (guac_vnc_client*) client->data;
+    guac_vnc_settings* settings = vnc_client->settings;
+
+    /* Clean up VNC client*/
+    rfbClient* rfb_client = vnc_client->rfb_client;
+    if (rfb_client != NULL) {
+        /* Wait for client thread to finish */
+        pthread_join(vnc_client->client_thread, NULL);
+
+        /* Free memory not free'd by libvncclient's rfbClientCleanup() */
+        if (rfb_client->frameBuffer != NULL) free(rfb_client->frameBuffer);
+        if (rfb_client->raw_buffer != NULL) free(rfb_client->raw_buffer);
+        if (rfb_client->rcSource != NULL) free(rfb_client->rcSource);
+
+        /* Free VNC rfbClientData linked list (not free'd by rfbClientCleanup()) */
+        while (rfb_client->clientData != NULL) {
+            rfbClientData* next = rfb_client->clientData->next;
+            free(rfb_client->clientData);
+            rfb_client->clientData = next;
+        }
+        rfbClientCleanup(rfb_client);
+    }
+
+    /* Free clipboard */
+    if (vnc_client->clipboard != NULL)
+        guac_common_clipboard_free(vnc_client->clipboard);
+
+    /* Free display */
+    if (vnc_client->display != NULL)
+        guac_common_display_free(vnc_client->display);
+
+    /* Free parsed settings */
+    if (settings != NULL)
+        guac_vnc_settings_free(settings);
+
+    /* Free generic data struct */
+    free(client->data);
+    return 0;
+}
+
+int guac_client_init(guac_client* client) {
+
+    /* Set client args */
+    client->args = GUAC_VNC_CLIENT_ARGS;
+
+    /* Alloc client data */
+    guac_vnc_client* vnc_client = calloc(1, sizeof(guac_vnc_client));
+    client->data = vnc_client;
+
+    /* Init clipboard */
+    vnc_client->clipboard = guac_common_clipboard_alloc(GUAC_VNC_CLIPBOARD_MAX_LENGTH);
+
+    /* Set handlers */
+    client->join_handler = guac_vnc_user_join_handler;
+    client->leave_handler = guac_vnc_user_leave_handler;
+    client->free_handler = guac_vnc_client_free_handler;
+
+    return 0;
+}
 
 /**
  * Callback invoked by libVNCServer when an informational message needs to be
