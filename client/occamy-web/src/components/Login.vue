@@ -62,8 +62,7 @@ export default {
     login() {
         axios.post('/api/v1/login', this.credentials[this.form.protocol]).then((response) => {
             window.location = this.$router.resolve({
-                name: 'desktop', 
-                query:{token: response.data.token}
+                name: 'desktop', query:{token: response.data.token}
             }).href
         }).catch((err) => {
             this.$message({message: `login fail: ${err}`, type: 'error'})
@@ -71,9 +70,7 @@ export default {
     },
   },
   computed: {
-    showUsername() {
-        return this.form.protocol != 'vnc'
-    }
+    showUsername() { return this.form.protocol != 'vnc' }
   }
 };
 </script>
