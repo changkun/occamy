@@ -20,11 +20,9 @@
 #include "config.h"
 
 #include "client.h"
-#include "clipboard.h"
 #include "common/clipboard.h"
 #include "common/cursor.h"
 #include "common/display.h"
-#include "cursor.h"
 #include "settings.h"
 #include "vnc.h"
 
@@ -314,6 +312,120 @@ void guac_vnc_copyrect(rfbClient* client, int src_x, int src_y, int w, int h, in
 
 }
 
+/* Define cairo_format_stride_for_width() if missing */
+#ifndef HAVE_CAIRO_FORMAT_STRIDE_FOR_WIDTH
+#define cairo_format_stride_for_width(format, width) (width*4)
+#endif
+
+/**
+ * Callback invoked by libVNCServer when it receives a new cursor image from
+ * the VNC server. The cursor image itself will be split across
+ * client->rcSource and client->rcMask, where rcSource is an image buffer of
+ * the format natively used by the current VNC connection, and rcMask is an
+ * array if bitmasks. Each bit within rcMask corresponds to a pixel within
+ * rcSource, where a 0 denotes full transparency and a 1 denotes full opacity.
+ *
+ * @param client
+ *     The VNC client associated with the VNC session in which the new cursor
+ *     image was received.
+ *
+ * @param x
+ *     The X coordinate of the new cursor image's hotspot, in pixels.
+ *
+ * @param y
+ *     The Y coordinate of the new cursor image's hotspot, in pixels.
+ *
+ * @param w
+ *     The width of the cursor image, in pixels.
+ *
+ * @param h
+ *     The height of the cursor image, in pixels.
+ *
+ * @param bpp
+ *     The number of bytes in each pixel, which must be either 4, 2, or 1.
+ */
+void guac_vnc_cursor(rfbClient* client, int x, int y, int w, int h, int bpp) {
+
+    guac_client* gc = rfbClientGetClientData(client, GUAC_VNC_CLIENT_KEY);
+    guac_vnc_client* vnc_client = (guac_vnc_client*) gc->data;
+
+    /* Cairo image buffer */
+    int stride = cairo_format_stride_for_width(CAIRO_FORMAT_ARGB32, w);
+    unsigned char* buffer = malloc(h*stride);
+    unsigned char* buffer_row_current = buffer;
+
+    /* VNC image buffer */
+    unsigned int fb_stride = bpp * w;
+    unsigned char* fb_row_current = client->rcSource;
+    unsigned char* fb_mask = client->rcMask;
+
+    int dx, dy;
+
+    /* Copy image data from VNC client to RGBA buffer */
+    for (dy = 0; dy<h; dy++) {
+
+        unsigned int*  buffer_current;
+        unsigned char* fb_current;
+        
+        /* Get current buffer row, advance to next */
+        buffer_current      = (unsigned int*) buffer_row_current;
+        buffer_row_current += stride;
+
+        /* Get current framebuffer row, advance to next */
+        fb_current      = fb_row_current;
+        fb_row_current += fb_stride;
+
+        for (dx = 0; dx<w; dx++) {
+
+            unsigned char alpha, red, green, blue;
+            unsigned int v;
+
+            /* Read current pixel value */
+            switch (bpp) {
+                case 4:
+                    v = *((uint32_t*) fb_current);
+                    break;
+
+                case 2:
+                    v = *((uint16_t*) fb_current);
+                    break;
+
+                default:
+                    v = *((uint8_t*)  fb_current);
+            }
+
+            /* Translate mask to alpha */
+            if (*(fb_mask++)) alpha = 0xFF;
+            else              alpha = 0x00;
+
+            /* Translate value to RGB */
+            red   = (v >> client->format.redShift)   * 0x100 / (client->format.redMax  + 1);
+            green = (v >> client->format.greenShift) * 0x100 / (client->format.greenMax+ 1);
+            blue  = (v >> client->format.blueShift)  * 0x100 / (client->format.blueMax + 1);
+
+            /* Output ARGB */
+            if (vnc_client->settings->swap_red_blue)
+                *(buffer_current++) = (alpha << 24) | (blue << 16) | (green << 8) | red;
+            else
+                *(buffer_current++) = (alpha << 24) | (red  << 16) | (green << 8) | blue;
+
+            /* Next VNC pixel */
+            fb_current += bpp;
+
+        }
+    }
+
+    /* Update stored cursor information */
+    guac_common_cursor_set_argb(vnc_client->display->cursor, x, y,
+            buffer, w, h, stride);
+
+    /* Free surface */
+    free(buffer);
+
+    /* libvncclient does not free rcMask as it does rcSource */
+    free(client->rcMask);
+}
+
 /**
  * Overridden implementation of the rfb_MallocFrameBuffer function invoked by
  * libVNCServer when the display is being resized (or initially allocated).
@@ -337,6 +449,42 @@ rfbBool guac_vnc_malloc_framebuffer(rfbClient* rfb_client) {
 
     /* Use original, wrapped proc */
     return vnc_client->rfb_MallocFrameBuffer(rfb_client);
+}
+
+/**
+ * Handler for clipboard data received via VNC, invoked by libVNCServer
+ * whenever text has been copied or cut within the VNC session.
+ *
+ * @param client
+ *     The VNC client associated with the session in which the user cut or
+ *     copied text.
+ *
+ * @param text
+ *     The string of cut/copied text.
+ *
+ * @param textlen
+ *     The number of bytes in the string of cut/copied text.
+ */
+void guac_vnc_cut_text(rfbClient* client, const char* text, int textlen) {
+
+    guac_client* gc = rfbClientGetClientData(client, GUAC_VNC_CLIENT_KEY);
+    guac_vnc_client* vnc_client = (guac_vnc_client*) gc->data;
+
+    char received_data[GUAC_VNC_CLIPBOARD_MAX_LENGTH];
+
+    const char* input = text;
+    char* output = received_data;
+    guac_iconv_read* reader = vnc_client->clipboard_reader;
+
+    /* Convert clipboard contents */
+    guac_iconv(reader, &input, textlen,
+               GUAC_WRITE_UTF8, &output, sizeof(received_data));
+
+    /* Send converted data */
+    guac_common_clipboard_reset(vnc_client->clipboard, "text/plain");
+    guac_common_clipboard_append(vnc_client->clipboard, received_data, output - received_data);
+    guac_common_clipboard_send(vnc_client->clipboard, gc);
+
 }
 
 /**
@@ -460,6 +608,65 @@ static int guac_vnc_wait_for_messages(rfbClient* rfb_client, int timeout) {
 
     /* If no data on buffer, wait for data on socket */
     return WaitForMessage(rfb_client, timeout);
+
+}
+
+/**
+ * Sets the encoding of clipboard data exchanged with the VNC server to the
+ * encoding having the given name. If the name is NULL, or is invalid, the
+ * standard ISO8859-1 encoding will be used.
+ *
+ * @param client
+ *     The client to set the clipboard encoding of.
+ *
+ * @param name
+ *     The name of the encoding to use for all clipboard data. Valid values
+ *     are: "ISO8859-1", "UTF-8", "UTF-16", "CP1252", or NULL.
+ *
+ * @return
+ *     Zero if the chosen encoding is standard for VNC, or non-zero if the VNC
+ *     standard is being violated.
+ */
+int guac_vnc_set_clipboard_encoding(guac_client* client,
+        const char* name) {
+
+    guac_vnc_client* vnc_client = (guac_vnc_client*) client->data;
+
+    /* Use ISO8859-1 if explicitly selected or NULL */
+    if (name == NULL || strcmp(name, "ISO8859-1") == 0) {
+        vnc_client->clipboard_reader = GUAC_READ_ISO8859_1;
+        vnc_client->clipboard_writer = GUAC_WRITE_ISO8859_1;
+        return 0;
+    }
+
+    /* UTF-8 */
+    if (strcmp(name, "UTF-8") == 0) {
+        vnc_client->clipboard_reader = GUAC_READ_UTF8;
+        vnc_client->clipboard_writer = GUAC_WRITE_UTF8;
+        return 1;
+    }
+
+    /* UTF-16 */
+    if (strcmp(name, "UTF-16") == 0) {
+        vnc_client->clipboard_reader = GUAC_READ_UTF16;
+        vnc_client->clipboard_writer = GUAC_WRITE_UTF16;
+        return 1;
+    }
+
+    /* CP1252 */
+    if (strcmp(name, "CP1252") == 0) {
+        vnc_client->clipboard_reader = GUAC_READ_CP1252;
+        vnc_client->clipboard_writer = GUAC_WRITE_CP1252;
+        return 1;
+    }
+
+    /* If encoding unrecognized, warn and default to ISO8859-1 */
+    guac_client_log(client, GUAC_LOG_WARNING,
+            "Encoding '%s' is invalid. Defaulting to ISO8859-1.", name);
+
+    vnc_client->clipboard_reader = GUAC_READ_ISO8859_1;
+    vnc_client->clipboard_writer = GUAC_WRITE_ISO8859_1;
+    return 0;
 
 }
 

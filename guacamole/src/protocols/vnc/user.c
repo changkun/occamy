@@ -19,12 +19,14 @@
 
 #include "config.h"
 
-#include "clipboard.h"
+#include "client.h"
 #include "common/display.h"
+#include "common/iconv.h"
 #include "user.h"
 #include "vnc.h"
 
 #include <guacamole/client.h>
+#include <guacamole/stream.h>
 #include <guacamole/socket.h>
 #include <guacamole/user.h>
 #include <rfb/rfbclient.h>
@@ -62,6 +64,61 @@ int guac_vnc_user_key_handler(guac_user* user, int keysym, int pressed) {
     /* Send VNC event only if finished connecting */
     if (rfb_client != NULL)
         SendKeyEvent(rfb_client, keysym, pressed);
+
+    return 0;
+}
+
+/**
+ * Handler for stream data related to clipboard.
+ */
+int guac_vnc_clipboard_blob_handler(guac_user* user, guac_stream* stream,
+        void* data, int length) {
+
+    /* Append new data */
+    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
+    guac_common_clipboard_append(vnc_client->clipboard, (char*) data, length);
+
+    return 0;
+}
+
+/**
+ * Handler for end-of-stream related to clipboard.
+ */
+int guac_vnc_clipboard_end_handler(guac_user* user, guac_stream* stream) {
+
+    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
+    rfbClient* rfb_client = vnc_client->rfb_client;
+
+    char output_data[GUAC_VNC_CLIPBOARD_MAX_LENGTH];
+
+    const char* input = vnc_client->clipboard->buffer;
+    char* output = output_data;
+    guac_iconv_write* writer = vnc_client->clipboard_writer;
+
+    /* Convert clipboard contents */
+    guac_iconv(GUAC_READ_UTF8, &input, vnc_client->clipboard->length,
+               writer, &output, sizeof(output_data));
+
+    /* Send via VNC only if finished connecting */
+    if (rfb_client != NULL)
+        SendClientCutText(rfb_client, output_data, output - output_data);
+
+    return 0;
+}
+
+/**
+ * Handler for inbound clipboard data from Guacamole users.
+ */
+int guac_vnc_clipboard_handler(guac_user* user, guac_stream* stream,
+        char* mimetype) {
+
+    /* Clear clipboard and prepare for new data */
+    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
+    guac_common_clipboard_reset(vnc_client->clipboard, mimetype);
+
+    /* Set handlers for clipboard stream */
+    stream->blob_handler = guac_vnc_clipboard_blob_handler;
+    stream->end_handler = guac_vnc_clipboard_end_handler;
 
     return 0;
 }

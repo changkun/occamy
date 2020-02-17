@@ -24,16 +24,12 @@ lib_LTLIBRARIES = libguac-client-vnc.la
 
 libguac_client_vnc_la_SOURCES = \
     client.c                    \
-    clipboard.c                 \
-    cursor.c                    \
     settings.c                  \
     user.c                      \
     vnc.c
     
 noinst_HEADERS =      \
     client.h          \
-    clipboard.h       \
-    cursor.h          \
     settings.h        \
     user.h            \
     vnc.h
