@@ -5,7 +5,7 @@
 package lib
 
 /*
-#cgo LDFLAGS: -L/usr/local/lib -lguac
+#cgo LDFLAGS: -L${SRCDIR}/../guacamole/build/lib -lguac
 #include <stdlib.h>
 #include "../guacamole/src/libguac/guacamole/parser.h"
 #include "../guacamole/src/libguac/guacamole/user.h"

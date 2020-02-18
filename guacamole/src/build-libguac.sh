@@ -46,4 +46,3 @@ autoreconf -fi
 ./configure --prefix="$PREFIX_DIR"
 make
 make install
-ldconfig
