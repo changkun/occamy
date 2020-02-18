@@ -12,19 +12,14 @@ Occamy is an open source protocol and proxy for modern remote desktop control th
 
 ### Build
 
-Occamy support deployment with Docker or container orchestration tool, e.g. K8s. 
-To build Occamy, you need:
-
 ```
-git clone https://github.com/changkun/occamy.git
-cd occamy
-make build
-```
-
-Then you should be able to run occamy with:
-
-```
-docker run -itd occamy:latest
+./guacamole/src/build-libguac.sh ./guacamole/ $(pwd)/guacamole/build/
+go build -a -mod vendor -x -i -ldflags \
+    "-X /occamy/config.Version=v$(git describe --always --tags) \
+    -X /occamy/config.BuildTime=$(date +%F) \
+    -X /occamy/config.GitCommit=$(git rev-parse HEAD)" \
+    -o occamyd occamy.go
+./occamyd
 ```
 
 ### APIs

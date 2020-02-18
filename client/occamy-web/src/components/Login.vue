@@ -37,7 +37,7 @@ export default {
       credentials: {
           'vnc': {
             protocol: 'vnc',
-            host: '172.16.238.11:5901',
+            host: 'localhost:5901',
             username: '',
             password: 'vncpassword'
           }
