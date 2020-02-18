@@ -29,7 +29,7 @@
 #include "stream.h"
 #include "timestamp.h"
 #include "user.h"
-
+#include "vnc.h"
 #include <dlfcn.h>
 #include <inttypes.h>
 #include <pthread.h>

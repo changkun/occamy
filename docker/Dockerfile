@@ -29,7 +29,7 @@ RUN mkdir /golang                                      && \
     wget https://dl.google.com/go/go${GO_VERSION}.linux-amd64.tar.gz && \
     tar -xvf go${GO_VERSION}.linux-amd64.tar.gz
 ADD . .
-RUN ./guacamole/src/build-libguac.sh /occamy/guacamole
+RUN ./guacamole/src/build-libguac.sh /occamy/guacamole /occamy/guacamole/build
 RUN /golang/go/bin/go build -mod vendor -x -ldflags \
     "-X /occamy/config.Version=v$(git describe --always --tags) \
     -X /occamy/config.BuildTime=$(date +%F) \

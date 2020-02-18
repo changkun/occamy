@@ -70,6 +70,9 @@ libguac_la_SOURCES =   \
     unicode.c          \
     user.c             \
     user-handlers.c    \
+    cursor.c           \
+    display.c          \
+    surface.c          \
     vnc.c
 
 libguac_la_CFLAGS = \
@@ -80,6 +83,8 @@ libguac_la_LDFLAGS =     \
     -no-undefined        \
     @CAIRO_LIBS@         \
     @DL_LIBS@            \
+    @CAIRO_LIBS@         \
+    @VNC_LIBS@           \
     @PNG_LIBS@           \
     @PTHREAD_LIBS@
 

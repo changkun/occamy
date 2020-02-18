@@ -17,8 +17,8 @@
  * under the License.
  */
 
-#include "common/cursor.h"
-#include "common/surface.h"
+#include "cursor.h"
+#include "surface.h"
 
 #include <cairo/cairo.h>
 #include <guacamole/client.h>

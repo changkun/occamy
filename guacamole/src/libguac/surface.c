@@ -18,7 +18,7 @@
  */
 
 #include "config.h"
-#include "common/surface.h"
+#include "surface.h"
 
 #include <cairo/cairo.h>
 #include <guacamole/client.h>

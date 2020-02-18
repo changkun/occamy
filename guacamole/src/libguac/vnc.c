@@ -19,8 +19,8 @@
 
 #include "config.h"
 
-#include "common/cursor.h"
-#include "common/display.h"
+#include "cursor.h"
+#include "display.h"
 #include "vnc.h"
 
 #include <pthread.h>

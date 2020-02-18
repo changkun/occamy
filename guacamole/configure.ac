@@ -102,10 +102,6 @@ AC_TYPE_SSIZE_T
 AC_SUBST([LIBGUAC_LTLIB],   '$(top_builddir)/src/libguac/libguac.la')
 AC_SUBST([LIBGUAC_INCLUDE], '-I$(top_srcdir)/src/libguac')
 
-# Common non-libguac utility library
-AC_SUBST([COMMON_LTLIB],   '$(top_builddir)/src/common/libguac_common.la')
-AC_SUBST([COMMON_INCLUDE], '-I$(top_srcdir)/src/common')
-
 # Init directory
 AC_ARG_WITH(init_dir,
             [AS_HELP_STRING([--with-init-dir=<path>],
@@ -200,9 +196,7 @@ fi
 #
 
 AC_CONFIG_FILES([Makefile
-                 src/common/Makefile
-                 src/libguac/Makefile
-                 src/protocols/vnc/Makefile])
+                 src/libguac/Makefile])
 AC_OUTPUT
 
 #

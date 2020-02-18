@@ -20,10 +20,6 @@
 ACLOCAL_AMFLAGS = -I m4
 
 # Subprojects
-DIST_SUBDIRS =           \
-    src/libguac          \
-    src/common
+DIST_SUBDIRS = src/libguac
 
-SUBDIRS =        \
-    src/libguac  \
-    src/common
+SUBDIRS = src/libguac

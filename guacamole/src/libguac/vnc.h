@@ -22,8 +22,8 @@
 
 #include "config.h"
 
-#include "common/display.h"
-#include "common/surface.h"
+#include "display.h"
+#include "surface.h"
 
 #include <guacamole/client.h>
 #include <guacamole/layer.h>
@@ -164,6 +164,8 @@ typedef struct guac_vnc_client {
  *     Always NULL.
  */
 void* guac_vnc_client_thread(void* data);
+
+int guac_client_init(guac_client* client);
 
 #endif
 
