@@ -38,7 +38,6 @@ __guac_instruction_handler_mapping __guac_instruction_handler_map[] = {
    {"sync",       __guac_handle_sync},
    {"mouse",      __guac_handle_mouse},
    {"key",        __guac_handle_key},
-   {"clipboard",  __guac_handle_clipboard},
    {"disconnect", __guac_handle_disconnect},
    {"size",       __guac_handle_size},
    {"file",       __guac_handle_file},
@@ -276,29 +275,6 @@ static guac_stream* __init_input_stream(guac_user* user, int stream_index) {
     stream->end_handler = NULL;
 
     return stream;
-
-}
-
-int __guac_handle_clipboard(guac_user* user, int argc, char** argv) {
-
-    /* Pull corresponding stream */
-    int stream_index = atoi(argv[0]);
-    guac_stream* stream = __init_input_stream(user, stream_index);
-    if (stream == NULL)
-        return 0;
-
-    /* If supported, call handler */
-    if (user->clipboard_handler)
-        return user->clipboard_handler(
-            user,
-            stream,
-            argv[1] /* mimetype */
-        );
-
-    /* Otherwise, abort */
-    guac_protocol_send_ack(user->socket, stream,
-            "Clipboard unsupported", GUAC_PROTOCOL_STATUS_UNSUPPORTED);
-    return 0;
 
 }
 

@@ -22,9 +22,7 @@
 
 #include "config.h"
 
-#include "common/clipboard.h"
 #include "common/display.h"
-#include "common/iconv.h"
 #include "common/surface.h"
 
 #include <guacamole/client.h>
@@ -113,12 +111,6 @@ typedef struct guac_vnc_settings {
      */
     int retries;
 
-    /**
-     * The encoding to use for clipboard data sent to the VNC server, or NULL
-     * to use the encoding required by the VNC standard.
-     */
-    char* clipboard_encoding;
-
 } guac_vnc_settings;
 
 /**
@@ -157,21 +149,6 @@ typedef struct guac_vnc_client {
      * The current display state.
      */
     guac_common_display* display;
-
-    /**
-     * Internal clipboard.
-     */
-    guac_common_clipboard* clipboard;
-
-    /**
-     * Clipboard encoding-specific reader.
-     */
-    guac_iconv_read* clipboard_reader;
-
-    /**
-     * Clipboard encoding-specific writer.
-     */
-    guac_iconv_write* clipboard_writer;
 
 } guac_vnc_client;
 

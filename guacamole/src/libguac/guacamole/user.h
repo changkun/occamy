@@ -64,18 +64,6 @@
  */
 #define GUAC_USER_UNDEFINED_OBJECT_INDEX -1
 
-/**
- * The stream name reserved for the root of a Guacamole protocol object.
- */
-#define GUAC_USER_OBJECT_ROOT_NAME "/"
-
-/**
- * The mimetype of a stream containing a map of available stream names to their
- * corresponding mimetypes. The root of a Guacamole protocol object is
- * guaranteed to have this type.
- */
-#define GUAC_USER_STREAM_INDEX_MIMETYPE "application/vnd.glyptodon.guacamole.stream-index+json"
-
 struct guac_user_info {
 
     /**
@@ -93,19 +81,6 @@ struct guac_user_info {
      * screen, honoring the display size request is recommended.
      */
     int optimal_height;
-
-    /**
-     * NULL-terminated array of client-supported video mimetypes. If the client
-     * does not support video at all, this will be NULL.
-     */
-    const char** video_mimetypes;
-
-    /**
-     * NULL-terminated array of client-supported image mimetypes. Though all
-     * supported image mimetypes will be listed here, it can be safely assumed
-     * that all clients will support at least "image/png".
-     */
-    const char** image_mimetypes;
 
     /**
      * The DPI of the physical remote display if configured for the optimal
@@ -269,27 +244,6 @@ struct guac_user {
      * @endcode
      */
     guac_user_key_handler* key_handler;
-
-    /**
-     * Handler for clipboard events sent by the Guacamole web-client. This
-     * handler will be called whenever the web-client sets the data of the
-     * clipboard.
-     *
-     * The handler takes a guac_stream, which contains the stream index and
-     * will persist through the duration of the transfer, and the mimetype
-     * of the data being transferred.
-     *
-     * Example:
-     * @code
-     *     int clipboard_handler(guac_user* user, guac_stream* stream,
-     *             char* mimetype);
-     *
-     *     int guac_user_init(guac_user* user, int argc, char** argv) {
-     *         user->clipboard_handler = clipboard_handler;
-     *     }
-     * @endcode
-     */
-    guac_user_clipboard_handler* clipboard_handler;
 
     /**
      * Handler for size events sent by the Guacamole web-client.

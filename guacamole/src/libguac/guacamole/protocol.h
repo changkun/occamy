@@ -163,27 +163,6 @@ int guac_protocol_send_sync(guac_socket* socket, guac_timestamp timestamp);
 int guac_protocol_send_body(guac_socket* socket, const guac_object* object,
         const guac_stream* stream, const char* mimetype, const char* name);
 
-/**
- * Sends a filesystem instruction over the given guac_socket connection.
- *
- * If an error occurs sending the instruction, a non-zero value is
- * returned, and guac_error is set appropriately.
- *
- * @param socket
- *     The guac_socket connection to use.
- *
- * @param object
- *     The object representing the filesystem being exposed.
- *
- * @param name
- *     A name describing the filesystem being exposed.
- *
- * @return
- *     Zero on success, non-zero on error.
- */
-int guac_protocol_send_filesystem(guac_socket* socket,
-        const guac_object* object, const char* name);
-
 /* MEDIA INSTRUCTIONS */
 
 /**
@@ -461,20 +440,6 @@ int guac_protocol_send_size(guac_socket* socket, const guac_layer* layer,
         int w, int h);
 
 /* TEXT INSTRUCTIONS */
-
-/**
- * Sends a clipboard instruction over the given guac_socket connection.
- *
- * If an error occurs sending the instruction, a non-zero value is
- * returned, and guac_error is set appropriately.
- *
- * @param socket The guac_socket connection to use.
- * @param stream The stream to use.
- * @param mimetype The mimetype of the clipboard data being sent.
- * @return Zero on success, non-zero on error.
- */
-int guac_protocol_send_clipboard(guac_socket* socket, const guac_stream* stream,
-        const char* mimetype);
 
 /**
  * Sends a name instruction over the given guac_socket connection.

@@ -19,10 +19,8 @@
 
 #include "config.h"
 
-#include "common/clipboard.h"
 #include "common/cursor.h"
 #include "common/display.h"
-#include "common/iconv.h"
 #include "vnc.h"
 
 #include <pthread.h>
@@ -71,11 +69,6 @@
 #define GUAC_VNC_CONNECT_INTERVAL 1000
 
 /**
- * The maximum number of bytes to allow within the clipboard.
- */
-#define GUAC_VNC_CLIPBOARD_MAX_LENGTH 262144
-
-/**
  * Key which can be used with the rfbClientGetClientData function to return
  * the associated guac_client.
  */
@@ -111,61 +104,6 @@ int guac_vnc_user_key_handler(guac_user* user, int keysym, int pressed) {
     /* Send VNC event only if finished connecting */
     if (rfb_client != NULL)
         SendKeyEvent(rfb_client, keysym, pressed);
-
-    return 0;
-}
-
-/**
- * Handler for stream data related to clipboard.
- */
-int guac_vnc_clipboard_blob_handler(guac_user* user, guac_stream* stream,
-        void* data, int length) {
-
-    /* Append new data */
-    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
-    guac_common_clipboard_append(vnc_client->clipboard, (char*) data, length);
-
-    return 0;
-}
-
-/**
- * Handler for end-of-stream related to clipboard.
- */
-int guac_vnc_clipboard_end_handler(guac_user* user, guac_stream* stream) {
-
-    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
-    rfbClient* rfb_client = vnc_client->rfb_client;
-
-    char output_data[GUAC_VNC_CLIPBOARD_MAX_LENGTH];
-
-    const char* input = vnc_client->clipboard->buffer;
-    char* output = output_data;
-    guac_iconv_write* writer = vnc_client->clipboard_writer;
-
-    /* Convert clipboard contents */
-    guac_iconv(GUAC_READ_UTF8, &input, vnc_client->clipboard->length,
-               writer, &output, sizeof(output_data));
-
-    /* Send via VNC only if finished connecting */
-    if (rfb_client != NULL)
-        SendClientCutText(rfb_client, output_data, output - output_data);
-
-    return 0;
-}
-
-/**
- * Handler for inbound clipboard data from Guacamole users.
- */
-int guac_vnc_clipboard_handler(guac_user* user, guac_stream* stream,
-        char* mimetype) {
-
-    /* Clear clipboard and prepare for new data */
-    guac_vnc_client* vnc_client = (guac_vnc_client*) user->client->data;
-    guac_common_clipboard_reset(vnc_client->clipboard, mimetype);
-
-    /* Set handlers for clipboard stream */
-    stream->blob_handler = guac_vnc_clipboard_blob_handler;
-    stream->end_handler = guac_vnc_clipboard_end_handler;
 
     return 0;
 }
@@ -225,14 +163,6 @@ enum VNC_ARGS_IDX {
      */
     IDX_AUTORETRY,
 
-    /**
-     * The encoding to use for clipboard data sent to the VNC server if we are
-     * going to be deviating from the standard (which mandates ISO 8829-1).
-     * Valid values are "ISO8829-1" (the only legal value with respect to the
-     * VNC standard), "UTF-8", "UTF-16", and "CP2252".
-     */
-    IDX_CLIPBOARD_ENCODING,
-
 #ifdef ENABLE_VNC_REPEATER
     /**
      * The VNC host to connect to, if using a repeater.
@@ -278,7 +208,6 @@ const char* GUAC_VNC_CLIENT_ARGS[] = {
     "color-depth",
     "cursor",
     "autoretry",
-    "clipboard-encoding",
 
 #ifdef ENABLE_VNC_REPEATER
     "dest-host",
@@ -400,11 +329,6 @@ guac_vnc_settings* guac_vnc_parse_args(guac_user* user,
                 IDX_LISTEN_TIMEOUT, 5000);
 #endif
 
-    /* Set clipboard encoding if specified */
-    settings->clipboard_encoding =
-        guac_user_parse_args_string(user, GUAC_VNC_CLIENT_ARGS, argv,
-                IDX_CLIPBOARD_ENCODING, NULL);
-
     return settings;
 
 }
@@ -458,10 +382,9 @@ int guac_vnc_user_join_handler(guac_user* user, int argc, char** argv) {
     /* Only handle events if not read-only */
     if (!settings->read_only) {
 
-        /* General mouse/keyboard/clipboard events */
+        /* General mouse/keyboard events */
         user->mouse_handler     = guac_vnc_user_mouse_handler;
         user->key_handler       = guac_vnc_user_key_handler;
-        user->clipboard_handler = guac_vnc_clipboard_handler;
 
     }
 
@@ -479,7 +402,6 @@ int guac_vnc_user_join_handler(guac_user* user, int argc, char** argv) {
 void guac_vnc_settings_free(guac_vnc_settings* settings) {
 
     /* Free settings strings */
-    free(settings->clipboard_encoding);
     free(settings->encodings);
     free(settings->hostname);
 
@@ -536,10 +458,6 @@ int guac_vnc_client_free_handler(guac_client* client) {
         rfbClientCleanup(rfb_client);
     }
 
-    /* Free clipboard */
-    if (vnc_client->clipboard != NULL)
-        guac_common_clipboard_free(vnc_client->clipboard);
-
     /* Free display */
     if (vnc_client->display != NULL)
         guac_common_display_free(vnc_client->display);
@@ -561,9 +479,6 @@ int guac_client_init(guac_client* client) {
     /* Alloc client data */
     guac_vnc_client* vnc_client = calloc(1, sizeof(guac_vnc_client));
     client->data = vnc_client;
-
-    /* Init clipboard */
-    vnc_client->clipboard = guac_common_clipboard_alloc(GUAC_VNC_CLIPBOARD_MAX_LENGTH);
 
     /* Set handlers */
     client->join_handler = guac_vnc_user_join_handler;
@@ -980,42 +895,6 @@ rfbBool guac_vnc_malloc_framebuffer(rfbClient* rfb_client) {
 }
 
 /**
- * Handler for clipboard data received via VNC, invoked by libVNCServer
- * whenever text has been copied or cut within the VNC session.
- *
- * @param client
- *     The VNC client associated with the session in which the user cut or
- *     copied text.
- *
- * @param text
- *     The string of cut/copied text.
- *
- * @param textlen
- *     The number of bytes in the string of cut/copied text.
- */
-void guac_vnc_cut_text(rfbClient* client, const char* text, int textlen) {
-
-    guac_client* gc = rfbClientGetClientData(client, GUAC_VNC_CLIENT_KEY);
-    guac_vnc_client* vnc_client = (guac_vnc_client*) gc->data;
-
-    char received_data[GUAC_VNC_CLIPBOARD_MAX_LENGTH];
-
-    const char* input = text;
-    char* output = received_data;
-    guac_iconv_read* reader = vnc_client->clipboard_reader;
-
-    /* Convert clipboard contents */
-    guac_iconv(reader, &input, textlen,
-               GUAC_WRITE_UTF8, &output, sizeof(received_data));
-
-    /* Send converted data */
-    guac_common_clipboard_reset(vnc_client->clipboard, "text/plain");
-    guac_common_clipboard_append(vnc_client->clipboard, received_data, output - received_data);
-    guac_common_clipboard_send(vnc_client->clipboard, gc);
-
-}
-
-/**
  * Callback which is invoked by libVNCServer when it needs to read the user's
  * VNC password. As ths user's password, if any, will be stored in the
  * connection settings, this function does nothing more than return that value.
@@ -1059,9 +938,6 @@ rfbClient* guac_vnc_get_client(guac_client* client) {
 
     /* Do not handle clipboard and local cursor if read-only */
     if (vnc_settings->read_only == 0) {
-
-        /* Clipboard */
-        rfb_client->GotXCutText = guac_vnc_cut_text;
 
         /* Set remote cursor */
         if (vnc_settings->remote_cursor) {
@@ -1152,76 +1028,11 @@ static int guac_vnc_wait_for_messages(rfbClient* rfb_client, int timeout) {
 
 }
 
-/**
- * Sets the encoding of clipboard data exchanged with the VNC server to the
- * encoding having the given name. If the name is NULL, or is invalid, the
- * standard ISO8859-1 encoding will be used.
- *
- * @param client
- *     The client to set the clipboard encoding of.
- *
- * @param name
- *     The name of the encoding to use for all clipboard data. Valid values
- *     are: "ISO8859-1", "UTF-8", "UTF-16", "CP1252", or NULL.
- *
- * @return
- *     Zero if the chosen encoding is standard for VNC, or non-zero if the VNC
- *     standard is being violated.
- */
-int guac_vnc_set_clipboard_encoding(guac_client* client,
-        const char* name) {
-
-    guac_vnc_client* vnc_client = (guac_vnc_client*) client->data;
-
-    /* Use ISO8859-1 if explicitly selected or NULL */
-    if (name == NULL || strcmp(name, "ISO8859-1") == 0) {
-        vnc_client->clipboard_reader = GUAC_READ_ISO8859_1;
-        vnc_client->clipboard_writer = GUAC_WRITE_ISO8859_1;
-        return 0;
-    }
-
-    /* UTF-8 */
-    if (strcmp(name, "UTF-8") == 0) {
-        vnc_client->clipboard_reader = GUAC_READ_UTF8;
-        vnc_client->clipboard_writer = GUAC_WRITE_UTF8;
-        return 1;
-    }
-
-    /* UTF-16 */
-    if (strcmp(name, "UTF-16") == 0) {
-        vnc_client->clipboard_reader = GUAC_READ_UTF16;
-        vnc_client->clipboard_writer = GUAC_WRITE_UTF16;
-        return 1;
-    }
-
-    /* CP1252 */
-    if (strcmp(name, "CP1252") == 0) {
-        vnc_client->clipboard_reader = GUAC_READ_CP1252;
-        vnc_client->clipboard_writer = GUAC_WRITE_CP1252;
-        return 1;
-    }
-
-    /* If encoding unrecognized, warn and default to ISO8859-1 */
-    guac_client_log(client, GUAC_LOG_WARNING,
-            "Encoding '%s' is invalid. Defaulting to ISO8859-1.", name);
-
-    vnc_client->clipboard_reader = GUAC_READ_ISO8859_1;
-    vnc_client->clipboard_writer = GUAC_WRITE_ISO8859_1;
-    return 0;
-
-}
-
 void* guac_vnc_client_thread(void* data) {
 
     guac_client* client = (guac_client*) data;
     guac_vnc_client* vnc_client = (guac_vnc_client*) client->data;
     guac_vnc_settings* settings = vnc_client->settings;
-
-    /* Configure clipboard encoding */
-    if (guac_vnc_set_clipboard_encoding(client, settings->clipboard_encoding)) {
-        guac_client_log(client, GUAC_LOG_INFO, "Using non-standard VNC "
-                "clipboard encoding: '%s'.", settings->clipboard_encoding);
-    }
 
     /* Set up libvncclient logging */
     rfbClientLog = guac_vnc_client_log_info;

@@ -116,29 +116,6 @@ typedef int guac_user_mouse_handler(guac_user* user, int x, int y,
 typedef int guac_user_key_handler(guac_user* user, int keysym, int pressed);
 
 /**
- * Handler for Guacamole clipboard streams received from a user. Each such
- * clipboard stream begins when the user sends a "clipboard" instruction. To
- * handle received data along this stream, implementations of this handler
- * must assign blob and end handlers to the given stream object.
- *
- * @param user
- *     The user that opened the clipboard stream.
- *
- * @param stream
- *     The stream object allocated by libguac to represent the clipboard stream
- *     opened by the user.
- *
- * @param mimetype
- *     The mimetype of the data that will be sent along the stream.
- *
- * @return
- *     Zero if the opening of the clipboard stream has been handled
- *     successfully, or non-zero if an error occurs.
- */
-typedef int guac_user_clipboard_handler(guac_user* user, guac_stream* stream,
-        char* mimetype);
-
-/**
  * Handler for Guacamole size events, invoked when a "size" instruction has
  * been received from a user. A "size" instruction indicates that the desired
  * display size has changed.

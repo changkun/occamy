@@ -787,7 +787,7 @@ Occamy.Client = function(tunnel) {
      * stream with this Occamy.Client. Note that this stream will not yet
      * exist as far as the other end of the Occamy connection is concerned.
      * Streams exist within the Occamy protocol only when referenced by an
-     * instruction which creates the stream, such as a "clipboard", "file", or
+     * instruction which creates the stream, such as a "file", or
      * "pipe" instruction.
      *
      * @returns {Occamy.OutputStream}
@@ -836,23 +836,6 @@ Occamy.Client = function(tunnel) {
         // Allocate and associate stream with pipe metadata
         var stream = guac_client.createOutputStream();
         tunnel.sendMessage("pipe", stream.index, mimetype, name);
-        return stream;
-
-    };
-
-    /**
-     * Opens a new clipboard object for writing, having the given mimetype. The
-     * instruction necessary to create this stream will automatically be sent.
-     *
-     * @param {String} mimetype The mimetype of the data being sent.
-     * @param {String} name The name of the pipe.
-     * @return {Occamy.OutputStream} The created file stream.
-     */
-    this.createClipboardStream = function(mimetype) {
-
-        // Allocate and associate stream with clipboard metadata
-        var stream = guac_client.createOutputStream();
-        tunnel.sendMessage("clipboard", stream.index, mimetype);
         return stream;
 
     };
@@ -992,16 +975,6 @@ Occamy.Client = function(tunnel) {
     this.onerror = null;
 
     /**
-     * Fired when the clipboard of the remote client is changing.
-     * 
-     * @event
-     * @param {Occamy.InputStream} stream The stream that will receive
-     *                                       clipboard data from the server.
-     * @param {String} mimetype The mimetype of the data which will be received.
-     */
-    this.onclipboard = null;
-
-    /**
      * Fired when a file stream is created. The stream provided to this event
      * handler will contain its own event handlers for received data.
      * 
@@ -1012,20 +985,6 @@ Occamy.Client = function(tunnel) {
      * @param {String} filename The name of the file received.
      */
     this.onfile = null;
-
-    /**
-     * Fired when a filesystem object is created. The object provided to this
-     * event handler will contain its own event handlers and functions for
-     * requesting and handling data.
-     *
-     * @event
-     * @param {Occamy.Object} object
-     *     The created filesystem object.
-     *
-     * @param {String} name
-     *     The name of the filesystem.
-     */
-    this.onfilesystem = null;
 
     /**
      * Fired when a pipe stream is created. The stream provided to this event
@@ -1219,23 +1178,6 @@ Occamy.Client = function(tunnel) {
 
         },
 
-        "clipboard": function(parameters) {
-
-            var stream_index = parseInt(parameters[0]);
-            var mimetype = parameters[1];
-
-            // Create stream 
-            if (guac_client.onclipboard) {
-                var stream = streams[stream_index] = new Occamy.InputStream(guac_client, stream_index);
-                guac_client.onclipboard(stream, mimetype);
-            }
-
-            // Otherwise, unsupported
-            else
-                guac_client.sendAck(stream_index, "Clipboard unsupported", 0x0100);
-
-        },
-
         "copy": function(parameters) {
 
             var srcL = getLayer(parseInt(parameters[0]));
@@ -1347,21 +1289,6 @@ Occamy.Client = function(tunnel) {
             // Otherwise, unsupported
             else
                 guac_client.sendAck(stream_index, "File transfer unsupported", 0x0100);
-
-        },
-
-        "filesystem" : function handleFilesystem(parameters) {
-
-            var objectIndex = parseInt(parameters[0]);
-            var name = parameters[1];
-
-            // Create object, if supported
-            if (guac_client.onfilesystem) {
-                var object = objects[objectIndex] = new Occamy.Object(guac_client, objectIndex);
-                guac_client.onfilesystem(object, name);
-            }
-
-            // If unsupported, simply ignore the availability of the filesystem
 
         },
 
@@ -2362,41 +2289,6 @@ Occamy.Display = function() {
         image.onload = task.unblock;
         image.onerror = task.unblock;
         image.src = url;
-
-    };
-
-    /**
-     * Plays the video at the specified URL within this layer. The video
-     * will be loaded automatically, and this and any future operations will
-     * wait for the video to finish loading. Future operations will not be
-     * executed until the video finishes playing.
-     * 
-     * @param {Occamy.Layer} layer The layer to draw upon.
-     * @param {String} mimetype The mimetype of the video to play.
-     * @param {Number} duration The duration of the video in milliseconds.
-     * @param {String} url The URL of the video to play.
-     */
-    this.play = function(layer, mimetype, duration, url) {
-
-        // Start loading the video
-        var video = document.createElement("video");
-        video.type = mimetype;
-        video.src = url;
-
-        // Start copying frames when playing
-        video.addEventListener("play", function() {
-            
-            function render_callback() {
-                layer.drawImage(0, 0, video);
-                if (!video.ended)
-                    window.setTimeout(render_callback, 20);
-            }
-            
-            render_callback();
-            
-        }, false);
-
-        scheduleTask(video.play);
 
     };
 

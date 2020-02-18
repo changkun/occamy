@@ -58,9 +58,6 @@ struct guac_stream {
      *         guac_stream* stream = guac_user_alloc_stream(user);
      *         stream->ack_handler = ack_handler;
      *
-     *         guac_protocol_send_clipboard(user->socket,
-     *             stream, "text/plain");
-     *
      *     }
      * @endcode
      */
@@ -78,10 +75,6 @@ struct guac_stream {
      *     int blob_handler(guac_user* user, guac_stream* stream,
      *             void* data, int length);
      *
-     *     int my_clipboard_handler(guac_user* user, guac_stream* stream,
-     *             char* mimetype) {
-     *         stream->blob_handler = blob_handler;
-     *     }
      * @endcode
      */
     guac_user_blob_handler* blob_handler;
@@ -96,11 +89,6 @@ struct guac_stream {
      * Example:
      * @code
      *     int end_handler(guac_user* user, guac_stream* stream);
-     *
-     *     int my_clipboard_handler(guac_user* user, guac_stream* stream,
-     *             char* mimetype) {
-     *         stream->end_handler = end_handler;
-     *     }
      * @endcode
      */
     guac_user_end_handler* end_handler;

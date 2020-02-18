@@ -167,24 +167,6 @@ int guac_protocol_send_clip(guac_socket* socket, const guac_layer* layer) {
 
 }
 
-int guac_protocol_send_clipboard(guac_socket* socket, const guac_stream* stream,
-        const char* mimetype) {
-
-    int ret_val;
-
-    guac_socket_instruction_begin(socket);
-    ret_val =
-           guac_socket_write_string(socket, "9.clipboard,")
-        || __guac_socket_write_length_int(socket, stream->index)
-        || guac_socket_write_string(socket, ",")
-        || __guac_socket_write_length_string(socket, mimetype)
-        || guac_socket_write_string(socket, ";");
-
-    guac_socket_instruction_end(socket);
-    return ret_val;
-
-}
-
 int guac_protocol_send_copy(guac_socket* socket,
         const guac_layer* srcl, int srcx, int srcy, int w, int h,
         guac_composite_mode mode, const guac_layer* dstl, int dstx, int dsty) {
@@ -314,24 +296,6 @@ int guac_protocol_send_file(guac_socket* socket, const guac_stream* stream,
         || __guac_socket_write_length_int(socket, stream->index)
         || guac_socket_write_string(socket, ",")
         || __guac_socket_write_length_string(socket, mimetype)
-        || guac_socket_write_string(socket, ",")
-        || __guac_socket_write_length_string(socket, name)
-        || guac_socket_write_string(socket, ";");
-
-    guac_socket_instruction_end(socket);
-    return ret_val;
-
-}
-
-int guac_protocol_send_filesystem(guac_socket* socket,
-        const guac_object* object, const char* name) {
-
-    int ret_val;
-
-    guac_socket_instruction_begin(socket);
-    ret_val =
-           guac_socket_write_string(socket, "10.filesystem,")
-        || __guac_socket_write_length_int(socket, object->index)
         || guac_socket_write_string(socket, ",")
         || __guac_socket_write_length_string(socket, name)
         || guac_socket_write_string(socket, ";");
