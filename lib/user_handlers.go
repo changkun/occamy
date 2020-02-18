@@ -15,11 +15,6 @@ const (
 	// UserObjectRootName is the stream name reserved for the root of a
 	// Occamy protocol object.
 	UserObjectRootName = "/"
-	// UserStreamIndexMimetype is the mimetype of a stream containing
-	// a map of available stream names to their corresponding mimetypes.
-	// The root of a Guacamole protocol object is guaranteed to have
-	// this type.
-	UserStreamIndexMimetype = "application/vnd.glyptodon.guacamole.stream-index+json"
 )
 
 // Occamy instruction handler map
@@ -27,7 +22,6 @@ var instructionHandlers = map[string]func(u *User, ins *protocol.Instruction) er
 	"sync":       handleSync,
 	"mouse":      handleMouse,
 	"key":        handleKey,
-	"clipboard":  handleClipboard,
 	"disconnect": handleDisconnect,
 	"size":       handleSize,
 	"file":       handleFile,
@@ -50,11 +44,6 @@ func handleMouse(u *User, ins *protocol.Instruction) error {
 }
 
 func handleKey(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-
-func handleClipboard(u *User, ins *protocol.Instruction) error {
 	// TODO:
 	return nil
 }

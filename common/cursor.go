@@ -11,8 +11,6 @@ import (
 	"github.com/changkun/occamy/lib"
 )
 
-// "github.com/changkun/occamy/lib"
-
 // CursorDefaultSize is the default size of the cursor image buffer.
 const CursorDefaultSize = 64 * 64 * 4
 

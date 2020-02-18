@@ -140,7 +140,7 @@ func (p *proxy) initJWT() {
 // - use the pprof tool to look at the heap profile:
 //   go tool pprof http://0.0.0.0:5636/debug/pprof/heap
 // - look at a 30-second CPU profile:
-//   go tool pprof http://0.0.0.0:5636/debug/pprof/profile
+//   go tool pprof http://0.0.0.0:5636/debug/pprof/profile?seconds=30
 // - look at the goroutine blocking profile, after calling runtime.SetBlockProfileRate:
 //   go tool pprof http://0.0.0.0:5636/debug/pprof/block
 // - collect a 5-second execution trace:

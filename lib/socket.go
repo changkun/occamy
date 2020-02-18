@@ -96,7 +96,6 @@ func (s *Socket) SendBolb()                                                   {}
 func (s *Socket) SendBody()                                                   {}
 func (s *Socket) SendCfill()                                                  {}
 func (s *Socket) SendClip()                                                   {}
-func (s *Socket) SendClipboard()                                              {}
 func (s *Socket) SendCopy()                                                   {}
 func (s *Socket) SendCursor()                                                 {}
 func (s *Socket) SendDisconnect()                                             {}
@@ -104,7 +103,6 @@ func (s *Socket) SendDispose()                                                {}
 func (s *Socket) SendEnd(stream *Stream)                                      {}
 func (s *Socket) SendError()                                                  {}
 func (s *Socket) SendFile()                                                   {}
-func (s *Socket) SendFilesystem()                                             {}
 func (s *Socket) SendMouse()                                                  {}
 func (s *Socket) SendMove()                                                   {}
 func (s *Socket) SendName()                                                   {}

@@ -13,13 +13,10 @@ package lib
 #include "../guacamole/src/libguac/guacamole/protocol.h"
 #include "../guacamole/src/libguac/guacamole/socket.h"
 
-const char *mimetypes[] = {"", NULL};
 void set_user_info(guac_user* user) {
 	user->info.optimal_width = 1024;
 	user->info.optimal_height = 768;
 	user->info.optimal_resolution = 96;
-	user->info.video_mimetypes = (const char**) mimetypes;
-	user->info.image_mimetypes = (const char**) mimetypes;
 }
 int get_args_length(const char** args) {
 	int i = 0;
@@ -103,8 +100,6 @@ type connectInformation struct {
 	optimalWidth      int
 	optimalHeight     int
 	optimalResolution int
-	videoMimetypes    []string
-	imageMimetypes    []string
 }
 
 // NewUser creates a user and associate the user with any specific client

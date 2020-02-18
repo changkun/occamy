@@ -21,9 +21,6 @@ const (
 	// ConnectInterval is the number of milliseconds to wait between
 	// connection attempts.
 	ConnectInterval = 1000
-	// ClipboardMaxLength is the maximum number of bytes to allow within
-	// the clipboard.
-	ClipboardMaxLength = 262144
 	// ClientKey which can be used with the rfbClientGetClientData
 	// function to return the associated guac_client.
 	ClientKey = "GUAC_VNC"
@@ -40,7 +37,6 @@ var clientArgs = []string{
 	"color-depth",
 	"cursor",
 	"autoretry",
-	"clipboard-encoding",
 	"dest-host",
 	"dest-port",
 	"reverse-connect",
@@ -49,15 +45,14 @@ var clientArgs = []string{
 
 // Settings ...
 type Settings struct {
-	hostname          string
-	port              int
-	password          string
-	encoding          string
-	swapRedBlue       bool
-	colorDepth        int
-	readOnly          bool
-	retries           int
-	clipboardEncoding string
+	hostname    string
+	port        int
+	password    string
+	encoding    string
+	swapRedBlue bool
+	colorDepth  int
+	readOnly    bool
+	retries     int
 }
 
 // Parse ...
