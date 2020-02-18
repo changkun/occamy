@@ -20,7 +20,7 @@ ENV LC_ALL=en_US.UTF-8                \
         libtool                       \
         libvncserver-devel            \
         make"                         \
-    GO_VERSION=1.13.8
+    GO_VERSION=1.14rc1
 RUN yum -y update                                                         && \
     yum -y install epel-release $RUNTIME_DEPENDENCIES $BUILD_DEPENDENCIES
 WORKDIR /occamy
@@ -36,5 +36,4 @@ RUN /golang/go/bin/go build -mod vendor -x -ldflags \
     -X /occamy/config.GitCommit=$(git rev-parse HEAD)" \
     -o occamyd occamy.go
 
-EXPOSE 5636
 CMD ["/occamy/occamyd"]
