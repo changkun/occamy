@@ -344,13 +344,6 @@ struct guac_client {
      * @endcode
      */
     const char** args;
-
-    /**
-     * Handle to the dlopen()'d plugin, which should be given to dlclose() when
-     * this client is freed. This is only assigned if guac_client_load_plugin()
-     * is used.
-     */
-    void* __plugin_handle;
 };
 
 /**

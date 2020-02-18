@@ -22,14 +22,8 @@ ACLOCAL_AMFLAGS = -I m4
 # Subprojects
 DIST_SUBDIRS =           \
     src/libguac          \
-    src/common           \
-    src/protocols/vnc
+    src/common
 
 SUBDIRS =        \
     src/libguac  \
     src/common
-
-if ENABLE_VNC
-SUBDIRS += src/protocols/vnc
-endif
-
