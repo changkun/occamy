@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	maxc            = 10
+	maxc            = 20
 	debug           = false
 	endpointLogin   = "http://0.0.0.0:5636/api/v1/login"
 	endpointConnect = "ws://0.0.0.0:5636/api/v1/connect"
@@ -92,6 +92,14 @@ func successConnect(url string) error {
 		if debug {
 			fmt.Println("server: ", string(data))
 		}
+		// TODO: handle server side errors to prevent pause?
+		if len(data) > 8 && string(data[0:8]) == "5.error" {
+			err := conn.Close()
+			if err != nil {
+				return fmt.Errorf("connection: received error from server: %v, err: %v", data, err)
+			}
+			return fmt.Errorf("connection: received error from server: %v, err: %v", data, err)
+		}
 		if len(data) > 6 && string(data[0:6]) == "4.sync" {
 			if debug {
 				fmt.Println("client: ", string(data))
@@ -149,13 +157,13 @@ func TestConnectionPressure(t *testing.T) {
 	protos := []string{
 		"vnc",
 	}
-	connectors := map[string]func(string) error{"success": successConnect, "fail": failConnect}
+	connectors := map[string]func(string) error{"success": successConnect}
 	var wg sync.WaitGroup
 	for i := 1; i <= maxc; i++ {
 		for _, proto := range protos {
 			for name, connector := range connectors {
 				wg.Add(1)
-				// time.Sleep(time.Second)
+				time.Sleep(time.Second)
 				go func(name string, connector func(string) error, proto string, i int) {
 					defer wg.Done()
 
