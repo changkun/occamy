@@ -28,9 +28,6 @@ func init() {
 
 // Run is an export method that serves occamy proxy
 func Run() {
-	log.SetPrefix("occamy: ")
-	log.SetFlags(log.LstdFlags | log.Lshortfile | log.Lmsgprefix)
-
 	proxy := &proxy{
 		sessions: make(map[string]*Session),
 		upgrader: &websocket.Upgrader{
@@ -86,7 +83,6 @@ func (p *proxy) routers() (r *gin.Engine) {
 		r.StaticFS("/static", http.Dir("./client/occamy-web/dist"))
 	}
 	v1 := r.Group("/api/v1")
-	v1.GET("/ping", p.Ping)
 	if config.Runtime.Client {
 		v1.POST("/login", p.jwtm.LoginHandler)
 	}

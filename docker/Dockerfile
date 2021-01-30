@@ -49,11 +49,7 @@ RUN mkdir /golang                                      && \
     tar -xvf go${GO_VERSION}.linux-amd64.tar.gz
 ADD . .
 RUN ./guacamole/src/build-libguac.sh /occamy/guacamole
-RUN /golang/go/bin/go build -mod vendor -x -ldflags \
-    "-X /occamy/config.Version=v$(git describe --always --tags) \
-    -X /occamy/config.BuildTime=$(date +%F) \
-    -X /occamy/config.GitCommit=$(git rev-parse HEAD)" \
-    -o occamyd occamy.go
+RUN /golang/go/bin/go build -mod vendor -x -o occamyd
 
 EXPOSE 5636
 CMD ["/occamy/occamyd"]
