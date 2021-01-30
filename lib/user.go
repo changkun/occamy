@@ -58,8 +58,8 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/changkun/occamy/config"
-	"github.com/changkun/occamy/protocol"
+	"changkun.de/x/occamy/config"
+	"changkun.de/x/occamy/protocol"
 	"github.com/sirupsen/logrus"
 )
 

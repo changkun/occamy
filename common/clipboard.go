@@ -7,7 +7,7 @@ package common
 import (
 	"sync"
 
-	"github.com/changkun/occamy/lib"
+	"changkun.de/x/occamy/lib"
 	"github.com/sirupsen/logrus"
 )
 

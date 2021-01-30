@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
+	"changkun.de/x/occamy/config"
+	"changkun.de/x/occamy/protocol"
 	jwt "github.com/appleboy/gin-jwt/v2"
-	"github.com/changkun/occamy/config"
-	"github.com/changkun/occamy/protocol"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"

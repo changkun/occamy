@@ -40,7 +40,7 @@ LENGTH.VALUE
 ```
 {
       protocol: "vnc",
-      host: "172.16.238.11:5901",
+      host: "172.16.239.11:5901",
       username: "",
       password: "vncpassword"
 }

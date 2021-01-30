@@ -11,7 +11,7 @@ services:
     working_dir: /occamy
     networks:
       occamy_network:
-        ipv4_address: 172.16.238.10
+        ipv4_address: 172.16.239.10
     cap_add:
       - SYS_PTRACE
     ports:
@@ -26,7 +26,7 @@ services:
     container_name: vnc
     networks:
       occamy_network:
-        ipv4_address: 172.16.238.11
+        ipv4_address: 172.16.239.11
   rdp:
     # user: root, password: Docker
     image: umis/xubuntu-office-xrdp-desktop:v1.0
@@ -36,7 +36,7 @@ services:
       - "PASSWORD:Docker"
     networks:
       occamy_network:
-        ipv4_address: 172.16.238.12
+        ipv4_address: 172.16.239.12
 
   ssh:
     # user: root, password: root
@@ -44,7 +44,7 @@ services:
     container_name: ssh
     networks:
       occamy_network:
-        ipv4_address: 172.16.238.13
+        ipv4_address: 172.16.239.13
 
 networks:
   occamy_network:
@@ -52,4 +52,4 @@ networks:
     ipam:
       driver: default
       config:
-        - subnet: 172.16.238.0/24
+        - subnet: 172.16.239.0/24

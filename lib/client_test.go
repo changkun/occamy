@@ -7,7 +7,7 @@ package lib_test
 import (
 	"testing"
 
-	"github.com/changkun/occamy/lib"
+	"changkun.de/x/occamy/lib"
 )
 
 func TestNewClient(t *testing.T) {

@@ -8,7 +8,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/changkun/occamy/config"
+	"changkun.de/x/occamy/config"
 )
 
 func TestJWT_GenerateID(t *testing.T) {

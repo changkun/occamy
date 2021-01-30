@@ -38,21 +38,21 @@ type jwtOutput struct {
 }
 
 var credentials = map[string]jwtInput{
-	"vnc": jwtInput{
+	"vnc": {
 		Protocol: "vnc",
-		Host:     "172.16.238.11:5901",
+		Host:     "172.16.239.11:5901",
 		Username: "",
 		Password: "vncpassword",
 	},
-	"rdp": jwtInput{
+	"rdp": {
 		Protocol: "rdp",
-		Host:     "172.16.238.12:3389",
+		Host:     "172.16.239.12:3389",
 		Username: "root",
 		Password: "Docker",
 	},
-	"ssh": jwtInput{
+	"ssh": {
 		Protocol: "ssh",
-		Host:     "172.16.238.13:22",
+		Host:     "172.16.239.13:22",
 		Username: "root",
 		Password: "root",
 	},

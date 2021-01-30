@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/changkun/occamy/protocol"
+	"changkun.de/x/occamy/protocol"
 )
 
 // type ISocket interface {
