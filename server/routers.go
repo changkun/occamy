@@ -5,13 +5,13 @@
 package server
 
 import (
+	"log"
 	"net/http"
 
 	"changkun.de/x/occamy/config"
 	jwt "github.com/appleboy/gin-jwt/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/sirupsen/logrus"
 )
 
 // Ping implements /api/v1/ping
@@ -31,7 +31,7 @@ func (p *proxy) Ping(c *gin.Context) {
 func (p *proxy) serveWS(c *gin.Context) {
 	ws, err := p.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		logrus.Errorf("occamy-proxy: upgrade websocket failed: %v", err)
+		log.Printf("upgrade websocket failed: %v", err)
 		c.Writer.Write([]byte(http.StatusText(http.StatusBadRequest)))
 		return
 	}
@@ -45,7 +45,7 @@ func (p *proxy) serveWS(c *gin.Context) {
 	}
 	err = p.routeConn(ws, jwt)
 	if err != nil {
-		logrus.Errorf("occamy-proxy: route connection failed: %v", err)
+		log.Printf("route connection failed: %v", err)
 		ws.WriteMessage(websocket.CloseMessage, []byte(err.Error()))
 	}
 	ws.Close()
@@ -66,7 +66,7 @@ func (p *proxy) routeConn(ws *websocket.Conn, jwt *config.JWT) (err error) {
 	}
 
 	p.sessions[jwt.GenerateID()] = s
-	logrus.Infof("occamy-proxy: new session was created: %s", s.ID)
+	log.Printf("new session was created: %s", s.ID)
 	err = s.Join(ws, jwt, true, func() { p.mu.Unlock() }) // block here
 
 	p.mu.Lock()

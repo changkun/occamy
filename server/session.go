@@ -6,6 +6,7 @@ package server
 
 import (
 	"fmt"
+	"log"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -15,7 +16,6 @@ import (
 	"changkun.de/x/occamy/lib"
 	"changkun.de/x/occamy/protocol"
 	"github.com/gorilla/websocket"
-	"github.com/sirupsen/logrus"
 )
 
 // Session is an occamy proxy session that shares connection
@@ -37,7 +37,7 @@ func NewSession(proto string) (*Session, error) {
 	}
 
 	s := &Session{client: cli}
-	s.client.InitLogLevel(config.Runtime.MaxLogLevel)
+	s.client.InitLogLevel(config.Runtime.Mode)
 	err = s.client.LoadProtocolPlugin(proto)
 	if err != nil {
 		s.close()
@@ -59,7 +59,7 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
 		unlock()
-		return fmt.Errorf("occamy-proxy: new socket pair error: %w", err)
+		return fmt.Errorf("new socket pair error: %w", err)
 	}
 
 	// 2. create guac socket using fds[0]
@@ -126,7 +126,7 @@ func (s *Session) serveIO(conn *protocol.InstructionIO, ws *websocket.Conn) (err
 			}
 		}
 		exit <- err
-		logrus.Info("occamy-proxy: reading from desktop terminated.")
+		log.Println("reading from desktop terminated.")
 		wg.Done()
 	}(conn, ws)
 	go func(conn *protocol.InstructionIO, ws *websocket.Conn) {
@@ -142,12 +142,12 @@ func (s *Session) serveIO(conn *protocol.InstructionIO, ws *websocket.Conn) (err
 			}
 		}
 		exit <- err
-		logrus.Info("occamy-proxy: reading from client terminated.")
+		log.Println("reading from client terminated.")
 		wg.Done()
 	}(conn, ws)
 	err = <-exit
 	conn.Close()
 	wg.Wait()
-	logrus.Info("occamy-proxy: IO goroutines are terminated.")
+	log.Println("IO goroutines are terminated.")
 	return
 }

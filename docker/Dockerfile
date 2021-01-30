@@ -31,7 +31,7 @@ ENV LC_ALL=en_US.UTF-8                \
         libtool                       \
         libvncserver-devel            \
         make"                         \
-    GO_VERSION=1.13.8
+    GO_VERSION=1.15.7
 RUN yum -y update                                                         && \
     yum -y install epel-release $RUNTIME_DEPENDENCIES $BUILD_DEPENDENCIES && \
     # see: https://github.com/Zer0CoolX/guacamole-install-rhel/issues/78#issuecomment-534620524

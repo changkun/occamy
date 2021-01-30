@@ -5,10 +5,10 @@
 package common
 
 import (
+	"log"
 	"sync"
 
 	"changkun.de/x/occamy/lib"
-	"github.com/sirupsen/logrus"
 )
 
 // ClipboardBlockSize is the maximum number of bytes to send in an
@@ -59,9 +59,9 @@ func (c *Clipboard) Append(data []byte) {
 // splitting the contents as necessary.
 func (c *Clipboard) Send(cli *lib.Client) {
 	c.mu.Lock()
-	logrus.Debug("Broadcasting clipboard to call all connected users.")
+	log.Printf("Broadcasting clipboard to call all connected users.")
 	cli.ForeachUser(sendFunc, c)
-	logrus.Debug("Broadcast of clipboard complete.")
+	log.Printf("Broadcast of clipboard complete.")
 	c.mu.Unlock()
 }
 
@@ -73,7 +73,7 @@ func sendFunc(u *User, data interface{}) interface{} {
 	stream := NewStreamFromUser(u)
 
 	u.sock.SendClipboard(stream, clipboard.Mimetype)
-	logrus.Debugf("Created stream %i for %s clipboard data.", stream.Index, clipboard.Mimetype)
+	log.Printf("Created stream %i for %s clipboard data.", stream.Index, clipboard.Mimetype)
 
 	// split clipboard into chunks
 	for remaining > 0 {
@@ -86,13 +86,13 @@ func sendFunc(u *User, data interface{}) interface{} {
 
 		// send block
 		u.sock.SendBlob(stream, buf[:blockSize])
-		logrus.Debugf("Sent %i bytes of clipboard data on stream %i.", blockSize, stream.Index)
+		log.Printf("Sent %i bytes of clipboard data on stream %i.", blockSize, stream.Index)
 
 		remaining -= blockSize
 		buf = buf[blockSize:]
 	}
 
-	logrus.Debugf("Clipboard stream %i complete.", stream.Index)
+	log.Printf("Clipboard stream %i complete.", stream.Index)
 	u.sock.SendEnd(stream)
 	u.Free(stream)
 }
