@@ -5,15 +5,10 @@
 package main
 
 import (
-	"runtime"
-
+	"changkun.de/x/occamy/internal/mainthread"
 	"changkun.de/x/occamy/server"
 )
 
-func init() {
-	runtime.LockOSThread()
-}
-
 func main() {
-	server.Run()
+	mainthread.Init(server.Run)
 }

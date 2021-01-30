@@ -53,6 +53,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"log"
 	"net"
 	"sync"
 	"time"
@@ -60,7 +61,6 @@ import (
 
 	"changkun.de/x/occamy/config"
 	"changkun.de/x/occamy/protocol"
-	"github.com/sirupsen/logrus"
 )
 
 // UserMaxStreams is the character prefix which identifies a user ID.
@@ -222,7 +222,7 @@ func (u *User) Prepare() error {
 	}
 
 	if int(ret) != 0 {
-		logrus.Errorf("User %s could NOT join connection %s",
+		log.Printf("User %s could NOT join connection %s",
 			C.GoString(u.guacUser.user_id), C.GoString(u.guacClient.connection_id))
 		return errors.New("occamy-lib: user cannot join")
 	}
@@ -238,7 +238,7 @@ func (u *User) HandleConnection(done chan struct{}) {
 	C.guac_client_add_user(u.guacUser)
 	C.guac_user_input_thread(u.guacUser, C.int(int(usecTimeout))) // block here
 	C.guac_client_remove_user(u.guacClient, u.guacUser)
-	logrus.Infof("User %s disconnected (%d users remain)", u.ID, int(u.guacClient.connected_users))
+	log.Printf("User %s disconnected (%d users remain)", u.ID, int(u.guacClient.connected_users))
 	C.guac_protocol_send_disconnect(u.guacUser.socket)
 	C.guac_socket_flush(u.guacUser.socket)
 	close(done)
@@ -321,7 +321,7 @@ func (u *User) StreamPNG(mode CompositeMode, layer *Layer, x, y int, img *image.
 
 // Debug logs debug information
 func (u *User) Debug(format string, args ...interface{}) {
-	logrus.Debugf(fmt.Sprintf("[u:%s] %s", u.ID, format), args)
+	log.Printf(fmt.Sprintf("[u:%s] %s", u.ID, format), args)
 }
 
 // Abort sends error message to client and stops the connection

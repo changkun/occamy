@@ -9,10 +9,10 @@ import (
 	"flag"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"os"
 
 	"github.com/gin-gonic/gin"
-	"github.com/sirupsen/logrus"
 	"gopkg.in/yaml.v2"
 )
 
@@ -33,10 +33,9 @@ func (j *JWT) GenerateID() string {
 
 // config is a
 type config struct {
-	Address     string `yaml:"address"`
-	Mode        string `yaml:"mode"`
-	MaxLogLevel string `yaml:"max_log_level"`
-	Auth        struct {
+	Address string `yaml:"address"`
+	Mode    string `yaml:"mode"`
+	Auth    struct {
 		JWTSecret    string `yaml:"jwt_secret"`
 		JWTAlgorithm string `yaml:"jwt_alg"`
 	} `yaml:"auth"`
@@ -73,16 +72,11 @@ func Init() {
 	flag.Parse()
 	raw, err := ioutil.ReadFile(*loc)
 	if err != nil {
-		logrus.Fatalf("occamy-proxy: cannot open given config file, error: %v", err)
+		log.Fatalf("cannot open given config file, error: %v", err)
 	}
 	err = yaml.Unmarshal(raw, Runtime)
 	if err != nil {
-		logrus.Fatalf("occamy-proxy: failed of parsing config file, error: %v", err)
+		log.Fatalf("failed of parsing config file, error: %v", err)
 	}
-	lvl, err := logrus.ParseLevel(Runtime.MaxLogLevel)
-	if err != nil {
-		logrus.Fatalf("occamy-proxy: unknown log level in config file")
-	}
-	logrus.SetLevel(lvl)
 	gin.SetMode(Runtime.Mode)
 }

@@ -76,11 +76,9 @@ const (
 // clientLogLevelTable provides a mapping from configuration string to guacamole
 // libguac log level
 var clientLogLevelTable = map[string]clientLogLevel{
-	"info":    clientLogInfo,
-	"error":   clientLogError,
-	"warning": clientLogWarning,
+	"release": clientLogError,
+	"test":    clientLogInfo,
 	"debug":   clientLogDebug,
-	"trace":   clientLogTrace,
 }
 
 // Client is a guacamole client container

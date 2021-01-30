@@ -7,6 +7,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/http/pprof"
 	"os"
@@ -19,7 +20,6 @@ import (
 	jwt "github.com/appleboy/gin-jwt/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/sirupsen/logrus"
 )
 
 func init() {
@@ -28,6 +28,9 @@ func init() {
 
 // Run is an export method that serves occamy proxy
 func Run() {
+	log.SetPrefix("occamy: ")
+	log.SetFlags(log.LstdFlags | log.Lshortfile | log.Lmsgprefix)
+
 	proxy := &proxy{
 		sessions: make(map[string]*Session),
 		upgrader: &websocket.Upgrader{
@@ -58,21 +61,21 @@ func (p *proxy) serve() {
 		quit := make(chan os.Signal, 1)
 		signal.Notify(quit, os.Interrupt, os.Kill)
 		sig := <-quit
-		logrus.Errorf("occamy-proxy: shutting down occammy proxy... %v", sig)
+		log.Printf("shutting down occammy proxy... %v", sig)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := server.Shutdown(ctx); err != nil {
-			logrus.Errorf("occamy-proxy: server shutdown with error: %v", err)
+			log.Printf("server shutdown with error: %v", err)
 		}
 		cancel()
 		done <- struct{}{}
 	}()
-	logrus.Infof("occamy-proxy: starting at http://%s...", config.Runtime.Address)
+	log.Printf("starting at http://%s...", config.Runtime.Address)
 	err := server.ListenAndServe()
 	if err != http.ErrServerClosed {
-		logrus.Errorf("occamy-proxy: close with error: %v", err)
+		log.Printf("close with error: %v", err)
 	}
 	<-done
-	logrus.Info("occamy-proxy: occamy proxy is down, good bye!")
+	log.Println("occamy proxy is down, good bye!")
 	return
 }
 
@@ -107,7 +110,7 @@ func (p *proxy) initJWT() {
 			var conf config.JWT
 			err := c.ShouldBind(&conf)
 			if err != nil {
-				logrus.Error("err: ", err)
+				log.Printf("err: %v", err)
 				return &conf, jwt.ErrFailedAuthentication
 			}
 			return &conf, nil
@@ -126,7 +129,7 @@ func (p *proxy) initJWT() {
 		TokenLookup: "header: Authorization, query: token, cookie: jwt",
 	})
 	if err != nil {
-		logrus.Fatalf("occamy-proxy: initialize router error: %v", err)
+		log.Fatalf("initialize router error: %v", err)
 	}
 	p.jwtm = jwtm
 }
