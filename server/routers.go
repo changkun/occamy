@@ -14,19 +14,6 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-// Ping implements /api/v1/ping
-func (p *proxy) Ping(c *gin.Context) {
-	c.JSON(http.StatusOK, struct {
-		Version   string `json:"version"`
-		BuildTime string `json:"build_time"`
-		GitCommit string `json:"git_commit"`
-	}{
-		Version:   config.Version,
-		GitCommit: config.GitCommit,
-		BuildTime: config.BuildTime,
-	})
-}
-
 // serveWS implements /api/v1/connect
 func (p *proxy) serveWS(c *gin.Context) {
 	ws, err := p.upgrader.Upgrade(c.Writer, c.Request, nil)

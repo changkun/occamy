@@ -45,28 +45,15 @@ type config struct {
 // Runtime configurations
 var Runtime = &config{}
 
-// Only set when built
-var (
-	Version   = "x.y.z"
-	BuildTime = "2019-02-01"
-	GitCommit = "abcdefg"
-)
-
-const (
-	usage = `
-a modern guacamole protocol based remote desktop proxy written in Go.
-Version: %s
-Build: %s
-Git commit: %s
-Usage:
-`
-)
-
 // Init initialize the runtime configurations
 func Init() {
+	log.SetPrefix("occamy: ")
+	log.SetFlags(log.LstdFlags | log.Lshortfile | log.Lmsgprefix)
+
 	loc := flag.String("conf", "./conf.yaml", "path to the runtime config file")
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, fmt.Sprintf(usage, Version, BuildTime, GitCommit))
+		fmt.Fprintf(os.Stderr, `a modern guacamole protocol based remote desktop proxy written in Go.
+Usage:`)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
