@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/changkun/occamy/lib"
+	"changkun.de/x/occamy/lib"
 )
 
 const (

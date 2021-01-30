@@ -11,9 +11,9 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"github.com/changkun/occamy/config"
-	"github.com/changkun/occamy/lib"
-	"github.com/changkun/occamy/protocol"
+	"changkun.de/x/occamy/config"
+	"changkun.de/x/occamy/lib"
+	"changkun.de/x/occamy/protocol"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"
 )

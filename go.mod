@@ -1,4 +1,4 @@
-module github.com/changkun/occamy
+module changkun.de/x/occamy
 
 go 1.12
 

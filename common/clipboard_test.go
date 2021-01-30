@@ -7,7 +7,7 @@ package common_test
 import (
 	"testing"
 
-	"github.com/changkun/occamy/common"
+	"changkun.de/x/occamy/common"
 )
 
 func TestNewClipboard(t *testing.T) {

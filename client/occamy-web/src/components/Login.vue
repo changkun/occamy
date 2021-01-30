@@ -39,19 +39,19 @@ export default {
       credentials: {
           'vnc': {
             protocol: 'vnc',
-            host: '172.16.238.11:5901',
+            host: '172.16.239.11:5901',
             username: '',
             password: 'vncpassword'
           },
           'rdp': {
             protocol: 'rdp',
-            host: '172.16.238.12:3389',
+            host: '172.16.239.12:3389',
             username: 'root',
             password: 'Docker'
           },
           'ssh': {
             protocol: 'ssh',
-            host: '172.16.238.13:22',
+            host: '172.16.239.13:22',
             username: 'root',
             password: 'root'
           }

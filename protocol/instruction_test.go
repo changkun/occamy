@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/changkun/occamy/protocol"
+	"changkun.de/x/occamy/protocol"
 )
 
 func TestNewInstruction(t *testing.T) {

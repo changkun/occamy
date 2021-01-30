@@ -34,7 +34,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/changkun/occamy/plugins"
+	"changkun.de/x/occamy/plugins"
 )
 
 // ClientMouse ...

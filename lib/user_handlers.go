@@ -4,7 +4,7 @@
 
 package lib
 
-import "github.com/changkun/occamy/protocol"
+import "changkun.de/x/occamy/protocol"
 
 const (
 	// UserMaxObjects is the index of a closed stream.

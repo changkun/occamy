@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/changkun/occamy/lib"
+	"changkun.de/x/occamy/lib"
 )
 
 func TestNewUser(t *testing.T) {

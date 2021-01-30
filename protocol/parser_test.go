@@ -8,7 +8,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/changkun/occamy/protocol"
+	"changkun.de/x/occamy/protocol"
 )
 
 var instructions = [][]byte{

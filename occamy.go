@@ -7,7 +7,7 @@ package main
 import (
 	"runtime"
 
-	"github.com/changkun/occamy/server"
+	"changkun.de/x/occamy/server"
 )
 
 func init() {

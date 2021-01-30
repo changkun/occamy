@@ -7,9 +7,9 @@ package plugins
 import (
 	"errors"
 
-	"github.com/changkun/occamy/plugins/rdp"
-	"github.com/changkun/occamy/plugins/ssh"
-	"github.com/changkun/occamy/plugins/vnc"
+	"changkun.de/x/occamy/plugins/rdp"
+	"changkun.de/x/occamy/plugins/ssh"
+	"changkun.de/x/occamy/plugins/vnc"
 )
 
 // SupportedProtocols ...

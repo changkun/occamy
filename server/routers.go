@@ -7,8 +7,8 @@ package server
 import (
 	"net/http"
 
+	"changkun.de/x/occamy/config"
 	jwt "github.com/appleboy/gin-jwt/v2"
-	"github.com/changkun/occamy/config"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
 	"github.com/sirupsen/logrus"

@@ -6,7 +6,7 @@ VERSION = $(shell git describe --always --tags)
 BUILD = $(shell date +%F)
 GOPATH=$(shell go env GOPATH)
 
-HOME = github.com/changkun/occamy
+HOME = changkun.de/x/occamy
 IMAGE = occamy
 
 build:
