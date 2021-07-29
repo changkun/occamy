@@ -5,6 +5,14 @@
 *.so
 *.dylib
 
+# guacamole build files
+*.cache
+*.o
+*.deps
+*.libs
+*.lo
+*.m4
+
 # Test binary, build with `go test -c`
 *.test
 

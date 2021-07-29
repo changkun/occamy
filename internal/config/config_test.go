@@ -8,11 +8,11 @@ import (
 	"os"
 	"testing"
 
-	"changkun.de/x/occamy/config"
+	"changkun.de/x/occamy/internal/config"
 )
 
 func TestJWT_GenerateID(t *testing.T) {
-	os.Args[1] = "-conf=../conf.yaml"
+	os.Args[1] = "-conf=../../conf.yaml"
 	config.Init()
 
 	j := config.JWT{

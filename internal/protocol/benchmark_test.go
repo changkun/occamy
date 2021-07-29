@@ -12,7 +12,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"changkun.de/x/occamy/protocol"
+	"changkun.de/x/occamy/internal/protocol"
 )
 
 // ParseInstructionGuac parses an instruction: 1.a,2.bc,3.def,10.abcdefghij;

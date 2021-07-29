@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"testing"
 
-	"changkun.de/x/occamy/lib"
+	"changkun.de/x/occamy/internal/lib"
 )
 
 func TestNewSocket(t *testing.T) {

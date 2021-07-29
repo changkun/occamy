@@ -7,11 +7,11 @@ package lib
 /*
 #cgo LDFLAGS: -L/usr/local/lib -lguac
 #include <stdlib.h>
-#include "../guacamole/src/libguac/guacamole/parser.h"
-#include "../guacamole/src/libguac/guacamole/user.h"
-#include "../guacamole/src/libguac/guacamole/client.h"
-#include "../guacamole/src/libguac/guacamole/protocol.h"
-#include "../guacamole/src/libguac/guacamole/socket.h"
+#include "../../guacamole/src/libguac/guacamole/parser.h"
+#include "../../guacamole/src/libguac/guacamole/user.h"
+#include "../../guacamole/src/libguac/guacamole/client.h"
+#include "../../guacamole/src/libguac/guacamole/protocol.h"
+#include "../../guacamole/src/libguac/guacamole/socket.h"
 
 const char *mimetypes[] = {"", NULL};
 void set_user_info(guac_user* user) {
@@ -58,7 +58,7 @@ import (
 	"time"
 	"unsafe"
 
-	"changkun.de/x/occamy/config"
+	"changkun.de/x/occamy/internal/config"
 	"changkun.de/x/occamy/internal/uuid"
 )
 

@@ -8,8 +8,8 @@ package lib
 #cgo LDFLAGS: -L/usr/local/lib -lguac
 #include <stdlib.h>
 #include <string.h>
-#include "../guacamole/src/libguac/guacamole/error.h"
-#include "../guacamole/src/libguac/guacamole/client.h"
+#include "../../guacamole/src/libguac/guacamole/error.h"
+#include "../../guacamole/src/libguac/guacamole/client.h"
 
 void guac_error_reset() {
 	guac_error = GUAC_STATUS_SUCCESS;

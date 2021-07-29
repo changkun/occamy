@@ -7,7 +7,7 @@ package lib_test
 import (
 	"testing"
 
-	"changkun.de/x/occamy/lib"
+	"changkun.de/x/occamy/internal/lib"
 )
 
 func TestResetErrors(t *testing.T) {

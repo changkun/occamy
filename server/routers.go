@@ -8,7 +8,7 @@ import (
 	"log"
 	"net/http"
 
-	"changkun.de/x/occamy/config"
+	"changkun.de/x/occamy/internal/config"
 	jwt "github.com/appleboy/gin-jwt/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"

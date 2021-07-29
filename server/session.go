@@ -12,9 +12,9 @@ import (
 	"sync/atomic"
 	"syscall"
 
-	"changkun.de/x/occamy/config"
-	"changkun.de/x/occamy/lib"
-	"changkun.de/x/occamy/protocol"
+	"changkun.de/x/occamy/internal/config"
+	"changkun.de/x/occamy/internal/lib"
+	"changkun.de/x/occamy/internal/protocol"
 	"github.com/gorilla/websocket"
 )
 

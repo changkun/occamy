@@ -11,7 +11,7 @@ package lib
 #include <stdlib.h>
 #include <syslog.h>
 
-#include "../guacamole/src/libguac/guacamole/client.h"
+#include "../../guacamole/src/libguac/guacamole/client.h"
 
 int max_log_level;
 
@@ -84,12 +84,10 @@ var clientLogLevelTable = map[string]clientLogLevel{
 // Client is a guacamole client container
 type Client struct {
 	guacClient *C.struct_guac_client
-	once       sync.Once
-
-	ID       string
-	running  bool
-	data     interface{}
-	lastSent time.Time
+	ID         string
+	running    bool
+	data       interface{}
+	lastSent   time.Time
 
 	mu             sync.RWMutex
 	users          *User // list of all connected users
@@ -133,11 +131,9 @@ func (c *Client) isRunning() bool {
 
 // Close closes the corresponding guacamole client
 func (c *Client) Close() {
-	c.once.Do(func() {
-		C.guac_client_stop(c.guacClient)
-		C.guac_client_free(c.guacClient)
-		c.guacClient = nil
-	})
+	C.guac_client_stop(c.guacClient)
+	C.guac_client_free(c.guacClient)
+	c.guacClient = nil
 }
 
 // InitLogLevel initialize guacamole's libguac maximum log level
@@ -149,16 +145,13 @@ func (c *Client) InitLogLevel(level string) {
 	C.init_client_log(c.guacClient, C.int(maxLevel))
 }
 
-func (c *Client) SendError(format string, err error) {
-
-}
-
-// LoadProtocolPlugin initializes the given guac_client using the initialization routine
-// provided by the plugin corresponding to the named protocol. This will automatically
-// invoke guac_client_init within the plugin for the given protocol.
+// LoadProtocolPlugin initializes the given guac_client using the
+// initialization routine provided by the plugin corresponding to the
+// named protocol. This will automatically invoke guac_client_init
+// within the plugin for the given protocol.
 //
-// Note that the connection will likely not be established until the first
-// user (the "owner") is added to the client.
+// Note that the connection will likely not be established until the
+// first user (the "owner") is added to the client.
 func (c *Client) LoadProtocolPlugin(proto string) error {
 	cproto := C.CString(proto)
 	defer C.free(unsafe.Pointer(cproto))
