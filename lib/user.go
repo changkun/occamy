@@ -52,7 +52,6 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"image"
 	"log"
 	"net"
 	"sync"
@@ -60,7 +59,7 @@ import (
 	"unsafe"
 
 	"changkun.de/x/occamy/config"
-	"changkun.de/x/occamy/protocol"
+	"changkun.de/x/occamy/internal/uuid"
 )
 
 // UserMaxStreams is the character prefix which identifies a user ID.
@@ -77,21 +76,14 @@ type User struct {
 	guacClient *C.struct_guac_client
 	once       sync.Once
 
-	ID                string
-	owner             bool
-	active            bool
-	lastReceived      time.Time
-	lastFrameDuration time.Duration
-	processingLag     time.Duration
-	info              connectInformation
-	client            *Client
-	sock              *Socket
-	poolStream        *Pool
-	poolObject        *Pool
-	inputStreams      [UserMaxStreams]Stream
-	outputStreams     [UserMaxStreams]Stream
-	prev, next        *User // points to next connected user
-	data              interface{}
+	ID         string
+	owner      bool
+	active     bool
+	info       connectInformation
+	client     *Client
+	sock       *Socket
+	prev, next *User // points to next connected user
+	data       interface{}
 }
 
 type connectInformation struct {
@@ -109,7 +101,7 @@ type connectInformation struct {
 
 // NewUser creates a user and associate the user with any specific client
 func NewUser(s *Socket, c *Client, owner bool, jwt *config.JWT) (*User, error) {
-	id := NewID(prefixUser)
+	id := uuid.NewID("@")
 	uid := C.CString(id)
 
 	user := C.guac_user_alloc(uid)
@@ -131,29 +123,13 @@ func NewUser(s *Socket, c *Client, owner bool, jwt *config.JWT) (*User, error) {
 		return nil, err
 	}
 
-	// initialize streams
-	istreams := [UserMaxStreams]Stream{}
-	for i := 0; i < UserMaxStreams; i++ {
-		istreams[i] = Stream{Index: UserClosedStreamIndex}
-	}
-	ostreams := [UserMaxStreams]Stream{}
-	for i := 0; i < UserMaxStreams; i++ {
-		ostreams[i] = Stream{Index: UserClosedStreamIndex}
-	}
-
 	return &User{
 		guacUser:   user,
 		guacClient: c.guacClient,
 
-		ID:                id,
-		owner:             owner,
-		active:            true,
-		lastReceived:      time.Now(),
-		lastFrameDuration: 0,
-		processingLag:     0,
-		poolStream:        NewPool(0),
-		inputStreams:      istreams,
-		outputStreams:     ostreams,
+		ID:     id,
+		owner:  owner,
+		active: true,
 		info: connectInformation{
 			Host:     host,
 			Port:     port,
@@ -244,88 +220,13 @@ func (u *User) HandleConnection(done chan struct{}) {
 	close(done)
 }
 
-// HandleConnectionGo handles all I/O for the portion of a user's Occamy
-// connection without the handshake process. This function blocks until
-// the connection/user is aborted or the user disconnects.
-func (u *User) HandleConnectionGo(done chan error) {
-	// FIXME: Go version, this does not work at the moment
-	p := protocol.NewParser()
-
-	// Occamy user input loop
-	for u.client.isRunning() && u.isActive() {
-		raw, err := u.sock.reader.ReadBytes(byte(';'))
-		if err != nil {
-			if errors.Is(err, Err(statusTimeout)) {
-				u.Debug("User is not responding.")
-				u.Abort(err)
-			} else {
-				if errors.Is(err, Err(statusClosed)) {
-					u.Debug("Occamy connection failure")
-				}
-				u.Stop()
-			}
-			done <- err
-			return
-		}
-		ins := protocol.Instruction{}
-		err = p.Parse(raw, &ins)
-		if err != nil {
-			u.Debug("Parse instruction error: %v", err)
-			done <- err
-			return
-		}
-
-		err = u.HandleInstruction(&ins)
-		if err != nil {
-			u.Debug("User connection aborted.", err)
-			u.Debug("Failing instruction handler in user was %s", ins.Opcode())
-			u.Stop()
-			done <- err
-			return
-		}
-	}
-
-	close(done)
-}
-
 // Stop signals the given user that it must disconnect, or advises
 // cooperating services that the given user is no longer connected.
 func (u *User) Stop() {
 	u.active = false
 }
 
-// HandleInstruction calls the appropriate handler defined by the given
-// user for the given instruction. A comparison is made between the
-// instruction opcode and the initial handler lookup table defined in
-// user_handlers.go. The intial handlers will in turn call the user's
-// handler (if defined).
-func (u *User) HandleInstruction(ins *protocol.Instruction) error {
-	handler, ok := instructionHandlers[ins.Opcode()]
-	if !ok {
-		return errors.New("unknown opcode")
-	}
-
-	return handler(u, ins)
-}
-
-// StreamPNG streams the image data of the given surface over an image
-// stream ("img" instruction) as PNG-encoded data. The image stream will
-// be automatically allocated and freed.
-func (u *User) StreamPNG(mode CompositeMode, layer *Layer, x, y int, img *image.RGBA) {
-	s := NewStreamFromUser(u)
-	u.sock.SendImg(mode, layer, "image/png", x, y)
-	u.sock.WritePNG(s, img)
-	u.sock.SendEnd(s)
-	s.FreeToUser(u)
-}
-
 // Debug logs debug information
 func (u *User) Debug(format string, args ...interface{}) {
 	log.Printf(fmt.Sprintf("[u:%s] %s", u.ID, format), args)
-}
-
-// Abort sends error message to client and stops the connection
-func (u *User) Abort(err error) {
-	u.client.SendError("Aborted. Error: ", err)
-	u.Stop()
 }

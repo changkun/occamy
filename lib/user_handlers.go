@@ -4,8 +4,6 @@
 
 package lib
 
-import "changkun.de/x/occamy/protocol"
-
 const (
 	// UserMaxObjects is the index of a closed stream.
 	UserMaxObjects = 64
@@ -21,85 +19,3 @@ const (
 	// this type.
 	UserStreamIndexMimetype = "application/vnd.glyptodon.guacamole.stream-index+json"
 )
-
-// Occamy instruction handler map
-var instructionHandlers = map[string]func(u *User, ins *protocol.Instruction) error{
-	"sync":       handleSync,
-	"mouse":      handleMouse,
-	"key":        handleKey,
-	"clipboard":  handleClipboard,
-	"disconnect": handleDisconnect,
-	"size":       handleSize,
-	"file":       handleFile,
-	"pipe":       handlePipe,
-	"ack":        handleAck,
-	"blob":       handleBlob,
-	"end":        handleEnd,
-	"get":        handleGet,
-	"put":        handlePut,
-}
-
-func handleSync(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-
-func handleMouse(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-
-func handleKey(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-
-func handleClipboard(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-
-func handleDisconnect(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-
-func handleSize(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-
-func handleFile(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-
-func handlePipe(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-
-func handleAck(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-
-func handleBlob(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-
-func handleEnd(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-
-func handleGet(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}
-
-func handlePut(u *User, ins *protocol.Instruction) error {
-	// TODO:
-	return nil
-}

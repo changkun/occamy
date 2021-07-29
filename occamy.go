@@ -4,11 +4,6 @@
 
 package main
 
-import (
-	"changkun.de/x/occamy/internal/mainthread"
-	"changkun.de/x/occamy/server"
-)
+import "changkun.de/x/occamy/server"
 
-func main() {
-	mainthread.Init(server.Run)
-}
+func main() { server.Run() }

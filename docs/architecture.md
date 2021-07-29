@@ -9,10 +9,10 @@ connection of Guacamole application.
 ```
 |-- Browser --|-------- Guacamole Server -----------|--- Intranet ---|
 
-UserA --------+                                      +---- RDP server
-              +------ Guacamole Servlet              |
-UserB --------+                |                     +---- VNC server
-                               +------- guacd -------+
+                                                     +---- RDP server
+UserA --------+                                      |
+              +------ Guacamole Servlet --- guacd ---+---- VNC server
+UserB --------+                                      |
                                                      +---- Others
 ```
 
@@ -24,11 +24,10 @@ all connection in multiple thread rather than multiple processes, as shown in Fi
 ```
 |-- Browser --|---- Occamy Server -----|--- Intranet ---|
 
-
-UserA --------+                        +---- RDP server
-              +------ Occamy ----------+
-UserB --------+                        +---- VNC server
-                                       |
+                                       +---- RDP server
+UserA --------+                        |
+              +------ Occamy ----------+---- VNC server
+UserB --------+                        |
                                        +---- Others
 ```
 

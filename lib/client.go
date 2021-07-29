@@ -34,7 +34,7 @@ import (
 	"time"
 	"unsafe"
 
-	"changkun.de/x/occamy/plugins"
+	"changkun.de/x/occamy/internal/uuid"
 )
 
 // ClientMouse ...
@@ -86,15 +86,10 @@ type Client struct {
 	guacClient *C.struct_guac_client
 	once       sync.Once
 
-	ID            string
-	socket        *Socket
-	running       bool
-	data          interface{}
-	lastSent      time.Time
-	poolBuffer    *Pool
-	poolLayer     *Pool
-	poolStream    *Pool
-	outputStreams [64]Stream
+	ID       string
+	running  bool
+	data     interface{}
+	lastSent time.Time
 
 	mu             sync.RWMutex
 	users          *User // list of all connected users
@@ -106,12 +101,11 @@ type Client struct {
 	handlerJoin  func()
 	handlerLeave func()
 	args         []string
-	plugin       plugins.Client
 }
 
 // NewClient creates a new guacamole client
 func NewClient() (*Client, error) {
-	id := NewID(prefixClient)
+	id := uuid.NewID("$")
 	cid := C.CString(id)
 	cli := C.guac_client_alloc(cid)
 	if cli == nil {
@@ -119,24 +113,13 @@ func NewClient() (*Client, error) {
 		return nil, errorStatus()
 	}
 
-	// initialize streams
-	streams := [64]Stream{}
-	for i := 0; i < 64; i++ {
-		streams[i] = Stream{Index: ClientClosedStreamIndex}
-	}
-
 	return &Client{
 		guacClient: cli,
 
-		ID:            id,
-		socket:        nil, // TODO: Set up socket to broadcast to all users
-		running:       true,
-		lastSent:      time.Now(),
-		poolBuffer:    NewPool(BufferPoolInitialSize),
-		poolLayer:     NewPool(BufferPoolInitialSize),
-		poolStream:    NewPool(0),
-		outputStreams: streams,
-		args:          []string{},
+		ID:       id,
+		running:  true,
+		lastSent: time.Now(),
+		args:     []string{},
 	}, nil
 }
 
@@ -183,36 +166,5 @@ func (c *Client) LoadProtocolPlugin(proto string) error {
 	if int(C.guac_client_load_plugin(c.guacClient, cproto)) != 0 {
 		return errorStatus()
 	}
-
-	plugin, err := plugins.NewPlugin(plugins.SupportedProtocols(proto))
-	if err != nil {
-		return err
-	}
-	c.plugin = plugin
 	return nil
-}
-
-// ForeachUser calls the given function on all currently-connected users
-// of the given client. The function will be given a reference to a
-// lib.User and the specified arbitrary data. The value returned by the
-// callback will be ignored.
-func (c *Client) ForeachUser(
-	callback func(u *User, data interface{}) interface{},
-	data interface{},
-) {
-	c.mu.RLock()
-	u := c.users
-	for u != nil {
-		callback(u, data)
-		u = u.next
-	}
-	c.mu.RUnlock()
-}
-
-// StreamPNG streams the image data of the given surface over an image
-// stream ("img" instruction) as PNG-encoded data. The image stream will
-// be automatically allocated and freed.
-func (c *Client) StreamPNG(s *Socket, mode CompositeMode, layer *Layer, x, y int, surface interface{}) {
-	// stream := NewStreamFromClient(c)
-	// protocol.SendImg(s, stream, mode, layer, "image/png", x, y)
 }

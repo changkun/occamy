@@ -12,10 +12,8 @@ package lib
 import "C"
 import (
 	"bufio"
-	"image"
 	"sync"
 	"syscall"
-	"time"
 
 	"changkun.de/x/occamy/protocol"
 )
@@ -35,13 +33,10 @@ type Socket struct {
 	guacSocket *C.struct_guac_socket
 	once       sync.Once
 
-	fd        int
-	reader    *bufio.Reader
-	writer    *bufio.Writer
-	lastWrite time.Time
-	readyBuf  []byte
-	IsOpen    bool
-	data      interface{}
+	fd       int
+	reader   *bufio.Reader
+	writer   *bufio.Writer
+	readyBuf []byte
 }
 
 // NewSocket allocates and initialize a new guac_socket object with given
@@ -90,29 +85,3 @@ func (s *Socket) Write(buf []byte) error {
 	}
 	return nil
 }
-
-func (s *Socket) SendAck()                                                    {}
-func (s *Socket) SendBolb()                                                   {}
-func (s *Socket) SendBody()                                                   {}
-func (s *Socket) SendCfill()                                                  {}
-func (s *Socket) SendClip()                                                   {}
-func (s *Socket) SendClipboard()                                              {}
-func (s *Socket) SendCopy()                                                   {}
-func (s *Socket) SendCursor()                                                 {}
-func (s *Socket) SendDisconnect()                                             {}
-func (s *Socket) SendDispose()                                                {}
-func (s *Socket) SendEnd(stream *Stream)                                      {}
-func (s *Socket) SendError()                                                  {}
-func (s *Socket) SendFile()                                                   {}
-func (s *Socket) SendFilesystem()                                             {}
-func (s *Socket) SendMouse()                                                  {}
-func (s *Socket) SendMove()                                                   {}
-func (s *Socket) SendName()                                                   {}
-func (s *Socket) SendPipe()                                                   {}
-func (s *Socket) SendRect()                                                   {}
-func (s *Socket) SendImg(mode CompositeMode, l *Layer, name string, x, y int) {}
-func (s *Socket) SendShade()                                                  {}
-func (s *Socket) SendSize()                                                   {}
-func (s *Socket) SendSync()                                                   {}
-func (s *Socket) SendTransfer()                                               {}
-func (s *Socket) WritePNG(stream *Stream, img *image.RGBA)                    {}
