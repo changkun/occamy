@@ -1,8 +1,50 @@
+# gioui.org v0.0.0-20211202105001-872b4ba41be0
+## explicit
+gioui.org/app
+gioui.org/app/internal/log
+gioui.org/app/internal/windows
+gioui.org/app/internal/xkb
+gioui.org/f32
+gioui.org/gesture
+gioui.org/gpu
+gioui.org/gpu/internal/d3d11
+gioui.org/gpu/internal/driver
+gioui.org/gpu/internal/metal
+gioui.org/gpu/internal/opengl
+gioui.org/gpu/internal/vulkan
+gioui.org/internal/byteslice
+gioui.org/internal/cocoainit
+gioui.org/internal/d3d11
+gioui.org/internal/egl
+gioui.org/internal/f32color
+gioui.org/internal/fling
+gioui.org/internal/gl
+gioui.org/internal/ops
+gioui.org/internal/scene
+gioui.org/internal/stroke
+gioui.org/internal/vk
+gioui.org/io/clipboard
+gioui.org/io/event
+gioui.org/io/key
+gioui.org/io/pointer
+gioui.org/io/profile
+gioui.org/io/router
+gioui.org/io/semantic
+gioui.org/io/system
+gioui.org/layout
+gioui.org/op
+gioui.org/op/clip
+gioui.org/op/paint
+gioui.org/unit
+# gioui.org/cpu v0.0.0-20210817075930-8d6a761490d2
+gioui.org/cpu
+# gioui.org/shader v1.0.6
+gioui.org/shader
+gioui.org/shader/gio
+gioui.org/shader/piet
 # github.com/appleboy/gin-jwt/v2 v2.6.2
 ## explicit
 github.com/appleboy/gin-jwt/v2
-# github.com/davecgh/go-spew v1.1.1
-## explicit
 # github.com/dgrijalva/jwt-go v3.2.0+incompatible
 github.com/dgrijalva/jwt-go
 # github.com/gin-contrib/sse v0.0.0-20190301062529-5545eab6dad3
@@ -13,12 +55,16 @@ github.com/gin-gonic/gin
 github.com/gin-gonic/gin/binding
 github.com/gin-gonic/gin/internal/json
 github.com/gin-gonic/gin/render
-# github.com/golang/protobuf v1.3.1
+# github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0
+github.com/golang/freetype
+github.com/golang/freetype/raster
+github.com/golang/freetype/truetype
+# github.com/golang/protobuf v1.3.2
 github.com/golang/protobuf/proto
 # github.com/gorilla/websocket v1.4.0
 ## explicit
 github.com/gorilla/websocket
-# github.com/json-iterator/go v1.1.6
+# github.com/json-iterator/go v1.1.8
 github.com/json-iterator/go
 # github.com/mattn/go-isatty v0.0.8
 github.com/mattn/go-isatty
@@ -26,13 +72,22 @@ github.com/mattn/go-isatty
 github.com/modern-go/concurrent
 # github.com/modern-go/reflect2 v1.0.1
 github.com/modern-go/reflect2
+# github.com/tfriedel6/canvas v0.9.1
+## explicit
+github.com/tfriedel6/canvas
+github.com/tfriedel6/canvas/backend/backendbase
+github.com/tfriedel6/canvas/backend/softwarebackend
 # github.com/ugorji/go v1.1.4
 github.com/ugorji/go/codec
-# golang.org/x/sys v0.0.0-20190422165155-953cdadca894
-## explicit
+# golang.org/x/image v0.0.0-20210628002857-a66eb6448b8d
+golang.org/x/image/font
+golang.org/x/image/math/fixed
+# golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c
+golang.org/x/sys/internal/unsafeheader
 golang.org/x/sys/unix
+golang.org/x/sys/windows
 # gopkg.in/go-playground/validator.v8 v8.18.2
 gopkg.in/go-playground/validator.v8
-# gopkg.in/yaml.v2 v2.2.2
+# gopkg.in/yaml.v2 v2.2.4
 ## explicit
 gopkg.in/yaml.v2
