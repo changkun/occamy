@@ -2,7 +2,7 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package lib
+package guacd
 
 /*
 #cgo LDFLAGS: -L/usr/local/lib -lguac
@@ -30,23 +30,9 @@ void init_client_log(guac_client* client, int level) {
 */
 import "C"
 import (
-	"sync"
-	"time"
 	"unsafe"
 
 	"changkun.de/x/occamy/internal/uuid"
-)
-
-// ClientMouse ...
-type ClientMouse int
-
-// ClientMouse constants
-const (
-	ClientMouseLeft       ClientMouse = 0x01
-	ClientMouseMiddle     ClientMouse = 0x02
-	ClientMouseRight      ClientMouse = 0x04
-	ClientMouseScrollUp   ClientMouse = 0x08
-	ClientMouseScrollDown ClientMouse = 0x10
 )
 
 // clientLogLevel All supported log levels used by the logging subsystem of each Occamy
@@ -83,22 +69,10 @@ var clientLogLevelTable = map[string]clientLogLevel{
 
 // Client is a guacamole client container
 type Client struct {
+	ID   string
+	args []string
+
 	guacClient *C.struct_guac_client
-	ID         string
-	running    bool
-	data       interface{}
-	lastSent   time.Time
-
-	mu             sync.RWMutex
-	users          *User // list of all connected users
-	owner          *User
-	connectedUsers int64
-
-	handlerFree  func()
-	handlerLog   func()
-	handlerJoin  func()
-	handlerLeave func()
-	args         []string
 }
 
 // NewClient creates a new guacamole client
@@ -114,19 +88,9 @@ func NewClient() (*Client, error) {
 	return &Client{
 		guacClient: cli,
 
-		ID:       id,
-		running:  true,
-		lastSent: time.Now(),
-		args:     []string{},
+		ID:   id,
+		args: []string{},
 	}, nil
-}
-
-// isRunning checks if a client is still running
-func (c *Client) isRunning() bool {
-	if c.guacClient.state == C.GUAC_CLIENT_RUNNING {
-		return true
-	}
-	return false
 }
 
 // Close closes the corresponding guacamole client

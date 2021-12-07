@@ -2,14 +2,6 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package lib_test
+package main
 
-import (
-	"testing"
-
-	"changkun.de/x/occamy/internal/lib"
-)
-
-func TestResetErrors(t *testing.T) {
-	t.Log(lib.ResetErrors())
-}
+func main() { Run() }

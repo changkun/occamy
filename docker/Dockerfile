@@ -31,7 +31,7 @@ ENV LC_ALL=en_US.UTF-8                \
         libtool                       \
         libvncserver-devel            \
         make"                         \
-    GO_VERSION=1.15.7
+    GO_VERSION=1.17.3
 RUN yum -y update                                                         && \
     yum -y install epel-release $RUNTIME_DEPENDENCIES $BUILD_DEPENDENCIES && \
     # see: https://github.com/Zer0CoolX/guacamole-install-rhel/issues/78#issuecomment-534620524
@@ -49,7 +49,7 @@ RUN mkdir /golang                                      && \
     tar -xvf go${GO_VERSION}.linux-amd64.tar.gz
 ADD . .
 RUN ./guacamole/src/build-libguac.sh /occamy/guacamole
-RUN /golang/go/bin/go build -mod vendor -x -o occamyd
+RUN /golang/go/bin/go build -x -o occamyd cmd/occamyd/*
 
 EXPOSE 5636
 CMD ["/occamy/occamyd"]

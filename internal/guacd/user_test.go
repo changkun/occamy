@@ -2,13 +2,13 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package lib_test
+package guacd_test
 
 import (
 	"syscall"
 	"testing"
 
-	"changkun.de/x/occamy/internal/lib"
+	"changkun.de/x/occamy/internal/guacd"
 )
 
 func TestNewUser(t *testing.T) {
@@ -18,32 +18,33 @@ func TestNewUser(t *testing.T) {
 		t.FailNow()
 	}
 
-	sock1, err := lib.NewSocket(fds[0])
+	sock1, err := guacd.NewSocket(fds[0])
 	if err != nil {
 		t.Error("create socket1 in NewUser error: ", err)
 		t.FailNow()
 	}
-	sock2, err := lib.NewSocket(fds[1])
+	sock2, err := guacd.NewSocket(fds[1])
 	if err != nil {
 		t.Error("create socket2 in NewUser error: ", err)
 		t.FailNow()
 	}
 
-	cli, err := lib.NewClient()
+	cli, err := guacd.NewClient()
 	if err != nil {
 		t.Error("create client in NewUser error: ", err)
 		t.FailNow()
 	}
-	user, err := lib.NewUser(sock1, cli, true)
+	u, err := guacd.NewUser(sock1, cli, true)
 	if err != nil {
 		t.Error("NewUser error: ", err)
 		t.FailNow()
 	}
+	defer u.Close()
 
 	t.Run("handle-conn", func(t *testing.T) {
 		done := make(chan bool, 2)
 		go func() {
-			err := user.HandleConnection()
+			err := u.HandleConnection()
 			if err != nil {
 				t.Error("user handle connection error: ", err)
 				t.FailNow()
@@ -61,6 +62,4 @@ func TestNewUser(t *testing.T) {
 		}()
 		<-done
 	})
-
-	user.Close()
 }

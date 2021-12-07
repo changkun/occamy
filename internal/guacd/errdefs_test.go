@@ -2,8 +2,14 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package main
+package guacd_test
 
-import "changkun.de/x/occamy/server"
+import (
+	"testing"
 
-func main() { server.Run() }
+	"changkun.de/x/occamy/internal/guacd"
+)
+
+func TestResetErrors(t *testing.T) {
+	t.Log(guacd.ResetErrors())
+}
