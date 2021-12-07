@@ -12,7 +12,7 @@ import (
 )
 
 func TestNewInstruction(t *testing.T) {
-	ins := protocol.NewInstruction([]string{"hello", "世界"})
+	ins := protocol.NewInstruction("hello", "世界")
 	want := "5.hello,2.世界;"
 	if want != ins.String() {
 		t.Errorf("encode instruction error, got: %s", ins.String())
@@ -22,7 +22,7 @@ func TestNewInstruction(t *testing.T) {
 		t.FailNow()
 	}
 
-	ins = protocol.NewInstruction([]string{"fake", ""})
+	ins = protocol.NewInstruction("fake", "")
 	want = "4.fake,0.;"
 	if want != ins.String() {
 		t.Errorf("encode instruction error, got: %s", ins.String())

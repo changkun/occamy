@@ -2,7 +2,7 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package server
+package main
 
 import (
 	"fmt"
@@ -13,7 +13,7 @@ import (
 	"syscall"
 
 	"changkun.de/x/occamy/internal/config"
-	"changkun.de/x/occamy/internal/lib"
+	"changkun.de/x/occamy/internal/guacd"
 	"changkun.de/x/occamy/internal/protocol"
 	"github.com/gorilla/websocket"
 )
@@ -24,14 +24,14 @@ type Session struct {
 	ID             string
 	connectedUsers uint64
 	once           sync.Once
-	client         *lib.Client // shared client in a session
+	client         *guacd.Client // shared client in a session
 }
 
 // NewSession creates a new occamy proxy session
 func NewSession(proto string) (*Session, error) {
 	runtime.LockOSThread() // without unlock to exit the Go thread
 
-	cli, err := lib.NewClient()
+	cli, err := guacd.NewClient()
 	if err != nil {
 		return nil, fmt.Errorf("occamy-lib: new client error: %w", err)
 	}
@@ -40,7 +40,7 @@ func NewSession(proto string) (*Session, error) {
 	s.client.InitLogLevel(config.Runtime.Mode)
 	err = s.client.LoadProtocolPlugin(proto)
 	if err != nil {
-		s.close()
+		s.Close()
 		return nil, fmt.Errorf("occamy-lib: load protocol plugin failed: %w", err)
 	}
 	s.ID = s.client.ID
@@ -51,26 +51,24 @@ func NewSession(proto string) (*Session, error) {
 // reading/writing from the socket via read/write threads. The given socket,
 // parser, and any associated resources will be freed unless the user is not
 // added successfully.
-func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock func()) error {
-	defer s.close()
-	lib.ResetErrors()
+func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool) error {
+	guacd.ResetErrors()
 
 	// 1. prepare socket pair
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
-		unlock()
 		return fmt.Errorf("new socket pair error: %w", err)
 	}
 
 	// 2. create guac socket using fds[0]
-	sock, err := lib.NewSocket(fds[0])
+	sock, err := guacd.NewSocket(fds[0])
 	if err != nil {
 		return fmt.Errorf("occamy-lib: create guac socket error: %w", err)
 	}
 	defer sock.Close()
 
 	// 3. create guac user using created guac socket
-	u, err := lib.NewUser(sock, s.client, owner, jwt)
+	u, err := guacd.NewUser(sock, s.client, owner, jwt)
 	if err != nil {
 		return fmt.Errorf("occamy-lib: create guac user error: %w", err)
 	}
@@ -83,10 +81,10 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 	// 5. preparing connection
 	err = u.Prepare()
 	if err != nil {
-		unlock()
 		return fmt.Errorf("occamy-lib: handle user connection error: %w", err)
 	}
-	unlock()
+
+	log.Println("start to handle connections...")
 
 	// 6. handle connection
 	done := make(chan struct{}, 1)
@@ -102,7 +100,7 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 }
 
 // Close closes a session.
-func (s *Session) close() {
+func (s *Session) Close() {
 	if atomic.LoadUint64(&s.connectedUsers) > 0 {
 		return
 	}

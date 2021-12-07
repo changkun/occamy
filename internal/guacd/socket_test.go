@@ -2,13 +2,13 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package lib_test
+package guacd_test
 
 import (
 	"syscall"
 	"testing"
 
-	"changkun.de/x/occamy/internal/lib"
+	"changkun.de/x/occamy/internal/guacd"
 )
 
 func TestNewSocket(t *testing.T) {
@@ -18,12 +18,12 @@ func TestNewSocket(t *testing.T) {
 		t.FailNow()
 	}
 
-	sock1, err := lib.NewSocket(fds[0])
+	sock1, err := guacd.NewSocket(fds[0])
 	if err != nil {
 		t.Error("create lib socket error: ", err)
 		t.FailNow()
 	}
-	sock2, err := lib.NewSocket(fds[1])
+	sock2, err := guacd.NewSocket(fds[1])
 	if err != nil {
 		t.Error("create lib socket error: ", err)
 		t.FailNow()

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package lib
+package guacd
 
 /*
 #cgo LDFLAGS: -L/usr/local/lib -lguac
@@ -51,7 +51,6 @@ static int join_handler_bridge(guac_user* user, int argc, char** argv) {
 import "C"
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net"
 	"sync"
@@ -66,7 +65,7 @@ import (
 const UserMaxStreams = 64
 
 // UserClosedStreamIndex is the maximum number of inbound or
-// outbound streams supported by any one lib.User
+// outbound streams supported by any one guacd.User
 const UserClosedStreamIndex = -1
 
 // User is the representation of a physical connection within a larger logical connection
@@ -76,14 +75,10 @@ type User struct {
 	guacClient *C.struct_guac_client
 	once       sync.Once
 
-	ID         string
-	owner      bool
-	active     bool
-	info       connectInformation
-	client     *Client
-	sock       *Socket
-	prev, next *User // points to next connected user
-	data       interface{}
+	ID     string
+	owner  bool
+	info   connectInformation
+	client *Client
 }
 
 type connectInformation struct {
@@ -127,9 +122,8 @@ func NewUser(s *Socket, c *Client, owner bool, jwt *config.JWT) (*User, error) {
 		guacUser:   user,
 		guacClient: c.guacClient,
 
-		ID:     id,
-		owner:  owner,
-		active: true,
+		ID:    id,
+		owner: owner,
 		info: connectInformation{
 			Host:     host,
 			Port:     port,
@@ -145,14 +139,6 @@ func (u *User) Close() {
 	u.once.Do(func() {
 		C.guac_user_free(u.guacUser)
 	})
-}
-
-// isActive checks if a user is still active
-func (u *User) isActive() bool {
-	if u.guacUser.active != 0 {
-		return true
-	}
-	return false
 }
 
 const usecTimeout time.Duration = 15 * time.Millisecond
@@ -218,15 +204,4 @@ func (u *User) HandleConnection(done chan struct{}) {
 	C.guac_protocol_send_disconnect(u.guacUser.socket)
 	C.guac_socket_flush(u.guacUser.socket)
 	close(done)
-}
-
-// Stop signals the given user that it must disconnect, or advises
-// cooperating services that the given user is no longer connected.
-func (u *User) Stop() {
-	u.active = false
-}
-
-// Debug logs debug information
-func (u *User) Debug(format string, args ...interface{}) {
-	log.Printf(fmt.Sprintf("[u:%s] %s", u.ID, format), args)
 }

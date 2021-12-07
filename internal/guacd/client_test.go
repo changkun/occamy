@@ -2,16 +2,16 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package lib_test
+package guacd_test
 
 import (
 	"testing"
 
-	"changkun.de/x/occamy/internal/lib"
+	"changkun.de/x/occamy/internal/guacd"
 )
 
 func TestNewClient(t *testing.T) {
-	cli, err := lib.NewClient()
+	cli, err := guacd.NewClient()
 	if err != nil {
 		t.Errorf("%v", err)
 		t.FailNow()
