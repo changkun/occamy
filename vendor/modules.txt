@@ -15,9 +15,6 @@ github.com/gin-gonic/gin/internal/json
 github.com/gin-gonic/gin/render
 # github.com/golang/protobuf v1.3.1
 github.com/golang/protobuf/proto
-# github.com/google/uuid v1.1.2
-## explicit
-github.com/google/uuid
 # github.com/gorilla/websocket v1.4.0
 ## explicit
 github.com/gorilla/websocket

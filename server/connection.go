@@ -6,7 +6,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
 	"net/http/pprof"
@@ -15,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"changkun.de/x/occamy/config"
-	"changkun.de/x/occamy/protocol"
+	"changkun.de/x/occamy/internal/config"
+	"changkun.de/x/occamy/internal/protocol"
 	jwt "github.com/appleboy/gin-jwt/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -43,15 +42,17 @@ func Run() {
 // connects to occamy
 type proxy struct {
 	jwtm     *jwt.GinJWTMiddleware
-	sessions map[string]*Session
-	mu       sync.Mutex
 	upgrader *websocket.Upgrader
+	engine   *gin.Engine
+
+	mu       sync.Mutex
+	sessions map[string]*Session
 }
 
 func (p *proxy) serve() {
-	server := &http.Server{
+	s := &http.Server{
 		Handler: p.routers(),
-		Addr:    fmt.Sprintf("%s", config.Runtime.Address),
+		Addr:    config.Runtime.Address,
 	}
 	done := make(chan struct{})
 	go func() {
@@ -60,14 +61,14 @@ func (p *proxy) serve() {
 		sig := <-quit
 		log.Printf("shutting down occammy proxy... %v", sig)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := server.Shutdown(ctx); err != nil {
+		if err := s.Shutdown(ctx); err != nil {
 			log.Printf("server shutdown with error: %v", err)
 		}
 		cancel()
 		done <- struct{}{}
 	}()
 	log.Printf("starting at http://%s...", config.Runtime.Address)
-	err := server.ListenAndServe()
+	err := s.ListenAndServe()
 	if err != http.ErrServerClosed {
 		log.Printf("close with error: %v", err)
 	}
@@ -76,24 +77,23 @@ func (p *proxy) serve() {
 	return
 }
 
-func (p *proxy) routers() (r *gin.Engine) {
-	r = gin.Default()
+func (p *proxy) routers() *gin.Engine {
+	p.engine = gin.Default()
 	p.initJWT()
 	if config.Runtime.Client {
-		r.StaticFS("/static", http.Dir("./client/occamy-web/dist"))
+		p.engine.StaticFS("/static", http.Dir("./client/occamy-web/dist"))
 	}
-	v1 := r.Group("/api/v1")
+	v1 := p.engine.Group("/api/v1")
 	if config.Runtime.Client {
 		v1.POST("/login", p.jwtm.LoginHandler)
 	}
 	auth := v1.Group("/connect")
 	auth.Use(p.jwtm.MiddlewareFunc())
 	auth.GET("", p.serveWS)
-	if gin.Mode() != gin.DebugMode {
-		return
+	if gin.Mode() == gin.DebugMode {
+		p.profile()
 	}
-	profile(r)
-	return
+	return p.engine
 }
 
 func (p *proxy) initJWT() {
@@ -145,25 +145,26 @@ func (p *proxy) initJWT() {
 // - collect a 5-second execution trace:
 //   wget http://0.0.0.0:5636/debug/pprof/trace?seconds=5
 //
-func profile(r *gin.Engine) {
+func (p *proxy) profile() {
 	pprofHandler := func(h http.HandlerFunc) gin.HandlerFunc {
 		handler := http.HandlerFunc(h)
 		return func(c *gin.Context) {
 			handler.ServeHTTP(c.Writer, c.Request)
 		}
 	}
-	prefixRouter := r.Group("/debug/pprof")
+	r := p.engine.Group("/debug/pprof")
 	{
-		prefixRouter.GET("/", pprofHandler(pprof.Index))
-		prefixRouter.GET("/cmdline", pprofHandler(pprof.Cmdline))
-		prefixRouter.GET("/profile", pprofHandler(pprof.Profile))
-		prefixRouter.POST("/symbol", pprofHandler(pprof.Symbol))
-		prefixRouter.GET("/symbol", pprofHandler(pprof.Symbol))
-		prefixRouter.GET("/trace", pprofHandler(pprof.Trace))
-		prefixRouter.GET("/block", pprofHandler(pprof.Handler("block").ServeHTTP))
-		prefixRouter.GET("/goroutine", pprofHandler(pprof.Handler("goroutine").ServeHTTP))
-		prefixRouter.GET("/heap", pprofHandler(pprof.Handler("heap").ServeHTTP))
-		prefixRouter.GET("/mutex", pprofHandler(pprof.Handler("mutex").ServeHTTP))
-		prefixRouter.GET("/threadcreate", pprofHandler(pprof.Handler("threadcreate").ServeHTTP))
+		r.GET("/", pprofHandler(pprof.Index))
+		r.GET("/cmdline", pprofHandler(pprof.Cmdline))
+		r.GET("/profile", pprofHandler(pprof.Profile))
+		r.POST("/symbol", pprofHandler(pprof.Symbol))
+		r.GET("/symbol", pprofHandler(pprof.Symbol))
+		r.GET("/trace", pprofHandler(pprof.Trace))
+		r.GET("/allocs", pprofHandler(pprof.Handler("allocs").ServeHTTP))
+		r.GET("/block", pprofHandler(pprof.Handler("block").ServeHTTP))
+		r.GET("/goroutine", pprofHandler(pprof.Handler("goroutine").ServeHTTP))
+		r.GET("/heap", pprofHandler(pprof.Handler("heap").ServeHTTP))
+		r.GET("/mutex", pprofHandler(pprof.Handler("mutex").ServeHTTP))
+		r.GET("/threadcreate", pprofHandler(pprof.Handler("threadcreate").ServeHTTP))
 	}
 }
