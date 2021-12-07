@@ -1,4 +1,4 @@
-# gioui.org v0.0.0-20211202105001-872b4ba41be0
+# gioui.org v0.0.0-20211207114553-03016f0c69b7
 ## explicit
 gioui.org/app
 gioui.org/app/internal/log
@@ -31,6 +31,7 @@ gioui.org/io/profile
 gioui.org/io/router
 gioui.org/io/semantic
 gioui.org/io/system
+gioui.org/io/transfer
 gioui.org/layout
 gioui.org/op
 gioui.org/op/clip

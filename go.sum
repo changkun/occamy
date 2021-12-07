@@ -1,10 +1,8 @@
 cloud.google.com/go v0.26.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 cloud.google.com/go v0.34.0/go.mod h1:aQUYkXzVsufM+DwF1aE+0xfcU+56JwCaLick0ClmMTw=
 dmitri.shuralyov.com/gpu/mtl v0.0.0-20201218220906-28db891af037/go.mod h1:H6x//7gZCb22OMCxBHrMx7a5I7Hp++hsVxbQ4BYO7hU=
-gioui.org v0.0.0-20211126213425-227c5a132be6 h1:I/VXI7iHRGYHVqkhLBOxw43zvDH+uzANxKhCj2DNbms=
-gioui.org v0.0.0-20211126213425-227c5a132be6/go.mod h1:yoWOxPng6WkDpsud+NRmkoftmyWn3rkKsYGEcWHpjTI=
-gioui.org v0.0.0-20211202105001-872b4ba41be0 h1:rXO+2zdXvX6G19M5oF1fs1U7kmUWb4uXCKWa+WHZSpA=
-gioui.org v0.0.0-20211202105001-872b4ba41be0/go.mod h1:yoWOxPng6WkDpsud+NRmkoftmyWn3rkKsYGEcWHpjTI=
+gioui.org v0.0.0-20211207114553-03016f0c69b7 h1:iJza27sQfbK41uk2Jlx8MpsrlWqMj7n5vCg0GGcC9DM=
+gioui.org v0.0.0-20211207114553-03016f0c69b7/go.mod h1:yoWOxPng6WkDpsud+NRmkoftmyWn3rkKsYGEcWHpjTI=
 gioui.org/cpu v0.0.0-20210808092351-bfe733dd3334/go.mod h1:A8M0Cn5o+vY5LTMlnRoK3O5kG+rH0kWfJjeKd9QpBmQ=
 gioui.org/cpu v0.0.0-20210817075930-8d6a761490d2 h1:AGDDxsJE1RpcXTAxPG2B4jrwVUJGFDjINIPi1jtO6pc=
 gioui.org/cpu v0.0.0-20210817075930-8d6a761490d2/go.mod h1:A8M0Cn5o+vY5LTMlnRoK3O5kG+rH0kWfJjeKd9QpBmQ=
