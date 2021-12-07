@@ -2,8 +2,14 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package main
+package lib_test
 
-import "changkun.de/x/occamy/server"
+import (
+	"testing"
 
-func main() { server.Run() }
+	"changkun.de/x/occamy/internal/lib"
+)
+
+func TestResetErrors(t *testing.T) {
+	t.Log(lib.ResetErrors())
+}

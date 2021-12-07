@@ -9,12 +9,16 @@ GOPATH=$(shell go env GOPATH)
 HOME = changkun.de/x/occamy
 IMAGE = occamy
 
+compile:
+	go build -mod vendor -x -o occamyd
+.PHONY: compile
+
 build:
 	docker build -t $(IMAGE):$(VERSION) -t $(IMAGE):latest -f docker/Dockerfile .
 .PHONY: occamy
 
 run:
-	cd docker && docker-compose up
+	cd docker && docker-compose up -d
 
 stop:
 	cd docker && docker-compose down
