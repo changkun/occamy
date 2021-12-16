@@ -6,7 +6,6 @@ package protocol
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"strconv"
 	"strings"
@@ -27,12 +26,13 @@ var (
 
 // Instruction is a guacamole instruction
 type Instruction struct {
-	elements []string // [0] is the opcode of instruction
+	Opcode string
+	Args   []string
 }
 
 // NewInstruction creates a instruction with given elements
-func NewInstruction(elements []string) *Instruction {
-	return &Instruction{elements}
+func NewInstruction(opcode string, args ...string) *Instruction {
+	return &Instruction{Opcode: opcode, Args: args}
 }
 
 // ParseInstruction parses an instruction: 1.a,2.bc,3.def,10.abcdefghij;
@@ -44,7 +44,6 @@ func ParseInstruction(raw []byte) (ins *Instruction, err error) {
 
 	bytes := len(raw)
 	for cursor < bytes {
-
 		// 1. parse digit
 		lengthEnd := -1
 		for i := cursor; i < bytes; i++ {
@@ -87,46 +86,27 @@ func ParseInstruction(raw []byte) (ins *Instruction, err error) {
 		cursor++
 	}
 
-	return NewInstruction(elements), nil
+	return NewInstruction(elements[0], elements[1:]...), nil
 }
 
 func (i Instruction) String() string {
-	buffer := new(bytes.Buffer)
-	buffer.WriteString(strconv.FormatInt(int64(utf8.RuneCountInString(i.elements[0])), 10))
-	buffer.WriteString(".")
-	buffer.WriteString(i.elements[0])
-	for index := 1; index < len(i.elements); index++ {
-		buffer.WriteString(",")
-		buffer.WriteString(strconv.FormatInt(int64(utf8.RuneCountInString(i.elements[index])), 10))
-		buffer.WriteString(".")
-		buffer.WriteString(i.elements[index])
+	b := strings.Builder{}
+	b.WriteString(strconv.Itoa(len(i.Opcode)))
+	b.WriteString(".")
+	b.WriteString(i.Opcode)
+	for _, a := range i.Args {
+		b.WriteString(",")
+		b.WriteString(strconv.FormatInt(int64(utf8.RuneCountInString(a)), 10))
+		b.WriteString(".")
+		b.WriteString(a)
 	}
-	buffer.WriteString(";")
-	return buffer.String()
+	b.WriteString(";")
+	return b.String()
 }
 
 // Expect op code
 func (i Instruction) Expect(op string) bool {
-	if len(i.elements) == 0 {
-		return false
-	}
-	return i.elements[0] == op
-}
-
-// Opcode returns the opcode of an instruction
-func (i Instruction) Opcode() string {
-	if len(i.elements) < 1 {
-		return ""
-	}
-	return i.elements[0]
-}
-
-// Args returns the arguments of an instruction
-func (i Instruction) Args() []string {
-	if len(i.elements) < 1 {
-		return []string{}
-	}
-	return i.elements[1:]
+	return i.Opcode == op
 }
 
 // InstructionIO implements io.Reader and io.Writer

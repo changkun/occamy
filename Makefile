@@ -10,22 +10,18 @@ HOME = changkun.de/x/occamy
 IMAGE = occamy
 
 compile:
-	go build -mod vendor -x -o occamyd
+	go build -x -o occamyd cmd/occamyd/*
 .PHONY: compile
 
 build:
-	docker build -t $(IMAGE):$(VERSION) -t $(IMAGE):latest -f docker/Dockerfile .
+	docker build --platform linux/x86_64 -t $(IMAGE):$(VERSION) -t $(IMAGE):latest -f docker/Dockerfile .
 .PHONY: occamy
 
-run:
+up:
 	cd docker && docker-compose up -d
 
-stop:
+down:
 	cd docker && docker-compose down
-
-test:
-	go test -cover -coverprofile=cover.test -v ./...
-	go tool cover -html=cover.test -o cover.html
 
 clean:
 	docker images -f "dangling=true" -q | xargs docker rmi -f

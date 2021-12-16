@@ -2,13 +2,12 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package server
+package main
 
 import (
 	"context"
 	"log"
 	"net/http"
-	"net/http/pprof"
 	"os"
 	"os/signal"
 	"sync"
@@ -28,7 +27,7 @@ func init() {
 // Run is an export method that serves occamy proxy
 func Run() {
 	proxy := &proxy{
-		sessions: make(map[string]*Session),
+		// sessions: make(map[string]*Session),
 		upgrader: &websocket.Upgrader{
 			ReadBufferSize:  protocol.MaxInstructionLength,
 			WriteBufferSize: protocol.MaxInstructionLength,
@@ -44,9 +43,7 @@ type proxy struct {
 	jwtm     *jwt.GinJWTMiddleware
 	upgrader *websocket.Upgrader
 	engine   *gin.Engine
-
-	mu       sync.Mutex
-	sessions map[string]*Session
+	sess     sync.Map // map[string]*Session
 }
 
 func (p *proxy) serve() {
@@ -90,9 +87,6 @@ func (p *proxy) routers() *gin.Engine {
 	auth := v1.Group("/connect")
 	auth.Use(p.jwtm.MiddlewareFunc())
 	auth.GET("", p.serveWS)
-	if gin.Mode() == gin.DebugMode {
-		p.profile()
-	}
 	return p.engine
 }
 
@@ -128,43 +122,4 @@ func (p *proxy) initJWT() {
 		log.Fatalf("initialize router error: %v", err)
 	}
 	p.jwtm = jwtm
-}
-
-// profile the standard HandlerFuncs from the net/http/pprof package with
-// the provided gin.Engine. prefixOptions is a optional. If not prefixOptions,
-// the default path prefix is used, otherwise first prefixOptions will be path prefix.
-//
-// Basic Usage:
-//
-// - use the pprof tool to look at the heap profile:
-//   go tool pprof http://0.0.0.0:5636/debug/pprof/heap
-// - look at a 30-second CPU profile:
-//   go tool pprof http://0.0.0.0:5636/debug/pprof/profile
-// - look at the goroutine blocking profile, after calling runtime.SetBlockProfileRate:
-//   go tool pprof http://0.0.0.0:5636/debug/pprof/block
-// - collect a 5-second execution trace:
-//   wget http://0.0.0.0:5636/debug/pprof/trace?seconds=5
-//
-func (p *proxy) profile() {
-	pprofHandler := func(h http.HandlerFunc) gin.HandlerFunc {
-		handler := http.HandlerFunc(h)
-		return func(c *gin.Context) {
-			handler.ServeHTTP(c.Writer, c.Request)
-		}
-	}
-	r := p.engine.Group("/debug/pprof")
-	{
-		r.GET("/", pprofHandler(pprof.Index))
-		r.GET("/cmdline", pprofHandler(pprof.Cmdline))
-		r.GET("/profile", pprofHandler(pprof.Profile))
-		r.POST("/symbol", pprofHandler(pprof.Symbol))
-		r.GET("/symbol", pprofHandler(pprof.Symbol))
-		r.GET("/trace", pprofHandler(pprof.Trace))
-		r.GET("/allocs", pprofHandler(pprof.Handler("allocs").ServeHTTP))
-		r.GET("/block", pprofHandler(pprof.Handler("block").ServeHTTP))
-		r.GET("/goroutine", pprofHandler(pprof.Handler("goroutine").ServeHTTP))
-		r.GET("/heap", pprofHandler(pprof.Handler("heap").ServeHTTP))
-		r.GET("/mutex", pprofHandler(pprof.Handler("mutex").ServeHTTP))
-		r.GET("/threadcreate", pprofHandler(pprof.Handler("threadcreate").ServeHTTP))
-	}
 }

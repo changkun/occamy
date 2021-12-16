@@ -2,7 +2,7 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package lib
+package guacd
 
 /*
 #cgo LDFLAGS: -L/usr/local/lib -lguac
@@ -17,16 +17,6 @@ import (
 
 	"changkun.de/x/occamy/internal/protocol"
 )
-
-// type ISocket interface {
-// 	Read()
-// 	Write()
-// 	Flush()
-// 	Lock()
-// 	UnLock()
-// 	Select()
-// 	Free()
-// }
 
 // Socket is a wrapper of given open file descriptor
 type Socket struct {
