@@ -1,6 +1,6 @@
 ---
 title: Session lifecycle hardening
-status: drafted
+status: testing
 track: server
 depends_on:
   - specs/005-upstream-guacamole.md

@@ -29,7 +29,7 @@ replaced one protocol at a time.
 |-|------|--------|
 | ● | [001](001-status-quo.md) Status quo after the 2026 revival | complete |
 | ✕ | [002](002-ssh-session-rejoin.md) SSH sessions after the first one | archived |
-| ○ | [003](003-session-lifecycle-hardening.md) Session lifecycle hardening | drafted |
+| ◐ | [003](003-session-lifecycle-hardening.md) Session lifecycle hardening | testing |
 | ○ | [004](004-security-hardening.md) Security hardening | drafted |
 | ● | [005](005-upstream-guacamole.md) Catch up with upstream guacamole | complete |
 | ● | [006](006-demo-stack-refresh.md) Demo stack refresh and end-to-end tests | complete |
@@ -68,7 +68,7 @@ Build, dependencies, CI, demo environment, and documentation.
 | Spec | Status | Deliverable |
 |------|--------|-------------|
 | [002-ssh-session-rejoin.md](002-ssh-session-rejoin.md) | Archived | Moot: guacd replaced the in-process libguac (#22 fixed by 005) |
-| [003-session-lifecycle-hardening.md](003-session-lifecycle-hardening.md) | Not started | Close the join-as-last-user-leaves race, stress-test the session table, pressure test in CI, debugging docs (#18, #20) |
+| [003-session-lifecycle-hardening.md](003-session-lifecycle-hardening.md) | In testing | Close the join-as-last-user-leaves race, stress-test the session table, pressure test in CI, debugging docs (#18, #20) |
 | [004-security-hardening.md](004-security-hardening.md) | Not started | No credentials in tokens or logs, target allowlist, safe defaults, gin-jwt v3 |
 | [005-upstream-guacamole.md](005-upstream-guacamole.md) | Complete (v0.5.0) | Upstream guacd 1.6 as backend: RDP restored, cgo removed (#25); Windows RDP check open on #32 |
 
