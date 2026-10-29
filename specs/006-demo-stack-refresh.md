@@ -1,6 +1,6 @@
 ---
 title: Demo stack refresh and end-to-end tests
-status: drafted
+status: validated
 track: maintenance
 depends_on:
   - specs/001-status-quo.md
