@@ -132,20 +132,8 @@ func (p *proxy) initJWT() {
 	p.jwtm = jwtm
 }
 
-// profile the standard HandlerFuncs from the net/http/pprof package with
-// the provided gin.Engine. prefixOptions is a optional. If not prefixOptions,
-// the default path prefix is used, otherwise first prefixOptions will be path prefix.
-//
-// Basic Usage:
-//
-//   - use the pprof tool to look at the heap profile:
-//     go tool pprof http://0.0.0.0:5636/debug/pprof/heap
-//   - look at a 30-second CPU profile:
-//     go tool pprof http://0.0.0.0:5636/debug/pprof/profile
-//   - look at the goroutine blocking profile, after calling runtime.SetBlockProfileRate:
-//     go tool pprof http://0.0.0.0:5636/debug/pprof/block
-//   - collect a 5-second execution trace:
-//     wget http://0.0.0.0:5636/debug/pprof/trace?seconds=5
+// profile serves the net/http/pprof handlers under /debug/pprof, in debug
+// mode only. docs/debugging.md describes how to use them.
 func (p *proxy) profile() {
 	pprofHandler := func(h http.HandlerFunc) gin.HandlerFunc {
 		return func(c *gin.Context) {

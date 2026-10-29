@@ -18,6 +18,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   ([#20](https://github.com/changkun/occamy/issues/20)), with 10 rounds.
   Afterwards, `occamyd`'s goroutines and guacd's processes must return
   to their numbers before the tests.
+- A guide to profiling `occamyd` in debug mode, watching guacd's
+  processes, and the pressure test
+  ([docs/debugging.md](docs/debugging.md),
+  [#18](https://github.com/changkun/occamy/issues/18)).
 
 ### Fixed
 
