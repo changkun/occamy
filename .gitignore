@@ -21,3 +21,6 @@
 
 # project irrelevant ignores
 .vscode
+# release builds (goreleaser, scripts/third-party-licenses.sh)
+/dist/
+/THIRD_PARTY_LICENSES
