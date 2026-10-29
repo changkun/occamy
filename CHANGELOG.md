@@ -19,6 +19,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   photograph. They run on a bench desktop (`docker/bench/desktop`) whose
   session is a scene program (`bench/scene`) drawing the same pixels in
   every run.
+- The README documents connection parameters in `guacd.params` and how to
+  reach a Windows RDP host. `conf.yaml` lists `domain` and `security` as
+  comments ([#32](https://github.com/changkun/occamy/issues/32)).
 
 ## [0.5.0] - 2026-10-29
 

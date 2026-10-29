@@ -86,6 +86,37 @@ make compile                 # CGO_ENABLED=0, produces ./occamyd
 ./occamyd -conf=./conf.yaml
 ```
 
+### Connection parameters
+
+A token carries `protocol`, `host`, `username` and `password`. guacd takes
+many more parameters per protocol, listed in the
+[Guacamole manual](https://guacamole.apache.org/doc/1.6.0/gug/configuring-guacamole.html#connection-configuration).
+Set them as strings under `guacd.params.<protocol>` in
+[conf.yaml](./conf.yaml). They apply to every connection of that protocol,
+and token values win over them.
+
+For RDP to a Windows host:
+
+```yaml
+guacd:
+  params:
+    rdp:
+      ignore-cert: "true" # already in conf.yaml
+      domain: EXAMPLE     # only for domain accounts
+```
+
+- guacd negotiates the security mode when `security` is unset. The
+  negotiation includes NLA, which current Windows requires by default.
+  Set `security: nla` to force it.
+- NLA needs the username and password in the token. The web client cannot
+  answer guacd's prompt for missing credentials.
+- Windows uses a self-signed RDP certificate by default, so conf.yaml sets
+  `ignore-cert`. This skips the certificate check for every RDP host.
+  `cert-fingerprints` accepts only the certificates you list.
+
+RDP is tested against xrdp in CI. We have not tested a Windows host yet
+([#32](https://github.com/changkun/occamy/issues/32)).
+
 ### Web client
 
 The demo web client lives in [client/occamy-web](./client/occamy-web) (Vue 3, Vite).
