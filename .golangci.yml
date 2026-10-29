@@ -14,6 +14,14 @@ linters:
     - unconvert     # conversions to the same type
     - usestdlibvars # http.MethodGet and friends instead of literals
   exclusions:
+    presets:
+      # Unchecked Close, Flush and print calls.
+      - std-error-handling
+    rules:
+      # Tests may ignore errors from their own plumbing and use fixed
+      # demo credentials.
+      - path: _test\.go
+        linters: [errcheck, gosec]
     paths:
       # npm packages can ship Go code of their own.
       - client/

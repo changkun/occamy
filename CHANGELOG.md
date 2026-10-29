@@ -72,6 +72,12 @@ Development resumed in 2026 after a pause from the end of 2021.
   ([#22](https://github.com/changkun/occamy/issues/22)).
 - Ending a VNC session no longer crashes `occamyd`.
 - Tokens no longer stop validating after one hour of uptime.
+- Two tokens whose claims concatenate to the same string (username `ab`
+  with password `c`, and username `a` with password `bc`) no longer share
+  a session. Session keys are a SHA-256 hash of the length-prefixed claims
+  instead of an MD5 hash of their concatenation.
+- `occamyd` closes connections whose request headers take longer than
+  10 seconds, so slow clients cannot hold connections open.
 - `occamyd` shuts down cleanly on SIGTERM.
 - Indirect dependencies with known vulnerabilities have been upgraded.
 

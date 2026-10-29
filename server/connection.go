@@ -15,11 +15,12 @@ import (
 	"syscall"
 	"time"
 
-	"changkun.de/x/occamy/internal/config"
-	"changkun.de/x/occamy/internal/protocol"
 	jwt "github.com/appleboy/gin-jwt/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+
+	"changkun.de/x/occamy/internal/config"
+	"changkun.de/x/occamy/internal/protocol"
 )
 
 // Run is an export method that serves occamy proxy
@@ -53,6 +54,9 @@ func (p *proxy) serve() {
 	s := &http.Server{
 		Handler: p.routers(),
 		Addr:    config.Runtime.Address,
+		// Bound how long a client may take to send its request headers,
+		// so that slow clients cannot hold connections open.
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 	done := make(chan struct{})
 	go func() {
@@ -74,7 +78,6 @@ func (p *proxy) serve() {
 	}
 	<-done
 	log.Println("occamy proxy is down, good bye!")
-	return
 }
 
 func (p *proxy) routers() *gin.Engine {
@@ -145,9 +148,8 @@ func (p *proxy) initJWT() {
 //     wget http://0.0.0.0:5636/debug/pprof/trace?seconds=5
 func (p *proxy) profile() {
 	pprofHandler := func(h http.HandlerFunc) gin.HandlerFunc {
-		handler := http.HandlerFunc(h)
 		return func(c *gin.Context) {
-			handler.ServeHTTP(c.Writer, c.Request)
+			h.ServeHTTP(c.Writer, c.Request)
 		}
 	}
 	r := p.engine.Group("/debug/pprof")

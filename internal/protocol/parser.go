@@ -34,9 +34,7 @@ const (
 )
 
 // Parser parses an occamy instruction
-type Parser struct {
-	state ParserState
-}
+type Parser struct{}
 
 // NewParser creates an occamy protocol parser.
 func NewParser() Parser {
