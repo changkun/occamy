@@ -1,0 +1,19 @@
+# Copyright 2019 Changkun Ou. All rights reserved.
+# Use of this source code is governed by a MIT
+# license that can be found in the LICENSE file.
+
+# occamy's config in the demo stack (docker-compose.yaml): conf.yaml with
+# guacd reached by service name.
+
+---
+address: 0.0.0.0:5636
+mode: debug # options: debug/release/test
+auth:
+  jwt_secret: occamy
+  jwt_alg: HS256
+client: true # enable web client demo
+guacd:
+  address: guacd:4822
+  params: # per-protocol defaults, merged under token values
+    rdp:
+      ignore-cert: "true"
