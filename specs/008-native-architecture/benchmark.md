@@ -217,8 +217,22 @@ so the repository carries no image files.
 
 ## Implementation notes
 
-- **Status:** the Terminal task shipped in PR #76 on 2026-10-29. Desktop
-  VNC, Desktop RDP and the targets of the Baseline task remain.
+- **Status:** the Terminal task shipped in PR #76 on 2026-10-29, and the
+  Desktop VNC and Desktop RDP tasks in the PR after it. The desktop
+  baseline numbers and the targets of the Baseline task remain.
+- **Desktop decisions:**
+  - The bench desktop replaces the `vnc` and `rdp` services' images
+    rather than adding a service, so the harness's hosts, credentials
+    and per-service CPU stay as they are.
+  - The probe swatch is reset to grey by every scene key, and the
+    harness's readiness check alternates two letters of different
+    colours, because an update that paints the colour already shown
+    changes no pixels and draws nothing.
+  - Every wait in a desktop scenario is bounded. At N2 a VNC session
+    could keep drawing long enough that waiting for quiet hung until the
+    scenario's 10-minute limit.
+  - The interpreter applies all sixteen channel masks; guacd uses
+    destination-out and destination-atop on buffers at connect.
 - **Done ahead of plan:** the interpreter, planned for Desktop VNC,
   because SSH needed it; and from the Baseline task, the CI smoke job
   and `docs/benchmarks.md` with the terminal numbers.
