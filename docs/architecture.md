@@ -56,7 +56,8 @@ A connection goes through these steps:
    claims share one session. The first user dials guacd and asks it for a new
    connection with the claims as parameters, plus the protocol's
    `guacd.params` from `conf.yaml`; later users join it with
-   `select $id`. The session ends when its last user leaves.
+   `select $id`. The session ends when its last user leaves. A user who
+   joins just as guacd ends the connection starts a new session instead.
 4. `occamyd` copies instructions between guacd and the WebSocket until either
    side closes, and then closes the WebSocket with the Guacamole status code.
 

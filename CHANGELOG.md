@@ -22,6 +22,20 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - The README documents connection parameters in `guacd.params` and how to
   reach a Windows RDP host. `conf.yaml` lists `domain` and `security` as
   comments ([#32](https://github.com/changkun/occamy/issues/32)).
+- CI runs the pressure test, which crashed `occamyd` before 0.5.0
+  ([#20](https://github.com/changkun/occamy/issues/20)), with 10 rounds.
+  Afterwards, `occamyd`'s goroutines must return to their number before
+  the storm, and CI warns if guacd keeps a process.
+- A guide to profiling `occamyd` in debug mode, watching guacd's
+  processes, and the pressure test
+  ([docs/debugging.md](docs/debugging.md),
+  [#18](https://github.com/changkun/occamy/issues/18)).
+
+### Fixed
+
+- A client that connects just as the last user of a session with the
+  same credentials leaves gets a new session, instead of joining the
+  ending one and being disconnected.
 
 ## [0.5.0] - 2026-10-29
 

@@ -188,8 +188,10 @@ make stop
 ```
 
 The pressure test also needs `OCCAMY_PRESSURE_N`, the number of rounds
-(`make e2e OCCAMY_PRESSURE_N=10`). CI does not run it yet
-([specs/003](./specs/003-session-lifecycle-hardening.md)).
+(`make e2e OCCAMY_PRESSURE_N=10`). CI runs it with 10 rounds. After the
+storm it checks that new sessions work and that `occamyd`'s goroutines
+return to their number before it. [docs/debugging.md](./docs/debugging.md)
+covers profiling and measuring `occamyd`.
 
 ## Contributing
 

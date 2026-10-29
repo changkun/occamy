@@ -10,6 +10,9 @@ You may interested in the following document:
     information to Occamy for  getting authentication tokens. 
 - [Benchmarks](./benchmarks.md)
   + TL;DR: How Occamy is measured, and the numbers protocol v1 must beat.
+- [Debugging and measuring](./debugging.md)
+  + TL;DR: Profiling `occamyd` in debug mode, guacd's processes, and the
+    pressure test.
 - [Design specs](../specs/README.md)
   + TL;DR: Current status of the project and planned work.
 

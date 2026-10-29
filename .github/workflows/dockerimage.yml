@@ -91,8 +91,34 @@ jobs:
       run: make build CONTAINER_ENGINE=docker
     - name: Start the demo stack
       run: make run CONTAINER_ENGINE=docker
-    - name: End-to-end tests
-      run: make e2e
+    - name: Resources before the tests
+      working-directory: docker
+      run: |
+        docker stats --no-stream
+        docker compose top guacd
+    # OCCAMY_PRESSURE_N=10 adds the pressure test: 60 concurrent sessions
+    # over the three demo servers.
+    - name: End-to-end and pressure tests
+      run: make e2e OCCAMY_PRESSURE_N=10
+    # guacd forks a process for each connection, which should exit once
+    # the connection's last user has left. Under the pressure test, guacd
+    # 1.6 has kept a VNC process whose users had all left (specs/003), so
+    # a leftover process is a warning, not a failure.
+    - name: Resources after the tests
+      working-directory: docker
+      run: |
+        guacd=$(docker compose ps -q guacd)
+        for i in $(seq 30); do
+          n=$(docker top "$guacd" -eo pid,comm | awk '$2 == "guacd"' | wc -l)
+          [ "$n" -eq 1 ] && break
+          sleep 1
+        done
+        docker stats --no-stream
+        docker compose top guacd
+        if [ "$n" -ne 1 ]; then
+          echo "::warning::guacd runs $n processes after the tests, want 1"
+          docker compose logs guacd
+        fi
     - name: Demo stack logs
       if: failure()
       working-directory: docker
