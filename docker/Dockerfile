@@ -2,54 +2,61 @@
 # Use of this source code is governed by a MIT
 # license that can be found in the LICENSE file.
 
-# FYI: debian has connection issue
-FROM centos:centos7
-ENV LC_ALL=en_US.UTF-8                \
-    RUNTIME_DEPENDENCIES="            \
-        gcc                           \
-        gdb                           \
-        wget                          \
-        glib                          \
-        cairo                         \
-        dejavu-sans-mono-fonts        \
-        freerdp                       \
-        freerdp-plugins               \
-        ghostscript                   \
-        libssh2                       \
-        liberation-mono-fonts         \
-        libvncserver                  \
-        pango                         \
-        terminus-fonts                \
-        git"                          \
-    BUILD_DEPENDENCIES="              \
-        autoconf                      \
-        automake                      \
-        cairo-devel                   \
-        freerdp-devel                 \
-        pango-devel                   \
-        libssh2-devel                 \
-        libtool                       \
-        libvncserver-devel            \
-        make"                         \
-    GO_VERSION=1.15.7
-RUN yum -y update                                                         && \
-    yum -y install epel-release $RUNTIME_DEPENDENCIES $BUILD_DEPENDENCIES && \
-    # see: https://github.com/Zer0CoolX/guacamole-install-rhel/issues/78#issuecomment-534620524
-    yum -y remove freerdp-devel && \
-    yum -y remove freerdp-libs && \
-    yum -y install freerdp-devel-1.0.2-15.el7 \
-                freerdp-plugins-1.0.2-15.el7 \
-                --enablerepo=C7.6.1810-base \
-                --disablerepo=base \
-                --disablerepo=updates
+# Stage 1: build the web client demo.
+FROM node:24-trixie-slim AS web
+WORKDIR /occamy/client/occamy-web
+COPY client/occamy-web/package.json ./
+RUN npm install --no-audit --no-fund
+COPY client/occamy-web ./
+RUN npm run build
+
+# Stage 2: build libguac with its protocol plugins, then occamyd against it.
+#
+# RDP is disabled: the vendored guacamole-server (1.0.0) only supports
+# FreeRDP 1.x, which no current distribution ships. VNC and SSH are built.
+FROM golang:1.27-trixie AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        autoconf                \
+        automake                \
+        libtool                 \
+        make                    \
+        pkg-config              \
+        libcairo2-dev           \
+        libpango1.0-dev         \
+        libpng-dev              \
+        libssh2-1-dev           \
+        libssl-dev              \
+        libvncserver-dev     && \
+    rm -rf /var/lib/apt/lists/*
 WORKDIR /occamy
-RUN mkdir /golang                                      && \
-    cd /golang                                         && \
-    wget https://dl.google.com/go/go${GO_VERSION}.linux-amd64.tar.gz && \
-    tar -xvf go${GO_VERSION}.linux-amd64.tar.gz
-ADD . .
-RUN ./guacamole/src/build-libguac.sh /occamy/guacamole
-RUN /golang/go/bin/go build -mod vendor -x -o occamyd
+COPY guacamole ./guacamole
+RUN ./guacamole/src/build-libguac.sh /occamy/guacamole /usr/local
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o occamyd .
+
+# Stage 3: runtime image.
+FROM debian:trixie-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        fontconfig              \
+        fonts-dejavu-core       \
+        libcairo2               \
+        libpango-1.0-0          \
+        libpangocairo-1.0-0     \
+        libpng16-16t64          \
+        libssh2-1t64            \
+        libssl3t64              \
+        libvncclient1        && \
+    rm -rf /var/lib/apt/lists/*
+COPY --from=build /usr/local/lib/libguac* /usr/local/lib/
+# libguac dlopen()s plugins by their unversioned name (libguac-client-vnc.so),
+# which ldconfig does not cache, so the directory must be on the search path.
+ENV LD_LIBRARY_PATH=/usr/local/lib
+WORKDIR /occamy
+COPY --from=build /occamy/occamyd ./
+COPY conf.yaml ./
+COPY --from=web /occamy/client/occamy-web/dist ./client/occamy-web/dist
 
 EXPOSE 5636
 CMD ["/occamy/occamyd"]

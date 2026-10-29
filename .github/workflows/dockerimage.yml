@@ -1,14 +1,53 @@
 name: Builds
 
-on: [push]
+on:
+  push:
+  pull_request:
 
 jobs:
 
-  build:
-
+  go:
     runs-on: ubuntu-latest
-
+    env:
+      # libguac dlopen()s protocol plugins by unversioned name.
+      LD_LIBRARY_PATH: /usr/local/lib
     steps:
-    - uses: actions/checkout@v1
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+    - name: Install libguac build dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          autoconf automake libtool make pkg-config \
+          libcairo2-dev libpango1.0-dev libpng-dev \
+          libssh2-1-dev libssl-dev libvncserver-dev
+    - name: Build libguac
+      run: sudo ./guacamole/src/build-libguac.sh "$PWD/guacamole" /usr/local
+    - name: Vet
+      run: go vet ./...
+    # tests/ needs the docker compose demo stack and is not run here.
+    - name: Test
+      run: go test ./internal/... ./server/...
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client/occamy-web
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 24
+    - run: npm install --no-audit --no-fund
+    - run: npm run lint
+    - run: npm run build
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
     - name: Build the Docker image
       run: make build

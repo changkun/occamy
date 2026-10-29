@@ -2,7 +2,6 @@
 # Use of this source code is governed by a MIT
 # license that can be found in the LICENSE file.
 
-version: '3'
 services:
   occamy:
     container_name: occamy
