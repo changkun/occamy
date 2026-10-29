@@ -100,7 +100,9 @@ sends that user something. Until then the user still counts, for up to
   check that the remote desktop arrives at the first attempt.
 - `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test. Each of its N
   rounds opens two sessions to each demo server at once: one that waits
-  for the desktop and one that sends garbage. Sessions may fail under
+  for the desktop and one that sends garbage. All sessions to one server
+  have the same claims, so they share a guacd connection, and the storm
+  mostly exercises joining and leaving. Sessions may fail under
   the load. Afterwards, `occamyd`'s goroutines must return to their
   number before the storm within a minute, or the test fails and prints
   the goroutine profile. Then a session with the storm's own claims and
@@ -112,3 +114,36 @@ CI runs the unit tests with `-race`, and the end-to-end and pressure
 tests with 10 rounds. It prints `docker stats` and guacd's processes
 before and after them, and warns if guacd still runs more than its one
 process 30 s after the tests.
+
+## Pressure baseline
+
+From CI run
+[40969282182](https://github.com/changkun/occamy/actions/runs/40969282182),
+on GitHub's `ubuntu-latest` runner (4 CPUs, Docker), with
+`OCCAMY_PRESSURE_N=10`. The goroutines are counted around the storm;
+the rest around the whole end-to-end step, which runs the storm after
+the other end-to-end tests.
+
+| | Before | After |
+|---|---|---|
+| Storm | | 60 sessions in 2.4 s, none failed |
+| `occamyd` goroutines | 5 | 5, at once |
+| `occamyd` memory (`docker stats`) | 2.6 MiB | 10.3 MiB |
+| `occamyd` threads (`PIDS`) | 9 | 12 |
+| guacd processes | 1 | 1, within 15 s |
+| guacd threads (`PIDS`) | 1 | 7 |
+
+The Go runtime keeps idle OS threads and returns freed memory to the
+system gradually, so neither number drops back at once. The goroutine
+count is what shows a leak.
+
+In the first CI run of the test
+([40968488199](https://github.com/changkun/occamy/actions/runs/40968488199)),
+13 users joined a VNC connection before guacd had drawn its first frame,
+and none of them ever got one. Six storm sessions timed out after 10 s,
+and the storm took 10.1 s. guacd dropped each of those users as not
+responding after 15 s, but never logged them as gone, and the
+connection's process was still there 30 s after the tests. `occamyd`
+had closed every session, and its goroutines were back at 5. It looks
+like a hang in guacd 1.6, which is why CI only warns about a leftover
+guacd process.
