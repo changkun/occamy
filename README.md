@@ -117,8 +117,22 @@ go test ./internal/... ./server/...
 ```
 
 `internal/lib` links against libguac, so run it where libguac is installed
-(for example the `build` stage of the Dockerfile). [tests/](./tests) holds a
-pressure test that needs the compose demo running.
+(for example the `build` stage of the Dockerfile).
+
+[tests/](./tests) holds end-to-end and pressure tests that open real
+sessions to the demo servers. They are skipped unless
+`OCCAMY_E2E_ENDPOINT` is set; `make e2e` sets it to `localhost:5636`:
+
+```
+make build
+make run
+make e2e
+make stop
+```
+
+The pressure test also needs `OCCAMY_PRESSURE_N`, the number of rounds
+(`make e2e OCCAMY_PRESSURE_N=10`). It still crashes occamyd
+([#20](https://github.com/changkun/occamy/issues/20)), so CI does not run it yet.
 
 ## Contributing
 

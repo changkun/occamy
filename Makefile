@@ -29,6 +29,11 @@ stop:
 	cd docker && $(CONTAINER_ENGINE) compose down
 .PHONY: stop
 
+# e2e runs the end-to-end tests against a stack started with make run.
+e2e:
+	OCCAMY_E2E_ENDPOINT=$(or $(OCCAMY_E2E_ENDPOINT),localhost:5636) go test -v -count=1 ./tests/
+.PHONY: e2e
+
 test:
 	go test -cover -coverprofile=cover.test -v ./...
 	go tool cover -html=cover.test -o cover.html

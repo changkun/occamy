@@ -5,11 +5,8 @@
 package tests
 
 import (
-	"bytes"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
+	"os"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -17,172 +14,68 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-const (
-	maxc            = 10
-	debug           = false
-	endpointLogin   = "http://0.0.0.0:5636/api/v1/login"
-	endpointConnect = "ws://0.0.0.0:5636/api/v1/connect"
-)
-
-type jwtInput struct {
-	Protocol string `json:"protocol"`
-	Host     string `json:"host"`
-	Username string `json:"username"`
-	Password string `json:"password"`
-}
-
-type jwtOutput struct {
-	Code   int       `json:"code"`
-	Expire time.Time `json:"expire"`
-	Token  string    `json:"token"`
-}
-
-var credentials = map[string]jwtInput{
-	"vnc": {
-		Protocol: "vnc",
-		Host:     "172.16.239.11:5901",
-		Username: "",
-		Password: "vncpassword",
-	},
-	"rdp": {
-		Protocol: "rdp",
-		Host:     "172.16.239.12:3389",
-		Username: "root",
-		Password: "Docker",
-	},
-	"ssh": {
-		Protocol: "ssh",
-		Host:     "172.16.239.13:22",
-		Username: "root",
-		Password: "root",
-	},
-}
-
-func login(protocol string) string {
-	credential, ok := credentials[protocol]
-	if !ok {
-		panic(fmt.Sprintf("login: protocol %s is not supported.", protocol))
-	}
-
-	b, err := json.Marshal(credential)
-	if err != nil {
-		panic(fmt.Sprintf("login: marshal credentials failed: %v", err))
-	}
-
-	resp, err := http.Post(endpointLogin, "application/json", bytes.NewReader(b))
-	if err != nil {
-		panic(fmt.Sprintf("login: applying credentials failed: %v", err))
-	}
-	defer resp.Body.Close()
-
-	d, err := io.ReadAll(resp.Body)
-	if err != nil {
-		panic(fmt.Sprintf("login: reading respons failed: %v", err))
-	}
-
-	var out jwtOutput
-	err = json.Unmarshal(d, &out)
-	if err != nil {
-		panic(fmt.Sprintf("login: unmarshal response failed: %v", err))
-	}
-	return endpointConnect + "?token=" + out.Token
-}
-
 func successConnect(url string) error {
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
-	if err != nil {
-		return fmt.Errorf("connect: dial failed, err: %v", err)
-	}
-	for i := 0; i < 50; i++ {
-		_, data, err := conn.ReadMessage()
-		if err != nil {
-			if debug {
-				fmt.Println("client: ", err)
-			}
-			return nil
-		}
-		if debug {
-			fmt.Println("server: ", string(data))
-		}
-		if len(data) > 6 && string(data[0:6]) == "4.sync" {
-			if debug {
-				fmt.Println("client: ", string(data))
-			}
-			conn.WriteMessage(websocket.TextMessage, data)
-			continue
-		}
-		if len(data) > 5 && string(data[0:5]) == "3.nop" {
-			if debug {
-				fmt.Println("client: ", string(data))
-			}
-			conn.WriteMessage(websocket.TextMessage, data)
-			continue
-		}
-		if len(data) > 12 && string(data[0:12]) == "10.disconnect" {
-			if debug {
-				fmt.Println("client: ", string(data))
-			}
-			conn.WriteMessage(websocket.TextMessage, data)
-			return nil
-		}
-	}
-	conn.WriteMessage(websocket.TextMessage, []byte("10.disconnect;"))
-	if debug {
-		fmt.Println("client: 10.disconnect;")
-	}
-	return conn.Close()
+	return session(url, 10*time.Second, "size", "img", "sync")
 }
 
 func failConnect(url string) error {
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	ws, err := dial(url)
 	if err != nil {
-		return fmt.Errorf("connect: dial failed, err: %v", err)
+		return err
 	}
+	defer ws.Close()
 
-	// read guacamole message, first message will contains the connection-id
-	_, _, err = conn.ReadMessage()
-	if err != nil {
-		return fmt.Errorf("error when reading message: %v", err)
+	ws.SetReadDeadline(time.Now().Add(10 * time.Second))
+	if _, _, err := ws.ReadMessage(); err != nil {
+		return err
 	}
-	conn.WriteMessage(websocket.TextMessage, []byte("bad instruction"))
-	return conn.Close()
+	return ws.WriteMessage(websocket.TextMessage, []byte("bad instruction"))
 }
 
-// TestConnectionPressure implements a pressure test for occamy service.
-// It is required to run the occamy service to run this test.
+// TestConnectionPressure opens many concurrent sessions to every demo
+// server, half of which send garbage, and then checks that occamy still
+// serves new sessions. Individual sessions may fail under the load; occamy
+// must not crash or lock up. OCCAMY_PRESSURE_N sets the number of rounds.
 //
-//	make build
-//	make run
-//
-// then run this test by:
-//
-//	go test -v -count=1 .
+// The test is skipped unless OCCAMY_PRESSURE_N is set: concurrent joins and
+// teardowns still crash occamyd (#20,
+// specs/003-session-lifecycle-hardening.md), which runs it in CI once fixed.
 func TestConnectionPressure(t *testing.T) {
-	protos := []string{
-		"vnc",
-		"rdp",
-		"ssh",
+	v := os.Getenv("OCCAMY_PRESSURE_N")
+	if v == "" {
+		t.Skip("OCCAMY_PRESSURE_N not set, see the test documentation")
 	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		t.Fatalf("bad OCCAMY_PRESSURE_N: %v", err)
+	}
+	addr := endpoint(t)
+
 	connectors := map[string]func(string) error{"success": successConnect, "fail": failConnect}
 	var wg sync.WaitGroup
-	for i := 1; i <= maxc; i++ {
-		for _, proto := range protos {
+	for i := 1; i <= n; i++ {
+		for _, proto := range protocols() {
 			for name, connector := range connectors {
 				wg.Add(1)
-				// time.Sleep(time.Second)
-				go func(name string, connector func(string) error, proto string, i int) {
+				go func() {
 					defer wg.Done()
-
-					fmt.Printf("%s-%s-%d start...\n", proto, name, i)
-					err := connector(login(proto))
-					if err != nil {
-						fmt.Printf("%s-%s-%d err: %v\n", proto, name, i, err)
-						return
+					url, err := login(addr, credentials[proto])
+					if err == nil {
+						err = connector(url)
 					}
-					fmt.Printf("%s-%s-%d done.\n", proto, name, i)
-				}(name, connector, proto, i)
+					if err != nil {
+						t.Logf("%s-%s-%d: %v", proto, name, i, err)
+					}
+				}()
 			}
 		}
 	}
 	wg.Wait()
+
+	// A session with the storm's claims may never end and keep those claims
+	// stuck (specs/003-session-lifecycle-hardening.md, defect 8), so check
+	// with claims of its own. VNC ignores the username.
+	fresh := credentials["vnc"]
+	fresh.Username = "after-pressure"
+	checkSession(t, addr, fresh)
 }
