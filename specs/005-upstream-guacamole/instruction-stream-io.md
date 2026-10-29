@@ -47,7 +47,9 @@ prefixes instead of splitting at the first `;`. Every later task in
    - append every byte read to the returned slice so the result is the raw
      instruction including `;`, exactly as today.
    Fail with a new `ErrInstructionTooLong` once the raw size passes
-   `MaxInstructionLength` code points, and with `ErrInstructionTooManyElements`
+   `MaxInstructionLength` code points (8192, the same as
+   `GUAC_INSTRUCTION_MAX_LENGTH` in guacamole-server 1.6.0, so guacd's
+   own output always fits), and with `ErrInstructionTooManyElements`
    past `InstructionMaxElements`.
 5. `Read` keeps calling `ParseInstruction` on the raw bytes. Leave
    `ParseInstruction` and `Parser` alone apart from reusing the shared

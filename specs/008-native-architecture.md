@@ -64,7 +64,8 @@ In scope:
    for RDP.
 9. Clients: the web client on protocol v1 ([009](009-react-web-client.md))
    and the Go client core, which the end-to-end tests and the Swift client
-   ([010](010-native-swift-client.md), preview in beta) build on.
+   ([010](010-native-swift-client.md)) build on. The Swift client is a
+   preview by rc.1 and does not gate beta.1.
 
 Out of scope for beta: video encoding (H.264 and similar), audio, file
 transfer and SFTP, a recording player, WebTransport, native RDP, and

@@ -95,15 +95,18 @@ table never holds the proxy lock across network I/O.
 
 5. **Proxy loop** (`serveIO`, now taking `*guacd.Conn`):
    - guacd → client: send the internal-opcode instruction
-     `0.,<n>.<ConnID>;` first, the same tunnel-UUID message that
-     guacamole-client sends and `occamy.js` already accepts
-     (`Occamy.Tunnel.INTERNAL_DATA_OPCODE`). Then forward each `ReadRaw`
-     result as one text message.
+     `0.,<n>.<ConnID>;` first. guacamole-client 1.6.0 sends the same kind
+     of message with its tunnel UUID
+     (`GuacamoleWebSocketTunnelEndpoint`), and `occamy.js` already accepts
+     it (`Occamy.Tunnel.INTERNAL_DATA_OPCODE`). Then forward each
+     `ReadRaw` result as one text message.
    - client → guacd: a message may hold several instructions. Split them
-     with the length-aware reader over a `bytes.Reader`. Drop
-     internal-opcode instructions (opcode `""`), answering
-     `0.,4.ping,<ts>;` with the same instruction as guacamole-client 1.1+
-     does. Forward the rest.
+     with the length-aware reader over a `bytes.Reader`. Never forward
+     internal-opcode instructions (opcode `""`). Answer
+     `0.,4.ping,<ts>;` with the same instruction, as
+     `GuacamoleWebSocketTunnelEndpoint` does in 1.6.0. The bundled
+     `occamy.js` sends no pings, but current guacamole-common-js clients
+     do. Forward the rest.
    - Keep the first error and close both sides as today.
 
 6. Log the guacd connection ID with every session log line. Never log
