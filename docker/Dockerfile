@@ -10,49 +10,17 @@ RUN npm ci --no-audit --no-fund
 COPY client/occamy-web ./
 RUN npm run build
 
-# Stage 2: build libguac with its protocol plugins, then occamyd against it.
-#
-# RDP is disabled: the vendored guacamole-server (1.0.0) only supports
-# FreeRDP 1.x, which no current distribution ships. VNC and SSH are built.
+# Stage 2: build occamyd. It needs no cgo, so the binary is static.
 FROM golang:1.27-trixie AS build
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        autoconf                \
-        automake                \
-        libtool                 \
-        make                    \
-        pkg-config              \
-        libcairo2-dev           \
-        libpango1.0-dev         \
-        libpng-dev              \
-        libssh2-1-dev           \
-        libssl-dev              \
-        libvncserver-dev     && \
-    rm -rf /var/lib/apt/lists/*
 WORKDIR /occamy
-COPY guacamole ./guacamole
-RUN ./guacamole/src/build-libguac.sh /occamy/guacamole /usr/local
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN go build -o occamyd .
+RUN CGO_ENABLED=0 go build -trimpath -o occamyd .
 
-# Stage 3: runtime image.
-FROM debian:trixie-slim
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        fontconfig              \
-        fonts-dejavu-core       \
-        libcairo2               \
-        libpango-1.0-0          \
-        libpangocairo-1.0-0     \
-        libpng16-16t64          \
-        libssh2-1t64            \
-        libssl3t64              \
-        libvncclient1        && \
-    rm -rf /var/lib/apt/lists/*
-COPY --from=build /usr/local/lib/libguac* /usr/local/lib/
-# libguac dlopen()s plugins by their unversioned name (libguac-client-vnc.so),
-# which ldconfig does not cache, so the directory must be on the search path.
-ENV LD_LIBRARY_PATH=/usr/local/lib
+# Stage 3: runtime image, without a shell or C libraries, running as the
+# unprivileged user nonroot. occamyd writes no files.
+FROM gcr.io/distroless/static-debian13:nonroot
 WORKDIR /occamy
 COPY --from=build /occamy/occamyd ./
 COPY conf.yaml ./

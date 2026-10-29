@@ -10,7 +10,7 @@ IMAGE = occamy
 CONTAINER_ENGINE ?= podman
 
 compile:
-	go build -x -o occamyd
+	CGO_ENABLED=0 go build -trimpath -o occamyd
 .PHONY: compile
 
 client:
