@@ -1,6 +1,6 @@
 ---
 title: Open source release readiness
-status: drafted
+status: validated
 track: maintenance
 depends_on: []
 affects:
@@ -113,8 +113,9 @@ publishes checksummed, attested artifacts.
 - **Supported versions:** before 1.0, only the latest release and
   `master`.
 - **Reporting:** GitHub private vulnerability reporting
-  (`/security/advisories/new`), never public issues. Best-effort response,
-  stated plainly as a volunteer project.
+  (`/security/advisories/new`), with `hi@changkun.de` as the fallback.
+  Never public issues. Best-effort response, stated plainly as a volunteer
+  project.
 - **Security notes:** the current caveats from
   [004](004-security-hardening.md) in operator terms:
   - tokens carry the remote credentials and must be treated as secrets;
@@ -126,10 +127,8 @@ publishes checksummed, attested artifacts.
 
 ### Community files
 
-- `CODE_OF_CONDUCT.md`: Contributor Covenant 2.1. The covenant needs a
-  private contact for reports. Private advisory reporting is meant for
-  vulnerabilities, not conduct, so the maintainer picks the contact (open
-  question 2).
+- `CODE_OF_CONDUCT.md`: Contributor Covenant 2.1, with reports to
+  `hi@changkun.de`.
 - `CONTRIBUTING.md`:
   - how to build and test (`make build`, `make run`, `make e2e`);
   - the spec workflow (`specs/`);
@@ -207,7 +206,7 @@ These are settings, not files, so the maintainer applies them:
 - secret scanning with push protection;
 - Dependabot alerts and security updates;
 - branch protection on `master`, requiring `go`, `web`, `image` and `e2e`
-  with the branch up to date;
+  with the branch up to date, and letting administrators bypass it;
 - merge commits only, with branches deleted on merge.
 
 ## Plan
@@ -229,18 +228,20 @@ Each phase is one PR, merged when CI is green.
    [remove-libguac](005-upstream-guacamole/remove-libguac.md)):
    GoReleaser, the binaries job and the third-party license report.
 
-## Open Questions
+## Decisions
 
-1. **First release.** Tag `v0.5.0-alpha.1` as soon as phase 3 merges
-   (image and web only), to exercise the pipeline? Or wait for `v0.5.0`,
-   when `occamyd` is cgo-free and binaries ship? Recommendation: the
-   alpha. It proves the pipeline and gives users a pullable image now.
-2. **Contacts.** Vulnerabilities through private vulnerability reporting
-   (recommended). Conduct reports need a private channel that advisory
-   reporting does not provide: an email address, or the maintainer's
-   GitHub profile?
-3. **Branch protection.** Should it bind administrators, or let the
-   maintainer bypass it in an emergency (recommended)?
+Settled with the maintainer on 2026-10-29:
+
+1. **First release:** `v0.5.0`, once [005](005-upstream-guacamole.md) is
+   complete and `occamyd` is cgo-free. Phases 3 and 4 both land before
+   it. Until then the pipeline is exercised only through its
+   `workflow_dispatch` dry run, and no prerelease is tagged.
+2. **Contacts:** vulnerabilities go through GitHub private vulnerability
+   reporting, with `hi@changkun.de` as the fallback in `SECURITY.md`.
+   Conduct reports go to `hi@changkun.de`, the address already public as
+   a commit author.
+3. **Branch protection:** checks `go`, `web`, `image` and `e2e` are
+   required on `master`, and administrators may bypass them.
 
 ## Testing Strategy
 
@@ -248,11 +249,10 @@ Each phase is one PR, merged when CI is green.
   Links in the new Markdown files resolve.
 - **Phase 2:** the new jobs pass on the PR, and a Dependabot dry parse
   shows no configuration errors in the repository's Insights.
-- **Phase 3:**
-  - a `workflow_dispatch` dry run builds both architectures, the web
-    tarball and `SHA256SUMS`, and publishes nothing;
-  - the first tag publishes, and `gh attestation verify` succeeds for one
-    file and for the image.
+- **Phase 3:** a `workflow_dispatch` dry run builds both architectures,
+  the web tarball and `SHA256SUMS`, and publishes nothing.
+- **First release (`v0.5.0`):** the tag publishes, and
+  `gh attestation verify` succeeds for one file and for the image.
 
 ## Acceptance Criteria
 

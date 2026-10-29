@@ -36,7 +36,7 @@ replaced one protocol at a time.
 | ○ | [008](008-native-architecture.md) Occamy v1 architecture | drafted |
 | ○ | [009](009-react-web-client.md) React web client | vague |
 | ○ | [010](010-native-swift-client.md) Native Swift client on a Go core | drafted |
-| ○ | [011](011-release-readiness.md) Open source release readiness | drafted |
+| ○ | [011](011-release-readiness.md) Open source release readiness | validated |
 
 ● complete · ◐ in testing · ○ not started · ✕ archived
 
