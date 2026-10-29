@@ -149,12 +149,12 @@ func TestHandshakeNoSuchConnection(t *testing.T) {
 	go func() {
 		conn := guacamole.NewInstructionIO(srv)
 		conn.Read()
-		conn.Write(guacamole.NewInstruction([]string{"error", "No such connection.", "519"}))
+		conn.Write(guacamole.NewInstruction([]string{"error", "No such connection.", "516"}))
 	}()
 
 	_, err := guacd.Handshake(context.Background(), cli, guacd.Config{ConnectionID: "$gone"})
 	var e *guacd.Error
-	if !errors.As(err, &e) || e.Status != 519 || e.Message != "No such connection." {
+	if !errors.As(err, &e) || e.Status != 516 || e.Message != "No such connection." {
 		t.Fatalf("handshake error wrong, got: %v", err)
 	}
 }

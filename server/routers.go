@@ -6,7 +6,9 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"strconv"
 	"time"
@@ -61,11 +63,6 @@ func (p *proxy) routeConn(ws *websocket.Conn, jwt *config.JWT, d display) error 
 		return fmt.Errorf("%w: %w", errBadRequest, err)
 	}
 
-	s, owner := p.enter(jwt.GenerateID())
-	defer p.leave(s)
-
-	ctx, cancel := context.WithTimeout(context.Background(), guacd.DefaultTimeout)
-	defer cancel()
 	cfg := guacd.Config{
 		Params:   params,
 		Width:    d.width,
@@ -73,18 +70,54 @@ func (p *proxy) routeConn(ws *websocket.Conn, jwt *config.JWT, d display) error 
 		DPI:      d.dpi,
 		Timezone: d.timezone,
 	}
+
+	key := jwt.GenerateID()
+	s, owner := p.enter(key)
+	conn, err := p.connect(s, owner, jwt.Protocol, cfg)
+	// guacd ends a connection as soon as its last user leaves, but the
+	// entry goes only after that user's proxy loop has returned. A client
+	// that joins in between starts a new session instead, or joins the one
+	// that another such client has started. Each pass drops a session that
+	// guacd has ended, and the loop stops once the client owns a session
+	// or has joined a live one.
+	for !owner && ended(err) {
+		log.Printf("session %s: ended while joining: %v", s.ConnID, err)
+		p.abandon(s)
+		s, owner = p.enter(key)
+		conn, err = p.connect(s, owner, jwt.Protocol, cfg)
+	}
+	defer p.leave(s)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
 	role := "owner"
-	if owner {
-		cfg.Protocol = jwt.Protocol
-	} else {
+	if !owner {
 		role = "joiner"
+	}
+	log.Printf("session %s: %s joined", conn.ID, role)
+	err = serveIO(conn, ws)
+	log.Printf("session %s: %s left", conn.ID, role)
+	return err
+}
+
+// connect performs the guacd handshake for a user of s. The owner creates
+// the connection; a joiner waits for the owner's handshake and then joins
+// the connection it created.
+func (p *proxy) connect(s *Session, owner bool, protocol string, cfg guacd.Config) (*guacd.Conn, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), guacd.DefaultTimeout)
+	defer cancel()
+	if owner {
+		cfg.Protocol = protocol
+	} else {
 		select {
 		case <-s.ready:
 		case <-ctx.Done():
-			return fmt.Errorf("waiting for the session to start: %w", ctx.Err())
+			return nil, fmt.Errorf("waiting for the session to start: %w", ctx.Err())
 		}
 		if s.err != nil {
-			return s.err
+			return nil, s.err
 		}
 		cfg.ConnectionID = s.ConnID
 	}
@@ -93,15 +126,20 @@ func (p *proxy) routeConn(ws *websocket.Conn, jwt *config.JWT, d display) error 
 	if owner {
 		p.started(s, conn, err)
 	}
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
+	return conn, err
+}
 
-	log.Printf("session %s: %s joined", conn.ID, role)
-	err = serveIO(conn, ws)
-	log.Printf("session %s: %s left", conn.ID, role)
-	return err
+// ended reports whether a join failed because guacd has already ended the
+// connection. guacd 1.6 answers a join to a connection it has removed with
+// status 516. Before the removal, from the moment the last user leaves,
+// the connection's process takes no more users, and guacd closes the
+// joiner's socket without a word.
+func ended(err error) bool {
+	var ge *guacd.Error
+	if errors.As(err, &ge) {
+		return ge.Status == statusResourceNotFound
+	}
+	return errors.Is(err, io.EOF)
 }
 
 // enter counts a user of the session with the given key, creating the
@@ -143,6 +181,16 @@ func (p *proxy) leave(s *Session) {
 	if s.users == 0 {
 		p.remove(s)
 	}
+}
+
+// abandon counts a user out of a session that guacd has ended, and takes
+// the session out of the table, so that the user's next attempt starts a
+// new one. Its other users still leave it as usual.
+func (p *proxy) abandon(s *Session) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	s.users--
+	p.remove(s)
 }
 
 // remove deletes s from the table unless a newer session has taken its

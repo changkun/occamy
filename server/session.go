@@ -41,6 +41,7 @@ const (
 	statusSuccess          = 0x0000
 	statusServerError      = 0x0200
 	statusUpstreamTimeout  = 0x0202
+	statusResourceNotFound = 0x0204 // guacd's answer to a join to a removed connection
 	statusClientBadRequest = 0x0300
 )
 

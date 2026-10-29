@@ -25,6 +25,7 @@ import (
 
 	"changkun.de/x/occamy/internal/config"
 	"changkun.de/x/occamy/internal/guacamole"
+	"changkun.de/x/occamy/internal/guacd"
 )
 
 // fakeGuacd is an in-process guacd. It answers the handshake, numbers new
@@ -42,6 +43,9 @@ type fakeGuacd struct {
 	received []string   // raw instructions after ready
 	users    map[string]int
 	nextID   int
+	// unknown answers a join to a connection that is not live, as guacd
+	// 1.6 does by default; nil closes the socket without a word.
+	unknown []string
 }
 
 func newFakeGuacd(t *testing.T) *fakeGuacd {
@@ -49,7 +53,12 @@ func newFakeGuacd(t *testing.T) *fakeGuacd {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := &fakeGuacd{ln: ln, release: make(chan struct{}), users: map[string]int{}}
+	g := &fakeGuacd{
+		ln:      ln,
+		release: make(chan struct{}),
+		users:   map[string]int{},
+		unknown: []string{"error", "No such connection.", "516"},
+	}
 	go func() {
 		for {
 			nc, err := ln.Accept()
@@ -87,10 +96,12 @@ func (g *fakeGuacd) handle(nc net.Conn) {
 	}
 	if strings.HasPrefix(id, "$") {
 		g.mu.Lock()
-		live := g.users[id] > 0
+		live, reply := g.users[id] > 0, g.unknown
 		g.mu.Unlock()
 		if !live {
-			send("error", "No such connection.", "519")
+			if reply != nil {
+				send(reply...)
+			}
 			return
 		}
 	}
@@ -375,6 +386,68 @@ func TestRouteConnLastUserRemovesEntry(t *testing.T) {
 	}
 	leave(joiner)
 	waitFor(t, "the session to go", func() bool { return tp.sessions() == 0 })
+}
+
+// A client that joins a session as guacd ends it starts a new session
+// instead of being disconnected (specs/003-session-lifecycle-hardening.md,
+// defect 6). guacd either answers the join with 516 or closes the socket.
+// Any other failure reaches the client as it is.
+func TestRouteConnJoinEndedSession(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		reply  []string // guacd's answer to the join
+		status string   // the client's close status, or "" for a new session
+	}{
+		{"removed", []string{"error", "No such connection.", "516"}, ""},
+		{"closing", nil, ""},
+		{"failed", []string{"error", "Server error.", "512"}, "512"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tp := newTestProxy(t)
+			tp.g.mu.Lock()
+			tp.g.unknown = tt.reply
+			tp.g.mu.Unlock()
+
+			// The session's last user is still leaving, but guacd has
+			// already ended its connection.
+			q := claims("vnc", "a")
+			stale, _ := tp.p.enter(key(q))
+			tp.p.started(stale, &guacd.Conn{ID: "$9"}, nil)
+			var once sync.Once
+			leaveStale := func() { once.Do(func() { tp.p.leave(stale) }) }
+			t.Cleanup(leaveStale)
+
+			ws := tp.connect(t, q)
+			if tt.status != "" {
+				if got := closeReason(t, ws); got != tt.status {
+					t.Fatalf("closed with status %q, want %q", got, tt.status)
+				}
+				if selects, _, _ := tp.g.snapshot(); !slices.Equal(selects, []string{"$9"}) {
+					t.Fatalf("guacd saw select %q, want only $9", selects)
+				}
+				return
+			}
+
+			if got, want := mustRead(t, ws), announce("$1"); got != want {
+				t.Fatalf("first message = %q, want %q", got, want)
+			}
+			if selects, _, _ := tp.g.snapshot(); !slices.Equal(selects, []string{"$9", "vnc"}) {
+				t.Fatalf("guacd saw select %q, want $9, then vnc", selects)
+			}
+			tp.p.mu.Lock()
+			s := tp.p.sessions[key(q)]
+			tp.p.mu.Unlock()
+			if s == nil || s == stale || s.ConnID != "$1" {
+				t.Fatal("the table does not hold the new session $1")
+			}
+
+			// The old session's last user leaves the new session alone.
+			leaveStale()
+			if n := tp.users(key(q)); n != 1 {
+				t.Fatalf("new session has %d users, want 1", n)
+			}
+		})
+	}
 }
 
 func TestServeIOInternalOpcodes(t *testing.T) {

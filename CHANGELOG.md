@@ -15,6 +15,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   protocol are the baseline that protocol v1 is designed against
   ([docs/benchmarks.md](docs/benchmarks.md)).
 
+### Fixed
+
+- A client that connects just as the last user of a session with the
+  same credentials leaves gets a new session, instead of joining the
+  ending one and being disconnected.
+
 ## [0.5.0] - 2026-10-29
 
 Development resumed in 2026 after a pause from the end of 2021.
