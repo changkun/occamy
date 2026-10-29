@@ -41,8 +41,9 @@ _Figure 2: Occamy Architecture_
 |------|------|
 | [server/](../server) | HTTP routes (gin), JWT login and auth, the session table, and WebSocket to guacd proxying |
 | [internal/guacd/](../internal/guacd) | guacd client: the handshake that creates or joins a connection |
-| [internal/guacamole/](../internal/guacamole) | Guacamole instruction encoding, parsing, and stream I/O |
+| [internal/guacamole/](../internal/guacamole) | Guacamole instruction encoding, parsing, and stream I/O, and a display that applies drawing as a client does |
 | [internal/config/](../internal/config) | `conf.yaml` loading, the JWT claim structure, and guacd parameters |
+| [bench/](../bench) | Benchmark harness: scenarios, emulated networks, and the measurements in [benchmarks.md](./benchmarks.md) |
 | [client/occamy-web/](../client/occamy-web) | Demo web client (Vue 3) with a fork of guacamole-common-js 0.9.14 (Apache-2.0) |
 
 A connection goes through these steps:

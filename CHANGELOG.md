@@ -7,6 +7,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ## [Unreleased]
 
+### Added
+
+- A benchmark harness (`make bench`, `bench/`) that measures sessions
+  under fixed scenarios: input latency, bytes, server CPU and client
+  decoding, over emulated networks. Its numbers for the Guacamole
+  protocol are the baseline that protocol v1 is designed against
+  ([docs/benchmarks.md](docs/benchmarks.md)).
+
 ## [0.5.0] - 2026-10-29
 
 Development resumed in 2026 after a pause from the end of 2021.

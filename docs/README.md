@@ -8,6 +8,8 @@ You may interested in the following document:
   + TL;DR: The great thing about Occamy is that occamy has no handshake process 
     between client and Occamy, one can simply POST the connection 
     information to Occamy for  getting authentication tokens. 
+- [Benchmarks](./benchmarks.md)
+  + TL;DR: How Occamy is measured, and the numbers protocol v1 must beat.
 - [Design specs](../specs/README.md)
   + TL;DR: Current status of the project and planned work.
 

@@ -47,7 +47,7 @@ clocks need synchronizing.
 |--------|------------|
 | Input latency `L` | From writing an input message to the WebSocket until the harness has received and decoded the drawing that reflects it (the probe, see below). Reported as p50, p95 and p99 over at least 200 inputs. |
 | Processing latency `Lp` | `L` measured with no network emulation. It covers occamyd, guacd (v0), the remote server and the client decode, and it is the part Occamy can improve. |
-| Bytes | WebSocket payload bytes in each direction: totals for bounded scenarios, per second for continuous ones. |
+| Bytes | TCP payload bytes through the emulated link in each direction, which include WebSocket frame headers where there is a WebSocket: totals for bounded scenarios, per second for continuous ones. |
 | Server CPU | CPU time of the occamyd and guacd containers during the scenario, read from the container engine's stats before and after, and reported separately. The remote server's container is reported as well, but it is not Occamy's. |
 | Client CPU | The harness's own time spent decoding and applying drawing. It stands in for a client's cost; browsers decode natively, so only ratios between series are meaningful. |
 | Delivered frame rate | Complete frames received per second (`sync` in v0, `frame-end` in v1), and for scenes animated at a known rate, the share of scene frames that reached the client. |
@@ -146,7 +146,9 @@ Markdown table.
 - **Guacamole interpreter** (`internal/guacamole`, next to the parser,
   so that [guacd-bridge](guacd-bridge.md) can reuse it):
   - It applies `size`, `img`/`blob`/`end`, `copy`, `transfer`,
-    `rect`/`cfill` and `dispose` to the default layer and to buffers.
+    `rect`/`cfill` and `dispose` to layers and buffers, and composites
+    the visible layers that `move` and `shade` place. guacd's terminal
+    draws on such a layer, which it moves into the default layer.
   - It counts the operations it does not support, so a skewed framebuffer
     shows up in the results.
   - It is written fresh. `internal/guac` on the `gio-client` branch
@@ -155,8 +157,10 @@ Markdown table.
   - WebP decoding uses `golang.org/x/image/webp`.
 - **Network proxy:** a TCP proxy the driver dials through, configured per
   condition.
-- **CPU sampling:** container stats from podman or docker, read before
-  and after each scenario.
+- **CPU sampling:** container stats from podman, read before and after
+  each scenario. docker's stats have no cumulative CPU time.
+- **Repetition:** `-runs N` measures everything N times; the table shows
+  the median of each number, and the JSON keeps every run.
 
 ### Bench desktop (`docker/bench/desktop`)
 
@@ -206,3 +210,32 @@ so the repository carries no image files.
 | Desktop VNC | The interpreter, the bench desktop, the scene program, and G1 to G7 over VNC |
 | Desktop RDP | G1 to G7 over RDP through the same desktop image |
 | Baseline | `docs/benchmarks.md` with the baseline numbers and the per-scenario targets, and the CI smoke job |
+
+## Implementation notes
+
+- **Status:** the Terminal task shipped in PR #76 on 2026-10-29. Desktop
+  VNC, Desktop RDP and the targets of the Baseline task remain.
+- **Done ahead of plan:** the interpreter, planned for Desktop VNC,
+  because SSH needed it; and from the Baseline task, the CI smoke job
+  and `docs/benchmarks.md` with the terminal numbers.
+- **Decisions:**
+  - Repetition with medians, because single runs picked up disturbances
+    on the host: a compile during one run more than doubled a p95 latency.
+  - Bytes are counted at the proxy, so they include WebSocket framing.
+    The spec said WebSocket payload; the difference is a few bytes per
+    message, and the proxy sees both series the same way.
+  - Sessions are 2 s apart, so that a session with the same claims does
+    not join the one before it while it ends (003, defect 6).
+- **Surprises:**
+  - guacd's terminal draws on visible layer 1 at (7, 7), not on the
+    default layer, so the interpreter needed layer compositing for SSH.
+  - The podman VM counts time the host takes its CPUs away as CPU time,
+    so a disturbed run shows more CPU as well as more time.
+  - The demo VNC container uses about 13% of a CPU while idle, probably
+    because its health check connects to x11vnc every second. To check
+    in Desktop VNC, whose image replaces it in the bench stack.
+- **Findings for the targets:** occamyd costs nothing measurable over
+  guacd. T1 is near its floor (3 ms p95 at N0), so its target is the
+  bound plus a margin. guacd coalesces T2's 575 KiB into 82–115 KiB of
+  screens, so v1 needs terminal state on the server. G7's bound needs
+  the SSH handshake measured alone.
