@@ -51,20 +51,27 @@ func NewSession(proto string) (*Session, error) {
 // reading/writing from the socket via read/write threads. The given socket,
 // parser, and any associated resources will be freed unless the user is not
 // added successfully.
+//
+// unlock is called exactly once: as soon as the user is prepared, or when
+// Join returns early, so that a failed join never leaves the caller's lock
+// held.
 func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock func()) error {
 	defer s.close()
+	unlock = sync.OnceFunc(unlock)
+	defer unlock()
 	lib.ResetErrors()
 
 	// 1. prepare socket pair
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
-		unlock()
 		return fmt.Errorf("new socket pair error: %w", err)
 	}
 
 	// 2. create guac socket using fds[0]
 	sock, err := lib.NewSocket(fds[0])
 	if err != nil {
+		syscall.Close(fds[0])
+		syscall.Close(fds[1])
 		return fmt.Errorf("occamy-lib: create guac socket error: %w", err)
 	}
 	defer sock.Close()
@@ -72,6 +79,7 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 	// 3. create guac user using created guac socket
 	u, err := lib.NewUser(sock, s.client, owner, jwt)
 	if err != nil {
+		syscall.Close(fds[1])
 		return fmt.Errorf("occamy-lib: create guac user error: %w", err)
 	}
 	defer u.Close()
@@ -83,7 +91,6 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 	// 5. preparing connection
 	err = u.Prepare()
 	if err != nil {
-		unlock()
 		return fmt.Errorf("occamy-lib: handle user connection error: %w", err)
 	}
 	unlock()

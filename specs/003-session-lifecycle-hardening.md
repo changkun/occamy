@@ -37,26 +37,34 @@ once the user is prepared.
 
 Defects found by reading the code during the 2026 revival:
 
-1. **Proxy-wide deadlock (verified).** `Join` returns without calling
+1. **Proxy-wide deadlock (fixed).** `Join` returned without calling
    `unlock` when `lib.NewSocket` or `lib.NewUser` fails. `lib.NewUser` fails
    whenever the JWT `host` has no port (`net.SplitHostPort`), and with
    `client: true` anyone can mint such a token from `/api/v1/login`. After one
-   such connection `proxy.mu` stays locked and every later connection blocks
-   forever. Reproduced against the revival image: a valid VNC session after
-   a portless one received no data and no session was created.
+   such connection `proxy.mu` stayed locked and every later connection
+   blocked forever. Fixed: `Join` wraps `unlock` in `sync.OnceFunc` and
+   defers it, `lib.NewUser` validates the host before allocating, and the
+   socket pair is closed on early returns. `server/routers_test.go` covers
+   it; `config.Init` moved from `init()` into `server.Run` so the package is
+   testable.
 2. **Double free on concurrent leave.** `Join` defers the user-count
    decrement after `s.close`, so it runs first. Two users leaving together
    can both observe zero users and both call `(*lib.Client).Close`, which has
    no guard and passes a nil `guac_client` the second time.
-3. **Leak on `NewUser` failure.** `internal/lib/user.go` `NewUser` frees the
-   ID string but not the `guac_user` it just allocated.
+3. **Leak on `NewUser` failure.** Fixed for the invalid-host path (the host
+   is parsed before `guac_user_alloc`); any later failure in `NewUser` must
+   free the user too.
 4. **Lost I/O errors.** In `(*Session).serveIO` both goroutines shadow
    `err` inside the loop, so the error sent on `exit` is always nil.
 5. **Thread pinning.** `NewSession` calls `runtime.LockOSThread` and never
    unlocks, deliberately terminating the thread when the handler returns.
    Later joiners of a shared session run on other threads, so the guarantee
    it was meant to give is unclear.
-6. `Session.once` is unused; `lib.Client` carries several unused fields
+6. **Joining a dying session (observed).** The owner's entry stays in the
+   table until its teardown finishes, so a client with the same claims that
+   connects right after the owner leaves joins the dying session and is
+   disconnected moments later.
+7. `Session.once` is unused; `lib.Client` carries several unused fields
    (`users`, `owner`, `handler*`).
 
 If [005](005-upstream-guacamole.md) replaces the in-process libguac with
@@ -132,6 +140,6 @@ unknown protocol) are rejected before any libguac allocation.
 
 ## Acceptance Criteria
 
-- [ ] No connection can leave `proxy.mu` locked.
+- [x] No connection can leave `proxy.mu` locked.
 - [ ] Concurrent leaves never close a client twice (`-race` clean).
 - [ ] Pressure test passes in CI; issues #20 and #18 can be closed.

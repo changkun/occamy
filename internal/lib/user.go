@@ -101,6 +101,11 @@ type connectInformation struct {
 
 // NewUser creates a user and associate the user with any specific client
 func NewUser(s *Socket, c *Client, owner bool, jwt *config.JWT) (*User, error) {
+	host, port, err := net.SplitHostPort(jwt.Host)
+	if err != nil {
+		return nil, err
+	}
+
 	id := uuid.NewID("@")
 	uid := C.CString(id)
 
@@ -115,12 +120,6 @@ func NewUser(s *Socket, c *Client, owner bool, jwt *config.JWT) (*User, error) {
 		user.owner = C.int(1)
 	} else {
 		user.owner = C.int(0)
-	}
-
-	host, port, err := net.SplitHostPort(jwt.Host)
-	if err != nil {
-		C.free(unsafe.Pointer(uid))
-		return nil, err
 	}
 
 	return &User{

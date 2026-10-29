@@ -160,7 +160,7 @@ reversible.
 
 | Issue | Where it is tracked |
 |-------|---------------------|
-| Any token whose `host` lacks a port leaves the proxy mutex locked; every later connection hangs until restart | [003](003-session-lifecycle-hardening.md) |
+| Any token whose `host` lacked a port left the proxy mutex locked (fixed after the revival) | [003](003-session-lifecycle-hardening.md) |
 | Second SSH session in one process gets no output (#22) | [002](002-ssh-session-rejoin.md) |
 | Panics under high pressure (#20), unsynchronized session teardown | [003](003-session-lifecycle-hardening.md) |
 | JWT carries plaintext remote credentials, tokens appear in request logs, `/login` is an open proxy, debug mode (with pprof) is the default | [004](004-security-hardening.md) |

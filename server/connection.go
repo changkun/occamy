@@ -22,12 +22,9 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-func init() {
-	config.Init()
-}
-
 // Run is an export method that serves occamy proxy
 func Run() {
+	config.Init()
 	proxy := &proxy{
 		sessions: make(map[string]*Session),
 		upgrader: &websocket.Upgrader{
