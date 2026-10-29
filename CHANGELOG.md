@@ -14,6 +14,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   decoding, over emulated networks. Its numbers for the Guacamole
   protocol are the baseline that protocol v1 is designed against
   ([docs/benchmarks.md](docs/benchmarks.md)).
+- The README documents connection parameters in `guacd.params` and how to
+  reach a Windows RDP host. `conf.yaml` lists `domain` and `security` as
+  comments ([#32](https://github.com/changkun/occamy/issues/32)).
 
 ## [0.5.0] - 2026-10-29
 

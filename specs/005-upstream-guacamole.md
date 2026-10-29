@@ -207,8 +207,11 @@ here:
 - RDP against a current Windows host with NLA (#32). It needs a Windows
   host. The maintainer chose to release v0.5.0 without it, and #32
   asks the reporter to retest. xrdp has no NLA, so the demo stack cannot
-  cover it. If NLA fails, `security: nla` or `any` in
-  `guacd.params.rdp` is the first thing to try.
+  cover it. guacd 1.6 treats an unset `security` as `any`, which
+  negotiates NLA (`src/protocols/rdp/settings.c`), so the shipped
+  config should need no change. If NLA fails, `security: nla` in
+  `guacd.params.rdp` is the first thing to try. The README's
+  "Connection parameters" section documents this.
 
 **Decisions, surprises, follow-ups.**
 

@@ -137,8 +137,10 @@ host (#32) stays on [005](../005-upstream-guacamole.md).
   | `rdp` | fails with 515; xrdp logs "MAC checksum error for non-FIPS PDU" |
   | `nla` | fails with 769; xrdp has no NLA |
 
-  No default is needed. A Windows host with NLA will need `security: nla`
-  or `any` in its token or `guacd.params`; record that with #32.
+  No default is needed. Unset is `any` in guacd 1.6, which also offers
+  NLA, so a Windows host with NLA should need no setting either. The
+  token cannot carry `security`; `guacd.params.rdp` can, if a host needs
+  `nla` forced. Record the result with #32.
 - **One session per user.** xrdp gives each user one X session. A second
   RDP connection for the same user takes it over, and guacd logs "Manually
   logged off." for the first. That is why the e2e case runs once. Sharing
