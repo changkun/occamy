@@ -6,7 +6,8 @@ package protocol
 
 import "syscall"
 
-// IO is a fd wrap that implements io.Reader and io.Writer
+// IO is a fd wrap that implements io.Reader and io.Writer. It exists for
+// the socketpair between libguac and the proxy, and goes away with libguac.
 type IO struct {
 	fd int
 }

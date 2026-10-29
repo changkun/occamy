@@ -5,8 +5,16 @@
 package protocol_test
 
 import (
+	"bufio"
+	"bytes"
+	"errors"
+	"io"
+	"net"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
+	"testing/iotest"
 
 	"changkun.de/x/occamy/internal/protocol"
 )
@@ -33,6 +41,21 @@ func TestNewInstruction(t *testing.T) {
 	}
 }
 
+func TestParseInstructionReplacementCharacter(t *testing.T) {
+	// U+FFFD is valid UTF-8 even though it decodes to utf8.RuneError.
+	raw := "3.key,1.\uFFFD;"
+	ins, err := protocol.ParseInstruction([]byte(raw))
+	if err != nil {
+		t.Fatalf("parse instruction error: %v", err)
+	}
+	if ins.String() != raw {
+		t.Fatalf("parse instruction wrong, got: %q", ins.String())
+	}
+	if _, err := protocol.ParseInstruction([]byte("3.key,1.\xff;")); err != protocol.ErrInstructionBadRune {
+		t.Fatalf("parse invalid utf-8, got: %v, want: %v", err, protocol.ErrInstructionBadRune)
+	}
+}
+
 func TestNewInstructionIO(t *testing.T) {
 	raw := "5.hello,2.世界;"
 
@@ -42,7 +65,7 @@ func TestNewInstructionIO(t *testing.T) {
 		t.FailNow()
 	}
 
-	io := protocol.NewInstructionIO(fds[0])
+	io := protocol.NewInstructionIO(protocol.NewIO(fds[0]))
 	fdio := protocol.NewIO(fds[1])
 	var ins *protocol.Instruction
 	t.Run("read", func(t *testing.T) {
@@ -91,4 +114,143 @@ func TestNewInstructionIO(t *testing.T) {
 	if err != nil {
 		t.Error("io close error: ", err)
 	}
+}
+
+func readRaw(t *testing.T, r io.Reader) []string {
+	t.Helper()
+	br := bufio.NewReader(r)
+	var got []string
+	for {
+		raw, err := protocol.ReadRaw(br)
+		if err == io.EOF {
+			return got
+		}
+		if err != nil {
+			t.Fatalf("read instruction error: %v", err)
+		}
+		got = append(got, string(raw))
+	}
+}
+
+func TestInstructionIOOverPipe(t *testing.T) {
+	want := []string{"4.size,4.1024,3.768;", "5.hello,2.世界;", "4.args,3.a;b;", "4.sync,11.10574782313;"}
+	a, b := net.Pipe()
+	defer b.Close()
+	go func() {
+		for _, ins := range want {
+			a.Write([]byte(ins))
+		}
+	}()
+
+	conn := protocol.NewInstructionIO(b)
+	for _, w := range want {
+		raw, err := conn.ReadRaw()
+		if err != nil {
+			t.Fatalf("read instruction error: %v", err)
+		}
+		if string(raw) != w {
+			t.Fatalf("read instruction wrong, got: %q, want: %q", raw, w)
+		}
+	}
+}
+
+func TestReadRawSemicolonInValue(t *testing.T) {
+	want := []string{"4.args,3.a;b;", "5.error,9.a, b; c.d,3.519;"}
+	got := readRaw(t, strings.NewReader(strings.Join(want, "")))
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("read instructions wrong, got: %q, want: %q", got, want)
+	}
+}
+
+func TestReadRawMultibyte(t *testing.T) {
+	want := []string{"5.hello,2.日本;", "3.key,4.🙂ü日a;"}
+	got := readRaw(t, strings.NewReader(strings.Join(want, "")))
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("read instructions wrong, got: %q, want: %q", got, want)
+	}
+}
+
+func TestReadRawPartialReads(t *testing.T) {
+	want := []string{"5.hello,2.日本;", "4.args,3.a;b;", "4.sync,11.10574782313;"}
+	got := readRaw(t, iotest.OneByteReader(strings.NewReader(strings.Join(want, ""))))
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("read instructions wrong, got: %q, want: %q", got, want)
+	}
+}
+
+func TestReadRawSplitsMessage(t *testing.T) {
+	r := bufio.NewReader(bytes.NewReader([]byte("3.key,5.65307,1.1;3.key,5.65307,1.0;")))
+	for _, want := range []string{"3.key,5.65307,1.1;", "3.key,5.65307,1.0;"} {
+		raw, err := protocol.ReadRaw(r)
+		if err != nil || string(raw) != want {
+			t.Fatalf("read instruction wrong, got: %q, %v, want: %q", raw, err, want)
+		}
+	}
+	if _, err := protocol.ReadRaw(r); err != io.EOF {
+		t.Fatalf("read after last instruction, got: %v, want: io.EOF", err)
+	}
+}
+
+func TestReadRawLimits(t *testing.T) {
+	elements := func(n int) string {
+		return strings.TrimSuffix(strings.Repeat("1.a,", n), ",") + ";"
+	}
+	element := func(n int) string {
+		return "4.blob," + strconv.Itoa(n) + "." + strings.Repeat("x", n) + ";"
+	}
+	tests := []struct {
+		name string
+		raw  string
+		err  error
+	}{
+		{"max elements", elements(protocol.InstructionMaxElements), nil},
+		{"too many elements", elements(protocol.InstructionMaxElements + 1), protocol.ErrInstructionTooManyElements},
+		{"max element length", element(protocol.MaxInstructionLength), nil},
+		{"element too long", element(protocol.MaxInstructionLength + 1), protocol.ErrInstructionTooLong},
+		{"six digit length", "123456.a;", protocol.ErrInstructionBadDigit},
+		{"no digits", ".;", protocol.ErrInstructionBadDigit},
+		{"letter in length", "4x.sync;", protocol.ErrInstructionBadDigit},
+		{"bad terminator", "4.sync:", protocol.ErrInstructionMissComma},
+		{"invalid utf-8", "1.\xff;", protocol.ErrInstructionBadRune},
+		{"truncated element", "4.syn", io.ErrUnexpectedEOF},
+		{"truncated length", "4", io.ErrUnexpectedEOF},
+		{"missing terminator", "4.sync", io.ErrUnexpectedEOF},
+		{"empty", "", io.EOF},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := protocol.ReadRaw(bufio.NewReader(strings.NewReader(tt.raw)))
+			if !errors.Is(err, tt.err) {
+				t.Fatalf("read instruction error, got: %v, want: %v", err, tt.err)
+			}
+			if err == nil && string(raw) != tt.raw {
+				t.Fatalf("read instruction wrong, got %d bytes, want %d", len(raw), len(tt.raw))
+			}
+		})
+	}
+}
+
+func FuzzReadRaw(f *testing.F) {
+	f.Add([]byte("5.hello,2.世界;"))
+	f.Add([]byte("4.args,3.a;b;"))
+	f.Add([]byte("0.,4.ping,13.1730000000000;"))
+	f.Add([]byte("4.sync,11.10574782313;4.sync"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		raw, err := protocol.ReadRaw(bufio.NewReader(bytes.NewReader(data)))
+		if err != nil {
+			return
+		}
+		if !bytes.HasPrefix(data, raw) {
+			t.Fatalf("raw %q is not a prefix of the input", raw)
+		}
+		ins, err := protocol.ParseInstruction(raw)
+		if err != nil {
+			t.Fatalf("accepted %q but ParseInstruction failed: %v", raw, err)
+		}
+		canonical := ins.String()
+		again, err := protocol.ReadRaw(bufio.NewReader(strings.NewReader(canonical)))
+		if err != nil || string(again) != canonical {
+			t.Fatalf("%q does not round-trip: %q, %v", canonical, again, err)
+		}
+	})
 }

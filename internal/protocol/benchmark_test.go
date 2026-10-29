@@ -5,6 +5,8 @@
 package protocol_test
 
 import (
+	"bufio"
+	"bytes"
 	"fmt"
 	"os"
 	"strconv"
@@ -102,6 +104,24 @@ func BenchmarkInstructionParser(b *testing.B) {
 		b.Run(fmt.Sprintf("occamy-%d", idx), func(b *testing.B) {
 			for i := 0; i < b.N; i++ {
 				parser(ins[idx])
+			}
+		})
+	}
+}
+
+func BenchmarkReadRaw(b *testing.B) {
+	for idx := range instructions {
+		b.Run(fmt.Sprintf("occamy-ins-len-%d", len(instructions[idx])), func(b *testing.B) {
+			b.ReportAllocs()
+			b.SetBytes(int64(len(instructions[idx])))
+			src := bytes.NewReader(nil)
+			r := bufio.NewReaderSize(src, protocol.MaxInstructionLength)
+			for i := 0; i < b.N; i++ {
+				src.Reset(instructions[idx])
+				r.Reset(src)
+				if _, err := protocol.ReadRaw(r); err != nil {
+					b.Fatal(err)
+				}
 			}
 		})
 	}

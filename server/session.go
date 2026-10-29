@@ -100,7 +100,7 @@ func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock f
 	go u.HandleConnection(done) // block until disconnect/completion
 
 	// 7. proxy io
-	conn := protocol.NewInstructionIO(fds[1])
+	conn := protocol.NewInstructionIO(protocol.NewIO(fds[1]))
 	defer conn.Close()
 
 	err = s.serveIO(conn, ws)

@@ -72,7 +72,7 @@ func (p Parser) Parse(raw []byte, ins *Instruction) (err error) {
 		element.Grow(length)
 		for i := 1; i <= length; i++ {
 			r, n := utf8.DecodeRune(raw[cursor:])
-			if r == utf8.RuneError {
+			if r == utf8.RuneError && n <= 1 {
 				return ErrInstructionBadRune
 			}
 			cursor += n
