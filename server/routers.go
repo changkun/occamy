@@ -8,23 +8,23 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"net/http"
 	"strconv"
 	"time"
 
-	"changkun.de/x/occamy/internal/config"
-	"changkun.de/x/occamy/internal/guacd"
 	jwt "github.com/appleboy/gin-jwt/v2"
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
+
+	"changkun.de/x/occamy/internal/config"
+	"changkun.de/x/occamy/internal/guacd"
 )
 
 // serveWS implements /api/v1/connect
 func (p *proxy) serveWS(c *gin.Context) {
+	// On failure, Upgrade has already replied with an HTTP error.
 	ws, err := p.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("upgrade websocket failed: %v", err)
-		c.Writer.Write([]byte(http.StatusText(http.StatusBadRequest)))
 		return
 	}
 
@@ -47,7 +47,8 @@ func (p *proxy) serveConn(ws *websocket.Conn, jwt *config.JWT, d display) {
 	}
 	code, status := closeStatus(err)
 	msg := websocket.FormatCloseMessage(code, strconv.Itoa(status))
-	ws.WriteControl(websocket.CloseMessage, msg, time.Now().Add(time.Second))
+	// Best effort: the client may already be gone.
+	_ = ws.WriteControl(websocket.CloseMessage, msg, time.Now().Add(time.Second))
 	ws.Close()
 }
 

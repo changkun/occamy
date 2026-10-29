@@ -22,10 +22,21 @@ func TestJWT_GenerateID(t *testing.T) {
 		Username: "occamy",
 		Password: "occamy",
 	}
-	want := "d742d2c10082f08506028cfb09cd1674"
+	want := "07b66ddee5267f334f08073d2261960e0dd256e6fc7d5bd593bbbae4ee5f740c"
 	if want != j.GenerateID() {
 		t.Error("jwt hash error, got: ", j.GenerateID())
 		t.FailNow()
+	}
+}
+
+// TestGenerateIDSeparatesClaims checks that claims which concatenate to the
+// same string get different session keys, so that one user never joins
+// another's session.
+func TestGenerateIDSeparatesClaims(t *testing.T) {
+	a := config.JWT{Protocol: "vnc", Host: "desktop:5900", Username: "ab", Password: "c"}
+	b := config.JWT{Protocol: "vnc", Host: "desktop:5900", Username: "a", Password: "bc"}
+	if a.GenerateID() == b.GenerateID() {
+		t.Fatalf("claims %+v and %+v share the session key %s", a, b, a.GenerateID())
 	}
 }
 

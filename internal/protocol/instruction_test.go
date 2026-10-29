@@ -50,7 +50,7 @@ func TestParseInstructionReplacementCharacter(t *testing.T) {
 	if ins.String() != raw {
 		t.Fatalf("parse instruction wrong, got: %q", ins.String())
 	}
-	if _, err := protocol.ParseInstruction([]byte("3.key,1.\xff;")); err != protocol.ErrInstructionBadRune {
+	if _, err := protocol.ParseInstruction([]byte("3.key,1.\xff;")); !errors.Is(err, protocol.ErrInstructionBadRune) {
 		t.Fatalf("parse invalid utf-8, got: %v, want: %v", err, protocol.ErrInstructionBadRune)
 	}
 }
@@ -106,7 +106,7 @@ func readRaw(t *testing.T, r io.Reader) []string {
 	var got []string
 	for {
 		raw, err := protocol.ReadRaw(br)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return got
 		}
 		if err != nil {
@@ -170,7 +170,7 @@ func TestReadRawSplitsMessage(t *testing.T) {
 			t.Fatalf("read instruction wrong, got: %q, %v, want: %q", raw, err, want)
 		}
 	}
-	if _, err := protocol.ReadRaw(r); err != io.EOF {
+	if _, err := protocol.ReadRaw(r); !errors.Is(err, io.EOF) {
 		t.Fatalf("read after last instruction, got: %v, want: io.EOF", err)
 	}
 }

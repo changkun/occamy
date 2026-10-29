@@ -17,9 +17,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"changkun.de/x/occamy/internal/guacd"
 	"changkun.de/x/occamy/internal/protocol"
-	"github.com/gorilla/websocket"
 )
 
 // Session is a guacd connection shared by every client with the same
@@ -157,8 +158,8 @@ func serveIO(conn *guacd.Conn, ws *websocket.Conn) error {
 	// deadline ends the WebSocket reader without closing the socket, so
 	// that the caller can still send a close frame.
 	conn.Close()
-	ws.NetConn().SetReadDeadline(aLongTimeAgo)
-	<-exit
+	_ = ws.NetConn().SetReadDeadline(aLongTimeAgo)
+	<-exit //nolint:errcheck // a consequence of the first error
 	return err
 }
 
@@ -190,7 +191,7 @@ func forward(conn *guacd.Conn, msg []byte, reply func([]byte) error) error {
 	out := make([]byte, 0, len(msg))
 	for {
 		raw, err := protocol.ReadRaw(r)
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {

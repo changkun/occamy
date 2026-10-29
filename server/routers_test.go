@@ -21,9 +21,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gorilla/websocket"
+
 	"changkun.de/x/occamy/internal/config"
 	"changkun.de/x/occamy/internal/protocol"
-	"github.com/gorilla/websocket"
 )
 
 // fakeGuacd is an in-process guacd. It answers the handshake, numbers new
@@ -212,7 +213,7 @@ func key(q url.Values) string {
 func (tp *testProxy) connect(t *testing.T, q url.Values) *websocket.Conn {
 	t.Helper()
 	d := websocket.Dialer{Subprotocols: []string{"guacamole"}, HandshakeTimeout: 5 * time.Second}
-	ws, _, err := d.Dial(tp.url+"/?"+q.Encode(), nil)
+	ws, _, err := d.Dial(tp.url+"/?"+q.Encode(), nil) //nolint:bodyclose // gorilla/websocket: the response body need not be closed
 	if err != nil {
 		t.Fatal(err)
 	}

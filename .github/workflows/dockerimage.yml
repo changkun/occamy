@@ -30,6 +30,18 @@ jobs:
     - name: Licenses
       run: go run github.com/google/go-licenses/v2@v2.0.1 check . --disallowed_types=forbidden,restricted
 
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version: stable
+    # Linters and formatters are configured in .golangci.yml.
+    - uses: golangci/golangci-lint-action@v9
+      with:
+        version: v2.15.0
+
   # occamyd needs no C toolchain, so it builds wherever Go does.
   cross:
     name: build (${{ matrix.os }})

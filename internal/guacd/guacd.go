@@ -93,9 +93,13 @@ func Dial(ctx context.Context, addr string, c Config) (*Conn, error) {
 // returned connection. The caller closes nc if Handshake fails.
 func Handshake(ctx context.Context, nc net.Conn, c Config) (*Conn, error) {
 	if _, ok := ctx.Deadline(); !ok {
-		nc.SetDeadline(time.Now().Add(DefaultTimeout))
+		if err := nc.SetDeadline(time.Now().Add(DefaultTimeout)); err != nil {
+			return nil, fmt.Errorf("guacd: %w", err)
+		}
 	}
-	stop := context.AfterFunc(ctx, func() { nc.SetDeadline(aLongTimeAgo) })
+	// Unblocks the handshake on cancellation. If setting the deadline
+	// fails, nc is already closed and the handshake fails anyway.
+	stop := context.AfterFunc(ctx, func() { _ = nc.SetDeadline(aLongTimeAgo) })
 	defer stop()
 
 	conn := &Conn{io: protocol.NewInstructionIO(nc)}
@@ -108,7 +112,9 @@ func Handshake(ctx context.Context, nc net.Conn, c Config) (*Conn, error) {
 	if !stop() {
 		return nil, fmt.Errorf("guacd: handshake: %w", ctx.Err())
 	}
-	nc.SetDeadline(time.Time{})
+	if err := nc.SetDeadline(time.Time{}); err != nil {
+		return nil, fmt.Errorf("guacd: %w", err)
+	}
 	return conn, nil
 }
 

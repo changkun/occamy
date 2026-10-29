@@ -273,7 +273,7 @@ func lastRuneStart(p []byte, from int) int {
 }
 
 func unexpectedEOF(err error, started bool) error {
-	if err == io.EOF && started {
+	if errors.Is(err, io.EOF) && started {
 		return io.ErrUnexpectedEOF
 	}
 	return err

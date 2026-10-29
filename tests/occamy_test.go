@@ -26,8 +26,9 @@ import (
 	"testing"
 	"time"
 
-	"changkun.de/x/occamy/internal/protocol"
 	"github.com/gorilla/websocket"
+
+	"changkun.de/x/occamy/internal/protocol"
 )
 
 type jwtInput struct {
@@ -116,7 +117,7 @@ func login(addr string, credential jwtInput) (string, error) {
 
 func dial(url string) (*websocket.Conn, error) {
 	d := websocket.Dialer{Subprotocols: []string{"guacamole"}, HandshakeTimeout: 10 * time.Second}
-	ws, _, err := d.Dial(url, nil)
+	ws, _, err := d.Dial(url, nil) //nolint:bodyclose // gorilla/websocket: the response body need not be closed
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
@@ -155,7 +156,7 @@ func session(url string, timeout time.Duration, want ...string) error {
 		r := bufio.NewReader(bytes.NewReader(msg))
 		for {
 			raw, err := protocol.ReadRaw(r)
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			if err != nil {

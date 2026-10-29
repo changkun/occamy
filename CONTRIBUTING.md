@@ -28,6 +28,10 @@ make stop
 unless `make e2e` points them at a running stack. No C toolchain is needed.
 See the README for a native build.
 
+`make lint` runs golangci-lint v2 with the linters and formatters in
+`.golangci.yml`, as CI does. Code must be `gofmt`ed, with imports grouped
+by `goimports`.
+
 ## Design specs
 
 Larger changes start as a design spec in [specs/](specs/README.md). A spec
