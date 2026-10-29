@@ -77,8 +77,11 @@ libguac_client_ssh_la_SOURCES += ssh_agent.c
 noinst_HEADERS += ssh_agent.h
 endif
 
+# key.c still uses the RSA/DSA APIs deprecated in OpenSSL 3.0; target the
+# 1.1.0 API level so they keep compiling under -Werror.
 libguac_client_ssh_la_CFLAGS = \
     -Werror -Wall -Iinclude    \
+    -DOPENSSL_API_COMPAT=0x10100000L \
     @COMMON_INCLUDE@           \
     @LIBGUAC_INCLUDE@          \
     @PANGO_CFLAGS@             \

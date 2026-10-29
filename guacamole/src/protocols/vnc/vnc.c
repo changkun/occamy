@@ -522,10 +522,15 @@ int guac_vnc_client_free_handler(guac_client* client) {
         /* Wait for client thread to finish */
         pthread_join(vnc_client->client_thread, NULL);
 
-        /* Free memory not free'd by libvncclient's rfbClientCleanup() */
-        if (rfb_client->frameBuffer != NULL) free(rfb_client->frameBuffer);
-        if (rfb_client->raw_buffer != NULL) free(rfb_client->raw_buffer);
-        if (rfb_client->rcSource != NULL) free(rfb_client->rcSource);
+        /* Free memory not free'd by older libvncclient's rfbClientCleanup().
+         * Newer versions free some of these themselves, so reset each
+         * pointer to avoid a double free. */
+        free(rfb_client->frameBuffer);
+        rfb_client->frameBuffer = NULL;
+        free(rfb_client->raw_buffer);
+        rfb_client->raw_buffer = NULL;
+        free(rfb_client->rcSource);
+        rfb_client->rcSource = NULL;
 
         /* Free VNC rfbClientData linked list (not free'd by rfbClientCleanup()) */
         while (rfb_client->clientData != NULL) {
@@ -950,8 +955,10 @@ void guac_vnc_cursor(rfbClient* client, int x, int y, int w, int h, int bpp) {
     /* Free surface */
     free(buffer);
 
-    /* libvncclient does not free rcMask as it does rcSource */
+    /* Older libvncclient does not free rcMask as it does rcSource. Newer
+     * versions do, so reset it to avoid a double free. */
     free(client->rcMask);
+    client->rcMask = NULL;
 }
 
 /**
