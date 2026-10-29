@@ -11,9 +11,8 @@ Development resumed in 2026 after a pause from the end of 2021.
 
 ### Added
 
-- Groundwork for running on upstream guacd 1.6: a guacd handshake client
-  (`internal/guacd`), a `guacd` section in `conf.yaml`, and a guacd
-  service in the demo stack. `occamyd` does not use guacd yet.
+- The web client sends its window size, pixel density and time zone, so
+  the remote desktop matches the browser window.
 - Demo servers built from the repository for linux/amd64 and linux/arm64
   (`docker/demo/`), and end-to-end tests that CI runs on every push
   (`make e2e`).
@@ -24,6 +23,15 @@ Development resumed in 2026 after a pause from the end of 2021.
 
 ### Changed
 
+- Sessions are served by upstream guacd 1.6 instead of the bundled
+  libguac. `occamyd` needs a reachable guacd: set `guacd.address` in
+  `conf.yaml` (default `localhost:4822`), and `guacd.params` for
+  per-protocol connection defaults. The demo stack runs one.
+- Sessions start and join without holding a proxy-wide lock, and a
+  session ends when its last user leaves. A failed connection no longer
+  blocks later connections with the same credentials.
+- Errors close the WebSocket with the Guacamole status code as the close
+  reason, so that the client can show it.
 - Go 1.26 or later is required. All Go dependencies have been upgraded and
   the `vendor/` directory removed. The module path is
   `changkun.de/x/occamy`.
@@ -47,6 +55,8 @@ Development resumed in 2026 after a pause from the end of 2021.
 
 - A failed join no longer leaves the proxy locked for every other
   connection.
+- SSH sessions can be opened again after the first one ends
+  ([#22](https://github.com/changkun/occamy/issues/22)).
 - Ending a VNC session no longer crashes `occamyd` with a double free
   under libvncclient 0.9.15.
 - Tokens no longer stop validating after one hour of uptime.

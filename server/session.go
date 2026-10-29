@@ -5,156 +5,214 @@
 package server
 
 import (
+	"bufio"
+	"bytes"
+	"context"
+	"errors"
 	"fmt"
-	"log"
-	"runtime"
+	"io"
+	"net/url"
+	"regexp"
+	"strconv"
 	"sync"
-	"sync/atomic"
-	"syscall"
+	"time"
 
-	"changkun.de/x/occamy/internal/config"
-	"changkun.de/x/occamy/internal/lib"
+	"changkun.de/x/occamy/internal/guacd"
 	"changkun.de/x/occamy/internal/protocol"
 	"github.com/gorilla/websocket"
 )
 
-// Session is an occamy proxy session that shares connection
-// within an user group
+// Session is a guacd connection shared by every client with the same
+// claims. The first client, the owner, creates the connection in guacd;
+// later clients join it.
 type Session struct {
-	ID             string
-	connectedUsers uint64
-	once           sync.Once
-	client         *lib.Client // shared client in a session
+	Key    string // jwt.GenerateID(), the sharing rule
+	ConnID string // guacd connection ID, valid once ready is closed and err is nil
+
+	ready chan struct{} // closed when ConnID or err is set
+	err   error         // why the owner's handshake failed
+	users int           // guarded by proxy.mu
 }
 
-// NewSession creates a new occamy proxy session
-func NewSession(proto string) (*Session, error) {
-	runtime.LockOSThread() // without unlock to exit the Go thread
+// Guacamole status codes that occamy.js reads from the WebSocket close
+// reason.
+const (
+	statusSuccess          = 0x0000
+	statusServerError      = 0x0200
+	statusUpstreamTimeout  = 0x0202
+	statusClientBadRequest = 0x0300
+)
 
-	cli, err := lib.NewClient()
-	if err != nil {
-		return nil, fmt.Errorf("occamy-lib: new client error: %w", err)
-	}
+// errBadRequest marks a connection rejected for its own parameters.
+var errBadRequest = errors.New("bad request")
 
-	s := &Session{client: cli}
-	s.client.InitLogLevel(config.Runtime.Mode)
-	err = s.client.LoadProtocolPlugin(proto)
-	if err != nil {
-		s.close()
-		return nil, fmt.Errorf("occamy-lib: load protocol plugin failed: %w", err)
+// closeStatus maps the error a connection ended with to a WebSocket close
+// code and a Guacamole status code.
+func closeStatus(err error) (code, status int) {
+	var ge *guacd.Error
+	switch {
+	case err == nil:
+		return websocket.CloseNormalClosure, statusSuccess
+	case errors.As(err, &ge) && ge.Status != 0:
+		return websocket.CloseInternalServerErr, ge.Status
+	case errors.Is(err, errBadRequest):
+		return websocket.ClosePolicyViolation, statusClientBadRequest
+	case errors.Is(err, context.DeadlineExceeded):
+		return websocket.CloseInternalServerErr, statusUpstreamTimeout
+	default:
+		return websocket.CloseInternalServerErr, statusServerError
 	}
-	s.ID = s.client.ID
-	return s, nil
 }
 
-// Join adds the given socket as a new user to the given process, automatically
-// reading/writing from the socket via read/write threads. The given socket,
-// parser, and any associated resources will be freed unless the user is not
-// added successfully.
-//
-// unlock is called exactly once: as soon as the user is prepared, or when
-// Join returns early, so that a failed join never leaves the caller's lock
-// held.
-func (s *Session) Join(ws *websocket.Conn, jwt *config.JWT, owner bool, unlock func()) error {
-	defer s.close()
-	unlock = sync.OnceFunc(unlock)
-	defer unlock()
-	lib.ResetErrors()
-
-	// 1. prepare socket pair
-	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
-	if err != nil {
-		return fmt.Errorf("new socket pair error: %w", err)
-	}
-
-	// 2. create guac socket using fds[0]
-	sock, err := lib.NewSocket(fds[0])
-	if err != nil {
-		syscall.Close(fds[0])
-		syscall.Close(fds[1])
-		return fmt.Errorf("occamy-lib: create guac socket error: %w", err)
-	}
-	defer sock.Close()
-
-	// 3. create guac user using created guac socket
-	u, err := lib.NewUser(sock, s.client, owner, jwt)
-	if err != nil {
-		syscall.Close(fds[1])
-		return fmt.Errorf("occamy-lib: create guac user error: %w", err)
-	}
-	defer u.Close()
-
-	// 4. count new user
-	atomic.AddUint64(&s.connectedUsers, 1)
-	defer atomic.AddUint64(&s.connectedUsers, ^uint64(0))
-
-	// 5. preparing connection
-	err = u.Prepare()
-	if err != nil {
-		return fmt.Errorf("occamy-lib: handle user connection error: %w", err)
-	}
-	unlock()
-
-	// 6. handle connection
-	done := make(chan struct{}, 1)
-	go u.HandleConnection(done) // block until disconnect/completion
-
-	// 7. proxy io
-	conn := protocol.NewInstructionIO(protocol.NewIO(fds[1]))
-	defer conn.Close()
-
-	err = s.serveIO(conn, ws)
-	<-done
-	return err
+// display is the client's screen, announced to guacd in the handshake.
+type display struct {
+	width, height, dpi int
+	timezone           string
 }
 
-// Close closes a session.
-func (s *Session) close() {
-	if atomic.LoadUint64(&s.connectedUsers) > 0 {
-		return
+// timezonePattern matches IANA time zone names such as Europe/Berlin or
+// Etc/GMT+1.
+var timezonePattern = regexp.MustCompile(`^[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+)*$`)
+
+// displayHints reads the optional width, height, dpi and timezone query
+// parameters. Sizes are clamped to 1-8192 and the DPI to 48-600; anything
+// missing or malformed falls back to 1024x768 at 96 DPI and no time zone.
+func displayHints(q url.Values) display {
+	d := display{
+		width:  intParam(q, "width", guacd.DefaultWidth, 1, 8192),
+		height: intParam(q, "height", guacd.DefaultHeight, 1, 8192),
+		dpi:    intParam(q, "dpi", guacd.DefaultDPI, 48, 600),
 	}
-	s.client.Close()
+	if tz := q.Get("timezone"); len(tz) <= 64 && timezonePattern.MatchString(tz) {
+		d.timezone = tz
+	}
+	return d
 }
 
-func (s *Session) serveIO(conn *protocol.InstructionIO, ws *websocket.Conn) (err error) {
-	wg := sync.WaitGroup{}
+func intParam(q url.Values, name string, fallback, lo, hi int) int {
+	v, err := strconv.Atoi(q.Get(name))
+	if err != nil {
+		return fallback
+	}
+	return min(max(v, lo), hi)
+}
+
+// aLongTimeAgo is a deadline in the past, used to abort blocked reads.
+var aLongTimeAgo = time.Unix(1, 0)
+
+// serveIO proxies instructions between guacd and the client until either
+// side ends, and returns why, or nil if a side closed normally.
+func serveIO(conn *guacd.Conn, ws *websocket.Conn) error {
+	var wmu sync.Mutex // gorilla/websocket allows one writer at a time
+	send := func(b []byte) error {
+		wmu.Lock()
+		defer wmu.Unlock()
+		return ws.WriteMessage(websocket.TextMessage, b)
+	}
+
+	// Each side reports nil when it ends normally: guacd closes after a
+	// disconnect, and a client leaves however it likes.
 	exit := make(chan error, 2)
-	wg.Add(2)
-	go func(conn *protocol.InstructionIO, ws *websocket.Conn) {
-		var err error
+	go func() {
+		// Announce the connection ID as an internal-opcode instruction,
+		// the way guacamole-client's tunnel announces its UUID.
+		id := protocol.NewInstruction([]string{"", conn.ID}).String()
+		if err := send([]byte(id)); err != nil {
+			exit <- clientError(err)
+			return
+		}
 		for {
 			raw, err := conn.ReadRaw()
 			if err != nil {
-				break
+				if errors.Is(err, io.EOF) {
+					err = nil
+				} else {
+					err = fmt.Errorf("from guacd: %w", err)
+				}
+				exit <- err
+				return
 			}
-			err = ws.WriteMessage(websocket.TextMessage, raw)
-			if err != nil {
-				break
+			if err := send(raw); err != nil {
+				exit <- clientError(err)
+				return
 			}
 		}
-		exit <- err
-		log.Println("reading from desktop terminated.")
-		wg.Done()
-	}(conn, ws)
-	go func(conn *protocol.InstructionIO, ws *websocket.Conn) {
-		var err error
+	}()
+	go func() {
 		for {
-			_, buf, err := ws.ReadMessage()
+			_, msg, err := ws.ReadMessage()
 			if err != nil {
-				break
+				exit <- clientError(err)
+				return
 			}
-			_, err = conn.WriteRaw(buf)
-			if err != nil {
-				break
+			if err := forward(conn, msg, send); err != nil {
+				exit <- err
+				return
 			}
 		}
-		exit <- err
-		log.Println("reading from client terminated.")
-		wg.Done()
-	}(conn, ws)
-	err = <-exit
+	}()
+
+	err := <-exit
+	// Unblock the other side: closing guacd ends its reader, and a read
+	// deadline ends the WebSocket reader without closing the socket, so
+	// that the caller can still send a close frame.
 	conn.Close()
-	wg.Wait()
-	log.Println("IO goroutines are terminated.")
-	return
+	ws.NetConn().SetReadDeadline(aLongTimeAgo)
+	<-exit
+	return err
+}
+
+// clientError classifies an error on the client's WebSocket. A client
+// that closes, with or without a close frame, or whose connection drops,
+// has left; only a close for a protocol violation is a failure.
+func clientError(err error) error {
+	var ce *websocket.CloseError
+	if errors.As(err, &ce) {
+		switch ce.Code {
+		case websocket.CloseNormalClosure, websocket.CloseGoingAway,
+			websocket.CloseNoStatusReceived, websocket.CloseAbnormalClosure:
+			return nil
+		}
+		return fmt.Errorf("from client: %w", err)
+	}
+	return nil
+}
+
+// internalOpcode prefixes instructions with the empty opcode, which the
+// tunnel uses for its own messages.
+var internalOpcode = []byte("0.")
+
+// forward sends the instructions in one client message to guacd. Internal
+// instructions stay in the proxy: a ping is answered with itself, as
+// guacamole-client's tunnel does, and the rest are dropped.
+func forward(conn *guacd.Conn, msg []byte, reply func([]byte) error) error {
+	r := bufio.NewReader(bytes.NewReader(msg))
+	out := make([]byte, 0, len(msg))
+	for {
+		raw, err := protocol.ReadRaw(r)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("%w: %w", errBadRequest, err)
+		}
+		if !bytes.HasPrefix(raw, internalOpcode) {
+			out = append(out, raw...)
+			continue
+		}
+		ins, err := protocol.ParseInstruction(raw)
+		if err != nil {
+			return fmt.Errorf("%w: %w", errBadRequest, err)
+		}
+		if args := ins.Args(); len(args) > 0 && args[0] == "ping" {
+			if err := reply(raw); err != nil {
+				return err
+			}
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	_, err := conn.WriteRaw(out)
+	return err
 }

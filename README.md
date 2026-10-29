@@ -37,11 +37,19 @@ make build                          # or: make build CONTAINER_ENGINE=docker
 
 The image builds the web client, the bundled libguac with its VNC and SSH
 plugins, and `occamyd` in separate stages (see [docker/Dockerfile](./docker/Dockerfile)).
-Then you should be able to run occamy with:
+Occamy serves sessions through [guacd](https://hub.docker.com/r/guacamole/guacd),
+which it expects at `guacd.address` in [conf.yaml](./conf.yaml). To run both:
 
 ```
-podman run -itd -p 5636:5636 occamy:latest
+podman network create occamy
+podman run -d --name guacd --network occamy docker.io/guacamole/guacd:1.6.0
+podman run -d --network occamy -p 5636:5636 \
+    -v ./docker/occamy.yaml:/occamy/conf.yaml:ro occamy:latest
 ```
+
+[docker/occamy.yaml](./docker/occamy.yaml) points occamy at `guacd:4822`. guacd
+opens the connections to the remote desktops, so their hosts must be
+reachable from the guacd container.
 
 ### Releases
 
@@ -116,7 +124,8 @@ Occamy reaches them by compose service name:
 | SSH | `ssh:22` | `occamy` | `occamy` |
 
 There is no RDP demo server yet ([specs/005](./specs/005-upstream-guacamole.md)).
-The stack also runs upstream guacd 1.6, which occamy does not use yet.
+occamy connects to them through upstream guacd 1.6, which also runs in
+the stack.
 
 Here is a working video demo:
 

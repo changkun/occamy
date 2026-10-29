@@ -69,7 +69,7 @@ Build, dependencies, CI, demo environment, and documentation.
 | [002-ssh-session-rejoin.md](002-ssh-session-rejoin.md) | Not started | Repeated SSH sessions in one process (#22); moot if 005 adopts guacd |
 | [003-session-lifecycle-hardening.md](003-session-lifecycle-hardening.md) | Not started | Deadlock-free, race-free session table; pressure test in CI (#17, #18, #20) |
 | [004-security-hardening.md](004-security-hardening.md) | Not started | No credentials in tokens or logs, target allowlist, safe defaults, gin-jwt v3 |
-| [005-upstream-guacamole.md](005-upstream-guacamole.md) | In progress (4/7 tasks) | Upstream guacd 1.6 as backend: RDP restored, cgo removed (#25, #32) |
+| [005-upstream-guacamole.md](005-upstream-guacamole.md) | In progress (5/7 tasks) | Upstream guacd 1.6 as backend: RDP restored, cgo removed (#25, #32) |
 
 ### client
 
