@@ -36,6 +36,7 @@ replaced one protocol at a time.
 | ○ | [008](008-native-architecture.md) Occamy v1 architecture | drafted |
 | ○ | [009](009-react-web-client.md) React web client | vague |
 | ○ | [010](010-native-swift-client.md) Native Swift client on a Go core | drafted |
+| ○ | [011](011-release-readiness.md) Open source release readiness | drafted |
 
 ● complete · ◐ in testing · ○ not started · ✕ archived
 
@@ -57,6 +58,7 @@ Build, dependencies, CI, demo environment, and documentation.
 |------|--------|-------------|
 | [001-status-quo.md](001-status-quo.md) | Testing | Buildable baseline on current toolchains, verified and documented |
 | [006-demo-stack-refresh.md](006-demo-stack-refresh.md) | Complete | Multi-arch VNC and SSH demo servers; VNC and SSH end-to-end tests in CI (pressure test opt-in until 003) |
+| [011-release-readiness.md](011-release-readiness.md) | Not started | Licensing, changelog, security policy, CI gates, attested multi-arch releases |
 
 ### server
 
