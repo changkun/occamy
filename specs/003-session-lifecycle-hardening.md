@@ -66,6 +66,19 @@ Defects found by reading the code during the 2026 revival:
    disconnected moments later.
 7. `Session.once` is unused; `lib.Client` carries several unused fields
    (`users`, `owner`, `handler*`).
+8. **A failed connect poisons its claims until restart (observed).** When
+   the remote desktop is unreachable, libguac sends `error`, and the client
+   then disconnects. `serveIO` closes its end of the socket pair, but its
+   desktop reader stays blocked in `syscall.Read` on that descriptor: a
+   close does not wake a read in another thread, and the stopped VNC client
+   never writes again. `Join` never returns and the entry is never
+   removed. Every later connection with the same claims joins the dead
+   session and gets only `disconnect`. Reproduced on 2026-10-29 with a VNC
+   token for a closed port, identically before and after
+   [instruction-stream-io](005-upstream-guacamole/instruction-stream-io.md).
+   [guacd-sessions](005-upstream-guacamole/guacd-sessions.md) removes the
+   cause: reads are on a `net.Conn`, which `Close` does unblock, and the
+   entry goes when its last user leaves.
 
 If [005](005-upstream-guacamole.md) replaces the in-process libguac with
 upstream guacd, the socket pair and cgo user in `Join` become a TCP
