@@ -19,8 +19,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   comments ([#32](https://github.com/changkun/occamy/issues/32)).
 - CI runs the pressure test, which crashed `occamyd` before 0.5.0
   ([#20](https://github.com/changkun/occamy/issues/20)), with 10 rounds.
-  Afterwards, `occamyd`'s goroutines and guacd's processes must return
-  to their numbers before the tests.
+  Afterwards, `occamyd`'s goroutines must return to their number before
+  the storm, and CI warns if guacd keeps a process.
 - A guide to profiling `occamyd` in debug mode, watching guacd's
   processes, and the pressure test
   ([docs/debugging.md](docs/debugging.md),

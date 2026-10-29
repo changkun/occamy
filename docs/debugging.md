@@ -83,6 +83,10 @@ joined` and `left`. It logs `ended while joining` when a client joins a
 session just as guacd ends it, and then starts a new session for that
 client.
 
+guacd notices that a user has closed its connection only when it next
+sends that user something. Until then the user still counts, for up to
+15 s, after which guacd logs `User is not responding.` and drops it.
+
 ## Tests and benchmarks
 
 - `go test -race ./...` runs the unit tests. `TestRouteConnStress` in
@@ -105,5 +109,6 @@ client.
   [benchmarks.md](./benchmarks.md).
 
 CI runs the unit tests with `-race`, and the end-to-end and pressure
-tests with 10 rounds. After them it checks that guacd is down to its one
-process, and prints `docker stats` before and after.
+tests with 10 rounds. It prints `docker stats` and guacd's processes
+before and after them, and warns if guacd still runs more than its one
+process 30 s after the tests.
