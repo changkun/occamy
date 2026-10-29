@@ -6263,7 +6263,7 @@ Occamy.Mouse = function(element) {
                              + "AAAACklEQVQI12NgAAAAAgAB4iG8MwAA"
                              + "AABJRU5ErkJggg==) 0 0, auto";
         }
-        catch (e) {
+        catch {
             return false;
         }
 
@@ -9230,4 +9230,4 @@ Occamy.WebSocketTunnel.prototype = new Occamy.Tunnel();
  */
 Occamy.API_VERSION = "0.9.14";
 
-module.exports = Occamy;
+export default Occamy;

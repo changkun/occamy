@@ -20,7 +20,7 @@
             <el-input v-model="credentials[form.protocol].password"></el-input>
         </el-form-item>
         <el-form-item>
-            <el-button type="primary" @click.native="login">Login</el-button>
+            <el-button type="primary" @click="login">Login</el-button>
         </el-form-item>
     </el-form>
 </div>
@@ -28,6 +28,7 @@
 </template>
 <script>
 import axios from 'axios'
+import { ElMessage } from 'element-plus'
 export default {
   data() {
     return {
@@ -65,7 +66,7 @@ export default {
                 name: 'desktop', query:{token: response.data.token}
             }).href
         }).catch((err) => {
-            this.$message({message: `login fail: ${err}`, type: 'error'})
+            ElMessage({message: `login fail: ${err}`, type: 'error'})
         })
     },
   },
