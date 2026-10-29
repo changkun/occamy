@@ -27,9 +27,9 @@ services:
         condition: service_healthy
 
   guacd:
-    # Not used by occamy yet (specs/005-upstream-guacamole/guacd-sessions.md).
-    # guacd opens the connections to the demo servers, so the hosts in
-    # tokens must resolve from here.
+    # occamy reaches it as guacd:4822 (occamy.yaml). guacd opens the
+    # connections to the demo servers, so the hosts in tokens must resolve
+    # from here.
     image: docker.io/guacamole/guacd:1.6.0
     healthcheck:
       test: ["CMD", "nc", "-z", "127.0.0.1", "4822"]

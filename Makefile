@@ -14,7 +14,7 @@ compile:
 .PHONY: compile
 
 client:
-	cd client/occamy-web && npm install && npm run build
+	cd client/occamy-web && npm ci && npm run build
 .PHONY: client
 
 build:
