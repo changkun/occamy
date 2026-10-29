@@ -9,8 +9,10 @@ affects:
   - CODE_OF_CONDUCT.md
   - CONTRIBUTING.md
   - LICENSE
-  - guacamole/LICENSE
-  - guacamole/NOTICE
+  - client/occamy-web/LICENSE.guacamole
+  - client/occamy-web/NOTICE.guacamole
+  - .goreleaser.yaml
+  - scripts/third-party-licenses.sh
   - .github/
   - docker/Dockerfile
   - README.md
@@ -90,7 +92,14 @@ publishes checksummed, attested artifacts.
 - README License section: Occamy is MIT, and `guacamole/` is Apache-2.0.
 - Release archives carry `LICENSE`, plus the guacamole notices while
   libguac ships. Once binaries ship, they carry a third-party license
-  report generated with `go-licenses`.
+  report, `THIRD_PARTY_LICENSES`, written by
+  `scripts/third-party-licenses.sh`. `go-licenses check` gates
+  dependencies in CI.
+- Since [remove-libguac](005-upstream-guacamole/remove-libguac.md), the
+  Apache files live in `client/occamy-web/` as `LICENSE.guacamole` and
+  `NOTICE.guacamole`, for the web client's fork of guacamole-common-js
+  0.9.14. The image keeps them under `/occamy/licenses/guacamole/`, and the
+  web client archive carries them.
 
 ### Versioning and changelog
 
@@ -162,8 +171,7 @@ nothing. It has four jobs:
 
 1. **image**:
    - builds `docker/Dockerfile` natively on `ubuntu-latest` (amd64) and
-     `ubuntu-24.04-arm` (arm64), because libguac compiles too slowly under
-     QEMU;
+     `ubuntu-24.04-arm` (arm64), which is faster than QEMU;
    - pushes by digest to `ghcr.io/changkun/occamy`, then merges a
      multi-arch manifest tagged with the version, plus `latest` for
      non-prereleases;
@@ -256,12 +264,72 @@ Settled with the maintainer on 2026-10-29:
 
 ## Acceptance Criteria
 
-- [ ] Redistributed Apache-2.0 code carries its LICENSE and NOTICE, in the
+- [x] Redistributed Apache-2.0 code carries its LICENSE and NOTICE, in the
       repository and in the image.
-- [ ] `CHANGELOG.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` and a complete
+- [x] `CHANGELOG.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` and a complete
       `CONTRIBUTING.md` exist.
-- [ ] CI runs race tests and govulncheck; Dependabot is configured.
+- [x] CI runs race tests and govulncheck; Dependabot is configured.
 - [ ] A `v*` tag produces a GitHub release with a multi-arch GHCR image,
       the web client archive, `SHA256SUMS` and provenance attestations.
 - [ ] After remove-libguac, releases include `occamyd` binaries for
       linux, darwin and windows on amd64 and arm64.
+
+## Implementation notes
+
+- **Status.** All four phases have merged; the first release (`v0.5.0`) has
+  not been tagged, so the last two criteria are open:
+  - phase 1: #59;
+  - phase 2: #60;
+  - phase 3: #61;
+  - phase 4: #66.
+- **What was done.**
+  - **Licensing.** Apache LICENSE and NOTICE, first for `guacamole/`. They
+    moved to `client/occamy-web/` when #65 deleted the fork. `LICENSE` year
+    updated, and the image carries the notices.
+  - **Community.** `CHANGELOG.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
+    `CONTRIBUTING.md`, issue forms and a PR template.
+  - **CI.** `go test -race`, govulncheck and the `master`-only push
+    trigger, plus Dependabot for gomod, npm, actions and the five Docker
+    directories. Since #65, also a build-only macOS and Windows job. Since
+    #66, `go-licenses check`.
+  - **Release.** `release.yml` has image (native amd64 and arm64), manifest,
+    web, binaries (GoReleaser) and release jobs. Every PR that touches the
+    release build runs the dry run. The README covers the release contents
+    and verification, and its badge shows the latest release.
+  - **Repository settings.** Private vulnerability reporting, secret
+    scanning with push protection, and Dependabot alerts and security
+    fixes. Branch protection on `master`: go, web, image and e2e, strict,
+    admins may bypass.
+- **Decisions made during implementation.**
+  - Archives are named `occamyd-<version>-<os>-<arch>`, with the tag
+    including its `v`, to match `occamy-web-<version>`.
+  - They are reproducible: fixed root owner, commit-date mtimes and
+    `mod_timestamp`. A second local build was byte-identical.
+  - GoReleaser is pinned to v2.18.3, and its checksum, changelog and
+    release steps are disabled, so `release.yml` owns those.
+  - The binaries use `go-version: stable` like the other jobs, which
+    picks up Go patch releases.
+- **Deviations from the spec.**
+  - The license report comes from `scripts/third-party-licenses.sh`, not
+    `go-licenses report`. The report template can reach a module's
+    license text but not its NOTICE files. Apache-2.0 requires carrying
+    those, and `go.yaml.in/yaml/v3` (NOTICE) and `go.mongodb.org/mongo-driver/v2`
+    (THIRD-PARTY-NOTICES) have them.
+  - The script includes every LICENSE, COPYING, NOTICE and
+    THIRD-PARTY-NOTICES file, taking modules from the union over linux,
+    darwin and windows (the same 24 modules today), plus Go's own
+    license. It fails if a module has none.
+  - go-licenses still classifies licenses: `check
+    --disallowed_types=forbidden,restricted` runs in the `go` job.
+- **Surprises / gotchas.**
+  - The 172 MB to 34.7 MB image drop came from #65, not from this spec.
+  - macOS bsdtar lacks `--sort` and `--transform`, so the web archive
+    command only runs in CI.
+  - Vite drops `/*!` license comments, so shipped notices must be files.
+- **Follow-ups.**
+  - Tag `v0.5.0` once the maintainer agrees, then check `gh attestation
+    verify` for one archive and for the image, which closes the last two
+    criteria.
+  - Branch protection could also require `build (macos-latest)`,
+    `build (windows-latest)` and `binaries`.
+

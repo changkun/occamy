@@ -17,6 +17,10 @@ Development resumed in 2026 after a pause from the end of 2021.
   (`docker/demo/`), and end-to-end tests that CI runs on every push
   (`make e2e`).
 - RDP sessions, through guacd, with an xrdp demo server in the demo stack.
+- Releases: a multi-arch image on GHCR, `occamyd` archives for Linux, macOS
+  and Windows on amd64 and arm64 with the licenses of their dependencies,
+  the web client archive, and `SHA256SUMS`, all with build provenance
+  attestations.
 - A changelog, security policy, code of conduct and contribution guide.
 - License and NOTICE files for the web client's fork of
   guacamole-common-js (`client/occamy-web/`), also shipped in the image

@@ -1,0 +1,57 @@
+# GoReleaser builds the occamyd archives for .github/workflows/release.yml,
+# which writes the checksums and attestations and creates the GitHub
+# release itself. VERSION names the archives, as it does the web client's:
+#
+#   VERSION=dryrun goreleaser release --snapshot --clean
+version: 2
+project_name: occamy
+
+before:
+  hooks:
+    - ./scripts/third-party-licenses.sh
+
+builds:
+  - id: occamyd
+    main: .
+    binary: occamyd
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: occamyd
+    name_template: "occamyd-{{ .Env.VERSION }}-{{ .Os }}-{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    # Fixed owners and timestamps, so that the archives do not depend on
+    # who builds them, or when.
+    builds_info: &info
+      owner: root
+      group: root
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: LICENSE
+        info: *info
+      - src: README.md
+        info: *info
+      - src: conf.yaml
+        info: *info
+      - src: THIRD_PARTY_LICENSES
+        info: *info
+
+checksum:
+  disable: true
+
+changelog:
+  disable: true
+
+release:
+  disable: true

@@ -4,7 +4,7 @@
 
 [![Builds](https://github.com/changkun/occamy/actions/workflows/dockerimage.yml/badge.svg?branch=master)](https://github.com/changkun/occamy/actions/workflows/dockerimage.yml)
 [![Go Reference](https://pkg.go.dev/badge/changkun.de/x/occamy.svg)](https://pkg.go.dev/changkun.de/x/occamy)
-[![Latest tag](https://img.shields.io/github/v/tag/changkun/occamy?sort=semver&label=latest)](https://github.com/changkun/occamy/tags)
+[![Release](https://img.shields.io/github/v/release/changkun/occamy?sort=semver)](https://github.com/changkun/occamy/releases)
 [![Go version](https://img.shields.io/github/go-mod/go-version/changkun/occamy)](./go.mod)
 [![License](https://img.shields.io/github/license/changkun/occamy)](./LICENSE)
 Occamy is an open source protocol and proxy for modern remote desktop control that written in Go.
@@ -56,13 +56,21 @@ reachable from the guacd container.
 ### Releases
 
 From v0.5.0 on, each [release](https://github.com/changkun/occamy/releases)
-publishes a multi-arch image (linux/amd64 and linux/arm64) as
-`ghcr.io/changkun/occamy:<version>`, the web client as an archive, and
-`SHA256SUMS`, all with build provenance attestations. To verify them:
+publishes:
+
+- a multi-arch image (linux/amd64 and linux/arm64) as
+  `ghcr.io/changkun/occamy:<version>`;
+- `occamyd` archives for Linux, macOS and Windows on amd64 and arm64
+  (`occamyd-<version>-<os>-<arch>`), each with `conf.yaml` and the licenses
+  of the code compiled into it (`THIRD_PARTY_LICENSES`);
+- the web client as an archive;
+- `SHA256SUMS`.
+
+All of them carry build provenance attestations. To verify them:
 
 ```
 sha256sum -c SHA256SUMS
-gh attestation verify occamy-web-<version>.tar.gz --repo changkun/occamy
+gh attestation verify occamyd-<version>-linux-amd64.tar.gz --repo changkun/occamy
 gh attestation verify oci://ghcr.io/changkun/occamy:<version> --repo changkun/occamy
 ```
 
