@@ -50,7 +50,8 @@ next-step spec builds on.
   `dgrijalva/jwt-go`), gorilla/websocket v1.4.0, and `gopkg.in/yaml.v2`.
   `vendor/` also carried `gioui.org` and `tfriedel6/canvas`, which nothing on
   master imports (they belong to the unmerged Gio client, see
-  [007](007-native-gio-client.md)).
+  [007](007-native-gio-client.md), retired in favour of
+  [010](010-native-swift-client.md)).
 - `internal/lib/user_test.go` no longer compiled after the #50 refactor
   changed `lib.NewUser` and `(*lib.User).HandleConnection`.
 - The web client used Vue 2, vue-cli 4, element-ui and axios 0.21: all end of
@@ -166,7 +167,7 @@ reversible.
 | JWT carries plaintext remote credentials, tokens appear in request logs, `/login` is an open proxy, debug mode (with pprof) is the default | [004](004-security-hardening.md) |
 | RDP not built (FreeRDP 1.x only); Windows RDP failures (#32); macOS native segfault (#25) | [005](005-upstream-guacamole.md) |
 | Compose demo images from 2019, amd64 only; no automated end-to-end test | [006](006-demo-stack-refresh.md) |
-| Gio client (#51) unmerged on branches `gio` and `gio-client` | [007](007-native-gio-client.md) |
+| Gio client (#51) unmerged on branches `gio` and `gio-client` | Retired ([007](007-native-gio-client.md)); Swift client in [010](010-native-swift-client.md) |
 | C core in-process via cgo; Guacamole protocol costs; redesign (#3) and traffic (#21) | [008](008-native-architecture.md) |
 | Web client framework (React considered) | [009](009-react-web-client.md) |
 

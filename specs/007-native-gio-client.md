@@ -1,6 +1,6 @@
 ---
 title: Native Gio client
-status: vague
+status: archived
 track: client
 depends_on:
   - specs/001-status-quo.md
@@ -58,3 +58,12 @@ branches.
 - [ ] Decision recorded here (continue or retire).
 - [ ] If continuing: refined to `drafted` with the layout chosen and the
       branch rebased onto master with current Gio.
+
+## Outcome
+
+Retired on 2026-10-29. The native client will be SwiftUI on top of the Go
+client core rather than Gio. See [010](010-native-swift-client.md). PR #51
+and branches `gio` and `gio-client` stay as they are until the maintainer
+closes them. `internal/guac` on `gio-client` is a reuse candidate for the
+guacd bridge ([guacd-bridge](008-native-architecture/guacd-bridge.md)).
+

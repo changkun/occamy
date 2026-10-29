@@ -16,10 +16,13 @@ parent's breakdown section lists them in order.
 ## Status Quo
 
 Start with [001-status-quo.md](001-status-quo.md) for the baseline restored by
-the 2026 revival, how it was verified, and every known issue. The direction
-from there is [008-native-architecture.md](008-native-architecture.md): a
-pure-Go core with its own protocol, reached in phases that keep the current
-path shipping.
+the 2026 revival, how it was verified, and every known issue. Everything
+shipped so far (0.x) is a proof of concept. Next,
+[005](005-upstream-guacamole.md) moves it onto upstream guacd 1.6, which
+removes cgo from `occamyd` and restores RDP. The target is
+[008-native-architecture.md](008-native-architecture.md): Occamy v1, a
+pure-Go server with its own protocol, aiming for a v1 beta, with guacd
+replaced one protocol at a time.
 
 | | Spec | Status |
 |-|------|--------|
@@ -29,11 +32,12 @@ path shipping.
 | ○ | [004](004-security-hardening.md) Security hardening | drafted |
 | ○ | [005](005-upstream-guacamole.md) Catch up with upstream guacamole | validated |
 | ○ | [006](006-demo-stack-refresh.md) Demo stack refresh and end-to-end tests | drafted |
-| ○ | [007](007-native-gio-client.md) Native Gio client | vague |
-| ○ | [008](008-native-architecture.md) Occamy native architecture | drafted |
+| ✕ | [007](007-native-gio-client.md) Native Gio client | archived |
+| ○ | [008](008-native-architecture.md) Occamy v1 architecture | drafted |
 | ○ | [009](009-react-web-client.md) React web client | vague |
+| ○ | [010](010-native-swift-client.md) Native Swift client on a Go core | drafted |
 
-● complete · ◐ in testing · ○ not started
+● complete · ◐ in testing · ○ not started · ✕ archived
 
 ## Tracks
 
@@ -43,7 +47,7 @@ The target design of Occamy as a whole: core, backends, protocol.
 
 | Spec | Status | Deliverable |
 |------|--------|-------------|
-| [008-native-architecture.md](008-native-architecture.md) | Not started | Pure-Go core, backend interface, Occamy protocol, phased migration (#3, #21) |
+| [008-native-architecture.md](008-native-architecture.md) | Not started | Occamy v1: beta scope, path to pure Go, 9 sub-designs (#3, #21) |
 
 ### maintenance
 
@@ -71,23 +75,32 @@ Clients that speak to `occamyd`.
 
 | Spec | Status | Deliverable |
 |------|--------|-------------|
-| [007-native-gio-client.md](007-native-gio-client.md) | Not started | Decision on PR #51 and, if kept, a Gio client on the Occamy protocol |
-| [009-react-web-client.md](009-react-web-client.md) | Not started | Decision on React and, if chosen, a React shell at parity |
+| [007-native-gio-client.md](007-native-gio-client.md) | Archived | Retired in favour of 010 |
+| [009-react-web-client.md](009-react-web-client.md) | Not started | Decision on React and, if chosen, a React shell, then protocol v1 |
+| [010-native-swift-client.md](010-native-swift-client.md) | Not started | SwiftUI app linking the Go client core as a static library |
 
 ## Dependency graph
 
 ```mermaid
 flowchart TD
   s001[001 status quo] --> s006[006 demo stack + e2e]
-  s001 --> s007[007 Gio client]
   s006 --> s003[003 session lifecycle]
-  s006 --> s005[005 upstream guacamole]
-  s008[008 native architecture] --> s007
+  s006 --> s005[005 upstream guacd: 6 tasks]
+  s005 --> s008[008 v1 architecture: 9 sub-designs]
+  s008 --> s010[010 Swift client]
+  s008 --> s009[009 React client]
   s002[002 SSH rejoin]
   s004[004 security]
-  s009[009 React client]
 ```
 
-Migration phases from [008](008-native-architecture.md): stabilize (003, 004,
-006) → upstream guacd (005) → backend interface, protocol v0 and React client
-(008, 009) → native SSH → native VNC → RDP strategy.
+Edges into and out of 008 are summarized: the precise ones are on the
+children, for example
+[guacd-bridge](008-native-architecture/guacd-bridge.md) on 005's handshake
+client and 010 on
+[client-core](008-native-architecture/client-core.md).
+
+Path from [008](008-native-architecture.md): 0.5 runs everything through
+guacd with a cgo-free `occamyd` (005) → `v1.0.0-beta.1` with API and
+protocol v1, the guacd bridge and native SSH → beta.2 with native VNC →
+rc.1 freezes the API and protocol → v1.0 with guacd optional (RDP only) →
+native RDP in v1.x.
