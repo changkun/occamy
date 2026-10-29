@@ -165,8 +165,12 @@ Markdown table.
 ### Bench desktop (`docker/bench/desktop`)
 
 An image with Xvfb and x11vnc, and xrdp with xorgxrdp, whose sessions run
-the scene program instead of a desktop. A compose override,
-`docker/docker-compose.bench.yaml`, adds it to the stack and publishes
+the scene program instead of a desktop. One container runs per protocol,
+as the `vnc` and `rdp` services, so that hosts, credentials and CPU
+attribution stay as they are. x11vnc runs threaded and polls every
+millisecond, without naps or move and scroll detection, so that the VNC
+server stays within the 5 ms remote budget. A compose override,
+`docker/docker-compose.bench.yaml`, swaps it into the stack and publishes
 guacd on `127.0.0.1:4822` for the direct series. `make run` and the e2e
 job do not use it. `make bench` starts the stack with the override and
 runs the harness. The demo images stay as they are.
@@ -213,8 +217,22 @@ so the repository carries no image files.
 
 ## Implementation notes
 
-- **Status:** the Terminal task shipped in PR #76 on 2026-10-29. Desktop
-  VNC, Desktop RDP and the targets of the Baseline task remain.
+- **Status:** the Terminal task shipped in PR #76 on 2026-10-29, and the
+  Desktop VNC and Desktop RDP tasks in the PR after it. The desktop
+  baseline numbers and the targets of the Baseline task remain.
+- **Desktop decisions:**
+  - The bench desktop replaces the `vnc` and `rdp` services' images
+    rather than adding a service, so the harness's hosts, credentials
+    and per-service CPU stay as they are.
+  - The probe swatch is reset to grey by every scene key, and the
+    harness's readiness check alternates two letters of different
+    colours, because an update that paints the colour already shown
+    changes no pixels and draws nothing.
+  - Every wait in a desktop scenario is bounded. At N2 a VNC session
+    could keep drawing long enough that waiting for quiet hung until the
+    scenario's 10-minute limit.
+  - The interpreter applies all sixteen channel masks; guacd uses
+    destination-out and destination-atop on buffers at connect.
 - **Done ahead of plan:** the interpreter, planned for Desktop VNC,
   because SSH needed it; and from the Baseline task, the CI smoke job
   and `docs/benchmarks.md` with the terminal numbers.
@@ -231,9 +249,10 @@ so the repository carries no image files.
     default layer, so the interpreter needed layer compositing for SSH.
   - The podman VM counts time the host takes its CPUs away as CPU time,
     so a disturbed run shows more CPU as well as more time.
-  - The demo VNC container uses about 13% of a CPU while idle, probably
-    because its health check connects to x11vnc every second. To check
-    in Desktop VNC, whose image replaces it in the bench stack.
+  - x11vnc with its defaults uses about 8% of a CPU with no client
+    connected, and takes 27 ms at the median and 125 ms at p95 from a
+    key to its update. The bench desktop tunes it to 2.8 ms and 3.4 ms
+    (`docker/bench/desktop/start.sh`).
 - **Findings for the targets:** occamyd costs nothing measurable over
   guacd. T1 is near its floor (3 ms p95 at N0), so its target is the
   bound plus a margin. guacd coalesces T2's 575 KiB into 82–115 KiB of

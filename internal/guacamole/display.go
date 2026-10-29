@@ -21,7 +21,12 @@ import (
 	"golang.org/x/image/webp"
 )
 
-// Channel masks, the composite operations of img, copy and cfill.
+// Channel masks, the composite operations of img, copy and cfill. Each
+// bit adds one Porter-Duff term: 0x8 the source where the destination is
+// transparent, 0x4 the source where both are opaque, 0x2 the destination
+// where the source is transparent, and 0x1 the destination where both
+// are opaque. guacamole-common-js maps them to the canvas's composite
+// operations: 0x2 is destination-out, 0x9 destination-atop, 0xA xor.
 const (
 	maskSrc  = 0xC
 	maskOver = 0xE
@@ -42,7 +47,7 @@ type Display struct {
 	dirty   image.Rectangle // not yet composited into out
 
 	// Unsupported counts instructions that draw in ways Display does not
-	// implement, by opcode, and composite operations it approximates.
+	// implement, by opcode.
 	Unsupported map[string]int
 }
 
@@ -297,7 +302,7 @@ func (d *Display) size(args []string) error {
 
 func (d *Display) img(args []string) error {
 	v, err := ints(args, 0, 1, 2, 4, 5)
-	if err != nil || len(args) < 6 {
+	if err != nil || len(args) < 6 || !validMask(v[1]) {
 		return errArgs
 	}
 	d.streams[v[0]] = &imageStream{
@@ -356,21 +361,53 @@ func (d *Display) end(args []string) error {
 	}
 	b := img.Bounds()
 	l, dr := d.target(s.layer, image.Rectangle{Max: b.Size()}.Add(image.Pt(s.x, s.y)))
-	draw.Draw(l, dr, img, b.Min.Add(dr.Min.Sub(image.Pt(s.x, s.y))), d.op(s.mask))
+	composite(l, dr, img, b.Min.Add(dr.Min.Sub(image.Pt(s.x, s.y))), s.mask)
 	return nil
 }
 
-// op maps a channel mask to a draw operation. Masks other than SRC and
-// OVER are approximated by OVER and counted.
-func (d *Display) op(mask int) draw.Op {
+func validMask(mask int) bool { return 0 <= mask && mask <= 0xF }
+
+// composite draws src at sp onto r of dst with a channel mask. Outside r
+// the destination stays as it is, where a canvas would also clear it for
+// masks without the 0x2 bit; guacd uses those on buffers only.
+func composite(dst *image.RGBA, r image.Rectangle, src image.Image, sp image.Point, mask int) {
 	switch mask {
 	case maskSrc:
-		return draw.Src
+		draw.Draw(dst, r, src, sp, draw.Src)
+		return
 	case maskOver:
-		return draw.Over
+		draw.Draw(dst, r, src, sp, draw.Over)
+		return
 	}
-	d.Unsupported[fmt.Sprintf("mask %#x", mask)]++
-	return draw.Over
+	// image.RGBA is premultiplied, as the terms need. src may overlap dst.
+	tmp := image.NewRGBA(image.Rectangle{Max: r.Size()})
+	draw.Draw(tmp, tmp.Bounds(), src, sp, draw.Src)
+	for y := range r.Dy() {
+		for x := range r.Dx() {
+			sc := tmp.RGBAAt(x, y)
+			dc := dst.RGBAAt(r.Min.X+x, r.Min.Y+y)
+			as, ad := int(sc.A), int(dc.A)
+			f := func(s, d uint8) uint8 {
+				var v int
+				if mask&0x8 != 0 {
+					v += int(s) * (0xff - ad)
+				}
+				if mask&0x4 != 0 {
+					v += int(s) * ad
+				}
+				if mask&0x2 != 0 {
+					v += int(d) * (0xff - as)
+				}
+				if mask&0x1 != 0 {
+					v += int(d) * as
+				}
+				return clampByte(v / 0xff)
+			}
+			dst.SetRGBA(r.Min.X+x, r.Min.Y+y, color.RGBA{
+				R: f(sc.R, dc.R), G: f(sc.G, dc.G), B: f(sc.B, dc.B), A: f(sc.A, dc.A),
+			})
+		}
+	}
 }
 
 // copy implements copy (srcl, sx, sy, w, h, mask, dstl, dx, dy) and
@@ -379,6 +416,9 @@ func (d *Display) copy(args []string, transfer bool) error {
 	v, err := ints(args, 0, 1, 2, 3, 4, 5, 6, 7, 8)
 	if err != nil {
 		return err
+	}
+	if !transfer && !validMask(v[5]) {
+		return errArgs
 	}
 	src := d.layer(v[0])
 	sr := image.Rect(v[1], v[2], v[1]+v[3], v[2]+v[4]).Intersect(src.Bounds())
@@ -389,7 +429,7 @@ func (d *Display) copy(args []string, transfer bool) error {
 	l, dr := d.target(v[6], sr.Sub(sr.Min).Add(dp))
 	sp := sr.Min.Add(dr.Min.Sub(dp))
 	if !transfer {
-		draw.Draw(l, dr, src, sp, d.op(v[5]))
+		composite(l, dr, src, sp, v[5])
 		return nil
 	}
 	transferRect(l, dr, src, sp, v[5])
@@ -444,13 +484,15 @@ func (d *Display) cfill(args []string) error {
 	if err != nil {
 		return err
 	}
+	if !validMask(v[0]) {
+		return errArgs
+	}
 	c := &image.Uniform{C: color.NRGBA{
 		R: clampByte(v[2]), G: clampByte(v[3]), B: clampByte(v[4]), A: clampByte(v[5]),
 	}}
-	op := d.op(v[0])
 	for _, pr := range d.paths[v[1]] {
 		l, dr := d.target(v[1], pr)
-		draw.Draw(l, dr, c, image.Point{}, op)
+		composite(l, dr, c, image.Point{}, v[0])
 	}
 	delete(d.paths, v[1])
 	return nil

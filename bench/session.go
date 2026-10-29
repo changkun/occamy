@@ -215,9 +215,11 @@ func (s *session) read() {
 			s.decode.Add(int64(now.Sub(t)))
 			damage := s.display.TakeDamage()
 			// The reply acknowledges the frame, so that guacd keeps
-			// sending.
+			// sending. close may have closed the connection meanwhile.
 			if err := s.conn.writeRaw(raw); err != nil {
-				s.err = err
+				if !errClosed(err) {
+					s.err = err
+				}
 				return
 			}
 			if damage.Empty() {
@@ -320,6 +322,33 @@ func (s *session) settle(ctx context.Context, quiet time.Duration) error {
 			timer.Reset(quiet)
 		case <-timer.C:
 			return nil
+		}
+	}
+}
+
+// last returns when the last frame after t that drew arrived, once no
+// frame has drawn for quiet.
+func (s *session) last(ctx context.Context, t time.Time, quiet time.Duration) (time.Time, error) {
+	var at time.Time
+	timer := time.NewTimer(quiet)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return at, ctx.Err()
+		case f, open := <-s.frames:
+			if !open {
+				return at, s.ended()
+			}
+			if f.at.After(t) {
+				at = f.at
+			}
+			timer.Reset(quiet)
+		case <-timer.C:
+			if at.IsZero() {
+				return at, errors.New("nothing drew")
+			}
+			return at, nil
 		}
 	}
 }
