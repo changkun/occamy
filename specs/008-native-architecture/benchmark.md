@@ -7,7 +7,8 @@ depends_on:
 affects:
   - bench/
   - docker/bench/
-  - docker/docker-compose.yaml
+  - docker/docker-compose.bench.yaml
+  - internal/guacamole/
   - Makefile
   - .github/workflows/dockerimage.yml
   - docs/benchmarks.md
@@ -142,11 +143,16 @@ Markdown table.
   `client` package. Each driver answers `sync` the way a browser does,
   announces the image types a browser announces (PNG, JPEG, WebP), and
   keeps a decoded framebuffer.
-- **Guacamole interpreter:** applies `size`, `img`/`blob`/`end`, `copy`,
-  `rect`/`cfill` and `dispose` to layer 0 and buffers. It starts from
-  `internal/guac` on the `gio-client` branch, which
-  [guacd-bridge](guacd-bridge.md) needs as well. WebP decoding uses
-  `golang.org/x/image/webp`.
+- **Guacamole interpreter** (`internal/guacamole`, next to the parser,
+  so that [guacd-bridge](guacd-bridge.md) can reuse it):
+  - It applies `size`, `img`/`blob`/`end`, `copy`, `transfer`,
+    `rect`/`cfill` and `dispose` to the default layer and to buffers.
+  - It counts the operations it does not support, so a skewed framebuffer
+    shows up in the results.
+  - It is written fresh. `internal/guac` on the `gio-client` branch
+    depends on `tfriedel6/canvas` for paths, and Guacamole's fills only
+    need rectangles.
+  - WebP decoding uses `golang.org/x/image/webp`.
 - **Network proxy:** a TCP proxy the driver dials through, configured per
   condition.
 - **CPU sampling:** container stats from podman or docker, read before
@@ -155,10 +161,11 @@ Markdown table.
 ### Bench desktop (`docker/bench/desktop`)
 
 An image with Xvfb and x11vnc, and xrdp with xorgxrdp, whose sessions run
-the scene program instead of a desktop. It runs under the compose profile
-`bench`, so `make run` and the e2e job do not build it. `make bench`
-starts the profile and runs the harness. The demo images stay as they
-are.
+the scene program instead of a desktop. A compose override,
+`docker/docker-compose.bench.yaml`, adds it to the stack and publishes
+guacd on `127.0.0.1:4822` for the direct series. `make run` and the e2e
+job do not use it. `make bench` starts the stack with the override and
+runs the harness. The demo images stay as they are.
 
 ### Scene program (`bench/scene`)
 
