@@ -193,8 +193,13 @@ jobs:
           found { print }
         ' CHANGELOG.md > notes.md
         if ! grep -q '[^[:space:]]' notes.md; then
-          echo "::error::CHANGELOG.md has no entries under [$section]"
-          exit 1
+          # Right after a release Unreleased is empty, which only matters
+          # when publishing.
+          if [ "$PUBLISH" = true ]; then
+            echo "::error::CHANGELOG.md has no entries under [$section]"
+            exit 1
+          fi
+          echo "::warning::CHANGELOG.md has no entries under [$section]"
         fi
         cat notes.md
     - name: Checksums
