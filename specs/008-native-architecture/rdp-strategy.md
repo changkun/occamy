@@ -27,6 +27,11 @@ decides.
 
 - Through v1.0, RDP runs on guacd 1.6 (FreeRDP 2 or 3 inside guacd) via
   the bridge ([guacd-bridge](guacd-bridge.md)).
+- Since v0.5.0, RDP through guacd is tested end to end against xrdp only.
+  That needs `security` left unset, so that TLS is negotiated, and
+  `ignore-cert`. Nobody has checked a Windows host with NLA yet; that
+  check is open on #32. Step 2 of the evaluation plan below needs a
+  Windows host too, so the two checks can share one.
 - A modern RDP client needs:
   - TLS and NLA (CredSSP with NTLMv2; Kerberos for domains);
   - the X.224, MCS and GCC connection sequence and licensing exchange;

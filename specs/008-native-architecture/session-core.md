@@ -33,12 +33,15 @@ The core replaces v0's mutex-guarded session map, whose failure modes
 ## Context
 
 - v0: `server/routers.go` `routeConn` keys sessions by credential hash.
-  The guacd switch ([guacd-sessions](../005-upstream-guacamole/guacd-sessions.md))
-  keeps that key but stops holding the lock across I/O, and removes an
-  entry when its last user leaves.
-- 003 lists the v0 defects: lock held across joins (fixed), racing
-  teardown, joining a dying session, unbounded user counts, no pressure
-  test in CI.
+  Since the guacd switch in v0.5.0
+  ([guacd-sessions](../005-upstream-guacamole/guacd-sessions.md)), it no
+  longer holds the lock across I/O, and it removes an entry when its last
+  user leaves.
+- 003 lists the v0 defects. The lock held across joins, racing teardown
+  and a failed connect sticking its claims are fixed. Still open on v0:
+  a client can join a session as its last user leaves (guacd answers
+  516), the table has no concurrent stress test, and the pressure test
+  does not run in CI.
 - Protocol v1 ([protocol-v1](protocol-v1.md)) gives each viewer a frame
   window and acks.
 
@@ -143,5 +146,6 @@ travel through shared memory (`memfd` on Linux) to avoid copies.
 
 New `internal/backend` (interface, event types) and `internal/session`
 (owner, viewer, registry), with the HTTP layer from
-[api-and-server-stack](api-and-server-stack.md) on top. 003's remaining
-defects are resolved by this design rather than patched on v0.
+[api-and-server-stack](api-and-server-stack.md) on top. 003 fixes the
+remaining v0 defects in place. The core is designed so that they cannot
+arise, rather than inheriting those fixes.

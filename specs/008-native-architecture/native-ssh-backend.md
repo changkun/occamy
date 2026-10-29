@@ -29,12 +29,15 @@ terminals stay text. Three things need deciding:
 
 ## Context
 
-- `golang.org/x/crypto/ssh` is already a dependency. It provides the
-  client, `RequestPty`, `WindowChange`, the Password, PublicKeys and
-  KeyboardInteractive auth methods, `knownhosts`, and `agent`.
-- v0 renders SSH through libguac's terminal emulator with Pango and Cairo
-  into PNG tiles. Repeated sessions crash in-process (#22) until
-  [005](../005-upstream-guacamole.md) moves SSH to guacd.
+- `golang.org/x/crypto` is already in `go.mod`, as an indirect
+  dependency. Its `ssh` package provides the client, `RequestPty`,
+  `WindowChange`, the Password, PublicKeys and KeyboardInteractive auth
+  methods, `knownhosts`, and `agent`.
+- v0 renders SSH as pixels: a terminal emulator draws with Pango and
+  Cairo into PNG tiles. Up to `0.4.0` this ran in libguac inside
+  `occamyd`, where repeated sessions failed (#22). Since `v0.5.0` it runs
+  in guacd, one process per connection
+  ([005](../005-upstream-guacamole.md)).
 - Protocol v1 carries `term-data`, `term-snapshot`, `term-input`,
   `resize-request` and `prompt` ([protocol-v1](protocol-v1.md)).
 
