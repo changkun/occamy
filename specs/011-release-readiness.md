@@ -1,6 +1,6 @@
 ---
 title: Open source release readiness
-status: validated
+status: complete
 track: maintenance
 depends_on: []
 affects:
@@ -269,15 +269,55 @@ Settled with the maintainer on 2026-10-29:
 - [x] `CHANGELOG.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md` and a complete
       `CONTRIBUTING.md` exist.
 - [x] CI runs race tests and govulncheck; Dependabot is configured.
-- [ ] A `v*` tag produces a GitHub release with a multi-arch GHCR image,
+- [x] A `v*` tag produces a GitHub release with a multi-arch GHCR image,
       the web client archive, `SHA256SUMS` and provenance attestations.
-- [ ] After remove-libguac, releases include `occamyd` binaries for
+- [x] After remove-libguac, releases include `occamyd` binaries for
       linux, darwin and windows on amd64 and arm64.
 
-## Implementation notes
+## Outcome
 
-- **Status.** All four phases have merged; the first release (`v0.5.0`) has
-  not been tagged, so the last two criteria are open:
+**Summary.** Implemented directly in five PRs:
+
+- #59, licensing and community files;
+- #60, CI gates;
+- #61, the release pipeline;
+- #66, binaries;
+- #70, linting.
+
+[v0.5.0](https://github.com/changkun/occamy/releases/tag/v0.5.0) was
+released from them on 2026-10-29 (tag on `30fef0a`, run 40932881518). Drift:
+Minimal. Every item shipped. The one design change is that the license
+report comes from a script rather than `go-licenses report`, with
+`go-licenses check` kept as a gate.
+
+**Release verified.**
+
+- The release is published, not a draft. It has 8 assets: six `occamyd`
+  archives, the web archive and `SHA256SUMS`. Its notes are CHANGELOG's
+  `[0.5.0]` section.
+- `shasum -c` passes for the downloaded archives, and the darwin/arm64
+  binary runs.
+- `gh attestation verify` passes for an archive and for
+  `oci://ghcr.io/changkun/occamy:v0.5.0`. Both carry SLSA provenance v1
+  signed by `release.yml@refs/tags/v0.5.0`.
+- The image manifest lists amd64 and arm64 (plus buildx's provenance
+  entries). The GHCR package is public. The image runs as `nonroot` and
+  is 34.7 MB.
+
+**Unspecified work.**
+
+- golangci-lint (#70), added after the maintainer asked whether linting
+  was enough (improvement). Its first run found:
+  - two real defects, fixed before the tag: ambiguous session keys
+    (concatenated claims, MD5), and no `ReadHeaderTimeout`;
+  - an extra reply after a failed upgrade.
+- The release dry run warns instead of failing when `[Unreleased]` is
+  empty (#69). Otherwise every Dockerfile PR would fail it right after a
+  release (improvement).
+
+### Implementation notes
+
+- **Status.** All four phases merged, and `v0.5.0` was released from them:
   - phase 1: #59;
   - phase 2: #60;
   - phase 3: #61;
@@ -327,9 +367,6 @@ Settled with the maintainer on 2026-10-29:
     command only runs in CI.
   - Vite drops `/*!` license comments, so shipped notices must be files.
 - **Follow-ups.**
-  - Tag `v0.5.0` once the maintainer agrees, then check `gh attestation
-    verify` for one archive and for the image, which closes the last two
-    criteria.
   - Branch protection could also require `build (macos-latest)`,
     `build (windows-latest)` and `binaries`.
 
