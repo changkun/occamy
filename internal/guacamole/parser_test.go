@@ -2,13 +2,13 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package protocol_test
+package guacamole_test
 
 import (
 	"fmt"
 	"testing"
 
-	"changkun.de/x/occamy/internal/protocol"
+	"changkun.de/x/occamy/internal/guacamole"
 )
 
 var instructions = [][]byte{
@@ -19,8 +19,8 @@ var instructions = [][]byte{
 func TestParser_Parse(t *testing.T) {
 	for idx := range instructions {
 		t.Run(fmt.Sprintf("occamy-ins-len-%d", len(instructions[idx])), func(t *testing.T) {
-			p := protocol.NewParser()
-			ins := protocol.Instruction{}
+			p := guacamole.NewParser()
+			ins := guacamole.Instruction{}
 			p.Parse(instructions[idx], &ins)
 
 			if ins.String() != string(instructions[idx]) {
@@ -35,8 +35,8 @@ func BenchmarkParser_Parse(b *testing.B) {
 	for idx := range instructions {
 		b.Run(fmt.Sprintf("occamy-ins-len-%d", len(instructions[idx])), func(b *testing.B) {
 			b.ReportAllocs()
-			p := protocol.NewParser()
-			ins := protocol.Instruction{}
+			p := guacamole.NewParser()
+			ins := guacamole.Instruction{}
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				p.Parse(instructions[idx], &ins)

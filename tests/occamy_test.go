@@ -28,7 +28,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	"changkun.de/x/occamy/internal/protocol"
+	"changkun.de/x/occamy/internal/guacamole"
 )
 
 type jwtInput struct {
@@ -155,14 +155,14 @@ func session(url string, timeout time.Duration, want ...string) error {
 		}
 		r := bufio.NewReader(bytes.NewReader(msg))
 		for {
-			raw, err := protocol.ReadRaw(r)
+			raw, err := guacamole.ReadRaw(r)
 			if errors.Is(err, io.EOF) {
 				break
 			}
 			if err != nil {
 				return fmt.Errorf("bad instruction from occamy: %w", err)
 			}
-			ins, err := protocol.ParseInstruction(raw)
+			ins, err := guacamole.ParseInstruction(raw)
 			if err != nil {
 				return fmt.Errorf("bad instruction from occamy: %w", err)
 			}

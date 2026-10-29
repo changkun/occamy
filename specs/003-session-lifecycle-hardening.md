@@ -98,7 +98,7 @@ of defect 6, which the guacd table narrowed but did not close (see
 - `server/connection.go` serves `/debug/pprof/*` in debug mode. `conf.yaml`
   and the demo stack run in debug mode. The usage notes are only a code
   comment.
-- `internal/protocol/benchmark_test.go` has the parser benchmarks.
+- `internal/guacamole/benchmark_test.go` has the parser benchmarks.
 - Nothing in `docs/` mentions either.
 
 ### Issues
@@ -184,7 +184,7 @@ Write `docs/debugging.md`. It covers:
 
 - the pprof routes and how to switch debug mode on and off; release mode
   must not expose them (see [004](004-security-hardening.md));
-- the protocol benchmarks (`go test -bench . ./internal/protocol/`);
+- the protocol benchmarks (`go test -bench . ./internal/guacamole/`);
 - the end-to-end and pressure tests;
 - how to see guacd's per-connection processes in the demo stack.
 
