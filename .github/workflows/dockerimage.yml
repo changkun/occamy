@@ -1,7 +1,10 @@
 name: Builds
 
 on:
+  # Pull requests run through pull_request, so pushes only need to cover
+  # master; running both would test every PR branch twice.
   push:
+    branches: [master]
   pull_request:
 
 jobs:
@@ -29,7 +32,9 @@ jobs:
       run: go vet ./...
     # tests/ needs the demo stack and runs in the e2e job.
     - name: Test
-      run: go test ./internal/... ./server/...
+      run: go test -race ./internal/... ./server/...
+    - name: Vulnerabilities
+      run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
 
   web:
     runs-on: ubuntu-latest

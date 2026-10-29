@@ -1,0 +1,33 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go:
+        update-types: [minor, patch]
+  - package-ecosystem: npm
+    directory: /client/occamy-web
+    schedule:
+      interval: weekly
+    groups:
+      web:
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        update-types: [minor, patch]
+  - package-ecosystem: docker
+    directories:
+      - /docker
+      - /docker/demo/vnc
+      - /docker/demo/ssh
+    schedule:
+      interval: weekly
+    groups:
+      images:
+        update-types: [minor, patch]
