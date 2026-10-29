@@ -27,7 +27,7 @@ replaced one protocol at a time.
 | | Spec | Status |
 |-|------|--------|
 | ◐ | [001](001-status-quo.md) Status quo after the 2026 revival | testing |
-| ○ | [002](002-ssh-session-rejoin.md) SSH sessions after the first one | drafted |
+| ✕ | [002](002-ssh-session-rejoin.md) SSH sessions after the first one | archived |
 | ○ | [003](003-session-lifecycle-hardening.md) Session lifecycle hardening | drafted |
 | ○ | [004](004-security-hardening.md) Security hardening | drafted |
 | ○ | [005](005-upstream-guacamole.md) Catch up with upstream guacamole | validated |
@@ -66,10 +66,10 @@ Build, dependencies, CI, demo environment, and documentation.
 
 | Spec | Status | Deliverable |
 |------|--------|-------------|
-| [002-ssh-session-rejoin.md](002-ssh-session-rejoin.md) | Not started | Repeated SSH sessions in one process (#22); moot if 005 adopts guacd |
+| [002-ssh-session-rejoin.md](002-ssh-session-rejoin.md) | Archived | Moot: guacd replaced the in-process libguac (#22 fixed by 005) |
 | [003-session-lifecycle-hardening.md](003-session-lifecycle-hardening.md) | Not started | Deadlock-free, race-free session table; pressure test in CI (#17, #18, #20) |
 | [004-security-hardening.md](004-security-hardening.md) | Not started | No credentials in tokens or logs, target allowlist, safe defaults, gin-jwt v3 |
-| [005-upstream-guacamole.md](005-upstream-guacamole.md) | In progress (6/7 tasks) | Upstream guacd 1.6 as backend: RDP restored, cgo removed (#25, #32) |
+| [005-upstream-guacamole.md](005-upstream-guacamole.md) | In progress (7/7 tasks; Windows RDP check open) | Upstream guacd 1.6 as backend: RDP restored, cgo removed (#25, #32) |
 
 ### client
 
@@ -91,7 +91,6 @@ flowchart TD
   s005 --> s008[008 v1 architecture: 9 sub-designs]
   s008 --> s010[010 Swift client]
   s008 --> s009[009 React client]
-  s002[002 SSH rejoin]
   s004[004 security]
 ```
 

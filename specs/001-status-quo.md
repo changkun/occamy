@@ -162,13 +162,13 @@ reversible.
 | Issue | Where it is tracked |
 |-------|---------------------|
 | Any token whose `host` lacked a port left the proxy mutex locked (fixed after the revival) | [003](003-session-lifecycle-hardening.md) |
-| Second SSH session in one process gets no output (#22) | [002](002-ssh-session-rejoin.md) |
+| Second SSH session in one process gets no output (#22). Resolved by 005: guacd runs each connection in its own process | [002](002-ssh-session-rejoin.md) (archived) |
 | Panics under high pressure (#20), unsynchronized session teardown | [003](003-session-lifecycle-hardening.md) |
 | JWT carries plaintext remote credentials, tokens appear in request logs, `/login` is an open proxy, debug mode (with pprof) is the default | [004](004-security-hardening.md) |
-| RDP not built (FreeRDP 1.x only); Windows RDP failures (#32); macOS native segfault (#25) | [005](005-upstream-guacamole.md) |
+| RDP not built (FreeRDP 1.x only); Windows RDP failures (#32); macOS native segfault (#25). Resolved by 005, except #32, which awaits a check against a Windows host: RDP runs through guacd, and `occamyd` builds without cgo | [005](005-upstream-guacamole.md) |
 | Compose demo images from 2019, amd64 only; no automated end-to-end test | [006](006-demo-stack-refresh.md) |
 | Gio client (#51) unmerged on branches `gio` and `gio-client` | Retired ([007](007-native-gio-client.md)); Swift client in [010](010-native-swift-client.md) |
-| C core in-process via cgo; Guacamole protocol costs; redesign (#3) and traffic (#21) | [008](008-native-architecture.md) |
+| C core in-process via cgo (gone since 005); Guacamole protocol costs; redesign (#3) and traffic (#21) | [008](008-native-architecture.md) |
 | Web client framework (React considered) | [009](009-react-web-client.md) |
 
 The branch `vnc` (2020-02) holds an older VNC-only native build experiment

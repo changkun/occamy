@@ -1,6 +1,6 @@
 ---
 title: Remove libguac and cgo
-status: validated
+status: complete
 track: server
 depends_on:
   - specs/005-upstream-guacamole/guacd-sessions.md
@@ -40,9 +40,8 @@ Go supports (#25), and the image carries no C libraries.
    [guacd-sessions](guacd-sessions.md) started using it.
 2. `docker/Dockerfile`: drop the apt block and `build-libguac.sh`. Build
    with `CGO_ENABLED=0 go build -trimpath -o occamyd .`. Base the runtime
-   stage on a static image (`gcr.io/distroless/static-debian13`, or
-   `debian:trixie-slim` if a shell is wanted for debugging) without the
-   C runtime libraries or `LD_LIBRARY_PATH`. Keep the web client stage.
+   stage on `gcr.io/distroless/static-debian13:nonroot`, without the C
+   runtime libraries or `LD_LIBRARY_PATH`. Keep the web client stage.
 3. `.dockerignore`: drop entries that only existed for `guacamole/`.
 4. CI (`.github/workflows/dockerimage.yml`), job `go`: remove
    `LD_LIBRARY_PATH`, the apt step and the libguac build. Run
@@ -76,3 +75,108 @@ Go supports (#25), and the image carries no C libraries.
 
 - No behaviour change in `server/`.
 - Do not touch the web client or the API.
+
+## Outcome
+
+**Summary.** Implemented directly in four commits:
+
+- `566b35e` (`docker: build occamyd without cgo on a static base`);
+- `8695462` (`internal: delete libguac, its cgo bindings and protocol.IO`);
+- `a52f6b6` (`ci: build without cgo, and on macOS and Windows`);
+- `19b444b` (`docs: describe occamy on guacd without libguac`).
+
+Drift: Minimal. All 7 steps shipped. The one addition the spec missed is
+keeping the Apache license for `occamy.js`, which still ships after
+`guacamole/` is gone.
+
+**What shipped.**
+
+- **Deleted:**
+  - `guacamole/` (the guacamole-server 1.0.0 fork) and `internal/lib/`;
+  - `internal/uuid/`, which only `internal/lib` used;
+  - `internal/protocol/io.go`. `TestNewInstructionIO` runs over `net.Pipe`
+    instead of a socket pair.
+  - The commit removes 47,955 lines. `go mod tidy` changed nothing.
+- **`docker/Dockerfile`:**
+  - the build stage runs `CGO_ENABLED=0 go build -trimpath`;
+  - the runtime is `gcr.io/distroless/static-debian13:nonroot`, running as
+    `nonroot`.
+  - The image went from 172 MB to 34.7 MB (podman, linux/arm64).
+- **`.github/workflows/dockerimage.yml`:**
+  - job `go`: `CGO_ENABLED=0 go build ./...`, `go vet ./...`,
+    `go test -race ./...` and govulncheck, with no apt or libguac steps;
+  - new job `cross` (`build (macos-latest)`, `build (windows-latest)`):
+    `CGO_ENABLED=0 go build ./...`.
+- **`Makefile`:** `compile` runs `CGO_ENABLED=0 go build -trimpath`.
+- **Docs:**
+  - README: the status table, image paragraph, native build (Go plus a
+    guacd), tests section, pitch (linking 008) and license section;
+  - `docs/architecture.md`: the figure, components and flow show guacd;
+  - `docs/README.md`: the TL;DR;
+  - `docs/protocol-cn.md`: a note that guacd loads the plugins now;
+  - CONTRIBUTING and CHANGELOG.
+- **Specs:**
+  - [002](../002-ssh-session-rejoin.md) is archived as moot;
+  - [001](../001-status-quo.md)'s known issues mark #22 and #25 resolved by
+    005;
+  - [003](../003-session-lifecycle-hardening.md) has a note at the top.
+- **Verified:**
+  - `CGO_ENABLED=0 go build ./...`, `go vet ./...` and `go test -race ./...`
+    pass;
+  - `occamyd` cross-compiles for windows/amd64, darwin/amd64,
+    freebsd/amd64, linux/amd64 and linux/arm64;
+  - `make build run e2e` passes vnc, vnc-again, ssh, ssh-again and rdp on
+    the new image;
+  - `OCCAMY_PRESSURE_N=10` passes;
+  - `/static/` is served.
+
+**Design evolution.**
+
+- **Runtime base.** The spec offered distroless static or
+  `debian:trixie-slim`. It is distroless with the `:nonroot` tag. occamyd
+  writes no files and listens above 1024. Nothing in compose or CI runs a
+  shell in the occamy container.
+- **`.dockerignore`.** It had no entries that existed only for
+  `guacamole/`. It gained `.claude`, so that agent worktrees there never
+  enter the build context.
+
+**Not implemented.** None.
+
+**Unspecified work.**
+
+- **Apache license for `occamy.js`** (scaffolding; it blocked the PR).
+  `client/occamy-web/src/components/occamy.js` is a modified copy of
+  guacamole-common-js 0.9.14 (`Occamy.API_VERSION`) with its Apache
+  headers stripped. `guacamole/LICENSE` and `NOTICE` were the only Apache
+  license in the repository, so deleting `guacamole/` would have shipped
+  Apache-2.0 code without its license. The changes:
+  - the files moved to `client/occamy-web/LICENSE.guacamole` and
+    `NOTICE.guacamole`, and the NOTICE now names the fork;
+  - `occamy.js` gained a header;
+  - the image keeps them under `/occamy/licenses/guacamole/`;
+  - `release.yml` adds them to the web client archive.
+- `go test -race ./...` rather than `go test ./...`, which keeps
+  [011](../011-release-readiness.md)'s race gate (improvement).
+- `make compile` lost `-x` and gained `-trimpath`, matching the image
+  (improvement).
+- CHANGELOG, CONTRIBUTING and `docs/README.md` updates, and the README
+  pressure-test line: it no longer crashes occamyd, and CI enabling it
+  stays with 003 (improvement).
+
+**Decisions, surprises, follow-ups.**
+
+- **Ordering.** [rdp-xrdp](rdp-xrdp.md) ran first, so the README's RDP row
+  was already set; this task set the VNC and SSH rows only.
+- **Vite drops the license header.** It drops the `/*!` comment from
+  the bundle, so the shipped notice is the LICENSE/NOTICE pair next to
+  `dist`, not the comment.
+- **Race detector.** `go test -race` needs cgo for the race runtime on
+  Linux. The `go` job keeps it, while the build itself is checked with
+  `CGO_ENABLED=0` on Linux, macOS and Windows.
+- **Follow-ups:**
+  - [011](../011-release-readiness.md) phase 4 (GoReleaser binaries,
+    third-party license report) is unblocked;
+  - #25 is closed by this PR;
+  - the Windows RDP check (#32) remains the last open item on
+    [005](../005-upstream-guacamole.md).
+

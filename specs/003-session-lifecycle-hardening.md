@@ -19,6 +19,16 @@ dispatched_task_id: null
 
 # Session lifecycle hardening
 
+> **Note (2026-10-29).** [005](005-upstream-guacamole.md) moved sessions to
+> upstream guacd and deleted libguac, so the libguac defects below (2, 3, 5,
+> 8) are gone with the code they were in. The new session table
+> ([guacd-sessions](005-upstream-guacamole/guacd-sessions.md)) never holds
+> the lock across I/O. It drops an entry when its last user leaves, and it
+> reports I/O errors, which covers 4, 6 and 7. The pressure test passes against
+> it (`OCCAMY_PRESSURE_N=10` and `=50`, locally) but is not in CI yet. Refine
+> the rest of this spec against `server/routers.go` and `server/session.go` as
+> they are now.
+
 ## Overview
 
 The session table and its locking in `server/` are fragile. Any authenticated
