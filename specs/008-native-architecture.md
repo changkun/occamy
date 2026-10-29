@@ -20,13 +20,13 @@ dispatched_task_id: null
 
 ## Overview
 
-Everything Occamy has shipped so far (tags `0.1.0` to `0.4.0`) is a proof of
-concept: a Guacamole-protocol proxy around libguac, and soon around guacd
-([005](005-upstream-guacamole.md)). This spec designs **Occamy v1**: one
-pure-Go server with its own protocol and native backends. The first
-release target is **v1 beta**. The spec defines the beta scope, the path
-from guacd to pure Go, and the sub-designs, which are broken out as
-children.
+Everything Occamy has shipped so far (tags `0.1.0` to `v0.5.0`) is a proof
+of concept: a Guacamole-protocol proxy, around libguac up to `0.4.0` and
+around guacd since `v0.5.0` ([005](005-upstream-guacamole.md)). This spec
+designs **Occamy v1**: one pure-Go server with its own protocol and native
+backends. The first release target is **v1 beta**. The spec defines the
+beta scope, the path from guacd to pure Go, and the sub-designs, which are
+broken out as children.
 
 The recommendation not to reimplement libguac stands. libguac is shaped
 around Guacamole's drawing-instruction protocol, and a port would carry
@@ -38,8 +38,8 @@ kept only as a bridge for protocols that have no native backend yet.
 
 - **v0** is the PoC line: the Guacamole protocol on `/api/v1/login` and
   `/api/v1/connect` (the path says v1, the design does not). It makes no
-  compatibility promise. Its tags lack the `v` prefix, so the Go toolchain
-  ignores them.
+  compatibility promise. Its tags up to `0.4.0` lack the `v` prefix, so
+  the Go toolchain ignores them; from `v0.5.0` on, tags carry it.
 - **v1** starts with `v1.0.0-beta.1`. Betas may still break the API and
   the protocol. From the release candidate on, both are frozen, and later
   v1 changes are additive and negotiated through capabilities. The module
@@ -88,14 +88,14 @@ Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
 ## Path to pure Go
 
 "Pure Go" means `occamyd` builds with `CGO_ENABLED=0` **and** no protocol
-needs an external process. 005 already delivers the first half: C leaves
-`occamyd`'s process, and guacd becomes a sidecar. The second half replaces
+needs an external process. 005 delivered the first half in v0.5.0: C left
+`occamyd`'s process, and guacd became a sidecar. The second half replaces
 guacd one protocol at a time. Each switch is gated by the parity criteria
 in [guacd-bridge](008-native-architecture/guacd-bridge.md).
 
 | Milestone | Delivers | guacd needed for |
 |-----------|----------|------------------|
-| 0.5 (after [005](005-upstream-guacamole.md)) | `occamyd` without cgo; everything through guacd | VNC, SSH, RDP |
+| v0.5.0 ([005](005-upstream-guacamole.md), released 2026-10-29) | `occamyd` without cgo; everything through guacd | VNC, SSH, RDP |
 | v1.0.0-beta.1 | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, web client on v1 | VNC, RDP |
 | v1.0.0-beta.2 | Native VNC | RDP |
 | v1.0.0-rc.1 | API and protocol frozen; Swift client preview | RDP |
@@ -109,9 +109,10 @@ server.
 
 ## What the v0 design costs
 
-- **C in-process** (until 005). The libguac fork runs inside `occamyd`
-  through cgo, so a memory bug crashes every session: the two double frees
-  fixed during the revival, plus #15, #17, #20 and #22.
+- **C in-process** (up to `0.4.0`). The libguac fork ran inside
+  `occamyd` through cgo, so a memory bug crashed every session: the two
+  double frees fixed during the revival, plus #15, #17, #20 and #22. 005
+  removed it in v0.5.0.
 - **Protocol.** Text instructions carry image data as base64 PNG, JPEG or
   WebP in `blob` instructions. That adds a third to the encoded size and
   forces text WebSocket frames. Clients must implement Guacamole's layers
@@ -121,7 +122,7 @@ server.
   characters, and clients cannot select text or choose fonts.
 - **Implicit sharing.** Identical credentials silently join one session
   (`config.JWT.GenerateID`).
-- **External process.** After 005, every connection needs guacd.
+- **External process.** Since v0.5.0, every connection needs guacd.
 
 ## Architecture
 
@@ -182,7 +183,7 @@ Expectations to measure, not promises:
   by orders of magnitude for typical output.
 - Binary frames remove base64's 4/3 expansion.
 - Go-side encoding can use all cores per session and apply backpressure per
-  viewer, which libguac's model does not expose to Occamy.
+  viewer, which guacd's model does not expose to Occamy.
 
 Before beta.1, record baselines on 0.5 (guacd): bytes per second and CPU
 for VNC idle, scrolling and video playback, and for SSH `ls -R` and `top`
@@ -192,7 +193,8 @@ reruns it.
 ## Testing Strategy
 
 - Backend conformance against real servers in the
-  [006](006-demo-stack-refresh.md) stack (x11vnc, TigerVNC, OpenSSH, xrdp).
+  [006](006-demo-stack-refresh.md) stack (x11vnc, OpenSSH, xrdp), plus a
+  TigerVNC server, which the stack does not have yet.
 - Protocol: golden encode/decode tests, and `go test -fuzz` on every
   decoder.
 - Encoder: lossless tiles must round-trip exactly; lossy tiles meet a

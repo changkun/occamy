@@ -38,9 +38,9 @@ session framebuffer. Three choices:
   authentication, `crypto/tls` for VeNCrypt, `compress/zlib` for ZRLE and
   Tight, `image/jpeg` for Tight JPEG, and `crypto/aes` plus `math/big` for
   Apple Remote Desktop authentication.
-- Test servers: x11vnc and TigerVNC in the
-  [006](../006-demo-stack-refresh.md) stack; QEMU's VNC server; macOS
-  Screen Sharing, checked by hand.
+- Test servers: x11vnc in the [006](../006-demo-stack-refresh.md)
+  stack, and TigerVNC, to be added to it; QEMU's VNC server; macOS Screen
+  Sharing, checked by hand.
 
 ## Proposed scope for beta
 

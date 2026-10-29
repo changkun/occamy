@@ -44,10 +44,17 @@ spec defines what has to change before the answer can be yes.
 - **Defaults.** `conf.yaml` ships `jwt_secret: occamy` and `mode: debug`.
   Debug mode registers `/debug/pprof` (`(*proxy).profile`) on the public
   listener.
-- **Session sharing by credentials.** `config.JWT.GenerateID` is an MD5 of
-  the concatenated claims without separators, and identical claims silently
-  join the same session.
-- **Transport.** No TLS options; the image runs as root.
+- **Session sharing by credentials.** Identical claims silently join the
+  same session. `config.JWT.GenerateID` keys it by a SHA-256 of the
+  length-prefixed claims since v0.5.0 (#70). Before that it was an MD5 of
+  the claims concatenated, so different credentials could share a session.
+- **Transport.** No TLS options, neither to clients nor to guacd. Since
+  v0.5.0 the image runs as the distroless `nonroot` user, and request
+  headers time out after 10 seconds (`ReadHeaderTimeout`).
+- **guacd.** Since [005](005-upstream-guacamole.md), `occamyd` hands every
+  connection to guacd (`guacd.address`), which connects anywhere it is
+  asked to. Nothing in the docs yet says it must stay off untrusted
+  networks.
 - **Dependencies.** gin-jwt is on v2.10; v3 is current and changes the API.
 - Cross-origin WebSockets are rejected by gorilla's default origin check
   (`websocket.Upgrader` without `CheckOrigin`), which is correct and should
@@ -80,10 +87,9 @@ Independent of the option chosen:
 - Run the image as a non-root user. (Done in
   [remove-libguac](005-upstream-guacamole/remove-libguac.md): distroless
   `:nonroot`.)
-- Once [005](005-upstream-guacamole.md) puts guacd behind `occamyd`:
-  optional TLS to guacd (`guacd.tls`, matching guacd's `-C`/`-K` flags),
-  and a note that guacd must never be reachable from untrusted networks,
-  because it connects anywhere it is asked to.
+- Optional TLS to guacd (`guacd.tls`, matching guacd's `-C`/`-K` flags),
+  and a note in `SECURITY.md` and the README that guacd must never be
+  reachable from untrusted networks.
 - Move to gin-jwt v3 together with the new token model, rather than porting
   the current claims first. Do this only if the v0 routes outlive
   `v1.0.0-beta.1`: the v1 API design

@@ -7,6 +7,7 @@ affects:
   - client/occamy-web/
   - docker/Dockerfile
   - .github/workflows/dockerimage.yml
+  - .github/workflows/release.yml
 effort: medium
 created: 2026-10-29
 updated: 2026-10-29

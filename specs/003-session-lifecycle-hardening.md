@@ -3,14 +3,17 @@ title: Session lifecycle hardening
 status: drafted
 track: server
 depends_on:
+  - specs/005-upstream-guacamole.md
   - specs/006-demo-stack-refresh.md
 affects:
   - server/routers.go
-  - server/session.go
-  - internal/lib/client.go
-  - internal/lib/user.go
+  - server/routers_test.go
   - tests/pressure_test.go
-effort: large
+  - tests/occamy_test.go
+  - .github/workflows/dockerimage.yml
+  - README.md
+  - docs/
+effort: medium
 created: 2026-10-29
 updated: 2026-10-29
 author: Changkun Ou
@@ -19,157 +22,221 @@ dispatched_task_id: null
 
 # Session lifecycle hardening
 
-> **Note (2026-10-29).** [005](005-upstream-guacamole.md) moved sessions to
-> upstream guacd and deleted libguac, so the libguac defects below (2, 3, 5,
-> 8) are gone with the code they were in. The new session table
-> ([guacd-sessions](005-upstream-guacamole/guacd-sessions.md)) never holds
-> the lock across I/O. It drops an entry when its last user leaves, and it
-> reports I/O errors, which covers 4, 6 and 7. The pressure test passes against
-> it (`OCCAMY_PRESSURE_N=10` and `=50`, locally) but is not in CI yet. Refine
-> the rest of this spec against `server/routers.go` and `server/session.go` as
-> they are now.
-
 ## Overview
 
-The session table and its locking in `server/` are fragile. Any authenticated
-caller can wedge the whole proxy with one malformed token, and concurrent
-joins and leaves race on teardown, which is the likely source of the panics
-under load in issues #20 and #17. This spec makes session creation, sharing
-and teardown correct under concurrency and failure, and sets up the
-measurement tooling asked for in #18.
+`occamyd` gives every client with the same claims one shared guacd
+connection. Most of what this spec was first written against went away in
+[005](005-upstream-guacamole.md): libguac was deleted, and
+[guacd-sessions](005-upstream-guacamole/guacd-sessions.md) rebuilt the
+session table so that it never holds its lock across I/O. Four gaps remain:
+
+- the pressure test does not run in CI;
+- the table has no concurrent stress test;
+- a client can still join a session as its last user leaves;
+- the debugging and measurement tools asked for in #18 are undocumented.
+
+Closing them lets #20 and #18 be closed.
 
 ## Current State
 
-`server/routers.go` `routeConn` takes `proxy.mu`, looks up or creates a
-`Session` keyed by `config.JWT.GenerateID()`, and hands an `unlock` callback
-to `(*Session).Join` in `server/session.go`, which is expected to call it
-once the user is prepared.
+### Session table
 
-Defects found by reading the code during the 2026 revival:
+`server/routers.go`, as shipped in v0.5.0:
 
-1. **Proxy-wide deadlock (fixed).** `Join` returned without calling
-   `unlock` when `lib.NewSocket` or `lib.NewUser` fails. `lib.NewUser` fails
-   whenever the JWT `host` has no port (`net.SplitHostPort`), and with
-   `client: true` anyone can mint such a token from `/api/v1/login`. After one
-   such connection `proxy.mu` stayed locked and every later connection
-   blocked forever. Fixed: `Join` wraps `unlock` in `sync.OnceFunc` and
-   defers it, `lib.NewUser` validates the host before allocating, and the
-   socket pair is closed on early returns. `server/routers_test.go` covers
-   it; `config.Init` moved from `init()` into `server.Run` so the package is
-   testable.
-2. **Double free on concurrent leave.** `Join` defers the user-count
-   decrement after `s.close`, so it runs first. Two users leaving together
-   can both observe zero users and both call `(*lib.Client).Close`, which has
-   no guard and passes a nil `guac_client` the second time. Observed on
-   2026-10-29 under the [006](006-demo-stack-refresh.md) pressure test
-   (`OCCAMY_PRESSURE_N=3`, 3 of 8 runs on a fresh `occamyd`): SIGSEGV in
-   `guac_client_remove_user` from a joiner's `HandleConnection` while the
-   owner's `Join` ran `guac_client_free`, and in `join_handler_bridge` and
-   `guac_client_stop`.
-3. **Leak on `NewUser` failure.** Fixed for the invalid-host path (the host
-   is parsed before `guac_user_alloc`); any later failure in `NewUser` must
-   free the user too.
-4. **Lost I/O errors.** In `(*Session).serveIO` both goroutines shadow
-   `err` inside the loop, so the error sent on `exit` is always nil.
-5. **Thread pinning.** `NewSession` calls `runtime.LockOSThread` and never
-   unlocks, deliberately terminating the thread when the handler returns.
-   Later joiners of a shared session run on other threads, so the guarantee
-   it was meant to give is unclear.
-6. **Joining a dying session (observed).** The owner's entry stays in the
-   table until its teardown finishes, so a client with the same claims that
-   connects right after the owner leaves joins the dying session and is
-   disconnected moments later.
-7. `Session.once` is unused; `lib.Client` carries several unused fields
-   (`users`, `owner`, `handler*`).
-8. **A failed connect poisons its claims until restart (observed).** When
-   the remote desktop is unreachable, libguac sends `error`, and the client
-   then disconnects. `serveIO` closes its end of the socket pair, but its
-   desktop reader stays blocked in `syscall.Read` on that descriptor: a
-   close does not wake a read in another thread, and the stopped VNC client
-   never writes again. `Join` never returns and the entry is never
-   removed. Every later connection with the same claims joins the dead
-   session and gets only `disconnect`. Reproduced on 2026-10-29 with a VNC
-   token for a closed port, identically before and after
-   [instruction-stream-io](005-upstream-guacamole/instruction-stream-io.md).
-   [guacd-sessions](005-upstream-guacamole/guacd-sessions.md) removes the
-   cause: reads are on a `net.Conn`, which `Close` does unblock, and the
-   entry goes when its last user leaves.
+- `routeConn` validates the claims (`config.JWT.GuacdParams`) before
+  touching the table. A malformed token is rejected with status 768 and
+  holds nothing.
+- `enter` counts a user under `proxy.mu` and creates the `Session` if
+  there is none; the creator is the owner.
+- The owner dials guacd with `select <protocol>` outside the lock.
+  `started` then records the connection ID or the error and closes
+  `ready`. Joiners wait on `ready`, bounded by `guacd.DefaultTimeout`, and
+  dial with `select $id`.
+- A failed owner handshake removes the entry at once, and the waiting
+  joiners fail with the owner's error. The next connection with the same
+  claims starts a new session.
+- `leave`, deferred in `routeConn`, decrements the count and removes the
+  entry at zero. `remove` deletes an entry only if it is still the one in
+  the table.
+- Each user has its own TCP connection to guacd, which `serveIO` closes.
+  There is no shared client object that two users could close twice.
 
-If [005](005-upstream-guacamole.md) replaces the in-process libguac with
-upstream guacd, the socket pair and cgo user in `Join` become a TCP
-connection to guacd; the locking and reference-counting design below applies
-unchanged.
+`server/routers_test.go` covers the table against a fake guacd:
 
-`tests/pressure_test.go` exercises concurrent connects against the
-[006](006-demo-stack-refresh.md) demo stack. It is skipped unless
-`OCCAMY_PRESSURE_N` is set, and CI does not set it because it still crashes
-`occamyd` (defect 2).
+- `TestRouteConnReleasesLockOnJoinError`
+- `TestRouteConnNoLockDuringHandshake`
+- `TestRouteConnJoin`
+- `TestRouteConnOwnerFailureFailsJoiners`
+- `TestRouteConnLastUserRemovesEntry`
 
-## Architecture
+CI runs `go test -race ./...`. Nothing yet runs `enter`, `started` and
+`leave` concurrently on shared keys.
 
-Separate the session table from the cgo lifecycle:
+### Pressure test
 
-- `proxy.mu` guards only the map and is never held across cgo calls or
-  network I/O.
-- Each `Session` owns a reference count and its own mutex. Joining
-  increments under the session lock; leaving decrements and, at zero,
-  removes the session from the map and closes the libguac client exactly
-  once (`sync.Once` or state under lock).
-- Session creation that may block (plugin load, user prepare) happens
-  outside `proxy.mu`; concurrent first joiners for the same key wait on the
-  session's readiness rather than on the global lock.
-- Every early return releases what was acquired; prefer `defer` over
-  callbacks passed down the stack.
+`tests/pressure_test.go` (`TestConnectionPressure`) runs N rounds of
+concurrent sessions against every demo server, half of them sending
+garbage, and then checks that a new session still works.
 
-Open questions:
+- It passed at N=10 (3 runs) and N=50 (2 runs) against the guacd table,
+  locally.
+- It is skipped unless `OCCAMY_PRESSURE_N` is set, and the e2e job in
+  `.github/workflows/dockerimage.yml` does not set it.
+- Its doc comment still says it crashes `occamyd`.
+- Its final check uses claims the storm never used, a workaround for
+  defect 8 below.
 
-- Should the session key include the password at all? It currently decides
-  sharing (see [004](004-security-hardening.md)).
-- Is the thread-pinning in `NewSession` required by libguac (thread-local
-  state in the plugins) or a leftover from early debugging?
+### Dying-session race
+
+`tests/occamy_test.go` `checkSession` retries up to five times when a
+session is disconnected before the desktop arrives. It does this because
+of defect 6, which the guacd table narrowed but did not close (see
+[Join a session as its last user leaves](#join-a-session-as-its-last-user-leaves)).
+
+### Debugging and measurement
+
+- `server/connection.go` serves `/debug/pprof/*` in debug mode. `conf.yaml`
+  and the demo stack run in debug mode. The usage notes are only a code
+  comment.
+- `internal/protocol/benchmark_test.go` has the parser benchmarks.
+- Nothing in `docs/` mentions either.
+
+### Issues
+
+- #20 (panics under pressure): a cgo crash in libguac, open.
+- #18 (benchmarking and debugging tools): open.
+- #17 (concurrent join panic): closed.
+
+### History: defects in the libguac session table
+
+These were found during the 2026 revival. Other specs and the tests cite
+them by number.
+
+1. **Proxy-wide deadlock.** `Join` returned without unlocking `proxy.mu`
+   when the JWT `host` had no port. Fixed during the revival. Claims are
+   now validated before the table (`TestRouteConnReleasesLockOnJoinError`).
+2. **Double free on concurrent leave.** Two leaving users both closed the
+   libguac client, which segfaulted in `guac_client_remove_user` at
+   `OCCAMY_PRESSURE_N=3`. Gone with libguac (005).
+3. **Leak on `NewUser` failure.** Gone with libguac.
+4. **Lost I/O errors.** `serveIO` shadowed `err`, so it always reported
+   nil. Fixed in guacd-sessions: `serveIO` returns the first side's error.
+5. **Thread pinning** in `NewSession`. Gone with libguac.
+6. **Joining a dying session.** A client with the same claims that
+   connects as the last user leaves joins the ending session and is
+   disconnected. Narrowed but still open; this spec closes it.
+7. **Unused fields** (`Session.once`, several `lib.Client` fields). Gone.
+8. **A failed connect stuck its claims until restart.** A desktop read
+   blocked on a socket pair kept the entry alive forever. Fixed in
+   guacd-sessions: reads are on a `net.Conn`, which `Close` unblocks, and a
+   failed owner handshake leaves the table at once.
 
 ## Components
 
-### Session table (`server/routers.go`)
+### Pressure test in CI
 
-Replace the `unlock` callback protocol with a lookup-or-create that returns a
-referenced session, plus a release function.
+- The e2e job runs the pressure test with a bounded round count:
+  `OCCAMY_PRESSURE_N=10` gives 60 concurrent sessions over three
+  protocols. `make e2e OCCAMY_PRESSURE_N=10` already passes the variable
+  through.
+- After the storm, check one session with the storm's own claims, as a
+  regression test for defect 8, as well as the fresh-claims session.
+- Check that `occamyd`'s goroutine count returns to its pre-storm baseline,
+  within a small margin. Read it from `/debug/pprof/goroutine?debug=1`
+  (`goroutine profile: total N`), which the demo stack serves.
+- Update the test's doc comment, and the README paragraph that says CI does
+  not run it.
 
-### Session (`server/session.go`)
+### Session table stress test
 
-Reference counting, single close, I/O error propagation, user-facing error
-instruction on join failure.
+Add a test to `server/routers_test.go` that runs many goroutines through
+`routeConn` on a handful of keys against the fake guacd, with some owner
+handshakes failing. Under `-race` it asserts:
 
-### libguac bindings (`internal/lib/`)
+- every joiner of a successful session gets its owner's connection ID;
+- every joiner of a failed session gets the owner's error;
+- the table is empty once all of them leave.
 
-`(*Client).Close` idempotent; `NewUser` validates `host` before allocating
-and frees on every failure path. Remove dead fields.
+### Join a session as its last user leaves
 
-### Measurement (#18)
+The window: `serveIO` closes the user's guacd connection, and only then
+does the deferred `leave` remove the entry. When that user is the last
+one, guacd ends the connection as soon as it sees the close ("Last user of
+connection ... disconnected"), while the entry still counts one user. A
+client with the same claims that enters in between becomes a joiner of a
+connection that is gone. guacd 1.6 answers its `select $id` with
+`No such connection.` and status 516, and the client is closed with 516.
 
-Document the existing `/debug/pprof` routes and the parser benchmark in
-`internal/protocol/benchmark_test.go`, and record baseline numbers from the
-pressure test.
+The joiner can be made to fall back. When a joiner's handshake fails with
+516, it removes the entry if it is still the same session and retries
+once, as the owner of a new session. That closes the window from the
+client's point of view, with no protocol change. Calling `leave` before
+closing the guacd connection narrows the window too, but it cannot close
+it. A joiner whose handshake is in flight when the last established user
+closes still finds the connection gone.
+
+Once the fallback is in, `checkSession` no longer needs to retry. Keep the
+retry loop but fail on a retry, so that a regression shows.
+
+### Debugging and measurement (#18)
+
+Write `docs/debugging.md`. It covers:
+
+- the pprof routes and how to switch debug mode on and off; release mode
+  must not expose them (see [004](004-security-hardening.md));
+- the protocol benchmarks (`go test -bench . ./internal/protocol/`);
+- the end-to-end and pressure tests;
+- how to see guacd's per-connection processes in the demo stack.
+
+Record baseline numbers from one pressure run:
+
+- wall time;
+- `occamyd`'s goroutines and RSS before and after;
+- guacd's process count before and after.
+
+#18 asks that threads exit once all connections close. Under guacd that
+means `occamyd`'s goroutines and guacd's processes return to their
+baselines.
 
 ## Error Handling
 
-A failed join must send an `error` instruction and close the WebSocket
-without affecting other sessions. Malformed claims (`host` without port,
-unknown protocol) are rejected before any libguac allocation.
+Failures still close the WebSocket with the Guacamole status as the close
+reason, and a failed join does not affect other sessions. The one change
+is a joiner that gets 516: it retries once as an owner. Every other joiner
+failure is returned as it is.
 
 ## Testing Strategy
 
-- Unit tests for the session table with a fake client behind a small
-  interface, run with `-race`: concurrent join/leave on one key, failing
-  creation, failing join.
-- Regression test for defect 1: a portless host followed by a valid connect
-  succeeds.
-- `tests/pressure_test.go` against the [006](006-demo-stack-refresh.md) demo
-  stack, run in CI with a bounded concurrency and duration, with no panics
-  and a stable goroutine count afterwards.
+- The stress test above, under `-race`.
+- A fallback test with the fake guacd: a joiner whose `select $id` gets
+  516 starts a new session as its owner, and the stale entry is gone. The
+  fake answers unknown connections with 519 today; switch it to 516 to
+  match guacd 1.6.
+- The pressure test in the e2e job, with the storm-claims check and the
+  goroutine baseline.
+- The e2e suite passing several times in a row with `checkSession` failing
+  on any retry.
+
+## Open Questions
+
+- Should the pressure test also check that guacd's process count returns
+  to its baseline? The test would need access to the guacd container, or
+  the workflow could check it in a step after the tests.
+- Is N=10 the right CI budget, given how long the e2e job takes now?
+- Whether the session key should include the password decides who shares
+  a session. That belongs to [004](004-security-hardening.md).
 
 ## Acceptance Criteria
 
 - [x] No connection can leave `proxy.mu` locked.
-- [ ] Concurrent leaves never close a client twice (`-race` clean).
-- [ ] Pressure test passes in CI; issues #20 and #18 can be closed.
+- [x] A failed connect does not stick its claims (defect 8): `started`
+  removes the entry at once. No test checks it yet; the pressure test's
+  storm-claims check will.
+- [ ] Concurrent `routeConn` on shared keys is `-race` clean and leaves the
+  table empty.
+- [ ] A client that connects as the last user of its session leaves gets a
+  working session without retrying (defect 6).
+- [ ] The pressure test runs in the e2e job, and `occamyd`'s goroutines
+  return to their baseline afterwards.
+- [ ] Debugging and measurement are documented with baseline numbers.
+- [ ] #20 and #18 are closed, with a comment on what fixed each.
