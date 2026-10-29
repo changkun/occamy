@@ -15,10 +15,22 @@ services:
     ports:
       - "5636:5636"
     depends_on:
+      guacd:
+        condition: service_healthy
       vnc:
         condition: service_healthy
       ssh:
         condition: service_healthy
+
+  guacd:
+    # Not used by occamy yet (specs/005-upstream-guacamole/guacd-sessions.md).
+    # guacd opens the connections to the demo servers, so the hosts in
+    # tokens must resolve from here.
+    image: docker.io/guacamole/guacd:1.6.0
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "4822"]
+      interval: 1s
+      retries: 30
 
   vnc:
     # host vnc:5900, password vncpassword
