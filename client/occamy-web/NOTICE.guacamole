@@ -1,0 +1,10 @@
+Apache Guacamole
+Copyright 2018 The Apache Software Foundation
+
+This product includes software developed at
+The Apache Software Foundation (http://www.apache.org/).
+
+src/components/occamy.js is a modified copy of guacamole-common-js 0.9.14,
+maintained as part of Occamy (https://github.com/changkun/occamy). It is
+licensed under the Apache License 2.0 (LICENSE.guacamole). The rest of the
+web client is under Occamy's MIT license.

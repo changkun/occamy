@@ -25,7 +25,8 @@ WORKDIR /occamy
 COPY --from=build /occamy/occamyd ./
 COPY conf.yaml ./
 COPY LICENSE ./licenses/
-COPY guacamole/LICENSE guacamole/NOTICE ./licenses/guacamole/
+COPY client/occamy-web/LICENSE.guacamole ./licenses/guacamole/LICENSE
+COPY client/occamy-web/NOTICE.guacamole ./licenses/guacamole/NOTICE
 COPY --from=web /occamy/client/occamy-web/dist ./client/occamy-web/dist
 
 EXPOSE 5636

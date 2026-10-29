@@ -1,3 +1,11 @@
+/*!
+ * Modified copy of guacamole-common-js 0.9.14 from Apache Guacamole,
+ * renamed from Guacamole to Occamy and changed for Occamy.
+ *
+ * Licensed under the Apache License, Version 2.0. See LICENSE.guacamole and
+ * NOTICE.guacamole in client/occamy-web.
+ */
+
 var Occamy = Occamy || {};
 
 /**
