@@ -9,3 +9,8 @@ auth:
   jwt_secret: occamy
   jwt_alg: HS256
 client: true # enable web client demo
+guacd:
+  address: localhost:4822
+  params: # per-protocol defaults, merged under token values
+    rdp:
+      ignore-cert: "true"
