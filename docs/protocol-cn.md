@@ -140,6 +140,8 @@ Occamy 支持传输剪贴板内容、音频、视频、图像数据、文件以�
 
 ### `occamy-lib` 与协议客户端插件
 
+> 注意：自 2026 年起，`occamyd` 不再在进程内加载 libguac 及其协议插件，而是通过上游 guacd 1.6 提供会话（见 [specs/005](../specs/005-upstream-guacamole.md)）。下文描述的插件机制现在由 guacd 实现，也是 Occamy 0.4 及更早版本的做法。
+
 Occamy 守护进程 `occamyd` 通过加载插件的方式来扩展自身功能，也就是源码中的 `lib`。
 
 桌面协议客户端插件通过动态库的方式进行加载，库的名称约定为 `libguac-client-protocol_name`，准守此名字的客户端才会被 `occamyd` 加载。当插件被加载后，`occamyd` 会根据自身客户端的协议握手来调用 `guac_client_plugin_open()` 方法，如果执行成功，则会返回一个 handler 提供给 `occamyd` 使用，并在结束时调用 `guac_client_plugin_close()` 进行回收。当插件成功加载后，occamyd 会调用 `guac_client_plugin_init_client()` 来初始化客户端，该方法会调用客户端内部的 `guac_client_init()`。因此每个客户端插件都必须实现该接口。

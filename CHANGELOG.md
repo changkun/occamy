@@ -18,8 +18,9 @@ Development resumed in 2026 after a pause from the end of 2021.
   (`make e2e`).
 - RDP sessions, through guacd, with an xrdp demo server in the demo stack.
 - A changelog, security policy, code of conduct and contribution guide.
-- License and NOTICE files for the bundled guacamole-server code, also
-  shipped in the image under `/occamy/licenses/`.
+- License and NOTICE files for the web client's fork of
+  guacamole-common-js (`client/occamy-web/`), also shipped in the image
+  under `/occamy/licenses/` and in the web client archive.
 - Design specs for the road to v1 in `specs/`.
 
 ### Changed
@@ -37,8 +38,11 @@ Development resumed in 2026 after a pause from the end of 2021.
   the `vendor/` directory removed. The module path is
   `changkun.de/x/occamy`.
 - The web client uses Vue 3 and Vite.
-- The image is built on Debian trixie. Podman is the default container
-  engine; set `CONTAINER_ENGINE=docker` to use Docker.
+- `occamyd` builds without cgo (`CGO_ENABLED=0`) and so on Linux, macOS
+  and Windows ([#25](https://github.com/changkun/occamy/issues/25)). The
+  image runs it on distroless static as an unprivileged user and is about
+  35 MB instead of 172 MB. Podman is the default container engine; set
+  `CONTAINER_ENGINE=docker` to use Docker.
 - Instructions are framed by their declared lengths, with upstream
   Guacamole's limits on element length and count.
 - The demo stack addresses its servers by service name (`vnc:5900`,
@@ -48,8 +52,8 @@ Development resumed in 2026 after a pause from the end of 2021.
 
 ### Removed
 
-- RDP. The bundled guacamole-server needs FreeRDP 1.x, which current
-  distributions no longer ship. RDP returns through upstream guacd.
+- The bundled guacamole-server 1.0.0 fork and its cgo bindings
+  (`guacamole/`, `internal/lib/`). guacd took their place.
 - The `/api/v1/ping` endpoint.
 
 ### Fixed
@@ -62,7 +66,6 @@ Development resumed in 2026 after a pause from the end of 2021.
   under libvncclient 0.9.15.
 - Tokens no longer stop validating after one hour of uptime.
 - `occamyd` shuts down cleanly on SIGTERM.
-- The bundled guacamole-server builds with OpenSSL 3.
 - Indirect dependencies with known vulnerabilities have been upgraded.
 
 ## [0.4.0] - 2020-02-17
