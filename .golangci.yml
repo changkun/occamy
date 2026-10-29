@@ -1,0 +1,31 @@
+# golangci-lint v2 configuration. CI runs it in the lint job of
+# .github/workflows/dockerimage.yml; run it locally with `make lint`.
+version: "2"
+
+linters:
+  # errcheck, govet, ineffassign, staticcheck and unused.
+  default: standard
+  enable:
+    - bodyclose     # HTTP response bodies are closed
+    - errorlint     # wrapped errors are compared with errors.Is and errors.As
+    - gosec         # common security mistakes
+    - misspell
+    - nilerr        # an error checked and then nil returned
+    - unconvert     # conversions to the same type
+    - usestdlibvars # http.MethodGet and friends instead of literals
+  exclusions:
+    paths:
+      # npm packages can ship Go code of their own.
+      - client/
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - changkun.de/x/occamy
+  exclusions:
+    paths:
+      - client/

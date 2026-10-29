@@ -34,6 +34,11 @@ e2e:
 	OCCAMY_E2E_ENDPOINT=$(or $(OCCAMY_E2E_ENDPOINT),localhost:5636) go test -v -count=1 ./tests/
 .PHONY: e2e
 
+# lint needs golangci-lint v2 (https://golangci-lint.run), as CI uses.
+lint:
+	golangci-lint run
+.PHONY: lint
+
 test:
 	go test -cover -coverprofile=cover.test -v ./...
 	go tool cover -html=cover.test -o cover.html
