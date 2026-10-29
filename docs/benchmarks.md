@@ -115,8 +115,9 @@ The VNC server is x11vnc on Xvfb. With its defaults, x11vnc alone takes
 shows it, which would hide everything after it. In the bench desktop it
 runs threaded, polls every millisecond, and skips its naps and its
 detection of window moves and scrolls, which brings it to 2.8 ms and
-3.4 ms. These were measured with a VNC client inside the container, so
-they include no network or guacd. The RDP server is xrdp with
+3.4 ms. `bench/vncprobe` measures this: a VNC client that runs inside
+the container, so the numbers include no network and no guacd. Its doc
+comment shows how to run it. The RDP server is xrdp with
 xorgxrdp, as configured by Debian.
 
 ## Terminal baseline
