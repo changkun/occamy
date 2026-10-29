@@ -1,9 +1,8 @@
 ---
 title: Catch up with upstream guacamole
-status: drafted
+status: validated
 track: server
-depends_on:
-  - specs/006-demo-stack-refresh.md
+depends_on: []
 affects:
   - guacamole/
   - internal/lib/
@@ -76,19 +75,35 @@ upstream and restores full protocol coverage. It is the bridge toward
 Recommendation: A. Option B only makes sense if a single process is a hard
 requirement before [008](008-native-architecture.md) delivers native backends.
 
+**Decision (2026-10-29): option A.** Temporarily contradicting the
+"no guacd" pitch is accepted on the condition that
+[008](008-native-architecture.md) lays out the path back to a single
+pure-Go binary. After this spec, `occamyd` itself is already pure Go. What
+remains is replacing guacd one protocol at a time.
+
 ## Components (option A)
 
-### guacd client (`server/`)
+### guacd client (`internal/guacd`)
 
-New connector that dials `guacd.address`, runs the handshake with the
-optimal size, DPI and mimetypes currently set by `set_user_info` in
-`internal/lib/user.go`, and hands the connection to the existing I/O proxy.
-The session table keys a share to guacd's connection ID.
+Dials `guacd.address` and runs the handshake (`select`, `args`, `size`,
+`audio`, `video`, `image`, `timezone`, `name`, `connect`, `ready`). It sends
+the client's real display size instead of the fixed 1024×768 that
+`set_user_info` in `internal/lib/user.go` uses today. Joins use
+`select $<connection-id>`. See
+[guacd-handshake-client](005-upstream-guacamole/guacd-handshake-client.md)
+for the verified 1.6 handshake.
+
+### Sessions (`server/`)
+
+The session table keeps the credential-hash sharing key and stores guacd's
+connection ID for joiners. It never holds the proxy lock across network
+I/O, and it drops an entry when its last user leaves, as guacd does.
 
 ### Configuration
 
-`conf.yaml`: `guacd.address` (default `localhost:4822`), optional TLS to
-guacd.
+`conf.yaml`: `guacd.address` (default `localhost:4822`) and
+`guacd.params.<protocol>` defaults, such as `rdp.ignore-cert`. TLS to guacd
+is left to [004](004-security-hardening.md).
 
 ### Removal
 
@@ -110,8 +125,34 @@ Add a `guacd` service pinned to the 1.6 line in
 
 ## Acceptance Criteria
 
-- [ ] Option chosen (A recommended) and recorded here.
+- [x] Option chosen and recorded here (A, 2026-10-29).
 - [ ] RDP connects to xrdp and to a current Windows host.
 - [ ] `occamyd` builds with `CGO_ENABLED=0`; `guacamole/` and `internal/lib/`
       removed.
 - [ ] README's architecture pitch updated to match.
+
+## Task Breakdown
+
+| Child spec | Depends on | Effort | Status |
+|------------|-----------|--------|--------|
+| [Instruction I/O over any stream](005-upstream-guacamole/instruction-stream-io.md) | — | medium | validated |
+| [guacd handshake client](005-upstream-guacamole/guacd-handshake-client.md) | instruction-stream-io | medium | validated |
+| [guacd service in the demo stack](005-upstream-guacamole/guacd-compose-service.md) | [006](006-demo-stack-refresh.md) | small | validated |
+| [Serve sessions through guacd](005-upstream-guacamole/guacd-sessions.md) | guacd-handshake-client, guacd-compose-service | large | validated |
+| [Remove libguac and cgo](005-upstream-guacamole/remove-libguac.md) | guacd-sessions | medium | validated |
+| [RDP through guacd, verified against xrdp](005-upstream-guacamole/rdp-xrdp.md) | guacd-sessions, [006](006-demo-stack-refresh.md) | medium | validated |
+
+```mermaid
+graph LR
+  S006[006 demo stack] --> C[guacd compose service]
+  A[instruction I/O] --> B[handshake client]
+  B --> D[sessions through guacd]
+  C --> D
+  D --> E[remove libguac]
+  D --> F[RDP via xrdp]
+  S006 --> F
+```
+
+The first two tasks need neither guacd nor 006 and can start now, in
+parallel with 006.
+
