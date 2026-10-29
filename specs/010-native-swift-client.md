@@ -156,8 +156,10 @@ one window per session, full screen, and share links.
    or an Xcode project for signing, entitlements and the App Store?
 5. Rendering: a `CALayer` first, or Metal from the start?
 6. Distribution: a notarized DMG, the Mac App Store, or TestFlight?
-7. Gio retirement: close PR #51 and delete branches `gio` and
-   `gio-client` (the maintainer's call; nothing here does it).
+7. Gio retirement: PR #51 was closed on 2026-10-29. Branches `gio` and
+   `gio-client` stay while
+   [guacd-bridge](008-native-architecture/guacd-bridge.md) considers
+   reusing `internal/guac`.
 
 ## Acceptance Criteria
 
