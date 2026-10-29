@@ -1,0 +1,64 @@
+name: Bug report
+description: Something in Occamy does not work as expected.
+labels: [NeedsInvestigation]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Security issues must not be reported here; see [SECURITY.md](https://github.com/changkun/occamy/blob/master/SECURITY.md).
+        Remove tokens and passwords from logs before pasting them: tokens contain the remote credentials.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release, image tag or commit you ran.
+      placeholder: v0.5.0, ghcr.io/changkun/occamy:v0.5.0, or a commit hash
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: Deployment
+      options:
+        - Image (Podman or Docker)
+        - Demo stack (make run)
+        - Built from source
+    validations:
+      required: true
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: Protocol
+      multiple: true
+      options:
+        - VNC
+        - SSH
+        - RDP
+        - Not protocol specific
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. make run
+        2. Log in to vnc:5900 from the web client
+        3. ...
+  - type: textarea
+    id: logs
+    attributes:
+      label: occamyd logs
+      render: text
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: Host OS and architecture, container engine, browser or client.

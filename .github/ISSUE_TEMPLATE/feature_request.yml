@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest an idea or an improvement.
+labels: [NeedsInvestigation]
+body:
+  - type: markdown
+    attributes:
+      value: Larger changes are designed as specs first; see [specs/](https://github.com/changkun/occamy/blob/master/specs/README.md) for what is planned.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

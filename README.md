@@ -137,9 +137,12 @@ The pressure test also needs `OCCAMY_PRESSURE_N`, the number of rounds
 
 ## Contributing
 
-Easiest way to contribute is to provide feedback! We would love to hear 
-what you like and what you think is missing. PRs are welcome. 
-Please follow the given PR template before you send your pull request.
+Feedback, bug reports and pull requests are welcome. See
+[CONTRIBUTING.md](./CONTRIBUTING.md) for how to build, test and send
+changes, and the [code of conduct](./CODE_OF_CONDUCT.md). Report security
+issues privately as described in [SECURITY.md](./SECURITY.md), which also
+lists the current security caveats. Changes are recorded in
+[CHANGELOG.md](./CHANGELOG.md).
 
 ## Why Occamy and how it works?
 
@@ -164,4 +167,10 @@ Read more details in [docs](./docs/README.md).
 
 ## License
 
-[Occamy](https://github.com/changkun/occamy) | [MIT](./LICENSE) &copy; 2019 [Ou Changkun](https://changkun.de)
+[Occamy](https://github.com/changkun/occamy) | [MIT](./LICENSE) &copy; 2019-2026 [Ou Changkun](https://changkun.de)
+
+[guacamole/](./guacamole) is a modified copy of
+[Apache guacamole-server](https://github.com/apache/guacamole-server) 1.0.0,
+licensed under the [Apache License 2.0](./guacamole/LICENSE) (see
+[NOTICE](./guacamole/NOTICE)). The image ships both under
+`/occamy/licenses/`.
