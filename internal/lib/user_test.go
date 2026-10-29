@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"testing"
 
+	"changkun.de/x/occamy/internal/config"
 	"changkun.de/x/occamy/internal/lib"
 )
 
@@ -34,7 +35,12 @@ func TestNewUser(t *testing.T) {
 		t.Error("create client in NewUser error: ", err)
 		t.FailNow()
 	}
-	user, err := lib.NewUser(sock1, cli, true)
+	jwt := &config.JWT{
+		Protocol: "vnc",
+		Host:     "127.0.0.1:5900",
+		Password: "occamy",
+	}
+	user, err := lib.NewUser(sock1, cli, true, jwt)
 	if err != nil {
 		t.Error("NewUser error: ", err)
 		t.FailNow()
@@ -43,11 +49,9 @@ func TestNewUser(t *testing.T) {
 	t.Run("handle-conn", func(t *testing.T) {
 		done := make(chan bool, 2)
 		go func() {
-			err := user.HandleConnection()
-			if err != nil {
-				t.Error("user handle connection error: ", err)
-				t.FailNow()
-			}
+			conn := make(chan struct{})
+			user.HandleConnection(conn)
+			<-conn
 			done <- true
 		}()
 		go func() {
@@ -55,7 +59,6 @@ func TestNewUser(t *testing.T) {
 			_, err := sock2.Read(buf)
 			if err != nil {
 				t.Error("read user handle connection message error: ", err)
-				t.FailNow()
 			}
 			done <- true
 		}()

@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"changkun.de/x/occamy/internal/config"
@@ -57,7 +58,7 @@ func (p *proxy) serve() {
 	done := make(chan struct{})
 	go func() {
 		quit := make(chan os.Signal, 1)
-		signal.Notify(quit, os.Interrupt, os.Kill)
+		signal.Notify(quit, os.Interrupt, syscall.SIGTERM)
 		sig := <-quit
 		log.Printf("shutting down occammy proxy... %v", sig)
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -101,7 +102,6 @@ func (p *proxy) initJWT() {
 		Realm:            "occamy-proxy",
 		Key:              []byte(config.Runtime.Auth.JWTSecret),
 		SigningAlgorithm: config.Runtime.Auth.JWTAlgorithm,
-		TimeFunc:         time.Now().UTC,
 		Authenticator: func(c *gin.Context) (interface{}, error) {
 			var conf config.JWT
 			err := c.ShouldBind(&conf)
@@ -136,15 +136,14 @@ func (p *proxy) initJWT() {
 //
 // Basic Usage:
 //
-// - use the pprof tool to look at the heap profile:
-//   go tool pprof http://0.0.0.0:5636/debug/pprof/heap
-// - look at a 30-second CPU profile:
-//   go tool pprof http://0.0.0.0:5636/debug/pprof/profile
-// - look at the goroutine blocking profile, after calling runtime.SetBlockProfileRate:
-//   go tool pprof http://0.0.0.0:5636/debug/pprof/block
-// - collect a 5-second execution trace:
-//   wget http://0.0.0.0:5636/debug/pprof/trace?seconds=5
-//
+//   - use the pprof tool to look at the heap profile:
+//     go tool pprof http://0.0.0.0:5636/debug/pprof/heap
+//   - look at a 30-second CPU profile:
+//     go tool pprof http://0.0.0.0:5636/debug/pprof/profile
+//   - look at the goroutine blocking profile, after calling runtime.SetBlockProfileRate:
+//     go tool pprof http://0.0.0.0:5636/debug/pprof/block
+//   - collect a 5-second execution trace:
+//     wget http://0.0.0.0:5636/debug/pprof/trace?seconds=5
 func (p *proxy) profile() {
 	pprofHandler := func(h http.HandlerFunc) gin.HandlerFunc {
 		handler := http.HandlerFunc(h)
