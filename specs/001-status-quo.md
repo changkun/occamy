@@ -1,6 +1,6 @@
 ---
 title: Status quo after the 2026 revival
-status: testing
+status: complete
 track: maintenance
 depends_on: []
 affects:
@@ -206,8 +206,9 @@ Not verified at the time, and what happened since:
 - The CI workflow had not run on GitHub, and the image had not been built
   for linux/amd64. Both have run on every PR since, and v0.5.0 ships an
   amd64 and arm64 image.
-- The web client has not been exercised in a browser against a live
-  session. This is still open.
+- The web client had not been exercised in a browser against a live
+  session. It was on 2026-10-29: the v0.5.0 image logs in and renders the
+  VNC and RDP sessions from the demo stack.
 - The `docker/docker-compose.yaml` demo and `tests/pressure_test.go`. Both
   are covered since 006, and the pressure test is still opt-in.
 - RDP and native macOS builds. Both are covered since 005.
@@ -216,4 +217,16 @@ Not verified at the time, and what happened since:
 
 - [x] Revival changes committed on master.
 - [x] All three CI jobs pass on GitHub.
-- [ ] Web client logs in and renders a VNC desktop in a browser.
+- [x] Web client logs in and renders a VNC desktop in a browser.
+
+## Outcome
+
+All three criteria hold. The revival commits are on master, and CI has
+passed on GitHub on every PR since. On 2026-10-29 the web client was
+checked by hand in a browser against the demo stack, running
+`ghcr.io/changkun/occamy:v0.5.0`. It logged in and rendered the VNC demo
+(an xterm on Xvfb) and the RDP demo (an xterm on xrdp). That release no
+longer matches the baseline recorded above, which describes the code
+right after the revival. [005](005-upstream-guacamole.md),
+[006](006-demo-stack-refresh.md) and [011](011-release-readiness.md)
+describe what changed since.

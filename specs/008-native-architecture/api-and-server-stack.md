@@ -1,6 +1,6 @@
 ---
 title: API v1 and server stack
-status: drafted
+status: validated
 track: architecture
 depends_on: []
 affects:
@@ -51,6 +51,8 @@ can only patch on v0.
 | Method and path | Purpose |
 |-----------------|---------|
 | `POST /api/v1/auth/token` | Exchange caller credentials (per auth provider) for a short-lived access token |
+| `GET /api/v1/auth/oidc/login` | Start OIDC sign-in: redirect to the identity provider (authorization code with PKCE) |
+| `GET /api/v1/auth/oidc/callback` | Finish OIDC sign-in and issue an access token |
 | `GET /api/v1/connections` | Connections the caller may open (from the registry) |
 | `POST /api/v1/sessions` | Open a session on a connection, returning the session ID and the caller's role |
 | `GET /api/v1/sessions/{id}` | Session state: backend, size, viewers |
@@ -109,25 +111,41 @@ their gin-jwt v3 move happens in 004; otherwise skip it.
 - **iii. Remove at beta.1.** Simplest, but breaks the demo client until
   [009](../009-react-web-client.md) is on protocol v1.
 
-## Open Questions
+## Decisions
 
-1. Token format: JWT (signed with golang-jwt v5) or opaque server-side
-   tokens? Single-node beta makes opaque tokens sufficient. Is
-   third-party issuance (an SSO gateway minting tokens) a beta
-   requirement?
-2. Auth providers for beta: static users in config (bcrypt hashes) only,
-   or OIDC as well? OIDC adds `golang.org/x/oauth2` and an
-   `github.com/coreos/go-oidc` style dependency.
-3. Registry storage: configuration file only for beta, or a pluggable
-   store (SQLite would need cgo or a pure-Go driver such as
-   `modernc.org/sqlite`)?
-4. v0 routes: option i, ii or iii?
-5. Configuration: version the file (`version: 1`) and reject unknown keys
-   (`yaml.Decoder.KnownFields`)?
-6. Metrics: expvar on the debug listener, or Prometheus exposition
-   (`prometheus/client_golang` adds a sizeable dependency)?
-7. TLS: terminate in `occamyd` (`tls.cert`, `tls.key`, ACME later) or
-   document a reverse proxy only?
+Settled on 2026-10-29. Items 1, 2 and 4 were the owner's call; the rest
+follow the recommendations above, or the smallest choice that serves a
+single-node beta.
+
+- **Stack: A,** standard library `net/http` and golang-jwt v5. gin and
+  gin-jwt leave `go.mod` once the v0 routes are gone.
+
+1. **Tokens: JWTs (option A, not C).**
+   - occamyd signs its own tokens with Ed25519 and accepts only the
+     algorithms it is configured for.
+   - Access tokens are short-lived (15 min by default) and name the user.
+     Stream and share tokens name a session and a role.
+   - Third-party issuance is supported: a gateway can mint tokens with a
+     key listed under `auth.trusted_issuers`.
+   - Closing a session ends its streams at once, whatever tokens are
+     still valid.
+2. **Sign-in: static users and OIDC.**
+   - Static users have bcrypt hashes in the configuration.
+   - OIDC uses the authorization code flow with PKCE, through
+     `golang.org/x/oauth2` and a go-oidc style ID token verifier.
+   - Registry permissions name users and groups. OIDC identities map to
+     them through configured subject and group claims.
+3. **Registry: configuration file only** for beta.
+4. **v0 routes: i.** They move to `/api/v0/login` and `/api/v0/connect`
+   behind `legacy_v0: true` and are removed at v1.0. The Vue client keeps
+   working until [009](../009-react-web-client.md) moves to protocol v1.
+5. **Configuration:** v1 files carry `version: 1` and reject unknown keys
+   (`yaml.Decoder.KnownFields`). A file without `version` is read as v0
+   configuration and served through the v0 routes.
+6. **Metrics: expvar on the debug listener** for beta. Prometheus can
+   come later if someone asks for it.
+7. **TLS:** occamyd terminates TLS when `tls.cert` and `tls.key` are set.
+   A reverse proxy is documented as the alternative. ACME comes later.
 
 ## Affects
 

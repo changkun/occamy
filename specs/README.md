@@ -27,7 +27,7 @@ replaced one protocol at a time.
 
 | | Spec | Status |
 |-|------|--------|
-| ◐ | [001](001-status-quo.md) Status quo after the 2026 revival | testing |
+| ● | [001](001-status-quo.md) Status quo after the 2026 revival | complete |
 | ✕ | [002](002-ssh-session-rejoin.md) SSH sessions after the first one | archived |
 | ○ | [003](003-session-lifecycle-hardening.md) Session lifecycle hardening | drafted |
 | ○ | [004](004-security-hardening.md) Security hardening | drafted |
@@ -36,7 +36,7 @@ replaced one protocol at a time.
 | ✕ | [007](007-native-gio-client.md) Native Gio client | archived |
 | ○ | [008](008-native-architecture.md) Occamy v1 architecture | drafted |
 | ○ | [009](009-react-web-client.md) React web client | vague |
-| ○ | [010](010-native-swift-client.md) Native Swift client on a Go core | drafted |
+| ○ | [010](010-native-swift-client.md) Native Swift client on a Go core | validated |
 | ● | [011](011-release-readiness.md) Open source release readiness | complete |
 
 ● complete · ◐ in testing · ○ not started · ✕ archived
@@ -49,7 +49,7 @@ The target design of Occamy as a whole: core, backends, protocol.
 
 | Spec | Status | Deliverable |
 |------|--------|-------------|
-| [008-native-architecture.md](008-native-architecture.md) | Not started | Occamy v1: beta scope, path to pure Go, 9 sub-designs (#3, #21) |
+| [008-native-architecture.md](008-native-architecture.md) | Not started (4 of 9 sub-designs validated) | Occamy v1: beta scope, path to pure Go, 9 sub-designs (#3, #21) |
 
 ### maintenance
 
@@ -57,7 +57,7 @@ Build, dependencies, CI, demo environment, and documentation.
 
 | Spec | Status | Deliverable |
 |------|--------|-------------|
-| [001-status-quo.md](001-status-quo.md) | Testing | Buildable baseline on current toolchains, verified and documented |
+| [001-status-quo.md](001-status-quo.md) | Complete | Buildable baseline on current toolchains, verified and documented |
 | [006-demo-stack-refresh.md](006-demo-stack-refresh.md) | Complete | Multi-arch VNC and SSH demo servers; VNC and SSH end-to-end tests in CI (pressure test opt-in until 003) |
 | [011-release-readiness.md](011-release-readiness.md) | Complete (v0.5.0) | Licensing, changelog, security policy, CI gates, attested multi-arch releases and binaries |
 
@@ -80,7 +80,7 @@ Clients that speak to `occamyd`.
 |------|--------|-------------|
 | [007-native-gio-client.md](007-native-gio-client.md) | Archived | Retired in favour of 010 |
 | [009-react-web-client.md](009-react-web-client.md) | Not started | Decision on React and, if chosen, a React shell, then protocol v1 |
-| [010-native-swift-client.md](010-native-swift-client.md) | Not started | SwiftUI app linking the Go client core as a static library |
+| [010-native-swift-client.md](010-native-swift-client.md) | Not started | SwiftUI app for macOS 14+ linking the Go client core as a static library, on protocol v1 |
 
 ## Dependency graph
 
