@@ -31,6 +31,15 @@ dispatched_task_id: null
 
 # Status quo after the 2026 revival
 
+> **Note (2026-10-29).** This is a snapshot of the baseline right after the
+> revival. Several rows below have been superseded since:
+> [005](005-upstream-guacamole.md) replaced libguac with guacd, removed cgo,
+> brought back RDP and made the image distroless.
+> [006](006-demo-stack-refresh.md) rebuilt the demo stack and added the
+> end-to-end tests. [011](011-release-readiness.md) added the release
+> pipeline, and v0.5.0 shipped from it. The [README](../README.md) and
+> [specs/README.md](README.md) describe the current state.
+
 ## Overview
 
 Occamy was last developed in December 2021 and nothing in the repository built
@@ -163,10 +172,10 @@ reversible.
 |-------|---------------------|
 | Any token whose `host` lacked a port left the proxy mutex locked (fixed after the revival) | [003](003-session-lifecycle-hardening.md) |
 | Second SSH session in one process gets no output (#22). Resolved by 005: guacd runs each connection in its own process | [002](002-ssh-session-rejoin.md) (archived) |
-| Panics under high pressure (#20), unsynchronized session teardown | [003](003-session-lifecycle-hardening.md) |
+| Panics under high pressure (#20), unsynchronized session teardown. The crashes went with libguac (005), and the pressure test passes locally but is not in CI yet | [003](003-session-lifecycle-hardening.md) |
 | JWT carries plaintext remote credentials, tokens appear in request logs, `/login` is an open proxy, debug mode (with pprof) is the default | [004](004-security-hardening.md) |
 | RDP not built (FreeRDP 1.x only); Windows RDP failures (#32); macOS native segfault (#25). Resolved by 005, except #32, which awaits a check against a Windows host: RDP runs through guacd, and `occamyd` builds without cgo | [005](005-upstream-guacamole.md) |
-| Compose demo images from 2019, amd64 only; no automated end-to-end test | [006](006-demo-stack-refresh.md) |
+| Compose demo images from 2019, amd64 only; no automated end-to-end test. Resolved by 006 | [006](006-demo-stack-refresh.md) |
 | Gio client (#51) unmerged on branches `gio` and `gio-client` | Retired ([007](007-native-gio-client.md)); Swift client in [010](010-native-swift-client.md) |
 | C core in-process via cgo (gone since 005); Guacamole protocol costs; redesign (#3) and traffic (#21) | [008](008-native-architecture.md) |
 | Web client framework (React considered) | [009](009-react-web-client.md) |
@@ -192,16 +201,19 @@ Verified during the revival:
   first SSH session rendered a terminal; later SSH sessions failed (#22).
 - `npm run lint` and `npm run build` pass; `npm audit` reports 0.
 
-Not verified:
+Not verified at the time, and what happened since:
 
-- The CI workflow has not run on GitHub yet, and the image has not been
-  built for linux/amd64.
-- The web client has not been exercised in a browser against a live session.
-- `docker/docker-compose.yaml` demo and `tests/pressure_test.go`.
-- RDP and native macOS builds.
+- The CI workflow had not run on GitHub, and the image had not been built
+  for linux/amd64. Both have run on every PR since, and v0.5.0 ships an
+  amd64 and arm64 image.
+- The web client has not been exercised in a browser against a live
+  session. This is still open.
+- The `docker/docker-compose.yaml` demo and `tests/pressure_test.go`. Both
+  are covered since 006, and the pressure test is still opt-in.
+- RDP and native macOS builds. Both are covered since 005.
 
 ## Acceptance Criteria
 
-- [ ] Revival changes committed on master.
-- [ ] All three CI jobs pass on GitHub.
+- [x] Revival changes committed on master.
+- [x] All three CI jobs pass on GitHub.
 - [ ] Web client logs in and renders a VNC desktop in a browser.

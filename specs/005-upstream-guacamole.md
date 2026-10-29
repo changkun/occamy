@@ -1,6 +1,6 @@
 ---
 title: Catch up with upstream guacamole
-status: validated
+status: complete
 track: server
 depends_on: []
 affects:
@@ -129,7 +129,8 @@ Add a `guacd` service pinned to the 1.6 line in
 - [x] RDP connects to xrdp (automated, [rdp-xrdp](005-upstream-guacamole/rdp-xrdp.md)).
 - [ ] RDP connects by hand to a current Windows host (Windows 11 or
       Server 2022/2025) with NLA; result and any needed parameters
-      recorded here (#32).
+      recorded here (#32). Not done: it needs a Windows host, and it stays
+      open on #32 (see Outcome).
 - [x] `occamyd` builds with `CGO_ENABLED=0`; `guacamole/` and `internal/lib/`
       removed.
 - [x] README's architecture pitch updated to match.
@@ -160,4 +161,65 @@ graph LR
 
 The first two tasks need neither guacd nor 006 and can start now, in
 parallel with 006.
+
+## Outcome
+
+**Summary.** Option A, implemented directly in seven tasks and released
+in [v0.5.0](https://github.com/changkun/occamy/releases/tag/v0.5.0):
+
+- [instruction-stream-io](005-upstream-guacamole/instruction-stream-io.md),
+  `8160431`;
+- [guacd-handshake-client](005-upstream-guacamole/guacd-handshake-client.md),
+  `327769a`;
+- [guacd-compose-service](005-upstream-guacamole/guacd-compose-service.md),
+  #56;
+- [guacd-config](005-upstream-guacamole/guacd-config.md), #57;
+- [guacd-sessions](005-upstream-guacamole/guacd-sessions.md), #62;
+- [rdp-xrdp](005-upstream-guacamole/rdp-xrdp.md), #64;
+- [remove-libguac](005-upstream-guacamole/remove-libguac.md), #65.
+
+Drift: Minimal. Every component shipped as designed. The one acceptance
+criterion left open is the manual Windows check, which needs hardware this
+work did not have.
+
+**What shipped.**
+
+- `occamyd` serves VNC, SSH and RDP through upstream guacd 1.6
+  (`guacd.address`, `guacd.params`) and builds with `CGO_ENABLED=0` on
+  Linux, macOS and Windows.
+- `guacamole/` and `internal/lib/` are gone. The image is distroless and
+  34.7 MB, down from 172 MB.
+- The demo stack runs guacd and an xrdp server. CI's end-to-end suite runs
+  vnc, vnc-again, ssh, ssh-again and rdp on every PR.
+- Issues #22 (repeated SSH sessions) and #25 (native macOS builds) are
+  fixed, each with a comment on the cause.
+
+**Design evolution.** Each task records its own. The ones that matter
+here:
+
+- guacd 1.6 answers a join to a vanished connection with status 516, not
+  519.
+- RDP needs only `ignore-cert` against xrdp; `security` stays unset.
+- The task order changed: rdp-xrdp ran before remove-libguac.
+
+**Not implemented.**
+
+- RDP against a current Windows host with NLA (#32). It needs a Windows
+  host. The maintainer chose to release v0.5.0 without it, and #32
+  asks the reporter to retest. xrdp has no NLA, so the demo stack cannot
+  cover it. If NLA fails, `security: nla` or `any` in
+  `guacd.params.rdp` is the first thing to try.
+
+**Decisions, surprises, follow-ups.**
+
+- `client/occamy-web/src/components/occamy.js` is still Apache-2.0
+  (guacamole-common-js 0.9.14), so its LICENSE and NOTICE moved next to
+  it when `guacamole/` was deleted.
+- With libguac gone, the pressure test no longer crashes `occamyd`.
+  Enabling it in CI is [003](003-session-lifecycle-hardening.md)'s.
+- Follow-ups:
+  - TLS to guacd and a warning that guacd must stay off untrusted networks
+    ([004](004-security-hardening.md));
+  - replacing guacd one protocol at a time
+    ([008](008-native-architecture.md)).
 
