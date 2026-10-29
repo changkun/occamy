@@ -10,7 +10,9 @@ import "testing"
 // desktop reaches the client. VNC runs twice in a row: tearing a session
 // down used to crash occamyd (the libvncclient double frees fixed during
 // the revival), and only the next session notices. SSH runs twice because
-// a second SSH session used to fail (#22).
+// a second SSH session used to fail (#22). RDP runs once: xrdp gives each
+// user one session, and a second connection for the same user takes it
+// over from the first.
 func TestE2E(t *testing.T) {
 	addr := endpoint(t)
 	for _, tt := range []struct{ name, proto string }{
@@ -18,6 +20,7 @@ func TestE2E(t *testing.T) {
 		{"vnc-again", "vnc"},
 		{"ssh", "ssh"},
 		{"ssh-again", "ssh"}, // #22
+		{"rdp", "rdp"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			checkSession(t, addr, credentials[tt.proto])

@@ -57,6 +57,12 @@ var credentials = map[string]jwtInput{
 		Username: "occamy",
 		Password: "occamy",
 	},
+	"rdp": {
+		Protocol: "rdp",
+		Host:     "rdp:3389",
+		Username: "occamy",
+		Password: "occamy",
+	},
 }
 
 var httpClient = &http.Client{Timeout: 10 * time.Second}
