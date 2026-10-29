@@ -1,6 +1,6 @@
 ---
 title: guacd service in the demo stack
-status: validated
+status: complete
 track: server
 depends_on:
   - specs/006-demo-stack-refresh.md
@@ -66,3 +66,38 @@ work.
 
 - No `occamy` code or config changes.
 - No RDP server (that is [rdp-xrdp](rdp-xrdp.md)).
+
+## Outcome
+
+**Summary.** Implemented directly in `5868291` (`docker: run upstream
+guacd 1.6 in the demo stack`). Drift: Minimal. Every item shipped as
+written.
+
+**What shipped.**
+
+- The `guacd` service in `docker/docker-compose.yaml`:
+  `docker.io/guacamole/guacd:1.6.0`, an `nc -z` healthcheck, no published
+  port and no restart policy. `occamy.depends_on` waits for it to be
+  healthy.
+- A README sentence saying the stack runs guacd, which occamy does not use
+  yet.
+- Verified locally on linux/arm64 with Podman:
+  - `make run` brings guacd up healthy, and its log shows `Listening on
+    host 0.0.0.0, port 4822`;
+  - from the guacd container, `nc -z` reaches `vnc:5900` and `ssh:22`;
+  - `make e2e` still passes.
+
+**Design evolution.** None.
+
+**Not implemented.** None.
+
+**Unspecified work.**
+
+- A comment on the service saying occamy does not use guacd yet, and why
+  the hosts in tokens must resolve from guacd (improvement).
+
+**Decisions, surprises, follow-ups.**
+
+- Follow-up: [guacd-config](guacd-config.md) points `occamy` at
+  `guacd:4822` through `docker/occamy.yaml`.
+
