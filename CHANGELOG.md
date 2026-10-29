@@ -7,6 +7,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-29
+
 Development resumed in 2026 after a pause from the end of 2021.
 
 ### Added
@@ -16,7 +18,6 @@ Development resumed in 2026 after a pause from the end of 2021.
 - Demo servers built from the repository for linux/amd64 and linux/arm64
   (`docker/demo/`), and end-to-end tests that CI runs on every push
   (`make e2e`).
-- RDP sessions, through guacd, with an xrdp demo server in the demo stack.
 - Releases: a multi-arch image on GHCR, `occamyd` archives for Linux, macOS
   and Windows on amd64 and arm64 with the licenses of their dependencies,
   the web client archive, and `SHA256SUMS`, all with build provenance
@@ -33,6 +34,9 @@ Development resumed in 2026 after a pause from the end of 2021.
   libguac. `occamyd` needs a reachable guacd: set `guacd.address` in
   `conf.yaml` (default `localhost:4822`), and `guacd.params` for
   per-protocol connection defaults. The demo stack runs one.
+- RDP runs through guacd, whose FreeRDP is current, and is verified against
+  an xrdp server added to the demo stack. The bundled plugin needed
+  FreeRDP 1.x, which current distributions no longer ship.
 - Sessions start and join without holding a proxy-wide lock, and a
   session ends when its last user leaves. A failed connection no longer
   blocks later connections with the same credentials.
@@ -66,8 +70,7 @@ Development resumed in 2026 after a pause from the end of 2021.
   connection.
 - SSH sessions can be opened again after the first one ends
   ([#22](https://github.com/changkun/occamy/issues/22)).
-- Ending a VNC session no longer crashes `occamyd` with a double free
-  under libvncclient 0.9.15.
+- Ending a VNC session no longer crashes `occamyd`.
 - Tokens no longer stop validating after one hour of uptime.
 - `occamyd` shuts down cleanly on SIGTERM.
 - Indirect dependencies with known vulnerabilities have been upgraded.
@@ -126,7 +129,8 @@ Development resumed in 2026 after a pause from the end of 2021.
 - First release: a Go proxy that drives libguac through cgo and serves the
   Guacamole protocol over WebSocket with JWT authentication.
 
-[Unreleased]: https://github.com/changkun/occamy/compare/0.4.0...HEAD
+[Unreleased]: https://github.com/changkun/occamy/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/changkun/occamy/compare/0.4.0...v0.5.0
 [0.4.0]: https://github.com/changkun/occamy/compare/0.3.0...0.4.0
 [0.3.0]: https://github.com/changkun/occamy/compare/0.2.0...0.3.0
 [0.2.0]: https://github.com/changkun/occamy/compare/0.1.0...0.2.0
