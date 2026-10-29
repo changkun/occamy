@@ -51,8 +51,7 @@ Go supports (#25), and the image carries no C libraries.
    Add a build-only matrix on `macos-latest` and `windows-latest`.
 5. `Makefile`: `compile` sets `CGO_ENABLED=0`.
 6. Docs: README status table (VNC and SSH through guacd; the RDP row
-   stays as is until [rdp-xrdp](rdp-xrdp.md), which runs after this
-   task). "Build from source" becomes `go build` plus a guacd to point
+   was already set by [rdp-xrdp](rdp-xrdp.md), which ran first). "Build from source" becomes `go build` plus a guacd to point
    at. Rewrite the "Why Occamy" pitch: it says Occamy
    needs no guacd, which is false for now, so link
    [008](../008-native-architecture.md) for the path back to a single

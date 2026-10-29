@@ -126,7 +126,7 @@ Add a `guacd` service pinned to the 1.6 line in
 ## Acceptance Criteria
 
 - [x] Option chosen and recorded here (A, 2026-10-29).
-- [ ] RDP connects to xrdp (automated, [rdp-xrdp](005-upstream-guacamole/rdp-xrdp.md)).
+- [x] RDP connects to xrdp (automated, [rdp-xrdp](005-upstream-guacamole/rdp-xrdp.md)).
 - [ ] RDP connects by hand to a current Windows host (Windows 11 or
       Server 2022/2025) with NLA; result and any needed parameters
       recorded here (#32).
@@ -144,7 +144,7 @@ Add a `guacd` service pinned to the 1.6 line in
 | [guacd configuration and parameters](005-upstream-guacamole/guacd-config.md) | guacd-compose-service | small | complete |
 | [Serve sessions through guacd](005-upstream-guacamole/guacd-sessions.md) | guacd-handshake-client, guacd-config | large | complete |
 | [Remove libguac and cgo](005-upstream-guacamole/remove-libguac.md) | guacd-sessions | medium | validated |
-| [RDP through guacd, verified against xrdp](005-upstream-guacamole/rdp-xrdp.md) | remove-libguac, [006](006-demo-stack-refresh.md) | medium | validated |
+| [RDP through guacd, verified against xrdp](005-upstream-guacamole/rdp-xrdp.md) | guacd-sessions, [006](006-demo-stack-refresh.md) | medium | complete |
 
 ```mermaid
 graph LR
@@ -154,7 +154,7 @@ graph LR
   B --> D[sessions through guacd]
   G --> D
   D --> E[remove libguac]
-  E --> F[RDP via xrdp]
+  D --> F[RDP via xrdp]
   S006 --> F
 ```
 
