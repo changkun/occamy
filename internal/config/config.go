@@ -5,7 +5,7 @@
 package config
 
 import (
-	"crypto/md5"
+	"crypto/sha256"
 	"flag"
 	"fmt"
 	"log"
@@ -24,10 +24,15 @@ type JWT struct {
 	Password string `form:"password" json:"password" binding:"required"`
 }
 
-// GenerateID generates a unique id based on JWT information
+// GenerateID returns the session key of the token: a SHA-256 hash of its
+// claims. Each claim is length-prefixed, so that different claims never
+// run together into the same input (username "ab" and password "c"
+// against username "a" and password "bc").
 func (j *JWT) GenerateID() string {
-	h := md5.New()
-	h.Write([]byte(fmt.Sprintf("%s%s%s%s", j.Protocol, j.Host, j.Username, j.Password)))
+	h := sha256.New()
+	for _, claim := range []string{j.Protocol, j.Host, j.Username, j.Password} {
+		fmt.Fprintf(h, "%d.%s,", len(claim), claim)
+	}
 	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
