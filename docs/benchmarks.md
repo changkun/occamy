@@ -14,10 +14,10 @@ page covers how to run the harness and what it measured.
 make bench
 ```
 
-This builds and starts the demo stack with
-`docker/docker-compose.bench.yaml` on top, which publishes guacd on
-`127.0.0.1:4822`. Then it runs every scenario in every series under every
-network condition, which takes about 12 minutes. Results go to
+This builds occamyd's image from the working tree, then builds and starts
+the demo stack with `docker/docker-compose.bench.yaml` on top, which
+publishes guacd on `127.0.0.1:4822`. Then it runs every scenario in every
+series under every network condition, which takes about 12 minutes. Results go to
 `bench-results.json`, and a Markdown table goes to standard output.
 
 The harness and the stack share the host, so anything else that uses the
