@@ -30,13 +30,20 @@ it lands.
    ```yaml
    guacd:
      image: docker.io/guacamole/guacd:1.6.0
-     restart: always
+     healthcheck:
+       test: ["CMD", "nc", "-z", "127.0.0.1", "4822"]
+       interval: 1s
+       retries: 30
    ```
 
    Use the fully qualified name: Podman, now the default engine, refuses
    unqualified short names unless aliases are configured. Do not publish
-   port 4822. `occamy` reaches it by service name.
-2. Add `guacd` to `occamy.depends_on`.
+   port 4822. `occamy` reaches it by service name. The image defines no
+   healthcheck and ships no bash (Alpine), so probe with busybox `nc`.
+   Like the other services since [006](../006-demo-stack-refresh.md), it
+   has no restart policy, so a crash fails the end-to-end tests.
+2. Add `guacd` to `occamy.depends_on` with `condition: service_healthy`,
+   as for `vnc` and `ssh`.
 3. No multi-arch work is needed: `docker.io/guacamole/guacd:1.6.0` is
    published for linux/amd64 and linux/arm64 (checked with
    `podman manifest inspect` on 2026-10-29).

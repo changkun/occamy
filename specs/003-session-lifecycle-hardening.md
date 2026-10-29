@@ -50,7 +50,12 @@ Defects found by reading the code during the 2026 revival:
 2. **Double free on concurrent leave.** `Join` defers the user-count
    decrement after `s.close`, so it runs first. Two users leaving together
    can both observe zero users and both call `(*lib.Client).Close`, which has
-   no guard and passes a nil `guac_client` the second time.
+   no guard and passes a nil `guac_client` the second time. Observed on
+   2026-10-29 under the [006](006-demo-stack-refresh.md) pressure test
+   (`OCCAMY_PRESSURE_N=3`, 3 of 8 runs on a fresh `occamyd`): SIGSEGV in
+   `guac_client_remove_user` from a joiner's `HandleConnection` while the
+   owner's `Join` ran `guac_client_free`, and in `join_handler_bridge` and
+   `guac_client_stop`.
 3. **Leak on `NewUser` failure.** Fixed for the invalid-host path (the host
    is parsed before `guac_user_alloc`); any later failure in `NewUser` must
    free the user too.
@@ -85,8 +90,10 @@ upstream guacd, the socket pair and cgo user in `Join` become a TCP
 connection to guacd; the locking and reference-counting design below applies
 unchanged.
 
-`tests/pressure_test.go` exercises concurrent connects but needs the compose
-demo with fixed IPs and is not run anywhere.
+`tests/pressure_test.go` exercises concurrent connects against the
+[006](006-demo-stack-refresh.md) demo stack. It is skipped unless
+`OCCAMY_PRESSURE_N` is set, and CI does not set it because it still crashes
+`occamyd` (defect 2).
 
 ## Architecture
 

@@ -31,7 +31,7 @@ replaced one protocol at a time.
 | ○ | [003](003-session-lifecycle-hardening.md) Session lifecycle hardening | drafted |
 | ○ | [004](004-security-hardening.md) Security hardening | drafted |
 | ○ | [005](005-upstream-guacamole.md) Catch up with upstream guacamole | validated |
-| ○ | [006](006-demo-stack-refresh.md) Demo stack refresh and end-to-end tests | validated |
+| ● | [006](006-demo-stack-refresh.md) Demo stack refresh and end-to-end tests | complete |
 | ✕ | [007](007-native-gio-client.md) Native Gio client | archived |
 | ○ | [008](008-native-architecture.md) Occamy v1 architecture | drafted |
 | ○ | [009](009-react-web-client.md) React web client | vague |
@@ -56,7 +56,7 @@ Build, dependencies, CI, demo environment, and documentation.
 | Spec | Status | Deliverable |
 |------|--------|-------------|
 | [001-status-quo.md](001-status-quo.md) | Testing | Buildable baseline on current toolchains, verified and documented |
-| [006-demo-stack-refresh.md](006-demo-stack-refresh.md) | Not started | Multi-arch demo servers and end-to-end tests in CI |
+| [006-demo-stack-refresh.md](006-demo-stack-refresh.md) | Complete | Multi-arch VNC and SSH demo servers; VNC and SSH end-to-end tests in CI (pressure test opt-in until 003) |
 
 ### server
 

@@ -36,15 +36,20 @@ a current Windows host (#32) is a manual acceptance item on
    and a light session (xterm or a minimal window manager). Create a demo
    user whose password comes from the environment, as the 006 VNC and SSH
    images do. Expose 3389.
-2. `docker/docker-compose.yaml`: add the `rdp` service built from it.
+2. `docker/docker-compose.yaml`: add the `rdp` service built from it,
+   with a port healthcheck like `vnc` and `ssh`, and add it to
+   `occamy.depends_on` with `condition: service_healthy`.
 3. Defaults: `conf.yaml` and `docker/occamy.yaml` keep
    `guacd.params.rdp.ignore-cert: "true"` (xrdp uses a self-signed
    certificate). Leave `security` at guacd's default unless xrdp needs
    otherwise; if it does, record why in the config comment.
-4. `tests/`: add an `rdp` case to the end-to-end table (log in, connect,
-   expect `size`, `img`, `sync`).
-5. `Login.vue` and the README: RDP host default `rdp:3389`; status table
-   row "RDP: through guacd, verified against xrdp".
+4. `tests/`: add an `rdp` entry to `credentials` in
+   `tests/occamy_test.go` and an `rdp` case to the `TestE2E` table in
+   `tests/e2e_test.go` (log in, connect, expect `size`, `img`, `sync`).
+5. `Login.vue` already defaults RDP to `rdp:3389` with user and password
+   `occamy`; use that demo user. README: add RDP to the demo credentials
+   table, drop the "no RDP demo server yet" line, and set the status table
+   row to "RDP: through guacd, verified against xrdp".
 
 ## Tests
 

@@ -78,8 +78,8 @@ Options:
 
 - End to end: start one `occamyd`, run SSH, SSH, VNC, SSH sessions in
   sequence against the demo servers, and assert each receives `size`,
-  `img` and `sync`. Until [006](006-demo-stack-refresh.md) lands, this is the
-  manual procedure recorded in [001](001-status-quo.md).
+  `img` and `sync`. Add the sequence to `tests/e2e_test.go`, the end-to-end
+  suite from [006](006-demo-stack-refresh.md), which CI runs on every push.
 - Confirm the GLib criticals are gone from the `occamyd` log.
 - If the hypothesis is wrong (the criticals persist with `RTLD_NODELETE`),
   return this spec to `vague` and investigate Pango initialization in
