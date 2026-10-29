@@ -224,8 +224,8 @@ Each phase is one PR, merged when CI is green.
 3. **Release pipeline:** `release.yml` with the image, web, checksum,
    attestation and release jobs, a dry run through `workflow_dispatch`,
    and the README install section and badges.
-4. **Binaries** (blocked by
-   [remove-libguac](005-upstream-guacamole/remove-libguac.md)):
+4. **Binaries** (unblocked:
+   [remove-libguac](005-upstream-guacamole/remove-libguac.md) is complete):
    GoReleaser, the binaries job and the third-party license report.
 
 ## Decisions

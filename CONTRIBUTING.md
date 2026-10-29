@@ -24,10 +24,9 @@ make e2e        # end-to-end tests against the running stack
 make stop
 ```
 
-`go test ./internal/... ./server/...` runs the unit tests. The
-`internal/lib` tests link against libguac, so run them where libguac is
-installed, as CI and the `build` stage of `docker/Dockerfile` do. See the
-README for a native build.
+`go test ./...` runs the unit tests; the end-to-end tests in `tests/` skip
+unless `make e2e` points them at a running stack. No C toolchain is needed.
+See the README for a native build.
 
 ## Design specs
 

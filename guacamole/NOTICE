@@ -1,9 +1,0 @@
-Apache Guacamole
-Copyright 2018 The Apache Software Foundation
-
-This product includes software developed at
-The Apache Software Foundation (http://www.apache.org/).
-
-This directory is a modified copy of guacamole-server 1.0.0, maintained as
-part of Occamy (https://github.com/changkun/occamy). README.md in this
-directory describes the changes.

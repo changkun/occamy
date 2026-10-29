@@ -1,6 +1,6 @@
 ---
 title: SSH sessions after the first one
-status: drafted
+status: archived
 track: server
 depends_on: []
 affects:
@@ -90,3 +90,13 @@ Options:
 - [ ] Ten sequential SSH sessions in one process all render a terminal.
 - [ ] Mixed VNC and SSH sequences keep working.
 - [ ] Issue #22 can be closed.
+
+## Outcome
+
+Archived on 2026-10-29 without implementation, as moot. `occamyd` no longer
+loads libguac plugins in-process. Sessions go through upstream guacd
+([guacd-sessions](005-upstream-guacamole/guacd-sessions.md), #62), which forks
+a process per connection, and
+[remove-libguac](005-upstream-guacamole/remove-libguac.md) deleted the fork this
+spec would have patched. `TestE2E/ssh-again` opens a second SSH session in CI,
+and #22 is closed.

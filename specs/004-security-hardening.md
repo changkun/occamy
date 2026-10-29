@@ -77,7 +77,9 @@ Independent of the option chosen:
   of the query string, and stop logging query strings.
 - Explicit session sharing (a `share` claim or connection setting) instead
   of credential-hash matching.
-- Run the image as a non-root user.
+- Run the image as a non-root user. (Done in
+  [remove-libguac](005-upstream-guacamole/remove-libguac.md): distroless
+  `:nonroot`.)
 - Once [005](005-upstream-guacamole.md) puts guacd behind `occamyd`:
   optional TLS to guacd (`guacd.tls`, matching guacd's `-C`/`-K` flags),
   and a note that guacd must never be reachable from untrusted networks,

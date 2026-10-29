@@ -11,30 +11,37 @@ jobs:
 
   go:
     runs-on: ubuntu-latest
-    env:
-      # libguac dlopen()s protocol plugins by unversioned name.
-      LD_LIBRARY_PATH: /usr/local/lib
     steps:
     - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with:
         go-version: stable
-    - name: Install libguac build dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y --no-install-recommends \
-          autoconf automake libtool make pkg-config \
-          libcairo2-dev libpango1.0-dev libpng-dev \
-          libssh2-1-dev libssl-dev libvncserver-dev
-    - name: Build libguac
-      run: sudo ./guacamole/src/build-libguac.sh "$PWD/guacamole" /usr/local
+    - name: Build
+      run: CGO_ENABLED=0 go build ./...
     - name: Vet
       run: go vet ./...
-    # tests/ needs the demo stack and runs in the e2e job.
+    # tests/ needs the demo stack and runs in the e2e job; here it skips.
     - name: Test
-      run: go test -race ./internal/... ./server/...
+      run: go test -race ./...
     - name: Vulnerabilities
       run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  # occamyd needs no C toolchain, so it builds wherever Go does.
+  cross:
+    name: build (${{ matrix.os }})
+    strategy:
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version: stable
+    - name: Build
+      env:
+        CGO_ENABLED: "0"
+      run: go build ./...
 
   web:
     runs-on: ubuntu-latest

@@ -12,12 +12,14 @@ Occamy is an open source protocol and proxy for modern remote desktop control th
 ## Project status
 
 Occamy is experimental. Development paused at the end of 2021 and resumed in
-2026 with a toolchain and dependency refresh. What works today:
+2026 with a toolchain and dependency refresh, and `occamyd` now serves
+sessions through upstream [guacd](https://hub.docker.com/r/guacamole/guacd)
+1.6. What works today:
 
 | Protocol | Status |
 |----------|--------|
-| VNC | Builds and serves sessions, verified end to end |
-| SSH | Builds and serves the first session; joining again fails ([#22](https://github.com/changkun/occamy/issues/22)) |
+| VNC | Through guacd, verified end to end |
+| SSH | Through guacd, verified end to end, including repeated sessions |
 | RDP | Through guacd, verified against xrdp |
 
 Known gaps and planned work are tracked as design specs in [specs/](./specs/README.md).
@@ -35,8 +37,8 @@ cd occamy
 make build                          # or: make build CONTAINER_ENGINE=docker
 ```
 
-The image builds the web client, the bundled libguac with its VNC and SSH
-plugins, and `occamyd` in separate stages (see [docker/Dockerfile](./docker/Dockerfile)).
+The image builds the web client and a static `occamyd` in separate stages, on a
+distroless base (see [docker/Dockerfile](./docker/Dockerfile)).
 Occamy serves sessions through [guacd](https://hub.docker.com/r/guacamole/guacd),
 which it expects at `guacd.address` in [conf.yaml](./conf.yaml). To run both:
 
@@ -66,19 +68,15 @@ gh attestation verify oci://ghcr.io/changkun/occamy:<version> --repo changkun/oc
 
 ### Build from source
 
-A native build needs Go 1.26+ and the libguac build dependencies. On Debian or Ubuntu:
+A native build needs Go 1.26+ and no C toolchain. It works on Linux, macOS and
+Windows. `occamyd` needs a guacd at `guacd.address` in [conf.yaml](./conf.yaml)
+(default `localhost:4822`):
 
 ```
-sudo apt install autoconf automake libtool make pkg-config \
-    libcairo2-dev libpango1.0-dev libpng-dev \
-    libssh2-1-dev libssl-dev libvncserver-dev
-sudo ./guacamole/src/build-libguac.sh "$PWD/guacamole" /usr/local
-export LD_LIBRARY_PATH=/usr/local/lib    # libguac dlopen()s its protocol plugins
-make compile                             # produces ./occamyd
+podman run -d -p 4822:4822 docker.io/guacamole/guacd:1.6.0
+make compile                 # CGO_ENABLED=0, produces ./occamyd
 ./occamyd -conf=./conf.yaml
 ```
-
-Native builds on macOS are untested ([#25](https://github.com/changkun/occamy/issues/25)).
 
 ### Web client
 
@@ -136,11 +134,8 @@ Here is a working video demo:
 ### Tests
 
 ```
-go test ./internal/... ./server/...
+go test ./...
 ```
-
-`internal/lib` links against libguac, so run it where libguac is installed
-(for example the `build` stage of the Dockerfile).
 
 [tests/](./tests) holds end-to-end and pressure tests that open real
 sessions to the demo servers. They are skipped unless
@@ -154,8 +149,8 @@ make stop
 ```
 
 The pressure test also needs `OCCAMY_PRESSURE_N`, the number of rounds
-(`make e2e OCCAMY_PRESSURE_N=10`). It still crashes occamyd
-([#20](https://github.com/changkun/occamy/issues/20)), so CI does not run it yet.
+(`make e2e OCCAMY_PRESSURE_N=10`). CI does not run it yet
+([specs/003](./specs/003-session-lifecycle-hardening.md)).
 
 ## Contributing
 
@@ -179,11 +174,13 @@ The benefits of Occamy that differ from Guacamole are:
 - Streaming compression and optimization
 - Modern with Go
 
-Occamy server side currently simplifies Guacamole proxy and 
-Guacamole servlet client in a single middleware application. 
-Any client that involves Guacamole protocol and uses WebSocket 
-for authentication can directly switch to interact to Occamy 
-without any changes.
+Occamy takes the place of the Guacamole web application: a single Go
+binary issues JWTs and tunnels the Guacamole protocol over WebSocket.
+Any client that speaks the Guacamole protocol over WebSocket can switch
+to Occamy without changes. For now the remote desktop protocols
+themselves run in upstream guacd. [specs/008](./specs/008-native-architecture.md)
+describes the path back to a single binary, with native SSH and VNC and
+guacd kept only for RDP.
 
 Read more details in [docs](./docs/README.md).
 
@@ -191,8 +188,8 @@ Read more details in [docs](./docs/README.md).
 
 [Occamy](https://github.com/changkun/occamy) | [MIT](./LICENSE) &copy; 2019-2026 [Ou Changkun](https://changkun.de)
 
-[guacamole/](./guacamole) is a modified copy of
-[Apache guacamole-server](https://github.com/apache/guacamole-server) 1.0.0,
-licensed under the [Apache License 2.0](./guacamole/LICENSE) (see
-[NOTICE](./guacamole/NOTICE)). The image ships both under
-`/occamy/licenses/`.
+The web client's [occamy.js](./client/occamy-web/src/components/occamy.js) is a
+modified copy of [Apache guacamole-common-js](https://github.com/apache/guacamole-client)
+0.9.14, licensed under the [Apache License 2.0](./client/occamy-web/LICENSE.guacamole)
+(see [NOTICE](./client/occamy-web/NOTICE.guacamole)). The image and the web
+client archive ship both.
