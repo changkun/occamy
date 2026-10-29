@@ -43,6 +43,19 @@ Then you should be able to run occamy with:
 podman run -itd -p 5636:5636 occamy:latest
 ```
 
+### Releases
+
+From v0.5.0 on, each [release](https://github.com/changkun/occamy/releases)
+publishes a multi-arch image (linux/amd64 and linux/arm64) as
+`ghcr.io/changkun/occamy:<version>`, the web client as an archive, and
+`SHA256SUMS`, all with build provenance attestations. To verify them:
+
+```
+sha256sum -c SHA256SUMS
+gh attestation verify occamy-web-<version>.tar.gz --repo changkun/occamy
+gh attestation verify oci://ghcr.io/changkun/occamy:<version> --repo changkun/occamy
+```
+
 ### Build from source
 
 A native build needs Go 1.26+ and the libguac build dependencies. On Debian or Ubuntu:
@@ -65,7 +78,7 @@ The demo web client lives in [client/occamy-web](./client/occamy-web) (Vue 3, Vi
 It needs Node.js 20.19+ or 22.12+:
 
 ```
-make client     # npm install && npm run build, output in client/occamy-web/dist
+make client     # npm ci && npm run build, output in client/occamy-web/dist
 ```
 
 With `client: true` in [conf.yaml](./conf.yaml), `occamyd` serves it at `/static`.
@@ -137,9 +150,12 @@ The pressure test also needs `OCCAMY_PRESSURE_N`, the number of rounds
 
 ## Contributing
 
-Easiest way to contribute is to provide feedback! We would love to hear 
-what you like and what you think is missing. PRs are welcome. 
-Please follow the given PR template before you send your pull request.
+Feedback, bug reports and pull requests are welcome. See
+[CONTRIBUTING.md](./CONTRIBUTING.md) for how to build, test and send
+changes, and the [code of conduct](./CODE_OF_CONDUCT.md). Report security
+issues privately as described in [SECURITY.md](./SECURITY.md), which also
+lists the current security caveats. Changes are recorded in
+[CHANGELOG.md](./CHANGELOG.md).
 
 ## Why Occamy and how it works?
 
@@ -164,4 +180,10 @@ Read more details in [docs](./docs/README.md).
 
 ## License
 
-[Occamy](https://github.com/changkun/occamy) | [MIT](./LICENSE) &copy; 2019 [Ou Changkun](https://changkun.de)
+[Occamy](https://github.com/changkun/occamy) | [MIT](./LICENSE) &copy; 2019-2026 [Ou Changkun](https://changkun.de)
+
+[guacamole/](./guacamole) is a modified copy of
+[Apache guacamole-server](https://github.com/apache/guacamole-server) 1.0.0,
+licensed under the [Apache License 2.0](./guacamole/LICENSE) (see
+[NOTICE](./guacamole/NOTICE)). The image ships both under
+`/occamy/licenses/`.

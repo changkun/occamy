@@ -1,18 +1,9 @@
-resolve #issue_id
+## What and why
 
-## Details
+<!-- What this PR changes and the problem it solves. Link issues with "Fixes #123". -->
 
-Please briefly describe the motivation of this pull request, and which problem is solved in this PR.
+## Checklist
 
-## Changes
-
-- Fixes ...
-- Adds ...
-- Resolves ...
-
-## References
-
-related issues:
-
-- #issue_id
-- #issue_id
+- [ ] Tests cover the change (a regression test for a bug fix).
+- [ ] `CHANGELOG.md` has a line under `Unreleased` for user-visible changes.
+- [ ] Specs under `specs/` that this change affects are updated.
