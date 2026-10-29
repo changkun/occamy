@@ -114,9 +114,12 @@ func dialOccamy(ctx context.Context, addr string, cred config.JWT) (rawConn, err
 		return nil, fmt.Errorf("login: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("login: %s", resp.Status)
+	}
 	var out struct{ Token string }
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("login: %s: %v", resp.Status, err)
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, fmt.Errorf("login: %w", err)
 	}
 	url := fmt.Sprintf("ws://%s/api/v1/connect?token=%s&width=%d&height=%d&dpi=%d",
 		addr, out.Token, width, height, dpi)
@@ -275,6 +278,15 @@ func (s *session) setMarker(m func(img *image.RGBA, r image.Rectangle) bool) {
 // errEnded reports a session that ended while a scenario waited on it.
 var errEnded = errors.New("session ended")
 
+// ended returns errEnded, with the reason the session ended if it failed.
+// It is called once frames has closed, after s.err is set.
+func (s *session) ended() error {
+	if s.err != nil {
+		return fmt.Errorf("%w: %w", errEnded, s.err)
+	}
+	return errEnded
+}
+
 // wait returns the first frame after t for which ok reports true.
 func (s *session) wait(ctx context.Context, t time.Time, ok func(frame) bool) (frame, error) {
 	for {
@@ -283,7 +295,7 @@ func (s *session) wait(ctx context.Context, t time.Time, ok func(frame) bool) (f
 			return frame{}, ctx.Err()
 		case f, open := <-s.frames:
 			if !open {
-				return frame{}, fmt.Errorf("%w: %v", errEnded, s.err)
+				return frame{}, s.ended()
 			}
 			if f.at.After(t) && ok(f) {
 				return f, nil
@@ -303,7 +315,7 @@ func (s *session) settle(ctx context.Context, quiet time.Duration) error {
 			return ctx.Err()
 		case _, open := <-s.frames:
 			if !open {
-				return fmt.Errorf("%w: %v", errEnded, s.err)
+				return s.ended()
 			}
 			timer.Reset(quiet)
 		case <-timer.C:
