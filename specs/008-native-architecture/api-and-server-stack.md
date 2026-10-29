@@ -1,0 +1,137 @@
+---
+title: API v1 and server stack
+status: drafted
+track: architecture
+depends_on: []
+affects:
+  - server/
+  - internal/config/
+  - conf.yaml
+  - go.mod
+  - docs/
+effort: large
+created: 2026-10-29
+updated: 2026-10-29
+author: Changkun Ou
+dispatched_task_id: null
+---
+
+# API v1 and server stack
+
+## Design Problem
+
+Define the HTTP surface of `occamyd` v1 and the stack that serves it:
+
+- How do callers authenticate?
+- Where do connection targets and their credentials live?
+- How are sessions created, shared and closed?
+- What happens to the v0 routes?
+- Should v1 stay on gin?
+
+The answers fix the security model that [004](../004-security-hardening.md)
+can only patch on v0.
+
+## Context
+
+- v0 (`server/connection.go`): gin with gin-jwt v2. `/api/v1/login`
+  signs whatever `protocol`, `host`, `username` and `password` it receives,
+  and `/api/v1/connect?token=` upgrades to a Guacamole WebSocket. The token
+  carries the remote password in readable claims. Identical claims share a
+  session.
+- 004 lists the v0 problems: open proxy, credentials in tokens and logs,
+  `jwt_secret: occamy` and `mode: debug` defaults, `/debug/pprof` on the
+  public listener, and gin-jwt v2 on golang-jwt v4.
+- gin pulls a large indirect graph (quic-go, sonic, ugorji). Every
+  Dependabot alert after the revival came from it (commit `b1bb2de`).
+- Since Go 1.22, `net/http.ServeMux` routes by method and path pattern
+  (`GET /api/v1/sessions/{id}`), which covers what gin is used for here.
+
+## Proposed API
+
+| Method and path | Purpose |
+|-----------------|---------|
+| `POST /api/v1/auth/token` | Exchange caller credentials (per auth provider) for a short-lived access token |
+| `GET /api/v1/connections` | Connections the caller may open (from the registry) |
+| `POST /api/v1/sessions` | Open a session on a connection, returning the session ID and the caller's role |
+| `GET /api/v1/sessions/{id}` | Session state: backend, size, viewers |
+| `POST /api/v1/sessions/{id}/shares` | Mint a share token for viewer or read-only access, with an expiry |
+| `DELETE /api/v1/sessions/{id}` | Close the session (owner only) |
+| `GET /api/v1/sessions/{id}/stream` | WebSocket upgrade to protocol v1; the token goes in the first message, never in the URL |
+| `GET /healthz` | Liveness, on the public listener |
+
+Debug and metrics endpoints move to a separate listener (`debug.address`,
+off by default).
+
+Connection registry: an administrator defines connections (`id`, display
+name, protocol, target, credential reference, allowed users or groups) in
+configuration for beta. Credentials stay server-side, and tokens reference
+a connection ID only. Ad-hoc targets (the v0 behaviour) are behind
+`allow_adhoc_targets: false`, with a target allowlist when enabled.
+
+## Options
+
+### Server stack
+
+- **A. Standard library `net/http` plus golang-jwt v5 (recommended).**
+  Method-and-pattern routing is built in, and middleware is plain
+  `func(http.Handler) http.Handler`. golang-jwt v5 is the maintained JWT
+  library with an explicit allowed-algorithms check.
+  - Pros: drops gin and its indirect graph; nothing framework-specific in
+    handlers; the same code serves tests through `httptest`.
+  - Cons: request binding and validation are hand-written (a handful of
+    JSON bodies); the move costs a rewrite of `server/`, which happens
+    anyway.
+- **B. gin with gin-jwt v3.** Smallest change from v0, and it does the v3
+  move that 004 plans.
+  - Pros: familiar; binding and middleware ready-made.
+  - Cons: keeps the dependency graph and its alert churn. gin-jwt couples
+    token issuance to a login handler shape that does not fit a registry
+    model.
+- **C. Opaque server-side session tokens instead of JWTs.** Random IDs
+  looked up in memory, with no signing keys.
+  - Pros: revocable at once, and nothing to leak in claims.
+  - Cons: state lives in one process (fine for single-node beta), and
+    third-party issuers cannot mint tokens.
+
+Recommendation: A for the stack. Decide token format between JWT (A) and
+opaque (C) under the open questions. If v0 routes survive past beta.1,
+their gin-jwt v3 move happens in 004; otherwise skip it.
+
+### v0 routes
+
+- **i. Move to `/api/v0/login` and `/api/v0/connect` behind
+  `legacy_v0: true`, and remove them at v1.0 (recommended).** Existing
+  demos keep working through the betas. The new API owns `/api/v1`.
+- **ii. Keep a Guacamole-compatible endpoint permanently** for third-party
+  guacamole-common-js clients. It can only serve guacd-backed sessions,
+  since native backends produce no Guacamole instructions, so it is a
+  shrinking feature.
+- **iii. Remove at beta.1.** Simplest, but breaks the demo client until
+  [009](../009-react-web-client.md) is on protocol v1.
+
+## Open Questions
+
+1. Token format: JWT (signed with golang-jwt v5) or opaque server-side
+   tokens? Single-node beta makes opaque tokens sufficient. Is
+   third-party issuance (an SSO gateway minting tokens) a beta
+   requirement?
+2. Auth providers for beta: static users in config (bcrypt hashes) only,
+   or OIDC as well? OIDC adds `golang.org/x/oauth2` and an
+   `github.com/coreos/go-oidc` style dependency.
+3. Registry storage: configuration file only for beta, or a pluggable
+   store (SQLite would need cgo or a pure-Go driver such as
+   `modernc.org/sqlite`)?
+4. v0 routes: option i, ii or iii?
+5. Configuration: version the file (`version: 1`) and reject unknown keys
+   (`yaml.Decoder.KnownFields`)?
+6. Metrics: expvar on the debug listener, or Prometheus exposition
+   (`prometheus/client_golang` adds a sizeable dependency)?
+7. TLS: terminate in `occamyd` (`tls.cert`, `tls.key`, ACME later) or
+   document a reverse proxy only?
+
+## Affects
+
+`server/` is rewritten around the chosen stack. `internal/config` gains
+the registry and auth sections. `go.mod` loses gin and gin-jwt under option
+A. Most of 004's items are absorbed into this design; 004 remains the
+place for fixes that ship on v0 before beta.

@@ -79,7 +79,11 @@ Independent of the option chosen:
   of credential-hash matching.
 - Run the image as a non-root user.
 - Move to gin-jwt v3 together with the new token model, rather than porting
-  the current claims first.
+  the current claims first. Do this only if the v0 routes outlive
+  `v1.0.0-beta.1`: the v1 API design
+  ([api-and-server-stack](008-native-architecture/api-and-server-stack.md))
+  recommends the standard library and golang-jwt v5 (or opaque tokens),
+  with these properties built in.
 
 ## API Surface
 

@@ -40,10 +40,13 @@ Recommended in two steps:
    desktop view that wrap the existing `occamy.js` objects, at parity with
    the Vue client: protocol selection, display scaling, mouse and keyboard.
    Small, and independent of protocol work.
-2. **Protocol client swap.** When [008](008-native-architecture.md) phase 3
-   lands, replace `occamy.js` with an Occamy protocol client: tile decoding
-   in a Worker (OffscreenCanvas, WebCodecs where needed) and a terminal view
-   (for example xterm.js) for terminal backends.
+2. **Protocol client swap.** For `v1.0.0-beta.1`
+   ([008](008-native-architecture.md)), replace `occamy.js` with a
+   TypeScript client for
+   [protocol v1](008-native-architecture/protocol-v1.md): tile decoding in a
+   Worker (`createImageBitmap`, `DecompressionStream`, OffscreenCanvas) and
+   a terminal view (xterm.js) for terminal backends. It is tested against
+   the golden vectors from the Go `protocol` package.
 
 Open questions:
 
