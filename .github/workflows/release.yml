@@ -1,17 +1,20 @@
 name: Release
 
-# A v* tag builds and publishes a release: a multi-arch image on GHCR, the
-# web client archive, SHA256SUMS, provenance attestations, and a GitHub
-# release whose notes are the version's CHANGELOG.md section. Manual runs
-# and pull requests that touch the release build are dry runs: they build
-# everything and publish nothing.
+# A v* tag builds and publishes a release: a multi-arch image on GHCR,
+# occamyd archives for Linux, macOS and Windows (.goreleaser.yaml), the web
+# client archive, SHA256SUMS, provenance attestations, and a GitHub release
+# whose notes are the version's CHANGELOG.md section. Manual runs and pull
+# requests that touch the release build are dry runs: they build everything
+# and publish nothing.
 on:
   push:
     tags: ['v*']
   pull_request:
     paths:
       - .github/workflows/release.yml
+      - .goreleaser.yaml
       - docker/Dockerfile
+      - scripts/third-party-licenses.sh
   workflow_dispatch:
 
 permissions:
@@ -32,7 +35,7 @@ jobs:
     strategy:
       matrix:
         include:
-          # Native runners: libguac takes too long to compile under QEMU.
+          # Native runners: faster than building under QEMU.
           - arch: amd64
             runner: ubuntu-latest
           - arch: arm64
@@ -139,12 +142,34 @@ jobs:
         tar -tzf "release/occamy-web-$VERSION.tar.gz" | head
     - uses: actions/upload-artifact@v7
       with:
-        name: release-files
+        name: release-web
         path: release/*
         if-no-files-found: error
 
+  binaries:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        # GoReleaser reads the version and the commit date from git.
+        fetch-depth: 0
+    - uses: actions/setup-go@v7
+      with:
+        go-version: stable
+    - uses: goreleaser/goreleaser-action@v7
+      with:
+        version: v2.18.3
+        args: release --clean ${{ env.PUBLISH != 'true' && '--snapshot' || '' }}
+    - uses: actions/upload-artifact@v7
+      with:
+        name: release-binaries
+        path: |
+          dist/*.tar.gz
+          dist/*.zip
+        if-no-files-found: error
+
   release:
-    needs: [manifest, web]
+    needs: [manifest, web, binaries]
     # manifest is skipped in dry runs, which must not skip this job.
     if: ${{ !cancelled() && !failure() }}
     runs-on: ubuntu-latest
@@ -156,8 +181,9 @@ jobs:
     - uses: actions/checkout@v7
     - uses: actions/download-artifact@v8
       with:
-        name: release-files
+        pattern: release-*
         path: release
+        merge-multiple: true
     - name: Release notes
       run: |
         section="${VERSION#v}"
