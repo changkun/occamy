@@ -65,7 +65,7 @@ The demo web client lives in [client/occamy-web](./client/occamy-web) (Vue 3, Vi
 It needs Node.js 20.19+ or 22.12+:
 
 ```
-make client     # npm install && npm run build, output in client/occamy-web/dist
+make client     # npm ci && npm run build, output in client/occamy-web/dist
 ```
 
 With `client: true` in [conf.yaml](./conf.yaml), `occamyd` serves it at `/static`.
