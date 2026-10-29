@@ -1,6 +1,6 @@
 ---
 title: guacd configuration and connection parameters
-status: validated
+status: complete
 track: server
 depends_on:
   - specs/005-upstream-guacamole/guacd-compose-service.md
@@ -70,3 +70,54 @@ In `internal/config/config_test.go`:
 
 - Nothing reads the new config yet; `server/` is unchanged.
 - No changes to JWT claims or `/api/v1/login`.
+
+## Outcome
+
+**Summary.** Implemented directly in `f3d82c5` (`config: add guacd
+settings and token-to-parameter mapping`). Drift: Minimal. Every item
+shipped as written, and the loading code gained a small seam for the
+default-address test.
+
+**What shipped.**
+
+- `internal/config/config.go`:
+  - `Guacd` (`Address`, `Params`), as `Runtime.Guacd`;
+  - `DefaultGuacdAddress` (`localhost:4822`), applied when the section or
+    its address is missing;
+  - `(*JWT).GuacdParams`, which returns the `net.SplitHostPort` error
+    unchanged.
+- `conf.yaml`: the `guacd` section, with `rdp.ignore-cert: "true"`.
+- `docker/occamy.yaml`: `conf.yaml` with `address: guacd:4822`. It is
+  mounted read-only over `/occamy/conf.yaml` in the demo stack.
+- `internal/config/config_test.go`: `TestGuacdParams`,
+  `TestGuacdParamsMissingPort` and `TestGuacdDefaultAddress`.
+- Verified:
+  - `go test ./internal/config/`;
+  - `make run` and `make e2e` with the mounted config, which the
+    container shows in `/occamy/conf.yaml`.
+
+**Design evolution.** None.
+
+**Not implemented.** None.
+
+**Unspecified work.**
+
+- `Init` now loads through `parse(raw) (*config, error)`, which fills in
+  defaults (scaffolding). `export_test.go` exposes it to the external test
+  package, because `Init` registers a flag and cannot run twice in one
+  test binary.
+- `TestGuacdParams` also checks that the defaults map is not modified
+  (improvement).
+
+**Decisions, surprises, follow-ups.**
+
+- `username` and `password` are always set from the token, even when
+  empty. An empty token value therefore wins over a configured default,
+  which matches "token values win". Revisit in
+  [guacd-sessions](guacd-sessions.md) if a protocol needs a default
+  username.
+- The read-only bind mount has no SELinux label. On SELinux hosts
+  (Fedora, RHEL) Podman needs `:ro,z`; macOS and the CI runners do not.
+- Follow-up: [guacd-sessions](guacd-sessions.md) reads `Runtime.Guacd`
+  and calls `GuacdParams`.
+
