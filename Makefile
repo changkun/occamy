@@ -7,7 +7,7 @@ BUILD = $(shell date +%F)
 GOPATH=$(shell go env GOPATH)
 
 IMAGE = occamy
-CONTAINER_ENGINE ?= docker
+CONTAINER_ENGINE ?= podman
 
 compile:
 	go build -x -o occamyd

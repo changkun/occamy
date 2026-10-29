@@ -26,13 +26,13 @@ Known gaps and planned work are tracked as design specs in [specs/](./specs/READ
 
 ### Build
 
-Occamy is deployed as a container image. To build it you need Docker (or Podman)
+Occamy is deployed as a container image. To build it you need Podman (or Docker)
 and `make`:
 
 ```
 git clone https://github.com/changkun/occamy.git
 cd occamy
-make build                          # or: make build CONTAINER_ENGINE=podman
+make build                          # or: make build CONTAINER_ENGINE=docker
 ```
 
 The image builds the web client, the bundled libguac with its VNC and SSH
@@ -40,7 +40,7 @@ plugins, and `occamyd` in separate stages (see [docker/Dockerfile](./docker/Dock
 Then you should be able to run occamy with:
 
 ```
-docker run -itd -p 5636:5636 occamy:latest
+podman run -itd -p 5636:5636 occamy:latest
 ```
 
 ### Build from source
@@ -83,7 +83,9 @@ If you build Occamy with web client, you can also access `/static` for web clien
 
 ### Demo
 
-With compose, you should be able to run a working demo with:
+With compose (`podman compose` needs a compose provider such as
+podman-compose or docker-compose installed), you should be able to run a
+working demo with:
 
 ```
 make build
