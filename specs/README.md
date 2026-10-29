@@ -67,7 +67,7 @@ Build, dependencies, CI, demo environment, and documentation.
 | [002-ssh-session-rejoin.md](002-ssh-session-rejoin.md) | Not started | Repeated SSH sessions in one process (#22); moot if 005 adopts guacd |
 | [003-session-lifecycle-hardening.md](003-session-lifecycle-hardening.md) | Not started | Deadlock-free, race-free session table; pressure test in CI (#17, #18, #20) |
 | [004-security-hardening.md](004-security-hardening.md) | Not started | No credentials in tokens or logs, target allowlist, safe defaults, gin-jwt v3 |
-| [005-upstream-guacamole.md](005-upstream-guacamole.md) | Not started | Upstream guacd 1.6 as backend: RDP restored, cgo removed (#25, #32); 6 tasks |
+| [005-upstream-guacamole.md](005-upstream-guacamole.md) | Not started | Upstream guacd 1.6 as backend: RDP restored, cgo removed (#25, #32); 7 tasks |
 
 ### client
 
@@ -85,7 +85,7 @@ Clients that speak to `occamyd`.
 flowchart TD
   s001[001 status quo] --> s006[006 demo stack + e2e]
   s006 --> s003[003 session lifecycle]
-  s006 --> s005[005 upstream guacd: 6 tasks]
+  s006 --> s005[005 upstream guacd: 7 tasks]
   s005 --> s008[008 v1 architecture: 9 sub-designs]
   s008 --> s010[010 Swift client]
   s008 --> s009[009 React client]

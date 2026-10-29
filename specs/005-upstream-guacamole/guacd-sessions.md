@@ -4,17 +4,12 @@ status: validated
 track: server
 depends_on:
   - specs/005-upstream-guacamole/guacd-handshake-client.md
-  - specs/005-upstream-guacamole/guacd-compose-service.md
+  - specs/005-upstream-guacamole/guacd-config.md
 affects:
   - server/session.go
   - server/routers.go
   - server/routers_test.go
   - server/connection.go
-  - internal/config/config.go
-  - internal/config/config_test.go
-  - conf.yaml
-  - docker/occamy.yaml
-  - docker/docker-compose.yaml
   - client/occamy-web/src/components/Desktop.vue
 effort: large
 created: 2026-10-29
@@ -34,27 +29,12 @@ table never holds the proxy lock across network I/O.
 
 ## What to do
 
-1. **Config** (`internal/config/config.go`, `conf.yaml`):
+1. **Address**: dial `config.Runtime.Guacd.Address`
+   ([guacd-config](guacd-config.md)).
 
-   ```yaml
-   guacd:
-     address: localhost:4822
-     params:            # per-protocol defaults, merged under token values
-       rdp:
-         ignore-cert: "true"
-   ```
-
-   The type is `Guacd struct { Address string; Params map[string]map[string]string }`.
-   Add `docker/occamy.yaml`, a copy of `conf.yaml` with
-   `address: guacd:4822`, and mount it read-only over `/occamy/conf.yaml`
-   for the `occamy` service in `docker/docker-compose.yaml`.
-
-2. **Parameters**: build `guacd.Config.Params` from the token.
-   `net.SplitHostPort(jwt.Host)` gives `hostname` and `port` (a split
-   error rejects the connection before any dial, as today). `username`
-   and `password` come from the claims. Then copy in
-   `config.Runtime.Guacd.Params[jwt.Protocol]` for names the token does
-   not set.
+2. **Parameters**: `jwt.GuacdParams(config.Runtime.Guacd.Params)`. Its
+   error (a host without a port) rejects the connection before any
+   dial, as today.
 
 3. **Display hints**: `serveWS` reads optional `width`, `height`, `dpi`
    and `timezone` query parameters (clamped to 1–8192 and 48–600),
@@ -101,7 +81,7 @@ table never holds the proxy lock across network I/O.
      it (`Occamy.Tunnel.INTERNAL_DATA_OPCODE`). Then forward each
      `ReadRaw` result as one text message.
    - client → guacd: a message may hold several instructions. Split them
-     with the length-aware reader over a `bytes.Reader`. Never forward
+     with `protocol.ReadRaw(bufio.NewReader(bytes.NewReader(msg)))`. Never forward
      internal-opcode instructions (opcode `""`). Answer
      `0.,4.ping,<ts>;` with the same instruction, as
      `GuacamoleWebSocketTunnelEndpoint` does in 1.6.0. The bundled
@@ -132,8 +112,10 @@ server and a real WebSocket dialer.
 - `TestServeIOInternalOpcodes`: the client first receives
   `0.,<n>.$id;`, a client `ping` is answered and not forwarded, and a
   message carrying two instructions reaches guacd as two.
-- `internal/config`: `TestGuacdParams` merges per-protocol defaults under
-  token values.
+- `TestDisplayHints`: missing query parameters give 1024×768 at 96 DPI,
+  out-of-range values are clamped, and garbage is ignored.
+- `TestSessionLogsOmitPassword`: with `log.SetOutput` on a buffer, a full
+  connect and disconnect never writes the token's password.
 
 End to end: the [006](../006-demo-stack-refresh.md) suite passes for VNC
 and SSH through guacd, plus a new case that opens two SSH sessions one

@@ -3,14 +3,16 @@ title: RDP through guacd, verified against xrdp
 status: validated
 track: server
 depends_on:
-  - specs/005-upstream-guacamole/guacd-sessions.md
+  - specs/005-upstream-guacamole/remove-libguac.md
   - specs/006-demo-stack-refresh.md
 affects:
   - docker/demo/rdp/
   - docker/docker-compose.yaml
+  - conf.yaml
+  - docker/occamy.yaml
+  - client/occamy-web/src/components/Login.vue
   - tests/
   - README.md
-  - specs/005-upstream-guacamole.md
 effort: medium
 created: 2026-10-29
 updated: 2026-10-29
@@ -22,8 +24,11 @@ dispatched_task_id: null
 
 ## Goal
 
-Bring RDP back. guacd 1.6 ships it, so the work is a demo server, an
-end-to-end case, and a check against a current Windows host (#32).
+Bring RDP back. guacd 1.6 ships it, so the work is a demo server and an
+end-to-end case. It runs after [remove-libguac](remove-libguac.md) so
+that the two do not race on the README's status table. The check against
+a current Windows host (#32) is a manual acceptance item on
+[005](../005-upstream-guacamole.md), not part of this task.
 
 ## What to do
 
@@ -40,15 +45,10 @@ end-to-end case, and a check against a current Windows host (#32).
    expect `size`, `img`, `sync`).
 5. `Login.vue` and the README: RDP host default `rdp:3389`; status table
    row "RDP: through guacd, verified against xrdp".
-6. Connect once by hand to a current Windows host (Windows 11 or Server
-   2022/2025) with NLA enabled, and record the result and any parameters
-   it needed in [005](../005-upstream-guacamole.md)'s acceptance
-   criteria.
 
 ## Tests
 
 - End to end: `TestE2E/rdp` passes in CI.
-- Manual: the Windows check above, recorded in the parent spec.
 
 ## Boundaries
 

@@ -78,6 +78,10 @@ Independent of the option chosen:
 - Explicit session sharing (a `share` claim or connection setting) instead
   of credential-hash matching.
 - Run the image as a non-root user.
+- Once [005](005-upstream-guacamole.md) puts guacd behind `occamyd`:
+  optional TLS to guacd (`guacd.tls`, matching guacd's `-C`/`-K` flags),
+  and a note that guacd must never be reachable from untrusted networks,
+  because it connects anywhere it is asked to.
 - Move to gin-jwt v3 together with the new token model, rather than porting
   the current claims first. Do this only if the v0 routes outlive
   `v1.0.0-beta.1`: the v1 API design

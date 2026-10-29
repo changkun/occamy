@@ -126,7 +126,10 @@ Add a `guacd` service pinned to the 1.6 line in
 ## Acceptance Criteria
 
 - [x] Option chosen and recorded here (A, 2026-10-29).
-- [ ] RDP connects to xrdp and to a current Windows host.
+- [ ] RDP connects to xrdp (automated, [rdp-xrdp](005-upstream-guacamole/rdp-xrdp.md)).
+- [ ] RDP connects by hand to a current Windows host (Windows 11 or
+      Server 2022/2025) with NLA; result and any needed parameters
+      recorded here (#32).
 - [ ] `occamyd` builds with `CGO_ENABLED=0`; `guacamole/` and `internal/lib/`
       removed.
 - [ ] README's architecture pitch updated to match.
@@ -138,18 +141,20 @@ Add a `guacd` service pinned to the 1.6 line in
 | [Instruction I/O over any stream](005-upstream-guacamole/instruction-stream-io.md) | — | medium | validated |
 | [guacd handshake client](005-upstream-guacamole/guacd-handshake-client.md) | instruction-stream-io | medium | validated |
 | [guacd service in the demo stack](005-upstream-guacamole/guacd-compose-service.md) | [006](006-demo-stack-refresh.md) | small | validated |
-| [Serve sessions through guacd](005-upstream-guacamole/guacd-sessions.md) | guacd-handshake-client, guacd-compose-service | large | validated |
+| [guacd configuration and parameters](005-upstream-guacamole/guacd-config.md) | guacd-compose-service | small | validated |
+| [Serve sessions through guacd](005-upstream-guacamole/guacd-sessions.md) | guacd-handshake-client, guacd-config | large | validated |
 | [Remove libguac and cgo](005-upstream-guacamole/remove-libguac.md) | guacd-sessions | medium | validated |
-| [RDP through guacd, verified against xrdp](005-upstream-guacamole/rdp-xrdp.md) | guacd-sessions, [006](006-demo-stack-refresh.md) | medium | validated |
+| [RDP through guacd, verified against xrdp](005-upstream-guacamole/rdp-xrdp.md) | remove-libguac, [006](006-demo-stack-refresh.md) | medium | validated |
 
 ```mermaid
 graph LR
   S006[006 demo stack] --> C[guacd compose service]
+  C --> G[guacd config]
   A[instruction I/O] --> B[handshake client]
   B --> D[sessions through guacd]
-  C --> D
+  G --> D
   D --> E[remove libguac]
-  D --> F[RDP via xrdp]
+  E --> F[RDP via xrdp]
   S006 --> F
 ```
 

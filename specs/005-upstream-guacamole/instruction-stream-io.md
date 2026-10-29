@@ -34,7 +34,12 @@ prefixes instead of splitting at the first `;`. Every later task in
    `Close` doc comment saying it exists for the socketpair only.
 3. `server/session.go` `Join`: construct with
    `protocol.NewInstructionIO(protocol.NewIO(fds[1]))`. No other change.
-4. Rewrite `(*InstructionIO).ReadRaw` to frame by length. Today it is
+4. Add `ReadRaw(r *bufio.Reader) ([]byte, error)` as a package-level
+   function that frames by length, and make `(*InstructionIO).ReadRaw`
+   call it with its `input` reader. It is exported so that
+   [guacd-sessions](guacd-sessions.md) can split a WebSocket message
+   holding several instructions (`bufio.NewReader(bytes.NewReader(msg))`)
+   without touching this package. Today `(*InstructionIO).ReadRaw` is
    `io.input.ReadBytes(';')`, which cuts an instruction in two whenever an
    element contains `;` (a password, clipboard text or an `error` message),
    and the client then receives two broken WebSocket messages. Read loop:
@@ -55,6 +60,8 @@ prefixes instead of splitting at the first `;`. Every later task in
    `ParseInstruction` and `Parser` alone apart from reusing the shared
    constants.
 6. Fix the `ErrInstructionMissSemi` message typo ("withou") while there.
+7. Update `TestNewInstructionIO` (`instruction_test.go`), which passes a
+   raw fd, to the new constructor (`NewInstructionIO(protocol.NewIO(fd))`).
 
 ## Tests
 
@@ -69,6 +76,9 @@ In `internal/protocol/instruction_test.go`:
   and a bad terminator each return the matching error.
 - `TestReadRawPartialReads`: an `io.Reader` that returns one byte per call
   still yields whole instructions.
+- `TestReadRawSplitsMessage`: the package-level `ReadRaw` over a
+  `bytes.Reader` holding two instructions returns them one by one, then
+  `io.EOF`.
 - `FuzzReadRaw`: never panics, and whatever it accepts round-trips through
   `ParseInstruction` and `String`.
 
