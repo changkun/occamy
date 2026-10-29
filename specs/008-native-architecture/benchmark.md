@@ -1,0 +1,201 @@
+---
+title: Protocol benchmark
+status: validated
+track: architecture
+depends_on:
+  - specs/006-demo-stack-refresh.md
+affects:
+  - bench/
+  - docker/bench/
+  - docker/docker-compose.yaml
+  - Makefile
+  - .github/workflows/dockerimage.yml
+  - docs/benchmarks.md
+  - go.mod
+effort: large
+created: 2026-10-29
+updated: 2026-10-29
+author: Changkun Ou
+dispatched_task_id: null
+---
+
+# Protocol benchmark
+
+## Goal
+
+Measure what Occamy costs today under fixed scenarios, so that protocol
+v1 and its graphics pipeline are designed against numbers and proven with
+the same harness. Today Occamy speaks Guacamole and runs everything through
+guacd. The owner set two targets:
+
+- **Speed:** at least 10x better than the Guacamole baseline, benchmarked.
+- **Latency:** input-to-update latency under 50 ms for desktop
+  interactions.
+
+This spec defines the yardstick: the metrics, the scenarios, how they are
+measured, and how the targets are judged. The harness measures v0 first.
+Protocol v1 gets a driver in the same harness once
+[client-core](client-core.md) exists.
+
+## Metrics
+
+All times come from the harness's monotonic clock in one process, so no
+clocks need synchronizing.
+
+| Metric | Definition |
+|--------|------------|
+| Input latency `L` | From writing an input message to the WebSocket until the harness has received and decoded the drawing that reflects it (the probe, see below). Reported as p50, p95 and p99 over at least 200 inputs. |
+| Processing latency `Lp` | `L` measured with no network emulation. It covers occamyd, guacd (v0), the remote server and the client decode, and it is the part Occamy can improve. |
+| Bytes | WebSocket payload bytes in each direction: totals for bounded scenarios, per second for continuous ones. |
+| Server CPU | CPU time of the occamyd and guacd containers during the scenario, read from the container engine's stats before and after, and reported separately. The remote server's container is reported as well, but it is not Occamy's. |
+| Client CPU | The harness's own time spent decoding and applying drawing. It stands in for a client's cost; browsers decode natively, so only ratios between series are meaningful. |
+| Delivered frame rate | Complete frames received per second (`sync` in v0, `frame-end` in v1), and for scenes animated at a known rate, the share of scene frames that reached the client. |
+| Time to first frame | From dialing the WebSocket until the first complete frame. |
+| Completion time | For bounded output, from the command until its end marker is visible. |
+
+### The latency probe
+
+- **Desktop:** the scene program (below) fills a 32×32 swatch at a fixed
+  position with a colour derived from each key it receives. The probe
+  completes when the swatch's centre pixel in the harness's decoded
+  framebuffer has that colour.
+- **Terminal:** the harness types into an idle shell, and the probe
+  completes on the first frame containing drawing after the key. The
+  harness ignores frames without drawing: guacd sends `sync` and `nop` on
+  its own schedule.
+
+### The 50 ms budget
+
+The 50 ms requirement is end to end, so it only holds below some network
+round-trip time (RTT). The budget for `L` p95 is:
+
+| Part | Budget |
+|------|--------|
+| Network RTT | up to 30 ms |
+| Remote server reaction (the scene program's draw) | up to 5 ms |
+| Occamy: server, client decode and all queueing | up to 15 ms |
+| Total | 50 ms |
+
+The harness measures up to decoded pixels. A display adds up to one
+refresh interval on top (16.7 ms at 60 Hz). Counted to photons, the
+50 ms target therefore holds up to about 13 ms RTT.
+
+## Scenarios
+
+Every scenario runs over v0 through occamyd, the shipped path. A second
+v0 series connects to guacd directly, to separate occamyd's proxying cost
+from guacd's own. A v1 series is added later.
+
+| ID | Protocol | Scenario | Primary metric |
+|----|----------|----------|----------------|
+| T1 | SSH | Type 200 characters, 10 per second, into an idle shell | `L` |
+| T2 | SSH | `seq 1 100000`, then an end marker | bytes, completion time, server CPU |
+| T3 | SSH | `top -d 0.5` for 30 s | bytes per second |
+| G1 | VNC, RDP | Idle desktop for 30 s | bytes per second, server CPU |
+| G2 | VNC, RDP | Probe keys on an otherwise still desktop | `L` |
+| G3 | VNC, RDP | A page of text scrolled one line every 16 ms for 10 s | bytes, server CPU, delivered frame rate |
+| G4 | VNC, RDP | A 400×300 textured window dragged across the screen at 60 Hz | bytes, server CPU, delivered frame rate |
+| G5 | VNC, RDP | Full-screen procedural motion at 30 fps, with probe keys during it | delivered frame rate, bytes, `L` under load |
+| G6 | VNC, RDP | One static photographic full-screen image | bytes, time until complete |
+| G7 | SSH, VNC, RDP | Connect | time to first frame |
+
+G5's `L` under load is the queueing test. Guacamole cannot put a key's
+update ahead of bulk frames, and protocol v1 must.
+
+### Network conditions
+
+| ID | RTT | Bandwidth |
+|----|-----|-----------|
+| N0 | none added | unlimited |
+| N1 | 20 ms | 100 Mbit/s |
+| N2 | 50 ms | 20 Mbit/s |
+
+A userspace proxy inside the harness adds half the RTT in each direction
+and enforces the bandwidth with a token bucket. It emulates latency and
+throughput, not loss or TCP congestion behaviour.
+
+## Targets
+
+For each scenario, the target is 10x better than the v0-through-occamyd
+baseline on its primary metric, under the same network condition, at the
+p95 for latencies.
+
+The baseline run may show that a metric is bound by something Occamy does
+not control: the RTT, the remote server, or the scene's own frame rate,
+for example. A delivered frame rate cannot exceed the scene's. Such a
+metric's target becomes that bound plus a stated margin. The evidence goes
+next to it in `docs/benchmarks.md`, so that no target is quietly dropped.
+
+The 50 ms budget applies separately: `L` p95 for G2 and T1 under N1, and
+for G5 under N1, must be at most 50 ms with v1.
+
+## Components
+
+### Harness (`bench/`)
+
+A Go command, `go run ./bench`, with flags for the scenarios, network
+conditions and series, and the endpoint. It writes a JSON result and a
+Markdown table.
+
+- **Drivers:** v0 through occamyd (log in, dial `/api/v1/connect`); v0
+  direct to guacd (the `internal/guacd` handshake); v1 later through the
+  `client` package. Each driver answers `sync` the way a browser does,
+  announces the image types a browser announces (PNG, JPEG, WebP), and
+  keeps a decoded framebuffer.
+- **Guacamole interpreter:** applies `size`, `img`/`blob`/`end`, `copy`,
+  `rect`/`cfill` and `dispose` to layer 0 and buffers. It starts from
+  `internal/guac` on the `gio-client` branch, which
+  [guacd-bridge](guacd-bridge.md) needs as well. WebP decoding uses
+  `golang.org/x/image/webp`.
+- **Network proxy:** a TCP proxy the driver dials through, configured per
+  condition.
+- **CPU sampling:** container stats from podman or docker, read before
+  and after each scenario.
+
+### Bench desktop (`docker/bench/desktop`)
+
+An image with Xvfb and x11vnc, and xrdp with xorgxrdp, whose sessions run
+the scene program instead of a desktop. It runs under the compose profile
+`bench`, so `make run` and the e2e job do not build it. `make bench`
+starts the profile and runs the harness. The demo images stay as they
+are.
+
+### Scene program (`bench/scene`)
+
+A pure-Go X11 client (`github.com/jezek/xgb`) that covers the screen with
+one override-redirect window and takes the input focus, since there is no
+window manager. It draws deterministic content, and function keys select
+the scene, so the same control works over every protocol and series:
+
+| Key | Scene |
+|-----|-------|
+| F1 | idle (G1) |
+| F2 | probe: letters fill the swatch (G2) |
+| F3 | scroll (G3) |
+| F4 | drag (G4) |
+| F5 | motion, with the probe still active (G5) |
+| F6 | photo (G6) |
+| Escape | back to idle |
+
+The photo and the texture are generated procedurally from a fixed seed,
+so the repository carries no image files.
+
+## Testing Strategy
+
+- Unit tests for the interpreter (each operation against expected pixels),
+  the proxy (added delay and rate within tolerance), and the probe
+  matcher.
+- A CI smoke job runs every scenario briefly under N0 to prove that the
+  harness and the bench desktop work. CI never gates on absolute numbers
+  from shared runners.
+- Baselines come from a documented local run, with the hardware, OS,
+  engine and versions recorded.
+
+## Tasks
+
+| Task | Delivers |
+|------|----------|
+| Terminal | The harness, the v0 drivers, the proxy, CPU sampling, and T1 to T3 with G7 for SSH |
+| Desktop VNC | The interpreter, the bench desktop, the scene program, and G1 to G7 over VNC |
+| Desktop RDP | G1 to G7 over RDP through the same desktop image |
+| Baseline | `docs/benchmarks.md` with the baseline numbers and the per-scenario targets, and the CI smoke job |

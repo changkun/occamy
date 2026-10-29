@@ -177,18 +177,26 @@ Each component is a sub-design (see Design Breakdown):
 
 ## Performance
 
-Expectations to measure, not promises:
+v1 has two performance targets, defined and measured by
+[benchmark](008-native-architecture/benchmark.md):
 
-- Terminals: sending terminal bytes instead of PNG tiles should cut traffic
-  by orders of magnitude for typical output.
+- at least 10x better than the v0 Guacamole baseline on each scenario's
+  primary metric, under the same network conditions;
+- input-to-update latency p95 at most 50 ms for desktop interactions at
+  20 ms RTT, including while the screen is in full motion.
+
+The baseline is measured first, and the designs below are judged against
+it. Where they come from:
+
+- Terminals send bytes, not PNG tiles of rendered text.
 - Binary frames remove base64's 4/3 expansion.
-- Go-side encoding can use all cores per session and apply backpressure per
-  viewer, which guacd's model does not expose to Occamy.
+- Encoding is limited to damaged tiles and spread across cores.
+- Small messages never wait behind tiles, and per-viewer windows keep
+  queues short, so a keystroke's update is not stuck behind bulk frames.
+- Native backends remove guacd's encode and the bridge's decode and
+  re-encode.
 
-Before beta.1, record baselines on 0.5 (guacd): bytes per second and CPU
-for VNC idle, scrolling and video playback, and for SSH `ls -R` and `top`
-(overlaps #18). Keep the measurement harness in `tests/` so that each beta
-reruns it.
+Each beta reruns the benchmark, which also covers #18.
 
 ## Testing Strategy
 
@@ -206,7 +214,10 @@ reruns it.
 
 - [ ] v1 beta scope and milestones agreed.
 - [ ] Every sub-design validated and broken into tasks.
-- [ ] Baseline measurements recorded on 0.5.
+- [ ] Guacamole baseline recorded on v0.5.0 with the
+  [benchmark](008-native-architecture/benchmark.md).
+- [ ] v1 meets the benchmark's 10x and 50 ms targets, or each miss is
+  justified there by a bound Occamy does not control.
 - [ ] RDP strategy decided after evaluation.
 
 ## Design Breakdown
@@ -222,6 +233,7 @@ reruns it.
 | 7 | [Native VNC backend](008-native-architecture/native-vnc-backend.md) | RFB client: security types, encodings | session-core, graphics-pipeline | large | drafted |
 | 8 | [Go client core](008-native-architecture/client-core.md) | Client library shaped for tests and a C ABI | protocol-v1, graphics-pipeline | medium | validated |
 | 9 | [RDP strategy](008-native-architecture/rdp-strategy.md) | guacd, helper process, or pure-Go RDP | session-core | large | drafted |
+| 10 | [Protocol benchmark](008-native-architecture/benchmark.md) | Yardstick: scenarios, metrics, the Guacamole baseline, the 10x and 50 ms targets | — | large | validated |
 
 ```mermaid
 graph LR
@@ -236,10 +248,12 @@ graph LR
   P --> CC[8 Go client core]
   G --> CC
   S --> RDP[9 RDP strategy]
+  BM[10 benchmark] --> G
   A[1 API and server stack]
 ```
 
-**Recommended iteration order:** #1, #2 and #3 in parallel. They are the
-foundations, and the protocol is the longest-lived contract. Then #4 and
-#5. Then #6, #7 and #8. The #9 evaluation spike can run at any time
-alongside.
+**Recommended iteration order:** #10 first, so that the Guacamole
+baseline exists before any encoding or pacing is built. Alongside it, #1,
+#2 and #3, the foundations; the protocol is the longest-lived contract.
+Then #4 and #5. Then #6, #7 and #8. The #9 evaluation spike can run at any
+time alongside.

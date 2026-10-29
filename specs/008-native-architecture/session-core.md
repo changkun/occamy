@@ -82,6 +82,13 @@ plus a scrollback snapshot), serializes input from viewers that hold
 input rights, and enforces roles (owner, viewer, read-only). It starts a
 writer goroutine per viewer.
 
+Each viewer's writer has two queues: small messages and tiles. It always
+drains the small queue first, so a cursor move, terminal data or a
+keystroke's update never waits behind bulk tiles. On Linux and macOS it
+sets `TCP_NOTSENT_LOWAT` on the connection, so that the kernel holds
+little unsent data and the writer's ordering still takes effect.
+[benchmark](benchmark.md)'s G5 measures this.
+
 ## Options
 
 ### Viewer pacing

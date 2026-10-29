@@ -49,7 +49,7 @@ The target design of Occamy as a whole: core, backends, protocol.
 
 | Spec | Status | Deliverable |
 |------|--------|-------------|
-| [008-native-architecture.md](008-native-architecture.md) | Not started (4 of 9 sub-designs validated) | Occamy v1: beta scope, path to pure Go, 9 sub-designs (#3, #21) |
+| [008-native-architecture.md](008-native-architecture.md) | Not started (5 of 10 sub-designs validated) | Occamy v1: beta scope, path to pure Go, 10 sub-designs including the benchmark that sets the 10x and 50 ms targets (#3, #18, #21) |
 
 ### maintenance
 
@@ -90,7 +90,7 @@ flowchart TD
   s006 --> s005[005 upstream guacd: 7 tasks]
   s006 --> s003[003 session lifecycle]
   s005 --> s003
-  s005 --> s008[008 v1 architecture: 9 sub-designs]
+  s005 --> s008[008 v1 architecture: 10 sub-designs]
   s008 --> s010[010 Swift client]
   s008 --> s009[009 React client]
   s004[004 security]
