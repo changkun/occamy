@@ -62,6 +62,9 @@ services:
     environment:
       RDP_PASSWORD: occamy
     healthcheck:
-      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/3389"]
+      # Look for the listening socket (port 3389 is 0D3D) rather than
+      # connect, since xrdp logs errors for every connection that does not
+      # speak RDP.
+      test: ["CMD", "sh", "-c", "grep -q ':0D3D [0-9A-F]*:0000 0A' /proc/net/tcp /proc/net/tcp6"]
       interval: 1s
       retries: 30
