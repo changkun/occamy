@@ -538,4 +538,4 @@ Occamy 守护进程 `occamyd` 通过加载插件的方式来扩展自身功能�
 
 ## License
 
-[Occamy](https://github.com/changkun/occamy) | [MIT](./LICENSE) &copy; 2019 [Ou Changkun](https://changkun.de)
+[Occamy](https://github.com/changkun/occamy) | [MIT](../LICENSE) &copy; 2019 [Ou Changkun](https://changkun.de)
