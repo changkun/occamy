@@ -195,10 +195,12 @@ func protocols() []string {
 }
 
 // checkSession opens a session to the given demo server and fails the test
-// unless the remote desktop arrives. A session that starts while the
-// previous one with the same claims is still tearing down joins it and is
-// disconnected (specs/003-session-lifecycle-hardening.md, defect 6), so
-// that case is retried briefly.
+// unless the remote desktop arrives at the first attempt. A session that
+// started while the previous one with the same claims was ending used to
+// join it and be disconnected (specs/003-session-lifecycle-hardening.md,
+// defect 6). occamy now starts a new session instead, so a disconnected
+// session fails the test, and is retried only to tell whether the next
+// attempt works.
 func checkSession(t *testing.T, addr string, credential jwtInput) {
 	t.Helper()
 	proto := credential.Protocol
@@ -214,7 +216,7 @@ func checkSession(t *testing.T, addr string, credential jwtInput) {
 		if !errors.Is(err, errDisconnected) || attempt == 5 {
 			t.Fatalf("%s session: %v", proto, err)
 		}
-		t.Logf("%s attempt %d: %v", proto, attempt, err)
+		t.Errorf("%s attempt %d: %v", proto, attempt, err)
 		time.Sleep(time.Second)
 	}
 }
