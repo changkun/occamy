@@ -1,0 +1,10 @@
+# Benchmark stack: the demo stack plus what specs/008-native-architecture/
+# benchmark.md needs. guacd is published on the loopback interface, so that
+# the harness can also measure guacd without occamy in between.
+#
+#   make bench
+
+services:
+  guacd:
+    ports:
+      - "127.0.0.1:4822:4822"

@@ -26,13 +26,21 @@ run:
 .PHONY: run
 
 stop:
-	cd docker && $(CONTAINER_ENGINE) compose down
+	cd docker && $(CONTAINER_ENGINE) compose down --remove-orphans
 .PHONY: stop
 
 # e2e runs the end-to-end tests against a stack started with make run.
 e2e:
 	OCCAMY_E2E_ENDPOINT=$(or $(OCCAMY_E2E_ENDPOINT),localhost:5636) go test -v -count=1 ./tests/
 .PHONY: e2e
+
+# bench starts the benchmark stack and measures it, as described in
+# docs/benchmarks.md. BENCH_FLAGS passes flags to the harness, for example
+# BENCH_FLAGS="-quick -scenarios T1".
+bench:
+	cd docker && $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml up -d --build --wait
+	go run ./bench -engine $(CONTAINER_ENGINE) $(BENCH_FLAGS)
+.PHONY: bench
 
 # lint needs golangci-lint v2 (https://golangci-lint.run), as CI uses.
 lint:

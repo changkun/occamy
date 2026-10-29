@@ -24,3 +24,5 @@
 # release builds (goreleaser, scripts/third-party-licenses.sh)
 /dist/
 /THIRD_PARTY_LICENSES
+# benchmark results (go run ./bench)
+/bench-results.json
