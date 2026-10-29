@@ -11,6 +11,8 @@ auth:
 client: true # enable web client demo
 guacd:
   address: localhost:4822
-  params: # per-protocol defaults, merged under token values
+  params: # per-protocol defaults, merged under token values (see README)
     rdp:
-      ignore-cert: "true"
+      ignore-cert: "true" # accept self-signed certificates (xrdp, Windows)
+      # domain: EXAMPLE   # Windows domain accounts
+      # security: nla     # unset negotiates, NLA included
