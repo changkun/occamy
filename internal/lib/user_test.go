@@ -62,6 +62,9 @@ func TestNewUser(t *testing.T) {
 			}
 			done <- true
 		}()
+		// Wait for both: HandleConnection still uses the user after the
+		// reader sees its disconnect, so closing earlier is a use after free.
+		<-done
 		<-done
 	})
 
