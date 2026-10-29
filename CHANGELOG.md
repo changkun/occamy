@@ -7,6 +7,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-30
+
 ### Added
 
 - A benchmark harness (`make bench`, `bench/`) that measures sessions
@@ -165,7 +167,8 @@ Development resumed in 2026 after a pause from the end of 2021.
 - First release: a Go proxy that drives libguac through cgo and serves the
   Guacamole protocol over WebSocket with JWT authentication.
 
-[Unreleased]: https://github.com/changkun/occamy/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/changkun/occamy/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/changkun/occamy/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/changkun/occamy/compare/0.4.0...v0.5.0
 [0.4.0]: https://github.com/changkun/occamy/compare/0.3.0...0.4.0
 [0.3.0]: https://github.com/changkun/occamy/compare/0.2.0...0.3.0
