@@ -88,14 +88,21 @@ podman-compose or docker-compose installed), you should be able to run a
 working demo with:
 
 ```
-make build
-make run
+make build      # the occamy image
+make run        # occamy plus the demo servers, on localhost:5636
 make stop
 ```
 
-The demo desktop images in [docker/docker-compose.yaml](./docker/docker-compose.yaml)
-date from 2019 and are amd64 only; refreshing them is planned in
-[specs/006-demo-stack-refresh.md](./specs/006-demo-stack-refresh.md).
+[docker/docker-compose.yaml](./docker/docker-compose.yaml) builds small
+Debian demo servers from [docker/demo](./docker/demo) for amd64 and arm64.
+Occamy reaches them by compose service name:
+
+| Protocol | Host | Username | Password |
+|----------|------|----------|----------|
+| VNC | `vnc:5900` | | `vncpassword` |
+| SSH | `ssh:22` | `occamy` | `occamy` |
+
+There is no RDP demo server yet ([specs/005](./specs/005-upstream-guacamole.md)).
 
 Here is a working video demo:
 

@@ -22,10 +22,12 @@ build:
 .PHONY: build
 
 run:
-	cd docker && $(CONTAINER_ENGINE) compose up -d
+	cd docker && $(CONTAINER_ENGINE) compose up -d --build --wait
+.PHONY: run
 
 stop:
 	cd docker && $(CONTAINER_ENGINE) compose down
+.PHONY: stop
 
 test:
 	go test -cover -coverprofile=cover.test -v ./...
