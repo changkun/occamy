@@ -13,6 +13,10 @@ linters:
     - nilerr        # an error checked and then nil returned
     - unconvert     # conversions to the same type
     - usestdlibvars # http.MethodGet and friends instead of literals
+  settings:
+    gosec:
+      excludes:
+        - G104 # unchecked errors, which errcheck reports with exclusions
   exclusions:
     presets:
       # Unchecked Close, Flush and print calls.

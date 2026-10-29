@@ -159,7 +159,7 @@ func serveIO(conn *guacd.Conn, ws *websocket.Conn) error {
 	// that the caller can still send a close frame.
 	conn.Close()
 	_ = ws.NetConn().SetReadDeadline(aLongTimeAgo)
-	_ = <-exit // a consequence of the first error
+	<-exit //nolint:errcheck // a consequence of the first error
 	return err
 }
 

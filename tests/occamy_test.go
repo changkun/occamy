@@ -156,7 +156,7 @@ func session(url string, timeout time.Duration, want ...string) error {
 		r := bufio.NewReader(bytes.NewReader(msg))
 		for {
 			raw, err := protocol.ReadRaw(r)
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			if err != nil {
