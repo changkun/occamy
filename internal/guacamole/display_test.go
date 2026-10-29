@@ -232,3 +232,45 @@ func TestDisplayVisibleLayers(t *testing.T) {
 	apply(t, d, "dispose", "2")
 	wantPixel(t, d.Image(), 3, 4, red)
 }
+
+// Channel masks other than SRC and OVER, as guacd uses them to build the
+// cursor on buffers.
+func TestDisplayMasks(t *testing.T) {
+	half := color.RGBA{R: 0x80, A: 0x80} // red at half opacity, premultiplied
+	for _, tc := range []struct {
+		mask string
+		dst  color.RGBA // a pixel of the buffer before the fill
+		src  color.RGBA // what cfill paints over it
+		want color.RGBA
+	}{
+		// destination-out: the source's alpha erases the destination.
+		{"2", green, red, transparent},
+		{"2", green, half, color.RGBA{G: 0x7f, A: 0x7f}},
+		{"2", green, transparent, green},
+		// destination-atop: the destination where the source is, the
+		// source where the destination is not.
+		{"9", green, red, green},
+		{"9", transparent, red, red},
+		{"9", green, transparent, transparent},
+		// xor: each where the other is not.
+		{"10", green, red, transparent},
+		{"10", transparent, blue, blue},
+		// copy and source-over, through the same path as before.
+		{"12", green, half, half},
+		{"14", green, half, color.RGBA{R: 0x80, G: 0x7f, A: 0xff}},
+	} {
+		d := guacamole.NewDisplay()
+		fill(t, d, -1, 0, 0, 1, 1, tc.dst)
+		apply(t, d, "rect", "-1", "0", "0", "1", "1")
+		c := tc.src
+		if c.A != 0 { // cfill takes colours that are not premultiplied
+			c.R, c.G, c.B = uint8(int(c.R)*0xff/int(c.A)), uint8(int(c.G)*0xff/int(c.A)), uint8(int(c.B)*0xff/int(c.A))
+		}
+		apply(t, d, "cfill", tc.mask, "-1", strconv.Itoa(int(c.R)), strconv.Itoa(int(c.G)), strconv.Itoa(int(c.B)), strconv.Itoa(int(c.A)))
+		apply(t, d, "size", "0", "1", "1")
+		apply(t, d, "copy", "-1", "0", "0", "1", "1", "12", "0", "0", "0")
+		if got := d.Image().RGBAAt(0, 0); got != tc.want {
+			t.Errorf("mask %s of %v over %v = %v, want %v", tc.mask, tc.src, tc.dst, got, tc.want)
+		}
+	}
+}
