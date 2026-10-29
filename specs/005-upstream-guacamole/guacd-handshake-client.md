@@ -1,6 +1,6 @@
 ---
 title: guacd handshake client
-status: validated
+status: complete
 track: server
 depends_on:
   - specs/005-upstream-guacamole/instruction-stream-io.md
@@ -75,8 +75,10 @@ From `src/guacd/connection.c`, `src/libguac/user-handshake.c` and
    type Error struct { Message string; Status int } // from an error instruction
    ```
 
-2. `Handshake` sets a deadline on `nc` from `ctx`, or 15 s if `ctx` has
-   none (guacd's own `GUACD_USEC_TIMEOUT`), and clears it after `ready`.
+2. `Handshake` aborts blocked I/O when `ctx` ends (`context.AfterFunc`
+   sets a past deadline on `nc`), and returns `ctx.Err()` wrapped. If `ctx`
+   has no deadline, it sets one 15 s ahead (guacd's own
+   `GUACD_USEC_TIMEOUT`). It clears the deadline after `ready`.
 3. Send `connect` with the constant `ProtocolVersion = "VERSION_1_5_0"`.
    Fill values from `Params` by name and send `""` for names it lacks.
    Fail if `args` does not start with `VERSION_` (guacd before 1.1 is not
@@ -113,3 +115,65 @@ From `src/guacd/connection.c`, `src/libguac/user-handshake.c` and
 - Not used by `server/` yet; no config keys.
 - No WebSocket code, no session table.
 - No TLS to guacd (a later option in [004](../004-security-hardening.md)).
+
+## Outcome
+
+**Summary.** Implemented directly in `327769a` (`guacd: add a handshake
+client for upstream guacd`). Drift: Minimal. Every item shipped; one
+mechanism differs, as described below, and the body has been updated to
+match.
+
+**What shipped.**
+
+- `internal/guacd/guacd.go`:
+  - `Config`, `Conn` (`ID`, `Version`, `ReadRaw`, `WriteRaw`, `Close`) and
+    `Error`;
+  - `Dial`, `Handshake`, `ProtocolVersion` and `DefaultTimeout`;
+  - exported defaults: `DefaultWidth`, `DefaultHeight`, `DefaultDPI` and
+    `DefaultImageMimetypes`.
+- `internal/guacd/guacd_test.go`:
+  - every listed test, against a fake guacd on `net.Pipe`;
+  - `TestDialRealGuacd`, behind `OCCAMY_GUACD_ADDR`.
+- Verified:
+  - `go test -race` locally;
+  - `TestDialRealGuacd` against `docker.io/guacamole/guacd:1.6.0`, both
+    with an unreachable target and with a live x11vnc plus a join. guacd
+    logged "Joining existing connection" and "2 users now present".
+
+**Design evolution.**
+
+- *Deadline mechanism.* The spec copied the context's deadline onto the
+  socket. Instead, `context.AfterFunc` aborts I/O when the context ends,
+  so a timeout or cancellation always surfaces as `ctx.Err()`. Copying
+  the deadline would race: the socket deadline can fire just before the
+  context reports `DeadlineExceeded`, leaving a bare
+  `os.ErrDeadlineExceeded`. `stop()` reporting false after `ready` is
+  treated as cancellation, because the deadline may already be poisoned.
+
+**Not implemented.** None.
+
+**Unspecified work.**
+
+- `TestHandshakeDefaults` and `TestHandshakeUnexpectedInstruction` cover
+  spec items 4 and 5 directly (improvement).
+- `TestDialRealGuacd` also joins the connection when `OCCAMY_GUACD_VNC`
+  names a reachable VNC server (improvement). Joining an unreachable
+  target would race guacd stopping the client.
+- The defaults are exported constants, so the server can reuse them for
+  display hints (improvement).
+
+**Decisions, surprises, follow-ups.**
+
+- A nil `ImageMimetypes` means the defaults; an empty, non-nil slice
+  announces none. Audio and video default to none, since v0 dropped
+  audio.
+- `Conn` keeps the handshake's buffered reader. Any instructions guacd
+  sends right after `ready` are already buffered and must not be lost,
+  so the proxy reads them through the same `Conn`.
+- The `guacamole/guacd:1.6.0` image is published for linux/amd64 and
+  linux/arm64, which answers
+  [guacd-compose-service](guacd-compose-service.md) step 3.
+- Follow-up: none. [guacd-sessions](guacd-sessions.md) and
+  [guacd-bridge](../008-native-architecture/guacd-bridge.md) can build on
+  this.
+

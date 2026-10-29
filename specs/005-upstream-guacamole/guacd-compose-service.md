@@ -37,11 +37,9 @@ it lands.
    unqualified short names unless aliases are configured. Do not publish
    port 4822. `occamy` reaches it by service name.
 2. Add `guacd` to `occamy.depends_on`.
-3. Check that the image is published for linux/arm64 as well as amd64
-   (`podman manifest inspect docker.io/guacamole/guacd:1.6.0`). If arm64
-   is missing, note it in the compose file and in
-   [006](../006-demo-stack-refresh.md)'s multi-arch criterion rather than
-   building guacd from source here.
+3. No multi-arch work is needed: `docker.io/guacamole/guacd:1.6.0` is
+   published for linux/amd64 and linux/arm64 (checked with
+   `podman manifest inspect` on 2026-10-29).
 4. README "Demo" section: one sentence saying the stack now includes guacd
    and that, until [guacd-sessions](guacd-sessions.md) lands, `occamy`
    does not use it yet.
