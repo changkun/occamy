@@ -59,11 +59,13 @@ as `-beta.1` when needed. To cut one:
    and date, and update the comparison links.
 2. Merge that change, wait for CI to pass on `master`, and tag that commit.
 3. Push the tag. `.github/workflows/release.yml` builds the multi-arch
-   image and the web client archive, and publishes them with
+   image, the `occamyd` archives (`.goreleaser.yaml`) and the web client
+   archive, and publishes them with
    `SHA256SUMS`, provenance attestations, and the changelog section as
    release notes. It fails if `CHANGELOG.md` has no entries for the
    version.
 
 Run the workflow by hand (Actions, Release, Run workflow) for a dry run
 that builds everything and publishes nothing. Pull requests that change
-the workflow or `docker/Dockerfile` run the dry run automatically.
+the workflow, `.goreleaser.yaml`, `docker/Dockerfile` or
+`scripts/third-party-licenses.sh` run the dry run automatically.
