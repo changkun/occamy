@@ -13,19 +13,28 @@ export default {
     let display = guac.getDisplay()
     document.getElementById('desktop').appendChild(display.getElement());
     guac.onerror = null;
-    guac.connect(`token=${this.$route.query.token}`)
+    // Display hints let guacd size the remote desktop to this window.
+    const hints = new URLSearchParams({
+      token: this.$route.query.token,
+      width: window.innerWidth,
+      height: window.innerHeight,
+      dpi: Math.round(window.devicePixelRatio * 96),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    })
+    guac.connect(hints.toString())
     window.display = display;
-    display.scale(Math.min(
-      window.innerHeight / 1024,
-      window.innerWidth / 768
-    ))
-    window.onunload = () => { guac.disconnect() }
-    window.onresize = () => {
-      display.scale(Math.min(
-        window.innerHeight / display.getHeight(),
-        window.innerWidth / display.getWidth()
-      ))
+    // Fit the remote desktop to the window whenever either changes size.
+    const fit = () => {
+      if (display.getWidth() && display.getHeight()) {
+        display.scale(Math.min(
+          window.innerHeight / display.getHeight(),
+          window.innerWidth / display.getWidth()
+        ))
+      }
     }
+    display.onresize = fit
+    window.onunload = () => { guac.disconnect() }
+    window.onresize = fit
     var mouse = new occamy.Mouse(display.getElement());
     mouse.onmousedown = mouse.onmouseup = mouse.onmousemove = (mouseState) => {
       display.showCursor(false);
