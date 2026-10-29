@@ -23,6 +23,8 @@ services:
         condition: service_healthy
       ssh:
         condition: service_healthy
+      rdp:
+        condition: service_healthy
 
   guacd:
     # Not used by occamy yet (specs/005-upstream-guacamole/guacd-sessions.md).
@@ -51,5 +53,15 @@ services:
       SSH_PASSWORD: occamy
     healthcheck:
       test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/22"]
+      interval: 1s
+      retries: 30
+
+  rdp:
+    # host rdp:3389, user occamy, password occamy
+    build: ./demo/rdp
+    environment:
+      RDP_PASSWORD: occamy
+    healthcheck:
+      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/3389"]
       interval: 1s
       retries: 30
