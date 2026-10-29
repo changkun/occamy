@@ -38,10 +38,13 @@ The core replaces v0's mutex-guarded session map, whose failure modes
   longer holds the lock across I/O, and it removes an entry when its last
   user leaves.
 - 003 lists the v0 defects. The lock held across joins, racing teardown
-  and a failed connect sticking its claims are fixed. Still open on v0:
-  a client can join a session as its last user leaves (guacd answers
-  516), the table has no concurrent stress test, and the pressure test
-  does not run in CI.
+  and a failed connect sticking its claims are fixed. A client that
+  joins a session as guacd ends it now starts a new session, a stress
+  test runs the table under `-race`, and CI runs the pressure test. One
+  sliver remains on v0: a join that guacd accepts just before the last
+  user leaves gets `ready` and is then disconnected, which `occamyd`
+  cannot tell from a session that ends. It exists because guacd, not
+  `occamyd`, decides when a connection ends.
 - Protocol v1 ([protocol-v1](protocol-v1.md)) gives each viewer a frame
   window and acks.
 
