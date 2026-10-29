@@ -19,6 +19,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
+	"math"
 	"os"
 	"os/exec"
 	"runtime"
@@ -44,6 +46,7 @@ func main() {
 		nets      = flag.String("net", "N0,N1,N2", "comma-separated network conditions")
 		seriesF   = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd")
 		quick     = flag.Bool("quick", false, "fewer samples and shorter scenarios, to check the setup")
+		runs      = flag.Int("runs", 1, "how many times to run everything; the table shows medians")
 		engine    = flag.String("engine", "podman", "container engine for CPU statistics, or none")
 		project   = flag.String("project", "docker", "compose project of the stack")
 		out       = flag.String("out", "bench-results.json", "JSON output file")
@@ -84,26 +87,32 @@ func main() {
 	report := report{
 		Started: time.Now().UTC(),
 		Quick:   *quick,
+		Runs:    max(*runs, 1),
 		Host:    hostInfo(*engine, *project),
 	}
 	ctx := context.Background()
-	for _, sr := range chosenSeries {
-		for _, nc := range chosenNets {
-			p, err := startProxy(sr.target, nc)
-			if err != nil {
-				log.Fatal(err)
+	// Each run measures everything once, so that a disturbance on the host
+	// affects one run of a measurement rather than all of them.
+	for run := range report.Runs {
+		log.Printf("run %d of %d", run+1, report.Runs)
+		for _, sr := range chosenSeries {
+			for _, nc := range chosenNets {
+				p, err := startProxy(sr.target, nc)
+				if err != nil {
+					log.Fatal(err)
+				}
+				r := &runner{
+					series: sr, net: nc, proxy: p, quick: *quick, runIndex: run,
+					cpu: newCPUSampler(*engine, *project),
+				}
+				for _, sc := range chosen {
+					report.Results = append(report.Results, r.run(ctx, sc))
+				}
+				for _, proto := range protocolsOf(chosen) {
+					report.Results = append(report.Results, r.connect(ctx, proto))
+				}
+				p.close()
 			}
-			r := &runner{
-				series: sr, net: nc, proxy: p, quick: *quick,
-				cpu: newCPUSampler(*engine, *project),
-			}
-			for _, sc := range chosen {
-				report.Results = append(report.Results, r.run(ctx, sc))
-			}
-			for _, proto := range protocolsOf(chosen) {
-				report.Results = append(report.Results, r.connect(ctx, proto))
-			}
-			p.close()
 		}
 	}
 
@@ -134,11 +143,12 @@ func protocolsOf(scs []scenario) []string {
 
 // runner runs scenarios for one series under one network condition.
 type runner struct {
-	series series
-	net    netCondition
-	proxy  *proxy
-	quick  bool
-	cpu    *cpuSampler
+	series   series
+	net      netCondition
+	proxy    *proxy
+	quick    bool
+	runIndex int // which of the runs this is
+	cpu      *cpuSampler
 }
 
 // gap separates sessions, so that a session with the same claims does
@@ -161,7 +171,7 @@ func (r *runner) duration(d time.Duration) time.Duration {
 }
 
 func (r *runner) newResult(id, proto string) *result {
-	return &result{Scenario: id, Protocol: proto, Series: r.series.Name, Net: r.net.Name}
+	return &result{Scenario: id, Protocol: proto, Series: r.series.Name, Net: r.net.Name, Run: r.runIndex}
 }
 
 // run runs one scenario on a fresh session.
@@ -285,6 +295,7 @@ type result struct {
 	Protocol string `json:"protocol"`
 	Series   string `json:"series"`
 	Net      string `json:"net"`
+	Run      int    `json:"run"`
 
 	Latency    *percentiles `json:"latency_ms,omitempty"`
 	FirstFrame *percentiles `json:"first_frame_ms,omitempty"`
@@ -304,6 +315,7 @@ type result struct {
 type report struct {
 	Started time.Time         `json:"started"`
 	Quick   bool              `json:"quick"`
+	Runs    int               `json:"runs"`
 	Host    map[string]string `json:"host"`
 	Results []result          `json:"results"`
 }
@@ -313,51 +325,147 @@ func (rep *report) markdown(w io.Writer) {
 	if rep.Quick {
 		fmt.Fprint(w, " (quick)")
 	}
+	if rep.Runs > 1 {
+		fmt.Fprintf(w, ". Each number is the median of %d runs.", rep.Runs)
+	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "| Scenario | Series | Net | Latency p50/p95/p99 ms | First frame p50 ms | Completion ms | Down KiB | Down KiB/s | Frames/s | occamy+guacd CPU ms | Remote CPU ms | Decode ms | Notes |")
 	fmt.Fprintln(w, "|---|---|---|---|---|---|---|---|---|---|---|---|---|")
-	for _, r := range rep.Results {
-		lat, first, done := "", "", ""
-		if r.Latency != nil {
-			lat = fmt.Sprintf("%.1f / %.1f / %.1f", r.Latency.P50, r.Latency.P95, r.Latency.P99)
+	for _, row := range table(rep.Results) {
+		r, c := row.first, row.cells
+		f := func(i int, format string) string {
+			if math.IsNaN(c[i]) {
+				return ""
+			}
+			return fmt.Sprintf(format, c[i])
 		}
-		if r.FirstFrame != nil {
-			first = fmt.Sprintf("%.1f", r.FirstFrame.P50)
-		}
-		if r.Completion > 0 {
-			done = fmt.Sprintf("%.0f", r.Completion)
-		}
-		down, rate, fps := "", "", ""
-		if r.Seconds > 0 {
-			down = fmt.Sprintf("%.1f", float64(r.BytesDown)/1024)
-			rate = fmt.Sprintf("%.1f", float64(r.BytesDown)/1024/r.Seconds)
-			fps = fmt.Sprintf("%.1f", float64(r.Frames)/r.Seconds)
-		}
-		server, remote := "", ""
-		if r.CPUMS != nil {
-			server = fmt.Sprintf("%.0f", r.CPUMS["occamy"]+r.CPUMS["guacd"])
-			remote = fmt.Sprintf("%.0f", r.CPUMS[r.Protocol])
-		}
-		decode := ""
-		if r.DecodeMS > 0 {
-			decode = fmt.Sprintf("%.0f", r.DecodeMS)
-		}
-		var notes []string
-		if r.Error != "" {
-			notes = append(notes, "error: "+r.Error)
-		}
-		for op, n := range r.Unsupported {
-			notes = append(notes, fmt.Sprintf("%s ×%d", op, n))
+		lat := ""
+		if !math.IsNaN(c[colP50]) {
+			lat = fmt.Sprintf("%.1f / %.1f / %.1f", c[colP50], c[colP95], c[colP99])
 		}
 		scen := r.Scenario
 		if r.Scenario == "G7" {
 			scen += " " + r.Protocol
 		}
 		fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
-			scen, r.Series, r.Net, lat, first, done, down, rate, fps, server, remote, decode,
-			strings.ReplaceAll(strings.Join(notes, "; "), "|", "/"))
+			scen, r.Series, r.Net, lat, f(colFirst, "%.1f"), f(colCompletion, "%.0f"),
+			f(colDown, "%.1f"), f(colRate, "%.1f"), f(colFPS, "%.1f"),
+			f(colServerCPU, "%.0f"), f(colRemoteCPU, "%.0f"), f(colDecode, "%.0f"),
+			strings.ReplaceAll(strings.Join(row.notes, "; "), "|", "/"))
 	}
+}
+
+// The numbers in a row of the table.
+const (
+	colP50 = iota
+	colP95
+	colP99
+	colFirst
+	colCompletion
+	colDown
+	colRate
+	colFPS
+	colServerCPU
+	colRemoteCPU
+	colDecode
+	numCols
+)
+
+// cells returns the numbers of one result, with NaN where the scenario
+// does not measure something.
+func cells(r *result) [numCols]float64 {
+	var c [numCols]float64
+	for i := range c {
+		c[i] = math.NaN()
+	}
+	if r.Latency != nil {
+		c[colP50], c[colP95], c[colP99] = r.Latency.P50, r.Latency.P95, r.Latency.P99
+	}
+	if r.FirstFrame != nil {
+		c[colFirst] = r.FirstFrame.P50
+	}
+	if r.Completion > 0 {
+		c[colCompletion] = r.Completion
+	}
+	if r.Seconds > 0 {
+		c[colDown] = float64(r.BytesDown) / 1024
+		c[colRate] = float64(r.BytesDown) / 1024 / r.Seconds
+		c[colFPS] = float64(r.Frames) / r.Seconds
+	}
+	if r.CPUMS != nil {
+		c[colServerCPU] = r.CPUMS["occamy"] + r.CPUMS["guacd"]
+		c[colRemoteCPU] = r.CPUMS[r.Protocol]
+	}
+	if r.DecodeMS > 0 {
+		c[colDecode] = r.DecodeMS
+	}
+	return c
+}
+
+// row is a line of the table: one measurement over all runs.
+type row struct {
+	first *result
+	cells [numCols]float64 // medians over the runs
+	notes []string
+}
+
+// table groups the results of every run by measurement, in the order
+// they were first measured, and takes the median of each number.
+func table(results []result) []row {
+	type key struct{ scenario, protocol, series, net string }
+	var keys []key
+	runs := map[key][]*result{}
+	for i := range results {
+		r := &results[i]
+		k := key{r.Scenario, r.Protocol, r.Series, r.Net}
+		if _, ok := runs[k]; !ok {
+			keys = append(keys, k)
+		}
+		runs[k] = append(runs[k], r)
+	}
+	rows := make([]row, 0, len(keys))
+	for _, k := range keys {
+		rs := runs[k]
+		row := row{first: rs[0]}
+		for col := range numCols {
+			var vs []float64
+			for _, r := range rs {
+				if v := cells(r)[col]; !math.IsNaN(v) {
+					vs = append(vs, v)
+				}
+			}
+			row.cells[col] = median(vs)
+		}
+		unsupported := map[string]int{}
+		for _, r := range rs {
+			if r.Error != "" {
+				row.notes = append(row.notes, fmt.Sprintf("run %d error: %s", r.Run+1, r.Error))
+			}
+			for op, n := range r.Unsupported {
+				unsupported[op] += n
+			}
+		}
+		for _, op := range slices.Sorted(maps.Keys(unsupported)) {
+			row.notes = append(row.notes, fmt.Sprintf("%s ×%d", op, unsupported[op]))
+		}
+		rows = append(rows, row)
+	}
+	return rows
+}
+
+// median returns the median of vs, or NaN if there are none.
+func median(vs []float64) float64 {
+	if len(vs) == 0 {
+		return math.NaN()
+	}
+	vs = slices.Clone(vs)
+	slices.Sort(vs)
+	n := len(vs)
+	if n%2 == 1 {
+		return vs[n/2]
+	}
+	return (vs[n/2-1] + vs[n/2]) / 2
 }
 
 // cpuSampler reads the CPU time of the stack's containers.

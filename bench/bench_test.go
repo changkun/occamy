@@ -6,7 +6,9 @@ package main
 
 import (
 	"io"
+	"math"
 	"net"
+	"slices"
 	"testing"
 	"time"
 )
@@ -96,5 +98,40 @@ func TestSummarize(t *testing.T) {
 	}
 	if summarize(nil) != nil {
 		t.Error("summarize(nil) is not nil")
+	}
+}
+
+func TestTableMedians(t *testing.T) {
+	t1 := func(run int, p95 float64) result {
+		return result{Scenario: "T1", Protocol: "ssh", Series: "occamy", Net: "N0", Run: run,
+			Latency: &percentiles{P50: 2, P95: p95, P99: p95}}
+	}
+	t3 := func(run int, kib int64) result {
+		return result{Scenario: "T3", Protocol: "ssh", Series: "occamy", Net: "N0", Run: run,
+			Seconds: 2, BytesDown: kib << 10, CPUMS: map[string]float64{"occamy": 1, "guacd": 2, "ssh": 5}}
+	}
+	broken := t3(2, 0)
+	broken.Seconds, broken.CPUMS, broken.Error = 0, nil, "session ended"
+	rows := table([]result{t1(0, 3), t3(0, 10), t1(1, 50), t3(1, 30), t1(2, 4), broken})
+
+	if len(rows) != 2 || rows[0].first.Scenario != "T1" || rows[1].first.Scenario != "T3" {
+		t.Fatalf("rows are not T1, then T3: %+v", rows)
+	}
+	// One disturbed run does not move the median.
+	if got := rows[0].cells[colP95]; got != 4 {
+		t.Errorf("T1 p95 = %v, want 4", got)
+	}
+	// A run that failed has no numbers, and the others still count.
+	if got := rows[1].cells[colRate]; got != 10 {
+		t.Errorf("T3 KiB/s = %v, want 10, the median of 5 and 15", got)
+	}
+	if got := rows[1].cells[colServerCPU]; got != 3 {
+		t.Errorf("T3 server CPU = %v, want 3", got)
+	}
+	if !math.IsNaN(rows[1].cells[colP50]) {
+		t.Errorf("T3 has a latency: %v", rows[1].cells[colP50])
+	}
+	if want := []string{"run 3 error: session ended"}; !slices.Equal(rows[1].notes, want) {
+		t.Errorf("T3 notes = %q, want %q", rows[1].notes, want)
 	}
 }
