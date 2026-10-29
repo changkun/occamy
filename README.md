@@ -18,7 +18,7 @@ Occamy is experimental. Development paused at the end of 2021 and resumed in
 |----------|--------|
 | VNC | Builds and serves sessions, verified end to end |
 | SSH | Builds and serves the first session; joining again fails ([#22](https://github.com/changkun/occamy/issues/22)) |
-| RDP | Not built: the bundled guacamole-server only supports FreeRDP 1.x, which current distributions no longer ship |
+| RDP | Through guacd, verified against xrdp |
 
 Known gaps and planned work are tracked as design specs in [specs/](./specs/README.md).
 
@@ -122,9 +122,9 @@ Occamy reaches them by compose service name:
 |----------|------|----------|----------|
 | VNC | `vnc:5900` | | `vncpassword` |
 | SSH | `ssh:22` | `occamy` | `occamy` |
+| RDP | `rdp:3389` | `occamy` | `occamy` |
 
-There is no RDP demo server yet ([specs/005](./specs/005-upstream-guacamole.md)).
-occamy connects to them through upstream guacd 1.6, which also runs in
+Occamy connects to them through upstream guacd 1.6, which also runs in
 the stack.
 
 Here is a working video demo:

@@ -16,6 +16,7 @@ Development resumed in 2026 after a pause from the end of 2021.
 - Demo servers built from the repository for linux/amd64 and linux/arm64
   (`docker/demo/`), and end-to-end tests that CI runs on every push
   (`make e2e`).
+- RDP sessions, through guacd, with an xrdp demo server in the demo stack.
 - A changelog, security policy, code of conduct and contribution guide.
 - License and NOTICE files for the bundled guacamole-server code, also
   shipped in the image under `/occamy/licenses/`.

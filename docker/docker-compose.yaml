@@ -23,6 +23,8 @@ services:
         condition: service_healthy
       ssh:
         condition: service_healthy
+      rdp:
+        condition: service_healthy
 
   guacd:
     # occamy reaches it as guacd:4822 (occamy.yaml). guacd opens the
@@ -51,5 +53,18 @@ services:
       SSH_PASSWORD: occamy
     healthcheck:
       test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/22"]
+      interval: 1s
+      retries: 30
+
+  rdp:
+    # host rdp:3389, user occamy, password occamy
+    build: ./demo/rdp
+    environment:
+      RDP_PASSWORD: occamy
+    healthcheck:
+      # Look for the listening socket (port 3389 is 0D3D) rather than
+      # connect, since xrdp logs errors for every connection that does not
+      # speak RDP.
+      test: ["CMD", "sh", "-c", "grep -q ':0D3D [0-9A-F]*:0000 0A' /proc/net/tcp /proc/net/tcp6"]
       interval: 1s
       retries: 30
