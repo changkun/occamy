@@ -215,9 +215,11 @@ func (s *session) read() {
 			s.decode.Add(int64(now.Sub(t)))
 			damage := s.display.TakeDamage()
 			// The reply acknowledges the frame, so that guacd keeps
-			// sending.
+			// sending. close may have closed the connection meanwhile.
 			if err := s.conn.writeRaw(raw); err != nil {
-				s.err = err
+				if !errClosed(err) {
+					s.err = err
+				}
 				return
 			}
 			if damage.Empty() {
