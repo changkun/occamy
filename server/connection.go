@@ -26,6 +26,7 @@ import (
 func Run() {
 	config.Init()
 	proxy := &proxy{
+		guacd:    config.Runtime.Guacd,
 		sessions: make(map[string]*Session),
 		upgrader: &websocket.Upgrader{
 			ReadBufferSize:  protocol.MaxInstructionLength,
@@ -42,6 +43,7 @@ type proxy struct {
 	jwtm     *jwt.GinJWTMiddleware
 	upgrader *websocket.Upgrader
 	engine   *gin.Engine
+	guacd    config.Guacd
 
 	mu       sync.Mutex
 	sessions map[string]*Session
