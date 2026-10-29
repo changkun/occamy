@@ -1,6 +1,6 @@
 ---
 title: Session core and backend interface
-status: drafted
+status: validated
 track: architecture
 depends_on: []
 affects:
@@ -123,24 +123,36 @@ interface over a socket. Either define a small IPC encoding of
 start, or wait until an out-of-process backend exists. Pixel data would
 travel through shared memory (`memfd` on Linux) to avoid copies.
 
-## Open Questions
+## Decisions
 
-1. Is pacing model A agreed, including the encoded-tile cache?
-2. Framebuffer concurrency A or B? The answer depends on the graphics
-   pipeline's tile size.
-3. Late join for terminals: keep a headless terminal emulator per session
-   (an exact snapshot) or replay a bounded byte log since the last
-   full-screen clear (approximate)? See
-   [native-ssh-backend](native-ssh-backend.md).
-4. Input arbitration: may several viewers send input at once (as v0
-   does), or does input require an explicit grant from the owner?
-5. Lifecycle: does the session end when the owner leaves, or when the
-   last viewer leaves? Idle timeout default? Reconnect grace period for a
-   dropped owner?
-6. Recording: a sink tap in the core (asciicast v2 for terminals, a frame
-   log for graphics), or out of scope for beta?
-7. Should IPC for out-of-process backends be defined now (serializable
-   interface) or later?
+Settled on 2026-10-29. Items 4 and 5 were the owner's call; the rest
+follow the recommendations above.
+
+1. **Pacing: A,** with the encoded-tile cache keyed by tile index, tile
+   version, codec and quality.
+2. **Framebuffer concurrency: A,** per-tile version counters and an
+   RWMutex per tile row. The row height follows the tile size that the
+   [graphics-pipeline](graphics-pipeline.md) benchmark picks.
+3. **Late join for terminals:** decided in
+   [native-ssh-backend](native-ssh-backend.md). The core only requires a
+   snapshot that the backend can produce on demand.
+4. **Input: the share role decides.** The owner and every `viewer` may
+   send input at the same time, as v0 allows. A `read-only` viewer may
+   not, and its input messages are dropped and counted. The owner
+   goroutine applies input in arrival order.
+5. **Lifecycle: the session ends with its owner.**
+   - When the owner's connection drops, the session waits for a grace
+     period for the owner to reconnect (`session.owner_grace`, default
+     60 s). Viewers stay connected and see a `viewer-left` for the owner.
+   - If the owner does not come back in time, or closes the session, it
+     ends and every viewer gets `close`.
+   - A session with no input from anyone for `session.idle_timeout`
+     (default 30 min) ends the same way.
+   - Share tokens die with the session.
+6. **Recording is out of scope for beta.** The `Sink` interface leaves
+   room for a tap later.
+7. **IPC for out-of-process backends waits** until
+   [rdp-strategy](rdp-strategy.md) picks a helper.
 
 ## Affects
 

@@ -1,6 +1,6 @@
 ---
 title: Native Swift client on a Go core
-status: drafted
+status: validated
 track: client
 depends_on:
   - specs/008-native-architecture/client-core.md
@@ -145,25 +145,36 @@ one window per session, full screen, and share links.
   events.
 - CI: a `macos-latest` job builds the archive, the package and the app.
 
-## Open Questions
+## Decisions
 
-1. Linking: A, B, or C?
-2. First platforms: macOS only, or iPadOS too? Minimum OS version, for
-   example macOS 14 for the Observation framework?
-3. Layout: in this repository under `client/occamy-swift/` (one version,
-   one CI), or a separate repository consuming released XCFrameworks?
-4. App project: SwiftPM only (an executable target plus a bundling step),
-   or an Xcode project for signing, entitlements and the App Store?
-5. Rendering: a `CALayer` first, or Metal from the start?
-6. Distribution: a notarized DMG, the Mac App Store, or TestFlight?
-7. Gio retirement: PR #51 was closed on 2026-10-29. Branches `gio` and
-   `gio-client` stay while
-   [guacd-bridge](008-native-architecture/guacd-bridge.md) considers
-   reusing `internal/guac`.
+Settled on 2026-10-29.
+
+- **Order:** the app is built on protocol v1, after
+  [client-core](008-native-architecture/client-core.md). It does not get
+  an interim Guacamole client.
+- **Platforms:** macOS 14 and later first, for the Observation framework.
+  iPadOS follows once the core ships as an XCFramework.
+- **Layout:** in this repository, under `client/occamy-swift/`, with one
+  version and one CI.
+- **Linking: C.** A `systemLibrary` target (option A) for the macOS
+  development loop, and option B's XCFramework once iPadOS or binary
+  releases need it, with the same module map.
+- **App project:** SwiftPM only for now, an executable target plus a
+  bundling step. An Xcode project waits until signing and entitlements
+  matter.
+- **Rendering:** a `CALayer` first. Metal only if profiling asks for it.
+
+Open:
+
+- **Distribution** (a notarized DMG, the Mac App Store, or TestFlight) is
+  decided before the first preview build.
+- **Gio:** the `gio` and `gio-client` branches stay.
+  [guacd-bridge](008-native-architecture/guacd-bridge.md) may reuse their
+  `internal/guac`.
 
 ## Acceptance Criteria
 
-- [ ] Linking option and first platforms chosen.
+- [x] Linking option and first platforms chosen.
 - [ ] `OccamyKit` opens a terminal session and a graphical session
       against the v1 stack.
 - [ ] CI builds the core archive and the Swift package on macOS.

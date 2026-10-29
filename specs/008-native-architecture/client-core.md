@@ -1,6 +1,6 @@
 ---
 title: Go client core
-status: drafted
+status: validated
 track: architecture
 depends_on:
   - specs/008-native-architecture/protocol-v1.md
@@ -96,15 +96,23 @@ not recommended: native browser decoders (`createImageBitmap`,
 several megabytes. The web client implements the protocol in TypeScript
 against the golden vectors from the `protocol` package.
 
-## Open Questions
+## Decisions
 
-1. Event delivery A or B? A is recommended for the C ABI and is also
-   pleasant in Go tests.
-2. Framebuffer ownership A or B?
-3. Is the package public (`client/`) from the first beta, with an API
-   stability promise, or `internal/` until the release candidate?
-4. Should the pressure test move onto this package at once, retiring
-   `tests/pressure_test.go`'s Guacamole code?
+Settled on 2026-10-29, following the recommendations above.
+
+1. **Event delivery: A,** pull through `(*Session).Next(ctx)`.
+2. **Framebuffer: A, in the export layer.**
+   - The `client` package stays pure Go. It decodes into a Go framebuffer
+     and reports dirty rectangles.
+   - [010](../010-native-swift-client.md)'s cgo export layer keeps a
+     C-allocated mirror. It copies dirty rectangles into the mirror under
+     the lock that `occamy_framebuffer_lock` exposes.
+   - No Go pointer crosses the ABI, and no pinning rules leak into Swift.
+3. **Public `client/` from the first beta,** with no API stability promise
+   until the release candidate, matching the protocol.
+4. **Tests move gradually.** End-to-end and pressure tests for protocol v1
+   use this package. The Guacamole tests in `tests/` stay as long as the
+   v0 routes do, which is until v1.0.
 
 ## Affects
 
