@@ -5,8 +5,8 @@
 # Stage 1: build the web client demo.
 FROM node:24-trixie-slim AS web
 WORKDIR /occamy/client/occamy-web
-COPY client/occamy-web/package.json ./
-RUN npm install --no-audit --no-fund
+COPY client/occamy-web/package.json client/occamy-web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY client/occamy-web ./
 RUN npm run build
 
