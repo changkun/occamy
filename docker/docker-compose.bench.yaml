@@ -1,6 +1,9 @@
 # Benchmark stack: the demo stack plus what specs/008-native-architecture/
 # benchmark.md needs. guacd is published on the loopback interface, so that
-# the harness can also measure guacd without occamy in between.
+# the harness can also measure guacd without occamy in between. The VNC
+# and RDP servers show the scene program (bench/scene) instead of an
+# xterm. They keep their service names, hosts and credentials, and are
+# tagged apart from the demo images.
 #
 #   make bench
 
@@ -8,3 +11,22 @@ services:
   guacd:
     ports:
       - "127.0.0.1:4822:4822"
+
+  vnc:
+    image: occamy-bench-desktop
+    build:
+      context: ..
+      dockerfile: docker/bench/desktop/Dockerfile
+    command: ["vnc"]
+    healthcheck:
+      # Look for the listening socket (port 5900 is 170C) rather than
+      # connect, since x11vnc sets up a client for every connection, and
+      # the check runs during measurements.
+      test: ["CMD", "sh", "-c", "grep -q ':170C [0-9A-F]*:0000 0A' /proc/net/tcp /proc/net/tcp6"]
+
+  rdp:
+    image: occamy-bench-desktop
+    build:
+      context: ..
+      dockerfile: docker/bench/desktop/Dockerfile
+    command: ["rdp"]

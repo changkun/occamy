@@ -14,6 +14,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   decoding, over emulated networks. Its numbers for the Guacamole
   protocol are the baseline that protocol v1 is designed against
   ([docs/benchmarks.md](docs/benchmarks.md)).
+- Desktop scenarios for the harness over VNC and RDP: a still desktop,
+  key latency, scrolling text, a dragged window, full-screen motion and a
+  photograph. They run on a bench desktop (`docker/bench/desktop`) whose
+  session is a scene program (`bench/scene`) drawing the same pixels in
+  every run.
 
 ## [0.5.0] - 2026-10-29
 

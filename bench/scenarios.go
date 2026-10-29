@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"slices"
 	"time"
 )
 
@@ -19,10 +20,26 @@ type scenario struct {
 	run      func(ctx context.Context, r *runner, s *session, res *result) error
 }
 
-var scenarios = []scenario{
-	{ID: "T1", Protocol: "ssh", run: runTypeEcho},
-	{ID: "T2", Protocol: "ssh", run: runBulkOutput},
-	{ID: "T3", Protocol: "ssh", run: runTop},
+var scenarios = slices.Concat(
+	[]scenario{
+		{ID: "T1", Protocol: "ssh", run: runTypeEcho},
+		{ID: "T2", Protocol: "ssh", run: runBulkOutput},
+		{ID: "T3", Protocol: "ssh", run: runTop},
+	},
+	desktopScenarios("vnc"),
+	desktopScenarios("rdp"),
+)
+
+// desktopScenarios are the scenarios on the bench desktop over proto.
+func desktopScenarios(proto string) []scenario {
+	return []scenario{
+		{ID: "G1", Protocol: proto, run: runIdle},
+		{ID: "G2", Protocol: proto, run: runProbe},
+		{ID: "G3", Protocol: proto, run: animated(keyF3, scrollFPS, 10*time.Second)},
+		{ID: "G4", Protocol: proto, run: animated(keyF4, dragFPS, 10*time.Second)},
+		{ID: "G5", Protocol: proto, run: runMotion},
+		{ID: "G6", Protocol: proto, run: runPhoto},
+	}
 }
 
 // promptQuiet is how long a fresh terminal must stay still before a

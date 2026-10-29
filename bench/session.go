@@ -326,6 +326,33 @@ func (s *session) settle(ctx context.Context, quiet time.Duration) error {
 	}
 }
 
+// last returns when the last frame after t that drew arrived, once no
+// frame has drawn for quiet.
+func (s *session) last(ctx context.Context, t time.Time, quiet time.Duration) (time.Time, error) {
+	var at time.Time
+	timer := time.NewTimer(quiet)
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return at, ctx.Err()
+		case f, open := <-s.frames:
+			if !open {
+				return at, s.ended()
+			}
+			if f.at.After(t) {
+				at = f.at
+			}
+			timer.Reset(quiet)
+		case <-timer.C:
+			if at.IsZero() {
+				return at, errors.New("nothing drew")
+			}
+			return at, nil
+		}
+	}
+}
+
 // drain consumes frames for d.
 func (s *session) drain(ctx context.Context, d time.Duration) error {
 	ctx, cancel := context.WithTimeout(ctx, d)
