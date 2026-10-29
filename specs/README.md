@@ -58,7 +58,7 @@ Build, dependencies, CI, demo environment, and documentation.
 |------|--------|-------------|
 | [001-status-quo.md](001-status-quo.md) | Testing | Buildable baseline on current toolchains, verified and documented |
 | [006-demo-stack-refresh.md](006-demo-stack-refresh.md) | Complete | Multi-arch VNC and SSH demo servers; VNC and SSH end-to-end tests in CI (pressure test opt-in until 003) |
-| [011-release-readiness.md](011-release-readiness.md) | Not started | Licensing, changelog, security policy, CI gates, attested multi-arch releases |
+| [011-release-readiness.md](011-release-readiness.md) | In progress (4/4 phases; first release not tagged) | Licensing, changelog, security policy, CI gates, attested multi-arch releases and binaries |
 
 ### server
 
