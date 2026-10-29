@@ -19,8 +19,8 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"changkun.de/x/occamy/internal/guacamole"
 	"changkun.de/x/occamy/internal/guacd"
-	"changkun.de/x/occamy/internal/protocol"
 )
 
 // Session is a guacd connection shared by every client with the same
@@ -117,7 +117,7 @@ func serveIO(conn *guacd.Conn, ws *websocket.Conn) error {
 	go func() {
 		// Announce the connection ID as an internal-opcode instruction,
 		// the way guacamole-client's tunnel announces its UUID.
-		id := protocol.NewInstruction([]string{"", conn.ID}).String()
+		id := guacamole.NewInstruction([]string{"", conn.ID}).String()
 		if err := send([]byte(id)); err != nil {
 			exit <- clientError(err)
 			return
@@ -190,7 +190,7 @@ func forward(conn *guacd.Conn, msg []byte, reply func([]byte) error) error {
 	r := bufio.NewReader(bytes.NewReader(msg))
 	out := make([]byte, 0, len(msg))
 	for {
-		raw, err := protocol.ReadRaw(r)
+		raw, err := guacamole.ReadRaw(r)
 		if errors.Is(err, io.EOF) {
 			break
 		}
@@ -201,7 +201,7 @@ func forward(conn *guacd.Conn, msg []byte, reply func([]byte) error) error {
 			out = append(out, raw...)
 			continue
 		}
-		ins, err := protocol.ParseInstruction(raw)
+		ins, err := guacamole.ParseInstruction(raw)
 		if err != nil {
 			return fmt.Errorf("%w: %w", errBadRequest, err)
 		}

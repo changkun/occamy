@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"changkun.de/x/occamy/internal/protocol"
+	"changkun.de/x/occamy/internal/guacamole"
 )
 
 // ProtocolVersion is the Guacamole protocol version sent in connect.
@@ -56,7 +56,7 @@ type Conn struct {
 	ID      string // connection ID from ready
 	Version string // protocol version guacd sent in args
 
-	io *protocol.InstructionIO
+	io *guacamole.InstructionIO
 }
 
 // Error is an error instruction received from guacd.
@@ -102,7 +102,7 @@ func Handshake(ctx context.Context, nc net.Conn, c Config) (*Conn, error) {
 	stop := context.AfterFunc(ctx, func() { _ = nc.SetDeadline(aLongTimeAgo) })
 	defer stop()
 
-	conn := &Conn{io: protocol.NewInstructionIO(nc)}
+	conn := &Conn{io: guacamole.NewInstructionIO(nc)}
 	if err := conn.handshake(c); err != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return nil, fmt.Errorf("guacd: handshake: %w", ctxErr)
@@ -191,7 +191,7 @@ func (c *Conn) handshake(cfg Config) error {
 }
 
 func (c *Conn) send(opcode string, args ...string) error {
-	_, err := c.io.Write(protocol.NewInstruction(append([]string{opcode}, args...)))
+	_, err := c.io.Write(guacamole.NewInstruction(append([]string{opcode}, args...)))
 	if err != nil {
 		return fmt.Errorf("guacd: send %s: %w", opcode, err)
 	}

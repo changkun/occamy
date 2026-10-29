@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
+	"changkun.de/x/occamy/internal/guacamole"
 	"changkun.de/x/occamy/internal/guacd"
-	"changkun.de/x/occamy/internal/protocol"
 )
 
 // fakeGuacd plays guacd's side of the handshake: it answers select with
@@ -25,7 +25,7 @@ func fakeGuacd(t *testing.T, nc net.Conn, args []string, ready string) <-chan []
 	got := make(chan []string, 1)
 	go func() {
 		defer close(got)
-		conn := protocol.NewInstructionIO(nc)
+		conn := guacamole.NewInstructionIO(nc)
 		var received []string
 		for {
 			ins, err := conn.Read()
@@ -36,9 +36,9 @@ func fakeGuacd(t *testing.T, nc net.Conn, args []string, ready string) <-chan []
 			received = append(received, ins.String())
 			switch ins.Opcode() {
 			case "select":
-				conn.Write(protocol.NewInstruction(append([]string{"args"}, args...)))
+				conn.Write(guacamole.NewInstruction(append([]string{"args"}, args...)))
 			case "connect":
-				conn.Write(protocol.NewInstruction([]string{"ready", ready}))
+				conn.Write(guacamole.NewInstruction([]string{"ready", ready}))
 				got <- received
 				return
 			}
@@ -48,7 +48,7 @@ func fakeGuacd(t *testing.T, nc net.Conn, args []string, ready string) <-chan []
 }
 
 func instruction(elements ...string) string {
-	return protocol.NewInstruction(elements).String()
+	return guacamole.NewInstruction(elements).String()
 }
 
 func TestHandshakeNewConnection(t *testing.T) {
@@ -147,9 +147,9 @@ func TestHandshakeNoSuchConnection(t *testing.T) {
 	defer cli.Close()
 	defer srv.Close()
 	go func() {
-		conn := protocol.NewInstructionIO(srv)
+		conn := guacamole.NewInstructionIO(srv)
 		conn.Read()
-		conn.Write(protocol.NewInstruction([]string{"error", "No such connection.", "519"}))
+		conn.Write(guacamole.NewInstruction([]string{"error", "No such connection.", "519"}))
 	}()
 
 	_, err := guacd.Handshake(context.Background(), cli, guacd.Config{ConnectionID: "$gone"})
@@ -163,7 +163,7 @@ func TestHandshakeTimeout(t *testing.T) {
 	cli, srv := net.Pipe()
 	defer cli.Close()
 	defer srv.Close()
-	go protocol.NewInstructionIO(srv).Read() // read select, never answer
+	go guacamole.NewInstructionIO(srv).Read() // read select, never answer
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
@@ -192,7 +192,7 @@ func TestHandshakeSpecialValues(t *testing.T) {
 		t.Fatalf("handshake error: %v", err)
 	}
 	g := <-got
-	ins, err := protocol.ParseInstruction([]byte(g[len(g)-1]))
+	ins, err := guacamole.ParseInstruction([]byte(g[len(g)-1]))
 	if err != nil {
 		t.Fatalf("parse connect error: %v", err)
 	}
@@ -206,9 +206,9 @@ func TestHandshakeOldGuacd(t *testing.T) {
 	defer cli.Close()
 	defer srv.Close()
 	go func() {
-		conn := protocol.NewInstructionIO(srv)
+		conn := guacamole.NewInstructionIO(srv)
 		conn.Read()
-		conn.Write(protocol.NewInstruction([]string{"args", "hostname", "port"}))
+		conn.Write(guacamole.NewInstruction([]string{"args", "hostname", "port"}))
 	}()
 
 	_, err := guacd.Handshake(context.Background(), cli, guacd.Config{Protocol: "vnc"})
@@ -222,9 +222,9 @@ func TestHandshakeUnexpectedInstruction(t *testing.T) {
 	defer cli.Close()
 	defer srv.Close()
 	go func() {
-		conn := protocol.NewInstructionIO(srv)
+		conn := guacamole.NewInstructionIO(srv)
 		conn.Read()
-		conn.Write(protocol.NewInstruction([]string{"sync", "123"}))
+		conn.Write(guacamole.NewInstruction([]string{"sync", "123"}))
 	}()
 
 	_, err := guacd.Handshake(context.Background(), cli, guacd.Config{Protocol: "vnc"})

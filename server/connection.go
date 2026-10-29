@@ -20,7 +20,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"changkun.de/x/occamy/internal/config"
-	"changkun.de/x/occamy/internal/protocol"
+	"changkun.de/x/occamy/internal/guacamole"
 )
 
 // Run is an export method that serves occamy proxy
@@ -30,8 +30,8 @@ func Run() {
 		guacd:    config.Runtime.Guacd,
 		sessions: make(map[string]*Session),
 		upgrader: &websocket.Upgrader{
-			ReadBufferSize:  protocol.MaxInstructionLength,
-			WriteBufferSize: protocol.MaxInstructionLength,
+			ReadBufferSize:  guacamole.MaxInstructionLength,
+			WriteBufferSize: guacamole.MaxInstructionLength,
 			Subprotocols:    []string{"guacamole"}, // fixed by guacamole-client
 		},
 	}

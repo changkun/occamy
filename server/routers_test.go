@@ -24,7 +24,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"changkun.de/x/occamy/internal/config"
-	"changkun.de/x/occamy/internal/protocol"
+	"changkun.de/x/occamy/internal/guacamole"
 )
 
 // fakeGuacd is an in-process guacd. It answers the handshake, numbers new
@@ -65,8 +65,8 @@ func newFakeGuacd(t *testing.T) *fakeGuacd {
 
 func (g *fakeGuacd) handle(nc net.Conn) {
 	defer nc.Close()
-	io := protocol.NewInstructionIO(nc)
-	send := func(elements ...string) { io.Write(protocol.NewInstruction(elements)) }
+	io := guacamole.NewInstructionIO(nc)
+	send := func(elements ...string) { io.Write(guacamole.NewInstruction(elements)) }
 
 	ins, err := io.Read()
 	if err != nil || ins.Opcode() != "select" || len(ins.Args()) == 0 {
@@ -272,7 +272,7 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 }
 
 func announce(id string) string {
-	return protocol.NewInstruction([]string{"", id}).String()
+	return guacamole.NewInstruction([]string{"", id}).String()
 }
 
 // A connection that fails before reaching guacd must release the proxy
@@ -384,7 +384,7 @@ func TestServeIOInternalOpcodes(t *testing.T) {
 		t.Fatalf("first message = %q, want %q", got, want)
 	}
 
-	ping := protocol.NewInstruction([]string{"", "ping", "1730000000000"}).String()
+	ping := guacamole.NewInstruction([]string{"", "ping", "1730000000000"}).String()
 	if err := ws.WriteMessage(websocket.TextMessage, []byte(ping)); err != nil {
 		t.Fatal(err)
 	}

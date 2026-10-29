@@ -2,7 +2,7 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package protocol_test
+package guacamole_test
 
 import (
 	"bufio"
@@ -15,11 +15,11 @@ import (
 	"testing"
 	"testing/iotest"
 
-	"changkun.de/x/occamy/internal/protocol"
+	"changkun.de/x/occamy/internal/guacamole"
 )
 
 func TestNewInstruction(t *testing.T) {
-	ins := protocol.NewInstruction([]string{"hello", "世界"})
+	ins := guacamole.NewInstruction([]string{"hello", "世界"})
 	want := "5.hello,2.世界;"
 	if want != ins.String() {
 		t.Errorf("encode instruction error, got: %s", ins.String())
@@ -29,7 +29,7 @@ func TestNewInstruction(t *testing.T) {
 		t.FailNow()
 	}
 
-	ins = protocol.NewInstruction([]string{"fake", ""})
+	ins = guacamole.NewInstruction([]string{"fake", ""})
 	want = "4.fake,0.;"
 	if want != ins.String() {
 		t.Errorf("encode instruction error, got: %s", ins.String())
@@ -43,15 +43,15 @@ func TestNewInstruction(t *testing.T) {
 func TestParseInstructionReplacementCharacter(t *testing.T) {
 	// U+FFFD is valid UTF-8 even though it decodes to utf8.RuneError.
 	raw := "3.key,1.\uFFFD;"
-	ins, err := protocol.ParseInstruction([]byte(raw))
+	ins, err := guacamole.ParseInstruction([]byte(raw))
 	if err != nil {
 		t.Fatalf("parse instruction error: %v", err)
 	}
 	if ins.String() != raw {
 		t.Fatalf("parse instruction wrong, got: %q", ins.String())
 	}
-	if _, err := protocol.ParseInstruction([]byte("3.key,1.\xff;")); !errors.Is(err, protocol.ErrInstructionBadRune) {
-		t.Fatalf("parse invalid utf-8, got: %v, want: %v", err, protocol.ErrInstructionBadRune)
+	if _, err := guacamole.ParseInstruction([]byte("3.key,1.\xff;")); !errors.Is(err, guacamole.ErrInstructionBadRune) {
+		t.Fatalf("parse invalid utf-8, got: %v, want: %v", err, guacamole.ErrInstructionBadRune)
 	}
 }
 
@@ -60,8 +60,8 @@ func TestNewInstructionIO(t *testing.T) {
 
 	// net.Pipe is synchronous: each write waits for the matching read.
 	a, b := net.Pipe()
-	conn := protocol.NewInstructionIO(a)
-	var ins *protocol.Instruction
+	conn := guacamole.NewInstructionIO(a)
+	var ins *guacamole.Instruction
 	t.Run("read", func(t *testing.T) {
 		go b.Write([]byte(raw))
 
@@ -105,7 +105,7 @@ func readRaw(t *testing.T, r io.Reader) []string {
 	br := bufio.NewReader(r)
 	var got []string
 	for {
-		raw, err := protocol.ReadRaw(br)
+		raw, err := guacamole.ReadRaw(br)
 		if errors.Is(err, io.EOF) {
 			return got
 		}
@@ -126,7 +126,7 @@ func TestInstructionIOOverPipe(t *testing.T) {
 		}
 	}()
 
-	conn := protocol.NewInstructionIO(b)
+	conn := guacamole.NewInstructionIO(b)
 	for _, w := range want {
 		raw, err := conn.ReadRaw()
 		if err != nil {
@@ -165,12 +165,12 @@ func TestReadRawPartialReads(t *testing.T) {
 func TestReadRawSplitsMessage(t *testing.T) {
 	r := bufio.NewReader(bytes.NewReader([]byte("3.key,5.65307,1.1;3.key,5.65307,1.0;")))
 	for _, want := range []string{"3.key,5.65307,1.1;", "3.key,5.65307,1.0;"} {
-		raw, err := protocol.ReadRaw(r)
+		raw, err := guacamole.ReadRaw(r)
 		if err != nil || string(raw) != want {
 			t.Fatalf("read instruction wrong, got: %q, %v, want: %q", raw, err, want)
 		}
 	}
-	if _, err := protocol.ReadRaw(r); !errors.Is(err, io.EOF) {
+	if _, err := guacamole.ReadRaw(r); !errors.Is(err, io.EOF) {
 		t.Fatalf("read after last instruction, got: %v, want: io.EOF", err)
 	}
 }
@@ -187,15 +187,15 @@ func TestReadRawLimits(t *testing.T) {
 		raw  string
 		err  error
 	}{
-		{"max elements", elements(protocol.InstructionMaxElements), nil},
-		{"too many elements", elements(protocol.InstructionMaxElements + 1), protocol.ErrInstructionTooManyElements},
-		{"max element length", element(protocol.MaxInstructionLength), nil},
-		{"element too long", element(protocol.MaxInstructionLength + 1), protocol.ErrInstructionTooLong},
-		{"six digit length", "123456.a;", protocol.ErrInstructionBadDigit},
-		{"no digits", ".;", protocol.ErrInstructionBadDigit},
-		{"letter in length", "4x.sync;", protocol.ErrInstructionBadDigit},
-		{"bad terminator", "4.sync:", protocol.ErrInstructionMissComma},
-		{"invalid utf-8", "1.\xff;", protocol.ErrInstructionBadRune},
+		{"max elements", elements(guacamole.InstructionMaxElements), nil},
+		{"too many elements", elements(guacamole.InstructionMaxElements + 1), guacamole.ErrInstructionTooManyElements},
+		{"max element length", element(guacamole.MaxInstructionLength), nil},
+		{"element too long", element(guacamole.MaxInstructionLength + 1), guacamole.ErrInstructionTooLong},
+		{"six digit length", "123456.a;", guacamole.ErrInstructionBadDigit},
+		{"no digits", ".;", guacamole.ErrInstructionBadDigit},
+		{"letter in length", "4x.sync;", guacamole.ErrInstructionBadDigit},
+		{"bad terminator", "4.sync:", guacamole.ErrInstructionMissComma},
+		{"invalid utf-8", "1.\xff;", guacamole.ErrInstructionBadRune},
 		{"truncated element", "4.syn", io.ErrUnexpectedEOF},
 		{"truncated length", "4", io.ErrUnexpectedEOF},
 		{"missing terminator", "4.sync", io.ErrUnexpectedEOF},
@@ -203,7 +203,7 @@ func TestReadRawLimits(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			raw, err := protocol.ReadRaw(bufio.NewReader(strings.NewReader(tt.raw)))
+			raw, err := guacamole.ReadRaw(bufio.NewReader(strings.NewReader(tt.raw)))
 			if !errors.Is(err, tt.err) {
 				t.Fatalf("read instruction error, got: %v, want: %v", err, tt.err)
 			}
@@ -220,19 +220,19 @@ func FuzzReadRaw(f *testing.F) {
 	f.Add([]byte("0.,4.ping,13.1730000000000;"))
 	f.Add([]byte("4.sync,11.10574782313;4.sync"))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		raw, err := protocol.ReadRaw(bufio.NewReader(bytes.NewReader(data)))
+		raw, err := guacamole.ReadRaw(bufio.NewReader(bytes.NewReader(data)))
 		if err != nil {
 			return
 		}
 		if !bytes.HasPrefix(data, raw) {
 			t.Fatalf("raw %q is not a prefix of the input", raw)
 		}
-		ins, err := protocol.ParseInstruction(raw)
+		ins, err := guacamole.ParseInstruction(raw)
 		if err != nil {
 			t.Fatalf("accepted %q but ParseInstruction failed: %v", raw, err)
 		}
 		canonical := ins.String()
-		again, err := protocol.ReadRaw(bufio.NewReader(strings.NewReader(canonical)))
+		again, err := guacamole.ReadRaw(bufio.NewReader(strings.NewReader(canonical)))
 		if err != nil || string(again) != canonical {
 			t.Fatalf("%q does not round-trip: %q, %v", canonical, again, err)
 		}

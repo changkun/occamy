@@ -2,7 +2,7 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-package protocol_test
+package guacamole_test
 
 import (
 	"bufio"
@@ -14,11 +14,11 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"changkun.de/x/occamy/internal/protocol"
+	"changkun.de/x/occamy/internal/guacamole"
 )
 
 // ParseInstructionGuac parses an instruction: 1.a,2.bc,3.def,10.abcdefghij;
-func ParseInstructionGuac(raw []byte) (ins *protocol.Instruction, err error) {
+func ParseInstructionGuac(raw []byte) (ins *guacamole.Instruction, err error) {
 	var (
 		cursor   int
 		elements []string
@@ -36,11 +36,11 @@ func ParseInstructionGuac(raw []byte) (ins *protocol.Instruction, err error) {
 			}
 		}
 		if lengthEnd == -1 { // cannot find '.'
-			return nil, protocol.ErrInstructionMissDot
+			return nil, guacamole.ErrInstructionMissDot
 		}
 		length, err := strconv.Atoi(string(raw[cursor:lengthEnd]))
 		if err != nil {
-			return nil, protocol.ErrInstructionBadDigit
+			return nil, guacamole.ErrInstructionBadDigit
 		}
 
 		// 2. parse rune
@@ -49,7 +49,7 @@ func ParseInstructionGuac(raw []byte) (ins *protocol.Instruction, err error) {
 		for i := 1; i <= length; i++ {
 			r, n := utf8.DecodeRune(raw[cursor:])
 			if r == utf8.RuneError {
-				return nil, protocol.ErrInstructionBadRune
+				return nil, guacamole.ErrInstructionBadRune
 			}
 			cursor += n
 			element.WriteRune(r)
@@ -63,23 +63,23 @@ func ParseInstructionGuac(raw []byte) (ins *protocol.Instruction, err error) {
 
 		// 4. parse next
 		if raw[cursor] != ',' {
-			return nil, protocol.ErrInstructionMissComma
+			return nil, guacamole.ErrInstructionMissComma
 		}
 
 		cursor++
 	}
 
-	return protocol.NewInstruction(elements), nil
+	return guacamole.NewInstruction(elements), nil
 }
 
 // ParseInstructionOccamy parses an instruction: a,bc,def,abcdefghij;
-func ParseInstructionOccamy(raw []byte) (ins *protocol.Instruction, err error) {
+func ParseInstructionOccamy(raw []byte) (ins *guacamole.Instruction, err error) {
 	if string(raw[len(raw)-1]) != ";" {
-		return nil, protocol.ErrInstructionMissSemi
+		return nil, guacamole.ErrInstructionMissSemi
 	}
 
 	elements := strings.Split(string(raw)[:len(raw)-1], ",")
-	return protocol.NewInstruction(elements), nil
+	return guacamole.NewInstruction(elements), nil
 }
 
 func BenchmarkInstructionParser(b *testing.B) {
@@ -115,11 +115,11 @@ func BenchmarkReadRaw(b *testing.B) {
 			b.ReportAllocs()
 			b.SetBytes(int64(len(instructions[idx])))
 			src := bytes.NewReader(nil)
-			r := bufio.NewReaderSize(src, protocol.MaxInstructionLength)
+			r := bufio.NewReaderSize(src, guacamole.MaxInstructionLength)
 			for i := 0; i < b.N; i++ {
 				src.Reset(instructions[idx])
 				r.Reset(src)
-				if _, err := protocol.ReadRaw(r); err != nil {
+				if _, err := guacamole.ReadRaw(r); err != nil {
 					b.Fatal(err)
 				}
 			}
