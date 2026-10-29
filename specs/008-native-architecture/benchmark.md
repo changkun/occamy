@@ -252,7 +252,8 @@ so the repository carries no image files.
   - x11vnc with its defaults uses about 8% of a CPU with no client
     connected, and takes 27 ms at the median and 125 ms at p95 from a
     key to its update. The bench desktop tunes it to 2.8 ms and 3.4 ms
-    (`docker/bench/desktop/start.sh`).
+    (`docker/bench/desktop/start.sh`), at about one CPU whether a client
+    is connected or not.
 - **Findings for the targets:** occamyd costs nothing measurable over
   guacd. T1 is near its floor (3 ms p95 at N0), so its target is the
   bound plus a margin. guacd coalesces T2's 575 KiB into 82–115 KiB of
