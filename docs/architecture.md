@@ -1,10 +1,9 @@
 # Occamy Architecture
 
-Figure 1 illustrates the architecture of an Guacamole application, it requires
-end-user install a Guacamole Servlet for authentication proxy, and uses `guacd` as
-a second proxy for the connection management between end-user and remote desktop server.
-Furthermore, `guacd` manages connection in different processes, which can limits the maximum
-connection of Guacamole application.
+Figure 1 illustrates the architecture of a Guacamole application. It needs a
+Guacamole Servlet (a Java web application) for authentication and for tunneling the
+protocol to the browser, and `guacd` as a second proxy that connects to the remote
+desktop servers, with one process per connection.
 
 ```
 |-- Browser --|-------- Guacamole Server -----------|--- Intranet ---|
