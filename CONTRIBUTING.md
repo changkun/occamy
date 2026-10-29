@@ -59,6 +59,12 @@ as `-beta.1` when needed. To cut one:
 1. Move the `Unreleased` entries in `CHANGELOG.md` under the new version
    and date, and update the comparison links.
 2. Merge that change, wait for CI to pass on `master`, and tag that commit.
-3. Push the tag. The release workflow that builds and publishes the
-   artifacts is planned in
-   [specs/011-release-readiness.md](specs/011-release-readiness.md).
+3. Push the tag. `.github/workflows/release.yml` builds the multi-arch
+   image and the web client archive, and publishes them with
+   `SHA256SUMS`, provenance attestations, and the changelog section as
+   release notes. It fails if `CHANGELOG.md` has no entries for the
+   version.
+
+Run the workflow by hand (Actions, Release, Run workflow) for a dry run
+that builds everything and publishes nothing. Pull requests that change
+the workflow or `docker/Dockerfile` run the dry run automatically.
