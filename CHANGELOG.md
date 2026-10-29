@@ -14,6 +14,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   decoding, over emulated networks. Its numbers for the Guacamole
   protocol are the baseline that protocol v1 is designed against
   ([docs/benchmarks.md](docs/benchmarks.md)).
+- CI runs the pressure test, which crashed `occamyd` before 0.5.0
+  ([#20](https://github.com/changkun/occamy/issues/20)), with 10 rounds.
+  Afterwards, `occamyd`'s goroutines and guacd's processes must return
+  to their numbers before the tests.
 
 ### Fixed
 
