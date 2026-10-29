@@ -8,12 +8,11 @@ import (
 	"crypto/md5"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 
 	"github.com/gin-gonic/gin"
-	"gopkg.in/yaml.v2"
+	"go.yaml.in/yaml/v3"
 )
 
 // JWT is a configuration structure between browser client and server
@@ -57,7 +56,7 @@ Usage:`)
 		flag.PrintDefaults()
 	}
 	flag.Parse()
-	raw, err := ioutil.ReadFile(*loc)
+	raw, err := os.ReadFile(*loc)
 	if err != nil {
 		log.Fatalf("cannot open given config file, error: %v", err)
 	}

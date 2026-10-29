@@ -8,7 +8,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"sync"
 	"testing"
@@ -75,7 +75,7 @@ func login(protocol string) string {
 	}
 	defer resp.Body.Close()
 
-	d, err := ioutil.ReadAll(resp.Body)
+	d, err := io.ReadAll(resp.Body)
 	if err != nil {
 		panic(fmt.Sprintf("login: reading respons failed: %v", err))
 	}
@@ -151,12 +151,12 @@ func failConnect(url string) error {
 // TestConnectionPressure implements a pressure test for occamy service.
 // It is required to run the occamy service to run this test.
 //
-//  make build
-//  make run
+//	make build
+//	make run
 //
 // then run this test by:
 //
-//  go test -v -count=1 .
+//	go test -v -count=1 .
 func TestConnectionPressure(t *testing.T) {
 	protos := []string{
 		"vnc",
