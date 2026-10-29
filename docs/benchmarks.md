@@ -78,17 +78,46 @@ answers each `sync` once the frame is applied, and sends a `nop` every
   frames. A browser decodes natively, so only ratios between series mean
   anything.
 
-So far the harness runs the terminal scenarios over SSH:
+The scenarios:
 
-| ID | Scenario | Primary metric |
-|----|----------|----------------|
-| T1 | Type 200 characters, 10 per second, into an idle shell; latency is from each key to the first frame that draws | latency |
-| T2 | `seq 1 100000`, then a magenta end marker; completion is from Return until the marker is visible | bytes, completion, server CPU |
-| T3 | `top -d 0.5` for 30 s | bytes per second |
-| G7 | Connect | time to the first frame |
+| ID | Protocol | Scenario | Primary metric |
+|----|----------|----------|----------------|
+| T1 | SSH | Type 200 characters, 10 per second, into an idle shell; latency is from each key to the first frame that draws | latency |
+| T2 | SSH | `seq 1 100000`, then a magenta end marker; completion is from Return until the marker is visible | bytes, completion, server CPU |
+| T3 | SSH | `top -d 0.5` for 30 s | bytes per second |
+| G1 | VNC, RDP | A still desktop for 30 s | bytes per second, server CPU |
+| G2 | VNC, RDP | Probe keys, 10 per second, on a still desktop | latency |
+| G3 | VNC, RDP | A page of text scrolling one line every 16 ms, for 10 s | bytes, server CPU, frame rate |
+| G4 | VNC, RDP | A 400×300 textured window dragged at 60 Hz, for 10 s | bytes, server CPU, frame rate |
+| G5 | VNC, RDP | Full-screen motion at 30 fps, with probe keys during it | frame rate, bytes, latency under load |
+| G6 | VNC, RDP | One photographic full-screen image; completion is from the key until the last update | bytes, completion |
+| G7 | all | Connect | time to the first frame |
 
-The desktop scenarios (G1–G6, and G7 over VNC and RDP) follow with the
-bench desktop.
+### The bench desktop
+
+`make bench` replaces the demo's VNC and RDP servers with the bench
+desktop (`docker/bench/desktop`). The service names, hosts and
+credentials stay the same. In both, the session is the scene program
+(`bench/scene`), with no window manager. It covers the screen with one
+window, draws content generated from fixed seeds, and switches scenes on
+function keys: F1 is idle, F2 the probe, F3 the scroll, F4 the drag, F5
+the motion, F6 the photo, and Escape goes back to idle.
+
+Every letter paints a 32×32 swatch near the top left corner in a colour
+of its own (`bench/internal/probe`). Latency is from writing the key
+until the harness's framebuffer shows that colour at the swatch's
+centre, within a tolerance for lossy encoding and 16-bit colour. Every
+scene starts with a grey swatch, so the first probe key always changes
+it.
+
+The VNC server is x11vnc on Xvfb. With its defaults, x11vnc alone takes
+27 ms at the median and 125 ms at p95 from a key to the update that
+shows it, which would hide everything after it. In the bench desktop it
+runs threaded, polls every millisecond, and skips its naps and its
+detection of window moves and scrolls, which brings it to 2.8 ms and
+3.4 ms. These were measured with a VNC client inside the container, so
+they include no network or guacd. The RDP server is xrdp with
+xorgxrdp, as configured by Debian.
 
 ## Terminal baseline
 

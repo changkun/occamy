@@ -301,12 +301,15 @@ type result struct {
 	FirstFrame *percentiles `json:"first_frame_ms,omitempty"`
 	Completion float64      `json:"completion_ms,omitempty"`
 
-	Seconds   float64            `json:"seconds,omitempty"`
-	BytesUp   int64              `json:"bytes_up,omitempty"`
-	BytesDown int64              `json:"bytes_down,omitempty"`
-	Frames    int64              `json:"frames,omitempty"`
-	DecodeMS  float64            `json:"client_decode_ms,omitempty"`
-	CPUMS     map[string]float64 `json:"cpu_ms,omitempty"`
+	Seconds   float64 `json:"seconds,omitempty"`
+	BytesUp   int64   `json:"bytes_up,omitempty"`
+	BytesDown int64   `json:"bytes_down,omitempty"`
+	Frames    int64   `json:"frames,omitempty"`
+	DecodeMS  float64 `json:"client_decode_ms,omitempty"`
+	// SceneFPS is the rate at which the scene animates, which bounds
+	// Frames/Seconds.
+	SceneFPS float64            `json:"scene_fps,omitempty"`
+	CPUMS    map[string]float64 `json:"cpu_ms,omitempty"`
 
 	Unsupported map[string]int `json:"unsupported,omitempty"`
 	Error       string         `json:"error,omitempty"`
@@ -345,7 +348,7 @@ func (rep *report) markdown(w io.Writer) {
 			lat = fmt.Sprintf("%.1f / %.1f / %.1f", c[colP50], c[colP95], c[colP99])
 		}
 		scen := r.Scenario
-		if r.Scenario == "G7" {
+		if strings.HasPrefix(r.Scenario, "G") {
 			scen += " " + r.Protocol
 		}
 		fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
@@ -436,6 +439,9 @@ func table(results []result) []row {
 				}
 			}
 			row.cells[col] = median(vs)
+		}
+		if fps := rs[0].SceneFPS; fps > 0 {
+			row.notes = append(row.notes, fmt.Sprintf("scene %g fps", fps))
 		}
 		unsupported := map[string]int{}
 		for _, r := range rs {
