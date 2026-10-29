@@ -140,7 +140,7 @@ Add a `guacd` service pinned to the 1.6 line in
 |------------|-----------|--------|--------|
 | [Instruction I/O over any stream](005-upstream-guacamole/instruction-stream-io.md) | — | medium | complete |
 | [guacd handshake client](005-upstream-guacamole/guacd-handshake-client.md) | instruction-stream-io | medium | complete |
-| [guacd service in the demo stack](005-upstream-guacamole/guacd-compose-service.md) | [006](006-demo-stack-refresh.md) | small | validated |
+| [guacd service in the demo stack](005-upstream-guacamole/guacd-compose-service.md) | [006](006-demo-stack-refresh.md) | small | complete |
 | [guacd configuration and parameters](005-upstream-guacamole/guacd-config.md) | guacd-compose-service | small | validated |
 | [Serve sessions through guacd](005-upstream-guacamole/guacd-sessions.md) | guacd-handshake-client, guacd-config | large | validated |
 | [Remove libguac and cgo](005-upstream-guacamole/remove-libguac.md) | guacd-sessions | medium | validated |

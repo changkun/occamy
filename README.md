@@ -103,6 +103,7 @@ Occamy reaches them by compose service name:
 | SSH | `ssh:22` | `occamy` | `occamy` |
 
 There is no RDP demo server yet ([specs/005](./specs/005-upstream-guacamole.md)).
+The stack also runs upstream guacd 1.6, which occamy does not use yet.
 
 Here is a working video demo:
 
