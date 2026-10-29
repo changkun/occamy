@@ -5,6 +5,7 @@ track: architecture
 depends_on:
   - specs/008-native-architecture/protocol-v1.md
   - specs/008-native-architecture/session-core.md
+  - specs/008-native-architecture/benchmark.md
 affects:
   - internal/framebuffer/
   - internal/encoder/

@@ -72,6 +72,20 @@ evolve without breaking old clients.
   sent as one coalesced frame once an ack arrives. Terminal data is not
   windowed but is bounded by the WebSocket write buffer, with a
   disconnect-on-overflow limit.
+- **Latency:** the design must meet the 50 ms budget in
+  [benchmark](benchmark.md).
+  - Every input message carries a u32 sequence number, and `frame-end`
+    carries the last sequence number the frame reflects. A client can
+    then measure input-to-update latency exactly.
+  - The server sends small messages (`cursor-move`, `term-data`, `close`
+    and the like) ahead of queued tiles.
+  - A tile message has a size cap, so a small message waits behind at most
+    one tile.
+  - Besides the frame window, the bytes in flight per viewer are capped
+    near the link's bandwidth-delay product, estimated from `frame-ack`
+    round trips. Without that cap, one large frame fills the TCP buffers.
+  - The client draws the cursor locally from `cursor`, so pointer motion
+    does not wait for a round trip.
 - **Versioning:** the major version lives in the subprotocol name. Minor
   evolution goes through capabilities and ignorable messages. Message type
   numbers are never reused.
@@ -122,8 +136,9 @@ Settled on 2026-10-29.
    client each hold the table that translates from `KeyboardEvent.code`
    or `NSEvent.keyCode`.
 3. **Frame window: 2 by default.** `welcome` can agree a different value.
-   Tune it with the graphics pipeline's slow-viewer test and a 100 ms RTT
-   link before the release candidate.
+   Tune it with the graphics pipeline's slow-viewer test and the
+   [benchmark](benchmark.md) under N1 and N2 before the release
+   candidate.
 4. **No terminal flow control for beta.** Terminal data is bounded by the
    WebSocket write buffer, and a viewer that overflows it is
    disconnected. Byte credits can come later as a capability.
