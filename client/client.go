@@ -29,10 +29,10 @@
 // from the frame's frame-end arriving to its delivery, so the server
 // spaces its frames by how fast the caller takes them rather than
 // taking a slow caller for a slow network. The server's frame interval
-// follows that time, so after a long pause it recovers over a few
-// frames; a caller that stops taking events for long, as when its window
-// is hidden, says so with View instead, and gets one frame of the
-// current screen when it shows again.
+// follows that time, so a long pause slows motion, though not the frame
+// after an input, for about as long again; a caller that stops taking
+// events for long, as when its window is hidden, says so with View
+// instead, and gets one frame of the current screen when it shows again.
 //
 // Tiles of codecs other than raw are decoded as they arrive, in
 // parallel, by decoders the caller plugs in through Options.Decoders;

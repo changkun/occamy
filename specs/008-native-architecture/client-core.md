@@ -169,9 +169,15 @@ layer, and any tools.
   - `decode_time` runs from the frame's `frame-end` arriving to its
     delivery. The server takes it out of the round trip and spaces its
     frames by it, so a caller that takes frames at 30 a second gets about
-    30, each fresh. After a pause the server's frame interval recovers
-    over a few frames; a caller whose window is hidden says so with
-    `View` instead.
+    30, each fresh. The cost is a long pause: the pacer averages decode
+    times over about eight frames, so each frame held for a pause of
+    length H adds about H/8 to the frame interval, which then shrinks by
+    an eighth a frame. Motion stays slow for about H per held frame, two
+    or three of them after a full window, so a 30 s stall costs about a
+    minute of slowed motion afterwards. Input is not slowed: the frame
+    after an input ignores the interval. A caller whose window is hidden
+    says so with `View` instead, and the pacer should damp the sample
+    (Follow-ups).
   - The slow-consumer policy is one ordered queue of small events and
     complete frames, each frame at its `frame-end`. Frames are bounded by
     the protocol: more than `frame_window` + 1 undelivered is a
@@ -218,9 +224,10 @@ layer, and any tools.
     `TestTerminalResizeRequest`
     ([session-core](session-core.md), terminal frames).
   - The pacer treats a zero decode average as no sample and adopts the
-    next one whole. In a synctest bubble decoding takes no time, so one
-    held frame sets the frame interval to the whole hold, and it decays
-    by an eighth a frame. Real decode times are never exactly zero.
+    next one whole. In a synctest bubble decoding takes no time, so the
+    first held frame sets the frame interval to the whole hold, which
+    makes the hold test's recovery slower than the H/8 a frame above;
+    the test waits ten seconds for full rate.
 - **Protocol text clarified** in [docs/protocol.md](../../docs/protocol.md):
   - `frame-ack`'s `decode_time` runs from `frame-end` arriving to the
     acknowledgement, any wait to be shown included. The server's round
@@ -245,8 +252,12 @@ layer, and any tools.
     occamyd's handler must. `dial_test.go`'s `wsServer` is the adapter
     such a handler needs. The owner's `hello` size still does not size
     the remote (known; see session-core).
-  - The pacer could ignore a zero decode average and damp outliers, so
-    one long hold does not slow motion for several frames.
+  - Pacer: `Interval()` follows the raw decode average, so one long
+    hold slows motion for about as long again (Decisions). It should cap
+    or damp a decode sample far above the average, and not take a zero
+    average for no sample. The round trip and delivery rate need the
+    whole time, so the fix belongs in the interval, not in what clients
+    report.
 - **Tests:** end-to-end against `stream.Serve` with real sessions and
   the backendtest backends, in synctest bubbles: a graphical screen drawn
   and copied at random converges byte for byte, through raw tiles and
