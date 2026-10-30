@@ -463,8 +463,13 @@ leaves only RDP on the bridge.
     `OCCAMY_CONTAINER_ENGINE`, as the RDP spike's test does: both are
     named `occamy-vnc-it-until<time>-<pid>` after the time the run ends
     at the latest, the port is the engine's choice, and the run removes
-    them, or the next run once that time has passed. It skips without an
-    engine; `OCCAMY_VNC_TLS_ADDR` points it at a running server instead.
+    them, or the next run once that time has passed. A later run removes
+    only names that are a run's whole, after any registry and path and
+    before any tag: review found that matching the prefix anywhere in a
+    name, as the RDP spike still does, would remove other people's
+    containers and images on a shared host. `TestExpired`, outside the
+    tag, pins the matcher. It skips without an engine;
+    `OCCAMY_VNC_TLS_ADDR` points it at a running server instead.
     It connects with a private CA by address and by name, a pinned
     fingerprint, insecure mode with its warning, Plain with a configured
     and with a prompted password; it is refused with a wrong host, the
