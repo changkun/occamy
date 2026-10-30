@@ -78,11 +78,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   then the client's input and views applied as they come, and frames at
   the pace of the viewer's link. Small state never waits behind tiles,
   and an input's effect goes ahead of motion already on the screen.
-  Graphical sessions get raw tiles for now; terminal sessions get the
-  diff between the screens a viewer was sent, so bulk output coalesces,
-  an echo goes ahead of a status line or other output already on the
-  screen, and the terminal's answers to the shell's queries reach the
-  shell. Not served by any route yet.
+  Graphical sessions get tiles in the codecs the viewer agreed to;
+  terminal sessions get the diff between the screens a viewer was sent,
+  so bulk output coalesces, an echo goes ahead of a status line or other
+  output already on the screen, and the terminal's answers to the
+  shell's queries reach the shell. Not served by any route yet.
 - A native VNC backend for protocol v1, `internal/backend/vnc`, in pure
   Go: RFB 3.3, 3.7 and 3.8 with the security types None and VNC
   Authentication, asking the session's owner for a password the
@@ -131,6 +131,19 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   lossy WebP and JPEG on them for size, time and SSIM. It picks deflate
   for lossless tiles, 64-pixel tiles, RGBA pixels, and WebP for lossy
   tiles with JPEG as the fallback.
+- The codecs of the graphics pipeline. `internal/encoder` encodes a tile
+  of up to 256 colours losslessly, in deflate over a palette, and one of
+  more in lossy WebP, or in JPEG for a client that lists JPEG but not
+  WebP, in pure Go with gen2brain/vpx and gen2brain/jpegn; adjacent
+  lossy tiles share one message. `internal/stream` sends each viewer's
+  tiles and cursor in the codecs it agreed to, cursors with straight
+  alpha. `internal/codec` holds the deflate container and raw pixels
+  both ways, with the standard library only, for clients to decode with.
+  [docs/protocol.md](docs/protocol.md) fixes the deflate container's
+  layout, with alpha for cursors, and the most a receiver inflates, and
+  `protocol/testdata/codecs.json` holds a payload of each codec occamyd
+  sends and deflate payloads a client must refuse. The image's
+  `licenses/` carries vpx's, jpegn's and jpegli's notices.
 - `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
   (static users sign in with a password for an access token), TLS when
   `tls.cert` and `tls.key` are set, expvar and pprof on the debug
@@ -165,6 +178,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Changed
 
+- Building occamyd needs Go 1.26.4 or later, which gen2brain/vpx and
+  gen2brain/jpegn require.
 - `make bench` builds occamyd's image from the working tree before
   measuring it, instead of measuring whatever `occamy:latest` was.
 - The v0 routes moved from `/api/v1/login` and `/api/v1/connect` to

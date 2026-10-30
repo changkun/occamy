@@ -76,9 +76,9 @@ gh attestation verify oci://ghcr.io/changkun/occamy:<version> --repo changkun/oc
 
 ### Build from source
 
-A native build needs Go 1.26+ and no C toolchain. It works on Linux, macOS and
-Windows. `occamyd` needs a guacd at `guacd.address` in [conf.yaml](./conf.yaml)
-(default `localhost:4822`):
+A native build needs Go 1.26.4+ and no C toolchain. It works on Linux, macOS
+and Windows. `occamyd` needs a guacd at `guacd.address` in
+[conf.yaml](./conf.yaml) (default `localhost:4822`):
 
 ```
 podman run -d -p 4822:4822 docker.io/guacamole/guacd:1.6.0
