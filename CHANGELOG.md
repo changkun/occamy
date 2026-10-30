@@ -174,7 +174,17 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   decoding a server can ask for. It is tested live against xrdp under
   the `rdp_integration` build tag, which starts a container, and by
   replaying xrdp's recorded PDUs; NLA is not yet tested against Windows.
-  No backend uses it yet.
+- `internal/backend/rdp`, the native RDP backend's first phase
+  ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)),
+  on `internal/rdp`: NLA by default, or TLS, with the owner asked for
+  the credentials NLA needs and the configuration lacks; bitmap updates
+  and the pointer drawn into the session, pointer updates paced like
+  bitmaps; keys by physical code, text as Unicode keyboard events, and
+  the pointer and wheels, batched into input PDUs from a bounded queue;
+  Suppress Output while nobody can see. Clipboard and resize wait for
+  the virtual channels of its second phase. Nothing registers it in
+  occamyd yet. The VNC and RDP backends share one USB HID to scan code
+  table, `internal/keymap`.
 
 ### Changed
 

@@ -49,7 +49,7 @@ The target design of Occamy as a whole: core, backends, protocol.
 
 | Spec | Status | Deliverable |
 |------|--------|-------------|
-| [008-native-architecture.md](008-native-architecture.md) | In progress: 1 of 10 sub-designs complete, 9 more validated; building beta.1 (merged: backend interface, protocol framing and messages, pacer, framebuffer, auth tokens, session core, viewer writer, guacd bridge, native SSH, terminal state, config v1, native VNC phases 1, 2 and 3, v0 routes, codec measurement, HTTP server, Go client core, codecs); RDP spike steps 1 and 3 done against xrdp and reviewed, step 2 waits for a Windows host | Occamy v1: beta scope, path to pure Go, 10 sub-designs including the benchmark that sets the 10x and 50 ms targets (#3, #18, #21) |
+| [008-native-architecture.md](008-native-architecture.md) | In progress: 1 of 11 sub-designs complete, 10 more validated; building beta.1 (merged: backend interface, protocol framing and messages, pacer, framebuffer, auth tokens, session core, viewer writer, guacd bridge, native SSH, terminal state, config v1, native VNC phases 1, 2 and 3, v0 routes, codec measurement, HTTP server, Go client core, codecs, native RDP phase 1); RDP spike steps 1 and 3 done against xrdp and reviewed, step 2 waits for a Windows host | Occamy v1: beta scope, path to pure Go, 11 sub-designs including the benchmark that sets the 10x and 50 ms targets (#3, #18, #21) |
 
 ### maintenance
 
@@ -90,7 +90,7 @@ flowchart TD
   s006 --> s005[005 upstream guacd: 7 tasks]
   s006 --> s003[003 session lifecycle]
   s005 --> s003
-  s005 --> s008[008 v1 architecture: 10 sub-designs]
+  s005 --> s008[008 v1 architecture: 11 sub-designs]
   s008 --> s010[010 Swift client]
   s008 --> s009[009 React client]
   s004[004 security]
