@@ -36,9 +36,9 @@ kept only as a bridge for protocols that have no native backend yet.
 
 ## Versioning
 
-- **v0** is the PoC line: the Guacamole protocol on `/api/v1/login` and
-  `/api/v1/connect` (the path says v1, the design does not). It makes no
-  compatibility promise. Its tags up to `0.4.0` lack the `v` prefix, so
+- **v0** is the PoC line: the Guacamole protocol on `/api/v0/login` and
+  `/api/v0/connect` (`/api/v1/…` until 0.6.0, though the design was never
+  v1). It makes no compatibility promise. Its tags up to `0.4.0` lack the `v` prefix, so
   the Go toolchain ignores them; from `v0.5.0` on, tags carry it.
 - **v1** starts with `v1.0.0-beta.1`. Betas may still break the API and
   the protocol. From the release candidate on, both are frozen, and later
