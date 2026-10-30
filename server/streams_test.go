@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"net/url"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -228,6 +229,11 @@ func TestStreamRefused(t *testing.T) {
 	badVersion := termHello.Append(nil)
 	header := len(protocol.AppendHeader(nil, protocol.Header{}))
 	badVersion[header] = 9
+	// A hello that lists raw twice, which no encoder would write.
+	twice := termHello
+	twice.Capabilities.Codecs = []protocol.Codec{protocol.CodecRaw, protocol.CodecWebP}
+	badCodecs := twice.Append(nil)
+	badCodecs[bytes.LastIndex(badCodecs, []byte{byte(protocol.CodecRaw), byte(protocol.CodecWebP)})+1] = byte(protocol.CodecRaw)
 	const stream = "/api/v1/connections/ops-shell/stream"
 	h := termHello
 	for _, tt := range []struct {
@@ -261,6 +267,7 @@ func TestStreamRefused(t *testing.T) {
 		{name: "two origins", subs: withToken(alice), hello: &h, header: http.Header{"Origin": {"https://app.example", "https://evil.example"}}, code: protocol.CloseForbidden},
 		{name: "no hello", subs: withToken(alice), code: protocol.CloseProtocolError},
 		{name: "hello of another version", path: stream + "?hello=" + base64.RawURLEncoding.EncodeToString(badVersion), subs: withToken(alice), code: protocol.CloseUnsupported},
+		{name: "hello with a codec twice", path: stream + "?hello=" + base64.RawURLEncoding.EncodeToString(badCodecs), subs: withToken(alice), code: protocol.CloseProtocolError},
 		{name: "another's connection", path: "/api/v1/connections/dev-shell/stream", subs: withToken(alice), hello: &h, code: protocol.CloseForbidden},
 		{name: "unknown connection", path: "/api/v1/connections/nope/stream", subs: withToken(alice), hello: &h, code: protocol.CloseForbidden},
 	} {
@@ -936,6 +943,60 @@ func TestStreamSizeBounds(t *testing.T) {
 	viewer = ts.stream(t, path, share(o.ID), graphical)
 	viewer.send(t, protocol.ResizeRequest{Seq: 1, Width: 65535, Height: 65535})
 	resized(scr.Inputs, backend.Resize{Width: backend.MaxResizeSide, Height: backend.MaxResizeSide})
+}
+
+// TestStreamCodecs checks that a graphical stream offers the encoder's
+// codecs, agrees to those of the client's it has, in the client's order,
+// sends tiles in them, and closes a client that decodes none of them
+// with unsupported.
+func TestStreamCodecs(t *testing.T) {
+	ts, _ := sessionServer(t, nil)
+	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
+		return backendtest.NewScreen(64, 48, 0), nil
+	})
+	alice := ts.token(t, "alice", "ops")
+	const path = "/api/v1/connections/ops-shell/stream"
+	hello := func(codecs ...protocol.Codec) protocol.Hello {
+		return protocol.Hello{Visible: true, Capabilities: protocol.Capabilities{Codecs: codecs}}
+	}
+	const (
+		raw     = protocol.CodecRaw
+		deflate = protocol.CodecDeflate
+		png     = protocol.CodecPNG
+		jpeg    = protocol.CodecJPEG
+		webp    = protocol.CodecWebP
+		cached  = protocol.CodecCached
+	)
+	for _, tt := range []struct {
+		offer, agreed []protocol.Codec
+		tile          protocol.Codec // of the fake's few colours
+	}{
+		{[]protocol.Codec{raw}, []protocol.Codec{raw}, raw},
+		{[]protocol.Codec{png, raw, cached, deflate, webp}, []protocol.Codec{raw, deflate, webp}, deflate},
+		{[]protocol.Codec{webp, jpeg}, []protocol.Codec{webp, jpeg}, webp},
+		{[]protocol.Codec{jpeg}, []protocol.Codec{jpeg}, jpeg},
+	} {
+		c := ts.stream(t, path, alice, hello(tt.offer...))
+		if got := c.welcome.Capabilities.Codecs; !slices.Equal(got, tt.agreed) {
+			t.Errorf("offer %v: agreed %v, want %v", tt.offer, got, tt.agreed)
+		}
+		c.until(t, "a tile", func(m protocol.Message) bool {
+			tile, ok := m.(*protocol.Tile)
+			if ok && tile.Codec != tt.tile {
+				t.Errorf("offer %v: a tile in %v, want %v", tt.offer, tile.Codec, tt.tile)
+			}
+			return ok
+		})
+		_ = c.ws.CloseNow()
+	}
+
+	// occamyd sends neither png nor cached.
+	h := hello(png, cached)
+	c, status, err := dial(ts.srv.URL+path, withToken(alice), &h, nil)
+	if err != nil {
+		t.Fatalf("%d %v", status, err)
+	}
+	c.closed(t, protocol.CloseUnsupported)
 }
 
 // failing is a terminal backend whose remote cannot be reached.

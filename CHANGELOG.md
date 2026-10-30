@@ -164,7 +164,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   streams it in one request, and `GET /api/v1/sessions/{id}/stream`
   joins a running one, both as protocol v1 WebSockets with the token in
   a subprotocol, never in the URL, and `Origin` checked against
-  `origins`. ssh and vnc connections use the native backends, rdp and
+  `origins`. Graphical streams offer `webp`, `jpeg`, `deflate` and
+  `raw`. ssh and vnc connections use the native backends, rdp and
   telnet the guacd bridge. ssh connections need `host_keys` or
   `insecure_ignore_host_key: true`. vnc connections take a `username`
   for VeNCrypt's Plain, and a `tls` block for the server's certificate:

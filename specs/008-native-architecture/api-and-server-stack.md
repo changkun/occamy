@@ -905,8 +905,15 @@ place for fixes that ship on v0 before beta.
     `View` before `welcome` finds the session ended, as when its backend
     fails at once, `Serve` sends the session's own end, such as
     `backend-failed`, rather than an internal error.
-  - **Capabilities:** raw tiles and terminal level 1, `stream.Serve`'s
-    defaults, until the graphics pipeline's codecs land.
+  - **Capabilities:** terminal level 1, and the codecs
+    `internal/encoder` sends (`encoder.Codecs()`: webp, jpeg, deflate,
+    raw), with a viewer's encoder from `encoder.New` for the codecs it
+    agreed to (`stream.Config.NewEncoder`). Raw tiles alone until the
+    Codecs task (#109) merged; `TestStreamCodecs` checks the agreement
+    in the client's order, the tiles' codecs, and `unsupported` for a
+    client that lists only `png` and `cached`. occamyd's binary now
+    links vpx and jpegn, which `scripts/third-party-licenses.sh` picks
+    up from the main package's dependencies.
   - **The WebSocket:** coder/websocket drops the connection when the
     context of a read or write ends, and `Serve` ends its contexts as
     soon as it is done, so `wsConn` reads in a goroutine without a

@@ -24,6 +24,7 @@ import (
 
 	"changkun.de/x/occamy/internal/auth"
 	"changkun.de/x/occamy/internal/backend"
+	"changkun.de/x/occamy/internal/encoder"
 	"changkun.de/x/occamy/internal/session"
 	"changkun.de/x/occamy/internal/stream"
 	"changkun.de/x/occamy/internal/terminal"
@@ -38,9 +39,18 @@ const streamLowWater = 16 << 10
 // setLowWater is stream.SetLowWater, a variable for tests.
 var setLowWater = stream.SetLowWater
 
-// streamCapabilities are what occamyd offers a stream: raw tiles and an
-// xterm-compatible terminal, until the graphics pipeline's codecs land.
-var streamCapabilities = protocol.Capabilities{Codecs: []protocol.Codec{protocol.CodecRaw}, Terminal: 1}
+// streamCapabilities are what occamyd offers a stream: the codecs that
+// internal/encoder sends, and an xterm-compatible terminal.
+var streamCapabilities = protocol.Capabilities{Codecs: encoder.Codecs(), Terminal: 1}
+
+// newEncoder is a viewer's encoder for the codecs it agreed to, or nil
+// if it sends none of them, which stream.Serve closes with unsupported.
+func newEncoder(codecs []protocol.Codec) stream.Encoder {
+	if e := encoder.New(codecs); e != nil {
+		return e
+	}
+	return nil
+}
 
 // Timeouts of a stream's end.
 const (
@@ -394,7 +404,7 @@ func (s *server) serve(ctx context.Context, c *wsConn, info *sessionInfo, v *ses
 	}
 	// The client is let in: its messages may be as large as agreed.
 	c.ws.SetReadLimit(int64(protocol.Agree(hello.Capabilities, streamCapabilities).Limits().MaxMessageSize))
-	err := serveStream(ctx, c, v, hello, stream.Config{SessionID: info.id, Capabilities: streamCapabilities})
+	err := serveStream(ctx, c, v, hello, stream.Config{SessionID: info.id, Capabilities: streamCapabilities, NewEncoder: newEncoder})
 	if own != nil {
 		info.mu.Lock()
 		if info.ownerStream == own {
