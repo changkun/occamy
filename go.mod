@@ -1,12 +1,16 @@
 module changkun.de/x/occamy
 
-go 1.26.0
+go 1.26.4
 
 require (
 	github.com/appleboy/gin-jwt/v2 v2.10.3
+	github.com/deepteams/webp v1.2.8
+	github.com/gen2brain/jpegn v0.6.2
+	github.com/gen2brain/vpx v0.2.1
 	github.com/gin-gonic/gin v1.12.0
 	github.com/gorilla/websocket v1.5.3
 	github.com/jezek/xgb v1.3.1
+	github.com/klauspost/compress v1.20.3
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/image v0.47.0
 )
