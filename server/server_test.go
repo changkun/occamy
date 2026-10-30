@@ -88,6 +88,8 @@ func newTestServer(t *testing.T, edit func(*config.File)) *testServer {
 	}
 	srv := httptest.NewServer(s.routes())
 	t.Cleanup(srv.Close)
+	// Before the server closes, the sessions end.
+	t.Cleanup(s.shutdown)
 	return &testServer{s: s, srv: srv}
 }
 

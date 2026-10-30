@@ -18,11 +18,14 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"changkun.de/x/occamy/internal/auth"
 	"changkun.de/x/occamy/internal/config"
+	"changkun.de/x/occamy/internal/session"
 )
 
 // Limits of the public listener. ReadTimeout and WriteTimeout end
@@ -49,9 +52,22 @@ var (
 // server is occamyd serving a v1 file.
 type server struct {
 	verifier *auth.Verifier
+	signer   *auth.Signer
 	signIn   *staticUsers
 	tls      *tls.Config // nil serves plain HTTP
 	v0       *proxy      // nil unless legacy_v0
+
+	// API v1's sessions and streams.
+	connections []config.Connection
+	origins     map[string]bool // origins whose pages may open streams, besides occamyd's own
+	adhoc       *allowlist      // nil unless allow_adhoc_targets
+	backends    backends
+	registry    *session.Registry
+	stop        context.CancelFunc // ends every session, at shutdown
+	streamTTL   time.Duration      // of the stream token POST /api/v1/sessions returns
+
+	mu       sync.Mutex
+	sessions map[string]*sessionInfo // by ID, while they run
 }
 
 // Run serves a v1 file until SIGINT or SIGTERM, then drains requests in
@@ -95,10 +111,23 @@ func Run(f *config.File) error {
 	if dln != nil {
 		log.Printf("serving expvar and pprof at http://%s/debug/", dln.Addr())
 	}
-	err = serveUntil(ctx, drainTimeout, newPublicServer(s.routes(), s.tls), ln, debug, dln)
+	err = serveUntil(ctx, drainTimeout, s.publicServer(), ln, debug, dln)
 	log.Println("occamy is down, good bye!")
 	return err
 }
+
+// publicServer returns the public listener's server, which ends every
+// session, and with them their streams, when it shuts down: Shutdown
+// does not reach the hijacked connections of streams.
+func (s *server) publicServer() *http.Server {
+	public := newPublicServer(s.routes(), s.tls)
+	public.RegisterOnShutdown(s.shutdown)
+	return public
+}
+
+// shutdown ends every session, which sends their streams close with
+// server-shutdown.
+func (s *server) shutdown() { s.stop() }
 
 // listen opens the public listener and, only if debug.address is set,
 // the debug listener; dln is nil otherwise.
@@ -153,13 +182,29 @@ func newServer(f *config.File) (*server, error) {
 			return nil, err
 		}
 	}
-	signIn, err := newStaticUsers(f.Auth.Users, auth.NewSigner(key, auth.Issuer, auth.Audience), f.Auth.AccessTokenLifetime)
+	signer := auth.NewSigner(key, auth.Issuer, auth.Audience)
+	signIn, err := newStaticUsers(f.Auth.Users, signer, f.Auth.AccessTokenLifetime)
 	if err != nil {
 		return nil, err
 	}
+	ctx, stop := context.WithCancel(context.Background())
 	s := &server{
-		verifier: auth.NewVerifier(auth.Audience, keys),
-		signIn:   signIn,
+		verifier:    auth.NewVerifier(auth.Audience, keys),
+		signer:      signer,
+		signIn:      signIn,
+		connections: f.Connections,
+		origins:     map[string]bool{},
+		backends:    newBackends(f.Guacd),
+		registry:    session.NewRegistry(ctx),
+		stop:        stop,
+		streamTTL:   streamTokenLifetime,
+		sessions:    map[string]*sessionInfo{},
+	}
+	for _, o := range f.Origins {
+		s.origins[strings.ToLower(o)] = true
+	}
+	if f.AllowAdhocTargets {
+		s.adhoc = newAllowlist(f.AdhocAllowlist)
 	}
 	if f.TLS.Cert != "" || f.TLS.Key != "" {
 		cert, err := tls.LoadX509KeyPair(f.TLS.Cert, f.TLS.Key)
@@ -205,6 +250,7 @@ func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
 	mux.HandleFunc("POST /api/v1/auth/token", s.signIn.token)
+	s.registerSessions(mux)
 	if s.v0 != nil {
 		s.v0.register(mux)
 	}
