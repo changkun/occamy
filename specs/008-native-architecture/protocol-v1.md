@@ -220,8 +220,8 @@ web client ([009](../009-react-web-client.md)) and the client core
 ## Implementation notes
 
 - **Status.** All four tasks are done: Framing in #84, and Handshake,
-  Messages and Document on the branch `protocol-messages`. The spec
-  stays validated until the wrap-up.
+  Messages and Document in #96. The spec stays validated until the
+  wrap-up.
 
 ### Framing
 
