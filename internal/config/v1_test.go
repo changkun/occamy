@@ -38,6 +38,18 @@ func TestVersion(t *testing.T) {
 		{raw: "version: [1]\n", wantErr: true},
 		{raw: "version:\n", wantErr: true},
 		{raw: "address: [\n", wantErr: true},
+		// A merged version counts, as the decoder reads it.
+		{raw: "<<: {version: 1}\nlisten: :5636\n", want: 1},
+		{raw: "base: &b {version: 1}\n<<: *b\n", want: 1},
+		{raw: "<<: [{mode: debug}, {version: 1}]\n", want: 1},
+		{raw: "<<: {version: 2}\n", wantErr: true},
+		{raw: "version: 1\n<<: {version: 2}\n", want: 1},
+		{raw: "a: {version: 1}\n", want: 0},
+		{raw: "- {version: 1}\n", want: 0},
+		// A version in a later document is an error, not a v0 file.
+		{raw: "---\n---\nversion: 1\n", wantErr: true},
+		{raw: "address: :5636\n---\nversion: 1\n", wantErr: true},
+		{raw: "address: :5636\n---\nmode: debug\n", want: 0},
 	}
 	for _, tt := range tests {
 		got, err := config.Version([]byte(tt.raw))
@@ -297,6 +309,7 @@ func TestParseV1Valid(t *testing.T) {
   - {id: c, protocol: rdp, target: 192.0.2.1, credentials: {password_env: OCCAMY_TEST_PASSWORD}, allow: {users: [alice]}}
   - {id: d.e_f-1, protocol: telnet, target: host_1.example.com., credentials: {password_file: DIR/password}, allow: {users: [alice]}}
 `},
+		{"merged version", "<<: {version: 1}\n" + strings.TrimPrefix(head, "version: 1\n")},
 		{"debug on its own port", head + "listen: ':5636'\ndebug: {address: 'localhost:6060'}\n"},
 		{"debug on the port of another address", head + "listen: '10.0.0.1:5636'\ndebug: {address: '127.0.0.1:5636'}\n"},
 		{"names from oidc", head + `  oidc: {issuer: "http://localhost:8080/realms/x", client_id: occamy, redirect_url: "http://127.0.0.1:5636/cb", client_secret_env: OCCAMY_TEST_PASSWORD}
