@@ -345,12 +345,35 @@ func (s *Session) cursor(m *protocol.Cursor) (Cursor, int, error) {
 	r := image.Rect(0, 0, int(m.W), int(m.H))
 	img := &image.NRGBA{Pix: m.Payload, Stride: 4 * r.Dx(), Rect: r}
 	if m.Codec != protocol.CodecRaw {
+		if err := s.cursorFits(4 * r.Dx() * r.Dy()); err != nil {
+			return Cursor{}, 0, err
+		}
 		img = image.NewNRGBA(r)
 		if err := s.decoders[m.Codec].Decode(img.Pix, r.Dx(), r.Dy(), m.Payload); err != nil {
 			return Cursor{}, 0, fmt.Errorf("%w: %v cursor: %w", errDecode, m.Codec, err)
 		}
 	}
 	return Cursor{Image: img, Hot: image.Pt(int(m.HotX), int(m.HotY))}, len(img.Pix), nil
+}
+
+// cursorFits checks that a cursor of n bytes of pixels, in place of an
+// undelivered one, keeps the backlog within its bound, before the
+// pixels are allocated: a cursor of a plugged codec may declare up to
+// max_texture_size² pixels in a few bytes.
+func (s *Session) cursorFits(n int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	backlog := s.backlog + n
+	for i := len(s.queue) - 1; i >= 0; i-- {
+		if _, ok := s.queue[i].ev.(Cursor); ok {
+			backlog -= s.queue[i].bytes
+			break
+		}
+	}
+	if limit := s.maxBacklog(); backlog > limit {
+		return fmt.Errorf("%w: a cursor of %d bytes, with %d bytes of frames and events undelivered, more than %d", protocol.ErrInvalid, n, s.backlog, limit)
+	}
+	return nil
 }
 
 // event queues a small event that holds n bytes. An event that holds

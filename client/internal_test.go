@@ -316,6 +316,51 @@ func TestDecodedBacklog(t *testing.T) {
 	})
 }
 
+// A cursor of a plugged codec is checked against the backlog before its
+// pixels are allocated: a few bytes may declare 4096×4096 of them.
+func TestCursorBacklog(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		lowBacklog(t)
+		c := &fuzzConn{msgs: encode(
+			pngWelcome(2),
+			&protocol.Resize{Width: 64, Height: 64},
+			&protocol.Cursor{W: 32, H: 32, Codec: protocol.CodecPNG, Payload: []byte{7}},
+			&protocol.Cursor{W: 4096, H: 304, Codec: protocol.CodecPNG, Payload: []byte{7}},
+		)}
+		s, err := New(context.Background(), c, Options{Decoders: []Decoder{fuzzDecoder{}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		synctest.Wait() // read everything before Next delivers anything
+		s.mu.Lock()
+		backlog, limit := s.backlog, s.maxBacklog()
+		s.mu.Unlock()
+		if backlog > limit {
+			t.Errorf("backlog %d, limit %d", backlog, limit)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		var evs []Event
+		for {
+			ev, err := s.Next(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			evs = append(evs, ev)
+			if _, ok := ev.(End); ok {
+				break
+			}
+		}
+		if cur, ok := evs[0].(Cursor); !ok || cur.Image.Rect.Dx() != 32 {
+			t.Errorf("first event %#v, want the small cursor", evs[0])
+		}
+		if e := evs[len(evs)-1].(End); e.Code != protocol.CloseProtocolError || !strings.Contains(e.Err.Error(), "cursor") {
+			t.Errorf("End %+v, want a protocol error for the cursor", e)
+		}
+	})
+}
+
 // A frame that draws a large screen and then shrinks it still holds
 // what it decodes for the large one, and is measured against it.
 func TestShrinkWithinFrame(t *testing.T) {
