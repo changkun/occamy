@@ -8,10 +8,12 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"time"
 
@@ -101,7 +103,7 @@ func recoverWith(next http.Handler, fail func(http.ResponseWriter)) http.Handler
 				panic(v)
 			}
 			// #nosec G706 -- the client's method and path are quoted, so they cannot break the line.
-			log.Printf("panic serving %q %q: %v\n%s", r.Method, r.URL.Path, v, debug.Stack())
+			log.Printf("panic serving %q %q: %s\n%s", r.Method, r.URL.Path, panicValue(v), debug.Stack())
 			if sw.code == 0 {
 				fail(w)
 			}
@@ -110,9 +112,28 @@ func recoverWith(next http.Handler, fail func(http.ResponseWriter)) http.Handler
 	})
 }
 
+// panicValue describes a recovered panic value for the log. Strings and
+// errors appear as they are, and anything else by its type only: %v of an
+// *http.Request, a URL or a struct holding one would print the query
+// string and headers, and with them tokens. So a handler must not panic
+// with a string or error that carries a secret.
+func panicValue(v any) string {
+	switch v := v.(type) {
+	case string:
+		return strconv.Quote(v)
+	case error:
+		return strconv.Quote(v.Error())
+	default:
+		return fmt.Sprintf("a value of type %T", v)
+	}
+}
+
 // limitBodies bounds every request body to n bytes. A handler reading
-// past the limit gets an *http.MaxBytesError, and the connection is
-// closed after the response.
+// past the limit gets an *http.MaxBytesError. Only when limitBodies gets
+// net/http's own response writer does net/http also close the connection
+// after the response: http.MaxBytesReader tells the writer through an
+// unexported method that no wrapping writer can pass on, so routes puts
+// limitBodies outside every wrapper.
 func limitBodies(n int64) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

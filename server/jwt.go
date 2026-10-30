@@ -156,12 +156,12 @@ func loginClaims(w http.ResponseWriter, r *http.Request) (*config.JWT, error) {
 	var c config.JWT
 	if mediaType, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mediaType == "application/json" {
 		if err := json.NewDecoder(r.Body).Decode(&c); err != nil {
-			return nil, fmt.Errorf("reading the JSON body: %w", err)
+			return nil, bodyError("reading the JSON body", err)
 		}
 	} else {
 		err := r.ParseMultipartForm(maxLoginSize) // #nosec G120 -- MaxBytesReader bounds the body above
 		if err != nil && !errors.Is(err, http.ErrNotMultipart) {
-			return nil, fmt.Errorf("reading the form: %w", err)
+			return nil, bodyError("reading the form", err)
 		}
 		c = config.JWT{
 			Protocol: r.Form.Get("protocol"),
@@ -179,6 +179,18 @@ func loginClaims(w http.ResponseWriter, r *http.Request) (*config.JWT, error) {
 		return nil, errors.New("no password")
 	}
 	return &c, nil
+}
+
+// bodyError says why a login body could not be read without the
+// decoder's message, which login logs and which can quote bytes of the
+// password: a JSON syntax error names the character it stopped at, and a
+// form names a malformed escape.
+func bodyError(what string, err error) error {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		return fmt.Errorf("%s: over %d bytes", what, tooLarge.Limit)
+	}
+	return fmt.Errorf("%s: malformed (%T)", what, err)
 }
 
 // authenticate returns the claims of the request's token. If there is no

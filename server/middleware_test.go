@@ -25,6 +25,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 
 	"changkun.de/x/occamy/internal/auth"
+	"changkun.de/x/occamy/internal/config"
 )
 
 // captureLog sends the log to a buffer until the test ends, and returns a
@@ -76,6 +77,9 @@ func TestRecovery(t *testing.T) {
 	mux.Handle("GET /v0", recoverV0(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		panic("v0")
 	})))
+	mux.HandleFunc("GET /request", func(_ http.ResponseWriter, r *http.Request) {
+		panic(r) // %v would print the query string and the headers
+	})
 	srv := httptest.NewServer(logRequests(recovery(mux)))
 	defer srv.Close()
 
@@ -86,19 +90,23 @@ func TestRecovery(t *testing.T) {
 	if e := decodeError(t, r.body); e.Code != codeInternal {
 		t.Errorf("panic: code %q, want %q", e.Code, codeInternal)
 	}
+	if r := do(t, http.MethodGet, srv.URL+"/request?token=secret", http.Header{"Authorization": {"Bearer secret"}}, ""); r.code != http.StatusInternalServerError {
+		t.Errorf("panic with the request: %d", r.code)
+	}
 	got := logs()
 	for _, want := range []string{
-		`panic serving "GET" "/boom": boom`,
+		`panic serving "GET" "/boom": "boom"`,
 		"goroutine ",                // the stack
 		"server.TestRecovery.func1", // the panicking handler in it
 		`"GET" "/boom" 500 `,        // the request log
+		`panic serving "GET" "/request": a value of type *http.Request`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("log lacks %q:\n%s", want, got)
 		}
 	}
 	if strings.Contains(got, "secret") {
-		t.Errorf("log has the query string:\n%s", got)
+		t.Errorf("log has the query string or a header:\n%s", got)
 	}
 
 	// A response under way is not written over.
@@ -128,6 +136,51 @@ func TestRecoveryV0Routes(t *testing.T) {
 	r := rp.login(t, "application/json", `{"protocol":"vnc","host":"h:1","password":"p"}`)
 	if r.code != http.StatusInternalServerError || len(r.body) != 0 {
 		t.Errorf("login panic: %d %q, want 500 without a body", r.code, r.body)
+	}
+}
+
+// TestRoutesRecover checks that the v1 routes recover: a panic in the
+// token endpoint answers API v1's 500.
+func TestRoutesRecover(t *testing.T) {
+	logs := captureLog(t)
+	ts := newTestServer(t, nil)
+	ts.s.signIn.compare = func([]byte, []byte) error { panic("compare") }
+	r := ts.signIn(t, "alice", alicePassword)
+	if r.code != http.StatusInternalServerError {
+		t.Fatalf("panic in sign-in: %d %s, want 500", r.code, r.body)
+	}
+	if e := decodeError(t, r.body); e.Code != codeInternal {
+		t.Errorf("code %q, want %q", e.Code, codeInternal)
+	}
+	if !strings.Contains(logs(), `panic serving "POST" "/api/v1/auth/token": "compare"`) {
+		t.Errorf("the panic is not logged:\n%s", logs())
+	}
+}
+
+// TestRoutesLimitBodies checks that the v1 routes bound every body, on
+// net/http's own writer, so that net/http closes the connection after a
+// body over the limit. The v0 login reads up to its own limit, as large
+// as the routes' one.
+func TestRoutesLimitBodies(t *testing.T) {
+	captureLog(t)
+	ts := newTestServer(t, func(f *config.File) { f.LegacyV0 = true })
+	// login posts a form and reports whether the server closes the
+	// connection, which the client learns from a Connection: close header
+	// that it takes out of the response's.
+	login := func(body string) (code int, closed bool) {
+		resp, err := http.Post(ts.srv.URL+"/api/v0/login", "application/x-www-form-urlencoded", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return resp.StatusCode, resp.Close
+	}
+	if code, closed := login("protocol=vnc&host=h:1&password=" + strings.Repeat("x", maxBodyBytes)); code != http.StatusUnauthorized || !closed {
+		t.Errorf("a body over the limit: %d, closed %v; want 401, closed", code, closed)
+	}
+	if code, closed := login("protocol=vnc&host=h:1&password=x"); code != http.StatusOK || closed {
+		t.Errorf("a body within the limit: %d, closed %v; want 200, open", code, closed)
 	}
 }
 

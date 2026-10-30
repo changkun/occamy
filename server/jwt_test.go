@@ -248,6 +248,26 @@ func TestLoginRejected(t *testing.T) {
 	}
 }
 
+// TestLoginLogOmitsBody checks that a login whose body does not parse
+// logs why without the decoder's message, which quotes bytes of the body
+// and so of the password.
+func TestLoginLogOmitsBody(t *testing.T) {
+	logs := captureLog(t)
+	rp := newRouteProxy(t, true, false)
+	for _, tt := range []struct{ contentType, body, secret string }{
+		{"application/json", `{"protocol":"vnc","host":"h:1","password":"hunter\Zword"}`, "'Z'"},
+		{"application/json", `{"protocol":"vnc","host":"h:1","password":"hunter"Qword}`, "'Q'"},
+		{"application/x-www-form-urlencoded", "protocol=vnc&host=h:1&password=hunter%zzword", "%zz"},
+	} {
+		if r := rp.login(t, tt.contentType, tt.body); r.code != http.StatusUnauthorized {
+			t.Errorf("login with %s: %d, want 401", tt.body, r.code)
+		}
+		if got := logs(); strings.Contains(got, tt.secret) || !strings.Contains(got, "malformed") {
+			t.Errorf("login with %s logged:\n%s", tt.body, got)
+		}
+	}
+}
+
 // TestRoutes checks which routes exist: login only with client: true,
 // and nothing left under the old v0 paths.
 func TestRoutes(t *testing.T) {

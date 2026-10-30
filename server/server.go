@@ -197,8 +197,10 @@ func newLegacyV0(g config.Guacd) (*proxy, error) {
 }
 
 // routes returns the public listener's handler: API v1, /healthz and,
-// with legacy_v0, the v0 routes, behind the request log, the recovery and
-// the body limit.
+// with legacy_v0, the v0 routes, behind the body limit, the request log
+// and the recovery. The body limit comes first, on net/http's own
+// response writer, which is the only one through which a body over the
+// limit can have net/http close the connection.
 func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
@@ -206,7 +208,7 @@ func (s *server) routes() http.Handler {
 	if s.v0 != nil {
 		s.v0.register(mux)
 	}
-	return logRequests(recovery(limitBodies(maxBodyBytes)(apiFallback(mux))))
+	return limitBodies(maxBodyBytes)(logRequests(recovery(apiFallback(mux))))
 }
 
 // newPublicServer returns the public listener's server for h, which
