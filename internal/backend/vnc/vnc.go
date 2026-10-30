@@ -10,10 +10,11 @@
 // session's owner for a password that its configuration lacks.
 //
 // It speaks RFB 3.3, 3.7 and 3.8 with the security types None and VNC
-// Authentication, and the encodings Raw, CopyRect, DesktopSize and
-// Cursor. Pixels arrive in the framebuffer's own layout, so a rectangle
-// is copied into it without conversion. Every length the server sends is
-// checked against a limit before anything is read or allocated for it.
+// Authentication, the encodings Tight, ZRLE, Hextile, Raw and CopyRect,
+// and the pseudo-encodings DesktopSize and Cursor. Pixels arrive in the
+// framebuffer's own layout, so a raw rectangle is copied into it without
+// conversion. Every length the server sends is checked against a limit
+// before anything is read or allocated for it.
 package vnc
 
 import (
