@@ -43,7 +43,7 @@ _Figure 2: Occamy Architecture_
 |------|------|
 | [server/](../server) | The v0 routes on a `net/http` ServeMux, v0 tokens (HMAC JWTs, golang-jwt v5), the session table, and WebSocket (coder/websocket) to guacd proxying; the v1 server below shares the package |
 | [internal/guacd/](../internal/guacd) | guacd client: the handshake that creates or joins a connection |
-| [internal/guacamole/](../internal/guacamole) | Guacamole instruction encoding, parsing, and stream I/O, and a display that applies drawing and the pointer as a client does, for the benchmark and the guacd bridge |
+| [internal/guacamole/](../internal/guacamole) | Guacamole instruction encoding, parsing, and stream I/O, and a display that applies drawing and the pointer as a client does, decoding WebP as libwebp does, for the benchmark and the guacd bridge |
 | [internal/config/](../internal/config) | `conf.yaml` loading, the JWT claim structure, and guacd parameters |
 | [bench/](../bench) | Benchmark harness: scenarios, emulated networks, and the measurements in [benchmarks.md](./benchmarks.md) |
 | [client/occamy-web/](../client/occamy-web) | Demo web client (Vue 3) with a fork of guacamole-common-js 0.9.14 (Apache-2.0) |
@@ -78,7 +78,7 @@ implements.
 |------|------|
 | [protocol/](../protocol) | Protocol v1, a public package: framing, the handshake (hello in the upgrade query, the token in a subprotocol, capabilities and their agreement), every message with its encoding and decoding, close codes, size limits, golden vectors; described in [protocol.md](protocol.md) ([protocol-v1](../specs/008-native-architecture/protocol-v1.md)) |
 | [internal/backend/](../internal/backend) | The interface every backend implements (native SSH, native VNC, the guacd bridge), its input events and prompts, and scripted fakes for tests ([session-core](../specs/008-native-architecture/session-core.md)) |
-| [internal/backend/guacd/](../internal/backend/guacd) | The guacd bridge: a graphical backend that applies guacd's drawing, copies each frame into the session's framebuffer before it answers the frame's sync, and translates viewers' input into Guacamole instructions ([guacd-bridge](../specs/008-native-architecture/guacd-bridge.md)) |
+| [internal/backend/guacd/](../internal/backend/guacd) | The guacd bridge: a graphical backend that applies guacd's drawing, copies each frame into the session's framebuffer before it answers the frame's sync, and translates viewers' input into Guacamole instructions; recorded guacd 1.6 VNC, RDP and SSH sessions in `testdata/conformance` replay through it in tests ([guacd-bridge](../specs/008-native-architecture/guacd-bridge.md)) |
 | [internal/pacer/](../internal/pacer) | Per-viewer pacing: the frame window, the frame after an input sent at once, bytes in flight held near the bandwidth-delay product, and quality that adapts ([session-core](../specs/008-native-architecture/session-core.md)) |
 | [internal/framebuffer/](../internal/framebuffer) | A session's screen in tiles, versioned from one counter, so each viewer is sent only the tiles it has not seen ([graphics-pipeline](../specs/008-native-architecture/graphics-pipeline.md)) |
 | [server/](../server) | The v1 server on a `net/http` ServeMux: middleware for the request log, recovery, body limits and access tokens; API v1's JSON errors; `/healthz` and `POST /api/v1/auth/token`; TLS, graceful shutdown, and expvar and pprof on the debug listener; the v0 routes with `legacy_v0` ([api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md)) |

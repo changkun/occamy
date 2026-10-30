@@ -44,6 +44,17 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   instructions. `internal/guacamole`'s display now applies `cursor`,
   reports damage as rectangles, and copies areas out. Not served by any
   route yet.
+- A conformance corpus for the guacd bridge: guacd 1.6's VNC, RDP and
+  SSH sessions on the bench stack, recorded with `go test -tags record`
+  and replayed by `go test` without containers, which fails on any
+  error, unsupported operation or log line, on a checkpoint that does
+  not show the scene's idle screen, on a changed pixel where a `copy`
+  moved content, on prompts, handshake, credential answers or sync
+  answers that differ from the recording's, and on a changed final
+  frame. `OCCAMY_CONFORMANCE_DUMP` names a directory for the frames of
+  failed checks. RDP is recorded with `disable-gfx`, since through the
+  graphics pipeline xrdp's RemoteFX Progressive codec shifted the
+  desktop's colours by up to 22 levels before guacd saw them.
 - A native SSH backend for protocol v1, `internal/backend/ssh`, in pure
   Go. It accepts only pinned host keys, by key or SHA-256 fingerprint,
   unless told to ignore them, which it logs as a warning. It
@@ -116,6 +127,20 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   coder/websocket, so gin, gin-jwt and gorilla/websocket and their
   indirect dependencies are gone from `go.mod`. `auth.jwt_alg` must be
   HS256, HS384 or HS512, and `auth.jwt_secret` must not be empty.
+
+### Fixed
+
+- `internal/guacamole`'s display, which the benchmark and the guacd
+  bridge draw with, decodes lossy WebP as libwebp, and so a browser,
+  does. `golang.org/x/image/webp` alone read VP8's limited-range colours
+  as full-range and did not interpolate chroma, which put guacd's WebP
+  images up to 38 levels a channel off libwebp's on a first recording
+  (320 images), and up to 34 on the 36 of the committed conformance
+  corpus.
+- The same display reads an image's size before decoding it and refuses
+  one wider or taller than 16,384 pixels or larger than 8192×8192 in
+  all, so that an `img` stream cannot make the guacd bridge allocate
+  gigabytes.
 
 ### Security
 
