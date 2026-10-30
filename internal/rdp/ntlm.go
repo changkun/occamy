@@ -52,9 +52,11 @@ const (
 
 // AV pair IDs of [MS-NLMP] 2.2.2.1.
 const (
-	avEOL       = 0x0000
-	avFlags     = 0x0006
-	avTimestamp = 0x0007
+	avEOL            = 0x0000
+	avNbComputerName = 0x0001
+	avNbDomainName   = 0x0002
+	avFlags          = 0x0006
+	avTimestamp      = 0x0007
 
 	// avFlagMIC is the MsvAvFlags bit that tells the server the
 	// AUTHENTICATE_MESSAGE carries a MIC.
@@ -73,6 +75,12 @@ const (
 	ntlmChallengeMinLen = 48 // without the version
 	ntlmAuthenticateLen = 88 // with the version and the MIC
 	ntlmMICOffset       = 72
+
+	// maxTargetInfo bounds the server's target info, which the NTLMv2
+	// response repeats and whose length is 16 bits. Its names, three DNS
+	// names of up to 255 characters and two NetBIOS names of 15, with a
+	// timestamp and flags, take under 2 KiB.
+	maxTargetInfo = 8 << 10
 )
 
 // ntlmClient authenticates one user with NTLMv2.
@@ -131,8 +139,13 @@ func parseChallenge(msg []byte) (*ntlmChallenge, error) {
 	if err != nil {
 		return nil, fmt.Errorf("rdp: NTLM challenge target info: %w", err)
 	}
-	if ch.targetInfo, err = parseAVPairs(info); err != nil {
-		return nil, err
+	if len(info) > maxTargetInfo {
+		return nil, fmt.Errorf("rdp: NTLM challenge target info of %d bytes", len(info))
+	}
+	if len(info) > 0 { // empty, it is absent, without even its MsvAvEOL
+		if ch.targetInfo, err = parseAVPairs(info); err != nil {
+			return nil, err
+		}
 	}
 	for _, p := range ch.targetInfo {
 		if p.id == avTimestamp {
@@ -191,6 +204,11 @@ func (c *ntlmClient) authenticate(challenge []byte) ([]byte, *ntlmSession, error
 	if ch.flags&ntlmRequiredFlags != ntlmRequiredFlags {
 		return nil, nil, fmt.Errorf("rdp: the server's NTLM challenge lacks flags %#08x", ntlmRequiredFlags&^ch.flags)
 	}
+	// [MS-NLMP] 3.1.5.1.2: with signing or sealing, which CredSSP needs,
+	// a challenge without both NetBIOS names is a logon failure.
+	if !hasAVPair(ch.targetInfo, avNbComputerName) || !hasAVPair(ch.targetInfo, avNbDomainName) {
+		return nil, nil, errors.New("rdp: the server's NTLM challenge lacks its NetBIOS computer or domain name")
+	}
 	// The client confirms the server's flags, as FreeRDP does.
 	flags := ch.flags
 
@@ -214,6 +232,7 @@ func (c *ntlmClient) authenticate(challenge []byte) ([]byte, *ntlmSession, error
 	}
 
 	key := ntowfv2(c.password, c.user, c.domain)
+	defer clear(key)
 	var temp writer
 	temp.bytes([]byte{1, 1}) // RespType, HiRespType
 	temp.zero(6)
@@ -249,6 +268,9 @@ func (c *ntlmClient) authenticate(challenge []byte) ([]byte, *ntlmSession, error
 	offsets := make([]int, len(payload))
 	at := ntlmAuthenticateLen
 	for i, p := range payload {
+		if len(p) > 0xffff {
+			return nil, nil, fmt.Errorf("rdp: NTLM field of %d bytes", len(p))
+		}
 		offsets[i] = at
 		at += len(p)
 	}
@@ -258,7 +280,7 @@ func (c *ntlmClient) authenticate(challenge []byte) ([]byte, *ntlmSession, error
 	for _, i := range []int{3, 4, 0, 1, 2, 5} {
 		w.u16(len(payload[i]))
 		w.u16(len(payload[i]))
-		w.u32(uint32(offsets[i])) // #nosec G115 -- a few hundred bytes
+		w.u32(uint32(offsets[i])) // #nosec G115 -- six fields of at most 64 KiB, checked above
 	}
 	w.u32(flags)
 	w.bytes(ntlmVersionField)
@@ -281,6 +303,16 @@ func (c *ntlmClient) random(fixed []byte, n int) ([]byte, error) {
 	b := make([]byte, n)
 	_, err := rand.Read(b)
 	return b, err
+}
+
+// hasAVPair reports whether pairs hold one of id.
+func hasAVPair(pairs []avPair, id uint16) bool {
+	for _, p := range pairs {
+		if p.id == id {
+			return true
+		}
+	}
+	return false
 }
 
 // withMICFlag returns pairs with the MIC bit set in MsvAvFlags, which is
@@ -326,8 +358,12 @@ func fileTime(t time.Time) []byte {
 // the domain is not.
 func ntowfv2(password, user, domain string) []byte {
 	h := md4.New() // #nosec G406 -- NTOWFv2 is defined on MD4
-	h.Write(utf16le(password))
-	return hmacMD5(h.Sum(nil), utf16le(strings.ToUpper(user)+domain))
+	p := utf16le(password)
+	h.Write(p)
+	clear(p)
+	nt := h.Sum(nil)
+	defer clear(nt)
+	return hmacMD5(nt, utf16le(strings.ToUpper(user)+domain))
 }
 
 func hmacMD5(key []byte, msg ...[]byte) []byte {

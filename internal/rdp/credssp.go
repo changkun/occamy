@@ -129,14 +129,20 @@ func credSSP(r *bufio.Reader, w io.Writer, cert *x509.Certificate, domain, user,
 		return errors.New("rdp: CredSSP server proved a different public key")
 	}
 
-	creds, err := asn1.Marshal(tsPasswordCreds{utf16le(domain), utf16le(user), utf16le(password)})
+	// The client clears its encodings of the password once they are
+	// sealed; the Config's string it cannot.
+	pw := utf16le(password)
+	defer clear(pw)
+	creds, err := asn1.Marshal(tsPasswordCreds{utf16le(domain), utf16le(user), pw})
 	if err != nil {
 		return err
 	}
+	defer clear(creds)
 	ts, err := asn1.Marshal(tsCredentials{CredType: 1, Credentials: creds})
 	if err != nil {
 		return err
 	}
+	defer clear(ts)
 	return writeTSRequest(w, &tsRequest{Version: version, AuthInfo: sess.seal(ts)})
 }
 

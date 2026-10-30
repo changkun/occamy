@@ -46,8 +46,13 @@ const (
 )
 
 func vectorChallenge(t testing.TB) []byte {
-	pairs := []avPair{{2, utf16le("Domain")}, {1, utf16le("Server")}}
-	return challengeMessage(vectorFlags, unhex(t, vectorServerChallenge), "Server", pairs)
+	return challengeMessage(vectorFlags, unhex(t, vectorServerChallenge), "Server", vectorNames())
+}
+
+// vectorNames are the example's AV pairs, the NetBIOS domain and computer
+// names.
+func vectorNames() []avPair {
+	return []avPair{{avNbDomainName, utf16le("Domain")}, {avNbComputerName, utf16le("Server")}}
 }
 
 func vectorClient() *ntlmClient {
@@ -164,8 +169,7 @@ func TestNTLMMIC(t *testing.T) {
 
 // A challenge that refuses what CredSSP needs, such as sealing, fails.
 func TestNTLMRequiredFlags(t *testing.T) {
-	pairs := []avPair{{2, utf16le("Domain")}}
-	ch := challengeMessage(vectorFlags&^ntlmSeal, unhex(t, vectorServerChallenge), "Server", pairs)
+	ch := challengeMessage(vectorFlags&^ntlmSeal, unhex(t, vectorServerChallenge), "Server", vectorNames())
 	c := vectorClient()
 	c.negotiateMessage()
 	if _, _, err := c.authenticate(ch); err == nil {
@@ -184,15 +188,62 @@ func TestNTLMHostileChallenge(t *testing.T) {
 	for name, ch := range map[string][]byte{
 		"crasher": []byte(ntlmCrasher),
 		"short timestamp": challengeMessage(vectorFlags, unhex(t, vectorServerChallenge), "",
-			[]avPair{{avTimestamp, []byte{1}}}),
+			append(vectorNames(), avPair{avTimestamp, []byte{1}})),
 		"short flags": challengeMessage(vectorFlags, unhex(t, vectorServerChallenge), "",
-			[]avPair{{avFlags, []byte{1, 2}}}),
+			append(vectorNames(), avPair{avFlags, []byte{1, 2}})),
 		"no EOL":            vectorChallenge(t)[:len(vectorChallenge(t))-4],
 		"short":             []byte("NTLMSSP\x00\x02\x00\x00\x00"),
 		"info out of range": func() []byte { b := vectorChallenge(t); b[44] = 0xff; return b }(),
 	} {
 		if _, _, err := c.authenticate(ch); err == nil {
 			t.Errorf("%s: authenticate accepted it", name)
+		}
+	}
+}
+
+// The target info is bounded, so that the NT response, which repeats it,
+// fits its 16-bit length, and so is each field of the AUTHENTICATE_MESSAGE.
+func TestNTLMLengths(t *testing.T) {
+	c := vectorClient()
+	c.negotiateMessage()
+	near := append(vectorNames(), avPair{0x0009, make([]byte, 65480)}, avPair{avTimestamp, make([]byte, 8)})
+	ch := challengeMessage(vectorFlags, unhex(t, vectorServerChallenge), "", near)
+	if _, _, err := c.authenticate(ch); err == nil || !strings.Contains(err.Error(), "target info of") {
+		t.Errorf("a target info of %d bytes: %v", len(ch), err)
+	}
+	fits := append(vectorNames(), avPair{0x0009, make([]byte, maxTargetInfo-40)})
+	if _, _, err := c.authenticate(challengeMessage(vectorFlags, unhex(t, vectorServerChallenge), "", fits)); err != nil {
+		t.Errorf("a target info just within %d bytes: %v", maxTargetInfo, err)
+	}
+	c.user = strings.Repeat("u", 1<<15)
+	if _, _, err := c.authenticate(vectorChallenge(t)); err == nil || !strings.Contains(err.Error(), "NTLM field of") {
+		t.Errorf("a user name of %d characters: %v", len(c.user), err)
+	}
+}
+
+// [MS-NLMP] 3.1.5.1.2: with signing or sealing, a challenge without both
+// NetBIOS names is a logon failure. An empty target info parses, as an
+// absent one, and fails for the same reason.
+func TestNTLMNetBIOSNames(t *testing.T) {
+	c := vectorClient()
+	c.negotiateMessage()
+	for name, pairs := range map[string][]avPair{
+		"no target info":      nil,
+		"no computer name":    vectorNames()[:1],
+		"no domain name":      vectorNames()[1:],
+		"only the DNS names":  {{0x0003, utf16le("server.test")}, {0x0004, utf16le("test")}},
+		"names and timestamp": append(vectorNames(), avPair{avTimestamp, make([]byte, 8)}),
+	} {
+		ch := challengeMessage(vectorFlags, unhex(t, vectorServerChallenge), "", pairs)
+		if pairs == nil {
+			ch = ch[:len(ch)-4] // without the MsvAvEOL either
+			binary.LittleEndian.PutUint16(ch[40:], 0)
+			binary.LittleEndian.PutUint16(ch[42:], 0)
+		}
+		_, _, err := c.authenticate(ch)
+		if want := name == "names and timestamp"; (err == nil) != want ||
+			!want && !strings.Contains(err.Error(), "NetBIOS") {
+			t.Errorf("%s: %v", name, err)
 		}
 	}
 }
