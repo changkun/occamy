@@ -760,6 +760,55 @@ func TestTracker(t *testing.T) {
 	}
 }
 
+// TestRev111GrowRowsPanics checks that the owner's stream survives a
+// resize-request that grows the terminal by a few rows, as a client's
+// does when its window grows. It panicked in the terminal's diff once.
+func TestRev111GrowRowsPanics(t *testing.T) {
+	ts, _ := sessionServer(t, nil)
+	alice := ts.token(t, "alice", "ops")
+	c := ts.stream(t, "/api/v1/connections/ops-shell/stream", alice, termHello)
+	c.until(t, "the first frame", func(m protocol.Message) bool { _, ok := m.(*protocol.FrameEnd); return ok })
+	id := c.welcome.SessionID
+	c.send(t, protocol.ResizeRequest{Seq: 1, Width: 80, Height: 30})
+	c.until(t, "the resize", func(m protocol.Message) bool {
+		r, ok := m.(*protocol.Resize)
+		return ok && r.Width == 80 && r.Height == 30
+	})
+	c.until(t, "a frame after the resize", func(m protocol.Message) bool { _, ok := m.(*protocol.FrameEnd); return ok })
+	if v := ts.s.session(id).s.Viewers(); len(v) != 1 || v[0].Role != session.RoleOwner {
+		t.Errorf("viewers %+v after the resize, want the owner", v)
+	}
+}
+
+// TestRev111ViewerKillsOwnerStream checks that the owner's stream
+// survives a viewer's resize-request that grows the rows while the
+// owner's input still waits for its effect.
+func TestRev111ViewerKillsOwnerStream(t *testing.T) {
+	ts, _ := sessionServer(t, nil)
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	path := "/api/v1/sessions/" + o.ID + "/stream"
+	owner := ts.stream(t, path, o.StreamToken, termHello)
+	owner.until(t, "the first frame", func(m protocol.Message) bool { _, ok := m.(*protocol.FrameEnd); return ok })
+	r := ts.api(t, http.MethodPost, "/api/v1/sessions/"+o.ID+"/shares", alice, `{"role":"viewer"}`)
+	var sh shareResponse
+	if err := json.Unmarshal(r.body, &sh); err != nil {
+		t.Fatal(err)
+	}
+	viewer := ts.stream(t, path, sh.Token, termHello)
+	viewer.until(t, "the first frame", func(m protocol.Message) bool { _, ok := m.(*protocol.FrameEnd); return ok })
+	owner.send(t, protocol.Key{Seq: 1, Down: true, Keysym: 'a'}) // its echo is not in yet
+	viewer.send(t, protocol.ResizeRequest{Seq: 1, Width: 80, Height: 30})
+	owner.until(t, "the resize", func(m protocol.Message) bool {
+		r, ok := m.(*protocol.Resize)
+		return ok && r.Height == 30
+	})
+	owner.until(t, "a frame after the resize", func(m protocol.Message) bool { _, ok := m.(*protocol.FrameEnd); return ok })
+	if v := ts.s.session(o.ID).s.Viewers(); len(v) != 2 || v[0].Role != session.RoleOwner {
+		t.Errorf("viewers %+v after the viewer's resize, want the owner and the viewer", v)
+	}
+}
+
 // TestRev111PanicLeaks checks that a stream that panics closes with an
 // internal error and leaves nothing behind: no WebSocket reader, no
 // owner's stream that a newer one would wait for, and no viewer.
