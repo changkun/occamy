@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/url"
 	"runtime/debug"
@@ -49,6 +50,9 @@ const (
 	// takeoverTimeout bounds the wait for an owner's older stream to end
 	// when a newer one takes over.
 	takeoverTimeout = 5 * time.Second
+	// refuseTimeout bounds a refused stream, from its close to the end of
+	// the closing handshake.
+	refuseTimeout = time.Second
 )
 
 // registerStreams registers the stream routes. They authenticate on
@@ -73,17 +77,17 @@ func (s *server) connectionStream(w http.ResponseWriter, r *http.Request) {
 	}
 	claims, err := s.verifier.VerifyAccess(req.token)
 	if err != nil {
-		req.c.finish(refuseToken(err), true)
+		req.c.refuse(refuseToken(err))
 		return
 	}
 	c := s.connection(r.PathValue("id"), claims)
 	if c == nil {
-		req.c.finish(protocol.Close{Code: protocol.CloseForbidden, Reason: "no such connection"}, true)
+		req.c.refuse(protocol.Close{Code: protocol.CloseForbidden, Reason: "no such connection"})
 		return
 	}
 	info, owner, err := s.open(connectionTarget(c), claims.Subject, screenOf(req.hello))
 	if err != nil {
-		req.c.finish(protocol.Close{Code: protocol.CloseInternalError, Reason: "the session could not be opened"}, true)
+		req.c.refuse(protocol.Close{Code: protocol.CloseInternalError, Reason: "the session could not be opened"})
 		return
 	}
 	s.serve(r.Context(), req.c, info, owner, req.hello)
@@ -102,7 +106,7 @@ func (s *server) sessionStream(w http.ResponseWriter, r *http.Request) {
 	}
 	info, v, refuse := s.join(r.PathValue("id"), req.token)
 	if refuse != nil {
-		req.c.finish(*refuse, true)
+		req.c.refuse(*refuse)
 		return
 	}
 	if v.Role() == session.RoleOwner {
@@ -116,7 +120,9 @@ func (s *server) sessionStream(w http.ResponseWriter, r *http.Request) {
 }
 
 // streamRequest is an upgraded stream request whose Origin, token and
-// hello passed the checks every stream route makes.
+// hello passed the checks every stream route makes. Its read limit stays
+// at protocol.MinMessageSize until serve, so that a client whose token
+// is refused has a small one.
 type streamRequest struct {
 	c     *wsConn
 	token string // not verified yet: what it may be depends on the route
@@ -129,7 +135,9 @@ type streamRequest struct {
 // after the upgrade to one whose Origin, token or hello is refused,
 // since a browser cannot read the status of a refused upgrade. The token
 // comes from the occamy.v1.token. subprotocol or, if there is none, from
-// Authorization; never from the URL, which proxies log.
+// Authorization; never from the URL, which proxies log. The route
+// verifies it after the upgrade, since what it may be depends on the
+// route, and refuses it with close too.
 func (s *server) upgrade(w http.ResponseWriter, r *http.Request) *streamRequest {
 	if !offers(r, protocol.Subprotocol) {
 		writeError(w, http.StatusBadRequest, codeBadRequest, "a stream is a WebSocket with the subprotocol "+protocol.Subprotocol)
@@ -153,7 +161,8 @@ func (s *server) upgrade(w http.ResponseWriter, r *http.Request) *streamRequest 
 	}
 	// The WebSocket hides the socket, so its unsent bytes are limited
 	// now.
-	if conn, ok := connFrom(r.Context()); ok {
+	conn, ok := connFrom(r.Context())
+	if ok {
 		if err := setLowWater(conn, streamLowWater); err != nil {
 			// #nosec G706 -- the remote address comes from net/http, not the client's data.
 			log.Printf("stream from %s: setting TCP_NOTSENT_LOWAT: %v", r.RemoteAddr, err)
@@ -169,15 +178,14 @@ func (s *server) upgrade(w http.ResponseWriter, r *http.Request) *streamRequest 
 	if err != nil {
 		return nil // Accept has answered
 	}
-	c := newWSConn(ws)
+	ws.SetReadLimit(protocol.MinMessageSize)
+	c := newWSConn(ws, conn)
 	if refuse != nil {
 		// #nosec G706 -- the reason is one of the constants above.
 		log.Printf("stream refused from %s: %s", r.RemoteAddr, refuse.Reason)
-		ws.SetReadLimit(protocol.MinMessageSize)
-		c.finish(*refuse, true)
+		c.refuse(*refuse)
 		return nil
 	}
-	ws.SetReadLimit(int64(protocol.Agree(hello.Capabilities, streamCapabilities).Limits().MaxMessageSize))
 	return &streamRequest{c: c, token: token, hello: hello}
 }
 
@@ -195,9 +203,11 @@ func offers(r *http.Request, sub string) bool {
 }
 
 // originAllowed reports whether a page of the request's Origin may open
-// a stream: its own, whose host is the request's, or one of origins. A
-// request without Origin comes from no browser, which is no page to
-// guard against. An empty Origin, a repeated one and null are refused.
+// a stream: its own, whose host is the request's, or one of origins. Its
+// own is https when occamyd terminates TLS; behind a proxy that does,
+// occamyd cannot tell the scheme, and takes either. A request without
+// Origin comes from no browser, which is no page to guard against. An
+// empty Origin, a repeated one and null are refused.
 func (s *server) originAllowed(r *http.Request) bool {
 	o, ok := r.Header["Origin"]
 	if !ok {
@@ -210,7 +220,7 @@ func (s *server) originAllowed(r *http.Request) bool {
 	if err != nil || u.Host == "" || u.Scheme != "http" && u.Scheme != "https" {
 		return false
 	}
-	if strings.EqualFold(u.Host, r.Host) {
+	if strings.EqualFold(u.Host, r.Host) && (r.TLS == nil || u.Scheme == "https") {
 		return true
 	}
 	return s.origins[u.Scheme+"://"+strings.ToLower(u.Host)]
@@ -354,6 +364,8 @@ func (s *server) serve(ctx context.Context, c *wsConn, info *sessionInfo, v *ses
 		info.ownerStream = own
 		info.mu.Unlock()
 	}
+	// The client is let in: its messages may be as large as agreed.
+	c.ws.SetReadLimit(int64(protocol.Agree(hello.Capabilities, streamCapabilities).Limits().MaxMessageSize))
 	err := serveStream(ctx, c, v, hello, stream.Config{SessionID: info.id, Capabilities: streamCapabilities})
 	if own != nil {
 		info.mu.Lock()
@@ -435,6 +447,7 @@ func screenOf(h protocol.Hello) screen {
 // finish closes the WebSocket with the same code.
 type wsConn struct {
 	ws    *websocket.Conn
+	raw   net.Conn // the socket below, or nil if the server does not keep it
 	start sync.Once
 	in    chan readResult
 	quit  chan struct{} // closed by finish: nobody reads any more
@@ -454,8 +467,8 @@ type readResult struct {
 // errText reports a text message, which protocol v1 does not allow.
 var errText = fmt.Errorf("%w: a text message", protocol.ErrUnsupported)
 
-func newWSConn(ws *websocket.Conn) *wsConn {
-	return &wsConn{ws: ws, in: make(chan readResult), quit: make(chan struct{})}
+func newWSConn(ws *websocket.Conn, raw net.Conn) *wsConn {
+	return &wsConn{ws: ws, raw: raw, in: make(chan readResult), quit: make(chan struct{})}
 }
 
 // read reads messages for ReadMessage until the connection fails or
@@ -551,6 +564,18 @@ func (c *wsConn) replacement() *protocol.Close {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.replaced
+}
+
+// refuse ends a stream before it starts: it sends m and closes the
+// WebSocket with its code, as finish does, but drops the connection once
+// refuseTimeout has passed, rather than wait up to 5 s each way for the
+// closing handshake of a client that may not have authenticated.
+func (c *wsConn) refuse(m protocol.Close) {
+	if c.raw != nil {
+		t := time.AfterFunc(refuseTimeout, func() { _ = c.raw.Close() })
+		defer t.Stop()
+	}
+	c.finish(m, true)
 }
 
 // finish closes the WebSocket once the stream is over: with the code of

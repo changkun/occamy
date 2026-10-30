@@ -107,9 +107,10 @@ one that is not base64url, and it never logs a token.
 
 ### The response
 
-The server checks `Origin`, authenticates the token, decodes `hello`,
-and answers `101 Switching Protocols` with `Sec-WebSocket-Protocol:
-occamy.v1` alone. It then sends, without waiting:
+The server checks `Origin`, finds the token, decodes `hello`, and
+answers `101 Switching Protocols` with `Sec-WebSocket-Protocol:
+occamy.v1` alone. It then authenticates the token, opens or joins the
+session, and sends, without waiting:
 
 1. `welcome`, with the viewer's ID and role, the session's class and ID,
    and the agreed [capabilities](#capabilities);
@@ -128,7 +129,9 @@ with an HTTP error, since it cannot speak to the client. If the token,
 completes the upgrade, sends `close` with `unauthorized`, `forbidden`,
 `protocol-error` or `unsupported`, and closes the WebSocket with the
 same code, because a browser cannot read the HTTP status of a refused
-upgrade.
+upgrade. A client that does not answer the WebSocket's close at once
+may find the connection dropped. Until the server has let a client in,
+it reads no message larger than the smallest maximum message size.
 
 `hello` sent as a WebSocket message, or a second `welcome`, is a
 protocol error.

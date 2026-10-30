@@ -784,13 +784,21 @@ place for fixes that ship on v0 before beta.
     `bad_request` as JSON. Every other refusal gets the upgrade, `close`
     and a WebSocket close with the same code: 4001 for `Origin`, 4000
     for the token, 1002 or 1003 for `hello`, 4001 for a connection or
-    session the token does not open. The read limit is 64 KiB until a
-    request is accepted, then the agreed message size.
+    session the token does not open. The read limit is 64 KiB until
+    `serve` lets the client in, after the route has verified its token,
+    then the agreed message size. A refused client gets 1 s from its
+    `close` to the end of the closing handshake, after which the socket
+    is closed under coder/websocket, rather than its 5 s each way.
+    [docs/protocol.md](../../docs/protocol.md) now gives this order:
+    `Origin`, the token found, `hello`, the upgrade, then the token
+    verified.
   - **Origin:** none is accepted, since a client that is no browser can
     send any `Origin`, and the token is what protects the route. One
     `Origin`, `http` or `https` with a host, is accepted when its host
-    is the request's `Host` (the scheme is not compared, since TLS may
-    end at a proxy) or `scheme://host[:port]` is in `origins`. `null`,
+    is the request's `Host` and, when occamyd terminates TLS, its scheme
+    is `https` (behind a proxy that ends TLS, the scheme cannot be
+    told), or `scheme://host[:port]` is in `origins`. A proxy that
+    rewrites `Host` needs occamyd's own origin in `origins`. `null`,
     an empty one and a repeated one are refused. coder/websocket's own
     check is off, since it refuses with 403 before `close` can go out.
   - **Token:** from the `occamy.v1.token.` subprotocol, else from

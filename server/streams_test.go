@@ -7,6 +7,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -298,6 +299,30 @@ func TestStreamRefused(t *testing.T) {
 				t.Errorf("%d sessions after a refusal, %d before", n, before)
 			}
 		})
+	}
+}
+
+// TestStreamRefusalShort checks that a refused client that does not
+// answer the closing handshake is dropped after refuseTimeout, not the
+// 10 s that coder/websocket would give it.
+func TestStreamRefusalShort(t *testing.T) {
+	ts, _ := sessionServer(t, nil)
+	for i, token := range []string{"", "not-a-share", ts.token(t, "mallory")} {
+		c, status, err := dial(ts.srv.URL+"/api/v1/connections/ops-shell/stream", withToken(token), &termHello, nil)
+		if err != nil {
+			t.Fatalf("%d %v", status, err)
+		}
+		start := time.Now()
+		m, err := c.next()
+		if _, ok := m.(*protocol.Close); !ok {
+			t.Fatalf("%#v %v, want close", m, err)
+		}
+		// The client reads no further, so it does not answer the
+		// WebSocket's close.
+		if !ts.s.streams.wait(3 * refuseTimeout) {
+			t.Errorf("token %d: the refused stream is still open after %v", i, time.Since(start))
+		}
+		_ = c.ws.CloseNow()
 	}
 }
 
@@ -635,6 +660,19 @@ func TestOriginAllowed(t *testing.T) {
 		}
 		if got := s.originAllowed(r); got != tt.want {
 			t.Errorf("Origin %q at %s: %v, want %v", tt.origin, tt.host, got, tt.want)
+		}
+	}
+	// When occamyd terminates TLS, its own pages are https.
+	for origin, want := range map[string]bool{
+		"https://occamy.example": true,
+		"http://occamy.example":  false,
+		"https://app.example":    true,
+	} {
+		r, _ := http.NewRequest(http.MethodGet, "https://occamy.example/", nil)
+		r.Header.Set("Origin", origin)
+		r.TLS = &tls.ConnectionState{}
+		if got := s.originAllowed(r); got != want {
+			t.Errorf("Origin %q over TLS: %v, want %v", origin, got, want)
 		}
 	}
 }

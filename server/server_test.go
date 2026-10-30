@@ -86,7 +86,9 @@ func newTestServer(t *testing.T, edit func(*config.File)) *testServer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(s.routes())
+	srv := httptest.NewUnstartedServer(s.routes())
+	srv.Config.ConnContext = connContext // as the public server's
+	srv.Start()
 	t.Cleanup(srv.Close)
 	// Before the server closes, the sessions end, and their streams.
 	t.Cleanup(func() {
