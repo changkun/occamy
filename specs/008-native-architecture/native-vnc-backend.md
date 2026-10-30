@@ -486,11 +486,12 @@ leaves only RDP on the bridge.
   the speed of a copy.
 - **Mutation checks.** Each of these was reverted in turn, and a test
   failed: Tight's stream resets, the bound on ZRLE runs, the check for
-  inflated data left over, keeping the zlib tail, its 64-byte bound, the
-  gradient's clamp and its first pixel, a coloured Hextile subrectangle
-  setting the foreground, the Hextile subrectangle bound at edge tiles,
-  Tight's palette index check, the ZRLE and Tight length bounds, and the
-  JPEG image size and width checks.
+  inflated data left over, the buffer as large as the window, keeping
+  the zlib tail, its 64-byte bound, the gradient's clamp and its first
+  pixel, a coloured Hextile subrectangle setting the foreground, the
+  Hextile subrectangle bound at edge tiles, Tight's palette index check,
+  the ZRLE and Tight length bounds, and the JPEG image size and width
+  checks.
 - **Follow-ups.**
   - QEMU's VNC server, for recorded traffic and the integration test.
   - A per-connection JPEG quality for slow upstream links, which the
