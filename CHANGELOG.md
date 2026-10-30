@@ -114,6 +114,17 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   wildcard host and `localhost`. A `version` merged in with `<<` counts,
   and one outside the file's first YAML document is an error. A v0 file
   is served as before.
+- Sign-in through an OpenID Connect provider, with `auth.oidc`: the
+  authorization code flow with PKCE, the ID token checked by go-oidc
+  (issuer, audience, expiry, nonce, and asymmetric algorithms only), and
+  the user and groups taken from `subject_claim` and `groups_claim`. The
+  browser goes back to one of `auth.oidc.return_urls` with a one-time
+  code in the fragment, which the client exchanges at
+  `POST /api/v1/auth/oidc/token`, with its own PKCE verifier, for an
+  access token, so the token never appears in a URL.
+  `require_known_users` admits only the users the file names. A
+  provider that is down fails OIDC sign-ins, not occamyd's start
+  ([docs/configuration.md](docs/configuration.md#signing-in-through-oidc)).
 
 ### Changed
 
