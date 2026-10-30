@@ -72,6 +72,17 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   an echo goes ahead of a status line or other output already on the
   screen, and the terminal's answers to the shell's queries reach the
   shell. Not served by any route yet.
+- A native VNC backend for protocol v1, `internal/backend/vnc`, in pure
+  Go: RFB 3.3, 3.7 and 3.8 with the security types None and VNC
+  Authentication, asking the session's owner for a password the
+  configuration lacks, and the Raw, CopyRect, DesktopSize and Cursor
+  encodings in the framebuffer's own pixel layout. It asks for screen
+  updates only while a viewer can see the screen, sends keys, pointer,
+  wheel and Latin-1 clipboard text, and reads the server's clipboard as
+  UTF-8 when it is valid UTF-8. It checks every length the server sends
+  before it reads or allocates, resizes the screen at most once an
+  update and ten times a second, and bounds its queued input by bytes.
+  `occamyd` does not use it yet.
 - `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS, NLA
   through CredSSP with NTLMv2, the connection sequence, bitmap updates
   in interleaved RLE and planar, pointer updates, and keyboard and mouse
