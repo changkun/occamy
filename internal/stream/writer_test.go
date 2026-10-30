@@ -83,15 +83,42 @@ func newClient(c Conn) *client {
 	return &client{c: c, start: time.Now(), img: &image.RGBA{}, codecs: map[protocol.Codec]int{}}
 }
 
-// decodeWebP decodes a WebP payload as libwebp, and so a browser, does:
-// a lossy image to opaque RGBA, a lossless one, a cursor, with its
-// straight alpha.
-func decodeWebP(payload []byte) (image.Image, error) {
-	m, err := webp.Decode(bytes.NewReader(payload))
+// decodeLossy decodes a WebP or JPEG payload of a w×h rectangle as a
+// client should. It checks the size the header claims against the
+// rectangle before it decodes, since a few bytes of header can claim a
+// frame that takes hundreds of megabytes to decode into. It decodes
+// lossy WebP as libwebp, and so a browser, does: an image.YCbCr or
+// image.NYCbCrA drawn with the standard library's conversion, which is
+// JPEG's full-range one, misreads VP8's limited-range colours, by about
+// 10 dB on the golden vectors. A lossless WebP image, a cursor, comes
+// back as an image.NRGBA, with straight alpha.
+func decodeLossy(c protocol.Codec, payload []byte, w, h int) (image.Image, error) {
+	var cfg image.Config
+	var err error
+	switch c {
+	case protocol.CodecWebP:
+		cfg, err = webp.DecodeConfig(bytes.NewReader(payload))
+	case protocol.CodecJPEG:
+		cfg, err = jpeg.DecodeConfig(bytes.NewReader(payload))
+	default:
+		return nil, fmt.Errorf("codec %v is not lossy", c)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Width != w || cfg.Height != h {
+		return nil, fmt.Errorf("a %v header claims %d×%d for a %d×%d rectangle", c, cfg.Width, cfg.Height, w, h)
+	}
+	if c == protocol.CodecJPEG {
+		return jpeg.Decode(bytes.NewReader(payload))
+	}
+	opts := webp.Options{Threads: 1, FrameSizeLimit: w * h}
+	m, err := webp.Decode(bytes.NewReader(payload), opts)
 	if _, lossless := m.(*image.NRGBA); err != nil || lossless {
 		return m, err
 	}
-	return webp.Decode(bytes.NewReader(payload), webp.Options{ToRGBA: true, Threads: 1})
+	opts.ToRGBA = true
+	return webp.Decode(bytes.NewReader(payload), opts)
 }
 
 // decodeTile decodes a tile's payload into dst, its rectangle of the
@@ -105,10 +132,8 @@ func decodeTile(dst *image.RGBA, c protocol.Codec, payload []byte) error {
 	case protocol.CodecDeflate:
 		var in codec.Inflater
 		return in.Decode(dst, payload)
-	case protocol.CodecWebP:
-		m, err = decodeWebP(payload)
-	case protocol.CodecJPEG:
-		m, err = jpeg.Decode(bytes.NewReader(payload))
+	case protocol.CodecWebP, protocol.CodecJPEG:
+		m, err = decodeLossy(c, payload, dst.Rect.Dx(), dst.Rect.Dy())
 	default:
 		return fmt.Errorf("tile in codec %v", c)
 	}
@@ -627,7 +652,7 @@ func TestCursor(t *testing.T) {
 		r := newRig(t, b, 50e6, time.Millisecond, visible)
 		time.Sleep(100 * time.Millisecond)
 		img := image.NewRGBA(image.Rect(0, 0, 8, 8))
-		img.Pix[0] = 0xff
+		img.Pix[0], img.Pix[3] = 0xff, 0xff // opaque red
 		b.Sink().Cursor(img, image.Pt(20, -3))
 		time.Sleep(100 * time.Millisecond)
 		b.Sink().Cursor(nil, image.Pt(3, 4))
@@ -849,21 +874,25 @@ func TestHelloAfterHandshake(t *testing.T) {
 	})
 }
 
-// A client that decodes no codec the server sends is refused.
+// A client that decodes no codec the server sends is refused, whether it
+// lists none or only codecs the server does not send.
 func TestNoCodec(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		r := newRig(t, backendtest.NewScreen(200, 150, 0), 50e6, time.Millisecond, protocol.Hello{Visible: true})
-		if err := <-r.served; err != nil {
-			t.Errorf("Serve returned %v", err)
-		}
-		r.served <- nil
-		time.Sleep(10 * time.Millisecond)
-		r.cl.mu.Lock()
-		defer r.cl.mu.Unlock()
-		if r.cl.close == nil || r.cl.close.Code != protocol.CloseUnsupported || r.cl.tiles != 0 {
-			t.Errorf("close %+v after %d tiles, want unsupported before any", r.cl.close, r.cl.tiles)
-		}
-	})
+	for _, codecs := range [][]protocol.Codec{nil, {protocol.CodecPNG, protocol.CodecCached}} {
+		synctest.Test(t, func(t *testing.T) {
+			hello := protocol.Hello{Visible: true, Capabilities: protocol.Capabilities{Codecs: codecs}}
+			r := newRig(t, backendtest.NewScreen(200, 150, 0), 50e6, time.Millisecond, hello)
+			if err := <-r.served; err != nil {
+				t.Errorf("%v: Serve returned %v", codecs, err)
+			}
+			r.served <- nil
+			time.Sleep(10 * time.Millisecond)
+			r.cl.mu.Lock()
+			defer r.cl.mu.Unlock()
+			if r.cl.close == nil || r.cl.close.Code != protocol.CloseUnsupported || r.cl.tiles != 0 {
+				t.Errorf("%v: close %+v after %d tiles, want unsupported before any", codecs, r.cl.close, r.cl.tiles)
+			}
+		})
+	}
 }
 
 // A message larger than the client takes is dropped, and the stream goes

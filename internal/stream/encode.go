@@ -14,7 +14,7 @@ import (
 
 // lookahead is a lossless tile that encode read and encoded while it
 // looked for the end of a run of lossy tiles: the next message, unless
-// the frame takes another turn first.
+// the frame takes another turn first, or the tile changed since.
 type lookahead struct {
 	ok      bool
 	tile    int
@@ -33,19 +33,25 @@ type lookahead struct {
 // client's maximum texture size wide, and makes a message within the
 // maximum message size.
 //
+// In an input's frame, a run ends where a drawing operation does, so that
+// the frame can end before an operation that would take it past its
+// budget.
+//
 // It reports how many tiles the message holds, and false for send in the
 // rare case that the encoder could not fit even one tile in a message the
 // client takes: the tile is then taken as sent, so that the writer does
 // not try it again until it changes. It reports false for ok if the
 // screen was resized since order was made.
-func (w *writer) encode(id uint32, order []int, i int) (n int, send, ok bool) {
+func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send, ok bool) {
 	start := time.Now()
 	defer func() { w.encodeTime += time.Since(start) }()
 
 	t := order[i]
 	if a := &w.ahead; a.ok {
 		a.ok = false
-		if a.tile == t {
+		// The tile it holds, read no earlier than the versions order
+		// was made from; else the tile changed since, and is read again.
+		if a.tile == t && a.version >= w.versions[t] {
 			w.payload = append(w.payload[:0], a.payload...)
 			w.runVersion = append(w.runVersion[:0], a.version)
 			w.message(id, a.r, a.codec)
@@ -82,6 +88,9 @@ func (w *writer) encode(id uint32, order []int, i int) (n int, send, ok bool) {
 		got, v := w.fb.ReadTile(u, w.tile(n))
 		if got != ru || w.fb.Bounds() != w.g.bounds {
 			break // resized: the next message finds out
+		}
+		if input && v != w.runVersion[n-1] {
+			break // another drawing operation
 		}
 		b, c, lossy := w.enc.Tile(w.ahead.payload[:0], w.tiles[n], ru.Dx(), ru.Dy())
 		if !lossy {

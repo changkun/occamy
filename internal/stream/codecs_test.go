@@ -356,18 +356,26 @@ func lossyColour(col int) color.RGBA {
 // A cursor keeps its alpha in each codec a viewer may get it in, and a
 // viewer that decodes none that carries alpha keeps its own pointer.
 func TestCursorCodecs(t *testing.T) {
-	img := image.NewRGBA(image.Rect(0, 0, 16, 16))
-	for i := 0; i < len(img.Pix); i += 4 {
+	// A pointer with straight alpha, which the backend hands over as an
+	// image.RGBA, premultiplied; the client gets straight alpha back.
+	pointer := image.NewNRGBA(image.Rect(0, 0, 16, 16))
+	for i := 0; i < len(pointer.Pix); i += 4 {
 		x, y := i/4%16, i/4/16
 		switch {
 		case x == 0 || y == 0:
-			copy(img.Pix[i:], []byte{0, 0, 0, 0xff})
+			copy(pointer.Pix[i:], []byte{0, 0, 0, 0xff})
 		case x < y:
-			copy(img.Pix[i:], []byte{0xff, 0xff, 0xff, 0xff})
+			copy(pointer.Pix[i:], []byte{0xff, 0xff, 0xff, 0xff})
+		case x == y:
+			copy(pointer.Pix[i:], []byte{0x20, 0x40, 0x60, 0}) // transparent
 		default:
-			copy(img.Pix[i:], []byte{0x20, 0x40, 0x60, byte(x * 16)}) // straight alpha
+			copy(pointer.Pix[i:], []byte{0x20, 0x40, 0x60, byte(x * 16)})
 		}
 	}
+	img := image.NewRGBA(pointer.Rect)
+	draw.Draw(img, img.Rect, pointer, image.Point{}, draw.Src)
+	want := image.NewNRGBA(pointer.Rect)
+	draw.Draw(want, want.Rect, img, image.Point{}, draw.Src)
 	for _, c := range []struct {
 		codecs []protocol.Codec
 		want   protocol.Codec
@@ -400,8 +408,297 @@ func TestCursorCodecs(t *testing.T) {
 			if err := decodeTile(out, m.Codec, m.Payload); err != nil || m.Codec != c.want {
 				t.Fatalf("%v: cursor in %v: %v", c.codecs, m.Codec, err)
 			}
-			if !bytes.Equal(out.Pix, img.Pix) {
+			if !bytes.Equal(out.Pix, want.Pix) {
 				t.Errorf("%v: the cursor differs after a round trip in %v", c.codecs, m.Codec)
+			}
+		})
+	}
+}
+
+// hookEncoder is markEncoder with a hook in Lossy, which runs once, on
+// the writer's goroutine, after the run's lookahead tile was read.
+type hookEncoder struct {
+	markEncoder
+	once sync.Once
+	hook func()
+}
+
+func (e *hookEncoder) Lossy(dst, pix []byte, w, h, q int) ([]byte, protocol.Codec) {
+	e.once.Do(e.hook)
+	return e.markEncoder.Lossy(dst, pix, w, h, q)
+}
+
+// tileAt is the rectangle of a 64-pixel tile.
+func tileAt(row, col int) image.Rectangle {
+	return image.Rect(col*64, row*64, (col+1)*64, (row+1)*64)
+}
+
+// An input whose effect lands on the lossless tile that ended a lossy run
+// goes out with the effect, not with the copy read ahead before it.
+func TestLookaheadInputEffect(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &tapped{Backend: backendtest.NewScreen(640, 192, 0)}
+		var r *rig
+		oldC := color.RGBA{R: 0x80, A: 0xff}
+		newC := color.RGBA{G: 0x80, A: 0xff}
+		u := tileAt(1, 2)
+		enc := &hookEncoder{}
+		enc.hook = func() {
+			r.cl.send(t, protocol.Key{Seq: 1, Keysym: 'k'}) // a key-up: the fake paints nothing
+			time.Sleep(time.Second)
+			paint(b, u, &image.Uniform{C: newC})
+		}
+		cfg := Config{NewEncoder: func([]protocol.Codec) Encoder { return enc }}
+		r = newRigConfig(t, b, 64, 50e6, time.Millisecond, visible, cfg)
+		time.Sleep(500 * time.Millisecond)
+		synctest.Wait()
+
+		var carrier *frameRecord
+		var shown color.RGBA
+		r.cl.mu.Lock()
+		r.cl.onFrame = func(f frameRecord) {
+			if carrier == nil && f.lastSeq >= 1 {
+				carrier = &f
+				shown = r.cl.img.RGBAAt(u.Min.X+1, u.Min.Y+1)
+			}
+		}
+		r.cl.mu.Unlock()
+		// Two lossy tiles, then a lossless one.
+		paint(b, image.Rect(0, 64, 128, 128), &image.Uniform{C: lossyColour(0)})
+		paint(b, u, &image.Uniform{C: oldC})
+		time.Sleep(3 * time.Second)
+		synctest.Wait()
+
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		if carrier == nil {
+			t.Fatal("no frame reported last_seq 1")
+		}
+		if shown != newC {
+			t.Errorf("frame %d reports the input shown, but its effect's tile shows %v, not %v", carrier.id, shown, newC)
+		}
+	})
+}
+
+// A tile read ahead in one frame is not sent in the next as it was: the
+// tile may have changed while the client hid the screen.
+func TestLookaheadAcrossFrames(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &tapped{Backend: backendtest.NewScreen(640, 192, 0)}
+		var r *rig
+		newC := color.RGBA{G: 0x80, A: 0xff}
+		u := tileAt(1, 2)
+		enc := &hookEncoder{}
+		enc.hook = func() {
+			// The run is in hand and u read ahead: the frame ends at the
+			// next message, and u changes before the client looks again.
+			r.cl.send(t, protocol.View{})
+			time.Sleep(time.Second)
+			paint(b, u, &image.Uniform{C: newC})
+		}
+		cfg := Config{NewEncoder: func([]protocol.Codec) Encoder { return enc }}
+		r = newRigConfig(t, b, 64, 50e6, time.Millisecond, visible, cfg)
+		time.Sleep(500 * time.Millisecond)
+		synctest.Wait()
+		r.cl.mu.Lock()
+		before := len(r.cl.frames)
+		r.cl.mu.Unlock()
+		paint(b, image.Rect(0, 64, 128, 128), &image.Uniform{C: lossyColour(0)})
+		paint(b, u, &image.Uniform{C: color.RGBA{R: 0x80, A: 0xff}})
+		time.Sleep(3 * time.Second)
+		synctest.Wait()
+		r.cl.send(t, protocol.View{Visible: true})
+		time.Sleep(time.Second)
+		synctest.Wait()
+
+		if got := r.cl.screen().RGBAAt(u.Min.X+1, u.Min.Y+1); got != newC {
+			t.Errorf("the tile read ahead shows %v, not %v", got, newC)
+		}
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		n := 0
+		for _, f := range r.cl.frames[before:] {
+			for _, rect := range f.rects {
+				if rect == u {
+					n++
+				}
+			}
+		}
+		if n != 1 {
+			t.Errorf("the tile read ahead went out %d times, want once, as it is now", n)
+		}
+	})
+}
+
+// An input's frame ends before a drawing operation that would take it
+// past inputFrameBytes, and a lossy run does not carry the next
+// operation across that boundary whole.
+func TestInputBudgetAcrossRun(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &tapped{Backend: backendtest.NewScreen(1280, 192, 0)}
+		var r *rig
+		enc := &hookEncoder{}
+		enc.hook = func() {
+			r.cl.send(t, protocol.Key{Seq: 1, Keysym: 'k'})
+			time.Sleep(time.Second)
+			paint(b, tileAt(1, 0), &image.Uniform{C: lossyColour(0)})                  // A: one tile
+			paint(b, image.Rect(64, 64, 1280, 128), &image.Uniform{C: lossyColour(1)}) // B: 19 tiles, 304 KiB raw
+		}
+		cfg := Config{NewEncoder: func([]protocol.Codec) Encoder { return enc }}
+		r = newRigConfig(t, b, 64, 1e9, 20*time.Millisecond, visible, cfg)
+		time.Sleep(500 * time.Millisecond)
+		synctest.Wait()
+		var carrier *frameRecord
+		r.cl.mu.Lock()
+		r.cl.onFrame = func(f frameRecord) {
+			if carrier == nil && f.lastSeq >= 1 {
+				carrier = &f
+			}
+		}
+		r.cl.mu.Unlock()
+		paint(b, tileAt(2, 0), &image.Uniform{C: lossyColour(2)}) // the frame whose run runs the hook
+		time.Sleep(3 * time.Second)
+		synctest.Wait()
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		if carrier == nil {
+			t.Fatal("no frame reported last_seq 1")
+		}
+		if want := []image.Rectangle{tileAt(1, 0)}; !slices.Equal(carrier.rects, want) {
+			t.Errorf("the input's frame carried %v, want %v", carrier.rects, want)
+		}
+	})
+}
+
+// The input budget counts the bytes of each tile of a run, not the run's
+// for each: a run of four tiles leaves room for an operation of five.
+func TestInputBudgetPerTile(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// 16-pixel tiles, 1 KiB each raw.
+		b := &tapped{Backend: backendtest.NewScreen(320, 64, 0)}
+		var r *rig
+		tile := func(row, col int) image.Rectangle { return image.Rect(col*16, row*16, (col+1)*16, (row+1)*16) }
+		enc := &hookEncoder{}
+		enc.hook = func() {
+			r.cl.send(t, protocol.Key{Seq: 1, Keysym: 'k'})
+			time.Sleep(time.Second)
+			paint(b, image.Rect(0, 16, 64, 32), &image.Uniform{C: lossyColour(0)})            // A: a run of 4 tiles
+			paint(b, image.Rect(0, 32, 80, 48), &image.Uniform{C: color.RGBA{G: 1, A: 0xff}}) // B: 5 lossless tiles
+		}
+		cfg := Config{NewEncoder: func([]protocol.Codec) Encoder { return enc }}
+		r = newRigConfig(t, b, 16, 1e9, 20*time.Millisecond, visible, cfg)
+		time.Sleep(500 * time.Millisecond)
+		synctest.Wait()
+		var carrier *frameRecord
+		r.cl.mu.Lock()
+		r.cl.onFrame = func(f frameRecord) {
+			if carrier == nil && f.lastSeq >= 1 {
+				carrier = &f
+			}
+		}
+		r.cl.mu.Unlock()
+		paint(b, tile(3, 0), &image.Uniform{C: lossyColour(2)})
+		time.Sleep(3 * time.Second)
+		synctest.Wait()
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		if carrier == nil {
+			t.Fatal("no frame reported last_seq 1")
+		}
+		want := []image.Rectangle{image.Rect(0, 16, 64, 32)}
+		for col := range 5 {
+			want = append(want, tile(2, col))
+		}
+		if !slices.Equal(carrier.rects, want) {
+			t.Errorf("the input's frame carried %v, want %v", carrier.rects, want)
+		}
+	})
+}
+
+// resizeEncoder is markEncoder that runs a hook when it is first asked
+// for a lossy tile, before the writer looks for the rest of the run.
+type resizeEncoder struct {
+	markEncoder
+	once sync.Once
+	hook func()
+}
+
+func (e *resizeEncoder) Tile(dst, pix []byte, w, h int) ([]byte, protocol.Codec, bool) {
+	if pix[0] == lossyMark {
+		e.once.Do(e.hook)
+	}
+	return e.markEncoder.Tile(dst, pix, w, h)
+}
+
+// A run ends where the screen was resized under it, rather than take a
+// tile of the new size for one of the old.
+func TestLossyRunResized(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &tapped{Backend: backendtest.NewScreen(640, 192, 0)}
+		enc := &resizeEncoder{}
+		enc.hook = func() {
+			// Ten columns become five: tile 11, the next in the run, was
+			// at row 1, column 1, and is now at row 2, column 1, lossy.
+			b.Sink().Resize(320, 192)
+			paint(b, tileAt(2, 1), &image.Uniform{C: lossyColour(1)})
+		}
+		cfg := Config{NewEncoder: func([]protocol.Codec) Encoder { return enc }}
+		r := newRigConfig(t, b, 64, 50e6, time.Millisecond, visible, cfg)
+		time.Sleep(500 * time.Millisecond)
+		synctest.Wait()
+		r.cl.mu.Lock()
+		before := len(r.cl.frames)
+		r.cl.mu.Unlock()
+		paint(b, tileAt(1, 0), &image.Uniform{C: lossyColour(0)})
+		paint(b, tileAt(1, 1), &image.Uniform{C: color.RGBA{G: 1, A: 0xff}})
+		time.Sleep(time.Second)
+		synctest.Wait()
+
+		if got, want := r.cl.screen(), serverScreen(r.s); !bytes.Equal(got.Pix, want.Pix) {
+			t.Error("the client's screen differs from the server's")
+		}
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		for _, f := range r.cl.frames[before:] {
+			for _, rect := range f.rects {
+				if rect.Dx() > 64 {
+					t.Errorf("a run of %v spans a resize", rect)
+				}
+			}
+		}
+	})
+}
+
+// A viewer that lists only a lossy codec gets every tile in it, those at
+// the screen's odd edges included, in the right place.
+func TestLossyOnly(t *testing.T) {
+	for _, codecs := range [][]protocol.Codec{{protocol.CodecJPEG}, {protocol.CodecWebP}} {
+		synctest.Test(t, func(t *testing.T) {
+			pic := photo(t)
+			b := &tapped{Backend: backendtest.NewScreen(651, 487, 0)}
+			hello := protocol.Hello{Visible: true, Capabilities: protocol.Capabilities{Codecs: codecs}}
+			r := newRig(t, b, 50e6, time.Millisecond, hello)
+			time.Sleep(100 * time.Millisecond)
+			paint(b, image.Rect(0, 0, 651, 487), pic)
+			time.Sleep(time.Second)
+			synctest.Wait()
+			want, got := serverScreen(r.s), r.cl.screen()
+			worst := math.Inf(1)
+			for y := 0; y < 487; y += 64 {
+				for x := 0; x < 651; x += 64 {
+					tr := image.Rect(x, y, x+64, y+64).Intersect(want.Rect)
+					worst = min(worst, psnr(want.SubImage(tr).(*image.RGBA), got.SubImage(tr).(*image.RGBA)))
+				}
+			}
+			r.cl.mu.Lock()
+			defer r.cl.mu.Unlock()
+			for k := range r.cl.codecs {
+				if k != codecs[0] {
+					t.Errorf("%v: tiles in %v", codecs, k)
+				}
+			}
+			if worst < 28 {
+				t.Errorf("%v: the worst tile scores %.1f dB", codecs, worst)
 			}
 		})
 	}

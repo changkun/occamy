@@ -323,6 +323,8 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 			}
 			if n > 0 {
 				order, i, input = w.fresh[:n], 0, true
+				// The tile read ahead belongs to the order left behind.
+				w.ahead.ok = false
 				// The rest of the frame shows the inputs through the
 				// latest.
 				seq = max(seq, w.in.seq)
@@ -338,7 +340,7 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 		if visible, _ := w.v.Visibility(); !visible {
 			break
 		}
-		n, send, ok := w.encode(id, order, i)
+		n, send, ok := w.encode(id, order, i, input)
 		if !ok {
 			break // resized since the tiles were chosen
 		}
