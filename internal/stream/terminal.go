@@ -36,8 +36,10 @@ func (w *writer) runTerminal(ctx context.Context) error {
 			w.in = nil // it changed nothing on the screen
 		}
 		changed := w.s.Changed()
-		seq, _ := w.v.LastInput() // before the screen, which then shows it
 		s := w.s.Screen()
+		// After the screen: the session records an input before the
+		// backend sees it, so the screen cannot show an input this misses.
+		seq, _ := w.v.LastInput()
 		w.track(s)
 		if s == last {
 			if err := w.wait(ctx, changed, 0); err != nil {
@@ -65,16 +67,22 @@ func (w *writer) runTerminal(ctx context.Context) error {
 			return err
 		}
 		if w.in != nil && w.in.boosted {
-			// What the input changed went out as its effect, so it is not
-			// motion when the next input comes.
-			for i, v := range w.versions {
-				if v > w.in.clock && (w.in.active == nil || !w.in.active[i]) {
-					w.effects[i] = v
-				}
-			}
+			w.keepEffects()
 			w.resolve()
 		}
 		last = s
+	}
+}
+
+// keepEffects records the rows that the pending input changed, which
+// went out as its effect, so that they are not taken for motion when the
+// next input comes. The input's rows in motion may be of a screen of
+// another size, when the input resized it: then no row was in motion.
+func (w *writer) keepEffects() {
+	for i, v := range w.versions {
+		if v > w.in.clock && !w.in.moving(i, len(w.versions)) {
+			w.effects[i] = v
+		}
 	}
 }
 
@@ -107,7 +115,7 @@ func (w *writer) termEffect(s *terminal.Screen, seq uint32) {
 	}
 	in.checked = s.Version
 	for i, v := range w.versions {
-		if v > in.clock && (in.active == nil || !in.active[i]) {
+		if v > in.clock && !in.moving(i, len(w.versions)) {
 			w.p.Input()
 			in.boosted = true
 			in.seq = max(in.seq, seq)

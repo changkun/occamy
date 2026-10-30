@@ -343,12 +343,12 @@ arise, rather than inheriting those fixes.
     While the pacer holds a frame back, the writer wakes on framebuffer
     changes as long as an effect is awaited. An input whose effect does
     not appear within 1 s loses its priority.
-  - `frame-end`'s `last_seq` is the last input applied when the frame
-    started, or when it took up an input's effect, if later. An input
-    applied before a frame's content was read may still have its effect
-    on the way from the remote end, so `last_seq` says which inputs a
-    frame could show, not that it shows their effect; the frame that
-    goes beyond the window does show it.
+  - `frame-end`'s `last_seq` is the last input recorded when the writer
+    finished reading the frame's content (see the later fix below). An
+    input applied before a frame's content was read may still have its
+    effect on the way from the remote end, so `last_seq` says which
+    inputs a frame could show, not that it shows their effect; the frame
+    that goes beyond the window does show it.
   - Small state goes out before every tile, during pacing sleeps and
     while waiting, so it waits for at most the tile being written.
   - Resizes follow the framebuffer's bounds, not the session's small
@@ -426,9 +426,9 @@ arise, rather than inheriting those fixes.
     at that clock. While every row is in motion, as under a fast
     scrolling log, an echo cannot be told from the output and gets no
     priority.
-  - `last_seq` is read before the snapshot, as in a graphical frame: it
-    names the inputs applied before the screen was read, whose echo may
-    come in a later frame.
+  - `last_seq` is read after the snapshot, as in a graphical frame after
+    the tiles: it names every input whose effect the snapshot can hold,
+    and perhaps one more whose echo comes in a later frame.
   - A diff goes whole: a client's screen is right only once it has all of
     it, so a terminal frame is never cut. At the cap on bytes in flight it
     waits for acknowledgements of earlier frames (`Pacer.Hold`); a frame
@@ -492,3 +492,27 @@ arise, rather than inheriting those fixes.
   fails in about one run in five.
 - **Cost:** a snapshot allocates a version per row, about 400 ns more
   for a 200x50 screen.
+- **Later fix:** the Go client core's end-to-end tests found that a
+  `resize-request` panicked the terminal writer: the rows in motion at
+  the input were recorded for the old size and indexed with the new
+  rows. occamyd hit it too, when a `resize-request` added rows while an
+  input was pending. Both places that read those rows, the search for
+  the input's effect (`termEffect`) and the record of what the effect
+  changed (`keepEffects`), now take rows of a screen of another size as
+  still, as tiles already did (`TestTerminalResizeRequest`,
+  `TestTerminalResizeWhileBusy` with every row in motion,
+  `TestTermEffectResized`, `TestKeepEffectsResized`;
+  [client-core](client-core.md)).
+- **Later fix:** the client core's `TestInputLastSeq` failed 15 runs
+  of 200 under `-race`: a frame showed a key's effect with a
+  `last_seq` below the key. The viewer recorded the input's `seq` only
+  after `backend.Input` returned, and the remote could draw the effect
+  in between; the graphical writer also read `last_seq` when the frame
+  started. Now the viewer records `seq` before it hands the input to the
+  backend, and puts the previous one back if the backend refuses it, and
+  both writers read `last_seq` after the frame's content (the tiles, or
+  the terminal snapshot). An effect on screen therefore always has its
+  input recorded, and `last_seq` never names less than a frame shows; it
+  may name one input more, whose effect comes later, which the protocol
+  allows (`TestInputRecordedBeforeBackend`; the client test passes 200
+  runs of 200 under `-race`).
