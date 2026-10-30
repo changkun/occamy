@@ -582,8 +582,9 @@ leaves only RDP on the bridge.
   Outside the security code, each of these made
   `TestExtendedDesktopSize` fail: a refused size sent again, a
   prohibition ignored, and the refused sizes never forgotten. Passing
-  plain cut text through a string again made `TestCutTextAllocations`
-  fail.
+  plain cut text through a string and back again made the Latin-1 case
+  of `TestCutTextAllocations` fail; the UTF-8 case, bounded at five
+  times for the race detector, catches only phase 1's whole path.
 - **Surprises / gotchas.**
   - TigerVNC lists the plain security types among VeNCrypt's subtypes,
     so a VeNCrypt-only offer may still mean no TLS.
