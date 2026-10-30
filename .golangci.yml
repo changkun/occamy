@@ -27,8 +27,9 @@ linters:
       - path: _test\.go
         linters: [errcheck, gosec]
     paths:
-      # npm packages can ship Go code of their own.
-      - client/
+      # npm packages can ship Go code of their own; the Go client
+      # package beside them is linted.
+      - client/occamy-web/
 
 formatters:
   enable:
@@ -40,4 +41,4 @@ formatters:
         - changkun.de/x/occamy
   exclusions:
     paths:
-      - client/
+      - client/occamy-web/
