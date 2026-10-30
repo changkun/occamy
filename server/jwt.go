@@ -42,7 +42,38 @@ var (
 	errMissingExpField      = errors.New("missing exp field")
 	// gin-jwt panicked on a token without these claims.
 	errMissingClaims = errors.New("token lacks the connection claims")
+
+	// gin-jwt's own error, and golang-jwt v4's texts that gin-jwt
+	// passed on, which v0 clients may match.
+	errInvalidSigningAlgorithm = errors.New("invalid signing algorithm")
+	errExpiredToken            = errors.New("token is expired")         // gin-jwt's, for an exp of 0
+	errTokenExpired            = errors.New("Token is expired")         //nolint:staticcheck // ST1005: v4's text
+	errTokenNotValidYet        = errors.New("Token is not valid yet")   //nolint:staticcheck // ST1005: v4's text
+	errTokenUsedBeforeIssued   = errors.New("Token used before issued") //nolint:staticcheck // ST1005: v4's text
+	errSignatureInvalid        = errors.New("signature is invalid")
 )
+
+// v4Error returns the error gin-jwt reported for a token that golang-jwt
+// v5 refused, so that the 401 bodies stay as they were.
+func v4Error(err error) error {
+	switch {
+	case errors.Is(err, errInvalidSigningAlgorithm):
+		return errInvalidSigningAlgorithm
+	case errors.Is(err, jwt.ErrTokenExpired):
+		return errTokenExpired
+	case errors.Is(err, jwt.ErrTokenNotValidYet):
+		return errTokenNotValidYet
+	case errors.Is(err, jwt.ErrTokenUsedBeforeIssued):
+		return errTokenUsedBeforeIssued
+	case errors.Is(err, jwt.ErrTokenSignatureInvalid):
+		return errSignatureInvalid
+	case errors.Is(err, jwt.ErrTokenMalformed):
+		// v4 reported the cause alone, such as "token contains an invalid
+		// number of segments".
+		return errors.New(strings.TrimPrefix(err.Error(), jwt.ErrTokenMalformed.Error()+": "))
+	}
+	return err
+}
 
 // hmacMethods are the algorithms that v0 tokens may be signed with. gin-jwt
 // also took RS256, RS384 and RS512, but only with key files, which v0's
@@ -158,12 +189,16 @@ func (t *tokens) authenticate(w http.ResponseWriter, r *http.Request) (*config.J
 		unauthorized(w, http.StatusUnauthorized, err)
 		return nil, false
 	}
-	token, err := jwt.Parse(raw, func(*jwt.Token) (any, error) { return t.key, nil },
-		jwt.WithValidMethods([]string{t.method.Alg()}),
-		jwt.WithTimeFunc(t.now),
-	)
+	// The key function accepts only the configured algorithm, as
+	// gin-jwt's did, which also rules out none and asymmetric keys.
+	token, err := jwt.Parse(raw, func(tok *jwt.Token) (any, error) {
+		if tok.Method.Alg() != t.method.Alg() {
+			return nil, errInvalidSigningAlgorithm
+		}
+		return t.key, nil
+	}, jwt.WithTimeFunc(t.now), jwt.WithIssuedAt())
 	if err != nil {
-		unauthorized(w, http.StatusUnauthorized, err)
+		unauthorized(w, http.StatusUnauthorized, v4Error(err))
 		return nil, false
 	}
 	claims, ok := token.Claims.(jwt.MapClaims)
@@ -172,8 +207,15 @@ func (t *tokens) authenticate(w http.ResponseWriter, r *http.Request) (*config.J
 		return nil, false
 	}
 	// The parser checks exp if it is there; gin-jwt also required it.
-	if _, ok := claims["exp"]; !ok {
+	exp, ok := claims["exp"]
+	if !ok {
 		unauthorized(w, http.StatusBadRequest, errMissingExpField)
+		return nil, false
+	}
+	// golang-jwt v5 takes an exp of 0 for none at all, where gin-jwt
+	// found it expired long ago.
+	if n, ok := exp.(float64); ok && n <= 0 {
+		unauthorized(w, http.StatusUnauthorized, errExpiredToken)
 		return nil, false
 	}
 	var c config.JWT

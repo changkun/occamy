@@ -69,6 +69,13 @@ func closeStatus(err error) (code websocket.StatusCode, status int) {
 // 5 s each for the close frame to go out and for the client's to come
 // back. Only the first call on a connection does anything.
 func closeWith(ws *websocket.Conn, err error) {
+	if errors.Is(err, websocket.ErrMessageTooBig) {
+		// coder/websocket has sent 1009 already. Its close handshake would
+		// first read the rest of the oversized message with no deadline,
+		// so a client that goes quiet would hold the handler forever.
+		_ = ws.CloseNow()
+		return
+	}
 	code, status := closeStatus(err)
 	// Best effort: the client may already be gone.
 	_ = ws.Close(code, strconv.Itoa(status))

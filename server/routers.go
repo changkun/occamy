@@ -41,6 +41,12 @@ func (p *proxy) serveWS(w http.ResponseWriter, r *http.Request) {
 // with 403: an Origin header, if present, must name the request's host.
 // Compression stays off, as it was on gorilla/websocket.
 func accept(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
+	if o, ok := r.Header["Origin"]; ok && (len(o) != 1 || o[0] == "") {
+		// coder/websocket skips the check for an empty Origin, which
+		// gorilla/websocket refused.
+		http.Error(w, "invalid Origin header", http.StatusForbidden)
+		return nil, errors.New("invalid Origin header")
+	}
 	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		Subprotocols:    []string{"guacamole"}, // fixed by guacamole-common-js
 		CompressionMode: websocket.CompressionDisabled,

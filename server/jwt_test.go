@@ -5,14 +5,18 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -309,21 +313,28 @@ func TestTokenRejected(t *testing.T) {
 	delete(noPassword, "password")
 	numericHost := validClaims()
 	numericHost["host"] = 5900
+	zeroExp := validClaims()
+	zeroExp["exp"] = 0
+	future := validClaims()
+	future["iat"] = testNow.Add(time.Hour).Unix()
 	unsigned := sign(t, jwt.SigningMethodNone, jwt.UnsafeAllowNoneSignatureType, validClaims())
 
 	for _, tt := range []struct {
 		name    string
 		token   string
 		code    int
-		message string // "" for any
+		message string // gin-jwt's text, which v0 clients may match
 	}{
 		{"none", "", http.StatusUnauthorized, "cookie token is empty"},
-		{"HS384", sign(t, jwt.SigningMethodHS384, key, validClaims()), http.StatusUnauthorized, ""},
-		{"HS512", sign(t, jwt.SigningMethodHS512, key, validClaims()), http.StatusUnauthorized, ""},
-		{"alg none", unsigned, http.StatusUnauthorized, ""},
-		{"other secret", sign(t, jwt.SigningMethodHS256, []byte("other"), validClaims()), http.StatusUnauthorized, ""},
-		{"tampered", rp.token(t) + "x", http.StatusUnauthorized, ""},
-		{"expired", sign(t, jwt.SigningMethodHS256, key, expired), http.StatusUnauthorized, ""},
+		{"HS384", sign(t, jwt.SigningMethodHS384, key, validClaims()), http.StatusUnauthorized, "invalid signing algorithm"},
+		{"HS512", sign(t, jwt.SigningMethodHS512, key, validClaims()), http.StatusUnauthorized, "invalid signing algorithm"},
+		{"alg none", unsigned, http.StatusUnauthorized, "invalid signing algorithm"},
+		{"other secret", sign(t, jwt.SigningMethodHS256, []byte("other"), validClaims()), http.StatusUnauthorized, "signature is invalid"},
+		{"tampered", rp.token(t) + "x", http.StatusUnauthorized, "signature is invalid"},
+		{"malformed", "a.b", http.StatusUnauthorized, "token contains an invalid number of segments"},
+		{"expired", sign(t, jwt.SigningMethodHS256, key, expired), http.StatusUnauthorized, "Token is expired"},
+		{"exp zero", sign(t, jwt.SigningMethodHS256, key, zeroExp), http.StatusUnauthorized, "token is expired"},
+		{"issued later", sign(t, jwt.SigningMethodHS256, key, future), http.StatusUnauthorized, "Token used before issued"},
 		{"no exp", sign(t, jwt.SigningMethodHS256, key, noExp), http.StatusBadRequest, "missing exp field"},
 		{"no password", sign(t, jwt.SigningMethodHS256, key, noPassword), http.StatusUnauthorized, errMissingClaims.Error()},
 		{"numeric host", sign(t, jwt.SigningMethodHS256, key, numericHost), http.StatusUnauthorized, errMissingClaims.Error()},
@@ -344,7 +355,7 @@ func TestTokenRejected(t *testing.T) {
 			if err := json.Unmarshal(r.body, &out); err != nil {
 				t.Fatalf("body %s: %v", r.body, err)
 			}
-			if out.Code != tt.code || out.Message == "" || tt.message != "" && out.Message != tt.message {
+			if out.Code != tt.code || out.Message != tt.message {
 				t.Errorf("body %s, want code %d and message %q", r.body, tt.code, tt.message)
 			}
 			if got := r.header.Get("WWW-Authenticate"); got != "JWT realm=occamy-proxy" {
@@ -417,6 +428,57 @@ func TestLargeMessage(t *testing.T) {
 			t.Fatalf("closed with %v (%v), want 1009", code, err)
 		}
 		break
+	}
+}
+
+// TestOversizedStall checks that a client which declares a message far
+// over the read limit, sends just past the limit and then goes quiet does
+// not hold its handler and session: coder/websocket's close would read
+// the rest of that message with no deadline.
+func TestOversizedStall(t *testing.T) {
+	rp := newRouteProxy(t, true, false)
+	addr := strings.TrimPrefix(rp.srv.URL, "http://")
+	nc, err := net.Dial("tcp", addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+	fmt.Fprintf(nc, "GET /api/v0/connect?token=%s HTTP/1.1\r\nHost: %s\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n"+
+		"Sec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: guacamole\r\n\r\n", rp.token(t), addr)
+	br := bufio.NewReader(nc)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil || resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("upgrade: %v %v", resp, err)
+	}
+	// A 101 has no body; closing it leaves the connection open.
+	resp.Body.Close()
+	go func() { _, _ = io.Copy(io.Discard, br) }() // the server's writes never block
+	sessions := func() int {
+		rp.p.mu.Lock()
+		defer rp.p.mu.Unlock()
+		return len(rp.p.sessions)
+	}
+	waitFor(t, "a session", func() bool { return sessions() == 1 })
+
+	// A masked text frame that declares 1 TiB, with a zero mask.
+	hdr := binary.BigEndian.AppendUint64([]byte{0x81, 0x80 | 127}, 1<<40)
+	if _, err := nc.Write(append(hdr, 0, 0, 0, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := nc.Write(bytes.Repeat([]byte("a"), guacamole.MaxInstructionSize+64)); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the session to end while the client is quiet", func() bool { return sessions() == 0 })
+}
+
+// TestEmptyOrigin checks that an Origin header without a value is
+// refused, as gorilla/websocket refused it; coder/websocket skips the
+// check for one.
+func TestEmptyOrigin(t *testing.T) {
+	rp := newRouteProxy(t, true, false)
+	r := rp.get(t, "/api/v0/connect?token="+rp.token(t), http.Header{"Origin": {""}})
+	if r.code != http.StatusForbidden {
+		t.Errorf("%d %s, want 403", r.code, r.body)
 	}
 }
 
