@@ -11,26 +11,39 @@ package vnc
 // X509Plain, with a server certificate for localhost and 127.0.0.1
 // signed by a CA of the image's own, and a loop on the display that
 // answers clipboard text that starts "owner: " with "echo: " and the
-// rest. Start one, copy out its CA and certificate, and point the test
-// at them:
+// rest:
 //
-//	podman build -t occamy-vnc-tigervnc docker/test/tigervnc
-//	podman run -d --rm --name occamy-vnc-tigervnc -p 127.0.0.1:15901:5901 occamy-vnc-tigervnc
-//	podman cp occamy-vnc-tigervnc:/etc/vnc-test/ca.pem /tmp/occamy-vnc-ca.pem
-//	podman cp occamy-vnc-tigervnc:/etc/vnc-test/server.pem /tmp/occamy-vnc-server.pem
-//	OCCAMY_VNC_TLS_ADDR=127.0.0.1:15901 \
-//	OCCAMY_VNC_TLS_CA=/tmp/occamy-vnc-ca.pem OCCAMY_VNC_TLS_CERT=/tmp/occamy-vnc-server.pem \
 //	go test -tags integration -run TestTigerVNC ./internal/backend/vnc
-//	podman stop occamy-vnc-tigervnc
+//
+// The test builds the image and starts a container with podman, or the
+// engine OCCAMY_CONTAINER_ENGINE names, such as docker, and skips
+// without one, or with -short. OCCAMY_VNC_TLS_IMAGE names an image to
+// use instead of building one. OCCAMY_VNC_TLS_ADDR names a running
+// server to use instead of starting a container, with
+// OCCAMY_VNC_TLS_CA and OCCAMY_VNC_TLS_CERT the files of its CA and
+// server certificates.
+//
+// The image and the container a run makes are its own, named with the
+// time the run ends at the latest, its -timeout, and the container
+// listens on a port the engine picks: concurrent runs do not share
+// them. A run removes them when it ends; one that panics, as on
+// -timeout, leaves them behind, and the next run removes those whose
+// time has passed.
 
 import (
+	"cmp"
 	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"flag"
+	"fmt"
 	"image"
+	"io"
 	"net"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -39,29 +52,140 @@ import (
 	"changkun.de/x/occamy/internal/backend/backendtest"
 )
 
-func TestTigerVNC(t *testing.T) {
-	addr := os.Getenv("OCCAMY_VNC_TLS_ADDR")
-	if addr == "" {
-		t.Skip("OCCAMY_VNC_TLS_ADDR is not set")
+// runPrefix starts the names of the images and containers that runs
+// make, which go on with the Unix time a run ends at the latest.
+const runPrefix = "occamy-vnc-it-until"
+
+// runName returns this run's name for its image and container.
+func runName() string {
+	timeout := 24 * time.Hour
+	if f := flag.Lookup("test.timeout"); f != nil {
+		if d, err := time.ParseDuration(f.Value.String()); err == nil && d > 0 {
+			timeout = d
+		}
 	}
+	return fmt.Sprintf("%s%d-%d", runPrefix, time.Now().Add(timeout+time.Minute).Unix(), os.Getpid())
+}
+
+// expired reports whether name is a run's whose time has passed.
+func expired(name string) bool {
+	_, rest, ok := strings.Cut(name, runPrefix)
+	if !ok {
+		return false
+	}
+	until, _, _ := strings.Cut(rest, "-")
+	t, err := strconv.ParseInt(until, 10, 64)
+	return err == nil && time.Now().Unix() > t
+}
+
+// cleanUp removes the containers and images of earlier runs whose time
+// has passed. podman lists images with a registry before the name.
+func cleanUp(engine string) {
+	out, _ := exec.Command(engine, "ps", "-a", "--filter", "name="+runPrefix, "--format", "{{.Names}}").Output()
+	for _, name := range strings.Fields(string(out)) {
+		if expired(name) {
+			_ = exec.Command(engine, "rm", "-f", name).Run()
+		}
+	}
+	out, _ = exec.Command(engine, "images", "--format", "{{.Repository}}").Output()
+	for _, repo := range strings.Fields(string(out)) {
+		if expired(repo) {
+			_ = exec.Command(engine, "rmi", "-f", repo).Run()
+		}
+	}
+}
+
+// tigerVNC returns the address of the server, and its CA and server
+// certificates in PEM.
+func tigerVNC(t *testing.T) (addr string, caPEM, certPEM []byte) {
+	if addr := os.Getenv("OCCAMY_VNC_TLS_ADDR"); addr != "" {
+		caPEM, err := os.ReadFile(os.Getenv("OCCAMY_VNC_TLS_CA"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		certPEM, err := os.ReadFile(os.Getenv("OCCAMY_VNC_TLS_CERT"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return addr, caPEM, certPEM
+	}
+	if testing.Short() {
+		t.Skip("-short: no container")
+	}
+	engine := cmp.Or(os.Getenv("OCCAMY_CONTAINER_ENGINE"), "podman")
+	if _, err := exec.LookPath(engine); err != nil {
+		t.Skipf("no container engine: %v", err)
+	}
+	cleanUp(engine)
+	name := runName()
+	img := os.Getenv("OCCAMY_VNC_TLS_IMAGE")
+	if img == "" {
+		img = name
+		if out, err := exec.Command(engine, "build", "-q", "-t", img, "../../../docker/test/tigervnc").CombinedOutput(); err != nil {
+			t.Fatalf("building the TigerVNC image: %v: %s", err, out)
+		}
+		t.Cleanup(func() { _ = exec.Command(engine, "rmi", "-f", img).Run() })
+	}
+	if out, err := exec.Command(engine, "run", "-d", "--rm", "--name", name, "-p", "127.0.0.1::5901", img).CombinedOutput(); err != nil {
+		t.Fatalf("starting %s: %v: %s", img, err, out)
+	}
+	t.Cleanup(func() { _ = exec.Command(engine, "rm", "-f", name).Run() })
+	out, err := exec.Command(engine, "port", name, "5901/tcp").Output()
+	if err != nil {
+		t.Fatalf("the port of %s: %v", name, err)
+	}
+	addr = strings.TrimSpace(strings.Split(string(out), "\n")[0])
+	file := func(path string) []byte {
+		b, err := exec.Command(engine, "exec", name, "cat", path).Output()
+		if err != nil {
+			t.Fatalf("%s of %s: %v", path, name, err)
+		}
+		return b
+	}
+	caPEM, certPEM = file("/etc/vnc-test/ca.pem"), file("/etc/vnc-test/server.pem")
+	// Wait until Xvnc sends its version.
+	for deadline := time.Now().Add(60 * time.Second); ; {
+		if probeRFB(addr) == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Xvnc at %s does not answer", addr)
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	return addr, caPEM, certPEM
+}
+
+// probeRFB reads the server's ProtocolVersion.
+func probeRFB(addr string) error {
+	c, err := net.DialTimeout("tcp", addr, time.Second)
+	if err != nil {
+		return err
+	}
+	defer c.Close()
+	if err := c.SetDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		return err
+	}
+	var b [12]byte
+	if _, err := io.ReadFull(c, b[:]); err != nil {
+		return err
+	}
+	_, err = parseVersion(b[:])
+	return err
+}
+
+func TestTigerVNC(t *testing.T) {
+	addr, caPEM, certPEM := tigerVNC(t)
 	// The image's: VNC Authentication's password, and Plain's user and
 	// password.
 	const pw, user, plainPW = "vncpassword", "occamy", "plainpassword"
-	caPEM, err := os.ReadFile(os.Getenv("OCCAMY_VNC_TLS_CA"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(caPEM) {
-		t.Fatal("no CA certificate in OCCAMY_VNC_TLS_CA")
-	}
-	certPEM, err := os.ReadFile(os.Getenv("OCCAMY_VNC_TLS_CERT"))
-	if err != nil {
-		t.Fatal(err)
+		t.Fatal("no CA certificate")
 	}
 	block, _ := pem.Decode(certPEM)
 	if block == nil {
-		t.Fatal("no certificate in OCCAMY_VNC_TLS_CERT")
+		t.Fatal("no server certificate")
 	}
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {
