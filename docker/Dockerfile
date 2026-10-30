@@ -17,6 +17,12 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o occamyd .
+# The licences of the lossy tile encoders, and the WebM patent grant that
+# comes with gen2brain/vpx's VP8, for the runtime image's licenses/.
+RUN mkdir -p /licenses/vpx /licenses/jpegn \
+	&& vpx=$(go list -m -f '{{.Dir}}' github.com/gen2brain/vpx) \
+	&& cp "$vpx/COPYING" "$vpx/COPYING.webpkit" "$vpx/PATENTS" /licenses/vpx/ \
+	&& cp "$(go list -m -f '{{.Dir}}' github.com/gen2brain/jpegn)/LICENSE" /licenses/jpegn/
 
 # Stage 3: runtime image, without a shell or C libraries, running as the
 # unprivileged user nonroot. occamyd writes no files.
@@ -27,6 +33,8 @@ COPY conf.yaml ./
 COPY LICENSE ./licenses/
 COPY client/occamy-web/LICENSE.guacamole ./licenses/guacamole/LICENSE
 COPY client/occamy-web/NOTICE.guacamole ./licenses/guacamole/NOTICE
+COPY --from=build /licenses/vpx ./licenses/vpx/
+COPY --from=build /licenses/jpegn ./licenses/jpegn/
 COPY --from=web /occamy/client/occamy-web/dist ./client/occamy-web/dist
 
 EXPOSE 5636
