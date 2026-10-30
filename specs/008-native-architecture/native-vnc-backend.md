@@ -994,10 +994,15 @@ leaves only RDP on the bridge.
     else.
   - **Clearing.** The plaintext of the credentials, the shared secret's
     bytes, the MD5 key, and the words of the private key and of the
-    secret are cleared once they have been used. What Go does not let
-    the backend clear is not: the strings that hold the configured or
-    prompted credentials, the key schedule inside `crypto/aes`'s cipher,
-    and the temporaries of `math/big`'s exponentiation.
+    secret are cleared once they have been used, the private key's on
+    every path out, by a `defer` from where it is made. What Go does not
+    let the backend clear is not: the strings that hold the configured
+    or prompted credentials; the key schedule inside `crypto/aes`'s
+    cipher; the copy of the MD5 key that `ardKey` returns by value,
+    which leaves a copy in its frame; the buffer of random bytes inside
+    `crypto/rand.Int`, from which the private key is made; and the
+    temporaries of `math/big`'s exponentiation, among them the words
+    it takes from its pool and returns without clearing.
   - **Tests**, in `ard_test.go`: a known-answer test of two vectors, each
     computed apart from the package (the exchange and the key with
     Python's `pow` and `hashlib`, the ciphertext with `openssl enc

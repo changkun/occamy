@@ -94,12 +94,12 @@ func ardAuth(r io.Reader, w io.Writer, rnd io.Reader, creds func() (string, stri
 	if err != nil {
 		return err
 	}
+	defer clear(x.Bits())
 	var plain [2 * ardField]byte
 	if _, err := io.ReadFull(rnd, plain[:]); err != nil {
 		return fmt.Errorf("vnc: %w", err)
 	}
 	out := ardResponse(n, g, p, y, x, user, password, &plain)
-	clear(x.Bits())
 	if _, err := w.Write(out); err != nil {
 		return fmt.Errorf("vnc: %w", err)
 	}
