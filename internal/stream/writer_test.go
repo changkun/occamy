@@ -8,9 +8,11 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
+	"image/jpeg"
 	"slices"
 	"sync"
 	"testing"
@@ -18,8 +20,11 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"golang.org/x/image/webp"
+
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/backend/backendtest"
+	"changkun.de/x/occamy/internal/codec"
 	"changkun.de/x/occamy/internal/session"
 	"changkun.de/x/occamy/internal/terminal"
 	"changkun.de/x/occamy/protocol"
@@ -39,6 +44,7 @@ type client struct {
 	close   *protocol.Close
 	welcome *protocol.Welcome
 	tiles   int
+	codecs  map[protocol.Codec]int // tiles received in each codec
 	cursors []protocol.Cursor
 	clips   int // server clipboards received
 	pongs   []uint32
@@ -73,7 +79,45 @@ type timedTitle struct {
 	tiles int // received before it
 }
 
-func newClient(c Conn) *client { return &client{c: c, start: time.Now(), img: &image.RGBA{}} }
+func newClient(c Conn) *client {
+	return &client{c: c, start: time.Now(), img: &image.RGBA{}, codecs: map[protocol.Codec]int{}}
+}
+
+// decodeTile decodes a tile's payload into dst, its rectangle of the
+// screen, as a client does.
+func decodeTile(dst *image.RGBA, c protocol.Codec, payload []byte) error {
+	var m image.Image
+	var err error
+	switch c {
+	case protocol.CodecRaw:
+		return codec.DecodeRaw(dst, payload)
+	case protocol.CodecDeflate:
+		var in codec.Inflater
+		return in.Decode(dst, payload)
+	case protocol.CodecWebP:
+		m, err = webp.Decode(bytes.NewReader(payload))
+	case protocol.CodecJPEG:
+		m, err = jpeg.Decode(bytes.NewReader(payload))
+	default:
+		return fmt.Errorf("tile in codec %v", c)
+	}
+	if err != nil {
+		return err
+	}
+	if m.Bounds().Size() != dst.Rect.Size() {
+		return fmt.Errorf("%v tile of %v decodes to %v", c, dst.Rect.Size(), m.Bounds().Size())
+	}
+	if n, ok := m.(*image.NRGBA); ok {
+		// Lossless WebP keeps straight alpha.
+		for y := range dst.Rect.Dy() {
+			o := dst.PixOffset(dst.Rect.Min.X, dst.Rect.Min.Y+y)
+			copy(dst.Pix[o:o+4*dst.Rect.Dx()], n.Pix[y*n.Stride:])
+		}
+		return nil
+	}
+	draw.Draw(dst, dst.Rect, m, m.Bounds().Min, draw.Src)
+	return nil
+}
 
 func (cl *client) run(ctx context.Context) {
 	reg := protocol.ServerMessages()
@@ -127,10 +171,13 @@ func (cl *client) run(ctx context.Context) {
 				cl.outside = true
 				break
 			}
-			src := &image.RGBA{Pix: m.Payload, Stride: 4 * r.Dx(), Rect: image.Rect(0, 0, r.Dx(), r.Dy())}
-			draw.Draw(cl.img, r, src, image.Point{}, draw.Src)
+			if err := decodeTile(cl.img.SubImage(r).(*image.RGBA), m.Codec, m.Payload); err != nil {
+				cl.errs = append(cl.errs, err)
+				break
+			}
 			rects = append(rects, r)
 			cl.tiles++
+			cl.codecs[m.Codec]++
 		case *protocol.FrameEnd:
 			f := frameRecord{id: m.FrameID, lastSeq: m.LastSeq, at: time.Since(cl.start), tiles: len(rects), rects: rects}
 			cl.frames = append(cl.frames, f)
@@ -219,6 +266,12 @@ func newRig(t *testing.T, b backend.Backend, rate float64, delay time.Duration, 
 // newRigTiles is newRig with tiles of the given side.
 func newRigTiles(t *testing.T, b backend.Backend, tile int, rate float64, delay time.Duration, hello protocol.Hello) *rig {
 	t.Helper()
+	return newRigConfig(t, b, tile, rate, delay, hello, Config{SessionID: "s1"})
+}
+
+// newRigConfig is newRigTiles with the stream's configuration.
+func newRigConfig(t *testing.T, b backend.Backend, tile int, rate float64, delay time.Duration, hello protocol.Hello, cfg Config) *rig {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	s, owner, err := session.Start(ctx, session.Config{Backend: b, TileSize: tile})
 	if err != nil {
@@ -228,7 +281,7 @@ func newRigTiles(t *testing.T, b backend.Backend, tile int, rate float64, delay 
 	r.cl = newClient(r.link.client())
 	go r.cl.run(ctx)
 	go func() {
-		r.served <- Serve(ctx, r.link.server(), owner, hello, Config{SessionID: "s1"})
+		r.served <- Serve(ctx, r.link.server(), owner, hello, cfg)
 	}()
 	t.Cleanup(func() {
 		cancel()

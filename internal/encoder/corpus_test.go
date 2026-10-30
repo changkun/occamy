@@ -30,8 +30,9 @@ type message struct {
 // encodeFrame encodes a whole frame in 64-pixel tiles, row by row, as the
 // stream writer sends a full screen: each tile through Tile, and each run
 // of adjacent lossy tiles in a row, up to MaxRun, through Lossy, or each
-// lossy tile alone if merge is false. It returns the messages and how
-// long encoding took, classification included.
+// lossy tile alone if merge is false. Like the writer, it keeps the
+// lossless tile that ends a run for the next message. It returns the
+// messages and how long encoding took, classification included.
 func encodeFrame(e *Encoder, img *image.RGBA, quality int, merge bool) ([]message, time.Duration) {
 	const side = 64
 	b := img.Rect
@@ -41,10 +42,16 @@ func encodeFrame(e *Encoder, img *image.RGBA, quality int, merge bool) ([]messag
 	}
 	var msgs []message
 	var took time.Duration
+	var ahead *message // the lossless tile that ended a run
 	run := make([]byte, 0, 4*MaxRun*side*side)
 	for r := range rows {
 		for c := 0; c < cols; {
 			t := tile(c, r)
+			if ahead != nil {
+				msgs, ahead = append(msgs, *ahead), nil
+				c++
+				continue
+			}
 			pix := pixels(img, t)
 			start := time.Now()
 			payload, codec, lossy := e.Tile(nil, pix, t.Dx(), t.Dy())
@@ -59,9 +66,10 @@ func encodeFrame(e *Encoder, img *image.RGBA, quality int, merge bool) ([]messag
 			for merge && c+n < cols && n < MaxRun {
 				u := tile(c+n, r)
 				start := time.Now()
-				_, _, lossy := e.Tile(nil, pixels(img, u), u.Dx(), u.Dy())
+				payload, codec, lossy := e.Tile(nil, pixels(img, u), u.Dx(), u.Dy())
 				took += time.Since(start)
 				if !lossy {
+					ahead = &message{u, 1, codec, payload}
 					break
 				}
 				rect, n = rect.Union(u), n+1

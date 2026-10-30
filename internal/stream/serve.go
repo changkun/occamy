@@ -10,9 +10,9 @@ import (
 	"image"
 	"io"
 	"log/slog"
-	"slices"
 
 	"changkun.de/x/occamy/internal/backend"
+	"changkun.de/x/occamy/internal/encoder"
 	"changkun.de/x/occamy/internal/pacer"
 	"changkun.de/x/occamy/internal/session"
 	"changkun.de/x/occamy/protocol"
@@ -23,31 +23,51 @@ type Config struct {
 	// SessionID names the session in welcome.
 	SessionID string
 	// Capabilities are what the server offers. Welcome carries their
-	// agreement with the client's. Without codecs, the server offers raw
-	// tiles.
+	// agreement with the client's. Without codecs, the server offers
+	// those its encoder sends, encoder.Codecs() by default.
 	Capabilities protocol.Capabilities
 	// Pacer configures the viewer's pacer. Its Window is the agreed frame
 	// window.
 	Pacer pacer.Config
-	// Encoder encodes tiles, raw pixels if nil.
-	Encoder Encoder
+	// NewEncoder returns the encoder of a viewer that agreed to codecs,
+	// or nil if it sends none of them. If NewEncoder is nil, the viewer's
+	// encoder is internal/encoder's.
+	NewEncoder func(codecs []protocol.Codec) Encoder
 	// Logger receives the stream's log, slog.Default() if nil.
 	Logger *slog.Logger
 }
 
-// Encoder encodes a tile's pixels for a viewer.
+// Encoder encodes a viewer's tiles and cursor in the codecs it agreed
+// to. Each writer has its own, which it calls from one goroutine.
+// internal/encoder's is the one occamyd uses.
 type Encoder interface {
-	// Encode appends the encoding of pix, w by h pixels in RGBA order row
-	// by row, to dst at the given lossy quality, and returns it with its
-	// codec.
-	Encode(dst, pix []byte, w, h, quality int) ([]byte, protocol.Codec)
+	// Tile appends the encoding of a tile's pixels, w by h in RGBA order
+	// row by row, to dst and returns it with its codec; or, if the tile
+	// goes lossy, returns dst unchanged and lossy set, so that the writer
+	// merges it with the lossy tiles beside it and encodes them with
+	// Lossy.
+	Tile(dst, pix []byte, w, h int) (b []byte, codec protocol.Codec, lossy bool)
+	// Lossy appends the encoding of pix, w by h pixels in RGBA order row
+	// by row, at quality from 1 to 100, and returns it with its codec,
+	// or with codec 0 if it cannot. pix is one tile that Tile reported
+	// lossy, or several side by side.
+	Lossy(dst, pix []byte, w, h, quality int) ([]byte, protocol.Codec)
+	// Cursor appends the encoding of a cursor's image, w by h pixels in
+	// RGBA order row by row with straight alpha, to dst in a codec that
+	// keeps it exact, and returns it with its codec, or reports false if
+	// the viewer decodes none.
+	Cursor(dst, pix []byte, w, h int) (b []byte, codec protocol.Codec, ok bool)
 }
 
-// raw sends pixels as they are, until the graphics pipeline's codecs land.
-type raw struct{}
+var _ Encoder = (*encoder.Encoder)(nil)
 
-func (raw) Encode(dst, pix []byte, w, h, _ int) ([]byte, protocol.Codec) {
-	return append(dst, pix[:4*w*h]...), protocol.CodecRaw
+// newEncoder is internal/encoder's encoder, or nil if it sends none of
+// codecs.
+func newEncoder(codecs []protocol.Codec) Encoder {
+	if e := encoder.New(codecs); e != nil {
+		return e
+	}
+	return nil
 }
 
 // errEnded stops the writer once it has sent close for the session's end.
@@ -65,13 +85,13 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	defer v.Leave()
 	s := v.Session()
 	if len(cfg.Capabilities.Codecs) == 0 {
-		cfg.Capabilities.Codecs = []protocol.Codec{protocol.CodecRaw}
+		cfg.Capabilities.Codecs = encoder.Codecs()
 	}
 	if cfg.Capabilities.Terminal == 0 {
 		cfg.Capabilities.Terminal = 1
 	}
-	if cfg.Encoder == nil {
-		cfg.Encoder = raw{}
+	if cfg.NewEncoder == nil {
+		cfg.NewEncoder = newEncoder
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
@@ -79,15 +99,13 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	agreed := protocol.Agree(hello.Capabilities, cfg.Capabilities)
 	limits := agreed.Limits()
 	class := protocol.ClassGraphical
-	switch {
-	case s.Class() == backend.Terminal:
+	var enc Encoder
+	if s.Class() == backend.Terminal {
 		class = protocol.ClassTerminal
 		if agreed.Terminal == 0 {
 			return closeWith(ctx, c, protocol.Close{Code: protocol.CloseUnsupported, Reason: "the client renders no terminal"})
 		}
-	case !slices.Contains(agreed.Codecs, protocol.CodecRaw):
-		// Tiles and cursors are raw until the graphics pipeline's codecs
-		// land.
+	} else if enc = cfg.NewEncoder(agreed.Codecs); enc == nil {
 		return closeWith(ctx, c, protocol.Close{Code: protocol.CloseUnsupported, Reason: "no codec in common"})
 	}
 
@@ -112,7 +130,7 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	defer cancel()
 	pc := cfg.Pacer
 	pc.Window = int(agreed.FrameWindow)
-	w := newWriter(c, v, pacer.New(pc), cfg.Encoder, limits, cfg.Logger)
+	w := newWriter(c, v, pacer.New(pc), enc, limits, cfg.Logger)
 	read := make(chan error, 1)
 	go func() {
 		err := w.read(ctx, limits)
