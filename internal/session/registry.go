@@ -110,9 +110,11 @@ func (r *Registry) Share(id string, role Role, ttl time.Duration) (token string,
 	return token, nil
 }
 
-// JoinShared joins the session a share token is for, with the token's
-// role.
-func (r *Registry) JoinShared(token string) (*Viewer, error) {
+// JoinShared joins session id with the role of a share token for it. A
+// token for another session is not found, so that a share opens only the
+// session it was minted for, and the other session's viewers hear of no
+// join.
+func (r *Registry) JoinShared(id, token string) (*Viewer, error) {
 	key := sha256.Sum256([]byte(token))
 	r.mu.Lock()
 	sh, ok := r.shares[key]
@@ -122,7 +124,7 @@ func (r *Registry) JoinShared(token string) (*Viewer, error) {
 	}
 	s := r.sessions[sh.session]
 	r.mu.Unlock()
-	if !ok || s == nil {
+	if !ok || s == nil || sh.session != id {
 		return nil, ErrNotFound
 	}
 	v, err := s.Join(sh.role)

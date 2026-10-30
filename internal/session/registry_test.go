@@ -49,27 +49,35 @@ func TestRegistry(t *testing.T) {
 			t.Fatal("two shares got the same token")
 		}
 
-		v, err := r.JoinShared(viewTok)
+		// A share opens only its own session.
+		other, _, _, err := r.Open(session.Config{Backend: backendtest.NewScreen(64, 48, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.JoinShared(other, viewTok); !errors.Is(err, session.ErrNotFound) {
+			t.Errorf("a share used on another session returned %v", err)
+		}
+		v, err := r.JoinShared(id, viewTok)
 		if err != nil || v.Role() != session.RoleViewer {
 			t.Fatalf("JoinShared = %v, %v", v, err)
 		}
-		if _, err := r.JoinShared("forged"); !errors.Is(err, session.ErrNotFound) {
+		if _, err := r.JoinShared(id, "forged"); !errors.Is(err, session.ErrNotFound) {
 			t.Errorf("forged token returned %v", err)
 		}
 
 		// The read-only token expires after a minute.
 		time.Sleep(time.Minute)
-		if _, err := r.JoinShared(roTok); !errors.Is(err, session.ErrNotFound) {
+		if _, err := r.JoinShared(id, roTok); !errors.Is(err, session.ErrNotFound) {
 			t.Errorf("expired token returned %v", err)
 		}
 
 		// The session ends: it leaves the registry and its tokens die.
 		s.Close()
 		synctest.Wait()
-		if r.Len() != 0 {
-			t.Errorf("%d sessions after the only one ended", r.Len())
+		if r.Len() != 1 {
+			t.Errorf("%d sessions after one of two ended", r.Len())
 		}
-		if _, err := r.JoinShared(viewTok); !errors.Is(err, session.ErrNotFound) {
+		if _, err := r.JoinShared(id, viewTok); !errors.Is(err, session.ErrNotFound) {
 			t.Errorf("token of an ended session returned %v", err)
 		}
 	})

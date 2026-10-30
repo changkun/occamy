@@ -164,6 +164,18 @@ func TestViewersSeeEachOther(t *testing.T) {
 		if p := v.Take(); len(p.Joined) != 1 || p.Joined[0].Role != session.RoleOwner {
 			t.Errorf("new viewer saw %v, want the owner", p.Joined)
 		}
+		// The owner comes first in the list, also after it rejoins.
+		owner.Leave()
+		back, err := s.Join(session.RoleOwner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []session.ViewerInfo{{ID: back.ID(), Role: session.RoleOwner}, {ID: v.ID(), Role: session.RoleViewer}}
+		if got := s.Viewers(); !slices.Equal(got, want) {
+			t.Errorf("Viewers() = %v, want %v", got, want)
+		}
+		owner = back
+		owner.Take()
 		v.Leave()
 		if p := owner.Take(); len(p.Left) != 1 || p.Left[0] != v.ID() {
 			t.Errorf("owner saw leaves %v", p.Left)

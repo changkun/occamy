@@ -19,6 +19,7 @@
 package session
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -313,6 +314,29 @@ func (s *Session) Done() <-chan struct{} { return s.done }
 func (s *Session) End() End {
 	<-s.done
 	return s.end
+}
+
+// Viewers describes the session's viewers, the owner first if present,
+// then the others in the order they joined.
+func (s *Session) Viewers() []ViewerInfo {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	vs := make([]ViewerInfo, 0, len(s.viewers))
+	for _, v := range s.viewers {
+		vs = append(vs, ViewerInfo{ID: v.id, Role: v.role})
+	}
+	slices.SortStableFunc(vs, func(a, b ViewerInfo) int {
+		return cmp.Compare(rank(a.Role), rank(b.Role))
+	})
+	return vs
+}
+
+// rank orders the owner before other roles.
+func rank(r Role) int {
+	if r == RoleOwner {
+		return 0
+	}
+	return 1
 }
 
 // DroppedInputs is the number of inputs dropped from read-only viewers.
