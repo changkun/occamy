@@ -102,6 +102,8 @@ type fakeServer struct {
 	// echo, if set, replaces the protocols the server says it was
 	// offered, which are otherwise those the client offered.
 	echo uint32
+	// noEcho leaves clientRequestedProtocols out of the server core data.
+	noEcho bool
 
 	// creds are the credentials the client delegated through CredSSP.
 	creds tsPasswordCreds
@@ -120,7 +122,7 @@ func (s *fakeServer) serve(conn net.Conn) error {
 	if echo == 0 && len(req.data) >= 4 {
 		echo = binary.LittleEndian.Uint32(req.data[len(req.data)-4:])
 	}
-	frames := withEcho(s.frames, echo)
+	frames := withEcho(s.frames, echo, s.noEcho)
 	cc := bytes.Clone(frames[0])
 	if s.protocol != 0 {
 		binary.LittleEndian.PutUint32(cc[len(cc)-4:], s.protocol)
@@ -173,8 +175,11 @@ func (s *fakeServer) serve(conn net.Conn) error {
 }
 
 // withEcho returns frames with the server core data of xrdp's Connect
-// Response, the second frame, saying the server was offered protocols.
-func withEcho(frames [][]byte, protocols uint32) [][]byte {
+// Response, the second frame, saying the server was offered protocols,
+// or, if omit, not saying: the block then ends after its version, and
+// the four bytes that held the protocols become an empty block of an
+// unknown type, which keeps every length around them.
+func withEcho(frames [][]byte, protocols uint32, omit bool) [][]byte {
 	// TS_UD_SC_CORE as xrdp sends it: type 0x0c01, length 12, version
 	// 0x00080004, then clientRequestedProtocols.
 	core := []byte{0x01, 0x0c, 0x0c, 0x00, 0x04, 0x00, 0x08, 0x00}
@@ -188,6 +193,10 @@ func withEcho(frames [][]byte, protocols uint32) [][]byte {
 	frames = slices.Clone(frames)
 	frames[1] = bytes.Clone(frames[1])
 	binary.LittleEndian.PutUint32(frames[1][i+len(core):], protocols)
+	if omit {
+		frames[1][i+2] = 8
+		copy(frames[1][i+len(core):], []byte{0xff, 0x0c, 0x04, 0x00})
+	}
 	return frames
 }
 
@@ -220,7 +229,7 @@ func replay(t *testing.T, s *fakeServer, cfg Config) (*Client, *screen) {
 	cconn, sconn := net.Pipe()
 	served := make(chan error, 1)
 	go func() { served <- s.serve(sconn) }()
-	cfg.InsecureSkipVerify, cfg.Logger = true, quiet
+	cfg.TLS.InsecureSkipVerify, cfg.Logger = true, quiet
 	if cfg.Username == "" {
 		cfg.Username, cfg.Password = "occamy", "occamy"
 	}
@@ -332,7 +341,7 @@ func TestReplayNLAWrongPassword(t *testing.T) {
 	go func() { served <- s.serve(sconn) }()
 	_, err := Connect(context.Background(), cconn, Config{
 		Username: "occamy", Password: "wrong",
-		InsecureSkipVerify: true, Logger: quiet,
+		TLS: TLS{InsecureSkipVerify: true}, Logger: quiet,
 	})
 	var ce *CredSSPError
 	if !errors.As(err, &ce) || ce.Code != statusLogonFailure {
@@ -351,7 +360,7 @@ func TestRefusesStandardSecurity(t *testing.T) {
 	go s.serve(sconn)
 	_, err := Connect(context.Background(), cconn, Config{
 		Username: "occamy", Password: "occamy", Protocols: ProtocolHybrid,
-		InsecureSkipVerify: true, Logger: quiet,
+		TLS: TLS{InsecureSkipVerify: true}, Logger: quiet,
 	})
 	if err == nil {
 		t.Fatal("Connect accepted standard RDP security")
@@ -408,7 +417,7 @@ func TestConnectHostileChallenge(t *testing.T) {
 	defer cancel()
 	_, err := Connect(ctx, cconn, Config{
 		Username: "u", Password: "p",
-		InsecureSkipVerify: true, Logger: quiet,
+		TLS: TLS{InsecureSkipVerify: true}, Logger: quiet,
 	})
 	if err == nil || !strings.Contains(err.Error(), "NTLM") {
 		t.Errorf("Connect returned %v, want an NTLM error", err)

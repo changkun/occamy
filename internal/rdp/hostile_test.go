@@ -347,7 +347,7 @@ func TestConnectSetErrorInfo(t *testing.T) {
 	go (&fakeServer{frames: frames}).serve(sconn)
 	_, err := Connect(context.Background(), cconn, Config{
 		Username: "occamy", Password: "occamy", Protocols: ProtocolSSL,
-		InsecureSkipVerify: true, Logger: quiet,
+		TLS: TLS{InsecureSkipVerify: true}, Logger: quiet,
 	})
 	var ei ErrorInfo
 	if !errors.As(err, &ei) || ei != 7 {

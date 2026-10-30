@@ -210,7 +210,7 @@ func dial(t *testing.T, cfg Config) *session {
 	cfg.Username, cfg.Password = "occamy", "occamy"
 	// xrdp signs its certificate itself and has no NLA: the test skips
 	// verification and offers TLS alone, explicitly.
-	cfg.InsecureSkipVerify, cfg.Logger = true, quiet
+	cfg.TLS.InsecureSkipVerify, cfg.Logger = true, quiet
 	if cfg.Protocols == 0 {
 		cfg.Protocols = ProtocolSSL
 	}
