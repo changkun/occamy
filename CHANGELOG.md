@@ -33,6 +33,22 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   state as latest values, ends the session when the owner stays away or
   it idles, and a registry of sessions with share tokens that die with
   them. Not served by any route yet.
+- `internal/backend/guacd`, the guacd bridge of v1: a graphical backend
+  that applies guacd's drawing and copies each frame into the session's
+  framebuffer before it answers the frame's `sync`, so that guacd paces
+  against the bridge alone. It turns guacd's pointer, title, clipboard
+  and credential requests into session events, and viewers' keys,
+  pointer, wheel, text, clipboard and resizes into Guacamole
+  instructions. `internal/guacamole`'s display now applies `cursor`,
+  reports damage as rectangles, and copies areas out. Not served by any
+  route yet.
+- A native SSH backend for protocol v1, `internal/backend/ssh`, in pure
+  Go. It accepts only pinned host keys, by key or SHA-256 fingerprint,
+  unless told to ignore them, which it logs as a warning. It
+  authenticates with key files or a password, which also answers a
+  keyboard-interactive password challenge, and asks the session's owner
+  for anything else. It feeds the shell's terminal output to the
+  session. `occamyd` does not use it yet.
 
 ### Changed
 
