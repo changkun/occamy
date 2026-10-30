@@ -13,6 +13,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"runtime"
 	"slices"
@@ -526,6 +527,64 @@ func TestStreamProtocolErrors(t *testing.T) {
 			}
 			break
 		}
+	}
+}
+
+// TestFinishAfterTooLarge checks that a stream that read a message over
+// its limit, which coder/websocket answers with close 1009 itself, waits
+// for the client to answer that close. A client that writes before it
+// reads the close, as one acking a frame it read before does, must not
+// fail with a broken pipe, nor lose the close to the reset that closing
+// a socket with the rest of the message unread sends.
+func TestFinishAfterTooLarge(t *testing.T) {
+	read := make(chan error, 1)
+	finished := make(chan struct{})
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := connFrom(r.Context())
+		ws, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			read <- err
+			return
+		}
+		ws.SetReadLimit(1024)
+		c := newWSConn(ws, raw)
+		_, err = c.ReadMessage(context.Background())
+		read <- err
+		c.finish(protocol.Close{Code: protocol.CloseTooLarge}, false)
+		close(finished)
+	}))
+	srv.Config.ConnContext = connContext
+	srv.Start()
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ws, _, err := websocket.Dial(ctx, srv.URL, nil) //nolint:bodyclose // coder/websocket: the response body need not be closed
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ws.CloseNow()
+	if err := ws.Write(ctx, websocket.MessageBinary, make([]byte, 64<<10)); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-read; !errors.Is(err, websocket.ErrMessageTooBig) {
+		t.Fatalf("ReadMessage: %v, want ErrMessageTooBig", err)
+	}
+	// Give a server that drops the connection the time to drop it.
+	select {
+	case <-finished:
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := ws.Write(ctx, websocket.MessageBinary, []byte{1}); err != nil {
+		t.Errorf("a write before reading close: %v", err)
+	}
+	if _, _, err := ws.Read(ctx); websocket.CloseStatus(err) != websocket.StatusMessageTooBig {
+		t.Errorf("read %v, want close %v", err, websocket.StatusMessageTooBig)
+	}
+	select {
+	case <-finished:
+	case <-ctx.Done():
+		t.Fatal("finish did not return")
 	}
 }
 

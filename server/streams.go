@@ -495,6 +495,7 @@ type wsConn struct {
 	sent     *protocol.Close // the close message the stream sent
 	replaced *protocol.Close // the close for a stream that another took over
 	failed   bool            // the connection failed
+	tooLarge bool            // the client sent a message over the read limit
 }
 
 type readResult struct {
@@ -540,6 +541,11 @@ func (c *wsConn) ReadMessage(ctx context.Context) ([]byte, error) {
 			return nil, r.err
 		case websocket.CloseStatus(r.err) != -1:
 			return nil, io.EOF // the client closed the WebSocket
+		case errors.Is(r.err, websocket.ErrMessageTooBig):
+			c.mu.Lock()
+			c.tooLarge = true
+			c.mu.Unlock()
+			return nil, r.err
 		}
 		c.fail()
 		return nil, r.err
@@ -619,18 +625,29 @@ func (c *wsConn) refuse(m protocol.Close) {
 // finish closes the WebSocket once the stream is over: with the code of
 // the close message the stream sent, or else with m, which it sends
 // first if tell is set. A connection that failed is dropped: nobody is
-// left to tell, and after a message over the read limit, which
-// coder/websocket answers with 1009 itself, Close would first read the
-// rest of the message with no deadline. Only the first call does
-// anything.
+// left to tell. After a message over the read limit, coder/websocket
+// has sent close 1009 itself; Close then sends nothing more, but reads
+// the rest of the message, with no deadline, and the client's close, so
+// it gets refuseTimeout, as a refused stream does. Dropping the
+// connection at once would let a client still writing, such as acking
+// a frame it read before the close, fail with a broken pipe, or lose
+// the close to the reset. Only the first call does anything.
 func (c *wsConn) finish(m protocol.Close, tell bool) {
 	c.ended.Do(func() {
 		close(c.quit)
 		c.mu.Lock()
-		sent, failed := c.sent, c.failed
+		sent, failed, tooLarge := c.sent, c.failed, c.tooLarge
 		c.mu.Unlock()
 		switch {
-		case failed:
+		case tooLarge && c.raw != nil:
+			// Before failed: a write of the stream's after the 1009
+			// fails and marks the connection failed, though the client
+			// may still answer.
+			t := time.AfterFunc(refuseTimeout, func() { _ = c.raw.Close() })
+			defer t.Stop()
+			_ = c.ws.Close(websocket.StatusMessageTooBig, "")
+			return
+		case failed || tooLarge:
 			_ = c.ws.CloseNow()
 			return
 		case sent != nil:

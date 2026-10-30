@@ -976,8 +976,11 @@ place for fixes that ship on v0 before beta.
   - `Serve` takes every failed read for a dead connection and sends no
     `close`. A text message is no such failure, so `serve` sends
     `unsupported` for it. After a message over the read limit,
-    coder/websocket has sent 1009 itself, and the connection is dropped
-    with `CloseNow`, as the v0 routes do.
+    coder/websocket has sent 1009 itself, and the connection was
+    dropped with `CloseNow`, as the v0 routes do. (Revised: a stream
+    now completes the closing handshake within `refuseTimeout`, with a
+    timer that closes the socket below, which does interrupt `Close`;
+    see the follow-up on `TestStreamProtocolErrors`.)
 - **Mutation checks:** each of these failed a test: any `Origin`
   accepted, a listed origin accepted with the other scheme, a host
   matched by prefix, a token read from the URL, `Authorization` read
@@ -1000,16 +1003,21 @@ place for fixes that ship on v0 before beta.
   - ~~A terminal's hello may ask for up to 65535 columns or rows, which
     reach the backend unbounded.~~ Fixed in review: see "Sizes (added
     in review)".
-  - `TestStreamProtocolErrors` failed twice in the review's full-suite
-    runs at a load average of 112 to 150. It did not fail here in 50
-    runs at a load of about 50, 15 runs of the whole package and 300
-    runs at `-cpu 1,2,4`, all with `-race`. Its timing assumptions are
-    the server's: a write in progress gets 1 s after the stream's
-    context ends, and `close` 1 s to be written. A goroutine that waits
-    longer than that to run drops the connection without `close`, which
-    the test reads as EOF. Both bounds keep a client that stops reading
-    from holding the server, so they stay; if the test fails again, its
-    message tells whether this is the cause.
+  - ~~`TestStreamProtocolErrors` failed twice in the review's
+    full-suite runs at a load average of 112 to 150.~~ Fixed once it
+    failed again, with `broken pipe` in its oversized message: the
+    write was the test client's ack of a frame it had read before the
+    close, not a timing bound of the server's. After a message over the
+    read limit, coder/websocket sends close 1009 itself, and `finish`
+    then dropped the connection, since `ReadMessage` had marked it
+    failed. With the rest of the message unread, closing the socket
+    sends a reset, so a client still writing failed, or could lose the
+    1009 to the reset. `finish` now completes the closing handshake:
+    `Close` sends nothing more, reads the rest of the message and the
+    client's close, and has `refuseTimeout` to do it, as a refused
+    stream has. `TestFinishAfterTooLarge` writes before it reads the
+    close; with the old `finish` it failed every time. Both tests then
+    passed 200 runs with `-race`.
   - [009](../009-react-web-client.md) and the Go client: send `hello` in
     the query and the token in the subprotocol; expect `close` before
     `welcome` for a refusal; reconnect as the owner with an access token
