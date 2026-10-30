@@ -130,7 +130,7 @@ publishes checksummed, attested artifacts.
   - tokens carry the remote credentials and must be treated as secrets;
   - put TLS in front, because `occamyd` speaks plain HTTP;
   - change `jwt_secret` and use `mode: release`;
-  - `client: true` makes `/api/v1/login` an open proxy and is for demos
+  - `client: true` makes `/api/v0/login` an open proxy and is for demos
     only;
   - the demo credentials are public.
 

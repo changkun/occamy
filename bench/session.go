@@ -19,7 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 
 	"changkun.de/x/occamy/internal/config"
 	"changkun.de/x/occamy/internal/guacamole"
@@ -45,11 +45,12 @@ type rawConn interface {
 	close() error
 }
 
-// wsConn is a v0 connection through occamyd's WebSocket.
+// wsConn is a v0 connection through occamyd's WebSocket. Its I/O runs
+// without a context, since coder/websocket closes the connection when one
+// ends. coder/websocket allows concurrent writes.
 type wsConn struct {
 	ws *websocket.Conn
 	r  *bufio.Reader // the rest of the current message
-	mu sync.Mutex    // one writer at a time
 }
 
 func (c *wsConn) readRaw() ([]byte, error) {
@@ -63,7 +64,7 @@ func (c *wsConn) readRaw() ([]byte, error) {
 				return nil, err
 			}
 		}
-		_, msg, err := c.ws.ReadMessage()
+		_, msg, err := c.ws.Read(context.Background())
 		if err != nil {
 			return nil, err
 		}
@@ -72,12 +73,12 @@ func (c *wsConn) readRaw() ([]byte, error) {
 }
 
 func (c *wsConn) writeRaw(b []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.ws.WriteMessage(websocket.TextMessage, b)
+	return c.ws.Write(context.Background(), websocket.MessageText, b)
 }
 
-func (c *wsConn) close() error { return c.ws.Close() }
+// close drops the connection without a close frame, as gorilla/websocket's
+// Close did.
+func (c *wsConn) close() error { return c.ws.CloseNow() }
 
 // guacdConn is a v0 connection straight to guacd.
 type guacdConn struct {
@@ -104,7 +105,7 @@ func dialOccamy(ctx context.Context, addr string, cred config.JWT) (rawConn, err
 		"protocol": cred.Protocol, "host": cred.Host,
 		"username": cred.Username, "password": cred.Password,
 	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+"/api/v1/login", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+"/api/v0/login", bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -121,13 +122,18 @@ func dialOccamy(ctx context.Context, addr string, cred config.JWT) (rawConn, err
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("login: %w", err)
 	}
-	url := fmt.Sprintf("ws://%s/api/v1/connect?token=%s&width=%d&height=%d&dpi=%d",
+	url := fmt.Sprintf("ws://%s/api/v0/connect?token=%s&width=%d&height=%d&dpi=%d",
 		addr, out.Token, width, height, dpi)
-	d := websocket.Dialer{Subprotocols: []string{"guacamole"}}
-	ws, _, err := d.DialContext(ctx, url, nil) //nolint:bodyclose // gorilla/websocket: the response body need not be closed
+	// ctx bounds the handshake only.
+	ws, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{ //nolint:bodyclose // coder/websocket: the response body need not be closed
+		Subprotocols: []string{"guacamole"},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
+	// occamyd sends one instruction per message, of up to this size;
+	// coder/websocket's default limit of 32 KiB could cut a session short.
+	ws.SetReadLimit(guacamole.MaxInstructionSize)
 	return &wsConn{ws: ws}, nil
 }
 

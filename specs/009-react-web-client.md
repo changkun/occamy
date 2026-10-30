@@ -27,8 +27,8 @@ the decision does not block on [008](008-native-architecture.md).
 
 - `client/occamy-web/`: Vue 3, Vite, vue-router, element-plus. Two views:
   `Login.vue` (protocol, host, username and password form posting to
-  `/api/v1/login`) and `Desktop.vue` (wires `occamy.Client`, `Display`,
-  `Mouse` and `Keyboard` to a WebSocket at `/api/v1/connect`).
+  `/api/v0/login`) and `Desktop.vue` (wires `occamy.Client`, `Display`,
+  `Mouse` and `Keyboard` to a WebSocket at `/api/v0/connect`).
 - `src/components/occamy.js` is a 9k-line fork of guacamole-common-js and
   holds all protocol and rendering logic; the Vue code around it is under
   200 lines.
