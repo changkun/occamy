@@ -274,3 +274,138 @@ func TestDisplayMasks(t *testing.T) {
 		}
 	}
 }
+
+// guacd draws the pointer on a buffer and points cursor at it.
+func TestDisplayCursor(t *testing.T) {
+	d := guacamole.NewDisplay()
+	apply(t, d, "size", "0", "4", "4")
+	if _, _, ok := d.TakeCursor(); ok {
+		t.Fatal("cursor before any cursor instruction")
+	}
+	fill(t, d, -1, 0, 0, 2, 2, red)
+	d.TakeDamage()
+
+	// The region reaches past the buffer, which is transparent there.
+	apply(t, d, "cursor", "1", "0", "-1", "1", "0", "2", "2")
+	if got := d.TakeDamage(); !got.Empty() {
+		t.Errorf("cursor damaged %v", got)
+	}
+	img, hot, ok := d.TakeCursor()
+	if !ok || img == nil {
+		t.Fatalf("TakeCursor = %v, %v, %v", img, hot, ok)
+	}
+	if hot != image.Pt(1, 0) || img.Bounds() != image.Rect(0, 0, 2, 2) {
+		t.Errorf("cursor bounds %v, hot spot %v", img.Bounds(), hot)
+	}
+	wantPixel(t, img, 0, 0, red)
+	wantPixel(t, img, 0, 1, red)
+	wantPixel(t, img, 1, 0, transparent)
+	if _, _, ok := d.TakeCursor(); ok {
+		t.Error("cursor taken twice")
+	}
+
+	// The image is copied when cursor applies, as guacamole-common-js
+	// does.
+	apply(t, d, "cursor", "0", "0", "-1", "0", "0", "1", "1")
+	fill(t, d, -1, 0, 0, 1, 1, green)
+	img, _, _ = d.TakeCursor()
+	wantPixel(t, img, 0, 0, red)
+
+	// An empty region hides the pointer, and a layer that does not exist
+	// gives a transparent one.
+	apply(t, d, "cursor", "3", "4", "-1", "0", "0", "0", "0")
+	if img, hot, ok := d.TakeCursor(); !ok || img != nil || hot != image.Pt(3, 4) {
+		t.Errorf("empty cursor = %v, %v, %v", img, hot, ok)
+	}
+	apply(t, d, "cursor", "0", "0", "-7", "0", "0", "1", "1")
+	img, _, _ = d.TakeCursor()
+	wantPixel(t, img, 0, 0, transparent)
+
+	if err := d.Apply(guacamole.NewInstruction([]string{"cursor", "0", "0", "-1", "0", "0", "-1", "1"})); err == nil {
+		t.Error("cursor with a negative width: no error")
+	}
+}
+
+func TestDisplayCopyTo(t *testing.T) {
+	d := guacamole.NewDisplay()
+	apply(t, d, "size", "0", "4", "4")
+	fill(t, d, 0, 1, 1, 2, 2, red)
+	fill(t, d, 0, 3, 3, 1, 1, color.RGBA{G: 0xff, A: 0x80})
+
+	// The destination covers more than the display, as a framebuffer
+	// can before a resize reaches it.
+	dst := image.NewRGBA(image.Rect(0, 0, 6, 6))
+	for i := range dst.Pix {
+		dst.Pix[i] = 0x11
+	}
+	if got := d.CopyTo(dst, image.Rect(0, 0, 6, 6)); got != image.Rect(0, 0, 4, 4) {
+		t.Errorf("copied %v, want (0,0)-(4,4)", got)
+	}
+	wantPixel(t, dst, 1, 1, red)
+	wantPixel(t, dst, 0, 0, color.RGBA{A: 0xff})          // transparent over black
+	wantPixel(t, dst, 3, 3, color.RGBA{G: 0x80, A: 0xff}) // half green over black
+	wantPixel(t, dst, 5, 5, color.RGBA{R: 0x11, G: 0x11, B: 0x11, A: 0x11})
+
+	// Into a sub-image, as a framebuffer's Lock returns one.
+	fill(t, d, 0, 2, 2, 1, 1, blue)
+	sub := dst.SubImage(image.Rect(2, 2, 3, 3)).(*image.RGBA)
+	if got := d.CopyTo(sub, image.Rect(0, 0, 4, 4)); got != image.Rect(2, 2, 3, 3) {
+		t.Errorf("copied %v, want (2,2)-(3,3)", got)
+	}
+	wantPixel(t, dst, 2, 2, blue)
+	wantPixel(t, dst, 1, 1, red)
+}
+
+func TestDisplayDamageRects(t *testing.T) {
+	d := guacamole.NewDisplay()
+	apply(t, d, "size", "0", "100", "100")
+	if got := d.TakeDamageRects(); len(got) != 1 || got[0] != image.Rect(0, 0, 100, 100) {
+		t.Fatalf("damage after size = %v, want the whole display", got)
+	}
+
+	// Far apart areas stay apart; adjacent and overlapping ones merge.
+	fill(t, d, 0, 0, 0, 2, 2, red)
+	fill(t, d, 0, 90, 90, 2, 2, red)
+	fill(t, d, 0, 2, 0, 2, 2, red)
+	fill(t, d, 0, 1, 1, 2, 1, red)
+	got := d.TakeDamageRects()
+	want := []image.Rectangle{image.Rect(90, 90, 92, 92), image.Rect(0, 0, 4, 2)}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("damage = %v, want %v", got, want)
+	}
+	if got := d.TakeDamageRects(); len(got) != 0 {
+		t.Errorf("damage after TakeDamageRects = %v", got)
+	}
+
+	// Many areas are kept in a bounded number of rectangles that cover
+	// them all.
+	var all []image.Rectangle
+	for i := range 40 {
+		r := image.Rect(i*5%97, i*11%93, i*5%97+1, i*11%93+1)
+		all = append(all, r)
+		fill(t, d, 0, r.Min.X, r.Min.Y, 1, 1, green)
+	}
+	got = d.TakeDamageRects()
+	if len(got) > 16 {
+		t.Errorf("%d damage rectangles, want at most 16", len(got))
+	}
+	for _, r := range all {
+		covered := false
+		for _, g := range got {
+			covered = covered || r.In(g)
+		}
+		if !covered {
+			t.Errorf("%v is not in the damage %v", r, got)
+		}
+	}
+
+	// TakeDamage takes the same damage as one rectangle.
+	fill(t, d, 0, 0, 0, 1, 1, blue)
+	fill(t, d, 0, 50, 50, 1, 1, blue)
+	if got := d.TakeDamage(); got != image.Rect(0, 0, 51, 51) {
+		t.Errorf("TakeDamage = %v", got)
+	}
+	if got := d.TakeDamageRects(); len(got) != 0 {
+		t.Errorf("damage after TakeDamage = %v", got)
+	}
+}
