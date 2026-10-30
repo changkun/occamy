@@ -307,9 +307,9 @@ place for fixes that ship on v0 before beta.
   golang-jwt v5; `accept` and `serveIO` run on coder/websocket.
   `internal/config` no longer imports gin. The Vue client, `tests/` and
   `bench/` use the new paths, and `tests/` and `bench/` use
-  coder/websocket. gin, gin-jwt, gorilla/websocket and 29 of 30 indirect
+  coder/websocket. gin, gin-jwt, gorilla/websocket and 28 of 29 indirect
   requirements left `go.mod` (`golang.org/x/sys` stays for the SSH
-  backend); `go.sum` went from 115 lines to 16.
+  backend); `go.sum` went from 115 lines to 18.
 - **What v0 clients see:** the paths, nothing else. The login response
   is `{"code":200,"expire":"<RFC 3339>","token":"…"}` as gin rendered it
   (sorted keys, no trailing newline, `application/json; charset=utf-8`);

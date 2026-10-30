@@ -1,0 +1,30 @@
+Processes: 1278 total, 5 running, 1273 sleeping, 12293 threads                             10:48:10 
+Load Avg: 24.38, 11.17, 11.11  CPU usage: 29.16% user, 14.69% sys, 56.13% idle                      
+SharedLibs: 719M resident, 101M data, 92M linkedit.                                                 
+MemRegions: 413 total, 7488K resident, 108M private, 2831M shared.                                  
+PhysMem: 59G used (6905M wired, 28G compressor), 4279M unused.                                      
+VM: 731T vsize, 6144M framework vsize, 55946025(0) swapins, 68004921(0) swapouts.                   
+Networks: packets: 856668512/1495G in, 837294341/1468G out.                                         
+Disks: 1192840424/22T read, 839662166/19T written.                                                  
+
+PID    COMMAND      %CPU TIME     #TH     #WQ  #PORTS MEM    PURG   CMPRS  PGRP  PPID  STATE        
+74     fseventsd    97.6 17:36:21 33/1    1    412    8417M+ 0B     2568M- 74    1     running      
+0      kernel_task  64.7 79:33:06 1227/18 0    0      97M-   0B     0B     0     0     running      
+42384  Google Chrom 29.8 38:52:41 59      4    8530-  2182M- 0B     1706M+ 42384 1     sleeping     
+141    WindowServer 29.3 135 hrs  27      3    24144- 1478M- 0B     587M+  141   1     sleeping     
+43554  ghostty      19.7 62:36:36 83/1    4/1  1633   2695M  0B     684M+  43554 1     running      
+50863  top          9.9  00:03.76 1/1     0    45+    14M+   0B     656K-  50863 50861 running      
+153    coreaudiod   7.6  10:37:20 22      14   21486+ 140M+  0B     107M-  153   1     sleeping     
+16159  chrome-headl 6.4  02:47.15 30/1    1    160    157M+  0B     86M+   16143 16143 running      
+37776  Magnet       5.7  26:30:41 5       3    1168-  153M-  0B     125M-  37776 1     sleeping     
+30553  2.1.312      4.6  28:59.52 31      1    95     558M+  0B     188M-  30553 29335 sleeping     
+16255  chrome-headl 4.6  01:27.24 26      1    233    516M-  0B     384M-  16143 16143 sleeping     
+49616  go           4.4  00:09.87 36      0    78+    91M+   0B     48M-   46668 46706 sleeping     
+50735  chrome-headl 4.3  00:03.23 27      2    170    265M-  0B     59M+   16143 16143 sleeping     
+78766  krunkit      3.9  37:29:15 44      1    111    7472M- 0B     7344M- 78749 1     sleeping     
+50925  bluetoothd   3.3  02:36:18 16      5    682-   15M-   256K+  6000K+ 50925 1     sleeping     
+76340  2.1.312      3.2  43:06.75 31      1    99-    747M-  0B     370M+  76340 75470 sleeping     
+215    syspolicyd   3.0  03:38:37 6       4    2538+  76M+   0B     74M-   215   1     sleeping     
+1      launchd      2.5  06:15:39 4       3    4955   31M    0B     22M-   1     0     sleeping     
+97923  diskimagesio 2.4  01:20.04 4       3    123+   127M+  0B     88M-   97923 1     sleeping     
+42198  2.1.302      2.4  03:56:32 29      1    92     671M   0B     481M-  42198 42090 sleeping     

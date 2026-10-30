@@ -1,0 +1,221 @@
+[?1049h[24;1H[?1h=// Copyright 2026 Changkun Ou. All rights reserved.[m
+// Use of this source code is governed by a MIT[m
+// license that can be found in the LICENSE file.[m
+[m
+// Package guacd connects to an upstream guacd and performs the Guacamole[m
+// handshake for a new connection or for joining an existing one.[m
+package guacd[m
+[m
+import ([m
+        "context"[m
+        "errors"[m
+        "fmt"[m
+        "net"[m
+        "strconv"[m
+        "strings"[m
+        "time"[m
+[m
+        "changkun.de/x/occamy/internal/guacamole"[m
+)[m
+[m
+// ProtocolVersion is the Guacamole protocol version sent in connect.[m
+const ProtocolVersion = "VERSION_1_5_0"[m
+[m
+[7msample.go[27m[K[K// DefaultTimeout bounds a handshake whose context has no deadline, matching[m
+// guacd's own GUACD_USEC_TIMEOUT.[m
+const DefaultTimeout = 15 * time.Second[m
+[m
+// Default display settings, used where Config leaves them zero.[m
+const ([m
+        DefaultWidth  = 1024[m
+        DefaultHeight = 768[m
+        DefaultDPI    = 96[m
+)[m
+[m
+// DefaultImageMimetypes are the image formats announced when[m
+// Config.ImageMimetypes is nil.[m
+var DefaultImageMimetypes = []string{"image/png", "image/jpeg", "image/webp"}[m
+[m
+// Config describes the connection to create or join.[m
+type Config struct {[m
+        Protocol     string            // used when ConnectionID is empty[m
+        ConnectionID string            // "$..." to join an existing connection[m
+        Params       map[string]string // values for the names guacd sends in ar[m gs[m
+[m
+        Width, Height, DPI int[m
+:[K[K[m
+        // ImageMimetypes defaults to DefaultImageMimetypes when nil; an empty,[m
+        // non-nil slice announces none. Audio and video default to none.[m
+        ImageMimetypes, AudioMimetypes, VideoMimetypes []string[m
+[m
+        Timezone, Name string // sent only when set[m
+}[m
+[m
+// Conn is a guacd connection after a successful handshake.[m
+type Conn struct {[m
+        ID      string // connection ID from ready[m
+        Version string // protocol version guacd sent in args[m
+[m
+        io *guacamole.InstructionIO[m
+}[m
+[m
+// Error is an error instruction received from guacd.[m
+type Error struct {[m
+        Message string[m
+        Status  int[m
+}[m
+[m
+func (e *Error) Error() string {[m
+:[K[K[HM        Width, Height, DPI int[m
+[HM[m
+[HMgs[m
+[HM        Params       map[string]string // values for the names guacd sends in ar[m[HM        ConnectionID string            // "$..." to join an existing connection[m
+[HM        Protocol     string            // used when ConnectionID is empty[m
+[HMtype Config struct {[m
+[HM// Config describes the connection to create or join.[m
+[HM[m
+[HMvar DefaultImageMimetypes = []string{"image/png", "image/jpeg", "image/webp"}[m
+[HM// Config.ImageMimetypes is nil.[m
+[HM// DefaultImageMimetypes are the image formats announced when[m
+[HM[m
+[HM)[m
+[HM        DefaultDPI    = 96[m
+[HM        DefaultHeight = 768[m
+[HM        DefaultWidth  = 1024[m
+[HMconst ([m
+[HM// Default display settings, used where Config leaves them zero.[m
+[HM[m
+[HMconst DefaultTimeout = 15 * time.Second[m
+[HM// guacd's own GUACD_USEC_TIMEOUT.[m
+[HM// DefaultTimeout bounds a handshake whose context has no deadline, matching[m
+[24;1H[K:[K[K[m
+:[K[K        // ImageMimetypes defaults to DefaultImageMimetypes when nil; an empty,[m
+:[K[K/[Kff[Kuu[Knn[Kcc[K[1;1H[Kconst DefaultTimeout = 15 * time.Second[m
+[2;1H[K[m
+[3;1H[K// Default display settings, used where Config leaves them zero.[m
+[4;1H[Kconst ([m
+[5;1H[K        DefaultWidth  = 1024[m
+[6;1H[K        DefaultHeight = 768[m
+[7;1H[K        DefaultDPI    = 96[m
+[8;1H[K)[m
+[9;1H[K[m
+[10;1H[K// DefaultImageMimetypes are the image formats announced when[m
+[11;1H[K// Config.ImageMimetypes is nil.[m
+[12;1H[Kvar DefaultImageMimetypes = []string{"image/png", "image/jpeg", "image/webp"}[m
+[13;1H[K[m
+[14;1H[K// Config describes the connection to create or join.[m
+[15;1H[Ktype Config struct {[m
+[16;1H[K        Protocol     string            // used when ConnectionID is empty[m
+[17;1H[K        ConnectionID string            // "$..." to join an existing connection[m
+[18;1H[K        Params       map[string]string // values for the names guacd sends in ar[m [19;1H[Kgs[m
+[20;1H[K[m
+[21;1H[K        Width, Height, DPI int[m
+[22;1H[K[m
+[23;1H[K        // ImageMimetypes defaults to DefaultImageMimetypes when nil; an empty,[m
+[24;1H[1;1H[Kconst DefaultTimeout = 15 * time.Second[m
+[2;1H[K[m
+[3;1H[K// Default display settings, used where Config leaves them zero.[m
+[4;1H[Kconst ([m
+[5;1H[K        DefaultWidth  = 1024[m
+[6;1H[K        DefaultHeight = 768[m
+[7;1H[K        DefaultDPI    = 96[m
+[8;1H[K)[m
+[9;1H[K[m
+[10;1H[K// DefaultImageMimetypes are the image formats announced when[m
+[11;1H[K// Config.ImageMimetypes is nil.[m
+[12;1H[Kvar DefaultImageMimetypes = []string{"image/png", "image/jpeg", "image/webp"}[m
+[13;1H[K[m
+[14;1H[K// Config describes the connection to create or join.[m
+[15;1H[Ktype Config struct {[m
+[16;1H[K        Protocol     string            // used when ConnectionID is empty[m
+[17;1H[K        ConnectionID string            // "$..." to join an existing connection[m
+[18;1H[K        Params       map[string]string // values for the names guacd sends in ar[m [19;1H[Kgs[m
+[20;1H[K[m
+[21;1H[K        Width, Height, DPI int[m
+[22;1H[K[m
+[23;1H[K        // ImageMimetypes defaults to DefaultImageMimetypes when nil; an empty,[m
+[24;1H...skipping...
+[7mfunc[27m (e *Error) Error() string {[m
+        return fmt.Sprintf("guacd: %s (status %d)", e.Message, e.Status)[m
+}[m
+[m
+// aLongTimeAgo is a deadline in the past, used to abort blocked I/O.[m
+var aLongTimeAgo = time.Unix(1, 0)[m
+[m
+// Dial connects to guacd at addr and performs the handshake.[m
+[7mfunc[27m Dial(ctx context.Context, addr string, c Config) (*Conn, error) {[m
+        var d net.Dialer[m
+        nc, err := d.DialContext(ctx, "tcp", addr)[m
+        if err != nil {[m
+                return nil, fmt.Errorf("guacd: %w", err)[m
+        }[m
+        conn, err := Handshake(ctx, nc, c)[m
+        if err != nil {[m
+                nc.Close()[m
+                return nil, err[m
+        }[m
+        return conn, nil[m
+}[m
+[m
+// Handshake performs the Guacamole handshake on nc. It returns once guacd[m
+:[K[K/[K// has sent ready, which happens before guacd connects to the remote desktop,[m
+// so later failures arrive as error and disconnect instructions on the[m
+// returned connection. The caller closes nc if Handshake fails.[m
+[7mfunc[27m Handshake(ctx context.Context, nc net.Conn, c Config) (*Conn, error) {[m
+        if _, ok := ctx.Deadline(); !ok {[m
+                if err := nc.SetDeadline(time.Now().Add(DefaultTimeout)); err !=[m  nil {[m
+                        return nil, fmt.Errorf("guacd: %w", err)[m
+:[K[K...skipping...
+                        }[m
+                }[m
+                return nil, e[m
+        default:[m
+                return nil, fmt.Errorf("guacd: unexpected %q instruction during [m handshake, want %q", ins.Opcode(), opcode)[m
+        }[m
+}[m
+[m
+// ReadRaw reads the next raw instruction from guacd.[m
+[7mfunc[27m (c *Conn) ReadRaw() ([]byte, error) {[m
+        return c.io.ReadRaw()[m
+}[m
+[m
+// WriteRaw writes raw instructions to guacd.[m
+[7mfunc[27m (c *Conn) WriteRaw(b []byte) (int, error) {[m
+        return c.io.WriteRaw(b)[m
+}[m
+[m
+// Close closes the connection to guacd.[m
+[7mfunc[27m (c *Conn) Close() error {[m
+        return c.io.Close()[m
+}[m
+[7m(END)[27m[K[K[HM                                e.Status, _ = strconv.Atoi(args[1])[m
+[24;1H[K:[K[K[HM                        if len(args) > 1 {[m
+[24;1H[K:[K[K[H[2J[HM[m
+[HMconst ProtocolVersion = "VERSION_1_5_0"[m
+[HM// ProtocolVersion is the Guacamole protocol version sent in connect.[m
+[HM[m
+[HM)[m
+[HM        "changkun.de/x/occamy/internal/guacamole"[m
+[HM[m
+[HM        "time"[m
+[HM        "strings"[m
+[HM        "strconv"[m
+[HM        "net"[m
+[HM        "fmt"[m
+[HM        "errors"[m
+[HM        "context"[m
+[HMimport ([m
+[HM[m
+[HMpackage guacd[m
+[HM// handshake for a new connection or for joining an existing one.[m
+[HM// Package guacd connects to an upstream guacd and performs the Guacamole[m
+[HM[m
+[HM// license that can be found in the LICENSE file.[m
+[HM// Use of this source code is governed by a MIT[m
+[HM// Copyright 2026 Changkun Ou. All rights reserved.[m
+[24;1H[K:[K[K:[K55[K// DefaultTimeout bounds a handshake whose context has no deadline, matching[m
+// guacd's own GUACD_USEC_TIMEOUT.[m
+const DefaultTimeout = 15 * time.Second[m
+[m
+// Default display settings, used where Config leaves them zero.[m
+:[K

@@ -1,0 +1,59 @@
+[?1006;1000h[?1002h[?1049h[>4;2m[?1h=[?2004h[?1004h[1;24r[?12h[?12l[22;2t[22;1t[27m[23m[29m[m[H[2J[?25l[24;1H"sample.go" 238L, 6471B[2;1H▽[6n[2;1H  [3;1HPzz\[0%m[6n[3;1H           [1;1H[>c[1;1H[34m// Copyright 2026 Changkun Ou. All rights reserved.
+// Use of this source code is governed by a MIT[m[2;48H[K[3;1H[34m// license that can be found in the LICENSE file.[m[3;50H[K[5;1H[34m// Package guacd connects to an upstream guacd and performs the Guacamole
+// handshake for a new connection or for joining an existing one.[m
+[38;5;130mpackage[m guacd
+
+[38;5;130mimport[m ([10;9H[31m"context"[11;9H"errors"[12;9H"fmt"[13;9H"net"[14;9H"strconv"[15;9H"strings"[16;9H"time"[18;9H"changkun.de/x/occamy/internal/guacamole"[m
+)
+
+[34m// ProtocolVersion is the Guacamole protocol version sent in connect.[m
+[38;5;130mconst[m ProtocolVersion = [31m"VERSION_1_5_0"[m[24;63H1,1[11CTop[1;1H[?25h[?4m[?12$p[?25l[24;53H40G[1;1H[24;53H   [12;1H[1;1H[38;5;130mconst[m ([1;8H[K[2;1H        DefaultWidth  = [31m1024[m[2;29H[K[3;1H        DefaultHeight = [31m768[m[3;28H[K[4;9HDefaultDPI    = [31m96[m
+)[5;2H[K[6;1H[K[7;1H[34m// DefaultImageMimetypes are the image formats announced when
+// Config.ImageMimetypes is nil.[m
+[38;5;130mvar[m DefaultImageMimetypes = [][32mstring[m{[31m"image/png"[m, [31m"image/jpeg"[m, [31m"image/webp"[m}[10;9H[K[11;1H[34m// Config describes the connection to create or join.[m
+[38;5;130mtype[m Config [38;5;130mstruct[m {[13;9HProtocol     [32mstring[m[12C[34m// used when ConnectionID is empty[m[14;9HConnectionID [32mstring[m[12C[34m// "$..." to join an existing connection[m[15;9HParams       [32mmap[m[[32mstring[m][32mstring[m [34m// values for the names guacd sends in arr[16;1Hgs[m[16;9H[K[18;9HWidth, Height, DPI [32mint[m[18;31H[K[19;1H[K[20;9H[34m// ImageMimetypes defaults to DefaultImageMimetypes when nil; an empty,[m
+        [34m// non-nil slice announces none. Audio and video default to none.[m
+        ImageMimetypes, AudioMimetypes, VideoMimetypes [][32mstring[m[24;63H40,1[10C12%[12;1H[?25h[?25l[24;53H^E[12;1H[24;53H  [11;1H[1;23r[23;1H
+[1;24r[23;9HTimezone, Name [32mstring[m [34m// sent only when set[m[24;1H[K[24;63H40,1[10C13%[11;1H[?25h[?25l[24;53H^E[11;1H[24;53H  [10;1H[1;23r[23;1H
+[1;24r[23;1H}[24;63H[K[24;63H40,1[10C13%[10;1H[?25h[?25l[24;53H^D[10;1H[24;53H  [10;1H[1;23r[1;1H[11M[1;24r[14;1H[34m// Conn is a guacd connection after a successful handshake.[m
+[38;5;130mtype[m Conn [38;5;130mstruct[m {[16;9HID      [32mstring[m [34m// connection ID from ready[m[17;9HVersion [32mstring[m [34m// protocol version guacd sent in args[m[19;9Hio *guacamole.InstructionIO
+}
+
+[34m// Error is an error instruction received from guacd.[m
+[38;5;130mtype[m Error [38;5;130mstruct[m {[24;63H[K[24;63H50,0-1[8C18%[10;1H[?25h[?25l[24;53H^U[10;1H[24;53H  [10;1H[1;23r[1;1H[11L[1;24r[1;9HDefaultHeight = [31m768[m[2;9HDefaultDPI    = [31m96[m
+)
+
+[34m// DefaultImageMimetypes are the image formats announced when
+// Config.ImageMimetypes is nil.[m
+[38;5;130mvar[m DefaultImageMimetypes = [][32mstring[m{[31m"image/png"[m, [31m"image/jpeg"[m, [31m"image/webp"[m}
+
+[34m// Config describes the connection to create or join.[m
+[38;5;130mtype[m Config [38;5;130mstruct[m {[11;9HProtocol     [32mstring[m[12C[34m// used when ConnectionID is empty[m[24;63H[K[24;63H40,1[10C13%[10;1H[?25h[?25l[24;53H10G[10;1H[24;53H   [10;9H[1;1H[34m// Copyright 2026 Changkun Ou. All rights reserved.
+// Use of this source code is governed by a MIT
+// license that can be found in the LICENSE file.[5;4HPackage guacd connects to an upstream guacd and performs the Guacamole
+// handshake for a new connection or for joining an existing one.[m
+[38;5;130mpackage[m guacd[7;14H[K[9;1H[38;5;130mimport[m ([9;9H[K[10;1H        [31m"context"[m[10;18H[K[11;9H[31m"errors"[m[11;22H[K[12;9H[31m"fmt"[m[12;14H[K[13;9H[31m"net"[m[13;14H[K[14;1H        [31m"strconv"[15;9H"strings"[16;9H"time"[m[16;16H[K[18;9H[31m"changkun.de/x/occamy/internal/guacamole"[m[18;50H[K[19;1H)[19;9H[K[20;9H[K[21;1H[34m// ProtocolVersion is the Guacamole protocol version sent in connect.[m
+[38;5;130mconst[m ProtocolVersion = [31m"VERSION_1_5_0"[m[22;40H[K[23;1H[K[24;63H10,2-9[8CTop[10;9H[?25h[?25l[24;53H0[10;9H[24;53H [10;8H[24;66H1-8[10;8H[?25h[?25l[24;53H5l[10;8H[24;53H  [10;13H[24;66H6-13[10;13H[?25h[?25l[24;1H[1m-- INSERT --[m[24;63H[K[24;63H10,6-13[7CTop[10;13H[31minserted text"[m[24;66H15-22[10;22H[?25h[24;1H[K[10;21H[?25l[24;53H^[[10;21H[24;53H  [10;22H[24;63H10,14-21      Top[10;21H[?25h[?25l[24;63H[K[24;1H:split[?25h[?25l[1;4H[34mPackage guacd connects to an upstream guacd and performs the Guacamole
+// handshake for a new connection or for joining an existing one.[m
+[38;5;130mpackage[m guacd[3;14H[K[5;1H[38;5;130mimport[m ([5;9H[K[6;1H        [31m"coninserted text"[m[6;27H[K[7;1H        [31m"errors"[8;9H"fmt"[m
+        [31m"net"[10;10Hstrconv"[m[10;18H[K[11;10H[31mstrings"[m
+[1m[7msample.go [+]                                                 10,14-21        1%[m[13;1H[34m// handshake for a new connection or for joining an existing one.[m
+[38;5;130mpackage[m guacd[14;14H[K[15;9H[K[16;1H[38;5;130mimport[m ([16;9H[K[17;9H[31m"coninserted text"[18;10Herrors"[m[18;17H[K[19;1H [7C[31m"fmt"[20;9H"net"[m
+        [31m"strconv"[m[21;18H[K[22;1H        [31m"strings"[m[22;18H[K[23;1H[7msample.go [+]                                                 10,14-21        2%[6;21H[?25h[?25l[m[24;70H^W[6;21H[?25h[?25l[24;72Hj[6;21H[24;70H   [17;21H[12;1H[7msample.go [+][m[1m[7m [m[7m                                                 10,14-21        1%[m[23;1H[1m[7msample.go [+]                                                 10,14-21        2%[17;21H[?25h[?25l[m[24;70HG[17;21H[24;70H [22;1H[13;1H[K[14;1H[34m// WriteRaw writes raw instructions to guacd.[m
+[38;5;130mfunc[m (c *Conn) WriteRaw(b [][32mbyte[m) ([32mint[m, [32merror[m) {
+        [38;5;130mreturn[m c.io.WriteRaw(b)
+}[17;9H[K[18;9H[K[19;1H[34m// Close closes the connection to guacd.[m
+[38;5;130mfunc[m (c *Conn) Close() [32merror[m {[21;9H[38;5;130mreturn[m c.io.Close()
+}[22;9H[K[23;63H[1m[7m238,1          Bot[22;1H[?25h[?25l[13;22r[m[22;1H
+[1;24r[22;9Htab     line ä 漢字 é[24;1H[1m-- INSERT --[m[23;65H[1m[7m9,23-30[22;30H[?25h[m[24;1H[K[22;29H[?25l[24;70H^[[22;29H[24;70H  [22;30H[23;68H[1m[7m1-29 [22;29H[?25h[?25l
+
+[m:set number[?25h[?25l[13;1H[38;5;130m230 [m[34m// WriteRaw writes raw instructions to guacd.[m
+[38;5;130m231 func[m (c *Conn) WriteRaw(b [][32mbyte[m) ([32mint[m, [32merror[m) {
+[38;5;130m232 [m        [1C[38;5;130meturn[m c.io.WriteRaw(b)
+[38;5;130m233 [m}
+[38;5;130m234 
+235 [m[34m// Close closes the connection to guacd.[m
+[38;5;130m236 func[m (c *Conn) Close() [32merror[m {
+[38;5;130m237 [m        [1C[38;5;130meturn[m c.io.Close()
+[38;5;130m238 [m}
+[38;5;130m239 [m        tab     line ä 漢字 é[22;33H[?25h
