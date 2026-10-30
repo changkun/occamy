@@ -125,6 +125,17 @@ func TestUpdateDrawBudget(t *testing.T) {
 	if _, err := decode(t, screen.Max, defaultLimits, putUpdate(resized...)); err != nil {
 		t.Fatalf("four screens, a smaller screen and a fill of it: %v", err)
 	}
+	// So does an ExtendedDesktopSize that resizes. One of the size the
+	// screen has, which TigerVNC sends in answer to every request for the
+	// whole screen, resizes nothing and starts nothing.
+	resized = append(fills(4), putExtDesktopSize(0, 0, 64, 48), e.tightFill(small, red, 0))
+	if _, err := decode(t, screen.Max, defaultLimits, putUpdate(resized...)); err != nil {
+		t.Fatalf("four screens, a smaller extended screen and a fill of it: %v", err)
+	}
+	same := append(fills(4), putExtDesktopSize(0, 0, screen.Dx(), screen.Dy()), e.tightFill(small, red, 0))
+	if _, err := decode(t, screen.Max, defaultLimits, putUpdate(same...)); err == nil || !strings.Contains(err.Error(), "draws more than 4 times") {
+		t.Fatalf("four screens, an extended screen of the same size and a fill: %v, want the fill refused", err)
+	}
 	msg := putUpdate(fills(1000)...)
 	in := bytes.NewReader(msg)
 	sink := &backendtest.Sink{}
@@ -278,9 +289,9 @@ func (s *benchSink) CopyRect(dst image.Rectangle, src image.Point) {
 	draw.Draw(s.img, dst, s.img, src, draw.Src)
 }
 
-// desktop returns a desktop of w×h: a gradient wallpaper, a window of
+// desktopImage returns a desktop of w×h: a gradient wallpaper, a window of
 // text, and a photograph of smooth noise and grain.
-func desktop(w, h int) *image.RGBA {
+func desktopImage(w, h int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	rng := rand.New(rand.NewPCG(1, 2))
 	for y := range h {
@@ -344,7 +355,7 @@ func tightFrame(e *encoder, img *image.RGBA, quality int) [][]byte {
 // BenchmarkDecode decodes a desktop of 1024×768 in each encoding. Its
 // throughput is in bytes of pixels drawn, four a pixel.
 func BenchmarkDecode(b *testing.B) {
-	img := desktop(1024, 768)
+	img := desktopImage(1024, 768)
 	r := img.Rect
 	for _, enc := range []struct {
 		name   string

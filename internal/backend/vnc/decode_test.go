@@ -108,6 +108,33 @@ func TestCutTextTruncated(t *testing.T) {
 	}
 }
 
+func TestCutTextAllocations(t *testing.T) {
+	// Cut text allocates for what is kept: the buffer's growth to it, and
+	// the sink's copy, with room for the race detector's allocations. The
+	// UTF-8 of 4 MiB of Latin-1 is up to twice that, and is allocated
+	// twice: once converted and once copied.
+	for _, tt := range []struct {
+		name string
+		text string
+		max  uint64
+	}{
+		{"4 MiB of UTF-8 and more", strings.Repeat("a", maxClipboard+10), 5 * maxClipboard},
+		{"4 MiB of Latin-1 and more", strings.Repeat("\xe9", maxClipboard+10), 8 * maxClipboard},
+	} {
+		sink := &backendtest.Sink{}
+		sink.Resize(8, 8)
+		d := newDecoder(context.Background(), strings.NewReader(string(putCutText(tt.text))), sink, image.Pt(8, 8), defaultLimits, discardLogger)
+		var err error
+		got := allocated(func() { _, err = d.next() })
+		if err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		if got > tt.max {
+			t.Errorf("%s: allocated %d bytes, want at most %d", tt.name, got, tt.max)
+		}
+	}
+}
+
 func TestCursorTransparency(t *testing.T) {
 	// One row of 9 pixels needs two mask bytes; set bits are opaque.
 	pix := make([]byte, 4*9)
