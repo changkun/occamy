@@ -484,7 +484,10 @@ leaves only RDP on the bridge.
     0.5 µs a byte. Fixed by the JPEG rule above: sequential frames
     only, a scan per component, and 65536 pixels, down from 2048×2048.
     `TestTightJPEGScanBombs` holds the review's images, and each now
-    fails in microseconds.
+    fails in microseconds. (Phase 4 replaced the test's 100 ms bound,
+    which timed the sink's 16 MB screen too and failed once on CI under
+    the race detector, with a count of the images that reach
+    `image/jpeg`: none of these.)
   - `io.ErrUnexpectedEOF`, which Run reserves for a connection that
     closes within a message, also came from data that had arrived
     whole: `io.ReadFull` turned the inflater's `io.EOF`, at the end of a
