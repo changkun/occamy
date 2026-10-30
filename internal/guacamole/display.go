@@ -15,6 +15,7 @@ import (
 	"image/draw"
 	"image/jpeg"
 	"image/png"
+	"io"
 	"slices"
 	"strconv"
 
@@ -342,6 +343,13 @@ func ints(args []string, pos ...int) ([]int, error) {
 // memory.
 const maxLayerSize = 16384
 
+// maxImagePixels bounds the images of img streams, which are checked
+// before they decode: a 16383×16383 WebP is valid and would take 1 GiB
+// as it decodes. 8192² still holds an 8K screen.
+const maxImagePixels = 8192 * 8192
+
+var errImageSize = errors.New("image too large")
+
 func (d *Display) layer(i int) *image.RGBA {
 	l, ok := d.layers[i]
 	if !ok {
@@ -440,19 +448,29 @@ func (d *Display) end(args []string) error {
 	}
 	delete(d.streams, v[0])
 
-	var img image.Image
-	r := bytes.NewReader(s.data)
+	var (
+		config func(io.Reader) (image.Config, error)
+		decode func(io.Reader) (image.Image, error)
+	)
 	switch s.mimetype {
 	case "image/png":
-		img, err = png.Decode(r)
+		config, decode = png.DecodeConfig, png.Decode
 	case "image/jpeg":
-		img, err = jpeg.Decode(r)
+		config, decode = jpeg.DecodeConfig, jpeg.Decode
 	case "image/webp":
-		img, err = webp.Decode(r)
+		config, decode = webp.DecodeConfig, decodeWebP
 	default:
 		d.Unsupported["img "+s.mimetype]++
 		return nil
 	}
+	c, err := config(bytes.NewReader(s.data))
+	if err != nil {
+		return err
+	}
+	if c.Width > maxLayerSize || c.Height > maxLayerSize || c.Width*c.Height > maxImagePixels {
+		return fmt.Errorf("%w: %d×%d", errImageSize, c.Width, c.Height)
+	}
+	img, err := decode(bytes.NewReader(s.data))
 	if err != nil {
 		return err
 	}

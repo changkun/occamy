@@ -23,9 +23,9 @@ import (
 // /static with client: true.
 const clientDir = "./client/occamy-web/dist"
 
-// Run is an export method that serves occamy proxy
-func Run() {
-	config.Init()
+// RunV0 serves the v0 configuration that config.Init has read into
+// config.Runtime, as occamyd served it before API v1.
+func RunV0() {
 	tokens, err := newTokens(config.Runtime.Auth.JWTSecret, config.Runtime.Auth.JWTAlgorithm)
 	if err != nil {
 		log.Fatalf("initialize router error: %v", err)
@@ -33,10 +33,10 @@ func Run() {
 	proxy := &proxy{
 		guacd:  config.Runtime.Guacd,
 		tokens: tokens,
-		// Every configuration that internal/config reads is a v0 file,
-		// and a v0 file implies legacy_v0.
+		// A v0 file implies legacy_v0.
 		legacyV0: true,
 		client:   config.Runtime.Client,
+		login:    config.Runtime.Client,
 		debug:    config.Runtime.Debug(),
 		sessions: make(map[string]*Session),
 	}
@@ -49,7 +49,8 @@ type proxy struct {
 	guacd    config.Guacd
 	tokens   *tokens // v0 tokens
 	legacyV0 bool    // serve the v0 routes under /api/v0
-	client   bool    // serve the web client and the v0 login
+	client   bool    // serve the web client under /static
+	login    bool    // serve /api/v0/login
 	debug    bool    // serve pprof under /debug/pprof
 
 	mu       sync.Mutex
@@ -89,78 +90,43 @@ func (p *proxy) serve(addr string) {
 	log.Println("occamy proxy is down, good bye!")
 }
 
-// routes returns occamyd's handler: its routes on a ServeMux, behind the
-// request log.
+// routes returns the handler of a v0 file: the v0 routes on a ServeMux,
+// behind the request log.
 func (p *proxy) routes() http.Handler {
 	mux := http.NewServeMux()
-	if p.client {
-		mux.Handle("GET /static/", http.StripPrefix("/static", http.FileServer(http.Dir(clientDir))))
-	}
-	if p.legacyV0 {
-		if p.client {
-			mux.HandleFunc("POST /api/v0/login", p.tokens.login)
-		}
-		mux.HandleFunc("GET /api/v0/connect", p.serveWS)
-	}
-	if p.debug {
-		profile(mux)
-	}
+	p.register(mux)
 	return logRequests(mux)
 }
 
-// profile serves the net/http/pprof handlers under /debug/pprof, in debug
-// mode only. docs/debugging.md describes how to use them. Index also
+// register adds the v0 routes to mux, each behind recoverV0, which
+// answers a panic with a bare 500 as gin's recovery did.
+func (p *proxy) register(mux *http.ServeMux) {
+	handle := func(pattern string, h http.HandlerFunc) {
+		mux.Handle(pattern, recoverV0(h))
+	}
+	if p.client {
+		handle("GET /static/", http.StripPrefix("/static", http.FileServer(http.Dir(clientDir))).ServeHTTP)
+	}
+	if p.legacyV0 {
+		if p.login {
+			handle("POST /api/v0/login", p.tokens.login)
+		}
+		handle("GET /api/v0/connect", p.serveWS)
+	}
+	if p.debug {
+		profile(handle)
+	}
+}
+
+// profile serves the net/http/pprof handlers under /debug/pprof: on the
+// public listener in a v0 file's debug mode, and on the debug listener
+// of a v1 file. docs/debugging.md describes how to use them. Index also
 // serves the named profiles, such as /debug/pprof/heap.
-func profile(mux *http.ServeMux) {
-	mux.HandleFunc("GET /debug/pprof/", pprof.Index)
-	mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("POST /debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
-}
-
-// logRequests logs each request once it has been served: its method,
-// path, status, duration and the client's address. It leaves out the
-// query string, which carries the token to /api/v0/connect, and the
-// headers. gin's logger wrote the query string, and with it the token.
-func logRequests(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		sw := &statusWriter{ResponseWriter: w}
-		next.ServeHTTP(sw, r)
-		// #nosec G706 -- the client's method and path are quoted, so they cannot break the line.
-		log.Printf("%q %q %d %v %s", r.Method, r.URL.Path, sw.status(), time.Since(start).Round(time.Microsecond), r.RemoteAddr)
-	})
-}
-
-// statusWriter records the status code of a response. Unwrap lets
-// coder/websocket and http.ResponseController reach the connection's
-// http.Hijacker and http.Flusher.
-type statusWriter struct {
-	http.ResponseWriter
-	code int
-}
-
-func (w *statusWriter) WriteHeader(code int) {
-	if w.code == 0 {
-		w.code = code
-	}
-	w.ResponseWriter.WriteHeader(code)
-}
-
-func (w *statusWriter) Write(b []byte) (int, error) {
-	if w.code == 0 {
-		w.code = http.StatusOK
-	}
-	return w.ResponseWriter.Write(b)
-}
-
-func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
-
-func (w *statusWriter) status() int {
-	if w.code == 0 {
-		return http.StatusOK
-	}
-	return w.code
+func profile(handle func(pattern string, h http.HandlerFunc)) {
+	handle("GET /debug/pprof/", pprof.Index)
+	handle("GET /debug/pprof/cmdline", pprof.Cmdline)
+	handle("GET /debug/pprof/profile", pprof.Profile)
+	handle("GET /debug/pprof/symbol", pprof.Symbol)
+	handle("POST /debug/pprof/symbol", pprof.Symbol)
+	handle("GET /debug/pprof/trace", pprof.Trace)
 }

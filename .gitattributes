@@ -1,2 +1,5 @@
 *.c linguist-language=Go
 *.h linguist-language=Go
+# Recorded test data, never converted.
+*.gz binary
+*.webp binary
