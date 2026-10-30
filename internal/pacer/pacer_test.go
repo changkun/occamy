@@ -39,6 +39,37 @@ func TestWindow(t *testing.T) {
 	}
 }
 
+// TestHold checks that a frame which cannot be cut short waits for acks
+// at the cap only while earlier frames are in flight.
+func TestHold(t *testing.T) {
+	p := New(Config{InitialCap: 10000})
+	if ok, _ := p.StartFrame(t0); !ok {
+		t.Fatal("frame 1 could not start")
+	}
+	p.Wrote(t0, 4000)
+	if p.Hold(8000) {
+		t.Error("a frame alone in flight was held")
+	}
+	p.EndFrame(t0, 1)
+	if ok, _ := p.StartFrame(t0); !ok {
+		t.Fatal("frame 2 could not start")
+	}
+	if p.Hold(8000) {
+		t.Error("a frame's first write was held")
+	}
+	p.Wrote(t0, 100)
+	if !p.Hold(6000) {
+		t.Error("a write past the cap was not held with a frame in flight")
+	}
+	if _, more := p.Delay(t0, 6000); more {
+		t.Error("Delay let a write past the cap go on")
+	}
+	p.Ack(t0.Add(ms(10)), 1, 0)
+	if p.Hold(6000) {
+		t.Error("a write was held with nothing else in flight")
+	}
+}
+
 func TestInputGoesBeyondTheWindowOnce(t *testing.T) {
 	p := New(Config{})
 	send(t, p, t0, 1, 1000)
