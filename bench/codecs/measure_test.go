@@ -266,6 +266,7 @@ func TestMeasure(t *testing.T) {
 		rep.add(side, tiles, codecs)
 	}
 	rep.Damage = damage(t, frames, sizes, all, rep.Codecs)
+	rep.Whole = wholeFrames(t, frames, filter)
 	rep.Finished = time.Now().UTC().Format(time.RFC3339)
 	if err := os.MkdirAll(*outDir, 0o750); err != nil {
 		t.Fatal(err)
@@ -295,6 +296,7 @@ type report struct {
 	Raw               []row // the raw layouts, deflated at level 1
 	Tiles             []tileCount
 	Damage            []damageRow
+	Whole             []wholeRow
 }
 
 // row sums one codec's results over a group of tiles.
@@ -400,6 +402,102 @@ func cmpAll(c ...int) int {
 		}
 	}
 	return 0
+}
+
+// wholeRow is a lossy codec on whole frames of a scene, or on their
+// rows of 64-pixel tiles, as if the pipeline merged lossy tiles into
+// larger rectangles.
+type wholeRow struct {
+	Scene    string
+	Unit     string // "frame" or "row of 64"
+	Codec    string
+	Frames   int
+	Bytes    int
+	EncodeNs float64
+	DecodeNs float64
+	SSIMSum  float64
+}
+
+// wholeFamilies are the lossy codecs measured on whole frames.
+var wholeFamilies = []string{"jpeg", "jpegn", "webp-vpx0", "webp-vpx4"}
+
+// wholeFrames encodes every frame as one image, and the frames of the
+// photograph and the motion as rows of 64-pixel tiles, with the lossy
+// codecs at four qualities: what the per-tile headers cost, and what
+// merging a frame's lossy tiles would reach.
+func wholeFrames(t *testing.T, frames []frame, filter *regexp.Regexp) []wholeRow {
+	var codecs []*Codec
+	for _, c := range Candidates(1) {
+		if slices.Contains(wholeFamilies, c.Family) && slices.Contains([]int{30, 50, 70, 90}, c.Quality) &&
+			(filter == nil || filter.MatchString(c.Name)) {
+			codecs = append(codecs, c)
+		}
+	}
+	rows := map[[3]string]*wholeRow{}
+	var order [][3]string
+	// measure encodes the parts of a frame and sums them; the SSIM is
+	// the parts' mean, weighted by their pixels.
+	measure := func(f frame, unit string, parts []*image.RGBA) {
+		for _, c := range codecs {
+			var size int
+			var encSum, decSum, ssim float64
+			for _, part := range parts {
+				var enc, dec []int64
+				for pass := range *runs {
+					t0 := time.Now()
+					b, err := c.Encode(part, nil)
+					enc = append(enc, time.Since(t0).Nanoseconds())
+					if err != nil {
+						t.Fatalf("%s on %s: %v", c.Name, f.name, err)
+					}
+					if pass == 0 {
+						size += len(b)
+					}
+					t0 = time.Now()
+					got, err := c.Decode(b)
+					dec = append(dec, time.Since(t0).Nanoseconds())
+					if err != nil {
+						t.Fatalf("%s decoding %s: %v", c.Name, f.name, err)
+					}
+					if pass == 0 {
+						ssim += SSIM(part, got) * float64(len(part.Pix)) / float64(len(f.img.Pix))
+					}
+				}
+				encSum += median(enc)
+				decSum += median(dec)
+			}
+			k := [3]string{f.scene, unit, c.Name}
+			r := rows[k]
+			if r == nil {
+				r = &wholeRow{Scene: f.scene, Unit: unit, Codec: c.Name}
+				rows[k] = r
+				order = append(order, k)
+			}
+			r.Frames++
+			r.Bytes += size
+			r.EncodeNs += encSum
+			r.DecodeNs += decSum
+			r.SSIMSum += ssim
+		}
+	}
+	for _, f := range frames {
+		measure(f, "frame", []*image.RGBA{f.img})
+		if f.scene != "photo" && f.scene != "motion" {
+			continue
+		}
+		var strips []*image.RGBA
+		for y := 0; y < f.img.Rect.Dy(); y += 64 {
+			s := image.NewRGBA(image.Rect(0, 0, f.img.Rect.Dx(), min(64, f.img.Rect.Dy()-y)))
+			draw.Draw(s, s.Rect, f.img, image.Pt(0, y), draw.Src)
+			strips = append(strips, s)
+		}
+		measure(f, "row of 64", strips)
+	}
+	var out []wholeRow
+	for _, k := range order {
+		out = append(out, *rows[k])
+	}
+	return out
 }
 
 // damageRow is what one change costs to send at one tile size: the

@@ -313,6 +313,17 @@ func (rep *report) markdown() string {
 		}
 	}
 
+	// Whole frames.
+	if len(rep.Whole) > 0 {
+		b.WriteString("## Lossy codecs on whole frames and rows\n\nEach frame encoded as one image, and the photograph's and the motion's frames as 16 rows of 64-pixel tiles: KiB, SSIM, encode and decode ms per frame.\n\n")
+		var rows [][]string
+		for _, w := range rep.Whole {
+			fr := float64(w.Frames)
+			rows = append(rows, []string{w.Scene, w.Unit, w.Codec, f1(float64(w.Bytes) / 1024 / fr), f3(w.SSIMSum / fr), f2(w.EncodeNs / 1e6 / fr), f2(w.DecodeNs / 1e6 / fr)})
+		}
+		table(&b, []string{"Scene", "Unit", "Codec", "KiB/frame", "SSIM", "enc ms", "dec ms"}, rows)
+	}
+
 	// Damage.
 	b.WriteString("## Damage at each tile size\n\nThe tiles a change touches, their pixels and their bytes in the mix " + *pipeLL + " + " + *pipeLossy + ".\n\n")
 	rows = nil
