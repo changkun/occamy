@@ -58,8 +58,9 @@ including the libraries that would otherwise spread one image over
 several. The measurement logs the host's load average every 30 seconds
 ([codecs-load.log](./codecs-load.log)); the one-minute average stayed
 between 4.7 and 8.8, with other sessions' work on the host. An earlier
-run at 11:50 gave the same bytes and SSIM for every tile, and times
-within 5 %.
+run at 11:50 gave the same bytes and SSIM for every tile; its times per
+codec and class were within 5 % for 95 % of the sums and within 10 %
+for 98 %, the rest being solid tiles' sub-microsecond times.
 
 `bench/codecs` is a Go module of its own, so that occamyd's `go.mod`
 carries none of the candidates; gen2brain's modules need Go 1.26.4.
@@ -138,8 +139,9 @@ lossless, at 64 pixels: KiB a frame · encode ms a frame.
   scroll's bitmap text, 1.1 and 1.05 on antialiased text. Its fixed cost
   is 12 bytes a solid tile against 88, and it encodes in two fifths of
   PNG's time on simple tiles and about the same on text. Go decodes A in
-  45 to 65 % of PNG's time on tiles of up to 16 colours and 70 to 95 %
-  on 17 to 256, with PNG's palette expanded through a table.
+  a quarter to two thirds of PNG's time on tiles of up to 16 colours and
+  70 to 95 % on 17 to 256, with PNG's palette expanded through a
+  table.
 - **Where PNG wins.** On the plasma's gradients PNG's filters are 3 %
   smaller at best speed, which makes the class of 17 to 256 colours as a
   whole 2 % smaller as PNG (3.28 bits a pixel against 3.35). Those tiles
