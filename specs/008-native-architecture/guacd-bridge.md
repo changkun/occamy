@@ -181,7 +181,7 @@ do not).
 ## Implementation notes: bridge backend
 
 - **Status.** Interpreter additions and Bridge backend are done
-  (#94). The conformance corpus followed (see its notes below);
+  (#94). The conformance corpus followed (#104, see its notes below);
   registration has not, so the spec stays validated.
 - **What the interpreter gained** (`internal/guacamole`):
   - `Display` applies `cursor`; `TakeCursor` returns the image (copied
@@ -287,8 +287,8 @@ do not).
 
 ## Implementation notes: conformance corpus
 
-- **Status.** The conformance corpus is done. Registration is the last
-  task, so the spec stays validated.
+- **Status.** The conformance corpus is done (#104). Registration is
+  the last task, so the spec stays validated.
 - **What it is** (`internal/backend/guacd/testdata/conformance`): one
   recording per protocol, each a `<name>.guac.gz` (every byte guacd sent
   the bridge, cut after the last complete `sync`, gzipped) and a
