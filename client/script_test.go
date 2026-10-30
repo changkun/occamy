@@ -375,9 +375,9 @@ func TestProtocolErrors(t *testing.T) {
 					t.Errorf("the client closed the connection with %v, want %v", code, c.want)
 				}
 				evs := drain(t, sc.cl, time.Second)
-				e, ok := evs[len(evs)-1].(client.End)
+				e, ok := last(evs).(client.End)
 				if !ok || e.Code != c.want || e.Err == nil {
-					t.Fatalf("last event %#v, want End %v with the error", evs[len(evs)-1], c.want)
+					t.Fatalf("last event %#v, want End %v with the error", last(evs), c.want)
 				}
 				t.Log(e.Err)
 				if _, err := sc.cl.Key(context.Background(), true, 'a', 0); !errors.Is(err, client.ErrClosed) {

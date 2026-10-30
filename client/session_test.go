@@ -429,9 +429,9 @@ func TestCloseCodes(t *testing.T) {
 				drain(t, r.cl, 50*time.Millisecond)
 				c.end(r, b)
 				evs := drain(t, r.cl, time.Second)
-				e, ok := evs[len(evs)-1].(client.End)
+				e, ok := last(evs).(client.End)
 				if !ok || e.Code != c.want || e.Err != nil {
-					t.Fatalf("last event %#v, want End %v", evs[len(evs)-1], c.want)
+					t.Fatalf("last event %#v, want End %v", last(evs), c.want)
 				}
 				if _, err := r.cl.Next(context.Background()); !errors.Is(err, client.ErrClosed) {
 					t.Errorf("Next after End: %v", err)

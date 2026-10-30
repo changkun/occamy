@@ -327,9 +327,9 @@ func TestGoldenInvalid(t *testing.T) {
 				sc.send(&protocol.Resize{Width: 256, Height: 256})
 				sc.sendBytes(b)
 				evs := drain(t, sc.cl, time.Second)
-				e, ok := evs[len(evs)-1].(client.End)
+				e, ok := last(evs).(client.End)
 				if !ok || e.Code != code || !errors.Is(e.Err, want) {
-					t.Errorf("last event %#v, want End %v with %v", evs[len(evs)-1], code, want)
+					t.Errorf("last event %#v, want End %v with %v", last(evs), code, want)
 				}
 			})
 		})

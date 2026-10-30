@@ -295,6 +295,14 @@ func collect(t *testing.T, cl *client.Session, d time.Duration) []client.Event {
 	return evs
 }
 
+// last returns the last of evs, or nil if there is none.
+func last(evs []client.Event) client.Event {
+	if len(evs) == 0 {
+		return nil
+	}
+	return evs[len(evs)-1]
+}
+
 func frames(evs []client.Event) []client.Frame {
 	var fs []client.Frame
 	for _, ev := range evs {
