@@ -347,29 +347,34 @@ func TestRoutingCookie(t *testing.T) {
 	}
 }
 
-// Config.Trace sees the Client Info PDU with the password zeroed.
+// Config.Trace sees the Client Info PDU without the password: neither its
+// bytes nor its length, which cbPassword and every length around it would
+// tell.
 func TestTraceRedactsPassword(t *testing.T) {
 	frames := loadTrace(t, "testdata/xrdp-32bpp.trace.gz")
-	var sent [][]byte
-	replay(t, &fakeServer{frames: frames}, Config{
-		Username: "occamy", Password: "hunter2-secret",
-		Trace: func(d Direction, p []byte) {
-			if d == ToServer {
-				sent = append(sent, bytes.Clone(p))
-			}
-		},
-	})
-	info := false
-	for _, p := range sent {
-		if bytes.Contains(p, utf16le("hunter2-secret")) {
-			t.Errorf("Trace received the password in a %d-byte frame", len(p))
+	info := func(password string) []byte {
+		var info []byte
+		replay(t, &fakeServer{frames: frames}, Config{
+			Username: "trace-user", Password: password,
+			Trace: func(d Direction, p []byte) {
+				if d != ToServer {
+					return
+				}
+				if bytes.Contains(p, utf16le(password)) {
+					t.Errorf("Trace received the password in a %d-byte frame", len(p))
+				}
+				if bytes.Contains(p, utf16le("trace-user")) {
+					info = bytes.Clone(p)
+				}
+			},
+		})
+		if info == nil {
+			t.Fatal("Trace did not see the Client Info PDU")
 		}
-		if bytes.Contains(p, utf16le("occamy")) {
-			info = true
-		}
+		return info
 	}
-	if !info {
-		t.Error("Trace did not see the Client Info PDU")
+	if short, long := info("hunter2"), info("hunter2-a-much-longer-secret"); !bytes.Equal(short, long) {
+		t.Errorf("Trace saw Client Info PDUs of %d and %d bytes for passwords of two lengths", len(short), len(long))
 	}
 }
 

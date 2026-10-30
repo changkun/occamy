@@ -87,19 +87,28 @@ func (c *Client) sendData(typ2 int, body []byte) error {
 	return c.sendIO(c.shareData(typ2, body))
 }
 
-// sendClientInfo sends the Client Info PDU. A trace sees it with the
-// password zeroed.
+// sendClientInfo sends the Client Info PDU, then clears the copies of
+// the password it made. A trace sees the PDU as it would be without the
+// password, so that neither the password nor its length reaches it.
 func (c *Client) sendClientInfo() error {
-	pdu, pass := c.clientInfo()
-	frame := tpkt(sendDataRequest(c.userID, c.ioChannel, pdu))
-	off := len(frame) - len(pdu)
-	return c.t.writeRedacted(frame, off+pass[0], off+pass[1])
+	pdu := c.clientInfo(c.cfg.Password)
+	data := sendDataRequest(c.userID, c.ioChannel, pdu)
+	frame := tpkt(data)
+	defer func() {
+		clear(pdu)
+		clear(data)
+		clear(frame)
+	}()
+	var traced []byte
+	if c.t.trace != nil {
+		traced = tpkt(sendDataRequest(c.userID, c.ioChannel, c.clientInfo("")))
+	}
+	return c.t.writeTraced(frame, traced)
 }
 
 // clientInfo is the Client Info PDU of [MS-RDPBCGR] 2.2.1.11, with the
-// credentials for automatic logon. password is where the password lies
-// in the PDU.
-func (c *Client) clientInfo() (pdu []byte, password [2]int) {
+// credentials for automatic logon: the configuration's, with password.
+func (c *Client) clientInfo(password string) []byte {
 	const (
 		infoMouse              = 0x00000001
 		infoDisableCtrlAltDel  = 0x00000002
@@ -122,7 +131,8 @@ func (c *Client) clientInfo() (pdu []byte, password [2]int) {
 	if c.cfg.Password != "" {
 		flags |= infoAutoLogon
 	}
-	domain, user, pass := utf16le(c.cfg.Domain), utf16le(c.cfg.Username), utf16le(c.cfg.Password)
+	domain, user, pass := utf16le(c.cfg.Domain), utf16le(c.cfg.Username), utf16le(password)
+	defer clear(pass)
 
 	var w writer
 	w.u16(secInfoPkt) // basic security header, [MS-RDPBCGR] 2.2.8.1.1.2.1
@@ -134,10 +144,7 @@ func (c *Client) clientInfo() (pdu []byte, password [2]int) {
 	w.u16(len(pass))
 	w.u16(0) // cbAlternateShell
 	w.u16(0) // cbWorkingDir
-	for i, s := range [][]byte{domain, user, pass, nil, nil} {
-		if i == 2 {
-			password = [2]int{len(w.b), len(w.b) + len(s)}
-		}
+	for _, s := range [][]byte{domain, user, pass, nil, nil} {
 		w.bytes(s)
 		w.u16(0)
 	}
@@ -156,7 +163,7 @@ func (c *Client) clientInfo() (pdu []byte, password [2]int) {
 	w.u32(perfDisableWallpaper | perfDisableFullWindow | perfDisableMenuAnims |
 		perfDisableTheming | perfDisableCursorShdw | perfDisableCursorBlink)
 	w.u16(0) // cbAutoReconnectCookie
-	return w.b, password
+	return w.b
 }
 
 // Licensing, [MS-RDPELE] and [MS-RDPBCGR] 2.2.1.12.

@@ -6,7 +6,6 @@ package rdp
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -130,21 +129,19 @@ func (t *transport) readFrame(buf []byte) (frame, []byte, error) {
 
 // write sends one complete frame.
 func (t *transport) write(p []byte) error {
-	return t.writeRedacted(p, 0, 0)
+	return t.writeTraced(p, nil)
 }
 
-// writeRedacted sends one complete frame, which the trace sees with the
-// bytes from start to end zeroed.
-func (t *transport) writeRedacted(p []byte, start, end int) error {
+// writeTraced sends one complete frame, which the trace sees as traced
+// instead, if it is set.
+func (t *transport) writeTraced(p, traced []byte) error {
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
 	if t.trace != nil {
-		q := p
-		if start < end {
-			q = bytes.Clone(p)
-			clear(q[start:end])
+		if traced == nil {
+			traced = p
 		}
-		t.trace(ToServer, q)
+		t.trace(ToServer, traced)
 	}
 	_, err := t.conn.Write(p)
 	return err
