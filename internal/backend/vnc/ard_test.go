@@ -168,9 +168,10 @@ func TestARDPrivateKey(t *testing.T) {
 		lens = append(lens, x.BitLen())
 	}
 	// A key of 256 random bits has the top one with a chance of one in
-	// two, so none of 64 has it with a chance of one in 2^64.
-	if lo, hi := slices.Min(lens), slices.Max(lens); lo < 2 || hi < ardExponent || hi > ardExponent+1 {
-		t.Errorf("private keys of %d to %d bits for a 1024-bit prime, want up to %d", lo, hi, ardExponent)
+	// two, so none of 64 has it with a chance of one in 2^64. The size is
+	// written out, not ardExponent, so that a smaller one fails.
+	if lo, hi := slices.Min(lens), slices.Max(lens); lo < 2 || hi < 256 || hi > 257 {
+		t.Errorf("private keys of %d to %d bits for a 1024-bit prime, want up to 256", lo, hi)
 	}
 	// A key within [2, p-2] for a prime of 256 bits or fewer: each of
 	// 2 to 5 for 7.
