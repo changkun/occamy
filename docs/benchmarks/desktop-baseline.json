@@ -1,0 +1,4823 @@
+{
+  "started": "2026-10-30T00:09:29.14386Z",
+  "quick": false,
+  "runs": 3,
+  "host": {
+    "cpu": "Apple M5 Pro",
+    "cpus": "18",
+    "engine": "podman version 6.0.2",
+    "goarch": "arm64",
+    "goos": "darwin",
+    "guacd_image": "docker.io/guacamole/guacd:1.6.0 ad352d5923f392e753d983d951939a699a1b4044ae3108419f03f42afcdf231d",
+    "occamy_image": "localhost/occamy:latest 5fd2acdc3036faa52a68a1ec0c3eb75383e54dd550506da0b901882862d251c0",
+    "os": "26.6"
+  },
+  "results": [
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "seconds": 30.001282958,
+      "bytes_up": 103,
+      "bytes_down": 167,
+      "frames": 1,
+      "client_decode_ms": 0.021,
+      "cpu_ms": {
+        "guacd": 32.595,
+        "occamy": 0.994,
+        "rdp": 36.268,
+        "ssh": 119.724,
+        "vnc": 30305.092
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 14.567,
+        "p95": 15.595,
+        "p99": 17.019,
+        "max": 18.958
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "seconds": 10.001487375,
+      "bytes_up": 12858,
+      "bytes_down": 29179013,
+      "frames": 414,
+      "client_decode_ms": 2861.271,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 15308.73,
+        "occamy": 572.579,
+        "rdp": 18.337,
+        "ssh": 42.963,
+        "vnc": 17588.114
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "seconds": 10.000921209,
+      "bytes_up": 18562,
+      "bytes_down": 24092932,
+      "frames": 598,
+      "client_decode_ms": 2251.753,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 6477.294,
+        "occamy": 203.633,
+        "rdp": 16.073,
+        "ssh": 48.175,
+        "vnc": 16398.089
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 66.258,
+        "p95": 76.646,
+        "p99": 85.062,
+        "max": 111.725
+      },
+      "seconds": 20.000659583,
+      "bytes_up": 26076,
+      "bytes_down": 29913205,
+      "frames": 596,
+      "client_decode_ms": 6133.894,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 23752.577,
+        "occamy": 257.892,
+        "rdp": 25.683,
+        "ssh": 78.164,
+        "vnc": 35154.255
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "completion_ms": 172.643,
+      "seconds": 0.172643458,
+      "bytes_up": 73,
+      "bytes_down": 2290102,
+      "frames": 1,
+      "client_decode_ms": 28.742,
+      "cpu_ms": {
+        "guacd": 255.035,
+        "occamy": 9.325,
+        "rdp": 2.326,
+        "ssh": 6.618,
+        "vnc": 2296.957
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "seconds": 30.0015915,
+      "bytes_up": 72,
+      "bytes_down": 24,
+      "client_decode_ms": 0.002,
+      "cpu_ms": {
+        "guacd": 126.074,
+        "occamy": 1.045,
+        "rdp": 40.716,
+        "ssh": 110.035,
+        "vnc": 29725.212
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 17.132,
+        "p95": 17.756,
+        "p99": 18.876,
+        "max": 20.037
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "seconds": 10.002067458,
+      "bytes_up": 6100,
+      "bytes_down": 103312384,
+      "frames": 196,
+      "client_decode_ms": 8231.309,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 20580.087,
+        "occamy": 450.123,
+        "rdp": 3178.257,
+        "ssh": 59.449,
+        "vnc": 9774.946
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "seconds": 10.000057834,
+      "bytes_up": 7557,
+      "bytes_down": 9853206,
+      "frames": 243,
+      "client_decode_ms": 926.636,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3271.542,
+        "occamy": 83.764,
+        "rdp": 744.333,
+        "ssh": 42.389,
+        "vnc": 9831.215
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 68.423,
+        "p95": 87.739,
+        "p99": 98.069,
+        "max": 110.045
+      },
+      "seconds": 20.000298917,
+      "bytes_up": 22976,
+      "bytes_down": 33656590,
+      "frames": 496,
+      "client_decode_ms": 6635.918,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 26899.422,
+        "occamy": 232.282,
+        "rdp": 4616.153,
+        "ssh": 74.896,
+        "vnc": 19328.058
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "completion_ms": 130.717,
+      "seconds": 0.130718167,
+      "bytes_up": 104,
+      "bytes_down": 1433722,
+      "frames": 2,
+      "client_decode_ms": 21.97,
+      "cpu_ms": {
+        "guacd": 541.424,
+        "occamy": 6.348,
+        "rdp": 19.065,
+        "ssh": 13.412,
+        "vnc": 2141.564
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 110.298,
+        "p95": 116.619,
+        "p99": 116.64,
+        "max": 116.64
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 0,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2192.762,
+        "p95": 2245.553,
+        "p99": 2292.136,
+        "max": 2292.136
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "seconds": 30.002059542,
+      "bytes_up": 103,
+      "bytes_down": 159,
+      "frames": 1,
+      "client_decode_ms": 0.023,
+      "cpu_ms": {
+        "guacd": 31.647,
+        "occamy": 1.061,
+        "rdp": 35.249,
+        "ssh": 114.607,
+        "vnc": 30320.611
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 37.672,
+        "p95": 39.161,
+        "p99": 39.505,
+        "max": 39.678
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "seconds": 10.00017675,
+      "bytes_up": 13013,
+      "bytes_down": 30805611,
+      "frames": 419,
+      "client_decode_ms": 2911.666,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 13462.834,
+        "occamy": 549.729,
+        "rdp": 15.833,
+        "ssh": 35.966,
+        "vnc": 15145.849
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "seconds": 10.001325584,
+      "bytes_up": 18531,
+      "bytes_down": 24049420,
+      "frames": 597,
+      "client_decode_ms": 2269.324,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 6499.534,
+        "occamy": 198.606,
+        "rdp": 15.211,
+        "ssh": 50.14,
+        "vnc": 16270.414
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 64.779,
+        "p95": 84.649,
+        "p99": 103.845,
+        "max": 110.687
+      },
+      "seconds": 20.000247958,
+      "bytes_up": 26076,
+      "bytes_down": 29820330,
+      "frames": 596,
+      "client_decode_ms": 6103.446,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 23582.111,
+        "occamy": 239.154,
+        "rdp": 23.984,
+        "ssh": 82.85,
+        "vnc": 35053.227
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "completion_ms": 300.562,
+      "seconds": 0.300562916,
+      "bytes_up": 73,
+      "bytes_down": 2290102,
+      "frames": 1,
+      "client_decode_ms": 28.137,
+      "cpu_ms": {
+        "guacd": 275.222,
+        "occamy": 10.032,
+        "rdp": 2.054,
+        "ssh": 6.603,
+        "vnc": 2459.108
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "seconds": 30.002037042,
+      "bytes_up": 72,
+      "bytes_down": 24,
+      "client_decode_ms": 0.002,
+      "cpu_ms": {
+        "guacd": 37.476,
+        "occamy": 1.133,
+        "rdp": 40.984,
+        "ssh": 119.062,
+        "vnc": 29743.822
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 40.068,
+        "p95": 41.534,
+        "p99": 42.316,
+        "max": 54.171
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "seconds": 10.000157958,
+      "bytes_up": 5542,
+      "bytes_down": 91030725,
+      "frames": 178,
+      "client_decode_ms": 7159.126,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 18550.26,
+        "occamy": 376.428,
+        "rdp": 3006.828,
+        "ssh": 43.911,
+        "vnc": 9858.218
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "seconds": 10.00097675,
+      "bytes_up": 7619,
+      "bytes_down": 9848538,
+      "frames": 245,
+      "client_decode_ms": 990.911,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3854.906,
+        "occamy": 123.274,
+        "rdp": 1013.16,
+        "ssh": 47.932,
+        "vnc": 9636.977
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 84.216,
+        "p95": 109.797,
+        "p99": 123.09,
+        "max": 134.923
+      },
+      "seconds": 20.009207333,
+      "bytes_up": 22976,
+      "bytes_down": 33781191,
+      "frames": 497,
+      "client_decode_ms": 6662.721,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 27123.509,
+        "occamy": 242.635,
+        "rdp": 4698.002,
+        "ssh": 82.108,
+        "vnc": 19477.402
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "completion_ms": 148.564,
+      "seconds": 0.148564542,
+      "bytes_up": 135,
+      "bytes_down": 458081,
+      "frames": 3,
+      "client_decode_ms": 56.688,
+      "cpu_ms": {
+        "guacd": 180.911,
+        "occamy": 2.246,
+        "rdp": 28.518,
+        "ssh": 15.404,
+        "vnc": 2159.64
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 155.302,
+        "p95": 161.537,
+        "p99": 169.586,
+        "max": 169.586
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 0,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2235.958,
+        "p95": 2240.696,
+        "p99": 2245.521,
+        "max": 2245.521
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "seconds": 30.000532125,
+      "bytes_up": 103,
+      "bytes_down": 159,
+      "frames": 1,
+      "client_decode_ms": 0.02,
+      "cpu_ms": {
+        "guacd": 27.952,
+        "occamy": 0.969,
+        "rdp": 30.953,
+        "ssh": 101.951,
+        "vnc": 30337.852
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 67.801,
+        "p95": 69.338,
+        "p99": 69.835,
+        "max": 74.618
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "seconds": 10.00014025,
+      "bytes_up": 8177,
+      "bytes_down": 18779539,
+      "frames": 263,
+      "client_decode_ms": 1896.662,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 11605.22,
+        "occamy": 388.04,
+        "rdp": 15.141,
+        "ssh": 46.578,
+        "vnc": 17793.716
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "seconds": 10.000795583,
+      "bytes_up": 15090,
+      "bytes_down": 19539512,
+      "frames": 486,
+      "client_decode_ms": 1844.875,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 5585.869,
+        "occamy": 180.6,
+        "rdp": 14.203,
+        "ssh": 42.421,
+        "vnc": 16536.418
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 129.834,
+        "p95": 174.521,
+        "p99": 183.849,
+        "max": 186.02
+      },
+      "seconds": 26.088993417,
+      "bytes_up": 31575,
+      "bytes_down": 37482498,
+      "frames": 774,
+      "client_decode_ms": 8353.645,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 31647.974,
+        "occamy": 351.003,
+        "rdp": 35.918,
+        "ssh": 108.136,
+        "vnc": 46769.284
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "completion_ms": 706.549,
+      "seconds": 0.706549875,
+      "bytes_up": 104,
+      "bytes_down": 1534214,
+      "frames": 2,
+      "client_decode_ms": 26.182,
+      "cpu_ms": {
+        "guacd": 182.185,
+        "occamy": 7.263,
+        "rdp": 2.904,
+        "ssh": 8.375,
+        "vnc": 2893.022
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "seconds": 30.002045,
+      "bytes_up": 72,
+      "bytes_down": 24,
+      "client_decode_ms": 0.003,
+      "cpu_ms": {
+        "guacd": 34.963,
+        "occamy": 0.665,
+        "rdp": 34.565,
+        "ssh": 116.994,
+        "vnc": 29762.197
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 70.471,
+        "p95": 72.111,
+        "p99": 73.837,
+        "max": 74.198
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "seconds": 10.000576042,
+      "bytes_up": 489,
+      "bytes_down": 25001984,
+      "frames": 15,
+      "client_decode_ms": 442.449,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 9869.813,
+        "occamy": 48.723,
+        "rdp": 2854.143,
+        "ssh": 46.044,
+        "vnc": 9827.658
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "seconds": 10.000800875,
+      "bytes_up": 7464,
+      "bytes_down": 9805991,
+      "frames": 240,
+      "client_decode_ms": 921.222,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3317.392,
+        "occamy": 83.467,
+        "rdp": 766.664,
+        "ssh": 39.279,
+        "vnc": 9828.429
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 134.709,
+        "p95": 167.231,
+        "p99": 174.311,
+        "max": 175.971
+      },
+      "seconds": 27.683109042,
+      "bytes_up": 28890,
+      "bytes_down": 39310180,
+      "frames": 686,
+      "client_decode_ms": 8986.463,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 35001.594,
+        "occamy": 326.22,
+        "rdp": 6488.631,
+        "ssh": 105.71,
+        "vnc": 26931.267
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "completion_ms": 268.775,
+      "seconds": 0.268775459,
+      "bytes_up": 197,
+      "bytes_down": 427235,
+      "frames": 5,
+      "client_decode_ms": 70.07,
+      "cpu_ms": {
+        "guacd": 1205.876,
+        "occamy": 2.38,
+        "rdp": 23.585,
+        "ssh": 8.716,
+        "vnc": 2274.846
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 216.787,
+        "p95": 225.168,
+        "p99": 227.354,
+        "max": 227.354
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 0,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2297.5,
+        "p95": 2338.164,
+        "p99": 2350.282,
+        "max": 2350.282
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "seconds": 30.002057291,
+      "bytes_up": 61,
+      "bytes_down": 147,
+      "frames": 1,
+      "client_decode_ms": 0.026,
+      "cpu_ms": {
+        "guacd": 41.947,
+        "occamy": 0,
+        "rdp": 39.916,
+        "ssh": 115.516,
+        "vnc": 30370.146
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 14.514,
+        "p95": 15.454,
+        "p99": 16.234,
+        "max": 17.937
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "seconds": 10.000493958,
+      "bytes_up": 10587,
+      "bytes_down": 32005877,
+      "frames": 423,
+      "client_decode_ms": 3073.284,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 15849.213,
+        "occamy": 0,
+        "rdp": 11.86,
+        "ssh": 35.931,
+        "vnc": 17607.817
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "seconds": 10.000511625,
+      "bytes_up": 14887,
+      "bytes_down": 23950533,
+      "frames": 595,
+      "client_decode_ms": 2262.833,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 6487.636,
+        "occamy": 0,
+        "rdp": 18.504,
+        "ssh": 53.876,
+        "vnc": 16421.163
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 44.5,
+        "p95": 112.07,
+        "p99": 127.612,
+        "max": 133.48
+      },
+      "seconds": 20.043601042,
+      "bytes_up": 20276,
+      "bytes_down": 28122810,
+      "frames": 557,
+      "client_decode_ms": 6145.264,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 26402.796,
+        "occamy": 0,
+        "rdp": 26.978,
+        "ssh": 81.601,
+        "vnc": 47891.858
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "completion_ms": 174.074,
+      "seconds": 0.174074125,
+      "bytes_up": 61,
+      "bytes_down": 2288942,
+      "frames": 1,
+      "client_decode_ms": 28.511,
+      "cpu_ms": {
+        "guacd": 258.089,
+        "occamy": 0,
+        "rdp": 3.72,
+        "ssh": 7.299,
+        "vnc": 2315.024
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "seconds": 30.000356166,
+      "bytes_up": 36,
+      "bytes_down": 18,
+      "client_decode_ms": 0.003,
+      "cpu_ms": {
+        "guacd": 37.434,
+        "occamy": 0.638,
+        "rdp": 39.859,
+        "ssh": 119.192,
+        "vnc": 29744.683
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 16.956,
+        "p95": 17.799,
+        "p99": 18.958,
+        "max": 49.269
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "seconds": 10.000329,
+      "bytes_up": 4912,
+      "bytes_down": 103619689,
+      "frames": 196,
+      "client_decode_ms": 8154.524,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 20197.061,
+        "occamy": 0,
+        "rdp": 3122.078,
+        "ssh": 45.57,
+        "vnc": 9795.025
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "seconds": 10.002035375,
+      "bytes_up": 6162,
+      "bytes_down": 9917284,
+      "frames": 246,
+      "client_decode_ms": 947.27,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3380.138,
+        "occamy": 4.198,
+        "rdp": 819.726,
+        "ssh": 43.943,
+        "vnc": 9825.758
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 70.82,
+        "p95": 90.213,
+        "p99": 110.73,
+        "max": 117.226
+      },
+      "seconds": 20.000520209,
+      "bytes_up": 18751,
+      "bytes_down": 33593898,
+      "frames": 495,
+      "client_decode_ms": 6850.184,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 27716.87,
+        "occamy": 0,
+        "rdp": 4862.452,
+        "ssh": 82.126,
+        "vnc": 19474.204
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "completion_ms": 133.185,
+      "seconds": 0.133185417,
+      "bytes_up": 86,
+      "bytes_down": 1432970,
+      "frames": 2,
+      "client_decode_ms": 22.826,
+      "cpu_ms": {
+        "guacd": 195.614,
+        "occamy": 0,
+        "rdp": 20.258,
+        "ssh": 14.009,
+        "vnc": 2138.377
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 109.655,
+        "p95": 114.29,
+        "p99": 123.92,
+        "max": 123.92
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 0,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2187.934,
+        "p95": 2197.233,
+        "p99": 2197.453,
+        "max": 2197.453
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "seconds": 30.000869459,
+      "bytes_up": 61,
+      "bytes_down": 153,
+      "frames": 1,
+      "client_decode_ms": 0.029,
+      "cpu_ms": {
+        "guacd": 41.081,
+        "occamy": 0.498,
+        "rdp": 42.222,
+        "ssh": 104.826,
+        "vnc": 30309.227
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 37.458,
+        "p95": 39.446,
+        "p99": 41.289,
+        "max": 43.91
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "seconds": 10.000186417,
+      "bytes_up": 10287,
+      "bytes_down": 29741456,
+      "frames": 411,
+      "client_decode_ms": 2956.65,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 15522.461,
+        "occamy": 0,
+        "rdp": 16.076,
+        "ssh": 45.248,
+        "vnc": 17707.233
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "seconds": 10.000815042,
+      "bytes_up": 14687,
+      "bytes_down": 23620240,
+      "frames": 587,
+      "client_decode_ms": 2237.352,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 6461.544,
+        "occamy": 3.711,
+        "rdp": 13.742,
+        "ssh": 45.725,
+        "vnc": 16239.155
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 98.371,
+        "p95": 132.185,
+        "p99": 145.775,
+        "max": 150.684
+      },
+      "seconds": 20.116335541,
+      "bytes_up": 21151,
+      "bytes_down": 29845089,
+      "frames": 592,
+      "client_decode_ms": 7032.668,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 27095.861,
+        "occamy": 0,
+        "rdp": 30.283,
+        "ssh": 99.554,
+        "vnc": 37363.541
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "completion_ms": 297.729,
+      "seconds": 0.297729584,
+      "bytes_up": 61,
+      "bytes_down": 2288942,
+      "frames": 1,
+      "client_decode_ms": 29.047,
+      "cpu_ms": {
+        "guacd": 272.735,
+        "occamy": 0,
+        "rdp": 2.201,
+        "ssh": 6.766,
+        "vnc": 2441.324
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "seconds": 30.000431792,
+      "bytes_up": 36,
+      "bytes_down": 24,
+      "client_decode_ms": 0.009,
+      "cpu_ms": {
+        "guacd": 131.726,
+        "occamy": 1.458,
+        "rdp": 50.981,
+        "ssh": 144.086,
+        "vnc": 29570.89
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 39.994,
+        "p95": 41.062,
+        "p99": 41.169,
+        "max": 52.425
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "seconds": 10.000065125,
+      "bytes_up": 4487,
+      "bytes_down": 91174001,
+      "frames": 179,
+      "client_decode_ms": 7142.613,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 18204.403,
+        "occamy": 0,
+        "rdp": 2934.947,
+        "ssh": 45.575,
+        "vnc": 9765.529
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "seconds": 10.002847167,
+      "bytes_up": 6062,
+      "bytes_down": 9749788,
+      "frames": 242,
+      "client_decode_ms": 919.37,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3243.514,
+        "occamy": 4.261,
+        "rdp": 746.205,
+        "ssh": 40.858,
+        "vnc": 9825.162
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 83.462,
+        "p95": 110.595,
+        "p99": 117.087,
+        "max": 130.427
+      },
+      "seconds": 20.011649875,
+      "bytes_up": 18776,
+      "bytes_down": 33679664,
+      "frames": 497,
+      "client_decode_ms": 6628.358,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 26767.882,
+        "occamy": 0,
+        "rdp": 4610.151,
+        "ssh": 80.625,
+        "vnc": 19546.133
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "completion_ms": 254.165,
+      "seconds": 0.254165666,
+      "bytes_up": 61,
+      "bytes_down": 2227346,
+      "frames": 1,
+      "client_decode_ms": 28.345,
+      "cpu_ms": {
+        "guacd": 284.683,
+        "occamy": 0,
+        "rdp": 14.802,
+        "ssh": 6.454,
+        "vnc": 2267.669
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 154.231,
+        "p95": 157.774,
+        "p99": 159.495,
+        "max": 159.495
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 0,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2237.449,
+        "p95": 2253.675,
+        "p99": 2284.907,
+        "max": 2284.907
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "seconds": 30.002248334,
+      "bytes_up": 61,
+      "bytes_down": 153,
+      "frames": 1,
+      "client_decode_ms": 0.322,
+      "cpu_ms": {
+        "guacd": 88.347,
+        "occamy": 0.323,
+        "rdp": 86.268,
+        "ssh": 195.225,
+        "vnc": 30960.743
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 68.426,
+        "p95": 70.978,
+        "p99": 75.725,
+        "max": 81.898
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "seconds": 10.000392542,
+      "bytes_up": 6262,
+      "bytes_down": 16506194,
+      "frames": 250,
+      "client_decode_ms": 2056.008,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 11781.214,
+        "occamy": 5.911,
+        "rdp": 19.276,
+        "ssh": 59.92,
+        "vnc": 18145.653
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "seconds": 10.000275834,
+      "bytes_up": 12712,
+      "bytes_down": 20440761,
+      "frames": 508,
+      "client_decode_ms": 1960.148,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 5781.644,
+        "occamy": 0,
+        "rdp": 14.934,
+        "ssh": 45.026,
+        "vnc": 16399.138
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 129.833,
+        "p95": 161.241,
+        "p99": 177.746,
+        "max": 183.255
+      },
+      "seconds": 25.829409792,
+      "bytes_up": 25382,
+      "bytes_down": 36383189,
+      "frames": 760,
+      "client_decode_ms": 8280.956,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 30594.42,
+        "occamy": 0,
+        "rdp": 34.789,
+        "ssh": 100.51,
+        "vnc": 45894.147
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "completion_ms": 1068.522,
+      "seconds": 1.068523084,
+      "bytes_up": 61,
+      "bytes_down": 2288942,
+      "frames": 1,
+      "client_decode_ms": 27.691,
+      "cpu_ms": {
+        "guacd": 259.932,
+        "occamy": 0,
+        "rdp": 7.335,
+        "ssh": 11.906,
+        "vnc": 3221.954
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "seconds": 30.002060417,
+      "bytes_up": 36,
+      "bytes_down": 18,
+      "client_decode_ms": 0.002,
+      "cpu_ms": {
+        "guacd": 35.621,
+        "occamy": 0,
+        "rdp": 35.324,
+        "ssh": 117.506,
+        "vnc": 29753.757
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 70.333,
+        "p95": 71.222,
+        "p99": 72.533,
+        "max": 77.815
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "seconds": 10.000583625,
+      "bytes_up": 362,
+      "bytes_down": 25001984,
+      "frames": 14,
+      "client_decode_ms": 416.002,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 8640.551,
+        "occamy": 0,
+        "rdp": 3057.139,
+        "ssh": 42.832,
+        "vnc": 9888.736
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "seconds": 10.00044975,
+      "bytes_up": 6137,
+      "bytes_down": 9945524,
+      "frames": 245,
+      "client_decode_ms": 940.924,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3357.905,
+        "occamy": 0,
+        "rdp": 766.833,
+        "ssh": 45.436,
+        "vnc": 9875.245
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "latency_ms": {
+        "n": 200,
+        "p50": 134.548,
+        "p95": 167.952,
+        "p99": 176.633,
+        "max": 178.715
+      },
+      "seconds": 27.799566625,
+      "bytes_up": 23563,
+      "bytes_down": 39826440,
+      "frames": 687,
+      "client_decode_ms": 9076.41,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 35170.832,
+        "occamy": 0.349,
+        "rdp": 6560.928,
+        "ssh": 106.974,
+        "vnc": 27083.203
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "completion_ms": 248.466,
+      "seconds": 0.248467084,
+      "bytes_up": 111,
+      "bytes_down": 391478,
+      "frames": 3,
+      "client_decode_ms": 51.362,
+      "cpu_ms": {
+        "guacd": 135.212,
+        "occamy": 0,
+        "rdp": 22.363,
+        "ssh": 6.241,
+        "vnc": 2273.145
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 214.681,
+        "p95": 216.584,
+        "p99": 218.462,
+        "max": 218.462
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 0,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2295.558,
+        "p95": 2303.421,
+        "p99": 2320.506,
+        "max": 2320.506
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "seconds": 30.000379959,
+      "bytes_up": 103,
+      "bytes_down": 159,
+      "frames": 1,
+      "client_decode_ms": 0.016,
+      "cpu_ms": {
+        "guacd": 39.878,
+        "occamy": 1.022,
+        "rdp": 35.497,
+        "ssh": 105.197,
+        "vnc": 30304.175
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 14.696,
+        "p95": 15.646,
+        "p99": 15.824,
+        "max": 16.531
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "seconds": 10.000666375,
+      "bytes_up": 12796,
+      "bytes_down": 30166056,
+      "frames": 412,
+      "client_decode_ms": 2938.421,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 15324.137,
+        "occamy": 574.219,
+        "rdp": 16.092,
+        "ssh": 48.5,
+        "vnc": 17313.274
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "seconds": 10.00005625,
+      "bytes_up": 18407,
+      "bytes_down": 23861952,
+      "frames": 593,
+      "client_decode_ms": 2254.552,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 6408.445,
+        "occamy": 193.341,
+        "rdp": 15.659,
+        "ssh": 44.497,
+        "vnc": 16296.04
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 65.471,
+        "p95": 84.447,
+        "p99": 95.817,
+        "max": 133.59
+      },
+      "seconds": 20.000183084,
+      "bytes_up": 26200,
+      "bytes_down": 30000913,
+      "frames": 600,
+      "client_decode_ms": 6248.74,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 23971.197,
+        "occamy": 263.554,
+        "rdp": 25.042,
+        "ssh": 81.069,
+        "vnc": 35377.87
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "completion_ms": 171.43,
+      "seconds": 0.171430417,
+      "bytes_up": 73,
+      "bytes_down": 2290102,
+      "frames": 1,
+      "client_decode_ms": 28.644,
+      "cpu_ms": {
+        "guacd": 257.412,
+        "occamy": 9.774,
+        "rdp": 5.465,
+        "ssh": 14.474,
+        "vnc": 2325.079
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "seconds": 30.001556334,
+      "bytes_up": 72,
+      "bytes_down": 24,
+      "client_decode_ms": 0.002,
+      "cpu_ms": {
+        "guacd": 119.44,
+        "occamy": 0.731,
+        "rdp": 33.815,
+        "ssh": 105.975,
+        "vnc": 29738.092
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 17.132,
+        "p95": 17.44,
+        "p99": 18.182,
+        "max": 44.665
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "seconds": 10.000592167,
+      "bytes_up": 6255,
+      "bytes_down": 106141916,
+      "frames": 201,
+      "client_decode_ms": 8232.216,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 20211.062,
+        "occamy": 435.529,
+        "rdp": 2985.242,
+        "ssh": 42.075,
+        "vnc": 9740.948
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "seconds": 10.002049917,
+      "bytes_up": 7526,
+      "bytes_down": 9824562,
+      "frames": 242,
+      "client_decode_ms": 923.7,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3336.835,
+        "occamy": 87.495,
+        "rdp": 764.89,
+        "ssh": 39.946,
+        "vnc": 9892.644
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 68.567,
+        "p95": 88.125,
+        "p99": 97.323,
+        "max": 104.748
+      },
+      "seconds": 20.000755834,
+      "bytes_up": 22976,
+      "bytes_down": 33718937,
+      "frames": 496,
+      "client_decode_ms": 6676.174,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 26968.092,
+        "occamy": 244.14,
+        "rdp": 4648.699,
+        "ssh": 78.427,
+        "vnc": 19504.395
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "completion_ms": 127.419,
+      "seconds": 0.127419959,
+      "bytes_up": 104,
+      "bytes_down": 1413255,
+      "frames": 2,
+      "client_decode_ms": 20.477,
+      "cpu_ms": {
+        "guacd": 192.26,
+        "occamy": 5.902,
+        "rdp": 19.363,
+        "ssh": 11.845,
+        "vnc": 2139.413
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 110.286,
+        "p95": 112.974,
+        "p99": 114.944,
+        "max": 114.944
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 1,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2189.538,
+        "p95": 2197.668,
+        "p99": 2202.786,
+        "max": 2202.786
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "seconds": 30.000382333,
+      "bytes_up": 103,
+      "bytes_down": 167,
+      "frames": 1,
+      "client_decode_ms": 0.031,
+      "cpu_ms": {
+        "guacd": 31.6,
+        "occamy": 1.557,
+        "rdp": 39.536,
+        "ssh": 118.349,
+        "vnc": 30409.761
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 37.707,
+        "p95": 40.876,
+        "p99": 47.696,
+        "max": 62.085
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "seconds": 10.000694542,
+      "bytes_up": 13416,
+      "bytes_down": 31594576,
+      "frames": 432,
+      "client_decode_ms": 3043.852,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 16087.324,
+        "occamy": 587.357,
+        "rdp": 16.245,
+        "ssh": 44.961,
+        "vnc": 17339.184
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "seconds": 10.000244,
+      "bytes_up": 17136,
+      "bytes_down": 22103843,
+      "frames": 552,
+      "client_decode_ms": 2207.436,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 6569.34,
+        "occamy": 234.751,
+        "rdp": 54.225,
+        "ssh": 54.367,
+        "vnc": 16277.435
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 66.679,
+        "p95": 114.898,
+        "p99": 118.535,
+        "max": 129.651
+      },
+      "seconds": 20.008397833,
+      "bytes_up": 26262,
+      "bytes_down": 30043183,
+      "frames": 602,
+      "client_decode_ms": 6272.079,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 24457.359,
+        "occamy": 260.724,
+        "rdp": 29.89,
+        "ssh": 87.547,
+        "vnc": 35729.154
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "completion_ms": 307.73,
+      "seconds": 0.307730333,
+      "bytes_up": 73,
+      "bytes_down": 2290102,
+      "frames": 1,
+      "client_decode_ms": 30.509,
+      "cpu_ms": {
+        "guacd": 271.462,
+        "occamy": 10.023,
+        "rdp": 2.545,
+        "ssh": 10.948,
+        "vnc": 2467.179
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "seconds": 30.00013,
+      "bytes_up": 72,
+      "bytes_down": 24,
+      "client_decode_ms": 0.003,
+      "cpu_ms": {
+        "guacd": 34.724,
+        "occamy": 0.759,
+        "rdp": 36.524,
+        "ssh": 113.028,
+        "vnc": 29794.113
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 40.59,
+        "p95": 52.646,
+        "p99": 77.563,
+        "max": 106.275
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "seconds": 10.000029042,
+      "bytes_up": 5418,
+      "bytes_down": 90103018,
+      "frames": 174,
+      "client_decode_ms": 7257.136,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 18847.106,
+        "occamy": 399.483,
+        "rdp": 3172.545,
+        "ssh": 45.8,
+        "vnc": 9591.926
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "seconds": 10.000613667,
+      "bytes_up": 7619,
+      "bytes_down": 9943739,
+      "frames": 245,
+      "client_decode_ms": 940.31,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3451.499,
+        "occamy": 92.765,
+        "rdp": 829.568,
+        "ssh": 55.161,
+        "vnc": 9900.177
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 164.311,
+        "p95": 354.407,
+        "p99": 437.889,
+        "max": 524.761
+      },
+      "seconds": 37.051951,
+      "bytes_up": 27488,
+      "bytes_down": 35865813,
+      "frames": 640,
+      "client_decode_ms": 13100.511,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 59338.72,
+        "occamy": 1280.607,
+        "rdp": 21268.244,
+        "ssh": 451.187,
+        "vnc": 32789.284
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "completion_ms": 308.327,
+      "seconds": 0.30832725,
+      "bytes_up": 116,
+      "bytes_down": 1445606,
+      "frames": 2,
+      "client_decode_ms": 31.273,
+      "cpu_ms": {
+        "guacd": 424.987,
+        "occamy": 8.867,
+        "rdp": 48.832,
+        "ssh": 37.034,
+        "vnc": 2344.17
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 180.622,
+        "p95": 237.158,
+        "p99": 268.838,
+        "max": 268.838
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 1,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2239.726,
+        "p95": 2293.619,
+        "p99": 2350.244,
+        "max": 2350.244
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "seconds": 30.000291958,
+      "bytes_up": 103,
+      "bytes_down": 167,
+      "frames": 1,
+      "client_decode_ms": 0.071,
+      "cpu_ms": {
+        "guacd": 90.184,
+        "occamy": 4.778,
+        "rdp": 79.931,
+        "ssh": 209.603,
+        "vnc": 30998.04
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 67.691,
+        "p95": 69.448,
+        "p99": 69.837,
+        "max": 70.064
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "seconds": 10.00026725,
+      "bytes_up": 7929,
+      "bytes_down": 18187529,
+      "frames": 255,
+      "client_decode_ms": 1780.325,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 11048.08,
+        "occamy": 346.406,
+        "rdp": 13.424,
+        "ssh": 42.911,
+        "vnc": 17594.927
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "seconds": 10.000211959,
+      "bytes_up": 15834,
+      "bytes_down": 20498705,
+      "frames": 510,
+      "client_decode_ms": 1982.948,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 5822.292,
+        "occamy": 170.753,
+        "rdp": 14.06,
+        "ssh": 41.253,
+        "vnc": 16407.485
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 128.351,
+        "p95": 154.087,
+        "p99": 176.499,
+        "max": 184.197
+      },
+      "seconds": 25.394161833,
+      "bytes_up": 30738,
+      "bytes_down": 35480131,
+      "frames": 746,
+      "client_decode_ms": 7694.719,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 29318.908,
+        "occamy": 310.516,
+        "rdp": 32.315,
+        "ssh": 96.646,
+        "vnc": 44754.616
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "completion_ms": 708.545,
+      "seconds": 0.70854525,
+      "bytes_up": 104,
+      "bytes_down": 1534214,
+      "frames": 2,
+      "client_decode_ms": 30.835,
+      "cpu_ms": {
+        "guacd": 182.925,
+        "occamy": 6.174,
+        "rdp": 8.412,
+        "ssh": 7.356,
+        "vnc": 2853.337
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "seconds": 30.002085042,
+      "bytes_up": 72,
+      "bytes_down": 32,
+      "client_decode_ms": 0.004,
+      "cpu_ms": {
+        "guacd": 44.606,
+        "occamy": 0.879,
+        "rdp": 39.986,
+        "ssh": 126.027,
+        "vnc": 29790.103
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 70.844,
+        "p95": 71.708,
+        "p99": 74.002,
+        "max": 76.248
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "seconds": 10.000421791,
+      "bytes_up": 489,
+      "bytes_down": 25001984,
+      "frames": 15,
+      "client_decode_ms": 456.511,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 9309.703,
+        "occamy": 62.878,
+        "rdp": 2875.692,
+        "ssh": 42.686,
+        "vnc": 9838.633
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "seconds": 10.002038875,
+      "bytes_up": 7650,
+      "bytes_down": 10039331,
+      "frames": 246,
+      "client_decode_ms": 945.677,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3350.127,
+        "occamy": 86.682,
+        "rdp": 764.801,
+        "ssh": 41.11,
+        "vnc": 9809.613
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 144.179,
+        "p95": 170.308,
+        "p99": 175.718,
+        "max": 187.172
+      },
+      "seconds": 28.725711084,
+      "bytes_up": 29665,
+      "bytes_down": 41025772,
+      "frames": 711,
+      "client_decode_ms": 9472.327,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 36724.806,
+        "occamy": 340.851,
+        "rdp": 7124.109,
+        "ssh": 100.89,
+        "vnc": 27913.523
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "completion_ms": 277.695,
+      "seconds": 0.277695208,
+      "bytes_up": 197,
+      "bytes_down": 441131,
+      "frames": 5,
+      "client_decode_ms": 75.037,
+      "cpu_ms": {
+        "guacd": 175.473,
+        "occamy": 3.448,
+        "rdp": 24.525,
+        "ssh": 7.075,
+        "vnc": 2289.352
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 216.441,
+        "p95": 219.721,
+        "p99": 222.92,
+        "max": 222.92
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 1,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2297.387,
+        "p95": 2305.094,
+        "p99": 2305.56,
+        "max": 2305.56
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "seconds": 30.000632084,
+      "bytes_up": 61,
+      "bytes_down": 153,
+      "frames": 1,
+      "client_decode_ms": 0.022,
+      "cpu_ms": {
+        "guacd": 42.4,
+        "occamy": 0,
+        "rdp": 43.596,
+        "ssh": 112.99,
+        "vnc": 30370.825
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 14.333,
+        "p95": 15.303,
+        "p99": 15.638,
+        "max": 17.418
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "seconds": 10.000157459,
+      "bytes_up": 10062,
+      "bytes_down": 29127541,
+      "frames": 402,
+      "client_decode_ms": 2949.616,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 13515.355,
+        "occamy": 0,
+        "rdp": 15.201,
+        "ssh": 46.581,
+        "vnc": 15244.814
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "seconds": 10.00033175,
+      "bytes_up": 13662,
+      "bytes_down": 21872328,
+      "frames": 545,
+      "client_decode_ms": 2171.607,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 6378.672,
+        "occamy": 0,
+        "rdp": 15.014,
+        "ssh": 39.495,
+        "vnc": 16200.786
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 65.574,
+        "p95": 89.471,
+        "p99": 116.543,
+        "max": 148.031
+      },
+      "seconds": 20.0003095,
+      "bytes_up": 21301,
+      "bytes_down": 29854535,
+      "frames": 597,
+      "client_decode_ms": 6418.056,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 24057.051,
+        "occamy": 0,
+        "rdp": 25.372,
+        "ssh": 69.164,
+        "vnc": 35390.404
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "completion_ms": 136.964,
+      "seconds": 0.136964417,
+      "bytes_up": 86,
+      "bytes_down": 1227849,
+      "frames": 2,
+      "client_decode_ms": 19.089,
+      "cpu_ms": {
+        "guacd": 148.911,
+        "occamy": 0,
+        "rdp": 3.196,
+        "ssh": 9.575,
+        "vnc": 2282.744
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "seconds": 30.002055875,
+      "bytes_up": 36,
+      "bytes_down": 18,
+      "client_decode_ms": 0.002,
+      "cpu_ms": {
+        "guacd": 31.814,
+        "occamy": 0.321,
+        "rdp": 35.113,
+        "ssh": 107.256,
+        "vnc": 29801.903
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 16.859,
+        "p95": 18.502,
+        "p99": 19.999,
+        "max": 44.731
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "seconds": 10.002088583,
+      "bytes_up": 4937,
+      "bytes_down": 104308098,
+      "frames": 197,
+      "client_decode_ms": 8115.022,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 19925.536,
+        "occamy": 0,
+        "rdp": 3043.535,
+        "ssh": 49.16,
+        "vnc": 9511.487
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "seconds": 10.002053291,
+      "bytes_up": 6037,
+      "bytes_down": 9773200,
+      "frames": 241,
+      "client_decode_ms": 919.046,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3281.913,
+        "occamy": 10.034,
+        "rdp": 762.144,
+        "ssh": 36.354,
+        "vnc": 9910.406
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 69.02,
+        "p95": 88.033,
+        "p99": 96.513,
+        "max": 110.742
+      },
+      "seconds": 20.001102375,
+      "bytes_up": 18701,
+      "bytes_down": 33457178,
+      "frames": 493,
+      "client_decode_ms": 6620.132,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 26805.479,
+        "occamy": 0,
+        "rdp": 4683.731,
+        "ssh": 75.996,
+        "vnc": 19508.068
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "completion_ms": 131.054,
+      "seconds": 0.131054792,
+      "bytes_up": 86,
+      "bytes_down": 1432970,
+      "frames": 2,
+      "client_decode_ms": 22.01,
+      "cpu_ms": {
+        "guacd": 195.545,
+        "occamy": 0,
+        "rdp": 20.438,
+        "ssh": 12.46,
+        "vnc": 2151.6
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 109.253,
+        "p95": 110.535,
+        "p99": 116.05,
+        "max": 116.05
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 1,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2187.974,
+        "p95": 2195.795,
+        "p99": 2223.016,
+        "max": 2223.016
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "seconds": 30.002068542,
+      "bytes_up": 61,
+      "bytes_down": 147,
+      "frames": 1,
+      "client_decode_ms": 0.024,
+      "cpu_ms": {
+        "guacd": 57.614,
+        "occamy": 0.586,
+        "rdp": 54.692,
+        "ssh": 128.386,
+        "vnc": 30323.215
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 37.305,
+        "p95": 39.092,
+        "p99": 39.459,
+        "max": 39.595
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "seconds": 10.000449208,
+      "bytes_up": 6012,
+      "bytes_down": 18334405,
+      "frames": 240,
+      "client_decode_ms": 2349.181,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 11695.084,
+        "occamy": 0,
+        "rdp": 56.296,
+        "ssh": 155.588,
+        "vnc": 16169.572
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "seconds": 10.001326334,
+      "bytes_up": 11987,
+      "bytes_down": 19075298,
+      "frames": 478,
+      "client_decode_ms": 1971.505,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 5843.938,
+        "occamy": 7.956,
+        "rdp": 19.467,
+        "ssh": 54.162,
+        "vnc": 15785.369
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 64.325,
+        "p95": 124.66,
+        "p99": 146.351,
+        "max": 165.739
+      },
+      "seconds": 20.097108334,
+      "bytes_up": 21326,
+      "bytes_down": 29861300,
+      "frames": 599,
+      "client_decode_ms": 6562.741,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 24961.838,
+        "occamy": 0,
+        "rdp": 22.694,
+        "ssh": 71.499,
+        "vnc": 36039.809
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "completion_ms": 302.249,
+      "seconds": 0.30225,
+      "bytes_up": 61,
+      "bytes_down": 2288942,
+      "frames": 1,
+      "client_decode_ms": 28.391,
+      "cpu_ms": {
+        "guacd": 255.219,
+        "occamy": 0,
+        "rdp": 2.367,
+        "ssh": 6.444,
+        "vnc": 2464.211
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "seconds": 30.002042416,
+      "bytes_up": 36,
+      "bytes_down": 18,
+      "client_decode_ms": 0.002,
+      "cpu_ms": {
+        "guacd": 33.313,
+        "occamy": 0.222,
+        "rdp": 36.267,
+        "ssh": 107.954,
+        "vnc": 29734.234
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 39.916,
+        "p95": 41.187,
+        "p99": 42.984,
+        "max": 53.095
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "seconds": 10.002052584,
+      "bytes_up": 4537,
+      "bytes_down": 91631859,
+      "frames": 181,
+      "client_decode_ms": 7259.047,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 18387.782,
+        "occamy": 0,
+        "rdp": 2995.773,
+        "ssh": 38.922,
+        "vnc": 9781.245
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "seconds": 10.000239583,
+      "bytes_up": 6162,
+      "bytes_down": 9975627,
+      "frames": 246,
+      "client_decode_ms": 952.747,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3441.917,
+        "occamy": 0,
+        "rdp": 811.399,
+        "ssh": 42.572,
+        "vnc": 9924.812
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 86.367,
+        "p95": 110.386,
+        "p99": 120.657,
+        "max": 124.447
+      },
+      "seconds": 20.000504083,
+      "bytes_up": 18776,
+      "bytes_down": 33647675,
+      "frames": 496,
+      "client_decode_ms": 6710.952,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 27263.446,
+        "occamy": 0,
+        "rdp": 4761.004,
+        "ssh": 74.63,
+        "vnc": 19373.381
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "completion_ms": 147.471,
+      "seconds": 0.147471375,
+      "bytes_up": 111,
+      "bytes_down": 457821,
+      "frames": 3,
+      "client_decode_ms": 56.36,
+      "cpu_ms": {
+        "guacd": 176.249,
+        "occamy": 0,
+        "rdp": 23.57,
+        "ssh": 7.06,
+        "vnc": 2173.164
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 152.723,
+        "p95": 156.006,
+        "p99": 160.803,
+        "max": 160.803
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 1,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2234.924,
+        "p95": 2238.296,
+        "p99": 2240.35,
+        "max": 2240.35
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "seconds": 30.002048625,
+      "bytes_up": 61,
+      "bytes_down": 153,
+      "frames": 1,
+      "client_decode_ms": 0.025,
+      "cpu_ms": {
+        "guacd": 41.832,
+        "occamy": 0.238,
+        "rdp": 41.232,
+        "ssh": 114.18,
+        "vnc": 30318.936
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 67.577,
+        "p95": 69.3,
+        "p99": 69.614,
+        "max": 69.754
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "seconds": 10.00089425,
+      "bytes_up": 6237,
+      "bytes_down": 18008069,
+      "frames": 249,
+      "client_decode_ms": 1790.55,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 8827.611,
+        "occamy": 2.272,
+        "rdp": 13.492,
+        "ssh": 43.369,
+        "vnc": 15238.85
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "seconds": 10.001023417,
+      "bytes_up": 12587,
+      "bytes_down": 20154752,
+      "frames": 503,
+      "client_decode_ms": 1936.225,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 5822.182,
+        "occamy": 0,
+        "rdp": 16.949,
+        "ssh": 60.664,
+        "vnc": 16417.141
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 148.253,
+        "p95": 198.327,
+        "p99": 213.811,
+        "max": 253.138
+      },
+      "seconds": 29.716844709,
+      "bytes_up": 26688,
+      "bytes_down": 39112799,
+      "frames": 812,
+      "client_decode_ms": 10021.274,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 37363.81,
+        "occamy": 0,
+        "rdp": 51.479,
+        "ssh": 163.539,
+        "vnc": 55160.856
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "completion_ms": 705.098,
+      "seconds": 0.7050985,
+      "bytes_up": 86,
+      "bytes_down": 1551175,
+      "frames": 2,
+      "client_decode_ms": 27.781,
+      "cpu_ms": {
+        "guacd": 187.023,
+        "occamy": 0,
+        "rdp": 2.725,
+        "ssh": 10.833,
+        "vnc": 2880.456
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "seconds": 30.002045209,
+      "bytes_up": 36,
+      "bytes_down": 18,
+      "client_decode_ms": 0.004,
+      "cpu_ms": {
+        "guacd": 34.984,
+        "occamy": 0,
+        "rdp": 37.355,
+        "ssh": 114.793,
+        "vnc": 29774.6
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 70.13,
+        "p95": 71.164,
+        "p99": 71.267,
+        "max": 71.484
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "seconds": 10.001342708,
+      "bytes_up": 387,
+      "bytes_down": 25018368,
+      "frames": 15,
+      "client_decode_ms": 482.538,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 8097.298,
+        "occamy": 0,
+        "rdp": 2777.76,
+        "ssh": 33.138,
+        "vnc": 9820.681
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "seconds": 10.000567,
+      "bytes_up": 6112,
+      "bytes_down": 9921844,
+      "frames": 244,
+      "client_decode_ms": 931.61,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3318.076,
+        "occamy": 0,
+        "rdp": 760.525,
+        "ssh": 44.264,
+        "vnc": 9823.281
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "latency_ms": {
+        "n": 200,
+        "p50": 138.77,
+        "p95": 169.259,
+        "p99": 179.538,
+        "max": 191.988
+      },
+      "seconds": 28.325036583,
+      "bytes_up": 23938,
+      "bytes_down": 41622038,
+      "frames": 702,
+      "client_decode_ms": 9418.89,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 36677.755,
+        "occamy": 0.377,
+        "rdp": 6917.388,
+        "ssh": 114.484,
+        "vnc": 27451.409
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "completion_ms": 280.835,
+      "seconds": 0.280835458,
+      "bytes_up": 136,
+      "bytes_down": 440923,
+      "frames": 4,
+      "client_decode_ms": 69.23,
+      "cpu_ms": {
+        "guacd": 174.981,
+        "occamy": 0,
+        "rdp": 23.999,
+        "ssh": 7.358,
+        "vnc": 2283.279
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 214.153,
+        "p95": 216.461,
+        "p99": 218.081,
+        "max": 218.081
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 1,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2296.401,
+        "p95": 2303.612,
+        "p99": 2312.865,
+        "max": 2312.865
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "seconds": 30.002045416,
+      "bytes_up": 103,
+      "bytes_down": 159,
+      "frames": 1,
+      "client_decode_ms": 0.033,
+      "cpu_ms": {
+        "guacd": 39.028,
+        "occamy": 0.811,
+        "rdp": 38.716,
+        "ssh": 113.1,
+        "vnc": 30258.891
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 14.599,
+        "p95": 15.517,
+        "p99": 16.658,
+        "max": 33.882
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "seconds": 10.000947125,
+      "bytes_up": 13044,
+      "bytes_down": 30407967,
+      "frames": 420,
+      "client_decode_ms": 2998.218,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 15390.178,
+        "occamy": 577.353,
+        "rdp": 16.421,
+        "ssh": 50.884,
+        "vnc": 17450.868
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "seconds": 10.001392917,
+      "bytes_up": 18531,
+      "bytes_down": 24029588,
+      "frames": 597,
+      "client_decode_ms": 2252.03,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 6401.482,
+        "occamy": 190.911,
+        "rdp": 15.008,
+        "ssh": 41.74,
+        "vnc": 16236.261
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 68.485,
+        "p95": 109.22,
+        "p99": 122.498,
+        "max": 195.661
+      },
+      "seconds": 20.002048292,
+      "bytes_up": 24867,
+      "bytes_down": 28379845,
+      "frames": 557,
+      "client_decode_ms": 5940.978,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 25778.157,
+        "occamy": 263.072,
+        "rdp": 30.863,
+        "ssh": 86.311,
+        "vnc": 46739.499
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "completion_ms": 194.635,
+      "seconds": 0.1946355,
+      "bytes_up": 104,
+      "bytes_down": 1515808,
+      "frames": 2,
+      "client_decode_ms": 24.695,
+      "cpu_ms": {
+        "guacd": 232.071,
+        "occamy": 6.194,
+        "rdp": 4.957,
+        "ssh": 13.745,
+        "vnc": 2460.154
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "seconds": 30.002043875,
+      "bytes_up": 72,
+      "bytes_down": 24,
+      "client_decode_ms": 0.003,
+      "cpu_ms": {
+        "guacd": 81.58,
+        "occamy": 0.448,
+        "rdp": 35.27,
+        "ssh": 102.22,
+        "vnc": 29844.98
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 17.058,
+        "p95": 17.552,
+        "p99": 19.35,
+        "max": 44.938
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "seconds": 10.002035833,
+      "bytes_up": 6069,
+      "bytes_down": 103763282,
+      "frames": 195,
+      "client_decode_ms": 8072.349,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 19883.642,
+        "occamy": 431.372,
+        "rdp": 3009.345,
+        "ssh": 44.934,
+        "vnc": 9702.009
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "seconds": 10.000867208,
+      "bytes_up": 7464,
+      "bytes_down": 9803719,
+      "frames": 240,
+      "client_decode_ms": 922.413,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3461.377,
+        "occamy": 80.76,
+        "rdp": 816.383,
+        "ssh": 44.359,
+        "vnc": 9916.412
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 67.304,
+        "p95": 88.094,
+        "p99": 90.343,
+        "max": 95.538
+      },
+      "seconds": 20.000793416,
+      "bytes_up": 22728,
+      "bytes_down": 33183214,
+      "frames": 488,
+      "client_decode_ms": 6559.459,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 26544.505,
+        "occamy": 248.849,
+        "rdp": 4659.006,
+        "ssh": 84.518,
+        "vnc": 19510.324
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "completion_ms": 180.905,
+      "seconds": 0.1809055,
+      "bytes_up": 104,
+      "bytes_down": 1433722,
+      "frames": 2,
+      "client_decode_ms": 25.47,
+      "cpu_ms": {
+        "guacd": 298.779,
+        "occamy": 9.615,
+        "rdp": 30.976,
+        "ssh": 8.004,
+        "vnc": 2203.165
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 110.077,
+        "p95": 111.527,
+        "p99": 125.042,
+        "max": 125.042
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N0",
+      "run": 2,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2190.429,
+        "p95": 2192.916,
+        "p99": 2194.644,
+        "max": 2194.644
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "seconds": 30.000478167,
+      "bytes_up": 103,
+      "bytes_down": 159,
+      "frames": 1,
+      "client_decode_ms": 0.024,
+      "cpu_ms": {
+        "guacd": 30.144,
+        "occamy": 0.575,
+        "rdp": 35.952,
+        "ssh": 94.551,
+        "vnc": 30219.793
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 37.706,
+        "p95": 39.378,
+        "p99": 39.504,
+        "max": 39.568
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "seconds": 10.001460417,
+      "bytes_up": 12796,
+      "bytes_down": 31265169,
+      "frames": 412,
+      "client_decode_ms": 2920.551,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 15276.99,
+        "occamy": 541.255,
+        "rdp": 13.783,
+        "ssh": 38.871,
+        "vnc": 17246.137
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "seconds": 10.00044425,
+      "bytes_up": 18593,
+      "bytes_down": 24138342,
+      "frames": 599,
+      "client_decode_ms": 2251.834,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 6510.767,
+        "occamy": 189.407,
+        "rdp": 14.345,
+        "ssh": 41.07,
+        "vnc": 16317.597
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 89.182,
+        "p95": 112.722,
+        "p99": 132.208,
+        "max": 138.305
+      },
+      "seconds": 20.001902834,
+      "bytes_up": 26076,
+      "bytes_down": 29857307,
+      "frames": 596,
+      "client_decode_ms": 6181.126,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 24166.678,
+        "occamy": 262.806,
+        "rdp": 26.509,
+        "ssh": 81.294,
+        "vnc": 35518.124
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "completion_ms": 301.712,
+      "seconds": 0.30171275,
+      "bytes_up": 73,
+      "bytes_down": 2290102,
+      "frames": 1,
+      "client_decode_ms": 27.957,
+      "cpu_ms": {
+        "guacd": 252.314,
+        "occamy": 9.191,
+        "rdp": 2.234,
+        "ssh": 7.372,
+        "vnc": 2454.47
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "seconds": 30.000686209,
+      "bytes_up": 72,
+      "bytes_down": 24,
+      "client_decode_ms": 0.003,
+      "cpu_ms": {
+        "guacd": 35.362,
+        "occamy": 0.994,
+        "rdp": 35.956,
+        "ssh": 113.696,
+        "vnc": 29798.624
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 40.73,
+        "p95": 41.298,
+        "p99": 43.152,
+        "max": 56.321
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "seconds": 10.000028959,
+      "bytes_up": 5635,
+      "bytes_down": 92435938,
+      "frames": 181,
+      "client_decode_ms": 7260.837,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 18611.586,
+        "occamy": 389.182,
+        "rdp": 3004.333,
+        "ssh": 44.27,
+        "vnc": 9837.649
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "seconds": 10.000293334,
+      "bytes_up": 7619,
+      "bytes_down": 9997902,
+      "frames": 245,
+      "client_decode_ms": 942.623,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3379.659,
+        "occamy": 90.721,
+        "rdp": 795.381,
+        "ssh": 41.099,
+        "vnc": 9819.215
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 83.98,
+        "p95": 109.426,
+        "p99": 124.225,
+        "max": 128.546
+      },
+      "seconds": 20.000134208,
+      "bytes_up": 22976,
+      "bytes_down": 33696109,
+      "frames": 496,
+      "client_decode_ms": 6660,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 26949.533,
+        "occamy": 239.034,
+        "rdp": 4681.346,
+        "ssh": 76.51,
+        "vnc": 19479.167
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "completion_ms": 172.88,
+      "seconds": 0.17288075,
+      "bytes_up": 104,
+      "bytes_down": 1413255,
+      "frames": 2,
+      "client_decode_ms": 20.617,
+      "cpu_ms": {
+        "guacd": 192.094,
+        "occamy": 5.494,
+        "rdp": 22.065,
+        "ssh": 13.691,
+        "vnc": 2183.911
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 155.662,
+        "p95": 158.433,
+        "p99": 158.455,
+        "max": 158.455
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N1",
+      "run": 2,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2237.368,
+        "p95": 2242.37,
+        "p99": 2257.13,
+        "max": 2257.13
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "seconds": 30.00205275,
+      "bytes_up": 103,
+      "bytes_down": 159,
+      "frames": 1,
+      "client_decode_ms": 0.016,
+      "cpu_ms": {
+        "guacd": 37.012,
+        "occamy": 1.629,
+        "rdp": 36.172,
+        "ssh": 101.943,
+        "vnc": 30311.562
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 67.726,
+        "p95": 69.433,
+        "p99": 69.684,
+        "max": 69.746
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "seconds": 10.000550834,
+      "bytes_up": 7526,
+      "bytes_down": 17604992,
+      "frames": 242,
+      "client_decode_ms": 1758.058,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 10703.864,
+        "occamy": 328.48,
+        "rdp": 16.265,
+        "ssh": 35.027,
+        "vnc": 17570.525
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "seconds": 10.000623417,
+      "bytes_up": 14997,
+      "bytes_down": 19299142,
+      "frames": 483,
+      "client_decode_ms": 1810.314,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 5354.107,
+        "occamy": 148.857,
+        "rdp": 10.566,
+        "ssh": 34.432,
+        "vnc": 16194.113
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 128.677,
+        "p95": 153.223,
+        "p99": 166.523,
+        "max": 189.733
+      },
+      "seconds": 25.110527083,
+      "bytes_up": 30645,
+      "bytes_down": 35391222,
+      "frames": 744,
+      "client_decode_ms": 7631.401,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 28980.991,
+        "occamy": 309.494,
+        "rdp": 34.289,
+        "ssh": 107.266,
+        "vnc": 44063.592
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "completion_ms": 704.569,
+      "seconds": 0.704569875,
+      "bytes_up": 104,
+      "bytes_down": 1551987,
+      "frames": 2,
+      "client_decode_ms": 27.578,
+      "cpu_ms": {
+        "guacd": 185.463,
+        "occamy": 5.092,
+        "rdp": 4.827,
+        "ssh": 7.804,
+        "vnc": 2869.106
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "seconds": 30.000100208,
+      "bytes_up": 72,
+      "bytes_down": 24,
+      "client_decode_ms": 0.002,
+      "cpu_ms": {
+        "guacd": 33.694,
+        "occamy": 0.962,
+        "rdp": 33.672,
+        "ssh": 105.982,
+        "vnc": 29779.413
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 70.607,
+        "p95": 71.402,
+        "p99": 71.517,
+        "max": 71.553
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "seconds": 10.000303583,
+      "bytes_up": 582,
+      "bytes_down": 25001984,
+      "frames": 18,
+      "client_decode_ms": 696.621,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 8438.607,
+        "occamy": 40.358,
+        "rdp": 2820.347,
+        "ssh": 41.159,
+        "vnc": 9830.431
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "seconds": 10.002020959,
+      "bytes_up": 7495,
+      "bytes_down": 9765253,
+      "frames": 241,
+      "client_decode_ms": 926.363,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3282.073,
+        "occamy": 86.276,
+        "rdp": 760.471,
+        "ssh": 41.277,
+        "vnc": 9817.032
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 134.566,
+        "p95": 166.727,
+        "p99": 172.343,
+        "max": 176.379
+      },
+      "seconds": 27.595233625,
+      "bytes_up": 28735,
+      "bytes_down": 39745380,
+      "frames": 682,
+      "client_decode_ms": 8954.406,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 34810.662,
+        "occamy": 315.983,
+        "rdp": 6465.703,
+        "ssh": 97.44,
+        "vnc": 26843.623
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "completion_ms": 270.83,
+      "seconds": 0.270830625,
+      "bytes_up": 166,
+      "bytes_down": 433430,
+      "frames": 4,
+      "client_decode_ms": 64.415,
+      "cpu_ms": {
+        "guacd": 1165.223,
+        "occamy": 2.248,
+        "rdp": 25.177,
+        "ssh": 6.708,
+        "vnc": 2272.287
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 215.61,
+        "p95": 217.471,
+        "p99": 218.527,
+        "max": 218.527
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "occamy",
+      "net": "N2",
+      "run": 2,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2295.891,
+        "p95": 2302.078,
+        "p99": 2304.091,
+        "max": 2304.091
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "seconds": 30.002067709,
+      "bytes_up": 61,
+      "bytes_down": 153,
+      "frames": 1,
+      "client_decode_ms": 0.028,
+      "cpu_ms": {
+        "guacd": 38.159,
+        "occamy": 0,
+        "rdp": 36.728,
+        "ssh": 102.004,
+        "vnc": 30299.689
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 14.496,
+        "p95": 15.523,
+        "p99": 16.249,
+        "max": 16.794
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "seconds": 10.000134625,
+      "bytes_up": 10587,
+      "bytes_down": 31496689,
+      "frames": 423,
+      "client_decode_ms": 3011.896,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 15479.345,
+        "occamy": 0,
+        "rdp": 13.894,
+        "ssh": 40.028,
+        "vnc": 17504.194
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "seconds": 10.000275333,
+      "bytes_up": 14887,
+      "bytes_down": 23956614,
+      "frames": 595,
+      "client_decode_ms": 2233.295,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 6370.814,
+        "occamy": 0,
+        "rdp": 17.955,
+        "ssh": 60.616,
+        "vnc": 16250.32
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 65.704,
+        "p95": 73.248,
+        "p99": 83.658,
+        "max": 102.44
+      },
+      "seconds": 20.000095583,
+      "bytes_up": 21351,
+      "bytes_down": 29993490,
+      "frames": 599,
+      "client_decode_ms": 6185.976,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 23717.24,
+        "occamy": 0,
+        "rdp": 25.759,
+        "ssh": 80.361,
+        "vnc": 35166.377
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "completion_ms": 146.833,
+      "seconds": 0.146833291,
+      "bytes_up": 86,
+      "bytes_down": 1475420,
+      "frames": 2,
+      "client_decode_ms": 22.086,
+      "cpu_ms": {
+        "guacd": 177.036,
+        "occamy": 0,
+        "rdp": 4.198,
+        "ssh": 12.597,
+        "vnc": 2299.087
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "seconds": 30.002043625,
+      "bytes_up": 36,
+      "bytes_down": 18,
+      "client_decode_ms": 0.002,
+      "cpu_ms": {
+        "guacd": 121.162,
+        "occamy": 4.58,
+        "rdp": 33.006,
+        "ssh": 108.491,
+        "vnc": 29751.641
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 16.783,
+        "p95": 17.14,
+        "p99": 17.289,
+        "max": 17.403
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "seconds": 10.000729958,
+      "bytes_up": 4787,
+      "bytes_down": 116661653,
+      "frames": 191,
+      "client_decode_ms": 8757.636,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 20704.107,
+        "occamy": 0,
+        "rdp": 3122.358,
+        "ssh": 45.062,
+        "vnc": 9804.652
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "seconds": 10.000382958,
+      "bytes_up": 6162,
+      "bytes_down": 9995907,
+      "frames": 246,
+      "client_decode_ms": 937.329,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3285.072,
+        "occamy": 0.481,
+        "rdp": 743.099,
+        "ssh": 32.305,
+        "vnc": 9803.163
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 70.544,
+        "p95": 93.532,
+        "p99": 103.246,
+        "max": 114.062
+      },
+      "seconds": 20.000618458,
+      "bytes_up": 18701,
+      "bytes_down": 33447696,
+      "frames": 493,
+      "client_decode_ms": 6873.606,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 28043.976,
+        "occamy": 0,
+        "rdp": 5080.86,
+        "ssh": 90.047,
+        "vnc": 19507.823
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "completion_ms": 128.156,
+      "seconds": 0.128156208,
+      "bytes_up": 86,
+      "bytes_down": 1412515,
+      "frames": 2,
+      "client_decode_ms": 20.497,
+      "cpu_ms": {
+        "guacd": 191.581,
+        "occamy": 0,
+        "rdp": 19.703,
+        "ssh": 13.708,
+        "vnc": 2135.916
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 109.552,
+        "p95": 115.074,
+        "p99": 117.025,
+        "max": 117.025
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N0",
+      "run": 2,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2189.737,
+        "p95": 2193.19,
+        "p99": 2194.223,
+        "max": 2194.223
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "seconds": 30.000382,
+      "bytes_up": 61,
+      "bytes_down": 153,
+      "frames": 1,
+      "client_decode_ms": 0.024,
+      "cpu_ms": {
+        "guacd": 42.131,
+        "occamy": 3.915,
+        "rdp": 42.04,
+        "ssh": 118.222,
+        "vnc": 30292.944
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 37.156,
+        "p95": 38.991,
+        "p99": 39.189,
+        "max": 40.186
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "seconds": 10.000094541,
+      "bytes_up": 10687,
+      "bytes_down": 32292341,
+      "frames": 427,
+      "client_decode_ms": 3022.623,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 15598.924,
+        "occamy": 0,
+        "rdp": 15.649,
+        "ssh": 44.072,
+        "vnc": 17526.803
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "seconds": 10.000028541,
+      "bytes_up": 15012,
+      "bytes_down": 24154147,
+      "frames": 600,
+      "client_decode_ms": 2244.574,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 6408.739,
+        "occamy": 0.43,
+        "rdp": 12.442,
+        "ssh": 40.252,
+        "vnc": 16203.922
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 63.5,
+        "p95": 97.755,
+        "p99": 115.271,
+        "max": 142.479
+      },
+      "seconds": 20.000152708,
+      "bytes_up": 21376,
+      "bytes_down": 29835005,
+      "frames": 600,
+      "client_decode_ms": 6111.467,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 23773.023,
+        "occamy": 0,
+        "rdp": 24.953,
+        "ssh": 80.844,
+        "vnc": 35257.018
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "completion_ms": 246.046,
+      "seconds": 0.246047042,
+      "bytes_up": 86,
+      "bytes_down": 1569308,
+      "frames": 2,
+      "client_decode_ms": 28.967,
+      "cpu_ms": {
+        "guacd": 190.222,
+        "occamy": 0,
+        "rdp": 4.408,
+        "ssh": 12.833,
+        "vnc": 2395.45
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "seconds": 30.00203925,
+      "bytes_up": 36,
+      "bytes_down": 24,
+      "client_decode_ms": 0.003,
+      "cpu_ms": {
+        "guacd": 36.296,
+        "occamy": 4.158,
+        "rdp": 34.6,
+        "ssh": 111.006,
+        "vnc": 29759.464
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 40.089,
+        "p95": 41.285,
+        "p99": 43.504,
+        "max": 53.074
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "seconds": 10.000174708,
+      "bytes_up": 4262,
+      "bytes_down": 88202144,
+      "frames": 170,
+      "client_decode_ms": 6868.827,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 17852.967,
+        "occamy": 0,
+        "rdp": 3008.124,
+        "ssh": 44.96,
+        "vnc": 9784.651
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "seconds": 10.000578584,
+      "bytes_up": 6162,
+      "bytes_down": 9953053,
+      "frames": 246,
+      "client_decode_ms": 934.826,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3304.764,
+        "occamy": 0,
+        "rdp": 759.17,
+        "ssh": 39.08,
+        "vnc": 9894.876
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 84.052,
+        "p95": 113.47,
+        "p99": 123.352,
+        "max": 160.867
+      },
+      "seconds": 20.000719125,
+      "bytes_up": 18776,
+      "bytes_down": 33571296,
+      "frames": 496,
+      "client_decode_ms": 6748.431,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 27030.978,
+        "occamy": 0,
+        "rdp": 4812.596,
+        "ssh": 76.479,
+        "vnc": 19355.506
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "completion_ms": 133.703,
+      "seconds": 0.133704125,
+      "bytes_up": 111,
+      "bytes_down": 392061,
+      "frames": 3,
+      "client_decode_ms": 56.175,
+      "cpu_ms": {
+        "guacd": 1231.999,
+        "occamy": 0,
+        "rdp": 22.31,
+        "ssh": 6.283,
+        "vnc": 2140.557
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 153.712,
+        "p95": 158.282,
+        "p99": 161.358,
+        "max": 161.358
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N1",
+      "run": 2,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2234.014,
+        "p95": 2238.001,
+        "p99": 2238.882,
+        "max": 2238.882
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "seconds": 30.002062708,
+      "bytes_up": 61,
+      "bytes_down": 153,
+      "frames": 1,
+      "client_decode_ms": 0.032,
+      "cpu_ms": {
+        "guacd": 41.311,
+        "occamy": 2.629,
+        "rdp": 41.431,
+        "ssh": 118.076,
+        "vnc": 30285.085
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 67.534,
+        "p95": 69.139,
+        "p99": 69.619,
+        "max": 71.407
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "seconds": 10.000387417,
+      "bytes_up": 6312,
+      "bytes_down": 17843998,
+      "frames": 252,
+      "client_decode_ms": 1755.072,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 10831.935,
+        "occamy": 0.225,
+        "rdp": 13.706,
+        "ssh": 41.954,
+        "vnc": 17572.35
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "seconds": 10.000267833,
+      "bytes_up": 12762,
+      "bytes_down": 20467885,
+      "frames": 510,
+      "client_decode_ms": 1907.833,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 5568.972,
+        "occamy": 0,
+        "rdp": 12.752,
+        "ssh": 40.858,
+        "vnc": 16221.882
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 126.81,
+        "p95": 157.211,
+        "p99": 169.685,
+        "max": 205.364
+      },
+      "seconds": 24.7981865,
+      "bytes_up": 24782,
+      "bytes_down": 35462012,
+      "frames": 736,
+      "client_decode_ms": 7748.217,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 29348.35,
+        "occamy": 0,
+        "rdp": 37.064,
+        "ssh": 108.097,
+        "vnc": 44010.337
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "completion_ms": 720.065,
+      "seconds": 0.720065625,
+      "bytes_up": 86,
+      "bytes_down": 1551175,
+      "frames": 2,
+      "client_decode_ms": 27.777,
+      "cpu_ms": {
+        "guacd": 191.373,
+        "occamy": 0,
+        "rdp": 5.856,
+        "ssh": 23.771,
+        "vnc": 2890.43
+      }
+    },
+    {
+      "scenario": "G1",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "seconds": 30.000214833,
+      "bytes_up": 36,
+      "bytes_down": 18,
+      "client_decode_ms": 0.006,
+      "cpu_ms": {
+        "guacd": 36.365,
+        "occamy": 4.06,
+        "rdp": 33.525,
+        "ssh": 109.973,
+        "vnc": 29689.65
+      }
+    },
+    {
+      "scenario": "G2",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 70.181,
+        "p95": 71.232,
+        "p99": 71.466,
+        "max": 71.819
+      }
+    },
+    {
+      "scenario": "G3",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "seconds": 10.000036583,
+      "bytes_up": 362,
+      "bytes_down": 24985600,
+      "frames": 14,
+      "client_decode_ms": 458.361,
+      "scene_fps": 62.5,
+      "cpu_ms": {
+        "guacd": 8444.189,
+        "occamy": 0,
+        "rdp": 2941.007,
+        "ssh": 45.481,
+        "vnc": 9871.697
+      }
+    },
+    {
+      "scenario": "G4",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "seconds": 10.000458917,
+      "bytes_up": 5987,
+      "bytes_down": 9698292,
+      "frames": 239,
+      "client_decode_ms": 918.533,
+      "scene_fps": 60,
+      "cpu_ms": {
+        "guacd": 3296.159,
+        "occamy": 0,
+        "rdp": 780.107,
+        "ssh": 37.473,
+        "vnc": 9846.882
+      }
+    },
+    {
+      "scenario": "G5",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "latency_ms": {
+        "n": 200,
+        "p50": 132.754,
+        "p95": 167.761,
+        "p99": 176.787,
+        "max": 181.034
+      },
+      "seconds": 27.8029375,
+      "bytes_up": 23438,
+      "bytes_down": 40618057,
+      "frames": 682,
+      "client_decode_ms": 8995.364,
+      "scene_fps": 30,
+      "cpu_ms": {
+        "guacd": 35038.77,
+        "occamy": 4.216,
+        "rdp": 6440.482,
+        "ssh": 112.158,
+        "vnc": 27035.285
+      }
+    },
+    {
+      "scenario": "G6",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "completion_ms": 611.404,
+      "seconds": 0.611404167,
+      "bytes_up": 92,
+      "bytes_down": 1293216,
+      "frames": 2,
+      "client_decode_ms": 18.476,
+      "cpu_ms": {
+        "guacd": 181.678,
+        "occamy": 0,
+        "rdp": 18.758,
+        "ssh": 11.815,
+        "vnc": 2616.101
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "vnc",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 214.934,
+        "p95": 218.828,
+        "p99": 221.047,
+        "max": 221.047
+      }
+    },
+    {
+      "scenario": "G7",
+      "protocol": "rdp",
+      "series": "guacd",
+      "net": "N2",
+      "run": 2,
+      "first_frame_ms": {
+        "n": 20,
+        "p50": 2297.004,
+        "p95": 2299.409,
+        "p99": 2300.459,
+        "max": 2300.459
+      }
+    }
+  ]
+}

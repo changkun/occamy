@@ -1,6 +1,6 @@
 ---
 title: Protocol benchmark
-status: validated
+status: complete
 track: architecture
 depends_on:
   - specs/006-demo-stack-refresh.md
@@ -15,7 +15,7 @@ affects:
   - go.mod
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -112,8 +112,11 @@ update ahead of bulk frames, and protocol v1 must.
 | N2 | 50 ms | 20 Mbit/s |
 
 A userspace proxy inside the harness adds half the RTT in each direction
-and enforces the bandwidth with a token bucket. It emulates latency and
-throughput, not loss or TCP congestion behaviour.
+and serializes each direction at the bandwidth, with a queue of twice the
+bandwidth-delay product, so that a fast sender meets backpressure as on a
+real link. It emulates latency and throughput, not loss or TCP congestion
+behaviour, and it does not delay TCP handshakes, which it answers
+locally.
 
 ## Targets
 
@@ -126,6 +129,23 @@ not control: the RTT, the remote server, or the scene's own frame rate,
 for example. A delivered frame rate cannot exceed the scene's. Such a
 metric's target becomes that bound plus a stated margin. The evidence goes
 next to it in `docs/benchmarks.md`, so that no target is quietly dropped.
+The bounds are applied as follows:
+
+- **Latency and completion:** at N0, no lower than the remote server's own
+  time, where it is measured, plus 2 ms; at N1 and N2, no lower than the
+  N0 target plus one RTT plus the time the link takes to carry the
+  target's bytes.
+- **Frame rates:** 95% of the scene's rate, or as many frames of the
+  target size as the link carries, whichever is fewer.
+- **Continuous scenes (G3 to G5):** bytes and CPU per delivered frame,
+  from N0, so that dropping frames does not count as saving bytes and a
+  frame's target does not depend on the network.
+- **The photograph (G6):** one bytes target, 10x below the median of the
+  runs in which guacd encoded it at least partly lossy. guacd picks PNG
+  or a lossy format by how recently a region changed, so the same image
+  costs 0.4 to 2.2 MiB from run to run.
+- **Unmeasured bounds** leave the target in place until a measurement
+  shows the server alone exceeds it.
 
 The 50 ms budget applies separately: `L` p95 for G2 and T1 under N1, and
 for G5 under N1, must be at most 50 ms with v1.
@@ -172,8 +192,8 @@ millisecond, without naps or move and scroll detection, so that the VNC
 server stays within the 5 ms remote budget. A compose override,
 `docker/docker-compose.bench.yaml`, swaps it into the stack and publishes
 guacd on `127.0.0.1:4822` for the direct series. `make run` and the e2e
-job do not use it. `make bench` starts the stack with the override and
-runs the harness. The demo images stay as they are.
+job do not use it. `make bench` builds occamyd's image, starts the stack
+with the override and runs the harness. The demo images stay as they are.
 
 ### Scene program (`bench/scene`)
 
@@ -200,8 +220,8 @@ so the repository carries no image files.
 - Unit tests for the interpreter (each operation against expected pixels),
   the proxy (added delay and rate within tolerance), and the probe
   matcher.
-- A CI smoke job runs every scenario briefly under N0 to prove that the
-  harness and the bench desktop work. CI never gates on absolute numbers
+- A CI smoke job runs every scenario briefly under N0 and N1 to prove
+  that the harness and the bench desktop work. CI never gates on absolute numbers
   from shared runners.
 - Baselines come from a documented local run, with the hardware, OS,
   engine and versions recorded.
@@ -215,46 +235,139 @@ so the repository carries no image files.
 | Desktop RDP | G1 to G7 over RDP through the same desktop image |
 | Baseline | `docs/benchmarks.md` with the baseline numbers and the per-scenario targets, and the CI smoke job |
 
-## Implementation notes
+## Outcome
 
-- **Status:** the Terminal task shipped in PR #76 on 2026-10-29, and the
-  Desktop VNC and Desktop RDP tasks in the PR after it. The desktop
-  baseline numbers and the targets of the Baseline task remain.
-- **Desktop decisions:**
-  - The bench desktop replaces the `vnc` and `rdp` services' images
-    rather than adding a service, so the harness's hosts, credentials
-    and per-service CPU stay as they are.
-  - The probe swatch is reset to grey by every scene key, and the
-    harness's readiness check alternates two letters of different
-    colours, because an update that paints the colour already shown
-    changes no pixels and draws nothing.
-  - Every wait in a desktop scenario is bounded. At N2 a VNC session
-    could keep drawing long enough that waiting for quiet hung until the
-    scenario's 10-minute limit.
-  - The interpreter applies all sixteen channel masks; guacd uses
-    destination-out and destination-atop on buffers at connect.
-- **Done ahead of plan:** the interpreter, planned for Desktop VNC,
-  because SSH needed it; and from the Baseline task, the CI smoke job
-  and `docs/benchmarks.md` with the terminal numbers.
-- **Decisions:**
-  - Repetition with medians, because single runs picked up disturbances
-    on the host: a compile during one run more than doubled a p95 latency.
-  - Bytes are counted at the proxy, so they include WebSocket framing.
-    The spec said WebSocket payload; the difference is a few bytes per
-    message, and the proxy sees both series the same way.
-  - Sessions are 2 s apart, so that a session with the same claims does
-    not join the one before it while it ends (003, defect 6).
-- **Surprises:**
-  - guacd's terminal draws on visible layer 1 at (7, 7), not on the
-    default layer, so the interpreter needed layer compositing for SSH.
-  - The podman VM counts time the host takes its CPUs away as CPU time,
-    so a disturbed run shows more CPU as well as more time.
-  - x11vnc with its defaults uses about 8% of a CPU with no client
-    connected, and takes 27 ms at the median and 125 ms at p95 from a
-    key to its update. The bench desktop tunes it to 2.8 ms and 3.4 ms
-    (`docker/bench/desktop/start.sh`).
-- **Findings for the targets:** occamyd costs nothing measurable over
-  guacd. T1 is near its floor (3 ms p95 at N0), so its target is the
-  bound plus a margin. guacd coalesces T2's 575 KiB into 82–115 KiB of
-  screens, so v1 needs terminal state on the server. G7's bound needs
-  the SSH handshake measured alone.
+**Summary.** The harness, the bench desktop and the Guacamole baselines
+shipped in three pull requests, implemented directly rather than
+dispatched: the Terminal task in #76 and the Desktop VNC and Desktop RDP
+tasks in #77, both on 2026-10-29, and the Baseline task in #81 on
+2026-10-30.
+[docs/benchmarks.md](../../docs/benchmarks.md) holds the terminal and
+desktop baselines, as medians of three runs, and the per-scenario
+targets. Drift: minimal. Of 17 items, 14 shipped as specified and 3
+diverged, with the body above corrected. None is unimplemented apart
+from the v1 series, which waits for [client-core](client-core.md).
+
+### What shipped
+
+- **Harness** (`bench/`):
+  - the occamy and guacd-direct drivers, the network proxy, CPU sampling
+    through podman, `-runs` with median tables, and the scenarios T1 to
+    T3 and G1 to G7 over SSH, VNC and RDP;
+  - `make bench`, which builds occamyd's image, starts the stack with
+    `docker/docker-compose.bench.yaml` and runs it;
+  - a CI smoke job that runs it quickly under N0 and N1.
+- **Interpreter** (`internal/guacamole`): layers and buffers, the
+  drawing and compositing operations, all sixteen channel masks, and
+  counts of unsupported operations.
+- **Bench desktop** (`docker/bench/desktop`): Xvfb with tuned x11vnc,
+  and xrdp with xorgxrdp, each running the scene program (`bench/scene`)
+  as its session. The probe colours live in `bench/internal/probe`.
+- **`bench/vncprobe`**: an RFB client that runs inside the VNC container
+  and measures x11vnc on its own, per scene, for the remote server's
+  bounds.
+- **Tests:**
+  - the proxy's delay and rate, percentiles and median tables
+    (`bench/bench_test.go`);
+  - the probe colours (`bench/internal/probe`);
+  - the scene's determinism (`bench/scene`);
+  - the interpreter's operations and masks (`internal/guacamole`).
+- **Documentation:** the baseline data in `docs/benchmarks/`
+  (`terminal-baseline.json` and `desktop-baseline.json`).
+
+### Design evolution
+
+- **Bytes** are the TCP payload at the proxy, WebSocket framing
+  included, instead of the WebSocket payload (#76). The difference is a
+  few bytes a message, and both series are counted the same way.
+- **The proxy** serializes each direction at the bandwidth behind a
+  queue of twice the bandwidth-delay product, instead of a token bucket,
+  so that a fast sender meets backpressure. Because it is a userspace
+  proxy, TCP handshakes are not delayed, and G7 counts only the round
+  trips that carry data: about two for v0 in both series.
+- **The targets' rules** were settled against the baseline (#81):
+  - Bytes and CPU in G3 to G5 are per delivered frame and come from N0,
+    because over RDP the baseline delivered a third of the scroll's
+    frames, and a per-second target would reward dropping more.
+  - G6's bytes target is anchored on guacd's lossy runs instead of the
+    median of all runs, because guacd's choice of PNG or a lossy format
+    depends on timing. Its runs fall into three groups: 2.2 MiB,
+    1.2–1.5 MiB and 0.4 MiB.
+  - A bound is only applied where it was measured. Unmeasured server
+    times leave the 10x target in place, rather than weakening it on an
+    assumption.
+- **The CI smoke job** runs under N0 and N1, not N0 alone, so that the
+  proxy is exercised too.
+
+### Not implemented
+
+- **The v1 series**, which needs the Go client core
+  ([client-core](client-core.md)). This was planned as later work.
+
+### Unspecified work
+
+- `bench/vncprobe`, which gives the remote server's own latency and
+  update rate (an improvement).
+- `make bench` now builds occamyd's image, because before it measured
+  whatever `occamy:latest` happened to be (an improvement).
+- The interpreter's sixteen channel masks, which guacd uses on buffers
+  at connect (scaffolding).
+- Sessions 2 s apart, so that one does not join the previous session
+  while it ends (scaffolding, 003 defect 6).
+
+### Decisions
+
+- The bench desktop replaces the `vnc` and `rdp` services' images
+  instead of adding services, so that hosts, credentials and per-service
+  CPU stay as they are.
+- The probe swatch is reset to grey by every scene key. The readiness
+  check alternates two letters of different colours, because an update
+  that paints the colour already shown changes no pixels and draws
+  nothing.
+- Every wait in a desktop scenario is bounded. At N2 a VNC session could
+  keep drawing long enough that waiting for quiet hung until the
+  scenario's 10-minute limit.
+- Runs are repeated and reported as medians, because single runs picked
+  up disturbances on the host: a compile during one run more than
+  doubled a p95 latency.
+- The latency margin is 2 ms, and a frame rate's margin is 5% of the
+  scene's rate.
+
+### Surprises
+
+- guacd's terminal draws on visible layer 1 at (7, 7), not on the
+  default layer, so the interpreter needed layer compositing for SSH.
+- The podman VM counts time that the host takes its CPUs away as CPU
+  time, so a disturbed run shows more CPU as well as more time.
+- x11vnc with its defaults uses about 8% of a CPU with no client
+  connected, and takes 27 ms at the median and 125 ms at p95 from a key
+  to its update. The bench desktop tunes it to 2.9 ms and 3.5 ms
+  (`docker/bench/desktop/start.sh`), at about one CPU whether a client
+  is connected or not.
+- guacd 1.6 encodes a region as JPEG or WebP only if it changed recently
+  enough (`src/libguac/display-worker.c`). So the encoding of a still
+  image depends on timing, and G6's bytes vary 5x between runs.
+- RDP stops at 24–25 frames a second with bandwidth and CPU to spare.
+  Connecting over RDP takes 2.2 s, against 110 ms over VNC.
+- The bench host is shared, and other work on it pushed the load average
+  as high as 34 during the desktop baseline. The run logs the load every
+  minute, and the medians absorbed the one disturbed run.
+
+### Findings for v1
+
+- occamyd costs nothing measurable over guacd.
+- In full motion a key waits behind frames: 84 ms at N0 and 113 ms at
+  N1 over VNC, while x11vnc shows it in 5.6 ms. This is the main fix v1
+  needs, and the only 50 ms miss at N1.
+- guacd coalesces T2's 575 KiB of output into 82–115 KiB of screens, so
+  v1 needs terminal state on the server.
+
+### Follow-ups
+
+- An RDP counterpart of `bench/vncprobe`, for xrdp's reaction and its
+  frame-rate ceiling.
+- Each server's connect time on its own: sshd, x11vnc and xrdp.
+- The shell's echo over SSH on its own.
+- An image-quality score for G6, so that its bytes compare at equal
+  quality. The scene's photograph can be regenerated from its seed.
+- The v1 series, once client-core exists.

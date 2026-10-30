@@ -133,8 +133,6 @@ jobs:
     - uses: actions/setup-go@v7
       with:
         go-version: stable
-    - name: Build the image
-      run: make build CONTAINER_ENGINE=docker
     - name: Benchmark smoke run
       run: make bench CONTAINER_ENGINE=docker BENCH_FLAGS="-quick -net N0,N1 -engine none"
     - name: Stack logs
