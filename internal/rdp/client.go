@@ -17,9 +17,11 @@ package rdp
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"image"
+	"log/slog"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -35,7 +37,9 @@ type Config struct {
 	// ColorDepth is 15, 16, 24 or 32 bits per pixel; 32 by default.
 	ColorDepth int
 	// Domain, Username and Password log on, through NLA when the server
-	// selects it and through the Client Info PDU in any case.
+	// selects it and through the Client Info PDU in any case. Without
+	// NLA, the password goes to whichever server holds a certificate the
+	// policy below accepts.
 	Domain, Username, Password string
 	// ClientName is the client's name the server sees; "occamy" by
 	// default.
@@ -44,12 +48,34 @@ type Config struct {
 	// English (0x409) by default.
 	KeyboardLayout uint32
 	// Protocols are the security protocols to offer, of ProtocolSSL,
-	// ProtocolHybrid and ProtocolHybridEx; all three by default. Standard
+	// ProtocolHybrid and ProtocolHybridEx; NLA, ProtocolHybrid and
+	// ProtocolHybridEx, by default. ProtocolSSL, TLS without NLA, logs on
+	// in the Client Info PDU after the connection is set up, and is
+	// offered only when asked for: xrdp supports nothing else. Standard
 	// RDP security is never offered.
 	Protocols uint32
-	// TLSConfig configures TLS. Nil verifies the server's certificate
-	// against the system roots for the host the connection is to.
-	TLSConfig *tls.Config
+
+	// The server's certificate is accepted if it is pinned in
+	// ServerCerts, or valid for ServerName under RootCAs, or if
+	// InsecureSkipVerify is set. Connect refuses a configuration with
+	// none of them.
+
+	// ServerName is the name the certificate must be valid for, normally
+	// the host dialled; Dial sets it from its address.
+	ServerName string
+	// RootCAs verify the certificate for ServerName; nil means the
+	// system's roots.
+	RootCAs *x509.CertPool
+	// ServerCerts pin certificates: each is a certificate in PEM, or the
+	// SHA-256 fingerprint of one in hex, colons allowed, as
+	// openssl x509 -noout -fingerprint -sha256 prints it.
+	ServerCerts []string
+	// InsecureSkipVerify accepts any certificate and logs a warning with
+	// its fingerprint, once per Client. It is meant for tests and demos.
+	InsecureSkipVerify bool
+	// Logger receives warnings; nil means slog.Default().
+	Logger *slog.Logger
+
 	// Trace, if set, receives every frame the client writes and reads
 	// outside TLS records and CredSSP, for recording sessions. The slice
 	// is borrowed for the call.
@@ -92,6 +118,7 @@ type Client struct {
 	conn     net.Conn
 	t        *transport
 	protocol uint32 // the security protocol the server selected
+	certs    *certPolicy
 
 	userID     uint16
 	ioChannel  uint16
@@ -142,15 +169,35 @@ func checkDesktop(w, h int) error {
 	return nil
 }
 
+// Dial connects to the RDP server at addr, a host and port, and runs
+// Connect. Unless cfg.ServerName is set, the server's certificate must be
+// valid for the host, or pinned, or cfg.InsecureSkipVerify set.
+func Dial(ctx context.Context, addr string, cfg Config) (*Client, error) {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, fmt.Errorf("rdp: %w", err)
+	}
+	if cfg.ServerName == "" {
+		cfg.ServerName = host
+	}
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return nil, fmt.Errorf("rdp: %w", err)
+	}
+	return Connect(ctx, conn, cfg)
+}
+
 // Connect runs the RDP connection sequence over conn, which is connected
 // to the server's RDP port, up to the client's part of the connection
-// finalization. Run then serves the connection. If ctx is done first,
-// Connect closes conn and returns ctx.Err().
+// finalization. Run then serves the connection. On an error Connect
+// closes conn; if ctx is done first, the error is ctx.Err().
 func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 	if cfg.Width == 0 {
 		cfg.Width, cfg.Height = 1024, 768
 	}
 	if cfg.Width < 200 || cfg.Height < 200 || checkDesktop(cfg.Width, cfg.Height) != nil {
+		conn.Close()
 		return nil, fmt.Errorf("rdp: desktop size %d×%d out of range", cfg.Width, cfg.Height)
 	}
 	switch cfg.ColorDepth {
@@ -158,6 +205,7 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 		cfg.ColorDepth = 32
 	case 15, 16, 24, 32:
 	default:
+		conn.Close()
 		return nil, fmt.Errorf("rdp: colour depth %d", cfg.ColorDepth)
 	}
 	if cfg.ClientName == "" {
@@ -167,9 +215,15 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 		cfg.KeyboardLayout = 0x409
 	}
 	if cfg.Protocols == 0 {
-		cfg.Protocols = ProtocolSSL | ProtocolHybrid | ProtocolHybridEx
+		cfg.Protocols = ProtocolHybrid | ProtocolHybridEx
+	}
+	certs, err := newCertPolicy(&cfg)
+	if err != nil {
+		conn.Close()
+		return nil, err
 	}
 	c := &Client{
+		certs:  certs,
 		cfg:    cfg,
 		conn:   conn,
 		t:      newTransport(conn, cfg.Trace),
@@ -179,7 +233,7 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 		ctx:    ctx,
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Unix(1, 0)) })
-	err := c.connect(ctx)
+	err = c.connect(ctx)
 	if !stop() || ctx.Err() != nil {
 		conn.Close()
 		return nil, ctx.Err()
@@ -208,18 +262,7 @@ func (c *Client) connect(ctx context.Context) error {
 		return fmt.Errorf("rdp: the server selected security protocol %#x, which the client did not offer or does not support", c.protocol)
 	}
 
-	tcfg := c.cfg.TLSConfig.Clone()
-	if tcfg == nil {
-		tcfg = &tls.Config{MinVersion: tls.VersionTLS12}
-	}
-	if tcfg.ServerName == "" && !tcfg.InsecureSkipVerify {
-		host, _, err := net.SplitHostPort(c.conn.RemoteAddr().String())
-		if err != nil {
-			return err
-		}
-		tcfg.ServerName = host
-	}
-	tc := tls.Client(c.conn, tcfg)
+	tc := tls.Client(c.conn, c.certs.tlsConfig())
 	if err := tc.HandshakeContext(ctx); err != nil {
 		return fmt.Errorf("rdp: TLS: %w", err)
 	}
@@ -256,6 +299,13 @@ func (c *Client) connect(ctx context.Context) error {
 	}
 	if sd.encryption != 0 {
 		return errors.New("rdp: the server wants standard RDP security encryption")
+	}
+	// The server repeats, under TLS, the protocols it was offered in the
+	// clear (clientRequestedProtocols of TS_UD_SC_CORE, [MS-RDPBCGR]
+	// 2.2.1.4.2): a difference means someone changed the offer to make
+	// the server pick a weaker protocol.
+	if !sd.echoed || sd.requestedProtocols != c.cfg.Protocols {
+		return fmt.Errorf("rdp: the server was offered security protocols %#x, not the %#x the client sent", sd.requestedProtocols, c.cfg.Protocols)
 	}
 	c.ioChannel, c.msgChannel = sd.ioChannel, sd.msgChannel
 

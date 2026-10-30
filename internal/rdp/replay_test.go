@@ -20,9 +20,11 @@ import (
 	"fmt"
 	"image"
 	"io"
+	"log/slog"
 	"math/big"
 	"net"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -71,6 +73,7 @@ var testCert = sync.OnceValues(func() (tls.Certificate, error) {
 	tmpl := &x509.Certificate{
 		SerialNumber: big.NewInt(1),
 		Subject:      pkix.Name{CommonName: "rdp-test"},
+		DNSNames:     []string{"rdp.test"},
 		NotBefore:    time.Now().Add(-time.Hour),
 		NotAfter:     time.Now().Add(time.Hour),
 	}
@@ -96,6 +99,9 @@ type fakeServer struct {
 	domain   string
 	user     string
 	password string
+	// echo, if set, replaces the protocols the server says it was
+	// offered, which are otherwise those the client offered.
+	echo uint32
 
 	// creds are the credentials the client delegated through CredSSP.
 	creds tsPasswordCreds
@@ -106,10 +112,16 @@ type fakeServer struct {
 func (s *fakeServer) serve(conn net.Conn) error {
 	defer conn.Close()
 	t := newTransport(conn, nil)
-	if _, _, err := t.readFrame(nil); err != nil {
+	req, _, err := t.readFrame(nil)
+	if err != nil {
 		return fmt.Errorf("connection request: %w", err)
 	}
-	cc := bytes.Clone(s.frames[0])
+	echo := s.echo
+	if echo == 0 && len(req.data) >= 4 {
+		echo = binary.LittleEndian.Uint32(req.data[len(req.data)-4:])
+	}
+	frames := withEcho(s.frames, echo)
+	cc := bytes.Clone(frames[0])
 	if s.protocol != 0 {
 		binary.LittleEndian.PutUint32(cc[len(cc)-4:], s.protocol)
 	}
@@ -152,13 +164,35 @@ func (s *fakeServer) serve(conn net.Conn) error {
 			}
 		}
 	}()
-	for _, f := range s.frames[1:] {
+	for _, f := range frames[1:] {
 		if _, err := tc.Write(f); err != nil {
 			return err
 		}
 	}
 	return <-fontList
 }
+
+// withEcho returns frames with the server core data of xrdp's Connect
+// Response, the second frame, saying the server was offered protocols.
+func withEcho(frames [][]byte, protocols uint32) [][]byte {
+	// TS_UD_SC_CORE as xrdp sends it: type 0x0c01, length 12, version
+	// 0x00080004, then clientRequestedProtocols.
+	core := []byte{0x01, 0x0c, 0x0c, 0x00, 0x04, 0x00, 0x08, 0x00}
+	if len(frames) < 2 {
+		return frames
+	}
+	i := bytes.Index(frames[1], core)
+	if i < 0 {
+		return frames
+	}
+	frames = slices.Clone(frames)
+	frames[1] = bytes.Clone(frames[1])
+	binary.LittleEndian.PutUint32(frames[1][i+len(core):], protocols)
+	return frames
+}
+
+// quiet discards the client's warnings about the test certificate.
+var quiet = slog.New(slog.DiscardHandler)
 
 // isFontList reports whether a client frame is the Font List PDU.
 func isFontList(f frame) bool {
@@ -186,9 +220,12 @@ func replay(t *testing.T, s *fakeServer, cfg Config) (*Client, *screen) {
 	cconn, sconn := net.Pipe()
 	served := make(chan error, 1)
 	go func() { served <- s.serve(sconn) }()
-	cfg.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+	cfg.InsecureSkipVerify, cfg.Logger = true, quiet
 	if cfg.Username == "" {
 		cfg.Username, cfg.Password = "occamy", "occamy"
+	}
+	if cfg.Protocols == 0 {
+		cfg.Protocols = ProtocolSSL // xrdp's, as recorded
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -267,7 +304,7 @@ func TestReplayNLA(t *testing.T) {
 				protocol: p,
 				domain:   "DOMAIN", user: "occamy", password: "s3cret",
 			}
-			c, scr := replay(t, s, Config{Domain: "DOMAIN", Username: "occamy", Password: "s3cret"})
+			c, scr := replay(t, s, Config{Domain: "DOMAIN", Username: "occamy", Password: "s3cret", Protocols: ProtocolHybrid | ProtocolHybridEx})
 			if c.Protocol() != p {
 				t.Errorf("protocol %#x, want %#x", c.Protocol(), p)
 			}
@@ -295,7 +332,7 @@ func TestReplayNLAWrongPassword(t *testing.T) {
 	go func() { served <- s.serve(sconn) }()
 	_, err := Connect(context.Background(), cconn, Config{
 		Username: "occamy", Password: "wrong",
-		TLSConfig: &tls.Config{InsecureSkipVerify: true},
+		InsecureSkipVerify: true, Logger: quiet,
 	})
 	var ce *CredSSPError
 	if !errors.As(err, &ce) || ce.Code != statusLogonFailure {
@@ -314,7 +351,7 @@ func TestRefusesStandardSecurity(t *testing.T) {
 	go s.serve(sconn)
 	_, err := Connect(context.Background(), cconn, Config{
 		Username: "occamy", Password: "occamy", Protocols: ProtocolHybrid,
-		TLSConfig: &tls.Config{InsecureSkipVerify: true},
+		InsecureSkipVerify: true, Logger: quiet,
 	})
 	if err == nil {
 		t.Fatal("Connect accepted standard RDP security")
@@ -371,7 +408,7 @@ func TestConnectHostileChallenge(t *testing.T) {
 	defer cancel()
 	_, err := Connect(ctx, cconn, Config{
 		Username: "u", Password: "p",
-		TLSConfig: &tls.Config{InsecureSkipVerify: true},
+		InsecureSkipVerify: true, Logger: quiet,
 	})
 	if err == nil || !strings.Contains(err.Error(), "NTLM") {
 		t.Errorf("Connect returned %v, want an NTLM error", err)

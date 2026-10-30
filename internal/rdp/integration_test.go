@@ -25,7 +25,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"crypto/tls"
 	"flag"
 	"fmt"
 	"image"
@@ -150,7 +149,12 @@ func dial(t *testing.T, cfg Config) *session {
 		t.Fatal(err)
 	}
 	cfg.Username, cfg.Password = "occamy", "occamy"
-	cfg.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+	// xrdp signs its certificate itself and has no NLA: the test skips
+	// verification and offers TLS alone, explicitly.
+	cfg.InsecureSkipVerify, cfg.Logger = true, quiet
+	if cfg.Protocols == 0 {
+		cfg.Protocols = ProtocolSSL
+	}
 	s := &session{scr: &screen{}, done: make(chan error, 1)}
 	cfg.Trace = func(d Direction, p []byte) {
 		if d != FromServer {

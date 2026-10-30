@@ -93,13 +93,15 @@ func (c *Client) clientData() []byte {
 
 // serverData is what the server data blocks tell the client.
 type serverData struct {
-	version        uint32
-	ioChannel      uint16
-	channels       []uint16
-	msgChannel     uint16
-	encryption     uint32 // encryptionMethod of TS_UD_SC_SEC1
-	encryptionLvl  uint32
-	earlyCapsFlags uint32
+	version            uint32
+	requestedProtocols uint32 // the protocols the server was offered
+	echoed             bool   // the server sent requestedProtocols
+	ioChannel          uint16
+	channels           []uint16
+	msgChannel         uint16
+	encryption         uint32 // encryptionMethod of TS_UD_SC_SEC1
+	encryptionLvl      uint32
+	earlyCapsFlags     uint32
 }
 
 // parseServerData parses the server data blocks of the Connect Response,
@@ -115,10 +117,12 @@ func parseServerData(p []byte) (*serverData, error) {
 		}
 		b := reader{b: r.take(n - 4)}
 		switch typ {
-		case scCore:
+		case scCore: // [MS-RDPBCGR] 2.2.1.4.2; xrdp ends it after the protocols
 			sd.version = b.u32()
-			if b.len() >= 8 {
-				b.u32() // clientRequestedProtocols
+			if b.len() >= 4 {
+				sd.requestedProtocols, sd.echoed = b.u32(), true
+			}
+			if b.len() >= 4 {
 				sd.earlyCapsFlags = b.u32()
 			}
 		case scSecurity:
