@@ -49,11 +49,13 @@ evolve without breaking old clients.
   length-prefixed variable fields. Flag bit 0 marks a message that
   receivers may ignore if they do not know its type. Unknown non-ignorable
   types close the connection with `unsupported`.
-- **Handshake:** client `hello` carries the protocol version, client
-  name and capabilities (codecs, max texture size, terminal support,
-  pixel ratio, initial size and visibility). Server `welcome` carries the
-  session ID, role, backend class (terminal or graphical), the agreed
-  capabilities, and an initial `snapshot` that follows immediately.
+- **Handshake:** client `hello` carries the protocol version first, the
+  initial size in pixels and in character cells (the client does not
+  know the class yet), visibility, the client name, and capabilities
+  (codecs, max texture size, terminal level, pixel ratio, cache slots,
+  frame window, max message size). Server `welcome` carries the viewer's
+  ID, role, backend class (terminal or graphical), the session ID and the
+  agreed capabilities, and the first frame follows immediately.
   - **One round trip to the first frame.** `hello` travels in the
     WebSocket upgrade request, base64url-encoded in the `hello` query
     parameter, and the server sends `welcome` and the snapshot right
@@ -64,8 +66,10 @@ evolve without breaking old clients.
     subprotocols, `occamy.v1` and `occamy.v1.token.<token>` with the
     token base64url-encoded, as Kubernetes does for its WebSocket API.
     Browsers can set this header and proxies do not log it as they log
-    URLs. The server authenticates the token, answers with `occamy.v1`
-    alone, and closes the connection on failure. Native clients may
+    URLs. The server authenticates the token and answers with
+    `occamy.v1` alone. On failure it still completes the upgrade and
+    sends `close`, since a browser cannot read the status of a refused
+    upgrade. Native clients may
     send `Authorization: Bearer` instead. `hello` itself carries no
     secret.
 - **Server to client:** `resize`, `tile` (frame ID, rectangle, codec,
@@ -76,15 +80,16 @@ evolve without breaking old clients.
   and hotspot) and `cursor-move`, `term-data` (bytes),
   `term-snapshot`, `clipboard` (MIME type and data), `bell`, `title`,
   `prompt` (keyboard-interactive or credential request), `viewer-joined`
-  and `viewer-left`, `ping`, and `close` (code and reason).
+  (viewer ID, role and name) and `viewer-left`, and `ping`, `pong` and
+  `close` (code and reason), which go either way.
 - **Client to server:** `key` (down or up, keysym, and the physical key as
   a USB HID usage from the keyboard page), `text` (UTF-8, for
   IME), `term-input` (bytes produced by the client's terminal emulator,
   such as xterm.js `onData`), `pointer` (x, y, button mask), `wheel` (dx,
   dy, with pixel or line mode), `resize-request`, `clipboard`, `prompt-reply`,
   `frame-ack` (frame ID and decode time), `view` (whether the client is
-  visible, and the rectangle of the screen its viewport shows), `pong`,
-  and `close`.
+  visible, and the rectangle of the screen its viewport shows), and
+  `ping`, `pong` and `close`.
 - **Terminals are framed screen diffs.** The server keeps the terminal's
   screen ([native-ssh-backend](native-ssh-backend.md)) and, once per
   frame, sends what changed as `term-data`: escape sequences that turn
@@ -214,8 +219,12 @@ web client ([009](../009-react-web-client.md)) and the client core
 
 ## Implementation notes
 
-- **Status.** Framing is done (#84). Handshake, Messages and Document
-  are not, so the spec stays validated.
+- **Status.** All four tasks are done: Framing in #84, and Handshake,
+  Messages and Document on the branch `protocol-messages`. The spec
+  stays validated until the wrap-up.
+
+### Framing
+
 - **What Framing shipped.** The public package `protocol/`:
   - `Header` (`Type`, `Flags`), `FlagIgnorable`, `AppendHeader`, and
     `Split`, which checks the message size before it reads the header.
@@ -275,3 +284,149 @@ web client ([009](../009-react-web-client.md)) and the client core
   A 1 MiB payload appends in about 12.6 µs and reads in 3.8 ns because
   it is not copied. None of them allocates.
 - **Deviations.** None from the spec.
+
+### Handshake, Messages and Document
+
+- **What shipped.**
+  - Every message as a type with `Append(b) []byte` and
+    `Decode(body, Limits) error`, behind the `Message` interface; `New`;
+    `Decode(msg, registry, limits)`, which splits, dispatches and
+    decodes; `ClientMessages` and `ServerMessages`, the registries a
+    server and a client accept with; `Type.String`.
+  - The handshake: `Hello`, `Welcome`, `Capabilities` with `Agree` and
+    `Limits`, `EncodeHelloQuery` and `DecodeHelloQuery` with
+    `MaxHelloSize`, `TokenSubprotocol` and `TokenFromSubprotocols`.
+  - `CloseCode` with `CloseCodeFor`, which maps decoding errors to close
+    codes (`ErrUnsupported` to `unsupported`).
+  - Primitives: `AppendBool` and `ReadBool`, `AppendCount`, `ReadCount`
+    and `MaxCount`, `ErrInvalid`, and `Limits.MaxTextureSize` and
+    `Limits.CacheSlots`.
+  - [docs/protocol.md](../../docs/protocol.md), golden vectors in
+    `protocol/testdata/messages.json` (42 messages, 52 invalid messages,
+    hello queries, tokens and subprotocol headers), a test that checks
+    every example in the document against them, three more fuzz
+    targets, examples and benchmarks. `docs/protocol-cn.md` is marked
+    as the v0 description.
+- **Type numbers.** Either way: `ping` 0x0001, `pong` 0x0002, `close`
+  0x0003. From the client: `hello` 0x0101, `key` 0x0102, `text` 0x0103,
+  `term-input` 0x0104, `pointer` 0x0105, `wheel` 0x0106,
+  `resize-request` 0x0107, `clipboard` 0x0108, `view` 0x0109,
+  `frame-ack` 0x010a, `prompt-reply` 0x010b. From the server: `welcome`
+  0x0201, `resize` 0x0202, `tile` 0x0203, `copy-rect` 0x0204,
+  `frame-end` 0x0205, `cursor` 0x0206, `cursor-move` 0x0207,
+  `term-data` 0x0208, `term-snapshot` 0x0209, `clipboard` 0x020a,
+  `bell` 0x020b, `title` 0x020c, `prompt` 0x020d, `viewer-joined`
+  0x020e, `viewer-left` 0x020f. A message sent the wrong way is an
+  unknown type to its receiver.
+- **Decisions the spec left open.**
+  - A list is a u16 count, and the count times the element's smallest
+    size must fit in the bytes left, or the read is `truncated` before
+    anything is allocated. A boolean is a u8 that is 0 or 1.
+  - One new error, `ErrInvalid` (vector name `invalid`), for values the
+    protocol does not allow. A tile or cursor over the maximum texture
+    size wraps `ErrTooLarge`, and a hello of another version wraps
+    `ErrUnsupported`, so each maps to the close code of the same name.
+  - A decoder checks each field as it reads it, then trailing bytes, then
+    the rules between fields, so implementations agree on which error
+    a message fails with. It checks only what needs no state beyond the
+    agreed limits: booleans, roles, classes, wheel modes, codecs,
+    capabilities, tile and cursor sizes, cache slots, a cached tile's
+    slot and empty payload, a raw image's size, a hidden cursor's form,
+    and the hot spot. Checks against the session (a rectangle within the
+    screen, a frame ID that matches, a stored slot) belong to the
+    receiver, and the document lists them per message.
+  - Capabilities have one encoding: entries in ascending order of ID,
+    each once, no zero values, known IDs with values of their exact
+    size. Unknown entries are kept raw in `Capabilities.Unknown`, so a
+    message re-encodes exactly. Known IDs run from 1 to 7 without gaps,
+    so unknown ones always follow them.
+  - Agreement (`Agree`): the client's codecs that the server has, in
+    the client's order; the client's texture size, lowered to the
+    server's; the lower terminal level and the fewer cache slots; the
+    client's pixel ratio; the smaller frame window and message size,
+    each counting an unstated value as its default. `welcome` therefore
+    always states the frame window and the message size. A graphical
+    session without an agreed codec, or a terminal without an agreed
+    terminal level, closes with `unsupported`.
+  - The pixel ratio is a u16 in hundredths (200 for twice the density),
+    the fixed point the Framing notes suggested.
+  - Codec IDs: 1 raw, 2 deflate, 3 PNG, 4 JPEG, 5 WebP, 6 cached; 0 is
+    not a codec (it marks a hidden cursor), 7 to 0x7F are unassigned and
+    0x80 to 0xFF are reserved for the video tier. Raw's channel order and
+    deflate's container are provisional until the graphics pipeline's
+    measurement, and WebP is one of its candidates.
+  - Close codes are WebSocket close statuses, so the `close` message and
+    the close frame carry one number: `normal` 1000, `server-shutdown`
+    1001, `protocol-error` 1002, `unsupported` 1003, `too-large` 1009,
+    `internal-error` 1011, then `unauthorized` 4000, `forbidden` 4001,
+    `session-closed` 4002, `owner-left` 4003, `idle` 4004,
+    `remote-ended` 4005, `backend-failed` 4006, `viewer-limit` 4007. A
+    WebSocket library that closes on its own read limit uses 1009, which
+    is already ours. The session core's end reasons map one to one onto
+    the codes from 4002 and onto 1001.
+  - The hello query carries the whole message, header included, so the
+    server decodes it as any message. It is at most 2048 bytes, 2731
+    characters, well within the 8 KiB request lines that common proxies
+    allow, and its length is checked before decoding. Decoding is
+    strict, so each hello has one encoding.
+  - Tokens may arrive in several `Sec-WebSocket-Protocol` lines, each a
+    comma-separated list. More than one token, an empty one or one that
+    is not base64url is refused; no token means `Authorization`. Errors
+    never contain the token, which a test and a fuzz target check.
+  - A refused token, `Origin` or hello still gets the upgrade and a
+    `close`, because browsers cannot read the status of a refused
+    upgrade; a request without `occamy.v1` gets an HTTP error. A hello
+    on the WebSocket, or a second welcome, is a protocol error. A client
+    sends nothing before welcome.
+  - A frame is the `resize`, `tile`, `copy-rect`, `term-data` and
+    `term-snapshot` messages up to its `frame-end`; the client shows it
+    at `frame-end`. Frame IDs start at 1 per connection, and an ack
+    covers every earlier frame.
+  - Reserved pointer button bits are ignored rather than refused, as
+    reserved header flags are. No private type range was added.
+- **Deviations from the layout proposed for these tasks.**
+  - `hello` and `welcome` put fixed fields before strings and
+    capabilities, as the spec's Framing bullet requires: `hello` is
+    version, width, height, cols, rows, visible, name, capabilities;
+    `welcome` is viewer ID, role, class, session ID, capabilities.
+  - `hello` gains `cols` and `rows`. The client does not know the class
+    when it sends `hello`, and with one round trip the server must start
+    the PTY at the right size from `hello` alone.
+  - `welcome` gains `viewer_id`, without which a client cannot tell
+    itself apart in `viewer-joined` and `viewer-left`.
+  - `welcome` has no fields for the frame window and the maximum message
+    size besides the capabilities: two places for one value would need a
+    rule for when they disagree.
+  - `viewer-joined` gains `name`, so a client can show who is watching.
+  - Close codes are WebSocket statuses rather than small integers, and
+    `internal-error` (1011) is added for the server's own failures.
+  - The two clipboards are two types (0x0108 and 0x020a), since the
+    client's is input and carries a sequence number.
+  - `Decode` takes `Limits` on every message, so one interface serves
+    all of them; tile and cursor use it.
+  - The Go `Hello` has no version field: `Append` writes 1 and `Decode`
+    checks it.
+- **Surprises.**
+  - Go's base64 decoder skips line breaks even in strict mode, so a hello
+    query or token would have more than one encoding; decoding checks
+    the alphabet first.
+  - While this was built, master's graphics pipeline turned WebP from
+    rejected into a measured candidate (pure-Go encoders appeared), so
+    the codec is marked as a candidate rather than as unused.
+  - `internal/session` (merged meanwhile) keeps `ViewerInfo` without a
+    name, so the viewer writer sends an empty name until it has one.
+- **Verification.** Each new fuzz target ran for 30 s locally with no
+  failures: `FuzzMessage` (decode as client and server, re-encode to the
+  same bytes, byte fields alias the message) about 6.4 M inputs,
+  `FuzzHelloQuery` 6.7 M, `FuzzTokenSubprotocol` 6.0 M. Every proper
+  prefix of every vector is `truncated` and a byte more is
+  `trailing-data`. Decoding a tile allocates nothing and does not copy
+  the payload (`testing.AllocsPerRun`). Medians of seven benchmark runs
+  on an Apple M5 Pro under heavy load from other work (load average
+  about 20): appending a tile with a 6 KiB payload 92 ns, decoding it
+  16 ns, both without allocating; decoding a key through `Decode` 31 ns
+  with one allocation, the message; decoding a hello query 168 ns.
+- **Follow-ups.** The viewer writer and the Streams task use this
+  package. The web client's TypeScript codec is tested against
+  `messages.json`. The graphics pipeline's measurement fixes raw's
+  channel order and deflate's container. `ViewerInfo` gains a name.
