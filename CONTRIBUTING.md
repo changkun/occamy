@@ -28,6 +28,11 @@ make stop
 unless `make e2e` points them at a running stack. No C toolchain is needed.
 See the README for a native build.
 
+`go test -tags rdp_integration -timeout 30m ./internal/rdp` builds the
+bench desktop image and starts an xrdp container with Podman
+(`OCCAMY_CONTAINER_ENGINE=docker` for Docker) to test the RDP client
+against; `internal/rdp/integration_test.go` describes its settings.
+
 `make lint` runs golangci-lint v2 with the linters and formatters in
 `.golangci.yml`, as CI does. Code must be `gofmt`ed, with imports grouped
 by `goimports`.

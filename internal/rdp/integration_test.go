@@ -12,14 +12,22 @@ package rdp
 //
 //	go test -tags rdp_integration -run Integration -timeout 30m ./internal/rdp
 //
-// It builds the image with podman unless OCCAMY_RDP_IMAGE names one. The
-// build downloads Go modules and Debian packages, which can take longer
-// than go test's default 10-minute timeout, hence -timeout. It
-// starts a container of its own unless OCCAMY_RDP_ADDR names a running
-// server, whose container OCCAMY_RDP_CONTAINER may name for the mouse
-// check. OCCAMY_CONTAINER_ENGINE selects docker instead of podman, and
-// OCCAMY_RDP_DUMP names a directory for screenshots. With -rdp.record the
-// test rewrites the recordings that TestReplay plays back.
+// The rdp_integration build tag builds a container image and starts a
+// container, with podman or the engine OCCAMY_CONTAINER_ENGINE names,
+// such as docker. The build downloads Go modules and Debian packages,
+// which can take longer than go test's default 10-minute timeout, hence
+// -timeout. OCCAMY_RDP_IMAGE names an image to use instead of building
+// one, and OCCAMY_RDP_ADDR a running server to use instead of starting a
+// container; OCCAMY_RDP_CONTAINER may then name its container for the
+// mouse check. OCCAMY_RDP_DUMP names a directory for screenshots. With
+// -rdp.record the test rewrites the recordings that TestReplay plays
+// back.
+//
+// The image and the container a run makes are its own, named with the
+// time the run ends at the latest, its -timeout: concurrent runs do not
+// share them. A run removes them when it ends; one that panics, as on
+// -timeout, leaves them behind, and the next run removes those whose
+// time has passed.
 
 import (
 	"bytes"
@@ -35,6 +43,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -69,29 +78,79 @@ func TestMain(m *testing.M) {
 	}())
 }
 
+// runPrefix starts the names of the images and containers that runs
+// make, which go on with the Unix time a run ends at the latest.
+const runPrefix = "occamy-rdp-it-until"
+
+// runName returns this run's name for its image and container.
+func runName() string {
+	timeout := 24 * time.Hour
+	if f := flag.Lookup("test.timeout"); f != nil {
+		if d, err := time.ParseDuration(f.Value.String()); err == nil && d > 0 {
+			timeout = d
+		}
+	}
+	return fmt.Sprintf("%s%d-%d", runPrefix, time.Now().Add(timeout+time.Minute).Unix(), os.Getpid())
+}
+
+// expired reports whether name is a run's whose time has passed.
+func expired(name string) bool {
+	_, rest, ok := strings.Cut(name, runPrefix)
+	if !ok {
+		return false
+	}
+	until, _, _ := strings.Cut(rest, "-")
+	t, err := strconv.ParseInt(until, 10, 64)
+	return err == nil && time.Now().Unix() > t
+}
+
+// cleanUp removes the containers and images of earlier runs whose time
+// has passed. podman lists images with a registry before the name.
+func cleanUp() {
+	out, _ := exec.Command(engine, "ps", "-a", "--filter", "name="+runPrefix, "--format", "{{.Names}}").Output()
+	for _, name := range strings.Fields(string(out)) {
+		if expired(name) {
+			exec.Command(engine, "rm", "-f", name).Run()
+		}
+	}
+	out, _ = exec.Command(engine, "images", "--format", "{{.Repository}}").Output()
+	for _, repo := range strings.Fields(string(out)) {
+		if expired(repo) {
+			exec.Command(engine, "rmi", "-f", repo).Run()
+		}
+	}
+}
+
 // startServer returns the address of an xrdp server showing the scene.
 func startServer() (string, func(), error) {
 	if addr := os.Getenv("OCCAMY_RDP_ADDR"); addr != "" {
 		return addr, func() {}, nil
 	}
+	cleanUp()
+	name := runName()
 	image := os.Getenv("OCCAMY_RDP_IMAGE")
+	removeImage := func() {}
 	if image == "" {
-		image = "occamy-rdp-integration"
+		image = name
 		cmd := exec.Command(engine, "build", "-q", "-t", image, "-f", "docker/bench/desktop/Dockerfile", ".")
 		cmd.Dir = "../.."
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
 			return "", nil, fmt.Errorf("building the desktop image: %w", err)
 		}
+		removeImage = func() { exec.Command(engine, "rmi", "-f", image).Run() }
 	}
-	name := fmt.Sprintf("occamy-rdp-integration-%d-%d", os.Getpid(), time.Now().UnixNano()%1e6)
 	out, err := exec.Command(engine, "run", "-d", "--rm", "--name", name,
 		"-p", "127.0.0.1::3389", image, "rdp").CombinedOutput()
 	if err != nil {
+		removeImage()
 		return "", nil, fmt.Errorf("starting %s: %w: %s", image, err, out)
 	}
 	rdpContainer = name
-	stop := func() { exec.Command(engine, "rm", "-f", name).Run() }
+	stop := func() {
+		exec.Command(engine, "rm", "-f", name).Run()
+		removeImage()
+	}
 	out, err = exec.Command(engine, "port", name, "3389/tcp").Output()
 	if err != nil {
 		stop()
