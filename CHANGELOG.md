@@ -62,6 +62,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   rows, and the diffs that bring a viewer's terminal from the screen it
   last received to the current one, sending scrolled lines as line feeds
   so the client's scrollback fills. Not served by any route yet.
+- A native VNC backend for protocol v1, `internal/backend/vnc`, in pure
+  Go: RFB 3.3, 3.7 and 3.8 with no security or VNC authentication,
+  asking the session's owner for a password the configuration lacks,
+  and the Raw, CopyRect, DesktopSize and Cursor encodings in the
+  framebuffer's own pixel layout. It asks for screen updates only while
+  a viewer can see the screen, sends keys, pointer, wheel and Latin-1
+  clipboard text, and checks every length the server sends before it
+  reads or allocates. `occamyd` does not use it yet.
 
 ### Changed
 
