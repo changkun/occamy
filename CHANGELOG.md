@@ -62,6 +62,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   rows, and the diffs that bring a viewer's terminal from the screen it
   last received to the current one, sending scrolled lines as line feeds
   so the client's scrollback fills. Not served by any route yet.
+- `internal/stream`, a viewer's connection in protocol v1: `welcome`,
+  then the client's input and views applied as they come, and frames at
+  the pace of the viewer's link. Small state never waits behind tiles,
+  and an input's effect goes ahead of motion already on the screen. It
+  serves graphical sessions with raw tiles for now. Not served by any
+  route yet.
 - A native VNC backend for protocol v1, `internal/backend/vnc`, in pure
   Go: RFB 3.3, 3.7 and 3.8 with no security or VNC authentication,
   asking the session's owner for a password the configuration lacks,

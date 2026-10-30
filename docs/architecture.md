@@ -82,6 +82,7 @@ the spec it implements.
 | [internal/backend/ssh/](../internal/backend/ssh) | The native SSH backend: a pure-Go client that verifies pinned host keys, logs in with key files or a password and asks the owner for what they cannot answer, and feeds a shell's PTY output to the session's terminal ([native-ssh-backend](../specs/008-native-architecture/native-ssh-backend.md)) |
 | [internal/backend/vnc/](../internal/backend/vnc) | The native VNC backend: a pure-Go RFB client that logs in with no security or a VNC password, asking the owner for one it lacks, asks for screen updates only while a viewer can see, and draws Raw and CopyRect rectangles, resizes and the cursor into the session's framebuffer ([native-vnc-backend](../specs/008-native-architecture/native-vnc-backend.md)) |
 | [internal/terminal/](../internal/terminal) | The headless terminal emulator of a terminal session: immutable, versioned screen snapshots that share unchanged rows, and the diffs that bring each viewer's terminal up to date ([native-ssh-backend](../specs/008-native-architecture/native-ssh-backend.md)) |
+| [internal/stream/](../internal/stream) | A viewer's connection: welcome, the reader of its input and view, and the writer that sends small state ahead of tiles and an input's effect ahead of motion, at the pace its pacer allows ([session-core](../specs/008-native-architecture/session-core.md)) |
 
 ## License
 
