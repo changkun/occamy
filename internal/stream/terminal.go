@@ -67,16 +67,22 @@ func (w *writer) runTerminal(ctx context.Context) error {
 			return err
 		}
 		if w.in != nil && w.in.boosted {
-			// What the input changed went out as its effect, so it is not
-			// motion when the next input comes.
-			for i, v := range w.versions {
-				if v > w.in.clock && !w.in.moving(i, len(w.versions)) {
-					w.effects[i] = v
-				}
-			}
+			w.keepEffects()
 			w.resolve()
 		}
 		last = s
+	}
+}
+
+// keepEffects records the rows that the pending input changed, which
+// went out as its effect, so that they are not taken for motion when the
+// next input comes. The input's rows in motion may be of a screen of
+// another size, when the input resized it: then no row was in motion.
+func (w *writer) keepEffects() {
+	for i, v := range w.versions {
+		if v > w.in.clock && !w.in.moving(i, len(w.versions)) {
+			w.effects[i] = v
+		}
 	}
 }
 

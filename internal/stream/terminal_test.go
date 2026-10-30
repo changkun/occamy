@@ -21,6 +21,7 @@ import (
 	"changkun.de/x/occamy/internal/backend/backendtest"
 	"changkun.de/x/occamy/internal/pacer"
 	"changkun.de/x/occamy/internal/session"
+	"changkun.de/x/occamy/internal/terminal"
 	"changkun.de/x/occamy/protocol"
 )
 
@@ -227,6 +228,69 @@ func TestTerminalResizeRequest(t *testing.T) {
 		defer r.cl.mu.Unlock()
 		got := r.cl.term.Snapshot()
 		if got.Cols != 120 || got.Rows != 40 || !got.Equal(r.s.Screen()) {
+			t.Errorf("client screen %dx%d\n%s\nserver\n%s", got.Cols, got.Rows, got, r.s.Screen())
+		}
+	})
+}
+
+// resizedPending is a writer whose pending input saw every row of a
+// 24-row screen in motion, and whose screen has since grown to 40 rows,
+// each changed after the input: a resize-request that added rows.
+func resizedPending() *writer {
+	const oldRows, newRows, clock = 24, 40, 5
+	w := &writer{p: pacer.New(pacer.Config{})}
+	w.in = &pending{seq: 1, clock: clock, active: make([]bool, oldRows+1)}
+	for i := range w.in.active {
+		w.in.active[i] = true
+	}
+	for range newRows + 1 {
+		w.versions = append(w.versions, clock+1)
+	}
+	w.effects = make([]uint64, len(w.versions))
+	return w
+}
+
+// termEffect does not index the rows in motion at the input with the
+// rows of a screen that grew since: no row was in motion then.
+func TestTermEffectResized(t *testing.T) {
+	w := resizedPending()
+	w.termEffect(&terminal.Screen{Version: 6}, 1)
+	if !w.in.boosted {
+		t.Error("the resized screen was not taken for the input's effect")
+	}
+}
+
+// keepEffects does not either, after the effect went out.
+func TestKeepEffectsResized(t *testing.T) {
+	w := resizedPending()
+	w.keepEffects()
+	for i, e := range w.effects {
+		if e != w.versions[i] {
+			t.Fatalf("row %d: effect %d, want %d", i, e, w.versions[i])
+		}
+	}
+}
+
+// A resize-request that adds rows while every row was in motion, as
+// under a full screen of output, is the input's effect, and the writer
+// goes on.
+func TestTerminalResizeWhileBusy(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &tapped{Backend: backendtest.NewTerminal(80, 24, 0)}
+		r := newRig(t, b, 1e6, 10*time.Millisecond, termHello)
+		time.Sleep(100 * time.Millisecond)
+		for i := range 30 {
+			b.Sink().TermData(fmt.Appendf(nil, "\r\noutput %d", i)) // the last row too
+		}
+		r.cl.send(t, protocol.ResizeRequest{Seq: 1, Width: 80, Height: 40})
+		time.Sleep(100 * time.Millisecond)
+		r.cl.send(t, protocol.TermInput{Seq: 2, Data: []byte("after")})
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		got := r.cl.term.Snapshot()
+		if got.Rows != 40 || !got.Equal(r.s.Screen()) {
 			t.Errorf("client screen %dx%d\n%s\nserver\n%s", got.Cols, got.Rows, got, r.s.Screen())
 		}
 	})
