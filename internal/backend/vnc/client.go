@@ -257,9 +257,16 @@ func toLatin1(text []byte, limit int) []byte {
 	return out
 }
 
-// fromLatin1 converts Latin-1 text to UTF-8.
+// fromLatin1 converts Latin-1 text to UTF-8, in a buffer of the size the
+// UTF-8 takes: two bytes for each byte from 0x80.
 func fromLatin1(text []byte) []byte {
-	out := make([]byte, 0, len(text))
+	n := len(text)
+	for _, c := range text {
+		if c >= utf8.RuneSelf {
+			n++
+		}
+	}
+	out := make([]byte, 0, n)
 	for _, c := range text {
 		out = utf8.AppendRune(out, rune(c))
 	}

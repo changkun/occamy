@@ -5,7 +5,6 @@
 package vnc
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -322,12 +321,8 @@ func (d *decoder) cutText() error {
 		return d.extendedClipboard(-int64(int32(n))) // #nosec G115 -- the signed length it is
 	}
 	keep := min(int64(n), maxClipboard)
-	// The buffer grows as the text arrives, not to the length claimed.
-	var buf bytes.Buffer
-	if _, err := io.CopyN(&buf, d.r, keep); err != nil {
-		if errors.Is(err, io.EOF) {
-			err = io.ErrUnexpectedEOF
-		}
+	b, err := readText(d.r, int(keep))
+	if err != nil {
 		return fmt.Errorf("vnc: cut text: %w", err)
 	}
 	if rest := int64(n) - keep; rest > 0 {
@@ -336,11 +331,14 @@ func (d *decoder) cutText() error {
 			return fmt.Errorf("vnc: cut text: %w", err)
 		}
 	}
-	b := buf.Bytes()
 	if t := trimPartialRune(b); int64(n) > keep && len(t) < len(b) && utf8.Valid(t) {
 		b = t // UTF-8 cut short; Latin-1 is kept whole
 	}
-	d.sink.Clipboard("text/plain", []byte(text(b)))
+	// The text is passed on as it was read, unless it is Latin-1.
+	if !utf8.Valid(b) {
+		b = fromLatin1(b)
+	}
+	d.sink.Clipboard("text/plain", b)
 	return nil
 }
 

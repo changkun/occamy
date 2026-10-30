@@ -139,24 +139,32 @@ func readProvide(r io.Reader, flags uint32) (text []byte, truncated bool, err er
 		return nil, false, err
 	}
 	size := int64(binary.BigEndian.Uint32(b[:]))
-	keep := int(min(size, maxClipboard))
-	// The buffer grows as the text arrives, not to the size claimed, and
-	// not beyond what is kept.
-	text = make([]byte, 0, min(keep, 4<<10))
-	for len(text) < keep {
-		if len(text) == cap(text) {
-			text = slices.Grow(text, min(len(text), keep-len(text)))
+	keep := min(size, maxClipboard)
+	if text, err = readText(zr, int(keep)); err != nil {
+		return nil, false, err
+	}
+	return text, size > keep, nil
+}
+
+// readText reads n bytes of text from r into a buffer that grows as the
+// text arrives, not to the length claimed, and not beyond n. It returns
+// io.ErrUnexpectedEOF if r ends first.
+func readText(r io.Reader, n int) ([]byte, error) {
+	b := make([]byte, 0, min(n, 4<<10))
+	for len(b) < n {
+		if len(b) == cap(b) {
+			b = slices.Grow(b, min(len(b), n-len(b)))
 		}
-		n, err := zr.Read(text[len(text):min(cap(text), keep)])
-		text = text[:len(text)+n]
-		if err != nil && len(text) < keep {
+		k, err := r.Read(b[len(b):min(cap(b), n)])
+		b = b[:len(b)+k]
+		if err != nil && len(b) < n {
 			if errors.Is(err, io.EOF) {
 				err = io.ErrUnexpectedEOF
 			}
-			return nil, false, err
+			return nil, err
 		}
 	}
-	return text, size > int64(keep), nil
+	return b, nil
 }
 
 // limitedReader reads at most n bytes from r, and keeps r's error apart
