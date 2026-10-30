@@ -403,12 +403,17 @@ leaves only RDP on the bridge.
     image; its buffer grows as the data arrives rather than to the length
     claimed, and the image's size must be the rectangle's before it is
     decoded.
-  - Decompression bombs: inflated data that the rectangle's pixels do not
-    take is an error, so a rectangle inflates no more than its pixels and
-    a few tens of KiB beyond them, the inflater's 32 KiB window and a
-    16 KiB buffer. Up to 64 compressed bytes may be left after the pixels,
-    the end of a server's flush, and are kept for the stream's next
-    rectangle; more is an error.
+  - Decompression bombs: the inflater runs only as far as the pixels
+    read from it, so a rectangle inflates no more than its pixels and a
+    few tens of KiB beyond them, the inflater's 32 KiB window and a 32 KiB
+    buffer. Inflated data that the pixels do not take is an error. Up to
+    64 compressed bytes may be left after the pixels, the end of a
+    server's flush, and are kept for the stream's next rectangle; more is
+    an error. One case goes unseen: when the inflater's window fills
+    exactly where the pixels end, it holds back what follows until the
+    flush, so extra data whose compressed form fits in those 64 bytes
+    starts the stream's next rectangle. That garbles only the server's
+    own pixels.
   - Strictness: ZRLE's unused subencodings (17 to 127 and 129), Tight's
     compression types above JPEG (PNG belongs to TightPNG), unknown
     filters, palette indices beyond the palette, runs past the tile and
@@ -445,6 +450,12 @@ leaves only RDP on the bridge.
   - Neither server sent a gradient rectangle in these sessions, only the
     copy and palette filters, so the gradient filter is tested with
     hand-built data and the fake server's encoder alone.
+  - `bufio.Reader` reads a request at least as large as its buffer
+    straight from the underlying reader, so inflated data beyond a large
+    Tight rectangle's pixels stayed in the inflater, unseen by the check
+    for it, and started the next rectangle. Reads now go through the
+    buffer in pieces smaller than it, and the buffer is as large as the
+    window, the most the inflater hands out at once.
   - With the race detector on, `slices.Grow` allocated twice the growth,
     which broke the JPEG allocation bound; the JPEG buffer grows by hand.
   - Go's fuzzer minimizes each new input for up to a minute and does not
