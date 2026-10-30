@@ -26,28 +26,47 @@ func decodeWebP(r io.Reader) (image.Image, error) {
 	if err != nil {
 		return nil, err
 	}
+	return fromWebP(img), nil
+}
+
+// fromWebP converts what golang.org/x/image/webp decoded to the pixels
+// libwebp would.
+func fromWebP(img image.Image) image.Image {
 	switch m := img.(type) {
 	case *image.YCbCr:
 		if m.SubsampleRatio == image.YCbCrSubsampleRatio420 && m.Rect.Min == (image.Point{}) {
-			return upsample(m, nil), nil
+			return upsample(m, nil)
 		}
 	case *image.NYCbCrA:
 		if m.SubsampleRatio == image.YCbCrSubsampleRatio420 && m.Rect.Min == (image.Point{}) {
-			return upsample(&m.YCbCr, m), nil
+			return upsample(&m.YCbCr, m)
 		}
 	}
-	return img, nil
+	return img
 }
 
 // upsample converts a 4:2:0 image whose bounds start at the origin to
-// non-premultiplied RGBA, taking alpha from a when it is not nil. It
-// follows libwebp's EmitFancyRGB and UpsampleRgbLinePair: each output
-// pixel weighs the four nearest chroma samples 9:3:3:1, and the first
-// row, the last row of an even height and the edge columns mirror the
-// samples beyond the border.
-func upsample(m *image.YCbCr, a *image.NYCbCrA) *image.NRGBA {
+// RGBA: an image.NRGBA with alpha from a when a is not nil, and else an
+// opaque image.RGBA, which draws faster. It follows libwebp's
+// EmitFancyRGB and UpsampleRgbLinePair: each output pixel weighs the
+// four nearest chroma samples 9:3:3:1, and the first row, the last row
+// of an even height and the edge columns mirror the samples beyond the
+// border.
+func upsample(m *image.YCbCr, a *image.NYCbCrA) image.Image {
 	w, h := m.Rect.Dx(), m.Rect.Dy()
-	dst := image.NewNRGBA(m.Rect)
+	var (
+		img    image.Image
+		pix    []uint8
+		stride int
+	)
+	if a != nil {
+		dst := image.NewNRGBA(m.Rect)
+		img, pix, stride = dst, dst.Pix, dst.Stride
+	} else {
+		// Opaque, so premultiplied and straight alpha are the same.
+		dst := image.NewRGBA(m.Rect)
+		img, pix, stride = dst, dst.Pix, dst.Stride
+	}
 	rows := (h + 1) / 2
 	for y := range h {
 		// near is the chroma row closest to y, far the next closest:
@@ -62,7 +81,7 @@ func upsample(m *image.YCbCr, a *image.NYCbCrA) *image.NRGBA {
 		nv := m.Cr[near*m.CStride:]
 		fu := m.Cb[far*m.CStride:]
 		fv := m.Cr[far*m.CStride:]
-		out := dst.Pix[y*dst.Stride : y*dst.Stride+4*w]
+		out := pix[y*stride : y*stride+4*w]
 
 		put := func(x int, u, v uint32) {
 			yuvToRGB(ys[x], u, v, out[4*x:4*x+3])
@@ -86,7 +105,7 @@ func upsample(m *image.YCbCr, a *image.NYCbCrA) *image.NRGBA {
 			}
 		}
 	}
-	return dst
+	return img
 }
 
 // between interpolates the chroma of a pixel whose nearest sample is
