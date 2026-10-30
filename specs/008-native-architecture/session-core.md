@@ -364,8 +364,10 @@ arise, rather than inheriting those fixes.
   - Terminal sessions: `Serve` refuses them until `internal/terminal`
     has its snapshot and diff API.
   - `TCP_NOTSENT_LOWAT` is not set on a connection yet. coder/websocket
-    hides the socket, so the HTTP layer calls `SetLowWater` from
-    `http.Server.ConnContext`, as part of the HTTP server task.
+    hides the socket, so the HTTP layer reaches it first: the HTTP server
+    task's `ConnContext` keeps each connection in the request context,
+    and `connFrom` returns the TCP socket below TLS. The Streams task
+    calls `SetLowWater` on it before the upgrade.
   - The Scheduling test task.
 - **Surprises:**
   - The tile is the unit of priority. With 64-pixel tiles, the test
@@ -391,4 +393,5 @@ arise, rather than inheriting those fixes.
     The test client now records undecodable messages, and every test
     fails on one.
 - **Follow-ups:** terminal frames (screen diffs), the Scheduling test,
-  and the HTTP layer's `ConnContext`.
+  and `SetLowWater` on each stream's socket (the HTTP server's
+  `connFrom` reaches it; the Streams task calls it).

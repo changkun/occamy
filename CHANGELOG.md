@@ -26,7 +26,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - `internal/auth`, the tokens of API v1: Ed25519 JWTs for access
   (a user and groups) and for sessions (a session and a role), signed by
   occamyd or by a configured trusted issuer, with no other algorithm
-  accepted. Not served by any route yet.
+  accepted. occamyd's own tokens name `occamy` as issuer and audience,
+  so a trusted issuer may not be named `occamy`.
 - `internal/session`, the session core of v1: one goroutine per session
   that runs a backend, draws into the framebuffer or the terminal, applies
   input by role (owner, viewer, read-only), keeps each viewer's small
@@ -55,8 +56,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   secrets, TLS, the debug listener, origins and ad-hoc targets. Unknown
   keys are errors, and validation reports every problem with its line and
   key path ([docs/configuration.md](docs/configuration.md)). A file
-  without `version` is read as v0, as before. `occamyd` does not serve
-  v1 files yet.
+  without `version` is read as v0, as before.
 - `internal/terminal`, the headless terminal emulator of a terminal
   session: immutable, versioned screen snapshots that share unchanged
   rows, and the diffs that bring a viewer's terminal from the screen it
@@ -68,6 +68,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   and an input's effect goes ahead of motion already on the screen. It
   serves graphical sessions with raw tiles for now. Not served by any
   route yet.
+- `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
+  (static users sign in with a password for an access token), TLS when
+  `tls.cert` and `tls.key` are set, expvar and pprof on the debug
+  listener when `debug.address` is set, and the v0 routes with
+  `legacy_v0: true`. API v1 errors share one JSON shape,
+  `{"error":{"code":"…","message":"…"}}`. SIGINT and SIGTERM drain
+  requests in flight for up to 5 s. A v0 file is served as before.
 
 ### Changed
 

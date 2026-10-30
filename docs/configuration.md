@@ -4,14 +4,14 @@
 another. The file comes in two versions:
 
 - **v0** has no `version` key. It is the format of the released v0.x
-  servers and of the [conf.yaml](../conf.yaml) in this repository, and the
-  only one `occamyd` serves today (see [v0 files](#v0-files)).
-- **v1** starts with `version: 1`. It configures the API v1 server: sign-in,
-  the connection registry, TLS and the debug listener. `internal/config`
-  parses and validates it, but `occamyd` does not serve it yet; the HTTP
-  server of
-  [api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md)
-  will start from it.
+  servers and of the [conf.yaml](../conf.yaml) in this repository.
+  `occamyd` serves it as before (see [v0 files](#v0-files)).
+- **v1** starts with `version: 1`. It configures the API v1 server of
+  [api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md):
+  sign-in, the connection registry, TLS and the debug listener. The
+  server is being built: so far it serves `/healthz`, sign-in for static
+  users and, with `legacy_v0`, the v0 routes (see
+  [Serving a v1 file](#serving-a-v1-file)).
 
 Any other `version` is an error, and so is `version: 0`: a v0 file has no
 `version` key.
@@ -58,10 +58,10 @@ directory.
 |-----|---------|---------|
 | `version` | required | `1` |
 | `listen` | `:5636` | Address of the public listener, `host:port`: the API, the streams and `/healthz` |
-| `tls.cert`, `tls.key` | unset | Certificate and key files, PEM. `occamyd` terminates TLS when both are set; set both or neither. Without them, put a reverse proxy that terminates TLS in front |
-| `debug.address` | unset (off) | Address of the debug listener with expvar and pprof. Keep it on the loopback interface; it may not be the `listen` address |
+| `tls.cert`, `tls.key` | unset | Certificate and key files, PEM. `occamyd` terminates TLS when both are set; set both or neither. Without them, put a reverse proxy that terminates TLS in front. Read at start, so a renewed certificate needs a restart |
+| `debug.address` | unset (off) | Address of the debug listener: expvar at `/debug/vars` and pprof under `/debug/pprof/`, without authentication, and never on the `listen` address. Keep it on the loopback interface; `occamyd` warns at start when it is not |
 | `origins` | none | Origins, `scheme://host[:port]`, whose web pages may open streams besides `occamyd`'s own. Written in lower case without a trailing slash, as browsers send them |
-| `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for the Guacamole-based web client. They are removed at v1.0 |
+| `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for the Guacamole-based web client. Their tokens are signed with a key made at each start, so they do not survive a restart. The web client itself (`/static/`) is not served from a v1 file. The login signs any target for anyone, as in v0, and `occamyd` warns at start. They are removed at v1.0 |
 
 ### Sign-in: `auth`
 
@@ -69,10 +69,10 @@ directory.
 |-----|---------|---------|
 | `auth.signing_key_file` | required | The Ed25519 key, PKCS #8 PEM, that signs `occamyd`'s tokens. If the file does not exist, `occamyd` creates it on first start, so its directory must exist |
 | `auth.access_token_lifetime` | `15m` | How long an access token lasts, a duration with a unit (`15m`, `1h30m`) between `1m` and `12h` |
-| `auth.trusted_issuers[].issuer` | required | Name of a third party, such as a gateway, whose tokens `occamyd` accepts. Unique |
+| `auth.trusted_issuers[].issuer` | required | Name of a third party, such as a gateway, whose tokens `occamyd` accepts. Unique, and not `occamy`, which is `occamyd`'s own. See [tokens from a trusted issuer](#tokens-from-a-trusted-issuer) |
 | `auth.trusted_issuers[].public_key_file` | required | That issuer's Ed25519 public key, PKIX PEM |
 | `auth.users[].name` | required | A static user, who signs in with a password. Unique |
-| `auth.users[].password_hash` | required | bcrypt hash of the password, cost 10 or more. `htpasswd -nbBC 12 "" 'the password' \| cut -d: -f2` makes one |
+| `auth.users[].password_hash` | required | bcrypt hash of the password, cost 10 or more. `htpasswd -nbBC 12 "" 'the password' \| cut -d: -f2` makes one. Give every user the same cost: a sign-in as an unknown user is checked against a hash of the highest cost, so a user at a lower cost signs in measurably faster, and `occamyd` warns at start when the costs differ |
 | `auth.users[].groups` | none | Groups the user belongs to |
 | `auth.oidc` | unset (off) | Sign-in through an OpenID Connect identity provider |
 | `auth.oidc.issuer` | required | The provider's issuer URL. https, or http on localhost |
@@ -82,6 +82,20 @@ directory.
 | `auth.oidc.scopes` | `[openid, profile, email]` | Scopes to request; must include `openid` |
 | `auth.oidc.subject_claim` | `sub` | The ID token claim that names the user in allow lists |
 | `auth.oidc.groups_claim` | unset | The claim that lists the user's groups. Unset, OIDC users have no groups |
+
+#### Tokens from a trusted issuer
+
+A trusted issuer mints JWTs that `occamyd` accepts as its own:
+
+- signed with the issuer's Ed25519 key (`alg: EdDSA`; no other algorithm
+  is accepted);
+- `iss` is the issuer's name as configured, and `aud` is `occamy`;
+- `iat` and `exp` are set, at most 12 hours apart;
+- `kind` is `access`, with the user in `sub` and optionally `groups`, a
+  list of group names; or `session`, with `sid` (a session ID) and
+  `role` (`owner`, `viewer` or `read-only`).
+
+`occamyd`'s own tokens have the same shape with `iss: occamy`.
 
 ### guacd: `guacd`
 
@@ -148,13 +162,38 @@ that:
 - every environment variable it names is set and not empty;
 - addresses are `host:port` with a numeric port, and origins and OIDC URLs
   parse;
-- connection IDs, user names and issuer names are unique;
+- connection IDs, user names and issuer names are unique, and no trusted
+  issuer is named `occamy`;
 - user, group and issuer names are not empty and have no spaces;
 - with neither `auth.oidc` nor `auth.trusted_issuers` configured, every
   name in an `allow` list is a static user, and every group is a group of
   some static user. With either one configured, users and groups also come
   from token claims, so names the file does not list are accepted;
 - a file holds one YAML document.
+
+## Serving a v1 file
+
+`occamyd` serves a v1 file on `listen`, over TLS when `tls.cert` and
+`tls.key` are set, and speaks HTTP/1.1 only, since the streams are
+WebSockets over HTTP/1.1. So far it serves:
+
+| Route | Meaning |
+|-------|---------|
+| `GET /healthz` | `200 {"status":"ok"}` while `occamyd` runs |
+| `POST /api/v1/auth/token` | Sign-in for static users: `{"username":"alice","password":"…"}` as `application/json` in, `{"access_token":"…","token_type":"Bearer","expires_in":900}` out. A wrong password and an unknown user get the same `401` |
+| `/api/v0/login`, `/api/v0/connect` | With `legacy_v0: true`, the v0 routes as a v0 file serves them |
+
+API v1 answers every error with `{"error":{"code":"…","message":"…"}}`,
+where `code` is stable, such as `unauthorized`, `invalid_token`,
+`token_expired` or `not_found`, and `message` is for people. Routes that
+need a caller take the access token in `Authorization: Bearer`, never in
+the URL. The request log names each request's method, path, status,
+duration and peer, never its query string, headers or body.
+
+On SIGINT or SIGTERM, `occamyd` stops accepting connections and gives
+requests in flight up to 5 seconds to finish. If the signing key file
+does not exist, `occamyd` creates it and warns: tokens signed with an
+earlier key no longer verify.
 
 ## v0 files
 

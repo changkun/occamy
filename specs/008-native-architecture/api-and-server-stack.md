@@ -216,7 +216,9 @@ place for fixes that ship on v0 before beta.
     trusted issuer and the stream token that `POST /api/v1/sessions`
     returns.
 - **Follow-ups:** the HTTP server task wires the signer and verifier from
-  the v1 configuration and logs a warning when the key is created.
+  the v1 configuration and logs a warning when the key is created (done;
+  occamyd's issuer and audience are both `occamy`, `auth.Issuer` and
+  `auth.Audience`).
 
 ## Implementation notes: config v1
 
@@ -287,7 +289,8 @@ place for fixes that ship on v0 before beta.
 - **Follow-ups:**
   - HTTP server: start from `ParseV1`, reject a trusted issuer named
     like occamyd's own issuer, and make `Init` refuse a v1 file until
-    then, since the lenient v0 decoder would read one with defaults.
+    then, since the lenient v0 decoder would read one with defaults
+    (all three done by the HTTP server task).
   - Native SSH backend: add the host key policy (`host_keys`,
     `insecure_ignore_host_key`) and `term` to connection entries.
   - Sessions: matching rules for `adhoc_allowlist` (resolved addresses
@@ -374,8 +377,8 @@ place for fixes that ship on v0 before beta.
     refuses it at start instead of serving with defaults.
   - `proxy.legacyV0` is always true, since `config.Init` reads only v0
     files, and a v0 file implies `legacy_v0`. `config.File.LegacyV0` from
-    Config v1 is not wired yet, since nothing starts occamyd from a v1
-    file.
+    Config v1 was not wired yet, since nothing started occamyd from a v1
+    file; the HTTP server task wired it.
   - The request log writes the quoted method and path, the status, the
     duration and the remote address: no query string, no headers, so
     neither the token nor the credentials in it. gin's logger wrote the
@@ -393,9 +396,10 @@ place for fixes that ship on v0 before beta.
     plain GET with a valid token gets 426 from coder/websocket where
     gorilla answered 400. The log names the peer address, not gin's
     `X-Forwarded-For` client IP.
-  - There is no recovery middleware: `net/http` logs a panic and drops
-    the connection where gin answered 500. It arrives with the HTTP server
-    task.
+  - There was no recovery middleware: `net/http` logged a panic and
+    dropped the connection where gin answered 500. The HTTP server task
+    added it back: a v0 route answers a panic with a bare 500, as gin's
+    recovery did.
 - **Surprises:**
   - gin-jwt's 400 for an `exp` of the wrong type was unreachable: golang-jwt
     v4 had already rejected such a token as expired, with 401. Only a
@@ -416,6 +420,156 @@ place for fixes that ship on v0 before beta.
   these routes on its mux with its recovery middleware when `legacy_v0`
   is set, gives them a per-process HS256 key under a v1 file (see Config
   v1's notes; `newTokens` takes any secret), and decides whether v0's
-  pprof moves to the debug listener. 004 keeps the token out of the URL
-  and the other v0 items. The end-to-end and pressure tests ran in CI
-  only.
+  pprof moves to the debug listener (all done; see its notes). 004 keeps
+  the token out of the URL and the other v0 items. The end-to-end and
+  pressure tests ran in CI only.
+
+## Implementation notes: HTTP server
+
+- **What was done:**
+  - `occamy.go` reads the file once (`config.Load`) and sniffs
+    `config.Version`. A v0 file goes through `config.Init` and
+    `server.RunV0` as before; `config.Init` now refuses a v1 file. A v1
+    file goes through `config.ParseV1` and `server.Run`.
+  - `server/` serves a v1 file on a `net/http.ServeMux` behind plain
+    `func(http.Handler) http.Handler` middleware, outermost first: the
+    request log, `recovery`, `limitBodies` (1 MiB), and `apiFallback`.
+    `authenticate` is per route. Routes: `GET /healthz`, `POST
+    /api/v1/auth/token`, and with `legacy_v0` the v0 login and connect.
+  - The signing key comes from `auth.LoadOrCreateKey` with a warning
+    when it is created; the verifier trusts occamyd's key under
+    `auth.Issuer` and each trusted issuer's key under its name. TLS
+    comes from `tls.cert` and `tls.key`. SIGINT and SIGTERM shut down
+    with a drain of up to 5 s. expvar and pprof are on the debug listener
+    only, which is opened only when `debug.address` is set.
+  - `connContext`, the public server's `ConnContext`, keeps each
+    connection in the request context; `connFrom` returns it below TLS,
+    a `*net.TCPConn` on which `stream.SetLowWater` works.
+- **Decisions:**
+  - **API v1's error shape** is `{"error":{"code":"…","message":"…"}}`
+    as `application/json`. `code` is what clients branch on and is one
+    of `bad_request`, `unauthorized` (no credentials, or wrong ones),
+    `invalid_token`, `token_expired`, `not_found`, `method_not_allowed`
+    (with `Allow`), `too_large`, `unsupported_media_type` and `internal`;
+    later tasks add codes, never change one. `message` is for people.
+    Paths under `/api/v1/` that no route takes get this shape for 404
+    and 405, where the ServeMux would answer in plain text
+    (`apiFallback` asks `ServeMux.Handler` for the pattern; an empty one
+    is the mux's own error). Bodies are compact without a trailing line
+    break and carry `X-Content-Type-Options: nosniff`. The v0 routes'
+    bodies are untouched.
+  - **Sign-in:** `POST /api/v1/auth/token` takes
+    `{"username":"…","password":"…"}` and answers OAuth 2.0's token
+    response shape (RFC 6749, 5.1): `{"access_token":"…","token_type":
+    "Bearer","expires_in":900}`, with `Cache-Control: no-store`. Only
+    `application/json` is accepted (415 otherwise), so a cross-site HTML
+    form cannot post to it without a CORS preflight; unknown fields and
+    a second JSON value are 400, so the body can be extended later
+    without guessing what old clients sent. Wrong password and unknown
+    user get the same 401 (`unauthorized`, `WWW-Authenticate: Bearer
+    realm="occamy"`). The body limit is 64 KiB.
+  - **Constant time:** an unknown user's password is compared with a
+    dummy hash, so bcrypt runs either way. bcrypt's time is set by its
+    cost, so a fixed dummy at cost 10 would tell users at cost 12 from
+    unknown ones. The dummy is generated at start, from random text, at
+    the highest cost among the static users' hashes (10 without users),
+    and occamyd warns when the users' costs differ, since then the time
+    still tells some users apart. User names are compared through a map
+    lookup, which leaks nothing measurable beside bcrypt.
+  - **Authentication** takes the token from exactly one `Authorization:
+    Bearer` header; the scheme is case-insensitive (RFC 9110), where v0
+    kept gin-jwt's `Bearer`. The query string and cookies are never
+    read. The claims go into the request context (`claimsFrom`), with
+    the issuer, so later tasks can tell a static user from a trusted
+    issuer's user of the same name. A failure is 401 with a RFC 6750
+    challenge: `unauthorized` without a token, `token_expired` for an
+    expired one, `invalid_token` for anything else (malformed, a session
+    token, an unknown issuer, a wrong audience, a bad signature). The
+    response never repeats the token.
+  - **Issuer and audience:** both `occamy`. `ParseV1` rejects a trusted
+    issuer named `occamy`, since the issuer picks the key and such an
+    issuer would stand in for occamyd; `newServer` refuses it too, for a
+    `File` built another way.
+  - **Recovery** logs `panic serving "METHOD" "/path": value` with the
+    stack, never the query, and answers 500 `internal` unless the
+    handler had begun its response, such as an upgraded WebSocket.
+    `http.ErrAbortHandler` passes through. The v0 routes are each
+    wrapped in `recoverV0`, which answers a bare 500 as gin's recovery
+    did, also on a v0 file's mux.
+  - **Request log:** v0's `logRequests`, unchanged: quoted method and
+    path, status, duration, peer address. A sign-in logs `user "alice"
+    signed in` or `sign-in failed from <address>`, without the name,
+    since people type passwords into it.
+  - **Listener:** HTTP/1.1 only (`http.Server.Protocols`), with or
+    without TLS. The streams are WebSockets, which coder/websocket
+    upgrades by hijacking an HTTP/1.1 connection; Go's HTTP/2 server
+    does not advertise RFC 8441 (behind `GODEBUG=http2xconnect=1`), but
+    if a later Go does, a browser on HTTP/2 would try a WebSocket that
+    coder/websocket cannot serve. It also keeps one request per
+    connection at a time, so `TCP_NOTSENT_LOWAT` on a connection affects
+    one stream. TLS 1.2 is the minimum. Timeouts: 10 s for headers, 30 s
+    to read a request and to write a response, 2 min idle; `net/http`
+    clears the read and write deadlines when a handler hijacks the
+    connection, so they do not end WebSockets. Headers are limited to
+    64 KiB.
+  - **Shutdown** closes the listeners at once and drains requests for up
+    to 5 s, inside the 10 s `docker stop` allows, then closes what is
+    left. `http.Server.Shutdown` neither waits for nor closes hijacked
+    connections. A listener that fails stops the other server too.
+  - **Debug listener:** expvar at `/debug/vars` and pprof under
+    `/debug/pprof/`, with the request log and recovery, no write timeout
+    (a CPU profile takes as long as asked), and a warning at start when
+    `debug.address` is not on the loopback interface. Under a v1 file,
+    v0's pprof moves here; a v0 file's `mode: debug` still serves it on
+    the public listener.
+  - **v0 routes under a v1 file:** login and connect, signed with
+    `rand.Text()` as the HS256 secret, made per process, and a warning
+    at start that the login signs any target for anyone. No `/static/`,
+    since a v1 file has no key for the web client, so the Vue client
+    reaches them through a reverse proxy that serves it on the same
+    origin. `proxy.login` is now separate from `proxy.client` for this.
+- **Deviations:**
+  - The row's "graceful shutdown" also bounds the drain, and the row did
+    not name `ConnContext`, which session-core's viewer writer notes
+    assigned to this task.
+  - A v0 file's mux gained the v0 recovery, as gin had; nothing else on
+    the v0 path changed (its listener, timeouts and 5 s drain stay).
+- **Surprises:**
+  - `ConnContext` receives the `*tls.Conn` under TLS, which is no
+    `syscall.Conn`, so `SetLowWater` would have silently done nothing;
+    `connFrom` unwraps it with `NetConn`.
+  - `bcrypt.CompareHashAndPassword` does not refuse passwords over 72
+    bytes, unlike `GenerateFromPassword`; it compares the first 72, as
+    `htpasswd` hashed them, so no length check was added.
+  - gosec reads the challenge string `Bearer realm="occamy"` as a
+    hard-coded credential (G101); it carries a `#nosec`.
+- **Mutation checks:** each of these was reverted and its test failed:
+  bcrypt skipped for an unknown user, the dummy at a fixed cost, a
+  different reply for an unknown user, a wrong password accepted, a
+  token taken from the query, a session token admitted, expiry not told
+  apart, the query string in the request log, no recovery, the v0
+  recovery answering JSON, pprof on the public mux, a debug listener
+  without `debug.address`, a trusted issuer named `occamy` (in `ParseV1`
+  and in `newServer`), `Init` reading a v1 file, `connFrom` returning
+  the TLS connection, shutdown without a drain, and TLS not served.
+- **Follow-ups:**
+  - OIDC: register its routes on the same mux; the cookie carrying state
+    and verifier needs `Secure` when TLS is served here or by a proxy,
+    which the server cannot tell; issue tokens through the same signer
+    (`staticUsers.signer` or a shared one).
+  - Sessions: wrap its routes in `authenticate(s.verifier)` and read
+    `claimsFrom(r.Context())`, deciding whether `Subject` from a trusted
+    issuer names the same user as a static user; use `decodeJSON`,
+    `respond` and `writeError`, adding codes such as `forbidden` and
+    `conflict`. CORS for browser clients on other origins (from
+    `origins`) is not served yet. Sign-in has no rate limit; each
+    attempt costs one bcrypt comparison.
+  - Streams: call `stream.SetLowWater` on `connFrom(r.Context())`
+    before `websocket.Accept`; end streams on shutdown through
+    `http.Server.RegisterOnShutdown`, since `Shutdown` ignores hijacked
+    connections (the drain does not cover them); check the subprotocol
+    token with `s.verifier`; the public server lives in `server.Run`, so
+    the hook needs a way in, such as a `server` field.
+  - Document: `docs/api.md` for `/healthz`, the token endpoint and the
+    error shape above; certificate reload (today a restart) and the
+    HTTP/1.1 decision in the TLS section.
