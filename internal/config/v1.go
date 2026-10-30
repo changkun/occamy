@@ -86,14 +86,22 @@ type User struct {
 
 // OIDC configures sign-in through an OpenID Connect identity provider.
 type OIDC struct {
-	Issuer           string   `yaml:"issuer"`
-	ClientID         string   `yaml:"client_id"`
-	ClientSecretFile string   `yaml:"client_secret_file"`
-	ClientSecretEnv  string   `yaml:"client_secret_env"`
-	RedirectURL      string   `yaml:"redirect_url"`
-	Scopes           []string `yaml:"scopes"`
-	SubjectClaim     string   `yaml:"subject_claim"`
-	GroupsClaim      string   `yaml:"groups_claim"`
+	Issuer           string `yaml:"issuer"`
+	ClientID         string `yaml:"client_id"`
+	ClientSecretFile string `yaml:"client_secret_file"`
+	ClientSecretEnv  string `yaml:"client_secret_env"`
+	RedirectURL      string `yaml:"redirect_url"`
+	// ReturnURLs are the only places a browser is sent back to after a
+	// sign-in, with a one-time code or an error in the fragment. A
+	// sign-in names one of them exactly. ParseV1 fills in the origin of
+	// RedirectURL, with the path /, when the file lists none.
+	ReturnURLs   []string `yaml:"return_urls"`
+	Scopes       []string `yaml:"scopes"`
+	SubjectClaim string   `yaml:"subject_claim"`
+	GroupsClaim  string   `yaml:"groups_claim"`
+	// RequireKnownUsers admits only the users that the file names, as a
+	// static user or in a connection's allow.users.
+	RequireKnownUsers bool `yaml:"require_known_users"`
 }
 
 // Connection is an entry of the connection registry.

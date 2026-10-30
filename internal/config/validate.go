@@ -212,6 +212,13 @@ func (a *Auth) validate(c *checker) {
 		c.file("auth.oidc.client_secret_file", o.ClientSecretFile)
 		c.env("auth.oidc.client_secret_env", o.ClientSecretEnv)
 		c.providerURL("auth.oidc.redirect_url", o.RedirectURL)
+		if len(o.ReturnURLs) == 0 && o.RedirectURL != "" && SecureURLProblem(o.RedirectURL) == "" {
+			u, _ := url.Parse(o.RedirectURL)
+			o.ReturnURLs = []string{u.Scheme + "://" + u.Host + "/"}
+		}
+		for i, r := range o.ReturnURLs {
+			c.returnURL(fmt.Sprintf("auth.oidc.return_urls[%d]", i), r)
+		}
 		if len(o.Scopes) == 0 {
 			o.Scopes = slices.Clone(DefaultOIDCScopes)
 		} else if !slices.Contains(o.Scopes, "openid") {
@@ -306,6 +313,41 @@ func (f *File) validateConnections(c *checker) {
 		c.credentials(p+".credentials", cn.Protocol, cn.Credentials)
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
 	}
+	if o := f.Auth.OIDC; o != nil && o.RequireKnownUsers && len(f.KnownUsers()) == 0 {
+		c.add("auth.oidc.require_known_users", "the file names no users, in auth.users or in a connection's allow.users, so nobody could sign in through OIDC")
+	}
+}
+
+// KnownUsers returns the users that f names: its static users and the
+// users in its connections' allow lists.
+func (f *File) KnownUsers() map[string]bool {
+	known := map[string]bool{}
+	for _, u := range f.Auth.Users {
+		known[u.Name] = true
+	}
+	for _, cn := range f.Connections {
+		for _, u := range cn.Allow.Users {
+			known[u] = true
+		}
+	}
+	return known
+}
+
+// KnownGroups returns the groups that f names: its static users' groups
+// and the groups in its connections' allow lists.
+func (f *File) KnownGroups() map[string]bool {
+	known := map[string]bool{}
+	for _, u := range f.Auth.Users {
+		for _, g := range u.Groups {
+			known[g] = true
+		}
+	}
+	for _, cn := range f.Connections {
+		for _, g := range cn.Allow.Groups {
+			known[g] = true
+		}
+	}
+	return known
 }
 
 func (c *checker) credentials(path, protocol string, cr Credentials) {
@@ -491,13 +533,40 @@ func (c *checker) providerURL(path, s string) {
 		c.add(path, "required")
 		return
 	}
+	if p := SecureURLProblem(s); p != "" {
+		c.add(path, "%s", p)
+	}
+}
+
+// returnURL checks a URL that browsers are sent back to after an OIDC
+// sign-in: https except on the loopback interface, with no user name,
+// and no fragment, since occamyd puts the sign-in's code in one.
+func (c *checker) returnURL(path, s string) {
+	if p := SecureURLProblem(s); p != "" {
+		c.add(path, "%s", p)
+		return
+	}
+	u, _ := url.Parse(s)
+	switch {
+	case u.User != nil:
+		c.add(path, "%q has a user name in it", s)
+	case strings.Contains(s, "#"):
+		c.add(path, "%q has a fragment: occamyd adds one with the sign-in's code", s)
+	}
+}
+
+// SecureURLProblem describes what keeps s from being a URL that occamyd
+// may exchange credentials with: it must be an absolute https URL, or
+// http on the loopback interface. It returns "" for such a URL.
+func SecureURLProblem(s string) string {
 	u, err := url.Parse(s)
 	switch {
 	case err != nil || u.Host == "" || u.Scheme != "https" && u.Scheme != "http":
-		c.add(path, "%q is not an absolute http or https URL", s)
+		return fmt.Sprintf("%q is not an absolute http or https URL", s)
 	case u.Scheme == "http" && !isLoopback(u.Hostname()):
-		c.add(path, "%q needs https; http is accepted only on localhost", s)
+		return fmt.Sprintf("%q needs https; http is accepted only on localhost", s)
 	}
+	return ""
 }
 
 func isLoopback(host string) bool {

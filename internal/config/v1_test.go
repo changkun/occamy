@@ -174,6 +174,7 @@ func TestParseV1Example(t *testing.T) {
 				ClientID:         "occamy",
 				ClientSecretFile: path("run/secrets/oidc-client-secret"),
 				RedirectURL:      "https://occamy.example.com/api/v1/auth/oidc/callback",
+				ReturnURLs:       []string{"https://occamy.example.com/"},
 				Scopes:           []string{"openid", "profile", "email", "groups"},
 				SubjectClaim:     "email",
 				GroupsClaim:      "groups",
@@ -251,13 +252,33 @@ func TestParseV1Defaults(t *testing.T) {
 		t.Errorf("optional features on by default: %+v", f)
 	}
 
-	f, err = parse(t, head+"  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://occamy.example.com/cb}\n")
+	f, err = parse(t, head+"  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://occamy.example.com:8443/occamy/cb}\n")
 	if err != nil {
 		t.Fatal(err)
 	}
 	o := f.Auth.OIDC
-	if !reflect.DeepEqual(o.Scopes, config.DefaultOIDCScopes) || o.SubjectClaim != config.DefaultOIDCSubjectClaim || o.GroupsClaim != "" {
-		t.Errorf("oidc defaults: scopes %v, subject claim %q, groups claim %q", o.Scopes, o.SubjectClaim, o.GroupsClaim)
+	if !reflect.DeepEqual(o.Scopes, config.DefaultOIDCScopes) || o.SubjectClaim != config.DefaultOIDCSubjectClaim || o.GroupsClaim != "" || o.RequireKnownUsers {
+		t.Errorf("oidc defaults: scopes %v, subject claim %q, groups claim %q, require known users %v", o.Scopes, o.SubjectClaim, o.GroupsClaim, o.RequireKnownUsers)
+	}
+	if want := []string{"https://occamy.example.com:8443/"}; !reflect.DeepEqual(o.ReturnURLs, want) {
+		t.Errorf("oidc return URLs %q, want %q: the origin of the redirect URL", o.ReturnURLs, want)
+	}
+}
+
+// TestKnownNames checks the users and groups that a file names, which
+// OIDC sign-in admits and maps to.
+func TestKnownNames(t *testing.T) {
+	f, err := parse(t, head+`  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb}
+`+conn+`  - {id: b, protocol: ssh, target: b, credentials: {prompt: true}, allow: {users: [carol], groups: [admins]}}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := f.KnownUsers(), map[string]bool{"alice": true, "bob": true, "carol": true}; !reflect.DeepEqual(got, want) {
+		t.Errorf("KnownUsers = %v, want %v", got, want)
+	}
+	if got, want := f.KnownGroups(), map[string]bool{"ops": true, "dev": true, "admins": true}; !reflect.DeepEqual(got, want) {
+		t.Errorf("KnownGroups = %v, want %v", got, want)
 	}
 }
 
@@ -471,6 +492,27 @@ func TestParseV1Problems(t *testing.T) {
 			{"auth.oidc.client_secret_file", "does not exist"},
 			{"auth.oidc.client_secret_env", "OCCAMY_TEST_UNSET is not set"},
 			{"auth.oidc.scopes", "must include openid"},
+		}},
+		{"oidc return urls", head + `  oidc:
+    issuer: https://id.example.com
+    client_id: occamy
+    redirect_url: https://o.example.com/cb
+    return_urls: ['/app', 'http://o.example.com/', 'https://o.example.com/#/signed-in', 'https://o.example.com/#', 'https://me@o.example.com/']
+`, []want{
+			{"auth.oidc.return_urls[0]", "is not an absolute http or https URL"},
+			{"auth.oidc.return_urls[1]", "needs https; http is accepted only on localhost"},
+			{"auth.oidc.return_urls[2]", "has a fragment"},
+			{"auth.oidc.return_urls[3]", "has a fragment"},
+			{"auth.oidc.return_urls[4]", "has a user name in it"},
+		}},
+		{"oidc known users", `version: 1
+auth:
+  signing_key_file: DIR/signing.key
+  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb, require_known_users: true}
+connections:
+  - {id: a, protocol: ssh, target: a, credentials: {prompt: true}, allow: {groups: [admins]}}
+`, []want{
+			{"auth.oidc.require_known_users", "the file names no users"},
 		}},
 
 		// guacd.
