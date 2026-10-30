@@ -15,13 +15,12 @@ import (
 // session belongs to a principal, so that the same subject from two
 // issuers is two users, and a trusted issuer acts for its own users only:
 // not for occamyd's, nor for another issuer's. The allow lists of
-// connections still name users by subject alone.
+// connections still name users by subject alone. Access tokens do not
+// say yet where one of occamyd's own users signed in; once OIDC sign-in
+// names it in an idp claim, it becomes part of the key here and in
+// session tokens.
 type principal struct {
-	issuer string // auth.Issuer for occamyd's own users
-	// idp is where one of occamyd's own users signed in. Access tokens
-	// do not carry it yet; once OIDC sign-in names it in its idp claim,
-	// it becomes part of the key here and in session tokens.
-	idp     string
+	issuer  string // auth.Issuer for occamyd's own users
 	subject string
 }
 
