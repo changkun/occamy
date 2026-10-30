@@ -5,7 +5,6 @@
 package vnc
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -43,6 +42,13 @@ const (
 	// interactive resize still follows at that rate. TigerVNC's viewer
 	// waits 500 ms before it asks for a resize of its own.
 	resizeEvery = 100 * time.Millisecond
+	// drawBudget bounds the pixels that an update draws, as a multiple of
+	// the screen's. A rectangle of a few bytes can draw the whole screen,
+	// as a Tight fill, a CopyRect or a ZRLE rectangle of one colour do,
+	// which takes 25 ms on the largest screen; an update of 65535 of them
+	// would take half an hour. Servers cover the screen once an update,
+	// with few overlaps.
+	drawBudget = 4
 )
 
 // decoder reads the server's messages and applies them to a sink. Every
@@ -55,16 +61,20 @@ type decoder struct {
 	sink backend.Sink
 	lim  limits
 	log  *slog.Logger
+	peer peer // told of the extensions' messages; nil ignores them
+	last bool // a LastRect ended the current update
 
 	size        image.Point   // the screen
 	resized     bool          // the current or last update resized the screen
 	resizeEvery time.Duration // the least time between two resizes
 	lastResize  time.Time
+	drawn       int64 // the pixels that the current update has drawn
 
 	hdr    [12]byte
 	strip  []byte // stripSize bytes
 	cursor []byte // a cursor's pixels and mask, grown up to maxCursor
 	img    image.RGBA
+	enc    codecs // Hextile, ZRLE and Tight
 }
 
 func newDecoder(ctx context.Context, r io.Reader, sink backend.Sink, size image.Point, lim limits, log *slog.Logger) *decoder {
@@ -110,19 +120,20 @@ func (d *decoder) next() (byte, error) {
 	case msgServerCutText:
 		err = d.cutText()
 	default:
-		err = fmt.Errorf("vnc: unknown message type %d", t[0])
+		err = d.extensionMessage(t[0])
 	}
 	return t[0], err
 }
 
 // update applies a FramebufferUpdate.
 func (d *decoder) update() error {
-	d.resized = false
+	d.resized, d.last = false, false
+	d.drawn = 0
 	if err := d.read(d.hdr[:3]); err != nil {
 		return fmt.Errorf("vnc: framebuffer update: %w", err)
 	}
 	n := int(binary.BigEndian.Uint16(d.hdr[1:]))
-	for i := range n {
+	for i := 0; i < n && !d.last; i++ {
 		err := d.ctx.Err()
 		if err == nil {
 			err = d.rect()
@@ -144,16 +155,39 @@ func (d *decoder) rect() error {
 	enc := int32(binary.BigEndian.Uint32(d.hdr[8:])) // #nosec G115 -- encodings are signed on the wire
 	r := image.Rect(x, y, x+w, y+h)
 	switch enc {
+	case encRaw, encCopyRect, encHextile, encZRLE, encTight:
+		if err := d.spend(r); err != nil {
+			return err
+		}
+	}
+	switch enc {
 	case encRaw:
 		return d.raw(r)
 	case encCopyRect:
 		return d.copyRect(r)
+	case encHextile:
+		return d.hextile(r)
+	case encZRLE:
+		return d.zrle(r)
+	case encTight:
+		return d.tight(r)
 	case encDesktopSize:
 		return d.desktopSize(w, h)
 	case encCursor:
 		return d.setCursor(image.Pt(x, y), w, h)
 	}
-	return fmt.Errorf("unsupported encoding %d", enc)
+	return d.extensionRect(enc, r)
+}
+
+// spend counts the pixels of r on the screen against the update's
+// budget (drawBudget).
+func (d *decoder) spend(r image.Rectangle) error {
+	r = r.Intersect(image.Rectangle{Max: d.size})
+	d.drawn += int64(r.Dx()) * int64(r.Dy())
+	if d.drawn > drawBudget*int64(d.size.X)*int64(d.size.Y) {
+		return fmt.Errorf("the update draws more than %d times the screen's %d×%d pixels", drawBudget, d.size.X, d.size.Y)
+	}
+	return nil
 }
 
 // onScreen returns an error if r, which is not empty, is not within the
@@ -246,6 +280,9 @@ func (d *decoder) desktopSize(w, h int) error {
 	d.lastResize = time.Now()
 	d.size = image.Pt(w, h)
 	d.resized = true
+	// The rectangles after it draw on the new screen, with a budget of its
+	// size; an update resizes once, so it draws at most two budgets.
+	d.drawn = 0
 	d.sink.Resize(w, h)
 	return nil
 }
@@ -316,17 +353,12 @@ func (d *decoder) cutText() error {
 	}
 	n := binary.BigEndian.Uint32(d.hdr[3:])
 	if n&(1<<31) != 0 {
-		// A negative length is Extended Clipboard's, which the
-		// backend does not ask for.
-		return fmt.Errorf("vnc: cut text of %d bytes", int32(n)) // #nosec G115 -- shown as the signed length it is
+		// A negative length is Extended Clipboard's.
+		return d.extendedClipboard(-int64(int32(n))) // #nosec G115 -- the signed length it is
 	}
 	keep := min(int64(n), maxClipboard)
-	// The buffer grows as the text arrives, not to the length claimed.
-	var buf bytes.Buffer
-	if _, err := io.CopyN(&buf, d.r, keep); err != nil {
-		if errors.Is(err, io.EOF) {
-			err = io.ErrUnexpectedEOF
-		}
+	b, err := readText(d.r, int(keep))
+	if err != nil {
 		return fmt.Errorf("vnc: cut text: %w", err)
 	}
 	if rest := int64(n) - keep; rest > 0 {
@@ -335,11 +367,14 @@ func (d *decoder) cutText() error {
 			return fmt.Errorf("vnc: cut text: %w", err)
 		}
 	}
-	b := buf.Bytes()
 	if t := trimPartialRune(b); int64(n) > keep && len(t) < len(b) && utf8.Valid(t) {
 		b = t // UTF-8 cut short; Latin-1 is kept whole
 	}
-	d.sink.Clipboard("text/plain", []byte(text(b)))
+	// The text is passed on as it was read, unless it is Latin-1.
+	if !utf8.Valid(b) {
+		b = fromLatin1(b)
+	}
+	d.sink.Clipboard("text/plain", b)
 	return nil
 }
 

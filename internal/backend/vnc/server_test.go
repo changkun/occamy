@@ -11,7 +11,10 @@ package vnc
 
 import (
 	"bufio"
+	"bytes"
+	"compress/zlib"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/binary"
 	"fmt"
 	"image"
@@ -102,6 +105,33 @@ type (
 		at      image.Point
 	}
 	cutTextMsg struct{ text string } // Latin-1, as sent
+
+	continuousMsg struct {
+		enable bool
+		r      image.Rectangle
+	}
+	fenceMsg struct {
+		flags   uint32
+		payload string
+	}
+	setSizeMsg struct {
+		size    image.Point
+		screens []screenMsg
+	}
+	screenMsg struct {
+		id    uint32
+		r     image.Rectangle
+		flags uint32
+	}
+	qemuKeyMsg struct {
+		down            bool
+		keysym, keycode uint32
+	}
+	clipMsg struct { // Extended Clipboard
+		flags uint32
+		sizes []uint32 // of caps
+		text  string   // of provide, as sent: CR LF line ends and a NUL
+	}
 )
 
 // serverOptions configure a fake server.
@@ -109,9 +139,16 @@ type serverOptions struct {
 	version  string      // the server's version, "003.008" if empty
 	types    []byte      // offered security types, [None] if nil; 3.3 uses the first
 	refuse   string      // a reason to refuse every connection with
-	password string      // for VNC Authentication
+	password string      // for VNC Authentication and VeNCrypt's Plain
 	size     image.Point // the screen, 64×48 if zero
 	name     string
+
+	// VeNCrypt, if types offers it.
+	vencrypt  []uint32        // the subtypes offered
+	vcVersion [2]byte         // VeNCrypt's version, 0.2 if zero
+	cert      tls.Certificate // for the TLS and X.509 subtypes
+	tlsMax    uint16          // the newest TLS version, and TLS 1.0 the oldest, if not zero
+	user      string          // for Plain
 }
 
 // fakeServer is an RFB server on the loopback interface.
@@ -124,6 +161,8 @@ type fakeServer struct {
 	mu       sync.Mutex
 	replies  []string // the clients' versions
 	failures int      // failed authentications
+	subtypes []uint32 // the VeNCrypt subtypes the clients chose
+	plains   []string // Plain's credentials, as "user:password"
 }
 
 // newServer starts a fake server that serves until the test ends.
@@ -255,26 +294,34 @@ func (s *fakeServer) serve(nc net.Conn) {
 			return
 		}
 	}
-	if t == secVNCAuth {
-		var challenge [16]byte
-		rand.Read(challenge[:])
-		nc.Write(challenge[:])
-		if _, err := io.ReadFull(r, b[:16]); err != nil {
+	authOK := true
+	inner := uint32(t) // the type that authenticates, VeNCrypt's subtype within it
+	switch t {
+	case secVNCAuth:
+		var ok bool
+		if authOK, ok = s.vncAuth(nc, r); !ok {
 			return
 		}
-		if want := vncAuthResponse(s.opts.password, challenge); string(b[:16]) != string(want[:]) {
-			s.mu.Lock()
-			s.failures++
-			s.mu.Unlock()
-			nc.Write(binary.BigEndian.AppendUint32(nil, 1))
-			if v == 8 {
-				nc.Write(appendString(nil, "Authentication failed"))
-			}
-			nc.Close()
+	case secVeNCrypt:
+		var ok bool
+		if nc, r, inner, authOK, ok = s.veNCrypt(nc, r); !ok {
 			return
 		}
 	}
-	if t == secVNCAuth || v == 8 {
+	if !authOK {
+		s.mu.Lock()
+		s.failures++
+		s.mu.Unlock()
+		nc.Write(binary.BigEndian.AppendUint32(nil, 1))
+		if v == 8 {
+			nc.Write(appendString(nil, "Authentication failed"))
+		}
+		nc.Close()
+		return
+	}
+	// As TigerVNC's SConnection::approveConnection: no SecurityResult
+	// for None before 3.8, VeNCrypt's None subtype included.
+	if inner != secNone || v == 8 {
 		nc.Write(binary.BigEndian.AppendUint32(nil, 0))
 	}
 	if _, err := io.ReadFull(r, b[:1]); err != nil {
@@ -314,6 +361,102 @@ func (s *fakeServer) serve(nc net.Conn) {
 	go c.readLoop(s.t)
 	s.conns <- c
 	<-c.stopped
+}
+
+// vncAuth runs the server's side of VNC Authentication. It returns
+// whether the password was right, and false for ok if the connection
+// failed.
+func (s *fakeServer) vncAuth(nc net.Conn, r *bufio.Reader) (right, ok bool) {
+	var challenge, response [16]byte
+	rand.Read(challenge[:])
+	nc.Write(challenge[:])
+	if _, err := io.ReadFull(r, response[:]); err != nil {
+		return false, false
+	}
+	want := vncAuthResponse(s.opts.password, challenge)
+	return response == want, true
+}
+
+// veNCrypt runs the server's side of VeNCrypt: the version, the
+// subtype, TLS for the TLS and X.509 subtypes, and the subtype's
+// authentication. It returns the connection to go on with, the
+// subtype, whether the credentials were right, and false for ok if the
+// connection failed.
+func (s *fakeServer) veNCrypt(nc net.Conn, r *bufio.Reader) (_ net.Conn, _ *bufio.Reader, _ uint32, right, ok bool) {
+	version := s.opts.vcVersion
+	if version == ([2]byte{}) {
+		version = [2]byte{0, 2}
+	}
+	nc.Write(version[:])
+	var b [8]byte
+	if _, err := io.ReadFull(r, b[:2]); err != nil {
+		return nil, nil, 0, false, false
+	}
+	if b[0] != 0 || b[1] != 2 {
+		return nil, nil, 0, false, false // the client gave up
+	}
+	p := append([]byte{0, byte(len(s.opts.vencrypt))}, make([]byte, 0, 4*len(s.opts.vencrypt))...)
+	for _, st := range s.opts.vencrypt {
+		p = binary.BigEndian.AppendUint32(p, st)
+	}
+	nc.Write(p)
+	if _, err := io.ReadFull(r, b[:4]); err != nil {
+		return nil, nil, 0, false, false
+	}
+	st := binary.BigEndian.Uint32(b[:4])
+	s.mu.Lock()
+	s.subtypes = append(s.subtypes, st)
+	s.mu.Unlock()
+	if !slices.Contains(s.opts.vencrypt, st) {
+		s.t.Errorf("fake server: client chose VeNCrypt subtype %d of %v", st, s.opts.vencrypt)
+		return nil, nil, 0, false, false
+	}
+	if st >= 257 && st <= 262 {
+		nc.Write([]byte{1})
+		cfg := &tls.Config{Certificates: []tls.Certificate{s.opts.cert}, MinVersion: tls.VersionTLS12}
+		if s.opts.tlsMax != 0 {
+			cfg.MinVersion, cfg.MaxVersion = tls.VersionTLS10, s.opts.tlsMax
+		}
+		tc := tls.Server(nc, cfg)
+		if err := tc.Handshake(); err != nil {
+			return nil, nil, 0, false, false
+		}
+		nc, r = tc, bufio.NewReader(tc)
+	}
+	switch st {
+	case 2, 258, 261: // VNC Authentication
+		right, ok = s.vncAuth(nc, r)
+		return nc, r, st, right, ok
+	case 256, 259, 262: // Plain
+		if _, err := io.ReadFull(r, b[:8]); err != nil {
+			return nil, nil, 0, false, false
+		}
+		creds := make([]byte, int(binary.BigEndian.Uint32(b[0:]))+int(binary.BigEndian.Uint32(b[4:])))
+		if _, err := io.ReadFull(r, creds); err != nil {
+			return nil, nil, 0, false, false
+		}
+		n := binary.BigEndian.Uint32(b[0:])
+		user, password := string(creds[:n]), string(creds[n:])
+		s.mu.Lock()
+		s.plains = append(s.plains, user+":"+password)
+		s.mu.Unlock()
+		return nc, r, st, user == s.opts.user && password == s.opts.password, true
+	}
+	return nc, r, st, true, true // None
+}
+
+// Subtypes returns the VeNCrypt subtypes the clients chose.
+func (s *fakeServer) Subtypes() []uint32 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.subtypes)
+}
+
+// Plains returns Plain's credentials, as "user:password".
+func (s *fakeServer) Plains() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.plains)
 }
 
 // appendString appends a string with its U32 length.
@@ -383,11 +526,64 @@ func (c *serverConn) readLoop(t *testing.T) {
 			if _, err := io.ReadFull(c.r, b[:7]); err != nil {
 				return
 			}
-			text := make([]byte, binary.BigEndian.Uint32(b[3:]))
+			n := int32(binary.BigEndian.Uint32(b[3:]))
+			if n < 0 {
+				var err error
+				if m, err = readClipMsg(c.r, int(-n)); err != nil {
+					t.Errorf("fake server: %v", err)
+					c.nc.Close()
+					return
+				}
+				break
+			}
+			text := make([]byte, n)
 			if _, err := io.ReadFull(c.r, text); err != nil {
 				return
 			}
 			m = cutTextMsg{string(text)}
+		case msgEnableContinuousUpdates:
+			if _, err := io.ReadFull(c.r, b[:9]); err != nil {
+				return
+			}
+			x, y := int(binary.BigEndian.Uint16(b[1:])), int(binary.BigEndian.Uint16(b[3:]))
+			w, h := int(binary.BigEndian.Uint16(b[5:])), int(binary.BigEndian.Uint16(b[7:]))
+			m = continuousMsg{enable: b[0] != 0, r: image.Rect(x, y, x+w, y+h)}
+		case msgClientFence:
+			if _, err := io.ReadFull(c.r, b[:8]); err != nil {
+				return
+			}
+			payload := make([]byte, b[7])
+			if _, err := io.ReadFull(c.r, payload); err != nil {
+				return
+			}
+			m = fenceMsg{flags: binary.BigEndian.Uint32(b[3:]), payload: string(payload)}
+		case msgSetDesktopSize:
+			if _, err := io.ReadFull(c.r, b[:7]); err != nil {
+				return
+			}
+			msg := setSizeMsg{size: image.Pt(int(binary.BigEndian.Uint16(b[1:])), int(binary.BigEndian.Uint16(b[3:])))}
+			for range b[5] {
+				var s [16]byte
+				if _, err := io.ReadFull(c.r, s[:]); err != nil {
+					return
+				}
+				x, y := int(binary.BigEndian.Uint16(s[4:])), int(binary.BigEndian.Uint16(s[6:]))
+				w, h := int(binary.BigEndian.Uint16(s[8:])), int(binary.BigEndian.Uint16(s[10:]))
+				msg.screens = append(msg.screens, screenMsg{
+					id: binary.BigEndian.Uint32(s[0:]), r: image.Rect(x, y, x+w, y+h), flags: binary.BigEndian.Uint32(s[12:]),
+				})
+			}
+			m = msg
+		case msgQEMU:
+			if _, err := io.ReadFull(c.r, b[:11]); err != nil {
+				return
+			}
+			if b[0] != qemuExtKeyEvent {
+				t.Errorf("fake server: QEMU submessage %d", b[0])
+				c.nc.Close()
+				return
+			}
+			m = qemuKeyMsg{down: binary.BigEndian.Uint16(b[1:]) != 0, keysym: binary.BigEndian.Uint32(b[3:]), keycode: binary.BigEndian.Uint32(b[7:])}
 		default:
 			t.Errorf("fake server: unknown client message type %d", typ)
 			c.nc.Close()
@@ -522,6 +718,102 @@ func putColourMap(n int) []byte {
 	p := []byte{msgSetColourMapEntries, 0, 0, 0}
 	p = binary.BigEndian.AppendUint16(p, uint16(n))
 	return append(p, make([]byte, 6*n)...)
+}
+
+// The extensions' server messages and pseudo-rectangles.
+
+func putFence(flags uint32, payload string) []byte {
+	p := binary.BigEndian.AppendUint32([]byte{msgServerFence, 0, 0, 0}, flags)
+	return append(append(p, byte(len(payload))), payload...)
+}
+
+func putEndOfContinuous() []byte { return []byte{msgEndOfContinuousUpdates} }
+
+func putLastRect() []byte { return rectHeader(image.Rectangle{}, encLastRect) }
+
+func putQEMUKeys() []byte { return rectHeader(image.Rect(0, 0, 64, 48), encQEMUExtKey) }
+
+// putExtDesktopSize encodes an ExtendedDesktopSize rectangle of a screen
+// of w×h with the given layout.
+func putExtDesktopSize(reason, status, w, h int, screens ...screenMsg) []byte {
+	p := rectHeader(image.Rect(reason, status, reason+w, status+h), encExtendedDesktopSize)
+	p = append(p, byte(len(screens)), 0, 0, 0)
+	for _, s := range screens {
+		p = binary.BigEndian.AppendUint32(p, s.id)
+		for _, v := range []int{s.r.Min.X, s.r.Min.Y, s.r.Dx(), s.r.Dy()} {
+			p = binary.BigEndian.AppendUint16(p, uint16(v))
+		}
+		p = binary.BigEndian.AppendUint32(p, s.flags)
+	}
+	return p
+}
+
+// putClip encodes a ServerCutText of Extended Clipboard.
+func putClip(flags uint32, payload []byte) []byte {
+	p := []byte{msgServerCutText, 0, 0, 0}
+	p = binary.BigEndian.AppendUint32(p, uint32(-int32(4+len(payload))))
+	p = binary.BigEndian.AppendUint32(p, flags)
+	return append(p, payload...)
+}
+
+// putClipCaps encodes Extended Clipboard caps with a size per format.
+func putClipCaps(flags uint32, sizes ...uint32) []byte {
+	var p []byte
+	for _, s := range sizes {
+		p = binary.BigEndian.AppendUint32(p, s)
+	}
+	return putClip(clipCaps|flags, p)
+}
+
+// putClipProvide encodes a provide action of text as it is, which
+// should end with a NUL.
+func putClipProvide(text string) []byte {
+	return putClip(clipProvide|clipText, zlibOf(binary.BigEndian.AppendUint32(nil, uint32(len(text))), []byte(text)))
+}
+
+func zlibOf(parts ...[]byte) []byte {
+	var b bytes.Buffer
+	zw := zlib.NewWriter(&b)
+	for _, p := range parts {
+		zw.Write(p)
+	}
+	zw.Close()
+	return b.Bytes()
+}
+
+// readClipMsg reads an Extended Clipboard message of n bytes after its
+// length.
+func readClipMsg(r io.Reader, n int) (clipMsg, error) {
+	body := make([]byte, n)
+	if _, err := io.ReadFull(r, body); err != nil {
+		return clipMsg{}, err
+	}
+	if n < 4 {
+		return clipMsg{}, fmt.Errorf("extended clipboard message of %d bytes", n)
+	}
+	m := clipMsg{flags: binary.BigEndian.Uint32(body)}
+	body = body[4:]
+	switch {
+	case m.flags&clipCaps != 0:
+		for len(body) >= 4 {
+			m.sizes = append(m.sizes, binary.BigEndian.Uint32(body))
+			body = body[4:]
+		}
+	case m.flags&clipProvide != 0:
+		zr, err := zlib.NewReader(bytes.NewReader(body))
+		if err != nil {
+			return m, err
+		}
+		data, err := io.ReadAll(zr)
+		if err != nil {
+			return m, err
+		}
+		if len(data) < 4 || int(binary.BigEndian.Uint32(data)) != len(data)-4 {
+			return m, fmt.Errorf("provide of %d bytes", len(data))
+		}
+		m.text = string(data[4:])
+	}
+	return m, nil
 }
 
 // pattern returns an opaque image whose every pixel differs from its
