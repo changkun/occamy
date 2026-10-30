@@ -83,6 +83,20 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   before it reads or allocates, resizes the screen at most once an
   update and ten times a second, and bounds its queued input by bytes.
   `occamyd` does not use it yet.
+- RFB extensions in the native VNC backend: VeNCrypt with an X.509
+  certificate and Plain, None or VNC Authentication inside TLS, asking
+  the owner for a username or password the configuration lacks;
+  ExtendedDesktopSize, so that a `Resize` resizes the remote screen;
+  continuous updates with Fence, paused while nobody can see; QEMU
+  extended key events with physical key codes; Extended Clipboard in
+  UTF-8 both ways; and LastRect. The server's certificate must chain to
+  the system's roots or a configured CA and name the server, or be
+  pinned by its SHA-256 fingerprint; an insecure mode accepts any with a
+  warning. The backend prefers VeNCrypt whenever a server offers it and
+  fails closed, so a server with a self-signed certificate that VNC
+  Authentication reached before is refused, with the fingerprint to pin
+  in the error. VeNCrypt's anonymous TLS subtypes are not supported. An
+  integration test runs against TigerVNC (`docker/test/tigervnc`).
 - The codec measurement of the graphics pipeline
   ([docs/benchmarks/codecs.md](docs/benchmarks/codecs.md)): a corpus of
   13 frames recorded from the bench desktop by `make corpus`, and
