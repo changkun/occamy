@@ -280,8 +280,9 @@ stays open.
   xrdp's log says so. The step was meant to compare against guacd with
   AVC, but this xrdp build has no H.264 encoder, so RemoteFX Progressive
   is the baseline. The client's bitmap updates are lossless and unpaced,
-  so the comparison is not like for like. guacd's lower rates also
-  include the frames that GFX flow control kept xrdp from sending.
+  so the comparison is not like for like. guacd's lower rates likely
+  also reflect frames that GFX flow control kept xrdp from sending; the
+  frame rate guacd delivered was not measured.
 
   | KB/s from xrdp | G1 idle | G3 scroll | G4 drag | G5 motion | G6 photo (5 s) |
   |----------------|--------:|----------:|--------:|----------:|---------------:|
@@ -290,12 +291,12 @@ stays open.
   | guacd, GFX RemoteFX Progressive, 16 bpp | 1.3 | 11,459 | 1,015 | 1,313 | 30 |
   | native, interleaved RLE, 16 bpp | 0.3 | 10,253 | 7,056 | 30,217 | 315 |
 
-  Native idle at 32 bpp is one full-screen redraw (79 KB) arriving
-  inside the window, not a steady rate. Full-screen motion at 30 fps
-  costs 50 MB/s (400 Mbit/s) over bitmap updates, 38 times guacd's
-  link. The drag costs 13 times guacd's link, and the photograph 15
-  times. Only scrolling is close, because RemoteFX Progressive does
-  poorly on scrolled text too. Bitmap updates are fine for a LAN
+  Native idle at 32 bpp, 74 KB in the window, is consistent with one
+  full-screen redraw (79 KB) arriving late rather than a steady rate.
+  Full-screen motion at 30 fps costs 50 MB/s (400 Mbit/s) over bitmap
+  updates, 38 times guacd's link. The drag costs 13 times guacd's link,
+  and the photograph 15 times. Only scrolling is close, apparently
+  because RemoteFX Progressive does poorly on scrolled text too. Bitmap updates are fine for a LAN
   between `occamyd` and a lightly used desktop. For motion they are not
   a beta-quality path.
 - **Verdict so far.** Step 1 passed in one working session, decoding
