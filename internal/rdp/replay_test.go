@@ -319,3 +319,23 @@ func TestRefusesStandardSecurity(t *testing.T) {
 		t.Fatal("Connect accepted standard RDP security")
 	}
 }
+
+// A PDU on another channel than the I/O channel, such as an auto-detect
+// request on the message channel, which starts with a security header,
+// does not end the session.
+func TestReplayOtherChannel(t *testing.T) {
+	frames := loadTrace(t, "testdata/xrdp-32bpp.trace.gz")
+	// An auto-detect RTT request ([MS-RDPBCGR] 2.2.14.1.1) on channel
+	// 1010: a basic security header with SEC_AUTODETECT_REQ, then the
+	// request.
+	pdu := []byte{0x00, 0x10, 0x00, 0x00, 0x06, 0x00, 0x01, 0x00, 0x01, 0x10}
+	ind := append([]byte{mcsSendDataIndication, 0x00, 0x06, 0x03, 0xf2, 0x70, byte(len(pdu))}, pdu...)
+	frames = append(frames, tpkt(ind))
+	c, scr := replay(t, &fakeServer{frames: frames}, Config{})
+	if bad, _ := matchesWallpaper(scr.snapshot(), 0); bad != 0 {
+		t.Errorf("%d pixels differ from the wallpaper", bad)
+	}
+	if n := c.Stats().Ignored["virtual channel"]; n != 1 {
+		t.Errorf("ignored %v, want one virtual channel PDU", c.Stats().Ignored)
+	}
+}

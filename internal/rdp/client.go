@@ -288,7 +288,7 @@ func (c *Client) connect(ctx context.Context) error {
 
 	// Capabilities exchange, phase 7.
 	for {
-		data, err := c.readChannelData()
+		data, err := c.readIOData()
 		if err != nil {
 			return err
 		}
@@ -317,12 +317,40 @@ func (c *Client) read() (frame, error) {
 
 // readChannelData reads the data of the next Send Data Indication.
 func (c *Client) readChannelData() ([]byte, error) {
+	_, data, err := c.readChannel()
+	return data, err
+}
+
+func (c *Client) readChannel() (uint16, []byte, error) {
 	f, err := c.read()
 	if err != nil {
-		return nil, err
+		return 0, nil, err
 	}
-	_, data, err := parseDomainPDU(f.data)
-	return data, err
+	return parseDomainPDU(f.data)
+}
+
+// readIOData reads the data of the next Send Data Indication on the I/O
+// channel, skipping the other channels'.
+func (c *Client) readIOData() ([]byte, error) {
+	for {
+		ch, data, err := c.readChannel()
+		if err != nil || ch == c.ioChannel {
+			return data, err
+		}
+		c.ignoreChannel(ch)
+	}
+}
+
+// ignoreChannel counts a PDU on a channel other than the I/O channel: the
+// message channel's auto-detect and multitransport requests
+// ([MS-RDPBCGR] 2.2.14, 2.2.15), which start with a security header and
+// which the client does not answer, or a virtual channel's.
+func (c *Client) ignoreChannel(ch uint16) {
+	kind := "virtual channel"
+	if ch == c.msgChannel {
+		kind = "message channel"
+	}
+	c.count(func(s *Stats) { s.Ignored[kind]++ })
 }
 
 // Size returns the desktop's size.
@@ -409,8 +437,12 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 			if errors.Is(err, errDisconnected) {
 				return c.disconnected()
 			}
-			if err == nil && (ch == c.ioChannel || ch == c.msgChannel) {
-				_, err = c.handleShareControl(out, data)
+			if err == nil {
+				if ch == c.ioChannel {
+					_, err = c.handleShareControl(out, data)
+				} else {
+					c.ignoreChannel(ch)
+				}
 			}
 		}
 		if err != nil {
