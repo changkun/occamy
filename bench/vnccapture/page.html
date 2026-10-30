@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Benchmarks - Occamy</title>
+<style>
+body { margin: 0; background: #ffffff; color: #1f2328; font-family: "DejaVu Sans", sans-serif; font-size: 15px; }
+#top { background: #24292f; color: #f6f8fa; padding: 10px 20px; font-size: 18px; }
+#top a { color: #f6f8fa; text-decoration: none; margin-right: 18px; font-size: 14px; }
+#side { background: #f6f8fa; border-right: 1px solid #d0d7de; padding: 14px; width: 190px; font-size: 14px; }
+#side a { color: #0969da; text-decoration: none; }
+#main { padding: 6px 28px; }
+h1 { font-size: 28px; border-bottom: 1px solid #d0d7de; padding-bottom: 6px; }
+h2 { font-size: 21px; border-bottom: 1px solid #d0d7de; padding-bottom: 4px; }
+a { color: #0969da; }
+code { background: #eff1f3; font-family: "DejaVu Sans Mono", monospace; font-size: 13px; }
+pre { background: #f6f8fa; border: 1px solid #d0d7de; padding: 10px; font-family: "DejaVu Sans Mono", monospace; font-size: 13px; }
+table.data { border-collapse: collapse; }
+table.data td, table.data th { border: 1px solid #d0d7de; padding: 4px 10px; }
+table.data th { background: #f6f8fa; }
+.note { background: #ddf4ff; border-left: 4px solid #0969da; padding: 8px 12px; }
+</style>
+</head>
+<body>
+<div id="top"><b>Occamy</b> &nbsp; <a href="#">Docs</a> <a href="#">Specs</a> <a href="#">Releases</a> <a href="#">Issues</a></div>
+<table cellspacing="0" cellpadding="0"><tr>
+<td id="side" valign="top">
+<p><b>Manual</b></p>
+<p><a href="#">Architecture</a><br><a href="#">Protocol</a><br><b>Benchmarks</b><br><a href="#">Debugging and measuring</a><br><a href="#">Design specs</a></p>
+<p><b>On this page</b></p>
+<p><a href="#">Running</a><br><a href="#">What is measured</a><br><a href="#">The bench desktop</a><br><a href="#">Terminal baseline</a><br><a href="#">Desktop baseline</a><br><a href="#">Targets</a></p>
+</td>
+<td id="main" valign="top">
+<h1>Benchmarks</h1>
+<p>Protocol v1 is designed against measurements of what Occamy costs today, and it is proven with the same harness. Its two targets are a 10x improvement over the Guacamole baseline on each scenario's primary metric, and input-to-update latency under 50 ms for desktop interactions.</p>
+<div class="note">The harness and the stack share the host, so anything else that uses the CPU shows up in the numbers. Keep the host idle, and use <code>-runs 3</code>.</div>
+<h2>Running</h2>
+<pre>make bench
+make bench BENCH_FLAGS="-scenarios T1 -net N1 -series occamy"</pre>
+<p>This builds occamyd's image from the working tree, then builds and starts the demo stack with <code>docker/docker-compose.bench.yaml</code> on top, which publishes guacd on <code>127.0.0.1:4822</code>. Results go to <code>bench-results.json</code>, and a Markdown table goes to standard output.</p>
+<table class="data">
+<tr><th>Flag</th><th>Default</th><th>Meaning</th></tr>
+<tr><td><code>-scenarios</code></td><td><code>all</code></td><td>Comma-separated scenario IDs</td></tr>
+<tr><td><code>-net</code></td><td><code>N0,N1,N2</code></td><td>Network conditions</td></tr>
+<tr><td><code>-series</code></td><td><code>occamy,guacd</code></td><td><a href="#">occamy</a> goes through occamyd; <a href="#">guacd</a> connects directly</td></tr>
+<tr><td><code>-runs</code></td><td><code>1</code></td><td>How many times to run everything; the table shows medians</td></tr>
+</table>
+<h2>What is measured</h2>
+<p>The harness is a client. It decodes every image into a framebuffer, answers each <code>sync</code> once the frame is applied, and sends a <code>nop</code> every 5 seconds, as the web client does. Each scenario runs on a fresh session. <b>Bytes</b> are the TCP payload through the proxy, and <b>server CPU</b> is the CPU time of the occamyd and guacd containers during the measured part of a scenario.</p>
+<p>A proxy inside the harness carries every connection. It adds half the RTT in each direction and serializes at the bandwidth, with a queue of twice the bandwidth-delay product. It does not emulate loss. See <a href="#">the spec</a> for the scenarios and how the targets are judged.</p>
+</td></tr></table>
+</body>
+</html>

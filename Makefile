@@ -42,6 +42,15 @@ bench: build
 	go run ./bench -engine $(CONTAINER_ENGINE) $(BENCH_FLAGS)
 .PHONY: bench
 
+# corpus records the frames the codec measurement works on
+# (bench/testdata/corpus/README.md) from the bench desktop with a terminal
+# and a browser added.
+corpus:
+	$(CONTAINER_ENGINE) build -t occamy-bench-corpus -f docker/bench/desktop/Dockerfile \
+		--build-arg EXTRA_PACKAGES="dillo procps xterm" .
+	go run ./bench/vnccapture -engine $(CONTAINER_ENGINE) -image occamy-bench-corpus
+.PHONY: corpus
+
 # lint needs golangci-lint v2 (https://golangci-lint.run), as CI uses.
 lint:
 	golangci-lint run
