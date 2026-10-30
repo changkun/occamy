@@ -7,6 +7,7 @@ package vnc
 import (
 	"encoding/binary"
 	"image"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -77,13 +78,14 @@ const (
 const maxClipboard = 4 << 20
 
 // appendSetup appends the messages sent after the handshake:
-// SetPixelFormat and SetEncodings.
+// SetPixelFormat and SetEncodings, with the extensions' pseudo-encodings
+// after the encodings.
 func appendSetup(p []byte) []byte {
 	p = append(p, msgSetPixelFormat, 0, 0, 0)
 	p = append(p, pixelFormat[:]...)
 	p = append(p, msgSetEncodings, 0)
-	p = binary.BigEndian.AppendUint16(p, uint16(len(encodings))) // #nosec G115 -- a short constant list
-	for _, e := range encodings {
+	p = binary.BigEndian.AppendUint16(p, uint16(len(encodings)+len(extensions))) // #nosec G115 -- short constant lists
+	for _, e := range slices.Concat(encodings, extensions) {
 		p = binary.BigEndian.AppendUint32(p, uint32(e)) // #nosec G115 -- encodings are signed on the wire
 	}
 	return p

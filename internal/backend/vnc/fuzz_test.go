@@ -104,8 +104,16 @@ func FuzzHandshake(f *testing.F) {
 		f.Add(seed, true)
 	}
 	f.Fuzz(func(t *testing.T, data []byte, preferAuth bool) {
-		pw := func() (string, error) { return "hunter2", nil }
-		init, err := handshake(bytes.NewReader(data), io.Discard, pw, preferAuth, fuzzLimits)
+		// TLS is pretended: the handshake goes on in the clear, so that
+		// the fuzzer reaches VeNCrypt's inner authentication.
+		a := auth{
+			password:    func() (string, error) { return "hunter2", nil },
+			plain:       func() (string, string, error) { return "alice", "hunter2", nil },
+			hasUser:     preferAuth,
+			hasPassword: preferAuth,
+			startTLS:    func() error { return nil },
+		}
+		init, err := handshake(bytes.NewReader(data), io.Discard, a, fuzzLimits)
 		if err != nil {
 			return
 		}

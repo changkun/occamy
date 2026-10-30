@@ -7,18 +7,28 @@
 // session's framebuffer
 // (specs/008-native-architecture/native-vnc-backend.md). It asks for
 // screen updates only while a viewer can see the screen, and asks the
-// session's owner for a password that its configuration lacks.
+// session's owner for credentials that its configuration lacks.
 //
 // It speaks RFB 3.3, 3.7 and 3.8 with the security types None and VNC
 // Authentication, and the encodings Raw, CopyRect, DesktopSize and
 // Cursor. Pixels arrive in the framebuffer's own layout, so a rectangle
 // is copied into it without conversion. Every length the server sends is
 // checked against a limit before anything is read or allocated for it.
+//
+// It also speaks these extensions of the community RFB specification
+// (rfbproto) when the server offers them: VeNCrypt with TLS and an X.509
+// certificate checked by a TLS policy, and Plain, None or VNC
+// Authentication within (vencrypt.go); ExtendedDesktopSize, so that the
+// owner can resize the remote screen (desktopsize.go); ContinuousUpdates
+// with Fence (continuous.go); QEMU Extended Key Events with physical key
+// codes (qemukeys.go); Extended Clipboard in UTF-8 (clipboard.go); and
+// LastRect (extensions.go).
 package vnc
 
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"image"
@@ -60,6 +70,9 @@ const (
 	readBuffer = 64 << 10
 	// writeBuffer is the most queued input written in one write.
 	writeBuffer = 4 << 10
+	// controlQueue is the number of answers to the server's Fences that
+	// wait to be written before the reader waits for the writer.
+	controlQueue = 16
 )
 
 var (
@@ -89,11 +102,19 @@ type Config struct {
 	// Addr is the server's host and TCP port, not a VNC display number.
 	// The port defaults to 5900.
 	Addr string
+	// Username is the username for VeNCrypt's Plain authentication. If
+	// it is set, Plain is chosen over VeNCrypt's other subtypes.
+	Username string
 	// Password is the VNC password, of which VNC Authentication uses the
-	// first 8 bytes. If it is empty and the server asks for one, the
-	// session's owner is asked. If it is set and the server offers both
-	// None and VNC Authentication, VNC Authentication is chosen.
+	// first 8 bytes, or the password for VeNCrypt's Plain, which uses all
+	// of it. If it is empty and the server asks for one, the session's
+	// owner is asked, as for a username that Plain needs. If it is set and
+	// the server offers both None and VNC Authentication, VNC
+	// Authentication is chosen.
 	Password string
+	// TLS is the policy for the server's certificate when VeNCrypt runs
+	// TLS. VeNCrypt is chosen whenever a server offers it.
+	TLS TLS
 	// DialTimeout bounds the TCP connection and defaults to 15 seconds.
 	// Only Run's context bounds the handshake that follows, since it may
 	// wait for the owner to answer a prompt.
@@ -106,7 +127,9 @@ type Config struct {
 // backend.Backend.
 type Backend struct {
 	addr        string
+	username    string
 	password    string
+	tls         tlsPolicy
 	dialTimeout time.Duration
 	log         *slog.Logger
 	limits      limits
@@ -137,9 +160,16 @@ func New(cfg Config) (*Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	host, _, _ := net.SplitHostPort(addr)
+	policy, err := newTLSPolicy(cfg.TLS, host)
+	if err != nil {
+		return nil, err
+	}
 	return &Backend{
 		addr:        addr,
+		username:    cfg.Username,
 		password:    cfg.Password,
+		tls:         policy,
 		dialTimeout: cfg.DialTimeout,
 		log:         cfg.Logger,
 		limits:      defaultLimits,
@@ -180,6 +210,11 @@ func (b *Backend) Class() backend.Class { return backend.Graphical }
 // which sends size changes and cursor shapes before it looks at the
 // requested region, keeps that region as the union of the requests, so
 // the second merges with the first.
+//
+// A server that supports ContinuousUpdates and Fence pushes updates
+// instead: the backend enables them for the whole screen while
+// d.Visible and disables them while nobody can see, and asks for no
+// changes of its own.
 func (b *Backend) Demand(d backend.Demand) {
 	b.visible.Store(d.Visible)
 	b.mu.Lock()
@@ -192,9 +227,11 @@ func (b *Backend) Demand(d backend.Demand) {
 
 // Input implements backend.Backend. Key and Text become key events,
 // Pointer and Wheel pointer events, and text Clipboard content becomes
-// the server's cut text in Latin-1. Resize is ignored: without
-// ExtendedDesktopSize the server's size is fixed and viewers scale.
-// TermInput fails with ErrUnsupportedInput.
+// the server's clipboard. A Key with a physical code becomes a QEMU
+// Extended Key Event once the server has asked for them. Resize asks for
+// the screen's new size with SetDesktopSize once the server has shown
+// that it supports ExtendedDesktopSize; without it, the server's size is
+// fixed and viewers scale. TermInput fails with ErrUnsupportedInput.
 //
 // Input queues what it is given and returns at once. Input that arrives
 // while Run is still connecting is written once the handshake ends. The
@@ -210,10 +247,7 @@ func (b *Backend) Input(ev backend.InputEvent) error {
 	var p []byte
 	switch ev := ev.(type) {
 	case backend.Key:
-		if ev.Keysym == 0 {
-			return nil
-		}
-		p = appendKey(nil, ev.Keysym, ev.Down)
+		p = r.key(ev)
 	case backend.Text:
 		for _, c := range ev.Text {
 			if k, ok := textKeysym(c); ok {
@@ -228,8 +262,9 @@ func (b *Backend) Input(ev backend.InputEvent) error {
 		if !isText(ev.MIME) {
 			return nil
 		}
-		p = appendCutText(nil, ev.Data)
+		p = r.clipboard(ev.Data)
 	case backend.Resize:
+		r.resize(ev.Width, ev.Height, b.limits)
 		return nil
 	default:
 		return fmt.Errorf("%w: %T", ErrUnsupportedInput, ev)
@@ -239,10 +274,12 @@ func (b *Backend) Input(ev backend.InputEvent) error {
 
 // run is the state of one Run that Input and Demand share.
 type run struct {
-	queue  chan []byte   // client messages from Input, for the writer
-	queued atomic.Int64  // the bytes in queue and not yet written
-	kick   chan struct{} // asks the writer to reconsider an update request
-	werr   error         // the writer's error; read after it has ended
+	queue   chan []byte   // client messages from Input, for the writer
+	queued  atomic.Int64  // the bytes in queue and not yet written
+	kick    chan struct{} // asks the writer to reconsider what is due
+	control chan []byte   // answers to the server's Fences, for the writer
+	wdone   chan struct{} // closed when the writer has ended
+	werr    error         // the writer's error; read after it has ended
 
 	mu      sync.Mutex
 	size    image.Point // the screen, zero until the handshake ends
@@ -251,13 +288,19 @@ type run struct {
 	buttons uint8       // the pointer's buttons, as last sent
 	pos     image.Point // the pointer, as last sent
 	scroll  image.Point // pixels scrolled toward the next wheel press
+	cont    continuous  // ContinuousUpdates and Fence
+	desk    desktop     // ExtendedDesktopSize
+	keys    extKeys     // QEMU Extended Key Events
+	clip    clipboard   // Extended Clipboard
 }
 
 func newRun() *run {
 	return &run{
-		queue: make(chan []byte, inputQueue),
-		kick:  make(chan struct{}, 1),
-		full:  true,
+		queue:   make(chan []byte, inputQueue),
+		kick:    make(chan struct{}, 1),
+		control: make(chan []byte, controlQueue),
+		wdone:   make(chan struct{}),
+		full:    true,
 	}
 }
 
@@ -282,7 +325,8 @@ func (r *run) send(p []byte) error {
 	}
 }
 
-// poke asks the writer to send an update request if one is due.
+// poke asks the writer to send what is due: an update request, or a
+// message of an extension.
 func (r *run) poke() {
 	select {
 	case r.kick <- struct{}{}:
@@ -290,20 +334,35 @@ func (r *run) poke() {
 	}
 }
 
-// request returns the update request to send now, or nil. One is due
-// when a viewer can see the screen and no request has been sent since
-// the last update. It asks for the whole screen after the handshake and
-// after a resize, and for changes otherwise.
-func (r *run) request(visible bool) []byte {
+// due writes to w the messages that are due: continuous updates enabled
+// or disabled, SetDesktopSize, an update request, and the clipboard's.
+// A clipboard's text is compressed after r.mu is released.
+func (r *run) due(w io.Writer, visible bool) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	if !visible || r.pending || r.size == (image.Point{}) {
-		return nil
+	p := r.continuousDue(nil, visible)
+	p = r.desktopSizeDue(p)
+	p = r.request(p, visible)
+	p, text := r.clipboardDue(p)
+	r.mu.Unlock()
+	if text != nil {
+		p = appendClipboardProvide(p, text)
+	}
+	_, _ = w.Write(p)
+}
+
+// request appends the update request to send now, if one is due. One is
+// due when a viewer can see the screen and no request has been sent
+// since the last update. It asks for the whole screen after the
+// handshake and after a resize, and for changes otherwise, except while
+// continuous updates bring the changes. r.mu must be held.
+func (r *run) request(p []byte, visible bool) []byte {
+	if !visible || r.pending || r.size == (image.Point{}) || r.cont.on && !r.full {
+		return p
 	}
 	r.pending = true
 	incremental := !r.full
 	r.full = false
-	return appendUpdateRequest(nil, incremental, image.Rectangle{Max: r.size})
+	return appendUpdateRequest(p, incremental, image.Rectangle{Max: r.size})
 }
 
 // updated records that an update has been applied, and that it resized
@@ -363,13 +422,14 @@ func (b *Backend) connect(ctx context.Context, sink backend.Sink, r *run) error 
 	}()
 
 	br := bufio.NewReaderSize(nc, readBuffer)
-	init, err := handshake(br, nc, b.passwordFunc(ctx, sink), b.password != "", b.limits)
+	c := &conn{Reader: br, Writer: nc}
+	init, err := handshake(c, c, b.auth(ctx, sink, nc, br, c), b.limits)
 	if err != nil {
 		return failure(ctx, err)
 	}
 	b.log.Debug("vnc: connected", "addr", b.addr, "version", fmt.Sprintf("3.%d", init.version),
 		"security", init.security, "width", init.size.X, "height", init.size.Y)
-	if _, err := nc.Write(appendSetup(nil)); err != nil {
+	if _, err := c.Write(appendSetup(nil)); err != nil {
 		return failure(ctx, fmt.Errorf("vnc: %w", err))
 	}
 	sink.Resize(init.size.X, init.size.Y)
@@ -380,11 +440,13 @@ func (b *Backend) connect(ctx context.Context, sink backend.Sink, r *run) error 
 	r.size = init.size
 	r.mu.Unlock()
 
-	dec := newDecoder(ctx, br, sink, init.size, b.limits, b.log)
+	dec := newDecoder(ctx, c.Reader, sink, init.size, b.limits, b.log)
+	dec.peer = r
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		if r.werr = r.writeLoop(nc, done, &b.visible); r.werr != nil {
+		defer close(r.wdone) // a reader that waits to answer a Fence stops waiting
+		if r.werr = r.writeLoop(c.Writer, done, &b.visible); r.werr != nil {
 			nc.Close() // stops the reader too
 		}
 	})
@@ -402,26 +464,79 @@ func (b *Backend) connect(ctx context.Context, sink backend.Sink, r *run) error 
 	return err
 }
 
-// passwordFunc returns the configured password, or asks the owner for
-// one. The answer is passed to the handshake and kept nowhere else.
-func (b *Backend) passwordFunc(ctx context.Context, sink backend.Sink) func() (string, error) {
-	return func() (string, error) {
-		if b.password != "" {
-			return b.password, nil
-		}
-		p := backend.Prompt{
-			Instruction: "VNC password for " + b.addr,
-			Fields:      []backend.PromptField{{Label: "Password", Secret: true}},
-		}
-		reply, err := sink.Prompt(ctx, p)
-		if err != nil {
-			return "", fmt.Errorf("vnc: prompt: %w", err)
-		}
-		if len(reply.Answers) != 1 {
-			return "", fmt.Errorf("vnc: prompt: %d answers for 1 question", len(reply.Answers))
-		}
-		return reply.Answers[0], nil
+// auth returns what the handshake needs: the credentials, asked of the
+// owner through sink when the configuration lacks them, and a TLS
+// handshake on nc that replaces both directions of c. br is what the
+// handshake has read nc through.
+func (b *Backend) auth(ctx context.Context, sink backend.Sink, nc net.Conn, br *bufio.Reader, c *conn) auth {
+	return auth{
+		password: func() (string, error) {
+			_, pw, err := b.credentials(ctx, sink, false)
+			return pw, err
+		},
+		plain: func() (string, string, error) {
+			return b.credentials(ctx, sink, true)
+		},
+		hasUser:     b.username != "",
+		hasPassword: b.password != "",
+		requireTLS:  b.tls.require,
+		startTLS: func() error {
+			// The server waits for the client's hello: anything it sent
+			// before would be read as plain text, and is a protocol error.
+			if br.Buffered() > 0 {
+				return errors.New("vnc: the server sent data before the TLS handshake")
+			}
+			tc := tls.Client(nc, b.tls.config(b.addr, b.log))
+			if err := tc.HandshakeContext(ctx); err != nil {
+				return fmt.Errorf("vnc: TLS: %w", err)
+			}
+			cs := tc.ConnectionState()
+			b.log.Debug("vnc: TLS", "addr", b.addr, "version", tls.VersionName(cs.Version),
+				"cipher", tls.CipherSuiteName(cs.CipherSuite))
+			c.Reader = bufio.NewReaderSize(tc, readBuffer)
+			c.Writer = tc
+			return nil
+		},
 	}
+}
+
+// credentials returns the configured username, if user, and password,
+// asking the owner for the ones the configuration lacks. The answers are
+// passed to the handshake and kept nowhere else.
+func (b *Backend) credentials(ctx context.Context, sink backend.Sink, user bool) (string, string, error) {
+	name, pw := b.username, b.password
+	var fields []backend.PromptField
+	var what []string
+	if user && name == "" {
+		fields = append(fields, backend.PromptField{Label: "Username"})
+		what = append(what, "username")
+	}
+	if pw == "" {
+		fields = append(fields, backend.PromptField{Label: "Password", Secret: true})
+		what = append(what, "password")
+	}
+	if len(fields) == 0 {
+		return name, pw, nil
+	}
+	p := backend.Prompt{
+		Instruction: "VNC " + strings.Join(what, " and ") + " for " + b.addr,
+		Fields:      fields,
+	}
+	reply, err := sink.Prompt(ctx, p)
+	if err != nil {
+		return "", "", fmt.Errorf("vnc: prompt: %w", err)
+	}
+	if len(reply.Answers) != len(fields) {
+		return "", "", fmt.Errorf("vnc: prompt: %d answers for %d questions", len(reply.Answers), len(fields))
+	}
+	answers := reply.Answers
+	if user && name == "" {
+		name, answers = answers[0], answers[1:]
+	}
+	if pw == "" {
+		pw = answers[0]
+	}
+	return name, pw, nil
 }
 
 // failure returns ctx's error if ctx is done, since closing the
@@ -450,8 +565,9 @@ func (r *run) readLoop(d *decoder) error {
 	}
 }
 
-// writeLoop writes queued input and update requests until done is closed
-// or a write fails. Whatever is ready is written in one write.
+// writeLoop writes queued input, answers to Fences, and what is due
+// until done is closed or a write fails. Whatever is ready is written in
+// one write.
 func (r *run) writeLoop(w io.Writer, done <-chan struct{}, visible *atomic.Bool) error {
 	// A bufio.Writer's error sticks, so Flush reports a failed Write.
 	bw := bufio.NewWriterSize(w, writeBuffer)
@@ -461,18 +577,22 @@ func (r *run) writeLoop(w io.Writer, done <-chan struct{}, visible *atomic.Bool)
 		select {
 		case <-done:
 			return nil
+		case p := <-r.control:
+			_, _ = bw.Write(p)
 		case p := <-r.queue:
 			r.write(bw, p)
 		case <-r.kick:
-			_, _ = bw.Write(r.request(visible.Load()))
+			r.due(bw, visible.Load())
 		}
 	more:
 		for bw.Buffered() < writeBuffer {
 			select {
+			case p := <-r.control:
+				_, _ = bw.Write(p)
 			case p := <-r.queue:
 				r.write(bw, p)
 			case <-r.kick:
-				_, _ = bw.Write(r.request(visible.Load()))
+				r.due(bw, visible.Load())
 			default:
 				break more
 			}

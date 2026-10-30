@@ -58,11 +58,31 @@ type serverInit struct {
 	name     string
 }
 
+// auth is what the security handshake needs from the backend.
+type auth struct {
+	// password returns the password for VNC Authentication, and plain
+	// the username and password for VeNCrypt's Plain, asking the owner
+	// for what the configuration lacks.
+	password func() (string, error)
+	plain    func() (user, password string, err error)
+	// hasUser and hasPassword say what the configuration holds. They
+	// choose between the types a server offers, so that nobody is asked
+	// for credentials that a server does not need.
+	hasUser, hasPassword bool
+	// startTLS runs a TLS handshake on the connection, after which the
+	// handshake's reads and writes go through TLS. Nil leaves VeNCrypt
+	// out.
+	startTLS func() error
+	// requireTLS refuses every security type but VeNCrypt's X.509
+	// subtypes.
+	requireTLS bool
+}
+
 // handshake runs the handshake from ProtocolVersion to ServerInit (RFC
 // 6143, sections 7.1 to 7.3), asking for the screen to be shared with
-// other clients. password returns the password when VNC Authentication
-// is chosen; preferAuth chooses it over None when the server offers both.
-func handshake(r io.Reader, w io.Writer, password func() (string, error), preferAuth bool, lim limits) (serverInit, error) {
+// other clients. r and w are the connection, whose two directions
+// a.startTLS replaces when VeNCrypt runs TLS.
+func handshake(r io.Reader, w io.Writer, a auth, lim limits) (serverInit, error) {
 	var init serverInit
 	var b [24]byte
 	if err := read(r, b[:12]); err != nil {
@@ -76,7 +96,7 @@ func handshake(r io.Reader, w io.Writer, password func() (string, error), prefer
 	if _, err := w.Write(fmt.Appendf(nil, "RFB 003.%03d\n", v)); err != nil {
 		return init, fmt.Errorf("vnc: %w", err)
 	}
-	if init.security, err = security(r, w, v, password, preferAuth); err != nil {
+	if init.security, err = security(r, w, v, a); err != nil {
 		return init, err
 	}
 	if _, err := w.Write([]byte{1}); err != nil { // ClientInit, shared
@@ -141,7 +161,7 @@ func decimal(b []byte) (int, bool) {
 
 // security runs the security handshake for the minor version v and
 // returns the type used.
-func security(r io.Reader, w io.Writer, v int, password func() (string, error), preferAuth bool) (byte, error) {
+func security(r io.Reader, w io.Writer, v int, a auth) (byte, error) {
 	var t byte
 	if v == 3 {
 		// The server decides (RFC 6143, appendix A.1).
@@ -153,6 +173,9 @@ func security(r io.Reader, w io.Writer, v int, password func() (string, error), 
 		case secInvalid:
 			return 0, refused(r)
 		case secNone, secVNCAuth:
+			if a.requireTLS {
+				return 0, fmt.Errorf("%w: the server chose type %d, without TLS", ErrNoSecurityType, st)
+			}
 			t = byte(st)
 		default:
 			return 0, fmt.Errorf("%w: the server chose type %d", ErrNoSecurityType, st)
@@ -169,29 +192,25 @@ func security(r io.Reader, w io.Writer, v int, password func() (string, error), 
 		if err := read(r, offered); err != nil {
 			return 0, fmt.Errorf("vnc: read the security types: %w", err)
 		}
-		if t = choose(offered, preferAuth); t == secInvalid {
+		if t = choose(offered, a); t == secInvalid {
 			return 0, fmt.Errorf("%w: the server offers %v", ErrNoSecurityType, offered)
 		}
 		if _, err := w.Write([]byte{t}); err != nil {
 			return 0, fmt.Errorf("vnc: %w", err)
 		}
 	}
-	if t == secVNCAuth {
-		var challenge [16]byte
-		if err := read(r, challenge[:]); err != nil {
-			return 0, fmt.Errorf("vnc: read the challenge: %w", err)
-		}
-		pw, err := password()
-		if err != nil {
-			return 0, err
-		}
-		response := vncAuthResponse(pw, challenge)
-		if _, err := w.Write(response[:]); err != nil {
-			return 0, fmt.Errorf("vnc: %w", err)
-		}
+	var err error
+	switch t {
+	case secVNCAuth:
+		err = vncAuth(r, w, a.password)
+	case secVeNCrypt:
+		err = veNCrypt(r, w, a)
 	}
-	// SecurityResult follows VNC Authentication, and None only in 3.8
-	// (RFC 6143, appendix A).
+	if err != nil {
+		return 0, err
+	}
+	// SecurityResult follows VNC Authentication and VeNCrypt, and None
+	// only in 3.8 (RFC 6143, appendix A).
 	if t == secNone && v < 8 {
 		return t, nil
 	}
@@ -209,13 +228,38 @@ func security(r io.Reader, w io.Writer, v int, password func() (string, error), 
 	return t, nil
 }
 
-// choose picks a security type from those offered: VNC Authentication
-// over None if preferAuth or if None is not offered, None otherwise, or
-// secInvalid if neither is offered.
-func choose(offered []byte, preferAuth bool) byte {
+// vncAuth runs VNC Authentication: the server's challenge comes back
+// encrypted with the password.
+func vncAuth(r io.Reader, w io.Writer, password func() (string, error)) error {
+	var challenge [16]byte
+	if err := read(r, challenge[:]); err != nil {
+		return fmt.Errorf("vnc: read the challenge: %w", err)
+	}
+	pw, err := password()
+	if err != nil {
+		return err
+	}
+	response := vncAuthResponse(pw, challenge)
+	if _, err := w.Write(response[:]); err != nil {
+		return fmt.Errorf("vnc: %w", err)
+	}
+	return nil
+}
+
+// choose picks a security type from those offered: VeNCrypt if a can
+// start TLS, since its X.509 subtypes encrypt; otherwise, unless
+// a.requireTLS, VNC Authentication over None if a password is configured
+// or None is not offered, None if it is offered; or secInvalid.
+func choose(offered []byte, a auth) byte {
+	if a.startTLS != nil && slices.Contains(offered, secVeNCrypt) {
+		return secVeNCrypt
+	}
+	if a.requireTLS {
+		return secInvalid
+	}
 	none, auth := slices.Contains(offered, secNone), slices.Contains(offered, secVNCAuth)
 	switch {
-	case auth && (preferAuth || !none):
+	case auth && (a.hasPassword || !none):
 		return secVNCAuth
 	case none:
 		return secNone
