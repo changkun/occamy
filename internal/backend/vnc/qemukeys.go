@@ -38,11 +38,13 @@ type extKeys struct {
 
 // hidToXT maps the USB HID usages of the keyboard page (0x07) to XT
 // scancodes as RFB keycodes: a scancode below 0x80 as it is, and one
-// prefixed by 0xe0 with its high bit set. It is generated from
-// keycodemapdb's data/keymaps.csv (the "USB Keycodes" and "AT set1
-// keycode" columns), which QEMU and noVNC also derive their tables from,
-// for the usages of the HID specification up to 0xe7. As rfbproto
-// requires, PrintScreen is 0x54 and Pause 0xc6. Zero means no mapping.
+// prefixed by 0xe0 with its high bit set. Lang1 and Lang2, the Korean
+// keys, are the single bytes they send, 0xf2 and 0xf1, which have no
+// release codes. It is generated from keycodemapdb's data/keymaps.csv
+// (the "USB Keycodes" and "AT set1 keycode" columns), which QEMU and
+// noVNC also derive their tables from, for the usages of the HID
+// specification up to 0xe7. As rfbproto requires, PrintScreen is 0x54
+// and Pause 0xc6. Zero means no mapping.
 var hidToXT = [0xe8]uint8{
 	0x04: 0x1e, // KeyA
 	0x05: 0x30, // KeyB
@@ -177,6 +179,8 @@ var hidToXT = [0xe8]uint8{
 	0x8a: 0x79, // Convert
 	0x8b: 0x7b, // NonConvert
 	0x8c: 0x5c, // International6, the keypad's Japanese comma
+	0x90: 0xf2, // Lang1, Hangul/English
+	0x91: 0xf1, // Lang2, Hanja
 	0x92: 0x78, // Katakana
 	0x93: 0x77, // Hiragana
 	0x94: 0x76, // Lang5

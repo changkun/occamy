@@ -411,7 +411,10 @@ leaves only RDP on the bridge.
     or with one the table lacks, goes as a KeyEvent, or not at all
     without a keysym. The table covers the keyboard page's usages 0x04
     to 0xe7, generated from keycodemapdb's `keymaps.csv` (USB to AT set
-    1, with an E0 prefix as the high bit, as QEMU numbers keys).
+    1, with an E0 prefix as the high bit, as QEMU numbers keys). Lang1
+    and Lang2, the Korean keys, are the single set 1 bytes they send,
+    0xf2 and 0xf1, as keycodemapdb has them; the first generation left
+    them out, and review caught it.
   - **Extended Clipboard.** The backend answers the server's caps with
     its own: text, the actions request, peek, notify and provide, and
     4 MiB of text taken unasked. Before the server's caps, and with a
