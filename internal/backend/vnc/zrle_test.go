@@ -247,10 +247,31 @@ func TestZlibStreamLevels(t *testing.T) {
 	}
 }
 
+func TestZlibStoredBlockPastRect(t *testing.T) {
+	// A ZRLE rectangle of 8×1, 25 bytes of data raw, whose compressed
+	// length covers the zlib header, a stored block's header that claims
+	// 25 bytes, and 10 of them. The inflater may not read the 15 Bells
+	// and the flush that follow as the rest of the block.
+	r := image.Rect(0, 0, 8, 1)
+	z := slices.Concat([]byte{0x78, 0x01, 0x00, 25, 0, ^byte(25), 0xff}, make([]byte, 10))
+	msg := putUpdate(zrleRaw(r, z))
+	rest := append(bytes.Repeat([]byte{msgBell}, 15), 0x00, 0x00, 0x00, 0xff, 0xff)
+	in := bytes.NewReader(slices.Concat(msg, rest))
+	sink := &backendtest.Sink{}
+	sink.Resize(8, 8)
+	d := newDecoder(context.Background(), in, sink, image.Pt(8, 8), defaultLimits, discardLogger)
+	if _, err := d.next(); err == nil || !strings.Contains(err.Error(), "ends before the rectangle's pixels") {
+		t.Errorf("next = %v, want the rectangle's data short of its pixels", err)
+	}
+	if in.Len() != len(rest) {
+		t.Errorf("%d bytes after the rectangle are left, want %d", in.Len(), len(rest))
+	}
+}
+
 func TestZlibTailKept(t *testing.T) {
-	// The inflater hands out data at the end of a stored block, which is
-	// the flush's, so a second flush in a rectangle is left for the next
-	// rectangle, and its stream goes on from there.
+	// The inflater hands out data at an empty stored block, the flush, so
+	// a second flush in a rectangle is left for the next rectangle, and its
+	// stream goes on from there.
 	var buf bytes.Buffer
 	w := zlib.NewWriter(&buf)
 	rect := func(r image.Rectangle, data []byte) []byte {
