@@ -9,7 +9,7 @@ affects:
   - docs/protocol-cn.md
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -49,14 +49,31 @@ evolve without breaking old clients.
   length-prefixed variable fields. Flag bit 0 marks a message that
   receivers may ignore if they do not know its type. Unknown non-ignorable
   types close the connection with `unsupported`.
-- **Handshake:** client `hello` carries the protocol version, token,
-  client name and capabilities (codecs, max texture size, terminal
-  support, pixel ratio, initial size). Server `welcome` carries the
+- **Handshake:** client `hello` carries the protocol version, client
+  name and capabilities (codecs, max texture size, terminal support,
+  pixel ratio, initial size and visibility). Server `welcome` carries the
   session ID, role, backend class (terminal or graphical), the agreed
   capabilities, and an initial `snapshot` that follows immediately.
+  - **One round trip to the first frame.** `hello` travels in the
+    WebSocket upgrade request, base64url-encoded in the `hello` query
+    parameter, and the server sends `welcome` and the snapshot right
+    after `101 Switching Protocols`, without waiting for a message.
+    v0 needs two round trips after sign-in, and a separate `hello` would
+    make v1 no better.
+  - **The token never goes in the URL.** The client offers two
+    subprotocols, `occamy.v1` and `occamy.v1.token.<token>` with the
+    token base64url-encoded, as Kubernetes does for its WebSocket API.
+    Browsers can set this header and proxies do not log it as they log
+    URLs. The server authenticates the token, answers with `occamy.v1`
+    alone, and closes the connection on failure. Native clients may
+    send `Authorization: Bearer` instead. `hello` itself carries no
+    secret.
 - **Server to client:** `resize`, `tile` (frame ID, rectangle, codec,
-  payload), `copy-rect`, `frame-end` (frame ID and timestamp), `cursor`
-  (image and hotspot) and `cursor-move`, `term-data` (bytes),
+  payload, and an optional client cache slot to store it in; the `cached`
+  codec draws a stored slot instead of a payload, see
+  [graphics-pipeline](graphics-pipeline.md)), `copy-rect`, `frame-end`
+  (frame ID, timestamp and the last input it reflects), `cursor` (image
+  and hotspot) and `cursor-move`, `term-data` (bytes),
   `term-snapshot`, `clipboard` (MIME type and data), `bell`, `title`,
   `prompt` (keyboard-interactive or credential request), `viewer-joined`
   and `viewer-left`, `ping`, and `close` (code and reason).
@@ -65,25 +82,44 @@ evolve without breaking old clients.
   IME), `term-input` (bytes produced by the client's terminal emulator,
   such as xterm.js `onData`), `pointer` (x, y, button mask), `wheel` (dx,
   dy, with pixel or line mode), `resize-request`, `clipboard`, `prompt-reply`,
-  `frame-ack` (frame ID and decode time), `pong`, and `close`.
+  `frame-ack` (frame ID and decode time), `view` (whether the client is
+  visible, and the rectangle of the screen its viewport shows), `pong`,
+  and `close`.
+- **Terminals are framed screen diffs.** The server keeps the terminal's
+  screen ([native-ssh-backend](native-ssh-backend.md)) and, once per
+  frame, sends what changed as `term-data`: escape sequences that turn
+  the client's screen into the server's, as mosh does. A `frame-end`
+  closes each terminal frame like a graphical one. Intermediate screens
+  are skipped under bulk output, and the client can confirm or undo its
+  predicted echo from the input sequence number in `frame-end`.
 - **Flow control:** the server keeps at most `window` unacknowledged
   frames per viewer (agreed in `welcome`, default 2). While the window is
   full, damage accumulates (see [session-core](session-core.md)) and is
-  sent as one coalesced frame once an ack arrives. Terminal data is not
-  windowed but is bounded by the WebSocket write buffer, with a
-  disconnect-on-overflow limit.
-- **Latency:** the design must meet the 50 ms budget in
-  [benchmark](benchmark.md).
+  sent as one coalesced frame once an ack arrives. Terminal frames are
+  windowed the same way, so bulk output coalesces instead of queueing.
+- **Latency:** the design must meet the targets in
+  [docs/benchmarks.md](../../docs/benchmarks.md#targets) and the 50 ms
+  budget in [benchmark](benchmark.md). The objective is the time from an
+  input until its effect is visible to the viewer who made it, and only
+  for what a viewer can see ([session-core](session-core.md), Input to
+  display).
   - Every input message carries a u32 sequence number, and `frame-end`
     carries the last sequence number the frame reflects. A client can
     then measure input-to-update latency exactly.
-  - The server sends small messages (`cursor-move`, `term-data`, `close`
-    and the like) ahead of queued tiles.
-  - A tile message has a size cap, so a small message waits behind at most
-    one tile.
+  - Frames carry states, so skipping a stale frame never loses an
+    input's effect. The frame after an input is sent at once, with the
+    tiles damaged since the input first.
+  - A viewer that reports itself hidden with `view` gets no frames, and
+    tiles outside its viewport wait until they are in view.
+  - Messages the user sees directly or that end the session (`cursor`,
+    `cursor-move`, `clipboard`, `bell`, `close`) are never queued behind
+    tiles.
+  - A tile message has a size cap, so anything waits behind at most one
+    tile.
   - Besides the frame window, the bytes in flight per viewer are capped
     near the link's bandwidth-delay product, estimated from `frame-ack`
-    round trips. Without that cap, one large frame fills the TCP buffers.
+    round trips with a delay-based controller. Without that cap, one
+    large frame fills the TCP buffers.
   - The client draws the cursor locally from `cursor`, so pointer motion
     does not wait for a round trip.
 - **Versioning:** the major version lives in the subprotocol name. Minor
@@ -139,9 +175,10 @@ Settled on 2026-10-29.
    Tune it with the graphics pipeline's slow-viewer test and the
    [benchmark](benchmark.md) under N1 and N2 before the release
    candidate.
-4. **No terminal flow control for beta.** Terminal data is bounded by the
-   WebSocket write buffer, and a viewer that overflows it is
-   disconnected. Byte credits can come later as a capability.
+4. **Terminals are framed screen diffs under the frame window**
+   (revised 2026-10-30, owner's call). The earlier decision, raw bytes
+   bounded by the write buffer with disconnect on overflow, would send
+   575 KiB for T2 where guacd sends 86 KiB, against a target of 8.6 KiB.
 5. **One session per WebSocket for beta.** The ignorable flag and
    never-reused type numbers leave room to add streams later through a
    capability, for file transfer for example.
@@ -150,6 +187,14 @@ Settled on 2026-10-29.
    reference implementation. Golden vectors generated by the package are
    checked against the examples in the document, and a disagreement
    between the two is a bug, fixed before the release candidate.
+8. **The first frame takes one round trip** (2026-10-30). `hello` rides
+   in the upgrade request and the token in `Sec-WebSocket-Protocol`, as
+   described under Handshake, because the baseline's G7 targets assume
+   one round trip at N1 and N2.
+9. **The scheduling objective is input to display, for what is seen**
+   (owner's call, 2026-10-30): `view` reports visibility and the
+   viewport, and the latency rules above replace an earlier rule that
+   sent small control messages ahead of tiles.
 
 ## Task Breakdown
 
