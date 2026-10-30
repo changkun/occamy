@@ -138,7 +138,7 @@ Occamy offers two APIs, the v0 routes:
   `client: true` only) and
 - `GET /api/v0/connect` is used for WebSocket based Occamy connection.
 
-They were `/api/v1/login` and `/api/v1/connect` until 0.6.0; `/api/v1`
+They were `/api/v1/login` and `/api/v1/connect` through 0.6.0; `/api/v1`
 now belongs to API v1, which is in progress
 ([specs/008](./specs/008-native-architecture/api-and-server-stack.md)).
 The v0 routes are removed at v1.0.

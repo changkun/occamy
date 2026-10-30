@@ -67,7 +67,8 @@ A connection goes through these steps:
 ## Occamy v1, in progress
 
 v1 is being built beside v0 on `master`. Nothing below serves a route
-yet; the released v0.5.0 behaves as described above. Each package names
+yet; released versions behave as described above, with the v0 routes
+under `/api/v1` through 0.6.0. Each package names
 the spec it implements.
 
 | Path | Role |
