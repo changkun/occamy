@@ -28,8 +28,12 @@ type sizeRecorder struct {
 
 func (s *sizeRecorder) Resize(w, h int) { s.resizes = append(s.resizes, image.Pt(w, h)) }
 func (s *sizeRecorder) Lock(r image.Rectangle) *image.RGBA {
-	if s.img == nil || !r.In(s.img.Rect) {
+	if s.img == nil {
 		s.img = image.NewRGBA(r)
+	} else if !r.In(s.img.Rect) {
+		// Grown to all that was locked, so that strips of one bitmap
+		// allocate only the first time.
+		s.img = image.NewRGBA(r.Union(s.img.Rect))
 	}
 	return s.img
 }
