@@ -107,12 +107,39 @@ type Client struct {
 	stats     Stats
 	finalized bool
 
-	// Owned by Run.
-	dec     decoder
-	cursors [maxPointerCache]cursor
-	frag    []byte
-	rbuf    []byte
-	errInfo ErrorInfo
+	// Owned by Connect, then Run.
+	ctx        context.Context // ends a wait for resizeEvery; Background if nil
+	dec        decoder
+	cursors    [maxPointerCache]cursor
+	frag       []byte
+	fragging   bool // a first fragment came, and its last has not
+	budget     int  // the pixels the current PDU may still decode
+	lastResize time.Time
+	rbuf       []byte
+	errInfo    ErrorInfo
+}
+
+// Limits on what the server makes the client do.
+const (
+	// maxSide and maxPixels bound the desktop, which the server sets in
+	// its Demand Active, as they bound the size the client asks for:
+	// 8192 pixels a side, the most a client may ask for ([MS-RDPBCGR]
+	// 2.2.1.3.2), and 128 MiB of RGBA in all.
+	maxSide   = 8192
+	maxPixels = 1 << 25
+	// resizeEvery is the least time between two resizes. A Demand Active
+	// that resizes the desktop sooner waits, so that a server cannot make
+	// the session reallocate its screen faster than ten times a second.
+	resizeEvery = 100 * time.Millisecond
+)
+
+// checkDesktop returns an error if a desktop of w×h is empty or exceeds
+// the limits.
+func checkDesktop(w, h int) error {
+	if w <= 0 || h <= 0 || w > maxSide || h > maxSide || w*h > maxPixels {
+		return fmt.Errorf("rdp: desktop of %d×%d is empty or exceeds the limits of %d pixels a side and %d in all", w, h, maxSide, maxPixels)
+	}
+	return nil
 }
 
 // Connect runs the RDP connection sequence over conn, which is connected
@@ -123,7 +150,7 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 	if cfg.Width == 0 {
 		cfg.Width, cfg.Height = 1024, 768
 	}
-	if cfg.Width < 200 || cfg.Height < 200 || cfg.Width > 8192 || cfg.Height > 8192 {
+	if cfg.Width < 200 || cfg.Height < 200 || checkDesktop(cfg.Width, cfg.Height) != nil {
 		return nil, fmt.Errorf("rdp: desktop size %d×%d out of range", cfg.Width, cfg.Height)
 	}
 	switch cfg.ColorDepth {
@@ -149,6 +176,7 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 		width:  cfg.Width,
 		height: cfg.Height,
 		stats:  Stats{Bitmaps: map[string]int{}, Ignored: map[string]int{}},
+		ctx:    ctx,
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Unix(1, 0)) })
 	err := c.connect(ctx)
@@ -263,7 +291,7 @@ func (c *Client) connect(ctx context.Context) error {
 
 	// Secure settings exchange and licensing, phases 5 and 6. Under TLS
 	// there is no security exchange.
-	if err := c.sendIO(c.clientInfo()); err != nil {
+	if err := c.sendClientInfo(); err != nil {
 		return err
 	}
 	for licensed := false; !licensed; {
@@ -286,10 +314,14 @@ func (c *Client) connect(ctx context.Context) error {
 		}
 	}
 
-	// Capabilities exchange, phase 7.
+	// Capabilities exchange, phase 7. A server that refuses the logon
+	// here says why in a Set Error Info PDU before it disconnects.
 	for {
 		data, err := c.readIOData()
 		if err != nil {
+			if c.errInfo != 0 {
+				return fmt.Errorf("%w (%w)", c.errInfo, err)
+			}
 			return err
 		}
 		done, err := c.handleShareControl(nil, data)
@@ -414,8 +446,10 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 	defer c.conn.Close()
 	stop := context.AfterFunc(ctx, func() { c.conn.Close() })
 	defer stop()
+	c.ctx = ctx
 	w, h := c.Size()
 	out.Resize(w, h)
+	c.lastResize = time.Now()
 	for {
 		f, buf, err := c.t.readFrame(c.rbuf)
 		c.rbuf = buf
@@ -466,8 +500,11 @@ func (c *Client) disconnected() error {
 // handleShareControl handles the share control PDUs in data, the data of
 // a Send Data Indication on the I/O channel. out is nil during the
 // connection sequence, which ends with the client's finalization PDUs:
-// done reports that.
+// done reports that. A server sends a Demand Active in a PDU of its own,
+// and a second in the same PDU is refused, so that a few bytes cannot
+// make the client reallocate its desktop again and again.
 func (c *Client) handleShareControl(out Output, data []byte) (done bool, err error) {
+	c.budget = c.pixelBudget()
 	for len(data) >= 2 {
 		r := reader{b: data}
 		total := int(r.u16())
@@ -485,6 +522,9 @@ func (c *Client) handleShareControl(out Output, data []byte) (done bool, err err
 		data = data[total:]
 		switch typ {
 		case pduDemandActive:
+			if done {
+				return false, errors.New("rdp: a second Demand Active in one PDU")
+			}
 			if err := c.activate(out, body); err != nil {
 				return false, err
 			}
@@ -492,9 +532,6 @@ func (c *Client) handleShareControl(out Output, data []byte) (done bool, err err
 		case pduDeactivateAll:
 			// A Demand Active follows, [MS-RDPBCGR] 1.3.1.3.
 		case pduData:
-			if out == nil {
-				continue
-			}
 			if err := c.handleShareData(out, body); err != nil {
 				return false, err
 			}
@@ -527,13 +564,36 @@ func (c *Client) activate(out Output, body []byte) error {
 		return err
 	}
 	if out != nil && resized {
+		if err := c.waitResize(); err != nil {
+			return err
+		}
 		out.Resize(caps.width, caps.height)
 	}
 	return nil
 }
 
+// waitResize waits until resizeEvery has passed since the last resize.
+func (c *Client) waitResize() error {
+	if wait := time.Until(c.lastResize.Add(resizeEvery)); wait > 0 {
+		ctx := c.ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		t := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
+	c.lastResize = time.Now()
+	return nil
+}
+
 // handleShareData handles a share data PDU after its share control
-// header.
+// header. During the connection sequence, when out is nil, it takes only
+// the reason a server gives before it disconnects.
 func (c *Client) handleShareData(out Output, p []byte) error {
 	r := reader{b: p}
 	r.u32() // shareId
@@ -550,6 +610,9 @@ func (c *Client) handleShareData(out Output, p []byte) error {
 		return errors.New("rdp: compressed PDU, though the client offered no compression")
 	}
 	body := r.b
+	if out == nil && typ2 != pdu2SetErrorInfo {
+		return nil
+	}
 	switch typ2 {
 	case pdu2Update:
 		c.count(func(s *Stats) { s.SlowPath++ })
@@ -625,7 +688,8 @@ const (
 	fragNext   = 0x3
 )
 
-// maxReassembly bounds a fragmented fast-path update.
+// maxReassembly bounds a fragmented fast-path update, and the client
+// advertises it as the largest it accepts (capMultifragment).
 const maxReassembly = 32 << 20
 
 // handleFastPath applies the updates of a fast-path update PDU,
@@ -634,6 +698,7 @@ func (c *Client) handleFastPath(out Output, f frame) error {
 	if f.hdr&0xc0 != 0 {
 		return errors.New("rdp: encrypted fast-path PDU under TLS")
 	}
+	c.budget = c.pixelBudget()
 	r := reader{b: f.data}
 	for r.len() > 0 {
 		hdr := r.u8()
@@ -650,8 +715,16 @@ func (c *Client) handleFastPath(out Output, f frame) error {
 		case fragSingle:
 		case fragFirst:
 			c.frag = append(c.frag[:0], p...)
+			c.fragging = true
 			continue
 		case fragNext, fragLast:
+			if !c.fragging {
+				// A fragment without its first, which a server that
+				// follows [MS-RDPBCGR] 2.2.9.1.2.1 does not send: dropped,
+				// not added to the last update.
+				c.count(func(s *Stats) { s.Ignored["orphan fragments"]++ })
+				continue
+			}
 			if len(c.frag)+len(p) > maxReassembly {
 				return errors.New("rdp: fragmented fast-path update too large")
 			}
@@ -659,14 +732,22 @@ func (c *Client) handleFastPath(out Output, f frame) error {
 			if frag == fragNext {
 				continue
 			}
+			c.fragging = false
 			p = c.frag
 		}
 		if err := c.fastPathUpdate(out, code, p); err != nil {
 			return err
 		}
+		if frag == fragLast && cap(c.frag) > retainFrag {
+			c.frag = nil
+		}
 	}
 	return nil
 }
+
+// retainFrag bounds the reassembly buffer the client keeps between
+// fragmented updates.
+const retainFrag = 1 << 20
 
 func (c *Client) fastPathUpdate(out Output, code int, p []byte) error {
 	switch code {
@@ -758,8 +839,40 @@ func (c *Client) cachedPointer(out Output, p []byte) error {
 	return nil
 }
 
-// drawBitmap decodes b and draws it.
+// bitmapPad is how much wider and taller than its destination, or the
+// desktop, a bitmap may be: servers pad bitmaps to whole tiles of 64
+// pixels at most, and xrdp not at all.
+const bitmapPad = 63
+
+// pixelBudget is the number of pixels the bitmaps of one PDU may decode
+// in all: twice the desktop, since a server draws each pixel of an
+// update once. A few bytes of compressed data describe a large bitmap,
+// so without it a 64 KiB PDU could cost seconds of CPU.
+func (c *Client) pixelBudget() int {
+	w, h := c.Size()
+	return 2*w*h + (bitmapPad+1)*(bitmapPad+1)
+}
+
+// drawBitmap decodes b and draws it. It decodes only bitmaps that fit
+// their destination and the desktop, that show on the desktop and that
+// have data, within the PDU's budget of pixels.
 func (c *Client) drawBitmap(out Output, b *bitmapData) error {
+	w, h := c.Size()
+	if b.width <= 0 || b.height <= 0 ||
+		b.width > min(b.dest.Dx(), w)+bitmapPad || b.height > min(b.dest.Dy(), h)+bitmapPad {
+		return fmt.Errorf("rdp: bitmap of %d×%d for %v on a desktop of %d×%d", b.width, b.height, b.dest, w, h)
+	}
+	r := b.dest.Intersect(image.Rectangle{Min: b.dest.Min, Max: b.dest.Min.Add(image.Pt(b.width, b.height))})
+	r = r.Intersect(image.Rect(0, 0, w, h))
+	if r.Empty() || len(b.data) == 0 {
+		c.count(func(s *Stats) { s.Ignored["empty bitmaps"]++ })
+		return nil
+	}
+	n := b.width * b.height
+	if n > c.budget {
+		return fmt.Errorf("rdp: an update decodes more than %d pixels", c.pixelBudget())
+	}
+	c.budget -= n
 	rgba, err := c.dec.decode(b)
 	if err != nil {
 		return err
@@ -772,12 +885,6 @@ func (c *Client) drawBitmap(out Output, b *bitmapData) error {
 		kind = fmt.Sprintf("rle%d", b.bpp)
 	}
 	c.count(func(s *Stats) { s.Bitmaps[kind]++ })
-	w, h := c.Size()
-	r := b.dest.Intersect(image.Rectangle{Min: b.dest.Min, Max: b.dest.Min.Add(image.Pt(b.width, b.height))})
-	r = r.Intersect(image.Rect(0, 0, w, h))
-	if r.Empty() {
-		return nil
-	}
 	img := out.Lock(r)
 	sx := r.Min.X - b.dest.Min.X
 	for y := r.Min.Y; y < r.Max.Y; y++ {

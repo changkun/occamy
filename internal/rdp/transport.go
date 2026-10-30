@@ -6,6 +6,7 @@ package rdp
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -129,10 +130,21 @@ func (t *transport) readFrame(buf []byte) (frame, []byte, error) {
 
 // write sends one complete frame.
 func (t *transport) write(p []byte) error {
+	return t.writeRedacted(p, 0, 0)
+}
+
+// writeRedacted sends one complete frame, which the trace sees with the
+// bytes from start to end zeroed.
+func (t *transport) writeRedacted(p []byte, start, end int) error {
 	t.wmu.Lock()
 	defer t.wmu.Unlock()
 	if t.trace != nil {
-		t.trace(ToServer, p)
+		q := p
+		if start < end {
+			q = bytes.Clone(p)
+			clear(q[start:end])
+		}
+		t.trace(ToServer, q)
 	}
 	_, err := t.conn.Write(p)
 	return err
@@ -148,9 +160,27 @@ func tpkt(payload []byte) []byte {
 	return append(b, payload...)
 }
 
+// maxCookie bounds the routing cookie: mstsc sends the first nine
+// characters of the user name.
+const maxCookie = 9
+
+// routingCookie returns the cookie for a user name: its printable ASCII
+// characters, at most maxCookie of them, so that it fits the TPDU's
+// one-byte length and ends at the CR LF the client adds.
+func routingCookie(user string) string {
+	b := make([]byte, 0, maxCookie)
+	for i := 0; i < len(user) && len(b) < maxCookie; i++ {
+		if c := user[i]; c >= 0x20 && c < 0x7f {
+			b = append(b, c)
+		}
+	}
+	return string(b)
+}
+
 // connectionRequest is the X.224 Connection Request PDU of [MS-RDPBCGR]
-// 2.2.1.1, with a routing cookie and an RDP_NEG_REQ.
-func connectionRequest(cookie string, protocols uint32) []byte {
+// 2.2.1.1, with a routing cookie for user and an RDP_NEG_REQ.
+func connectionRequest(user string, protocols uint32) []byte {
+	cookie := routingCookie(user)
 	var w writer
 	w.bytes([]byte{0x03, 0x00, 0, 0}) // TPKT, length below
 	w.u8(0)                           // length indicator, below

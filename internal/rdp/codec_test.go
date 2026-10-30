@@ -57,6 +57,21 @@ func TestRLEOrders(t *testing.T) {
 			4, []byte{0xfd, 0xfe, 0xfd, 0xfe}, []uint32{0xff, 0, 0xff, 0}},
 		{"special foreground/background 1 on the second row",
 			8, []byte{0x88, 1, 2, 3, 4, 5, 6, 7, 8, 0xf9}, []uint32{1, 2, 3, 4, 5, 6, 7, 8, 1 ^ 0xff, 2 ^ 0xff, 3, 4, 5, 6, 7, 8}},
+		// The rest, from the review, worked by hand from the pseudocode
+		// of [MS-RDPBCGR] 3.1.9. An order that starts on the first row
+		// keeps its first-row semantics past the end of the row.
+		{"mega-mega foreground/background image across the first row",
+			4, []byte{0xf2, 10, 0, 0x0f, 0x02}, []uint32{0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0, 0, 0xff, 0, 0}},
+		{"mega-mega set foreground and foreground/background image",
+			4, []byte{0xf7, 3, 0, 0x11, 0x05}, []uint32{0x11, 0, 0x11, 0}},
+		{"foreground/background image on the second row xors the row above",
+			2, []byte{0x82, 1, 2, 0x40, 1, 0x01}, []uint32{1, 2, 0xfe, 2}},
+		{"set foreground and foreground/background image (lite) with its length in the next byte",
+			4, []byte{0xd0, 1, 0x22, 0x02}, []uint32{0, 0x22, 0, 0}},
+		{"special foreground/background 1 on the first row",
+			8, []byte{0xf9}, []uint32{0xff, 0xff, 0, 0, 0, 0, 0, 0}},
+		{"foreground/background image of 9 pixels takes two masks",
+			9, []byte{0x40, 8, 0x01, 0x01}, []uint32{0xff, 0, 0, 0, 0, 0, 0, 0, 0xff}},
 		{"special foreground/background 2 on the second row",
 			8, []byte{0x88, 1, 2, 3, 4, 5, 6, 7, 8, 0xfa}, []uint32{1, 2, 3, 4, 5, 6, 7, 8, 1 ^ 0xff, 2, 3 ^ 0xff, 4, 5, 6, 7, 8}},
 		{"colour run with its length in the next byte",
@@ -371,9 +386,11 @@ func TestPointerShapes(t *testing.T) {
 // testClient is a client in the active state with a w×h desktop, whose
 // writes go nowhere.
 func testClient(w, h int) *Client {
-	return &Client{
+	c := &Client{
 		width: w, height: h,
 		stats: Stats{Bitmaps: map[string]int{}, Ignored: map[string]int{}},
 		t:     &transport{conn: discardConn{}},
 	}
+	c.budget = c.pixelBudget() // as for a PDU, for tests that draw bitmaps directly
+	return c
 }

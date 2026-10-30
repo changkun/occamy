@@ -89,8 +89,8 @@ func parseDemandActive(p []byte) (shareID uint32, caps serverCaps, err error) {
 	if r.err != nil {
 		return 0, caps, fmt.Errorf("rdp: demand active: %w", r.err)
 	}
-	if caps.width <= 0 || caps.height <= 0 {
-		return 0, caps, fmt.Errorf("rdp: demand active for a %d×%d desktop", caps.width, caps.height)
+	if err := checkDesktop(caps.width, caps.height); err != nil {
+		return 0, caps, fmt.Errorf("rdp: demand active: %w", err)
 	}
 	return shareID, caps, nil
 }
@@ -190,7 +190,7 @@ func (c *Client) capabilities() (n int, b []byte) {
 	set(capActivation, func() { w.u16(0); w.u16(0); w.u16(0); w.u16(0) })
 	set(capColorCache, func() { w.u16(6); w.u16(0) })
 	set(capMultifragment, func() { // [MS-RDPBCGR] 2.2.7.2.6
-		w.u32(uint32(min(c.width*c.height*4+0x10000, 1<<26))) // #nosec G115 -- bounded
+		w.u32(uint32(min(c.width*c.height*4+0x10000, maxReassembly))) // #nosec G115 -- bounded
 	})
 	return n, w.b
 }

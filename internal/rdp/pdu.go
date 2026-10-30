@@ -87,9 +87,19 @@ func (c *Client) sendData(typ2 int, body []byte) error {
 	return c.sendIO(c.shareData(typ2, body))
 }
 
+// sendClientInfo sends the Client Info PDU. A trace sees it with the
+// password zeroed.
+func (c *Client) sendClientInfo() error {
+	pdu, pass := c.clientInfo()
+	frame := tpkt(sendDataRequest(c.userID, c.ioChannel, pdu))
+	off := len(frame) - len(pdu)
+	return c.t.writeRedacted(frame, off+pass[0], off+pass[1])
+}
+
 // clientInfo is the Client Info PDU of [MS-RDPBCGR] 2.2.1.11, with the
-// credentials for automatic logon.
-func (c *Client) clientInfo() []byte {
+// credentials for automatic logon. password is where the password lies
+// in the PDU.
+func (c *Client) clientInfo() (pdu []byte, password [2]int) {
 	const (
 		infoMouse              = 0x00000001
 		infoDisableCtrlAltDel  = 0x00000002
@@ -124,7 +134,10 @@ func (c *Client) clientInfo() []byte {
 	w.u16(len(pass))
 	w.u16(0) // cbAlternateShell
 	w.u16(0) // cbWorkingDir
-	for _, s := range [][]byte{domain, user, pass, nil, nil} {
+	for i, s := range [][]byte{domain, user, pass, nil, nil} {
+		if i == 2 {
+			password = [2]int{len(w.b), len(w.b) + len(s)}
+		}
 		w.bytes(s)
 		w.u16(0)
 	}
@@ -143,7 +156,7 @@ func (c *Client) clientInfo() []byte {
 	w.u32(perfDisableWallpaper | perfDisableFullWindow | perfDisableMenuAnims |
 		perfDisableTheming | perfDisableCursorShdw | perfDisableCursorBlink)
 	w.u16(0) // cbAutoReconnectCookie
-	return w.b
+	return w.b, password
 }
 
 // Licensing, [MS-RDPELE] and [MS-RDPBCGR] 2.2.1.12.

@@ -16,10 +16,17 @@ const (
 	noBitmapCompressionHDR = 0x0400
 )
 
-// maxBitmapPixels bounds one bitmap rectangle. Servers tile updates in
-// rectangles of 64×64 pixels or a few scanlines; the bound only keeps a
-// hostile server from making the decoder allocate gigabytes.
-const maxBitmapPixels = 4096 * 2048
+const (
+	// maxBitmapPixels bounds one bitmap rectangle, whatever the desktop.
+	// Servers tile updates in rectangles of 64×64 pixels or a few
+	// scanlines; the client bounds bitmaps by the desktop as well, and
+	// this only keeps the decoder from allocating gigabytes on its own.
+	maxBitmapPixels = 4096 * 2048
+	// retainPixels bounds the scratch buffers the decoder keeps between
+	// bitmaps: a 64×64 tile, or eight rows of 8192 pixels, fits. A larger
+	// bitmap gets buffers of its own, which the decoder drops after.
+	retainPixels = 1 << 16
+)
 
 // bitmapData is one TS_BITMAP_DATA of a bitmap update.
 type bitmapData struct {
@@ -77,6 +84,9 @@ func (d *decoder) decode(b *bitmapData) ([]byte, error) {
 		return nil, fmt.Errorf("rdp: bitmap of %d×%d pixels", w, h)
 	}
 	n := w * h
+	if n > retainPixels {
+		defer d.drop()
+	}
 	if cap(d.rgba) < 4*n {
 		d.rgba = make([]byte, 4*n)
 	}
@@ -127,6 +137,22 @@ func (d *decoder) decode(b *bitmapData) ([]byte, error) {
 		d.convert(dst, src, b.bpp)
 	}
 	return out, nil
+}
+
+// drop lets go of the scratch buffers that outgrew retainPixels. The
+// slice decode returned stays valid.
+func (d *decoder) drop() {
+	if cap(d.rgba) > 4*retainPixels {
+		d.rgba = nil
+	}
+	if cap(d.raw) > retainPixels {
+		d.raw = nil
+	}
+	for i := range d.planes {
+		if cap(d.planes[i]) > retainPixels {
+			d.planes[i] = nil
+		}
+	}
 }
 
 // convert turns pixel values of bpp bits into RGBA.

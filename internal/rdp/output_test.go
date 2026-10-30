@@ -22,7 +22,12 @@ type screen struct {
 	draws   int
 }
 
+// Resize panics on a size the client should have refused, so that the
+// fuzzers notice.
 func (s *screen) Resize(w, h int) {
+	if err := checkDesktop(w, h); err != nil {
+		panic(fmt.Sprintf("screen: Resize(%d, %d): %v", w, h, err))
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.img = image.NewRGBA(image.Rect(0, 0, w, h))
