@@ -143,6 +143,15 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   wildcard host and `localhost`. A `version` merged in with `<<` counts,
   and one outside the file's first YAML document is an error. A v0 file
   is served as before.
+- `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS with the
+  VNC backend's certificate policy, NLA through CredSSP 5 or later with
+  NTLMv2 of its own, offered by default, the connection sequence, bitmap
+  updates in interleaved RLE and planar, pointer updates, and keyboard
+  and mouse input. It bounds the desktop, resizes and the rate of
+  decoding a server can ask for. It is tested live against xrdp under
+  the `rdp_integration` build tag, which starts a container, and by
+  replaying xrdp's recorded PDUs; NLA is not yet tested against Windows.
+  No backend uses it yet.
 
 ### Changed
 
