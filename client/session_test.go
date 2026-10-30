@@ -60,7 +60,7 @@ func TestGraphicalConverges(t *testing.T) {
 				if plugged {
 					opts.Decoders = []client.Decoder{codec}
 					opts.DecodeWorkers = 4
-					cfg.Encoder = codec
+					cfg.NewEncoder = func([]protocol.Codec) stream.Encoder { return codec }
 					cfg.Capabilities.Codecs = []protocol.Codec{protocol.CodecPNG, protocol.CodecRaw}
 				}
 				b := tap(backendtest.NewScreen(300, 200, 0))
