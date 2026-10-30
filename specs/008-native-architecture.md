@@ -185,8 +185,9 @@ v1 has two performance targets, defined and measured by
 - input-to-update latency p95 at most 50 ms for desktop interactions at
   20 ms RTT, including while the screen is in full motion.
 
-The baseline is measured first, and the designs below are judged against
-it. Where they come from:
+The baseline and the per-scenario targets are in
+[docs/benchmarks.md](../docs/benchmarks.md), and the designs below are
+judged against them. Where they come from:
 
 - Terminals send bytes, not PNG tiles of rendered text.
 - Binary frames remove base64's 4/3 expansion.
@@ -233,7 +234,7 @@ Each beta reruns the benchmark, which also covers #18.
 | 7 | [Native VNC backend](008-native-architecture/native-vnc-backend.md) | RFB client: security types, encodings | session-core, graphics-pipeline | large | drafted |
 | 8 | [Go client core](008-native-architecture/client-core.md) | Client library shaped for tests and a C ABI | protocol-v1, graphics-pipeline | medium | validated |
 | 9 | [RDP strategy](008-native-architecture/rdp-strategy.md) | guacd, helper process, or pure-Go RDP | session-core | large | drafted |
-| 10 | [Protocol benchmark](008-native-architecture/benchmark.md) | Yardstick: scenarios, metrics, the Guacamole baseline, the 10x and 50 ms targets | — | large | validated |
+| 10 | [Protocol benchmark](008-native-architecture/benchmark.md) | Yardstick: scenarios, metrics, the Guacamole baseline, the 10x and 50 ms targets | — | large | complete |
 
 ```mermaid
 graph LR

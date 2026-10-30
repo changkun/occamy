@@ -1,6 +1,6 @@
 ---
 title: Protocol benchmark
-status: testing
+status: complete
 track: architecture
 depends_on:
   - specs/006-demo-stack-refresh.md
