@@ -94,6 +94,35 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   before it reads or allocates, resizes the screen at most once an
   update and ten times a second, and bounds its queued input by bytes.
   `occamyd` does not use it yet.
+- The native VNC backend decodes Tight, ZRLE and Hextile, and asks for
+  them in that order before Raw. Tight stays lossless, since the backend
+  asks for no JPEG quality, but JPEG and the gradient filter are decoded
+  when a server sends them. JPEG must be sequential (baseline or
+  extended), with a scan for each component and at most 65536 pixels, as
+  TigerVNC, libvncserver and QEMU send it. Compressed lengths, palettes
+  and runs are checked before anything is read or allocated, a
+  rectangle's zlib data is inflated only as far as its pixels need, and
+  an update may draw at most four times the screen's pixels. The fuzz
+  corpus holds sessions recorded from x11vnc and TigerVNC.
+- RFB extensions in the native VNC backend: VeNCrypt with an X.509
+  certificate and Plain, None or VNC Authentication inside TLS, asking
+  the owner for a username or password the configuration lacks;
+  ExtendedDesktopSize, so that a `Resize` resizes the remote screen,
+  except to a size the server refused, or at all once it prohibits
+  resizing; continuous updates with Fence, paused while nobody can
+  see; QEMU extended key events with physical key codes; Extended
+  Clipboard in UTF-8 both ways; and LastRect. The server's certificate
+  must chain to the system's roots or a configured CA and name the
+  server, or be pinned by its SHA-256 fingerprint; an insecure mode
+  accepts any with a warning. The backend prefers VeNCrypt whenever a
+  server offers it and fails closed, so a server with a self-signed
+  certificate that VNC Authentication reached before is refused, with
+  the fingerprint to pin in the error. VeNCrypt's anonymous TLS
+  subtypes are not supported, so a server whose VeNCrypt offers only
+  those, or Plain in the clear, is refused even if it offers VNC
+  Authentication too. Cut text from the server allocates about
+  three times the text kept, down from seven. An integration test runs
+  against TigerVNC (`docker/test/tigervnc`) in a container of its own.
 - The codec measurement of the graphics pipeline
   ([docs/benchmarks/codecs.md](docs/benchmarks/codecs.md)): a corpus of
   13 frames recorded from the bench desktop by `make corpus`, and

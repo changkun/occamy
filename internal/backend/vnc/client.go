@@ -7,6 +7,7 @@ package vnc
 import (
 	"encoding/binary"
 	"image"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -32,8 +33,16 @@ const (
 )
 
 // encodings are the encodings the backend asks for, in order of
-// preference.
-var encodings = []int32{encCopyRect, encRaw, encCursor, encDesktopSize}
+// preference; servers use the first they support. Tight comes first, as
+// in TigerVNC's viewer: it sends solid areas as fills, and lossless it
+// is as compact as ZRLE (within 4% on the bench desktop's scenes, from
+// x11vnc and TigerVNC). ZRLE comes next, for servers without Tight, then
+// Hextile, which needs no zlib and sends twice as much, and Raw.
+// CopyRect is used alongside whichever is chosen. No JPEG quality level
+// is asked for, so Tight stays lossless and the framebuffer holds the
+// server's exact pixels, which the graphics pipeline's refinement to
+// lossless relies on; JPEG that a server sends anyway is still decoded.
+var encodings = []int32{encCopyRect, encTight, encZRLE, encHextile, encRaw, encCursor, encDesktopSize}
 
 // pixelFormat is the PIXEL_FORMAT the backend asks for: 32 bits per
 // pixel, depth 24, little-endian true colour with red at bit 0, green at
@@ -77,13 +86,14 @@ const (
 const maxClipboard = 4 << 20
 
 // appendSetup appends the messages sent after the handshake:
-// SetPixelFormat and SetEncodings.
+// SetPixelFormat and SetEncodings, with the extensions' pseudo-encodings
+// after the encodings.
 func appendSetup(p []byte) []byte {
 	p = append(p, msgSetPixelFormat, 0, 0, 0)
 	p = append(p, pixelFormat[:]...)
 	p = append(p, msgSetEncodings, 0)
-	p = binary.BigEndian.AppendUint16(p, uint16(len(encodings))) // #nosec G115 -- a short constant list
-	for _, e := range encodings {
+	p = binary.BigEndian.AppendUint16(p, uint16(len(encodings)+len(extensions))) // #nosec G115 -- short constant lists
+	for _, e := range slices.Concat(encodings, extensions) {
 		p = binary.BigEndian.AppendUint32(p, uint32(e)) // #nosec G115 -- encodings are signed on the wire
 	}
 	return p
@@ -255,9 +265,16 @@ func toLatin1(text []byte, limit int) []byte {
 	return out
 }
 
-// fromLatin1 converts Latin-1 text to UTF-8.
+// fromLatin1 converts Latin-1 text to UTF-8, in a buffer of the size the
+// UTF-8 takes: two bytes for each byte from 0x80.
 func fromLatin1(text []byte) []byte {
-	out := make([]byte, 0, len(text))
+	n := len(text)
+	for _, c := range text {
+		if c >= utf8.RuneSelf {
+			n++
+		}
+	}
+	out := make([]byte, 0, n)
 	for _, c := range text {
 		out = utf8.AppendRune(out, rune(c))
 	}
