@@ -29,8 +29,8 @@ terminals stay text. Three things need deciding:
 
 ## Context
 
-- `golang.org/x/crypto` is already in `go.mod`, as an indirect
-  dependency. Its `ssh` package provides the client, `RequestPty`,
+- `golang.org/x/crypto` is in `go.mod`, a direct dependency since the
+  backend uses it. Its `ssh` package provides the client, `RequestPty`,
   `WindowChange`, the Password, PublicKeys and KeyboardInteractive auth
   methods, `knownhosts`, and `agent`.
 - v0 renders SSH as pixels: a terminal emulator draws with Pango and
@@ -53,8 +53,10 @@ terminals stay text. Three things need deciding:
   emulator and sends viewers screen diffs, not the shell's bytes (see
   Screen diffs below). `resize-request` from a viewer holding input
   rights becomes `WindowChange`.
-- Keyboard-interactive and missing credentials go to the owner through
-  `Sink.Prompt`. Answers are never stored.
+- Keyboard-interactive challenges and a missing password go to the owner
+  through `Sink.Prompt`, except that a configured password answers a
+  challenge with a single hidden question, once per connection.
+  Answers are never stored.
 - Snapshot for late joiners: a byte sequence that, fed into a fresh
   terminal of the same size, reproduces the screen, cursor, attributes and
   alternate-screen state. Clients need no special snapshot logic.
@@ -148,9 +150,9 @@ recommendations above.
    the screen diffs and snapshots. The candidate is picked by a
    conformance check (vttest-style sequences, `top`, `vim`, `less`,
    `htop`) and maintenance at implementation time.
-2. **Host keys: A plus D.** A pinned fingerprint or set of keys per
-   registry entry, and an explicit `insecure_ignore_host_key: true` for
-   demos, logged at warning level. No trust on first use.
+2. **Host keys: A plus D.** A set of pinned keys or SHA-256 fingerprints
+   per registry entry, and an explicit `insecure_ignore_host_key: true`
+   for demos, logged at warning level. No trust on first use.
 3. **Private keys: file paths in the configuration** for beta, readable
    only by the `occamyd` user. Encryption at rest can follow.
 4. **No agent or port forwarding in beta.**
@@ -163,3 +165,97 @@ New `internal/backend/ssh`. The web client gains a terminal view
 ([009](../009-react-web-client.md)), and so does the Swift client
 ([010](../010-native-swift-client.md)). After its parity gate
 ([guacd-bridge](guacd-bridge.md)), SSH connections no longer need guacd.
+
+## Implementation notes
+
+- **Status.** The SSH backend is done: `internal/backend/ssh` implements
+  `backend.Backend`. The terminal state (decision 1: the headless
+  emulator, screen diffs and snapshots) and predicted echo are not built
+  yet; they belong to the session and the clients. Nothing wires the
+  backend into `occamyd` yet: the registry entry and its credential
+  reference come with [api-and-server-stack](api-and-server-stack.md).
+- **What was built.** `Config`, `New` and `Backend`. Run dials with the
+  context, checks the host key, authenticates, requests a PTY, starts a
+  shell, reports the size with `Sink.Resize`, and copies stdout and
+  stderr to `Sink.TermData` in reads of at most 32 KiB. The tests run an
+  x/crypto server on the loopback interface and check every path for
+  leaked goroutines.
+- **Decisions made during implementation.**
+  - Host key algorithms. The backend offers the pinned keys' algorithms
+    first (an RSA key as `rsa-sha2-512`, `rsa-sha2-256`, `ssh-rsa`). If a
+    fingerprint is pinned, or nothing is, OpenSSH's order follows:
+    Ed25519, ECDSA, then RSA with SHA-2. The fingerprint that `ssh -v`
+    shows is then the one of the key the server presents. Certificate
+    algorithms are not offered, since a certificate never matches a
+    pinned key.
+  - A fingerprint carries no key type, so a fingerprint of a server's
+    ECDSA or RSA key is refused when the server also has an Ed25519 key.
+    Pin the full key then. The error, a `HostKeyError`, names the
+    presented key's type and fingerprint. Pinning a full public key is
+    the recommended form, since a fingerprint pin of a non-Ed25519 key
+    fails on servers that also hold an Ed25519 key.
+  - Insecure mode accepts any key and warns once per Run; rekeys run the
+    check again. With both pins and the insecure flag, a pinned key is
+    accepted silently and any other key with the warning.
+  - A shell that exits with any status or signal ends the session
+    normally, and Run returns nil: the status is the last command's, so
+    it is logged at debug level. A channel that closes without an exit
+    status is an error, since that is how a dropped connection shows in
+    x/crypto. A server that never sends an exit status therefore gets an
+    error at logout.
+  - Input that arrives while Run connects is queued. Keys typed during a
+    prompt reach the shell once it starts, as typing ahead does with
+    ssh(1), and a Resize sets the size the PTY is requested with. Input
+    before Run or after it returns fails with `ErrNotRunning`.
+  - stdin's queue holds 64 inputs, then `ErrInputFull`. Resize is not
+    queued with stdin: the newest size wins, and its own goroutine sends
+    `window-change` and then calls `Sink.Resize`. Writes to stdin block
+    on the channel window when the remote stops reading;
+    `window-change` does not.
+  - `Key` is ignored, as are `Pointer`, `Wheel` and `Clipboard`: the
+    viewer's terminal emulator turns keys into `term-input`, and
+    translating keysyms would need the modes it holds. `Text` goes to
+    stdin.
+  - The PTY is requested with `IUTF8`, so that line editing erases whole
+    UTF-8 characters.
+  - `DialTimeout` (15 s by default) bounds the TCP connection only. Run's
+    context bounds the handshake, which can wait for the owner.
+  - `New` reads and parses the key files, so a missing key fails there,
+    and a key protected by a passphrase is refused as not supported yet.
+    File permissions are not checked. `New` also requires a user and a
+    host key policy, and sizes from 1 to 65535.
+  - A configured password also answers a keyboard-interactive challenge
+    that asks a single hidden question, as guacd and sshpass do. PAM
+    servers that disable the `password` method ask for the password
+    this way, and the owner would otherwise be asked for it. The
+    configured password is sent at most once per connection, by
+    whichever method asks first. A second such challenge means it was
+    wrong, and goes to the owner, which fails the connection if nobody
+    can answer. A hidden question after the `password` method has sent
+    it is another factor, such as a one-time code, and goes to the owner
+    too. Challenges of any other shape always go to the owner.
+  - The password prompt has the instruction `Password for user@host:port`
+    and one secret field. Keyboard-interactive rounds without questions,
+    which OpenSSH sends, are not passed to the owner. The server's
+    pre-authentication banner is ignored.
+- **Deviations from the spec.** None in shape. Option A names
+  `ssh.FixedHostKey`; the backend has its own callback, which takes a set
+  of keys and fingerprints.
+- **Surprises / gotchas.**
+  - x/crypto's default host key preference puts ECDSA ahead of Ed25519,
+    so without the ordering above an Ed25519 pin fails against a stock
+    OpenSSH server.
+  - x/crypto uses only the first auth method of each name. `Password` and
+    `PasswordCallback` are both `password`, so a configured password and
+    a prompted one exclude each other.
+  - `ssh.NewClientConn` takes no context. Closing the connection from
+    `context.AfterFunc` is the only way to abort a handshake.
+  - With `StdinPipe`, `StdoutPipe` and `StderrPipe`, `Session` starts no
+    copy goroutines, so Run joins every goroutine it starts. x/crypto's
+    own goroutines stop once the connection closes; Run waits for its
+    reader with `Client.Wait`.
+- **Follow-ups.**
+  - Keys protected by a passphrase, and keys encrypted at rest
+    (decision 3).
+  - The session's terminal emulator (decision 1) and its conformance
+    check, and wiring into `occamyd`.

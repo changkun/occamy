@@ -35,16 +35,21 @@ const (
 // Display applies drawing instructions the way a client does, so that a
 // tool can see what a session shows. It keeps the default layer (0), the
 // visible layers (positive indices) that move, shade and size place on
-// it, and the off-screen buffers (negative indices) that guacd draws
-// through. The zero value is not usable; use NewDisplay.
+// it, the off-screen buffers (negative indices) that guacd draws
+// through, and the pointer that cursor sets. The zero value is not
+// usable; use NewDisplay.
 type Display struct {
 	layers  map[int]*image.RGBA
 	visible map[int]*placement // layers other than the default
 	paths   map[int][]image.Rectangle
 	streams map[int]*imageStream
-	out     *image.RGBA     // the composited display
-	damage  image.Rectangle // since TakeDamage
-	dirty   image.Rectangle // not yet composited into out
+	out     *image.RGBA       // the composited display
+	damage  []image.Rectangle // since TakeDamage or TakeDamageRects
+	dirty   image.Rectangle   // not yet composited into out
+
+	cursor    *image.RGBA // set by the last cursor instruction
+	hotspot   image.Point
+	cursorSet bool // since TakeCursor
 
 	// Unsupported counts instructions that draw in ways Display does not
 	// implement, by opcode.
@@ -87,13 +92,103 @@ func (d *Display) Image() *image.RGBA {
 	return d.out
 }
 
-// TakeDamage returns the area of the display drawn since the last call,
-// and resets it.
+// Bounds returns the display's bounds, which the default layer's size
+// sets.
+func (d *Display) Bounds() image.Rectangle {
+	return d.layers[0].Bounds()
+}
+
+// TakeDamage returns the area of the display drawn since the last call to
+// it or to TakeDamageRects, as one rectangle, and resets it.
 func (d *Display) TakeDamage() image.Rectangle {
-	r := d.damage
-	d.damage = image.Rectangle{}
+	var r image.Rectangle
+	for _, dr := range d.damage {
+		r = r.Union(dr)
+	}
+	d.damage = d.damage[:0]
 	return r
 }
+
+// TakeDamageRects returns the area of the display drawn since the last
+// call to it or to TakeDamage, as at most maxDamageRects rectangles that
+// may overlap, and resets it. The caller owns the slice.
+func (d *Display) TakeDamageRects() []image.Rectangle {
+	rs := d.damage
+	d.damage = nil
+	return rs
+}
+
+// CopyTo copies the area r of the display into dst at the same
+// coordinates, as if over black, so that the copy is opaque where the
+// display is transparent. It returns the area copied: r clipped to the
+// display and to dst.
+func (d *Display) CopyTo(dst *image.RGBA, r image.Rectangle) image.Rectangle {
+	img := d.Image()
+	r = r.Intersect(img.Rect).Intersect(dst.Rect)
+	if r.Empty() {
+		return r
+	}
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		row := dst.Pix[dst.PixOffset(r.Min.X, y):dst.PixOffset(r.Max.X, y)]
+		copy(row, img.Pix[img.PixOffset(r.Min.X, y):img.PixOffset(r.Max.X, y)])
+		// The colours are premultiplied, so over black only the alpha
+		// changes.
+		for i := 3; i < len(row); i += 4 {
+			row[i] = 0xff
+		}
+	}
+	return r
+}
+
+// TakeCursor returns the pointer that the last cursor instruction set, if
+// one applied since the last call: its image, nil if empty, and its hot
+// spot. The caller owns the image.
+func (d *Display) TakeCursor() (img *image.RGBA, hotspot image.Point, ok bool) {
+	if !d.cursorSet {
+		return nil, image.Point{}, false
+	}
+	img, hotspot = d.cursor, d.hotspot
+	d.cursor, d.cursorSet = nil, false
+	return img, hotspot, true
+}
+
+// maxDamageRects bounds the rectangles that damage is kept in.
+const maxDamageRects = 16
+
+// addDamage adds r to the damage. A rectangle merges with another when
+// their union is no larger than the two together, and beyond
+// maxDamageRects the pair whose union adds the least area merges.
+func (d *Display) addDamage(r image.Rectangle) {
+	if r.Empty() {
+		return
+	}
+	for i := 0; i < len(d.damage); {
+		if u := r.Union(d.damage[i]); area(u) <= area(r)+area(d.damage[i]) {
+			r = u
+			d.damage = slices.Delete(d.damage, i, i+1)
+			i = 0 // the union may now merge with one already passed
+			continue
+		}
+		i++
+	}
+	d.damage = append(d.damage, r)
+	if len(d.damage) <= maxDamageRects {
+		return
+	}
+	bi, bj, best := 0, 1, -1
+	for i := range d.damage {
+		for j := i + 1; j < len(d.damage); j++ {
+			a, b := d.damage[i], d.damage[j]
+			if cost := area(a.Union(b)) - area(a) - area(b); best < 0 || cost < best {
+				bi, bj, best = i, j, cost
+			}
+		}
+	}
+	d.damage[bi] = d.damage[bi].Union(d.damage[bj])
+	d.damage = slices.Delete(d.damage, bj, bj+1)
+}
+
+func area(r image.Rectangle) int { return r.Dx() * r.Dy() }
 
 // unsupportedOps draw with paths, strokes, patterns or transforms, which
 // guacd's VNC, RDP and SSH support do not use for the default layer.
@@ -134,7 +229,7 @@ func (d *Display) damageLayer(i int, r image.Rectangle) {
 		return
 	}
 	r = r.Add(o).Intersect(d.layers[0].Bounds())
-	d.damage = d.damage.Union(r)
+	d.addDamage(r)
 	d.dirty = d.dirty.Union(r)
 }
 
@@ -212,6 +307,8 @@ func (d *Display) Apply(ins *Instruction) error {
 		err = d.move(args)
 	case "shade":
 		err = d.shade(args)
+	case "cursor":
+		err = d.setCursor(args)
 	default:
 		if unsupportedOps[op] {
 			d.Unsupported[op]++
@@ -293,7 +390,7 @@ func (d *Display) size(args []string) error {
 		out := image.NewRGBA(l.Bounds())
 		draw.Draw(out, out.Bounds(), d.out, image.Point{}, draw.Src)
 		d.out = out
-		d.damage = l.Bounds()
+		d.damage = append(d.damage[:0], l.Bounds())
 		d.dirty = l.Bounds()
 	}
 	d.damageWhole(v[0])
@@ -551,5 +648,29 @@ func (d *Display) shade(args []string) error {
 	d.damageWhole(v[0])
 	d.visible[v[0]].opacity = clampByte(v[1])
 	d.damageWhole(v[0])
+	return nil
+}
+
+// setCursor sets the pointer: hotspot x, y, then the image from a region
+// of a layer (srclayer, srcx, srcy, w, h), copied as it is now, as
+// guacamole-common-js's Display.setCursor does. Parts of the region
+// outside the layer are transparent.
+func (d *Display) setCursor(args []string) error {
+	v, err := ints(args, 0, 1, 2, 3, 4, 5, 6)
+	if err != nil {
+		return err
+	}
+	w, h := v[5], v[6]
+	if w < 0 || h < 0 || w > maxLayerSize || h > maxLayerSize {
+		return errArgs
+	}
+	d.cursor, d.hotspot, d.cursorSet = nil, image.Pt(v[0], v[1]), true
+	if w == 0 || h == 0 {
+		return nil
+	}
+	d.cursor = image.NewRGBA(image.Rect(0, 0, w, h))
+	if src, ok := d.layers[v[2]]; ok {
+		draw.Draw(d.cursor, d.cursor.Rect, src, image.Pt(v[3], v[4]), draw.Src)
+	}
 	return nil
 }
