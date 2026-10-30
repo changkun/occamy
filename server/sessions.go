@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http"
 	"slices"
+	"sync"
 	"time"
 
 	"changkun.de/x/occamy/internal/auth"
@@ -49,6 +50,9 @@ type sessionInfo struct {
 	protocol   string
 	backend    string
 	opened     time.Time
+
+	mu          sync.Mutex
+	ownerStream *ownerStream // the stream the owner is connected through, if any
 }
 
 // registerSessions registers the routes of connections and sessions,

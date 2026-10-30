@@ -68,6 +68,7 @@ type server struct {
 
 	mu       sync.Mutex
 	sessions map[string]*sessionInfo // by ID, while they run
+	streams  tracker                 // the streams being served
 }
 
 // Run serves a v1 file until SIGINT or SIGTERM, then drains requests in
@@ -112,6 +113,11 @@ func Run(f *config.File) error {
 		log.Printf("serving expvar and pprof at http://%s/debug/", dln.Addr())
 	}
 	err = serveUntil(ctx, drainTimeout, s.publicServer(), ln, debug, dln)
+	// Shutdown neither waits for nor closes hijacked connections, so the
+	// streams, which the sessions' ends are closing, get as long again.
+	if !s.streams.wait(drainTimeout) {
+		log.Printf("warning: streams still open after a further %v were cut", drainTimeout)
+	}
 	log.Println("occamy is down, good bye!")
 	return err
 }
@@ -251,6 +257,7 @@ func (s *server) routes() http.Handler {
 	mux.HandleFunc("GET /healthz", healthz)
 	mux.HandleFunc("POST /api/v1/auth/token", s.signIn.token)
 	s.registerSessions(mux)
+	s.registerStreams(mux)
 	if s.v0 != nil {
 		s.v0.register(mux)
 	}

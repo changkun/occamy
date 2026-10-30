@@ -88,8 +88,13 @@ func newTestServer(t *testing.T, edit func(*config.File)) *testServer {
 	}
 	srv := httptest.NewServer(s.routes())
 	t.Cleanup(srv.Close)
-	// Before the server closes, the sessions end.
-	t.Cleanup(s.shutdown)
+	// Before the server closes, the sessions end, and their streams.
+	t.Cleanup(func() {
+		s.shutdown()
+		if !s.streams.wait(10 * time.Second) {
+			t.Error("streams still open after the sessions ended")
+		}
+	})
 	return &testServer{s: s, srv: srv}
 }
 

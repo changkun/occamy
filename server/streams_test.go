@@ -1,0 +1,718 @@
+// Copyright 2026 Changkun Ou. All rights reserved.
+// Use of this source code is governed by a MIT
+// license that can be found in the LICENSE file.
+
+package server
+
+import (
+	"bytes"
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+	"github.com/golang-jwt/jwt/v5"
+
+	"changkun.de/x/occamy/internal/auth"
+	"changkun.de/x/occamy/internal/backend"
+	"changkun.de/x/occamy/internal/config"
+	"changkun.de/x/occamy/protocol"
+)
+
+// termHello is the hello of a client that renders terminals.
+var termHello = protocol.Hello{Visible: true, Name: "occamy-test/1", Capabilities: protocol.Capabilities{Terminal: 1}}
+
+// streamClient is a minimal protocol v1 client, enough to drive the
+// stream routes. It acknowledges every frame. The Go client's
+// client.Dial is to replace it once client/ is on master.
+type streamClient struct {
+	ws      *websocket.Conn
+	welcome *protocol.Welcome
+}
+
+// dial opens the stream at u with the subprotocols and header, and with
+// hello in the query unless it is nil.
+func dial(u string, subprotocols []string, hello *protocol.Hello, header http.Header) (*streamClient, int, error) {
+	if hello != nil {
+		q, err := protocol.EncodeHelloQuery(*hello)
+		if err != nil {
+			return nil, 0, err
+		}
+		sep := "?"
+		if strings.Contains(u, "?") {
+			sep = "&"
+		}
+		u += sep + protocol.HelloParameter + "=" + q
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ws, resp, err := websocket.Dial(ctx, u, &websocket.DialOptions{ //nolint:bodyclose // coder/websocket: the response body need not be closed
+		Subprotocols: subprotocols,
+		HTTPHeader:   header,
+	})
+	if err != nil {
+		if resp != nil {
+			return nil, resp.StatusCode, err
+		}
+		return nil, 0, err
+	}
+	ws.SetReadLimit(protocol.DefaultMaxMessageSize)
+	return &streamClient{ws: ws}, resp.StatusCode, nil
+}
+
+// withToken is the subprotocols that carry token.
+func withToken(token string) []string {
+	return []string{protocol.Subprotocol, protocol.TokenSubprotocol(token)}
+}
+
+// stream opens path's stream on ts with token and hello, and reads its
+// welcome.
+func (ts *testServer) stream(t *testing.T, path, token string, hello protocol.Hello) *streamClient {
+	t.Helper()
+	c, status, err := dial(ts.srv.URL+path, withToken(token), &hello, nil)
+	if err != nil {
+		t.Fatalf("%s: %d %v", path, status, err)
+	}
+	t.Cleanup(func() { _ = c.ws.CloseNow() })
+	if got := c.ws.Subprotocol(); got != protocol.Subprotocol {
+		t.Errorf("subprotocol %q, want %s", got, protocol.Subprotocol)
+	}
+	m, err := c.next()
+	if err != nil {
+		t.Fatalf("%s: %v", path, err)
+	}
+	w, ok := m.(*protocol.Welcome)
+	if !ok {
+		t.Fatalf("%s: %#v, want welcome", path, m)
+	}
+	c.welcome = w
+	return c
+}
+
+// next reads the next message, acknowledging a frame's end.
+func (c *streamClient) next() (protocol.Message, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for {
+		typ, p, err := c.ws.Read(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if typ != websocket.MessageBinary {
+			return nil, errors.New("a text message")
+		}
+		m, err := protocol.Decode(p, protocol.ServerMessages(), protocol.Limits{})
+		if err != nil {
+			return nil, err
+		}
+		if m == nil {
+			continue // an ignorable message this client does not know
+		}
+		if f, ok := m.(*protocol.FrameEnd); ok {
+			if err := c.ws.Write(ctx, websocket.MessageBinary, protocol.FrameAck{FrameID: f.FrameID, DecodeTime: 1}.Append(nil)); err != nil {
+				return nil, err
+			}
+		}
+		return m, nil
+	}
+}
+
+// until reads messages until ok returns true for one.
+func (c *streamClient) until(t *testing.T, what string, ok func(protocol.Message) bool) {
+	t.Helper()
+	for {
+		m, err := c.next()
+		if err != nil {
+			t.Fatalf("waiting for %s: %v", what, err)
+		}
+		if cl, closed := m.(*protocol.Close); closed {
+			t.Fatalf("waiting for %s: close %v %q", what, cl.Code, cl.Reason)
+		}
+		if ok(m) {
+			return
+		}
+	}
+}
+
+// closed reads until close, checks its code, and that the WebSocket then
+// closes with the same code.
+func (c *streamClient) closed(t *testing.T, code protocol.CloseCode) protocol.Close {
+	t.Helper()
+	for {
+		m, err := c.next()
+		if err != nil {
+			t.Fatalf("waiting for close %v: %v", code, err)
+		}
+		cl, ok := m.(*protocol.Close)
+		if !ok {
+			if _, frame := m.(*protocol.Welcome); frame && code >= 4000 && code < 4002 {
+				t.Fatalf("welcome, want close %v", code)
+			}
+			continue
+		}
+		if cl.Code != code {
+			t.Errorf("close %v %q, want %v", cl.Code, cl.Reason, code)
+		}
+		_, err = c.next()
+		if got := websocket.CloseStatus(err); got != websocket.StatusCode(cl.Code) {
+			t.Errorf("WebSocket closed with %v (%v), want %v", got, err, cl.Code)
+		}
+		return *cl
+	}
+}
+
+func (c *streamClient) send(t *testing.T, m interface{ Append([]byte) []byte }) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.ws.Write(ctx, websocket.MessageBinary, m.Append(nil)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestStreamWelcome opens a connection's stream and gets welcome and the
+// first frame, with the session sized as the owner's hello asks.
+func TestStreamWelcome(t *testing.T) {
+	ts, fb := sessionServer(t, nil)
+	hello := termHello
+	hello.Cols, hello.Rows = 100, 30
+	c := ts.stream(t, "/api/v1/connections/ops-shell/stream", ts.token(t, "alice", "ops"), hello)
+	w := c.welcome
+	info := ts.s.session(w.SessionID)
+	if info == nil || info.owner != "alice" || w.Role != protocol.RoleOwner || w.Class != protocol.ClassTerminal || w.ViewerID == 0 {
+		t.Fatalf("welcome %+v, session %+v", w, info)
+	}
+	if w.Capabilities.MaxMessageSize != protocol.DefaultMaxMessageSize {
+		t.Errorf("agreed %+v", w.Capabilities)
+	}
+	if _, sz, _ := fb.last(); sz.cols != 100 || sz.rows != 30 {
+		t.Errorf("the backend was made at %+v, want the hello's 100x30", sz)
+	}
+	c.until(t, "the first frame", func(m protocol.Message) bool { _, ok := m.(*protocol.TermSnapshot); return ok })
+	if got := info.s.Size(); got.X != 100 || got.Y != 30 {
+		t.Errorf("session size %v", got)
+	}
+}
+
+// TestStreamRefused checks what a stream request must carry, and that a
+// refusal after the upgrade is close with the same code as the WebSocket's
+// close.
+func TestStreamRefused(t *testing.T) {
+	k := newKeys(t)
+	path := writeIssuerKey(t, k.gateway)
+	ts, _ := sessionServer(t, func(f *config.File) {
+		f.Auth.TrustedIssuers = []config.TrustedIssuer{{Issuer: "gateway", PublicKeyFile: path}}
+		f.Origins = []string{"https://App.Example"}
+	})
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	expired := access("gateway", "alice", "ops")
+	expired.IssuedAt = jwt.NewNumericDate(time.Now().Add(-time.Hour))
+	expired.ExpiresAt = jwt.NewNumericDate(time.Now().Add(-time.Minute))
+	badVersion := termHello.Append(nil)
+	header := len(protocol.AppendHeader(nil, protocol.Header{}))
+	badVersion[header] = 9
+	const stream = "/api/v1/connections/ops-shell/stream"
+	h := termHello
+	for _, tt := range []struct {
+		name   string
+		path   string
+		subs   []string
+		hello  *protocol.Hello
+		header http.Header
+		status int                // an HTTP refusal
+		code   protocol.CloseCode // close; 0 for welcome
+	}{
+		{name: "token", subs: withToken(alice), hello: &h},
+		{name: "authorization", subs: []string{protocol.Subprotocol}, hello: &h, header: http.Header{"Authorization": {"Bearer " + alice}}},
+		{name: "own origin", subs: withToken(alice), hello: &h, header: http.Header{"Origin": {"http://" + strings.TrimPrefix(ts.srv.URL, "http://")}}},
+		{name: "listed origin", subs: withToken(alice), hello: &h, header: http.Header{"Origin": {"https://app.example"}}},
+		{name: "no subprotocol", hello: &h, header: http.Header{"Authorization": {"Bearer " + alice}}, status: http.StatusBadRequest},
+		{name: "only the token subprotocol", subs: withToken(alice)[1:], hello: &h, status: http.StatusBadRequest},
+		{name: "no token", subs: []string{protocol.Subprotocol}, hello: &h, code: protocol.CloseUnauthorized},
+		{name: "token in the URL", path: stream + "?token=" + alice + "&access_token=" + alice, subs: []string{protocol.Subprotocol}, hello: &h, code: protocol.CloseUnauthorized},
+		{name: "wrong key", subs: withToken(signClaims(t, k.stranger, access("gateway", "alice", "ops"))), hello: &h, code: protocol.CloseUnauthorized},
+		{name: "expired", subs: withToken(signClaims(t, k.gateway, expired)), hello: &h, code: protocol.CloseUnauthorized},
+		{name: "session token", subs: withToken(o.StreamToken), hello: &h, code: protocol.CloseUnauthorized},
+		{name: "a share", subs: withToken("abc"), hello: &h, code: protocol.CloseUnauthorized},
+		{name: "token subprotocol not base64url", subs: []string{protocol.Subprotocol, protocol.Subprotocol + ".token.a+b"}, hello: &h, code: protocol.CloseUnauthorized},
+		{name: "the subprotocol's token before Authorization", subs: withToken("abc"), hello: &h, header: http.Header{"Authorization": {"Bearer " + alice}}, code: protocol.CloseUnauthorized},
+		{name: "foreign origin", subs: withToken(alice), hello: &h, header: http.Header{"Origin": {"https://evil.example"}}, code: protocol.CloseForbidden},
+		{name: "listed origin's other scheme", subs: withToken(alice), hello: &h, header: http.Header{"Origin": {"http://app.example"}}, code: protocol.CloseForbidden},
+		{name: "own host on another port", subs: withToken(alice), hello: &h, header: http.Header{"Origin": {"http://127.0.0.1:1"}}, code: protocol.CloseForbidden},
+		{name: "null origin", subs: withToken(alice), hello: &h, header: http.Header{"Origin": {"null"}}, code: protocol.CloseForbidden},
+		{name: "empty origin", subs: withToken(alice), hello: &h, header: http.Header{"Origin": {""}}, code: protocol.CloseForbidden},
+		{name: "two origins", subs: withToken(alice), hello: &h, header: http.Header{"Origin": {"https://app.example", "https://evil.example"}}, code: protocol.CloseForbidden},
+		{name: "no hello", subs: withToken(alice), code: protocol.CloseProtocolError},
+		{name: "hello of another version", path: stream + "?hello=" + base64.RawURLEncoding.EncodeToString(badVersion), subs: withToken(alice), code: protocol.CloseUnsupported},
+		{name: "another's connection", path: "/api/v1/connections/dev-shell/stream", subs: withToken(alice), hello: &h, code: protocol.CloseForbidden},
+		{name: "unknown connection", path: "/api/v1/connections/nope/stream", subs: withToken(alice), hello: &h, code: protocol.CloseForbidden},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.path == "" {
+				tt.path = stream
+			}
+			before := ts.s.registry.Len()
+			c, status, err := dial(ts.srv.URL+tt.path, tt.subs, tt.hello, tt.header)
+			if tt.status != 0 {
+				if err == nil || status != tt.status {
+					t.Fatalf("upgrade: %d %v, want %d", status, err, tt.status)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("upgrade: %d %v", status, err)
+			}
+			defer c.ws.CloseNow()
+			if got := c.ws.Subprotocol(); got != protocol.Subprotocol {
+				t.Errorf("subprotocol %q", got)
+			}
+			if tt.code == 0 {
+				m, err := c.next()
+				if _, ok := m.(*protocol.Welcome); !ok {
+					t.Fatalf("%#v %v, want welcome", m, err)
+				}
+				return
+			}
+			cl := c.closed(t, tt.code)
+			if strings.Contains(cl.Reason, alice) || cl.Reason == "" {
+				t.Errorf("reason %q", cl.Reason)
+			}
+			if tt.name == "expired" && cl.Reason != "token expired" {
+				t.Errorf("reason %q, want token expired", cl.Reason)
+			}
+			if n := ts.s.registry.Len(); n != before {
+				t.Errorf("%d sessions after a refusal, %d before", n, before)
+			}
+		})
+	}
+}
+
+// TestSessionStream checks who joins a session's stream, and as what.
+func TestSessionStream(t *testing.T) {
+	ts, _ := sessionServer(t, nil)
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	other := ts.openSession(t, alice, "both")
+	share := func(id, role string) string {
+		r := ts.api(t, http.MethodPost, "/api/v1/sessions/"+id+"/shares", alice, `{"role":"`+role+`"}`)
+		var sh shareResponse
+		if err := json.Unmarshal(r.body, &sh); err != nil || sh.Token == "" {
+			t.Fatalf("share: %s %v", r.body, err)
+		}
+		return sh.Token
+	}
+	sessionToken := func(id, role, sub string) string {
+		tok, err := ts.s.signer.Session(id, role, sub, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	path := "/api/v1/sessions/" + o.ID + "/stream"
+
+	owner := ts.stream(t, path, o.StreamToken, termHello)
+	if owner.welcome.Role != protocol.RoleOwner || owner.welcome.SessionID != o.ID {
+		t.Errorf("owner's welcome %+v", owner.welcome)
+	}
+	for _, tt := range []struct {
+		name  string
+		token string
+		role  protocol.Role
+	}{
+		{"viewer share", share(o.ID, auth.RoleViewer), protocol.RoleViewer},
+		{"read-only share", share(o.ID, auth.RoleReadOnly), protocol.RoleReadOnly},
+		{"viewer token", sessionToken(o.ID, auth.RoleViewer, ""), protocol.RoleViewer},
+		{"read-only token", sessionToken(o.ID, auth.RoleReadOnly, "carol"), protocol.RoleReadOnly},
+	} {
+		c := ts.stream(t, path, tt.token, termHello)
+		if c.welcome.Role != tt.role || c.welcome.SessionID != o.ID {
+			t.Errorf("%s: welcome %+v", tt.name, c.welcome)
+		}
+	}
+
+	for _, tt := range []struct {
+		name, path, token string
+		code              protocol.CloseCode
+	}{
+		{"another session's share", path, share(other.ID, auth.RoleViewer), protocol.CloseUnauthorized},
+		{"another session's stream token", path, other.StreamToken, protocol.CloseForbidden},
+		{"no share", path, "Q1p2Q3p4Q5p6Q7p8Q9p0QQ", protocol.CloseUnauthorized},
+		{"bob", path, ts.token(t, "bob", "dev"), protocol.CloseForbidden},
+		{"alice's group", path, ts.token(t, "carol", "ops"), protocol.CloseForbidden},
+		{"an owner token for another", path, sessionToken(o.ID, auth.RoleOwner, "bob"), protocol.CloseForbidden},
+		{"an owner token for nobody", path, sessionToken(o.ID, auth.RoleOwner, ""), protocol.CloseForbidden},
+		{"unknown session", "/api/v1/sessions/nope/stream", alice, protocol.CloseForbidden},
+		{"unknown session's share", "/api/v1/sessions/nope/stream", share(o.ID, auth.RoleViewer), protocol.CloseUnauthorized},
+	} {
+		c, status, err := dial(ts.srv.URL+tt.path, withToken(tt.token), &termHello, nil)
+		if err != nil {
+			t.Fatalf("%s: %d %v", tt.name, status, err)
+		}
+		c.closed(t, tt.code)
+	}
+	if got := len(ts.s.session(o.ID).s.Viewers()); got != 5 {
+		t.Errorf("%d viewers, want the owner and four others", got)
+	}
+}
+
+// TestOwnerTakeover checks that the owner's newer stream ends the older:
+// it may be on a connection that died unnoticed.
+func TestOwnerTakeover(t *testing.T) {
+	ts, _ := sessionServer(t, nil)
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	path := "/api/v1/sessions/" + o.ID + "/stream"
+	first := ts.stream(t, path, o.StreamToken, termHello)
+	first.until(t, "the first frame", func(m protocol.Message) bool { _, ok := m.(*protocol.TermSnapshot); return ok })
+	second := ts.stream(t, path, alice, termHello)
+	if second.welcome.Role != protocol.RoleOwner {
+		t.Errorf("second welcome %+v", second.welcome)
+	}
+	if cl := first.closed(t, protocol.CloseNormal); cl.Reason != "the owner connected again" {
+		t.Errorf("the older stream's close %q", cl.Reason)
+	}
+	third := ts.stream(t, "/api/v1/connections/ops-shell/stream", alice, termHello)
+	if third.welcome.SessionID == o.ID {
+		t.Error("a connection's stream joined a running session")
+	}
+	second.until(t, "a frame after the takeover", func(m protocol.Message) bool { _, ok := m.(*protocol.TermSnapshot); return ok })
+	if v := ts.s.session(o.ID).s.Viewers(); len(v) != 1 || v[0].ID != int(second.welcome.ViewerID) {
+		t.Errorf("viewers %+v, want the second stream's owner alone", v)
+	}
+}
+
+// TestOwnerHelloResizes checks that the owner joining a running terminal
+// sizes it as their hello asks, and a viewer's hello does not.
+func TestOwnerHelloResizes(t *testing.T) {
+	ts, fb := sessionServer(t, nil)
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	_, _, b := fb.last()
+	path := "/api/v1/sessions/" + o.ID + "/stream"
+	hello := termHello
+	hello.Cols, hello.Rows = 120, 40
+	ts.stream(t, path, o.StreamToken, hello)
+	waitFor(t, "the resize", func() bool { return ts.s.session(o.ID).s.Size().X == 120 })
+	r := ts.api(t, http.MethodPost, "/api/v1/sessions/"+o.ID+"/shares", alice, `{"role":"viewer"}`)
+	var sh shareResponse
+	_ = json.Unmarshal(r.body, &sh)
+	hello.Cols, hello.Rows = 50, 10
+	ts.stream(t, path, sh.Token, hello)
+	time.Sleep(50 * time.Millisecond)
+	var resizes []backend.Resize
+	for _, ev := range b.Inputs() {
+		if r, ok := ev.(backend.Resize); ok {
+			resizes = append(resizes, r)
+		}
+	}
+	if len(resizes) != 1 || resizes[0] != (backend.Resize{Width: 120, Height: 40}) {
+		t.Errorf("resizes %+v, want the owner's alone", resizes)
+	}
+}
+
+// TestDeleteEndsStreams checks that closing a session ends its streams,
+// whatever tokens are still valid, and that none joins it after.
+func TestDeleteEndsStreams(t *testing.T) {
+	ts, _ := sessionServer(t, nil)
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	path := "/api/v1/sessions/" + o.ID + "/stream"
+	r := ts.api(t, http.MethodPost, "/api/v1/sessions/"+o.ID+"/shares", alice, `{"role":"viewer"}`)
+	var sh shareResponse
+	_ = json.Unmarshal(r.body, &sh)
+	owner := ts.stream(t, path, o.StreamToken, termHello)
+	viewer := ts.stream(t, path, sh.Token, termHello)
+	if r := ts.api(t, http.MethodDelete, "/api/v1/sessions/"+o.ID, alice, ""); r.code != http.StatusNoContent {
+		t.Fatalf("DELETE: %d %s", r.code, r.body)
+	}
+	owner.closed(t, protocol.CloseSessionClosed)
+	viewer.closed(t, protocol.CloseSessionClosed)
+	for _, token := range []string{o.StreamToken, sh.Token, alice} {
+		c, _, err := dial(ts.srv.URL+path, withToken(token), &termHello, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cl := c.closed(t, map[bool]protocol.CloseCode{true: protocol.CloseUnauthorized, false: protocol.CloseForbidden}[token == sh.Token]); cl.Code == 0 {
+			t.Error("joined a closed session")
+		}
+	}
+}
+
+// TestStreamProtocolErrors checks that a client breaking the protocol
+// gets close with the code of its mistake.
+func TestStreamProtocolErrors(t *testing.T) {
+	ts, _ := sessionServer(t, nil)
+	alice := ts.token(t, "alice", "ops")
+	const path = "/api/v1/connections/ops-shell/stream"
+
+	c := ts.stream(t, path, alice, termHello)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := c.ws.Write(ctx, websocket.MessageText, []byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	c.closed(t, protocol.CloseUnsupported)
+
+	c = ts.stream(t, path, alice, termHello)
+	if err := c.ws.Write(ctx, websocket.MessageBinary, []byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	c.closed(t, protocol.CloseProtocolError)
+
+	// A message over the agreed size is refused by the WebSocket itself.
+	small := termHello
+	small.Capabilities.MaxMessageSize = protocol.MinMessageSize
+	c = ts.stream(t, path, alice, small)
+	big := protocol.TermInput{Seq: 1, Data: bytes.Repeat([]byte("x"), protocol.MinMessageSize)}
+	if err := c.ws.Write(ctx, websocket.MessageBinary, big.Append(nil)); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		_, err := c.next()
+		if err != nil {
+			if got := websocket.CloseStatus(err); got != websocket.StatusMessageTooBig {
+				t.Errorf("an oversized message: %v", err)
+			}
+			break
+		}
+	}
+}
+
+// TestShutdownEndsStreams serves through the public listener's server,
+// whose shutdown ends the sessions and with them their streams, which it
+// could not reach as hijacked connections, and checks that streams get
+// TCP_NOTSENT_LOWAT.
+func TestShutdownEndsStreams(t *testing.T) {
+	var mu sync.Mutex
+	var lowWater []int
+	setLowWater = func(c net.Conn, n int) error {
+		if _, ok := c.(*net.TCPConn); !ok {
+			t.Errorf("TCP_NOTSENT_LOWAT set on a %T", c)
+		}
+		mu.Lock()
+		lowWater = append(lowWater, n)
+		mu.Unlock()
+		return nil
+	}
+	t.Cleanup(func() { setLowWater = streamLowWaterDefault })
+
+	f := testFile(t)
+	sessionFile(f)
+	s, err := newServer(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fb := &fakeBackends{}
+	s.backends.register("fake", "fake", fb.make)
+	ln := localListener(t)
+	stop := serving(t, time.Second, s.publicServer(), ln, nil, nil)
+	ts := &testServer{s: s, srv: nil}
+	token := ts.token(t, "alice", "ops")
+	c, status, err := dial("http://"+ln.Addr().String()+"/api/v1/connections/ops-shell/stream", withToken(token), &termHello, nil)
+	if err != nil {
+		t.Fatalf("%d %v", status, err)
+	}
+	defer c.ws.CloseNow()
+	if m, err := c.next(); err != nil {
+		t.Fatal(err)
+	} else if _, ok := m.(*protocol.Welcome); !ok {
+		t.Fatalf("%#v, want welcome", m)
+	}
+	mu.Lock()
+	if len(lowWater) != 1 || lowWater[0] != streamLowWater {
+		t.Errorf("TCP_NOTSENT_LOWAT %v, want %d once", lowWater, streamLowWater)
+	}
+	mu.Unlock()
+
+	done := make(chan error, 1)
+	go func() { done <- stop() }()
+	if cl := c.closed(t, protocol.CloseServerShutdown); cl.Reason == "" {
+		t.Error("close without a reason")
+	}
+	if err := <-done; err != nil {
+		t.Errorf("serveUntil: %v", err)
+	}
+	if !s.streams.wait(5 * time.Second) {
+		t.Error("the stream did not end")
+	}
+	if n := s.registry.Len(); n != 0 {
+		t.Errorf("%d sessions after the shutdown", n)
+	}
+}
+
+// streamLowWaterDefault is setLowWater as the package sets it.
+var streamLowWaterDefault = setLowWater
+
+// TestEndToEnd signs in, opens a session, streams it, types, and closes
+// it, through the real routes and a fake terminal.
+func TestEndToEnd(t *testing.T) {
+	ts, _ := sessionServer(t, nil)
+	r := ts.signIn(t, "alice", alicePassword)
+	var tr tokenResponse
+	if err := json.Unmarshal(r.body, &tr); err != nil || r.code != http.StatusOK {
+		t.Fatalf("sign-in: %d %s", r.code, r.body)
+	}
+	r = ts.api(t, http.MethodGet, "/api/v1/connections", tr.AccessToken, "")
+	if !strings.Contains(string(r.body), `"id":"ops-shell"`) {
+		t.Fatalf("connections: %s", r.body)
+	}
+	o := ts.openSession(t, tr.AccessToken, "ops-shell")
+	c := ts.stream(t, "/api/v1/sessions/"+url.PathEscape(o.ID)+"/stream", o.StreamToken, termHello)
+	if c.welcome.Role != protocol.RoleOwner || c.welcome.Class != protocol.ClassTerminal {
+		t.Fatalf("welcome %+v", c.welcome)
+	}
+	c.until(t, "the screen", func(m protocol.Message) bool { _, ok := m.(*protocol.TermSnapshot); return ok })
+	c.send(t, protocol.TermInput{Seq: 1, Data: []byte("echo occamy\r")})
+	var echoed bool
+	c.until(t, "the echo", func(m protocol.Message) bool {
+		switch m := m.(type) {
+		case *protocol.TermData:
+			echoed = echoed || bytes.Contains(m.Data, []byte("echo occamy"))
+		case *protocol.TermSnapshot:
+			echoed = echoed || bytes.Contains(m.Data, []byte("echo occamy"))
+		case *protocol.FrameEnd:
+			return echoed && m.LastSeq == 1
+		}
+		return false
+	})
+	r = ts.api(t, http.MethodGet, "/api/v1/sessions/"+o.ID, tr.AccessToken, "")
+	if !strings.Contains(string(r.body), `"viewers":[{"id":`+jsonInt(c.welcome.ViewerID)+`,"role":"owner"}]`) {
+		t.Errorf("state %s", r.body)
+	}
+	if r := ts.api(t, http.MethodDelete, "/api/v1/sessions/"+o.ID, tr.AccessToken, ""); r.code != http.StatusNoContent {
+		t.Fatalf("DELETE: %d", r.code)
+	}
+	c.closed(t, protocol.CloseSessionClosed)
+}
+
+func jsonInt(n uint32) string {
+	b, _ := json.Marshal(n)
+	return string(b)
+}
+
+func TestOriginAllowed(t *testing.T) {
+	s := &server{origins: map[string]bool{"https://app.example": true, "http://localhost:3000": true}}
+	for _, tt := range []struct {
+		host   string
+		origin []string
+		want   bool
+	}{
+		{"occamy.example", nil, true},
+		{"occamy.example", []string{"https://occamy.example"}, true},
+		{"occamy.example", []string{"http://OCCAMY.example"}, true},
+		{"occamy.example:8443", []string{"https://occamy.example:8443"}, true},
+		{"occamy.example", []string{"https://occamy.example:8443"}, false},
+		{"occamy.example", []string{"https://app.example"}, true},
+		{"occamy.example", []string{"https://APP.example"}, true},
+		{"occamy.example", []string{"http://app.example"}, false},
+		{"occamy.example", []string{"http://localhost:3000"}, true},
+		{"occamy.example", []string{"http://localhost"}, false},
+		{"occamy.example", []string{"https://evil.example"}, false},
+		{"occamy.example", []string{"https://occamy.example.evil"}, false},
+		{"occamy.example", []string{"null"}, false},
+		{"occamy.example", []string{""}, false},
+		{"occamy.example", []string{"file://occamy.example"}, false},
+		{"occamy.example", []string{"https://occamy.example", "https://evil.example"}, false},
+		{"occamy.example", []string{"https://user@occamy.example"}, true},
+	} {
+		r, _ := http.NewRequest(http.MethodGet, "http://"+tt.host+"/", nil)
+		if tt.origin != nil {
+			r.Header["Origin"] = tt.origin
+		}
+		if got := s.originAllowed(r); got != tt.want {
+			t.Errorf("Origin %q at %s: %v, want %v", tt.origin, tt.host, got, tt.want)
+		}
+	}
+}
+
+func TestOffers(t *testing.T) {
+	for _, tt := range []struct {
+		header []string
+		want   bool
+	}{
+		{nil, false},
+		{[]string{"occamy.v1"}, true},
+		{[]string{"guacamole, occamy.v1"}, true},
+		{[]string{"guacamole", " occamy.v1 "}, true},
+		{[]string{"occamy.v1.token.YQ"}, false},
+		{[]string{"occamy.v2"}, false},
+	} {
+		r := &http.Request{Header: http.Header{"Sec-Websocket-Protocol": tt.header}}
+		if got := offers(r, protocol.Subprotocol); got != tt.want {
+			t.Errorf("%q: %v", tt.header, got)
+		}
+	}
+}
+
+func TestTrimReason(t *testing.T) {
+	if got := trimReason(strings.Repeat("a", 200)); len(got) != maxCloseReason {
+		t.Errorf("%d bytes", len(got))
+	}
+	long := strings.Repeat("a", maxCloseReason-1) + "é"
+	if got := trimReason(long); got != strings.Repeat("a", maxCloseReason-1) {
+		t.Errorf("cut inside a character: %q", got[len(got)-3:])
+	}
+	if got := trimReason("short"); got != "short" {
+		t.Error(got)
+	}
+}
+
+func TestCloseMessage(t *testing.T) {
+	m := protocol.Close{Code: protocol.CloseIdle, Reason: "idle"}
+	if got, ok := closeMessage(m.Append(nil)); !ok || got != m {
+		t.Errorf("%+v %v", got, ok)
+	}
+	if _, ok := closeMessage(protocol.Ping{}.Append(nil)); ok {
+		t.Error("ping taken for close")
+	}
+	if _, ok := closeMessage(append(m.Append(nil), 0)); ok {
+		t.Error("close with trailing data taken for close")
+	}
+	if _, ok := closeMessage(protocol.TermData{Data: make([]byte, 2000)}.Append(nil)); ok {
+		t.Error("term-data taken for close")
+	}
+}
+
+func TestResizeFor(t *testing.T) {
+	sz := screen{width: 1280, height: 720, cols: 100, rows: 30}
+	if r, ok := resizeFor(backend.Terminal, sz); !ok || r != (backend.Resize{Width: 100, Height: 30}) {
+		t.Errorf("terminal: %+v %v", r, ok)
+	}
+	if r, ok := resizeFor(backend.Graphical, sz); !ok || r != (backend.Resize{Width: 1280, Height: 720}) {
+		t.Errorf("graphical: %+v %v", r, ok)
+	}
+	if _, ok := resizeFor(backend.Terminal, screen{width: 1280, height: 720, cols: 100}); ok {
+		t.Error("a terminal resized without rows")
+	}
+	if _, ok := resizeFor(backend.Graphical, screen{cols: 100, rows: 30}); ok {
+		t.Error("a screen resized to no pixels")
+	}
+}
+
+func TestTracker(t *testing.T) {
+	var tr tracker
+	if !tr.wait(0) {
+		t.Error("no streams, but wait failed")
+	}
+	tr.add()
+	tr.add()
+	if tr.wait(10 * time.Millisecond) {
+		t.Error("wait returned with streams open")
+	}
+	go func() {
+		tr.done()
+		tr.done()
+	}()
+	if !tr.wait(5 * time.Second) {
+		t.Error("wait did not see the streams end")
+	}
+}
