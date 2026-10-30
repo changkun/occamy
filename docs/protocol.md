@@ -354,9 +354,10 @@ c8 00                    # pixel_ratio: 200
 `clipboard` are input. Each starts with a sequence number, `seq`: the
 client numbers its input messages from 1, one more for each, and
 `frame-end` reports the last one a frame reflects, so the client can
-measure the time from an input to its effect exactly. The server
-applies input in the order it arrives, and drops input from read-only
-viewers.
+measure the time from an input to its effect exactly. After 2³²−1 the
+next number is 1: 0 is never an input's number, so a `last_seq` of 0
+always means none. The server applies input in the order it arrives,
+and drops input from read-only viewers.
 
 ### key
 
@@ -528,14 +529,20 @@ c8 00                    # y: 200
 
 ### frame-ack
 
-Type 0x010a. Acknowledges that the client drew a frame, and so every
-frame before it. The client sends it for every frame, once the frame is
-shown. See [Frames and flow control](#frames-and-flow-control).
+Type 0x010a. Acknowledges that the client has shown a frame, and so
+every frame before it. The client acknowledges a frame once it is
+shown, not when it arrives: a client that hands frames to a renderer
+acknowledges one when the renderer is done with it and asks for the
+next. Since an acknowledgement covers every earlier frame, a client may
+skip one that a later acknowledgement covers, as when two wait to be
+sent and only the newer goes. It should not hold one back once its
+frame is shown: the server measures round trips and holds frames by
+them. See [Frames and flow control](#frames-and-flow-control).
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | frame_id | u32 | The frame's ID, from its `frame-end`. |
-| decode_time | u32 | How long the client took to decode and draw the frame, in microseconds. |
+| decode_time | u32 | How long the client took to decode and draw the frame, in microseconds: the time from its `frame-end` arriving to this acknowledgement, any wait for the frame to be shown included. The server takes it out of the round trip and spaces its frames by it. |
 
 ```hex
 # vector: frame-ack
@@ -720,9 +727,9 @@ drew, then acknowledges it with `frame-ack`.
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| frame_id | u32 | The frame's ID. IDs start at 1 on each connection and grow by one for each frame. |
+| frame_id | u32 | The frame's ID. IDs start at 1 on each connection and grow by one for each frame, wrapping from 2³²−1 to 0. |
 | server_time | u64 | When the server read the frame's content, in microseconds since the session started. |
-| last_seq | u32 | The sequence number of the last input from this client that the server applied before it read the frame's content, or 0 if none. The input's effect may show only in a later frame when the remote end answers late, as a remote shell's echo does. |
+| last_seq | u32 | The sequence number of the last input from this client that the server applied before it finished reading the frame's content, or 0 if none. A frame never shows the effect of a later input. The input's effect may show only in a later frame when the remote end answers late, as a remote shell's echo does. |
 
 ```hex
 # vector: frame-end
@@ -1149,12 +1156,17 @@ The server keeps at most `frame_window` frames unacknowledged per
 viewer, 2 unless the handshake agrees otherwise. While the window is
 full, changes accumulate and go out as one frame once a `frame-ack`
 arrives. The client acknowledges every frame once it has shown it;
-an acknowledgement covers every earlier frame too. Terminal frames are
-windowed the same way, so bulk output coalesces instead of queueing.
+an acknowledgement covers every earlier frame too, so it may skip one
+that a later acknowledgement covers. Terminal frames are windowed the
+same way, so bulk output coalesces instead of queueing.
 
 The one exception is input: after the server applies an input from a
 viewer, the frame that carries its effect goes out at once, one beyond
-the window if the window is full.
+the window if the window is full. A viewer therefore never has more than
+`frame_window` + 1 frames unacknowledged, and a client may close with
+`protocol-error` a server that sends more. A client that cannot show
+frames as fast as they come keeps them unacknowledged meanwhile, which
+holds the server back instead of queueing stale frames.
 
 ### Bytes in flight
 

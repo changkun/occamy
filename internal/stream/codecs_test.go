@@ -548,10 +548,13 @@ func TestInputBudgetAcrossRun(t *testing.T) {
 		r = newRigConfig(t, b, 64, 1e9, 20*time.Millisecond, visible, cfg)
 		time.Sleep(500 * time.Millisecond)
 		synctest.Wait()
+		// The input's frame is the first to draw in row 1; the frame
+		// whose run runs the hook may report the input too, since the
+		// key arrives while it is read.
 		var carrier *frameRecord
 		r.cl.mu.Lock()
 		r.cl.onFrame = func(f frameRecord) {
-			if carrier == nil && f.lastSeq >= 1 {
+			if carrier == nil && f.lastSeq >= 1 && slices.ContainsFunc(f.rects, func(rect image.Rectangle) bool { return rect.Min.Y == 64 }) {
 				carrier = &f
 			}
 		}
@@ -562,7 +565,7 @@ func TestInputBudgetAcrossRun(t *testing.T) {
 		r.cl.mu.Lock()
 		defer r.cl.mu.Unlock()
 		if carrier == nil {
-			t.Fatal("no frame reported last_seq 1")
+			t.Fatal("no frame of the input drew row 1")
 		}
 		if want := []image.Rectangle{tileAt(1, 0)}; !slices.Equal(carrier.rects, want) {
 			t.Errorf("the input's frame carried %v, want %v", carrier.rects, want)
@@ -589,21 +592,22 @@ func TestInputBudgetPerTile(t *testing.T) {
 		r = newRigConfig(t, b, 16, 1e9, 20*time.Millisecond, visible, cfg)
 		time.Sleep(500 * time.Millisecond)
 		synctest.Wait()
+		// The input's frame is the first to draw in rows 1 or 2.
 		var carrier *frameRecord
 		r.cl.mu.Lock()
 		r.cl.onFrame = func(f frameRecord) {
-			if carrier == nil && f.lastSeq >= 1 {
+			if carrier == nil && f.lastSeq >= 1 && slices.ContainsFunc(f.rects, func(rect image.Rectangle) bool { return rect.Min.Y == 16 || rect.Min.Y == 32 }) {
 				carrier = &f
 			}
 		}
 		r.cl.mu.Unlock()
-		paint(b, tile(3, 0), &image.Uniform{C: lossyColour(2)})
+		paint(b, tile(3, 0), &image.Uniform{C: lossyColour(2)}) // the frame whose run runs the hook
 		time.Sleep(3 * time.Second)
 		synctest.Wait()
 		r.cl.mu.Lock()
 		defer r.cl.mu.Unlock()
 		if carrier == nil {
-			t.Fatal("no frame reported last_seq 1")
+			t.Fatal("no frame of the input drew rows 1 or 2")
 		}
 		want := []image.Rectangle{image.Rect(0, 16, 64, 32)}
 		for col := range 5 {

@@ -119,6 +119,11 @@ type pending struct {
 	boosted bool   // the pacer has been told, at the clock checked
 }
 
+// moving reports whether tile or row i of n was in motion at the input.
+// Those of a screen of another size were not: the screen resized since,
+// as when the input was a resize-request.
+func (in *pending) moving(i, n int) bool { return len(in.active) == n && in.active[i] }
+
 // newPending returns the pending input seq, whose effect is the change
 // after clock. A tile was in motion if it changed since the last snapshot
 // and before clock, or between the last two, unless the change went out
@@ -303,7 +308,6 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 	w.frame++
 	id := w.frame
 	readAt := time.Now()
-	seq, _ := w.v.LastInput()
 	carried := false // tiles showing the pending input's effect went out
 	inputBytes := 0  // bytes of the input's tiles in this frame
 	tileBytes := 0   // of the last message, a tile's share
@@ -325,9 +329,6 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 				order, i, input = w.fresh[:n], 0, true
 				// The tile read ahead belongs to the order left behind.
 				w.ahead.ok = false
-				// The rest of the frame shows the inputs through the
-				// latest.
-				seq = max(seq, w.in.seq)
 			}
 		}
 		if input && inputBytes > 0 && w.versions[order[i]] != w.versions[order[i-1]] &&
@@ -377,6 +378,12 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 		i += n - 1
 	}
 	w.ahead.ok = false
+	// last_seq is read once the frame's tiles are: the session records an
+	// input before the backend sees it, so any tile read above that shows
+	// an input's effect was read after the input was recorded. Read at the
+	// frame's start, an input applied while the frame was being read
+	// would show without its number.
+	seq, _ := w.v.LastInput()
 	end := protocol.FrameEnd{
 		FrameID:    id,
 		ServerTime: uint64(readAt.Sub(w.start).Microseconds()), // #nosec G115 -- durations since the start are positive
