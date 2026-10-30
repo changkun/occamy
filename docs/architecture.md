@@ -71,7 +71,7 @@ the spec it implements.
 
 | Path | Role |
 |------|------|
-| [protocol/](../protocol) | Protocol v1, a public package: framing, the message type registry, size limits, golden vectors ([protocol-v1](../specs/008-native-architecture/protocol-v1.md)) |
+| [protocol/](../protocol) | Protocol v1, a public package: framing, the handshake (hello in the upgrade query, the token in a subprotocol, capabilities and their agreement), every message with its encoding and decoding, close codes, size limits, golden vectors; described in [protocol.md](protocol.md) ([protocol-v1](../specs/008-native-architecture/protocol-v1.md)) |
 | [internal/backend/](../internal/backend) | The interface every backend implements (native SSH, native VNC, the guacd bridge), its input events and prompts, and scripted fakes for tests ([session-core](../specs/008-native-architecture/session-core.md)) |
 | [internal/pacer/](../internal/pacer) | Per-viewer pacing: the frame window, the frame after an input sent at once, bytes in flight held near the bandwidth-delay product, and quality that adapts ([session-core](../specs/008-native-architecture/session-core.md)) |
 | [internal/framebuffer/](../internal/framebuffer) | A session's screen in tiles, versioned from one counter, so each viewer is sent only the tiles it has not seen ([graphics-pipeline](../specs/008-native-architecture/graphics-pipeline.md)) |
