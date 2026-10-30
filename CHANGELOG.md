@@ -83,6 +83,15 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   before it reads or allocates, resizes the screen at most once an
   update and ten times a second, and bounds its queued input by bytes.
   `occamyd` does not use it yet.
+- `changkun.de/x/occamy/client`, a public Go client of protocol v1 in
+  pure Go, for tests, tools and the Swift client's export layer. `Dial`
+  performs the handshake over a WebSocket, and `Next` delivers frames
+  decoded into a client framebuffer with their dirty rectangles,
+  terminal bytes untouched, and the small state, ending with the close
+  code. A frame is applied and acknowledged as `Next` delivers it, so a
+  slow caller holds the server back instead of queueing frames, and
+  input never waits for `Next`. Tiles of plugged codecs decode in
+  parallel. No API stability promise until the release candidate.
 
 ### Changed
 

@@ -488,3 +488,9 @@ arise, rather than inheriting those fixes.
   fails in about one run in five.
 - **Cost:** a snapshot allocates a version per row, about 400 ns more
   for a 200x50 screen.
+- **Later fix:** the Go client core's end-to-end tests found that a
+  `resize-request` panicked the terminal writer: the rows in motion at
+  the input were recorded for the old size and indexed with the new
+  rows. Rows of a screen of another size now count as still, as tiles
+  already did (`TestTerminalResizeRequest`,
+  [client-core](client-core.md)).
