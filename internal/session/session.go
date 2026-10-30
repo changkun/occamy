@@ -32,6 +32,7 @@ import (
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/framebuffer"
+	"changkun.de/x/occamy/internal/terminal"
 )
 
 // Role is what a viewer may do in a session.
@@ -116,20 +117,25 @@ var (
 // Terminal is the session's terminal state for a terminal backend: the
 // headless emulator that its output feeds
 // (specs/008-native-architecture/native-ssh-backend.md, Screen diffs).
-// The session serialises its own calls, which may come from any of the
-// backend's goroutines; Write's slice is borrowed for the call. Viewers'
-// writers read the screen concurrently, so the emulator still needs its
-// own lock for them.
+// The session serialises its own calls to Write and Resize, which may
+// come from any of the backend's goroutines; Write's slice is borrowed
+// for the call. Viewers' writers call Snapshot concurrently, so the
+// emulator still needs its own lock for them. *terminal.Terminal is one.
 type Terminal interface {
 	Write(p []byte)
 	Resize(cols, rows int)
+	// Snapshot returns the current screen, which never changes after.
+	Snapshot() *terminal.Screen
 }
 
 // Config describes a session. Zero fields take the defaults.
 type Config struct {
 	// Backend is the connection the session runs. Required.
 	Backend backend.Backend
-	// Terminal holds the screen of a terminal backend. Required for one.
+	// Terminal holds the screen of a terminal backend. If nil, the
+	// session makes a terminal.Terminal of 80x24 until the backend sizes
+	// it, whose answers to the application's queries go back to the
+	// backend as terminal input.
 	Terminal Terminal
 	// TileSize is the framebuffer's tile side for a graphical backend,
 	// 64 if zero.
@@ -184,6 +190,9 @@ type Session struct {
 	prompts   map[uint32]*promptRequest
 	nextPrmt  uint32
 	termWake  chan struct{} // closed at the next terminal output
+	replies   [][]byte      // the terminal's answers, for the backend
+
+	replyWake chan struct{} // holds a token while replies is not empty
 
 	dropped atomic.Int64
 }
@@ -207,21 +216,22 @@ func Start(ctx context.Context, cfg Config) (*Session, *Viewer, error) {
 		cfg.Logger = slog.Default()
 	}
 	s := &Session{
-		cfg:     cfg,
-		class:   cfg.Backend.Class(),
-		backend: cfg.Backend,
-		log:     cfg.Logger,
-		cmds:    make(chan func()),
-		ending:  make(chan struct{}),
-		done:    make(chan struct{}),
-		prompts: map[uint32]*promptRequest{},
+		cfg:       cfg,
+		class:     cfg.Backend.Class(),
+		backend:   cfg.Backend,
+		log:       cfg.Logger,
+		cmds:      make(chan func()),
+		ending:    make(chan struct{}),
+		done:      make(chan struct{}),
+		prompts:   map[uint32]*promptRequest{},
+		replyWake: make(chan struct{}, 1),
 	}
 	switch s.class {
 	case backend.Graphical:
 		s.fb = framebuffer.New(cfg.TileSize)
 	case backend.Terminal:
-		if cfg.Terminal == nil {
-			return nil, nil, errors.New("session: terminal backend without a Terminal")
+		if s.cfg.Terminal == nil {
+			s.cfg.Terminal = terminal.New(80, 24, terminal.Options{Reply: s.reply})
 		}
 	default:
 		return nil, nil, fmt.Errorf("session: backend of class %v", s.class)
@@ -237,6 +247,42 @@ func (s *Session) Class() backend.Class { return s.class }
 
 // Framebuffer is the screen of a graphical session, nil for a terminal.
 func (s *Session) Framebuffer() *framebuffer.Framebuffer { return s.fb }
+
+// Screen returns the current screen of a terminal session, nil for a
+// graphical one.
+func (s *Session) Screen() *terminal.Screen {
+	if s.fb != nil {
+		return nil
+	}
+	return s.cfg.Terminal.Snapshot()
+}
+
+// reply queues the terminal's answer to the application, such as a
+// cursor position report, for the backend's input. It is called from
+// the sink's TermData on a backend goroutine, which must not wait for
+// the backend, so the owner goroutine delivers it.
+func (s *Session) reply(p []byte) {
+	s.mu.Lock()
+	s.replies = append(s.replies, p)
+	s.mu.Unlock()
+	select {
+	case s.replyWake <- struct{}{}:
+	default:
+	}
+}
+
+// sendReplies gives the backend the terminal's queued answers, in order.
+func (s *Session) sendReplies() {
+	s.mu.Lock()
+	replies := s.replies
+	s.replies = nil
+	s.mu.Unlock()
+	for _, p := range replies {
+		if err := s.backend.Input(backend.TermInput{Data: p}); err != nil {
+			s.log.Debug("terminal reply dropped", "err", err)
+		}
+	}
+}
 
 // Changed returns a channel that is closed at the next change to the
 // screen or the terminal. Call it before reading the screen, so that a
@@ -330,6 +376,8 @@ func (s *Session) run(ctx context.Context) {
 		select {
 		case f := <-s.cmds:
 			f()
+		case <-s.replyWake:
+			s.sendReplies()
 		case err := <-runDone:
 			runDone = nil
 			switch {
@@ -398,9 +446,18 @@ func (s *Session) addViewer(role Role) *Viewer {
 	defer s.mu.Unlock()
 	s.nextID++
 	v := &Viewer{s: s, id: s.nextID, role: role, wake: make(chan struct{}, 1)}
-	// A new viewer starts from the session's current small state.
-	title := s.title
-	v.pending = Pending{Title: &title}
+	// A new viewer starts from the session's current small state. A
+	// terminal's title and cursor are on its screen, and a terminal has
+	// no pointer.
+	if s.class == backend.Graphical {
+		title := s.title
+		v.pending.Title = &title
+		pos := s.cursorPos
+		v.pending.CursorPos = &pos
+	} else if s.title != "" {
+		title := s.title
+		v.pending.Title = &title
+	}
 	if s.size != (image.Point{}) {
 		size := s.size
 		v.pending.Resize = &size
@@ -408,8 +465,6 @@ func (s *Session) addViewer(role Role) *Viewer {
 	if s.cursor != nil {
 		v.pending.Cursor = s.cursor
 	}
-	pos := s.cursorPos
-	v.pending.CursorPos = &pos
 	for _, o := range s.viewers {
 		o.update(func(p *Pending) { p.Joined = append(p.Joined, ViewerInfo{ID: v.id, Role: role}) })
 		v.pending.Joined = append(v.pending.Joined, ViewerInfo{ID: o.id, Role: o.role})

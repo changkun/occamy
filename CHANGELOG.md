@@ -23,6 +23,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   vectors in `protocol/testdata/messages.json`, and
   [docs/protocol.md](docs/protocol.md), the protocol's normative
   description. `docs/protocol-cn.md` is now marked as the v0 protocol.
+  A `max_message_size` below 64 KiB is refused.
 - `internal/auth`, the tokens of API v1: Ed25519 JWTs for access
   (a user and groups) and for sessions (a session and a role), signed by
   occamyd or by a configured trusted issuer, with no other algorithm
@@ -65,9 +66,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - `internal/stream`, a viewer's connection in protocol v1: `welcome`,
   then the client's input and views applied as they come, and frames at
   the pace of the viewer's link. Small state never waits behind tiles,
-  and an input's effect goes ahead of motion already on the screen. It
-  serves graphical sessions with raw tiles for now. Not served by any
-  route yet.
+  and an input's effect goes ahead of motion already on the screen.
+  Graphical sessions get raw tiles for now; terminal sessions get the
+  diff between the screens a viewer was sent, so bulk output coalesces,
+  an echo goes ahead of a status line or other output already on the
+  screen, and the terminal's answers to the shell's queries reach the
+  shell. Not served by any route yet.
 - `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS, NLA
   through CredSSP with NTLMv2, the connection sequence, bitmap updates
   in interleaved RLE and planar, pointer updates, and keyboard and mouse
