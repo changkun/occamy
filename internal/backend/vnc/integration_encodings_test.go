@@ -41,8 +41,9 @@ import (
 
 const (
 	keyF6 = 0xffc3 // a static photograph
-	// encQualityLevel6 asks for JPEG of the middle quality (RFC 6143,
-	// section 7.8.8), which the backend does not ask for itself.
+	// encQualityLevel6 asks for JPEG of quality level 6 of 0 to 9
+	// (rfbproto, "JPEG Quality Level Pseudo-encoding"), which the backend
+	// does not ask for itself.
 	encQualityLevel6 = -32 + 6
 )
 
