@@ -90,6 +90,7 @@ implements.
 | [internal/terminal/](../internal/terminal) | The headless terminal emulator of a terminal session: immutable, versioned screen snapshots that share unchanged rows and carry each row's version, and the diffs that bring each viewer's terminal up to date ([native-ssh-backend](../specs/008-native-architecture/native-ssh-backend.md)) |
 | [client/](../client) | The Go client of protocol v1, a public package: the handshake over a WebSocket, a client framebuffer with dirty rectangles and parallel decoding, terminal bytes passed through, input numbered for latency, and events pulled with `Next`, for tests, tools and the Swift client's export layer ([client-core](../specs/008-native-architecture/client-core.md)) |
 | [internal/stream/](../internal/stream) | A viewer's connection: welcome, the reader of its input and view, and the writer that sends small state ahead of frames, tiles or terminal screen diffs, and an input's effect ahead of motion, at the pace its pacer allows ([session-core](../specs/008-native-architecture/session-core.md)) |
+| [internal/rdp/](../internal/rdp) | The RDP spike's pure-Go client: TLS with the VNC backend's certificate policy, NLA (CredSSP with its own NTLMv2; unverified live, since xrdp has no NLA and no Windows host has run it), the connection sequence, bitmap updates in interleaved RLE and planar drawn into a backend's sink within bounds on size and on the rate of decoding, and keyboard and mouse input; no backend uses it yet ([rdp-strategy](../specs/008-native-architecture/rdp-strategy.md)) |
 
 ## License
 
