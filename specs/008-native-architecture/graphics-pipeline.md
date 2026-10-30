@@ -8,6 +8,7 @@ depends_on:
   - specs/008-native-architecture/benchmark.md
 affects:
   - internal/framebuffer/
+  - internal/codec/
   - internal/encoder/
 effort: large
 created: 2026-10-29
@@ -83,9 +84,10 @@ quickly, in pure Go. That means choosing:
   (`src/libguac/display-worker.c`), so the same photograph cost 0.4 to
   2.2 MiB between runs of the baseline's G6.
 - **Lossy rectangles:** a frame's adjacent lossy tiles are encoded
-  together as one rectangle, a run of tiles along a row or a block of
-  them, so that the lossy format's headers are paid once per rectangle.
-  Tiles stay 64 pixels for damage and classification.
+  together as one rectangle, a run of tiles along a row, so that the
+  lossy format's headers are paid once per rectangle. Tiles stay 64
+  pixels for damage and classification. (The Codecs task merges runs
+  along rows only; blocks are not built, see its notes.)
 - **Refinement (build to lossless):** when a region stops changing for a
   short delay, it is resent at its final quality: exact for tiles of up
   to 256 colours, so text and UI always end up exact, and a high lossy quality
@@ -273,7 +275,7 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
 |------|----------|-------|
 | Framebuffer | `internal/framebuffer`: RGBA pixels in square tiles, versions from one counter, a lock per row of tiles, drawing and CopyRect for backends, tile reads and a change signal for writers; the tile size is a parameter | — |
 | Measurement (done 2026-10-30) | A corpus of frames recorded from the bench desktop's scenes (desktop, two terminals, browser, photograph, drag, scroll, motion), and benchmarks on Go 1.27 that settle questions 1 to 3 and the lossy codec: palette or raw pixels with deflate, PNG, QOI, lossless WebP, JPEG (standard library and gen2brain/jpegn) and lossy WebP, scored for size, encode and decode time and SSIM; results in [docs/benchmarks/codecs.md](../../docs/benchmarks/codecs.md) | — |
-| Codecs | `internal/encoder`, an implementation of `stream.Encoder`: classification by colour count (up to 16, 17 to 256, above 256); the palette or raw container with `compress/flate` at level 1 as `deflate` (2); raw RGBA (1); lossy WebP from gen2brain/vpx/webp at method 0 (5), and JPEG from gen2brain/jpegn (4) for viewers that list JPEG but not WebP; adjacent lossy tiles of a frame encoded as one rectangle. Fixes the deflate container, including alpha for cursors, in [docs/protocol.md](../../docs/protocol.md), which marks it provisional. Adds vpx and jpegn to occamyd's `go.mod`, with the Go 1.26.4 they need, and their licence and PATENTS notices to the image's `licenses/` | Measurement |
+| Codecs (done 2026-10-30) | `internal/encoder`, an implementation of `stream.Encoder`: classification by colour count (up to 16, 17 to 256, above 256); the palette or raw container with `compress/flate` at level 1 as `deflate` (2); raw RGBA (1); lossy WebP from gen2brain/vpx/webp at method 0 (5), and JPEG from gen2brain/jpegn (4) for viewers that list JPEG but not WebP; adjacent lossy tiles of a frame encoded as one rectangle. Fixes the deflate container, including alpha for cursors, in [docs/protocol.md](../../docs/protocol.md), which marked it provisional. Adds vpx and jpegn to occamyd's `go.mod`, with the Go 1.26.4 they need, and their licence and PATENTS notices to the image's `licenses/` | Measurement |
 | Refinement | Motion heat per tile, and refinement after a still delay: exact for tiles of up to 256 colours, which go lossy while they move if they have more than 16, and a quality chosen by SSIM for photographic ones; gives `stream.Encoder` the tile's motion | Codecs |
 | Scroll detection | Row hashes per tile column (xxh3-64), the offset search, and `copy-rect` with tiles for the exposed strip | Framebuffer |
 | Tile cache | Content hashes (xxh3-128 from zeebo/xxh3, so collisions are out of reach), the server's mirror of each client's cache, and the `cached` codec | Codecs, protocol v1 Messages |
@@ -281,12 +283,15 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
 
 ## Affects
 
-New `internal/framebuffer` and `internal/encoder`. Fixes the provisional
-codec layouts of [protocol-v1](protocol-v1.md) (raw's channel order, the
-deflate container, whether WebP is sent) and the decoders in
-[client-core](client-core.md) and [009](../009-react-web-client.md). The
-measurement fixed raw's order as RGBA and chose WebP for lossy tiles;
-the deflate container's exact layout is left to the Codecs task.
+New `internal/framebuffer`, `internal/codec` and `internal/encoder`.
+Fixes the provisional codec layouts of [protocol-v1](protocol-v1.md)
+(raw's channel order, the deflate container, whether WebP is sent) and
+the decoders in [client-core](client-core.md) and
+[009](../009-react-web-client.md). The measurement fixed raw's order as
+RGBA and chose WebP for lossy tiles; the Codecs task fixed the deflate
+container in [docs/protocol.md](../../docs/protocol.md#the-deflate-container),
+with golden payloads of every codec in
+`protocol/testdata/codecs.json`.
 
 ## Implementation notes: measurement
 
@@ -359,10 +364,10 @@ tiles of 17 to 256 colours.
 - The measured container stores palette entries and raw pixels as RGB
   without alpha, while cursors use the same codecs with straight alpha.
   The Codecs task fixes the container in docs/protocol.md with a form
-  for alpha.
+  for alpha. (Done: forms 2 and 3.)
 - The Codecs task ships the licence and PATENTS notices of
   `gen2brain/vpx` and `gen2brain/jpegn` in the image's `licenses/`, as
-  docker/Dockerfile does for Guacamole's.
+  docker/Dockerfile does for Guacamole's. (Done.)
 - Decision 9 assumes VNC and the guacd bridge as sources. A native RDP
   backend receives blue-first bitmaps; its design should measure the
   swizzle on drawing before it asks for another layout.
@@ -417,4 +422,196 @@ within 5 % for 95 % of the sums per codec and class, within 10 % for
   load average itself.
 - Decisions 1, 7, 8, 9 and 10 and the G6 claim were corrected as above;
   docs/protocol.md says occamyd sends only `raw` until the Codecs task
-  lands.
+  lands. (It has: docs/protocol.md now says what occamyd sends in each
+  codec.)
+
+## Implementation notes: Codecs
+
+Done on 2026-10-30.
+
+**What was built.**
+
+- `internal/codec`, with the standard library only, so that a client
+  decodes without linking the lossy encoders: raw pixels both ways; the
+  palette, counted with an early exit at the 257th colour; and the
+  deflate container, written at `compress/flate` level 1 with a
+  compressor reused between tiles and read by `Inflater.Decode`, which
+  inflates straight into the destination image, row by row, and refuses
+  anything the protocol does not allow: a form other than 0 to 3, a
+  container longer or shorter than the rectangle, an index beyond the
+  palette, bytes after the DEFLATE stream. It never inflates more than
+  `1 + 4wh` bytes and allocates nothing once warm; two fuzzers (any
+  payload, and round trips of any pixels) found nothing in 30 to 60
+  seconds each.
+- `internal/encoder`, `stream.Encoder`'s implementation. `New` takes the
+  codecs a viewer agreed to and picks deflate or else raw for lossless
+  tiles, and WebP or else JPEG for lossy ones. `Tile` counts a tile's
+  colours (`Classify`: up to 16, 17 to 256, more), encodes it lossless
+  or reports it lossy; `Lossy` encodes a lossy tile, or a run of them,
+  with `gen2brain/vpx/webp` at method 0 on one thread or `gen2brain/jpegn`
+  at 4:2:0; `Cursor` encodes the cursor exactly.
+- `internal/stream`: `Config.NewEncoder` gives each viewer its own
+  encoder for the codecs it agreed to, internal/encoder's by default,
+  and the server offers `webp`, `jpeg`, `deflate` and `raw` unless told
+  otherwise. A graphical viewer that agrees to none of them is closed
+  with `unsupported`. The writer merges a frame's lossy tiles into runs:
+  consecutive dirty tiles in one row of tiles, at most
+  `encoder.MaxRun` (16) of them, at most the client's texture size wide,
+  and halved until the message fits the agreed message size. The
+  lossless tile that ends a run is encoded once, kept, and sent as the
+  next message. The cursor goes in the viewer's codecs too. The debug
+  log gives each frame's encode time.
+- docs/protocol.md fixes the deflate container (forms 0 to 3: palette
+  or raw, opaque or with alpha) and says what occamyd sends in each
+  codec; its two container examples are checked by `go test ./protocol`.
+  `protocol/testdata/codecs.json` holds 17 payloads, of each codec
+  occamyd sends and each container form, with their pixels, and 14
+  deflate payloads a receiver refuses; `go test ./internal/encoder -run
+  TestGoldenCodecs -update` writes it. Lossless vectors decode exactly.
+  Lossy ones carry a floor on PSNR 3 dB under what the reference
+  decoders reach (vpx's for WebP, which decodes as libwebp does, and
+  `image/jpeg`), since decoders differ in rounding and in upsampling
+  chroma.
+- `go.mod` needs Go 1.26.4 and gains `gen2brain/vpx` v0.2.1 and
+  `gen2brain/jpegn` v0.6.2, both pure Go: every package builds with
+  `CGO_ENABLED=0` for the release's Linux, macOS and Windows on amd64
+  and arm64, for Linux on 386, arm, ppc64le, riscv64 and s390x, for
+  FreeBSD, and with `-tags noasm`. The image's `licenses/` carries
+  vpx's COPYING, COPYING.webpkit and PATENTS and jpegn's LICENSE;
+  `THIRD_PARTY_LICENSES` now takes PATENTS files, Go's and
+  golang.org/x's among them.
+
+**Decisions.**
+
+- **Rows, not blocks.** The writer sends tiles in index order, so a run
+  along a row needs one tile of lookahead, while a block needs the rows
+  below classified before the first is sent. Rows already reach the
+  measurement's numbers (below); blocks would save a few headers more
+  on large photographic areas.
+- **At most 16 tiles a run,** 1024 pixels: rows of 16 were what the
+  measurement measured, and the cap bounds the pixels a lossy encode
+  takes at once (256 KiB) and the time a frame's first message waits.
+- **Quality is the pacer's** (30 to 90, starting at 90) for both WebP
+  and JPEG, though the two scales differ (WebP scores lower at 30 and
+  70 and higher at 90). Choosing a quality by SSIM is the Refinement
+  task's.
+- **A viewer's order of preference is ignored**: the measurement ranks
+  the codecs of each kind. A viewer with no lossy codec gets every tile
+  lossless, photographic ones as deflate's raw form; one with no
+  lossless codec gets every tile lossy. The cursor is deflate, else
+  raw, else lossless WebP; a viewer that agrees only JPEG gets no
+  cursor and draws its own pointer.
+- **Tiles of 17 to 256 colours are lossless** until the Refinement task
+  gives the encoder a tile's motion, so the motion scene costs 388 KiB
+  a frame for now, as the measurement found.
+- **Classification is per viewer**: each writer counts its tiles'
+  colours. Sharing it, and the encoded tiles, is the Encode cache's.
+- **`internal/codec` is a package of its own** rather than part of
+  internal/encoder, so that `client/` imports the decoders without vpx
+  and jpegn.
+
+**Deviations from the task.**
+
+- `stream.Encoder` changed shape. It was one `Encode(dst, pix, w, h,
+  quality)` shared by every viewer, with raw as the default; it is now
+  `Tile`, `Lossy` and `Cursor`, one encoder per viewer from
+  `Config.NewEncoder`, since the codecs depend on what the viewer
+  agreed and the encoder keeps buffers and compressors.
+- Lossy tiles are merged along rows only, as above, not into blocks.
+- CI's licence check (`go-licenses check`) covers `./...` instead of
+  occamyd's main package: occamyd does not link `internal/stream` until
+  it serves protocol v1, so vpx and jpegn are not yet in its binary or
+  in the release archives' `THIRD_PARTY_LICENSES`, and a check of `.`
+  would not see them. The image ships their notices already, copied from
+  the module cache in the build stage.
+
+**Measured encode times.**
+
+One core (`GOMAXPROCS=1`), at quality 70, classification included:
+the median of five passes over each frame, summed over a scene's frames
+and divided by their number (`go test ./internal/encoder -run
+TestCorpusTimes -corpus.runs 5`), on 2026-10-30 at 22:29 under a load
+average of 9.8 over a minute (18 over five) on 18 cores. The
+measurement ran under 5 to 9, and left classification out of its encode
+times.
+
+| Scene | KiB a frame: WebP rows · JPEG rows | ms a frame: WebP rows · WebP tiles · JPEG rows | Measurement, WebP tiles: KiB · ms |
+|---|---|---|---|
+| desktop | 15.1 · 15.1 | 3.0 · 2.8 · 3.0 | 15.1 · 1.4 |
+| terminal | 17.4 · 17.4 | 2.7 · 2.8 · 2.6 | 17.4 · 1.5 |
+| terminal-aa | 103.2 · 103.2 | 5.1 · 4.8 · 4.8 | 103.2 · 3.9 |
+| browser | 138.8 · 144.2 | 7.1 · 7.1 · 5.8 | 140.1 · 6.1 |
+| photo | 31.1 · 70.7 | 12.4 · 13.2 · 2.9 | 44.1 · 12.4 (rows: 31 · 9.8, jpegn 71 · 1.8) |
+| drag | 22.0 · 30.0 | 4.5 · 5.0 · 3.1 | 24.5 · 3.7 |
+| scroll | 55.4 · 55.4 | 4.4 · 4.5 · 4.6 | 55.4 · 3.6 |
+| motion | 388.1 · 388.1 | 9.4 · 9.0 · 8.7 | 388.1 · 8.0 |
+
+- The bytes are the measurement's: to the 0.1 KiB on lossless content,
+  31.1 KiB against 31 for the photograph as rows of WebP, and 70.7
+  against 71 as rows of JPEG. Rows take 29 % less than single tiles on
+  the photograph and 10 % less on the drag; on the browser, whose 12
+  lossy tiles are a small part of the frame, 1 % less.
+- The times are the measurement's plus 0.8 to 2.6 ms a frame, about
+  what classification cost it (1.2 to 2.7 ms a frame). Scenes without
+  lossy tiles take the same time in every mode within 8 %, as they
+  should.
+- `BenchmarkFrame -cpu 1`, which times whole frames with their pixel
+  copies, gives medians over five counts from 4 % below these to 24 %
+  above (antialiased text). Seven runs earlier, under load averages of
+  15 to 35, gave medians up to 30 % higher (the photograph as WebP
+  rows: 16.0 ms), so these times are indicative; the bytes are exact.
+- A viewer encodes on one core at most: a full-screen photograph
+  changing 30 times a second would take 37 % of a core as WebP and 9 %
+  as JPEG, and the plasma, lossless for now, 27 %.
+
+**Surprises.**
+
+- vpx unpremultiplies every pixel of an `image.RGBA`, with a division;
+  tiles are opaque, so the encoder hands it the same pixels as an
+  `image.NRGBA`, which it copies as they are.
+- The photograph at the pacer's starting quality of 90 takes 151 KiB a
+  frame as rows of WebP (175 as JPEG), over G6's 139; at 70 it takes 31.
+  G6 depends on the quality the pacer settles at, or the one refinement
+  picks.
+- The first golden vectors' floors on PSNR were 10 dB too low: the
+  tests decoded WebP with `golang.org/x/image/webp`, which reads VP8's
+  limited-range colours as full-range, as the guacd bridge's
+  conformance work found at the same time. They decode with vpx now,
+  as the measurement did, so its scores stand.
+- The measured container needed only its form byte widened for alpha:
+  opaque tiles cost the same bytes as in the measurement.
+- Two of the run's conditions, a gap in the dirty tiles and the end of
+  a row, survived a mutation check against the first tests; the tests
+  now cover both.
+
+**Follow-ups.**
+
+- Refinement: `stream.Encoder` gains the tile's motion, `Tile` sends 17
+  to 256 colours lossy while they move, and a still tile is resent
+  exact, or at a quality chosen by SSIM. Lossless WebP for still
+  antialiased text needs its measurement first.
+- Tile cache: `cached` (6) is not in `encoder.Codecs()`. A cached tile
+  is looked up before classification, and a run of lossy tiles is
+  broken at a cached one.
+- Encode cache and workers: classification and payloads keyed by tile,
+  version, codec and quality, shared across viewers; a run's payload
+  depends on which neighbours are dirty, so the cache holds single
+  tiles, or runs keyed by their tiles' versions. Today a viewer encodes
+  on its writer's goroutine, one core at most, with no bound per
+  session.
+- client-core: `codec.Inflater.Decode(dst *image.RGBA, payload)` and
+  `codec.DecodeRaw` decode `deflate` and `raw` straight into a
+  `SubImage` of the client's screen, one Inflater per decoding
+  goroutine. `gen2brain/vpx/webp` decodes WebP as libwebp does (with
+  `ToRGBA` for lossy images; lossless ones, cursors, come back as
+  `image.NRGBA`), and `image/jpeg` decodes JPEG; `golang.org/x/image/webp`
+  drawn as it is gets VP8's colour range wrong and fails the golden
+  vectors. A tile message may cover up to 16 tiles of a row. A
+  cursor's pixels are straight alpha, so the client views them as
+  `image.NRGBA`. Its tests run `protocol/testdata/codecs.json`.
+- 009: inflate with `DecompressionStream('deflate-raw')`, read the
+  container as docs/protocol.md describes, in a Worker, and decode WebP
+  and JPEG with `createImageBitmap`; its tests run `codecs.json` too,
+  exact for lossless vectors, above `min_psnr` for lossy ones, refusing
+  every invalid one.
+- Browsers' decode times are still unmeasured.
