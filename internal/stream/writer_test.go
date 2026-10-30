@@ -16,6 +16,7 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+	"unicode/utf8"
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/backend/backendtest"
@@ -105,6 +106,9 @@ func (cl *client) run(ctx context.Context) {
 				cl.term.Resize(cl.size.X, cl.size.Y)
 			}
 		case *protocol.TermSnapshot:
+			if !utf8.Valid(m.Data) {
+				cl.errs = append(cl.errs, errors.New("term-snapshot split inside a character"))
+			}
 			cl.term = terminal.New(cl.size.X, cl.size.Y, terminal.Options{})
 			cl.term.Write(m.Data)
 			cl.snapshots++
@@ -112,6 +116,9 @@ func (cl *client) run(ctx context.Context) {
 			if cl.term == nil {
 				cl.errs = append(cl.errs, errors.New("term-data before term-snapshot"))
 				break
+			}
+			if !utf8.Valid(m.Data) {
+				cl.errs = append(cl.errs, errors.New("term-data split inside a character"))
 			}
 			cl.term.Write(m.Data)
 		case *protocol.Tile:

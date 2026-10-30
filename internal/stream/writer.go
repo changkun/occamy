@@ -30,8 +30,8 @@ const inputTimeout = time.Second
 const inputFrameBytes = 16 << 10
 
 // activeWindow is how far back the writer looks for motion when an input
-// arrives: a tile that changed within it was in motion, and its next
-// change is not taken for the input's effect.
+// arrives: a tile, or a terminal's row or cursor, that changed within it
+// was in motion, and its next change is not taken for the input's effect.
 const activeWindow = 100 * time.Millisecond
 
 // maxBells bounds the bells sent at once; more ring as one burst anyway.
@@ -79,7 +79,9 @@ type writer struct {
 	in       *pending // the input whose effect goes first
 
 	// snap holds the versions at snapAt and prev those at least
-	// activeWindow before, to find the tiles in motion at an input.
+	// activeWindow before, to find the tiles in motion at an input. In a
+	// terminal session the versions are those of the screen's rows, then
+	// its cursor's.
 	prev, snap, cur []uint64
 	snapAt          time.Time
 	// effects holds the version of each tile when it last went out as an
@@ -89,7 +91,7 @@ type writer struct {
 
 // pending holds the inputs whose effect has not been sent yet, from the
 // input first through seq. Their effect is the change after clock on
-// tiles that were still before it: a tile in motion, active, changes
+// tiles, or a terminal's rows and cursor, that were still before it: a tile in motion, active, changes
 // after the input anyway, and taking that change for the effect would
 // spend the inputs' priority on the motion. Inputs that come while the
 // effect is awaited join it, since the first input's clock precedes
@@ -106,21 +108,32 @@ type pending struct {
 }
 
 // newPending returns the pending input seq, whose effect is the change
-// after clock. A tile was in motion if it changed between the last two
-// snapshots, or since the last and before clock, unless the change went
-// out as an earlier input's effect. A tile that changed since the last
-// snapshot and again after clock is taken as still.
+// after clock. A tile was in motion if it changed since the last snapshot
+// and before clock, or between the last two, unless the change went out
+// as an earlier input's effect. A tile that changed since the last
+// snapshot and again after clock is taken as still; a terminal's rows
+// are read at clock, so this does not arise for them. The writer takes a
+// snapshot at least every activeWindow while it is visible; older
+// snapshots, from while it was hidden or held mid-frame, are history and
+// show no motion.
 func (w *writer) newPending(seq uint32, clock uint64) *pending {
 	in := &pending{first: seq, seq: seq, clock: clock, at: time.Now()}
-	if w.fb == nil {
-		return in // a terminal: any change after clock is the effect
+	if w.fb != nil {
+		w.cur = w.fb.Versions(w.cur[:0])
+	} else {
+		// The screen at clock, when known, says exactly which rows
+		// changed before the input.
+		s := w.v.InputScreen()
+		if s == nil || s.Version != clock {
+			s = w.s.Screen()
+		}
+		w.cur = s.Versions(w.cur[:0])
 	}
-	w.cur = w.fb.Versions(w.cur[:0])
 	if len(w.cur) != len(w.snap) || len(w.effects) != len(w.cur) {
 		return in
 	}
 	in.active = make([]bool, len(w.cur))
-	before := len(w.prev) == len(w.snap)
+	before := len(w.prev) == len(w.snap) && time.Since(w.snapAt) < 2*activeWindow
 	for i, v := range w.cur {
 		e := w.effects[i]
 		recent := v > w.snap[i] && v <= clock && v > e
@@ -221,7 +234,7 @@ func (w *writer) run(ctx context.Context) error {
 			if w.in != nil && !w.in.boosted {
 				effect = changed
 			}
-			if err := w.wait(ctx, effect, retry); err != nil {
+			if err := w.wait(ctx, effect, w.untilSnap(retry)); err != nil {
 				return err
 			}
 			continue
@@ -408,6 +421,17 @@ func (w *writer) resolve() {
 	if seq, _ := w.v.LastInput(); seq != in.first {
 		w.in = w.newPending(seq, in.checked)
 	}
+}
+
+// untilSnap bounds a wait of retry, 0 for none, by when the next
+// snapshot of motion is due, so that the snapshots stay fresh while the
+// pacer holds frames back.
+func (w *writer) untilSnap(retry time.Duration) time.Duration {
+	d := max(time.Millisecond, activeWindow-time.Since(w.snapAt))
+	if retry > 0 {
+		d = min(d, retry)
+	}
+	return d
 }
 
 // syncSize sends resize when the framebuffer's size differs from what

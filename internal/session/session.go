@@ -446,9 +446,18 @@ func (s *Session) addViewer(role Role) *Viewer {
 	defer s.mu.Unlock()
 	s.nextID++
 	v := &Viewer{s: s, id: s.nextID, role: role, wake: make(chan struct{}, 1)}
-	// A new viewer starts from the session's current small state.
-	title := s.title
-	v.pending = Pending{Title: &title}
+	// A new viewer starts from the session's current small state. A
+	// terminal's title and cursor are on its screen, and a terminal has
+	// no pointer.
+	if s.class == backend.Graphical {
+		title := s.title
+		v.pending.Title = &title
+		pos := s.cursorPos
+		v.pending.CursorPos = &pos
+	} else if s.title != "" {
+		title := s.title
+		v.pending.Title = &title
+	}
 	if s.size != (image.Point{}) {
 		size := s.size
 		v.pending.Resize = &size
@@ -456,8 +465,6 @@ func (s *Session) addViewer(role Role) *Viewer {
 	if s.cursor != nil {
 		v.pending.Cursor = s.cursor
 	}
-	pos := s.cursorPos
-	v.pending.CursorPos = &pos
 	for _, o := range s.viewers {
 		o.update(func(p *Pending) { p.Joined = append(p.Joined, ViewerInfo{ID: v.id, Role: role}) })
 		v.pending.Joined = append(v.pending.Joined, ViewerInfo{ID: o.id, Role: o.role})

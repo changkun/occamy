@@ -6,6 +6,7 @@ package stream
 
 import (
 	"context"
+	"fmt"
 	"time"
 	"unicode/utf8"
 
@@ -37,27 +38,25 @@ func (w *writer) runTerminal(ctx context.Context) error {
 		changed := w.s.Changed()
 		seq, _ := w.v.LastInput() // before the screen, which then shows it
 		s := w.s.Screen()
+		w.track(s)
 		if s == last {
 			if err := w.wait(ctx, changed, 0); err != nil {
 				return err
 			}
 			continue
 		}
-		if w.in != nil && !w.in.boosted && s.Version > w.in.clock {
-			// The input's effect is on the screen: its frame may go
-			// beyond the window.
-			w.p.Input()
-			w.in.boosted = true
-			w.in.checked = s.Version
-			w.in.seq = max(w.in.seq, seq)
+		if last != nil && last.Equal(s) {
+			last = s // redrawn the same: nothing for the viewer
+			continue
 		}
+		w.termEffect(s, seq)
 		ok, retry := w.p.StartFrame(time.Now())
 		if !ok {
 			var effect <-chan struct{}
 			if w.in != nil && !w.in.boosted {
 				effect = changed
 			}
-			if err := w.wait(ctx, effect, retry); err != nil {
+			if err := w.wait(ctx, effect, w.untilSnap(retry)); err != nil {
 				return err
 			}
 			continue
@@ -66,9 +65,54 @@ func (w *writer) runTerminal(ctx context.Context) error {
 			return err
 		}
 		if w.in != nil && w.in.boosted {
+			// What the input changed went out as its effect, so it is not
+			// motion when the next input comes.
+			for i, v := range w.versions {
+				if v > w.in.clock && (w.in.active == nil || !w.in.active[i]) {
+					w.effects[i] = v
+				}
+			}
 			w.resolve()
 		}
 		last = s
+	}
+}
+
+// track keeps the versions of the screen's rows and cursor, and the
+// snapshots of them that tell motion from an input's effect, as collect
+// does for tiles.
+func (w *writer) track(s *terminal.Screen) {
+	w.versions = s.Versions(w.versions[:0])
+	now := time.Now()
+	switch {
+	case len(w.snap) != len(w.versions):
+		// The rows of the old size say nothing about motion on the new.
+		w.prev = w.prev[:0]
+		w.snap, w.snapAt = append(w.snap[:0], w.versions...), now
+		w.effects = append(w.effects[:0], make([]uint64, len(w.versions))...)
+	case now.Sub(w.snapAt) >= activeWindow:
+		w.prev, w.snap = w.snap, w.prev
+		w.snap, w.snapAt = append(w.snap[:0], w.versions...), now
+	}
+}
+
+// termEffect tells the pacer when the pending input's effect is on s: a
+// row or the cursor changed after the input that was still before it.
+// Output that was already scrolling or redrawing a row is not taken for
+// the effect, so the frame that goes beyond the window shows the input.
+func (w *writer) termEffect(s *terminal.Screen, seq uint32) {
+	in := w.in
+	if in == nil || in.boosted || s.Version <= in.clock || s.Version == in.checked {
+		return
+	}
+	in.checked = s.Version
+	for i, v := range w.versions {
+		if v > in.clock && (in.active == nil || !in.active[i]) {
+			w.p.Input()
+			in.boosted = true
+			in.seq = max(in.seq, seq)
+			return
+		}
 	}
 }
 
@@ -98,6 +142,9 @@ func (w *writer) sendScreen(ctx context.Context, from, to *terminal.Screen, seq 
 	snapshot := from == nil
 	for first := true; first || len(data) > 0; first = false {
 		n := w.termChunk(data)
+		if n == 0 && len(data) > 0 {
+			return fmt.Errorf("stream: a %d-byte message has no room for terminal data", w.limits.MaxMessageSize)
+		}
 		var m message = protocol.TermData{Data: data[:n]}
 		if snapshot && first {
 			m = protocol.TermSnapshot{Data: data[:n]}
@@ -112,7 +159,7 @@ func (w *writer) sendScreen(ctx context.Context, from, to *terminal.Screen, seq 
 		ServerTime: uint64(readAt.Sub(w.start).Microseconds()), // #nosec G115 -- durations since the start are positive
 		LastSeq:    seq,
 	}
-	if err := w.writeFrame(ctx, end); err != nil {
+	if err := w.write(ctx, end); err != nil {
 		return err
 	}
 	w.p.EndFrame(time.Now(), id)
@@ -129,7 +176,7 @@ func (w *writer) termChunk(data []byte) int {
 	if limit <= 0 {
 		limit = protocol.DefaultMaxMessageSize
 	}
-	n := min(len(data), limit-termHeader)
+	n := max(0, min(len(data), limit-termHeader))
 	for n < len(data) && n > 0 && !utf8.RuneStart(data[n]) {
 		n--
 	}
@@ -138,11 +185,17 @@ func (w *writer) termChunk(data []byte) int {
 
 // writeFrame sends a message of the open frame at the pace the pacer
 // allows, while still sending small state as it changes. Unlike tiles, a
-// terminal frame is never cut short: the cap on bytes in flight only
-// delays it.
+// terminal frame is never cut short: at the cap on bytes in flight it
+// waits for acknowledgements of earlier frames.
 func (w *writer) writeFrame(ctx context.Context, m message) error {
 	w.buf = m.Append(w.buf[:0])
-	if wait, _ := w.p.Delay(time.Now(), len(w.buf)); wait > 0 {
+	for w.p.Hold(len(w.buf)) {
+		if err := w.wait(ctx, nil, 0); err != nil {
+			return err
+		}
+		w.takeAcks()
+	}
+	if wait := w.p.Pace(time.Now()); wait > 0 {
 		if err := w.sleep(ctx, wait); err != nil {
 			return err
 		}
