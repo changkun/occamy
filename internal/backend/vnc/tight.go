@@ -7,10 +7,12 @@ package vnc
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"image"
 	"image/draw"
 	"image/jpeg"
+	"io"
 	"slices"
 )
 
@@ -36,10 +38,10 @@ const (
 	// split larger areas.
 	tightMaxJPEGWidth = 2048
 	// tightMaxJPEGPixels bounds a JPEG rectangle's area, since image/jpeg
-	// allocates the whole image, and up to 16 bytes a pixel for a
-	// progressive one. TigerVNC, libvncserver and QEMU send JPEG
-	// rectangles of at most 65536 pixels.
-	tightMaxJPEGPixels = tightMaxJPEGWidth * tightMaxJPEGWidth
+	// allocates the whole image and its decoding time grows with it.
+	// TigerVNC, libvncserver and QEMU send JPEG rectangles of at most
+	// 65536 pixels.
+	tightMaxJPEGPixels = 65536
 	// jpegChunk is the most JPEG data read before the buffer grows, so
 	// that the buffer grows with the data that arrives, not with the
 	// length the server claims.
@@ -295,8 +297,8 @@ func gradient(data []byte, row int, prev []byte) {
 }
 
 // tightJPEG draws a Tight JPEG rectangle: a compact length, then a JPEG
-// image of the rectangle's size, which is opaque. The image's size is
-// checked against the rectangle before it is decoded.
+// image of the rectangle's size, which is opaque. The image's markers,
+// and its size, are checked before it is decoded (jpegFrame).
 func (d *decoder) tightJPEG(r image.Rectangle) error {
 	n, err := d.compactLength()
 	if err != nil {
@@ -327,14 +329,19 @@ func (d *decoder) tightJPEG(r image.Rectangle) error {
 		buf = buf[:len(buf)+k]
 	}
 	d.enc.jpeg = buf
-	cfg, err := jpeg.DecodeConfig(bytes.NewReader(buf))
+	size, err := jpegFrame(buf)
 	if err != nil {
 		return fmt.Errorf("tight jpeg: %w", err)
 	}
-	if cfg.Width != r.Dx() || cfg.Height != r.Dy() {
-		return fmt.Errorf("a tight jpeg image of %d×%d for a rectangle of %d×%d", cfg.Width, cfg.Height, r.Dx(), r.Dy())
+	if size != r.Size() {
+		return fmt.Errorf("a tight jpeg image of %d×%d for a rectangle of %d×%d", size.X, size.Y, r.Dx(), r.Dy())
 	}
 	img, err := jpeg.Decode(bytes.NewReader(buf))
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		// The data arrived whole; it is the image that is cut short, which
+		// is not the connection's io.ErrUnexpectedEOF.
+		return errors.New("tight jpeg: the image ends before its pixels")
+	}
 	if err != nil {
 		return fmt.Errorf("tight jpeg: %w", err)
 	}
@@ -349,4 +356,86 @@ func (d *decoder) tightJPEG(r image.Rectangle) error {
 	}
 	d.enc.counts[tightJPEGRect]++
 	return nil
+}
+
+// jpegFrame checks a JPEG image's markers, and returns the size its frame
+// header gives. image/jpeg decodes every scan of an image, and a
+// progressive image can have thousands of scans of a few bytes, each a
+// pass over every block: 16,000 scans in 300 KB took 13 s at 2048×2048.
+// Only baseline and extended sequential images (SOF0 and SOF1), which
+// TigerVNC, libvncserver and QEMU send, are accepted, with at most a
+// scan per component, as sequential JPEG has, so that decoding costs no
+// more than a pass over the image's blocks for each component.
+func jpegFrame(data []byte) (image.Point, error) {
+	if len(data) < 2 || data[0] != 0xff || data[1] != 0xd8 {
+		return image.Point{}, errors.New("no start of image")
+	}
+	var size image.Point
+	comps, scans := 0, 0
+	for i := 2; ; {
+		// A marker: 0xFF, any fill bytes of 0xFF, and its code.
+		if i >= len(data) || data[i] != 0xff {
+			return image.Point{}, fmt.Errorf("no marker at byte %d", i)
+		}
+		for i < len(data) && data[i] == 0xff {
+			i++
+		}
+		if i >= len(data) {
+			return image.Point{}, errors.New("the image ends within a marker")
+		}
+		m := data[i]
+		i++
+		if m == 0xd9 { // EOI
+			if scans == 0 {
+				return image.Point{}, errors.New("no scan")
+			}
+			return size, nil
+		}
+		if i+2 > len(data) {
+			return image.Point{}, errors.New("the image ends within a marker")
+		}
+		n := int(binary.BigEndian.Uint16(data[i:]))
+		if n < 2 || i+n > len(data) {
+			return image.Point{}, fmt.Errorf("a segment of %d bytes at byte %d, beyond the image's %d", n, i, len(data))
+		}
+		seg := data[i+2 : i+n]
+		i += n
+		switch {
+		case m == 0xc0 || m == 0xc1: // SOF0, SOF1
+			if comps != 0 {
+				return image.Point{}, errors.New("a second frame")
+			}
+			if len(seg) < 6 || seg[5] == 0 {
+				return image.Point{}, errors.New("an invalid frame header")
+			}
+			size = image.Pt(int(binary.BigEndian.Uint16(seg[3:])), int(binary.BigEndian.Uint16(seg[1:])))
+			comps = int(seg[5])
+		case m == 0xda: // SOS
+			if comps == 0 {
+				return image.Point{}, errors.New("a scan before the frame header")
+			}
+			if scans++; scans > comps {
+				return image.Point{}, fmt.Errorf("more scans than components: the frame has %d", comps)
+			}
+			// The scan's entropy-coded data runs to the next marker, other
+			// than stuffed bytes (0xFF 0x00) and restart markers.
+			for {
+				k := bytes.IndexByte(data[i:], 0xff)
+				if k < 0 || i+k+1 >= len(data) {
+					return image.Point{}, errors.New("the image ends within a scan")
+				}
+				i += k
+				if c := data[i+1]; c != 0 && (c < 0xd0 || c > 0xd7) {
+					break
+				}
+				i += 2
+			}
+		case m == 0xc4, m == 0xdb, m == 0xdd, m == 0xfe, 0xe0 <= m && m <= 0xef:
+			// DHT, DQT, DRI, COM and APPn.
+		case 0xc0 <= m && m <= 0xcf && m != 0xc8 && m != 0xcc:
+			return image.Point{}, fmt.Errorf("a frame of type SOF%d; only baseline and extended sequential JPEG (SOF0, SOF1) is accepted", m-0xc0)
+		default:
+			return image.Point{}, fmt.Errorf("marker %#x", m)
+		}
+	}
 }

@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"changkun.de/x/occamy/internal/backend/backendtest"
 )
@@ -255,10 +256,7 @@ func TestTightErrors(t *testing.T) {
 		{"one colour, index 1", putUpdate(tightRect(image.Rect(0, 0, 2, 2), tightExplicitFilter<<4, []byte{tightFilterPalette, 0},
 			cpx(red), []byte{0x00, 0x40})), "palette index 1 of 1 colour"},
 		{"jpeg of another size", jpegRect(image.Rect(0, 0, 8, 7)), "a tight jpeg image of 8×8 for a rectangle of 8×7"},
-		{"jpeg too wide", jpegRect(image.Rect(0, 0, 2049, 1)), "exceeds 2048 pixels wide"},
-		{"jpeg too large", jpegRect(image.Rect(0, 0, 2048, 2049)), "or 4194304 in all"},
 		{"jpeg outside the screen", jpegRect(image.Rect(20, 20, 28, 28)), "outside the screen"},
-		{"jpeg data", putUpdate(tightRect(image.Rect(0, 0, 8, 8), tightJPEG<<4, appendCompact(nil, 4), []byte{1, 2, 3, 4})), "tight jpeg: invalid JPEG format"},
 		{"jpeg cut short", putUpdate(tightRect(image.Rect(0, 0, 8, 8), tightJPEG<<4, appendCompact(nil, jpeg8.Len()), jpeg8.Bytes()[:40])), "unexpected EOF"},
 		{"compressed length beyond the bound", putUpdate(tightRect(image.Rect(0, 0, 4, 4), 0, appendCompact(nil, 48+6+1024+1))), "tight data of 48 bytes compressed to 1079"},
 		{"compressed data short", putUpdate(tightRect(image.Rect(0, 0, 4, 4), 0, appendCompact(nil, 10), zlibBytes(make([]byte, 48))[:10])), "ends before the rectangle's pixels"},
@@ -273,6 +271,180 @@ func TestTightErrors(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTightJPEGErrors(t *testing.T) {
+	// On a screen where the JPEG bounds, not the screen's, are what a
+	// rectangle exceeds.
+	screen := image.Pt(2100, 300)
+	var jpeg8 bytes.Buffer
+	jpeg.Encode(&jpeg8, image.NewGray(image.Rect(0, 0, 8, 8)), nil)
+	head, rest := jpeg8.Bytes()[:2], jpeg8.Bytes()[2:]
+	for _, tt := range []struct {
+		name string
+		r    image.Rectangle
+		data []byte
+		want string
+	}{
+		{"too wide", image.Rect(0, 0, 2049, 1), jpeg8.Bytes(), "exceeds 2048 pixels wide"},
+		{"too large", image.Rect(0, 0, 256, 257), jpeg8.Bytes(), "or 65536 in all"},
+		{"not a JPEG", image.Rect(0, 0, 8, 8), []byte{1, 2, 3, 4}, "tight jpeg: no start of image"},
+		{"no end", image.Rect(0, 0, 8, 8), jpeg8.Bytes()[:jpeg8.Len()-2], "the image ends within a scan"},
+		{"a segment past the end", image.Rect(0, 0, 8, 8), slices.Concat(head, []byte{0xff, 0xfe, 0x40, 0}), "beyond the image's"},
+		{"progressive", image.Rect(0, 0, 16, 16), progressiveJPEG(16, 16, 0), "SOF2"},
+		{"lossless", image.Rect(0, 0, 8, 8), slices.Concat(head, jpegSegment(0xc3, jpegSOF(8, 8)), rest), "SOF3"},
+		{"more scans than components", image.Rect(0, 0, 16, 16), baselineJPEG(16, 16, 2), "more scans than components: the frame has 1"},
+		{"a scan before the frame", image.Rect(0, 0, 8, 8), slices.Concat(head, jpegSegment(0xda, []byte{1, 1, 0, 0, 63, 0}), rest), "a scan before the frame header"},
+		{"two frames", image.Rect(0, 0, 8, 8), slices.Concat(head, jpegSegment(0xc0, jpegSOF(8, 8)), rest), "a second frame"},
+		{"arithmetic conditioning", image.Rect(0, 0, 8, 8), slices.Concat(head, jpegSegment(0xcc, []byte{0, 0}), rest), "marker 0xcc"},
+		{"no scan", image.Rect(0, 0, 8, 8), slices.Concat(head, jpegSegment(0xc0, jpegSOF(8, 8)), []byte{0xff, 0xd9}), "no scan"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := putUpdate(tightRect(tt.r, tightJPEG<<4, appendCompact(nil, len(tt.data)), tt.data))
+			_, err := decode(t, screen, defaultLimits, msg)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("decode = %v, want an error with %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestTightJPEGScanBombs(t *testing.T) {
+	// image/jpeg decodes every scan of an image, each a pass over its
+	// blocks, so that thousands of scans of a few bytes each cost seconds.
+	// Such images are refused before they are decoded.
+	for _, tt := range []struct {
+		name string
+		r    image.Rectangle
+		data []byte
+		want string
+	}{
+		// 13 s without the bounds.
+		{"progressive, 2048×2048, 16000 scans", image.Rect(0, 0, 2048, 2048), progressiveJPEG(2048, 2048, 16000), "or 65536 in all"},
+		// 190 ms without them, 0.6 µs a byte.
+		{"progressive, 256×256, 16000 scans", image.Rect(0, 0, 256, 256), progressiveJPEG(256, 256, 16000), "SOF2"},
+		// 140 ms without them, 0.5 µs a byte.
+		{"baseline, 256×256, 1000 scans", image.Rect(0, 0, 256, 256), baselineJPEG(256, 256, 1000), "more scans than components: the frame has 1"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			msg := putUpdate(tightRect(tt.r, tightJPEG<<4, appendCompact(nil, len(tt.data)), tt.data))
+			start := time.Now()
+			_, err := decode(t, tt.r.Max, defaultLimits, msg)
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("decode = %v, want an error with %q", err, tt.want)
+			}
+			if d := time.Since(start); d > 100*time.Millisecond {
+				t.Errorf("took %v", d)
+			}
+		})
+	}
+	// The same images of one scan decode.
+	r := image.Rect(0, 0, 256, 256)
+	data := baselineJPEG(256, 256, 1)
+	sink, err := decode(t, r.Max, defaultLimits, putUpdate(tightRect(r, tightJPEG<<4, appendCompact(nil, len(data)), data)))
+	if err != nil {
+		t.Fatalf("a baseline JPEG of one scan: %v", err)
+	}
+	if c := sink.Pixels().RGBAAt(100, 100); c.R != c.G || c.G != c.B || c.A != 0xff {
+		t.Errorf("a grey JPEG drew %v", c)
+	}
+}
+
+// jpegBits writes JPEG entropy-coded data, the most significant bit
+// first, with a 0x00 stuffed after each 0xFF.
+type jpegBits struct {
+	out  []byte
+	acc  byte
+	nacc uint
+}
+
+func (w *jpegBits) bits(v uint32, n uint) {
+	for i := int(n) - 1; i >= 0; i-- {
+		w.acc = w.acc<<1 | byte(v>>uint(i)&1)
+		if w.nacc++; w.nacc == 8 {
+			w.out = append(w.out, w.acc)
+			if w.acc == 0xff {
+				w.out = append(w.out, 0)
+			}
+			w.acc, w.nacc = 0, 0
+		}
+	}
+}
+
+// flush pads the last byte with ones and returns the data.
+func (w *jpegBits) flush() []byte {
+	for w.nacc != 0 {
+		w.bits(1, 1)
+	}
+	return w.out
+}
+
+// jpegSegment is a JPEG marker segment.
+func jpegSegment(marker byte, payload []byte) []byte {
+	n := len(payload) + 2
+	return append([]byte{0xff, marker, byte(n >> 8), byte(n)}, payload...)
+}
+
+// jpegSOF is the frame header of a greyscale image of w×h.
+func jpegSOF(w, h int) []byte {
+	return []byte{8, byte(h >> 8), byte(h), byte(w >> 8), byte(w), 1, 1, 0x11, 0}
+}
+
+// jpegHuffman is a Huffman table of class 0 (DC) or 1 (AC) with one code,
+// of one bit, for symbol.
+func jpegHuffman(class, symbol byte) []byte {
+	return slices.Concat([]byte{class << 4, 1}, make([]byte, 15), []byte{symbol})
+}
+
+// grayJPEG is a greyscale JPEG's start, up to its first scan: a
+// quantization table of ones, the frame header of type sof, and Huffman
+// tables for DC and AC.
+func grayJPEG(sof byte, w, h int, ac byte) []byte {
+	return slices.Concat([]byte{0xff, 0xd8},
+		jpegSegment(0xdb, append([]byte{0}, bytes.Repeat([]byte{1}, 64)...)),
+		jpegSegment(sof, jpegSOF(w, h)),
+		jpegSegment(0xc4, jpegHuffman(0, 0)), // DC: a difference of 0
+		jpegSegment(0xc4, jpegHuffman(1, ac)),
+	)
+}
+
+// baselineJPEG is a baseline greyscale JPEG of w×h in the given number of
+// scans, each of a DC difference of 0 and an end of block for every
+// block.
+func baselineJPEG(w, h, scans int) []byte {
+	b := grayJPEG(0xc0, w, h, 0x00) // AC: end of block
+	for range scans {
+		b = append(b, jpegSegment(0xda, []byte{1, 1, 0x00, 0, 63, 0})...)
+		var bw jpegBits
+		for range ((w + 7) / 8) * ((h + 7) / 8) {
+			bw.bits(0, 2)
+		}
+		b = append(b, bw.flush()...)
+	}
+	return append(b, 0xff, 0xd9)
+}
+
+// progressiveJPEG is a progressive greyscale JPEG of w×h: a DC scan, and
+// the given number of AC scans of a few bytes each, whose end-of-band
+// runs span every block.
+func progressiveJPEG(w, h, scans int) []byte {
+	b := grayJPEG(0xc2, w, h, 0xe0) // AC: EOB14, a run of 2^14 bands or more
+	b = append(b, jpegSegment(0xda, []byte{1, 1, 0x00, 0, 0, 0})...)
+	var dc jpegBits
+	for range ((w + 7) / 8) * ((h + 7) / 8) {
+		dc.bits(0, 1)
+	}
+	b = append(b, dc.flush()...)
+	for range scans {
+		b = append(b, jpegSegment(0xda, []byte{1, 1, 0x00, 1, 63, 0})...)
+		var bw jpegBits
+		for range 3 {
+			bw.bits(0, 1)
+			bw.bits(0x3fff, 14)
+		}
+		b = append(b, bw.flush()...)
+	}
+	return append(b, 0xff, 0xd9)
 }
 
 func TestCompactLength(t *testing.T) {
