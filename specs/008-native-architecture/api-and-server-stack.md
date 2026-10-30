@@ -963,6 +963,16 @@ place for fixes that ship on v0 before beta.
   - ~~A terminal's hello may ask for up to 65535 columns or rows, which
     reach the backend unbounded.~~ Fixed in review: see "Sizes (added
     in review)".
+  - `TestStreamProtocolErrors` failed twice in the review's full-suite
+    runs at a load average of 112 to 150. It did not fail here in 50
+    runs at a load of about 50, 15 runs of the whole package and 300
+    runs at `-cpu 1,2,4`, all with `-race`. Its timing assumptions are
+    the server's: a write in progress gets 1 s after the stream's
+    context ends, and `close` 1 s to be written. A goroutine that waits
+    longer than that to run drops the connection without `close`, which
+    the test reads as EOF. Both bounds keep a client that stops reading
+    from holding the server, so they stay; if the test fails again, its
+    message tells whether this is the cause.
   - [009](../009-react-web-client.md) and the Go client: send `hello` in
     the query and the token in the subprotocol; expect `close` before
     `welcome` for a refusal; reconnect as the owner with an access token
