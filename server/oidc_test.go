@@ -449,6 +449,16 @@ func sentBack(t *testing.T, r reply) url.Values {
 	return v
 }
 
+// clears reports whether r clears the sign-in cookie.
+func clears(r reply) bool {
+	for _, c := range (&http.Response{Header: r.header}).Cookies() {
+		if c.Name == flowCookieName && c.MaxAge < 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // wantError checks that r sends the browser back with error code and no
 // one-time code.
 func wantError(t *testing.T, r reply, code string) {
@@ -523,11 +533,7 @@ func TestOIDCSignIn(t *testing.T) {
 	if len(v) != 1 || v.Get("code") == "" {
 		t.Fatalf("sent back with %v, want a code alone", v)
 	}
-	cleared := false
-	for _, c := range (&http.Response{Header: cb.header}).Cookies() {
-		cleared = cleared || c.Name == flowCookieName && c.MaxAge < 0
-	}
-	if !cleared {
+	if !clears(cb) {
 		t.Errorf("the callback did not clear the sign-in cookie: %q", cb.header.Values("Set-Cookie"))
 	}
 
@@ -567,12 +573,12 @@ func TestOIDCSignIn(t *testing.T) {
 func TestOIDCLoginCookie(t *testing.T) {
 	for _, tt := range []struct {
 		name, redirect string
-		tls            bool
+		cookie         string
 		path           string
 		secure         bool
 	}{
-		{"plain http on localhost", "", false, "/api/v1/auth/oidc/callback", false},
-		{"https through a proxy with a prefix", "https://occamy.example.com/occamy/api/v1/auth/oidc/callback", false, "/occamy/api/v1/auth/oidc/callback", true},
+		{"plain http on localhost", "", "occamy_oidc", "/api/v1/auth/oidc/callback", false},
+		{"https through a proxy with a prefix", "https://occamy.example.com/occamy/api/v1/auth/oidc/callback", "__Secure-occamy_oidc", "/occamy/api/v1/auth/oidc/callback", true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ot := newOIDCTest(t, func(f *config.File) {
@@ -586,8 +592,8 @@ func TestOIDCLoginCookie(t *testing.T) {
 				t.Fatalf("login: %d, cookies %q", r.code, r.header.Values("Set-Cookie"))
 			}
 			c := cookies[0]
-			if c.Name != flowCookieName || c.Path != tt.path || !c.HttpOnly || c.SameSite != http.SameSiteLaxMode || c.Secure != tt.secure || c.MaxAge != 600 {
-				t.Errorf("cookie %q, want %s with path %s, HttpOnly, SameSite=Lax, Max-Age=600 and Secure %v", r.header.Get("Set-Cookie"), flowCookieName, tt.path, tt.secure)
+			if c.Name != tt.cookie || c.Path != tt.path || !c.HttpOnly || c.SameSite != http.SameSiteLaxMode || c.Secure != tt.secure || c.MaxAge != 600 {
+				t.Errorf("cookie %q, want %s with path %s, HttpOnly, SameSite=Lax, Max-Age=600 and Secure %v", r.header.Get("Set-Cookie"), tt.cookie, tt.path, tt.secure)
 			}
 			f, ok := ot.s.oidc.flows.open(c.Value)
 			if !ok || f.ReturnURL != testReturnURL || f.State == "" || f.Nonce == "" || f.Verifier == "" {
@@ -606,8 +612,21 @@ func TestOIDCLoginCookie(t *testing.T) {
 	}
 	// occamyd serving TLS makes the cookie Secure whatever the URL says.
 	fc, err := newFlowCookies("http://127.0.0.1:5636/api/v1/auth/oidc/callback", true)
-	if err != nil || !fc.secure {
-		t.Errorf("serving TLS: secure %v, %v", fc.secure, err)
+	if err != nil || !fc.secure || fc.name != "__Secure-occamy_oidc" {
+		t.Errorf("serving TLS: %s, secure %v, %v", fc.name, fc.secure, err)
+	}
+	// A sealed value under one name does not open under the other.
+	plain, err := newFlowCookies("http://127.0.0.1:5636/api/v1/auth/oidc/callback", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain.aead = fc.aead
+	w := httptest.NewRecorder()
+	if err := fc.set(w, flow{State: "s", Expires: time.Now().Add(time.Minute).Unix()}); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := plain.open(w.Result().Cookies()[0].Value); ok {
+		t.Error("a __Secure- cookie's value opens as a plain one")
 	}
 }
 
@@ -749,7 +768,28 @@ func TestOIDCCallbackState(t *testing.T) {
 		b := newBrowser(t)
 		cb, _ := callbackOf(t, ot, b)
 		ot.clock.add(flowLifetime)
-		refused(t, ot, b.get(t, cb))
+		r := b.get(t, cb)
+		refused(t, ot, r)
+		if !clears(r) {
+			t.Errorf("the callback kept an expired sign-in cookie: %q", r.header.Values("Set-Cookie"))
+		}
+	})
+	t.Run("another sign-in's state leaves this one alone", func(t *testing.T) {
+		// A link from another site sends the browser to the callback,
+		// with the attacker's state, while its own sign-in is under way.
+		ot := newOIDCTest(t, nil)
+		victim := newBrowser(t)
+		authURL, verifier := ot.toProvider(t, victim)
+		attackers, _ := callbackOf(t, ot, newBrowser(t))
+		r := victim.get(t, attackers)
+		refused(t, ot, r)
+		if len(r.header.Values("Set-Cookie")) != 0 {
+			t.Errorf("the callback touched the sign-in under way: %q", r.header.Values("Set-Cookie"))
+		}
+		v := sentBack(t, victim.get(t, ot.toCallback(t, victim, authURL)))
+		if r := ot.exchange(t, v.Get("code"), verifier); r.code != http.StatusOK {
+			t.Errorf("the sign-in under way failed: %v, %d %s", v, r.code, r.body)
+		}
 	})
 	t.Run("tampered cookie", func(t *testing.T) {
 		ot := newOIDCTest(t, nil)
@@ -973,6 +1013,9 @@ func TestOIDCProviderErrors(t *testing.T) {
 		{"token endpoint fails", func(p *testIdP) { p.tokenStatus = http.StatusInternalServerError }},
 		{"no ID token", func(p *testIdP) { p.noIDToken = true }},
 		{"another issuer in the answer", func(p *testIdP) { p.issParam = "https://evil.example.com" }},
+		{"no issuer in the answer of a provider that promises one", func(p *testIdP) {
+			p.doc = func(d map[string]any) { d["authorization_response_iss_parameter_supported"] = true }
+		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			logged := captureLog(t)
@@ -1001,6 +1044,41 @@ func TestOIDCProviderErrors(t *testing.T) {
 		ot.idp.set(func(p *testIdP) { p.issParam = p.srv.URL })
 		ot.signedIn(t)
 	})
+	t.Run("the issuer named, as promised", func(t *testing.T) {
+		ot := newOIDCTest(t, nil)
+		ot.idp.set(func(p *testIdP) {
+			p.issParam = p.srv.URL
+			p.doc = func(d map[string]any) { d["authorization_response_iss_parameter_supported"] = true }
+		})
+		ot.signedIn(t)
+	})
+}
+
+// TestOIDCEndpoints checks which endpoints of a discovery document
+// occamyd talks to: https, or http on the loopback interface when the
+// issuer is there too.
+func TestOIDCEndpoints(t *testing.T) {
+	for _, tt := range []struct {
+		issuer, endpoint string
+		ok               bool
+	}{
+		{"https://id.example.com", "https://id.example.com/token", true},
+		{"https://id.example.com", "https://elsewhere.example.com/token", true},
+		{"https://id.example.com", "http://id.example.com/token", false},
+		{"https://id.example.com", "http://localhost:8080/token", false},
+		{"https://id.example.com", "http://127.0.0.1:8080/token", false},
+		{"https://id.example.com", "http://[::1]:8080/token", false},
+		{"https://id.example.com", "ftp://id.example.com/token", false},
+		{"https://id.example.com", "/token", false},
+		{"http://127.0.0.1:8080", "http://127.0.0.1:8080/token", true},
+		{"http://localhost:8080", "http://localhost:9090/token", true},
+		{"http://127.0.0.1:8080", "https://id.example.com/token", true},
+		{"http://127.0.0.1:8080", "http://id.example.com/token", false},
+	} {
+		if got := endpointProblem(tt.issuer, tt.endpoint) == ""; got != tt.ok {
+			t.Errorf("endpoint %s of issuer %s: accepted %v, want %v", tt.endpoint, tt.issuer, got, tt.ok)
+		}
+	}
 }
 
 // TestOIDCPKCE checks that occamyd proves the code is its own with the

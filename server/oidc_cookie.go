@@ -29,9 +29,10 @@ type flow struct {
 	Expires   int64  `json:"e"` // Unix seconds
 }
 
-// flowCookieName names the cookie of a sign-in. It is also the
-// additional data of the seal, so that no other sealed value passes for
-// it.
+// flowCookieName names the cookie of a sign-in, with the prefix
+// __Secure- when the cookie is Secure, so that the browser takes it only
+// from an https response. The name is also the additional data of the
+// seal, so that no other sealed value passes for it.
 const flowCookieName = "occamy_oidc"
 
 // flowCookies seals sign-ins into cookies with AES-256-GCM under a key
@@ -47,6 +48,7 @@ const flowCookieName = "occamy_oidc"
 // proxy terminates TLS.
 type flowCookies struct {
 	aead   cipher.AEAD
+	name   string
 	path   string
 	secure bool
 }
@@ -72,13 +74,17 @@ func newFlowCookies(redirectURL string, servesTLS bool) (*flowCookies, error) {
 	if path == "" {
 		path = "/"
 	}
-	return &flowCookies{aead: aead, path: path, secure: servesTLS || u.Scheme == "https"}, nil
+	c := &flowCookies{aead: aead, name: flowCookieName, path: path, secure: servesTLS || u.Scheme == "https"}
+	if c.secure {
+		c.name = "__Secure-" + flowCookieName
+	}
+	return c, nil
 }
 
 func (c *flowCookies) cookie(value string, maxAge int) *http.Cookie {
 	// #nosec G124 -- Secure whenever the browser reaches the callback over https; a browser on http://localhost would drop a Secure cookie.
 	return &http.Cookie{
-		Name:     flowCookieName,
+		Name:     c.name,
 		Value:    value,
 		Path:     c.path,
 		MaxAge:   maxAge,
@@ -95,7 +101,7 @@ func (c *flowCookies) set(w http.ResponseWriter, f flow) error {
 	if err != nil {
 		return err
 	}
-	sealed := c.aead.Seal(nil, nil, b, []byte(flowCookieName)) // #nosec G407 -- NewGCMWithRandomNonce makes a random nonce for each seal
+	sealed := c.aead.Seal(nil, nil, b, []byte(c.name)) // #nosec G407 -- NewGCMWithRandomNonce makes a random nonce for each seal
 
 	http.SetCookie(w, c.cookie(base64.RawURLEncoding.EncodeToString(sealed), int(flowLifetime/time.Second)))
 	return nil
@@ -107,20 +113,24 @@ func (c *flowCookies) clear(w http.ResponseWriter) {
 }
 
 // match returns the sign-in of the request's cookie whose state is the
-// one value of state, if it has not expired by now. Every cookie of the
-// name is tried, so that one set for a parent domain cannot shadow the
-// sign-in's own.
-func (c *flowCookies) match(r *http.Request, state []string, now time.Time) (*flow, bool) {
-	if len(state) != 1 || state[0] == "" {
-		return nil, false
-	}
-	for _, ck := range r.CookiesNamed(flowCookieName) {
+// one value of state, if it has not expired by now, or nil. pending
+// tells whether the request holds another sign-in that has not expired,
+// one that a callback which does not match must leave alone. Every
+// cookie of the name is tried, so that one set for a parent domain
+// cannot shadow the sign-in's own.
+func (c *flowCookies) match(r *http.Request, state []string, now time.Time) (matched *flow, pending bool) {
+	for _, ck := range r.CookiesNamed(c.name) {
 		f, ok := c.open(ck.Value)
-		if ok && now.Unix() < f.Expires && subtle.ConstantTimeCompare([]byte(f.State), []byte(state[0])) == 1 {
-			return f, true
+		if !ok || now.Unix() >= f.Expires {
+			continue
 		}
+		if matched == nil && len(state) == 1 && state[0] != "" && subtle.ConstantTimeCompare([]byte(f.State), []byte(state[0])) == 1 {
+			matched = f
+			continue
+		}
+		pending = true
 	}
-	return nil, false
+	return matched, pending
 }
 
 // open unseals a cookie's value.
@@ -129,7 +139,7 @@ func (c *flowCookies) open(v string) (*flow, bool) {
 	if err != nil {
 		return nil, false
 	}
-	plain, err := c.aead.Open(nil, nil, b, []byte(flowCookieName))
+	plain, err := c.aead.Open(nil, nil, b, []byte(c.name))
 	if err != nil {
 		return nil, false
 	}

@@ -144,6 +144,9 @@ type oidcSignIn struct {
 type oidcProvider struct {
 	endpoint oauth2.Endpoint
 	verifier *oidc.IDTokenVerifier
+	// issParam is whether the provider names itself in every answer to
+	// the callback (RFC 9207).
+	issParam bool
 }
 
 // pendingSignIn is a user signed in at the callback whose client has yet
@@ -237,8 +240,8 @@ func (o *oidcSignIn) discover() (*oidcProvider, error) {
 }
 
 // fetchProvider reads the provider's discovery document. go-oidc checks
-// that it names the configured issuer; the endpoints must be https, or
-// http on the loopback interface, as the issuer must.
+// that it names the configured issuer; the endpoints must pass
+// endpointProblem.
 func (o *oidcSignIn) fetchProvider() (*oidcProvider, error) {
 	ctx := oidc.ClientContext(context.Background(), o.client)
 	p, err := oidc.NewProvider(ctx, o.conf.Issuer)
@@ -248,6 +251,7 @@ func (o *oidcSignIn) fetchProvider() (*oidcProvider, error) {
 	var meta struct {
 		JWKS        string   `json:"jwks_uri"`
 		AuthMethods []string `json:"token_endpoint_auth_methods_supported"`
+		IssParam    bool     `json:"authorization_response_iss_parameter_supported"`
 	}
 	if err := p.Claims(&meta); err != nil {
 		return nil, err
@@ -258,7 +262,7 @@ func (o *oidcSignIn) fetchProvider() (*oidcProvider, error) {
 		{"token_endpoint", endpoint.TokenURL},
 		{"jwks_uri", meta.JWKS},
 	} {
-		if problem := config.SecureURLProblem(u.url); problem != "" {
+		if problem := endpointProblem(o.conf.Issuer, u.url); problem != "" {
 			return nil, fmt.Errorf("the discovery document's %s: %s", u.name, problem)
 		}
 	}
@@ -270,7 +274,24 @@ func (o *oidcSignIn) fetchProvider() (*oidcProvider, error) {
 			SupportedSigningAlgs: idTokenAlgs,
 			Now:                  func() time.Time { return o.now() },
 		}),
+		issParam: meta.IssParam,
 	}, nil
+}
+
+// endpointProblem describes what keeps an endpoint that issuer's
+// discovery document names from being one occamyd talks to: it must be
+// https, or http on the loopback interface when the issuer is too, so
+// that a provider elsewhere cannot point occamyd at a port of its own
+// host in the clear. It returns "" for such an endpoint.
+func endpointProblem(issuer, endpoint string) string {
+	if p := config.SecureURLProblem(endpoint); p != "" {
+		return p
+	}
+	iu, err := url.Parse(issuer)
+	if eu, _ := url.Parse(endpoint); eu.Scheme != "https" && (err != nil || iu.Scheme != "http") {
+		return fmt.Sprintf("%q needs https, as the issuer has", endpoint)
+	}
+	return ""
 }
 
 // authStyle picks how occamyd authenticates to the token endpoint: a
@@ -353,15 +374,20 @@ func (o *oidcSignIn) returnURL(v []string) (string, bool) {
 }
 
 // callback implements GET /api/v1/auth/oidc/callback, where the provider
-// sends the browser back. Until the state matches a sign-in cookie,
-// which it clears in any case, it answers with API v1's error, since it
-// knows no return URL it can trust; after, it sends the browser back to
-// the sign-in's return URL with a one-time code or an error.
+// sends the browser back. Until the state matches a sign-in cookie, it
+// answers with API v1's error, since it knows no return URL it can
+// trust; after, it sends the browser back to the sign-in's return URL
+// with a one-time code or an error. It clears the cookie when the state
+// matches, or when the browser holds no sign-in in progress, so that a
+// link to the callback with another state, from another site, cannot end
+// a sign-in that is under way.
 func (o *oidcSignIn) callback(w http.ResponseWriter, r *http.Request) {
-	o.flows.clear(w)
 	q := r.URL.Query()
-	f, ok := o.flows.match(r, q["state"], o.now())
-	if !ok {
+	f, pending := o.flows.match(r, q["state"], o.now())
+	if f != nil || !pending {
+		o.flows.clear(w)
+	}
+	if f == nil {
 		// #nosec G706 -- the remote address comes from net/http, not the client's data.
 		log.Printf("OIDC sign-in failed from %s: no sign-in cookie of this browser matches the state", r.RemoteAddr)
 		w.Header().Set("Cache-Control", "no-store")
@@ -414,17 +440,21 @@ func (o *oidcSignIn) identify(r *http.Request, q url.Values, f *flow) (user stri
 		}
 		return "", nil, failed(codeSignInFailed, "the provider answered %s", quote(e))
 	}
-	// RFC 9207: a provider that names itself must be ours.
-	if iss, ok := q["iss"]; ok && (len(iss) != 1 || iss[0] != o.conf.Issuer) {
+	p, err := o.discover()
+	if err != nil {
+		return "", nil, failed(codeUnavailable, "the provider cannot be reached: %s", quote(err.Error()))
+	}
+	// RFC 9207: a provider that names itself must be ours, and one that
+	// says it names itself must do so.
+	switch iss, ok := q["iss"]; {
+	case ok && (len(iss) != 1 || iss[0] != o.conf.Issuer):
 		return "", nil, failed(codeSignInFailed, "the provider's answer names another issuer, %s", quote(strings.Join(iss, " ")))
+	case !ok && p.issParam:
+		return "", nil, failed(codeSignInFailed, "the provider's answer names no issuer, though its discovery document says it does (RFC 9207)")
 	}
 	code := q["code"]
 	if len(code) != 1 || code[0] == "" {
 		return "", nil, failed(codeSignInFailed, "the provider's answer has no code")
-	}
-	p, err := o.discover()
-	if err != nil {
-		return "", nil, failed(codeUnavailable, "the provider cannot be reached: %s", quote(err.Error()))
 	}
 	secret, err := o.conf.ClientSecret()
 	if err != nil && !errors.Is(err, config.ErrNoSecret) {
