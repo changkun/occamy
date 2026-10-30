@@ -720,7 +720,7 @@ drew, then acknowledges it with `frame-ack`.
 |-------|------|---------|
 | frame_id | u32 | The frame's ID. IDs start at 1 on each connection and grow by one for each frame. |
 | server_time | u64 | When the server read the frame's content, in microseconds since the session started. |
-| last_seq | u32 | The sequence number of the last input from this client that the frame reflects, or 0 if none. |
+| last_seq | u32 | The sequence number of the last input from this client that the server applied before it read the frame's content, or 0 if none. The input's effect may show only in a later frame when the remote end answers late, as a remote shell's echo does. |
 
 ```hex
 # vector: frame-end
@@ -971,7 +971,7 @@ ignores entries whose IDs it does not know.
 | 4 | `pixel_ratio` | u16: device pixels per CSS pixel in hundredths, such as 200 | 100 | The client's |
 | 5 | `cache_slots` | u16: the number of tile cache slots the client keeps | 0, no cache | The fewer of the two |
 | 6 | `frame_window` | u8: unacknowledged frames per viewer | 2 | The smaller of the two, an unstated one counting as the default |
-| 7 | `max_message_size` | u32: the largest message in bytes, header included, for both directions | 4194304 (4 MiB) | The smaller of the two, an unstated one counting as the default |
+| 7 | `max_message_size` | u32: the largest message in bytes, header included, for both directions; at least 65536, and a receiver refuses less | 4194304 (4 MiB) | The smaller of the two, an unstated one counting as the default |
 
 In `welcome`, the server always states `frame_window` and
 `max_message_size`. A graphical session with no agreed codec, or a

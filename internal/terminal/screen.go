@@ -170,6 +170,10 @@ type Screen struct {
 	AltScreen bool
 
 	main, alt []*line // alt is nil unless AltScreen is set
+	// rowVersions holds, for each row shown, the version at which it last
+	// came to look as it does, and cursorVersion that of the cursor.
+	rowVersions   []uint64
+	cursorVersion uint64
 	// scrolled counts the lines that have left the top of the primary
 	// screen, scrolled out of a full-screen scroll region. Diff uses the
 	// difference between two screens to scroll the client the same way.
@@ -213,6 +217,18 @@ func (s *Screen) String() string {
 		b.WriteString(s.Line(y))
 	}
 	return b.String()
+}
+
+// Versions appends to dst, for each row shown from the top, the version
+// at which the row last came to look as it does, then the version at
+// which the cursor last moved or changed. A row redrawn the same, or a
+// line that scrolled into a row that showed the same, keeps its version,
+// so a row's version is not raised by output that changed nothing on
+// it. The versions are those of snapshots: changes between two snapshots
+// carry the later one's version.
+func (s *Screen) Versions(dst []uint64) []uint64 {
+	dst = append(dst, s.rowVersions...)
+	return append(dst, s.cursorVersion)
 }
 
 // Equal reports whether s and o look the same to a viewer and set the same
