@@ -5,6 +5,7 @@
 package server
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"net/http"
 	"strings"
@@ -57,8 +58,10 @@ func TestIdentities(t *testing.T) {
 		{"a linked issuer's static name", ids, claims("linked", "", "", "alice"), own(auth.IdPLocal, "alice"), nil},
 		{"a linked issuer's own user", ids, claims("linked", "", "", "carol"), principal{issuer: "linked", subject: "carol"}, nil},
 		{"occamyd's token for a trusted issuer's user", ids, claims(auth.Issuer, "gateway", "", "carol"), principal{issuer: "gateway", subject: "carol"}, nil},
-		{"a share-like token", ids, claims("gateway", "", "", ""), principal{issuer: "gateway"}, nil},
-		{"a share-like token of occamyd's", ids, claims(auth.Issuer, "", "", ""), principal{issuer: auth.Issuer}, nil},
+		{"a trusted issuer's token without a subject", ids, claims("gateway", "", "", ""), principal{}, errSubject},
+		{"occamyd's token without a subject", ids, claims(auth.Issuer, "", "", ""), principal{}, errSubject},
+		{"occamyd's token for a trusted issuer's user without a subject", ids, claims(auth.Issuer, "gateway", "", ""), principal{}, errSubject},
+		{"occamyd's token with a zero-width space", ids, claims(auth.Issuer, "", auth.IdPOIDC, "car\u200bol"), principal{}, errSubject},
 	} {
 		got, err := tt.ids.of(tt.claims)
 		if got != tt.want || !errors.Is(err, tt.err) {
@@ -149,6 +152,86 @@ func TestOIDCOwners(t *testing.T) {
 // as a subject of an issuer: the same subject from another issuer is
 // another user, and a trusted issuer cannot name a static user unless it
 // is linked to them.
+// TestIssuerSessionTokens checks that a trusted issuer's session token, of
+// any role, joins only its own users' sessions, or a static user's if the
+// issuer is linked to the static users. An unlinked gateway's viewer
+// token, for no subject, once joined static alice's session and typed
+// into it.
+func TestIssuerSessionTokens(t *testing.T) {
+	k := newKeys(t)
+	gatewayKey := writeIssuerKey(t, k.gateway)
+	linkedKey := writeIssuerKey(t, k.stranger)
+	ts, _ := sessionServer(t, func(f *config.File) {
+		f.Auth.TrustedIssuers = []config.TrustedIssuer{
+			{Issuer: "gateway", PublicKeyFile: gatewayKey},
+			{Issuer: "linked", PublicKeyFile: linkedKey, LinkStaticUsers: true},
+		}
+		f.Connections[0].Allow.Users = []string{"carol", "dave"}
+	})
+	key := map[string]ed25519.PrivateKey{"gateway": k.gateway, "linked": k.stranger}
+	ids := map[string]string{
+		"alice": ts.openSession(t, ts.token(t, "alice", "ops"), "ops-shell").ID,
+		"carol": ts.openSession(t, signClaims(t, k.gateway, access("gateway", "carol")), "ops-shell").ID,
+		"dave":  ts.openSession(t, signClaims(t, k.stranger, access("linked", "dave")), "ops-shell").ID,
+	}
+	const (
+		owner    = protocol.RoleOwner
+		viewer   = protocol.RoleViewer
+		readOnly = protocol.RoleReadOnly
+	)
+	for _, tt := range []struct {
+		owner, issuer, role, sub string
+		joins                    protocol.Role
+		refused                  protocol.CloseCode
+	}{
+		// The gateway, unlinked: its own users' sessions only.
+		{"alice", "gateway", auth.RoleViewer, "", 0, protocol.CloseUnauthorized},
+		{"alice", "gateway", auth.RoleViewer, "mallory", 0, protocol.CloseForbidden},
+		{"alice", "gateway", auth.RoleReadOnly, "mallory", 0, protocol.CloseForbidden},
+		{"alice", "gateway", auth.RoleOwner, "alice", 0, protocol.CloseUnauthorized},
+		{"dave", "gateway", auth.RoleViewer, "mallory", 0, protocol.CloseForbidden},
+		{"dave", "gateway", auth.RoleReadOnly, "dave", 0, protocol.CloseForbidden},
+		{"dave", "gateway", auth.RoleOwner, "dave", 0, protocol.CloseForbidden},
+		{"carol", "gateway", auth.RoleViewer, "frank", viewer, 0},
+		{"carol", "gateway", auth.RoleReadOnly, "frank", readOnly, 0},
+		{"carol", "gateway", auth.RoleOwner, "frank", 0, protocol.CloseForbidden},
+		{"carol", "gateway", auth.RoleOwner, "carol", owner, 0},
+		// The linked issuer: its own users' and the static users'.
+		{"alice", "linked", auth.RoleViewer, "erin", viewer, 0},
+		{"alice", "linked", auth.RoleReadOnly, "erin", readOnly, 0},
+		{"alice", "linked", auth.RoleOwner, "alice", owner, 0},
+		{"carol", "linked", auth.RoleViewer, "erin", 0, protocol.CloseForbidden},
+		{"carol", "linked", auth.RoleReadOnly, "erin", 0, protocol.CloseForbidden},
+		{"carol", "linked", auth.RoleOwner, "carol", 0, protocol.CloseForbidden},
+		{"dave", "linked", auth.RoleViewer, "erin", viewer, 0},
+		{"dave", "linked", auth.RoleOwner, "dave", owner, 0},
+	} {
+		name := tt.issuer + "'s " + tt.role + " token for " + tt.owner + "'s session, for " + tt.sub
+		token := signClaims(t, key[tt.issuer], auth.Claims{
+			Kind: auth.KindSession, Session: ids[tt.owner], Role: tt.role,
+			RegisteredClaims: jwt.RegisteredClaims{Issuer: tt.issuer, Subject: tt.sub, Audience: jwt.ClaimStrings{auth.Audience}},
+		})
+		c, status, err := dial(ts.srv.URL+"/api/v1/sessions/"+ids[tt.owner]+"/stream", withToken(token), &termHello, nil)
+		if err != nil {
+			t.Fatalf("%s: %d %v", name, status, err)
+		}
+		m, err := c.next()
+		switch m := m.(type) {
+		case *protocol.Welcome:
+			if tt.joins != m.Role {
+				t.Errorf("%s: joined as %v, want close %v", name, m.Role, tt.refused)
+			}
+		case *protocol.Close:
+			if m.Code != tt.refused {
+				t.Errorf("%s: close %v %q, want role %v or close %v", name, m.Code, m.Reason, tt.joins, tt.refused)
+			}
+		default:
+			t.Errorf("%s: %T %v", name, m, err)
+		}
+		_ = c.ws.CloseNow()
+	}
+}
+
 func TestIssuersOwnTheirSessions(t *testing.T) {
 	k := newKeys(t)
 	gatewayKey := writeIssuerKey(t, k.gateway)

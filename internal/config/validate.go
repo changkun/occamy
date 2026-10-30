@@ -205,6 +205,9 @@ func (a *Auth) validate(c *checker) {
 	for i, u := range a.Users {
 		p := fmt.Sprintf("auth.users[%d]", i)
 		if c.name(p+".name", u.Name) {
+			if !UsableName(u.Name) {
+				c.add(p+".name", "%q is not a usable name: it has characters that render as nothing, or is over %d bytes", u.Name, MaxNameBytes)
+			}
 			if j, ok := users[u.Name]; ok {
 				c.add(p+".name", "%q is already auth.users[%d]", u.Name, j)
 			} else {
@@ -393,6 +396,28 @@ func (f *File) TakesStaticName(name string) bool {
 // allow lists, compares names exactly.
 func SameName(a, b string) bool {
 	return strings.EqualFold(norm.NFC.String(a), norm.NFC.String(b))
+}
+
+// MaxNameBytes bounds a user name, in bytes of UTF-8. An OIDC sub is at
+// most 255 ASCII characters.
+const MaxNameBytes = 255
+
+// UsableName reports whether s can name a user: not empty, at most
+// MaxNameBytes bytes of UTF-8, of graphic characters that show, with
+// U+0020 the only space. Any other character would let a name pass for
+// another or break a log line, so it refuses control characters; format
+// characters (unicode.Cf: zero-width spaces and joiners, bidirectional
+// overrides, the soft hyphen); the other default-ignorable code points,
+// which render as nothing (the combining grapheme joiner, variation
+// selectors, the Hangul fillers); U+2800, the blank Braille pattern; the
+// line and paragraph separators; and the other spaces. It is the one
+// rule for every user's name: a static user's, an OIDC subject, and the
+// subject of any token occamyd accepts.
+func UsableName(s string) bool {
+	return s != "" && len(s) <= MaxNameBytes && utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool {
+		return !unicode.IsGraphic(r) || r != ' ' && unicode.IsSpace(r) ||
+			unicode.In(r, unicode.Other_Default_Ignorable_Code_Point, unicode.Variation_Selector) || r == '\u2800'
+	})
 }
 
 // KnownGroups returns the groups that f names: its static users' groups

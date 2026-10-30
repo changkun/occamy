@@ -99,8 +99,13 @@ A trusted issuer mints JWTs that `occamyd` accepts as its own:
 - `iss` is the issuer's name as configured, and `aud` is `occamy`;
 - `iat` and `exp` are set, at most 12 hours apart;
 - `kind` is `access`, with the user in `sub` and optionally `groups`, a
-  list of group names; or `session`, with `sid` (a session ID) and
-  `role` (`owner`, `viewer` or `read-only`).
+  list of group names; or `session`, with the user in `sub`, `sid` (a
+  session ID) and `role` (`owner`, `viewer` or `read-only`). A session
+  token of any role joins only a session that one of the issuer's own
+  users opened, or, with `link_static_users`, a static user; an
+  `owner` token only for that user.
+- `sub` is a usable name, by the rules that `auth.oidc.subject_claim`
+  gives. A token without one is refused, whoever signed it.
 
 `occamyd`'s own tokens have the same shape with `iss: occamy`. An access
 token may also carry `idp`, where the user signed in: `occamyd` puts

@@ -373,7 +373,7 @@ func TestSessionStream(t *testing.T) {
 	}{
 		{"viewer share", share(o.ID, auth.RoleViewer), protocol.RoleViewer},
 		{"read-only share", share(o.ID, auth.RoleReadOnly), protocol.RoleReadOnly},
-		{"viewer token", sessionToken(o.ID, auth.RoleViewer, ""), protocol.RoleViewer},
+		{"viewer token", sessionToken(o.ID, auth.RoleViewer, "dave"), protocol.RoleViewer},
 		{"read-only token", sessionToken(o.ID, auth.RoleReadOnly, "carol"), protocol.RoleReadOnly},
 	} {
 		c := ts.stream(t, path, tt.token, termHello)
@@ -392,7 +392,6 @@ func TestSessionStream(t *testing.T) {
 		{"bob", path, ts.token(t, "bob", "dev"), protocol.CloseForbidden},
 		{"alice's group", path, ts.token(t, "carol", "ops"), protocol.CloseForbidden},
 		{"an owner token for another", path, sessionToken(o.ID, auth.RoleOwner, "bob"), protocol.CloseForbidden},
-		{"an owner token for nobody", path, sessionToken(o.ID, auth.RoleOwner, ""), protocol.CloseForbidden},
 		{"unknown session", "/api/v1/sessions/nope/stream", alice, protocol.CloseForbidden},
 		{"unknown session's share", "/api/v1/sessions/nope/stream", share(o.ID, auth.RoleViewer), protocol.CloseUnauthorized},
 	} {

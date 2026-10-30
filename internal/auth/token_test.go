@@ -94,12 +94,12 @@ func TestAccess(t *testing.T) {
 
 func TestSession(t *testing.T) {
 	f := newFixture(t)
-	tok := f.must(f.signer.Session("s1", RoleReadOnly, "", time.Hour))
+	tok := f.must(f.signer.Session("s1", RoleReadOnly, "alice", time.Hour))
 	c, err := f.verifier.VerifySession(tok)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Session != "s1" || c.Role != RoleReadOnly || c.Subject != "" {
+	if c.Session != "s1" || c.Role != RoleReadOnly || c.Subject != "alice" {
 		t.Errorf("claims %+v", c)
 	}
 }
@@ -158,9 +158,11 @@ func TestSignRejects(t *testing.T) {
 	f := newFixture(t)
 	for name, sign := range map[string]func() (string, error){
 		"no subject":   func() (string, error) { return f.signer.Access("", nil, time.Minute) },
-		"no session":   func() (string, error) { return f.signer.Session("", RoleViewer, "", time.Minute) },
-		"unknown role": func() (string, error) { return f.signer.Session("s1", "admin", "", time.Minute) },
-		"no lifetime":  func() (string, error) { return f.signer.Access("alice", nil, 0) },
+		"no session":   func() (string, error) { return f.signer.Session("", RoleViewer, "alice", time.Minute) },
+		"unknown role": func() (string, error) { return f.signer.Session("s1", "admin", "alice", time.Minute) },
+		// Every session token names its user: a share is the registry's.
+		"no subject in a session token": func() (string, error) { return f.signer.Session("s1", RoleViewer, "", time.Minute) },
+		"no lifetime":                   func() (string, error) { return f.signer.Access("alice", nil, 0) },
 	} {
 		if tok, err := sign(); err == nil {
 			t.Errorf("%s: signed %s", name, tok)
@@ -208,6 +210,8 @@ func TestVerifyRejects(t *testing.T) {
 	sessionWithGroups.Session, sessionWithGroups.Role, sessionWithGroups.Groups = "s1", RoleViewer, []string{"ops"}
 	sessionWithIdP := claims(KindSession, "occamy", time.Minute)
 	sessionWithIdP.Session, sessionWithIdP.Role, sessionWithIdP.IdP = "s1", RoleViewer, IdPOIDC
+	sessionWithoutSubject := claims(KindSession, "occamy", time.Minute)
+	sessionWithoutSubject.Session, sessionWithoutSubject.Role, sessionWithoutSubject.Subject = "s1", RoleViewer, ""
 
 	// The payload of a different token, under the valid token's
 	// signature.
@@ -263,7 +267,7 @@ func TestVerifyRejects(t *testing.T) {
 			ErrKind,
 		},
 		"session token as access": {
-			f.must(f.signer.Session("s1", RoleViewer, "", time.Minute)),
+			f.must(f.signer.Session("s1", RoleViewer, "alice", time.Minute)),
 			ErrKind,
 		},
 		"session with groups": {
@@ -272,6 +276,12 @@ func TestVerifyRejects(t *testing.T) {
 		},
 		"session with an idp": {
 			forge(t, jwt.SigningMethodEdDSA, gwPriv, setIss(sessionWithIdP, "gateway")),
+			ErrClaims,
+		},
+		// A trusted issuer's session token names its user, as occamyd's
+		// do; one for nobody could join any session.
+		"session without a subject": {
+			forge(t, jwt.SigningMethodEdDSA, gwPriv, setIss(sessionWithoutSubject, "gateway")),
 			ErrClaims,
 		},
 		"tampered": {tampered, jwt.ErrTokenSignatureInvalid},

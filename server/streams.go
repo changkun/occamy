@@ -282,7 +282,8 @@ func refuseToken(err error) protocol.Close {
 //   - a share of the registry for the session joins with its role.
 //
 // The owner is a principal: the same subject from another issuer is
-// another user.
+// another user. A trusted issuer's session token, of any role, joins
+// only its own users' sessions, or a static user's if it is linked.
 //
 // A session token's expiry, like an access token's, does not end a
 // stream that has joined; the session's end does.
@@ -322,7 +323,7 @@ func (s *server) join(id, token string) (*sessionInfo, *session.Viewer, *protoco
 	}
 	role := session.RoleOwner
 	if claims.Kind == auth.KindSession {
-		if claims.Session != id {
+		if claims.Session != id || !s.ids.grants(claims, info.owner) {
 			return nil, nil, forbidden
 		}
 		switch claims.Role {

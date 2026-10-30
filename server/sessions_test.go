@@ -449,7 +449,7 @@ func TestLimits(t *testing.T) {
 	path := "/api/v1/sessions/" + o.ID + "/stream"
 	ts.stream(t, path, o.StreamToken, termHello)
 	ts.stream(t, path, shares[0], termHello)
-	viewer, err := ts.s.signer.Session(o.ID, auth.RoleViewer, "", time.Minute)
+	viewer, err := ts.s.signer.Session(o.ID, auth.RoleViewer, "carol", time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

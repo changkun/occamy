@@ -65,30 +65,27 @@ func newIdentities(f *config.File) identities {
 // link_static_users was on.
 var errStaticUser = errors.New("the token's subject is a static user's name, which its source may not use")
 
-// errSubject refuses a trusted issuer's token whose subject OIDC sign-in
-// would refuse too, by validSubject.
+// errSubject refuses a token whose subject is not a usable name, by
+// config.UsableName, as OIDC sign-in refuses one.
 var errSubject = errors.New("the token's subject is not a usable name")
 
-// of returns the principal that verified claims speak for. occamyd's own
-// tokens speak for its users, or, in a session token, for the trusted
-// issuer's user it names. A trusted issuer's token speaks for the
-// issuer's user of its subject, or, if the issuer is linked to static
-// users, for the static user of that name. Its subject must pass
-// validSubject, and, unless the issuer is linked, must not be a static
-// user's name by config.SameName, as OIDC sign-in checks a subject, so
-// that the two paths refuse the same names.
+// of returns the principal that verified claims speak for. Every token
+// names a user whose name config.UsableName passes. occamyd's own tokens
+// speak for its users, or, in a session token, for the trusted issuer's
+// user it names. A trusted issuer's token speaks for the issuer's user
+// of its subject, or, if the issuer is linked to static users, for the
+// static user of that name. Unless the issuer is linked, its subject
+// must not be a static user's name by config.SameName, as OIDC sign-in
+// checks a subject, so that the two paths refuse the same names.
 func (ids identities) of(c *auth.Claims) (principal, error) {
+	if !validSubject(c.Subject) {
+		return principal{}, errSubject
+	}
 	if c.Issuer == auth.Issuer {
 		if c.UserIssuer != "" {
 			return principal{issuer: c.UserIssuer, subject: c.Subject}, nil
 		}
 		return ids.own(c.IdP, c.Subject)
-	}
-	if c.Subject == "" {
-		return principal{issuer: c.Issuer}, nil // a share-like session token
-	}
-	if !validSubject(c.Subject) {
-		return principal{}, errSubject
 	}
 	if ids.takesStaticName(c.Subject) {
 		if !ids.linked[c.Issuer] {
@@ -99,6 +96,20 @@ func (ids identities) of(c *auth.Claims) (principal, error) {
 		}
 	}
 	return principal{issuer: c.Issuer, subject: c.Subject}, nil
+}
+
+// grants reports whether session token c may join a session of owner,
+// in any role. occamyd signs session tokens only for a session's owner.
+// A trusted issuer's token joins only a session of one of the issuer's
+// own users, or, if the issuer is linked to the static users, of a
+// static user: an issuer has no say over another's users' sessions,
+// whatever role its token claims for whichever subject.
+func (ids identities) grants(c *auth.Claims, owner principal) bool {
+	switch {
+	case c.Issuer == auth.Issuer, owner.issuer == c.Issuer:
+		return true
+	}
+	return ids.linked[c.Issuer] && owner.issuer == auth.Issuer && owner.idp == auth.IdPLocal
 }
 
 // takesStaticName reports whether subject is a static user's name by
@@ -117,9 +128,6 @@ func (ids identities) takesStaticName(subject string) bool {
 // longer linked. A token without idp predates OIDC sign-in, so it is a
 // static user's.
 func (ids identities) own(idp, subject string) (principal, error) {
-	if subject == "" {
-		return principal{issuer: auth.Issuer}, nil // a share's session token
-	}
 	if idp == "" {
 		idp = auth.IdPLocal
 	}

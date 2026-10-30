@@ -740,6 +740,21 @@ place for fixes that ship on v0 before beta.
     issuer's own user, as an OIDC user of that name is.
     `identities.takesStaticName` is the one comparison both paths
     use.
+  - **A trusted issuer's session tokens (delta review):** `join`
+    compared the principal with the owner only for the `owner` role,
+    and `Claims.check` let a session token name no subject, so an
+    unlinked gateway could mint a `viewer` token for no one, join
+    static alice's session and type into it. Every token now names its
+    user (`auth.Claims.check` refuses a session token without `sub`,
+    and occamyd signs none), every subject passes
+    `config.UsableName`, the rule `validSubject` was and that static
+    users' names now pass too, and a trusted issuer's session token of
+    any role joins only a session whose owner is one of that issuer's
+    users, or a static user when it is linked
+    (`identities.grants`). occamyd's own session tokens are signed
+    only for the owner. `TestIssuerSessionTokens` runs every role
+    against static alice's, the gateway's carol's and the linked
+    issuer's dave's sessions.
   - **Absent rather than forbidden:** a connection the caller may not
     open answers 404, as an unknown one does, and so does another
     user's session on `GET`, `DELETE` and shares, so IDs cannot be

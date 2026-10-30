@@ -540,6 +540,8 @@ func TestParseV1Problems(t *testing.T) {
     - {name: "carol smith", password_hash: plaintext}
     - {name: dave, password_hash: "` + string(lowCost) + `"}
     - {name: erin, password_hash: "$2a$99$Ad6WcgC.YRhS7d8JbV/9..v/X5C7aAnBg5cVXdoz1F1d0uHmkmuH2"}
+    - {name: "fr\u200bank", password_hash: "` + hash + `"}
+    - {name: "` + strings.Repeat("g", config.MaxNameBytes+1) + `", password_hash: "` + hash + `"}
 `, []want{
 			{"auth.users[0].groups[1]", "must not be empty"},
 			{"auth.users[1].name", `"alice" is already auth.users[0]`},
@@ -547,6 +549,8 @@ func TestParseV1Problems(t *testing.T) {
 			{"auth.users[2].password_hash", "not a bcrypt hash"},
 			{"auth.users[3].password_hash", "bcrypt cost 4 is below 10"},
 			{"auth.users[4].password_hash", "not a bcrypt hash: crypto/bcrypt: cost 99"},
+			{"auth.users[5].name", "is not a usable name"},
+			{"auth.users[6].name", "is not a usable name"},
 		}},
 		{"oidc required", head + "  oidc: {}\n", []want{
 			{"auth.oidc.issuer", "required"},

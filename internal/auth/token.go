@@ -77,9 +77,9 @@ var (
 	ErrClaims = errors.New("auth: invalid claims")
 )
 
-// Claims are what a token says. Access tokens carry Groups, and IdP when
-// occamyd issued them; session tokens carry Session and Role, and Subject
-// if they were issued to a user. A session token of occamyd's issued to
+// Claims are what a token says. Every token names a user in Subject.
+// Access tokens carry Groups, and IdP when occamyd issued them; session
+// tokens carry Session and Role. A session token of occamyd's issued to
 // one of its own users carries IdP too, and one issued to a trusted
 // issuer's user names that issuer in UserIssuer instead, since a subject
 // means a user only together with its issuer.
@@ -101,8 +101,7 @@ func (c *Claims) check() error {
 			return ErrClaims
 		}
 	case KindSession:
-		if c.Session == "" || c.Groups != nil ||
-			(c.UserIssuer != "" || c.IdP != "") && c.Subject == "" ||
+		if c.Session == "" || c.Subject == "" || c.Groups != nil ||
 			c.UserIssuer != "" && c.IdP != "" {
 			return ErrClaims
 		}
@@ -149,8 +148,8 @@ func (s *Signer) AccessFrom(idp, subject string, groups []string, ttl time.Durat
 }
 
 // Session issues a session token that joins session with role, valid for
-// ttl. subject names the user it is issued to, or is empty for a token
-// that anyone holding it may use, such as a share.
+// ttl, to the user subject. A share, which anyone holding it may use, is
+// the session registry's, not a token.
 func (s *Signer) Session(session, role, subject string, ttl time.Duration) (string, error) {
 	return s.SessionFor(session, role, User{Subject: subject}, ttl)
 }
