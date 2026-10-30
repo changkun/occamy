@@ -279,6 +279,9 @@ func (d *decoder) desktopSize(w, h int) error {
 	d.lastResize = time.Now()
 	d.size = image.Pt(w, h)
 	d.resized = true
+	// The rectangles after it draw on the new screen, with a budget of its
+	// size; an update resizes once, so it draws at most two budgets.
+	d.drawn = 0
 	d.sink.Resize(w, h)
 	return nil
 }

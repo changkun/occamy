@@ -119,6 +119,12 @@ func TestUpdateDrawBudget(t *testing.T) {
 	if _, err := decode(t, screen.Max, defaultLimits, putUpdate(ok...), putUpdate(fills(4)...)); err != nil {
 		t.Fatalf("updates of four screens: %v", err)
 	}
+	// A DesktopSize starts the budget again, at the new screen's size.
+	small := image.Rect(0, 0, 64, 48)
+	resized := append(fills(4), putDesktopSize(64, 48), e.tightFill(small, red, 0))
+	if _, err := decode(t, screen.Max, defaultLimits, putUpdate(resized...)); err != nil {
+		t.Fatalf("four screens, a smaller screen and a fill of it: %v", err)
+	}
 	msg := putUpdate(fills(1000)...)
 	in := bytes.NewReader(msg)
 	sink := &backendtest.Sink{}
