@@ -14,12 +14,12 @@ package vnc
 // screen and disables them while nobody can.
 //
 // The backend answers every Fence the server asks for, honouring
-// BlockBefore only: the reader applies every message before it passes
-// the answer to the writer, which writes it before anything queued
-// later, but it reads on without waiting for the answer to be written,
-// so BlockAfter and SyncNext are cleared from the answer. The backend
-// sends no Fence of its own: it never changes the pixel format, which
-// is what SyncNext is for.
+// BlockBefore only: the reader has applied every message before the
+// Fence when it passes the answer to the writer, which writes the
+// answers in order, but it reads on without waiting for the answer to
+// be written, so BlockAfter and SyncNext are cleared from the answer.
+// The backend sends no Fence of its own: it never changes the pixel
+// format, which is what SyncNext is for.
 
 import (
 	"encoding/binary"
