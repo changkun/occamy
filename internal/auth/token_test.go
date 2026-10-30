@@ -74,11 +74,21 @@ func TestAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Subject != "alice" || !slices.Equal(c.Groups, []string{"ops"}) || c.Issuer != "occamy" {
+	if c.Subject != "alice" || !slices.Equal(c.Groups, []string{"ops"}) || c.Issuer != "occamy" || c.IdP != IdPLocal {
 		t.Errorf("claims %+v", c)
 	}
 	if got := c.ExpiresAt.Sub(epoch); got != 15*time.Minute {
 		t.Errorf("lifetime %v, want 15m", got)
+	}
+
+	tok = f.must(f.signer.AccessFrom(IdPOIDC, "carol", nil, time.Minute))
+	if c, err := f.verifier.VerifyAccess(tok); err != nil || c.Subject != "carol" || c.IdP != IdPOIDC {
+		t.Errorf("claims %+v, %v", c, err)
+	}
+	// A trusted issuer's access token need not name an idp.
+	tok = forge(t, jwt.SigningMethodEdDSA, f.gateway.key, claims(KindAccess, "gateway", time.Minute))
+	if c, err := f.verifier.VerifyAccess(tok); err != nil || c.IdP != "" {
+		t.Errorf("claims %+v, %v", c, err)
 	}
 }
 
@@ -158,6 +168,8 @@ func TestVerifyRejects(t *testing.T) {
 	noKind := claims("", "occamy", time.Minute)
 	sessionWithGroups := claims(KindSession, "occamy", time.Minute)
 	sessionWithGroups.Session, sessionWithGroups.Role, sessionWithGroups.Groups = "s1", RoleViewer, []string{"ops"}
+	sessionWithIdP := claims(KindSession, "occamy", time.Minute)
+	sessionWithIdP.Session, sessionWithIdP.Role, sessionWithIdP.IdP = "s1", RoleViewer, IdPOIDC
 
 	// The payload of a different token, under the valid token's
 	// signature.
@@ -218,6 +230,10 @@ func TestVerifyRejects(t *testing.T) {
 		},
 		"session with groups": {
 			forge(t, jwt.SigningMethodEdDSA, gwPriv, setIss(sessionWithGroups, "gateway")),
+			ErrClaims,
+		},
+		"session with an idp": {
+			forge(t, jwt.SigningMethodEdDSA, gwPriv, setIss(sessionWithIdP, "gateway")),
 			ErrClaims,
 		},
 		"tampered": {tampered, jwt.ErrTokenSignatureInvalid},

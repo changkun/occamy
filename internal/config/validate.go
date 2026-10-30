@@ -313,24 +313,33 @@ func (f *File) validateConnections(c *checker) {
 		c.credentials(p+".credentials", cn.Protocol, cn.Credentials)
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
 	}
-	if o := f.Auth.OIDC; o != nil && o.RequireKnownUsers && len(f.KnownUsers()) == 0 {
-		c.add("auth.oidc.require_known_users", "the file names no users, in auth.users or in a connection's allow.users, so nobody could sign in through OIDC")
+	if o := f.Auth.OIDC; o != nil && o.RequireKnownUsers {
+		if users, groups := f.Admitted(); len(users) == 0 && (len(groups) == 0 || o.GroupsClaim == "") {
+			c.add("auth.oidc.require_known_users", "the file admits no one: name users in a connection's allow.users, or groups in its allow.groups with auth.oidc.groups_claim set (static users count only with auth.oidc.link_static_users)")
+		}
 	}
 }
 
-// KnownUsers returns the users that f names: its static users and the
-// users in its connections' allow lists.
-func (f *File) KnownUsers() map[string]bool {
-	known := map[string]bool{}
-	for _, u := range f.Auth.Users {
-		known[u.Name] = true
+// Admitted returns the users and groups that auth.oidc.require_known_users
+// admits: those in the connections' allow lists, and, with
+// auth.oidc.link_static_users, the static users. A user is admitted by
+// name, or by a group that the provider's groups claim names.
+func (f *File) Admitted() (users, groups map[string]bool) {
+	users, groups = map[string]bool{}, map[string]bool{}
+	if f.Auth.OIDC != nil && f.Auth.OIDC.LinkStaticUsers {
+		for _, u := range f.Auth.Users {
+			users[u.Name] = true
+		}
 	}
 	for _, cn := range f.Connections {
 		for _, u := range cn.Allow.Users {
-			known[u] = true
+			users[u] = true
+		}
+		for _, g := range cn.Allow.Groups {
+			groups[g] = true
 		}
 	}
-	return known
+	return users, groups
 }
 
 // KnownGroups returns the groups that f names: its static users' groups

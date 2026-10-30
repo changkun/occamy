@@ -119,10 +119,14 @@ type oidcSignIn struct {
 	ttl    time.Duration
 	client *http.Client // to the provider: oidcTimeout, maxProviderBody, no redirects
 	flows  *flowCookies
-	// knownUsers are the users admitted with require_known_users, and
-	// nil without it. knownGroups are the groups the file names; other
+	// static are the static users, whose names an OIDC user may not
+	// take, and nil with link_static_users. admitUsers and admitGroups
+	// are the users and groups that require_known_users admits, and nil
+	// without it. knownGroups are the groups the file names; other
 	// groups of a user are dropped.
-	knownUsers  map[string]bool
+	static      map[string]bool
+	admitUsers  map[string]bool
+	admitGroups map[string]bool
 	knownGroups map[string]bool
 	now         func() time.Time
 
@@ -180,8 +184,14 @@ func newOIDC(f *config.File, signer *auth.Signer, servesTLS bool) (*oidcSignIn, 
 		now:         time.Now,
 		codes:       map[[sha256.Size]byte]pendingSignIn{},
 	}
+	if !conf.LinkStaticUsers {
+		o.static = map[string]bool{}
+		for _, u := range f.Auth.Users {
+			o.static[u.Name] = true
+		}
+	}
 	if conf.RequireKnownUsers {
-		o.knownUsers = f.KnownUsers()
+		o.admitUsers, o.admitGroups = f.Admitted()
 	}
 	return o, nil
 }
@@ -452,8 +462,10 @@ func (o *oidcSignIn) identify(r *http.Request, q url.Values, f *flow) (user stri
 }
 
 // mapClaims maps the claims of a verified ID token to a user and groups:
-// the user from subject_claim, the groups from groups_claim, keeping the
-// groups the file names.
+// the user from subject_claim, which may not name a static user unless
+// link_static_users links them, and the groups from groups_claim,
+// keeping the groups the file names. With require_known_users, an allow
+// list must name the user or one of the groups.
 func (o *oidcSignIn) mapClaims(id *oidc.IDToken, claims map[string]json.RawMessage) (user string, groups []string, err error) {
 	// OpenID Connect Core 1.0, 3.1.3.7: with several audiences, the
 	// authorized party must be occamyd, and so must any that is named.
@@ -475,32 +487,45 @@ func (o *oidcSignIn) mapClaims(id *oidc.IDToken, claims map[string]json.RawMessa
 			return "", nil, failed(codeAccessDenied, "user %q: the provider has not verified the email address", user)
 		}
 	}
-	if o.knownUsers != nil && !o.knownUsers[user] {
-		return "", nil, failed(codeAccessDenied, "user %q is not named in the configuration, which require_known_users asks for", user)
+	// A name belongs to one source unless the file links them.
+	if o.static[user] {
+		return "", nil, failed(codeAccessDenied, "user %q is a static user, and auth.oidc.link_static_users is off", user)
 	}
+	if groups, err = o.groupsOf(user, claims); err != nil {
+		return "", nil, err
+	}
+	if o.admitUsers != nil && !o.admitUsers[user] && !slices.ContainsFunc(groups, func(g string) bool { return o.admitGroups[g] }) {
+		return "", nil, failed(codeAccessDenied, "user %q is not admitted by require_known_users: no allow list names the user or the user's groups", user)
+	}
+	return user, groups, nil
+}
 
+// groupsOf returns the groups that groups_claim names, keeping those the
+// file names, sorted and without duplicates.
+func (o *oidcSignIn) groupsOf(user string, claims map[string]json.RawMessage) ([]string, error) {
 	if o.conf.GroupsClaim == "" {
-		return user, nil, nil
+		return nil, nil
 	}
 	raw, ok := claims[o.conf.GroupsClaim]
 	if !ok || string(raw) == "null" {
-		return user, nil, nil
+		return nil, nil
 	}
 	var all []string
 	if err := json.Unmarshal(raw, &all); err != nil {
 		var one string
 		if json.Unmarshal(raw, &one) != nil {
-			return "", nil, failed(codeSignInFailed, "user %q: the ID token's %s claim is neither a list of strings nor a string", user, o.conf.GroupsClaim)
+			return nil, failed(codeSignInFailed, "user %q: the ID token's %s claim is neither a list of strings nor a string", user, o.conf.GroupsClaim)
 		}
 		all = []string{one}
 	}
+	var groups []string
 	for _, g := range all {
 		if o.knownGroups[g] {
 			groups = append(groups, g)
 		}
 	}
 	slices.Sort(groups)
-	return user, slices.Compact(groups), nil
+	return slices.Compact(groups), nil
 }
 
 // validSubject reports whether s can name a user: not empty, at most
@@ -588,13 +613,13 @@ func (o *oidcSignIn) token(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, codeUnauthorized, "the code is unknown, used or expired, or the verifier does not match")
 		return
 	}
-	token, err := o.signer.Access(p.user, p.groups, o.ttl)
+	token, err := o.signer.AccessFrom(auth.IdPOIDC, p.user, p.groups, o.ttl)
 	if err != nil {
 		log.Printf("signing an access token for %q: %v", p.user, err)
 		writeError(w, http.StatusInternalServerError, codeInternal, "internal server error")
 		return
 	}
-	log.Printf("user %q signed in through OIDC", p.user)
+	log.Printf("user %q signed in, idp %s", p.user, auth.IdPOIDC)
 	w.Header().Set("Cache-Control", "no-store")
 	respond(w, http.StatusOK, tokenResponse{
 		AccessToken: token,

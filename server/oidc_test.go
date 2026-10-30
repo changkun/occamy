@@ -30,6 +30,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"golang.org/x/oauth2"
 
+	"changkun.de/x/occamy/internal/auth"
 	"changkun.de/x/occamy/internal/config"
 )
 
@@ -545,12 +546,12 @@ func TestOIDCSignIn(t *testing.T) {
 		t.Fatal(err)
 	}
 	// marketing is named nowhere in the file, so it is dropped.
-	if c.Subject != "carol" || !slices.Equal(c.Groups, []string{"admins"}) {
-		t.Errorf("access token for %q in %v, want carol in [admins]", c.Subject, c.Groups)
+	if c.Subject != "carol" || !slices.Equal(c.Groups, []string{"admins"}) || c.IdP != auth.IdPOIDC {
+		t.Errorf("access token for %q in %v from idp %q, want carol in [admins] from oidc", c.Subject, c.Groups, c.IdP)
 	}
 
 	out := logged()
-	if !strings.Contains(out, `user "carol" signed in through OIDC`) {
+	if !strings.Contains(out, `user "carol" signed in, idp oidc`) {
 		t.Errorf("no sign-in in the log:\n%s", out)
 	}
 	for name, secret := range map[string]string{"state": state, "one-time code": v.Get("code"), "verifier": verifier, "access token": tr.AccessToken} {
@@ -850,8 +851,9 @@ func TestOIDCIDTokenRefused(t *testing.T) {
 
 // TestOIDCAccessDenied checks the users that the callback refuses, with
 // access_denied: whom the provider refused, a token without a usable
-// user name, and with require_known_users, a user the file does not
-// name.
+// user name, a static user's name unless link_static_users links them,
+// and with require_known_users, a user whom no allow list names, by name
+// or by group.
 func TestOIDCAccessDenied(t *testing.T) {
 	for _, tt := range []struct {
 		name  string
@@ -886,12 +888,47 @@ func TestOIDCAccessDenied(t *testing.T) {
 			idp: func(p *testIdP) { p.subject = "carol" }, allow: true,
 		},
 		{
-			name: "static user", edit: func(f *config.File) { f.Auth.OIDC.RequireKnownUsers = true },
-			idp: func(p *testIdP) { p.subject = "alice" }, allow: true,
+			name: "user in an allowed group", edit: func(f *config.File) { f.Auth.OIDC.RequireKnownUsers = true },
+			idp: func(p *testIdP) {
+				p.subject, p.extra = "dave", jwt.MapClaims{"groups": []string{"marketing", "admins"}}
+			}, allow: true,
+		},
+		{
+			// ops is a static user's group, which no allow list names.
+			name: "user in no allowed group", edit: func(f *config.File) { f.Auth.OIDC.RequireKnownUsers = true },
+			idp: func(p *testIdP) { p.subject, p.extra = "dave", jwt.MapClaims{"groups": []string{"ops"}} },
 		},
 		{
 			name: "any user without require_known_users",
 			idp:  func(p *testIdP) { p.subject = "mallory" }, allow: true,
+		},
+		// A name belongs to one source unless the file links them.
+		{name: "static user", idp: func(p *testIdP) { p.subject = "alice" }},
+		{
+			name: "static user, require_known_users", edit: func(f *config.File) { f.Auth.OIDC.RequireKnownUsers = true },
+			idp: func(p *testIdP) { p.subject = "alice" },
+		},
+		{
+			name: "static user named in an allow list",
+			edit: func(f *config.File) { f.Connections[0].Allow.Users = append(f.Connections[0].Allow.Users, "alice") },
+			idp:  func(p *testIdP) { p.subject = "alice" },
+		},
+		{
+			// An account at the provider that picks its own
+			// preferred_username.
+			name: "static user by a claim the user chose", edit: func(f *config.File) { f.Auth.OIDC.SubjectClaim = "preferred_username" },
+			idp: func(p *testIdP) {
+				p.subject, p.extra = "opaque-123", jwt.MapClaims{"preferred_username": "alice", "groups": []string{"admins"}}
+			},
+		},
+		{
+			name: "static user, linked", edit: func(f *config.File) { f.Auth.OIDC.LinkStaticUsers = true },
+			idp: func(p *testIdP) { p.subject = "alice" }, allow: true,
+		},
+		{
+			name: "static user, linked, require_known_users",
+			edit: func(f *config.File) { f.Auth.OIDC.LinkStaticUsers, f.Auth.OIDC.RequireKnownUsers = true, true },
+			idp:  func(p *testIdP) { p.subject = "alice" }, allow: true,
 		},
 		{
 			name: "email not verified", edit: func(f *config.File) { f.Auth.OIDC.SubjectClaim = "email" },

@@ -99,9 +99,14 @@ type OIDC struct {
 	Scopes       []string `yaml:"scopes"`
 	SubjectClaim string   `yaml:"subject_claim"`
 	GroupsClaim  string   `yaml:"groups_claim"`
-	// RequireKnownUsers admits only the users that the file names, as a
-	// static user or in a connection's allow.users.
+	// RequireKnownUsers admits only the users that File.Admitted names:
+	// in a connection's allow.users, in one of its allow.groups by the
+	// groups claim, or, with LinkStaticUsers, a static user.
 	RequireKnownUsers bool `yaml:"require_known_users"`
+	// LinkStaticUsers lets an OIDC user whose subject names a static user
+	// sign in as that user. Off, such a sign-in is refused, since a name
+	// belongs to one source unless the file links them.
+	LinkStaticUsers bool `yaml:"link_static_users"`
 }
 
 // Connection is an entry of the connection registry.

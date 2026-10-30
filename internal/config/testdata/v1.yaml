@@ -62,8 +62,11 @@ auth:
     # Pick claims that users cannot set themselves.
     subject_claim: email
     groups_claim: groups
-    # Admit only users this file names, in users or in allow.users.
+    # Admit only users that an allow list names, by name or by group.
     require_known_users: false
+    # Let an OIDC user whose subject names a static user sign in as that
+    # user. Off, such a sign-in is refused.
+    link_static_users: false
 
 # guacd serves the vnc, rdp and telnet connections.
 guacd:

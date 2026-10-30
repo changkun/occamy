@@ -265,20 +265,30 @@ func TestParseV1Defaults(t *testing.T) {
 	}
 }
 
-// TestKnownNames checks the users and groups that a file names, which
-// OIDC sign-in admits and maps to.
+// TestKnownNames checks the groups that a file names, which OIDC sign-in
+// maps to, and the users and groups that require_known_users admits: the
+// static users only when link_static_users links them.
 func TestKnownNames(t *testing.T) {
-	f, err := parse(t, head+`  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb}
+	for _, tt := range []struct {
+		link  string
+		users map[string]bool
+	}{
+		{"false", map[string]bool{"alice": true, "carol": true}},
+		{"true", map[string]bool{"alice": true, "bob": true, "carol": true}},
+	} {
+		f, err := parse(t, head+`  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb, link_static_users: `+tt.link+`}
 `+conn+`  - {id: b, protocol: ssh, target: b, credentials: {prompt: true}, allow: {users: [carol], groups: [admins]}}
 `)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got, want := f.KnownUsers(), map[string]bool{"alice": true, "bob": true, "carol": true}; !reflect.DeepEqual(got, want) {
-		t.Errorf("KnownUsers = %v, want %v", got, want)
-	}
-	if got, want := f.KnownGroups(), map[string]bool{"ops": true, "dev": true, "admins": true}; !reflect.DeepEqual(got, want) {
-		t.Errorf("KnownGroups = %v, want %v", got, want)
+		if err != nil {
+			t.Fatal(err)
+		}
+		users, groups := f.Admitted()
+		if !reflect.DeepEqual(users, tt.users) || !reflect.DeepEqual(groups, map[string]bool{"admins": true}) {
+			t.Errorf("link_static_users %s: Admitted = %v, %v, want %v, [admins]", tt.link, users, groups, tt.users)
+		}
+		if got, want := f.KnownGroups(), map[string]bool{"ops": true, "dev": true, "admins": true}; !reflect.DeepEqual(got, want) {
+			t.Errorf("KnownGroups = %v, want %v", got, want)
+		}
 	}
 }
 
@@ -505,14 +515,18 @@ func TestParseV1Problems(t *testing.T) {
 			{"auth.oidc.return_urls[3]", "has a fragment"},
 			{"auth.oidc.return_urls[4]", "has a user name in it"},
 		}},
-		{"oidc known users", `version: 1
+		{"oidc known users: groups without groups_claim", `version: 1
 auth:
   signing_key_file: DIR/signing.key
   oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb, require_known_users: true}
 connections:
   - {id: a, protocol: ssh, target: a, credentials: {prompt: true}, allow: {groups: [admins]}}
 `, []want{
-			{"auth.oidc.require_known_users", "the file names no users"},
+			{"auth.oidc.require_known_users", "the file admits no one"},
+		}},
+		{"oidc known users: static users not linked", head + `  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb, require_known_users: true}
+`, []want{
+			{"auth.oidc.require_known_users", "the file admits no one"},
 		}},
 
 		// guacd.

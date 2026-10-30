@@ -115,7 +115,7 @@ func (s *staticUsers) token(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, codeInternal, "internal server error")
 		return
 	}
-	log.Printf("user %q signed in", req.Username)
+	log.Printf("user %q signed in, idp %s", req.Username, auth.IdPLocal)
 	w.Header().Set("Cache-Control", "no-store")
 	respond(w, http.StatusOK, tokenResponse{
 		AccessToken: token,
