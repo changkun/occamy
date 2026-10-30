@@ -116,7 +116,10 @@ var (
 // Terminal is the session's terminal state for a terminal backend: the
 // headless emulator that its output feeds
 // (specs/008-native-architecture/native-ssh-backend.md, Screen diffs).
-// The session calls it from the backend's goroutine.
+// The session serialises its own calls, which may come from any of the
+// backend's goroutines; Write's slice is borrowed for the call. Viewers'
+// writers read the screen concurrently, so the emulator still needs its
+// own lock for them.
 type Terminal interface {
 	Write(p []byte)
 	Resize(cols, rows int)
@@ -159,6 +162,10 @@ type Session struct {
 	ending chan struct{} // closed when the session starts to end
 	done   chan struct{} // closed when it has ended
 	end    End
+
+	// outMu serialises Resize and the calls to cfg.Terminal, so that the
+	// screen, s.size and what viewers were told agree.
+	outMu sync.Mutex
 
 	// Owned by the owner goroutine.
 	idle   *time.Timer
@@ -275,11 +282,8 @@ func (s *Session) Join(role Role) (*Viewer, error) {
 				return ErrOwnerPresent
 			}
 			v = s.addViewer(RoleOwner)
-			s.mu.Lock()
-			s.owner = v
-			s.mu.Unlock()
+			s.setOwner(v)
 			s.ownerAway(false)
-			s.redeliverPrompts()
 			return nil
 		}
 		if role != RoleViewer && role != RoleReadOnly {
@@ -460,6 +464,12 @@ func (s *Session) updateDemand() {
 func (s *Session) broadcast(f func(p *Pending)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.broadcastLocked(f)
+}
+
+// broadcastLocked is broadcast with s.mu held, for callers that store the
+// same state for late joiners in the same critical section.
+func (s *Session) broadcastLocked(f func(p *Pending)) {
 	for _, v := range s.viewers {
 		v.update(f)
 	}
@@ -471,11 +481,14 @@ type promptRequest struct {
 	reply  chan backend.PromptReply
 }
 
-// redeliverPrompts gives a returning owner the prompts still unanswered.
-// It runs on the owner goroutine with the new owner set.
-func (s *Session) redeliverPrompts() {
+// setOwner makes v the owner and gives it the prompts still unanswered.
+// Both happen under one hold of s.mu, so that a prompt raised meanwhile
+// reaches the owner once, either here or from sink.Prompt. It runs on the
+// owner goroutine.
+func (s *Session) setOwner(v *Viewer) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.owner = v
 	for _, r := range s.prompts {
 		s.owner.update(func(p *Pending) { p.Prompts = append(p.Prompts, PromptRequest{ID: r.id, Prompt: r.prompt}) })
 	}
@@ -486,6 +499,8 @@ type sink struct{ s *Session }
 
 func (k sink) Resize(width, height int) {
 	s := k.s
+	s.outMu.Lock()
+	defer s.outMu.Unlock()
 	if s.fb != nil {
 		s.fb.Resize(width, height)
 	} else {
@@ -494,9 +509,9 @@ func (k sink) Resize(width, height int) {
 	}
 	size := image.Pt(width, height)
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.size = size
-	s.mu.Unlock()
-	s.broadcast(func(p *Pending) { p.Resize = &size })
+	s.broadcastLocked(func(p *Pending) { p.Resize = &size })
 }
 
 func (k sink) Lock(r image.Rectangle) *image.RGBA { return k.s.fb.Lock(r) }
@@ -512,22 +527,25 @@ func (k sink) Cursor(img *image.RGBA, hot image.Point) {
 	}
 	s := k.s
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.cursor = c
-	s.mu.Unlock()
-	s.broadcast(func(p *Pending) { p.Cursor = c })
+	s.broadcastLocked(func(p *Pending) { p.Cursor = c })
 }
 
 func (k sink) CursorMove(pos image.Point) {
 	s := k.s
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.cursorPos = pos
-	s.mu.Unlock()
-	s.broadcast(func(p *Pending) { p.CursorPos = &pos })
+	s.broadcastLocked(func(p *Pending) { p.CursorPos = &pos })
 }
 
 func (k sink) TermData(data []byte) {
-	k.s.cfg.Terminal.Write(data)
-	k.s.wakeTerminal()
+	s := k.s
+	s.outMu.Lock()
+	s.cfg.Terminal.Write(data)
+	s.outMu.Unlock()
+	s.wakeTerminal()
 }
 
 func (k sink) Clipboard(mime string, data []byte) {
@@ -540,9 +558,9 @@ func (k sink) Bell() { k.s.broadcast(func(p *Pending) { p.Bells++ }) }
 func (k sink) Title(title string) {
 	s := k.s
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.title = title
-	s.mu.Unlock()
-	s.broadcast(func(p *Pending) { p.Title = &title })
+	s.broadcastLocked(func(p *Pending) { p.Title = &title })
 }
 
 func (k sink) Prompt(ctx context.Context, pr backend.Prompt) (backend.PromptReply, error) {

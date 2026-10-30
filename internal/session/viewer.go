@@ -80,7 +80,8 @@ func (v *Viewer) ID() int { return v.id }
 // Role is what the viewer may do.
 func (v *Viewer) Role() Role { return v.role }
 
-// Session is the session the viewer belongs to.
+// Session is the session the viewer belongs to. Its Close and Join do
+// not check this viewer's role; whoever hands out viewers checks it.
 func (v *Viewer) Session() *Session { return v.s }
 
 // Wake receives a value when Take has news.
@@ -110,17 +111,24 @@ func (v *Viewer) Input(seq uint32, ev backend.InputEvent) error {
 			v.s.dropped.Add(1)
 			return nil
 		}
-		err := v.s.backend.Input(ev)
+		// The clock is read before the backend sees the input: a tile it
+		// changes in between then counts as after the input, which is
+		// harmless, while reading it afterwards could miss the tile that
+		// shows the input's effect.
 		var clock uint64
 		if v.s.fb != nil {
 			clock = v.s.fb.Clock()
+		}
+		v.s.idle.Reset(v.s.cfg.IdleTimeout)
+		if err := v.s.backend.Input(ev); err != nil {
+			// The backend dropped it, so no frame will show it.
+			return err
 		}
 		v.mu.Lock()
 		v.lastSeq, v.inputClock = seq, clock
 		v.mu.Unlock()
 		v.update(func(p *Pending) { p.Input = true })
-		v.s.idle.Reset(v.s.cfg.IdleTimeout)
-		return err
+		return nil
 	})
 }
 

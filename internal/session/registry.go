@@ -97,8 +97,16 @@ func (r *Registry) Share(id string, role Role, ttl time.Duration) (token string,
 	if _, ok := r.sessions[id]; !ok {
 		return "", ErrNotFound
 	}
+	// Expired shares go here, so that they do not pile up in a session
+	// that keeps minting them.
+	now := r.now()
+	for k, sh := range r.shares {
+		if !now.Before(sh.expires) {
+			delete(r.shares, k)
+		}
+	}
 	token = randomID(32)
-	r.shares[sha256.Sum256([]byte(token))] = share{session: id, role: role, expires: r.now().Add(ttl)}
+	r.shares[sha256.Sum256([]byte(token))] = share{session: id, role: role, expires: now.Add(ttl)}
 	return token, nil
 }
 

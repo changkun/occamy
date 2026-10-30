@@ -94,3 +94,29 @@ func TestRegistryShutdown(t *testing.T) {
 		}
 	})
 }
+
+// Expired shares leave when the session mints the next one, rather than
+// piling up until it ends.
+func TestRegistrySharesExpire(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		r := session.NewRegistry(ctx)
+		id, _, _, err := r.Open(session.Config{Backend: backendtest.NewScreen(64, 48, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for range 3 {
+			if _, err := r.Share(id, session.RoleViewer, time.Minute); err != nil {
+				t.Fatal(err)
+			}
+		}
+		time.Sleep(time.Minute)
+		if _, err := r.Share(id, session.RoleViewer, time.Minute); err != nil {
+			t.Fatal(err)
+		}
+		if n := r.Shares(); n != 1 {
+			t.Errorf("%d shares held, want the live one", n)
+		}
+	})
+}

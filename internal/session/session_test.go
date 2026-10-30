@@ -477,3 +477,125 @@ func (r *recordingTerminal) state() (string, []image.Point) {
 	defer r.mu.Unlock()
 	return string(r.written), slices.Clone(r.sizes)
 }
+
+// echoing draws an input's effect before Input returns, as a local
+// backend may, or fails every input.
+type echoing struct {
+	mu   sync.Mutex
+	s    backend.Sink
+	fail error
+}
+
+func (b *echoing) Class() backend.Class { return backend.Graphical }
+
+func (b *echoing) Run(ctx context.Context, sink backend.Sink) error {
+	b.mu.Lock()
+	b.s = sink
+	b.mu.Unlock()
+	sink.Resize(64, 64)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (b *echoing) Input(backend.InputEvent) error {
+	if b.fail != nil {
+		return b.fail
+	}
+	b.mu.Lock()
+	sink := b.s
+	b.mu.Unlock()
+	r := image.Rect(0, 0, 8, 8)
+	sink.Lock(r)
+	sink.Unlock(r)
+	return nil
+}
+
+func (b *echoing) Demand(backend.Demand) {}
+
+// The tile an input changes is above the input's clock even when the
+// backend draws it before Input returns.
+func TestInputClockBeforeEffect(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, owner := start(t, session.Config{Backend: &echoing{}, TileSize: 32})
+		synctest.Wait()
+		if err := owner.Input(1, backend.Key{Down: true, Keysym: 'a'}); err != nil {
+			t.Fatal(err)
+		}
+		_, clock := owner.LastInput()
+		if v := s.Framebuffer().Version(0); v <= clock {
+			t.Errorf("tile changed by the input at version %d, not above the input's clock %d", v, clock)
+		}
+	})
+}
+
+// An input the backend rejects is not reported as applied.
+func TestRejectedInput(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		_, owner := start(t, session.Config{Backend: &echoing{fail: errors.New("queue full")}})
+		synctest.Wait()
+		owner.Take()
+		if err := owner.Input(9, backend.Key{Down: true}); err == nil {
+			t.Fatal("rejected input returned no error")
+		}
+		if seq, _ := owner.LastInput(); seq == 9 {
+			t.Errorf("LastInput reports seq %d, which the backend rejected", seq)
+		}
+		if owner.Take().Input {
+			t.Error("Pending.Input set for a rejected input")
+		}
+	})
+}
+
+// twoStreams writes output and resizes from two goroutines, as an SSH
+// backend reading output while handling a window change does.
+type twoStreams struct{ done chan struct{} }
+
+func (twoStreams) Class() backend.Class { return backend.Terminal }
+
+func (b twoStreams) Run(ctx context.Context, sink backend.Sink) error {
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for range 100 {
+			sink.TermData([]byte("x"))
+		}
+	})
+	wg.Go(func() {
+		for i := range 100 {
+			sink.Resize(80+i, 24)
+		}
+	})
+	wg.Wait()
+	close(b.done)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (twoStreams) Input(backend.InputEvent) error { return nil }
+func (twoStreams) Demand(backend.Demand)          {}
+
+// unlocked takes Terminal's doc at its word and has no lock, so the race
+// detector reports any concurrent call.
+type unlocked struct {
+	buf        []byte
+	cols, rows int
+}
+
+func (u *unlocked) Write(p []byte) { u.buf = append(u.buf, p...) }
+
+func (u *unlocked) Resize(cols, rows int) {
+	u.cols, u.rows = cols, rows
+	u.buf = u.buf[:0]
+}
+
+// The session serialises its calls to the Terminal, and the size it
+// reports is the last one the backend set.
+func TestTerminalCallsSerialised(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := twoStreams{done: make(chan struct{})}
+		s, _ := start(t, session.Config{Backend: b, Terminal: &unlocked{}})
+		<-b.done
+		if got := s.Size(); got != image.Pt(179, 24) {
+			t.Errorf("size %v, want the last resize 179x24", got)
+		}
+	})
+}
