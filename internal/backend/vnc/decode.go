@@ -43,6 +43,13 @@ const (
 	// interactive resize still follows at that rate. TigerVNC's viewer
 	// waits 500 ms before it asks for a resize of its own.
 	resizeEvery = 100 * time.Millisecond
+	// drawBudget bounds the pixels that an update draws, as a multiple of
+	// the screen's. A rectangle of a few bytes can draw the whole screen,
+	// as a Tight fill, a CopyRect or a ZRLE rectangle of one colour do,
+	// which takes 25 ms on the largest screen; an update of 65535 of them
+	// would take half an hour. Servers cover the screen once an update,
+	// with few overlaps.
+	drawBudget = 4
 )
 
 // decoder reads the server's messages and applies them to a sink. Every
@@ -60,11 +67,13 @@ type decoder struct {
 	resized     bool          // the current or last update resized the screen
 	resizeEvery time.Duration // the least time between two resizes
 	lastResize  time.Time
+	drawn       int64 // the pixels that the current update has drawn
 
 	hdr    [12]byte
 	strip  []byte // stripSize bytes
 	cursor []byte // a cursor's pixels and mask, grown up to maxCursor
 	img    image.RGBA
+	enc    codecs // Hextile, ZRLE and Tight
 }
 
 func newDecoder(ctx context.Context, r io.Reader, sink backend.Sink, size image.Point, lim limits, log *slog.Logger) *decoder {
@@ -118,6 +127,7 @@ func (d *decoder) next() (byte, error) {
 // update applies a FramebufferUpdate.
 func (d *decoder) update() error {
 	d.resized = false
+	d.drawn = 0
 	if err := d.read(d.hdr[:3]); err != nil {
 		return fmt.Errorf("vnc: framebuffer update: %w", err)
 	}
@@ -144,16 +154,39 @@ func (d *decoder) rect() error {
 	enc := int32(binary.BigEndian.Uint32(d.hdr[8:])) // #nosec G115 -- encodings are signed on the wire
 	r := image.Rect(x, y, x+w, y+h)
 	switch enc {
+	case encRaw, encCopyRect, encHextile, encZRLE, encTight:
+		if err := d.spend(r); err != nil {
+			return err
+		}
+	}
+	switch enc {
 	case encRaw:
 		return d.raw(r)
 	case encCopyRect:
 		return d.copyRect(r)
+	case encHextile:
+		return d.hextile(r)
+	case encZRLE:
+		return d.zrle(r)
+	case encTight:
+		return d.tight(r)
 	case encDesktopSize:
 		return d.desktopSize(w, h)
 	case encCursor:
 		return d.setCursor(image.Pt(x, y), w, h)
 	}
 	return fmt.Errorf("unsupported encoding %d", enc)
+}
+
+// spend counts the pixels of r on the screen against the update's
+// budget (drawBudget).
+func (d *decoder) spend(r image.Rectangle) error {
+	r = r.Intersect(image.Rectangle{Max: d.size})
+	d.drawn += int64(r.Dx()) * int64(r.Dy())
+	if d.drawn > drawBudget*int64(d.size.X)*int64(d.size.Y) {
+		return fmt.Errorf("the update draws more than %d times the screen's %d×%d pixels", drawBudget, d.size.X, d.size.Y)
+	}
+	return nil
 }
 
 // onScreen returns an error if r, which is not empty, is not within the
@@ -246,6 +279,9 @@ func (d *decoder) desktopSize(w, h int) error {
 	d.lastResize = time.Now()
 	d.size = image.Pt(w, h)
 	d.resized = true
+	// The rectangles after it draw on the new screen, with a budget of its
+	// size; an update resizes once, so it draws at most two budgets.
+	d.drawn = 0
 	d.sink.Resize(w, h)
 	return nil
 }

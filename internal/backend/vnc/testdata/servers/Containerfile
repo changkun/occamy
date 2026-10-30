@@ -1,0 +1,17 @@
+# The bench desktop (docker/bench/desktop) with TigerVNC's Xvnc beside its
+# x11vnc, for the VNC backend's integration tests. Build the bench desktop
+# first (docker compose -f docker/docker-compose.bench.yaml build desktop),
+# then, from the repository's root:
+#
+#	podman build -t occamy-vnc-servers internal/backend/vnc/testdata/servers
+#	podman run -d --rm --name occamy-vnc-tigervnc -p 127.0.0.1:15900:5900 -e GEOMETRY=64x48 occamy-vnc-servers tigervnc
+#
+# start.sh x11vnc runs x11vnc as the bench desktop does.
+ARG BASE=occamy-bench-desktop
+FROM ${BASE}
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends tigervnc-standalone-server tigervnc-tools && \
+    rm -rf /var/lib/apt/lists/*
+COPY start.sh /usr/local/bin/start-vnc.sh
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/start-vnc.sh"]
+CMD ["tigervnc"]
