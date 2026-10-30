@@ -128,6 +128,8 @@ func TestAPIFallback(t *testing.T) {
 	}{
 		{http.MethodGet, "/api/v1/nope", http.StatusNotFound, codeNotFound, ""},
 		{http.MethodGet, "/api/v1/", http.StatusNotFound, codeNotFound, ""},
+		{http.MethodGet, "/api/v1", http.StatusNotFound, codeNotFound, ""},
+		{http.MethodGet, "/api/v10", http.StatusNotFound, "", ""},
 		{http.MethodGet, "/api/v1/auth/token", http.StatusMethodNotAllowed, codeMethodNotAllowed, "POST"},
 		{http.MethodDelete, "/api/v1/auth/token", http.StatusMethodNotAllowed, codeMethodNotAllowed, "POST"},
 		{http.MethodGet, "/nope", http.StatusNotFound, "", ""},

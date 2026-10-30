@@ -80,19 +80,21 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	case errors.As(err, &tooLarge):
 		writeError(w, http.StatusRequestEntityTooLarge, codeTooLarge, "the body is too large")
 	default:
-		// The decoder's messages name fields and types, never values.
+		// The decoder's messages name fields and types, and a syntax
+		// error quotes the character it stopped at: the client's own
+		// data, sent back to the client only, never logged.
 		writeError(w, http.StatusBadRequest, codeBadRequest, "the body is not a valid request: "+strings.TrimPrefix(err.Error(), "json: "))
 	}
 	return false
 }
 
-// apiFallback answers requests under /api/v1/ that no route of mux takes
-// with API v1's error, where the ServeMux would answer in plain text: 404
-// for a path without a route, and 405 with Allow for a route that takes
-// other methods. Everything else goes to mux.
+// apiFallback answers requests for /api/v1 and under it that no route of
+// mux takes with API v1's error, where the ServeMux would answer in plain
+// text: 404 for a path without a route, and 405 with Allow for a route
+// that takes other methods. Everything else goes to mux.
 func apiFallback(mux *http.ServeMux) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.HasPrefix(r.URL.Path, "/api/v1/") {
+		if r.URL.Path != "/api/v1" && !strings.HasPrefix(r.URL.Path, "/api/v1/") {
 			mux.ServeHTTP(w, r)
 			return
 		}
