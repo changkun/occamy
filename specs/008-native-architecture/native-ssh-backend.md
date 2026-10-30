@@ -395,6 +395,14 @@ took its place.
 - The `Diff` comment lists every sequence used, all supported by both
   xterm.js and SwiftTerm.
 
+**Row versions.** Added with the terminal frames' review: each snapshot
+records the version at which each row came to look as it does, and at
+which the cursor last moved or changed (`Screen.Versions`), by comparing
+the rows at each index with the snapshot before. A row redrawn the same,
+or a line scrolled into a row that showed the same, keeps its version.
+The viewer writer treats rows like tiles to tell an input's echo from
+output already in motion ([session-core](session-core.md)).
+
 **Tests.**
 
 - The property: feeding the diffs between successive snapshots into a

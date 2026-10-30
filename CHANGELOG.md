@@ -23,6 +23,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   vectors in `protocol/testdata/messages.json`, and
   [docs/protocol.md](docs/protocol.md), the protocol's normative
   description. `docs/protocol-cn.md` is now marked as the v0 protocol.
+  A `max_message_size` below 64 KiB is refused.
 - `internal/auth`, the tokens of API v1: Ed25519 JWTs for access
   (a user and groups) and for sessions (a session and a role), signed by
   occamyd or by a configured trusted issuer, with no other algorithm
@@ -68,8 +69,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   and an input's effect goes ahead of motion already on the screen.
   Graphical sessions get raw tiles for now; terminal sessions get the
   diff between the screens a viewer was sent, so bulk output coalesces,
-  and the terminal's answers to the shell's queries reach the shell. Not
-  served by any route yet.
+  an echo goes ahead of a status line or other output already on the
+  screen, and the terminal's answers to the shell's queries reach the
+  shell. Not served by any route yet.
 
 ### Changed
 
