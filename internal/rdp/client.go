@@ -150,7 +150,7 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 		height: cfg.Height,
 		stats:  Stats{Bitmaps: map[string]int{}, Ignored: map[string]int{}},
 	}
-	stop := context.AfterFunc(ctx, func() { conn.SetDeadline(time.Unix(1, 0)) })
+	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Unix(1, 0)) })
 	err := c.connect(ctx)
 	if !stop() || ctx.Err() != nil {
 		conn.Close()

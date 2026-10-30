@@ -6,6 +6,7 @@ package rdp
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"fmt"
 )
@@ -47,7 +48,7 @@ const (
 func berLen(b []byte, n int) []byte {
 	switch {
 	case n < 0x80:
-		return append(b, byte(n))
+		return append(b, byte(n)) // #nosec G115 -- in range
 	case n < 0x100:
 		return append(b, 0x81, byte(n))
 	}
@@ -65,7 +66,7 @@ func berTLV(b []byte, tag byte, v []byte) []byte {
 func berInt(v int) []byte {
 	switch {
 	case v < 0x80:
-		return berTLV(nil, berTagInteger, []byte{byte(v)})
+		return berTLV(nil, berTagInteger, []byte{byte(v)}) // #nosec G115 -- in range
 	case v < 0x8000:
 		return berTLV(nil, berTagInteger, []byte{byte(v >> 8), byte(v)}) // #nosec G115 -- in range
 	}
@@ -101,7 +102,7 @@ func connectInitial(userData []byte) []byte {
 // perLen appends an ALIGNED PER length determinant.
 func perLen(b []byte, n int) []byte {
 	if n < 0x80 {
-		return append(b, byte(n))
+		return append(b, byte(n)) // #nosec G115 -- in range
 	}
 	return append(b, 0x80|byte(n>>8), byte(n)) // #nosec G115 -- lengths stay below 16 KiB
 }
@@ -225,9 +226,8 @@ func parseAttachUserConfirm(p []byte) (uint16, error) {
 
 // channelJoinRequest is [MS-RDPBCGR] 2.2.1.8.
 func channelJoinRequest(user, channel uint16) []byte {
-	return []byte{mcsChannelJoinRequest,
-		byte((user - mcsBaseUserID) >> 8), byte(user - mcsBaseUserID),
-		byte(channel >> 8), byte(channel)}
+	b := binary.BigEndian.AppendUint16([]byte{mcsChannelJoinRequest}, user-mcsBaseUserID)
+	return binary.BigEndian.AppendUint16(b, channel)
 }
 
 // parseChannelJoinConfirm checks a Channel Join Confirm, [MS-RDPBCGR]
@@ -254,10 +254,10 @@ func parseChannelJoinConfirm(p []byte, channel uint16) error {
 // [T.125] 11.32, with high priority and the data whole.
 func sendDataRequest(user, channel uint16, data []byte) []byte {
 	b := make([]byte, 0, 8+len(data))
-	b = append(b, mcsSendDataRequest,
-		byte((user-mcsBaseUserID)>>8), byte(user-mcsBaseUserID),
-		byte(channel>>8), byte(channel),
-		0x70) // dataPriority high, segmentation begin and end
+	b = append(b, mcsSendDataRequest)
+	b = binary.BigEndian.AppendUint16(b, user-mcsBaseUserID)
+	b = binary.BigEndian.AppendUint16(b, channel)
+	b = append(b, 0x70) // dataPriority high, segmentation begin and end
 	b = perLen(b, len(data))
 	return append(b, data...)
 }
