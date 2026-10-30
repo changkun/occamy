@@ -141,7 +141,8 @@ and 113 ms at N1, behind frames it had already queued.
   their minimum the rate backs off to the latest measurement. On Linux
   and macOS the writer sets `TCP_NOTSENT_LOWAT`, so the kernel holds
   little unsent data. A key's frame then waits behind little more than
-  the tile being written.
+  the message being written: one tile, or since the graphics pipeline's
+  Codecs task a run of up to 16 lossy tiles, about 1 ms to encode.
 - **Only what is seen.** A client reports with `view` whether it is
   visible (a hidden browser tab, a minimized window) and which part of
   the screen its viewport shows. A hidden viewer gets no frames, which
@@ -261,7 +262,7 @@ follow the recommendations above.
 | Backend interface | `internal/backend`: `Class`, `Backend`, `Sink`, `Demand`, input events (key, pointer, wheel, text, terminal input, clipboard, resize) and prompts; `backendtest`, a scripted fake backend for both classes that draws on a clock and records input | — |
 | Pacer | A per-viewer controller without I/O: the frame window, one frame beyond it after an input, bytes in flight capped near the bandwidth-delay product from `frame-ack` round trips with delay-based backoff, and AIMD steps for the frame interval and quality; tests on a simulated clock and link | — |
 | Owner | `internal/session`: the goroutine that runs a backend, applies its events to the framebuffer or the terminal emulator, adds damage to each viewer's dirty tiles, applies input in arrival order by role (read-only input dropped and counted), sets `Demand` from the viewers' `view`, and ends the session per decision 5; tests under `-race` that also check for leaked goroutines | Backend interface; the graphics pipeline's framebuffer |
-| Viewer writer | The goroutine per viewer: takes the dirty tiles inside the viewport when the pacer allows, encodes them through an encoder interface (raw pixels until the graphics pipeline's codecs land), sends size-capped tiles and `frame-end` with the last input applied, sends small messages ahead of tiles, sends a hidden viewer nothing and one current frame on its return, and sets `TCP_NOTSENT_LOWAT` on Linux and macOS; terminal sessions send screen diffs in the same frames | Owner, Pacer, protocol v1 Messages |
+| Viewer writer | The goroutine per viewer: takes the dirty tiles inside the viewport when the pacer allows, encodes them through an encoder interface (raw pixels at first; `internal/encoder`'s codecs since the graphics pipeline's Codecs task), sends size-capped tiles and `frame-end` with the last input applied, sends small messages ahead of tiles, sends a hidden viewer nothing and one current frame on its return, and sets `TCP_NOTSENT_LOWAT` on Linux and macOS; terminal sessions send screen diffs in the same frames | Owner, Pacer, protocol v1 Messages |
 | Registry | Sessions by ID: open on a connection, join with a role, share tokens that die with the session, removal when it ends | Owner |
 | Scheduling test | End to end with the fake backend in full-screen motion over a simulated N1 link: a key's `frame-end` arrives within one round trip plus a bound while frames keep flowing, a hidden viewer receives nothing and costs no encoding, and a slow viewer does not slow a fast one | Viewer writer |
 
@@ -350,7 +351,9 @@ arise, rather than inheriting those fixes.
     frame could show, not that it shows their effect; the frame that
     goes beyond the window does show it.
   - Small state goes out before every tile, during pacing sleeps and
-    while waiting, so it waits for at most the tile being written.
+    while waiting, so it waits for at most the tile being written. Since
+    the graphics pipeline's Codecs task a message may be a run of up to
+    16 lossy tiles, so that is one run's encoding, about 1 ms.
   - Resizes follow the framebuffer's bounds, not the session's small
     state. `resize` precedes every tile of the new size.
   - A client that breaks the protocol gets `close` with `CloseCodeFor`,
@@ -358,14 +361,17 @@ arise, rather than inheriting those fixes.
     `close` with its reason's code. Either waits at most 1 s for a client
     that stopped reading. A client that hangs up (`io.EOF` from `Conn`)
     or a failed connection gets nothing.
-  - A client that decodes no raw tiles is refused with `unsupported`. A
-    small message larger than the client's message size, such as a huge
+  - A client that decodes no raw tiles is refused with `unsupported`;
+    since the graphics pipeline's Codecs task, one that decodes no codec
+    the server sends. A small message larger than the client's message size, such as a huge
     remote clipboard, is dropped. Up to 16 pings wait for their pongs,
     and acks beyond 64 drop the oldest.
   - Tiles go through an `Encoder` interface, raw RGBA until the graphics
-    pipeline's codecs land. Cursors go raw, and not at all if they are
-    larger than the client's texture limit; a hidden cursor carries no hot
-    spot, codec or payload.
+    pipeline's Codecs task gave it `internal/encoder`'s codecs. Cursors
+    went raw; they now go in `deflate`, `raw` or lossless WebP, and not at
+    all to a viewer that decodes none of those or if they are larger than
+    the client's texture limit. A hidden cursor carries no hot spot, codec
+    or payload.
 - **What was not done:**
   - `TCP_NOTSENT_LOWAT` is not set on a connection yet. coder/websocket
     hides the socket, so the HTTP layer reaches it first: the HTTP server

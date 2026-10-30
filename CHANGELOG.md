@@ -79,10 +79,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the pace of the viewer's link. Small state never waits behind tiles,
   and an input's effect goes ahead of motion already on the screen.
   Graphical sessions get tiles in the codecs the viewer agreed to;
-  terminal sessions get the diff between the screens a viewer was sent, so bulk output coalesces,
-  an echo goes ahead of a status line or other output already on the
-  screen, and the terminal's answers to the shell's queries reach the
-  shell. Not served by any route yet.
+  terminal sessions get the diff between the screens a viewer was sent,
+  so bulk output coalesces, an echo goes ahead of a status line or other
+  output already on the screen, and the terminal's answers to the
+  shell's queries reach the shell. Not served by any route yet.
 - A native VNC backend for protocol v1, `internal/backend/vnc`, in pure
   Go: RFB 3.3, 3.7 and 3.8 with the security types None and VNC
   Authentication, asking the session's owner for a password the
@@ -136,12 +136,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   more in lossy WebP, or in JPEG for a client that lists JPEG but not
   WebP, in pure Go with gen2brain/vpx and gen2brain/jpegn; adjacent
   lossy tiles share one message. `internal/stream` sends each viewer's
-  tiles and cursor in the codecs it agreed to. `internal/codec` holds the
-  deflate container and raw pixels both ways, with the standard library
-  only, for clients to decode with. [docs/protocol.md](docs/protocol.md)
-  fixes the deflate container's layout, with alpha for cursors, and
+  tiles and cursor in the codecs it agreed to, cursors with straight
+  alpha. `internal/codec` holds the deflate container and raw pixels
+  both ways, with the standard library only, for clients to decode with.
+  [docs/protocol.md](docs/protocol.md) fixes the deflate container's
+  layout, with alpha for cursors, and the most a receiver inflates, and
   `protocol/testdata/codecs.json` holds a payload of each codec occamyd
-  sends and deflate payloads a client must refuse.
+  sends and deflate payloads a client must refuse. The image's
+  `licenses/` carries vpx's, jpegn's and jpegli's notices.
 - `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
   (static users sign in with a password for an access token), TLS when
   `tls.cert` and `tls.key` are set, expvar and pprof on the debug
