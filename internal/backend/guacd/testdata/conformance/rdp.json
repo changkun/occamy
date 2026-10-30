@@ -2,6 +2,8 @@
 	"name": "rdp",
 	"protocol": "rdp",
 	"params": {
+		"color-depth": "24",
+		"disable-gfx": "true",
 		"hostname": "rdp",
 		"ignore-cert": "true",
 		"port": "3389",
@@ -22,34 +24,50 @@
 	],
 	"checkpoints": [
 		{
-			"sync": "1225293052",
+			"sync": "1232805629",
 			"letter": "a"
 		},
 		{
-			"sync": "1225294020",
+			"sync": "1232806539",
 			"letter": "b"
+		}
+	],
+	"regions": [
+		{
+			"sync": "1232805973",
+			"rect": {
+				"Min": {
+					"X": 320,
+					"Y": 192
+				},
+				"Max": {
+					"X": 448,
+					"Y": 320
+				}
+			},
+			"why": "a 320×192 copy from layer -1 to layer 0 at (128,192)",
+			"png": "rdp-copy.png"
 		}
 	],
 	"instructions": {
 		"args": 1,
-		"blob": 126,
-		"cfill": 14,
-		"copy": 21,
-		"cursor": 2,
+		"blob": 34,
+		"cfill": 24,
+		"copy": 28,
+		"cursor": 1,
 		"dispose": 2,
-		"end": 36,
-		"img": 36,
-		"img image/png": 24,
-		"img image/webp": 12,
-		"mouse": 1,
+		"end": 28,
+		"img": 28,
+		"img image/png": 15,
+		"img image/webp": 13,
 		"ready": 1,
-		"rect": 14,
+		"rect": 24,
 		"size": 7,
-		"sync": 20
+		"sync": 19
 	},
 	"size": {
 		"X": 800,
 		"Y": 600
 	},
-	"sha256": "776011fb455cdcb15f34fade5dca45b6c5a4b1d04617229314771ac3f49be174"
+	"sha256": "6a5ab681d608ac4618acc5df906d59c69c2f176c9f1b28a097bf5ede9f6c0dd4"
 }

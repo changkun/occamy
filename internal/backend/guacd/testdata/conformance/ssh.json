@@ -16,6 +16,23 @@
 		"typing: ls -l /",
 		"exit"
 	],
+	"regions": [
+		{
+			"sync": "1225302877",
+			"rect": {
+				"Min": {
+					"X": 359,
+					"Y": 278
+				},
+				"Max": {
+					"X": 487,
+					"Y": 406
+				}
+			},
+			"why": "a 610×399 copy from layer 1 to layer 1 at (0,0)",
+			"png": "ssh-copy.png"
+		}
+	],
 	"instructions": {
 		"args": 1,
 		"argv": 3,

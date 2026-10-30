@@ -27,6 +27,34 @@
 			"letter": "b"
 		}
 	],
+	"regions": [
+		{
+			"sync": "1225288191",
+			"rect": {
+				"Min": {
+					"X": 192,
+					"Y": 512
+				},
+				"Max": {
+					"X": 320,
+					"Y": 640
+				}
+			},
+			"why": "a 384×128 copy from layer -1 to layer 0 at (128,512)",
+			"png": "vnc-copy.png"
+		}
+	],
+	"prompts": [
+		{
+			"name": "vnc",
+			"fields": [
+				{
+					"label": "Password",
+					"secret": true
+				}
+			]
+		}
+	],
 	"instructions": {
 		"ack": 1,
 		"args": 1,

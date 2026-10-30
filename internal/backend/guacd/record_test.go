@@ -8,19 +8,27 @@
 // the bench stack of docs/benchmarks.md: guacd 1.6, the bench desktop
 // (bench/scene) over VNC and RDP, and the demo SSH server. It drives a
 // bridge through each session, keeps every byte guacd sent up to the last
-// complete frame, and pins that frame by replaying the stream as
-// TestConformance does.
+// complete frame, and pins what TestConformance checks by replaying the
+// stream as it does.
 //
-//	cd docker
-//	podman compose -f docker-compose.yaml -f docker-compose.bench.yaml up -d --build --wait guacd vnc rdp ssh
-//	cd ..
+// The stack runs as a compose project of its own, with only the services
+// the recordings need, so that taking it down leaves other stacks alone.
+// Its guacd is published on 127.0.0.1:4822, as make bench's is, so run it
+// while no bench stack is up. CONTAINER_ENGINE is podman or docker.
+//
+//	export CONTAINER_ENGINE=podman
+//	compose="$CONTAINER_ENGINE compose -p occamy-record -f docker/docker-compose.yaml -f docker/docker-compose.bench.yaml"
+//	$compose up -d --build --wait guacd vnc rdp ssh
 //	go test -tags record -run TestRecord -v ./internal/backend/guacd -args -guacd 127.0.0.1:4822
 //	go test -run TestConformance ./internal/backend/guacd
-//	cd docker && podman compose -f docker-compose.yaml -f docker-compose.bench.yaml down
+//	$compose down
 //
 // -record vnc,rdp,ssh picks the recordings to make. The scenes animate in
-// real time, so a new recording differs from the last and pins another
-// frame.
+// real time, so a new recording differs from the last and pins other
+// frames. -pin pins the existing recordings again from their streams,
+// without a stack, for when the bridge's rendering changes on purpose.
+// When a checkpoint fails, the frame goes as a PNG file to the directory
+// that OCCAMY_CONFORMANCE_DUMP names.
 package guacd_test
 
 import (
@@ -34,6 +42,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"io"
 	"maps"
@@ -41,6 +50,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -56,6 +66,7 @@ import (
 var (
 	recordGuacd = flag.String("guacd", "127.0.0.1:4822", "address of the bench stack's guacd")
 	recordOnly  = flag.String("record", "vnc,rdp,ssh", "comma-separated recordings to make")
+	recordPin   = flag.Bool("pin", false, "pin the existing recordings again instead of recording")
 )
 
 // Keysyms the recorder presses.
@@ -82,6 +93,13 @@ func TestRecord(t *testing.T) {
 			Params: map[string]string{
 				"hostname": "rdp", "port": "3389", "username": "occamy",
 				"ignore-cert": "true", "resize-method": "display-update",
+				// Through the graphics pipeline, which guacd enables by
+				// default, xrdp encodes the screen with RemoteFX
+				// Progressive, a lossy codec: the idle screen reached
+				// guacd 5 to 7 levels darker on average and up to 22
+				// off. Without it xrdp sends bitmaps as they are, at
+				// 24 bits, since guacd asks for 16 without it.
+				"disable-gfx": "true", "color-depth": "24",
 			},
 		}, map[string]string{"password": "occamy"}, func(l *live) { desktop(l, image.Pt(800, 600)) }},
 		"ssh": {recording{
@@ -96,6 +114,10 @@ func TestRecord(t *testing.T) {
 			t.Fatalf("no recording %q", name)
 		}
 		t.Run(name, func(t *testing.T) {
+			if *recordPin {
+				pin(t, name)
+				return
+			}
 			rec := s.rec
 			l := startLive(t, &rec, s.secret)
 			s.play(l)
@@ -103,6 +125,26 @@ func TestRecord(t *testing.T) {
 			save(t, &rec, stream)
 		})
 	}
+}
+
+// pin reads a recording and saves it again, which pins what its replay
+// shows now.
+func pin(t *testing.T, name string) {
+	t.Helper()
+	base := filepath.Join(corpus, name)
+	data, err := os.ReadFile(base + ".json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec recording
+	if err := json.Unmarshal(data, &rec); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := readStream(base + ".guac.gz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	save(t, &rec, stream)
 }
 
 // desktop plays the bench desktop: it waits for the scene, then types,
@@ -409,9 +451,7 @@ func (l *live) checkpoint(k rune) {
 		l.rec.Checkpoints = append(l.rec.Checkpoints, checkpoint{Sync: ts, Letter: string(k)})
 	case <-time.After(15 * time.Second):
 		fb := l.sink.Pixels()
-		if dir := os.Getenv("OCCAMY_RECORD_DUMP"); dir != "" {
-			dump(l.t, filepath.Join(dir, l.rec.Name+"-"+string(k)+".png"), fb)
-		}
+		keep(l.t, l.rec.Name+"-"+string(k), fb)
 		l.t.Fatalf("no frame shows the idle scene with %q: %v", k, showsIdle(fb, k))
 	}
 }
@@ -478,7 +518,12 @@ func lastSyncEnd(stream []byte) (int, error) {
 	return end, nil
 }
 
-// save replays stream, pins its last frame in rec, and writes both.
+// save pins in rec what TestConformance checks of stream, from a replay
+// of it: the opcode counts, the prompts, the pixels that a copy onto the
+// screen moved, and the last frame. It writes the stream, the manifest
+// and the pinned pixels. What the replay breaks is reported after the
+// recording is written, so that TestConformance reproduces it; only a
+// replay that draws nothing stops it.
 func save(t *testing.T, rec *recording, stream []byte) {
 	t.Helper()
 	counts, err := instructions(stream)
@@ -486,18 +531,73 @@ func save(t *testing.T, rec *recording, stream []byte) {
 		t.Fatal(err)
 	}
 	rec.Instructions = counts
-	r := replay(stream, rec)
-	checkReplay(t, rec, r)
-	if r.frame != nil {
-		rec.Size = r.frame.Rect.Size()
-		rec.SHA256 = frameHash(r.frame)
+	rec.Regions = nil
+	frames, err := copyFrames(stream)
+	if err != nil {
+		t.Fatal(err)
 	}
-	t.Logf("%d bytes, instructions %v", len(stream), counts)
-	t.Logf("unsupported %v, prompts %+v", r.unsupported, r.prompts)
-
+	var syncs []string
+	for _, g := range frames {
+		syncs = append(syncs, g.Sync)
+	}
+	r := replay(stream, rec, syncs...)
+	if r.frame == nil {
+		t.Fatalf("the replay drew nothing: %v", r.err)
+	}
+	rec.Prompts = prompts(r.prompts)
+	rec.Size = r.frame.Rect.Size()
+	rec.SHA256 = frameHash(r.frame)
 	if err := os.MkdirAll(corpus, 0o750); err != nil {
 		t.Fatal(err)
 	}
+
+	// Pin the square that a bridge ignoring copy would draw most
+	// differently, of the frames that copy onto the screen: there a
+	// broken copy shows. The latest wins a tie.
+	bare := replay(withoutCopies(stream), rec, syncs...)
+	var (
+		pinned region
+		most   int
+	)
+	for _, g := range frames {
+		a, b := r.snaps[g.Sync], bare.snaps[g.Sync]
+		if a == nil || b == nil || a.Rect != b.Rect {
+			continue
+		}
+		sq, n := bestTile(g.Rect.Intersect(a.Rect), func(sq image.Rectangle) int {
+			var n int
+			for y := sq.Min.Y; y < sq.Max.Y; y++ {
+				for x := sq.Min.X; x < sq.Max.X; x++ {
+					if a.RGBAAt(x, y) != b.RGBAAt(x, y) {
+						n++
+					}
+				}
+			}
+			return n
+		})
+		if n > 0 && n >= most {
+			pinned, most = g, n
+			pinned.Rect = sq
+		}
+	}
+	t.Logf("%d frames copy onto the screen; without copy, %d pixels of the pinned square differ", len(frames), most)
+	if most > 0 {
+		fb := r.snaps[pinned.Sync]
+		pinned.PNG = rec.Name + "-copy.png"
+		crop := image.NewRGBA(image.Rectangle{Max: pinned.Rect.Size()})
+		draw.Draw(crop, crop.Rect, fb, pinned.Rect.Min, draw.Src)
+		var b bytes.Buffer
+		if err := png.Encode(&b, crop); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(corpus, pinned.PNG), b.Bytes(), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		rec.Regions = append(rec.Regions, pinned)
+	}
+	t.Logf("%d bytes, instructions %v", len(stream), counts)
+	t.Logf("unsupported %v, prompts %+v, regions %+v", r.unsupported, r.prompts, rec.Regions)
+
 	var z bytes.Buffer
 	w, _ := gzip.NewWriterLevel(&z, gzip.BestCompression)
 	w.Write(stream)
@@ -516,17 +616,125 @@ func save(t *testing.T, rec *recording, stream []byte) {
 		t.Fatal(err)
 	}
 	t.Logf("wrote %s.guac.gz (%d bytes compressed), opcodes %v", base, z.Len(), slices.Sorted(maps.Keys(counts)))
+	checkReplay(t, rec, stream, r)
 }
 
-// dump writes img as a PNG, for a look at a frame that failed.
-func dump(t *testing.T, path string, img image.Image) {
-	t.Helper()
-	var b bytes.Buffer
-	if err := png.Encode(&b, img); err != nil {
-		t.Error(err)
-		return
+// The side of a pinned square, and the grid it sits on.
+const tileSide, tileStep = 128, 32
+
+// bestTile returns the tileSide square of r, on a tileStep grid, or r
+// where it is smaller, that score rates highest, and that score.
+func bestTile(r image.Rectangle, score func(image.Rectangle) int) (image.Rectangle, int) {
+	best, most := image.Rectangle{}, 0
+	if r.Empty() {
+		return best, most
 	}
-	if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
-		t.Error(err)
+	for y := r.Min.Y; ; y += tileStep {
+		y = max(min(y, r.Max.Y-tileSide), r.Min.Y)
+		for x := r.Min.X; ; x += tileStep {
+			x = max(min(x, r.Max.X-tileSide), r.Min.X)
+			sq := image.Rect(x, y, x+tileSide, y+tileSide).Intersect(r)
+			if n := score(sq); n > most {
+				best, most = sq, n
+			}
+			if x+tileSide >= r.Max.X {
+				break
+			}
+		}
+		if y+tileSide >= r.Max.Y {
+			break
+		}
+	}
+	return best, most
+}
+
+// maxCopyFrames bounds the frames copyFrames returns, each of which a
+// replay keeps.
+const maxCopyFrames = 24
+
+// copyFrames returns the frames in which a copy of at least a tileSide
+// square lands on the screen, on the default layer or a layer moved onto
+// it: the sync that ends each and the largest such copy in it. It keeps
+// the maxCopyFrames with the largest copies, the latest of those as
+// large, in stream order.
+func copyFrames(stream []byte) ([]region, error) {
+	all, err := parse(stream)
+	if err != nil {
+		return nil, err
+	}
+	// Where each layer on the screen sits.
+	at := map[int]image.Point{0: {}}
+	var (
+		frames []region
+		g      region
+		area   int
+	)
+	for _, ins := range all {
+		a := ins.Args()
+		n := make([]int, len(a))
+		for i, s := range a {
+			n[i], _ = strconv.Atoi(s)
+		}
+		switch ins.Opcode() {
+		case "move":
+			if len(n) == 5 && n[1] == 0 {
+				at[n[0]] = image.Pt(n[2], n[3])
+			} else if len(n) == 5 {
+				delete(at, n[0])
+			}
+		case "copy":
+			if len(n) != 9 || n[3] < tileSide || n[4] < tileSide || n[3]*n[4] <= area {
+				continue
+			}
+			if o, ok := at[n[6]]; ok {
+				g.Rect = image.Rect(n[7], n[8], n[7]+n[3], n[8]+n[4]).Add(o)
+				g.Why = fmt.Sprintf("a %d×%d copy from layer %d to layer %d at %v",
+					n[3], n[4], n[0], n[6], image.Pt(n[7], n[8]))
+				area = n[3] * n[4]
+			}
+		case "sync":
+			if area > 0 {
+				g.Sync = a[0]
+				frames = append(frames, g)
+			}
+			area = 0
+		}
+	}
+	if len(frames) <= maxCopyFrames {
+		return frames, nil
+	}
+	order := make([]int, len(frames))
+	for i := range order {
+		order[i] = i
+	}
+	size := func(i int) int { return frames[i].Rect.Dx() * frames[i].Rect.Dy() }
+	slices.SortStableFunc(order, func(i, j int) int {
+		if d := size(j) - size(i); d != 0 {
+			return d
+		}
+		return j - i
+	})
+	order = order[:maxCopyFrames]
+	slices.Sort(order)
+	kept := make([]region, 0, len(order))
+	for _, i := range order {
+		kept = append(kept, frames[i])
+	}
+	return kept, nil
+}
+
+// withoutCopies returns stream without its copy instructions: what a
+// bridge that ignored them would draw.
+func withoutCopies(stream []byte) []byte {
+	var out []byte
+	r := bufio.NewReader(bytes.NewReader(stream))
+	for {
+		raw, err := guacamole.ReadRaw(r)
+		if err != nil {
+			return out
+		}
+		if !bytes.HasPrefix(raw, []byte("4.copy,")) {
+			out = append(out, raw...)
+		}
 	}
 }
