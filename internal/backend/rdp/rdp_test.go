@@ -368,6 +368,25 @@ func TestRunInputBatched(t *testing.T) {
 	}
 }
 
+// The queue's budget of events is returned as the writer takes inputs,
+// so that a session can type more than the budget over its life.
+func TestRunInputBudgetReturned(t *testing.T) {
+	checkGoroutines(t)
+	s := listen(t, rdptest.Server{})
+	b := newBackend(t, s.config(t))
+	b.Demand(backend.Demand{Visible: true})
+	start(t, b, &backendtest.Sink{})
+	c := s.accept(t)
+	text := backend.Text{Text: strings.Repeat("x", inputEvents/4/8)} // an eighth of the budget
+	for i := range 20 {
+		if err := b.Input(text); err != nil {
+			t.Fatalf("Text %d: %v", i, err)
+		}
+		// Each character is pressed and released.
+		events(t, c, 2*len(text.Text))
+	}
+}
+
 // While nobody can see, the server is told to suppress its output, and
 // told to resume when a viewer can see again.
 func TestRunDemand(t *testing.T) {
