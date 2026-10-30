@@ -87,7 +87,7 @@ func startServer() (string, func(), error) {
 	out, err := exec.Command(engine, "run", "-d", "--rm", "--name", name,
 		"-p", "127.0.0.1::3389", image, "rdp").CombinedOutput()
 	if err != nil {
-		return "", nil, fmt.Errorf("starting %s: %v: %s", image, err, out)
+		return "", nil, fmt.Errorf("starting %s: %w: %s", image, err, out)
 	}
 	rdpContainer = name
 	stop := func() { exec.Command(engine, "rm", "-f", name).Run() }
@@ -377,11 +377,11 @@ func queryPointer(t *testing.T) string {
 		build := exec.Command("go", "build", "-o", bin, "./testdata/querypointer")
 		build.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+goarch, "CGO_ENABLED=0")
 		if out, err := build.CombinedOutput(); err != nil {
-			q.err = fmt.Errorf("%v: %s", err, out)
+			q.err = fmt.Errorf("%w: %s", err, out)
 			return
 		}
 		if out, err := exec.Command(engine, "cp", bin, rdpContainer+":/tmp/querypointer").CombinedOutput(); err != nil {
-			q.err = fmt.Errorf("%v: %s", err, out)
+			q.err = fmt.Errorf("%w: %s", err, out)
 			return
 		}
 		q.path = "/tmp/querypointer"
