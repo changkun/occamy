@@ -98,3 +98,28 @@ func TestGuacdDefaultAddress(t *testing.T) {
 		t.Errorf("guacd address = %q, want guacd:4822", c.Guacd.Address)
 	}
 }
+
+// TestMode checks the modes gin knew: debug, also when empty, serves
+// pprof, and any other mode fails as gin.SetMode did.
+func TestMode(t *testing.T) {
+	for _, tt := range []struct {
+		raw   string
+		debug bool
+	}{
+		{"address: 0.0.0.0:5636\n", true},
+		{"mode: debug\n", true},
+		{"mode: release\n", false},
+		{"mode: test\n", false},
+	} {
+		c, err := config.Parse([]byte(tt.raw))
+		if err != nil {
+			t.Fatalf("%q: %v", tt.raw, err)
+		}
+		if c.Debug() != tt.debug {
+			t.Errorf("%q: Debug() = %v, want %v", tt.raw, c.Debug(), tt.debug)
+		}
+	}
+	if _, err := config.Parse([]byte("mode: production\n")); err == nil {
+		t.Error("mode production did not fail")
+	}
+}

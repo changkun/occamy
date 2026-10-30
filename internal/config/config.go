@@ -12,16 +12,16 @@ import (
 	"net"
 	"os"
 
-	"github.com/gin-gonic/gin"
 	"go.yaml.in/yaml/v3"
 )
 
-// JWT is a configuration structure between browser client and server
+// JWT is a configuration structure between browser client and server. The
+// v0 login requires a protocol, a host and a password.
 type JWT struct {
-	Protocol string `form:"protocol" json:"protocol" binding:"required"`
-	Host     string `form:"host"     json:"host"     binding:"required"`
-	Username string `form:"username" json:"username"`
-	Password string `form:"password" json:"password" binding:"required"`
+	Protocol string `json:"protocol"`
+	Host     string `json:"host"`
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 // GenerateID returns the session key of the token: a SHA-256 hash of its
@@ -69,10 +69,17 @@ type Guacd struct {
 	Params map[string]map[string]string `yaml:"params"`
 }
 
+// Modes, as gin named them when v0 ran on it. Debug mode serves pprof.
+const (
+	ModeDebug   = "debug"
+	ModeRelease = "release"
+	ModeTest    = "test"
+)
+
 // config is a
 type config struct {
 	Address string `yaml:"address"`
-	Mode    string `yaml:"mode"`
+	Mode    string `yaml:"mode"` // debug, release or test; debug if empty
 	Auth    struct {
 		JWTSecret    string `yaml:"jwt_secret"`
 		JWTAlgorithm string `yaml:"jwt_alg"`
@@ -104,7 +111,12 @@ Usage:`)
 	if err != nil {
 		log.Fatalf("failed of parsing config file, error: %v", err)
 	}
-	gin.SetMode(Runtime.Mode)
+}
+
+// Debug reports whether occamyd runs in debug mode. An empty mode is
+// debug, as it was in gin.
+func (c *config) Debug() bool {
+	return c.Mode == "" || c.Mode == ModeDebug
 }
 
 // parse parses a config file and fills in defaults.
@@ -112,6 +124,12 @@ func parse(raw []byte) (*config, error) {
 	c := &config{}
 	if err := yaml.Unmarshal(raw, c); err != nil {
 		return nil, err
+	}
+	switch c.Mode {
+	case "", ModeDebug, ModeRelease, ModeTest:
+	default:
+		// gin.SetMode panicked on any other mode.
+		return nil, fmt.Errorf("unknown mode %q, want %s, %s or %s", c.Mode, ModeDebug, ModeRelease, ModeTest)
 	}
 	if c.Guacd.Address == "" {
 		c.Guacd.Address = DefaultGuacdAddress
