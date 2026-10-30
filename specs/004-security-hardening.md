@@ -13,7 +13,7 @@ affects:
   - client/occamy-web/src/components/
 effort: medium
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -35,10 +35,13 @@ spec defines what has to change before the answer can be yes.
   into the claims. JWTs are signed, not encrypted, so anyone holding a token
   can read the password.
 - **Tokens in logs.** The web client connects with `?token=...`
-  (`client/occamy-web/src/components/Desktop.vue`) and `gin.Default()` logs
-  the full request URI, so every connect writes the credentials to the log.
-  Observed in the revival's end-to-end runs.
-- **Open proxy.** With `client: true`, `/api/v1/login` signs a token for any
+  (`client/occamy-web/src/components/Desktop.vue`). `gin.Default()` logged
+  the full request URI, so every connect wrote the credentials to the log.
+  Since the v0 routes moved to `net/http`
+  ([api-and-server-stack](008-native-architecture/api-and-server-stack.md),
+  v0 routes), occamyd's log leaves out query strings; a reverse proxy in
+  front can still log the token.
+- **Open proxy.** With `client: true`, `/api/v0/login` signs a token for any
   `host:port` without authenticating the caller, which makes `occamyd` a
   WebSocket-to-TCP bridge into whatever network it can reach.
 - **Defaults.** `conf.yaml` ships `jwt_secret: occamy` and `mode: debug`.
@@ -55,10 +58,11 @@ spec defines what has to change before the answer can be yes.
   connection to guacd (`guacd.address`), which connects anywhere it is
   asked to. Nothing in the docs yet says it must stay off untrusted
   networks.
-- **Dependencies.** gin-jwt is on v2.10; v3 is current and changes the API.
-- Cross-origin WebSockets are rejected by gorilla's default origin check
-  (`websocket.Upgrader` without `CheckOrigin`), which is correct and should
-  stay.
+- **Dependencies.** The v0 routes run on golang-jwt v5, `net/http` and
+  coder/websocket; gin, gin-jwt and gorilla/websocket are gone.
+- Cross-origin WebSockets are rejected by coder/websocket's default origin
+  check (`websocket.Accept` without `OriginPatterns`), the same rule as
+  gorilla's default, which is correct and should stay.
 
 ## Architecture
 
@@ -71,7 +75,7 @@ Split *who may connect* from *what to connect to*:
 - **Encrypted tokens.** Keep self-contained tokens but use JWE so claims are
   confidential. Smaller change; tokens remain bearer credentials for the
   remote host.
-- **External issuer.** Disable `/api/v1/login` outside demos (already the
+- **External issuer.** Disable `/api/v0/login` outside demos (already the
   case with `client: false`) and document the token contract for an
   upstream identity provider.
 
@@ -90,12 +94,11 @@ Independent of the option chosen:
 - Optional TLS to guacd (`guacd.tls`, matching guacd's `-C`/`-K` flags),
   and a note in `SECURITY.md` and the README that guacd must never be
   reachable from untrusted networks.
-- Move to gin-jwt v3 together with the new token model, rather than porting
-  the current claims first. Do this only if the v0 routes outlive
-  `v1.0.0-beta.1`: the v1 API design
-  ([api-and-server-stack](008-native-architecture/api-and-server-stack.md))
-  recommends the standard library and golang-jwt v5 (or opaque tokens),
-  with these properties built in.
+- ~~Move to gin-jwt v3 together with the new token model.~~ Superseded:
+  the v0 routes outlive `v1.0.0-beta.1` and were ported to the standard
+  library and golang-jwt v5 instead, with their claims unchanged
+  ([api-and-server-stack](008-native-architecture/api-and-server-stack.md),
+  v0 routes).
 
 ## API Surface
 
@@ -116,4 +119,5 @@ Independent of the option chosen:
 - [ ] No remote credential is readable from a token or a log line.
 - [ ] The default configuration exposes neither pprof nor an open login.
 - [ ] Connections are limited to configured targets.
-- [ ] Migrated to gin-jwt v3.
+- [x] Off gin-jwt v2: superseded by golang-jwt v5 (api-and-server-stack,
+  v0 routes) instead of gin-jwt v3.

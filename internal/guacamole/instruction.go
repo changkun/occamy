@@ -19,6 +19,12 @@ import (
 // element, the same as GUAC_INSTRUCTION_MAX_LENGTH in libguac.
 const MaxInstructionLength = 8192
 
+// MaxInstructionSize is the size in bytes of the largest instruction that
+// ReadRaw accepts: InstructionMaxElements elements, each with a length
+// prefix of InstructionMaxDigits digits and a dot, MaxInstructionLength
+// code points of utf8.UTFMax bytes, and a terminator. It is about 4 MiB.
+const MaxInstructionSize = InstructionMaxElements * (InstructionMaxDigits + 1 + MaxInstructionLength*utf8.UTFMax + 1)
+
 // Errors while parsing instruction
 var (
 	ErrInstructionMissDot   = errors.New("instruction without dot")
