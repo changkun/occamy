@@ -59,7 +59,8 @@ From v0.5.0 on, each [release](https://github.com/changkun/occamy/releases)
 publishes:
 
 - a multi-arch image (linux/amd64 and linux/arm64) as
-  `ghcr.io/changkun/occamy:<version>`;
+  `ghcr.io/changkun/occamy:<version>`, with the licenses of the code
+  compiled into it in `/occamy/licenses/THIRD_PARTY_LICENSES`;
 - `occamyd` archives for Linux, macOS and Windows on amd64 and arm64
   (`occamyd-<version>-<os>-<arch>`), each with `conf.yaml` and the licenses
   of the code compiled into it (`THIRD_PARTY_LICENSES`);
