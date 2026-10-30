@@ -55,10 +55,21 @@ auth:
     client_id: occamy
     client_secret_file: /run/secrets/oidc-client-secret
     redirect_url: https://occamy.example.com/api/v1/auth/oidc/callback
+    # Where browsers go back to after signing in, with a one-time code in
+    # the fragment; a sign-in names one exactly. Default: the origin of
+    # redirect_url, with the path /.
+    return_urls:
+      - https://occamy.example.com/
     scopes: [openid, profile, email, groups]
     # The claims that name the user and the user's groups in allow lists.
+    # Pick claims that users cannot set themselves.
     subject_claim: email
     groups_claim: groups
+    # Admit only users that an allow list names, by name or by group.
+    require_known_users: false
+    # Let an OIDC user whose subject names a static user sign in as that
+    # user. Off, such a sign-in is refused.
+    link_static_users: false
 
 # guacd serves the vnc, rdp and telnet connections.
 guacd:

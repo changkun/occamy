@@ -127,14 +127,28 @@ type User struct {
 
 // OIDC configures sign-in through an OpenID Connect identity provider.
 type OIDC struct {
-	Issuer           string   `yaml:"issuer"`
-	ClientID         string   `yaml:"client_id"`
-	ClientSecretFile string   `yaml:"client_secret_file"`
-	ClientSecretEnv  string   `yaml:"client_secret_env"`
-	RedirectURL      string   `yaml:"redirect_url"`
-	Scopes           []string `yaml:"scopes"`
-	SubjectClaim     string   `yaml:"subject_claim"`
-	GroupsClaim      string   `yaml:"groups_claim"`
+	Issuer           string `yaml:"issuer"`
+	ClientID         string `yaml:"client_id"`
+	ClientSecretFile string `yaml:"client_secret_file"`
+	ClientSecretEnv  string `yaml:"client_secret_env"`
+	RedirectURL      string `yaml:"redirect_url"`
+	// ReturnURLs are the only places a browser is sent back to after a
+	// sign-in, with a one-time code or an error in the fragment. A
+	// sign-in names one of them exactly. ParseV1 fills in the origin of
+	// RedirectURL, with the path /, when the file lists none.
+	ReturnURLs   []string `yaml:"return_urls"`
+	Scopes       []string `yaml:"scopes"`
+	SubjectClaim string   `yaml:"subject_claim"`
+	GroupsClaim  string   `yaml:"groups_claim"`
+	// RequireKnownUsers admits only the users that File.Admitted names:
+	// in a connection's allow.users, in one of its allow.groups by the
+	// groups claim, or, with LinkStaticUsers, a static user.
+	RequireKnownUsers bool `yaml:"require_known_users"`
+	// LinkStaticUsers lets an OIDC user whose subject names a static user
+	// sign in under that name, with the groups of the groups claim. Off,
+	// a subject that is a static user's name by SameName is refused,
+	// since a name belongs to one source unless the file links them.
+	LinkStaticUsers bool `yaml:"link_static_users"`
 }
 
 // Connection is an entry of the connection registry.

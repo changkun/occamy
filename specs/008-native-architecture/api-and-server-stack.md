@@ -56,7 +56,8 @@ can only patch on v0.
 |-----------------|---------|
 | `POST /api/v1/auth/token` | Exchange caller credentials (per auth provider) for a short-lived access token |
 | `GET /api/v1/auth/oidc/login` | Start OIDC sign-in: redirect to the identity provider (authorization code with PKCE) |
-| `GET /api/v1/auth/oidc/callback` | Finish OIDC sign-in and issue an access token |
+| `GET /api/v1/auth/oidc/callback` | Finish OIDC sign-in: send the browser back to a configured return URL with a one-time code in the fragment |
+| `POST /api/v1/auth/oidc/token` | Exchange that one-time code, with the client's PKCE verifier, for a short-lived access token |
 | `GET /api/v1/connections` | Connections the caller may open (from the registry) |
 | `GET /api/v1/connections/{id}/stream` | WebSocket upgrade that opens a session on the connection and streams it, in one round trip ([protocol-v1](protocol-v1.md), Handshake) |
 | `POST /api/v1/sessions` | Open a session on a connection, or on an ad-hoc target when allowed, returning the session ID, the caller's role and a stream token that joins it as the owner |
@@ -173,7 +174,7 @@ single-node beta.
 | Config v1 | `internal/config`: a file with `version: 1` decoded with `KnownFields`, and a file without it read as v0 as today. Sections: `listen`, `tls` (cert, key), `debug.address`, `origins`, `auth` (signing key file, access token lifetime, `trusted_issuers`, static `users` with bcrypt hashes and groups, `oidc`), `guacd` (address and per-protocol parameters), `connections` (ID, display name, protocol, target, credentials, allowed users and groups), `allow_adhoc_targets` with its allowlist, and `legacy_v0`. Credentials are references (`password_file`, `password_env`, `private_key_file`) or `prompt`, never inline secrets, so a configuration file can be committed. Validation reports every problem with its key path: unique connection IDs, known protocols, targets that parse, references that resolve, and, when static users are the only identities (no OIDC, no trusted issuers), allowed users and groups that exist | — |
 | Tokens | `internal/auth`: Ed25519 signing keys loaded from a file (generated on first start when absent, with a warning), access tokens (subject, groups, 15 minutes by default) and stream and share tokens (session ID, role), issued and verified with golang-jwt v5 restricted to `EdDSA`; tokens from `trusted_issuers` verified against their listed keys. Tests reject `none`, an HMAC token signed with the public key, an unknown issuer, a wrong audience, expiry and tampering | — |
 | HTTP server | `server/` on `net/http.ServeMux`: plain `func(http.Handler) http.Handler` middleware for recovery, request logging that never logs tokens or credentials, and authentication; JSON helpers and one JSON error shape; `/healthz`; `POST /api/v1/auth/token` for static users (bcrypt, constant-time on unknown users); TLS when configured; graceful shutdown; the debug listener with expvar and pprof, off unless `debug.address` is set. `occamy.go` starts it from a v1 configuration | Config v1, Tokens |
-| OIDC | `GET /api/v1/auth/oidc/login` and `/callback`: authorization code with PKCE through `golang.org/x/oauth2`, state and verifier in a short-lived signed cookie, the ID token checked by `coreos/go-oidc` v3, and subject and group claims mapped to registry users and groups as configured; tests against an in-process identity provider | HTTP server |
+| OIDC | `GET /api/v1/auth/oidc/login` and `/callback`: authorization code with PKCE through `golang.org/x/oauth2`, state, nonce and verifier in a short-lived sealed cookie, the ID token checked by `coreos/go-oidc` v3, and subject and group claims mapped to registry users and groups as configured; the browser sent back to a configured return URL with a one-time code that `POST /api/v1/auth/oidc/token` exchanges for an access token; tests against an in-process identity provider | HTTP server |
 | Sessions | `GET /api/v1/connections` filtered by the caller's users and groups; `POST /api/v1/sessions`, `GET` and `DELETE /api/v1/sessions/{id}` and `POST /api/v1/sessions/{id}/shares` on the session registry; a backend factory keyed by protocol that the native SSH and VNC backends and the guacd bridge register into; ad-hoc targets only when enabled and allowed; tests on the fake backend | HTTP server; session-core Registry |
 | Streams | `GET /api/v1/connections/{id}/stream` and `/api/v1/sessions/{id}/stream` on coder/websocket: `Origin` checked against `origins`, the token taken from the `occamy.v1.token.` subprotocol or `Authorization`, `occamy.v1` answered alone, `hello` read from the query, and the socket handed to the viewer writer, `stream.Serve`, with `stream.SetLowWater` applied; a closed session ends its streams whatever tokens remain valid, and so does a shutdown. Tests cover one round trip to `welcome`, a bad origin, a missing or wrong token, and a token in the URL ignored | Sessions; session-core Viewer writer; protocol v1 Handshake |
 | v0 routes | `/api/v0/login` and `/api/v0/connect` behind `legacy_v0`, served on the new mux through `net/http`, golang-jwt v5 (HS256 with the v0 secret, so v0 tokens keep their shape) and coder/websocket, so that gin, gin-jwt and gorilla/websocket leave `go.mod` at beta.1; a v0 configuration file implies `legacy_v0`; the Vue client moves to the new paths; the existing v0 tests keep passing against the new paths | HTTP server |
@@ -506,7 +507,8 @@ place for fixes that ship on v0 before beta.
     did, also on a v0 file's mux.
   - **Request log:** v0's `logRequests`, unchanged: quoted method and
     path, status, duration, peer address. A sign-in logs `user "alice"
-    signed in` or `sign-in failed from <address>`, without the name,
+    signed in` (since OIDC, with `, idp local`) or `sign-in failed from
+    <address>`, without the name,
     since people type passwords into it. The v0 login logs why a body
     did not parse (too large, or the decoder's error type) without the
     decoder's message, which quotes the byte it stopped at in a JSON
@@ -613,16 +615,18 @@ place for fixes that ship on v0 before beta.
   - OIDC: register its routes on the same mux; the cookie carrying state
     and verifier needs `Secure` when TLS is served here or by a proxy,
     which the server cannot tell; issue tokens through the same signer
-    (`staticUsers.signer` or a shared one).
+    (`staticUsers.signer` or a shared one). All done; `redirect_url`'s
+    scheme tells what the browser sees (see OIDC's notes).
   - Sessions: wrap its routes in `authenticate(s.verifier)` and read
     `claimsFrom(r.Context())`; use `decodeJSON`, `respond` and
     `writeError`, adding codes such as `forbidden` and `conflict` (done;
     it added `forbidden` and needed no `conflict`).
-  - Identity: decide whether a trusted issuer's `sub` names the same
-    user as a static user of that name. `claimsFrom` carries the issuer
-    so the two can be told apart; nothing decides it yet (decided by the
-    Sessions task, and revised in its review: it does not, unless the
-    issuer has `link_static_users`).
+  - Identity: decided with OIDC: a name belongs to one source unless
+    the configuration links them (see OIDC's notes). Trusted issuers
+    get the same rule with Sessions, in its review: a trusted issuer's
+    `sub` that names a static user is refused unless the issuer has
+    `link_static_users`. `claimsFrom` carries `iss`, and occamyd's
+    access tokens carry `idp`, so the sources can be told apart.
   - Sign-in has no rate limit, per address or per user; each attempt
     costs one bcrypt comparison at the users' highest cost, so a flood
     of attempts is also a CPU cost.
@@ -985,3 +989,365 @@ place for fixes that ship on v0 before beta.
     `welcome` for a refusal; reconnect as the owner with an access token
     (the stream token lasts 5 minutes); read `close` 1000 with "the
     owner connected again" as being replaced, not as an error.
+
+## Implementation notes: OIDC
+
+- **What was done:**
+  - `server/oidc.go` and `server/oidc_cookie.go` serve `GET
+    /api/v1/auth/oidc/login`, `GET /api/v1/auth/oidc/callback` and `POST
+    /api/v1/auth/oidc/token` when `auth.oidc` is set, on
+    `golang.org/x/oauth2` v0.37.0 and `github.com/coreos/go-oidc/v3`
+    v3.21.0, which brings `github.com/go-jose/go-jose/v4` (Apache-2.0
+    and BSD-3-Clause; the go-licenses check passes). Static and OIDC
+    sign-in share one signer. `server.go` changed in five places only:
+    the `oidc` field, the signer taken out of the `newStaticUsers` call
+    so that both share it, the construction after TLS, `register` in
+    `routes`, and a warm-up in `Run`.
+  - `internal/config` gained `auth.oidc.return_urls`,
+    `auth.oidc.require_known_users` and `auth.oidc.link_static_users`,
+    and `File.Admitted`, the users and groups that
+    `require_known_users` admits, and `File.KnownGroups`, the groups the
+    file names. `internal/auth` gained the `idp` claim on access tokens
+    and `Signer.AccessFrom`; `Signer.Access` keeps its signature and
+    names `local`.
+  - Sign-in: the client sends the browser to `login` with `return_url`
+    and `code_challenge`, the S256 challenge of a verifier it keeps.
+    occamyd seals state, nonce, its own PKCE verifier, the return URL
+    and the client's challenge into a cookie and redirects to the
+    provider. The callback matches the state to the cookie, exchanges
+    the code, verifies the ID token, maps its claims, and sends the
+    browser to `return_url#code=…`. The client posts
+    `{"code":"…","code_verifier":"…"}` to `POST /api/v1/auth/oidc/token`
+    and gets `/api/v1/auth/token`'s response.
+- **Decisions:**
+  - **Hand-off: a one-time code in the fragment of a configured return
+    URL, exchanged by POST.** The access token in the fragment never
+    reaches a server log or Referer, but it sits in history and is
+    readable by every script on the page for its 15 minutes. An HttpOnly
+    cookie would need the API to read tokens from cookies, which the
+    HTTP server ruled out. A page that posts the token to
+    `window.opener` puts it in an HTML body and makes every client run a
+    popup. The callback's own response is a top-level navigation that no
+    script reads. With the code, the access token appears only in the
+    body of the exchange, with `Cache-Control: no-store`. The code
+    reaches no log or Referer either, since browsers send no fragment;
+    it does sit in history, but it lives a minute, is spent on its first
+    try, right or wrong, and redeems only with the verifier of the
+    challenge the client gave `login`. That binding stops a planted
+    code: an attacker who signs in at the provider in their own browser
+    and sends the victim to `return_url#code=…` holds the only verifier.
+    A cookie could bind the code to the browser, but only on one site
+    and not for native clients; the challenge works across origins and
+    in the Swift client. Codes wait in memory, by their SHA-256, at most
+    4096 at a time and three for one user, whose oldest a fourth drops,
+    so that one account at the provider, signing in over and over,
+    cannot fill the table for everyone; expired ones are swept when a
+    new one comes. A cap per address was left out: behind a reverse
+    proxy every sign-in has the proxy's address.
+  - **Return URLs** match exactly as written, so no normalization is
+    there for an attacker to play with. With one configured, `login`
+    may leave `return_url` out. The default is `redirect_url`'s origin
+    with the path `/`, the callback's own origin, so no default sends a
+    browser anywhere the operator does not serve. Entries are https
+    except on localhost, with no user name and no fragment.
+  - **Errors:** `login` refuses an unlisted return URL, a missing,
+    repeated or malformed challenge, or a `code_challenge_method` other
+    than `S256`, with API v1's 400 before it sets a cookie. The
+    callback answers `invalid_state`, 400 as JSON, until the state
+    matches a cookie, since until then it has no return URL it can
+    trust. After that, every outcome goes back to the return URL:
+    `#code=…`, or `#error=access_denied` (the provider's
+    `access_denied`, or occamyd refusing the user), `sign_in_failed`
+    (any other provider error, or an answer that does not verify) or
+    `unavailable` (discovery failed, or too many codes wait). A provider
+    that cannot be discovered at `login` also sends the browser back
+    with `unavailable`. Neither the provider's `error_description` nor
+    the token endpoint's body reaches the client or the log, which gets
+    the provider's error code and HTTP status code. Text from the
+    provider or the client that does reach the log, such as the bodies
+    go-oidc puts in its discovery and key set errors, is quoted and
+    truncated to 256 bytes, so it can neither forge a log line nor flood
+    the log. A bad code or verifier at
+    the exchange gets 401 `unauthorized`, as a wrong password does. The
+    four codes join API v1's and are defined in `server/oidc.go`, to
+    keep `api.go` out of merges.
+  - **Cookie:** `occamy_oidc`, or `__Secure-occamy_oidc` when it is
+    Secure, so that the browser takes it only from https, sealed with
+    AES-256-GCM
+    (`cipher.NewGCMWithRandomNonce`) under a key made for the process,
+    with its name as additional data. Sealing costs no more than
+    signing, and the browser cannot read occamyd's PKCE verifier or the
+    nonce. It holds state, nonce, verifier, return URL, the client's
+    challenge and an expiry 10 minutes out, which the server checks,
+    since `Max-Age` is the browser's to honour. HttpOnly; SameSite=Lax,
+    which the provider's redirect back, a cross-site top-level GET,
+    still carries where Strict would not; the path of `redirect_url`, so
+    it goes only to the callback, behind a proxy prefix too; and Secure
+    when `redirect_url` is https or occamyd serves TLS. That answers the
+    HTTP server's follow-up without a key: `redirect_url` is where the
+    browser meets the callback, so its scheme is what the browser sees,
+    whoever terminates TLS. The callback clears the cookie when the
+    state matches it, or when the browser holds no sign-in in progress
+    (expired, or sealed before a restart); a callback with another
+    state, as a link from another site makes, leaves a sign-in under way
+    alone, which weakens nothing, since only the state completes it. It
+    tries every cookie of the name, so that one set for a parent domain
+    cannot shadow the sign-in's own. A restart between `login` and the
+    callback therefore fails with `invalid_state`, and a second sign-in
+    in one browser replaces the first. That includes a top-level
+    navigation to `login` from another site, which ends a sign-in under
+    way: a nuisance docs/configuration.md records, not a way in, since
+    the second sign-in's code needs a verifier the client does not hold
+    (`TestOIDCLoginReplacesFlow`).
+  - **ID token:** go-oidc checks the issuer (the configured one exactly,
+    which discovery must name too), the audience (`client_id`), the
+    expiry (a missing `exp` is expired) and the signature, with
+    occamyd's own algorithm list: RS, ES and PS at 256, 384 and 512, and
+    EdDSA, whatever the provider advertises, never `none` or an HMAC.
+    occamyd then compares the nonce in constant time, which go-oidc
+    leaves to its caller, and checks `azp` as OpenID Connect Core 3.1.3.7
+    says: with several audiences it must be there, and when there it
+    must be `client_id`. An `iss` parameter on the callback (RFC 9207)
+    must be the issuer, exactly and once, and must be there when
+    discovery says `authorization_response_iss_parameter_supported`,
+    which is read as a strict JSON bool. The check runs before the
+    provider's `error` is believed, since an error answer carries `iss`
+    too (RFC 9207, 2.4). `at_hash` is not checked, since occamyd never
+    uses the provider's access token.
+  - **Claims:** `subject_claim` names the user: a string of 1 to 255
+    bytes of UTF-8 of graphic characters (`unicode.IsGraphic`) with
+    U+0020 the only space, or the sign-in is `access_denied`. That
+    refuses control and format characters (zero-width spaces and
+    joiners, bidirectional overrides, the soft hyphen), the other
+    default-ignorable code points, which are graphic but render as
+    nothing (`unicode.Other_Default_Ignorable_Code_Point`, such as the
+    combining grapheme joiner and the Hangul fillers, and
+    `unicode.Variation_Selector`), U+2800 (the blank Braille pattern),
+    the line and paragraph separators and the no-break and other spaces,
+    which let a name look like another. U+0020 is allowed: an allow list
+    cannot name such a user, but a group can admit one. With
+    `subject_claim: email`,
+    `email_verified` must be `true`, since an address the provider has
+    not verified may be anyone's; for a provider that does not send it,
+    such as Entra ID, pick another claim. `require_known_users` admits
+    a user whom a connection's `allow.users` names, exactly, or who is in
+    one of its `allow.groups` by `groups_claim`; static users, and names
+    in `allow.users` that are a static user's by `config.SameName`, count
+    only with `link_static_users`, since the callback refuses those names
+    without it. `ParseV1` refuses it when that admits no one.
+    `groups_claim` takes a list of strings or one string; a missing or
+    null claim is no groups, and another type fails the sign-in, since
+    it is a misconfiguration. Only the groups the file names, as static
+    users' groups or in `allow.groups`, are kept, sorted and without
+    duplicates. That keeps tokens small for users in hundreds of
+    provider groups and changes no decision, since only named groups
+    are checked. Claim names are top-level and literal, so namespaced
+    claims (`https://example.com/groups`) work and nested ones
+    (Keycloak's `realm_access.roles`) do not.
+  - **Identity: a name belongs to one source unless the
+    configuration links them.** occamyd's tokens say `iss: occamy`
+    after either sign-in, and allow lists name users in one namespace,
+    so an OIDC user named `alice` would be static user `alice`. By
+    default the callback refuses an OIDC subject that names a static
+    user, with `access_denied`, and logs it. It compares with
+    `config.SameName`, equal under Unicode case folding once both are in
+    NFC, so `Alice`, or `alice` with a decomposed character, cannot pass
+    for static `alice` to a person reading a log or a session list;
+    `golang.org/x/text`, already a dependency, does the NFC. Access
+    itself, by allow lists and `require_known_users`, compares names
+    exactly, so a looser rule there could only widen it.
+    `auth.oidc.link_static_users: true` lets the name through, for a
+    provider that holds the same people: the OIDC user takes the static
+    user's place in allow lists, with the groups of `groups_claim`, not
+    the static user's (`TestOIDCLinkedGroups`); docs/configuration.md
+    warns that `subject_claim` must then be a claim users cannot choose
+    (`sub`, or a verified email). Access tokens record the source in
+    `idp`: `local` from `POST /api/v1/auth/token`, `oidc` from the OIDC
+    exchange, and each sign-in's log line names it (`user "carol"
+    signed in, idp oidc`). `idp` is optional in a token, so tokens
+    signed before it, and trusted issuers' access tokens, still verify;
+    a session token may not carry one. Trusted issuers get the same rule
+    with Sessions (#111).
+  - **Discovery: lazy.** `newServer` does not contact the provider, so a
+    provider that is down cannot keep occamyd from starting with static
+    users. `Run` starts one discovery in the background, so the log
+    tells at start whether the provider answers; otherwise the first
+    sign-in discovers it. One fetch runs at a time; a failure is
+    remembered for 10 s (`oidcRetry`), so sign-ins while the provider is
+    down do not each wait for it, and a success is kept until a restart.
+    Every request to the provider (discovery, key set, exchange) goes
+    through one `http.Client` with a 10 s timeout (`oidcTimeout`),
+    responses limited to 1 MiB, and no redirects followed: a 3xx is the
+    answer, which fails discovery, the key set or the exchange, so the
+    code, the verifier and the client secret reach the discovered token
+    endpoint only. go-oidc's discovery and key set fetches take that
+    client from the context (`oidc.ClientContext`), and so does oauth2's
+    exchange. The discovered `authorization_endpoint`, `token_endpoint`
+    and `jwks_uri` must be https, or http on the loopback interface when
+    the issuer is too, so a provider elsewhere cannot point occamyd at
+    a port of its own host in the clear. With redirects refused, that
+    holds for every hop. Their hosts are not restricted: the discovery
+    document comes from the configured issuer, over https, and is
+    trusted to name them, as it is trusted to name the keys.
+  - **Client authentication** follows discovery's
+    `token_endpoint_auth_methods_supported`: a public client sends
+    `client_id` in the body; a confidential one sends a Basic header,
+    the default when the list is absent, unless the provider lists only
+    `client_secret_post`. oauth2's auto-detection would try both and
+    send the code twice. The secret is read at each exchange, so a
+    rotated secret takes effect at once.
+- **Deviations:**
+  - The row's "signed cookie" is sealed: encrypted as well as
+    authenticated.
+  - The row named no hand-off to the browser. `POST
+    /api/v1/auth/oidc/token` is new; the Proposed API table and the row
+    now list it.
+  - Three keys the row did not name, `return_urls`,
+    `require_known_users` and `link_static_users`, and the `idp` claim.
+- **Surprises:**
+  - go-oidc's `Verify` checks no nonce and no `azp` and allows no clock
+    skew on `exp`; its key set fetches with a context that is never
+    cancelled, and its discovery reads the whole body, so the client's
+    timeout and the body limit are their only bounds.
+  - go-jose does not take an RSA public key as an HMAC secret, so the
+    classic algorithm confusion failed even with HS256 allowed. The test
+    needs a key set that also lists a symmetric key to show that the
+    algorithm list refuses HMAC by itself.
+  - go-oidc refuses an ID token whose `sub` is not a string while it
+    parses the claims, so that is `sign_in_failed`, not `access_denied`.
+  - gosec flags the conditional `Secure` (G124), and `Seal` with a nil
+    nonce (G407), which `NewGCMWithRandomNonce` fills in; both carry a
+    `#nosec`. Its log injection check (G706) flags the two log lines
+    that carry the provider's text even once `quote` has quoted it,
+    since it does not see through the helper; they carry a `#nosec`
+    that says so.
+  - go-oidc puts the provider's response bodies in its discovery and
+    key set errors (`503 Service Unavailable: <body>`), line breaks and
+    all, so logging its errors with `%v` let a provider forge log lines
+    until they were quoted.
+  - The review found the first version followed the token endpoint's
+    307 and 308, sending the code, the verifier and, with
+    `client_secret_post`, the client secret to another origin, and that
+    one provider account, looping through silent sign-ins, filled the
+    code table so that everyone else got `unavailable`. Both are fixed
+    above, with tests.
+  - The second review found that `File.Admitted` counted a static
+    user's name in `allow.users` without `link_static_users`, so a file
+    that admitted no one through OIDC passed validation; that the
+    license script piped `go list` into `sort`, so a failing `go list`
+    wrote a file with the standard library's license only (it now
+    writes each `go list` to a file and checks it, since the image's
+    build stage runs dash, which has no `pipefail`, and it now also
+    copies `PATENTS` files: Go's, x/crypto's, x/image's and x/text's);
+    that `unicode.IsGraphic` passes code points that render as nothing,
+    such as U+034F and the Hangul fillers, so `alice` followed by one
+    signed in beside static `alice` and logged as her; that the static
+    name check was exact, so `Alice` signed in beside her; that the
+    `iss` check ran after the `error` branch; and that the docs said a
+    linked user gets the static user's access, where the groups come
+    from `groups_claim`. All are fixed above, with tests.
+- **Mutation checks:** each of these was made and its test failed: the
+  state not compared; the cookie's expiry not checked; the cookie not
+  cleared; the cookie not HttpOnly, SameSite=None, on the path `/`, or
+  Secure only under TLS; the nonce not compared; the signature not
+  checked (`none` and a foreign key got through); HS256 allowed (caught
+  only by the key set with a symmetric key); the audience, issuer,
+  expiry or `azp` not checked; the `iss` parameter not checked; no
+  verifier in the exchange; no challenge to the provider; the return URL
+  not checked; the client's challenge not required; a code reusable,
+  never expiring, or redeemed without its verifier; no limit on waiting
+  codes; unknown users admitted; the subject not validated;
+  `email_verified` not required; unmapped groups kept; a failed
+  discovery not remembered; provider bodies unbounded; discovered
+  endpoints not checked; no timeout to the provider (the hanging
+  provider's test then hangs); client authentication auto-detected; no
+  warm-up in `Run` (`TestRunOIDCProviderDown` runs occamyd as a child
+  with a provider nothing serves, and signs a static user in). After
+  review, also: redirects followed by the provider's client (caught for
+  discovery, the key set and the token endpoint); the provider's text
+  logged unquoted or untruncated (forged log lines from discovery, the
+  key set and the callback's error); no cap per user on waiting codes,
+  or the newest dropped instead of the oldest; `match` reading only the
+  first cookie of the name (`TestOIDCPlantedCookie`); `redeem` deleting
+  the code only after checking the verifier, and `redeem` looking the
+  code up and deleting it under two locks taken back to back
+  (`TestOIDCCodeRace`, 32 exchanges racing for one code, 500 times:
+  the second mutation leaves a window of nanoseconds, which one round
+  of 32 seldom hits, and 500 rounds hit in 19 of 20 runs, and in every
+  run under `-race`); format characters and other spaces in a subject;
+  a static user's name admitted, or `link_static_users` ignored;
+  static users admitted by `require_known_users` without it, or groups
+  admitting without `groups_claim`; admission by group not checked;
+  `idp` missing from either token, or allowed on a session token; http
+  endpoints allowed for an https issuer; the `iss` parameter not
+  required when promised; the cookie without `__Secure-`, or sealed
+  without its name; and the cookie cleared by a callback whose state
+  does not match, or an expired one kept. After the second review,
+  also: discovery checking endpoints with `config.SecureURLProblem`
+  instead of `endpointProblem` (caught with an https issuer whose token
+  endpoint is http on loopback); the `iss` value compared loosely, a
+  repeated `iss` taken, or the check moved back after the `error`
+  branch; `quote` not quoting short text, and the token endpoint's
+  error code or `azp` logged raw; default-ignorable code points or
+  U+2800 in a subject; the static name check exact, without NFC or
+  without case folding; `File.Admitted` counting static users' names
+  in `allow.users` without `link_static_users`; and `match` reading
+  cookies of any name, which survived until a test put a sign-in sealed
+  for `__Secure-occamy_oidc` in a cookie named `occamy_oidc`.
+- **Follow-ups:**
+  - Web client ([009](../009-react-web-client.md)): make a verifier of
+    43 to 128 characters, keep it in `sessionStorage`, and navigate to
+    `/api/v1/auth/oidc/login?return_url=…&code_challenge=…`; on the
+    return URL, read `code` or `error` from `location.hash`, remove the
+    fragment with `history.replaceState`, and post the code and verifier
+    to `/api/v1/auth/oidc/token`. A code found with no verifier held is
+    one the client did not start: spend it with a throwaway verifier, or
+    ignore it, and never sign in with it. Until CORS is served, the
+    client must be on occamyd's origin, since the exchange is a JSON
+    POST, which needs a preflight from another origin.
+  - Native clients ([010](../010-native-swift-client.md)): return URLs
+    with a custom scheme, or on the loopback interface with any port
+    (RFC 8252), are not accepted yet.
+  - Several occamyd instances: the cookie key and the codes are per
+    process, so `login`, the callback and the exchange must reach one
+    instance (sticky sessions) until they share state.
+  - The provider's refresh token is neither requested nor kept: a client
+    signs in again when its access token expires. Signing out at the
+    provider (RP-initiated logout) is not served.
+  - Nested claims, and a map from provider groups to registry names, if
+    a provider needs them.
+  - OIDC sign-in has no rate limit either; a sign-in costs the provider
+    a round trip, not occamyd a bcrypt comparison. With three codes per
+    user, filling the 4096 waiting codes takes about 1400 accounts at
+    the provider, each signing in within a minute; a rate limit per
+    address (behind a trusted proxy's `X-Forwarded-For`) or per user
+    would bound it further.
+  - A loop of silent sign-ins (`prompt=none` at a provider that keeps
+    a session) costs the provider an authorization and a token request
+    each; a provider may throttle occamyd's `client_id` for it, which
+    fails everyone's OIDC sign-ins with `sign_in_failed` until the
+    throttle lifts. A rate limit as above is the remedy.
+  - Starting a sign-in ends the one under way in that browser, also
+    when another site navigates to `login`. One cookie per sign-in,
+    named by its state, would let them run side by side, at the cost of
+    a bound on how many a browser may hold.
+  - Names that only look alike, such as `alice` with a Cyrillic `а` or
+    a fullwidth `ａ`, are neither refused nor folded: confusable
+    detection (Unicode TR 39) is not done. The docs ask for a
+    `subject_claim` users cannot choose, which leaves the names to the
+    provider.
+  - Residual risks of binding the code to the client's challenge, not
+    to the browser. First, `login` is a GET anyone can link to: an
+    attacker who sends the victim's browser there with a challenge whose
+    verifier the attacker holds gets a code for the victim's account
+    (silently, where the provider keeps a session) into the victim's
+    fragment, and redeems it if the code leaks (history, a script on the
+    return page). A client that spends every code it did not start, by
+    posting it with a throwaway verifier, closes that window, since a
+    code is spent on its first try; docs/configuration.md asks clients
+    to. Second, an attacker who learns the victim's challenge (it is in
+    the `login` URL, so in a proxy's access log or the history) can bind
+    the attacker's own sign-in to it and plant that code at the victim's
+    return URL: a login CSRF, as the attacker. Both need a leak beyond
+    the flow. Binding the code to the browser as well, with a cookie,
+    would close both for clients on occamyd's origin.

@@ -32,6 +32,15 @@ const (
 	KindSession Kind = "session"
 )
 
+// Identity providers that occamyd's access tokens name in idp: where the
+// user signed in. A name belongs to one source unless the configuration
+// links them, so the idp tells a static user from an OIDC user of the
+// same name.
+const (
+	IdPLocal = "local" // a static user, with a password
+	IdPOIDC  = "oidc"  // through auth.oidc's provider
+)
+
 // Roles a session token can carry, as the session core names them.
 const (
 	RoleOwner    = "owner"
@@ -68,14 +77,15 @@ var (
 	ErrClaims = errors.New("auth: invalid claims")
 )
 
-// Claims are what a token says. Access tokens carry Groups; session tokens
-// carry Session and Role, and Subject if they were issued to a user.
-// A session token of occamyd's issued to a trusted issuer's user names
-// that issuer in UserIssuer, since a subject means a user only together
-// with its issuer.
+// Claims are what a token says. Access tokens carry Groups, and IdP when
+// occamyd issued them; session tokens carry Session and Role, and Subject
+// if they were issued to a user. A session token of occamyd's issued to a
+// trusted issuer's user names that issuer in UserIssuer, since a subject
+// means a user only together with its issuer.
 type Claims struct {
 	Kind       Kind     `json:"kind"`
 	Groups     []string `json:"groups,omitempty"`
+	IdP        string   `json:"idp,omitempty"`
 	Session    string   `json:"sid,omitempty"`
 	Role       string   `json:"role,omitempty"`
 	UserIssuer string   `json:"uiss,omitempty"`
@@ -90,7 +100,7 @@ func (c *Claims) check() error {
 			return ErrClaims
 		}
 	case KindSession:
-		if c.Session == "" || c.Groups != nil || c.UserIssuer != "" && c.Subject == "" {
+		if c.Session == "" || c.Groups != nil || c.IdP != "" || c.UserIssuer != "" && c.Subject == "" {
 			return ErrClaims
 		}
 		switch c.Role {
@@ -118,12 +128,19 @@ func NewSigner(key ed25519.PrivateKey, issuer, audience string) *Signer {
 	return &Signer{key: key, issuer: issuer, audience: audience, now: time.Now}
 }
 
-// Access issues an access token for a user and the groups the user belongs
-// to, valid for ttl.
+// Access issues an access token for a static user and the groups the user
+// belongs to, valid for ttl. It names IdPLocal.
 func (s *Signer) Access(subject string, groups []string, ttl time.Duration) (string, error) {
+	return s.AccessFrom(IdPLocal, subject, groups, ttl)
+}
+
+// AccessFrom issues an access token for a user who signed in at idp, and
+// the groups the user belongs to, valid for ttl.
+func (s *Signer) AccessFrom(idp, subject string, groups []string, ttl time.Duration) (string, error) {
 	return s.sign(&Claims{
 		Kind:             KindAccess,
 		Groups:           groups,
+		IdP:              idp,
 		RegisteredClaims: jwt.RegisteredClaims{Subject: subject},
 	}, ttl)
 }

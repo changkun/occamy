@@ -250,7 +250,7 @@ func checkToken(t *testing.T, s *server, r reply, user string, groups []string, 
 	if err != nil {
 		t.Fatalf("the access token does not verify: %v", err)
 	}
-	if c.Subject != user || !slices.Equal(c.Groups, groups) || c.Issuer != auth.Issuer ||
+	if c.Subject != user || !slices.Equal(c.Groups, groups) || c.Issuer != auth.Issuer || c.IdP != auth.IdPLocal ||
 		c.ExpiresAt.Sub(c.IssuedAt.Time) != ttl {
 		t.Errorf("claims %+v, want %s in %v for %v", c, user, groups, ttl)
 	}

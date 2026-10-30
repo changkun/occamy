@@ -55,6 +55,7 @@ type server struct {
 	signer   *auth.Signer
 	ids      identities // the principals that tokens speak for
 	signIn   *staticUsers
+	oidc     *oidcSignIn // nil unless auth.oidc
 	tls      *tls.Config // nil serves plain HTTP
 	v0       *proxy      // nil unless legacy_v0
 
@@ -82,6 +83,9 @@ func Run(f *config.File) error {
 	s, err := newServer(f)
 	if err != nil {
 		return err
+	}
+	if s.oidc != nil {
+		go s.oidc.warm()
 	}
 	ln, dln, err := listen(f)
 	if err != nil {
@@ -230,6 +234,11 @@ func newServer(f *config.File) (*server, error) {
 		}
 		s.tls = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}
 	}
+	if f.Auth.OIDC != nil {
+		if s.oidc, err = newOIDC(f, signer, s.tls != nil); err != nil {
+			return nil, err
+		}
+	}
 	if f.LegacyV0 {
 		if s.v0, err = newLegacyV0(f.Guacd); err != nil {
 			return nil, err
@@ -267,6 +276,9 @@ func (s *server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", healthz)
 	mux.HandleFunc("POST /api/v1/auth/token", s.signIn.token)
+	if s.oidc != nil {
+		s.oidc.register(mux)
+	}
 	s.registerSessions(mux)
 	s.registerStreams(mux)
 	if s.v0 != nil {

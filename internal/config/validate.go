@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/text/unicode/norm"
 
 	"changkun.de/x/occamy/internal/auth"
 	"changkun.de/x/occamy/internal/backend/ssh"
@@ -227,6 +228,13 @@ func (a *Auth) validate(c *checker) {
 		c.file("auth.oidc.client_secret_file", o.ClientSecretFile)
 		c.env("auth.oidc.client_secret_env", o.ClientSecretEnv)
 		c.providerURL("auth.oidc.redirect_url", o.RedirectURL)
+		if len(o.ReturnURLs) == 0 && o.RedirectURL != "" && SecureURLProblem(o.RedirectURL) == "" {
+			u, _ := url.Parse(o.RedirectURL)
+			o.ReturnURLs = []string{u.Scheme + "://" + u.Host + "/"}
+		}
+		for i, r := range o.ReturnURLs {
+			c.returnURL(fmt.Sprintf("auth.oidc.return_urls[%d]", i), r)
+		}
 		if len(o.Scopes) == 0 {
 			o.Scopes = slices.Clone(DefaultOIDCScopes)
 		} else if !slices.Contains(o.Scopes, "openid") {
@@ -337,6 +345,71 @@ func (f *File) validateConnections(c *checker) {
 		}
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
 	}
+	if o := f.Auth.OIDC; o != nil && o.RequireKnownUsers {
+		if users, groups := f.Admitted(); len(users) == 0 && (len(groups) == 0 || o.GroupsClaim == "") {
+			c.add("auth.oidc.require_known_users", "the file admits no one: name users in a connection's allow.users, or groups in its allow.groups with auth.oidc.groups_claim set (static users count only with auth.oidc.link_static_users)")
+		}
+	}
+}
+
+// Admitted returns the users and groups that auth.oidc.require_known_users
+// admits: those in the connections' allow lists, and, with
+// auth.oidc.link_static_users, the static users. Without it, a name in an
+// allow list that TakesStaticName is left out, since OIDC refuses it. A
+// user is admitted by name, compared exactly, or by a group that the
+// provider's groups claim names.
+func (f *File) Admitted() (users, groups map[string]bool) {
+	users, groups = map[string]bool{}, map[string]bool{}
+	link := f.Auth.OIDC != nil && f.Auth.OIDC.LinkStaticUsers
+	if link {
+		for _, u := range f.Auth.Users {
+			users[u.Name] = true
+		}
+	}
+	for _, cn := range f.Connections {
+		for _, u := range cn.Allow.Users {
+			if link || !f.TakesStaticName(u) {
+				users[u] = true
+			}
+		}
+		for _, g := range cn.Allow.Groups {
+			groups[g] = true
+		}
+	}
+	return users, groups
+}
+
+// TakesStaticName reports whether name is a static user's by SameName.
+// OIDC sign-in refuses such a name unless auth.oidc.link_static_users
+// links the two.
+func (f *File) TakesStaticName(name string) bool {
+	return slices.ContainsFunc(f.Auth.Users, func(u User) bool { return SameName(name, u.Name) })
+}
+
+// SameName reports whether a and b would pass for the same user's name:
+// equal under Unicode case folding once both are in NFC, so that Alice,
+// or an alice with a decomposed accent, is not a user apart from alice.
+// It keeps OIDC users' names apart from the static users'; access, by
+// allow lists, compares names exactly.
+func SameName(a, b string) bool {
+	return strings.EqualFold(norm.NFC.String(a), norm.NFC.String(b))
+}
+
+// KnownGroups returns the groups that f names: its static users' groups
+// and the groups in its connections' allow lists.
+func (f *File) KnownGroups() map[string]bool {
+	known := map[string]bool{}
+	for _, u := range f.Auth.Users {
+		for _, g := range u.Groups {
+			known[g] = true
+		}
+	}
+	for _, cn := range f.Connections {
+		for _, g := range cn.Allow.Groups {
+			known[g] = true
+		}
+	}
+	return known
 }
 
 // hostKeys checks the host key policy of a connection: an ssh connection
@@ -573,13 +646,40 @@ func (c *checker) providerURL(path, s string) {
 		c.add(path, "required")
 		return
 	}
+	if p := SecureURLProblem(s); p != "" {
+		c.add(path, "%s", p)
+	}
+}
+
+// returnURL checks a URL that browsers are sent back to after an OIDC
+// sign-in: https except on the loopback interface, with no user name,
+// and no fragment, since occamyd puts the sign-in's code in one.
+func (c *checker) returnURL(path, s string) {
+	if p := SecureURLProblem(s); p != "" {
+		c.add(path, "%s", p)
+		return
+	}
+	u, _ := url.Parse(s)
+	switch {
+	case u.User != nil:
+		c.add(path, "%q has a user name in it", s)
+	case strings.Contains(s, "#"):
+		c.add(path, "%q has a fragment: occamyd adds one with the sign-in's code", s)
+	}
+}
+
+// SecureURLProblem describes what keeps s from being a URL that occamyd
+// may exchange credentials with: it must be an absolute https URL, or
+// http on the loopback interface. It returns "" for such a URL.
+func SecureURLProblem(s string) string {
 	u, err := url.Parse(s)
 	switch {
 	case err != nil || u.Host == "" || u.Scheme != "https" && u.Scheme != "http":
-		c.add(path, "%q is not an absolute http or https URL", s)
+		return fmt.Sprintf("%q is not an absolute http or https URL", s)
 	case u.Scheme == "http" && !isLoopback(u.Hostname()):
-		c.add(path, "%q needs https; http is accepted only on localhost", s)
+		return fmt.Sprintf("%q needs https; http is accepted only on localhost", s)
 	}
+	return ""
 }
 
 func isLoopback(host string) bool {
