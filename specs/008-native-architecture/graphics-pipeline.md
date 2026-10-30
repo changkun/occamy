@@ -552,7 +552,9 @@ times.
   the photograph and 10 % less on the drag; on the browser, whose 12
   lossy tiles are a small part of the frame, 1 % less.
 - The times are the measurement's plus 0.8 to 2.6 ms a frame, about
-  what classification cost it (1.2 to 2.7 ms a frame). Scenes without
+  what classification cost it (1.2 to 2.7 ms a frame); the photograph
+  as rows of WebP, 2.6 ms over, is more than its classification, which
+  stops early, explains, and is not accounted for. Scenes without
   lossy tiles take the same time in every mode within 8 %, as they
   should.
 - `BenchmarkFrame -cpu 1`, which times whole frames with their pixel
