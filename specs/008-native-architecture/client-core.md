@@ -318,14 +318,18 @@ layer, and any tools.
     (`codec.Inflater`, one per decoding goroutine, into a sub-image of
     the screen, and `codec.DecodeRaw`), WebP through
     `github.com/gen2brain/vpx/webp` with `ToRGBA` (`x/image/webp`
-    misreads VP8's colour range), and JPEG through `image/jpeg`. A tile
+    misreads VP8's colour range), and JPEG through `image/jpeg`, each
+    after the size its header claims (`DecodeConfig`, or vpx's
+    `FrameSizeLimit`) is checked against the rectangle, as
+    docs/protocol.md requires since #109. A tile
     message may then cover up to 16 tiles of a row, and cursor pixels
     are straight alpha, as `Cursor` already is. Their tests are
     `protocol/testdata/codecs.json`: lossless vectors exact, lossy ones
     at `min_psnr`, invalid ones refused. The tile cache (`cached` and
     slots) comes with it. #109 also turns `stream.Encoder` into
     per-viewer encoders made by `Config.NewEncoder`, which this
-    package's tests that build a `stream.Config` follow. Until then the
+    package's tests that build a `stream.Config` follow: their PNG codec
+    is a `stream.Encoder` with `Tile`, `Lossy` and `Cursor`. Until then the
     plugged-codec path, its worker pool and agreement are tested with a
     PNG codec in the tests.
   - [010](../010-native-swift-client.md)'s export layer: wrap `Next` as

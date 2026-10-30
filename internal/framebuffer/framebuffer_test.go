@@ -98,6 +98,25 @@ func TestVersions(t *testing.T) {
 	}
 }
 
+// A resized screen is opaque black, so that a tile the backend has not
+// drawn yet goes out opaque, in the containers without alpha.
+func TestResizeOpaque(t *testing.T) {
+	f := framebuffer.New(4)
+	f.Resize(6, 4)
+	fill(f, image.Rect(0, 0, 6, 4), color.RGBA{R: 0xff, A: 0xff})
+	f.Resize(5, 3)
+	buf := make([]byte, 4*4*4)
+	cols, rows := f.Grid()
+	for i := range cols * rows {
+		r, _ := f.ReadTile(i, buf)
+		for p := range r.Dx() * r.Dy() {
+			if got := (color.RGBA{buf[4*p], buf[4*p+1], buf[4*p+2], buf[4*p+3]}); got != (color.RGBA{A: 0xff}) {
+				t.Fatalf("tile %d, pixel %d is %v after Resize, want opaque black", i, p, got)
+			}
+		}
+	}
+}
+
 func TestReadTile(t *testing.T) {
 	f := framebuffer.New(4)
 	f.Resize(6, 4)

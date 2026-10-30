@@ -322,13 +322,22 @@ type pngCodec struct {
 
 func (*pngCodec) Codec() protocol.Codec { return protocol.CodecPNG }
 
-func (*pngCodec) Encode(dst, pix []byte, w, h, _ int) ([]byte, protocol.Codec) {
+// Tile encodes every tile as PNG, none lossy.
+func (*pngCodec) Tile(dst, pix []byte, w, h int) ([]byte, protocol.Codec, bool) {
 	var b bytes.Buffer
 	img := &image.RGBA{Pix: pix[:4*w*h], Stride: 4 * w, Rect: image.Rect(0, 0, w, h)}
 	if err := png.Encode(&b, img); err != nil {
 		panic(err)
 	}
-	return append(dst, b.Bytes()...), protocol.CodecPNG
+	return append(dst, b.Bytes()...), protocol.CodecPNG, false
+}
+
+// Lossy is never asked for, since Tile sends no tile lossy.
+func (*pngCodec) Lossy(dst, _ []byte, _, _, _ int) ([]byte, protocol.Codec) { return dst, 0 }
+
+// Cursor sends the cursor raw.
+func (*pngCodec) Cursor(dst, pix []byte, w, h int) ([]byte, protocol.Codec, bool) {
+	return append(dst, pix[:4*w*h]...), protocol.CodecRaw, true
 }
 
 // Decode checks the size the PNG declares before it decodes, as the

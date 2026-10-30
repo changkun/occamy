@@ -94,23 +94,23 @@ func (c Class) String() string {
 // 1.0.
 type Codec uint8
 
-// The codecs. Deflate's container is provisional until the graphics
-// pipeline's Codecs task fixes it.
+// The codecs. docs/protocol.md describes their payloads, and
+// testdata/codecs.json holds a payload of each that occamyd sends.
 const (
 	// CodecRaw is 4 bytes per pixel, row by row without padding, in RGBA
 	// order with straight alpha.
 	CodecRaw Codec = 1
-	// CodecDeflate is a raw DEFLATE stream (RFC 1951) of a palette or raw
-	// pixel container.
+	// CodecDeflate is a raw DEFLATE stream (RFC 1951) of a container of
+	// a palette and each pixel's index into it, or of raw pixels, either
+	// opaque or with alpha.
 	CodecDeflate Codec = 2
 	// CodecPNG is a PNG file.
 	CodecPNG Codec = 3
 	// CodecJPEG is a baseline or progressive JFIF file.
 	CodecJPEG Codec = 4
-	// CodecWebP is a WebP file, lossy or lossless. The graphics
-	// pipeline's measurement picked it for lossy tiles, with CodecJPEG
-	// for a client that lists JPEG but not WebP; occamyd sends neither
-	// before the pipeline's Codecs task lands.
+	// CodecWebP is a WebP file, lossy or lossless. occamyd sends lossy
+	// WebP for tiles of more than 256 colours, and CodecJPEG instead to a
+	// client that lists JPEG but not WebP.
 	CodecWebP Codec = 5
 	// CodecCached draws the tile stored in a client cache slot and has no
 	// payload. It is only for tiles.
