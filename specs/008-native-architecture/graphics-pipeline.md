@@ -336,6 +336,9 @@ tiles of 17 to 256 colours.
   without alpha, while cursors use the same codecs with straight alpha.
   The Codecs task fixes the container in docs/protocol.md with a form
   for alpha.
+- x11vnc's fourth byte in RGBX is padding, not alpha, while raw codec 1
+  is RGBA with straight alpha, so the VNC backend writes 0xFF alpha
+  into the framebuffer.
 - Lossless WebP for refining still antialiased text, and the vp8 video
   tier, each need a measurement of their own.
 - Browsers' decode times (WebP, JPEG, and inflating plus expanding the
