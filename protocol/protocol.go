@@ -48,6 +48,11 @@ const HeaderSize = 4
 // peer accepts unless the handshake agrees on another limit.
 const DefaultMaxMessageSize = 4 << 20
 
+// MinMessageSize is the smallest max_message_size a peer may state, so
+// that a message is never too small to make progress: a receiver refuses
+// a hello or welcome that states less.
+const MinMessageSize = 64 << 10
+
 // DefaultMaxTextureSize is the largest width or height, in pixels, of a
 // tile or a cursor image that a client accepts unless it states another
 // limit in its hello.
