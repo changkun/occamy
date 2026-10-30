@@ -68,6 +68,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   and an input's effect goes ahead of motion already on the screen. It
   serves graphical sessions with raw tiles for now. Not served by any
   route yet.
+- `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS, NLA
+  through CredSSP with NTLMv2, the connection sequence, bitmap updates
+  in interleaved RLE and planar, pointer updates, and keyboard and mouse
+  input. It is tested live against xrdp under the `rdp_integration` build
+  tag and by replaying xrdp's recorded PDUs; NLA is not yet tested
+  against Windows. No backend uses it yet.
 
 ### Changed
 

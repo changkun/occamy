@@ -5,6 +5,7 @@ track: architecture
 depends_on:
   - specs/008-native-architecture/session-core.md
 affects:
+  - internal/rdp/
   - internal/backend/rdp/
 effort: large
 created: 2026-10-29
@@ -50,11 +51,16 @@ decides.
   - `casvisor/gordp` (Apache-2.0, created 2026-10) and
     `bouncyball-git/gopher-rdp` (MIT, created 2026-02) do NLA and decode
     the GFX codecs (planar, ClearCodec, RemoteFX Progressive, ZGFX), by
-    their own account. Both are young and self-verified: the spike
-    reviews their code and tests it against FreeRDP before borrowing any.
+    their own account. Both are young and self-verified. The spike
+    borrowed nothing from them: every layer it needed was written from
+    the specifications.
   - `github.com/oiweiwei/go-msrpc/ssp` (MIT, active) implements NTLM with
     signing and sealing, Kerberos and SPNEGO, which CredSSP needs.
-    `Azure/go-ntlmssp` cannot: it has no key exchange or sealing.
+    `Azure/go-ntlmssp` cannot: it has no key exchange or sealing. The
+    spike uses `ssp/ntlm` for NTLMv2 and its sealing. That package
+    imports `ssp/credential`, which brings two Kerberos stacks into the
+    build (`jcmturner/gokrb5/v8` and `oiweiwei/gokrb5.fork/v9`, see
+    Spike results).
   - IronRDP (Rust, MIT or Apache-2.0) is the reference for the protocol
     and its tests.
 
@@ -70,8 +76,9 @@ decides.
 - **C. Helper process around IronRDP (Rust).** Same isolation as B on a
   memory-safe, actively developed stack. Its NLA, GFX and codec coverage
   must be verified, and it brings a Rust toolchain into the build.
-- **D. Pure-Go RDP client in `internal/backend/rdp`.** Scope: TLS, NLA with
-  NTLMv2 on `go-msrpc/ssp`, the connection sequence, fast-path, bitmap updates with
+- **D. Pure-Go RDP client in `internal/rdp`, with a backend in
+  `internal/backend/rdp`.** Scope: TLS, NLA with NTLMv2 on
+  `go-msrpc/ssp`, the connection sequence, fast-path, bitmap updates with
   interleaved RLE and planar decoding, GFX without AVC (RemoteFX, planar,
   ClearCodec), CLIPRDR and DISP. Kerberos, audio, drive redirection and
   RemoteApp come later.
@@ -81,8 +88,11 @@ decides.
 A time-boxed spike for D (target: two to four weeks of work), run any time
 after session-core settles:
 
-1. TLS and NLA, then a desktop bitmap stream from xrdp in the
-   [006](../006-demo-stack-refresh.md) stack.
+1. TLS, then a desktop bitmap stream from xrdp in the bench desktop
+   image (`docker/bench/desktop`, the scene program of
+   [benchmark](benchmark.md)). xrdp 0.10.1 has no CredSSP, so NLA is
+   checked against the [MS-NLMP] test vectors and an in-process CredSSP
+   acceptor instead, and live only in step 2.
 2. The same against Windows Server 2022 or 2025, and Windows 11, with NLA.
 3. Measure bytes per second against guacd's RDP (AVC on) for the baseline
    scenarios.
@@ -124,5 +134,138 @@ follow the recommendations.
 
 ## Affects
 
-Possibly a new `internal/backend/rdp`, or a helper binary and an IPC
-definition in session-core. Decides when guacd leaves Occamy entirely.
+`internal/rdp`, the protocol client the spike built, and a backend in
+`internal/backend/rdp` on it; or, if the spike fails, a helper binary
+and an IPC definition in session-core. Decides when guacd leaves Occamy
+entirely.
+
+## Spike results
+
+Step 1 ran on 2026-10-30 against xrdp 0.10.1 (Debian trixie, xorgxrdp)
+in the bench desktop image. Step 2 has not run: there is no Windows
+host, and [#32](https://github.com/changkun/occamy/issues/32) stays
+open. Step 3 has not run yet.
+
+| Criterion | Result |
+|-----------|--------|
+| TLS security negotiation with xrdp | Pass, live. |
+| NLA (CredSSP with NTLMv2) | Unverified live; passes the [MS-NLMP] 4.2.4 vectors and a round trip against an in-process acceptor. |
+| Connection sequence through capabilities and licensing | Pass, live, at 32, 24, 16 and 15 bits per pixel. |
+| Bitmap updates decoded to the scene's pixels | Pass, live: every pixel of the 1024×768 wallpaper, exact at 32 and 24 bits per pixel, within 8 per channel at 16 and 15. |
+| Keyboard and mouse input reach the session | Pass, live: keys paint the probe swatch; the pointer lands where it was sent, on the session's X display. |
+
+- **What was built.** `internal/rdp`, a pure-Go RDP client of about
+  3,500 lines plus 2,000 lines of tests. It contains:
+  - X.224 negotiation, TLS, and CredSSP version 6 with NTLMv2 (TSRequest
+    in `encoding/asn1`, NTLM and its sealing from `go-msrpc/ssp/ntlm`,
+    the public key bound by the SHA-256 hash of [MS-CSSP] 3.1.5,
+    PROTOCOL_HYBRID_EX's early user authorization result);
+  - MCS and GCC in BER and PER, with channel joins;
+  - the Client Info PDU with automatic logon;
+  - licensing, but only the server's STATUS_VALID_CLIENT shortcut;
+  - Demand Active and Confirm Active, connection finalization, and
+    reactivation after a Deactivate All (written, not yet exercised);
+  - fast-path and slow-path updates with fragment reassembly;
+  - bitmap updates, uncompressed, interleaved RLE (8, 15, 16 and 24 bits
+    per pixel) and planar (32 bits per pixel);
+  - pointer shapes (colour, new and large, cached, system) and position;
+  - fast-path and slow-path keyboard (scancodes and Unicode) and mouse
+    input, wheel included, with keysym and USB HID usage tables for a US
+    layout;
+  - Suppress Output and Refresh Rect PDUs, for the backend's `Demand`.
+- **Placement.** The protocol is its own package, as `internal/guacd`
+  is beside `internal/backend/guacd`. `Client.Run` draws into an
+  `Output`, a subset of `backend.Sink`, so a session's sink plugs in as
+  it is. The backend in `internal/backend/rdp` is not built yet: it maps
+  `backend.InputEvent` to the client's input methods and `Demand` to
+  Suppress Output.
+- **Decisions.**
+  - The client asks for bitmap updates only. It advertises no drawing
+    orders, no bitmap, glyph or brush caches, no bulk compression, no
+    bitmap codecs and no virtual channels. A server then has nothing to
+    send but bitmap updates, so two codecs cover the whole screen and the
+    client keeps no cache state.
+  - Only TLS-based security is offered (SSL, HYBRID, HYBRID_EX). A server
+    that selects standard RDP security is refused, since RC4 with the
+    server's proprietary certificate is not worth implementing.
+  - NTLM comes from `go-msrpc/ssp/ntlm`, used directly: its
+    Authentifier gives the three messages, the checksum, the RC4 seal
+    and the signature, which is all GSS_WrapEx needs. Without SPNEGO,
+    the NTLM tokens go straight into the TSRequest, as mstsc and FreeRDP
+    send them when Kerberos is off.
+  - Keys go out as scancodes, which the server maps through the keyboard
+    layout the client announced. A keysym with no key on the US layout
+    goes out as a Unicode keyboard event.
+- **What xrdp sends.** With the capabilities above, xrdp 0.10.1 sends
+  only fast-path and slow-path bitmap updates. They are planar (RLE
+  planes, no alpha, no colour loss) at 32 bits per pixel, and
+  interleaved RLE at 24, 16 and 15. It sends no orders and no surface
+  commands. The first screen at 32 bits per pixel is 192 bitmaps in
+  79 KB of PDUs; at 24 bits it is 154 bitmaps in 12 KB. xrdp's build
+  has RemoteFX (`--enable-rfxcodec`) but no x264, so it would send
+  RemoteFX through surface commands to a client that advertises the
+  codec, and RemoteFX Progressive through GFX. It never sends H.264.
+  NSCodec is not in xrdp at all. The GFX steps of option D can therefore
+  be developed against xrdp for RemoteFX only. Planar and ClearCodec
+  under GFX need Windows.
+- **Surprises.**
+  - xrdp has no CredSSP. Offered SSL, HYBRID and HYBRID_EX, it selects
+    SSL. Offered HYBRID alone, it selects standard RDP security (protocol
+    0) rather than failing the negotiation.
+  - `go-msrpc/ssp/ntlm` imports `ssp/credential`, which imports two
+    Kerberos libraries for its keytab and ccache types. The build gains
+    `jcmturner/gokrb5/v8`, `oiweiwei/gokrb5.fork/v9`,
+    `jcmturner/aescts/v2`, `jcmturner/gofork`, `hashicorp/go-uuid`,
+    `oiweiwei/go-oem` and `indece-official/go-ebcdic`. Their licences
+    are Apache-2.0, BSD-3-Clause, MPL-2.0 (go-uuid) and MIT; go-licenses
+    accepts them. Kerberos is still not used (decision 4), but its code
+    is linked. If that weight matters, NTLMv2 with sealing is about 400
+    lines and the vectors in `credssp_test.go` would carry over.
+  - go-msrpc's NTLMv2 adds target name and channel binding AV pairs to
+    the client's blob. The worked example of [MS-NLMP] 4.2.4.2.2 has
+    neither, so its NTProofStr cannot be reproduced byte for byte. The
+    test checks the response against the formulas of 3.3.2 instead.
+- **Verification.**
+  - The integration test, under the `rdp_integration` build tag, builds
+    the bench desktop image, starts xrdp, and connects at each colour
+    depth. It compares every pixel with the scene's wallpaper, paints the
+    probe swatch with keys, and asks the session's X server
+    (`testdata/querypointer`) where the pointer is.
+  - It records xrdp's frames to `testdata/xrdp-*.trace.gz` (16 KB in
+    all). `TestReplay` plays them back from a fake server over TLS
+    without a container.
+  - `TestReplayNLA` puts the same server behind CredSSP, with
+    go-msrpc's NTLM acceptor, for HYBRID and HYBRID_EX. It checks the
+    delegated credentials and a wrong password's STATUS_LOGON_FAILURE.
+  - Unit tests cover every RLE order, planar through a test encoder, the
+    MCS PDUs against [MS-RDPBCGR] 4.1, and input encoding.
+  - Five fuzzers (fast-path, slow-path, RLE, planar, pointer), seeded
+    from the recordings, ran 20 seconds each without a finding.
+- **What the NLA result rests on.** The [MS-NLMP] 4.2.4 vectors check
+  NTOWFv2, the LMv2 response, the encrypted session key, the sealing
+  and signing keys, and the sealed message and its signature. The
+  TSRequest framing, the public key binding and the error path are
+  checked only against an acceptor built from the same library and this
+  package's own TSRequest code. They are self-consistent, not
+  interoperable, until a Windows host answers.
+- **What remains for a beta-quality backend.**
+  - The backend in `internal/backend/rdp`: Run, input mapping, `Demand`
+    to Suppress Output, credentials from the registry.
+  - Step 2 against Windows with NLA, and with it the parts xrdp cannot
+    exercise. These are the full licensing exchange (Windows Server with
+    an RDS licensing server), server redirection, and the auto-detect
+    and multitransport requests, which the client now skips.
+  - Answers to auto-detect requests (a server may lower quality
+    without them), and the Heartbeat PDU.
+  - CLIPRDR and DISP over static virtual channels and DRDYNVC; dynamic
+    resize needs DISP.
+  - GFX without AVC (RemoteFX, RemoteFX Progressive, planar, ClearCodec,
+    ZGFX), measured against bitmap updates in step 3.
+  - Keyboard layouts other than US English, and keysyms that need
+    AltGr.
+  - Auto-reconnect cookies and the Save Session Info PDU.
+- **Verdict so far.** Step 1 passed in one working session, decoding
+  exactly and fuzzing clean. Nothing in it argues for a helper process.
+  Every remaining risk is on the Windows path: live NLA, licensing and
+  the message channel. More xrdp work cannot retire those, so the
+  decision between D and a helper waits on step 2.
