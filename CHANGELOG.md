@@ -97,10 +97,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - The native VNC backend decodes Tight, ZRLE and Hextile, and asks for
   them in that order before Raw. Tight stays lossless, since the backend
   asks for no JPEG quality, but JPEG and the gradient filter are decoded
-  when a server sends them. Compressed lengths, palettes and runs are
-  checked before anything is read or allocated, and a rectangle's zlib
-  data is inflated only as far as its pixels need. The fuzz corpus holds
-  sessions recorded from x11vnc and TigerVNC.
+  when a server sends them. JPEG must be sequential (baseline or
+  extended), with a scan for each component and at most 65536 pixels, as
+  TigerVNC, libvncserver and QEMU send it. Compressed lengths, palettes
+  and runs are checked before anything is read or allocated, a
+  rectangle's zlib data is inflated only as far as its pixels need, and
+  an update may draw at most four times the screen's pixels. The fuzz
+  corpus holds sessions recorded from x11vnc and TigerVNC.
 - The codec measurement of the graphics pipeline
   ([docs/benchmarks/codecs.md](docs/benchmarks/codecs.md)): a corpus of
   13 frames recorded from the bench desktop by `make corpus`, and

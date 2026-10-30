@@ -58,9 +58,9 @@ The scope is delivered in four phases (see Task Breakdown).
   Remote Desktop (30), so that macOS hosts work. RA2 and other proprietary
   types are out.
 - **Encodings:** Raw, CopyRect, Hextile, ZRLE and Tight (including JPEG and
-  the gradient filter). JPEG is decoded when a server sends it, but the
-  backend asks for no quality level, so servers keep Tight lossless (see
-  phase 2's notes).
+  the gradient filter). Sequential JPEG is decoded when a server sends
+  it, but the backend asks for no quality level, so servers keep Tight
+  lossless (see phase 2's notes).
 - **Pseudo-encodings:** DesktopSize, ExtendedDesktopSize (with
   `SetDesktopSize` for client-driven resize), Cursor, LastRect,
   ContinuousUpdates with Fence, QEMU Extended Key Event (physical key
@@ -178,9 +178,10 @@ leaves only RDP on the bridge.
 - **What was built.**
   - Run dials with the context, runs the handshake, sends
     `SetPixelFormat` and `SetEncodings` (CopyRect, Raw, Cursor,
-    DesktopSize; phase 2 adds Tight, ZRLE and Hextile) in one write, reports the size with `Sink.Resize` and
-    the desktop name with `Sink.Title`, and then applies the server's
-    messages until the connection ends. A writer goroutine sends queued
+    DesktopSize; phase 2 adds Tight, ZRLE and Hextile) in one write,
+    reports the size with `Sink.Resize` and the desktop name with
+    `Sink.Title`, and then applies the server's messages until the
+    connection ends. A writer goroutine sends queued
     input and update requests, batching what is ready into one write.
   - Raw rectangles are read in strips of whole rows (up to 256 KiB) and
     each strip is copied into `Sink.Lock`'s pixels after it has arrived,
@@ -337,8 +338,8 @@ leaves only RDP on the bridge.
 - **Status.** Phase 2 is done: Hextile, ZRLE and Tight, with Tight's
   fill, JPEG, and its copy, palette and gradient filters, in
   `hextile.go`, `zrle.go` and `tight.go`, the zlib streams in `zlib.go`
-  and the state they share in `codec.go`: about 1,050 lines of code and
-  2,000 of tests. The backend asks for them in `SetEncodings`.
+  and the state they share in `codec.go`: about 1,150 lines of code and
+  2,300 of tests. The backend asks for them in `SetEncodings`.
 - **What was built.**
   - `SetEncodings` lists CopyRect, Tight, ZRLE, Hextile, Raw, Cursor and
     DesktopSize (decisions below).
@@ -398,22 +399,51 @@ leaves only RDP on the bridge.
     rectangle's compressed length may not exceed what deflate takes for
     its largest encoding (1 + 3 × 127 bytes a tile and 4 a pixel, plus an
     eighth and 1 KiB); a Tight rectangle's, the same bound on its data.
-    A JPEG rectangle may be at most 2048 pixels wide, as TigerVNC's viewer
-    allows, and 2048×2048 in all, since `image/jpeg` allocates the whole
-    image; its buffer grows as the data arrives rather than to the length
-    claimed, and the image's size must be the rectangle's before it is
-    decoded.
+    A JPEG rectangle's buffer grows as the data arrives rather than to
+    the length claimed.
+  - JPEG: a rectangle may be at most 2048 pixels wide, as TigerVNC's
+    viewer allows, and 65536 pixels in all, the most that TigerVNC,
+    libvncserver and QEMU send in one; both recorded sessions' JPEG
+    rectangles, 84 from TigerVNC and 12 from x11vnc at 1024×768, fit.
+    Before `image/jpeg` sees the image, its markers are walked from the
+    start of the image to its end: only a baseline or extended
+    sequential frame (SOF0, SOF1) is accepted, with at most a scan for
+    each of its components, and the frame's size must be the
+    rectangle's. `image/jpeg` decodes every scan an image has, without a
+    limit, and each scan is a pass over the image's blocks, so decoding
+    then costs no more than a pass for each component. An error from
+    `image/jpeg` that reads as `io.ErrUnexpectedEOF` becomes a plain one,
+    since the image arrived whole.
+  - Updates: an update may draw at most four times the screen's pixels,
+    counting each rectangle that draws by its area on the screen, and a
+    DesktopSize starts the count again at the new size. A rectangle of a
+    few bytes can draw the whole screen, as a Tight fill, a CopyRect or a
+    ZRLE rectangle of one colour do, which took 18 to 25 ms at 8192×4096,
+    so an update of 65535 of them would have taken half an hour. Servers
+    draw each pixel about once an update: the recorded sessions drew at
+    most one screen in one. The decoder checks Run's context between
+    rectangles, as in phase 1.
   - Decompression bombs: the inflater runs only as far as the pixels
     read from it, so a rectangle inflates no more than its pixels and a
     few tens of KiB beyond them, the inflater's 32 KiB window and a 32 KiB
     buffer. Inflated data that the pixels do not take is an error. Up to
-    64 compressed bytes may be left after the pixels, the end of a
+    16 compressed bytes may be left after the pixels, the end of a
     server's flush, and are kept for the stream's next rectangle; more is
-    an error. One case goes unseen: when the inflater's window fills
-    exactly where the pixels end, it holds back what follows until the
-    flush, so extra data whose compressed form fits in those 64 bytes
-    starts the stream's next rectangle. That garbles only the server's
-    own pixels.
+    an error. An honest tail is about 7 bytes: when the window fills just
+    as the pixels end, the end of the last block and the empty stored
+    block of the flush; about 12 when a server flushes twice.
+  - What goes unseen: the inflater has not looked at the bytes left, so
+    data among them is not seen as extra. It happens when the window
+    fills exactly where the pixels end, and when a flush is followed by
+    more data and a second flush. The data then starts the stream's next
+    rectangle, which it garbles, or makes fail one rectangle late; the
+    connection's framing does not depend on it, as each rectangle's
+    length is read before its data. The 16 bytes bound what it can
+    inflate to: after the 5 bytes of the flush, 11 are left for the rest
+    of a block whose Huffman codes were read before, and at 2 bits for a
+    match of 258 bytes they make about 11 KB. 10,750 bytes slipped
+    through with `BestCompression` at a window boundary, and 1,250 with
+    a second flush.
   - Strictness: ZRLE's unused subencodings (17 to 127 and 129), Tight's
     compression types above JPEG (PNG belongs to TightPNG), unknown
     filters, palette indices beyond the palette, runs past the tile and
@@ -430,10 +460,55 @@ leaves only RDP on the bridge.
   says how compact pixels are expanded, decision 5 says which servers'
   traffic was recorded, and the test servers bullet names the TigerVNC
   image.
+- **Review fixes.** A review of the pull request found:
+  - JPEG scan bombs: `image/jpeg` decodes every scan of a progressive
+    image, each a pass over all its blocks, and a cancel cannot stop
+    it. 16,000 scans in 304 KB took 27 s at 2048×2048 in the review, and
+    13 s here; the 4 MiB that a Tight rectangle may hold would have
+    taken minutes. A baseline image with more scans than components is
+    slow too: 1,000 scans in 266 KB took 138 ms at 256×256, about
+    0.5 µs a byte. Fixed by the JPEG rule above: sequential frames
+    only, a scan per component, and 65536 pixels, down from 2048×2048.
+    `TestTightJPEGScanBombs` holds the review's images, and each now
+    fails in microseconds.
+  - `io.ErrUnexpectedEOF`, which Run reserves for a connection that
+    closes within a message, also came from data that had arrived
+    whole: `io.ReadFull` turned the inflater's `io.EOF`, at the end of a
+    stream that a server ended, into it, and `image/jpeg` returned it
+    for an image cut short within its length. The inflater's end is now
+    "the server ended its zlib stream", and `image/jpeg`'s error a plain
+    one. `checkSession` accepted the error anywhere in a recording, and
+    now only at its end.
+  - The unseen data in the zlib tail could inflate to about 32 KB with
+    a tail of 64 bytes. The tail is now 16 bytes, and what is left
+    unseen is described above. The review's way to close the gap, a
+    copy of the output in a 32 KiB ring and a restart of the inflater
+    with it as the dictionary after reading what is left, was not
+    taken: it restarts only when the output is a multiple of 32 KiB, so
+    it misses data after a second flush, and its cost, a copy of every
+    inflated byte, could not be measured to the 5% asked for on the
+    shared host, where the review's runs varied by 20 to 30% from one to
+    the next. It is a follow-up.
+  - Two guards had no test. Without the cap on `zinput.Read`, a stored
+    block that claims more bytes than the rectangle has read the next
+    messages as its own, and the tail's copy panicked;
+    `TestZlibStoredBlockPastRect` covers it. The JPEG area bound was
+    tested on a screen too small for the rectangle, whose check failed
+    first; `TestTightJPEGErrors` uses one of 2100×300.
+  - A Tight fill, 16 bytes with its header, took 16 ms at 8192×4096 in
+    the review, and 18 to 25 ms here, with nothing to bound how many an
+    update holds. Fixed by the draw budget above.
+  - The reference client summed its rectangles' areas, so rectangles
+    that overlapped could reach the screen's area with pixels missing.
+    It now counts each pixel once.
+  - The notes said that `flate` hands out data at the end of any stored
+    block; it is at an empty one. They now say so, and what unseen data
+    does to the next rectangle.
 - **Surprises / gotchas.**
-  - Go's `compress/flate` hands out inflated data only at the end of a
-    stored block, when its 32 KiB window fills, and at the end of the
-    stream, not at the end of each block. A server's `Z_SYNC_FLUSH` ends
+  - Go's `compress/flate` hands out inflated data only at an empty
+    stored block, which is the marker that `Z_SYNC_FLUSH` writes, when
+    its 32 KiB window fills, and at the end of the stream, not at the
+    end of other blocks, stored ones included. A server's flush ends
     each rectangle with an empty stored block, so a rectangle's pixels
     are all available once its data is read. A server that flushed with
     `Z_PARTIAL_FLUSH` would fail with "the compressed data ends before the
@@ -446,7 +521,10 @@ leaves only RDP on the bridge.
     would read past the rectangle; the reader implements `io.ByteReader`.
   - TigerVNC's Xvnc sometimes answered the reference client's first
     request with an update without pixels, which left phase 1's reference
-    client waiting; it now asks again until it has every pixel.
+    client waiting; it now asks again until it has every pixel. It marks
+    each pixel it is sent in a bitmap of the screen and counts it once,
+    so rectangles that overlap, within an update or across the updates
+    it asks for, cannot make it stop with pixels missing.
   - Neither server sent a gradient rectangle in these sessions, only the
     copy and palette filters, so the gradient filter is tested with
     hand-built data and the fake server's encoder alone.
@@ -487,11 +565,17 @@ leaves only RDP on the bridge.
 - **Mutation checks.** Each of these was reverted in turn, and a test
   failed: Tight's stream resets, the bound on ZRLE runs, the check for
   inflated data left over, the buffer as large as the window, keeping
-  the zlib tail, its 64-byte bound, the gradient's clamp and its first
-  pixel, a coloured Hextile subrectangle setting the foreground, the
-  Hextile subrectangle bound at edge tiles, Tight's palette index check,
-  the ZRLE and Tight length bounds, and the JPEG image size and width
-  checks.
+  the zlib tail, its 16-byte bound, the cap on a stored block at the
+  rectangle's end, the inflater's end as its own error, the gradient's
+  clamp and its first pixel, a coloured Hextile subrectangle setting the
+  foreground, the Hextile subrectangle bound at edge tiles, Tight's
+  palette index check, the ZRLE and Tight length bounds, the JPEG
+  marker walk, its sequential frames, its scan count, its area of 65536
+  pixels, the image size and width checks, the draw budget, and its
+  start again at a DesktopSize. One survived: turning `image/jpeg`'s
+  `io.ErrUnexpectedEOF` into a plain error, since no image that passes
+  the marker walk makes `image/jpeg` return it. It is kept in case one
+  does.
 - **Follow-ups.**
   - QEMU's VNC server, for recorded traffic and the integration test.
   - A per-connection JPEG quality for slow upstream links, which the
@@ -500,6 +584,12 @@ leaves only RDP on the bridge.
     the end-to-end matrix covers a server other than x11vnc.
   - Phase 3's LastRect ends a Tight server's updates of unknown length
     (`0xFFFF` rectangles); the decoders need nothing for it.
+  - Closing the zlib tail's gap: keep the last 32 KiB of output in a
+    ring, and whenever compressed bytes are left after the pixels, read
+    them through the inflater, failing at the first byte it hands out,
+    and restart it with the ring as its dictionary. That covers a second
+    flush as well, and needs a measurement on a quiet host of what the
+    copy into the ring costs, against 5%.
   - Inflating is the decoding cost of ZRLE and Tight, and a single zlib
     stream cannot be split across cores. If full-screen motion at 4K
     matters before beta, a faster pure-Go inflater is the lever.
