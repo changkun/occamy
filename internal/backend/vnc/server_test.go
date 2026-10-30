@@ -147,6 +147,7 @@ type serverOptions struct {
 	vencrypt  []uint32        // the subtypes offered
 	vcVersion [2]byte         // VeNCrypt's version, 0.2 if zero
 	cert      tls.Certificate // for the TLS and X.509 subtypes
+	tlsMax    uint16          // the newest TLS version, and TLS 1.0 the oldest, if not zero
 	user      string          // for Plain
 }
 
@@ -294,6 +295,7 @@ func (s *fakeServer) serve(nc net.Conn) {
 		}
 	}
 	authOK := true
+	inner := uint32(t) // the type that authenticates, VeNCrypt's subtype within it
 	switch t {
 	case secVNCAuth:
 		var ok bool
@@ -302,7 +304,7 @@ func (s *fakeServer) serve(nc net.Conn) {
 		}
 	case secVeNCrypt:
 		var ok bool
-		if nc, r, authOK, ok = s.veNCrypt(nc, r); !ok {
+		if nc, r, inner, authOK, ok = s.veNCrypt(nc, r); !ok {
 			return
 		}
 	}
@@ -317,7 +319,9 @@ func (s *fakeServer) serve(nc net.Conn) {
 		nc.Close()
 		return
 	}
-	if t != secNone || v == 8 {
+	// As TigerVNC's SConnection::approveConnection: no SecurityResult
+	// for None before 3.8, VeNCrypt's None subtype included.
+	if inner != secNone || v == 8 {
 		nc.Write(binary.BigEndian.AppendUint32(nil, 0))
 	}
 	if _, err := io.ReadFull(r, b[:1]); err != nil {
@@ -375,9 +379,10 @@ func (s *fakeServer) vncAuth(nc net.Conn, r *bufio.Reader) (right, ok bool) {
 
 // veNCrypt runs the server's side of VeNCrypt: the version, the
 // subtype, TLS for the TLS and X.509 subtypes, and the subtype's
-// authentication. It returns the connection to go on with, whether the
-// credentials were right, and false for ok if the connection failed.
-func (s *fakeServer) veNCrypt(nc net.Conn, r *bufio.Reader) (_ net.Conn, _ *bufio.Reader, right, ok bool) {
+// authentication. It returns the connection to go on with, the
+// subtype, whether the credentials were right, and false for ok if the
+// connection failed.
+func (s *fakeServer) veNCrypt(nc net.Conn, r *bufio.Reader) (_ net.Conn, _ *bufio.Reader, _ uint32, right, ok bool) {
 	version := s.opts.vcVersion
 	if version == ([2]byte{}) {
 		version = [2]byte{0, 2}
@@ -385,10 +390,10 @@ func (s *fakeServer) veNCrypt(nc net.Conn, r *bufio.Reader) (_ net.Conn, _ *bufi
 	nc.Write(version[:])
 	var b [8]byte
 	if _, err := io.ReadFull(r, b[:2]); err != nil {
-		return nil, nil, false, false
+		return nil, nil, 0, false, false
 	}
 	if b[0] != 0 || b[1] != 2 {
-		return nil, nil, false, false // the client gave up
+		return nil, nil, 0, false, false // the client gave up
 	}
 	p := append([]byte{0, byte(len(s.opts.vencrypt))}, make([]byte, 0, 4*len(s.opts.vencrypt))...)
 	for _, st := range s.opts.vencrypt {
@@ -396,7 +401,7 @@ func (s *fakeServer) veNCrypt(nc net.Conn, r *bufio.Reader) (_ net.Conn, _ *bufi
 	}
 	nc.Write(p)
 	if _, err := io.ReadFull(r, b[:4]); err != nil {
-		return nil, nil, false, false
+		return nil, nil, 0, false, false
 	}
 	st := binary.BigEndian.Uint32(b[:4])
 	s.mu.Lock()
@@ -404,36 +409,40 @@ func (s *fakeServer) veNCrypt(nc net.Conn, r *bufio.Reader) (_ net.Conn, _ *bufi
 	s.mu.Unlock()
 	if !slices.Contains(s.opts.vencrypt, st) {
 		s.t.Errorf("fake server: client chose VeNCrypt subtype %d of %v", st, s.opts.vencrypt)
-		return nil, nil, false, false
+		return nil, nil, 0, false, false
 	}
 	if st >= 257 && st <= 262 {
 		nc.Write([]byte{1})
-		tc := tls.Server(nc, &tls.Config{Certificates: []tls.Certificate{s.opts.cert}, MinVersion: tls.VersionTLS12})
+		cfg := &tls.Config{Certificates: []tls.Certificate{s.opts.cert}, MinVersion: tls.VersionTLS12}
+		if s.opts.tlsMax != 0 {
+			cfg.MinVersion, cfg.MaxVersion = tls.VersionTLS10, s.opts.tlsMax
+		}
+		tc := tls.Server(nc, cfg)
 		if err := tc.Handshake(); err != nil {
-			return nil, nil, false, false
+			return nil, nil, 0, false, false
 		}
 		nc, r = tc, bufio.NewReader(tc)
 	}
 	switch st {
 	case 2, 258, 261: // VNC Authentication
 		right, ok = s.vncAuth(nc, r)
-		return nc, r, right, ok
+		return nc, r, st, right, ok
 	case 256, 259, 262: // Plain
 		if _, err := io.ReadFull(r, b[:8]); err != nil {
-			return nil, nil, false, false
+			return nil, nil, 0, false, false
 		}
 		creds := make([]byte, int(binary.BigEndian.Uint32(b[0:]))+int(binary.BigEndian.Uint32(b[4:])))
 		if _, err := io.ReadFull(r, creds); err != nil {
-			return nil, nil, false, false
+			return nil, nil, 0, false, false
 		}
 		n := binary.BigEndian.Uint32(b[0:])
 		user, password := string(creds[:n]), string(creds[n:])
 		s.mu.Lock()
 		s.plains = append(s.plains, user+":"+password)
 		s.mu.Unlock()
-		return nc, r, user == s.opts.user && password == s.opts.password, true
+		return nc, r, st, user == s.opts.user && password == s.opts.password, true
 	}
-	return nc, r, true, true // None
+	return nc, r, st, true, true // None
 }
 
 // Subtypes returns the VeNCrypt subtypes the clients chose.

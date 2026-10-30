@@ -198,6 +198,10 @@ func TestVeNCrypt(t *testing.T) {
 			name: "a private CA requires TLS", types: []byte{secVeNCrypt, secVNCAuth},
 			subs: []uint32{258, secVNCAuth}, cfg: Config{Password: "hunter2"}, err: ErrNoSecurityType,
 		},
+		// TigerVNC sends no SecurityResult after VeNCrypt's None subtype
+		// before 3.8, and one after X509None.
+		{name: "None within, 3.7", version: "003.007", subs: []uint32{secNone}, want: secNone, noCA: true},
+		{name: "None within, 3.8", subs: []uint32{secNone}, want: secNone, noCA: true},
 		{name: "anonymous TLS only", subs: []uint32{257, 258, 259}, err: ErrNoSecurityType},
 		{name: "Plain in the clear", subs: []uint32{256}, cfg: Config{Username: "alice", Password: "hunter2"}, err: ErrNoSecurityType},
 		{
@@ -284,6 +288,7 @@ func TestTLSPolicy(t *testing.T) {
 	leafPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: p.leaf.Raw}))
 	sum := sha256.Sum256(p.leaf.Raw)
 	selfFP := certFingerprint(p.selfSigned.Leaf)
+	caSum := sha256.Sum256(p.server.Certificate[1])
 	for _, tt := range []struct {
 		name string
 		cert tls.Certificate
@@ -305,6 +310,8 @@ func TestTLSPolicy(t *testing.T) {
 		{name: "a pinned certificate", cert: p.server, tls: TLS{Pins: []string{leafPEM}}},
 		{name: "a pin ignores the name", cert: p.server, tls: TLS{Pins: []string{leafPEM}, ServerName: "vnc.example"}},
 		{name: "another certificate pinned", cert: p.server, tls: TLS{Pins: []string{selfFP}}, err: errNotPinned},
+		// A pin is of the leaf, not of any certificate the server presents.
+		{name: "the CA pinned", cert: p.server, tls: TLS{Pins: []string{hex.EncodeToString(caSum[:])}}, err: errNotPinned},
 		{name: "insecure", cert: p.selfSigned, tls: TLS{InsecureSkipVerify: true}, warn: true},
 		{name: "insecure after the pins", cert: p.server, tls: TLS{Pins: []string{selfFP}, InsecureSkipVerify: true}, warn: true},
 		{name: "insecure but pinned", cert: p.selfSigned, tls: TLS{Pins: []string{selfFP}, InsecureSkipVerify: true}},
@@ -363,6 +370,35 @@ func TestTLSPolicy(t *testing.T) {
 			}
 			if warned && !strings.Contains(logged, certFingerprint(tt.cert.Leaf)) {
 				t.Errorf("the warning does not show the fingerprint:\n%s", logged)
+			}
+		})
+	}
+}
+
+func TestTLSVersion(t *testing.T) {
+	// TLS 1.0 and 1.1 are refused, whatever the certificate.
+	p := newPKI(t)
+	for _, tt := range []struct {
+		max  uint16
+		want bool // connects
+	}{
+		{tls.VersionTLS10, false},
+		{tls.VersionTLS11, false},
+		{tls.VersionTLS12, true},
+	} {
+		t.Run(tls.VersionName(tt.max), func(t *testing.T) {
+			checkGoroutines(t)
+			srv := newServer(t, serverOptions{types: []byte{secVeNCrypt}, vencrypt: []uint32{subX509None}, cert: p.server, tlsMax: tt.max})
+			r := start(t, newBackend(t, Config{Addr: srv.addr, TLS: TLS{RootCAs: p.roots}}), &backendtest.Sink{})
+			if tt.want {
+				srv.accept(t)
+				if err := r.stop(t); !errors.Is(err, context.Canceled) {
+					t.Errorf("Run = %v, want context.Canceled", err)
+				}
+				return
+			}
+			if err := r.wait(t); err == nil || !strings.Contains(err.Error(), "protocol version") {
+				t.Errorf("Run = %v, want an error about the protocol version", err)
 			}
 		})
 	}
@@ -442,7 +478,18 @@ func TestVeNCryptScripts(t *testing.T) {
 		sent     string // what the client sends, if not empty
 		err      string // in the error; empty for success
 		is       error
+		clear    bool // no TLS
 	}{
+		{
+			// No SecurityResult after VeNCrypt's None subtype before 3.8.
+			name: "None within, 3.7", in: script{}.version("003.007").u8(1, secVeNCrypt).u8(0, 2, 0, 1).u32(secNone).init(10, 10, ""),
+			sent: "RFB 003.007\n\x13\x00\x02\x00\x00\x00\x01\x01", clear: true,
+		},
+		{
+			name: "None within, 3.8", in: vc(secNone).u32(0).init(10, 10, ""),
+			sent: "RFB 003.008\n\x13\x00\x02\x00\x00\x00\x01\x01", clear: true,
+		},
+		{name: "X509None, 3.7", in: script{}.version("003.007").u8(1, secVeNCrypt).u8(0, 2, 0, 1).u32(subX509None).u8(1).u32(0).init(10, 10, "")},
 		{
 			name: "X509Plain", in: vc(subX509Plain).u8(1).u32(0).init(10, 10, ""),
 			sent: "RFB 003.008\n\x13\x00\x02\x00\x00\x01\x06\x00\x00\x00\x05\x00\x00\x00\x07alicehunter2\x01",
@@ -477,8 +524,8 @@ func TestVeNCryptScripts(t *testing.T) {
 				if err != nil {
 					t.Fatalf("handshake = %v", err)
 				}
-				if !started {
-					t.Error("TLS did not start")
+				if started == tt.clear {
+					t.Errorf("TLS started %v, want %v", started, !tt.clear)
 				}
 				return
 			}

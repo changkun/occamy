@@ -48,33 +48,62 @@ const maxCredential = 64 << 10
 
 // veNCrypt runs VeNCrypt 0.2 after the client has chosen it: the
 // version, the subtype, TLS for the X.509 subtypes, and the subtype's
-// authentication. SecurityResult follows.
-func veNCrypt(r io.Reader, w io.Writer, a auth) error {
+// authentication. It returns the subtype. SecurityResult follows,
+// unless the subtype is None and the version before 3.8.
+func veNCrypt(r io.Reader, w io.Writer, a auth) (uint32, error) {
+	st, err := veNCryptSubtype(r, w, a)
+	if err != nil {
+		return 0, err
+	}
+	if st >= subX509None {
+		var b [1]byte
+		if err := read(r, b[:]); err != nil {
+			return 0, fmt.Errorf("vnc: read the VeNCrypt subtype's ack: %w", err)
+		}
+		if b[0] != 1 {
+			return 0, fmt.Errorf("%w: the server did not start TLS", ErrRefused)
+		}
+		if err := a.startTLS(); err != nil {
+			return 0, err
+		}
+	}
+	switch st {
+	case subX509Vnc, secVNCAuth:
+		err = vncAuth(r, w, a.password)
+	case subX509Plain:
+		err = plainAuth(w, a.plain)
+	}
+	return st, err
+}
+
+// veNCryptSubtype agrees on VeNCrypt's version and subtype, and returns
+// the subtype.
+func veNCryptSubtype(r io.Reader, w io.Writer, a auth) (uint32, error) {
 	var b [4]byte
 	if err := read(r, b[:2]); err != nil {
-		return fmt.Errorf("vnc: read the VeNCrypt version: %w", err)
+		return 0, fmt.Errorf("vnc: read the VeNCrypt version: %w", err)
 	}
 	if b[0] != 0 || b[1] < 2 {
 		// 0.1 numbers its subtypes otherwise. 0.0 tells the server that
 		// the client supports none of its versions, as TigerVNC does.
 		_, _ = w.Write([]byte{0, 0})
-		return fmt.Errorf("%w: the server offers VeNCrypt %d.%d", ErrNoSecurityType, b[0], b[1])
+		return 0, fmt.Errorf("%w: the server offers VeNCrypt %d.%d", ErrNoSecurityType, b[0], b[1])
 	}
 	if _, err := w.Write([]byte{0, 2}); err != nil {
-		return fmt.Errorf("vnc: %w", err)
+		return 0, fmt.Errorf("vnc: %w", err)
 	}
 	if err := read(r, b[:1]); err != nil {
-		return fmt.Errorf("vnc: read the VeNCrypt version's ack: %w", err)
+		return 0, fmt.Errorf("vnc: read the VeNCrypt version's ack: %w", err)
 	}
 	if b[0] != 0 {
-		return fmt.Errorf("%w: the server does not accept VeNCrypt 0.2", ErrRefused)
+		return 0, fmt.Errorf("%w: the server does not accept VeNCrypt 0.2", ErrRefused)
 	}
 	if err := read(r, b[:1]); err != nil {
-		return fmt.Errorf("vnc: read the VeNCrypt subtypes: %w", err)
+		return 0, fmt.Errorf("vnc: read the VeNCrypt subtypes: %w", err)
 	}
 	raw := make([]byte, 4*int(b[0]))
 	if err := read(r, raw); err != nil {
-		return fmt.Errorf("vnc: read the VeNCrypt subtypes: %w", err)
+		return 0, fmt.Errorf("vnc: read the VeNCrypt subtypes: %w", err)
 	}
 	offered := make([]uint32, b[0])
 	for i := range offered {
@@ -82,29 +111,12 @@ func veNCrypt(r io.Reader, w io.Writer, a auth) error {
 	}
 	st := chooseSubtype(offered, a)
 	if st == 0 {
-		return fmt.Errorf("%w: the server offers the VeNCrypt subtypes %v", ErrNoSecurityType, offered)
+		return 0, fmt.Errorf("%w: the server offers the VeNCrypt subtypes %v", ErrNoSecurityType, offered)
 	}
 	if _, err := w.Write(binary.BigEndian.AppendUint32(nil, st)); err != nil {
-		return fmt.Errorf("vnc: %w", err)
+		return 0, fmt.Errorf("vnc: %w", err)
 	}
-	if st >= subX509None {
-		if err := read(r, b[:1]); err != nil {
-			return fmt.Errorf("vnc: read the VeNCrypt subtype's ack: %w", err)
-		}
-		if b[0] != 1 {
-			return fmt.Errorf("%w: the server did not start TLS", ErrRefused)
-		}
-		if err := a.startTLS(); err != nil {
-			return err
-		}
-	}
-	switch st {
-	case subX509Vnc, secVNCAuth:
-		return vncAuth(r, w, a.password)
-	case subX509Plain:
-		return plainAuth(w, a.plain)
-	}
-	return nil
+	return st, nil
 }
 
 // chooseSubtype picks a VeNCrypt subtype from those offered, or returns

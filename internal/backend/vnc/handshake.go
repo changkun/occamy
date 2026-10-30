@@ -199,19 +199,22 @@ func security(r io.Reader, w io.Writer, v int, a auth) (byte, error) {
 			return 0, fmt.Errorf("vnc: %w", err)
 		}
 	}
+	// inner is the type that authenticates: VeNCrypt's subtype within it.
+	inner := uint32(t)
 	var err error
 	switch t {
 	case secVNCAuth:
 		err = vncAuth(r, w, a.password)
 	case secVeNCrypt:
-		err = veNCrypt(r, w, a)
+		inner, err = veNCrypt(r, w, a)
 	}
 	if err != nil {
 		return 0, err
 	}
-	// SecurityResult follows VNC Authentication and VeNCrypt, and None
-	// only in 3.8 (RFC 6143, appendix A).
-	if t == secNone && v < 8 {
+	// SecurityResult follows every type but None before 3.8 (RFC 6143,
+	// appendix A), and so VeNCrypt too, unless its subtype is None, as
+	// TigerVNC has it.
+	if inner == secNone && v < 8 {
 		return t, nil
 	}
 	var b [4]byte
