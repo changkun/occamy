@@ -170,6 +170,31 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   wildcard host and `localhost`. A `version` merged in with `<<` counts,
   and one outside the file's first YAML document is an error. A v0 file
   is served as before.
+- Sign-in through an OpenID Connect provider, with `auth.oidc`: the
+  authorization code flow with PKCE, the ID token's issuer, audience,
+  expiry and signature checked by go-oidc with asymmetric algorithms
+  only, and its nonce and `azp` by occamyd, and the user and groups
+  taken from `subject_claim` and `groups_claim`. The browser goes back
+  to one of `auth.oidc.return_urls` with a one-time code in the
+  fragment, which the client exchanges at
+  `POST /api/v1/auth/oidc/token`, with its own PKCE verifier, for an
+  access token, so the token never appears in a URL. An OIDC subject
+  that names a static user, in any case or Unicode normal form, is
+  refused unless `link_static_users` links the two, and one with
+  characters that render as nothing is refused always.
+  `require_known_users` admits only the users whom an allow list names,
+  exactly, or by group. occamyd follows no redirect from the provider,
+  checks RFC 9207's `iss` on every answer to the callback, and a
+  provider that is down fails OIDC sign-ins, not occamyd's start
+  ([docs/configuration.md](docs/configuration.md#signing-in-through-oidc)).
+- Access tokens name where the user signed in, in `idp`: `local` for a
+  static user, `oidc` through OIDC. The sign-in's log line names it too.
+- The image carries the license, notice and patent files of the Go
+  code compiled into occamyd, in `/occamy/licenses/THIRD_PARTY_LICENSES`,
+  as release archives do. `scripts/third-party-licenses.sh` also takes
+  those of compiled packages that have their own, such as go-jose's
+  fork of `encoding/json`, and fails, writing nothing, when `go list`
+  fails, instead of writing the standard library's license alone.
 - `changkun.de/x/occamy/client`, a public Go client of protocol v1 in
   pure Go, for tests, tools and the Swift client's export layer. `Dial`
   performs the handshake over a WebSocket, and `Next` delivers frames

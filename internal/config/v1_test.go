@@ -174,6 +174,7 @@ func TestParseV1Example(t *testing.T) {
 				ClientID:         "occamy",
 				ClientSecretFile: path("run/secrets/oidc-client-secret"),
 				RedirectURL:      "https://occamy.example.com/api/v1/auth/oidc/callback",
+				ReturnURLs:       []string{"https://occamy.example.com/"},
 				Scopes:           []string{"openid", "profile", "email", "groups"},
 				SubjectClaim:     "email",
 				GroupsClaim:      "groups",
@@ -251,13 +252,68 @@ func TestParseV1Defaults(t *testing.T) {
 		t.Errorf("optional features on by default: %+v", f)
 	}
 
-	f, err = parse(t, head+"  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://occamy.example.com/cb}\n")
+	f, err = parse(t, head+"  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://occamy.example.com:8443/occamy/cb}\n")
 	if err != nil {
 		t.Fatal(err)
 	}
 	o := f.Auth.OIDC
-	if !reflect.DeepEqual(o.Scopes, config.DefaultOIDCScopes) || o.SubjectClaim != config.DefaultOIDCSubjectClaim || o.GroupsClaim != "" {
-		t.Errorf("oidc defaults: scopes %v, subject claim %q, groups claim %q", o.Scopes, o.SubjectClaim, o.GroupsClaim)
+	if !reflect.DeepEqual(o.Scopes, config.DefaultOIDCScopes) || o.SubjectClaim != config.DefaultOIDCSubjectClaim || o.GroupsClaim != "" || o.RequireKnownUsers {
+		t.Errorf("oidc defaults: scopes %v, subject claim %q, groups claim %q, require known users %v", o.Scopes, o.SubjectClaim, o.GroupsClaim, o.RequireKnownUsers)
+	}
+	if want := []string{"https://occamy.example.com:8443/"}; !reflect.DeepEqual(o.ReturnURLs, want) {
+		t.Errorf("oidc return URLs %q, want %q: the origin of the redirect URL", o.ReturnURLs, want)
+	}
+}
+
+// TestKnownNames checks the groups that a file names, which OIDC sign-in
+// maps to, and the users and groups that require_known_users admits: the
+// static users, and names in allow lists that are theirs, only when
+// link_static_users links them.
+func TestKnownNames(t *testing.T) {
+	for _, tt := range []struct {
+		link  string
+		users map[string]bool
+	}{
+		{"false", map[string]bool{"carol": true}},
+		{"true", map[string]bool{"alice": true, "bob": true, "carol": true, "Bob": true}},
+	} {
+		f, err := parse(t, head+`  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb, link_static_users: `+tt.link+`}
+`+conn+`  - {id: b, protocol: ssh, target: b, credentials: {prompt: true}, allow: {users: [carol, Bob], groups: [admins]}}
+`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		users, groups := f.Admitted()
+		if !reflect.DeepEqual(users, tt.users) || !reflect.DeepEqual(groups, map[string]bool{"admins": true}) {
+			t.Errorf("link_static_users %s: Admitted = %v, %v, want %v, [admins]", tt.link, users, groups, tt.users)
+		}
+		if got, want := f.KnownGroups(), map[string]bool{"ops": true, "dev": true, "admins": true}; !reflect.DeepEqual(got, want) {
+			t.Errorf("KnownGroups = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestSameName checks when two user names pass for one: under Unicode
+// case folding, once in NFC.
+func TestSameName(t *testing.T) {
+	for _, tt := range []struct {
+		a, b string
+		want bool
+	}{
+		{"alice", "alice", true},
+		{"alice", "Alice", true},
+		{"alice", "ALICE", true},
+		{"zo\u00eb", "zoe\u0308", true}, // precomposed and decomposed
+		{"Zo\u00cb", "zoe\u0308", true}, // and in another case
+		{"\u212aim", "kim", true},       // Kelvin sign, which folds to k
+		{"alice", "alice ", false},
+		{"alice", "al\u0456ce", false},    // Cyrillic i: a look-alike, not the same
+		{"alice", "\uff41lice", false},    // fullwidth a
+		{"stra\u00dfe", "strasse", false}, // simple folding only
+	} {
+		if got := config.SameName(tt.a, tt.b); got != tt.want {
+			t.Errorf("SameName(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
 	}
 }
 
@@ -471,6 +527,43 @@ func TestParseV1Problems(t *testing.T) {
 			{"auth.oidc.client_secret_file", "does not exist"},
 			{"auth.oidc.client_secret_env", "OCCAMY_TEST_UNSET is not set"},
 			{"auth.oidc.scopes", "must include openid"},
+		}},
+		{"oidc return urls", head + `  oidc:
+    issuer: https://id.example.com
+    client_id: occamy
+    redirect_url: https://o.example.com/cb
+    return_urls: ['/app', 'http://o.example.com/', 'https://o.example.com/#/signed-in', 'https://o.example.com/#', 'https://me@o.example.com/']
+`, []want{
+			{"auth.oidc.return_urls[0]", "is not an absolute http or https URL"},
+			{"auth.oidc.return_urls[1]", "needs https; http is accepted only on localhost"},
+			{"auth.oidc.return_urls[2]", "has a fragment"},
+			{"auth.oidc.return_urls[3]", "has a fragment"},
+			{"auth.oidc.return_urls[4]", "has a user name in it"},
+		}},
+		{"oidc known users: groups without groups_claim", `version: 1
+auth:
+  signing_key_file: DIR/signing.key
+  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb, require_known_users: true}
+connections:
+  - {id: a, protocol: ssh, target: a, credentials: {prompt: true}, allow: {groups: [admins]}}
+`, []want{
+			{"auth.oidc.require_known_users", "the file admits no one"},
+		}},
+		{"oidc known users: static users not linked", head + `  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb, require_known_users: true}
+`, []want{
+			{"auth.oidc.require_known_users", "the file admits no one"},
+		}},
+		// OIDC refuses a static user's name without link_static_users, so
+		// an allow list that names only static users admits no one.
+		{"oidc known users: only static users allowed", head + `  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb, require_known_users: true}
+` + conn, []want{
+			{"auth.oidc.require_known_users", "the file admits no one"},
+		}},
+		{"oidc known users: only static users' names in another case", head + `  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb, require_known_users: true}
+connections:
+  - {id: box, protocol: ssh, target: box.internal, credentials: {prompt: true}, allow: {users: [Alice, BOB]}}
+`, []want{
+			{"auth.oidc.require_known_users", "the file admits no one"},
 		}},
 
 		// guacd.
