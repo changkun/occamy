@@ -6,8 +6,12 @@
 # third-party-licenses.sh writes the license, notice and patent grant
 # files of the Go standard library and of every module compiled into
 # occamyd, on any release platform, to THIRD_PARTY_LICENSES (or the file
-# given as the first argument). Release archives carry it.
+# given as the first argument). Release archives carry it. jpegn ports
+# parts of jpegli, whose notice it does not carry, so jpegli's, kept in
+# third_party/jpegli, follows jpegn's.
 set -eu
+
+jpegli=$(dirname "$0")/../third_party/jpegli/LICENSE
 
 out=${1:-THIRD_PARTY_LICENSES}
 rule================================================================================
@@ -38,5 +42,10 @@ section() {
 			cat "$dir/$f"
 			echo
 		done
+		if [ "$path" = github.com/gen2brain/jpegn ]; then
+			section "github.com/google/jpegli, which $path ports in part: LICENSE"
+			cat "$jpegli"
+			echo
+		fi
 	done
 } > "$out"

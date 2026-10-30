@@ -17,8 +17,10 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o occamyd .
-# The licences of the lossy tile encoders, and the WebM patent grant that
-# comes with gen2brain/vpx's VP8, for the runtime image's licenses/.
+# The licences of the lossy tile encoders, for the runtime image's
+# licenses/, with the PATENTS file gen2brain/vpx ships: the WebM Project's
+# patent grant, which covers Google's implementations of VP8 and does not
+# name vpx's port.
 RUN mkdir -p /licenses/vpx /licenses/jpegn \
 	&& vpx=$(go list -m -f '{{.Dir}}' github.com/gen2brain/vpx) \
 	&& cp "$vpx/COPYING" "$vpx/COPYING.webpkit" "$vpx/PATENTS" /licenses/vpx/ \
@@ -35,6 +37,9 @@ COPY client/occamy-web/LICENSE.guacamole ./licenses/guacamole/LICENSE
 COPY client/occamy-web/NOTICE.guacamole ./licenses/guacamole/NOTICE
 COPY --from=build /licenses/vpx ./licenses/vpx/
 COPY --from=build /licenses/jpegn ./licenses/jpegn/
+# jpegn's adaptive quantisation and progressive scans are ported from
+# jpegli, whose notice jpegn's own LICENSE does not carry.
+COPY third_party/jpegli/LICENSE ./licenses/jpegli/
 COPY --from=web /occamy/client/occamy-web/dist ./client/occamy-web/dist
 
 EXPOSE 5636
