@@ -153,8 +153,9 @@ func (s *sliceWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// Inflater decodes deflate payloads (codec 2). It inflates no more than
-// the container of the rectangle's size can hold, and allocates nothing
+// Inflater decodes deflate payloads (codec 2). It inflates at most one
+// byte past the longest container of the rectangle's size, max(1 + 4wh,
+// 1026 + wh) bytes, whatever the payload inflates to, and allocates nothing
 // that grows with the payload: its decompressor and one row, both reused
 // between calls. It is not safe for concurrent use; its zero value is
 // ready to use.

@@ -991,7 +991,7 @@ A codec ID is a u8. Codec 0 is not a codec: it appears only in a hidden
 | 2 | `deflate` | A raw DEFLATE stream ([RFC 1951](https://www.rfc-editor.org/rfc/rfc1951)) of a [deflate container](#the-deflate-container); browsers inflate it with `DecompressionStream('deflate-raw')` | Tiles of up to 256 colours, and cursors |
 | 3 | `png` | A PNG file | Nothing |
 | 4 | `jpeg` | A JFIF file, opaque | Tiles of more than 256 colours, to a client that lists `jpeg` but not `webp` |
-| 5 | `webp` | A WebP file, lossy or lossless | Tiles of more than 256 colours, lossy; cursors, lossless, to a client that lists neither `deflate` nor `raw` |
+| 5 | `webp` | A WebP file, lossy or lossless, with straight alpha | Tiles of more than 256 colours, lossy and opaque; cursors, lossless, to a client that lists neither `deflate` nor `raw` |
 | 6 | `cached` | Empty: the tile is drawn from its cache slot | Tiles only, once the server has a tile cache |
 | 7 to 0x7F | | Unassigned | |
 | 0x80 to 0xFF | | Reserved for a video tier after 1.0 | |
@@ -1002,9 +1002,19 @@ holds a payload of each codec occamyd sends, with the pixels it
 encodes, and payloads of `deflate` that a receiver refuses. A lossy
 payload's `min_psnr` is 3 dB under what libwebp's decoding, and so a
 browser's, or `image/jpeg`'s reaches. Lossy WebP is VP8, whose colours
-are BT.601 limited-range YCbCr: a decoder that reads them as full-range,
-as `golang.org/x/image/webp`'s `image.YCbCr` drawn as it is does, falls
-about 10 dB short.
+are BT.601 limited-range YCbCr: a decoder that reads them as full-range
+falls about 10 dB short, to about 27 dB on the golden vectors. In Go,
+that is any `image.YCbCr` or `image.NYCbCrA` drawn with the standard
+library's conversion, which is JPEG's full-range one: what
+`golang.org/x/image/webp` returns, and what `github.com/gen2brain/vpx`
+returns unless asked for RGBA.
+
+Before it decodes a `jpeg` or `webp` payload, a receiver checks the size
+that its header claims against the message's rectangle, and refuses one
+that differs with `protocol-error`: a few bytes of header can claim a
+frame that takes hundreds of megabytes to decode into. In Go, that is
+`DecodeConfig` before `Decode`, or the decoder's own limit on the frame's
+size where it has one.
 
 What occamyd sends follows the [codec measurement](benchmarks/codecs.md):
 a tile of up to 256 colours is lossless, and one of more is lossy, in
@@ -1012,7 +1022,9 @@ the best codec of each kind that the client lists, whatever its order. A
 client that lists no lossy codec gets every tile lossless, and one that
 lists no lossless codec gets every tile lossy. A lossy tile message may
 cover several tiles side by side, so that the lossy format's headers are
-paid once. JPEG has no alpha, so a client that lists only `jpeg` gets no
+paid once. The screen is opaque, and occamyd encodes a lossy tile
+without alpha. A cursor's alpha is straight in every codec, as it is in
+`raw`. JPEG has no alpha, so a client that lists only `jpeg` gets no
 `cursor` and draws its own pointer.
 
 ### The deflate container
@@ -1035,19 +1047,31 @@ form, says how the pixels follow:
   256 colours, then the colours. If there are two or more, each pixel's
   index into them follows, row by row from the top, packed at 1, 2, 4 or
   8 bits for up to 2, 4, 16 or 256 colours: the first pixel of a byte is
-  in its most significant bits. Each row starts on a byte, and the bits
-  that pad its last byte are zero. A palette of one colour has no
-  indices: every pixel is that colour.
+  in its most significant bits. Each row starts on a byte. A sender
+  writes the bits that pad its last byte as zero, and a receiver
+  ignores them. A palette of one colour has no indices: every pixel is
+  that colour. A palette may hold colours that no pixel uses, and a
+  colour more than once.
 - Raw pixels are `w × h` pixels, row by row from the top.
 
 A receiver refuses, with `protocol-error`, a payload that is not one
 DEFLATE stream with nothing after it, a form other than 0 to 3, a
 container longer or shorter than its form and the rectangle call for, or
-an index beyond the palette; so it never inflates more than `1 + 4 × w ×
-h` bytes. A sender may use any form for any pixels. occamyd sends a
-palette when the pixels have at most 256 colours, alpha included, and
-the forms with alpha only when a pixel is not opaque, which happens for
-cursors.
+an index beyond the palette. The longest container of a rectangle is
+`max(1 + 4wh, 1026 + wh)` bytes: raw pixels with alpha, or 256 colours
+with alpha and a byte an index, which is the longer for a rectangle of
+up to 341 pixels. A receiver that inflates as it reads stops one byte
+past that, the byte that shows the container is longer; it never needs
+to hold more, whatever the payload inflates to. The golden file's
+payloads include a bomb, 1 MiB of zeros, but a receiver that
+inflates it whole and then refuses it passes that vector too: what
+shows the cap is a harness that counts the bytes inflated, as
+`internal/codec`'s tests and fuzzer do.
+
+A sender may use any form for any pixels. occamyd sends a palette when
+the pixels have at most 256 colours, alpha included, and the forms with
+alpha only when a pixel is not opaque, which happens only for cursors,
+since the screen is opaque.
 
 A tile of 3 × 2 pixels in three colours, its container before deflate:
 
