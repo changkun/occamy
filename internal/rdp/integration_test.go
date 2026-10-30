@@ -27,7 +27,8 @@ package rdp
 // time the run ends at the latest, its -timeout: concurrent runs do not
 // share them. A run removes them when it ends; one that panics, as on
 // -timeout, leaves them behind, and the next run removes those whose
-// time has passed.
+// time has passed. It matches the whole name, so that it removes nobody
+// else's image or container.
 
 import (
 	"bytes"
@@ -43,7 +44,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -78,11 +78,8 @@ func TestMain(m *testing.M) {
 	}())
 }
 
-// runPrefix starts the names of the images and containers that runs
-// make, which go on with the Unix time a run ends at the latest.
-const runPrefix = "occamy-rdp-it-until"
-
-// runName returns this run's name for its image and container.
+// runName returns this run's name for its image and container, which
+// runPattern (runs_test.go) matches.
 func runName() string {
 	timeout := 24 * time.Hour
 	if f := flag.Lookup("test.timeout"); f != nil {
@@ -93,29 +90,18 @@ func runName() string {
 	return fmt.Sprintf("%s%d-%d", runPrefix, time.Now().Add(timeout+time.Minute).Unix(), os.Getpid())
 }
 
-// expired reports whether name is a run's whose time has passed.
-func expired(name string) bool {
-	_, rest, ok := strings.Cut(name, runPrefix)
-	if !ok {
-		return false
-	}
-	until, _, _ := strings.Cut(rest, "-")
-	t, err := strconv.ParseInt(until, 10, 64)
-	return err == nil && time.Now().Unix() > t
-}
-
 // cleanUp removes the containers and images of earlier runs whose time
 // has passed. podman lists images with a registry before the name.
 func cleanUp() {
 	out, _ := exec.Command(engine, "ps", "-a", "--filter", "name="+runPrefix, "--format", "{{.Names}}").Output()
 	for _, name := range strings.Fields(string(out)) {
-		if expired(name) {
+		if expired(name, time.Now()) {
 			exec.Command(engine, "rm", "-f", name).Run()
 		}
 	}
 	out, _ = exec.Command(engine, "images", "--format", "{{.Repository}}").Output()
 	for _, repo := range strings.Fields(string(out)) {
-		if expired(repo) {
+		if expired(repo, time.Now()) {
 			exec.Command(engine, "rmi", "-f", repo).Run()
 		}
 	}
