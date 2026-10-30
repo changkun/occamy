@@ -36,6 +36,11 @@ occamy-record`), as the doc comment of
 `OCCAMY_CONFORMANCE_DUMP=<dir> go test -run TestConformance
 ./internal/backend/guacd` writes the failing frames there as PNG files.
 
+`go test -tags rdp_integration -timeout 30m ./internal/rdp` builds the
+bench desktop image and starts an xrdp container with Podman
+(`OCCAMY_CONTAINER_ENGINE=docker` for Docker) to test the RDP client
+against; `internal/rdp/integration_test.go` describes its settings.
+
 `make lint` runs golangci-lint v2 with the linters and formatters in
 `.golangci.yml`, as CI does. Code must be `gofmt`ed, with imports grouped
 by `goimports`.
