@@ -533,7 +533,7 @@ shown. See [Frames and flow control](#frames-and-flow-control).
 | Field | Type | Meaning |
 |-------|------|---------|
 | frame_id | u32 | The frame's ID, from its `frame-end`. |
-| decode_time | u32 | How long the client took to decode and draw the frame, in microseconds. |
+| decode_time | u32 | How long the client took to decode and draw the frame, in microseconds: the time from its `frame-end` arriving to this acknowledgement, any wait for the frame to be shown included. The server takes it out of the round trip and spaces its frames by it. |
 
 ```hex
 # vector: frame-ack
@@ -1054,7 +1054,11 @@ windowed the same way, so bulk output coalesces instead of queueing.
 
 The one exception is input: after the server applies an input from a
 viewer, the frame that carries its effect goes out at once, one beyond
-the window if the window is full.
+the window if the window is full. A viewer therefore never has more than
+`frame_window` + 1 frames unacknowledged, and a client may close with
+`protocol-error` a server that sends more. A client that cannot show
+frames as fast as they come keeps them unacknowledged meanwhile, which
+holds the server back instead of queueing stale frames.
 
 ### Bytes in flight
 
