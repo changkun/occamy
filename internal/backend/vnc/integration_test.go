@@ -183,6 +183,9 @@ func referenceFrame(t *testing.T, addr, pw string) *image.RGBA {
 	must(err)
 
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	// seen marks the pixels drawn so far, so that rectangles which overlap
+	// count their pixels once: the frame is whole when each is drawn.
+	seen := make([]bool, w*h)
 	covered := 0
 	for covered < w*h {
 		hdr := readN(4)
@@ -215,9 +218,22 @@ func referenceFrame(t *testing.T, addr, pw string) *image.RGBA {
 					B: uint8(v >> pf.bshift & uint32(pf.bmax) * 255 / uint32(pf.bmax)),
 					A: 0xff,
 				}
-				img.SetRGBA(x+i%rw, y+i/rw, c)
+				px, py := x+i%rw, y+i/rw
+				if px >= w || py >= h {
+					t.Fatalf("reference client: a rectangle of %dx%d at (%d,%d) on a screen of %dx%d", rw, rht, x, y, w, h)
+				}
+				img.SetRGBA(px, py, c)
+				if !seen[py*w+px] {
+					seen[py*w+px] = true
+					covered++
+				}
 			}
-			covered += rw * rht
+		}
+		// TigerVNC may answer with an update that leaves pixels out, the
+		// cursor alone; the rest comes with the next request.
+		if covered < w*h {
+			_, err = nc.Write(appendUpdateRequest(nil, false, image.Rect(0, 0, w, h)))
+			must(err)
 		}
 	}
 	return img

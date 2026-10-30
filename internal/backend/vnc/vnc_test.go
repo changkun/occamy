@@ -290,7 +290,7 @@ func TestHandshake(t *testing.T) {
 			if s.c.pf != wantPixelFormat {
 				t.Errorf("pixel format %+v, want %+v", s.c.pf, wantPixelFormat)
 			}
-			if want := slices.Concat([]int32{encCopyRect, encRaw, encCursor, encDesktopSize}, extensions); !slices.Equal(s.c.encodings, want) {
+			if want := slices.Concat([]int32{encCopyRect, encTight, encZRLE, encHextile, encRaw, encCursor, encDesktopSize}, extensions); !slices.Equal(s.c.encodings, want) {
 				t.Errorf("encodings %v, want %v", s.c.encodings, want)
 			}
 			waitFor(t, "the title", func() bool { return s.sink.TitleText() == "Desktop ✓" })
@@ -922,8 +922,8 @@ func TestProtocolErrors(t *testing.T) {
 	}{
 		{"unknown message", func(*serverConn) []byte { return []byte{99} }, "unknown message type 99"},
 		{"unknown encoding", func(*serverConn) []byte {
-			return putUpdate(rectHeader(image.Rect(0, 0, 8, 8), 5)) // Hextile
-		}, "unsupported encoding 5"},
+			return putUpdate(rectHeader(image.Rect(0, 0, 8, 8), 2)) // RRE
+		}, "unsupported encoding 2"},
 		{"raw beyond the screen", func(c *serverConn) []byte {
 			return putUpdate(putRaw(c.pf, pattern(80, 80, 0), image.Rect(60, 0, 70, 4)))
 		}, "outside the screen"},

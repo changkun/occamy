@@ -94,6 +94,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   before it reads or allocates, resizes the screen at most once an
   update and ten times a second, and bounds its queued input by bytes.
   `occamyd` does not use it yet.
+- The native VNC backend decodes Tight, ZRLE and Hextile, and asks for
+  them in that order before Raw. Tight stays lossless, since the backend
+  asks for no JPEG quality, but JPEG and the gradient filter are decoded
+  when a server sends them. JPEG must be sequential (baseline or
+  extended), with a scan for each component and at most 65536 pixels, as
+  TigerVNC, libvncserver and QEMU send it. Compressed lengths, palettes
+  and runs are checked before anything is read or allocated, a
+  rectangle's zlib data is inflated only as far as its pixels need, and
+  an update may draw at most four times the screen's pixels. The fuzz
+  corpus holds sessions recorded from x11vnc and TigerVNC.
 - RFB extensions in the native VNC backend: VeNCrypt with an X.509
   certificate and Plain, None or VNC Authentication inside TLS, asking
   the owner for a username or password the configuration lacks;
