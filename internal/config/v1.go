@@ -276,10 +276,18 @@ func (k *keys) walk(n *yaml.Node, t reflect.Type, path string) {
 			return
 		}
 		fields := yamlFields(t)
+		var merges []*yaml.Node
+		// Merged keys are walked last, so that the lines of the keys
+		// they override are the ones recorded.
+		defer func() {
+			for _, m := range merges {
+				k.merge(m, t, path)
+			}
+		}()
 		for i := 0; i+1 < len(n.Content); i += 2 {
 			key, value := n.Content[i], n.Content[i+1]
 			if key.Tag == "!!merge" {
-				k.merge(value, t, path)
+				merges = append(merges, value)
 				continue
 			}
 			p := joinPath(path, key.Value)

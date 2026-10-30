@@ -570,6 +570,23 @@ connections:
 	}
 }
 
+// TestParseV1MergeLines checks that a key which overrides a merged key
+// is reported on its own line.
+func TestParseV1MergeLines(t *testing.T) {
+	_, err := parse(t, head+`connections:
+  - &base {id: a, protocol: ssh, target: a, credentials: {prompt: true}, allow: {groups: [ops]}}
+  - <<: *base
+    id: B
+`)
+	var problems config.Problems
+	if !errors.As(err, &problems) || len(problems) != 1 {
+		t.Fatalf("ParseV1() error = %v, want one problem", err)
+	}
+	if p := problems[0]; p.Line != 10 || p.Path != "connections[1].id" {
+		t.Errorf("problem at line %d, %s; want line 10, connections[1].id", p.Line, p.Path)
+	}
+}
+
 func TestParseV1Unreadable(t *testing.T) {
 	if os.Geteuid() == 0 {
 		t.Skip("root reads any file")
