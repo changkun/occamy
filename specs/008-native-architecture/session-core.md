@@ -495,8 +495,13 @@ arise, rather than inheriting those fixes.
 - **Later fix:** the Go client core's end-to-end tests found that a
   `resize-request` panicked the terminal writer: the rows in motion at
   the input were recorded for the old size and indexed with the new
-  rows. Rows of a screen of another size now count as still, as tiles
-  already did (`TestTerminalResizeRequest`,
+  rows. occamyd hit it too, when a `resize-request` added rows while an
+  input was pending. Both places that read those rows, the search for
+  the input's effect (`termEffect`) and the record of what the effect
+  changed (`keepEffects`), now take rows of a screen of another size as
+  still, as tiles already did (`TestTerminalResizeRequest`,
+  `TestTerminalResizeWhileBusy` with every row in motion,
+  `TestTermEffectResized`, `TestKeepEffectsResized`;
   [client-core](client-core.md)).
 - **Later fix:** the client core's `TestInputLastSeq` failed 15 runs
   of 200 under `-race`: a frame showed a key's effect with a
