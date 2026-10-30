@@ -83,9 +83,10 @@ func traceData(t testing.TB) (fast, slow [][]byte, bitmaps []bitmapData) {
 }
 
 // The update fuzzers draw on a desktop as wide as the recordings', so
-// that xrdp's full-width rows fit, and short, so that a PDU's budget of
-// decoded pixels, and with it an execution, stays small. Rows below it
-// are not decoded.
+// that xrdp's full-width rows fit, and short, so that the bucket of
+// pixels the client decodes before it would wait, and with it an
+// execution, stays small: the test client fails where it would wait.
+// Rows below the desktop are not decoded.
 const fuzzWidth, fuzzHeight = 1024, 64
 
 // singleUpdates returns the fast-path updates of the recordings, the

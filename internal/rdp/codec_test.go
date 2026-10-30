@@ -7,11 +7,13 @@ package rdp
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"image"
 	"image/color"
 	"math/rand/v2"
 	"slices"
 	"testing"
+	"time"
 )
 
 // Each order of the interleaved RLE stream, [MS-RDPBCGR] 2.2.9.1.1.3.1.2.4,
@@ -384,13 +386,47 @@ func TestPointerShapes(t *testing.T) {
 }
 
 // testClient is a client in the active state with a w×h desktop, whose
-// writes go nowhere.
+// writes go nowhere. Where it would wait, as for its decoding budget, it
+// fails with errPaced, so that a fuzzer's execution decodes at most one
+// bucket of pixels.
 func testClient(w, h int) *Client {
+	c, clock := testClock(w, h)
+	clock.err = errPaced
+	return c
+}
+
+// errPaced is the error of a test client that would wait.
+var errPaced = errors.New("the client would wait")
+
+// testClock returns a client as testClient does, whose waits pass at
+// once on the clock it returns.
+func testClock(w, h int) (*Client, *fakeClock) {
+	clock := &fakeClock{t: time.Unix(1<<30, 0)}
 	c := &Client{
 		width: w, height: h,
 		stats: Stats{Bitmaps: map[string]int{}, Ignored: map[string]int{}},
 		t:     &transport{conn: discardConn{}},
+		now:   clock.now,
+		sleep: clock.sleep,
 	}
-	c.budget = c.pixelBudget() // as for a PDU, for tests that draw bitmaps directly
-	return c
+	return c, clock
+}
+
+// fakeClock is a client's clock in the tests. Its sleeps pass at once
+// and add up, or fail with err.
+type fakeClock struct {
+	t     time.Time
+	slept time.Duration
+	err   error
+}
+
+func (f *fakeClock) now() time.Time { return f.t }
+
+func (f *fakeClock) sleep(d time.Duration) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.t = f.t.Add(d)
+	f.slept += d
+	return nil
 }

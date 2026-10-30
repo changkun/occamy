@@ -22,10 +22,6 @@ const (
 	// scanlines; the client bounds bitmaps by the desktop as well, and
 	// this only keeps the decoder from allocating gigabytes on its own.
 	maxBitmapPixels = 4096 * 2048
-	// retainPixels bounds the scratch buffers the decoder keeps between
-	// bitmaps: a 64×64 tile, or eight rows of 8192 pixels, fits. A larger
-	// bitmap gets buffers of its own, which the decoder drops after.
-	retainPixels = 1 << 16
 )
 
 // bitmapData is one TS_BITMAP_DATA of a bitmap update.
@@ -68,7 +64,10 @@ func parseBitmapUpdate(p []byte, f func(*bitmapData) error) error {
 	return r.err
 }
 
-// decoder decodes bitmaps. It keeps its buffers between bitmaps.
+// decoder decodes bitmaps. It keeps its buffers between bitmaps, so
+// that they grow to the largest bitmap and stay: xrdp's are at most 8192
+// pixels, Windows' 64×64 tiles. The client drops them when the desktop
+// changes, which bounds them by the largest bitmap the desktop allows.
 type decoder struct {
 	raw     []uint32
 	rgba    []byte
@@ -84,9 +83,6 @@ func (d *decoder) decode(b *bitmapData) ([]byte, error) {
 		return nil, fmt.Errorf("rdp: bitmap of %d×%d pixels", w, h)
 	}
 	n := w * h
-	if n > retainPixels {
-		defer d.drop()
-	}
 	if cap(d.rgba) < 4*n {
 		d.rgba = make([]byte, 4*n)
 	}
@@ -139,20 +135,10 @@ func (d *decoder) decode(b *bitmapData) ([]byte, error) {
 	return out, nil
 }
 
-// drop lets go of the scratch buffers that outgrew retainPixels. The
-// slice decode returned stays valid.
+// drop lets go of the scratch buffers. The slice decode returned stays
+// valid.
 func (d *decoder) drop() {
-	if cap(d.rgba) > 4*retainPixels {
-		d.rgba = nil
-	}
-	if cap(d.raw) > retainPixels {
-		d.raw = nil
-	}
-	for i := range d.planes {
-		if cap(d.planes[i]) > retainPixels {
-			d.planes[i] = nil
-		}
-	}
+	d.rgba, d.raw, d.planes = nil, nil, [4][]byte{}
 }
 
 // convert turns pixel values of bpp bits into RGBA.

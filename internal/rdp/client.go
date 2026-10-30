@@ -123,15 +123,21 @@ type Client struct {
 	finalized bool
 
 	// Owned by Connect, then Run.
-	ctx        context.Context // ends a wait for resizeEvery; Background if nil
+	ctx        context.Context // ends a wait; Background if nil
 	dec        decoder
 	cursors    [maxPointerCache]cursor
 	frag       []byte
 	fragging   bool // a first fragment came, and its last has not
-	budget     int  // the pixels the current PDU may still decode
 	lastResize time.Time
+	tokens     float64   // the pixels the client may decode; below 0, its debt
+	paced      time.Time // when tokens was last brought up to date
 	rbuf       []byte
 	errInfo    ErrorInfo
+
+	// The tests replace these: now, if set, is the time, and sleep, if
+	// set, waits.
+	now   func() time.Time
+	sleep func(time.Duration) error
 }
 
 // Limits on what the server makes the client do.
@@ -146,6 +152,14 @@ const (
 	// that resizes the desktop sooner waits, so that a server cannot make
 	// the session reallocate its screen faster than ten times a second.
 	resizeEvery = 100 * time.Millisecond
+	// decodeRate bounds the pixels of bitmaps the client decodes, a few
+	// bytes of which can describe a whole desktop: 32 Mi pixels a second,
+	// 42 desktops of 1024×768, 16 of 1920×1080, 4 of 3840×2160 or 1 of
+	// the largest. Real content costs about two bytes a pixel as bitmap
+	// updates, so a server needs over 500 Mbit/s to reach it. A token
+	// bucket holds two desktops and a tile; while it is empty, the client
+	// waits, and the server's updates queue behind it.
+	decodeRate = 1 << 25
 )
 
 // checkDesktop returns an error if a desktop of w×h is empty or exceeds
@@ -504,7 +518,7 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 	c.ctx = ctx
 	w, h := c.Size()
 	out.Resize(w, h)
-	c.lastResize = time.Now()
+	c.lastResize = c.clock()
 	for {
 		f, buf, err := c.t.readFrame(c.rbuf)
 		c.rbuf = buf
@@ -559,7 +573,6 @@ func (c *Client) disconnected() error {
 // and a second in the same PDU is refused, so that a few bytes cannot
 // make the client reallocate its desktop again and again.
 func (c *Client) handleShareControl(out Output, data []byte) (done bool, err error) {
-	c.budget = c.pixelBudget()
 	for len(data) >= 2 {
 		r := reader{b: data}
 		total := int(r.u16())
@@ -622,6 +635,7 @@ func (c *Client) activate(out Output, body []byte) error {
 		if err := c.waitResize(); err != nil {
 			return err
 		}
+		c.dec.drop()
 		out.Resize(caps.width, caps.height)
 	}
 	return nil
@@ -629,21 +643,60 @@ func (c *Client) activate(out Output, body []byte) error {
 
 // waitResize waits until resizeEvery has passed since the last resize.
 func (c *Client) waitResize() error {
-	if wait := time.Until(c.lastResize.Add(resizeEvery)); wait > 0 {
-		ctx := c.ctx
-		if ctx == nil {
-			ctx = context.Background()
-		}
-		t := time.NewTimer(wait)
-		select {
-		case <-ctx.Done():
-			t.Stop()
-			return ctx.Err()
-		case <-t.C:
+	if d := c.lastResize.Add(resizeEvery).Sub(c.clock()); d > 0 {
+		if err := c.wait(d); err != nil {
+			return err
 		}
 	}
-	c.lastResize = time.Now()
+	c.lastResize = c.clock()
 	return nil
+}
+
+// clock returns the time.
+func (c *Client) clock() time.Time {
+	if c.now != nil {
+		return c.now()
+	}
+	return time.Now()
+}
+
+// wait waits for d, or until c.ctx ends.
+func (c *Client) wait(d time.Duration) error {
+	if c.sleep != nil {
+		return c.sleep(d)
+	}
+	ctx := c.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// pace charges n decoded pixels to the token bucket of decodeRate, and
+// waits while the bucket is in debt. The wait follows from the debt, so
+// a bitmap larger than the bucket waits its share too.
+func (c *Client) pace(n int) error {
+	now := c.clock()
+	w, h := c.Size()
+	burst := float64(2*w*h + (bitmapPad+1)*(bitmapPad+1))
+	if c.paced.IsZero() {
+		c.tokens = burst
+	} else {
+		c.tokens = min(burst, c.tokens+now.Sub(c.paced).Seconds()*decodeRate)
+	}
+	c.paced = now
+	c.tokens -= float64(n)
+	if c.tokens >= 0 {
+		return nil
+	}
+	return c.wait(time.Duration(-c.tokens / decodeRate * float64(time.Second)))
 }
 
 // handleShareData handles a share data PDU after its share control
@@ -753,7 +806,6 @@ func (c *Client) handleFastPath(out Output, f frame) error {
 	if f.hdr&0xc0 != 0 {
 		return errors.New("rdp: encrypted fast-path PDU under TLS")
 	}
-	c.budget = c.pixelBudget()
 	r := reader{b: f.data}
 	for r.len() > 0 {
 		hdr := r.u8()
@@ -899,18 +951,9 @@ func (c *Client) cachedPointer(out Output, p []byte) error {
 // pixels at most, and xrdp not at all.
 const bitmapPad = 63
 
-// pixelBudget is the number of pixels the bitmaps of one PDU may decode
-// in all: twice the desktop, since a server draws each pixel of an
-// update once. A few bytes of compressed data describe a large bitmap,
-// so without it a 64 KiB PDU could cost seconds of CPU.
-func (c *Client) pixelBudget() int {
-	w, h := c.Size()
-	return 2*w*h + (bitmapPad+1)*(bitmapPad+1)
-}
-
 // drawBitmap decodes b and draws it. It decodes only bitmaps that fit
 // their destination and the desktop, that show on the desktop and that
-// have data, within the PDU's budget of pixels.
+// have data, at the pace of decodeRate.
 func (c *Client) drawBitmap(out Output, b *bitmapData) error {
 	w, h := c.Size()
 	if b.width <= 0 || b.height <= 0 ||
@@ -923,11 +966,9 @@ func (c *Client) drawBitmap(out Output, b *bitmapData) error {
 		c.count(func(s *Stats) { s.Ignored["empty bitmaps"]++ })
 		return nil
 	}
-	n := b.width * b.height
-	if n > c.budget {
-		return fmt.Errorf("rdp: an update decodes more than %d pixels", c.pixelBudget())
+	if err := c.pace(b.width * b.height); err != nil {
+		return err
 	}
-	c.budget -= n
 	rgba, err := c.dec.decode(b)
 	if err != nil {
 		return err

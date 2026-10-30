@@ -242,6 +242,12 @@ func replay(t *testing.T, s *fakeServer, cfg Config) (*Client, *screen) {
 	if err != nil {
 		t.Fatalf("Connect: %v (server: %v)", err, <-served)
 	}
+	// xrdp's updates, played back at once, stay within the decoding
+	// budget.
+	c.sleep = func(d time.Duration) error {
+		t.Errorf("the client waited %v to decode xrdp's updates", d)
+		return nil
+	}
 	scr := &screen{}
 	err = c.Run(ctx, scr)
 	if err := <-served; err != nil {

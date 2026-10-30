@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"net"
 	"strings"
@@ -93,6 +94,7 @@ func TestDemandActiveRepeated(t *testing.T) {
 // and the wait ends with the context.
 func TestDemandActiveResizeRate(t *testing.T) {
 	c := testClient(1024, 768)
+	c.now, c.sleep = nil, nil // the clock and its timers
 	out := &sizeRecorder{}
 	c.lastResize = time.Now()
 	start := time.Now()
@@ -136,34 +138,124 @@ func fastPathBitmaps(n, w, h, bpp int, data []byte) []byte {
 	return f.b
 }
 
-// A few bytes of RLE describe a whole desktop. A PDU full of such
-// rectangles decodes at most its budget of pixels, and the decoder does
-// not keep the large buffers.
-func TestBitmapPixelBudget(t *testing.T) {
-	c := testClient(1024, 768)
+// A few bytes of RLE describe a whole desktop: a mega-mega background
+// run of 65535 pixels is 3 bytes. The client decodes such rectangles at
+// decodeRate, whether they come in one PDU or one per PDU, and a bitmap
+// larger than the bucket waits its share.
+func TestDecodeRate(t *testing.T) {
+	const w, h, n = 1024, 768, 50
+	desktop := fastPathBitmaps(1, w, h, 16, []byte{0xf0, 0xff, 0xff})
+	burst := 2*w*h + (bitmapPad+1)*(bitmapPad+1)
+	want := time.Duration(float64(n*w*h-burst) / decodeRate * float64(time.Second))
+	near := func(d time.Duration) bool { return d > want-time.Millisecond && d < want+time.Millisecond }
 	scr := &screen{}
-	scr.Resize(1024, 768)
-	// A mega-mega background run of 65535 pixels, 3 bytes for a whole
-	// desktop: 3000 of them fit a fast-path PDU.
+	scr.Resize(w, h)
+
+	// One PDU of n desktops, and n PDUs of one.
+	c, clock := testClock(w, h)
+	if err := c.handleFastPath(scr, frame{fastPath: true, data: fastPathBitmaps(n, w, h, 16, []byte{0xf0, 0xff, 0xff})}); err != nil {
+		t.Fatal(err)
+	}
+	if c.Stats().Bitmaps["rle16"] != n || !near(clock.slept) {
+		t.Errorf("one PDU of %d desktops: decoded %d, waited %v, want %v", n, c.Stats().Bitmaps["rle16"], clock.slept, want)
+	}
+	c, clock = testClock(w, h)
+	for range n {
+		if err := c.handleFastPath(scr, frame{fastPath: true, data: desktop}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !near(clock.slept) {
+		t.Errorf("%d PDUs of one desktop: waited %v, want %v", n, clock.slept, want)
+	}
+
+	// Without a wait, the bucket holds two desktops and a tile.
+	c = testClient(w, h)
+	err := c.handleFastPath(scr, frame{fastPath: true, data: fastPathBitmaps(n, w, h, 16, []byte{0xf0, 0xff, 0xff})})
+	if !errors.Is(err, errPaced) || c.Stats().Bitmaps["rle16"] != 2 {
+		t.Errorf("an empty bucket: %v after %d desktops, want 2", err, c.Stats().Bitmaps["rle16"])
+	}
+
+	// A bitmap larger than the bucket, as a desktop of 1×8192 allows,
+	// waits for its share, not for ever.
+	c, clock = testClock(1, 8192)
+	bw, bh := 1+bitmapPad, 8192+bitmapPad
+	big := fastPathBitmaps(1, bw, bh, 16, []byte{0xf0, 0xff, 0xff})
+	wantBig := time.Duration(float64(bw*bh-(2*8192+(bitmapPad+1)*(bitmapPad+1))) / decodeRate * float64(time.Second))
+	if err := c.handleFastPath(&sizeRecorder{}, frame{fastPath: true, data: big}); err != nil || clock.slept != wantBig {
+		t.Errorf("a bitmap of %d×%d on a desktop of 1×8192: %v, waited %v, want %v", bw, bh, err, clock.slept, wantBig)
+	}
+
+	// Real traffic never waits: the motion scene's 30 desktops of
+	// 1024×768 a second, or 15 of 1920×1080.
+	for _, tc := range []struct{ w, h, fps int }{{1024, 768, 30}, {1920, 1080, 15}} {
+		c, clock = testClock(tc.w, tc.h)
+		scr.Resize(tc.w, tc.h)
+		pdu := fastPathBitmaps(1, tc.w, tc.h, 16, []byte{0xf0, 0xff, 0xff})
+		for range 2 * tc.fps {
+			if err := c.handleFastPath(scr, frame{fastPath: true, data: pdu}); err != nil {
+				t.Fatal(err)
+			}
+			clock.t = clock.t.Add(time.Second / time.Duration(tc.fps))
+		}
+		if clock.slept != 0 {
+			t.Errorf("%d desktops of %d×%d a second waited %v", tc.fps, tc.w, tc.h, clock.slept)
+		}
+	}
+
+	// Rectangles with no data are not decoded or charged at all.
+	c = testClient(w, h)
 	start := time.Now()
-	err := c.handleFastPath(scr, frame{fastPath: true, data: fastPathBitmaps(3000, 1024, 768, 16, []byte{0xf0, 0xff, 0xff})})
-	if d := time.Since(start); err == nil || !strings.Contains(err.Error(), "decodes more than") || d > time.Second {
-		t.Errorf("a PDU of 3000 desktop-sized rectangles: %v after %v", err, d)
-	}
-	if n := c.Stats().Bitmaps["rle16"]; n != 2 {
-		t.Errorf("decoded %d rectangles, want 2 within the budget", n)
-	}
-	if cap(c.dec.rgba) > 4*retainPixels || cap(c.dec.raw) > retainPixels {
-		t.Errorf("the decoder keeps %d and %d bytes", cap(c.dec.rgba), 4*cap(c.dec.raw))
-	}
-	// Rectangles with no data are not decoded at all.
-	c = testClient(1024, 768)
-	start = time.Now()
-	if err := c.handleFastPath(scr, frame{fastPath: true, data: fastPathBitmaps(3600, 1024, 768, 16, nil)}); err != nil {
+	if err := c.handleFastPath(scr, frame{fastPath: true, data: fastPathBitmaps(3600, w, h, 16, nil)}); err != nil {
 		t.Fatal(err)
 	}
 	if d := time.Since(start); d > 100*time.Millisecond || c.Stats().Ignored["empty bitmaps"] != 3600 {
 		t.Errorf("3600 empty rectangles took %v, ignored %v", d, c.Stats().Ignored)
+	}
+}
+
+// The decoder keeps its buffers from bitmap to bitmap, however large,
+// and drops them when the desktop changes.
+func TestDecoderKeepsScratch(t *testing.T) {
+	c, _ := testClock(1024, 768)
+	out := &sizeRecorder{}
+	pdu := fastPathBitmaps(1, 1024, 768, 16, []byte{0xf0, 0xff, 0xff})
+	if err := c.handleFastPath(out, frame{fastPath: true, data: pdu}); err != nil {
+		t.Fatal(err)
+	}
+	raw, rgba := &c.dec.raw[0], &c.dec.rgba[0]
+	if a := testing.AllocsPerRun(10, func() {
+		if err := c.handleFastPath(out, frame{fastPath: true, data: pdu}); err != nil {
+			t.Fatal(err)
+		}
+	}); a > 4 || &c.dec.raw[0] != raw || &c.dec.rgba[0] != rgba {
+		t.Errorf("a desktop-sized bitmap allocated %v times, and the buffers moved", a)
+	}
+	if _, err := c.handleShareControl(out, demandActive(800, 600)); err != nil {
+		t.Fatal(err)
+	}
+	if c.dec.raw != nil || c.dec.rgba != nil {
+		t.Errorf("the decoder kept %d and %d bytes after a resize", 4*cap(c.dec.raw), cap(c.dec.rgba))
+	}
+}
+
+// BenchmarkHostileBitmap is the cheapest PDU for the most decoding: one
+// rectangle of 3 bytes of RLE. Its ns/pixel times decodeRate is the CPU
+// a hostile server can make the client spend in a second.
+func BenchmarkHostileBitmap(b *testing.B) {
+	for _, size := range []image.Point{{1024, 768}, {4096, 2048}} {
+		b.Run(fmt.Sprintf("%dx%d", size.X, size.Y), func(b *testing.B) {
+			c, _ := testClock(size.X, size.Y)
+			out := &sizeRecorder{}
+			pdu := fastPathBitmaps(1, size.X, size.Y, 16, []byte{0xf0, 0xff, 0xff})
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := c.handleFastPath(out, frame{fastPath: true, data: pdu}); err != nil {
+					b.Fatal(err)
+				}
+			}
+			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/float64(size.X*size.Y), "ns/pixel")
+		})
 	}
 }
 
