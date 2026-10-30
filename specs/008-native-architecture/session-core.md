@@ -154,7 +154,9 @@ and 113 ms at N1, behind frames it had already queued.
 - **What goes first is what the user sees directly.** The cursor is drawn
   by the client from `cursor` and `cursor-move`, so pointer motion needs
   no frame. Small messages (cursor, clipboard, bell, close, ping) are
-  never queued behind tiles; acks and pings only drive pacing.
+  never queued behind tiles; acks and pings only drive pacing. Each
+  viewer keeps them as state, the latest cursor, title or clipboard, so a
+  slow viewer never queues them either.
 - **The remote server is paced too.** The session owns the framebuffer,
   so the remote server's rate and each viewer's rate are independent,
   and backends use each protocol's own control:
@@ -266,3 +268,38 @@ New `internal/backend` (interface, event types) and `internal/session`
 [api-and-server-stack](api-and-server-stack.md) on top. 003 fixes the
 remaining v0 defects in place. The core is designed so that they cannot
 arise, rather than inheriting those fixes.
+
+## Implementation notes: owner and registry
+
+- **What was done:** `internal/session` with `Start`, `Session`
+  (`Join`, `Close`, `Framebuffer`, `Changed`, `Size`, `Done`, `End`),
+  `Viewer` (`Take`, `Wake`, `Input`, `LastInput`, `View`, `Answer`,
+  `Leave`) and `Registry` (`Open`, `Get`, `Share`, `JoinShared`).
+- **Decisions:**
+  - One owner goroutine runs commands from a channel; viewers' calls
+    become commands, so input reaches the backend in arrival order. Sink
+    methods run on the backend's goroutines and never wait for the owner
+    goroutine, so ending a session cannot deadlock on a backend blocked
+    in the sink.
+  - Each viewer's small state is a `Pending` of latest values (resize,
+    cursor, clipboard, title, bells, joins, leaves, prompts, input, end),
+    taken whole by its writer, so a slow writer skips stale values
+    instead of queueing them.
+  - An input records the framebuffer's clock read before the backend
+    sees the input, so every tile it changes is above that clock even
+    when a backend draws before `Input` returns. An input the backend
+    rejects is not recorded and raises no `Pending.Input`.
+  - The session serialises its calls to the terminal emulator and to
+    `Resize`, since backends call the sink from several goroutines.
+  - Defaults: owner grace 60 s, idle timeout 30 min, tile size 64.
+  - Session IDs are 128 random bits; share tokens are 256 random bits,
+    held only as SHA-256 hashes, with an expiry, and die with the
+    session. Expired shares are pruned when the next is minted.
+- **Surprises:** an independent review found five bugs the fake backends
+  never reached (the clock read after `Input`, rejected inputs recorded,
+  unserialised terminal calls, a prompt delivered twice to a returning
+  owner, setters storing and broadcasting in separate critical sections).
+  All have regression tests now.
+- **Follow-ups:** `Viewer.Session` exposes `Close` and `Join` without a
+  role check, so the HTTP layer checks roles. The viewer writer is next.
+

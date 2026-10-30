@@ -37,7 +37,10 @@ func (c Class) String() string {
 // Backend is one connection to a remote server, owned by one session.
 //
 // The session calls Run once. It calls Input and Demand from its owner
-// goroutine, one call at a time, concurrently with Run.
+// goroutine, one call at a time, concurrently with Run. They may still
+// come for a moment after Run returns, until the session notices, and
+// must then return without blocking or panicking; Input returns an
+// error.
 type Backend interface {
 	// Class reports the kind of content the backend produces. It never
 	// changes.
@@ -77,8 +80,8 @@ type Sink interface {
 	// Lock returns the framebuffer's pixels in r, which must lie within the
 	// screen, locked for drawing. The backend draws and then calls Unlock
 	// with the same r, which releases the pixels and records r as damage.
-	// A goroutine holds at most one lock at a time. Graphical backends
-	// only.
+	// A goroutine that holds a lock calls no other Sink method until it
+	// unlocks. Graphical backends only.
 	Lock(r image.Rectangle) *image.RGBA
 	Unlock(r image.Rectangle)
 	// CopyRect copies the pixels of dst's size at src to dst, as when the
