@@ -361,7 +361,10 @@ leaves only RDP on the bridge.
     password, None first with neither, so that nobody is asked for
     credentials a server does not need. TigerVNC also lists None and VNC
     Authentication among the subtypes; they run without TLS, and are
-    chosen as outside VeNCrypt unless TLS is required. TLS runs over the
+    chosen as outside VeNCrypt unless TLS is required. Before RFB 3.8,
+    VeNCrypt with the None subtype has no SecurityResult, as TigerVNC
+    sends none for it (`SConnection::approveConnection` tests the
+    subtype); every other subtype has one. TLS runs over the
     same connection with `crypto/tls`, at least TLS 1.2; a server that
     sent anything after its ack and before the client's hello is a
     protocol error, since those bytes would be read as plain text.
@@ -393,8 +396,13 @@ leaves only RDP on the bridge.
     follows it; a size beyond the limits, or the size the screen already
     has, is not sent. A rectangle that changes the size is a resize like
     DesktopSize, under the same limits and the same once-an-update and
-    100 ms rules. A refusal is logged as a warning, or at debug level if
-    the server forwarded the request, and changes nothing.
+    100 ms rules. A refusal changes nothing. The size refused is not
+    asked for again until the server resizes the screen on request (the
+    latest 16 refused sizes are kept), so each is logged once, as a
+    warning with the size and the reason; after status 1, resizing
+    administratively prohibited, no size is asked for on that
+    connection. A forwarded request is logged at debug level and refuses
+    nothing.
   - **ContinuousUpdates with Fence.** Once the server has sent both a
     Fence and EndOfContinuousUpdates, the backend enables continuous
     updates for the whole screen while a viewer can see it, again after
@@ -439,7 +447,10 @@ leaves only RDP on the bridge.
     cover each policy: a private CA by address, by name and by
     `ServerName`; a wrong host; an untrusted root; the system's roots;
     each form of pin; a pin that ignores the name; another certificate
-    pinned; insecure mode with its warning; and New's errors.
+    pinned; the CA pinned, which does not pin the leaf; insecure mode
+    with its warning; and New's errors. Servers that speak only TLS 1.0
+    or 1.1 are refused. VeNCrypt's None subtype is run in RFB 3.7 and
+    3.8, by the backend and by a scripted server.
   - Fuzzing: seeds for every new server message and six VeNCrypt
     handshakes. `FuzzServerMessages` now runs a Run's state as the
     decoder's peer and the writer's choice of what is due after each
@@ -447,26 +458,41 @@ leaves only RDP on the bridge.
     of `FuzzHandshake` found nothing.
   - Integration: `TestTigerVNC`, behind the `integration` tag, runs
     against TigerVNC's Xvnc (`docker/test/tigervnc`, Debian trixie's
-    TigerVNC 1.15) offering only X509Vnc and X509Plain. It connects with
-    a private CA by address and by name, a pinned fingerprint, insecure
-    mode with its warning, Plain with a configured and with a prompted
-    password; it is refused with a wrong host, the system's roots,
-    another pin, and wrong Plain and VNC passwords; and with the CA it
-    checks that TigerVNC enables continuous updates, ExtendedDesktopSize,
-    QEMU key events and Extended Clipboard (caps `0x1f000001`), that a
-    `Resize` to 800×600 and back resizes the screen, that continuous
-    updates stop and resume with demand, and that `owner: naïve € ✓`
-    copied by the owner comes back as `echo: naïve € ✓` through a loop
-    on the X display that answers the clipboard with `xclip`. It passed
-    every run, under the race detector.
+    TigerVNC 1.15) offering only X509Vnc and X509Plain. It builds the
+    image and starts the container itself, with podman or
+    `OCCAMY_CONTAINER_ENGINE`, as the RDP spike's test does: both are
+    named `occamy-vnc-it-until<time>-<pid>` after the time the run ends
+    at the latest, the port is the engine's choice, and the run removes
+    them, or the next run once that time has passed. It skips without an
+    engine; `OCCAMY_VNC_TLS_ADDR` points it at a running server instead.
+    It connects with a private CA by address and by name, a pinned
+    fingerprint, insecure mode with its warning, Plain with a configured
+    and with a prompted password; it is refused with a wrong host, the
+    system's roots, another pin, and wrong Plain and VNC passwords; and
+    with the CA it checks that TigerVNC enables continuous updates,
+    ExtendedDesktopSize, QEMU key events and Extended Clipboard (caps
+    `0x1f000001`), that a `Resize` to 800×600 and back resizes the
+    screen, that continuous updates stop and resume with demand, and that
+    `owner: naïve € ✓` copied by the owner comes back as `echo: naïve € ✓`
+    through a loop on the X display that answers the clipboard with
+    `xclip`. It passed every run, under the race detector, and takes
+    about 30 s with the image's layers cached.
 - **Decisions made during implementation.**
   - The anonymous TLS subtypes (TLSNone, TLSVnc and TLSPlain, 257 to
     259) are never chosen: anonymous Diffie-Hellman authenticates
     nobody, so anyone between the backend and the server reads
     everything, and `crypto/tls` does not implement it. Plain without
     TLS (256) is not chosen either, since it sends the password in the
-    clear. A server that offers only these fails with
-    `ErrNoSecurityType`; there is no reconnect to try other types.
+    clear. A server whose VeNCrypt subtypes are only these fails with
+    `ErrNoSecurityType`, even if it also offers None or VNC
+    Authentication outside VeNCrypt: types [19, 2] with the subtype
+    [258], which phase 1 reached with VNC Authentication, now fail. The
+    subtypes arrive only after VeNCrypt is chosen, and RFB has no way
+    back to the other types short of a new connection, which the backend
+    does not make. Choosing VeNCrypt only when TLS is required would
+    give up TLS with every server that offers it, so the backend keeps
+    the preference, `TLS.Require` or not. TigerVNC is unaffected, since
+    it lists its plain types among the subtypes too.
   - VeNCrypt is preferred over None and VNC Authentication whenever it
     is offered, and fails closed: a TigerVNC with a self-signed
     certificate, which phase 1 reached with VNC Authentication, now
@@ -519,7 +545,7 @@ leaves only RDP on the bridge.
   - Decision 4 now says that a `Resize` before the server shows its
     support waits for it.
   - The integration image makes its own CA and server certificate when
-    it is built, and the test copies `ca.pem` and `server.pem` out of
+    it is built, and the test reads `ca.pem` and `server.pem` out of
     the container, rather than the certificates coming from the build
     context, so that no key material is in the repository and every
     build has fresh keys.
@@ -545,6 +571,19 @@ leaves only RDP on the bridge.
   - The prompt skipped: the prompted cases of `TestVeNCrypt`,
     `TestPlainCredentialErrors` and `TestPasswordPrompt`.
   - The prompt's answers swapped: the case that asks for both.
+  - Pins matching any certificate in the chain: undetected until
+    review. `TestTLSPolicy` now pins the CA, and that case fails.
+  - `MinVersion` at TLS 1.0: the TLS 1.0 and 1.1 cases of
+    `TestTLSVersion`.
+  - SecurityResult skipped by the top-level type, not VeNCrypt's
+    subtype: the 3.7 None-within cases of `TestVeNCrypt` and
+    `TestVeNCryptScripts`.
+
+  Outside the security code, each of these made
+  `TestExtendedDesktopSize` fail: a refused size sent again, a
+  prohibition ignored, and the refused sizes never forgotten. Passing
+  plain cut text through a string again made `TestCutTextAllocations`
+  fail.
 - **Surprises / gotchas.**
   - TigerVNC lists the plain security types among VeNCrypt's subtypes,
     so a VeNCrypt-only offer may still mean no TLS.
@@ -562,12 +601,20 @@ leaves only RDP on the bridge.
     on purpose.
   - Reading the server's text with `io.CopyN` into a `bytes.Buffer`
     allocated 16 MiB for 4 MiB kept: `ReadFrom` grows a full buffer for
-    512 more bytes, doubling it to 8 MiB. `bytes.ToValidUTF8` and two
-    `bytes.ReplaceAll` then copied the text three more times. The buffer
-    now grows to the kept size at most and the text is converted in
-    place: 4 MiB of text allocates 11.7 MiB, the sink's copy included
-    (14.4 MiB under the race detector), and
-    `TestExtendedClipboardAllocations` holds it to four times the text.
+    512 more bytes, doubling it to 8 MiB. For Extended Clipboard,
+    `bytes.ToValidUTF8` and two `bytes.ReplaceAll` then copied the text
+    three more times. Phase 1's plain cut text, read the same way, then
+    went through a string and back, two more copies: 28 MiB for 4 MiB
+    kept, the sink's copy included, as review found. Both now read
+    through `readText`, whose buffer grows to
+    the kept size at most. Extended text is converted in place; plain cut
+    text is passed on as read if it is UTF-8, and Latin-1 is converted
+    once, into a buffer of its exact UTF-8 size. 4 MiB of either kind of
+    text allocates 11.7 MiB, the sink's copy included (14.4 MiB for
+    Extended Clipboard and 15 MiB for cut text under the race detector);
+    4 MiB of Latin-1, 8 MiB as UTF-8, allocates 24 MiB (27 MiB).
+    `TestExtendedClipboardAllocations` and `TestCutTextAllocations` hold
+    them to four times the bytes kept, and to eight for Latin-1.
   - keycodemapdb maps Backslash and Non-US # to one XT keycode, 0x2b:
     they are one key, on US and ISO keyboards.
 - **Follow-ups.**
@@ -587,3 +634,18 @@ leaves only RDP on the bridge.
   - TigerVNC in the demo stack, and QEMU's VNC server, which would
     exercise QEMU key events end to end; the integration test checks
     only that TigerVNC enables them.
+  - Clipboard amplification: an Extended Clipboard provide of about
+    8 KB of zlib decompresses to the 4 MiB kept, which goes to every
+    viewer, and nothing limits how often a server sends one. A broken or
+    hostile server can so make each viewer receive megabytes for every
+    few kilobytes it sends. A byte budget or rate per connection, here
+    or in session-core, would bound it.
+  - Fence answers queue 16 deep. Once 16 wait, the reader waits for the
+    writer to take one, which keeps them in order and bounds memory. A
+    server that sends Fences but does not read what the backend writes
+    fills the TCP send buffer: the writer blocks in its write, the
+    reader blocks behind it, and the session hangs with a frozen screen
+    until Run's context is cancelled, which closes the connection, or
+    the server closes it. A write deadline would turn that into an
+    error; none is set, as in phase 1, where a server that stops reading
+    blocks the writer the same way.
