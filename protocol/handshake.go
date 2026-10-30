@@ -108,8 +108,9 @@ const (
 	CodecPNG Codec = 3
 	// CodecJPEG is a baseline or progressive JFIF file.
 	CodecJPEG Codec = 4
-	// CodecWebP is a WebP file. occamyd does not send it in beta, since
-	// no pure-Go encoder exists.
+	// CodecWebP is a WebP file, lossy or lossless. It is a candidate in
+	// the graphics pipeline's measurement, and occamyd sends it only if
+	// the measurement picks it.
 	CodecWebP Codec = 5
 	// CodecCached draws the tile stored in a client cache slot and has no
 	// payload. It is only for tiles.
