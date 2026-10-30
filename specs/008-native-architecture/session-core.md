@@ -60,7 +60,7 @@ type Backend interface {
     // Run connects and blocks until ctx ends or the remote closes. Events go
     // to sink; Run must not block on a slow sink.
     Run(ctx context.Context, sink Sink) error
-    Input(ev InputEvent) error // key, pointer, wheel, text, clipboard, resize
+    Input(ev InputEvent) error // key, pointer, wheel, text, terminal input, clipboard, resize
     // Demand tells the backend whether any viewer can see the session,
     // so that it can pace the remote server (see Input to display).
     Demand(d Demand)
@@ -72,19 +72,28 @@ type Demand struct {
 
 type Sink interface {
     Resize(w, h int)
-    Damage(r image.Rectangle)          // graphical: the framebuffer changed
+    // Lock returns the framebuffer's pixels in r, locked for drawing;
+    // Unlock releases them and records r as damage. Graphical only.
+    Lock(r image.Rectangle) *image.RGBA
+    Unlock(r image.Rectangle)
     CopyRect(dst image.Rectangle, src image.Point)
     Cursor(img *image.RGBA, hot image.Point)
+    CursorMove(p image.Point)
     TermData(p []byte)                 // terminal
     Clipboard(mime string, data []byte)
     Bell()
-    Prompt(p Prompt) (PromptReply, error)
+    Title(title string)
+    Prompt(ctx context.Context, p Prompt) (PromptReply, error)
 }
 ```
 
 Graphical backends write pixels into a framebuffer that the session owns
 ([graphics-pipeline](graphics-pipeline.md)) and report damage. They never
-encode.
+encode. They draw through `Lock` and `Unlock`, so that a decoder writes
+straight into the framebuffer under the row locks of decision 2, without
+a copy, and the damage it reports is exactly what it drew. The RGBA
+layout holds until the graphics pipeline's measurement settles the pixel
+layout.
 
 The session owner is one goroutine per session. It runs the backend,
 applies events to shared state (the framebuffer, or the terminal state
@@ -111,20 +120,23 @@ and 113 ms at N1, behind frames it had already queued.
   the same act. Terminals follow the same rule with screen diffs
   ([native-ssh-backend](native-ssh-backend.md)).
 - **The frame after an input goes out at once.** When the owner applies
-  an input from a viewer, that viewer's writer sends its next frame as
-  soon as damage appears, one frame beyond its window if the window is
-  full, with the tiles damaged since the input first. `frame-end`
+  an input from a viewer, that viewer's writer sends the tiles damaged
+  since the input first: next in the open frame, which then ends, or in
+  a new frame that starts at once, one beyond the window if the window
+  is full. Those bytes go out unpaced. `frame-end`
   carries the sequence number of the last input applied before the
   frame's tiles were read ([protocol-v1](protocol-v1.md)), so the client
   measures input to display exactly, and the benchmark uses the same
   number.
-- **Little is in flight.** Besides the frame window, a viewer's bytes in
-  flight are capped near the bandwidth-delay product, estimated from
-  `frame-ack` round trips with a delay-based controller: when round
-  trips grow above their minimum, the rate backs off before buffers
-  fill. On Linux and macOS the writer sets `TCP_NOTSENT_LOWAT`, so the
-  kernel holds little unsent data. A key's frame then waits behind at
-  most about one round trip of data.
+- **Little is in flight.** Besides the frame window, a viewer's writes
+  are paced at its delivery rate, which `frame-ack`s measure as BBR
+  does: the windowed maximum delivery rate and minimum round trip. Data
+  then does not queue in the network. Bytes in flight are capped at
+  twice the bandwidth-delay product, and when round trips grow above
+  their minimum the rate backs off to the latest measurement. On Linux
+  and macOS the writer sets `TCP_NOTSENT_LOWAT`, so the kernel holds
+  little unsent data. A key's frame then waits behind little more than
+  the tile being written.
 - **Only what is seen.** A client reports with `view` whether it is
   visible (a hidden browser tab, a minimized window) and which part of
   the screen its viewport shows. A hidden viewer gets no frames, which
@@ -133,11 +145,12 @@ and 113 ms at N1, behind frames it had already queued.
   and it gets one frame of them when it becomes visible again: the
   current screen, never a backlog. Tiles outside the viewport stay dirty until they come into
   view.
-- **Motion degrades smoothly.** When a viewer's ack round trips or decode
-  times grow, its frame interval and lossy quality step down, and they
-  step back up when acks return quickly
-  ([graphics-pipeline](graphics-pipeline.md)). Input stays responsive
-  while motion loses detail or rate, never the reverse.
+- **Motion degrades smoothly.** While a viewer's writer spends most of a
+  round waiting for the path, its lossy quality steps down, and it steps
+  back up while the writer waits little; the frame interval follows the
+  viewer's decode time ([graphics-pipeline](graphics-pipeline.md)).
+  Input stays responsive while motion loses detail or rate, never the
+  reverse.
 - **What goes first is what the user sees directly.** The cursor is drawn
   by the client from `cursor` and `cursor-move`, so pointer motion needs
   no frame. Small messages (cursor, clipboard, bell, close, ping) are
@@ -231,6 +244,20 @@ follow the recommendations above.
    see it. This replaces an earlier design of a small-message queue
    drained ahead of tiles, which put control messages ahead of the
    frames the user was waiting for. See Input to display.
+
+## Task Breakdown
+
+| Task | Delivers | Needs |
+|------|----------|-------|
+| Backend interface | `internal/backend`: `Class`, `Backend`, `Sink`, `Demand`, input events (key, pointer, wheel, text, terminal input, clipboard, resize) and prompts; `backendtest`, a scripted fake backend for both classes that draws on a clock and records input | — |
+| Pacer | A per-viewer controller without I/O: the frame window, one frame beyond it after an input, bytes in flight capped near the bandwidth-delay product from `frame-ack` round trips with delay-based backoff, and AIMD steps for the frame interval and quality; tests on a simulated clock and link | — |
+| Owner | `internal/session`: the goroutine that runs a backend, applies its events to the framebuffer or the terminal emulator, adds damage to each viewer's dirty tiles, applies input in arrival order by role (read-only input dropped and counted), sets `Demand` from the viewers' `view`, and ends the session per decision 5; tests under `-race` that also check for leaked goroutines | Backend interface; the graphics pipeline's framebuffer |
+| Viewer writer | The goroutine per viewer: takes the dirty tiles inside the viewport when the pacer allows, encodes them through an encoder interface (raw pixels until the graphics pipeline's codecs land), sends size-capped tiles and `frame-end` with the last input applied, sends small messages ahead of tiles, sends a hidden viewer nothing and one current frame on its return, and sets `TCP_NOTSENT_LOWAT` on Linux and macOS; terminal sessions send screen diffs in the same frames | Owner, Pacer, protocol v1 Messages |
+| Registry | Sessions by ID: open on a connection, join with a role, share tokens that die with the session, removal when it ends | Owner |
+| Scheduling test | End to end with the fake backend in full-screen motion over a simulated N1 link: a key's `frame-end` arrives within one round trip plus a bound while frames keep flowing, a hidden viewer receives nothing and costs no encoding, and a slow viewer does not slow a fast one | Viewer writer |
+
+The HTTP routes on top belong to
+[api-and-server-stack](api-and-server-stack.md).
 
 ## Affects
 
