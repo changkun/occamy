@@ -110,7 +110,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the fingerprint to pin in the error. VeNCrypt's anonymous TLS
   subtypes are not supported, so a server whose VeNCrypt offers only
   those, or Plain in the clear, is refused even if it offers VNC
-  Authentication too. Cut text from the server allocates less than
+  Authentication too. Cut text from the server allocates about
   three times the text kept, down from seven. An integration test runs
   against TigerVNC (`docker/test/tigervnc`) in a container of its own.
 - The codec measurement of the graphics pipeline

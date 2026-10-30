@@ -118,7 +118,7 @@ func TestCutTextAllocations(t *testing.T) {
 		text string
 		max  uint64
 	}{
-		{"4 MiB of UTF-8 and more", strings.Repeat("a", maxClipboard+10), 4 * maxClipboard},
+		{"4 MiB of UTF-8 and more", strings.Repeat("a", maxClipboard+10), 5 * maxClipboard},
 		{"4 MiB of Latin-1 and more", strings.Repeat("\xe9", maxClipboard+10), 8 * maxClipboard},
 	} {
 		sink := &backendtest.Sink{}

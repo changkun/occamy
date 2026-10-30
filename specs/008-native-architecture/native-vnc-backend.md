@@ -613,8 +613,10 @@ leaves only RDP on the bridge.
     text allocates 11.7 MiB, the sink's copy included (14.4 MiB for
     Extended Clipboard and 15 MiB for cut text under the race detector);
     4 MiB of Latin-1, 8 MiB as UTF-8, allocates 24 MiB (27 MiB).
-    `TestExtendedClipboardAllocations` and `TestCutTextAllocations` hold
-    them to four times the bytes kept, and to eight for Latin-1.
+    `TestExtendedClipboardAllocations` holds Extended Clipboard to four
+    times the bytes kept, and `TestCutTextAllocations` cut text to five,
+    since the race detector adds more there, and Latin-1 to eight; the
+    copies removed would take cut text to seven.
   - keycodemapdb maps Backslash and Non-US # to one XT keycode, 0x2b:
     they are one key, on US and ISO keyboards.
 - **Follow-ups.**
