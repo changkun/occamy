@@ -433,6 +433,17 @@ func tileAt(row, col int) image.Rectangle {
 	return image.Rect(col*64, row*64, (col+1)*64, (row+1)*64)
 }
 
+// runThenTile is the pixels of row 1's first three 64-pixel tiles, in
+// screen coordinates: two that markEncoder sends lossy, then one in c,
+// lossless, which ends the run and is read ahead. Painted at once, they
+// are one drawing operation, so that a frame takes them all.
+func runThenTile(c color.RGBA) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 64, 192, 128))
+	draw.Draw(img, image.Rect(0, 64, 128, 128), &image.Uniform{C: lossyColour(0)}, image.Point{}, draw.Src)
+	draw.Draw(img, tileAt(1, 2), &image.Uniform{C: c}, image.Point{}, draw.Src)
+	return img
+}
+
 // An input whose effect lands on the lossless tile that ended a lossy run
 // goes out with the effect, not with the copy read ahead before it.
 func TestLookaheadInputEffect(t *testing.T) {
@@ -453,29 +464,29 @@ func TestLookaheadInputEffect(t *testing.T) {
 		time.Sleep(500 * time.Millisecond)
 		synctest.Wait()
 
+		// The frame that takes up the input's effect reports the input
+		// and carries u.
 		var carrier *frameRecord
 		var shown color.RGBA
 		r.cl.mu.Lock()
 		r.cl.onFrame = func(f frameRecord) {
-			if carrier == nil && f.lastSeq >= 1 {
+			if carrier == nil && f.lastSeq >= 1 && slices.Contains(f.rects, u) {
 				carrier = &f
 				shown = r.cl.img.RGBAAt(u.Min.X+1, u.Min.Y+1)
 			}
 		}
 		r.cl.mu.Unlock()
-		// Two lossy tiles, then a lossless one.
-		paint(b, image.Rect(0, 64, 128, 128), &image.Uniform{C: lossyColour(0)})
-		paint(b, u, &image.Uniform{C: oldC})
+		paint(b, image.Rect(0, 64, 192, 128), runThenTile(oldC))
 		time.Sleep(3 * time.Second)
 		synctest.Wait()
 
 		r.cl.mu.Lock()
 		defer r.cl.mu.Unlock()
 		if carrier == nil {
-			t.Fatal("no frame reported last_seq 1")
+			t.Fatal("no frame of the input carried the tile")
 		}
 		if shown != newC {
-			t.Errorf("frame %d reports the input shown, but its effect's tile shows %v, not %v", carrier.id, shown, newC)
+			t.Errorf("frame %d carries the input's effect, but its tile shows %v, not %v", carrier.id, shown, newC)
 		}
 	})
 }
@@ -503,8 +514,7 @@ func TestLookaheadAcrossFrames(t *testing.T) {
 		r.cl.mu.Lock()
 		before := len(r.cl.frames)
 		r.cl.mu.Unlock()
-		paint(b, image.Rect(0, 64, 128, 128), &image.Uniform{C: lossyColour(0)})
-		paint(b, u, &image.Uniform{C: color.RGBA{R: 0x80, A: 0xff}})
+		paint(b, image.Rect(0, 64, 192, 128), runThenTile(color.RGBA{R: 0x80, A: 0xff}))
 		time.Sleep(3 * time.Second)
 		synctest.Wait()
 		r.cl.send(t, protocol.View{Visible: true})
@@ -653,8 +663,12 @@ func TestLossyRunResized(t *testing.T) {
 		r.cl.mu.Lock()
 		before := len(r.cl.frames)
 		r.cl.mu.Unlock()
-		paint(b, tileAt(1, 0), &image.Uniform{C: lossyColour(0)})
-		paint(b, tileAt(1, 1), &image.Uniform{C: color.RGBA{G: 1, A: 0xff}})
+		// One drawing operation, so that a frame takes both tiles: a
+		// lossy one, then one that would not join its run.
+		img := image.NewRGBA(image.Rect(0, 64, 128, 128))
+		draw.Draw(img, tileAt(1, 0), &image.Uniform{C: lossyColour(0)}, image.Point{}, draw.Src)
+		draw.Draw(img, tileAt(1, 1), &image.Uniform{C: color.RGBA{G: 1, A: 0xff}}, image.Point{}, draw.Src)
+		paint(b, img.Rect, img)
 		time.Sleep(time.Second)
 		synctest.Wait()
 
