@@ -732,6 +732,12 @@
       "error": "invalid"
     },
     {
+      "name": "hello with a max_message_size below 65536",
+      "from": "client",
+      "hex": "010100000100000000000000000000000000000100070004000000ffff0000",
+      "error": "invalid"
+    },
+    {
       "name": "hello with an empty codec list",
       "from": "client",
       "hex": "010100000100000000000000000000000000000100010000000000",

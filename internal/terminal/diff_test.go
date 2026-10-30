@@ -7,6 +7,7 @@ package terminal
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -45,6 +46,58 @@ func TestSnapshotVersions(t *testing.T) {
 	term.Resize(12, 4)
 	if c := term.Snapshot(); c.Version <= b.Version || c.Cols != 12 || c.Rows != 4 {
 		t.Errorf("after a resize: version %d, size %dx%d", c.Version, c.Cols, c.Rows)
+	}
+}
+
+// TestRowVersions checks that a row's version is raised only when the row
+// comes to look different, and the cursor's only when it moves.
+func TestRowVersions(t *testing.T) {
+	term := New(10, 4, Options{})
+	versions := func() []uint64 { return term.Snapshot().Versions(nil) }
+	first := versions()
+	if len(first) != 5 {
+		t.Fatalf("%d versions for 4 rows and a cursor", len(first))
+	}
+	steps := []struct {
+		name    string
+		input   string
+		changed []bool // rows 0 to 3, then the cursor
+	}{
+		{"write", "abc", []bool{true, false, false, false, true}},
+		{"redraw the same", "\rabc", []bool{false, false, false, false, false}},
+		{"move only", "\x1b[3;2H", []bool{false, false, false, false, true}},
+		{"write elsewhere", "x", []bool{false, false, true, false, true}},
+		{"erase a blank row", "\x1b[4;1H\x1b[2K", []bool{false, false, false, false, true}},
+		// "abc", "", " x", "" scroll to "", " x", "", "".
+		{"scroll", "\n", []bool{true, true, true, false, false}},
+		// A blank alternate screen differs only in the row holding " x".
+		{"alternate screen", "\x1b[?1049h", []bool{false, true, false, false, false}},
+	}
+	before := first
+	for _, st := range steps {
+		v0 := term.Snapshot().Version
+		term.Write([]byte(st.input))
+		s := term.Snapshot()
+		after := s.Versions(nil)
+		for i, changed := range st.changed {
+			switch {
+			case changed && after[i] != s.Version:
+				t.Errorf("%s: version %d of %d is %d, want %d", st.name, i, len(after), after[i], s.Version)
+			case !changed && after[i] != before[i]:
+				t.Errorf("%s: version %d of %d went from %d to %d", st.name, i, len(after), before[i], after[i])
+			}
+		}
+		if s.Version == v0 && slices.Contains(st.changed, true) {
+			t.Errorf("%s: the snapshot's version did not change", st.name)
+		}
+		before = after
+	}
+	term.Resize(12, 4)
+	s := term.Snapshot()
+	for i, v := range s.Versions(nil) {
+		if v != s.Version {
+			t.Errorf("after a resize, version %d is %d, want %d", i, v, s.Version)
+		}
 	}
 }
 
