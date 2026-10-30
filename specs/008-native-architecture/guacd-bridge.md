@@ -1,6 +1,6 @@
 ---
 title: guacd bridge and the path to pure Go
-status: drafted
+status: validated
 track: architecture
 depends_on:
   - specs/008-native-architecture/session-core.md
@@ -126,6 +126,42 @@ protocols or is deleted.
    ([008](../008-native-architecture.md), Path to pure Go), so the bridge
    is removed with it. It carries VNC and RDP over protocol v1 only until
    their native backends pass its parity gate.
+
+## Decisions
+
+Settled on 2026-10-30, following the recommendations above.
+
+1. **Bridge model: I, the interpreter.** v1.0 ships without the Guacamole
+   protocol, so no client may depend on it, and under I none does. If the
+   baseline shows the server's decode and re-encode cost to be
+   prohibitive, that is a reason to bring the native backends forward,
+   not to put Guacamole into clients.
+2. **Reuse `internal/guacamole`'s display** (open question 2, answered
+   above).
+3. **Scope: what guacd 1.6's VNC, RDP and SSH plugins emit.** The
+   display already counts unsupported drawing operations; the bridge
+   logs each opcode the first time it sees it in a session, and the
+   conformance corpus fails on any. Transfer functions other than `SRC`
+   and `OVER` are rejected loudly, as proposed.
+4. **Gate values:** N = 20 concurrent sessions for H = 8 hours with no
+   growth in goroutines or heap after the first hour, and the native
+   backend's traffic and server CPU each no more than 10% above the
+   bridge's on every baseline scenario. The 10x target in
+   [008](../008-native-architecture.md) is measured against guacd, not
+   against this gate; the gate only stops a regression.
+5. **The bridge is removed at v1.0** (open question 5, answered above).
+
+## Task Breakdown
+
+| Task | Delivers | Needs |
+|------|----------|-------|
+| Interpreter additions | `internal/guacamole`: the `cursor` instruction (hotspot and image from a layer region) exposed as a cursor change, and access to the composited display by rectangle for copying out | — |
+| Bridge backend | `internal/backend/guacd`: a `Backend` of class graphical over `internal/guacd`. Instructions apply to the display; at each `sync` the damage is copied into the sink (`Lock` and `Unlock` per damaged rectangle) and the `sync` is answered, so guacd paces against the bridge alone. `size` of the default layer becomes `Resize`, `cursor` becomes `Cursor`, `name` becomes `Title`, clipboard streams become `Clipboard`, `required` becomes a `Prompt` whose answers go back as `argv` streams, `error` ends `Run` with the status, and `disconnect` ends it cleanly. Input translates to `key`, `mouse` (button mask, and wheel as buttons 4 and 5 pressed and released), keysyms for `Text`, a `clipboard` stream, and `size`. Writes to guacd are serialised. Tests against a scripted guacd on `net.Pipe` | Interpreter additions; session-core Backend interface |
+| Conformance corpus | Instruction streams recorded from guacd 1.6's VNC, RDP and SSH plugins on the demo stack (logging in, typing, scrolling, moving a window, resizing), replayed through the bridge in tests: no unsupported operation, no error, and the final frame's hash pinned | Bridge backend |
+| Registration | The bridge registered in the API's backend factory for `vnc` and `rdp`, and for `telnet` and `kubernetes` behind an opt-in, with guacd parameters from the configuration under the connection's | Bridge backend; API Sessions |
+
+The soak and performance gates run per protocol when a native backend
+asks to replace the bridge, not as tasks here.
 
 ## Affects
 
