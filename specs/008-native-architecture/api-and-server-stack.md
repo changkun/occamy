@@ -942,9 +942,11 @@ place for fixes that ship on v0 before beta.
   repeated `iss` taken, or the check moved back after the `error`
   branch; `quote` not quoting short text, and the token endpoint's
   error code or `azp` logged raw; default-ignorable code points or
-  U+2800 in a subject; the static name check exact, or without NFC;
-  and `File.Admitted` counting static users' names in `allow.users`
-  without `link_static_users`.
+  U+2800 in a subject; the static name check exact, without NFC or
+  without case folding; `File.Admitted` counting static users' names
+  in `allow.users` without `link_static_users`; and `match` reading
+  cookies of any name, which survived until a test put a sign-in sealed
+  for `__Secure-occamy_oidc` in a cookie named `occamy_oidc`.
 - **Follow-ups:**
   - Web client ([009](../009-react-web-client.md)): make a verifier of
     43 to 128 characters, keep it in `sessionStorage`, and navigate to

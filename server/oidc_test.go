@@ -630,8 +630,20 @@ func TestOIDCLoginCookie(t *testing.T) {
 	if err := fc.set(w, flow{State: "s", Expires: time.Now().Add(time.Minute).Unix()}); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := plain.open(w.Result().Cookies()[0].Value); ok {
+	value := w.Result().Cookies()[0].Value
+	if _, ok := plain.open(value); ok {
 		t.Error("a __Secure- cookie's value opens as a plain one")
+	}
+	// The callback reads the cookie of its name only, so that one that
+	// another origin may set, such as occamy_oidc beside
+	// __Secure-occamy_oidc, cannot carry a sealed sign-in, even one
+	// sealed for the prefixed name.
+	for name, want := range map[string]bool{fc.name: true, flowCookieName: false, "other": false} {
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/callback", nil)
+		req.AddCookie(&http.Cookie{Name: name, Value: value})
+		if f, _ := fc.match(req, []string{"s"}, time.Now()); (f != nil) != want {
+			t.Errorf("the sign-in in a cookie named %s matched: %v, want %v", name, f != nil, want)
+		}
 	}
 }
 
