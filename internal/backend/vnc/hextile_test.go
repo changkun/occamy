@@ -76,10 +76,10 @@ func TestHextileByHand(t *testing.T) {
 	for i := 0; i < len(raw.Pix); i += 4 {
 		msg = append(msg, raw.Pix[i], raw.Pix[i+1], raw.Pix[i+2], 0)
 	}
-	// Tile 4: the background carries over the raw tile; a yellow
-	// foreground for a subrectangle of 4×1 at (0, 1).
-	msg = append(msg, hextileForeground|hextileAnySubrects)
-	msg = append(append(msg, px(yellow)...), 1, 0x01, 0x30)
+	// Tile 4: the background carries over the raw tile, and so does the
+	// foreground, which is the colour of tile 2's last subrectangle, as
+	// TigerVNC and libvncclient have it; a subrectangle of 4×1 at (0, 1).
+	msg = append(msg, hextileAnySubrects, 1, 0x01, 0x30)
 	// A second rectangle of one tile, 3×2 at (0, 0): the background starts
 	// black again, and a tile with no bits is all background.
 	second := append(rectHeader(image.Rect(0, 0, 3, 2), encHextile), 0)
@@ -98,7 +98,7 @@ func TestHextileByHand(t *testing.T) {
 	fillRect(want, image.Rect(19, 18, 22, 19), blue)
 	draw.Draw(want, image.Rect(2, 19, 18, 21), raw, image.Point{}, draw.Src)
 	fillRect(want, image.Rect(18, 19, 22, 21), red)
-	fillRect(want, image.Rect(18, 20, 22, 21), yellow)
+	fillRect(want, image.Rect(18, 20, 22, 21), blue)
 	fillRect(want, image.Rect(0, 0, 3, 2), color.RGBA{A: 0xff})
 	equalImages(t, sink.Pixels(), want)
 	// One lock per row of tiles.
