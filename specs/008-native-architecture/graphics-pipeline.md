@@ -32,13 +32,26 @@ quickly, in pure Go. That means choosing:
 
 ## Context
 
-- Pure-Go encoders available without cgo: `image/png`, `image/jpeg` and
-  `compress/flate` in the standard library. `golang.org/x/image/webp`
-  decodes only, and there is no WebP encoder in `x/image`. libwebp and
+- Pure-Go encoders without cgo, as surveyed on 2026-10-30:
+  - the standard library's `image/png`, `image/jpeg` (rewritten in Go
+    1.26) and `compress/flate` (faster in Go 1.27, which speeds up PNG
+    too);
+  - `github.com/klauspost/compress` for flate and zstd;
+  - `github.com/deepteams/webp` and `github.com/gen2brain/vpx/webp`,
+    lossless and lossy WebP encoders with SIMD;
+  - `github.com/gen2brain/jpegn`, JPEG with SIMD;
+  - `github.com/zeebo/xxh3` for hashing: xxh3-64 for scroll detection's
+    row hashes, xxh3-128 for the tile cache.
+
+  Their speed figures are the projects' own, several measured against
+  the older standard library, so the measurement compares them on Go
+  1.27. The WebP encoders and jpegn are months old. libwebp and
   libjpeg-turbo would bring cgo back.
-- Browsers decode PNG and JPEG natively (`createImageBitmap`, in a
+- Browsers decode PNG, JPEG and WebP natively (`createImageBitmap`, in a
   Worker), and inflate with `DecompressionStream('deflate-raw')` (Chrome
-  103, Firefox 113, Safari 16.4).
+  103, Firefox 113, Safari 16.4). No engine ships a native zstd decoder,
+  and Chrome has no brotli one, so zstd on the wire needs a decoder in
+  the client.
 - libguac's approach, for reference: a 64-pixel heat map on each surface
   picks lossy encoding for frequently updated regions and PNG otherwise.
 - Backends: VNC delivers rectangles, already decoded, plus CopyRect. The
@@ -110,13 +123,21 @@ quickly, in pure Go. That means choosing:
   - Pros: very fast to encode and decode.
   - Cons: no native browser decoder (needs about 100 lines of JS or WASM);
     compresses UI content less well than palette plus deflate.
+- **D. Lossless WebP (VP8L).**
+  - Pros: browsers decode it natively; smaller than PNG on screen
+    content, by the encoders' own figures.
+  - Cons: the pure-Go encoders are young; encoding costs more than
+    palette plus deflate.
 
 ### Lossy codec
 
 - **A. JPEG via `image/jpeg` (recommended).** Native decoding everywhere.
   Quality is adjustable per viewer.
-- **B. WebP lossy.** Better compression, but no pure-Go encoder of usable
-  speed; it would need cgo or a helper. Rejected for the server.
+- **B. WebP lossy.** Better quality per byte than JPEG, and decoded
+  natively by browsers. Pure-Go encoders appeared in 2026
+  (`deepteams/webp`, `gen2brain/vpx/webp`); the measurement compares them
+  with JPEG (standard library and jpegn) for speed and size at equal
+  SSIM.
 
 ### Pixel layout
 
@@ -127,9 +148,14 @@ quickly, in pure Go. That means choosing:
 
 ### Video tier (after 1.0)
 
-H.264 or AV1 for high-motion regions with WebCodecs decoding. Pure-Go
-encoders are not fast enough, so it needs a helper process or a hardware
-encoder, plus a licensing check. Kept out of beta; protocol v1 reserves a
+A video codec for high-motion regions with WebCodecs decoding.
+`github.com/gen2brain/vpx/vp8` is a pure-Go VP8 encoder with inter
+frames whose output libvpx decodes, and WebCodecs decodes VP8 in Chrome
+and Firefox; Safari's support needs a runtime check. It has no rate
+control and no published realtime speed, so it needs a benchmark before
+it is a candidate. H.264 without cgo would mean OpenH264 loaded through
+purego, downloaded by the user under Cisco's binary licence, or the
+operating system's hardware encoders. Kept out of beta; protocol v1 reserves a
 codec ID range for it.
 
 ## Decisions
@@ -153,7 +179,9 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
    viewport covers small screens; scaling can come later as a capability.
 6. **The lossless codec, the tile size and the pixel layout** (questions
    1 to 3 below) are decided by the first task's measurement on recorded
-   frames from the bench desktop's scenes, not in advance.
+   frames from the bench desktop's scenes, not in advance. Lossless and
+   lossy WebP join that measurement (added 2026-10-30), since pure-Go
+   encoders for them now exist; any of them keeps decision 1.
 
 ## Open Questions
 

@@ -9,7 +9,7 @@ affects:
   - internal/backend/vnc/
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -30,10 +30,14 @@ session framebuffer. Three choices:
 - RFB is specified in RFC 6143, with community extensions documented in
   the rfbproto repository. libvncclient's double frees during the revival
   ([001](../001-status-quo.md)) show the cost of the C path.
-- Go libraries exist (for example `mitchellh/go-vnc`, archived and
-  Raw-only, and forks such as `kward/go-vnc`, plus proxy projects with
-  wider encoding support). Their maintenance and coverage must be checked
-  at evaluation time.
+- No maintained Go RFB client covers the needed encodings, as surveyed
+  on 2026-10-30. `mitchellh/go-vnc` is archived and Raw-only,
+  `kward/go-vnc` is minimal, and `unistack-org/go-rfb` lacks ZRLE and
+  Hextile. `amitbet/vnc2video` (MIT) decodes Raw, CopyRect, RRE,
+  Hextile, Zlib, ZRLE, Tight and the cursor pseudo-encodings, but has had
+  no commits since 2019. None implement ExtendedDesktopSize. Writing the
+  client in `occamyd`, with decoders ported from `amitbet/vnc2video`
+  where they fit, is the likely path.
 - Everything needed is in the standard library: `crypto/des` for VNC
   authentication, `crypto/tls` for VeNCrypt, `compress/zlib` for ZRLE and
   Tight, `image/jpeg` for Tight JPEG, and `crypto/aes` plus `math/big` for
