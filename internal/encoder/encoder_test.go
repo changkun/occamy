@@ -7,6 +7,7 @@ package encoder
 import (
 	"bytes"
 	"image"
+	"math/rand/v2"
 	"slices"
 	"testing"
 
@@ -243,6 +244,44 @@ func TestCursorAlpha(t *testing.T) {
 		}
 		if !bytes.Equal(out.Pix, want) {
 			t.Errorf("%v: the cursor differs after a round trip in %v", codecs, c)
+		}
+	}
+}
+
+// Cursors of random colours and alpha, transparent pixels among them,
+// round-trip as the standard library converts them to straight alpha, in
+// each codec a cursor may go in.
+func TestCursorRoundTrip(t *testing.T) {
+	rng := rand.New(rand.NewPCG(1, 2))
+	for range 50 {
+		w, h := 1+rng.IntN(32), 1+rng.IntN(32)
+		cur := make([]byte, 4*w*h)
+		for i := 0; i < len(cur); i += 4 {
+			cur[i], cur[i+1], cur[i+2] = byte(rng.Uint32()), byte(rng.Uint32()), byte(rng.Uint32())
+			switch rng.IntN(3) {
+			case 0:
+				cur[i+3] = 0
+			case 1:
+				cur[i+3] = 0xff
+			default:
+				cur[i+3] = byte(rng.Uint32())
+			}
+		}
+		pre := premultiplied(cur, w, h)
+		want := straightOf(pre, w, h)
+		for _, c := range []protocol.Codec{deflate, raw, webpC} {
+			e := New([]protocol.Codec{c})
+			b, got, ok := e.Cursor(nil, pre, w, h)
+			if !ok || got != c {
+				t.Fatalf("%v: cursor in %v, %v", c, got, ok)
+			}
+			out, err := decode(got, b, w, h)
+			if err != nil {
+				t.Fatalf("%v: %v", c, err)
+			}
+			if !bytes.Equal(out.Pix, want) {
+				t.Fatalf("%v: a %d×%d cursor differs after a round trip", c, w, h)
+			}
 		}
 	}
 }
