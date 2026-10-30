@@ -400,8 +400,8 @@ took its place.
   - 300 random streams in six sizes, including 1x1, with resizes.
   - Every conformance case, with a snapshot after every byte.
   - The four traces, with snapshots every 1, 7, 64 and 500 bytes.
-  - `FuzzDiff`, run for 60 s twice, about 3.7 million inputs, with no
-    failure.
+  - `FuzzDiff`, run three times for 60 s, the last time over 8 million
+    inputs, with no failure.
 - tmux shows the screen encoded by 50 of 50 diff streams: a snapshot and
   a chain of diffs for each trace, 20 random streams and T2.
 - Unit tests cover scroll detection, SGR minimality, wide characters at
