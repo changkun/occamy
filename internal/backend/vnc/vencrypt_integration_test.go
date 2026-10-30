@@ -36,14 +36,11 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
-	"flag"
-	"fmt"
 	"image"
 	"io"
 	"net"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -52,44 +49,19 @@ import (
 	"changkun.de/x/occamy/internal/backend/backendtest"
 )
 
-// runPrefix starts the names of the images and containers that runs
-// make, which go on with the Unix time a run ends at the latest.
-const runPrefix = "occamy-vnc-it-until"
-
-// runName returns this run's name for its image and container.
-func runName() string {
-	timeout := 24 * time.Hour
-	if f := flag.Lookup("test.timeout"); f != nil {
-		if d, err := time.ParseDuration(f.Value.String()); err == nil && d > 0 {
-			timeout = d
-		}
-	}
-	return fmt.Sprintf("%s%d-%d", runPrefix, time.Now().Add(timeout+time.Minute).Unix(), os.Getpid())
-}
-
-// expired reports whether name is a run's whose time has passed.
-func expired(name string) bool {
-	_, rest, ok := strings.Cut(name, runPrefix)
-	if !ok {
-		return false
-	}
-	until, _, _ := strings.Cut(rest, "-")
-	t, err := strconv.ParseInt(until, 10, 64)
-	return err == nil && time.Now().Unix() > t
-}
-
 // cleanUp removes the containers and images of earlier runs whose time
-// has passed. podman lists images with a registry before the name.
+// has passed (runname_test.go), and nothing else.
 func cleanUp(engine string) {
+	now := time.Now()
 	out, _ := exec.Command(engine, "ps", "-a", "--filter", "name="+runPrefix, "--format", "{{.Names}}").Output()
 	for _, name := range strings.Fields(string(out)) {
-		if expired(name) {
+		if expired(name, now) {
 			_ = exec.Command(engine, "rm", "-f", name).Run()
 		}
 	}
 	out, _ = exec.Command(engine, "images", "--format", "{{.Repository}}").Output()
 	for _, repo := range strings.Fields(string(out)) {
-		if expired(repo) {
+		if expired(repo, now) {
 			_ = exec.Command(engine, "rmi", "-f", repo).Run()
 		}
 	}
