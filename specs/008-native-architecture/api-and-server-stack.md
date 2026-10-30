@@ -621,7 +621,8 @@ place for fixes that ship on v0 before beta.
   - Identity: decide whether a trusted issuer's `sub` names the same
     user as a static user of that name. `claimsFrom` carries the issuer
     so the two can be told apart; nothing decides it yet (decided by the
-    Sessions task: it does).
+    Sessions task, and revised in its review: it does not, unless the
+    issuer has `link_static_users`).
   - Sign-in has no rate limit, per address or per user; each attempt
     costs one bcrypt comparison at the users' highest cost, so a flood
     of attempts is also a CPU cost.
@@ -652,7 +653,8 @@ place for fixes that ship on v0 before beta.
     `guacd.params.<protocol>` under the target, the user name and the
     stored password. A prompting ssh connection without a user name gets
     a backend that asks the owner for one, then dials.
-  - `server/sessions.go`, every route behind `authenticate(s.verifier)`:
+  - `server/sessions.go`, every route behind
+    `authenticate(s.verifier, s.ids)`:
     - `GET /api/v1/connections`: `{"connections":[{"id","name",
       "protocol"}],"adhoc_targets":false}`, the connections whose allow
       list names the caller or one of the caller's groups, in the
@@ -693,16 +695,25 @@ place for fixes that ship on v0 before beta.
     follow-up). Kubernetes is not registered: it has no `host:port`
     target. The hello's graphical size reaches guacd capped at 8192, as
     v0's display hints are.
-  - **One identity namespace:** a trusted issuer's `sub` is the same
-    user as the static user of that name, for allow lists and for
-    owning sessions, and groups are matched by name too. Allow lists
-    name no issuer, and an issuer that is trusted can mint any `sub`
-    anyway, so telling them apart would protect nothing.
+  - **Owners are principals (revised in review):** a session belongs to
+    the issuer and `sub` of the token that opened it
+    (`server/identity.go`), so a trusted issuer acts for its own users
+    only. The first version took a trusted issuer's `sub` for the
+    static user of that name, which let a gateway's `alice` take over,
+    close and share static `alice`'s session. A trusted issuer's token
+    whose `sub` names a static user is refused, unless the issuer has
+    `link_static_users: true`, the switch OIDC sign-in (#110) adds under
+    `auth.oidc`, and then acts as that user. The stream token of a
+    trusted issuer's user carries the issuer in `uiss`, which only
+    occamyd's own tokens may set. Allow lists and groups still match by
+    name: they name no issuer. Once access tokens carry OIDC sign-in's
+    `idp` claim, the key becomes issuer, `idp` and `sub`; the
+    principal has the field for it.
   - **Absent rather than forbidden:** a connection the caller may not
     open answers 404, as an unknown one does, and so does another
     user's session on `GET`, `DELETE` and shares, so IDs cannot be
-    probed. Only the owner, by name, reads, closes and shares a session;
-    there is no administrator role yet.
+    probed. Only the owner reads, closes and shares a session; there is
+    no administrator role yet.
   - **Opening without streaming:** `POST /api/v1/sessions` starts the
     session at once. The owner's viewer that the registry returns leaves
     at once, which starts the owner grace of 60 s (session-core) in

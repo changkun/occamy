@@ -80,12 +80,17 @@ func (s *server) connectionStream(w http.ResponseWriter, r *http.Request) {
 		req.c.refuse(refuseToken(err))
 		return
 	}
+	p, err := s.ids.of(claims)
+	if err != nil {
+		req.c.refuse(refuseToken(err))
+		return
+	}
 	c := s.connection(r.PathValue("id"), claims)
 	if c == nil {
 		req.c.refuse(protocol.Close{Code: protocol.CloseForbidden, Reason: "no such connection"})
 		return
 	}
-	info, owner, err := s.open(connectionTarget(c), claims.Subject, screenOf(req.hello))
+	info, owner, err := s.open(connectionTarget(c), p, screenOf(req.hello))
 	if err != nil {
 		req.c.refuse(protocol.Close{Code: protocol.CloseInternalError, Reason: "the session could not be opened"})
 		return
@@ -242,10 +247,14 @@ func streamToken(r *http.Request) (string, *protocol.Close) {
 	return "", &protocol.Close{Code: protocol.CloseUnauthorized, Reason: "a token is required"}
 }
 
-// refuseToken is the close for a token that failed verification.
+// refuseToken is the close for a token that failed verification, or
+// whose subject identities refused.
 func refuseToken(err error) protocol.Close {
-	if errors.Is(err, jwt.ErrTokenExpired) {
+	switch {
+	case errors.Is(err, jwt.ErrTokenExpired):
 		return protocol.Close{Code: protocol.CloseUnauthorized, Reason: "token expired"}
+	case errors.Is(err, errStaticUser):
+		return protocol.Close{Code: protocol.CloseUnauthorized, Reason: "the token's subject is a static user's name"}
 	}
 	return protocol.Close{Code: protocol.CloseUnauthorized, Reason: "invalid token"}
 }
@@ -257,6 +266,9 @@ func refuseToken(err error) protocol.Close {
 //   - a session token for the session joins with its role, as the owner
 //     only if it names the owner;
 //   - a share of the registry for the session joins with its role.
+//
+// The owner is a principal: the same subject from another issuer is
+// another user.
 //
 // A session token's expiry, like an access token's, does not end a
 // stream that has joined; the session's end does.
@@ -279,6 +291,10 @@ func (s *server) join(id, token string) (*sessionInfo, *session.Viewer, *protoco
 	if errors.Is(err, auth.ErrKind) {
 		claims, err = s.verifier.VerifySession(token)
 	}
+	var p principal
+	if err == nil {
+		p, err = s.ids.of(claims)
+	}
 	if err != nil {
 		refuse := refuseToken(err)
 		return nil, nil, &refuse
@@ -299,7 +315,7 @@ func (s *server) join(id, token string) (*sessionInfo, *session.Viewer, *protoco
 			role = session.RoleReadOnly
 		}
 	}
-	if role == session.RoleOwner && claims.Subject != info.owner {
+	if role == session.RoleOwner && p != info.owner {
 		return nil, nil, forbidden
 	}
 	var v *session.Viewer

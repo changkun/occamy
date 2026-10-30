@@ -53,6 +53,7 @@ var (
 type server struct {
 	verifier *auth.Verifier
 	signer   *auth.Signer
+	ids      identities // the principals that tokens speak for
 	signIn   *staticUsers
 	tls      *tls.Config // nil serves plain HTTP
 	v0       *proxy      // nil unless legacy_v0
@@ -197,6 +198,7 @@ func newServer(f *config.File) (*server, error) {
 	s := &server{
 		verifier:    auth.NewVerifier(auth.Audience, keys),
 		signer:      signer,
+		ids:         newIdentities(f),
 		signIn:      signIn,
 		connections: f.Connections,
 		origins:     map[string]bool{},

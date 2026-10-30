@@ -45,7 +45,7 @@ const (
 type sessionInfo struct {
 	id         string
 	s          *session.Session
-	owner      string // the owner's user name
+	owner      principal
 	connection string // the registry's ID, empty for an ad-hoc target
 	protocol   string
 	backend    string
@@ -58,7 +58,7 @@ type sessionInfo struct {
 // registerSessions registers the routes of connections and sessions,
 // each for callers with an access token.
 func (s *server) registerSessions(mux *http.ServeMux) {
-	authed := authenticate(s.verifier)
+	authed := authenticate(s.verifier, s.ids)
 	mux.Handle("GET /api/v1/connections", authed(http.HandlerFunc(s.listConnections)))
 	mux.Handle("POST /api/v1/sessions", authed(http.HandlerFunc(s.openSession)))
 	mux.Handle("GET /api/v1/sessions/{id}", authed(http.HandlerFunc(s.sessionState)))
@@ -69,7 +69,8 @@ func (s *server) registerSessions(mux *http.ServeMux) {
 // mayOpen reports whether the caller of claims may open c: c's allow
 // list names the caller or one of the caller's groups. Names are matched
 // whichever issuer signed the token, as the allow lists name no issuer:
-// trusting an issuer trusts it for every name.
+// trusting an issuer trusts it for every name it may use, which excludes
+// static users' unless the issuer is linked to them.
 func mayOpen(c *config.Connection, claims *auth.Claims) bool {
 	if slices.Contains(c.Allow.Users, claims.Subject) {
 		return true
@@ -175,7 +176,8 @@ func (s *server) openSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, rerr.status, rerr.code, rerr.message)
 		return
 	}
-	info, owner, err := s.open(t, claims.Subject, screen{})
+	p := principalFrom(r.Context())
+	info, owner, err := s.open(t, p, screen{})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, codeInternal, "the session could not be opened")
 		return
@@ -183,7 +185,7 @@ func (s *server) openSession(w http.ResponseWriter, r *http.Request) {
 	// Nobody serves the owner's viewer, so it leaves, which starts the
 	// grace period within which the owner's stream joins.
 	owner.Leave()
-	token, err := s.signer.Session(info.id, auth.RoleOwner, claims.Subject, s.streamTTL)
+	token, err := s.signer.SessionFor(info.id, auth.RoleOwner, p.issuer, p.subject, s.streamTTL)
 	if err != nil {
 		log.Printf("session %s: signing the stream token: %v", info.id, err)
 		info.s.Close()
@@ -276,14 +278,14 @@ func (s *server) adhocTarget(ctx context.Context, req *openRequest) (target, *re
 // open starts a session on t for owner, sized as s asks, and returns it
 // with the owner's viewer. Failures are logged here; they are occamyd's
 // own, such as a password file it cannot read.
-func (s *server) open(t target, owner string, sz screen) (*sessionInfo, *session.Viewer, error) {
+func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *session.Viewer, error) {
 	what := fmt.Sprintf("connection %q", t.connection)
 	if t.connection == "" {
 		what = fmt.Sprintf("ad-hoc target %q", t.protocol+"://"+t.addr)
 	}
 	fail := func(err error) (*sessionInfo, *session.Viewer, error) {
 		// #nosec G706 -- the user name and the target are quoted, so they cannot break the line.
-		log.Printf("user %q opening %s: %v", owner, what, err)
+		log.Printf("user %q opening %s: %v", owner.String(), what, err)
 		return nil, nil, err
 	}
 	maker, ok := s.backends[t.protocol]
@@ -317,7 +319,7 @@ func (s *server) open(t target, owner string, sz screen) (*sessionInfo, *session
 		s.mu.Unlock()
 	}()
 	// #nosec G706 -- the user name and the target are quoted, so they cannot break the line.
-	log.Printf("session %s: user %q opened %s through %s", id, owner, what, maker.name)
+	log.Printf("session %s: user %q opened %s through %s", id, owner.String(), what, maker.name)
 	return info, v, nil
 }
 
@@ -332,9 +334,8 @@ func (s *server) session(id string) *sessionInfo {
 // caller owns it. Otherwise it has answered 404, so that another user's
 // session is as absent as an ended one.
 func (s *server) ownSession(w http.ResponseWriter, r *http.Request) (*sessionInfo, bool) {
-	claims, _ := claimsFrom(r.Context())
 	info := s.session(r.PathValue("id"))
-	if info == nil || info.owner != claims.Subject {
+	if info == nil || info.owner != principalFrom(r.Context()) {
 		writeError(w, http.StatusNotFound, codeNotFound, "no such session")
 		return nil, false
 	}

@@ -172,13 +172,13 @@ func TestSessionRoutesAuth(t *testing.T) {
 }
 
 // TestListConnections checks that each caller sees the connections that
-// name them or one of their groups, and that a trusted issuer's user is
-// the static user of the same name.
+// name them or one of their groups, whichever issuer names them, and that
+// a trusted issuer linked to static users may name them.
 func TestListConnections(t *testing.T) {
 	k := newKeys(t)
 	path := writeIssuerKey(t, k.gateway)
 	ts, _ := sessionServer(t, func(f *config.File) {
-		f.Auth.TrustedIssuers = []config.TrustedIssuer{{Issuer: "gateway", PublicKeyFile: path}}
+		f.Auth.TrustedIssuers = []config.TrustedIssuer{{Issuer: "gateway", PublicKeyFile: path, LinkStaticUsers: true}}
 	})
 	for _, tt := range []struct {
 		name  string
@@ -243,7 +243,7 @@ func TestOpenSession(t *testing.T) {
 		t.Errorf("stream token claims %+v", c)
 	}
 	info := ts.s.session(o.ID)
-	if info == nil || info.owner != "alice" || info.connection != "ops-shell" || info.protocol != "fake" {
+	if info == nil || info.owner != (principal{issuer: auth.Issuer, subject: "alice"}) || info.connection != "ops-shell" || info.protocol != "fake" {
 		t.Fatalf("session %+v", info)
 	}
 	if tg, sz, _ := fb.last(); tg.addr != "ops.example:22" || tg.connection != "ops-shell" || sz != (screen{}) {
@@ -462,7 +462,7 @@ func TestAdhocTargets(t *testing.T) {
 		}
 		var o openResponse
 		_ = json.Unmarshal(r.body, &o)
-		if info := ts.s.session(o.ID); info == nil || info.owner != "carol" || info.connection != "" {
+		if info := ts.s.session(o.ID); info == nil || info.owner != (principal{issuer: auth.Issuer, subject: "carol"}) || info.connection != "" {
 			t.Errorf("%s: session %+v", tt.body, info)
 		}
 	}

@@ -74,6 +74,7 @@ directory.
 | `auth.access_token_lifetime` | `15m` | How long an access token lasts, a duration with a unit (`15m`, `1h30m`) between `1m` and `12h` |
 | `auth.trusted_issuers[].issuer` | required | Name of a third party, such as a gateway, whose tokens `occamyd` accepts. Unique, and not `occamy`, which is `occamyd`'s own. See [tokens from a trusted issuer](#tokens-from-a-trusted-issuer) |
 | `auth.trusted_issuers[].public_key_file` | required | That issuer's Ed25519 public key, PKIX PEM |
+| `auth.trusted_issuers[].link_static_users` | `false` | Lets the issuer's tokens act for a static user by naming them in `sub`. Off, such tokens are refused: see [tokens from a trusted issuer](#tokens-from-a-trusted-issuer) |
 | `auth.users[].name` | required | A static user, who signs in with a password. Unique |
 | `auth.users[].password_hash` | required | bcrypt hash of the password, cost 10 or more. `htpasswd -nbBC 12 "" 'the password' \| cut -d: -f2` makes one. Give every user the same cost: a sign-in as an unknown user is checked against a hash of the highest cost, so a user at a lower cost signs in measurably faster, and `occamyd` warns at start when the costs differ |
 | `auth.users[].groups` | none | Groups the user belongs to |
@@ -99,6 +100,18 @@ A trusted issuer mints JWTs that `occamyd` accepts as its own:
   `role` (`owner`, `viewer` or `read-only`).
 
 `occamyd`'s own tokens have the same shape with `iss: occamy`.
+
+An issuer's users are its own. A session belongs to the issuer and the
+`sub` of the token that opened it, so the gateway's `carol` and
+`occamyd`'s `carol` are two users, and neither reads, closes, shares or
+streams as the owner the other's session. The stream token that
+`POST /api/v1/sessions` returns for a trusted issuer's user names that
+issuer in a `uiss` claim; no trusted issuer may set `uiss` itself. A
+trusted issuer's token whose `sub` names a static user is refused with
+`invalid_token` (on a stream, `close` with `unauthorized`), unless the
+issuer has `link_static_users: true`, in which case it acts as that
+static user. Connections' `allow.users` and `allow.groups` name users
+and groups whichever issuer signed the token.
 
 ### guacd: `guacd`
 
@@ -211,7 +224,7 @@ WebSockets over HTTP/1.1. So far it serves:
 | `DELETE /api/v1/sessions/{id}` | Close the session, owner only; every stream of it ends |
 | `POST /api/v1/sessions/{id}/shares` | A share for `{"role":"viewer"}` or `"read-only"`, with `expires_in` in seconds (60 to 43200, an hour by default), owner only |
 | `GET /api/v1/connections/{id}/stream` | Open a session on the connection and stream it, as a protocol v1 WebSocket ([protocol.md](protocol.md)) |
-| `GET /api/v1/sessions/{id}/stream` | Join a session as a protocol v1 WebSocket: as its owner with the owner's access token or the stream token, or with a share |
+| `GET /api/v1/sessions/{id}/stream` | Join a session as a protocol v1 WebSocket: as its owner with the owner's access token or the stream token, with the role of a session token for the session, which a trusted issuer may mint too, or with a share |
 | `/api/v0/login`, `/api/v0/connect` | With `legacy_v0: true`, the v0 routes as a v0 file serves them |
 
 `ssh` and `vnc` sessions use `occamyd`'s native backends, and `rdp` and

@@ -164,7 +164,7 @@ func TestParseV1Example(t *testing.T) {
 		Auth: config.Auth{
 			SigningKeyFile:      path("var/lib/occamy/signing.key"),
 			AccessTokenLifetime: 15 * time.Minute,
-			TrustedIssuers:      []config.TrustedIssuer{{Issuer: "gateway", PublicKeyFile: path("etc/occamy/gateway.pub")}},
+			TrustedIssuers:      []config.TrustedIssuer{{Issuer: "gateway", PublicKeyFile: path("etc/occamy/gateway.pub"), LinkStaticUsers: true}},
 			Users: []config.User{
 				{Name: "alice", PasswordHash: "$2a$12$R6bvkO3lC3JV/OaHnySvquk.wobMPB3XleIdoBgEwlhjbcfaZi0km", Groups: []string{"ops"}},
 				{Name: "bob", PasswordHash: "$2a$10$Ad6WcgC.YRhS7d8JbV/9..v/X5C7aAnBg5cVXdoz1F1d0uHmkmuH2", Groups: []string{"dev"}},

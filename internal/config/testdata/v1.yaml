@@ -32,10 +32,13 @@ auth:
   # How long an access token lasts, between 1m and 12h. Default 15m.
   access_token_lifetime: 15m
   # Third parties, such as a gateway, whose tokens occamyd accepts. Each
-  # key is an Ed25519 public key, PKIX PEM.
+  # key is an Ed25519 public key, PKIX PEM. An issuer's users are its
+  # own, and its tokens for a subject that names a static user are
+  # refused, unless link_static_users lets them act as that user.
   trusted_issuers:
     - issuer: gateway
       public_key_file: /etc/occamy/gateway.pub
+      link_static_users: true
   # Static users sign in with a password, stored as a bcrypt hash of cost
   # 10 or more. htpasswd -nbBC 12 "" 'the password' | cut -d: -f2 makes
   # one.

@@ -265,13 +265,14 @@ func TestAuthenticate(t *testing.T) {
 	wrongAudience := access(auth.Issuer, "alice")
 	wrongAudience.Audience = jwt.ClaimStrings{"elsewhere"}
 
-	srv := httptest.NewServer(authenticate(k.verifier)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	ids := identities{static: map[string]bool{"alice": true}, linked: map[string]bool{"linked": true}}
+	srv := httptest.NewServer(authenticate(k.verifier, ids)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, ok := claimsFrom(r.Context())
 		if !ok {
 			t.Error("no claims in the context")
 			return
 		}
-		respond(w, http.StatusOK, map[string]any{"user": c.Subject, "groups": c.Groups, "issuer": c.Issuer})
+		respond(w, http.StatusOK, map[string]any{"user": c.Subject, "groups": c.Groups, "issuer": c.Issuer, "principal": principalFrom(r.Context()).String()})
 	})))
 	defer srv.Close()
 
@@ -297,9 +298,10 @@ func TestAuthenticate(t *testing.T) {
 		{name: "wrong audience", header: bearer(signClaims(t, k.own, wrongAudience)), code: codeInvalidToken},
 		{name: "unknown issuer", header: bearer(signClaims(t, k.stranger, access("stranger", "alice"))), code: codeInvalidToken},
 		{name: "forged", header: bearer(signClaims(t, k.stranger, access(auth.Issuer, "alice"))), code: codeInvalidToken},
-		{name: "valid", header: bearer(valid), admit: `{"groups":["ops"],"issuer":"occamy","user":"alice"}`},
-		{name: "lowercase scheme", header: http.Header{"Authorization": {"bearer " + valid}}, admit: `{"groups":["ops"],"issuer":"occamy","user":"alice"}`},
-		{name: "trusted issuer", header: bearer(signClaims(t, k.gateway, access("gateway", "carol"))), admit: `{"groups":null,"issuer":"gateway","user":"carol"}`},
+		{name: "valid", header: bearer(valid), admit: `{"groups":["ops"],"issuer":"occamy","principal":"alice","user":"alice"}`},
+		{name: "lowercase scheme", header: http.Header{"Authorization": {"bearer " + valid}}, admit: `{"groups":["ops"],"issuer":"occamy","principal":"alice","user":"alice"}`},
+		{name: "trusted issuer", header: bearer(signClaims(t, k.gateway, access("gateway", "carol"))), admit: `{"groups":null,"issuer":"gateway","principal":"gateway:carol","user":"carol"}`},
+		{name: "trusted issuer naming a static user", header: bearer(signClaims(t, k.gateway, access("gateway", "alice"))), code: codeInvalidToken},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			r := do(t, http.MethodGet, srv.URL+"/"+tt.query, tt.header, "")
@@ -343,7 +345,7 @@ func TestRequestLogOmitsSecrets(t *testing.T) {
 	ts.signIn(t, "alice", "wrong-"+alicePassword)
 	do(t, http.MethodGet, ts.srv.URL+"/healthz?token="+tr.AccessToken, http.Header{"Authorization": {"Bearer " + tr.AccessToken}}, "")
 
-	authed := httptest.NewServer(logRequests(authenticate(ts.s.verifier)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))))
+	authed := httptest.NewServer(logRequests(authenticate(ts.s.verifier, ts.s.ids)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))))
 	defer authed.Close()
 	do(t, http.MethodGet, authed.URL+"/api/v1/connections?access_token="+tr.AccessToken, http.Header{"Authorization": {"Bearer " + tr.AccessToken}}, "")
 

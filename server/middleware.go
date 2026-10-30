@@ -148,14 +148,15 @@ func limitBodies(n int64) func(http.Handler) http.Handler {
 const bearerRealm = `Bearer realm="occamy"` // #nosec G101 -- a challenge, not a credential
 
 // authenticate admits requests that carry a valid access token in an
-// Authorization header, and puts the token's claims in the request's
-// context, where claimsFrom finds them. It never looks at the query
-// string or cookies, so a token never has to appear in a URL. Anything
-// else is refused with 401 and a WWW-Authenticate challenge (RFC 6750):
-// no token is unauthorized, and a token that fails verification, an
-// expired one, one of another kind or from an unknown issuer, is
-// invalid_token or token_expired.
-func authenticate(v *auth.Verifier) func(http.Handler) http.Handler {
+// Authorization header, and puts the token's claims and the principal
+// that ids maps them to in the request's context, where claimsFrom and
+// principalFrom find them. It never looks at the query string or
+// cookies, so a token never has to appear in a URL. Anything else is
+// refused with 401 and a WWW-Authenticate challenge (RFC 6750): no token
+// is unauthorized, and a token that fails verification, an expired one,
+// one of another kind or from an unknown issuer, or one whose subject
+// ids refuses, is invalid_token or token_expired.
+func authenticate(v *auth.Verifier, ids identities) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token, ok := bearerToken(r)
@@ -174,7 +175,14 @@ func authenticate(v *auth.Verifier) func(http.Handler) http.Handler {
 				}
 				return
 			}
-			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), claimsKey{}, claims)))
+			p, err := ids.of(claims)
+			if err != nil {
+				w.Header().Set("WWW-Authenticate", bearerRealm+`, error="invalid_token"`)
+				writeError(w, http.StatusUnauthorized, codeInvalidToken, err.Error())
+				return
+			}
+			ctx := context.WithValue(r.Context(), claimsKey{}, claims)
+			next.ServeHTTP(w, r.WithContext(context.WithValue(ctx, principalKey{}, p)))
 		})
 	}
 }
@@ -206,6 +214,15 @@ type claimsKey struct{}
 func claimsFrom(ctx context.Context) (*auth.Claims, bool) {
 	c, ok := ctx.Value(claimsKey{}).(*auth.Claims)
 	return c, ok
+}
+
+type principalKey struct{}
+
+// principalFrom returns the principal that authenticate admitted the
+// request for.
+func principalFrom(ctx context.Context) principal {
+	p, _ := ctx.Value(principalKey{}).(principal)
+	return p
 }
 
 type connKey struct{}

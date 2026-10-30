@@ -71,10 +71,16 @@ type Auth struct {
 }
 
 // TrustedIssuer is a third party, such as a gateway, whose tokens occamyd
-// accepts.
+// accepts. Its users are its own: a subject it names is another user than
+// a static user or another issuer's user of the same name.
 type TrustedIssuer struct {
 	Issuer        string `yaml:"issuer"`
 	PublicKeyFile string `yaml:"public_key_file"`
+	// LinkStaticUsers lets a subject of the issuer that names a static
+	// user act as that user. Off, the issuer's tokens for such a subject
+	// are refused, since a name belongs to one source unless the file
+	// links them.
+	LinkStaticUsers bool `yaml:"link_static_users"`
 }
 
 // User is a static user who signs in with a password.

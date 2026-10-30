@@ -106,6 +106,35 @@ func TestTrustedIssuer(t *testing.T) {
 	}
 }
 
+// A session token of occamyd's for a trusted issuer's user names the
+// issuer; a trusted issuer cannot name another, and an access token
+// names none.
+func TestSessionFor(t *testing.T) {
+	f := newFixture(t)
+	c, err := f.verifier.VerifySession(f.must(f.signer.SessionFor("s1", RoleOwner, "gateway", "bob", time.Minute)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Issuer != "occamy" || c.UserIssuer != "gateway" || c.Subject != "bob" {
+		t.Errorf("claims %+v", c)
+	}
+	c, err = f.verifier.VerifySession(f.must(f.signer.SessionFor("s1", RoleOwner, "occamy", "bob", time.Minute)))
+	if err != nil || c.UserIssuer != "" {
+		t.Errorf("own user: %+v %v", c, err)
+	}
+	if _, err := f.verifier.VerifySession(f.must(f.gateway.SessionFor("s1", RoleOwner, "elsewhere", "bob", time.Minute))); !errors.Is(err, ErrClaims) {
+		t.Errorf("a trusted issuer naming another's user: %v, want ErrClaims", err)
+	}
+	if tok, err := f.signer.SessionFor("s1", RoleViewer, "gateway", "", time.Minute); err == nil {
+		t.Errorf("signed a user issuer without a subject: %s", tok)
+	}
+	access := claims(KindAccess, "occamy", time.Minute)
+	access.UserIssuer = "gateway"
+	if _, err := f.verifier.VerifyAccess(forge(t, jwt.SigningMethodEdDSA, f.signer.key, access)); !errors.Is(err, ErrClaims) {
+		t.Errorf("an access token naming a user issuer: %v, want ErrClaims", err)
+	}
+}
+
 func TestSignRejects(t *testing.T) {
 	f := newFixture(t)
 	for name, sign := range map[string]func() (string, error){

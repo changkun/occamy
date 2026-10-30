@@ -70,11 +70,15 @@ var (
 
 // Claims are what a token says. Access tokens carry Groups; session tokens
 // carry Session and Role, and Subject if they were issued to a user.
+// A session token of occamyd's issued to a trusted issuer's user names
+// that issuer in UserIssuer, since a subject means a user only together
+// with its issuer.
 type Claims struct {
-	Kind    Kind     `json:"kind"`
-	Groups  []string `json:"groups,omitempty"`
-	Session string   `json:"sid,omitempty"`
-	Role    string   `json:"role,omitempty"`
+	Kind       Kind     `json:"kind"`
+	Groups     []string `json:"groups,omitempty"`
+	Session    string   `json:"sid,omitempty"`
+	Role       string   `json:"role,omitempty"`
+	UserIssuer string   `json:"uiss,omitempty"`
 	jwt.RegisteredClaims
 }
 
@@ -82,11 +86,11 @@ type Claims struct {
 func (c *Claims) check() error {
 	switch c.Kind {
 	case KindAccess:
-		if c.Subject == "" || c.Session != "" || c.Role != "" {
+		if c.Subject == "" || c.Session != "" || c.Role != "" || c.UserIssuer != "" {
 			return ErrClaims
 		}
 	case KindSession:
-		if c.Session == "" || c.Groups != nil {
+		if c.Session == "" || c.Groups != nil || c.UserIssuer != "" && c.Subject == "" {
 			return ErrClaims
 		}
 		switch c.Role {
@@ -128,10 +132,20 @@ func (s *Signer) Access(subject string, groups []string, ttl time.Duration) (str
 // ttl. subject names the user it is issued to, or is empty for a token
 // that anyone holding it may use, such as a share.
 func (s *Signer) Session(session, role, subject string, ttl time.Duration) (string, error) {
+	return s.SessionFor(session, role, "", subject, ttl)
+}
+
+// SessionFor is Session for a user of userIssuer, a trusted issuer. An
+// empty userIssuer, or the signer's own, is the signer's.
+func (s *Signer) SessionFor(session, role, userIssuer, subject string, ttl time.Duration) (string, error) {
+	if userIssuer == s.issuer {
+		userIssuer = ""
+	}
 	return s.sign(&Claims{
 		Kind:             KindSession,
 		Session:          session,
 		Role:             role,
+		UserIssuer:       userIssuer,
 		RegisteredClaims: jwt.RegisteredClaims{Subject: subject},
 	}, ttl)
 }
@@ -205,6 +219,11 @@ func (v *Verifier) verify(token string, kind Kind) (*Claims, error) {
 	}
 	if c.Kind != kind {
 		return nil, ErrKind
+	}
+	// Only occamyd speaks for another issuer's users: a trusted issuer
+	// that named one would name users beyond its own.
+	if c.UserIssuer != "" && c.Issuer != Issuer {
+		return nil, ErrClaims
 	}
 	return c, nil
 }
