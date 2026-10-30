@@ -290,7 +290,7 @@ func TestHandshake(t *testing.T) {
 			if s.c.pf != wantPixelFormat {
 				t.Errorf("pixel format %+v, want %+v", s.c.pf, wantPixelFormat)
 			}
-			if want := []int32{encCopyRect, encRaw, encCursor, encDesktopSize}; !slices.Equal(s.c.encodings, want) {
+			if want := []int32{encCopyRect, encTight, encZRLE, encHextile, encRaw, encCursor, encDesktopSize}; !slices.Equal(s.c.encodings, want) {
 				t.Errorf("encodings %v, want %v", s.c.encodings, want)
 			}
 			waitFor(t, "the title", func() bool { return s.sink.TitleText() == "Desktop ✓" })
