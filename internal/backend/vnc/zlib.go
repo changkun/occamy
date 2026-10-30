@@ -24,10 +24,11 @@ const (
 	// stored block, a few bytes, are left for the next rectangle.
 	maxZlibTail = 64
 	// zlibBuffer is the size of the buffer that a stream's output is read
-	// through: the inflater's window, the most it hands out at once, so
-	// that each time the buffer is filled it takes all that the inflater
-	// has handed out, and inflated data that a rectangle's pixels do not
-	// take is left in the buffer, where end sees it.
+	// through. It is the inflater's window, the most the inflater hands
+	// out at once, so that each read takes all it has handed out, whether
+	// into the buffer or, for a request as large as the buffer, straight
+	// into the request. Inflated data that a rectangle's pixels do not
+	// take is then left in the buffer, where end sees it.
 	zlibBuffer = 32 << 10
 )
 
@@ -121,17 +122,10 @@ func (z *zstream) reset() {
 	z.in.tail = nil
 }
 
-// read fills p with inflated data. It reads less than the buffer at a
-// time, since bufio reads larger requests past its buffer.
+// read fills p with inflated data.
 func (z *zstream) read(p []byte) error {
-	for len(p) > 0 {
-		n := min(len(p), zlibBuffer-1)
-		if _, err := io.ReadFull(z.out, p[:n]); err != nil {
-			return zlibError(err)
-		}
-		p = p[n:]
-	}
-	return nil
+	_, err := io.ReadFull(z.out, p)
+	return zlibError(err)
 }
 
 // byte reads one byte of inflated data.

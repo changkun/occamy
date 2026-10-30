@@ -451,11 +451,11 @@ leaves only RDP on the bridge.
     copy and palette filters, so the gradient filter is tested with
     hand-built data and the fake server's encoder alone.
   - `bufio.Reader` reads a request at least as large as its buffer
-    straight from the underlying reader, so inflated data beyond a large
-    Tight rectangle's pixels stayed in the inflater, unseen by the check
-    for it, and started the next rectangle. Reads now go through the
-    buffer in pieces smaller than it, and the buffer is as large as the
-    window, the most the inflater hands out at once.
+    straight from the underlying reader. With a 16 KiB buffer, inflated
+    data beyond a large Tight rectangle's pixels stayed in the inflater,
+    unseen by the check for it, and started the next rectangle. The
+    buffer is now as large as the inflater's window, the most it hands
+    out at once, so every read takes all it has handed out.
   - With the race detector on, `slices.Grow` allocated twice the growth,
     which broke the JPEG allocation bound; the JPEG buffer grows by hand.
   - Go's fuzzer minimizes each new input for up to a minute and does not
