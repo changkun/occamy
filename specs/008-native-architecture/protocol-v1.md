@@ -354,7 +354,9 @@ web client ([009](../009-react-web-client.md)) and the client core
     not a codec (it marks a hidden cursor), 7 to 0x7F are unassigned and
     0x80 to 0xFF are reserved for the video tier. Raw's channel order and
     deflate's container are provisional until the graphics pipeline's
-    measurement, and WebP is one of its candidates.
+    measurement, and WebP is one of its candidates. (2026-10-30: the
+    measurement fixed raw as RGBA and picked WebP for lossy tiles; the
+    deflate container goes to the graphics pipeline's Codecs task.)
   - Close codes are WebSocket close statuses, so the `close` message and
     the close frame carry one number: `normal` 1000, `server-shutdown`
     1001, `protocol-error` 1002, `unsupported` 1003, `too-large` 1009,
@@ -429,4 +431,5 @@ web client ([009](../009-react-web-client.md)) and the client core
 - **Follow-ups.** The viewer writer and the Streams task use this
   package. The web client's TypeScript codec is tested against
   `messages.json`. The graphics pipeline's measurement fixes raw's
-  channel order and deflate's container. `ViewerInfo` gains a name.
+  channel order and deflate's container (raw's order is fixed as RGBA;
+  the container goes to its Codecs task). `ViewerInfo` gains a name.
