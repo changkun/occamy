@@ -14,6 +14,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"changkun.de/x/occamy/internal/backend/backendtest"
@@ -49,9 +50,22 @@ func messageSeeds() map[string][]byte {
 		"bell":         putBell(),
 		"cut-text":     putCutText("caf\xe9\nline"),
 		"colour-map":   putColourMap(3),
+
+		"ext-desktop-size": putUpdate(putExtDesktopSize(0, 0, 20, 16, screenMsg{id: 1, r: image.Rect(0, 0, 20, 16)}),
+			putRaw(pf, img, image.Rect(0, 0, 20, 16))),
+		"ext-desktop-size-answer": putUpdate(putExtDesktopSize(reasonClient, 3, 0, 0)),
+		"last-rect":               putUncounted(putRaw(pf, img, image.Rect(0, 0, 4, 4)), putLastRect()),
+		"qemu-keys":               putUpdate(putQEMUKeys()),
+		"continuous":              slices.Concat(putFence(fenceRequest|fenceBlockBefore, "abc"), putEndOfContinuous()),
+		"clipboard-caps":          putClipCaps(clipText|1<<1|clipRequest|clipPeek|clipNotify|clipProvide, 1<<20, 0),
+		"clipboard-actions":       slices.Concat(putClip(clipNotify|clipText, nil), putClip(clipRequest|clipText, nil), putClip(clipPeek, nil)),
+		"clipboard-provide":       putClipProvide("café\r\nline\x00"),
 	}
 	var all []byte
-	for _, name := range []string{"raw", "copy-rect", "cursor", "bell", "cut-text", "colour-map", "desktop-size"} {
+	for _, name := range []string{
+		"raw", "copy-rect", "cursor", "bell", "cut-text", "colour-map", "desktop-size",
+		"continuous", "clipboard-caps", "clipboard-provide", "qemu-keys", "ext-desktop-size",
+	} {
 		all = append(all, seeds[name]...)
 	}
 	seeds["all"] = all
@@ -61,7 +75,21 @@ func messageSeeds() map[string][]byte {
 // handshakeSeeds are servers' sides of handshakes, by name.
 func handshakeSeeds() map[string][]byte {
 	challenge := make([]byte, 16)
+	vc := func(subs ...uint32) script {
+		s := script{}.version("003.008").u8(1, secVeNCrypt).u8(0, 2, 0, byte(len(subs)))
+		for _, st := range subs {
+			s = s.u32(st)
+		}
+		return s
+	}
 	return map[string][]byte{
+		"vencrypt-x509none":  vc(subX509None).u8(1).u32(0).init(16, 12, ""),
+		"vencrypt-x509vnc":   vc(subX509Vnc).u8(1).u8(challenge...).u32(0).init(16, 12, ""),
+		"vencrypt-x509plain": vc(subX509Plain).u8(1).u32(0).init(16, 12, ""),
+		"vencrypt-tigervnc":  vc(258, subX509Vnc, secVNCAuth, secNone).u8(1).u8(challenge...).u32(0).init(16, 12, ""),
+		"vencrypt-failed":    vc(subX509Plain).u8(1).u32(1).str("Authentication failed"),
+		"vencrypt-0.1":       script{}.version("003.008").u8(1, secVeNCrypt).u8(0, 1, 2).u32(19),
+
 		"3.3-none":    script{}.version("003.003").u32(secNone).init(16, 12, "desktop"),
 		"3.3-auth":    script{}.version("003.003").u32(secVNCAuth).u8(challenge...).u32(0).init(16, 12, ""),
 		"3.7-auth":    script{}.version("003.007").u8(2, secNone, secVNCAuth).u8(challenge...).u32(0).init(16, 12, "x"),
@@ -84,10 +112,23 @@ func FuzzServerMessages(f *testing.F) {
 		sink.Resize(fuzzScreen.X, fuzzScreen.Y)
 		d := newDecoder(context.Background(), bytes.NewReader(data), sink, fuzzScreen, fuzzLimits, discardLogger)
 		d.resizeEvery = 0
-		for {
-			if _, err := d.next(); err != nil {
+		// The extensions' state takes what the decoder tells it, and the
+		// writer's side runs after each message, as Run would.
+		r := newRun()
+		r.size = fuzzScreen
+		d.peer = r
+		for i := 0; ; i++ {
+			typ, err := d.next()
+			if err != nil {
 				break
 			}
+			if typ == msgFramebufferUpdate {
+				r.updated(d.size, d.resized)
+			}
+			for len(r.control) > 0 {
+				<-r.control
+			}
+			r.due(io.Discard, i%3 != 2)
 		}
 		if s := sink.Size(); s.X > fuzzLimits.side || s.Y > fuzzLimits.side || s.X*s.Y > fuzzLimits.pixels || s != d.size {
 			t.Errorf("screen %v, decoder's %v, beyond the limits %+v", s, d.size, fuzzLimits)
