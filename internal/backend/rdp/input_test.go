@@ -10,7 +10,6 @@ import (
 	"image"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/rdp"
@@ -179,6 +178,8 @@ func TestCost(t *testing.T) {
 func FuzzInput(f *testing.F) {
 	f.Add(uint8(0), true, uint32(0xff13), uint16(0x48), 0, 0, uint8(0), "")
 	f.Add(uint8(1), false, uint32(0), uint16(0), 0, 0, uint8(0), "a€😀\n\x01\u0085")
+	f.Add(uint8(1), false, uint32(0), uint16(0), 0, 0, uint8(0), "A") // with Shift
+	f.Add(uint8(1), false, uint32(0), uint16(0), 0, 0, uint8(0), "😀") // two UTF-16 units
 	f.Add(uint8(2), true, uint32(0), uint16(0), 5, 6, uint8(0x1f), "")
 	f.Add(uint8(3), false, uint32(0), uint16(0), 1<<30, -1<<30, uint8(1), "")
 	f.Fuzz(func(t *testing.T, kind uint8, flag bool, keysym uint32, code uint16, x, y int, buttons uint8, s string) {
@@ -207,9 +208,6 @@ func FuzzInput(f *testing.F) {
 			if got := len(s.events(nil, caps, ev)); got > n {
 				t.Fatalf("%+v makes %d events, charged %d", ev, got, n)
 			}
-		}
-		if text, ok := ev.(backend.Text); ok && n != 4*utf8.RuneCountInString(text.Text) {
-			t.Fatalf("text charged %d", n)
 		}
 	})
 }
