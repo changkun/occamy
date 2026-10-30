@@ -272,14 +272,14 @@ func TestVisibility(t *testing.T) {
 		if err := r.cl.View(ctx, true, image.Rect(0, 0, 100, 60)); err != nil {
 			t.Fatal(err)
 		}
-		var dirty []image.Rectangle
-		for _, f := range frames(drain(t, r.cl, 100*time.Millisecond)) {
-			dirty = append(dirty, f.Dirty...)
-		}
 		// The viewport covers two of the 64-pixel tiles, but the frame
 		// that resizes the screen marks the whole screen.
-		if r.cl.Size() != image.Pt(256, 256) {
-			t.Fatalf("size %v after the first frame", r.cl.Size())
+		shown := frames(drain(t, r.cl, 100*time.Millisecond))
+		if len(shown) == 0 || r.cl.Size() != image.Pt(256, 256) {
+			t.Fatalf("%d frames, size %v once shown", len(shown), r.cl.Size())
+		}
+		if d := shown[0].Dirty; len(d) != 1 || d[0] != image.Rect(0, 0, 256, 256) {
+			t.Errorf("the first frame marks %v, want the screen", d)
 		}
 		got := r.cl.Screenshot()
 		want := serverScreen(r.s)

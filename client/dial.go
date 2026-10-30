@@ -46,7 +46,8 @@ func Dial(ctx context.Context, rawURL, token string, opts Options) (*Session, er
 	if token != "" {
 		subprotocols = append(subprotocols, protocol.TokenSubprotocol(token))
 	}
-	c, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{
+	// websocket.Dial closes the response's body itself.
+	c, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{ //nolint:bodyclose
 		HTTPClient:   opts.HTTPClient,
 		HTTPHeader:   opts.HTTPHeader,
 		Subprotocols: subprotocols,
