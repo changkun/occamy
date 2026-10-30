@@ -28,6 +28,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   state as latest values, ends the session when the owner stays away or
   it idles, and a registry of sessions with share tokens that die with
   them. Not served by any route yet.
+- `internal/terminal`, the headless terminal emulator of a terminal
+  session: immutable, versioned screen snapshots that share unchanged
+  rows, and the diffs that bring a viewer's terminal from the screen it
+  last received to the current one, sending scrolled lines as line feeds
+  so the client's scrollback fills. Not served by any route yet.
 
 ### Changed
 
