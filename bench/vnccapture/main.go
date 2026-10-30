@@ -181,6 +181,10 @@ func (r *recorder) shot(c *rfb.Conn, s shot) error {
 		defer r.engineRun("exec", r.name, "pkill", "-x", s.run[0]) //nolint:errcheck // reported on stderr
 	}
 	time.Sleep(s.settle)
+	// Keep the frames in memory until the sequence is complete, so that
+	// saving one does not delay the request for the next.
+	frames := make([]*image.RGBA, s.frames)
+	start := time.Now()
 	for i := range s.frames {
 		if err := c.Request(i > 0); err != nil {
 			return err
@@ -188,26 +192,35 @@ func (r *recorder) shot(c *rfb.Conn, s shot) error {
 		if err := c.ReadUpdate(); err != nil {
 			return err
 		}
+		frames[i] = snapshot(c)
+	}
+	elapsed := time.Since(start)
+	for i, img := range frames {
 		file := s.name + ".png"
 		if s.frames > 1 {
 			file = fmt.Sprintf("%s-%d.png", s.name, i)
 		}
-		if err := save(filepath.Join(r.out, file), c); err != nil {
+		if err := save(filepath.Join(r.out, file), img); err != nil {
 			return err
 		}
 	}
-	log.Printf("%s: %d frames", s.name, s.frames)
+	log.Printf("%s: %d frames in %v", s.name, s.frames, elapsed.Round(time.Millisecond))
 	return nil
 }
 
-// save writes the screen as PNG, with a palette when it has 256 colours
-// or fewer, which makes the file smaller and changes no pixel.
-func save(path string, c *rfb.Conn) error {
+// snapshot copies the screen into an opaque image.
+func snapshot(c *rfb.Conn) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, c.W, c.H))
 	for i := 0; i < len(c.FB); i += 4 {
 		copy(img.Pix[i:i+3], c.FB[i:i+3])
 		img.Pix[i+3] = 0xff
 	}
+	return img
+}
+
+// save writes the screen as PNG, with a palette when it has 256 colours
+// or fewer, which makes the file smaller and changes no pixel.
+func save(path string, img *image.RGBA) error {
 	var m image.Image = img
 	if p := paletted(img); p != nil {
 		m = p

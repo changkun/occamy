@@ -7,7 +7,7 @@ The results are in [docs/benchmarks/codecs.md](../../../docs/benchmarks/codecs.m
 
 Every frame is the full 1024×768 screen as x11vnc sent it, stored as PNG
 (with a palette where the frame has 256 colours or fewer, which changes no
-pixel). The 13 files take 2.5 MiB (2,578,985 bytes).
+pixel). The 13 files take 2.5 MiB (2,586,822 bytes).
 
 | File | What is on the screen |
 |------|------------------------|
@@ -37,9 +37,10 @@ For the terminal and the browser, `vnccapture` starts xterm or dillo on
 the display with `podman exec` over the idle scene; with no window
 manager, their windows have no decorations. For the bench scenes it
 presses their function keys. A still is a complete update; a sequence
-is the screen after each update that x11vnc sent next, so it is what a
-VNC backend would see, including updates that land between the scene's
-copy and its redraw (visible in `scroll-1.png`).
+is the screen after each update that x11vnc sent next, held in memory
+until the sequence ends, so it is what a VNC backend would see. The
+three scroll updates came within 42 ms, the three drag updates within
+48 ms and the two motion updates within 20 ms.
 
 The capture asks x11vnc for pixels in red, green, blue order and for the
 cursor's shape as a pseudo-encoding, so the pointer is not painted into
