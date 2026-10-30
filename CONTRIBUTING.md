@@ -26,7 +26,10 @@ make stop
 
 `go test ./...` runs the unit tests; the end-to-end tests in `tests/` skip
 unless `make e2e` points them at a running stack. No C toolchain is needed.
-See the README for a native build.
+See the README for a native build. The guacd bridge's conformance corpus,
+recorded guacd sessions that `go test` replays, is recorded again with
+`go test -tags record` against the bench stack, as the doc comment of
+`internal/backend/guacd/record_test.go` shows.
 
 `make lint` runs golangci-lint v2 with the linters and formatters in
 `.golangci.yml`, as CI does. Code must be `gofmt`ed, with imports grouped

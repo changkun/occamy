@@ -42,6 +42,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   instructions. `internal/guacamole`'s display now applies `cursor`,
   reports damage as rectangles, and copies areas out. Not served by any
   route yet.
+- A conformance corpus for the guacd bridge: guacd 1.6's VNC, RDP and
+  SSH sessions on the bench stack, recorded with `go test -tags record`
+  and replayed by `go test` without containers, which fails on any
+  error, unsupported operation or log line, on a checkpoint that does
+  not show the scene's idle screen, and on a changed final frame.
 - A native SSH backend for protocol v1, `internal/backend/ssh`, in pure
   Go. It accepts only pinned host keys, by key or SHA-256 fingerprint,
   unless told to ignore them, which it logs as a warning. It
@@ -81,6 +86,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   coder/websocket, so gin, gin-jwt and gorilla/websocket and their
   indirect dependencies are gone from `go.mod`. `auth.jwt_alg` must be
   HS256, HS384 or HS512, and `auth.jwt_secret` must not be empty.
+
+### Fixed
+
+- `internal/guacamole`'s display, which the benchmark and the guacd
+  bridge draw with, decodes lossy WebP as libwebp, and so a browser,
+  does. `golang.org/x/image/webp` alone read VP8's limited-range colours
+  as full-range and did not interpolate chroma, which put guacd's frames
+  up to 38 levels a channel off.
 
 ### Security
 
