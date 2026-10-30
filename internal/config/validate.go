@@ -26,6 +26,7 @@ import (
 
 	"changkun.de/x/occamy/internal/auth"
 	"changkun.de/x/occamy/internal/backend/ssh"
+	"changkun.de/x/occamy/internal/backend/vnc"
 )
 
 // Bounds of auth.access_token_lifetime. The upper bound is the longest
@@ -332,6 +333,7 @@ func (f *File) validateConnections(c *checker) {
 		c.credentials(p+".credentials", cn.Protocol, cn.Credentials)
 		if known {
 			c.hostKeys(p, cn)
+			c.connectionTLS(p+".tls", cn)
 		}
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
 	}
@@ -359,6 +361,31 @@ func (c *checker) hostKeys(path string, cn *Connection) {
 	for i, k := range cn.HostKeys {
 		if err := ssh.CheckHostKey(k); err != nil {
 			c.add(fmt.Sprintf("%s.host_keys[%d]", path, i), "%v", err)
+		}
+	}
+}
+
+// connectionTLS checks a vnc connection's certificate policy: pins
+// replace the roots that ca_file names, and other protocols have no tls.
+func (c *checker) connectionTLS(path string, cn *Connection) {
+	t := cn.TLS
+	if cn.Protocol != "vnc" {
+		if t.set() {
+			c.add(path, "only vnc connections have tls")
+		}
+		return
+	}
+	if t.CAFile != "" && len(t.Pins) > 0 {
+		c.add(path+".pins", "pins replace the roots: set ca_file or pins, not both")
+	}
+	if c.file(path+".ca_file", t.CAFile) {
+		if _, err := t.RootCAs(); err != nil {
+			c.add(path+".ca_file", "%v", err)
+		}
+	}
+	for i, s := range t.Pins {
+		if err := vnc.CheckPin(s); err != nil {
+			c.add(fmt.Sprintf("%s.pins[%d]", path, i), "%v", err)
 		}
 	}
 }

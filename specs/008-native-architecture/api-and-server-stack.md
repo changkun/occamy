@@ -798,13 +798,22 @@ place for fixes that ship on v0 before beta.
   - A per-connection `backend:` key (guacd-bridge's parity gate), `term`
     for ssh (the backend's `xterm-256color` until then) and per-connection
     guacd parameters.
-  - VNC phase 3 (#106, not merged when this landed) adds a user name and
-    a TLS policy to `vnc.Config`. Connections then need `username` and a
-    `tls` block (`require`, `server_name`, `ca_file`, `pins`,
-    `insecure_skip_verify`), validated and passed through `newVNC`. Its
-    pins should take the shape of `host_keys`: a list of keys or
-    `SHA256:` fingerprints in base64, and a separate `insecure_` switch
-    that excludes them.
+  - VNC phase 3's user name and TLS policy (done in review, once #106
+    merged): `credentials.username` reaches `vnc.Config.Username`, and a
+    vnc connection's `tls` block (`config.ConnectionTLS`: `require`,
+    `server_name`, `ca_file`, `pins`, `insecure_skip_verify`) its `TLS`
+    through `vncConfig`, with `ca_file` read into `RootCAs` when the
+    session starts, as passwords are. Validation refuses `tls` on other
+    protocols, `ca_file` with `pins`, a CA file without a PEM
+    certificate, and a pin that `vnc.CheckPin` refuses. Pins take the
+    forms the backend parses (a PEM certificate, or a SHA-256
+    fingerprint in hex or in base64 after `SHA256:`), and
+    `insecure_skip_verify` does not exclude them, as in the backend,
+    where it accepts what is not pinned. An ad-hoc vnc target's
+    certificate must name the host name the request gave
+    (`target.name`), not the address dialled. Left over: an ad-hoc
+    request carries no pins or CA, so a server with a self-signed
+    certificate is reachable as a connection only.
   - Ad-hoc targets for some groups only, and a rate limit on
     `POST /api/v1/sessions`.
   - A list of the caller's own sessions, `GET /api/v1/sessions`, which

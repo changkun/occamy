@@ -241,6 +241,7 @@ func connectionTarget(c *config.Connection) target {
 		creds:                 c.Credentials,
 		hostKeys:              c.HostKeys,
 		insecureIgnoreHostKey: c.InsecureIgnoreHostKey,
+		tls:                   c.TLS,
 	}
 }
 

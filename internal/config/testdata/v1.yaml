@@ -92,6 +92,10 @@ connections:
     name: NAS desktop
     protocol: vnc
     target: nas.internal # the protocol's default port, 5900
+    # The NAS's self-signed certificate, by the fingerprint that
+    # openssl x509 -noout -fingerprint -sha256 prints.
+    tls:
+      pins: ["B7:2C:51:9E:0D:44:A3:6F:18:E2:95:7B:C0:3A:61:DD:4F:89:12:B6:E7:05:9C:73:2A:F1:58:0E:C4:93:6B:1D"]
     credentials:
       password_env: OCCAMY_NAS_VNC_PASSWORD
     allow:

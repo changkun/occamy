@@ -6,6 +6,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -149,9 +150,61 @@ type Connection struct {
 	HostKeys []string `yaml:"host_keys"`
 	// InsecureIgnoreHostKey accepts any host key from an ssh target, with
 	// a warning, for demos.
-	InsecureIgnoreHostKey bool        `yaml:"insecure_ignore_host_key"`
-	Credentials           Credentials `yaml:"credentials"`
-	Allow                 Allow       `yaml:"allow"`
+	InsecureIgnoreHostKey bool `yaml:"insecure_ignore_host_key"`
+	// TLS is the certificate policy of a vnc target's VeNCrypt. Other
+	// protocols have none.
+	TLS         ConnectionTLS `yaml:"tls"`
+	Credentials Credentials   `yaml:"credentials"`
+	Allow       Allow         `yaml:"allow"`
+}
+
+// ConnectionTLS is the policy for the certificate that a vnc target
+// presents when VeNCrypt runs TLS, which the native VNC backend prefers
+// whenever a server offers it. By default the certificate must chain to
+// the system's roots and name the target's host.
+type ConnectionTLS struct {
+	// Require refuses a server that does not offer VeNCrypt with a
+	// certificate, so that nobody on the way can strip it from the
+	// security types the server offers. CAFile and Pins imply it.
+	Require bool `yaml:"require"`
+	// ServerName is the name the certificate must carry, if not the
+	// target's host.
+	ServerName string `yaml:"server_name"`
+	// CAFile holds the PEM certificates of the CAs that replace the
+	// system's roots, as for a private CA. It is read when a session
+	// starts.
+	CAFile string `yaml:"ca_file"`
+	// Pins are the certificates accepted as they are, as an ssh
+	// connection's host keys are: each a certificate in PEM or its
+	// SHA-256 fingerprint, in hex as openssl x509 -fingerprint -sha256
+	// prints it or in base64 after "SHA256:". They replace the roots, so
+	// CAFile is not set with them.
+	Pins []string `yaml:"pins"`
+	// InsecureSkipVerify accepts any certificate that is not pinned, and
+	// logs a warning with its fingerprint. For demos.
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify"`
+}
+
+// set reports whether any of t's keys is set.
+func (t ConnectionTLS) set() bool {
+	return t.Require || t.ServerName != "" || t.CAFile != "" || len(t.Pins) > 0 || t.InsecureSkipVerify
+}
+
+// RootCAs reads the certificates in CAFile, and returns nil, for the
+// system's roots, if it is not set.
+func (t ConnectionTLS) RootCAs() (*x509.CertPool, error) {
+	if t.CAFile == "" {
+		return nil, nil
+	}
+	b, err := os.ReadFile(t.CAFile) // #nosec G304 -- the path comes from the operator's configuration
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(b) {
+		return nil, fmt.Errorf("%s holds no PEM certificate", t.CAFile)
+	}
+	return pool, nil
 }
 
 // Credentials say how occamyd authenticates to a connection's target.

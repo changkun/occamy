@@ -912,7 +912,9 @@ leaves only RDP on the bridge.
     backends; `internal/config` is unchanged here. A VNC connection
     needs `username`, and a `tls` block with `require`, `server_name`,
     `ca_file` (read into `RootCAs`), `pins` (a list) and
-    `insecure_skip_verify`.
+    `insecure_skip_verify`. Done in the Sessions task's review (#111),
+    with `vnc.CheckPin` for the configuration's checks; see
+    api-and-server-stack.md.
   - Protocol v1's web client must fill `Key.Code` from
     `KeyboardEvent.code` for QEMU key events to be used; the current
     Guacamole-protocol client sends keysyms only.

@@ -33,6 +33,8 @@ type target struct {
 	// The host key policy of an ssh target.
 	hostKeys              []string
 	insecureIgnoreHostKey bool
+	// tls is the certificate policy of a vnc target.
+	tls config.ConnectionTLS
 }
 
 // screen is the size that the owner's hello asks for: pixels for a
@@ -120,11 +122,42 @@ func newSSH(t target, s screen) (backend.Backend, error) {
 // newVNC makes a native VNC backend. VNC Authentication has no user
 // name, so a configured one is not used.
 func newVNC(t target, _ screen) (backend.Backend, error) {
-	pw, err := password(t.creds)
+	cfg, err := vncConfig(t)
 	if err != nil {
 		return nil, err
 	}
-	return vnc.New(vnc.Config{Addr: t.addr, Password: pw})
+	return vnc.New(cfg)
+}
+
+// vncConfig is the native VNC backend's configuration for t, with the
+// password and the CA file read.
+func vncConfig(t target) (vnc.Config, error) {
+	pw, err := password(t.creds)
+	if err != nil {
+		return vnc.Config{}, err
+	}
+	roots, err := t.tls.RootCAs()
+	if err != nil {
+		return vnc.Config{}, fmt.Errorf("reading the CA file: %w", err)
+	}
+	cfg := vnc.Config{
+		Addr:     t.addr,
+		Username: t.creds.Username,
+		Password: pw,
+		TLS: vnc.TLS{
+			Require:            t.tls.Require,
+			ServerName:         t.tls.ServerName,
+			RootCAs:            roots,
+			Pins:               t.tls.Pins,
+			InsecureSkipVerify: t.tls.InsecureSkipVerify,
+		},
+	}
+	// An ad-hoc target's address is the one its name resolved to, and
+	// the certificate names the name.
+	if cfg.TLS.ServerName == "" {
+		cfg.TLS.ServerName = t.name
+	}
+	return cfg, nil
 }
 
 // newBridge returns the maker of protocol's sessions through guacd at g.

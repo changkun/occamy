@@ -153,7 +153,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   a subprotocol, never in the URL, and `Origin` checked against
   `origins`. ssh and vnc connections use the native backends, rdp and
   telnet the guacd bridge. ssh connections need `host_keys` or
-  `insecure_ignore_host_key: true`.
+  `insecure_ignore_host_key: true`. vnc connections take a `username`
+  for VeNCrypt's Plain, and a `tls` block for the server's certificate:
+  a CA file, pins by fingerprint, or an insecure mode for demos.
 - `changkun.de/x/occamy/client`, a public Go client of protocol v1 in
   pure Go, for tests, tools and the Swift client's export layer. `Dial`
   performs the handshake over a WebSocket, and `Next` delivers frames

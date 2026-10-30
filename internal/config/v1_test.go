@@ -7,8 +7,10 @@ package config_test
 import (
 	"crypto/ed25519"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"math/big"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -89,6 +91,7 @@ func fixture(t *testing.T) string {
 		}
 	}
 	writePublicKey(t, filepath.Join(dir, "gateway.pub"))
+	writeCertificate(t, filepath.Join(dir, "ca.pem"))
 	t.Setenv("OCCAMY_TEST_PASSWORD", "s3cret")
 	t.Setenv("OCCAMY_TEST_EMPTY", "")
 	return dir
@@ -106,6 +109,31 @@ func writePublicKey(t *testing.T, path string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeCertificate writes a self-signed CA certificate in PEM.
+func writeCertificate(t *testing.T, path string) {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "occamy test CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(nil, tmpl, tmpl, pub, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -192,6 +220,7 @@ func TestParseV1Example(t *testing.T) {
 			},
 			{
 				ID: "nas-desktop", Name: "NAS desktop", Protocol: "vnc", Target: "nas.internal:5900",
+				TLS:         config.ConnectionTLS{Pins: []string{"B7:2C:51:9E:0D:44:A3:6F:18:E2:95:7B:C0:3A:61:DD:4F:89:12:B6:E7:05:9C:73:2A:F1:58:0E:C4:93:6B:1D"}},
 				Credentials: config.Credentials{PasswordEnv: "OCCAMY_NAS_VNC_PASSWORD"},
 				Allow:       config.Allow{Groups: []string{"ops", "dev"}},
 			},
@@ -569,6 +598,21 @@ func TestParseV1Problems(t *testing.T) {
 			{"connections[2].host_keys[1]", "host key is not a public key"},
 			{"connections[3].host_keys", "only ssh connections have host keys"},
 			{"connections[3].insecure_ignore_host_key", "only ssh connections have host keys"},
+		}},
+		{"vnc tls", head + `connections:
+  - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: vnc, target: b, tls: {ca_file: DIR/ca.pem, pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: vnc, target: c, tls: {ca_file: DIR/password}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: d, protocol: vnc, target: d, tls: {ca_file: DIR/missing.pem}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: e, protocol: vnc, target: e, tls: {pins: ["SHA256:short", "zz"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: f, protocol: vnc, target: f, tls: {require: true, server_name: nas, ca_file: DIR/ca.pem, insecure_skip_verify: true}, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
+`, []want{
+			{"connections[0].tls", "only vnc connections have tls"},
+			{"connections[1].tls.pins", "set ca_file or pins, not both"},
+			{"connections[2].tls.ca_file", "holds no PEM certificate"},
+			{"connections[3].tls.ca_file", "missing.pem does not exist"},
+			{"connections[4].tls.pins[0]", "not a certificate or a SHA-256 fingerprint"},
+			{"connections[4].tls.pins[1]", "not a certificate or a SHA-256 fingerprint"},
 		}},
 		{"allow", head + `connections:
   - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}}

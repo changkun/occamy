@@ -136,6 +136,7 @@ colours reached guacd shifted.
 | `connections[].target` | required | `host:port`, or a host alone for the protocol's default port: 22 for ssh, 5900 for vnc, 3389 for rdp, 23 for telnet. IPv6 addresses go in brackets with a port, `[fd00::22]:22` |
 | `connections[].host_keys` | required for ssh | The host keys an ssh target may present: public keys in `authorized_keys` format, as `ssh-keyscan` prints them, or SHA-256 fingerprints, as `ssh-keygen -l` prints them (`SHA256:…`). `occamyd` refuses any other key. Not for other protocols |
 | `connections[].insecure_ignore_host_key` | `false` | Accept any host key from an ssh target instead, logging its fingerprint as a warning. For demos only; set this or `host_keys`, not both |
+| `connections[].tls` | system roots | How a vnc target's certificate is checked when the server offers VeNCrypt, which `occamyd` then always chooses. By default the certificate must chain to the system's roots and name the target's host, as a browser checks it. Not for other protocols; see below |
 | `connections[].credentials` | required | How `occamyd` authenticates to the target; see below |
 | `connections[].allow.users`, `allow.groups` | required | Who may open the connection: users by name, and members of groups. At least one entry, since an empty list would let nobody in |
 
@@ -148,13 +149,29 @@ colours reached guacd shifted.
 | `private_key_file` | An SSH private key file, ssh only. Keep it readable by the `occamyd` user only |
 | `prompt: true` | Nothing stored: the session's owner is asked for whatever the target requires, and the answers are not kept. Use it also for a target that needs no credentials |
 
-An ssh connection needs a `username` unless it prompts. A secret written
+An ssh connection needs a `username` unless it prompts. A vnc
+connection's `username` is for VeNCrypt's Plain authentication, which
+is then chosen over the server's other types; without one, the owner is
+asked if the server wants it. A secret written
 inline (`password:` under `credentials`, `client_secret:` under `oidc`) is
 rejected with the keys to use instead.
 
 Secrets are read when they are used, not when the file is loaded:
 validation only checks that each file can be opened and each variable is
 set. A secret rotated on disk is therefore picked up by the next session.
+
+A vnc connection's `tls` takes:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `require` | `false` | Refuse a server that does not offer VeNCrypt with a certificate, so that nobody on the way can strip VeNCrypt from what the server offers. `ca_file` and `pins` imply it |
+| `server_name` | the target's host | The name the certificate must carry |
+| `ca_file` | none | PEM certificates of the CAs that replace the system's roots, as for a private CA. Read when a session starts |
+| `pins` | none | Certificates accepted as they are, as an ssh connection's `host_keys` are: their chain, names and dates are not checked. Each is a certificate in PEM or its SHA-256 fingerprint, in hex as `openssl x509 -noout -fingerprint -sha256` prints it or in base64 after `SHA256:`. Set this or `ca_file`, not both |
+| `insecure_skip_verify` | `false` | Accept any certificate that is not pinned, logging its fingerprint as a warning. For demos only |
+
+A refused certificate fails the session, and `occamyd`'s log names the
+certificate's fingerprint, ready for `pins`.
 
 ### Ad-hoc targets
 
@@ -166,7 +183,9 @@ set. A secret rotated on disk is therefore picked up by the next session.
 Any signed-in user may open an ad-hoc target, with
 `POST /api/v1/sessions`. Its credentials are always asked of the user,
 and an ssh target needs `host_keys` or `insecure_ignore_host_key: true`
-in the request, as a connection does. An entry without ports allows the
+in the request, as a connection does. A vnc target's certificate, if the
+server offers VeNCrypt, must chain to the system's roots and carry the
+name the target was given, or its address if it was given one. An entry without ports allows the
 protocol's own: 22 for ssh, 5900 to 5999 for vnc, 3389 for rdp and 23
 for telnet. A target is allowed on a port that an entry allows when:
 

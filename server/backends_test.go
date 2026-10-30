@@ -6,8 +6,16 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"errors"
 	"maps"
+	"math/big"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -139,6 +147,70 @@ func TestNewVNC(t *testing.T) {
 	if _, err := newVNC(target{addr: "127.0.0.1:5900", creds: config.Credentials{PasswordEnv: "OCCAMY_TEST_UNSET"}}, screen{}); err == nil {
 		t.Error("an unset password variable made a backend")
 	}
+
+	// The connection's username and certificate policy reach the
+	// backend, with the CA file read.
+	ca := writeCA(t)
+	tls := config.ConnectionTLS{Require: true, ServerName: "nas", CAFile: ca, InsecureSkipVerify: true}
+	cfg, err := vncConfig(target{addr: "10.0.0.5:5900", creds: config.Credentials{Username: "alice", Prompt: true}, tls: tls})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Username != "alice" || cfg.Password != "" || !cfg.TLS.Require || cfg.TLS.ServerName != "nas" || cfg.TLS.RootCAs == nil || !cfg.TLS.InsecureSkipVerify {
+		t.Errorf("vncConfig = %+v", cfg)
+	}
+	pins := []string{"SHA256:" + strings.Repeat("A", 43)}
+	cfg, err = vncConfig(target{addr: "10.0.0.5:5900", creds: config.Credentials{Prompt: true}, tls: config.ConnectionTLS{Pins: pins}})
+	if err != nil || !slices.Equal(cfg.TLS.Pins, pins) || cfg.TLS.RootCAs != nil || cfg.TLS.ServerName != "" {
+		t.Errorf("pins: %+v %v", cfg.TLS, err)
+	}
+	// An ad-hoc target's certificate names the name it was opened by,
+	// not the address it resolved to.
+	cfg, err = vncConfig(target{addr: "10.0.0.5:5900", name: "nas.lab.internal", creds: config.Credentials{Prompt: true}})
+	if err != nil || cfg.TLS.ServerName != "nas.lab.internal" {
+		t.Errorf("ad-hoc: server name %q, %v", cfg.TLS.ServerName, err)
+	}
+	notPEM := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(notPEM, []byte("s3cret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for name, tls := range map[string]config.ConnectionTLS{
+		"missing CA file":    {CAFile: filepath.Join(t.TempDir(), "nope")},
+		"CA file not PEM":    {CAFile: notPEM},
+		"pins and a CA file": {CAFile: ca, Pins: pins},
+	} {
+		if _, err := newVNC(target{addr: "10.0.0.5:5900", creds: config.Credentials{Prompt: true}, tls: tls}, screen{}); err == nil {
+			t.Errorf("%s: made a backend", name)
+		}
+	}
+}
+
+// writeCA writes a self-signed CA certificate in PEM and returns its
+// path.
+func writeCA(t *testing.T) string {
+	t.Helper()
+	pub, priv, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "occamy test CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(nil, tmpl, tmpl, pub, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(p, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }
 
 // TestAskUser checks that a prompting ssh connection without a user name
