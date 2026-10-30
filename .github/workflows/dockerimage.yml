@@ -27,8 +27,9 @@ jobs:
       run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
     # Release archives carry dependency licenses
     # (scripts/third-party-licenses.sh); keep them redistributable.
+    # internal/rdp is checked too until occamyd imports it.
     - name: Licenses
-      run: go run github.com/google/go-licenses/v2@v2.0.1 check . --disallowed_types=forbidden,restricted
+      run: go run github.com/google/go-licenses/v2@v2.0.1 check . ./internal/rdp --disallowed_types=forbidden,restricted
     # bench/codecs is a module of its own (docs/benchmarks/codecs.md).
     # Vet with the measure tag builds the measurement, which runs by hand.
     - name: Codec measurement
@@ -48,6 +49,11 @@ jobs:
     - uses: golangci/golangci-lint-action@v9
       with:
         version: v2.15.0
+    # The RDP integration tests build only under their tag.
+    - uses: golangci/golangci-lint-action@v9
+      with:
+        version: v2.15.0
+        args: --build-tags=rdp_integration ./internal/rdp/...
 
   # occamyd needs no C toolchain, so it builds wherever Go does.
   cross:
