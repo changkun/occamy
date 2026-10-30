@@ -3,7 +3,8 @@
 Frames of the bench desktop, recorded over VNC, on which `bench/codecs`
 measures tile codecs for
 [the graphics pipeline](../../../specs/008-native-architecture/graphics-pipeline.md).
-The results are in [docs/benchmarks/codecs.md](../../../docs/benchmarks/codecs.md).
+The results are in [docs/benchmarks/codecs.md](../../../docs/benchmarks/codecs.md),
+and `make codecs` measures again.
 
 Every frame is the full 1024×768 screen as x11vnc sent it, stored as PNG
 (with a palette where the frame has 256 colours or fewer, which changes no
