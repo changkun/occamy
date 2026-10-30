@@ -76,3 +76,44 @@ func (s *screen) snapshot() *image.RGBA {
 	copy(c.Pix, s.img.Pix)
 	return c
 }
+
+// wallpaper is the scene's background in row y of a screen h pixels high,
+// as bench/scene's newWallpaper draws it.
+func wallpaper(y, h int) color.RGBA {
+	top, bottom := color.RGBA{0x1f, 0x3b, 0x5a, 0xff}, color.RGBA{0x3c, 0x6e, 0x8f, 0xff}
+	t := float64(y) / float64(max(1, h-1))
+	f := func(a, b uint8) uint8 { return uint8(float64(a) + (float64(b)-float64(a))*t) }
+	return color.RGBA{f(top.R, bottom.R), f(top.G, bottom.G), f(top.B, bottom.B), 0xff}
+}
+
+// matchesWallpaper counts the pixels outside the swatch that differ from
+// the scene's wallpaper by more than tol in a channel.
+func matchesWallpaper(img *image.RGBA, tol int) (bad int, first image.Point) {
+	if img == nil {
+		return -1, image.Point{}
+	}
+	w, h := img.Rect.Dx(), img.Rect.Dy()
+	swatch := image.Rect(16, 16, 48, 48)
+	for y := range h {
+		want := wallpaper(y, h)
+		for x := range w {
+			if image.Pt(x, y).In(swatch) {
+				continue
+			}
+			got := img.RGBAAt(x, y)
+			if !near(got.R, want.R, tol) || !near(got.G, want.G, tol) || !near(got.B, want.B, tol) {
+				if bad == 0 {
+					first = image.Pt(x, y)
+				}
+				bad++
+			}
+		}
+	}
+	return bad, first
+}
+
+func near(a, b uint8, tol int) bool {
+	d := int(a) - int(b)
+	return -tol <= d && d <= tol
+}
+

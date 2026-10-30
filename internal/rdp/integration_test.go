@@ -14,11 +14,17 @@ package rdp
 //
 // It builds the image with podman unless OCCAMY_RDP_IMAGE names one, and
 // starts a container of its own unless OCCAMY_RDP_ADDR names a running
-// server. OCCAMY_CONTAINER_ENGINE selects docker instead of podman.
+// server, whose container OCCAMY_RDP_CONTAINER may name for the mouse
+// check. OCCAMY_CONTAINER_ENGINE selects docker instead of podman, and
+// OCCAMY_RDP_DUMP names a directory for screenshots. With -rdp.record the
+// test rewrites the recordings that TestReplay plays back.
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"crypto/tls"
+	"flag"
 	"fmt"
 	"image"
 	"image/color"
@@ -27,14 +33,18 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
 
 var (
-	rdpAddr string
-	engine  = envOr("OCCAMY_CONTAINER_ENGINE", "podman")
+	rdpAddr      string
+	rdpContainer = os.Getenv("OCCAMY_RDP_CONTAINER")
+	engine       = envOr("OCCAMY_CONTAINER_ENGINE", "podman")
+	record       = flag.Bool("rdp.record", false, "rewrite testdata/*.trace.gz from the live server")
 )
 
 func envOr(k, def string) string {
@@ -45,6 +55,7 @@ func envOr(k, def string) string {
 }
 
 func TestMain(m *testing.M) {
+	flag.Parse()
 	os.Exit(func() int {
 		addr, stop, err := startServer()
 		if err != nil {
@@ -78,6 +89,7 @@ func startServer() (string, func(), error) {
 	if err != nil {
 		return "", nil, fmt.Errorf("starting %s: %v: %s", image, err, out)
 	}
+	rdpContainer = name
 	stop := func() { exec.Command(engine, "rm", "-f", name).Run() }
 	out, err = exec.Command(engine, "port", name, "3389/tcp").Output()
 	if err != nil {
@@ -122,6 +134,9 @@ type session struct {
 	c    *Client
 	scr  *screen
 	done chan error
+
+	mu    sync.Mutex
+	trace []byte // the server's frames, recorded
 }
 
 func dial(t *testing.T, cfg Config) *session {
@@ -134,28 +149,28 @@ func dial(t *testing.T, cfg Config) *session {
 	}
 	cfg.Username, cfg.Password = "occamy", "occamy"
 	cfg.TLSConfig = &tls.Config{InsecureSkipVerify: true}
+	s := &session{scr: &screen{}, done: make(chan error, 1)}
+	cfg.Trace = func(d Direction, p []byte) {
+		if d != FromServer {
+			return
+		}
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		s.trace = appendRecord(s.trace, p)
+	}
 	cctx, ccancel := context.WithTimeout(ctx, 30*time.Second)
 	defer ccancel()
 	c, err := Connect(cctx, conn, cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &session{c: c, scr: &screen{}, done: make(chan error, 1)}
+	s.c = c
 	go func() { s.done <- c.Run(ctx, s.scr) }()
 	t.Cleanup(func() {
 		cancel()
 		<-s.done
 	})
 	return s
-}
-
-// wallpaper is the scene's background at (x, y) on a w×h screen, as
-// bench/scene's newWallpaper draws it.
-func wallpaper(y, h int) color.RGBA {
-	top, bottom := color.RGBA{0x1f, 0x3b, 0x5a, 0xff}, color.RGBA{0x3c, 0x6e, 0x8f, 0xff}
-	t := float64(y) / float64(max(1, h-1))
-	f := func(a, b uint8) uint8 { return uint8(float64(a) + (float64(b)-float64(a))*t) }
-	return color.RGBA{f(top.R, bottom.R), f(top.G, bottom.G), f(top.B, bottom.B), 0xff}
 }
 
 func dump(t *testing.T, s *session, name string) {
@@ -176,14 +191,226 @@ func dump(t *testing.T, s *session, name string) {
 	png.Encode(f, img)
 }
 
-func TestIntegrationExplore(t *testing.T) {
-	s := dial(t, Config{ColorDepth: 32})
-	t.Logf("protocol %#x, desktop %v", s.c.Protocol(), image.Pt(s.c.Size()))
-	select {
-	case err := <-s.done:
-		t.Fatalf("Run: %v", err)
-	case <-time.After(15 * time.Second):
+// waitFor polls cond until it holds or d passes.
+func waitFor(d time.Duration, cond func() bool) bool {
+	for deadline := time.Now().Add(d); time.Now().Before(deadline); time.Sleep(50 * time.Millisecond) {
+		if cond() {
+			return true
+		}
 	}
-	dump(t, s, "explore")
-	t.Logf("finalized %v, stats %+v", s.c.Finalized(), s.c.Stats())
+	return cond()
+}
+
+// probeColour is the colour bench/scene paints the swatch for letter k
+// (bench/internal/probe).
+func probeColour(k rune) color.RGBA {
+	palette := []color.RGBA{
+		{0xff, 0x00, 0x00, 0xff}, {0x00, 0xff, 0x00, 0xff}, {0x00, 0x00, 0xff, 0xff},
+		{0xff, 0xff, 0x00, 0xff}, {0x00, 0xff, 0xff, 0xff}, {0xff, 0x00, 0xff, 0xff},
+		{0xff, 0x80, 0x00, 0xff}, {0x80, 0x00, 0xff, 0xff},
+	}
+	return palette[int(k)%len(palette)]
+}
+
+// tap presses and releases the key with scancode sc.
+func tap(t *testing.T, c *Client, sc uint16) {
+	t.Helper()
+	if err := c.Key(sc, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Key(sc, false); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// swatchShows waits for the swatch to show the colour of letter k.
+func swatchShows(s *session, k rune, d time.Duration) bool {
+	want := probeColour(k)
+	return waitFor(d, func() bool {
+		got := s.scr.at(32, 32)
+		return near(got.R, want.R, 40) && near(got.G, want.G, 40) && near(got.B, want.B, 40)
+	})
+}
+
+func letter(t *testing.T, k rune) uint16 {
+	sc, ok := ScancodeForKeysym(uint32(k))
+	if !ok {
+		t.Fatalf("no scancode for %q", k)
+	}
+	return sc
+}
+
+// The scene's pixels arrive whole at every colour depth: planar at 32 bits
+// per pixel, interleaved RLE below. Keys reach the scene, which paints the
+// swatch, and the pointer moves on the session's X display.
+func TestIntegration(t *testing.T) {
+	for _, tc := range []struct {
+		bpp   int
+		tol   int // per channel: 15- and 16-bit colour truncate
+		codec string
+	}{
+		{32, 0, "planar"},
+		{24, 0, "rle24"},
+		{16, 8, "rle16"},
+		{15, 8, "rle15"},
+	} {
+		t.Run(fmt.Sprintf("%dbpp", tc.bpp), func(t *testing.T) {
+			s := dial(t, Config{ColorDepth: tc.bpp})
+			t.Logf("security protocol %#x, desktop %v", s.c.Protocol(), image.Pt(s.c.Size()))
+			if s.c.Protocol() != ProtocolSSL {
+				t.Errorf("security protocol %#x, want TLS", s.c.Protocol())
+			}
+			// xrdp shows its own screens while sesman starts the session,
+			// which takes a while for the first connection at a depth.
+			ok := waitFor(90*time.Second, func() bool {
+				bad, _ := matchesWallpaper(s.scr.snapshot(), tc.tol)
+				return bad == 0
+			})
+			dump(t, s, fmt.Sprintf("%dbpp", tc.bpp))
+			if !ok {
+				bad, first := matchesWallpaper(s.scr.snapshot(), tc.tol)
+				t.Fatalf("%d pixels differ from the wallpaper, the first at %v: %v, want %v; stats %+v",
+					bad, first, s.scr.at(first.X, first.Y), wallpaper(first.Y, 768), s.c.Stats())
+			}
+			if !s.c.Finalized() {
+				t.Error("no Font Map PDU from the server")
+			}
+			st := s.c.Stats()
+			t.Logf("stats after the first screen: %+v", st)
+			if st.Bitmaps[tc.codec] == 0 {
+				t.Errorf("no %s bitmaps: %v", tc.codec, st.Bitmaps)
+			}
+			if *record {
+				s.mu.Lock()
+				saveTrace(t, fmt.Sprintf("testdata/xrdp-%dbpp.trace.gz", tc.bpp), s.trace)
+				s.mu.Unlock()
+			}
+
+			// Keyboard: F2 resets the swatch and a letter paints it, as
+			// bench's ready() does. Both may arrive in one update, so the
+			// attempts alternate between letters of different colours.
+			painted := false
+			for i := range 10 {
+				k := 'y' + rune(i%2)
+				tap(t, s.c, 0x3c) // F2
+				tap(t, s.c, letter(t, k))
+				if swatchShows(s, k, 3*time.Second) {
+					painted = true
+					break
+				}
+			}
+			if !painted {
+				t.Fatalf("the swatch does not take the colour of the letter keys: %v", s.scr.at(32, 32))
+			}
+			for _, k := range "abc" {
+				tap(t, s.c, letter(t, k))
+				if !swatchShows(s, k, 5*time.Second) {
+					t.Fatalf("key %q: the swatch shows %v, want %v", k, s.scr.at(32, 32), probeColour(k))
+				}
+			}
+
+			// Mouse: the scene ignores the pointer, so the test asks the
+			// session's X server where it is.
+			if rdpContainer == "" {
+				t.Log("mouse not checked: no container")
+				return
+			}
+			p := image.Pt(500+tc.bpp, 300+tc.bpp)
+			if err := s.c.MouseMove(p); err != nil {
+				t.Fatal(err)
+			}
+			want := fmt.Sprintf("%d %d", p.X, p.Y)
+			var got string
+			if !waitFor(5*time.Second, func() bool {
+				got = queryPointer(t)
+				return strings.Contains(got, want)
+			}) {
+				t.Errorf("the X pointer is at %q, want %s on one display", got, want)
+			}
+			// Clicks and a wheel notch must not end the session.
+			for _, b := range []Button{ButtonLeft, ButtonRight} {
+				if err := s.c.MouseButton(b, true, p); err != nil {
+					t.Fatal(err)
+				}
+				if err := s.c.MouseButton(b, false, p); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := s.c.MouseWheel(-120, false, p); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-s.done:
+				t.Fatalf("Run returned %v after mouse input", err)
+			case <-time.After(500 * time.Millisecond):
+			}
+		})
+	}
+}
+
+var queryPointerBin struct {
+	once sync.Once
+	path string
+	err  error
+}
+
+// queryPointer runs testdata/querypointer in the container.
+func queryPointer(t *testing.T) string {
+	t.Helper()
+	q := &queryPointerBin
+	q.once.Do(func() {
+		arch, err := exec.Command(engine, "exec", rdpContainer, "uname", "-m").Output()
+		if err != nil {
+			q.err = err
+			return
+		}
+		goarch := map[string]string{"aarch64": "arm64", "x86_64": "amd64"}[strings.TrimSpace(string(arch))]
+		if goarch == "" {
+			goarch = runtime.GOARCH
+		}
+		dir, err := os.MkdirTemp("", "querypointer")
+		if err != nil {
+			q.err = err
+			return
+		}
+		bin := filepath.Join(dir, "querypointer")
+		build := exec.Command("go", "build", "-o", bin, "./testdata/querypointer")
+		build.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+goarch, "CGO_ENABLED=0")
+		if out, err := build.CombinedOutput(); err != nil {
+			q.err = fmt.Errorf("%v: %s", err, out)
+			return
+		}
+		if out, err := exec.Command(engine, "cp", bin, rdpContainer+":/tmp/querypointer").CombinedOutput(); err != nil {
+			q.err = fmt.Errorf("%v: %s", err, out)
+			return
+		}
+		q.path = "/tmp/querypointer"
+	})
+	if q.err != nil {
+		t.Fatalf("querypointer: %v", q.err)
+	}
+	out, err := exec.Command(engine, "exec", rdpContainer, q.path).Output()
+	if err != nil {
+		t.Fatalf("querypointer: %v", err)
+	}
+	return string(out)
+}
+
+// appendRecord appends a frame to a recording: its length in four bytes,
+// big-endian, then the frame.
+func appendRecord(b, p []byte) []byte {
+	n := len(p)
+	b = append(b, byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
+	return append(b, p...)
+}
+
+func saveTrace(t *testing.T, name string, trace []byte) {
+	var buf bytes.Buffer
+	zw, _ := gzip.NewWriterLevel(&buf, gzip.BestCompression)
+	zw.Write(trace)
+	zw.Close()
+	if err := os.WriteFile(name, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("recorded %d bytes of server frames in %s (%d compressed)", len(trace), name, buf.Len())
 }

@@ -117,9 +117,10 @@ func (t *transport) readFrame(buf []byte) (frame, []byte, error) {
 	if !f.fastPath {
 		// Every TPKT after the connection confirm carries an X.224 Data
 		// TPDU, [X.224] 13.7: length indicator 2, DT with EOT.
+		// The connection request and confirm (CR, CC) keep their TPDU.
 		if len(f.data) >= 3 && f.data[0] == 0x02 && f.data[1] == 0xf0 {
 			f.data = f.data[3:]
-		} else if len(f.data) < 2 || f.data[1]&0xf0 != 0xd0 {
+		} else if len(f.data) < 2 || (f.data[1]&0xf0 != 0xd0 && f.data[1]&0xf0 != 0xe0) {
 			return frame{}, buf, errors.New("rdp: TPKT without X.224 data")
 		}
 	}
