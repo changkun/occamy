@@ -26,7 +26,8 @@ make stop
 
 `go test ./...` runs the unit tests; the end-to-end tests in `tests/` skip
 unless `make e2e` points them at a running stack. No C toolchain is needed.
-See the README for a native build.
+See the README for a native build. `bench/codecs`, the codec measurement,
+is a module of its own; run its tests from that directory.
 
 `make lint` runs golangci-lint v2 with the linters and formatters in
 `.golangci.yml`, as CI does. Code must be `gofmt`ed, with imports grouped

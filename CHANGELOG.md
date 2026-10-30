@@ -83,6 +83,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   before it reads or allocates, resizes the screen at most once an
   update and ten times a second, and bounds its queued input by bytes.
   `occamyd` does not use it yet.
+- The codec measurement of the graphics pipeline
+  ([docs/benchmarks/codecs.md](docs/benchmarks/codecs.md)): a corpus of
+  13 frames recorded from the bench desktop by `make corpus`, and
+  `bench/codecs`, a module of its own that `make codecs` runs, which
+  compares palette or raw pixels with deflate, PNG, QOI, lossless and
+  lossy WebP and JPEG on them for size, time and SSIM. It picks deflate
+  for lossless tiles, 64-pixel tiles, RGBA pixels, and WebP for lossy
+  tiles with JPEG as the fallback.
 - `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
   (static users sign in with a password for an access token), TLS when
   `tls.cert` and `tls.key` are set, expvar and pprof on the debug
