@@ -259,12 +259,15 @@ func TestExtendedClipboardAllocations(t *testing.T) {
 	// A small message that decompresses to much allocates for what is
 	// kept, not for what it claims or holds.
 	bomb := zlibOf(binary.BigEndian.AppendUint32(nil, 1<<31), make([]byte, 64<<20))
+	text := bytes.Repeat([]byte("line\r\n"), maxClipboard/6+100)
 	for _, tt := range []struct {
 		name string
 		msg  []byte
 		max  uint64
 	}{
 		{"64 MiB of zeros", putClip(clipProvide|clipText, bomb), 3 * maxClipboard},
+		// The text kept, the buffer's growth to it, and the sink's copy.
+		{"4 MiB of text and more", putClip(clipProvide|clipText, zlibOf(binary.BigEndian.AppendUint32(nil, uint32(len(text))), text)), 3*maxClipboard + 256<<10},
 		{"a size of 2 GiB, and 5 bytes", putClip(clipProvide|clipText, zlibOf(binary.BigEndian.AppendUint32(nil, 1<<31), []byte("short"))), 80 << 10},
 		{"a message of 2 GiB", []byte{msgServerCutText, 0, 0, 0, 0x80, 0, 0, 0, 0x10, 0, 0, 1}, 32 << 10},
 		{"caps for 16 formats", putClip(clipCaps|clipFormats, make([]byte, 64)), 32 << 10},

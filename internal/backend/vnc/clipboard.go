@@ -319,6 +319,7 @@ func toExtendedText(data []byte) []byte {
 // fromExtendedText converts text in the extended format to the sink's:
 // UTF-8 up to the first NUL, with LF line ends. A character that a
 // truncation cut in two is dropped, and invalid UTF-8 becomes U+FFFD.
+// It converts b in place, unless b is not valid UTF-8.
 func fromExtendedText(b []byte, truncated bool) []byte {
 	if i := bytes.IndexByte(b, 0); i >= 0 {
 		b, truncated = b[:i], false
@@ -326,7 +327,20 @@ func fromExtendedText(b []byte, truncated bool) []byte {
 	if truncated {
 		b = trimPartialRune(b)
 	}
-	b = bytes.ToValidUTF8(b, []byte(string(utf8.RuneError)))
-	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
-	return bytes.ReplaceAll(b, []byte("\r"), []byte("\n"))
+	if !utf8.Valid(b) {
+		b = bytes.ToValidUTF8(b, []byte(string(utf8.RuneError)))
+	}
+	// CR LF and a lone CR become LF; the text only shrinks.
+	out := b[:0]
+	for i := 0; i < len(b); i++ {
+		c := b[i]
+		if c == '\r' {
+			c = '\n'
+			if i+1 < len(b) && b[i+1] == '\n' {
+				i++
+			}
+		}
+		out = append(out, c)
+	}
+	return out
 }
