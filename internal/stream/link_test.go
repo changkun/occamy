@@ -45,7 +45,15 @@ func (l *link) bottleneck() {
 	for {
 		select {
 		case p := <-l.wire:
-			time.Sleep(time.Duration(float64(len(p)) / l.rate * float64(time.Second)))
+			// A plain sleep would outlive close: a bubble's time stops
+			// once its test returns.
+			t := time.NewTimer(time.Duration(float64(len(p)) / l.rate * float64(time.Second)))
+			select {
+			case <-t.C:
+			case <-l.closed:
+				t.Stop()
+				return
+			}
 			l.toCli.push(p, time.Now().Add(l.delay))
 		case <-l.closed:
 			return
@@ -148,16 +156,17 @@ func (b *inbox) pop(ctx context.Context) ([]byte, error) {
 		}
 		b.mu.Unlock()
 		var timer <-chan time.Time
+		t := time.NewTimer(wait)
 		if wait > 0 {
-			t := time.NewTimer(wait)
-			defer t.Stop()
 			timer = t.C
 		}
 		select {
 		case <-b.notify:
 		case <-timer:
 		case <-ctx.Done():
+			t.Stop()
 			return nil, ctx.Err()
 		}
+		t.Stop()
 	}
 }
