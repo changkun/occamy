@@ -40,7 +40,11 @@ reach v1 clients through protocol v1. Two things need deciding:
   `sync` replies. Text, clipboard and input go through `clipboard`
   streams, `key` and `mouse`.
 - `golang.org/x/image/webp` decodes lossy and lossless WebP, and
-  `image/png` and `image/jpeg` cover the rest, all without cgo.
+  `image/png` and `image/jpeg` cover the rest, all without cgo. Lossy
+  WebP needs converting after it: the package hands back limited-range
+  YCbCr under a full-range colour model and does not interpolate chroma,
+  so `internal/guacamole` converts it as libwebp does (see the
+  conformance corpus notes).
 - Branch `gio-client` (PR #51, commit `1d9a31d`) holds `internal/guac`: a
   Go Guacamole client with display, layer, stream and instruction
   handlers (about 1,100 lines). It is a reuse candidate for an
@@ -120,6 +124,8 @@ protocols or is deleted.
 3. Which Guacamole operations are in scope? Proposed: those guacd 1.6's
    VNC, RDP and SSH plugins emit, confirmed by recording real sessions,
    with transfer functions other than `SRC` and `OVER` rejected loudly.
+   Answered by Decision 3, and the recordings of the conformance corpus
+   confirmed it: the bridge applies all they contain.
 4. Gate values: N, H, and the performance tolerance?
 5. ~~After RDP goes native: keep the bridge, or delete it?~~ Answered
    2026-10-30: v1.0 ships without guacd
@@ -159,7 +165,7 @@ Settled on 2026-10-30, following the recommendations above.
 |------|----------|-------|
 | Interpreter additions | `internal/guacamole`: the `cursor` instruction (hotspot and image from a layer region) exposed as a cursor change, and access to the composited display by rectangle for copying out | — |
 | Bridge backend | `internal/backend/guacd`: a `Backend` of class graphical over `internal/guacd`. Instructions apply to the display; at each `sync` the damage is copied into the sink (`Lock` and `Unlock` per damaged rectangle) and the `sync` is answered, so guacd paces against the bridge alone. `size` of the default layer becomes `Resize`, `cursor` becomes `Cursor`, `name` becomes `Title`, clipboard streams become `Clipboard`, `required` becomes a `Prompt` whose answers go back as `argv` streams, `error` ends `Run` with the status, and `disconnect` ends it cleanly. Input translates to `key`, `mouse` (button mask, and wheel as buttons 4 and 5 pressed and released), keysyms for `Text`, a `clipboard` stream, and `size`. Writes to guacd are serialised. Tests against a scripted guacd on `net.Pipe` | Interpreter additions; session-core Backend interface |
-| Conformance corpus | Instruction streams recorded from guacd 1.6's VNC, RDP and SSH plugins on the demo stack (logging in, typing, scrolling, moving a window, resizing), replayed through the bridge in tests: no unsupported operation, no error, and the final frame's hash pinned | Bridge backend |
+| Conformance corpus | Instruction streams recorded from guacd 1.6's VNC, RDP and SSH plugins on the bench stack (the bench desktop over VNC and RDP, the demo SSH server; logging in, typing, scrolling, moving a window, resizing), replayed through the bridge in tests: no unsupported operation, no error, the idle screen at checkpoints, and the final frame's hash pinned | Bridge backend |
 | Registration | The bridge registered in the API's backend factory for `vnc` and `rdp`, and for `telnet` and `kubernetes` behind an opt-in, with guacd parameters from the configuration under the connection's | Bridge backend; API Sessions |
 
 The soak and performance gates run per protocol when a native backend
@@ -175,8 +181,8 @@ do not).
 ## Implementation notes: bridge backend
 
 - **Status.** Interpreter additions and Bridge backend are done
-  (#94). The conformance corpus and registration are not, so the spec
-  stays validated.
+  (#94). The conformance corpus followed (see its notes below);
+  registration has not, so the spec stays validated.
 - **What the interpreter gained** (`internal/guacamole`):
   - `Display` applies `cursor`; `TakeCursor` returns the image (copied
     from the source layer when the instruction applies, as
@@ -276,5 +282,121 @@ do not).
     reach the server unchanged; RDP has no bit for it.
   - Send `disconnect` before closing on cancellation, as `Client.js`
     does, so guacd logs a clean leave.
-  - The conformance corpus decides whether `Unsupported` stays empty on
-    real VNC, RDP and SSH sessions.
+  - ~~The conformance corpus decides whether `Unsupported` stays empty on
+    real VNC, RDP and SSH sessions.~~ It does on all three recordings.
+
+## Implementation notes: conformance corpus
+
+- **Status.** The conformance corpus is done. Registration is the last
+  task, so the spec stays validated.
+- **What it is** (`internal/backend/guacd/testdata/conformance`): one
+  recording per protocol, each a `<name>.guac.gz` (every byte guacd sent
+  the bridge, cut after the last complete `sync`, gzipped) and a
+  `<name>.json` manifest (guacd parameters without secrets, the size
+  asked for, the steps taken, checkpoints, the instruction counts, and
+  the final frame's size and SHA-256).
+  - `TestConformance` (no build tag, no containers) checks each stream's
+    instruction counts against its manifest, then replays it through the
+    bridge from a scripted guacd on `net.Pipe` that sends the stream and
+    `disconnect`, inside a `synctest` bubble. The replay must end
+    without error, with nothing unsupported and nothing logged, show
+    the idle screen at each checkpoint, and end on the pinned frame.
+  - `TestRecord` (build tag `record`) drives a bridge through live
+    sessions and writes the corpus; its doc comment has the commands.
+    In short: start `guacd vnc rdp ssh` from `docker-compose.yaml` plus
+    `docker-compose.bench.yaml`, run `go test -tags record -run
+    TestRecord ./internal/backend/guacd -args -guacd 127.0.0.1:4822`,
+    and `-record vnc,rdp,ssh` picks recordings. It replays what it
+    recorded and reports what breaks the rules, but writes the recording
+    regardless, so that `TestConformance` reproduces a bridge bug it
+    found.
+- **Recordings.** All three log in, type, scroll and ask to resize; the
+  two desktops also drag a window. Each instruction count below is from
+  its manifest; `rect` and `cfill` come in pairs, as do `img` and `end`,
+  and `blob` is left out.
+
+  | Recording | Session | Instructions | Compressed |
+  |-----------|---------|--------------|------------|
+  | `vnc` | bench desktop, x11vnc, 1024×768; password through `required` | `args` `ready` `required` `ack`, `size` 3, `rect`/`cfill` 16, `copy` 111, `img` 130 (PNG 108, WebP 22), `cursor` 2, `sync` 22 | 275,248 bytes (398,004 raw) |
+  | `rdp` | bench desktop, xrdp, 640×480 resized to 800×600 | `args` `ready`, `size` 7, `rect`/`cfill` 14, `copy` 21, `img` 36 (PNG 24, WebP 12), `cursor` 2, `mouse` 1, `dispose` 2, `sync` 20 | 586,022 bytes (788,594 raw) |
+  | `ssh` | demo SSH server, 800×600 resized to 640×480; password at the terminal's prompt | `args` `ready` `argv` 3, `size` 15, `move` 13, `rect`/`cfill` 22, `copy` 13, `img` 32 (PNG 31, WebP 1), `cursor` 3, `sync` 21 | 66,713 bytes (99,181 raw) |
+
+  The corpus is 928 KB. On the desktops, `bench/scene` gives the
+  content: letters paint the probe's swatch, F3 scrolls a page of text
+  (a wheel notch is turned while it does), F4 drags a 400×300 window,
+  and Escape returns to the idle gradient. The terminal session types
+  `echo hello`, `seq 1 200`, turns the wheel three notches back and
+  forward, resizes, runs `ls -l /` and exits.
+- **Bug found and fixed: WebP colours.** The first VNC recording failed
+  its checkpoint after the drag: five pixels were 25 levels off in blue,
+  one more than the tolerance. Two errors were stacked there. guacd's
+  lossy WebP itself had left a ringing artefact that a browser shows
+  too (libwebp decodes those pixels 21 off), and the bridge's decoding
+  of that WebP added to it. `golang.org/x/image/webp` returns a lossy image as
+  `image.YCbCr`, whose model is JPEG's full-range YCbCr, while VP8
+  samples are BT.601 limited-range; it also leaves chroma at half
+  resolution where libwebp interpolates it. Over the 320 WebP images of
+  that recording the display was up to 38 levels a channel off dwebp.
+  `internal/guacamole/webp.go` now converts 4:2:0 images itself with
+  libwebp's fixed-point arithmetic and its fancy upsampling (9:3:3:1),
+  and matches dwebp 1.6 exactly on all 320. `TestDisplayWebPMatchesLibwebp`
+  pins two cwebp-encoded images, one with alpha, to dwebp's output.
+- **Decisions.**
+  - The recorder tees the bridge's connection, so what is recorded is
+    exactly what the bridge read. The stream is cut after the last
+    complete `sync`, since the bridge reads ahead, and the hash is
+    pinned from a replay of the cut stream, never from the live sink.
+  - Checkpoints check meaning, not just stability. The idle screen is
+    known: the gradient of `bench/scene` and the swatch's colour. A
+    checkpoint frame must match it within 24 levels a channel, with
+    none of the swatch's pixels and at most one in a thousand of the
+    rest further off. The allowance is for lossy residue (see
+    Surprises). The recorder presses Escape, waits for half a second of
+    quiet, presses the letter, and takes the first frame from then that
+    shows the idle screen. The pause keeps the swatch lossless. Letters
+    are chosen so each changes the swatch's colour, since a press that
+    changes nothing brings no frame over RDP.
+  - Secrets stay out of the corpus. VNC's password goes through guacd's
+    `required` and the bridge's prompt, and SSH's is typed at guacd's
+    terminal prompt, so neither is in a manifest; the recorder passes
+    RDP's as a parameter it does not save. The streams carry only what
+    guacd sent, and it echoes no password.
+  - Size: the text page and the dragged window are dense images, so
+    those phases are cut short (a tenth of a second of scrolling, 80 ms
+    of dragging), and RDP starts at 640×480 and resizes up, since the
+    idle gradient after the resize is cheap. RDP is still the largest:
+    each scrolled frame comes as new images of the page, not as `copy`.
+- **Deviations.**
+  - The spec said the demo stack. The desktops are the bench stack's
+    (`docker-compose.bench.yaml`), whose `bench/scene` gives content with
+    a known look, and the SSH server is the demo's. The task row now
+    says so.
+  - The VNC recording does not resize. x11vnc on the bench desktop has a
+    fixed 1024×768 Xvfb screen and ignores the client's request, so no
+    `size` of the default layer follows; the bridge's `size` is still
+    sent. RDP (`resize-method=display-update`) and SSH do resize.
+  - No JPEG: guacd 1.6 prefers WebP for lossy updates when the client
+    accepts it (`display-worker.c`), and the bridge does.
+  - There is no `required` in the RDP and SSH recordings. xrdp asks for
+    no NLA, so RDP takes the password as a parameter, and guacd's SSH
+    support prompts inside the terminal (`guac_terminal_prompt`).
+- **Surprises.**
+  - guacd never repaints a lossy region without loss. It encodes a
+    64×64 cell as WebP or JPEG when the cell changed at three frames a
+    second or more (`GUAC_DISPLAY_JPEG_FRAMERATE`) and PNG would not
+    compress it better (`display-worker.c`), and it sends only
+    pixels that differ from what it sent last (`display-plan.c`), so the
+    ringing stays until the pixels change. Browsers show the same
+    residue. Hence the outlier allowance in checkpoints.
+  - guacd's RDP sends no frame while the screen stands still, so the
+    recorder watches every frame from the letter's press on rather than
+    waiting for the next one.
+  - Load on the shared host only changes how many frames a phase
+    produces; the checks do not depend on it.
+- **Follow-ups.**
+  - Recordings are real time, so recording again pins other frames and
+    other hashes. Record again when guacd's version changes.
+  - JPEG decoding is unmeasured against libjpeg-turbo, which browsers
+    use with fancy upsampling while `image/jpeg` does not. A recording
+    with WebP not announced would cover it.
+  - The corpus has no clipboard, audio, telnet or Kubernetes sessions.
