@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -74,11 +75,19 @@ const (
 	codeLifetime = time.Minute
 	// maxPendingCodes bounds the one-time codes waiting for exchange.
 	maxPendingCodes = 4096
+	// maxPendingPerUser bounds the codes of one user waiting for
+	// exchange, so that one account at the provider, signing in over and
+	// over, cannot fill the table for everyone: the user's oldest code
+	// makes room for a new one.
+	maxPendingPerUser = 3
 	// maxProviderBody bounds a response from the provider.
 	maxProviderBody = 1 << 20
 	// maxSubject bounds the length of a user name from the provider; an
 	// OIDC sub is at most 255 ASCII characters.
 	maxSubject = 255
+	// maxLogged bounds what of the provider's or a client's text reaches
+	// the log.
+	maxLogged = 256
 )
 
 // Variables, so that tests can shorten them.
@@ -108,7 +117,7 @@ type oidcSignIn struct {
 	conf   config.OIDC
 	signer *auth.Signer
 	ttl    time.Duration
-	client *http.Client // to the provider, with oidcTimeout
+	client *http.Client // to the provider: oidcTimeout, maxProviderBody, no redirects
 	flows  *flowCookies
 	// knownUsers are the users admitted with require_known_users, and
 	// nil without it. knownGroups are the groups the file names; other
@@ -124,6 +133,7 @@ type oidcSignIn struct {
 
 	codesMu sync.Mutex
 	codes   map[[sha256.Size]byte]pendingSignIn // by the hash of the code
+	pended  uint64                              // codes pended so far
 }
 
 // oidcProvider is what discovery found out about the provider.
@@ -139,6 +149,7 @@ type pendingSignIn struct {
 	groups    []string
 	challenge string // the client's S256 code challenge
 	expires   time.Time
+	seq       uint64 // the order of pending, oldest first
 }
 
 // newOIDC prepares sign-in through f's OIDC provider, without contacting
@@ -158,6 +169,11 @@ func newOIDC(f *config.File, signer *auth.Signer, servesTLS bool) (*oidcSignIn, 
 		client: &http.Client{
 			Timeout:   oidcTimeout,
 			Transport: limitBody{http.DefaultTransport, maxProviderBody},
+			// A redirect is answered, not followed, so that the code,
+			// the verifier and the client secret go to the discovered
+			// token endpoint only, and every hop is one whose URL was
+			// checked.
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		},
 		flows:       flows,
 		knownGroups: f.KnownGroups(),
@@ -200,8 +216,8 @@ func (o *oidcSignIn) discover() (*oidcProvider, error) {
 	p, err := o.fetchProvider()
 	if err != nil {
 		o.err = err
-		// #nosec G706 -- the operator's configuration and the provider's answer, quoted by the error.
-		log.Printf("warning: OIDC discovery at %s failed, retried on the next sign-in after %v: %v", o.conf.Issuer, oidcRetry, err)
+		// #nosec G706 -- the issuer is the operator's configuration, and the error, which may hold the provider's answer, is quoted.
+		log.Printf("warning: OIDC discovery at %s failed, retried on the next sign-in after %v: %s", o.conf.Issuer, oidcRetry, quote(err.Error()))
 		return nil, err
 	}
 	// #nosec G706 -- the operator's configuration, not a client's input.
@@ -346,9 +362,9 @@ func (o *oidcSignIn) callback(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var se *signInError
 		if !errors.As(err, &se) {
-			se = &signInError{codeSignInFailed, err.Error()}
+			se = &signInError{codeSignInFailed, quote(err.Error())}
 		}
-		// #nosec G706 -- the reasons quote whatever came from the provider or the client.
+		// #nosec G706 -- a reason quotes whatever came from the provider or the client, with quote, or with %q once checked by validSubject.
 		log.Printf("OIDC sign-in failed from %s: %s", r.RemoteAddr, se.reason)
 		sendBack(w, f.ReturnURL, url.Values{"error": {se.code}})
 		return
@@ -364,7 +380,9 @@ func (o *oidcSignIn) callback(w http.ResponseWriter, r *http.Request) {
 }
 
 // signInError is a failed sign-in: code goes to the client, and reason,
-// which names no secret, to the log.
+// which names no secret, to the log. A reason quotes any text from the
+// provider or the client with quote, or, for a user name that
+// validSubject passed, with %q.
 type signInError struct {
 	code   string
 	reason string
@@ -384,11 +402,11 @@ func (o *oidcSignIn) identify(r *http.Request, q url.Values, f *flow) (user stri
 		if e == "access_denied" {
 			return "", nil, failed(codeAccessDenied, "the provider denied access")
 		}
-		return "", nil, failed(codeSignInFailed, "the provider answered %q", e)
+		return "", nil, failed(codeSignInFailed, "the provider answered %s", quote(e))
 	}
 	// RFC 9207: a provider that names itself must be ours.
 	if iss, ok := q["iss"]; ok && (len(iss) != 1 || iss[0] != o.conf.Issuer) {
-		return "", nil, failed(codeSignInFailed, "the provider's answer names another issuer, %q", iss)
+		return "", nil, failed(codeSignInFailed, "the provider's answer names another issuer, %s", quote(strings.Join(iss, " ")))
 	}
 	code := q["code"]
 	if len(code) != 1 || code[0] == "" {
@@ -396,11 +414,11 @@ func (o *oidcSignIn) identify(r *http.Request, q url.Values, f *flow) (user stri
 	}
 	p, err := o.discover()
 	if err != nil {
-		return "", nil, failed(codeUnavailable, "the provider cannot be reached: %v", err)
+		return "", nil, failed(codeUnavailable, "the provider cannot be reached: %s", quote(err.Error()))
 	}
 	secret, err := o.conf.ClientSecret()
 	if err != nil && !errors.Is(err, config.ErrNoSecret) {
-		return "", nil, failed(codeSignInFailed, "reading the client secret: %v", err)
+		return "", nil, failed(codeSignInFailed, "reading the client secret: %s", quote(err.Error()))
 	}
 	ctx := oidc.ClientContext(r.Context(), o.client)
 	tok, err := o.oauth2Config(p, secret).Exchange(ctx, code[0], oauth2.VerifierOption(f.Verifier))
@@ -409,9 +427,9 @@ func (o *oidcSignIn) identify(r *http.Request, q url.Values, f *flow) (user stri
 		if errors.As(err, &re) && re.Response != nil {
 			// Neither the body nor the description: only the provider's
 			// error code and status.
-			return "", nil, failed(codeSignInFailed, "the token endpoint refused the code: %q, %s", re.ErrorCode, re.Response.Status)
+			return "", nil, failed(codeSignInFailed, "the token endpoint refused the code: %s, status %d", quote(re.ErrorCode), re.Response.StatusCode)
 		}
-		return "", nil, failed(codeSignInFailed, "exchanging the code: %v", err)
+		return "", nil, failed(codeSignInFailed, "exchanging the code: %s", quote(err.Error()))
 	}
 	raw, ok := tok.Extra("id_token").(string)
 	if !ok || raw == "" {
@@ -420,7 +438,7 @@ func (o *oidcSignIn) identify(r *http.Request, q url.Values, f *flow) (user stri
 	// Issuer, audience, expiry, algorithm and signature.
 	id, err := p.verifier.Verify(ctx, raw)
 	if err != nil {
-		return "", nil, failed(codeSignInFailed, "the ID token does not verify: %v", err)
+		return "", nil, failed(codeSignInFailed, "the ID token does not verify: %s", quote(err.Error()))
 	}
 	// go-oidc leaves the nonce to the caller.
 	if subtle.ConstantTimeCompare([]byte(id.Nonce), []byte(f.Nonce)) != 1 {
@@ -428,7 +446,7 @@ func (o *oidcSignIn) identify(r *http.Request, q url.Values, f *flow) (user stri
 	}
 	var claims map[string]json.RawMessage
 	if err := id.Claims(&claims); err != nil {
-		return "", nil, failed(codeSignInFailed, "the ID token's claims: %v", err)
+		return "", nil, failed(codeSignInFailed, "the ID token's claims: %s", quote(err.Error()))
 	}
 	return o.mapClaims(id, claims)
 }
@@ -444,7 +462,7 @@ func (o *oidcSignIn) mapClaims(id *oidc.IDToken, claims map[string]json.RawMessa
 		return "", nil, failed(codeSignInFailed, "the ID token's azp is not a string")
 	}
 	if (len(id.Audience) > 1 || azp != "") && azp != o.conf.ClientID {
-		return "", nil, failed(codeSignInFailed, "the ID token was issued to another party, %q", azp)
+		return "", nil, failed(codeSignInFailed, "the ID token was issued to another party, %s", quote(azp))
 	}
 
 	if err := json.Unmarshal(claims[o.conf.SubjectClaim], &user); err != nil || !validSubject(user) {
@@ -486,27 +504,46 @@ func (o *oidcSignIn) mapClaims(id *oidc.IDToken, claims map[string]json.RawMessa
 }
 
 // validSubject reports whether s can name a user: not empty, at most
-// maxSubject bytes of UTF-8, without control characters.
+// maxSubject bytes of UTF-8, of graphic characters, with U+0020 the only
+// space. That refuses control characters, format characters (unicode.Cf:
+// zero-width spaces and joiners, bidirectional overrides, the soft
+// hyphen), the line and paragraph separators and the other spaces, which
+// would let a name pass for another or break a log line.
 func validSubject(s string) bool {
-	return s != "" && len(s) <= maxSubject && utf8.ValidString(s) && !strings.ContainsFunc(s, unicode.IsControl)
+	return s != "" && len(s) <= maxSubject && utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool {
+		return !unicode.IsGraphic(r) || r != ' ' && unicode.IsSpace(r)
+	})
 }
 
 // pend keeps a signed-in user for its client to collect, and returns the
-// one-time code to collect it with.
+// one-time code to collect it with. It sweeps expired codes, and drops
+// the user's oldest code when maxPendingPerUser of the user's wait.
 func (o *oidcSignIn) pend(user string, groups []string, challenge string) (string, error) {
 	code := rand.Text()
 	o.codesMu.Lock()
 	defer o.codesMu.Unlock()
 	now := o.now()
+	var oldest [sha256.Size]byte
+	mine := 0
 	for k, p := range o.codes {
-		if !now.Before(p.expires) {
+		switch {
+		case !now.Before(p.expires):
 			delete(o.codes, k)
+		case p.user == user:
+			if mine == 0 || p.seq < o.codes[oldest].seq {
+				oldest = k
+			}
+			mine++
 		}
+	}
+	if mine >= maxPendingPerUser {
+		delete(o.codes, oldest)
 	}
 	if len(o.codes) >= maxPendingCodes {
 		return "", errors.New("too many sign-ins wait for their clients")
 	}
-	o.codes[sha256.Sum256([]byte(code))] = pendingSignIn{user, groups, challenge, now.Add(codeLifetime)}
+	o.pended++
+	o.codes[sha256.Sum256([]byte(code))] = pendingSignIn{user, groups, challenge, now.Add(codeLifetime), o.pended}
 	return code, nil
 }
 
@@ -598,6 +635,17 @@ func redirect(w http.ResponseWriter, u string) {
 // log and no Referer.
 func sendBack(w http.ResponseWriter, returnURL string, v url.Values) {
 	redirect(w, returnURL+"#"+v.Encode())
+}
+
+// quote returns s for the log, truncated to maxLogged bytes and quoted,
+// so that text from the provider or a client, such as a response body
+// that go-oidc puts in its errors, can neither forge a log line nor flood
+// the log.
+func quote(s string) string {
+	if len(s) > maxLogged {
+		return strconv.Quote(s[:maxLogged]) + "..."
+	}
+	return strconv.Quote(s)
 }
 
 // limitBody bounds the bodies of the responses its transport receives

@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"fmt"
 	"io"
 	"math/big"
 	"net/http"
@@ -22,6 +23,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1076,23 +1078,97 @@ func TestOIDCCode(t *testing.T) {
 }
 
 // TestOIDCPendingLimit checks that codes waiting for their clients are
-// bounded, and that expired ones make room.
+// bounded, for each user and in all, and that expired ones make room.
 func TestOIDCPendingLimit(t *testing.T) {
-	ot := newOIDCTest(t, nil)
-	o := ot.s.oidc
-	for range maxPendingCodes {
+	t.Run("per user", func(t *testing.T) {
+		o := newOIDCTest(t, nil).s.oidc
+		var codes, verifiers []string
+		for range maxPendingPerUser + 1 {
+			v := oauth2.GenerateVerifier()
+			code, err := o.pend("mallory", nil, oauth2.S256ChallengeFromVerifier(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			codes, verifiers = append(codes, code), append(verifiers, v)
+		}
+		// Another user's code does not count against mallory's.
 		if _, err := o.pend("carol", nil, "c"); err != nil {
 			t.Fatal(err)
 		}
-	}
-	if _, err := o.pend("carol", nil, "c"); err == nil {
-		t.Fatal("no limit on waiting codes")
-	}
-	cb, _ := ot.signIn(t, newBrowser(t))
-	wantError(t, cb, codeUnavailable)
-	ot.clock.add(codeLifetime)
-	if _, err := o.pend("carol", nil, "c"); err != nil {
-		t.Fatalf("expired codes kept: %v", err)
+		if _, ok := o.redeem(codes[0], verifiers[0]); ok {
+			t.Error("the oldest of more than maxPendingPerUser codes still redeems")
+		}
+		for i := 1; i < len(codes); i++ {
+			if _, ok := o.redeem(codes[i], verifiers[i]); !ok {
+				t.Errorf("code %d of %d does not redeem", i+1, len(codes))
+			}
+		}
+	})
+	t.Run("one user signing in over and over", func(t *testing.T) {
+		// An account at the provider that signs in without end, and
+		// never exchanges its codes, keeps others from no sign-in.
+		ot := newOIDCTest(t, nil)
+		for range maxPendingCodes {
+			if _, err := ot.s.oidc.pend("mallory", nil, "c"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ot.s.oidc.codesMu.Lock()
+		n := len(ot.s.oidc.codes)
+		ot.s.oidc.codesMu.Unlock()
+		if n != maxPendingPerUser {
+			t.Errorf("%d codes wait for one user, want %d", n, maxPendingPerUser)
+		}
+		if user, _ := ot.signedIn(t); user != "carol" {
+			t.Errorf("signed in as %q", user)
+		}
+	})
+	t.Run("in all", func(t *testing.T) {
+		ot := newOIDCTest(t, nil)
+		o := ot.s.oidc
+		for i := range maxPendingCodes {
+			if _, err := o.pend(fmt.Sprintf("user%d", i), nil, "c"); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := o.pend("carol", nil, "c"); err == nil {
+			t.Fatal("no limit on waiting codes")
+		}
+		cb, _ := ot.signIn(t, newBrowser(t))
+		wantError(t, cb, codeUnavailable)
+		ot.clock.add(codeLifetime)
+		if _, err := o.pend("carol", nil, "c"); err != nil {
+			t.Fatalf("expired codes kept: %v", err)
+		}
+	})
+}
+
+// TestOIDCCodeRace checks that a code redeems once, however many
+// exchanges race for it.
+func TestOIDCCodeRace(t *testing.T) {
+	o := newOIDCTest(t, nil).s.oidc
+	for range 20 {
+		v := oauth2.GenerateVerifier()
+		code, err := o.pend("carol", nil, oauth2.S256ChallengeFromVerifier(v))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var won atomic.Int32
+		var wg sync.WaitGroup
+		start := make(chan struct{})
+		for range 32 {
+			wg.Go(func() {
+				<-start
+				if _, ok := o.redeem(code, v); ok {
+					won.Add(1)
+				}
+			})
+		}
+		close(start)
+		wg.Wait()
+		if n := won.Load(); n != 1 {
+			t.Fatalf("%d of 32 racing exchanges of one code succeeded, want 1", n)
+		}
 	}
 }
 
@@ -1318,14 +1394,227 @@ func TestOIDCValidators(t *testing.T) {
 		"carol":                  true,
 		"carol@example.com":      true,
 		"Carol Smith":            true,
+		"Zo\u00eb \u00c5berg":    true,
+		"\u5c71\u7530":           true,
 		"":                       false,
 		"carol\x00":              false,
+		"carol\t":                false,
+		"carol\u0085":            false, // next line, a control character
 		"\xff":                   false,
 		strings.Repeat("c", 255): true,
 		strings.Repeat("c", 256): false,
+		// Format characters, which render as nothing or reorder text,
+		// separators, and spaces that look like U+0020.
+		"car\u200bol":  false, // zero-width space
+		"car\u200dol":  false, // zero-width joiner
+		"\u202elorac":  false, // right-to-left override
+		"carol\u00ad":  false, // soft hyphen
+		"\ufeffcarol":  false, // byte order mark
+		"carol\u2060":  false, // word joiner
+		"carol\u2028":  false, // line separator
+		"carol\u2029":  false, // paragraph separator
+		"carol\u00a0x": false, // no-break space
+		"carol\u3000x": false, // ideographic space
 	} {
 		if validSubject(s) != want {
 			t.Errorf("validSubject(%q) = %v", s, !want)
 		}
 	}
+}
+
+// redirector answers every request with a redirect to the same path on
+// target, with status, and returns its URL.
+func redirector(t *testing.T, target string, status int) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target+r.URL.Path, status)
+	}))
+	t.Cleanup(srv.Close)
+	return srv.URL
+}
+
+// TestOIDCProviderRedirects checks that occamyd follows no redirect from
+// the provider, at discovery, the key set or the token endpoint, so that
+// nothing, least of all the code, the verifier and the client secret,
+// goes to a URL that was not checked.
+func TestOIDCProviderRedirects(t *testing.T) {
+	t.Run("discovery", func(t *testing.T) {
+		ot := newOIDCTest(t, func(f *config.File) {
+			f.Auth.OIDC.Issuer = redirector(t, f.Auth.OIDC.Issuer, http.StatusTemporaryRedirect)
+		})
+		r := newBrowser(t).get(t, ot.loginURL(testReturnURL, oauth2.S256ChallengeFromVerifier(oauth2.GenerateVerifier())))
+		wantError(t, r, codeUnavailable)
+		if n, _ := ot.idp.counts(); n != 0 {
+			t.Errorf("discovery followed a redirect %d times", n)
+		}
+	})
+	t.Run("key set", func(t *testing.T) {
+		ot := newOIDCTest(t, nil)
+		keys := redirector(t, ot.idp.srv.URL, http.StatusFound) + "/jwks"
+		ot.idp.set(func(p *testIdP) { p.doc = func(d map[string]any) { d["jwks_uri"] = keys } })
+		cb, _ := ot.signIn(t, newBrowser(t))
+		wantError(t, cb, codeSignInFailed)
+	})
+	secretFile := filepath.Join(t.TempDir(), "client-secret")
+	if err := os.WriteFile(secretFile, []byte("s3cret\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name   string
+		status int
+		secret bool
+	}{
+		{"token endpoint", http.StatusTemporaryRedirect, false},
+		{"token endpoint, client secret in the body", http.StatusPermanentRedirect, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var got atomic.Value
+			elsewhere := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = r.ParseForm()
+				got.Store(r.PostForm.Encode() + " " + r.Header.Get("Authorization"))
+				http.Error(w, "no", http.StatusBadRequest)
+			}))
+			defer elsewhere.Close()
+			tokenURL := redirector(t, elsewhere.URL, tt.status) + "/token"
+			ot := newOIDCTest(t, func(f *config.File) {
+				if tt.secret {
+					f.Auth.OIDC.ClientSecretFile = secretFile
+				}
+			})
+			ot.idp.set(func(p *testIdP) {
+				if tt.secret {
+					p.secret, p.authMethods = "s3cret", []string{"client_secret_post"}
+				}
+				p.doc = func(d map[string]any) { d["token_endpoint"] = tokenURL }
+			})
+			cb, _ := ot.signIn(t, newBrowser(t))
+			wantError(t, cb, codeSignInFailed)
+			if v, _ := got.Load().(string); v != "" {
+				t.Errorf("the exchange followed a redirect, carrying %s", v)
+			}
+		})
+	}
+}
+
+// TestOIDCProviderTextLogged checks that text from the provider reaches
+// the log quoted and truncated: a body that go-oidc puts in an error, or
+// an error code in the callback, forges no log line and floods nothing.
+func TestOIDCProviderTextLogged(t *testing.T) {
+	forged := "\n2026/10/30 12:00:00 user \"alice\" signed in"
+	evil := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "maintenance"+forged+strings.Repeat("x", 4096), http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(evil.Close)
+	check := func(t *testing.T, out string) {
+		t.Helper()
+		if strings.Contains(out, forged) {
+			t.Errorf("the provider forged a log line:\n%s", out)
+		}
+		if strings.Contains(out, strings.Repeat("x", maxLogged)) {
+			t.Errorf("the provider's text is not truncated:\n%s", out)
+		}
+		if !strings.Contains(out, `\n2026/10/30 12:00:00 user \"alice\" signed in`) {
+			t.Errorf("the provider's text is not in the log, quoted:\n%s", out)
+		}
+	}
+	t.Run("discovery", func(t *testing.T) {
+		logged := captureLog(t)
+		ot := newOIDCTest(t, func(f *config.File) { f.Auth.OIDC.Issuer = evil.URL })
+		wantError(t, newBrowser(t).get(t, ot.loginURL(testReturnURL, oauth2.S256ChallengeFromVerifier(oauth2.GenerateVerifier()))), codeUnavailable)
+		check(t, logged())
+	})
+	t.Run("key set", func(t *testing.T) {
+		logged := captureLog(t)
+		ot := newOIDCTest(t, nil)
+		ot.idp.set(func(p *testIdP) { p.doc = func(d map[string]any) { d["jwks_uri"] = evil.URL } })
+		cb, _ := ot.signIn(t, newBrowser(t))
+		wantError(t, cb, codeSignInFailed)
+		check(t, logged())
+	})
+	t.Run("the provider's error", func(t *testing.T) {
+		logged := captureLog(t)
+		ot := newOIDCTest(t, nil)
+		ot.idp.set(func(p *testIdP) { p.authError = "server_error" + forged + strings.Repeat("x", 4096) })
+		cb, _ := ot.signIn(t, newBrowser(t))
+		wantError(t, cb, codeSignInFailed)
+		check(t, logged())
+	})
+}
+
+// started takes a fresh browser through login and the provider, and
+// returns the callback URL, the sign-in cookie the browser holds, and the
+// client's verifier.
+func (ot *oidcTest) started(t *testing.T) (cb, cookie, verifier string) {
+	t.Helper()
+	b := newBrowser(t)
+	authURL, verifier := ot.toProvider(t, b)
+	cb = ot.toCallback(t, b, authURL)
+	u, err := url.Parse(cb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range b.jar.Cookies(u) {
+		if c.Name == flowCookieName {
+			cookie = c.Value
+		}
+	}
+	if cookie == "" {
+		t.Fatal("no sign-in cookie")
+	}
+	return cb, cookie, verifier
+}
+
+// callbackWith sends a browser to the callback with the sign-in cookies
+// given, in order, as a browser that holds one for the callback's host
+// and one for a parent domain sends both.
+func callbackWith(t *testing.T, cb string, cookies ...string) reply {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, cb, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pairs []string
+	for _, c := range cookies {
+		pairs = append(pairs, flowCookieName+"="+c)
+	}
+	req.Header.Set("Cookie", strings.Join(pairs, "; "))
+	c := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reply{resp.StatusCode, resp.Header, body}
+}
+
+// TestOIDCPlantedCookie checks the callback in a browser that holds,
+// beside its own sign-in cookie, one that a sibling subdomain planted for
+// the parent domain: an attacker's sealed cookie, which login hands to
+// anyone.
+func TestOIDCPlantedCookie(t *testing.T) {
+	t.Run("does not shadow the sign-in's own", func(t *testing.T) {
+		ot := newOIDCTest(t, nil)
+		_, planted, _ := ot.started(t)
+		cb, own, verifier := ot.started(t)
+		code := sentBack(t, callbackWith(t, cb, planted, own)).Get("code")
+		if r := ot.exchange(t, code, verifier); r.code != http.StatusOK {
+			t.Errorf("exchange: %d %s", r.code, r.body)
+		}
+	})
+	t.Run("signs no one in as the attacker", func(t *testing.T) {
+		// The attacker signs in at the provider as mallory, plants the
+		// cookie, and sends the victim to the attacker's callback.
+		ot := newOIDCTest(t, nil)
+		ot.idp.set(func(p *testIdP) { p.subject = "mallory" })
+		cb, planted, _ := ot.started(t)
+		_, own, verifier := ot.started(t)
+		code := sentBack(t, callbackWith(t, cb, planted, own)).Get("code")
+		if r := ot.exchange(t, code, verifier); r.code != http.StatusUnauthorized {
+			t.Errorf("the victim's client exchanged the attacker's code: %d %s", r.code, r.body)
+		}
+	})
 }
