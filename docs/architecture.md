@@ -61,6 +61,20 @@ A connection goes through these steps:
 4. `occamyd` copies instructions between guacd and the WebSocket until either
    side closes, and then closes the WebSocket with the Guacamole status code.
 
+## Occamy v1, in progress
+
+v1 is being built beside v0 on `master`. Nothing below serves a route
+yet; the released v0.5.0 behaves as described above. Each package names
+the spec it implements.
+
+| Path | Role |
+|------|------|
+| [protocol/](../protocol) | Protocol v1, a public package: framing, the message type registry, size limits, golden vectors ([protocol-v1](../specs/008-native-architecture/protocol-v1.md)) |
+| [internal/backend/](../internal/backend) | The interface every backend implements (native SSH, native VNC, the guacd bridge), its input events and prompts, and scripted fakes for tests ([session-core](../specs/008-native-architecture/session-core.md)) |
+| [internal/pacer/](../internal/pacer) | Per-viewer pacing: the frame window, the frame after an input sent at once, bytes in flight held near the bandwidth-delay product, and quality that adapts ([session-core](../specs/008-native-architecture/session-core.md)) |
+| [internal/framebuffer/](../internal/framebuffer) | A session's screen in tiles, versioned from one counter, so each viewer is sent only the tiles it has not seen ([graphics-pipeline](../specs/008-native-architecture/graphics-pipeline.md)) |
+| [internal/backend/ssh/](../internal/backend/ssh) | The native SSH backend: a pure-Go client that verifies pinned host keys, asks the owner for keyboard-interactive answers and missing passwords, and feeds a shell's PTY output to the session's terminal ([native-ssh-backend](../specs/008-native-architecture/native-ssh-backend.md)) |
+
 ## License
 
 [Occamy](https://github.com/changkun/occamy) | [MIT](../LICENSE) &copy; 2019 [Ou Changkun](https://changkun.de)

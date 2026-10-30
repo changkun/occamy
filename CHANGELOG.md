@@ -18,6 +18,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   Golden vectors in `protocol/testdata/framing.json` let other
   implementations check their codecs against it. No message types are
   defined yet.
+- A native SSH backend for protocol v1, `internal/backend/ssh`, in pure
+  Go. It accepts only pinned host keys, by key or SHA-256 fingerprint,
+  unless told to ignore them, which it logs as a warning. It
+  authenticates with key files, a password, or keyboard-interactive
+  answers from the session's owner, and feeds the shell's terminal
+  output to the session. `occamyd` does not use it yet.
 
 ### Changed
 
