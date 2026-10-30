@@ -59,6 +59,7 @@ func newRouteProxy(t *testing.T, client, debug bool) *routeProxy {
 		tokens:   tokens,
 		legacyV0: true,
 		client:   client,
+		login:    client,
 		debug:    debug,
 		sessions: make(map[string]*Session),
 	}
