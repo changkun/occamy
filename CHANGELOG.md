@@ -65,9 +65,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - `internal/stream`, a viewer's connection in protocol v1: `welcome`,
   then the client's input and views applied as they come, and frames at
   the pace of the viewer's link. Small state never waits behind tiles,
-  and an input's effect goes ahead of motion already on the screen. It
-  serves graphical sessions with raw tiles for now. Not served by any
-  route yet.
+  and an input's effect goes ahead of motion already on the screen.
+  Graphical sessions get raw tiles for now; terminal sessions get the
+  diff between the screens a viewer was sent, so bulk output coalesces,
+  and the terminal's answers to the shell's queries reach the shell. Not
+  served by any route yet.
 
 ### Changed
 

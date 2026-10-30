@@ -59,16 +59,16 @@ var errEnded = errors.New("stream: session ended")
 // first frame as soon as there is something to show, so that the client
 // sees the screen one round trip after it asked.
 //
-// Terminal sessions are not served yet: their frames are screen diffs
-// from the terminal emulator, which come with it.
+// A graphical session's frames are tiles; a terminal session's are the
+// diffs between the screens the viewer was sent.
 func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello, cfg Config) error {
 	defer v.Leave()
 	s := v.Session()
-	if s.Class() != backend.Graphical {
-		return errors.New("stream: terminal sessions are not served yet")
-	}
 	if len(cfg.Capabilities.Codecs) == 0 {
 		cfg.Capabilities.Codecs = []protocol.Codec{protocol.CodecRaw}
+	}
+	if cfg.Capabilities.Terminal == 0 {
+		cfg.Capabilities.Terminal = 1
 	}
 	if cfg.Encoder == nil {
 		cfg.Encoder = raw{}
@@ -78,7 +78,14 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	}
 	agreed := protocol.Agree(hello.Capabilities, cfg.Capabilities)
 	limits := agreed.Limits()
-	if !slices.Contains(agreed.Codecs, protocol.CodecRaw) {
+	class := protocol.ClassGraphical
+	switch {
+	case s.Class() == backend.Terminal:
+		class = protocol.ClassTerminal
+		if agreed.Terminal == 0 {
+			return closeWith(ctx, c, protocol.Close{Code: protocol.CloseUnsupported, Reason: "the client renders no terminal"})
+		}
+	case !slices.Contains(agreed.Codecs, protocol.CodecRaw):
 		// Tiles and cursors are raw until the graphics pipeline's codecs
 		// land.
 		return closeWith(ctx, c, protocol.Close{Code: protocol.CloseUnsupported, Reason: "no codec in common"})
@@ -92,7 +99,7 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	welcome := protocol.Welcome{
 		ViewerID:     uint32(v.ID()), // #nosec G115 -- viewer IDs count up from 1
 		Role:         role(v.Role()),
-		Class:        protocol.ClassGraphical,
+		Class:        class,
 		SessionID:    cfg.SessionID,
 		Capabilities: agreed,
 	}

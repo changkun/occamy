@@ -112,6 +112,9 @@ type pending struct {
 // snapshot and again after clock is taken as still.
 func (w *writer) newPending(seq uint32, clock uint64) *pending {
 	in := &pending{first: seq, seq: seq, clock: clock, at: time.Now()}
+	if w.fb == nil {
+		return in // a terminal: any change after clock is the effect
+	}
 	w.cur = w.fb.Versions(w.cur[:0])
 	if len(w.cur) != len(w.snap) || len(w.effects) != len(w.cur) {
 		return in
@@ -129,12 +132,11 @@ func (w *writer) newPending(seq uint32, clock uint64) *pending {
 
 func newWriter(c Conn, v *session.Viewer, p *pacer.Pacer, enc Encoder, l protocol.Limits, log *slog.Logger) *writer {
 	s := v.Session()
-	fb := s.Framebuffer()
-	return &writer{
+	w := &writer{
 		c:      c,
 		v:      v,
 		s:      s,
-		fb:     fb,
+		fb:     s.Framebuffer(),
 		p:      p,
 		enc:    enc,
 		limits: l,
@@ -142,8 +144,11 @@ func newWriter(c Conn, v *session.Viewer, p *pacer.Pacer, enc Encoder, l protoco
 		start:  time.Now(),
 		acks:   newAcks(),
 		poke:   make(chan struct{}, 1),
-		pix:    make([]byte, 4*fb.TileSize()*fb.TileSize()),
 	}
+	if w.fb != nil {
+		w.pix = make([]byte, 4*w.fb.TileSize()*w.fb.TileSize())
+	}
+	return w
 }
 
 // wake tells the run loop that the reader has news.
@@ -173,6 +178,9 @@ func (w *writer) write(ctx context.Context, m message) error {
 
 // run sends frames until the session ends or ctx is done.
 func (w *writer) run(ctx context.Context) error {
+	if w.fb == nil {
+		return w.runTerminal(ctx)
+	}
 	for {
 		if err := w.small(ctx); err != nil {
 			return err

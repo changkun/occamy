@@ -226,8 +226,9 @@ follow the recommendations above.
    RWMutex per tile row. The row height follows the tile size that the
    [graphics-pipeline](graphics-pipeline.md) benchmark picks.
 3. **Late join for terminals:** decided in
-   [native-ssh-backend](native-ssh-backend.md). The core only requires a
-   snapshot that the backend can produce on demand.
+   [native-ssh-backend](native-ssh-backend.md). The session keeps the
+   terminal's screen in `internal/terminal` from the backend's output, so
+   a late joiner gets a snapshot without asking the backend.
 4. **Input: the share role decides.** The owner and every `viewer` may
    send input at the same time, as v0 allows. A `read-only` viewer may
    not, and its input messages are dropped and counted. The owner
@@ -361,8 +362,6 @@ arise, rather than inheriting those fixes.
     larger than the client's texture limit; a hidden cursor carries no hot
     spot, codec or payload.
 - **What was not done:**
-  - Terminal sessions: `Serve` refuses them until `internal/terminal`
-    has its snapshot and diff API.
   - `TCP_NOTSENT_LOWAT` is not set on a connection yet. coder/websocket
     hides the socket, so the HTTP layer calls `SetLowWater` from
     `http.Server.ConnContext`, as part of the HTTP server task.
@@ -390,5 +389,42 @@ arise, rather than inheriting those fixes.
     taken for a protocol error; and a late `hello` got `unsupported`.
     The test client now records undecodable messages, and every test
     fails on one.
-- **Follow-ups:** terminal frames (screen diffs), the Scheduling test,
+- **Follow-ups:** the Scheduling test,
   and the HTTP layer's `ConnContext`.
+
+## Implementation notes: terminal frames
+
+- **What was done:** `Serve` serves terminal sessions. A frame is the
+  title if it changed, `resize` if the size changed, the
+  `terminal.Diff` from the screen the viewer last got to the current
+  one, and `frame-end`. The first frame's diff goes as `term-snapshot`.
+  The session makes the `terminal.Terminal` itself when `Config.Terminal`
+  is nil, exposes snapshots through `Session.Screen`, and gives the
+  backend the emulator's answers to the application's queries as
+  terminal input.
+- **Decisions:**
+  - The emulator's answers are queued, and the owner goroutine gives them
+    to the backend. They come from `TermData` on a backend goroutine,
+    which must not wait for the backend's own `Input`.
+  - An input's clock in a terminal session is the screen's version when
+    the input was applied, so any later screen shows its effect. The
+    effect's frame goes beyond the window, like a graphical one.
+    `last_seq` is read before the snapshot, so the frame shows every input
+    it reports.
+  - A diff goes whole: a client's screen is right only once it has all of
+    it, so the cap on bytes in flight delays a terminal frame but never
+    cuts it. A diff larger than the client's message size goes as
+    several messages, split at character boundaries, and the first of a
+    snapshot is the `term-snapshot`.
+  - A client that renders no terminal (`terminal` capability 0) is
+    refused a terminal session with `unsupported`. The server offers
+    level 1 unless configured otherwise.
+- **Not done:** the owner's `hello` columns and rows do not size the
+  terminal yet; the Streams task asks the backend for them.
+- **Tests:** a burst of 5000 lines converges in a few frames with one
+  snapshot, resizes follow the backend, an input's echo goes out beyond a
+  stalled client's window with its `last_seq`, a hidden client gets no
+  frames and one when shown, and a diff over a 512-byte message size
+  arrives in pieces. Each test fails when the behaviour it names is
+  removed. The test client feeds what it gets into its own
+  `terminal.Terminal` and compares screens with the server's.

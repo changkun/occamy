@@ -118,6 +118,8 @@ func (v *Viewer) Input(seq uint32, ev backend.InputEvent) error {
 		var clock uint64
 		if v.s.fb != nil {
 			clock = v.s.fb.Clock()
+		} else if screen := v.s.cfg.Terminal.Snapshot(); screen != nil {
+			clock = screen.Version
 		}
 		v.s.idle.Reset(v.s.cfg.IdleTimeout)
 		if err := v.s.backend.Input(ev); err != nil {
@@ -133,8 +135,9 @@ func (v *Viewer) Input(seq uint32, ev backend.InputEvent) error {
 }
 
 // LastInput reports the sequence number of the last input the session
-// applied from the viewer, and the framebuffer's clock at that moment:
-// tiles above it changed after the input.
+// applied from the viewer, and the framebuffer's clock at that moment,
+// or the terminal screen's version: tiles and screens above it changed
+// after the input.
 func (v *Viewer) LastInput() (seq uint32, clock uint64) {
 	v.mu.Lock()
 	defer v.mu.Unlock()

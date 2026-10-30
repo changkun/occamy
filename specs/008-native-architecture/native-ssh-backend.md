@@ -266,9 +266,11 @@ need guacd.
 - **Follow-ups.**
   - Keys protected by a passphrase, and keys encrypted at rest
     (decision 3).
-  - Feeding the backend's output to `internal/terminal` in the session,
-    writing the emulator's answers (`Options.Reply`) to stdin, sending
-    viewers its diffs, and wiring into `occamyd`.
+  - Wiring into `occamyd`. The session now feeds the backend's output
+    to `internal/terminal`, gives the emulator's answers back to the
+    backend as terminal input, and sends viewers its diffs
+    ([session-core](session-core.md), Implementation notes: terminal
+    frames).
 
 ## Implementation notes: terminal state
 
@@ -347,9 +349,9 @@ took its place.
 - No scrollback and no reflow: a resize cuts or pads lines, and a
   shorter screen drops lines from the top to keep the cursor on it.
 - Answers to DA1, DA2, DSR 5 and 6, DECRQM, `CSI 18 t` and XTVERSION go
-  to `Options.Reply`, called after the lock is released. The backend
-  must write them to stdin: fish waits for DA1 and vim asks for the
-  cursor position.
+  to `Options.Reply`, called after the lock is released. They must reach
+  stdin: fish waits for DA1 and vim asks for the cursor position. The
+  session gives them to the backend as terminal input.
 
 **Writers.** The package documentation shows the loop.
 
