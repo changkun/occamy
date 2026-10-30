@@ -105,8 +105,10 @@ A trusted issuer mints JWTs that `occamyd` accepts as its own:
 `occamyd`'s own tokens have the same shape with `iss: occamy`. An access
 token may also carry `idp`, where the user signed in: `occamyd` puts
 `local` on a static user's and `oidc` on one from
-[OIDC](#signing-in-through-oidc), and logs it at each sign-in. A session
-token carries no `idp`.
+[OIDC](#signing-in-through-oidc), and logs it at each sign-in. The stream
+token of one of `occamyd`'s own users carries the `idp` of the access
+token that opened the session. A trusted issuer's session token that
+carries `idp` is refused, and the `idp` of its access token is ignored.
 
 #### User names
 
@@ -221,6 +223,16 @@ trusted issuer's token whose `sub` names a static user is refused with
 issuer has `link_static_users: true`, in which case it acts as that
 static user. Connections' `allow.users` and `allow.groups` name users
 and groups whichever issuer signed the token.
+
+Among `occamyd`'s own users, a session also belongs to where its owner
+signed in: an OIDC user and a static user are two users. The exception
+is a static user's name: with `auth.oidc.link_static_users`, the OIDC
+user who signs in under it is the static user, and owns the same
+sessions, whichever of the two opened them. Its access token still
+says `idp: oidc`, for the log. A token of such a user, whose `sub` is a
+static user's name in any case or normal form, is refused with
+`invalid_token` once `link_static_users` is off. The OIDC user keeps
+the groups of `groups_claim`, not the static user's.
 
 ### guacd: `guacd`
 

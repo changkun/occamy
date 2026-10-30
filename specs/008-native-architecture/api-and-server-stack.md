@@ -710,9 +710,27 @@ place for fixes that ship on v0 before beta.
     `auth.oidc`, and then acts as that user. The stream token of a
     trusted issuer's user carries the issuer in `uiss`, which only
     occamyd's own tokens may set. Allow lists and groups still match by
-    name: they name no issuer. Once access tokens carry OIDC sign-in's
-    `idp` claim, the key becomes issuer, `idp` and `sub`; the
-    principal has the field for it.
+    name: they name no issuer.
+  - **Where occamyd's users signed in (added once #110 merged):** for
+    occamyd's own tokens the key is issuer, `idp` and `sub`, so an OIDC
+    user and a static user are two owners, except that a static user's
+    name is always `(occamy, local, sub)`: OIDC sign-in takes such a
+    name only when `auth.oidc.link_static_users` says the two are one
+    person, so the linked OIDC user owns the static user's sessions,
+    whichever opened them. Its access token keeps `idp: oidc` for the
+    log, and so does the stream token, which `sessionUser` signs with
+    the access token's `idp`. A token without `idp` predates OIDC
+    sign-in and is a static user's. A token that says `idp: oidc` with
+    a static user's name, by `config.SameName` as sign-in compares, is
+    refused once the link is off, as after a restart with tokens still
+    out. Trusted issuers keep `(issuer, "", sub)`; a linked one's static
+    names are `(occamy, local, sub)`. #110 refused every session token
+    with `idp`; `auth.Verifier` now refuses it only from a trusted
+    issuer, as `uiss`, since occamyd's own stream tokens carry it. A
+    trusted issuer's access token may still carry an `idp`, which
+    nothing reads. `auth.Signer.SessionFor` takes an `auth.User`
+    (issuer, `idp`, subject). `TestOIDCOwners` covers the linked user,
+    an OIDC user of another name, and the refusal after unlinking.
   - **Absent rather than forbidden:** a connection the caller may not
     open answers 404, as an unknown one does, and so does another
     user's session on `GET`, `DELETE` and shares, so IDs cannot be
@@ -1167,7 +1185,9 @@ place for fixes that ship on v0 before beta.
     signed in, idp oidc`). `idp` is optional in a token, so tokens
     signed before it, and trusted issuers' access tokens, still verify;
     a session token may not carry one. Trusted issuers get the same rule
-    with Sessions (#111).
+    with Sessions (#111). (Revised by #111 once this merged: occamyd's
+    own session tokens carry `idp`, and only a trusted issuer's are
+    refused for it; see Sessions' notes.)
   - **Discovery: lazy.** `newServer` does not contact the provider, so a
     provider that is down cannot keep occamyd from starting with static
     users. `Run` starts one discovery in the background, so the log

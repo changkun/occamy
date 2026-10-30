@@ -244,7 +244,7 @@ func TestOpenSession(t *testing.T) {
 		t.Errorf("stream token claims %+v", c)
 	}
 	info := ts.s.session(o.ID)
-	if info == nil || info.owner != (principal{issuer: auth.Issuer, subject: "alice"}) || info.connection != "ops-shell" || info.protocol != "fake" {
+	if info == nil || info.owner != (principal{issuer: auth.Issuer, idp: auth.IdPLocal, subject: "alice"}) || info.connection != "ops-shell" || info.protocol != "fake" {
 		t.Fatalf("session %+v", info)
 	}
 	if tg, sz, _ := fb.last(); tg.addr != "ops.example:22" || tg.connection != "ops-shell" || sz != (screen{}) {
@@ -529,7 +529,7 @@ func TestAdhocTargets(t *testing.T) {
 		}
 		var o openResponse
 		_ = json.Unmarshal(r.body, &o)
-		if info := ts.s.session(o.ID); info == nil || info.owner != (principal{issuer: auth.Issuer, subject: "carol"}) || info.connection != "" {
+		if info := ts.s.session(o.ID); info == nil || info.owner != (principal{issuer: auth.Issuer, idp: auth.IdPLocal, subject: "carol"}) || info.connection != "" {
 			t.Errorf("%s: session %+v", tt.body, info)
 		}
 	}

@@ -79,8 +79,9 @@ var (
 
 // Claims are what a token says. Access tokens carry Groups, and IdP when
 // occamyd issued them; session tokens carry Session and Role, and Subject
-// if they were issued to a user. A session token of occamyd's issued to a
-// trusted issuer's user names that issuer in UserIssuer, since a subject
+// if they were issued to a user. A session token of occamyd's issued to
+// one of its own users carries IdP too, and one issued to a trusted
+// issuer's user names that issuer in UserIssuer instead, since a subject
 // means a user only together with its issuer.
 type Claims struct {
 	Kind       Kind     `json:"kind"`
@@ -100,7 +101,9 @@ func (c *Claims) check() error {
 			return ErrClaims
 		}
 	case KindSession:
-		if c.Session == "" || c.Groups != nil || c.IdP != "" || c.UserIssuer != "" && c.Subject == "" {
+		if c.Session == "" || c.Groups != nil ||
+			(c.UserIssuer != "" || c.IdP != "") && c.Subject == "" ||
+			c.UserIssuer != "" && c.IdP != "" {
 			return ErrClaims
 		}
 		switch c.Role {
@@ -149,21 +152,32 @@ func (s *Signer) AccessFrom(idp, subject string, groups []string, ttl time.Durat
 // ttl. subject names the user it is issued to, or is empty for a token
 // that anyone holding it may use, such as a share.
 func (s *Signer) Session(session, role, subject string, ttl time.Duration) (string, error) {
-	return s.SessionFor(session, role, "", subject, ttl)
+	return s.SessionFor(session, role, User{Subject: subject}, ttl)
 }
 
-// SessionFor is Session for a user of userIssuer, a trusted issuer. An
-// empty userIssuer, or the signer's own, is the signer's.
-func (s *Signer) SessionFor(session, role, userIssuer, subject string, ttl time.Duration) (string, error) {
-	if userIssuer == s.issuer {
-		userIssuer = ""
+// User is the user a session token is issued to.
+type User struct {
+	// Issuer is the trusted issuer whose user it is; empty, or the
+	// signer's own, for one of the signer's users.
+	Issuer string
+	// IdP is where one of the signer's users signed in, as its access
+	// token says. A trusted issuer's user has none.
+	IdP     string
+	Subject string
+}
+
+// SessionFor is Session for user u.
+func (s *Signer) SessionFor(session, role string, u User, ttl time.Duration) (string, error) {
+	if u.Issuer == s.issuer {
+		u.Issuer = ""
 	}
 	return s.sign(&Claims{
 		Kind:             KindSession,
 		Session:          session,
 		Role:             role,
-		UserIssuer:       userIssuer,
-		RegisteredClaims: jwt.RegisteredClaims{Subject: subject},
+		IdP:              u.IdP,
+		UserIssuer:       u.Issuer,
+		RegisteredClaims: jwt.RegisteredClaims{Subject: u.Subject},
 	}, ttl)
 }
 
@@ -234,13 +248,16 @@ func (v *Verifier) verify(token string, kind Kind) (*Claims, error) {
 	if err := c.check(); err != nil {
 		return nil, err
 	}
+	// Only occamyd speaks for another issuer's users: a trusted issuer
+	// that named one would name users beyond its own. Nor may a trusted
+	// issuer say where a user signed in, in a session token, which
+	// occamyd's own carry for its users. A trusted issuer's access token
+	// may carry an idp of its own, which nothing reads.
+	if (c.UserIssuer != "" || c.Kind == KindSession && c.IdP != "") && c.Issuer != Issuer {
+		return nil, ErrClaims
+	}
 	if c.Kind != kind {
 		return nil, ErrKind
-	}
-	// Only occamyd speaks for another issuer's users: a trusted issuer
-	// that named one would name users beyond its own.
-	if c.UserIssuer != "" && c.Issuer != Issuer {
-		return nil, ErrClaims
 	}
 	return c, nil
 }

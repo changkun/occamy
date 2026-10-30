@@ -196,7 +196,7 @@ func TestStreamWelcome(t *testing.T) {
 	c := ts.stream(t, "/api/v1/connections/ops-shell/stream", ts.token(t, "alice", "ops"), hello)
 	w := c.welcome
 	info := ts.s.session(w.SessionID)
-	if info == nil || info.owner != (principal{issuer: auth.Issuer, subject: "alice"}) || w.Role != protocol.RoleOwner || w.Class != protocol.ClassTerminal || w.ViewerID == 0 {
+	if info == nil || info.owner != (principal{issuer: auth.Issuer, idp: auth.IdPLocal, subject: "alice"}) || w.Role != protocol.RoleOwner || w.Class != protocol.ClassTerminal || w.ViewerID == 0 {
 		t.Fatalf("welcome %+v, session %+v", w, info)
 	}
 	if w.Capabilities.MaxMessageSize != protocol.DefaultMaxMessageSize {

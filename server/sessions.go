@@ -196,7 +196,7 @@ func (s *server) openSession(w http.ResponseWriter, r *http.Request) {
 	// Nobody serves the owner's viewer, so it leaves, which starts the
 	// grace period within which the owner's stream joins.
 	owner.Leave()
-	token, err := s.signer.SessionFor(info.id, auth.RoleOwner, p.issuer, p.subject, s.streamTTL)
+	token, err := s.signer.SessionFor(info.id, auth.RoleOwner, sessionUser(p, claims), s.streamTTL)
 	if err != nil {
 		log.Printf("session %s: signing the stream token: %v", info.id, err)
 		info.s.Close()

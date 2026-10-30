@@ -171,8 +171,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   for VeNCrypt's Plain, and a `tls` block for the server's certificate:
   a CA file, pins by fingerprint, or an insecure mode for demos. A
   session belongs to a subject of the issuer that signed its owner's
-  token, and a trusted issuer may not name a static user unless its
-  `link_static_users` is on. `limits` bounds the sessions a user owns
+  token, and of where the user signed in, and a trusted issuer may not
+  name a static user unless its `link_static_users` is on. An OIDC user
+  linked to a static user owns the static user's sessions, and occamyd's
+  own stream tokens carry `idp`. `limits` bounds the sessions a user owns
   (10), and the viewers (50) and unexpired shares (100) of a session.
   An ad-hoc target is allowed only on its protocol's port or the ports
   its allowlist entry names, never on a loopback, link-local,

@@ -117,26 +117,35 @@ func TestTrustedIssuer(t *testing.T) {
 }
 
 // A session token of occamyd's for a trusted issuer's user names the
-// issuer; a trusted issuer cannot name another, and an access token
-// names none.
+// issuer, and one for its own user where the user signed in; a trusted
+// issuer can do neither, and an access token names no user issuer.
 func TestSessionFor(t *testing.T) {
 	f := newFixture(t)
-	c, err := f.verifier.VerifySession(f.must(f.signer.SessionFor("s1", RoleOwner, "gateway", "bob", time.Minute)))
+	c, err := f.verifier.VerifySession(f.must(f.signer.SessionFor("s1", RoleOwner, User{Issuer: "gateway", Subject: "bob"}, time.Minute)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Issuer != "occamy" || c.UserIssuer != "gateway" || c.Subject != "bob" {
+	if c.Issuer != "occamy" || c.UserIssuer != "gateway" || c.Subject != "bob" || c.IdP != "" {
 		t.Errorf("claims %+v", c)
 	}
-	c, err = f.verifier.VerifySession(f.must(f.signer.SessionFor("s1", RoleOwner, "occamy", "bob", time.Minute)))
-	if err != nil || c.UserIssuer != "" {
+	c, err = f.verifier.VerifySession(f.must(f.signer.SessionFor("s1", RoleOwner, User{Issuer: "occamy", IdP: IdPOIDC, Subject: "bob"}, time.Minute)))
+	if err != nil || c.UserIssuer != "" || c.IdP != IdPOIDC || c.Subject != "bob" {
 		t.Errorf("own user: %+v %v", c, err)
 	}
-	if _, err := f.verifier.VerifySession(f.must(f.gateway.SessionFor("s1", RoleOwner, "elsewhere", "bob", time.Minute))); !errors.Is(err, ErrClaims) {
+	if _, err := f.verifier.VerifySession(f.must(f.gateway.SessionFor("s1", RoleOwner, User{Issuer: "elsewhere", Subject: "bob"}, time.Minute))); !errors.Is(err, ErrClaims) {
 		t.Errorf("a trusted issuer naming another's user: %v, want ErrClaims", err)
 	}
-	if tok, err := f.signer.SessionFor("s1", RoleViewer, "gateway", "", time.Minute); err == nil {
-		t.Errorf("signed a user issuer without a subject: %s", tok)
+	if _, err := f.verifier.VerifySession(f.must(f.gateway.SessionFor("s1", RoleOwner, User{IdP: IdPLocal, Subject: "bob"}, time.Minute))); !errors.Is(err, ErrClaims) {
+		t.Errorf("a trusted issuer's session token with an idp: %v, want ErrClaims", err)
+	}
+	for name, u := range map[string]User{
+		"a user issuer without a subject": {Issuer: "gateway"},
+		"an idp without a subject":        {IdP: IdPLocal},
+		"a user issuer and an idp":        {Issuer: "gateway", IdP: IdPLocal, Subject: "bob"},
+	} {
+		if tok, err := f.signer.SessionFor("s1", RoleViewer, u, time.Minute); err == nil {
+			t.Errorf("signed %s: %s", name, tok)
+		}
 	}
 	access := claims(KindAccess, "occamy", time.Minute)
 	access.UserIssuer = "gateway"
