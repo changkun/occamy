@@ -242,8 +242,33 @@ func pngCodec(name string, level png.CompressionLevel) *Codec {
 			err := enc.Encode(&buf, m)
 			return buf.Bytes(), err
 		},
-		Decode: func(b []byte) (*image.RGBA, error) { return toRGBA(png.Decode(bytes.NewReader(b))) },
+		Decode: decodePNG,
 	}
+}
+
+// decodePNG decodes a PNG to RGBA pixels. A paletted image is expanded
+// through a table, as a client would, rather than through image/draw's
+// generic path, which costs more than the decoding.
+func decodePNG(b []byte) (*image.RGBA, error) {
+	m, err := png.Decode(bytes.NewReader(b))
+	p, ok := m.(*image.Paletted)
+	if err != nil || !ok {
+		return toRGBA(m, err)
+	}
+	var lut [256][4]byte
+	for i, c := range p.Palette {
+		r, g, b, a := c.RGBA()
+		lut[i] = [4]byte{byte(r >> 8), byte(g >> 8), byte(b >> 8), byte(a >> 8)} // #nosec G115 -- 16-bit channels to 8
+	}
+	w, h := p.Rect.Dx(), p.Rect.Dy()
+	out := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := range h {
+		dst := out.Pix[y*out.Stride : y*out.Stride+4*w]
+		for x, i := range p.Pix[y*p.Stride : y*p.Stride+w] {
+			copy(dst[4*x:4*x+4], lut[i][:])
+		}
+	}
+	return out, nil
 }
 
 // qoiCodec is lossless option C.

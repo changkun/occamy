@@ -16,6 +16,7 @@ import (
 	"image/png"
 	"math"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -23,6 +24,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -30,19 +32,21 @@ import (
 	"changkun.de/x/occamy/internal/framebuffer"
 )
 
-// The measurement runs with
+// The measurement runs from this directory, a module of its own, with
 //
-//	go test -tags measure -run TestMeasure -timeout 2h ./bench/codecs -args -out DIR
+//	go test -tags measure -run TestMeasure -timeout 2h . -args -out DIR
 //
-// and writes DIR/codecs.json and DIR/codecs-tables.md.
+// or make codecs from the repository's root, and writes DIR/codecs.json,
+// DIR/codecs-tables.md and DIR/codecs-load.log, the host's load average
+// every 30 seconds.
 var (
 	corpusDir = flag.String("corpus", "../testdata/corpus", "corpus directory")
 	outDir    = flag.String("out", "", "output directory; the measurement is skipped without it")
-	runs      = flag.Int("runs", 3, "passes over the corpus; times are the median per tile")
+	runs      = flag.Int("runs", 5, "passes over the corpus; times are the median per tile")
 	sizesFlag = flag.String("sizes", "64,128", "tile sides")
 	only      = flag.String("codecs", "", "regexp restricting the codecs, for a quick look")
 	pipeLL    = flag.String("pipeline-lossless", "pal+flate1", "lossless codec of the pipeline mix")
-	pipeLossy = flag.String("pipeline-lossy", "jpeg q70", "lossy codec of the pipeline mix")
+	pipeLossy = flag.String("pipeline-lossy", "webp-vpx0 q70,jpegn q70", "lossy codecs of the pipeline mix, comma-separated")
 )
 
 // frame is one corpus file.
@@ -155,6 +159,7 @@ func TestMeasure(t *testing.T) {
 	}
 	prev := runtime.GOMAXPROCS(1)
 	defer runtime.GOMAXPROCS(prev)
+	stopLoad := sampleLoad()
 	frames := loadCorpus(t)
 	var sizes []int
 	for _, s := range strings.Split(*sizesFlag, ",") {
@@ -215,7 +220,10 @@ func TestMeasure(t *testing.T) {
 					tl.res = make([]result, len(codecs))
 					tl.raw = map[string]result{}
 				}
-				for _, layout := range rawLayouts {
+				// The layouts take turns going first, so that none of
+				// them always finds the tile in the cache.
+				for k := range rawLayouts {
+					layout := rawLayouts[(k+pass+tl.index)%len(rawLayouts)]
 					buf = appendRaw(buf[:0], tl.img, layout)
 					t0 := time.Now()
 					var err error
@@ -265,9 +273,10 @@ func TestMeasure(t *testing.T) {
 		}
 		rep.add(side, tiles, codecs)
 	}
-	rep.Damage = damage(t, frames, sizes, all, rep.Codecs)
+	rep.DamageLossy, rep.Damage = damage(t, frames, sizes, all, rep.Codecs)
 	rep.Whole = wholeFrames(t, frames, filter)
 	rep.Finished = time.Now().UTC().Format(time.RFC3339)
+	rep.Load = stopLoad()
 	if err := os.MkdirAll(*outDir, 0o750); err != nil {
 		t.Fatal(err)
 	}
@@ -280,6 +289,63 @@ func TestMeasure(t *testing.T) {
 	}
 	if err := os.WriteFile(filepath.Join(*outDir, "codecs-tables.md"), []byte(rep.markdown()), 0o600); err != nil {
 		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(*outDir, "codecs-load.log"), []byte(strings.Join(rep.Load, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// loadAverage is the host's load average over one, five and fifteen
+// minutes, or "unknown" where it cannot be read.
+func loadAverage() string {
+	switch runtime.GOOS {
+	case "darwin":
+		if out, err := exec.Command("sysctl", "-n", "vm.loadavg").Output(); err == nil {
+			return strings.Trim(strings.TrimSpace(string(out)), "{} ")
+		}
+	case "linux":
+		if b, err := os.ReadFile("/proc/loadavg"); err == nil {
+			if f := strings.Fields(string(b)); len(f) >= 3 {
+				return strings.Join(f[:3], " ")
+			}
+		}
+	}
+	return "unknown"
+}
+
+// sampleLoad records the load average now and every 30 seconds until the
+// function it returns is called, which records it once more and returns
+// the samples, one line each.
+func sampleLoad() func() []string {
+	var (
+		mu      sync.Mutex
+		samples []string
+	)
+	record := func() {
+		mu.Lock()
+		defer mu.Unlock()
+		samples = append(samples, time.Now().UTC().Format(time.RFC3339)+" "+loadAverage())
+	}
+	record()
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		tick := time.NewTicker(30 * time.Second)
+		defer tick.Stop()
+		for {
+			select {
+			case <-tick.C:
+				record()
+			case <-done:
+				return
+			}
+		}
+	})
+	return func() []string {
+		close(done)
+		wg.Wait()
+		record()
+		return samples
 	}
 }
 
@@ -295,8 +361,10 @@ type report struct {
 	Rows              []row
 	Raw               []row // the raw layouts, deflated at level 1
 	Tiles             []tileCount
+	DamageLossy       []string // the lossy codecs of the damage figures
 	Damage            []damageRow
 	Whole             []wholeRow
+	Load              []string // load average samples
 }
 
 // row sums one codec's results over a group of tiles.
@@ -501,46 +569,49 @@ func wholeFrames(t *testing.T, frames []frame, filter *regexp.Regexp) []wholeRow
 }
 
 // damageRow is what one change costs to send at one tile size: the
-// tiles it touches, their pixels, and their bytes in the pipeline's mix
-// of codecs.
+// tiles it touches, how many of them are above 256 colours, their
+// pixels, and their bytes in the pipeline's mix with each lossy codec.
 type damageRow struct {
 	Case   string
 	Size   int
 	Tiles  int
+	Lossy  int
 	Pixels int
-	Bytes  int
+	Bytes  []int
 }
 
 // damage measures what small and partial changes cost at each tile
 // size: consecutive frames of the animated scenes as they are, the
 // scroll after an ideal copy of the scrolled area, and single keys.
-func damage(t *testing.T, frames []frame, sizes []int, all map[int][]*tile, names []string) []damageRow {
-	ll, lossy := slices.Index(names, *pipeLL), slices.Index(names, *pipeLossy)
-	if ll < 0 || lossy < 0 {
-		t.Logf("no damage figures: %s or %s was not measured", *pipeLL, *pipeLossy)
-		return nil
+func damage(t *testing.T, frames []frame, sizes []int, all map[int][]*tile, names []string) ([]string, []damageRow) {
+	ll := slices.Index(names, *pipeLL)
+	lossyNames := strings.Split(*pipeLossy, ",")
+	var lossy []int
+	for _, n := range lossyNames {
+		lossy = append(lossy, slices.Index(names, n))
+	}
+	if ll < 0 || slices.Contains(lossy, -1) {
+		t.Logf("no damage figures: %s or one of %s was not measured", *pipeLL, *pipeLossy)
+		return nil, nil
 	}
 	byName := map[string]*image.RGBA{}
 	for _, f := range frames {
 		byName[f.name] = f.img
 	}
-	// cost is the pipeline's bytes for tile i of frame name.
-	cost := func(side int, name string, i int) int {
+	// tileOf is tile i of frame name.
+	tileOf := func(side int, name string, i int) *tile {
 		for _, tl := range all[side] {
 			if tl.frame == name && tl.index == i {
-				if tl.colours <= 256 {
-					return tl.res[ll].bytes
-				}
-				return tl.res[lossy].bytes
+				return tl
 			}
 		}
 		t.Fatalf("no tile %d of %s", i, name)
-		return 0
+		return nil
 	}
 	var rows []damageRow
 	addDirty := func(label string, side int, after string, dirty []bool) {
 		cols := (byName[after].Rect.Dx() + side - 1) / side
-		r := damageRow{Case: label, Size: side}
+		r := damageRow{Case: label, Size: side, Bytes: make([]int, len(lossy))}
 		for i, d := range dirty {
 			if !d {
 				continue
@@ -548,7 +619,16 @@ func damage(t *testing.T, frames []frame, sizes []int, all map[int][]*tile, name
 			r.Tiles++
 			tr := image.Rect(i%cols*side, i/cols*side, (i%cols+1)*side, (i/cols+1)*side).Intersect(byName[after].Rect)
 			r.Pixels += tr.Dx() * tr.Dy()
-			r.Bytes += cost(side, after, i)
+			tl := tileOf(side, after, i)
+			if tl.colours > 256 {
+				r.Lossy++
+			}
+			for k, c := range lossy {
+				if tl.colours <= 256 {
+					c = ll
+				}
+				r.Bytes[k] += tl.res[c].bytes
+			}
 		}
 		rows = append(rows, r)
 	}
@@ -592,7 +672,7 @@ func damage(t *testing.T, frames []frame, sizes []int, all map[int][]*tile, name
 			addDirty(k.label, side, k.frame, dirty)
 		}
 	}
-	return rows
+	return lossyNames, rows
 }
 
 // dirtyTiles marks the tiles of b that differ from a, where a's area
