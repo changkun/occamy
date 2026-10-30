@@ -82,10 +82,10 @@ directory.
 | `auth.oidc.redirect_url` | required | `occamyd`'s callback URL as the browser and the provider know it, ending in `/api/v1/auth/oidc/callback` behind any proxy prefix. https, or http on localhost. Its path is also the sign-in cookie's, and with https the cookie is `Secure`, whoever terminates TLS |
 | `auth.oidc.return_urls` | the origin of `redirect_url`, with the path `/` | Where browsers are sent back after a sign-in, with a one-time code or an error in the fragment: your web client's sign-in page. A sign-in names one of them, matched exactly as written. https, or http on localhost, with no user name and no fragment |
 | `auth.oidc.scopes` | `[openid, profile, email]` | Scopes to request; must include `openid` |
-| `auth.oidc.subject_claim` | `sub` | The ID token claim that names the user in allow lists: a top-level string claim of up to 255 bytes, of printable characters with no space but U+0020 (no control or format characters, such as zero-width spaces or bidirectional overrides). Pick one that users cannot set themselves, such as `sub` or `email`, never a display name or `preferred_username` where users can edit it, since allow lists grant by this name. With `email`, the token must also say `email_verified: true` |
+| `auth.oidc.subject_claim` | `sub` | The ID token claim that names the user in allow lists: a top-level string claim of up to 255 bytes, of printable characters that show, with no space but U+0020: no control or format characters (zero-width spaces, bidirectional overrides), no other characters that render as nothing (variation selectors, the combining grapheme joiner, Hangul fillers, the blank Braille pattern U+2800). See [user names](#user-names). Pick one that users cannot set themselves, such as `sub` or `email`, never a display name or `preferred_username` where users can edit it, since allow lists grant by this name. With `email`, the token must also say `email_verified: true` |
 | `auth.oidc.groups_claim` | unset | The top-level claim that lists the user's groups, as a list of strings or one string. Only the groups the file names, in `auth.users[].groups` or an `allow.groups`, are kept. Unset, OIDC users have no groups |
-| `auth.oidc.require_known_users` | `false` | Admit only the users whom an allow list names: in a connection's `allow.users`, or in one of its `allow.groups` by `groups_claim`. Static users count only with `link_static_users`. Off, anyone the provider signs in gets an access token, and allow lists still decide what they may open |
-| `auth.oidc.link_static_users` | `false` | Let an OIDC user whose subject names a static user sign in as that user, with that user's access. Off, such a sign-in is refused with `access_denied` and logged: a name belongs to one source unless the file links them. Turn it on only with a `subject_claim` that users cannot choose, such as `sub` or a verified `email`: whoever the provider names `alice` then is static user `alice` |
+| `auth.oidc.require_known_users` | `false` | Admit only the users whom an allow list names: in a connection's `allow.users`, exactly, or in one of its `allow.groups` by `groups_claim`. Static users, and names in `allow.users` that are a static user's, count only with `link_static_users`, since OIDC refuses those names without it. Off, anyone the provider signs in gets an access token, and allow lists still decide what they may open |
+| `auth.oidc.link_static_users` | `false` | Let an OIDC user whose subject names a static user sign in under that name, so that the allow lists naming the static user name the OIDC user too. The OIDC user's groups still come from `groups_claim`, not from the static user's `groups`. Off, a subject that is a static user's name, in any case or Unicode normal form (`Alice` for `alice`), is refused with `access_denied` and logged: a name belongs to one source unless the file links them. Turn it on only with a `subject_claim` that users cannot choose, such as `sub` or a verified `email`: whoever the provider names `alice` then has static user `alice`'s place in every allow list |
 
 #### Tokens from a trusted issuer
 
@@ -104,6 +104,19 @@ token may also carry `idp`, where the user signed in: `occamyd` puts
 `local` on a static user's and `oidc` on one from
 [OIDC](#signing-in-through-oidc), and logs it at each sign-in. A session
 token carries no `idp`.
+
+#### User names
+
+Allow lists and `require_known_users` compare user names exactly, byte
+for byte: `allow.users: [alice]` admits neither `Alice` nor an `alice`
+with a decomposed character, so write names as the provider sends them.
+Telling OIDC users from static users casts a wider net: without
+`link_static_users`, an OIDC subject is refused when it equals a static
+user's name under Unicode case folding, once both are in NFC, so that
+`Alice` cannot pass for static `alice` in a log or to a person. Names
+that only look alike, such as one with a Cyrillic `а` or a fullwidth
+`ａ`, are neither refused nor the same user; pick a `subject_claim` that
+users cannot choose.
 
 #### Signing in through OIDC
 
@@ -154,8 +167,8 @@ Errors in the fragment:
 
 | `error` | Meaning |
 |---------|---------|
-| `access_denied` | The provider refused, or `occamyd` refused the user: a `subject_claim` that is missing or not a usable name, an email the provider has not verified, a static user's name without `link_static_users`, or with `require_known_users`, a user whom no allow list names |
-| `sign_in_failed` | The provider answered with another error, or its answer did not verify: the ID token's issuer, audience, authorized party (`azp`), expiry, signature, algorithm or nonce, the answer's `iss` (RFC 9207), or a `sub` that is not a string, which the ID token's parser refuses before `subject_claim` is read |
+| `access_denied` | The provider refused, or `occamyd` refused the user: a `subject_claim` that is missing or not a usable name, an email the provider has not verified, a static user's name, in any case or normal form, without `link_static_users`, or with `require_known_users`, a user whom no allow list names |
+| `sign_in_failed` | The provider answered with another error, or its answer did not verify: the ID token's issuer, audience, authorized party (`azp`), expiry, signature, algorithm or nonce, the answer's `iss` (RFC 9207), also on an error answer, or a `sub` that is not a string, which the ID token's parser refuses before `subject_claim` is read |
 | `unavailable` | The provider cannot be reached, or too many sign-ins wait for their clients |
 
 `login` answers `400` with API v1's error for a return URL that is not
@@ -166,8 +179,14 @@ with `invalid_state` when the browser has no sign-in cookie that matches
 the provider's answer: the sign-in started in another browser, took
 longer than 10 minutes, or outlived a restart of `occamyd`. It leaves a
 sign-in that is under way alone, so a link to the callback from another
-site cannot end it. The exchange answers `401` for a code that is
-unknown, used or expired, or a verifier that does not match. A user has
+site cannot end it. Starting a sign-in can: `login` replaces the
+browser's sign-in cookie, so a second `login`, including a top-level
+navigation to it from another site, ends the sign-in under way, whose
+callback then answers `invalid_state`. That is a nuisance, not a way
+in, since the second sign-in's code needs a verifier the client does
+not hold, and the user can start again. The exchange answers `401` for
+a code that is unknown, used or expired, or a verifier that does not
+match. A user has
 at most three codes waiting for exchange; a fourth sign-in drops the
 oldest.
 
@@ -175,7 +194,14 @@ ID tokens must be signed with RS, ES or PS at 256, 384 or 512 bits, or
 EdDSA; `none` and HMAC are refused whatever the provider advertises.
 `occamyd` follows no redirect from the provider, and talks only to the
 endpoints its discovery document names, which must be https, or http on
-localhost when the issuer is too. The sign-in cookie is
+localhost when the issuer is too. Their hosts are the discovery
+document's to choose, since it comes from the issuer you configure:
+`occamyd` checks only the scheme. It reads
+`authorization_response_iss_parameter_supported` as a JSON bool; any
+other value fails discovery. When the provider names itself in its
+answer to the callback (`iss`, RFC 9207), `occamyd` compares it with the
+issuer exactly, also in an error answer, before it takes the error as
+the provider's. The sign-in cookie is
 `__Secure-occamy_oidc` when it is `Secure`, and `occamy_oidc` on plain
 http.
 Several `occamyd` instances behind one name need sticky sessions, since
@@ -258,7 +284,9 @@ that:
 - `auth.oidc.return_urls` are https, or http on localhost, with no user
   name and no fragment, and `auth.oidc.require_known_users` has someone
   to admit: a user in an `allow.users`, a group in an `allow.groups`
-  with `groups_claim` set, or, with `link_static_users`, a static user;
+  with `groups_claim` set, or, with `link_static_users`, a static user.
+  Without `link_static_users`, a static user's name in an `allow.users`
+  does not count, since OIDC refuses it;
 - a file holds one YAML document.
 
 ## Serving a v1 file

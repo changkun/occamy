@@ -152,16 +152,22 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   fragment, which the client exchanges at
   `POST /api/v1/auth/oidc/token`, with its own PKCE verifier, for an
   access token, so the token never appears in a URL. An OIDC subject
-  that names a static user is refused unless `link_static_users` links
-  the two. `require_known_users` admits only the users whom an allow
-  list names, by name or by group. occamyd follows no redirect from the
-  provider, and a provider that is down fails OIDC sign-ins, not
-  occamyd's start
+  that names a static user, in any case or Unicode normal form, is
+  refused unless `link_static_users` links the two, and one with
+  characters that render as nothing is refused always.
+  `require_known_users` admits only the users whom an allow list names,
+  exactly, or by group. occamyd follows no redirect from the provider,
+  checks RFC 9207's `iss` on every answer to the callback, and a
+  provider that is down fails OIDC sign-ins, not occamyd's start
   ([docs/configuration.md](docs/configuration.md#signing-in-through-oidc)).
 - Access tokens name where the user signed in, in `idp`: `local` for a
   static user, `oidc` through OIDC. The sign-in's log line names it too.
 - The image carries the licenses of the Go code compiled into occamyd,
   in `/occamy/licenses/THIRD_PARTY_LICENSES`, as release archives do.
+  The file now also holds the `PATENTS` files of Go and of the
+  `golang.org/x` modules, and `scripts/third-party-licenses.sh` fails,
+  writing nothing, when `go list` fails, instead of writing the standard
+  library's license alone.
 - `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS with the
   VNC backend's certificate policy, NLA through CredSSP 5 or later with
   NTLMv2 of its own, offered by default, the connection sequence, bitmap

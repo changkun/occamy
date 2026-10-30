@@ -747,7 +747,11 @@ place for fixes that ship on v0 before beta.
     tries every cookie of the name, so that one set for a parent domain
     cannot shadow the sign-in's own. A restart between `login` and the
     callback therefore fails with `invalid_state`, and a second sign-in
-    in one browser replaces the first.
+    in one browser replaces the first. That includes a top-level
+    navigation to `login` from another site, which ends a sign-in under
+    way: a nuisance docs/configuration.md records, not a way in, since
+    the second sign-in's code needs a verifier the client does not hold
+    (`TestOIDCLoginReplacesFlow`).
   - **ID token:** go-oidc checks the issuer (the configured one exactly,
     which discovery must name too), the audience (`client_id`), the
     expiry (a missing `exp` is expired) and the signature, with
@@ -757,24 +761,33 @@ place for fixes that ship on v0 before beta.
     leaves to its caller, and checks `azp` as OpenID Connect Core 3.1.3.7
     says: with several audiences it must be there, and when there it
     must be `client_id`. An `iss` parameter on the callback (RFC 9207)
-    must be the issuer, and must be there when discovery says
-    `authorization_response_iss_parameter_supported`. `at_hash` is not
-    checked, since occamyd never uses the provider's access token.
+    must be the issuer, exactly and once, and must be there when
+    discovery says `authorization_response_iss_parameter_supported`,
+    which is read as a strict JSON bool. The check runs before the
+    provider's `error` is believed, since an error answer carries `iss`
+    too (RFC 9207, 2.4). `at_hash` is not checked, since occamyd never
+    uses the provider's access token.
   - **Claims:** `subject_claim` names the user: a string of 1 to 255
     bytes of UTF-8 of graphic characters (`unicode.IsGraphic`) with
     U+0020 the only space, or the sign-in is `access_denied`. That
     refuses control and format characters (zero-width spaces and
-    joiners, bidirectional overrides, the soft hyphen), the line and
-    paragraph separators and the no-break and other spaces, which let a
-    name look like another. U+0020 is allowed: an allow list cannot
-    name such a user, but a group can admit one. With
+    joiners, bidirectional overrides, the soft hyphen), the other
+    default-ignorable code points, which are graphic but render as
+    nothing (`unicode.Other_Default_Ignorable_Code_Point`, such as the
+    combining grapheme joiner and the Hangul fillers, and
+    `unicode.Variation_Selector`), U+2800 (the blank Braille pattern),
+    the line and paragraph separators and the no-break and other spaces,
+    which let a name look like another. U+0020 is allowed: an allow list
+    cannot name such a user, but a group can admit one. With
     `subject_claim: email`,
     `email_verified` must be `true`, since an address the provider has
     not verified may be anyone's; for a provider that does not send it,
     such as Entra ID, pick another claim. `require_known_users` admits
-    a user whom a connection's `allow.users` names, or who is in one of
-    its `allow.groups` by `groups_claim`; static users count only with
-    `link_static_users`. `ParseV1` refuses it when that admits no one.
+    a user whom a connection's `allow.users` names, exactly, or who is in
+    one of its `allow.groups` by `groups_claim`; static users, and names
+    in `allow.users` that are a static user's by `config.SameName`, count
+    only with `link_static_users`, since the callback refuses those names
+    without it. `ParseV1` refuses it when that admits no one.
     `groups_claim` takes a list of strings or one string; a missing or
     null claim is no groups, and another type fails the sign-in, since
     it is a misconfiguration. Only the groups the file names, as static
@@ -789,12 +802,20 @@ place for fixes that ship on v0 before beta.
     after either sign-in, and allow lists name users in one namespace,
     so an OIDC user named `alice` would be static user `alice`. By
     default the callback refuses an OIDC subject that names a static
-    user, with `access_denied`, and logs it.
-    `auth.oidc.link_static_users: true` lets it through, for a provider
-    that holds the same people; docs/configuration.md warns that
-    `subject_claim` must then be a claim users cannot choose (`sub`, or
-    a verified email). Access tokens record the source in `idp`:
-    `local` from `POST /api/v1/auth/token`, `oidc` from the OIDC
+    user, with `access_denied`, and logs it. It compares with
+    `config.SameName`, equal under Unicode case folding once both are in
+    NFC, so `Alice`, or `alice` with a decomposed character, cannot pass
+    for static `alice` to a person reading a log or a session list;
+    `golang.org/x/text`, already a dependency, does the NFC. Access
+    itself, by allow lists and `require_known_users`, compares names
+    exactly, so a looser rule there could only widen it.
+    `auth.oidc.link_static_users: true` lets the name through, for a
+    provider that holds the same people: the OIDC user takes the static
+    user's place in allow lists, with the groups of `groups_claim`, not
+    the static user's (`TestOIDCLinkedGroups`); docs/configuration.md
+    warns that `subject_claim` must then be a claim users cannot choose
+    (`sub`, or a verified email). Access tokens record the source in
+    `idp`: `local` from `POST /api/v1/auth/token`, `oidc` from the OIDC
     exchange, and each sign-in's log line names it (`user "carol"
     signed in, idp oidc`). `idp` is optional in a token, so tokens
     signed before it, and trusted issuers' access tokens, still verify;
@@ -818,7 +839,9 @@ place for fixes that ship on v0 before beta.
     and `jwks_uri` must be https, or http on the loopback interface when
     the issuer is too, so a provider elsewhere cannot point occamyd at
     a port of its own host in the clear. With redirects refused, that
-    holds for every hop.
+    holds for every hop. Their hosts are not restricted: the discovery
+    document comes from the configured issuer, over https, and is
+    trusted to name them, as it is trusted to name the keys.
   - **Client authentication** follows discovery's
     `token_endpoint_auth_methods_supported`: a public client sends
     `client_id` in the body; a confidential one sends a Basic header,
@@ -861,6 +884,21 @@ place for fixes that ship on v0 before beta.
     one provider account, looping through silent sign-ins, filled the
     code table so that everyone else got `unavailable`. Both are fixed
     above, with tests.
+  - The second review found that `File.Admitted` counted a static
+    user's name in `allow.users` without `link_static_users`, so a file
+    that admitted no one through OIDC passed validation; that the
+    license script piped `go list` into `sort`, so a failing `go list`
+    wrote a file with the standard library's license only (it now
+    writes each `go list` to a file and checks it, since the image's
+    build stage runs dash, which has no `pipefail`, and it now also
+    copies `PATENTS` files: Go's, x/crypto's, x/image's and x/text's);
+    that `unicode.IsGraphic` passes code points that render as nothing,
+    such as U+034F and the Hangul fillers, so `alice` followed by one
+    signed in beside static `alice` and logged as her; that the static
+    name check was exact, so `Alice` signed in beside her; that the
+    `iss` check ran after the `error` branch; and that the docs said a
+    linked user gets the static user's access, where the groups come
+    from `groups_claim`. All are fixed above, with tests.
 - **Mutation checks:** each of these was made and its test failed: the
   state not compared; the cookie's expiry not checked; the cookie not
   cleared; the cookie not HttpOnly, SameSite=None, on the path `/`, or
@@ -897,7 +935,16 @@ place for fixes that ship on v0 before beta.
   endpoints allowed for an https issuer; the `iss` parameter not
   required when promised; the cookie without `__Secure-`, or sealed
   without its name; and the cookie cleared by a callback whose state
-  does not match, or an expired one kept.
+  does not match, or an expired one kept. After the second review,
+  also: discovery checking endpoints with `config.SecureURLProblem`
+  instead of `endpointProblem` (caught with an https issuer whose token
+  endpoint is http on loopback); the `iss` value compared loosely, a
+  repeated `iss` taken, or the check moved back after the `error`
+  branch; `quote` not quoting short text, and the token endpoint's
+  error code or `azp` logged raw; default-ignorable code points or
+  U+2800 in a subject; the static name check exact, or without NFC;
+  and `File.Admitted` counting static users' names in `allow.users`
+  without `link_static_users`.
 - **Follow-ups:**
   - Web client ([009](../009-react-web-client.md)): make a verifier of
     43 to 128 characters, keep it in `sessionStorage`, and navigate to
@@ -931,6 +978,15 @@ place for fixes that ship on v0 before beta.
     each; a provider may throttle occamyd's `client_id` for it, which
     fails everyone's OIDC sign-ins with `sign_in_failed` until the
     throttle lifts. A rate limit as above is the remedy.
+  - Starting a sign-in ends the one under way in that browser, also
+    when another site navigates to `login`. One cookie per sign-in,
+    named by its state, would let them run side by side, at the cost of
+    a bound on how many a browser may hold.
+  - Names that only look alike, such as `alice` with a Cyrillic `а` or
+    a fullwidth `ａ`, are neither refused nor folded: confusable
+    detection (Unicode TR 39) is not done. The docs ask for a
+    `subject_claim` users cannot choose, which leaves the names to the
+    provider.
   - Residual risks of binding the code to the client's challenge, not
     to the browser. First, `login` is a GET anyone can link to: an
     attacker who sends the victim's browser there with a challenge whose
