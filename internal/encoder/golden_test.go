@@ -36,8 +36,9 @@ const goldenComment = "Occamy protocol v1 codec vectors: payloads of the codecs 
 	"`exact` vector reproduces them byte for byte; one of a lossy vector " +
 	"reaches at least `min_psnr` against them, in decibels over the red, " +
 	"green and blue of every pixel: 10·log10(255² / the mean squared " +
-	"difference). `container` is a deflate payload inflated. Invalid " +
-	"vectors fail to decode."
+	"difference). `container` is a deflate payload inflated. A " +
+	"`handmade` vector is one occamyd does not send, which a decoder " +
+	"takes all the same. Invalid vectors fail to decode."
 
 type codecGolden struct {
 	Comment string         `json:"comment"`
@@ -55,6 +56,7 @@ type codecVector struct {
 	Payload   string  `json:"payload"`
 	Exact     bool    `json:"exact"`
 	MinPSNR   float64 `json:"min_psnr,omitempty"`
+	Handmade  bool    `json:"handmade,omitempty"`
 }
 
 type invalidCodec struct {
@@ -99,7 +101,11 @@ type codecCase struct {
 	w, h    int
 	pix     []byte
 	quality int  // for a lossy vector
-	cursor  bool // encoded as a cursor
+	cursor  bool // encoded as a cursor, from pre
+	pre     []byte
+	// container is a deflate container that the encoder would not
+	// write, which the vector carries instead of its own.
+	container []byte
 }
 
 func goldenCases(t testing.TB) []codecCase {
@@ -123,7 +129,7 @@ func goldenCases(t testing.TB) []codecCase {
 			pointer = append(pointer, 0x10, 0x20, 0x30, byte(x*16))
 		}
 	}
-	return []codecCase{
+	cases := []codecCase{
 		{name: "raw", codec: raw, w: 2, h: 2, pix: rgbaPixels(red, glass, 0x00000000, blue)},
 		{name: "deflate: solid", codec: deflate, w: 3, h: 1, pix: rgbaPixels(red, red, red)},
 		{name: "deflate: two colours, a row padded", codec: deflate, w: 9, h: 1,
@@ -144,17 +150,72 @@ func goldenCases(t testing.TB) []codecCase {
 		{name: "jpeg: 24×16", codec: jpegC, w: 24, h: 16, pix: crop(image.Rect(100, 200, 124, 216)), quality: 70},
 		{name: "jpeg: 17×9", codec: jpegC, w: 17, h: 9, pix: crop(image.Rect(511, 300, 528, 309)), quality: 90},
 	}
+	cases = append(cases, atTheCap(),
+		// Containers occamyd does not send, which a decoder takes: one
+		// whose padding bits are set, and one that lists a colour twice.
+		codecCase{name: "deflate: padding bits set, which a decoder ignores",
+			codec: deflate, w: 3, h: 2, pix: rgbaPixels(blue, red, blue, red, blue, red),
+			container: []byte{0, 1, 0xff, 0, 0, 0, 0, 0xff, 0b1011_1111, 0b0101_1111}},
+		codecCase{name: "deflate: a colour listed twice",
+			codec: deflate, w: 3, h: 1, pix: rgbaPixels(red, red, blue),
+			container: []byte{0, 2, 0xff, 0, 0, 0xff, 0, 0, 0, 0, 0xff, 0b0001_1000}},
+	)
+	// A cursor reaches the encoder premultiplied, as the session holds
+	// it, and its vector's pixels are what the client decodes.
+	for i := range cases {
+		if c := &cases[i]; c.cursor {
+			c.pre = premultiplied(c.pix, c.w, c.h)
+			c.pix = straightOf(c.pre, c.w, c.h)
+		}
+	}
+	return cases
+}
+
+// atTheCap is a container as long as a 3×2 rectangle's can be,
+// max(1 + 4wh, 1026 + wh) bytes: 256 colours with alpha, though the
+// pixels use 6 of them, and a byte an index.
+func atTheCap() codecCase {
+	const w, h = 3, 2
+	c := []byte{2, 255}
+	for i := range 256 {
+		c = append(c, byte(i), byte(255-i), byte(i*7), byte(i|1))
+	}
+	var pix []byte
+	for _, k := range []int{0, 255, 17, 128, 64, 200} {
+		c = append(c, byte(k))
+		pix = append(pix, c[2+4*k:2+4*k+4]...)
+	}
+	if len(c) != max(1+4*w*h, 1026+w*h) {
+		panic("atTheCap is not at the cap")
+	}
+	return codecCase{name: "deflate: at the cap, 256 colours with alpha for 3×2 pixels",
+		codec: deflate, w: w, h: h, pix: pix, container: c}
+}
+
+// deflated is container compressed as occamyd compresses its own.
+func deflated(t testing.TB, container []byte) []byte {
+	var out bytes.Buffer
+	fw, err := flate.NewWriter(&out, flate.BestSpeed)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fw.Write(container)
+	fw.Close()
+	return out.Bytes()
 }
 
 // encodeCase encodes c with an encoder that sends its codec.
 func encodeCase(t testing.TB, c codecCase) []byte {
 	t.Helper()
+	if c.container != nil {
+		return deflated(t, c.container)
+	}
 	var b []byte
 	var got protocol.Codec
 	switch {
 	case c.cursor:
 		e := New([]protocol.Codec{c.codec})
-		b, got, _ = e.Cursor(nil, c.pix, c.w, c.h)
+		b, got, _ = e.Cursor(nil, c.pre, c.w, c.h)
 	case c.quality > 0:
 		b, got = New([]protocol.Codec{c.codec}).Lossy(nil, c.pix, c.w, c.h, c.quality)
 	default:
@@ -193,9 +254,10 @@ func vector(t testing.TB, c codecCase, b []byte) codecVector {
 	t.Helper()
 	v := codecVector{
 		Name: c.name, Codec: int(c.codec), Width: c.w, Height: c.h,
-		Pixels:  hex.EncodeToString(c.pix),
-		Payload: hex.EncodeToString(b),
-		Exact:   c.quality == 0,
+		Pixels:   hex.EncodeToString(c.pix),
+		Payload:  hex.EncodeToString(b),
+		Exact:    c.quality == 0,
+		Handmade: c.container != nil,
 	}
 	if c.codec == deflate {
 		var p codec.Palette
@@ -204,6 +266,9 @@ func vector(t testing.TB, c codecCase, b []byte) codecVector {
 			pp = nil
 		}
 		v.Container = hex.EncodeToString(codec.AppendContainer(nil, c.pix, c.w, c.h, pp))
+		if c.container != nil {
+			v.Container = hex.EncodeToString(c.container)
+		}
 		var inflated bytes.Buffer
 		if _, err := inflated.ReadFrom(flate.NewReader(bytes.NewReader(b))); err != nil {
 			t.Fatalf("%s: %v", c.name, err)
@@ -236,16 +301,16 @@ func vector(t testing.TB, c codecCase, b []byte) codecVector {
 
 // invalidCodecs are deflate payloads that a decoder refuses.
 func invalidCodecs(t testing.TB) []invalidCodec {
-	z := func(container []byte) string {
-		var out bytes.Buffer
-		fw, err := flate.NewWriter(&out, flate.BestSpeed)
-		if err != nil {
-			t.Fatal(err)
+	z := func(container []byte) string { return hex.EncodeToString(deflated(t, container)) }
+	// Palettes of n opaque colours.
+	palette := func(n int) []byte {
+		c := []byte{0, byte(n - 1)}
+		for i := range n {
+			c = append(c, byte(i), 0, 0)
 		}
-		fw.Write(container)
-		fw.Close()
-		return hex.EncodeToString(out.Bytes())
+		return c
 	}
+	over := atTheCap().container
 	// A valid 3×2 tile of two colours.
 	valid := []byte{0, 1, 0xff, 0, 0, 0, 0, 0xff, 0b0100_0000, 0b1000_0000}
 	inv := func(name, payload string) invalidCodec {
@@ -259,12 +324,19 @@ func invalidCodecs(t testing.TB) []invalidCodec {
 		inv("bytes after the stream", z(valid)+"00"),
 		inv("an empty container", z(nil)),
 		inv("form 4", z(append([]byte{4}, valid[1:]...))),
+		inv("a reserved form bit, 0x80", z(append([]byte{0x80}, valid[1:]...))),
 		inv("a truncated palette", z(valid[:5])),
+		inv("a truncated palette with alpha", z([]byte{2, 1, 0xff, 0, 0, 0xff, 0, 0, 0xff})),
 		inv("one row of indices missing", z(valid[:9])),
-		inv("an index beyond the palette", z([]byte{0, 2, 1, 1, 1, 2, 2, 2, 3, 3, 3, 0b1100_0000, 0})),
+		inv("an index beyond the palette, 2 bits", z([]byte{0, 2, 1, 1, 1, 2, 2, 2, 3, 3, 3, 0b1100_0000, 0})),
+		inv("an index beyond the palette, 4 bits", z(append(palette(5), 0x01, 0x50, 0, 0))),
+		inv("an index beyond the palette, 8 bits", z(append(palette(17), 0, 1, 17, 3, 4, 5))),
 		inv("an extra row of indices", z(append(bytes.Clone(valid), 0))),
+		inv("indices after a palette of one colour", z([]byte{0, 0, 1, 2, 3, 0, 0})),
 		inv("raw pixels short of the rectangle", z(append([]byte{1}, make([]byte, 3*6-1)...))),
 		inv("raw pixels beyond the rectangle", z(append([]byte{1}, make([]byte, 3*6+1)...))),
+		inv("raw pixels with alpha short of the rectangle", z(append([]byte{3}, make([]byte, 4*6-1)...))),
+		inv("a byte over the cap", z(append(bytes.Clone(over), 0))),
 		inv("a bomb: 1 MiB of zeros", z(make([]byte, 1<<20))),
 	}
 }

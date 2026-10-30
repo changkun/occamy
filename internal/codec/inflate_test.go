@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"compress/flate"
 	"errors"
+	"image"
+	"io"
 	"runtime"
 	"testing"
 	"time"
@@ -66,6 +68,95 @@ func TestInflateInvalid(t *testing.T) {
 	}
 }
 
+// countingReader counts the bytes an Inflater inflates.
+type countingReader struct {
+	io.ReadCloser
+	n int
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.ReadCloser.Read(p)
+	c.n += n
+	return n, err
+}
+
+func (c *countingReader) Reset(r io.Reader, dict []byte) error {
+	c.n = 0
+	return c.ReadCloser.(flate.Resetter).Reset(r, dict)
+}
+
+// counting returns an Inflater that counts the bytes it inflates.
+func counting() (*Inflater, *countingReader) {
+	c := &countingReader{ReadCloser: flate.NewReader(bytes.NewReader(nil))}
+	return &Inflater{fr: c}, c
+}
+
+// maxContainer is the longest container of a w×h rectangle: raw pixels
+// with alpha, or a palette of 256 colours with alpha and a byte an index.
+func maxContainer(w, h int) int { return max(1+4*w*h, 1026+w*h) }
+
+// A receiver inflates at most one byte more than the longest container
+// of the rectangle, max(1 + 4wh, 1026 + wh) bytes; the byte more shows
+// that a container is longer. The bound is not 1 + 4wh: a palette of 256
+// colours goes past that for a rectangle of up to 341 pixels, and so may
+// occamyd's own container of an edge tile.
+func TestInflateCap(t *testing.T) {
+	// The longest container of a 3×2 rectangle, which decodes.
+	at := []byte{2, 255}
+	for i := range 256 {
+		at = append(at, byte(i), byte(255-i), byte(i*7), byte(i|1))
+	}
+	at = append(at, 0, 255, 17, 128, 64, 200)
+	if len(at) != maxContainer(3, 2) || len(at) <= 1+4*3*2 {
+		t.Fatalf("the container is %d bytes, not the cap", len(at))
+	}
+	in, c := counting()
+	if err := in.Decode(rgba(make([]byte, 4*6), 3, 2), deflate(t, at)); err != nil || c.n != len(at) {
+		t.Errorf("a container at the cap: %v after %d bytes, want it decoded after %d", err, c.n, len(at))
+	}
+	over := append(bytes.Clone(at), 0)
+	if err := in.Decode(rgba(make([]byte, 4*6), 3, 2), deflate(t, over)); !errors.Is(err, ErrInvalid) || c.n != len(at)+1 {
+		t.Errorf("a byte over the cap: %v after %d bytes, want ErrInvalid after %d", err, c.n, len(at)+1)
+	}
+
+	// occamyd's container of a 1×64 edge tile of 64 colours is 258
+	// bytes, over 1 + 4wh.
+	pix := make([]byte, 0, 4*64)
+	for i := range 64 {
+		pix = append(pix, byte(i), byte(255-i), byte(i*3), 0xff)
+	}
+	var p Palette
+	if !p.Build(pix, 1, 64) {
+		t.Fatal("64 colours make no palette")
+	}
+	edge := AppendContainer(nil, pix, 1, 64, &p)
+	if len(edge) <= 1+4*64 || len(edge) > maxContainer(1, 64) {
+		t.Errorf("the edge tile's container is %d bytes; want over %d and at most %d", len(edge), 1+4*64, maxContainer(1, 64))
+	}
+	if err := in.Decode(rgba(make([]byte, len(pix)), 1, 64), deflate(t, edge)); err != nil || c.n != len(edge) {
+		t.Errorf("the edge tile: %v after %d bytes", err, c.n)
+	}
+
+	// Bombs of each form inflate one byte past the longest container of
+	// their form, never more than one past the cap.
+	for _, size := range []image.Point{{1, 1}, {3, 2}, {1, 64}, {17, 5}, {64, 64}} {
+		w, h := size.X, size.Y
+		for _, head := range [][]byte{{0, 255}, {1}, {2, 255}, {3}} {
+			bomb := deflate(t, append(bytes.Clone(head), make([]byte, 1<<20)...))
+			if err := in.Decode(rgba(make([]byte, 4*w*h), w, h), bomb); !errors.Is(err, ErrInvalid) {
+				t.Errorf("%dx%d, a bomb of form %d: %v", w, h, head[0], err)
+			}
+			if c.n > maxContainer(w, h)+1 {
+				t.Errorf("%dx%d, a bomb of form %d: %d bytes inflated, over %d", w, h, head[0], c.n, maxContainer(w, h)+1)
+			}
+		}
+		_ = in.Decode(rgba(make([]byte, 4*w*h), w, h), deflate(t, append([]byte{2, 255}, make([]byte, 1<<20)...)))
+		if w*h < 342 && c.n != maxContainer(w, h)+1 {
+			t.Errorf("%dx%d, a bomb of 256 colours: %d bytes inflated, want %d", w, h, c.n, maxContainer(w, h)+1)
+		}
+	}
+}
+
 // An Inflater allocates nothing per payload once it has decoded one, and
 // nothing that grows with a hostile payload.
 func TestInflateAllocations(t *testing.T) {
@@ -97,8 +188,9 @@ func TestInflateAllocations(t *testing.T) {
 }
 
 // Decoding any payload into any small rectangle fails or succeeds without
-// panicking, and what decodes is a container that encodes the same
-// pixels again.
+// panicking and without inflating more than one byte past the
+// rectangle's longest container, and what decodes is a container that
+// encodes the same pixels again.
 func FuzzInflate(f *testing.F) {
 	var d Deflater
 	for _, n := range []int{1, 2, 3, 5, 17, 0} {
@@ -112,10 +204,13 @@ func FuzzInflate(f *testing.F) {
 		if w == 0 || h == 0 || w > 64 || h > 64 {
 			return
 		}
-		var in Inflater
+		in, c := counting()
 		W, H := int(w), int(h)
 		out := rgba(make([]byte, 4*W*H), W, H)
 		err := in.Decode(out, payload)
+		if c.n > maxContainer(W, H)+1 {
+			t.Fatalf("%d bytes inflated for %d×%d pixels, over %d", c.n, W, H, maxContainer(W, H)+1)
+		}
 		if err != nil {
 			if !errors.Is(err, ErrInvalid) {
 				t.Fatalf("error %v is not ErrInvalid", err)

@@ -19,8 +19,8 @@ import (
 var goldenFile = filepath.Join("..", "..", "protocol", "testdata", "codecs.json")
 
 // The decoders of this package decode the vectors of its codecs exactly,
-// the container of each deflate vector is what AppendContainer writes,
-// and every invalid vector fails.
+// the container of each deflate vector that occamyd sends is what
+// AppendContainer writes, and every invalid vector fails.
 func TestGoldenVectors(t *testing.T) {
 	b, err := os.ReadFile(goldenFile)
 	if err != nil {
@@ -35,6 +35,7 @@ func TestGoldenVectors(t *testing.T) {
 			Container     string
 			Payload       string
 			Exact         bool
+			Handmade      bool
 		}
 		Invalid []struct {
 			Name          string
@@ -79,6 +80,10 @@ func TestGoldenVectors(t *testing.T) {
 		if !bytes.Equal(inflate(t, payload), container) {
 			t.Errorf("%s: the payload does not inflate to the container", v.Name)
 		}
+		forms[container[0]] = true
+		if v.Handmade {
+			continue
+		}
 		pp := &p
 		if !p.Build(pix, v.Width, v.Height) {
 			pp = nil
@@ -86,7 +91,6 @@ func TestGoldenVectors(t *testing.T) {
 		if got := AppendContainer(nil, pix, v.Width, v.Height, pp); !bytes.Equal(got, container) {
 			t.Errorf("%s: container % x, want % x", v.Name, got, container)
 		}
-		forms[container[0]] = true
 	}
 	if decoded == 0 || len(forms) != 4 {
 		t.Errorf("%d vectors decoded, forms %v; want every form", decoded, forms)
