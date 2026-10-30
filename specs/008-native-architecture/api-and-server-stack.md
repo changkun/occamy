@@ -11,7 +11,7 @@ affects:
   - docs/
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -54,11 +54,12 @@ can only patch on v0.
 | `GET /api/v1/auth/oidc/login` | Start OIDC sign-in: redirect to the identity provider (authorization code with PKCE) |
 | `GET /api/v1/auth/oidc/callback` | Finish OIDC sign-in and issue an access token |
 | `GET /api/v1/connections` | Connections the caller may open (from the registry) |
+| `GET /api/v1/connections/{id}/stream` | WebSocket upgrade that opens a session on the connection and streams it, in one round trip ([protocol-v1](protocol-v1.md), Handshake) |
 | `POST /api/v1/sessions` | Open a session on a connection, returning the session ID and the caller's role |
 | `GET /api/v1/sessions/{id}` | Session state: backend, size, viewers |
 | `POST /api/v1/sessions/{id}/shares` | Mint a share token for viewer or read-only access, with an expiry |
 | `DELETE /api/v1/sessions/{id}` | Close the session (owner only) |
-| `GET /api/v1/sessions/{id}/stream` | WebSocket upgrade to protocol v1; the token goes in the first message, never in the URL |
+| `GET /api/v1/sessions/{id}/stream` | WebSocket upgrade that joins a session, with an access or share token; the token travels in `Sec-WebSocket-Protocol` (or `Authorization` for native clients), never in the URL |
 | `GET /healthz` | Liveness, on the public listener |
 
 Debug and metrics endpoints move to a separate listener (`debug.address`,
@@ -146,6 +147,15 @@ single-node beta.
    come later if someone asks for it.
 7. **TLS:** occamyd terminates TLS when `tls.cert` and `tls.key` are set.
    A reverse proxy is documented as the alternative. ACME comes later.
+8. **Opening and streaming is one request** (2026-10-30).
+   `GET /api/v1/connections/{id}/stream` opens a session and streams it,
+   so a client reaches the first frame in one round trip after sign-in,
+   where v0 needs two and `POST /api/v1/sessions` followed by a stream
+   would need three. The token travels in `Sec-WebSocket-Protocol`, as
+   [protocol-v1](protocol-v1.md) describes, and the server checks
+   `Origin` against the configured origins on every upgrade.
+   `POST /api/v1/sessions` stays for clients that want the session ID
+   first.
 
 ## Affects
 

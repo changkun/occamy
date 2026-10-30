@@ -91,16 +91,20 @@ Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
 needs an external process. 005 delivered the first half in v0.5.0: C left
 `occamyd`'s process, and guacd became a sidecar. The second half replaces
 guacd one protocol at a time. Each switch is gated by the parity criteria
-in [guacd-bridge](008-native-architecture/guacd-bridge.md).
+in [guacd-bridge](008-native-architecture/guacd-bridge.md). The goal, the
+owner's call on 2026-10-30, is a v1.0 with no Guacamole anywhere: neither
+guacd nor the Guacamole protocol. RDP is native if its spike passes; if
+not, an isolated helper process takes its place, the one exception to
+"no external process", and still free of Guacamole.
 
 | Milestone | Delivers | guacd needed for |
 |-----------|----------|------------------|
 | v0.5.0 ([005](005-upstream-guacamole.md), released 2026-10-29) | `occamyd` without cgo; everything through guacd | VNC, SSH, RDP |
 | v1.0.0-beta.1 | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, web client on v1 | VNC, RDP |
 | v1.0.0-beta.2 | Native VNC | RDP |
-| v1.0.0-rc.1 | API and protocol frozen; Swift client preview | RDP |
-| v1.0.0 | guacd optional and off by default; deployed only when RDP connections are configured | RDP, opt-in |
-| v1.x | Native RDP per [rdp-strategy](008-native-architecture/rdp-strategy.md) | nothing |
+| v1.0.0-rc.1 | API and protocol frozen; native RDP (or its helper fallback); Swift client preview | nothing |
+| v1.0.0 | No guacd and no Guacamole protocol; the v0 routes are removed | nothing |
+| v1.x | Kerberos, audio and the rest of RDP's later scope per [rdp-strategy](008-native-architecture/rdp-strategy.md) | nothing |
 
 The client side is a separate matter. The Swift app links the Go client
 core through cgo's `c-archive` export ([010](010-native-swift-client.md)).
@@ -228,12 +232,12 @@ Each beta reruns the benchmark, which also covers #18.
 | 1 | [API and server stack](008-native-architecture/api-and-server-stack.md) | HTTP API v1, auth, registry, v0 routes, gin or stdlib | — | large | validated |
 | 2 | [Protocol v1](008-native-architecture/protocol-v1.md) | Wire format, capabilities, flow control, versioning | — | large | validated |
 | 3 | [Session core](008-native-architecture/session-core.md) | Backend interface, session owner, viewer pacing | — | large | validated |
-| 4 | [Graphics pipeline](008-native-architecture/graphics-pipeline.md) | Framebuffer, damage, codecs, quality | protocol-v1, session-core | large | drafted |
-| 5 | [Native SSH backend](008-native-architecture/native-ssh-backend.md) | SSH, terminal state, host keys | protocol-v1, session-core | medium | drafted |
+| 4 | [Graphics pipeline](008-native-architecture/graphics-pipeline.md) | Framebuffer, damage, codecs, quality | protocol-v1, session-core | large | validated |
+| 5 | [Native SSH backend](008-native-architecture/native-ssh-backend.md) | SSH, terminal state, host keys | protocol-v1, session-core | medium | validated |
 | 6 | [guacd bridge](008-native-architecture/guacd-bridge.md) | guacd under protocol v1; parity gates for removal | session-core, graphics-pipeline, 005 handshake client | large | drafted |
 | 7 | [Native VNC backend](008-native-architecture/native-vnc-backend.md) | RFB client: security types, encodings | session-core, graphics-pipeline | large | drafted |
 | 8 | [Go client core](008-native-architecture/client-core.md) | Client library shaped for tests and a C ABI | protocol-v1, graphics-pipeline | medium | validated |
-| 9 | [RDP strategy](008-native-architecture/rdp-strategy.md) | guacd, helper process, or pure-Go RDP | session-core | large | drafted |
+| 9 | [RDP strategy](008-native-architecture/rdp-strategy.md) | guacd, helper process, or pure-Go RDP | session-core | large | validated |
 | 10 | [Protocol benchmark](008-native-architecture/benchmark.md) | Yardstick: scenarios, metrics, the Guacamole baseline, the 10x and 50 ms targets | — | large | complete |
 
 ```mermaid

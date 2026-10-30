@@ -9,7 +9,7 @@ affects:
   - server/
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -61,6 +61,13 @@ type Backend interface {
     // to sink; Run must not block on a slow sink.
     Run(ctx context.Context, sink Sink) error
     Input(ev InputEvent) error // key, pointer, wheel, text, clipboard, resize
+    // Demand tells the backend whether any viewer can see the session,
+    // so that it can pace the remote server (see Input to display).
+    Demand(d Demand)
+}
+
+type Demand struct {
+    Visible bool // at least one viewer can see the screen
 }
 
 type Sink interface {
@@ -85,12 +92,66 @@ plus a scrollback snapshot), serializes input from viewers that hold
 input rights, and enforces roles (owner, viewer, read-only). It starts a
 writer goroutine per viewer.
 
-Each viewer's writer has two queues: small messages and tiles. It always
-drains the small queue first, so a cursor move, terminal data or a
-keystroke's update never waits behind bulk tiles. On Linux and macOS it
-sets `TCP_NOTSENT_LOWAT` on the connection, so that the kernel holds
-little unsent data and the writer's ordering still takes effect.
-[benchmark](benchmark.md)'s G5 measures this.
+### Input to display
+
+The scheduler's objective is the time from a viewer's input until that
+viewer sees its effect, measured as `L` in [benchmark](benchmark.md),
+and only for what a viewer can see. An input matters through its visible
+effect. Delivering the input quickly, or sending control messages ahead
+of frames, gains nothing while the frame that shows the effect waits;
+and prioritizing a viewer who cannot see the screen is wasted work. The
+baseline shows the cost of getting this wrong: in full-screen motion
+x11vnc shows a key in 5.6 ms, and guacd delivers it after 84 ms at N0
+and 113 ms at N1, behind frames it had already queued.
+
+- **Frames are states, not events.** Under the pull model (decision 1),
+  a frame carries the current content of its dirty tiles, so a viewer
+  that skips intermediate frames loses nothing: an input's effect is in
+  the newest state. Skipping stale frames and prioritizing the input are
+  the same act. Terminals follow the same rule with screen diffs
+  ([native-ssh-backend](native-ssh-backend.md)).
+- **The frame after an input goes out at once.** When the owner applies
+  an input from a viewer, that viewer's writer sends its next frame as
+  soon as damage appears, one frame beyond its window if the window is
+  full, with the tiles damaged since the input first. `frame-end`
+  carries the sequence number of the last input applied before the
+  frame's tiles were read ([protocol-v1](protocol-v1.md)), so the client
+  measures input to display exactly, and the benchmark uses the same
+  number.
+- **Little is in flight.** Besides the frame window, a viewer's bytes in
+  flight are capped near the bandwidth-delay product, estimated from
+  `frame-ack` round trips with a delay-based controller: when round
+  trips grow above their minimum, the rate backs off before buffers
+  fill. On Linux and macOS the writer sets `TCP_NOTSENT_LOWAT`, so the
+  kernel holds little unsent data. A key's frame then waits behind at
+  most about one round trip of data.
+- **Only what is seen.** A client reports with `view` whether it is
+  visible (a hidden browser tab, a minimized window) and which part of
+  the screen its viewport shows. A hidden viewer gets no frames; its
+  dirty region keeps growing, which costs a bitset, and it gets one frame
+  of it when it becomes visible again: the current screen, never a
+  backlog. Tiles outside the viewport stay dirty until they come into
+  view.
+- **Motion degrades smoothly.** When a viewer's ack round trips or decode
+  times grow, its frame interval and lossy quality step down, and they
+  step back up when acks return quickly
+  ([graphics-pipeline](graphics-pipeline.md)). Input stays responsive
+  while motion loses detail or rate, never the reverse.
+- **What goes first is what the user sees directly.** The cursor is drawn
+  by the client from `cursor` and `cursor-move`, so pointer motion needs
+  no frame. Small messages (cursor, clipboard, bell, close, ping) are
+  never queued behind tiles; acks and pings only drive pacing.
+- **The remote server is paced too.** The session owns the framebuffer,
+  so the remote server's rate and each viewer's rate are independent,
+  and backends use each protocol's own control:
+  - VNC is pull-based: the backend keeps one incremental update request
+    outstanding while `Demand.Visible`, applies each update as it
+    arrives and asks for the next, and stops asking while nobody can
+    see.
+  - RDP acknowledges graphics frames as it applies them, and sends a
+    Suppress Output PDU while nobody can see.
+  - SSH output always feeds the terminal state, which is cheap and keeps
+    it correct, while the frames to viewers follow the rules above.
 
 ## Options
 
@@ -163,6 +224,12 @@ follow the recommendations above.
    room for a tap later.
 7. **IPC for out-of-process backends waits** until
    [rdp-strategy](rdp-strategy.md) picks a helper.
+8. **The scheduling objective is input to display, for what is seen**
+   (owner's call, 2026-10-30). A keypress matters more than a frame only
+   through the frame that shows its effect, and only while the user can
+   see it. This replaces an earlier design of a small-message queue
+   drained ahead of tiles, which put control messages ahead of the
+   frames the user was waiting for. See Input to display.
 
 ## Affects
 

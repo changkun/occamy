@@ -11,7 +11,7 @@ affects:
   - internal/guacd/
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -113,14 +113,19 @@ protocols or is deleted.
 
 1. Bridge model I or P? I is recommended; P only if server CPU proves
    prohibitive in the baseline measurements.
-2. Reuse `internal/guac` from `gio-client` as the interpreter's starting
-   point, or write it fresh against the 1.6 instruction set?
+2. ~~Reuse `internal/guac` from `gio-client`, or write the interpreter
+   fresh?~~ Answered 2026-10-30: the benchmark wrote it fresh against
+   guacd 1.6 (`internal/guacamole/display.go`, all sixteen channel
+   masks, layers and buffers), and the bridge reuses it.
 3. Which Guacamole operations are in scope? Proposed: those guacd 1.6's
    VNC, RDP and SSH plugins emit, confirmed by recording real sessions,
    with transfer functions other than `SRC` and `OVER` rejected loudly.
 4. Gate values: N, H, and the performance tolerance?
-5. After RDP goes native: keep the bridge for telnet and Kubernetes, or
-   delete it?
+5. ~~After RDP goes native: keep the bridge, or delete it?~~ Answered
+   2026-10-30: v1.0 ships without guacd
+   ([008](../008-native-architecture.md), Path to pure Go), so the bridge
+   is removed with it. It carries VNC and RDP over protocol v1 only until
+   their native backends pass its parity gate.
 
 ## Affects
 

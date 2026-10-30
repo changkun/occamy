@@ -1,6 +1,6 @@
 ---
 title: RDP strategy
-status: drafted
+status: validated
 track: architecture
 depends_on:
   - specs/008-native-architecture/session-core.md
@@ -8,7 +8,7 @@ affects:
   - internal/backend/rdp/
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -84,18 +84,31 @@ Outcome:
   complexity. guacd then leaves the default deployment while `occamyd`
   stays pure Go, with RDP in an isolated helper.
 
+## Decisions
+
+Settled on 2026-10-30. Items 1 and 2 were the owner's calls; 3 and 4
+follow the recommendations.
+
+1. **D, pure-Go RDP, decided by the spike first.** The end state is an
+   `occamyd` with no Guacamole and no cgo for every protocol. If the
+   spike fails, the fallback is a helper process (B or C), which is still
+   free of Guacamole; guacd does not stay for RDP.
+2. **No H.264.** Codecs stay pure Go ([graphics-pipeline](graphics-pipeline.md)
+   decision 1); RDP uses the bitmap and GFX codecs without AVC, and the
+   lossy tier covers motion.
+3. **The spike runs during beta.1,** as soon as the backend interface in
+   [session-core](session-core.md) exists, in parallel with the other
+   beta.1 work. It needs nothing else from them.
+4. **No Kerberos in the first native RDP release.** NTLMv2 through
+   CredSSP covers local and most domain accounts; Kerberos follows when a
+   deployment needs it.
+
 ## Open Questions
 
-1. Is a pure-Go RDP worth its maintenance cost, or is "pure-Go `occamyd`
-   plus an isolated helper for RDP" an acceptable end state?
-2. Spike budget and owner: when does it run relative to beta.2?
-3. Where does the Windows check run: a manual host, a self-hosted
-   runner, or a cloud VM in CI?
-4. Is the bandwidth penalty of no H.264 acceptable for the target use
-   (administration rather than video), given the tile pipeline's lossy
-   tier?
-5. Is Kerberos (domain-joined targets) a requirement for the first native
-   RDP release?
+1. Where does the Windows check run: a manual host, a self-hosted
+   runner, or a cloud VM in CI? The spike's second step needs Windows
+   Server or Windows 11 with NLA, and so does
+   [#32](https://github.com/changkun/occamy/issues/32).
 
 ## Affects
 
