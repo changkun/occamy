@@ -88,20 +88,22 @@ func TestExtendedDesktopSize(t *testing.T) {
 	}
 
 	// A refusal changes nothing and is logged.
-	s.c.send(t, putUpdate(putExtDesktopSize(reasonClient, 1, 0, 0)))
+	s.c.send(t, putUpdate(putExtDesktopSize(reasonClient, 3, 0, 0)))
 	if req := expect[requestMsg](t, s.c); !req.incremental || req.r != image.Rect(0, 0, 80, 60) {
 		t.Fatalf("request %+v, want changes to the screen", req)
 	}
 	if got := s.sink.Size(); got != image.Pt(80, 60) {
 		t.Errorf("screen %v after a refusal, want 80×60", got)
 	}
-	if !strings.Contains(log.String(), "administratively prohibited") {
+	if !strings.Contains(log.String(), "invalid screen layout") || !strings.Contains(log.String(), "width=120 height=90") {
 		t.Errorf("the refusal is not logged:\n%s", log)
 	}
 
 	// Once answered, the next resize is sent; one of the size the
-	// screen has, or beyond the limits, is not.
+	// screen has, the size just refused, or one beyond the limits, is
+	// not.
 	resize(80, 60)
+	resize(120, 90)
 	resize(0, 60)
 	resize(1<<20, 60)
 	s.c.quiet(t, silence)
@@ -127,6 +129,31 @@ func TestExtendedDesktopSize(t *testing.T) {
 	// had one.
 	resize(64, 48)
 	expectSetSize(t, s.c, 64, 48, 9, 1)
+
+	// Once the server resizes on request, a size it refused is asked
+	// for again.
+	s.c.send(t, putUpdate(putExtDesktopSize(reasonClient, 0, 64, 48, screenMsg{id: 9, r: image.Rect(0, 0, 64, 48), flags: 1})))
+	expect[requestMsg](t, s.c)
+	resize(120, 90)
+	expectSetSize(t, s.c, 120, 90, 9, 1)
+	s.c.send(t, putUpdate(putExtDesktopSize(reasonClient, 3, 0, 0)))
+	expect[requestMsg](t, s.c)
+	if n := strings.Count(log.String(), "width=120 height=90"); n != 2 {
+		t.Errorf("%d refusals of 120×90 logged, want 2:\n%s", n, log)
+	}
+
+	// A server that prohibits resizing is asked no more, whatever the
+	// size.
+	resize(70, 50)
+	expectSetSize(t, s.c, 70, 50, 9, 1)
+	s.c.send(t, putUpdate(putExtDesktopSize(reasonClient, statusProhibited, 0, 0)))
+	expect[requestMsg](t, s.c)
+	resize(72, 54)
+	resize(74, 56)
+	s.c.quiet(t, silence)
+	if n := strings.Count(log.String(), "administratively prohibited"); n != 1 {
+		t.Errorf("%d prohibitions logged, want 1:\n%s", n, log)
+	}
 }
 
 func TestResizeWithoutSupport(t *testing.T) {

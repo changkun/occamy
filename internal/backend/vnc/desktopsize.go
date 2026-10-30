@@ -21,10 +21,15 @@ package vnc
 // send; the newest Resize that came meanwhile follows it. The layout
 // sent is a single screen covering the framebuffer, with the id and
 // flags of the server's first screen, as noVNC sends it.
+//
+// A size the server refused is not asked for again until it resizes the
+// screen on request, so each refusal is logged once; a server that
+// prohibits resizing is asked no more.
 
 import (
 	"encoding/binary"
 	"image"
+	"slices"
 )
 
 const (
@@ -33,12 +38,15 @@ const (
 	msgSetDesktopSize = 251
 	// screenSize is the size of a SCREEN in a layout.
 	screenSize = 16
+	// maxRefused bounds the refused sizes kept.
+	maxRefused = 16
 )
 
 // The reasons and status codes of an ExtendedDesktopSize.
 const (
-	reasonClient  = 1 // answers this client's SetDesktopSize
-	statusForward = 4 // forwarded, as by a hypervisor, to be done later
+	reasonClient     = 1 // answers this client's SetDesktopSize
+	statusProhibited = 1 // the server takes no SetDesktopSize
+	statusForward    = 4 // forwarded, as by a hypervisor, to be done later
 )
 
 // statusText describes an ExtendedDesktopSize's status code.
@@ -61,6 +69,11 @@ type desktop struct {
 	first     screen      // the first screen of its latest layout
 	want      image.Point // the size asked for by the newest Resize, if not sent
 	asked     bool        // a SetDesktopSize awaits its answer
+	sent      image.Point // the size of the latest SetDesktopSize
+	// refused holds the sizes the server refused since it last resized
+	// on request, the newest last, at most maxRefused of them.
+	refused    []image.Point
+	prohibited bool // the server prohibits resizing
 }
 
 // extendedDesktopSize applies an ExtendedDesktopSize rectangle, whose
@@ -83,12 +96,16 @@ func (d *decoder) extendedDesktopSize(r image.Rectangle) error {
 		if status < len(statusText) {
 			desc = statusText[status]
 		}
-		if status == statusForward {
-			d.log.Debug("vnc: the server forwarded the resize")
-		} else {
-			d.log.Warn("vnc: the server did not resize the screen", "status", status, "reason", desc)
+		asked := d.tell().desktopSizeRefused(status)
+		switch status {
+		case statusForward:
+			d.log.Debug("vnc: the server forwarded the resize", "width", asked.X, "height", asked.Y)
+		case statusProhibited:
+			d.log.Warn("vnc: the server prohibits resizing the screen; it is asked no more", "reason", desc)
+		default:
+			d.log.Warn("vnc: the server did not resize the screen; the size is asked for no more",
+				"width", asked.X, "height", asked.Y, "status", status, "reason", desc)
 		}
-		d.tell().extendedDesktopSize(d.size, nil, true)
 		return nil
 	}
 	if size != d.size {
@@ -114,9 +131,31 @@ func (r *run) extendedDesktopSize(size image.Point, first *screen, answer bool) 
 	}
 	if answer {
 		r.desk.asked = false
+		r.desk.refused = r.desk.refused[:0]
 	}
 	r.mu.Unlock()
 	r.poke()
+}
+
+// desktopSizeRefused implements peer: the size asked for is not asked
+// for again, unless the resize was forwarded; after status 1 no size is.
+func (r *run) desktopSizeRefused(status int) image.Point {
+	r.mu.Lock()
+	d := &r.desk
+	d.asked = false
+	switch {
+	case status == statusProhibited:
+		d.prohibited = true
+	case status != statusForward && !slices.Contains(d.refused, d.sent):
+		if len(d.refused) == maxRefused {
+			d.refused = slices.Delete(d.refused, 0, 1)
+		}
+		d.refused = append(d.refused, d.sent)
+	}
+	sent := d.sent
+	r.mu.Unlock()
+	r.poke()
+	return sent
 }
 
 // resize keeps the size of a Resize, unless it is empty or beyond lim,
@@ -133,18 +172,19 @@ func (r *run) resize(w, h int, lim limits) {
 
 // desktopSizeDue appends the SetDesktopSize that is due, if any: the
 // newest size asked for, once the server supports it and has answered
-// the last one, unless the screen has that size. r.mu must be held.
+// the last one, unless the screen has that size, the server refused it,
+// or the server prohibits resizing. r.mu must be held.
 func (r *run) desktopSizeDue(p []byte) []byte {
 	d := &r.desk
-	if !d.supported || d.asked || d.want == (image.Point{}) {
+	if !d.supported || d.prohibited || d.asked || d.want == (image.Point{}) {
 		return p
 	}
 	want := d.want
 	d.want = image.Point{}
-	if want == r.size {
+	if want == r.size || slices.Contains(d.refused, want) {
 		return p
 	}
-	d.asked = true
+	d.asked, d.sent = true, want
 	return appendSetDesktopSize(p, want, d.first)
 }
 

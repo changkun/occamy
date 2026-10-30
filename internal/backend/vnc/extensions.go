@@ -44,6 +44,10 @@ type peer interface {
 	// size, its first screen is first unless nil, and answer is whether
 	// it answers this client's SetDesktopSize.
 	extendedDesktopSize(size image.Point, first *screen, answer bool)
+	// desktopSizeRefused records that the server did not do this
+	// client's SetDesktopSize, with the status it gave, and returns the
+	// size that was asked for.
+	desktopSizeRefused(status int) image.Point
 	// clipboardCaps records the server's Extended Clipboard caps: the
 	// formats and actions it takes.
 	clipboardCaps(flags uint32)
@@ -58,6 +62,7 @@ func (nopPeer) fence(uint32, []byte) error                     { return nil }
 func (nopPeer) continuousUpdates()                             {}
 func (nopPeer) qemuKeys()                                      {}
 func (nopPeer) extendedDesktopSize(image.Point, *screen, bool) {}
+func (nopPeer) desktopSizeRefused(int) image.Point             { return image.Point{} }
 func (nopPeer) clipboardCaps(uint32)                           {}
 func (nopPeer) clipboardAction(uint32)                         {}
 
