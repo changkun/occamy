@@ -1,9 +1,11 @@
 module changkun.de/x/occamy
 
-go 1.26.0
+go 1.26.4
 
 require (
 	github.com/coder/websocket v1.8.15
+	github.com/gen2brain/jpegn v0.6.2
+	github.com/gen2brain/vpx v0.2.1
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/jezek/xgb v1.3.1
 	go.yaml.in/yaml/v3 v3.0.5
