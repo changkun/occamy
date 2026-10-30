@@ -1,0 +1,41 @@
+{
+	"name": "ssh",
+	"protocol": "ssh",
+	"params": {
+		"hostname": "ssh",
+		"port": "22",
+		"username": "occamy"
+	},
+	"width": 800,
+	"height": 600,
+	"steps": [
+		"logging in: the password typed at guacd's prompt",
+		"typing: echo hello",
+		"scrolling: seq 1 200, then the wheel back three notches and forward three",
+		"resizing to 640x480",
+		"typing: ls -l /",
+		"exit"
+	],
+	"instructions": {
+		"args": 1,
+		"argv": 3,
+		"blob": 36,
+		"cfill": 22,
+		"copy": 13,
+		"cursor": 3,
+		"end": 35,
+		"img": 32,
+		"img image/png": 31,
+		"img image/webp": 1,
+		"move": 13,
+		"ready": 1,
+		"rect": 22,
+		"size": 15,
+		"sync": 21
+	},
+	"size": {
+		"X": 640,
+		"Y": 480
+	},
+	"sha256": "609abda13e1cff68c07afa01ad7ea39e490188e47635789bbb13343ae4c53ffb"
+}

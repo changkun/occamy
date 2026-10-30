@@ -1,0 +1,52 @@
+{
+	"name": "vnc",
+	"protocol": "vnc",
+	"params": {
+		"hostname": "vnc",
+		"port": "5900"
+	},
+	"width": 1024,
+	"height": 768,
+	"steps": [
+		"logging in, and waiting for the scene to answer F2 and a letter",
+		"Escape and a: the idle scene with the swatch painted",
+		"typing hello, each letter painting the swatch, and moving the pointer",
+		"scrolling: F3 scrolls a page of text a line every 16 ms, for a tenth of a second with the wheel turned",
+		"moving a window: F4 drags a 400×300 window for 80 ms",
+		"b: the idle scene again",
+		"resizing to 800x600",
+		"c, the last frame"
+	],
+	"checkpoints": [
+		{
+			"sync": "1225287973",
+			"letter": "a"
+		},
+		{
+			"sync": "1225288803",
+			"letter": "b"
+		}
+	],
+	"instructions": {
+		"ack": 1,
+		"args": 1,
+		"blob": 153,
+		"cfill": 16,
+		"copy": 111,
+		"cursor": 2,
+		"end": 130,
+		"img": 130,
+		"img image/png": 108,
+		"img image/webp": 22,
+		"ready": 1,
+		"rect": 16,
+		"required": 1,
+		"size": 3,
+		"sync": 22
+	},
+	"size": {
+		"X": 1024,
+		"Y": 768
+	},
+	"sha256": "29fa762ad9c17ed69e761761158042b7af7712ac40047ef38c01cbb52a346af5"
+}

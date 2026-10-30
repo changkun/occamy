@@ -1,0 +1,55 @@
+{
+	"name": "rdp",
+	"protocol": "rdp",
+	"params": {
+		"hostname": "rdp",
+		"ignore-cert": "true",
+		"port": "3389",
+		"resize-method": "display-update",
+		"username": "occamy"
+	},
+	"width": 640,
+	"height": 480,
+	"steps": [
+		"logging in, and waiting for the scene to answer F2 and a letter",
+		"Escape and a: the idle scene with the swatch painted",
+		"typing hello, each letter painting the swatch, and moving the pointer",
+		"scrolling: F3 scrolls a page of text a line every 16 ms, for a tenth of a second with the wheel turned",
+		"moving a window: F4 drags a 400×300 window for 80 ms",
+		"b: the idle scene again",
+		"resizing to 800x600",
+		"c, the last frame"
+	],
+	"checkpoints": [
+		{
+			"sync": "1225293052",
+			"letter": "a"
+		},
+		{
+			"sync": "1225294020",
+			"letter": "b"
+		}
+	],
+	"instructions": {
+		"args": 1,
+		"blob": 126,
+		"cfill": 14,
+		"copy": 21,
+		"cursor": 2,
+		"dispose": 2,
+		"end": 36,
+		"img": 36,
+		"img image/png": 24,
+		"img image/webp": 12,
+		"mouse": 1,
+		"ready": 1,
+		"rect": 14,
+		"size": 7,
+		"sync": 20
+	},
+	"size": {
+		"X": 800,
+		"Y": 600
+	},
+	"sha256": "776011fb455cdcb15f34fade5dca45b6c5a4b1d04617229314771ac3f49be174"
+}
