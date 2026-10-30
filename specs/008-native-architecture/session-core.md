@@ -60,7 +60,7 @@ type Backend interface {
     // Run connects and blocks until ctx ends or the remote closes. Events go
     // to sink; Run must not block on a slow sink.
     Run(ctx context.Context, sink Sink) error
-    Input(ev InputEvent) error // key, pointer, wheel, text, clipboard, resize
+    Input(ev InputEvent) error // key, pointer, wheel, text, terminal input, clipboard, resize
     // Demand tells the backend whether any viewer can see the session,
     // so that it can pace the remote server (see Input to display).
     Demand(d Demand)
@@ -72,19 +72,28 @@ type Demand struct {
 
 type Sink interface {
     Resize(w, h int)
-    Damage(r image.Rectangle)          // graphical: the framebuffer changed
+    // Lock returns the framebuffer's pixels in r, locked for drawing;
+    // Unlock releases them and records r as damage. Graphical only.
+    Lock(r image.Rectangle) *image.RGBA
+    Unlock(r image.Rectangle)
     CopyRect(dst image.Rectangle, src image.Point)
     Cursor(img *image.RGBA, hot image.Point)
+    CursorMove(p image.Point)
     TermData(p []byte)                 // terminal
     Clipboard(mime string, data []byte)
     Bell()
-    Prompt(p Prompt) (PromptReply, error)
+    Title(title string)
+    Prompt(ctx context.Context, p Prompt) (PromptReply, error)
 }
 ```
 
 Graphical backends write pixels into a framebuffer that the session owns
 ([graphics-pipeline](graphics-pipeline.md)) and report damage. They never
-encode.
+encode. They draw through `Lock` and `Unlock`, so that a decoder writes
+straight into the framebuffer under the row locks of decision 2, without
+a copy, and the damage it reports is exactly what it drew. The RGBA
+layout holds until the graphics pipeline's measurement settles the pixel
+layout.
 
 The session owner is one goroutine per session. It runs the backend,
 applies events to shared state (the framebuffer, or the terminal state
@@ -230,6 +239,20 @@ follow the recommendations above.
    see it. This replaces an earlier design of a small-message queue
    drained ahead of tiles, which put control messages ahead of the
    frames the user was waiting for. See Input to display.
+
+## Task Breakdown
+
+| Task | Delivers | Needs |
+|------|----------|-------|
+| Backend interface | `internal/backend`: `Class`, `Backend`, `Sink`, `Demand`, input events (key, pointer, wheel, text, terminal input, clipboard, resize) and prompts; `backendtest`, a scripted fake backend for both classes that draws on a clock and records input | — |
+| Pacer | A per-viewer controller without I/O: the frame window, one frame beyond it after an input, bytes in flight capped near the bandwidth-delay product from `frame-ack` round trips with delay-based backoff, and AIMD steps for the frame interval and quality; tests on a simulated clock and link | — |
+| Owner | `internal/session`: the goroutine that runs a backend, applies its events to the framebuffer or the terminal emulator, adds damage to each viewer's dirty tiles, applies input in arrival order by role (read-only input dropped and counted), sets `Demand` from the viewers' `view`, and ends the session per decision 5; tests under `-race` that also check for leaked goroutines | Backend interface; the graphics pipeline's framebuffer |
+| Viewer writer | The goroutine per viewer: takes the dirty tiles inside the viewport when the pacer allows, encodes them through an encoder interface (raw pixels until the graphics pipeline's codecs land), sends size-capped tiles and `frame-end` with the last input applied, sends small messages ahead of tiles, sends a hidden viewer nothing and one current frame on its return, and sets `TCP_NOTSENT_LOWAT` on Linux and macOS; terminal sessions send screen diffs in the same frames | Owner, Pacer, protocol v1 Messages |
+| Registry | Sessions by ID: open on a connection, join with a role, share tokens that die with the session, removal when it ends | Owner |
+| Scheduling test | End to end with the fake backend in full-screen motion over a simulated N1 link: a key's `frame-end` arrives within one round trip plus a bound while frames keep flowing, a hidden viewer receives nothing and costs no encoding, and a slow viewer does not slow a fast one | Viewer writer |
+
+The HTTP routes on top belong to
+[api-and-server-stack](api-and-server-stack.md).
 
 ## Affects
 
