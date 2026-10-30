@@ -73,6 +73,19 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 - `make bench` builds occamyd's image from the working tree before
   measuring it, instead of measuring whatever `occamy:latest` was.
+- The v0 routes moved from `/api/v1/login` and `/api/v1/connect` to
+  `/api/v0/login` and `/api/v0/connect`, leaving `/api/v1` to API v1.
+  The web client, the end-to-end tests and the benchmark use the new
+  paths; tokens, responses and close statuses are unchanged. occamyd
+  serves them with the standard library's `net/http`, golang-jwt v5 and
+  coder/websocket, so gin, gin-jwt and gorilla/websocket and their
+  indirect dependencies are gone from `go.mod`. `auth.jwt_alg` must be
+  HS256, HS384 or HS512, and `auth.jwt_secret` must not be empty.
+
+### Security
+
+- occamyd's request log no longer records query strings, which carry the
+  v0 token and with it the remote credentials.
 
 ## [0.6.0] - 2026-10-30
 

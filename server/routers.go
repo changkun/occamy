@@ -10,34 +10,56 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"strconv"
-	"time"
+	"net/http"
 
-	jwt "github.com/appleboy/gin-jwt/v2"
-	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 
 	"changkun.de/x/occamy/internal/config"
+	"changkun.de/x/occamy/internal/guacamole"
 	"changkun.de/x/occamy/internal/guacd"
 )
 
-// serveWS implements /api/v1/connect
-func (p *proxy) serveWS(c *gin.Context) {
-	// On failure, Upgrade has already replied with an HTTP error.
-	ws, err := p.upgrader.Upgrade(c.Writer, c.Request, nil)
+// serveWS implements GET /api/v0/connect.
+func (p *proxy) serveWS(w http.ResponseWriter, r *http.Request) {
+	jwt, ok := p.tokens.authenticate(w, r)
+	if !ok {
+		return
+	}
+	ws, err := accept(w, r)
 	if err != nil {
 		log.Printf("upgrade websocket failed: %v", err)
 		return
 	}
+	p.serveConn(ws, jwt, displayHints(r.URL.Query()))
+}
 
-	claims := jwt.ExtractClaims(c)
-	jwt := &config.JWT{
-		Protocol: claims["protocol"].(string),
-		Host:     claims["host"].(string),
-		Username: claims["username"].(string),
-		Password: claims["password"].(string),
+// accept upgrades the request to a WebSocket with the subprotocol
+// guacamole, which guacamole-common-js asks for. On failure it has
+// already replied with an HTTP error.
+//
+// Like gorilla/websocket's default, it rejects a cross-origin request
+// with 403: an Origin header, if present, must name the request's host.
+// Compression stays off, as it was on gorilla/websocket.
+func accept(w http.ResponseWriter, r *http.Request) (*websocket.Conn, error) {
+	if o, ok := r.Header["Origin"]; ok && (len(o) != 1 || o[0] == "") {
+		// coder/websocket skips the check for an empty Origin, which
+		// gorilla/websocket refused.
+		http.Error(w, "invalid Origin header", http.StatusForbidden)
+		return nil, errors.New("invalid Origin header")
 	}
-	p.serveConn(ws, jwt, displayHints(c.Request.URL.Query()))
+	ws, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		Subprotocols:    []string{"guacamole"}, // fixed by guacamole-common-js
+		CompressionMode: websocket.CompressionDisabled,
+	})
+	if err != nil {
+		return nil, err
+	}
+	// gorilla/websocket read messages of any size. coder/websocket stops
+	// at 32 KiB by default, short of one instruction whose element holds
+	// MaxInstructionLength 4-byte code points, so the limit is the largest
+	// instruction that forward accepts.
+	ws.SetReadLimit(guacamole.MaxInstructionSize)
+	return ws, nil
 }
 
 // serveConn serves one client until it leaves, then closes the WebSocket
@@ -47,11 +69,9 @@ func (p *proxy) serveConn(ws *websocket.Conn, jwt *config.JWT, d display) {
 	if err != nil {
 		log.Printf("connection failed: %v", err)
 	}
-	code, status := closeStatus(err)
-	msg := websocket.FormatCloseMessage(code, strconv.Itoa(status))
-	// Best effort: the client may already be gone.
-	_ = ws.WriteControl(websocket.CloseMessage, msg, time.Now().Add(time.Second))
-	ws.Close()
+	// serveIO has closed the WebSocket if the client reached guacd; this
+	// closes it otherwise.
+	closeWith(ws, err)
 }
 
 // routeConn connects the client to guacd: as the owner of a new session,
