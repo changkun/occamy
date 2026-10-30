@@ -1205,7 +1205,9 @@ leaves only RDP on the bridge.
      `OCCAMY_VNC_ARD_ADDR=<mac>:5900 go test -tags integration -run
      TestMacOS -v ./internal/backend/vnc`. It logs the version, the
      types, and type 30's generator, key length and prime size, and
-     checks that the backend refuses type 30 without `ARD`.
+     checks that the backend refuses type 30 without `ARD`. To read the
+     group it chooses type 30 and disconnects once the prime has
+     arrived, so the Mac sees an exchange abandoned, not a login failed.
   3. Log in: add `OCCAMY_VNC_ARD_USER` and `OCCAMY_VNC_ARD_PASSWORD`,
      an account of that Mac. The test logs in with type 30 and waits for
      the screen.
@@ -1222,3 +1224,7 @@ leaves only RDP on the bridge.
     against.
   - The prompt says "VNC username and password" for a Mac account too;
     naming the Mac's account might help the owner.
+  - `TestEncodings` replaces the encodings it asks for but not phase 3's
+    pseudo-encodings, so its Tight JPEG session from TigerVNC doubled
+    under continuous updates. Confirm why, or have it clear
+    `extensions` as it replaces `encodings`.
