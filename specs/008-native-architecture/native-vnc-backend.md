@@ -950,7 +950,7 @@ leaves only RDP on the bridge.
 
 - **Status.** Phase 4 is done but for its check against a Mac: Apple
   Remote Desktop authentication, security type 30, in `ard.go`, about
-  200 lines of code and 600 of tests, behind `Config.ARD`, which is off
+  200 lines of code and 800 of tests, behind `Config.ARD`, which is off
   by default. No Mac with Screen Sharing on was at hand, so the check by
   hand below is still to be run. Statement coverage of the package is
   97%. Nothing wires the backend into `occamyd` yet, and
@@ -1035,6 +1035,20 @@ leaves only RDP on the bridge.
     password in the log. Others cover the private key's size and range,
     errors from the prompt and the random source, `New`, allocations,
     write errors, and `choose`.
+  - **The review's tests.** An independent review of the pull request
+    computed four more exchanges from the wire format alone, with
+    Python and OpenSSL: RFC 2409's group 2 with a private key searched
+    for so that both the secret and the client's public key start with
+    a zero byte, an odd key length of 129 bytes with the generator 5,
+    p = 7 in 128 bytes, and credentials of 63 bytes. `TestARDVectors`
+    (`ard_vectors_test.go`) runs each through the handshake in 3.3,
+    3.7, 3.8 and 3.889, with the server's bytes written out by hand and
+    the random stream fed through `crypto/rand.Int`, and compares every
+    byte the client writes. `TestARDFreshRandomness` runs the handshake
+    with the default random source, as `Run` does, and checks that
+    three connections send three responses and that the public key is
+    no small power of the generator; every other test feeds a source
+    of its own, so a constant default had passed them all.
   - **Fuzzing.** `FuzzHandshake` allows type 30, with keys made from a
     fixed seed so that an input runs the same way twice, and gained five
     seeds: macOS's offer and a login, a failure, macOS's little-endian
@@ -1073,8 +1087,14 @@ leaves only RDP on the bridge.
     phase 3's options are flat, rather than a list of allowed types:
     type 30 is the only type the backend takes that needs consent. With
     it, an attacker between the backend and the Mac reads the account's
-    password; without it, the Mac is out of reach. The owner, not the
-    backend, has to choose that.
+    password; without it, the Mac is out of reach. It also raises what
+    a downgrade gets from any server: without a TLS requirement, an
+    attacker in between can strip VeNCrypt from the offer and offer
+    type 30 alone, and is sent the whole password, where without `ARD`
+    the most it gets is VNC Authentication's DES response from the
+    password's first 8 bytes. `Config.ARD`'s documentation says so,
+    and to set it only for Macs, on trusted networks. The owner, not
+    the backend, has to choose that.
   - **The choice.** VeNCrypt still comes first. Then, if `ARD` allows it:
     type 30 when a username is configured, even over VNC Authentication
     and None, since of the types here only 30 takes one, and the
@@ -1179,6 +1199,13 @@ leaves only RDP on the bridge.
   - The prompt skipped: `TestARD`'s prompted cases. The warning dropped:
     `TestARD`'s logins. `New` taking `ARD` with a TLS requirement:
     `TestARDNew`.
+  - After the review: the default random source made constant, as a
+    seeded ChaCha8 or as zeros: `TestARDFreshRandomness`, alone. The
+    not-allowed error suggesting `ARD` while TLS is required:
+    `TestARDScripts`' required-TLS case without `ARD`.
+  - Not caught, since no test can see it from outside the functions:
+    dropping the clearing of the private key, of the secret's words or
+    of its bytes. The review found the same.
 - **Phase 2's and 3's integration tests, run once.** Phase 2's
   `TestEncodings` had been compiled but not run since phase 3 merged.
   With images built from master's `docker/bench/desktop` and
@@ -1227,6 +1254,9 @@ leaves only RDP on the bridge.
   - The check by hand above, on current macOS.
   - Configuration v1's `ard` key for VNC connections (phase 3's list),
     documented with its risk in `docs/configuration.md` once it exists.
+    When it lands, the error for a server that offers only type 30
+    should name that key rather than `Config.ARD`, which an operator
+    cannot set.
   - Apple's types 33, 35 and 36, with SRP and Kerberos, would log in to
     a Mac without type 30's exposure; each needs a Mac to be built
     against.

@@ -125,10 +125,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   against TigerVNC (`docker/test/tigervnc`) in a container of its own.
 - Apple Remote Desktop authentication (security type 30) in the native
   VNC backend, so that it can log in to macOS Screen Sharing as a user
-  of the Mac, but only when the connection's `ARD` option allows it:
+  of the Mac, but only when the backend's `vnc.Config.ARD` allows it:
   its key exchange authenticates no server, so anyone between Occamy and
-  the Mac can read the account's password. A server that offers only
-  type 30 otherwise fails with an error that names the option. The
+  the Mac can read the account's password, or, with `ARD` set, strip
+  VeNCrypt from any server's offer to get it. No configuration key sets
+  `ARD` yet; that is a follow-up. A server that offers only type 30
+  otherwise fails with an error that names the setting. The
   server's key length, prime, generator and public key are checked
   before anything else, a username or password longer than 63 bytes is
   refused rather than cut short, and the owner is asked for what the
