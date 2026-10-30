@@ -99,7 +99,7 @@ func TestARDKnownAnswer(t *testing.T) {
 				"d1f09df6edce8699c3705c3c1cea5b428326bbc36ea7d4f120fad4d5ca59b41547d9d1512a3d76f8417b624e8b6fca8932b925ad3a63bb352a7d0da5e8a3972a",
 		},
 		{
-			// RFC 2409's group 2, as macOS sends it, with private keys of
+			// RFC 2409's group 2, as macOS 10.13 sent it, with private keys of
 			// 256 bits: the SHA-256 of "occamy ard server" and of "occamy
 			// ard client".
 			name: "RFC 2409 group 2", g: 2, p: rfc2409Group2,
