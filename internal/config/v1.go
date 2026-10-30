@@ -169,31 +169,90 @@ func readSecret(file, env string) (string, error) {
 
 // Version returns the version of a configuration file: 1 for a file with
 // version: 1, and 0 for a file without a version key, which is read as v0
-// configuration. Any other version is an error.
+// configuration. A version brought in by a merge key (<<) counts. Any
+// other version is an error, and so is a version key in any YAML document
+// but the first, which the v0 decoder would silently skip.
 func Version(raw []byte) (int, error) {
-	var root yaml.Node
-	if err := yaml.Unmarshal(raw, &root); err != nil {
-		return 0, fmt.Errorf("config: %w", err)
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	version := 0
+	for doc := 0; ; doc++ {
+		var root yaml.Node
+		err := dec.Decode(&root)
+		if errors.Is(err, io.EOF) {
+			return version, nil
+		}
+		if err != nil {
+			return 0, fmt.Errorf("config: %w", err)
+		}
+		v := versionKey(&root)
+		if v == nil {
+			continue
+		}
+		if doc > 0 {
+			return 0, fmt.Errorf("config: line %d: version is not in the file's first YAML document; a configuration file holds one document", v.Line)
+		}
+		var n int
+		if v.Kind != yaml.ScalarNode || v.Tag != "!!int" || v.Decode(&n) != nil || n != 1 {
+			return 0, fmt.Errorf("config: line %d: version %q is not supported: write version: 1, or leave the key out for a v0 file", v.Line, v.Value)
+		}
+		version = 1
 	}
-	m := &root
+}
+
+// versionKey returns the value of a document's top-level version key, or
+// nil if it has none.
+func versionKey(root *yaml.Node) *yaml.Node {
+	m := root
 	if m.Kind == yaml.DocumentNode && len(m.Content) == 1 {
 		m = m.Content[0]
 	}
-	if m.Kind != yaml.MappingNode {
-		return 0, nil
+	for m.Kind == yaml.AliasNode && m.Alias != nil {
+		m = m.Alias
 	}
+	if m.Kind != yaml.MappingNode {
+		return nil
+	}
+	return lookupKey(m, "version", 0)
+}
+
+// lookupKey returns the value of key in mapping m, following aliases and
+// merge keys as the decoder does: a key of m wins over a merged one, and
+// an earlier merged mapping over a later one.
+func lookupKey(m *yaml.Node, key string, depth int) *yaml.Node {
+	for m.Kind == yaml.AliasNode && m.Alias != nil {
+		m = m.Alias
+	}
+	if depth > 16 {
+		return nil
+	}
+	if m.Kind == yaml.SequenceNode { // the value of a merge key
+		for _, item := range m.Content {
+			if v := lookupKey(item, key, depth+1); v != nil {
+				return v
+			}
+		}
+		return nil
+	}
+	if m.Kind != yaml.MappingNode {
+		return nil
+	}
+	var merges []*yaml.Node
 	for i := 0; i+1 < len(m.Content); i += 2 {
-		if m.Content[i].Value != "version" {
+		k, v := m.Content[i], m.Content[i+1]
+		if k.Tag == "!!merge" {
+			merges = append(merges, v)
 			continue
 		}
-		v := m.Content[i+1]
-		var n int
-		if v.Kind == yaml.ScalarNode && v.Tag == "!!int" && v.Decode(&n) == nil && n == 1 {
-			return 1, nil
+		if k.Kind == yaml.ScalarNode && k.Value == key {
+			return v
 		}
-		return 0, fmt.Errorf("config: line %d: version %q is not supported: write version: 1, or leave the key out for a v0 file", v.Line, v.Value)
 	}
-	return 0, nil
+	for _, v := range merges {
+		if found := lookupKey(v, key, depth+1); found != nil {
+			return found
+		}
+	}
+	return nil
 }
 
 // ParseV1 decodes a version 1 configuration file, rejecting unknown keys,
