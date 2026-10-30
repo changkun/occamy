@@ -645,6 +645,34 @@ func TestOIDCOpenRedirect(t *testing.T) {
 		"//evil.example.com/signed-in",
 		"/signed-in",
 		"javascript:alert(1)",
+		// Near misses, which a parser or a normalization might take for
+		// the configured URL.
+		"https://app.example.com./signed-in",
+		"https://app.example.com:443/signed-in",
+		"https://APP.example.com/signed-in",
+		"https://app.example.com/signed%2Din",
+		"https://app.example.com/Signed-in",
+		"https://app.example.com/signed-in.",
+		"https://app.example.com/signed-in;x",
+		"https://app.example.com/signed-in?",
+		"https://app.example.com/signed-in%23x",
+		"https://app.example.com/signed-in%0d%0aSet-Cookie:x=y",
+		"https://app.example.com/signed-in\r\nSet-Cookie: x=y",
+		`https://app.example.com\@evil.example.com/signed-in`,
+		`https://evil.example.com\@app.example.com/signed-in`,
+		"https://app.example.com@evil.example.com/signed-in",
+		"https://user@app.example.com/signed-in",
+		"https://xn--pp-ula.example.com/signed-in",
+		"https://\u0430pp.example.com/signed-in", // a Cyrillic a
+		`\\evil.example.com/signed-in`,
+		`https:/\evil.example.com/signed-in`,
+		"///evil.example.com",
+		" https://app.example.com/signed-in",
+		"https://app.example.com/signed-in ",
+		"\thttps://app.example.com/signed-in",
+		"https://app.example.com/signed-in/..",
+		"https://app.example.com/./signed-in",
+		"https://app.example.com/signed-in#",
 	} {
 		r := newBrowser(t).get(t, ot.loginURL(bad, challenge))
 		if r.code != http.StatusBadRequest || r.header.Get("Location") != "" || len(r.header.Values("Set-Cookie")) != 0 {
@@ -668,6 +696,24 @@ func TestOIDCOpenRedirect(t *testing.T) {
 		if r := newBrowser(t).get(t, ot.loginURL(good, challenge)); r.code != http.StatusFound {
 			t.Errorf("return_url %q: %d %s", good, r.code, r.body)
 		}
+	}
+
+	// A return URL percent-encoded byte by byte decodes to the configured
+	// one, as any other encoding of the query does.
+	var encoded strings.Builder
+	for _, b := range []byte(testReturnURL) {
+		fmt.Fprintf(&encoded, "%%%02X", b)
+	}
+	if r := newBrowser(t).get(t, ot.url+"/api/v1/auth/oidc/login?code_challenge="+challenge+"&return_url="+encoded.String()); r.code != http.StatusFound || !strings.HasPrefix(r.header.Get("Location"), ot.idp.srv.URL+"/authorize?") {
+		t.Errorf("the configured return URL, percent-encoded: %d to %q", r.code, r.header.Get("Location"))
+	}
+	// After the state matched, an error goes back to the sign-in's own
+	// return URL.
+	ot.idp.set(func(p *testIdP) { p.authError = "server_error" })
+	b := newBrowser(t)
+	r := b.get(t, ot.loginURL(otherReturnURL, challenge))
+	if loc := b.get(t, ot.toCallback(t, b, r.header.Get("Location"))).header.Get("Location"); loc != otherReturnURL+"#error=sign_in_failed" {
+		t.Errorf("an error went back to %q, want %s", loc, otherReturnURL)
 	}
 
 	// With one configured, a sign-in may leave it out.
@@ -1259,10 +1305,12 @@ func TestOIDCPendingLimit(t *testing.T) {
 }
 
 // TestOIDCCodeRace checks that a code redeems once, however many
-// exchanges race for it.
+// exchanges race for it. It takes many rounds, since a look-up and a
+// delete under two locks, one right after the other, leave a window of
+// nanoseconds.
 func TestOIDCCodeRace(t *testing.T) {
 	o := newOIDCTest(t, nil).s.oidc
-	for range 20 {
+	for range 500 {
 		v := oauth2.GenerateVerifier()
 		code, err := o.pend("carol", nil, oauth2.S256ChallengeFromVerifier(v))
 		if err != nil {
