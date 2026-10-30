@@ -145,6 +145,19 @@ func (f *File) validate(c *checker) {
 			c.add(fmt.Sprintf("adhoc_allowlist[%d]", i), "%q is not a CIDR range, an IP address, a host name or *.domain", e)
 		}
 	}
+	for _, l := range []struct {
+		path string
+		n    int
+	}{
+		{"limits.sessions_per_user", f.Limits.SessionsPerUser},
+		{"limits.viewers_per_session", f.Limits.ViewersPerSession},
+		{"limits.shares_per_session", f.Limits.SharesPerSession},
+	} {
+		if l.n < 0 {
+			c.add(l.path, "must be at least 1, or 0 for the default")
+		}
+	}
+	f.Limits = f.Limits.WithDefaults()
 }
 
 func (a *Auth) validate(c *checker) {

@@ -126,3 +126,12 @@ allow_adhoc_targets: false
 adhoc_allowlist:
   - 10.0.0.0/8
   - "*.lab.internal"
+
+# What one user or one session may hold. Zero or absent is the default.
+limits:
+  # Sessions one user owns at once. Default 10.
+  sessions_per_user: 20
+  # Viewers a session takes besides its owner. Default 50.
+  viewers_per_session: 50
+  # Unexpired shares a session has. Default 100.
+  shares_per_session: 100

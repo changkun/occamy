@@ -28,6 +28,13 @@ const (
 	DefaultOIDCSubjectClaim    = "sub"
 )
 
+// Default limits, filled in by ParseV1 and by Limits.WithDefaults.
+const (
+	DefaultSessionsPerUser   = 10
+	DefaultViewersPerSession = 50
+	DefaultSharesPerSession  = 100
+)
+
 // DefaultOIDCScopes are the scopes requested when oidc.scopes is empty.
 var DefaultOIDCScopes = []string{"openid", "profile", "email"}
 
@@ -47,6 +54,33 @@ type File struct {
 	Connections       []Connection `yaml:"connections"`
 	AllowAdhocTargets bool         `yaml:"allow_adhoc_targets"`
 	AdhocAllowlist    []string     `yaml:"adhoc_allowlist"`
+	Limits            Limits       `yaml:"limits"`
+}
+
+// Limits bound what one user or one session holds, so that no user takes
+// what the others need. Zero is the default.
+type Limits struct {
+	// SessionsPerUser is the most sessions one user owns at once.
+	SessionsPerUser int `yaml:"sessions_per_user"`
+	// ViewersPerSession is the most viewers a session takes besides its
+	// owner, who can always join.
+	ViewersPerSession int `yaml:"viewers_per_session"`
+	// SharesPerSession is the most unexpired shares a session has.
+	SharesPerSession int `yaml:"shares_per_session"`
+}
+
+// WithDefaults returns l with the defaults in place of zero.
+func (l Limits) WithDefaults() Limits {
+	if l.SessionsPerUser == 0 {
+		l.SessionsPerUser = DefaultSessionsPerUser
+	}
+	if l.ViewersPerSession == 0 {
+		l.ViewersPerSession = DefaultViewersPerSession
+	}
+	if l.SharesPerSession == 0 {
+		l.SharesPerSession = DefaultSharesPerSession
+	}
+	return l
 }
 
 // TLS names the certificate and key files. occamyd terminates TLS when

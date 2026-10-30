@@ -128,3 +128,50 @@ func TestRegistrySharesExpire(t *testing.T) {
 		}
 	})
 }
+
+// A session holds at most MaxShares unexpired shares, its expired ones
+// make room, and its shares leave with it.
+func TestRegistryShareLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		r := session.NewRegistry(ctx)
+		r.MaxShares = 2
+		id, s, _, err := r.Open(session.Config{Backend: backendtest.NewScreen(64, 48, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		other, _, _, err := r.Open(session.Config{Backend: backendtest.NewScreen(64, 48, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		short, err := r.Share(id, session.RoleViewer, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.Share(id, session.RoleViewer, time.Hour); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := r.Share(id, session.RoleViewer, time.Hour); !errors.Is(err, session.ErrShareLimit) {
+			t.Errorf("a third share returned %v, want ErrShareLimit", err)
+		}
+		if _, err := r.Share(other, session.RoleViewer, time.Hour); err != nil {
+			t.Errorf("another session's share: %v", err)
+		}
+		time.Sleep(time.Minute)
+		if _, err := r.JoinShared(id, short); !errors.Is(err, session.ErrNotFound) {
+			t.Errorf("an expired share returned %v", err)
+		}
+		if _, err := r.Share(id, session.RoleReadOnly, time.Hour); err != nil {
+			t.Errorf("a share after one expired: %v", err)
+		}
+		if n := r.Shares(); n != 3 {
+			t.Errorf("%d shares held, want 3", n)
+		}
+		s.Close()
+		synctest.Wait()
+		if n := r.Shares(); n != 1 {
+			t.Errorf("%d shares held after the session ended, want the other's", n)
+		}
+	})
+}

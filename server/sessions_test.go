@@ -22,6 +22,7 @@ import (
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/backend/backendtest"
 	"changkun.de/x/occamy/internal/config"
+	"changkun.de/x/occamy/protocol"
 )
 
 // sessionFile adds connections to a test file, all of the fake protocol
@@ -404,6 +405,64 @@ func TestShares(t *testing.T) {
 
 // TestAdhocTargets checks ad-hoc targets against allow_adhoc_targets and
 // adhoc_allowlist.
+// TestLimits checks the sessions a user owns, the shares a session has
+// and the viewers it takes.
+func TestLimits(t *testing.T) {
+	ts, _ := sessionServer(t, func(f *config.File) {
+		f.Limits = config.Limits{SessionsPerUser: 2, ViewersPerSession: 1, SharesPerSession: 2}
+	})
+	alice := ts.token(t, "alice", "ops")
+	first := ts.openSession(t, alice, "ops-shell")
+	ts.openSession(t, alice, "ops-shell")
+	r := ts.api(t, http.MethodPost, "/api/v1/sessions", alice, `{"connection":"ops-shell"}`)
+	if r.code != http.StatusTooManyRequests || decodeError(t, r.body).Code != codeLimitExceeded {
+		t.Errorf("a third session: %d %s, want 429 limit_exceeded", r.code, r.body)
+	}
+	c, status, err := dial(ts.srv.URL+"/api/v1/connections/ops-shell/stream", withToken(alice), &termHello, nil)
+	if err != nil {
+		t.Fatalf("%d %v", status, err)
+	}
+	c.closed(t, protocol.CloseForbidden)
+	ts.openSession(t, ts.token(t, "carol", "ops"), "ops-shell") // another user's are their own
+	if r := ts.api(t, http.MethodDelete, "/api/v1/sessions/"+first.ID, alice, ""); r.code != http.StatusNoContent {
+		t.Fatalf("DELETE: %d %s", r.code, r.body)
+	}
+	waitFor(t, "the closed session to stop counting", func() bool {
+		return ts.api(t, http.MethodPost, "/api/v1/sessions", alice, `{"connection":"ops-shell"}`).code == http.StatusCreated
+	})
+
+	o := ts.openSession(t, ts.token(t, "bob", "ops"), "ops-shell")
+	bob := ts.token(t, "bob", "ops")
+	var shares []string
+	for range 2 {
+		r := ts.api(t, http.MethodPost, "/api/v1/sessions/"+o.ID+"/shares", bob, `{"role":"viewer"}`)
+		var sh shareResponse
+		if err := json.Unmarshal(r.body, &sh); err != nil || r.code != http.StatusCreated {
+			t.Fatalf("share: %d %s", r.code, r.body)
+		}
+		shares = append(shares, sh.Token)
+	}
+	r = ts.api(t, http.MethodPost, "/api/v1/sessions/"+o.ID+"/shares", bob, `{"role":"viewer"}`)
+	if r.code != http.StatusTooManyRequests || decodeError(t, r.body).Code != codeLimitExceeded {
+		t.Errorf("a third share: %d %s, want 429 limit_exceeded", r.code, r.body)
+	}
+	path := "/api/v1/sessions/" + o.ID + "/stream"
+	ts.stream(t, path, o.StreamToken, termHello)
+	ts.stream(t, path, shares[0], termHello)
+	viewer, err := ts.s.signer.Session(o.ID, auth.RoleViewer, "", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, token := range []string{shares[1], viewer} {
+		c, status, err := dial(ts.srv.URL+path, withToken(token), &termHello, nil)
+		if err != nil {
+			t.Fatalf("%d %v", status, err)
+		}
+		c.closed(t, protocol.CloseViewerLimit)
+	}
+	ts.stream(t, path, bob, termHello) // the owner, beside a full session
+}
+
 func TestAdhocTargets(t *testing.T) {
 	ts, fb := sessionServer(t, func(f *config.File) {
 		f.AllowAdhocTargets = true

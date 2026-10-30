@@ -23,8 +23,13 @@ import (
 
 // API v1 error codes of the session routes, beside those in api.go.
 const (
-	codeForbidden = "forbidden" // the caller may not do this
+	codeForbidden     = "forbidden"      // the caller may not do this
+	codeLimitExceeded = "limit_exceeded" // the caller holds as much as limits allows
 )
+
+// errSessionLimit refuses a session to a user who owns as many as
+// limits.sessions_per_user allows.
+var errSessionLimit = errors.New("too many sessions open")
 
 // Lifetimes of what the session routes hand out.
 const (
@@ -178,6 +183,10 @@ func (s *server) openSession(w http.ResponseWriter, r *http.Request) {
 	}
 	p := principalFrom(r.Context())
 	info, owner, err := s.open(t, p, screen{})
+	if errors.Is(err, errSessionLimit) {
+		writeError(w, http.StatusTooManyRequests, codeLimitExceeded, fmt.Sprintf("you have %d sessions open, as many as a user may: close one first", s.limits.SessionsPerUser))
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, codeInternal, "the session could not be opened")
 		return
@@ -276,8 +285,9 @@ func (s *server) adhocTarget(ctx context.Context, req *openRequest) (target, *re
 }
 
 // open starts a session on t for owner, sized as s asks, and returns it
-// with the owner's viewer. Failures are logged here; they are occamyd's
-// own, such as a password file it cannot read.
+// with the owner's viewer, or errSessionLimit if owner has as many as
+// limits allows. Failures are logged here; they are occamyd's own, such
+// as a password file it cannot read.
 func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *session.Viewer, error) {
 	what := fmt.Sprintf("connection %q", t.connection)
 	if t.connection == "" {
@@ -292,12 +302,30 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 	if !ok {
 		return fail(fmt.Errorf("no backend serves %s", t.protocol))
 	}
+	// The session counts toward the owner's from now until it ends, so
+	// that concurrent requests cannot all pass the limit.
+	s.mu.Lock()
+	if s.owned[owner] >= s.limits.SessionsPerUser {
+		s.mu.Unlock()
+		return fail(errSessionLimit)
+	}
+	s.owned[owner]++
+	s.mu.Unlock()
+	release := func() {
+		s.mu.Lock()
+		if s.owned[owner]--; s.owned[owner] <= 0 {
+			delete(s.owned, owner)
+		}
+		s.mu.Unlock()
+	}
 	b, err := maker.make(t, sz)
 	if err != nil {
+		release()
 		return fail(err)
 	}
-	id, sess, v, err := s.registry.Open(session.Config{Backend: b})
+	id, sess, v, err := s.registry.Open(session.Config{Backend: b, MaxViewers: s.limits.ViewersPerSession})
 	if err != nil {
+		release()
 		return fail(err)
 	}
 	info := &sessionInfo{
@@ -317,6 +345,7 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 		s.mu.Lock()
 		delete(s.sessions, id)
 		s.mu.Unlock()
+		release()
 	}()
 	// #nosec G706 -- the user name and the target are quoted, so they cannot break the line.
 	log.Printf("session %s: user %q opened %s through %s", id, owner.String(), what, maker.name)
@@ -452,6 +481,10 @@ func (s *server) share(w http.ResponseWriter, r *http.Request) {
 	token, err := s.registry.Share(info.id, role, ttl)
 	if errors.Is(err, session.ErrNotFound) {
 		writeError(w, http.StatusNotFound, codeNotFound, "no such session")
+		return
+	}
+	if errors.Is(err, session.ErrShareLimit) {
+		writeError(w, http.StatusTooManyRequests, codeLimitExceeded, fmt.Sprintf("the session has %d shares that have not expired, as many as it may", s.limits.SharesPerSession))
 		return
 	}
 	if err != nil {

@@ -739,6 +739,19 @@ place for fixes that ship on v0 before beta.
   - **Failures of occamyd's own,** such as a password file it cannot
     read, are logged with the user and the target and answered 500
     `internal`, without the cause.
+  - **Limits (added in review):** `limits.sessions_per_user` (10),
+    `limits.viewers_per_session` (50, the owner aside) and
+    `limits.shares_per_session` (100 unexpired), each raisable in the
+    file. A session counts toward its owner's from the moment `open`
+    reserves it, under the server's lock, until it ends, so concurrent
+    requests cannot all pass. Over a limit, the JSON routes answer 429
+    `limit_exceeded`, a code this review adds; a connection's stream
+    gets `close` `forbidden`, and a viewer beyond the session's limit
+    `viewer-limit`. The session core gained `Config.MaxViewers` and
+    `ErrViewerLimit`; the registry gained `MaxShares` and
+    `ErrShareLimit`, and keeps each session's shares in an index of its
+    own, so that `Share` prunes and `remove` drops only that session's,
+    where both scanned every share under the registry's lock.
   - A shutdown ends every session, through the registry's context.
 - **Deviations:**
   - VNC defaults to the native backend, where guacd-bridge's parity gate

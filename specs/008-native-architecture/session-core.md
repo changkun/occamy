@@ -287,7 +287,10 @@ arise, rather than inheriting those fixes.
   refuses a share minted for another session, whose viewers would
   otherwise hear of the join
   ([api-and-server-stack](api-and-server-stack.md), Implementation
-  notes: Sessions).
+  notes: Sessions). For its limits, `Config.MaxViewers` bounds the
+  viewers besides the owner (`ErrViewerLimit`), and
+  `Registry.MaxShares` a session's unexpired shares (`ErrShareLimit`),
+  which the registry indexes by session.
 - **Decisions:**
   - One owner goroutine runs commands from a channel; viewers' calls
     become commands, so input reaches the backend in arrival order. Sink

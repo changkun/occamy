@@ -113,6 +113,8 @@ var (
 	ErrNotOwner = errors.New("session: not the owner")
 	// ErrLeft reports a call on a viewer that has left.
 	ErrLeft = errors.New("session: viewer left")
+	// ErrViewerLimit reports a join beyond Config.MaxViewers.
+	ErrViewerLimit = errors.New("session: viewer limit reached")
 )
 
 // Terminal is the session's terminal state for a terminal backend: the
@@ -147,6 +149,9 @@ type Config struct {
 	// IdleTimeout ends a session without input for that long, 30 min if
 	// zero.
 	IdleTimeout time.Duration
+	// MaxViewers is the most viewers the session takes besides its
+	// owner, who can always join; no limit if zero.
+	MaxViewers int
 	// Logger receives the session's log, slog.Default() if nil.
 	Logger *slog.Logger
 }
@@ -358,6 +363,15 @@ func (s *Session) Join(role Role) (*Viewer, error) {
 		}
 		if role != RoleViewer && role != RoleReadOnly {
 			return fmt.Errorf("session: join as %v", role)
+		}
+		s.mu.Lock()
+		others := len(s.viewers)
+		if s.owner != nil {
+			others--
+		}
+		s.mu.Unlock()
+		if s.cfg.MaxViewers > 0 && others >= s.cfg.MaxViewers {
+			return ErrViewerLimit
 		}
 		v = s.addViewer(role)
 		return nil

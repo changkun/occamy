@@ -177,6 +177,17 @@ in the request, as a connection does. A target is allowed when:
   range. `occamyd` then dials the address it checked, so a second
   lookup cannot lead elsewhere.
 
+### Limits: `limits`
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `limits.sessions_per_user` | `10` | Sessions one user owns at once. One more is refused with `429 limit_exceeded`, or on a connection's stream with `close` `forbidden` |
+| `limits.viewers_per_session` | `50` | Viewers a session takes besides its owner, who can always join. One more gets `close` `viewer-limit` |
+| `limits.shares_per_session` | `100` | Shares of a session that have not expired. One more is refused with `429 limit_exceeded` |
+
+A user is a subject of an issuer, as for owning sessions: a trusted
+issuer's users count apart from `occamyd`'s own.
+
 ## Validation
 
 A v1 file is checked as a whole, and every problem is reported with its
@@ -233,8 +244,8 @@ open, and another user's session, answer `404` as if they did not exist.
 
 API v1 answers every error with `{"error":{"code":"…","message":"…"}}`,
 where `code` is stable, such as `unauthorized`, `invalid_token`,
-`token_expired`, `forbidden` or `not_found`, and `message` is for
-people. Routes that need a caller take the access token in
+`token_expired`, `forbidden`, `not_found` or `limit_exceeded`, and
+`message` is for people. Routes that need a caller take the access token in
 `Authorization: Bearer`, never in the URL. A stream takes it in the
 `occamy.v1.token.` subprotocol instead, which a browser can send, or in
 `Authorization`, and refuses a bad token, `Origin` or `hello` with a

@@ -646,4 +646,30 @@ func TestTerminalReplies(t *testing.T) {
 	})
 }
 
+// A session takes at most MaxViewers viewers besides its owner, who can
+// always join.
+func TestViewerLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, owner := start(t, session.Config{Backend: backendtest.NewScreen(64, 48, 0), MaxViewers: 2})
+		a, err := s.Join(session.RoleViewer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Join(session.RoleReadOnly); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Join(session.RoleViewer); !errors.Is(err, session.ErrViewerLimit) {
+			t.Errorf("a third viewer: %v, want ErrViewerLimit", err)
+		}
+		owner.Leave()
+		if _, err := s.Join(session.RoleOwner); err != nil {
+			t.Errorf("the owner beside a full session: %v", err)
+		}
+		a.Leave()
+		if _, err := s.Join(session.RoleViewer); err != nil {
+			t.Errorf("a viewer after one left: %v", err)
+		}
+	})
+}
+
 var _ session.Terminal = (*terminal.Terminal)(nil)

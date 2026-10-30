@@ -91,6 +91,10 @@ func (s *server) connectionStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info, owner, err := s.open(connectionTarget(c), p, screenOf(req.hello))
+	if errors.Is(err, errSessionLimit) {
+		req.c.refuse(protocol.Close{Code: protocol.CloseForbidden, Reason: errSessionLimit.Error()})
+		return
+	}
 	if err != nil {
 		req.c.refuse(protocol.Close{Code: protocol.CloseInternalError, Reason: "the session could not be opened"})
 		return
@@ -277,6 +281,9 @@ func (s *server) join(id, token string) (*sessionInfo, *session.Viewer, *protoco
 	if !strings.Contains(token, ".") {
 		// A JWT has three parts; a share has none.
 		v, err := s.registry.JoinShared(id, token)
+		if errors.Is(err, session.ErrViewerLimit) {
+			return nil, nil, &viewerLimit
+		}
 		if err != nil {
 			return nil, nil, &protocol.Close{Code: protocol.CloseUnauthorized, Reason: "invalid token"}
 		}
@@ -327,11 +334,16 @@ func (s *server) join(id, token string) (*sessionInfo, *session.Viewer, *protoco
 	switch {
 	case errors.Is(err, session.ErrOwnerPresent):
 		return nil, nil, &protocol.Close{Code: protocol.CloseForbidden, Reason: "the owner is connected already"}
+	case errors.Is(err, session.ErrViewerLimit):
+		return nil, nil, &viewerLimit
 	case err != nil:
 		return nil, nil, forbidden
 	}
 	return info, v, nil
 }
+
+// viewerLimit refuses a viewer of a session that has as many as it takes.
+var viewerLimit = protocol.Close{Code: protocol.CloseViewerLimit, Reason: "the session has as many viewers as it takes"}
 
 // ownerStream is the stream an owner is connected through.
 type ownerStream struct {

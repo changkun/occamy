@@ -23,18 +23,27 @@ var (
 	// ErrShareRole reports a share for a role other than viewer or
 	// read-only.
 	ErrShareRole = errors.New("session: shares are for viewers or read-only viewers")
+	// ErrShareLimit reports a share beyond Registry.MaxShares.
+	ErrShareLimit = errors.New("session: share limit reached")
 )
 
 // Registry holds the running sessions by ID and the share tokens that let
 // others join them. A session leaves the registry when it ends, and its
 // share tokens die with it.
 type Registry struct {
+	// MaxShares is the most unexpired shares a session may have; no
+	// limit if zero. It is set before the registry is used.
+	MaxShares int
+
 	ctx context.Context
 	now func() time.Time
 
 	mu       sync.Mutex
 	sessions map[string]*Session
 	shares   map[[sha256.Size]byte]share // by the token's hash
+	// byID holds the hashes of each session's shares, so that a session
+	// prunes and drops its own without a look at the others'.
+	byID map[string]map[[sha256.Size]byte]struct{}
 }
 
 type share struct {
@@ -51,6 +60,7 @@ func NewRegistry(ctx context.Context) *Registry {
 		now:      time.Now,
 		sessions: map[string]*Session{},
 		shares:   map[[sha256.Size]byte]share{},
+		byID:     map[string]map[[sha256.Size]byte]struct{}{},
 	}
 }
 
@@ -84,7 +94,8 @@ func (r *Registry) Get(id string) (*Session, error) {
 }
 
 // Share mints a token that lets its holder join session id with role
-// until ttl passes or the session ends.
+// until ttl passes or the session ends, unless the session has MaxShares
+// unexpired shares.
 func (r *Registry) Share(id string, role Role, ttl time.Duration) (token string, err error) {
 	if role != RoleViewer && role != RoleReadOnly {
 		return "", ErrShareRole
@@ -97,16 +108,27 @@ func (r *Registry) Share(id string, role Role, ttl time.Duration) (token string,
 	if _, ok := r.sessions[id]; !ok {
 		return "", ErrNotFound
 	}
-	// Expired shares go here, so that they do not pile up in a session
-	// that keeps minting them.
+	// The session's expired shares go here, so that they do not pile up
+	// in a session that keeps minting them.
 	now := r.now()
-	for k, sh := range r.shares {
-		if !now.Before(sh.expires) {
+	keys := r.byID[id]
+	for k := range keys {
+		if !now.Before(r.shares[k].expires) {
 			delete(r.shares, k)
+			delete(keys, k)
 		}
 	}
+	if r.MaxShares > 0 && len(keys) >= r.MaxShares {
+		return "", ErrShareLimit
+	}
+	if keys == nil {
+		keys = map[[sha256.Size]byte]struct{}{}
+		r.byID[id] = keys
+	}
 	token = randomID(32)
-	r.shares[sha256.Sum256([]byte(token))] = share{session: id, role: role, expires: now.Add(ttl)}
+	k := sha256.Sum256([]byte(token))
+	r.shares[k] = share{session: id, role: role, expires: now.Add(ttl)}
+	keys[k] = struct{}{}
 	return token, nil
 }
 
@@ -120,6 +142,7 @@ func (r *Registry) JoinShared(id, token string) (*Viewer, error) {
 	sh, ok := r.shares[key]
 	if ok && !r.now().Before(sh.expires) {
 		delete(r.shares, key)
+		delete(r.byID[sh.session], key)
 		ok = false
 	}
 	s := r.sessions[sh.session]
@@ -146,11 +169,10 @@ func (r *Registry) remove(id string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.sessions, id)
-	for k, sh := range r.shares {
-		if sh.session == id {
-			delete(r.shares, k)
-		}
+	for k := range r.byID[id] {
+		delete(r.shares, k)
 	}
+	delete(r.byID, id)
 }
 
 // randomID returns n random bytes in unpadded base64url.

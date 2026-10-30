@@ -66,9 +66,11 @@ type server struct {
 	registry    *session.Registry
 	stop        context.CancelFunc // ends every session, at shutdown
 	streamTTL   time.Duration      // of the stream token POST /api/v1/sessions returns
+	limits      config.Limits
 
 	mu       sync.Mutex
 	sessions map[string]*sessionInfo // by ID, while they run
+	owned    map[principal]int       // the sessions each user owns, while they run
 	streams  tracker                 // the streams being served
 }
 
@@ -195,6 +197,9 @@ func newServer(f *config.File) (*server, error) {
 		return nil, err
 	}
 	ctx, stop := context.WithCancel(context.Background())
+	limits := f.Limits.WithDefaults()
+	registry := session.NewRegistry(ctx)
+	registry.MaxShares = limits.SharesPerSession
 	s := &server{
 		verifier:    auth.NewVerifier(auth.Audience, keys),
 		signer:      signer,
@@ -203,10 +208,12 @@ func newServer(f *config.File) (*server, error) {
 		connections: f.Connections,
 		origins:     map[string]bool{},
 		backends:    newBackends(f.Guacd),
-		registry:    session.NewRegistry(ctx),
+		registry:    registry,
 		stop:        stop,
 		streamTTL:   streamTokenLifetime,
+		limits:      limits,
 		sessions:    map[string]*sessionInfo{},
+		owned:       map[principal]int{},
 	}
 	for _, o := range f.Origins {
 		s.origins[strings.ToLower(o)] = true
