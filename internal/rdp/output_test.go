@@ -116,4 +116,3 @@ func near(a, b uint8, tol int) bool {
 	d := int(a) - int(b)
 	return -tol <= d && d <= tol
 }
-
