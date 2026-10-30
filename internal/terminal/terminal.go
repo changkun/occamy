@@ -10,6 +10,38 @@
 // current one, escape sequences that turn one into the other, as mosh
 // does. A late joiner is sent the Diff from nothing.
 //
+// # Writers
+//
+// The session's owner calls Write with the backend's output and Resize
+// with the owner's size, one call at a time. Any number of viewer writers
+// read at the same time, each from its own goroutine, without further
+// locking:
+//
+//	var last *terminal.Screen // what this viewer was last sent; nil at first
+//	for {
+//		changed := sess.Changed() // before reading, so no change is missed
+//		s := term.Snapshot()
+//		if s != last {
+//			if last != nil && (last.Cols != s.Cols || last.Rows != s.Rows) {
+//				// send the size first; the client resizes its terminal
+//			}
+//			send(terminal.Diff(last, s)) // as term-data, then frame-end
+//			last = s
+//		}
+//		<-changed // or the pacer's next frame
+//	}
+//
+// Snapshot holds the terminal's lock only to copy one pointer per row and
+// hash the rows that changed, about a microsecond for 200x50, so it is
+// cheap at any frame rate and Write never waits on a diff. Screens are
+// immutable: a writer may keep its last one as long as it likes, diff it
+// from any goroutine, and share it with other writers. While nothing
+// changes, Snapshot returns the same pointer, and Diff of a screen with
+// itself is empty, so a writer can compare pointers to skip a frame.
+// Intermediate screens a writer never took are skipped, which is what
+// makes bulk output cheap: a frame costs what changed on the screen, not
+// what the shell printed.
+//
 // The emulator follows xterm, and where xterm.js and SwiftTerm, the two
 // clients, differ from xterm, it follows them. It keeps no scrollback:
 // lines that leave the top of the screen are sent to clients as scrolled
