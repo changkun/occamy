@@ -496,6 +496,8 @@ type echoing struct {
 	mu   sync.Mutex
 	s    backend.Sink
 	fail error
+	// seen, if set, is called with each input as the backend gets it.
+	seen func()
 }
 
 func (b *echoing) Class() backend.Class { return backend.Graphical }
@@ -510,6 +512,9 @@ func (b *echoing) Run(ctx context.Context, sink backend.Sink) error {
 }
 
 func (b *echoing) Input(backend.InputEvent) error {
+	if b.seen != nil {
+		b.seen()
+	}
 	if b.fail != nil {
 		return b.fail
 	}
@@ -536,6 +541,24 @@ func TestInputClockBeforeEffect(t *testing.T) {
 		_, clock := owner.LastInput()
 		if v := s.Framebuffer().Version(0); v <= clock {
 			t.Errorf("tile changed by the input at version %d, not above the input's clock %d", v, clock)
+		}
+	})
+}
+
+// An input is recorded before the backend gets it, so that a frame read
+// after the backend drew its effect reports it in last_seq.
+func TestInputRecordedBeforeBackend(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var owner *session.Viewer
+		var seenSeq uint32
+		b := &echoing{seen: func() { seenSeq, _ = owner.LastInput() }}
+		_, owner = start(t, session.Config{Backend: b, TileSize: 32})
+		synctest.Wait()
+		if err := owner.Input(4, backend.Key{Down: true, Keysym: 'a'}); err != nil {
+			t.Fatal(err)
+		}
+		if seenSeq != 4 {
+			t.Errorf("LastInput reported seq %d while the backend had the input, want 4", seenSeq)
 		}
 	})
 }
