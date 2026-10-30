@@ -354,3 +354,66 @@ func TestDecoderAllocations(t *testing.T) {
 		t.Errorf("Split and ReadUint64: %v allocations, want 0", n)
 	}
 }
+
+func TestBool(t *testing.T) {
+	for _, v := range []bool{false, true} {
+		raw := protocol.AppendBool(nil, v)
+		d := protocol.NewDecoder(raw)
+		if got := d.ReadBool(); got != v || d.Finish() != nil || len(raw) != 1 {
+			t.Errorf("bool %v: %x reads back as %v, %v", v, raw, got, d.Finish())
+		}
+	}
+	for _, b := range []byte{2, 0x80, 0xff} {
+		d := protocol.NewDecoder([]byte{b})
+		if v := d.ReadBool(); v || !errors.Is(d.Err(), protocol.ErrInvalid) || d.Len() != 1 {
+			t.Errorf("bool %#x: %v, %v, %d left", b, v, d.Err(), d.Len())
+		}
+	}
+	d := protocol.NewDecoder(nil)
+	if d.ReadBool() || !errors.Is(d.Err(), protocol.ErrTruncated) {
+		t.Errorf("bool of no bytes: %v", d.Err())
+	}
+}
+
+func TestCount(t *testing.T) {
+	if raw := protocol.AppendCount(nil, 0x0102); !bytes.Equal(raw, []byte{2, 1}) {
+		t.Fatalf("AppendCount = %x", raw)
+	}
+	tests := []struct {
+		name    string
+		raw     []byte
+		minSize int
+		n       int
+		err     error
+	}{
+		{"empty list", []byte{0, 0}, 4, 0, nil},
+		{"elements fit", []byte{2, 0, 1, 2, 3, 4, 5, 6, 7, 8}, 4, 2, nil},
+		{"one element too many", []byte{3, 0, 1, 2, 3, 4, 5, 6, 7, 8}, 4, 0, protocol.ErrTruncated},
+		{"largest count", []byte{0xff, 0xff, 1}, 1, 0, protocol.ErrTruncated},
+		{"short count", []byte{1}, 1, 0, protocol.ErrTruncated},
+	}
+	for _, tt := range tests {
+		d := protocol.NewDecoder(tt.raw)
+		n := d.ReadCount(tt.minSize)
+		if n != tt.n || !errors.Is(d.Err(), tt.err) || (d.Err() == nil) != (tt.err == nil) {
+			t.Errorf("%s: ReadCount = %d, %v, want %d, %v", tt.name, n, d.Err(), tt.n, tt.err)
+		}
+		if tt.err != nil && d.Len() != len(tt.raw) {
+			t.Errorf("%s: a failed read consumed %d bytes", tt.name, len(tt.raw)-d.Len())
+		}
+	}
+	for _, f := range []func(){
+		func() { protocol.AppendCount(nil, -1) },
+		func() { protocol.AppendCount(nil, protocol.MaxCount+1) },
+		func() { protocol.NewDecoder([]byte{0, 0}).ReadCount(0) },
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Error("no panic")
+				}
+			}()
+			f()
+		}()
+	}
+}

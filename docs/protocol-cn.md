@@ -1,5 +1,12 @@
 # Occamy 协议手册
 
+> **Protocol v0.** This document describes protocol v0, the Guacamole
+> protocol that occamyd v0.x speaks. Occamy v1 has its own protocol,
+> described in [protocol.md](protocol.md).
+>
+> **协议 v0。** 本文描述的是 occamyd v0.x 使用的协议 v0，即 Guacamole
+> 协议。Occamy v1 使用新的协议，详见 [protocol.md](protocol.md)。
+
 本文提供了 Occamy 协议的全部细节。
 
 [TOC]

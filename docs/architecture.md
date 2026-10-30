@@ -73,7 +73,7 @@ the spec it implements.
 
 | Path | Role |
 |------|------|
-| [protocol/](../protocol) | Protocol v1, a public package: framing, the message type registry, size limits, golden vectors ([protocol-v1](../specs/008-native-architecture/protocol-v1.md)) |
+| [protocol/](../protocol) | Protocol v1, a public package: framing, the handshake (hello in the upgrade query, the token in a subprotocol, capabilities and their agreement), every message with its encoding and decoding, close codes, size limits, golden vectors; described in [protocol.md](protocol.md) ([protocol-v1](../specs/008-native-architecture/protocol-v1.md)) |
 | [internal/backend/](../internal/backend) | The interface every backend implements (native SSH, native VNC, the guacd bridge), its input events and prompts, and scripted fakes for tests ([session-core](../specs/008-native-architecture/session-core.md)) |
 | [internal/backend/guacd/](../internal/backend/guacd) | The guacd bridge: a graphical backend that applies guacd's drawing, copies each frame into the session's framebuffer before it answers the frame's sync, and translates viewers' input into Guacamole instructions ([guacd-bridge](../specs/008-native-architecture/guacd-bridge.md)) |
 | [internal/pacer/](../internal/pacer) | Per-viewer pacing: the frame window, the frame after an input sent at once, bytes in flight held near the bandwidth-delay product, and quality that adapts ([session-core](../specs/008-native-architecture/session-core.md)) |
