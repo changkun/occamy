@@ -170,3 +170,31 @@ single-node beta.
 the registry and auth sections. `go.mod` loses gin and gin-jwt under option
 A. Most of 004's items are absorbed into this design; 004 remains the
 place for fixes that ship on v0 before beta.
+
+## Implementation notes: tokens
+
+- **What was done:** `internal/auth` with `Signer` (`Access`,
+  `Session`), `Verifier` (`VerifyAccess`, `VerifySession`),
+  `LoadOrCreateKey` and `LoadPublicKey`, on golang-jwt v5.
+- **Decisions:**
+  - Every token carries a `kind` claim, `access` or `session`, so one is
+    never accepted where the other is expected. Session tokens carry
+    `sid` and `role`, the role as a string (`owner`, `viewer`,
+    `read-only`) so that `internal/auth` does not import the session
+    core.
+  - The issuer claim picks the key, and only `EdDSA` is accepted, so an
+    unknown issuer, `none` and an HMAC token keyed with the public key
+    all fail before any claim is trusted. The audience is required.
+  - A token must carry `iat`, and `exp - iat` may not exceed 12 hours, so
+    a trusted issuer cannot mint tokens that live for years. Clock skew of
+    30 seconds is allowed. Base64 decoding is strict.
+  - The signing key is PKCS #8 PEM, created readable by its owner only
+    through a temporary file and a hard link, so occamyd instances
+    starting together agree on one key and a crash leaves no partial key.
+  - Shares minted by `POST /api/v1/sessions/{id}/shares` stay the session
+    registry's opaque tokens (session-core), which die with the session
+    and are stored only as hashes. Session JWTs serve tokens minted by a
+    trusted issuer and the stream token that `POST /api/v1/sessions`
+    returns.
+- **Follow-ups:** the HTTP server task wires the signer and verifier from
+  the v1 configuration and logs a warning when the key is created.

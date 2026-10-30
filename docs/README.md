@@ -3,8 +3,9 @@
 You may interested in the following document:
 
 - [Occamy Architecture](./architecture.md)
-  + TL;DR: Occamy authenticates with JWT and proxies each connection to guacd
-- [Occamy Protocol](./protocol-cn.md)
+  + TL;DR: Occamy v0 authenticates with JWT and proxies each connection to
+    guacd; v1, in progress, has its own protocol and backends.
+- [Occamy Protocol (v0)](./protocol-cn.md)
   + TL;DR: The great thing about Occamy is that occamy has no handshake process 
     between client and Occamy, one can simply POST the connection 
     information to Occamy for  getting authentication tokens. 
