@@ -209,22 +209,8 @@ func TestTightJPEG(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The pixels are image/jpeg's, and opaque.
-	data := msg[12+1:]
-	n, k := int(data[0]&0x7f), 1
-	if data[0]&0x80 != 0 {
-		n |= int(data[1]&0x7f) << 7
-		k = 2
-		if data[1]&0x80 != 0 {
-			n |= int(data[2]) << 14
-			k = 3
-		}
-	}
-	dec, err := jpeg.Decode(bytes.NewReader(data[k : k+n]))
-	if err != nil {
-		t.Fatal(err)
-	}
 	want := pattern(40, 30, 5)
-	draw.Draw(want, r, dec, image.Point{}, draw.Src)
+	draw.Draw(want, r, jpegOf(t, msg), image.Point{}, draw.Src)
 	draw.Draw(want, gr, mustDecodeJPEG(t, grayJPEG.Bytes()), image.Point{}, draw.Src)
 	equalImages(t, sink.Pixels(), want)
 	for y := range 30 {

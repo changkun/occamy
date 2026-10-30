@@ -12,6 +12,7 @@ import (
 	"image"
 	"image/color"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"testing"
@@ -50,6 +51,7 @@ func messageSeeds() map[string][]byte {
 		"cut-text":     putCutText("caf\xe9\nline"),
 		"colour-map":   putColourMap(3),
 	}
+	maps.Copy(seeds, encodingSeeds())
 	var all []byte
 	for _, name := range []string{"raw", "copy-rect", "cursor", "bell", "cut-text", "colour-map", "desktop-size"} {
 		all = append(all, seeds[name]...)
@@ -94,6 +96,12 @@ func FuzzServerMessages(f *testing.F) {
 		}
 		if img, _ := sink.CursorImage(); img != nil && (img.Rect.Dx() > maxCursor || img.Rect.Dy() > maxCursor) {
 			t.Errorf("cursor %v beyond %d", img.Rect, maxCursor)
+		}
+		if n := cap(d.enc.band); n > 4*fuzzLimits.side*zrleTile {
+			t.Errorf("a band of %d bytes for a screen of at most %d pixels wide", n, fuzzLimits.side)
+		}
+		if n := cap(d.enc.jpeg); n > 2*(1<<22) {
+			t.Errorf("a JPEG buffer of %d bytes", n)
 		}
 	})
 }
