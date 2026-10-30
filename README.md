@@ -132,10 +132,16 @@ For development, run `npm run dev` in `client/occamy-web`; it proxies `/api` to 
 
 ### APIs
 
-Occamy offers two APIs:
+Occamy offers two APIs, the v0 routes:
 
-- `/api/v1/login` distributes JWT tokens for authentication and
-- `/api/v1/connect` is used for WebSocket based Occamy connection.
+- `POST /api/v0/login` distributes JWT tokens for authentication (with
+  `client: true` only) and
+- `GET /api/v0/connect` is used for WebSocket based Occamy connection.
+
+They were `/api/v1/login` and `/api/v1/connect` until 0.6.0; `/api/v1`
+now belongs to API v1, which is in progress
+([specs/008](./specs/008-native-architecture/api-and-server-stack.md)).
+The v0 routes are removed at v1.0.
 
 If you build Occamy with web client, you can also access `/static` for web client demo.
 

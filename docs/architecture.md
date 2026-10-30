@@ -41,7 +41,7 @@ _Figure 2: Occamy Architecture_
 
 | Path | Role |
 |------|------|
-| [server/](../server) | HTTP routes (gin), JWT login and auth, the session table, and WebSocket to guacd proxying |
+| [server/](../server) | The v0 routes on a `net/http` ServeMux, v0 tokens (HMAC JWTs, golang-jwt v5), the session table, and WebSocket (coder/websocket) to guacd proxying |
 | [internal/guacd/](../internal/guacd) | guacd client: the handshake that creates or joins a connection |
 | [internal/guacamole/](../internal/guacamole) | Guacamole instruction encoding, parsing, and stream I/O, and a display that applies drawing and the pointer as a client does, for the benchmark and the guacd bridge |
 | [internal/config/](../internal/config) | `conf.yaml` loading, the JWT claim structure, and guacd parameters |
@@ -51,9 +51,10 @@ _Figure 2: Occamy Architecture_
 A connection goes through these steps:
 
 1. The client POSTs `protocol`, `host`, `username`, and `password` to
-   `/api/v1/login` and receives a JWT carrying them as claims.
-2. The client opens a WebSocket (subprotocol `guacamole`) to `/api/v1/connect`
-   with the token.
+   `/api/v0/login` and receives a JWT carrying them as claims.
+2. The client opens a WebSocket (subprotocol `guacamole`) to `/api/v0/connect`
+   with the token in the `Authorization` header, the `token` query
+   parameter or the `jwt` cookie.
 3. `occamyd` looks up a session by a hash of the claims. Users with identical
    claims share one session. The first user dials guacd and asks it for a new
    connection with the claims as parameters, plus the protocol's
