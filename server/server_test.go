@@ -533,6 +533,16 @@ func TestTLS(t *testing.T) {
 	if resp.StatusCode != http.StatusOK || resp.TLS == nil || resp.Proto != "HTTP/1.1" {
 		t.Errorf("GET /healthz over TLS: %d %s, TLS %v", resp.StatusCode, resp.Proto, resp.TLS != nil)
 	}
+	// TLS 1.2 is the least it speaks.
+	for _, version := range []uint16{tls.VersionTLS10, tls.VersionTLS11} {
+		c, err := tls.Dial("tcp", ln.Addr().String(), &tls.Config{
+			RootCAs: pool, MinVersion: tls.VersionTLS10, MaxVersion: version, // #nosec G402 -- the test offers old versions on purpose
+		})
+		if err == nil {
+			c.Close()
+			t.Errorf("a TLS handshake at version %x succeeded", version)
+		}
+	}
 	// Plain HTTP on the TLS port is refused.
 	if resp, err := http.Get("http://" + ln.Addr().String() + "/healthz"); err == nil {
 		resp.Body.Close()

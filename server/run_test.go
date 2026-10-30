@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,34 @@ import (
 
 	"changkun.de/x/occamy/internal/config"
 )
+
+// TestReadHeaderTimeout checks that the public listener drops a client
+// that does not finish its request headers in time.
+func TestReadHeaderTimeout(t *testing.T) {
+	defer func(d time.Duration) { readHeaderTimeout = d }(readHeaderTimeout)
+	readHeaderTimeout = 200 * time.Millisecond
+	ln := localListener(t)
+	serving(t, time.Second, newPublicServer(http.NotFoundHandler(), nil), ln, nil, nil)
+
+	c, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := io.WriteString(c, "GET / HTTP/1.1\r\nHost: occamy\r\n"); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	_, err = io.ReadAll(c)
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		t.Fatalf("the connection was still open after %v", time.Since(start))
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Errorf("the connection closed after %v", d)
+	}
+}
 
 // TestListenRefusesOverlap checks that listen does not open a debug
 // listener on the public listener's port, whatever the File says.
