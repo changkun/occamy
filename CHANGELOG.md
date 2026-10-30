@@ -119,10 +119,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   performs the handshake over a WebSocket, and `Next` delivers frames
   decoded into a client framebuffer with their dirty rectangles,
   terminal bytes untouched, and the small state, ending with the close
-  code. A frame is applied and acknowledged as `Next` delivers it, so a
-  slow caller holds the server back instead of queueing frames, and
-  input never waits for `Next`. Tiles of plugged codecs decode in
-  parallel. No API stability promise until the release candidate.
+  code. A frame is applied as `Next` delivers it and acknowledged when
+  the caller asks for the next event, so a slow caller holds the server
+  back instead of queueing frames, and input never waits for `Next`.
+  Tiles of plugged codecs decode in parallel. No API stability promise
+  until the release candidate.
 
 ### Changed
 

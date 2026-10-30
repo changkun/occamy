@@ -122,7 +122,7 @@ layer, and any tools.
 ## Implementation notes
 
 - **What was done:** package `changkun.de/x/occamy/client`, pure Go with
-  no new dependency, about 1,800 lines and 2,100 of tests.
+  no new dependency, about 2,000 lines and 2,900 of tests.
   - `Dial(ctx, url, token, Options)` performs the upgrade of
     [docs/protocol.md](../../docs/protocol.md) with coder/websocket:
     `hello` in the `hello` query parameter beside the route's own, the
@@ -151,25 +151,38 @@ layer, and any tools.
   - Terminal sessions pass `term-snapshot` and `term-data` bytes through
     untouched, with the frame's `Resize` and the title.
   - `Key`, `Text`, `TermInput`, `Pointer`, `Wheel`, `Resize` and
-    `Clipboard` number inputs from 1 and return each input's `seq`;
-    `View` and `PromptReply` send the rest. A read-only viewer's input
-    is refused with `ErrReadOnly`, and a reply from a viewer other than
-    the owner with `ErrNotOwner`, before anything is sent.
+    `Clipboard` number inputs from 1, wrapping from 2³²−1 to 1, and return
+    each input's `seq`; `View` and `PromptReply` send the rest. A
+    read-only viewer's input is refused with `ErrReadOnly`, and a reply
+    from a viewer other than the owner with `ErrNotOwner`, before anything
+    is sent. `View` clamps the viewport to the protocol's coordinates and
+    refuses one that shows nothing, which the wire would read as the
+    whole screen.
   - `Close` sends the input queued so far and `close` (normal), closes
     the WebSocket with the same code, and waits for every goroutine of
-    the session.
+    the session. It waits up to a second for the network to take the
+    input, then for coder/websocket's close handshake, which bounds each
+    of its steps at 5 s: about 6 s against a server that stopped
+    answering.
 - **Decisions:**
-  - A frame is applied to the framebuffer, and acknowledged, when `Next`
-    delivers it, not when it arrives. The framebuffer therefore always
-    holds a whole frame, so the export layer never copies half of one,
-    and a caller that falls behind holds the server at its frame window
-    rather than queueing stale frames. Tiles of plugged codecs still
-    decode as they arrive, in parallel, so delivery waits only for the
-    copy.
+  - A frame is applied to the framebuffer when `Next` delivers it, not
+    when it arrives. The framebuffer therefore always holds a whole
+    frame, so the export layer never copies half of one, and a caller
+    that falls behind holds the server at its frame window rather than
+    queueing stale frames. Tiles of plugged codecs still decode as they
+    arrive, in parallel, so delivery waits only for the copy.
+  - A frame is acknowledged when the caller calls `Next` again, not when
+    `Next` returns it. The protocol acknowledges a frame once it is
+    shown, and the caller shows it after `Next` returns; only its next
+    call says it is done. Acknowledging at delivery would leave the
+    drawing out of `decode_time` and let the server send faster than the
+    caller draws. A caller that waits in `Next` acknowledges as it
+    enters, so a steady caller adds no delay. Only the newest waiting
+    acknowledgement is sent, since it covers the earlier ones.
   - `decode_time` runs from the frame's `frame-end` arriving to its
-    delivery. The server takes it out of the round trip and spaces its
-    frames by it, so a caller that takes frames at 30 a second gets about
-    30, each fresh. The cost is a long pause: the pacer averages decode
+    acknowledgement. The server takes it out of the round trip and
+    spaces its frames by it, so a caller that takes frames at 30 a second
+    gets about 30, each fresh. The cost is a long pause: the pacer averages decode
     times over about eight frames, so each frame held for a pause of
     length H adds about H/8 to the frame interval, which then shrinks by
     an eighth a frame. Motion stays slow for about H per held frame, two
@@ -186,9 +199,32 @@ layer, and any tools.
     place; at most 3 bells wait; a viewer that leaves cancels its
     undelivered join. More than 1024 undelivered events, or more bytes
     than max(64 MiB, min((window + 2) × 3 screens, 1 GiB)), is taken for
-    a broken server and closed with `protocol-error`. A screen larger
-    than `Options.MaxPixels` (8192 × 8192 by default) ends the session
-    with `unsupported` before anything is allocated.
+    a broken server and closed with `protocol-error`. The screen is the
+    largest that a frame held or being read was drawn for, so a queued
+    frame of a large screen does not count against the small one the
+    next frame resizes to; a tile of a plugged codec counts its decoded
+    pixels, whatever its payload's size; a terminal holds 64 MiB. A
+    screen larger than `Options.MaxPixels` (8192 × 8192 by default) ends
+    the session with `unsupported` before anything is allocated.
+  - A frame's work is bounded apart from its bytes: the pixels its
+    tiles, copies and resizes write or allocate may total eight screens
+    (64 MiB at least), or the session ends with `protocol-error` before
+    `Next` does any of it. A `copy-rect` or `resize` costs a few bytes to
+    send and a screen to apply, which the backlog does not see. A
+    `resize` drops what its frame drew before it, which no one would
+    see, so resizes in a row cost one screen.
+  - `Next` returns its context's error while it waits for an event or
+    for a frame's tiles to decode, and leaves the frame queued for the
+    next call. Once it applies a frame it finishes it, so that a live
+    session's framebuffer never holds half a frame; the work bound keeps
+    that short. At the default `MaxPixels` a hostile frame may still
+    write eight screens of 256 MiB, a few hundred milliseconds of
+    copying that the context does not cut; the bound is the knob if that
+    is too long. `Close` stops it between two messages, since the
+    session is over.
+  - Nothing is queued once the session ended: `Next` delivers what came
+    before, then `End`, then `ErrClosed`. The reader stops at the end,
+    and a frame or event that races it is dropped.
   - Input never waits for `Next`. Input methods queue their message for
     a writer goroutine and return; they wait, until their context is
     done, only while more than `max_message_size` bytes are queued and
@@ -199,9 +235,17 @@ layer, and any tools.
     connection when a write's context ends.
   - The client checks what the server sends against the session:
     messages of its class only, tiles and copies within the screen as
-    resized so far, frame IDs that grow by one from 1, agreed codecs, one
-    `welcome`. A failure is closed with the protocol's code, sent as
-    `close` and then as the WebSocket's close code.
+    resized so far, frame IDs that grow by one from 1 (wrapping from
+    2³²−1 to 0), agreed codecs, one `welcome`, binary WebSocket messages
+    only. A failure is closed with the protocol's code, sent as `close`
+    and then as the WebSocket's close code. A message over the agreed
+    `max_message_size`, which coder/websocket's read limit catches and
+    closes with 1009, ends the session with `too-large`.
+  - A `Decoder` is Go: one in C would need cgo, which the package does
+    without. It is called from several goroutines, and it checks the
+    size the payload declares before it allocates, as
+    `image.DecodeConfig` allows, so a few bytes cannot make it allocate
+    more than its tile.
   - The client uses no capability beyond what it offered, whatever
     `welcome` states, and its frame window is the smaller of its offer
     and the server's.
@@ -228,7 +272,31 @@ layer, and any tools.
     first held frame sets the frame interval to the whole hold, which
     makes the hold test's recovery slower than the H/8 a frame above;
     the test waits ten seconds for full rate.
+  - Review found these, each now fixed with a test:
+    - A frame could show a key's effect with a `last_seq` below the key
+      (`TestInputLastSeq`, 15 runs of 200 under `-race`): the server
+      recorded the input after the backend had it. Fixed in `session`
+      and `stream` ([session-core](session-core.md), later fix).
+    - A full frame of a large screen still queued, then a `resize` to a
+      small one, closed a correct server with `protocol-error`: the
+      backlog limit followed the new screen only.
+    - A `title` the server sent before it read the client's close was
+      delivered after `End`.
+    - 1.4 KB of `resize` and `copy-rect` made `Next` allocate and move
+      several GiB.
+    - `Next` could wait forever for a tile submitted after the decoders
+      exited, past its context.
+    - A message over the read limit ended the session with code 0.
 - **Protocol text clarified** in [docs/protocol.md](../../docs/protocol.md):
+  - A frame is acknowledged once shown, which for a client that hands
+    frames to a renderer is when the renderer asks for the next one, and
+    an acknowledgement covers the earlier frames, so a client may skip
+    one that a later one covers.
+  - Frame IDs wrap from 2³²−1 to 0; input sequence numbers from 2³²−1 to
+    1, so a `last_seq` of 0 always means none.
+  - `last_seq` is the last input applied before the server finished
+    reading the frame's content, and a frame never shows a later one's
+    effect.
   - `frame-ack`'s `decode_time` runs from `frame-end` arriving to the
     acknowledgement, any wait to be shown included. The server's round
     trip and delivery rate assume this; "decode and draw" alone left it
@@ -246,18 +314,32 @@ layer, and any tools.
     `occamy_session_next(handle, timeout_ms, *event)`, copy each
     `Frame.Dirty` rectangle from `Framebuffer` into the C mirror inside
     the callback, and map `End.Code` to the close code. Input calls
-    return the sequence number for latency measurement.
+    return the sequence number for latency measurement. `Close` can take
+    about 6 s against a server that stopped answering, so the app calls
+    it off the main thread. Decoders plugged into the client are Go;
+    VideoToolbox or another C decoder would need cgo in the core.
   - Streams task: `stream.Serve` sends `close` but cannot close the
     WebSocket with the same code, since `stream.Conn` has no `Close`;
     occamyd's handler must. `dial_test.go`'s `wsServer` is the adapter
     such a handler needs. The owner's `hello` size still does not size
     the remote (known; see session-core).
-  - Pacer: `Interval()` follows the raw decode average, so one long
-    hold slows motion for about as long again (Decisions). It should cap
-    or damp a decode sample far above the average, and not take a zero
-    average for no sample. The round trip and delivery rate need the
-    whole time, so the fix belongs in the interval, not in what clients
-    report.
+  - Pacer: the decode average follows the raw samples, and a held frame
+    is one sample of the whole hold. It feeds three things: the frame
+    interval, so motion stays slow for about as long as the hold
+    (Decisions); the bandwidth-delay product, so the cap on bytes in
+    flight grows with it and a stalled client is sent more; and the
+    unpaced burst of the frame after an input, which grows the same way.
+    The pacer should cap or damp a sample far above the average, and not
+    take a zero average for no sample. The round trip and delivery rate
+    need the whole time, so the fix belongs in the average, not in what
+    clients report.
+  - A cursor of a plugged codec is allocated at its declared size before
+    it decodes, up to `max_texture_size`² pixels (64 MiB at 4096), once
+    a message. The texture limit bounds it; the backlog sees it only
+    after.
+  - `stream`'s terminal writer keeps the larger of two sequence numbers
+    for the pacer's input timing (`max(in.seq, seq)`), which picks the
+    old one once numbers wrap. It only times one input, once in 2³².
 - **Tests:** end-to-end against `stream.Serve` with real sessions and
   the backendtest backends, in synctest bubbles: a graphical screen drawn
   and copied at random converges byte for byte, through raw tiles and
@@ -275,10 +357,25 @@ layer, and any tools.
   closes with. The golden vectors check the client's bytes for every
   client message, its reading of every server message, and the close
   code for each of the 29 invalid server vectors. `FuzzSession` plays a
-  hostile server and checks for panics, the backlog bound and the
-  framebuffer bound. The dial tests run a real WebSocket through
-  httptest with a token check and `stream.Serve`, and check for leaked
-  goroutines. Mutations checked: acknowledging on receipt, skipping
+  hostile server with screens of four sizes and the backlog's 64 MiB
+  floor lowered, so that the limits that follow from the screen apply,
+  and checks for panics, the backlog and framebuffer bounds, and that
+  after `End` nothing is queued and `Next` returns `ErrClosed`. The
+  dial tests run a real WebSocket through httptest with a token check
+  and `stream.Serve`, check for leaked goroutines, and cover a context
+  cancelled after `Dial`, a text message and a message over the read
+  limit. Each finding of the review has a test: a shrink with a large
+  frame queued and within a frame, nothing after `End`, the work bound
+  both ways and resizes in a row, `Next` waiting on a decode until its
+  context or `Close`, a tile submitted to a closed pool, `Close`
+  flushing input, viewports at negative coordinates, and numbers that
+  wrap. Mutations checked: acknowledging on receipt, skipping
   `copy-rect`, dropping the frame ID checks, the window bound and
-  `MaxPixels`, numbering inputs wrong, dropping coalescing, and input
-  waiting for `Next` each fail a test.
+  `MaxPixels`, numbering inputs wrong, dropping coalescing, input
+  waiting for `Next`, decoded pixels left out of the backlog, the pool
+  decoding after `Close`, `Close` not flushing input, text messages
+  taken, the read limit's error unmapped, the backlog measured by the
+  last screen only, no work bound, resizes not merged, the decode wait
+  ignoring `Close`, a tile queued to a closed pool, `Next` delivering
+  after `End`, and a viewport that shows nothing sent: each fails a
+  test.
