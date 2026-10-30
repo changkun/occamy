@@ -235,15 +235,36 @@ func (p *Pacer) Delay(now time.Time, n int) (wait time.Duration, more bool) {
 	if p.inflightBytes+p.cur.bytes+n > p.cap() {
 		return 0, false
 	}
+	return p.Pace(now), true
+}
+
+// Hold reports whether a frame that cannot be cut short, such as a
+// terminal's, must wait for acknowledgements before it writes n more
+// bytes: they would take the bytes in flight past the cap while earlier
+// frames are still in flight. A frame alone in flight is never held,
+// however large; Pace spreads it out.
+func (p *Pacer) Hold(n int) bool {
+	if !p.open || p.cur.bytes == 0 || p.burst > 0 || p.inflightBytes == 0 {
+		return false
+	}
+	return p.inflightBytes+p.cur.bytes+n > p.cap()
+}
+
+// Pace reports how long the writer should wait before it writes more
+// of the open frame at the pacing rate, whatever the cap.
+func (p *Pacer) Pace(now time.Time) time.Duration {
+	if !p.open || p.cur.bytes == 0 || p.burst > 0 {
+		return 0
+	}
 	rate := p.pacingRate()
 	if rate == 0 {
-		return 0, true
+		return 0
 	}
 	p.refill(now, rate)
 	if p.tokens > 0 {
-		return 0, true
+		return 0
 	}
-	wait = time.Duration(-p.tokens / rate * float64(time.Second))
+	wait := time.Duration(-p.tokens / rate * float64(time.Second))
 	// Count the wait once, however often the writer asks.
 	from := now
 	if p.blockedUntil.After(from) {
@@ -253,7 +274,7 @@ func (p *Pacer) Delay(now time.Time, n int) (wait time.Duration, more bool) {
 		p.blocked += until.Sub(from)
 		p.blockedUntil = until
 	}
-	return wait, true
+	return wait
 }
 
 // Wrote records that the writer wrote n bytes of the open frame at now.

@@ -275,6 +275,7 @@ func invalidMessages() []invalidMessageVector {
 		v("hello with capability 0", "client", nil, helloWith(1).cap(0)),
 		v("hello with a capability of the wrong size", "client", nil, helloWith(1).cap(2, 0, 1, 0)),
 		v("hello with a capability that is zero", "client", nil, helloWith(1).cap(5, 0, 0)),
+		v("hello with a max_message_size below 65536", "client", nil, helloWith(1).cap(7, 0xff, 0xff, 0, 0)),
 		v("hello with an empty codec list", "client", nil, helloWith(1).cap(1)),
 		v("hello with a codec listed twice", "client", nil, helloWith(1).cap(1, 3, 4, 3)),
 		v("hello with codec 0", "client", nil, helloWith(1).cap(1, 0)),

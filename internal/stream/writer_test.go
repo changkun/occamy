@@ -16,10 +16,12 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+	"unicode/utf8"
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/backend/backendtest"
 	"changkun.de/x/occamy/internal/session"
+	"changkun.de/x/occamy/internal/terminal"
 	"changkun.de/x/occamy/protocol"
 )
 
@@ -45,6 +47,14 @@ type client struct {
 	errs []error
 	// outside reports a tile outside the screen the client was told of.
 	outside bool
+	// term is the client's terminal, made at term-snapshot from the size
+	// of the last resize; snapshots counts the term-snapshots.
+	term      *terminal.Terminal
+	size      image.Point
+	snapshots int
+	// noAcks stops the client acknowledging frames, as one whose
+	// renderer stalls.
+	noAcks bool
 	// onFrame, if set, runs at each frame-end with the lock held.
 	onFrame func(f frameRecord)
 }
@@ -75,6 +85,10 @@ func (cl *client) run(ctx context.Context) {
 		}
 		m, err := protocol.Decode(b, reg, protocol.Limits{MaxMessageSize: 1 << 30})
 		cl.mu.Lock()
+		if cl.welcome != nil && err == nil {
+			// Every message after welcome is within the agreed size.
+			err = cl.welcome.Capabilities.Limits().CheckSize(len(b))
+		}
 		if err != nil {
 			cl.errs = append(cl.errs, err)
 			cl.mu.Unlock()
@@ -87,6 +101,26 @@ func (cl *client) run(ctx context.Context) {
 			cl.welcome = m
 		case *protocol.Resize:
 			cl.img = image.NewRGBA(image.Rect(0, 0, int(m.Width), int(m.Height)))
+			cl.size = image.Pt(int(m.Width), int(m.Height))
+			if cl.term != nil {
+				cl.term.Resize(cl.size.X, cl.size.Y)
+			}
+		case *protocol.TermSnapshot:
+			if !utf8.Valid(m.Data) {
+				cl.errs = append(cl.errs, errors.New("term-snapshot split inside a character"))
+			}
+			cl.term = terminal.New(cl.size.X, cl.size.Y, terminal.Options{})
+			cl.term.Write(m.Data)
+			cl.snapshots++
+		case *protocol.TermData:
+			if cl.term == nil {
+				cl.errs = append(cl.errs, errors.New("term-data before term-snapshot"))
+				break
+			}
+			if !utf8.Valid(m.Data) {
+				cl.errs = append(cl.errs, errors.New("term-data split inside a character"))
+			}
+			cl.term.Write(m.Data)
 		case *protocol.Tile:
 			r := image.Rect(int(m.X), int(m.Y), int(m.X)+int(m.W), int(m.Y)+int(m.H))
 			if !r.In(cl.img.Rect) {
@@ -119,8 +153,9 @@ func (cl *client) run(ctx context.Context) {
 			c := *m
 			cl.close = &c
 		}
+		noAcks := cl.noAcks
 		cl.mu.Unlock()
-		if ackID != 0 {
+		if ackID != 0 && !noAcks {
 			_ = cl.c.WriteMessage(ctx, protocol.FrameAck{FrameID: ackID, DecodeTime: 500}.Append(nil))
 		}
 	}

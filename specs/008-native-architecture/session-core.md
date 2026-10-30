@@ -226,8 +226,9 @@ follow the recommendations above.
    RWMutex per tile row. The row height follows the tile size that the
    [graphics-pipeline](graphics-pipeline.md) benchmark picks.
 3. **Late join for terminals:** decided in
-   [native-ssh-backend](native-ssh-backend.md). The core only requires a
-   snapshot that the backend can produce on demand.
+   [native-ssh-backend](native-ssh-backend.md). The session keeps the
+   terminal's screen in `internal/terminal` from the backend's output, so
+   a late joiner gets a snapshot without asking the backend.
 4. **Input: the share role decides.** The owner and every `viewer` may
    send input at the same time, as v0 allows. A `read-only` viewer may
    not, and its input messages are dropped and counted. The owner
@@ -342,7 +343,11 @@ arise, rather than inheriting those fixes.
     changes as long as an effect is awaited. An input whose effect does
     not appear within 1 s loses its priority.
   - `frame-end`'s `last_seq` is the last input applied when the frame
-    started, or when it took up an input's effect, if later.
+    started, or when it took up an input's effect, if later. An input
+    applied before a frame's content was read may still have its effect
+    on the way from the remote end, so `last_seq` says which inputs a
+    frame could show, not that it shows their effect; the frame that
+    goes beyond the window does show it.
   - Small state goes out before every tile, during pacing sleeps and
     while waiting, so it waits for at most the tile being written.
   - Resizes follow the framebuffer's bounds, not the session's small
@@ -361,8 +366,6 @@ arise, rather than inheriting those fixes.
     larger than the client's texture limit; a hidden cursor carries no hot
     spot, codec or payload.
 - **What was not done:**
-  - Terminal sessions: `Serve` refuses them until `internal/terminal`
-    has its snapshot and diff API.
   - `TCP_NOTSENT_LOWAT` is not set on a connection yet. coder/websocket
     hides the socket, so the HTTP layer reaches it first: the HTTP server
     task's `ConnContext` keeps each connection in the request context,
@@ -392,6 +395,99 @@ arise, rather than inheriting those fixes.
     taken for a protocol error; and a late `hello` got `unsupported`.
     The test client now records undecodable messages, and every test
     fails on one.
-- **Follow-ups:** terminal frames (screen diffs), the Scheduling test,
-  and `SetLowWater` on each stream's socket (the HTTP server's
-  `connFrom` reaches it; the Streams task calls it).
+- **Follow-ups:** the Scheduling test, and `SetLowWater` on each
+  stream's socket (the HTTP server's `connFrom` reaches it; the Streams
+  task calls it).
+
+## Implementation notes: terminal frames
+
+- **What was done:** `Serve` serves terminal sessions. A frame is the
+  title if it changed, `resize` if the size changed, the
+  `terminal.Diff` from the screen the viewer last got to the current
+  one, and `frame-end`. The first frame's diff goes as `term-snapshot`.
+  The session makes the `terminal.Terminal` itself when `Config.Terminal`
+  is nil, exposes snapshots through `Session.Screen`, and gives the
+  backend the emulator's answers to the application's queries as
+  terminal input.
+- **Decisions:**
+  - The emulator's answers are queued, and the owner goroutine gives them
+    to the backend. They come from `TermData` on a backend goroutine,
+    which must not wait for the backend's own `Input`.
+  - A terminal's rows and cursor are its tiles. Each snapshot carries the
+    version at which each row came to look as it does and at which the
+    cursor last moved (`Screen.Versions`): a row redrawn the same, or one
+    that scrolled into a row showing the same, keeps its version. An
+    input's effect is a change after its clock on a row or the cursor
+    that was not in motion before it, judged as for tiles, so a status
+    line or a scrolling log does not take the frame beyond the window
+    while the echo is still on its way from the remote end. The viewer
+    keeps the screen it took the input's clock from, so the rows are read
+    at that clock. While every row is in motion, as under a fast
+    scrolling log, an echo cannot be told from the output and gets no
+    priority.
+  - `last_seq` is read before the snapshot, as in a graphical frame: it
+    names the inputs applied before the screen was read, whose echo may
+    come in a later frame.
+  - A diff goes whole: a client's screen is right only once it has all of
+    it, so a terminal frame is never cut. At the cap on bytes in flight it
+    waits for acknowledgements of earlier frames (`Pacer.Hold`); a frame
+    alone in flight goes on at the pacing rate (`Pacer.Pace`).
+    `frame-end` goes unpaced, as in a graphical frame. A diff larger than
+    the client's message size goes as several messages, split at
+    character boundaries, and the first of a snapshot is the
+    `term-snapshot`.
+  - A screen redrawn the same, which bumps the terminal's version but
+    changes nothing a viewer sees (`Screen.Equal`), costs no frame.
+  - A terminal viewer gets no `cursor-move`, which is the graphical
+    pointer, and the title from the screen, not the session's empty one
+    at join.
+  - A client that renders no terminal (`terminal` capability 0) is
+    refused a terminal session with `unsupported`. The server offers
+    level 1 unless configured otherwise.
+- **Not done:** the owner's `hello` columns and rows do not size the
+  terminal yet; the Streams task asks the backend for them.
+- **Follow-ups:** the emulator's answers to queries are dropped, at Debug
+  level, when the backend's input queue is full (the SSH backend's holds
+  64, shared with viewer input), and a dropped answer to a device
+  attributes query leaves a shell such as fish waiting. The owner's
+  `select` also picks at random between a viewer's input and pending
+  answers when both are ready. Neither is fixed here.
+- **Tests:** a burst of 5000 lines converges in a few frames with one
+  snapshot, resizes follow the backend, an input's echo goes out beyond a
+  stalled client's window with its `last_seq`, an echo a round trip late
+  under a status line redrawn every 5 ms gets the frame beyond the window
+  and no frame reports the input without it, a hidden client gets no
+  frames and one when shown, a diff over a 64 KiB message size arrives
+  in pieces that each end at a character boundary, a diff past the cap
+  waits for acknowledgements, identical redraws cost no frame, and a
+  terminal client gets no pointer and one title. Each test fails when
+  the behaviour it names is removed. The test client feeds what it gets
+  into its own `terminal.Terminal`, rejects a piece split inside a
+  character, and compares screens with the server's.
+- **Review fixes:** an independent review found three bugs and three
+  smaller faults, each with a test that fails without its fix:
+  - a `max_message_size` below the term-data header made the writer
+    panic, and one a few bytes above it looped on empty messages. The
+    protocol now refuses a size below 64 KiB (`protocol.MinMessageSize`),
+    and a frame that cannot make progress ends the stream with an error;
+  - output between an input and its echo took the input's priority, so
+    the frame beyond the window carried the output and `last_seq` without
+    the echo, which then waited for a normal slot. Fixed by the row
+    versions above;
+  - `Delay`'s cap result was ignored, so a terminal frame never waited at
+    the cap, and its own `frame-end` was the only message paced;
+  - terminal viewers got `cursor-move` and the title three times;
+  - a redraw that changed nothing cost a frame and, within 1 s of an
+    input, the input's priority;
+  - the chunk test could not catch a split inside a character, since the
+    client's emulator reassembles one.
+  The race fixes touched the graphical path too: the writer's last two
+  snapshots of motion were taken as it looped, so after it waited a long
+  time on a full window, a change between them hundreds of milliseconds
+  before an input counted as motion. While the pacer holds frames back
+  the writer now takes a snapshot at least every `activeWindow`, and
+  snapshots older than twice that are not used. Either this or reading
+  rows at the input's clock fixes the status-line test; without both it
+  fails in about one run in five.
+- **Cost:** a snapshot allocates a version per row, about 400 ns more
+  for a 200x50 screen.

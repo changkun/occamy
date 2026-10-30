@@ -365,6 +365,9 @@ func (d *Decoder) readCapabilities() Capabilities {
 		case CapMaxMessageSize:
 			if capValue(d, id, v, 4) {
 				c.MaxMessageSize = binary.LittleEndian.Uint32(v)
+				if c.MaxMessageSize < MinMessageSize {
+					d.failf(ErrInvalid, "max_message_size %d is below %d", c.MaxMessageSize, MinMessageSize)
+				}
 			}
 		default:
 			c.Unknown = append(c.Unknown, Capability{ID: id, Value: v})
