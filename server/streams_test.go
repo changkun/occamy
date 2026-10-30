@@ -23,6 +23,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/golang-jwt/jwt/v5"
 
+	"changkun.de/x/occamy/client"
 	"changkun.de/x/occamy/internal/auth"
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/backend/backendtest"
@@ -37,8 +38,9 @@ import (
 var termHello = protocol.Hello{Visible: true, Name: "occamy-test/1", Capabilities: protocol.Capabilities{Terminal: 1}}
 
 // streamClient is a minimal protocol v1 client, enough to drive the
-// stream routes. It acknowledges every frame. The Go client's
-// client.Dial is to replace it once client/ is on master.
+// stream routes message by message, as the Go client does not let a
+// test: it sends what it is told, broken messages included, and
+// acknowledges every frame. TestEndToEnd uses the Go client.
 type streamClient struct {
 	ws      *websocket.Conn
 	welcome *protocol.Welcome
@@ -596,32 +598,59 @@ func TestEndToEnd(t *testing.T) {
 		t.Fatalf("connections: %s", r.body)
 	}
 	o := ts.openSession(t, tr.AccessToken, "ops-shell")
-	c := ts.stream(t, "/api/v1/sessions/"+url.PathEscape(o.ID)+"/stream", o.StreamToken, termHello)
-	if c.welcome.Role != protocol.RoleOwner || c.welcome.Class != protocol.ClassTerminal {
-		t.Fatalf("welcome %+v", c.welcome)
+
+	// The Go client streams it.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cl, err := client.Dial(ctx, ts.srv.URL+"/api/v1/sessions/"+url.PathEscape(o.ID)+"/stream", o.StreamToken, client.Options{Name: "occamy-test/1"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	c.until(t, "the screen", func(m protocol.Message) bool { _, ok := m.(*protocol.TermSnapshot); return ok })
-	c.send(t, protocol.TermInput{Seq: 1, Data: []byte("echo occamy\r")})
-	var echoed bool
-	c.until(t, "the echo", func(m protocol.Message) bool {
-		switch m := m.(type) {
-		case *protocol.TermData:
-			echoed = echoed || bytes.Contains(m.Data, []byte("echo occamy"))
-		case *protocol.TermSnapshot:
-			echoed = echoed || bytes.Contains(m.Data, []byte("echo occamy"))
-		case *protocol.FrameEnd:
-			return echoed && m.LastSeq == 1
+	defer cl.Close()
+	if cl.Role() != protocol.RoleOwner || cl.Class() != protocol.ClassTerminal || cl.SessionID() != o.ID {
+		t.Fatalf("role %v, class %v, session %q", cl.Role(), cl.Class(), cl.SessionID())
+	}
+	seq, err := cl.TermInput(ctx, []byte("echo occamy\r"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	for echoed := false; !echoed; {
+		ev, err := cl.Next(ctx)
+		if err != nil {
+			t.Fatal(err)
 		}
-		return false
-	})
+		switch ev := ev.(type) {
+		case client.TermSnapshot:
+			out.Reset()
+			out.Write(ev.Data)
+		case client.TermData:
+			out.Write(ev.Data)
+		case client.Frame:
+			echoed = ev.LastSeq == seq && bytes.Contains(out.Bytes(), []byte("echo occamy"))
+		case client.End:
+			t.Fatalf("the session ended: %+v", ev)
+		}
+	}
 	r = ts.api(t, http.MethodGet, "/api/v1/sessions/"+o.ID, tr.AccessToken, "")
-	if !strings.Contains(string(r.body), `"viewers":[{"id":`+jsonInt(c.welcome.ViewerID)+`,"role":"owner"}]`) {
+	if !strings.Contains(string(r.body), `"viewers":[{"id":`+jsonInt(cl.ViewerID())+`,"role":"owner"}]`) {
 		t.Errorf("state %s", r.body)
 	}
 	if r := ts.api(t, http.MethodDelete, "/api/v1/sessions/"+o.ID, tr.AccessToken, ""); r.code != http.StatusNoContent {
 		t.Fatalf("DELETE: %d", r.code)
 	}
-	c.closed(t, protocol.CloseSessionClosed)
+	for {
+		ev, err := cl.Next(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e, ok := ev.(client.End); ok {
+			if e.Code != protocol.CloseSessionClosed {
+				t.Errorf("end %+v, want %v", e, protocol.CloseSessionClosed)
+			}
+			break
+		}
+	}
 }
 
 func jsonInt(n uint32) string {

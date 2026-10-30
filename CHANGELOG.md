@@ -155,7 +155,18 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   telnet the guacd bridge. ssh connections need `host_keys` or
   `insecure_ignore_host_key: true`. vnc connections take a `username`
   for VeNCrypt's Plain, and a `tls` block for the server's certificate:
-  a CA file, pins by fingerprint, or an insecure mode for demos.
+  a CA file, pins by fingerprint, or an insecure mode for demos. A
+  session belongs to a subject of the issuer that signed its owner's
+  token, and a trusted issuer may not name a static user unless its
+  `link_static_users` is on. `limits` bounds the sessions a user owns
+  (10), and the viewers (50) and unexpired shares (100) of a session.
+  An ad-hoc target is allowed only on its protocol's port or the ports
+  its allowlist entry names, never on a loopback, link-local,
+  unspecified or multicast address unless an entry is that address,
+  and it takes only the display's `guacd.params`. `guacd.params`
+  refuses any parameter whose name holds `password`, `passphrase`,
+  `private-key` or `secret`. A terminal is at most 1000 by 500 cells,
+  and a screen 8192 pixels a side.
 - `changkun.de/x/occamy/client`, a public Go client of protocol v1 in
   pure Go, for tests, tools and the Swift client's export layer. `Dial`
   performs the handshake over a WebSocket, and `Next` delivers frames

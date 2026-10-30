@@ -725,8 +725,12 @@ place for fixes that ship on v0 before beta.
     checks a connection (`config.NormalizeTarget`), an ssh target needs
     `host_keys` or `insecure_ignore_host_key: true` as a connection
     does, and the credentials are always prompted for, so a request
-    carries no secret. With ad-hoc targets off, or outside the
-    allowlist, the answer is 403 `forbidden`, a code this task adds.
+    carries no secret. Nor does the target get one from the file: it
+    takes only the display's `guacd.params` (see "guacd parameters"
+    below), and its VNC certificate is checked against the system's
+    roots and the name the request gave. With ad-hoc targets off, or
+    outside the allowlist, the answer is 403 `forbidden`, a code this
+    task adds.
   - **Allowlist matching (revised in review):** entries may name ports,
     `:port` or `:first-last` (`config.ParseAllowEntry`); without, the
     protocol's own (ssh 22, vnc 5900-5999, rdp 3389, telnet 23), where
@@ -794,6 +798,9 @@ place for fixes that ship on v0 before beta.
   anything, allowing a name when one of its addresses is listed,
   `*.domain` matching without the dot, dialling the name it resolved,
   and allowing an address with a zone; `DELETE` that does not close.
+  After review, also: the owner compared by subject alone in
+  `ownSession`; a vnc connection's `tls` left unchecked; an ad-hoc vnc
+  target's certificate checked against its address, not its name.
 - **Follow-ups:**
   - A per-connection `backend:` key (guacd-bridge's parity gate), `term`
     for ssh (the backend's `xterm-256color` until then) and per-connection
@@ -877,6 +884,27 @@ place for fixes that ship on v0 before beta.
     guacd; native VNC takes the server's size); on the session route the
     owner's hello becomes a `backend.Resize`. A viewer's hello resizes
     nothing.
+  - **Sizes (added in review):** a terminal is at most 1000 columns by
+    500 rows (`terminal.MaxCols`, `terminal.MaxRows`) and a graphical
+    screen at most 8192 pixels a side (`backend.MaxResizeSide`), whether
+    the owner's hello or anyone's `resize-request` asks. `screenOf` and
+    the stream's reader clamp, the terminal emulator clamps on its own,
+    and the SSH backend asks the server for no larger terminal
+    (`ssh.MaxCols`, `ssh.MaxRows`). Before, a terminal of up to 65535
+    by 65535 cells reached the emulator and the backend.
+  - **A stream that panics (added in review):** `serveStream` recovers
+    a panic of `stream.Serve`, which a terminal resize that grew the
+    rows caused before #107: the viewer leaves the session, the owner's
+    next stream does not wait for the dead one, the WebSocket closes
+    with 1011 and the stack goes to the log. `net/http` would recover it
+    too, but leave the hijacked connection and its reader running until
+    the client left. `TestRev111PanicLeaks` injects a panic;
+    `TestRev111GrowRowsPanics` and `TestRev111ViewerKillsOwnerStream`
+    fail on the code before #107 merged.
+  - **A session that ends before its stream (added in review):** when
+    `View` before `welcome` finds the session ended, as when its backend
+    fails at once, `Serve` sends the session's own end, such as
+    `backend-failed`, rather than an internal error.
   - **Capabilities:** raw tiles and terminal level 1, `stream.Serve`'s
     defaults, until the graphics pipeline's codecs land.
   - **The WebSocket:** coder/websocket drops the connection when the
@@ -898,9 +926,11 @@ place for fixes that ship on v0 before beta.
   - [docs/protocol.md](../../docs/protocol.md) said the subprotocol
     carries an access or share token; it now names session tokens too.
   - The end-to-end test, `TestEndToEnd`, signs in, opens a session,
-    streams it, types and closes it through a minimal client of its own
-    in `server/streams_test.go`. The Go client (`client/`, #107) was not
-    on master; the test should move to `client.Dial` when it is.
+    streams it, types and closes it. It first used a minimal client of
+    its own in `server/streams_test.go`, since the Go client (`client/`,
+    #107) was not on master; it moved to `client.Dial` in review, once
+    #107 merged. The minimal client stays for the tests that send
+    broken or hand-made messages, which the Go client does not.
 - **Surprises:**
   - A frame being written when a client sent a text message or broke the
     protocol cut off the `close` that followed: coder/websocket closed
@@ -919,7 +949,9 @@ place for fixes that ship on v0 before beta.
   owner's, no `TCP_NOTSENT_LOWAT`, no shutdown hook, a connection
   stream made without the hello's size, a viewer's hello resizing the
   session, no takeover, and the WebSocket closed with another code than
-  the `close` sent.
+  the `close` sent. After review, also: no recover in `serveStream`; no
+  `refuseTimeout`; a session token's owner compared by subject alone in
+  `join`.
 - **Not checked live:** the demo SSH and VNC servers were not tried: the
   shared benchmark host's load average was 46 at the time. The tests run
   the routes against fake backends only.
@@ -928,8 +960,9 @@ place for fixes that ship on v0 before beta.
     stream routes, with the replies above.
   - CORS is still not served, so a page on another origin in `origins`
     can open streams but not call the JSON routes.
-  - A terminal's hello may ask for up to 65535 columns or rows, which
-    reach the backend unbounded; the graphical size is capped at 8192.
+  - ~~A terminal's hello may ask for up to 65535 columns or rows, which
+    reach the backend unbounded.~~ Fixed in review: see "Sizes (added
+    in review)".
   - [009](../009-react-web-client.md) and the Go client: send `hello` in
     the query and the token in the subprotocol; expect `close` before
     `welcome` for a refusal; reconnect as the owner with an access token

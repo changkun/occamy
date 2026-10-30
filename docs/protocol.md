@@ -463,7 +463,9 @@ fd ff ff ff              # dy: -3
 
 Type 0x0107. Asks the remote to change the screen's size, such as when
 the client's window changes. The remote may refuse or pick another
-size; `resize` reports what it did.
+size; `resize` reports what it did. `occamyd` asks for at most 8192
+pixels a side, or 1000 columns and 500 rows, and takes a larger request,
+or a hello's larger size, as that bound.
 
 | Field | Type | Meaning |
 |-------|------|---------|
