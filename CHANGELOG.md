@@ -89,7 +89,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   listener when `debug.address` is set, and the v0 routes with
   `legacy_v0: true`. API v1 errors share one JSON shape,
   `{"error":{"code":"…","message":"…"}}`. SIGINT and SIGTERM drain
-  requests in flight for up to 5 s. A v0 file is served as before.
+  requests in flight for up to 5 s, then cut what is left with a
+  warning and exit with status 0; a second signal stops occamyd at once.
+  `debug.address` must not share a port with `listen`, counting a
+  wildcard host and `localhost`. A `version` merged in with `<<` counts,
+  and one outside the file's first YAML document is an error. A v0 file
+  is served as before.
 
 ### Changed
 

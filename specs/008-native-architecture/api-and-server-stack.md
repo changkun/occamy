@@ -432,16 +432,18 @@ place for fixes that ship on v0 before beta.
     `server.RunV0` as before; `config.Init` now refuses a v1 file. A v1
     file goes through `config.ParseV1` and `server.Run`.
   - `server/` serves a v1 file on a `net/http.ServeMux` behind plain
-    `func(http.Handler) http.Handler` middleware, outermost first: the
-    request log, `recovery`, `limitBodies` (1 MiB), and `apiFallback`.
+    `func(http.Handler) http.Handler` middleware, outermost first:
+    `limitBodies` (1 MiB), the request log, `recovery`, and
+    `apiFallback`.
     `authenticate` is per route. Routes: `GET /healthz`, `POST
     /api/v1/auth/token`, and with `legacy_v0` the v0 login and connect.
   - The signing key comes from `auth.LoadOrCreateKey` with a warning
     when it is created; the verifier trusts occamyd's key under
     `auth.Issuer` and each trusted issuer's key under its name. TLS
     comes from `tls.cert` and `tls.key`. SIGINT and SIGTERM shut down
-    with a drain of up to 5 s. expvar and pprof are on the debug listener
-    only, which is opened only when `debug.address` is set.
+    with a drain of up to 5 s; a second signal ends occamyd at once.
+    expvar and pprof are on the debug listener only, which is opened only
+    when `debug.address` is set, on a port of its own.
   - `connContext`, the public server's `ConnContext`, keeps each
     connection in the request context; `connFrom` returns it below TLS,
     a `*net.TCPConn` on which `stream.SetLowWater` works.
@@ -452,8 +454,8 @@ place for fixes that ship on v0 before beta.
     `invalid_token`, `token_expired`, `not_found`, `method_not_allowed`
     (with `Allow`), `too_large`, `unsupported_media_type` and `internal`;
     later tasks add codes, never change one. `message` is for people.
-    Paths under `/api/v1/` that no route takes get this shape for 404
-    and 405, where the ServeMux would answer in plain text
+    `/api/v1` and paths under it that no route takes get this shape for
+    404 and 405, where the ServeMux would answer in plain text
     (`apiFallback` asks `ServeMux.Handler` for the pattern; an empty one
     is the mux's own error). Bodies are compact without a trailing line
     break and carry `X-Content-Type-Options: nosniff`. The v0 routes'
@@ -491,15 +493,29 @@ place for fixes that ship on v0 before beta.
     issuer would stand in for occamyd; `newServer` refuses it too, for a
     `File` built another way.
   - **Recovery** logs `panic serving "METHOD" "/path": value` with the
-    stack, never the query, and answers 500 `internal` unless the
-    handler had begun its response, such as an upgraded WebSocket.
+    stack, never the query. A string or error value is quoted; any other
+    value is named by its type only, since `%v` of a request, a URL or a
+    struct holding one prints the query and headers, so a handler must
+    not panic with a string or error that carries a secret. It answers
+    500 `internal` unless the handler had begun its response, such as
+    an upgraded WebSocket.
     `http.ErrAbortHandler` passes through. The v0 routes are each
     wrapped in `recoverV0`, which answers a bare 500 as gin's recovery
     did, also on a v0 file's mux.
   - **Request log:** v0's `logRequests`, unchanged: quoted method and
     path, status, duration, peer address. A sign-in logs `user "alice"
     signed in` or `sign-in failed from <address>`, without the name,
-    since people type passwords into it.
+    since people type passwords into it. The v0 login logs why a body
+    did not parse (too large, or the decoder's error type) without the
+    decoder's message, which quotes the byte it stopped at in a JSON
+    body and the malformed escape in a form, both possibly from the
+    password.
+  - **Body limit:** `limitBodies` is the outermost middleware, on
+    `net/http`'s own response writer. `http.MaxBytesReader` tells the
+    writer that a body went over the limit through an unexported method,
+    `requestTooLarge`, which no wrapping writer can pass on; only on
+    `net/http`'s writer does `net/http` then close the connection after
+    the response instead of reading the rest of the body.
   - **Listener:** HTTP/1.1 only (`http.Server.Protocols`), with or
     without TLS. The streams are WebSockets, which coder/websocket
     upgrades by hijacking an HTTP/1.1 connection; Go's HTTP/2 server
@@ -514,14 +530,34 @@ place for fixes that ship on v0 before beta.
     64 KiB.
   - **Shutdown** closes the listeners at once and drains requests for up
     to 5 s, inside the 10 s `docker stop` allows, then closes what is
-    left. `http.Server.Shutdown` neither waits for nor closes hijacked
-    connections. A listener that fails stops the other server too.
+    left with a warning. A drain that runs out is a normal stop: `Run`
+    returns nil and occamyd exits with status 0; only a server that fails
+    is an error. `http.Server.Shutdown` neither waits for nor closes
+    hijacked connections. A listener that fails stops the other server
+    too. `Run` stops handling signals once the first arrives, so a
+    second SIGINT or SIGTERM gets Go's default handling and ends occamyd
+    at once, as `signal.NotifyContext` alone would not.
   - **Debug listener:** expvar at `/debug/vars` and pprof under
     `/debug/pprof/`, with the request log and recovery, no write timeout
     (a CPU profile takes as long as asked), and a warning at start when
-    `debug.address` is not on the loopback interface. Under a v1 file,
-    v0's pprof moves here; a v0 file's `mode: debug` still serves it on
-    the public listener.
+    `debug.address` is not on the loopback interface. It must not share
+    the public listener's port where the two could take the same
+    connections: `config.Overlap` compares ports as numbers and counts an
+    empty or unspecified host as every address of both families (Go
+    listens dual-stack on it), `localhost` as `127.0.0.1` and `::1`, and
+    other names by name. `ParseV1` refuses such a pair; `listen` checks
+    again after binding, against the bound address too, for a `File`
+    built another way. Whether the system lets the pair bind varies
+    (macOS lets a specific address bind beside a wildcard, and then
+    hands it that address's connections), so the check does not rely on
+    the bind failing. Under a v1 file, v0's pprof moves here; a v0
+    file's `mode: debug` still serves it on the public listener.
+  - **Version sniffing:** `config.Version` reads every YAML document. A
+    `version` brought in by a merge key (`<<`) counts, as the decoder
+    would take it; a key of the mapping wins over a merged one, and an
+    earlier merge over a later one. A `version` key in any document but
+    the first is an error, where it used to read the file as v0 from an
+    empty first document.
   - **v0 routes under a v1 file:** login and connect, signed with
     `rand.Text()` as the HS256 secret, made per process, and a warning
     at start that the login signs any target for anyone. No `/static/`,
@@ -535,6 +571,15 @@ place for fixes that ship on v0 before beta.
   - A v0 file's mux gained the v0 recovery, as gin had; nothing else on
     the v0 path changed (its listener, timeouts and 5 s drain stay).
 - **Surprises:**
+  - The body limit closed no connection while the request log wrapped
+    the writer, for the unexported `requestTooLarge` above; the old
+    comment on `limitBodies` claimed it did. Go's client also takes
+    `Connection: close` out of the response's headers into
+    `Response.Close`, which is what the test reads.
+  - gosec's taint analysis followed `TestRunChild`'s environment
+    variable through `config.ParseV1` into two start-up warnings that
+    log configuration values (G706); they carry a `#nosec`, since the
+    values are the operator's.
   - `ConnContext` receives the `*tls.Conn` under TLS, which is no
     `syscall.Conn`, so `SetLowWater` would have silently done nothing;
     `connFrom` unwraps it with `NetConn`.
@@ -552,18 +597,37 @@ place for fixes that ship on v0 before beta.
   without `debug.address`, a trusted issuer named `occamy` (in `ParseV1`
   and in `newServer`), `Init` reading a v1 file, `connFrom` returning
   the TLS connection, shutdown without a drain, and TLS not served.
+  After review, also: `recovery` taken out of `routes`; `limitBodies`
+  taken out of `routes`, or moved inside the request log; TLS 1.0
+  allowed; no `ReadHeaderTimeout`; a drain that runs out returned as an
+  error; the first signal left registered, which swallows the second;
+  `listen` trusting the `File`; validation comparing the address
+  strings; an empty host, an unspecified host or `localhost` compared by
+  name; port 0 overlapping; merge keys ignored by `Version`; `Version`
+  reading the first document only, or skipping a version in a later
+  one; `/api/v1` answered in plain text; panic values logged with
+  `%v`; and the v0 login logging the decoder's message.
 - **Follow-ups:**
   - OIDC: register its routes on the same mux; the cookie carrying state
     and verifier needs `Secure` when TLS is served here or by a proxy,
     which the server cannot tell; issue tokens through the same signer
     (`staticUsers.signer` or a shared one).
   - Sessions: wrap its routes in `authenticate(s.verifier)` and read
-    `claimsFrom(r.Context())`, deciding whether `Subject` from a trusted
-    issuer names the same user as a static user; use `decodeJSON`,
-    `respond` and `writeError`, adding codes such as `forbidden` and
-    `conflict`. CORS for browser clients on other origins (from
-    `origins`) is not served yet. Sign-in has no rate limit; each
-    attempt costs one bcrypt comparison.
+    `claimsFrom(r.Context())`; use `decodeJSON`, `respond` and
+    `writeError`, adding codes such as `forbidden` and `conflict`.
+  - Identity: decide whether a trusted issuer's `sub` names the same
+    user as a static user of that name. `claimsFrom` carries the issuer
+    so the two can be told apart; nothing decides it yet.
+  - Sign-in has no rate limit, per address or per user; each attempt
+    costs one bcrypt comparison at the users' highest cost, so a flood
+    of attempts is also a CPU cost.
+  - CORS for browser clients on other origins (from `origins`) is not
+    served; API v1 answers no preflight yet.
+  - `connFrom` unwraps only `*tls.Conn`. A listener that wraps
+    connections, such as one for the PROXY protocol or a connection
+    limit, would hide the `*net.TCPConn`, and `stream.SetLowWater` would
+    silently do nothing. Before occamyd takes such a listener, `connFrom`
+    needs to unwrap it too, or the wrapper to pass on `syscall.Conn`.
   - Streams: call `stream.SetLowWater` on `connFrom(r.Context())`
     before `websocket.Accept`; end streams on shutdown through
     `http.Server.RegisterOnShutdown`, since `Shutdown` ignores hijacked

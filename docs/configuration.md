@@ -14,7 +14,8 @@ another. The file comes in two versions:
   [Serving a v1 file](#serving-a-v1-file)).
 
 Any other `version` is an error, and so is `version: 0`: a v0 file has no
-`version` key.
+`version` key. A `version` brought in by a merge key (`<<`) counts, and a
+`version` key in any YAML document but the first is an error.
 
 ## A v1 file
 
@@ -59,9 +60,9 @@ directory.
 | `version` | required | `1` |
 | `listen` | `:5636` | Address of the public listener, `host:port`: the API, the streams and `/healthz` |
 | `tls.cert`, `tls.key` | unset | Certificate and key files, PEM. `occamyd` terminates TLS when both are set; set both or neither. Without them, put a reverse proxy that terminates TLS in front. Read at start, so a renewed certificate needs a restart |
-| `debug.address` | unset (off) | Address of the debug listener: expvar at `/debug/vars` and pprof under `/debug/pprof/`, without authentication, and never on the `listen` address. Keep it on the loopback interface; `occamyd` warns at start when it is not |
+| `debug.address` | unset (off) | Address of the debug listener: expvar at `/debug/vars` and pprof under `/debug/pprof/`, without authentication. It needs a port of its own: not `listen`'s port on the same host, nor on `localhost` beside `127.0.0.1` or `::1`, nor beside a wildcard host (`:5636`, `0.0.0.0`, `::`), which takes every address. Keep it on the loopback interface; `occamyd` warns at start when it is not |
 | `origins` | none | Origins, `scheme://host[:port]`, whose web pages may open streams besides `occamyd`'s own. Written in lower case without a trailing slash, as browsers send them |
-| `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for the Guacamole-based web client. Their tokens are signed with a key made at each start, so they do not survive a restart. The web client itself (`/static/`) is not served from a v1 file. The login signs any target for anyone, as in v0, and `occamyd` warns at start. They are removed at v1.0 |
+| `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for the Guacamole-based web client. Their tokens are signed with a key made at each start, so they do not survive a restart. The web client itself (`/static/`) is not served from a v1 file. The login signs any target for anyone, as in v0, and `occamyd` warns at start; `allow_adhoc_targets`, `adhoc_allowlist` and the connection registry do not restrict these routes. They are removed at v1.0 |
 
 ### Sign-in: `auth`
 
@@ -162,6 +163,8 @@ that:
 - every environment variable it names is set and not empty;
 - addresses are `host:port` with a numeric port, and origins and OIDC URLs
   parse;
+- `debug.address` does not share a port with `listen` (see the table
+  above);
 - connection IDs, user names and issuer names are unique, and no trusted
   issuer is named `occamy`;
 - user, group and issuer names are not empty and have no spaces;
@@ -191,7 +194,9 @@ the URL. The request log names each request's method, path, status,
 duration and peer, never its query string, headers or body.
 
 On SIGINT or SIGTERM, `occamyd` stops accepting connections and gives
-requests in flight up to 5 seconds to finish. If the signing key file
+requests in flight up to 5 seconds to finish. It then cuts what is left,
+such as a long CPU profile, with a warning, and exits with status 0. A
+second SIGINT or SIGTERM in those seconds ends it at once. If the signing key file
 does not exist, `occamyd` creates it and warns: tokens signed with an
 earlier key no longer verify.
 

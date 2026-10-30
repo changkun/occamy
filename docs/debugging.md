@@ -30,7 +30,12 @@ and expvar under `/debug/vars` only on the debug listener, at
 ([configuration](./configuration.md)). The public listener never serves
 them. The listener has no authentication, so keep it on the loopback
 interface, such as `localhost:6060`; `occamyd` warns at start when it is
-not. The examples below work against it with that address in place of
+not. It needs a port of its own: `occamyd` refuses a `debug.address` on
+`listen`'s port where the two could take the same connections, such as
+`localhost:5636` beside `127.0.0.1:5636`, or any host beside `:5636`.
+A CPU profile or a trace still running when `occamyd` stops is cut after
+the 5 second drain; a second SIGINT or SIGTERM stops `occamyd` at once.
+The examples below work against it with that address in place of
 `localhost:5636`. `/debug/vars` shows the command line and the runtime's
 memory statistics as JSON.
 
