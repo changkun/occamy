@@ -28,6 +28,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   state as latest values, ends the session when the owner stays away or
   it idles, and a registry of sessions with share tokens that die with
   them. Not served by any route yet.
+- Version 1 configuration files (`version: 1`): sign-in through static
+  users, OIDC and trusted issuers, a connection registry whose
+  credentials name files or environment variables instead of holding
+  secrets, TLS, the debug listener, origins and ad-hoc targets. Unknown
+  keys are errors, and validation reports every problem with its line and
+  key path ([docs/configuration.md](docs/configuration.md)). A file
+  without `version` is read as v0, as before. `occamyd` does not serve
+  v1 files yet.
 
 ### Changed
 
