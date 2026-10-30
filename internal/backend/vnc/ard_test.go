@@ -271,6 +271,7 @@ func TestARDScripts(t *testing.T) {
 		},
 		{name: "3.3 not allowed", in: script{}.version("003.003").u32(secARD), sent: -2, is: ErrNoSecurityType, err: "set Config.ARD"},
 		{name: "required TLS", in: ard38(), ard: true, requireTLS: true, sent: -2, is: ErrNoSecurityType, err: "offers [30]"},
+		{name: "required TLS, not allowed", in: ard38(), requireTLS: true, sent: -2, is: ErrNoSecurityType, err: "offers [30]"},
 		{name: "3.3 required TLS", in: script{}.version("003.003").u32(secARD), ard: true, requireTLS: true, sent: -2, err: "without TLS"},
 
 		// The key's bounds, checked before anything else.
@@ -361,6 +362,11 @@ func TestARDScripts(t *testing.T) {
 			}
 			if tt.is != nil && !errors.Is(err, tt.is) {
 				t.Errorf("handshake = %v, want %v", err, tt.is)
+			}
+			// With TLS required, ARD cannot be set (New refuses it), so
+			// the error must not suggest it.
+			if tt.requireTLS && strings.Contains(err.Error(), "ARD to allow it") {
+				t.Errorf("handshake = %v, which suggests ARD while TLS is required", err)
 			}
 			if strings.Contains(err.Error(), "hunter2") || strings.Contains(err.Error(), "alice") || strings.Contains(err.Error(), "aaaa") {
 				t.Errorf("the error shows a credential: %v", err)
