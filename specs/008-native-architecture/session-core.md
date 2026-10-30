@@ -139,10 +139,11 @@ and 113 ms at N1, behind frames it had already queued.
   the tile being written.
 - **Only what is seen.** A client reports with `view` whether it is
   visible (a hidden browser tab, a minimized window) and which part of
-  the screen its viewport shows. A hidden viewer gets no frames; its
-  dirty region keeps growing, which costs a bitset, and it gets one frame
-  of it when it becomes visible again: the current screen, never a
-  backlog. Tiles outside the viewport stay dirty until they come into
+  the screen its viewport shows. A hidden viewer gets no frames, which
+  costs nothing to track: its dirty tiles are those whose versions passed
+  the ones it last received ([graphics-pipeline](graphics-pipeline.md)),
+  and it gets one frame of them when it becomes visible again: the
+  current screen, never a backlog. Tiles outside the viewport stay dirty until they come into
   view.
 - **Motion degrades smoothly.** While a viewer's writer spends most of a
   round waiting for the path, its lossy quality steps down, and it steps
