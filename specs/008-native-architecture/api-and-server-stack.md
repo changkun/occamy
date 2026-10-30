@@ -41,6 +41,10 @@ can only patch on v0.
 - 004 lists the v0 problems: open proxy, credentials in tokens and logs,
   `jwt_secret: occamy` and `mode: debug` defaults, `/debug/pprof` on the
   public listener, and gin-jwt v2 on golang-jwt v4.
+- v0 serves WebSockets with `gorilla/websocket`, whose last commit was
+  in 2025-03. `github.com/coder/websocket` (ISC, active) reads and writes
+  without allocating, supports permessage-deflate, and compiles to WASM,
+  so the Go client core can share it.
 - gin pulls a large indirect graph (quic-go, sonic, ugorji). Every
   Dependabot alert after the revival came from it (commit `b1bb2de`).
 - Since Go 1.22, `net/http.ServeMux` routes by method and path pattern
@@ -156,6 +160,9 @@ single-node beta.
    `Origin` against the configured origins on every upgrade.
    `POST /api/v1/sessions` stays for clients that want the session ID
    first.
+9. **WebSocket library: `coder/websocket`** (2026-10-30) for the v1
+   routes, for the reasons under Context; the v0 routes keep
+   `gorilla/websocket` until they are removed.
 
 ## Affects
 
@@ -163,3 +170,31 @@ single-node beta.
 the registry and auth sections. `go.mod` loses gin and gin-jwt under option
 A. Most of 004's items are absorbed into this design; 004 remains the
 place for fixes that ship on v0 before beta.
+
+## Implementation notes: tokens
+
+- **What was done:** `internal/auth` with `Signer` (`Access`,
+  `Session`), `Verifier` (`VerifyAccess`, `VerifySession`),
+  `LoadOrCreateKey` and `LoadPublicKey`, on golang-jwt v5.
+- **Decisions:**
+  - Every token carries a `kind` claim, `access` or `session`, so one is
+    never accepted where the other is expected. Session tokens carry
+    `sid` and `role`, the role as a string (`owner`, `viewer`,
+    `read-only`) so that `internal/auth` does not import the session
+    core.
+  - The issuer claim picks the key, and only `EdDSA` is accepted, so an
+    unknown issuer, `none` and an HMAC token keyed with the public key
+    all fail before any claim is trusted. The audience is required.
+  - A token must carry `iat`, and `exp - iat` may not exceed 12 hours, so
+    a trusted issuer cannot mint tokens that live for years. Clock skew of
+    30 seconds is allowed. Base64 decoding is strict.
+  - The signing key is PKCS #8 PEM, created readable by its owner only
+    through a temporary file and a hard link, so occamyd instances
+    starting together agree on one key and a crash leaves no partial key.
+  - Shares minted by `POST /api/v1/sessions/{id}/shares` stay the session
+    registry's opaque tokens (session-core), which die with the session
+    and are stored only as hashes. Session JWTs serve tokens minted by a
+    trusted issuer and the stream token that `POST /api/v1/sessions`
+    returns.
+- **Follow-ups:** the HTTP server task wires the signer and verifier from
+  the v1 configuration and logs a warning when the key is created.
