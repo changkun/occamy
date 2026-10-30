@@ -290,7 +290,7 @@ func TestHandshake(t *testing.T) {
 			if s.c.pf != wantPixelFormat {
 				t.Errorf("pixel format %+v, want %+v", s.c.pf, wantPixelFormat)
 			}
-			if want := []int32{encCopyRect, encTight, encZRLE, encHextile, encRaw, encCursor, encDesktopSize}; !slices.Equal(s.c.encodings, want) {
+			if want := slices.Concat([]int32{encCopyRect, encTight, encZRLE, encHextile, encRaw, encCursor, encDesktopSize}, extensions); !slices.Equal(s.c.encodings, want) {
 				t.Errorf("encodings %v, want %v", s.c.encodings, want)
 			}
 			waitFor(t, "the title", func() bool { return s.sink.TitleText() == "Desktop ✓" })
@@ -948,9 +948,9 @@ func TestProtocolErrors(t *testing.T) {
 		{"huge cursor", func(*serverConn) []byte {
 			return putUpdate(rectHeader(image.Rect(0, 0, 300, 2), encCursor))
 		}, "cursor of 300×2"},
-		{"extended clipboard", func(*serverConn) []byte {
-			return []byte{msgServerCutText, 0, 0, 0, 0xff, 0xff, 0xff, 0xf0}
-		}, "cut text of -16 bytes"},
+		{"extended clipboard shorter than its flags", func(*serverConn) []byte {
+			return []byte{msgServerCutText, 0, 0, 0, 0xff, 0xff, 0xff, 0xfe, 0, 0}
+		}, "extended clipboard message of 2 bytes"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			checkGoroutines(t)

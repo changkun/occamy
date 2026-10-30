@@ -144,7 +144,7 @@ func TestHandshakeScripts(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var sent bytes.Buffer
 			pw := func() (string, error) { return "hunter2", nil }
-			init, err := handshake(bytes.NewReader(tt.in), &sent, pw, false, tt.lim)
+			init, err := handshake(bytes.NewReader(tt.in), &sent, auth{password: pw}, tt.lim)
 			if tt.err == "" && tt.is == nil {
 				if err != nil {
 					t.Fatalf("handshake = %v", err)
@@ -173,7 +173,7 @@ func TestHandshakeScripts(t *testing.T) {
 func TestHandshakePasswordError(t *testing.T) {
 	errOwner := errors.New("the owner left")
 	in := script{}.version("003.008").u8(1, secVNCAuth).u8(make([]byte, 16)...)
-	_, err := handshake(bytes.NewReader(in), io.Discard, func() (string, error) { return "", errOwner }, false, defaultLimits)
+	_, err := handshake(bytes.NewReader(in), io.Discard, auth{password: func() (string, error) { return "", errOwner }}, defaultLimits)
 	if !errors.Is(err, errOwner) {
 		t.Errorf("handshake = %v, want the password's error", err)
 	}
@@ -191,7 +191,7 @@ func TestHandshakeWriteError(t *testing.T) {
 		// handshake has no more writes.
 		for n := 0; n < 4; n++ {
 			w := &failingWriter{n: n, err: errWrite}
-			_, err := handshake(bytes.NewReader(in), w, func() (string, error) { return "", nil }, false, defaultLimits)
+			_, err := handshake(bytes.NewReader(in), w, auth{password: func() (string, error) { return "", nil }}, defaultLimits)
 			if w.failed && !errors.Is(err, errWrite) {
 				t.Errorf("handshake after %d writes = %v, want the write's error", n, err)
 			}
@@ -223,7 +223,7 @@ func TestHandshakeAllocations(t *testing.T) {
 		none38().init(0xffff, 0xffff, ""),
 	} {
 		got := allocated(func() {
-			handshake(bytes.NewReader(in), io.Discard, func() (string, error) { return "", nil }, false, defaultLimits)
+			handshake(bytes.NewReader(in), io.Discard, auth{password: func() (string, error) { return "", nil }}, defaultLimits)
 		})
 		if got > 16<<10 {
 			t.Errorf("handshake of %q allocated %d bytes", in, got)
@@ -242,20 +242,24 @@ func allocated(f func()) uint64 {
 }
 
 func TestChoose(t *testing.T) {
+	tls := func() error { return nil }
 	for _, tt := range []struct {
-		offered    []byte
-		preferAuth bool
-		want       byte
+		offered []byte
+		a       auth
+		want    byte
 	}{
-		{[]byte{secNone}, true, secNone},
-		{[]byte{secVNCAuth}, false, secVNCAuth},
-		{[]byte{secNone, secVNCAuth}, true, secVNCAuth},
-		{[]byte{secNone, secVNCAuth}, false, secNone},
-		{[]byte{19, 30}, true, secInvalid},
-		{nil, true, secInvalid},
+		{[]byte{secNone}, auth{hasPassword: true}, secNone},
+		{[]byte{secVNCAuth}, auth{}, secVNCAuth},
+		{[]byte{secNone, secVNCAuth}, auth{hasPassword: true}, secVNCAuth},
+		{[]byte{secNone, secVNCAuth}, auth{}, secNone},
+		{[]byte{secVeNCrypt, 30}, auth{hasPassword: true}, secInvalid}, // no TLS to start
+		{[]byte{secVeNCrypt, 30}, auth{startTLS: tls}, secVeNCrypt},
+		{[]byte{secNone, secVeNCrypt, secVNCAuth}, auth{startTLS: tls}, secVeNCrypt},
+		{[]byte{secNone, secVNCAuth}, auth{startTLS: tls, requireTLS: true}, secInvalid},
+		{nil, auth{hasPassword: true}, secInvalid},
 	} {
-		if got := choose(tt.offered, tt.preferAuth); got != tt.want {
-			t.Errorf("choose(%v, %v) = %d, want %d", tt.offered, tt.preferAuth, got, tt.want)
+		if got := choose(tt.offered, tt.a); got != tt.want {
+			t.Errorf("choose(%v, %+v) = %d, want %d", tt.offered, tt.a, got, tt.want)
 		}
 	}
 	if !slices.Equal(appendSetup(nil)[4:20], pixelFormat[:]) {

@@ -158,7 +158,7 @@ func stillFrame(t *testing.T, addr, pw string) *image.RGBA {
 func checkSession(t *testing.T, data []byte, pw string, first, last kind, lossy bool, server, name string) {
 	t.Helper()
 	in := bytes.NewReader(data)
-	init, err := handshake(in, io.Discard, func() (string, error) { return pw, nil }, true, defaultLimits)
+	init, err := handshake(in, io.Discard, auth{password: func() (string, error) { return pw, nil }, hasPassword: true}, defaultLimits)
 	if err != nil {
 		t.Fatalf("the recording's handshake: %v", err)
 	}

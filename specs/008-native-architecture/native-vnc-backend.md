@@ -46,17 +46,20 @@ session framebuffer. Three choices:
   stack and on the bench desktop (`docker/bench/desktop`), which the
   integration tests use; TigerVNC's Xvnc, in an image on top of the bench
   desktop (`internal/backend/vnc/testdata/servers`) that phase 2's
-  integration test uses, and still to be added to the stack; QEMU's VNC
-  server; macOS Screen Sharing, checked by hand.
+  integration test uses, and with VeNCrypt only
+  (`docker/test/tigervnc`), which phase 3's integration test uses, both
+  still to be added to the stack; QEMU's VNC server; macOS Screen
+  Sharing, checked by hand.
 
 ## Proposed scope for beta
 
 The scope is delivered in four phases (see Task Breakdown).
 
 - **Security types:** None (1), VNC Authentication (2), VeNCrypt (19)
-  with TLS and X.509 subtypes (Plain, None and VNC inner auth), and Apple
-  Remote Desktop (30), so that macOS hosts work. RA2 and other proprietary
-  types are out.
+  with its X.509 subtypes (Plain, None and VNC inner auth), and Apple
+  Remote Desktop (30), so that macOS hosts work. VeNCrypt's anonymous
+  TLS subtypes, which no certificate authenticates, are out (phase 3
+  notes), as are RA2 and other proprietary types.
 - **Encodings:** Raw, CopyRect, Hextile, ZRLE and Tight (including JPEG and
   the gradient filter). Sequential JPEG is decoded when a server sends
   it, but the backend asks for no quality level, so servers keep Tight
@@ -71,8 +74,9 @@ The scope is delivered in four phases (see Task Breakdown).
   Updates copy without conversion; only the padding byte is set to opaque
   alpha. ZRLE's and Tight's 3-byte compact pixels are then red, green and
   blue, and gain the alpha byte.
-- **Update model:** with ContinuousUpdates the server pushes, and is
-  paused while nobody can see. Without it, the backend asks for an
+- **Update model:** with ContinuousUpdates, which servers offer only
+  to clients that take Fences, the server pushes, and is paused while
+  nobody can see. Without it, the backend asks for an
   update while `Demand.Visible` and asks for the next as soon as that
   update is applied, and asks for none while nobody can see. That is
   [session-core](session-core.md)'s one outstanding request as far as RFB
@@ -138,8 +142,10 @@ items with the recommended options, checked against the code and RFC
    lacks is the server's to handle (x11vnc and TigerVNC add it to the X
    keymap).
 4. **Without ExtendedDesktopSize, the client scales; there is no server
-   resize.** A `Resize` input is then ignored. With it (phase 3),
-   `Resize` becomes `SetDesktopSize`. This matches
+   resize.** A `Resize` input is then ignored; one that comes before the
+   server has shown whether it supports the extension waits for its
+   first update. With it (phase 3), `Resize` becomes `SetDesktopSize`.
+   This matches
    [graphics-pipeline](graphics-pipeline.md) decision 5: no server-side
    scaling either.
 5. **The decoders are fuzzed** with Go's native fuzzing, one target for
@@ -156,7 +162,7 @@ items with the recommended options, checked against the code and RFC
 |-------|----------|-------|
 | 1 | `internal/backend/vnc`: the RFB 3.3, 3.7 and 3.8 handshake; security types None and VNC Authentication, with the owner asked through `Sink.Prompt` for a password the configuration lacks; Raw, CopyRect, DesktopSize and Cursor; the pixel format requested in the framebuffer's layout; one incremental update request outstanding while `Demand.Visible`; key and pointer input; the server clipboard as Latin-1 cut text. Tests against an in-process fake RFB server, fuzzed decoders | session-core Backend interface, framebuffer |
 | 2 | Hextile, ZRLE, and Tight with JPEG and the gradient filter; recorded traffic in the fuzz corpus | Phase 1 |
-| 3 | VeNCrypt (TLS and X.509, with Plain, None and VNC inner authentication); ExtendedDesktopSize with `SetDesktopSize`; ContinuousUpdates with Fence; QEMU Extended Key Event with the HID-to-XT table; Extended Clipboard (UTF-8); LastRect | Phase 1 |
+| 3 | VeNCrypt (X.509, with Plain, None and VNC inner authentication); ExtendedDesktopSize with `SetDesktopSize`; ContinuousUpdates with Fence; QEMU Extended Key Event with the HID-to-XT table; Extended Clipboard (UTF-8); LastRect | Phase 1 |
 | 4 | Apple Remote Desktop (type 30), checked by hand against macOS Screen Sharing | Phase 1 |
 
 Registration in the API's backend factory for `vnc`, and the switch from
@@ -278,7 +284,8 @@ leaves only RDP on the bridge.
     guacd bridge does. The pointer is clamped to the screen. Clipboard
     input of a `text/*` type, or none, becomes Latin-1 cut text with LF
     line ends and `?` for characters outside Latin-1; other types are
-    ignored. `Resize` is ignored (decision 4) and `TermInput` fails with
+    ignored. `Resize` is ignored (decision 4; phase 3 sends it to servers
+    with ExtendedDesktopSize) and `TermInput` fails with
     `ErrUnsupportedInput`. The queue holds 256 inputs and 8 MiB plus
     64 KiB of their messages, two clipboards of the largest size, then
     `ErrInputFull`. A `Text` costs 16 bytes a character, so one of more
@@ -289,7 +296,8 @@ leaves only RDP on the bridge.
     beyond ASCII is rarely valid UTF-8. Cut text cut short by the 4 MiB
     limit within a UTF-8 character loses that character's first bytes
     before the check. Text sent to the server stays Latin-1, as RFC 6143
-    requires; Extended Clipboard (phase 3) removes the asymmetry.
+    requires; Extended Clipboard (phase 3) removes the asymmetry with
+    servers that support it.
 - **Deviations from the spec.** None in scope. The pixel format bullet
   above now says that the padding byte is made opaque, which "without
   conversion" left out, and the update model bullet says which bound on
@@ -593,3 +601,337 @@ leaves only RDP on the bridge.
   - Inflating is the decoding cost of ZRLE and Tight, and a single zlib
     stream cannot be split across cores. If full-screen motion at 4K
     matters before beta, a faster pure-Go inflater is the lever.
+
+## Implementation notes: phase 3
+
+- **Status.** Phase 3 is done: VeNCrypt, ExtendedDesktopSize,
+  ContinuousUpdates with Fence, QEMU Extended Key Events, Extended
+  Clipboard and LastRect, each in a file of its own (`vencrypt.go`,
+  `desktopsize.go`, `continuous.go`, `qemukeys.go`, `clipboard.go`,
+  `extensions.go`), in about 1,500 lines of code and 2,000 of tests.
+  Statement coverage stays at 98%. Nothing wires the backend into
+  `occamyd` yet, and `internal/config` has no keys for the new options
+  (follow-ups).
+- **What was built.**
+  - `SetEncodings` lists the pseudo-encodings ExtendedDesktopSize,
+    LastRect, ContinuousUpdates, Fence, QEMU Extended Key Event and
+    Extended Clipboard after phase 2's list (CopyRect, Tight, ZRLE,
+    Hextile, Raw, Cursor, DesktopSize). Code shared with phase 2 changes
+    little: the decoder's rectangle switch and message switch fall
+    through to `extensions.go`, the encodings list gains an `extensions`
+    list after it, and the handshake's security switch calls
+    `veNCrypt`. The decoder tells a `peer`, the Run's state, what the
+    server's extension messages ask for; the writer sends what is due.
+  - Phase 3 merged after phase 2. An ExtendedDesktopSize that changes
+    the size resizes through DesktopSize's code, so it starts phase 2's
+    per-update draw budget again, and one of the size the screen has
+    does not, so a server cannot reset the budget with it.
+    `TestUpdateDrawBudget` covers both; keeping the count across the
+    resize, or resetting it for every ExtendedDesktopSize, makes it
+    fail. Pseudo-encodings cost nothing against the budget, and LastRect
+    ends the update as the rectangle count would. Phase 2's test helper
+    `desktop` is now `desktopImage`, since phase 3 has a type of that
+    name.
+  - **VeNCrypt 0.2.** The backend chooses VeNCrypt whenever a server
+    offers it. Of the subtypes it takes X509Plain (262), X509Vnc (261)
+    and X509None (260), in an order set by the configuration: Plain
+    first with a username, VNC Authentication first with only a
+    password, None first with neither, so that nobody is asked for
+    credentials a server does not need. TigerVNC also lists None and VNC
+    Authentication among the subtypes; they run without TLS, and are
+    chosen as outside VeNCrypt unless TLS is required. Before RFB 3.8,
+    VeNCrypt with the None subtype has no SecurityResult, as TigerVNC
+    sends none for it (`SConnection::approveConnection` tests the
+    subtype); every other subtype has one. TLS runs over the
+    same connection with `crypto/tls`, at least TLS 1.2; a server that
+    sent anything after its ack and before the client's hello is a
+    protocol error, since those bytes would be read as plain text.
+  - **Plain** sends `Config.Username` and `Config.Password`, the same
+    password VNC Authentication uses. The owner is asked, through
+    `Sink.Prompt`, for whichever the configuration lacks, in one prompt:
+    `VNC username and password for host:port` with the fields `Username`
+    and `Password` (secret), or one of them.
+  - **The TLS policy** (`Config.TLS`) mirrors the SSH backend's host
+    keys. By default the certificate must chain to the system's roots and
+    carry the host of `Config.Addr`, an IP address included, or
+    `TLS.ServerName`. `TLS.RootCAs` replaces the roots, for a private CA.
+    `TLS.Pins` accepts certificates as they are, ignoring chain, names
+    and validity, as SSH host keys are; a pin is a certificate in PEM or
+    its SHA-256 fingerprint, in hex as `openssl x509 -fingerprint
+    -sha256` prints it (colons and case optional) or in base64 after
+    `SHA256:`. `TLS.InsecureSkipVerify` accepts any certificate that is
+    not pinned and logs a warning with its subject and fingerprint. A
+    certificate the policy refuses fails Run with a `CertificateError`
+    that carries the subject, the fingerprint (what `Pins` takes) and the
+    reason (`x509.HostnameError`, `x509.UnknownAuthorityError`, or not
+    pinned).
+  - **ExtendedDesktopSize.** A `Resize` becomes `SetDesktopSize` once the
+    server has sent an ExtendedDesktopSize rectangle, which servers do in
+    answer to the first request for the whole screen. The layout sent is
+    one screen covering the framebuffer, with the id and flags of the
+    server's first screen, as noVNC sends it. One `SetDesktopSize` awaits
+    its answer at a time, and the newest `Resize` asked for meanwhile
+    follows it; a size beyond the limits, or the size the screen already
+    has, is not sent. A rectangle that changes the size is a resize like
+    DesktopSize, under the same limits and the same once-an-update and
+    100 ms rules. A refusal changes nothing. The size refused is not
+    asked for again until the server resizes the screen on request (the
+    latest 16 refused sizes are kept), so each is logged once, as a
+    warning with the size and the reason; after status 1, resizing
+    administratively prohibited, no size is asked for on that
+    connection. A forwarded request is logged at debug level and refuses
+    nothing.
+  - **ContinuousUpdates with Fence.** Once the server has sent both a
+    Fence and EndOfContinuousUpdates, the backend enables continuous
+    updates for the whole screen while a viewer can see it, again after
+    a resize, and disables them while nobody can. While they are on, it
+    sends no incremental requests; the first request, and the one after a
+    resize, still ask for the whole screen. Every Fence that asks for an
+    answer gets one, with its payload and BlockBefore, through a queue of
+    its own that the writer drains in order.
+  - **QEMU Extended Key Events.** Once the server has sent the
+    pseudo-encoding, a `Key` whose `Code`, a USB HID usage, has an XT
+    keycode goes as an extended event, with its keysym, even a zero one.
+    A key goes up as it went down: one pressed as a KeyEvent before the
+    server's support arrived is released as one. A key without a code,
+    or with one the table lacks, goes as a KeyEvent, or not at all
+    without a keysym. The table covers the keyboard page's usages 0x04
+    to 0xe7, generated from keycodemapdb's `keymaps.csv` (USB to AT set
+    1, with an E0 prefix as the high bit, as QEMU numbers keys). Lang1
+    and Lang2, the Korean keys, are the single set 1 bytes they send,
+    0xf2 and 0xf1, as keycodemapdb has them; the first generation left
+    them out, and review caught it.
+  - **Extended Clipboard.** The backend answers the server's caps with
+    its own: text, the actions request, peek, notify and provide, and
+    4 MiB of text taken unasked. Before the server's caps, and with a
+    server whose caps lack text, the owner's text goes as Latin-1 cut
+    text as in phase 1. Otherwise the owner's copy notifies the server,
+    queued with the other input so that it arrives before the keys that
+    paste it, and the text is kept for the server to ask for; a server
+    that takes no notifications gets the text unasked. A notification of
+    text from the server is answered with a request, and a peek with a
+    notification. The backend sends no action that the server's caps
+    lack. Text both ways is UTF-8 with CR LF line ends and a terminating
+    NUL; text from the server is cut at its NUL, its line ends become LF,
+    invalid UTF-8 becomes U+FFFD, and text beyond 4 MiB is cut there,
+    with a character cut in two dropped, and a warning.
+  - **LastRect** ends an update that counted its rectangles as 65535.
+  - Tests: the fake server runs VeNCrypt with real TLS (`tls.Server`),
+    records the subtypes chosen and Plain's credentials, parses the new
+    client messages, and encodes the new server messages. A test file
+    per extension runs the backend against it. The TLS tests make a CA, a
+    server certificate for localhost and 127.0.0.1 that the server
+    presents with the CA after it, a self-signed one and another CA, and
+    cover each policy: a private CA by address, by name and by
+    `ServerName`; a wrong host; an untrusted root; the system's roots;
+    each form of pin; a pin that ignores the name; another certificate
+    pinned; the CA pinned, which does not pin the leaf; insecure mode
+    with its warning; and New's errors. Servers that speak only TLS 1.0
+    or 1.1 are refused. VeNCrypt's None subtype is run in RFB 3.7 and
+    3.8, by the backend and by a scripted server.
+  - Fuzzing: seeds for every new server message and six VeNCrypt
+    handshakes. `FuzzServerMessages` now runs a Run's state as the
+    decoder's peer and the writer's choice of what is due after each
+    message, so the extensions' state is fuzzed too. 60 s of it and 45 s
+    of `FuzzHandshake` found nothing.
+  - Integration: `TestTigerVNC`, behind the `integration` tag, runs
+    against TigerVNC's Xvnc (`docker/test/tigervnc`, Debian trixie's
+    TigerVNC 1.15) offering only X509Vnc and X509Plain. It builds the
+    image and starts the container itself, with podman or
+    `OCCAMY_CONTAINER_ENGINE`, as the RDP spike's test does: both are
+    named `occamy-vnc-it-until<time>-<pid>` after the time the run ends
+    at the latest, the port is the engine's choice, and the run removes
+    them, or the next run once that time has passed. A later run removes
+    only names that are a run's whole, after any registry and path and
+    before any tag: review found that matching the prefix anywhere in a
+    name, as the RDP spike still does, would remove other people's
+    containers and images on a shared host. `TestExpired`, outside the
+    tag, pins the matcher. It skips without an engine;
+    `OCCAMY_VNC_TLS_ADDR` points it at a running server instead.
+    It connects with a private CA by address and by name, a pinned
+    fingerprint, insecure mode with its warning, Plain with a configured
+    and with a prompted password; it is refused with a wrong host, the
+    system's roots, another pin, and wrong Plain and VNC passwords; and
+    with the CA it checks that TigerVNC enables continuous updates,
+    ExtendedDesktopSize, QEMU key events and Extended Clipboard (caps
+    `0x1f000001`), that a `Resize` to 800×600 and back resizes the
+    screen, that continuous updates stop and resume with demand, and that
+    `owner: naïve € ✓` copied by the owner comes back as `echo: naïve € ✓`
+    through a loop on the X display that answers the clipboard with
+    `xclip`. It passed every run, under the race detector, and takes
+    about 30 s with the image's layers cached.
+- **Decisions made during implementation.**
+  - The anonymous TLS subtypes (TLSNone, TLSVnc and TLSPlain, 257 to
+    259) are never chosen: anonymous Diffie-Hellman authenticates
+    nobody, so anyone between the backend and the server reads
+    everything, and `crypto/tls` does not implement it. Plain without
+    TLS (256) is not chosen either, since it sends the password in the
+    clear. A server whose VeNCrypt subtypes are only these fails with
+    `ErrNoSecurityType`, even if it also offers None or VNC
+    Authentication outside VeNCrypt: types [19, 2] with the subtype
+    [258], which phase 1 reached with VNC Authentication, now fail. The
+    subtypes arrive only after VeNCrypt is chosen, and RFB has no way
+    back to the other types short of a new connection, which the backend
+    does not make. Choosing VeNCrypt only when TLS is required would
+    give up TLS with every server that offers it, so the backend keeps
+    the preference, `TLS.Require` or not. TigerVNC is unaffected, since
+    it lists its plain types among the subtypes too.
+  - VeNCrypt is preferred over None and VNC Authentication whenever it
+    is offered, and fails closed: a TigerVNC with a self-signed
+    certificate, which phase 1 reached with VNC Authentication, now
+    fails with a `CertificateError` until its fingerprint is pinned, its
+    CA is configured, or insecure mode is on. The error shows the
+    fingerprint to pin.
+  - The certificate is checked in `tls.Config.VerifyConnection`, with
+    `InsecureSkipVerify` set so that `crypto/tls` does not check it
+    first. Pins and insecure mode then share one path, and a refusal
+    carries the fingerprint. `gosec` G402 is suppressed there with that
+    reason.
+  - Pins replace the roots, so `New` refuses `RootCAs` with `Pins`. A
+    pinned certificate in insecure mode is accepted without a warning;
+    any other is accepted with one.
+  - `TLS.Require`, not in the phase's scope, refuses servers that do not
+    offer VeNCrypt with an X.509 subtype: a 3.3 server that chooses None
+    or VNC Authentication, a server that does not offer VeNCrypt, and
+    VeNCrypt's plain subtypes. Without it, anyone between the backend
+    and the server could strip VeNCrypt from the types offered. It is
+    implied by `RootCAs` and `Pins`, since whoever configures trust for a
+    server expects TLS.
+  - ExtendedDesktopSize that reports the size the screen already has
+    changes nothing. TigerVNC sends one in answer to every request for
+    the whole screen, and the backend asks for the whole screen after
+    every resize, so treating it as a resize would loop.
+  - A `Resize` before the server's first update is kept, not dropped,
+    since the server shows its support only then; without support it is
+    never sent (decision 4).
+  - Re-enabling continuous updates when a viewer comes back sends no
+    request: TigerVNC keeps the damage outside the requested region and
+    sends it once the region is requested again.
+  - Fences: BlockAfter and SyncNext are cleared from answers, since the
+    reader goes on before the answer is written; the backend sends no
+    Fence of its own, since it never changes the pixel format.
+  - The clipboard caps take 4 MiB of text unasked, the size of cut text
+    phase 1 takes, rather than rfbproto's recommended 0: with text as
+    the only format, unasked text is not ambiguous, and it saves a round
+    trip. TigerVNC then sends small text unasked instead of a
+    notification.
+  - The server's text grows a buffer as it decompresses, up to the 4 MiB
+    kept, never to the size the stream claims; the rest of the message
+    is skipped without decompressing it. A stream that does not
+    decompress is skipped with a warning, since the message's length
+    still frames it.
+- **Deviations from the spec.**
+  - The scope said VeNCrypt "with TLS and X.509 subtypes"; the anonymous
+    TLS subtypes are left out, as decided above, and the scope bullet
+    and the task breakdown now say so.
+  - `TLS.Require` is an addition.
+  - Decision 4 now says that a `Resize` before the server shows its
+    support waits for it.
+  - The integration image makes its own CA and server certificate when
+    it is built, and the test reads `ca.pem` and `server.pem` out of
+    the container, rather than the certificates coming from the build
+    context, so that no key material is in the repository and every
+    build has fresh keys.
+- **Mutation checks.** Each change below to the security-relevant code
+  made the named tests fail, and was reverted:
+  - `verify` accepting every certificate: the wrong host, untrusted
+    root, system roots, self-signed and other-pin cases of
+    `TestTLSPolicy`, its insecure cases (no warning), and
+    `TestCertificateErrorMessage`.
+  - Verification without the server's name: the wrong-host case.
+  - Every pin matching: the other-pin case.
+  - Pins compared against the chain's last certificate instead of the
+    leaf: undetected at first, since the fake server presented the leaf
+    alone. The fake server now presents its CA after the leaf, as real
+    servers do, and the pinned-certificate cases fail. Keep the CA in
+    that chain.
+  - Insecure mode without its warning: both insecure cases.
+  - `TLS.Require` ignored in `choose`, in `chooseSubtype`, or for 3.3:
+    the required-TLS cases of `TestVeNCrypt` and `TestChoose`, one for
+    each.
+  - Plain sending the password as the username: every Plain case of
+    `TestVeNCrypt` and the script test of X509Plain.
+  - The prompt skipped: the prompted cases of `TestVeNCrypt`,
+    `TestPlainCredentialErrors` and `TestPasswordPrompt`.
+  - The prompt's answers swapped: the case that asks for both.
+  - Pins matching any certificate in the chain: undetected until
+    review. `TestTLSPolicy` now pins the CA, and that case fails.
+  - `MinVersion` at TLS 1.0: the TLS 1.0 and 1.1 cases of
+    `TestTLSVersion`.
+  - SecurityResult skipped by the top-level type, not VeNCrypt's
+    subtype: the 3.7 None-within cases of `TestVeNCrypt` and
+    `TestVeNCryptScripts`.
+
+  Outside the security code, each of these made
+  `TestExtendedDesktopSize` fail: a refused size sent again, a
+  prohibition ignored, and the refused sizes never forgotten. Passing
+  plain cut text through a string and back again made the Latin-1 case
+  of `TestCutTextAllocations` fail; the UTF-8 case, bounded at five
+  times for the race detector, catches only phase 1's whole path.
+- **Surprises / gotchas.**
+  - TigerVNC lists the plain security types among VeNCrypt's subtypes,
+    so a VeNCrypt-only offer may still mean no TLS.
+  - TigerVNC sends ExtendedDesktopSize for every request for the whole
+    screen, and enables continuous updates only for clients that take
+    Fences.
+  - TigerVNC logs `TLS shutdown failed` and a broken pipe whenever the
+    backend disconnects, since Run closes the TCP connection without
+    TLS's close_notify. It is harmless, since RFB frames its own
+    messages, and the TLS tests that fail on purpose also log `TLS
+    Handshake failed: A TLS fatal alert has been received`.
+  - TigerVNC blacklists an address after five failed logins, and PAM
+    delays a wrong Plain password by about 2 s. The test image raises
+    the blacklist threshold, since the integration test fails to log in
+    on purpose.
+  - Reading the server's text with `io.CopyN` into a `bytes.Buffer`
+    allocated 16 MiB for 4 MiB kept: `ReadFrom` grows a full buffer for
+    512 more bytes, doubling it to 8 MiB. For Extended Clipboard,
+    `bytes.ToValidUTF8` and two `bytes.ReplaceAll` then copied the text
+    three more times. Phase 1's plain cut text, read the same way, then
+    went through a string and back, two more copies: 28 MiB for 4 MiB
+    kept, the sink's copy included, as review found. Both now read
+    through `readText`, whose buffer grows to
+    the kept size at most. Extended text is converted in place; plain cut
+    text is passed on as read if it is UTF-8, and Latin-1 is converted
+    once, into a buffer of its exact UTF-8 size. 4 MiB of either kind of
+    text allocates 11.7 MiB, the sink's copy included (14.4 MiB for
+    Extended Clipboard and 15 MiB for cut text under the race detector);
+    4 MiB of Latin-1, 8 MiB as UTF-8, allocates 24 MiB (27 MiB).
+    `TestExtendedClipboardAllocations` holds Extended Clipboard to four
+    times the bytes kept, and `TestCutTextAllocations` cut text to five,
+    since the race detector adds more there, and Latin-1 to eight; the
+    copies removed would take cut text to seven.
+  - keycodemapdb maps Backslash and Non-US # to one XT keycode, 0x2b:
+    they are one key, on US and ISO keyboards.
+- **Follow-ups.**
+  - Configuration v1 keys for the Sessions task, which registers
+    backends; `internal/config` is unchanged here. A VNC connection
+    needs `username`, and a `tls` block with `require`, `server_name`,
+    `ca_file` (read into `RootCAs`), `pins` (a list) and
+    `insecure_skip_verify`.
+  - Protocol v1's web client must fill `Key.Code` from
+    `KeyboardEvent.code` for QEMU key events to be used; the current
+    Guacamole-protocol client sends keysyms only.
+  - session-core: any viewer whose input is accepted can send `Resize`,
+    which now resizes the remote screen for everyone. Whether only the
+    owner may resize is session-core's to decide.
+  - Send TLS's close_notify on a clean disconnect, without letting a
+    server that does not read delay Run's return.
+  - TigerVNC in the demo stack, and QEMU's VNC server, which would
+    exercise QEMU key events end to end; the integration test checks
+    only that TigerVNC enables them.
+  - Clipboard amplification: an Extended Clipboard provide of about
+    8 KB of zlib decompresses to the 4 MiB kept, which goes to every
+    viewer, and nothing limits how often a server sends one. A broken or
+    hostile server can so make each viewer receive megabytes for every
+    few kilobytes it sends. A byte budget or rate per connection, here
+    or in session-core, would bound it.
+  - Fence answers queue 16 deep. Once 16 wait, the reader waits for the
+    writer to take one, which keeps them in order and bounds memory. A
+    server that sends Fences but does not read what the backend writes
+    fills the TCP send buffer: the writer blocks in its write, the
+    reader blocks behind it, and the session hangs with a frozen screen
+    until Run's context is cancelled, which closes the connection, or
+    the server closes it. A write deadline would turn that into an
+    error; none is set, as in phase 1, where a server that stops reading
+    blocks the writer the same way.

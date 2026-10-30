@@ -5,7 +5,6 @@
 package vnc
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -62,6 +61,8 @@ type decoder struct {
 	sink backend.Sink
 	lim  limits
 	log  *slog.Logger
+	peer peer // told of the extensions' messages; nil ignores them
+	last bool // a LastRect ended the current update
 
 	size        image.Point   // the screen
 	resized     bool          // the current or last update resized the screen
@@ -119,20 +120,20 @@ func (d *decoder) next() (byte, error) {
 	case msgServerCutText:
 		err = d.cutText()
 	default:
-		err = fmt.Errorf("vnc: unknown message type %d", t[0])
+		err = d.extensionMessage(t[0])
 	}
 	return t[0], err
 }
 
 // update applies a FramebufferUpdate.
 func (d *decoder) update() error {
-	d.resized = false
+	d.resized, d.last = false, false
 	d.drawn = 0
 	if err := d.read(d.hdr[:3]); err != nil {
 		return fmt.Errorf("vnc: framebuffer update: %w", err)
 	}
 	n := int(binary.BigEndian.Uint16(d.hdr[1:]))
-	for i := range n {
+	for i := 0; i < n && !d.last; i++ {
 		err := d.ctx.Err()
 		if err == nil {
 			err = d.rect()
@@ -175,7 +176,7 @@ func (d *decoder) rect() error {
 	case encCursor:
 		return d.setCursor(image.Pt(x, y), w, h)
 	}
-	return fmt.Errorf("unsupported encoding %d", enc)
+	return d.extensionRect(enc, r)
 }
 
 // spend counts the pixels of r on the screen against the update's
@@ -352,17 +353,12 @@ func (d *decoder) cutText() error {
 	}
 	n := binary.BigEndian.Uint32(d.hdr[3:])
 	if n&(1<<31) != 0 {
-		// A negative length is Extended Clipboard's, which the
-		// backend does not ask for.
-		return fmt.Errorf("vnc: cut text of %d bytes", int32(n)) // #nosec G115 -- shown as the signed length it is
+		// A negative length is Extended Clipboard's.
+		return d.extendedClipboard(-int64(int32(n))) // #nosec G115 -- the signed length it is
 	}
 	keep := min(int64(n), maxClipboard)
-	// The buffer grows as the text arrives, not to the length claimed.
-	var buf bytes.Buffer
-	if _, err := io.CopyN(&buf, d.r, keep); err != nil {
-		if errors.Is(err, io.EOF) {
-			err = io.ErrUnexpectedEOF
-		}
+	b, err := readText(d.r, int(keep))
+	if err != nil {
 		return fmt.Errorf("vnc: cut text: %w", err)
 	}
 	if rest := int64(n) - keep; rest > 0 {
@@ -371,11 +367,14 @@ func (d *decoder) cutText() error {
 			return fmt.Errorf("vnc: cut text: %w", err)
 		}
 	}
-	b := buf.Bytes()
 	if t := trimPartialRune(b); int64(n) > keep && len(t) < len(b) && utf8.Valid(t) {
 		b = t // UTF-8 cut short; Latin-1 is kept whole
 	}
-	d.sink.Clipboard("text/plain", []byte(text(b)))
+	// The text is passed on as it was read, unless it is Latin-1.
+	if !utf8.Valid(b) {
+		b = fromLatin1(b)
+	}
+	d.sink.Clipboard("text/plain", b)
 	return nil
 }
 
