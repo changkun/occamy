@@ -141,10 +141,10 @@ entirely.
 
 ## Spike results
 
-Step 1 ran on 2026-10-30 against xrdp 0.10.1 (Debian trixie, xorgxrdp)
-in the bench desktop image. Step 2 has not run: there is no Windows
-host, and [#32](https://github.com/changkun/occamy/issues/32) stays
-open. Step 3 has not run yet.
+Steps 1 and 3 ran on 2026-10-30 against xrdp 0.10.1 (Debian trixie,
+xorgxrdp) in the bench desktop image. Step 2 has not run: there is no
+Windows host, and [#32](https://github.com/changkun/occamy/issues/32)
+stays open.
 
 | Criterion | Result |
 |-----------|--------|
@@ -260,12 +260,49 @@ open. Step 3 has not run yet.
   - CLIPRDR and DISP over static virtual channels and DRDYNVC; dynamic
     resize needs DISP.
   - GFX without AVC (RemoteFX, RemoteFX Progressive, planar, ClearCodec,
-    ZGFX), measured against bitmap updates in step 3.
+    ZGFX). Step 3 shows this is required, not optional.
+  - Pacing of bitmap updates. Bitmap updates have no frame
+    acknowledgement, so the backend has to pace xrdp itself: Suppress
+    Output while the session is behind, or the Frame Acknowledge
+    capability with surface commands.
+  - Scrolls as screen-to-screen copies. Advertising the ScrBlt order and
+    applying it with `Sink.CopyRect` should make G3 cheap; whether
+    xorgxrdp sends it is unchecked.
   - Keyboard layouts other than US English, and keysyms that need
     AltGr.
   - Auto-reconnect cookies and the Save Session Info PDU.
+- **Step 3: bytes on the RDP link.** `TestBytesAgainstGuacd` (under the
+  `rdp_integration` tag) drives the bench scenes through this client and
+  through guacd 1.6's FreeRDP against the same xrdp. It reads the bytes
+  the xrdp container sent, TCP and TLS included. Each series is the
+  median of three runs; host load was 4 to 8. guacd's FreeRDP
+  negotiates the GFX pipeline with RemoteFX Progressive, which is lossy;
+  xrdp's log says so. The step was meant to compare against guacd with
+  AVC, but this xrdp build has no H.264 encoder, so RemoteFX Progressive
+  is the baseline. The client's bitmap updates are lossless and unpaced,
+  so the comparison is not like for like. guacd's lower rates also
+  include the frames that GFX flow control kept xrdp from sending.
+
+  | KB/s from xrdp | G1 idle | G3 scroll | G4 drag | G5 motion | G6 photo (5 s) |
+  |----------------|--------:|----------:|--------:|----------:|---------------:|
+  | guacd, GFX RemoteFX Progressive, 32 bpp | 1.3 | 11,502 | 1,008 | 1,316 | 33 |
+  | native, planar, 32 bpp | 7.4 | 19,080 | 13,048 | 49,769 | 512 |
+  | guacd, GFX RemoteFX Progressive, 16 bpp | 1.3 | 11,459 | 1,015 | 1,313 | 30 |
+  | native, interleaved RLE, 16 bpp | 0.3 | 10,253 | 7,056 | 30,217 | 315 |
+
+  Native idle at 32 bpp is one full-screen redraw (79 KB) arriving
+  inside the window, not a steady rate. Full-screen motion at 30 fps
+  costs 50 MB/s (400 Mbit/s) over bitmap updates, 38 times guacd's
+  link. The drag costs 13 times guacd's link, and the photograph 15
+  times. Only scrolling is close, because RemoteFX Progressive does
+  poorly on scrolled text too. Bitmap updates are fine for a LAN
+  between `occamyd` and a lightly used desktop. For motion they are not
+  a beta-quality path.
 - **Verdict so far.** Step 1 passed in one working session, decoding
   exactly and fuzzing clean. Nothing in it argues for a helper process.
-  Every remaining risk is on the Windows path: live NLA, licensing and
-  the message channel. More xrdp work cannot retire those, so the
-  decision between D and a helper waits on step 2.
+  Step 3 confirms what option D already scopes: GFX with RemoteFX
+  Progressive and flow control is required work for beta, not a later
+  optimization. Every remaining protocol risk is on the Windows path:
+  live NLA, licensing and the message channel. More xrdp work cannot
+  retire those, so the decision between D and a helper waits on
+  step 2.
