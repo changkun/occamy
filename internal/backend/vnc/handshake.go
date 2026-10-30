@@ -173,12 +173,12 @@ func security(r io.Reader, w io.Writer, v int, a auth) (byte, error) {
 		case secInvalid:
 			return 0, refused(r)
 		case secNone, secVNCAuth:
-			if a.requireTLS {
-				return 0, fmt.Errorf("%w: the server chose type %d, without TLS", ErrNoSecurityType, st)
-			}
 			t = byte(st)
 		default:
 			return 0, fmt.Errorf("%w: the server chose type %d", ErrNoSecurityType, st)
+		}
+		if a.requireTLS {
+			return 0, fmt.Errorf("%w: the server chose type %d, without TLS", ErrNoSecurityType, t)
 		}
 	} else {
 		var b [256]byte

@@ -29,7 +29,8 @@ import (
 
 const (
 	encExtendedDesktopSize int32 = -308
-	msgSetDesktopSize            = 251
+
+	msgSetDesktopSize = 251
 	// screenSize is the size of a SCREEN in a layout.
 	screenSize = 16
 )

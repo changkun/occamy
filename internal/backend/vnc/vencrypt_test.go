@@ -337,13 +337,17 @@ func TestTLSPolicy(t *testing.T) {
 				if !strings.Contains(err.Error(), ce.Fingerprint) {
 					t.Errorf("Run = %v, which does not show the fingerprint", err)
 				}
-				switch want := tt.err.(type) {
-				case x509.HostnameError:
-					if !errors.As(err, &want) {
+				var (
+					host      x509.HostnameError
+					authority x509.UnknownAuthorityError
+				)
+				switch {
+				case errors.As(tt.err, &host):
+					if !errors.As(err, &host) {
 						t.Errorf("Run = %v, want a wrong host", err)
 					}
-				case x509.UnknownAuthorityError:
-					if !errors.As(err, &want) {
+				case errors.As(tt.err, &authority):
+					if !errors.As(err, &authority) {
 						t.Errorf("Run = %v, want an unknown authority", err)
 					}
 				default:
