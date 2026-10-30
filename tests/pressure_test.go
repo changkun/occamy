@@ -5,6 +5,7 @@
 package tests
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 )
 
 func successConnect(url string) error {
@@ -27,13 +28,14 @@ func failConnect(url string) error {
 	if err != nil {
 		return err
 	}
-	defer ws.Close()
+	defer ws.CloseNow()
 
-	ws.SetReadDeadline(time.Now().Add(10 * time.Second))
-	if _, _, err := ws.ReadMessage(); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, _, err := ws.Read(ctx); err != nil {
 		return err
 	}
-	return ws.WriteMessage(websocket.TextMessage, []byte("bad instruction"))
+	return ws.Write(context.Background(), websocket.MessageText, []byte("bad instruction"))
 }
 
 // TestConnectionPressure opens many concurrent sessions to every demo

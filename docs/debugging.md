@@ -6,10 +6,12 @@ behind it, and the tests that measure them under load.
 
 ## Debug mode
 
-`mode` in [conf.yaml](../conf.yaml) is `debug`, `release` or `test`.
-`conf.yaml` and the demo stack's [docker/occamy.yaml](../docker/occamy.yaml)
-set `debug`. In debug mode, `occamyd` serves Go's profiling routes under
-`/debug/pprof/` on its own address, with no token.
+`mode` in [conf.yaml](../conf.yaml) is `debug`, `release` or `test`;
+a file without `mode` runs in debug mode, and any other value stops
+`occamyd` at start. `conf.yaml` and the demo stack's
+[docker/occamy.yaml](../docker/occamy.yaml) set `debug`. In debug mode,
+`occamyd` serves Go's profiling routes under `/debug/pprof/` on its own
+address, with no token, and says so in its log at start.
 Anyone who can reach `occamyd` can then read its profiles and its
 command line. Set `mode: release` wherever others can reach it: release
 mode does not register the routes.

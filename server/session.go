@@ -14,10 +14,8 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
-	"sync"
-	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 
 	"changkun.de/x/occamy/internal/guacamole"
 	"changkun.de/x/occamy/internal/guacd"
@@ -50,20 +48,37 @@ var errBadRequest = errors.New("bad request")
 
 // closeStatus maps the error a connection ended with to a WebSocket close
 // code and a Guacamole status code.
-func closeStatus(err error) (code, status int) {
+func closeStatus(err error) (code websocket.StatusCode, status int) {
 	var ge *guacd.Error
 	switch {
 	case err == nil:
-		return websocket.CloseNormalClosure, statusSuccess
+		return websocket.StatusNormalClosure, statusSuccess
 	case errors.As(err, &ge) && ge.Status != 0:
-		return websocket.CloseInternalServerErr, ge.Status
+		return websocket.StatusInternalError, ge.Status
 	case errors.Is(err, errBadRequest):
-		return websocket.ClosePolicyViolation, statusClientBadRequest
+		return websocket.StatusPolicyViolation, statusClientBadRequest
 	case errors.Is(err, context.DeadlineExceeded):
-		return websocket.CloseInternalServerErr, statusUpstreamTimeout
+		return websocket.StatusInternalError, statusUpstreamTimeout
 	default:
-		return websocket.CloseInternalServerErr, statusServerError
+		return websocket.StatusInternalError, statusServerError
 	}
+}
+
+// closeWith closes the WebSocket with the close code for err and its
+// Guacamole status code as the reason. The close handshake waits up to
+// 5 s each for the close frame to go out and for the client's to come
+// back. Only the first call on a connection does anything.
+func closeWith(ws *websocket.Conn, err error) {
+	if errors.Is(err, websocket.ErrMessageTooBig) {
+		// coder/websocket has sent 1009 already. Its close handshake would
+		// first read the rest of the oversized message with no deadline,
+		// so a client that goes quiet would hold the handler forever.
+		_ = ws.CloseNow()
+		return
+	}
+	code, status := closeStatus(err)
+	// Best effort: the client may already be gone.
+	_ = ws.Close(code, strconv.Itoa(status))
 }
 
 // display is the client's screen, announced to guacd in the handshake.
@@ -99,17 +114,17 @@ func intParam(q url.Values, name string, fallback, lo, hi int) int {
 	return min(max(v, lo), hi)
 }
 
-// aLongTimeAgo is a deadline in the past, used to abort blocked reads.
-var aLongTimeAgo = time.Unix(1, 0)
-
 // serveIO proxies instructions between guacd and the client until either
-// side ends, and returns why, or nil if a side closed normally.
+// side ends, and returns why, or nil if a side closed normally. It closes
+// the WebSocket with the status for that reason.
 func serveIO(conn *guacd.Conn, ws *websocket.Conn) error {
-	var wmu sync.Mutex // gorilla/websocket allows one writer at a time
+	// coder/websocket closes the connection when the context of a read or
+	// a write ends, so session I/O runs without one, as it ran without
+	// deadlines on gorilla/websocket. Both goroutines write, which
+	// coder/websocket allows.
+	ctx := context.Background()
 	send := func(b []byte) error {
-		wmu.Lock()
-		defer wmu.Unlock()
-		return ws.WriteMessage(websocket.TextMessage, b)
+		return ws.Write(ctx, websocket.MessageText, b)
 	}
 
 	// Each side reports nil when it ends normally: guacd closes after a
@@ -142,7 +157,7 @@ func serveIO(conn *guacd.Conn, ws *websocket.Conn) error {
 	}()
 	go func() {
 		for {
-			_, msg, err := ws.ReadMessage()
+			_, msg, err := ws.Read(ctx)
 			if err != nil {
 				exit <- clientError(err)
 				return
@@ -155,29 +170,35 @@ func serveIO(conn *guacd.Conn, ws *websocket.Conn) error {
 	}()
 
 	err := <-exit
-	// Unblock the other side: closing guacd ends its reader, and a read
-	// deadline ends the WebSocket reader without closing the socket, so
-	// that the caller can still send a close frame.
+	// Unblock the other side: closing guacd ends its reader, and closing
+	// the WebSocket ends the client's reader and any blocked write. A
+	// cancelled read would close the WebSocket without a close frame, so
+	// the close carries the status here.
 	conn.Close()
-	_ = ws.NetConn().SetReadDeadline(aLongTimeAgo)
+	closeWith(ws, err)
 	<-exit //nolint:errcheck // a consequence of the first error
 	return err
 }
 
 // clientError classifies an error on the client's WebSocket. A client
-// that closes, with or without a close frame, or whose connection drops,
-// has left; only a close for a protocol violation is a failure.
+// that closes normally, with or without a close frame, or whose
+// connection drops, has left. A close for any other reason, such as a
+// protocol violation, and a message over the read limit are failures.
+// coder/websocket reports a dropped connection as a plain error, not as
+// close code 1006 as gorilla/websocket did, and every plain error but the
+// read limit counts as leaving, as before.
 func clientError(err error) error {
-	var ce *websocket.CloseError
-	if errors.As(err, &ce) {
-		switch ce.Code {
-		case websocket.CloseNormalClosure, websocket.CloseGoingAway,
-			websocket.CloseNoStatusReceived, websocket.CloseAbnormalClosure:
-			return nil
+	switch websocket.CloseStatus(err) {
+	case websocket.StatusNormalClosure, websocket.StatusGoingAway, websocket.StatusNoStatusRcvd:
+		return nil
+	case -1: // no close frame from the client
+		if errors.Is(err, websocket.ErrMessageTooBig) {
+			return fmt.Errorf("from client: %w", err)
 		}
+		return nil
+	default:
 		return fmt.Errorf("from client: %w", err)
 	}
-	return nil
 }
 
 // internalOpcode prefixes instructions with the empty opcode, which the
