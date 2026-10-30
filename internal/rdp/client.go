@@ -25,7 +25,6 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 )
 
@@ -569,7 +568,7 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 // end of the stream, or the reset a server's kernel sends instead when
 // the server closes with the client's input unread.
 func HungUp(err error) bool {
-	return errors.Is(err, io.EOF) || errors.Is(err, syscall.ECONNRESET)
+	return errors.Is(err, io.EOF) || errors.Is(err, errReset)
 }
 
 // disconnected returns Run's result for a server that disconnected.
