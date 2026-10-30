@@ -13,17 +13,20 @@ package vnc
 //	OCCAMY_VNC_ARD_ADDR=mac.local:5900 go test -tags integration -run TestMacOS -v ./internal/backend/vnc
 //
 // That reads the server's version and the security types it offers,
-// and disconnects before choosing one. With OCCAMY_VNC_ARD_USER and
+// and the generator and prime of Apple Remote Desktop's group, and
+// disconnects before sending any credential. With OCCAMY_VNC_ARD_USER and
 // OCCAMY_VNC_ARD_PASSWORD, a Mac account's, it also logs in with Apple
 // Remote Desktop authentication and waits for the screen. Its key
 // exchange authenticates no server, so run it on a network you trust.
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
 	"net"
 	"os"
 	"slices"
@@ -48,6 +51,12 @@ func TestMacOS(t *testing.T) {
 	if !slices.Contains(types, secARD) {
 		t.Fatalf("no Apple Remote Desktop authentication among %v", types)
 	}
+	g, n, p, err := ardGroup(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("Apple Remote Desktop's group: generator %d, key length %d bytes, a prime of %d bits%s",
+		g, n, p.BitLen(), map[bool]string{true: ", RFC 2409's group 2"}[p.Cmp(rfc2409Group2) == 0])
 
 	// Without ARD, a Mac that offers none of the other types the backend
 	// takes is refused before any credential is asked for.
@@ -94,20 +103,62 @@ func TestMacOS(t *testing.T) {
 // client's, the security types it offers, and disconnects before
 // choosing one.
 func securityTypes(addr string) (version string, types []byte, err error) {
-	c, err := net.DialTimeout("tcp", addr, timeout)
+	c, err := dialProbe(addr)
 	if err != nil {
 		return "", nil, err
 	}
 	defer c.Close()
+	return readSecurityTypes(c)
+}
+
+// ardGroup chooses Apple Remote Desktop authentication, reads the
+// server's generator, key length and prime, and disconnects before
+// sending anything more.
+func ardGroup(addr string) (g, n int, p *big.Int, err error) {
+	c, err := dialProbe(addr)
+	if err != nil {
+		return 0, 0, nil, err
+	}
+	defer c.Close()
+	if _, _, err := readSecurityTypes(c); err != nil {
+		return 0, 0, nil, err
+	}
+	if _, err := c.Write([]byte{secARD}); err != nil {
+		return 0, 0, nil, err
+	}
+	var b [4]byte
+	if _, err := io.ReadFull(c, b[:]); err != nil {
+		return 0, 0, nil, err
+	}
+	g, n = int(binary.BigEndian.Uint16(b[:])), int(binary.BigEndian.Uint16(b[2:]))
+	prime := make([]byte, n)
+	if _, err := io.ReadFull(c, prime); err != nil {
+		return g, n, nil, err
+	}
+	return g, n, new(big.Int).SetBytes(prime), nil
+}
+
+func dialProbe(addr string) (net.Conn, error) {
+	c, err := net.DialTimeout("tcp", addr, timeout)
+	if err != nil {
+		return nil, err
+	}
 	if err := c.SetDeadline(time.Now().Add(timeout)); err != nil {
+		c.Close()
+		return nil, err
+	}
+	return c, nil
+}
+
+// readSecurityTypes reads the server's version, answers it, and reads
+// the security types offered, or the one a 3.3 server chose.
+func readSecurityTypes(c net.Conn) (version string, types []byte, err error) {
+	var b [12]byte
+	if _, err := io.ReadFull(c, b[:]); err != nil {
 		return "", nil, err
 	}
-	var b [256]byte
-	if _, err := io.ReadFull(c, b[:12]); err != nil {
-		return "", nil, err
-	}
-	version = strings.TrimSpace(string(b[:12]))
-	v, err := parseVersion(b[:12])
+	version = strings.TrimSpace(string(b[:]))
+	v, err := parseVersion(b[:])
 	if err != nil {
 		return version, nil, err
 	}
