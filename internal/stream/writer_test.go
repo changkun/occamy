@@ -871,3 +871,73 @@ func TestInputJoinsPending(t *testing.T) {
 		}
 	})
 }
+
+// failing is a terminal backend whose remote cannot be reached.
+type failing struct{ backend.Backend }
+
+func (failing) Run(context.Context, backend.Sink) error { return errors.New("connection refused") }
+
+// sent records the messages written to it.
+type sent struct {
+	mu sync.Mutex
+	p  [][]byte
+}
+
+func (c *sent) ReadMessage(ctx context.Context) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (c *sent) WriteMessage(_ context.Context, p []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.p = append(c.p, slices.Clone(p))
+	return nil
+}
+
+// A session that ends before its stream begins, as when the backend
+// fails at once, closes the stream with the session's end, not with an
+// internal error.
+func TestEndedBeforeServe(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, owner, err := session.Start(t.Context(), session.Config{Backend: failing{backendtest.NewTerminal(80, 24, 0)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-s.Done()
+		c := &sent{}
+		if err := Serve(t.Context(), c, owner, termHello, Config{}); err != nil {
+			t.Errorf("Serve returned %v", err)
+		}
+		if len(c.p) != 1 {
+			t.Fatalf("sent %d messages, want close", len(c.p))
+		}
+		var m protocol.Close
+		h, body, err := protocol.Split(c.p[0], protocol.Limits{})
+		if err != nil || h.Type != protocol.TypeClose || m.Decode(body, protocol.Limits{}) != nil {
+			t.Fatalf("sent %x, want close", c.p[0])
+		}
+		if m.Code != protocol.CloseBackendFailed || m.Reason != session.Failed.String() {
+			t.Errorf("close %+v, want backend failed", m)
+		}
+	})
+}
+
+// A resize-request is clamped to what a backend of the session's class
+// is asked for.
+func TestBoundResize(t *testing.T) {
+	for _, tc := range []struct {
+		class         backend.Class
+		width, height int
+		want          backend.Resize
+	}{
+		{backend.Terminal, 80, 24, backend.Resize{Width: 80, Height: 24}},
+		{backend.Terminal, 65535, 65535, backend.Resize{Width: terminal.MaxCols, Height: terminal.MaxRows}},
+		{backend.Graphical, 1920, 1080, backend.Resize{Width: 1920, Height: 1080}},
+		{backend.Graphical, 65535, 65535, backend.Resize{Width: backend.MaxResizeSide, Height: backend.MaxResizeSide}},
+	} {
+		if got := boundResize(tc.class, tc.width, tc.height); got != tc.want {
+			t.Errorf("boundResize(%v, %d, %d) = %+v, want %+v", tc.class, tc.width, tc.height, got, tc.want)
+		}
+	}
+}

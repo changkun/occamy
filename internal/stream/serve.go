@@ -94,6 +94,12 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	// The client's visibility applies before the first frame, so that a
 	// client that starts hidden is sent none.
 	if err := v.View(hello.Visible, image.Rectangle{}); err != nil {
+		if errors.Is(err, session.ErrEnded) {
+			// The session ended before the stream began, as when its
+			// backend fails at once: the client learns why, as it would
+			// have a moment later.
+			return closeEnded(ctx, c, s)
+		}
 		return err
 	}
 	welcome := protocol.Welcome{
@@ -148,6 +154,17 @@ func closeWith(ctx context.Context, c Conn, m protocol.Close) error {
 	ctx, cancel := context.WithTimeout(ctx, closeTimeout)
 	defer cancel()
 	return c.WriteMessage(ctx, m.Append(nil))
+}
+
+// closeEnded sends the close for the end of s, which is ending, once its
+// end is known.
+func closeEnded(ctx context.Context, c Conn, s *session.Session) error {
+	select {
+	case <-s.Done():
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return closeWith(ctx, c, closeFor(s.End()))
 }
 
 func role(r session.Role) protocol.Role {

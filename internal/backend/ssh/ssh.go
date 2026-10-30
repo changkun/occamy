@@ -25,6 +25,7 @@ import (
 	gossh "golang.org/x/crypto/ssh"
 
 	"changkun.de/x/occamy/internal/backend"
+	"changkun.de/x/occamy/internal/terminal"
 )
 
 // Defaults for the fields that Config leaves zero.
@@ -36,8 +37,12 @@ const (
 	DefaultDialTimeout = 15 * time.Second
 )
 
-// MaxSize is the largest number of columns or rows a terminal may have.
-const MaxSize = 0xffff
+// MaxCols and MaxRows are the largest terminal the backend asks the
+// server for: the largest the session's terminal emulator keeps.
+const (
+	MaxCols = terminal.MaxCols
+	MaxRows = terminal.MaxRows
+)
 
 // inputQueue is the number of inputs that Input holds before it fails.
 const inputQueue = 64
@@ -191,7 +196,7 @@ func hostPort(addr string) (string, error) {
 }
 
 func validSize(cols, rows int) bool {
-	return cols >= 1 && rows >= 1 && cols <= MaxSize && rows <= MaxSize
+	return cols >= 1 && rows >= 1 && cols <= MaxCols && rows <= MaxRows
 }
 
 // loadKeys reads and parses the private keys at paths.

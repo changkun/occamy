@@ -40,10 +40,6 @@ type screen struct {
 	cols, rows    int
 }
 
-// maxGraphicalSide bounds the screen sides a hello asks guacd for, as
-// the v0 routes' display hints do.
-const maxGraphicalSide = 8192
-
 // backendMaker makes the backend of one session.
 type backendMaker struct {
 	// name is the backend as the session's state reports it: ssh, vnc or
@@ -172,8 +168,8 @@ func bridgeConfig(g config.Guacd, protocol string, t target, s screen) (guacd.Co
 	return guacd.Config{
 		Protocol: protocol,
 		Params:   params,
-		Width:    min(s.width, maxGraphicalSide),
-		Height:   min(s.height, maxGraphicalSide),
+		Width:    min(s.width, backend.MaxResizeSide),
+		Height:   min(s.height, backend.MaxResizeSide),
 	}, nil
 }
 
@@ -196,7 +192,7 @@ func (a *askUser) Input(ev backend.InputEvent) error {
 	if b == nil {
 		defer a.mu.Unlock()
 		if r, ok := ev.(backend.Resize); ok {
-			if r.Width < 1 || r.Height < 1 || r.Width > ssh.MaxSize || r.Height > ssh.MaxSize {
+			if r.Width < 1 || r.Height < 1 || r.Width > ssh.MaxCols || r.Height > ssh.MaxRows {
 				return fmt.Errorf("ssh: invalid terminal size %dx%d", r.Width, r.Height)
 			}
 			a.cfg.Cols, a.cfg.Rows = r.Width, r.Height

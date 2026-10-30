@@ -53,7 +53,7 @@ func TestBridgeConfig(t *testing.T) {
 		"security": "nla", "hostname": "fd00::5", "port": "3390",
 		"username": "carol", "password": "s3cret", "disable-gfx": "true",
 	}
-	if cfg.Protocol != "rdp" || !maps.Equal(cfg.Params, want) || cfg.Width != 1920 || cfg.Height != maxGraphicalSide {
+	if cfg.Protocol != "rdp" || !maps.Equal(cfg.Params, want) || cfg.Width != 1920 || cfg.Height != backend.MaxResizeSide {
 		t.Errorf("config %+v", cfg)
 	}
 	if g.Params["rdp"]["hostname"] != "configured" || len(g.Params["rdp"]) != 2 {

@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -23,7 +24,11 @@ import (
 
 	"changkun.de/x/occamy/internal/auth"
 	"changkun.de/x/occamy/internal/backend"
+	"changkun.de/x/occamy/internal/backend/backendtest"
 	"changkun.de/x/occamy/internal/config"
+	"changkun.de/x/occamy/internal/session"
+	"changkun.de/x/occamy/internal/stream"
+	"changkun.de/x/occamy/internal/terminal"
 	"changkun.de/x/occamy/protocol"
 )
 
@@ -714,5 +719,130 @@ func TestTracker(t *testing.T) {
 	}()
 	if !tr.wait(5 * time.Second) {
 		t.Error("wait did not see the streams end")
+	}
+}
+
+// TestRev111PanicLeaks checks that a stream that panics closes with an
+// internal error and leaves nothing behind: no WebSocket reader, no
+// owner's stream that a newer one would wait for, and no viewer.
+func TestRev111PanicLeaks(t *testing.T) {
+	streamServe = func(ctx context.Context, c stream.Conn, _ *session.Viewer, _ protocol.Hello, _ stream.Config) error {
+		if _, err := c.ReadMessage(ctx); err != nil { // starts the WebSocket's reader
+			return err
+		}
+		panic("injected")
+	}
+	t.Cleanup(func() { streamServe = stream.Serve })
+	ts, _ := sessionServer(t, nil)
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	path := "/api/v1/sessions/" + o.ID + "/stream"
+	start := time.Now()
+	for range 3 {
+		c, status, err := dial(ts.srv.URL+path, withToken(alice), &termHello, nil)
+		if err != nil {
+			t.Fatalf("%d %v", status, err)
+		}
+		c.send(t, protocol.Ping{Nonce: 1})
+		c.closed(t, protocol.CloseInternalError)
+	}
+	if d := time.Since(start); d >= takeoverTimeout {
+		t.Errorf("the owner's streams took %v: one waited for a stream that panicked", d)
+	}
+	info := ts.s.session(o.ID)
+	info.mu.Lock()
+	own := info.ownerStream
+	info.mu.Unlock()
+	if own != nil {
+		t.Error("the owner's stream that panicked is still the owner's stream")
+	}
+	if v := info.s.Viewers(); len(v) != 0 {
+		t.Errorf("viewers %+v after the streams panicked", v)
+	}
+	waitFor(t, "the WebSocket readers to end", func() bool {
+		buf := make([]byte, 1<<20)
+		return !strings.Contains(string(buf[:runtime.Stack(buf, true)]), "server.(*wsConn).read(")
+	})
+	if !ts.s.streams.wait(5 * time.Second) {
+		t.Error("the streams are still tracked")
+	}
+}
+
+// TestStreamSizeBounds checks that the sizes a client asks for are
+// clamped before the backend sees them: the owner's hello, and the
+// resize-request of a viewer, for a terminal and for a graphical screen.
+func TestStreamSizeBounds(t *testing.T) {
+	ts, fb := sessionServer(t, nil)
+	alice := ts.token(t, "alice", "ops")
+	hello := termHello
+	hello.Cols, hello.Rows, hello.Width, hello.Height = 65535, 65535, 65535, 65535
+	c := ts.stream(t, "/api/v1/connections/ops-shell/stream", alice, hello)
+	if _, s, _ := fb.last(); s != (screen{width: backend.MaxResizeSide, height: backend.MaxResizeSide, cols: terminal.MaxCols, rows: terminal.MaxRows}) {
+		t.Errorf("the hello's screen reached the backend as %+v", s)
+	}
+	share := func(id string) string {
+		r := ts.api(t, http.MethodPost, "/api/v1/sessions/"+id+"/shares", alice, `{"role":"viewer"}`)
+		var sh shareResponse
+		if err := json.Unmarshal(r.body, &sh); err != nil {
+			t.Fatal(err)
+		}
+		return sh.Token
+	}
+	resized := func(inputs func() []backend.InputEvent, want backend.Resize) {
+		t.Helper()
+		waitFor(t, "the resize", func() bool {
+			for _, ev := range inputs() {
+				if r, ok := ev.(backend.Resize); ok && r.Width != 80 {
+					if r != want {
+						t.Fatalf("resize %+v reached the backend, want %+v", r, want)
+					}
+					return true
+				}
+			}
+			return false
+		})
+	}
+	_, _, term := fb.last()
+	id := c.welcome.SessionID
+	viewer := ts.stream(t, "/api/v1/sessions/"+id+"/stream", share(id), termHello)
+	viewer.send(t, protocol.ResizeRequest{Seq: 1, Width: 65535, Height: 65535})
+	resized(term.Inputs, backend.Resize{Width: terminal.MaxCols, Height: terminal.MaxRows})
+
+	var scr *backendtest.Screen
+	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
+		scr = backendtest.NewScreen(64, 48, 0)
+		return scr, nil
+	})
+	graphical := protocol.Hello{Visible: true, Capabilities: protocol.Capabilities{Codecs: []protocol.Codec{protocol.CodecRaw}}}
+	o := ts.openSession(t, alice, "ops-shell")
+	path := "/api/v1/sessions/" + o.ID + "/stream"
+	ts.stream(t, path, o.StreamToken, graphical)
+	viewer = ts.stream(t, path, share(o.ID), graphical)
+	viewer.send(t, protocol.ResizeRequest{Seq: 1, Width: 65535, Height: 65535})
+	resized(scr.Inputs, backend.Resize{Width: backend.MaxResizeSide, Height: backend.MaxResizeSide})
+}
+
+// failing is a terminal backend whose remote cannot be reached.
+type failing struct{ backend.Backend }
+
+func (failing) Run(context.Context, backend.Sink) error { return errors.New("connection refused") }
+
+// TestStreamBackendFails checks that a stream whose backend fails at
+// once, however soon, closes with backend failed: before its welcome as
+// after.
+func TestStreamBackendFails(t *testing.T) {
+	ts, _ := sessionServer(t, nil)
+	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
+		return failing{backendtest.NewTerminal(80, 24, 0)}, nil
+	})
+	alice := ts.token(t, "alice", "ops")
+	for range 10 {
+		c, status, err := dial(ts.srv.URL+"/api/v1/connections/ops-shell/stream", withToken(alice), &termHello, nil)
+		if err != nil {
+			t.Fatalf("%d %v", status, err)
+		}
+		if cl := c.closed(t, protocol.CloseBackendFailed); cl.Reason != "failed" {
+			t.Errorf("close %v %q", cl.Code, cl.Reason)
+		}
 	}
 }

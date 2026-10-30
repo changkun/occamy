@@ -347,6 +347,27 @@ func TestDiffResize(t *testing.T) {
 	}
 }
 
+// A size out of bounds is clamped, however a client asked for it.
+func TestSizeBounds(t *testing.T) {
+	for _, tc := range []struct{ cols, rows, wantCols, wantRows int }{
+		{0, -1, 1, 1},
+		{80, 24, 80, 24},
+		{MaxCols, MaxRows, MaxCols, MaxRows},
+		{MaxCols + 1, MaxRows + 1, MaxCols, MaxRows},
+		{65535, 65535, MaxCols, MaxRows},
+	} {
+		s := New(tc.cols, tc.rows, Options{}).Snapshot()
+		if s.Cols != tc.wantCols || s.Rows != tc.wantRows {
+			t.Errorf("New(%d, %d) is %dx%d, want %dx%d", tc.cols, tc.rows, s.Cols, s.Rows, tc.wantCols, tc.wantRows)
+		}
+		term := New(80, 24, Options{})
+		term.Resize(tc.cols, tc.rows)
+		if s := term.Snapshot(); s.Cols != tc.wantCols || s.Rows != tc.wantRows {
+			t.Errorf("Resize(%d, %d) is %dx%d, want %dx%d", tc.cols, tc.rows, s.Cols, s.Rows, tc.wantCols, tc.wantRows)
+		}
+	}
+}
+
 func TestDiffAltScreen(t *testing.T) {
 	term := New(20, 4, Options{})
 	w := writerOf(term)

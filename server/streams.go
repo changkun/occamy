@@ -12,6 +12,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/session"
 	"changkun.de/x/occamy/internal/stream"
+	"changkun.de/x/occamy/internal/terminal"
 	"changkun.de/x/occamy/protocol"
 )
 
@@ -352,7 +354,7 @@ func (s *server) serve(ctx context.Context, c *wsConn, info *sessionInfo, v *ses
 		info.ownerStream = own
 		info.mu.Unlock()
 	}
-	err := stream.Serve(ctx, c, v, hello, stream.Config{SessionID: info.id, Capabilities: streamCapabilities})
+	err := serveStream(ctx, c, v, hello, stream.Config{SessionID: info.id, Capabilities: streamCapabilities})
 	if own != nil {
 		info.mu.Lock()
 		if info.ownerStream == own {
@@ -361,7 +363,12 @@ func (s *server) serve(ctx context.Context, c *wsConn, info *sessionInfo, v *ses
 		info.mu.Unlock()
 		close(own.done)
 	}
+	var p panicked
 	switch m := c.replacement(); {
+	case errors.As(err, &p):
+		// #nosec G706 -- the session's ID is occamyd's, and the panic is the stream's.
+		log.Printf("session %s: viewer %d: the stream panicked: %v\n%s", info.id, v.ID(), p.value, p.stack)
+		c.finish(protocol.Close{Code: protocol.CloseInternalError, Reason: "internal error"}, true)
 	case m != nil:
 		c.finish(*m, true)
 	case err == nil:
@@ -382,13 +389,39 @@ func (s *server) serve(ctx context.Context, c *wsConn, info *sessionInfo, v *ses
 	}
 }
 
-// screenOf is the size a hello asks for.
+// streamServe is stream.Serve, a variable for tests.
+var streamServe = stream.Serve
+
+// panicked is the error of a stream that panicked.
+type panicked struct {
+	value any
+	stack []byte
+}
+
+func (p panicked) Error() string { return fmt.Sprintf("panic: %v", p.value) }
+
+// serveStream runs stream.Serve and recovers from its panic: the viewer
+// leaves the session, and serve still closes the WebSocket and lets a
+// newer stream of the owner in. net/http would recover the panic too,
+// but leave an upgraded connection open, with its reader running, until
+// the client left.
+func serveStream(ctx context.Context, c *wsConn, v *session.Viewer, hello protocol.Hello, cfg stream.Config) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = panicked{value: r, stack: debug.Stack()}
+			v.Leave() // Serve's own deferred Leave has run, unless it panicked before
+		}
+	}()
+	return streamServe(ctx, c, v, hello, cfg)
+}
+
+// screenOf is the size a hello asks for, within the bounds of a Resize.
 func screenOf(h protocol.Hello) screen {
 	return screen{
-		width:  min(int(h.Width), maxGraphicalSide),
-		height: min(int(h.Height), maxGraphicalSide),
-		cols:   int(h.Cols),
-		rows:   int(h.Rows),
+		width:  min(int(h.Width), backend.MaxResizeSide),
+		height: min(int(h.Height), backend.MaxResizeSide),
+		cols:   min(int(h.Cols), terminal.MaxCols),
+		rows:   min(int(h.Rows), terminal.MaxRows),
 	}
 }
 
