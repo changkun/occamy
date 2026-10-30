@@ -24,8 +24,11 @@ const (
 	// stored block, a few bytes, are left for the next rectangle.
 	maxZlibTail = 64
 	// zlibBuffer is the size of the buffer that a stream's output is read
-	// through, for the few bytes at a time that ZRLE reads.
-	zlibBuffer = 16 << 10
+	// through: the inflater's window, the most it hands out at once, so
+	// that each time the buffer is filled it takes all that the inflater
+	// has handed out, and inflated data that a rectangle's pixels do not
+	// take is left in the buffer, where end sees it.
+	zlibBuffer = 32 << 10
 )
 
 var (
@@ -100,6 +103,10 @@ func (z *zstream) begin(r io.Reader, n int64) error {
 // end finishes a rectangle: its pixels have been read. What is left of its
 // compressed data must be the end of the server's flush, which is kept
 // for the next rectangle; inflated data that no pixel took is an error.
+// The inflater holds back what it inflates after its window last filled,
+// until the next stored block, so data beyond the pixels goes unseen when
+// the window fills exactly where they end: it then starts the stream's
+// next rectangle, and maxZlibTail bounds what it can inflate to.
 func (z *zstream) end() error {
 	if n := z.out.Buffered(); n > 0 {
 		return fmt.Errorf("the compressed data holds %d bytes more than the rectangle's pixels", n)
@@ -114,10 +121,17 @@ func (z *zstream) reset() {
 	z.in.tail = nil
 }
 
-// read fills p with inflated data.
+// read fills p with inflated data. It reads less than the buffer at a
+// time, since bufio reads larger requests past its buffer.
 func (z *zstream) read(p []byte) error {
-	_, err := io.ReadFull(z.out, p)
-	return zlibError(err)
+	for len(p) > 0 {
+		n := min(len(p), zlibBuffer-1)
+		if _, err := io.ReadFull(z.out, p[:n]); err != nil {
+			return zlibError(err)
+		}
+		p = p[n:]
+	}
+	return nil
 }
 
 // byte reads one byte of inflated data.

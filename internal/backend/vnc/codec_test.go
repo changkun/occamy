@@ -15,6 +15,7 @@ import (
 	"image/jpeg"
 	"math/rand/v2"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,6 +92,35 @@ func TestEncodingsOverRun(t *testing.T) {
 		}
 		u.draw()
 		equalImages(t, s.sink.Pixels(), want)
+	}
+}
+
+func TestDataBeyondThePixels(t *testing.T) {
+	// Inflated data that the pixels do not take is an error, also when a
+	// rectangle's data is larger than the buffer it is read through, or
+	// than the inflater's window, unless the window fills exactly where
+	// the pixels end (zstream.end).
+	zrleData := func(r image.Rectangle) []byte {
+		var data []byte
+		tiles(r, zrleTile, func(t image.Rectangle) {
+			data = append(append(data, 0), make([]byte, 3*t.Dx()*t.Dy())...)
+		})
+		return data
+	}
+	for _, r := range []image.Rectangle{image.Rect(0, 0, 8, 8), image.Rect(0, 0, 128, 64), image.Rect(0, 0, 500, 250)} {
+		for _, enc := range []string{"zrle", "tight"} {
+			var msg []byte
+			if enc == "zrle" {
+				msg = zrleRaw(r, zlibBytes(append(zrleData(r), make([]byte, 100)...)))
+			} else {
+				z := zlibBytes(make([]byte, 3*r.Dx()*r.Dy()+100))
+				msg = tightRect(r, 0, appendCompact(nil, len(z)), z)
+			}
+			_, err := decode(t, r.Max, defaultLimits, putUpdate(msg))
+			if err == nil || !strings.Contains(err.Error(), "100 bytes more than the rectangle's pixels") {
+				t.Errorf("%s of %v with 100 bytes more: %v", enc, r, err)
+			}
+		}
 	}
 }
 
