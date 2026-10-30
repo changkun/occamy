@@ -30,6 +30,13 @@ jobs:
     # internal/rdp is checked too until occamyd imports it.
     - name: Licenses
       run: go run github.com/google/go-licenses/v2@v2.0.1 check . ./internal/rdp --disallowed_types=forbidden,restricted
+    # bench/codecs is a module of its own (docs/benchmarks/codecs.md).
+    # Vet with the measure tag builds the measurement, which runs by hand.
+    - name: Codec measurement
+      working-directory: bench/codecs
+      run: |
+        go vet -tags measure ./...
+        go test ./...
 
   lint:
     runs-on: ubuntu-latest

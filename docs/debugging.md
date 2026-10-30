@@ -6,6 +6,10 @@ behind it, and the tests that measure them under load.
 
 ## Debug mode
 
+This section is about v0 files such as [conf.yaml](../conf.yaml); a v1
+file serves the same routes on a listener of its own (see
+[the debug listener](#the-debug-listener-of-a-v1-file)).
+
 `mode` in [conf.yaml](../conf.yaml) is `debug`, `release` or `test`;
 a file without `mode` runs in debug mode, and any other value stops
 `occamyd` at start. `conf.yaml` and the demo stack's
@@ -17,6 +21,23 @@ command line. Set `mode: release` wherever others can reach it: release
 mode does not register the routes.
 [004](../specs/004-security-hardening.md) plans to make release the
 default and move pprof to a separate listener.
+
+## The debug listener of a v1 file
+
+A v1 file has no `mode`. `occamyd` serves pprof under `/debug/pprof/`
+and expvar under `/debug/vars` only on the debug listener, at
+`debug.address`, and opens that listener only when the key is set
+([configuration](./configuration.md)). The public listener never serves
+them. The listener has no authentication, so keep it on the loopback
+interface, such as `localhost:6060`; `occamyd` warns at start when it is
+not. It needs a port of its own: `occamyd` refuses a `debug.address` on
+`listen`'s port where the two could take the same connections, such as
+`localhost:5636` beside `127.0.0.1:5636`, or any host beside `:5636`.
+A CPU profile or a trace still running when `occamyd` stops is cut after
+the 5 second drain; a second SIGINT or SIGTERM stops `occamyd` at once.
+The examples below work against it with that address in place of
+`localhost:5636`. `/debug/vars` shows the command line and the runtime's
+memory statistics as JSON.
 
 ## Profiling occamyd
 

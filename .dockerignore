@@ -3,3 +3,4 @@ client/occamy-web/node_modules
 client/occamy-web/dist
 occamyd
 .claude
+bench/testdata/

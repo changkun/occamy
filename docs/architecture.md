@@ -41,9 +41,9 @@ _Figure 2: Occamy Architecture_
 
 | Path | Role |
 |------|------|
-| [server/](../server) | The v0 routes on a `net/http` ServeMux, v0 tokens (HMAC JWTs, golang-jwt v5), the session table, and WebSocket (coder/websocket) to guacd proxying |
+| [server/](../server) | The v0 routes on a `net/http` ServeMux, v0 tokens (HMAC JWTs, golang-jwt v5), the session table, and WebSocket (coder/websocket) to guacd proxying; the v1 server below shares the package |
 | [internal/guacd/](../internal/guacd) | guacd client: the handshake that creates or joins a connection |
-| [internal/guacamole/](../internal/guacamole) | Guacamole instruction encoding, parsing, and stream I/O, and a display that applies drawing and the pointer as a client does, for the benchmark and the guacd bridge |
+| [internal/guacamole/](../internal/guacamole) | Guacamole instruction encoding, parsing, and stream I/O, and a display that applies drawing and the pointer as a client does, decoding WebP as libwebp does, for the benchmark and the guacd bridge |
 | [internal/config/](../internal/config) | `conf.yaml` loading, the JWT claim structure, and guacd parameters |
 | [bench/](../bench) | Benchmark harness: scenarios, emulated networks, and the measurements in [benchmarks.md](./benchmarks.md) |
 | [client/occamy-web/](../client/occamy-web) | Demo web client (Vue 3) with a fork of guacamole-common-js 0.9.14 (Apache-2.0) |
@@ -66,18 +66,22 @@ A connection goes through these steps:
 
 ## Occamy v1, in progress
 
-v1 is being built beside v0 on `master`. Nothing below serves a route
-yet; released versions behave as described above, with the v0 routes
-under `/api/v1` through 0.6.0. Each package names
-the spec it implements.
+v1 is being built beside v0 on `master`. `occamyd` picks the server by
+the configuration file: a v0 file, without `version`, is served as
+described above, and a v1 file (`version: 1`) by the v1 server, which so
+far serves `/healthz`, static users' sign-in and, with `legacy_v0`, the
+v0 routes. Released versions behave as described above, with the v0
+routes under `/api/v1` through 0.6.0. Each package names the spec it
+implements.
 
 | Path | Role |
 |------|------|
 | [protocol/](../protocol) | Protocol v1, a public package: framing, the handshake (hello in the upgrade query, the token in a subprotocol, capabilities and their agreement), every message with its encoding and decoding, close codes, size limits, golden vectors; described in [protocol.md](protocol.md) ([protocol-v1](../specs/008-native-architecture/protocol-v1.md)) |
 | [internal/backend/](../internal/backend) | The interface every backend implements (native SSH, native VNC, the guacd bridge), its input events and prompts, and scripted fakes for tests ([session-core](../specs/008-native-architecture/session-core.md)) |
-| [internal/backend/guacd/](../internal/backend/guacd) | The guacd bridge: a graphical backend that applies guacd's drawing, copies each frame into the session's framebuffer before it answers the frame's sync, and translates viewers' input into Guacamole instructions ([guacd-bridge](../specs/008-native-architecture/guacd-bridge.md)) |
+| [internal/backend/guacd/](../internal/backend/guacd) | The guacd bridge: a graphical backend that applies guacd's drawing, copies each frame into the session's framebuffer before it answers the frame's sync, and translates viewers' input into Guacamole instructions; recorded guacd 1.6 VNC, RDP and SSH sessions in `testdata/conformance` replay through it in tests ([guacd-bridge](../specs/008-native-architecture/guacd-bridge.md)) |
 | [internal/pacer/](../internal/pacer) | Per-viewer pacing: the frame window, the frame after an input sent at once, bytes in flight held near the bandwidth-delay product, and quality that adapts ([session-core](../specs/008-native-architecture/session-core.md)) |
 | [internal/framebuffer/](../internal/framebuffer) | A session's screen in tiles, versioned from one counter, so each viewer is sent only the tiles it has not seen ([graphics-pipeline](../specs/008-native-architecture/graphics-pipeline.md)) |
+| [server/](../server) | The v1 server on a `net/http` ServeMux: middleware for the request log, recovery, body limits and access tokens; API v1's JSON errors; `/healthz` and `POST /api/v1/auth/token`; TLS, graceful shutdown, and expvar and pprof on the debug listener; the v0 routes with `legacy_v0` ([api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md)) |
 | [internal/auth/](../internal/auth) | Tokens of API v1: Ed25519 JWTs for access (a user and groups) and for sessions (a session and a role), from occamyd or a trusted issuer ([api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md)) |
 | [internal/config/](../internal/config) | Version 1 configuration files: sign-in, the connection registry with credential references, TLS and the debug listener, decoded strictly and validated as a whole ([configuration](./configuration.md), [api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md)) |
 | [internal/session/](../internal/session) | The session core: one goroutine per session runs a backend, applies input by role, keeps each viewer's small state as latest values, and a registry holds sessions and share tokens ([session-core](../specs/008-native-architecture/session-core.md)) |
