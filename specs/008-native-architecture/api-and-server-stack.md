@@ -798,6 +798,10 @@ place for fixes that ship on v0 before beta.
     parameter whose name holds `password`, `passphrase`, `private-key`
     or `secret`, where it refused those three names alone, so that
     `sftp-password` or `gateway-password` cannot sit in the file either.
+    (Delta review: names are compared in lower case, so `Password` and
+    `SFTP-PASSWORD` are refused, and `hostname` and `port` in any case;
+    a name that ends in `-regex` is a prompt's pattern, so telnet's
+    `password-regex`, which the first version refused, is allowed.)
     An ad-hoc target takes only the display's parameters
     (`adhocParams`: `color-depth`, `color-scheme`, `cursor`,
     `disable-gfx`, `enable-font-smoothing`, `font-name`, `font-size`,

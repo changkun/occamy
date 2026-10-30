@@ -610,16 +610,20 @@ connections:
 		{"guacd params", head + `guacd:
   params:
     kubernetes: {namespace: default}
-    rdp: {password: hunter2, ignore-cert: "true", sftp-password: hunter2, gateway-password: hunter2, sftp-passphrase: hunter2, sftp-private-key: hunter2, client-secret: hunter2}
-    vnc: {hostname: x, port: "5901"}
+    rdp: {password: hunter2, ignore-cert: "true", sftp-password: hunter2, gateway-password: hunter2, sftp-passphrase: hunter2, sftp-private-key: hunter2, client-secret: hunter2, Password: hunter2, SFTP-PASSWORD: hunter2}
+    vnc: {hostname: x, port: "5901", Hostname: x}
+    telnet: {password-regex: '[Pp]assword:', username-regex: 'login:'}
 `, []want{
 			{"guacd.params.kubernetes", `unknown protocol "kubernetes"`},
+			{"guacd.params.rdp.Password", "inline secrets are not allowed"},
+			{"guacd.params.rdp.SFTP-PASSWORD", "inline secrets are not allowed"},
 			{"guacd.params.rdp.client-secret", "inline secrets are not allowed"},
 			{"guacd.params.rdp.gateway-password", "inline secrets are not allowed"},
 			{"guacd.params.rdp.password", "inline secrets are not allowed"},
 			{"guacd.params.rdp.sftp-passphrase", "inline secrets are not allowed"},
 			{"guacd.params.rdp.sftp-password", "inline secrets are not allowed"},
 			{"guacd.params.rdp.sftp-private-key", "inline secrets are not allowed"},
+			{"guacd.params.vnc.Hostname", "set from each connection's target"},
 			{"guacd.params.vnc.hostname", "set from each connection's target"},
 			{"guacd.params.vnc.port", "set from each connection's target"},
 		}},

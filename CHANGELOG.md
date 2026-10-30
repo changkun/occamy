@@ -186,7 +186,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   unspecified or multicast address unless an entry is that address,
   and it takes only the display's `guacd.params`. `guacd.params`
   refuses any parameter whose name holds `password`, `passphrase`,
-  `private-key` or `secret`. A terminal is at most 1000 by 500 cells,
+  `private-key` or `secret` in any case, but for a prompt's pattern
+  such as telnet's `password-regex`. A terminal is at most 1000 by 500 cells,
   and a screen 8192 pixels a side.
 - Sign-in through an OpenID Connect provider, with `auth.oidc`: the
   authorization code flow with PKCE, the ID token's issuer, audience,

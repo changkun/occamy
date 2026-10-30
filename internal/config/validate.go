@@ -276,7 +276,7 @@ func (f *File) validateGuacd(c *checker) {
 			switch {
 			case secretParam(name):
 				c.add(p+"."+name, "inline secrets are not allowed, so that the file can be committed: set credentials on each connection, with password_file, password_env, private_key_file or prompt: true")
-			case name == "hostname" || name == "port":
+			case strings.EqualFold(name, "hostname") || strings.EqualFold(name, "port"):
 				c.add(p+"."+name, "set from each connection's target")
 			}
 		}
@@ -285,8 +285,13 @@ func (f *File) validateGuacd(c *checker) {
 
 // secretParam reports whether a guacd parameter holds a secret, such as
 // password, sftp-password, gateway-password, passphrase or
-// sftp-private-key.
+// sftp-private-key, in any case. A name that ends in -regex, such as
+// telnet's password-regex, holds the pattern of a prompt instead.
 func secretParam(name string) bool {
+	name = strings.ToLower(name)
+	if strings.HasSuffix(name, "-regex") {
+		return false
+	}
 	for _, s := range []string{"password", "passphrase", "private-key", "secret"} {
 		if strings.Contains(name, s) {
 			return true
