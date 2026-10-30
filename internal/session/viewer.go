@@ -127,13 +127,22 @@ func (v *Viewer) Input(seq uint32, ev backend.InputEvent) error {
 			clock = screen.Version
 		}
 		v.s.idle.Reset(v.s.cfg.IdleTimeout)
-		if err := v.s.backend.Input(ev); err != nil {
-			// The backend dropped it, so no frame will show it.
-			return err
-		}
+		// The input is recorded before the backend sees it, so that no
+		// tile or screen a writer reads can show its effect while
+		// LastInput still reports an earlier input. If the backend drops
+		// it, the record goes back: a frame in between may have reported
+		// it, which says only that its effect may show later.
 		v.mu.Lock()
+		prevSeq, prevClock, prevScreen := v.lastSeq, v.inputClock, v.inputScreen
 		v.lastSeq, v.inputClock, v.inputScreen = seq, clock, screen
 		v.mu.Unlock()
+		if err := v.s.backend.Input(ev); err != nil {
+			// The backend dropped it, so no frame will show it.
+			v.mu.Lock()
+			v.lastSeq, v.inputClock, v.inputScreen = prevSeq, prevClock, prevScreen
+			v.mu.Unlock()
+			return err
+		}
 		v.update(func(p *Pending) { p.Input = true })
 		return nil
 	})

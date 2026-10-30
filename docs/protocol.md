@@ -720,7 +720,7 @@ drew, then acknowledges it with `frame-ack`.
 |-------|------|---------|
 | frame_id | u32 | The frame's ID. IDs start at 1 on each connection and grow by one for each frame. |
 | server_time | u64 | When the server read the frame's content, in microseconds since the session started. |
-| last_seq | u32 | The sequence number of the last input from this client that the server applied before it read the frame's content, or 0 if none. The input's effect may show only in a later frame when the remote end answers late, as a remote shell's echo does. |
+| last_seq | u32 | The sequence number of the last input from this client that the server applied before it finished reading the frame's content, or 0 if none. A frame never shows the effect of a later input. The input's effect may show only in a later frame when the remote end answers late, as a remote shell's echo does. |
 
 ```hex
 # vector: frame-end

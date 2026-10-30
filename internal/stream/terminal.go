@@ -36,8 +36,10 @@ func (w *writer) runTerminal(ctx context.Context) error {
 			w.in = nil // it changed nothing on the screen
 		}
 		changed := w.s.Changed()
-		seq, _ := w.v.LastInput() // before the screen, which then shows it
 		s := w.s.Screen()
+		// After the screen: the session records an input before the
+		// backend sees it, so the screen cannot show an input this misses.
+		seq, _ := w.v.LastInput()
 		w.track(s)
 		if s == last {
 			if err := w.wait(ctx, changed, 0); err != nil {
