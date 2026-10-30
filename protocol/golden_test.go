@@ -174,6 +174,8 @@ func errorName(err error) string {
 		return "unsupported"
 	case errors.Is(err, protocol.ErrTrailingData):
 		return "trailing-data"
+	case errors.Is(err, protocol.ErrInvalid):
+		return "invalid"
 	}
 	return err.Error()
 }
@@ -346,7 +348,7 @@ func vectors(t testing.TB) golden {
 	return g
 }
 
-func marshalGolden(g golden) ([]byte, error) {
+func marshalGolden(g any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
