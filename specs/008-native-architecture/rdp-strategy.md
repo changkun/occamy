@@ -43,8 +43,20 @@ decides.
   ClearCodec through GFX, or legacy bitmap updates (interleaved RLE,
   planar), at a bandwidth cost on high-motion content. Decoding H.264 in
   pure Go is not realistic, so a pure-Go client must not advertise it.
-- Go RDP implementations exist (for example `tomatome/grdp`). Their
-  maintenance and NLA coverage must be checked at evaluation time.
+- Go RDP code, as surveyed on 2026-10-30:
+  - `tomatome/grdp` and most Go RDP forks are GPL-3.0, so no code from
+    them can enter MIT `occamyd`, and the provenance of code in other
+    projects matters.
+  - `casvisor/gordp` (Apache-2.0, created 2026-10) and
+    `bouncyball-git/gopher-rdp` (MIT, created 2026-02) do NLA and decode
+    the GFX codecs (planar, ClearCodec, RemoteFX Progressive, ZGFX), by
+    their own account. Both are young and self-verified: the spike
+    reviews their code and tests it against FreeRDP before borrowing any.
+  - `github.com/oiweiwei/go-msrpc/ssp` (MIT, active) implements NTLM with
+    signing and sealing, Kerberos and SPNEGO, which CredSSP needs.
+    `Azure/go-ntlmssp` cannot: it has no key exchange or sealing.
+  - IronRDP (Rust, MIT or Apache-2.0) is the reference for the protocol
+    and its tests.
 
 ## Options
 
@@ -59,7 +71,7 @@ decides.
   memory-safe, actively developed stack. Its NLA, GFX and codec coverage
   must be verified, and it brings a Rust toolchain into the build.
 - **D. Pure-Go RDP client in `internal/backend/rdp`.** Scope: TLS, NLA with
-  NTLMv2, the connection sequence, fast-path, bitmap updates with
+  NTLMv2 on `go-msrpc/ssp`, the connection sequence, fast-path, bitmap updates with
   interleaved RLE and planar decoding, GFX without AVC (RemoteFX, planar,
   ClearCodec), CLIPRDR and DISP. Kerberos, audio, drive redirection and
   RemoteApp come later.
