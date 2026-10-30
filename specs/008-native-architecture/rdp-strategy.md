@@ -146,8 +146,11 @@ xorgxrdp) in the bench desktop image. Step 2 has not run: there is no
 Windows host, and [#32](https://github.com/changkun/occamy/issues/32)
 stays open. An independent review of the spike's PR (#102) found a
 panic in the NTLM dependency and ways for a hostile server to exhaust
-memory and CPU; the fixes below are in the same PR, each with a
-regression test, and the live run was repeated after them.
+memory and CPU. A second review of the fixes found tests that a
+mutation survived, a decoding budget per PDU that a stream of small
+PDUs renewed, and certificate pins that added to the roots instead of
+replacing them. The fixes of both are in the same PR, each with a test
+that fails without it, and the live run was repeated after them.
 
 | Criterion | Result |
 |-----------|--------|
@@ -158,8 +161,9 @@ regression test, and the live run was repeated after them.
 | Keyboard and mouse input reach the session | Pass, live: keys paint the probe swatch; the pointer lands where it was sent, on the session's X display. |
 
 - **What was built.** `internal/rdp`, a pure-Go RDP client of about
-  4,200 lines plus 3,200 lines of tests. It contains:
-  - X.224 negotiation, TLS with a certificate policy, and CredSSP
+  4,300 lines plus 3,700 lines of tests. It contains:
+  - X.224 negotiation, TLS with the VNC backend's certificate policy,
+    and CredSSP
     versions 5 and 6 with NTLMv2 (TSRequest in `encoding/asn1`, NTLM in
     `ntlm.go`, the public key bound by the SHA-256 hash of [MS-CSSP]
     3.1.5, PROTOCOL_HYBRID_EX's early user authorization result);
@@ -198,11 +202,26 @@ regression test, and the live run was repeated after them.
   - The server repeats, inside TLS, the protocols it was offered in the
     clear (clientRequestedProtocols). The client compares them with its
     offer, so that an attacker who strips NLA from the offer is noticed.
-  - The certificate policy is the SSH backend's: the system roots (or
-    `RootCAs`) for `ServerName`, which `Dial` sets to the host dialled;
-    pinned certificates, in PEM or as SHA-256 fingerprints; or
-    `InsecureSkipVerify`, which logs the fingerprint once. A
-    configuration with none of them does not connect.
+  - The certificate policy is the VNC backend's (VeNCrypt, PR #106) in
+    meaning and in shape, so that one `tls` block of the configuration
+    can serve both. `Config.TLS` holds `ServerName`, `RootCAs`, `Pins`
+    and `InsecureSkipVerify`:
+    - By default the certificate must chain to the system's roots (or
+      `RootCAs`) and name `ServerName`. `ServerName` defaults to the host
+      `Dial` dials, or else to the host of the connection's remote
+      address.
+    - Pins replace the roots and match the leaf only. Each is one
+      certificate in PEM, or its SHA-256 fingerprint in hex or in base64
+      after `SHA256:`. `RootCAs` and `Pins` together are refused.
+    - `InsecureSkipVerify` accepts what fails and logs the certificate's
+      fingerprint.
+    - A configuration with no server name, pin or insecure mode, as over
+      a pipe, does not connect.
+    - There is no `Require`, as VeNCrypt has, since the echoed protocols
+      already notice an NLA strip. A server that leaves
+      clientRequestedProtocols out is refused.
+    - The two copies stay the same until a shared package replaces them
+      (see below).
   - NTLMv2 is the package's own, in about 430 lines: the three messages,
     the MIC when the server sends a timestamp, and signing and sealing
     with extended session security. The spike first used
@@ -214,22 +233,56 @@ regression test, and the live run was repeated after them.
     Kerberos stacks, of which only 2.7 KB was linked, and `go-oem`, whose
     x/text code page tables were 577 KB of the binary. Without SPNEGO,
     the NTLM tokens go straight into the TSRequest, as mstsc and FreeRDP
-    send them when Kerberos is off.
+    send them when Kerberos is off. The client bounds the server's
+    target info to 8 KiB, so that the NTLMv2 response that repeats it
+    fits its 16-bit length. It also refuses a challenge without both
+    NetBIOS names, as [MS-NLMP] 3.1.5.1.2 requires with signing and
+    sealing. An empty target info parses as an absent one and fails on
+    that rule.
   - CredSSP versions before 5 are refused before the client answers the
     challenge. They bind the public key the way CVE-2018-0886 broke, and
     Windows clients have refused servers that offer only them since the
     2018 fix.
-  - The server bounds what the client does. The desktop it sets is at
-    most 8192 pixels a side and 2^25 in all, as the size the client asks
-    for; a PDU holds one Demand Active, and resizes come at most every
-    100 ms, as in the VNC backend. A bitmap may exceed its destination
-    and the desktop by 63 pixels, a tile's padding; bitmaps that do not
-    show or have no data are not decoded; a PDU decodes at most twice
-    the desktop's pixels; and the decoder drops scratch buffers larger
-    than 2^16 pixels. Before, an 18-byte rectangle cost 8.8 ms, so a
-    64 KiB PDU could cost half a minute of CPU, and one 60 KB PDU caused
-    1,305 resizes.
-  - `Config.Trace` sees the Client Info PDU with the password zeroed.
+  - The client bounds what the server can make it do:
+    - The desktop the server sets is at most 8192 pixels a side and 2^25
+      in all, as is the size the client asks for.
+    - A PDU holds one Demand Active, and resizes come at most every
+      100 ms, as in the VNC backend. Without these, one 60 KB PDU caused
+      1,305 resizes.
+    - A bitmap may exceed its destination and the desktop by 63 pixels,
+      a tile's padding. Bitmaps that do not show or have no data are not
+      decoded.
+  - The rate of decoding is bounded too. A few bytes of RLE describe a
+    whole desktop: a 26-byte PDU cost 1.8 ms at 1024×768, and 23 ms with
+    64 MB allocated for a 4096×2048 bitmap. The first review's budget of
+    twice the desktop per PDU still let a stream of such PDUs take
+    seconds of CPU for 64 KiB, since each PDU started a full budget.
+    - The client now decodes at most 32 Mi pixels a second
+      (`decodeRate`), from a token bucket that holds two desktops and a
+      tile. While the bucket is in debt the client waits, and the
+      server's updates queue behind it.
+    - The rate is 42 desktops of 1024×768 a second, 16 of 1920×1080, 4
+      of 3840×2160, or 1 of the largest. Real traffic stays under it:
+      the motion scene's 30 desktops of 1024×768 a second take at most
+      23.6 million pixels. Real content costs about two bytes a pixel as
+      bitmap updates, so reaching the rate needs over 500 Mbit/s.
+    - The cheapest PDU, one rectangle of 3 bytes of RLE, decodes at 1.8
+      to 2.9 ns a pixel (`BenchmarkHostileBitmap`; medians of five runs
+      at 1024×768 and 4096×2048, host load 20). A hostile server can
+      therefore make the client spend 60 to 100 ms of CPU a second,
+      whatever it sends.
+    - The decoder keeps its buffers instead of reallocating them for
+      every large bitmap, and drops them when the desktop changes.
+      xrdp's bitmaps are at most 8,192 pixels, so for real traffic the
+      buffers stay small. A hostile server can make the client hold
+      those of a 4096×2048 bitmap, the most `maxBitmapPixels` allows:
+      about 96 MiB beside the desktop it set.
+  - `Config.Trace` sees the Client Info PDU as it would be with an empty
+    password. Zeroing the password's bytes would still leave its length
+    in cbPassword and in every length around it. The client clears the
+    copies of the password it encodes (the Client Info PDU, the
+    TSCredentials, the UTF-16 password and its NT hash) once they are
+    sent. `Config.Password`, a string, lives as long as the Client.
   - Keys go out as scancodes, which the server maps through the keyboard
     layout the client announced. A keysym with no key on the US layout
     goes out as a Unicode keyboard event.
@@ -262,36 +315,79 @@ regression test, and the live run was repeated after them.
     the session's X server (`testdata/querypointer`) where the pointer
     is. Each run names its image and container with the time it ends at
     the latest, and removes those of earlier runs that passed it, so a
-    run that `-timeout` kills leaks them only until the next.
+    run that `-timeout` kills leaks them only until the next. It matches
+    whole names only, alone or after podman's `localhost/`, so that it
+    removes nobody else's.
   - It records xrdp's frames to `testdata/xrdp-*.trace.gz` (9.4 KB in
     all). `TestReplay` plays them back from a fake server over TLS
     without a container; the fake server repeats the client's offer in
-    the core data block, as xrdp does.
+    the core data block, as xrdp does. Played back at once, the
+    recordings never make the client wait on its decoding rate.
   - `TestReplayNLA` puts the same server behind CredSSP, with the
     package's test acceptor, for HYBRID and HYBRID_EX. It checks the
     delegated credentials and a wrong password's STATUS_LOGON_FAILURE.
-    The acceptor checks the NTLMv2 response and the MIC; tests cover a
-    tampered message, a wrong public key proof, versions 2 to 4, and a
-    hostile challenge through `Connect`.
+    The acceptor checks the NTLMv2 response and the MIC. Tests cover:
+    - a tampered message;
+    - a wrong public key proof, and a right one with a changed signature;
+    - versions 2 to 4, from which the acceptor must receive no
+      AUTHENTICATE_MESSAGE;
+    - a hostile challenge through `Connect`.
   - Unit tests cover every RLE order, with the review's cases for
     orders that start on the first row, planar through a test encoder,
     the MCS PDUs against [MS-RDPBCGR] 4.1, and input encoding.
-  - Regression tests from the review cover each bound above, the
-    certificate policy, the downgrade check, the trace redaction, the
-    routing cookie, a last fragment without a first, and Set Error Info
-    during `Connect`. Removing the public key proof check, the
-    decoder's bitmap size bound or the pointer cache index check fails
-    a test.
+  - Regression tests from both reviews cover:
+    - each bound above, including the decoding rate, for one PDU of many
+      desktops and for many PDUs of one;
+    - the certificate policy;
+    - the downgrade check, including a server that leaves out the
+      protocols it was offered;
+    - the trace;
+    - the routing cookie;
+    - a last fragment without a first;
+    - Set Error Info during `Connect`;
+    - the run name matcher.
+
+    Each of these guards was removed in turn, and every removal failed a
+    test:
+    - the public key proof check;
+    - the CredSSP version check, by moving it after the AUTHENTICATE;
+    - unseal's signature check;
+    - the leaf-only pin match;
+    - pins replacing the roots;
+    - the echo check;
+    - the decoding rate, or a bucket renewed per PDU;
+    - the scratch kept, and dropped on a resize;
+    - the target info and field bounds;
+    - the NetBIOS name rule;
+    - the decoder's bitmap size bound;
+    - the pointer cache index check.
   - Seven fuzzers: fast-path, slow-path, RLE, planar and pointer
     updates, the NTLM challenge and the connection sequence's parsers.
     The pointer fuzzer's seed is synthetic; the others are seeded from
     the recordings, with xrdp's fragmented updates reassembled, or from
     the test acceptor. The update fuzzers draw on a 1024×64 desktop, so
-    that the recordings' full-width rows fit and an execution's budget
-    stays small. After the fixes each ran 60 seconds without a finding.
-    FuzzFastPath made 953 executions in 60 seconds before the pixel
-    budget, one 64 KiB PDU taking seconds, and 99,977 after, at a host
-    load near 40.
+    that the recordings' full-width rows fit. The test client fails
+    where it would wait on the decoding rate, so an execution decodes
+    at most one bucket.
+
+    After the second round's fixes, each fuzzer ran 60 seconds without a
+    finding, with `-fuzzminimizetime 20x`. By default `go test` spends
+    up to 60 seconds minimizing each new input, so the first round's
+    counts had measured mostly minimization. The host is shared; its
+    1-minute load is given.
+
+    | Fuzzer | Executions in 60 s | Host load |
+    |--------|-------------------:|----------:|
+    | FuzzFastPath | 9,690,279 | 25–43 |
+    | FuzzSlowPath | 5,165,683 | 43–69 |
+    | FuzzRLE | 7,979,230 | 69–76 |
+    | FuzzPlanar | 6,756,754 | 76–80 |
+    | FuzzPointer | 9,235,989 | 72–80 |
+    | FuzzNTLMChallenge | 6,891,406 | 72–110 |
+    | FuzzConnectionSequence | 10,178,376 | 110–139 |
+
+    Before the first round's bounds, FuzzFastPath made 953 executions in
+    60 seconds, one 64 KiB PDU taking seconds.
 - **What the NLA result rests on.** The [MS-NLMP] 4.2.4 vectors check
   NTOWFv2, the LMv2 and NTLMv2 responses (NTProofStr byte for byte),
   the session base key, the encrypted session key, the sealing and
@@ -311,10 +407,11 @@ regression test, and the live run was repeated after them.
       session; xrdp never sends them, Windows may, and there is no test
       vector or server to write them against yet;
     - the client sends only the server's AV pairs plus MsvAvFlags, with
-      no MsvAvTargetName or channel bindings; a server that requires
-      them refuses the logon;
-    - the 63-pixel padding allowance and the budget of twice the
-      desktop per PDU hold for xrdp; Windows may tile otherwise;
+      no MsvAvTargetName or channel bindings, which [MS-NLMP] 3.1.5.1.2
+      says a client SHOULD send; a server that requires them refuses the
+      logon;
+    - the 63-pixel padding allowance holds for xrdp, and the decoding
+      rate for the bench scenes; Windows may tile otherwise;
     - a refused logon without NLA arrives in a Save Session Info PDU,
       which the client does not read.
   - Answers to auto-detect requests (a server may lower quality
@@ -323,10 +420,14 @@ regression test, and the live run was repeated after them.
     resize needs DISP.
   - GFX without AVC (RemoteFX, RemoteFX Progressive, planar, ClearCodec,
     ZGFX). Step 3 shows this is required, not optional.
-  - Pacing of bitmap updates. Bitmap updates have no frame
-    acknowledgement, so the backend has to pace xrdp itself: Suppress
-    Output while the session is behind, or the Frame Acknowledge
-    capability with surface commands.
+  - Pacing of bitmap updates for the viewers. The decoding rate bounds
+    the client's CPU, not how far viewers fall behind. Bitmap updates
+    have no frame acknowledgement, so the backend has to pace xrdp
+    itself: Suppress Output while the session is behind, or the Frame
+    Acknowledge capability with surface commands.
+  - One package for the TLS policy of the VNC and RDP backends, once
+    both are on master, so that the configuration's `tls` block has one
+    implementation.
   - Scrolls as screen-to-screen copies. Advertising the ScrBlt order and
     applying it with `Sink.CopyRect` should make G3 cheap; whether
     xorgxrdp sends it is unchecked.
