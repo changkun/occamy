@@ -65,6 +65,7 @@ type decoder struct {
 	strip  []byte // stripSize bytes
 	cursor []byte // a cursor's pixels and mask, grown up to maxCursor
 	img    image.RGBA
+	enc    codecs // Hextile, ZRLE and Tight
 }
 
 func newDecoder(ctx context.Context, r io.Reader, sink backend.Sink, size image.Point, lim limits, log *slog.Logger) *decoder {
@@ -148,6 +149,12 @@ func (d *decoder) rect() error {
 		return d.raw(r)
 	case encCopyRect:
 		return d.copyRect(r)
+	case encHextile:
+		return d.hextile(r)
+	case encZRLE:
+		return d.zrle(r)
+	case encTight:
+		return d.tight(r)
 	case encDesktopSize:
 		return d.desktopSize(w, h)
 	case encCursor:
