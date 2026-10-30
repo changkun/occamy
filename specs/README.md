@@ -49,7 +49,7 @@ The target design of Occamy as a whole: core, backends, protocol.
 
 | Spec | Status | Deliverable |
 |------|--------|-------------|
-| [008-native-architecture.md](008-native-architecture.md) | In progress: 1 of 10 sub-designs complete, 9 more validated; building beta.1 (merged: backend interface, protocol framing and messages, pacer, framebuffer, auth tokens, session core, viewer writer, guacd bridge, native SSH, terminal state, config v1, native VNC phase 1); RDP spike steps 1 and 3 done against xrdp, step 2 waits for a Windows host | Occamy v1: beta scope, path to pure Go, 10 sub-designs including the benchmark that sets the 10x and 50 ms targets (#3, #18, #21) |
+| [008-native-architecture.md](008-native-architecture.md) | In progress: 1 of 10 sub-designs complete, 9 more validated; building beta.1 (merged: backend interface, protocol framing and messages, pacer, framebuffer, auth tokens, session core, viewer writer, guacd bridge, native SSH, terminal state, config v1, native VNC phase 1); RDP spike steps 1 and 3 done against xrdp and reviewed, step 2 waits for a Windows host | Occamy v1: beta scope, path to pure Go, 10 sub-designs including the benchmark that sets the 10x and 50 ms targets (#3, #18, #21) |
 
 ### maintenance
 

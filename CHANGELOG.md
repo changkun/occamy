@@ -83,12 +83,15 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   before it reads or allocates, resizes the screen at most once an
   update and ten times a second, and bounds its queued input by bytes.
   `occamyd` does not use it yet.
-- `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS, NLA
-  through CredSSP with NTLMv2, the connection sequence, bitmap updates
-  in interleaved RLE and planar, pointer updates, and keyboard and mouse
-  input. It is tested live against xrdp under the `rdp_integration` build
-  tag and by replaying xrdp's recorded PDUs; NLA is not yet tested
-  against Windows. No backend uses it yet.
+- `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS with the
+  SSH backend's certificate policy, NLA through CredSSP 5 or later with
+  NTLMv2 of its own, offered by default, the connection sequence, bitmap
+  updates in interleaved RLE and planar, pointer updates, and keyboard
+  and mouse input. It bounds the desktop, resizes and decoding a server
+  can ask for. It is tested live against xrdp under the
+  `rdp_integration` build tag, which starts a container, and by
+  replaying xrdp's recorded PDUs; NLA is not yet tested against Windows.
+  No backend uses it yet.
 
 ### Changed
 
