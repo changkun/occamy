@@ -57,6 +57,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   key path ([docs/configuration.md](docs/configuration.md)). A file
   without `version` is read as v0, as before. `occamyd` does not serve
   v1 files yet.
+- `internal/terminal`, the headless terminal emulator of a terminal
+  session: immutable, versioned screen snapshots that share unchanged
+  rows, and the diffs that bring a viewer's terminal from the screen it
+  last received to the current one, sending scrolled lines as line feeds
+  so the client's scrollback fills. Not served by any route yet.
 
 ### Changed
 
