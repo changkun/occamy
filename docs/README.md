@@ -18,6 +18,9 @@ You may interested in the following document:
     validated; a file without `version` is read as v0.
 - [Benchmarks](./benchmarks.md)
   + TL;DR: How Occamy is measured, and the numbers protocol v1 must beat.
+- [Codec measurement](./benchmarks/codecs.md)
+  + TL;DR: Which pure-Go codecs, tile size and pixel layout the graphics
+    pipeline uses, measured on frames recorded from the bench desktop.
 - [Debugging and measuring](./debugging.md)
   + TL;DR: Profiling `occamyd` in debug mode, guacd's processes, and the
     pressure test.

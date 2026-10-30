@@ -478,6 +478,12 @@ only, and no CPU the harness can tell from that spread.
 more than twice for G5 (113 ms over VNC, 110 ms over RDP). Every target
 above meets it at N1.
 
+The graphics pipeline's codecs, tile size and pixel layout were chosen
+by a separate measurement on frames recorded from the bench desktop:
+[benchmarks/codecs.md](./benchmarks/codecs.md). It also bears on G5's
+bytes, which no pure-Go codec measured there brings near 4.9 KiB a
+frame.
+
 Four measurements would replace assumptions here: an RDP counterpart of
 `bench/vncprobe`, for xrdp's reaction and its frame-rate ceiling; each
 server's connect time on its own; the shell's echo over SSH on its own;
