@@ -315,7 +315,7 @@ func (rep *report) markdown() string {
 
 	// Whole frames.
 	if len(rep.Whole) > 0 {
-		b.WriteString("## Lossy codecs on whole frames and rows\n\nEach frame encoded as one image, and the photograph's and the motion's frames as 16 rows of 64-pixel tiles: KiB, SSIM, encode and decode ms per frame.\n\n")
+		b.WriteString("## Lossy codecs on whole frames and rows\n\nEach frame encoded as one image, and the photograph's and the motion's frames as rows of 64-pixel tiles, 16 tiles a row: KiB, SSIM, encode and decode ms per frame.\n\n")
 		var rows [][]string
 		for _, w := range rep.Whole {
 			fr := float64(w.Frames)
