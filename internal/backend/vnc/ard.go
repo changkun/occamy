@@ -35,7 +35,8 @@ const secARD = 30
 const (
 	// minARDKey and maxARDKey bound the length of the server's prime and
 	// public key, in bytes, as TigerVNC's viewer bounds them: from a
-	// 1024-bit group, which macOS sent in 2017, to an 8192-bit one.
+	// 1024-bit group, which macOS sent in 2017, past the 4096-bit one
+	// reported from macOS 26, to an 8192-bit one.
 	minARDKey = 128
 	maxARDKey = 1024
 	// ardField is the size of each of the two fields of the credentials,

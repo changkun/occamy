@@ -219,8 +219,9 @@ func TestARDScripts(t *testing.T) {
 		ard, requireTLS bool
 		user, password  string // what the owner gives; alice and hunter2 if empty
 		// sent is what the client sends after its version: 0 for the
-		// type, the response and ClientInit, -1 for all but ClientInit,
-		// -2 for nothing, -3 for the type alone.
+		// type, the response of a 128-byte key and ClientInit, -1 for all
+		// but ClientInit, -2 for nothing, -3 for the type alone, and -5
+		// as 0 with a 512-byte key.
 		sent  int
 		creds bool   // the credentials are asked for
 		err   string // in the error; empty for success
@@ -240,6 +241,13 @@ func TestARDScripts(t *testing.T) {
 		{
 			// p = 7 in 128 bytes: a private key of as many bits as p has.
 			name: "a small prime", in: ard38().ardKey(3, 128, seven, two).u32(0).init(10, 10, ""), ard: true, creds: true,
+		},
+		{
+			// As macOS 26.6 sends it, by one report: the generator 5 and
+			// 512 bytes. The modulus here is odd, not prime.
+			name: "macOS 26's group", in: script{}.version("003.889").u8(3, 30, 33, 36).
+				ardKey(5, 512, new(big.Int).Sub(new(big.Int).Lsh(one, 4096), one), new(big.Int).Lsh(one, 4000)).u32(0).init(10, 10, ""),
+			ard: true, creds: true, sent: -5,
 		},
 		{
 			name: "3.8 failure", in: ard38().u8(ardScriptKey()...).u32(1).str("Authentication failed"), ard: true, creds: true,
@@ -327,6 +335,8 @@ func TestARDScripts(t *testing.T) {
 				want = 0
 			case -3: // the type alone
 				want = 1
+			case -5: // a 512-byte key
+				want = 1 + 2*ardField + 512 + 1
 			}
 			if strings.HasPrefix(string(tt.in), "RFB 003.003") && want > 0 {
 				want-- // the server chose the type
