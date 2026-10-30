@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"math/bits"
+	"slices"
 	"unicode/utf8"
 )
 
@@ -138,13 +139,24 @@ func readProvide(r io.Reader, flags uint32) (text []byte, truncated bool, err er
 		return nil, false, err
 	}
 	size := int64(binary.BigEndian.Uint32(b[:]))
-	keep := min(size, maxClipboard)
-	// The buffer grows as the text arrives, not to the size claimed.
-	var buf bytes.Buffer
-	if _, err := io.CopyN(&buf, zr, keep); err != nil {
-		return nil, false, err
+	keep := int(min(size, maxClipboard))
+	// The buffer grows as the text arrives, not to the size claimed, and
+	// not beyond what is kept.
+	text = make([]byte, 0, min(keep, 4<<10))
+	for len(text) < keep {
+		if len(text) == cap(text) {
+			text = slices.Grow(text, min(len(text), keep-len(text)))
+		}
+		n, err := zr.Read(text[len(text):min(cap(text), keep)])
+		text = text[:len(text)+n]
+		if err != nil && len(text) < keep {
+			if errors.Is(err, io.EOF) {
+				err = io.ErrUnexpectedEOF
+			}
+			return nil, false, err
+		}
 	}
-	return buf.Bytes(), size > keep, nil
+	return text, size > int64(keep), nil
 }
 
 // limitedReader reads at most n bytes from r, and keeps r's error apart
