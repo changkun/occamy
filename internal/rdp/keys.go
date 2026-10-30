@@ -4,37 +4,35 @@
 
 package rdp
 
-// RDP sends keys as scancodes in scan code set 1, and the server maps
-// them through the keyboard layout the client announced. These tables
-// translate the two key identities a viewer sends, USB HID usages and X11
-// keysyms, for a US layout; keysyms of other layouts that have no key
-// here go out as Unicode keyboard events instead.
+import "changkun.de/x/occamy/internal/keymap"
 
-// hidScancodes maps USB HID usages of the keyboard page (0x07) to
-// scancodes, from 0x04 (a) on.
-var hidScancodes = [...]uint16{
-	0x04: 0x1e, 0x30, 0x2e, 0x20, 0x12, 0x21, 0x22, 0x23, 0x17, 0x24, 0x25, 0x26, 0x32, // a-m
-	0x11: 0x31, 0x18, 0x19, 0x10, 0x13, 0x1f, 0x14, 0x16, 0x2f, 0x11, 0x2d, 0x15, 0x2c, // n-z
-	0x1e: 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, // 1-0
-	0x28: 0x1c, 0x01, 0x0e, 0x0f, 0x39, // enter, escape, backspace, tab, space
-	0x2d: 0x0c, 0x0d, 0x1a, 0x1b, 0x2b, 0x2b, 0x27, 0x28, 0x29, 0x33, 0x34, 0x35, // - = [ ] \ # ; ' ` , . /
-	0x39: 0x3a,                                                                   // caps lock
-	0x3a: 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x40, 0x41, 0x42, 0x43, 0x44, 0x57, 0x58, // F1-F12
-	0x46: 0xe037, 0x46, 0, // print screen, scroll lock, pause (E1 sequence, unsupported)
-	0x49: 0xe052, 0xe047, 0xe049, 0xe053, 0xe04f, 0xe051, // insert, home, page up, delete, end, page down
-	0x4f: 0xe04d, 0xe04b, 0xe050, 0xe048, // right, left, down, up
-	0x53: 0x45, 0xe035, 0x37, 0x4a, 0x4e, 0xe01c, // num lock, keypad / * - + enter
-	0x59: 0x4f, 0x50, 0x51, 0x4b, 0x4c, 0x4d, 0x47, 0x48, 0x49, 0x52, 0x53, // keypad 1-9, 0, .
-	0x64: 0x56, 0xe05d, // non-US \, application
-	0xe0: 0x1d, 0x2a, 0x38, 0xe05b, 0xe01d, 0x36, 0xe038, 0xe05c, // modifiers
-}
+// RDP sends keys as scancodes in scan code set 1, with the 0xe0 and 0xe1
+// prefixes as flags, and the server maps them through the keyboard
+// layout the client announced. ScancodeForHID and ScancodeForKeysym
+// translate the two key identities a viewer sends, USB HID usages and
+// X11 keysyms, the second for a US layout.
 
-// ScancodeForHID returns the scancode of a USB HID keyboard usage.
+// Scancodes of keys that the tables treat specially.
+const (
+	scancodeNumLock     = 0x45
+	scancodeLeftControl = 0x1d
+)
+
+// ScancodeForHID returns the scancode of a USB HID keyboard usage: its
+// set 1 make code (internal/keymap), with 0xe0 in the high byte for a
+// code after the prefix. Lang1 and Lang2, the Korean keys, whose set 1
+// codes 0xf2 and 0xf1 have no break codes, are 0x72 and 0x71 with the
+// release flag doing the break, as FreeRDP sends them. Pause has none,
+// since its make code is a sequence: PauseEvents sends it.
 func ScancodeForHID(usage uint16) (uint16, bool) {
-	if int(usage) >= len(hidScancodes) || hidScancodes[usage] == 0 {
+	sc := keymap.Set1(usage)
+	switch {
+	case sc == 0 || sc == keymap.Pause:
 		return 0, false
+	case sc >= 0x80 && sc < 0x100:
+		return sc & 0x7f, true
 	}
-	return hidScancodes[usage], true
+	return sc, true
 }
 
 // asciiScancodes maps printable ASCII keysyms, which equal their code
@@ -71,9 +69,9 @@ var keysymScancodes = map[uint32]uint16{
 func ScancodeForKeysym(keysym uint32) (uint16, bool) {
 	switch {
 	case 'a' <= keysym && keysym <= 'z':
-		return hidScancodes[keysym-'a'+0x04], true
+		return ScancodeForHID(uint16(keysym - 'a' + 0x04))
 	case 'A' <= keysym && keysym <= 'Z':
-		return hidScancodes[keysym-'A'+0x04], true
+		return ScancodeForHID(uint16(keysym - 'A' + 0x04))
 	case keysym < 0x80:
 		sc, ok := asciiScancodes[rune(keysym)]
 		return sc, ok
