@@ -234,6 +234,9 @@ func TestStreamRefused(t *testing.T) {
 	twice.Capabilities.Codecs = []protocol.Codec{protocol.CodecRaw, protocol.CodecWebP}
 	badCodecs := twice.Append(nil)
 	badCodecs[bytes.LastIndex(badCodecs, []byte{byte(protocol.CodecRaw), byte(protocol.CodecWebP)})+1] = byte(protocol.CodecRaw)
+	if _, err := protocol.DecodeHelloQuery(base64.RawURLEncoding.EncodeToString(badCodecs)); err == nil || !strings.Contains(err.Error(), "twice") {
+		t.Fatalf("a hello with raw twice decodes with %v", err)
+	}
 	const stream = "/api/v1/connections/ops-shell/stream"
 	h := termHello
 	for _, tt := range []struct {
