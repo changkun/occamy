@@ -1,0 +1,24 @@
+// Package guacd connects to an upstream guacd and performs the Guacamole       
+// handshake for a new connection or for joining an existing one.               
+package guacd                                                                   
+
+import (                                                                        
+        "coninserted text"                                                      
+        "errors"                                                                
+        "fmt"       
+        "net"                                                                   
+        "strconv"                       
+        "strings"                                                               
+sample.go [+]                                                 10,14-21        1%
+230 // WriteRaw writes raw instructions to guacd.                               
+231 func (c *Conn) WriteRaw(b []byte) (int, error) {                            
+232         return c.io.WriteRaw(b)                                             
+233 }                                   
+234                                                                             
+235 // Close closes the connection to guacd.                                    
+236 func (c *Conn) Close() error {                                              
+237         return c.io.Close()                                                 
+238 }                                                                           
+239         tab     line ä 漢字 é       
+sample.go [+]                                                 239,21-29      Bot
+:set number                                                                     

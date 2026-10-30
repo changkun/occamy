@@ -1,6 +1,6 @@
 ---
 title: guacd bridge and the path to pure Go
-status: drafted
+status: validated
 track: architecture
 depends_on:
   - specs/008-native-architecture/session-core.md
@@ -127,9 +127,154 @@ protocols or is deleted.
    is removed with it. It carries VNC and RDP over protocol v1 only until
    their native backends pass its parity gate.
 
+## Decisions
+
+Settled on 2026-10-30, following the recommendations above.
+
+1. **Bridge model: I, the interpreter.** v1.0 ships without the Guacamole
+   protocol, so no client may depend on it, and under I none does. If the
+   baseline shows the server's decode and re-encode cost to be
+   prohibitive, that is a reason to bring the native backends forward,
+   not to put Guacamole into clients.
+2. **Reuse `internal/guacamole`'s display** (open question 2, answered
+   above).
+3. **Scope: what guacd 1.6's VNC, RDP and SSH plugins emit.** The
+   display already counts unsupported drawing operations; the bridge
+   logs each opcode the first time it sees it in a session, and the
+   conformance corpus fails on any. The display implements all sixteen
+   channel masks and all sixteen transfer functions, so none is
+   rejected; what it does not implement (paths, strokes, transforms,
+   images other than PNG, JPEG and WebP) is counted instead.
+4. **Gate values:** N = 20 concurrent sessions for H = 8 hours with no
+   growth in goroutines or heap after the first hour, and the native
+   backend's traffic and server CPU each no more than 10% above the
+   bridge's on every baseline scenario. The 10x target in
+   [008](../008-native-architecture.md) is measured against guacd, not
+   against this gate; the gate only stops a regression.
+5. **The bridge is removed at v1.0** (open question 5, answered above).
+
+## Task Breakdown
+
+| Task | Delivers | Needs |
+|------|----------|-------|
+| Interpreter additions | `internal/guacamole`: the `cursor` instruction (hotspot and image from a layer region) exposed as a cursor change, and access to the composited display by rectangle for copying out | — |
+| Bridge backend | `internal/backend/guacd`: a `Backend` of class graphical over `internal/guacd`. Instructions apply to the display; at each `sync` the damage is copied into the sink (`Lock` and `Unlock` per damaged rectangle) and the `sync` is answered, so guacd paces against the bridge alone. `size` of the default layer becomes `Resize`, `cursor` becomes `Cursor`, `name` becomes `Title`, clipboard streams become `Clipboard`, `required` becomes a `Prompt` whose answers go back as `argv` streams, `error` ends `Run` with the status, and `disconnect` ends it cleanly. Input translates to `key`, `mouse` (button mask, and wheel as buttons 4 and 5 pressed and released), keysyms for `Text`, a `clipboard` stream, and `size`. Writes to guacd are serialised. Tests against a scripted guacd on `net.Pipe` | Interpreter additions; session-core Backend interface |
+| Conformance corpus | Instruction streams recorded from guacd 1.6's VNC, RDP and SSH plugins on the demo stack (logging in, typing, scrolling, moving a window, resizing), replayed through the bridge in tests: no unsupported operation, no error, and the final frame's hash pinned | Bridge backend |
+| Registration | The bridge registered in the API's backend factory for `vnc` and `rdp`, and for `telnet` and `kubernetes` behind an opt-in, with guacd parameters from the configuration under the connection's | Bridge backend; API Sessions |
+
+The soak and performance gates run per protocol when a native backend
+asks to replace the bridge, not as tasks here.
+
 ## Affects
 
 New `internal/backend/guacd` on top of `internal/guacd`. Decides whether
 [client-core](client-core.md), [009](../009-react-web-client.md) and
 [010](../010-native-swift-client.md) need any Guacamole code (under I they
 do not).
+
+## Implementation notes: bridge backend
+
+- **Status.** Interpreter additions and Bridge backend are done
+  (#94). The conformance corpus and registration are not, so the spec
+  stays validated.
+- **What the interpreter gained** (`internal/guacamole`):
+  - `Display` applies `cursor`; `TakeCursor` returns the image (copied
+    from the source layer when the instruction applies, as
+    guacamole-common-js's `Display.setCursor` does) and the hot spot.
+  - `CopyTo(dst, r)` copies an area of the composited display into an
+    `*image.RGBA`, over black, so the copy is opaque.
+  - `TakeDamageRects` returns the damage as at most 16 rectangles: two
+    merge when their union is no larger than both together, and past 16
+    the pair whose union adds the least area merges. `TakeDamage`
+    returns their union, so the bench is unchanged. `Bounds` reports
+    the default layer's size.
+- **What the bridge is** (`internal/backend/guacd`): `New(addr,
+  guacd.Config, Options{Logger, Dial})` returns a `*Backend` with
+  `Class` (graphical), `Run`, `Input`, `Demand` and `Unsupported`.
+  `Run` dials, calls `guacd.Handshake`, and serves guacd:
+  - `sync`: the damage is copied into the sink, one `Lock` and `Unlock`
+    per rectangle within the screen, and only then is the `sync`
+    answered, with its timestamp alone and once per timestamp, as
+    `Client.js` does. guacd rejects timestamps it did not send
+    (`user-handlers.c`), so the bridge echoes them.
+  - `size` of the default layer: `Resize` at the next `sync`, followed by
+    the whole screen, so the session sees the new size and its content
+    in one frame.
+  - `cursor`: `Cursor`; a fully transparent image becomes nil, since
+    guacd hides the pointer with one transparent pixel
+    (`display-builtin-cursors.c`). `mouse`: `CursorMove`. `name`:
+    `Title`.
+  - `clipboard` streams: `Clipboard`, capped at 4 MiB, not acked:
+    `StringReader.js` does not ack, and `common/clipboard.c` does not
+    wait.
+  - `required`: a `Prompt` (name: the protocol; one field per parameter,
+    labelled "Private key" for `private-key`, secret when the name
+    contains "password" or "passphrase"), answered as `argv` streams of
+    `text/plain` without waiting for guacd's acks, as `ManagedClient.js`
+    does. A failed prompt ends `Run` with its error.
+  - `error`: `Run` returns a `*guacd.Error` with the status.
+    `disconnect`: nil. A closed connection without `disconnect` is an
+    error wrapping `io.ErrUnexpectedEOF`, since guacd always sends one
+    (`user-handshake.c`). Cancellation closes the connection, and `Run`
+    returns `ctx.Err()`.
+  - Streams the bridge does not take get the ack `Client.js` sends
+    without a handler: `audio` and `video` "BAD TYPE" (0x030F), `file`,
+    `pipe`, `body` and echoed `argv` 0x0100. `nop`, `msg`, `set`
+    (multi-touch), `log` and `ready` need nothing.
+  - `Unsupported` counts what the session could not apply: drawing the
+    display lacks, image types it cannot decode, refused streams other
+    than `argv`, unknown opcodes, and instructions that failed
+    (`"end failed"` for an image that does not decode). Each is logged
+    once per session, and the session goes on.
+- **Input.** `Key` is `key`; `Pointer` is `mouse` with Left 1, Middle 2,
+  Right 4; `Text` is a key press and release per character; `Clipboard`
+  is a `clipboard` stream in 6048-byte blobs (`ArrayBufferWriter.js`);
+  `Resize` is `size`; `TermInput` returns `ErrUnsupportedInput`. Back and
+  Forward are dropped: guacd's RDP support reads only bits 0x01 to 0x10
+  (`input-queue.c`), and its VNC support passes the mask on as it is.
+- **Decisions the spec left open.**
+  - The wheel follows `Mouse.js`: a line is 18 pixels, each 53 pixels
+    press and release button 4 (up, 8) or 5 (down, 16) at the last
+    pointer position with the held buttons, and the remainder is
+    dropped after a press, so a notch scrolls once whether a browser
+    reports it as 3 lines or as 100 pixels. One press per line would
+    scroll three times as far in Firefox. DX is dropped: Guacamole has
+    no horizontal wheel. One `Wheel` presses at most 32 times.
+  - `Text` keysyms follow `Keyboard.js`'s `keysym_from_charcode`:
+    Latin-1 as it is, other characters 0x1000000 plus the code point,
+    C0 controls 0xff00 plus the control. A line feed types Return
+    (0xff0d) rather than Linefeed, and DEL and the C1 controls type
+    nothing.
+  - `Input` never writes to guacd: it encodes into a queue of 256 that
+    a writer goroutine drains, as the Backend contract asks, and returns
+    `ErrQueueFull` when it is full and `ErrClosed` after `Run`. Inputs
+    before the handshake wait in the queue. One mutex serialises the
+    writer (inputs, nops) and the reader (sync answers, acks, `argv`).
+  - A `nop` goes out after 5 seconds without a write, from the writer
+    goroutine, so it keeps going while the reader waits on a prompt;
+    guacd drops a user silent for 15 seconds. `Client.js` sends one every
+    5 seconds regardless.
+  - Each stream the bridge sends goes out whole in one write, so fixed
+    indices suffice: 0 for clipboard, 1 for `argv`.
+  - `Demand` is ignored. guacd sends only what changed, so the bridge
+    must apply every frame to keep its display whole, and must answer
+    every `sync` for guacd to keep sending.
+  - A malformed drawing instruction or an image that does not decode is
+    counted and logged, and the session goes on, rather than ending it
+    over one tile.
+- **Deviations.** Decision 3 said transfer functions other than `SRC`
+  and `OVER` are rejected loudly. The display implements all channel
+  masks and transfer functions, and guacd builds its cursor with masks
+  other than those two, so nothing is rejected; Decision 3 now says so.
+- **Surprises.** On `net.Pipe`, `guacd.Handshake` fails if guacd closes
+  right after `ready`, because clearing the deadline on a closed pipe
+  fails; over TCP it does not.
+- **Follow-ups.**
+  - Send `copy` within the default layer as `CopyRect` when no visible
+    layer covers it, so that scrolls through the bridge cost no pixels.
+  - Horizontal wheel over VNC, where RFB buttons 6 and 7 (bits 32 and 64)
+    reach the server unchanged; RDP has no bit for it.
+  - Send `disconnect` before closing on cancellation, as `Client.js`
+    does, so guacd logs a clean leave.
+  - The conformance corpus decides whether `Unsupported` stays empty on
+    real VNC, RDP and SSH sessions.

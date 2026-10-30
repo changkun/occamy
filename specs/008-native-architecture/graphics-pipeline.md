@@ -158,8 +158,8 @@ and Firefox; Safari's support needs a runtime check. It has no rate
 control and no published realtime speed, so it needs a benchmark before
 it is a candidate. H.264 without cgo would mean OpenH264 loaded through
 purego, downloaded by the user under Cisco's binary licence, or the
-operating system's hardware encoders. Kept out of beta; protocol v1 reserves a
-codec ID range for it.
+operating system's hardware encoders. Kept out of beta; protocol v1 reserves
+codec IDs 0x80 to 0xFF for it.
 
 ## Decisions
 
@@ -202,7 +202,7 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
 |------|----------|-------|
 | Framebuffer | `internal/framebuffer`: RGBA pixels in square tiles, versions from one counter, a lock per row of tiles, drawing and CopyRect for backends, tile reads and a change signal for writers; the tile size is a parameter | — |
 | Measurement | A corpus of frames recorded from the bench desktop's scenes (desktop, terminal, browser, photograph, scroll), and benchmarks on Go 1.27 that settle questions 1 to 3 and the lossy codec: palette or raw pixels with deflate, PNG, lossless WebP, JPEG (standard library and gen2brain/jpegn) and lossy WebP, scored for size, encode time and SSIM | — |
-| Codecs | `internal/encoder`: classification by colour count, the lossless codec the measurement picked, JPEG at a quality, and their codec IDs in protocol v1 | Measurement |
+| Codecs | `internal/encoder`: classification by colour count, the lossless codec the measurement picked, and JPEG at a quality, under the codec IDs protocol v1 assigns (raw 1, deflate 2, PNG 3, JPEG 4, WebP 5); fixes raw's channel order and the deflate container, which [docs/protocol.md](../../docs/protocol.md) marks provisional | Measurement |
 | Refinement | Motion heat per tile, and refinement after a still delay: exact for low-colour tiles, a quality chosen by SSIM for photographic ones | Codecs |
 | Scroll detection | Row hashes per tile column (xxh3-64), the offset search, and `copy-rect` with tiles for the exposed strip | Framebuffer |
 | Tile cache | Content hashes (xxh3-128 from zeebo/xxh3, so collisions are out of reach), the server's mirror of each client's cache, and the `cached` codec | Codecs, protocol v1 Messages |
@@ -210,6 +210,7 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
 
 ## Affects
 
-New `internal/framebuffer` and `internal/encoder`. Fixes the codec IDs in
-[protocol-v1](protocol-v1.md) and the decoders in
+New `internal/framebuffer` and `internal/encoder`. Fixes the provisional
+codec layouts of [protocol-v1](protocol-v1.md) (raw's channel order, the
+deflate container, whether WebP is sent) and the decoders in
 [client-core](client-core.md) and [009](../009-react-web-client.md).

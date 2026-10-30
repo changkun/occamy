@@ -16,8 +16,58 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   with its framing: the message header and its ignorable flag, the field
   encodings, a registry of message types, and the maximum message size.
   Golden vectors in `protocol/testdata/framing.json` let other
-  implementations check their codecs against it. No message types are
-  defined yet.
+  implementations check their codecs against it.
+- Every message of protocol v1 in the `protocol` package, with the
+  handshake (`hello` in the upgrade query, the token in a subprotocol,
+  capabilities agreed in `welcome`), codecs and close codes, golden
+  vectors in `protocol/testdata/messages.json`, and
+  [docs/protocol.md](docs/protocol.md), the protocol's normative
+  description. `docs/protocol-cn.md` is now marked as the v0 protocol.
+- `internal/auth`, the tokens of API v1: Ed25519 JWTs for access
+  (a user and groups) and for sessions (a session and a role), signed by
+  occamyd or by a configured trusted issuer, with no other algorithm
+  accepted. Not served by any route yet.
+- `internal/session`, the session core of v1: one goroutine per session
+  that runs a backend, draws into the framebuffer or the terminal, applies
+  input by role (owner, viewer, read-only), keeps each viewer's small
+  state as latest values, ends the session when the owner stays away or
+  it idles, and a registry of sessions with share tokens that die with
+  them. Not served by any route yet.
+- `internal/backend/guacd`, the guacd bridge of v1: a graphical backend
+  that applies guacd's drawing and copies each frame into the session's
+  framebuffer before it answers the frame's `sync`, so that guacd paces
+  against the bridge alone. It turns guacd's pointer, title, clipboard
+  and credential requests into session events, and viewers' keys,
+  pointer, wheel, text, clipboard and resizes into Guacamole
+  instructions. `internal/guacamole`'s display now applies `cursor`,
+  reports damage as rectangles, and copies areas out. Not served by any
+  route yet.
+- A native SSH backend for protocol v1, `internal/backend/ssh`, in pure
+  Go. It accepts only pinned host keys, by key or SHA-256 fingerprint,
+  unless told to ignore them, which it logs as a warning. It
+  authenticates with key files or a password, which also answers a
+  keyboard-interactive password challenge, and asks the session's owner
+  for anything else. It feeds the shell's terminal output to the
+  session. `occamyd` does not use it yet.
+- Version 1 configuration files (`version: 1`): sign-in through static
+  users, OIDC and trusted issuers, a connection registry whose
+  credentials name files or environment variables instead of holding
+  secrets, TLS, the debug listener, origins and ad-hoc targets. Unknown
+  keys are errors, and validation reports every problem with its line and
+  key path ([docs/configuration.md](docs/configuration.md)). A file
+  without `version` is read as v0, as before. `occamyd` does not serve
+  v1 files yet.
+- `internal/terminal`, the headless terminal emulator of a terminal
+  session: immutable, versioned screen snapshots that share unchanged
+  rows, and the diffs that bring a viewer's terminal from the screen it
+  last received to the current one, sending scrolled lines as line feeds
+  so the client's scrollback fills. Not served by any route yet.
+- `internal/stream`, a viewer's connection in protocol v1: `welcome`,
+  then the client's input and views applied as they come, and frames at
+  the pace of the viewer's link. Small state never waits behind tiles,
+  and an input's effect goes ahead of motion already on the screen. It
+  serves graphical sessions with raw tiles for now. Not served by any
+  route yet.
 
 ### Changed
 

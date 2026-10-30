@@ -1,0 +1,118 @@
+# An example occamyd configuration file, version 1. docs/configuration.md
+# describes every key. The file holds no secrets: credentials name the
+# file or environment variable that holds them, so it can be committed.
+version: 1
+
+# The public listener: the API, the streams and /healthz. Default :5636.
+listen: 0.0.0.0:5636
+
+# occamyd terminates TLS when both are set. Leave both out to serve plain
+# HTTP behind a reverse proxy that terminates TLS.
+tls:
+  cert: /etc/occamy/tls.crt
+  key: /etc/occamy/tls.key
+
+# The debug listener, with expvar and pprof. Off when unset. Keep it on
+# the loopback interface.
+debug:
+  address: localhost:6060
+
+# Origins whose browsers may open streams, besides occamyd's own.
+origins:
+  - https://occamy.example.com
+
+# Serves the v0 routes (/api/v0/login and /api/v0/connect) for the
+# Guacamole-based web client. They are removed at v1.0.
+legacy_v0: false
+
+auth:
+  # The Ed25519 key that signs occamyd's tokens, PKCS #8 PEM. occamyd
+  # creates it on first start if it does not exist.
+  signing_key_file: /var/lib/occamy/signing.key
+  # How long an access token lasts, between 1m and 12h. Default 15m.
+  access_token_lifetime: 15m
+  # Third parties, such as a gateway, whose tokens occamyd accepts. Each
+  # key is an Ed25519 public key, PKIX PEM.
+  trusted_issuers:
+    - issuer: gateway
+      public_key_file: /etc/occamy/gateway.pub
+  # Static users sign in with a password, stored as a bcrypt hash of cost
+  # 10 or more. htpasswd -nbBC 12 "" 'the password' | cut -d: -f2 makes
+  # one.
+  users:
+    - name: alice
+      password_hash: "$2a$12$R6bvkO3lC3JV/OaHnySvquk.wobMPB3XleIdoBgEwlhjbcfaZi0km"
+      groups: [ops]
+    - name: bob
+      password_hash: "$2a$10$Ad6WcgC.YRhS7d8JbV/9..v/X5C7aAnBg5cVXdoz1F1d0uHmkmuH2"
+      groups: [dev]
+  # Sign-in through an OpenID Connect identity provider.
+  oidc:
+    issuer: https://accounts.example.com
+    client_id: occamy
+    client_secret_file: /run/secrets/oidc-client-secret
+    redirect_url: https://occamy.example.com/api/v1/auth/oidc/callback
+    scopes: [openid, profile, email, groups]
+    # The claims that name the user and the user's groups in allow lists.
+    subject_claim: email
+    groups_claim: groups
+
+# guacd serves the vnc, rdp and telnet connections.
+guacd:
+  address: localhost:4822
+  # guacd parameters per protocol. Connection targets and credentials
+  # override them.
+  params:
+    rdp:
+      ignore-cert: "true"
+
+# The connections that users may open. Tokens name a connection by its ID,
+# which appears in URLs.
+connections:
+  - id: build-box
+    name: Build box
+    protocol: ssh
+    target: build.internal:22
+    credentials:
+      username: deploy
+      private_key_file: /etc/occamy/keys/deploy
+    allow:
+      users: [alice]
+      groups: [ops]
+
+  - id: nas-desktop
+    name: NAS desktop
+    protocol: vnc
+    target: nas.internal # the protocol's default port, 5900
+    credentials:
+      password_env: OCCAMY_NAS_VNC_PASSWORD
+    allow:
+      groups: [ops, dev]
+
+  - id: windows
+    name: Windows workstation
+    protocol: rdp
+    target: 10.0.4.20:3389
+    credentials:
+      username: Administrator
+      password_file: /run/secrets/windows-password
+    allow:
+      groups: [ops]
+
+  - id: lab-shell
+    name: Lab shell
+    protocol: ssh
+    target: "[fd00::22]"
+    credentials:
+      # Nothing stored: the session owner is asked for what the server
+      # needs, and the answers are not kept.
+      prompt: true
+    allow:
+      groups: [dev]
+
+# Ad-hoc targets let users connect to hosts that are not in the registry.
+# Off by default; when on, only targets in the allowlist are reachable.
+allow_adhoc_targets: false
+adhoc_allowlist:
+  - 10.0.0.0/8
+  - "*.lab.internal"

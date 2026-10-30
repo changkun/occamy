@@ -120,10 +120,15 @@ and 113 ms at N1, behind frames it had already queued.
   the same act. Terminals follow the same rule with screen diffs
   ([native-ssh-backend](native-ssh-backend.md)).
 - **The frame after an input goes out at once.** When the owner applies
-  an input from a viewer, that viewer's writer sends the tiles damaged
-  since the input first: next in the open frame, which then ends, or in
-  a new frame that starts at once, one beyond the window if the window
-  is full. Those bytes go out unpaced. `frame-end`
+  an input from a viewer, that viewer's writer sends the input's effect
+  first: the tiles that changed after the input and were still before
+  it, smallest drawing operation first. A tile already in motion changes
+  after the input anyway, and taking that change for the effect would
+  spend the input's priority on the motion. The effect goes next in the
+  open frame, which then ends, or in a new frame that starts at once,
+  one beyond the window if the window is full, and its bytes go out
+  unpaced. The frame ends before a large operation, so that its
+  `frame-end` does not wait behind motion drawn in the same moment. `frame-end`
   carries the sequence number of the last input applied before the
   frame's tiles were read ([protocol-v1](protocol-v1.md)), so the client
   measures input to display exactly, and the benchmark uses the same
@@ -154,7 +159,9 @@ and 113 ms at N1, behind frames it had already queued.
 - **What goes first is what the user sees directly.** The cursor is drawn
   by the client from `cursor` and `cursor-move`, so pointer motion needs
   no frame. Small messages (cursor, clipboard, bell, close, ping) are
-  never queued behind tiles; acks and pings only drive pacing.
+  never queued behind tiles; acks and pings only drive pacing. Each
+  viewer keeps them as state, the latest cursor, title or clipboard, so a
+  slow viewer never queues them either.
 - **The remote server is paced too.** The session owns the framebuffer,
   so the remote server's rate and each viewer's rate are independent,
   and backends use each protocol's own control:
@@ -266,3 +273,122 @@ New `internal/backend` (interface, event types) and `internal/session`
 [api-and-server-stack](api-and-server-stack.md) on top. 003 fixes the
 remaining v0 defects in place. The core is designed so that they cannot
 arise, rather than inheriting those fixes.
+
+## Implementation notes: owner and registry
+
+- **What was done:** `internal/session` with `Start`, `Session`
+  (`Join`, `Close`, `Framebuffer`, `Changed`, `Size`, `Done`, `End`),
+  `Viewer` (`Take`, `Wake`, `Input`, `LastInput`, `View`, `Answer`,
+  `Leave`) and `Registry` (`Open`, `Get`, `Share`, `JoinShared`).
+- **Decisions:**
+  - One owner goroutine runs commands from a channel; viewers' calls
+    become commands, so input reaches the backend in arrival order. Sink
+    methods run on the backend's goroutines and never wait for the owner
+    goroutine, so ending a session cannot deadlock on a backend blocked
+    in the sink.
+  - Each viewer's small state is a `Pending` of latest values (resize,
+    cursor, clipboard, title, bells, joins, leaves, prompts, input, end),
+    taken whole by its writer, so a slow writer skips stale values
+    instead of queueing them.
+  - An input records the framebuffer's clock read before the backend
+    sees the input, so every tile it changes is above that clock even
+    when a backend draws before `Input` returns. An input the backend
+    rejects is not recorded and raises no `Pending.Input`.
+  - The session serialises its calls to the terminal emulator and to
+    `Resize`, since backends call the sink from several goroutines.
+  - Defaults: owner grace 60 s, idle timeout 30 min, tile size 64.
+  - Session IDs are 128 random bits; share tokens are 256 random bits,
+    held only as SHA-256 hashes, with an expiry, and die with the
+    session. Expired shares are pruned when the next is minted.
+- **Surprises:** an independent review found five bugs the fake backends
+  never reached (the clock read after `Input`, rejected inputs recorded,
+  unserialised terminal calls, a prompt delivered twice to a returning
+  owner, setters storing and broadcasting in separate critical sections).
+  All have regression tests now.
+- **Follow-ups:** `Viewer.Session` exposes `Close` and `Join` without a
+  role check, so the HTTP layer checks roles.
+
+
+## Implementation notes: viewer writer
+
+- **What was done:** `internal/stream`, with `Serve(ctx, conn, viewer,
+  hello, Config)`: it sends `welcome`, runs a reader goroutine that
+  applies the client's messages, and runs the writer loop until the
+  session ends or the client leaves. `Conn` is a message interface, so
+  the tests run over a simulated link (a bottleneck rate, a one-way delay
+  and a send buffer of one message) under `testing/synctest`.
+  `SetLowWater` sets `TCP_NOTSENT_LOWAT` on Linux and macOS and does
+  nothing elsewhere.
+- **Decisions:**
+  - An input's effect is the change after its clock on tiles that were
+    still before it. The writer keeps two snapshots of the tile versions
+    at least 100 ms apart. A tile that changed between them, or since the
+    last one and before the input, was in motion, unless that change went
+    out as an earlier input's effect, so that the next key on the same
+    caret keeps its priority. Without this rule, full-screen motion drawn
+    after a key took the key's priority, and an effect that appeared
+    40 ms later got none.
+  - Inputs that come while an effect is awaited join it: the first
+    input's clock precedes their effects too, and each input restarts
+    the timeout. So a key-up, which shows nothing, does not hold back the
+    next key. Once an effect is sent, later inputs are awaited from the
+    clock at which it was found.
+  - The effect's tiles go smallest operation first: tiles that share a
+    version were changed by one drawing operation. The input's frame ends
+    before an operation that would take it past 16 KiB. The first
+    operation goes whole, since a scroll may be the effect.
+  - The writer looks for the effect before each tile, not after it.
+    While the pacer holds a frame back, the writer wakes on framebuffer
+    changes as long as an effect is awaited. An input whose effect does
+    not appear within 1 s loses its priority.
+  - `frame-end`'s `last_seq` is the last input applied when the frame
+    started, or when it took up an input's effect, if later.
+  - Small state goes out before every tile, during pacing sleeps and
+    while waiting, so it waits for at most the tile being written.
+  - Resizes follow the framebuffer's bounds, not the session's small
+    state. `resize` precedes every tile of the new size.
+  - A client that breaks the protocol gets `close` with `CloseCodeFor`,
+    including a `hello` after the handshake. The session's end gets
+    `close` with its reason's code. Either waits at most 1 s for a client
+    that stopped reading. A client that hangs up (`io.EOF` from `Conn`)
+    or a failed connection gets nothing.
+  - A client that decodes no raw tiles is refused with `unsupported`. A
+    small message larger than the client's message size, such as a huge
+    remote clipboard, is dropped. Up to 16 pings wait for their pongs,
+    and acks beyond 64 drop the oldest.
+  - Tiles go through an `Encoder` interface, raw RGBA until the graphics
+    pipeline's codecs land. Cursors go raw, and not at all if they are
+    larger than the client's texture limit; a hidden cursor carries no hot
+    spot, codec or payload.
+- **What was not done:**
+  - Terminal sessions: `Serve` refuses them until `internal/terminal`
+    has its snapshot and diff API.
+  - `TCP_NOTSENT_LOWAT` is not set on a connection yet. coder/websocket
+    hides the socket, so the HTTP layer calls `SetLowWater` from
+    `http.Server.ConnContext`, as part of the HTTP server task.
+  - The Scheduling test task.
+- **Surprises:**
+  - The tile is the unit of priority. With 64-pixel tiles, the test
+    screen's 32-pixel swatch shares a tile with the motion below it, so
+    the key's effect counts as motion; the input test uses 32-pixel
+    tiles. A real effect in a tile with motion gets no priority.
+  - At most three tiles are ahead of an effect's tile: one on the wire,
+    one in the send buffer and the one being written. Three raw 64-pixel
+    tiles are 48 KiB, which take 10 ms at 5 MB/s; coded tiles are a few
+    KiB.
+  - `testing/synctest` stops time once a test's function returns, so a
+    goroutine left in `time.Sleep` at cleanup deadlocks the bubble. The
+    simulated link's waits select on close.
+  - An independent review found seven bugs the first tests missed, each
+    with a regression test now that fails without its fix: small state
+    sent during a pacing sleep overwrote the tile waiting in the same
+    buffer, which then counted as sent; a hidden cursor carried a hot spot
+    and codec that clients must reject; the close after a protocol error
+    could wait forever on a client that stopped reading; key-ups and the
+    previous key's effect took the next key's priority while typing;
+    `last_seq` lagged when an effect joined an open frame; a hang-up was
+    taken for a protocol error; and a late `hello` got `unsupported`.
+    The test client now records undecodable messages, and every test
+    fails on one.
+- **Follow-ups:** terminal frames (screen diffs), the Scheduling test,
+  and the HTTP layer's `ConnContext`.

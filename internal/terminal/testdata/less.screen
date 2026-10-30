@@ -1,0 +1,24 @@
+// handshake for a new connection or for joining an existing one.               
+package guacd       
+
+import (            
+        "context"   
+        "errors"    
+        "fmt"       
+        "net"       
+        "strconv"   
+        "strings"   
+        "time"      
+
+        "changkun.de/x/occamy/internal/guacamole"                               
+)                   
+
+// ProtocolVersion is the Guacamole protocol version sent in connect.           
+const ProtocolVersion = "VERSION_1_5_0" 
+
+// DefaultTimeout bounds a handshake whose context has no deadline, matching    
+// guacd's own GUACD_USEC_TIMEOUT.      
+const DefaultTimeout = 15 * time.Second 
+
+// Default display settings, used where Config leaves them zero.                
+:                   
