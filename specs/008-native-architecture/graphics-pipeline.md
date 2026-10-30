@@ -49,8 +49,11 @@ quickly, in pure Go. That means choosing:
 ## Proposed shape
 
 - **Framebuffer:** 32-bit pixels, one buffer per session, tiles of 64×64
-  with a version counter each. A backend damage report bumps the version
-  of the tiles it touches. A CopyRect from the backend is forwarded as
+  with a version each. A change gives the tiles it touches a new version
+  from one counter for the screen, so a viewer's dirty tiles are those
+  above the versions it last sent, and the tiles changed since an input
+  are those above the counter's value when the input was applied. A
+  CopyRect from the backend is forwarded as
   `copy-rect` when every viewer's last frame contains the source region;
   otherwise it degrades to damage.
 - **Classification per tile: content picks the codec, motion picks the
@@ -164,6 +167,18 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
    per-tile overhead.
 3. Pixel layout A or B? The swizzle happens once per decoded tile in one
    place either way.
+
+## Task Breakdown
+
+| Task | Delivers | Needs |
+|------|----------|-------|
+| Framebuffer | `internal/framebuffer`: RGBA pixels in square tiles, versions from one counter, a lock per row of tiles, drawing and CopyRect for backends, tile reads and a change signal for writers; the tile size is a parameter | — |
+| Measurement | A corpus of frames recorded from the bench desktop's scenes (desktop, terminal, browser, photograph, scroll), and benchmarks that settle questions 1 to 3 | — |
+| Codecs | `internal/encoder`: classification by colour count, the lossless codec the measurement picked, JPEG at a quality, and their codec IDs in protocol v1 | Measurement |
+| Refinement | Motion heat per tile, and refinement after a still delay: exact for low-colour tiles, a quality chosen by SSIM for photographic ones | Codecs |
+| Scroll detection | Row hashes per tile column, the offset search, and `copy-rect` with tiles for the exposed strip | Framebuffer |
+| Tile cache | Content hashes (xxh3), the server's mirror of each client's cache, and the `cached` codec | Codecs, protocol v1 Messages |
+| Encode cache and workers | Encoded tiles cached by tile, version, codec and quality and shared by viewers; a worker pool bounded per session | Codecs |
 
 ## Affects
 
