@@ -297,3 +297,125 @@ place for fixes that ship on v0 before beta.
     the web client from a v1 file have no keys yet.
   - Document: a password hashing command (`occamyd hash-password`) and
     `conf.yaml` as a v1 example.
+
+## Implementation notes: v0 routes
+
+- **What was done:** `server/` serves `POST /api/v0/login` (with
+  `client: true`) and `GET /api/v0/connect` on a `net/http.ServeMux`
+  behind a request log, with `/static/` and, in debug mode,
+  `/debug/pprof/`. `server/jwt.go` issues and checks v0 tokens with
+  golang-jwt v5; `accept` and `serveIO` run on coder/websocket.
+  `internal/config` no longer imports gin. The Vue client, `tests/` and
+  `bench/` use the new paths, and `tests/` and `bench/` use
+  coder/websocket. gin, gin-jwt, gorilla/websocket and 28 of 29 indirect
+  requirements left `go.mod` (`golang.org/x/sys` stays for the SSH
+  backend); `go.sum` went from 115 lines to 18.
+- **What v0 clients see:** the paths, nothing else. The login response
+  is `{"code":200,"expire":"<RFC 3339>","token":"…"}` as gin rendered it
+  (sorted keys, no trailing newline, `application/json; charset=utf-8`);
+  the token has the same header and claims (`protocol`, `host`,
+  `username`, `password`, `exp`, `orig_iat`) and lives an hour, gin-jwt's
+  default timeout. The token is looked up in `Authorization: Bearer`, then
+  `?token=`, then the `jwt` cookie, and a malformed header falls through
+  to the next. Failures answer `{"code":401,"message":"…"}` with
+  `WWW-Authenticate: JWT realm=occamy-proxy`, and 400 for a token without
+  `exp`. The messages are gin-jwt's and the golang-jwt v4 texts it passed
+  on (`Token is expired`, `signature is invalid`, `invalid signing
+  algorithm`, `token contains an invalid number of segments`), mapped from
+  v5's errors. As before, an `exp` of 0 or less is expired (v5 reads it
+  as no expiry) and an `iat` in the future is refused (v5 ignores `iat`
+  unless asked). The subprotocol, text frames, close codes, Guacamole statuses,
+  the same-origin rule (an empty or repeated `Origin` header is refused
+  with 403, as gorilla refused it; coder/websocket skips the check for an
+  empty one), login only with `client: true` and pprof only in
+  debug mode are as before. Tests in `server/jwt_test.go` pin each of
+  these.
+- **Decisions:**
+  - The read limit is `guacamole.MaxInstructionSize`, about 4 MiB: the
+    largest instruction `guacamole.ReadRaw` accepts (128 elements of 8192
+    code points of 4 bytes, with prefixes). gorilla/websocket read without
+    a limit, and coder/websocket's default of 32 KiB is short of a single
+    such element. Over the limit, coder/websocket closes with 1009 itself,
+    so the client sees no Guacamole status, and `clientError` logs it as a
+    failure. The clients in `tests/` and `bench/` set the same limit on
+    occamyd's messages.
+  - Compression stays off, as it was with gorilla's defaults. Both
+    libraries write one frame per message, so bytes on the wire are
+    unchanged.
+  - coder/websocket closes the connection when the context of a read or
+    write ends, so `serveIO` runs I/O without a context, as gorilla ran
+    without deadlines, and the read-deadline trick became
+    `Close(code, status)` once the first side ends. That close carries the
+    status and unblocks the reader and any blocked write. It is a closing
+    handshake: up to 5 s to send the close frame and 5 s to receive the
+    client's, where gorilla closed at once. A client that does not answer
+    keeps its handler, and its session entry, up to about 10 s longer; a
+    joiner in that window starts a new session, as for any ended one. The
+    write mutex went, since coder/websocket serializes writes.
+  - After a message over the read limit, which coder/websocket answers
+    with 1009 itself, occamyd drops the connection with `CloseNow`
+    instead of closing it: `Close` would first read the rest of the
+    declared message with no deadline, so a client that declares a huge
+    frame and goes quiet would hold its handler and session forever.
+    `CloseNow` cannot interrupt a `Close` already under way, so a timer
+    around `Close` would not help.
+  - `clientError` reads `websocket.CloseStatus`: 1000, 1001 and 1005 mean
+    the client left, any other close code and `ErrMessageTooBig` are
+    failures, and any other error counts as leaving. coder/websocket
+    reports a dropped connection as a plain error, not as 1006.
+  - `mode` keeps gin's meaning: empty is debug, which serves pprof, and an
+    unknown mode fails at start, as `gin.SetMode` panicked. Debug mode now
+    logs a warning at start.
+  - Start-up rejects an `auth.jwt_alg` other than HS256, HS384 or HS512
+    (empty is HS256, as in gin-jwt; its RS algorithms needed key files
+    that v0 configuration cannot name) and an empty `auth.jwt_secret`,
+    which gin-jwt accepted and with which anyone can sign tokens. A v1
+    file handed to `config.Init` has no `jwt_secret`, so occamyd now
+    refuses it at start instead of serving with defaults.
+  - `proxy.legacyV0` is always true, since `config.Init` reads only v0
+    files, and a v0 file implies `legacy_v0`. `config.File.LegacyV0` from
+    Config v1 is not wired yet, since nothing starts occamyd from a v1
+    file.
+  - The request log writes the quoted method and path, the status, the
+    duration and the remote address: no query string, no headers, so
+    neither the token nor the credentials in it. gin's logger wrote the
+    query string. A request is logged when it ends, so a WebSocket's line
+    appears with status 101 when its session ends.
+- **Deviations:**
+  - Decision 9's "the v0 routes keep `gorilla/websocket` until they are
+    removed" is superseded by this task.
+  - Login reads JSON and forms (URL-encoded or multipart), limited to
+    1 MiB; gin's binding also took XML, YAML, TOML and protobuf bodies,
+    which no v0 client sends.
+  - A token without the four claims as strings gets 401; gin-jwt's v0
+    panicked on it after the upgrade.
+  - A wrong method gets 405 from the ServeMux where gin answered 404; a
+    plain GET with a valid token gets 426 from coder/websocket where
+    gorilla answered 400. The log names the peer address, not gin's
+    `X-Forwarded-For` client IP.
+  - There is no recovery middleware: `net/http` logs a panic and drops
+    the connection where gin answered 500. It arrives with the HTTP server
+    task.
+- **Surprises:**
+  - gin-jwt's 400 for an `exp` of the wrong type was unreachable: golang-jwt
+    v4 had already rejected such a token as expired, with 401. Only a
+    missing `exp` reached the 400, which is kept.
+  - gosec's G120 has no sanitizer, so `http.MaxBytesReader` does not
+    silence it on `ParseMultipartForm`; the call carries a `#nosec`.
+  - occamyd does not read the WebSocket during the guacd handshake, as
+    before, so a client's close frame waits for the handshake. One test
+    drops its stalled client instead of closing it, since coder/websocket's
+    `Close` waits for the answer.
+- **Benchmark:** the harness's `occamy` series now dials with
+  coder/websocket, and occamyd's own WebSocket library changed too. Bytes
+  are unaffected, as above, and the `guacd` series does not touch either
+  library. The `occamy` series' server CPU in
+  [benchmarks.md](../../docs/benchmarks.md) was measured on gorilla and
+  has not been measured again.
+- **Follow-ups:** the HTTP server task, starting from `ParseV1`, mounts
+  these routes on its mux with its recovery middleware when `legacy_v0`
+  is set, gives them a per-process HS256 key under a v1 file (see Config
+  v1's notes; `newTokens` takes any secret), and decides whether v0's
+  pprof moves to the debug listener. 004 keeps the token out of the URL
+  and the other v0 items. The end-to-end and pressure tests ran in CI
+  only.

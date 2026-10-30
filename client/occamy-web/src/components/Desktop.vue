@@ -8,7 +8,7 @@ export default {
   methods: {},
   mounted () {
     const scheme = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const url = `${scheme}//${window.location.host}/api/v1/connect`
+    const url = `${scheme}//${window.location.host}/api/v0/connect`
     let guac = new occamy.Client(new occamy.WebSocketTunnel(url));
     let display = guac.getDisplay()
     document.getElementById('desktop').appendChild(display.getElement());

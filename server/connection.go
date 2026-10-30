@@ -6,6 +6,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log"
 	"net/http"
 	"net/http/pprof"
@@ -15,45 +16,50 @@ import (
 	"syscall"
 	"time"
 
-	jwt "github.com/appleboy/gin-jwt/v2"
-	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
-
 	"changkun.de/x/occamy/internal/config"
-	"changkun.de/x/occamy/internal/guacamole"
 )
+
+// clientDir holds the built web client, which occamyd serves under
+// /static with client: true.
+const clientDir = "./client/occamy-web/dist"
 
 // Run is an export method that serves occamy proxy
 func Run() {
 	config.Init()
-	proxy := &proxy{
-		guacd:    config.Runtime.Guacd,
-		sessions: make(map[string]*Session),
-		upgrader: &websocket.Upgrader{
-			ReadBufferSize:  guacamole.MaxInstructionLength,
-			WriteBufferSize: guacamole.MaxInstructionLength,
-			Subprotocols:    []string{"guacamole"}, // fixed by guacamole-client
-		},
+	tokens, err := newTokens(config.Runtime.Auth.JWTSecret, config.Runtime.Auth.JWTAlgorithm)
+	if err != nil {
+		log.Fatalf("initialize router error: %v", err)
 	}
-	proxy.serve()
+	proxy := &proxy{
+		guacd:  config.Runtime.Guacd,
+		tokens: tokens,
+		// Every configuration that internal/config reads is a v0 file,
+		// and a v0 file implies legacy_v0.
+		legacyV0: true,
+		client:   config.Runtime.Client,
+		debug:    config.Runtime.Debug(),
+		sessions: make(map[string]*Session),
+	}
+	proxy.serve(config.Runtime.Address)
 }
 
 // proxy is an occamy proxy that serves all sessions
 // connects to occamy
 type proxy struct {
-	jwtm     *jwt.GinJWTMiddleware
-	upgrader *websocket.Upgrader
-	engine   *gin.Engine
 	guacd    config.Guacd
+	tokens   *tokens // v0 tokens
+	legacyV0 bool    // serve the v0 routes under /api/v0
+	client   bool    // serve the web client and the v0 login
+	debug    bool    // serve pprof under /debug/pprof
 
 	mu       sync.Mutex
 	sessions map[string]*Session
 }
 
-func (p *proxy) serve() {
+func (p *proxy) serve(addr string) {
 	s := &http.Server{
-		Handler: p.routers(),
-		Addr:    config.Runtime.Address,
+		Handler: p.routes(),
+		Addr:    addr,
 		// Bound how long a client may take to send its request headers,
 		// so that slow clients cannot hold connections open.
 		ReadHeaderTimeout: 10 * time.Second,
@@ -71,88 +77,90 @@ func (p *proxy) serve() {
 		cancel()
 		done <- struct{}{}
 	}()
-	log.Printf("starting at http://%s...", config.Runtime.Address)
+	if p.debug {
+		log.Printf("debug mode: serving /debug/pprof without a token; set mode: release where others can reach occamyd")
+	}
+	log.Printf("starting at http://%s...", addr)
 	err := s.ListenAndServe()
-	if err != http.ErrServerClosed {
+	if !errors.Is(err, http.ErrServerClosed) {
 		log.Printf("close with error: %v", err)
 	}
 	<-done
 	log.Println("occamy proxy is down, good bye!")
 }
 
-func (p *proxy) routers() *gin.Engine {
-	p.engine = gin.Default()
-	p.initJWT()
-	if config.Runtime.Client {
-		p.engine.StaticFS("/static", http.Dir("./client/occamy-web/dist"))
+// routes returns occamyd's handler: its routes on a ServeMux, behind the
+// request log.
+func (p *proxy) routes() http.Handler {
+	mux := http.NewServeMux()
+	if p.client {
+		mux.Handle("GET /static/", http.StripPrefix("/static", http.FileServer(http.Dir(clientDir))))
 	}
-	v1 := p.engine.Group("/api/v1")
-	if config.Runtime.Client {
-		v1.POST("/login", p.jwtm.LoginHandler)
+	if p.legacyV0 {
+		if p.client {
+			mux.HandleFunc("POST /api/v0/login", p.tokens.login)
+		}
+		mux.HandleFunc("GET /api/v0/connect", p.serveWS)
 	}
-	auth := v1.Group("/connect")
-	auth.Use(p.jwtm.MiddlewareFunc())
-	auth.GET("", p.serveWS)
-	if gin.Mode() == gin.DebugMode {
-		p.profile()
+	if p.debug {
+		profile(mux)
 	}
-	return p.engine
-}
-
-func (p *proxy) initJWT() {
-	jwtm, err := jwt.New(&jwt.GinJWTMiddleware{
-		Realm:            "occamy-proxy",
-		Key:              []byte(config.Runtime.Auth.JWTSecret),
-		SigningAlgorithm: config.Runtime.Auth.JWTAlgorithm,
-		Authenticator: func(c *gin.Context) (interface{}, error) {
-			var conf config.JWT
-			err := c.ShouldBind(&conf)
-			if err != nil {
-				log.Printf("err: %v", err)
-				return &conf, jwt.ErrFailedAuthentication
-			}
-			return &conf, nil
-		},
-		PayloadFunc: func(data interface{}) jwt.MapClaims {
-			if v, ok := data.(*config.JWT); ok {
-				return jwt.MapClaims{
-					"protocol": v.Protocol,
-					"host":     v.Host,
-					"username": v.Username,
-					"password": v.Password,
-				}
-			}
-			return jwt.MapClaims{}
-		},
-		TokenLookup: "header: Authorization, query: token, cookie: jwt",
-	})
-	if err != nil {
-		log.Fatalf("initialize router error: %v", err)
-	}
-	p.jwtm = jwtm
+	return logRequests(mux)
 }
 
 // profile serves the net/http/pprof handlers under /debug/pprof, in debug
-// mode only. docs/debugging.md describes how to use them.
-func (p *proxy) profile() {
-	pprofHandler := func(h http.HandlerFunc) gin.HandlerFunc {
-		return func(c *gin.Context) {
-			h.ServeHTTP(c.Writer, c.Request)
-		}
+// mode only. docs/debugging.md describes how to use them. Index also
+// serves the named profiles, such as /debug/pprof/heap.
+func profile(mux *http.ServeMux) {
+	mux.HandleFunc("GET /debug/pprof/", pprof.Index)
+	mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("POST /debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
+}
+
+// logRequests logs each request once it has been served: its method,
+// path, status, duration and the client's address. It leaves out the
+// query string, which carries the token to /api/v0/connect, and the
+// headers. gin's logger wrote the query string, and with it the token.
+func logRequests(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(sw, r)
+		// #nosec G706 -- the client's method and path are quoted, so they cannot break the line.
+		log.Printf("%q %q %d %v %s", r.Method, r.URL.Path, sw.status(), time.Since(start).Round(time.Microsecond), r.RemoteAddr)
+	})
+}
+
+// statusWriter records the status code of a response. Unwrap lets
+// coder/websocket and http.ResponseController reach the connection's
+// http.Hijacker and http.Flusher.
+type statusWriter struct {
+	http.ResponseWriter
+	code int
+}
+
+func (w *statusWriter) WriteHeader(code int) {
+	if w.code == 0 {
+		w.code = code
 	}
-	r := p.engine.Group("/debug/pprof")
-	{
-		r.GET("/", pprofHandler(pprof.Index))
-		r.GET("/cmdline", pprofHandler(pprof.Cmdline))
-		r.GET("/profile", pprofHandler(pprof.Profile))
-		r.POST("/symbol", pprofHandler(pprof.Symbol))
-		r.GET("/symbol", pprofHandler(pprof.Symbol))
-		r.GET("/trace", pprofHandler(pprof.Trace))
-		r.GET("/allocs", pprofHandler(pprof.Handler("allocs").ServeHTTP))
-		r.GET("/block", pprofHandler(pprof.Handler("block").ServeHTTP))
-		r.GET("/goroutine", pprofHandler(pprof.Handler("goroutine").ServeHTTP))
-		r.GET("/heap", pprofHandler(pprof.Handler("heap").ServeHTTP))
-		r.GET("/mutex", pprofHandler(pprof.Handler("mutex").ServeHTTP))
-		r.GET("/threadcreate", pprofHandler(pprof.Handler("threadcreate").ServeHTTP))
+	w.ResponseWriter.WriteHeader(code)
+}
+
+func (w *statusWriter) Write(b []byte) (int, error) {
+	if w.code == 0 {
+		w.code = http.StatusOK
 	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w *statusWriter) status() int {
+	if w.code == 0 {
+		return http.StatusOK
+	}
+	return w.code
 }
