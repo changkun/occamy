@@ -210,6 +210,28 @@ func TestTerminalResize(t *testing.T) {
 	})
 }
 
+// A resize-request is an input whose effect is a screen of another size:
+// the rows in motion at the input, of the old size, say nothing about the
+// new rows.
+func TestTerminalResizeRequest(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &tapped{Backend: backendtest.NewTerminal(80, 24, 0)}
+		r := newRig(t, b, 1e6, 10*time.Millisecond, termHello)
+		time.Sleep(100 * time.Millisecond)
+		r.cl.send(t, protocol.ResizeRequest{Seq: 1, Width: 120, Height: 40})
+		time.Sleep(100 * time.Millisecond)
+		r.cl.send(t, protocol.TermInput{Seq: 2, Data: []byte("after")})
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		got := r.cl.term.Snapshot()
+		if got.Cols != 120 || got.Rows != 40 || !got.Equal(r.s.Screen()) {
+			t.Errorf("client screen %dx%d\n%s\nserver\n%s", got.Cols, got.Rows, got, r.s.Screen())
+		}
+	})
+}
+
 // An input's echo goes out at once, beyond a full frame window, and its
 // frame reports the input.
 func TestTerminalInput(t *testing.T) {

@@ -107,6 +107,11 @@ type pending struct {
 	boosted bool   // the pacer has been told, at the clock checked
 }
 
+// moving reports whether tile or row i of n was in motion at the input.
+// Those of a screen of another size were not: the screen resized since,
+// as when the input was a resize-request.
+func (in *pending) moving(i, n int) bool { return len(in.active) == n && in.active[i] }
+
 // newPending returns the pending input seq, whose effect is the change
 // after clock. A tile was in motion if it changed since the last snapshot
 // and before clock, or between the last two, unless the change went out

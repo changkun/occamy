@@ -68,7 +68,7 @@ func (w *writer) runTerminal(ctx context.Context) error {
 			// What the input changed went out as its effect, so it is not
 			// motion when the next input comes.
 			for i, v := range w.versions {
-				if v > w.in.clock && (w.in.active == nil || !w.in.active[i]) {
+				if v > w.in.clock && !w.in.moving(i, len(w.versions)) {
 					w.effects[i] = v
 				}
 			}
@@ -107,7 +107,7 @@ func (w *writer) termEffect(s *terminal.Screen, seq uint32) {
 	}
 	in.checked = s.Version
 	for i, v := range w.versions {
-		if v > in.clock && (in.active == nil || !in.active[i]) {
+		if v > in.clock && !in.moving(i, len(w.versions)) {
 			w.p.Input()
 			in.boosted = true
 			in.seq = max(in.seq, seq)
