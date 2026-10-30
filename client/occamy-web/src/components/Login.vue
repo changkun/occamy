@@ -61,7 +61,7 @@ export default {
   },
   methods: {
     login() {
-        axios.post('/api/v1/login', this.credentials[this.form.protocol]).then((response) => {
+        axios.post('/api/v0/login', this.credentials[this.form.protocol]).then((response) => {
             window.location = this.$router.resolve({
                 name: 'desktop', query:{token: response.data.token}
             }).href
