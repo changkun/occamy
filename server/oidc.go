@@ -119,12 +119,12 @@ type oidcSignIn struct {
 	ttl    time.Duration
 	client *http.Client // to the provider: oidcTimeout, maxProviderBody, no redirects
 	flows  *flowCookies
-	// static are the static users, whose names an OIDC user may not
-	// take, and nil with link_static_users. admitUsers and admitGroups
-	// are the users and groups that require_known_users admits, and nil
-	// without it. knownGroups are the groups the file names; other
-	// groups of a user are dropped.
-	static      map[string]bool
+	// static are the static users' names, which an OIDC user may not
+	// take, by config.SameName, and nil with link_static_users.
+	// admitUsers and admitGroups are the users and groups that
+	// require_known_users admits, and nil without it. knownGroups are the
+	// groups the file names; other groups of a user are dropped.
+	static      []string
 	admitUsers  map[string]bool
 	admitGroups map[string]bool
 	knownGroups map[string]bool
@@ -188,9 +188,8 @@ func newOIDC(f *config.File, signer *auth.Signer, servesTLS bool) (*oidcSignIn, 
 		codes:       map[[sha256.Size]byte]pendingSignIn{},
 	}
 	if !conf.LinkStaticUsers {
-		o.static = map[string]bool{}
 		for _, u := range f.Auth.Users {
-			o.static[u.Name] = true
+			o.static = append(o.static, u.Name)
 		}
 	}
 	if conf.RequireKnownUsers {
@@ -434,23 +433,25 @@ func failed(code, format string, args ...any) error {
 // provider's answer in q, exchanges the code with the verifier of f,
 // verifies the ID token, and maps its claims to a user and groups.
 func (o *oidcSignIn) identify(r *http.Request, q url.Values, f *flow) (user string, groups []string, err error) {
-	if e := q.Get("error"); e != "" {
-		if e == "access_denied" {
-			return "", nil, failed(codeAccessDenied, "the provider denied access")
-		}
-		return "", nil, failed(codeSignInFailed, "the provider answered %s", quote(e))
-	}
 	p, err := o.discover()
 	if err != nil {
 		return "", nil, failed(codeUnavailable, "the provider cannot be reached: %s", quote(err.Error()))
 	}
 	// RFC 9207: a provider that names itself must be ours, and one that
-	// says it names itself must do so.
+	// says it names itself must do so, in an error response too (2.4),
+	// so the check comes before the provider's error is taken as its.
+	// The issuer is compared exactly, once.
 	switch iss, ok := q["iss"]; {
 	case ok && (len(iss) != 1 || iss[0] != o.conf.Issuer):
 		return "", nil, failed(codeSignInFailed, "the provider's answer names another issuer, %s", quote(strings.Join(iss, " ")))
 	case !ok && p.issParam:
 		return "", nil, failed(codeSignInFailed, "the provider's answer names no issuer, though its discovery document says it does (RFC 9207)")
+	}
+	if e := q.Get("error"); e != "" {
+		if e == "access_denied" {
+			return "", nil, failed(codeAccessDenied, "the provider denied access")
+		}
+		return "", nil, failed(codeSignInFailed, "the provider answered %s", quote(e))
 	}
 	code := q["code"]
 	if len(code) != 1 || code[0] == "" {
@@ -492,10 +493,11 @@ func (o *oidcSignIn) identify(r *http.Request, q url.Values, f *flow) (user stri
 }
 
 // mapClaims maps the claims of a verified ID token to a user and groups:
-// the user from subject_claim, which may not name a static user unless
-// link_static_users links them, and the groups from groups_claim,
-// keeping the groups the file names. With require_known_users, an allow
-// list must name the user or one of the groups.
+// the user from subject_claim, which may not name a static user, by
+// config.SameName, unless link_static_users links them, and the groups
+// from groups_claim, keeping the groups the file names; a linked user
+// gets these, not the static user's. With require_known_users, an allow
+// list must name the user, exactly, or one of the groups.
 func (o *oidcSignIn) mapClaims(id *oidc.IDToken, claims map[string]json.RawMessage) (user string, groups []string, err error) {
 	// OpenID Connect Core 1.0, 3.1.3.7: with several audiences, the
 	// authorized party must be occamyd, and so must any that is named.
@@ -518,8 +520,8 @@ func (o *oidcSignIn) mapClaims(id *oidc.IDToken, claims map[string]json.RawMessa
 		}
 	}
 	// A name belongs to one source unless the file links them.
-	if o.static[user] {
-		return "", nil, failed(codeAccessDenied, "user %q is a static user, and auth.oidc.link_static_users is off", user)
+	if i := slices.IndexFunc(o.static, func(name string) bool { return config.SameName(user, name) }); i >= 0 {
+		return "", nil, failed(codeAccessDenied, "user %q takes the name of static user %q, and auth.oidc.link_static_users is off", user, o.static[i])
 	}
 	if groups, err = o.groupsOf(user, claims); err != nil {
 		return "", nil, err
@@ -559,14 +561,18 @@ func (o *oidcSignIn) groupsOf(user string, claims map[string]json.RawMessage) ([
 }
 
 // validSubject reports whether s can name a user: not empty, at most
-// maxSubject bytes of UTF-8, of graphic characters, with U+0020 the only
-// space. That refuses control characters, format characters (unicode.Cf:
-// zero-width spaces and joiners, bidirectional overrides, the soft
-// hyphen), the line and paragraph separators and the other spaces, which
-// would let a name pass for another or break a log line.
+// maxSubject bytes of UTF-8, of graphic characters that show, with U+0020
+// the only space. Any other character would let a name pass for another
+// or break a log line, so it refuses control characters; format
+// characters (unicode.Cf: zero-width spaces and joiners, bidirectional
+// overrides, the soft hyphen); the other default-ignorable code points,
+// which render as nothing (the combining grapheme joiner, variation
+// selectors, the Hangul fillers); U+2800, the blank Braille pattern; the
+// line and paragraph separators; and the other spaces.
 func validSubject(s string) bool {
 	return s != "" && len(s) <= maxSubject && utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool {
-		return !unicode.IsGraphic(r) || r != ' ' && unicode.IsSpace(r)
+		return !unicode.IsGraphic(r) || r != ' ' && unicode.IsSpace(r) ||
+			unicode.In(r, unicode.Other_Default_Ignorable_Code_Point, unicode.Variation_Selector) || r == '\u2800'
 	})
 }
 

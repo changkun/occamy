@@ -267,17 +267,18 @@ func TestParseV1Defaults(t *testing.T) {
 
 // TestKnownNames checks the groups that a file names, which OIDC sign-in
 // maps to, and the users and groups that require_known_users admits: the
-// static users only when link_static_users links them.
+// static users, and names in allow lists that are theirs, only when
+// link_static_users links them.
 func TestKnownNames(t *testing.T) {
 	for _, tt := range []struct {
 		link  string
 		users map[string]bool
 	}{
-		{"false", map[string]bool{"alice": true, "carol": true}},
-		{"true", map[string]bool{"alice": true, "bob": true, "carol": true}},
+		{"false", map[string]bool{"carol": true}},
+		{"true", map[string]bool{"alice": true, "bob": true, "carol": true, "Bob": true}},
 	} {
 		f, err := parse(t, head+`  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb, link_static_users: `+tt.link+`}
-`+conn+`  - {id: b, protocol: ssh, target: b, credentials: {prompt: true}, allow: {users: [carol], groups: [admins]}}
+`+conn+`  - {id: b, protocol: ssh, target: b, credentials: {prompt: true}, allow: {users: [carol, Bob], groups: [admins]}}
 `)
 		if err != nil {
 			t.Fatal(err)
@@ -288,6 +289,30 @@ func TestKnownNames(t *testing.T) {
 		}
 		if got, want := f.KnownGroups(), map[string]bool{"ops": true, "dev": true, "admins": true}; !reflect.DeepEqual(got, want) {
 			t.Errorf("KnownGroups = %v, want %v", got, want)
+		}
+	}
+}
+
+// TestSameName checks when two user names pass for one: under Unicode
+// case folding, once in NFC.
+func TestSameName(t *testing.T) {
+	for _, tt := range []struct {
+		a, b string
+		want bool
+	}{
+		{"alice", "alice", true},
+		{"alice", "Alice", true},
+		{"alice", "ALICE", true},
+		{"zo\u00eb", "zoe\u0308", true}, // precomposed and decomposed
+		{"Zo\u00cb", "zoe\u0308", true}, // and in another case
+		{"\u212aim", "kim", true},       // Kelvin sign, which folds to k
+		{"alice", "alice ", false},
+		{"alice", "al\u0456ce", false},    // Cyrillic i: a look-alike, not the same
+		{"alice", "\uff41lice", false},    // fullwidth a
+		{"stra\u00dfe", "strasse", false}, // simple folding only
+	} {
+		if got := config.SameName(tt.a, tt.b); got != tt.want {
+			t.Errorf("SameName(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
 		}
 	}
 }
@@ -525,6 +550,18 @@ connections:
 			{"auth.oidc.require_known_users", "the file admits no one"},
 		}},
 		{"oidc known users: static users not linked", head + `  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb, require_known_users: true}
+`, []want{
+			{"auth.oidc.require_known_users", "the file admits no one"},
+		}},
+		// OIDC refuses a static user's name without link_static_users, so
+		// an allow list that names only static users admits no one.
+		{"oidc known users: only static users allowed", head + `  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb, require_known_users: true}
+` + conn, []want{
+			{"auth.oidc.require_known_users", "the file admits no one"},
+		}},
+		{"oidc known users: only static users' names in another case", head + `  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://o.example.com/cb, require_known_users: true}
+connections:
+  - {id: box, protocol: ssh, target: box.internal, credentials: {prompt: true}, allow: {users: [Alice, BOB]}}
 `, []want{
 			{"auth.oidc.require_known_users", "the file admits no one"},
 		}},

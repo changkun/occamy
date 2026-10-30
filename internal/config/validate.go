@@ -23,6 +23,7 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/text/unicode/norm"
 
 	"changkun.de/x/occamy/internal/auth"
 )
@@ -322,24 +323,45 @@ func (f *File) validateConnections(c *checker) {
 
 // Admitted returns the users and groups that auth.oidc.require_known_users
 // admits: those in the connections' allow lists, and, with
-// auth.oidc.link_static_users, the static users. A user is admitted by
-// name, or by a group that the provider's groups claim names.
+// auth.oidc.link_static_users, the static users. Without it, a name in an
+// allow list that TakesStaticName is left out, since OIDC refuses it. A
+// user is admitted by name, compared exactly, or by a group that the
+// provider's groups claim names.
 func (f *File) Admitted() (users, groups map[string]bool) {
 	users, groups = map[string]bool{}, map[string]bool{}
-	if f.Auth.OIDC != nil && f.Auth.OIDC.LinkStaticUsers {
+	link := f.Auth.OIDC != nil && f.Auth.OIDC.LinkStaticUsers
+	if link {
 		for _, u := range f.Auth.Users {
 			users[u.Name] = true
 		}
 	}
 	for _, cn := range f.Connections {
 		for _, u := range cn.Allow.Users {
-			users[u] = true
+			if link || !f.TakesStaticName(u) {
+				users[u] = true
+			}
 		}
 		for _, g := range cn.Allow.Groups {
 			groups[g] = true
 		}
 	}
 	return users, groups
+}
+
+// TakesStaticName reports whether name is a static user's by SameName.
+// OIDC sign-in refuses such a name unless auth.oidc.link_static_users
+// links the two.
+func (f *File) TakesStaticName(name string) bool {
+	return slices.ContainsFunc(f.Auth.Users, func(u User) bool { return SameName(name, u.Name) })
+}
+
+// SameName reports whether a and b would pass for the same user's name:
+// equal under Unicode case folding once both are in NFC, so that Alice,
+// or an alice with a decomposed accent, is not a user apart from alice.
+// It keeps OIDC users' names apart from the static users'; access, by
+// allow lists, compares names exactly.
+func SameName(a, b string) bool {
+	return strings.EqualFold(norm.NFC.String(a), norm.NFC.String(b))
 }
 
 // KnownGroups returns the groups that f names: its static users' groups

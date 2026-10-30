@@ -104,8 +104,9 @@ type OIDC struct {
 	// groups claim, or, with LinkStaticUsers, a static user.
 	RequireKnownUsers bool `yaml:"require_known_users"`
 	// LinkStaticUsers lets an OIDC user whose subject names a static user
-	// sign in as that user. Off, such a sign-in is refused, since a name
-	// belongs to one source unless the file links them.
+	// sign in under that name, with the groups of the groups claim. Off,
+	// a subject that is a static user's name by SameName is refused,
+	// since a name belongs to one source unless the file links them.
 	LinkStaticUsers bool `yaml:"link_static_users"`
 }
 

@@ -79,6 +79,7 @@ type testIdP struct {
 	authError   string // the authorization endpoint answers with this error
 	issParam    string // the authorization endpoint adds iss (RFC 9207)
 	tokenStatus int    // the token endpoint fails with this status
+	tokenError  string // and this error code, invalid_grant if empty
 	noIDToken   bool
 	oct         []byte // a symmetric key that the key set also lists
 }
@@ -212,7 +213,11 @@ func (p *testIdP) token(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if p.tokenStatus != 0 {
-		fail(p.tokenStatus, "invalid_grant")
+		code := p.tokenError
+		if code == "" {
+			code = "invalid_grant"
+		}
+		fail(p.tokenStatus, code)
 		return
 	}
 	id, secret, basic := r.BasicAuth()
@@ -630,6 +635,35 @@ func TestOIDCLoginCookie(t *testing.T) {
 	}
 }
 
+// TestOIDCLoginReplacesFlow checks what a second login in one browser
+// does, such as a top-level navigation to login from another site: it
+// replaces the sign-in cookie, so the sign-in under way fails at the
+// callback with invalid_state, a nuisance the docs record. The sign-in
+// that the other site started reaches the return URL with a code that
+// the browser's client cannot redeem, since it holds no verifier of that
+// challenge.
+func TestOIDCLoginReplacesFlow(t *testing.T) {
+	ot := newOIDCTest(t, nil)
+	b := newBrowser(t)
+	authURL, verifier := ot.toProvider(t, b)
+
+	other := oauth2.GenerateVerifier()
+	r := b.get(t, ot.loginURL(testReturnURL, oauth2.S256ChallengeFromVerifier(other)))
+	if r.code != http.StatusFound || len(r.header.Values("Set-Cookie")) != 1 {
+		t.Fatalf("second login: %d %q", r.code, r.header.Values("Set-Cookie"))
+	}
+	otherAuthURL := r.header.Get("Location")
+
+	cb := b.get(t, ot.toCallback(t, b, authURL))
+	if cb.code != http.StatusBadRequest || decodeError(t, cb.body).Code != codeInvalidState {
+		t.Fatalf("the first sign-in's callback: %d %s", cb.code, cb.body)
+	}
+	v := sentBack(t, b.get(t, ot.toCallback(t, b, otherAuthURL)))
+	if r := ot.exchange(t, v.Get("code"), verifier); r.code != http.StatusUnauthorized {
+		t.Errorf("the client's verifier redeemed the other site's code: %d %s", r.code, r.body)
+	}
+}
+
 // TestOIDCOpenRedirect checks that login sends nobody anywhere but to a
 // configured return URL, exactly as written.
 func TestOIDCOpenRedirect(t *testing.T) {
@@ -948,6 +982,10 @@ func TestOIDCAccessDenied(t *testing.T) {
 		allow bool
 	}{
 		{name: "the provider refused", idp: func(p *testIdP) { p.authError = "access_denied" }},
+		{name: "the provider refused, naming itself as promised", idp: func(p *testIdP) {
+			p.authError, p.issParam = "access_denied", p.srv.URL
+			p.doc = func(d map[string]any) { d["authorization_response_iss_parameter_supported"] = true }
+		}},
 		{name: "no subject", idp: func(p *testIdP) { p.spoil = func(c jwt.MapClaims) { delete(c, "sub") } }},
 		{name: "empty subject", idp: func(p *testIdP) { p.subject = "" }},
 		{
@@ -1011,6 +1049,26 @@ func TestOIDCAccessDenied(t *testing.T) {
 			name: "static user, linked", edit: func(f *config.File) { f.Auth.OIDC.LinkStaticUsers = true },
 			idp: func(p *testIdP) { p.subject = "alice" }, allow: true,
 		},
+		// A static user's name in another case or another normal form is
+		// the static user's too, and one with an invisible character is
+		// no name at all.
+		{name: "static user in another case", idp: func(p *testIdP) { p.subject = "Alice" }},
+		{name: "static user in upper case", idp: func(p *testIdP) { p.subject = "ALICE" }},
+		{
+			name: "static user, decomposed", edit: func(f *config.File) { f.Auth.Users[1].Name = "zo\u00eb" },
+			idp: func(p *testIdP) { p.subject = "Zoe\u0308" },
+		},
+		{name: "static user with an invisible character", idp: func(p *testIdP) { p.subject = "alice\u034f" }},
+		{
+			// Linked, Alice is a user apart from alice, as access compares
+			// names exactly.
+			name: "static user in another case, linked", edit: func(f *config.File) { f.Auth.OIDC.LinkStaticUsers = true },
+			idp: func(p *testIdP) { p.subject = "Alice" }, allow: true,
+		},
+		{
+			name: "user named in an allow list in another case", edit: func(f *config.File) { f.Auth.OIDC.RequireKnownUsers = true },
+			idp: func(p *testIdP) { p.subject = "Carol" },
+		},
 		{
 			name: "static user, linked, require_known_users",
 			edit: func(f *config.File) { f.Auth.OIDC.LinkStaticUsers, f.Auth.OIDC.RequireKnownUsers = true, true },
@@ -1062,6 +1120,18 @@ func TestOIDCProviderErrors(t *testing.T) {
 		{"no issuer in the answer of a provider that promises one", func(p *testIdP) {
 			p.doc = func(d map[string]any) { d["authorization_response_iss_parameter_supported"] = true }
 		}},
+		// RFC 9207 compares the issuer exactly.
+		{"the issuer with a trailing slash", func(p *testIdP) { p.issParam = p.srv.URL + "/" }},
+		{"the issuer in upper case", func(p *testIdP) { p.issParam = "HTTP" + strings.TrimPrefix(p.srv.URL, "http") }},
+		{"the issuer under another host name", func(p *testIdP) { p.issParam = strings.Replace(p.srv.URL, "127.0.0.1", "localhost", 1) }},
+		{"the issuer with a dot segment", func(p *testIdP) { p.issParam = p.srv.URL + "/." }},
+		// An error response is checked too (RFC 9207, 2.4), and its
+		// error is not passed on as the provider's.
+		{"an error naming another issuer", func(p *testIdP) { p.authError, p.issParam = "access_denied", "https://evil.example.com" }},
+		{"an error naming no issuer, from a provider that promises one", func(p *testIdP) {
+			p.authError = "access_denied"
+			p.doc = func(d map[string]any) { d["authorization_response_iss_parameter_supported"] = true }
+		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			logged := captureLog(t)
@@ -1082,6 +1152,17 @@ func TestOIDCProviderErrors(t *testing.T) {
 		u, _ := url.Parse(ot.toCallback(t, b, authURL))
 		q := u.Query()
 		q.Del("code")
+		u.RawQuery = q.Encode()
+		wantError(t, b.get(t, u.String()), codeSignInFailed)
+	})
+	t.Run("the issuer named twice", func(t *testing.T) {
+		ot := newOIDCTest(t, nil)
+		ot.idp.set(func(p *testIdP) { p.issParam = p.srv.URL })
+		b := newBrowser(t)
+		authURL, _ := ot.toProvider(t, b)
+		u, _ := url.Parse(ot.toCallback(t, b, authURL))
+		q := u.Query()
+		q.Add("iss", ot.idp.srv.URL)
 		u.RawQuery = q.Encode()
 		wantError(t, b.get(t, u.String()), codeSignInFailed)
 	})
@@ -1110,6 +1191,10 @@ func TestOIDCEndpoints(t *testing.T) {
 	}{
 		{"https://id.example.com", "https://id.example.com/token", true},
 		{"https://id.example.com", "https://elsewhere.example.com/token", true},
+		// The discovery document, from the issuer occamyd trusts, picks
+		// the hosts: occamyd restricts the scheme only.
+		{"https://id.example.com", "https://127.0.0.1:6443/token", true},
+		{"https://id.example.com", "https://169.254.169.254/latest", true},
 		{"https://id.example.com", "http://id.example.com/token", false},
 		{"https://id.example.com", "http://localhost:8080/token", false},
 		{"https://id.example.com", "http://127.0.0.1:8080/token", false},
@@ -1167,6 +1252,28 @@ func TestOIDCGroups(t *testing.T) {
 			ot.idp.set(func(p *testIdP) { p.extra = tt.extra })
 			if user, groups := ot.signedIn(t); user != "carol" || !slices.Equal(groups, tt.groups) {
 				t.Errorf("signed in as %q in %q, want carol in %q", user, groups, tt.groups)
+			}
+		})
+	}
+}
+
+// TestOIDCLinkedGroups checks the groups of an OIDC user that
+// link_static_users links to a static user: those of the groups claim,
+// not the static user's.
+func TestOIDCLinkedGroups(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		extra  jwt.MapClaims
+		groups []string
+	}{
+		{"no groups claim", nil, nil},
+		{"groups claim", jwt.MapClaims{"groups": []string{"admins"}}, []string{"admins"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ot := newOIDCTest(t, func(f *config.File) { f.Auth.OIDC.LinkStaticUsers = true })
+			ot.idp.set(func(p *testIdP) { p.subject, p.extra = "alice", tt.extra }) // static alice is in ops
+			if user, groups := ot.signedIn(t); user != "alice" || !slices.Equal(groups, tt.groups) {
+				t.Errorf("signed in as %q in %q, want alice in %q", user, groups, tt.groups)
 			}
 		})
 	}
@@ -1262,6 +1369,32 @@ func TestOIDCPendingLimit(t *testing.T) {
 		for i := 1; i < len(codes); i++ {
 			if _, ok := o.redeem(codes[i], verifiers[i]); !ok {
 				t.Errorf("code %d of %d does not redeem", i+1, len(codes))
+			}
+		}
+	})
+	t.Run("names apart", func(t *testing.T) {
+		// Codes count by the exact name, so names that pass for
+		// mallory's evict none of mallory's.
+		o := newOIDCTest(t, nil).s.oidc
+		var codes, verifiers []string
+		for range maxPendingPerUser {
+			v := oauth2.GenerateVerifier()
+			code, err := o.pend("mallory", nil, oauth2.S256ChallengeFromVerifier(v))
+			if err != nil {
+				t.Fatal(err)
+			}
+			codes, verifiers = append(codes, code), append(verifiers, v)
+		}
+		for _, other := range []string{"Mallory", "mallory ", "m\u0430llory"} {
+			for range maxPendingPerUser + 2 {
+				if _, err := o.pend(other, nil, "c"); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+		for i := range codes {
+			if _, ok := o.redeem(codes[i], verifiers[i]); !ok {
+				t.Errorf("mallory's code %d was evicted by another name", i+1)
 			}
 		}
 	})
@@ -1454,6 +1587,8 @@ func TestOIDCDiscovery(t *testing.T) {
 		{"token endpoint over http", func(d map[string]any) { d["token_endpoint"] = "http://id.example.com/token" }},
 		{"authorization endpoint over http", func(d map[string]any) { d["authorization_endpoint"] = "http://id.example.com/authorize" }},
 		{"no key set", func(d map[string]any) { delete(d, "jwks_uri") }},
+		// The flag is read as a JSON bool, strictly.
+		{"iss flag as a string", func(d map[string]any) { d["authorization_response_iss_parameter_supported"] = "true" }},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ot := newOIDCTest(t, nil)
@@ -1461,6 +1596,44 @@ func TestOIDCDiscovery(t *testing.T) {
 			unavailable(t, ot)
 		})
 	}
+	t.Run("https issuer", func(t *testing.T) {
+		// An https issuer's endpoints must be https, also on the loopback
+		// interface, where http passes for an http issuer.
+		var tokenURL atomic.Value
+		var srv *httptest.Server
+		srv = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                 srv.URL,
+				"authorization_endpoint": srv.URL + "/authorize",
+				"token_endpoint":         tokenURL.Load(),
+				"jwks_uri":               srv.URL + "/jwks",
+			})
+		}))
+		srv.StartTLS()
+		t.Cleanup(srv.Close)
+		for _, tt := range []struct {
+			name, token string
+			ok          bool
+		}{
+			{"token endpoint over https", srv.URL + "/token", true},
+			{"token endpoint over http on loopback", "http" + strings.TrimPrefix(srv.URL, "https") + "/token", false},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				tokenURL.Store(tt.token)
+				ot := newOIDCTest(t, func(f *config.File) { f.Auth.OIDC.Issuer = srv.URL })
+				ot.s.oidc.client.Transport = limitBody{srv.Client().Transport, maxProviderBody}
+				if !tt.ok {
+					unavailable(t, ot)
+					return
+				}
+				r := newBrowser(t).get(t, ot.loginURL(testReturnURL, challenge))
+				if loc := r.header.Get("Location"); r.code != http.StatusFound || !strings.HasPrefix(loc, srv.URL+"/authorize?") {
+					t.Errorf("login: %d to %q: %s", r.code, loc, r.body)
+				}
+			})
+		}
+	})
 	t.Run("document too large", func(t *testing.T) {
 		ot := newOIDCTest(t, nil)
 		ot.idp.set(func(p *testIdP) {
@@ -1578,6 +1751,23 @@ func TestOIDCValidators(t *testing.T) {
 		"carol\u2029":  false, // paragraph separator
 		"carol\u00a0x": false, // no-break space
 		"carol\u3000x": false, // ideographic space
+		// Default-ignorable code points, which render as nothing, and the
+		// blank Braille pattern.
+		"carol\u034f":     false, // combining grapheme joiner
+		"carol\ufe0f":     false, // variation selector 16
+		"carol\U000e0100": false, // variation selector 17
+		"carol\u180b":     false, // Mongolian free variation selector
+		"carol\u115f":     false, // Hangul choseong filler
+		"carol\u1160":     false, // Hangul jungseong filler
+		"carol\u3164":     false, // Hangul filler
+		"carol\uffa0":     false, // halfwidth Hangul filler
+		"carol\u17b4":     false, // Khmer inherent vowel
+		"carol\u2800":     false, // Braille pattern blank
+		"carol\u2801":     true,  // a Braille pattern that shows
+		"care\u0301":      true,  // a combining accent, which shows
+		// Look-alikes show, and pass: access compares names exactly.
+		"al\u0456ce": true, // Cyrillic i
+		"\uff41lice": true, // fullwidth a
 	} {
 		if validSubject(s) != want {
 			t.Errorf("validSubject(%q) = %v", s, !want)
@@ -1701,6 +1891,39 @@ func TestOIDCProviderTextLogged(t *testing.T) {
 		cb, _ := ot.signIn(t, newBrowser(t))
 		wantError(t, cb, codeSignInFailed)
 		check(t, logged())
+	})
+	t.Run("the token endpoint's error", func(t *testing.T) {
+		logged := captureLog(t)
+		ot := newOIDCTest(t, nil)
+		ot.idp.set(func(p *testIdP) {
+			p.tokenStatus, p.tokenError = http.StatusBadRequest, "invalid_grant"+forged+strings.Repeat("x", 4096)
+		})
+		cb, _ := ot.signIn(t, newBrowser(t))
+		wantError(t, cb, codeSignInFailed)
+		check(t, logged())
+	})
+	t.Run("the ID token's azp", func(t *testing.T) {
+		logged := captureLog(t)
+		ot := newOIDCTest(t, nil)
+		ot.idp.set(func(p *testIdP) { p.extra = jwt.MapClaims{"azp": "other" + forged + strings.Repeat("x", 4096)} })
+		cb, _ := ot.signIn(t, newBrowser(t))
+		wantError(t, cb, codeSignInFailed)
+		check(t, logged())
+	})
+	t.Run("quote", func(t *testing.T) {
+		long := strings.Repeat("x", maxLogged)
+		for in, want := range map[string]string{
+			"":            `""`,
+			"a\nb":        `"a\nb"`,
+			"\x1b[31mred": `"\x1b[31mred"`,
+			"\u202eevil":  `"\u202eevil"`,
+			long:          `"` + long + `"`,
+			long + "y":    `"` + long + `"...`,
+		} {
+			if got := quote(in); got != want {
+				t.Errorf("quote(%q) = %s, want %s", in, got, want)
+			}
+		}
 	})
 }
 
