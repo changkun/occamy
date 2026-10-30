@@ -23,6 +23,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   vectors in `protocol/testdata/messages.json`, and
   [docs/protocol.md](docs/protocol.md), the protocol's normative
   description. `docs/protocol-cn.md` is now marked as the v0 protocol.
+  A `max_message_size` below 64 KiB is refused.
 - `internal/auth`, the tokens of API v1: Ed25519 JWTs for access
   (a user and groups) and for sessions (a session and a role), signed by
   occamyd or by a configured trusted issuer, with no other algorithm
@@ -70,9 +71,23 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - `internal/stream`, a viewer's connection in protocol v1: `welcome`,
   then the client's input and views applied as they come, and frames at
   the pace of the viewer's link. Small state never waits behind tiles,
-  and an input's effect goes ahead of motion already on the screen. It
-  serves graphical sessions with raw tiles for now. Not served by any
-  route yet.
+  and an input's effect goes ahead of motion already on the screen.
+  Graphical sessions get raw tiles for now; terminal sessions get the
+  diff between the screens a viewer was sent, so bulk output coalesces,
+  an echo goes ahead of a status line or other output already on the
+  screen, and the terminal's answers to the shell's queries reach the
+  shell. Not served by any route yet.
+- A native VNC backend for protocol v1, `internal/backend/vnc`, in pure
+  Go: RFB 3.3, 3.7 and 3.8 with the security types None and VNC
+  Authentication, asking the session's owner for a password the
+  configuration lacks, and the Raw, CopyRect, DesktopSize and Cursor
+  encodings in the framebuffer's own pixel layout. It asks for screen
+  updates only while a viewer can see the screen, sends keys, pointer,
+  wheel and Latin-1 clipboard text, and reads the server's clipboard as
+  UTF-8 when it is valid UTF-8. It checks every length the server sends
+  before it reads or allocates, resizes the screen at most once an
+  update and ten times a second, and bounds its queued input by bytes.
+  `occamyd` does not use it yet.
 
 ### Changed
 

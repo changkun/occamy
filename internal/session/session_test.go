@@ -17,6 +17,7 @@ import (
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/backend/backendtest"
 	"changkun.de/x/occamy/internal/session"
+	"changkun.de/x/occamy/internal/terminal"
 )
 
 // start starts a session in the bubble and ends it when the test ends.
@@ -422,9 +423,6 @@ func TestStartErrors(t *testing.T) {
 	if _, _, err := session.Start(context.Background(), session.Config{}); err == nil {
 		t.Error("started without a backend")
 	}
-	if _, _, err := session.Start(context.Background(), session.Config{Backend: backendtest.NewTerminal(80, 24, 0)}); err == nil {
-		t.Error("started a terminal backend without a Terminal")
-	}
 }
 
 // scripted is a backend whose sink the test drives directly.
@@ -471,6 +469,8 @@ func (r *recordingTerminal) Resize(cols, rows int) {
 	defer r.mu.Unlock()
 	r.sizes = append(r.sizes, image.Pt(cols, rows))
 }
+
+func (r *recordingTerminal) Snapshot() *terminal.Screen { return nil }
 
 func (r *recordingTerminal) state() (string, []image.Point) {
 	r.mu.Lock()
@@ -582,6 +582,9 @@ type unlocked struct {
 
 func (u *unlocked) Write(p []byte) { u.buf = append(u.buf, p...) }
 
+// Snapshot reads nothing, since viewers may call it at any time.
+func (u *unlocked) Snapshot() *terminal.Screen { return nil }
+
 func (u *unlocked) Resize(cols, rows int) {
 	u.cols, u.rows = cols, rows
 	u.buf = u.buf[:0]
@@ -599,3 +602,36 @@ func TestTerminalCallsSerialised(t *testing.T) {
 		}
 	})
 }
+
+// Without a Terminal, the session keeps the screen itself and gives the
+// backend the terminal's answers to the application's queries, as the
+// shell's stdin would get them.
+func TestTerminalReplies(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := backendtest.NewTerminal(80, 24, 0)
+		s, owner := start(t, session.Config{Backend: b})
+		synctest.Wait()
+		// The fake backend echoes input as output, so the terminal sees
+		// the query as the application's output.
+		if err := owner.Input(1, backend.TermInput{Data: []byte("hi\x1b[6n")}); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		screen := s.Screen()
+		if screen == nil || screen.Line(0) != "hi" || screen.Cols != 80 {
+			t.Fatalf("screen %q", screen.Line(0))
+		}
+		var replies []string
+		for _, ev := range b.Inputs()[1:] {
+			replies = append(replies, string(ev.(backend.TermInput).Data))
+		}
+		if want := []string{"\x1b[1;3R"}; !slices.Equal(replies, want) {
+			t.Errorf("backend got %q after the query, want the cursor position %q", replies, want)
+		}
+		if _, clock := owner.LastInput(); clock == 0 || clock >= screen.Version {
+			t.Errorf("input clock %d, screen version %d; want the input before the echo", clock, screen.Version)
+		}
+	})
+}
+
+var _ session.Terminal = (*terminal.Terminal)(nil)

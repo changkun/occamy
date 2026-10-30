@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"changkun.de/x/occamy/internal/backend"
+	"changkun.de/x/occamy/internal/terminal"
 )
 
 // Viewer is one connection to a session. Its methods are safe for
@@ -27,6 +28,9 @@ type Viewer struct {
 	left       bool
 	lastSeq    uint32
 	inputClock uint64
+	// inputScreen is the terminal's screen at inputClock, nil in a
+	// graphical session.
+	inputScreen *terminal.Screen
 }
 
 // Pending is the small state that changed since the viewer's writer last
@@ -116,8 +120,11 @@ func (v *Viewer) Input(seq uint32, ev backend.InputEvent) error {
 		// harmless, while reading it afterwards could miss the tile that
 		// shows the input's effect.
 		var clock uint64
+		var screen *terminal.Screen
 		if v.s.fb != nil {
 			clock = v.s.fb.Clock()
+		} else if screen = v.s.cfg.Terminal.Snapshot(); screen != nil {
+			clock = screen.Version
 		}
 		v.s.idle.Reset(v.s.cfg.IdleTimeout)
 		if err := v.s.backend.Input(ev); err != nil {
@@ -125,7 +132,7 @@ func (v *Viewer) Input(seq uint32, ev backend.InputEvent) error {
 			return err
 		}
 		v.mu.Lock()
-		v.lastSeq, v.inputClock = seq, clock
+		v.lastSeq, v.inputClock, v.inputScreen = seq, clock, screen
 		v.mu.Unlock()
 		v.update(func(p *Pending) { p.Input = true })
 		return nil
@@ -133,12 +140,22 @@ func (v *Viewer) Input(seq uint32, ev backend.InputEvent) error {
 }
 
 // LastInput reports the sequence number of the last input the session
-// applied from the viewer, and the framebuffer's clock at that moment:
-// tiles above it changed after the input.
+// applied from the viewer, and the framebuffer's clock at that moment,
+// or the terminal screen's version: tiles and screens above it changed
+// after the input.
 func (v *Viewer) LastInput() (seq uint32, clock uint64) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	return v.lastSeq, v.inputClock
+}
+
+// InputScreen returns the terminal's screen when the session applied the
+// viewer's last input, whose version LastInput reports, or nil in a
+// graphical session.
+func (v *Viewer) InputScreen() *terminal.Screen {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	return v.inputScreen
 }
 
 // View reports whether the viewer's client can see the session, and the
