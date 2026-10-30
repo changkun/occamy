@@ -23,12 +23,15 @@ import (
 	"unicode/utf8"
 
 	"golang.org/x/crypto/bcrypt"
+
+	"changkun.de/x/occamy/internal/auth"
 )
 
-// Bounds of auth.access_token_lifetime.
+// Bounds of auth.access_token_lifetime. The upper bound is the longest
+// lifetime that occamyd's token verifier accepts.
 const (
 	MinAccessTokenLifetime = time.Minute
-	MaxAccessTokenLifetime = 24 * time.Hour
+	MaxAccessTokenLifetime = auth.DefaultMaxLifetime
 )
 
 // MinBcryptCost is the lowest bcrypt cost a static user's hash may have.
@@ -153,7 +156,8 @@ func (a *Auth) validate(c *checker) {
 		a.AccessTokenLifetime = DefaultAccessTokenLifetime
 	}
 	if a.AccessTokenLifetime < MinAccessTokenLifetime || a.AccessTokenLifetime > MaxAccessTokenLifetime {
-		c.add("auth.access_token_lifetime", "%v is not between 1m and 24h", a.AccessTokenLifetime)
+		c.add("auth.access_token_lifetime", "%s is not between %s and %s",
+			shortDuration(a.AccessTokenLifetime), shortDuration(MinAccessTokenLifetime), shortDuration(MaxAccessTokenLifetime))
 	}
 
 	issuers := map[string]int{}
@@ -168,8 +172,13 @@ func (a *Auth) validate(c *checker) {
 		}
 		if ti.PublicKeyFile == "" {
 			c.add(p+".public_key_file", "required")
+		} else if c.file(p+".public_key_file", ti.PublicKeyFile) {
+			// A public key is no secret, so it is parsed now rather than
+			// when the first token arrives.
+			if _, err := auth.LoadPublicKey(ti.PublicKeyFile); err != nil {
+				c.add(p+".public_key_file", "%v", err)
+			}
 		}
-		c.file(p+".public_key_file", ti.PublicKeyFile)
 	}
 
 	users := map[string]int{}
@@ -208,6 +217,19 @@ func (a *Auth) validate(c *checker) {
 			o.SubjectClaim = DefaultOIDCSubjectClaim
 		}
 	}
+}
+
+// shortDuration formats d as it would be written in a file: 12h, not
+// 12h0m0s.
+func shortDuration(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = strings.TrimSuffix(s, "0s")
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = strings.TrimSuffix(s, "0m")
+	}
+	return s
 }
 
 func (f *File) validateGuacd(c *checker) {
@@ -428,33 +450,36 @@ func isLoopback(host string) bool {
 	return err == nil && a.IsLoopback()
 }
 
-// file checks that name, if set, is a regular file that occamyd can read.
-// It opens the file and closes it again, so no secret is read.
-func (c *checker) file(path, name string) {
+// file checks that name, if set, is a regular file that occamyd can read,
+// and reports whether it is. It opens the file and closes it again, so no
+// secret is read.
+func (c *checker) file(path, name string) bool {
 	if name == "" {
-		return
+		return false
 	}
 	info, err := os.Stat(name)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		c.add(path, "%s does not exist", name)
-		return
+		return false
 	case err != nil:
 		c.add(path, "%v", err)
-		return
+		return false
 	case info.IsDir():
 		c.add(path, "%s is a directory", name)
-		return
+		return false
 	}
 	fh, err := os.Open(name) // #nosec G304 -- the path comes from the operator's configuration
 	switch {
 	case errors.Is(err, fs.ErrPermission):
 		c.add(path, "%s is not readable", name)
+		return false
 	case err != nil:
 		c.add(path, "%v", err)
-	default:
-		fh.Close()
+		return false
 	}
+	fh.Close()
+	return true
 }
 
 // signingKey checks the signing key file, which may be missing because

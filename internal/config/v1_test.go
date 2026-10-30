@@ -5,6 +5,9 @@
 package config_test
 
 import (
+	"crypto/ed25519"
+	"crypto/x509"
+	"encoding/pem"
 	"errors"
 	"os"
 	"path/filepath"
@@ -68,14 +71,31 @@ func TestVersionV0File(t *testing.T) {
 func fixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	for _, name := range []string{"key", "password", "gateway.pub", "tls.crt", "tls.key", "secret"} {
+	for _, name := range []string{"key", "password", "tls.crt", "tls.key", "secret"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("s3cret\n"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
+	writePublicKey(t, filepath.Join(dir, "gateway.pub"))
 	t.Setenv("OCCAMY_TEST_PASSWORD", "s3cret")
 	t.Setenv("OCCAMY_TEST_EMPTY", "")
 	return dir
+}
+
+// writePublicKey writes a trusted issuer's Ed25519 public key.
+func writePublicKey(t *testing.T, path string) {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: der}), 0o600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func parse(t *testing.T, raw string) (*config.File, error) {
@@ -98,7 +118,6 @@ func TestParseV1Example(t *testing.T) {
 	for _, name := range []string{
 		"etc/occamy/tls.crt",
 		"etc/occamy/tls.key",
-		"etc/occamy/gateway.pub",
 		"etc/occamy/keys/deploy",
 		"run/secrets/oidc-client-secret",
 		"run/secrets/windows-password",
@@ -111,6 +130,7 @@ func TestParseV1Example(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	writePublicKey(t, filepath.Join(dir, "etc/occamy/gateway.pub"))
 	// The signing key is created on first start, so only its directory
 	// exists.
 	if err := os.MkdirAll(filepath.Join(dir, "var/lib/occamy"), 0o700); err != nil {
@@ -350,8 +370,8 @@ func TestParseV1Problems(t *testing.T) {
 		{"no signing key", "version: 1\n", []want{{"auth.signing_key_file", "required"}}},
 		{"signing key directory missing", "version: 1\nauth: {signing_key_file: DIR/none/signing.key}\n", []want{{"auth.signing_key_file", "nor its directory"}}},
 		{"signing key is a directory", "version: 1\nauth: {signing_key_file: DIR}\n", []want{{"auth.signing_key_file", "is a directory"}}},
-		{"lifetime short", "version: 1\nauth: {signing_key_file: DIR/signing.key, access_token_lifetime: 30s}\n", []want{{"auth.access_token_lifetime", "30s is not between 1m and 24h"}}},
-		{"lifetime long", "version: 1\nauth: {signing_key_file: DIR/signing.key, access_token_lifetime: 48h}\n", []want{{"auth.access_token_lifetime", "not between"}}},
+		{"lifetime short", "version: 1\nauth: {signing_key_file: DIR/signing.key, access_token_lifetime: 30s}\n", []want{{"auth.access_token_lifetime", "30s is not between 1m and 12h"}}},
+		{"lifetime long", "version: 1\nauth: {signing_key_file: DIR/signing.key, access_token_lifetime: 12h1m}\n", []want{{"auth.access_token_lifetime", "12h1m is not between"}}},
 		{"lifetime negative", "version: 1\nauth: {signing_key_file: DIR/signing.key, access_token_lifetime: -5m}\n", []want{{"auth.access_token_lifetime", "not between"}}},
 		{"lifetime without unit", "version: 1\nauth: {signing_key_file: DIR/signing.key, access_token_lifetime: 900}\n", []want{{"auth.access_token_lifetime", "not a duration"}}},
 		{"trusted issuers", head + `  trusted_issuers:
@@ -359,11 +379,13 @@ func TestParseV1Problems(t *testing.T) {
     - {issuer: gateway, public_key_file: DIR/missing.pub}
     - {public_key_file: DIR/gateway.pub}
     - {issuer: other}
+    - {issuer: wrong, public_key_file: DIR/key}
 `, []want{
 			{"auth.trusted_issuers[1].issuer", `"gateway" is already auth.trusted_issuers[0]`},
 			{"auth.trusted_issuers[1].public_key_file", "does not exist"},
 			{"auth.trusted_issuers[2].issuer", "must not be empty"},
 			{"auth.trusted_issuers[3].public_key_file", "required"},
+			{"auth.trusted_issuers[4].public_key_file", "want a PEM block of type PUBLIC KEY"},
 		}},
 		{"users", "version: 1\nauth:\n  signing_key_file: DIR/signing.key\n  users:\n" +
 			`    - {name: alice, password_hash: "` + hash + `", groups: [ops, ""]}

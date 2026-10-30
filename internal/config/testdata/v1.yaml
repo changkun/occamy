@@ -26,12 +26,13 @@ origins:
 legacy_v0: false
 
 auth:
-  # The Ed25519 key that signs occamyd's tokens. occamyd creates it on
-  # first start if it does not exist.
+  # The Ed25519 key that signs occamyd's tokens, PKCS #8 PEM. occamyd
+  # creates it on first start if it does not exist.
   signing_key_file: /var/lib/occamy/signing.key
-  # How long an access token lasts, between 1m and 24h. Default 15m.
+  # How long an access token lasts, between 1m and 12h. Default 15m.
   access_token_lifetime: 15m
-  # Third parties, such as a gateway, whose tokens occamyd accepts.
+  # Third parties, such as a gateway, whose tokens occamyd accepts. Each
+  # key is an Ed25519 public key, PKIX PEM.
   trusted_issuers:
     - issuer: gateway
       public_key_file: /etc/occamy/gateway.pub
