@@ -34,7 +34,7 @@ const (
 // encodings are the encodings the backend asks for, in order of
 // preference; servers use the first they support. Tight comes first, as
 // in TigerVNC's viewer: it sends solid areas as fills, and lossless it
-// is as compact as ZRLE (within 3% on the bench desktop's scenes, from
+// is as compact as ZRLE (within 4% on the bench desktop's scenes, from
 // x11vnc and TigerVNC). ZRLE comes next, for servers without Tight, then
 // Hextile, which needs no zlib and sends twice as much, and Raw.
 // CopyRect is used alongside whichever is chosen. No JPEG quality level is asked for, so Tight stays
