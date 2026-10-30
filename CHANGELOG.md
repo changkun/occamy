@@ -37,6 +37,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   instructions. `internal/guacamole`'s display now applies `cursor`,
   reports damage as rectangles, and copies areas out. Not served by any
   route yet.
+- A native SSH backend for protocol v1, `internal/backend/ssh`, in pure
+  Go. It accepts only pinned host keys, by key or SHA-256 fingerprint,
+  unless told to ignore them, which it logs as a warning. It
+  authenticates with key files or a password, which also answers a
+  keyboard-interactive password challenge, and asks the session's owner
+  for anything else. It feeds the shell's terminal output to the
+  session. `occamyd` does not use it yet.
 
 ### Changed
 
