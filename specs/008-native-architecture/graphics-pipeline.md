@@ -180,10 +180,12 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
    1.0, so the G5 bytes target (about 5 KiB a frame) is expected to be
    missed, and it will be revised to what adaptive JPEG reaches, with the
    measurement as evidence. Latency and frame-rate targets stay.
-   (Amended 2026-10-30 by the measurement: PNG wins nowhere the pipeline
-   sends lossless, so occamyd does not send it, and the lossy codec is
-   WebP with JPEG as the fallback, decision 10. The G5 proposal is in
-   the implementation notes.)
+   (Amended 2026-10-30 by the measurement: PNG wins only on still tiles
+   of 17 to 256 colours with smooth gradients, by 3 % (2 % over that
+   class, 3.28 bits a pixel against 3.35), and loses on all other
+   content sent lossless, so occamyd does not send it in beta; the lossy
+   codec is WebP with JPEG as the fallback, decision 10. The G5 proposal
+   is in the implementation notes.)
 2. **Quality adapts per viewer in beta,** as above, rather than a fixed
    quality per session: motion loses detail or rate before input loses
    responsiveness.
@@ -214,33 +216,44 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
    % smaller on antialiased text, at two fifths to all of PNG's encode
    time, with 12 bytes for a solid tile against 88. Level 6 saves 3 to 6
    % at 1.3 times the time. Lossless WebP is 27 to 35 % smaller on
-   antialiased text but 10 to 21 times slower, so it is left for
+   antialiased text but 9 to 21 times slower, so it is left for
    refinement, after its own measurement; QOI is 1.4 to 3.9 times
    larger.
 8. **Tiles are 64 pixels, and lossy tiles are merged into rectangles.**
-   At 64 a key costs 0.1 to 1.7 KiB against 0.2 to 4.3 at 128, a
+   At 64 a key costs 0.1 to 1.7 KiB against 0.2 to 2.9 at 128, a
    scrolled line after a copy 4.6 KiB against 8.7 (G3's target is 7.1),
-   and the browser page sends 6 % of its area lossy against 42 %. 128's
-   advantage on full frames comes mostly from lossy headers paid per
-   tile, about 650 bytes a JPEG, which merging adjacent lossy tiles
-   removes: the motion scene at JPEG quality 30 takes 137 KiB as tiles
-   and 33 KiB as rows of tiles. The `tile` message already carries any
-   size up to the maximum texture size.
+   and the browser page sends 6 % of its area lossy against 42 %. Full
+   frames cost more at 64: 1.5 to 2.2 times the bytes on the desktop,
+   the terminals, the browser and the drag (the desktop 15.1 KiB against
+   6.9), and 1.06 to 1.3 times on the scroll, the photograph and the
+   plasma. That cost is lossless, since every tile carries its own
+   palette and starts deflate afresh, and merging lossy tiles does not
+   recover it; 64 is chosen for damage, which a session mostly sends.
+   Merging is still worth it for lossy tiles, whose headers are paid per
+   tile, about 650 bytes a JPEG: the motion scene at JPEG quality 30
+   takes 137 KiB as tiles and 33 KiB as rows of tiles. The `tile`
+   message already carries any size up to the maximum texture size.
 9. **Pixels are RGBA** (option A), in the framebuffer, in raw codec 1
    and in what the `stream.Encoder` interface takes. x11vnc sends RGBX
    when asked, the Go encoders take `image.RGBA`, browsers' `ImageData`
-   is RGBA, and a swizzle would cost 3.2 µs a 64-pixel tile.
+   is RGBA, and a swizzle would cost 3.3 µs a 64-pixel tile. The native
+   VNC backend asks for this order and makes the padding opaque alpha. A
+   native RDP backend would receive blue-first bitmaps and swizzle as it
+   draws, once per changed pixel rather than per encode; that is for its
+   design to weigh, not a reason to change the layout.
 10. **Lossy tiles are WebP from `gen2brain/vpx/webp` at method 0** on one
     goroutine, as codec 5, and JPEG from `gen2brain/jpegn` (baseline,
-    4:2:0) as codec 4 for a viewer that does not list WebP. At equal
-    SSIM WebP takes half of JPEG's bytes or less on 64-pixel tiles (110
-    against 233 KiB for the photograph at 0.90) and 53 bytes of fixed
-    cost a tile against 656, at 1.6 to 1.8 times `image/jpeg`'s encode
-    time and 5.5 to 6 times jpegn's. `jpegn` writes the same quality as
-    `image/jpeg` within 5 % of its bytes in a third of the time. What
-    would flip this: CPU becoming the server's limit before bandwidth,
-    or browsers' WebP decoding proving slower than JPEG on low-end
-    clients, which the measurement did not cover.
+    4:2:0) as codec 4 for a viewer that lists JPEG but not WebP. At
+    equal SSIM WebP takes 0.35 to 0.54 of JPEG's bytes on 64-pixel tiles
+    (110 against 233 KiB for the photograph at 0.90) and 0.65 on
+    128-pixel ones, with 53 bytes of fixed cost a tile against 656. At
+    that SSIM it takes about twice `image/jpeg`'s encode time (1.9 to 2.1
+    times) and 6.5 to 7 times jpegn's: 18 ms of one core for the
+    photograph's full screen at 0.90, against 9.2 and 2.7. `jpegn` writes
+    the same quality as `image/jpeg` within 5 % of its bytes in a third
+    of the time. What would flip this: CPU becoming the server's limit
+    before bandwidth, or browsers' WebP decoding proving slower than
+    JPEG on low-end clients, which the measurement did not cover.
 
 ## Open Questions
 
@@ -260,7 +273,7 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
 |------|----------|-------|
 | Framebuffer | `internal/framebuffer`: RGBA pixels in square tiles, versions from one counter, a lock per row of tiles, drawing and CopyRect for backends, tile reads and a change signal for writers; the tile size is a parameter | — |
 | Measurement (done 2026-10-30) | A corpus of frames recorded from the bench desktop's scenes (desktop, two terminals, browser, photograph, drag, scroll, motion), and benchmarks on Go 1.27 that settle questions 1 to 3 and the lossy codec: palette or raw pixels with deflate, PNG, QOI, lossless WebP, JPEG (standard library and gen2brain/jpegn) and lossy WebP, scored for size, encode and decode time and SSIM; results in [docs/benchmarks/codecs.md](../../docs/benchmarks/codecs.md) | — |
-| Codecs | `internal/encoder`, an implementation of `stream.Encoder`: classification by colour count (up to 16, 17 to 256, above 256); the palette or raw container with `compress/flate` at level 1 as `deflate` (2); raw RGBA (1); lossy WebP from gen2brain/vpx/webp at method 0 (5), and JPEG from gen2brain/jpegn (4) for viewers that do not list WebP; adjacent lossy tiles of a frame encoded as one rectangle. Fixes the deflate container, including alpha for cursors, in [docs/protocol.md](../../docs/protocol.md), which marks it provisional | Measurement |
+| Codecs | `internal/encoder`, an implementation of `stream.Encoder`: classification by colour count (up to 16, 17 to 256, above 256); the palette or raw container with `compress/flate` at level 1 as `deflate` (2); raw RGBA (1); lossy WebP from gen2brain/vpx/webp at method 0 (5), and JPEG from gen2brain/jpegn (4) for viewers that list JPEG but not WebP; adjacent lossy tiles of a frame encoded as one rectangle. Fixes the deflate container, including alpha for cursors, in [docs/protocol.md](../../docs/protocol.md), which marks it provisional. Adds vpx and jpegn to occamyd's `go.mod`, with the Go 1.26.4 they need, and their licence and PATENTS notices to the image's `licenses/` | Measurement |
 | Refinement | Motion heat per tile, and refinement after a still delay: exact for tiles of up to 256 colours, which go lossy while they move if they have more than 16, and a quality chosen by SSIM for photographic ones; gives `stream.Encoder` the tile's motion | Codecs |
 | Scroll detection | Row hashes per tile column (xxh3-64), the offset search, and `copy-rect` with tiles for the exposed strip | Framebuffer |
 | Tile cache | Content hashes (xxh3-128 from zeebo/xxh3, so collisions are out of reach), the server's mirror of each client's cache, and the `cached` codec | Codecs, protocol v1 Messages |
@@ -292,10 +305,12 @@ Done on 2026-10-30. The results, the method and the full tables are in
   browser (a documentation page in dillo), photo, three consecutive
   updates each of drag and scroll, and two of motion. A sequence's frames
   are held in memory until it ends, so they are consecutive updates.
-- `bench/codecs`: tile classification, the palette container, QOI, SSIM
-  and the candidates, with unit tests that run in `go test ./...`, and
-  the measurement behind the `measure` build tag, which writes
-  `codecs.json` and `codecs-tables.md`.
+- `bench/codecs`, a Go module of its own: tile classification, the
+  palette container, QOI, SSIM and the candidates, with unit tests, and
+  the measurement behind the `measure` build tag, which `make codecs`
+  runs and which writes `codecs.json`, `codecs-tables.md` and
+  `codecs-load.log`, the host's load average every 30 seconds. CI's go
+  job vets it with the tag and runs its tests.
 
 **Decisions** are 7 to 10 above, with decision 3 amended for moving
 tiles of 17 to 256 colours.
@@ -309,18 +324,27 @@ tiles of 17 to 256 colours.
 - QOI and `klauspost/compress` (flate and zstd) were measured alongside,
   and the lossy codecs were also measured on whole frames and rows of
   tiles, which is what decided the tile size.
-- `go.mod` moves from Go 1.26.0 to 1.26.4, which gen2brain's modules
-  require. The new dependencies (`deepteams/webp`, `gen2brain/jpegn`,
-  `gen2brain/vpx`, `klauspost/compress`) are pure Go and used only by
-  `bench/codecs`; occamyd links none of them yet.
+- `bench/codecs` has its own `go.mod` (module
+  `changkun.de/x/occamy/bench/codecs`, with a `replace` of the root to
+  `../..`, so it still imports `internal/framebuffer`). Its dependencies
+  (`deepteams/webp`, `gen2brain/jpegn`, `gen2brain/vpx`,
+  `klauspost/compress`) are pure Go, and gen2brain's need Go 1.26.4, so
+  occamyd's `go.mod` keeps its Go version and gains nothing until the
+  Codecs task links vpx and jpegn. The first version of this work bumped
+  the root module instead; review moved it out, since every builder of
+  occamyd would have needed the newer Go and its image build fetched
+  about 54 MB it never linked.
 
 **Surprises.**
 
 - Colour count alone sends the motion scene lossless at 388 KiB a frame,
   eight times guacd's baseline, because its plasma draws from 256
   colours.
-- A JPEG's tables cost about 650 bytes a tile, which made 128-pixel
-  tiles look better than they are; merged rectangles remove it.
+- A JPEG's tables cost about 650 bytes a tile, so lossy tiles are
+  merged into rectangles. Full frames still cost 1.5 to 2.2 times more
+  at 64 than at 128 on most screen content, from the per-tile palette
+  and deflate context; the first version of these notes put that on the
+  lossy headers, which review corrected.
 - Lossless WebP from `gen2brain/vpx` at method 0 is unusable on
   gradients (168 KiB for the desktop against 19 at method 4), and
   `deepteams/webp`'s method 4 is worse than its method 0 at equal SSIM.
@@ -336,29 +360,60 @@ tiles of 17 to 256 colours.
   without alpha, while cursors use the same codecs with straight alpha.
   The Codecs task fixes the container in docs/protocol.md with a form
   for alpha.
-- x11vnc's fourth byte in RGBX is padding, not alpha, while raw codec 1
-  is RGBA with straight alpha, so the VNC backend writes 0xFF alpha
-  into the framebuffer.
+- The Codecs task ships the licence and PATENTS notices of
+  `gen2brain/vpx` and `gen2brain/jpegn` in the image's `licenses/`, as
+  docker/Dockerfile does for Guacamole's.
+- Decision 9 assumes VNC and the guacd bridge as sources. A native RDP
+  backend receives blue-first bitmaps; its design should measure the
+  swizzle on drawing before it asks for another layout.
+- Encoding a full frame's adjacent lossless tiles together, where their
+  union keeps to 256 colours, could recover part of what 64-pixel tiles
+  cost on full frames; not measured.
 - Lossless WebP for refining still antialiased text, and the vp8 video
   tier, each need a measurement of their own.
 - Browsers' decode times (WebP, JPEG, and inflating plus expanding the
   palette in JavaScript) are not measured; the Go client's are.
-- Classification takes 9 to 14 µs a 64-pixel tile, 1.1 to 2.6 ms a full
+- Classification takes 6 to 14 µs a 64-pixel tile, 1.2 to 2.7 ms a full
   frame on one core, as much as encoding simple content; it should run
   once per tile version and be shared by viewers, like encoded tiles.
 - SSIM was measured on luma only, so chroma subsampling's cost to
   coloured text is not in the scores.
-- G4 needs move detection: without it, a drag update costs 35 KiB at 64
-  pixels with JPEG for its lossy tiles, against a target of 3.9.
+- G4 needs move detection: without it, a drag update costs 12 KiB at 64
+  pixels with WebP for its lossy tiles (36 with JPEG), against a target
+  of 3.9.
 
 **G5's bytes, a proposal.** [docs/benchmarks.md](../../docs/benchmarks.md#targets)
 sets 4.9 KiB a frame for G5 over VNC, 10 times below guacd's 49, and
 decision 1 expected it to be missed. Measured on the motion scene, the
 best pure-Go result is lossy WebP at quality 30: 11 KiB a frame as one
 image and 14 KiB as rows of tiles, at an SSIM of 0.989; JPEG from
-`jpegn` takes 26 and 33 KiB. The proposal is to revise G5's bytes target
+`jpegn` at the same SSIM (quality 50) takes 32 and 38 KiB. The proposal
+is to revise G5's bytes target
 to 14 KiB a frame over both VNC and RDP, what rows of WebP tiles reach,
 since occamyd's encoding of the same scene does not depend on the
 backend. The targets table stays unchanged until the owner decides.
-G6's 139 KiB stands: the photograph takes 44 KiB as WebP tiles at
-quality 70.
+G6's 139 KiB stands at equal SSIM: on the photograph's 64-pixel tiles
+JPEG at quality 70 scores 0.871 in 175 KiB, over the target, and WebP
+reaches 0.871 at about quality 78 in about 75 KiB.
+
+**Review fixes, 2026-10-30.** An independent review reproduced every
+byte and SSIM and found the method sound; it led to these changes,
+measured again on 2026-10-30 at 19:31 UTC (same bytes and SSIM, times
+within 5 %):
+
+- `bench/codecs` became its own module, with `make codecs` and a CI
+  step; occamyd's `go.mod` is master's again.
+- PNG decoding expands the palette through a table instead of
+  image/draw, which had cost more than the decoding; Go decodes A in 45
+  to 95 % of PNG's time, not a quarter to three quarters.
+- The damage figures use WebP, the chosen codec, and JPEG from jpegn
+  beside it; the browser's key tile at 128 has 257 colours and goes
+  lossy.
+- Times are quoted at equal SSIM where bytes are: WebP takes about
+  twice image/jpeg's encode time there, not 1.6 to 1.8 times, which
+  holds only at equal settings.
+- The raw layouts take turns going first, and the measurement logs the
+  load average itself.
+- Decisions 1, 7, 8, 9 and 10 and the G6 claim were corrected as above;
+  docs/protocol.md says occamyd sends only `raw` until the Codecs task
+  lands.
