@@ -1,0 +1,3 @@
+go test fuzz v1
+[]byte("RFB 003.008\n\x00\x00\x00\x00\x1aToo many security failures")
+bool(false)
