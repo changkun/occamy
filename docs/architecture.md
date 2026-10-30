@@ -80,6 +80,7 @@ the spec it implements.
 | [internal/config/](../internal/config) | Version 1 configuration files: sign-in, the connection registry with credential references, TLS and the debug listener, decoded strictly and validated as a whole ([configuration](./configuration.md), [api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md)) |
 | [internal/session/](../internal/session) | The session core: one goroutine per session runs a backend, applies input by role, keeps each viewer's small state as latest values, and a registry holds sessions and share tokens ([session-core](../specs/008-native-architecture/session-core.md)) |
 | [internal/backend/ssh/](../internal/backend/ssh) | The native SSH backend: a pure-Go client that verifies pinned host keys, logs in with key files or a password and asks the owner for what they cannot answer, and feeds a shell's PTY output to the session's terminal ([native-ssh-backend](../specs/008-native-architecture/native-ssh-backend.md)) |
+| [internal/terminal/](../internal/terminal) | The headless terminal emulator of a terminal session: immutable, versioned screen snapshots that share unchanged rows, and the diffs that bring each viewer's terminal up to date ([native-ssh-backend](../specs/008-native-architecture/native-ssh-backend.md)) |
 
 ## License
 
