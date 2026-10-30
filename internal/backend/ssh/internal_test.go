@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"slices"
+	"strings"
 	"testing"
 
 	gossh "golang.org/x/crypto/ssh"
@@ -91,5 +92,28 @@ func TestFingerprintPadding(t *testing.T) {
 	}
 	if !slices.Equal(h.fingerprints, []string{fp}) {
 		t.Errorf("fingerprints %v, want [%s]", h.fingerprints, fp)
+	}
+}
+
+func TestCheckHostKey(t *testing.T) {
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k, err := gossh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for entry, want := range map[string]string{
+		string(gossh.MarshalAuthorizedKey(k)): "",
+		gossh.FingerprintSHA256(k):            "",
+		"SHA256:c2hvcnQ":                      "host key is not a SHA-256 fingerprint",
+		"ssh-ed25519 AAAA":                    "host key is not a public key",
+		"":                                    "host key is not a public key",
+	} {
+		err := CheckHostKey(entry)
+		if want == "" && err != nil || want != "" && (err == nil || !strings.HasPrefix(err.Error(), want)) {
+			t.Errorf("CheckHostKey(%q) = %v, want %q", entry, err, want)
+		}
 	}
 }

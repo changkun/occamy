@@ -186,6 +186,7 @@ func TestParseV1Example(t *testing.T) {
 		Connections: []config.Connection{
 			{
 				ID: "build-box", Name: "Build box", Protocol: "ssh", Target: "build.internal:22",
+				HostKeys:    []string{"SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"},
 				Credentials: config.Credentials{Username: "deploy", PrivateKeyFile: path("etc/occamy/keys/deploy")},
 				Allow:       config.Allow{Users: []string{"alice"}, Groups: []string{"ops"}},
 			},
@@ -201,8 +202,9 @@ func TestParseV1Example(t *testing.T) {
 			},
 			{
 				ID: "lab-shell", Name: "Lab shell", Protocol: "ssh", Target: "[fd00::22]:22",
-				Credentials: config.Credentials{Prompt: true},
-				Allow:       config.Allow{Groups: []string{"dev"}},
+				InsecureIgnoreHostKey: true,
+				Credentials:           config.Credentials{Prompt: true},
+				Allow:                 config.Allow{Groups: []string{"dev"}},
 			},
 		},
 		AdhocAllowlist: []string{"10.0.0.0/8", "*.lab.internal"},
@@ -226,7 +228,7 @@ auth:
 
 // conn is a valid connection list.
 const conn = `connections:
-  - {id: box, protocol: ssh, target: box.internal, credentials: {username: deploy, private_key_file: DIR/key}, allow: {users: [alice]}}
+  - {id: box, protocol: ssh, insecure_ignore_host_key: true, target: box.internal, credentials: {username: deploy, private_key_file: DIR/key}, allow: {users: [alice]}}
 `
 
 func TestParseV1Defaults(t *testing.T) {
@@ -304,7 +306,7 @@ func TestParseV1Valid(t *testing.T) {
 		name, raw string
 	}{
 		{"targets", head + `connections:
-  - {id: a, protocol: ssh, target: "[::1]:2222", credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: "[::1]:2222", credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: b, protocol: vnc, target: "::1", credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: c, protocol: rdp, target: 192.0.2.1, credentials: {password_env: OCCAMY_TEST_PASSWORD}, allow: {users: [alice]}}
   - {id: d.e_f-1, protocol: telnet, target: host_1.example.com., credentials: {password_file: DIR/password}, allow: {users: [alice]}}
@@ -314,14 +316,14 @@ func TestParseV1Valid(t *testing.T) {
 		{"debug on the port of another address", head + "listen: '10.0.0.1:5636'\ndebug: {address: '127.0.0.1:5636'}\n"},
 		{"names from oidc", head + `  oidc: {issuer: "http://localhost:8080/realms/x", client_id: occamy, redirect_url: "http://127.0.0.1:5636/cb", client_secret_env: OCCAMY_TEST_PASSWORD}
 connections:
-  - {id: a, protocol: ssh, target: a, credentials: {prompt: true}, allow: {users: [carol@example.com], groups: [admins]}}
+  - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [carol@example.com], groups: [admins]}}
 `},
 		{"names from a trusted issuer", head + `  trusted_issuers: [{issuer: gateway, public_key_file: DIR/gateway.pub}]
 connections:
-  - {id: a, protocol: ssh, target: a, credentials: {prompt: true}, allow: {groups: [admins]}}
+  - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {groups: [admins]}}
 `},
 		{"anchors", head + `connections:
-  - &base {id: a, protocol: ssh, target: a, credentials: {prompt: true}, allow: {groups: [ops]}}
+  - &base {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {groups: [ops]}}
   - <<: *base
     id: b
 `},
@@ -489,12 +491,12 @@ func TestParseV1Problems(t *testing.T) {
 
 		// Connections.
 		{"ids", head + `connections:
-  - {id: box, protocol: ssh, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: box, protocol: ssh, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: Build Box, protocol: ssh, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: ../x, protocol: ssh, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: .hidden, protocol: ssh, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {protocol: ssh, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: box, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: box, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: Build Box, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: ../x, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: .hidden, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
 			{"connections[1].id", `"box" is already the ID of connections[0]`},
 			{"connections[2].id", "is not a connection ID"},
@@ -510,12 +512,12 @@ func TestParseV1Problems(t *testing.T) {
 			{"connections[1].protocol", "required"},
 		}},
 		{"targets", head + `connections:
-  - {id: a, protocol: ssh, target: "ssh://a", credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: b, protocol: ssh, target: "b:0", credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: c, protocol: ssh, target: "c:ssh", credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: d, protocol: ssh, target: "bad!host:22", credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: e, protocol: ssh, target: "e:", credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: f, protocol: ssh, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: "ssh://a", credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: ssh, insecure_ignore_host_key: true, target: "b:0", credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: ssh, insecure_ignore_host_key: true, target: "c:ssh", credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: d, protocol: ssh, insecure_ignore_host_key: true, target: "bad!host:22", credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: e, protocol: ssh, insecure_ignore_host_key: true, target: "e:", credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: f, protocol: ssh, insecure_ignore_host_key: true, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
 			{"connections[0].target", "is not host:port"},
 			{"connections[1].target", "invalid port"},
@@ -537,7 +539,7 @@ func TestParseV1Problems(t *testing.T) {
   - {id: c, protocol: vnc, target: c, credentials: {password_env: OCCAMY_TEST_EMPTY}, allow: {users: [alice]}}
   - {id: d, protocol: vnc, target: d, credentials: {password_env: 1BAD}, allow: {users: [alice]}}
   - {id: e, protocol: vnc, target: e, credentials: {private_key_file: DIR/key}, allow: {users: [alice]}}
-  - {id: f, protocol: ssh, target: f, credentials: {password_env: OCCAMY_TEST_PASSWORD}, allow: {users: [alice]}}
+  - {id: f, protocol: ssh, insecure_ignore_host_key: true, target: f, credentials: {password_env: OCCAMY_TEST_PASSWORD}, allow: {users: [alice]}}
 `, []want{
 			{"connections[0].credentials.password_file", "missing does not exist"},
 			{"connections[1].credentials.password_env", "OCCAMY_TEST_UNSET is not set"},
@@ -546,9 +548,22 @@ func TestParseV1Problems(t *testing.T) {
 			{"connections[4].credentials.private_key_file", "only ssh connections use a private key"},
 			{"connections[5].credentials.username", "required for ssh unless prompt is true"},
 		}},
+		{"host keys", head + `connections:
+  - {id: a, protocol: ssh, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: ssh, target: b, host_keys: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"], insecure_ignore_host_key: true, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: ssh, target: c, host_keys: ["SHA256:short", "ssh-ed25519 AAAA"], credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: d, protocol: vnc, target: d, host_keys: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"], insecure_ignore_host_key: true, credentials: {prompt: true}, allow: {users: [alice]}}
+`, []want{
+			{"connections[0].host_keys", "required for ssh"},
+			{"connections[1].insecure_ignore_host_key", "set host_keys or insecure_ignore_host_key, not both"},
+			{"connections[2].host_keys[0]", "host key is not a SHA-256 fingerprint"},
+			{"connections[2].host_keys[1]", "host key is not a public key"},
+			{"connections[3].host_keys", "only ssh connections have host keys"},
+			{"connections[3].insecure_ignore_host_key", "only ssh connections have host keys"},
+		}},
 		{"allow", head + `connections:
-  - {id: a, protocol: ssh, target: a, credentials: {prompt: true}}
-  - {id: b, protocol: ssh, target: b, credentials: {prompt: true}, allow: {users: [carol, alice], groups: [admins, dev, ""]}}
+  - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}}
+  - {id: b, protocol: ssh, insecure_ignore_host_key: true, target: b, credentials: {prompt: true}, allow: {users: [carol, alice], groups: [admins, dev, ""]}}
 `, []want{
 			{"connections[0].allow", "names no users or groups"},
 			{"connections[1].allow.users[0]", `no static user is named "carol"`},
@@ -630,7 +645,7 @@ connections:
 // is reported on its own line.
 func TestParseV1MergeLines(t *testing.T) {
 	_, err := parse(t, head+`connections:
-  - &base {id: a, protocol: ssh, target: a, credentials: {prompt: true}, allow: {groups: [ops]}}
+  - &base {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {groups: [ops]}}
   - <<: *base
     id: B
 `)
@@ -658,6 +673,23 @@ func TestParseV1Unreadable(t *testing.T) {
 	var problems config.Problems
 	if !errors.As(err, &problems) || len(problems) != 1 || !strings.Contains(problems[0].Message, "is not readable") {
 		t.Fatalf("ParseV1() error = %v, want password_file not readable", err)
+	}
+}
+
+func TestNormalizeTarget(t *testing.T) {
+	for _, tt := range []struct{ protocol, target, want, err string }{
+		{"ssh", "box.internal", "box.internal:22", ""},
+		{"vnc", "10.0.0.5", "10.0.0.5:5900", ""},
+		{"rdp", "[fd00::1]", "[fd00::1]:3389", ""},
+		{"telnet", "host:2323", "host:2323", ""},
+		{"ssh", "user@box", "", "is not host:port"},
+		{"ssh", "box:0", "", "invalid port"},
+		{"kubernetes", "box", "", `unknown protocol "kubernetes"`},
+	} {
+		got, err := config.NormalizeTarget(tt.protocol, tt.target)
+		if got != tt.want || (err == nil) != (tt.err == "") || err != nil && !strings.Contains(err.Error(), tt.err) {
+			t.Errorf("NormalizeTarget(%q, %q) = %q, %v; want %q, %q", tt.protocol, tt.target, got, err, tt.want, tt.err)
+		}
 	}
 }
 

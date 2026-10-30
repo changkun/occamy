@@ -98,12 +98,20 @@ type OIDC struct {
 
 // Connection is an entry of the connection registry.
 type Connection struct {
-	ID          string      `yaml:"id"`
-	Name        string      `yaml:"name"`
-	Protocol    string      `yaml:"protocol"`
-	Target      string      `yaml:"target"`
-	Credentials Credentials `yaml:"credentials"`
-	Allow       Allow       `yaml:"allow"`
+	ID       string `yaml:"id"`
+	Name     string `yaml:"name"`
+	Protocol string `yaml:"protocol"`
+	Target   string `yaml:"target"`
+	// HostKeys are the host keys an ssh target may present, each a public
+	// key in authorized_keys format or a SHA-256 fingerprint as
+	// ssh-keygen -l prints it. An ssh connection has HostKeys or
+	// InsecureIgnoreHostKey, and other protocols neither.
+	HostKeys []string `yaml:"host_keys"`
+	// InsecureIgnoreHostKey accepts any host key from an ssh target, with
+	// a warning, for demos.
+	InsecureIgnoreHostKey bool        `yaml:"insecure_ignore_host_key"`
+	Credentials           Credentials `yaml:"credentials"`
+	Allow                 Allow       `yaml:"allow"`
 }
 
 // Credentials say how occamyd authenticates to a connection's target.

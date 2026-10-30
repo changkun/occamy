@@ -73,6 +73,11 @@ connections:
     name: Build box
     protocol: ssh
     target: build.internal:22
+    # The host keys the server may present: SHA-256 fingerprints as
+    # ssh-keygen -lf prints them, or public keys as ssh-keyscan prints
+    # them. ssh connections need them, or insecure_ignore_host_key.
+    host_keys:
+      - SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U
     credentials:
       username: deploy
       private_key_file: /etc/occamy/keys/deploy
@@ -103,6 +108,8 @@ connections:
     name: Lab shell
     protocol: ssh
     target: "[fd00::22]"
+    # Accepts any host key, with a warning in the log: for demos only.
+    insecure_ignore_host_key: true
     credentials:
       # Nothing stored: the session owner is asked for what the server
       # needs, and the answers are not kept.

@@ -40,6 +40,7 @@ connections:
     name: Build box
     protocol: ssh
     target: build.internal
+    host_keys: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]
     credentials: {username: deploy, private_key_file: /etc/occamy/keys/deploy}
     allow: {groups: [ops]}
   - id: nas-desktop
@@ -116,6 +117,8 @@ backends replace it.
 | `connections[].name` | the ID | Display name |
 | `connections[].protocol` | required | `ssh`, `vnc`, `rdp` or `telnet` |
 | `connections[].target` | required | `host:port`, or a host alone for the protocol's default port: 22 for ssh, 5900 for vnc, 3389 for rdp, 23 for telnet. IPv6 addresses go in brackets with a port, `[fd00::22]:22` |
+| `connections[].host_keys` | required for ssh | The host keys an ssh target may present: public keys in `authorized_keys` format, as `ssh-keyscan` prints them, or SHA-256 fingerprints, as `ssh-keygen -l` prints them (`SHA256:…`). `occamyd` refuses any other key. Not for other protocols |
+| `connections[].insecure_ignore_host_key` | `false` | Accept any host key from an ssh target instead, logging its fingerprint as a warning. For demos only; set this or `host_keys`, not both |
 | `connections[].credentials` | required | How `occamyd` authenticates to the target; see below |
 | `connections[].allow.users`, `allow.groups` | required | Who may open the connection: users by name, and members of groups. At least one entry, since an empty list would let nobody in |
 

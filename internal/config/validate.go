@@ -25,6 +25,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"changkun.de/x/occamy/internal/auth"
+	"changkun.de/x/occamy/internal/backend/ssh"
 )
 
 // Bounds of auth.access_token_lifetime. The upper bound is the longest
@@ -304,7 +305,36 @@ func (f *File) validateConnections(c *checker) {
 			cn.Target = t
 		}
 		c.credentials(p+".credentials", cn.Protocol, cn.Credentials)
+		if known {
+			c.hostKeys(p, cn)
+		}
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
+	}
+}
+
+// hostKeys checks the host key policy of a connection: an ssh connection
+// pins host keys or ignores them explicitly, since the native SSH backend
+// accepts no other key, and other protocols have no host keys.
+func (c *checker) hostKeys(path string, cn *Connection) {
+	if cn.Protocol != "ssh" {
+		if len(cn.HostKeys) > 0 {
+			c.add(path+".host_keys", "only ssh connections have host keys")
+		}
+		if cn.InsecureIgnoreHostKey {
+			c.add(path+".insecure_ignore_host_key", "only ssh connections have host keys")
+		}
+		return
+	}
+	switch {
+	case len(cn.HostKeys) == 0 && !cn.InsecureIgnoreHostKey:
+		c.add(path+".host_keys", "required for ssh: list the server's host keys or their SHA-256 fingerprints (ssh-keyscan, ssh-keygen -l), or set insecure_ignore_host_key: true for a demo")
+	case len(cn.HostKeys) > 0 && cn.InsecureIgnoreHostKey:
+		c.add(path+".insecure_ignore_host_key", "set host_keys or insecure_ignore_host_key, not both")
+	}
+	for i, k := range cn.HostKeys {
+		if err := ssh.CheckHostKey(k); err != nil {
+			c.add(fmt.Sprintf("%s.host_keys[%d]", path, i), "%v", err)
+		}
 	}
 }
 
@@ -569,6 +599,17 @@ func (c *checker) env(path, name string) {
 	case v == "":
 		c.add(path, "%s is empty", name)
 	}
+}
+
+// NormalizeTarget checks a target of protocol, host:port or a host
+// alone, and returns it as host:port with the protocol's default port
+// filled in, as ParseV1 stores the targets of connections.
+func NormalizeTarget(protocol, target string) (string, error) {
+	port, ok := defaultPorts[protocol]
+	if !ok {
+		return "", fmt.Errorf("unknown protocol %q: use %s", protocol, protocolList)
+	}
+	return normalizeTarget(target, port)
 }
 
 // normalizeTarget checks a connection target, host:port or a host alone,
