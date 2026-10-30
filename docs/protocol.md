@@ -985,11 +985,11 @@ A codec ID is a u8. Codec 0 is not a codec: it appears only in a hidden
 
 | ID | Name | Payload | Status |
 |----|------|---------|--------|
-| 1 | `raw` | `w × h × 4` bytes, rows from top to bottom without padding, in RGBA order with straight alpha | The channel order is provisional until the [graphics pipeline](../specs/008-native-architecture/graphics-pipeline.md)'s measurement fixes the pixel layout (RGBA or BGRX); the size, 4 bytes a pixel, holds either way |
-| 2 | `deflate` | A raw DEFLATE stream ([RFC 1951](https://www.rfc-editor.org/rfc/rfc1951)), which browsers inflate with `DecompressionStream('deflate-raw')`, of a palette or raw pixel container | The container is provisional until the measurement picks the lossless codec |
+| 1 | `raw` | `w × h × 4` bytes, rows from top to bottom without padding, in RGBA order with straight alpha | The [codec measurement](benchmarks/codecs.md) fixed the order as RGBA |
+| 2 | `deflate` | A raw DEFLATE stream ([RFC 1951](https://www.rfc-editor.org/rfc/rfc1951)), which browsers inflate with `DecompressionStream('deflate-raw')`, of a palette or raw pixel container | The [codec measurement](benchmarks/codecs.md) picked palette or raw pixels with deflate; the container's layout is provisional until the [graphics pipeline](../specs/008-native-architecture/graphics-pipeline.md)'s Codecs task fixes it |
 | 3 | `png` | A PNG file | |
 | 4 | `jpeg` | A JFIF file, opaque | |
-| 5 | `webp` | A WebP file, lossy or lossless | A candidate in the measurement; occamyd sends it only if the measurement picks it |
+| 5 | `webp` | A WebP file, lossy or lossless | occamyd's lossy codec, as the [codec measurement](benchmarks/codecs.md) picked; a client that does not list it gets `jpeg` |
 | 6 | `cached` | Empty: the tile is drawn from its cache slot | Tiles only |
 | 7 to 0x7F | | Unassigned | |
 | 0x80 to 0xFF | | Reserved for a video tier after 1.0 | |
