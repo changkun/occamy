@@ -154,7 +154,9 @@ and 113 ms at N1, behind frames it had already queued.
 - **What goes first is what the user sees directly.** The cursor is drawn
   by the client from `cursor` and `cursor-move`, so pointer motion needs
   no frame. Small messages (cursor, clipboard, bell, close, ping) are
-  never queued behind tiles; acks and pings only drive pacing.
+  never queued behind tiles; acks and pings only drive pacing. Each
+  viewer keeps them as state, the latest cursor, title or clipboard, so a
+  slow viewer never queues them either.
 - **The remote server is paced too.** The session owns the framebuffer,
   so the remote server's rate and each viewer's rate are independent,
   and backends use each protocol's own control:
