@@ -219,7 +219,9 @@ func newServer(f *config.File) (*server, error) {
 		s.origins[strings.ToLower(o)] = true
 	}
 	if f.AllowAdhocTargets {
-		s.adhoc = newAllowlist(f.AdhocAllowlist)
+		if s.adhoc, err = newAllowlist(f.AdhocAllowlist); err != nil {
+			return nil, fmt.Errorf("adhoc_allowlist: %w", err)
+		}
 	}
 	if f.TLS.Cert != "" || f.TLS.Key != "" {
 		cert, err := tls.LoadX509KeyPair(f.TLS.Cert, f.TLS.Key)

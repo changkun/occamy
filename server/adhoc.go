@@ -11,6 +11,8 @@ import (
 	"net/netip"
 	"strings"
 	"time"
+
+	"changkun.de/x/occamy/internal/config"
 )
 
 // errNotAllowed reports an ad-hoc target that adhoc_allowlist does not
@@ -20,52 +22,43 @@ var errNotAllowed = errors.New("the target is not in adhoc_allowlist")
 // resolveTimeout bounds the name lookup of an ad-hoc target.
 const resolveTimeout = 5 * time.Second
 
-// allowlist is adhoc_allowlist: where ad-hoc targets may point.
+// allowlist is adhoc_allowlist: where ad-hoc targets may point, and on
+// which ports. An entry without ports allows the protocol's
+// config.AdhocPorts.
 //
-// A target that is an IP address is allowed if a range or address of the
-// list holds it. A host name is allowed if the list names it, or if it
-// ends in the domain of a *.domain entry; occamyd then dials the name, so
-// the list trusts the names' DNS. Any other host name is resolved, and
-// allowed only if every address it resolves to lies in the list's ranges;
-// occamyd then dials the address it checked rather than the name, so
-// that a second lookup cannot lead elsewhere.
+// A target that is an IP address is allowed if an entry's range or
+// address holds it. A host name is resolved, and allowed if the list
+// names it, or it ends in the domain of a *.domain entry, or else if every
+// address it resolves to lies in the list's ranges. occamyd then dials
+// the first address it checked rather than the name, so that a second
+// lookup cannot lead elsewhere.
+//
+// Loopback, link-local (such as a cloud's metadata service at
+// 169.254.169.254), unspecified and multicast addresses are refused
+// whatever range or name leads to them, unless an entry is that very
+// address.
 type allowlist struct {
-	prefixes []netip.Prefix
-	names    map[string]bool
-	domains  []string // ".lab.internal" for *.lab.internal
-	lookup   func(ctx context.Context, host string) ([]netip.Addr, error)
+	entries []config.AllowEntry
+	ranges  bool // whether any entry is a range or an address
+	lookup  func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
-// newAllowlist reads entries that ParseV1 has checked.
-func newAllowlist(entries []string) *allowlist {
+// newAllowlist reads entries, which ParseV1 has checked.
+func newAllowlist(entries []string) (*allowlist, error) {
 	a := &allowlist{
-		names: map[string]bool{},
 		lookup: func(ctx context.Context, host string) ([]netip.Addr, error) {
 			return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 		},
 	}
-	for _, e := range entries {
-		if p, err := netip.ParsePrefix(e); err == nil {
-			// Addresses are compared unmapped, so a range of IPv4-mapped
-			// addresses becomes the IPv4 range.
-			if addr := p.Addr(); addr.Is4In6() && p.Bits() >= 96 {
-				p = netip.PrefixFrom(addr.Unmap(), p.Bits()-96)
-			}
-			a.prefixes = append(a.prefixes, p.Masked())
-			continue
+	for _, s := range entries {
+		e, err := config.ParseAllowEntry(s)
+		if err != nil {
+			return nil, err
 		}
-		if ip, err := netip.ParseAddr(e); err == nil {
-			ip = ip.Unmap()
-			a.prefixes = append(a.prefixes, netip.PrefixFrom(ip, ip.BitLen()))
-			continue
-		}
-		if d, ok := strings.CutPrefix(e, "*."); ok {
-			a.domains = append(a.domains, "."+canonicalName(d))
-			continue
-		}
-		a.names[canonicalName(e)] = true
+		a.entries = append(a.entries, e)
+		a.ranges = a.ranges || e.Prefix.IsValid()
 	}
-	return a
+	return a, nil
 }
 
 // canonicalName is a host name in lower case without a trailing dot.
@@ -73,48 +66,62 @@ func canonicalName(name string) string {
 	return strings.ToLower(strings.TrimSuffix(name, "."))
 }
 
-// allow returns the host to dial for an ad-hoc target's host, or
-// errNotAllowed.
-func (a *allowlist) allow(ctx context.Context, host string) (string, error) {
+// allow returns the address to dial for an ad-hoc target of protocol at
+// host and port, or errNotAllowed.
+func (a *allowlist) allow(ctx context.Context, protocol, host string, port uint16) (netip.Addr, error) {
 	if ip, err := netip.ParseAddr(host); err == nil {
-		if ip.Zone() != "" || !a.covers(ip) {
-			return "", errNotAllowed
+		if ip.Zone() != "" || !a.covers(protocol, ip.Unmap(), port) {
+			return netip.Addr{}, errNotAllowed
 		}
-		return ip.Unmap().String(), nil
+		return ip.Unmap(), nil
 	}
 	name := canonicalName(host)
-	if a.names[name] {
-		return host, nil
-	}
-	for _, d := range a.domains {
-		if strings.HasSuffix(name, d) {
-			return host, nil
-		}
-	}
-	if len(a.prefixes) == 0 {
-		return "", errNotAllowed
+	listed := a.names(protocol, name, port)
+	if !listed && !a.ranges {
+		return netip.Addr{}, errNotAllowed // no address could pass
 	}
 	ctx, cancel := context.WithTimeout(ctx, resolveTimeout)
 	defer cancel()
 	addrs, err := a.lookup(ctx, name)
 	if err != nil || len(addrs) == 0 {
-		return "", errNotAllowed
+		return netip.Addr{}, errNotAllowed
 	}
-	for _, ip := range addrs {
-		if !a.covers(ip) {
-			return "", errNotAllowed
+	for i, ip := range addrs {
+		ip = ip.Unmap().WithZone("")
+		addrs[i] = ip
+		if listed && !special(ip) || a.covers(protocol, ip, port) {
+			continue
 		}
+		return netip.Addr{}, errNotAllowed
 	}
-	return addrs[0].Unmap().WithZone("").String(), nil
+	return addrs[0], nil
 }
 
-// covers reports whether a range or address of the list holds ip.
-func (a *allowlist) covers(ip netip.Addr) bool {
-	ip = ip.Unmap().WithZone("")
-	for _, p := range a.prefixes {
-		if p.Contains(ip) {
+// names reports whether an entry names host, or its domain, with port.
+func (a *allowlist) names(protocol, name string, port uint16) bool {
+	for _, e := range a.entries {
+		if (e.Name != "" && e.Name == name || e.Domain != "" && strings.HasSuffix(name, "."+e.Domain)) && e.AllowsPort(protocol, port) {
 			return true
 		}
 	}
 	return false
+}
+
+// covers reports whether an entry's range or address holds ip, with
+// port. A special address must be the entry's very address.
+func (a *allowlist) covers(protocol string, ip netip.Addr, port uint16) bool {
+	sp := special(ip)
+	for _, e := range a.entries {
+		if e.Prefix.Contains(ip) && (!sp || e.Prefix.IsSingleIP()) && e.AllowsPort(protocol, port) {
+			return true
+		}
+	}
+	return false
+}
+
+// special reports whether ip is loopback, link-local, unspecified or
+// multicast: addresses of the host occamyd runs on, of its link, or of
+// no one host, which a range should not open by accident.
+func special(ip netip.Addr) bool {
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast()
 }

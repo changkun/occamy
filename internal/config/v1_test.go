@@ -207,7 +207,7 @@ func TestParseV1Example(t *testing.T) {
 				Allow:                 config.Allow{Groups: []string{"dev"}},
 			},
 		},
-		AdhocAllowlist: []string{"10.0.0.0/8", "*.lab.internal"},
+		AdhocAllowlist: []string{"10.0.0.0/8", "*.lab.internal:22"},
 		Limits:         config.Limits{SessionsPerUser: 20, ViewersPerSession: 50, SharesPerSession: 100},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -484,11 +484,16 @@ func TestParseV1Problems(t *testing.T) {
 		{"guacd params", head + `guacd:
   params:
     kubernetes: {namespace: default}
-    rdp: {password: hunter2, ignore-cert: "true"}
+    rdp: {password: hunter2, ignore-cert: "true", sftp-password: hunter2, gateway-password: hunter2, sftp-passphrase: hunter2, sftp-private-key: hunter2, client-secret: hunter2}
     vnc: {hostname: x, port: "5901"}
 `, []want{
 			{"guacd.params.kubernetes", `unknown protocol "kubernetes"`},
+			{"guacd.params.rdp.client-secret", "inline secrets are not allowed"},
+			{"guacd.params.rdp.gateway-password", "inline secrets are not allowed"},
 			{"guacd.params.rdp.password", "inline secrets are not allowed"},
+			{"guacd.params.rdp.sftp-passphrase", "inline secrets are not allowed"},
+			{"guacd.params.rdp.sftp-password", "inline secrets are not allowed"},
+			{"guacd.params.rdp.sftp-private-key", "inline secrets are not allowed"},
 			{"guacd.params.vnc.hostname", "set from each connection's target"},
 			{"guacd.params.vnc.port", "set from each connection's target"},
 		}},
@@ -584,12 +589,19 @@ func TestParseV1Problems(t *testing.T) {
 
 		// Ad-hoc targets.
 		{"adhoc without allowlist", head + "allow_adhoc_targets: true\n", []want{{"allow_adhoc_targets", "needs adhoc_allowlist"}}},
-		{"adhoc allowlist", head + "adhoc_allowlist: [10.0.0.0/33, '*.', 'http://x', '*', '*.10.0.0.1']\n", []want{
+		{"adhoc allowlist", head + "adhoc_allowlist: [10.0.0.0/33, '*.', 'http://x', '*', '*.10.0.0.1', '10.0.0.0/8:0', 'a.example:22-21', 'a.example:', '[10.0.0.1]:22', '[fd00::1]22', 'fe80::1%en0', 'a.example:x']\n", []want{
 			{"adhoc_allowlist[0]", "is not a CIDR range"},
 			{"adhoc_allowlist[1]", "is not a CIDR range"},
-			{"adhoc_allowlist[2]", "is not a CIDR range"},
+			{"adhoc_allowlist[2]", "is not a port"},
 			{"adhoc_allowlist[3]", "is not a CIDR range"},
 			{"adhoc_allowlist[4]", "is not a CIDR range"},
+			{"adhoc_allowlist[5]", "is not a port"},
+			{"adhoc_allowlist[6]", "is not a port"},
+			{"adhoc_allowlist[7]", "followed by no port"},
+			{"adhoc_allowlist[8]", "only an IPv6 range or address goes in brackets"},
+			{"adhoc_allowlist[9]", "brackets are followed by :port"},
+			{"adhoc_allowlist[10]", "is not a CIDR range"},
+			{"adhoc_allowlist[11]", "is not a port"},
 		}},
 	}
 	for _, tt := range tests {

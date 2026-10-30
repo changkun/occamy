@@ -26,7 +26,10 @@ type target struct {
 	connection string // the registry's ID, empty for an ad-hoc target
 	protocol   string
 	addr       string // host:port to dial
-	creds      config.Credentials
+	// name is the host name an ad-hoc target named, which addr holds the
+	// address of; empty otherwise. A certificate names it.
+	name  string
+	creds config.Credentials
 	// The host key policy of an ssh target.
 	hostKeys              []string
 	insecureIgnoreHostKey bool
@@ -141,6 +144,21 @@ func newBridge(g config.Guacd, protocol string) func(target, screen) (backend.Ba
 	}
 }
 
+// adhocParams are the guacd parameters that an ad-hoc target takes from
+// guacd.params: the display's. The others, such as an SFTP host or a
+// gateway, are meant for the configured connections, not for a target
+// that a user chose.
+var adhocParams = map[string]bool{
+	"color-depth":           true,
+	"color-scheme":          true,
+	"cursor":                true,
+	"disable-gfx":           true,
+	"enable-font-smoothing": true,
+	"font-name":             true,
+	"font-size":             true,
+	"resize-method":         true,
+}
+
 // bridgeConfig is the guacd handshake of a session of protocol on t.
 func bridgeConfig(g config.Guacd, protocol string, t target, s screen) (guacd.Config, error) {
 	host, port, err := net.SplitHostPort(t.addr)
@@ -150,6 +168,9 @@ func bridgeConfig(g config.Guacd, protocol string, t target, s screen) (guacd.Co
 	params := maps.Clone(g.Params[protocol])
 	if params == nil {
 		params = map[string]string{}
+	}
+	if t.connection == "" {
+		maps.DeleteFunc(params, func(name, _ string) bool { return !adhocParams[name] })
 	}
 	params["hostname"], params["port"] = host, port
 	if t.creds.Username != "" {

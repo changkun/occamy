@@ -466,12 +466,15 @@ func TestLimits(t *testing.T) {
 func TestAdhocTargets(t *testing.T) {
 	ts, fb := sessionServer(t, func(f *config.File) {
 		f.AllowAdhocTargets = true
-		f.AdhocAllowlist = []string{"10.0.0.0/24", "192.168.1.5", "*.lab.internal", "build.example"}
+		f.AdhocAllowlist = []string{"10.0.0.0/24", "192.168.1.5:3390", "*.lab.internal", "build.example:2222"}
 	})
 	resolved := map[string][]netip.Addr{
-		"inside.example":  {netip.MustParseAddr("10.0.0.7")},
-		"outside.example": {netip.MustParseAddr("10.0.1.7")},
-		"partly.example":  {netip.MustParseAddr("10.0.0.8"), netip.MustParseAddr("8.8.8.8")},
+		"inside.example":    {netip.MustParseAddr("10.0.0.7")},
+		"outside.example":   {netip.MustParseAddr("10.0.1.7")},
+		"partly.example":    {netip.MustParseAddr("10.0.0.8"), netip.MustParseAddr("8.8.8.8")},
+		"host.lab.internal": {netip.MustParseAddr("203.0.113.5")},
+		"loop.lab.internal": {netip.MustParseAddr("127.0.0.1")},
+		"build.example":     {netip.MustParseAddr("203.0.113.6")},
 	}
 	ts.s.adhoc.lookup = func(_ context.Context, host string) ([]netip.Addr, error) {
 		if a, ok := resolved[host]; ok {
@@ -484,28 +487,33 @@ func TestAdhocTargets(t *testing.T) {
 		body   string
 		status int
 		addr   string // dialled
+		name   string // the name a certificate names
 	}{
-		{`{"protocol":"vnc","target":"10.0.0.9"}`, http.StatusCreated, "10.0.0.9:5900"},
-		{`{"protocol":"rdp","target":"192.168.1.5:3390","username":"carol"}`, http.StatusCreated, "192.168.1.5:3390"},
-		{`{"protocol":"ssh","target":"host.lab.internal","insecure_ignore_host_key":true}`, http.StatusCreated, "host.lab.internal:22"},
-		{`{"protocol":"ssh","target":"build.example:2222","host_keys":["` + fakeHostKey + `"]}`, http.StatusCreated, "build.example:2222"},
-		{`{"protocol":"vnc","target":"inside.example"}`, http.StatusCreated, "10.0.0.7:5900"},
-		{`{"protocol":"vnc","target":"[::ffff:10.0.0.3]:5901"}`, http.StatusCreated, "10.0.0.3:5901"},
-		{`{"protocol":"vnc","target":"10.0.1.9"}`, http.StatusForbidden, ""},
-		{`{"protocol":"vnc","target":"192.168.1.6"}`, http.StatusForbidden, ""},
-		{`{"protocol":"vnc","target":"outside.example"}`, http.StatusForbidden, ""},
-		{`{"protocol":"vnc","target":"partly.example"}`, http.StatusForbidden, ""},
-		{`{"protocol":"vnc","target":"unknown.example"}`, http.StatusForbidden, ""},
-		{`{"protocol":"vnc","target":"lab.internal"}`, http.StatusForbidden, ""},
-		{`{"protocol":"vnc","target":"evil-lab.internal"}`, http.StatusForbidden, ""},
-		{`{"protocol":"vnc","target":"build.example.evil"}`, http.StatusForbidden, ""},
-		{`{"protocol":"ssh","target":"host.lab.internal"}`, http.StatusBadRequest, ""},
-		{`{"protocol":"ssh","target":"host.lab.internal","host_keys":["nope"]}`, http.StatusBadRequest, ""},
-		{`{"protocol":"ssh","target":"host.lab.internal","host_keys":["` + fakeHostKey + `"],"insecure_ignore_host_key":true}`, http.StatusBadRequest, ""},
-		{`{"protocol":"vnc","target":"10.0.0.9","insecure_ignore_host_key":true}`, http.StatusBadRequest, ""},
-		{`{"protocol":"kubernetes","target":"10.0.0.9:443"}`, http.StatusBadRequest, ""},
-		{`{"protocol":"vnc","target":"10.0.0.9:99999"}`, http.StatusBadRequest, ""},
-		{`{"target":"10.0.0.9:5900"}`, http.StatusBadRequest, ""},
+		{`{"protocol":"vnc","target":"10.0.0.9"}`, http.StatusCreated, "10.0.0.9:5900", ""},
+		{`{"protocol":"rdp","target":"192.168.1.5:3390","username":"carol"}`, http.StatusCreated, "192.168.1.5:3390", ""},
+		{`{"protocol":"ssh","target":"host.lab.internal","insecure_ignore_host_key":true}`, http.StatusCreated, "203.0.113.5:22", "host.lab.internal"},
+		{`{"protocol":"ssh","target":"build.example:2222","host_keys":["` + fakeHostKey + `"]}`, http.StatusCreated, "203.0.113.6:2222", "build.example"},
+		{`{"protocol":"vnc","target":"inside.example"}`, http.StatusCreated, "10.0.0.7:5900", "inside.example"},
+		{`{"protocol":"vnc","target":"[::ffff:10.0.0.3]:5901"}`, http.StatusCreated, "10.0.0.3:5901", ""},
+		{`{"protocol":"rdp","target":"192.168.1.5"}`, http.StatusForbidden, "", ""},
+		{`{"protocol":"ssh","target":"build.example","insecure_ignore_host_key":true}`, http.StatusForbidden, "", ""},
+		{`{"protocol":"vnc","target":"10.0.0.9:22"}`, http.StatusForbidden, "", ""},
+		{`{"protocol":"vnc","target":"loop.lab.internal"}`, http.StatusForbidden, "", ""},
+		{`{"protocol":"vnc","target":"10.0.1.9"}`, http.StatusForbidden, "", ""},
+		{`{"protocol":"vnc","target":"192.168.1.6"}`, http.StatusForbidden, "", ""},
+		{`{"protocol":"vnc","target":"outside.example"}`, http.StatusForbidden, "", ""},
+		{`{"protocol":"vnc","target":"partly.example"}`, http.StatusForbidden, "", ""},
+		{`{"protocol":"vnc","target":"unknown.example"}`, http.StatusForbidden, "", ""},
+		{`{"protocol":"vnc","target":"lab.internal"}`, http.StatusForbidden, "", ""},
+		{`{"protocol":"vnc","target":"evil-lab.internal"}`, http.StatusForbidden, "", ""},
+		{`{"protocol":"vnc","target":"build.example.evil"}`, http.StatusForbidden, "", ""},
+		{`{"protocol":"ssh","target":"host.lab.internal"}`, http.StatusBadRequest, "", ""},
+		{`{"protocol":"ssh","target":"host.lab.internal","host_keys":["nope"]}`, http.StatusBadRequest, "", ""},
+		{`{"protocol":"ssh","target":"host.lab.internal","host_keys":["` + fakeHostKey + `"],"insecure_ignore_host_key":true}`, http.StatusBadRequest, "", ""},
+		{`{"protocol":"vnc","target":"10.0.0.9","insecure_ignore_host_key":true}`, http.StatusBadRequest, "", ""},
+		{`{"protocol":"kubernetes","target":"10.0.0.9:443"}`, http.StatusBadRequest, "", ""},
+		{`{"protocol":"vnc","target":"10.0.0.9:99999"}`, http.StatusBadRequest, "", ""},
+		{`{"target":"10.0.0.9:5900"}`, http.StatusBadRequest, "", ""},
 	} {
 		r := ts.api(t, http.MethodPost, "/api/v1/sessions", carol, tt.body)
 		if r.code != tt.status {
@@ -516,8 +524,8 @@ func TestAdhocTargets(t *testing.T) {
 			continue
 		}
 		tg, _, _ := fb.last()
-		if tg.addr != tt.addr || tg.connection != "" || !tg.creds.Prompt {
-			t.Errorf("%s: target %+v, want %s with prompted credentials", tt.body, tg, tt.addr)
+		if tg.addr != tt.addr || tg.name != tt.name || tg.connection != "" || !tg.creds.Prompt {
+			t.Errorf("%s: target %+v, want %s named %q with prompted credentials", tt.body, tg, tt.addr, tt.name)
 		}
 		var o openResponse
 		_ = json.Unmarshal(r.body, &o)

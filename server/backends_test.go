@@ -41,9 +41,10 @@ func TestBridgeConfig(t *testing.T) {
 		"telnet": {"disable-gfx": "x"},
 	}}
 	tg := target{
-		protocol: "rdp",
-		addr:     "[fd00::5]:3390",
-		creds:    config.Credentials{Username: "carol", PasswordEnv: "OCCAMY_TEST_RDP_PASSWORD"},
+		connection: "windows",
+		protocol:   "rdp",
+		addr:       "[fd00::5]:3390",
+		creds:      config.Credentials{Username: "carol", PasswordEnv: "OCCAMY_TEST_RDP_PASSWORD"},
 	}
 	cfg, err := bridgeConfig(g, "rdp", tg, screen{width: 1920, height: 99999})
 	if err != nil {
@@ -70,9 +71,18 @@ func TestBridgeConfig(t *testing.T) {
 		t.Errorf("config %+v", cfg)
 	}
 
-	cfg, err = bridgeConfig(g, "telnet", target{addr: "10.0.0.1:23"}, screen{})
+	cfg, err = bridgeConfig(g, "telnet", target{connection: "c", addr: "10.0.0.1:23"}, screen{})
 	if err != nil || cfg.Params["disable-gfx"] != "x" || len(cfg.Params) != 3 {
 		t.Errorf("telnet: %+v %v", cfg, err)
+	}
+
+	// An ad-hoc target takes the display's parameters alone.
+	g.Params["rdp"]["sftp-hostname"] = "files.internal"
+	g.Params["rdp"]["color-depth"] = "16"
+	cfg, err = bridgeConfig(g, "rdp", target{addr: "10.0.0.1:3389", creds: config.Credentials{Prompt: true}}, screen{})
+	want = map[string]string{"hostname": "10.0.0.1", "port": "3389", "disable-gfx": "false", "color-depth": "16"}
+	if err != nil || !maps.Equal(cfg.Params, want) {
+		t.Errorf("ad-hoc: %+v %v, want %v", cfg, err, want)
 	}
 
 	tg.creds = config.Credentials{PasswordEnv: "OCCAMY_TEST_UNSET"}

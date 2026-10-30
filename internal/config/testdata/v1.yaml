@@ -121,11 +121,14 @@ connections:
       groups: [dev]
 
 # Ad-hoc targets let users connect to hosts that are not in the registry.
-# Off by default; when on, only targets in the allowlist are reachable.
+# Off by default; when on, only targets in the allowlist are reachable,
+# on the protocol's own ports (ssh 22, vnc 5900-5999, rdp 3389, telnet
+# 23) or those an entry names after a colon. Loopback, link-local,
+# unspecified and multicast addresses need an entry of their own.
 allow_adhoc_targets: false
 adhoc_allowlist:
   - 10.0.0.0/8
-  - "*.lab.internal"
+  - "*.lab.internal:22"
 
 # What one user or one session may hold. Zero or absent is the default.
 limits:

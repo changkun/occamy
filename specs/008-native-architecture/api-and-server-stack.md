@@ -727,15 +727,34 @@ place for fixes that ship on v0 before beta.
     does, and the credentials are always prompted for, so a request
     carries no secret. With ad-hoc targets off, or outside the
     allowlist, the answer is 403 `forbidden`, a code this task adds.
-  - **Allowlist matching:** an IP address must lie in a listed range or
-    be a listed address, IPv4-mapped addresses compared as IPv4, and an
-    address with a zone is refused. A host name that is listed, or ends
-    in `.lab.internal` for `*.lab.internal` (the domain itself does
-    not), is dialled by name, so the list trusts those names' DNS. Any
-    other name is resolved, within 5 s, and allowed only if every address
-    lies in the listed ranges; it is then dialled by the first address
-    checked, so that a second lookup cannot lead elsewhere. A list
-    without ranges resolves nothing.
+  - **Allowlist matching (revised in review):** entries may name ports,
+    `:port` or `:first-last` (`config.ParseAllowEntry`); without, the
+    protocol's own (ssh 22, vnc 5900-5999, rdp 3389, telnet 23), where
+    the first version allowed any port. An IP address must lie in a
+    listed range or be a listed address, IPv4-mapped addresses compared
+    as IPv4, and an address with a zone is refused. Every host name is
+    resolved, within 5 s, and dialled by the first address checked, so
+    that a second lookup cannot lead elsewhere: a name that is listed,
+    or ends in `.lab.internal` for `*.lab.internal` (the domain itself
+    does not), may resolve anywhere; any other name only within the
+    listed ranges. Loopback, link-local (169.254.169.254 among them),
+    unspecified and multicast addresses are refused whatever range or
+    name leads to them, unless an entry is that very address. The first
+    version dialled listed names by name, which let DNS lead them to
+    such addresses. A list without ranges resolves only the names it
+    lists. The name is kept beside the address for a certificate's
+    server name.
+  - **guacd parameters (added in review):** `guacd.params` refuses any
+    parameter whose name holds `password`, `passphrase`, `private-key`
+    or `secret`, where it refused those three names alone, so that
+    `sftp-password` or `gateway-password` cannot sit in the file either.
+    An ad-hoc target takes only the display's parameters
+    (`adhocParams`: `color-depth`, `color-scheme`, `cursor`,
+    `disable-gfx`, `enable-font-smoothing`, `font-name`, `font-size`,
+    `resize-method`), so that an SFTP host, a gateway or a drive meant
+    for the configured connections does not follow a target that a user
+    chose. Ad-hoc RDP therefore gets guacd's own security and
+    certificate defaults, not `ignore-cert` from the file.
   - **Failures of occamyd's own,** such as a password file it cannot
     read, are logged with the user and the target and answered 500
     `internal`, without the cause.

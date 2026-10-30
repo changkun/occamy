@@ -124,7 +124,7 @@ colours reached guacd shifted.
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `guacd.address` | `localhost:4822` | guacd's address, `host:port` |
-| `guacd.params.<protocol>` | none | guacd connection parameters per protocol (`ssh`, `vnc`, `rdp`, `telnet`), such as `ignore-cert: "true"` for `rdp`. A connection's target and credentials override them. `hostname` and `port` come from the target, and secrets (`password`, `passphrase`, `private-key`) are not allowed here |
+| `guacd.params.<protocol>` | none | guacd connection parameters per protocol (`ssh`, `vnc`, `rdp`, `telnet`), such as `ignore-cert: "true"` for `rdp`. A connection's target and credentials override them. `hostname` and `port` come from the target, and secrets are not allowed here: any parameter whose name holds `password`, `passphrase`, `private-key` or `secret`, such as `sftp-password`, is refused. Set credentials on each connection instead. An ad-hoc target takes only the display's parameters (see [ad-hoc targets](#ad-hoc-targets)) |
 
 ### The connection registry: `connections`
 
@@ -161,21 +161,33 @@ set. A secret rotated on disk is therefore picked up by the next session.
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `allow_adhoc_targets` | `false` | Let signed-in users connect to targets that are not in the registry, as v0 does |
-| `adhoc_allowlist` | none | Where ad-hoc targets may point: CIDR ranges (`10.0.0.0/8`), IP addresses, host names, or `*.` and a domain (`*.lab.internal`). Required when `allow_adhoc_targets` is `true` |
+| `adhoc_allowlist` | none | Where ad-hoc targets may point, and on which ports: CIDR ranges (`10.0.0.0/8`), IP addresses, host names, or `*.` and a domain (`*.lab.internal`), each optionally followed by `:port` or `:first-last` (`10.0.0.0/8:22`, `*.lab.internal:5900-5910`; an IPv6 range or address goes in brackets, `[fd00::/8]:22`). Required when `allow_adhoc_targets` is `true` |
 
 Any signed-in user may open an ad-hoc target, with
 `POST /api/v1/sessions`. Its credentials are always asked of the user,
 and an ssh target needs `host_keys` or `insecure_ignore_host_key: true`
-in the request, as a connection does. A target is allowed when:
+in the request, as a connection does. An entry without ports allows the
+protocol's own: 22 for ssh, 5900 to 5999 for vnc, 3389 for rdp and 23
+for telnet. A target is allowed on a port that an entry allows when:
 
 - it is an IP address in a listed range, or a listed address;
 - it is a listed host name, or ends in a `*.` entry's domain
   (`a.lab.internal` for `*.lab.internal`, but not `lab.internal`
-  itself). `occamyd` dials the name, so the list trusts these names'
-  DNS;
+  itself);
 - it is any other host name, every address of which lies in a listed
-  range. `occamyd` then dials the address it checked, so a second
-  lookup cannot lead elsewhere.
+  range.
+
+`occamyd` resolves every host name and dials the first address it
+checked, so a second lookup cannot lead elsewhere. Loopback, link-local
+(such as a cloud's metadata service at `169.254.169.254`), unspecified
+and multicast addresses are refused, whatever range or listed name leads
+to them, unless an entry is that very address (`127.0.0.1:2222`).
+
+An ad-hoc target passes no `guacd.params` but the display's
+(`color-depth`, `cursor`, `disable-gfx`, `enable-font-smoothing`,
+`font-name`, `font-size`, `color-scheme`, `resize-method`), so that
+parameters meant for the configured connections, such as an SFTP host,
+do not reach a target that a user chose.
 
 ### Limits: `limits`
 

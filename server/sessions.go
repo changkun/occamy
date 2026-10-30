@@ -11,7 +11,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/netip"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -271,17 +273,25 @@ func (s *server) adhocTarget(ctx context.Context, req *openRequest) (target, *re
 		return target{}, badRequest("only ssh targets have host keys")
 	}
 	host, port, _ := net.SplitHostPort(addr)
-	dial, err := s.adhoc.allow(ctx, host)
+	n, err := strconv.ParseUint(port, 10, 16)
+	if err != nil {
+		return target{}, badRequest("target: %v", err) // NormalizeTarget took it
+	}
+	dial, err := s.adhoc.allow(ctx, req.Protocol, host, uint16(n))
 	if err != nil {
 		return target{}, &requestError{http.StatusForbidden, codeForbidden, err.Error()}
 	}
-	return target{
+	t := target{
 		protocol:              req.Protocol,
-		addr:                  net.JoinHostPort(dial, port),
+		addr:                  net.JoinHostPort(dial.String(), port),
 		creds:                 config.Credentials{Username: req.Username, Prompt: true},
 		hostKeys:              req.HostKeys,
 		insecureIgnoreHostKey: req.InsecureIgnoreHostKey,
-	}, nil
+	}
+	if _, err := netip.ParseAddr(host); err != nil {
+		t.name = host
+	}
+	return t, nil
 }
 
 // open starts a session on t for owner, sized as s asks, and returns it

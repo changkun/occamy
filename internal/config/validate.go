@@ -141,8 +141,8 @@ func (f *File) validate(c *checker) {
 		c.add("allow_adhoc_targets", "needs adhoc_allowlist: list the networks and hosts that ad-hoc targets may reach")
 	}
 	for i, e := range f.AdhocAllowlist {
-		if !validPattern(e) {
-			c.add(fmt.Sprintf("adhoc_allowlist[%d]", i), "%q is not a CIDR range, an IP address, a host name or *.domain", e)
+		if _, err := ParseAllowEntry(e); err != nil {
+			c.add(fmt.Sprintf("adhoc_allowlist[%d]", i), "%v", err)
 		}
 	}
 	for _, l := range []struct {
@@ -261,14 +261,26 @@ func (f *File) validateGuacd(c *checker) {
 			c.add(p, "unknown protocol %q: use %s", protocol, protocolList)
 		}
 		for _, name := range slices.Sorted(maps.Keys(f.Guacd.Params[protocol])) {
-			switch name {
-			case "password", "passphrase", "private-key":
-				c.add(p+"."+name, "inline secrets are not allowed, so that the file can be committed: set credentials on each connection")
-			case "hostname", "port":
+			switch {
+			case secretParam(name):
+				c.add(p+"."+name, "inline secrets are not allowed, so that the file can be committed: set credentials on each connection, with password_file, password_env, private_key_file or prompt: true")
+			case name == "hostname" || name == "port":
 				c.add(p+"."+name, "set from each connection's target")
 			}
 		}
 	}
+}
+
+// secretParam reports whether a guacd parameter holds a secret, such as
+// password, sftp-password, gateway-password, passphrase or
+// sftp-private-key.
+func secretParam(name string) bool {
+	for _, s := range []string{"password", "passphrase", "private-key", "secret"} {
+		if strings.Contains(name, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *File) validateConnections(c *checker) {
@@ -681,17 +693,4 @@ func validHost(h string) bool {
 		}
 	}
 	return true
-}
-
-// validPattern reports whether e is an entry of adhoc_allowlist: a CIDR
-// range, an IP address, a host name, or *. and a domain.
-func validPattern(e string) bool {
-	if _, err := netip.ParsePrefix(e); err == nil {
-		return true
-	}
-	if d, ok := strings.CutPrefix(e, "*."); ok {
-		_, err := netip.ParseAddr(d)
-		return err != nil && validHost(d)
-	}
-	return validHost(e)
 }
