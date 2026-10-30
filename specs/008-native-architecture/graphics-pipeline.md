@@ -58,10 +58,13 @@ quickly, in pure Go. That means choosing:
   guacd bridge delivers decoded image streams plus `copy` operations.
   Both write into the framebuffer that [session-core](session-core.md)
   owns.
+- The measurement of 2026-10-30 compared these encoders on frames
+  recorded from the bench desktop:
+  [docs/benchmarks/codecs.md](../../docs/benchmarks/codecs.md).
 
 ## Proposed shape
 
-- **Framebuffer:** 32-bit pixels, one buffer per session, tiles of 64×64
+- **Framebuffer:** RGBA pixels, one buffer per session, tiles of 64×64
   with a version each. A change gives the tiles it touches a new version
   from one counter for the screen, so a viewer's dirty tiles are those
   above the versions it last sent, and the tiles changed since an input
@@ -70,16 +73,22 @@ quickly, in pure Go. That means choosing:
   `copy-rect` when every viewer's last frame contains the source region;
   otherwise it degrades to damage.
 - **Classification per tile: content picks the codec, motion picks the
-  quality.** Count distinct colours with an early exit. At or below 256
-  colours (text, UI) the tile is lossless. Above, it is photographic and
-  lossy, at a quality that the tile's motion (a heat counter decayed per
-  second) and the viewer's link set: low while it moves, high once it
+  quality.** Count distinct colours with an early exit. Up to 16 colours
+  (text, UI, flat gradients) the tile is always lossless. From 17 to 256
+  (antialiased text, smooth gradients) it is lossless while still and
+  lossy while it moves. Above 256 it is photographic and lossy. A lossy
+  tile's quality is set by its motion (a heat counter decayed per
+  second) and the viewer's link: low while it moves, high once it
   stops. guacd 1.6 chooses PNG or JPEG by timing alone
   (`src/libguac/display-worker.c`), so the same photograph cost 0.4 to
   2.2 MiB between runs of the baseline's G6.
+- **Lossy rectangles:** a frame's adjacent lossy tiles are encoded
+  together as one rectangle, a run of tiles along a row or a block of
+  them, so that the lossy format's headers are paid once per rectangle.
+  Tiles stay 64 pixels for damage and classification.
 - **Refinement (build to lossless):** when a region stops changing for a
-  short delay, it is resent at its final quality: exact for low-colour
-  tiles, so text and UI always end up exact, and a high lossy quality
+  short delay, it is resent at its final quality: exact for tiles of up
+  to 256 colours, so text and UI always end up exact, and a high lossy quality
   for photographic tiles, set by a perceptual score (SSIM against the
   framebuffer) rather than bit-exactness, which would cost PNG's size.
 - **Scroll and move detection:** the framebuffer keeps a hash per row of
@@ -110,7 +119,7 @@ quickly, in pure Go. That means choosing:
 
 ### Lossless codec
 
-- **A. Palette or raw pixels plus `deflate-raw` (recommended for beta).**
+- **A. Palette or raw pixels plus `deflate-raw` (chosen; decision 7).**
   The tile becomes a palette with indexed pixels (≤256 colours), or raw
   pixels otherwise, deflated at a fast level.
   - Pros: `compress/flate` on the server; native `DecompressionStream` in
@@ -134,18 +143,19 @@ quickly, in pure Go. That means choosing:
 
 ### Lossy codec
 
-- **A. JPEG via `image/jpeg` (recommended).** Native decoding everywhere.
-  Quality is adjustable per viewer.
-- **B. WebP lossy.** Better quality per byte than JPEG, and decoded
-  natively by browsers. Pure-Go encoders appeared in 2026
-  (`deepteams/webp`, `gen2brain/vpx/webp`); the measurement compares them
-  with JPEG (standard library and jpegn) for speed and size at equal
-  SSIM.
+- **A. JPEG via `image/jpeg` (the fallback, from `gen2brain/jpegn`;
+  decision 10).** Native decoding everywhere. Quality is adjustable per
+  viewer.
+- **B. WebP lossy (chosen; decision 10).** Better quality per byte than
+  JPEG, and decoded natively by browsers. Pure-Go encoders appeared in
+  2026 (`deepteams/webp`, `gen2brain/vpx/webp`); the measurement compared
+  them with JPEG (standard library and jpegn) for speed and size at
+  equal SSIM.
 
 ### Pixel layout
 
-- **A. RGBA (Go `image.RGBA`, browser `ImageData`).** No swizzle in the
-  web client or in Go.
+- **A. RGBA (Go `image.RGBA`, browser `ImageData`; chosen, decision
+  9).** No swizzle in the web client or in Go.
 - **B. BGRX little-endian.** Matches the common RFB true-colour format and
   CoreGraphics' native order, so VNC and Swift avoid a swizzle.
 
@@ -170,12 +180,22 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
    1.0, so the G5 bytes target (about 5 KiB a frame) is expected to be
    missed, and it will be revised to what adaptive JPEG reaches, with the
    measurement as evidence. Latency and frame-rate targets stay.
+   (Amended 2026-10-30 by the measurement: PNG wins nowhere the pipeline
+   sends lossless, so occamyd does not send it, and the lossy codec is
+   WebP with JPEG as the fallback, decision 10. The G5 proposal is in
+   the implementation notes.)
 2. **Quality adapts per viewer in beta,** as above, rather than a fixed
    quality per session: motion loses detail or rate before input loses
    responsiveness.
 3. **Content picks the codec and motion picks the quality**, with
    refinement to exact pixels for low-colour tiles and to a perceptual
-   quality for photographic ones.
+   quality for photographic ones. (Amended 2026-10-30: content and
+   motion together pick the codec for tiles of 17 to 256 colours, which
+   are lossless while still and lossy while they move. The motion scene
+   has at most 256 colours in every tile, and sent lossless it costs 388
+   KiB a frame against 26 KiB as lossy WebP at an SSIM of 0.989. Tiles
+   of up to 16 colours are always lossless, where lossy is 5 to 10 times
+   larger.)
 4. **Scroll and move detection and the client tile cache are in beta,**
    since G3 and G4's targets need them.
 5. **No server-side downscaling in beta.** Encoding only the visible
@@ -184,26 +204,64 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
    1 to 3 below) are decided by the first task's measurement on recorded
    frames from the bench desktop's scenes, not in advance. Lossless and
    lossy WebP join that measurement (added 2026-10-30), since pure-Go
-   encoders for them now exist; any of them keeps decision 1.
+   encoders for them now exist; any of them keeps decision 1. (Done
+   2026-10-30: the answers are decisions 7 to 10, from
+   [docs/benchmarks/codecs.md](../../docs/benchmarks/codecs.md).)
+7. **Lossless is palette or raw pixels with deflate** (option A), with
+   `compress/flate` at level 1, as codec 2 (`deflate`). On the tiles the
+   pipeline sends lossless it is 2.1 to 2.5 times smaller than PNG on
+   the desktop, the bitmap terminal and the dragged window, and 5 to 10
+   % smaller on antialiased text, at two fifths to all of PNG's encode
+   time, with 12 bytes for a solid tile against 88. Level 6 saves 3 to 6
+   % at 1.3 times the time. Lossless WebP is 27 to 35 % smaller on
+   antialiased text but 10 to 21 times slower, so it is left for
+   refinement, after its own measurement; QOI is 1.4 to 3.9 times
+   larger.
+8. **Tiles are 64 pixels, and lossy tiles are merged into rectangles.**
+   At 64 a key costs 0.1 to 1.7 KiB against 0.2 to 4.3 at 128, a
+   scrolled line after a copy 4.6 KiB against 8.7 (G3's target is 7.1),
+   and the browser page sends 6 % of its area lossy against 42 %. 128's
+   advantage on full frames comes mostly from lossy headers paid per
+   tile, about 650 bytes a JPEG, which merging adjacent lossy tiles
+   removes: the motion scene at JPEG quality 30 takes 137 KiB as tiles
+   and 33 KiB as rows of tiles. The `tile` message already carries any
+   size up to the maximum texture size.
+9. **Pixels are RGBA** (option A), in the framebuffer, in raw codec 1
+   and in what the `stream.Encoder` interface takes. x11vnc sends RGBX
+   when asked, the Go encoders take `image.RGBA`, browsers' `ImageData`
+   is RGBA, and a swizzle would cost 3.2 µs a 64-pixel tile.
+10. **Lossy tiles are WebP from `gen2brain/vpx/webp` at method 0** on one
+    goroutine, as codec 5, and JPEG from `gen2brain/jpegn` (baseline,
+    4:2:0) as codec 4 for a viewer that does not list WebP. At equal
+    SSIM WebP takes half of JPEG's bytes or less on 64-pixel tiles (110
+    against 233 KiB for the photograph at 0.90) and 53 bytes of fixed
+    cost a tile against 656, at 1.6 to 1.8 times `image/jpeg`'s encode
+    time and 5.5 to 6 times jpegn's. `jpegn` writes the same quality as
+    `image/jpeg` within 5 % of its bytes in a third of the time. What
+    would flip this: CPU becoming the server's limit before bandwidth,
+    or browsers' WebP decoding proving slower than JPEG on low-end
+    clients, which the measurement did not cover.
 
 ## Open Questions
 
-1. Lossless codec A, B or C? Benchmark A against B on a corpus of
+1. ~~Lossless codec A, B or C? Benchmark A against B on a corpus of
    recorded VNC frames (desktop, terminal, browser, photo) before
-   deciding.
-2. Tile size 64 or 128? Smaller tiles mean finer damage but more
-   per-tile overhead.
-3. Pixel layout A or B? The swizzle happens once per decoded tile in one
-   place either way.
+   deciding.~~ Answered 2026-10-30: A, palette or raw pixels with
+   deflate at level 1 (decision 7).
+2. ~~Tile size 64 or 128? Smaller tiles mean finer damage but more
+   per-tile overhead.~~ Answered 2026-10-30: 64, with adjacent lossy
+   tiles encoded as one rectangle (decision 8).
+3. ~~Pixel layout A or B? The swizzle happens once per decoded tile in
+   one place either way.~~ Answered 2026-10-30: A, RGBA (decision 9).
 
 ## Task Breakdown
 
 | Task | Delivers | Needs |
 |------|----------|-------|
 | Framebuffer | `internal/framebuffer`: RGBA pixels in square tiles, versions from one counter, a lock per row of tiles, drawing and CopyRect for backends, tile reads and a change signal for writers; the tile size is a parameter | — |
-| Measurement | A corpus of frames recorded from the bench desktop's scenes (desktop, terminal, browser, photograph, scroll), and benchmarks on Go 1.27 that settle questions 1 to 3 and the lossy codec: palette or raw pixels with deflate, PNG, lossless WebP, JPEG (standard library and gen2brain/jpegn) and lossy WebP, scored for size, encode time and SSIM | — |
-| Codecs | `internal/encoder`: classification by colour count, the lossless codec the measurement picked, and JPEG at a quality, under the codec IDs protocol v1 assigns (raw 1, deflate 2, PNG 3, JPEG 4, WebP 5); fixes raw's channel order and the deflate container, which [docs/protocol.md](../../docs/protocol.md) marks provisional | Measurement |
-| Refinement | Motion heat per tile, and refinement after a still delay: exact for low-colour tiles, a quality chosen by SSIM for photographic ones | Codecs |
+| Measurement (done 2026-10-30) | A corpus of frames recorded from the bench desktop's scenes (desktop, two terminals, browser, photograph, drag, scroll, motion), and benchmarks on Go 1.27 that settle questions 1 to 3 and the lossy codec: palette or raw pixels with deflate, PNG, QOI, lossless WebP, JPEG (standard library and gen2brain/jpegn) and lossy WebP, scored for size, encode and decode time and SSIM; results in [docs/benchmarks/codecs.md](../../docs/benchmarks/codecs.md) | — |
+| Codecs | `internal/encoder`, an implementation of `stream.Encoder`: classification by colour count (up to 16, 17 to 256, above 256); the palette or raw container with `compress/flate` at level 1 as `deflate` (2); raw RGBA (1); lossy WebP from gen2brain/vpx/webp at method 0 (5), and JPEG from gen2brain/jpegn (4) for viewers that do not list WebP; adjacent lossy tiles of a frame encoded as one rectangle. Fixes the deflate container, including alpha for cursors, in [docs/protocol.md](../../docs/protocol.md), which marks it provisional | Measurement |
+| Refinement | Motion heat per tile, and refinement after a still delay: exact for tiles of up to 256 colours, which go lossy while they move if they have more than 16, and a quality chosen by SSIM for photographic ones; gives `stream.Encoder` the tile's motion | Codecs |
 | Scroll detection | Row hashes per tile column (xxh3-64), the offset search, and `copy-rect` with tiles for the exposed strip | Framebuffer |
 | Tile cache | Content hashes (xxh3-128 from zeebo/xxh3, so collisions are out of reach), the server's mirror of each client's cache, and the `cached` codec | Codecs, protocol v1 Messages |
 | Encode cache and workers | Encoded tiles cached by tile, version, codec and quality and shared by viewers; a worker pool bounded per session | Codecs |
@@ -213,4 +271,91 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
 New `internal/framebuffer` and `internal/encoder`. Fixes the provisional
 codec layouts of [protocol-v1](protocol-v1.md) (raw's channel order, the
 deflate container, whether WebP is sent) and the decoders in
-[client-core](client-core.md) and [009](../009-react-web-client.md).
+[client-core](client-core.md) and [009](../009-react-web-client.md). The
+measurement fixed raw's order as RGBA and chose WebP for lossy tiles;
+the deflate container's exact layout is left to the Codecs task.
+
+## Implementation notes: measurement
+
+Done on 2026-10-30. The results, the method and the full tables are in
+[docs/benchmarks/codecs.md](../../docs/benchmarks/codecs.md).
+
+**What was built.**
+
+- `bench/internal/rfb`, the RFB 3.8 client that `bench/vncprobe` used,
+  shared, with a choice of RGBX or BGRX and the cursor pseudo-encoding,
+  so that x11vnc does not paint the cursor into frames.
+- `bench/vnccapture` and `make corpus`, which start the bench desktop
+  image with dillo and xterm added, drive each scene over VNC, and save
+  13 frames at 1024×768 as PNG to `bench/testdata/corpus` (2.5 MiB):
+  desktop, terminal (bitmap font), terminal-aa (antialiased font),
+  browser (a documentation page in dillo), photo, three consecutive
+  updates each of drag and scroll, and two of motion. A sequence's frames
+  are held in memory until it ends, so they are consecutive updates.
+- `bench/codecs`: tile classification, the palette container, QOI, SSIM
+  and the candidates, with unit tests that run in `go test ./...`, and
+  the measurement behind the `measure` build tag, which writes
+  `codecs.json` and `codecs-tables.md`.
+
+**Decisions** are 7 to 10 above, with decision 3 amended for moving
+tiles of 17 to 256 colours.
+
+**Deviations from the task.**
+
+- The corpus has three scenes more than planned: antialiased text,
+  because xterm's bitmap font and the browser are not the same content
+  class; the drag; and the motion, which turned out to decide decision
+  3's amendment.
+- QOI and `klauspost/compress` (flate and zstd) were measured alongside,
+  and the lossy codecs were also measured on whole frames and rows of
+  tiles, which is what decided the tile size.
+- `go.mod` moves from Go 1.26.0 to 1.26.4, which gen2brain's modules
+  require. The new dependencies (`deepteams/webp`, `gen2brain/jpegn`,
+  `gen2brain/vpx`, `klauspost/compress`) are pure Go and used only by
+  `bench/codecs`; occamyd links none of them yet.
+
+**Surprises.**
+
+- Colour count alone sends the motion scene lossless at 388 KiB a frame,
+  eight times guacd's baseline, because its plasma draws from 256
+  colours.
+- A JPEG's tables cost about 650 bytes a tile, which made 128-pixel
+  tiles look better than they are; merged rectangles remove it.
+- Lossless WebP from `gen2brain/vpx` at method 0 is unusable on
+  gradients (168 KiB for the desktop against 19 at method 4), and
+  `deepteams/webp`'s method 4 is worse than its method 0 at equal SSIM.
+- x11vnc sends red-first pixels on request, identical to its own
+  blue-first ones, so BGRX saves VNC nothing.
+
+**Follow-ups.**
+
+- `stream.Encoder` takes pixels, size and quality only. Decision 3's
+  amendment needs the tile's motion as well, or a quality that already
+  encodes it; the Refinement task adds it.
+- The measured container stores palette entries and raw pixels as RGB
+  without alpha, while cursors use the same codecs with straight alpha.
+  The Codecs task fixes the container in docs/protocol.md with a form
+  for alpha.
+- Lossless WebP for refining still antialiased text, and the vp8 video
+  tier, each need a measurement of their own.
+- Browsers' decode times (WebP, JPEG, and inflating plus expanding the
+  palette in JavaScript) are not measured; the Go client's are.
+- Classification takes 9 to 14 µs a 64-pixel tile, 1.1 to 2.6 ms a full
+  frame on one core, as much as encoding simple content; it should run
+  once per tile version and be shared by viewers, like encoded tiles.
+- SSIM was measured on luma only, so chroma subsampling's cost to
+  coloured text is not in the scores.
+- G4 needs move detection: without it, a drag update costs 35 KiB at 64
+  pixels with JPEG for its lossy tiles, against a target of 3.9.
+
+**G5's bytes, a proposal.** [docs/benchmarks.md](../../docs/benchmarks.md#targets)
+sets 4.9 KiB a frame for G5 over VNC, 10 times below guacd's 49, and
+decision 1 expected it to be missed. Measured on the motion scene, the
+best pure-Go result is lossy WebP at quality 30: 11 KiB a frame as one
+image and 14 KiB as rows of tiles, at an SSIM of 0.989; JPEG from
+`jpegn` takes 26 and 33 KiB. The proposal is to revise G5's bytes target
+to 14 KiB a frame over both VNC and RDP, what rows of WebP tiles reach,
+since occamyd's encoding of the same scene does not depend on the
+backend. The targets table stays unchanged until the owner decides.
+G6's 139 KiB stands: the photograph takes 44 KiB as WebP tiles at
+quality 70.
