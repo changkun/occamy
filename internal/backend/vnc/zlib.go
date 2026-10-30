@@ -169,7 +169,7 @@ func (z *zinput) ReadByte() (byte, error) {
 	z.n--
 	if z.br != nil {
 		c, err := z.br.ReadByte()
-		if errors.Is(err, io.EOF) {
+		if err != nil && errors.Is(err, io.EOF) {
 			err = io.ErrUnexpectedEOF
 		}
 		return c, err

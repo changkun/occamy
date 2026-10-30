@@ -311,11 +311,15 @@ func (d *decoder) tightJPEG(r image.Rectangle) error {
 	if err := d.onScreen("tight rectangle", r); err != nil {
 		return err
 	}
-	// The buffer grows as the data arrives.
+	// The buffer grows as the data arrives, doubling up to n.
 	buf := d.enc.jpeg[:0]
 	for len(buf) < n {
 		k := min(n-len(buf), jpegChunk)
-		buf = slices.Grow(buf, k)
+		if cap(buf)-len(buf) < k {
+			grown := make([]byte, len(buf), len(buf)+min(n-len(buf), max(k, len(buf))))
+			copy(grown, buf)
+			buf = grown
+		}
 		if err := d.read(buf[len(buf) : len(buf)+k]); err != nil {
 			d.enc.jpeg = buf
 			return err
