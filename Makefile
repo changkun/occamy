@@ -42,9 +42,27 @@ bench: build
 	go run ./bench -engine $(CONTAINER_ENGINE) $(BENCH_FLAGS)
 .PHONY: bench
 
+# corpus records the frames the codec measurement works on
+# (bench/testdata/corpus/README.md) from the bench desktop with a terminal
+# and a browser added.
+corpus:
+	$(CONTAINER_ENGINE) build -t occamy-bench-corpus -f docker/bench/desktop/Dockerfile \
+		--build-arg EXTRA_PACKAGES="dillo procps xterm" .
+	go run ./bench/vnccapture -engine $(CONTAINER_ENGINE) -image occamy-bench-corpus
+.PHONY: corpus
+
+# codecs measures the tile codecs on the corpus and writes the results
+# that docs/benchmarks/codecs.md quotes to docs/benchmarks. bench/codecs
+# is a module of its own, so occamyd's go.mod carries none of the
+# candidates. It takes about five minutes on one core; keep the host idle.
+codecs:
+	cd bench/codecs && go test -tags measure -run TestMeasure -timeout 2h . -args -out ../../docs/benchmarks
+.PHONY: codecs
+
 # lint needs golangci-lint v2 (https://golangci-lint.run), as CI uses.
 lint:
 	golangci-lint run
+	cd bench/codecs && golangci-lint run --build-tags measure ./...
 .PHONY: lint
 
 test:
