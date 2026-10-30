@@ -650,9 +650,10 @@ place for fixes that ship on v0 before beta.
     `golang.org/x/oauth2` v0.37.0 and `github.com/coreos/go-oidc/v3`
     v3.21.0, which brings `github.com/go-jose/go-jose/v4` (Apache-2.0
     and BSD-3-Clause; the go-licenses check passes). Static and OIDC
-    sign-in share one signer. `server.go` changed in four places only:
-    the field, its construction after TLS, `register` in `routes`, and a
-    warm-up in `Run`.
+    sign-in share one signer. `server.go` changed in five places only:
+    the `oidc` field, the signer taken out of the `newStaticUsers` call
+    so that both share it, the construction after TLS, `register` in
+    `routes`, and a warm-up in `Run`.
   - `internal/config` gained `auth.oidc.return_urls` and
     `auth.oidc.require_known_users`, and `File.KnownUsers` and
     `File.KnownGroups`, the names the file uses.
@@ -816,7 +817,9 @@ place for fixes that ship on v0 before beta.
   `email_verified` not required; unmapped groups kept; a failed
   discovery not remembered; provider bodies unbounded; discovered
   endpoints not checked; no timeout to the provider (the hanging
-  provider's test then hangs); client authentication auto-detected.
+  provider's test then hangs); client authentication auto-detected; no
+  warm-up in `Run` (`TestRunOIDCProviderDown` runs occamyd as a child
+  with a provider nothing serves, and signs a static user in).
 - **Follow-ups:**
   - Web client ([009](../009-react-web-client.md)): make a verifier of
     43 to 128 characters, keep it in `sessionStorage`, and navigate to

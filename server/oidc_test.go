@@ -1231,6 +1231,45 @@ func TestOIDCDiscovery(t *testing.T) {
 	})
 }
 
+// TestRunOIDCProviderDown runs occamyd, through Run, with a provider that
+// nothing serves: it starts, says that discovery failed, signs static
+// users in, and sends OIDC sign-ins back with unavailable.
+func TestRunOIDCProviderDown(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "v1.yaml")
+	raw := `version: 1
+listen: 127.0.0.1:0
+debug: {address: 127.0.0.1:0}
+auth:
+  signing_key_file: ` + filepath.Join(dir, "signing.key") + `
+  users: [{name: alice, password_hash: "` + hashPassword(t, alicePassword, config.MinBcryptCost) + `"}]
+  oidc:
+    issuer: http://127.0.0.1:1
+    client_id: occamy
+    redirect_url: http://127.0.0.1:5636/api/v1/auth/oidc/callback
+    return_urls: [` + testReturnURL + `]
+`
+	if err := os.WriteFile(file, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c := startChild(t, file, time.Second)
+	_, addr, ok := strings.Cut(c.output(), "serving API v1 at ")
+	if !ok {
+		t.Fatalf("occamyd did not serve:\n%s", c.output())
+	}
+	base, _, _ := strings.Cut(addr, "\n")
+	if !strings.Contains(c.output(), "OIDC discovery at http://127.0.0.1:1 failed") {
+		c.waitLine(t, "OIDC discovery at http://127.0.0.1:1 failed")
+	}
+
+	body := `{"username":"alice","password":"` + alicePassword + `"}`
+	if r := do(t, http.MethodPost, base+"/api/v1/auth/token", http.Header{"Content-Type": {"application/json"}}, body); r.code != http.StatusOK {
+		t.Errorf("static sign-in with the provider down: %d %s", r.code, r.body)
+	}
+	r := newBrowser(t).get(t, base+"/api/v1/auth/oidc/login?code_challenge="+oauth2.S256ChallengeFromVerifier(oauth2.GenerateVerifier()))
+	wantError(t, r, codeUnavailable)
+}
+
 // TestOIDCRoutesOff checks that without auth.oidc there are no OIDC
 // routes.
 func TestOIDCRoutesOff(t *testing.T) {
