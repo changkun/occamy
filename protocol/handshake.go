@@ -109,8 +109,8 @@ const (
 	CodecJPEG Codec = 4
 	// CodecWebP is a WebP file, lossy or lossless. The graphics
 	// pipeline's measurement picked it for lossy tiles, with CodecJPEG
-	// for a client that lists only that; occamyd sends neither before
-	// the pipeline's Codecs task lands.
+	// for a client that lists JPEG but not WebP; occamyd sends neither
+	// before the pipeline's Codecs task lands.
 	CodecWebP Codec = 5
 	// CodecCached draws the tile stored in a client cache slot and has no
 	// payload. It is only for tiles.
