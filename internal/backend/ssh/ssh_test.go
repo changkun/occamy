@@ -14,6 +14,7 @@ import (
 	"net"
 	"regexp"
 	"runtime"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -310,6 +311,104 @@ func TestKeyboardInteractiveUnanswered(t *testing.T) {
 	}
 	if n := srv.Shells(); n != 0 {
 		t.Errorf("%d shells started without authentication", n)
+	}
+}
+
+func TestKeyboardInteractivePassword(t *testing.T) {
+	hidden := []question{{prompt: "Password: ", echo: false, answer: "hunter2"}}
+	for _, tt := range []struct {
+		name     string
+		opts     serverOptions
+		password string   // configured
+		owner    []string // the owner's answers; nil means nobody answers
+		prompts  int      // asked of the owner
+		sent     [][]string
+		err      error // nil means the shell starts
+	}{
+		{
+			name:     "single hidden question",
+			opts:     serverOptions{questions: hidden},
+			password: "hunter2",
+			sent:     [][]string{{"hunter2"}},
+		},
+		{
+			name: "two questions",
+			opts: serverOptions{questions: []question{
+				{prompt: "Password: ", echo: false, answer: "hunter2"},
+				{prompt: "Code: ", echo: false, answer: "123456"},
+			}},
+			password: "hunter2",
+			owner:    []string{"hunter2", "123456"},
+			prompts:  1,
+			sent:     [][]string{{"hunter2", "123456"}},
+		},
+		{
+			name:     "echoed question",
+			opts:     serverOptions{questions: []question{{prompt: "Pet's name: ", echo: true, answer: "Rex"}}},
+			password: "hunter2",
+			owner:    []string{"Rex"},
+			prompts:  1,
+			sent:     [][]string{{"Rex"}},
+		},
+		{
+			name:     "wrong password asked again",
+			opts:     serverOptions{questions: hidden, retries: 1},
+			password: "wrong",
+			owner:    []string{"hunter2"},
+			prompts:  1,
+			sent:     [][]string{{"wrong"}, {"hunter2"}},
+		},
+		{
+			name:     "wrong password and no owner",
+			opts:     serverOptions{questions: hidden, retries: 1},
+			password: "wrong",
+			prompts:  1,
+			sent:     [][]string{{"wrong"}},
+			err:      backendtest.ErrNoAnswer,
+		},
+		{
+			// The password method sent the password already, so the
+			// hidden question is another factor.
+			name: "second factor",
+			opts: serverOptions{
+				password:     "hunter2",
+				secondFactor: true,
+				questions:    []question{{prompt: "Verification code: ", echo: false, answer: "123456"}},
+			},
+			password: "hunter2",
+			owner:    []string{"123456"},
+			prompts:  1,
+			sent:     [][]string{{"123456"}},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			checkGoroutines(t)
+			srv := newServer(t, tt.opts)
+			b := newBackend(t, ssh.Config{Addr: srv.addr, User: "alice", Password: tt.password, HostKeys: pin(srv)})
+			sink := &backendtest.Sink{}
+			if tt.owner != nil {
+				sink.Answer = func(backend.Prompt) (backend.PromptReply, error) {
+					return backend.PromptReply{Answers: tt.owner}, nil
+				}
+			}
+			r := start(t, b, sink)
+			if tt.err != nil {
+				if err := r.wait(t); !errors.Is(err, tt.err) {
+					t.Errorf("Run = %v, want %v", err, tt.err)
+				}
+			} else {
+				waitShell(t, sink)
+				if err := r.stop(t); !errors.Is(err, context.Canceled) {
+					t.Errorf("Run = %v, want context.Canceled", err)
+				}
+			}
+			if n := len(sink.Prompts()); n != tt.prompts {
+				t.Errorf("%d prompts, want %d", n, tt.prompts)
+			}
+			if got := srv.Answers(); !slices.EqualFunc(got, tt.sent, slices.Equal) {
+				t.Errorf("server got answers %q, want %q", got, tt.sent)
+			}
+		})
 	}
 }
 

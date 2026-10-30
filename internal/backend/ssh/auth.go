@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	gossh "golang.org/x/crypto/ssh"
 
@@ -140,15 +141,27 @@ func (h *hostKeys) callback(addr string, log *slog.Logger, warn *sync.Once) goss
 // keyboard-interactive through the owner. Without a configured password,
 // the owner is asked for one last. x/crypto tries only the methods that
 // the server offers, and each method once.
+//
+// The configured password is sent at most once per connection, by
+// whichever method asks for it first: the password method, or a
+// keyboard-interactive challenge that asks a single hidden question, as
+// PAM does when the server disables the password method. A password
+// asked for again was wrong, and a hidden question after the password
+// method has already sent it is another factor, such as a one-time code;
+// both go to the owner.
 func (b *Backend) clientConfig(ctx context.Context, sink backend.Sink, r *run) *gossh.ClientConfig {
+	var sent atomic.Bool // the configured password has been sent
 	var auth []gossh.AuthMethod
 	if len(b.signers) > 0 {
 		auth = append(auth, gossh.PublicKeys(b.signers...))
 	}
 	if b.password != "" {
-		auth = append(auth, gossh.Password(b.password))
+		auth = append(auth, gossh.PasswordCallback(func() (string, error) {
+			sent.Store(true)
+			return b.password, nil
+		}))
 	}
-	auth = append(auth, gossh.KeyboardInteractive(challenge(ctx, sink)))
+	auth = append(auth, gossh.KeyboardInteractive(b.challenge(ctx, sink, &sent)))
 	if b.password == "" {
 		auth = append(auth, gossh.PasswordCallback(b.askPassword(ctx, sink)))
 	}
@@ -160,13 +173,18 @@ func (b *Backend) clientConfig(ctx context.Context, sink backend.Sink, r *run) *
 	}
 }
 
-// challenge passes keyboard-interactive challenges to the owner.
-func challenge(ctx context.Context, sink backend.Sink) gossh.KeyboardInteractiveChallenge {
+// challenge answers a keyboard-interactive challenge that asks a single
+// hidden question with the configured password, unless sent says it has
+// been sent already, and passes every other challenge to the owner.
+func (b *Backend) challenge(ctx context.Context, sink backend.Sink, sent *atomic.Bool) gossh.KeyboardInteractiveChallenge {
 	return func(name, instruction string, questions []string, echos []bool) ([]string, error) {
 		if len(questions) == 0 {
 			// Servers send rounds without questions, as OpenSSH does
 			// once PAM has finished; there is nothing to ask.
 			return nil, nil
+		}
+		if b.password != "" && len(questions) == 1 && len(echos) == 1 && !echos[0] && sent.CompareAndSwap(false, true) {
+			return []string{b.password}, nil
 		}
 		p := backend.Prompt{
 			Name:        name,

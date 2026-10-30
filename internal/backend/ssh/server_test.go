@@ -31,6 +31,13 @@ type serverOptions struct {
 	password  string          // the password that password auth accepts
 	clientKey gossh.PublicKey // the key that public key auth accepts
 	questions []question      // what keyboard-interactive auth asks
+	// retries is how often keyboard-interactive asks again after wrong
+	// answers, as PAM may.
+	retries int
+	// secondFactor makes password auth a partial success that
+	// keyboard-interactive (questions) must complete, instead of
+	// offering keyboard-interactive on its own.
+	secondFactor bool
 	// hostKeys are the server's host keys; nil means one Ed25519 key.
 	hostKeys []gossh.Signer
 	// ignoreInput leaves the shell's stdin unread instead of echoing it.
@@ -67,12 +74,13 @@ type testServer struct {
 	ends   chan ending
 	wg     sync.WaitGroup
 
-	mu     sync.Mutex
-	closed bool
-	conns  []net.Conn
-	term   string
-	sizes  []image.Point // the pty-req's size, then each window-change's
-	shells int
+	mu      sync.Mutex
+	closed  bool
+	conns   []net.Conn
+	term    string
+	sizes   []image.Point // the pty-req's size, then each window-change's
+	shells  int
+	answers [][]string // each keyboard-interactive round's answers
 }
 
 // newServer starts a server that the test's cleanup stops.
@@ -80,50 +88,6 @@ func newServer(t *testing.T, opts serverOptions) *testServer {
 	t.Helper()
 	if opts.hostKeys == nil {
 		opts.hostKeys = []gossh.Signer{newSigner(t, newEd25519(t))}
-	}
-	config := &gossh.ServerConfig{}
-	for _, k := range opts.hostKeys {
-		config.AddHostKey(k)
-	}
-	if opts.password != "" {
-		config.PasswordCallback = func(_ gossh.ConnMetadata, pw []byte) (*gossh.Permissions, error) {
-			if string(pw) != opts.password {
-				return nil, errors.New("wrong password")
-			}
-			return nil, nil
-		}
-	}
-	if opts.clientKey != nil {
-		want := opts.clientKey.Marshal()
-		config.PublicKeyCallback = func(_ gossh.ConnMetadata, key gossh.PublicKey) (*gossh.Permissions, error) {
-			if !bytes.Equal(key.Marshal(), want) {
-				return nil, errors.New("unknown key")
-			}
-			return nil, nil
-		}
-	}
-	if opts.questions != nil {
-		config.KeyboardInteractiveCallback = func(_ gossh.ConnMetadata, client gossh.KeyboardInteractiveChallenge) (*gossh.Permissions, error) {
-			var prompts, want []string
-			var echos []bool
-			for _, q := range opts.questions {
-				prompts = append(prompts, q.prompt)
-				echos = append(echos, q.echo)
-				want = append(want, q.answer)
-			}
-			// A round without questions first, as OpenSSH sends.
-			if _, err := client("", "Welcome.", nil, nil); err != nil {
-				return nil, err
-			}
-			answers, err := client("Login", "Answer the questions.", prompts, echos)
-			if err != nil {
-				return nil, err
-			}
-			if !slices.Equal(answers, want) {
-				return nil, errors.New("wrong answers")
-			}
-			return nil, nil
-		}
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -133,13 +97,72 @@ func newServer(t *testing.T, opts serverOptions) *testServer {
 		addr:     ln.Addr().String(),
 		hostKeys: opts.hostKeys,
 		opts:     opts,
-		config:   config,
+		config:   &gossh.ServerConfig{},
 		ln:       ln,
 		ends:     make(chan ending, 1),
+	}
+	for _, k := range opts.hostKeys {
+		s.config.AddHostKey(k)
+	}
+	if opts.password != "" {
+		s.config.PasswordCallback = func(_ gossh.ConnMetadata, pw []byte) (*gossh.Permissions, error) {
+			if string(pw) != opts.password {
+				return nil, errors.New("wrong password")
+			}
+			if opts.secondFactor {
+				return nil, &gossh.PartialSuccessError{Next: gossh.ServerAuthCallbacks{
+					KeyboardInteractiveCallback: s.keyboardInteractive,
+				}}
+			}
+			return nil, nil
+		}
+	}
+	if opts.clientKey != nil {
+		want := opts.clientKey.Marshal()
+		s.config.PublicKeyCallback = func(_ gossh.ConnMetadata, key gossh.PublicKey) (*gossh.Permissions, error) {
+			if !bytes.Equal(key.Marshal(), want) {
+				return nil, errors.New("unknown key")
+			}
+			return nil, nil
+		}
+	}
+	if opts.questions != nil && !opts.secondFactor {
+		s.config.KeyboardInteractiveCallback = s.keyboardInteractive
 	}
 	s.wg.Go(s.accept)
 	t.Cleanup(s.close)
 	return s
+}
+
+// keyboardInteractive asks the configured questions, and again after
+// wrong answers as often as retries allows.
+func (s *testServer) keyboardInteractive(_ gossh.ConnMetadata, client gossh.KeyboardInteractiveChallenge) (*gossh.Permissions, error) {
+	var prompts, want []string
+	var echos []bool
+	for _, q := range s.opts.questions {
+		prompts = append(prompts, q.prompt)
+		echos = append(echos, q.echo)
+		want = append(want, q.answer)
+	}
+	// A round without questions first, as OpenSSH sends.
+	if _, err := client("", "Welcome.", nil, nil); err != nil {
+		return nil, err
+	}
+	for try := 0; ; try++ {
+		answers, err := client("Login", "Answer the questions.", prompts, echos)
+		if err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		s.answers = append(s.answers, answers)
+		s.mu.Unlock()
+		if slices.Equal(answers, want) {
+			return nil, nil
+		}
+		if try >= s.opts.retries {
+			return nil, errors.New("wrong answers")
+		}
+	}
 }
 
 func (s *testServer) accept() {
@@ -276,6 +299,14 @@ func (s *testServer) Term() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.term
+}
+
+// Answers returns the answers of each keyboard-interactive round with
+// questions.
+func (s *testServer) Answers() [][]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.answers)
 }
 
 // Sizes returns the pty-req's size and then each window-change's.

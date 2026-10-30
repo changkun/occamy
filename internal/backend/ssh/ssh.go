@@ -60,7 +60,9 @@ type Config struct {
 	Addr string
 	// User is the user to log in as.
 	User string
-	// Password, if set, is tried after the keys. If it is empty and the
+	// Password, if set, is tried after the keys, by the password method
+	// or as the answer to a keyboard-interactive challenge that asks a
+	// single hidden question, once per connection. If it is empty and the
 	// server accepts passwords, the session's owner is asked for one.
 	Password string
 	// KeyFiles are paths to private keys, tried first and in order. Keys
