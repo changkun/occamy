@@ -271,7 +271,7 @@ func TestCredSSPWrongPublicKeyProof(t *testing.T) {
 
 // A server that speaks a CredSSP version before 5, whose public key
 // binding CVE-2018-0886 broke, is refused before the client answers its
-// challenge.
+// challenge: the server never sees an AUTHENTICATE_MESSAGE.
 func TestCredSSPVersionDowngrade(t *testing.T) {
 	for _, v := range []int{2, 3, 4} {
 		s := &credSSPServer{ntlm: ntlmServer{user: "occamy", password: "s3cret"}, version: v}
@@ -282,6 +282,49 @@ func TestCredSSPVersionDowngrade(t *testing.T) {
 		if serr == nil {
 			t.Errorf("version %d: the client delegated its credentials", v)
 		}
+		if s.authenticates != 0 {
+			t.Errorf("version %d: the client sent %d AUTHENTICATE_MESSAGEs", v, s.authenticates)
+		}
+	}
+}
+
+// A public key proof whose signature does not match is refused, though
+// the proof itself is right: only the signature was changed.
+func TestCredSSPTamperedProof(t *testing.T) {
+	for _, at := range []int{4, 12} { // the checksum, the sequence number
+		s := &credSSPServer{
+			ntlm:   ntlmServer{user: "occamy", password: "s3cret"},
+			tamper: func(sealed []byte) { sealed[at] ^= 1 },
+		}
+		cerr, serr := credSSPPair(t, s, "occamy", "s3cret")
+		if cerr == nil || !strings.Contains(cerr.Error(), "bad signature") {
+			t.Errorf("byte %d of the signature changed: credSSP returned %v", at, cerr)
+		}
+		if serr == nil || s.creds.Password != nil {
+			t.Errorf("byte %d of the signature changed: the client delegated its credentials", at)
+		}
+	}
+}
+
+// unseal checks each message's signature and sequence number.
+func TestNTLMUnseal(t *testing.T) {
+	key := bytes.Repeat([]byte{0x55}, 16)
+	server := newNTLMSession(key, ntlmClientFlags, false)
+	client := newNTLMSession(key, ntlmClientFlags, true)
+	first := server.seal([]byte("first"))
+	second := server.seal([]byte("second"))
+	if got, err := client.unseal(first); err != nil || string(got) != "first" {
+		t.Fatalf("unseal: %q, %v", got, err)
+	}
+	if _, err := client.unseal(first); err == nil {
+		t.Error("unsealed a replayed message")
+	}
+	client = newNTLMSession(key, ntlmClientFlags, true)
+	client.unseal(first)
+	tampered := bytes.Clone(second)
+	tampered[5] ^= 1
+	if _, err := client.unseal(tampered); err == nil {
+		t.Error("unsealed a message with a changed checksum")
 	}
 }
 
@@ -448,6 +491,11 @@ type credSSPServer struct {
 	version int
 	// proof, if set, replaces the server's public key proof.
 	proof func(nonce, pub []byte) []byte
+	// tamper, if set, changes the sealed public key proof.
+	tamper func(sealed []byte)
+
+	// authenticates counts the AUTHENTICATE_MESSAGEs the client sent.
+	authenticates int
 
 	// creds are the credentials the client delegated.
 	creds tsPasswordCreds
@@ -479,6 +527,7 @@ func (s *credSSPServer) accept(r *bufio.Reader, w io.Writer, cert *x509.Certific
 	if req, err = readTSRequest(r); err != nil {
 		return err
 	}
+	s.authenticates += len(req.NegoTokens)
 	if len(req.NegoTokens) != 1 || len(req.ClientNonce) != 32 {
 		return fmt.Errorf("authenticate request %+v", req)
 	}
@@ -498,7 +547,11 @@ func (s *credSSPServer) accept(r *bufio.Reader, w io.Writer, cert *x509.Certific
 	if s.proof != nil {
 		proof = s.proof(req.ClientNonce, pub)
 	}
-	if err := writeTSRequest(w, &tsRequest{Version: version, PubKeyAuth: sess.seal(proof)}); err != nil {
+	sealed := sess.seal(proof)
+	if s.tamper != nil {
+		s.tamper(sealed)
+	}
+	if err := writeTSRequest(w, &tsRequest{Version: version, PubKeyAuth: sealed}); err != nil {
 		return err
 	}
 	if req, err = readTSRequest(r); err != nil {
