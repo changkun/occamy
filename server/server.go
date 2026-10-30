@@ -29,12 +29,18 @@ import (
 // requests, not WebSockets: net/http clears both deadlines when a handler
 // hijacks the connection for an upgrade.
 const (
+	readTimeout    = 30 * time.Second
+	writeTimeout   = 30 * time.Second
+	idleTimeout    = 2 * time.Minute
+	maxHeaderBytes = 64 << 10
+	maxBodyBytes   = 1 << 20
+)
+
+// Variables, so that tests can shorten them.
+var (
+	// readHeaderTimeout bounds how long a client may take to send its
+	// request headers, so that slow clients cannot hold connections.
 	readHeaderTimeout = 10 * time.Second
-	readTimeout       = 30 * time.Second
-	writeTimeout      = 30 * time.Second
-	idleTimeout       = 2 * time.Minute
-	maxHeaderBytes    = 64 << 10
-	maxBodyBytes      = 1 << 20
 	// drainTimeout bounds how long a shutdown waits for requests in
 	// flight, inside the 10 s that docker stop allows before it kills.
 	drainTimeout = 5 * time.Second
@@ -49,7 +55,9 @@ type server struct {
 }
 
 // Run serves a v1 file until SIGINT or SIGTERM, then drains requests in
-// flight for up to five seconds.
+// flight for up to five seconds; a second signal ends occamyd at once. A
+// drain that runs out is a normal stop: only a server that fails is an
+// error.
 func Run(f *config.File) error {
 	s, err := newServer(f)
 	if err != nil {
@@ -63,8 +71,22 @@ func Run(f *config.File) error {
 	if dln != nil {
 		debug = newDebugServer()
 	}
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sig)
+	go func() {
+		select {
+		case s := <-sig:
+			// Stop listening before the drain, so that a second signal
+			// gets Go's default handling and ends occamyd at once.
+			signal.Stop(sig)
+			log.Printf("received %v; another one stops occamyd at once", s)
+			cancel()
+		case <-ctx.Done():
+		}
+	}()
 	scheme := "http"
 	if s.tls != nil {
 		scheme = "https"
@@ -87,11 +109,19 @@ func listen(f *config.File) (ln, dln net.Listener, err error) {
 	if f.Debug.Address == "" {
 		return ln, nil, nil
 	}
+	// ParseV1 refuses a debug address that overlaps listen; this also
+	// covers a File built another way and the port that listen's port 0
+	// was given.
+	if config.Overlap(ln.Addr().String(), f.Debug.Address) || config.Overlap(f.Listen, f.Debug.Address) {
+		ln.Close()
+		return nil, nil, fmt.Errorf("debug.address %q shares a port with the public listener on %s", f.Debug.Address, ln.Addr())
+	}
 	if dln, err = net.Listen("tcp", f.Debug.Address); err != nil {
 		ln.Close()
 		return nil, nil, err
 	}
 	if !loopback(f.Debug.Address) {
+		// #nosec G706 -- the operator's configuration, not a client's input.
 		log.Printf("warning: the debug listener on %s serves profiles and the command line without authentication beyond the loopback interface", f.Debug.Address)
 	}
 	return ln, dln, nil
@@ -106,6 +136,7 @@ func newServer(f *config.File) (*server, error) {
 		return nil, err
 	}
 	if created {
+		// #nosec G706 -- the operator's configuration, not a client's input.
 		log.Printf("warning: created a new signing key in %s; tokens signed with any earlier key no longer verify", f.Auth.SigningKeyFile)
 	}
 	pub, ok := key.Public().(ed25519.PublicKey)
@@ -219,8 +250,10 @@ func newDebugServer() *http.Server {
 // debug on dln unless debug is nil, until ctx is done or a server fails.
 // Then it shuts both down: the listeners close at once, requests in
 // flight have up to drain to finish, and connections still open after it
-// are closed. Hijacked connections, such as WebSockets, are neither
-// waited for nor closed: net/http no longer tracks them.
+// are closed, with a warning. Hijacked connections, such as WebSockets,
+// are neither waited for nor closed: net/http no longer tracks them. The
+// error is that of a server that failed, and nil after a stop through
+// ctx, however the drain ended.
 func serveUntil(ctx context.Context, drain time.Duration, public *http.Server, ln net.Listener, debug *http.Server, dln net.Listener) error {
 	servers := []*http.Server{public}
 	errc := make(chan error, 2)
@@ -248,8 +281,10 @@ func serveUntil(ctx context.Context, drain time.Duration, public *http.Server, l
 	defer cancel()
 	for _, srv := range servers {
 		if serr := srv.Shutdown(sctx); serr != nil {
+			// A request that outlasts the drain, such as a long CPU
+			// profile, is cut; stopping was asked for, so it is no error.
+			log.Printf("warning: requests still in flight after the %v drain were cut: %v", drain, serr)
 			srv.Close()
-			err = errors.Join(err, fmt.Errorf("shutdown: %w", serr))
 		}
 	}
 	for ; running > 0; running-- {

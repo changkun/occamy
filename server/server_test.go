@@ -671,8 +671,10 @@ func TestGracefulShutdown(t *testing.T) {
 }
 
 // TestShutdownDrainTimeout checks that a shutdown waits for a request in
-// flight no longer than the drain timeout, then closes it.
+// flight no longer than the drain timeout, then closes it with a warning,
+// and that a drain that runs out is no error.
 func TestShutdownDrainTimeout(t *testing.T) {
+	logs := captureLog(t)
 	release := make(chan struct{})
 	defer close(release)
 	h, started := blocking(release)
@@ -688,15 +690,17 @@ func TestShutdownDrainTimeout(t *testing.T) {
 	}()
 	<-started
 	start := time.Now()
-	err := stop()
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("serveUntil: %v, want the drain's deadline", err)
+	if err := stop(); err != nil {
+		t.Errorf("serveUntil after a drain that ran out: %v, want nil", err)
 	}
 	if d := time.Since(start); d > 5*time.Second {
 		t.Errorf("shutdown took %v", d)
 	}
 	if err := <-failed; err == nil {
 		t.Error("the request outlived the drain")
+	}
+	if !strings.Contains(logs(), "warning: requests still in flight after the 100ms drain were cut") {
+		t.Errorf("no warning for the cut request:\n%s", logs())
 	}
 }
 
