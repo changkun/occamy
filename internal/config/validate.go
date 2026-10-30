@@ -164,7 +164,11 @@ func (a *Auth) validate(c *checker) {
 	for i, ti := range a.TrustedIssuers {
 		p := fmt.Sprintf("auth.trusted_issuers[%d]", i)
 		if c.name(p+".issuer", ti.Issuer) {
-			if j, ok := issuers[ti.Issuer]; ok {
+			if ti.Issuer == auth.Issuer {
+				// The issuer picks the verification key, so a third party
+				// by this name would stand in for occamyd itself.
+				c.add(p+".issuer", "%q is occamyd's own issuer: name the third party something else", ti.Issuer)
+			} else if j, ok := issuers[ti.Issuer]; ok {
 				c.add(p+".issuer", "%q is already auth.trusted_issuers[%d]", ti.Issuer, j)
 			} else {
 				issuers[ti.Issuer] = i

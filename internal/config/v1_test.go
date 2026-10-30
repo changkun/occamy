@@ -380,12 +380,14 @@ func TestParseV1Problems(t *testing.T) {
     - {public_key_file: DIR/gateway.pub}
     - {issuer: other}
     - {issuer: wrong, public_key_file: DIR/key}
+    - {issuer: occamy, public_key_file: DIR/gateway.pub}
 `, []want{
 			{"auth.trusted_issuers[1].issuer", `"gateway" is already auth.trusted_issuers[0]`},
 			{"auth.trusted_issuers[1].public_key_file", "does not exist"},
 			{"auth.trusted_issuers[2].issuer", "must not be empty"},
 			{"auth.trusted_issuers[3].public_key_file", "required"},
 			{"auth.trusted_issuers[4].public_key_file", "want a PEM block of type PUBLIC KEY"},
+			{"auth.trusted_issuers[5].issuer", `"occamy" is occamyd's own issuer`},
 		}},
 		{"users", "version: 1\nauth:\n  signing_key_file: DIR/signing.key\n  users:\n" +
 			`    - {name: alice, password_hash: "` + hash + `", groups: [ops, ""]}
