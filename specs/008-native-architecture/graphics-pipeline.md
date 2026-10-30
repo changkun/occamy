@@ -1,6 +1,6 @@
 ---
 title: Graphics pipeline
-status: drafted
+status: validated
 track: architecture
 depends_on:
   - specs/008-native-architecture/protocol-v1.md
@@ -11,7 +11,7 @@ affects:
   - internal/encoder/
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-30
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -53,12 +53,37 @@ quickly, in pure Go. That means choosing:
   of the tiles it touches. A CopyRect from the backend is forwarded as
   `copy-rect` when every viewer's last frame contains the source region;
   otherwise it degrades to damage.
-- **Classification per tile:** count distinct colours with an early exit.
-  At or below 256 colours the tile is lossless; above, it is lossy if the
-  tile's update frequency (a heat counter decayed per second) is high, and
-  lossless otherwise.
-- **Refinement:** when a lossy region stops changing for a short delay,
-  resend it losslessly so that static content ends up exact.
+- **Classification per tile: content picks the codec, motion picks the
+  quality.** Count distinct colours with an early exit. At or below 256
+  colours (text, UI) the tile is lossless. Above, it is photographic and
+  lossy, at a quality that the tile's motion (a heat counter decayed per
+  second) and the viewer's link set: low while it moves, high once it
+  stops. guacd 1.6 chooses PNG or JPEG by timing alone
+  (`src/libguac/display-worker.c`), so the same photograph cost 0.4 to
+  2.2 MiB between runs of the baseline's G6.
+- **Refinement (build to lossless):** when a region stops changing for a
+  short delay, it is resent at its final quality: exact for low-colour
+  tiles, so text and UI always end up exact, and a high lossy quality
+  for photographic tiles, set by a perceptual score (SSIM against the
+  framebuffer) rather than bit-exactness, which would cost PNG's size.
+- **Scroll and move detection:** the framebuffer keeps a hash per row of
+  each tile column. When a large region changes, the encoder looks for a
+  vertical or horizontal offset at which most row hashes match the
+  previous frame, and sends `copy-rect` for the matched part and tiles
+  for the exposed strip only. The baseline's G3 sends 71 KiB a frame
+  over VNC and 516 KiB over RDP for a one-line scroll; the target is
+  7.1 and 52 KiB. Backend CopyRect is used directly when it exists.
+- **Client tile cache:** the server mirrors a bounded LRU of tiles that
+  each client holds, keyed by a content hash (xxh3). A tile whose
+  content the client already has is sent as a `tile` with the `cached`
+  codec and the slot number, a few bytes instead of the pixels.
+  Repeated content (toolbars, desktop backgrounds, a window moved back)
+  then costs nothing to resend.
+- **Adaptive quality per viewer:** the lossy quality and the frame
+  interval follow each viewer's frame-ack round trips and decode times
+  (additive increase, multiplicative decrease), as
+  [session-core](session-core.md) describes under Input to display. Only
+  the visible viewport is encoded.
 - **Encode cache:** keyed by (tile, version, codec, quality), shared by all
   viewers at the same quality (see session-core pacing).
 - **Parallelism:** encode the tiles of one frame across a worker pool
@@ -107,6 +132,29 @@ encoders are not fast enough, so it needs a helper process or a hardware
 encoder, plus a licensing check. Kept out of beta; protocol v1 reserves a
 codec ID range for it.
 
+## Decisions
+
+Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
+
+1. **Codecs stay pure Go.** Palette or raw pixels with deflate, PNG
+   where it wins, and JPEG, all encoded in Go. The video tier stays after
+   1.0, so the G5 bytes target (about 5 KiB a frame) is expected to be
+   missed, and it will be revised to what adaptive JPEG reaches, with the
+   measurement as evidence. Latency and frame-rate targets stay.
+2. **Quality adapts per viewer in beta,** as above, rather than a fixed
+   quality per session: motion loses detail or rate before input loses
+   responsiveness.
+3. **Content picks the codec and motion picks the quality**, with
+   refinement to exact pixels for low-colour tiles and to a perceptual
+   quality for photographic ones.
+4. **Scroll and move detection and the client tile cache are in beta,**
+   since G3 and G4's targets need them.
+5. **No server-side downscaling in beta.** Encoding only the visible
+   viewport covers small screens; scaling can come later as a capability.
+6. **The lossless codec, the tile size and the pixel layout** (questions
+   1 to 3 below) are decided by the first task's measurement on recorded
+   frames from the bench desktop's scenes, not in advance.
+
 ## Open Questions
 
 1. Lossless codec A, B or C? Benchmark A against B on a corpus of
@@ -116,11 +164,6 @@ codec ID range for it.
    per-tile overhead.
 3. Pixel layout A or B? The swizzle happens once per decoded tile in one
    place either way.
-4. Per-viewer quality: drive JPEG quality from frame-ack round-trip time
-   and decode time (AIMD), or offer only a fixed per-session quality in
-   beta?
-5. Should the server downscale for viewers whose viewport is smaller than
-   the remote screen, or leave scaling to the client in beta?
 
 ## Affects
 
