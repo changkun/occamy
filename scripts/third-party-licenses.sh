@@ -3,14 +3,18 @@
 # Use of this source code is governed by a MIT
 # license that can be found in the LICENSE file.
 
-# third-party-licenses.sh writes the license, notice and patent files of
-# the Go standard library and of every module compiled into occamyd, on
-# any release platform, to THIRD_PARTY_LICENSES (or the file given as the
-# first argument), and those of any compiled package that has its own,
-# such as go-jose's fork of encoding/json. Release archives and the
-# image carry it. It fails, writing nothing, when go list fails or names
-# no module, or a module has no license file.
+# third-party-licenses.sh writes the license, notice and patent grant
+# files of the Go standard library and of every module compiled into
+# occamyd, on any release platform, to THIRD_PARTY_LICENSES (or the file
+# given as the first argument), and those of any compiled package that
+# has its own, such as go-jose's fork of encoding/json. Release archives
+# and the image carry it. jpegn ports parts of jpegli, whose notice it
+# does not carry, so jpegli's, kept in third_party/jpegli, follows
+# jpegn's. It fails, writing nothing, when go list fails or names no
+# module, or a module has no license file.
 set -eu
+
+jpegli=$(dirname "$0")/../third_party/jpegli/LICENSE
 
 out=${1:-THIRD_PARTY_LICENSES}
 rule================================================================================
@@ -62,6 +66,11 @@ stdlib=$(ls "$goroot" | grep -iE "$names" || true)
 			cat "$dir/$f"
 			echo
 		done
+		if [ "$path" = github.com/gen2brain/jpegn ]; then
+			section "github.com/google/jpegli, which $path ports in part: LICENSE"
+			cat "$jpegli"
+			echo
+		fi
 	done < "$tmp/modules"
 	while read -r path version moddir dir; do
 		for f in $(ls "$dir" | grep -iE "$names" || true); do

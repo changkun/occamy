@@ -141,7 +141,8 @@ and 113 ms at N1, behind frames it had already queued.
   their minimum the rate backs off to the latest measurement. On Linux
   and macOS the writer sets `TCP_NOTSENT_LOWAT`, so the kernel holds
   little unsent data. A key's frame then waits behind little more than
-  the tile being written.
+  the message being written: one tile, or since the graphics pipeline's
+  Codecs task a run of up to 16 lossy tiles, about 1 ms to encode.
 - **Only what is seen.** A client reports with `view` whether it is
   visible (a hidden browser tab, a minimized window) and which part of
   the screen its viewport shows. A hidden viewer gets no frames, which
@@ -261,7 +262,7 @@ follow the recommendations above.
 | Backend interface | `internal/backend`: `Class`, `Backend`, `Sink`, `Demand`, input events (key, pointer, wheel, text, terminal input, clipboard, resize) and prompts; `backendtest`, a scripted fake backend for both classes that draws on a clock and records input | — |
 | Pacer | A per-viewer controller without I/O: the frame window, one frame beyond it after an input, bytes in flight capped near the bandwidth-delay product from `frame-ack` round trips with delay-based backoff, and AIMD steps for the frame interval and quality; tests on a simulated clock and link | — |
 | Owner | `internal/session`: the goroutine that runs a backend, applies its events to the framebuffer or the terminal emulator, adds damage to each viewer's dirty tiles, applies input in arrival order by role (read-only input dropped and counted), sets `Demand` from the viewers' `view`, and ends the session per decision 5; tests under `-race` that also check for leaked goroutines | Backend interface; the graphics pipeline's framebuffer |
-| Viewer writer | The goroutine per viewer: takes the dirty tiles inside the viewport when the pacer allows, encodes them through an encoder interface (raw pixels until the graphics pipeline's codecs land), sends size-capped tiles and `frame-end` with the last input applied, sends small messages ahead of tiles, sends a hidden viewer nothing and one current frame on its return, and sets `TCP_NOTSENT_LOWAT` on Linux and macOS; terminal sessions send screen diffs in the same frames | Owner, Pacer, protocol v1 Messages |
+| Viewer writer | The goroutine per viewer: takes the dirty tiles inside the viewport when the pacer allows, encodes them through an encoder interface (raw pixels at first; `internal/encoder`'s codecs since the graphics pipeline's Codecs task), sends size-capped tiles and `frame-end` with the last input applied, sends small messages ahead of tiles, sends a hidden viewer nothing and one current frame on its return, and sets `TCP_NOTSENT_LOWAT` on Linux and macOS; terminal sessions send screen diffs in the same frames | Owner, Pacer, protocol v1 Messages |
 | Registry | Sessions by ID: open on a connection, join with a role, share tokens that die with the session, removal when it ends | Owner |
 | Scheduling test | End to end with the fake backend in full-screen motion over a simulated N1 link: a key's `frame-end` arrives within one round trip plus a bound while frames keep flowing, a hidden viewer receives nothing and costs no encoding, and a slow viewer does not slow a fast one | Viewer writer |
 
@@ -343,14 +344,16 @@ arise, rather than inheriting those fixes.
     While the pacer holds a frame back, the writer wakes on framebuffer
     changes as long as an effect is awaited. An input whose effect does
     not appear within 1 s loses its priority.
-  - `frame-end`'s `last_seq` is the last input applied when the frame
-    started, or when it took up an input's effect, if later. An input
-    applied before a frame's content was read may still have its effect
-    on the way from the remote end, so `last_seq` says which inputs a
-    frame could show, not that it shows their effect; the frame that
-    goes beyond the window does show it.
+  - `frame-end`'s `last_seq` is the last input recorded when the writer
+    finished reading the frame's content (see the later fix below). An
+    input applied before a frame's content was read may still have its
+    effect on the way from the remote end, so `last_seq` says which
+    inputs a frame could show, not that it shows their effect; the frame
+    that goes beyond the window does show it.
   - Small state goes out before every tile, during pacing sleeps and
-    while waiting, so it waits for at most the tile being written.
+    while waiting, so it waits for at most the tile being written. Since
+    the graphics pipeline's Codecs task a message may be a run of up to
+    16 lossy tiles, so that is one run's encoding, about 1 ms.
   - Resizes follow the framebuffer's bounds, not the session's small
     state. `resize` precedes every tile of the new size.
   - A client that breaks the protocol gets `close` with `CloseCodeFor`,
@@ -358,14 +361,17 @@ arise, rather than inheriting those fixes.
     `close` with its reason's code. Either waits at most 1 s for a client
     that stopped reading. A client that hangs up (`io.EOF` from `Conn`)
     or a failed connection gets nothing.
-  - A client that decodes no raw tiles is refused with `unsupported`. A
-    small message larger than the client's message size, such as a huge
+  - A client that decodes no raw tiles is refused with `unsupported`;
+    since the graphics pipeline's Codecs task, one that decodes no codec
+    the server sends. A small message larger than the client's message size, such as a huge
     remote clipboard, is dropped. Up to 16 pings wait for their pongs,
     and acks beyond 64 drop the oldest.
   - Tiles go through an `Encoder` interface, raw RGBA until the graphics
-    pipeline's codecs land. Cursors go raw, and not at all if they are
-    larger than the client's texture limit; a hidden cursor carries no hot
-    spot, codec or payload.
+    pipeline's Codecs task gave it `internal/encoder`'s codecs. Cursors
+    went raw; they now go in `deflate`, `raw` or lossless WebP, and not at
+    all to a viewer that decodes none of those or if they are larger than
+    the client's texture limit. A hidden cursor carries no hot spot, codec
+    or payload.
 - **What was not done:**
   - `TCP_NOTSENT_LOWAT` is not set on a connection yet. coder/websocket
     hides the socket, so the HTTP layer reaches it first: the HTTP server
@@ -426,9 +432,9 @@ arise, rather than inheriting those fixes.
     at that clock. While every row is in motion, as under a fast
     scrolling log, an echo cannot be told from the output and gets no
     priority.
-  - `last_seq` is read before the snapshot, as in a graphical frame: it
-    names the inputs applied before the screen was read, whose echo may
-    come in a later frame.
+  - `last_seq` is read after the snapshot, as in a graphical frame after
+    the tiles: it names every input whose effect the snapshot can hold,
+    and perhaps one more whose echo comes in a later frame.
   - A diff goes whole: a client's screen is right only once it has all of
     it, so a terminal frame is never cut. At the cap on bytes in flight it
     waits for acknowledgements of earlier frames (`Pacer.Hold`); a frame
@@ -492,3 +498,27 @@ arise, rather than inheriting those fixes.
   fails in about one run in five.
 - **Cost:** a snapshot allocates a version per row, about 400 ns more
   for a 200x50 screen.
+- **Later fix:** the Go client core's end-to-end tests found that a
+  `resize-request` panicked the terminal writer: the rows in motion at
+  the input were recorded for the old size and indexed with the new
+  rows. occamyd hit it too, when a `resize-request` added rows while an
+  input was pending. Both places that read those rows, the search for
+  the input's effect (`termEffect`) and the record of what the effect
+  changed (`keepEffects`), now take rows of a screen of another size as
+  still, as tiles already did (`TestTerminalResizeRequest`,
+  `TestTerminalResizeWhileBusy` with every row in motion,
+  `TestTermEffectResized`, `TestKeepEffectsResized`;
+  [client-core](client-core.md)).
+- **Later fix:** the client core's `TestInputLastSeq` failed 15 runs
+  of 200 under `-race`: a frame showed a key's effect with a
+  `last_seq` below the key. The viewer recorded the input's `seq` only
+  after `backend.Input` returned, and the remote could draw the effect
+  in between; the graphical writer also read `last_seq` when the frame
+  started. Now the viewer records `seq` before it hands the input to the
+  backend, and puts the previous one back if the backend refuses it, and
+  both writers read `last_seq` after the frame's content (the tiles, or
+  the terminal snapshot). An effect on screen therefore always has its
+  input recorded, and `last_seq` never names less than a frame shows; it
+  may name one input more, whose effect comes later, which the protocol
+  allows (`TestInputRecordedBeforeBackend`; the client test passes 200
+  runs of 200 under `-race`).

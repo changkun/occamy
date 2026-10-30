@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"changkun.de/x/occamy/internal/encoder"
 	"changkun.de/x/occamy/internal/framebuffer"
 	"changkun.de/x/occamy/internal/pacer"
 	"changkun.de/x/occamy/internal/session"
@@ -73,10 +74,21 @@ type writer struct {
 	buf      []byte // the tile being sent
 	sbuf     []byte // small messages, which go out while a tile waits in buf
 	pongs    []protocol.Ping
-	pix      []byte
-	payload  []byte
 	frame    uint32
 	in       *pending // the input whose effect goes first
+
+	// What encode works in: the pixels of the tiles of a run, the run's
+	// pixels side by side, their versions, the payload, a lossless tile
+	// encoded while looking for the run's end, and the time spent in the
+	// frame being sent.
+	tiles      [encoder.MaxRun][]byte
+	rects      [encoder.MaxRun]image.Rectangle
+	runVersion []uint64
+	runPix     []byte
+	payload    []byte
+	cbuf       []byte // a cursor's payload
+	ahead      lookahead
+	encodeTime time.Duration
 
 	// snap holds the versions at snapAt and prev those at least
 	// activeWindow before, to find the tiles in motion at an input. In a
@@ -106,6 +118,11 @@ type pending struct {
 	checked uint64 // the framebuffer's clock when last searched for the effect
 	boosted bool   // the pacer has been told, at the clock checked
 }
+
+// moving reports whether tile or row i of n was in motion at the input.
+// Those of a screen of another size were not: the screen resized since,
+// as when the input was a resize-request.
+func (in *pending) moving(i, n int) bool { return len(in.active) == n && in.active[i] }
 
 // newPending returns the pending input seq, whose effect is the change
 // after clock. A tile was in motion if it changed since the last snapshot
@@ -157,9 +174,6 @@ func newWriter(c Conn, v *session.Viewer, p *pacer.Pacer, enc Encoder, l protoco
 		start:  time.Now(),
 		acks:   newAcks(),
 		poke:   make(chan struct{}, 1),
-	}
-	if w.fb != nil {
-		w.pix = make([]byte, 4*w.fb.TileSize()*w.fb.TileSize())
 	}
 	return w
 }
@@ -294,10 +308,11 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 	w.frame++
 	id := w.frame
 	readAt := time.Now()
-	seq, _ := w.v.LastInput()
 	carried := false // tiles showing the pending input's effect went out
 	inputBytes := 0  // bytes of the input's tiles in this frame
-	tileBytes := 0   // of the last tile
+	tileBytes := 0   // of the last message, a tile's share
+	sent, messages := 0, 0
+	w.encodeTime = 0
 	for i := 0; i < len(order); i++ {
 		if err := w.smallNow(ctx); err != nil {
 			return err
@@ -312,9 +327,8 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 			}
 			if n > 0 {
 				order, i, input = w.fresh[:n], 0, true
-				// The rest of the frame shows the inputs through the
-				// latest.
-				seq = max(seq, w.in.seq)
+				// The tile read ahead belongs to the order left behind.
+				w.ahead.ok = false
 			}
 		}
 		if input && inputBytes > 0 && w.versions[order[i]] != w.versions[order[i-1]] &&
@@ -327,43 +341,49 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 		if visible, _ := w.v.Visibility(); !visible {
 			break
 		}
-		t := order[i]
-		r, version := w.fb.ReadTile(t, w.pix)
-		if r != w.g.rect(t) || w.fb.Bounds() != w.g.bounds {
-			break // resized since the tile was chosen
+		n, send, ok := w.encode(id, order, i, input)
+		if !ok {
+			break // resized since the tiles were chosen
 		}
-		var codec protocol.Codec
-		w.payload, codec = w.enc.Encode(w.payload[:0], w.pix, r.Dx(), r.Dy(), w.p.Quality())
-		w.buf = protocol.Tile{
-			FrameID: id,
-			X:       uint16(r.Min.X), // #nosec G115 -- screens are at most 65535 pixels wide
-			Y:       uint16(r.Min.Y), // #nosec G115 -- and high
-			W:       uint16(r.Dx()),  // #nosec G115 -- a tile is smaller than the screen
-			H:       uint16(r.Dy()),  // #nosec G115 -- a tile is smaller than the screen
-			Codec:   codec,
-			Payload: w.payload,
-		}.Append(w.buf[:0])
-		wait, more := w.p.Delay(time.Now(), len(w.buf))
-		if !more {
-			break
-		}
-		if wait > 0 {
-			if err := w.sleep(ctx, wait); err != nil {
+		if send {
+			wait, more := w.p.Delay(time.Now(), len(w.buf))
+			if !more {
+				break
+			}
+			if wait > 0 {
+				if err := w.sleep(ctx, wait); err != nil {
+					return err
+				}
+			}
+			if err := w.c.WriteMessage(ctx, w.buf); err != nil {
 				return err
 			}
+			w.p.Wrote(time.Now(), len(w.buf))
+			messages++
 		}
-		if err := w.c.WriteMessage(ctx, w.buf); err != nil {
-			return err
+		for k, t := range order[i : i+n] {
+			w.sent[t] = w.runVersion[k]
+			if input {
+				w.effects[t] = w.runVersion[k]
+			}
 		}
-		w.p.Wrote(time.Now(), len(w.buf))
-		w.sent[t] = version
-		tileBytes = len(w.buf)
-		if input {
-			carried = true
-			inputBytes += len(w.buf)
-			w.effects[t] = version
+		if send {
+			tileBytes = len(w.buf) / n
+			sent += n
+			if input {
+				carried = true
+				inputBytes += len(w.buf)
+			}
 		}
+		i += n - 1
 	}
+	w.ahead.ok = false
+	// last_seq is read once the frame's tiles are: the session records an
+	// input before the backend sees it, so any tile read above that shows
+	// an input's effect was read after the input was recorded. Read at the
+	// frame's start, an input applied while the frame was being read
+	// would show without its number.
+	seq, _ := w.v.LastInput()
 	end := protocol.FrameEnd{
 		FrameID:    id,
 		ServerTime: uint64(readAt.Sub(w.start).Microseconds()), // #nosec G115 -- durations since the start are positive
@@ -373,6 +393,7 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 		return err
 	}
 	w.p.EndFrame(time.Now(), id)
+	w.log.Debug("frame sent", "frame", id, "tiles", sent, "messages", messages, "encode", w.encodeTime)
 	if carried {
 		w.resolve()
 	}
@@ -553,10 +574,13 @@ func (w *writer) small(ctx context.Context) error {
 }
 
 // cursor sends the pointer's image, or hides it: a hidden cursor has no
-// hot spot, codec or payload. An image larger than the client decodes is
-// not sent; the client keeps its own. The hot spot is clamped into the
-// image.
+// hot spot, codec or payload. An image larger than the client decodes,
+// or in no codec it decodes, is not sent; the client keeps its own. The
+// hot spot is clamped into the image.
 func (w *writer) cursor(ctx context.Context, c *session.Cursor) error {
+	if w.enc == nil {
+		return nil // a terminal session has no pointer
+	}
 	if c.Image == nil || c.Image.Bounds().Empty() {
 		return w.write(ctx, protocol.Cursor{})
 	}
@@ -577,13 +601,19 @@ func (w *writer) cursor(ctx context.Context, c *session.Cursor) error {
 			pix = append(pix, c.Image.Pix[i:i+4*b.Dx()]...)
 		}
 	}
+	payload, codec, ok := w.enc.Cursor(w.cbuf[:0], pix, b.Dx(), b.Dy())
+	w.cbuf = payload
+	if !ok {
+		w.log.Debug("no codec for the cursor", "size", b.Size())
+		return nil
+	}
 	return w.write(ctx, protocol.Cursor{
 		HotX:    uint16(min(max(0, c.Hot.X), b.Dx()-1)), // #nosec G115 -- within the cursor image
 		HotY:    uint16(min(max(0, c.Hot.Y), b.Dy()-1)), // #nosec G115 -- within the cursor image
 		W:       uint16(b.Dx()),                         // #nosec G115 -- bounded by the texture size
 		H:       uint16(b.Dy()),                         // #nosec G115 -- bounded by the texture size
-		Codec:   protocol.CodecRaw,
-		Payload: pix[:4*b.Dx()*b.Dy()],
+		Codec:   codec,
+		Payload: payload,
 	})
 }
 

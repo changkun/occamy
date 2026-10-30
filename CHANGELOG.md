@@ -78,11 +78,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   then the client's input and views applied as they come, and frames at
   the pace of the viewer's link. Small state never waits behind tiles,
   and an input's effect goes ahead of motion already on the screen.
-  Graphical sessions get raw tiles for now; terminal sessions get the
-  diff between the screens a viewer was sent, so bulk output coalesces,
-  an echo goes ahead of a status line or other output already on the
-  screen, and the terminal's answers to the shell's queries reach the
-  shell. Not served by any route yet.
+  Graphical sessions get tiles in the codecs the viewer agreed to;
+  terminal sessions get the diff between the screens a viewer was sent,
+  so bulk output coalesces, an echo goes ahead of a status line or other
+  output already on the screen, and the terminal's answers to the
+  shell's queries reach the shell. Not served by any route yet.
 - A native VNC backend for protocol v1, `internal/backend/vnc`, in pure
   Go: RFB 3.3, 3.7 and 3.8 with the security types None and VNC
   Authentication, asking the session's owner for a password the
@@ -131,6 +131,19 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   lossy WebP and JPEG on them for size, time and SSIM. It picks deflate
   for lossless tiles, 64-pixel tiles, RGBA pixels, and WebP for lossy
   tiles with JPEG as the fallback.
+- The codecs of the graphics pipeline. `internal/encoder` encodes a tile
+  of up to 256 colours losslessly, in deflate over a palette, and one of
+  more in lossy WebP, or in JPEG for a client that lists JPEG but not
+  WebP, in pure Go with gen2brain/vpx and gen2brain/jpegn; adjacent
+  lossy tiles share one message. `internal/stream` sends each viewer's
+  tiles and cursor in the codecs it agreed to, cursors with straight
+  alpha. `internal/codec` holds the deflate container and raw pixels
+  both ways, with the standard library only, for clients to decode with.
+  [docs/protocol.md](docs/protocol.md) fixes the deflate container's
+  layout, with alpha for cursors, and the most a receiver inflates, and
+  `protocol/testdata/codecs.json` holds a payload of each codec occamyd
+  sends and deflate payloads a client must refuse. The image's
+  `licenses/` carries vpx's, jpegn's and jpegli's notices.
 - `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
   (static users sign in with a password for an access token), TLS when
   `tls.cert` and `tls.key` are set, expvar and pprof on the debug
@@ -162,12 +175,22 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   ([docs/configuration.md](docs/configuration.md#signing-in-through-oidc)).
 - Access tokens name where the user signed in, in `idp`: `local` for a
   static user, `oidc` through OIDC. The sign-in's log line names it too.
-- The image carries the licenses of the Go code compiled into occamyd,
-  in `/occamy/licenses/THIRD_PARTY_LICENSES`, as release archives do.
-  The file now also holds the `PATENTS` files of Go and of the
-  `golang.org/x` modules, and `scripts/third-party-licenses.sh` fails,
-  writing nothing, when `go list` fails, instead of writing the standard
-  library's license alone.
+- The image carries the license, notice and patent files of the Go
+  code compiled into occamyd, in `/occamy/licenses/THIRD_PARTY_LICENSES`,
+  as release archives do. `scripts/third-party-licenses.sh` also takes
+  those of compiled packages that have their own, such as go-jose's
+  fork of `encoding/json`, and fails, writing nothing, when `go list`
+  fails, instead of writing the standard library's license alone.
+- `changkun.de/x/occamy/client`, a public Go client of protocol v1 in
+  pure Go, for tests, tools and the Swift client's export layer. `Dial`
+  performs the handshake over a WebSocket, and `Next` delivers frames
+  decoded into a client framebuffer with their dirty rectangles,
+  terminal bytes untouched, and the small state, ending with the close
+  code. A frame is applied as `Next` delivers it and acknowledged when
+  the caller asks for the next event, so a slow caller holds the server
+  back instead of queueing frames, and input never waits for `Next`.
+  Tiles of plugged codecs decode in parallel. No API stability promise
+  until the release candidate.
 - `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS with the
   VNC backend's certificate policy, NLA through CredSSP 5 or later with
   NTLMv2 of its own, offered by default, the connection sequence, bitmap
@@ -180,6 +203,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Changed
 
+- Building occamyd needs Go 1.26.4 or later, which gen2brain/vpx and
+  gen2brain/jpegn require.
 - `make bench` builds occamyd's image from the working tree before
   measuring it, instead of measuring whatever `occamy:latest` was.
 - The v0 routes moved from `/api/v1/login` and `/api/v1/connect` to
