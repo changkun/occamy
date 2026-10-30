@@ -41,6 +41,10 @@ can only patch on v0.
 - 004 lists the v0 problems: open proxy, credentials in tokens and logs,
   `jwt_secret: occamy` and `mode: debug` defaults, `/debug/pprof` on the
   public listener, and gin-jwt v2 on golang-jwt v4.
+- v0 serves WebSockets with `gorilla/websocket`, whose last commit was
+  in 2025-03. `github.com/coder/websocket` (ISC, active) reads and writes
+  without allocating, supports permessage-deflate, and compiles to WASM,
+  so the Go client core can share it.
 - gin pulls a large indirect graph (quic-go, sonic, ugorji). Every
   Dependabot alert after the revival came from it (commit `b1bb2de`).
 - Since Go 1.22, `net/http.ServeMux` routes by method and path pattern
@@ -158,6 +162,9 @@ single-node beta.
    `Origin` against the configured origins on every upgrade.
    `POST /api/v1/sessions` stays for clients that want the session ID
    first.
+9. **WebSocket library: `coder/websocket`** (2026-10-30) for the v1
+   routes, for the reasons under Context; the v0 routes keep
+   `gorilla/websocket` until they are removed.
 
 ## Task Breakdown
 
