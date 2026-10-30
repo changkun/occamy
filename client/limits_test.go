@@ -59,9 +59,13 @@ func TestFrameWork(t *testing.T) {
 		for range 64 {
 			ms = append(ms, &protocol.CopyRect{FrameID: 1, SrcY: 1, W: w, H: h - 1})
 		}
+		ms = append(ms, &protocol.FrameEnd{FrameID: 1})
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
-		sc.frame(1, ms...)
+		for _, m := range ms {
+			// The client may close the pipe before the frame is all sent.
+			_ = sc.srv.WriteMessage(context.Background(), m.Append(nil))
+		}
 		evs := drain(t, sc.cl, time.Second)
 		runtime.ReadMemStats(&after)
 		e, ok := last(evs).(client.End)
