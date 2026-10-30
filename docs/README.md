@@ -9,6 +9,9 @@ You may interested in the following document:
   + TL;DR: The great thing about Occamy is that occamy has no handshake process 
     between client and Occamy, one can simply POST the connection 
     information to Occamy for  getting authentication tokens. 
+- [Configuration](./configuration.md)
+  + TL;DR: Every key of a v1 configuration file, its default and how it is
+    validated; a file without `version` is read as v0.
 - [Benchmarks](./benchmarks.md)
   + TL;DR: How Occamy is measured, and the numbers protocol v1 must beat.
 - [Debugging and measuring](./debugging.md)
