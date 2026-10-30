@@ -6,6 +6,7 @@ package vnc
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"image"
 	"image/color"
@@ -13,6 +14,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"changkun.de/x/occamy/internal/backend/backendtest"
 )
@@ -25,7 +27,7 @@ func decode(t *testing.T, screen image.Point, lim limits, msgs ...[]byte) (*back
 	t.Helper()
 	sink := &backendtest.Sink{}
 	sink.Resize(screen.X, screen.Y)
-	d := newDecoder(bytes.NewReader(bytes.Join(msgs, nil)), sink, screen, lim, discardLogger)
+	d := newDecoder(context.Background(), bytes.NewReader(bytes.Join(msgs, nil)), sink, screen, lim, discardLogger)
 	for {
 		if _, err := d.next(); err != nil {
 			if errors.Is(err, io.EOF) {
@@ -41,7 +43,7 @@ func TestRawInStrips(t *testing.T) {
 	sink.Resize(64, 48)
 	img := pattern(64, 48, 3)
 	msg := putUpdate(putRaw(wantPixelFormat, img, image.Rect(0, 0, 64, 48)))
-	d := newDecoder(bytes.NewReader(msg), sink, image.Pt(64, 48), defaultLimits, discardLogger)
+	d := newDecoder(context.Background(), bytes.NewReader(msg), sink, image.Pt(64, 48), defaultLimits, discardLogger)
 	d.strip = make([]byte, 5*4*64) // five rows
 	if _, err := d.next(); err != nil {
 		t.Fatal(err)
@@ -70,7 +72,7 @@ func TestDecoderAllocations(t *testing.T) {
 	} {
 		sink := &backendtest.Sink{}
 		sink.Resize(64, 48)
-		d := newDecoder(bytes.NewReader(tt.msg), sink, image.Pt(64, 48), defaultLimits, discardLogger)
+		d := newDecoder(context.Background(), bytes.NewReader(tt.msg), sink, image.Pt(64, 48), defaultLimits, discardLogger)
 		var err error
 		got := allocated(func() { _, err = d.next() })
 		if err == nil {
@@ -87,7 +89,7 @@ func TestCutTextTruncated(t *testing.T) {
 	sink := &backendtest.Sink{}
 	sink.Resize(8, 8)
 	text := strings.Repeat("\xe9", maxClipboard+10)
-	d := newDecoder(strings.NewReader(string(putCutText(text))+string(putBell())), sink, image.Pt(8, 8), defaultLimits,
+	d := newDecoder(context.Background(), strings.NewReader(string(putCutText(text))+string(putBell())), sink, image.Pt(8, 8), defaultLimits,
 		slog.New(slog.NewTextHandler(&logs, nil)))
 	for range 2 {
 		if _, err := d.next(); err != nil {
@@ -180,5 +182,158 @@ func TestLatin1(t *testing.T) {
 	}
 	if isText("image/png") {
 		t.Error("isText(image/png) = true")
+	}
+}
+
+func TestDesktopSizeOncePerUpdate(t *testing.T) {
+	// Each DesktopSize reallocates the screen, so an update of a few
+	// bytes must not resize it more than once.
+	two := putUpdate(putDesktopSize(32, 24), putDesktopSize(31, 24))
+	sink, err := decode(t, image.Pt(16, 12), defaultLimits, two)
+	if err == nil || !strings.Contains(err.Error(), "second DesktopSize") {
+		t.Errorf("decode = %v, want an error about a second DesktopSize", err)
+	}
+	if n := sink.Resizes(); n != 2 {
+		t.Errorf("%d resizes, want the test's and one from the update", n)
+	}
+}
+
+func TestResizeInterval(t *testing.T) {
+	// One resize an update is allowed, but resizes wait for each other.
+	sink := &backendtest.Sink{}
+	sink.Resize(16, 12)
+	var msgs []byte
+	for i := range 4 {
+		msgs = append(msgs, putUpdate(putDesktopSize(32+i%2, 24))...)
+	}
+	d := newDecoder(context.Background(), bytes.NewReader(msgs), sink, image.Pt(16, 12), defaultLimits, discardLogger)
+	d.resizeEvery = 50 * time.Millisecond
+	start := time.Now()
+	for range 4 {
+		if _, err := d.next(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if elapsed := time.Since(start); elapsed < 3*d.resizeEvery {
+		t.Errorf("4 resizes took %v, want at least %v", elapsed, 3*d.resizeEvery)
+	}
+	if n := sink.Resizes(); n != 5 {
+		t.Errorf("%d resizes, want 5", n)
+	}
+}
+
+func TestResizeWaitCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	sink := &backendtest.Sink{}
+	sink.Resize(16, 12)
+	msgs := append(putUpdate(putDesktopSize(32, 24)), putUpdate(putDesktopSize(33, 24))...)
+	d := newDecoder(ctx, bytes.NewReader(msgs), sink, image.Pt(16, 12), defaultLimits, discardLogger)
+	d.resizeEvery = time.Hour
+	if _, err := d.next(); err != nil {
+		t.Fatal(err)
+	}
+	errc := make(chan error, 1)
+	go func() {
+		_, err := d.next()
+		errc <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-errc:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("next = %v, want context.Canceled", err)
+		}
+	case <-time.After(timeout):
+		t.Fatal("the resize's wait did not end with the context")
+	}
+	if n := sink.Resizes(); n != 2 {
+		t.Errorf("%d resizes, want 2", n)
+	}
+}
+
+// cancelSink cancels a context at its at-th CopyRect or Bell.
+type cancelSink struct {
+	*backendtest.Sink
+	cancel func()
+	at     int
+}
+
+func (s *cancelSink) CopyRect(dst image.Rectangle, src image.Point) {
+	s.Sink.CopyRect(dst, src)
+	if len(s.Copies()) == s.at {
+		s.cancel()
+	}
+}
+
+func (s *cancelSink) Bell() {
+	s.Sink.Bell()
+	if s.Bells() == s.at {
+		s.cancel()
+	}
+}
+
+func TestDecoderStopsWhenCancelled(t *testing.T) {
+	// What is already read is not applied once the context is done: a
+	// closed connection does not stop the decoder while its buffer holds
+	// messages.
+	copies := make([][]byte, 5000)
+	for i := range copies {
+		copies[i] = putCopy(image.Rect(0, 0, 4, 4), image.Pt(i%8, 0))
+	}
+	bells := bytes.Repeat(putBell(), 5000)
+	for _, tt := range []struct {
+		name  string
+		msgs  []byte
+		count func(*backendtest.Sink) int
+	}{
+		{"between rectangles", putUpdate(copies...), func(s *backendtest.Sink) int { return len(s.Copies()) }},
+		{"between messages", bells, func(s *backendtest.Sink) int { return s.Bells() }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			sink := &cancelSink{Sink: &backendtest.Sink{}, cancel: cancel, at: 3}
+			sink.Resize(16, 12)
+			d := newDecoder(ctx, bytes.NewReader(tt.msgs), sink, image.Pt(16, 12), defaultLimits, discardLogger)
+			var err error
+			for err == nil {
+				_, err = d.next()
+			}
+			if !errors.Is(err, context.Canceled) {
+				t.Errorf("next = %v, want context.Canceled", err)
+			}
+			if n := tt.count(sink.Sink); n != 3 {
+				t.Errorf("%d applied, want 3: the decoder went on after the context was done", n)
+			}
+		})
+	}
+}
+
+func TestCutTextEncoding(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		sent string
+		want string
+	}{
+		{"Latin-1", "caf\xe9 \xbd", "café ½"},
+		{"UTF-8", "naïve ✓", "naïve ✓"},
+		{"ASCII", "plain", "plain"},
+		// UTF-8 cut within a character by the limit: the rest of the
+		// character is dropped, and the text stays UTF-8.
+		{"UTF-8 truncated", "ab" + strings.Repeat("✓", maxClipboard/3+1), "ab" + strings.Repeat("✓", (maxClipboard-2)/3)},
+		// Latin-1 that ends in what looks like the start of a UTF-8
+		// character keeps its last byte.
+		{"Latin-1 truncated", strings.Repeat("\xe9", maxClipboard+1), strings.Repeat("é", maxClipboard)},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			sink, err := decode(t, image.Pt(8, 8), defaultLimits, putCutText(tt.sent))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, got := sink.ClipboardContent(); string(got) != tt.want {
+				t.Errorf("clipboard of %d bytes, want %d: %.40q", len(got), len(tt.want), got)
+			}
+		})
 	}
 }

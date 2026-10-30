@@ -51,6 +51,10 @@ const (
 	// inputQueue is the number of inputs that wait to be written before
 	// Input fails.
 	inputQueue = 256
+	// inputBytes bounds the bytes of the inputs that wait to be written,
+	// since one input can be large: 4 MiB of clipboard, or 16 bytes per
+	// character of Text. It holds two clipboards of the largest size.
+	inputBytes = 2*maxClipboard + 64<<10
 	// readBuffer is the size of the buffer that the server's messages are
 	// read through.
 	readBuffer = 64 << 10
@@ -62,8 +66,9 @@ var (
 	// ErrNotRunning is returned by Input before Run has started or after
 	// it has returned.
 	ErrNotRunning = errors.New("vnc: backend not running")
-	// ErrInputFull is returned by Input when too many inputs wait to be
-	// written, as when the server has stopped reading.
+	// ErrInputFull is returned by Input when too many inputs, or too many
+	// bytes of them, wait to be written, as when the server has stopped
+	// reading.
 	ErrInputFull = errors.New("vnc: input queue full")
 	// ErrUnsupportedInput is returned by Input for input a graphical
 	// backend does not take, such as backend.TermInput.
@@ -163,10 +168,18 @@ func hostPort(addr string) (string, error) {
 // Class implements backend.Backend.
 func (b *Backend) Class() backend.Class { return backend.Graphical }
 
-// Demand implements backend.Backend. While d.Visible, one update request
-// is kept outstanding: the next is sent once the previous update has
-// been applied. While nobody can see, no request is sent, and an update
-// already requested is applied when it comes.
+// Demand implements backend.Backend. While d.Visible, the backend asks
+// for an update, and asks for the next once that update has been
+// applied: at most one request is sent per update applied. While nobody
+// can see, no request is sent, and an update already requested is
+// applied when it comes.
+//
+// RFB has no way to tell which request an update answers, so every
+// update counts as the answer. A server that sends updates nobody asked
+// for, which RFC 6143 forbids, may then hold two requests. libvncserver,
+// which sends size changes and cursor shapes before it looks at the
+// requested region, keeps that region as the union of the requests, so
+// the second merges with the first.
 func (b *Backend) Demand(d backend.Demand) {
 	b.visible.Store(d.Visible)
 	b.mu.Lock()
@@ -184,7 +197,9 @@ func (b *Backend) Demand(d backend.Demand) {
 // TermInput fails with ErrUnsupportedInput.
 //
 // Input queues what it is given and returns at once. Input that arrives
-// while Run is still connecting is written once the handshake ends.
+// while Run is still connecting is written once the handshake ends. The
+// queue holds 256 inputs and about 8 MiB, so a single Text of more than
+// about 500,000 characters, at 16 bytes each, fails with ErrInputFull.
 func (b *Backend) Input(ev backend.InputEvent) error {
 	b.mu.Lock()
 	r := b.run
@@ -224,13 +239,14 @@ func (b *Backend) Input(ev backend.InputEvent) error {
 
 // run is the state of one Run that Input and Demand share.
 type run struct {
-	queue chan []byte   // client messages from Input, for the writer
-	kick  chan struct{} // asks the writer to reconsider an update request
-	werr  error         // the writer's error; read after it has ended
+	queue  chan []byte   // client messages from Input, for the writer
+	queued atomic.Int64  // the bytes in queue and not yet written
+	kick   chan struct{} // asks the writer to reconsider an update request
+	werr   error         // the writer's error; read after it has ended
 
 	mu      sync.Mutex
 	size    image.Point // the screen, zero until the handshake ends
-	pending bool        // an update request is outstanding
+	pending bool        // a request was sent and no update has come since
 	full    bool        // the next request asks for the whole screen
 	buttons uint8       // the pointer's buttons, as last sent
 	pos     image.Point // the pointer, as last sent
@@ -245,14 +261,23 @@ func newRun() *run {
 	}
 }
 
+// send queues p for the writer, unless the queue is full. Input calls it
+// one call at a time, and the writer only lowers queued, so the check
+// and the addition need no lock.
 func (r *run) send(p []byte) error {
 	if len(p) == 0 {
 		return nil
 	}
+	n := int64(len(p))
+	if r.queued.Load()+n > inputBytes {
+		return ErrInputFull
+	}
+	r.queued.Add(n)
 	select {
 	case r.queue <- p:
 		return nil
 	default:
+		r.queued.Add(-n)
 		return ErrInputFull
 	}
 }
@@ -266,9 +291,9 @@ func (r *run) poke() {
 }
 
 // request returns the update request to send now, or nil. One is due
-// when a viewer can see the screen and none is outstanding. It asks for
-// the whole screen after the handshake and after a resize, and for
-// changes otherwise.
+// when a viewer can see the screen and no request has been sent since
+// the last update. It asks for the whole screen after the handshake and
+// after a resize, and for changes otherwise.
 func (r *run) request(visible bool) []byte {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -355,7 +380,7 @@ func (b *Backend) connect(ctx context.Context, sink backend.Sink, r *run) error 
 	r.size = init.size
 	r.mu.Unlock()
 
-	dec := newDecoder(br, sink, init.size, b.limits, b.log)
+	dec := newDecoder(ctx, br, sink, init.size, b.limits, b.log)
 	done := make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -421,7 +446,6 @@ func (r *run) readLoop(d *decoder) error {
 		}
 		if t == msgFramebufferUpdate {
 			r.updated(d.size, d.resized)
-			d.resized = false
 		}
 	}
 }
@@ -438,7 +462,7 @@ func (r *run) writeLoop(w io.Writer, done <-chan struct{}, visible *atomic.Bool)
 		case <-done:
 			return nil
 		case p := <-r.queue:
-			_, _ = bw.Write(p)
+			r.write(bw, p)
 		case <-r.kick:
 			_, _ = bw.Write(r.request(visible.Load()))
 		}
@@ -446,7 +470,7 @@ func (r *run) writeLoop(w io.Writer, done <-chan struct{}, visible *atomic.Bool)
 		for bw.Buffered() < writeBuffer {
 			select {
 			case p := <-r.queue:
-				_, _ = bw.Write(p)
+				r.write(bw, p)
 			case <-r.kick:
 				_, _ = bw.Write(r.request(visible.Load()))
 			default:
@@ -457,4 +481,11 @@ func (r *run) writeLoop(w io.Writer, done <-chan struct{}, visible *atomic.Bool)
 			return fmt.Errorf("vnc: write: %w", err)
 		}
 	}
+}
+
+// write writes queued input to bw. Its bytes leave the queue's budget
+// once bw has taken them: buffered, or written through for a large p.
+func (r *run) write(bw *bufio.Writer, p []byte) {
+	_, _ = bw.Write(p)
+	r.queued.Add(-int64(len(p)))
 }

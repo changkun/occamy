@@ -6,6 +6,7 @@ package vnc
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"image"
@@ -81,7 +82,8 @@ func FuzzServerMessages(f *testing.F) {
 		// held.
 		sink := &backendtest.Sink{}
 		sink.Resize(fuzzScreen.X, fuzzScreen.Y)
-		d := newDecoder(bytes.NewReader(data), sink, fuzzScreen, fuzzLimits, discardLogger)
+		d := newDecoder(context.Background(), bytes.NewReader(data), sink, fuzzScreen, fuzzLimits, discardLogger)
+		d.resizeEvery = 0
 		for {
 			if _, err := d.next(); err != nil {
 				break

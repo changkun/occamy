@@ -6,12 +6,15 @@ package vnc
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"image"
 	"io"
 	"log/slog"
+	"time"
+	"unicode/utf8"
 
 	"changkun.de/x/occamy/internal/backend"
 )
@@ -34,6 +37,12 @@ const (
 	// maxCursor is the largest width or height of a cursor, as in
 	// TigerVNC's viewer.
 	maxCursor = 256
+	// resizeEvery is the least time between two resizes. A DesktopSize
+	// that comes sooner waits, so that a server cannot make the session
+	// reallocate its screen faster than ten times a second; an
+	// interactive resize still follows at that rate. TigerVNC's viewer
+	// waits 500 ms before it asks for a resize of its own.
+	resizeEvery = 100 * time.Millisecond
 )
 
 // decoder reads the server's messages and applies them to a sink. Every
@@ -41,13 +50,16 @@ const (
 // every rectangle against the screen before it is drawn, so a server
 // cannot make it allocate without bound or break the sink's contract.
 type decoder struct {
+	ctx  context.Context // ends the decoding between messages and rectangles
 	r    io.Reader
 	sink backend.Sink
 	lim  limits
 	log  *slog.Logger
 
-	size    image.Point // the screen
-	resized bool        // the screen was resized since the field was cleared
+	size        image.Point   // the screen
+	resized     bool          // the current or last update resized the screen
+	resizeEvery time.Duration // the least time between two resizes
+	lastResize  time.Time
 
 	hdr    [12]byte
 	strip  []byte // stripSize bytes
@@ -55,8 +67,11 @@ type decoder struct {
 	img    image.RGBA
 }
 
-func newDecoder(r io.Reader, sink backend.Sink, size image.Point, lim limits, log *slog.Logger) *decoder {
-	return &decoder{r: r, sink: sink, lim: lim, log: log, size: size, strip: make([]byte, stripSize)}
+func newDecoder(ctx context.Context, r io.Reader, sink backend.Sink, size image.Point, lim limits, log *slog.Logger) *decoder {
+	return &decoder{
+		ctx: ctx, r: r, sink: sink, lim: lim, log: log,
+		size: size, resizeEvery: resizeEvery, strip: make([]byte, stripSize),
+	}
 }
 
 // read fills b. A connection that ends within a message is
@@ -74,8 +89,12 @@ func (d *decoder) discard(n int64) error {
 
 // next reads one message and applies it, and returns its type. It
 // returns io.EOF, unwrapped, only when the connection ends before the
-// message's first byte.
+// message's first byte, and the context's error once it is done: what
+// is left in the read buffer is not applied.
 func (d *decoder) next() (byte, error) {
+	if err := d.ctx.Err(); err != nil {
+		return 0, err
+	}
 	var t [1]byte
 	if _, err := io.ReadFull(d.r, t[:]); err != nil {
 		return 0, err
@@ -98,12 +117,17 @@ func (d *decoder) next() (byte, error) {
 
 // update applies a FramebufferUpdate.
 func (d *decoder) update() error {
+	d.resized = false
 	if err := d.read(d.hdr[:3]); err != nil {
 		return fmt.Errorf("vnc: framebuffer update: %w", err)
 	}
 	n := int(binary.BigEndian.Uint16(d.hdr[1:]))
 	for i := range n {
-		if err := d.rect(); err != nil {
+		err := d.ctx.Err()
+		if err == nil {
+			err = d.rect()
+		}
+		if err != nil {
 			return fmt.Errorf("vnc: framebuffer update, rectangle %d of %d: %w", i+1, n, err)
 		}
 	}
@@ -199,11 +223,27 @@ func (d *decoder) copyRect(r image.Rectangle) error {
 
 // desktopSize applies a DesktopSize pseudo-rectangle: the screen is now
 // w×h, and its pixels are lost. Rectangles after it in the same update
-// are drawn on the new screen.
+// are drawn on the new screen. An update resizes the screen at most
+// once, as servers send it (RFC 6143, section 7.8.2), so that a few
+// bytes cannot reallocate the screen thousands of times; and resizes
+// come at most every resizeEvery.
 func (d *decoder) desktopSize(w, h int) error {
+	if d.resized {
+		return errors.New("a second DesktopSize in one update")
+	}
 	if err := d.lim.check(w, h); err != nil {
 		return err
 	}
+	if wait := time.Until(d.lastResize.Add(d.resizeEvery)); wait > 0 {
+		t := time.NewTimer(wait)
+		select {
+		case <-d.ctx.Done():
+			t.Stop()
+			return d.ctx.Err()
+		case <-t.C:
+		}
+	}
+	d.lastResize = time.Now()
 	d.size = image.Pt(w, h)
 	d.resized = true
 	d.sink.Resize(w, h)
@@ -265,8 +305,11 @@ func (d *decoder) colourMap() error {
 	return nil
 }
 
-// cutText applies a ServerCutText: Latin-1 text, of which the first
-// maxClipboard bytes are kept.
+// cutText applies a ServerCutText, of which the first maxClipboard bytes
+// are kept. RFC 6143 says the text is Latin-1, but many servers send
+// UTF-8, so it is read as text, as the desktop name is: UTF-8 if it is
+// valid UTF-8, Latin-1 otherwise. A character that the truncation cut in
+// two is dropped first.
 func (d *decoder) cutText() error {
 	if err := d.read(d.hdr[:7]); err != nil {
 		return fmt.Errorf("vnc: cut text: %w", err)
@@ -292,6 +335,24 @@ func (d *decoder) cutText() error {
 			return fmt.Errorf("vnc: cut text: %w", err)
 		}
 	}
-	d.sink.Clipboard("text/plain", fromLatin1(buf.Bytes()))
+	b := buf.Bytes()
+	if t := trimPartialRune(b); int64(n) > keep && len(t) < len(b) && utf8.Valid(t) {
+		b = t // UTF-8 cut short; Latin-1 is kept whole
+	}
+	d.sink.Clipboard("text/plain", []byte(text(b)))
 	return nil
+}
+
+// trimPartialRune drops an incomplete UTF-8 sequence from the end of b,
+// as truncation leaves one.
+func trimPartialRune(b []byte) []byte {
+	for i := len(b) - 1; i >= 0 && i >= len(b)-utf8.UTFMax; i-- {
+		if utf8.RuneStart(b[i]) {
+			if !utf8.FullRune(b[i:]) {
+				return b[:i]
+			}
+			break
+		}
+	}
+	return b
 }

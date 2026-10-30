@@ -5,6 +5,7 @@
 package vnc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"image"
@@ -725,6 +726,56 @@ func TestInputFull(t *testing.T) {
 	}
 }
 
+// megabyte is a clipboard input of 1 MiB, which is 8 bytes more as cut
+// text.
+var megabyte = backend.Clipboard{MIME: "text/plain", Data: bytes.Repeat([]byte("x"), 1<<20)}
+
+func TestInputBytes(t *testing.T) {
+	checkGoroutines(t)
+	// The server never speaks, so nothing queued is written: the queue
+	// fills by its bytes long before its count.
+	addr := listen(t, func(nc net.Conn) { io.Copy(io.Discard, nc) })
+	b := newBackend(t, Config{Addr: addr})
+	r := start(t, b, &backendtest.Sink{})
+	waitFor(t, "Run", func() bool { return !errors.Is(b.Input(megabyte), ErrNotRunning) })
+	accepted := 1
+	var err error
+	for ; accepted < inputQueue; accepted++ {
+		if err = b.Input(megabyte); err != nil {
+			break
+		}
+	}
+	if want := inputBytes / (1<<20 + 8); !errors.Is(err, ErrInputFull) || accepted != want {
+		t.Errorf("%d inputs of 1 MiB accepted, then %v; want %d, then ErrInputFull", accepted, err, want)
+	}
+	// A key still fits; a Text of 600,000 characters, 9.6 MB of key
+	// events, never does.
+	if err := b.Input(backend.Key{Down: true, Keysym: 'a'}); err != nil {
+		t.Errorf("Input(Key) = %v", err)
+	}
+	if err := r.stop(t); !errors.Is(err, context.Canceled) {
+		t.Errorf("Run = %v, want context.Canceled", err)
+	}
+}
+
+func TestInputBytesDrain(t *testing.T) {
+	checkGoroutines(t)
+	s := connect(t, serverOptions{}, false)
+	if err := s.b.Input(backend.Text{Text: strings.Repeat("a", 600_000)}); !errors.Is(err, ErrInputFull) {
+		t.Errorf("Input(Text of 600,000 characters) = %v, want ErrInputFull", err)
+	}
+	// Written input leaves the budget: three times its size goes through
+	// once the server reads it.
+	for i := range 3 * inputBytes / (1 << 20) {
+		if err := s.b.Input(megabyte); err != nil {
+			t.Fatalf("input %d of 1 MiB = %v", i+1, err)
+		}
+		if m := expect[cutTextMsg](t, s.c); len(m.text) != 1<<20 {
+			t.Fatalf("cut text of %d bytes, want 1 MiB", len(m.text))
+		}
+	}
+}
+
 func TestDemand(t *testing.T) {
 	checkGoroutines(t)
 	s := connect(t, serverOptions{}, false)
@@ -759,6 +810,71 @@ func TestDemand(t *testing.T) {
 		t.Errorf("request %+v, want changes to the whole screen", req)
 	}
 	s.c.quiet(t, silence)
+}
+
+func TestRequestPerUpdate(t *testing.T) {
+	// RFB cannot tell which request an update answers, so the bound is
+	// one request per update applied, and none without one: a server
+	// that answers one request with several updates gets at most as many
+	// requests back.
+	checkGoroutines(t)
+	s := connect(t, serverOptions{}, true)
+	img := pattern(64, 48, 0)
+	s.fullScreen(t, img)
+	const updates = 5
+	var p []byte
+	for i := range updates {
+		p = append(p, putUpdate(putRaw(s.c.pf, img, image.Rect(i, 0, i+1, 1)))...)
+	}
+	s.c.send(t, p)
+	requests := 0
+	for done := false; !done; {
+		select {
+		case m := <-s.c.msgs:
+			if req, ok := m.(requestMsg); !ok || !req.incremental {
+				t.Fatalf("client sent %T %+v, want an incremental request", m, m)
+			}
+			requests++
+		case <-time.After(silence):
+			done = true
+		}
+	}
+	if requests < 1 || requests > updates {
+		t.Errorf("%d requests for %d updates, want 1 to %d", requests, updates, updates)
+	}
+}
+
+// slowSink takes a millisecond for each CopyRect, as a busy session
+// might.
+type slowSink struct{ *backendtest.Sink }
+
+func (s slowSink) CopyRect(dst image.Rectangle, src image.Point) {
+	time.Sleep(time.Millisecond)
+	s.Sink.CopyRect(dst, src)
+}
+
+func TestCancelMidUpdate(t *testing.T) {
+	checkGoroutines(t)
+	srv := newServer(t, serverOptions{})
+	b := newBackend(t, Config{Addr: srv.addr})
+	sink := slowSink{&backendtest.Sink{}}
+	r := start(t, b, sink)
+	c := srv.accept(t)
+	// An update of 65535 copies, 1 MiB, which takes over a minute to
+	// apply: what Run has read when it is cancelled is not applied.
+	rects := make([][]byte, 0xffff)
+	for i := range rects {
+		rects[i] = putCopy(image.Rect(0, 0, 4, 4), image.Pt(i%8, 0))
+	}
+	go c.nc.Write(putUpdate(rects...)) // fails once Run has closed the connection
+	waitFor(t, "copies", func() bool { return len(sink.Copies()) >= 50 })
+	start := time.Now()
+	if err := r.stop(t); !errors.Is(err, context.Canceled) {
+		t.Errorf("Run = %v, want context.Canceled", err)
+	}
+	if d := time.Since(start); d > time.Second {
+		t.Errorf("Run returned %v after it was cancelled", d)
+	}
 }
 
 func TestServerEnds(t *testing.T) {
@@ -822,6 +938,13 @@ func TestProtocolErrors(t *testing.T) {
 		}, "copy-rect destination"},
 		{"empty desktop size", func(*serverConn) []byte { return putUpdate(putDesktopSize(0, 10)) }, "empty screen"},
 		{"huge desktop size", func(*serverConn) []byte { return putUpdate(putDesktopSize(0xffff, 0xffff)) }, "exceeds the limits"},
+		{"many desktop sizes in one update", func(*serverConn) []byte {
+			rects := make([][]byte, 200)
+			for i := range rects {
+				rects[i] = putDesktopSize(640+i%2, 480)
+			}
+			return putUpdate(rects...)
+		}, "rectangle 2 of 200: a second DesktopSize"},
 		{"huge cursor", func(*serverConn) []byte {
 			return putUpdate(rectHeader(image.Rect(0, 0, 300, 2), encCursor))
 		}, "cursor of 300×2"},
