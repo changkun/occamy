@@ -10,9 +10,11 @@ package rdp
 // image (docker/bench/desktop), whose sessions show the scene program
 // (bench/scene):
 //
-//	go test -tags rdp_integration -run Integration ./internal/rdp
+//	go test -tags rdp_integration -run Integration -timeout 30m ./internal/rdp
 //
-// It builds the image with podman unless OCCAMY_RDP_IMAGE names one, and
+// It builds the image with podman unless OCCAMY_RDP_IMAGE names one. The
+// build downloads Go modules and Debian packages, which can take longer
+// than go test's default 10-minute timeout, hence -timeout. It
 // starts a container of its own unless OCCAMY_RDP_ADDR names a running
 // server, whose container OCCAMY_RDP_CONTAINER may name for the mouse
 // check. OCCAMY_CONTAINER_ENGINE selects docker instead of podman, and
