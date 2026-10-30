@@ -731,6 +731,14 @@ place for fixes that ship on v0 before beta.
     nothing reads. `auth.Signer.SessionFor` takes an `auth.User`
     (issuer, `idp`, subject). `TestOIDCOwners` covers the linked user,
     an OIDC user of another name, and the refusal after unlinking.
+    A trusted issuer's subject now passes the checks OIDC sign-in
+    makes of one: `validSubject`, and a static user's name by
+    `config.SameName`, so `ALICE` or a decomposed `zoë` is refused
+    without `link_static_users` as at sign-in. With it, only an exact
+    static name is the static user; another case or form is the
+    issuer's own user, as an OIDC user of that name is.
+    `identities.takesStaticName` is the one comparison both paths
+    use.
   - **Absent rather than forbidden:** a connection the caller may not
     open answers 404, as an unknown one does, and so does another
     user's session on `GET`, `DELETE` and shares, so IDs cannot be

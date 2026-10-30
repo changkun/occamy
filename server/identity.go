@@ -65,12 +65,18 @@ func newIdentities(f *config.File) identities {
 // link_static_users was on.
 var errStaticUser = errors.New("the token's subject is a static user's name, which its source may not use")
 
+// errSubject refuses a trusted issuer's token whose subject OIDC sign-in
+// would refuse too, by validSubject.
+var errSubject = errors.New("the token's subject is not a usable name")
+
 // of returns the principal that verified claims speak for. occamyd's own
 // tokens speak for its users, or, in a session token, for the trusted
 // issuer's user it names. A trusted issuer's token speaks for the
-// issuer's user of its subject, or for the static user of that name if
-// the issuer is linked to static users; otherwise such a subject is
-// refused.
+// issuer's user of its subject, or, if the issuer is linked to static
+// users, for the static user of that name. Its subject must pass
+// validSubject, and, unless the issuer is linked, must not be a static
+// user's name by config.SameName, as OIDC sign-in checks a subject, so
+// that the two paths refuse the same names.
 func (ids identities) of(c *auth.Claims) (principal, error) {
 	if c.Issuer == auth.Issuer {
 		if c.UserIssuer != "" {
@@ -78,13 +84,27 @@ func (ids identities) of(c *auth.Claims) (principal, error) {
 		}
 		return ids.own(c.IdP, c.Subject)
 	}
-	if c.Subject != "" && ids.static[c.Subject] {
+	if c.Subject == "" {
+		return principal{issuer: c.Issuer}, nil // a share-like session token
+	}
+	if !validSubject(c.Subject) {
+		return principal{}, errSubject
+	}
+	if ids.takesStaticName(c.Subject) {
 		if !ids.linked[c.Issuer] {
 			return principal{}, errStaticUser
 		}
-		return principal{issuer: auth.Issuer, idp: auth.IdPLocal, subject: c.Subject}, nil
+		if ids.static[c.Subject] {
+			return principal{issuer: auth.Issuer, idp: auth.IdPLocal, subject: c.Subject}, nil
+		}
 	}
 	return principal{issuer: c.Issuer, subject: c.Subject}, nil
+}
+
+// takesStaticName reports whether subject is a static user's name by
+// config.SameName, as OIDC sign-in compares it.
+func (ids identities) takesStaticName(subject string) bool {
+	return slices.ContainsFunc(ids.names, func(n string) bool { return config.SameName(subject, n) })
 }
 
 // own returns the principal of one of occamyd's own users, who signed in
@@ -103,7 +123,7 @@ func (ids identities) own(idp, subject string) (principal, error) {
 	if idp == "" {
 		idp = auth.IdPLocal
 	}
-	if idp != auth.IdPLocal && !ids.oidcLinked && slices.ContainsFunc(ids.names, func(n string) bool { return config.SameName(subject, n) }) {
+	if idp != auth.IdPLocal && !ids.oidcLinked && ids.takesStaticName(subject) {
 		return principal{}, errStaticUser
 	}
 	if ids.static[subject] {

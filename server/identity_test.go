@@ -21,7 +21,7 @@ import (
 func TestIdentities(t *testing.T) {
 	file := func(oidcLinked bool) *config.File {
 		return &config.File{Auth: config.Auth{
-			Users:          []config.User{{Name: "alice"}},
+			Users:          []config.User{{Name: "alice"}, {Name: "zoë"}},
 			TrustedIssuers: []config.TrustedIssuer{{Issuer: "gateway"}, {Issuer: "linked", LinkStaticUsers: true}},
 			OIDC:           &config.OIDC{LinkStaticUsers: oidcLinked},
 		}}
@@ -48,6 +48,12 @@ func TestIdentities(t *testing.T) {
 		{"a trusted issuer's user", ids, claims("gateway", "", "", "carol"), principal{issuer: "gateway", subject: "carol"}, nil},
 		{"a trusted issuer's idp is not read", ids, claims("gateway", "", auth.IdPLocal, "carol"), principal{issuer: "gateway", subject: "carol"}, nil},
 		{"a trusted issuer's static name", ids, claims("gateway", "", "", "alice"), principal{}, errStaticUser},
+		{"a trusted issuer's static name in another case", ids, claims("gateway", "", "", "ALICE"), principal{}, errStaticUser},
+		{"a trusted issuer's static name in another normal form", ids, claims("gateway", "", "", "zoe\u0308"), principal{}, errStaticUser},
+		{"a trusted issuer's subject with a zero-width space", ids, claims("gateway", "", "", "al\u200bice"), principal{}, errSubject},
+		{"a trusted issuer's subject of a blank Braille pattern", ids, claims("gateway", "", "", "\u2800"), principal{}, errSubject},
+		{"a trusted issuer's subject with a tab", ids, claims("gateway", "", "", "carol\t"), principal{}, errSubject},
+		{"a linked issuer's static name in another case", ids, claims("linked", "", "", "Alice"), principal{issuer: "linked", subject: "Alice"}, nil},
 		{"a linked issuer's static name", ids, claims("linked", "", "", "alice"), own(auth.IdPLocal, "alice"), nil},
 		{"a linked issuer's own user", ids, claims("linked", "", "", "carol"), principal{issuer: "linked", subject: "carol"}, nil},
 		{"occamyd's token for a trusted issuer's user", ids, claims(auth.Issuer, "gateway", "", "carol"), principal{issuer: "gateway", subject: "carol"}, nil},

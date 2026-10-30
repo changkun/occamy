@@ -265,7 +265,10 @@ func TestAuthenticate(t *testing.T) {
 	wrongAudience := access(auth.Issuer, "alice")
 	wrongAudience.Audience = jwt.ClaimStrings{"elsewhere"}
 
-	ids := identities{static: map[string]bool{"alice": true}, linked: map[string]bool{"linked": true}}
+	ids := newIdentities(&config.File{Auth: config.Auth{
+		Users:          []config.User{{Name: "alice"}},
+		TrustedIssuers: []config.TrustedIssuer{{Issuer: "linked", LinkStaticUsers: true}},
+	}})
 	srv := httptest.NewServer(authenticate(k.verifier, ids)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		c, ok := claimsFrom(r.Context())
 		if !ok {

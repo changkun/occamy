@@ -118,7 +118,9 @@ with a decomposed character, so write names as the provider sends them.
 Telling OIDC users from static users casts a wider net: without
 `link_static_users`, an OIDC subject is refused when it equals a static
 user's name under Unicode case folding, once both are in NFC, so that
-`Alice` cannot pass for static `alice` in a log or to a person. Names
+`Alice` cannot pass for static `alice` in a log or to a person. A
+trusted issuer's `sub` is compared the same way, unless the issuer has
+its own `link_static_users`. Names
 that only look alike, such as one with a Cyrillic `а` or a fullwidth
 `ａ`, are neither refused nor the same user; pick a `subject_claim` that
 users cannot choose.
@@ -218,10 +220,14 @@ An issuer's users are its own. A session belongs to the issuer and the
 streams as the owner the other's session. The stream token that
 `POST /api/v1/sessions` returns for a trusted issuer's user names that
 issuer in a `uiss` claim; no trusted issuer may set `uiss` itself. A
-trusted issuer's token whose `sub` names a static user is refused with
+trusted issuer's token whose `sub` names a static user, in any case or
+Unicode normal form (`Alice` for `alice`), is refused with
 `invalid_token` (on a stream, `close` with `unauthorized`), unless the
-issuer has `link_static_users: true`, in which case it acts as that
-static user. Connections' `allow.users` and `allow.groups` name users
+issuer has `link_static_users: true`. Then a `sub` that is exactly a
+static user's name acts as that static user, and one in another case
+or form is the issuer's own user. A `sub` that is not a usable name,
+by the rules that `auth.oidc.subject_claim` gives, is refused as well,
+so that a trusted issuer and OIDC sign-in refuse the same names. Connections' `allow.users` and `allow.groups` name users
 and groups whichever issuer signed the token.
 
 Among `occamyd`'s own users, a session also belongs to where its owner
