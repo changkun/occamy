@@ -86,10 +86,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - The codec measurement of the graphics pipeline
   ([docs/benchmarks/codecs.md](docs/benchmarks/codecs.md)): a corpus of
   13 frames recorded from the bench desktop by `make corpus`, and
-  `bench/codecs`, which compares palette or raw pixels with deflate,
-  PNG, QOI, lossless and lossy WebP and JPEG on them for size, time and
-  SSIM. It picks deflate for lossless tiles, 64-pixel tiles, RGBA
-  pixels, and WebP for lossy tiles with JPEG as the fallback.
+  `bench/codecs`, a module of its own that `make codecs` runs, which
+  compares palette or raw pixels with deflate, PNG, QOI, lossless and
+  lossy WebP and JPEG on them for size, time and SSIM. It picks deflate
+  for lossless tiles, 64-pixel tiles, RGBA pixels, and WebP for lossy
+  tiles with JPEG as the fallback.
 
 ### Changed
 
