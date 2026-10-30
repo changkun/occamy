@@ -132,7 +132,8 @@ func TestHandshakeScripts(t *testing.T) {
 			is: ErrRefused, err: `"ab"`,
 		},
 		{name: "3.8 none fails", in: script{}.version("003.008").u8(1, secNone).u32(1).str("blacklisted"), lim: small, is: ErrAuthFailed, err: "blacklisted"},
-		{name: "3.3 unknown type", in: script{}.version("003.003").u32(30), lim: small, is: ErrNoSecurityType, err: "type 30"},
+		{name: "3.3 unknown type", in: script{}.version("003.003").u32(16), lim: small, is: ErrNoSecurityType, err: "type 16"},
+		{name: "3.3 ARD not allowed", in: script{}.version("003.003").u32(30), lim: small, is: ErrNoSecurityType, err: "type 30"},
 		{name: "types cut short", in: script{}.version("003.008").u8(3, 1), lim: small, is: io.ErrUnexpectedEOF},
 		{name: "challenge cut short", in: script{}.version("003.008").u8(1, secVNCAuth).u8(1, 2, 3), lim: small, is: io.ErrUnexpectedEOF},
 		{name: "no security result", in: script{}.version("003.008").u8(1, secVNCAuth).u8(make([]byte, 16)...), lim: small, is: io.ErrUnexpectedEOF},
@@ -186,12 +187,18 @@ func TestHandshakeWriteError(t *testing.T) {
 		script{}.version("003.008").u8(1, secNone),
 		script{}.version("003.003").u32(secVNCAuth).u8(make([]byte, 16)...),
 		script{}.version("003.003").u32(secNone),
+		script{}.version("003.008").u8(1, secARD).u8(ardScriptKey()...).u32(0),
 	} {
 		// Each write after the first n fails, for every n until the
 		// handshake has no more writes.
 		for n := 0; n < 4; n++ {
 			w := &failingWriter{n: n, err: errWrite}
-			_, err := handshake(bytes.NewReader(in), w, auth{password: func() (string, error) { return "", nil }}, defaultLimits)
+			a := auth{
+				password: func() (string, error) { return "", nil },
+				plain:    func() (string, string, error) { return "alice", "hunter2", nil },
+				ard:      true,
+			}
+			_, err := handshake(bytes.NewReader(in), w, a, defaultLimits)
 			if w.failed && !errors.Is(err, errWrite) {
 				t.Errorf("handshake after %d writes = %v, want the write's error", n, err)
 			}
@@ -257,6 +264,18 @@ func TestChoose(t *testing.T) {
 		{[]byte{secNone, secVeNCrypt, secVNCAuth}, auth{startTLS: tls}, secVeNCrypt},
 		{[]byte{secNone, secVNCAuth}, auth{startTLS: tls, requireTLS: true}, secInvalid},
 		{nil, auth{hasPassword: true}, secInvalid},
+		// Apple Remote Desktop, only when allowed, and then with a
+		// username or as the only type offered.
+		{[]byte{secARD}, auth{hasUser: true, hasPassword: true}, secInvalid},
+		{[]byte{secARD}, auth{ard: true}, secARD},
+		{[]byte{secARD, 33, 36, 35}, auth{ard: true}, secARD},
+		{[]byte{secARD, secVNCAuth}, auth{hasUser: true, hasPassword: true}, secVNCAuth},
+		{[]byte{secARD, secVNCAuth}, auth{ard: true, hasPassword: true}, secVNCAuth},
+		{[]byte{secVNCAuth, secARD}, auth{ard: true, hasUser: true}, secARD},
+		{[]byte{secARD, secNone}, auth{ard: true}, secNone},
+		{[]byte{secNone, secARD}, auth{ard: true, hasUser: true}, secARD},
+		{[]byte{secARD, secVeNCrypt}, auth{ard: true, hasUser: true, startTLS: tls}, secVeNCrypt},
+		{[]byte{secARD}, auth{ard: true, hasUser: true, requireTLS: true}, secInvalid},
 	} {
 		if got := choose(tt.offered, tt.a); got != tt.want {
 			t.Errorf("choose(%v, %+v) = %d, want %d", tt.offered, tt.a, got, tt.want)

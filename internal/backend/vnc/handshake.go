@@ -6,6 +6,7 @@ package vnc
 
 import (
 	"crypto/des" // #nosec G502 -- VNC Authentication is DES by definition (RFC 6143, section 7.2.2)
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -61,14 +62,18 @@ type serverInit struct {
 // auth is what the security handshake needs from the backend.
 type auth struct {
 	// password returns the password for VNC Authentication, and plain
-	// the username and password for VeNCrypt's Plain, asking the owner
-	// for what the configuration lacks.
+	// the username and password for VeNCrypt's Plain and for Apple Remote
+	// Desktop, asking the owner for what the configuration lacks.
 	password func() (string, error)
 	plain    func() (user, password string, err error)
 	// hasUser and hasPassword say what the configuration holds. They
 	// choose between the types a server offers, so that nobody is asked
 	// for credentials that a server does not need.
 	hasUser, hasPassword bool
+	// ard allows Apple Remote Desktop authentication (ard.go), whose keys
+	// rand makes, or crypto/rand if it is nil.
+	ard  bool
+	rand io.Reader
 	// startTLS runs a TLS handshake on the connection, after which the
 	// handshake's reads and writes go through TLS. Nil leaves VeNCrypt
 	// out.
@@ -172,13 +177,16 @@ func security(r io.Reader, w io.Writer, v int, a auth) (byte, error) {
 		switch st := binary.BigEndian.Uint32(b[:]); st {
 		case secInvalid:
 			return 0, refused(r)
-		case secNone, secVNCAuth:
+		case secNone, secVNCAuth, secARD:
 			t = byte(st)
 		default:
 			return 0, fmt.Errorf("%w: the server chose type %d", ErrNoSecurityType, st)
 		}
 		if a.requireTLS {
 			return 0, fmt.Errorf("%w: the server chose type %d, without TLS", ErrNoSecurityType, t)
+		}
+		if t == secARD && !a.ard {
+			return 0, noSecurityType([]byte{t}, a)
 		}
 	} else {
 		var b [256]byte
@@ -193,7 +201,7 @@ func security(r io.Reader, w io.Writer, v int, a auth) (byte, error) {
 			return 0, fmt.Errorf("vnc: read the security types: %w", err)
 		}
 		if t = choose(offered, a); t == secInvalid {
-			return 0, fmt.Errorf("%w: the server offers %v", ErrNoSecurityType, offered)
+			return 0, noSecurityType(offered, a)
 		}
 		if _, err := w.Write([]byte{t}); err != nil {
 			return 0, fmt.Errorf("vnc: %w", err)
@@ -207,13 +215,20 @@ func security(r io.Reader, w io.Writer, v int, a auth) (byte, error) {
 		err = vncAuth(r, w, a.password)
 	case secVeNCrypt:
 		inner, err = veNCrypt(r, w, a)
+	case secARD:
+		rnd := a.rand
+		if rnd == nil {
+			rnd = rand.Reader
+		}
+		err = ardAuth(r, w, rnd, a.plain)
 	}
 	if err != nil {
 		return 0, err
 	}
 	// SecurityResult follows every type but None before 3.8 (RFC 6143,
 	// appendix A), and so VeNCrypt too, unless its subtype is None, as
-	// TigerVNC has it.
+	// TigerVNC has it. Any value but 0 is a failure: macOS Screen Sharing
+	// sends 1 in little-endian order.
 	if inner == secNone && v < 8 {
 		return t, nil
 	}
@@ -251,8 +266,11 @@ func vncAuth(r io.Reader, w io.Writer, password func() (string, error)) error {
 
 // choose picks a security type from those offered: VeNCrypt if a can
 // start TLS, since its X.509 subtypes encrypt; otherwise, unless
-// a.requireTLS, VNC Authentication over None if a password is configured
-// or None is not offered, None if it is offered; or secInvalid.
+// a.requireTLS, Apple Remote Desktop if a.ard allows it and either a
+// username is configured, which of these types only it takes, or neither
+// None nor VNC Authentication is offered; VNC Authentication over None
+// if a password is configured or None is not offered; None if it is
+// offered; or secInvalid.
 func choose(offered []byte, a auth) byte {
 	if a.startTLS != nil && slices.Contains(offered, secVeNCrypt) {
 		return secVeNCrypt
@@ -261,13 +279,28 @@ func choose(offered []byte, a auth) byte {
 		return secInvalid
 	}
 	none, auth := slices.Contains(offered, secNone), slices.Contains(offered, secVNCAuth)
+	ard := a.ard && slices.Contains(offered, secARD)
 	switch {
+	case ard && (a.hasUser || !none && !auth):
+		return secARD
 	case auth && (a.hasPassword || !none):
 		return secVNCAuth
 	case none:
 		return secNone
 	}
 	return secInvalid
+}
+
+// noSecurityType returns the error for a server that offers no type
+// that a takes. If Apple Remote Desktop is among them, and only not
+// allowed, it names the setting that allows it.
+func noSecurityType(offered []byte, a auth) error {
+	if slices.Contains(offered, secARD) && !a.ard && !a.requireTLS {
+		return fmt.Errorf("%w: the server offers %v; Apple Remote Desktop authentication (type 30) is not "+
+			"allowed, since its key exchange authenticates no server and anyone in between could read the "+
+			"password: set Config.ARD to allow it", ErrNoSecurityType, offered)
+	}
+	return fmt.Errorf("%w: the server offers %v", ErrNoSecurityType, offered)
 }
 
 // refused reads the reason the server gives for refusing the connection.
