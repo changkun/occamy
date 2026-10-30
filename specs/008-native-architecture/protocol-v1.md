@@ -211,3 +211,67 @@ Creates `protocol/` (public package) and `docs/protocol.md`.
 `docs/protocol-cn.md` is relabelled as the v0 (Guacamole) description. The
 web client ([009](../009-react-web-client.md)) and the client core
 ([client-core](client-core.md)) implement it.
+
+## Implementation notes
+
+- **Status.** Framing is done (#84). Handshake, Messages and Document
+  are not, so the spec stays validated.
+- **What Framing shipped.** The public package `protocol/`:
+  - `Header` (`Type`, `Flags`), `FlagIgnorable`, `AppendHeader`, and
+    `Split`, which checks the message size before it reads the header.
+  - `Append*` functions for u8 to u64, i8 to i64, byte strings and UTF-8
+    strings, and a `Decoder` whose `Read*` methods mirror them. Its
+    errors are sticky, and `Finish` reports trailing bytes.
+  - `Registry` with `Register`, `Lookup` and `Accept`. For an unknown
+    type, `Accept` says skip if the message is ignorable and returns
+    `ErrUnsupported` otherwise.
+  - `Limits.MaxMessageSize` (zero means 4 MiB) with `CheckSize`, and
+    `Subprotocol` (`occamy.v1`).
+  - Golden vectors in `protocol/testdata/framing.json`, three fuzz
+    targets, and benchmarks.
+- **Decisions the spec left open.**
+  - Byte strings and UTF-8 strings have a u32 little-endian length
+    prefix. A u16 length could not hold a 4 MiB message, and varints
+    have more than one encoding per value and need more code in
+    TypeScript.
+  - Flag bits 1 to 15 are reserved: senders leave them zero, receivers
+    ignore them, and `Split` keeps them. A flag that changes how a body
+    reads must therefore be agreed as a capability first.
+  - Type 0 is reserved and cannot be registered, so a zeroed buffer
+    never decodes as a message. There is no private or experimental
+    type range. The spec's extension path is capabilities and
+    never-reused numbers. Messages or Document can still add a range
+    before the release candidate.
+  - A length past the end of the message is `truncated`, like any read
+    past the end. Byte strings are not copied. The slice's capacity ends
+    at its length, so appending to it cannot overwrite the next field.
+  - Decoding rejects invalid UTF-8, as `TextDecoder` with `fatal: true`
+    does (no overlongs, surrogates or code points above U+10FFFF). The
+    encoder replaces invalid UTF-8 with U+FFFD instead of failing or
+    panicking, because strings such as window titles come from remote
+    hosts and a receiver would close the connection over them.
+  - `Decoder.Finish` rejects trailing bytes. `Len` lets Messages accept
+    them for a message where that is wanted.
+  - The golden vectors are one JSON file. Integer values are decimal
+    strings, so 64-bit values survive JavaScript numbers. The file also
+    has malformed inputs with stable error names (`truncated`,
+    `too-large`, `invalid-utf8`), and dispatch cases (`decode`, `skip`,
+    `unsupported`) for the web client's codec to check.
+- **Left to later tasks.**
+  - Codec IDs and the range reserved for the video tier belong to
+    Messages and [graphics-pipeline](graphics-pipeline.md), because the
+    width of the codec field is part of the `tile` layout.
+  - Close codes, including `unsupported`, come with `close` in
+    Messages. `ErrUnsupported` maps to that code.
+  - Messages will likely need a list primitive for lists such as
+    codecs: a count that is checked against the bytes left before
+    anything is allocated.
+  - Handshake picks an encoding for the pixel ratio and other
+    fractional values. Fixed point fits the integers here.
+- **Verification.** Each fuzz target ran for 35 s locally with no
+  failures: `FuzzSplit` about 19.5 M inputs, `FuzzDecoder` 23 M,
+  `FuzzRoundTrip` 8.1 M. Benchmarks ran on an Apple M5 Pro under load
+  from other work. Encoding the header takes 1.7 ns and `Split` 2.1 ns.
+  A 1 MiB payload appends in about 12.6 µs and reads in 3.8 ns because
+  it is not copied. None of them allocates.
+- **Deviations.** None from the spec.
