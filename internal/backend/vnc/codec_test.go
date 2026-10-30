@@ -9,10 +9,12 @@ import (
 	"compress/zlib"
 	"context"
 	"encoding/binary"
+	"errors"
 	"image"
 	"image/color"
 	"image/draw"
 	"image/jpeg"
+	"io"
 	"math/rand/v2"
 	"slices"
 	"strings"
@@ -92,6 +94,42 @@ func TestEncodingsOverRun(t *testing.T) {
 		}
 		u.draw()
 		equalImages(t, s.sink.Pixels(), want)
+	}
+}
+
+func TestUnexpectedEOFIsTheConnections(t *testing.T) {
+	// Run reports io.ErrUnexpectedEOF when the connection closes within a
+	// message. Data that arrived whole but ends too soon in its own format
+	// is another error.
+	var jbuf bytes.Buffer
+	if err := jpeg.Encode(&jbuf, pattern(16, 16, 0), nil); err != nil {
+		t.Fatal(err)
+	}
+	img := jbuf.Bytes()
+	sos := bytes.Index(img, []byte{0xff, 0xda})
+	tightJPEGOf := func(data []byte) []byte {
+		return tightRect(image.Rect(0, 0, 16, 16), tightJPEG<<4, appendCompact(nil, len(data)), data)
+	}
+	var final bytes.Buffer
+	w := zlib.NewWriter(&final)
+	w.Write([]byte{1, 2})
+	w.Close()
+	for _, tt := range []struct {
+		name string
+		rect []byte
+	}{
+		{"jpeg cut in half", tightJPEGOf(img[:len(img)/2])},
+		{"jpeg scan cut short", tightJPEGOf(slices.Concat(img[:sos+20], []byte{0xff, 0xd9}))},
+		{"zrle stream ended within the pixels", zrleRaw(image.Rect(0, 0, 4, 1), final.Bytes())},
+		{"tight stream ended within the pixels", tightRect(image.Rect(0, 0, 4, 4), 0, appendCompact(nil, final.Len()), final.Bytes())},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := decode(t, image.Pt(16, 16), defaultLimits, putUpdate(tt.rect), putBell())
+			if err == nil || errors.Is(err, io.ErrUnexpectedEOF) {
+				t.Errorf("decode = %v, want an error other than io.ErrUnexpectedEOF", err)
+			}
+			t.Log(err)
+		})
 	}
 }
 

@@ -16,13 +16,14 @@ const (
 	// maxZlibTail bounds the compressed bytes of a rectangle that are left
 	// once its pixels are decoded. A server flushes its stream at the end
 	// of each rectangle (Z_SYNC_FLUSH), which ends the data with an empty
-	// stored block, and Go's inflater hands out what it has inflated at
-	// the end of a stored block, when its 32 KiB window fills, and at the
-	// stream's end. So the inflater normally uses all of a rectangle's
-	// data, flush included. When the window fills just as the pixels end,
-	// or a server flushes twice, the end of the last block or an empty
-	// stored block, a few bytes, are left for the next rectangle.
-	maxZlibTail = 64
+	// stored block, and Go's inflater hands out what it has inflated only
+	// at an empty stored block, when its 32 KiB window fills, and at the
+	// stream's end, not at the end of other blocks. So the inflater
+	// normally uses all of a rectangle's data, flush included. When the
+	// window fills just as the pixels end, the end of the last block and
+	// the flush, about 7 bytes, are left for the next rectangle, and about
+	// 12 when a server flushes twice.
+	maxZlibTail = 16
 	// zlibBuffer is the size of the buffer that a stream's output is read
 	// through. It is the inflater's window, the most the inflater hands
 	// out at once, so that each read takes all it has handed out, whether
@@ -58,8 +59,8 @@ func deflateBound(n int) int { return n + n/8 + 1024 }
 // it the rectangle's compressed bytes and no more, and the decoder reads
 // as much inflated data as the rectangle's pixels need, through out, so
 // the compressed data is never buffered and the inflated data at most a
-// window at a time. Since Go's inflater hands out data at the end of a
-// stored block, a stream that a server flushes in another way, such as
+// window at a time. Since Go's inflater hands out data at an empty stored
+// block, a stream that a server flushes in another way, such as
 // Z_PARTIAL_FLUSH, fails with errZlibShort; TigerVNC, libvncserver and
 // QEMU flush with Z_SYNC_FLUSH. A stream lives as long as the decoder,
 // which is Run's.
@@ -67,7 +68,22 @@ type zstream struct {
 	in      zinput
 	started bool          // the zlib header has been read
 	fr      io.ReadCloser // the inflater, nil before the first rectangle
-	out     *bufio.Reader // fr's output
+	out     *bufio.Reader // fr's output, through zlibOutput
+}
+
+// zlibOutput is the inflater's output, which reports the end of the
+// stream as errZlibEnd. RFB keeps a stream open for the whole
+// connection, and io.ReadFull would turn the inflater's io.EOF within a
+// read into io.ErrUnexpectedEOF, which is the error of a connection that
+// closes within a message.
+type zlibOutput struct{ fr io.Reader }
+
+func (o zlibOutput) Read(p []byte) (int, error) {
+	n, err := o.fr.Read(p)
+	if errors.Is(err, io.EOF) {
+		err = errZlibEnd
+	}
+	return n, err
 }
 
 // begin starts a rectangle whose n bytes of compressed data follow on r.
@@ -90,12 +106,12 @@ func (z *zstream) begin(r io.Reader, n int64) error {
 	}
 	if z.fr == nil {
 		z.fr = flate.NewReader(&z.in)
-		z.out = bufio.NewReaderSize(z.fr, zlibBuffer)
+		z.out = bufio.NewReaderSize(zlibOutput{z.fr}, zlibBuffer)
 	} else {
 		if err := z.fr.(flate.Resetter).Reset(&z.in, nil); err != nil {
 			return err
 		}
-		z.out.Reset(z.fr)
+		z.out.Reset(zlibOutput{z.fr})
 	}
 	z.started = true
 	return nil
@@ -104,10 +120,12 @@ func (z *zstream) begin(r io.Reader, n int64) error {
 // end finishes a rectangle: its pixels have been read. What is left of its
 // compressed data must be the end of the server's flush, which is kept
 // for the next rectangle; inflated data that no pixel took is an error.
-// The inflater holds back what it inflates after its window last filled,
-// until the next stored block, so data beyond the pixels goes unseen when
-// the window fills exactly where they end: it then starts the stream's
-// next rectangle, and maxZlibTail bounds what it can inflate to.
+// The inflater has not looked at the bytes left, so data they hold goes
+// unseen: when the window fills exactly where the pixels end, or when
+// the flush is followed by more data and a second flush. It then starts
+// the stream's next rectangle, which it garbles or makes fail, and
+// maxZlibTail bounds what it can inflate to. The connection's framing
+// does not depend on it.
 func (z *zstream) end() error {
 	if n := z.out.Buffered(); n > 0 {
 		return fmt.Errorf("the compressed data holds %d bytes more than the rectangle's pixels", n)
@@ -134,16 +152,14 @@ func (z *zstream) byte() (byte, error) {
 	return c, zlibError(err)
 }
 
-// zlibError maps the inflater's io.EOF, which it returns after a final
-// block, to errZlibEnd, so that it cannot pass for the end of the
-// connection.
+// zlibError labels the inflater's errors as zlib's, but for its own and
+// io.ErrUnexpectedEOF, which zinput reports when the connection closes
+// within a rectangle.
 func zlibError(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, io.EOF):
-		return errZlibEnd
-	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, errZlibShort):
+	case errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, errZlibShort), errors.Is(err, errZlibEnd):
 		return err
 	}
 	return fmt.Errorf("zlib: %w", err)

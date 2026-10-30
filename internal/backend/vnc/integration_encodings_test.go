@@ -168,11 +168,13 @@ func checkSession(t *testing.T, data []byte, pw string, first, last kind, lossy 
 	in = bytes.NewReader(msgs)
 	d := newDecoder(context.Background(), in, sink, init.size, defaultLimits, discardLogger)
 	d.resizeEvery = 0
-	// The proxy may have cut the last message short when Run stopped.
+	// The proxy may have cut the last message short when Run stopped, and
+	// only the end of the recording may end a message.
 	end := 0
 	for {
 		if _, err := d.next(); err != nil {
-			if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
+			ended := errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+			if !ended || in.Len() > 0 {
 				t.Fatalf("the recording, after %d of its %d bytes: %v", end, len(msgs), err)
 			}
 			break
