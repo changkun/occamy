@@ -648,7 +648,11 @@ times.
   tiles, or runs keyed by their tiles' versions. Today a viewer encodes
   on its writer's goroutine, one core at most, with no bound per
   session.
-- client-core: `codec.Inflater.Decode(dst *image.RGBA, payload)` and
+- client-core (#107, merged meanwhile): wiring these decoders in as
+  `client`'s default `Options.Decoders` is a PR of its own, not this
+  one, since it changes what a client with default options offers and
+  links vpx into the public client package; client-core's follow-ups
+  describe it. `codec.Inflater.Decode(dst *image.RGBA, payload)` and
   `codec.DecodeRaw` decode `deflate` and `raw` straight into a
   `SubImage` of the client's screen, one Inflater per decoding
   goroutine. `gen2brain/vpx/webp` decodes WebP as libwebp does (with
