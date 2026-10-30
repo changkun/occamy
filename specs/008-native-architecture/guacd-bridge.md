@@ -312,8 +312,8 @@ do not).
     found.
 - **Recordings.** All three log in, type, scroll and ask to resize; the
   two desktops also drag a window. Each instruction count below is from
-  its manifest; `rect` and `cfill` come in pairs, as do `img` and `end`,
-  and `blob` is left out.
+  its manifest; `cfill` follows each `rect`, `end` closes each `img`
+  and `argv` stream, and `blob` is left out.
 
   | Recording | Session | Instructions | Compressed |
   |-----------|---------|--------------|------------|
@@ -396,7 +396,8 @@ do not).
 - **Follow-ups.**
   - Recordings are real time, so recording again pins other frames and
     other hashes. Record again when guacd's version changes.
-  - JPEG decoding is unmeasured against libjpeg-turbo, which browsers
-    use with fancy upsampling while `image/jpeg` does not. A recording
-    with WebP not announced would cover it.
+  - JPEG decoding is unmeasured. libjpeg-turbo interpolates chroma by
+    default and `image/jpeg` does not; whether browsers keep that
+    default is to be checked. A recording with WebP not announced would
+    give the images to compare.
   - The corpus has no clipboard, audio, telnet or Kubernetes sessions.
