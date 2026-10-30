@@ -20,7 +20,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"golang.org/x/image/webp"
+	"github.com/gen2brain/vpx/webp"
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/backend/backendtest"
@@ -83,6 +83,17 @@ func newClient(c Conn) *client {
 	return &client{c: c, start: time.Now(), img: &image.RGBA{}, codecs: map[protocol.Codec]int{}}
 }
 
+// decodeWebP decodes a WebP payload as libwebp, and so a browser, does:
+// a lossy image to opaque RGBA, a lossless one, a cursor, with its
+// straight alpha.
+func decodeWebP(payload []byte) (image.Image, error) {
+	m, err := webp.Decode(bytes.NewReader(payload))
+	if _, lossless := m.(*image.NRGBA); err != nil || lossless {
+		return m, err
+	}
+	return webp.Decode(bytes.NewReader(payload), webp.Options{ToRGBA: true, Threads: 1})
+}
+
 // decodeTile decodes a tile's payload into dst, its rectangle of the
 // screen, as a client does.
 func decodeTile(dst *image.RGBA, c protocol.Codec, payload []byte) error {
@@ -95,7 +106,7 @@ func decodeTile(dst *image.RGBA, c protocol.Codec, payload []byte) error {
 		var in codec.Inflater
 		return in.Decode(dst, payload)
 	case protocol.CodecWebP:
-		m, err = webp.Decode(bytes.NewReader(payload))
+		m, err = decodeWebP(payload)
 	case protocol.CodecJPEG:
 		m, err = jpeg.Decode(bytes.NewReader(payload))
 	default:

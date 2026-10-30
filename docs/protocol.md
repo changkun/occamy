@@ -999,7 +999,12 @@ A codec ID is a u8. Codec 0 is not a codec: it appears only in a hidden
 A server sends only agreed codecs. A codec ID is never given to another
 encoding. [`protocol/testdata/codecs.json`](../protocol/testdata/codecs.json)
 holds a payload of each codec occamyd sends, with the pixels it
-encodes, and payloads of `deflate` that a receiver refuses.
+encodes, and payloads of `deflate` that a receiver refuses. A lossy
+payload's `min_psnr` is 3 dB under what libwebp's decoding, and so a
+browser's, or `image/jpeg`'s reaches. Lossy WebP is VP8, whose colours
+are BT.601 limited-range YCbCr: a decoder that reads them as full-range,
+as `golang.org/x/image/webp`'s `image.YCbCr` drawn as it is does, falls
+about 10 dB short.
 
 What occamyd sends follows the [codec measurement](benchmarks/codecs.md):
 a tile of up to 256 colours is lossless, and one of more is lossy, in

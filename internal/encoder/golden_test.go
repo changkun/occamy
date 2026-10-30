@@ -221,8 +221,11 @@ func vector(t testing.TB, c codecCase, b []byte) codecVector {
 	case v.Exact && !bytes.Equal(out.Pix, c.pix):
 		t.Errorf("%s: the payload decodes to other pixels", c.name)
 	case !v.Exact:
-		// A margin below Go's decoders, for decoders that convert from
-		// YCbCr or invert the DCT another way.
+		// A margin below the reference decoders (vpx's for WebP, which
+		// decodes as libwebp does, and image/jpeg), for decoders that
+		// round or upsample chroma another way. A WebP decoder that
+		// reads VP8's limited-range colours as full-range falls about
+		// 10 dB short.
 		v.MinPSNR = math.Floor(quality) - 3
 		if v.MinPSNR < 20 {
 			t.Errorf("%s: PSNR %.1f dB", c.name, quality)

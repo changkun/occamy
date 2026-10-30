@@ -16,7 +16,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"golang.org/x/image/webp"
+	"github.com/gen2brain/vpx/webp"
 
 	"changkun.de/x/occamy/internal/codec"
 	"changkun.de/x/occamy/protocol"
@@ -103,7 +103,7 @@ func decode(c protocol.Codec, payload []byte, w, h int) (*image.RGBA, error) {
 		var in codec.Inflater
 		return out, in.Decode(out, payload)
 	case protocol.CodecWebP:
-		m, err = webp.Decode(bytes.NewReader(payload))
+		m, err = decodeWebP(payload)
 	case protocol.CodecJPEG:
 		m, err = jpeg.Decode(bytes.NewReader(payload))
 	default:
@@ -122,6 +122,19 @@ func decode(c protocol.Codec, payload []byte, w, h int) (*image.RGBA, error) {
 	}
 	draw.Draw(out, out.Rect, m, m.Bounds().Min, draw.Src)
 	return out, nil
+}
+
+// decodeWebP decodes a WebP payload as libwebp, and so a browser, does:
+// a lossy image to opaque RGBA, a lossless one, a cursor, with its
+// straight alpha. golang.org/x/image/webp would misread lossy images'
+// limited-range colours as full-range (internal/guacamole/webp.go), by
+// about 10 dB on the golden vectors.
+func decodeWebP(payload []byte) (image.Image, error) {
+	m, err := webp.Decode(bytes.NewReader(payload))
+	if _, lossless := m.(*image.NRGBA); err != nil || lossless {
+		return m, err
+	}
+	return webp.Decode(bytes.NewReader(payload), webp.Options{ToRGBA: true, Threads: 1})
 }
 
 // SSIM is the structural similarity of b to a (Wang et al., 2004) on

@@ -170,9 +170,10 @@ func TestConvergesCodecs(t *testing.T) {
 				if (wide > 0) != c.merged {
 					t.Errorf("%d rectangles of several tiles; want them %v", wide, c.merged)
 				}
-				// The photograph is grainy: at quality 90, its worst
-				// tile scores 24 dB as WebP and 35 as JPEG.
-				if hasLossy && (lossy == 0 || worst < 22) {
+				// At quality 90, the photograph's worst tile scores 37
+				// dB as WebP and 35 as JPEG; reading WebP's colours as
+				// full-range would cost it about 13.
+				if hasLossy && (lossy == 0 || worst < 30) {
 					t.Errorf("%d tiles lossy, the worst at %.1f dB", lossy, worst)
 				}
 				t.Logf("%d tiles lossy, the worst at %.1f dB; tiles by codec %v", lossy, worst, r.cl.codecs)
