@@ -125,6 +125,17 @@ func TestUpdateDrawBudget(t *testing.T) {
 	if _, err := decode(t, screen.Max, defaultLimits, putUpdate(resized...)); err != nil {
 		t.Fatalf("four screens, a smaller screen and a fill of it: %v", err)
 	}
+	// So does an ExtendedDesktopSize that resizes. One of the size the
+	// screen has, which TigerVNC sends in answer to every request for the
+	// whole screen, resizes nothing and starts nothing.
+	resized = append(fills(4), putExtDesktopSize(0, 0, 64, 48), e.tightFill(small, red, 0))
+	if _, err := decode(t, screen.Max, defaultLimits, putUpdate(resized...)); err != nil {
+		t.Fatalf("four screens, a smaller extended screen and a fill of it: %v", err)
+	}
+	same := append(fills(4), putExtDesktopSize(0, 0, screen.Dx(), screen.Dy()), e.tightFill(small, red, 0))
+	if _, err := decode(t, screen.Max, defaultLimits, putUpdate(same...)); err == nil || !strings.Contains(err.Error(), "draws more than 4 times") {
+		t.Fatalf("four screens, an extended screen of the same size and a fill: %v, want the fill refused", err)
+	}
 	msg := putUpdate(fills(1000)...)
 	in := bytes.NewReader(msg)
 	sink := &backendtest.Sink{}
