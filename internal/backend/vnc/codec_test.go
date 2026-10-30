@@ -97,6 +97,43 @@ func TestEncodingsOverRun(t *testing.T) {
 	}
 }
 
+func TestUpdateDrawBudget(t *testing.T) {
+	// A Tight fill of the whole screen is 16 bytes. An update may draw
+	// four times the screen's pixels, and the next is refused before it
+	// is drawn.
+	screen := image.Rect(0, 0, 1024, 768)
+	e := newEncoder(wantPixelFormat)
+	fills := func(n int) [][]byte {
+		var rects [][]byte
+		for i := range n {
+			rects = append(rects, e.tightFill(screen, []color.RGBA{red, green, blue, yellow}[i%4], 0))
+		}
+		return rects
+	}
+	// Each update has a budget of its own, and pseudo-encodings cost
+	// nothing.
+	ok := slices.Concat(fills(3), [][]byte{
+		putCopy(image.Rect(0, 0, 1024, 767), image.Pt(0, 1)),
+		rectHeader(image.Rectangle{}, encCursor),
+	})
+	if _, err := decode(t, screen.Max, defaultLimits, putUpdate(ok...), putUpdate(fills(4)...)); err != nil {
+		t.Fatalf("updates of four screens: %v", err)
+	}
+	msg := putUpdate(fills(1000)...)
+	in := bytes.NewReader(msg)
+	sink := &backendtest.Sink{}
+	sink.Resize(screen.Dx(), screen.Dy())
+	d := newDecoder(context.Background(), in, sink, screen.Size(), defaultLimits, discardLogger)
+	_, err := d.next()
+	if err == nil || !strings.Contains(err.Error(), "rectangle 5 of 1000: the update draws more than 4 times the screen's 1024×768 pixels") {
+		t.Errorf("next = %v, want the fifth fill refused", err)
+	}
+	// Four fills and the fifth's header are read, and nothing more.
+	if want := len(msg) - 4 - 4*16 - 12; in.Len() != want {
+		t.Errorf("%d bytes left, want %d", in.Len(), want)
+	}
+}
+
 func TestUnexpectedEOFIsTheConnections(t *testing.T) {
 	// Run reports io.ErrUnexpectedEOF when the connection closes within a
 	// message. Data that arrived whole but ends too soon in its own format
