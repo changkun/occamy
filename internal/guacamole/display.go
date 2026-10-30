@@ -17,8 +17,6 @@ import (
 	"image/png"
 	"slices"
 	"strconv"
-
-	"golang.org/x/image/webp"
 )
 
 // Channel masks, the composite operations of img, copy and cfill. Each
@@ -448,7 +446,7 @@ func (d *Display) end(args []string) error {
 	case "image/jpeg":
 		img, err = jpeg.Decode(r)
 	case "image/webp":
-		img, err = webp.Decode(r)
+		img, err = decodeWebP(r)
 	default:
 		d.Unsupported["img "+s.mimetype]++
 		return nil
