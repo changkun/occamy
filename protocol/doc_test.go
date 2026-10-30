@@ -7,6 +7,7 @@ package protocol_test
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -18,16 +19,37 @@ import (
 // docFile is the normative description of the protocol.
 var docFile = filepath.Join("..", "docs", "protocol.md")
 
+// codecsFile holds the codec payloads, which internal/encoder writes.
+var codecsFile = filepath.Join("testdata", "codecs.json")
+
 // TestDocExamples checks the examples in docs/protocol.md against the
 // vectors. An example is a fenced block with the info string "hex" whose
-// first line names a message vector ("# vector: <name>") and whose other
-// lines hold hex bytes, with comments from '#' to the end of the line.
-// Every message type has an example.
+// first line names a message vector ("# vector: <name>"), or a codec
+// vector whose deflate container it shows ("# container: <name>"), and
+// whose other lines hold hex bytes, with comments from '#' to the end of
+// the line. Every message type has an example.
 func TestDocExamples(t *testing.T) {
 	g := vectorsMessages(t)
-	byName := map[string]messageVector{}
+	byName := map[string]string{}
+	typeOf := map[string]protocol.Type{}
 	for _, v := range g.Messages {
-		byName[v.Name] = v
+		byName["vector: "+v.Name] = v.Hex
+		typeOf["vector: "+v.Name] = protocol.Type(v.Type)
+	}
+	b, err := os.ReadFile(codecsFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var codecs struct {
+		Vectors []struct{ Name, Container string }
+	}
+	if err := json.Unmarshal(b, &codecs); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range codecs.Vectors {
+		if v.Container != "" {
+			byName["container: "+v.Name] = v.Container
+		}
 	}
 	f, err := os.Open(docFile)
 	if err != nil {
@@ -50,19 +72,21 @@ func TestDocExamples(t *testing.T) {
 			hexDigits.Reset()
 		case in && text == "```":
 			in = false
-			v, ok := byName[name]
+			want, ok := byName[name]
 			if !ok {
-				t.Errorf("%s:%d: the example names no message vector: %q", docFile, line, name)
+				t.Errorf("%s:%d: the example names no vector: %q", docFile, line, name)
 				continue
 			}
-			if got := hexDigits.String(); got != v.Hex {
-				t.Errorf("%s:%d: example %q is\n%s\nwant\n%s", docFile, line, name, got, v.Hex)
+			if got := hexDigits.String(); got != want {
+				t.Errorf("%s:%d: example %q is\n%s\nwant\n%s", docFile, line, name, got, want)
 			}
-			types[protocol.Type(v.Type)] = true
+			if typ, ok := typeOf[name]; ok {
+				types[typ] = true
+			}
 		case in && name == "":
-			n, ok := strings.CutPrefix(text, "# vector: ")
-			if !ok {
-				t.Fatalf("%s:%d: an example starts with %q, want \"# vector: <name>\"", docFile, line, text)
+			n, ok := strings.CutPrefix(text, "# ")
+			if !ok || !strings.HasPrefix(n, "vector: ") && !strings.HasPrefix(n, "container: ") {
+				t.Fatalf("%s:%d: an example starts with %q, want \"# vector: <name>\" or \"# container: <name>\"", docFile, line, text)
 			}
 			name = n
 		case in:
