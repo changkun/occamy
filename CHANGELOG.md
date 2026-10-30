@@ -7,6 +7,17 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ## [Unreleased]
 
+### Added
+
+- The desktop baseline and the per-scenario targets for protocol v1
+  ([docs/benchmarks.md](docs/benchmarks.md)). `bench/vncprobe` measures
+  the bench desktop's VNC server on its own.
+
+### Changed
+
+- `make bench` builds occamyd's image from the working tree before
+  measuring it, instead of measuring whatever `occamy:latest` was.
+
 ## [0.6.0] - 2026-10-30
 
 ### Added

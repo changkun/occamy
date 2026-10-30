@@ -348,13 +348,15 @@ counterpart yet.
   50 ms budget at N1. A Guacamole connection is one ordered stream, so a
   key's update waits for the frames queued before it. This is the main
   thing protocol v1 has to fix.
-- **guacd limits the scroll's frame rate.** x11vnc sends 61 of the
-  scene's 62.5 updates a second, and guacd delivers 41 of them while
-  using 1.6 CPUs. The drag and the motion reach 99% of the scene over
-  VNC at N0 and N1.
+- **The scroll loses a third of its frames on the way.** x11vnc sends
+  the probe 61 of the scene's 62.5 updates a second, and the harness
+  receives 41 through guacd, which uses 1.6 CPUs meanwhile. The probe
+  asks for raw pixels, which cost x11vnc less than guacd's compressed
+  encodings, so this does not yet show which of the two drops them. The
+  drag and the motion reach 99% of the scene over VNC at N0 and N1.
 - **RDP stops at 24–25 frames a second.** G4 delivers that under every
-  network condition with a third of a CPU and under 1 MiB/s, G5 as
-  well, and G3 delivers 20. Whether xrdp or guacd's RDP client sets this ceiling
+  network condition with a third of a CPU and under 1 MiB/s, G5 reaches
+  the same 24.8, and G3 delivers 20. Whether xrdp or guacd's RDP client sets this ceiling
   needs an RDP counterpart of `bench/vncprobe` to tell.
 - **RDP's scroll is the most expensive scene:** about 516 KiB a frame
   against 71 KiB over VNC, 10 MiB/s at N0. At N2 it fills the 20 Mbit/s
@@ -387,7 +389,9 @@ target.
   no lower than the N0 target plus one RTT, for the input out and its
   update back, plus the time the link takes to carry the target's bytes.
 - **Frame rates** are 95% of the scene's rate, or as many frames of the
-  target size as the link carries, whichever is fewer.
+  target size as the link carries, whichever is fewer. Where the
+  baseline already does better, as G4 and G5 over VNC do, the target is
+  a floor not to fall below.
 - **Continuous scenes.** For G3 to G5, bytes and CPU are per delivered
   frame, so that dropping frames does not count as saving them, and the
   target comes from N0, since a frame's content does not depend on the

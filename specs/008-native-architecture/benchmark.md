@@ -240,8 +240,8 @@ so the repository carries no image files.
 **Summary.** The harness, the bench desktop and the Guacamole baselines
 shipped in three pull requests, implemented directly rather than
 dispatched: the Terminal task in #76 and the Desktop VNC and Desktop RDP
-tasks in #77, both on 2026-10-29, and the Baseline task in the pull
-request after the v0.6.0 release, on 2026-10-30.
+tasks in #77, both on 2026-10-29, and the Baseline task in #81 on
+2026-10-30.
 [docs/benchmarks.md](../../docs/benchmarks.md) holds the terminal and
 desktop baselines, as medians of three runs, and the per-scenario
 targets. Drift: minimal. Of 17 items, 14 shipped as specified and 3
@@ -285,8 +285,7 @@ from the v1 series, which waits for [client-core](client-core.md).
   so that a fast sender meets backpressure. Because it is a userspace
   proxy, TCP handshakes are not delayed, and G7 counts only the round
   trips that carry data: about two for v0 in both series.
-- **The targets' rules** were settled against the baseline (Baseline
-  PR):
+- **The targets' rules** were settled against the baseline (#81):
   - Bytes and CPU in G3 to G5 are per delivered frame and come from N0,
     because over RDP the baseline delivered a third of the scroll's
     frames, and a per-second target would reward dropping more.
