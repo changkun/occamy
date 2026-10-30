@@ -7,15 +7,13 @@ package config_test
 import (
 	"maps"
 	"os"
+	"strings"
 	"testing"
 
 	"changkun.de/x/occamy/internal/config"
 )
 
 func TestJWT_GenerateID(t *testing.T) {
-	os.Args[1] = "-conf=../../conf.yaml"
-	config.Init()
-
 	j := config.JWT{
 		Protocol: "vnc",
 		Host:     "0.0.0.0:5636",
@@ -26,6 +24,32 @@ func TestJWT_GenerateID(t *testing.T) {
 	if want != j.GenerateID() {
 		t.Error("jwt hash error, got: ", j.GenerateID())
 		t.FailNow()
+	}
+}
+
+// TestInit checks that Init reads the v0 file in the repository and
+// refuses a v1 file, which the lenient v0 decoder would read with
+// defaults.
+func TestInit(t *testing.T) {
+	raw, err := os.ReadFile("../../conf.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Init(raw); err != nil {
+		t.Fatalf("Init(conf.yaml): %v", err)
+	}
+	if config.Runtime.Auth.JWTSecret != "occamy" || !config.Runtime.Client {
+		t.Errorf("Init(conf.yaml) read %+v", config.Runtime)
+	}
+	raw, err = os.ReadFile("testdata/v1.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Init(raw); err == nil || !strings.Contains(err.Error(), "version 1") {
+		t.Errorf("Init(v1.yaml) = %v, want a refusal", err)
+	}
+	if err := config.Init([]byte("version: 1\naddress: :1\nauth: {jwt_secret: x}\n")); err == nil {
+		t.Error("Init of a v1 file with v0 keys did not fail")
 	}
 }
 
