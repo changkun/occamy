@@ -615,12 +615,23 @@ leaves only RDP on the bridge.
 - **What was built.**
   - `SetEncodings` lists the pseudo-encodings ExtendedDesktopSize,
     LastRect, ContinuousUpdates, Fence, QEMU Extended Key Event and
-    Extended Clipboard after phase 1's. Code shared with phase 2 changes
+    Extended Clipboard after phase 2's list (CopyRect, Tight, ZRLE,
+    Hextile, Raw, Cursor, DesktopSize). Code shared with phase 2 changes
     little: the decoder's rectangle switch and message switch fall
     through to `extensions.go`, the encodings list gains an `extensions`
     list after it, and the handshake's security switch calls
     `veNCrypt`. The decoder tells a `peer`, the Run's state, what the
     server's extension messages ask for; the writer sends what is due.
+  - Phase 3 merged after phase 2. An ExtendedDesktopSize that changes
+    the size resizes through DesktopSize's code, so it starts phase 2's
+    per-update draw budget again, and one of the size the screen has
+    does not, so a server cannot reset the budget with it.
+    `TestUpdateDrawBudget` covers both; keeping the count across the
+    resize, or resetting it for every ExtendedDesktopSize, makes it
+    fail. Pseudo-encodings cost nothing against the budget, and LastRect
+    ends the update as the rectangle count would. Phase 2's test helper
+    `desktop` is now `desktopImage`, since phase 3 has a type of that
+    name.
   - **VeNCrypt 0.2.** The backend chooses VeNCrypt whenever a server
     offers it. Of the subtypes it takes X509Plain (262), X509Vnc (261)
     and X509None (260), in an order set by the configuration: Plain
