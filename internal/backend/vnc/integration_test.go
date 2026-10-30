@@ -219,6 +219,12 @@ func referenceFrame(t *testing.T, addr, pw string) *image.RGBA {
 			}
 			covered += rw * rht
 		}
+		// TigerVNC may answer with an update that leaves pixels out, the
+		// cursor alone; the rest comes with the next request.
+		if covered < w*h {
+			_, err = nc.Write(appendUpdateRequest(nil, false, image.Rect(0, 0, w, h)))
+			must(err)
+		}
 	}
 	return img
 }
