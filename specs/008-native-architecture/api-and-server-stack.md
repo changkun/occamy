@@ -830,7 +830,13 @@ place for fixes that ship on v0 before beta.
   and allowing an address with a zone; `DELETE` that does not close.
   After review, also: the owner compared by subject alone in
   `ownSession`; a vnc connection's `tls` left unchecked; an ad-hoc vnc
-  target's certificate checked against its address, not its name.
+  target's certificate checked against its address, not its name. Once
+  #110 merged: a static user's name not mapped to `(occamy, local,
+  sub)`; an `idp: oidc` token for a static name let through after
+  unlinking; a stream token signed without the access token's `idp`;
+  `idp` refused on occamyd's own session tokens; a trusted issuer's
+  subject not checked by `validSubject`; and its static names compared
+  exactly rather than by `config.SameName`.
 - **Follow-ups:**
   - A per-connection `backend:` key (guacd-bridge's parity gate), `term`
     for ssh (the backend's `xterm-256color` until then) and per-connection
@@ -991,7 +997,8 @@ place for fixes that ship on v0 before beta.
   session, no takeover, and the WebSocket closed with another code than
   the `close` sent. After review, also: no recover in `serveStream`; no
   `refuseTimeout`; a session token's owner compared by subject alone in
-  `join`.
+  `join`; and the connection dropped after a message over the limit,
+  which `TestFinishAfterTooLarge` failed 20 runs of 20.
 - **Not checked live:** the demo SSH and VNC servers were not tried: the
   shared benchmark host's load average was 46 at the time. The tests run
   the routes against fake backends only.
