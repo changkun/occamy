@@ -398,14 +398,15 @@ reaches 0.871 at about quality 78 in about 75 KiB.
 
 **Review fixes, 2026-10-30.** An independent review reproduced every
 byte and SSIM and found the method sound; it led to these changes,
-measured again on 2026-10-30 at 19:31 UTC (same bytes and SSIM, times
-within 5 %):
+measured again on 2026-10-30 at 19:31 UTC (same bytes and SSIM; times
+within 5 % for 95 % of the sums per codec and class, within 10 % for
+98 %):
 
 - `bench/codecs` became its own module, with `make codecs` and a CI
   step; occamyd's `go.mod` is master's again.
 - PNG decoding expands the palette through a table instead of
-  image/draw, which had cost more than the decoding; Go decodes A in 45
-  to 95 % of PNG's time, not a quarter to three quarters.
+  image/draw, which had cost more than the decoding; Go decodes A in a
+  quarter to 95 % of PNG's time, depending on the colours.
 - The damage figures use WebP, the chosen codec, and JPEG from jpegn
   beside it; the browser's key tile at 128 has 257 colours and goes
   lossy.
