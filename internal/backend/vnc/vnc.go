@@ -133,6 +133,14 @@ type Config struct {
 	// is set or the server offers neither None nor VNC Authentication.
 	// It sends Username and Password, each of at most 63 bytes and
 	// without a NUL. ARD cannot be combined with a TLS requirement.
+	//
+	// ARD raises what an attacker in between gets from any server, not
+	// only from a Mac: without a TLS requirement, it can strip VeNCrypt
+	// from the server's offer and offer type 30 alone, and the backend
+	// sends it the whole password. Without ARD, the most such a
+	// downgrade gets is VNC Authentication's DES response, from the
+	// password's first 8 bytes. Set ARD only for Macs, on networks you
+	// trust.
 	ARD bool
 	// DialTimeout bounds the TCP connection and defaults to 15 seconds.
 	// Only Run's context bounds the handshake that follows, since it may
