@@ -67,11 +67,12 @@ The scope is delivered in four phases (see Task Breakdown).
   Updates copy without conversion; only the padding byte is set to opaque
   alpha.
 - **Update model:** with ContinuousUpdates the server pushes, and is
-  paused while nobody can see. Without it, one incremental
-  `FramebufferUpdateRequest` is outstanding while `Demand.Visible`: the
-  next is sent as soon as the previous update is applied, and none while
-  nobody can see ([session-core](session-core.md)). Viewer pacing
-  happens after the framebuffer.
+  paused while nobody can see. Without it, the backend asks for an
+  update while `Demand.Visible` and asks for the next as soon as that
+  update is applied, and asks for none while nobody can see. That is
+  [session-core](session-core.md)'s one outstanding request as far as RFB
+  can enforce it: at most one request per update applied (see the
+  implementation notes). Viewer pacing happens after the framebuffer.
 - **CopyRect** is passed to `Sink.CopyRect` so it can reach viewers as
   `copy-rect`.
 
@@ -166,8 +167,8 @@ leaves only RDP on the bridge.
 ## Implementation notes: phase 1
 
 - **Status.** Phase 1 is done: `internal/backend/vnc` implements
-  `backend.Backend` with `Config`, `New` and `Backend`, in about 1,300
-  lines of code and 2,200 of tests. Nothing wires it into `occamyd`: the
+  `backend.Backend` with `Config`, `New` and `Backend`, in about 1,400
+  lines of code and 2,500 of tests. Nothing wires it into `occamyd`: the
   sessions task registers backends.
 - **What was built.**
   - Run dials with the context, runs the handshake, sends
@@ -182,16 +183,18 @@ leaves only RDP on the bridge.
     network, and memory does not grow with the rectangle.
   - CopyRect goes to `Sink.CopyRect`, the Cursor pseudo-encoding to
     `Sink.Cursor` (the mask's clear bits transparent), `Bell` to
-    `Sink.Bell`, and `ServerCutText` from Latin-1 to UTF-8 as
-    `text/plain` to `Sink.Clipboard`. `SetColourMapEntries` is skipped.
+    `Sink.Bell`, and `ServerCutText` to `Sink.Clipboard` as `text/plain`
+    in UTF-8. `SetColourMapEntries` is skipped.
   - Tests run against a fake RFB server on the loopback interface that
     encodes pixels in the pixel format the client asks for, so a wrong
     request shows as wrong pixels. They cover each version's handshake,
     both security types, wrong and prompted passwords, refusals, each
     encoding, a resize mid-stream, the cursor, the clipboard both ways,
     input, demand gating, the server closing within each kind of message,
-    protocol errors and allocations; every test checks for leaked
-    goroutines. Coverage is 98% of statements. An integration test
+    cancellation mid-update, protocol errors and allocations. Every test
+    that runs the backend checks for leaked goroutines; the unit tests of
+    the handshake, the decoder and the conversions run no backend.
+    Coverage is 98% of statements. An integration test
     behind the `integration` build tag runs against the bench desktop's
     x11vnc: the idle screen decoded by the backend matches, pixel for
     pixel, the one an independent client reads in x11vnc's own pixel
@@ -200,7 +203,8 @@ leaves only RDP on the bridge.
     seeds in `testdata/fuzz/`. `TestFuzzCorpus` keeps the committed seeds
     equal to those the tests encode; `-args -update-corpus` rewrites
     them. A first run, 60 s of `FuzzServerMessages` and 45 s of
-    `FuzzHandshake`, found nothing.
+    `FuzzHandshake`, found nothing, nor did a second after the review
+    fixes (45 s and 20 s).
 - **Decisions made during implementation.**
   - Limits, checked before anything is read or allocated: a screen of at
     most 16384 pixels a side and 2^25 in all (8K UHD fits), since the
@@ -209,6 +213,19 @@ leaves only RDP on the bridge.
     beyond which the rest is read and dropped with a warning; the first
     4 KiB of a failure's reason. An empty screen, from ServerInit or
     DesktopSize, is an error, since the session cannot hold one.
+  - Resizes: an update resizes the screen at most once, and a second
+    DesktopSize in it is a protocol error. Servers send it as the last
+    rectangle (RFC 6143, section 7.8.2), and libvncserver as an update of
+    its own, while each resize reallocates the session's screen under its
+    exclusive lock. Rectangles after the one DesktopSize are still drawn,
+    on the new screen. Resizes also wait at least 100 ms for each other,
+    so that updates of 16 bytes cannot resize the screen faster than ten
+    times a second; an interactive resize still follows at that rate, and
+    TigerVNC's viewer waits 500 ms before it asks for one of its own. The
+    wait is a delay, not an error, and ends with Run's context.
+  - Cancellation: the decoder checks Run's context between messages and
+    between rectangles, so that Run returns at once when cancelled
+    instead of applying what is left in its 64 KiB read buffer.
   - Versions: 3.7 is 3.7, 3.8 and anything later (Apple's 3.889, 4.x) is
     answered with 3.8, as TigerVNC does, and any other 3.x is 3.3. RFC
     6143 says to treat every version but 3.7 and 3.8 as 3.3; answering
@@ -229,10 +246,21 @@ leaves only RDP on the bridge.
     flag set), so that Occamy never disconnects other VNC clients.
   - Updates: the first request after the handshake, and the first after
     a DesktopSize, ask for the whole screen; the others for changes.
-    Updates nobody asked for are applied, and do not count against the
-    outstanding request beyond clearing it. Demand is kept on the
-    `Backend`, not the Run, since the session reports only changes and
-    may report one before Run.
+    Demand is kept on the `Backend`, not the Run, since the session
+    reports only changes and may report one before Run.
+  - Requests: the bound enforced is at most one request per update
+    applied, and none without one, not exactly one outstanding. RFB has
+    no request IDs, so every update, including one nobody asked for,
+    counts as the answer to the pending request. A server that sends
+    updates unasked, which RFC 6143 forbids, may then hold two requests.
+    That is harmless where it was checked: libvncserver sends size
+    changes and cursor shapes before it looks at the requested region,
+    and keeps that region as the union of the requests (`sraRgnOr`), so
+    a second request merges with the first. Not clearing the pending
+    request on such updates would stall the loop against a server that
+    answers a request with a cursor-only update. session-core's "one
+    incremental update request outstanding" is the intent; this is the
+    form RFB allows.
   - A server that closes the connection between messages ends the
     session normally (Run returns nil), since RFB has no other way to end
     one; closing it within a message wraps `io.ErrUnexpectedEOF`.
@@ -245,11 +273,36 @@ leaves only RDP on the bridge.
     input of a `text/*` type, or none, becomes Latin-1 cut text with LF
     line ends and `?` for characters outside Latin-1; other types are
     ignored. `Resize` is ignored (decision 4) and `TermInput` fails with
-    `ErrUnsupportedInput`. The queue holds 256 inputs, then
-    `ErrInputFull`.
+    `ErrUnsupportedInput`. The queue holds 256 inputs and 8 MiB plus
+    64 KiB of their messages, two clipboards of the largest size, then
+    `ErrInputFull`. A `Text` costs 16 bytes a character, so one of more
+    than about 500,000 characters always fails.
+  - Text from the server, both the desktop name and cut text, is read as
+    UTF-8 if it is valid UTF-8 and as Latin-1 otherwise. RFC 6143 says
+    cut text is Latin-1, but many servers send UTF-8, and Latin-1 text
+    beyond ASCII is rarely valid UTF-8. Cut text cut short by the 4 MiB
+    limit within a UTF-8 character loses that character's first bytes
+    before the check. Text sent to the server stays Latin-1, as RFC 6143
+    requires; Extended Clipboard (phase 3) removes the asymmetry.
 - **Deviations from the spec.** None in scope. The pixel format bullet
   above now says that the padding byte is made opaque, which "without
-  conversion" left out.
+  conversion" left out, and the update model bullet says which bound on
+  requests is enforced.
+- **Review fixes.** A review of the pull request found:
+  - DesktopSize amplification: an update could carry 65535 DesktopSize
+    rectangles of 12 bytes, each reallocating the screen. 200 of them
+    alternating between 16384×2048 and 16383×2048, a 2404-byte update,
+    allocated 25.6 GiB in half a second, and after 65535 of them Run took
+    14.7 s to return from a cancel, since the decoder applied what its
+    buffer held. Fixed by the resize and cancellation rules above.
+  - More than one request could be outstanding after an update nobody
+    asked for. Kept, and documented, as the requests decision above
+    explains.
+  - The input queue was bounded by count only, so 256 clipboards or long
+    `Text`s could queue gigabytes against a server that stopped reading.
+    Fixed by the byte budget.
+  - Cut text was always read as Latin-1, while the desktop name was
+    sniffed for UTF-8. Both now follow the text rule above.
 - **Surprises / gotchas.**
   - x11vnc draws the pointer into the pixels for a client that does not
     take the Cursor pseudo-encoding, so frames compared across clients
@@ -268,5 +321,8 @@ leaves only RDP on the bridge.
     pointer's moves to `Sink.CursorMove`; it is not in the scope above.
   - A server that answers incremental requests with empty updates would
     make the request loop spin at the round-trip rate; none seen so far.
+  - Resizes are rate-limited by a fixed interval. A budget that scales
+    with the screen's size would bound the work better: at the largest
+    screen, ten resizes a second still reallocate 1.25 GiB a second.
   - Registration for `vnc` in the API's backend factory, and the parity
     gate against the guacd bridge.

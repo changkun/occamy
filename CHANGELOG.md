@@ -74,8 +74,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   configuration lacks, and the Raw, CopyRect, DesktopSize and Cursor
   encodings in the framebuffer's own pixel layout. It asks for screen
   updates only while a viewer can see the screen, sends keys, pointer,
-  wheel and Latin-1 clipboard text, and checks every length the server
-  sends before it reads or allocates. `occamyd` does not use it yet.
+  wheel and Latin-1 clipboard text, and reads the server's clipboard as
+  UTF-8 when it is valid UTF-8. It checks every length the server sends
+  before it reads or allocates, resizes the screen at most once an
+  update and ten times a second, and bounds its queued input by bytes.
+  `occamyd` does not use it yet.
 
 ### Changed
 
