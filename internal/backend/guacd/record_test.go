@@ -525,7 +525,8 @@ func lastSyncEnd(stream []byte) (int, error) {
 // screen moved, and the last frame. It writes the stream, the manifest
 // and the pinned pixels. What the replay breaks is reported after the
 // recording is written, so that TestConformance reproduces it; only a
-// replay that draws nothing stops it.
+// stream that does not parse, a replay that draws nothing or a file
+// that cannot be written stops it.
 func save(t *testing.T, rec *recording, stream []byte) {
 	t.Helper()
 	counts, err := instructions(stream)
