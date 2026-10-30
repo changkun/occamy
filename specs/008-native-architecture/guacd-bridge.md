@@ -330,10 +330,11 @@ do not).
     same `-p`, which leaves other stacks alone. `-record vnc,rdp,ssh`
     picks recordings, and `-pin` pins the existing ones again from
     their streams, without containers, for when the bridge's rendering
-    changes on purpose. A checkpoint that never shows stops a
-    recording; otherwise the recorder writes it, then replays it and
-    reports what breaks the rules, so that `TestConformance` reproduces
-    a bridge bug it found.
+    changes on purpose. A checkpoint that never shows, a stream that
+    does not parse, a replay that draws nothing or a file that cannot
+    be written stops a recording. Otherwise the recorder writes it and
+    then reports what in its replay breaks the rules, so that
+    `TestConformance` reproduces a bridge bug it found.
 - **Recordings.** All three log in, type, scroll and ask to resize; the
   two desktops also drag a window. Each instruction count below is from
   its manifest; `cfill` follows each `rect`, `end` closes each `img`
