@@ -28,8 +28,11 @@ make stop
 unless `make e2e` points them at a running stack. No C toolchain is needed.
 See the README for a native build. The guacd bridge's conformance corpus,
 recorded guacd sessions that `go test` replays, is recorded again with
-`go test -tags record` against the bench stack, as the doc comment of
-`internal/backend/guacd/record_test.go` shows.
+`go test -tags record` against the bench stack, run as a compose project
+of its own (`$CONTAINER_ENGINE compose -p occamy-record`), as the doc
+comment of `internal/backend/guacd/record_test.go` shows. When a replay
+fails, `OCCAMY_CONFORMANCE_DUMP=<dir> go test -run TestConformance
+./internal/backend/guacd` writes the failing frames there as PNG files.
 
 `make lint` runs golangci-lint v2 with the linters and formatters in
 `.golangci.yml`, as CI does. Code must be `gofmt`ed, with imports grouped

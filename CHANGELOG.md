@@ -47,7 +47,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   SSH sessions on the bench stack, recorded with `go test -tags record`
   and replayed by `go test` without containers, which fails on any
   error, unsupported operation or log line, on a checkpoint that does
-  not show the scene's idle screen, and on a changed final frame.
+  not show the scene's idle screen, on a changed pixel where a `copy`
+  moved content, on prompts, handshake, credential answers or sync
+  answers that differ from the recording's, and on a changed final
+  frame. `OCCAMY_CONFORMANCE_DUMP` names a directory for the frames of
+  failed checks. RDP is recorded with `disable-gfx`, since through the
+  graphics pipeline xrdp's RemoteFX Progressive codec shifted the
+  desktop's colours by up to 22 levels before guacd saw them.
 - A native SSH backend for protocol v1, `internal/backend/ssh`, in pure
   Go. It accepts only pinned host keys, by key or SHA-256 fingerprint,
   unless told to ignore them, which it logs as a warning. It
@@ -107,8 +113,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - `internal/guacamole`'s display, which the benchmark and the guacd
   bridge draw with, decodes lossy WebP as libwebp, and so a browser,
   does. `golang.org/x/image/webp` alone read VP8's limited-range colours
-  as full-range and did not interpolate chroma, which put guacd's frames
-  up to 38 levels a channel off.
+  as full-range and did not interpolate chroma, which put guacd's WebP
+  images up to 38 levels a channel off libwebp's on a first recording
+  (320 images), and up to 34 on the 36 of the committed conformance
+  corpus.
+- The same display reads an image's size before decoding it and refuses
+  one wider or taller than 16,384 pixels or larger than 8192×8192 in
+  all, so that an `img` stream cannot make the guacd bridge allocate
+  gigabytes.
 
 ### Security
 

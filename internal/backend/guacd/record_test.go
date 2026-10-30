@@ -14,7 +14,9 @@
 // The stack runs as a compose project of its own, with only the services
 // the recordings need, so that taking it down leaves other stacks alone.
 // Its guacd is published on 127.0.0.1:4822, as make bench's is, so run it
-// while no bench stack is up. CONTAINER_ENGINE is podman or docker.
+// while no bench stack is up. CONTAINER_ENGINE is podman or docker. On a
+// shared host, check the load (uptime) first, and touch no containers
+// but the project's.
 //
 //	export CONTAINER_ENGINE=podman
 //	compose="$CONTAINER_ENGINE compose -p occamy-record -f docker/docker-compose.yaml -f docker/docker-compose.bench.yaml"

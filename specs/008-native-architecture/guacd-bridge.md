@@ -125,7 +125,11 @@ protocols or is deleted.
    VNC, RDP and SSH plugins emit, confirmed by recording real sessions,
    with transfer functions other than `SRC` and `OVER` rejected loudly.
    Answered by Decision 3, and the recordings of the conformance corpus
-   confirmed it: the bridge applies all they contain.
+   confirmed it: the bridge applies all the drawing they contain. The
+   SSH recording also has three `argv` streams, in which guacd offers
+   its terminal's `color-scheme`, `font-name` and `font-size` for a
+   client to change; the bridge refuses each with an `ack` (0x0100), as
+   viewers cannot change them, and the corpus checks that it does.
 4. Gate values: N, H, and the performance tolerance?
 5. ~~After RDP goes native: keep the bridge, or delete it?~~ Answered
    2026-10-30: v1.0 ships without guacd
@@ -293,23 +297,43 @@ do not).
   recording per protocol, each a `<name>.guac.gz` (every byte guacd sent
   the bridge, cut after the last complete `sync`, gzipped) and a
   `<name>.json` manifest (guacd parameters without secrets, the size
-  asked for, the steps taken, checkpoints, the instruction counts, and
-  the final frame's size and SHA-256).
+  asked for, the steps taken, checkpoints, pinned regions, the prompts
+  the bridge raised, the instruction counts, and the final frame's size
+  and SHA-256), and for each region a `<name>-copy.png` of its pixels.
   - `TestConformance` (no build tag, no containers) checks each stream's
     instruction counts against its manifest, then replays it through the
     bridge from a scripted guacd on `net.Pipe` that sends the stream and
-    `disconnect`, inside a `synctest` bubble. The replay must end
-    without error, with nothing unsupported and nothing logged, show
-    the idle screen at each checkpoint, and end on the pinned frame.
+    `disconnect`, inside a `synctest` bubble, answering every prompt
+    with "answer". The replay must end without error, with nothing
+    unsupported and nothing logged, raise the manifest's prompts (VNC:
+    one, a secret field labelled Password), show the idle screen at each
+    checkpoint and the pinned pixels in each region, and end on the
+    pinned frame. What the bridge sent back is checked too: `select`
+    with the protocol first, `size` with the width and height asked
+    for, `image` offering WebP, `connect` with the protocol version and
+    each value in the order of guacd's `args`, an `argv` stream holding
+    "answer" for each name guacd `required`, an `ack` with 0x0100
+    refusing each `argv` stream guacd opened, and one `sync` answer for
+    each frame, in order.
+  - A failed checkpoint or region, or a final frame with another hash,
+    writes the frame as a PNG file to the directory that
+    `OCCAMY_CONFORMANCE_DUMP` names, and logs the path; without it the
+    test logs how to get one.
   - `TestRecord` (build tag `record`) drives a bridge through live
     sessions and writes the corpus; its doc comment has the commands.
-    In short: start `guacd vnc rdp ssh` from `docker-compose.yaml` plus
-    `docker-compose.bench.yaml`, run `go test -tags record -run
-    TestRecord ./internal/backend/guacd -args -guacd 127.0.0.1:4822`,
-    and `-record vnc,rdp,ssh` picks recordings. It replays what it
-    recorded and reports what breaks the rules, but writes the recording
-    regardless, so that `TestConformance` reproduces a bridge bug it
-    found.
+    In short: check that the host is idle (`uptime`) and that no bench
+    stack holds port 4822, start `guacd vnc rdp ssh` from
+    `docker-compose.yaml` plus `docker-compose.bench.yaml` as a compose
+    project of its own (`$CONTAINER_ENGINE compose -p occamy-record`),
+    run `go test -tags record -run TestRecord ./internal/backend/guacd
+    -args -guacd 127.0.0.1:4822`, and take the project down with the
+    same `-p`, which leaves other stacks alone. `-record vnc,rdp,ssh`
+    picks recordings, and `-pin` pins the existing ones again from
+    their streams, without containers, for when the bridge's rendering
+    changes on purpose. A checkpoint that never shows stops a
+    recording; otherwise the recorder writes it, then replays it and
+    reports what breaks the rules, so that `TestConformance` reproduces
+    a bridge bug it found.
 - **Recordings.** All three log in, type, scroll and ask to resize; the
   two desktops also drag a window. Each instruction count below is from
   its manifest; `cfill` follows each `rect`, `end` closes each `img`
@@ -318,29 +342,38 @@ do not).
   | Recording | Session | Instructions | Compressed |
   |-----------|---------|--------------|------------|
   | `vnc` | bench desktop, x11vnc, 1024×768; password through `required` | `args` `ready` `required` `ack`, `size` 3, `rect`/`cfill` 16, `copy` 111, `img` 130 (PNG 108, WebP 22), `cursor` 2, `sync` 22 | 275,248 bytes (398,004 raw) |
-  | `rdp` | bench desktop, xrdp, 640×480 resized to 800×600 | `args` `ready`, `size` 7, `rect`/`cfill` 14, `copy` 21, `img` 36 (PNG 24, WebP 12), `cursor` 2, `mouse` 1, `dispose` 2, `sync` 20 | 586,022 bytes (788,594 raw) |
+  | `rdp` | bench desktop, xrdp without the graphics pipeline at 24 bits, 640×480 resized to 800×600 | `args` `ready`, `size` 7, `rect`/`cfill` 24, `copy` 28, `img` 28 (PNG 15, WebP 13), `cursor` 1, `dispose` 2, `sync` 19 | 89,027 bytes (125,652 raw) |
   | `ssh` | demo SSH server, 800×600 resized to 640×480; password at the terminal's prompt | `args` `ready` `argv` 3, `size` 15, `move` 13, `rect`/`cfill` 22, `copy` 13, `img` 32 (PNG 31, WebP 1), `cursor` 3, `sync` 21 | 66,713 bytes (99,181 raw) |
 
-  The corpus is 928 KB. On the desktops, `bench/scene` gives the
+  The corpus is 479 KB with its manifests and pinned regions. On the
+  desktops, `bench/scene` gives the
   content: letters paint the probe's swatch, F3 scrolls a page of text
   (a wheel notch is turned while it does), F4 drags a 400×300 window,
   and Escape returns to the idle gradient. The terminal session types
   `echo hello`, `seq 1 200`, turns the wheel three notches back and
   forward, resizes, runs `ls -l /` and exits.
-- **Bug found and fixed: WebP colours.** The first VNC recording failed
-  its checkpoint after the drag: five pixels were 25 levels off in blue,
-  one more than the tolerance. Two errors were stacked there. guacd's
-  lossy WebP itself had left a ringing artefact that a browser shows
-  too (libwebp decodes those pixels 21 off), and the bridge's decoding
-  of that WebP added to it. `golang.org/x/image/webp` returns a lossy image as
-  `image.YCbCr`, whose model is JPEG's full-range YCbCr, while VP8
-  samples are BT.601 limited-range; it also leaves chroma at half
-  resolution where libwebp interpolates it. Over the 320 WebP images of
-  that recording the display was up to 38 levels a channel off dwebp.
+- **Bug found and fixed: WebP colours.** A first, uncommitted VNC
+  recording failed its checkpoint after the drag, under the 24-level
+  tolerance the checkpoints then had: five pixels were 25 levels off in
+  blue. Two errors were stacked there. guacd's lossy WebP itself had
+  left an artefact that a browser shows too (libwebp decodes those
+  pixels 21 off), and the bridge's decoding of that WebP added to it.
+  `golang.org/x/image/webp` returns a lossy image as `image.YCbCr`,
+  whose model is JPEG's full-range YCbCr, while VP8 samples are BT.601
+  limited-range; it also leaves chroma at half resolution where libwebp
+  interpolates it. Over the 320 WebP images of that first recording the
+  display was up to 38 levels a channel off dwebp; over the 36 of the
+  committed corpus (VNC 22, RDP 13, SSH 1) it is up to 34.
   `internal/guacamole/webp.go` now converts 4:2:0 images itself with
   libwebp's fixed-point arithmetic and its fancy upsampling (9:3:3:1),
-  and matches dwebp 1.6 exactly on all 320. `TestDisplayWebPMatchesLibwebp`
-  pins two cwebp-encoded images, one with alpha, to dwebp's output.
+  and matches dwebp 1.6 exactly on all 320 and all 36.
+  `TestDisplayWebPMatchesLibwebp` pins two cwebp-encoded images, one
+  with alpha, to dwebp's output, and `TestClip8` the clipping at
+  256<<6, where `uint8(v>>6)` would wrap to 0. In the corpus the fix is
+  guarded by the second checkpoint of each desktop: with the old
+  decoder 26,328 pixels of VNC's and 43,817 of RDP's are more than 6
+  levels off, against an allowance of 1,400 (see Decisions), and the
+  copy regions of both fail too.
 - **Decisions.**
   - The recorder tees the bridge's connection, so what is recorded is
     exactly what the bridge read. The stream is cut after the last
@@ -348,14 +381,33 @@ do not).
     pinned from a replay of the cut stream, never from the live sink.
   - Checkpoints check meaning, not just stability. The idle screen is
     known: the gradient of `bench/scene` and the swatch's colour. A
-    checkpoint frame must match it within 24 levels a channel, with
-    none of the swatch's pixels and at most one in a thousand of the
-    rest further off. The allowance is for lossy residue (see
-    Surprises). The recorder presses Escape, waits for half a second of
-    quiet, presses the letter, and takes the first frame from then that
-    shows the idle screen. The pause keeps the swatch lossless. Letters
-    are chosen so each changes the swatch's colour, since a press that
-    changes nothing brings no frame over RDP.
+    checkpoint frame must match it within 6 levels a channel, with none
+    of the swatch's pixels and at most 1,400 of the rest further off:
+    a line around the 400×300 dragged window, which is the residue
+    guacd leaves (see Surprises). The recordings need 0 at their first
+    checkpoints and 269 (VNC) and 865 (RDP) at their second; WebP
+    decoded as libwebp does keeps the smooth gradient within 4 levels
+    elsewhere. The allowance no longer scales with the screen, since
+    the residue scales with the window. The recorder presses Escape,
+    waits for half a second of quiet, presses the letter, and takes the
+    first frame from then that shows the idle screen. The pause keeps
+    the swatch lossless. Letters are chosen so each changes the
+    swatch's colour, since a press that changes nothing brings no frame
+    over RDP.
+  - Regions pin what `copy` moved, so that a broken copy fails with a
+    pixel's position rather than only a hash. The recorder lists the
+    frames in which a copy of at least 128×128 lands on the screen (on
+    the default layer, or on a layer `move`d onto it, as the SSH
+    terminal's is), keeping the 24 with the largest copies, and replays
+    the stream twice: as recorded and without its `copy` instructions.
+    It pins the 128×128 square, on a 32-pixel grid within a copy's
+    destination, where the two replays differ most, the latest on a
+    tie, and checks it exactly. Choosing by the difference matters: a
+    scroll back and forth, or a copy that later drawing covers, looks
+    the same without copy, and the SSH recording's last large copy
+    (scrolling the terminal forward again) did not notice copy being
+    disabled. With `Display.copy` disabled, each recording now fails its
+    region: VNC at (194,512), RDP at (320,192), SSH at (388,278).
   - Secrets stay out of the corpus. VNC's password goes through guacd's
     `required` and the bridge's prompt, and SSH's is typed at guacd's
     terminal prompt, so neither is in a manifest; the recorder passes
@@ -364,8 +416,15 @@ do not).
   - Size: the text page and the dragged window are dense images, so
     those phases are cut short (a tenth of a second of scrolling, 80 ms
     of dragging), and RDP starts at 640×480 and resizes up, since the
-    idle gradient after the resize is cheap. RDP is still the largest:
-    each scrolled frame comes as new images of the page, not as `copy`.
+    idle gradient after the resize is cheap. Through the graphics
+    pipeline RDP was the largest recording (586 KB), each scrolled frame
+    coming as new images. Without it guacd sends moved content as
+    `copy` from its copy of the previous frame (buffer -1), as it does
+    for VNC, and the recording is 89 KB.
+  - RDP is recorded with `disable-gfx=true` and `color-depth=24`, so
+    that the desktop's pixels reach guacd without loss (see Surprises).
+    24 bits, since guacd asks for 16 (`RDP_DEFAULT_DEPTH`) when the
+    graphics pipeline is off and 32 only when it is on.
 - **Deviations.**
   - The spec said the demo stack. The desktops are the bench stack's
     (`docker-compose.bench.yaml`), whose `bench/scene` gives content with
@@ -381,19 +440,64 @@ do not).
     no NLA, so RDP takes the password as a parameter, and guacd's SSH
     support prompts inside the terminal (`guac_terminal_prompt`).
 - **Surprises.**
+  - guacd's RDP shifted colours before guacd encoded anything. The
+    first RDP recording, with guacd's defaults, matched the idle screen
+    at none of its checkpoints within 6 levels: at the first, 307,072
+    of 640×480 pixels differed, 126,254 by more than 8 and at most by
+    22, on average 4.9, 5.5 and 7.3 levels darker in red, green and
+    blue (the gradient's centre came as (40,79,109) for (45,84,116)),
+    and guacd's PNG images already held those colours. guacd 1.6
+    enables the RDP graphics pipeline unless `disable-gfx` is set
+    (`settings.c`), and through it xrdp 0.10.1 encodes the screen with
+    RemoteFX Progressive (its log: `starting gfx rfx pro codec
+    session`), which is lossy. FreeRDP decodes it in guacd, so a
+    browser shows the same colours. Recorded again on the same stack
+    with `disable-gfx=true` and `color-depth=24`, xrdp sends bitmaps
+    (no codec in its log) and the first checkpoint matches exactly, all
+    307,200 pixels; with guacd's defaults again, the live recording
+    failed that checkpoint on the swatch, (0,251,12) for (0,255,0). Deployments that want exact colours over the bridge need
+    `disable-gfx`, at the cost of the pipeline's bandwidth savings.
   - guacd never repaints a lossy region without loss. It encodes a
     64×64 cell as WebP or JPEG when the cell changed at three frames a
     second or more (`GUAC_DISPLAY_JPEG_FRAMERATE`) and PNG would not
-    compress it better (`display-worker.c`), and it sends only
-    pixels that differ from what it sent last (`display-plan.c`), so the
-    ringing stays until the pixels change. Browsers show the same
-    residue. Hence the outlier allowance in checkpoints.
+    compress it better (`display-worker.c`), and it sends only pixels
+    that differ, in its own lossless copy of the screen, from what it
+    sent last (`display-plan.c`). So pixels that were the wallpaper
+    before and after a lossy update keep that update's error. While the
+    window is dragged, a WebP update holds the window and the
+    wallpaper beside it, and 4:2:0 chroma, interpolated by libwebp from
+    the two nearest chroma rows, carries the window's colour a quarter
+    into the wallpaper's first row past its edge. The window moves on,
+    but that row was the wallpaper all along and is never sent again.
+    At RDP's second checkpoint, row 400 is (59,102,117) where the
+    wallpaper is (55,101,134), drawn by a 448×376 WebP image during the
+    drag, which dwebp decodes to the same pixels. The residue
+    is one-pixel lines along the window's edges, up to 47 levels off;
+    browsers show the same. Hence the residue allowance in checkpoints.
   - guacd's RDP sends no frame while the screen stands still, so the
     recorder watches every frame from the letter's press on rather than
     waiting for the next one.
   - Load on the shared host only changes how many frames a phase
     produces; the checks do not depend on it.
+- **From review.**
+  - The display reads an image's size from its header
+    (`DecodeConfig` for its type) before decoding it, and refuses one
+    wider or taller than a layer may grow (16,384) or larger than
+    8192×8192 pixels in all, with `errImageSize`, so that an `img`
+    stream cannot make the bridge allocate gigabytes. Before, a
+    16383×16383 lossy WebP header, which `TestImageTooLarge` sends,
+    would have decoded into about 1 GiB.
+  - Opaque WebP images convert to `image.RGBA` rather than
+    `image.NRGBA`, which `draw.Draw` composites on its RGBA path rather
+    than premultiplying each pixel. `BenchmarkWebPOver` (a 448×480 4:2:0 image converted and
+    drawn with OVER), ten runs each on the shared host: median 1,425 µs
+    before (load average 5.2 to 5.5) and 1,385 µs after (7.0 to 7.1),
+    about 3% faster, which is within the host's noise, with the same
+    860 KB and 2 allocations an operation: the converted image.
 - **Follow-ups.**
+  - Registration decides whether the bridge passes `disable-gfx` for
+    RDP by default, trading the graphics pipeline's bandwidth for exact
+    colours (see Surprises).
   - Recordings are real time, so recording again pins other frames and
     other hashes. Record again when guacd's version changes.
   - JPEG decoding is unmeasured. libjpeg-turbo interpolates chroma by
