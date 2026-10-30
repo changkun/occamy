@@ -297,8 +297,32 @@ func (t *Terminal) Snapshot() *Screen {
 	if t.altActive {
 		s.alt = freezeLines(t.alt)
 	}
+	s.stamp(t.snap)
 	t.snap = s
 	return s
+}
+
+// stamp gives each row of s, and its cursor, the version at which they
+// came to look as they do, from those of the snapshot before.
+func (s *Screen) stamp(prev *Screen) {
+	ls := s.lines()
+	s.rowVersions = make([]uint64, len(ls))
+	same := prev != nil && prev.Cols == s.Cols && prev.Rows == s.Rows
+	var old []*line
+	if same {
+		old = prev.lines()
+	}
+	for y, l := range ls {
+		if same && l.equal(old[y]) {
+			s.rowVersions[y] = prev.rowVersions[y]
+		} else {
+			s.rowVersions[y] = s.Version
+		}
+	}
+	s.cursorVersion = s.Version
+	if same && prev.Cursor == s.Cursor {
+		s.cursorVersion = prev.cursorVersion
+	}
 }
 
 func freezeLines(ls []*line) []*line {
