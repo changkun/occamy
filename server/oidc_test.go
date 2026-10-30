@@ -77,6 +77,7 @@ type testIdP struct {
 	issParam    string // the authorization endpoint adds iss (RFC 9207)
 	tokenStatus int    // the token endpoint fails with this status
 	noIDToken   bool
+	oct         []byte // a symmetric key that the key set also lists
 }
 
 type idpGrant struct {
@@ -145,11 +146,17 @@ func (p *testIdP) discovery(w http.ResponseWriter, r *http.Request) {
 func (p *testIdP) jwks(w http.ResponseWriter, _ *http.Request) {
 	pub := p.key.PublicKey
 	b64 := base64.RawURLEncoding.EncodeToString
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{{
+	keys := []map[string]string{{
 		"kty": "RSA", "kid": "k1", "alg": "RS256", "use": "sig",
 		"n": b64(pub.N.Bytes()), "e": b64(big.NewInt(int64(pub.E)).Bytes()),
-	}}})
+	}}
+	p.mu.Lock()
+	if p.oct != nil {
+		keys = append(keys, map[string]string{"kty": "oct", "kid": "k1", "k": b64(p.oct)})
+	}
+	p.mu.Unlock()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"keys": keys})
 }
 
 // authorize signs the user in at once, after checking the request as a
@@ -789,6 +796,7 @@ func TestOIDCIDTokenRefused(t *testing.T) {
 		name  string
 		spoil func(jwt.MapClaims)
 		sign  func(jwt.MapClaims) string
+		oct   []byte
 	}{
 		{name: "nonce mismatch", spoil: func(c jwt.MapClaims) { c["nonce"] = rand.Text() }},
 		{name: "no nonce", spoil: func(c jwt.MapClaims) { delete(c, "nonce") }},
@@ -808,6 +816,13 @@ func TestOIDCIDTokenRefused(t *testing.T) {
 		{name: "HMAC with the public key's DER", sign: func(c jwt.MapClaims) string {
 			return signWith(jwt.SigningMethodHS256, pub, c)
 		}},
+		{
+			// go-jose will not take an RSA key as an HMAC secret, so
+			// only a key set that lists a symmetric key shows that the
+			// algorithm list, not the key's type, refuses HMAC.
+			name: "HMAC with a symmetric key in the key set", oct: pubPEM,
+			sign: func(c jwt.MapClaims) string { return signWith(jwt.SigningMethodHS256, pubPEM, c) },
+		},
 		{name: "another key", sign: func(c jwt.MapClaims) string {
 			return signWith(jwt.SigningMethodRS256, other, c)
 		}},
@@ -815,7 +830,7 @@ func TestOIDCIDTokenRefused(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ot := newOIDCTest(t, nil)
-			ot.idp.set(func(p *testIdP) { p.spoil, p.sign = tt.spoil, tt.sign })
+			ot.idp.set(func(p *testIdP) { p.spoil, p.sign, p.oct = tt.spoil, tt.sign, tt.oct })
 			cb, _ := ot.signIn(t, newBrowser(t))
 			wantError(t, cb, codeSignInFailed)
 		})
