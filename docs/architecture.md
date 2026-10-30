@@ -77,7 +77,7 @@ the spec it implements.
 | [internal/framebuffer/](../internal/framebuffer) | A session's screen in tiles, versioned from one counter, so each viewer is sent only the tiles it has not seen ([graphics-pipeline](../specs/008-native-architecture/graphics-pipeline.md)) |
 | [internal/auth/](../internal/auth) | Tokens of API v1: Ed25519 JWTs for access (a user and groups) and for sessions (a session and a role), from occamyd or a trusted issuer ([api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md)) |
 | [internal/session/](../internal/session) | The session core: one goroutine per session runs a backend, applies input by role, keeps each viewer's small state as latest values, and a registry holds sessions and share tokens ([session-core](../specs/008-native-architecture/session-core.md)) |
-| [internal/backend/ssh/](../internal/backend/ssh) | The native SSH backend: a pure-Go client that verifies pinned host keys, asks the owner for keyboard-interactive answers and missing passwords, and feeds a shell's PTY output to the session's terminal ([native-ssh-backend](../specs/008-native-architecture/native-ssh-backend.md)) |
+| [internal/backend/ssh/](../internal/backend/ssh) | The native SSH backend: a pure-Go client that verifies pinned host keys, logs in with key files or a password and asks the owner for what they cannot answer, and feeds a shell's PTY output to the session's terminal ([native-ssh-backend](../specs/008-native-architecture/native-ssh-backend.md)) |
 
 ## License
 
