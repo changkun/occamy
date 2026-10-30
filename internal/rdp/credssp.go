@@ -6,8 +6,6 @@ package rdp
 
 import (
 	"bufio"
-	"bytes"
-	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
@@ -17,20 +15,24 @@ import (
 	"errors"
 	"fmt"
 	"io"
-
-	"github.com/oiweiwei/go-msrpc/ssp/credential"
-	"github.com/oiweiwei/go-msrpc/ssp/ntlm"
 )
 
-// CredSSP ([MS-CSSP]) with NTLM ([MS-NLMP]) as its only mechanism: no
-// SPNEGO wrapping and no Kerberos, which [MS-CSSP] 3.1.5 allows. NTLM's
-// messages, signing and sealing come from go-msrpc's ssp/ntlm; this file
-// frames them in TSRequests and binds the server's TLS public key.
+// CredSSP ([MS-CSSP]) with NTLM ([MS-NLMP], ntlm.go) as its only
+// mechanism: no SPNEGO wrapping and no Kerberos, which [MS-CSSP] 3.1.5
+// allows. This file frames NTLM's messages in TSRequests and binds the
+// server's TLS public key.
 
-// credSSPVersion is the TSRequest version the client speaks: 6 adds the
-// client nonce that binds the public key hash ([MS-CSSP] 3.1.5.1.1,
-// CVE-2018-0886) and the error code.
-const credSSPVersion = 6
+const (
+	// credSSPVersion is the TSRequest version the client speaks: 6 adds
+	// the error code to version 5.
+	credSSPVersion = 6
+	// minCredSSPVersion is the oldest version the client accepts. Version
+	// 5 binds the public key with the client's nonce and a hash
+	// ([MS-CSSP] 3.1.5.1.1); the binding of earlier versions is the one
+	// CVE-2018-0886 broke, and since the 2018 fix Windows clients refuse
+	// servers that offer only it.
+	minCredSSPVersion = 5
+)
 
 // tsRequest is [MS-CSSP] 2.2.1 TSRequest.
 type tsRequest struct {
@@ -79,70 +81,51 @@ func (e *CredSSPError) Error() string {
 // credSSP authenticates over an established TLS connection, read through
 // r and written to w, whose server certificate is cert.
 func credSSP(r *bufio.Reader, w io.Writer, cert *x509.Certificate, domain, user, password string) error {
-	ctx := context.Background()
 	pub, err := subjectPublicKey(cert)
 	if err != nil {
 		return err
 	}
-	name := user
-	if domain != "" {
-		name = domain + `\` + user
-	}
-	cfg := ntlm.NewConfig()
-	cfg.Integrity, cfg.Confidentiality = true, true
-	cfg.Credential = credential.NewFromPassword(name, password)
-	a := &ntlm.Authentifier{Config: cfg}
-
-	negotiate, err := a.Negotiate(ctx)
-	if err != nil {
-		return fmt.Errorf("rdp: NTLM negotiate: %w", err)
-	}
-	if err := writeTSRequest(w, &tsRequest{Version: credSSPVersion, NegoTokens: []negoToken{{negotiate}}}); err != nil {
+	nc := &ntlmClient{domain: domain, user: user, password: password}
+	if err := writeTSRequest(w, &tsRequest{Version: credSSPVersion, NegoTokens: []negoToken{{nc.negotiateMessage()}}}); err != nil {
 		return err
 	}
 	resp, err := readTSRequest(r)
 	if err != nil {
 		return err
 	}
+	if resp.Version < minCredSSPVersion {
+		return fmt.Errorf("rdp: the server speaks CredSSP version %d; the client needs %d or later", resp.Version, minCredSSPVersion)
+	}
 	if len(resp.NegoTokens) == 0 {
 		return errors.New("rdp: CredSSP response without NTLM challenge")
 	}
 	version := min(resp.Version, credSSPVersion)
-	authenticate, err := a.Authenticate(ctx, resp.NegoTokens[0].Token)
+	authenticate, sess, err := nc.authenticate(resp.NegoTokens[0].Token)
 	if err != nil {
-		return fmt.Errorf("rdp: NTLM authenticate: %w", err)
-	}
-	req := &tsRequest{Version: version, NegoTokens: []negoToken{{authenticate}}}
-	bind := pub
-	if version >= 5 {
-		req.ClientNonce = make([]byte, 32)
-		if _, err := rand.Read(req.ClientNonce); err != nil {
-			return err
-		}
-		bind = bindingHash(clientServerHashMagic, req.ClientNonce, pub)
-	}
-	if req.PubKeyAuth, err = seal(ctx, a, bind); err != nil {
 		return err
 	}
-	if err := writeTSRequest(w, req); err != nil {
+	nonce := make([]byte, 32)
+	if _, err := rand.Read(nonce); err != nil {
+		return err
+	}
+	err = writeTSRequest(w, &tsRequest{
+		Version:     version,
+		NegoTokens:  []negoToken{{authenticate}},
+		PubKeyAuth:  sess.seal(bindingHash(clientServerHashMagic, nonce, pub)),
+		ClientNonce: nonce,
+	})
+	if err != nil {
 		return err
 	}
 	resp, err = readTSRequest(r)
 	if err != nil {
 		return err
 	}
-	got, err := unseal(ctx, a, resp.PubKeyAuth)
+	got, err := sess.unseal(resp.PubKeyAuth)
 	if err != nil {
 		return fmt.Errorf("rdp: CredSSP server public key: %w", err)
 	}
-	var want []byte
-	if version >= 5 {
-		want = bindingHash(serverClientHashMagic, req.ClientNonce, pub)
-	} else {
-		want = bytes.Clone(pub)
-		want[0]++
-	}
-	if !hmac.Equal(got, want) {
+	if !hmac.Equal(got, bindingHash(serverClientHashMagic, nonce, pub)) {
 		return errors.New("rdp: CredSSP server proved a different public key")
 	}
 
@@ -154,11 +137,7 @@ func credSSP(r *bufio.Reader, w io.Writer, cert *x509.Certificate, domain, user,
 	if err != nil {
 		return err
 	}
-	authInfo, err := seal(ctx, a, ts)
-	if err != nil {
-		return err
-	}
-	return writeTSRequest(w, &tsRequest{Version: version, AuthInfo: authInfo})
+	return writeTSRequest(w, &tsRequest{Version: version, AuthInfo: sess.seal(ts)})
 }
 
 // bindingHash is the SHA-256 public key hash of [MS-CSSP] 3.1.5 for
@@ -182,47 +161,6 @@ func subjectPublicKey(cert *x509.Certificate) ([]byte, error) {
 		return nil, fmt.Errorf("rdp: server certificate public key: %w", err)
 	}
 	return spki.PublicKey.Bytes, nil
-}
-
-// seal is GSS_WrapEx with NTLM: the 16-byte signature, then the
-// encrypted message ([MS-CSSP] 3.1.5, [MS-NLMP] 3.4.3).
-func seal(ctx context.Context, a *ntlm.Authentifier, msg []byte) ([]byte, error) {
-	data := bytes.Clone(msg)
-	chk, err := a.MakeOutboundChecksum(ctx, [][]byte{data})
-	if err != nil {
-		return nil, err
-	}
-	if err := a.ApplyOutboundCipher(ctx, data); err != nil {
-		return nil, err
-	}
-	sig, err := a.MakeOutboundSignature(ctx, chk)
-	if err != nil {
-		return nil, err
-	}
-	return append(sig, data...), nil
-}
-
-// unseal is GSS_UnwrapEx with NTLM, which checks the signature.
-func unseal(ctx context.Context, a *ntlm.Authentifier, msg []byte) ([]byte, error) {
-	if len(msg) < 16 {
-		return nil, errors.New("rdp: sealed message too short")
-	}
-	data := bytes.Clone(msg[16:])
-	if err := a.ApplyInboundCipher(ctx, data); err != nil {
-		return nil, err
-	}
-	chk, err := a.MakeInboundChecksum(ctx, [][]byte{data})
-	if err != nil {
-		return nil, err
-	}
-	sig, err := a.MakeInboundSignature(ctx, chk)
-	if err != nil {
-		return nil, err
-	}
-	if !hmac.Equal(sig, msg[:16]) {
-		return nil, errors.New("rdp: sealed message has a bad signature")
-	}
-	return data, nil
 }
 
 func writeTSRequest(w io.Writer, req *tsRequest) error {

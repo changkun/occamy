@@ -23,6 +23,7 @@ import (
 	"math/big"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -125,11 +126,11 @@ func (s *fakeServer) serve(conn net.Conn) error {
 	}
 	r := bufio.NewReader(tc)
 	if s.protocol&(ProtocolHybrid|ProtocolHybridEx) != 0 {
-		creds, err := acceptCredSSP(r, tc, cert.Leaf, s.domain, s.user, s.password)
-		if err != nil {
+		cs := &credSSPServer{ntlm: ntlmServer{domain: s.domain, user: s.user, password: s.password}}
+		if err := cs.accept(r, tc, cert.Leaf); err != nil {
 			return fmt.Errorf("CredSSP: %w", err)
 		}
-		s.creds = creds
+		s.creds = cs.creds
 		if s.protocol&ProtocolHybridEx != 0 {
 			if _, err := tc.Write([]byte{0, 0, 0, 0}); err != nil {
 				return err
@@ -337,5 +338,42 @@ func TestReplayOtherChannel(t *testing.T) {
 	}
 	if n := c.Stats().Ignored["virtual channel"]; n != 1 {
 		t.Errorf("ignored %v, want one virtual channel PDU", c.Stats().Ignored)
+	}
+}
+
+// A server that selects CredSSP and answers with a hostile NTLM
+// challenge gets an error from Connect, not a panic.
+func TestConnectHostileChallenge(t *testing.T) {
+	frames := loadTrace(t, "testdata/xrdp-32bpp.trace.gz")
+	cconn, sconn := net.Pipe()
+	go func() {
+		defer sconn.Close()
+		if _, _, err := newTransport(sconn, nil).readFrame(nil); err != nil {
+			return
+		}
+		cc := bytes.Clone(frames[0])
+		binary.LittleEndian.PutUint32(cc[len(cc)-4:], ProtocolHybrid)
+		if _, err := sconn.Write(cc); err != nil {
+			return
+		}
+		cert, _ := testCert()
+		tc := tls.Server(sconn, &tls.Config{Certificates: []tls.Certificate{cert}})
+		if tc.Handshake() != nil {
+			return
+		}
+		if _, err := readTSRequest(bufio.NewReader(tc)); err != nil {
+			return
+		}
+		writeTSRequest(tc, &tsRequest{Version: 6, NegoTokens: []negoToken{{[]byte(ntlmCrasher)}}})
+		io.Copy(io.Discard, tc)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := Connect(ctx, cconn, Config{
+		Username: "u", Password: "p",
+		TLSConfig: &tls.Config{InsecureSkipVerify: true},
+	})
+	if err == nil || !strings.Contains(err.Error(), "NTLM") {
+		t.Errorf("Connect returned %v, want an NTLM error", err)
 	}
 }
