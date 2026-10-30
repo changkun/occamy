@@ -216,10 +216,11 @@ func (e *markEncoder) Cursor(dst, pix []byte, w, h int) ([]byte, protocol.Codec,
 // tiles, at most the client's texture size wide, and within its message
 // size; every other tile goes alone.
 func TestLossyRuns(t *testing.T) {
-	// 1250×192 is 20×3 tiles, the last column 34 pixels wide.
+	// 1250×192 is 20×3 tiles, the last column 34 pixels wide. A run
+	// ends with its row, though the next row starts lossy.
 	lossy := map[int][]int{
 		0: {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19},
-		1: {2, 3, 4, 7, 9, 10, 19},
+		1: {0, 2, 3, 4, 7, 9, 10, 19},
 	}
 	run := func(row, from, to int) image.Rectangle { // tiles from to to, inclusive
 		return image.Rect(from*64, row*64, min(1250, (to+1)*64), (row+1)*64)
@@ -298,6 +299,51 @@ func TestLossyRuns(t *testing.T) {
 			})
 		})
 	}
+}
+
+// A run of lossy tiles ends where a tile of the row is not dirty, so
+// that the tiles after it are drawn in their own place.
+func TestLossyRunGaps(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &tapped{Backend: backendtest.NewScreen(640, 192, 0)}
+		hello := protocol.Hello{Visible: true, Capabilities: protocol.Capabilities{Codecs: []protocol.Codec{protocol.CodecRaw}}}
+		cfg := Config{NewEncoder: func([]protocol.Codec) Encoder { return &markEncoder{} }}
+		r := newRigConfig(t, b, 64, 50e6, time.Millisecond, hello, cfg)
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
+		tile := func(row, col int) image.Rectangle {
+			return image.Rect(col*64, row*64, (col+1)*64, (row+1)*64)
+		}
+		fill := func(row, col int) {
+			paint(b, tile(row, col), &image.Uniform{C: lossyColour(col)})
+		}
+		r.cl.mu.Lock()
+		before := len(r.cl.frames)
+		r.cl.mu.Unlock()
+		// A frame of one tile, so that the pacer holds the next frame
+		// until the clock moves, and the tiles drawn meanwhile go in it.
+		fill(2, 0)
+		synctest.Wait()
+		for _, col := range []int{2, 3, 5, 6} {
+			fill(0, col)
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+
+		if got, want := r.cl.screen(), serverScreen(r.s); !bytes.Equal(got.Pix, want.Pix) {
+			t.Error("the client's screen differs from the server's")
+		}
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		var got []image.Rectangle
+		for _, f := range r.cl.frames[before:] {
+			got = append(got, f.rects...)
+		}
+		want := []image.Rectangle{tile(2, 0), image.Rect(128, 0, 256, 64), image.Rect(320, 0, 448, 64)}
+		if !slices.Equal(got, want) {
+			t.Errorf("tile messages\n%v\nwant\n%v", got, want)
+		}
+	})
 }
 
 // lossyColour is an opaque colour that markEncoder sends lossy, different
