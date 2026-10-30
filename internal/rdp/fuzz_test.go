@@ -82,15 +82,54 @@ func traceData(t testing.TB) (fast, slow [][]byte, bitmaps []bitmapData) {
 	return fast, slow, bitmaps
 }
 
+// The update fuzzers draw on a desktop as wide as the recordings', so
+// that xrdp's full-width rows fit, and short, so that a PDU's budget of
+// decoded pixels, and with it an execution, stays small. Rows below it
+// are not decoded.
+const fuzzWidth, fuzzHeight = 1024, 64
+
+// singleUpdates returns the fast-path updates of the recordings, the
+// fragmented ones reassembled, each as a PDU of its own, since xrdp
+// fragments most bitmap updates over several PDUs.
+func singleUpdates(fast [][]byte) [][]byte {
+	var pdus [][]byte
+	var frag []byte
+	for _, data := range fast {
+		r := reader{b: data}
+		for r.len() > 0 && r.err == nil {
+			hdr := r.u8()
+			p := r.take(int(r.u16()))
+			switch hdr >> 4 & 0x3 {
+			case fragFirst:
+				frag = append(frag[:0], p...)
+				continue
+			case fragNext:
+				frag = append(frag, p...)
+				continue
+			case fragLast:
+				p = append(frag, p...)
+			}
+			if len(p) <= 0xffff {
+				var w writer
+				w.u8(int(hdr & 0xf))
+				w.u16(len(p))
+				w.bytes(p)
+				pdus = append(pdus, w.b)
+			}
+		}
+	}
+	return pdus
+}
+
 func FuzzFastPath(f *testing.F) {
 	fast, _, _ := traceData(f)
-	for _, d := range fast {
+	for _, d := range append(fast, singleUpdates(fast)...) {
 		f.Add(d)
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		c := testClient(256, 256)
+		c := testClient(fuzzWidth, fuzzHeight)
 		scr := &screen{}
-		scr.Resize(256, 256)
+		scr.Resize(fuzzWidth, fuzzHeight)
 		c.handleFastPath(scr, frame{fastPath: true, data: data})
 	})
 }
@@ -101,9 +140,9 @@ func FuzzSlowPath(f *testing.F) {
 		f.Add(d)
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		c := testClient(256, 256)
+		c := testClient(fuzzWidth, fuzzHeight)
 		scr := &screen{}
-		scr.Resize(256, 256)
+		scr.Resize(fuzzWidth, fuzzHeight)
 		c.handleShareControl(scr, data)
 	})
 }

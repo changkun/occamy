@@ -285,10 +285,13 @@ regression test, and the live run was repeated after them.
   - Seven fuzzers: fast-path, slow-path, RLE, planar and pointer
     updates, the NTLM challenge and the connection sequence's parsers.
     The pointer fuzzer's seed is synthetic; the others are seeded from
-    the recordings or the test acceptor. After the fixes each ran 60
-    seconds without a finding; see the PR for executions and host load.
+    the recordings, with xrdp's fragmented updates reassembled, or from
+    the test acceptor. The update fuzzers draw on a 1024×64 desktop, so
+    that the recordings' full-width rows fit and an execution's budget
+    stays small. After the fixes each ran 60 seconds without a finding.
     FuzzFastPath made 953 executions in 60 seconds before the pixel
-    budget, one 64 KiB PDU taking seconds.
+    budget, one 64 KiB PDU taking seconds, and 99,977 after, at a host
+    load near 40.
 - **What the NLA result rests on.** The [MS-NLMP] 4.2.4 vectors check
   NTOWFv2, the LMv2 and NTLMv2 responses (NTProofStr byte for byte),
   the session base key, the encrypted session key, the sealing and
