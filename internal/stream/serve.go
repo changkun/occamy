@@ -48,14 +48,15 @@ type Encoder interface {
 	// Lossy.
 	Tile(dst, pix []byte, w, h int) (b []byte, codec protocol.Codec, lossy bool)
 	// Lossy appends the encoding of pix, w by h pixels in RGBA order row
-	// by row, at quality from 1 to 100, and returns it with its codec,
-	// or with codec 0 if it cannot. pix is one tile that Tile reported
-	// lossy, or several side by side.
+	// by row, opaque whatever their alpha, at quality from 1 to 100, and
+	// returns it with its codec, or with codec 0 if it cannot. pix is
+	// one tile that Tile reported lossy, or several side by side.
 	Lossy(dst, pix []byte, w, h, quality int) ([]byte, protocol.Codec)
-	// Cursor appends the encoding of a cursor's image, w by h pixels in
-	// RGBA order row by row with straight alpha, to dst in a codec that
-	// keeps it exact, and returns it with its codec, or reports false if
-	// the viewer decodes none.
+	// Cursor appends the encoding of a cursor's image, w by h pixels as
+	// an image.RGBA holds them, row by row with alpha premultiplied, to
+	// dst in a codec that keeps it exact, with straight alpha as the
+	// protocol's codecs carry it, and returns it with its codec, or
+	// reports false if the viewer decodes none.
 	Cursor(dst, pix []byte, w, h int) (b []byte, codec protocol.Codec, ok bool)
 }
 

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"changkun.de/x/occamy/internal/codec"
+	"changkun.de/x/occamy/internal/guacamole"
 	"changkun.de/x/occamy/protocol"
 )
 
@@ -212,6 +213,8 @@ func TestLossyFallbacks(t *testing.T) {
 
 // A cursor's alpha survives every codec it may go in.
 func TestCursorAlpha(t *testing.T) {
+	// A pointer with straight alpha: an outline, a translucent shadow,
+	// and transparent pixels whose colour is not black.
 	cur := make([]byte, 4*32*32)
 	for i := 0; i < len(cur); i += 4 {
 		x, y := i/4%32, i/4/32
@@ -221,12 +224,16 @@ func TestCursorAlpha(t *testing.T) {
 		case x > y:
 			cur[i], cur[i+1], cur[i+2], cur[i+3] = 0x40, 0x80, 0xc0, byte(x*8) // a shadow
 		default:
-			cur[i+3] = 0 // transparent, black
+			cur[i], cur[i+1], cur[i+2], cur[i+3] = 0x40, 0x80, 0xc0, 0 // transparent
 		}
 	}
+	// The session holds it as an image.RGBA, premultiplied; the client
+	// gets it back with straight alpha, as color.NRGBAModel converts.
+	pre := premultiplied(cur, 32, 32)
+	want := straightOf(pre, 32, 32)
 	for _, codecs := range [][]protocol.Codec{{deflate}, {raw}, {webpC, jpegC}} {
 		e := New(codecs)
-		b, c, ok := e.Cursor(nil, cur, 32, 32)
+		b, c, ok := e.Cursor(nil, pre, 32, 32)
 		if !ok {
 			t.Fatalf("%v: no cursor", codecs)
 		}
@@ -234,8 +241,76 @@ func TestCursorAlpha(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%v: %v", codecs, err)
 		}
-		if !bytes.Equal(out.Pix, cur) {
+		if !bytes.Equal(out.Pix, want) {
 			t.Errorf("%v: the cursor differs after a round trip in %v", codecs, c)
+		}
+	}
+}
+
+// A cursor that guacd draws at half alpha reaches the encoder
+// premultiplied, from the guacd bridge's display, and leaves it with
+// straight alpha: white stays white.
+func TestCursorFromGuacd(t *testing.T) {
+	d := guacamole.NewDisplay()
+	for _, ins := range [][]string{
+		{"size", "-1", "2", "2"},
+		{"rect", "-1", "0", "0", "2", "2"},
+		{"cfill", "14", "-1", "255", "255", "255", "128"},
+		{"cursor", "0", "0", "-1", "0", "0", "2", "2"},
+	} {
+		if err := d.Apply(guacamole.NewInstruction(ins)); err != nil {
+			t.Fatal(ins, err)
+		}
+	}
+	img, _, ok := d.TakeCursor()
+	if !ok || img == nil || img.Rect.Dx() != 2 || img.Rect.Dy() != 2 {
+		t.Fatalf("cursor %v, %v", img, ok)
+	}
+	for _, codecs := range [][]protocol.Codec{{deflate}, {raw}, {webpC}} {
+		e := New(codecs)
+		b, c, _ := e.Cursor(nil, img.Pix, 2, 2)
+		out, err := decode(c, b, 2, 2)
+		if err != nil {
+			t.Fatalf("%v: %v", codecs, err)
+		}
+		for i := 0; i < len(out.Pix); i += 4 {
+			if got := out.Pix[i : i+4]; !bytes.Equal(got, []byte{0xff, 0xff, 0xff, 0x80}) {
+				t.Fatalf("%v: white at half alpha arrives as % x", c, got)
+			}
+		}
+	}
+}
+
+// A lossy rectangle is encoded opaque, whatever its alpha: WebP gets no
+// alpha channel, and the caller's pixels are left as they are.
+func TestLossyOpaque(t *testing.T) {
+	photo := loadFrame(t, "photo")
+	r := image.Rect(0, 0, 128, 64)
+	pix := pixels(photo, r)
+	for i := 3; i < len(pix); i += 4 {
+		pix[i] = byte(i)
+	}
+	before := bytes.Clone(pix)
+	for _, lossy := range []protocol.Codec{webpC, jpegC} {
+		e := New([]protocol.Codec{lossy})
+		b, c := e.Lossy(nil, pix, r.Dx(), r.Dy(), 90)
+		if c != lossy {
+			t.Fatalf("%v: codec %v", lossy, c)
+		}
+		if bytes.Contains(b, []byte("ALPH")) || bytes.Contains(b, []byte("VP8X")) {
+			t.Errorf("%v: the payload has an alpha channel", lossy)
+		}
+		out, err := decode(c, b, r.Dx(), r.Dy())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 3; i < len(out.Pix); i += 4 {
+			if out.Pix[i] != 0xff {
+				t.Fatalf("%v: pixel %d decodes with alpha %d", lossy, i/4, out.Pix[i])
+			}
+		}
+		if !bytes.Equal(pix, before) {
+			t.Fatalf("%v: Lossy changed the caller's pixels", lossy)
 		}
 	}
 }

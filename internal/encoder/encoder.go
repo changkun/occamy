@@ -99,6 +99,9 @@ type Encoder struct {
 	def codec.Deflater
 	out sliceWriter
 	jo  jpegn.EncodeOptions
+	// pix holds pixels converted before they are encoded: a cursor's to
+	// straight alpha, a lossy rectangle's to opaque.
+	pix []byte
 }
 
 // New returns an encoder for a viewer that agreed to codecs, in any
@@ -166,12 +169,15 @@ func (e *Encoder) appendLossless(dst, pix []byte, w, h int, p *codec.Palette) []
 // Lossy appends the lossy encoding of pix, w by h pixels in RGBA order
 // row by row, to dst at quality, from 1 to 100, and returns it with its
 // codec. pix is one tile that Tile reported lossy, or several adjacent
-// ones merged into a rectangle. Its alpha is taken as opaque. For a
-// viewer with no lossy codec, or if the lossy encoder fails, as it does
-// for a rectangle wider or higher than WebP allows (16383 pixels), the
-// encoding is lossless; it returns codec 0 only if there is none.
+// ones merged into a rectangle. It is encoded opaque, whatever its alpha,
+// since a screen has none: a pixel that is not opaque keeps its red,
+// green and blue, and WebP gets no alpha channel. For a viewer with no
+// lossy codec, or if the lossy encoder fails, as it does for a rectangle
+// wider or higher than WebP allows (16383 pixels), the encoding is
+// lossless; it returns codec 0 only if there is none.
 func (e *Encoder) Lossy(dst, pix []byte, w, h, quality int) ([]byte, protocol.Codec) {
 	quality = min(max(quality, 1), 100)
+	pix = e.opaque(pix[:4*w*h])
 	e.out.b = dst
 	var err error
 	switch e.lossy {
@@ -200,11 +206,18 @@ func (e *Encoder) Lossy(dst, pix []byte, w, h, quality int) ([]byte, protocol.Co
 	return e.appendLossless(dst, pix, w, h, p), e.lossless
 }
 
-// Cursor appends the encoding of a cursor's image, pix w by h pixels in
-// RGBA order row by row with straight alpha, to dst, in a codec that
-// keeps it exact, and returns it with its codec. It reports false, with
-// dst unchanged, for a viewer that agreed none: JPEG has no alpha.
+// Cursor appends the encoding of a cursor's image to dst, in a codec
+// that keeps it exact, and returns it with its codec. pix is w by h
+// pixels as an image.RGBA holds them, row by row with alpha
+// premultiplied; the payload carries straight alpha, as every codec of
+// the protocol does, converted as color.NRGBAModel converts. It reports
+// false, with dst unchanged, for a viewer that agreed none: JPEG has no
+// alpha.
 func (e *Encoder) Cursor(dst, pix []byte, w, h int) (b []byte, c protocol.Codec, ok bool) {
+	if e.lossless == 0 && !e.webp {
+		return dst, 0, false
+	}
+	pix = e.straight(pix[:4*w*h])
 	switch {
 	case e.lossless == protocol.CodecDeflate:
 		return e.def.Append(dst, pix, w, h), protocol.CodecDeflate, true
@@ -212,7 +225,10 @@ func (e *Encoder) Cursor(dst, pix []byte, w, h int) (b []byte, c protocol.Codec,
 		return codec.AppendRaw(dst, pix, w, h), protocol.CodecRaw, true
 	case e.webp:
 		e.out.b = dst
-		img := &image.NRGBA{Pix: pix[:4*w*h], Stride: 4 * w, Rect: image.Rect(0, 0, w, h)}
+		img := &image.NRGBA{Pix: pix, Stride: 4 * w, Rect: image.Rect(0, 0, w, h)}
+		// Without Exact, vpx may rewrite the colour of transparent
+		// pixels, which straight leaves zero, and the cursor would not
+		// decode as sent.
 		err := webp.Encode(&e.out, img, webp.EncodeOptions{Lossless: true, Exact: true, Method: 0, Threads: 1})
 		b, e.out.b = e.out.b, nil
 		if err == nil {
@@ -220,6 +236,48 @@ func (e *Encoder) Cursor(dst, pix []byte, w, h int) (b []byte, c protocol.Codec,
 		}
 	}
 	return dst, 0, false
+}
+
+// straight returns pix, premultiplied as in an image.RGBA, with straight
+// alpha, in e.pix: each colour channel times 0xffff over alpha, in 16
+// bits, as color.NRGBAModel converts, and transparent pixels zero.
+func (e *Encoder) straight(pix []byte) []byte {
+	e.pix = slices.Grow(e.pix[:0], len(pix))[:len(pix)]
+	out := e.pix
+	for i := 0; i < len(pix); i += 4 {
+		switch a := pix[i+3]; a {
+		case 0xff:
+			copy(out[i:i+4], pix[i:i+4])
+		case 0:
+			out[i], out[i+1], out[i+2], out[i+3] = 0, 0, 0, 0
+		default:
+			a16 := uint32(a) * 0x101
+			for k := range 3 {
+				// A channel above alpha is not premultiplied; it saturates.
+				c := min(uint32(pix[i+k])*0x101*0xffff/a16, 0xffff)
+				out[i+k] = uint8(c >> 8)
+			}
+			out[i+3] = a
+		}
+	}
+	return out
+}
+
+// opaque returns pix with every alpha 0xff: pix itself if it is opaque
+// already, as a screen's pixels are, and else a copy in e.pix.
+func (e *Encoder) opaque(pix []byte) []byte {
+	i := 3
+	for i < len(pix) && pix[i] == 0xff {
+		i += 4
+	}
+	if i >= len(pix) {
+		return pix
+	}
+	e.pix = append(e.pix[:0], pix...)
+	for ; i < len(e.pix); i += 4 {
+		e.pix[i] = 0xff
+	}
+	return e.pix
 }
 
 // sliceWriter appends what is written to a slice.

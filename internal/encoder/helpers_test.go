@@ -102,10 +102,8 @@ func decode(c protocol.Codec, payload []byte, w, h int) (*image.RGBA, error) {
 	case protocol.CodecDeflate:
 		var in codec.Inflater
 		return out, in.Decode(out, payload)
-	case protocol.CodecWebP:
-		m, err = decodeWebP(payload)
-	case protocol.CodecJPEG:
-		m, err = jpeg.Decode(bytes.NewReader(payload))
+	case protocol.CodecWebP, protocol.CodecJPEG:
+		m, err = decodeLossy(c, payload, w, h)
 	default:
 		return nil, fmt.Errorf("codec %v", c)
 	}
@@ -124,17 +122,60 @@ func decode(c protocol.Codec, payload []byte, w, h int) (*image.RGBA, error) {
 	return out, nil
 }
 
-// decodeWebP decodes a WebP payload as libwebp, and so a browser, does:
-// a lossy image to opaque RGBA, a lossless one, a cursor, with its
-// straight alpha. golang.org/x/image/webp would misread lossy images'
-// limited-range colours as full-range (internal/guacamole/webp.go), by
-// about 10 dB on the golden vectors.
-func decodeWebP(payload []byte) (image.Image, error) {
-	m, err := webp.Decode(bytes.NewReader(payload))
+// premultiplied returns straight-alpha pixels as an image.RGBA holds
+// them, premultiplied, as a backend hands a cursor to the session.
+func premultiplied(pix []byte, w, h int) []byte {
+	src := &image.NRGBA{Pix: pix, Stride: 4 * w, Rect: image.Rect(0, 0, w, h)}
+	dst := image.NewRGBA(src.Rect)
+	draw.Draw(dst, dst.Rect, src, image.Point{}, draw.Src)
+	return dst.Pix
+}
+
+// straightOf returns premultiplied pixels with straight alpha, as the
+// standard library converts them.
+func straightOf(pix []byte, w, h int) []byte {
+	src := &image.RGBA{Pix: pix, Stride: 4 * w, Rect: image.Rect(0, 0, w, h)}
+	dst := image.NewNRGBA(src.Rect)
+	draw.Draw(dst, dst.Rect, src, image.Point{}, draw.Src)
+	return dst.Pix
+}
+
+// decodeLossy decodes a WebP or JPEG payload of a w×h rectangle as a
+// client should. It checks the size the header claims against the
+// rectangle before it decodes, since a few bytes of header can claim a
+// frame that takes hundreds of megabytes to decode into. It decodes
+// lossy WebP as libwebp, and so a browser, does: an image.YCbCr or
+// image.NYCbCrA drawn with the standard library's conversion, which is
+// JPEG's full-range one, misreads VP8's limited-range colours, by about
+// 10 dB on the golden vectors. A lossless WebP image, a cursor, comes
+// back as an image.NRGBA, with straight alpha.
+func decodeLossy(c protocol.Codec, payload []byte, w, h int) (image.Image, error) {
+	var cfg image.Config
+	var err error
+	switch c {
+	case protocol.CodecWebP:
+		cfg, err = webp.DecodeConfig(bytes.NewReader(payload))
+	case protocol.CodecJPEG:
+		cfg, err = jpeg.DecodeConfig(bytes.NewReader(payload))
+	default:
+		return nil, fmt.Errorf("codec %v is not lossy", c)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if cfg.Width != w || cfg.Height != h {
+		return nil, fmt.Errorf("a %v header claims %d×%d for a %d×%d rectangle", c, cfg.Width, cfg.Height, w, h)
+	}
+	if c == protocol.CodecJPEG {
+		return jpeg.Decode(bytes.NewReader(payload))
+	}
+	opts := webp.Options{Threads: 1, FrameSizeLimit: w * h}
+	m, err := webp.Decode(bytes.NewReader(payload), opts)
 	if _, lossless := m.(*image.NRGBA); err != nil || lossless {
 		return m, err
 	}
-	return webp.Decode(bytes.NewReader(payload), webp.Options{ToRGBA: true, Threads: 1})
+	opts.ToRGBA = true
+	return webp.Decode(bytes.NewReader(payload), opts)
 }
 
 // SSIM is the structural similarity of b to a (Wang et al., 2004) on
