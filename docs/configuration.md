@@ -82,9 +82,10 @@ directory.
 | `auth.oidc.redirect_url` | required | `occamyd`'s callback URL as the browser and the provider know it, ending in `/api/v1/auth/oidc/callback` behind any proxy prefix. https, or http on localhost. Its path is also the sign-in cookie's, and with https the cookie is `Secure`, whoever terminates TLS |
 | `auth.oidc.return_urls` | the origin of `redirect_url`, with the path `/` | Where browsers are sent back after a sign-in, with a one-time code or an error in the fragment: your web client's sign-in page. A sign-in names one of them, matched exactly as written. https, or http on localhost, with no user name and no fragment |
 | `auth.oidc.scopes` | `[openid, profile, email]` | Scopes to request; must include `openid` |
-| `auth.oidc.subject_claim` | `sub` | The ID token claim that names the user in allow lists: a top-level string claim. Pick one that users cannot set themselves, such as `sub` or `email`, never a display name or `preferred_username` where users can edit it, since an OIDC user and a static user of the same name are one user. With `email`, the token must also say `email_verified: true` |
+| `auth.oidc.subject_claim` | `sub` | The ID token claim that names the user in allow lists: a top-level string claim of up to 255 bytes, of printable characters with no space but U+0020 (no control or format characters, such as zero-width spaces or bidirectional overrides). Pick one that users cannot set themselves, such as `sub` or `email`, never a display name or `preferred_username` where users can edit it, since allow lists grant by this name. With `email`, the token must also say `email_verified: true` |
 | `auth.oidc.groups_claim` | unset | The top-level claim that lists the user's groups, as a list of strings or one string. Only the groups the file names, in `auth.users[].groups` or an `allow.groups`, are kept. Unset, OIDC users have no groups |
-| `auth.oidc.require_known_users` | `false` | Admit only the users the file names, as static users or in an `allow.users`. Off, anyone the provider signs in gets an access token, and allow lists still decide what they may open |
+| `auth.oidc.require_known_users` | `false` | Admit only the users whom an allow list names: in a connection's `allow.users`, or in one of its `allow.groups` by `groups_claim`. Static users count only with `link_static_users`. Off, anyone the provider signs in gets an access token, and allow lists still decide what they may open |
+| `auth.oidc.link_static_users` | `false` | Let an OIDC user whose subject names a static user sign in as that user, with that user's access. Off, such a sign-in is refused with `access_denied` and logged: a name belongs to one source unless the file links them. Turn it on only with a `subject_claim` that users cannot choose, such as `sub` or a verified `email`: whoever the provider names `alice` then is static user `alice` |
 
 #### Tokens from a trusted issuer
 
@@ -98,7 +99,11 @@ A trusted issuer mints JWTs that `occamyd` accepts as its own:
   list of group names; or `session`, with `sid` (a session ID) and
   `role` (`owner`, `viewer` or `read-only`).
 
-`occamyd`'s own tokens have the same shape with `iss: occamy`.
+`occamyd`'s own tokens have the same shape with `iss: occamy`. An access
+token may also carry `idp`, where the user signed in: `occamyd` puts
+`local` on a static user's and `oidc` on one from
+[OIDC](#signing-in-through-oidc), and logs it at each sign-in. A session
+token carries no `idp`.
 
 #### Signing in through OIDC
 
@@ -128,7 +133,14 @@ A web client signs a user in in four steps:
    `{"code":"…","code_verifier":"<the verifier>"}` as `application/json`
    to `POST /api/v1/auth/oidc/token`. The answer is that of
    `POST /api/v1/auth/token`:
-   `{"access_token":"…","token_type":"Bearer","expires_in":900}`.
+   `{"access_token":"…","token_type":"Bearer","expires_in":900}`. Then
+   forget the verifier.
+
+A client that finds a `#code` but holds no verifier did not start that
+sign-in: someone may have sent the browser to `login` with a challenge
+of their own. It must not sign in with the code. It should spend it, by
+posting it with a throwaway verifier, since a code works once, or else
+remove it from the URL and ignore it.
 
 The access token never appears in a URL, so it reaches no server log,
 `Referer` or browser history. The one-time code sits in the history, but
@@ -142,20 +154,30 @@ Errors in the fragment:
 
 | `error` | Meaning |
 |---------|---------|
-| `access_denied` | The provider refused, or `occamyd` refused the user: no usable `subject_claim`, an email the provider has not verified, or with `require_known_users`, a user the file does not name |
-| `sign_in_failed` | The provider answered with another error, or its answer did not verify: the ID token's issuer, audience, expiry, signature, algorithm or nonce |
+| `access_denied` | The provider refused, or `occamyd` refused the user: a `subject_claim` that is missing or not a usable name, an email the provider has not verified, a static user's name without `link_static_users`, or with `require_known_users`, a user whom no allow list names |
+| `sign_in_failed` | The provider answered with another error, or its answer did not verify: the ID token's issuer, audience, authorized party (`azp`), expiry, signature, algorithm or nonce, the answer's `iss` (RFC 9207), or a `sub` that is not a string, which the ID token's parser refuses before `subject_claim` is read |
 | `unavailable` | The provider cannot be reached, or too many sign-ins wait for their clients |
 
 `login` answers `400` with API v1's error for a return URL that is not
-listed or a missing challenge. The callback answers `400` with
-`invalid_state` when the browser has no sign-in cookie that matches the
-provider's answer: the sign-in started in another browser, took longer
-than 10 minutes, or outlived a restart of `occamyd`. The exchange answers
-`401` for a code that is unknown, used or expired, or a verifier that
-does not match.
+listed, or a challenge that is missing, given twice or not an S256
+challenge (43 characters of unpadded base64url), or a
+`code_challenge_method` other than `S256`. The callback answers `400`
+with `invalid_state` when the browser has no sign-in cookie that matches
+the provider's answer: the sign-in started in another browser, took
+longer than 10 minutes, or outlived a restart of `occamyd`. It leaves a
+sign-in that is under way alone, so a link to the callback from another
+site cannot end it. The exchange answers `401` for a code that is
+unknown, used or expired, or a verifier that does not match. A user has
+at most three codes waiting for exchange; a fourth sign-in drops the
+oldest.
 
 ID tokens must be signed with RS, ES or PS at 256, 384 or 512 bits, or
 EdDSA; `none` and HMAC are refused whatever the provider advertises.
+`occamyd` follows no redirect from the provider, and talks only to the
+endpoints its discovery document names, which must be https, or http on
+localhost when the issuer is too. The sign-in cookie is
+`__Secure-occamy_oidc` when it is `Secure`, and `occamy_oidc` on plain
+http.
 Several `occamyd` instances behind one name need sticky sessions, since
 the sign-in cookie's key and the one-time codes live in each process.
 
@@ -234,8 +256,9 @@ that:
   some static user. With either one configured, users and groups also come
   from token claims, so names the file does not list are accepted;
 - `auth.oidc.return_urls` are https, or http on localhost, with no user
-  name and no fragment, and `auth.oidc.require_known_users` has at least
-  one user to admit;
+  name and no fragment, and `auth.oidc.require_known_users` has someone
+  to admit: a user in an `allow.users`, a group in an `allow.groups`
+  with `groups_claim` set, or, with `link_static_users`, a static user;
 - a file holds one YAML document.
 
 ## Serving a v1 file
