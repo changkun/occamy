@@ -14,7 +14,7 @@ credentials.
 
 ## Development
 
-You need Go 1.26 or later, Node.js 20.19+ or 22.12+ for the web client, and
+You need Go 1.26.4 or later, Node.js 20.19+ or 22.12+ for the web client, and
 Podman or Docker with a compose provider.
 
 ```
