@@ -319,8 +319,15 @@ place for fixes that ship on v0 before beta.
   `?token=`, then the `jwt` cookie, and a malformed header falls through
   to the next. Failures answer `{"code":401,"message":"…"}` with
   `WWW-Authenticate: JWT realm=occamy-proxy`, and 400 for a token without
-  `exp`. The subprotocol, text frames, close codes, Guacamole statuses,
-  the same-origin rule, login only with `client: true` and pprof only in
+  `exp`. The messages are gin-jwt's and the golang-jwt v4 texts it passed
+  on (`Token is expired`, `signature is invalid`, `invalid signing
+  algorithm`, `token contains an invalid number of segments`), mapped from
+  v5's errors. As before, an `exp` of 0 or less is expired (v5 reads it
+  as no expiry) and an `iat` in the future is refused (v5 ignores `iat`
+  unless asked). The subprotocol, text frames, close codes, Guacamole statuses,
+  the same-origin rule (an empty or repeated `Origin` header is refused
+  with 403, as gorilla refused it; coder/websocket skips the check for an
+  empty one), login only with `client: true` and pprof only in
   debug mode are as before. Tests in `server/jwt_test.go` pin each of
   these.
 - **Decisions:**
@@ -345,6 +352,13 @@ place for fixes that ship on v0 before beta.
     keeps its handler, and its session entry, up to about 10 s longer; a
     joiner in that window starts a new session, as for any ended one. The
     write mutex went, since coder/websocket serializes writes.
+  - After a message over the read limit, which coder/websocket answers
+    with 1009 itself, occamyd drops the connection with `CloseNow`
+    instead of closing it: `Close` would first read the rest of the
+    declared message with no deadline, so a client that declares a huge
+    frame and goes quiet would hold its handler and session forever.
+    `CloseNow` cannot interrupt a `Close` already under way, so a timer
+    around `Close` would not help.
   - `clientError` reads `websocket.CloseStatus`: 1000, 1001 and 1005 mean
     the client left, any other close code and `ErrMessageTooBig` are
     failures, and any other error counts as leaving. coder/websocket
@@ -373,9 +387,6 @@ place for fixes that ship on v0 before beta.
   - Login reads JSON and forms (URL-encoded or multipart), limited to
     1 MiB; gin's binding also took XML, YAML, TOML and protobuf bodies,
     which no v0 client sends.
-  - Messages for bad tokens are golang-jwt v5's (`token has invalid
-    claims: token is expired`); the lookup messages (`cookie token is
-    empty`) are gin-jwt's.
   - A token without the four claims as strings gets 401; gin-jwt's v0
     panicked on it after the upgrade.
   - A wrong method gets 405 from the ServeMux where gin answered 404; a
