@@ -287,6 +287,12 @@ layer, and any tools.
     - `Next` could wait forever for a tile submitted after the decoders
       exited, past its context.
     - A message over the read limit ended the session with code 0.
+  - `FuzzSession`, once its backlog floor was lowered, found a cursor of
+    a plugged codec that declared 4096 × 304 pixels in an 18-byte message:
+    the client allocated them and only then found the backlog full. A
+    cursor's pixels are now checked against the backlog before they are
+    allocated (`TestCursorBacklog`; the input is kept in
+    `testdata/fuzz`).
 - **Protocol text clarified** in [docs/protocol.md](../../docs/protocol.md):
   - A frame is acknowledged once shown, which for a client that hands
     frames to a renderer is when the renderer asks for the next one, and
@@ -306,10 +312,22 @@ layer, and any tools.
     `protocol-error`. This followed from the window and its input
     exception but was not stated.
 - **Follow-ups:**
-  - Codecs task: `Decoder`s for the lossless and lossy codecs, the tile
-    cache (`cached` and slots), and an `Encoder` for each in `stream`.
-    The plugged-codec path, its worker pool and agreement are tested with
-    a PNG codec in the tests.
+  - Codecs task: once the Codecs PR (#109) and this one are on master,
+    a follow-up PR wires its decoders into `client` as the default
+    `Options.Decoders`: deflate and raw through `internal/codec`
+    (`codec.Inflater`, one per decoding goroutine, into a sub-image of
+    the screen, and `codec.DecodeRaw`), WebP through
+    `github.com/gen2brain/vpx/webp` with `ToRGBA` (`x/image/webp`
+    misreads VP8's colour range), and JPEG through `image/jpeg`. A tile
+    message may then cover up to 16 tiles of a row, and cursor pixels
+    are straight alpha, as `Cursor` already is. Their tests are
+    `protocol/testdata/codecs.json`: lossless vectors exact, lossy ones
+    at `min_psnr`, invalid ones refused. The tile cache (`cached` and
+    slots) comes with it. #109 also turns `stream.Encoder` into
+    per-viewer encoders made by `Config.NewEncoder`, which this
+    package's tests that build a `stream.Config` follow. Until then the
+    plugged-codec path, its worker pool and agreement are tested with a
+    PNG codec in the tests.
   - [010](../010-native-swift-client.md)'s export layer: wrap `Next` as
     `occamy_session_next(handle, timeout_ms, *event)`, copy each
     `Frame.Dirty` rectangle from `Framebuffer` into the C mirror inside
@@ -333,10 +351,6 @@ layer, and any tools.
     take a zero average for no sample. The round trip and delivery rate
     need the whole time, so the fix belongs in the average, not in what
     clients report.
-  - A cursor of a plugged codec is allocated at its declared size before
-    it decodes, up to `max_texture_size`² pixels (64 MiB at 4096), once
-    a message. The texture limit bounds it; the backlog sees it only
-    after.
   - `stream`'s terminal writer keeps the larger of two sequence numbers
     for the pacer's input timing (`max(in.seq, seq)`), which picks the
     old one once numbers wrap. It only times one input, once in 2³².
@@ -377,5 +391,5 @@ layer, and any tools.
   taken, the read limit's error unmapped, the backlog measured by the
   last screen only, no work bound, resizes not merged, the decode wait
   ignoring `Close`, a tile queued to a closed pool, `Next` delivering
-  after `End`, and a viewport that shows nothing sent: each fails a
-  test.
+  after `End`, a viewport that shows nothing sent, and a cursor
+  allocated before the backlog check: each fails a test.
