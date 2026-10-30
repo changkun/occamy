@@ -39,6 +39,14 @@ const (
 	RoleReadOnly = "read-only"
 )
 
+// occamyd's own tokens name Issuer in iss and Audience in aud. A trusted
+// issuer may not be named Issuer, since the issuer picks the key, and its
+// tokens must name Audience too.
+const (
+	Issuer   = "occamy"
+	Audience = "occamy"
+)
+
 // Defaults for a Verifier.
 const (
 	// DefaultLeeway is the clock skew allowed between issuers and occamyd.

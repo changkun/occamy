@@ -6,6 +6,7 @@ package config
 
 import (
 	"crypto/sha256"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -91,8 +92,11 @@ type config struct {
 // Runtime configurations
 var Runtime = &config{}
 
-// Init initialize the runtime configurations
-func Init() {
+// Load sets up the log, parses the command line and returns the contents
+// of the configuration file that -conf names. It exits if the file
+// cannot be read. Version tells a v0 file, for Init, from a v1 file, for
+// ParseV1.
+func Load() []byte {
 	log.SetPrefix("occamy: ")
 	log.SetFlags(log.LstdFlags | log.Lshortfile | log.Lmsgprefix)
 
@@ -107,10 +111,18 @@ Usage:`)
 	if err != nil {
 		log.Fatalf("cannot open given config file, error: %v", err)
 	}
-	Runtime, err = parse(raw)
+	return raw
+}
+
+// Init parses a v0 configuration file into Runtime. It refuses a v1
+// file, which the lenient v0 decoder would otherwise read with defaults.
+func Init(raw []byte) error {
+	c, err := parse(raw)
 	if err != nil {
-		log.Fatalf("failed of parsing config file, error: %v", err)
+		return err
 	}
+	Runtime = c
+	return nil
 }
 
 // Debug reports whether occamyd runs in debug mode. An empty mode is
@@ -121,6 +133,12 @@ func (c *config) Debug() bool {
 
 // parse parses a config file and fills in defaults.
 func parse(raw []byte) (*config, error) {
+	switch v, err := Version(raw); {
+	case err != nil:
+		return nil, err
+	case v != 0:
+		return nil, errors.New("config: a version 1 file is not v0 configuration; ParseV1 reads it")
+	}
 	c := &config{}
 	if err := yaml.Unmarshal(raw, c); err != nil {
 		return nil, err

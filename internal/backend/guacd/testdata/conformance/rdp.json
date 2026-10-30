@@ -1,0 +1,73 @@
+{
+	"name": "rdp",
+	"protocol": "rdp",
+	"params": {
+		"color-depth": "24",
+		"disable-gfx": "true",
+		"hostname": "rdp",
+		"ignore-cert": "true",
+		"port": "3389",
+		"resize-method": "display-update",
+		"username": "occamy"
+	},
+	"width": 640,
+	"height": 480,
+	"steps": [
+		"logging in, and waiting for the scene to answer F2 and a letter",
+		"Escape and a: the idle scene with the swatch painted",
+		"typing hello, each letter painting the swatch, and moving the pointer",
+		"scrolling: F3 scrolls a page of text a line every 16 ms, for a tenth of a second with the wheel turned",
+		"moving a window: F4 drags a 400×300 window for 80 ms",
+		"b: the idle scene again",
+		"resizing to 800x600",
+		"c, the last frame"
+	],
+	"checkpoints": [
+		{
+			"sync": "1232805629",
+			"letter": "a"
+		},
+		{
+			"sync": "1232806539",
+			"letter": "b"
+		}
+	],
+	"regions": [
+		{
+			"sync": "1232805973",
+			"rect": {
+				"Min": {
+					"X": 320,
+					"Y": 192
+				},
+				"Max": {
+					"X": 448,
+					"Y": 320
+				}
+			},
+			"why": "a 320×192 copy from layer -1 to layer 0 at (128,192)",
+			"png": "rdp-copy.png"
+		}
+	],
+	"instructions": {
+		"args": 1,
+		"blob": 34,
+		"cfill": 24,
+		"copy": 28,
+		"cursor": 1,
+		"dispose": 2,
+		"end": 28,
+		"img": 28,
+		"img image/png": 15,
+		"img image/webp": 13,
+		"ready": 1,
+		"rect": 24,
+		"size": 7,
+		"sync": 19
+	},
+	"size": {
+		"X": 800,
+		"Y": 600
+	},
+	"sha256": "6a5ab681d608ac4618acc5df906d59c69c2f176c9f1b28a097bf5ede9f6c0dd4"
+}

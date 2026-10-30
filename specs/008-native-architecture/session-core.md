@@ -91,9 +91,9 @@ Graphical backends write pixels into a framebuffer that the session owns
 ([graphics-pipeline](graphics-pipeline.md)) and report damage. They never
 encode. They draw through `Lock` and `Unlock`, so that a decoder writes
 straight into the framebuffer under the row locks of decision 2, without
-a copy, and the damage it reports is exactly what it drew. The RGBA
-layout holds until the graphics pipeline's measurement settles the pixel
-layout.
+a copy, and the damage it reports is exactly what it drew. The layout
+is RGBA, which the graphics pipeline's measurement confirmed on
+2026-10-30.
 
 The session owner is one goroutine per session. It runs the backend,
 applies events to shared state (the framebuffer, or the terminal state
@@ -224,7 +224,8 @@ follow the recommendations above.
    version, codec and quality.
 2. **Framebuffer concurrency: A,** per-tile version counters and an
    RWMutex per tile row. The row height follows the tile size that the
-   [graphics-pipeline](graphics-pipeline.md) benchmark picks.
+   [graphics-pipeline](graphics-pipeline.md) benchmark picks (64, on
+   2026-10-30).
 3. **Late join for terminals:** decided in
    [native-ssh-backend](native-ssh-backend.md). The session keeps the
    terminal's screen in `internal/terminal` from the backend's output, so
@@ -367,8 +368,10 @@ arise, rather than inheriting those fixes.
     spot, codec or payload.
 - **What was not done:**
   - `TCP_NOTSENT_LOWAT` is not set on a connection yet. coder/websocket
-    hides the socket, so the HTTP layer calls `SetLowWater` from
-    `http.Server.ConnContext`, as part of the HTTP server task.
+    hides the socket, so the HTTP layer reaches it first: the HTTP server
+    task's `ConnContext` keeps each connection in the request context,
+    and `connFrom` returns the TCP socket below TLS. The Streams task
+    calls `SetLowWater` on it before the upgrade.
   - The Scheduling test task.
 - **Surprises:**
   - The tile is the unit of priority. With 64-pixel tiles, the test
@@ -393,8 +396,9 @@ arise, rather than inheriting those fixes.
     taken for a protocol error; and a late `hello` got `unsupported`.
     The test client now records undecodable messages, and every test
     fails on one.
-- **Follow-ups:** the Scheduling test,
-  and the HTTP layer's `ConnContext`.
+- **Follow-ups:** the Scheduling test, and `SetLowWater` on each
+  stream's socket (the HTTP server's `connFrom` reaches it; the Streams
+  task calls it).
 
 ## Implementation notes: terminal frames
 

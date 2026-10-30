@@ -7,6 +7,8 @@
 # shared by x11vnc on port 5900; `start.sh rdp` runs xrdp on port 3389,
 # whose sessions for the user occamy are the scene program on xorgxrdp.
 # docker-compose.bench.yaml builds it from the repository root.
+# EXTRA_PACKAGES adds Debian packages: `make corpus` adds a terminal and a
+# browser to record the codec corpus (bench/vnccapture).
 
 FROM golang:1.27-trixie AS build
 WORKDIR /occamy
@@ -16,11 +18,13 @@ COPY bench/ bench/
 RUN CGO_ENABLED=0 go build -trimpath -o /scene ./bench/scene
 
 FROM debian:trixie-slim
+ARG EXTRA_PACKAGES=""
 RUN apt-get update && apt-get install -y --no-install-recommends \
         x11vnc                  \
         xorgxrdp                \
         xrdp                    \
-        xvfb                 && \
+        xvfb                    \
+        $EXTRA_PACKAGES      && \
     rm -rf /var/lib/apt/lists/* && \
     useradd --create-home --shell /bin/bash occamy && \
     sed -i 's/^#EnableConsole=false/EnableConsole=true/; s/^EnableSyslog=true/EnableSyslog=false/' \
