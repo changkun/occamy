@@ -12,6 +12,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - The desktop baseline and the per-scenario targets for protocol v1
   ([docs/benchmarks.md](docs/benchmarks.md)). `bench/vncprobe` measures
   the bench desktop's VNC server on its own.
+- A public Go package for protocol v1, `changkun.de/x/occamy/protocol`,
+  with its framing: the message header and its ignorable flag, the field
+  encodings, a registry of message types, and the maximum message size.
+  Golden vectors in `protocol/testdata/framing.json` let other
+  implementations check their codecs against it. No message types are
+  defined yet.
 
 ### Changed
 
