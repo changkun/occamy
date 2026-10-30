@@ -95,6 +95,9 @@ so that typing feels immediate at any RTT.
   predictions and shows the server's screen.
 - Predictions are off while the server's screen shows no echo of
   recent input, the mosh heuristic for password prompts.
+- `github.com/unixshells/mosh-go` (MIT) has a simplified predictor and a
+  screen-diff layer, wire-compatible with mosh. It is a starting point to
+  port and extend toward mosh's full prediction overlay.
 - This lives in the clients ([009](../009-react-web-client.md),
   [client-core](client-core.md)). The server's part is the input
   sequence number in `frame-end`.
@@ -105,9 +108,18 @@ so that typing feels immediate at any RTT.
 
 - **A. Headless emulator in Go.** Feed all output through an emulator
   and serialize its screen on demand. Candidates to evaluate, checking
-  maintenance and VT coverage at evaluation time:
-  `github.com/charmbracelet/x/vt`, `github.com/hinshun/vt10x` (and its
-  forks), or a small in-house emulator.
+  maintenance and VT coverage at evaluation time. As surveyed on
+  2026-10-30:
+  - `github.com/charmbracelet/x/vt` (MIT, active), with damage tracking
+    and scrollback. It lacks insert mode (IRM), which nano needs: patch
+    it upstream, or start from `github.com/unixshells/vt-go`, a fork
+    that adds it.
+  - `github.com/gdamore/tcell/v3/vt` (Apache-2.0, active), with left and
+    right margins; its API is not yet stable.
+  - A small in-house emulator.
+
+  `hinshun/vt10x` and its forks have had no commits since 2022 and 2023,
+  and `go-libghostty` needs cgo.
   - Pros: exact snapshots; enables recording thumbnails and search later.
   - Cons: CPU per byte of output; emulator bugs show up as wrong
     snapshots.

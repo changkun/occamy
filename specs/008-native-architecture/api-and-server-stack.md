@@ -41,6 +41,10 @@ can only patch on v0.
 - 004 lists the v0 problems: open proxy, credentials in tokens and logs,
   `jwt_secret: occamy` and `mode: debug` defaults, `/debug/pprof` on the
   public listener, and gin-jwt v2 on golang-jwt v4.
+- v0 serves WebSockets with `gorilla/websocket`, whose last commit was
+  in 2025-03. `github.com/coder/websocket` (ISC, active) reads and writes
+  without allocating, supports permessage-deflate, and compiles to WASM,
+  so the Go client core can share it.
 - gin pulls a large indirect graph (quic-go, sonic, ugorji). Every
   Dependabot alert after the revival came from it (commit `b1bb2de`).
 - Since Go 1.22, `net/http.ServeMux` routes by method and path pattern
@@ -119,7 +123,9 @@ follow the recommendations above, or the smallest choice that serves a
 single-node beta.
 
 - **Stack: A,** standard library `net/http` and golang-jwt v5. gin and
-  gin-jwt leave `go.mod` once the v0 routes are gone.
+  gin-jwt leave `go.mod` once the v0 routes are ported to the new stack
+  (2026-10-30: at beta.1, not at v1.0; see v0 routes under Task
+  Breakdown).
 
 1. **Tokens: JWTs (option A, not C).**
    - occamyd signs its own tokens with Ed25519 and accepts only the
@@ -156,6 +162,26 @@ single-node beta.
    `Origin` against the configured origins on every upgrade.
    `POST /api/v1/sessions` stays for clients that want the session ID
    first.
+9. **WebSocket library: `coder/websocket`** (2026-10-30) for the v1
+   routes, for the reasons under Context; the v0 routes keep
+   `gorilla/websocket` until they are removed.
+
+## Task Breakdown
+
+| Task | Delivers | Needs |
+|------|----------|-------|
+| Config v1 | `internal/config`: a file with `version: 1` decoded with `KnownFields`, and a file without it read as v0 as today. Sections: `listen`, `tls` (cert, key), `debug.address`, `origins`, `auth` (signing key file, access token lifetime, `trusted_issuers`, static `users` with bcrypt hashes and groups, `oidc`), `connections` (ID, display name, protocol, target, credentials, allowed users and groups), `allow_adhoc_targets` with its allowlist, and `legacy_v0`. Credentials are references (`password_file`, `password_env`, `private_key_file`) or `prompt`, never inline secrets, so a configuration file can be committed. Validation reports every problem with its key path: unique connection IDs, known protocols, targets that parse, references that resolve, groups that exist | — |
+| Tokens | `internal/auth`: Ed25519 signing keys loaded from a file (generated on first start when absent, with a warning), access tokens (subject, groups, 15 minutes by default) and stream and share tokens (session ID, role), issued and verified with golang-jwt v5 restricted to `EdDSA`; tokens from `trusted_issuers` verified against their listed keys. Tests reject `none`, an HMAC token signed with the public key, an unknown issuer, a wrong audience, expiry and tampering | — |
+| HTTP server | `server/` on `net/http.ServeMux`: plain `func(http.Handler) http.Handler` middleware for recovery, request logging that never logs tokens or credentials, and authentication; JSON helpers and one JSON error shape; `/healthz`; `POST /api/v1/auth/token` for static users (bcrypt, constant-time on unknown users); TLS when configured; graceful shutdown; the debug listener with expvar and pprof, off unless `debug.address` is set. `occamy.go` starts it from a v1 configuration | Config v1, Tokens |
+| OIDC | `GET /api/v1/auth/oidc/login` and `/callback`: authorization code with PKCE through `golang.org/x/oauth2`, state and verifier in a short-lived signed cookie, the ID token checked by `coreos/go-oidc` v3, and subject and group claims mapped to registry users and groups as configured; tests against an in-process identity provider | HTTP server |
+| Sessions | `GET /api/v1/connections` filtered by the caller's users and groups; `POST /api/v1/sessions`, `GET` and `DELETE /api/v1/sessions/{id}` and `POST /api/v1/sessions/{id}/shares` on the session registry; a backend factory keyed by protocol that the native SSH backend and the guacd bridge register into; ad-hoc targets only when enabled and allowed; tests on the fake backend | HTTP server; session-core Registry |
+| Streams | `GET /api/v1/connections/{id}/stream` and `/api/v1/sessions/{id}/stream` on coder/websocket: `Origin` checked against `origins`, the token taken from the `occamy.v1.token.` subprotocol or `Authorization`, `occamy.v1` answered alone, `hello` read from the query, and the socket handed to the session's viewer writer; a closed session ends its streams whatever tokens remain valid. Tests cover one round trip to `welcome`, a bad origin, a missing or wrong token, and a token in the URL ignored | Sessions; session-core Viewer writer; protocol v1 Handshake |
+| v0 routes | `/api/v0/login` and `/api/v0/connect` behind `legacy_v0`, served on the new mux through `net/http`, golang-jwt v5 (HS256 with the v0 secret, so v0 tokens keep their shape) and coder/websocket, so that gin, gin-jwt and gorilla/websocket leave `go.mod` at beta.1; a v0 configuration file implies `legacy_v0`; the Vue client moves to the new paths; the existing v0 tests keep passing against the new paths | HTTP server |
+| Document | `docs/api.md` for every route above, the configuration reference, TLS through occamyd or a reverse proxy, and a v0 to v1 migration note; README and `conf.yaml` updated to a v1 example | all of the above |
+
+Config v1 and Tokens can start at once and in parallel. Streams is the
+task that joins this spec to [session-core](session-core.md) and
+[protocol-v1](protocol-v1.md).
 
 ## Affects
 
@@ -163,3 +189,31 @@ single-node beta.
 the registry and auth sections. `go.mod` loses gin and gin-jwt under option
 A. Most of 004's items are absorbed into this design; 004 remains the
 place for fixes that ship on v0 before beta.
+
+## Implementation notes: tokens
+
+- **What was done:** `internal/auth` with `Signer` (`Access`,
+  `Session`), `Verifier` (`VerifyAccess`, `VerifySession`),
+  `LoadOrCreateKey` and `LoadPublicKey`, on golang-jwt v5.
+- **Decisions:**
+  - Every token carries a `kind` claim, `access` or `session`, so one is
+    never accepted where the other is expected. Session tokens carry
+    `sid` and `role`, the role as a string (`owner`, `viewer`,
+    `read-only`) so that `internal/auth` does not import the session
+    core.
+  - The issuer claim picks the key, and only `EdDSA` is accepted, so an
+    unknown issuer, `none` and an HMAC token keyed with the public key
+    all fail before any claim is trusted. The audience is required.
+  - A token must carry `iat`, and `exp - iat` may not exceed 12 hours, so
+    a trusted issuer cannot mint tokens that live for years. Clock skew of
+    30 seconds is allowed. Base64 decoding is strict.
+  - The signing key is PKCS #8 PEM, created readable by its owner only
+    through a temporary file and a hard link, so occamyd instances
+    starting together agree on one key and a crash leaves no partial key.
+  - Shares minted by `POST /api/v1/sessions/{id}/shares` stay the session
+    registry's opaque tokens (session-core), which die with the session
+    and are stored only as hashes. Session JWTs serve tokens minted by a
+    trusted issuer and the stream token that `POST /api/v1/sessions`
+    returns.
+- **Follow-ups:** the HTTP server task wires the signer and verifier from
+  the v1 configuration and logs a warning when the key is created.

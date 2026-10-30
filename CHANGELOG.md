@@ -18,6 +18,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   Golden vectors in `protocol/testdata/framing.json` let other
   implementations check their codecs against it. No message types are
   defined yet.
+- `internal/auth`, the tokens of API v1: Ed25519 JWTs for access
+  (a user and groups) and for sessions (a session and a role), signed by
+  occamyd or by a configured trusted issuer, with no other algorithm
+  accepted. Not served by any route yet.
+- `internal/session`, the session core of v1: one goroutine per session
+  that runs a backend, draws into the framebuffer or the terminal, applies
+  input by role (owner, viewer, read-only), keeps each viewer's small
+  state as latest values, ends the session when the owner stays away or
+  it idles, and a registry of sessions with share tokens that die with
+  them. Not served by any route yet.
 
 ### Changed
 
