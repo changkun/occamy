@@ -554,7 +554,9 @@ func TestCancelDuringHandshake(t *testing.T) {
 	if err := r.stop(t); !errors.Is(err, context.Canceled) {
 		t.Errorf("Run = %v, want context.Canceled", err)
 	}
-	if d := time.Since(begin); d > time.Second {
+	// Generous for loaded machines; without the cancel, Run would wait
+	// for the server forever.
+	if d := time.Since(begin); d > 5*time.Second {
 		t.Errorf("Run took %v to return after cancel", d)
 	}
 }
@@ -589,7 +591,9 @@ func TestInputQueueFull(t *testing.T) {
 	for range 1000 {
 		begin := time.Now()
 		err := b.Input(backend.TermInput{Data: chunk})
-		if d := time.Since(begin); d > time.Second {
+		// Generous for loaded machines; a blocking Input would never
+		// return, since the server never reads.
+		if d := time.Since(begin); d > 5*time.Second {
 			t.Fatalf("Input blocked for %v", d)
 		}
 		if errors.Is(err, ssh.ErrInputFull) {
