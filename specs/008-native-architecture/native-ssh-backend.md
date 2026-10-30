@@ -54,7 +54,9 @@ terminals stay text. Three things need deciding:
   Screen diffs below). `resize-request` from a viewer holding input
   rights becomes `WindowChange`.
 - Keyboard-interactive challenges and a missing password go to the owner
-  through `Sink.Prompt`. Answers are never stored.
+  through `Sink.Prompt`, except that a configured password answers a
+  challenge with a single hidden question, once per connection.
+  Answers are never stored.
 - Snapshot for late joiners: a byte sequence that, fed into a fresh
   terminal of the same size, reproduces the screen, cursor, attributes and
   alternate-screen state. Clients need no special snapshot logic.
@@ -189,7 +191,9 @@ New `internal/backend/ssh`. The web client gains a terminal view
   - A fingerprint carries no key type, so a fingerprint of a server's
     ECDSA or RSA key is refused when the server also has an Ed25519 key.
     Pin the full key then. The error, a `HostKeyError`, names the
-    presented key's type and fingerprint.
+    presented key's type and fingerprint. Pinning a full public key is
+    the recommended form, since a fingerprint pin of a non-Ed25519 key
+    fails on servers that also hold an Ed25519 key.
   - Insecure mode accepts any key and warns once per Run; rekeys run the
     check again. With both pins and the insecure flag, a pinned key is
     accepted silently and any other key with the warning.
@@ -220,6 +224,16 @@ New `internal/backend/ssh`. The web client gains a terminal view
     and a key protected by a passphrase is refused as not supported yet.
     File permissions are not checked. `New` also requires a user and a
     host key policy, and sizes from 1 to 65535.
+  - A configured password also answers a keyboard-interactive challenge
+    that asks a single hidden question, as guacd and sshpass do. PAM
+    servers that disable the `password` method ask for the password
+    this way, and the owner would otherwise be asked for it. The
+    configured password is sent at most once per connection, by
+    whichever method asks first. A second such challenge means it was
+    wrong, and goes to the owner, which fails the connection if nobody
+    can answer. A hidden question after the `password` method has sent
+    it is another factor, such as a one-time code, and goes to the owner
+    too. Challenges of any other shape always go to the owner.
   - The password prompt has the instruction `Password for user@host:port`
     and one secret field. Keyboard-interactive rounds without questions,
     which OpenSSH sends, are not passed to the owner. The server's
@@ -241,11 +255,6 @@ New `internal/backend/ssh`. The web client gains a terminal view
     own goroutines stop once the connection closes; Run waits for its
     reader with `Client.Wait`.
 - **Follow-ups.**
-  - A configured password against a server that offers only
-    keyboard-interactive, as PAM setups often do: the owner is asked
-    although a password is configured. guacd answers a one-question
-    challenge with the configured password; whether to do the same is
-    open.
   - Keys protected by a passphrase, and keys encrypted at rest
     (decision 3).
   - The session's terminal emulator (decision 1) and its conformance
