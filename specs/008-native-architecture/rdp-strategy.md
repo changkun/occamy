@@ -149,8 +149,9 @@ panic in the NTLM dependency and ways for a hostile server to exhaust
 memory and CPU. A second review of the fixes found tests that a
 mutation survived, a decoding budget per PDU that a stream of small
 PDUs renewed, and certificate pins that added to the roots instead of
-replacing them. The fixes of both are in the same PR, each with a test
-that fails without it, and the live run was repeated after them.
+replacing them. The fixes of both are in the same PR. Each guard has a
+test that fails without it; the clearing of the password's copies,
+best effort, has none. The live run was repeated after the fixes.
 
 | Criterion | Result |
 |-----------|--------|
