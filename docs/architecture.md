@@ -19,9 +19,11 @@ _Figure 1: Guacamole Architecture_
 
 Occamy replaces the Guacamole Servlet with a single Go binary that uses JWT for
 authentication and tunnels the protocol over WebSocket, as shown in Figure 2. It
-still relies on upstream `guacd` for the remote desktop protocols;
-[specs/008](../specs/008-native-architecture.md) describes the path to native SSH and
-VNC, with `guacd` kept only for RDP.
+still relies on upstream `guacd` for the remote desktop protocols.
+[specs/008](../specs/008-native-architecture.md) describes Occamy v1, which
+replaces guacd one protocol at a time (SSH at beta.1, VNC at beta.2, RDP by
+the release candidate) and ships v1.0 with neither guacd nor the Guacamole
+protocol; see [Occamy v1, in progress](#occamy-v1-in-progress).
 
 ```
 |-- Browser --|-------- Occamy Server ---------|--- Intranet ---|
@@ -73,6 +75,8 @@ the spec it implements.
 | [internal/backend/](../internal/backend) | The interface every backend implements (native SSH, native VNC, the guacd bridge), its input events and prompts, and scripted fakes for tests ([session-core](../specs/008-native-architecture/session-core.md)) |
 | [internal/pacer/](../internal/pacer) | Per-viewer pacing: the frame window, the frame after an input sent at once, bytes in flight held near the bandwidth-delay product, and quality that adapts ([session-core](../specs/008-native-architecture/session-core.md)) |
 | [internal/framebuffer/](../internal/framebuffer) | A session's screen in tiles, versioned from one counter, so each viewer is sent only the tiles it has not seen ([graphics-pipeline](../specs/008-native-architecture/graphics-pipeline.md)) |
+| [internal/auth/](../internal/auth) | Tokens of API v1: Ed25519 JWTs for access (a user and groups) and for sessions (a session and a role), from occamyd or a trusted issuer ([api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md)) |
+| [internal/session/](../internal/session) | The session core: one goroutine per session runs a backend, applies input by role, keeps each viewer's small state as latest values, and a registry holds sessions and share tokens ([session-core](../specs/008-native-architecture/session-core.md)) |
 | [internal/backend/ssh/](../internal/backend/ssh) | The native SSH backend: a pure-Go client that verifies pinned host keys, asks the owner for keyboard-interactive answers and missing passwords, and feeds a shell's PTY output to the session's terminal ([native-ssh-backend](../specs/008-native-architecture/native-ssh-backend.md)) |
 
 ## License
