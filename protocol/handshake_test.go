@@ -9,6 +9,7 @@ import (
 	"errors"
 	"math"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -53,14 +54,21 @@ func TestHelloQuery(t *testing.T) {
 		t.Fatalf("decoding a hello over MaxHelloSize: %v", err)
 	}
 
-	// The size is checked before anything is decoded or allocated.
+	// The size is checked before anything is decoded: refusing a 1 MiB
+	// query allocates its error and nothing in proportion to the query.
+	// The count of allocations would not show that, and varies with the
+	// toolchain.
 	huge := strings.Repeat("A", 1<<20)
-	if n := testing.AllocsPerRun(10, func() {
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	for range 10 {
 		if _, err := protocol.DecodeHelloQuery(huge); !errors.Is(err, protocol.ErrTooLarge) {
-			panic(err)
+			t.Fatal(err)
 		}
-	}); n > 3 {
-		t.Errorf("refusing a 1 MiB query: %v allocations", n)
+	}
+	runtime.ReadMemStats(&after)
+	if n := (after.TotalAlloc - before.TotalAlloc) / 10; n > 1<<10 {
+		t.Errorf("refusing a 1 MiB query allocates %d bytes", n)
 	}
 
 	// A hello of another version is refused before the rest is read.
