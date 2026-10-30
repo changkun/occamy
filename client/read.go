@@ -19,7 +19,9 @@ type frame struct {
 	ops     []op
 	end     protocol.FrameEnd
 	arrived time.Time
-	bytes   int // what its ops hold
+	bytes   int // what its ops hold, counted in the backlog
+	work    int // bytes of pixels its ops write or allocate
+	area    int // pixels of the largest screen it was read for
 }
 
 type opKind uint8
@@ -34,11 +36,13 @@ const (
 
 // op is a message of a frame.
 type op struct {
-	kind opKind
-	r    image.Rectangle // a tile's, a copy's destination, the screen of a resize
-	src  image.Point     // a copy's source
-	data []byte          // a raw tile's pixels, a terminal's bytes
-	job  *job            // a tile of a plugged codec
+	kind  opKind
+	r     image.Rectangle // a tile's, a copy's destination, the screen of a resize
+	src   image.Point     // a copy's source
+	data  []byte          // a raw tile's pixels, a terminal's bytes
+	job   *job            // a tile of a plugged codec
+	bytes int             // what the op holds
+	work  int             // bytes of pixels the op writes or allocates
 }
 
 // read reads the server's messages until the session ends.
@@ -46,6 +50,11 @@ func (s *Session) read() {
 	defer s.wg.Done()
 	for {
 		b, err := s.conn.ReadMessage(s.ctx)
+		select {
+		case <-s.closed:
+			return // what arrives after the end is not delivered
+		default:
+		}
 		if err == nil {
 			err = s.handle(b)
 		}
@@ -127,11 +136,34 @@ func (s *Session) maxPixels() int {
 
 func (s *Session) resize(m *protocol.Resize, n int) error {
 	w, h := int(m.Width), int(m.Height)
-	if s.graphical() && w*h > s.maxPixels() {
+	if !s.graphical() {
+		s.wire, s.sized = image.Pt(w, h), true
+		return s.add(op{kind: opResize, r: image.Rect(0, 0, w, h), bytes: n})
+	}
+	if w*h > s.maxPixels() {
 		return fmt.Errorf("%w: a %dx%d screen, more than %d pixels", protocol.ErrUnsupported, w, h, s.maxPixels())
 	}
 	s.wire, s.sized = image.Pt(w, h), true
-	return s.add(op{kind: opResize, r: image.Rect(0, 0, w, h)}, n)
+	if s.open != nil {
+		// A resize starts the screen afresh, so what the frame drew
+		// before it is never applied, and resizes in a row cost one.
+		// Tiles that are being decoded stay counted until the frame is
+		// delivered.
+		var bytes, work int
+		for _, o := range s.open.ops {
+			if o.job == nil {
+				bytes += o.bytes
+				work += o.work
+			}
+		}
+		s.open.ops = s.open.ops[:0]
+		s.open.bytes -= bytes
+		s.open.work -= work
+		s.mu.Lock()
+		s.backlog -= bytes
+		s.mu.Unlock()
+	}
+	return s.add(op{kind: opResize, r: image.Rect(0, 0, w, h), bytes: n, work: 4 * w * h})
 }
 
 // screen checks that r lies within the screen as the messages read so
@@ -165,14 +197,14 @@ func (s *Session) tile(m *protocol.Tile, n int) error {
 	if !slices.Contains(s.agreed.Codecs, m.Codec) {
 		return fmt.Errorf("%w: a tile of codec %v, which was not agreed", protocol.ErrInvalid, m.Codec)
 	}
-	o := op{kind: opTile, r: r}
+	o := op{kind: opTile, r: r, bytes: n, work: 4 * r.Dx() * r.Dy()}
 	if m.Codec == protocol.CodecRaw {
 		o.data = m.Payload
 	} else {
 		o.job = &job{dec: s.decoders[m.Codec], payload: m.Payload, w: r.Dx(), h: r.Dy(), done: make(chan struct{})}
-		n += 4 * r.Dx() * r.Dy()
+		o.bytes += 4 * r.Dx() * r.Dy() // the decoded pixels
 	}
-	if err := s.add(o, n); err != nil {
+	if err := s.add(o); err != nil {
 		return err
 	}
 	if o.job != nil {
@@ -199,26 +231,35 @@ func (s *Session) copyRect(m *protocol.CopyRect, n int) error {
 	if dst.Empty() {
 		return nil // copies nothing
 	}
-	return s.add(op{kind: opCopy, r: dst, src: src.Min}, n)
+	return s.add(op{kind: opCopy, r: dst, src: src.Min, bytes: n, work: 4 * dst.Dx() * dst.Dy()})
 }
 
 func (s *Session) term(kind opKind, data []byte, n int) error {
 	if s.graphical() {
 		return fmt.Errorf("%w: terminal data in a graphical session", protocol.ErrInvalid)
 	}
-	return s.add(op{kind: kind, data: data}, n)
+	return s.add(op{kind: kind, data: data, bytes: n})
 }
 
-// add adds o, which holds n bytes, to the open frame.
-func (s *Session) add(o op, n int) error {
+// add adds o to the open frame.
+func (s *Session) add(o op) error {
 	if s.open == nil {
 		s.open = &frame{}
 	}
-	s.open.ops = append(s.open.ops, o)
-	s.open.bytes += n
+	f := s.open
+	f.ops = append(f.ops, o)
+	f.bytes += o.bytes
+	f.work += o.work
+	f.area = max(f.area, s.wire.X*s.wire.Y)
+	if limit := maxWork(f.area); f.work > limit {
+		return fmt.Errorf("%w: a frame that writes %d bytes of pixels, more than %d", protocol.ErrInvalid, f.work, limit)
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.backlog += n
+	s.backlog += o.bytes
+	if s.end != nil {
+		return nil // the frame will not be delivered: see frameEnd
+	}
 	return s.checkBacklog()
 }
 
@@ -233,14 +274,18 @@ func (s *Session) frameEnd(m *protocol.FrameEnd) error {
 		f = &frame{}
 	}
 	f.end, f.arrived = *m, time.Now()
+	f.area = max(f.area, s.wire.X*s.wire.Y)
 	s.mu.Lock()
-	if s.frames > s.window {
-		s.mu.Unlock()
+	defer s.mu.Unlock()
+	switch {
+	case s.end != nil:
+		s.backlog -= f.bytes // nothing is delivered after End
+		return nil
+	case s.frames > s.window:
 		return fmt.Errorf("%w: more than %d frames unacknowledged", protocol.ErrInvalid, s.window+1)
 	}
 	s.queue = append(s.queue, item{f: f})
 	s.frames++
-	s.mu.Unlock()
 	s.poke()
 	return nil
 }
@@ -251,10 +296,35 @@ func (s *Session) frameEnd(m *protocol.FrameEnd) error {
 // size, and sends the small state as it changes, which the Session
 // coalesces; one that sends more than three screens a frame beyond that
 // is taken for broken.
+//
+// The screen is the largest of the frames held, so that a frame of a
+// large screen still queued does not count against the smaller one the
+// next frame resizes to. A terminal's screen is cells, whose frames
+// hold text and not pixels: it holds minBacklog. s.mu is held.
 func (s *Session) maxBacklog() int {
-	screen := int64(4 * s.wire.X * s.wire.Y)
-	limit := int64(s.window+2) * 3 * screen
-	return int(max(min(limit, 1<<30), minBacklog))
+	if !s.graphical() {
+		return minBacklog
+	}
+	area := s.wire.X * s.wire.Y
+	if s.open != nil {
+		area = max(area, s.open.area)
+	}
+	for _, it := range s.queue {
+		if it.f != nil {
+			area = max(area, it.f.area)
+		}
+	}
+	limit := int64(s.window+2) * 3 * 4 * int64(area)
+	return int(max(min(limit, 1<<30), int64(minBacklog)))
+}
+
+// maxWork is the most bytes of pixels that a frame of a screen of area
+// pixels may write or allocate: eight screens, several times what a
+// server that resizes, scrolls and redraws the whole screen sends. A
+// copy-rect or a resize costs a few bytes to send and a screen to apply;
+// this bounds the work one Next can be made to do.
+func maxWork(area int) int {
+	return max(8*4*area, minBacklog)
 }
 
 func (s *Session) checkBacklog() error {
@@ -290,6 +360,9 @@ func (s *Session) cursor(m *protocol.Cursor) (Cursor, int, error) {
 func (s *Session) event(ev Event, n int) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.end != nil {
+		return nil // nothing is delivered after End
+	}
 	switch ev := ev.(type) {
 	case Title, Clipboard, Cursor, CursorMove:
 		for i := len(s.queue) - 1; i >= 0; i-- {
@@ -345,9 +418,9 @@ func sameKind(a, b Event) bool {
 	return false
 }
 
-// apply applies frame f and returns its events. A graphical frame's
-// tiles are decoded by then, or soon; the framebuffer is locked only
-// while the frame is drawn into it.
+// apply applies frame f, whose tiles are decoded, and returns its
+// events. The framebuffer is locked only while the frame is drawn into
+// it, and Close stops the drawing between two messages.
 func (s *Session) apply(f *frame) ([]Event, error) {
 	end := Frame{
 		ID:         f.end.FrameID,
@@ -370,17 +443,19 @@ func (s *Session) apply(f *frame) ([]Event, error) {
 		return append(evs, end), nil
 	}
 	for _, o := range f.ops {
-		if o.job != nil {
-			<-o.job.done
-			if o.job.err != nil {
-				return nil, o.job.err
-			}
+		if o.job != nil && o.job.err != nil { // decoded already: see Session.decoded
+			return nil, o.job.err
 		}
 	}
 	s.fbMu.Lock()
 	defer s.fbMu.Unlock()
 	resized := false
 	for _, o := range f.ops {
+		select {
+		case <-s.abort:
+			return nil, ErrClosed // Close: the frame will not be delivered
+		default:
+		}
 		switch o.kind {
 		case opResize:
 			s.fb = image.NewRGBA(o.r)

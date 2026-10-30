@@ -15,7 +15,8 @@ import (
 
 // A Decoder decodes the tile and cursor payloads of one codec. The
 // graphics pipeline's codecs plug in here; raw is built in. Decode is
-// called from several goroutines at once.
+// called from several goroutines at once, and is Go: a decoder in C
+// would need cgo, which the package does without.
 type Decoder interface {
 	// Codec is the codec the Decoder decodes.
 	Codec() protocol.Codec
@@ -23,7 +24,11 @@ type Decoder interface {
 	// holds w×h×4 bytes: rows from top to bottom without padding, four
 	// bytes a pixel in raw's channel order. It returns an error if
 	// payload is not such an image, which ends the session with
-	// protocol-error. It must not keep payload or dst.
+	// protocol-error. The payload comes from the server: Decode checks
+	// the size the payload declares against w×h before it allocates
+	// anything for it, as image.DecodeConfig allows, so that a few bytes
+	// cannot make it allocate more than dst. It must not keep payload or
+	// dst.
 	Decode(dst []byte, w, h int, payload []byte) error
 }
 
@@ -88,9 +93,16 @@ func newPool(workers int, abort <-chan struct{}, wg *sync.WaitGroup) *pool {
 	return p
 }
 
-// submit queues j.
+// submit queues j. Once the pool is closing, its workers may be gone,
+// so j fails with ErrClosed at once instead.
 func (p *pool) submit(j *job) {
 	p.mu.Lock()
+	if p.closing {
+		p.mu.Unlock()
+		j.err = ErrClosed
+		close(j.done)
+		return
+	}
 	p.jobs = append(p.jobs, j)
 	p.mu.Unlock()
 	p.cond.Signal()

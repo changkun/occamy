@@ -73,8 +73,14 @@ func (w wsConn) ReadMessage(ctx context.Context) ([]byte, error) {
 	typ, p, err := w.c.Read(ctx)
 	if err != nil {
 		var ce websocket.CloseError
-		if errors.As(err, &ce) {
+		switch {
+		case errors.As(err, &ce):
 			return nil, &CloseError{Code: protocol.CloseCode(ce.Code), Reason: ce.Reason} // #nosec G115 -- a close status is a u16 on the wire
+		case errors.Is(err, websocket.ErrMessageTooBig):
+			// The read limit, which is the agreed max_message_size: the
+			// server's protocol error, which coder/websocket already
+			// closed the WebSocket for with 1009.
+			return nil, fmt.Errorf("%w: %w", protocol.ErrTooLarge, err)
 		}
 		return nil, err
 	}

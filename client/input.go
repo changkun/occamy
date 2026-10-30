@@ -6,6 +6,7 @@ package client
 
 import (
 	"context"
+	"fmt"
 	"image"
 	"sync"
 
@@ -79,13 +80,20 @@ func (s *Session) Clipboard(ctx context.Context, mime string, data []byte) (uint
 }
 
 // View tells the server whether the client can be seen, and which part
-// of the screen it shows; an empty viewport is the whole screen. A
+// of the screen it shows, clamped to the protocol's coordinates; an
+// empty viewport is the whole screen, and one that shows nothing of a
+// screen, such as one at negative coordinates only, is refused. A
 // hidden client gets no frames, and one frame of the current screen
 // when it shows again.
 func (s *Session) View(ctx context.Context, visible bool, viewport image.Rectangle) error {
 	m := protocol.View{Visible: visible}
 	if !viewport.Empty() {
-		viewport = viewport.Intersect(image.Rect(0, 0, 1<<16-1, 1<<16-1))
+		clamped := viewport.Intersect(image.Rect(0, 0, 1<<16-1, 1<<16-1))
+		if clamped.Empty() {
+			// An empty viewport on the wire is the whole screen.
+			return fmt.Errorf("client: viewport %v shows nothing of a screen", viewport)
+		}
+		viewport = clamped
 		m.X, m.Y = uint16(viewport.Min.X), uint16(viewport.Min.Y) // #nosec G115 -- clamped above
 		m.W, m.H = uint16(viewport.Dx()), uint16(viewport.Dy())   // #nosec G115 -- clamped above
 	}
@@ -114,7 +122,7 @@ func (s *Session) input(ctx context.Context, build func(seq uint32) protocol.Mes
 
 // send queues the message that build returns for the writer. An input
 // takes the next sequence number, in the order of the queue and so of
-// the wire.
+// the wire, wrapping from 2³²−1 to 1.
 func (s *Session) send(ctx context.Context, build func(seq uint32) protocol.Message, input bool) (uint32, error) {
 	o := &s.out
 	for {
@@ -125,7 +133,9 @@ func (s *Session) send(ctx context.Context, build func(seq uint32) protocol.Mess
 		}
 		seq := uint32(0)
 		if input {
-			seq = o.seq + 1
+			// After 2³²−1 comes 1: 0 is never an input's number, so
+			// last_seq 0 always means none.
+			seq = max(o.seq+1, 1)
 		}
 		msg := build(seq).Append(nil)
 		if err := s.limits.CheckSize(len(msg)); err != nil {

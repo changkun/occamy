@@ -23,12 +23,14 @@ type Event interface{ event() }
 // Resize, TermSnapshot and TermData came just before it. Next
 // acknowledges the frame as it delivers it.
 type Frame struct {
-	// ID is the frame's ID, from 1 on each connection.
+	// ID is the frame's ID, from 1 on each connection, wrapping from
+	// 2³²−1 to 0.
 	ID uint32
 	// LastSeq is the sequence number of the last input of this client
-	// that the server applied before it read the frame's content, or 0.
-	// An input's effect may show only in a later frame when the remote
-	// end answers late, as a remote shell's echo does.
+	// that the server applied before it finished reading the frame's
+	// content, or 0. The frame shows the effect of no later input. An
+	// input's effect may show only in a later frame when the remote end
+	// answers late, as a remote shell's echo does.
 	LastSeq uint32
 	// ServerTime is when the server read the frame's content, since the
 	// session started.

@@ -135,13 +135,18 @@ func TestGoldenClientMessages(t *testing.T) {
 			t.Errorf("pong: % x, want % x", got, vec("pong"))
 		}
 
-		// A frame delivered 1250 µs after its frame-end arrived is
-		// acknowledged with that decode time.
+		// A frame is acknowledged when the caller comes back for the
+		// next event, having shown it, here 1250 µs after its frame-end
+		// arrived, with that decode time.
 		sc.send(&protocol.FrameEnd{FrameID: 1})
 		sc.sync()
-		time.Sleep(1250 * time.Microsecond)
+		time.Sleep(1000 * time.Microsecond)
 		if f, ok := next(t, sc.cl, time.Second).(client.Frame); !ok || f.ID != 1 {
 			t.Fatalf("no frame 1: %#v", f)
+		}
+		time.Sleep(250 * time.Microsecond) // drawing it
+		if ev := next(t, sc.cl, time.Millisecond); ev != nil {
+			t.Fatalf("event %#v", ev)
 		}
 		if got := sc.recvBytes(); !bytes.Equal(got, vec("frame-ack")) {
 			t.Errorf("frame-ack: % x, want % x", got, vec("frame-ack"))

@@ -132,8 +132,10 @@ const (
 const closeTimeout = time.Second
 
 // minBacklog is the least the Session holds of undelivered frames and
-// events before it takes the server for broken; see maxBacklog.
-const minBacklog = 64 << 20
+// events before it takes the server for broken, and the least work it
+// allows a frame; see maxBacklog and maxWork. Tests lower it to reach
+// the limits with small screens.
+var minBacklog = 64 << 20
 
 // maxEvents bounds the undelivered small events. Those that hold the
 // latest value replace each other, and a viewer that left cancels its
@@ -289,8 +291,9 @@ type Session struct {
 	frames    int     // complete frames in queue
 	backlog   int     // bytes held by queue and the open frame
 	end       *End
-	delivered bool // End was delivered
-	discard   bool // Close was called: nothing but End is delivered
+	delivered bool   // End was delivered
+	discard   bool   // Close was called: nothing but End is delivered
+	shown     *Frame // delivered and not yet acknowledged
 	size      image.Point
 	wake      chan struct{} // holds a token when Next has news
 
@@ -507,11 +510,14 @@ func (s *Session) Screenshot() *image.RGBA {
 // Next returns the session's next event. It blocks until there is one
 // or ctx is done. A Frame of a graphical session is applied to the
 // framebuffer as Next delivers it (a Resize first, if the frame resized
-// the screen), and acknowledged to the server.
+// the screen). Calling Next again says the caller has shown the frame,
+// and acknowledges it to the server.
 //
-// Once the session ended, Next delivers the events that arrived before
-// the end, then End, and then returns ErrClosed. After Close, it
-// delivers End at once.
+// Next returns ctx's error while it waits for an event or for a frame's
+// tiles to decode; once it applies a frame, it finishes it, which the
+// limits on a frame's work keep short. Once the session ended, Next
+// delivers the events that arrived before the end, then End, and then
+// returns ErrClosed. After Close, it delivers End at once.
 func (s *Session) Next(ctx context.Context) (Event, error) {
 	select {
 	case s.next <- struct{}{}:
@@ -519,10 +525,17 @@ func (s *Session) Next(ctx context.Context) (Event, error) {
 		return nil, ctx.Err()
 	}
 	defer func() { <-s.next }()
+	s.mu.Lock()
+	s.ackShown()
+	s.mu.Unlock()
 	for {
 		s.mu.Lock()
+		if s.delivered {
+			s.mu.Unlock()
+			return nil, ErrClosed
+		}
 		if s.discard { // what the reader added since Close
-			s.queue, s.pending = nil, nil
+			s.dropQueue()
 		}
 		if len(s.pending) > 0 {
 			ev := s.pending[0]
@@ -534,25 +547,39 @@ func (s *Session) Next(ctx context.Context) (Event, error) {
 		}
 		if len(s.queue) > 0 {
 			it := s.queue[0]
-			s.queue[0] = item{}
-			s.queue = s.queue[1:]
 			if it.f == nil {
+				s.queue[0] = item{}
+				s.queue = s.queue[1:]
 				s.backlog -= it.bytes
 				s.mu.Unlock()
 				return it.ev, nil
 			}
 			s.mu.Unlock()
+			if err := s.decoded(ctx, it.f); err != nil {
+				if ctx.Err() != nil {
+					return nil, err // the frame waits for the next call
+				}
+				continue // Close dropped the frame
+			}
+			s.mu.Lock()
+			if len(s.queue) == 0 || s.queue[0].f != it.f {
+				s.mu.Unlock()
+				continue // Close dropped the frame
+			}
+			s.queue[0] = item{}
+			s.queue = s.queue[1:]
+			s.backlog -= it.f.bytes
+			s.frames--
+			s.mu.Unlock()
 			evs, err := s.apply(it.f)
 			s.mu.Lock()
-			if !s.discard { // Close resets the counts
-				s.backlog -= it.f.bytes
-				s.frames--
-			}
 			if err != nil {
-				// The frame does not decode; what follows builds on it.
-				s.queue, s.pending = nil, nil
+				// What follows builds on the frame.
+				s.dropQueue()
 				s.mu.Unlock()
-				s.fail(err)
+				if !errors.Is(err, ErrClosed) { // Close ends the session itself
+					s.fail(err)
+				}
 				continue
 			}
 			s.pending = evs
@@ -560,10 +587,6 @@ func (s *Session) Next(ctx context.Context) (Event, error) {
 			continue
 		}
 		if s.end != nil {
-			if s.delivered {
-				s.mu.Unlock()
-				return nil, ErrClosed
-			}
 			s.delivered = true
 			e := *s.end
 			s.mu.Unlock()
@@ -578,19 +601,63 @@ func (s *Session) Next(ctx context.Context) (Event, error) {
 	}
 }
 
-// delivering records what delivering ev means: a Frame is acknowledged,
-// and a Resize sets the size. s.mu is held.
+// decoded waits until f's tiles of plugged codecs are decoded. It
+// returns ctx's error if ctx is done first, and ErrClosed after Close.
+func (s *Session) decoded(ctx context.Context, f *frame) error {
+	for _, o := range f.ops {
+		if o.job == nil {
+			continue
+		}
+		select {
+		case <-o.job.done:
+		case <-s.abort:
+			return ErrClosed
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+// dropQueue drops the undelivered events and frames. s.mu is held.
+func (s *Session) dropQueue() {
+	for _, it := range s.queue {
+		if it.f != nil {
+			s.backlog -= it.f.bytes
+			s.frames--
+		} else {
+			s.backlog -= it.bytes
+		}
+	}
+	s.queue, s.pending = nil, nil
+}
+
+// delivering records what delivering ev means: a Frame is to be
+// acknowledged once the caller comes back for the next event, and a
+// Resize sets the size. s.mu is held.
 func (s *Session) delivering(ev Event) {
 	switch ev := ev.(type) {
 	case Frame:
-		d := time.Since(ev.arrived).Microseconds()
-		s.out.ack(protocol.FrameAck{
-			FrameID:    ev.ID,
-			DecodeTime: uint32(min(max(d, 0), math.MaxUint32)), // #nosec G115 -- clamped to a u32
-		})
+		s.shown = &ev
 	case Resize:
 		s.size = image.Pt(ev.Width, ev.Height)
 	}
+}
+
+// ackShown acknowledges the frame Next delivered last, which the caller
+// has shown now that it asks for the next event. Its decode time runs
+// from its frame-end arriving until now. s.mu is held.
+func (s *Session) ackShown() {
+	f := s.shown
+	if f == nil {
+		return
+	}
+	s.shown = nil
+	d := time.Since(f.arrived).Microseconds()
+	s.out.ack(protocol.FrameAck{
+		FrameID:    f.ID,
+		DecodeTime: uint32(min(max(d, 0), math.MaxUint32)), // #nosec G115 -- clamped to a u32
+	})
 }
 
 // poke wakes Next.
@@ -603,13 +670,18 @@ func (s *Session) poke() {
 
 // Close ends the session: it sends the input queued so far and close,
 // closes the connection, and waits for the session's goroutines to
-// exit. Next then delivers End and nothing else.
+// exit. Next then delivers End and nothing else; a frame Next was
+// applying may be left half drawn in the framebuffer.
+//
+// Close waits up to a second for the network to take the queued input,
+// then for the WebSocket's close handshake, which coder/websocket bounds
+// at 5 s a step: about 6 s against a server that stopped answering. A
+// UI calls it off its main thread.
 func (s *Session) Close() error {
 	s.abortOnce.Do(func() { close(s.abort) })
 	s.mu.Lock()
 	s.discard = true
-	s.queue, s.pending = nil, nil
-	s.frames, s.backlog = 0, 0
+	s.dropQueue()
 	s.mu.Unlock()
 	s.terminate(End{Code: protocol.CloseNormal}, &protocol.Close{Code: protocol.CloseNormal}, true)
 	s.wg.Wait()

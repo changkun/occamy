@@ -331,13 +331,19 @@ func (*pngCodec) Encode(dst, pix []byte, w, h, _ int) ([]byte, protocol.Codec) {
 	return append(dst, b.Bytes()...), protocol.CodecPNG
 }
 
+// Decode checks the size the PNG declares before it decodes, as the
+// Decoder contract asks, so that a header cannot make it allocate.
 func (c *pngCodec) Decode(dst []byte, w, h int, payload []byte) error {
-	img, err := png.Decode(bytes.NewReader(payload))
+	cfg, err := png.DecodeConfig(bytes.NewReader(payload))
 	if err != nil {
 		return err
 	}
-	if img.Bounds() != image.Rect(0, 0, w, h) {
+	if cfg.Width != w || cfg.Height != h {
 		return errors.New("png of another size")
+	}
+	img, err := png.Decode(bytes.NewReader(payload))
+	if err != nil {
+		return err
 	}
 	draw.Draw(&image.RGBA{Pix: dst, Stride: 4 * w, Rect: img.Bounds()}, img.Bounds(), img, image.Point{}, draw.Src)
 	c.mu.Lock()

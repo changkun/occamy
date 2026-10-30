@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"io"
 	"net/http"
@@ -59,6 +60,13 @@ func newStack(t *testing.T, token string, subprotocols []string) *stack {
 	t.Helper()
 	st := &stack{hello: make(chan protocol.Hello, 1), query: make(chan string, 1), done: make(chan error, 1)}
 	st.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			// net/http would recover a panic itself, and the test then
+			// wait for done forever.
+			if p := recover(); p != nil {
+				st.done <- fmt.Errorf("the handler panicked: %v", p)
+			}
+		}()
 		st.query <- r.URL.RawQuery
 		tok, terr := protocol.TokenFromSubprotocols(r.Header.Values("Sec-WebSocket-Protocol"))
 		h, herr := protocol.DecodeHelloQuery(r.URL.Query().Get(protocol.HelloParameter))
@@ -92,6 +100,18 @@ func newStack(t *testing.T, token string, subprotocols []string) *stack {
 
 func (st *stack) url() string {
 	return "ws" + strings.TrimPrefix(st.srv.URL, "http") + "/api/v1/connections/lab/stream?x=1"
+}
+
+// wait returns what the server's handler returned.
+func (st *stack) wait(t *testing.T) error {
+	t.Helper()
+	select {
+	case err := <-st.done:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatal("the server's handler did not return")
+		return nil
+	}
 }
 
 // checkGoroutines fails t if goroutines that started since n outlive
@@ -159,7 +179,7 @@ func TestDial(t *testing.T) {
 		}
 	}
 	cl.Close()
-	if err := <-st.done; err != nil {
+	if err := st.wait(t); err != nil {
 		t.Errorf("Serve: %v", err)
 	}
 	st.srv.CloseClientConnections()
@@ -175,7 +195,7 @@ func TestDialRefused(t *testing.T) {
 	if !errors.As(err, &ce) || ce.Code != protocol.CloseUnauthorized || ce.Reason != "token refused" {
 		t.Fatalf("Dial returned %v, want unauthorized", err)
 	}
-	<-st.done
+	_ = st.wait(t)
 	st.srv.CloseClientConnections()
 	checkGoroutines(t, n)
 }
@@ -194,5 +214,108 @@ func TestDialOptions(t *testing.T) {
 	_, err := client.Dial(context.Background(), "ws://127.0.0.1:1/", "", client.Options{MaxMessageSize: 100})
 	if err == nil || strings.Contains(err.Error(), "dial") {
 		t.Errorf("Dial returned %v", err)
+	}
+}
+
+// Dial's context bounds the handshake only: cancelling it once Dial
+// returned leaves the session running.
+func TestDialContextAfterReturn(t *testing.T) {
+	st := newStack(t, "s3cret", []string{protocol.Subprotocol})
+	ctx, cancel := context.WithCancel(context.Background())
+	cl, err := client.Dial(ctx, st.url(), "s3cret", client.Options{Cols: 80, Rows: 24})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cl.Close()
+	cancel()
+	time.Sleep(50 * time.Millisecond)
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := cl.TermInput(ctx, []byte("still here\r")); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	for !bytes.Contains(out.Bytes(), []byte("still here")) {
+		ev, err := cl.Next(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch ev := ev.(type) {
+		case client.TermSnapshot:
+			out.Write(ev.Data)
+		case client.TermData:
+			out.Write(ev.Data)
+		case client.End:
+			t.Fatalf("the session ended once Dial's context was cancelled: %+v", ev)
+		}
+	}
+}
+
+// wsScript serves one WebSocket that speaks occamy.v1 and plays serve,
+// then reads until the client closes.
+func wsScript(t *testing.T, serve func(ctx context.Context, c *websocket.Conn)) string {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		c, err := websocket.Accept(w, r, &websocket.AcceptOptions{Subprotocols: []string{protocol.Subprotocol}})
+		if err != nil {
+			return
+		}
+		defer c.CloseNow()
+		serve(r.Context(), c)
+		for {
+			if _, _, err := c.Read(r.Context()); err != nil {
+				return
+			}
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return "ws" + strings.TrimPrefix(srv.URL, "http")
+}
+
+// endOf dials url and returns how the session ended.
+func endOf(t *testing.T, url string, opts client.Options) client.End {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cl, err := client.Dial(ctx, url, "", opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cl.Close()
+	for {
+		ev, err := cl.Next(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if e, ok := ev.(client.End); ok {
+			return e
+		}
+	}
+}
+
+// A text message is not a protocol message: the client ends the
+// session with unsupported rather than decode it.
+func TestDialTextMessage(t *testing.T) {
+	url := wsScript(t, func(ctx context.Context, c *websocket.Conn) {
+		_ = c.Write(ctx, websocket.MessageBinary, graphical.Append(nil))
+		_ = c.Write(ctx, websocket.MessageText, (&protocol.Title{Title: "text"}).Append(nil))
+	})
+	if e := endOf(t, url, client.Options{}); e.Code != protocol.CloseUnsupported || !errors.Is(e.Err, protocol.ErrUnsupported) {
+		t.Errorf("End %+v, want unsupported", e)
+	}
+}
+
+// A message beyond the agreed max_message_size ends the session with
+// too-large, which coder/websocket's read limit closes the WebSocket
+// with.
+func TestDialReadLimit(t *testing.T) {
+	url := wsScript(t, func(ctx context.Context, c *websocket.Conn) {
+		_ = c.Write(ctx, websocket.MessageBinary, graphical.Append(nil))
+		big := protocol.TermData{Data: make([]byte, protocol.MinMessageSize)}
+		_ = c.Write(ctx, websocket.MessageBinary, big.Append(nil))
+	})
+	e := endOf(t, url, client.Options{MaxMessageSize: protocol.MinMessageSize})
+	if e.Code != protocol.CloseTooLarge || !errors.Is(e.Err, protocol.ErrTooLarge) {
+		t.Errorf("End %+v, want too-large", e)
 	}
 }
