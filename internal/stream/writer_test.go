@@ -37,7 +37,13 @@ type client struct {
 	close   *protocol.Close
 	welcome *protocol.Welcome
 	tiles   int
-	// newGrid reports a tile outside the screen the client was told of.
+	cursors []protocol.Cursor
+	clips   int // server clipboards received
+	pongs   []uint32
+	// errs holds messages the client could not decode, which a client
+	// answers by closing the connection.
+	errs []error
+	// outside reports a tile outside the screen the client was told of.
 	outside bool
 	// onFrame, if set, runs at each frame-end with the lock held.
 	onFrame func(f frameRecord)
@@ -68,10 +74,12 @@ func (cl *client) run(ctx context.Context) {
 			return
 		}
 		m, err := protocol.Decode(b, reg, protocol.Limits{MaxMessageSize: 1 << 30})
-		if err != nil {
-			panic(err)
-		}
 		cl.mu.Lock()
+		if err != nil {
+			cl.errs = append(cl.errs, err)
+			cl.mu.Unlock()
+			continue
+		}
 		cl.types = append(cl.types, m.Type())
 		var ackID uint32
 		switch m := m.(type) {
@@ -97,6 +105,14 @@ func (cl *client) run(ctx context.Context) {
 			}
 			rects = nil
 			ackID = m.FrameID
+		case *protocol.Cursor:
+			c := *m
+			c.Payload = slices.Clone(m.Payload)
+			cl.cursors = append(cl.cursors, c)
+		case *protocol.ServerClipboard:
+			cl.clips++
+		case *protocol.Pong:
+			cl.pongs = append(cl.pongs, m.Nonce)
 		case *protocol.Title:
 			cl.titles = append(cl.titles, timedTitle{m.Title, time.Since(cl.start), cl.tiles})
 		case *protocol.Close:
@@ -115,6 +131,17 @@ func (cl *client) send(t *testing.T, m interface{ Append([]byte) []byte }) {
 	if err := cl.c.WriteMessage(context.Background(), m.Append(nil)); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// titled reports how many times the title arrived; the lock is held.
+func (cl *client) titled(title string) int {
+	n := 0
+	for _, t := range cl.titles {
+		if t.title == title {
+			n++
+		}
+	}
+	return n
 }
 
 // screen returns a copy of what the client shows.
@@ -173,11 +200,22 @@ func newRigTiles(t *testing.T, b backend.Backend, tile int, rate float64, delay 
 		s.Close()
 		r.link.close()
 		<-r.served
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		if len(r.cl.errs) > 0 {
+			t.Errorf("the client could not decode %d messages, the first: %v", len(r.cl.errs), r.cl.errs[0])
+		}
 	})
 	return r
 }
 
-var visible = protocol.Hello{Visible: true}
+// rawOnly are the capabilities of a client that decodes raw tiles.
+var rawOnly = protocol.Capabilities{Codecs: []protocol.Codec{protocol.CodecRaw}}
+
+var (
+	visible = protocol.Hello{Visible: true, Capabilities: rawOnly}
+	hidden  = protocol.Hello{Capabilities: rawOnly}
+)
 
 func TestConverges(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
@@ -259,7 +297,7 @@ func TestSmallStateAhead(t *testing.T) {
 // soon as it is visible.
 func TestHidden(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		r := newRig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 50e6, 5*time.Millisecond, protocol.Hello{})
+		r := newRig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 50e6, 5*time.Millisecond, hidden)
 		time.Sleep(time.Second)
 		r.cl.mu.Lock()
 		frames := len(r.cl.frames)
@@ -285,7 +323,7 @@ func TestHidden(t *testing.T) {
 // Tiles outside the viewport wait until they show.
 func TestViewport(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		r := newRig(t, backendtest.NewScreen(256, 256, 0), 50e6, time.Millisecond, protocol.Hello{})
+		r := newRig(t, backendtest.NewScreen(256, 256, 0), 50e6, time.Millisecond, hidden)
 		r.cl.send(t, protocol.View{Visible: true, X: 0, Y: 0, W: 100, H: 60})
 		time.Sleep(time.Second)
 		r.cl.mu.Lock()
@@ -447,6 +485,354 @@ func TestProtocolError(t *testing.T) {
 		defer r.cl.mu.Unlock()
 		if r.cl.close == nil || r.cl.close.Code != protocol.CloseUnsupported {
 			t.Errorf("close %+v, want unsupported", r.cl.close)
+		}
+	})
+}
+
+// Small state sent while a tile waits for the pacer does not replace the
+// tile, and every ping is answered.
+func TestPacedSmallState(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		// 1024x768 raw is 3 MiB: three seconds at 1 MB/s, paced.
+		b := &tapped{Backend: backendtest.NewScreen(1024, 768, 0)}
+		r := newRig(t, b, 1e6, 10*time.Millisecond, visible)
+		time.Sleep(500 * time.Millisecond)
+		b.Sink().Title("hello")
+		const pings = 400
+		for i := range pings {
+			r.cl.send(t, protocol.Ping{Nonce: uint32(i + 1)}) // #nosec G115 -- a small count
+			time.Sleep(5 * time.Millisecond)
+		}
+		time.Sleep(5 * time.Second)
+		synctest.Wait()
+		want, got := serverScreen(r.s), r.cl.screen()
+		if got.Rect != want.Rect || !bytes.Equal(got.Pix, want.Pix) {
+			t.Errorf("client screen differs from the server's")
+		}
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		if n := r.cl.titled("hello"); n != 1 {
+			t.Errorf("title sent %d times, want once", n)
+		}
+		if len(r.cl.pongs) != pings || !slices.IsSorted(r.cl.pongs) {
+			t.Errorf("%d pongs for %d pings", len(r.cl.pongs), pings)
+		}
+	})
+}
+
+// A hidden cursor carries no hot spot, codec or payload, and a shown
+// cursor's hot spot is inside its image.
+func TestCursor(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &tapped{Backend: backendtest.NewScreen(200, 150, 0)}
+		r := newRig(t, b, 50e6, time.Millisecond, visible)
+		time.Sleep(100 * time.Millisecond)
+		img := image.NewRGBA(image.Rect(0, 0, 8, 8))
+		img.Pix[0] = 0xff
+		b.Sink().Cursor(img, image.Pt(20, -3))
+		time.Sleep(100 * time.Millisecond)
+		b.Sink().Cursor(nil, image.Pt(3, 4))
+		time.Sleep(100 * time.Millisecond)
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		if len(r.cl.cursors) != 2 {
+			t.Fatalf("%d cursors, want 2", len(r.cl.cursors))
+		}
+		if c := r.cl.cursors[0]; c.W != 8 || c.H != 8 || c.HotX != 7 || c.HotY != 0 || c.Payload[0] != 0xff {
+			t.Errorf("shown cursor %dx%d hot %d,%d", c.W, c.H, c.HotX, c.HotY)
+		}
+		if c := r.cl.cursors[1]; c.W != 0 || c.Codec != 0 || c.HotX != 0 || len(c.Payload) != 0 {
+			t.Errorf("hidden cursor %+v", c)
+		}
+	})
+}
+
+// While typing, each key's effect goes first, not only the first key's:
+// a key-up, which shows nothing, and the previous key's effect on the same
+// tile take no priority from the next key.
+func TestTyping(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		keyUp bool          // a key-up 80 ms after the first key
+		gap   time.Duration // from the first key to the second
+	}{
+		{"down down 60ms", false, 60 * time.Millisecond},
+		{"down down 90ms", false, 90 * time.Millisecond},
+		{"down down 130ms", false, 130 * time.Millisecond},
+		{"down up down 150ms", true, 150 * time.Millisecond},
+		{"down up down 400ms", true, 400 * time.Millisecond},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				const (
+					delay     = 20 * time.Millisecond
+					rate      = 5e6
+					tile      = backendtest.SwatchSize
+					tileBytes = 4 * tile * tile
+				)
+				r := newRigTiles(t, backendtest.NewScreen(640, 480, 10*time.Millisecond), tile, rate, delay, visible)
+				time.Sleep(2 * time.Second)
+				wantK, wantJ := backendtest.SwatchColor('k'), backendtest.SwatchColor('j')
+				var arrK, arrJ time.Duration
+				r.cl.mu.Lock()
+				r.cl.onFrame = func(f frameRecord) {
+					switch px := r.cl.img.RGBAAt(1, 1); {
+					case arrK == 0 && px == wantK:
+						arrK = f.at
+					case arrJ == 0 && px == wantJ:
+						arrJ = f.at
+					}
+				}
+				r.cl.mu.Unlock()
+				pk := time.Since(r.cl.start)
+				r.cl.send(t, protocol.Key{Seq: 1, Down: true, Keysym: 'k'})
+				seq := uint32(2)
+				if c.keyUp {
+					time.Sleep(80 * time.Millisecond)
+					r.cl.send(t, protocol.Key{Seq: 2, Keysym: 'k'})
+					seq = 3
+					time.Sleep(c.gap - 80*time.Millisecond)
+				} else {
+					time.Sleep(c.gap)
+				}
+				pj := time.Since(r.cl.start)
+				r.cl.send(t, protocol.Key{Seq: seq, Down: true, Keysym: 'j'})
+				time.Sleep(2 * time.Second)
+				r.cl.mu.Lock()
+				defer r.cl.mu.Unlock()
+				bound := 2*delay + time.Duration(4*tileBytes/rate*float64(time.Second))
+				if arrK == 0 || arrK-pk > bound {
+					t.Errorf("first key's effect after %v, want at most %v", arrK-pk, bound)
+				}
+				if arrJ == 0 || arrJ-pj > bound {
+					t.Errorf("second key's effect after %v, want at most %v", arrJ-pj, bound)
+				}
+			})
+		})
+	}
+}
+
+// The frame that shows an input's effect reports that input in last_seq,
+// also when the effect joins a frame that started before the input.
+func TestLastSeq(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		b      func() backend.Backend
+		w, h   int
+		rate   float64
+		before time.Duration // from the start to the key
+	}{
+		{"remote", func() backend.Backend {
+			return delayed{backendtest.NewScreen(640, 480, 10*time.Millisecond), 40 * time.Millisecond}
+		}, 640, 480, 5e6, 2 * time.Second},
+		// A still 1024x768 screen takes three seconds at 1 MB/s: the key
+		// comes during its frames.
+		{"mid-frame 503ms", func() backend.Backend { return backendtest.NewScreen(1024, 768, 0) }, 1024, 768, 1e6, 503 * time.Millisecond},
+		{"mid-frame 541ms", func() backend.Backend { return backendtest.NewScreen(1024, 768, 0) }, 1024, 768, 1e6, 541 * time.Millisecond},
+		{"mid-frame 589ms", func() backend.Backend { return backendtest.NewScreen(1024, 768, 0) }, 1024, 768, 1e6, 589 * time.Millisecond},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				r := newRigTiles(t, c.b(), backendtest.SwatchSize, c.rate, 20*time.Millisecond, visible)
+				time.Sleep(c.before)
+				want := backendtest.SwatchColor('k')
+				var carrier *frameRecord
+				r.cl.mu.Lock()
+				r.cl.onFrame = func(f frameRecord) {
+					if carrier == nil && r.cl.img.RGBAAt(1, 1) == want {
+						carrier = &f
+					}
+				}
+				r.cl.mu.Unlock()
+				r.cl.send(t, protocol.Key{Seq: 1, Down: true, Keysym: 'k'})
+				time.Sleep(5 * time.Second)
+				r.cl.mu.Lock()
+				defer r.cl.mu.Unlock()
+				if carrier == nil {
+					t.Fatal("the key's effect never arrived")
+				}
+				if carrier.lastSeq != 1 {
+					t.Errorf("frame %d shows key 1's effect but reports last_seq %d", carrier.id, carrier.lastSeq)
+				}
+			})
+		})
+	}
+}
+
+// A client that hangs up is no error.
+func TestHangup(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t, backendtest.NewScreen(200, 150, 0), 50e6, time.Millisecond, visible)
+		time.Sleep(100 * time.Millisecond)
+		r.link.close()
+		err := <-r.served
+		r.served <- nil
+		if err != nil {
+			t.Errorf("Serve returned %v for a client that hung up", err)
+		}
+	})
+}
+
+// stuck is a connection whose client stopped reading: writes after the
+// first few block until their context is done.
+type stuck struct {
+	mu     sync.Mutex
+	writes int
+	read   chan []byte
+}
+
+func (c *stuck) WriteMessage(ctx context.Context, p []byte) error {
+	c.mu.Lock()
+	c.writes++
+	n := c.writes
+	c.mu.Unlock()
+	if n <= 3 {
+		return nil
+	}
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (c *stuck) ReadMessage(ctx context.Context) ([]byte, error) {
+	select {
+	case b := <-c.read:
+		return b, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// Serve returns after a protocol error even if the client stopped
+// reading, without waiting for its context.
+func TestCloseTimeout(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		s, owner, err := session.Start(ctx, session.Config{Backend: backendtest.NewScreen(200, 150, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		c := &stuck{read: make(chan []byte, 1)}
+		served := make(chan error, 1)
+		go func() { served <- Serve(ctx, c, owner, visible, Config{}) }()
+		time.Sleep(100 * time.Millisecond)
+		start := time.Now()
+		c.read <- []byte{0xff, 0xff, 0, 0}
+		select {
+		case <-served:
+			if d := time.Since(start); d > closeTimeout {
+				t.Errorf("Serve returned %v after the protocol error, want at most %v", d, closeTimeout)
+			}
+		case <-time.After(time.Hour):
+			t.Fatal("Serve still blocked an hour after the protocol error")
+		}
+	})
+}
+
+// A hello after the handshake is a protocol error.
+func TestHelloAfterHandshake(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t, backendtest.NewScreen(200, 150, 0), 50e6, time.Millisecond, visible)
+		time.Sleep(100 * time.Millisecond)
+		r.cl.send(t, protocol.Hello{Visible: true})
+		err := <-r.served
+		r.served <- nil
+		if !errors.Is(err, protocol.ErrInvalid) {
+			t.Errorf("Serve returned %v, want invalid", err)
+		}
+		time.Sleep(10 * time.Millisecond)
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		if r.cl.close == nil || r.cl.close.Code != protocol.CloseProtocolError {
+			t.Errorf("close %+v, want protocol error", r.cl.close)
+		}
+	})
+}
+
+// A client that decodes no codec the server sends is refused.
+func TestNoCodec(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRig(t, backendtest.NewScreen(200, 150, 0), 50e6, time.Millisecond, protocol.Hello{Visible: true})
+		if err := <-r.served; err != nil {
+			t.Errorf("Serve returned %v", err)
+		}
+		r.served <- nil
+		time.Sleep(10 * time.Millisecond)
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		if r.cl.close == nil || r.cl.close.Code != protocol.CloseUnsupported || r.cl.tiles != 0 {
+			t.Errorf("close %+v after %d tiles, want unsupported before any", r.cl.close, r.cl.tiles)
+		}
+	})
+}
+
+// A message larger than the client takes is dropped, and the stream goes
+// on.
+func TestTooLarge(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &tapped{Backend: backendtest.NewScreen(200, 150, 0)}
+		r := newRig(t, b, 50e6, time.Millisecond, visible)
+		time.Sleep(100 * time.Millisecond)
+		b.Sink().Clipboard("text/plain", make([]byte, protocol.DefaultMaxMessageSize))
+		b.Sink().Title("after")
+		time.Sleep(100 * time.Millisecond)
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		if r.cl.clips != 0 || r.cl.titled("after") != 1 {
+			t.Errorf("%d clipboards and %d titles, want the clipboard dropped and the title sent", r.cl.clips, r.cl.titled("after"))
+		}
+	})
+}
+
+// A client that floods acks loses the oldest.
+func TestAcksKeepNewest(t *testing.T) {
+	a := newAcks()
+	for i := range maxAcks + 10 {
+		a.put(ack{id: uint32(i)}) // #nosec G115 -- a small count
+	}
+	got := a.take(nil)
+	if len(got) != maxAcks || got[0].id != 10 || got[len(got)-1].id != maxAcks+9 {
+		t.Errorf("kept %d acks from %d to %d", len(got), got[0].id, got[len(got)-1].id)
+	}
+}
+
+// An input that comes while an input with no visible effect is pending
+// joins it: its effect keeps priority even when the first input's
+// timeout passes before the effect shows.
+func TestInputJoinsPending(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const (
+			delay     = 20 * time.Millisecond
+			effect    = 40 * time.Millisecond
+			rate      = 5e6
+			tile      = backendtest.SwatchSize
+			tileBytes = 4 * tile * tile
+		)
+		b := delayed{backendtest.NewScreen(640, 480, 10*time.Millisecond), effect}
+		r := newRigTiles(t, b, tile, rate, delay, visible)
+		time.Sleep(2 * time.Second)
+		want := backendtest.SwatchColor('j')
+		var arrived time.Duration
+		r.cl.mu.Lock()
+		r.cl.onFrame = func(f frameRecord) {
+			if arrived == 0 && r.cl.img.RGBAAt(1, 1) == want {
+				arrived = f.at
+			}
+		}
+		r.cl.mu.Unlock()
+		// A key-up shows nothing; the key-down comes just before its
+		// timeout, and shows after it.
+		r.cl.send(t, protocol.Key{Seq: 1, Keysym: 'k'})
+		time.Sleep(inputTimeout - effect/2)
+		pressed := time.Since(r.cl.start)
+		r.cl.send(t, protocol.Key{Seq: 2, Down: true, Keysym: 'j'})
+		time.Sleep(2 * time.Second)
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		bound := 2*delay + effect + time.Duration(4*tileBytes/rate*float64(time.Second))
+		if arrived == 0 || arrived-pressed > bound {
+			t.Errorf("key's effect after %v, want at most %v", arrived-pressed, bound)
 		}
 	})
 }

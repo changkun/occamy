@@ -323,9 +323,16 @@ arise, rather than inheriting those fixes.
   - An input's effect is the change after its clock on tiles that were
     still before it. The writer keeps two snapshots of the tile versions
     at least 100 ms apart. A tile that changed between them, or since the
-    last one and before the input, was in motion. Without this rule,
-    full-screen motion drawn after a key took the key's priority, and an
-    effect that appeared 40 ms later got none.
+    last one and before the input, was in motion, unless that change went
+    out as an earlier input's effect, so that the next key on the same
+    caret keeps its priority. Without this rule, full-screen motion drawn
+    after a key took the key's priority, and an effect that appeared
+    40 ms later got none.
+  - Inputs that come while an effect is awaited join it: the first
+    input's clock precedes their effects too, and each input restarts
+    the timeout. So a key-up, which shows nothing, does not hold back the
+    next key. Once an effect is sent, later inputs are awaited from the
+    clock at which it was found.
   - The effect's tiles go smallest operation first: tiles that share a
     version were changed by one drawing operation. The input's frame ends
     before an operation that would take it past 16 KiB. The first
@@ -335,16 +342,24 @@ arise, rather than inheriting those fixes.
     changes as long as an effect is awaited. An input whose effect does
     not appear within 1 s loses its priority.
   - `frame-end`'s `last_seq` is the last input applied when the frame
-    started.
+    started, or when it took up an input's effect, if later.
   - Small state goes out before every tile, during pacing sleeps and
     while waiting, so it waits for at most the tile being written.
   - Resizes follow the framebuffer's bounds, not the session's small
     state. `resize` precedes every tile of the new size.
-  - A client that breaks the protocol gets `close` with `CloseCodeFor`.
-    The session's end gets `close` with its reason's code.
+  - A client that breaks the protocol gets `close` with `CloseCodeFor`,
+    including a `hello` after the handshake. The session's end gets
+    `close` with its reason's code. Either waits at most 1 s for a client
+    that stopped reading. A client that hangs up (`io.EOF` from `Conn`)
+    or a failed connection gets nothing.
+  - A client that decodes no raw tiles is refused with `unsupported`. A
+    small message larger than the client's message size, such as a huge
+    remote clipboard, is dropped. Up to 16 pings wait for their pongs,
+    and acks beyond 64 drop the oldest.
   - Tiles go through an `Encoder` interface, raw RGBA until the graphics
     pipeline's codecs land. Cursors go raw, and not at all if they are
-    larger than the client's texture limit.
+    larger than the client's texture limit; a hidden cursor carries no hot
+    spot, codec or payload.
 - **What was not done:**
   - Terminal sessions: `Serve` refuses them until `internal/terminal`
     has its snapshot and diff API.
@@ -364,5 +379,16 @@ arise, rather than inheriting those fixes.
   - `testing/synctest` stops time once a test's function returns, so a
     goroutine left in `time.Sleep` at cleanup deadlocks the bubble. The
     simulated link's waits select on close.
+  - An independent review found seven bugs the first tests missed, each
+    with a regression test now that fails without its fix: small state
+    sent during a pacing sleep overwrote the tile waiting in the same
+    buffer, which then counted as sent; a hidden cursor carried a hot spot
+    and codec that clients must reject; the close after a protocol error
+    could wait forever on a client that stopped reading; key-ups and the
+    previous key's effect took the next key's priority while typing;
+    `last_seq` lagged when an effect joined an open frame; a hang-up was
+    taken for a protocol error; and a late `hello` got `unsupported`.
+    The test client now records undecodable messages, and every test
+    fails on one.
 - **Follow-ups:** terminal frames (screen diffs), the Scheduling test,
   and the HTTP layer's `ConnContext`.

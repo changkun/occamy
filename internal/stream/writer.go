@@ -37,6 +37,14 @@ const activeWindow = 100 * time.Millisecond
 // maxBells bounds the bells sent at once; more ring as one burst anyway.
 const maxBells = 3
 
+// maxPings bounds the pings waiting for their pong. A client sends one
+// at a time; one that floods loses the oldest.
+const maxPings = 16
+
+// closeTimeout bounds the wait to send close, since a client that stopped
+// reading would otherwise hold the stream open.
+const closeTimeout = time.Second
+
 // writer sends a viewer the session's state. Its run loop owns the
 // pacer and what was sent; the reader shares only acks, the latest ping
 // and wake-ups.
@@ -51,10 +59,10 @@ type writer struct {
 	log    *slog.Logger
 	start  time.Time
 
-	acks *acks
-	poke chan struct{} // holds a token when the reader has news
-	mu   sync.Mutex
-	ping *protocol.Ping // the latest, not yet answered
+	acks  *acks
+	poke  chan struct{} // holds a token when the reader has news
+	mu    sync.Mutex
+	pings []protocol.Ping // not yet answered, oldest first
 
 	g        grid
 	sent     []uint64 // the version of each tile the viewer has
@@ -62,7 +70,9 @@ type writer struct {
 	order    []int
 	fresh    []int
 	ackbuf   []ack
-	buf      []byte
+	buf      []byte // the tile being sent
+	sbuf     []byte // small messages, which go out while a tile waits in buf
+	pongs    []protocol.Ping
 	pix      []byte
 	payload  []byte
 	frame    uint32
@@ -72,35 +82,47 @@ type writer struct {
 	// activeWindow before, to find the tiles in motion at an input.
 	prev, snap, cur []uint64
 	snapAt          time.Time
+	// effects holds the version of each tile when it last went out as an
+	// input's effect: a change that was an effect is not motion.
+	effects []uint64
 }
 
-// pending is an input whose effect has not been sent yet. Its effect is
-// the change after clock on tiles that were still before it: a tile in
-// motion, active, changes after the input anyway, and taking that change
-// for the effect would spend the input's priority on the motion.
+// pending holds the inputs whose effect has not been sent yet, from the
+// input first through seq. Their effect is the change after clock on
+// tiles that were still before it: a tile in motion, active, changes
+// after the input anyway, and taking that change for the effect would
+// spend the inputs' priority on the motion. Inputs that come while the
+// effect is awaited join it, since the first input's clock precedes
+// their effects too; so a key-up, which shows nothing, does not keep the
+// next key from priority.
 type pending struct {
+	first   uint32
 	seq     uint32
 	clock   uint64
-	at      time.Time
+	at      time.Time // when the last input came
 	active  []bool
 	checked uint64 // the framebuffer's clock when last searched for the effect
-	boosted bool   // the pacer has been told
+	boosted bool   // the pacer has been told, at the clock checked
 }
 
-// newPending returns the pending input seq, read at clock. A tile was in
-// motion if it changed between the last two snapshots, or since the last
-// and before the input; a tile that changed since the last snapshot and
-// again after the input is taken as still.
+// newPending returns the pending input seq, whose effect is the change
+// after clock. A tile was in motion if it changed between the last two
+// snapshots, or since the last and before clock, unless the change went
+// out as an earlier input's effect. A tile that changed since the last
+// snapshot and again after clock is taken as still.
 func (w *writer) newPending(seq uint32, clock uint64) *pending {
-	in := &pending{seq: seq, clock: clock, at: time.Now()}
+	in := &pending{first: seq, seq: seq, clock: clock, at: time.Now()}
 	w.cur = w.fb.Versions(w.cur[:0])
-	if len(w.cur) != len(w.snap) {
+	if len(w.cur) != len(w.snap) || len(w.effects) != len(w.cur) {
 		return in
 	}
 	in.active = make([]bool, len(w.cur))
 	before := len(w.prev) == len(w.snap)
 	for i, v := range w.cur {
-		in.active[i] = v > w.snap[i] && v <= clock || before && w.snap[i] > w.prev[i]
+		e := w.effects[i]
+		recent := v > w.snap[i] && v <= clock && v > e
+		earlier := before && w.snap[i] > w.prev[i] && w.snap[i] > e
+		in.active[i] = recent || earlier
 	}
 	return in
 }
@@ -132,9 +154,21 @@ func (w *writer) wake() {
 	}
 }
 
-func (w *writer) write(ctx context.Context, m interface{ Append([]byte) []byte }) error {
-	w.buf = m.Append(w.buf[:0])
-	return w.c.WriteMessage(ctx, w.buf)
+// message is a message the writer sends.
+type message interface {
+	Append([]byte) []byte
+	Type() protocol.Type
+}
+
+// write sends a small message. One larger than the client takes, such as
+// a huge remote clipboard, is dropped.
+func (w *writer) write(ctx context.Context, m message) error {
+	w.sbuf = m.Append(w.sbuf[:0])
+	if err := w.limits.CheckSize(len(w.sbuf)); err != nil {
+		w.log.Warn("message dropped", "type", m.Type(), "err", err)
+		return nil
+	}
+	return w.c.WriteMessage(ctx, w.sbuf)
 }
 
 // run sends frames until the session ends or ctx is done.
@@ -199,6 +233,7 @@ func (w *writer) run(ctx context.Context) error {
 // show the pending input's effect first, and reports how many those are.
 // It reports false if the screen was resized since syncSize.
 func (w *writer) collect(viewport image.Rectangle) (fresh int, ok bool) {
+	clock := w.fb.Clock()
 	w.versions = w.fb.Versions(w.versions[:0])
 	if len(w.versions) != len(w.sent) {
 		return 0, false
@@ -219,6 +254,9 @@ func (w *writer) collect(viewport image.Rectangle) (fresh int, ok bool) {
 	var active []bool
 	if w.in != nil {
 		after, active = w.in.clock, w.in.active
+		if !w.in.boosted {
+			w.in.checked = clock
+		}
 	}
 	w.order, fresh = dirty(w.order, w.g, w.versions, w.sent, viewport, after, active)
 	return fresh, true
@@ -253,6 +291,9 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 			}
 			if n > 0 {
 				order, i, input = w.fresh[:n], 0, true
+				// The rest of the frame shows the inputs through the
+				// latest.
+				seq = max(seq, w.in.seq)
 			}
 		}
 		if input && inputBytes > 0 && w.versions[order[i]] != w.versions[order[i-1]] &&
@@ -267,7 +308,7 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 		}
 		t := order[i]
 		r, version := w.fb.ReadTile(t, w.pix)
-		if r != w.g.rect(t) {
+		if r != w.g.rect(t) || w.fb.Bounds() != w.g.bounds {
 			break // resized since the tile was chosen
 		}
 		var codec protocol.Codec
@@ -299,6 +340,7 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 		if input {
 			carried = true
 			inputBytes += len(w.buf)
+			w.effects[t] = version
 		}
 	}
 	end := protocol.FrameEnd{
@@ -340,19 +382,24 @@ func (w *writer) effect() (n int, ok bool) {
 	}
 	w.p.Input()
 	w.in.boosted = true
+	w.in.seq, _ = w.v.LastInput()
 	byDamage(w.fresh[:n], w.versions)
 	return n, true
 }
 
-// resolve forgets the pending input once its effect is sent, or given up
-// on, and takes up a later input the viewer gave meanwhile.
+// resolve forgets the pending inputs once their effect is sent, or given
+// up on. If several inputs were pending, or more came since, the effect
+// of a later one may be still to come; it is the change after the clock
+// at which the sent effect was found.
 func (w *writer) resolve() {
-	seq, clock := w.v.LastInput()
-	if w.in != nil && seq != w.in.seq {
-		w.in = w.newPending(seq, clock)
+	in := w.in
+	w.in = nil
+	if in == nil || !in.boosted {
 		return
 	}
-	w.in = nil
+	if seq, _ := w.v.LastInput(); seq != in.first {
+		w.in = w.newPending(seq, in.checked)
+	}
 }
 
 // syncSize sends resize when the framebuffer's size differs from what
@@ -368,6 +415,9 @@ func (w *writer) syncSize(ctx context.Context) error {
 	w.g = grid{bounds: b, tile: tile, cols: (b.Dx() + tile - 1) / tile}
 	n := w.g.cols * ((b.Dy() + tile - 1) / tile)
 	w.sent = append(w.sent[:0], make([]uint64, n)...)
+	w.effects = append(w.effects[:0], make([]uint64, n)...)
+	// The tiles of the old size say nothing about motion on the new.
+	w.prev, w.snap = w.prev[:0], w.snap[:0]
 	if b.Empty() {
 		return nil
 	}
@@ -392,8 +442,14 @@ func (w *writer) smallNow(ctx context.Context) error {
 // tiles, and answers the latest ping.
 func (w *writer) small(ctx context.Context) error {
 	p := w.v.Take()
-	if p.Input && w.in == nil {
-		w.in = w.newPending(w.v.LastInput())
+	if p.Input {
+		seq, clock := w.v.LastInput()
+		switch {
+		case w.in == nil:
+			w.in = w.newPending(seq, clock)
+		case !w.in.boosted:
+			w.in.seq, w.in.at = seq, time.Now()
+		}
 	}
 	if p.Cursor != nil {
 		if err := w.cursor(ctx, p.Cursor); err != nil {
@@ -445,15 +501,17 @@ func (w *writer) small(ctx context.Context) error {
 		}
 	}
 	w.mu.Lock()
-	ping := w.ping
-	w.ping = nil
+	w.pongs = append(w.pongs[:0], w.pings...)
+	w.pings = w.pings[:0]
 	w.mu.Unlock()
-	if ping != nil {
-		if err := w.write(ctx, protocol.Pong{Nonce: ping.Nonce, Time: ping.Time}); err != nil {
+	for _, ping := range w.pongs {
+		if err := w.write(ctx, protocol.Pong(ping)); err != nil {
 			return err
 		}
 	}
 	if p.End != nil {
+		ctx, cancel := context.WithTimeout(ctx, closeTimeout)
+		defer cancel()
 		if err := w.write(ctx, closeFor(*p.End)); err != nil {
 			return err
 		}
@@ -462,28 +520,39 @@ func (w *writer) small(ctx context.Context) error {
 	return nil
 }
 
-// cursor sends the pointer's image, or an empty one to hide it. An image
-// larger than the client decodes is not sent; the client keeps its own.
+// cursor sends the pointer's image, or hides it: a hidden cursor has no
+// hot spot, codec or payload. An image larger than the client decodes is
+// not sent; the client keeps its own. The hot spot is clamped into the
+// image.
 func (w *writer) cursor(ctx context.Context, c *session.Cursor) error {
-	m := protocol.Cursor{
-		HotX:  uint16(max(0, c.Hot.X)), // #nosec G115 -- within the cursor image
-		HotY:  uint16(max(0, c.Hot.Y)), // #nosec G115 -- within the cursor image
-		Codec: protocol.CodecRaw,
+	if c.Image == nil || c.Image.Bounds().Empty() {
+		return w.write(ctx, protocol.Cursor{})
 	}
-	if c.Image != nil {
-		b := c.Image.Bounds()
-		maxSize := w.limits.MaxTextureSize
-		if maxSize <= 0 {
-			maxSize = protocol.DefaultMaxTextureSize
-		}
-		if b.Dx() > maxSize || b.Dy() > maxSize {
-			w.log.Debug("cursor too large for the client", "size", b.Size())
-			return nil
-		}
-		m.W, m.H = uint16(b.Dx()), uint16(b.Dy()) // #nosec G115 -- bounded by the texture size
-		m.Payload = c.Image.Pix
+	b := c.Image.Bounds()
+	maxSize := w.limits.MaxTextureSize
+	if maxSize <= 0 {
+		maxSize = protocol.DefaultMaxTextureSize
 	}
-	return w.write(ctx, m)
+	if b.Dx() > maxSize || b.Dy() > maxSize {
+		w.log.Debug("cursor too large for the client", "size", b.Size())
+		return nil
+	}
+	pix := c.Image.Pix
+	if c.Image.Stride != 4*b.Dx() {
+		pix = make([]byte, 0, 4*b.Dx()*b.Dy())
+		for y := b.Min.Y; y < b.Max.Y; y++ {
+			i := c.Image.PixOffset(b.Min.X, y)
+			pix = append(pix, c.Image.Pix[i:i+4*b.Dx()]...)
+		}
+	}
+	return w.write(ctx, protocol.Cursor{
+		HotX:    uint16(min(max(0, c.Hot.X), b.Dx()-1)), // #nosec G115 -- within the cursor image
+		HotY:    uint16(min(max(0, c.Hot.Y), b.Dy()-1)), // #nosec G115 -- within the cursor image
+		W:       uint16(b.Dx()),                         // #nosec G115 -- bounded by the texture size
+		H:       uint16(b.Dy()),                         // #nosec G115 -- bounded by the texture size
+		Codec:   protocol.CodecRaw,
+		Payload: pix[:4*b.Dx()*b.Dy()],
+	})
 }
 
 // takeAcks gives the pacer the acks the reader received.

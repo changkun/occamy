@@ -11,7 +11,7 @@ import (
 
 // maxAcks bounds the acks waiting for the writer. A client acks only
 // frames it was sent, a window's worth and one more; a client that sends
-// more loses the excess, which the pacer ignores anyway.
+// more loses the oldest, which matter least.
 const maxAcks = 64
 
 // ack is a client's frame-ack, stamped when the reader received it, so
@@ -33,9 +33,10 @@ func newAcks() *acks { return &acks{wake: make(chan struct{}, 1)} }
 
 func (a *acks) put(x ack) {
 	a.mu.Lock()
-	if len(a.list) < maxAcks {
-		a.list = append(a.list, x)
+	if len(a.list) == maxAcks {
+		a.list = append(a.list[:0], a.list[1:]...)
 	}
+	a.list = append(a.list, x)
 	a.mu.Unlock()
 	select {
 	case a.wake <- struct{}{}:

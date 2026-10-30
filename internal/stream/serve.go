@@ -8,7 +8,9 @@ import (
 	"context"
 	"errors"
 	"image"
+	"io"
 	"log/slog"
+	"slices"
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/pacer"
@@ -21,7 +23,8 @@ type Config struct {
 	// SessionID names the session in welcome.
 	SessionID string
 	// Capabilities are what the server offers. Welcome carries their
-	// agreement with the client's.
+	// agreement with the client's. Without codecs, the server offers raw
+	// tiles.
 	Capabilities protocol.Capabilities
 	// Pacer configures the viewer's pacer. Its Window is the agreed frame
 	// window.
@@ -64,6 +67,9 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	if s.Class() != backend.Graphical {
 		return errors.New("stream: terminal sessions are not served yet")
 	}
+	if len(cfg.Capabilities.Codecs) == 0 {
+		cfg.Capabilities.Codecs = []protocol.Codec{protocol.CodecRaw}
+	}
 	if cfg.Encoder == nil {
 		cfg.Encoder = raw{}
 	}
@@ -72,6 +78,11 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	}
 	agreed := protocol.Agree(hello.Capabilities, cfg.Capabilities)
 	limits := agreed.Limits()
+	if !slices.Contains(agreed.Codecs, protocol.CodecRaw) {
+		// Tiles and cursors are raw until the graphics pipeline's codecs
+		// land.
+		return closeWith(ctx, c, protocol.Close{Code: protocol.CloseUnsupported, Reason: "no codec in common"})
+	}
 
 	// The client's visibility applies before the first frame, so that a
 	// client that starts hidden is sent none.
@@ -89,6 +100,7 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 		return err
 	}
 
+	parent := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	pc := cfg.Pacer
@@ -107,17 +119,28 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	cancel()
 	rerr := <-read
 	switch {
-	case errors.Is(err, errEnded):
+	case errors.Is(err, errEnded),
+		errors.Is(rerr, errClientClosed), errors.Is(rerr, io.EOF),
+		errors.Is(rerr, session.ErrEnded), errors.Is(rerr, session.ErrLeft):
 		return nil
-	case errors.Is(rerr, errClientClosed), errors.Is(rerr, session.ErrEnded), errors.Is(rerr, session.ErrLeft):
-		return nil
-	case rerr != nil && !errors.Is(rerr, context.Canceled):
-		// The client broke the protocol; tell it why, if it still listens.
-		closing := protocol.Close{Code: protocol.CloseCodeFor(rerr), Reason: "protocol error"}
-		_ = c.WriteMessage(context.WithoutCancel(ctx), closing.Append(nil))
-		return rerr
+	case errors.Is(rerr, context.Canceled):
+		return err // the writer ended first
+	case errors.As(rerr, new(connError)):
+		return rerr // the connection failed, and nobody is left to tell
 	}
-	return err
+	// The client broke the protocol; tell it why, if it still listens.
+	if cerr := closeWith(parent, c, protocol.Close{Code: protocol.CloseCodeFor(rerr), Reason: "protocol error"}); cerr != nil {
+		w.log.Debug("close not sent", "err", cerr)
+	}
+	return rerr
+}
+
+// closeWith sends m, waiting at most closeTimeout for a client that does
+// not read.
+func closeWith(ctx context.Context, c Conn, m protocol.Close) error {
+	ctx, cancel := context.WithTimeout(ctx, closeTimeout)
+	defer cancel()
+	return c.WriteMessage(ctx, m.Append(nil))
 }
 
 func role(r session.Role) protocol.Role {

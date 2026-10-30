@@ -20,6 +20,13 @@ import (
 // errClientClosed ends the reader when the client sends close.
 var errClientClosed = errors.New("stream: client closed")
 
+// connError is a failure of the connection rather than of the client's
+// messages: there is nobody left to tell.
+type connError struct{ err error }
+
+func (e connError) Error() string { return e.err.Error() }
+func (e connError) Unwrap() error { return e.err }
+
 // read applies the client's messages until it closes, breaks the
 // protocol, or ctx is done.
 func (w *writer) read(ctx context.Context, l protocol.Limits) error {
@@ -27,7 +34,7 @@ func (w *writer) read(ctx context.Context, l protocol.Limits) error {
 	for {
 		b, err := w.c.ReadMessage(ctx)
 		if err != nil {
-			return err
+			return connError{err}
 		}
 		m, err := protocol.Decode(b, reg, l)
 		if err != nil {
@@ -81,7 +88,10 @@ func (w *writer) apply(m protocol.Message) error {
 		return err
 	case *protocol.Ping:
 		w.mu.Lock()
-		w.ping = m
+		if len(w.pings) == maxPings {
+			w.pings = append(w.pings[:0], w.pings[1:]...)
+		}
+		w.pings = append(w.pings, *m)
 		w.mu.Unlock()
 		w.wake()
 		return nil
@@ -89,6 +99,8 @@ func (w *writer) apply(m protocol.Message) error {
 		return nil
 	case *protocol.Close:
 		return errClientClosed
+	case *protocol.Hello:
+		return fmt.Errorf("%w: hello after the handshake", protocol.ErrInvalid)
 	default:
 		return fmt.Errorf("%w: %v from a client after the handshake", protocol.ErrUnsupported, m.Type())
 	}
