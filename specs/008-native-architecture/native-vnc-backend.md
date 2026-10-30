@@ -199,7 +199,8 @@ leaves only RDP on the bridge.
   - Two fuzz targets, `FuzzServerMessages` and `FuzzHandshake`, with
     seeds in `testdata/fuzz/`. `TestFuzzCorpus` keeps the committed seeds
     equal to those the tests encode; `-args -update-corpus` rewrites
-    them. A first run of a minute each found nothing.
+    them. A first run, 60 s of `FuzzServerMessages` and 45 s of
+    `FuzzHandshake`, found nothing.
 - **Decisions made during implementation.**
   - Limits, checked before anything is read or allocated: a screen of at
     most 16384 pixels a side and 2^25 in all (8K UHD fits), since the
