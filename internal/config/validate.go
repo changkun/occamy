@@ -126,8 +126,8 @@ func (f *File) validate(c *checker) {
 	c.file("tls.key", f.TLS.Key)
 	if f.Debug.Address != "" {
 		c.address("debug.address", f.Debug.Address, false)
-		if f.Debug.Address == f.Listen {
-			c.add("debug.address", "is the listen address; the debug listener needs its own")
+		if Overlap(f.Listen, f.Debug.Address) {
+			c.add("debug.address", "%q shares a port with listen %q: give the debug listener a port of its own, since whatever reaches the one could reach the other", f.Debug.Address, f.Listen)
 		}
 	}
 	for i, o := range f.Origins {
@@ -409,6 +409,60 @@ func (c *checker) address(path, addr string, needHost bool) {
 	if _, err := strconv.ParseUint(port, 10, 16); err != nil {
 		c.add(path, "%q has an invalid port", addr)
 	}
+}
+
+// Overlap reports whether listeners on the host:port addresses a and b
+// could take connections to one address and port. That is so when the
+// ports are equal and the hosts share an address: an empty or
+// unspecified host (0.0.0.0, ::) listens on every address of both
+// families, as Go listens on it, and localhost is 127.0.0.1 and ::1. Other
+// host names are compared by name. Port 0, which the system picks, never
+// overlaps. Where the system lets both bind, as macOS does for a specific
+// address beside a wildcard, the more specific listener takes that
+// address's connections, so a proxy meant for one reaches the other.
+func Overlap(a, b string) bool {
+	ha, pa, err := net.SplitHostPort(a)
+	if err != nil {
+		return false
+	}
+	hb, pb, err := net.SplitHostPort(b)
+	if err != nil {
+		return false
+	}
+	na, errA := strconv.ParseUint(pa, 10, 16)
+	nb, errB := strconv.ParseUint(pb, 10, 16)
+	if errA != nil || errB != nil || na != nb || na == 0 {
+		return false
+	}
+	sa, sb := hostAddrs(ha), hostAddrs(hb)
+	if sa == nil || sb == nil {
+		return true // a wildcard
+	}
+	for k := range sa {
+		if sb[k] {
+			return true
+		}
+	}
+	return false
+}
+
+// hostAddrs returns the addresses a listener on host takes, as keys, or
+// nil for every address.
+func hostAddrs(host string) map[string]bool {
+	if host == "" {
+		return nil
+	}
+	if a, err := netip.ParseAddr(host); err == nil {
+		if a.IsUnspecified() {
+			return nil
+		}
+		return map[string]bool{a.Unmap().WithZone("").String(): true}
+	}
+	name := strings.ToLower(strings.TrimSuffix(host, "."))
+	if name == "localhost" {
+		return map[string]bool{"127.0.0.1": true, "::1": true}
+	}
+	return map[string]bool{"name:" + name: true}
 }
 
 // origin checks an origin and returns it in the form browsers send:

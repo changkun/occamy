@@ -249,6 +249,43 @@ func TestParseV1Defaults(t *testing.T) {
 	}
 }
 
+// TestOverlap checks when the debug listener would share the public
+// listener's port.
+func TestOverlap(t *testing.T) {
+	for _, tt := range []struct {
+		a, b string
+		want bool
+	}{
+		{":5636", ":5636", true},
+		{":5636", "127.0.0.1:5636", true},
+		{":5636", "[::1]:5636", true},
+		{"0.0.0.0:5636", "127.0.0.1:5636", true},
+		{"0.0.0.0:5636", "[::1]:5636", true}, // Go listens on both families
+		{"[::]:5636", "10.0.0.1:5636", true},
+		{"127.0.0.1:5636", "localhost:5636", true},
+		{"[::1]:5636", "LocalHost.:5636", true},
+		{"127.0.0.1:5636", "[::ffff:127.0.0.1]:5636", true},
+		{"[fe80::1%en0]:5636", "[fe80::1]:5636", true},
+		{"occamy.internal:5636", "Occamy.Internal:5636", true},
+		{"10.0.0.1:5636", "10.0.0.1:05636", true},
+		{":5636", ":6060", false},
+		{":5636", "localhost:6060", false},
+		{"10.0.0.1:5636", "127.0.0.1:5636", false},
+		{"127.0.0.1:5636", "127.0.0.2:5636", false},
+		{"127.0.0.1:5636", "[::1]:5636", false},
+		{"[::1]:5636", "occamy.internal:5636", false},
+		{":0", ":0", false},
+		{"nope", ":5636", false},
+	} {
+		if got := config.Overlap(tt.a, tt.b); got != tt.want {
+			t.Errorf("Overlap(%q, %q) = %v, want %v", tt.a, tt.b, got, tt.want)
+		}
+		if got := config.Overlap(tt.b, tt.a); got != tt.want {
+			t.Errorf("Overlap(%q, %q) = %v, want %v", tt.b, tt.a, got, tt.want)
+		}
+	}
+}
+
 // TestParseV1Valid checks files that are valid in less common ways.
 func TestParseV1Valid(t *testing.T) {
 	tests := []struct {
@@ -260,6 +297,8 @@ func TestParseV1Valid(t *testing.T) {
   - {id: c, protocol: rdp, target: 192.0.2.1, credentials: {password_env: OCCAMY_TEST_PASSWORD}, allow: {users: [alice]}}
   - {id: d.e_f-1, protocol: telnet, target: host_1.example.com., credentials: {password_file: DIR/password}, allow: {users: [alice]}}
 `},
+		{"debug on its own port", head + "listen: ':5636'\ndebug: {address: 'localhost:6060'}\n"},
+		{"debug on the port of another address", head + "listen: '10.0.0.1:5636'\ndebug: {address: '127.0.0.1:5636'}\n"},
 		{"names from oidc", head + `  oidc: {issuer: "http://localhost:8080/realms/x", client_id: occamy, redirect_url: "http://127.0.0.1:5636/cb", client_secret_env: OCCAMY_TEST_PASSWORD}
 connections:
   - {id: a, protocol: ssh, target: a, credentials: {prompt: true}, allow: {users: [carol@example.com], groups: [admins]}}
@@ -353,7 +392,9 @@ func TestParseV1Problems(t *testing.T) {
 		{"tls key alone", head + "tls: {key: DIR/tls.key}\n", []want{{"tls.cert", "required when tls.key is set"}}},
 		{"tls missing file", head + "tls: {cert: DIR/missing.crt, key: DIR/tls.key}\n", []want{{"tls.cert", "missing.crt does not exist"}}},
 		{"tls directory", head + "tls: {cert: DIR, key: DIR/tls.key}\n", []want{{"tls.cert", "is a directory"}}},
-		{"debug on listen", head + "debug: {address: ':5636'}\n", []want{{"debug.address", "is the listen address"}}},
+		{"debug on listen", head + "debug: {address: ':5636'}\n", []want{{"debug.address", `":5636" shares a port with listen ":5636"`}}},
+		{"debug beside a wildcard", head + "listen: ':5636'\ndebug: {address: 127.0.0.1:5636}\n", []want{{"debug.address", "shares a port with listen"}}},
+		{"debug on localhost", head + "listen: 127.0.0.1:5636\ndebug: {address: localhost:5636}\n", []want{{"debug.address", "shares a port with listen"}}},
 		{"debug address", head + "debug: {address: localhost}\n", []want{{"debug.address", "is not host:port"}}},
 		{"origin scheme", head + "origins: [occamy.example.com, 'ftp://o.example.com']\n", []want{
 			{"origins[0]", "needs the scheme http or https"},
