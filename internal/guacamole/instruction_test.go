@@ -214,6 +214,28 @@ func TestReadRawLimits(t *testing.T) {
 	}
 }
 
+// TestMaxInstructionSize reads the largest instruction ReadRaw accepts:
+// every element at the most elements, the longest length prefix, and the
+// longest element in 4-byte code points.
+func TestMaxInstructionSize(t *testing.T) {
+	element := "0" + strconv.Itoa(guacamole.MaxInstructionLength) + "." + strings.Repeat("😀", guacamole.MaxInstructionLength)
+	elements := make([]string, guacamole.InstructionMaxElements)
+	for i := range elements {
+		elements[i] = element
+	}
+	largest := strings.Join(elements, ",") + ";"
+	if len(largest) != guacamole.MaxInstructionSize {
+		t.Fatalf("largest instruction has %d bytes, MaxInstructionSize is %d", len(largest), guacamole.MaxInstructionSize)
+	}
+	raw, err := guacamole.ReadRaw(bufio.NewReader(strings.NewReader(largest)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != len(largest) {
+		t.Fatalf("read %d bytes, want %d", len(raw), len(largest))
+	}
+}
+
 func FuzzReadRaw(f *testing.F) {
 	f.Add([]byte("5.hello,2.世界;"))
 	f.Add([]byte("4.args,3.a;b;"))

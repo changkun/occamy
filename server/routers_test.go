@@ -6,6 +6,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -22,7 +23,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 
 	"changkun.de/x/occamy/internal/config"
 	"changkun.de/x/occamy/internal/guacamole"
@@ -176,10 +177,9 @@ func newTestProxy(t *testing.T) *testProxy {
 	p := &proxy{
 		guacd:    config.Guacd{Address: g.ln.Addr().String()},
 		sessions: make(map[string]*Session),
-		upgrader: &websocket.Upgrader{Subprotocols: []string{"guacamole"}},
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ws, err := p.upgrader.Upgrade(w, r, nil)
+		ws, err := accept(w, r)
 		if err != nil {
 			return
 		}
@@ -231,9 +231,28 @@ func key(q url.Values) string {
 }
 
 func (tp *testProxy) dial(q url.Values) (*websocket.Conn, error) {
-	d := websocket.Dialer{Subprotocols: []string{"guacamole"}, HandshakeTimeout: 5 * time.Second}
-	ws, _, err := d.Dial(tp.url+"/?"+q.Encode(), nil) //nolint:bodyclose // gorilla/websocket: the response body need not be closed
+	ws, _, err := dialWS(tp.url+"/?"+q.Encode(), nil)
 	return ws, err
+}
+
+// dialWS opens a WebSocket as guacamole-common-js does, with the given
+// handshake headers. A failed handshake returns the server's status code,
+// or 0 if there was no response.
+func dialWS(u string, header http.Header) (*websocket.Conn, int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ws, resp, err := websocket.Dial(ctx, u, &websocket.DialOptions{ //nolint:bodyclose // coder/websocket: the response body need not be closed
+		Subprotocols: []string{"guacamole"},
+		HTTPHeader:   header,
+	})
+	if err != nil {
+		if resp != nil {
+			return nil, resp.StatusCode, err
+		}
+		return nil, 0, err
+	}
+	ws.SetReadLimit(guacamole.MaxInstructionSize)
+	return ws, resp.StatusCode, nil
 }
 
 func (tp *testProxy) connect(t *testing.T, q url.Values) *websocket.Conn {
@@ -255,14 +274,15 @@ func (tp *testProxy) visit(q url.Values) error {
 		return err
 	}
 	defer leave(ws)
-	ws.SetReadDeadline(time.Now().Add(5 * time.Second))
-	_, msg, err := ws.ReadMessage()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, msg, err := ws.Read(ctx)
 	if q.Get("protocol") == "fail" {
 		if err == nil {
 			return fmt.Errorf("got %q, want a close with status 520", msg)
 		}
-		var ce *websocket.CloseError
-		if !errors.As(err, &ce) || ce.Text != "520" {
+		var ce websocket.CloseError
+		if !errors.As(err, &ce) || ce.Reason != "520" {
 			return fmt.Errorf("want a close with status 520: %w", err)
 		}
 		return nil
@@ -284,17 +304,19 @@ func (tp *testProxy) visit(q url.Values) error {
 	return nil
 }
 
-// leave closes the client side of a connection with a normal close frame.
+// leave closes the client side of a connection with a normal close frame,
+// and waits for the server's.
 func leave(ws *websocket.Conn) {
-	msg := websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")
-	ws.WriteControl(websocket.CloseMessage, msg, time.Now().Add(time.Second))
-	ws.Close()
+	ws.Close(websocket.StatusNormalClosure, "")
 }
 
+// read reads a message. On a timeout, coder/websocket closes the
+// connection.
 func read(t *testing.T, ws *websocket.Conn) (string, error) {
 	t.Helper()
-	ws.SetReadDeadline(time.Now().Add(5 * time.Second))
-	_, msg, err := ws.ReadMessage()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, msg, err := ws.Read(ctx)
 	return string(msg), err
 }
 
@@ -313,9 +335,9 @@ func closeReason(t *testing.T, ws *websocket.Conn) string {
 	t.Helper()
 	for {
 		_, err := read(t, ws)
-		var ce *websocket.CloseError
+		var ce websocket.CloseError
 		if errors.As(err, &ce) {
-			return ce.Text
+			return ce.Reason
 		}
 		if err != nil {
 			t.Fatalf("read: %v, want a close frame", err)
@@ -371,7 +393,14 @@ func TestRouteConnReleasesLockOnJoinError(t *testing.T) {
 
 func TestRouteConnNoLockDuringHandshake(t *testing.T) {
 	tp := newTestProxy(t)
-	tp.connect(t, claims("stall", "a"))
+	// The server does not read during the handshake, so it would answer
+	// a close frame only once guacd releases the handshake, after this
+	// cleanup. Drop the connection instead.
+	stalled, err := tp.dial(claims("stall", "a"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { stalled.CloseNow() })
 	waitFor(t, "the stalled handshake", func() bool {
 		selects, _, _ := tp.g.snapshot()
 		return slices.Contains(selects, "stall")
@@ -552,7 +581,7 @@ func TestServeIOInternalOpcodes(t *testing.T) {
 	}
 
 	ping := guacamole.NewInstruction([]string{"", "ping", "1730000000000"}).String()
-	if err := ws.WriteMessage(websocket.TextMessage, []byte(ping)); err != nil {
+	if err := ws.Write(context.Background(), websocket.MessageText, []byte(ping)); err != nil {
 		t.Fatal(err)
 	}
 	for {
@@ -566,7 +595,7 @@ func TestServeIOInternalOpcodes(t *testing.T) {
 	}
 
 	two := "3.key,5.65307,1.1;3.key,5.65307,1.0;"
-	if err := ws.WriteMessage(websocket.TextMessage, []byte(two)); err != nil {
+	if err := ws.Write(context.Background(), websocket.MessageText, []byte(two)); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"3.key,5.65307,1.1;", "3.key,5.65307,1.0;"}
@@ -651,17 +680,24 @@ type writerFunc func([]byte) (int, error)
 func (f writerFunc) Write(p []byte) (int, error) { return f(p) }
 
 func TestClientError(t *testing.T) {
+	// coder/websocket wraps what it returns, as Read does here.
+	wrap := func(err error) error { return fmt.Errorf("failed to get reader: %w", err) }
 	tests := []struct {
 		err     error
 		failure bool
 	}{
-		{&websocket.CloseError{Code: websocket.CloseNormalClosure}, false},
-		{&websocket.CloseError{Code: websocket.CloseGoingAway}, false},
-		{&websocket.CloseError{Code: websocket.CloseAbnormalClosure}, false},
-		{&net.OpError{Op: "read", Err: errors.New("connection reset by peer")}, false},
+		{wrap(websocket.CloseError{Code: websocket.StatusNormalClosure}), false},
+		{wrap(websocket.CloseError{Code: websocket.StatusGoingAway}), false},
+		{wrap(websocket.CloseError{Code: websocket.StatusNoStatusRcvd}), false},
+		// A dropped connection: coder/websocket has no close code 1006.
+		{wrap(&net.OpError{Op: "read", Err: errors.New("connection reset by peer")}), false},
+		{wrap(io.EOF), false},
 		{io.ErrUnexpectedEOF, false},
-		{&websocket.CloseError{Code: websocket.CloseProtocolError}, true},
-		{&websocket.CloseError{Code: websocket.CloseMessageTooBig}, true},
+		{wrap(net.ErrClosed), false},
+		{wrap(websocket.CloseError{Code: websocket.StatusProtocolError}), true},
+		{wrap(websocket.CloseError{Code: websocket.StatusMessageTooBig}), true},
+		// Over the read limit, coder/websocket closes with 1009 itself.
+		{fmt.Errorf("failed to read: %w", fmt.Errorf("%w: read limited at 9 bytes", websocket.ErrMessageTooBig)), true},
 	}
 	for _, tt := range tests {
 		if got := clientError(tt.err); (got != nil) != tt.failure {
@@ -688,7 +724,7 @@ func TestClientLeaveIsNotAFailure(t *testing.T) {
 	leave(ws)
 	abrupt := tp.connect(t, claims("vnc", "b"))
 	mustRead(t, abrupt)
-	abrupt.Close() // no close frame
+	abrupt.CloseNow() // no close frame
 	waitFor(t, "the sessions to go", func() bool { return tp.sessions() == 0 })
 
 	mu.Lock()

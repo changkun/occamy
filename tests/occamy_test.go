@@ -15,6 +15,7 @@ package tests
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gorilla/websocket"
+	"github.com/coder/websocket"
 
 	"changkun.de/x/occamy/internal/guacamole"
 )
@@ -96,7 +97,7 @@ func login(addr string, credential jwtInput) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("login: %w", err)
 	}
-	resp, err := httpClient.Post("http://"+addr+"/api/v1/login", "application/json", bytes.NewReader(b))
+	resp, err := httpClient.Post("http://"+addr+"/api/v0/login", "application/json", bytes.NewReader(b))
 	if err != nil {
 		return "", fmt.Errorf("login: %w", err)
 	}
@@ -112,15 +113,20 @@ func login(addr string, credential jwtInput) (string, error) {
 	if err := json.Unmarshal(d, &out); err != nil {
 		return "", fmt.Errorf("login: %w", err)
 	}
-	return "ws://" + addr + "/api/v1/connect?token=" + out.Token, nil
+	return "ws://" + addr + "/api/v0/connect?token=" + out.Token, nil
 }
 
 func dial(url string) (*websocket.Conn, error) {
-	d := websocket.Dialer{Subprotocols: []string{"guacamole"}, HandshakeTimeout: 10 * time.Second}
-	ws, _, err := d.Dial(url, nil) //nolint:bodyclose // gorilla/websocket: the response body need not be closed
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	ws, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{ //nolint:bodyclose // coder/websocket: the response body need not be closed
+		Subprotocols: []string{"guacamole"},
+	})
 	if err != nil {
 		return nil, fmt.Errorf("connect: %w", err)
 	}
+	// occamy sends one instruction per message, of up to this size.
+	ws.SetReadLimit(guacamole.MaxInstructionSize)
 	return ws, nil
 }
 
@@ -135,8 +141,10 @@ func session(url string, timeout time.Duration, want ...string) error {
 	if err != nil {
 		return err
 	}
-	defer ws.Close()
-	ws.SetReadDeadline(time.Now().Add(timeout))
+	defer ws.CloseNow()
+	// The deadline bounds reads; when it passes, the connection closes.
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
 	seen := map[string]int{}
 	missing := func() []string {
@@ -149,7 +157,7 @@ func session(url string, timeout time.Duration, want ...string) error {
 		return m
 	}
 	for {
-		_, msg, err := ws.ReadMessage()
+		_, msg, err := ws.Read(ctx)
 		if err != nil {
 			return fmt.Errorf("waiting for %v, saw %v: %w", missing(), seen, err)
 		}
@@ -169,7 +177,7 @@ func session(url string, timeout time.Duration, want ...string) error {
 			seen[ins.Opcode()]++
 			switch ins.Opcode() {
 			case "sync":
-				ws.WriteMessage(websocket.TextMessage, raw)
+				ws.Write(context.Background(), websocket.MessageText, raw)
 			case "error":
 				return fmt.Errorf("occamy sent error: %s", strings.Join(ins.Args(), ", "))
 			case "disconnect":
@@ -179,7 +187,7 @@ func session(url string, timeout time.Duration, want ...string) error {
 			}
 		}
 		if len(missing()) == 0 {
-			ws.WriteMessage(websocket.TextMessage, []byte("10.disconnect;"))
+			ws.Write(context.Background(), websocket.MessageText, []byte("10.disconnect;"))
 			return nil
 		}
 	}

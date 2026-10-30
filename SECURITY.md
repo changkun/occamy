@@ -22,11 +22,12 @@ has known gaps, tracked in
 [specs/004-security-hardening.md](specs/004-security-hardening.md). Until
 those are closed, an operator should know the following:
 
-- **Tokens carry the remote credentials.** `/api/v1/login` puts the
+- **Tokens carry the remote credentials.** `/api/v0/login` puts the
   remote host, username and password into a signed but unencrypted JWT.
   Anyone holding a token can read them, so treat tokens as secrets.
-- **Tokens appear in logs.** The web client passes the token in the
-  WebSocket URL, and request logging records it.
+- **Tokens travel in URLs.** The web client passes the token in the
+  WebSocket URL. `occamyd` does not log query strings, but a reverse
+  proxy in front of it may; keep them out of its access log.
 - **No TLS.** `occamyd` speaks plain HTTP and WebSocket. Put a
   TLS-terminating reverse proxy in front of it.
 - **The login endpoint is open.** It signs a token for any host and port

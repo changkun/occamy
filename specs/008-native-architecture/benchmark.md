@@ -158,7 +158,7 @@ A Go command, `go run ./bench`, with flags for the scenarios, network
 conditions and series, and the endpoint. It writes a JSON result and a
 Markdown table.
 
-- **Drivers:** v0 through occamyd (log in, dial `/api/v1/connect`); v0
+- **Drivers:** v0 through occamyd (log in, dial `/api/v0/connect`); v0
   direct to guacd (the `internal/guacd` handshake); v1 later through the
   `client` package. Each driver answers `sync` the way a browser does,
   announces the image types a browser announces (PNG, JPEG, WebP), and
