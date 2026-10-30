@@ -364,7 +364,8 @@ place for fixes that ship on v0 before beta.
     declared message with no deadline, so a client that declares a huge
     frame and goes quiet would hold its handler and session forever.
     `CloseNow` cannot interrupt a `Close` already under way, so a timer
-    around `Close` would not help.
+    around `Close` would not help; the v0 routes keep no `net.Conn` to
+    close under it, as v1 streams later do.
   - `clientError` reads `websocket.CloseStatus`: 1000, 1001 and 1005 mean
     the client left, any other close code and `ErrMessageTooBig` are
     failures, and any other error counts as leaving. coder/websocket
