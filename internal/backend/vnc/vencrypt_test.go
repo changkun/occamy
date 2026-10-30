@@ -36,7 +36,7 @@ import (
 // 127.0.0.1, and another CA that signed nothing the server presents.
 type testPKI struct {
 	roots, otherRoots *x509.CertPool
-	server            tls.Certificate // signed by the CA
+	server            tls.Certificate // signed by the CA, which it presents after it
 	leaf              *x509.Certificate
 	selfSigned        tls.Certificate // for localhost too, signed by itself
 }
@@ -57,7 +57,7 @@ func newPKI(t *testing.T) *testPKI {
 		pki = &testPKI{
 			roots:      x509.NewCertPool(),
 			otherRoots: x509.NewCertPool(),
-			server:     tls.Certificate{Certificate: [][]byte{leaf.Raw}, PrivateKey: leafKey, Leaf: leaf},
+			server:     tls.Certificate{Certificate: [][]byte{leaf.Raw, ca.Raw}, PrivateKey: leafKey, Leaf: leaf},
 			leaf:       leaf,
 			selfSigned: tls.Certificate{Certificate: [][]byte{self.Raw}, PrivateKey: selfKey, Leaf: self},
 		}
