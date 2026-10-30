@@ -156,7 +156,10 @@ items with the recommended options, checked against the code and RFC
 
 Registration in the API's backend factory for `vnc`, and the switch from
 the guacd bridge, follow the parity gate in
-[guacd-bridge](guacd-bridge.md), not these phases.
+[guacd-bridge](guacd-bridge.md), not these phases. (2026-10-30: the
+Sessions task of [api-and-server-stack](api-and-server-stack.md)
+registers the native backend as `vnc`'s default ahead of the gate,
+since no configuration key yet picks a backend; see its notes.)
 
 ## Affects
 
@@ -169,7 +172,8 @@ leaves only RDP on the bridge.
 - **Status.** Phase 1 is done: `internal/backend/vnc` implements
   `backend.Backend` with `Config`, `New` and `Backend`, in about 1,400
   lines of code and 2,500 of tests. Nothing wires it into `occamyd`: the
-  sessions task registers backends.
+  sessions task registers backends (done: `vnc` connections and ad-hoc
+  targets use it).
 - **What was built.**
   - Run dials with the context, runs the handshake, sends
     `SetPixelFormat` and `SetEncodings` (CopyRect, Raw, Cursor,
@@ -324,5 +328,5 @@ leaves only RDP on the bridge.
   - Resizes are rate-limited by a fixed interval. A budget that scales
     with the screen's size would bound the work better: at the largest
     screen, ten resizes a second still reallocate 1.25 GiB a second.
-  - Registration for `vnc` in the API's backend factory, and the parity
-    gate against the guacd bridge.
+  - Registration for `vnc` in the API's backend factory (done, as the
+    default), and the parity gate against the guacd bridge.

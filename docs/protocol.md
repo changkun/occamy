@@ -76,8 +76,8 @@ and adds:
   parameter is at most 2731 characters and the request line stays well
   within the 8 KiB that common proxies allow.
 - the header `Sec-WebSocket-Protocol` with two subprotocols:
-  `occamy.v1`, and `occamy.v1.token.` followed by the access or share
-  token in base64url without padding. The token never goes in the URL,
+  `occamy.v1`, and `occamy.v1.token.` followed by the token, an access
+  token, a session token or a share, in base64url without padding. The token never goes in the URL,
   which proxies and servers log. A native client may instead send
   `Authorization: Bearer <token>` and offer `occamy.v1` alone.
 

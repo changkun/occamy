@@ -34,7 +34,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   input by role (owner, viewer, read-only), keeps each viewer's small
   state as latest values, ends the session when the owner stays away or
   it idles, and a registry of sessions with share tokens that die with
-  them. Not served by any route yet.
+  them.
 - `internal/backend/guacd`, the guacd bridge of v1: a graphical backend
   that applies guacd's drawing and copies each frame into the session's
   framebuffer before it answers the frame's `sync`, so that guacd paces
@@ -42,8 +42,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   and credential requests into session events, and viewers' keys,
   pointer, wheel, text, clipboard and resizes into Guacamole
   instructions. `internal/guacamole`'s display now applies `cursor`,
-  reports damage as rectangles, and copies areas out. Not served by any
-  route yet.
+  reports damage as rectangles, and copies areas out.
 - A conformance corpus for the guacd bridge: guacd 1.6's VNC, RDP and
   SSH sessions on the bench stack, recorded with `go test -tags record`
   and replayed by `go test` without containers, which fails on any
@@ -61,7 +60,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   authenticates with key files or a password, which also answers a
   keyboard-interactive password challenge, and asks the session's owner
   for anything else. It feeds the shell's terminal output to the
-  session. `occamyd` does not use it yet.
+  session.
 - Version 1 configuration files (`version: 1`): sign-in through static
   users, OIDC and trusted issuers, a connection registry whose
   credentials name files or environment variables instead of holding
@@ -73,7 +72,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   session: immutable, versioned screen snapshots that share unchanged
   rows, and the diffs that bring a viewer's terminal from the screen it
   last received to the current one, sending scrolled lines as line feeds
-  so the client's scrollback fills. Not served by any route yet.
+  so the client's scrollback fills.
 - `internal/stream`, a viewer's connection in protocol v1: `welcome`,
   then the client's input and views applied as they come, and frames at
   the pace of the viewer's link. Small state never waits behind tiles,
@@ -82,7 +81,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   diff between the screens a viewer was sent, so bulk output coalesces,
   an echo goes ahead of a status line or other output already on the
   screen, and the terminal's answers to the shell's queries reach the
-  shell. Not served by any route yet.
+  shell.
 - A native VNC backend for protocol v1, `internal/backend/vnc`, in pure
   Go: RFB 3.3, 3.7 and 3.8 with the security types None and VNC
   Authentication, asking the session's owner for a password the
@@ -93,7 +92,6 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   UTF-8 when it is valid UTF-8. It checks every length the server sends
   before it reads or allocates, resizes the screen at most once an
   update and ten times a second, and bounds its queued input by bytes.
-  `occamyd` does not use it yet.
 - The codec measurement of the graphics pipeline
   ([docs/benchmarks/codecs.md](docs/benchmarks/codecs.md)): a corpus of
   13 frames recorded from the bench desktop by `make corpus`, and
@@ -114,6 +112,19 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   wildcard host and `localhost`. A `version` merged in with `<<` counts,
   and one outside the file's first YAML document is an error. A v0 file
   is served as before.
+- `occamyd` serves sessions and streams from a v1 file.
+  `GET /api/v1/connections` lists the connections the caller may open.
+  `POST /api/v1/sessions` opens a session on one, or on an ad-hoc target
+  that `adhoc_allowlist` covers when `allow_adhoc_targets` is on, and
+  `GET` and `DELETE /api/v1/sessions/{id}` and
+  `POST /api/v1/sessions/{id}/shares` read, close and share it for its
+  owner. `GET /api/v1/connections/{id}/stream` opens a session and
+  streams it in one request, and `GET /api/v1/sessions/{id}/stream`
+  joins a running one, both as protocol v1 WebSockets with the token in
+  a subprotocol, never in the URL, and `Origin` checked against
+  `origins`. ssh and vnc connections use the native backends, rdp and
+  telnet the guacd bridge. ssh connections need `host_keys` or
+  `insecure_ignore_host_key: true`.
 
 ### Changed
 

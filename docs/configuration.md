@@ -10,7 +10,8 @@ another. The file comes in two versions:
   [api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md):
   sign-in, the connection registry, TLS and the debug listener. The
   server is being built: so far it serves `/healthz`, sign-in for static
-  users and, with `legacy_v0`, the v0 routes (see
+  users, the connections and sessions of API v1 and their streams and,
+  with `legacy_v0`, the v0 routes (see
   [Serving a v1 file](#serving-a-v1-file)).
 
 Any other `version` is an error, and so is `version: 0`: a v0 file has no
@@ -62,7 +63,7 @@ directory.
 | `listen` | `:5636` | Address of the public listener, `host:port`: the API, the streams and `/healthz` |
 | `tls.cert`, `tls.key` | unset | Certificate and key files, PEM. `occamyd` terminates TLS when both are set; set both or neither. Without them, put a reverse proxy that terminates TLS in front. Read at start, so a renewed certificate needs a restart |
 | `debug.address` | unset (off) | Address of the debug listener: expvar at `/debug/vars` and pprof under `/debug/pprof/`, without authentication. It needs a port of its own: not `listen`'s port on the same host, nor on `localhost` beside `127.0.0.1` or `::1`, nor beside a wildcard host (`:5636`, `0.0.0.0`, `::`), which takes every address. Keep it on the loopback interface; `occamyd` warns at start when it is not |
-| `origins` | none | Origins, `scheme://host[:port]`, whose web pages may open streams besides `occamyd`'s own. Written in lower case without a trailing slash, as browsers send them |
+| `origins` | none | Origins, `scheme://host[:port]`, whose web pages may open streams besides `occamyd`'s own. Written in lower case without a trailing slash, as browsers send them. `occamyd`'s own origin is any whose host and port are the request's `Host`; a stream request without `Origin`, which no browser sends, is accepted on its token alone |
 | `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for the Guacamole-based web client. Their tokens are signed with a key made at each start, so they do not survive a restart. The web client itself (`/static/`) is not served from a v1 file. The login signs any target for anyone, as in v0, and `occamyd` warns at start; `allow_adhoc_targets`, `adhoc_allowlist` and the connection registry do not restrict these routes. They are removed at v1.0 |
 
 ### Sign-in: `auth`
@@ -101,8 +102,11 @@ A trusted issuer mints JWTs that `occamyd` accepts as its own:
 
 ### guacd: `guacd`
 
-guacd serves the `vnc`, `rdp` and `telnet` connections until their native
-backends replace it.
+guacd serves the `rdp` and `telnet` connections. `ssh` and `vnc`
+connections use `occamyd`'s native backends, and no key picks guacd for
+them yet. For `rdp`, `occamyd` passes `disable-gfx: "true"` unless
+`guacd.params.rdp` sets it: through RDP's graphics pipeline, xrdp's
+colours reached guacd shifted.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
@@ -146,6 +150,20 @@ set. A secret rotated on disk is therefore picked up by the next session.
 | `allow_adhoc_targets` | `false` | Let signed-in users connect to targets that are not in the registry, as v0 does |
 | `adhoc_allowlist` | none | Where ad-hoc targets may point: CIDR ranges (`10.0.0.0/8`), IP addresses, host names, or `*.` and a domain (`*.lab.internal`). Required when `allow_adhoc_targets` is `true` |
 
+Any signed-in user may open an ad-hoc target, with
+`POST /api/v1/sessions`. Its credentials are always asked of the user,
+and an ssh target needs `host_keys` or `insecure_ignore_host_key: true`
+in the request, as a connection does. A target is allowed when:
+
+- it is an IP address in a listed range, or a listed address;
+- it is a listed host name, or ends in a `*.` entry's domain
+  (`a.lab.internal` for `*.lab.internal`, but not `lab.internal`
+  itself). `occamyd` dials the name, so the list trusts these names'
+  DNS;
+- it is any other host name, every address of which lies in a listed
+  range. `occamyd` then dials the address it checked, so a second
+  lookup cannot lead elsewhere.
+
 ## Validation
 
 A v1 file is checked as a whole, and every problem is reported with its
@@ -187,18 +205,35 @@ WebSockets over HTTP/1.1. So far it serves:
 |-------|---------|
 | `GET /healthz` | `200 {"status":"ok"}` while `occamyd` runs |
 | `POST /api/v1/auth/token` | Sign-in for static users: `{"username":"alice","password":"…"}` as `application/json` in, `{"access_token":"…","token_type":"Bearer","expires_in":900}` out. A wrong password and an unknown user get the same `401` |
+| `GET /api/v1/connections` | The connections whose `allow` names the caller or one of the caller's groups: `{"connections":[{"id":"build-box","name":"Build box","protocol":"ssh"}],"adhoc_targets":false}` |
+| `POST /api/v1/sessions` | Open a session: `{"connection":"build-box"}`, or with ad-hoc targets on, `{"protocol":"ssh","target":"10.0.0.5","host_keys":["SHA256:…"]}`. `201` with `{"id":"…","role":"owner","stream_token":"…","expires_in":300}`; the owner has 60 seconds to open the session's stream |
+| `GET /api/v1/sessions/{id}` | The owner's view of the session: connection, protocol, backend, class, size and viewers |
+| `DELETE /api/v1/sessions/{id}` | Close the session, owner only; every stream of it ends |
+| `POST /api/v1/sessions/{id}/shares` | A share for `{"role":"viewer"}` or `"read-only"`, with `expires_in` in seconds (60 to 43200, an hour by default), owner only |
+| `GET /api/v1/connections/{id}/stream` | Open a session on the connection and stream it, as a protocol v1 WebSocket ([protocol.md](protocol.md)) |
+| `GET /api/v1/sessions/{id}/stream` | Join a session as a protocol v1 WebSocket: as its owner with the owner's access token or the stream token, or with a share |
 | `/api/v0/login`, `/api/v0/connect` | With `legacy_v0: true`, the v0 routes as a v0 file serves them |
+
+`ssh` and `vnc` sessions use `occamyd`'s native backends, and `rdp` and
+`telnet` sessions go through guacd. A connection the caller may not
+open, and another user's session, answer `404` as if they did not exist.
 
 API v1 answers every error with `{"error":{"code":"…","message":"…"}}`,
 where `code` is stable, such as `unauthorized`, `invalid_token`,
-`token_expired` or `not_found`, and `message` is for people. Routes that
-need a caller take the access token in `Authorization: Bearer`, never in
-the URL. The request log names each request's method, path, status,
-duration and peer, never its query string, headers or body.
+`token_expired`, `forbidden` or `not_found`, and `message` is for
+people. Routes that need a caller take the access token in
+`Authorization: Bearer`, never in the URL. A stream takes it in the
+`occamy.v1.token.` subprotocol instead, which a browser can send, or in
+`Authorization`, and refuses a bad token, `Origin` or `hello` with a
+protocol `close` after the upgrade. The request log names each
+request's method, path, status, duration and peer, never its query
+string, headers or body.
 
-On SIGINT or SIGTERM, `occamyd` stops accepting connections and gives
-requests in flight up to 5 seconds to finish. It then cuts what is left,
-such as a long CPU profile, with a warning, and exits with status 0. A
+On SIGINT or SIGTERM, `occamyd` stops accepting connections, ends every
+session, which sends its streams `close` with `server-shutdown`, and
+gives requests in flight up to 5 seconds to finish, and streams as long
+again. It then cuts what is left, such as a long CPU profile, with a
+warning, and exits with status 0. A
 second SIGINT or SIGTERM in those seconds ends it at once. If the signing key file
 does not exist, `occamyd` creates it and warns: tokens signed with an
 earlier key no longer verify.

@@ -59,11 +59,11 @@ can only patch on v0.
 | `GET /api/v1/auth/oidc/callback` | Finish OIDC sign-in and issue an access token |
 | `GET /api/v1/connections` | Connections the caller may open (from the registry) |
 | `GET /api/v1/connections/{id}/stream` | WebSocket upgrade that opens a session on the connection and streams it, in one round trip ([protocol-v1](protocol-v1.md), Handshake) |
-| `POST /api/v1/sessions` | Open a session on a connection, returning the session ID and the caller's role |
+| `POST /api/v1/sessions` | Open a session on a connection, or on an ad-hoc target when allowed, returning the session ID, the caller's role and a stream token that joins it as the owner |
 | `GET /api/v1/sessions/{id}` | Session state: backend, size, viewers |
 | `POST /api/v1/sessions/{id}/shares` | Mint a share token for viewer or read-only access, with an expiry |
 | `DELETE /api/v1/sessions/{id}` | Close the session (owner only) |
-| `GET /api/v1/sessions/{id}/stream` | WebSocket upgrade that joins a session, with an access or share token; the token travels in `Sec-WebSocket-Protocol` (or `Authorization` for native clients), never in the URL |
+| `GET /api/v1/sessions/{id}/stream` | WebSocket upgrade that joins a session, with the owner's access token, a session token (such as the stream token) or a share; the token travels in `Sec-WebSocket-Protocol` (or `Authorization` for native clients), never in the URL |
 | `GET /healthz` | Liveness, on the public listener |
 
 Debug and metrics endpoints move to a separate listener (`debug.address`,
@@ -174,8 +174,8 @@ single-node beta.
 | Tokens | `internal/auth`: Ed25519 signing keys loaded from a file (generated on first start when absent, with a warning), access tokens (subject, groups, 15 minutes by default) and stream and share tokens (session ID, role), issued and verified with golang-jwt v5 restricted to `EdDSA`; tokens from `trusted_issuers` verified against their listed keys. Tests reject `none`, an HMAC token signed with the public key, an unknown issuer, a wrong audience, expiry and tampering | — |
 | HTTP server | `server/` on `net/http.ServeMux`: plain `func(http.Handler) http.Handler` middleware for recovery, request logging that never logs tokens or credentials, and authentication; JSON helpers and one JSON error shape; `/healthz`; `POST /api/v1/auth/token` for static users (bcrypt, constant-time on unknown users); TLS when configured; graceful shutdown; the debug listener with expvar and pprof, off unless `debug.address` is set. `occamy.go` starts it from a v1 configuration | Config v1, Tokens |
 | OIDC | `GET /api/v1/auth/oidc/login` and `/callback`: authorization code with PKCE through `golang.org/x/oauth2`, state and verifier in a short-lived signed cookie, the ID token checked by `coreos/go-oidc` v3, and subject and group claims mapped to registry users and groups as configured; tests against an in-process identity provider | HTTP server |
-| Sessions | `GET /api/v1/connections` filtered by the caller's users and groups; `POST /api/v1/sessions`, `GET` and `DELETE /api/v1/sessions/{id}` and `POST /api/v1/sessions/{id}/shares` on the session registry; a backend factory keyed by protocol that the native SSH backend and the guacd bridge register into; ad-hoc targets only when enabled and allowed; tests on the fake backend | HTTP server; session-core Registry |
-| Streams | `GET /api/v1/connections/{id}/stream` and `/api/v1/sessions/{id}/stream` on coder/websocket: `Origin` checked against `origins`, the token taken from the `occamy.v1.token.` subprotocol or `Authorization`, `occamy.v1` answered alone, `hello` read from the query, and the socket handed to the session's viewer writer; a closed session ends its streams whatever tokens remain valid. Tests cover one round trip to `welcome`, a bad origin, a missing or wrong token, and a token in the URL ignored | Sessions; session-core Viewer writer; protocol v1 Handshake |
+| Sessions | `GET /api/v1/connections` filtered by the caller's users and groups; `POST /api/v1/sessions`, `GET` and `DELETE /api/v1/sessions/{id}` and `POST /api/v1/sessions/{id}/shares` on the session registry; a backend factory keyed by protocol that the native SSH and VNC backends and the guacd bridge register into; ad-hoc targets only when enabled and allowed; tests on the fake backend | HTTP server; session-core Registry |
+| Streams | `GET /api/v1/connections/{id}/stream` and `/api/v1/sessions/{id}/stream` on coder/websocket: `Origin` checked against `origins`, the token taken from the `occamy.v1.token.` subprotocol or `Authorization`, `occamy.v1` answered alone, `hello` read from the query, and the socket handed to the viewer writer, `stream.Serve`, with `stream.SetLowWater` applied; a closed session ends its streams whatever tokens remain valid, and so does a shutdown. Tests cover one round trip to `welcome`, a bad origin, a missing or wrong token, and a token in the URL ignored | Sessions; session-core Viewer writer; protocol v1 Handshake |
 | v0 routes | `/api/v0/login` and `/api/v0/connect` behind `legacy_v0`, served on the new mux through `net/http`, golang-jwt v5 (HS256 with the v0 secret, so v0 tokens keep their shape) and coder/websocket, so that gin, gin-jwt and gorilla/websocket leave `go.mod` at beta.1; a v0 configuration file implies `legacy_v0`; the Vue client moves to the new paths; the existing v0 tests keep passing against the new paths | HTTP server |
 | Document | `docs/api.md` for every route above, the configuration reference, TLS through occamyd or a reverse proxy, and a v0 to v1 migration note; README and `conf.yaml` updated to a v1 example | all of the above |
 
@@ -292,9 +292,11 @@ place for fixes that ship on v0 before beta.
     then, since the lenient v0 decoder would read one with defaults
     (all three done by the HTTP server task).
   - Native SSH backend: add the host key policy (`host_keys`,
-    `insecure_ignore_host_key`) and `term` to connection entries.
+    `insecure_ignore_host_key`) and `term` to connection entries (the
+    host key policy is done, by the Sessions task; `term` is not).
   - Sessions: matching rules for `adhoc_allowlist` (resolved addresses
-    against ranges), and whether ad-hoc targets need a group.
+    against ranges), and whether ad-hoc targets need a group (both
+    decided; see Implementation notes: Sessions).
   - Per-connection guacd params (an RDP domain per host), a per-protocol
     backend choice (`backend: guacd` after a parity switch), and serving
     the web client from a v1 file have no keys yet.
@@ -614,10 +616,12 @@ place for fixes that ship on v0 before beta.
     (`staticUsers.signer` or a shared one).
   - Sessions: wrap its routes in `authenticate(s.verifier)` and read
     `claimsFrom(r.Context())`; use `decodeJSON`, `respond` and
-    `writeError`, adding codes such as `forbidden` and `conflict`.
+    `writeError`, adding codes such as `forbidden` and `conflict` (done;
+    it added `forbidden` and needed no `conflict`).
   - Identity: decide whether a trusted issuer's `sub` names the same
     user as a static user of that name. `claimsFrom` carries the issuer
-    so the two can be told apart; nothing decides it yet.
+    so the two can be told apart; nothing decides it yet (decided by the
+    Sessions task: it does).
   - Sign-in has no rate limit, per address or per user; each attempt
     costs one bcrypt comparison at the users' highest cost, so a flood
     of attempts is also a CPU cost.
@@ -633,7 +637,241 @@ place for fixes that ship on v0 before beta.
     `http.Server.RegisterOnShutdown`, since `Shutdown` ignores hijacked
     connections (the drain does not cover them); check the subprotocol
     token with `s.verifier`; the public server lives in `server.Run`, so
-    the hook needs a way in, such as a `server` field.
+    the hook needs a way in, such as a `server` field (all done;
+    `server.publicServer` registers the hook).
   - Document: `docs/api.md` for `/healthz`, the token endpoint and the
     error shape above; certificate reload (today a restart) and the
     HTTP/1.1 decision in the TLS section.
+
+## Implementation notes: Sessions
+
+- **What was done:**
+  - `server/backends.go`: the backend factory, a map from protocol to a
+    maker. `ssh` makes the native SSH backend, `vnc` the native VNC
+    backend, and `rdp` and `telnet` the guacd bridge, with
+    `guacd.params.<protocol>` under the target, the user name and the
+    stored password. A prompting ssh connection without a user name gets
+    a backend that asks the owner for one, then dials.
+  - `server/sessions.go`, every route behind `authenticate(s.verifier)`:
+    - `GET /api/v1/connections`: `{"connections":[{"id","name",
+      "protocol"}],"adhoc_targets":false}`, the connections whose allow
+      list names the caller or one of the caller's groups, in the
+      file's order. Targets are left out.
+    - `POST /api/v1/sessions`: `{"connection":"lab"}`, or an ad-hoc
+      `{"protocol","target","username","host_keys",
+      "insecure_ignore_host_key"}`. 201 with `Location` and
+      `{"id","role":"owner","stream_token","expires_in":300}`.
+    - `GET /api/v1/sessions/{id}`: `{"id","connection","protocol",
+      "backend","class","size":{"width","height"},"viewers":[{"id",
+      "role"}],"opened"}`; `connection` is absent for an ad-hoc target
+      and `size` until the remote reports one.
+    - `DELETE /api/v1/sessions/{id}`: 204 once the session has ended.
+    - `POST /api/v1/sessions/{id}/shares`: `{"role":"viewer"}` or
+      `"read-only"`, and `expires_in` in seconds, 60 to 43200, an hour
+      if absent. 201 with `{"token","role","expires_in"}`.
+    - Replies that carry a token or a session's state are
+      `Cache-Control: no-store`.
+  - `server/adhoc.go`: `adhoc_allowlist`'s matching.
+  - The session core: `Session.Viewers` lists the viewers, the owner
+    first, for the session's state, and `Registry.JoinShared` takes the
+    session's ID and refuses a share of another session, which it
+    accepted before.
+  - Connections gained `host_keys` and `insecure_ignore_host_key`
+    (native-ssh-backend, decision 2): the SSH backend refuses to start
+    without a host key policy, so no ssh connection of a v1 file could
+    have opened. An ssh connection needs exactly one, other protocols
+    neither, and each key is checked with the backend's parser,
+    `ssh.CheckHostKey`.
+- **Decisions:**
+  - **Backend per protocol:** native SSH and native VNC; the guacd
+    bridge for RDP and telnet. No configuration key picks another
+    backend: `backend:` would be new configuration that no spec has
+    settled beyond guacd-bridge's parity gate. RDP gets
+    `disable-gfx: "true"` unless `guacd.params.rdp` sets it, trading the
+    graphics pipeline's bandwidth, saved between guacd and the remote
+    rather than on the viewers' links, for exact colours (guacd-bridge's
+    follow-up). Kubernetes is not registered: it has no `host:port`
+    target. The hello's graphical size reaches guacd capped at 8192, as
+    v0's display hints are.
+  - **One identity namespace:** a trusted issuer's `sub` is the same
+    user as the static user of that name, for allow lists and for
+    owning sessions, and groups are matched by name too. Allow lists
+    name no issuer, and an issuer that is trusted can mint any `sub`
+    anyway, so telling them apart would protect nothing.
+  - **Absent rather than forbidden:** a connection the caller may not
+    open answers 404, as an unknown one does, and so does another
+    user's session on `GET`, `DELETE` and shares, so IDs cannot be
+    probed. Only the owner, by name, reads, closes and shares a session;
+    there is no administrator role yet.
+  - **Opening without streaming:** `POST /api/v1/sessions` starts the
+    session at once. The owner's viewer that the registry returns leaves
+    at once, which starts the owner grace of 60 s (session-core) in
+    which the owner's stream must join, with the stream token (a session
+    token for the owner, 5 minutes) or an access token. The backend's
+    prompts wait for that stream.
+  - **Ad-hoc targets** are open to any signed-in user, on
+    `POST /api/v1/sessions` only. The request is checked as `ParseV1`
+    checks a connection (`config.NormalizeTarget`), an ssh target needs
+    `host_keys` or `insecure_ignore_host_key: true` as a connection
+    does, and the credentials are always prompted for, so a request
+    carries no secret. With ad-hoc targets off, or outside the
+    allowlist, the answer is 403 `forbidden`, a code this task adds.
+  - **Allowlist matching:** an IP address must lie in a listed range or
+    be a listed address, IPv4-mapped addresses compared as IPv4, and an
+    address with a zone is refused. A host name that is listed, or ends
+    in `.lab.internal` for `*.lab.internal` (the domain itself does
+    not), is dialled by name, so the list trusts those names' DNS. Any
+    other name is resolved, within 5 s, and allowed only if every address
+    lies in the listed ranges; it is then dialled by the first address
+    checked, so that a second lookup cannot lead elsewhere. A list
+    without ranges resolves nothing.
+  - **Failures of occamyd's own,** such as a password file it cannot
+    read, are logged with the user and the target and answered 500
+    `internal`, without the cause.
+  - A shutdown ends every session, through the registry's context.
+- **Deviations:**
+  - VNC defaults to the native backend, where guacd-bridge's parity gate
+    keeps the bridge until beta.2 with the native backend behind
+    `backend: native`; with no `backend:` key, a v1 file cannot send VNC
+    through the bridge. telnet goes through the bridge for any configured
+    connection: the connection is the opt-in that guacd-bridge's
+    Registration row asks for.
+  - The row named the native SSH backend and the bridge; native VNC
+    registers too. The API table did not say that
+    `POST /api/v1/sessions` returns a stream token, nor that a session
+    token joins a session's stream. Both are fixed above.
+- **Surprises:** none in the routes themselves. The missing host key
+  policy above was found when the factory first made an ssh backend
+  from a connection.
+- **Mutation checks:** each of these failed a test: the allow lists'
+  users or groups ignored, every connection listed, any connection
+  opened, a session's state, close and shares open to any user, a share
+  with the owner's role, ad-hoc targets served while off, an ssh
+  ad-hoc target without a host key policy, the allowlist allowing
+  anything, allowing a name when one of its addresses is listed,
+  `*.domain` matching without the dot, dialling the name it resolved,
+  and allowing an address with a zone; `DELETE` that does not close.
+- **Follow-ups:**
+  - A per-connection `backend:` key (guacd-bridge's parity gate), `term`
+    for ssh (the backend's `xterm-256color` until then) and per-connection
+    guacd parameters.
+  - VNC phase 3 (#106, not merged when this landed) adds a user name and
+    a TLS policy to `vnc.Config`. Connections then need `username` and a
+    `tls` block (`require`, `server_name`, `ca_file`, `pins`,
+    `insecure_skip_verify`), validated and passed through `newVNC`. Its
+    pins should take the shape of `host_keys`: a list of keys or
+    `SHA256:` fingerprints in base64, and a separate `insecure_` switch
+    that excludes them.
+  - Ad-hoc targets for some groups only, and a rate limit on
+    `POST /api/v1/sessions`.
+  - A list of the caller's own sessions, `GET /api/v1/sessions`, which
+    the table does not have.
+  - The session core's `Join` takes no name, so `viewer-joined` carries
+    an empty name.
+
+## Implementation notes: Streams
+
+- **What was done:** `server/streams.go`. Both routes authenticate on
+  their own rather than through `authenticate`, since a refusal must come
+  as `close` after the upgrade. `upgrade` checks the subprotocol offer,
+  then `Origin`, the token and `hello`, sets `TCP_NOTSENT_LOWAT` to
+  16 KiB on `connFrom`'s connection, and accepts; `wsConn` adapts the
+  coder/websocket connection to `stream.Conn`; `serve` hands it with the
+  viewer to `stream.Serve` and closes the WebSocket. `server.Run` waits
+  for streams after the drain.
+- **Decisions:**
+  - **Refusals:** a request that offers no `occamy.v1` gets 400
+    `bad_request` as JSON. Every other refusal gets the upgrade, `close`
+    and a WebSocket close with the same code: 4001 for `Origin`, 4000
+    for the token, 1002 or 1003 for `hello`, 4001 for a connection or
+    session the token does not open. The read limit is 64 KiB until a
+    request is accepted, then the agreed message size.
+  - **Origin:** none is accepted, since a client that is no browser can
+    send any `Origin`, and the token is what protects the route. One
+    `Origin`, `http` or `https` with a host, is accepted when its host
+    is the request's `Host` (the scheme is not compared, since TLS may
+    end at a proxy) or `scheme://host[:port]` is in `origins`. `null`,
+    an empty one and a repeated one are refused. coder/websocket's own
+    check is off, since it refuses with 403 before `close` can go out.
+  - **Token:** from the `occamy.v1.token.` subprotocol, else from
+    `Authorization` (one `Bearer` header, as `authenticate` reads it),
+    never from the URL. A subprotocol token wins: a bad one is refused
+    even beside a good header.
+  - **What each route takes:** the connection route takes an access
+    token whose caller may open the connection. The session route takes
+    the owner's access token; a session token whose `sid` is the route's
+    session, with its role, as the owner only if its `sub` is the owner;
+    or a share, a token without dots, through `Registry.JoinShared`,
+    which now refuses a share of another session. Another
+    user, another session's token and an unknown session get 4001 alike;
+    a share that does not open the session gets 4000, since it is no
+    valid token for it. Tokens are checked at the upgrade only: a
+    session's end, not a token's expiry, ends a stream (decision 1).
+  - **Owner takeover:** a newer stream of the owner takes over from an
+    older one, which gets `close` with 1000 and "the owner connected
+    again"; the newer one joins once the older has left, within 5 s.
+    Otherwise a connection that died unnoticed would keep the owner out
+    of their own session until TCP gives up.
+  - **The owner's hello sizes the session:** on the connection route the
+    backend is made at that size (columns and rows for ssh, pixels for
+    guacd; native VNC takes the server's size); on the session route the
+    owner's hello becomes a `backend.Resize`. A viewer's hello resizes
+    nothing.
+  - **Capabilities:** raw tiles and terminal level 1, `stream.Serve`'s
+    defaults, until the graphics pipeline's codecs land.
+  - **The WebSocket:** coder/websocket drops the connection when the
+    context of a read or write ends, and `Serve` ends its contexts as
+    soon as it is done, so `wsConn` reads in a goroutine without a
+    context, and a write in progress gets 1 s to finish after its
+    context ends. `Serve` sends `close` but cannot close the WebSocket;
+    `wsConn` keeps the `close` it sent and closes the WebSocket with its
+    code and reason, cut to 123 bytes at a character boundary. Compression
+    is off.
+  - **Shutdown:** `publicServer` registers the server's shutdown with
+    `RegisterOnShutdown`, which cancels the registry's context; every
+    session ends with `server-shutdown`, which `Serve` sends. `Run` then
+    waits up to the drain timeout again for the streams, since
+    `Shutdown` neither waits for nor closes hijacked connections.
+- **Deviations:**
+  - The row's "the session's viewer writer" is `stream.Serve`, now named
+    in the row.
+  - [docs/protocol.md](../../docs/protocol.md) said the subprotocol
+    carries an access or share token; it now names session tokens too.
+  - The end-to-end test, `TestEndToEnd`, signs in, opens a session,
+    streams it, types and closes it through a minimal client of its own
+    in `server/streams_test.go`. The Go client (`client/`, #107) was not
+    on master; the test should move to `client.Dial` when it is.
+- **Surprises:**
+  - A frame being written when a client sent a text message or broke the
+    protocol cut off the `close` that followed: coder/websocket closed
+    the connection when the writer's context ended mid-write. Hence the
+    second of grace above, which a test caught on its first runs.
+  - `Serve` takes every failed read for a dead connection and sends no
+    `close`. A text message is no such failure, so `serve` sends
+    `unsupported` for it. After a message over the read limit,
+    coder/websocket has sent 1009 itself, and the connection is dropped
+    with `CloseNow`, as the v0 routes do.
+- **Mutation checks:** each of these failed a test: any `Origin`
+  accepted, a listed origin accepted with the other scheme, a host
+  matched by prefix, a token read from the URL, `Authorization` read
+  before the subprotocol, any user taken for the owner, another
+  session's token accepted, a viewer's session token taken for the
+  owner's, no `TCP_NOTSENT_LOWAT`, no shutdown hook, a connection
+  stream made without the hello's size, a viewer's hello resizing the
+  session, no takeover, and the WebSocket closed with another code than
+  the `close` sent.
+- **Not checked live:** the demo SSH and VNC servers were not tried: the
+  shared benchmark host's load average was 46 at the time. The tests run
+  the routes against fake backends only.
+- **Follow-ups:**
+  - Document: `docs/api.md` for the five session routes and the two
+    stream routes, with the replies above.
+  - CORS is still not served, so a page on another origin in `origins`
+    can open streams but not call the JSON routes.
+  - A terminal's hello may ask for up to 65535 columns or rows, which
+    reach the backend unbounded; the graphical size is capped at 8192.
+  - [009](../009-react-web-client.md) and the Go client: send `hello` in
+    the query and the token in the subprotocol; expect `close` before
+    `welcome` for a refusal; reconnect as the owner with an access token
+    (the stream token lasts 5 minutes); read `close` 1000 with "the
+    owner connected again" as being replaced, not as an error.

@@ -282,6 +282,12 @@ arise, rather than inheriting those fixes.
   (`Join`, `Close`, `Framebuffer`, `Changed`, `Size`, `Done`, `End`),
   `Viewer` (`Take`, `Wake`, `Input`, `LastInput`, `View`, `Answer`,
   `Leave`) and `Registry` (`Open`, `Get`, `Share`, `JoinShared`).
+  For API v1's routes, `Session.Viewers` lists the viewers with the
+  owner first, and `JoinShared` takes the route's session ID and
+  refuses a share minted for another session, whose viewers would
+  otherwise hear of the join
+  ([api-and-server-stack](api-and-server-stack.md), Implementation
+  notes: Sessions).
 - **Decisions:**
   - One owner goroutine runs commands from a channel; viewers' calls
     become commands, so input reaches the backend in arrival order. Sink
@@ -371,7 +377,9 @@ arise, rather than inheriting those fixes.
     hides the socket, so the HTTP layer reaches it first: the HTTP server
     task's `ConnContext` keeps each connection in the request context,
     and `connFrom` returns the TCP socket below TLS. The Streams task
-    calls `SetLowWater` on it before the upgrade.
+    calls `SetLowWater` on it before the upgrade (done: 16 KiB, see
+    [api-and-server-stack](api-and-server-stack.md), Implementation
+    notes: Streams).
   - The Scheduling test task.
 - **Surprises:**
   - The tile is the unit of priority. With 64-pixel tiles, the test
@@ -398,7 +406,7 @@ arise, rather than inheriting those fixes.
     fails on one.
 - **Follow-ups:** the Scheduling test, and `SetLowWater` on each
   stream's socket (the HTTP server's `connFrom` reaches it; the Streams
-  task calls it).
+  task calls it, done).
 
 ## Implementation notes: terminal frames
 
@@ -446,7 +454,9 @@ arise, rather than inheriting those fixes.
     refused a terminal session with `unsupported`. The server offers
     level 1 unless configured otherwise.
 - **Not done:** the owner's `hello` columns and rows do not size the
-  terminal yet; the Streams task asks the backend for them.
+  terminal yet; the Streams task asks the backend for them (done: the
+  connection route makes the backend at that size, and the owner's
+  joining a running session resizes it).
 - **Follow-ups:** the emulator's answers to queries are dropped, at Debug
   level, when the backend's input queue is full (the SSH backend's holds
   64, shared with viewer input), and a dropped answer to a device
