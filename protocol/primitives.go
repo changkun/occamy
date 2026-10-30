@@ -12,12 +12,16 @@ import (
 )
 
 // A body is a sequence of fields without names or tags. Integers are
-// fixed-size and little-endian, signed ones in two's complement. Byte
-// strings and UTF-8 strings are a u32 length in bytes followed by that
-// many bytes.
+// fixed-size and little-endian, signed ones in two's complement. A
+// boolean is a u8 that is 0 or 1. Byte strings and UTF-8 strings are a
+// u32 length in bytes followed by that many bytes. A list is a u16 count
+// followed by that many elements.
 
 // lengthSize is the size of the length prefix of a byte or UTF-8 string.
 const lengthSize = 4
+
+// MaxCount is the largest number of elements in a list.
+const MaxCount = math.MaxUint16
 
 // AppendUint8 appends v to b.
 func AppendUint8(b []byte, v uint8) []byte { return append(b, v) }
@@ -42,6 +46,24 @@ func AppendInt32(b []byte, v int32) []byte { return AppendUint32(b, uint32(v)) }
 
 // AppendInt64 appends v to b.
 func AppendInt64(b []byte, v int64) []byte { return AppendUint64(b, uint64(v)) } //nolint:gosec // two's complement
+
+// AppendBool appends v to b as a u8, 1 for true and 0 for false.
+func AppendBool(b []byte, v bool) []byte {
+	if v {
+		return append(b, 1)
+	}
+	return append(b, 0)
+}
+
+// AppendCount appends n to b as the u16 count of a list, whose n elements
+// the caller appends next. It panics if n is negative or larger than
+// MaxCount.
+func AppendCount(b []byte, n int) []byte {
+	if n < 0 || n > MaxCount {
+		panic("protocol: list longer than a u16 count")
+	}
+	return AppendUint16(b, uint16(n))
+}
 
 // AppendBytes appends p to b as a byte string. It panics if p is longer
 // than a u32 can count, which no message size allows.
@@ -158,6 +180,39 @@ func (d *Decoder) ReadInt32() int32 { return int32(d.ReadUint32()) } //nolint:go
 
 // ReadInt64 reads a little-endian i64.
 func (d *Decoder) ReadInt64() int64 { return int64(d.ReadUint64()) } //nolint:gosec // two's complement
+
+// ReadBool reads a boolean, and fails with ErrInvalid if the u8 is
+// neither 0 nor 1.
+func (d *Decoder) ReadBool() bool {
+	buf := d.buf
+	switch d.ReadUint8() {
+	case 0:
+		return false
+	case 1:
+		return true
+	}
+	if d.err == nil {
+		d.buf, d.err = buf, ErrInvalid
+	}
+	return false
+}
+
+// ReadCount reads the u16 count of a list whose elements each take at
+// least minSize bytes, and returns it. It fails with ErrTruncated if that
+// many elements cannot fit in the rest of the body, so that a forged
+// count allocates nothing. It panics if minSize is less than 1.
+func (d *Decoder) ReadCount(minSize int) int {
+	if minSize < 1 {
+		panic("protocol: list elements without a minimum size")
+	}
+	buf := d.buf
+	n := int(d.ReadUint16())
+	if d.err == nil && n > len(d.buf)/minSize {
+		d.buf, d.err = buf, ErrTruncated
+		return 0
+	}
+	return n
+}
 
 // ReadBytes reads a byte string without copying it: the result aliases
 // the body and stays valid as long as the body does. Its capacity ends at

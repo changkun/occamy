@@ -16,8 +16,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   with its framing: the message header and its ignorable flag, the field
   encodings, a registry of message types, and the maximum message size.
   Golden vectors in `protocol/testdata/framing.json` let other
-  implementations check their codecs against it. No message types are
-  defined yet.
+  implementations check their codecs against it.
+- Every message of protocol v1 in the `protocol` package, with the
+  handshake (`hello` in the upgrade query, the token in a subprotocol,
+  capabilities agreed in `welcome`), codecs and close codes, golden
+  vectors in `protocol/testdata/messages.json`, and
+  [docs/protocol.md](docs/protocol.md), the protocol's normative
+  description. `docs/protocol-cn.md` is now marked as the v0 protocol.
 - `internal/auth`, the tokens of API v1: Ed25519 JWTs for access
   (a user and groups) and for sessions (a session and a role), signed by
   occamyd or by a configured trusted issuer, with no other algorithm

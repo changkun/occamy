@@ -5,6 +5,10 @@ You may interested in the following document:
 - [Occamy Architecture](./architecture.md)
   + TL;DR: Occamy v0 authenticates with JWT and proxies each connection to
     guacd; v1, in progress, has its own protocol and backends.
+- [Occamy Protocol (v1)](./protocol.md)
+  + TL;DR: The wire protocol of Occamy v1: binary messages over one
+    WebSocket, a handshake in one round trip, and frames acknowledged
+    under a small window. Normative, with golden vectors.
 - [Occamy Protocol (v0)](./protocol-cn.md)
   + TL;DR: The great thing about Occamy is that occamy has no handshake process 
     between client and Occamy, one can simply POST the connection 
