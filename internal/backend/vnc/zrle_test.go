@@ -174,8 +174,8 @@ func TestZRLEErrors(t *testing.T) {
 	w.Close()
 	// Corrupt deflate data: a block of the reserved type 3.
 	corrupt := []byte{0x78, 0x9c, 0x07, 0, 0, 0, 0}
-	// Data padded after the flush.
-	padded := append(zlibBytes(solid), make([]byte, maxZlibTail+1)...)
+	// Data padded after the flush, beyond the 16 bytes that are kept.
+	padded := append(zlibBytes(solid), make([]byte, 17)...)
 	for _, tt := range []struct {
 		name string
 		msg  []byte
