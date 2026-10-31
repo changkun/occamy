@@ -2,10 +2,12 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
+import { readFileSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
 
 import { CloseCode, CloseError, ConnectionError, ProtocolError } from '../protocol'
-import { type EndContext, describeEnd, describeFailure } from './ending'
+import { type EndContext, TAKEOVER_REASON, describeEnd, describeFailure } from './ending'
 
 const owner: EndContext = { shared: false, sessionId: 'mZ3k1tYb0Q2fJw8aXr5LsA' }
 const viewer: EndContext = { shared: true, sessionId: 'mZ3k1tYb0Q2fJw8aXr5LsA' }
@@ -25,10 +27,21 @@ describe('describeEnd', () => {
 
   it('says nothing of the user’s own close', () => {
     expect(describeEnd(CloseCode.Normal, '', owner).quiet).toBe(true)
-    // The owner's newer stream took over: that is worth saying.
-    const e = describeEnd(CloseCode.Normal, 'the owner connected again', owner)
-    expect(e.quiet).toBe(false)
-    expect(e.technical).toBe('the owner connected again')
+  })
+
+  it('tells an owner whose newer stream took over, and offers to take it back', () => {
+    const e = describeEnd(CloseCode.Normal, TAKEOVER_REASON, owner)
+    expect(e).toMatchObject({ title: 'Opened elsewhere', quiet: false, rejoin: true, signIn: false, technical: TAKEOVER_REASON })
+    expect(describeEnd(CloseCode.Normal, TAKEOVER_REASON, never).rejoin).toBe(false)
+    // Another normal close with a reason is no takeover.
+    expect(describeEnd(CloseCode.Normal, 'bye', owner)).toMatchObject({ title: 'Disconnected', rejoin: false, quiet: false })
+  })
+
+  it('knows the takeover by the reason occamyd sends and documents', () => {
+    const api = readFileSync(new URL('../../../../docs/api.md', import.meta.url), 'utf8')
+    const streams = readFileSync(new URL('../../../../server/streams.go', import.meta.url), 'utf8')
+    expect(api).toContain(`\`close\` 1000 \`normal\` with "${TAKEOVER_REASON}"`)
+    expect(streams).toContain(`protocol.Close{Code: protocol.CloseNormal, Reason: "${TAKEOVER_REASON}"}`)
   })
 
   it('names the code and clips the server’s reason', () => {

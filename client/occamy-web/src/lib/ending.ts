@@ -32,12 +32,29 @@ export interface Ending {
   quiet: boolean
 }
 
+/**
+ * TAKEOVER_REASON is the reason of the normal close that occamyd sends an
+ * owner's stream when a newer stream of the owner takes over
+ * (docs/api.md, GET /api/v1/sessions/{id}/stream): the session runs on
+ * elsewhere.
+ */
+export const TAKEOVER_REASON = 'the owner connected again'
+
 /** describeEnd describes a session that ended with code and reason. */
 export function describeEnd(code: number, reason: string, ctx: EndContext): Ending {
   const technical = code === 0 ? clip(reason, MAX_LABEL) : `${closeCodeName(code)} (${code})${reason === '' ? '' : `: ${clip(reason, MAX_LABEL)}`}`
   const e: Ending = { title: '', detail: closeDescription(code), technical, signIn: false, rejoin: false, quiet: false }
   switch (code) {
     case CloseCode.Normal:
+      if (reason === TAKEOVER_REASON && !ctx.shared) {
+        return {
+          ...e,
+          title: 'Opened elsewhere',
+          detail: 'You opened this session in another window or tab, which took it over. It runs on there; join it here to take it back.',
+          technical: reason,
+          rejoin: ctx.sessionId !== '',
+        }
+      }
       return { ...e, title: 'Disconnected', detail: 'The session was closed.', technical: reason === '' ? '' : clip(reason, MAX_LABEL), quiet: reason === '' }
     case CloseCode.SessionClosed:
       return { ...e, title: 'Session ended', detail: 'The owner ended the session.' }

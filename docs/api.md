@@ -757,8 +757,10 @@ access token or else a session token.
 A newer stream of the owner takes over from an older one, which gets
 `close` 1000 `normal` with "the owner connected again"; a connection
 that died without `occamyd` noticing would otherwise keep the owner out
-of their own session. The owner's `hello` resizes the session; a
-viewer's resizes nothing.
+of their own session. The reason is fixed, so that a client tells a
+takeover from its own close: the web client says the session was
+opened elsewhere and offers to join it again. The owner's `hello`
+resizes the session; a viewer's resizes nothing.
 
 ## Web client
 
