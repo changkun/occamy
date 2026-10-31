@@ -470,7 +470,8 @@ and guacd leaves the default deployment.
     their own state rather than the viewer's.
   - The writer's `shown` is not reset when the server reactivates the
     session; a server that resumes output on reactivation while nobody
-    can see keeps sending until the next change of demand.
+    can see keeps sending until the next change of demand. Done in
+    phase 2: the client repeats Suppress Output after a reactivation.
   - Session-level dedupe of identical cursor shapes before they are
     encoded for each viewer, for the encode-cache task: each new shape
     is copied by the session and encoded losslessly per viewer, and a
@@ -490,12 +491,12 @@ and guacd leaves the default deployment.
 
 ## Implementation notes: phase 2
 
-- **Status.** Phase 2 ships in two pull requests. This one has the
+- **Status.** Phase 2 ships in two pull requests. The first has the
   static virtual channels, the clipboard (CLIPRDR) both ways, and the
   CredSSP acceptor in `rdptest`, with NLA run end to end through the
-  backend. DRDYNVC and Display Control for `resize-request` follow in
-  a second pull request on top of this one; until it lands, `Resize`
-  is accepted and ignored, and viewers scale. The Heartbeat PDU and
+  backend; these notes are its. DRDYNVC and Display Control for
+  `resize-request` are the second's, on top of it, with notes of their
+  own below. The Heartbeat PDU and
   the auto-detect answers are deferred (Deviations). NLA now runs end
   to end against the acceptor, which registration waited for; the
   backend is still not registered in `occamyd`, which follows the
@@ -657,8 +658,164 @@ and guacd leaves the default deployment.
     the server's Monitor Ready, and a test that took the first Format
     List to have it failed once in five runs; both orders are right.
 - **Follow-ups.**
-  - DRDYNVC and Display Control (the second pull request).
+  - DRDYNVC and Display Control: done in the second pull request
+    (below).
   - A `normalize-clipboard` option, if X sessions need LF.
   - The Heartbeat PDU and auto-detect, with #32's Windows host.
   - Formats beyond text (HTML, images) wait for protocol v1 to carry
     them; files are out of v1.0.
+
+## Implementation notes: phase 2, DRDYNVC and Display Control
+
+- **Status.** The second pull request of phase 2: DRDYNVC and Display
+  Control, through which a viewer's `Resize` asks the server for a
+  desktop of its size. With it phase 2 is done but for the Heartbeat
+  PDU and the auto-detect answers (deferred above). The backend is
+  still not registered in `occamyd`, which follows the parity gate
+  (Task Breakdown).
+- **What was built.**
+  - DRDYNVC (`internal/rdp/dynvc.go`, [MS-RDPEDYC]). With
+    `Config.Resize` the client asks for the static channel `drdynvc`
+    (INITIALIZED and ENCRYPT_RDP), whose messages it keeps up to
+    8 KiB. It answers the server's capabilities with version 2 at
+    most, so a server that speaks 3 falls back and sends neither
+    compressed data nor soft-sync. It accepts the Display Control
+    channel, one at a time, and refuses other names, an id that is
+    open, and a second Display Control with STATUS_UNSUCCESSFUL, as
+    FreeRDP does; so at most one dynamic channel is open. A close is
+    answered with a close. A message comes in one Data PDU or in a Data
+    First that declares its length and Data PDUs after it, reassembled
+    up to the channel's own bound (1 KiB for Display Control): a longer
+    message is dropped and counted, one that runs past the length it
+    declared ends the session, as do compressed data, a Data First
+    whose length has size code 3, and a channel name without its NUL
+    within 256 bytes. Data for a channel that is not open, a static
+    message cut at its bound, and soft-sync are dropped and counted.
+    The answers the reader owes wait for the channel writer in a queue
+    of at most 64; a server that opens channels faster than it reads
+    the answers ends the session.
+  - Display Control ([MS-RDPEDISP]). The server's capabilities give the
+    most monitors and the area of each; the client takes their product,
+    saturated at the 32 Mi pixels a desktop may have, as the area it
+    may ask for. `rdp.Client.RequestSize` clamps a size to 200 to 8,192
+    pixels a side, the width even, and keeps the newest. Once the
+    channel is open and its capabilities have come, the channel writer
+    sends it as a monitor layout of one primary monitor at the origin,
+    its physical size unknown (0) and its scale 100%: a new size at
+    most every half second, as guacd's `GUAC_RDP_DISP_UPDATE_INTERVAL`,
+    and the same size again every two seconds while the desktop
+    differs, at most eight times; a size asked for anew starts its
+    eight again. The desktop's own size and a size beyond the area are
+    not sent. There is no acknowledgement: the server reactivates the
+    session at the new size, which `Run` reports to `Output.Resize` as
+    any reactivation. Closing the channel forgets the capabilities and
+    keeps the size, which goes again when a channel opens.
+  - After a reactivation, the client tells a server it had asked to
+    suppress its output to suppress it again, since the server's output
+    state after Demand Active is its own (phase 1's follow-up).
+  - The backend asks for DRDYNVC, and `Input` queues a `Resize` with
+    both sides above zero, in order with the other input; the writer
+    hands it to `RequestSize`, which keeps the newest and paces it.
+  - `rdptest` speaks DRDYNVC as a server (`rdptest/dynvc.go`): it sends
+    the capabilities of any version, opens and closes channels with
+    ids of one, two and four bytes, sends a message in one Data PDU or
+    in a Data First and Data PDUs, sends Display Control's
+    capabilities, and parses the client's PDUs and monitor layouts.
+- **Tests.** Against `rdptest` over loopback (`internal/rdp/dynvc_test.go`):
+  no `drdynvc` without `Resize`; the version answered for servers of 1
+  to 4; Display Control accepted, and other names and a second Display
+  Control refused; a close answered and Display Control
+  opened again under another id, the size not yet had sent on it;
+  layouts on ids of one, two and four bytes; the first layout waiting
+  for the capabilities, pacing with the newest of three winning, the
+  clamping and the even width, the retries up to eight and then
+  nothing, a size asked for anew sent again, nothing for the desktop's
+  own size or beyond the server's area; reassembly in three PDUs, a
+  message over its bound in one PDU or in several, data for a channel
+  not open, a message longer than declared, compressed data, names
+  without their NUL or too long, version 0 and a length of size code 3;
+  the answers' bound (`TestDynvcAnswersBounded`); the area's saturation
+  (`TestDisplayCapsArea`); and Suppress Output repeated after a
+  reactivation (`TestSuppressOutputAfterReactivation`). The backend's
+  `TestRunResize`: sizes of zero or less ask for nothing, a `Resize`
+  goes as a layout, the server's reactivation resizes the sink, and
+  Suppress Output is repeated after it. Coverage: `internal/rdp` 89.2%
+  of statements, `dynvc.go` 95.0%; `internal/backend/rdp` 98.4%.
+- **Integration test.** Under the `rdp_integration` tag, on 2026-10-31
+  against the bench desktop image's xrdp 0.10.1 with xorgxrdp 0.10.2:
+  the client's `TestIntegrationResize` saw DRDYNVC version 2 and
+  Display Control's capabilities (33,554,432 pixels) and resized the
+  desktop to 1280×720 and 800×600, each drawn to its new edges; the
+  backend's `TestIntegrationResize` resized the sink to 1280×720,
+  800×600 and back to 1024×768, a key painting the probe's swatch at
+  each size. The rest of both packages' integration tests passed with
+  the channel joined.
+- **Mutation checks.** Each was broken in turn, 33 in all, and a test
+  failed for 31; a mutant that no longer compiled was rewritten until
+  it did. Caught:
+  - the answers' bound (`TestDynvcAnswersBounded`; changing the
+    constant survived, since the test uses it, so the check itself was
+    broken instead);
+  - one Display Control at a time, the version answered, the close
+    answered, the state reset on close (`TestDynvcChannels`);
+  - the channel's bound in several PDUs and in one, the length
+    declared, compressed data, the name's bound, size code 3, a
+    truncated static message (`TestDynvcData`,
+    `TestDynvcAnswersBounded`; the bound in one PDU survived until
+    `TestDynvcData` sent such a message);
+  - the area with no monitors (`TestDisplayCapsArea`), the area check,
+    waiting for the capabilities, the desktop's own size, the least
+    width and height, the even width, the greatest height, pacing, the
+    tries' bound, the retry, the earlier of two wake-ups, a size asked
+    for anew (`TestDisplayControl`);
+  - Suppress Output after a reactivation, and the state it is repeated
+    from (`TestSuppressOutputAfterReactivation`);
+  - the backend's width and height, `Resize` asked for, and sizes of
+    zero or less, either side (`TestRunResize`; the width's check
+    survived until a `Resize` of height alone was sent).
+
+  Two survive, both equivalent: refusing an id that is open, which only
+  Display Control could be and which a second Display Control is
+  refused for anyway, kept so that a second handler cannot replace an
+  open channel; and an id from 256 to 65,535 sent in four bytes rather
+  than two, which DRDYNVC allows.
+- **Fuzzing.** `FuzzDynvc` feeds DRDYNVC PDUs and writes what is due
+  after each, checking the answers' and the channels' bounds;
+  `FuzzRun` now joins `drdynvc` beside the clipboard's channel, asks
+  for a size, and has DRDYNVC and reactivation seeds. 60 seconds each
+  with `-fuzzminimizetime 20x`, without a finding: `FuzzDynvc`
+  14,576,219 executions (host load 3 before, 60 after), `FuzzRun`
+  8,299,215 (57, 45).
+- **Decisions made during implementation.**
+  - One layout of one monitor, the primary, at the size asked for:
+    viewers have one canvas.
+  - The size is retried, where guacd sends a layout only when the size
+    changes and keeps no state of the server's answer: xrdp drops a
+    layout while its login is in progress ("Not allowing resize. Login
+    in progress."), which a viewer's first `Resize` usually meets, and
+    then the desktop would keep its size until the viewer resizes
+    again. Eight tries two seconds apart bound it for a server that
+    never applies a size.
+  - At most one dynamic channel is open, so the bound on channels is
+    the one Display Control rather than a count.
+- **Deviations.** From the Task Breakdown: "DRDYNVC with a bounded
+  number of channels" is one channel, Display Control; GFX in phase 3
+  will be the second. From guacd: the retries (above).
+- **Surprises.**
+  - xrdp refuses a layout during its login and says so only in its
+    log; nothing comes back on the channel.
+  - xrdp logs "Physical desktop dimensions (835586x0) are invalid" for
+    each connection: it reads the core data's physical size past the
+    end of the client's block, from the header of the block after it
+    (0x000CC002, the security data's type and length). It then ignores
+    them, so nothing changes; the client's block is as long as its
+    header says.
+  - xrdp logs that a physical size of 0 is out of range for each
+    layout, and uses none, as [MS-RDPEDISP] allows.
+- **Follow-ups.**
+  - The Heartbeat PDU and auto-detect, with #32's Windows host
+    (above).
+  - Display Control against Windows (phase 4), whose sizes and pacing
+    may differ.
+  - GFX over DRDYNVC (phase 3): a handler and a bound of its own, and
+    the version 3 features it may need.

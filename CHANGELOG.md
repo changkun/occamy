@@ -301,8 +301,17 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   `DisableCopy` or `DisablePaste` stops a direction, as guacd's
   `disable-copy` and `disable-paste` do. `rdptest` accepts NLA through
   CredSSP with NTLMv2, so that the backend's NLA path, prompted
-  credentials included, runs end to end in tests. Resize waits for the
-  dynamic channels of the second part.
+  credentials included, runs end to end in tests.
+- The native RDP backend's resize, the second part of its second
+  phase: `internal/rdp` speaks DRDYNVC, version 2 at most, and accepts
+  the Display Control channel, through which `RequestSize` asks the
+  server for a desktop size within the area it takes: the newest size,
+  at most one every half second, and again every two seconds, up to
+  eight times, until the desktop has it, since xrdp ignores a size
+  while its login is in progress. The backend asks for a viewer's
+  `Resize`; a server without Display Control keeps its size, which
+  viewers scale. After a reactivation the client tells a server it had
+  asked to suppress its output to suppress it again.
 
 ### Changed
 
