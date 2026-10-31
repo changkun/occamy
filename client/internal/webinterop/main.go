@@ -5,9 +5,10 @@
 // Command webinterop serves occamyd's stream code over WebSocket to the
 // browser client's interop test (client/occamy-web/src/protocol/
 // interop.test.ts), which runs it, and to the protocol demo page, which
-// runs in a browser by hand. It listens on 127.0.0.1, prints its URL on
-// the first line of stdout, and exits when stdin closes, so that it
-// never outlives the test that started it.
+// runs in a browser by hand. It listens on 127.0.0.1, or another
+// loopback address, prints its URL on the first line of stdout, and
+// exits when stdin closes, so that it never outlives the test that
+// started it; run by hand, it runs in the foreground.
 //
 // Routes, each a stream route of occamyd in miniature that takes the
 // token "interop" in Sec-WebSocket-Protocol and hello in the URL:
@@ -21,7 +22,9 @@
 //	/screen   its framebuffer, RGBA
 //	/cursor   its pointer image, RGBA with straight alpha
 //	/inputs   the input it got
-//	/demands  whether a viewer could see it, as demands came
+//	/log      in the order they happened: "shown" and "hidden" as
+//	          demands came, and "frame N" as its viewer was sent the
+//	          frame-end of frame N
 package main
 
 import (
@@ -62,6 +65,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// The routes take a fixed token, any Origin and any page's fetches.
+	if a, ok := ln.Addr().(*net.TCPAddr); !ok || !a.IP.IsLoopback() {
+		log.Fatalf("%v is not a loopback address", ln.Addr())
+	}
 	// The parent closes stdin, or dies, when it is done with the server.
 	go func() {
 		_, _ = io.Copy(io.Discard, os.Stdin)
@@ -83,11 +90,7 @@ type server struct {
 func newServer(logger *slog.Logger) *server {
 	s := &server{mux: http.NewServeMux(), log: logger}
 	s.mux.HandleFunc("/graphical", func(w http.ResponseWriter, r *http.Request) {
-		d := newDesk()
-		s.mu.Lock()
-		s.desk = d
-		s.mu.Unlock()
-		s.serve(w, r, d)
+		s.serve(w, r, newDesk())
 	})
 	s.mux.HandleFunc("/terminal", func(w http.ResponseWriter, r *http.Request) {
 		s.serve(w, r, backendtest.NewTerminal(80, 24, 0))
@@ -95,7 +98,7 @@ func newServer(logger *slog.Logger) *server {
 	s.mux.HandleFunc("/screen", s.state(func(d *desk) any { return d.screen() }))
 	s.mux.HandleFunc("/cursor", s.state(func(d *desk) any { return d.cursor() }))
 	s.mux.HandleFunc("/inputs", s.state(func(d *desk) any { return d.recorded() }))
-	s.mux.HandleFunc("/demands", s.state(func(d *desk) any { return d.demanded() }))
+	s.mux.HandleFunc("/log", s.state(func(d *desk) any { return d.logged() }))
 	return s
 }
 
@@ -150,13 +153,21 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request, b backend.Backend
 		_ = c.Close(websocket.StatusCode(m.Code), m.Reason)
 		return
 	}
+	cn := conn{c: c}
+	if d, ok := b.(*desk); ok {
+		// The JSON routes show the desktop of the last client let in.
+		s.mu.Lock()
+		s.desk = d
+		s.mu.Unlock()
+		cn.sent = d.sent
+	}
 	sess, owner, err := session.Start(ctx, session.Config{Backend: b, Logger: s.log})
 	if err != nil {
 		_ = c.Close(websocket.StatusInternalError, "")
 		return
 	}
 	defer sess.Close()
-	if err := stream.Serve(ctx, conn{c}, owner, h, stream.Config{SessionID: "interop", Logger: s.log}); err != nil {
+	if err := stream.Serve(ctx, cn, owner, h, stream.Config{SessionID: "interop", Logger: s.log}); err != nil {
 		s.log.Debug("stream ended", "err", err)
 	}
 	_ = c.Close(websocket.StatusNormalClosure, "")
@@ -164,7 +175,10 @@ func (s *server) serve(w http.ResponseWriter, r *http.Request, b backend.Backend
 
 // conn adapts a WebSocket to stream.Conn, as occamyd's handler does: a
 // close from the client ends the reads.
-type conn struct{ c *websocket.Conn }
+type conn struct {
+	c    *websocket.Conn
+	sent func(p []byte) // if set, sees each message before it is written
+}
 
 func (w conn) ReadMessage(ctx context.Context) ([]byte, error) {
 	typ, p, err := w.c.Read(ctx)
@@ -178,6 +192,9 @@ func (w conn) ReadMessage(ctx context.Context) ([]byte, error) {
 }
 
 func (w conn) WriteMessage(ctx context.Context, p []byte) error {
+	if w.sent != nil {
+		w.sent(p)
+	}
 	return w.c.Write(ctx, websocket.MessageBinary, p)
 }
 
@@ -197,10 +214,10 @@ const (
 type desk struct {
 	in chan backend.InputEvent
 
-	mu      sync.Mutex
-	img     *image.RGBA // the screen as painted
-	inputs  []inputJSON
-	demands []bool
+	mu     sync.Mutex
+	img    *image.RGBA // the screen as painted
+	inputs []inputJSON
+	log    []string // what /log reports
 }
 
 var _ backend.Backend = (*desk)(nil)
@@ -225,8 +242,25 @@ func (d *desk) Input(ev backend.InputEvent) error {
 
 func (d *desk) Demand(dm backend.Demand) {
 	d.mu.Lock()
-	d.demands = append(d.demands, dm.Visible)
+	if dm.Visible {
+		d.log = append(d.log, "shown")
+	} else {
+		d.log = append(d.log, "hidden")
+	}
 	d.mu.Unlock()
+}
+
+// sent logs a frame-end its viewer is sent, in order with the demands:
+// the session records a viewer's hiding before the stream's writer can
+// see it, so a frame logged after "hidden" was started after it.
+func (d *desk) sent(p []byte) {
+	if m, err := protocol.Decode(p, protocol.ServerMessages(), protocol.Limits{}); err == nil {
+		if fe, ok := m.(*protocol.FrameEnd); ok {
+			d.mu.Lock()
+			d.log = append(d.log, fmt.Sprintf("frame %d", fe.FrameID))
+			d.mu.Unlock()
+		}
+	}
 }
 
 func (d *desk) Run(ctx context.Context, sink backend.Sink) error {
@@ -412,8 +446,8 @@ func (d *desk) recorded() []inputJSON {
 	return append([]inputJSON{}, d.inputs...)
 }
 
-func (d *desk) demanded() []bool {
+func (d *desk) logged() []string {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return append([]bool{}, d.demands...)
+	return append([]string{}, d.log...)
 }

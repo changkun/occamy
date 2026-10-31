@@ -60,6 +60,7 @@ describe.skipIf(server === '')('interop with occamyd’s stream', { timeout: 30_
     const lines = createInterface({ input: proc.stdout as NodeJS.ReadableStream })
     base = await new Promise<string>((resolve, reject) => {
       lines.once('line', resolve)
+      proc.once('error', reject)
       proc.once('exit', (code) => reject(new Error(`the interop server exited (${code})`)))
     })
     lines.close()
@@ -130,18 +131,22 @@ describe.skipIf(server === '')('interop with occamyd’s stream', { timeout: 30_
       // Node decodes deflate and raw; occamyd's encoder sends more.
       expect(s.capabilities.codecs).toEqual([Codec.Deflate, Codec.Raw])
 
-      // The first frames show the screen, the pointer and the title.
+      // The first frames show the screen, the pointer and the title. A
+      // viewer is first sent the session's state as it is, which may be
+      // from before the desktop set them: no pointer and no title.
       const seen: SessionEvent[] = []
+      const pointer = (): SessionEvent | undefined => seen.findLast((e) => e.type === 'cursor' && e.image !== null)
       await until(s, (ev) => {
         seen.push(ev)
-        return ev.type === 'frame' && seen.some((e) => e.type === 'cursor') ? true : undefined
+        const titled = seen.some((e) => e.type === 'title' && e.title === 'interop')
+        return ev.type === 'frame' && titled && pointer() !== undefined ? true : undefined
       })
       await shows(s)
-      const cursor = seen.find((e) => e.type === 'cursor')
+      const cursor = pointer()
       const want = await get<ImageJSON>('/cursor')
       expect(cursor).toMatchObject({ hotX: want.hotX, hotY: want.hotY, image: { width: want.width, height: want.height } })
       expect(Array.from(cursor?.type === 'cursor' ? (cursor.image?.pixels ?? []) : [])).toEqual(bytes(want.pixels))
-      expect(seen.find((e) => e.type === 'title')).toEqual({ type: 'title', title: 'interop' })
+      expect(seen.filter((e) => e.type === 'title').at(-1)).toEqual({ type: 'title', title: 'interop' })
 
       // A key paints the swatch, in a frame that reports the key.
       const seq = s.key(true, 0x78, 0x1b)
@@ -182,14 +187,29 @@ describe.skipIf(server === '')('interop with occamyd’s stream', { timeout: 30_
       expect(s.size).toEqual({ width: 160, height: 96 })
       await shows(s)
 
-      // A hidden client gets no frames; shown again, it gets the screen.
+      // A hidden client gets no frames; shown again, it gets one frame
+      // of the screen. The server's log orders what it sent and the
+      // demands it took, so this holds without a clock: no frame went
+      // out between hiding and showing, and the frame after showing is
+      // the one after the last before hiding and carries the key the
+      // desktop took while hidden.
+      const log = (): Promise<string[]> => get<string[]>('/log')
+      const frameIds = (entries: string[]): number[] => entries.filter((e) => e.startsWith('frame ')).map((e) => Number(e.slice(6)))
+      const logged = (await log()).length
       s.view(false)
-      await waitFor(async () => (await get<boolean[]>('/demands')).at(-1) === false)
-      s.key(true, 0x79, 0x1c)
+      await waitFor(async () => (await log()).slice(logged).includes('hidden'))
+      const hidden = (await log()).lastIndexOf('hidden')
+      const lastShown = frameIds((await log()).slice(0, hidden)).at(-1) ?? 0
+      const hiddenSeq = s.key(true, 0x79, 0x1c)
       await waitFor(async () => (await get<InputJSON[]>('/inputs')).some((i) => i.keysym === 0x79))
-      await expect(until(s, (ev) => (ev.type === 'frame' ? true : undefined), 300)).rejects.toThrow(/no such event/)
       s.view(true)
-      await until(s, (ev) => (ev.type === 'frame' ? true : undefined))
+      const shown = await until(s, (ev) => (ev.type === 'frame' && ev.id > lastShown ? ev : undefined))
+      expect(shown.id).toBe(lastShown + 1)
+      expect(shown.lastSeq).toBeGreaterThanOrEqual(hiddenSeq)
+      const after = await log()
+      const showing = after.indexOf('shown', hidden)
+      expect(showing).toBeGreaterThan(hidden)
+      expect(frameIds(after.slice(hidden, showing))).toEqual([])
       await shows(s)
       expect(Array.from(s.framebuffer.data.subarray(0, 4))).toEqual(swatch(0x79))
 
