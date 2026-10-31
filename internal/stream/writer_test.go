@@ -999,6 +999,31 @@ func TestStalledAckRestarts(t *testing.T) {
 	})
 }
 
+// Acks of frames the viewer was never sent, far ahead or long behind,
+// do not keep its time from running.
+func TestStalledBogusAcks(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRigConfig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 64, 50e6, time.Millisecond, visible, stallConfig)
+		r.cl.mu.Lock()
+		r.cl.noAcks = true
+		r.cl.mu.Unlock()
+		for range 12 {
+			time.Sleep(stallConfig.ViewerTimeout / 4)
+			synctest.Wait()
+			if _, done := r.servedErr(); done {
+				break
+			}
+			for _, id := range []uint32{1 << 30, 0} {
+				r.cl.send(t, protocol.FrameAck{FrameID: id})
+			}
+		}
+		synctest.Wait()
+		if err, _ := r.servedErr(); !errors.Is(err, ErrStalled) {
+			t.Fatalf("Serve returned %v for a viewer that acknowledges only frames it was not sent; want ErrStalled", err)
+		}
+	})
+}
+
 // A hidden viewer's time runs as a visible one's: hidden, it gets no
 // new frames, but must acknowledge those it was sent; and one that does
 // stays, hidden, for as long as it likes.

@@ -98,6 +98,32 @@ func TestInputBypassesTheInterval(t *testing.T) {
 	}
 }
 
+// TestOldest checks that Oldest is when the oldest frame awaiting an ack
+// ended, the open frame aside.
+func TestOldest(t *testing.T) {
+	p := New(Config{Window: 4})
+	if _, ok := p.Oldest(); ok {
+		t.Error("Oldest with no frame in flight")
+	}
+	send(t, p, t0, 1, 1000)
+	send(t, p, t0.Add(ms(10)), 2, 1000)
+	if ok, _ := p.StartFrame(t0.Add(ms(20))); !ok {
+		t.Fatal("frame 3 could not start")
+	}
+	if at, ok := p.Oldest(); !ok || !at.Equal(t0) {
+		t.Errorf("Oldest %v %v, want frame 1's end, %v", at, ok, t0)
+	}
+	p.Ack(t0.Add(ms(30)), 1, 0)
+	if at, ok := p.Oldest(); !ok || !at.Equal(t0.Add(ms(10))) {
+		t.Errorf("Oldest %v %v after frame 1's ack, want frame 2's end", at, ok)
+	}
+	p.EndFrame(t0.Add(ms(40)), 3)
+	p.Ack(t0.Add(ms(50)), 3, 0)
+	if at, ok := p.Oldest(); ok {
+		t.Errorf("Oldest %v once every frame was acknowledged", at)
+	}
+}
+
 func TestCumulativeAck(t *testing.T) {
 	p := New(Config{Window: 4})
 	for id := uint32(1); id <= 3; id++ {

@@ -494,6 +494,53 @@ func TestLimits(t *testing.T) {
 
 // TestAdhocReserved checks that the server keeps guacd and its own
 // listeners out of an ad-hoc range's reach.
+// classless is a backend of no class, which session.Start refuses, as
+// it would any registry.Open that fails after the backend is made.
+type classless struct{ *backendtest.Terminal }
+
+func (classless) Class() backend.Class { return 0 }
+
+// TestSessionsCapReleased checks that every way out of a session gives
+// its place under limits.sessions back: the session's end, a backend
+// that could not be made, and a session that could not start. One place
+// kept would refuse every session after limits.sessions of them.
+func TestSessionsCapReleased(t *testing.T) {
+	ts, fb := sessionServer(t, func(f *config.File) { f.Limits = config.Limits{Sessions: 1} })
+	alice := ts.token(t, "alice", "ops")
+	for i := range 4 {
+		o := ts.openSession(t, alice, "ops-shell")
+		if r := ts.api(t, http.MethodDelete, "/api/v1/sessions/"+o.ID, alice, ""); r.code != http.StatusNoContent {
+			t.Fatalf("DELETE %d: %d", i, r.code)
+		}
+		waitFor(t, "the place to come back", func() bool {
+			ts.s.mu.Lock()
+			defer ts.s.mu.Unlock()
+			return ts.s.running == 0
+		})
+	}
+	failing := func(what string) {
+		t.Helper()
+		for i := range 3 {
+			if r := ts.api(t, http.MethodPost, "/api/v1/sessions", alice, `{"connection":"ops-shell"}`); r.code != http.StatusInternalServerError {
+				t.Fatalf("%s, %d: %d %s, want 500", what, i, r.code, r.body)
+			}
+		}
+	}
+	fb.mu.Lock()
+	fb.fail = errors.New("no backend")
+	fb.mu.Unlock()
+	failing("a backend that could not be made")
+	fb.mu.Lock()
+	fb.fail = nil
+	fb.mu.Unlock()
+	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
+		return classless{backendtest.NewTerminal(80, 24, 0)}, nil
+	})
+	failing("a session that could not start")
+	ts.s.backends.register("fake", "fake", fb.make)
+	ts.openSession(t, alice, "ops-shell")
+}
+
 // TestConcurrentLimits checks that requests that open sessions at once,
 // over REST and streams, cannot all pass a limit: each counts from its
 // check on.
