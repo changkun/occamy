@@ -7,6 +7,7 @@ package kubernetes_test
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"fmt"
@@ -760,6 +761,32 @@ func TestRedirect(t *testing.T) {
 	}
 	if n := len(other.Requests()); n != 0 {
 		t.Errorf("the redirect was followed: %d requests", n)
+	}
+}
+
+// TestTLSVersion checks that an API server that speaks nothing newer
+// than TLS 1.1 is refused before any request, and so the token, reaches
+// it.
+func TestTLSVersion(t *testing.T) {
+	checkGoroutines(t)
+	s := newServer(t, kubetest.Options{MaxVersion: tls.VersionTLS11})
+	b := newBackend(t, config(s))
+	if err := run(t, b, &backendtest.Sink{}); err == nil || !strings.Contains(err.Error(), "protocol version") {
+		t.Errorf("Run = %v, want TLS 1.1 refused", err)
+	}
+	if n := len(s.Requests()); n != 0 {
+		t.Errorf("%d requests reached a TLS 1.1 server", n)
+	}
+}
+
+// TestNoProxy checks that the API server is dialled directly, whatever
+// HTTPS_PROXY says, so that no proxy from the environment sees where the
+// token goes. A loopback server is never proxied, so the transport is
+// checked instead.
+func TestNoProxy(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://proxy.invalid:3128")
+	if kubernetes.HasProxy(newBackend(t, kubernetes.Config{Addr: "k8s.example.com", Pod: "p"})) {
+		t.Error("the backend's requests may go through a proxy")
 	}
 }
 

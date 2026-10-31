@@ -16,6 +16,9 @@ func SetKeepalive(t *testing.T, d time.Duration) {
 	t.Cleanup(func() { keepalive = old })
 }
 
+// HasProxy reports whether b's requests may go through a proxy.
+func HasProxy(b *Backend) bool { return b.transport.Proxy != nil }
+
 // The bounds, for tests.
 const (
 	MaxMessage = maxMessage

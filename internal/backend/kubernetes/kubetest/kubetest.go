@@ -83,6 +83,9 @@ type Options struct {
 	// Certificate, if set, is the server's in place of httptest's, which
 	// every Server shares.
 	Certificate *tls.Certificate
+	// MaxVersion, if set, is the newest TLS version the server speaks,
+	// and lets it speak TLS 1.0 and 1.1.
+	MaxVersion uint16
 }
 
 // Request is a request that reached the server's handler.
@@ -125,6 +128,10 @@ func NewServer(opts Options) *Server {
 	}
 	if opts.Certificate != nil {
 		s.srv.TLS.Certificates = []tls.Certificate{*opts.Certificate}
+	}
+	if opts.MaxVersion != 0 {
+		// #nosec G402 -- old versions are what the option tests
+		s.srv.TLS.MinVersion, s.srv.TLS.MaxVersion = tls.VersionTLS10, opts.MaxVersion
 	}
 	s.srv.StartTLS()
 	return s
