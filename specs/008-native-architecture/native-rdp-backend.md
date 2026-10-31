@@ -197,7 +197,10 @@ them:
   security mode and nothing has run it against a server that accepts
   it. Registration in the API's backend factory and the switch from
   the bridge then follow the parity gate in
-  [guacd-bridge](guacd-bridge.md), not these phases.
+  [guacd-bridge](guacd-bridge.md), not these phases. (Since the
+  Sessions task of [api-and-server-stack](api-and-server-stack.md),
+  `rdp` connections run on the guacd bridge in that factory,
+  `server/backends.go`; registration replaces that entry.)
 
 ## Affects
 
