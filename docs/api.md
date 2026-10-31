@@ -728,6 +728,12 @@ name or group. A session token or a share is refused.
 | `occamyd` runs `limits.sessions` sessions | 4001 `forbidden`, "occamyd runs as many sessions as it takes" |
 | The session could not be opened for a cause of `occamyd`'s own | 1011 `internal-error` |
 
+A remote that fails at once, such as one whose certificate is not the
+pinned one, or a kubernetes API server that refuses the exec, can end
+the session before `welcome`. The stream then gets `close` 4006
+`backend-failed` without `welcome`, the same `close` it would have had
+after `welcome` ([protocol.md](protocol.md#the-response)).
+
 Once the stream has joined, the session is as one that
 `POST /api/v1/sessions` opened: its owner may leave and come back
 within the owner grace through
