@@ -11,7 +11,7 @@ import { MessageChannel } from 'node:worker_threads'
 import { describe, expect, it } from 'vitest'
 
 import { LocalDecoder, type Port, WorkerDecoder, serveDecoder, streamInflate } from './decode'
-import { Display, MemorySurface, coalesce } from './display'
+import { Display, MemorySurface, coalesce, nextAnimationFrame } from './display'
 import type { Rect, SessionEvent } from './events'
 import { Codec, SessionClass } from './messages'
 import { frameEnd, open, tile } from './testing/server'
@@ -76,6 +76,62 @@ describe('display', () => {
     await display.run()
     expect(drawn).toBe(1)
     expect(surface.presents).toBe(0)
+  })
+
+  describe('waiting for a paint', () => {
+    // A page whose animation frames the test runs, and whose visibility
+    // it sets.
+    function page(hidden: boolean): { doc: EventTarget & { hidden: boolean }; frames: (() => void)[]; restore: () => void } {
+      const g = globalThis as Record<string, unknown>
+      const saved = { document: g.document, requestAnimationFrame: g.requestAnimationFrame }
+      const doc = Object.assign(new EventTarget(), { hidden })
+      const frames: (() => void)[] = []
+      g.document = doc
+      g.requestAnimationFrame = (cb: () => void) => frames.push(cb)
+      return { doc, frames, restore: () => Object.assign(g, saved) }
+    }
+    const settled = async (p: Promise<void>): Promise<boolean> => {
+      let done = false
+      void p.then(() => {
+        done = true
+      })
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      return done
+    }
+
+    it('waits for an animation frame in a page that can be seen', async () => {
+      const { frames, restore } = page(false)
+      try {
+        const p = nextAnimationFrame()
+        expect(await settled(p)).toBe(false)
+        frames.forEach((f) => f())
+        expect(await settled(p)).toBe(true)
+      } finally {
+        restore()
+      }
+    })
+
+    it('does not wait in a hidden page, which gets no animation frames', async () => {
+      const { restore } = page(true)
+      try {
+        expect(await settled(nextAnimationFrame())).toBe(true)
+      } finally {
+        restore()
+      }
+    })
+
+    it('stops waiting when the page hides', async () => {
+      const { doc, restore } = page(false)
+      try {
+        const p = nextAnimationFrame()
+        expect(await settled(p)).toBe(false)
+        doc.hidden = true
+        doc.dispatchEvent(new Event('visibilitychange'))
+        expect(await settled(p)).toBe(true)
+      } finally {
+        restore()
+      }
+    })
   })
 
   it('coalesces many rectangles into their bounding box', () => {

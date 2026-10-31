@@ -118,14 +118,41 @@ export class MemorySurface implements Surface {
   }
 }
 
-/** nextAnimationFrame resolves at the next animation frame, or at once where there are none. */
+/**
+ * nextAnimationFrame resolves at the next animation frame, or at once
+ * where there are none: in a hidden page, which gets none until it
+ * shows again, and where there is no requestAnimationFrame. A page that
+ * hides while it waits stops waiting. Presenting at once in a hidden
+ * page keeps what follows a frame, such as a prompt, the clipboard or
+ * the end, from waiting until the page shows.
+ */
 export function nextAnimationFrame(): Promise<void> {
   if (typeof requestAnimationFrame !== 'function') {
     return Promise.resolve()
   }
-  // The continuation runs in the callback's microtask checkpoint, before
-  // the browser paints.
-  return new Promise((resolve) => requestAnimationFrame(() => resolve()))
+  const doc = typeof document !== 'undefined' ? document : null
+  if (doc?.hidden === true) {
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => {
+    let done = false
+    const finish = (): void => {
+      if (!done) {
+        done = true
+        doc?.removeEventListener('visibilitychange', onChange)
+        resolve()
+      }
+    }
+    const onChange = (): void => {
+      if (doc?.hidden === true) {
+        finish()
+      }
+    }
+    doc?.addEventListener('visibilitychange', onChange)
+    // The continuation runs in the callback's microtask checkpoint,
+    // before the browser paints.
+    requestAnimationFrame(finish)
+  })
 }
 
 export interface DisplayOptions {

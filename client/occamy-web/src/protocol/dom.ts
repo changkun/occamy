@@ -42,11 +42,12 @@ interface KeyEventLike extends Event {
 
 /**
  * bindKeyboard sends the keys pressed while target has focus, and text
- * an input method composed there. A release sends the keysym its press
- * did, whatever the modifiers are by then, and keys still held when the
- * window loses focus are released, so the remote never keeps a key down
- * that the user let go of elsewhere. Keys the remote takes do not reach
- * the page: their default action is prevented.
+ * an input method composed there. A key's repeats and its release send
+ * the keysym its first press did, whatever the modifiers are by then,
+ * and keys still held when the window loses focus are released, so the
+ * remote never keeps a key down that the user let go of elsewhere. Keys
+ * the remote takes do not reach the page: their default action is
+ * prevented.
  */
 export function bindKeyboard(
   target: EventTarget,
@@ -77,13 +78,17 @@ export function bindKeyboard(
     if (ev.isComposing || ev.key === 'Process') {
       return
     }
-    const k = keyOf(ev)
-    if (k.keysym === 0 && k.code === 0) {
-      return
+    const id = ev.code !== '' ? ev.code : ev.key
+    // A repeat is the held key's, even if a modifier changed meanwhile.
+    let k = held.get(id)
+    if (k === undefined) {
+      k = keyOf(ev)
+      if (k.keysym === 0 && k.code === 0) {
+        return
+      }
+      held.set(id, k)
     }
     ev.preventDefault()
-    const id = ev.code !== '' ? ev.code : ev.key
-    held.set(id, k)
     send(true, k)
   }
   const onKeyUp = (e: Event): void => {
@@ -328,14 +333,24 @@ export function bindVisibility(doc: Document, session: Pick<Session, 'view'>, op
 }
 
 /**
+ * MAX_CURSOR_SIDE is the largest cursor image side browsers show:
+ * Chrome and Firefox refuse larger ones, and fall back to the default.
+ */
+export const MAX_CURSOR_SIDE = 128
+
+/**
  * cursorStyle returns a CSS cursor value that shows a cursor event's
  * image with its hot spot, and none for a hidden pointer. Its pixels are
- * straight alpha, as ImageData's are. Browsers refuse cursor images
- * larger than about 128 pixels, and fall back to the default arrow.
+ * straight alpha, as ImageData's are. An image larger than browsers show
+ * is the default arrow, before anything is drawn: a cursor may be as
+ * large as max_texture_size, whose data URL would take long to make.
  */
 export function cursorStyle(image: CursorImage | null, hotX: number, hotY: number): string {
   if (image === null || image.width === 0 || image.height === 0) {
     return 'none'
+  }
+  if (image.width > MAX_CURSOR_SIDE || image.height > MAX_CURSOR_SIDE) {
+    return 'default'
   }
   const canvas = document.createElement('canvas')
   canvas.width = image.width

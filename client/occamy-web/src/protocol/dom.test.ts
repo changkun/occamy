@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { type Box, WheelAccumulator, bindKeyboard, bindPointer, pointerButtons, remotePoint } from './dom'
+import { type Box, MAX_CURSOR_SIDE, WheelAccumulator, bindKeyboard, bindPointer, cursorStyle, pointerButtons, remotePoint } from './dom'
 import { ClosedError } from './errors'
 import { Buttons, WheelMode } from './messages'
 
@@ -40,6 +40,23 @@ class Recorder {
 }
 
 describe('keyboard', () => {
+  it('repeats a key with the keysym of its first press', () => {
+    const target = new EventTarget()
+    const r = new Recorder()
+    bindKeyboard(target, r, { window: new EventTarget() })
+    target.dispatchEvent(key('keydown', 'a', 'KeyA'))
+    // Shift went down while a repeats.
+    const repeat = event('keydown', { key: 'A', code: 'KeyA', location: 0, isComposing: false, repeat: true })
+    target.dispatchEvent(repeat)
+    expect(repeat.defaultPrevented).toBe(true)
+    target.dispatchEvent(key('keyup', 'A', 'KeyA'))
+    expect(r.calls).toEqual([
+      ['key', true, 0x61, 0x04],
+      ['key', true, 0x61, 0x04],
+      ['key', false, 0x61, 0x04],
+    ])
+  })
+
   it('sends presses and releases with the keysym of the press', () => {
     const target = new EventTarget()
     const r = new Recorder()
@@ -225,5 +242,15 @@ describe('wheel', () => {
   it('stays within the wheel message', () => {
     const a = new WheelAccumulator()
     expect(a.add(1e12, -1e12, 0, 1, screen)).toEqual({ dx: 0x7fffffff, dy: -0x80000000, mode: WheelMode.Pixels })
+  })
+})
+
+describe('cursor', () => {
+  it('shows the default arrow for an image larger than browsers show, drawing nothing', () => {
+    // Node has no document: drawing would throw.
+    const image = (w: number, h: number) => ({ width: w, height: h, pixels: new Uint8ClampedArray(4 * w * h) })
+    expect(cursorStyle(image(MAX_CURSOR_SIDE + 1, 1), 0, 0)).toBe('default')
+    expect(cursorStyle(image(1, 4096), 0, 0)).toBe('default')
+    expect(cursorStyle(null, 0, 0)).toBe('none')
   })
 })
