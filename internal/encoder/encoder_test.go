@@ -81,7 +81,7 @@ func TestAgreement(t *testing.T) {
 			t.Errorf("an encoder for %v, want none", codecs)
 		}
 	}
-	if !slices.Equal(Codecs(), []protocol.Codec{webpC, jpegC, deflate, raw}) {
+	if !slices.Equal(Codecs(), []protocol.Codec{webpC, jpegC, deflate, raw, protocol.CodecCached}) {
 		t.Errorf("Codecs() = %v", Codecs())
 	}
 }

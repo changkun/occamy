@@ -11,6 +11,7 @@ import (
 	"image"
 	"io"
 	"log/slog"
+	"slices"
 	"time"
 
 	"changkun.de/x/occamy/internal/backend"
@@ -49,6 +50,11 @@ type Config struct {
 	// NoRefine turns refinement off, and with it motion: nothing goes
 	// at a lower quality than the pacer's for refinement to raise.
 	NoRefine bool
+	// NoCache turns the tile cache off: the server offers neither the
+	// cached codec nor cache slots. Otherwise it offers the slots in
+	// Capabilities, DefaultCacheSlots if zero, and keeps a mirror of the
+	// slots of each client that agrees to both.
+	NoCache bool
 	// Logger receives the stream's log, slog.Default() if nil.
 	Logger *slog.Logger
 	// ViewerTimeout bounds how long a viewer, hidden or not, may leave
@@ -148,6 +154,14 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	if len(cfg.Capabilities.Codecs) == 0 {
 		cfg.Capabilities.Codecs = encoder.Codecs()
 	}
+	switch {
+	case cfg.NoCache:
+		cfg.Capabilities.Codecs = slices.DeleteFunc(slices.Clone(cfg.Capabilities.Codecs),
+			func(c protocol.Codec) bool { return c == protocol.CodecCached })
+		cfg.Capabilities.CacheSlots = 0
+	case cfg.Capabilities.CacheSlots == 0:
+		cfg.Capabilities.CacheSlots = DefaultCacheSlots
+	}
 	if cfg.Capabilities.Terminal == 0 {
 		cfg.Capabilities.Terminal = 1
 	}
@@ -204,6 +218,9 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	w := newWriter(c, v, pacer.New(pc), enc, limits, cfg.Logger)
 	if w.fb != nil && !cfg.NoScroll {
 		w.sc = &scroller{}
+	}
+	if w.fb != nil && slices.Contains(agreed.Codecs, protocol.CodecCached) {
+		w.cache = newTileCache(int(agreed.CacheSlots))
 	}
 	switch {
 	case cfg.NoRefine:

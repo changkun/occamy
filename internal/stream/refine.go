@@ -74,8 +74,12 @@ func (w *writer) quality(t int) uint8 {
 
 // drawn records that the message in w.buf, of tiles whose pixels are in
 // w.tiles from w.msgK on, was written: the client has them at quality q,
-// to be refined to goal.
+// to be refined to goal, and has stored the tile in w.msgSlot, if any.
 func (w *writer) drawn(tiles []int, q, goal uint8) {
+	if w.msgSlot != 0 {
+		w.cache.store(w.msgSlot, w.msgKey)
+		w.msgSlot = 0
+	}
 	for k, t := range tiles {
 		if w.sc != nil {
 			// The shadow takes the buffers the pixels were read into,
@@ -225,9 +229,13 @@ func (w *writer) refineTile(id uint32, t int) (send, ok bool) {
 		return false, true
 	}
 	w.runVersion = append(w.runVersion[:0], version)
-	w.msgK = 0
-	b, codec, lossy := w.enc.Tile(w.payload[:0], w.tiles[0], r.Dx(), r.Dy(), false)
+	w.msgK, w.msgSlot = 0, 0
 	w.msgQuality, w.msgGoal = lossless, lossless
+	key, keyed := w.cache.key(w.tiles[0], r)
+	if w.cached(id, r, key, keyed) {
+		return true, true
+	}
+	b, codec, lossy := w.enc.Tile(w.payload[:0], w.tiles[0], r.Dx(), r.Dy(), false)
 	if lossy {
 		q := w.p.Quality()
 		var got int
@@ -248,7 +256,8 @@ func (w *writer) refineTile(id uint32, t int) (send, ok bool) {
 		}
 		return false, true
 	}
-	w.message(id, r, codec)
+	w.storeIn(key, keyed, codec)
+	w.message(id, r, codec, w.msgSlot)
 	if w.limits.CheckSize(len(w.buf)) != nil {
 		w.goal[t] = have
 		return false, true

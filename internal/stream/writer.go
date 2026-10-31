@@ -102,6 +102,14 @@ type writer struct {
 	// the quality they are to reach, for refinement (refine.go).
 	msgQuality, msgGoal uint8
 
+	// cache mirrors the client's tile cache (cache.go), nil without one.
+	// msgSlot is the slot the message in buf stores its tile in, 0 for
+	// none, and msgKey the tile's content: the mirror takes it once the
+	// message is written.
+	cache   *tileCache
+	msgSlot uint16
+	msgKey  cacheKey
+
 	// Refinement (refine.go). heat is each tile's motion as of heatAt;
 	// changed is when each tile last went out changed, since start; goal
 	// is the quality each tile's pixels are to reach on the client, 0
