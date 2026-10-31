@@ -1057,7 +1057,7 @@ RDP's guacd path, RDP no longer needs guacd at all.
     left empty is split the same way.
   - `occamyd` warns when it loads the file, by protocol and for vnc as
     for rdp, of the `guacd.params` that no session reads: those of a
-    protocol none of whose connections sets `backend: guacd`, except the
+    protocol none of whose connections goes through guacd, except the
     display's when its ad-hoc targets go through guacd, and none with
     `legacy_v0`. A file written for guacd, with `disable-copy` or
     `recording-path`, would otherwise lose them unnoticed when its

@@ -259,10 +259,10 @@ connections that set `backend: guacd`. `ssh` connections always use
 default (see [backends](#backends)), so `guacd.params.vnc` and
 `guacd.params.rdp` apply only to connections with `backend: guacd`.
 `occamyd` warns when it starts of each protocol's parameters that no
-session reads: those of a protocol none of whose connections sets
-`backend: guacd`, unless its ad-hoc targets go through guacd and the
-parameters are the display's, which they take. With `legacy_v0`, the v0
-routes read them all.
+session reads: those of a protocol none of whose connections goes
+through guacd, unless its ad-hoc targets do and the parameters are the
+display's, which they take. With `legacy_v0`, the v0 routes read them
+all.
 For `rdp` through guacd, `occamyd` passes `disable-gfx: "true"` unless
 `guacd.params.rdp` sets it: through RDP's graphics pipeline, xrdp's
 colours reached guacd shifted.

@@ -248,8 +248,8 @@ func TestLoadWarnings(t *testing.T) {
 			Guacd:       config.Guacd{Params: params},
 			Connections: []config.Connection{conn("a", "rdp", ""), conn("b", "vnc", "native"), conn("c", "ssh", "")},
 		}, []string{
-			"guacd.params.rdp sets color-depth, disable-copy, recording-path, which no session reads: no rdp connection sets backend: guacd",
-			"guacd.params.vnc sets disable-paste, which no session reads: no vnc connection sets backend: guacd",
+			"guacd.params.rdp sets color-depth, disable-copy, recording-path, which no session reads: no rdp connection goes through guacd",
+			"guacd.params.vnc sets disable-paste, which no session reads: no vnc connection goes through guacd",
 		}},
 		{"guacd fallbacks", config.File{
 			Guacd:       config.Guacd{Params: params},
@@ -264,7 +264,7 @@ func TestLoadWarnings(t *testing.T) {
 			AllowAdhocTargets: true,
 			AdhocBackends:     map[string]string{"rdp": "guacd", "vnc": "native"},
 		}, []string{
-			"guacd.params.rdp sets disable-copy, recording-path, which no session reads: no rdp connection sets backend: guacd, and ad-hoc rdp targets take only the display's parameters",
+			"guacd.params.rdp sets disable-copy, recording-path, which no session reads: no rdp connection goes through guacd, and ad-hoc rdp targets take only the display's parameters",
 			"guacd.params.vnc sets disable-paste,",
 		}},
 		{"ad-hoc targets off", config.File{

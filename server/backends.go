@@ -297,7 +297,7 @@ func newBridge(g config.Guacd, protocol string) func(target, screen) (backend.Ba
 //
 // One warning names, per protocol, the guacd.params that no session
 // reads, since the native backends read none of them. That happens when
-// no connection of that protocol sets backend: guacd, and ad-hoc targets
+// no connection of that protocol goes through guacd, and ad-hoc targets
 // of that protocol either do not go through guacd or take only the
 // display's parameters. A file written for guacd, with disable-copy or
 // recording-path, would otherwise lose them unnoticed when its
@@ -325,7 +325,7 @@ func loadWarnings(f *config.File) []string {
 		if len(unused) == 0 {
 			continue
 		}
-		why := fmt.Sprintf("no %s connection sets backend: guacd", p)
+		why := fmt.Sprintf("no %s connection goes through guacd", p)
 		if adhoc {
 			why += fmt.Sprintf(", and ad-hoc %s targets take only the display's parameters", p)
 		}
