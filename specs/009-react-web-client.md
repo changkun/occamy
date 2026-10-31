@@ -381,15 +381,18 @@ Settled on 2026-10-31.
     kept in `sessionStorage` across single sign-on), `owner.ts` (End:
     for the user who opened the session, its stream, then `DELETE`; for
     an End that resumed after a sign-in, or another user's token,
-    `DELETE` with the stream open, as occamyd decides, the stream's 4002
-    counting for ended ahead of a 404), `controller.ts` (one stream:
+    `DELETE` with the stream open, as occamyd decides, the stream closed
+    for the session's end counting for ended ahead of a 404, and the
+    user who opened the session named only while the stream is open),
+    `controller.ts` (one stream:
     connect with the page's size and visibility, run the core's
     `Display`, bind input by role, keep what the page shows as an
     immutable state for `useSyncExternalStore`, with the close code the
     stream ended with),
     `ending.ts` (a close code and reason, or a failure to connect, as a
     title, a sentence, the technical detail and what to offer: join
-    again, or sign in), `roles.ts`, `layout.ts` and `text.ts` (clipping
+    again, or sign in; and the close codes that say a session has ended
+    for everyone), `roles.ts`, `layout.ts` and `text.ts` (clipping
     the server's strings, with control and bidi characters dropped).
   - `src/views`: sign-in (a password, and single sign-on where
     `GET /api/v1/auth/oidc/login` without a challenge answers 400),
@@ -447,7 +450,7 @@ Settled on 2026-10-31.
   - New: terminal sessions, the clipboard, credential prompts, sharing,
     viewers, visibility, the remote's cursor and title, the bell, and
     why a session ended.
-- **Tests:** 166 in `src/lib` and `src/views`, in the `web` job. Unit
+- **Tests:** 189 in `src/lib` and `src/views`, in the `web` job. Unit
   tests for the API calls against a scripted fetch (each request's
   method, path, headers and exact body, and the time limit on the
   answer and its body), the identity a token names, PKCE against RFC
@@ -460,19 +463,25 @@ Settled on 2026-10-31.
   leave of a view that is gone), End (nothing sent or closed with an
   expired token, the owner told when it fails, the stream left open and
   the session's owner named when occamyd refuses an End that resumed or
-  another user's, the stream's 4002 counting for ended ahead of a 404,
-  alice refused as bob and then ending her session, and a user linked
-  to single sign-on ending theirs), layout, roles,
-  clipping, the ending of every close code and of a takeover, and the
+  another user's, but not without a stream open, as the session may
+  have ended, the stream closed for the session's end counting for ended
+  ahead of a 404, alice refused as bob and then ending her session, and
+  a user linked to single sign-on ending theirs), layout, roles,
+  clipping, the ending of every close code and of a takeover, the close
+  codes that end a session, held to occamyd's `closeFor`, and the
   prompt's markup, rendered without a DOM. The session view, the share
   panel and the shell run in happy-dom under StrictMode: an owner's
   action and a share that waited for a sign-in are taken once, a share
-  that occamyd refuses says so, End shows that it waits for occamyd and
-  says when occamyd did not answer,
-  an End that resumed for another user says whose the session is and
-  ends once the owner signs in, over the view or after single sign-on
-  came back as someone else, with the owner taken from the stream's
-  welcome, and the stream's 4002 replaces what End said before. The
+  that occamyd refuses says so, End shows that it waits for occamyd,
+  takes no second End meanwhile, from the toolbar or the credential
+  prompt, and says when occamyd did not answer,
+  an End that resumed for another user says whose the session is, or,
+  with no stream open, that it may have ended, and ends once the owner
+  signs in, over the view or after single sign-on came back as someone
+  else, with the owner taken from the stream's welcome, and each close
+  for the session's end, 4002 to 4006 and 1001, before or during a
+  resumed End counts for the session ended and replaces what End said
+  before, while 1011 and 4001 do not. The
   controller runs against a stand-in `connect` and session (the
   hello's size and visibility, clamping, refusals, React's development
   effects cancelling an open, close cancelling one, the owner's resize
@@ -510,10 +519,11 @@ Settled on 2026-10-31.
     once in the dialog over the session and once through single
     sign-on, its identity provider stood in for over the DevTools
     protocol's Fetch domain with a token occamyd issued to that user:
-    occamyd answered the `DELETE` with 404, and the page said who
-    signed in and whose the session is while the session ran on for the
-    viewer, over the view that kept streaming and over the view that
-    opened on the page's return; signing in as the owner from there
+    occamyd answered the `DELETE` with 404 while the session ran on for
+    the viewer, and the page said who signed in and whose the session
+    is over the view that kept streaming, and, over the view that opened
+    on the page's return, whose stream occamyd refused, that the session
+    had ended or was the owner's; signing in as the owner from there
     sent a `DELETE` that occamyd answered with 204, and the viewer was
     told the session ended. No page broke the Content-Security-Policy.
     The console showed only the browser's failed-resource lines for
@@ -550,10 +560,16 @@ Settled on 2026-10-31.
     for whoever signs in, and occamyd decides whether the session is
     theirs. A resumed End sends `DELETE` with the stream still open and
     closes it once occamyd has ended the session; a resumed share is a
-    `POST` whose 404 is reported. occamyd answers 404 for a session that
-    is not the caller's, so for End a 404 then says who signed in and
-    who opened the session, with Sign in to try as the owner, rather
-    than that the session ended while it ran on. End pressed by the user
+    `POST`, sent once the stream is open, whose 404 is reported. The
+    view that opens after single sign-on came back as another user
+    sends none: occamyd refuses its stream with 4001, as it does a
+    session that is not the user's, so the share never finds the stream
+    open, and the view says why the stream ended. occamyd answers 404
+    for a session that is not the caller's, so for End a 404 then says
+    who signed in and who opened the session, with Sign in to try as the
+    owner, rather than that the session ended while it ran on; without
+    a stream open, which alone says that the session runs on, it says
+    that the session has ended or is the owner's. End pressed by the user
     who opened the session closes the stream first and takes a 404 for
     ended; End pressed by another user, signed in over the view, goes
     as a resumed one. The user who opened the session is the one
@@ -566,9 +582,21 @@ Settled on 2026-10-31.
     `link_static_users` links the two, whose sessions are then one
     user's (server/oidc.go, server/identity.go), so comparing `idp` too
     could only refuse a linked user wrongly. occamyd closes a session's
-    streams with 4002 once it is ended for everyone, so that close
-    counts as ended ahead of a 404, as when a `DELETE` whose answer was
-    lost had ended it, and replaces what End said before. A failed End
+    streams once it has ended for everyone with the code of its end, as
+    `closeFor` (internal/stream/serve.go) says: 4002 closed, 4003 owner
+    left, 4004 idle, 4005 remote ended, 4006 backend failed and 1001
+    shutdown, which ends every session. Each counts as ended ahead of a
+    404, as when a `DELETE` whose answer was lost had ended it, and
+    replaces what End said before. 1011 does not, though `closeFor`
+    sends it for a session that failed on its own, since occamyd also
+    closes a single stream with it, one whose reader panicked or that
+    it failed to serve, while the session runs on; a 404 after it finds
+    no stream open, and so says the session may have ended. Nor does
+    4001, which refuses a session that has ended and one that is not
+    the user's alike. While End waits for occamyd, the toolbar's End is
+    disabled and the credential prompt's End does nothing, so that a
+    second End neither sends another `DELETE` nor closes the stream
+    before occamyd answers the first. A failed End
     with the stream open says the session runs on, with its viewers,
     rather than speaking of the owner's minute of grace, which does not
     run while the stream is open.
