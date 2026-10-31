@@ -6,6 +6,7 @@ package config
 
 import (
 	"bytes"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -28,6 +29,18 @@ const (
 	DefaultOIDCSubjectClaim    = "sub"
 )
 
+// Default limits, filled in by ParseV1 and by Limits.WithDefaults.
+const (
+	DefaultSessions          = 1000
+	DefaultSessionsPerUser   = 10
+	DefaultViewersPerSession = 50
+	DefaultSharesPerSession  = 100
+)
+
+// DefaultViewerTimeout is streams.viewer_timeout's default, filled in
+// by ParseV1 and by Streams.WithDefaults.
+const DefaultViewerTimeout = 30 * time.Second
+
 // DefaultOIDCScopes are the scopes requested when oidc.scopes is empty.
 var DefaultOIDCScopes = []string{"openid", "profile", "email"}
 
@@ -47,6 +60,59 @@ type File struct {
 	Connections       []Connection `yaml:"connections"`
 	AllowAdhocTargets bool         `yaml:"allow_adhoc_targets"`
 	AdhocAllowlist    []string     `yaml:"adhoc_allowlist"`
+	Limits            Limits       `yaml:"limits"`
+	Streams           Streams      `yaml:"streams"`
+}
+
+// Streams bounds what occamyd keeps for one viewer.
+type Streams struct {
+	// ViewerTimeout is how long a viewer, hidden or not, may leave the
+	// frames it was sent unacknowledged, or one write to it blocked,
+	// before occamyd drops it with close too-slow. Each viewer holds the
+	// screen it was last sent, which a viewer that stalls would keep for
+	// as long as it stayed connected. Zero is the default.
+	ViewerTimeout time.Duration `yaml:"viewer_timeout"`
+}
+
+// WithDefaults returns s with the defaults in place of zero.
+func (s Streams) WithDefaults() Streams {
+	if s.ViewerTimeout == 0 {
+		s.ViewerTimeout = DefaultViewerTimeout
+	}
+	return s
+}
+
+// Limits bound what one user or one session holds, so that no user takes
+// what the others need. Zero is the default.
+type Limits struct {
+	// Sessions is the most sessions occamyd runs at once, whoever owns
+	// them: a trusted issuer can name new users without end, and each
+	// has SessionsPerUser of its own.
+	Sessions int `yaml:"sessions"`
+	// SessionsPerUser is the most sessions one user owns at once.
+	SessionsPerUser int `yaml:"sessions_per_user"`
+	// ViewersPerSession is the most viewers a session takes besides its
+	// owner, who can always join.
+	ViewersPerSession int `yaml:"viewers_per_session"`
+	// SharesPerSession is the most unexpired shares a session has.
+	SharesPerSession int `yaml:"shares_per_session"`
+}
+
+// WithDefaults returns l with the defaults in place of zero.
+func (l Limits) WithDefaults() Limits {
+	if l.Sessions == 0 {
+		l.Sessions = DefaultSessions
+	}
+	if l.SessionsPerUser == 0 {
+		l.SessionsPerUser = DefaultSessionsPerUser
+	}
+	if l.ViewersPerSession == 0 {
+		l.ViewersPerSession = DefaultViewersPerSession
+	}
+	if l.SharesPerSession == 0 {
+		l.SharesPerSession = DefaultSharesPerSession
+	}
+	return l
 }
 
 // TLS names the certificate and key files. occamyd terminates TLS when
@@ -71,10 +137,21 @@ type Auth struct {
 }
 
 // TrustedIssuer is a third party, such as a gateway, whose tokens occamyd
-// accepts.
+// accepts. Its users are its own: a subject it names is another user than
+// a static user or another issuer's user of the same name.
 type TrustedIssuer struct {
 	Issuer        string `yaml:"issuer"`
 	PublicKeyFile string `yaml:"public_key_file"`
+	// LinkStaticUsers lets a subject of the issuer that names a static
+	// user act as that user. Off, the issuer's tokens for such a subject
+	// are refused, since a name belongs to one source unless the file
+	// links them.
+	LinkStaticUsers bool `yaml:"link_static_users"`
+	// AllowedGroups are the groups the issuer's tokens may claim in
+	// groups. The others are dropped: an issuer's groups are its own say
+	// only where the file grants it, since a group in an allow list
+	// opens a connection, stored credentials and all. None by default.
+	AllowedGroups []string `yaml:"allowed_groups"`
 }
 
 // User is a static user who signs in with a password.
@@ -112,12 +189,72 @@ type OIDC struct {
 
 // Connection is an entry of the connection registry.
 type Connection struct {
-	ID          string      `yaml:"id"`
-	Name        string      `yaml:"name"`
-	Protocol    string      `yaml:"protocol"`
-	Target      string      `yaml:"target"`
-	Credentials Credentials `yaml:"credentials"`
-	Allow       Allow       `yaml:"allow"`
+	ID       string `yaml:"id"`
+	Name     string `yaml:"name"`
+	Protocol string `yaml:"protocol"`
+	Target   string `yaml:"target"`
+	// HostKeys are the host keys an ssh target may present, each a public
+	// key in authorized_keys format or a SHA-256 fingerprint as
+	// ssh-keygen -l prints it. An ssh connection has HostKeys or
+	// InsecureIgnoreHostKey, and other protocols neither.
+	HostKeys []string `yaml:"host_keys"`
+	// InsecureIgnoreHostKey accepts any host key from an ssh target, with
+	// a warning, for demos.
+	InsecureIgnoreHostKey bool `yaml:"insecure_ignore_host_key"`
+	// TLS is the certificate policy of a vnc target's VeNCrypt. Other
+	// protocols have none.
+	TLS         ConnectionTLS `yaml:"tls"`
+	Credentials Credentials   `yaml:"credentials"`
+	Allow       Allow         `yaml:"allow"`
+}
+
+// ConnectionTLS is the policy for the certificate that a vnc target
+// presents when VeNCrypt runs TLS, which the native VNC backend prefers
+// whenever a server offers it. By default the certificate must chain to
+// the system's roots and name the target's host.
+type ConnectionTLS struct {
+	// Require refuses a server that does not offer VeNCrypt with a
+	// certificate, so that nobody on the way can strip it from the
+	// security types the server offers. CAFile and Pins imply it.
+	Require bool `yaml:"require"`
+	// ServerName is the name the certificate must carry, if not the
+	// target's host.
+	ServerName string `yaml:"server_name"`
+	// CAFile holds the PEM certificates of the CAs that replace the
+	// system's roots, as for a private CA. It is read when a session
+	// starts.
+	CAFile string `yaml:"ca_file"`
+	// Pins are the certificates accepted as they are, as an ssh
+	// connection's host keys are: each a certificate in PEM or its
+	// SHA-256 fingerprint, in hex as openssl x509 -fingerprint -sha256
+	// prints it or in base64 after "SHA256:". They replace the roots, so
+	// CAFile is not set with them.
+	Pins []string `yaml:"pins"`
+	// InsecureSkipVerify accepts any certificate that is not pinned, and
+	// logs a warning with its fingerprint. For demos.
+	InsecureSkipVerify bool `yaml:"insecure_skip_verify"`
+}
+
+// set reports whether any of t's keys is set.
+func (t ConnectionTLS) set() bool {
+	return t.Require || t.ServerName != "" || t.CAFile != "" || len(t.Pins) > 0 || t.InsecureSkipVerify
+}
+
+// RootCAs reads the certificates in CAFile, and returns nil, for the
+// system's roots, if it is not set.
+func (t ConnectionTLS) RootCAs() (*x509.CertPool, error) {
+	if t.CAFile == "" {
+		return nil, nil
+	}
+	b, err := os.ReadFile(t.CAFile) // #nosec G304 -- the path comes from the operator's configuration
+	if err != nil {
+		return nil, err
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(b) {
+		return nil, fmt.Errorf("%s holds no PEM certificate", t.CAFile)
+	}
+	return pool, nil
 }
 
 // Credentials say how occamyd authenticates to a connection's target.

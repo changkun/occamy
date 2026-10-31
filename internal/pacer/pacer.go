@@ -437,6 +437,15 @@ func (p *Pacer) Quality() int { return p.quality }
 // configured minimum, or the viewer's decode time if that is longer.
 func (p *Pacer) Interval() time.Duration { return max(p.cfg.MinInterval, p.decode) }
 
+// Oldest reports when the oldest frame awaiting an ack ended, or false
+// if none does. The open frame does not count.
+func (p *Pacer) Oldest() (time.Time, bool) {
+	if len(p.inflight) == 0 {
+		return time.Time{}, false
+	}
+	return p.inflight[0].end, true
+}
+
 // InFlight reports the frames and bytes awaiting an ack, including the
 // open frame.
 func (p *Pacer) InFlight() (frames, bytes int) {

@@ -164,6 +164,18 @@ func TestViewersSeeEachOther(t *testing.T) {
 		if p := v.Take(); len(p.Joined) != 1 || p.Joined[0].Role != session.RoleOwner {
 			t.Errorf("new viewer saw %v, want the owner", p.Joined)
 		}
+		// The owner comes first in the list, also after it rejoins.
+		owner.Leave()
+		back, err := s.Join(session.RoleOwner)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := []session.ViewerInfo{{ID: back.ID(), Role: session.RoleOwner}, {ID: v.ID(), Role: session.RoleViewer}}
+		if got := s.Viewers(); !slices.Equal(got, want) {
+			t.Errorf("Viewers() = %v, want %v", got, want)
+		}
+		owner = back
+		owner.Take()
 		v.Leave()
 		if p := owner.Take(); len(p.Left) != 1 || p.Left[0] != v.ID() {
 			t.Errorf("owner saw leaves %v", p.Left)
@@ -232,6 +244,43 @@ func TestIdleTimeout(t *testing.T) {
 		if got := ended(t, s); got.Reason != session.Idle {
 			t.Errorf("ended for %v, want idle", got.Reason)
 		}
+	})
+}
+
+// panicsInRun is a backend whose Run panics, as a backend's bug would.
+type panicsInRun struct{ echoing }
+
+func (*panicsInRun) Run(context.Context, backend.Sink) error { panic("the backend's bug") }
+
+// A backend's panic, in Run or on an input a client sent, ends the
+// session with Internal and the panic, rather than crashing occamyd, and
+// the input's caller learns that the session ended.
+func TestBackendPanics(t *testing.T) {
+	internal := func(t *testing.T, s *session.Session, value any) {
+		t.Helper()
+		got := ended(t, s)
+		var p session.PanicError
+		if got.Reason != session.Internal || !errors.As(got.Err, &p) || p.Value != value || len(p.Stack) == 0 {
+			t.Errorf("ended with %+v, want Internal with the panic %q", got, value)
+		}
+	}
+	synctest.Test(t, func(t *testing.T) {
+		s, owner := start(t, session.Config{Backend: &panicsInRun{}})
+		synctest.Wait()
+		internal(t, s, "the backend's bug")
+		if p := owner.Take(); p.End == nil || p.End.Reason != session.Internal {
+			t.Errorf("owner told %+v", p.End)
+		}
+	})
+	synctest.Test(t, func(t *testing.T) {
+		s, owner := start(t, session.Config{Backend: &echoing{seen: func() { panic("an input's bug") }}})
+		synctest.Wait()
+		owner.Take()
+		if err := owner.Input(1, backend.Key{Down: true}); !errors.Is(err, session.ErrEnded) {
+			t.Errorf("Input that panicked: %v, want ErrEnded", err)
+		}
+		synctest.Wait()
+		internal(t, s, "an input's bug")
 	})
 }
 
@@ -653,6 +702,32 @@ func TestTerminalReplies(t *testing.T) {
 		}
 		if _, clock := owner.LastInput(); clock == 0 || clock >= screen.Version {
 			t.Errorf("input clock %d, screen version %d; want the input before the echo", clock, screen.Version)
+		}
+	})
+}
+
+// A session takes at most MaxViewers viewers besides its owner, who can
+// always join.
+func TestViewerLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, owner := start(t, session.Config{Backend: backendtest.NewScreen(64, 48, 0), MaxViewers: 2})
+		a, err := s.Join(session.RoleViewer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Join(session.RoleReadOnly); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Join(session.RoleViewer); !errors.Is(err, session.ErrViewerLimit) {
+			t.Errorf("a third viewer: %v, want ErrViewerLimit", err)
+		}
+		owner.Leave()
+		if _, err := s.Join(session.RoleOwner); err != nil {
+			t.Errorf("the owner beside a full session: %v", err)
+		}
+		a.Leave()
+		if _, err := s.Join(session.RoleViewer); err != nil {
+			t.Errorf("a viewer after one left: %v", err)
 		}
 	})
 }

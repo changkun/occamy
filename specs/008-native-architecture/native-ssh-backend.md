@@ -182,7 +182,11 @@ need guacd.
   feed it yet. Predicted echo, which belongs to the clients, is not
   built. Nothing wires the backend into `occamyd` yet: the registry
   entry and its credential reference come with
-  [api-and-server-stack](api-and-server-stack.md).
+  [api-and-server-stack](api-and-server-stack.md). (Done by its
+  Sessions task: `ssh` connections and ad-hoc targets use this backend,
+  with `host_keys` or `insecure_ignore_host_key` from the connection,
+  and a prompting connection without a user name asks the owner for
+  one before it dials.)
 - **What was built.** `Config`, `New` and `Backend`. Run dials with the
   context, checks the host key, authenticates, requests a PTY, starts a
   shell, reports the size with `Sink.Resize`, and copies stdout and
@@ -270,7 +274,9 @@ need guacd.
     to `internal/terminal`, gives the emulator's answers back to the
     backend as terminal input, and sends viewers its diffs
     ([session-core](session-core.md), Implementation notes: terminal
-    frames).
+    frames). The API's Sessions task registers it (done); `TERM` stays
+    the backend's `xterm-256color`, since connections have no `term`
+    key yet.
 
 ## Implementation notes: terminal state
 

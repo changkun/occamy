@@ -538,7 +538,9 @@ Done on 2026-10-30.
   it serves protocol v1, so vpx and jpegn are not yet in its binary or
   in the release archives' `THIRD_PARTY_LICENSES`, and a check of `.`
   would not see them. The image ships their notices already, copied from
-  the module cache in the build stage.
+  the module cache in the build stage. (The Sessions and Streams tasks,
+  #111, serve protocol v1 with this encoder, so occamyd links them now,
+  and `scripts/third-party-licenses.sh` lists them.)
 
 **Measured encode times.**
 

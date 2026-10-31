@@ -170,7 +170,7 @@ Settled on 2026-10-30, following the recommendations above.
 | Interpreter additions | `internal/guacamole`: the `cursor` instruction (hotspot and image from a layer region) exposed as a cursor change, and access to the composited display by rectangle for copying out | — |
 | Bridge backend | `internal/backend/guacd`: a `Backend` of class graphical over `internal/guacd`. Instructions apply to the display; at each `sync` the damage is copied into the sink (`Lock` and `Unlock` per damaged rectangle) and the `sync` is answered, so guacd paces against the bridge alone. `size` of the default layer becomes `Resize`, `cursor` becomes `Cursor`, `name` becomes `Title`, clipboard streams become `Clipboard`, `required` becomes a `Prompt` whose answers go back as `argv` streams, `error` ends `Run` with the status, and `disconnect` ends it cleanly. Input translates to `key`, `mouse` (button mask, and wheel as buttons 4 and 5 pressed and released), keysyms for `Text`, a `clipboard` stream, and `size`. Writes to guacd are serialised. Tests against a scripted guacd on `net.Pipe` | Interpreter additions; session-core Backend interface |
 | Conformance corpus | Instruction streams recorded from guacd 1.6's VNC, RDP and SSH plugins on the bench stack (the bench desktop over VNC and RDP, the demo SSH server; logging in, typing, scrolling, moving a window, resizing), replayed through the bridge in tests: no unsupported operation, no error, the idle screen at checkpoints, and the final frame's hash pinned | Bridge backend |
-| Registration | The bridge registered in the API's backend factory for `vnc` and `rdp`, and for `telnet` and `kubernetes` behind an opt-in, with guacd parameters from the configuration under the connection's | Bridge backend; API Sessions |
+| Registration | The bridge registered in the API's backend factory for `vnc` and `rdp`, and for `telnet` and `kubernetes` behind an opt-in, with guacd parameters from the configuration under the connection's (built for `rdp` and `telnet`; see Implementation notes: registration) | Bridge backend; API Sessions |
 
 The soak and performance gates run per protocol when a native backend
 asks to replace the bridge, not as tasks here.
@@ -292,7 +292,8 @@ do not).
 ## Implementation notes: conformance corpus
 
 - **Status.** The conformance corpus is done (#104). Registration is
-  the last task, so the spec stays validated.
+  the last task, so the spec stays validated. (2026-10-30: see
+  Implementation notes: registration.)
 - **What it is** (`internal/backend/guacd/testdata/conformance`): one
   recording per protocol, each a `<name>.guac.gz` (every byte guacd sent
   the bridge, cut after the last complete `sync`, gzipped) and a
@@ -498,7 +499,8 @@ do not).
 - **Follow-ups.**
   - Registration decides whether the bridge passes `disable-gfx` for
     RDP by default, trading the graphics pipeline's bandwidth for exact
-    colours (see Surprises).
+    colours (see Surprises). Decided: it does, unless
+    `guacd.params.rdp` sets it.
   - Recordings are real time, so recording again pins other frames and
     other hashes. Record again when guacd's version changes.
   - JPEG decoding is unmeasured. libjpeg-turbo interpolates chroma by
@@ -506,3 +508,27 @@ do not).
     default is to be checked. A recording with WebP not announced would
     give the images to compare.
   - The corpus has no clipboard, audio, telnet or Kubernetes sessions.
+
+## Implementation notes: registration
+
+- **Status.** Done by the Sessions task of
+  [api-and-server-stack](api-and-server-stack.md), except the bridge for
+  VNC and for Kubernetes, below. Every task of the breakdown is built;
+  the parity gate runs per protocol, not as a task.
+- **What was done.** The API's backend factory makes the bridge for
+  `rdp` and `telnet` connections and ad-hoc targets, at guacd's
+  `guacd.address`, with `guacd.params.<protocol>` under the target's
+  `hostname` and `port`, the connection's user name and its stored
+  password. RDP gets `disable-gfx: "true"` unless the configuration sets
+  it (see the follow-up above). The owner's `hello` sizes the screen,
+  each side capped at 8192.
+- **Deviations.**
+  - `vnc` goes to the native backend by default, ahead of the parity
+    gate's opt-in period, and no configuration key (`backend:`) picks the
+    bridge for it yet, so a v1 file cannot serve VNC through guacd.
+  - telnet needs no opt-in beyond a configured connection, or an ad-hoc
+    target where those are allowed.
+  - Kubernetes is not registered: connections have `host:port` targets
+    only, and Kubernetes needs a cluster, a namespace and a pod.
+- **Follow-ups.** The `backend:` key of the parity gate, so that VNC can
+  go through the bridge and back; Kubernetes targets.

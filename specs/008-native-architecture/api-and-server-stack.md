@@ -60,11 +60,11 @@ can only patch on v0.
 | `POST /api/v1/auth/oidc/token` | Exchange that one-time code, with the client's PKCE verifier, for a short-lived access token |
 | `GET /api/v1/connections` | Connections the caller may open (from the registry) |
 | `GET /api/v1/connections/{id}/stream` | WebSocket upgrade that opens a session on the connection and streams it, in one round trip ([protocol-v1](protocol-v1.md), Handshake) |
-| `POST /api/v1/sessions` | Open a session on a connection, returning the session ID and the caller's role |
+| `POST /api/v1/sessions` | Open a session on a connection, or on an ad-hoc target when allowed, returning the session ID, the caller's role and a stream token that joins it as the owner |
 | `GET /api/v1/sessions/{id}` | Session state: backend, size, viewers |
 | `POST /api/v1/sessions/{id}/shares` | Mint a share token for viewer or read-only access, with an expiry |
 | `DELETE /api/v1/sessions/{id}` | Close the session (owner only) |
-| `GET /api/v1/sessions/{id}/stream` | WebSocket upgrade that joins a session, with an access or share token; the token travels in `Sec-WebSocket-Protocol` (or `Authorization` for native clients), never in the URL |
+| `GET /api/v1/sessions/{id}/stream` | WebSocket upgrade that joins a session, with the owner's access token, a session token (such as the stream token) or a share; the token travels in `Sec-WebSocket-Protocol` (or `Authorization` for native clients), never in the URL |
 | `GET /healthz` | Liveness, on the public listener |
 
 Debug and metrics endpoints move to a separate listener (`debug.address`,
@@ -175,8 +175,8 @@ single-node beta.
 | Tokens | `internal/auth`: Ed25519 signing keys loaded from a file (generated on first start when absent, with a warning), access tokens (subject, groups, 15 minutes by default) and stream and share tokens (session ID, role), issued and verified with golang-jwt v5 restricted to `EdDSA`; tokens from `trusted_issuers` verified against their listed keys. Tests reject `none`, an HMAC token signed with the public key, an unknown issuer, a wrong audience, expiry and tampering | — |
 | HTTP server | `server/` on `net/http.ServeMux`: plain `func(http.Handler) http.Handler` middleware for recovery, request logging that never logs tokens or credentials, and authentication; JSON helpers and one JSON error shape; `/healthz`; `POST /api/v1/auth/token` for static users (bcrypt, constant-time on unknown users); TLS when configured; graceful shutdown; the debug listener with expvar and pprof, off unless `debug.address` is set. `occamy.go` starts it from a v1 configuration | Config v1, Tokens |
 | OIDC | `GET /api/v1/auth/oidc/login` and `/callback`: authorization code with PKCE through `golang.org/x/oauth2`, state, nonce and verifier in a short-lived sealed cookie, the ID token checked by `coreos/go-oidc` v3, and subject and group claims mapped to registry users and groups as configured; the browser sent back to a configured return URL with a one-time code that `POST /api/v1/auth/oidc/token` exchanges for an access token; tests against an in-process identity provider | HTTP server |
-| Sessions | `GET /api/v1/connections` filtered by the caller's users and groups; `POST /api/v1/sessions`, `GET` and `DELETE /api/v1/sessions/{id}` and `POST /api/v1/sessions/{id}/shares` on the session registry; a backend factory keyed by protocol that the native SSH backend and the guacd bridge register into; ad-hoc targets only when enabled and allowed; tests on the fake backend | HTTP server; session-core Registry |
-| Streams | `GET /api/v1/connections/{id}/stream` and `/api/v1/sessions/{id}/stream` on coder/websocket: `Origin` checked against `origins`, the token taken from the `occamy.v1.token.` subprotocol or `Authorization`, `occamy.v1` answered alone, `hello` read from the query, and the socket handed to the session's viewer writer; a closed session ends its streams whatever tokens remain valid. Tests cover one round trip to `welcome`, a bad origin, a missing or wrong token, and a token in the URL ignored | Sessions; session-core Viewer writer; protocol v1 Handshake |
+| Sessions | `GET /api/v1/connections` filtered by the caller's users and groups; `POST /api/v1/sessions`, `GET` and `DELETE /api/v1/sessions/{id}` and `POST /api/v1/sessions/{id}/shares` on the session registry; a backend factory keyed by protocol that the native SSH and VNC backends and the guacd bridge register into; ad-hoc targets only when enabled and allowed; tests on the fake backend | HTTP server; session-core Registry |
+| Streams | `GET /api/v1/connections/{id}/stream` and `/api/v1/sessions/{id}/stream` on coder/websocket: `Origin` checked against `origins`, the token taken from the `occamy.v1.token.` subprotocol or `Authorization`, `occamy.v1` answered alone, `hello` read from the query, and the socket handed to the viewer writer, `stream.Serve`, with `stream.SetLowWater` applied; a closed session ends its streams whatever tokens remain valid, and so does a shutdown. Tests cover one round trip to `welcome`, a bad origin, a missing or wrong token, and a token in the URL ignored | Sessions; session-core Viewer writer; protocol v1 Handshake |
 | v0 routes | `/api/v0/login` and `/api/v0/connect` behind `legacy_v0`, served on the new mux through `net/http`, golang-jwt v5 (HS256 with the v0 secret, so v0 tokens keep their shape) and coder/websocket, so that gin, gin-jwt and gorilla/websocket leave `go.mod` at beta.1; a v0 configuration file implies `legacy_v0`; the Vue client moves to the new paths; the existing v0 tests keep passing against the new paths | HTTP server |
 | Document | `docs/api.md` for every route above, the configuration reference, TLS through occamyd or a reverse proxy, and a v0 to v1 migration note; README and `conf.yaml` updated to a v1 example | all of the above |
 
@@ -293,9 +293,11 @@ place for fixes that ship on v0 before beta.
     then, since the lenient v0 decoder would read one with defaults
     (all three done by the HTTP server task).
   - Native SSH backend: add the host key policy (`host_keys`,
-    `insecure_ignore_host_key`) and `term` to connection entries.
+    `insecure_ignore_host_key`) and `term` to connection entries (the
+    host key policy is done, by the Sessions task; `term` is not).
   - Sessions: matching rules for `adhoc_allowlist` (resolved addresses
-    against ranges), and whether ad-hoc targets need a group.
+    against ranges), and whether ad-hoc targets need a group (both
+    decided; see Implementation notes: Sessions).
   - Per-connection guacd params (an RDP domain per host), a per-protocol
     backend choice (`backend: guacd` after a parity switch), and serving
     the web client from a v1 file have no keys yet.
@@ -362,7 +364,8 @@ place for fixes that ship on v0 before beta.
     declared message with no deadline, so a client that declares a huge
     frame and goes quiet would hold its handler and session forever.
     `CloseNow` cannot interrupt a `Close` already under way, so a timer
-    around `Close` would not help.
+    around `Close` would not help; the v0 routes keep no `net.Conn` to
+    close under it, as v1 streams later do.
   - `clientError` reads `websocket.CloseStatus`: 1000, 1001 and 1005 mean
     the client left, any other close code and `ErrMessageTooBig` are
     failures, and any other error counts as leaving. coder/websocket
@@ -617,11 +620,13 @@ place for fixes that ship on v0 before beta.
     scheme tells what the browser sees (see OIDC's notes).
   - Sessions: wrap its routes in `authenticate(s.verifier)` and read
     `claimsFrom(r.Context())`; use `decodeJSON`, `respond` and
-    `writeError`, adding codes such as `forbidden` and `conflict`.
+    `writeError`, adding codes such as `forbidden` and `conflict` (done;
+    it added `forbidden` and needed no `conflict`).
   - Identity: decided with OIDC: a name belongs to one source unless
     the configuration links them (see OIDC's notes). Trusted issuers
-    get the same rule with Sessions: a trusted issuer's `sub` is not a
-    static user of that name. `claimsFrom` carries `iss`, and occamyd's
+    get the same rule with Sessions, in its review: a trusted issuer's
+    `sub` that names a static user is refused unless the issuer has
+    `link_static_users`. `claimsFrom` carries `iss`, and occamyd's
     access tokens carry `idp`, so the sources can be told apart.
   - Sign-in has no rate limit, per address or per user; each attempt
     costs one bcrypt comparison at the users' highest cost, so a flood
@@ -638,10 +643,561 @@ place for fixes that ship on v0 before beta.
     `http.Server.RegisterOnShutdown`, since `Shutdown` ignores hijacked
     connections (the drain does not cover them); check the subprotocol
     token with `s.verifier`; the public server lives in `server.Run`, so
-    the hook needs a way in, such as a `server` field.
+    the hook needs a way in, such as a `server` field (all done;
+    `server.publicServer` registers the hook).
   - Document: `docs/api.md` for `/healthz`, the token endpoint and the
     error shape above; certificate reload (today a restart) and the
     HTTP/1.1 decision in the TLS section.
+
+## Implementation notes: Sessions
+
+- **What was done:**
+  - `server/backends.go`: the backend factory, a map from protocol to a
+    maker. `ssh` makes the native SSH backend, `vnc` the native VNC
+    backend, and `rdp` and `telnet` the guacd bridge, with
+    `guacd.params.<protocol>` under the target, the user name and the
+    stored password. A prompting ssh connection without a user name gets
+    a backend that asks the owner for one, then dials.
+  - `server/sessions.go`, every route behind
+    `authenticate(s.verifier, s.ids)`:
+    - `GET /api/v1/connections`: `{"connections":[{"id","name",
+      "protocol"}],"adhoc_targets":false}`, the connections whose allow
+      list names the caller or one of the caller's groups, in the
+      file's order. Targets are left out.
+    - `POST /api/v1/sessions`: `{"connection":"lab"}`, or an ad-hoc
+      `{"protocol","target","username","host_keys",
+      "insecure_ignore_host_key"}`. 201 with `Location` and
+      `{"id","role":"owner","stream_token","expires_in":300}`.
+    - `GET /api/v1/sessions/{id}`: `{"id","connection","protocol",
+      "backend","class","size":{"width","height"},"viewers":[{"id",
+      "role"}],"opened"}`; `connection` is absent for an ad-hoc target
+      and `size` until the remote reports one.
+    - `DELETE /api/v1/sessions/{id}`: 204 once the session has ended.
+    - `POST /api/v1/sessions/{id}/shares`: `{"role":"viewer"}` or
+      `"read-only"`, and `expires_in` in seconds, 60 to 43200, an hour
+      if absent. 201 with `{"token","role","expires_in"}`.
+    - Replies that carry a token or a session's state are
+      `Cache-Control: no-store`.
+  - `server/adhoc.go`: `adhoc_allowlist`'s matching.
+  - The session core: `Session.Viewers` lists the viewers, the owner
+    first, for the session's state, and `Registry.JoinShared` takes the
+    session's ID and refuses a share of another session, which it
+    accepted before.
+  - Connections gained `host_keys` and `insecure_ignore_host_key`
+    (native-ssh-backend, decision 2): the SSH backend refuses to start
+    without a host key policy, so no ssh connection of a v1 file could
+    have opened. An ssh connection needs exactly one, other protocols
+    neither, and each key is checked with the backend's parser,
+    `ssh.CheckHostKey`.
+- **Decisions:**
+  - **Backend per protocol:** native SSH and native VNC; the guacd
+    bridge for RDP and telnet. No configuration key picks another
+    backend: `backend:` would be new configuration that no spec has
+    settled beyond guacd-bridge's parity gate. RDP gets
+    `disable-gfx: "true"` unless `guacd.params.rdp` sets it, trading the
+    graphics pipeline's bandwidth, saved between guacd and the remote
+    rather than on the viewers' links, for exact colours (guacd-bridge's
+    follow-up). Kubernetes is not registered: it has no `host:port`
+    target. The hello's graphical size reaches guacd capped at 8192, as
+    v0's display hints are.
+  - **Owners are principals (revised in review):** a session belongs to
+    the issuer and `sub` of the token that opened it
+    (`server/identity.go`), so a trusted issuer acts for its own users
+    only. The first version took a trusted issuer's `sub` for the
+    static user of that name, which let a gateway's `alice` take over,
+    close and share static `alice`'s session. A trusted issuer's token
+    whose `sub` names a static user is refused, unless the issuer has
+    `link_static_users: true`, the switch OIDC sign-in (#110) adds under
+    `auth.oidc`, and then acts as that user. The stream token of a
+    trusted issuer's user carries the issuer in `uiss`, which only
+    occamyd's own tokens may set. Allow lists and groups still match by
+    name: they name no issuer.
+  - **Where occamyd's users signed in (added once #110 merged):** for
+    occamyd's own tokens the key is issuer, `idp` and `sub`, so an OIDC
+    user and a static user are two owners, except that a static user's
+    name is always `(occamy, local, sub)`: OIDC sign-in takes such a
+    name only when `auth.oidc.link_static_users` says the two are one
+    person, so the linked OIDC user owns the static user's sessions,
+    whichever opened them. Its access token keeps `idp: oidc` for the
+    log, and so does the stream token, which `sessionUser` signs with
+    the access token's `idp`. A token without `idp` predates OIDC
+    sign-in and is a static user's. A token that says `idp: oidc` with
+    a static user's name, by `config.SameName` as sign-in compares, is
+    refused once the link is off, as after a restart with tokens still
+    out. Trusted issuers keep `(issuer, "", sub)`; a linked one's static
+    names are `(occamy, local, sub)`. #110 refused every session token
+    with `idp`; `auth.Verifier` now refuses it only from a trusted
+    issuer, as `uiss`, since occamyd's own stream tokens carry it. A
+    trusted issuer's access token may still carry an `idp`, which
+    nothing reads. `auth.Signer.SessionFor` takes an `auth.User`
+    (issuer, `idp`, subject). `TestOIDCOwners` covers the linked user,
+    an OIDC user of another name, and the refusal after unlinking.
+    A trusted issuer's subject now passes the checks OIDC sign-in
+    makes of one: `validSubject`, and a static user's name by
+    `config.SameName`, so `ALICE` or a decomposed `zoë` is refused
+    without `link_static_users` as at sign-in. With it, only an exact
+    static name is the static user; another case or form is the
+    issuer's own user, as an OIDC user of that name is.
+    `identities.takesStaticName` is the one comparison both paths
+    use.
+  - **A trusted issuer's session tokens (delta review):** `join`
+    compared the principal with the owner only for the `owner` role,
+    and `Claims.check` let a session token name no subject, so an
+    unlinked gateway could mint a `viewer` token for no one, join
+    static alice's session and type into it. Every token now names its
+    user (`auth.Claims.check` refuses a session token without `sub`,
+    and occamyd signs none), every subject passes
+    `config.UsableName`, the rule `validSubject` was and that static
+    users' names now pass too, and a trusted issuer's session token of
+    any role joins only a session whose owner is one of that issuer's
+    users, or a static user when it is linked
+    (`identities.grants`). occamyd's own session tokens are signed
+    only for the owner. `TestIssuerSessionTokens` runs every role
+    against static alice's, the gateway's carol's and the linked
+    issuer's dave's sessions.
+  - **A trusted issuer's groups are opt-in (delta review):** an
+    issuer's `groups` claim counts only for the groups in its
+    `auth.trusted_issuers[].allowed_groups`, none by default. Before,
+    an unlinked issuer could claim `ops` and open every connection
+    allowed to `ops`, stored credentials included, which made trusting
+    an issuer trust it with every group. `identities.of` drops the
+    others from the claims, so every route that reads groups sees only
+    the allowed ones. `TestIssuerGroups` and `TestListConnections`
+    cover the REST and stream routes.
+  - **Panics end a stream or a session, not occamyd (delta review):**
+    `serve` recovered a panic of `stream.Serve`, but the reader runs on
+    a goroutine of its own, and the session's backend on others, where
+    net/http's recover does not reach, so a client's message that made
+    either panic would crash occamyd. The reader now returns a
+    `session.PanicError`, and `Serve` closes the stream with 1011. The
+    session recovers a panic of the backend's `Run` and of every step
+    of its owner goroutine, where commands such as an input reach the
+    backend, and ends with the new reason `session.Internal`, which
+    viewers get as `close` 1011 "internal error"; a command whose call
+    panicked returns `ErrEnded` to its caller. Both log the stack.
+    `TestReaderPanics`, `TestBackendPanics` and
+    `TestBackendPanicEndsSession` inject the panics.
+  - **Stalled viewers are dropped (delta review):** each viewer's
+    writer keeps the screen it last sent, a terminal's whole screen of
+    up to 1000 by 500 cells, about 11 MiB, and a viewer that read its
+    welcome and then stopped kept it for as long as it stayed, while
+    the owner's redraws gave each such viewer another screen:
+    50 stalled viewers on each of a user's 10 sessions held about
+    5 GiB. `streams.viewer_timeout`, 30 s by default and at least 1 s,
+    now drops a viewer with the new close code `too-slow` 4008 once a
+    frame has waited that long since its end, or since the last ack
+    that acknowledged a frame, and wraps every write in a deadline of
+    that length (`stream.Config.ViewerTimeout`, `stream.ErrStalled`,
+    `pacer.Oldest`). A hidden viewer's time runs too: a hidden client
+    gets no new frames but acknowledges those it was sent as they
+    arrive, as docs/protocol.md now says, since a browser tab in the
+    background still gets its messages though it does not draw. A
+    first cut paused the time while the viewer was hidden, so that a
+    client that acknowledged only what it drew kept its background
+    tabs; but a viewer that acknowledged its snapshot and then hid
+    kept a screen the session had left for as long as it stayed, the
+    same attack for one more message. The terminal writer therefore
+    also drops the screen it diffs against while the viewer is
+    hidden, and sends a `term-snapshot` once it is visible again, so
+    a hidden viewer holds no screen it was sent. One that may type
+    still holds the screen of its last input, which the session keeps
+    for each viewer to tell an input's effect from motion
+    (`Viewer.inputScreen`), hidden or not. What remains at the
+    defaults: every visible viewer that acknowledges within the
+    timeout holds its last-sent screen, and every viewer that may type
+    its last input's, so one user's 10 sessions of 51 viewers hold up
+    to 510 screens of 1000 by 500 cells, about 5.5 GiB, if they are
+    read-only, and up to 1020, about 11 GiB, if all may type; hidden,
+    those that may type hold 510 and read-only ones none. `limits`
+    bounds it, and docs/configuration.md says so.
+    `TestStalledViewersRelease` holds eight stalled viewers at
+    10.7 MiB each and finds 0.5 MiB each once they are dropped, and
+    `TestHiddenViewersRelease` finds eight read-only viewers that
+    acknowledged and hid holding about 1.3 MiB each while they stay,
+    the writer's buffer of the last snapshot it encoded, not a
+    screen; `TestStalledViewer`, `TestStalledViewerTimely`,
+    `TestStalledAckRestarts`, `TestStalledHidden`, `TestBlockedWrite`,
+    `TestTerminalHidden` and `TestStalledViewerTooSlow` cover the
+    rule. Mutations of the write deadline, the stall timer, the ack's
+    restart, the close, the server's timeout, the minimum and the
+    hidden viewer's screen kept are each caught; the server's own case
+    for `ErrStalled`, which only keeps the drop out of its error log,
+    is not, as the close it would send has gone already.
+  - **A limit for the whole server (delta review):**
+    `limits.sessions`, 1000 by default, bounds the sessions occamyd
+    runs whoever owns them, since `sessions_per_user` bounds each user
+    and a trusted issuer can mint new subjects without end. It counts
+    in `server.running` beside `owned`, under the same lock, from the
+    check to the session's end. One more is `503 limit_exceeded`, as
+    the server, not the caller, is full, and `close` `forbidden` on a
+    connection's stream, as the user's own limit is.
+  - **Absent rather than forbidden:** a connection the caller may not
+    open answers 404, as an unknown one does, and so does another
+    user's session on `GET`, `DELETE` and shares, so IDs cannot be
+    probed. Only the owner reads, closes and shares a session; there is
+    no administrator role yet.
+  - **Opening without streaming:** `POST /api/v1/sessions` starts the
+    session at once. The owner's viewer that the registry returns leaves
+    at once, which starts the owner grace of 60 s (session-core) in
+    which the owner's stream must join, with the stream token (a session
+    token for the owner, 5 minutes) or an access token. The backend's
+    prompts wait for that stream.
+  - **Ad-hoc targets** are open to any signed-in user, on
+    `POST /api/v1/sessions` only. The request is checked as `ParseV1`
+    checks a connection (`config.NormalizeTarget`), an ssh target needs
+    `host_keys` or `insecure_ignore_host_key: true` as a connection
+    does, and the credentials are always prompted for, so a request
+    carries no secret. Nor does the target get one from the file: it
+    takes only the display's `guacd.params` (see "guacd parameters"
+    below), and its VNC certificate is checked against the system's
+    roots and the name the request gave. With ad-hoc targets off, or
+    outside the allowlist, the answer is 403 `forbidden`, a code this
+    task adds.
+  - **Allowlist matching (revised in review):** entries may name ports,
+    `:port` or `:first-last` (`config.ParseAllowEntry`); without, the
+    protocol's own (ssh 22, vnc 5900-5999, rdp 3389, telnet 23), where
+    the first version allowed any port. An IP address must lie in a
+    listed range or be a listed address, IPv4-mapped addresses compared
+    as IPv4, and an address with a zone is refused. Every host name is
+    resolved, within 5 s, and dialled by the first address checked, so
+    that a second lookup cannot lead elsewhere: a name that is listed,
+    or ends in `.lab.internal` for `*.lab.internal` (the domain itself
+    does not), may resolve anywhere; any other name only within the
+    listed ranges. Loopback, link-local (169.254.169.254 among them),
+    unspecified and multicast addresses are refused whatever range or
+    name leads to them, unless an entry is that very address. The first
+    version dialled listed names by name, which let DNS lead them to
+    such addresses. A list without ranges resolves only the names it
+    lists. The name is kept beside the address for a certificate's
+    server name.
+    (Delta review: the special set also holds the metadata services
+    outside the link-local range, `fd00:ec2::254` and
+    `100.100.100.200`, and, by address and port, guacd's address, its
+    name resolved at start, and occamyd's `listen` and `debug.address`,
+    a listener on no host standing for every interface address
+    (`allowlist.reserve`), so that a range with explicit ports cannot
+    reach them. A name that does not resolve at start is logged. The
+    host's other addresses stay a documented warning: making every
+    interface address special would refuse the hosts a range is
+    usually written for when occamyd runs among them.)
+  - **guacd parameters (added in review):** `guacd.params` refuses any
+    parameter whose name holds `password`, `passphrase`, `private-key`
+    or `secret`, where it refused those three names alone, so that
+    `sftp-password` or `gateway-password` cannot sit in the file either.
+    (Delta review: names are compared in lower case, so `Password` and
+    `SFTP-PASSWORD` are refused, and `hostname` and `port` in any case;
+    a name that ends in `-regex` is a prompt's pattern, so telnet's
+    `password-regex`, which the first version refused, is allowed.)
+    An ad-hoc target takes only the display's parameters
+    (`adhocParams`: `color-depth`, `color-scheme`, `cursor`,
+    `disable-gfx`, `enable-font-smoothing`, `font-name`, `font-size`,
+    `resize-method`), so that an SFTP host, a gateway or a drive meant
+    for the configured connections does not follow a target that a user
+    chose. Ad-hoc RDP therefore gets guacd's own security and
+    certificate defaults, not `ignore-cert` from the file.
+  - **Failures of occamyd's own,** such as a password file it cannot
+    read, are logged with the user and the target and answered 500
+    `internal`, without the cause.
+  - **Limits (added in review):** `limits.sessions_per_user` (10),
+    `limits.viewers_per_session` (50, the owner aside) and
+    `limits.shares_per_session` (100 unexpired), each raisable in the
+    file. A session counts toward its owner's from the moment `open`
+    reserves it, under the server's lock, until it ends, so concurrent
+    requests cannot all pass. Over a limit, the JSON routes answer 429
+    `limit_exceeded`, a code this review adds; a connection's stream
+    gets `close` `forbidden`, and a viewer beyond the session's limit
+    `viewer-limit`. The session core gained `Config.MaxViewers` and
+    `ErrViewerLimit`; the registry gained `MaxShares` and
+    `ErrShareLimit`, and keeps each session's shares in an index of its
+    own, so that `Share` prunes and `remove` drops only that session's,
+    where both scanned every share under the registry's lock.
+  - A shutdown ends every session, through the registry's context.
+- **Deviations:**
+  - VNC defaults to the native backend, where guacd-bridge's parity gate
+    keeps the bridge until beta.2 with the native backend behind
+    `backend: native`; with no `backend:` key, a v1 file cannot send VNC
+    through the bridge. telnet goes through the bridge for any configured
+    connection: the connection is the opt-in that guacd-bridge's
+    Registration row asks for.
+  - The row named the native SSH backend and the bridge; native VNC
+    registers too. The API table did not say that
+    `POST /api/v1/sessions` returns a stream token, nor that a session
+    token joins a session's stream. Both are fixed above.
+- **Surprises:** none in the routes themselves. The missing host key
+  policy above was found when the factory first made an ssh backend
+  from a connection.
+- **Mutation checks:** each of these failed a test: the allow lists'
+  users or groups ignored, every connection listed, any connection
+  opened, a session's state, close and shares open to any user, a share
+  with the owner's role, ad-hoc targets served while off, an ssh
+  ad-hoc target without a host key policy, the allowlist allowing
+  anything, allowing a name when one of its addresses is listed,
+  `*.domain` matching without the dot, dialling the name it resolved,
+  and allowing an address with a zone; `DELETE` that does not close.
+  After review, also: the owner compared by subject alone in
+  `ownSession`; a vnc connection's `tls` left unchecked; an ad-hoc vnc
+  target's certificate checked against its address, not its name. Once
+  #110 merged: a static user's name not mapped to `(occamy, local,
+  sub)`; an `idp: oidc` token for a static name let through after
+  unlinking; a stream token signed without the access token's `idp`;
+  `idp` refused on occamyd's own session tokens; a trusted issuer's
+  subject not checked by `validSubject`; and its static names compared
+  exactly rather than by `config.SameName`. In the delta review, the
+  survivors it listed now fail a test each: the session counts taken
+  after the check (`TestConcurrentLimits`, over REST and streams, for
+  `sessions_per_user` and `sessions`), an ended session left in the
+  share index (`TestRegistryShareLimit`), `bridgeConfig`'s width
+  unclamped (`TestBridgeConfig`), `askUser` taking a size over ssh's
+  in either side (`TestAskUser`), the read limit left at 64 KiB once
+  the client is let in (`TestReadLimitAfterHello`), and `*.domain`
+  matched without the dot (`TestAllowlist`, whose `evillab.internal`
+  now resolves). Allowing an address with a zone, listed above, no
+  longer fails one: every allowlist entry is a `netip.Prefix`, and
+  `Prefix.Contains` is false for a zoned address, so the check in
+  `allow` is a second guard. The final review's survivors fail a test
+  each too: `server.running` not given back at a session's end, or
+  when its backend is not made or `registry.Open` fails
+  (`TestSessionsCapReleased`); a linked issuer's session token
+  granted on any session of occamyd's, an OIDC user's too, without
+  `owner.idp == auth.IdPLocal` in `grants` (`TestPrincipalMatrix`,
+  every principal, role, share and forged `idp` or `uiss` over every
+  session path, with and without `auth.oidc.link_static_users`);
+  `lastAck` set by an ack of a frame never sent, so that such acks
+  kept a viewer forever (`TestStalledBogusAcks`); and `pacer.Oldest`
+  reporting the newest frame (`TestOldest`).
+- **Follow-ups:**
+  - A per-connection `backend:` key (guacd-bridge's parity gate), `term`
+    for ssh (the backend's `xterm-256color` until then) and per-connection
+    guacd parameters.
+  - VNC phase 3's user name and TLS policy (done in review, once #106
+    merged): `credentials.username` reaches `vnc.Config.Username`, and a
+    vnc connection's `tls` block (`config.ConnectionTLS`: `require`,
+    `server_name`, `ca_file`, `pins`, `insecure_skip_verify`) its `TLS`
+    through `vncConfig`, with `ca_file` read into `RootCAs` when the
+    session starts, as passwords are. Validation refuses `tls` on other
+    protocols, `ca_file` with `pins`, a CA file without a PEM
+    certificate, and a pin that `vnc.CheckPin` refuses. Pins take the
+    forms the backend parses (a PEM certificate, or a SHA-256
+    fingerprint in hex or in base64 after `SHA256:`). The first version
+    let `insecure_skip_verify` stand beside them, as the backend takes
+    it, accepting what is not pinned; since the delta review it is
+    refused beside `pins` or `ca_file`, as ssh refuses
+    `insecure_ignore_host_key` beside `host_keys`, so that a file does
+    not read as pinned while it accepts anything. An ad-hoc vnc target's
+    certificate must name the host name the request gave
+    (`target.name`), not the address dialled. Left over: an ad-hoc
+    request carries no pins or CA, so a server with a self-signed
+    certificate is reachable as a connection only.
+  - Ad-hoc targets for some groups only, and a rate limit on
+    `POST /api/v1/sessions`.
+  - A list of the caller's own sessions, `GET /api/v1/sessions`, which
+    the table does not have.
+  - The session core's `Join` takes no name, so `viewer-joined` carries
+    an empty name.
+
+## Implementation notes: Streams
+
+- **What was done:** `server/streams.go`. Both routes authenticate on
+  their own rather than through `authenticate`, since a refusal must come
+  as `close` after the upgrade. `upgrade` checks the subprotocol offer,
+  then `Origin`, the token and `hello`, sets `TCP_NOTSENT_LOWAT` to
+  16 KiB on `connFrom`'s connection, and accepts; `wsConn` adapts the
+  coder/websocket connection to `stream.Conn`; `serve` hands it with the
+  viewer to `stream.Serve` and closes the WebSocket. `server.Run` waits
+  for streams after the drain.
+- **Decisions:**
+  - **Refusals:** a request that offers no `occamy.v1` gets 400
+    `bad_request` as JSON. Every other refusal gets the upgrade, `close`
+    and a WebSocket close with the same code: 4001 for `Origin`, 4000
+    for the token, 1002 or 1003 for `hello`, 4001 for a connection or
+    session the token does not open. The read limit is 64 KiB until
+    `serve` lets the client in, after the route has verified its token,
+    then the agreed message size. A refused client gets 1 s from its
+    `close` to the end of the closing handshake, after which the socket
+    is closed under coder/websocket, rather than its 5 s each way.
+    [docs/protocol.md](../../docs/protocol.md) now gives this order:
+    `Origin`, the token found, `hello`, the upgrade, then the token
+    verified.
+  - **Origin:** none is accepted, since a client that is no browser can
+    send any `Origin`, and the token is what protects the route. One
+    `Origin`, `http` or `https` with a host, is accepted when its host
+    is the request's `Host` and, when occamyd terminates TLS, its scheme
+    is `https` (behind a proxy that ends TLS, the scheme cannot be
+    told), or `scheme://host[:port]` is in `origins`. A proxy that
+    rewrites `Host` needs occamyd's own origin in `origins`. `null`,
+    an empty one and a repeated one are refused. coder/websocket's own
+    check is off, since it refuses with 403 before `close` can go out.
+  - **Token:** from the `occamy.v1.token.` subprotocol, else from
+    `Authorization` (one `Bearer` header, as `authenticate` reads it),
+    never from the URL. A subprotocol token wins: a bad one is refused
+    even beside a good header.
+  - **What each route takes:** the connection route takes an access
+    token whose caller may open the connection. The session route takes
+    the owner's access token; a session token whose `sid` is the route's
+    session, with its role, as the owner only if its `sub` is the owner;
+    or a share, a token without dots, through `Registry.JoinShared`,
+    which now refuses a share of another session. Another
+    user, another session's token and an unknown session get 4001 alike;
+    a share that does not open the session gets 4000, since it is no
+    valid token for it. Tokens are checked at the upgrade only: a
+    session's end, not a token's expiry, ends a stream (decision 1).
+  - **Owner takeover:** a newer stream of the owner takes over from an
+    older one, which gets `close` with 1000 and "the owner connected
+    again"; the newer one joins once the older has left, within 5 s.
+    Otherwise a connection that died unnoticed would keep the owner out
+    of their own session until TCP gives up.
+  - **The owner's hello sizes the session:** on the connection route the
+    backend is made at that size (columns and rows for ssh, pixels for
+    guacd; native VNC takes the server's size); on the session route the
+    owner's hello becomes a `backend.Resize`. A viewer's hello resizes
+    nothing.
+  - **Sizes (added in review):** a terminal is at most 1000 columns by
+    500 rows (`terminal.MaxCols`, `terminal.MaxRows`) and a graphical
+    screen at most 8192 pixels a side (`backend.MaxResizeSide`), whether
+    the owner's hello or anyone's `resize-request` asks. `screenOf` and
+    the stream's reader clamp, the terminal emulator clamps on its own,
+    and the SSH backend asks the server for no larger terminal
+    (`ssh.MaxCols`, `ssh.MaxRows`). Before, a terminal of up to 65535
+    by 65535 cells reached the emulator and the backend.
+  - **A stream that panics (added in review):** `serveStream` recovers
+    a panic of `stream.Serve`, which a terminal resize that grew the
+    rows caused before #107: the viewer leaves the session, the owner's
+    next stream does not wait for the dead one, the WebSocket closes
+    with 1011 and the stack goes to the log. `net/http` would recover it
+    too, but leave the hijacked connection and its reader running until
+    the client left. `TestRev111PanicLeaks` injects a panic;
+    `TestRev111GrowRowsPanics` and `TestRev111ViewerKillsOwnerStream`
+    fail on the code before #107 merged.
+  - **A session that ends before its stream (added in review):** when
+    `View` before `welcome` finds the session ended, as when its backend
+    fails at once, `Serve` sends the session's own end, such as
+    `backend-failed`, rather than an internal error.
+  - **Capabilities:** terminal level 1, and the codecs
+    `internal/encoder` sends (`encoder.Codecs()`: webp, jpeg, deflate,
+    raw), with a viewer's encoder from `encoder.New` for the codecs it
+    agreed to (`stream.Config.NewEncoder`). Raw tiles alone until the
+    Codecs task (#109) merged; `TestStreamCodecs` checks the agreement
+    in the client's order, the tiles' codecs, and `unsupported` for a
+    client that lists only `png` and `cached`. occamyd's binary now
+    links vpx and jpegn, which `scripts/third-party-licenses.sh` picks
+    up from the main package's dependencies.
+  - **The WebSocket:** coder/websocket drops the connection when the
+    context of a read or write ends, and `Serve` ends its contexts as
+    soon as it is done, so `wsConn` reads in a goroutine without a
+    context, and a write in progress gets 1 s to finish after its
+    context ends. `Serve` sends `close` but cannot close the WebSocket;
+    `wsConn` keeps the `close` it sent and closes the WebSocket with its
+    code and reason, cut to 123 bytes at a character boundary. Compression
+    is off.
+  - **Shutdown:** `publicServer` registers the server's shutdown with
+    `RegisterOnShutdown`, which cancels the registry's context; every
+    session ends with `server-shutdown`, which `Serve` sends. `Run` then
+    waits up to the drain timeout again for the streams, since
+    `Shutdown` neither waits for nor closes hijacked connections.
+- **Deviations:**
+  - The row's "the session's viewer writer" is `stream.Serve`, now named
+    in the row.
+  - [docs/protocol.md](../../docs/protocol.md) said the subprotocol
+    carries an access or share token; it now names session tokens too.
+  - The end-to-end test, `TestEndToEnd`, signs in, opens a session,
+    streams it, types and closes it. It first used a minimal client of
+    its own in `server/streams_test.go`, since the Go client (`client/`,
+    #107) was not on master; it moved to `client.Dial` in review, once
+    #107 merged. The minimal client stays for the tests that send
+    broken or hand-made messages, which the Go client does not.
+- **Surprises:**
+  - A frame being written when a client sent a text message or broke the
+    protocol cut off the `close` that followed: coder/websocket closed
+    the connection when the writer's context ended mid-write. Hence the
+    second of grace above, which a test caught on its first runs.
+  - `Serve` takes every failed read for a dead connection and sends no
+    `close`. A text message is no such failure, so `serve` sends
+    `unsupported` for it. After a message over the read limit,
+    coder/websocket has sent 1009 itself, and the connection was
+    dropped with `CloseNow`, as the v0 routes do. (Revised: a stream
+    now completes the closing handshake within `refuseTimeout`, with a
+    timer that closes the socket below, which does interrupt `Close`;
+    see the follow-up on `TestStreamProtocolErrors`.)
+- **Mutation checks:** each of these failed a test: any `Origin`
+  accepted, a listed origin accepted with the other scheme, a host
+  matched by prefix, a token read from the URL, `Authorization` read
+  before the subprotocol, any user taken for the owner, another
+  session's token accepted, a viewer's session token taken for the
+  owner's, no `TCP_NOTSENT_LOWAT`, no shutdown hook, a connection
+  stream made without the hello's size, a viewer's hello resizing the
+  session, no takeover, and the WebSocket closed with another code than
+  the `close` sent. After review, also: no recover in `serveStream`; no
+  `refuseTimeout`; a session token's owner compared by subject alone in
+  `join`; and the connection dropped after a message over the limit,
+  which `TestFinishAfterTooLarge` failed 20 runs of 20.
+- **Not checked live:** the demo SSH and VNC servers were not tried: the
+  shared benchmark host's load average was 46 at the time. The tests run
+  the routes against fake backends only.
+- **Follow-ups:**
+  - Recover gaps the final review found, for a PR of their own. A
+    panic leaves the session's state locked where a lock is not
+    released by `defer`:
+    - The VNC and guacd decoders hold rows between `sink.Lock` and
+      `sink.Unlock` without `defer` (vnc's `drawBand`, `fillRect`,
+      `raw`, `drawCompact`, `drawPalette` and `tightJPEG`, guacd's
+      `flush`), so a panic there, which the session's recover turns
+      into its end, leaves rows locked, and the viewers' writers wait
+      in `ReadTile` forever.
+    - SSH's `pump` goroutines run outside the session's recover, and
+      `sink.TermData` and `Terminal.Write` hold their locks without
+      `defer`; the terminal's parser has no fuzzer.
+    - VNC's cleanup after `readLoop` (`close(done)`, `nc.Close()`) is
+      not deferred, so a panic in `readLoop` leaves the writer loop
+      and the connection behind.
+  - The viewer timeout bounds each message's write, so a link too slow
+    to carry one message in 30 s, such as a terminal's snapshot of a
+    few megabytes at under 100 kB/s, drops its viewer. Tiles are small;
+    a terminal's frame goes whole. A deadline per byte, or a terminal
+    frame cut into messages the writer can pace, would serve such
+    links.
+  - Document: `docs/api.md` for the five session routes and the two
+    stream routes, with the replies above.
+  - CORS is still not served, so a page on another origin in `origins`
+    can open streams but not call the JSON routes.
+  - ~~A terminal's hello may ask for up to 65535 columns or rows, which
+    reach the backend unbounded.~~ Fixed in review: see "Sizes (added
+    in review)".
+  - ~~`TestStreamProtocolErrors` failed twice in the review's
+    full-suite runs at a load average of 112 to 150.~~ Fixed once it
+    failed again, with `broken pipe` in its oversized message: the
+    write was the test client's ack of a frame it had read before the
+    close, not a timing bound of the server's. After a message over the
+    read limit, coder/websocket sends close 1009 itself, and `finish`
+    then dropped the connection, since `ReadMessage` had marked it
+    failed. With the rest of the message unread, closing the socket
+    sends a reset, so a client still writing failed, or could lose the
+    1009 to the reset. `finish` now completes the closing handshake:
+    `Close` sends nothing more, reads the rest of the message and the
+    client's close, and has `refuseTimeout` to do it, as a refused
+    stream has. `TestFinishAfterTooLarge` writes before it reads the
+    close; with the old `finish` it failed every time. Both tests then
+    passed 200 runs with `-race`.
+  - ~~`TestStreamWelcome` failed under load (delta review).~~ Fixed:
+    it took the first `term-snapshot` for a frame of the hello's
+    size, then read the session's size. The fake backend sizes its
+    terminal when it runs, on a goroutine of its own, so the first
+    frame may show the session's 80 by 24 terminal before that, and
+    the session sets its size just after resizing its terminal and
+    waking the writers. 300 runs with `-race` at `-cpu 1,4` and a load
+    average of 157 failed 13 times with "session size (0,0)"; the test
+    now waits for a frame of the hello's size and then for the
+    session's, and passed the same 600 runs at a load average of 132.
+    The first frame of 80 by 24 is the server's behaviour, not only
+    the test's: a client may see the blank default terminal for a
+    moment before the backend's size, which `resize` then corrects.
+    Follow-up: start the session's terminal at the size the owner's
+    hello asks for, with a size in `session.Config`, since the
+    terminal's `Options.Reply` is the session's own.
+  - [009](../009-react-web-client.md) and the Go client: send `hello` in
+    the query and the token in the subprotocol; expect `close` before
+    `welcome` for a refusal; reconnect as the owner with an access token
+    (the stream token lasts 5 minutes); read `close` 1000 with "the
+    owner connected again" as being replaced, not as an error.
 
 ## Implementation notes: OIDC
 
@@ -820,7 +1376,9 @@ place for fixes that ship on v0 before beta.
     signed in, idp oidc`). `idp` is optional in a token, so tokens
     signed before it, and trusted issuers' access tokens, still verify;
     a session token may not carry one. Trusted issuers get the same rule
-    with Sessions (#111).
+    with Sessions (#111). (Revised by #111 once this merged: occamyd's
+    own session tokens carry `idp`, and only a trusted issuer's are
+    refused for it; see Sessions' notes.)
   - **Discovery: lazy.** `newServer` does not contact the provider, so a
     provider that is down cannot keep occamyd from starting with static
     users. `Run` starts one discovery in the background, so the log

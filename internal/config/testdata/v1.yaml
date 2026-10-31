@@ -32,10 +32,15 @@ auth:
   # How long an access token lasts, between 1m and 12h. Default 15m.
   access_token_lifetime: 15m
   # Third parties, such as a gateway, whose tokens occamyd accepts. Each
-  # key is an Ed25519 public key, PKIX PEM.
+  # key is an Ed25519 public key, PKIX PEM. An issuer's users are its
+  # own, and its tokens for a subject that names a static user are
+  # refused, unless link_static_users lets them act as that user. Its
+  # tokens' groups count only if allowed_groups lists them.
   trusted_issuers:
     - issuer: gateway
       public_key_file: /etc/occamy/gateway.pub
+      link_static_users: true
+      allowed_groups: [ops]
   # Static users sign in with a password, stored as a bcrypt hash of cost
   # 10 or more. htpasswd -nbBC 12 "" 'the password' | cut -d: -f2 makes
   # one.
@@ -84,6 +89,11 @@ connections:
     name: Build box
     protocol: ssh
     target: build.internal:22
+    # The host keys the server may present: SHA-256 fingerprints as
+    # ssh-keygen -lf prints them, or public keys as ssh-keyscan prints
+    # them. ssh connections need them, or insecure_ignore_host_key.
+    host_keys:
+      - SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U
     credentials:
       username: deploy
       private_key_file: /etc/occamy/keys/deploy
@@ -95,6 +105,10 @@ connections:
     name: NAS desktop
     protocol: vnc
     target: nas.internal # the protocol's default port, 5900
+    # The NAS's self-signed certificate, by the fingerprint that
+    # openssl x509 -noout -fingerprint -sha256 prints.
+    tls:
+      pins: ["B7:2C:51:9E:0D:44:A3:6F:18:E2:95:7B:C0:3A:61:DD:4F:89:12:B6:E7:05:9C:73:2A:F1:58:0E:C4:93:6B:1D"]
     credentials:
       password_env: OCCAMY_NAS_VNC_PASSWORD
     allow:
@@ -114,6 +128,8 @@ connections:
     name: Lab shell
     protocol: ssh
     target: "[fd00::22]"
+    # Accepts any host key, with a warning in the log: for demos only.
+    insecure_ignore_host_key: true
     credentials:
       # Nothing stored: the session owner is asked for what the server
       # needs, and the answers are not kept.
@@ -122,8 +138,29 @@ connections:
       groups: [dev]
 
 # Ad-hoc targets let users connect to hosts that are not in the registry.
-# Off by default; when on, only targets in the allowlist are reachable.
+# Off by default; when on, only targets in the allowlist are reachable,
+# on the protocol's own ports (ssh 22, vnc 5900-5999, rdp 3389, telnet
+# 23) or those an entry names after a colon. Loopback, link-local,
+# unspecified and multicast addresses need an entry of their own.
 allow_adhoc_targets: false
 adhoc_allowlist:
   - 10.0.0.0/8
-  - "*.lab.internal"
+  - "*.lab.internal:22"
+
+# What one user or one session may hold. Zero or absent is the default.
+limits:
+  # Sessions occamyd runs at once, whoever owns them. Default 1000.
+  sessions: 500
+  # Sessions one user owns at once. Default 10.
+  sessions_per_user: 20
+  # Viewers a session takes besides its owner. Default 50.
+  viewers_per_session: 50
+  # Unexpired shares a session has. Default 100.
+  shares_per_session: 100
+
+# What occamyd keeps for one viewer.
+streams:
+  # How long a viewer may leave frames unacknowledged, or one write to
+  # it block, before it is dropped with close too-slow.
+  # Default 30s.
+  viewer_timeout: 45s
