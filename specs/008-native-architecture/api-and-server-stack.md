@@ -926,7 +926,19 @@ place for fixes that ship on v0 before beta.
   unlinking; a stream token signed without the access token's `idp`;
   `idp` refused on occamyd's own session tokens; a trusted issuer's
   subject not checked by `validSubject`; and its static names compared
-  exactly rather than by `config.SameName`.
+  exactly rather than by `config.SameName`. In the delta review, the
+  survivors it listed now fail a test each: the session counts taken
+  after the check (`TestConcurrentLimits`, over REST and streams, for
+  `sessions_per_user` and `sessions`), an ended session left in the
+  share index (`TestRegistryShareLimit`), `bridgeConfig`'s width
+  unclamped (`TestBridgeConfig`), `askUser` taking a size over ssh's
+  in either side (`TestAskUser`), the read limit left at 64 KiB once
+  the client is let in (`TestReadLimitAfterHello`), and `*.domain`
+  matched without the dot (`TestAllowlist`, whose `evillab.internal`
+  now resolves). Allowing an address with a zone, listed above, no
+  longer fails one: every allowlist entry is a `netip.Prefix`, and
+  `Prefix.Contains` is false for a zoned address, so the check in
+  `allow` is a second guard.
 - **Follow-ups:**
   - A per-connection `backend:` key (guacd-bridge's parity gate), `term`
     for ssh (the backend's `xterm-256color` until then) and per-connection
