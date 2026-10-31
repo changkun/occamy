@@ -558,9 +558,12 @@ and guacd leaves the default deployment.
     copying while a long paste held the writer up (xrdp does not wait
     for the responses). In a burst, a Format Data Request for the
     newest list can now go before the responses to the lists before
-    it, which xrdp, not waiting for them, does not mind; Windows is to
-    be checked in phase 4. The server's text is charged against the
-    decoding rate as a pointer shape is, a tile at least, so that
+    it. By its source, xrdp should not mind, as xrdp-chansrv 0.10.1
+    takes a response without acting on it
+    (`clipboard_process_format_ack` only logs); the integration test
+    has not run since this change, and Windows is to be checked in
+    phase 4. The server's text is charged against the decoding rate as
+    a pointer shape is, a tile at least, so that
     announcing it again and again makes the client wait. A Format List
     that does not parse is refused with a failed response; a message
     whose length is wrong is dropped; locks and file PDUs are ignored.
@@ -635,6 +638,8 @@ and guacd leaves the default deployment.
   the backend's and the client's integration tests passed with the
   channel joined. That the round trip works shows xrdp sends CLIPRDR
   PDUs under TLS without a security header, as the client reads them.
+  It has not run again since the second review made the Format List
+  Responses a count, as the shared host's load stayed above 8.
 - **Mutation checks.** Each was broken in turn and a test failed, 26 in
   all, none surviving:
   - at most 31 channels in the server's network data, no more than
