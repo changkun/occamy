@@ -102,16 +102,19 @@ type writer struct {
 	// the quality they are to reach, for refinement (refine.go).
 	msgQuality, msgGoal uint8
 
-	// Refinement (refine.go). heat is each tile's motion as of heatAt;
-	// changed is when each tile last went out changed, since start; goal
-	// is the quality each tile's pixels are to reach on the client, 0
-	// while not known; qual is the quality the client has each tile at
-	// when there is no shadow to say; refineDelay is how long a tile
-	// stays unchanged before it is refined, negative for never; refine
-	// holds the tiles to refine, and held the refinement the pacer turned
-	// away last.
+	// Refinement (refine.go). heat is each tile's motion as of the last
+	// snapshot; heatAt is that snapshot, or the end of the last frame
+	// since, and heatIdle the time between frames from the snapshot to
+	// the start of that frame; changed is when each tile last went out
+	// changed, since start; goal is the quality each tile's pixels are to
+	// reach on the client, 0 while not known; qual is the quality the
+	// client has each tile at when there is no shadow to say;
+	// refineDelay is how long a tile stays unchanged before it is
+	// refined, negative for never; refine holds the tiles to refine, and
+	// held the refinement the pacer turned away last.
 	heat        []float32
 	heatAt      time.Time
+	heatIdle    time.Duration
 	changed     []time.Duration
 	goal        []uint8
 	qual        []uint8
@@ -352,6 +355,7 @@ func (w *writer) collect(viewport image.Rectangle) (fresh int, ok bool) {
 // in flight, when the screen is resized or hidden, or after the tiles of
 // an input whose effect appears meanwhile.
 func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
+	w.busy()
 	defer w.rested()
 	w.frame++
 	id := w.frame
