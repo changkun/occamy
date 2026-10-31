@@ -11,7 +11,7 @@ affects:
   - docs/
 effort: large
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -691,8 +691,9 @@ place for fixes that ship on v0 before beta.
     `ssh.CheckHostKey`.
 - **Decisions:**
   - **Backend per protocol:** native SSH and native VNC; the guacd
-    bridge for RDP and telnet. No configuration key picks another
-    backend: `backend:` would be new configuration that no spec has
+    bridge for RDP and telnet (superseded by `backend:`; see
+    Implementation notes: backends and the API reference). No
+    configuration key picks another backend: `backend:` would be new configuration that no spec has
     settled beyond guacd-bridge's parity gate. RDP gets
     `disable-gfx: "true"` unless `guacd.params.rdp` sets it, trading the
     graphics pipeline's bandwidth, saved between guacd and the remote
@@ -916,7 +917,8 @@ place for fixes that ship on v0 before beta.
   - VNC defaults to the native backend, where guacd-bridge's parity gate
     keeps the bridge until beta.2 with the native backend behind
     `backend: native`; with no `backend:` key, a v1 file cannot send VNC
-    through the bridge. telnet goes through the bridge for any configured
+    through the bridge. (Resolved: VNC now defaults to the bridge, and
+    `backend: native` opts in.) telnet goes through the bridge for any configured
     connection: the connection is the opt-in that guacd-bridge's
     Registration row asks for.
   - The row named the native SSH backend and the bridge; native VNC
@@ -1009,7 +1011,8 @@ place for fixes that ship on v0 before beta.
   - **Refusals:** a request that offers no `occamy.v1` gets 400
     `bad_request` as JSON. Every other refusal gets the upgrade, `close`
     and a WebSocket close with the same code: 4001 for `Origin`, 4000
-    for the token, 1002 or 1003 for `hello`, 4001 for a connection or
+    for the token, 1002 or 1003 for `hello` (1009 for one over 2048
+    bytes), 4001 for a connection or
     session the token does not open. The read limit is 64 KiB until
     `serve` lets the client in, after the route has verified its token,
     then the agreed message size. A refused client gets 1 s from its
@@ -1048,7 +1051,8 @@ place for fixes that ship on v0 before beta.
     of their own session until TCP gives up.
   - **The owner's hello sizes the session:** on the connection route the
     backend is made at that size (columns and rows for ssh, pixels for
-    guacd; native VNC takes the server's size); on the session route the
+    guacd; native VNC took the server's size, and now asks the server
+    for the hello's); on the session route the
     owner's hello becomes a `backend.Resize`. A viewer's hello resizes
     nothing.
   - **Sizes (added in review):** a terminal is at most 1000 columns by
@@ -1562,3 +1566,39 @@ place for fixes that ship on v0 before beta.
     return URL: a login CSRF, as the attacker. Both need a leak beyond
     the flow. Binding the code to the browser as well, with a cookie,
     would close both for clients on occamyd's origin.
+
+## Implementation notes: backends and the API reference
+
+- **Status.** Done in the change that started VNC's opt-in period
+  ([guacd-bridge](guacd-bridge.md), Implementation notes: the opt-in
+  period).
+- **What was done.**
+  - Configuration v1: `backend` on each connection (`guacd` or
+    `native`, filled with the protocol's default: `native` for ssh,
+    `guacd` for the others), `adhoc_backends` for ad-hoc targets by
+    protocol, and `ard` on vnc connections
+    ([native-vnc-backend](native-vnc-backend.md), Implementation notes:
+    registration). ssh refuses `guacd`, rdp refuses `native` until NLA
+    has run end to end, telnet has no native backend, and `tls` and
+    `ard` need `backend: native`.
+  - The backend factory is keyed by protocol and backend; `POST
+    /api/v1/sessions`, the connection stream and the ad-hoc path look
+    up the connection's or `adhoc_backends`' backend. The session's
+    state keeps naming it `ssh`, `vnc` or `guacd`.
+  - Routes register through a mux that records their patterns
+    (`routeMux`), so that `TestAPIDoc` can check that
+    [docs/api.md](../../docs/api.md), the reference of every route
+    with its tokens, requests, replies, errors and limits, has one
+    section per route of the public and debug listeners.
+- **Deviations.** The behaviour change for v1 files on master: vnc
+  connections without `backend` now go through guacd, and a vnc
+  connection with `tls` must set `backend: native`, or the file fails
+  to load with the key named. No release served v1 files' vnc
+  connections, so no release changes.
+- **Follow-ups.**
+  - `decodeJSON` matches field names case-insensitively, as
+    `encoding/json` does, so `{"Connection":"x"}` passes the unknown
+    field check; docs/api.md does not promise either.
+  - The 400s of `GET /api/v1/auth/oidc/login` carry no
+    `Cache-Control: no-store`, while the callback's `invalid_state`
+    does.

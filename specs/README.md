@@ -49,7 +49,7 @@ The target design of Occamy as a whole: core, backends, protocol.
 
 | Spec | Status | Deliverable |
 |------|--------|-------------|
-| [008-native-architecture.md](008-native-architecture.md) | In progress: 1 of 10 sub-designs complete, 9 more validated; building beta.1 (merged: backend interface, protocol framing and messages, pacer, framebuffer, auth tokens, session core, viewer writer, guacd bridge, native SSH, terminal state, config v1, native VNC phases 1 to 4 (phase 4's check against a Mac pending), v0 routes, codec measurement, HTTP server, Go client core, codecs, OIDC, API sessions and streams); RDP spike steps 1 and 3 done against xrdp and reviewed, step 2 waits for a Windows host | Occamy v1: beta scope, path to pure Go, 10 sub-designs including the benchmark that sets the 10x and 50 ms targets (#3, #18, #21) |
+| [008-native-architecture.md](008-native-architecture.md) | In progress: 1 of 10 sub-designs complete, 9 more validated; building beta.1 (merged: backend interface, protocol framing and messages, pacer, framebuffer, auth tokens, session core, viewer writer, guacd bridge, native SSH, terminal state, config v1, native VNC phases 1 to 4 (phase 4's check against a Mac pending) and its opt-in (`backend: native`), v0 routes, codec measurement, HTTP server, Go client core, codecs, OIDC, API sessions and streams); RDP spike steps 1 and 3 done against xrdp and reviewed, step 2 waits for a Windows host | Occamy v1: beta scope, path to pure Go, 10 sub-designs including the benchmark that sets the 10x and 50 ms targets (#3, #18, #21) |
 
 ### maintenance
 
@@ -58,7 +58,7 @@ Build, dependencies, CI, demo environment, and documentation.
 | Spec | Status | Deliverable |
 |------|--------|-------------|
 | [001-status-quo.md](001-status-quo.md) | Complete | Buildable baseline on current toolchains, verified and documented |
-| [006-demo-stack-refresh.md](006-demo-stack-refresh.md) | Complete | Multi-arch VNC and SSH demo servers; VNC and SSH end-to-end tests in CI (pressure test in CI since 003) |
+| [006-demo-stack-refresh.md](006-demo-stack-refresh.md) | Complete | Multi-arch VNC and SSH demo servers; VNC and SSH end-to-end tests in CI (pressure test in CI since 003); native VNC next to guacd's on `occamy-v1`, API v1 |
 | [011-release-readiness.md](011-release-readiness.md) | Complete (v0.5.0) | Licensing, changelog, security policy, CI gates, attested multi-arch releases and binaries |
 
 ### server

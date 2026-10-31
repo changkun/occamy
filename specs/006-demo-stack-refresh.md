@@ -11,9 +11,10 @@ affects:
   - client/occamy-web/src/components/Login.vue
   - .github/workflows/dockerimage.yml
   - Makefile
+  - docker/occamy-v1.yaml
 effort: medium
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -212,6 +213,38 @@ match.
   - [rdp-xrdp](005-upstream-guacamole/rdp-xrdp.md): where the tests and
     defaults now live.
 - Follow-up: 003 enables the pressure test in CI.
+
+## Addendum: native VNC in the matrix
+
+Added with the guacd bridge's opt-in period for VNC
+([guacd-bridge](008-native-architecture/guacd-bridge.md), Implementation
+notes: the opt-in period), after this spec was complete.
+
+- `docker/docker-compose.yaml` runs a second `occamyd`, `occamy-v1`,
+  from the same image with `-conf /occamy/v1.yaml`, published on 5637.
+  Its v1 file, `docker/occamy-v1.yaml`, has the static user `demo`
+  (password `occamy`) and two connections to `vnc:5900`: `vnc-native`
+  with `backend: native` and `vnc-guacd` through guacd. The VNC password
+  comes from `OCCAMY_DEMO_VNC_PASSWORD`, and the signing key goes to a
+  tmpfs at `/run/occamy`, since the distroless image's `nonroot` user
+  cannot write `/occamy`. `occamy-v1` waits for `guacd` and `vnc` only.
+- `tests/v1_test.go` (`TestE2EV1`) signs in through API v1, streams
+  each connection twice with the Go client of protocol v1, waits for a
+  frame of the desktop, checks that the session's state names the
+  backend, `vnc` or `guacd`, and that a frame acknowledges pointer and
+  key input, then closes the session. It is skipped unless
+  `OCCAMY_E2E_V1_ENDPOINT` is set; `make e2e` sets it to
+  `localhost:5637`, so CI's `e2e` job runs it with the v0 tests.
+  `TestMain` also checks that `occamy-v1` still signs in afterwards.
+- `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` let a second stack
+  run beside the first under another project name (`-p`), on a shared
+  host; the defaults are unchanged.
+- `internal/config`'s `TestDemoV1File` loads `docker/occamy-v1.yaml`, so
+  that a configuration change that breaks it fails `go test` rather
+  than the `e2e` job.
+- Validation: on linux/arm64 (Podman, libkrun VM) the whole suite,
+  `TestE2E` and `TestE2EV1`, passed against the stack under its own
+  project name, and `TestE2EV1` passed 7 of 7 runs.
 
 ## Appendix: revival verification harness
 

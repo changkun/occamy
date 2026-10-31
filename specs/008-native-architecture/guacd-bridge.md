@@ -11,7 +11,7 @@ affects:
   - internal/guacd/
 effort: large
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -523,12 +523,52 @@ do not).
   it (see the follow-up above). The owner's `hello` sizes the screen,
   each side capped at 8192.
 - **Deviations.**
-  - `vnc` goes to the native backend by default, ahead of the parity
-    gate's opt-in period, and no configuration key (`backend:`) picks the
-    bridge for it yet, so a v1 file cannot serve VNC through guacd.
+  - `vnc` went to the native backend by default, ahead of the parity
+    gate's opt-in period, and no configuration key (`backend:`) picked
+    the bridge for it, so a v1 file could not serve VNC through guacd.
+    Resolved: see Implementation notes: the opt-in period.
   - telnet needs no opt-in beyond a configured connection, or an ad-hoc
     target where those are allowed.
   - Kubernetes is not registered: connections have `host:port` targets
     only, and Kubernetes needs a cluster, a namespace and a pod.
-- **Follow-ups.** The `backend:` key of the parity gate, so that VNC can
-  go through the bridge and back; Kubernetes targets.
+- **Follow-ups.** ~~The `backend:` key of the parity gate, so that VNC
+  can go through the bridge and back~~ (done, below); Kubernetes targets.
+
+## Implementation notes: the opt-in period
+
+- **Status.** VNC's opt-in period (parity gate, step 1) has started:
+  the bridge serves `vnc` by default, and `backend: native` opts a
+  connection in. SSH has no opt-in period: it was native from the
+  start, and the bridge does not serve it.
+- **What was done.**
+  - Configuration v1 has `backend` on each connection, `guacd` or
+    `native`, which `ParseV1` fills with the protocol's default: `native`
+    for ssh, `guacd` for the others. `adhoc_backends` does the same for
+    ad-hoc targets, by protocol. ssh refuses `guacd`; rdp refuses
+    `native` until the native RDP backend has run NLA end to end
+    ([rdp-strategy](rdp-strategy.md)); telnet has no native backend.
+  - The backend factory in `server/backends.go` is keyed by protocol and
+    backend: ssh/native, vnc/native, and vnc, rdp and telnet on guacd.
+    The session's state names the backend as before (`ssh`, `vnc`,
+    `guacd`).
+  - A vnc connection's `tls` needs `backend: native`, since the bridge
+    would not check the certificate as `tls` says; `ard` too
+    ([native-vnc-backend](native-vnc-backend.md), phase 4).
+  - The [006](../006-demo-stack-refresh.md) stack runs `occamy-v1` with
+    the demo VNC server as `vnc-native` and `vnc-guacd`, and `make e2e`
+    streams both with the Go client (`tests/v1_test.go`); occamyd's own
+    tests drive native VNC through the routes against
+    `internal/backend/vnc/vnctest` (`server/vnc_e2e_test.go`).
+- **What the matrix covers so far.** Against x11vnc in the demo stack:
+  VNC Authentication with a stored password, the desktop arriving, and
+  pointer and key input acknowledged, on both backends. Against the
+  fake server: stored and prompted credentials, a refused password,
+  the screen, key, pointer and text input, resize by the hello and by
+  the client, clipboard both ways, the cursor, visibility, the end
+  reasons, the `tls` policy and an ad-hoc target. Not yet: sharing
+  roles, reconnect, AltGr and dead keys, and the performance and soak
+  steps.
+- **Follow-ups.** The rest of step 2's matrix on real servers
+  (TigerVNC's ExtendedDesktopSize and clipboard, sharing roles,
+  reconnect, keyboard layouts); steps 3 and 4; then VNC's switch of
+  default, after which `backend: guacd` stays for one minor release.

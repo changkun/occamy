@@ -503,7 +503,7 @@ Response: `200`, with `Cache-Control: no-store`.
 | `id` | The session's ID |
 | `connection` | The connection's ID; absent for an ad-hoc target |
 | `protocol` | `ssh`, `vnc`, `rdp` or `telnet` |
-| `backend` | What serves the session: `ssh`, `occamyd`'s native SSH backend; `vnc`, its native VNC backend; or `guacd`, the guacd bridge. ssh is always native, and rdp and telnet always go through guacd. vnc goes through guacd unless the connection's `backend` key, or `adhoc_backends` for an ad-hoc target, says `native` ([configuration.md](configuration.md#the-connection-registry-connections)) |
+| `backend` | What serves the session: `ssh`, `occamyd`'s native SSH backend; `vnc`, its native VNC backend; or `guacd`, the guacd bridge. ssh is always native, and rdp and telnet always go through guacd. vnc goes through guacd unless the connection's `backend` key, or `adhoc_backends` for an ad-hoc target, says `native` ([configuration.md](configuration.md#backends)) |
 | `class` | `terminal` (ssh) or `graphical` (the others, telnet through guacd included): whether the stream carries a terminal or tiles of pixels |
 | `size` | `width` and `height`, in character cells for a terminal and in pixels for a graphical session; absent until the remote reports a size |
 | `viewers` | The viewers connected now, the owner first if connected, then the others in the order they joined: each one's `id`, as in `viewer-joined`, and `role`, `owner`, `viewer` or `read-only`. Empty, `[]`, while nobody is connected |
