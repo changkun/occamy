@@ -687,18 +687,17 @@ that guacd was `vnc`'s default, they are corrected below.
   with the reason; any other failure fails the test, and so does a
   listed cell that passes, so the table below is what the suite finds.
   A cell that cannot reach the desktop, whose screen does not arrive or
-  whose probe never answers, gets a second try after 15 s through
-  either backend, since that is how a hung server looks. A guacd cell
-  gets a second try for any failure, which is generous to the
-  baseline; a native cell whose check found a difference gets none.
+  whose probe never answers, tries again 15 s later, up to three times
+  in all, through either backend, since that is how a hung server
+  looks. A guacd cell gets a second try for any failure, which is
+  generous to the baseline; a native cell whose check found a
+  difference gets none.
 - **The matrix.** x11vnc 0.9.17 (libvncserver 0.9.15) and TigerVNC
   1.15's Xvnc, Debian trixie; guacd 1.6. On the shared host, at a load
   average of 7 to 18, the whole matrix took 192 s on fresh servers and
   124 to 128 s on warm ones. Every run gave the table below. The runs
-  that failed cells did so on server faults (next items), which the rig
-  now absorbs, or, once, on the first version of the x11vnc watchdog,
-  which killed a live x11vnc. The last whole run, with the rig as it
-  is, needed no second try.
+  that failed cells did so on server faults (next items), or, once, on
+  the first version of the x11vnc watchdog, which killed a live x11vnc.
 
   | Feature | x11vnc native | x11vnc guacd | TigerVNC native | TigerVNC guacd |
   |---|---|---|---|---|
@@ -786,17 +785,22 @@ that guacd was `vnc`'s default, they are corrected below.
     connected: libvncclient logged "Error handling message from VNC
     server", and guacd ended with status 515. The next check on the
     same port passed; hence the second try for guacd cells.
-  - x11vnc with MIT-SHM hung for good now and then as a client
-    connected, through either backend: it logged "caught X11 error:"
-    with no detail, dropped its shared-memory polling images and stopped
-    in a futex wait, leaving connections unaccepted, so every later cell
-    on its port failed. That happened once in six whole runs, then four
-    times in about two runs of the x11vnc columns. The demo x11vnc now
-    runs with `-noshm`, under which fifteen runs of the x11vnc columns had
-    no X error, and under a watchdog that kills one that leaves a
-    connection unaccepted for 10 s and starts it again
-    ([006](../006-demo-stack-refresh.md), Addendum: TigerVNC and the VNC
-    parity matrix). It is a fault of the server, not of either backend.
+  - x11vnc hangs for good now and then as a client connects, through
+    either backend: it logs "caught X11 error:" with no detail, drops
+    its polling images on its way to exit and stops in a futex wait,
+    leaving connections unaccepted, so every later cell on its port
+    fails. With MIT-SHM, that happened once in six whole runs, then four
+    times in about two runs of the x11vnc columns, on a Mac. Without it
+    (`-noshm`), fifteen runs of the x11vnc columns on the Mac had no X
+    error, but the first run in CI had three, all in guacd cells as
+    guacd connected. The demo x11vnc now logs the failed request
+    (`X11VNC_PRINT_XERROR`), and runs under a watchdog that kills one
+    that reports an X error or leaves a connection unaccepted for 10 s,
+    and starts it again ([006](../006-demo-stack-refresh.md), Addendum:
+    TigerVNC and the VNC parity matrix). In that CI run, a cell's second
+    try met the hung x11vnc that its first try had found, before the
+    watchdog had killed it; hence up to three tries. It is a fault of
+    the server, not of either backend.
   - Read-only input is dropped by the session, before any backend, so
     the row cannot differ between backends; it is in the matrix because
     the gate names sharing roles.

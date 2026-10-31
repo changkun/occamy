@@ -376,9 +376,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   desktops report what reaches them, typed lines and clipboard text,
   over the session's clipboard. The two TigerVNC test images became
   one, `docker/demo/tigervnc`, which the integration tests build too.
-  The demo x11vnc runs without MIT-SHM, with which it hung now and then
-  as a client connected, and under a watchdog that restarts it when it
-  stops accepting connections.
+  x11vnc hangs now and then after an X error as a client connects; the
+  demo x11vnc runs under a watchdog that kills it when it reports an X
+  error or stops accepting connections, and starts it again, and the
+  matrix tries a cell that cannot reach the desktop up to three times.
 - The native RDP backend's clipboard, the first part of its second
   phase: `internal/rdp` joins static virtual channels and reassembles
   their chunks within a bound per channel, and carries text both ways
