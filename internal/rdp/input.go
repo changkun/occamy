@@ -160,6 +160,9 @@ type InputEvent struct {
 	e       inputEvent
 	pos     image.Point // a pointer event's position, clamped when sent
 	pointer bool
+	// joined is the number of events after this one that go in its PDU:
+	// a sequence the server reads as one key.
+	joined int
 }
 
 // KeyEvent is a key press or release by its scancode in scan code set 1.
@@ -181,14 +184,19 @@ func KeyEvent(scancode uint16, down bool) InputEvent {
 
 // PauseEvents are the events of a press of Pause, which has no release:
 // Control after the 0xe1 prefix and Num Lock, pressed and released, as
-// FreeRDP sends the make code E1 1D 45 E1 9D C5.
+// FreeRDP sends the make code E1 1D 45 E1 9D C5. SendInput puts the four
+// in one PDU, as FreeRDP does.
 func PauseEvents() []InputEvent {
-	return []InputEvent{
+	evs := []InputEvent{
 		KeyEvent(0xe100|scancodeLeftControl, true),
 		KeyEvent(scancodeNumLock, true),
 		KeyEvent(0xe100|scancodeLeftControl, false),
 		KeyEvent(scancodeNumLock, false),
 	}
+	for i := range evs {
+		evs[i].joined = len(evs) - 1 - i
+	}
+	return evs
 }
 
 // UnicodeEvent is a key press or release of a UTF-16 code unit, for text
@@ -258,8 +266,9 @@ const maxInputBatch = 255
 
 // SendInput sends events in order: as fast-path input when the server's
 // input capability set allows it, and in slow-path Input Event PDUs
-// otherwise. It puts up to maxInputBatch events in a PDU and writes the
-// PDUs at once. Pointer positions are clamped to the desktop.
+// otherwise. It puts up to maxInputBatch events in a PDU, without
+// splitting PauseEvents' sequence, and writes the PDUs at once. Pointer
+// positions are clamped to the desktop.
 func (c *Client) SendInput(events ...InputEvent) error {
 	if len(events) == 0 {
 		return nil
@@ -272,6 +281,11 @@ func (c *Client) SendInput(events ...InputEvent) error {
 	var frames [][]byte
 	for len(events) > 0 {
 		n := min(len(events), maxInputBatch)
+		// End the PDU before a sequence that would not fit in it; one is
+		// far shorter than a PDU.
+		for i := n - 1; n < len(events) && i > 0 && i+events[i].joined >= n; i-- {
+			n = i
+		}
 		batch = batch[:0]
 		for _, ev := range events[:n] {
 			if ev.pointer {

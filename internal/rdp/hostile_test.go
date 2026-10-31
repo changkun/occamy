@@ -300,9 +300,9 @@ func TestMaxBitmapPixels(t *testing.T) {
 	}
 }
 
-// pointerAttribute builds a 2×2 TS_POINTERATTRIBUTE at 24 bits per pixel
+// pointerAttributePDU builds a 2×2 TS_POINTERATTRIBUTE at 24 bits per pixel
 // for a cache index.
-func pointerAttribute(index int) []byte {
+func pointerAttributePDU(index int) []byte {
 	var w writer
 	w.u16(24)
 	w.u16(index)
@@ -319,11 +319,10 @@ func pointerAttribute(index int) []byte {
 // A pointer's cache index must lie in the cache, both when the server
 // sets it and when it uses it.
 func TestPointerCacheIndex(t *testing.T) {
-	var d decoder
-	if _, _, err := d.parsePointerAttribute(pointerAttribute(maxPointerCache-1), true, false); err != nil {
+	if _, err := parsePointerAttribute(pointerAttributePDU(maxPointerCache-1), true, false); err != nil {
 		t.Fatalf("index %d: %v", maxPointerCache-1, err)
 	}
-	if _, _, err := d.parsePointerAttribute(pointerAttribute(maxPointerCache), true, false); err == nil {
+	if _, err := parsePointerAttribute(pointerAttributePDU(maxPointerCache), true, false); err == nil {
 		t.Errorf("index %d accepted", maxPointerCache)
 	}
 	c := testClient(64, 64)

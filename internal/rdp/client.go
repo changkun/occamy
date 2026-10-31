@@ -45,6 +45,12 @@ type Config struct {
 	// ClientName is the client's name the server sees; "occamy" by
 	// default.
 	ClientName string
+	// RoutingCookie sends the first nine characters of Username as the
+	// routing cookie of the connection request ("Cookie: mstshash="), as
+	// mstsc and FreeRDP do, for a load balancer that routes by user. It
+	// goes in the clear, before TLS, so it is off by default: then the
+	// connection request carries only the protocols offered.
+	RoutingCookie bool
 	// KeyboardLayout is the input locale identifier of the layout; US
 	// English (0x409) by default.
 	KeyboardLayout uint32
@@ -264,7 +270,11 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 
 func (c *Client) connect(ctx context.Context) error {
 	// Connection initiation, [MS-RDPBCGR] 1.3.1.1 phase 1.
-	if err := c.t.write(connectionRequest(c.cfg.Username, c.cfg.Protocols)); err != nil {
+	cookie := ""
+	if c.cfg.RoutingCookie {
+		cookie = c.cfg.Username
+	}
+	if err := c.t.write(connectionRequest(cookie, c.cfg.Protocols)); err != nil {
 		return err
 	}
 	f, err := c.read()
@@ -539,6 +549,7 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 		c.stats.Bytes += int64(len(buf))
 		c.mu.Unlock()
 		if f.fastPath {
+			c.errInfo = 0 // the session went on after a reason
 			err = c.handleFastPath(out, f)
 		} else {
 			var ch uint16
@@ -604,6 +615,7 @@ func (c *Client) handleShareControl(out Output, data []byte) (done bool, err err
 		data = data[total:]
 		switch typ {
 		case pduDemandActive:
+			c.errInfo = 0 // the session went on after a reason
 			if done {
 				return false, errors.New("rdp: a second Demand Active in one PDU")
 			}
@@ -732,8 +744,16 @@ func (c *Client) handleShareData(out Output, p []byte) error {
 		return errors.New("rdp: compressed PDU, though the client offered no compression")
 	}
 	body := r.b
-	if out == nil && typ2 != pdu2SetErrorInfo {
-		return nil
+	if typ2 != pdu2SetErrorInfo {
+		// A reason holds only for the end that follows it: a server ends
+		// a session with Set Error Info, then optionally Deactivate All
+		// and a Disconnect Provider Ultimatum, and closes ([MS-RDPBCGR]
+		// 1.3.1.4.2). A share data PDU after the reason means the session
+		// went on, so a later hang-up is not the end the reason gave.
+		c.errInfo = 0
+		if out == nil {
+			return nil
+		}
 	}
 	switch typ2 {
 	case pdu2Update:
@@ -938,14 +958,24 @@ func (c *Client) slowPathPointer(out Output, typ int, p []byte) error {
 	return nil
 }
 
+// pointer decodes a new pointer shape, caches it and shows it. The shape
+// is charged by its size before it is decoded, as a bitmap is.
 func (c *Client) pointer(out Output, p []byte, withBpp, large bool) error {
-	i, cur, err := c.dec.parsePointerAttribute(p, withBpp, large)
+	a, err := parsePointerAttribute(p, withBpp, large)
 	if err != nil {
 		return err
 	}
-	c.cursors[i] = cur
+	if err := c.pace(cursorCost(a.w, a.h)); err != nil {
+		return err
+	}
+	img, err := c.dec.pointerImage(a.w, a.h, a.bpp, a.xorMask, a.andMask)
+	if err != nil {
+		return err
+	}
+	c.cursors[a.index] = cursor{img: img, hot: a.hot}
 	c.count(func(s *Stats) { s.Pointers++ })
-	return c.setCursor(out, cur.img, cur.hot)
+	c.showCursor(out, img, a.hot)
+	return nil
 }
 
 func (c *Client) cachedPointer(out Output, p []byte) error {
@@ -1021,7 +1051,8 @@ const drawStrip = 64 << 10
 // pointer is 2 bytes of a PDU, and the output copies its shape, up to
 // 384×384 pixels, and shows it to every viewer; a move is 4 bytes. The
 // charge bounds them to 8,192 a second at most, and a shape to its
-// pixels' share of decodeRate.
+// pixels' share of decodeRate. A new shape is charged by the size it
+// declares before it is decoded.
 const pointerCost = 64 * 64
 
 // shownCursor is the pointer shape the client last gave its output.
@@ -1031,22 +1062,30 @@ type shownCursor struct {
 	set bool
 }
 
-// setCursor gives out a pointer shape, unless it is the one shown, at
-// the pace of decodeRate.
+// cursorCost is what showing a pointer shape of w×h pixels is charged.
+func cursorCost(w, h int) int { return max(pointerCost, w*h) }
+
+// setCursor gives out a pointer shape the client has, a cached, hidden
+// or default one, unless it is the one shown, at the pace of decodeRate.
 func (c *Client) setCursor(out Output, img *image.RGBA, hot image.Point) error {
 	if c.shown.set && c.shown.img == img && c.shown.hot == hot {
 		return nil
 	}
 	n := pointerCost
 	if img != nil {
-		n = max(n, img.Rect.Dx()*img.Rect.Dy())
+		n = cursorCost(img.Rect.Dx(), img.Rect.Dy())
 	}
 	if err := c.pace(n); err != nil {
 		return err
 	}
+	c.showCursor(out, img, hot)
+	return nil
+}
+
+// showCursor gives out a pointer shape that has been charged.
+func (c *Client) showCursor(out Output, img *image.RGBA, hot image.Point) {
 	c.shown = shownCursor{img: img, hot: hot, set: true}
 	out.Cursor(img, hot)
-	return nil
 }
 
 // moveCursor reports the server's move of the pointer to out, at the

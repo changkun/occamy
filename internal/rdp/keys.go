@@ -18,6 +18,11 @@ const (
 	scancodeLeftControl = 0x1d
 )
 
+// ScancodeBreak is the key Pause is while Control is held: E0 46, an
+// ordinary key with a press and a release, which Windows reads as Break.
+// FreeRDP sends it so (RDP_SCANCODE_PAUSE).
+const ScancodeBreak = 0xe046
+
 // ScancodeForHID returns the scancode of a USB HID keyboard usage: its
 // set 1 make code (internal/keymap), with 0xe0 in the high byte for a
 // code after the prefix. Lang1 and Lang2, the Korean keys, whose set 1
@@ -62,6 +67,7 @@ var keysymScancodes = map[uint32]uint16{
 	0xffe1: 0x2a, 0xffe2: 0x36, 0xffe3: 0x1d, 0xffe4: 0xe01d, 0xffe5: 0x3a,
 	0xffe7: 0xe05b, 0xffe8: 0xe05c, 0xffe9: 0x38, 0xffea: 0xe038, 0xffeb: 0xe05b,
 	0xffec: 0xe05c, 0xffff: 0xe053, 0xfe03: 0xe038, // ISO_Level3_Shift (AltGr)
+	0xff6b: ScancodeBreak, // Break, which a keyboard types as Control and Pause
 }
 
 // ScancodeForKeysym returns the scancode of the key that produces an X11

@@ -53,32 +53,54 @@ func (c *countConn) Write(p []byte) (int, error) {
 
 // Many events go out in PDUs of at most 255 events, written at once.
 func TestSendInputBatches(t *testing.T) {
-	keys := make([]InputEvent, 600)
-	for i := range keys {
-		keys[i] = KeyEvent(0x1e, i%2 == 0)
+	keys := func(n int) []InputEvent {
+		evs := make([]InputEvent, n)
+		for i := range evs {
+			evs[i] = KeyEvent(0x1e, i%2 == 0)
+		}
+		return evs
 	}
-	for _, fastPath := range []bool{true, false} {
-		conn := &countConn{}
-		c := &Client{width: 1024, height: 768, t: &transport{conn: conn}, ioChannel: 1003}
-		c.fastPathInput.Store(fastPath)
-		if err := c.SendInput(keys...); err != nil {
-			t.Fatal(err)
-		}
-		var counts []int
-		for b := conn.buf.Bytes(); len(b) > 4; {
-			var n, events int
-			if fastPath {
-				// A count byte after a two-byte length.
-				n, events = int(b[1]&0x7f)<<8|int(b[2]), int(b[3])
-			} else {
-				n = int(binary.BigEndian.Uint16(b[2:]))
-				events = slowPathEvents(b[:n])
+	for _, tc := range []struct {
+		name   string
+		events []InputEvent
+		want   []int
+	}{
+		{"keys", keys(600), []int{255, 255, 90}},
+		// Pause's sequence is not split: the PDU ends before it.
+		{"Pause across the cut", slices.Concat(keys(253), PauseEvents(), keys(10)), []int{253, 14}},
+		{"Pause at the end of a PDU", slices.Concat(keys(251), PauseEvents(), keys(10)), []int{255, 10}},
+	} {
+		for _, fastPath := range []bool{true, false} {
+			conn := &countConn{}
+			c := &Client{width: 1024, height: 768, t: &transport{conn: conn}, ioChannel: 1003}
+			c.fastPathInput.Store(fastPath)
+			if err := c.SendInput(tc.events...); err != nil {
+				t.Fatal(err)
 			}
-			counts = append(counts, events)
-			b = b[n:]
-		}
-		if conn.writes != 1 || !slices.Equal(counts, []int{255, 255, 90}) {
-			t.Errorf("fast-path %v: %d writes of PDUs of %v events, want one of 255, 255 and 90", fastPath, conn.writes, counts)
+			var counts []int
+			for b := conn.buf.Bytes(); len(b) > 4; {
+				var n, events int
+				if fastPath {
+					// The count in the header, or in a byte after the
+					// length, which takes one byte or two.
+					n, events = int(b[1]), int(b[0]>>2&0xf)
+					i := 2
+					if b[1]&0x80 != 0 {
+						n, i = int(b[1]&0x7f)<<8|int(b[2]), 3
+					}
+					if events == 0 {
+						events = int(b[i])
+					}
+				} else {
+					n = int(binary.BigEndian.Uint16(b[2:]))
+					events = slowPathEvents(b[:n])
+				}
+				counts = append(counts, events)
+				b = b[n:]
+			}
+			if conn.writes != 1 || !slices.Equal(counts, tc.want) {
+				t.Errorf("%s, fast-path %v: %d writes of PDUs of %v events, want one of %v", tc.name, fastPath, conn.writes, counts, tc.want)
+			}
 		}
 	}
 	conn := &countConn{}
@@ -183,6 +205,47 @@ func TestPointerPaced(t *testing.T) {
 	if want := wait(shapes * (pointerCost + 80*80)); !near(clock.slept, want) {
 		t.Errorf("%d shapes waited %v, want %v", 2*shapes, clock.slept, want)
 	}
+
+	// Hiding the pointer and showing the default one are changes, and
+	// each costs a tile.
+	frames = frames[:0]
+	for i := range moves {
+		code := uint8(rdptest.FPPtrNull)
+		if i%2 == 1 {
+			code = rdptest.FPPtrDefault
+		}
+		frames = append(frames, rdptest.FastPath(rdptest.Update(code, nil)))
+	}
+	c, clock = testClock(w, h)
+	out = &cursorCount{}
+	if err := runFrames(c, out, frames...); !errors.Is(err, io.EOF) || out.shapes != moves {
+		t.Fatalf("hidden and default: Run returned %v after %d shapes", err, out.shapes)
+	}
+	if want := wait(moves * pointerCost); !near(clock.slept, want) {
+		t.Errorf("%d hidden and default pointers waited %v, want %v", moves, clock.slept, want)
+	}
+}
+
+// A new shape waits for its charge before it is decoded, as a bitmap
+// does, so that a server cannot make the client decode one shape ahead
+// of the budget.
+func TestPointerPacedBeforeDecoding(t *testing.T) {
+	c, clock := testClock(64, 64) // a budget of two 80×80 shapes and a bit
+	var decoded []int
+	c.sleep = func(d time.Duration) error {
+		decoded = append(decoded, c.Stats().Pointers)
+		return clock.sleep(d)
+	}
+	var frames [][]byte
+	for i := range 3 {
+		frames = append(frames, rdptest.FastPath(rdptest.Update(rdptest.FPPointer, rdptest.Pointer(i, image.Point{}, solid(80, 80, color.RGBA{A: 0xff})))))
+	}
+	if err := runFrames(c, &cursorCount{}, frames...); !errors.Is(err, io.EOF) {
+		t.Fatal(err)
+	}
+	if !slices.Equal(decoded, []int{1, 2}) {
+		t.Errorf("the client waited with %v shapes decoded, want 1 and 2: the second and the third shapes wait before they are decoded", decoded)
+	}
 }
 
 // A shape that is shown already is not shown again: the cached pointer
@@ -221,6 +284,30 @@ func TestRunErrorInfoThenHangUp(t *testing.T) {
 	}
 	if err := runFrames(testClient(1024, 768), &screen{}); !errors.Is(err, io.EOF) {
 		t.Errorf("no reason: Run returned %v, want io.EOF", err)
+	}
+}
+
+// A reason holds for the end that follows it, with at most a Deactivate
+// All between them ([MS-RDPBCGR] 1.3.1.4.2). Once the session goes on
+// after it, a hang-up is not that end.
+func TestRunErrorInfoStale(t *testing.T) {
+	bitmap := rdptest.BitmapUpdate(rdptest.FillBitmap(image.Rect(0, 0, 64, 64), color.RGBA{R: 0xff, A: 0xff}))
+	for _, tc := range []struct {
+		name   string
+		frames [][]byte
+		want   error // nil: Run returns nil
+	}{
+		{"a fast-path update after it", [][]byte{rdptest.SetErrorInfo(0x1), rdptest.FastPath(rdptest.Update(rdptest.FPBitmap, bitmap))}, io.EOF},
+		{"a slow-path update after it", [][]byte{rdptest.SetErrorInfo(0x1), rdptest.SlowPathUpdate(bitmap)}, io.EOF},
+		{"a slow-path update, then the ultimatum", [][]byte{rdptest.SetErrorInfo(0x9), rdptest.SlowPathUpdate(bitmap), rdptest.DisconnectUltimatum()}, nil},
+		{"Deactivate All after it", [][]byte{rdptest.SetErrorInfo(0x9), rdptest.DeactivateAll()}, ErrorInfo(0x9)},
+		{"Deactivate All and the ultimatum", [][]byte{rdptest.SetErrorInfo(0x9), rdptest.DeactivateAll(), rdptest.DisconnectUltimatum()}, ErrorInfo(0x9)},
+		{"a second reason", [][]byte{rdptest.SetErrorInfo(0x9), rdptest.SetErrorInfo(0x3)}, ErrorInfo(0x3)},
+	} {
+		err := runFrames(testClient(1024, 768), &screen{}, tc.frames...)
+		if tc.want == nil && err != nil || tc.want != nil && !errors.Is(err, tc.want) {
+			t.Errorf("%s: Run returned %v, want %v", tc.name, err, tc.want)
+		}
 	}
 }
 
