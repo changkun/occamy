@@ -805,10 +805,18 @@ that guacd was `vnc`'s default, they are corrected below.
     port. The native backend sends TigerVNC the codes as QEMU key
     events; without `RawKeyboard`, TigerVNC maps the keysyms to its own
     layout, so a German client types German text on its us screen too.
-  - A freshly started x11vnc did not answer the first cut text on each
-    port, through either backend; the check's barrier retries four
-    times, five seconds each, so the first check on each x11vnc port
-    takes about 15 s.
+  - A freshly started x11vnc drops the first cut text sent to it,
+    whichever backend sends it; the next comes back in about 5 s, and
+    every session's first after that within a second or two, through
+    either backend. On fresh servers, with two sessions of two nonces
+    each per port and backend, the native backend's first nonce on
+    each of the four x11vnc ports was lost and guacd's sessions after
+    it lost none; after a restart of the x11vnc container, with guacd
+    first, guacd's first nonce on each port was lost and the native
+    backend's lost none. TigerVNC lost none. It is x11vnc's start, not
+    a backend: the barrier no longer tries four times, which hid that,
+    and the test warms each port before the matrix and before a retry,
+    and logs what each port took.
   - Once in six whole runs, a guacd session to TigerVNC ended as it
     connected: libvncclient logged "Error handling message from VNC
     server", and guacd ended with status 515. The next check on the
