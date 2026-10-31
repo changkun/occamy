@@ -1591,7 +1591,10 @@ place for fixes that ship on v0 before beta.
     [docs/api.md](../../docs/api.md), the reference of every route
     with its tokens, requests, replies, errors and limits, has one
     section per route of the public and debug listeners. The list
-    holds no ServeMux, so a route cannot be added past it (review).
+    holds no ServeMux, and the one it builds is handed out as a
+    `routeHandler`, which serves and finds routes but has no method
+    that adds one, so a route cannot be added past the list without a
+    type assertion (review).
   - **Strict JSON (review):** `decodeJSON` reads the body, then walks
     its tokens with `json.Decoder.Token` against the target type
     (`checkMembers`, `server/strictjson.go`) before decoding it: a
@@ -1625,7 +1628,9 @@ place for fixes that ship on v0 before beta.
   itself with no credential sent; `TestVNCTLS` sends wrong passwords
   on the refused connections and counts the credentials `vnctest`
   receives. The mutants that survived before are killed, or no
-  longer compile (a route added on the ServeMux past the list).
+  longer compile (a route added on the ServeMux past the list). One
+  is equivalent: `Run` asking for the kept size even when it is
+  empty, which the limits check refuses anyway.
 - **Follow-ups.**
   - A hello of 8192×8192 passes `backend.MaxResizeSide` but exceeds
     the native VNC backend's 2^25 pixels; the backend ignores it and
