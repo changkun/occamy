@@ -1651,6 +1651,24 @@ func FuzzProgressive(f *testing.F) {
 			if p := g.c.gfx.progTiles; p > progTileLimit(128, 128) || p < 0 {
 				t.Fatalf("%d tiles", p)
 			}
+			// The count of tiles with signs, which a context's end
+			// trusts to skip its scan, is the tiles', and the pool
+			// stays bounded.
+			if s := g.c.gfx.surfaces[1]; s != nil && s.prog != nil {
+				st := s.prog
+				signed := 0
+				for _, tile := range st.tiles {
+					if tile != nil && tile.sign != nil {
+						signed++
+					}
+				}
+				if signed != st.signed {
+					t.Fatalf("%d tiles keep signs, counted %d", signed, st.signed)
+				}
+			}
+			if n := len(g.c.gfx.signs); n > maxSignPool {
+				t.Fatalf("%d spare signs", n)
+			}
 			if err != nil {
 				return
 			}

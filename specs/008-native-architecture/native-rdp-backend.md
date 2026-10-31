@@ -2018,6 +2018,17 @@ RDP's guacd path, RDP no longer needs guacd at all.
   decodes whole tiles; with the default minimization time of 60 s,
   minimizing their slow inputs made an earlier RemoteFX run appear to
   stall at 0 executions a second, hence 5 s.
+  - After review's fixes, `FuzzProgressive` also checks that the count
+    of tiles keeping signs, which a context's end trusts to skip its
+    scan, matches the tiles, and that the sign pool stays within its
+    bound; its seeds alone fail when a release does not lower the
+    count. The targets the fixes touched ran again, alone, 70 s each
+    with 4 workers and `-fuzzminimizetime 5s`: `FuzzProgressive` 293,000
+    executions (load 9.4), and with the new check 343,000 (load 13.9);
+    `FuzzGFX` 253,000 (load 13.5); `FuzzRemoteFX` 983,000 (load 24.5);
+    and `FuzzConnectionSequence`, for the bitmap updates' new charges,
+    4.1 million (load 19.9). None failed. `FuzzRLGR`'s code did not
+    change.
 - **Benchmarks** (3 runs each, the host's 1-minute load 6.9 when they
   started and 12.3 when they ended): a frame of 1024 × 768 in tiles of
   64 × 64, a PDU each, decoded and drawn: `BenchmarkGFXRemoteFX` 11.1
