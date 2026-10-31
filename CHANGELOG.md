@@ -39,9 +39,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   that applies guacd's drawing and copies each frame into the session's
   framebuffer before it answers the frame's `sync`, so that guacd paces
   against the bridge alone. It turns guacd's pointer, title, clipboard
-  and credential requests into session events, and viewers' keys,
-  pointer, wheel, text, clipboard and resizes into Guacamole
-  instructions. `internal/guacamole`'s display now applies `cursor`,
+  and credential requests into session events, and viewers' keys
+  (but for those without a keysym, which guacd cannot take), pointer,
+  wheel, text, clipboard and resizes into Guacamole instructions.
+  `internal/guacamole`'s display now applies `cursor`,
   reports damage as rectangles, and copies areas out. Not served by any
   route yet.
 - A conformance corpus for the guacd bridge: guacd 1.6's VNC, RDP and
@@ -82,7 +83,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   terminal sessions get the diff between the screens a viewer was sent,
   so bulk output coalesces, an echo goes ahead of a status line or other
   output already on the screen, and the terminal's answers to the
-  shell's queries reach the shell. Not served by any route yet.
+  shell's queries reach the shell. A client's `close` with a code other
+  than `normal` is logged at info, since a browser's close frame
+  carries 1000 for most codes. Not served by any route yet.
 - A native VNC backend for protocol v1, `internal/backend/vnc`, in pure
   Go: RFB 3.3, 3.7 and 3.8 with the security types None and VNC
   Authentication, asking the session's owner for a password the
@@ -216,8 +219,25 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   code. A frame is applied as `Next` delivers it and acknowledged when
   the caller asks for the next event, so a slow caller holds the server
   back instead of queueing frames, and input never waits for `Next`.
-  Tiles of plugged codecs decode in parallel. No API stability promise
-  until the release candidate.
+  The frame shown and not yet acknowledged counts against the frame
+  window, and each queued message against the backlog at its size and
+  512 bytes more. Tiles of plugged codecs decode in parallel. No API
+  stability promise until the release candidate.
+- The browser's client of protocol v1, a TypeScript library in
+  `client/occamy-web/src/protocol` that depends on no framework: the
+  handshake over a WebSocket, deflate through `DecompressionStream`,
+  WebP and JPEG through `createImageBitmap`, decoding in Workers, whole
+  frames presented to a canvas, keyboard input as keysyms with USB HID
+  usages, pointer, wheel, clipboard and close codes. It bounds what a
+  server can make it hold as the Go client does, feeds the inflater a
+  slice at a time so that Chrome cannot inflate a bomb ahead of the
+  cap, decodes images without their EXIF, which browsers apply
+  whatever they are told, fails a session whose decoding Worker dies or
+  falls silent, and in a hidden page acknowledges frames as they
+  arrive. It runs every golden vector of `protocol/testdata` under
+  vitest, and an interop test against occamyd's stream code, built with
+  the race detector, in the `web` job. The Vue app does not use it yet
+  (specs/009).
 - `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS with the
   VNC backend's certificate policy, NLA through CredSSP 5 or later with
   NTLMv2 of its own, offered by default, the connection sequence, bitmap

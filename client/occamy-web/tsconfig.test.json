@@ -1,0 +1,10 @@
+{
+  // The tests of src/protocol, which run in Node under vitest, and the
+  // configs that run them.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"]
+  },
+  "include": ["src/protocol/**/*.ts", "vitest.config.ts"],
+  "exclude": []
+}

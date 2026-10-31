@@ -10,7 +10,7 @@ affects:
   - tests/
 effort: medium
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -193,13 +193,17 @@ layer, and any tools.
     (Follow-ups).
   - The slow-consumer policy is one ordered queue of small events and
     complete frames, each frame at its `frame-end`. Frames are bounded by
-    the protocol: more than `frame_window` + 1 undelivered is a
-    `protocol-error`. Title, clipboard, cursor and pointer position hold
-    their latest value and replace an undelivered event of their kind in
-    place; at most 3 bells wait; a viewer that leaves cancels its
-    undelivered join. More than 1024 undelivered events, or more bytes
-    than max(64 MiB, min((window + 2) × 3 screens, 1 GiB)), is taken for
-    a broken server and closed with `protocol-error`. The screen is the
+    the protocol: more than `frame_window` + 1 undelivered, counting the
+    frame `Next` delivered and the caller has not yet acknowledged by
+    calling again, is a `protocol-error`. Title, clipboard, cursor and
+    pointer position hold their latest value and replace an undelivered
+    event of their kind in place; at most 3 bells wait; a viewer that
+    leaves cancels its undelivered join. More than 1024 undelivered
+    events, or more bytes than max(64 MiB, min((window + 2) × 3 screens,
+    1 GiB)), is taken for a broken server and closed with
+    `protocol-error`; each queued message counts its size and 512 bytes
+    more, above the 110 to 334 measured for holding it, so that small
+    messages cannot hold far more than they count. The screen is the
     largest that a frame held or being read was drawn for, so a queued
     frame of a large screen does not count against the small one the
     next frame resizes to; a tile of a plugged codec counts its decoded
@@ -358,6 +362,10 @@ layer, and any tools.
   - `stream`'s terminal writer keeps the larger of two sequence numbers
     for the pacer's input timing (`max(in.seq, seq)`), which picks the
     old one once numbers wrap. It only times one input, once in 2³².
+- **Browser counterpart:** the TypeScript core in
+  `client/occamy-web/src/protocol` follows this package's design, its
+  bounds and its delivery and acknowledgement rules, for the browser;
+  see [009](../009-react-web-client.md#implementation-notes-protocol-client).
 - **Tests:** end-to-end against `stream.Serve` with real sessions and
   the backendtest backends, in synctest bubbles: a graphical screen drawn
   and copied at random converges byte for byte, through raw tiles and
