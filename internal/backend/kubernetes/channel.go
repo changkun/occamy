@@ -196,9 +196,11 @@ func quote(s string) string {
 
 // cut is quote without the quotes, for the text of an error that holds
 // what the server sent, such as a header of a failed upgrade or the
-// names in its certificate: at most maxQuoted bytes, cut at a
+// names in its certificate: at most maxQuoted bytes of s, cut at a
 // character, with every control character and invalid byte turned into
-// U+FFFD, so that the text cannot break a log line.
+// U+FFFD, so that the text cannot break a log line. The bound is on the
+// bytes taken from s: each one replaced becomes the three of U+FFFD, so
+// the result may be up to three times as long.
 func cut(s string) string {
 	s, more := head(s)
 	s = strings.ToValidUTF8(s, "\uFFFD")

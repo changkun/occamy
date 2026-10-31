@@ -69,7 +69,8 @@ var keepalive = 30 * time.Second
 // Hooks for tests, nil otherwise: dialed runs in Run once the stream is
 // open, before anything is written to it, and serving in serve once its
 // goroutines run, before it waits for them, with the stream and the
-// channel of the reader's result.
+// channel of the reader's result. They are package state, so tests that
+// set them must not run in parallel.
 var (
 	testHookDialed  func()
 	testHookServing func(conn *websocket.Conn, ended chan error)
