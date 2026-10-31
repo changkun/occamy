@@ -9,8 +9,8 @@ privately as described in [SECURITY.md](SECURITY.md).
 Search the existing issues first. A good bug report says which version or
 commit you ran, how you deployed it (image or source), which protocol you
 connected with, what you expected, and what happened, with `occamyd`
-logs. Remove tokens and passwords from the logs: tokens contain the remote
-credentials.
+logs. Remove tokens and passwords from the logs: v0 tokens contain the
+remote credentials.
 
 ## Development
 
@@ -19,7 +19,7 @@ Podman or Docker with a compose provider.
 
 ```
 make build      # build the image (CONTAINER_ENGINE=docker for Docker)
-make run        # start occamy and the demo servers on localhost:5636
+make run        # start occamy and the demo servers on localhost:5636 and :5637
 make e2e        # end-to-end tests against the running stack
 make stop
 ```
@@ -66,7 +66,8 @@ the spec first, and update it when the change makes it inaccurate.
 - Add tests for new behaviour, and a regression test for every bug fix.
 - Add a line under `Unreleased` in [CHANGELOG.md](CHANGELOG.md) for any
   user-visible change.
-- CI (`go`, `web`, `image` and `e2e`) must pass before a PR merges. PRs
+- CI (`go`, `lint`, `build` on macOS and Windows, `web`, `image` and
+  `e2e`) must pass before a PR merges. PRs
   merge with a merge commit, so that the commit hashes cited in specs stay
   valid.
 

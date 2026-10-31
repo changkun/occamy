@@ -70,11 +70,12 @@ A connection goes through these steps:
 
 v1 is being built beside v0 on `master`. `occamyd` picks the server by
 the configuration file: a v0 file, without `version`, is served as
-described above, and a v1 file (`version: 1`) by the v1 server, which so
-far serves `/healthz`, static users' sign-in and, with `legacy_v0`, the
-v0 routes. Released versions behave as described above, with the v0
-routes under `/api/v1` through 0.6.0. Each package names the spec it
-implements.
+described above, and a v1 file (`version: 1`) by the v1 server, which
+serves API v1 ([api.md](api.md)): sign-in for static users and through
+OIDC, the connections and sessions, shares and their protocol v1
+streams, and, with `legacy_v0`, the v0 routes. Released versions behave
+as described above, with the v0 routes under `/api/v1` through 0.6.0.
+Each package names the spec it implements.
 
 | Path | Role |
 |------|------|

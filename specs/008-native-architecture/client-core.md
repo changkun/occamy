@@ -330,7 +330,8 @@ layer, and any tools.
     are straight alpha, as `Cursor` already is. Their tests are
     `protocol/testdata/codecs.json`: lossless vectors exact, lossy ones
     at `min_psnr`, invalid ones refused. The tile cache (`cached` and
-    slots) comes with it. #109 also turns `stream.Encoder` into
+    slots) is not part of it: #109 merged without one, and it is the
+    graphics pipeline's Tile cache task. #109 also turns `stream.Encoder` into
     per-viewer encoders made by `Config.NewEncoder`, which this
     package's tests that build a `stream.Config` follow: their PNG codec
     is a `stream.Encoder` with `Tile`, `Lossy` and `Cursor`. Until then the
@@ -348,7 +349,9 @@ layer, and any tools.
     WebSocket with the same code, since `stream.Conn` has no `Close`;
     occamyd's handler must. `dial_test.go`'s `wsServer` is the adapter
     such a handler needs. The owner's `hello` size still does not size
-    the remote (known; see session-core).
+    the remote (known; see session-core). (Both done in the Streams
+    task: `wsConn.finish` in `server/streams.go` closes with the code
+    sent, and the owner's `hello` sizes the backend.)
   - Pacer: the decode average follows the raw samples, and a held frame
     is one sample of the whole hold. It feeds three things: the frame
     interval, so motion stays slow for about as long as the hold

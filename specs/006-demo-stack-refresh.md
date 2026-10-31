@@ -71,7 +71,9 @@ name, so no fixed subnet is needed.
 - `ssh/Dockerfile`: Debian stable, openssh-server, password login for a
   demo user.
 - `rdp/` (xrdp) added by [005](005-upstream-guacamole.md), together with a
-  `guacd` service if that spec adopts upstream guacd.
+  `guacd` service if that spec adopts upstream guacd. (Both added:
+  [rdp-xrdp](005-upstream-guacamole/rdp-xrdp.md) and
+  [guacd-compose-service](005-upstream-guacamole/guacd-compose-service.md).)
 
 ### Compose (`docker/docker-compose.yaml`)
 
@@ -94,9 +96,10 @@ unless `OCCAMY_E2E_ENDPOINT` is set, so `go test ./...` stays hermetic.
 
 A job that runs `make build`, `make run` (`compose up -d --build --wait`)
 and the end-to-end test, then dumps the stack's logs on failure. The
-pressure test is skipped unless `OCCAMY_PRESSURE_N` is set, and CI does not
-set it yet: it still crashes `occamyd` (#20), and
-[003](003-session-lifecycle-hardening.md) turns it on once fixed.
+pressure test is skipped unless `OCCAMY_PRESSURE_N` is set. CI did not
+set it at first, since it crashed `occamyd` (#20); since
+[003](003-session-lifecycle-hardening.md) the e2e job runs
+`make e2e OCCAMY_PRESSURE_N=10`.
 
 ## Testing Strategy
 
@@ -212,7 +215,7 @@ match.
     healthcheck, no restart policy;
   - [rdp-xrdp](005-upstream-guacamole/rdp-xrdp.md): where the tests and
     defaults now live.
-- Follow-up: 003 enables the pressure test in CI.
+- Follow-up: 003 enables the pressure test in CI (done).
 
 ## Addendum: native VNC in the matrix
 

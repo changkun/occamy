@@ -225,7 +225,8 @@ do not).
 
 - **Status.** Interpreter additions and Bridge backend are done
   (#94). The conformance corpus followed (#104, see its notes below);
-  registration has not, so the spec stays validated.
+  registration has not, so the spec stays validated. (2026-10-30: it
+  has since; see Implementation notes: registration.)
 - **What the interpreter gained** (`internal/guacamole`):
   - `Display` applies `cursor`; `TakeCursor` returns the image (copied
     from the source layer when the instruction applies, as
@@ -325,8 +326,8 @@ do not).
     reach the server unchanged; RDP has no bit for it.
   - Send `disconnect` before closing on cancellation, as `Client.js`
     does, so guacd logs a clean leave.
-  - ~~The conformance corpus decides whether `Unsupported` stays empty on
-    real VNC, RDP and SSH sessions.~~ It does on all three recordings.
+  - The conformance corpus decides whether `Unsupported` stays empty on
+    real VNC, RDP and SSH sessions: it does on all three recordings.
 
 ## Implementation notes: conformance corpus
 

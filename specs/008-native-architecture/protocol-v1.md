@@ -9,7 +9,7 @@ affects:
   - docs/protocol-cn.md
 effort: large
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -439,6 +439,7 @@ web client ([009](../009-react-web-client.md)) and the client core
   with one allocation, the message; decoding a hello query 168 ns.
 - **Follow-ups.** The viewer writer and the Streams task use this
   package. The web client's TypeScript codec is tested against
-  `messages.json`. The graphics pipeline's measurement fixes raw's
+  `messages.json`. (All three done: `internal/stream`, `server/` and
+  `client/occamy-web/src/protocol` use it.) The graphics pipeline's measurement fixes raw's
   channel order and deflate's container (raw's order is fixed as RGBA,
   and its Codecs task fixed the container). `ViewerInfo` gains a name.

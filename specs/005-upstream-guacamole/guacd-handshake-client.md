@@ -8,7 +8,7 @@ affects:
   - internal/guacd/
 effort: medium
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -29,7 +29,7 @@ From `src/guacd/connection.c`, `src/libguac/user-handshake.c` and
 1. Client sends `select` with one argument: a protocol name (`vnc`, `ssh`,
    `rdp`, ...) for a new connection, or a connection ID starting with `$`
    to join one. An unknown ID gets
-   `error,"No such connection.",519` (`RESOURCE_NOT_FOUND`), then the
+   `error,"No such connection.",516` (`RESOURCE_NOT_FOUND`), then the
    socket closes.
 2. guacd replies `args`. The first element is the protocol version
    (`VERSION_1_5_0` in 1.6.0); the rest are parameter names.
@@ -100,7 +100,7 @@ From `src/guacd/connection.c`, `src/libguac/user-handshake.c` and
 - `TestHandshakeJoin`: `ConnectionID: "$abc"` sends `select,$abc` and
   returns `ID == "$abc"`.
 - `TestHandshakeNoSuchConnection`: an `error` reply returns `*Error` with
-  status 519.
+  status 516, as guacd 1.6 sends (see guacd-sessions' notes).
 - `TestHandshakeTimeout`: a fake that never answers fails when the
   context deadline passes.
 - `TestHandshakeSpecialValues`: a password containing `;`, `,` and

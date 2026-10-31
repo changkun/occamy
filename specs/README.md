@@ -107,9 +107,9 @@ everything through guacd with a cgo-free `occamyd` (005) →
 `v1.0.0-beta.1` with API and protocol v1, the guacd bridge, native SSH,
 and native VNC as vnc's default → beta.2 with VNC's guacd fallback
 deleted once the benchmark shows native 10x better → rc.1 freezes the
-API and protocol, with native RDP as rdp's default → v1.0 with no guacd
-and no Guacamole protocol, which drops telnet → the rest of RDP in v1.x.
-Native is the default wherever a native backend exists, and guacd stays
-only as an explicit fallback and the benchmark's baseline (owner,
-2026-10-31; [guacd-bridge](008-native-architecture/guacd-bridge.md),
-Parity gate).
+API and protocol, with native RDP as rdp's default → v1.0 with no guacd,
+no Guacamole protocol and no v0 routes. Telnet has no native backend and
+is dropped with guacd. Native is the default wherever a native backend
+exists, and guacd stays only as an explicit fallback and the benchmark's
+baseline (owner, 2026-10-31;
+[guacd-bridge](008-native-architecture/guacd-bridge.md), Parity gate).

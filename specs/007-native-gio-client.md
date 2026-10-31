@@ -11,7 +11,7 @@ affects:
   - go.mod
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -66,4 +66,6 @@ client core rather than Gio. See [010](010-native-swift-client.md). PR #51
 and branches `gio` and `gio-client` stay as they are until the maintainer
 closes them. `internal/guac` on `gio-client` is a reuse candidate for the
 guacd bridge ([guacd-bridge](008-native-architecture/guacd-bridge.md)).
+(Since: PR #51 is closed, and the bridge reuses the interpreter the
+benchmark wrote fresh, `internal/guacamole`, not `internal/guac`.)
 
