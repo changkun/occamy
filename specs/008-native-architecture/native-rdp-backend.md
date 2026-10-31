@@ -602,9 +602,9 @@ and guacd leaves the default deployment.
   the client answers the challenge; a challenge without sealing; a
   wrong public key proof, each without credentials delegated; and
   cancel while the server stalls at either step. The client also logs
-  on through the acceptor in `internal/rdp`. Coverage: `internal/rdp`
-  88.1% of statements, `channel.go` 90.5% and `cliprdr.go` 95.6%;
-  `internal/backend/rdp` 98.4%.
+  on through the acceptor in `internal/rdp`. Coverage, with the
+  review's tests: `internal/rdp` 88.5% of statements, `channel.go`
+  94.3% and `cliprdr.go` 96.9%; `internal/backend/rdp` 98.5%.
 - **Integration test.** `TestIntegrationClipboard`, under the
   `rdp_integration` tag, pastes text and reads the session's X
   CLIPBOARD selection, which xrdp-chansrv serves, and sets the
