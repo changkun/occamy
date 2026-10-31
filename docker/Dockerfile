@@ -17,6 +17,8 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -o occamyd .
+# The license, notice and patent files of the Go code compiled in.
+RUN sh scripts/third-party-licenses.sh THIRD_PARTY_LICENSES
 # The licences of the lossy tile encoders, for the runtime image's
 # licenses/, with the PATENTS file gen2brain/vpx ships: the WebM Project's
 # patent grant, which covers Google's implementations of VP8 and does not
@@ -33,6 +35,7 @@ WORKDIR /occamy
 COPY --from=build /occamy/occamyd ./
 COPY conf.yaml ./
 COPY LICENSE ./licenses/
+COPY --from=build /occamy/THIRD_PARTY_LICENSES ./licenses/
 COPY client/occamy-web/LICENSE.guacamole ./licenses/guacamole/LICENSE
 COPY client/occamy-web/NOTICE.guacamole ./licenses/guacamole/NOTICE
 COPY --from=build /licenses/vpx ./licenses/vpx/

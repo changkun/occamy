@@ -358,7 +358,7 @@ func TestRequestLogOmitsSecrets(t *testing.T) {
 		`"POST" "/api/v1/auth/token" 401 `,
 		`"GET" "/healthz" 200 `,
 		`"GET" "/api/v1/connections" 200 `,
-		`user "alice" signed in`,
+		`user "alice" signed in, idp local`,
 		"sign-in failed from 127.0.0.1:",
 	} {
 		if !strings.Contains(got, line) {
