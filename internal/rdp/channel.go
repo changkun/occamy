@@ -193,28 +193,54 @@ func (c *Client) chunk(id uint16, total int, first, last bool, data []byte) []by
 }
 
 // sendChannel sends msg on vc in chunks of chunkSize, chunksPerWrite of
-// them at a time, so that input written meanwhile waits for one write of
-// chunks, not for the whole message. writeDue's lock keeps the chunks of
-// other messages on the channel out.
+// them at a time (channelBatch).
 func (c *Client) sendChannel(vc *vchannel, msg []byte) error {
+	b := channelBatch{c: c}
+	if err := b.add(vc, msg); err != nil {
+		return err
+	}
+	return b.flush()
+}
+
+// channelBatch gathers the chunks of channel messages and writes them
+// chunksPerWrite at a time: the small messages that are due share a
+// write, and input written meanwhile waits for one write of chunks, not
+// for a whole message. writeDue's lock keeps the chunks of other
+// messages on the channels out.
+type channelBatch struct {
+	c      *Client
+	frames [][]byte
+}
+
+// add appends msg on vc in chunks of chunkSize, and writes every
+// chunksPerWrite of them.
+func (b *channelBatch) add(vc *vchannel, msg []byte) error {
 	if vc.id == 0 {
 		return nil
 	}
-	frames := make([][]byte, 0, chunksPerWrite)
 	for i := 0; ; i += chunkSize {
 		end := min(i+chunkSize, len(msg))
-		frames = append(frames, c.chunk(vc.id, len(msg), i == 0, end == len(msg), msg[i:end]))
-		if end == len(msg) || len(frames) == chunksPerWrite {
-			if err := c.t.writeFrames(frames); err != nil {
+		b.frames = append(b.frames, b.c.chunk(vc.id, len(msg), i == 0, end == len(msg), msg[i:end]))
+		if len(b.frames) == chunksPerWrite {
+			if err := b.flush(); err != nil {
 				return err
 			}
-			clear(frames)
-			frames = frames[:0]
 		}
 		if end == len(msg) {
 			return nil
 		}
 	}
+}
+
+// flush writes the chunks gathered, if any.
+func (b *channelBatch) flush() error {
+	if len(b.frames) == 0 {
+		return nil
+	}
+	err := b.c.t.writeFrames(b.frames)
+	clear(b.frames)
+	b.frames = b.frames[:0]
+	return err
 }
 
 // channelIO is the state of the client's channel output, which the reader
@@ -246,11 +272,16 @@ func (c *Client) writeDue() error {
 	c.chio.mu.Lock()
 	msgs := c.cliprdrDue(nil)
 	c.chio.mu.Unlock()
+	b := channelBatch{c: c}
 	for _, m := range msgs {
-		if err := c.sendChannel(m.vc, m.encode()); err != nil {
+		if err := b.add(m.vc, m.encode()); err != nil {
 			c.chio.err = err
 			return err
 		}
+	}
+	if err := b.flush(); err != nil {
+		c.chio.err = err
+		return err
 	}
 	return nil
 }

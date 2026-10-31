@@ -775,6 +775,7 @@ func TestClipboardText(t *testing.T) {
 		{[]byte{0x00, 0xdc, 'a', 0}, "\ufffda"},            // a low surrogate alone
 		{[]byte{'a', 0, 0, 0, 'b', 0}, "a"},                // up to the NUL
 		{[]byte{'a', 0, 'b'}, "a"},                         // an odd byte
+		{[]byte{'a', 0, 0x3d, 0xd8, 0x00}, "a"},            // a high surrogate, then an odd byte
 		{[]byte{0x3d, 0xd8, 0x00, 0xde}, "😀"},              // a pair
 		{[]byte{0x3d, 0xd8, 0x00, 0x00, 'b', 0}, "\ufffd"}, // a pair cut by the NUL
 	} {
