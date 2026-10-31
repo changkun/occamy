@@ -457,6 +457,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   not yet verified against Windows, and does not speak RDP's graphics
   pipeline yet
   ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)).
+- A native Kubernetes backend, `internal/backend/kubernetes`, in pure
+  Go and without client-go: a `kubernetes` connection opens a terminal
+  in a pod's container through the API server's `pods/exec` (or
+  `pods/attach`), over the `v5.channel.k8s.io` WebSocket subprotocol
+  with `v4.channel.k8s.io` as fallback. It authenticates with a bearer
+  token (`token_file`, `token_env` or a prompt) or a client
+  certificate, sends the token only after the API server's certificate
+  is checked against `tls` (the system's roots, `ca_file` or `pins`),
+  never logs it, and refuses names that are not Kubernetes's. It has no
+  guacd backend and no ad-hoc targets.
 
 ### Changed
 
@@ -517,6 +527,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 - occamyd's request log no longer records query strings, which carry the
   v0 token and with it the remote credentials.
+- A secret file, `password_file`, `token_file` or
+  `auth.oidc.client_secret_file`, of more than 64 KiB is refused, so
+  that a path such as `/dev/zero` cannot fill occamyd's memory.
 - A panic on a goroutine a backend starts, such as the SSH backend's
   readers of the remote's output and the VNC, RDP and guacd backends'
   writers, ends its session with close 1011 instead of crashing occamyd

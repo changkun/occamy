@@ -16,6 +16,7 @@ import (
 
 	"changkun.de/x/occamy/internal/backend"
 	bridge "changkun.de/x/occamy/internal/backend/guacd"
+	"changkun.de/x/occamy/internal/backend/kubernetes"
 	"changkun.de/x/occamy/internal/backend/rdp"
 	"changkun.de/x/occamy/internal/backend/ssh"
 	"changkun.de/x/occamy/internal/backend/vnc"
@@ -40,13 +41,17 @@ type target struct {
 	// The host key policy of an ssh target.
 	hostKeys              []string
 	insecureIgnoreHostKey bool
-	// tls is the certificate policy of a vnc or rdp target, and ard allows
-	// a vnc target's Apple Remote Desktop authentication.
+	// tls is the certificate policy of a vnc or rdp target or of a
+	// kubernetes target's API server, and ard allows a vnc target's Apple
+	// Remote Desktop authentication.
 	tls config.ConnectionTLS
 	ard bool
 	// security is the security mode of an rdp target on the native
 	// backend, empty for its default.
 	security string
+	// kubernetes is the pod of a kubernetes target, whose addr is the
+	// API server's.
+	kubernetes config.Kubernetes
 }
 
 // screen is the size that the owner's hello asks for: pixels for a
@@ -60,7 +65,7 @@ type screen struct {
 // backendMaker makes the backend of one session.
 type backendMaker struct {
 	// name is the backend as the session's state reports it: ssh, vnc,
-	// rdp or guacd.
+	// rdp, kubernetes or guacd.
 	name string
 	make func(t target, s screen) (backend.Backend, error)
 }
@@ -97,13 +102,17 @@ func (b backends) serves(protocol string) bool {
 }
 
 // newBackends returns the factory: the native SSH backend for ssh, the
-// native VNC and RDP backends for vnc and rdp, their default, and the
-// guacd bridge at g for telnet, and for vnc and rdp with backend: guacd.
+// native VNC and RDP backends for vnc and rdp, their default, the
+// native Kubernetes backend for kubernetes, and the guacd bridge at g
+// for telnet, and for vnc and rdp with backend: guacd. kubernetes has
+// no guacd backend
+// (specs/008-native-architecture/native-kubernetes-backend.md).
 func newBackends(g config.Guacd) backends {
 	b := backends{}
 	b.register("ssh", config.BackendNative, "ssh", newSSH)
 	b.register("vnc", config.BackendNative, "vnc", newVNC)
 	b.register("rdp", config.BackendNative, "rdp", newRDP)
+	b.register("kubernetes", config.BackendNative, "kubernetes", newKubernetes)
 	for _, p := range []string{"vnc", "rdp", "telnet"} {
 		b.register(p, config.BackendGuacd, "guacd", newBridge(g, p))
 	}
@@ -196,6 +205,54 @@ func vncConfig(t target) (vnc.Config, error) {
 	// the certificate names the name.
 	if cfg.TLS.ServerName == "" {
 		cfg.TLS.ServerName = t.name
+	}
+	return cfg, nil
+}
+
+// newKubernetes makes a native Kubernetes backend, which runs the
+// connection's command in its pod, or attaches to the container, through
+// the API server at t.addr, in a terminal of the hello's size.
+func newKubernetes(t target, s screen) (backend.Backend, error) {
+	cfg, err := kubernetesConfig(t)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Cols, cfg.Rows = s.cols, s.rows
+	return kubernetes.New(cfg)
+}
+
+// kubernetesConfig is the native Kubernetes backend's configuration for
+// t, with the token and the CA file read.
+func kubernetesConfig(t target) (kubernetes.Config, error) {
+	roots, err := t.tls.RootCAs()
+	if err != nil {
+		return kubernetes.Config{}, fmt.Errorf("reading the CA file: %w", err)
+	}
+	k := t.kubernetes
+	cfg := kubernetes.Config{
+		Addr:        t.addr,
+		Namespace:   k.Namespace,
+		Pod:         k.Pod,
+		Container:   k.Container,
+		Command:     k.Command,
+		Attach:      k.Attach,
+		NoTTY:       k.TTY != nil && !*k.TTY,
+		PromptToken: t.creds.Prompt,
+		CertFile:    t.creds.ClientCertFile,
+		KeyFile:     t.creds.ClientKeyFile,
+		TLS: kubernetes.TLS{
+			ServerName:         t.tls.ServerName,
+			RootCAs:            roots,
+			Pins:               t.tls.Pins,
+			InsecureSkipVerify: t.tls.InsecureSkipVerify,
+		},
+	}
+	if t.creds.TokenFile != "" || t.creds.TokenEnv != "" {
+		token, err := t.creds.Token()
+		if err != nil {
+			return kubernetes.Config{}, fmt.Errorf("reading the token: %w", err)
+		}
+		cfg.Token = kubernetes.Token(token)
 	}
 	return cfg, nil
 }

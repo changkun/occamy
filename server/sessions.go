@@ -253,6 +253,7 @@ func connectionTarget(c *config.Connection) target {
 		tls:                   c.TLS,
 		ard:                   c.ARD,
 		security:              c.Security,
+		kubernetes:            c.Kubernetes,
 	}
 }
 
@@ -264,6 +265,9 @@ func (s *server) adhocTarget(ctx context.Context, req *openRequest) (target, *re
 	}
 	if !s.backends.serves(req.Protocol) {
 		return target{}, badRequest("unknown protocol %q", req.Protocol)
+	}
+	if !config.AdhocProtocol(req.Protocol) {
+		return target{}, badRequest("%s has no ad-hoc targets: name a connection", req.Protocol)
 	}
 	addr, err := config.NormalizeTarget(req.Protocol, req.Target)
 	if err != nil {
