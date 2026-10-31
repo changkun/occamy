@@ -1,6 +1,6 @@
 ---
 title: Occamy protocol v1
-status: validated
+status: complete
 track: architecture
 depends_on: []
 affects:
@@ -221,7 +221,7 @@ web client ([009](../009-react-web-client.md)) and the client core
 
 - **Status.** All four tasks are done: Framing in #84, and Handshake,
   Messages and Document in #96. The spec stays validated until the
-  wrap-up.
+  wrap-up. (Wrapped up on 2026-10-31: see Outcome.)
 
 ### Framing
 
@@ -368,7 +368,13 @@ web client ([009](../009-react-web-client.md)) and the client core
     and, since the delta review of the server, `too-slow` 4008. A
     WebSocket library that closes on its own read limit uses 1009, which
     is already ours. The session core's end reasons map one to one onto
-    the codes from 4002 and onto 1001.
+    codes: closed 4002, owner left 4003, idle 4004, remote ended 4005,
+    failed 4006, shutdown 1001 and internal 1011
+    (`internal/stream/serve.go`, `closeFor`). The other codes are not
+    end reasons: the server sends `unauthorized`, `forbidden` and
+    `viewer-limit` when it refuses a stream, and `too-slow` when it
+    drops a viewer. (Corrected 2026-10-31: this said the end reasons
+    map onto the codes from 4002 and onto 1001.)
   - Since that review, too: a viewer that leaves a frame
     unacknowledged for the server's viewer timeout gets `too-slow`,
     hidden or not, so a hidden client acknowledges the frames it was
@@ -443,3 +449,124 @@ web client ([009](../009-react-web-client.md)) and the client core
   `client/occamy-web/src/protocol` use it.) The graphics pipeline's measurement fixes raw's
   channel order and deflate's container (raw's order is fixed as RGBA,
   and its Codecs task fixed the container). `ViewerInfo` gains a name.
+
+## Outcome
+
+**Summary.** The four tasks shipped in two pull requests, implemented
+directly rather than dispatched: Framing in #84 and Handshake, Messages
+and Document in #96, both on 2026-10-30. Later pull requests fixed what
+this spec left to the graphics pipeline and the server: raw's channel
+order and WebP in #103, a floor on the message size in #100, the
+deflate container and per-codec vectors in #109, and `too-slow` with
+the hidden client's acknowledgements in #111. Drift: minimal. Of 22
+items (13 in the proposed shape and 9 decisions), 18 shipped as
+specified, 2 diverged (the handshake's layout and the frame window's
+exception for input), and 2 are partly not implemented (the viewer's
+name and decision 3's tuning): 82% satisfied.
+
+### What shipped
+
+- **`protocol/`**, the public package:
+  - the header, the primitives and the type registry (Framing);
+  - 29 message types, 3 either way, 11 from the client and 15 from the
+    server, each with `Append` and `Decode`;
+  - the handshake: `Hello`, `Welcome`, `Capabilities` with `Agree`, the
+    hello query and the token subprotocol;
+  - 15 close codes, WebSocket statuses, and `CloseCodeFor`;
+  - golden vectors in `protocol/testdata/`: `framing.json`,
+    `messages.json` and, from #109, `codecs.json`;
+  - unit, golden and round-trip tests, a test that checks every example
+    in docs/protocol.md against the vectors, 6 fuzz targets, 10
+    benchmarks and 3 examples.
+- **[docs/protocol.md](../../docs/protocol.md)**, the normative
+  description (decision 7), and `docs/protocol-cn.md` marked as the v0
+  (Guacamole) description.
+- **Users of the package**, built by other specs: the server's viewer
+  writer and streams (`internal/stream`, `server/`), the Go client core
+  (`client/`, #107), and the web client's TypeScript codec
+  (`client/occamy-web/src/protocol`, #114), tested against
+  `messages.json`.
+
+### Design evolution
+
+- **The handshake's layout** (#96). `hello` and `welcome` put fixed
+  fields before strings, `hello` gained `cols` and `rows`, `welcome`
+  gained `viewer_id`, and the frame window and the message size live
+  only in the capabilities. The proposed shape above now says so;
+  Implementation notes, Deviations, lists each change.
+- **Close codes are WebSocket statuses** (#96), with `internal-error`
+  (1011) for the server's own failures. `too-slow` (4008) was added in
+  #111 (0fe9ff2).
+- **The frame window has an exception for input** (#96,
+  docs/protocol.md, The frame window). The proposed shape says at most
+  `window` frames are unacknowledged. The frame that carries an input's
+  effect goes out at once, one beyond the window if it is full, so a
+  viewer can have `frame_window` + 1 frames unacknowledged.
+- **A hidden viewer's acknowledgements** (#111, 93482c4). A viewer that
+  leaves a frame unacknowledged for the viewer timeout gets `too-slow`,
+  hidden or not, so a hidden client acknowledges frames as they arrive.
+  A `term-snapshot` may also come in any frame.
+
+### Not implemented
+
+- **The viewer's name.** `viewer-joined` carries a `name`, and
+  docs/protocol.md calls it the viewer's user name, but occamyd always
+  sends it empty: `session.ViewerInfo` has only an ID and a role, and
+  `internal/stream/writer.go` sets no name. The follow-up is in the
+  Implementation notes.
+- **Decision 3's tuning.** `DefaultFrameWindow` is 2, as decided, but it
+  has not been tuned with the slow-viewer test and the benchmark under
+  N1 and N2. That waits for the benchmark's v1 series and must happen
+  before the release candidate.
+- **Predicted echo.** The wire carries what it needs, the input
+  sequence number in `frame-end`, but no client uses it yet. It belongs
+  to the clients ([native-ssh-backend](native-ssh-backend.md),
+  Predicted echo).
+
+### Unspecified work
+
+- `max_message_size` below 64 KiB is refused (#100, 6375f97), since a
+  peer could agree a size too small for any terminal data and make the
+  writer panic or send empty messages (an improvement).
+- `too-slow` and the hidden client's acknowledgements (#111), so a viewer
+  that stops acknowledging or reading cannot hold the server's memory
+  (an improvement).
+- `protocol/testdata/codecs.json`, the payload of every codec occamyd
+  sends, for clients' decoders (scaffolding, #109).
+
+### Decisions
+
+- Lengths are u32, so a 4 MiB message fits and each value has one
+  encoding. Decoding refuses invalid UTF-8, and encoding replaces it
+  with U+FFFD, since titles and similar strings come from remote hosts.
+- A decoder checks fields, then trailing bytes, then the rules between
+  fields, so implementations agree on which error a message fails with.
+  Checks that need the session's state belong to the receiver.
+- No private or experimental type range. Extensions go through
+  capabilities and type numbers that are never reused.
+- One session per WebSocket (decision 5) and WebTransport after 1.0
+  (decision 6) are deferrals by decision, not gaps.
+
+### Surprises
+
+- Go's base64 decoder skips line breaks even in strict mode, so a hello
+  query or token would have had more than one encoding.
+- The graphics pipeline turned WebP from rejected into the lossy codec
+  while this was built, once pure-Go encoders appeared.
+- The Implementation notes said the end reasons map onto the codes from
+  4002 and onto 1001. `internal` maps to 1011 as well, and 4007 and 4008
+  are not end reasons; the note is corrected above.
+
+### Follow-ups
+
+- `ViewerInfo` gains a name, so `viewer-joined` carries one.
+- Tune the frame window with the benchmark's v1 series before the
+  release candidate.
+- Predicted echo in the web client ([009](../009-react-web-client.md))
+  and the client core ([client-core](client-core.md)).
+- The protocol freezes at the release candidate. After that, changes go
+  through capabilities and ignorable messages only.
+- Downstream specs checked: [client-core](client-core.md),
+  [graphics-pipeline](graphics-pipeline.md) and
+  [native-ssh-backend](native-ssh-backend.md) depend on this one and
+  need no correction.
