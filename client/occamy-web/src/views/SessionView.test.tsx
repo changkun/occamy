@@ -10,7 +10,8 @@
 // second press meanwhile, an End that resumed is ended or refused as
 // occamyd decides, for the user who opened the session as the stream's
 // welcome says, and the stream closed for the session's end counts for
-// the session ended.
+// the session ended; and the clipboard panel takes text sent for the
+// remote's.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
@@ -64,6 +65,8 @@ class Welcomed {
   readonly framebuffer = { width: 0, height: 0, data: new Uint8ClampedArray(0) }
   /** Whether the client closed the stream. */
   closed = false
+  /** The clipboard texts the client sent. */
+  readonly clipboards: string[] = []
   private readonly events: SessionEvent[] = []
   private wake: (() => void) | null = null
 
@@ -106,7 +109,8 @@ class Welcomed {
 
   view(): void {}
 
-  clipboard(): number {
+  clipboard(_mime: string, text: string): number {
+    this.clipboards.push(text)
     return 1
   }
 }
@@ -412,5 +416,55 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
     expect(r.deletes).toEqual(['DELETE /api/v1/sessions/mZ3k'])
     expect(Welcomed.last?.closed).toBe(false)
     expect(text()).toContain('Ending the session for everyone…')
+  })
+})
+
+describe('The clipboard panel of a stream welcomed as the owner’s', () => {
+  beforeEach(welcomed)
+
+  const box = (): HTMLTextAreaElement | null => container.querySelector('textarea')
+  // type puts text in the panel's box as the user would, for React's onChange.
+  const type = (text: string): void => {
+    const el = box()
+    if (el === null) {
+      throw new Error('no clipboard box')
+    }
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(el, text)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+  const remote = (text: string): void => Welcomed.last?.push({ type: 'clipboard', mime: 'text/plain;charset=utf-8', data: new TextEncoder().encode(text) })
+  const edited = 'Edited: the remote clipboard holds other text.'
+
+  it('shows the next remote clipboard after text was sent, and keeps only what was typed since', async () => {
+    await render({ token: accessToken('demo'), action: null }, ended)
+    act(() => remote('first'))
+    await settle()
+    act(() => button('Clipboard')?.click())
+    expect(box()?.value).toBe('first')
+
+    act(() => type('mine'))
+    expect(text()).toContain(edited)
+    act(() => button('Send')?.click())
+    await settle()
+    expect(Welcomed.last?.clipboards).toEqual(['mine'])
+    expect(text()).toContain('Sent to the remote clipboard.')
+    expect(box()?.value).toBe('mine')
+    expect(text()).not.toContain(edited)
+
+    // The remote clipboard changes: the box shows it.
+    act(() => remote('second'))
+    await settle()
+    expect(box()?.value).toBe('second')
+    expect(text()).not.toContain(edited)
+
+    // Text typed after a send stays, with the remote's a press away.
+    act(() => button('Send')?.click())
+    act(() => type('typed'))
+    act(() => remote('third'))
+    await settle()
+    expect(box()?.value).toBe('typed')
+    expect(text()).toContain(edited)
+    act(() => button('Show it')?.click())
+    expect(box()?.value).toBe('third')
   })
 })

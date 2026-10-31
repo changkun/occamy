@@ -57,11 +57,12 @@ export interface SessionState {
   viewers: readonly Viewer[]
   /** The owner's open credential prompts, oldest first. */
   prompts: readonly PromptEvent[]
-  /** The remote clipboard's latest text, or null before any. */
+  /** The remote clipboard's latest text, as the remote said or this client sent, or null before any. */
   clipboard: string | null
   /**
    * The clipboard panel's text: the remote clipboard's, until the user
-   * edits it, after which a new remote clipboard leaves it alone.
+   * edits it, after which a new remote clipboard leaves it alone. Text
+   * sent is the remote clipboard's.
    */
   draft: string
   /** How many times the bell rang. */
@@ -387,9 +388,7 @@ export class SessionController {
       case 'clipboard': {
         const text = clipboardText(ev.mime, ev.data)
         if (text !== null) {
-          this.lastClipboard = text
-          const { draft, clipboard } = this.state
-          this.update({ clipboard: text, draft: draft === (clipboard ?? '') ? text : draft })
+          this.agree(text)
           if (this.can.input) {
             this.options.writeClipboard?.(text).catch(() => undefined)
           }
@@ -481,9 +480,18 @@ export class SessionController {
     if (s === null || !this.can.clipboard || this.state.phase !== 'open') {
       return false
     }
-    this.lastClipboard = text
     safely(() => s.clipboard(TEXT_MIME, text))
+    this.agree(text)
     return true
+  }
+
+  // agree takes text for the remote clipboard's, as the remote said or as
+  // this client sent it: the panel's text follows, unless the user has
+  // edited it since the two last agreed.
+  private agree(text: string): void {
+    this.lastClipboard = text
+    const { draft, clipboard } = this.state
+    this.update({ clipboard: text, draft: draft === (clipboard ?? '') ? text : draft })
   }
 
   /**

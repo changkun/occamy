@@ -27,6 +27,8 @@ class FakeSession {
   readonly framebuffer = { width: 0, height: 0, data: new Uint8ClampedArray(0) }
   readonly resizes: [number, number][] = []
   readonly closes: { code: number; reason: string }[] = []
+  /** The clipboard texts the controller sent. */
+  readonly clipboards: string[] = []
   private readonly events: SessionEvent[] = []
   private wake: (() => void) | null = null
 
@@ -65,7 +67,8 @@ class FakeSession {
 
   view(): void {}
 
-  clipboard(): number {
+  clipboard(_mime: string, text: string): number {
+    this.clipboards.push(text)
     return 1
   }
 }
@@ -263,6 +266,46 @@ describe('SessionController', () => {
     s.push(clipboardEvent('third'))
     await settle()
     expect(c.getState()).toMatchObject({ clipboard: 'third', draft: 'third' })
+  })
+
+  it('takes the text it sent for the remote clipboard’s, which the next one replaces', async () => {
+    const s = new FakeSession(Role.Owner)
+    const c = await opened(s)
+    s.push(clipboardEvent('first'))
+    await settle()
+
+    // The user edits the panel's text and sends it: the remote holds it
+    // now, though the remote does not say so.
+    c.setDraft('mine')
+    expect(c.sendClipboard('mine')).toBe(true)
+    expect(s.clipboards).toEqual(['mine'])
+    expect(c.getState()).toMatchObject({ clipboard: 'mine', draft: 'mine' })
+    s.push(clipboardEvent('second'))
+    await settle()
+    expect(c.getState()).toMatchObject({ clipboard: 'second', draft: 'second' })
+
+    // Text typed after a send is an edit, which the next one leaves alone.
+    expect(c.sendClipboard('sent')).toBe(true)
+    c.setDraft('typed')
+    s.push(clipboardEvent('third'))
+    await settle()
+    expect(c.getState()).toMatchObject({ clipboard: 'third', draft: 'typed' })
+  })
+
+  it('keeps an edit when the local clipboard goes to the remote, and follows it otherwise', async () => {
+    const s = new FakeSession(Role.Owner)
+    const c = await opened(s)
+    s.push(clipboardEvent('first'))
+    await settle()
+
+    expect(c.syncClipboard('copied')).toBe(true)
+    expect(c.getState()).toMatchObject({ clipboard: 'copied', draft: 'copied' })
+    c.setDraft('mine')
+    expect(c.syncClipboard('copied again')).toBe(true)
+    expect(c.getState()).toMatchObject({ clipboard: 'copied again', draft: 'mine' })
+    // What the remote holds already is not sent again.
+    expect(c.syncClipboard('copied again')).toBe(false)
+    expect(s.clipboards).toEqual(['copied', 'copied again'])
   })
 
   it('closes the stream as unsupported when it fails to show it', async () => {

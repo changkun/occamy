@@ -200,12 +200,14 @@ describe.skipIf(server === '')('the shell’s controller with occamyd’s stream
       ])
       expect(canvas.focused).toBe(1)
 
-      // The clipboard goes to the remote, which echoes it back: the page
-      // shows it and puts it on the local clipboard, and does not send
-      // the same text back.
+      // The clipboard goes to the remote, whose clipboard the page takes
+      // it for at once; the remote echoes it back, and the page puts it
+      // on the local clipboard and does not send the same text back.
       expect(c.sendClipboard('from the shell')).toBe(true)
-      await until(c, (s) => s.clipboard === 'from the shell')
+      expect(c.getState()).toMatchObject({ clipboard: 'from the shell', draft: 'from the shell' })
+      await waitFor(() => written.length > 0)
       expect(written).toEqual(['from the shell'])
+      expect(c.getState().clipboard).toBe('from the shell')
       expect(c.syncClipboard('from the shell')).toBe(false)
 
       // Text an input method composed goes as text; the desktop takes
