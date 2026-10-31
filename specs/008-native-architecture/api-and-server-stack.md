@@ -1875,7 +1875,15 @@ to the VNC backend.
     request. `encoding/json/v2` rejects both but needs
     `GOEXPERIMENT=jsonv2` on Go 1.26. Types that decode themselves
     (`json.Unmarshaler`, `encoding.TextUnmarshaler`) and maps get the
-    duplicate check only; syntax errors stay the decoder's.
+    duplicate check only; syntax errors stay the decoder's. The check
+    is exact for flat types only: `jsonFields` gives a name that two
+    embedded structs share to the first, where encoding/json gives it
+    to the shallower or to neither, and map keys are compared as JSON
+    strings, where encoding/json reads `"1"` and `"01"` as one
+    `map[int]` key. Every request type is flat, and
+    `TestRequestTypesFlat` keeps it so: it finds each `decodeJSON`
+    call in the source and checks its type for embedded structs and
+    for maps whose keys are not plain strings (delta review).
   - The refusals of `GET /api/v1/auth/oidc/login` carry
     `Cache-Control: no-store`, as its redirects and the callback's
     `invalid_state` do (review).
@@ -1894,12 +1902,18 @@ to the VNC backend.
   `TestVNCAdhocName` opens ad-hoc targets by `.invalid` names through
   a resolver that answers once, so that dialling the name rather than
   the checked address fails, and refuses a certificate that signs
-  itself with no credential sent; `TestVNCTLS` sends wrong passwords
+  itself before the password is asked for; `TestVNCTLS` sends wrong passwords
   on the refused connections and counts the credentials `vnctest`
   receives. The mutants that survived before are killed, or no
   longer compile (a route added on the ServeMux past the list). One
   is equivalent: `Run` asking for the kept size even when it is
   empty, which the limits check refuses anyway.
+- **Delta review.** Two more mutants survived, and are killed now:
+  `TestCheckMembers` takes nesting of exactly 32 and refuses 33, and
+  `TestRoutesResolve` sends a request for every pattern that
+  `TestAPIDoc` reads to the mux that `handler` builds and wants that
+  pattern back, so that a route listed but not served (pprof's trace,
+  in the mutant) fails.
 - **Follow-ups.**
   - A hello of 8192×8192 passes `backend.MaxResizeSide` but exceeds
     the native VNC backend's 2^25 pixels; the backend ignores it and

@@ -710,7 +710,14 @@ func TestChannelWrites(t *testing.T) {
 	c := &Client{t: &transport{conn: conn}, userID: rdptest.User}
 	vc := &vchannel{name: "cliprdr", id: 1004}
 	msg := bytes.Repeat([]byte("x"), 100*chunkSize+1)
-	if err := c.sendChannel(vc, msg); err != nil {
+	send := func(vc *vchannel) error {
+		b := channelBatch{c: c}
+		if err := b.add(vc, msg); err != nil {
+			return err
+		}
+		return b.flush()
+	}
+	if err := send(vc); err != nil {
 		t.Fatal(err)
 	}
 	if want := (101 + chunksPerWrite - 1) / chunksPerWrite; conn.writes != want {
@@ -746,7 +753,7 @@ func TestChannelWrites(t *testing.T) {
 	if !bytes.Equal(got, msg) || chunks != 101 {
 		t.Errorf("reassembled %d bytes in %d chunks, want %d in 101", len(got), chunks, len(msg))
 	}
-	if err := c.sendChannel(&vchannel{name: "none"}, msg); err != nil || conn.writes != (101+chunksPerWrite-1)/chunksPerWrite {
+	if err := send(&vchannel{name: "none"}); err != nil || conn.writes != (101+chunksPerWrite-1)/chunksPerWrite {
 		t.Errorf("a channel the server gave no MCS channel: %v", err)
 	}
 }

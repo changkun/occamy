@@ -47,11 +47,15 @@ const maxCliprdrMessage = 8 + 2*MaxClipboard
 // so more mean a server that does not read.
 const maxDataRequests = 8
 
-// maxListResponses bounds the Format List Responses the client owes the
-// server. A server sends a Format List when its clipboard changes, and
-// the channel writer answers at once, so more mean a server that floods
-// lists while it does not read, or faster than the client writes.
-const maxListResponses = 64
+// listResponsesPerPass bounds the Format List Responses one pass of the
+// channel writer sends. The client owes a response to each Format List,
+// a count that grows as fast as a server sends lists, and faster than
+// the writer sends while a long paste holds it up; so the writer sends
+// the count a pass at a time, and looks again for the rest once a pass
+// is written. What it builds for a pass stays bounded however much is
+// owed, and a server that sends lists faster than it reads the
+// responses gets them as fast as it reads.
+const listResponsesPerPass = 64
 
 // ClipboardMode selects which ways clipboard text goes. With neither
 // direction the client does not ask for the clipboard channel.
@@ -106,8 +110,8 @@ type cliprdr struct {
 	// What is due to be sent.
 	initDue   bool   // the client's capabilities and first Format List
 	listDue   bool   // a Format List for new text
-	listOK    int    // Format List Responses that accept a list
-	listFail  int    // and those that refuse one that does not parse
+	listOK    int64  // Format List Responses that accept a list
+	listFail  int64  // and those that refuse one that does not parse
 	request   uint32 // a format of the server's to ask for, 0 if none
 	requested uint32 // the format asked for and not answered, 0 if none
 	provide   []uint32
@@ -155,12 +159,9 @@ func (c *Client) cliprdrMessage(out Output, msg []byte, truncated bool) error {
 		// The reader alone changes longNames, so it reads it unlocked.
 		format, ok := textFormat(body, cl.longNames)
 		c.chio.mu.Lock()
-		if cl.listOK+cl.listFail == maxListResponses {
-			err := c.owed(fmt.Errorf("rdp: more than %d clipboard Format List Responses await writing", maxListResponses))
-			c.chio.mu.Unlock()
-			return err
-		}
 		cl.owned = false
+		// One more response owed, a count of 64 bits that a server cannot
+		// send lists enough to overflow.
 		if ok {
 			cl.listOK++
 		} else {
@@ -222,7 +223,9 @@ func (c *Client) cliprdrMessage(out Output, msg []byte, truncated bool) error {
 }
 
 // cliprdrDue appends the clipboard messages that are due, in the order
-// [MS-RDPECLIP] 1.3.2 has them. chio.mu must be held.
+// [MS-RDPECLIP] 1.3.2 has them, but at most listResponsesPerPass of the
+// Format List Responses owed, and has the writer look again for the
+// rest. chio.mu must be held.
 func (c *Client) cliprdrDue(msgs []dueMessage) []dueMessage {
 	vc, cl := c.clipCh, &c.clip
 	if vc == nil {
@@ -240,11 +243,18 @@ func (c *Client) cliprdrDue(msgs []dueMessage) []dueMessage {
 		cl.owned = text
 		add(func() []byte { return formatList(long, text) })
 	}
-	for ; cl.listOK > 0; cl.listOK-- {
-		add(func() []byte { return cliprdrPDU(cbFormatListResponse, cbResponseOK, nil) })
+	for room := listResponsesPerPass; room > 0 && cl.listOK+cl.listFail > 0; room-- {
+		flags := cbResponseOK
+		if cl.listOK > 0 {
+			cl.listOK--
+		} else {
+			cl.listFail--
+			flags = cbResponseFail
+		}
+		add(func() []byte { return cliprdrPDU(cbFormatListResponse, flags, nil) })
 	}
-	for ; cl.listFail > 0; cl.listFail-- {
-		add(func() []byte { return cliprdrPDU(cbFormatListResponse, cbResponseFail, nil) })
+	if cl.listOK+cl.listFail > 0 {
+		c.due() // the rest, once this pass is written
 	}
 	if cl.request != 0 && cl.requested == 0 {
 		format := cl.request

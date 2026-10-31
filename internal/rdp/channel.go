@@ -200,16 +200,6 @@ func (c *Client) chunk(id uint16, total int, first, last bool, data []byte) []by
 	return tpkt(sendDataRequest(c.userID, id, w.b))
 }
 
-// sendChannel sends msg on vc in chunks of chunkSize, chunksPerWrite of
-// them at a time (channelBatch).
-func (c *Client) sendChannel(vc *vchannel, msg []byte) error {
-	b := channelBatch{c: c}
-	if err := b.add(vc, msg); err != nil {
-		return err
-	}
-	return b.flush()
-}
-
 // channelBatch gathers the chunks of channel messages and writes them
 // chunksPerWrite at a time: the small messages that are due share a
 // write, and input written meanwhile waits for one write of chunks, not

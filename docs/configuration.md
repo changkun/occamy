@@ -414,9 +414,11 @@ from the server's offer and capture the VNC Authentication response, a
 DES encryption of a random challenge with the password's first 8 bytes,
 from which an offline search can recover a weak password. Reach targets
 across networks you do not trust through a connection whose `tls`
-requires TLS (`require`, `ca_file` or `pins`). An entry without ports allows the
-protocol's own: 22 for ssh, 5900 to 5999 for vnc, 3389 for rdp and 23
-for telnet. A target is allowed on a port that an entry allows when:
+requires TLS (`require`, `ca_file` or `pins`).
+
+An entry of `adhoc_allowlist` without ports allows the protocol's own:
+22 for ssh, 5900 to 5999 for vnc, 3389 for rdp and 23 for telnet. A
+target is allowed on a port that an entry allows when:
 
 - it is an IP address in a listed range, or a listed address;
 - it is a listed host name, or ends in a `*.` entry's domain
