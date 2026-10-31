@@ -372,16 +372,20 @@ func composeE2E(t *testing.T) composeCmd {
 	return c
 }
 
-// run runs the compose command with args and returns what it printed.
+// run runs the compose command with args and returns what it printed on
+// its standard output. podman compose prints a notice of its compose
+// provider on standard error, which a failure reports with the rest.
 func (c composeCmd) run(t *testing.T, args ...string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, c[0], append(slices.Clone(c[1:]), args...)...).CombinedOutput()
-	if err != nil {
-		t.Fatalf("%s %s: %v\n%s", strings.Join(c, " "), strings.Join(args, " "), err, out)
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, c[0], append(slices.Clone(c[1:]), args...)...)
+	cmd.Stdout, cmd.Stderr = &stdout, &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("%s %s: %v\n%s%s", strings.Join(c, " "), strings.Join(args, " "), err, stdout.Bytes(), stderr.Bytes())
 	}
-	return string(out)
+	return stdout.String()
 }
 
 // openDesktopV1 opens the stream at path with token and waits for the
