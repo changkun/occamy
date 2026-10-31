@@ -54,11 +54,16 @@ export interface Platform {
 }
 
 /**
+ * INFLATE_SLICE is the most payload bytes an inflater is given at a
+ * time. DEFLATE inflates a byte to at most 1032, so a slice inflates to
+ * at most about 1 MiB, whatever the payload.
+ */
+export const INFLATE_SLICE = 1024
+
+/**
  * streamInflate inflates with DecompressionStream('deflate-raw'), the
  * raw DEFLATE that the deflate codec carries, or returns null where the
- * platform lacks it. The stream refuses trailing bytes and a stream
- * without its final block, which it reports when the input ends, so a
- * caller reads it to its end before taking what it yielded.
+ * platform lacks it.
  */
 export function streamInflate(): Inflate | null {
   if (typeof DecompressionStream !== 'function') {
@@ -69,13 +74,45 @@ export function streamInflate(): Inflate | null {
   } catch {
     return null
   }
+  return slicedInflate(() => new DecompressionStream('deflate-raw'))
+}
+
+/**
+ * slicedInflate inflates through the transform that make returns, such
+ * as a DecompressionStream, feeding it the payload INFLATE_SLICE bytes
+ * at a time as it asks for them, and cancelling it when the consumer
+ * stops. A transform need not wait for its output to be read: Chrome's
+ * DecompressionStream inflates a whole written chunk into its queue at
+ * once. Fed a slice at a time, it inflates at most a slice beyond what
+ * was read, about 1 MiB, rather than the whole payload, which may
+ * inflate to 1032 times max_message_size.
+ *
+ * The transform refuses trailing bytes and a stream without its final
+ * block, which it reports when the input ends, so a caller reads it to
+ * its end before taking what it yielded.
+ */
+export function slicedInflate(make: () => ReadableWritablePair<Uint8Array, BufferSource>): Inflate {
   return async function* inflate(payload: Uint8Array): AsyncGenerator<Uint8Array> {
-    const ds = new DecompressionStream('deflate-raw')
-    const writer = ds.writable.getWriter()
-    // The readable side reports the stream's errors; these would only
+    const ds = make()
+    let at = 0
+    const source = new ReadableStream<BufferSource>(
+      {
+        pull(c) {
+          if (at >= payload.length) {
+            c.close()
+            return
+          }
+          const end = Math.min(at + INFLATE_SLICE, payload.length)
+          c.enqueue(payload.slice(at, end))
+          at = end
+        },
+      },
+      // Nothing is read ahead of what the transform asks for.
+      { highWaterMark: 0 },
+    )
+    // The readable side reports the stream's errors; the pipe would only
     // repeat them, or report the cancel below.
-    writer.write(payload as Uint8Array<ArrayBuffer>).catch(() => undefined)
-    writer.close().catch(() => undefined)
+    source.pipeTo(ds.writable).catch(() => undefined)
     const reader = ds.readable.getReader()
     let done = false
     try {
@@ -89,7 +126,9 @@ export function streamInflate(): Inflate | null {
       }
     } finally {
       if (!done) {
-        // The consumer stopped early: stop inflating.
+        // The consumer stopped early: cancelling the readable side
+        // errors the writable side, which ends the pipe and cancels the
+        // source, so nothing more is fed.
         await reader.cancel().catch(() => undefined)
       }
     }

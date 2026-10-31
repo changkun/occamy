@@ -8,6 +8,8 @@
 // decoder: the browser's decoding of them is checked by hand
 // (specs/009-react-web-client.md, Implementation notes).
 
+import { constants as zlib, inflateRawSync } from 'node:zlib'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -23,7 +25,7 @@ import {
   pngSize,
   webpSize,
 } from './codecs'
-import { LocalDecoder, streamInflate } from './decode'
+import { INFLATE_SLICE, LocalDecoder, slicedInflate, streamInflate } from './decode'
 import { Codec } from './messages'
 import { codecs, fromHex, toHex } from './testing/vectors'
 import { ProtocolError } from './wire'
@@ -55,6 +57,58 @@ function counting(inner: Inflate, size: number): { inflate: Inflate; yielded: ()
     stopped: () => stopped,
   }
 }
+
+// eager is an inflater that, as Chrome's DecompressionStream does,
+// inflates each chunk written to it at once, in 64 KiB chunks, whether
+// or not its output is read; Node's waits for its output to be read, so
+// it cannot show what an eager one is made to do. It counts the payload
+// bytes it was fed and the bytes it inflated.
+function eager(): { inflate: Inflate; fed: () => number; inflated: () => number; cancelled: () => boolean } {
+  let fed = 0
+  let inflated = 0
+  let cancelled = false
+  const make = (): TransformStream<BufferSource, Uint8Array> => {
+    let input = new Uint8Array(0)
+    let out = 0
+    const run = (c: TransformStreamDefaultController<Uint8Array>, finishFlush: number): void => {
+      const all = inflateRawSync(input, { finishFlush })
+      for (let i = out; i < all.length; i += 64 << 10) {
+        c.enqueue(new Uint8Array(all.subarray(i, Math.min(i + (64 << 10), all.length))))
+      }
+      inflated += all.length - out
+      out = all.length
+    }
+    // Transformer's cancel, which the reader's cancel calls, is newer
+    // than TypeScript's DOM types.
+    const transformer: Transformer<BufferSource, Uint8Array> & { cancel: () => void } = {
+      transform(chunk, c) {
+        const b = ArrayBuffer.isView(chunk) ? new Uint8Array(chunk.buffer, chunk.byteOffset, chunk.byteLength) : new Uint8Array(chunk)
+        fed += b.length
+        const grown = new Uint8Array(input.length + b.length)
+        grown.set(input)
+        grown.set(b, input.length)
+        input = grown
+        run(c, zlib.Z_SYNC_FLUSH)
+      },
+      flush(c) {
+        run(c, zlib.Z_FINISH)
+      },
+      cancel() {
+        cancelled = true
+      },
+    }
+    return new TransformStream<BufferSource, Uint8Array>(transformer)
+  }
+  return { inflate: slicedInflate(make), fed: () => fed, inflated: () => inflated, cancelled: () => cancelled }
+}
+
+// deflated is data compressed as raw DEFLATE.
+async function deflated(data: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([data as Uint8Array<ArrayBuffer>]).stream().pipeThrough(new CompressionStream('deflate-raw'))
+  return new Uint8Array(await new Response(stream).arrayBuffer())
+}
+
+const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 20))
 
 async function rejectsInvalid(p: Promise<unknown>): Promise<ProtocolError> {
   const err = await p.then(
@@ -187,6 +241,61 @@ describe('the inflation cap', () => {
       expect(platform.yielded()).toBeLessThanOrEqual(64 << 10)
     })
   }
+})
+
+describe('feeding the inflater', () => {
+  // A slice inflates to at most 1032 bytes a byte.
+  const sliceOut = 1032 * 1024
+
+  it('feeds a container that fits, a slice at a time', async () => {
+    // Bytes that do not repeat stay about their length deflated.
+    const raw = new Uint8Array(1 + 4 * 64 * 64)
+    raw[0] = 3
+    let x = 1
+    for (let i = 1; i < raw.length; i++) {
+      x ^= x << 13
+      x ^= x >>> 17
+      x ^= x << 5
+      raw[i] = x
+    }
+    const payload = await deflated(raw)
+    expect(payload.length).toBeGreaterThan(8 * INFLATE_SLICE)
+    const f = eager()
+    expect(await inflateContainer(payload, 64, 64, f.inflate)).toEqual(raw)
+    expect(f.fed()).toBe(payload.length)
+  })
+
+  it('inflates a slice of a bomb past the cap, not the bomb', async () => {
+    // 16 MiB of zeros deflate to about 16 KiB, of which a slice inflates
+    // to about 1 MiB, past the cap of a 64×64 tile.
+    const payload = await deflated(new Uint8Array(16 << 20))
+    expect(payload.length).toBeGreaterThan(8 * INFLATE_SLICE)
+    const f = eager()
+    await rejectsInvalid(inflateContainer(payload, 64, 64, f.inflate))
+    await settle()
+    expect(f.fed()).toBeGreaterThan(0)
+    expect(f.fed()).toBeLessThanOrEqual(1024)
+    expect(f.inflated()).toBeLessThanOrEqual(sliceOut)
+  })
+
+  it('stops feeding when the consumer stops', async () => {
+    const payload = await deflated(new Uint8Array(16 << 20))
+    const f = eager()
+    for await (const chunk of f.inflate(payload)) {
+      expect(chunk.length).toBeGreaterThan(0)
+      break
+    }
+    await settle()
+    expect(f.fed()).toBeLessThanOrEqual(1024)
+    expect(f.inflated()).toBeLessThanOrEqual(sliceOut)
+    expect(f.cancelled()).toBe(true)
+  })
+
+  it('reads a payload slice by slice through the platform', async () => {
+    const payload = await deflated(new Uint8Array(1 + 4 * 64 * 64).fill(7, 1))
+    const c = await inflateContainer(payload, 64, 64, inflate)
+    expect(c.length).toBe(1 + 4 * 64 * 64)
+  })
 })
 
 describe('containers', () => {

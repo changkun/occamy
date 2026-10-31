@@ -34,20 +34,29 @@ export function containerCap(w: number, h: number): number {
  * inflateContainer inflates a deflate payload, refusing it as soon as
  * it inflates past the rectangle's longest container: it counts the
  * bytes the stream yields and stops at the chunk that takes them past
- * the cap, so it never holds more than the cap and one byte, whatever
- * the payload inflates to. The stream may have inflated the rest of
- * that chunk; DecompressionStream's chunks are 16 KiB in Node and
- * Chrome.
+ * the cap, so it keeps at most the cap, whatever the payload inflates
+ * to. Its buffer grows with what the stream yields, up to the cap, so a
+ * short container of a large rectangle takes little memory.
+ *
+ * The stream may have inflated beyond what it yielded: the rest of the
+ * chunk past the cap, DecompressionStream's chunks being 16 KiB in Node
+ * and 64 KiB in Chrome, and what it inflated ahead, which slicedInflate
+ * bounds by a slice of the payload, about 1 MiB.
  */
 export async function inflateContainer(payload: Uint8Array, w: number, h: number, inflate: Inflate): Promise<Uint8Array> {
   const cap = containerCap(w, h)
-  const buf = new Uint8Array(cap)
+  let buf = new Uint8Array(Math.min(cap, 4096))
   let n = 0
   try {
     for await (const chunk of inflate(payload)) {
       if (n + chunk.length > cap) {
         // Leaving the loop cancels the stream.
         throw new ProtocolError('invalid', `a deflate container longer than ${cap} bytes for ${w}x${h} pixels`)
+      }
+      if (n + chunk.length > buf.length) {
+        const grown = new Uint8Array(Math.min(cap, Math.max(2 * buf.length, n + chunk.length)))
+        grown.set(buf.subarray(0, n))
+        buf = grown
       }
       buf.set(chunk, n)
       n += chunk.length
