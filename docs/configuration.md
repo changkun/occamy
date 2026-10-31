@@ -253,11 +253,12 @@ the groups of `groups_claim`, not the static user's.
 
 ### guacd: `guacd`
 
-guacd serves the `rdp` and `telnet` connections, and the `vnc`
+guacd serves the `telnet` connections, and the `vnc` and `rdp`
 connections that set `backend: guacd`. `ssh` connections always use
-`occamyd`'s native backend, and `vnc` connections use it by default
-(see [backends](#backends)). For `rdp`,
-`occamyd` passes `disable-gfx: "true"` unless
+`occamyd`'s native backend, and `vnc` and `rdp` connections use it by
+default (see [backends](#backends)), so `guacd.params.vnc` and
+`guacd.params.rdp` apply only to connections with `backend: guacd`.
+For `rdp` through guacd, `occamyd` passes `disable-gfx: "true"` unless
 `guacd.params.rdp` sets it: through RDP's graphics pipeline, xrdp's
 colours reached guacd shifted.
 
@@ -274,10 +275,11 @@ colours reached guacd shifted.
 | `connections[].name` | the ID | Display name |
 | `connections[].protocol` | required | `ssh`, `vnc`, `rdp` or `telnet` |
 | `connections[].target` | required | `host:port`, or a host alone for the protocol's default port: 22 for ssh, 5900 for vnc, 3389 for rdp, 23 for telnet. IPv6 addresses go in brackets with a port, `[fd00::22]:22` |
-| `connections[].backend` | `native` for ssh and vnc, `guacd` for rdp and telnet | What serves the connection's sessions: `native`, `occamyd`'s own client, or `guacd`, through the guacd bridge. ssh is always `native`, rdp and telnet always `guacd` for now, and vnc takes either: `native` by default, and `guacd` as an opt-in fallback; see [backends](#backends) |
+| `connections[].backend` | `native` for ssh, vnc and rdp, `guacd` for telnet | What serves the connection's sessions: `native`, `occamyd`'s own client, or `guacd`, through the guacd bridge. ssh is always `native`, telnet always `guacd`, and vnc and rdp take either: `native` by default, and `guacd` as an opt-in fallback; see [backends](#backends) |
 | `connections[].host_keys` | required for ssh | The host keys an ssh target may present: public keys in `authorized_keys` format, as `ssh-keyscan` prints them, or SHA-256 fingerprints, as `ssh-keygen -l` prints them (`SHA256:…`). `occamyd` refuses any other key. Not for other protocols |
 | `connections[].insecure_ignore_host_key` | `false` | Accept any host key from an ssh target instead, logging its fingerprint as a warning. For demos only; set this or `host_keys`, not both |
-| `connections[].tls` | system roots on the native backend, vnc's default; none with `backend: guacd` | How a vnc target's certificate is checked when the server offers VeNCrypt, which the native backend then always chooses. Without `tls`, the certificate must chain to the system's roots and name the target's host, as a browser checks it. Through guacd, no certificate is checked, so a connection with `tls` cannot set `backend: guacd`; not for other protocols. See below |
+| `connections[].tls` | system roots on the native backend, the default; none with `backend: guacd` | How the target's certificate is checked: a vnc target's when the server offers VeNCrypt, which the native backend then always chooses, and an rdp target's always, since the native RDP backend always runs TLS. Without `tls`, the certificate must chain to the system's roots and name the target's host, as a browser checks it. Through guacd, `tls` is not what checks the certificate, so a connection with `tls` cannot set `backend: guacd`; not for ssh or telnet. See below |
+| `connections[].security` | `nla` | An rdp connection's security mode on the native backend, named as guacd names them: `nla`, NLA (CredSSP with NTLMv2) over TLS; `nla-ext`, the same with the early user authorization result only; `tls`, TLS without NLA, which sends the password to whichever server passed the certificate check; or `any`, which offers TLS and NLA and lets the server choose. xrdp speaks no NLA, so an xrdp target needs `tls` or `any`. Standard RDP security, without TLS, is never used. Not with `backend: guacd`, which takes its mode from `guacd.params.rdp`'s `security`, and only for rdp. See [backends](#backends) |
 | `connections[].ard` | `false` | Allow Apple Remote Desktop authentication, which macOS Screen Sharing needs to log in a user of the Mac. A vnc connection on the native backend only, not with `backend: guacd`, and never with a `tls` that requires TLS. Read [the risk](#apple-remote-desktop-ard) first |
 | `connections[].credentials` | required | How `occamyd` authenticates to the target; see below |
 | `connections[].allow.users`, `allow.groups` | required | Who may open the connection: users by name, and members of groups. At least one entry, since an empty list would let nobody in |
@@ -294,7 +296,13 @@ colours reached guacd shifted.
 An ssh connection needs a `username` unless it prompts. A vnc
 connection's `username` is for VeNCrypt's Plain authentication, which
 is then chosen over the server's other types; without one, the owner is
-asked if the server wants it. A secret written
+asked if the server wants it. An rdp connection on the native backend
+logs on with `username` and the password; a `username` of the form
+`DOMAIN\user` logs on to that domain. With NLA, the owner is asked for
+what `credentials` does not store: the username and the domain, if no
+`username` is stored, and the password. Without NLA (`security: tls`),
+nothing is asked, and a missing username or password leaves the
+server's logon screen to the owner. A secret written
 inline (`password:` under `credentials`, `client_secret:` under `oidc`) is
 rejected with the keys to use instead.
 
@@ -302,11 +310,11 @@ Secrets are read when they are used, not when the file is loaded:
 validation only checks that each file can be opened and each variable is
 set. A secret rotated on disk is therefore picked up by the next session.
 
-A vnc connection's `tls` takes:
+A vnc or rdp connection's `tls` takes:
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `require` | `false` | Refuse a server that does not offer VeNCrypt with a certificate, so that nobody on the way can strip VeNCrypt from what the server offers. `ca_file` and `pins` imply it |
+| `require` | `false` | Refuse a vnc server that does not offer VeNCrypt with a certificate, so that nobody on the way can strip VeNCrypt from what the server offers. `ca_file` and `pins` imply it. The native RDP backend always requires TLS, so for rdp it changes nothing |
 | `server_name` | the target's host | The name the certificate must carry |
 | `ca_file` | none | PEM certificates of the CAs that replace the system's roots, as for a private CA. Read when a session starts |
 | `pins` | none | Certificates accepted as they are, as an ssh connection's `host_keys` are: their chain, names and dates are not checked. Each is a certificate in PEM or its SHA-256 fingerprint, in hex as `openssl x509 -noout -fingerprint -sha256` prints it or in base64 after `SHA256:`. Set this or `ca_file`, not both |
@@ -323,17 +331,16 @@ A connection's `backend` picks what serves its sessions:
 |----------|----------|---------|
 | ssh | always: `occamyd`'s SSH client | refused |
 | vnc | the default: `occamyd`'s RFB client ([native VNC backend](../specs/008-native-architecture/native-vnc-backend.md)) | opt-in fallback |
-| rdp | refused: the native RDP backend is not registered until NLA has run end to end | always, for now |
+| rdp | the default: `occamyd`'s RDP client ([native RDP backend](../specs/008-native-architecture/native-rdp-backend.md)) | opt-in fallback |
 | telnet | refused: there is none | always, until guacd is removed |
 
 A protocol's default is `native` as soon as it has a native backend, so
-vnc connections use `occamyd`'s own client unless they set
+vnc and rdp connections use `occamyd`'s own client unless they set
 `backend: guacd`. That fallback through guacd is kept, as the
 benchmark's baseline too, only until the benchmark shows the native
 backend at least 10x better than guacd on every scenario
 ([guacd-bridge](../specs/008-native-architecture/guacd-bridge.md),
-[benchmarks](benchmarks.md)); v1.0 has no guacd. rdp defaults to
-`native` once the native RDP backend is registered. telnet has no native
+[benchmarks](benchmarks.md)); v1.0 has no guacd. telnet has no native
 backend and stays on guacd for now, so it goes when guacd is removed
 in v1.0. A native vnc session:
 
@@ -349,11 +356,63 @@ in v1.0. A native vnc session:
   `backend-failed` when it cannot connect or log in, or the server's
   certificate is refused.
 
+A native rdp session:
+
+- connects over TLS, checking the server's certificate as `tls` says,
+  and logs on with NLA (CredSSP with NTLMv2) unless `security` says
+  otherwise, asking the session's owner, and only the owner, for the
+  credentials NLA needs that `credentials` does not store;
+- asks for the owner's size from the stream's `hello`, from 200 to
+  8192 pixels a side and at most 2^25 pixels in all, and for a later
+  resize through the Display Control channel, where the server has it;
+  a server that keeps another size is scaled by the viewers;
+- draws the server's bitmap updates, in interleaved RLE and planar, and
+  its pointer; sends keys as scancodes by their physical key, text as
+  Unicode keyboard events, and the pointer and wheel as mouse events;
+  tells the server to suppress its output while no viewer can see the
+  session;
+- carries clipboard text both ways through the clipboard channel: the
+  server's to every viewer, and the owner's and interactive viewers'
+  to the server, as their other input;
+- ends with `remote-ended` when the server ends the session, as when
+  the user logs off, and with `backend-failed` when it cannot connect
+  or log on, or the server's certificate is refused.
+
+The native RDP backend has been tested against xrdp and against
+occamy's own test server, not yet against Windows: Windows servers are
+not yet verified, which the backend's fourth phase does
+([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)).
+Nor does it speak RDP's graphics pipeline (GFX) yet, so a server sends
+it plain bitmap updates, as it sends guacd with `disable-gfx`. Until
+Windows is verified, `backend: guacd` is the fallback for a Windows
+server that the native backend cannot serve.
+
+xrdp speaks no NLA: offered NLA alone, it selects standard RDP
+security, which the native backend refuses, so an xrdp connection
+needs `security: tls` (or `any`). The session's error in `occamyd`'s
+log then names the key to set, such as
+`security: tls on connection "lab-desktop"`. With `security: tls`, the
+password goes to the server inside TLS, so `tls` must check the
+certificate: pin a self-signed one by its fingerprint.
+
+An rdp connection that served sessions through guacd before
+`backend` defaulted to `native` now gets the native backend, which
+reads none of `guacd.params.rdp`. So:
+
+- its certificate is checked as `tls` says, against the system's roots
+  without `tls`, and guacd's `ignore-cert` and `cert-fingerprints` no
+  longer apply: pin a self-signed certificate with `tls.pins`, by the
+  fingerprint the refusal logs;
+- its security mode is `security`, NLA by default, and guacd's
+  `security` no longer applies: an xrdp target needs `security: tls`;
+- `backend: guacd` restores the old path, with `guacd.params.rdp`.
+
 Through guacd, `tls`'s keys would be ignored, since guacd checks no VNC
-certificate as `tls` says, so a vnc connection with `tls` cannot set
-`backend: guacd`, and neither can one with `ard`; such a file fails to
-load, naming the key. Only a vnc connection with `backend: guacd` needs
-guacd, at `guacd.address`.
+certificate, and an RDP certificate only as `guacd.params.rdp` says, so
+a vnc or rdp connection with `tls` cannot set `backend: guacd`, and
+neither can a vnc connection with `ard`, nor an rdp connection with
+`security`; such a file fails to load, naming the key. Only a vnc or
+rdp connection with `backend: guacd` needs guacd, at `guacd.address`.
 
 #### Apple Remote Desktop: `ard`
 
@@ -395,7 +454,7 @@ Without `ard: true`, a Mac that offers only ARD fails the session, and
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `allow_adhoc_targets` | `false` | Let signed-in users connect to targets that are not in the registry, as v0 does |
-| `adhoc_backends` | each protocol's default: `native` for ssh and vnc, `guacd` for rdp and telnet | The backend of each protocol's ad-hoc targets, by protocol: `{vnc: guacd}` sends ad-hoc vnc targets through guacd, the fallback, instead of the native backend. The values are a connection's `backend`'s, with the same refusals |
+| `adhoc_backends` | each protocol's default: `native` for ssh, vnc and rdp, `guacd` for telnet | The backend of each protocol's ad-hoc targets, by protocol: `{vnc: guacd}` sends ad-hoc vnc targets through guacd, the fallback, instead of the native backend, and `{rdp: guacd}` does the same for rdp. The values are a connection's `backend`'s, with the same refusals |
 | `adhoc_allowlist` | none | Where ad-hoc targets may point, and on which ports: CIDR ranges (`10.0.0.0/8`), IP addresses, host names, or `*.` and a domain (`*.lab.internal`), each optionally followed by `:port` or `:first-last` (`10.0.0.0/8:22`, `*.lab.internal:5900-5910`; an IPv6 range or address goes in brackets, `[fd00::/8]:22`). Required when `allow_adhoc_targets` is `true` |
 
 Any signed-in user may open an ad-hoc target, with
@@ -421,6 +480,14 @@ DES encryption of a random challenge with the password's first 8 bytes,
 from which an offline search can recover a weak password. Reach targets
 across networks you do not trust through a connection whose `tls`
 requires TLS (`require`, `ca_file` or `pins`).
+
+An rdp target served by the native backend always runs TLS, with the
+certificate checked against the system's roots and the name the target
+was given, or its address if it was given one, and logs on with NLA
+alone, its default `security`: the user is asked for the username, the
+domain and the password. A server whose certificate does not chain to
+the system's roots, as a self-signed one, or that speaks no NLA, as
+xrdp, needs a connection, whose `tls` and `security` can say so.
 
 An entry of `adhoc_allowlist` without ports allows the protocol's own:
 22 for ssh, 5900 to 5999 for vnc, 3389 for rdp and 23 for telnet. A
@@ -513,9 +580,11 @@ that:
 - connection IDs, user names and issuer names are unique, and no trusted
   issuer is named `occamy`;
 - each connection's `backend`, and each of `adhoc_backends`, serves its
-  protocol; `tls` and `ard` are set only on vnc connections on the
-  native backend, not with `backend: guacd`, and `ard` never with a
-  `tls` that requires TLS;
+  protocol; `tls` is set only on vnc and rdp connections, `ard` only on
+  vnc connections and `security` only on rdp connections, each on the
+  native backend, not with `backend: guacd`; `ard` never with a `tls`
+  that requires TLS, and `security` is `nla`, `nla-ext`, `tls` or
+  `any`;
 - user, group and issuer names are not empty and have no spaces;
 - with neither `auth.oidc` nor `auth.trusted_issuers` configured, every
   name in an `allow` list is a static user, and every group is a group of
@@ -550,10 +619,10 @@ WebSockets over HTTP/1.1. So far it serves:
 | `GET /api/v1/sessions/{id}/stream` | Join a session as a protocol v1 WebSocket: as its owner with the owner's access token or the stream token, with the role of a session token for the session, which a trusted issuer may mint too, or with a share |
 | `/api/v0/login`, `/api/v0/connect` | With `legacy_v0: true`, the v0 routes as a v0 file serves them |
 
-`ssh` and `vnc` sessions use `occamyd`'s native backends, and `rdp`
-and `telnet` sessions go through guacd. A `vnc` session goes through
-guacd only when the connection, or `adhoc_backends` for an ad-hoc
-target, picks `guacd` ([backends](#backends)). [api.md](api.md) describes every
+`ssh`, `vnc` and `rdp` sessions use `occamyd`'s native backends, and
+`telnet` sessions go through guacd. A `vnc` or `rdp` session goes
+through guacd only when the connection, or `adhoc_backends` for an
+ad-hoc target, picks `guacd` ([backends](#backends)). [api.md](api.md) describes every
 route in full. A connection the caller may not
 open, and another user's session, answer `404` as if they did not exist.
 
