@@ -33,6 +33,7 @@ import (
 	"net"
 	"slices"
 	"sync"
+	"time"
 	"unicode/utf8"
 )
 
@@ -82,6 +83,10 @@ const (
 
 // maxSide bounds the screen the server takes from SetDesktopSize.
 const maxSide = 8192
+
+// closeTimeout bounds how long Conn.Close waits for the client to close
+// its side.
+const closeTimeout = 5 * time.Second
 
 // Options configure a Server.
 type Options struct {
@@ -532,6 +537,7 @@ type Conn struct {
 	resized   bool           // the next update tells the client the screen's size
 	reason    int            // why: reasonServer or reasonClient
 	announced bool           // ExtendedDesktopSize has been sent
+	ending    bool           // Close has shut the server's side down
 }
 
 type cursor struct {
@@ -649,11 +655,28 @@ func (c *Conn) Bell() error {
 }
 
 // Close closes the connection between messages, which ends an RFB
-// session normally.
+// session normally. It shuts the server's side down first, then reads
+// what the client still sends until the client closes its own side, for
+// up to 5 seconds: a socket closed with bytes unread resets the
+// connection on Linux, and the client would read a reset rather than
+// the end of the session.
 func (c *Conn) Close() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.nc.Close()
+	c.ending = true
+	cw, ok := c.nc.(interface{ CloseWrite() error })
+	ok = ok && cw.CloseWrite() == nil
+	c.mu.Unlock()
+	if ok {
+		select {
+		case <-c.done:
+		case <-time.After(closeTimeout):
+		}
+	}
+	// Once the client's messages end, serve may have closed it already.
+	if err := c.nc.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+		return err
+	}
+	return nil
 }
 
 // write writes p to the client. c.mu must be held.
@@ -681,7 +704,7 @@ func (c *Conn) resize(size image.Point, reason int) {
 // not incremental. c.mu must be held.
 func (c *Conn) flush() error {
 	req := c.request
-	if req == nil {
+	if req == nil || c.ending {
 		return nil
 	}
 	announce := c.opts.ExtendedDesktopSize && !c.announced && !req.Incremental && c.takes(EncExtendedDesktopSize)

@@ -1315,7 +1315,11 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     ExtendedDesktopSize with SetDesktopSize, and cut text, answering
     update requests itself. It counts failed authentications and,
     right or wrong, the credentials clients send (`Credentials`), so
-    a test can tell that a refused certificate got none.
+    a test can tell that a refused certificate got none. `Conn.Close`
+    shuts the server's side down and reads until the client closes
+    its own: closing with bytes unread reset the connection on Linux,
+    which `TestServerEnds` saw in CI about once in a hundred runs under
+    the race detector.
     `server/vnc_e2e_test.go` runs the backend through occamyd's routes
     against it with the Go client, for connections and for ad-hoc
     targets by address and by name.
