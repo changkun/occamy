@@ -726,12 +726,16 @@ and guacd leaves the default deployment.
     up to the channel's own bound (1 KiB for Display Control): a longer
     message is dropped and counted, one that runs past the length it
     declared ends the session, as do compressed data, a Data First
-    whose length has size code 3, and a channel name without its NUL
-    within 256 bytes. Data for a channel that is not open, a static
-    message cut at its bound, and soft-sync are dropped and counted.
-    The answers the reader owes wait for the channel writer in a queue
-    of at most 64; a server that opens channels faster than it reads
-    the answers ends the session.
+    whose length has size code 3, a create, data or close whose channel
+    id has size code 3, and a channel name without its NUL within 256
+    bytes. Data for a channel that is not open, a static message cut at
+    its bound, and soft-sync are dropped and counted. The answers the
+    reader owes wait for the channel writer in a queue of at most 64; a
+    server that opens channels faster than it reads the answers ends
+    the session. Once a write of the channel writer has failed, this
+    bound and the clipboard's two report that write's error rather than
+    the bound, since the failure is why the answers wait (found in
+    review).
   - Display Control ([MS-RDPEDISP]). The server's capabilities give the
     most monitors and the area of each; the client takes their product,
     saturated at the 32 Mi pixels a desktop may have, as the area it
@@ -746,11 +750,21 @@ and guacd leaves the default deployment.
     eight again. The desktop's own size and a size beyond the area are
     not sent. There is no acknowledgement: the server reactivates the
     session at the new size, which `Run` reports to `Output.Resize` as
-    any reactivation. Closing the channel forgets the capabilities and
-    keeps the size, which goes again when a channel opens.
+    any reactivation. As the server may apply a layout late, a size
+    asked for back to the desktop's own while the last layout, of
+    another size, is within its two seconds is kept until then, and
+    sent should the desktop change (found in review: a viewer who
+    resized and resized back before the server applied the first size
+    was left with it). Closing the channel forgets the capabilities and
+    keeps the size, which goes again when a channel opens. `Run` stops
+    the layout timer as it returns.
   - After a reactivation, the client tells a server it had asked to
     suppress its output to suppress it again, since the server's output
-    state after Demand Active is its own (phase 1's follow-up).
+    state after Demand Active is its own (phase 1's follow-up). It reads
+    the state as it sends, under a lock that `SuppressOutput` holds as
+    it sends, so that a viewer's request for output while the server
+    reactivates is not undone by a repeat of the state before it (found
+    in review).
   - The backend asks for DRDYNVC, and `Input` queues a `Resize` with
     both sides above zero, in order with the other input; the writer
     hands it to `RequestSize`, which keeps the newest and paces it.
@@ -770,15 +784,28 @@ and guacd leaves the default deployment.
   nothing, a size asked for anew sent again, nothing for the desktop's
   own size or beyond the server's area; reassembly in three PDUs, a
   message over its bound in one PDU or in several, data for a channel
-  not open, a message longer than declared, compressed data, names
-  without their NUL or too long, version 0 and a length of size code 3;
-  the answers' bound (`TestDynvcAnswersBounded`); the area's saturation
-  (`TestDisplayCapsArea`); and Suppress Output repeated after a
-  reactivation (`TestSuppressOutputAfterReactivation`). The backend's
+  not open, a message longer than declared or than an empty one,
+  compressed data, names without their NUL or too long, version 0, a
+  length of size code 3 and ids of it in each command; a message of
+  exactly the channel's bound whole and one a byte longer dropped, in
+  one PDU and in several (`TestDynvcBound`); the answers' bound
+  (`TestDynvcAnswersBounded`), and the bounds reporting the writer's
+  failure (`TestOwedAfterWriteFailed`); the area's saturation
+  (`TestDisplayCapsArea`); a size asked for back kept until the server
+  applies the size before, or until that size's retry is due, and given
+  up once the desktop has it (`TestDisplayResizeBack`), the retry's
+  wake kept when a size asked for in between took it
+  (`TestLayoutWindow`), and the timer stopped with `Run`
+  (`TestDisplayTimerStops`); and Suppress Output repeated after a
+  reactivation (`TestSuppressOutputAfterReactivation`), not over a
+  viewer's request for output during it (`TestSuppressOutputRace`,
+  which holds the client's writes so that the request waits behind the
+  reactivation's; it failed 3 runs of 3 on the client before the fix
+  and passes whichever of the two goes first). The backend's
   `TestRunResize`: sizes of zero or less ask for nothing, a `Resize`
   goes as a layout, the server's reactivation resizes the sink, and
-  Suppress Output is repeated after it. Coverage: `internal/rdp` 89.2%
-  of statements, `dynvc.go` 95.0%; `internal/backend/rdp` 98.4%.
+  Suppress Output is repeated after it. Coverage: `internal/rdp` 89.9%
+  of statements, `dynvc.go` 95.1%; `internal/backend/rdp` 98.5%.
 - **Integration test.** Under the `rdp_integration` tag, on 2026-10-31
   against the bench desktop image's xrdp 0.10.1 with xorgxrdp 0.10.2:
   the client's `TestIntegrationResize` saw DRDYNVC version 2 and
@@ -797,7 +824,9 @@ and guacd leaves the default deployment.
     constant survived, since the test uses it, so the check itself was
     broken instead);
   - one Display Control at a time, the version answered, the close
-    answered, the state reset on close (`TestDynvcChannels`);
+    answered, the layouts' state reset on close (`TestDynvcChannels`;
+    the capabilities kept on close survived, which the review found,
+    below);
   - the channel's bound in several PDUs and in one, the length
     declared, compressed data, the name's bound, size code 3, a
     truncated static message (`TestDynvcData`,
@@ -819,6 +848,26 @@ and guacd leaves the default deployment.
   refused for anyway, kept so that a second handler cannot replace an
   open channel; and an id from 256 to 65,535 sent in four bytes rather
   than two, which DRDYNVC allows.
+
+  The review ran 28 mutants of its own and found five more that
+  survived, now caught: the bound of a Data First and of a single Data
+  PDU one byte off (`TestDynvcBound` sends 1 KiB and 1 KiB and a byte);
+  a Data First that declares 0 bytes taken as a whole message
+  (`TestDynvcData`); the look at the layout after a reactivation
+  removed (`TestDisplayResizeBack`, whose retry is an hour away, so
+  that the reactivation alone has the client look); and the
+  capabilities kept on close (`TestDynvcChannels` now checks that
+  nothing goes on the reopened channel before its capabilities). Its
+  sixth, refusing an id that is open, is the first equivalent one
+  above. The review's fixes were broken in turn too, 15 mutants, all
+  caught: each condition of keeping a size asked for back and the
+  look again when its window ends (`TestDisplayResizeBack`,
+  `TestLayoutWindow`); size code 3 for each command and the check
+  itself (`TestDynvcData`); the writer's failure recorded under the
+  channels' lock, read at the bounds, and reported at each of the three
+  (`TestOwedAfterWriteFailed`); and the timer stopped with `Run`
+  (`TestDisplayTimerStops`). The Suppress Output fix was checked by
+  running `TestSuppressOutputRace` on the client before it.
 - **Fuzzing.** `FuzzDynvc` feeds DRDYNVC PDUs and writes what is due
   after each, checking the answers' and the channels' bounds;
   `FuzzRun` now joins `drdynvc` beside the clipboard's channel, asks
@@ -838,6 +887,21 @@ and guacd leaves the default deployment.
     never applies a size.
   - At most one dynamic channel is open, so the bound on channels is
     the one Display Control rather than a count.
+  - A channel id of size code 3, which [MS-RDPEDYC] 2.2 does not define,
+    ends the session, as a length of it does: the client answers a
+    create or a close in the size the server used, and has no valid one
+    to answer this in. FreeRDP reads it as four bytes; no server is
+    known to send it.
+  - A second capabilities PDU is answered again, and a create before
+    the capabilities is answered as any other, rather than ending the
+    session: FreeRDP takes both, and what the client holds stays within
+    the answers' bound either way (the review asked whether to end the
+    session on them).
+  - Any interactive viewer's `Resize` asks for a size, not only the
+    owner's, and a viewer that resizes without end is bounded by the
+    pacing: one layout every half second at most, the newest size
+    winning, and eight tries of a size. Whether only the session's
+    owner may resize waits on the project owner's decision (follow-up).
 - **Deviations.** From the Task Breakdown: "DRDYNVC with a bounded
   number of channels" is one channel, Display Control; GFX in phase 3
   will be the second. From guacd: the retries (above).
@@ -859,3 +923,6 @@ and guacd leaves the default deployment.
     may differ.
   - GFX over DRDYNVC (phase 3): a handler and a bound of its own, and
     the version 3 features it may need.
+  - Resize for the session's owner alone, if the project owner decides
+    so; any
+    interactive viewer can resize now (above).

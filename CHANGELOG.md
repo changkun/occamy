@@ -328,10 +328,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   server for a desktop size within the area it takes: the newest size,
   at most one every half second, and again every two seconds, up to
   eight times, until the desktop has it, since xrdp ignores a size
-  while its login is in progress. The backend asks for a viewer's
-  `Resize`; a server without Display Control keeps its size, which
-  viewers scale. After a reactivation the client tells a server it had
-  asked to suppress its output to suppress it again.
+  while its login is in progress. A size asked for back to the
+  desktop's own before the server applied the one before it is kept
+  while the server may yet apply that one. The backend asks for any
+  interactive viewer's `Resize`; a server without Display Control keeps
+  its size, which viewers scale. After a reactivation the client tells
+  a server it had asked to suppress its output to suppress it again,
+  unless a viewer has asked for output since. A dynamic channel id of
+  size code 3 ends the session, and once the channel writer fails, a
+  server that the client then owes too many answers ends it with the
+  write's error.
 
 ### Changed
 
