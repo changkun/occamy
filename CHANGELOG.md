@@ -216,6 +216,25 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   once still, and the photograph shown once 121.8 against 150.8, under
   G6's 139 ([docs/benchmarks/refinement.md](docs/benchmarks/refinement.md)).
   `stream.Config.NoRefine` turns refinement off, and motion with it.
+- A tile cache in the graphics pipeline. The Go client and the web
+  client's protocol core offer the `cached` codec and 1024 cache slots
+  by default (`client.Options.CacheSlots` and `NoCache`, the web core's
+  `cacheSlots`), and keep in each slot the tile the server stores there,
+  16 KiB at most. occamyd offers 1024 slots (`stream.Config.NoCache`
+  turns the cache off), mirrors each client's slots by the xxh3-128 hash
+  of the tile each holds, under a secret seed drawn for each client so
+  that a remote host cannot draw two tiles that hash alike, stores a
+  tile it sends alone and exactly in the slot used least recently once
+  the message is written, and sends a tile whose content a slot holds as
+  a 23-byte `cached` tile of that slot. Neither client starts a
+  graphical session whose only codec in common is `cached`. On the recorded scenes
+  a window switched back and forth over the desktop takes 9.4 KiB a
+  frame against 79.7, and an eighth of the encode time; no scene takes
+  more ([docs/benchmarks/tile-cache.md](docs/benchmarks/tile-cache.md)).
+  The mirror costs 70 KiB a viewer. `protocol/testdata/cache.json`
+  records a session for clients to replay. Protocol v1: a tile that
+  names a slot covers at most 4096 pixels (`protocol.MaxCachedPixels`);
+  no server had named one before.
 - `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
   (static users sign in with a password for an access token), TLS when
   `tls.cert` and `tls.key` are set, expvar and pprof on the debug

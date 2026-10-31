@@ -46,6 +46,7 @@ type client struct {
 	welcome *protocol.Welcome
 	tiles   int
 	codecs  map[protocol.Codec]int // tiles received in each codec
+	cache   testSlots
 	cursors []protocol.Cursor
 	clips   int // server clipboards received
 	pongs   []uint32
@@ -170,7 +171,7 @@ func (cl *client) run(ctx context.Context) {
 		if err != nil {
 			return
 		}
-		m, err := protocol.Decode(b, reg, protocol.Limits{MaxMessageSize: 1 << 30})
+		m, err := protocol.Decode(b, reg, testLimits)
 		cl.mu.Lock()
 		if cl.welcome != nil && err == nil {
 			// Every message after welcome is within the agreed size.
@@ -214,7 +215,7 @@ func (cl *client) run(ctx context.Context) {
 				cl.outside = true
 				break
 			}
-			if err := decodeTile(cl.img.SubImage(r).(*image.RGBA), m.Codec, m.Payload); err != nil {
+			if err := cl.cache.draw(cl.img, m); err != nil {
 				cl.errs = append(cl.errs, err)
 				break
 			}
@@ -238,6 +239,7 @@ func (cl *client) run(ctx context.Context) {
 				late++
 			}
 		case *protocol.FrameEnd:
+			cl.cache.endFrame()
 			f := frameRecord{id: m.FrameID, lastSeq: m.LastSeq, at: time.Since(cl.start), tiles: len(rects), rects: rects, copies: copies, bytes: size, late: late}
 			cl.frames = append(cl.frames, f)
 			if cl.onFrame != nil {
