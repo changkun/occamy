@@ -131,6 +131,14 @@ const (
 // read.
 const closeTimeout = time.Second
 
+// opCost is what an op of an undelivered frame holds beyond its
+// message, counted in the backlog with it: the op in its frame's slice,
+// and a decoding tile's job and pixels' slice. Measured with 200,000
+// ops of 1×1 pixels: 110 bytes beyond the message for a raw tile or a
+// copy-rect, 334 for a tile of a plugged codec, decoded. Without it, a
+// frame of tiny ops would hold several times what it counts.
+const opCost = 512
+
 // minBacklog is the least the Session holds of undelivered frames and
 // events before it takes the server for broken, and the least work it
 // allows a frame; see maxBacklog and maxWork. Tests lower it to reach
@@ -289,6 +297,7 @@ type Session struct {
 	queue     []item  // undelivered, in order
 	pending   []Event // the rest of the frame being delivered
 	frames    int     // complete frames in queue
+	taken     int     // frames Next took from queue and has not acknowledged
 	backlog   int     // bytes held by queue and the open frame
 	end       *End
 	delivered bool   // End was delivered
@@ -572,6 +581,7 @@ func (s *Session) Next(ctx context.Context) (Event, error) {
 			s.queue = s.queue[1:]
 			s.backlog -= it.f.bytes
 			s.frames--
+			s.taken++
 			s.mu.Unlock()
 			evs, err := s.apply(it.f)
 			s.mu.Lock()
@@ -655,6 +665,7 @@ func (s *Session) ackShown() {
 		return
 	}
 	s.shown = nil
+	s.taken--
 	d := time.Since(f.arrived).Microseconds()
 	s.out.ack(protocol.FrameAck{
 		FrameID:    f.ID,

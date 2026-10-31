@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1.0">
+    <title>Occamy protocol client</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; margin: 16px; background: #fff; color: #111; }
+      canvas { display: block; max-width: 100%; border: 1px solid #888; image-rendering: pixelated; }
+      canvas:focus { outline: 2px solid #36c; }
+      pre { white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <p>
+      The protocol v1 client core against a protocol v1 server, for trying
+      it in a browser. Parameters: <code>server</code>, the server's URL;
+      <code>route</code>, its stream route (<code>/graphical</code>);
+      <code>token</code>; <code>check</code>, to run the browser checks of
+      specs/009-react-web-client.md first.
+    </p>
+    <canvas id="screen" tabindex="0" width="1" height="1"></canvas>
+    <pre id="log"></pre>
+    <script type="module" src="./demo.ts"></script>
+  </body>
+</html>

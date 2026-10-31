@@ -11,6 +11,7 @@ import (
 	"image"
 	"slices"
 	"time"
+	"unicode/utf8"
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/session"
@@ -111,12 +112,33 @@ func (w *writer) apply(m protocol.Message) error {
 	case *protocol.Pong:
 		return nil
 	case *protocol.Close:
+		if m.Code != protocol.CloseNormal {
+			// A client closes over a fault of its own or of the server's,
+			// such as a tile it cannot decode; a browser's close frame
+			// carries 1000 for most of them, so this is the only record.
+			w.log.Info("client closed", "code", m.Code, "reason", clip(m.Reason, maxCloseReason))
+		}
 		return errClientClosed
 	case *protocol.Hello:
 		return fmt.Errorf("%w: hello after the handshake", protocol.ErrInvalid)
 	default:
 		return fmt.Errorf("%w: %v from a client after the handshake", protocol.ErrUnsupported, m.Type())
 	}
+}
+
+// maxCloseReason bounds the reason a client's close logs with, which a
+// close frame would hold; a message can carry up to the message size.
+const maxCloseReason = 123
+
+// clip returns s cut to at most n bytes, at a character's start.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // input gives the session an input. An input the backend rejects is

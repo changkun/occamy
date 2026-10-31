@@ -1,0 +1,27 @@
+{
+  // The protocol v1 client core (src/protocol) is TypeScript; the Vue app
+  // around it stays JavaScript. This config checks the library alone,
+  // with the browser's types and no Node types, so that the library
+  // cannot use Node's APIs by accident. tsconfig.test.json checks the
+  // tests, which run in Node.
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": [],
+    "strict": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src/protocol/**/*.ts"],
+  "exclude": ["src/protocol/**/*.test.ts", "src/protocol/testing/**", "src/protocol/demo/vite.config.ts"]
+}

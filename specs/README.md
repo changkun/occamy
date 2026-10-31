@@ -79,7 +79,7 @@ Clients that speak to `occamyd`.
 | Spec | Status | Deliverable |
 |------|--------|-------------|
 | [007-native-gio-client.md](007-native-gio-client.md) | Archived | Retired in favour of 010 |
-| [009-react-web-client.md](009-react-web-client.md) | Not started | Decision on React and, if chosen, a React shell, then protocol v1 |
+| [009-react-web-client.md](009-react-web-client.md) | In progress: protocol client core built, shell decision open | Decision on React and, if chosen, a React shell, then protocol v1; the TypeScript protocol v1 core (`src/protocol`) comes first, independent of the shell |
 | [010-native-swift-client.md](010-native-swift-client.md) | Not started | SwiftUI app for macOS 14+ linking the Go client core as a static library, on protocol v1 |
 
 ## Dependency graph

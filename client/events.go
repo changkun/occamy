@@ -21,7 +21,8 @@ type Event interface{ event() }
 // changed: tiles and copy-rect destinations in the order they came, or
 // the whole screen after a Resize. For a terminal session, the frame's
 // Resize, TermSnapshot and TermData came just before it. Next
-// acknowledges the frame as it delivers it.
+// acknowledges the frame at its next call, which says the caller has
+// shown it.
 type Frame struct {
 	// ID is the frame's ID, from 1 on each connection, wrapping from
 	// 2³²−1 to 0.

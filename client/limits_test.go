@@ -10,6 +10,7 @@ import (
 	"errors"
 	"image"
 	"runtime"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -74,6 +75,36 @@ func TestFrameWork(t *testing.T) {
 		}
 		if n := after.TotalAlloc - before.TotalAlloc; n > 64<<20 {
 			t.Errorf("1.4 KB from the server made the client allocate %d MiB", n>>20)
+		}
+	})
+}
+
+// The frame Next delivered counts against the frame window until the
+// next call acknowledges it: with it, the server may hold the window
+// and one more frame unacknowledged, and no more.
+func TestWindowCountsShown(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sc := newScripted(t, graphical, client.Options{})
+		sc.send(&protocol.Resize{Width: 1, Height: 1}, &protocol.FrameEnd{FrameID: 1})
+		for range 2 { // the resize and frame 1, which is now shown
+			if _, err := sc.cl.Next(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		sc.send(&protocol.FrameEnd{FrameID: 2}, &protocol.FrameEnd{FrameID: 3})
+		synctest.Wait()
+		if code, closed := sc.pipe.clientCode(); closed {
+			t.Fatalf("the client closed a server within its window with %v", code)
+		}
+		sc.send(&protocol.FrameEnd{FrameID: 4})
+		synctest.Wait()
+		evs := drain(t, sc.cl, time.Second)
+		e, ok := last(evs).(client.End)
+		if !ok || e.Code != protocol.CloseProtocolError || e.Err == nil || !strings.Contains(e.Err.Error(), "more than 3 frames unacknowledged") {
+			t.Fatalf("events %#v, want End protocol-error for the window", evs)
+		}
+		if fs := frames(evs); len(fs) != 2 || fs[0].ID != 2 || fs[1].ID != 3 {
+			t.Errorf("frames %+v, want 2 and 3", fs)
 		}
 	})
 }

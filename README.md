@@ -121,7 +121,7 @@ RDP is tested against xrdp in CI. We have not tested a Windows host yet
 ### Web client
 
 The demo web client lives in [client/occamy-web](./client/occamy-web) (Vue 3, Vite).
-It needs Node.js 20.19+ or 22.12+:
+It needs Node.js 22.12+:
 
 ```
 make client     # npm ci && npm run build, output in client/occamy-web/dist
