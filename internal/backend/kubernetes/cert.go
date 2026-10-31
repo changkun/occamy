@@ -181,7 +181,7 @@ func (p *tlsPolicy) verify(chain []*x509.Certificate, addr string, log *slog.Log
 	}
 	if p.insecure {
 		log.Warn("kubernetes: accepting an unverified certificate", "addr", addr,
-			"subject", leaf.Subject.String(), "fingerprint", fingerprint(sum), "reason", err)
+			"subject", quote(leaf.Subject.String()), "fingerprint", fingerprint(sum), "reason", cut(err.Error()))
 		return nil
 	}
 	return &CertificateError{Subject: leaf.Subject.String(), Fingerprint: fingerprint(sum), Err: err}

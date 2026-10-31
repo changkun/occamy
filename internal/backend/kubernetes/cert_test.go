@@ -215,4 +215,25 @@ func TestCertificateErrorCut(t *testing.T) {
 	if strings.ContainsRune(msg, 0x1b) {
 		t.Errorf("a control character in %q", msg)
 	}
+
+	// Insecure mode accepts the certificate, and its warning cuts the
+	// same things.
+	var l logs
+	cfg.TLS.InsecureSkipVerify = true
+	cfg.Logger = l.logger()
+	b = newBackend(t, cfg)
+	r := start(t, b, &backendtest.Sink{})
+	if err := accept(t, s).Exit(0); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.wait(t); err != nil {
+		t.Errorf("Run in insecure mode = %v, want nil", err)
+	}
+	warning := l.String()
+	if !strings.Contains(warning, "accepting an unverified certificate") || !strings.Contains(warning, "name-000") {
+		t.Errorf("no warning with the reason: %s", warning)
+	}
+	if len(warning) > 1500 {
+		t.Errorf("a warning of %d bytes: %.300s", len(warning), warning)
+	}
 }
