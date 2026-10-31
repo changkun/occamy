@@ -901,10 +901,10 @@ const maxTitle = maxOSC - len("2;")
 // sanitizeTitle makes a title safe to send in OSC 2: valid UTF-8 without
 // C0 or C1 controls, which would end the sequence early, and at most
 // maxTitle bytes, cut between characters, which the parser would cut
-// anywhere. An invalid byte becomes U+FFFD, three bytes, so a title that
-// came in whole may need the cut.
+// anywhere. A title that came in, through the same parser, is no longer
+// than that, but an invalid byte becomes U+FFFD, three bytes.
 func sanitizeTitle(s string) string {
-	ok := len(s) <= maxTitle && utf8.ValidString(s)
+	ok := utf8.ValidString(s)
 	if ok {
 		for _, r := range s {
 			if r < 0x20 || (r >= 0x7f && r < 0xa0) {
