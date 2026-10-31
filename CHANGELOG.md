@@ -12,6 +12,23 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - The desktop baseline and the per-scenario targets for protocol v1
   ([docs/benchmarks.md](docs/benchmarks.md)). `bench/vncprobe` measures
   the bench desktop's VNC server on its own.
+- The benchmark's v1 series, `v1-native` and `v1-guacd`: the same
+  scenarios over protocol v1, driven by the Go client core through API
+  v1 against native SSH, VNC and RDP and against VNC and RDP through
+  guacd, on the bench stack's `occamy-v1` service
+  ([docs/benchmarks.md](docs/benchmarks.md#the-v1-series)). The harness
+  counts a v1 frame when the client core delivers it, and acknowledges a
+  graphical frame on a 60 Hz screen's next tick, as the web client
+  does, and a terminal's at once; the report records both, and
+  `-ack-hz 0` is a diagnostic. A terminal's G7 ends at its first cell
+  that is not blank. A desktop's key carries its HID usage, as the web
+  client's does. CI runs them quickly after the v0 smoke run, every
+  run with `-failfast`, which stops at the first error, stops the bench
+  job at 30 minutes, and prints the stack's logs unless the job
+  succeeded. Their full results wait for the rest of the graphics
+  pipeline and for native RDP.
+  `make bench` takes a compose project and ports for a second stack on a
+  shared host.
 - A public Go package for protocol v1, `changkun.de/x/occamy/protocol`,
   with its framing: the message header and its ignorable flag, the field
   encodings, a registry of message types, and the maximum message size.
@@ -178,8 +195,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   links into amd64 builds, and `scripts/third-party-licenses.sh` lists
   both architectures of every release platform.
 - Refinement in the graphics pipeline. Each viewer's writer keeps a heat
-  per tile, which halves each refine delay of the writer's time between
-  frames: a tile that changes more often than the refine delay is in
+  per tile, which halves each refine delay, 150 ms at the least, of the
+  writer's time between frames: a tile that changes more often than the
+  refine delay is in
   motion, and goes at the pacer's lowest quality, and lossy if it has 17
   to 256 colours; one that changes less often goes at its final quality.
   An input's effect is never in motion, and one the search finds at the
@@ -191,8 +209,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   Refinement goes only while nothing else is to be sent and no frame
   awaits an ack, a tile a message within the pacer's 5 ms of bytes, and
   gives way to an input before each message, and to a change after the
-  first tile it tries. A copy carries the goal of the pixels it moves.
-  On the recorded scenes the plasma takes 13.8 KiB a frame against
+  first tile it tries. A copy carries the goal of the pixels it moves,
+  and a tile searched while the link held the quality below what the
+  client has is raised once it recovers. On the recorded scenes the plasma takes 13.8 KiB a frame against
   392.4, the dragged window 5.2 against 30.6 and 17.9 KiB of refinement
   once still, and the photograph shown once 121.8 against 150.8, under
   G6's 139 ([docs/benchmarks/refinement.md](docs/benchmarks/refinement.md)).
@@ -309,8 +328,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   back instead of queueing frames, and input never waits for `Next`.
   The frame shown and not yet acknowledged counts against the frame
   window, and each queued message against the backlog at its size and
-  512 bytes more. Tiles of plugged codecs decode in parallel. No API
-  stability promise until the release candidate.
+  512 bytes more. Tiles of plugged codecs decode in parallel. A
+  `welcome` the client cannot show, with no codec or terminal level in
+  common, is refused with a `*RefusedError` that names the session the
+  server made, so that the caller can end it. No API stability promise
+  until the release candidate.
 - The browser's client of protocol v1, a TypeScript library in
   `client/occamy-web/src/protocol` that depends on no framework: the
   handshake over a WebSocket, deflate through `DecompressionStream`,
@@ -334,6 +356,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   remote with the window, answers the remote's credential prompts,
   shares the session through a link as a viewer or read-only, and ends
   it, signing in again over the session when the sign-in has expired;
+  an End or share that waited for the sign-in is left to occamyd, which
+  ends or shares only its owner's session: one who signs in as another
+  user is told the session has ended or is not theirs. A call to occamyd
+  gives up after 30 s, and End shows that it waits, with a way back to
+  the connections, and takes no second press meanwhile;
   the clipboard goes both ways as the role allows, and reaches the local
   clipboard on its own only for a role that gives input, so a read-only
   viewer copies it from the clipboard panel; a hidden page tells occamyd
@@ -496,6 +523,34 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   not yet verified against Windows, and does not speak RDP's graphics
   pipeline yet
   ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)).
+- The graphics pipeline (GFX) in `internal/rdp`, the first part of the
+  native RDP backend's third phase, behind `Config.GFX`, which the
+  backend does not set yet: the capability exchange over DRDYNVC, ZGFX
+  decompression with its 2.5 MB history, surfaces within a bound on
+  their pixels composed onto the desktop, at most 64 of them mapped,
+  solid fills, copies within and between surfaces (a copy within a
+  surface goes to viewers as a copy where no other surface covers it
+  and the output shows the surface's own pixels, which the surfaces
+  under one deleted, replaced or moved, or under a bitmap update, draw
+  again to keep), uncompressed and planar bitmaps (AYCoCg, colour loss
+  and chroma subsampling included, planar within a bitmap update's
+  bound), and frame acknowledgements, bounded, which the server waits
+  for. Decompression's growth, each copied point, each redraw after a
+  resize, and every cell that the surfaces draw again where a surface
+  left the output or a bitmap update drew under them are charged to
+  the decoding rate. A server that does not open the
+  channel, or closes it, draws with bitmap updates. RemoteFX
+  Progressive, RemoteFX, ClearCodec and the cache come next, and with
+  them GFX by default and a key that turns it off. Against xrdp 0.10.1
+  the channel, the capabilities, a reset to the size the desktop has,
+  ZGFX's stored segments, a surface, planar bitmaps of xrdp's first,
+  black screen, and frame acknowledgements (a frame a key) ran live;
+  that the acknowledgements pace xrdp was not checked against a run
+  without them. Compressed ZGFX, planar's
+  AYCoCg, solid fills, surface-to-surface copies and uncompressed
+  bitmaps, which xrdp did not send, are checked against the
+  specification's examples, the tests' own compressor and encoder, and
+  `rdptest` only, until a Windows host checks them.
 - A native Kubernetes backend, `internal/backend/kubernetes`, in pure
   Go and without client-go: a `kubernetes` connection opens a terminal
   in a pod's container through the API server's `pods/exec` (or
@@ -509,6 +564,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Changed
 
+- The plan for v1.0 (owner, 2026-10-31): it waits until the benchmark
+  shows native at least 10x better than guacd, and ships no guacd
+  fallback for a protocol still short of it; release candidates may
+  carry one. The gate is each scenario's target as defined, which may
+  fall short of 10x only where a documented bound outside Occamy makes
+  10x impossible, justified in `docs/benchmarks.md`
+  ([specs/008-native-architecture/benchmark.md](specs/008-native-architecture/benchmark.md#targets)).
 - Building occamyd needs Go 1.26.4 or later, which gen2brain/vpx and
   gen2brain/jpegn require.
 - `make bench` builds occamyd's image from the working tree before

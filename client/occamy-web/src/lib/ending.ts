@@ -40,6 +40,30 @@ export interface Ending {
  */
 export const TAKEOVER_REASON = 'the owner connected again'
 
+// The close codes occamyd sends a session's streams once the session
+// itself has ended, for everyone in it (closeFor, internal/stream/serve.go).
+const SESSION_ENDS: ReadonlySet<number> = new Set([
+  CloseCode.ServerShutdown,
+  CloseCode.SessionClosed,
+  CloseCode.OwnerLeft,
+  CloseCode.Idle,
+  CloseCode.RemoteEnded,
+  CloseCode.BackendFailed,
+])
+
+/**
+ * endsSession reports whether occamyd closes a stream with code only
+ * once the session has ended for everyone: closed by its owner, left by
+ * its owner, idle, ended by the remote, its connection to the remote
+ * failed, or occamyd shutting down, which ends every session. Not 1011,
+ * with which occamyd also closes one stream that failed while the
+ * session runs on, nor 4001, with which it refuses a stream to a session
+ * that may run on, someone else's.
+ */
+export function endsSession(code: number): boolean {
+  return SESSION_ENDS.has(code)
+}
+
 /** describeEnd describes a session that ended with code and reason. */
 export function describeEnd(code: number, reason: string, ctx: EndContext): Ending {
   const technical = code === 0 ? clip(reason, MAX_LABEL) : `${closeCodeName(code)} (${code})${reason === '' ? '' : `: ${clip(reason, MAX_LABEL)}`}`

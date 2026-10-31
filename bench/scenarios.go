@@ -10,6 +10,8 @@ import (
 	"image"
 	"slices"
 	"time"
+
+	"changkun.de/x/occamy/internal/terminal"
 )
 
 // scenario is one of the measurements in specs/008-native-architecture/
@@ -46,6 +48,13 @@ func desktopScenarios(proto string) []scenario {
 // scenario starts typing.
 const promptQuiet = 1500 * time.Millisecond
 
+// How long a scenario waits for one sample before it fails: a key's
+// update, and T2's end marker.
+var (
+	keyWait    = 10 * time.Second
+	markerWait = 30 * time.Second
+)
+
 // runTypeEcho (T1) types into an idle shell and measures the time from
 // each key until the first frame that draws after it.
 func runTypeEcho(ctx context.Context, r *runner, s *session, res *result) error {
@@ -61,9 +70,11 @@ func runTypeEcho(ctx context.Context, r *runner, s *session, res *result) error 
 		if err := s.key('a' + i%26); err != nil {
 			return err
 		}
-		f, err := s.wait(ctx, t0, func(frame) bool { return true })
+		wctx, cancel := context.WithTimeout(ctx, keyWait)
+		f, err := s.wait(wctx, t0, func(frame) bool { return true })
+		cancel()
 		if err != nil {
-			return err
+			return fmt.Errorf("key %d: %w", i, err)
 		}
 		lat = append(lat, f.at.Sub(t0))
 		time.Sleep(time.Until(next))
@@ -72,14 +83,35 @@ func runTypeEcho(ctx context.Context, r *runner, s *session, res *result) error 
 	return nil
 }
 
-// magenta is colour 201 of the xterm palette, which guacd's terminal
-// uses. Nothing else on the demo shell is this colour.
+// magenta marks T2's end: a line in colour 201 of the xterm palette.
+// Nothing else on the demo shell is this colour. A v0 client sees it as
+// pixels, which guacd's terminal draws, and a v1 client as cells of the
+// terminal it emulates.
+var magenta = marker{pixels: isMagenta, cells: hasMagenta}
+
+// isMagenta reports magenta pixels in r.
 func isMagenta(img *image.RGBA, r image.Rectangle) bool {
 	r = r.Intersect(img.Bounds())
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		for x := r.Min.X; x < r.Max.X; x++ {
 			c := img.RGBAAt(x, y)
 			if c.R > 0xf0 && c.G < 0x10 && c.B > 0xf0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// magentaCell is the background of the marker's cells, as the shell's
+// printf sets it (SGR 48;5;201).
+var magentaCell = terminal.IndexedColor(201)
+
+// hasMagenta reports cells with a magenta background on scr.
+func hasMagenta(scr *terminal.Screen) bool {
+	for y := range scr.Rows {
+		for x := range scr.Cols {
+			if scr.Cell(x, y).Style.Bg == magentaCell {
 				return true
 			}
 		}
@@ -94,7 +126,7 @@ func runBulkOutput(ctx context.Context, r *runner, s *session, res *result) erro
 		return err
 	}
 	lines := r.samples(100000)
-	s.setMarker(isMagenta)
+	s.setMarker(magenta)
 	cmd := fmt.Sprintf(`seq 1 %d; printf '\033[48;5;201m%%40s\033[0m\n' ''`, lines)
 	if err := s.typeText(cmd); err != nil {
 		return err
@@ -107,9 +139,11 @@ func runBulkOutput(ctx context.Context, r *runner, s *session, res *result) erro
 	if err := s.key(keyReturn); err != nil {
 		return err
 	}
-	f, err := s.wait(ctx, t0, func(f frame) bool { return f.marked })
+	wctx, cancel := context.WithTimeout(ctx, markerWait)
+	defer cancel()
+	f, err := s.wait(wctx, t0, func(f frame) bool { return f.marked })
 	if err != nil {
-		return err
+		return fmt.Errorf("the end marker: %w", err)
 	}
 	res.Completion = ms(f.at.Sub(t0))
 	m.finish(res, f.at)

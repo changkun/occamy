@@ -10,7 +10,8 @@ import (
 )
 
 // The planar codec, the RDP 6.0 bitmap compression of [MS-RDPEGDI]
-// 2.2.2.5.1 and 3.1.9, which compresses 32-bit bitmap updates.
+// 2.2.2.5.1 and 3.1.9, which compresses 32-bit bitmap updates and is one
+// of the graphics pipeline's codecs.
 
 // Planar format header bits, [MS-RDPEGDI] 2.2.2.5.1.
 const (
@@ -20,70 +21,132 @@ const (
 	planarNA      = 0x20 // no alpha plane
 )
 
+// planarStream is where a planar bitmap comes from, which decides how
+// its rows go and what it may hold.
+type planarStream int
+
+const (
+	// planarBitmap is a bitmap update's: its rows are bottom-up, and it
+	// is in ARGB, since the client advertises neither colour loss nor
+	// chroma subsampling ([MS-RDPBCGR] 2.2.7.1.2).
+	planarBitmap planarStream = iota
+	// planarGFX is the graphics pipeline's: its rows are top-down, and
+	// it may be in AYCoCg, with colour loss and chroma subsampling.
+	planarGFX
+)
+
 var errPlanarOverrun = errors.New("rdp: planar plane overruns its row")
 
-// planarDecode decodes a planar bitmap of width×height pixels into dst,
-// RGBA rows top-down. bottomUp tells whether the stream stores the rows
-// bottom-up, as bitmap updates do.
-func (d *decoder) planarDecode(src []byte, width, height int, dst []byte, bottomUp bool) error {
+// planarDecode decodes a planar bitmap of width×height pixels from the
+// stream kind into dst, opaque RGBA rows top-down, stride bytes apart.
+// The alpha plane, if any, is decoded and dropped: bitmap updates and
+// the graphics pipeline's opaque surfaces take none.
+func (d *decoder) planarDecode(src []byte, width, height int, dst []byte, stride int, kind planarStream) error {
 	if len(src) < 1 {
 		return errShort
 	}
 	hdr := src[0]
-	if hdr&planarCLLMask != 0 || hdr&planarCS != 0 {
-		// Colour loss and chroma subsampling select YCoCg, which xrdp does
-		// not send; it is left for the GFX planar codec.
-		return fmt.Errorf("rdp: planar bitmap with colour loss level %d", hdr&planarCLLMask)
+	cll := int(hdr & planarCLLMask)
+	cs := hdr&planarCS != 0
+	switch {
+	case kind == planarBitmap && cll != 0:
+		return fmt.Errorf("rdp: planar bitmap update with colour loss level %d", cll)
+	case cs && cll == 0:
+		// [MS-RDPEGDI] 2.2.2.5.1: chroma subsampling is of AYCoCg alone.
+		return errors.New("rdp: planar bitmap with chroma subsampling and no colour loss")
+	}
+	if width <= 0 || height <= 0 || len(dst) < stride*(height-1)+4*width {
+		return errors.New("rdp: planar destination too small")
 	}
 	n := width * height
-	if len(dst) < 4*n {
-		return errors.New("rdp: planar destination too small")
+	// The chroma planes of a subsampled bitmap have half its pixels each
+	// way, rounded up ([MS-RDPEGDI] 3.1.9.1.3).
+	cw, ch := width, height
+	if cs {
+		cw, ch = (width+1)/2, (height+1)/2
 	}
 	nplanes := 4
 	if hdr&planarNA != 0 {
 		nplanes = 3
 	}
-	for i := range nplanes {
-		if cap(d.planes[i]) < n {
-			d.planes[i] = make([]byte, n)
-		}
-		d.planes[i] = d.planes[i][:n]
-	}
+	o := nplanes - 3 // the colour planes' first: the alpha plane comes first
 	pos := 1
 	for i := range nplanes {
+		pw, ph := width, height
+		if i > o && cs {
+			pw, ph = cw, ch
+		}
+		size := pw * ph
+		if cap(d.planes[i]) < size {
+			d.planes[i] = make([]byte, max(size, n))
+		}
+		plane := d.planes[i][:size]
 		if hdr&planarRLE != 0 {
-			k, err := planarRLEPlane(src[pos:], d.planes[i], width, height)
+			k, err := planarRLEPlane(src[pos:], plane, pw, ph)
 			if err != nil {
 				return err
 			}
 			pos += k
 		} else {
-			if len(src)-pos < n {
+			if len(src)-pos < size {
 				return errShort
 			}
-			copy(d.planes[i], src[pos:pos+n])
-			pos += n
+			copy(plane, src[pos:pos+size])
+			pos += size
 		}
 	}
-	// The alpha plane comes first when present; bitmap updates are opaque,
-	// so it is decoded and dropped.
-	o := nplanes - 3
-	r, g, b := d.planes[o], d.planes[o+1], d.planes[o+2]
+	p0, p1, p2 := d.planes[o], d.planes[o+1], d.planes[o+2]
 	for y := range height {
 		sy := y
-		if bottomUp {
+		if kind == planarBitmap {
 			sy = height - 1 - y
 		}
-		row := dst[4*y*width : 4*(y+1)*width]
+		row := dst[y*stride : y*stride+4*width]
 		s := sy * width
-		for x := range width {
-			row[4*x] = r[s+x]
-			row[4*x+1] = g[s+x]
-			row[4*x+2] = b[s+x]
-			row[4*x+3] = 0xff
+		if cll == 0 {
+			r, g, b := p0[s:s+width], p1[s:s+width], p2[s:s+width]
+			for x := range width {
+				row[4*x] = r[x]
+				row[4*x+1] = g[x]
+				row[4*x+2] = b[x]
+				row[4*x+3] = 0xff
+			}
+			continue
 		}
+		ycocg(row, p0[s:s+width], p1, p2, sy, cw, cll, cs)
 	}
 	return nil
+}
+
+// ycocg converts the row sy of AYCoCg planes ([MS-RDPEGDI] 3.1.9.1.2) to
+// opaque RGBA in row: lum is the row's luma, and co and cg the chroma
+// planes, cw wide, subsampled if cs. The chroma lost cll bits; shifted
+// back, they are 9-bit signed values, of which the transform takes half.
+func ycocg(row, lum, co, cg []byte, sy, cw, cll int, cs bool) {
+	shift := cll - 1
+	c := sy * cw
+	if cs {
+		c = sy / 2 * cw
+	}
+	for x := range lum {
+		cx := c + x
+		if cs {
+			cx = c + x/2
+		}
+		y := int(lum[x])
+		o := int(int8(co[cx] << shift)) // #nosec G115 -- the 9-bit chroma's half
+		g := int(int8(cg[cx] << shift)) // #nosec G115 -- likewise
+		t := y - g
+		row[4*x] = clamp8(t + o)
+		row[4*x+1] = clamp8(y + g)
+		row[4*x+2] = clamp8(t - o)
+		row[4*x+3] = 0xff
+	}
+}
+
+// clamp8 clamps v to a byte.
+func clamp8(v int) byte {
+	return byte(min(max(v, 0), 0xff)) // #nosec G115 -- clamped
 }
 
 // planarRLEPlane decodes one RLE plane, [MS-RDPEGDI] 2.2.2.5.1.1, into

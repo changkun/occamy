@@ -1,0 +1,69 @@
+# Copyright 2026 Changkun Ou. All rights reserved.
+# Use of this source code is governed by a MIT
+# license that can be found in the LICENSE file.
+
+# The v1 file of the benchmark stack's occamy-v1 service
+# (docker-compose.bench.yaml), which replaces the demo's: the bench
+# desktop and the demo shell through every backend that API v1 serves
+# them with, for the harness's v1 series (bench/v1.go). SSH has no guacd
+# backend. Every connection names its backend, so that a change of a
+# protocol's default does not move a series to another backend.
+
+version: 1
+listen: 0.0.0.0:5637
+auth:
+  # On a tmpfs (docker-compose.yaml): occamyd creates the key at start.
+  signing_key_file: /run/occamy/signing.key
+  users:
+    # Password occamy, as the demo's.
+    - name: demo
+      password_hash: "$2a$10$DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
+connections:
+  - id: ssh
+    protocol: ssh
+    backend: native
+    target: ssh:22
+    # The demo shell's host key changes with its image.
+    insecure_ignore_host_key: true
+    credentials: {username: occamy, password_env: OCCAMY_BENCH_SSH_PASSWORD}
+    allow: {users: [demo]}
+  - id: vnc-native
+    protocol: vnc
+    backend: native
+    target: vnc:5900
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: vnc-guacd
+    protocol: vnc
+    backend: guacd
+    target: vnc:5900
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: rdp-native
+    protocol: rdp
+    backend: native
+    target: rdp:3389
+    # As the demo's rdp-native: xrdp speaks TLS without NLA, and signs
+    # its certificate itself when the image is built, so there is nothing
+    # to pin in advance; occamyd warns of it when it starts.
+    security: tls
+    tls: {insecure_skip_verify: true}
+    credentials: {username: occamy, password_env: OCCAMY_BENCH_RDP_PASSWORD}
+    allow: {users: [demo]}
+  - id: rdp-guacd
+    protocol: rdp
+    backend: guacd
+    target: rdp:3389
+    credentials: {username: occamy, password_env: OCCAMY_BENCH_RDP_PASSWORD}
+    allow: {users: [demo]}
+guacd:
+  address: guacd:4822
+  params:
+    rdp:
+      # As in occamy.yaml, the v0 file. occamyd adds disable-gfx, which the
+      # v0 series' guacd does not get (docs/benchmarks.md).
+      ignore-cert: "true"
+limits:
+  # The harness ends each session with DELETE, but a run that fails
+  # midway may leave some for the owner grace.
+  sessions_per_user: 100
