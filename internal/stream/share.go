@@ -345,8 +345,9 @@ func (c *encodeCache) run(k runKey, versions []uint64) (e *entry, mine bool) {
 			c.hits++
 			return old, false
 		}
+		// The key holds the run's length, so the two are as long.
 		for i, v := range old.versions {
-			if v > versions[i] {
+			if i < len(versions) && v > versions[i] {
 				c.stale++
 				return nil, false
 			}
