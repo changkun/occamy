@@ -14,7 +14,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -163,7 +165,8 @@ func TestE2EV1RDP(t *testing.T) {
 	// xrdp's clipboard channel, where the demo image's clipboard echo
 	// (docker/demo/rdp/clipboard-echo.sh) puts it back with echo: in
 	// front, and xrdp offers that to the viewers.
-	t.Run("clipboard", func(t *testing.T) {
+	clipboard := func(t *testing.T) {
+		t.Helper()
 		ctx, token, cl := open(t)
 		pasted := fmt.Sprintf("occamy-e2e:%d", time.Now().UnixNano())
 		if _, err := cl.Clipboard(ctx, "text/plain", []byte(pasted)); err != nil {
@@ -174,7 +177,8 @@ func TestE2EV1RDP(t *testing.T) {
 			return ok && strings.HasPrefix(c.MIME, "text/plain") && string(c.Data) == "echo:"+pasted
 		})
 		closeSessionV1(t, addr, token, cl.SessionID())
-	})
+	}
+	t.Run("clipboard", clipboard)
 
 	// The owner's resize goes through Display Control, and xrdp resizes
 	// the X session: the screen and the session's size follow. The
@@ -282,6 +286,99 @@ func TestE2EV1RDP(t *testing.T) {
 		typeV1(t, ctx, back)
 		closeSessionV1(t, addr, token, id)
 	})
+
+	// xrdp's channel server, xrdp-chansrv, carries the clipboard. xrdp
+	// 0.10.1's can exit when a connection closes just after attaching to
+	// it, and xrdp starts it only with the session. The demo image's
+	// reconnectwm.sh, which xrdp runs on each reconnection, starts it
+	// again (docker/demo/rdp/reconnectwm.sh). A connection while it runs
+	// starts none. Once it is killed, the next connection has the
+	// clipboard: xrdp retries the channel server for 10 seconds, and a
+	// connection that gets none in that time never has a clipboard. The
+	// log then names the restart.
+	t.Run("clipboard-after-chansrv-exit", func(t *testing.T) {
+		compose := composeE2E(t)
+		restarts := func() int {
+			return strings.Count(compose.run(t, "logs", "rdp"), "starting xrdp-chansrv again")
+		}
+		running := func() int {
+			out := strings.TrimSpace(compose.run(t, "exec", "-T", "rdp", "sh", "-c", countChansrv))
+			n, err := strconv.Atoi(out)
+			if err != nil {
+				t.Fatalf("counting the channel servers: %q", out)
+			}
+			return n
+		}
+		before, alive := restarts(), running()
+		clipboard(t)
+		want := before
+		if alive == 0 { // an earlier connection's left none
+			want++
+		}
+		if n := restarts(); n != want {
+			t.Errorf("a connection with %d channel servers running restarted it %d times, want %d", alive, n-before, want-before)
+		}
+		if n := running(); n != 1 {
+			t.Fatalf("%d channel servers run, want 1", n)
+		}
+
+		compose.run(t, "exec", "-T", "rdp", "sh", "-c", killChansrv)
+		for deadline := time.Now().Add(10 * time.Second); running() > 0; time.Sleep(100 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("the channel server still runs after it was killed")
+			}
+		}
+		clipboard(t)
+		if n := restarts(); n != want+1 {
+			t.Errorf("the channel server was restarted %d times after it was killed, want 1", n-want)
+		}
+		if n := running(); n != 1 {
+			t.Errorf("%d channel servers run after the restart, want 1", n)
+		}
+	})
+}
+
+// countChansrv prints how many xrdp-chansrv processes run in the rdp
+// container, leaving out those that have exited but are not yet
+// reaped. The image has no procps, so it reads /proc.
+const countChansrv = `n=0
+for p in /proc/[0-9]*; do
+	[ "$(cat "$p/comm" 2>/dev/null)" = xrdp-chansrv ] || continue
+	read -r _ _ state _ 2>/dev/null < "$p/stat" || continue
+	[ "$state" = Z ] || n=$((n+1))
+done
+echo "$n"`
+
+// killChansrv kills every xrdp-chansrv process in the rdp container.
+const killChansrv = `for p in /proc/[0-9]*; do
+	[ "$(cat "$p/comm" 2>/dev/null)" = xrdp-chansrv ] && kill "${p#/proc/}"
+done
+true`
+
+// composeCmd runs the demo stack's compose commands.
+type composeCmd []string
+
+// composeE2E returns OCCAMY_E2E_COMPOSE's command, which make e2e sets
+// to the demo stack's compose, or skips the test if it is not set.
+func composeE2E(t *testing.T) composeCmd {
+	t.Helper()
+	c := strings.Fields(os.Getenv("OCCAMY_E2E_COMPOSE"))
+	if len(c) == 0 {
+		t.Skip("OCCAMY_E2E_COMPOSE not set, see the package documentation")
+	}
+	return c
+}
+
+// run runs the compose command with args and returns what it printed.
+func (c composeCmd) run(t *testing.T, args ...string) string {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, c[0], append(slices.Clone(c[1:]), args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %s: %v\n%s", strings.Join(c, " "), strings.Join(args, " "), err, out)
+	}
+	return string(out)
 }
 
 // openDesktopV1 opens the stream at path with token and waits for the

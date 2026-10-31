@@ -129,7 +129,10 @@ sends that user something. Until then the user still counts, for up to
   for `error in trans_connect chan`. That line means xrdp found no
   channel server, the process that carries the clipboard. The image's
   `reconnectwm.sh` starts one again on the next connection, and logs
-  `starting xrdp-chansrv again` when it does.
+  `starting xrdp-chansrv again` when it does. `make e2e` checks that
+  restart too: it kills the channel server in the rdp container, through
+  the stack's compose command in `OCCAMY_E2E_COMPOSE`, then checks the
+  clipboard again.
 - `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test. Each of its N
   rounds opens two sessions to each demo server at once: one that waits
   for the desktop and one that sends garbage. All sessions to one server

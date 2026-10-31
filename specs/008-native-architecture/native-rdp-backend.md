@@ -1181,14 +1181,24 @@ RDP's guacd path, RDP no longer needs guacd at all.
     to the new one. A lock keeps two reconnections from starting two
     channel servers.
 
-    The restart has not run yet: the shared host's load stayed above 8,
-    which ruled out the local stack. A green CI run shows only that the
-    script changes nothing while the channel server runs. The restart
-    happens only in a run where the channel server dies, and CI prints
-    the stack's logs only when a test fails. A direct check: run the
-    rdp image alone, kill `xrdp-chansrv` in it, and connect twice
-    through a local occamyd. The second connection should have the
-    clipboard, and the log should show the restart.
+    The script decides by whether a channel server process exists, not
+    by whether it is listening. A channel server that is resetting, as
+    pid 123 was for the 2 seconds before it accepted, is still that
+    process, so the script leaves it alone.
+
+    `TestE2EV1RDP/clipboard-after-chansrv-exit` runs the restart in
+    every `make e2e`, through the stack's compose command
+    (`OCCAMY_E2E_COMPOSE`):
+    1. It checks the clipboard while the channel server runs. That
+       connection must not restart it, and exactly one must run
+       afterwards.
+    2. It kills `xrdp-chansrv` in the rdp container.
+    3. It checks the clipboard again. A connection that gets no channel
+       server within xrdp's 10 seconds of retries never has a clipboard.
+    4. The log must gain one `starting xrdp-chansrv again`, and exactly
+       one channel server must run.
+
+    Without the script, the subtest fails.
 - **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
   through occamyd's routes with the Go client against `rdptest`: NLA
   with stored credentials, the hello's size, the screen, scancodes,

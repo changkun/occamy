@@ -583,7 +583,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   a connection closes just after attaching to it, and xrdp starts it
   only with the session. Until now every later connection then waited
   10 seconds for it and got no clipboard, which once failed `make e2e`'s
-  clipboard check.
+  clipboard check. `make e2e` now kills the channel server in the rdp
+  container and checks that the next connection has the clipboard.
 
 ### Security
 

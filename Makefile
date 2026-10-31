@@ -33,10 +33,13 @@ stop:
 # the v0 service's on OCCAMY_E2E_ENDPOINT and occamy-v1's, API v1 with
 # native VNC and RDP next to guacd's, on OCCAMY_E2E_V1_ENDPOINT. Both
 # default to the ports the stack publishes, OCCAMY_PORT and
-# OCCAMY_V1_PORT as docker-compose.yaml takes them.
+# OCCAMY_V1_PORT as docker-compose.yaml takes them. OCCAMY_E2E_COMPOSE
+# is the stack's compose command, with which a test kills a process in
+# the rdp container and reads its log.
 e2e:
 	OCCAMY_E2E_ENDPOINT=$(or $(OCCAMY_E2E_ENDPOINT),localhost:$(or $(OCCAMY_PORT),5636)) \
 	OCCAMY_E2E_V1_ENDPOINT=$(or $(OCCAMY_E2E_V1_ENDPOINT),localhost:$(or $(OCCAMY_V1_PORT),5637)) \
+	OCCAMY_E2E_COMPOSE="$(or $(OCCAMY_E2E_COMPOSE),$(CONTAINER_ENGINE) compose -f $(CURDIR)/docker/docker-compose.yaml)" \
 	go test -v -count=1 ./tests/
 .PHONY: e2e
 
