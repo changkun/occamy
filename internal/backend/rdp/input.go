@@ -36,13 +36,6 @@ const (
 	keysymPause = 0xff13
 )
 
-// hidPower is the USB HID usage of the Power key, which the backend
-// drops: Windows applies its power button action to the machine, which
-// may shut it down or put it to sleep for every user, beyond what a
-// viewer's input to one session should reach. Sleep and Wake are
-// usages of the Generic Desktop page, which keys do not carry.
-const hidPower = 0x66
-
 // Scancodes of the Control keys, whose state decides what Pause sends.
 const (
 	scancodeLeftControl  = 0x1d
@@ -126,10 +119,12 @@ func (s *inputState) events(evs []rdp.InputEvent, caps capabilities, ev backend.
 // keyboard event if the server takes them, or as its key on a US layout
 // if not. Pause, whose make code is a sequence, is sent whole on its
 // press, except while Control is down: then it is Break, an ordinary
-// key, as FreeRDP sends it. Power is dropped (hidPower).
+// key, as FreeRDP sends it. Power and the power keysyms are dropped
+// (backend.PowerKey): Windows applies its power button action to the
+// whole machine.
 func (s *inputState) key(evs []rdp.InputEvent, caps capabilities, k backend.Key) []rdp.InputEvent {
 	switch {
-	case k.Code == hidPower:
+	case backend.PowerKey(k):
 		return evs
 	case k.Code == hidPause || k.Code == 0 && k.Keysym == keysymPause:
 		switch {

@@ -148,7 +148,10 @@ standing approval to resolve open items; open to the owner's review.
    down or put it to sleep for every user, which is more than a
    viewer's input to one session should reach. Sleep and Wake are
    Generic Desktop usages, which keys do not carry, so there is nothing
-   else to drop.
+   else to drop. Every backend now drops it, by `backend.PowerKey`
+   (`internal/backend/power.go`), which also drops the X11 power
+   keysyms (XF86PowerOff, PowerDown, Sleep, Suspend, Hibernate,
+   Standby) that a key without a code may carry.
 5. **The server's deliberate ends are remote ends.** Run returns nil,
    which the session reports as `remote-ended` (4005), for no reason,
    the user's logoff or disconnect, and also for the reasons guacd
@@ -479,8 +482,12 @@ and guacd leaves the default deployment.
   - Inherited from the VNC backend's text mapping: U+0014 taps Scroll
     Lock, since the C0 controls map to keysyms 0xff00 and up, and CR LF
     types Return twice.
-  - The VNC backend sends Power (E0 5E) through QEMU's extended key
-    events; it may want the same drop as RDP.
+  - ~~The VNC backend sends Power (E0 5E) through QEMU's extended key
+    events; it may want the same drop as RDP.~~ Done in the
+    panic-safety PR: the VNC, RDP and guacd backends drop Power and the
+    power keysyms through one helper, `backend.PowerKey`, whose
+    `HIDPower` the web client's keyboard test reads. The web client
+    still maps Power; no backend sends it.
   - Lang1 and Lang2's scancodes, unchecked against Windows.
   - At registration in `occamyd`'s backend factory, with the
     connection configuration's `rdp` parameters (`RoutingCookie` among

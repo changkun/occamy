@@ -10,7 +10,9 @@ package backend
 
 import (
 	"context"
+	"fmt"
 	"image"
+	"runtime/debug"
 	"strconv"
 )
 
@@ -41,6 +43,12 @@ func (c Class) String() string {
 // come for a moment after Run returns, until the session notices, and
 // must then return without blocking or panicking; Input returns an
 // error.
+//
+// What a client or the remote server sends must not crash occamyd. The
+// session recovers a panic of Run, Input and Demand on its own
+// goroutines; a backend recovers one on every goroutine it starts, stops
+// the others, and returns it from Run as a PanicError. Either way the
+// session ends with its internal reason.
 type Backend interface {
 	// Class reports the kind of content the backend produces. It never
 	// changes.
@@ -81,7 +89,9 @@ type Sink interface {
 	// screen, locked for drawing. The backend draws and then calls Unlock
 	// with the same r, which releases the pixels and records r as damage.
 	// A goroutine that holds a lock calls no other Sink method until it
-	// unlocks. Graphical backends only.
+	// unlocks. Unlock is deferred, so that a panic while drawing, which
+	// a decoder's bug and a server's data can cause, releases the pixels:
+	// viewers' writers wait for them. Graphical backends only.
 	Lock(r image.Rectangle) *image.RGBA
 	Unlock(r image.Rectangle)
 	// CopyRect copies the pixels of dst's size at src to dst, as when the
@@ -105,6 +115,30 @@ type Sink interface {
 	// keyboard-interactive challenge or a VNC password, and waits until
 	// the owner answers, ctx is done, or the session ends.
 	Prompt(ctx context.Context, p Prompt) (PromptReply, error)
+}
+
+// PanicError is a panic that a backend, a session or a stream recovered
+// from, with the stack where it happened.
+type PanicError struct {
+	Value any
+	Stack []byte
+}
+
+func (p PanicError) Error() string { return fmt.Sprintf("panic: %v", p.Value) }
+
+// Recovered returns the PanicError of r, the value of recover, or nil if
+// r is nil:
+//
+//	defer func() {
+//		if err := backend.Recovered(recover()); err != nil {
+//			// stop, and return err from Run
+//		}
+//	}()
+func Recovered(r any) error {
+	if r == nil {
+		return nil
+	}
+	return PanicError{Value: r, Stack: debug.Stack()}
 }
 
 // Prompt is a request for answers from the session's owner.

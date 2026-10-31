@@ -26,7 +26,6 @@ import (
 	"image"
 	"image/draw"
 	"log/slog"
-	"runtime/debug"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -110,23 +109,14 @@ type End struct {
 }
 
 // PanicError is a panic that a session or a stream recovered from, with
-// the stack where it happened. A client's message must not crash
-// occamyd, whatever it makes a backend do.
-type PanicError struct {
-	Value any
-	Stack []byte
-}
-
-func (p PanicError) Error() string { return fmt.Sprintf("panic: %v", p.Value) }
+// the stack where it happened, or one that a backend recovered on a
+// goroutine of its own and returned from Run. A client's message must not
+// crash occamyd, whatever it makes a backend do.
+type PanicError = backend.PanicError
 
 // Recovered returns the PanicError of r, the value of recover, or nil
 // if r is nil.
-func Recovered(r any) error {
-	if r == nil {
-		return nil
-	}
-	return PanicError{Value: r, Stack: debug.Stack()}
-}
+func Recovered(r any) error { return backend.Recovered(r) }
 
 // Errors from sessions and viewers.
 var (
@@ -462,7 +452,11 @@ func (s *Session) run(ctx context.Context) {
 	if runDone != nil {
 		// The session ended for another reason; the backend's error on
 		// the way out matters only for the log.
-		if err := <-runDone; err != nil && !errors.Is(err, context.Canceled) {
+		var p PanicError
+		switch err := <-runDone; {
+		case errors.As(err, &p):
+			s.log.Error("backend panicked", "panic", p.Value, "stack", string(p.Stack))
+		case err != nil && !errors.Is(err, context.Canceled):
 			s.log.Debug("backend stopped", "err", err)
 		}
 	}
@@ -471,6 +465,13 @@ func (s *Session) run(ctx context.Context) {
 	s.mu.Unlock()
 	for _, v := range viewers {
 		v.update(func(p *Pending) { p.End = &s.end })
+	}
+	if s.fb != nil {
+		// Run has returned, so no backend goroutine draws any more: a
+		// Lock still held was left by a panic, or forgotten, and the
+		// writers waiting for its rows would wait forever. Closing
+		// releases it; they read nothing more, and find the end.
+		s.fb.Close()
 	}
 	s.log.Info("session ended", "reason", s.end.Reason.String(), "err", s.end.Err)
 	close(s.done)
@@ -700,10 +701,18 @@ func (k sink) CursorMove(pos image.Point) {
 
 func (k sink) TermData(data []byte) {
 	s := k.s
-	s.outMu.Lock()
-	s.cfg.Terminal.Write(data)
-	s.outMu.Unlock()
+	s.termWrite(data)
 	s.wakeTerminal()
+}
+
+// termWrite feeds the terminal under outMu, which a panic in the
+// emulator releases too: the backend's other goroutines, such as SSH's
+// reader of the other stream, still feed and resize the terminal until
+// they stop.
+func (s *Session) termWrite(data []byte) {
+	s.outMu.Lock()
+	defer s.outMu.Unlock()
+	s.cfg.Terminal.Write(data)
 }
 
 func (k sink) Clipboard(mime string, data []byte) {
