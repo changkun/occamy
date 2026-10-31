@@ -3,14 +3,32 @@
 # the harness can also measure guacd without occamy in between. The VNC
 # and RDP servers show the scene program (bench/scene) instead of an
 # xterm. They keep their service names, hosts and credentials, and are
-# tagged apart from the demo images.
+# tagged apart from the demo images. occamy-v1 serves the shell and the
+# bench desktop through every backend API v1 has for them
+# (bench/occamy-v1.yaml), for the v1 series.
 #
 #   make bench
+#
+# GUACD_PORT publishes guacd on another port, for a second stack on a
+# shared host, as OCCAMY_PORT and OCCAMY_V1_PORT do for occamyd.
 
 services:
   guacd:
     ports:
-      - "127.0.0.1:4822:4822"
+      - "127.0.0.1:${GUACD_PORT:-4822}:4822"
+
+  occamy-v1:
+    volumes:
+      # Replaces the demo's v1 file, which is mounted at the same path.
+      - ./bench/occamy-v1.yaml:/occamy/v1.yaml:ro
+    environment:
+      OCCAMY_BENCH_SSH_PASSWORD: occamy
+      OCCAMY_BENCH_RDP_PASSWORD: occamy
+    depends_on:
+      ssh:
+        condition: service_healthy
+      rdp:
+        condition: service_healthy
 
   vnc:
     image: occamy-bench-desktop
