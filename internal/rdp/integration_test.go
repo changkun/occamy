@@ -418,7 +418,9 @@ func TestIntegrationResize(t *testing.T) {
 	s.c.chio.mu.Lock()
 	t.Logf("DRDYNVC version %d; Display Control takes %d pixels", s.c.dvc.version, s.c.disp.maxArea)
 	s.c.chio.mu.Unlock()
-	for _, size := range []image.Point{image.Pt(1280, 720), image.Pt(800, 600)} {
+	// The last size is the first, as the other tests expect it.
+	w0, h0 := s.c.Size()
+	for _, size := range []image.Point{image.Pt(1280, 720), image.Pt(800, 600), image.Pt(w0, h0)} {
 		s.c.RequestSize(size.X, size.Y)
 		if !waitFor(30*time.Second, func() bool {
 			w, h := s.c.Size()

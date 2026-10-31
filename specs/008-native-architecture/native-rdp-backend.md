@@ -745,13 +745,15 @@ and guacd leaves the default deployment.
   against the bench desktop image's xrdp 0.10.1 with xorgxrdp 0.10.2:
   the client's `TestIntegrationResize` saw DRDYNVC version 2 and
   Display Control's capabilities (33,554,432 pixels) and resized the
-  desktop to 1280×720 and 800×600, each drawn to its new edges; the
-  backend's `TestIntegrationResize` resized the sink to 1280×720,
-  800×600 and back to 1024×768, a key painting the probe's swatch at
-  each size. The rest of both packages' integration tests passed with
-  the channel joined.
-- **Mutation checks.** Each was broken in turn, 33 in all, and a test
-  failed for 31; a mutant that no longer compiled was rewritten until
+  desktop to 1280×720, 800×600 and back to 1024×768, each drawn to its
+  new edges; on a fresh session the first layout met xrdp's login and
+  the retry two seconds later applied it. The backend's
+  `TestIntegrationResize` resized the sink to 1280×720, 800×600 and
+  back to 1024×768, a key painting the probe's swatch at each size.
+  The rest of both packages' integration tests passed with the channel
+  joined.
+- **Mutation checks.** Each was broken in turn, 34 in all, and a test
+  failed for 32; a mutant that no longer compiled was rewritten until
   it did. Caught:
   - the answers' bound (`TestDynvcAnswersBounded`; changing the
     constant survived, since the test uses it, so the check itself was
