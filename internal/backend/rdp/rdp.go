@@ -232,6 +232,7 @@ func New(cfg Config) (*Backend, error) {
 			Protocols:      protocols,
 			TLS:            cfg.TLS,
 			Clipboard:      clip,
+			Resize:         true,
 			Logger:         cfg.Logger,
 		},
 		dialTimeout: cfg.DialTimeout,
@@ -302,9 +303,10 @@ func (b *Backend) Demand(d backend.Demand) {
 // events (see input.go). Clipboard text becomes the server's clipboard
 // through the clipboard channel, at most rdp.MaxClipboard bytes of it,
 // unless DisablePaste is set; other clipboard content is dropped.
-// Resize is ignored until the backend speaks the display control
-// channel, so viewers scale the remote desktop. TermInput fails with
-// ErrUnsupportedInput.
+// Resize asks the server for the size through Display Control
+// (rdp.Client.RequestSize), the newest size at most every half second;
+// a server without it keeps its size, which viewers scale. TermInput
+// fails with ErrUnsupportedInput.
 //
 // Input queues what it is given and returns at once, the clipboard in
 // order with the keys, so that the server has it before the keys that
@@ -325,6 +327,12 @@ func (b *Backend) Input(ev backend.InputEvent) error {
 		}
 		text := clipboardText(c.Data)
 		return r.send(queued{ev: backend.Clipboard{MIME: c.MIME, Data: text}, n: 1, bytes: len(text)})
+	}
+	if rs, ok := ev.(backend.Resize); ok {
+		if rs.Width <= 0 || rs.Height <= 0 {
+			return nil
+		}
+		return r.send(queued{ev: rs, n: 1})
 	}
 	n, err := cost(ev)
 	if err != nil || n == 0 {
@@ -602,6 +610,7 @@ type client interface {
 	SendInput(events ...rdp.InputEvent) error
 	SuppressOutput(suppress bool) error
 	SetClipboard(text []byte) error
+	RequestSize(width, height int)
 	UnicodeInput() bool
 	MouseXInput() bool
 }
@@ -682,6 +691,9 @@ func (r *run) take(batch []rdp.InputEvent, c client, q queued) []rdp.InputEvent 
 		r.typing = ev.Text
 	case backend.Clipboard:
 		r.paste, r.pasted = ev.Data, true
+	case backend.Resize:
+		// The client keeps the newest size and paces what it asks for.
+		c.RequestSize(ev.Width, ev.Height)
 	default:
 		batch = r.input.events(batch, capabilitiesOf(c), q.ev)
 	}

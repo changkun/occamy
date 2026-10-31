@@ -72,6 +72,10 @@ type Config struct {
 	// ClipboardToServer, the default, the client does not ask for the
 	// channel.
 	Clipboard ClipboardMode
+	// Resize asks for the dynamic virtual channels (DRDYNVC) and accepts
+	// the server's Display Control channel, through which RequestSize
+	// asks the server to resize the desktop (dynvc.go).
+	Resize bool
 	// Logger receives warnings; nil means slog.Default().
 	Logger *slog.Logger
 
@@ -130,11 +134,16 @@ type Client struct {
 	caps       serverCaps
 
 	// channels are the static virtual channels the client asked for;
-	// clipCh is the clipboard's among them, or nil.
+	// clipCh is the clipboard's among them and dynCh DRDYNVC's, or nil.
 	channels []*vchannel
 	clipCh   *vchannel
+	dynCh    *vchannel
 	chio     channelIO
 	clip     cliprdr // under chio.mu
+	dvc      dynvc   // under chio.mu
+	disp     display // under chio.mu
+	// layoutEvery and layoutRetry pace monitor layouts (dynvc.go).
+	layoutEvery, layoutRetry time.Duration
 
 	fastPathInput atomic.Bool
 
@@ -143,6 +152,13 @@ type Client struct {
 	height    int
 	stats     Stats
 	finalized bool
+
+	// smu is held across reading or setting suppressed and sending the
+	// Suppress Output PDU it says, so that the PDUs go in the order of
+	// the states. suppressed is the last Suppress Output's: the client
+	// repeats it after a reactivation.
+	smu        sync.Mutex
+	suppressed bool
 
 	// Owned by Connect, then Run.
 	ctx        context.Context // ends a wait; Background if nil
@@ -158,9 +174,11 @@ type Client struct {
 	errInfo    ErrorInfo
 
 	// The tests replace these: now, if set, is the time, and sleep, if
-	// set, waits.
-	now   func() time.Time
-	sleep func(time.Duration) error
+	// set, waits; resuppress, if set, runs under smu between
+	// suppressAgain's read of the state and its send.
+	now        func() time.Time
+	sleep      func(time.Duration) error
+	resuppress func()
 }
 
 // Limits on what the server makes the client do.
@@ -270,11 +288,17 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 		stats:  Stats{Bitmaps: map[string]int{}, Ignored: map[string]int{}},
 		ctx:    ctx,
 		chio:   channelIO{kick: make(chan struct{}, 1)},
+
+		layoutEvery: layoutEvery,
+		layoutRetry: layoutRetry,
 	}
 	c.channels = c.newChannels()
 	for _, vc := range c.channels {
-		if vc.name == "cliprdr" {
+		switch vc.name {
+		case "cliprdr":
 			c.clipCh = vc
+		case "drdynvc":
+			c.dynCh = vc
 		}
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Unix(1, 0)) })
@@ -552,8 +576,34 @@ func (c *Client) Finalized() bool {
 
 // SuppressOutput tells the server to stop or resume sending screen
 // updates, [MS-RDPBCGR] 2.2.11.3. On resuming, the server redraws the
-// desktop.
+// desktop. The client tells a server that reactivates the session, as
+// on a resize, to stop again.
 func (c *Client) SuppressOutput(suppress bool) error {
+	c.smu.Lock()
+	defer c.smu.Unlock()
+	c.suppressed = suppress
+	return c.sendSuppressOutput(suppress)
+}
+
+// suppressAgain tells a server that reactivated the session to suppress
+// its output again, if the client last told it to: the server's output
+// state after a reactivation is its own. It reads the state as it sends,
+// under the lock SuppressOutput holds as it sends, so that the last
+// Suppress Output the server gets is the client's last.
+func (c *Client) suppressAgain() error {
+	c.smu.Lock()
+	defer c.smu.Unlock()
+	if !c.suppressed {
+		return nil
+	}
+	if c.resuppress != nil {
+		c.resuppress()
+	}
+	return c.sendSuppressOutput(true)
+}
+
+// sendSuppressOutput sends a Suppress Output PDU. smu must be held.
+func (c *Client) sendSuppressOutput(suppress bool) error {
 	body := func() []byte {
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -591,6 +641,11 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 			cancel()
 			c.conn.Close() // ends a write that waits on the server
 			wg.Wait()
+			c.chio.mu.Lock()
+			if c.disp.timer != nil {
+				c.disp.timer.Stop() // no layout is due any more
+			}
+			c.chio.mu.Unlock()
 		}()
 	}
 	w, h := c.Size()
@@ -714,6 +769,12 @@ func (c *Client) activate(out Output, body []byte) error {
 	}
 	if err := c.finalize(); err != nil {
 		return err
+	}
+	if err := c.suppressAgain(); err != nil {
+		return err
+	}
+	if c.dynCh != nil {
+		c.due() // a size asked for may now be due, or no longer
 	}
 	if out != nil && resized {
 		if err := c.waitResize(); err != nil {
