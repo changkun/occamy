@@ -1338,6 +1338,14 @@ func newScreenful(t *testing.T, viewerTimeout time.Duration) *screenful {
 // holds the screen from before, as much as a viewer that kept one.
 func (sf *screenful) redraw(t *testing.T, c byte) {
 	t.Helper()
+	sf.draw(t, c)
+	sf.owner.has(t, sf.info.s.Screen())
+}
+
+// draw fills the session's screen with c, and returns once the session's
+// screen shows it, whatever the owner has.
+func (sf *screenful) draw(t *testing.T, c byte) {
+	t.Helper()
 	// Home, then 500 rows of 1000 cells but the last, in messages under
 	// 64 KiB. Each goes once the session's screen shows the one before:
 	// the owner's last input keeps the screen it was applied to, which
@@ -1355,7 +1363,6 @@ func (sf *screenful) redraw(t *testing.T, c byte) {
 			return sf.info.s.Screen().Cell(end%1000, end/1000).Content == string(c)
 		})
 	}
-	sf.owner.has(t, sf.info.s.Screen())
 }
 
 // ownerAlone fails t unless the owner is the session's only viewer.
@@ -1379,15 +1386,26 @@ func TestStalledViewersRelease(t *testing.T) {
 	if testing.Short() {
 		t.Skip("takes seconds")
 	}
-	sf := newScreenful(t, 3*time.Second)
+	// Each viewer's time runs from its own first frame, and none can be
+	// dropped before the timeout has passed since start: held is what
+	// all of them hold only if it is measured within the timeout. The
+	// joins take about 3 s under -race, which once was the timeout.
+	const timeout = 10 * time.Second
+	sf := newScreenful(t, timeout)
 	base := heapInUse()
 	const n = 8
+	start := time.Now()
 	for i := range n {
 		sf.ts.stream(t, sf.path, sf.share, sf.hello) // reads its welcome, then stops
-		sf.redraw(t, byte('b'+i))
+		sf.draw(t, byte('b'+i))
 	}
+	sf.owner.has(t, sf.info.s.Screen())
 	held := heapInUse()
-	deadline := time.Now().Add(20 * time.Second)
+	took := time.Since(start)
+	if took >= timeout {
+		t.Fatalf("the joins and the measurement took %v, the viewer timeout or more: held may miss viewers dropped before it", took)
+	}
+	deadline := time.Now().Add(timeout + 20*time.Second)
 	for len(sf.info.s.Viewers()) > 1 {
 		if time.Now().After(deadline) {
 			t.Fatalf("viewers %+v, want the stalled ones gone", sf.info.s.Viewers())
@@ -1396,7 +1414,7 @@ func TestStalledViewersRelease(t *testing.T) {
 	}
 	sf.ownerAlone(t)
 	after := heapInUse()
-	t.Logf("heap in use per stalled viewer: %.1f MiB while they stayed, %.1f MiB once dropped", perViewer(held, base, n), perViewer(after, base, n))
+	t.Logf("heap in use per stalled viewer: %.1f MiB while they stayed, measured %v after the first joined, %.1f MiB once dropped", perViewer(held, base, n), took.Round(time.Millisecond), perViewer(after, base, n))
 	// A screen of 1000x500 cells takes about 11 MiB.
 	if p := perViewer(held, base, n); p < 4 {
 		t.Errorf("%.1f MiB held per stalled viewer: the test does not show viewers holding screens", p)

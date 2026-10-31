@@ -363,15 +363,29 @@ best effort, has none. The live run was repeated after the fixes.
     - the decoder's bitmap size bound;
     - the pointer cache index check.
 
-    `TestDecoderKeepsScratch`, which checks the scratch kept, counts
-    allocations without the race detector only. Under `-race`,
-    `sync.Pool` drops one item in four put back, and each bitmap's two
-    `fmt.Sprintf` calls for its statistics then allocate a printer and
-    its buffer again: 3, 5 or 7 allocations a bitmap instead of 3, and
-    over the bound of 4 in 5 runs of 300, 2 of 300 with the collector
-    off. Under `-race` the test still checks that the decoder's buffers
-    stay, which a decoder that reallocates them fails; CI runs the
-    tests with `-race` only, so the count is checked locally.
+    `TestDecoderKeepsScratch` checks the scratch kept, and also counts
+    a PDU's allocations, with or without the race detector. The bound
+    is 1: the PDU's `bitmapData`, which its rectangles share.
+    - Each bitmap used to name itself for its statistics with two
+      `fmt.Sprintf` calls, and each call takes a printer from a
+      `sync.Pool`.
+    - Under `-race`, `sync.Pool` drops one item in four put back. The
+      printer and its buffer were then allocated again, so a bitmap
+      allocated 3, 5 or 7 times instead of 3. That went over the old
+      bound of 4 in 5 runs of 300, and in 2 of 300 with the collector
+      off.
+    - So the count was checked without `-race` only. CI runs the tests
+      with `-race` only, so CI never checked the count.
+    - The names now come from a table of constants by depth,
+      `bitmapKinds`, so a bitmap allocates nothing.
+    - The count is now 1 in 200 runs with `-race` and in 200 without.
+    - One more allocation a bitmap, a copy of its name, fails the test
+      under `-race` in 20 runs of 20, and without `-race` as well.
+    - `BenchmarkTileBitmaps` decodes a PDU of 64 bitmaps of 64×64. It
+      went from 129 allocations (804 bytes) to 1 (120 bytes). Its time
+      did not change: 418.7 µs before and 419.6 µs after, the medians
+      of ten interleaved runs each at a host load of 3.5 to 3.7.
+      Decoding dominates that time.
   - Seven fuzzers: fast-path, slow-path, RLE, planar and pointer
     updates, the NTLM challenge and the connection sequence's parsers.
     The pointer fuzzer's seed is synthetic; the others are seeded from
