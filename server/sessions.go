@@ -476,7 +476,9 @@ func (s *server) closeSession(w http.ResponseWriter, r *http.Request) {
 	// The session has ended. It is forgotten a moment later, and
 	// DELETE answers only then, so that a request after it, such as a
 	// GET, another DELETE, a share or a new session at the owner's
-	// limit, finds the session gone.
+	// limit, finds the session gone. The goroutine that closes gone
+	// waits for the end Close has waited for, and then only for mu,
+	// which nobody holds for long, so this wait is short and bounded.
 	<-info.gone
 	log.Printf("session %s: closed by its owner", info.id)
 	w.WriteHeader(http.StatusNoContent)
