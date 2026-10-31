@@ -477,6 +477,34 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   not yet verified against Windows, and does not speak RDP's graphics
   pipeline yet
   ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)).
+- The graphics pipeline (GFX) in `internal/rdp`, the first part of the
+  native RDP backend's third phase, behind `Config.GFX`, which the
+  backend does not set yet: the capability exchange over DRDYNVC, ZGFX
+  decompression with its 2.5 MB history, surfaces within a bound on
+  their pixels composed onto the desktop, at most 64 of them mapped,
+  solid fills, copies within and between surfaces (a copy within a
+  surface goes to viewers as a copy where no other surface covers it
+  and the output shows the surface's own pixels, which the surfaces
+  under one deleted, replaced or moved, or under a bitmap update, draw
+  again to keep), uncompressed and planar bitmaps (AYCoCg, colour loss
+  and chroma subsampling included, planar within a bitmap update's
+  bound), and frame acknowledgements, bounded, which the server waits
+  for. Decompression's growth, each copied point, each redraw after a
+  resize, and every cell that the surfaces draw again where a surface
+  left the output or a bitmap update drew under them are charged to
+  the decoding rate. A server that does not open the
+  channel, or closes it, draws with bitmap updates. RemoteFX
+  Progressive, RemoteFX, ClearCodec and the cache come next, and with
+  them GFX by default and a key that turns it off. Against xrdp 0.10.1
+  the channel, the capabilities, a reset to the size the desktop has,
+  ZGFX's stored segments, a surface, planar bitmaps of xrdp's first,
+  black screen, and frame acknowledgements (a frame a key) ran live;
+  that the acknowledgements pace xrdp was not checked against a run
+  without them. Compressed ZGFX, planar's
+  AYCoCg, solid fills, surface-to-surface copies and uncompressed
+  bitmaps, which xrdp did not send, are checked against the
+  specification's examples, the tests' own compressor and encoder, and
+  `rdptest` only, until a Windows host checks them.
 - A native Kubernetes backend, `internal/backend/kubernetes`, in pure
   Go and without client-go: a `kubernetes` connection opens a terminal
   in a pod's container through the API server's `pods/exec` (or
