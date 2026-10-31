@@ -123,6 +123,31 @@ async function checks(): Promise<Check[]> {
       record(`vector ${v.name}`, false, String(err))
     }
   }
+  {
+    // An EXIF orientation of 6, rotate 90°, in an APP1 segment after
+    // SOI: the image decodes as encoded, not turned into 16×24.
+    const v = codecs.vectors.find((x) => x.name === 'jpeg: 24×16')
+    if (v !== undefined) {
+      const jpeg = fromHex(v.payload)
+      const exif = Uint8Array.of(
+        0xff, 0xe1, 0x00, 0x22, 0x45, 0x78, 0x69, 0x66, 0x00, 0x00,
+        0x4d, 0x4d, 0x00, 0x2a, 0x00, 0x00, 0x00, 0x08,
+        0x00, 0x01, 0x01, 0x12, 0x00, 0x03, 0x00, 0x00, 0x00, 0x01, 0x00, 0x06, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00,
+      )
+      const rotated = new Uint8Array(jpeg.length + exif.length)
+      rotated.set(jpeg.subarray(0, 2))
+      rotated.set(exif, 2)
+      rotated.set(jpeg.subarray(2), 2 + exif.length)
+      try {
+        const got = await local.decode({ codec: v.codec, payload: rotated, width: v.width, height: v.height })
+        const diff = maxDiff(got, decoded.get(v.name))
+        record('a JPEG with an EXIF orientation decodes as encoded', diff === 0, `differs by up to ${diff}`)
+      } catch (err) {
+        record('a JPEG with an EXIF orientation decodes as encoded', false, String(err))
+      }
+    }
+  }
   for (const v of codecs.invalid) {
     const err: unknown = await local.decode({ codec: v.codec, payload: fromHex(v.payload), width: v.width, height: v.height }).then(
       () => null,

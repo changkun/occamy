@@ -24,6 +24,7 @@ import {
   jpegSize,
   pngSize,
   webpSize,
+  withoutExif,
 } from './codecs'
 import { INFLATE_SLICE, LocalDecoder, slicedInflate, streamInflate } from './decode'
 import { Codec } from './messages'
@@ -387,5 +388,72 @@ describe('image headers', () => {
 
   it('refuses codecs that are not images', () => {
     expect(() => imageSize(Codec.Deflate, new Uint8Array(32))).toThrow(ProtocolError)
+  })
+
+  describe('EXIF', () => {
+    // A TIFF header, big-endian, and one IFD entry: orientation 6.
+    const tiff = [0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0]
+    const ascii = (s: string): number[] => [...s].map((c) => c.charCodeAt(0))
+    const concat = (...parts: (Uint8Array | number[])[]): Uint8Array => {
+      const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0))
+      let at = 0
+      for (const p of parts) {
+        out.set(p, at)
+        at += p.length
+      }
+      return out
+    }
+    const segment = (marker: number, data: number[]): number[] => [0xff, marker, (data.length + 2) >> 8, (data.length + 2) & 0xff, ...data]
+    const png = (type: string, data: number[]): number[] => {
+      // The CRC is not checked here, so zeros stand in for it.
+      const n = data.length
+      return [n >>> 24, (n >> 16) & 0xff, (n >> 8) & 0xff, n & 0xff, ...ascii(type), ...data, 0, 0, 0, 0]
+    }
+    const jpeg = fromHex(codecs.vectors.find((v) => v.name === 'jpeg: 24×16')?.payload ?? '')
+    const exif = segment(0xe1, [...ascii('Exif'), 0, 0, ...tiff])
+
+    it('drops a JPEG APP1 Exif segment and its fill bytes, before and after other segments', () => {
+      const xmp = segment(0xe1, [...ascii('http://ns.adobe.com/xap/1.0/'), 0, 1, 2])
+      const p = concat(jpeg.subarray(0, 2), [0xff], exif, xmp, exif, jpeg.subarray(2))
+      expect(withoutExif(Codec.JPEG, p)).toEqual(concat(jpeg.subarray(0, 2), xmp, jpeg.subarray(2)))
+      expect(jpegSize(withoutExif(Codec.JPEG, p))).toEqual({ width: 24, height: 16 })
+    })
+
+    it('returns a payload without EXIF as it is', () => {
+      expect(withoutExif(Codec.JPEG, jpeg)).toBe(jpeg)
+      const webp = riff([vp8(8, 8)])
+      expect(withoutExif(Codec.WebP, webp)).toBe(webp)
+      const raw = new Uint8Array(16)
+      expect(withoutExif(Codec.Raw, raw)).toBe(raw)
+    })
+
+    it('leaves a JPEG whose structure breaks off where it breaks', () => {
+      // A segment longer than the payload, before the Exif one.
+      const p = concat(jpeg.subarray(0, 2), [0xff, 0xe0, 0xff, 0xff], exif)
+      expect(withoutExif(Codec.JPEG, p)).toBe(p)
+      // Exif in a segment after the scan starts is the scan's business.
+      const q = concat(jpeg.subarray(0, 2), segment(0xda, [0]), exif)
+      expect(withoutExif(Codec.JPEG, q)).toBe(q)
+    })
+
+    it('drops a PNG eXIf chunk', () => {
+      const sig = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+      const ihdr = png('IHDR', [0, 0, 0, 24, 0, 0, 0, 16, 8, 2, 0, 0, 0])
+      const idat = png('IDAT', [1, 2, 3])
+      const end = png('IEND', [])
+      const p = concat(sig, ihdr, png('eXIf', tiff), idat, end)
+      expect(withoutExif(Codec.PNG, p)).toEqual(concat(sig, ihdr, idat, end))
+      // Nothing after IEND is read.
+      const after = concat(sig, ihdr, end, png('eXIf', tiff))
+      expect(withoutExif(Codec.PNG, after)).toBe(after)
+    })
+
+    it("drops a WebP EXIF chunk, its padding, and VP8X's EXIF flag, and fixes the RIFF size", () => {
+      const odd = [...tiff, 0] // 27 bytes, padded to 28
+      const p = riff([vp8x(0x08 | 0x10, 24, 16), chunk('ALPH', [0, 0]), vp8(24, 16), chunk('EXIF', odd)])
+      const want = riff([vp8x(0x10, 24, 16), chunk('ALPH', [0, 0]), vp8(24, 16)])
+      expect(withoutExif(Codec.WebP, p)).toEqual(want)
+      expect(webpSize(want)).toEqual({ width: 24, height: 16 })
+    })
   })
 })

@@ -16,6 +16,7 @@ import {
   decodeRaw,
   imageTypes,
   isImageCodec,
+  withoutExif,
 } from './codecs'
 import { Codec } from './messages'
 import { type ErrorKind, ProtocolError } from './wire'
@@ -164,7 +165,10 @@ function scratchContext(): Context2D | null {
  * WebP about 10 dB short (docs/protocol.md, Codecs).
  * colorSpaceConversion 'none' keeps the decoded values as they are,
  * without a colour profile's correction, as libwebp and libjpeg give
- * them.
+ * them. premultiplyAlpha 'none' keeps alpha straight. No option stops a
+ * browser applying an EXIF orientation, which would rotate an image
+ * into another shape or mirror it, so the payload goes without its EXIF
+ * (withoutExif).
  *
  * A 2D canvas keeps premultiplied pixels, so a translucent pixel reads
  * back within rounding of its colour; opaque ones, which every tile is,
@@ -180,7 +184,7 @@ export function canvasDecodeImage(): DecodeImage | null {
     return null
   }
   return async (codec, payload, width, height) => {
-    const blob = new Blob([payload as Uint8Array<ArrayBuffer>], { type: imageTypes[codec as Codec] })
+    const blob = new Blob([withoutExif(codec, payload) as Uint8Array<ArrayBuffer>], { type: imageTypes[codec as Codec] })
     let bitmap: ImageBitmap
     try {
       bitmap = await createImageBitmap(blob, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' })

@@ -351,3 +351,134 @@ export function pngSize(p: Uint8Array): Size {
   }
   return { width: u32be(p, 16), height: u32be(p, 20) }
 }
+
+/**
+ * withoutExif returns an image payload without the EXIF metadata that a
+ * browser reads an orientation from: a JPEG's APP1 Exif segments before
+ * its first scan, a PNG's eXIf chunks, and an extended WebP's EXIF
+ * chunk. A browser applies that orientation whatever createImageBitmap
+ * is told: Chrome 156 turns a 24×16 JPEG or PNG with orientation 6 into
+ * 16×24 under imageOrientation 'none', which the HTML standard has since
+ * made another name for 'from-image'. Orientations that only flip keep
+ * the size, which the size check cannot catch, and the tile would be
+ * drawn mirrored. The server writes no EXIF.
+ *
+ * A payload without any comes back as it is, not copied. The walk stops
+ * where the structure stops making sense and keeps the rest unchanged,
+ * for the decoder to refuse.
+ */
+export function withoutExif(codec: number, p: Uint8Array): Uint8Array {
+  switch (codec) {
+    case Codec.JPEG:
+      return cut(p, jpegExif(p))
+    case Codec.PNG:
+      return cut(p, pngExif(p))
+    case Codec.WebP: {
+      const drop = webpExif(p)
+      if (drop.length === 0) {
+        return p
+      }
+      const out = cut(p, drop)
+      const size = out.length - 8
+      out.set([size & 0xff, (size >>> 8) & 0xff, (size >>> 16) & 0xff, size >>> 24], 4)
+      out[20] &= ~0x08 // VP8X's EXIF flag
+      return out
+    }
+  }
+  return p
+}
+
+type Span = [start: number, end: number]
+
+function jpegExif(p: Uint8Array): Span[] {
+  const drop: Span[] = []
+  if (p.length < 4 || p[0] !== 0xff || p[1] !== 0xd8) {
+    return drop
+  }
+  let i = 2
+  while (i < p.length && p[i] === 0xff) {
+    const start = i
+    while (i < p.length && p[i] === 0xff) {
+      i++ // fill bytes
+    }
+    if (i >= p.length) {
+      break
+    }
+    const marker = p[i++]
+    if ((marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
+      continue // markers without a length
+    }
+    if (marker === 0x00 || marker === 0xd8 || marker === 0xd9 || marker === 0xda || i + 2 > p.length) {
+      break // a scan, or the end
+    }
+    const len = u16be(p, i)
+    if (len < 2 || i + len > p.length) {
+      break
+    }
+    if (marker === 0xe1 && len >= 7 && fourcc(p, i + 2) === 'Exif' && p[i + 6] === 0) {
+      drop.push([start, i + len])
+    }
+    i += len
+  }
+  return drop
+}
+
+function pngExif(p: Uint8Array): Span[] {
+  const drop: Span[] = []
+  if (p.length < 8 || pngSignature.some((b, i) => p[i] !== b)) {
+    return drop
+  }
+  for (let at = 8; at + 12 <= p.length;) {
+    // The length, the type, the data, and a CRC of 4 bytes.
+    const next = at + 12 + u32be(p, at)
+    if (next > p.length) {
+      break
+    }
+    const id = fourcc(p, at + 4)
+    if (id === 'eXIf') {
+      drop.push([at, next])
+    } else if (id === 'IEND') {
+      break
+    }
+    at = next
+  }
+  return drop
+}
+
+function webpExif(p: Uint8Array): Span[] {
+  const drop: Span[] = []
+  // EXIF belongs to the extended format, whose VP8X chunk comes first.
+  if (p.length < 30 || fourcc(p, 0) !== 'RIFF' || fourcc(p, 8) !== 'WEBP' || fourcc(p, 12) !== 'VP8X') {
+    return drop
+  }
+  for (let at = 12; at + 8 <= p.length;) {
+    const size = u32le(p, at + 4)
+    // A chunk's data is padded to an even length.
+    const next = at + 8 + size + (size & 1)
+    if (next > p.length) {
+      break
+    }
+    if (fourcc(p, at) === 'EXIF') {
+      drop.push([at, next])
+    }
+    at = next
+  }
+  return drop
+}
+
+/** cut returns p without the spans, which are in order and apart, or p itself if there are none. */
+function cut(p: Uint8Array, drop: Span[]): Uint8Array {
+  if (drop.length === 0) {
+    return p
+  }
+  const out = new Uint8Array(p.length - drop.reduce((n, [s, e]) => n + e - s, 0))
+  let from = 0
+  let to = 0
+  for (const [s, e] of drop) {
+    out.set(p.subarray(from, s), to)
+    to += s - from
+    from = e
+  }
+  out.set(p.subarray(from), to)
+  return out
+}
