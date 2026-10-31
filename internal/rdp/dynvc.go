@@ -105,9 +105,10 @@ func (c *Client) drdynvcMessage(out Output, msg []byte, truncated bool) error {
 	switch cmd {
 	case dvcCreate, dvcDataFirst, dvcData, dvcClose:
 		if cbID == 3 {
-			// [MS-RDPEDYC] 2.2 gives an id 1, 2 or 4 bytes, size codes 0 to
-			// 2, and the client answers in the size the server used; it
-			// takes no id of size code 3, as it takes no length of it.
+			// [MS-RDPEDYC] 2.2.2.1 and 2.2.3.1 give an id 1, 2 or 4 bytes,
+			// size codes 0 to 2, and call 3 an invalid value; the client,
+			// which answers in the size the server used, takes no id of
+			// it, as it takes no length of it.
 			return fmt.Errorf("rdp: dynamic channel id of size code 3")
 		}
 	}

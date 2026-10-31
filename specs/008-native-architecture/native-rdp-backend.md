@@ -759,9 +759,9 @@ and guacd leaves the default deployment.
     reader owes wait for the channel writer in a queue of at most 64; a
     server that opens channels faster than it reads the answers ends
     the session. Once a write of the channel writer has failed, this
-    bound and the clipboard's two report that write's error rather than
-    the bound, since the failure is why the answers wait (found in
-    review).
+    bound and the clipboard's bound on data requests report that
+    write's error rather than the bound, since the failure is why the
+    answers wait (found in review).
   - Display Control ([MS-RDPEDISP]). The server's capabilities give the
     most monitors and the area of each; the client takes their product,
     saturated at the 32 Mi pixels a desktop may have, as the area it
@@ -781,7 +781,10 @@ and guacd leaves the default deployment.
     another size, is within its two seconds is kept until then, and
     sent should the desktop change (found in review: a viewer who
     resized and resized back before the server applied the first size
-    was left with it). Closing the channel forgets the capabilities and
+    was left with it). A server that applies the earlier layout after
+    its two seconds still leaves the viewer at that size, as the client
+    no longer wants the size asked for back by then; the viewer resizes
+    again. Closing the channel forgets the capabilities and
     keeps the size, which goes again when a channel opens. `Run` stops
     the layout timer as it returns.
   - After a reactivation, the client tells a server it had asked to
@@ -790,7 +793,8 @@ and guacd leaves the default deployment.
     the state as it sends, under a lock that `SuppressOutput` holds as
     it sends, so that a viewer's request for output while the server
     reactivates is not undone by a repeat of the state before it (found
-    in review).
+    in review). A seam between the read and the send lets a test hold
+    the repeat there.
   - The backend asks for DRDYNVC, and `Input` queues a `Resize` with
     both sides above zero, in order with the other input; the writer
     hands it to `RequestSize`, which keeps the newest and paces it.
@@ -816,7 +820,8 @@ and guacd leaves the default deployment.
   exactly the channel's bound whole and one a byte longer dropped, in
   one PDU and in several (`TestDynvcBound`); the answers' bound
   (`TestDynvcAnswersBounded`), and the bounds reporting the writer's
-  failure (`TestOwedAfterWriteFailed`); the area's saturation
+  failure (`TestOwedAfterWriteFailed`) and a write failing within a
+  message stopping it (`TestChannelWriteFailed`); the area's saturation
   (`TestDisplayCapsArea`); a size asked for back kept until the server
   applies the size before, or until that size's retry is due, and given
   up once the desktop has it (`TestDisplayResizeBack`), the retry's
@@ -827,7 +832,9 @@ and guacd leaves the default deployment.
   viewer's request for output during it (`TestSuppressOutputRace`,
   which holds the client's writes so that the request waits behind the
   reactivation's; it failed 3 runs of 3 on the client before the fix
-  and passes whichever of the two goes first). The backend's
+  and passes whichever of the two goes first), nor when the request
+  comes between the repeat's read and its send
+  (`TestSuppressOutputReaderFirst`, through the seam). The backend's
   `TestRunResize`: sizes of zero or less ask for nothing, a `Resize`
   goes as a layout, the server's reactivation resizes the sink, and
   Suppress Output is repeated after it. Coverage: `internal/rdp` 89.9%
@@ -886,15 +893,31 @@ and guacd leaves the default deployment.
   capabilities kept on close (`TestDynvcChannels` now checks that
   nothing goes on the reopened channel before its capabilities). Its
   sixth, refusing an id that is open, is the first equivalent one
-  above. The review's fixes were broken in turn too, 15 mutants, all
-  caught: each condition of keeping a size asked for back and the
-  look again when its window ends (`TestDisplayResizeBack`,
+  above. The review's fixes were broken in turn too, 15 mutants, which
+  the tests caught: each condition of keeping a size asked for back
+  and the look again when its window ends (`TestDisplayResizeBack`,
   `TestLayoutWindow`); size code 3 for each command and the check
-  itself (`TestDynvcData`); the writer's failure recorded under the
-  channels' lock, read at the bounds, and reported at each of the three
-  (`TestOwedAfterWriteFailed`); and the timer stopped with `Run`
-  (`TestDisplayTimerStops`). The Suppress Output fix was checked by
-  running `TestSuppressOutputRace` on the client before it.
+  itself (`TestDynvcData`); the writer's failure recorded, read at the
+  bounds, and reported at each (`TestOwedAfterWriteFailed`); and the
+  timer stopped with `Run` (`TestDisplayTimerStops`). The Suppress
+  Output fix was checked by running `TestSuppressOutputRace` on the
+  client before it.
+
+  Those 15 did not cover the fixes, though: a second review ran 19
+  mutants on them, and 6 survived. Three are now caught: the Suppress
+  Output repeat releasing its lock before it sends, or taking none
+  (`TestSuppressOutputReaderFirst`; `TestSuppressOutputRace` holds the
+  client's writes, so its reader blocks before it reads the state, and
+  both mutants passed it); and a write failing within a message not
+  recorded (`TestChannelWriteFailed`). Three still survive:
+  - `SuppressOutput` releasing its lock before it sends is equivalent:
+    the backend's writer is its only caller, so two never race, and
+    the repeat, which would read the new state, sends what
+    `SuppressOutput` sends;
+  - the writer's failure set under its own lock alone, not under the
+    channels' too, is a data race that no deterministic test sees, as
+    is `Run` stopping the layout timer before the writer has ended,
+    which a last pass of the writer may set again: both are timing.
 - **Fuzzing.** `FuzzDynvc` feeds DRDYNVC PDUs and writes what is due
   after each, checking the answers' and the channels' bounds;
   `FuzzRun` now joins `drdynvc` beside the clipboard's channel, asks
@@ -914,11 +937,11 @@ and guacd leaves the default deployment.
     never applies a size.
   - At most one dynamic channel is open, so the bound on channels is
     the one Display Control rather than a count.
-  - A channel id of size code 3, which [MS-RDPEDYC] 2.2 does not define,
-    ends the session, as a length of it does: the client answers a
-    create or a close in the size the server used, and has no valid one
-    to answer this in. FreeRDP reads it as four bytes; no server is
-    known to send it.
+  - A channel id of size code 3, which [MS-RDPEDYC] 2.2.2.1 and 2.2.3.1
+    call an invalid value, ends the session, as a length of it does:
+    the client answers a create or a close in the size the server used,
+    and has no valid one to answer this in. FreeRDP reads it as four
+    bytes; no server is known to send it.
   - A second capabilities PDU is answered again, and a create before
     the capabilities is answered as any other, rather than ending the
     session: FreeRDP takes both, and what the client holds stays within
