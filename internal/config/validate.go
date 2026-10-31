@@ -190,6 +190,9 @@ func (a *Auth) validate(c *checker) {
 				issuers[ti.Issuer] = i
 			}
 		}
+		for j, g := range ti.AllowedGroups {
+			c.name(fmt.Sprintf("%s.allowed_groups[%d]", p, j), g)
+		}
 		if ti.PublicKeyFile == "" {
 			c.add(p+".public_key_file", "required")
 		} else if c.file(p+".public_key_file", ti.PublicKeyFile) {

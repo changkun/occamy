@@ -755,6 +755,15 @@ place for fixes that ship on v0 before beta.
     only for the owner. `TestIssuerSessionTokens` runs every role
     against static alice's, the gateway's carol's and the linked
     issuer's dave's sessions.
+  - **A trusted issuer's groups are opt-in (delta review):** an
+    issuer's `groups` claim counts only for the groups in its
+    `auth.trusted_issuers[].allowed_groups`, none by default. Before,
+    an unlinked issuer could claim `ops` and open every connection
+    allowed to `ops`, stored credentials included, which made trusting
+    an issuer trust it with every group. `identities.of` drops the
+    others from the claims, so every route that reads groups sees only
+    the allowed ones. `TestIssuerGroups` and `TestListConnections`
+    cover the REST and stream routes.
   - **Absent rather than forbidden:** a connection the caller may not
     open answers 404, as an unknown one does, and so does another
     user's session on `GET`, `DELETE` and shares, so IDs cannot be

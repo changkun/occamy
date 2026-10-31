@@ -192,7 +192,7 @@ func TestParseV1Example(t *testing.T) {
 		Auth: config.Auth{
 			SigningKeyFile:      path("var/lib/occamy/signing.key"),
 			AccessTokenLifetime: 15 * time.Minute,
-			TrustedIssuers:      []config.TrustedIssuer{{Issuer: "gateway", PublicKeyFile: path("etc/occamy/gateway.pub"), LinkStaticUsers: true}},
+			TrustedIssuers:      []config.TrustedIssuer{{Issuer: "gateway", PublicKeyFile: path("etc/occamy/gateway.pub"), LinkStaticUsers: true, AllowedGroups: []string{"ops"}}},
 			Users: []config.User{
 				{Name: "alice", PasswordHash: "$2a$12$R6bvkO3lC3JV/OaHnySvquk.wobMPB3XleIdoBgEwlhjbcfaZi0km", Groups: []string{"ops"}},
 				{Name: "bob", PasswordHash: "$2a$10$Ad6WcgC.YRhS7d8JbV/9..v/X5C7aAnBg5cVXdoz1F1d0uHmkmuH2", Groups: []string{"dev"}},
@@ -526,6 +526,7 @@ func TestParseV1Problems(t *testing.T) {
     - {issuer: other}
     - {issuer: wrong, public_key_file: DIR/key}
     - {issuer: occamy, public_key_file: DIR/gateway.pub}
+    - {issuer: grouped, public_key_file: DIR/gateway.pub, allowed_groups: [ops, ""]}
 `, []want{
 			{"auth.trusted_issuers[1].issuer", `"gateway" is already auth.trusted_issuers[0]`},
 			{"auth.trusted_issuers[1].public_key_file", "does not exist"},
@@ -533,6 +534,7 @@ func TestParseV1Problems(t *testing.T) {
 			{"auth.trusted_issuers[3].public_key_file", "required"},
 			{"auth.trusted_issuers[4].public_key_file", "want a PEM block of type PUBLIC KEY"},
 			{"auth.trusted_issuers[5].issuer", `"occamy" is occamyd's own issuer`},
+			{"auth.trusted_issuers[6].allowed_groups[1]", "must not be empty"},
 		}},
 		{"users", "version: 1\nauth:\n  signing_key_file: DIR/signing.key\n  users:\n" +
 			`    - {name: alice, password_hash: "` + hash + `", groups: [ops, ""]}

@@ -116,6 +116,11 @@ type TrustedIssuer struct {
 	// are refused, since a name belongs to one source unless the file
 	// links them.
 	LinkStaticUsers bool `yaml:"link_static_users"`
+	// AllowedGroups are the groups the issuer's tokens may claim in
+	// groups. The others are dropped: an issuer's groups are its own say
+	// only where the file grants it, since a group in an allow list
+	// opens a connection, stored credentials and all. None by default.
+	AllowedGroups []string `yaml:"allowed_groups"`
 }
 
 // User is a static user who signs in with a password.

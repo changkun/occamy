@@ -178,8 +178,12 @@ func TestSessionRoutesAuth(t *testing.T) {
 func TestListConnections(t *testing.T) {
 	k := newKeys(t)
 	path := writeIssuerKey(t, k.gateway)
+	otherPath := writeIssuerKey(t, k.stranger)
 	ts, _ := sessionServer(t, func(f *config.File) {
-		f.Auth.TrustedIssuers = []config.TrustedIssuer{{Issuer: "gateway", PublicKeyFile: path, LinkStaticUsers: true}}
+		f.Auth.TrustedIssuers = []config.TrustedIssuer{
+			{Issuer: "gateway", PublicKeyFile: path, LinkStaticUsers: true, AllowedGroups: []string{"dev"}},
+			{Issuer: "other", PublicKeyFile: otherPath},
+		}
 	})
 	for _, tt := range []struct {
 		name  string
@@ -194,6 +198,11 @@ func TestListConnections(t *testing.T) {
 		{"carol in an unlisted group", ts.token(t, "carol", "Ops", "admins"), []string{}},
 		{"the gateway's alice", signClaims(t, k.gateway, access("gateway", "alice")), []string{"both"}},
 		{"the gateway's dev", signClaims(t, k.gateway, access("gateway", "dave", "dev")), []string{"both"}},
+		// An issuer grants only the groups of its allowed_groups.
+		{"the gateway's ops, which it may not grant", signClaims(t, k.gateway, access("gateway", "dave", "ops")), []string{}},
+		{"the gateway's ops and dev", signClaims(t, k.gateway, access("gateway", "dave", "ops", "dev")), []string{"both"}},
+		{"the gateway's alice in ops", signClaims(t, k.gateway, access("gateway", "alice", "ops")), []string{"both"}},
+		{"another issuer's dev, with no allowed groups", signClaims(t, k.stranger, access("other", "dave", "dev")), []string{}},
 	} {
 		r := ts.api(t, http.MethodGet, "/api/v1/connections", tt.token, "")
 		if r.code != http.StatusOK || r.header.Get("Cache-Control") != "no-store" {

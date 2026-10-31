@@ -40,20 +40,25 @@ func (p principal) String() string {
 
 // identities maps the claims of verified tokens to principals.
 type identities struct {
-	static     map[string]bool // the static users, by name
-	names      []string        // the same names, for config.SameName
-	linked     map[string]bool // the trusted issuers with link_static_users
-	oidcLinked bool            // auth.oidc.link_static_users
+	static     map[string]bool            // the static users, by name
+	names      []string                   // the same names, for config.SameName
+	linked     map[string]bool            // the trusted issuers with link_static_users
+	groups     map[string]map[string]bool // each trusted issuer's allowed_groups
+	oidcLinked bool                       // auth.oidc.link_static_users
 }
 
 func newIdentities(f *config.File) identities {
-	ids := identities{static: map[string]bool{}, linked: map[string]bool{}}
+	ids := identities{static: map[string]bool{}, linked: map[string]bool{}, groups: map[string]map[string]bool{}}
 	for _, u := range f.Auth.Users {
 		ids.static[u.Name] = true
 		ids.names = append(ids.names, u.Name)
 	}
 	for _, ti := range f.Auth.TrustedIssuers {
 		ids.linked[ti.Issuer] = ti.LinkStaticUsers
+		ids.groups[ti.Issuer] = map[string]bool{}
+		for _, g := range ti.AllowedGroups {
+			ids.groups[ti.Issuer][g] = true
+		}
 	}
 	ids.oidcLinked = f.Auth.OIDC != nil && f.Auth.OIDC.LinkStaticUsers
 	return ids
@@ -77,7 +82,22 @@ var errSubject = errors.New("the token's subject is not a usable name")
 // static user of that name. Unless the issuer is linked, its subject
 // must not be a static user's name by config.SameName, as OIDC sign-in
 // checks a subject, so that the two paths refuse the same names.
+//
+// of also drops from c the groups that a trusted issuer may not claim,
+// those its allowed_groups does not list, so that the allow lists read
+// only the groups the file lets the issuer grant. A linked issuer acting
+// as a static user claims the groups of its token too, not the static
+// user's.
 func (ids identities) of(c *auth.Claims) (principal, error) {
+	p, err := ids.principal(c)
+	if err == nil && c.Issuer != auth.Issuer {
+		c.Groups = slices.DeleteFunc(c.Groups, func(g string) bool { return !ids.groups[c.Issuer][g] })
+	}
+	return p, err
+}
+
+// principal is of without the groups.
+func (ids identities) principal(c *auth.Claims) (principal, error) {
 	if !validSubject(c.Subject) {
 		return principal{}, errSubject
 	}

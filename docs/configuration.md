@@ -75,6 +75,7 @@ directory.
 | `auth.trusted_issuers[].issuer` | required | Name of a third party, such as a gateway, whose tokens `occamyd` accepts. Unique, and not `occamy`, which is `occamyd`'s own. See [tokens from a trusted issuer](#tokens-from-a-trusted-issuer) |
 | `auth.trusted_issuers[].public_key_file` | required | That issuer's Ed25519 public key, PKIX PEM |
 | `auth.trusted_issuers[].link_static_users` | `false` | Lets the issuer's tokens act for a static user by naming them in `sub`. Off, such tokens are refused: see [tokens from a trusted issuer](#tokens-from-a-trusted-issuer) |
+| `auth.trusted_issuers[].allowed_groups` | none | The groups the issuer's tokens may claim in `groups`. Others are dropped, so that an issuer cannot claim `ops` and open every connection that allows `ops`, stored credentials and all, unless the file lets it. A linked issuer acting as a static user gets these groups from its token too, not the static user's |
 | `auth.users[].name` | required | A static user, who signs in with a password. Unique |
 | `auth.users[].password_hash` | required | bcrypt hash of the password, cost 10 or more. `htpasswd -nbBC 12 "" 'the password' \| cut -d: -f2` makes one. Give every user the same cost: a sign-in as an unknown user is checked against a hash of the highest cost, so a user at a lower cost signs in measurably faster, and `occamyd` warns at start when the costs differ |
 | `auth.users[].groups` | none | Groups the user belongs to |
@@ -99,7 +100,8 @@ A trusted issuer mints JWTs that `occamyd` accepts as its own:
 - `iss` is the issuer's name as configured, and `aud` is `occamy`;
 - `iat` and `exp` are set, at most 12 hours apart;
 - `kind` is `access`, with the user in `sub` and optionally `groups`, a
-  list of group names; or `session`, with the user in `sub`, `sid` (a
+  list of group names, of which only those in the issuer's
+  `allowed_groups` count; or `session`, with the user in `sub`, `sid` (a
   session ID) and `role` (`owner`, `viewer` or `read-only`). A session
   token of any role joins only a session that one of the issuer's own
   users opened, or, with `link_static_users`, a static user; an

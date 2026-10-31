@@ -232,6 +232,39 @@ func TestIssuerSessionTokens(t *testing.T) {
 	}
 }
 
+// TestIssuerGroups checks that a trusted issuer's groups open
+// connections only where its allowed_groups lets it grant them: an
+// unlisted group is dropped, on every route that reads groups.
+func TestIssuerGroups(t *testing.T) {
+	k := newKeys(t)
+	gatewayKey := writeIssuerKey(t, k.gateway)
+	grantingKey := writeIssuerKey(t, k.stranger)
+	ts, _ := sessionServer(t, func(f *config.File) {
+		f.Auth.TrustedIssuers = []config.TrustedIssuer{
+			{Issuer: "gateway", PublicKeyFile: gatewayKey},
+			{Issuer: "granting", PublicKeyFile: grantingKey, AllowedGroups: []string{"ops"}},
+		}
+	})
+	mallory := signClaims(t, k.gateway, access("gateway", "mallory", "ops"))
+	if r := ts.api(t, http.MethodPost, "/api/v1/sessions", mallory, `{"connection":"ops-shell"}`); r.code != http.StatusNotFound {
+		t.Errorf("the gateway's ops, not allowed: %d %s, want 404", r.code, r.body)
+	}
+	c, status, err := dial(ts.srv.URL+"/api/v1/connections/ops-shell/stream", withToken(mallory), &termHello, nil)
+	if err != nil {
+		t.Fatalf("%d %v", status, err)
+	}
+	c.closed(t, protocol.CloseForbidden)
+
+	erin := signClaims(t, k.stranger, access("granting", "erin", "ops", "dev"))
+	ts.openSession(t, erin, "ops-shell")
+	if r := ts.api(t, http.MethodPost, "/api/v1/sessions", erin, `{"connection":"both"}`); r.code != http.StatusNotFound {
+		t.Errorf("an allowed issuer's dev, not in its allowed_groups: %d %s, want 404", r.code, r.body)
+	}
+	if w := ts.stream(t, "/api/v1/connections/ops-shell/stream", erin, termHello).welcome; w.Role != protocol.RoleOwner {
+		t.Errorf("an allowed issuer's ops on a stream: %+v", w)
+	}
+}
+
 func TestIssuersOwnTheirSessions(t *testing.T) {
 	k := newKeys(t)
 	gatewayKey := writeIssuerKey(t, k.gateway)
