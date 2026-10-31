@@ -14,8 +14,10 @@
 // and the server's pointer shapes and moves into the session's cursor.
 // Viewers' keys go out as scancodes, by their physical key where the
 // viewer knows it, and text as Unicode keyboard events; the pointer and
-// the wheel as mouse events. While no viewer can see the screen, the
-// server is told to suppress its output.
+// the wheel as mouse events. Clipboard text goes both ways through the
+// clipboard channel, unless the configuration disables a direction.
+// While no viewer can see the screen, the server is told to suppress its
+// output.
 //
 // Every length the server sends is bounded by the client before it is
 // read or allocated, and the client decodes bitmaps and pointer updates
@@ -23,6 +25,7 @@
 package rdp
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -32,6 +35,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/rdp"
@@ -136,6 +140,11 @@ type Config struct {
 	// goes in the clear; it is off by default, and then nothing about
 	// the user is sent before the certificate policy passes.
 	RoutingCookie bool
+	// DisableCopy keeps the server's clipboard from the viewers, and
+	// DisablePaste the viewers' clipboard from the server, as guacd's
+	// disable-copy and disable-paste do. With both, the backend does not
+	// ask for the clipboard channel.
+	DisableCopy, DisablePaste bool
 	// DialTimeout bounds the TCP connection and defaults to 15 seconds.
 	// Only Run's context bounds the rest, since it may wait for the owner
 	// to answer a prompt.
@@ -204,6 +213,13 @@ func New(cfg Config) (*Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	var clip rdp.ClipboardMode
+	if !cfg.DisableCopy {
+		clip |= rdp.ClipboardFromServer
+	}
+	if !cfg.DisablePaste {
+		clip |= rdp.ClipboardToServer
+	}
 	b := &Backend{
 		addr: addr,
 		cfg: rdp.Config{
@@ -215,6 +231,7 @@ func New(cfg Config) (*Backend, error) {
 			KeyboardLayout: cfg.KeyboardLayout,
 			Protocols:      protocols,
 			TLS:            cfg.TLS,
+			Clipboard:      clip,
 			Logger:         cfg.Logger,
 		},
 		dialTimeout: cfg.DialTimeout,
@@ -282,14 +299,19 @@ func (b *Backend) Demand(d backend.Demand) {
 
 // Input implements backend.Backend. Key becomes a keyboard event by
 // scancode, Text Unicode keyboard events, Pointer and Wheel mouse
-// events (see input.go). Clipboard and Resize are ignored until the
-// backend speaks the clipboard and display control channels, so viewers
-// scale the remote desktop. TermInput fails with ErrUnsupportedInput.
+// events (see input.go). Clipboard text becomes the server's clipboard
+// through the clipboard channel, at most rdp.MaxClipboard bytes of it,
+// unless DisablePaste is set; other clipboard content is dropped.
+// Resize is ignored until the backend speaks the display control
+// channel, so viewers scale the remote desktop. TermInput fails with
+// ErrUnsupportedInput.
 //
-// Input queues what it is given and returns at once. Input that arrives
-// while Run is still connecting is written once the connection is up.
-// The queue holds 256 inputs of at most 2^18 events, so a single Text
-// of more than 65,536 characters fails with ErrInputFull.
+// Input queues what it is given and returns at once, the clipboard in
+// order with the keys, so that the server has it before the keys that
+// paste it. Input that arrives while Run is still connecting is written
+// once the connection is up. The queue holds 256 inputs of at most 2^18
+// events and two clipboards of the most text, so a single Text of more
+// than 65,536 characters fails with ErrInputFull.
 func (b *Backend) Input(ev backend.InputEvent) error {
 	b.mu.Lock()
 	r := b.run
@@ -297,28 +319,63 @@ func (b *Backend) Input(ev backend.InputEvent) error {
 	if r == nil {
 		return ErrNotRunning
 	}
+	if c, ok := ev.(backend.Clipboard); ok {
+		if b.cfg.Clipboard&rdp.ClipboardToServer == 0 || !isText(c.MIME) {
+			return nil
+		}
+		text := clipboardText(c.Data)
+		return r.send(queued{ev: backend.Clipboard{MIME: c.MIME, Data: text}, n: 1, bytes: len(text)})
+	}
 	n, err := cost(ev)
 	if err != nil || n == 0 {
 		return err
 	}
-	return r.send(ev, n)
+	return r.send(queued{ev: ev, n: n})
+}
+
+// clipboardBytes bounds the bytes of clipboard text in the queue: two
+// clipboards of the most text, as the VNC backend bounds its queue.
+const clipboardBytes = 2 * rdp.MaxClipboard
+
+// isText reports whether a clipboard MIME type is text, which is all
+// the backend gives the server. An empty type is taken as text.
+func isText(mime string) bool {
+	return mime == "" || strings.HasPrefix(strings.ToLower(mime), "text/")
+}
+
+// clipboardText returns a copy of the first rdp.MaxClipboard bytes of
+// text, cut at a character's start.
+func clipboardText(text []byte) []byte {
+	if len(text) > rdp.MaxClipboard {
+		n := rdp.MaxClipboard
+		for n > 0 && !utf8.RuneStart(text[n]) {
+			n--
+		}
+		text = text[:n]
+	}
+	return bytes.Clone(text)
 }
 
 // run is the state of one Run that Input and Demand share.
 type run struct {
 	queue  chan queued   // inputs from Input, for the writer
 	queued atomic.Int64  // the events that the inputs in queue may make
+	bytes  atomic.Int64  // the bytes of clipboard text in queue
 	kick   chan struct{} // asks the writer to reconsider the demand
 
 	// Owned by the writer.
 	input  inputState
 	typing string // the rest of a Text being typed
+	paste  []byte // clipboard text taken from the queue and not yet set
+	pasted bool   // paste holds text to set
 }
 
-// queued is an input in the queue, with the events it may make.
+// queued is an input in the queue, with the events it may make and the
+// bytes of clipboard text it holds.
 type queued struct {
-	ev backend.InputEvent
-	n  int
+	ev    backend.InputEvent
+	n     int
+	bytes int
 }
 
 func newRun() *run {
@@ -328,19 +385,22 @@ func newRun() *run {
 	}
 }
 
-// send queues ev, which may make n events, unless the queue is full.
-// Input calls it one call at a time, and the writer only lowers queued,
-// so the check and the addition need no lock.
-func (r *run) send(ev backend.InputEvent, n int) error {
-	if r.queued.Load()+int64(n) > inputEvents {
+// send queues q unless the queue is full: of inputs, of the events they
+// may make, or of clipboard text. Input calls it one call at a time, and
+// the writer only lowers queued and bytes, so the checks and the
+// additions need no lock.
+func (r *run) send(q queued) error {
+	if r.queued.Load()+int64(q.n) > inputEvents || r.bytes.Load()+int64(q.bytes) > clipboardBytes {
 		return ErrInputFull
 	}
-	r.queued.Add(int64(n))
+	r.queued.Add(int64(q.n))
+	r.bytes.Add(int64(q.bytes))
 	select {
-	case r.queue <- queued{ev: ev, n: n}:
+	case r.queue <- q:
 		return nil
 	default:
-		r.queued.Add(-int64(n))
+		r.queued.Add(-int64(q.n))
+		r.bytes.Add(-int64(q.bytes))
 		return ErrInputFull
 	}
 }
@@ -521,6 +581,7 @@ func (b *Backend) credentials(ctx context.Context, sink backend.Sink) (rdp.Confi
 type client interface {
 	SendInput(events ...rdp.InputEvent) error
 	SuppressOutput(suppress bool) error
+	SetClipboard(text []byte) error
 	UnicodeInput() bool
 	MouseXInput() bool
 }
@@ -528,7 +589,8 @@ type client interface {
 // writeLoop writes queued input and what the demand asks of the server,
 // until done is closed or a write fails. Input that is ready is written
 // at once, in writes of up to maxBatch events, in input PDUs of up to 255
-// events.
+// events. Clipboard text is set after the input queued before it and
+// before the input queued after it.
 func (r *run) writeLoop(c client, done <-chan struct{}, visible *atomic.Bool) error {
 	shown := true // the server sends updates until told otherwise
 	batch := make([]rdp.InputEvent, 0, maxBatch)
@@ -551,6 +613,13 @@ func (r *run) writeLoop(c client, done <-chan struct{}, visible *atomic.Bool) er
 			clear(batch)
 			batch = batch[:0]
 		}
+		if r.pasted {
+			text := r.paste
+			r.paste, r.pasted = nil, false
+			if err := c.SetClipboard(text); err != nil {
+				return writeFailed(done, err)
+			}
+		}
 		if v := visible.Load(); v != shown {
 			if err := c.SuppressOutput(!v); err != nil {
 				return writeFailed(done, err)
@@ -563,7 +632,7 @@ func (r *run) writeLoop(c client, done <-chan struct{}, visible *atomic.Bool) er
 // fill adds to batch what is ready to write, up to maxBatch events: the
 // rest of a Text being typed, as much of it as fits, then queued inputs,
 // which go whole, while the batch has room for the most an input other
-// than Text makes.
+// than Text makes, up to clipboard text, which is set after the batch.
 func (r *run) fill(batch []rdp.InputEvent, c client) []rdp.InputEvent {
 	for {
 		if r.typing != "" {
@@ -571,7 +640,7 @@ func (r *run) fill(batch []rdp.InputEvent, c client) []rdp.InputEvent {
 				return batch
 			}
 		}
-		if len(batch) > maxBatch-maxInputEvents {
+		if r.pasted || len(batch) > maxBatch-maxInputEvents {
 			return batch
 		}
 		select {
@@ -585,14 +654,19 @@ func (r *run) fill(batch []rdp.InputEvent, c client) []rdp.InputEvent {
 }
 
 // take appends the events of a queued input, or for a Text makes it the
-// text being typed. The input then leaves the queue's budget.
+// text being typed, or for a Clipboard the text to set. The input then
+// leaves the queue's budget.
 func (r *run) take(batch []rdp.InputEvent, c client, q queued) []rdp.InputEvent {
-	if t, ok := q.ev.(backend.Text); ok {
-		r.typing = t.Text
-	} else {
+	switch ev := q.ev.(type) {
+	case backend.Text:
+		r.typing = ev.Text
+	case backend.Clipboard:
+		r.paste, r.pasted = ev.Data, true
+	default:
 		batch = r.input.events(batch, capabilitiesOf(c), q.ev)
 	}
 	r.queued.Add(-int64(q.n))
+	r.bytes.Add(-int64(q.bytes))
 	return batch
 }
 
