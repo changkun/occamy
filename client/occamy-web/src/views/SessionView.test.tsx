@@ -6,7 +6,8 @@
 
 // The session view in a DOM, under StrictMode, whose development effects
 // run twice, with a WebSocket that never opens: an owner's action that
-// waited for a sign-in is taken once.
+// waited for a sign-in is taken once, and End shows that it waits for
+// occamyd and that it failed.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
@@ -70,6 +71,7 @@ const settle = (ms = 0): Promise<void> => act(() => new Promise<void>((resolve) 
 async function render(
   action: { seq: number; action: SessionAction } | null,
   answer: (signal: AbortSignal) => Promise<Response>,
+  timeout?: number,
   token = accessToken('demo'),
 ): Promise<Rendered> {
   const r: Rendered = { deletes: [], left: 0, signIns: [] }
@@ -79,6 +81,7 @@ async function render(
       return answer(init?.signal as AbortSignal)
     },
     Date.now,
+    timeout,
   )
   const view = (a: typeof action): React.JSX.Element => (
     <StrictMode>
@@ -108,6 +111,8 @@ async function render(
 let rerender: (a: { seq: number; action: SessionAction } | null) => Promise<void> = () => Promise.resolve()
 
 const ended = (): Promise<Response> => Promise.resolve(new Response(null, { status: 204 }))
+const text = (): string => container.textContent ?? ''
+const button = (label: string): HTMLButtonElement | undefined => [...container.querySelectorAll('button')].find((b) => b.textContent === label)
 
 describe('SessionView', () => {
   it('takes an End that waited for the owner once, though its effects run twice', async () => {
@@ -120,5 +125,34 @@ describe('SessionView', () => {
     await rerender({ ...end })
     await settle()
     expect(r.deletes).toHaveLength(1)
+  })
+
+  it('says it is ending the session while occamyd answers, and lets the owner leave', async () => {
+    let answer: (r: Response) => void = () => undefined
+    const r = await render({ seq: 1, action: { kind: 'end' } }, () => new Promise((resolve) => (answer = resolve)))
+    expect(text()).toContain('Ending the session for everyone…')
+    act(() => button('Back to connections')?.click())
+    expect(r.left).toBe(1)
+    answer(new Response(null, { status: 204 }))
+  })
+
+  it('asks an owner whose sign-in expired to sign in over the session, rather than wait', async () => {
+    const r = await render({ seq: 1, action: { kind: 'end' } }, ended, undefined, accessToken('demo', Date.now() - 1))
+    expect(r.deletes).toEqual([])
+    expect(r.signIns).toEqual([['Your sign-in has expired. Sign in again to end the session for everyone.', { target, then: { kind: 'end' }, here: true }]])
+    expect(text()).not.toContain('Ending the session for everyone…')
+  })
+
+  it('tells the owner when occamyd did not answer in time, and tries again', async () => {
+    const hung = (signal: AbortSignal): Promise<Response> => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason as Error)))
+    const r = await render({ seq: 1, action: { kind: 'end' } }, hung, 20)
+    await settle(60)
+    expect(text()).toContain('Not ended for everyone')
+    expect(text()).toContain('occamyd did not answer in time.')
+    expect(text()).not.toContain('Ending the session for everyone…')
+    act(() => button('Try again')?.click())
+    await settle()
+    expect(r.deletes).toEqual(['DELETE /api/v1/sessions/mZ3k', 'DELETE /api/v1/sessions/mZ3k'])
+    expect(text()).toContain('Ending the session for everyone…')
   })
 })

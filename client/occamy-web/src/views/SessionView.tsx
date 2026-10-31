@@ -84,6 +84,8 @@ export function SessionView({ api, token, target, action, onLeave, onSignIn, onR
   const [shareRequest, setShareRequest] = useState<ShareRequest | null>(null)
   // Why End did not end the session for everyone; empty for none.
   const [problem, setProblem] = useState('')
+  // Whether End waits for occamyd.
+  const [ending, setEnding] = useState(false)
   const handled = useRef(0)
   const name = target.kind === 'share' ? 'Shared session' : target.name
   const signedIn = target.kind !== 'share'
@@ -152,7 +154,8 @@ export function SessionView({ api, token, target, action, onLeave, onSignIn, onR
   // sign-in, the owner signs in over the session, and End resumes.
   const end = async (): Promise<void> => {
     setProblem('')
-    const outcome = await endSession({ api, token, sessionId, now: Date.now(), close: () => controller.close() })
+    setEnding(true)
+    const outcome = await endSession({ api, token, sessionId, now: Date.now(), close: () => controller.close() }).finally(() => setEnding(false))
     switch (outcome.kind) {
       case 'ended':
         onLeave()
@@ -273,7 +276,7 @@ export function SessionView({ api, token, target, action, onLeave, onSignIn, onR
             onSignIn={(message, then) => onSignIn(message, { target: again(), then, here: true })}
           />
         )}
-        {problem === '' && overlayOf(state) === 'connecting' && (
+        {problem === '' && !ending && overlayOf(state) === 'connecting' && (
           <div className="overlay" role="status">
             <div className="card">
               <p>Connecting to {name}…</p>
@@ -283,7 +286,7 @@ export function SessionView({ api, token, target, action, onLeave, onSignIn, onR
             </div>
           </div>
         )}
-        {problem === '' && overlayOf(state) === 'ended' && state.ending !== null && (
+        {problem === '' && !ending && overlayOf(state) === 'ended' && state.ending !== null && (
           <EndOverlay
             ending={state.ending}
             leaveLabel={signedIn ? 'Back to connections' : 'Close'}
@@ -291,6 +294,18 @@ export function SessionView({ api, token, target, action, onLeave, onSignIn, onR
             onSignIn={() => onSignIn(state.ending?.detail ?? '', { target: again(), then: null, here: false })}
             onRejoin={() => onRejoin(again())}
           />
+        )}
+        {problem === '' && ending && (
+          // End waits for occamyd, with the stream closed or about to
+          // be: the owner may leave rather than wait.
+          <div className="overlay" role="status">
+            <div className="card">
+              <p>Ending the session for everyone…</p>
+              <button type="button" onClick={onLeave}>
+                Back to connections
+              </button>
+            </div>
+          </div>
         )}
         {problem !== '' && (
           <EndOverlay

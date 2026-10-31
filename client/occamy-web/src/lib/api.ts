@@ -34,9 +34,10 @@ export type ShareRole = 'viewer' | 'read-only'
 
 /**
  * ApiError is an answer of API v1 other than success: its HTTP status
- * and the code of its error body, or "network" for no answer, "http" for
- * an answer without API v1's error body, such as an occamyd serving no
- * API v1, and "bad_response" for a success that did not parse.
+ * and the code of its error body, or "network" for no answer, "timeout"
+ * for none within the call's time limit, "http" for an answer without
+ * API v1's error body, such as an occamyd serving no API v1, and
+ * "bad_response" for a success that did not parse.
  */
 export class ApiError extends Error {
   readonly status: number
@@ -59,15 +60,25 @@ export class ApiError extends Error {
 // request does not race its expiry.
 const EXPIRY_MARGIN = 10_000
 
+/**
+ * How long a call waits for occamyd's answer, in milliseconds: occamyd
+ * gives up on a request after its write timeout of 30 s (server/server.go),
+ * so a call that takes longer is stuck in a proxy or the network, and
+ * the page says so rather than waiting on it.
+ */
+export const API_TIMEOUT = 30_000
+
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>
 
 export class Api {
   private readonly fetch: Fetch
   private readonly now: () => number
+  private readonly timeout: number
 
-  constructor(fetchFn: Fetch = (input, init) => globalThis.fetch(input, init), now: () => number = Date.now) {
+  constructor(fetchFn: Fetch = (input, init) => globalThis.fetch(input, init), now: () => number = Date.now, timeout = API_TIMEOUT) {
     this.fetch = fetchFn
     this.now = now
+    this.timeout = timeout
   }
 
   /** signIn signs a static user in with a password (POST /api/v1/auth/token). */
@@ -83,7 +94,7 @@ export class Api {
    */
   async oidcAvailable(): Promise<boolean> {
     try {
-      const res = await this.fetch('/api/v1/auth/oidc/login', { method: 'GET', redirect: 'manual', cache: 'no-store' })
+      const res = await this.fetch('/api/v1/auth/oidc/login', { method: 'GET', redirect: 'manual', cache: 'no-store', signal: AbortSignal.timeout(this.timeout) })
       return res.status === 400
     } catch {
       return false
@@ -143,13 +154,20 @@ export class Api {
       headers['Content-Type'] = 'application/json'
       body = JSON.stringify(o.body)
     }
+    // The time limit covers the answer's body too, which fetch reads
+    // under the same signal.
+    const signal = AbortSignal.timeout(this.timeout)
     let res: Response
+    let text: string
     try {
-      res = await this.fetch(path, { method, headers, body, cache: 'no-store', credentials: 'same-origin' })
-    } catch {
+      res = await this.fetch(path, { method, headers, body, cache: 'no-store', credentials: 'same-origin', signal })
+      text = await res.text()
+    } catch (err) {
+      if (signal.aborted || (err instanceof Error && err.name === 'TimeoutError')) {
+        throw new ApiError(0, 'timeout', 'occamyd did not answer in time.')
+      }
       throw new ApiError(0, 'network', 'occamyd cannot be reached.')
     }
-    const text = await res.text()
     let json: unknown = null
     if (text !== '') {
       try {

@@ -57,6 +57,22 @@ describe('endSession', () => {
     }
   })
 
+  it('tells the owner when occamyd does not answer in time, rather than waiting on it', async () => {
+    const log: string[] = []
+    const api = new Api(
+      (path, init) => {
+        log.push(`${init?.method} ${path}`)
+        const signal = init?.signal as AbortSignal
+        return new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason as Error)))
+      },
+      () => now,
+      20,
+    )
+    const got = await endSession({ api, token: fresh, sessionId: 'mZ3k', now, close: () => Promise.resolve(void log.push('close')) })
+    expect(got).toEqual({ kind: 'failed', message: 'The session was not ended for everyone: occamyd did not answer in time. Its viewers stay until your minute of grace runs out.' })
+    expect(log).toEqual(['close', 'DELETE /api/v1/sessions/mZ3k'])
+  })
+
   it('takes a session that ended already as ended', async () => {
     const { options } = owner(error(404, 'not_found'))
     expect(await endSession(options)).toEqual({ kind: 'ended' })

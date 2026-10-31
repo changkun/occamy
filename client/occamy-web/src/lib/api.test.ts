@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { Api, ApiError, errorMessage, subjectOf } from './api'
+import { API_TIMEOUT, Api, ApiError, errorMessage, subjectOf } from './api'
 
 interface Sent {
   path: string
@@ -165,6 +165,51 @@ describe('the routes that take an access token', () => {
     const { api } = scripted(() => json(429, { error: { code: 'limit_exceeded', message: 'x' } }))
     const err = (await api.share(token, 's', 'viewer', 3600).catch((e: unknown) => e)) as ApiError
     expect(err.signedOut).toBe(false)
+  })
+})
+
+describe('the time limit', () => {
+  // hung answers once the request's signal aborts, with its reason.
+  const hung = (_: string, init?: RequestInit): Promise<Response> =>
+    new Promise((_, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason as Error)))
+
+  it('gives up on occamyd when it does not answer in time', async () => {
+    const api = new Api(hung, () => 1_000_000, 20)
+    const err = await api.connections(token).catch((e: unknown) => e)
+    expect(err).toMatchObject({ status: 0, code: 'timeout', message: 'occamyd did not answer in time.', signedOut: false })
+    expect(errorMessage(err)).toBe('occamyd did not answer in time.')
+    await expect(api.endSession(token, 's')).rejects.toMatchObject({ code: 'timeout' })
+    await expect(api.signIn('a', 'b')).rejects.toMatchObject({ code: 'timeout' })
+    expect(await api.oidcAvailable()).toBe(false)
+  })
+
+  it('takes the answer’s body under the same limit', async () => {
+    const api = new Api(
+      (_, init) => {
+        const body = new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(new TextEncoder().encode('{"connections":'))
+            init?.signal?.addEventListener('abort', () => c.error(init.signal?.reason))
+          },
+        })
+        return Promise.resolve(new Response(body, { status: 200 }))
+      },
+      () => 1_000_000,
+      20,
+    )
+    await expect(api.connections(token)).rejects.toMatchObject({ status: 0, code: 'timeout' })
+  })
+
+  it('lasts as long as occamyd takes to give up on a request', async () => {
+    let signal: AbortSignal | undefined
+    const api = new Api((_, init) => {
+      signal = init?.signal ?? undefined
+      return Promise.resolve(json(200, { connections: [] }))
+    }, () => 1_000_000)
+    await api.connections(token)
+    expect(signal?.aborted).toBe(false)
+    // occamyd's writeTimeout, in server/server.go.
+    expect(API_TIMEOUT).toBe(30_000)
   })
 })
 
