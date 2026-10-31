@@ -234,7 +234,8 @@ func TestParseV1Example(t *testing.T) {
 				Allow:       config.Allow{Users: []string{"alice"}},
 			},
 			{
-				ID: "windows", Name: "Windows workstation", Protocol: "rdp", Target: "10.0.4.20:3389", Backend: "guacd",
+				ID: "windows", Name: "Windows workstation", Protocol: "rdp", Target: "10.0.4.20:3389", Backend: "native",
+				TLS:         config.ConnectionTLS{Pins: []string{"3F:A1:07:5C:92:E4:6B:D8:21:0A:F3:8E:57:C6:19:B4:E2:7D:40:95:A8:1C:6F:D3:0B:72:E9:58:34:AC:66:1F"}},
 				Credentials: config.Credentials{Username: "Administrator", PasswordFile: path("run/secrets/windows-password")},
 				Allow:       config.Allow{Groups: []string{"ops"}},
 			},
@@ -246,7 +247,7 @@ func TestParseV1Example(t *testing.T) {
 			},
 		},
 		AdhocAllowlist: []string{"10.0.0.0/8", "*.lab.internal:22"},
-		AdhocBackends:  map[string]string{"ssh": "native", "vnc": "native", "rdp": "guacd", "telnet": "guacd"},
+		AdhocBackends:  map[string]string{"ssh": "native", "vnc": "native", "rdp": "native", "telnet": "guacd"},
 		Limits:         config.Limits{Sessions: 500, SessionsPerUser: 20, ViewersPerSession: 50, SharesPerSession: 100},
 		Streams:        config.Streams{ViewerTimeout: 45 * time.Second},
 	}
@@ -404,7 +405,7 @@ func TestOverlap(t *testing.T) {
 
 // TestParseV1Backends checks that every connection and every protocol of
 // adhoc_backends ends up with a backend: its own, or the protocol's
-// default, which is native for ssh and guacd for the others.
+// default, which is native for ssh and rdp and guacd for the others.
 func TestParseV1Backends(t *testing.T) {
 	f, err := parse(t, head+`connections:
   - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
@@ -415,6 +416,8 @@ func TestParseV1Backends(t *testing.T) {
   - {id: f, protocol: vnc, backend: native, ard: true, target: f, tls: {insecure_skip_verify: true}, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
   - {id: g, protocol: rdp, target: g, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: h, protocol: telnet, backend: guacd, target: h, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: i, protocol: rdp, backend: guacd, target: i, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: j, protocol: rdp, backend: native, security: tls, target: j, tls: {require: true, insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
 adhoc_backends: {vnc: native}
 `)
 	if err != nil {
@@ -424,15 +427,15 @@ adhoc_backends: {vnc: native}
 	for _, c := range f.Connections {
 		got = append(got, c.ID+":"+c.Backend)
 	}
-	want := []string{"a:native", "b:native", "c:guacd", "d:native", "e:guacd", "f:native", "g:guacd", "h:guacd"}
+	want := []string{"a:native", "b:native", "c:guacd", "d:native", "e:guacd", "f:native", "g:native", "h:guacd", "i:guacd", "j:native"}
 	if !slices.Equal(got, want) {
 		t.Errorf("backends %v, want %v", got, want)
 	}
-	if want := map[string]string{"ssh": "native", "vnc": "native", "rdp": "guacd", "telnet": "guacd"}; !maps.Equal(f.AdhocBackends, want) {
+	if want := map[string]string{"ssh": "native", "vnc": "native", "rdp": "native", "telnet": "guacd"}; !maps.Equal(f.AdhocBackends, want) {
 		t.Errorf("adhoc_backends %v, want %v", f.AdhocBackends, want)
 	}
 	for _, tt := range []struct{ protocol, backend, want string }{
-		{"ssh", "", "native"}, {"vnc", "", "guacd"}, {"rdp", "", "guacd"}, {"telnet", "", "guacd"},
+		{"ssh", "", "native"}, {"vnc", "", "guacd"}, {"rdp", "", "native"}, {"telnet", "", "guacd"},
 		{"vnc", "native", "native"}, {"rdp", "guacd", "guacd"},
 	} {
 		if got := config.BackendOf(tt.protocol, tt.backend); got != tt.want {
@@ -765,7 +768,7 @@ connections:
   - {id: h, protocol: vnc, backend: native, target: h, tls: {ca_file: DIR/ca.pem, insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: i, protocol: vnc, backend: native, target: i, tls: {insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
-			{"connections[0].tls", "only vnc connections have tls"},
+			{"connections[0].tls", "only vnc and rdp connections have tls"},
 			{"connections[1].tls.pins", "set ca_file or pins, not both"},
 			{"connections[2].tls.ca_file", "holds no PEM certificate"},
 			{"connections[3].tls.ca_file", "missing.pem does not exist"},
@@ -773,6 +776,26 @@ connections:
 			{"connections[4].tls.pins[1]", "not a certificate or a SHA-256 fingerprint"},
 			{"connections[6].tls.insecure_skip_verify", "set ca_file or pins, or insecure_skip_verify, not both"},
 			{"connections[7].tls.insecure_skip_verify", "set ca_file or pins, or insecure_skip_verify, not both"},
+		}},
+		{"rdp tls and security", head + `connections:
+  - {id: a, protocol: rdp, target: a, tls: {pins: ["SHA256:short"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: rdp, backend: guacd, target: b, tls: {insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: rdp, target: c, tls: {ca_file: DIR/ca.pem, pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: d, protocol: rdp, target: d, security: tls, tls: {require: true, server_name: desk, ca_file: DIR/ca.pem}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: e, protocol: rdp, backend: guacd, security: tls, target: e, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: f, protocol: vnc, backend: native, security: tls, target: f, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: g, protocol: rdp, security: rdp, target: g, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: h, protocol: rdp, security: NLA, target: h, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: i, protocol: rdp, security: nla-ext, target: i, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: j, protocol: rdp, backend: native, security: any, target: j, tls: {pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+`, []want{
+			{"connections[0].tls.pins[0]", "not a certificate or a SHA-256 fingerprint"},
+			{"connections[1].tls", "only the native RDP backend checks the certificate"},
+			{"connections[2].tls.pins", "set ca_file or pins, not both"},
+			{"connections[4].security", "set guacd.params.rdp.security"},
+			{"connections[5].security", "only rdp connections have security"},
+			{"connections[6].security", `unknown security mode "rdp"`},
+			{"connections[7].security", `unknown security mode "NLA"`},
 		}},
 		{"backend", head + `connections:
   - {id: a, protocol: ssh, backend: guacd, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
@@ -783,7 +806,6 @@ connections:
   - {id: f, protocol: vnc, backend: guacd, target: f, tls: {insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
 			{"connections[0].backend", "ssh connections always use occamyd's native SSH backend"},
-			{"connections[1].backend", "the native RDP backend is not available yet"},
 			{"connections[2].backend", "telnet has no native backend"},
 			{"connections[3].backend", `unknown backend "nativ": use guacd or native`},
 			{"connections[4].tls", "set backend: native"},
@@ -806,7 +828,6 @@ connections:
 		{"adhoc backends", head + `adhoc_backends: {ssh: guacd, vnc: native, rdp: native, telnet: guacd, kubernetes: guacd, x: y}
 `, []want{
 			{"adhoc_backends.kubernetes", `unknown protocol "kubernetes"`},
-			{"adhoc_backends.rdp", "the native RDP backend is not available yet"},
 			{"adhoc_backends.ssh", "ssh connections always use occamyd's native SSH backend"},
 			{"adhoc_backends.x", `unknown protocol "x"`},
 		}},

@@ -26,8 +26,10 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"changkun.de/x/occamy/internal/auth"
+	rdpb "changkun.de/x/occamy/internal/backend/rdp"
 	"changkun.de/x/occamy/internal/backend/ssh"
 	"changkun.de/x/occamy/internal/backend/vnc"
+	"changkun.de/x/occamy/internal/rdp"
 )
 
 // Bounds of auth.access_token_lifetime. The upper bound is the longest
@@ -365,6 +367,7 @@ func (f *File) validateConnections(c *checker) {
 			c.hostKeys(p, cn)
 			c.connectionTLS(p+".tls", cn)
 			c.ard(p+".ard", cn)
+			c.security(p+".security", cn)
 		}
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
 	}
@@ -518,22 +521,31 @@ func (f *File) validateAdhocBackends(c *checker) {
 	}
 }
 
-// connectionTLS checks a vnc connection's certificate policy: pins
-// replace the roots that ca_file names, insecure_skip_verify replaces
-// both, as ssh's insecure_ignore_host_key replaces host_keys, and other
-// protocols have no tls. Only the native VNC backend checks it, so a
-// vnc connection through guacd has none either: guacd would not check
+// connectionTLS checks a vnc or rdp connection's certificate policy:
+// pins replace the roots that ca_file names, insecure_skip_verify
+// replaces both, as ssh's insecure_ignore_host_key replaces host_keys,
+// and other protocols have no tls. Only the native backends check it,
+// so a connection through guacd has none either: guacd would not check
 // the certificate as the file says.
 func (c *checker) connectionTLS(path string, cn *Connection) {
 	t := cn.TLS
-	if cn.Protocol != "vnc" {
-		if t.set() {
-			c.add(path, "only vnc connections have tls")
+	checkPin := vnc.CheckPin
+	switch cn.Protocol {
+	case "vnc":
+		if t.set() && cn.Backend != BackendNative {
+			c.add(path, "only the native VNC backend checks the certificate as tls says: set backend: native, since guacd, which serves vnc connections by default, would not")
+			return
 		}
-		return
-	}
-	if t.set() && cn.Backend != BackendNative {
-		c.add(path, "only the native VNC backend checks the certificate as tls says: set backend: native, since guacd, which serves vnc connections by default, would not")
+	case "rdp":
+		if t.set() && cn.Backend != BackendNative {
+			c.add(path, "only the native RDP backend checks the certificate as tls says: leave backend out, or set native, since guacd would not; through guacd, guacd.params.rdp.ignore-cert and cert-fingerprints decide")
+			return
+		}
+		checkPin = rdp.CheckPin
+	default:
+		if t.set() {
+			c.add(path, "only vnc and rdp connections have tls")
+		}
 		return
 	}
 	if t.CAFile != "" && len(t.Pins) > 0 {
@@ -548,7 +560,7 @@ func (c *checker) connectionTLS(path string, cn *Connection) {
 		}
 	}
 	for i, s := range t.Pins {
-		if err := vnc.CheckPin(s); err != nil {
+		if err := checkPin(s); err != nil {
 			c.add(fmt.Sprintf("%s.pins[%d]", path, i), "%v", err)
 		}
 	}
@@ -566,6 +578,25 @@ func (c *checker) ard(path string, cn *Connection) {
 		c.add(path, "only the native VNC backend speaks Apple Remote Desktop authentication: set backend: native")
 	case cn.TLS.required():
 		c.add(path, "Apple Remote Desktop authentication runs without TLS, so it cannot be allowed while tls requires TLS (require, ca_file or pins)")
+	}
+}
+
+// security checks a connection's security mode: only the native RDP
+// backend reads it, since guacd takes its mode from
+// guacd.params.rdp.security.
+func (c *checker) security(path string, cn *Connection) {
+	switch {
+	case cn.Security == "":
+	case cn.Protocol != "rdp":
+		c.add(path, "only rdp connections have security")
+	case cn.Backend != BackendNative:
+		c.add(path, "only the native RDP backend reads security: leave backend out, or set native; through guacd, set guacd.params.rdp.security")
+	default:
+		switch cn.Security {
+		case rdpb.SecurityNLA, rdpb.SecurityNLAExt, rdpb.SecurityTLS, rdpb.SecurityAny:
+		default:
+			c.add(path, "unknown security mode %q: use %s (the default), %s, %s or %s", cn.Security, rdpb.SecurityNLA, rdpb.SecurityNLAExt, rdpb.SecurityTLS, rdpb.SecurityAny)
+		}
 	}
 }
 

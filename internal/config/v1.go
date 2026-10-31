@@ -70,8 +70,8 @@ type File struct {
 
 // The backends that serve a connection's sessions.
 const (
-	// BackendNative is occamyd's own client of the protocol: ssh, and
-	// vnc with backend: native.
+	// BackendNative is occamyd's own client of the protocol: ssh, rdp,
+	// and vnc with backend: native.
 	BackendNative = "native"
 	// BackendGuacd is the guacd bridge, for every protocol but ssh.
 	BackendGuacd = "guacd"
@@ -79,12 +79,13 @@ const (
 
 // DefaultBackend returns the backend that serves protocol's sessions
 // when the configuration does not pick one: native for ssh, which has
-// no other, and guacd for the others. vnc stays on guacd until its
-// native backend passes the guacd bridge's parity gate
-// (specs/008-native-architecture/guacd-bridge.md): backend: native opts
-// a connection in.
+// no other, and for rdp, which backend: guacd keeps on the bridge; guacd
+// for the others. vnc stays on guacd until its native backend becomes
+// the default (specs/008-native-architecture/guacd-bridge.md):
+// backend: native opts a connection in.
 func DefaultBackend(protocol string) string {
-	if protocol == "ssh" {
+	switch protocol {
+	case "ssh", "rdp":
 		return BackendNative
 	}
 	return BackendGuacd
@@ -107,9 +108,7 @@ func backendProblem(protocol, b string) string {
 		return fmt.Sprintf("unknown backend %q: use %s or %s", b, BackendGuacd, BackendNative)
 	case protocol == "ssh" && b == BackendGuacd:
 		return "ssh connections always use occamyd's native SSH backend: leave backend out, or set native"
-	case protocol == "rdp" && b == BackendNative:
-		return "the native RDP backend is not available yet: it is not registered until NLA has run end to end. Leave backend out, or set guacd"
-	case protocol != "ssh" && protocol != "vnc" && b == BackendNative:
+	case protocol != "ssh" && protocol != "vnc" && protocol != "rdp" && b == BackendNative:
 		return fmt.Sprintf("%s has no native backend: leave backend out, or set guacd", protocol)
 	}
 	return ""
@@ -256,9 +255,15 @@ type Connection struct {
 	// InsecureIgnoreHostKey accepts any host key from an ssh target, with
 	// a warning, for demos.
 	InsecureIgnoreHostKey bool `yaml:"insecure_ignore_host_key"`
-	// TLS is the certificate policy of a vnc target's VeNCrypt, which
-	// only the native VNC backend checks. Other protocols have none.
+	// TLS is the certificate policy of a vnc target's VeNCrypt or an rdp
+	// target's TLS, which only the native backends check. Other
+	// protocols have none.
 	TLS ConnectionTLS `yaml:"tls"`
+	// Security is the security mode of an rdp connection on the native
+	// backend, named as guacd names them: nla (the default), nla-ext,
+	// tls or any. Through guacd, guacd.params.rdp.security sets it
+	// instead. xrdp speaks no NLA, so an xrdp target needs tls or any.
+	Security string `yaml:"security"`
 	// ARD allows Apple Remote Desktop authentication (security type 30)
 	// on a vnc connection with the native backend, which macOS Screen
 	// Sharing needs to log in a user of the Mac. Its key exchange
@@ -272,14 +277,16 @@ type Connection struct {
 	Allow       Allow       `yaml:"allow"`
 }
 
-// ConnectionTLS is the policy for the certificate that a vnc target
-// presents when VeNCrypt runs TLS, which the native VNC backend prefers
-// whenever a server offers it. By default the certificate must chain to
-// the system's roots and name the target's host.
+// ConnectionTLS is the policy for the certificate that a target
+// presents: a vnc target when VeNCrypt runs TLS, which the native VNC
+// backend prefers whenever a server offers it, and an rdp target, whose
+// native backend always runs TLS. By default the certificate must chain
+// to the system's roots and name the target's host.
 type ConnectionTLS struct {
-	// Require refuses a server that does not offer VeNCrypt with a
+	// Require refuses a vnc server that does not offer VeNCrypt with a
 	// certificate, so that nobody on the way can strip it from the
-	// security types the server offers. CAFile and Pins imply it.
+	// security types the server offers. CAFile and Pins imply it. The
+	// native RDP backend requires TLS whether it is set or not.
 	Require bool `yaml:"require"`
 	// ServerName is the name the certificate must carry, if not the
 	// target's host.

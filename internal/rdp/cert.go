@@ -111,6 +111,14 @@ func (t TLS) Check(host string) error {
 	return err
 }
 
+// CheckPin reports whether s is a pin as TLS.Pins takes it: a
+// certificate in PEM, or a SHA-256 fingerprint in hex or after
+// "SHA256:". The configuration checks its entries with it.
+func CheckPin(s string) error {
+	_, err := parsePin(s)
+	return err
+}
+
 // parsePin parses a pinned certificate or fingerprint.
 func parsePin(s string) ([sha256.Size]byte, error) {
 	var sum [sha256.Size]byte

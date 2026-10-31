@@ -22,6 +22,7 @@ import (
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/backend/backendtest"
+	"changkun.de/x/occamy/internal/backend/rdp"
 	"changkun.de/x/occamy/internal/backend/ssh"
 	"changkun.de/x/occamy/internal/backend/vnc"
 	"changkun.de/x/occamy/internal/config"
@@ -36,28 +37,26 @@ func TestBackendDefaults(t *testing.T) {
 	for k, m := range b {
 		got[k.protocol+"/"+k.backend] = m.name
 	}
-	// No native rdp: the native RDP backend is not registered until NLA
-	// has run end to end.
 	want := map[string]string{
 		"ssh/native": "ssh",
 		"vnc/native": "vnc", "vnc/guacd": "guacd",
-		"rdp/guacd":    "guacd",
+		"rdp/native": "rdp", "rdp/guacd": "guacd",
 		"telnet/guacd": "guacd",
 	}
 	if !maps.Equal(got, want) {
 		t.Errorf("backends %v, want %v", got, want)
 	}
-	// An empty backend is the protocol's default: guacd for vnc until
-	// its native backend passes the parity gate.
+	// An empty backend is the protocol's default: native for rdp, and
+	// guacd for vnc until its native backend becomes the default.
 	for _, tt := range []struct{ protocol, backend, want string }{
 		{"ssh", "", "ssh"}, {"vnc", "", "guacd"}, {"vnc", "native", "vnc"}, {"vnc", "guacd", "guacd"},
-		{"rdp", "", "guacd"}, {"telnet", "", "guacd"},
+		{"rdp", "", "rdp"}, {"rdp", "native", "rdp"}, {"rdp", "guacd", "guacd"}, {"telnet", "", "guacd"},
 	} {
 		if m, ok := b.lookup(tt.protocol, tt.backend); !ok || m.name != tt.want {
 			t.Errorf("lookup(%q, %q) = %q, %v; want %q", tt.protocol, tt.backend, m.name, ok, tt.want)
 		}
 	}
-	for _, tt := range []struct{ protocol, backend string }{{"rdp", "native"}, {"ssh", "guacd"}, {"telnet", "native"}, {"kubernetes", ""}} {
+	for _, tt := range []struct{ protocol, backend string }{{"ssh", "guacd"}, {"telnet", "native"}, {"kubernetes", ""}} {
 		if m, ok := b.lookup(tt.protocol, tt.backend); ok {
 			t.Errorf("lookup(%q, %q) = %q, want none", tt.protocol, tt.backend, m.name)
 		}
@@ -223,6 +222,83 @@ func TestNewVNC(t *testing.T) {
 		"pins and a CA file": {CAFile: ca, Pins: pins},
 	} {
 		if _, err := newVNC(target{addr: "10.0.0.5:5900", creds: config.Credentials{Prompt: true}, tls: tls}, screen{}); err == nil {
+			t.Errorf("%s: made a backend", name)
+		}
+	}
+}
+
+func TestNewRDP(t *testing.T) {
+	t.Setenv("OCCAMY_TEST_RDP_PASSWORD", "pw")
+	b, err := newRDP(target{addr: "127.0.0.1:3389", creds: config.Credentials{PasswordEnv: "OCCAMY_TEST_RDP_PASSWORD"}}, screen{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := b.(*rdp.Backend); !ok {
+		t.Errorf("%T, want *rdp.Backend", b)
+	}
+	if _, err := newRDP(target{addr: "127.0.0.1:3389", creds: config.Credentials{PasswordEnv: "OCCAMY_TEST_UNSET"}}, screen{}); err == nil {
+		t.Error("an unset password variable made a backend")
+	}
+	if _, err := newRDP(target{addr: "127.0.0.1:3389", security: "rdp", creds: config.Credentials{Prompt: true}}, screen{}); err == nil {
+		t.Error("an unknown security mode made a backend")
+	}
+
+	// The hello's size, both sides or neither, within an RDP desktop's.
+	for _, tt := range []struct {
+		s    screen
+		w, h int
+	}{
+		{screen{}, 0, 0},
+		{screen{width: 800}, 0, 0},
+		{screen{height: 600}, 0, 0},
+		{screen{cols: 80, rows: 24}, 0, 0},
+		{screen{width: 1920, height: 1080}, 1920, 1080},
+		{screen{width: 80, height: 60}, rdp.MinSide, rdp.MinSide},
+		{screen{width: 99999, height: 1080}, rdp.MaxSide, 1080},
+		{screen{width: 1920, height: 99999}, 1920, rdp.MaxSide},
+		{screen{width: 8000, height: 8000}, 8000, rdp.MaxPixels / 8000},
+	} {
+		if w, h := rdpSize(tt.s); w != tt.w || h != tt.h {
+			t.Errorf("rdpSize(%+v) = %d×%d, want %d×%d", tt.s, w, h, tt.w, tt.h)
+		}
+		if _, err := newRDP(target{addr: "127.0.0.1:3389", creds: config.Credentials{Prompt: true}}, tt.s); err != nil {
+			t.Errorf("screen %+v: %v", tt.s, err)
+		}
+	}
+
+	// The connection's credentials, security mode and certificate policy
+	// reach the backend, with the CA file read, and the key that allows
+	// TLS is named for the operator.
+	ca := writeCA(t)
+	tls := config.ConnectionTLS{Require: true, ServerName: "desk", CAFile: ca, InsecureSkipVerify: true}
+	cfg, err := rdpConfig(target{
+		connection: "desk", addr: "10.0.0.5:3389", security: rdp.SecurityTLS, tls: tls,
+		creds: config.Credentials{Username: "alice", PasswordEnv: "OCCAMY_TEST_RDP_PASSWORD"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Addr != "10.0.0.5:3389" || cfg.Username != "alice" || cfg.Password != "pw" || cfg.Security != rdp.SecurityTLS ||
+		cfg.TLS.ServerName != "desk" || cfg.TLS.RootCAs == nil || !cfg.TLS.InsecureSkipVerify || cfg.SecuritySetting != `security: tls on connection "desk"` {
+		t.Errorf("rdpConfig = %+v", cfg)
+	}
+	pins := []string{"SHA256:" + strings.Repeat("A", 43)}
+	cfg, err = rdpConfig(target{addr: "10.0.0.5:3389", creds: config.Credentials{Prompt: true}, tls: config.ConnectionTLS{Pins: pins}})
+	if err != nil || !slices.Equal(cfg.TLS.Pins, pins) || cfg.TLS.RootCAs != nil || cfg.TLS.ServerName != "" || cfg.Security != "" ||
+		!strings.Contains(cfg.SecuritySetting, "ad-hoc rdp targets take NLA alone") {
+		t.Errorf("pins: %+v %v", cfg, err)
+	}
+	// An ad-hoc target's certificate names the name it was opened by,
+	// not the address it resolved to.
+	cfg, err = rdpConfig(target{addr: "10.0.0.5:3389", name: "desk.lab.internal", creds: config.Credentials{Prompt: true}})
+	if err != nil || cfg.TLS.ServerName != "desk.lab.internal" {
+		t.Errorf("ad-hoc: server name %q, %v", cfg.TLS.ServerName, err)
+	}
+	for name, tls := range map[string]config.ConnectionTLS{
+		"missing CA file":    {CAFile: filepath.Join(t.TempDir(), "nope")},
+		"pins and a CA file": {CAFile: ca, Pins: pins},
+	} {
+		if _, err := newRDP(target{addr: "10.0.0.5:3389", creds: config.Credentials{Prompt: true}, tls: tls}, screen{}); err == nil {
 			t.Errorf("%s: made a backend", name)
 		}
 	}

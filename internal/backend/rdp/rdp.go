@@ -50,6 +50,14 @@ const (
 	DefaultHeight      = 768
 )
 
+// The bounds of Config.Width and Config.Height: each side from MinSide
+// to MaxSide, and the area at most MaxPixels.
+const (
+	MinSide   = 200
+	MaxSide   = 8192
+	MaxPixels = 1 << 25
+)
+
 // The security modes of Config.Security, named as guacd names them.
 const (
 	// SecurityNLA offers CredSSP, with and without the early user
@@ -200,7 +208,7 @@ func New(cfg Config) (*Backend, error) {
 	if cfg.Width == 0 && cfg.Height == 0 {
 		cfg.Width, cfg.Height = DefaultWidth, DefaultHeight
 	}
-	if cfg.Width < 200 || cfg.Height < 200 || cfg.Width > 8192 || cfg.Height > 8192 || cfg.Width*cfg.Height > 1<<25 {
+	if cfg.Width < MinSide || cfg.Height < MinSide || cfg.Width > MaxSide || cfg.Height > MaxSide || cfg.Width*cfg.Height > MaxPixels {
 		return nil, fmt.Errorf("rdp: desktop size %d×%d out of range", cfg.Width, cfg.Height)
 	}
 	switch cfg.ColorDepth {

@@ -252,6 +252,7 @@ func connectionTarget(c *config.Connection) target {
 		insecureIgnoreHostKey: c.InsecureIgnoreHostKey,
 		tls:                   c.TLS,
 		ard:                   c.ARD,
+		security:              c.Security,
 	}
 }
 

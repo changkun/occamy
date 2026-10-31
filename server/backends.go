@@ -14,10 +14,12 @@ import (
 
 	"changkun.de/x/occamy/internal/backend"
 	bridge "changkun.de/x/occamy/internal/backend/guacd"
+	"changkun.de/x/occamy/internal/backend/rdp"
 	"changkun.de/x/occamy/internal/backend/ssh"
 	"changkun.de/x/occamy/internal/backend/vnc"
 	"changkun.de/x/occamy/internal/config"
 	"changkun.de/x/occamy/internal/guacd"
+	rdpproto "changkun.de/x/occamy/internal/rdp"
 )
 
 // target is what a session connects to: a connection of the registry, or
@@ -36,10 +38,13 @@ type target struct {
 	// The host key policy of an ssh target.
 	hostKeys              []string
 	insecureIgnoreHostKey bool
-	// tls is the certificate policy of a vnc target, and ard allows its
-	// Apple Remote Desktop authentication.
+	// tls is the certificate policy of a vnc or rdp target, and ard allows
+	// a vnc target's Apple Remote Desktop authentication.
 	tls config.ConnectionTLS
 	ard bool
+	// security is the security mode of an rdp target on the native
+	// backend, empty for its default.
+	security string
 }
 
 // screen is the size that the owner's hello asks for: pixels for a
@@ -90,15 +95,14 @@ func (b backends) serves(protocol string) bool {
 }
 
 // newBackends returns the factory: the native SSH backend for ssh, the
-// native VNC backend for vnc with backend: native, and the guacd bridge
-// at g for vnc, rdp and telnet. The native RDP backend is not
-// registered until NLA has run end to end
-// (specs/008-native-architecture/native-rdp-backend.md), and the
-// configuration refuses backend: native for rdp.
+// native RDP backend for rdp, the native VNC backend for vnc with
+// backend: native, and the guacd bridge at g for vnc, telnet, and rdp
+// with backend: guacd.
 func newBackends(g config.Guacd) backends {
 	b := backends{}
 	b.register("ssh", config.BackendNative, "ssh", newSSH)
 	b.register("vnc", config.BackendNative, "vnc", newVNC)
+	b.register("rdp", config.BackendNative, "rdp", newRDP)
 	for _, p := range []string{"vnc", "rdp", "telnet"} {
 		b.register(p, config.BackendGuacd, "guacd", newBridge(g, p))
 	}
@@ -202,6 +206,72 @@ func ardSetting(t target) string {
 		return "ard: true on a connection for this target (ad-hoc targets have no ard)"
 	}
 	return fmt.Sprintf("ard: true on connection %q", t.connection)
+}
+
+// newRDP makes a native RDP backend, which connects with the desktop size
+// of the owner's hello, within the sizes an RDP desktop may have.
+func newRDP(t target, s screen) (backend.Backend, error) {
+	cfg, err := rdpConfig(t)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Width, cfg.Height = rdpSize(s)
+	return rdp.New(cfg)
+}
+
+// rdpSize is the desktop size to connect with for the hello's size:
+// zero, for the backend's default, without both sides; otherwise each
+// side within rdp.MinSide and rdp.MaxSide, and the height cut until the
+// area is within rdp.MaxPixels. Viewers scale what does not fit.
+func rdpSize(s screen) (width, height int) {
+	if s.width <= 0 || s.height <= 0 {
+		return 0, 0
+	}
+	width = min(max(s.width, rdp.MinSide), rdp.MaxSide)
+	height = min(max(s.height, rdp.MinSide), rdp.MaxSide, rdp.MaxPixels/width)
+	return width, height
+}
+
+// rdpConfig is the native RDP backend's configuration for t, with the
+// password and the CA file read.
+func rdpConfig(t target) (rdp.Config, error) {
+	pw, err := password(t.creds)
+	if err != nil {
+		return rdp.Config{}, err
+	}
+	roots, err := t.tls.RootCAs()
+	if err != nil {
+		return rdp.Config{}, fmt.Errorf("reading the CA file: %w", err)
+	}
+	cfg := rdp.Config{
+		Addr:     t.addr,
+		Username: t.creds.Username,
+		Password: pw,
+		Security: t.security,
+		TLS: rdpproto.TLS{
+			ServerName:         t.tls.ServerName,
+			RootCAs:            roots,
+			Pins:               t.tls.Pins,
+			InsecureSkipVerify: t.tls.InsecureSkipVerify,
+		},
+		SecuritySetting: securitySetting(t),
+	}
+	// An ad-hoc target's address is the one its name resolved to, and
+	// the certificate names the name.
+	if cfg.TLS.ServerName == "" {
+		cfg.TLS.ServerName = t.name
+	}
+	return cfg, nil
+}
+
+// securitySetting names, for the error of a server that selects
+// standard RDP security when offered NLA alone, the configuration key
+// that lets it take TLS.
+func securitySetting(t target) string {
+	if t.connection == "" {
+		return "security: tls on a connection for this target (ad-hoc rdp targets take NLA alone)"
+	}
+	return fmt.Sprintf("security: tls on connection %q", t.connection)
 }
 
 // newBridge returns the maker of protocol's sessions through guacd at g.
