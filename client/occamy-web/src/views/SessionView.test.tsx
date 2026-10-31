@@ -546,6 +546,16 @@ describe('The owner’s session kept for a reload', () => {
     expect(kept(r)).toBeNull()
   })
 
+  it('stays kept when End fails, as the session runs on for the owner’s grace', async () => {
+    const r = await render({ token: accessToken('demo'), action: null }, failed)
+    act(() => button('End session')?.click())
+    await settle()
+    expect(r.deletes).toEqual(['DELETE /api/v1/sessions/mZ3k'])
+    expect(text()).toContain('Not ended for everyone')
+    expect(Welcomed.last?.closed).toBe(true)
+    expect(kept(r)).toEqual(lab)
+  })
+
   it('is forgotten when occamyd refuses to join it again, as once it has ended', async () => {
     stream.connect = () => Promise.reject(new CloseError(CloseCode.Forbidden, 'no such session'))
     const storage = memory(new Map([[SESSION_KEY, JSON.stringify(lab)]]))
