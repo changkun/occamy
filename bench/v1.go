@@ -340,9 +340,10 @@ func (s *session) readV1(c *v1Conn, d display) {
 	defer close(s.done)
 	defer close(s.frames)
 	var (
-		term *terminal.Terminal
-		size image.Point
-		drew bool // the terminal frame being read carried bytes
+		term  *terminal.Terminal
+		size  image.Point
+		drew  bool // the terminal frame being read carried bytes
+		shown bool // the terminal showed a cell that is not blank
 	)
 	for {
 		ev, err := c.cl.Next(context.Background())
@@ -376,14 +377,23 @@ func (s *session) readV1(c *v1Conn, d display) {
 		case client.Frame:
 			m := s.marker.Load()
 			var (
-				draws, marked bool
-				damage        image.Rectangle
+				draws, marked, content bool
+				damage                 image.Rectangle
 			)
 			if c.cl.Class() == protocol.ClassTerminal {
+				// A terminal shows the remote from its first cell that is
+				// not blank: the SSH backend resizes the blank terminal
+				// before the shell prints, which sends a clear screen.
 				draws, drew = drew, false
-				marked = draws && m != nil && m.cells != nil && m.cells(term.Snapshot())
+				cells := m != nil && m.cells != nil
+				if draws && (!shown || cells) {
+					scr := term.Snapshot()
+					shown = shown || showsCells(scr)
+					marked = cells && m.cells(scr)
+				}
+				content = shown
 			} else if len(ev.Dirty) > 0 {
-				draws = true
+				draws, content = true, true
 				for _, r := range ev.Dirty {
 					damage = damage.Union(r)
 				}
@@ -395,7 +405,7 @@ func (s *session) readV1(c *v1Conn, d display) {
 			// every frame, drawing or not, before it acknowledges it.
 			at := d.present(time.Now())
 			if draws {
-				s.emit(at, damage, marked)
+				s.emit(frame{at: at, damage: damage, marked: marked, content: content})
 			}
 		case client.End:
 			if !c.closing.Load() {
@@ -407,6 +417,20 @@ func (s *session) readV1(c *v1Conn, d display) {
 			return
 		}
 	}
+}
+
+// showsCells reports a cell of scr that is not blank: one with a
+// character, or a background other than the default.
+func showsCells(scr *terminal.Screen) bool {
+	for y := range scr.Rows {
+		for x := range scr.Cols {
+			c := scr.Cell(x, y)
+			if c.Content != " " && c.Content != "" || c.Style.Bg != terminal.DefaultColor {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // decoders are the codecs that occamy's web client offers where the

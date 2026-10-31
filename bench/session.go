@@ -162,6 +162,10 @@ type frame struct {
 	at     time.Time
 	damage image.Rectangle // empty for a v1 terminal
 	marked bool            // the session's marker matched the frame
+	// content is set once the screen shows something of the remote: for
+	// a v1 terminal, from the first frame with a cell that is not blank,
+	// and for any other session from its first frame.
+	content bool
 }
 
 // marker reports whether a frame shows what a scenario waits for. pixels
@@ -213,11 +217,14 @@ func newSession(start time.Time) *session {
 	}
 }
 
-// emit reports a complete frame that drew, applied at now.
-func (s *session) emit(now time.Time, damage image.Rectangle, marked bool) {
+// emit reports a complete frame that drew. The first with content is
+// the session's first frame.
+func (s *session) emit(f frame) {
 	s.drawn.Add(1)
-	s.firstFrame.CompareAndSwap(0, int64(now.Sub(s.start)))
-	s.frames <- frame{at: now, damage: damage, marked: marked}
+	if f.content {
+		s.firstFrame.CompareAndSwap(0, int64(f.at.Sub(s.start)))
+	}
+	s.frames <- f
 }
 
 // v0Conn sends a v0 session's input as Guacamole instructions.
@@ -289,7 +296,7 @@ func (s *session) readV0(conn rawConn, display *guacamole.Display) {
 			if m := s.marker.Load(); m != nil && m.pixels != nil {
 				marked = m.pixels(img, damage)
 			}
-			s.emit(now, damage, marked)
+			s.emit(frame{at: now, damage: damage, marked: marked, content: true})
 		case "error":
 			args := ins.Args()
 			s.err = fmt.Errorf("guacd error: %v", args)

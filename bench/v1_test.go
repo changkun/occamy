@@ -35,6 +35,7 @@ import (
 	"changkun.de/x/occamy/internal/config"
 	sessions "changkun.de/x/occamy/internal/session"
 	"changkun.de/x/occamy/internal/stream"
+	"changkun.de/x/occamy/internal/terminal"
 	"changkun.de/x/occamy/protocol"
 )
 
@@ -373,18 +374,49 @@ func TestV1Terminal(t *testing.T) {
 	}
 }
 
-// A terminal's first frame is the first that shows the remote, not the
-// blank terminal the session core serves before the backend connected.
+// A terminal's first frame is the first that shows the remote: not the
+// blank terminal the session core serves before the backend connected,
+// nor the clear screen that resizing a blank terminal sends, as the SSH
+// backend resizes its terminal before the shell prints.
 func TestV1TerminalFirstFrame(t *testing.T) {
+	defer func(d time.Duration) { gap = d }(gap)
+	gap = 0
 	const delay = 300 * time.Millisecond
-	s := v1Rig(t, newShell(delay))
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-	if _, err := s.wait(ctx, s.start, func(frame) bool { return true }); err != nil {
-		t.Fatal(err)
+	for name, resize := range map[string]time.Duration{"blank": 0, "resized": 100 * time.Millisecond} {
+		t.Run(name, func(t *testing.T) {
+			r := testRunner(t, series{Name: "v1-native", open: func(context.Context, string, string) (*session, error) {
+				b := newShell(delay)
+				b.resize = resize
+				return v1Rig(t, b), nil
+			}})
+			res := r.connect(context.Background(), "ssh")
+			if res.Error != "" {
+				t.Fatal(res.Error)
+			}
+			if first := time.Duration(res.FirstFrame.P50 * float64(time.Millisecond)); first < delay {
+				t.Errorf("the first frame drew after %v, before the shell's first output after %v", first, delay)
+			}
+		})
 	}
-	if first := time.Duration(s.firstFrame.Load()); first < delay {
-		t.Errorf("the first frame drew after %v, before the shell's first output after %v", first, delay)
+}
+
+// A terminal shows something once a cell holds a character or a
+// coloured background; a cleared screen, or a moved cursor, shows
+// nothing.
+func TestShowsCells(t *testing.T) {
+	for in, want := range map[string]bool{
+		"":                         false,
+		"\x1b[H\x1b[2J\x1b[5;5H":   false,
+		"$ ":                       true,
+		"\x1b[48;5;201m \x1b[0m":   true,
+		"\x1b[3;3H\xe4\xb8\x80":    true, // a wide character
+		"\x1b[7m\x1b[0m\x1b[1;1H ": false,
+	} {
+		term := terminal.New(80, 24, terminal.Options{})
+		term.Write([]byte(in))
+		if got := showsCells(term.Snapshot()); got != want {
+			t.Errorf("%q shows %v, want %v", in, got, want)
+		}
 	}
 }
 
@@ -652,10 +684,12 @@ func fill(sink backend.Sink, r image.Rectangle, c color.RGBA) {
 
 // shell is a terminal backend that echoes its input, and prints T2's
 // magenta line on Return. It starts after delay, as a remote shell
-// answers some time after the session started.
+// answers some time after the session started. With resize, it resizes
+// its blank terminal after resize, as the SSH backend does once the
+// shell's channel opens.
 type shell struct {
-	input chan backend.InputEvent
-	delay time.Duration
+	input         chan backend.InputEvent
+	delay, resize time.Duration
 }
 
 func newShell(delay time.Duration) *shell {
@@ -670,10 +704,19 @@ func (b *shell) Input(ev backend.InputEvent) error {
 }
 
 func (b *shell) Run(ctx context.Context, sink backend.Sink) error {
+	start := time.Now()
+	if b.resize > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(b.resize):
+		}
+		sink.Resize(100, 30)
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(b.delay):
+	case <-time.After(time.Until(start.Add(b.delay))):
 	}
 	sink.Resize(80, 24)
 	sink.TermData([]byte("$ "))

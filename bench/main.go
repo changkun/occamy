@@ -280,7 +280,7 @@ func (r *runner) connect(ctx context.Context, proto string) result {
 			res.Error = err.Error()
 			break
 		}
-		_, err = s.wait(sctx, s.start, func(frame) bool { return true })
+		_, err = s.wait(sctx, s.start, func(f frame) bool { return f.content })
 		cancel()
 		s.close()
 		if err != nil {
