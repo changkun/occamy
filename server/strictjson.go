@@ -32,6 +32,14 @@ const maxJSONDepth = 32
 //
 // A syntax error is left for the decoder to report, as it would without
 // this check.
+//
+// The check is exact for types that are flat in two ways, which
+// TestRequestTypesFlat checks for every type decodeJSON decodes into.
+// No struct embeds another: jsonFields gives a name that two embedded
+// structs share to the first, where encoding/json gives it to the
+// shallower, or to neither. And every map's keys are plain strings:
+// keys are compared as the JSON strings they are, where encoding/json
+// reads "1" and "01" as the same key of a map[int].
 func checkMembers(data []byte, t reflect.Type) error {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
