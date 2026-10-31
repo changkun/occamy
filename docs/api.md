@@ -482,10 +482,12 @@ seconds, to open
 the stream token or the owner's access token; otherwise the session
 ends with `owner-left`. The remote is dialled after this answer, so a
 target that cannot be reached ends the session, and its stream gets
-`close` 4006 `backend-failed`. Credentials that the connection prompts
-for, and every ad-hoc target's, are asked of the owner on that stream,
-as `prompt` messages ([protocol.md](protocol.md#prompt)). The owner's
-`hello` sizes the session when the stream joins.
+`close` 4006 `backend-failed`, even when the session ended before the
+stream came ([below](#get-apiv1sessionsidstream)). Credentials that
+the connection prompts for, and every ad-hoc target's, are asked of
+the owner on that stream, as `prompt` messages
+([protocol.md](protocol.md#prompt)). The owner's `hello` sizes the
+session when the stream joins.
 
 | Status | `code` | When |
 |--------|--------|------|
@@ -525,9 +527,12 @@ Response: `200`, with `Cache-Control: no-store`.
 
 ### `DELETE /api/v1/sessions/{id}`
 
-Closes a session, for its owner. It answers once the session has ended,
-and every stream of the session gets `close` 4002 `session-closed`,
-whatever tokens and shares are still valid.
+Closes a session, for its owner. It answers once the session has ended
+and `occamyd` has let it go: a `GET`, `DELETE` or share of it after the
+answer gets 404, and the session no longer counts toward
+`limits.sessions_per_user` or `limits.sessions`, so its owner may open
+another at once. Every stream of the session gets `close` 4002
+`session-closed`, whatever tokens and shares are still valid.
 
 Response: `204 No Content`, with no body.
 
@@ -743,7 +748,8 @@ routes. The session's ID is in `welcome`.
 
 ### `GET /api/v1/sessions/{id}/stream`
 
-Joins running session `{id}`.
+Joins running session `{id}`, or tells its owner how it ended if it
+ended within the owner grace.
 
 Token, and the role it joins with:
 
@@ -760,9 +766,24 @@ access token or else a session token.
 |---------|---------|
 | A share that is unknown, expired, of another session, or whose session has ended | 4000 `unauthorized`, "invalid token" |
 | A JWT that fails verification | 4000 `unauthorized` |
-| No running session `{id}`, a session token for another session or from an issuer that may not join it, or an access token or `owner` session token of anyone but the owner | 4001 `forbidden`, "no such session" |
+| No running session `{id}`, and no ended one whose owner this is (below); a session token for another session or from an issuer that may not join it; an access token or `owner` session token of anyone but the owner; or a `viewer` or `read-only` session token of a session that has ended | 4001 `forbidden`, "no such session" |
 | The owner's older stream did not leave within 5 seconds of a newer one | 4001 `forbidden`, "the owner is connected already" |
 | A viewer beyond `limits.viewers_per_session` | 4007 `viewer-limit` |
+
+For the owner grace, 60 seconds, after a session ends, its owner's
+stream, with an access token or an `owner` session token, gets the
+`close` the session ended with instead of `welcome`: 4006
+`backend-failed` for a remote that failed before the stream came, as
+after [`POST /api/v1/sessions`](#post-apiv1sessions), or 4002
+`session-closed` after
+[`DELETE /api/v1/sessions/{id}`](#delete-apiv1sessionsid). Everyone
+else gets 4001 "no such session", as for a session that never existed,
+so the answer tells nobody else whether a session existed or how it
+ended. `occamyd` keeps as many ended sessions as `limits.sessions`, and
+1024 at the least, the owner and the `close` of each and no more, and
+forgets the oldest first, so a client that opens sessions whose remotes
+fail cannot grow them; an owner whose session was forgotten gets "no
+such session" too.
 
 A newer stream of the owner takes over from an older one, which gets
 `close` 1000 `normal` with "the owner connected again"; a connection

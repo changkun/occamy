@@ -143,6 +143,9 @@ server then sends `close` with the session's end, such as
 otherwise have had just after `welcome`, with the same code and
 reason. Which of the two a client gets is a race, so a client takes
 `close` before `welcome` as the end of the session it asked for.
+A session's owner whose stream comes after the session has ended,
+within the owner grace, gets that `close` too, and anyone else a
+refusal ([api.md](api.md#get-apiv1sessionsidstream)).
 
 `hello` sent as a WebSocket message, or a second `welcome`, is a
 protocol error.

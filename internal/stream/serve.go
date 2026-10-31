@@ -301,7 +301,7 @@ func closeEnded(ctx context.Context, c Conn, s *session.Session) error {
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	return closeWith(ctx, c, closeFor(s.End()))
+	return closeWith(ctx, c, CloseFor(s.End()))
 }
 
 func role(r session.Role) protocol.Role {
@@ -315,8 +315,9 @@ func role(r session.Role) protocol.Role {
 	}
 }
 
-// closeFor is the close message for a session's end.
-func closeFor(e session.End) protocol.Close {
+// CloseFor is the close message for a session's end: what its viewers
+// get, and what occamyd tells an owner whose stream comes after the end.
+func CloseFor(e session.End) protocol.Close {
 	code := map[session.Reason]protocol.CloseCode{
 		session.Closed:      protocol.CloseSessionClosed,
 		session.OwnerLeft:   protocol.CloseOwnerLeft,

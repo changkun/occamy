@@ -41,7 +41,7 @@ export interface Ending {
 export const TAKEOVER_REASON = 'the owner connected again'
 
 // The close codes occamyd sends a session's streams once the session
-// itself has ended, for everyone in it (closeFor, internal/stream/serve.go).
+// itself has ended, for everyone in it (CloseFor, internal/stream/serve.go).
 const SESSION_ENDS: ReadonlySet<number> = new Set([
   CloseCode.ServerShutdown,
   CloseCode.SessionClosed,

@@ -1105,6 +1105,132 @@ place for fixes that ship on v0 before beta.
     `View` before `welcome` finds the session ended, as when its backend
     fails at once, `Serve` sends the session's own end, such as
     `backend-failed`, rather than an internal error.
+  - **An owner who comes after the end:** after `POST /api/v1/sessions`,
+    a remote that fails before the owner's stream comes ended the
+    session, and `join` found no session and answered 4001 "no such
+    session", not the 4006 `backend-failed` that docs/api.md promised.
+    `TestVNCAdhocName` was a latent flake for this reason. A
+    self-signed certificate refused that way failed it 1 run in 30
+    locally (load 54), and 10 in 10 with 200 ms between `POST` and the
+    stream.
+    - occamyd now keeps each ended session's owner and close, and no
+      more, for the session's owner grace. The server opens every
+      session with its `ownerGrace`, `session.DefaultOwnerGrace` (60 s),
+      and keeps the end for the same grace, rather than a copy of it
+      that would fall behind if the grace changed or became
+      configurable. It keeps as many ended sessions as
+      `limits.sessions`, 1024 at the least (`endedSessions.most`), so
+      that a failure ending every session at once leaves each owner
+      their close, and forgets the oldest first. Both are set in
+      `newServer`; tests change them under the server's lock, not as
+      package variables that sessions' goroutines read. The session
+      moves from running to ended under one lock, so no stream finds
+      neither (server/ended.go).
+    - Follow-up: the count bound is per occamyd, not per owner, so one
+      user whose sessions keep failing can push out other owners'
+      records sooner. A cap per owner would stop that; it is left until
+      the records' total proves too small.
+    - `join` runs its owner checks unchanged against the ended
+      session's owner. The owner, with an access token or an `owner`
+      session token, gets the recorded close. Anyone else gets "no such
+      session", as for a session that never existed. That includes a
+      `viewer` or `read-only` session token, even the owner's own.
+    - A session that has ended but is still among the running ones
+      (`Join` answers `ErrEnded`) gives its owner its end the same way.
+    - `stream.CloseFor` is the end's close for both.
+    - Every end is kept, not only a failure, so an owner who reconnects
+      after `DELETE` now gets 4002 `session-closed` rather than "no
+      such session" (`TestDeleteEndsStreams`).
+
+    Tests (server/ended_test.go):
+    - `TestEndedSessionOwner` opens its stream 200 ms after `POST`, once
+      the session has ended. The stream token and the access token both
+      get `backend-failed`.
+    - `TestEndedSessionOthers` covers another user's access token and
+      owner session token, the owner's viewer and read-only session
+      tokens, and the owner's token for another session. All get the
+      close a session that never existed gives.
+    - `TestEndedSessionsBounded` covers the time and the count bounds.
+    - `TestEndedSessionsSized` checks the count against
+      `limits.sessions`: 1024 for 0 and 100, 5000 for 5000.
+    - `TestEndedSessionOwnerGrace` gives the server a grace of 1 s: a
+      session whose owner never comes ends after it, and the owner's
+      stream gets 4003 `owner-left` until it has passed again.
+    - `TestJoinEndingSession` covers a session that has ended and is
+      done, but is still among the running ones.
+    - `TestJoinEndingSessionWaits` covers the moment before that, when
+      the session has ended (`ending` is closed) but its backend's `Run`
+      has not returned (`done` is not), with a backend that holds on
+      after its context ends. Anyone else gets "no such session" at
+      once. The owner's stream waits for the end, and then gets 4002.
+    - `TestVNCAdhocName` takes the close before `welcome`.
+
+    Each mutant ran 10 times at a load of 6 to 12:
+    - No fix: `TestEndedSessionOwner`, `TestEndedSessionsBounded`,
+      `TestJoinEndingSession` and `TestDeleteEndsStreams` failed 10 of
+      10.
+    - The close to any of the owner's roles: `TestEndedSessionOthers`
+      failed 10 of 10.
+    - The close before the owner checks: `TestEndedSessionOthers`
+      failed 10 of 10.
+    - The ending session's close to any role: `TestJoinEndingSession`
+      failed 10 of 10.
+    - No expiry, or no count bound: `TestEndedSessionsBounded` failed
+      10 of 10.
+    - With 200 ms between `POST` and the stream, `TestVNCAdhocName`
+      failed 10 of 10 without the fix and passed 10 of 10 with it.
+
+    The review's mutants ran 10 times each at a load of 5 to 8:
+    - The count at 1024 whatever `limits.sessions`, or at
+      `limits.sessions` with no floor: `TestEndedSessionsSized` failed
+      10 of 10.
+    - The end kept 60 s whatever the session's grace:
+      `TestEndedSessionsBounded` and `TestEndedSessionOwnerGrace` failed
+      10 of 10.
+    - The session opened with the default grace rather than the
+      server's: `TestEndedSessionOwnerGrace` failed 10 of 10.
+    - No expiry: `TestEndedSessionsBounded` and
+      `TestEndedSessionOwnerGrace` failed 10 of 10. No count bound:
+      `TestEndedSessionsBounded` failed 10 of 10.
+    - The ending session's owner refused: `TestJoinEndingSession` and
+      `TestJoinEndingSessionWaits` failed 10 of 10. The latter's owner
+      got "no such session" while the backend still held on, so it
+      does join within the moment it means to.
+  - **DELETE answers once the session is let go (added in review):**
+    `closeSession` waited for `Session.Close`, which returns at the
+    session's end. The server forgot the session and released its count
+    toward the limits after that, in the goroutine `open` starts, and
+    the registry forgot it in another. `DELETE` could answer first.
+    `TestSessionOwnerOnly` failed once in CI on #144 this way, with "the
+    session is still running after DELETE", and passed on rerun.
+    - `sessionInfo.gone` is closed once that goroutine has removed the
+      session, kept its end, and released its count. `DELETE` waits for
+      it, and so answers after the end is kept, too. The wait cannot
+      hang: the goroutine waits for the end that `Close` has already
+      waited for, and then only for `mu`, which nobody holds for long.
+    - The registry may still forget the session a moment later. Every
+      route finds a session through the server's map first, so none
+      finds it in the registry alone.
+
+    Tests (server/sessions_test.go):
+    - `TestSessionOwnerOnly` requires the session gone as `DELETE`
+      answers. It used to accept it while the registry had forgotten
+      it, and then wait.
+    - `TestDeleteForgetsSession`, at one session per user: `DELETE`,
+      then at once a `POST /api/v1/sessions` (201), a `GET` (404) and a
+      share (404) of the closed session, three times.
+
+    With 100 ms between a session's end and both its server's and its
+    registry's removal, each ran 10 times at a load of 6 to 8:
+    - The fix: both passed 10 of 10, so a share is refused while the
+      registry still holds the session.
+    - Without the wait: both failed 10 of 10. After `DELETE`, a `GET`
+      answered 200, a second `DELETE` 204, a share 201, and the new
+      session 429.
+    - `TestDeleteEndsStreams` passed either way. Without the wait, the
+      owner's stream after `DELETE` found the session still running,
+      `Join` answered `ErrEnded`, and it got 4002 from that. With the
+      wait, it always gets 4002 from the kept end.
   - **Capabilities:** terminal level 1, and the codecs
     `internal/encoder` sends (`encoder.Codecs()`: webp, jpeg, deflate,
     raw), with a viewer's encoder from `encoder.New` for the codecs it

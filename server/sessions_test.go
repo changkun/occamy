@@ -352,10 +352,9 @@ func TestSessionOwnerOnly(t *testing.T) {
 	if r.code != http.StatusNoContent {
 		t.Fatalf("DELETE: %d %s", r.code, r.body)
 	}
-	if ts.s.session(o.ID) != nil && ts.s.registry.Len() != 0 {
-		t.Error("the session is still running after DELETE")
+	if ts.s.session(o.ID) != nil {
+		t.Error("the session is still there after DELETE")
 	}
-	waitFor(t, "the session to be forgotten", func() bool { return ts.s.session(o.ID) == nil })
 	for _, route := range []struct{ method, path string }{
 		{http.MethodGet, "/api/v1/sessions/" + o.ID},
 		{http.MethodDelete, "/api/v1/sessions/" + o.ID},
@@ -363,6 +362,37 @@ func TestSessionOwnerOnly(t *testing.T) {
 	} {
 		if r := ts.api(t, route.method, route.path, alice, ""); r.code != http.StatusNotFound {
 			t.Errorf("%s %s after the end: %d", route.method, route.path, r.code)
+		}
+	}
+}
+
+// TestDeleteForgetsSession checks that DELETE answers once occamyd has
+// forgotten the session, not only once it has ended: a request right
+// after it finds no session, and its owner, at a limit of one, opens
+// another at once.
+func TestDeleteForgetsSession(t *testing.T) {
+	ts, _ := sessionServer(t, func(f *config.File) { f.Limits.SessionsPerUser = 1 })
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	for range 3 {
+		if r := ts.api(t, http.MethodDelete, "/api/v1/sessions/"+o.ID, alice, ""); r.code != http.StatusNoContent {
+			t.Fatalf("DELETE: %d %s", r.code, r.body)
+		}
+		next := ts.api(t, http.MethodPost, "/api/v1/sessions", alice, `{"connection":"ops-shell"}`)
+		for _, route := range []struct{ method, path, body string }{
+			{http.MethodGet, "/api/v1/sessions/" + o.ID, ""},
+			{http.MethodPost, "/api/v1/sessions/" + o.ID + "/shares", `{"role":"viewer"}`},
+		} {
+			r := ts.api(t, route.method, route.path, alice, route.body)
+			if r.code != http.StatusNotFound || decodeError(t, r.body).Code != codeNotFound {
+				t.Errorf("%s %s after DELETE: %d %s, want 404", route.method, route.path, r.code, r.body)
+			}
+		}
+		if next.code != http.StatusCreated {
+			t.Fatalf("POST /api/v1/sessions right after DELETE: %d %s, want 201", next.code, next.body)
+		}
+		if err := json.Unmarshal(next.body, &o); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

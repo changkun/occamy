@@ -287,6 +287,10 @@ func refuseToken(err error) protocol.Close {
 //
 // A session token's expiry, like an access token's, does not end a
 // stream that has joined; the session's end does.
+//
+// The owner of a session that ended within endedFor gets the close it
+// ended with, as from a stream that had joined before the end. Anyone
+// else gets no such session, as for a session that never existed.
 func (s *server) join(id, token string) (*sessionInfo, *session.Viewer, *protocol.Close) {
 	forbidden := &protocol.Close{Code: protocol.CloseForbidden, Reason: "no such session"}
 	if !strings.Contains(token, ".") {
@@ -317,13 +321,17 @@ func (s *server) join(id, token string) (*sessionInfo, *session.Viewer, *protoco
 		refuse := refuseToken(err)
 		return nil, nil, &refuse
 	}
-	info := s.session(id)
-	if info == nil {
+	info, ended, ok := s.sessionOrEnd(id)
+	if !ok {
 		return nil, nil, forbidden
+	}
+	owner := ended.owner
+	if info != nil {
+		owner = info.owner
 	}
 	role := session.RoleOwner
 	if claims.Kind == auth.KindSession {
-		if claims.Session != id || !s.ids.grants(claims, info.owner) {
+		if claims.Session != id || !s.ids.grants(claims, owner) {
 			return nil, nil, forbidden
 		}
 		switch claims.Role {
@@ -333,8 +341,14 @@ func (s *server) join(id, token string) (*sessionInfo, *session.Viewer, *protoco
 			role = session.RoleReadOnly
 		}
 	}
-	if role == session.RoleOwner && p != info.owner {
+	if role == session.RoleOwner && p != owner {
 		return nil, nil, forbidden
+	}
+	if info == nil {
+		if role != session.RoleOwner {
+			return nil, nil, forbidden
+		}
+		return nil, nil, &ended.close
 	}
 	var v *session.Viewer
 	if role == session.RoleOwner {
@@ -347,10 +361,29 @@ func (s *server) join(id, token string) (*sessionInfo, *session.Viewer, *protoco
 		return nil, nil, &protocol.Close{Code: protocol.CloseForbidden, Reason: "the owner is connected already"}
 	case errors.Is(err, session.ErrViewerLimit):
 		return nil, nil, &viewerLimit
+	case errors.Is(err, session.ErrEnded) && role == session.RoleOwner:
+		// The session ended a moment ago, and is about to be kept as
+		// ended: its owner learns how, as just after.
+		c := stream.CloseFor(info.s.End())
+		return nil, nil, &c
 	case err != nil:
 		return nil, nil, forbidden
 	}
 	return info, v, nil
+}
+
+// sessionOrEnd returns session id if it runs, or else how it ended if
+// that is still kept, and reports whether it found either. Both are
+// looked up at once, since the session's end moves it from one to the
+// other.
+func (s *server) sessionOrEnd(id string) (*sessionInfo, endedSession, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if info := s.sessions[id]; info != nil {
+		return info, endedSession{}, true
+	}
+	e, ok := s.ended.get(id, time.Now())
+	return nil, e, ok
 }
 
 // viewerLimit refuses a viewer of a session that has as many as it takes.

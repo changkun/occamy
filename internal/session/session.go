@@ -159,7 +159,7 @@ type Config struct {
 	// 64 if zero.
 	TileSize int
 	// OwnerGrace is how long the session waits for its owner to come
-	// back, 60 s if zero.
+	// back, DefaultOwnerGrace if zero.
 	OwnerGrace time.Duration
 	// IdleTimeout ends a session without input for that long, 30 min if
 	// zero.
@@ -171,9 +171,11 @@ type Config struct {
 	Logger *slog.Logger
 }
 
+// DefaultOwnerGrace is the owner grace of a Config that sets none.
+const DefaultOwnerGrace = 60 * time.Second
+
 const (
 	defaultTileSize    = 64
-	defaultOwnerGrace  = 60 * time.Second
 	defaultIdleTimeout = 30 * time.Minute
 )
 
@@ -228,7 +230,7 @@ func Start(ctx context.Context, cfg Config) (*Session, *Viewer, error) {
 		cfg.TileSize = defaultTileSize
 	}
 	if cfg.OwnerGrace <= 0 {
-		cfg.OwnerGrace = defaultOwnerGrace
+		cfg.OwnerGrace = DefaultOwnerGrace
 	}
 	if cfg.IdleTimeout <= 0 {
 		cfg.IdleTimeout = defaultIdleTimeout

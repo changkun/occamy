@@ -376,7 +376,7 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
   })
 
   // The codes occamyd closes a session's streams with once the session
-  // ended for everyone (closeFor, internal/stream/serve.go), but 1011.
+  // ended for everyone (CloseFor, internal/stream/serve.go), but 1011.
   const sessionEnds = [CloseCode.ServerShutdown, CloseCode.SessionClosed, CloseCode.OwnerLeft, CloseCode.Idle, CloseCode.RemoteEnded, CloseCode.BackendFailed]
 
   it.each(sessionEnds)('takes close %i before a resumed End for the session ended, and sends nothing', async (code) => {

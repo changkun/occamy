@@ -485,7 +485,7 @@ Settled on 2026-10-31.
   ahead of a 404, alice refused as bob and then ending her session, and
   a user linked to single sign-on ending theirs), layout, roles,
   clipping, the ending of every close code and of a takeover, the close
-  codes that end a session, held to occamyd's `closeFor`, and the
+  codes that end a session, held to occamyd's `CloseFor`, and the
   prompt's markup, rendered without a DOM. The session view, the share
   panel and the shell run in happy-dom under StrictMode: an owner's
   action and a share that waited for a sign-in are taken once, a share
@@ -633,19 +633,21 @@ Settled on 2026-10-31.
     user's (server/oidc.go, server/identity.go), so comparing `idp` too
     could only refuse a linked user wrongly. occamyd closes a session's
     streams once it has ended for everyone with the code of its end, as
-    `closeFor` (internal/stream/serve.go) says: 4002 closed, 4003 owner
+    `CloseFor` (internal/stream/serve.go) says: 4002 closed, 4003 owner
     left, 4004 idle, 4005 remote ended, 4006 backend failed and 1001
     shutdown, which ends every session. Each counts as ended ahead of a
     404, as when a `DELETE` whose answer was lost had ended it, and
-    replaces what End said before. 1011 does not, though `closeFor`
+    replaces what End said before. 1011 does not, though `CloseFor`
     sends it for a session that failed on its own, since occamyd also
     closes a single stream with it, one whose reader panicked or that
     it failed to serve, while the session runs on; a 404 after it finds
     no stream open, and so says the session may have ended. Nor does
-    4001, which refuses a session that has ended and one that is not
-    the user's alike. While End waits for occamyd, the toolbar's End is
-    disabled and the credential prompt's End does nothing, so that a
-    second End neither sends another `DELETE` nor closes the stream
+    4001, which refuses a session that is not the user's, and one that
+    ended, alike, for anyone but its owner and for its owner too once
+    the owner grace after its end has passed; within it, the owner
+    gets the end's own code. While End waits for occamyd, the toolbar's
+    End is disabled and the credential prompt's End does nothing, so
+    that a second End neither sends another `DELETE` nor closes the stream
     before occamyd answers the first. A failed End
     with the stream open says the session runs on, with its viewers,
     rather than speaking of the owner's minute of grace, which does not
@@ -681,9 +683,12 @@ Settled on 2026-10-31.
     the user to sign in again, in a notice beside the form's errors,
     since nothing failed, with `role="status"` so that screen readers
     announce it politely, and with Go to the connections instead, which
-    forgets it; then it joins it. occamyd decides, so a session past
-    its grace, or a user who is not its owner, is refused with 4001 and
-    the view says so. It stays kept through a lost connection, a
+    forgets it; then it joins it. occamyd decides. A session that ended
+    less than the owner grace before the join gives its owner the close
+    it ended with, 4002 to 4006, such as 4003 `owner-left` once the
+    grace ran out, and the view says how it ended and forgets it, as
+    for any end. A session that ended longer ago, or a user who is not
+    its owner, is refused with 4001 and the view says so. It stays kept through a lost connection, a
     takeover and the page's own close on `pagehide`, as Join again
     would join it, through an End whose `DELETE` failed, after which
     the session runs on for the owner's grace, and through a join that
