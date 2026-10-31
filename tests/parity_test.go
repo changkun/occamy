@@ -308,6 +308,15 @@ func (s *paritySession) pump() {
 
 func (s *paritySession) close() { _ = s.cl.Close() }
 
+// endError describes the end of a session as an error.
+func endError(e client.End) error {
+	err := fmt.Errorf("the session ended: %v %q", e.Code, e.Reason)
+	if e.Err != nil {
+		err = fmt.Errorf("%w: %w", err, e.Err)
+	}
+	return err
+}
+
 // mark returns the index of the next event.
 func (s *paritySession) mark() int {
 	s.mu.Lock()
@@ -336,7 +345,7 @@ func (s *paritySession) waitFor(timeout time.Duration, from int, what string, ok
 			}
 			if e, end := ev.(client.End); end {
 				s.mu.Unlock()
-				return nil, from, fmt.Errorf("waiting for %s: the session ended: %v %q (%v)", what, e.Code, e.Reason, e.Err)
+				return nil, from, fmt.Errorf("waiting for %s: %w", what, endError(e))
 			}
 		}
 		more, err := s.more, s.err
@@ -999,7 +1008,7 @@ func checkReadOnly(p *parity, c parityColumn) error {
 	}
 	ctx := context.Background()
 	if _, err := ro.cl.Key(ctx, true, 'x', 0x1b); !errors.Is(err, client.ErrReadOnly) {
-		return fmt.Errorf("the client sent a read-only viewer's key: %v", err)
+		return fmt.Errorf("a read-only viewer's key: the client returned %q, want %w", fmt.Sprint(err), client.ErrReadOnly)
 	}
 	if _, err := owner.cl.Pointer(ctx, 20, 20, 0); err != nil {
 		return err
