@@ -540,6 +540,12 @@ func (b *Backend) serve(ctx context.Context, sink backend.Sink, r *run, conn *we
 			ccancel()
 		}
 	case err = <-ended:
+		// coder/websocket closes the connection when the context of a
+		// write or a ping is done, which ends the reader too, so that
+		// its error may come before ctx's. The cancel is then why.
+		if err != nil && ctx.Err() != nil {
+			err = ctx.Err()
+		}
 	case err = <-panicked:
 	}
 	close(done)

@@ -384,9 +384,15 @@ func TestCancel(t *testing.T) {
 			checkGoroutines(t)
 			s := newServer(t, kubetest.Options{Protocols: []string{proto}})
 			b := newBackend(t, config(s))
-			r := start(t, b, &backendtest.Sink{})
+			sink := &backendtest.Sink{}
+			r := start(t, b, sink)
 			e := accept(t, s)
 			next[kubetest.ResizeMessage](t, e)
+			// The size reaches the server before its write returns, and
+			// coder/websocket closes the connection if the write's
+			// context ends before then. The sink learns the size once
+			// the write has returned.
+			eventually(t, "the size", func() bool { return sink.Resizes() == 1 })
 			r.cancel()
 			if err := r.wait(t); !errors.Is(err, context.Canceled) {
 				t.Errorf("Run = %v, want context.Canceled", err)
