@@ -386,10 +386,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   suite.
 - A soak, `make soak`: sessions through the demo stack's `occamy-v1`
   for hours, while `TestSoak` samples `occamyd`'s goroutines, live heap
-  and open files from its debug listener and fails on steady growth.
-  `/debug/vars` publishes `goroutines` and `fds`, and the demo stack's
-  `occamy-v1` serves its debug listener on the host's loopback
-  interface, port 5638 (`OCCAMY_V1_DEBUG_PORT`).
+  and open files from its debug listener and fails on growth.
+  `/debug/vars` publishes `goroutines` and `fds`. A v1 file's
+  `debug.address_env` takes the debug listener's address from an
+  environment variable, and leaves the listener off while it is unset
+  or empty.
 - The native RDP backend's clipboard, the first part of its second
   phase: `internal/rdp` joins static virtual channels and reassembles
   their chunks within a bound per channel, and carries text both ways
@@ -485,6 +486,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the remote applies to the whole machine. The native VNC backend sent
   Power through QEMU's extended key events, and the VNC and guacd
   backends sent the keysyms.
+- The demo stack's debug routes, which have no authentication, are off
+  unless `make run OCCAMY_DEBUG=1` turns them on: `occamy-v1`'s debug
+  listener on the host's loopback interface, port 5638
+  (`OCCAMY_V1_DEBUG_PORT`), and the v0 service's pprof, from
+  `docker/occamy-debug.yaml`. `docker/occamy.yaml`, which served pprof
+  to anyone who could reach the v0 service, is now in release mode, and
+  the v0 service is published on the loopback interface only. The
+  pressure test and the soak need `OCCAMY_DEBUG=1`.
 
 ## [0.6.0] - 2026-10-30
 

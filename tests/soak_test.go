@@ -10,12 +10,13 @@ package tests
 // occamy-v1 for a duration, each moving the pointer and typing every few
 // seconds and asking its desktop for screen motion now and then, while
 // the test samples occamyd's goroutines, live heap and open files from
-// its debug listener. It fails if any of them grows monotonically past a
-// bound after the warm-up, or does not come back near where it started
+// its debug listener. It fails if any of them grows past a bound after
+// the warm-up (soakGrowth), or does not come back near where it started
 // once every session has closed, and if sessions fail. It is skipped
-// unless OCCAMY_SOAK_SESSIONS is set; make soak sets the rest:
+// unless OCCAMY_SOAK_SESSIONS is set; make soak sets the rest, against a
+// stack whose debug listeners make run OCCAMY_DEBUG=1 turned on:
 //
-//	make run
+//	make run OCCAMY_DEBUG=1
 //	make soak OCCAMY_SOAK_SESSIONS=8 OCCAMY_SOAK_DURATION=30m
 //
 // Decision 4's full soak is OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h.
@@ -25,17 +26,22 @@ package tests
 //	OCCAMY_SOAK_SESSIONS     sessions at once
 //	OCCAMY_SOAK_DURATION     how long, 1h by default
 //	OCCAMY_SOAK_CONNECTIONS  the connections that the sessions take in
-//	                         turn, vnc-native,tigervnc-native by default
+//	                         turn, tigervnc-native by default: x11vnc
+//	                         hangs now and then, and its watchdog's
+//	                         restarts would end sessions
+//	                         (docker/demo/vnc/start.sh)
 //	OCCAMY_SOAK_LIFETIME     how long a session lasts before it closes and
 //	                         another opens, 10m by default; 0 keeps each
 //	                         for the whole run
 //	OCCAMY_SOAK_INTERVAL     how often to sample, 30s by default
 //	OCCAMY_SOAK_WARMUP       how long before samples count, a tenth of the
-//	                         duration by default
+//	                         duration by default; the samples after it
+//	                         must number soakMinSamples at least
 //	OCCAMY_SOAK_BOUNDS       the growth allowed, goroutines=50,heap=32,fds=25
 //	                         by default, the heap in MiB
 //	OCCAMY_SOAK_DEBUG        occamy-v1's debug listener, from
-//	                         OCCAMY_V1_DEBUG_PORT in make soak
+//	                         OCCAMY_V1_DEBUG_PORT in make soak, which
+//	                         make run OCCAMY_DEBUG=1 publishes
 //	OCCAMY_SOAK_OUT          a CSV file for the samples
 //
 // Every other session has a read-only viewer, by a share, for its life.
@@ -80,10 +86,21 @@ type soakConfig struct {
 // soakMetrics are what a sample holds and the bounds name.
 var soakMetrics = []string{"goroutines", "heap", "fds"}
 
+// soakMinSamples is the fewest samples after the warm-up that soakGrowth
+// judges: two in each quarter.
+const soakMinSamples = 8
+
+// soakSampleTries is how often the soak tries to sample occamyd before it
+// gives up, soakSamplePause apart.
+const (
+	soakSampleTries = 3
+	soakSamplePause = 5 * time.Second
+)
+
 func soakConfigFromEnv() (soakConfig, error) {
 	cfg := soakConfig{
 		duration:    time.Hour,
-		connections: []string{"vnc-native", "tigervnc-native"},
+		connections: []string{"tigervnc-native"},
 		lifetime:    10 * time.Minute,
 		interval:    30 * time.Second,
 		bounds:      map[string]float64{"goroutines": 50, "heap": 32, "fds": 25},
@@ -112,6 +129,10 @@ func soakConfigFromEnv() (soakConfig, error) {
 	if cfg.interval <= 0 || cfg.duration <= 0 || cfg.warmup >= cfg.duration {
 		return cfg, errors.New("OCCAMY_SOAK_INTERVAL and OCCAMY_SOAK_DURATION must be positive, and OCCAMY_SOAK_WARMUP shorter than the duration")
 	}
+	if n := (cfg.duration - cfg.warmup) / cfg.interval; n < soakMinSamples {
+		return cfg, fmt.Errorf("%v after a warm-up of %v, sampled every %v, gives %d samples, fewer than the %d that judging growth takes: soak longer or sample more often",
+			cfg.duration, cfg.warmup, cfg.interval, n, soakMinSamples)
+	}
 	if v := os.Getenv("OCCAMY_SOAK_CONNECTIONS"); v != "" {
 		cfg.connections = strings.Split(v, ",")
 	}
@@ -126,7 +147,7 @@ func soakConfigFromEnv() (soakConfig, error) {
 		}
 	}
 	if cfg.debug == "" {
-		return cfg, errors.New("OCCAMY_SOAK_DEBUG is not set: occamy-v1's debug listener, such as localhost:5638")
+		return cfg, errors.New("OCCAMY_SOAK_DEBUG is not set: occamy-v1's debug listener, such as localhost:5638, which make run OCCAMY_DEBUG=1 publishes")
 	}
 	return cfg, nil
 }
@@ -193,9 +214,9 @@ func TestSoak(t *testing.T) {
 	}
 	stats := &soakStats{}
 	sampleNow := func() soakSample {
-		s, err := soakSampleDebug(cfg.debug)
+		s, err := soakRetry(soakSampleTries, soakSamplePause, t.Logf, func() (soakSample, error) { return soakSampleDebug(cfg.debug) })
 		if err != nil {
-			t.Fatalf("sampling occamyd: %v", err)
+			t.Fatalf("sampling occamyd at %s, which make run OCCAMY_DEBUG=1 publishes: %v", cfg.debug, err)
 		}
 		s.at, s.sessions = time.Since(start), stats.open.Load()
 		record(s)
@@ -242,24 +263,57 @@ func TestSoak(t *testing.T) {
 		for _, s := range samples {
 			series = append(series, s.values[m])
 		}
-		if grew, detail := soakGrowth(series, cfg.bounds[m]); grew {
+		switch grew, detail, err := soakGrowth(series, cfg.bounds[m]); {
+		case err != nil:
+			t.Errorf("%s: %v", m, err)
+		case grew:
 			t.Errorf("%s grew past %v: %s", m, cfg.bounds[m], detail)
-		} else {
+		default:
 			t.Logf("%s: %s", m, detail)
 		}
-		if m != "heap" && after.values[m] > before.values[m]+cfg.bounds[m] {
-			t.Errorf("%s: %v once the sessions closed, %v before they opened", m, after.values[m], before.values[m])
-		}
+	}
+	for _, e := range soakAfter(before, after, cfg.bounds) {
+		t.Error(e)
 	}
 }
 
-// soakGrowth judges a series of samples taken after the warm-up: it
-// grew if the medians of its four quarters never fall and the last
-// exceeds the first by more than bound. Medians, so that a sample taken
-// while sessions open or close does not decide.
-func soakGrowth(series []float64, bound float64) (bool, string) {
-	if len(series) < 8 {
-		return false, fmt.Sprintf("%d samples, too few to judge", len(series))
+// soakAfter compares each metric once the sessions have closed with its
+// value before they opened, and returns what stayed above it by more
+// than its bound.
+func soakAfter(before, after soakSample, bounds map[string]float64) []string {
+	var stayed []string
+	for _, m := range soakMetrics {
+		if after.values[m] > before.values[m]+bounds[m] {
+			stayed = append(stayed, fmt.Sprintf("%s: %v once the sessions closed, %v before they opened", m, after.values[m], before.values[m]))
+		}
+	}
+	return stayed
+}
+
+// soakRetry calls get up to tries times, pause apart, until it succeeds,
+// logging each failure, and returns the last error if none does.
+func soakRetry(tries int, pause time.Duration, logf func(string, ...any), get func() (soakSample, error)) (soakSample, error) {
+	for try := 1; ; try++ {
+		s, err := get()
+		if err == nil || try == tries {
+			return s, err
+		}
+		logf("sampling, try %d of %d: %v", try, tries, err)
+		time.Sleep(pause)
+	}
+}
+
+// soakGrowth judges a series of samples taken after the warm-up, by the
+// medians of its four quarters: it grew if the last median exceeds the
+// first by more than bound, and no median falls below the first.
+// Medians, so that a sample taken while sessions open or close does not
+// decide; a dip between the first quarter and the last does not hide
+// growth, but a quarter below the first says that the first was high
+// rather than that the rest grew. Fewer than soakMinSamples samples are
+// an error.
+func soakGrowth(series []float64, bound float64) (bool, string, error) {
+	if len(series) < soakMinSamples {
+		return false, "", fmt.Errorf("%d samples after the warm-up, fewer than the %d that judging growth takes", len(series), soakMinSamples)
 	}
 	var medians []float64
 	for q := range 4 {
@@ -267,12 +321,12 @@ func soakGrowth(series []float64, bound float64) (bool, string) {
 		slices.Sort(part)
 		medians = append(medians, part[len(part)/2])
 	}
-	rising := true
-	for i := 1; i < len(medians); i++ {
-		rising = rising && medians[i] >= medians[i-1]
+	grew := medians[3]-medians[0] > bound
+	for _, m := range medians[1:] {
+		grew = grew && m >= medians[0]
 	}
 	detail := fmt.Sprintf("medians of the quarters %.1f, range %.1f to %.1f", medians, slices.Min(series), slices.Max(series))
-	return rising && medians[3]-medians[0] > bound, detail
+	return grew, detail, nil
 }
 
 // soakSampleDebug reads occamyd's state from its debug listener: a heap
@@ -465,25 +519,136 @@ func TestSoakGrowth(t *testing.T) {
 		}
 		return s
 	}
+	// quarters returns a series of four quarters of n samples each, at
+	// the values given.
+	quarters := func(n int, values ...float64) []float64 {
+		var s []float64
+		for _, v := range values {
+			s = append(s, ramp(n, v, 0)...)
+		}
+		return s
+	}
+	// Quarters of 100, 110 with one sample of 50, 120 and 130.
+	lowOutlier := quarters(10, 100, 110, 120, 130)
+	lowOutlier[13] = 50
 	for _, tt := range []struct {
 		name   string
 		series []float64
 		bound  float64
 		grew   bool
 	}{
-		{"too few samples", ramp(7, 100, 100), 10, false},
 		{"flat", ramp(40, 100, 0), 10, false},
 		{"rising past the bound", ramp(40, 100, 1), 10, true},
 		{"rising within the bound", ramp(40, 100, 0.2), 10, false},
+		{"rising by exactly the bound", quarters(10, 100, 103, 107, 110), 10, false},
+		{"rising by just past the bound", quarters(10, 100, 103, 107, 110.5), 10, true},
 		{"falling", ramp(40, 200, -1), 10, false},
 		{"a spike in the last quarter", append(ramp(39, 100, 0), 500), 10, false},
-		{"up and down", append(append(ramp(10, 100, 0), ramp(10, 150, 0)...), append(ramp(10, 100, 0), ramp(10, 150, 0)...)...), 10, false},
-		{"steps up", append(append(ramp(10, 100, 0), ramp(10, 105, 0)...), append(ramp(10, 110, 0), ramp(10, 120, 0)...)...), 10, true},
+		{"up and down, ending near the start", quarters(10, 100, 150, 100, 105), 10, false},
+		{"up and down, ending high", quarters(10, 100, 150, 100, 150), 10, true},
+		{"steps up", quarters(10, 100, 105, 110, 120), 10, true},
+		{"a plateau", quarters(10, 100, 100, 150, 200), 10, true},
+		{"a plateau at the end", quarters(10, 100, 150, 200, 200), 10, true},
+		{"a low outlier in a quarter", lowOutlier, 10, true},
+		{"exactly the fewest samples", quarters(2, 100, 120, 140, 160), 10, true},
+		{"growth early, then level", quarters(10, 100, 200, 200, 205), 10, true},
+		{"a dip after growth", quarters(10, 100, 200, 199, 400), 10, true},
+		{"a quarter below the first", quarters(10, 100, 90, 150, 200), 10, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			if grew, detail := soakGrowth(tt.series, tt.bound); grew != tt.grew {
+			grew, detail, err := soakGrowth(tt.series, tt.bound)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if grew != tt.grew {
 				t.Errorf("soakGrowth = %v (%s), want %v", grew, detail, tt.grew)
 			}
 		})
+	}
+	if _, _, err := soakGrowth(ramp(soakMinSamples-1, 100, 100), 10); err == nil {
+		t.Errorf("soakGrowth judged %d samples", soakMinSamples-1)
+	}
+}
+
+// TestSoakAfter checks that every metric, the heap too, must come back
+// near where it started once the sessions have closed.
+func TestSoakAfter(t *testing.T) {
+	bounds := map[string]float64{"goroutines": 50, "heap": 32, "fds": 25}
+	sample := func(g, h, f float64) soakSample {
+		return soakSample{values: map[string]float64{"goroutines": g, "heap": h, "fds": f}}
+	}
+	before := sample(10, 2, 10)
+	for _, tt := range []struct {
+		after  soakSample
+		stayed []string
+	}{
+		{sample(60, 34, 35), nil},
+		{sample(61, 2, 10), []string{"goroutines"}},
+		{sample(10, 34.5, 10), []string{"heap"}},
+		{sample(10, 2, 36), []string{"fds"}},
+	} {
+		var stayed []string
+		for _, e := range soakAfter(before, tt.after, bounds) {
+			m, _, _ := strings.Cut(e, ":")
+			stayed = append(stayed, m)
+		}
+		if !slices.Equal(stayed, tt.stayed) {
+			t.Errorf("after %v: %v stayed up, want %v", tt.after.values, stayed, tt.stayed)
+		}
+	}
+}
+
+// TestSoakRetry checks that a failed sample is tried again before the
+// soak gives up.
+func TestSoakRetry(t *testing.T) {
+	for _, tt := range []struct {
+		fails, calls int
+		ok           bool
+	}{
+		{0, 1, true},
+		{soakSampleTries - 1, soakSampleTries, true},
+		{soakSampleTries, soakSampleTries, false},
+	} {
+		calls := 0
+		_, err := soakRetry(soakSampleTries, 0, t.Logf, func() (soakSample, error) {
+			calls++
+			if calls <= tt.fails {
+				return soakSample{}, errors.New("refused")
+			}
+			return soakSample{}, nil
+		})
+		if calls != tt.calls || (err == nil) != tt.ok {
+			t.Errorf("failing %d times: %d calls and %v, want %d calls, success %v", tt.fails, calls, err, tt.calls, tt.ok)
+		}
+	}
+}
+
+// TestSoakConfig checks the soak's defaults, and that a soak too short
+// for soakMinSamples samples is refused before it starts.
+func TestSoakConfig(t *testing.T) {
+	t.Setenv("OCCAMY_SOAK_SESSIONS", "2")
+	t.Setenv("OCCAMY_SOAK_DEBUG", "localhost:5638")
+	cfg, err := soakConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(cfg.connections, []string{"tigervnc-native"}) {
+		t.Errorf("the default connections are %v, want tigervnc-native alone", cfg.connections)
+	}
+	for _, tt := range []struct {
+		duration, warmup, interval string
+		ok                         bool
+	}{
+		{"1h", "", "30s", true},
+		{"5m", "1m", "30s", true},
+		{"5m", "1m", "31s", false},
+		{"4m", "", "30s", false},
+	} {
+		t.Setenv("OCCAMY_SOAK_DURATION", tt.duration)
+		t.Setenv("OCCAMY_SOAK_WARMUP", tt.warmup)
+		t.Setenv("OCCAMY_SOAK_INTERVAL", tt.interval)
+		if _, err := soakConfigFromEnv(); (err == nil) != tt.ok {
+			t.Errorf("%s with a warm-up of %q every %s: %v, want success %v", tt.duration, tt.warmup, tt.interval, err, tt.ok)
+		}
 	}
 }

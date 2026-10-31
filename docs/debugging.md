@@ -12,8 +12,12 @@ file serves the same routes on a listener of its own (see
 
 `mode` in [conf.yaml](../conf.yaml) is `debug`, `release` or `test`;
 a file without `mode` runs in debug mode, and any other value stops
-`occamyd` at start. `conf.yaml` and the demo stack's
-[docker/occamy.yaml](../docker/occamy.yaml) set `debug`. In debug mode,
+`occamyd` at start. `conf.yaml` sets `debug`. The demo stack's
+[docker/occamy.yaml](../docker/occamy.yaml) sets `release`, and
+`make run OCCAMY_DEBUG=1` mounts
+[docker/occamy-debug.yaml](../docker/occamy-debug.yaml), the same file
+in debug mode, in its place; the stack publishes the v0 service on the
+host's loopback interface only. In debug mode,
 `occamyd` serves Go's profiling routes under `/debug/pprof/` on its own
 address, with no token, and says so in its log at start.
 Anyone who can reach `occamyd` can then read its profiles and its
@@ -39,13 +43,19 @@ the 5 second drain; a second SIGINT or SIGTERM stops `occamyd` at once.
 The examples below work against it with that address in place of
 `localhost:5636`. `/debug/vars` shows the command line, the runtime's
 memory statistics, the number of goroutines and the open file
-descriptors as JSON. The demo stack's `occamy-v1` serves its debug
-listener on the host's `localhost:5638` (`OCCAMY_V1_DEBUG_PORT`), for
-the soak.
+descriptors as JSON. `debug.address_env` names an environment variable
+that holds the address instead, and leaves the listener off while it is
+unset or empty. The demo stack's `occamy-v1` takes its address from
+`OCCAMY_V1_DEBUG_ADDRESS`, which `make run OCCAMY_DEBUG=1` sets, and then
+serves its debug listener on the host's `localhost:5638`
+(`OCCAMY_V1_DEBUG_PORT`), for the soak. The stack's other services can
+reach both debug routes while they are on; `make run` without
+`OCCAMY_DEBUG=1` turns them off again.
 
 ## Profiling occamyd
 
-The examples use the demo stack's address, `localhost:5636`.
+The examples use the demo stack's address, `localhost:5636`, which
+serves them after `make run OCCAMY_DEBUG=1`.
 
 | Route | What it shows |
 |-------|---------------|
@@ -148,26 +158,31 @@ sends that user something. Until then the user still counts, for up to
   `parityFeatures` and `parityKnown` give. The demo x11vnc runs under a
   watchdog, which logs each restart as `[<port>] watchdog: …`, after
   the X error that caused it, if any (`podman compose logs vnc`).
-- `make soak` runs `TestSoak` against the demo stack's `occamy-v1`:
-  `OCCAMY_SOAK_SESSIONS` sessions, 8 by default, to x11vnc and TigerVNC
-  through the native backend for `OCCAMY_SOAK_DURATION`, 1 hour by
-  default. Each session moves the pointer, below the typing probe, and
+- `make soak` runs `TestSoak` against the demo stack's `occamy-v1`,
+  which `make run OCCAMY_DEBUG=1` started with its debug listener:
+  `OCCAMY_SOAK_SESSIONS` sessions, 8 by default, to TigerVNC through the
+  native backend (`OCCAMY_SOAK_CONNECTIONS`, `tigervnc-native` by
+  default, since x11vnc's watchdog restarts would end sessions) for
+  `OCCAMY_SOAK_DURATION`, 1 hour by default. Each session moves the pointer, below the typing probe, and
   types every 2 s, asks its desktop for a terminal that scrolls for 2 s
   once a minute, and closes after `OCCAMY_SOAK_LIFETIME`, 10 minutes by
   default, for another to open; every other session has a read-only
   viewer. Every 30 s the test samples `occamyd`'s goroutines, live heap
-  (after a collection) and open files from the debug listener, with the
-  host's load average, and logs them, and writes them as CSV to the file
-  `OCCAMY_SOAK_OUT` names. After a warm-up of a tenth of the run, it
-  fails if a metric's median never falls from one quarter of the samples
-  to the next and rises by more than its bound in all
-  (`OCCAMY_SOAK_BOUNDS`, `goroutines=50,heap=32,fds=25` by default, the
-  heap in MiB), if the goroutines or the open files stay above their
-  start by more than the bound a minute after the last session closed,
-  or if a session fails. `tests/soak_test.go` lists the variables. The
-  full soak is
+  (after a collection) and open files from the debug listener, trying a
+  failed sample twice more, with the host's load average, and logs
+  them, and writes them as CSV to the file `OCCAMY_SOAK_OUT` names.
+  After a warm-up of a tenth of the run, it fails if the median of a
+  metric's last quarter of samples exceeds the first quarter's by more
+  than its bound with no quarter below the first (`OCCAMY_SOAK_BOUNDS`,
+  `goroutines=50,heap=32,fds=25` by default, the heap in MiB), if a
+  metric stays above its start by more than the bound a minute after
+  the last session closed, if fewer than eight samples follow the
+  warm-up, or if a session fails. `tests/soak_test.go` lists the
+  variables. The full soak is
   `make soak OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h`.
-- `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test. Each of its N
+- `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test, which counts
+  `occamyd`'s goroutines from the v0 service's pprof routes, served
+  after `make run OCCAMY_DEBUG=1`. Each of its N
   rounds opens two sessions to each demo server at once: one that waits
   for the desktop and one that sends garbage. All sessions to one server
   have the same claims, so they share a guacd connection, and the storm

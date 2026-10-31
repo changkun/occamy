@@ -861,29 +861,53 @@ that guacd was `vnc`'s default, they are corrected below.
   make the full run, 20 sessions (N) for 8 hours (H), which has not
   been done.
 - **How it runs.** `tests/soak_test.go` (`TestSoak`), through
-  `make soak` against the [006](../006-demo-stack-refresh.md) stack:
-  sessions to `vnc-native` and `tigervnc-native`, in turn, with the Go
-  client core over API v1 and protocol v1. Each session moves the
+  `make soak` against the [006](../006-demo-stack-refresh.md) stack
+  started with `make run OCCAMY_DEBUG=1`: sessions to `tigervnc-native`
+  by default, with the Go client core over API v1 and protocol v1.
+  x11vnc hangs now and then (Implementation notes: VNC's parity
+  matrix), and each restart of it by its watchdog would end the
+  sessions on it and fail a long soak, so `vnc-native` is not in the
+  default; `OCCAMY_SOAK_CONNECTIONS` takes it, or any of `occamy-v1`'s
+  connections, in turn. Each session moves the
   pointer, below the parity matrix's typing probe so that the letters do
   not reach it, and types a letter every 2 s, presses Return every 20 s
   and, once a minute, asks its desktop, over the clipboard, for a
-  terminal that scrolls for 2 s (`desktop.sh`'s `motion:`). Every other
+  terminal that scrolls for 2 s (`desktop.sh`'s `motion:`, which takes
+  1 to 60 s and keeps at most four such terminals at once). Every other
   session has a read-only viewer, by a share. A session closes after 10
   minutes and another opens; the first ones close at staggered times, so
   that sessions turn over all through the run. Every 30 s the test asks
   the debug listener for a heap profile with `gc=1`, which collects,
   then reads `/debug/vars`: `goroutines` and `fds`, which `occamyd`
   publishes for this, and `memstats.HeapAlloc`, the live heap after that
-  collection. It logs each sample with the host's load average, and
-  writes them as CSV to `OCCAMY_SOAK_OUT`.
+  collection. A sample that fails is tried again twice, 5 s apart,
+  before the soak gives up. It logs each sample with the host's load
+  average, and writes them as CSV to `OCCAMY_SOAK_OUT`. The debug
+  listener has no authentication: `occamy-v1` opens it only when
+  `OCCAMY_V1_DEBUG_ADDRESS` is set (`debug.address_env`), which
+  `make run OCCAMY_DEBUG=1` does, and the stack publishes it on the
+  host's loopback interface only, though its other services can reach
+  it while it is on. `OCCAMY_DEBUG=1` also mounts the v0 service's
+  file in debug mode (`occamy-debug.yaml`) for the pressure test; the
+  v0 service is now published on the loopback interface only, and in
+  release mode without it.
 - **What fails it.** After a warm-up of a tenth of the run, a metric
-  grew if the medians of the four quarters of its samples never fall and
-  the last exceeds the first by more than a bound: 50 goroutines, 32 MiB
-  of heap and 25 file descriptors. Medians, so that a sample taken while
-  sessions open or close does not decide. Once every session has closed,
-  the goroutines and files must come back to within the bound of where
-  they started, within a minute. Any session that fails fails the run.
-  `TestSoakGrowth` checks the judgement on made-up series. The bounds
+  grew if the median of the last quarter of its samples exceeds the
+  first quarter's by more than a bound, and no quarter's median falls
+  below the first's: 50 goroutines, 32 MiB of heap and 25 file
+  descriptors. Medians, so that a sample taken while sessions open or
+  close does not decide. A dip between the first quarter and the last
+  does not hide growth, as a rule that wanted every median to rise on
+  the one before did (medians of 100, 200, 199 and 400 grew); a
+  quarter below the first says that the first was high. Fewer than
+  eight samples after the warm-up fail the run, and a soak too short
+  for eight is refused before it starts. Once every session has closed,
+  the goroutines, the heap and the files must come back to within the
+  bound of where they started, within a minute. Any session that fails
+  fails the run. `TestSoakGrowth` checks the judgement on made-up
+  series, at the bound, with plateaus, low outliers, eight samples,
+  early growth and a dip, and `TestSoakAfter`, `TestSoakRetry` and
+  `TestSoakConfig` the rest. The bounds
   suit the full run, about a thousand sessions, in which a leak of one
   goroutine or one descriptor per session exceeds them many times over;
   the short run, about thirty sessions, catches a leaked descriptor per
@@ -898,8 +922,15 @@ that guacd was `vnc`'s default, they are corrected below.
   throughout, and 70.1, 70.2, 70.4 and 70.5 MiB of heap, a rise far
   inside the bound. Before the first session it had 8 goroutines, 1.6
   MiB and 10 files, and once the last had closed 9, 2.1 MiB and 11.
+  That run took `vnc-native` and `tigervnc-native` in turn, and judged
+  growth by the earlier rule, with the heap left out of the check once
+  the sessions had closed; its samples pass the present rule and check
+  too.
 - **Not covered.** guacd's sessions, whose leaks would be guacd's, and
   native RDP and SSH sessions; `OCCAMY_SOAK_CONNECTIONS` takes any of
   `occamy-v1`'s connections, and the stack has none for RDP or SSH
   through API v1 yet. Clipboard text larger than a line, and the
-  reconnects that the parity matrix covers.
+  reconnects that the parity matrix covers. Each session ends by its
+  owner deleting it, so the path on which the owner leaves and the
+  owner grace runs out, which ends a session from a timer, is not
+  exercised.
