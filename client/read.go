@@ -198,19 +198,43 @@ func (s *Session) tile(m *protocol.Tile, n int) error {
 		return fmt.Errorf("%w: a tile of codec %v, which was not agreed", protocol.ErrInvalid, m.Codec)
 	}
 	o := op{kind: opTile, r: r, bytes: n, work: 4 * r.Dx() * r.Dy()}
-	if m.Codec == protocol.CodecRaw {
+	switch m.Codec {
+	case protocol.CodecCached:
+		c := s.slots[m.Slot-1]
+		if c.w != r.Dx() || c.h != r.Dy() {
+			return fmt.Errorf("%w: a %dx%d tile from cache slot %d, which holds %dx%d", protocol.ErrInvalid, r.Dx(), r.Dy(), m.Slot, c.w, c.h)
+		}
+		o.data, o.job = c.data, c.job
+		return s.add(o)
+	case protocol.CodecRaw:
 		o.data = m.Payload
-	} else {
+		if m.Slot != 0 {
+			o.data = slices.Clone(m.Payload) // not the message's buffer
+		}
+	default:
 		o.job = &job{dec: s.decoders[m.Codec], payload: m.Payload, w: r.Dx(), h: r.Dy(), done: make(chan struct{})}
 		o.bytes += 4 * r.Dx() * r.Dy() // the decoded pixels
 	}
 	if err := s.add(o); err != nil {
 		return err
 	}
+	if m.Slot != 0 {
+		// The slot holds the tile from now on, whatever becomes of its
+		// frame: a cached tile later in the frame draws it.
+		s.slots[m.Slot-1] = slot{w: r.Dx(), h: r.Dy(), data: o.data, job: o.job}
+	}
 	if o.job != nil {
 		s.pool.submit(o.job)
 	}
 	return nil
+}
+
+// slot is a tile cache slot: the tile stored in it, w by h, whose pixels
+// are data, or job's once it is decoded.
+type slot struct {
+	w, h int
+	data []byte
+	job  *job
 }
 
 func (s *Session) copyRect(m *protocol.CopyRect, n int) error {

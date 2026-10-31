@@ -464,15 +464,20 @@ func TestAgreed(t *testing.T) {
 			Codecs:         []protocol.Codec{protocol.CodecPNG, protocol.CodecRaw},
 			MaxTextureSize: 4096, Terminal: 1, FrameWindow: 9, MaxMessageSize: 1 << 30, CacheSlots: 64,
 		}
-		sc := newScripted(t, w, client.Options{FrameWindow: 3, MaxMessageSize: 1 << 20, MaxTextureSize: 512})
+		sc := newScripted(t, w, client.Options{FrameWindow: 3, MaxMessageSize: 1 << 20, MaxTextureSize: 512, CacheSlots: 16})
 		got := sc.cl.Capabilities()
 		want := protocol.Capabilities{
 			Codecs: []protocol.Codec{protocol.CodecRaw}, MaxTextureSize: 512, Terminal: 1,
-			FrameWindow: 3, MaxMessageSize: 1 << 20,
+			FrameWindow: 3, MaxMessageSize: 1 << 20, CacheSlots: 16,
 		}
 		if !slices.Equal(got.Codecs, want.Codecs) || got.MaxTextureSize != want.MaxTextureSize || got.Terminal != want.Terminal ||
-			got.FrameWindow != want.FrameWindow || got.MaxMessageSize != want.MaxMessageSize || got.CacheSlots != 0 {
+			got.FrameWindow != want.FrameWindow || got.MaxMessageSize != want.MaxMessageSize || got.CacheSlots != want.CacheSlots {
 			t.Errorf("agreed %+v, want %+v", got, want)
+		}
+		// A client without a cache agrees to no slots.
+		sc = newScripted(t, w, client.Options{NoCache: true})
+		if got := sc.cl.Capabilities(); got.CacheSlots != 0 || slices.Contains(got.Codecs, protocol.CodecCached) {
+			t.Errorf("agreed %+v without a cache", got)
 		}
 	})
 }

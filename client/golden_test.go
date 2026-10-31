@@ -12,6 +12,7 @@ import (
 	"errors"
 	"image"
 	"os"
+	"slices"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -171,10 +172,13 @@ func TestGoldenServerMessages(t *testing.T) {
 		if sc.cl.ViewerID() != 1 || sc.cl.Role() != protocol.RoleOwner || sc.cl.Class() != protocol.ClassGraphical || sc.cl.SessionID() != "s-7f3a" {
 			t.Errorf("welcome: viewer %d, role %v, class %v, session %q", sc.cl.ViewerID(), sc.cl.Role(), sc.cl.Class(), sc.cl.SessionID())
 		}
-		// The client takes the one codec it offered of the five the
-		// server agreed to.
-		if c := sc.cl.Capabilities().Codecs; len(c) != 1 || c[0] != protocol.CodecRaw {
+		// The client takes the two codecs it offered of the five the
+		// server agreed to: raw, and cached for its tile cache.
+		if c := sc.cl.Capabilities().Codecs; !slices.Equal(c, []protocol.Codec{protocol.CodecRaw, protocol.CodecCached}) {
 			t.Errorf("codecs %v", c)
+		}
+		if n := sc.cl.Capabilities().CacheSlots; n != 1024 {
+			t.Errorf("cache slots %d", n)
 		}
 		take := func(names ...string) []client.Event {
 			t.Helper()
