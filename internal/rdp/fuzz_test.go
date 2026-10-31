@@ -194,7 +194,13 @@ func FuzzPointer(f *testing.F) {
 	w.zero(16)
 	f.Add(w.b, true, false)
 	f.Fuzz(func(t *testing.T, data []byte, withBpp, large bool) {
+		a, err := parsePointerAttribute(data, withBpp, large)
+		if err != nil {
+			return
+		}
 		var d decoder
-		d.parsePointerAttribute(data, withBpp, large)
+		if _, err := d.pointerImage(a.w, a.h, a.bpp, a.xorMask, a.andMask); err != nil {
+			t.Fatalf("a shape that parsed did not decode: %v", err)
+		}
 	})
 }

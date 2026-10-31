@@ -147,6 +147,25 @@ func (t *transport) writeTraced(p, traced []byte) error {
 	return err
 }
 
+// writeFrames sends frames in one write, which the trace sees one by
+// one.
+func (t *transport) writeFrames(frames [][]byte) error {
+	if len(frames) == 1 {
+		return t.write(frames[0])
+	}
+	t.wmu.Lock()
+	defer t.wmu.Unlock()
+	var b []byte
+	for _, f := range frames {
+		if t.trace != nil {
+			t.trace(ToServer, f)
+		}
+		b = append(b, f...)
+	}
+	_, err := t.conn.Write(b)
+	return err
+}
+
 // tpkt wraps an X.224 Data TPDU's payload in its headers.
 func tpkt(payload []byte) []byte {
 	n := 7 + len(payload)

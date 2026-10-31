@@ -153,17 +153,22 @@ func encodeSlowPath(events []inputEvent) []byte {
 	return w.b
 }
 
-// sendInput sends events.
-func (c *Client) sendInput(events ...inputEvent) error {
-	if c.fastPathInput.Load() {
-		return c.t.write(encodeFastPath(events))
-	}
-	return c.sendData(pdu2Input, encodeSlowPath(events))
+// InputEvent is a keyboard or mouse event for SendInput, made by
+// KeyEvent, UnicodeEvent, MoveEvent, ButtonEvent, WheelEvent or
+// PauseEvents.
+type InputEvent struct {
+	e       inputEvent
+	pos     image.Point // a pointer event's position, clamped when sent
+	pointer bool
+	// joined is the number of events after this one that go in its PDU:
+	// a sequence the server reads as one key.
+	joined int
 }
 
-// Key sends a key press or release by its scancode in scan code set 1.
-// Extended keys carry 0xe0 in the high byte, as 0xe048 for the up arrow.
-func (c *Client) Key(scancode uint16, down bool) error {
+// KeyEvent is a key press or release by its scancode in scan code set 1.
+// Extended keys carry 0xe0 in the high byte, as 0xe048 for the up arrow,
+// and keys after the 0xe1 prefix carry 0xe1.
+func KeyEvent(scancode uint16, down bool) InputEvent {
 	e := inputEvent{kind: evScancode, a: scancode & 0xff}
 	switch scancode >> 8 {
 	case 0xe0:
@@ -174,37 +179,46 @@ func (c *Client) Key(scancode uint16, down bool) error {
 	if !down {
 		e.flags |= keyRelease
 	}
-	return c.sendInput(e)
+	return InputEvent{e: e}
 }
 
-// Unicode sends a key press or release of a UTF-16 code unit, for text
-// that has no key on the keyboard layout. The server must support it
-// (UnicodeInput).
-func (c *Client) Unicode(unit uint16, down bool) error {
+// PauseEvents are the events of a press of Pause, which has no release:
+// Control after the 0xe1 prefix and Num Lock, pressed and released, as
+// FreeRDP sends the make code E1 1D 45 E1 9D C5. SendInput puts the four
+// in one PDU, as FreeRDP does.
+func PauseEvents() []InputEvent {
+	evs := []InputEvent{
+		KeyEvent(0xe100|scancodeLeftControl, true),
+		KeyEvent(scancodeNumLock, true),
+		KeyEvent(0xe100|scancodeLeftControl, false),
+		KeyEvent(scancodeNumLock, false),
+	}
+	for i := range evs {
+		evs[i].joined = len(evs) - 1 - i
+	}
+	return evs
+}
+
+// UnicodeEvent is a key press or release of a UTF-16 code unit, for text
+// that has no key on the keyboard layout. The server must take them
+// (Client.UnicodeInput).
+func UnicodeEvent(unit uint16, down bool) InputEvent {
 	e := inputEvent{kind: evUnicode, a: unit}
 	if !down {
 		e.flags = keyRelease
 	}
-	return c.sendInput(e)
+	return InputEvent{e: e}
 }
 
-// UnicodeInput reports whether the server takes Unicode keyboard events.
-func (c *Client) UnicodeInput() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.caps.inputFlags&inputFlagUnicode != 0
+// MoveEvent moves the pointer to p.
+func MoveEvent(p image.Point) InputEvent {
+	return InputEvent{e: inputEvent{kind: evMouse, flags: ptrFlagsMove}, pos: p, pointer: true}
 }
 
-// MouseMove moves the pointer to p.
-func (c *Client) MouseMove(p image.Point) error {
-	x, y := c.clampPoint(p)
-	return c.sendInput(inputEvent{kind: evMouse, flags: ptrFlagsMove, a: x, b: y})
-}
-
-// MouseButton presses or releases button at p.
-func (c *Client) MouseButton(button Button, down bool, p image.Point) error {
-	x, y := c.clampPoint(p)
-	e := inputEvent{kind: evMouse, a: x, b: y}
+// ButtonEvent presses or releases a button at p. The back and forward
+// buttons need a server that takes them (Client.MouseXInput).
+func ButtonEvent(button Button, down bool, p image.Point) InputEvent {
+	e := inputEvent{kind: evMouse}
 	switch button {
 	case ButtonLeft:
 		e.flags = ptrFlagsButton1
@@ -220,37 +234,118 @@ func (c *Client) MouseButton(button Button, down bool, p image.Point) error {
 		if down {
 			e.flags |= ptrXFlagsDown
 		}
-		return c.sendInput(e)
+		return InputEvent{e: e, pos: p, pointer: true}
 	}
 	if down {
 		e.flags |= ptrFlagsDown
 	}
-	return c.sendInput(e)
+	return InputEvent{e: e, pos: p, pointer: true}
 }
 
-// MouseWheel scrolls by delta at p, in units of 120 per notch: positive
-// delta scrolls up, or right when horizontal is set.
-func (c *Client) MouseWheel(delta int, horizontal bool, p image.Point) error {
-	x, y := c.clampPoint(p)
-	delta = max(-255, min(255, delta))
+// WheelEvent scrolls by delta at p, in units of 120 per notch: positive
+// delta scrolls up, or right when horizontal is set. The delta is
+// clamped to its field's nine bits, -256 to 255.
+func WheelEvent(delta int, horizontal bool, p image.Point) InputEvent {
+	delta = max(-256, min(255, delta))
 	flags := uint16(ptrFlagsWheel)
 	if horizontal {
 		flags = ptrFlagsHWheel
 	}
 	if delta < 0 {
 		// A nine-bit two's complement rotation.
-		flags |= ptrFlagsWheelNegative | uint16(0x100+delta)&0xff // #nosec G115 -- in [1, 0xff]
+		flags |= ptrFlagsWheelNegative | uint16(0x100+delta)&0xff // #nosec G115 -- in [0, 0xff]
 	} else {
 		flags |= uint16(delta) // #nosec G115 -- in [0, 0xff]
 	}
-	return c.sendInput(inputEvent{kind: evMouse, flags: flags, a: x, b: y})
+	return InputEvent{e: inputEvent{kind: evMouse, flags: flags}, pos: p, pointer: true}
 }
 
-// clampPoint keeps p on the desktop.
-func (c *Client) clampPoint(p image.Point) (uint16, uint16) {
+// maxInputBatch is the most events one input PDU carries: fast-path
+// input counts them in a byte.
+const maxInputBatch = 255
+
+// SendInput sends events in order: as fast-path input when the server's
+// input capability set allows it, and in slow-path Input Event PDUs
+// otherwise. It puts up to maxInputBatch events in a PDU, without
+// splitting PauseEvents' sequence, and writes the PDUs at once. Pointer
+// positions are clamped to the desktop.
+func (c *Client) SendInput(events ...InputEvent) error {
+	if len(events) == 0 {
+		return nil
+	}
 	c.mu.Lock()
 	w, h := c.width, c.height
 	c.mu.Unlock()
+	fastPath := c.fastPathInput.Load()
+	batch := make([]inputEvent, 0, min(len(events), maxInputBatch))
+	var frames [][]byte
+	for len(events) > 0 {
+		n := min(len(events), maxInputBatch)
+		// End the PDU before a sequence that would not fit in it; one is
+		// far shorter than a PDU.
+		for i := n - 1; n < len(events) && i > 0 && i+events[i].joined >= n; i-- {
+			n = i
+		}
+		batch = batch[:0]
+		for _, ev := range events[:n] {
+			if ev.pointer {
+				ev.e.a, ev.e.b = clamp(ev.pos, w, h)
+			}
+			batch = append(batch, ev.e)
+		}
+		events = events[n:]
+		if fastPath {
+			frames = append(frames, encodeFastPath(batch))
+		} else {
+			frames = append(frames, tpkt(sendDataRequest(c.userID, c.ioChannel, c.shareData(pdu2Input, encodeSlowPath(batch)))))
+		}
+	}
+	return c.t.writeFrames(frames)
+}
+
+// Key sends a key press or release by its scancode, as KeyEvent.
+func (c *Client) Key(scancode uint16, down bool) error {
+	return c.SendInput(KeyEvent(scancode, down))
+}
+
+// Unicode sends a key press or release of a UTF-16 code unit, as
+// UnicodeEvent.
+func (c *Client) Unicode(unit uint16, down bool) error {
+	return c.SendInput(UnicodeEvent(unit, down))
+}
+
+// UnicodeInput reports whether the server takes Unicode keyboard events.
+func (c *Client) UnicodeInput() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.caps.inputFlags&inputFlagUnicode != 0
+}
+
+// MouseXInput reports whether the server takes the back and forward
+// buttons.
+func (c *Client) MouseXInput() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.caps.inputFlags&inputFlagMouseX != 0
+}
+
+// MouseMove moves the pointer to p.
+func (c *Client) MouseMove(p image.Point) error {
+	return c.SendInput(MoveEvent(p))
+}
+
+// MouseButton presses or releases button at p, as ButtonEvent.
+func (c *Client) MouseButton(button Button, down bool, p image.Point) error {
+	return c.SendInput(ButtonEvent(button, down, p))
+}
+
+// MouseWheel scrolls by delta at p, as WheelEvent.
+func (c *Client) MouseWheel(delta int, horizontal bool, p image.Point) error {
+	return c.SendInput(WheelEvent(delta, horizontal, p))
+}
+
+// clamp keeps p on a w×h desktop.
+func clamp(p image.Point, w, h int) (uint16, uint16) {
 	x := max(0, min(p.X, w-1))
 	y := max(0, min(p.Y, h-1))
 	return uint16(x), uint16(y) // #nosec G115 -- desktops are smaller than 64K

@@ -292,4 +292,7 @@ func TestScancodes(t *testing.T) {
 	if _, ok := ScancodeForHID(0x48); ok { // Pause
 		t.Error("Pause has a scancode")
 	}
+	if got, ok := ScancodeForKeysym(0xff6b); !ok || got != 0xe046 { // Break
+		t.Errorf("Break: %#x, %v, want E0 46", got, ok)
+	}
 }
