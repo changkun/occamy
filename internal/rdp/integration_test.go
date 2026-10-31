@@ -399,6 +399,51 @@ func TestIntegration(t *testing.T) {
 	}
 }
 
+// xrdp opens Display Control over DRDYNVC and resizes the desktop to
+// the size the client asks for, by reactivating the session; the scene
+// then draws at the new size.
+func TestIntegrationResize(t *testing.T) {
+	s := dial(t, Config{Resize: true})
+	if !waitFor(30*time.Second, func() bool {
+		s.c.chio.mu.Lock()
+		defer s.c.chio.mu.Unlock()
+		return s.c.disp.caps
+	}) {
+		s.c.chio.mu.Lock()
+		version, open := s.c.dvc.version, len(s.c.dvc.open)
+		s.c.chio.mu.Unlock()
+		t.Fatalf("xrdp sent no Display Control capabilities: DRDYNVC version %d, %d channels open; ignored %v",
+			version, open, s.c.Stats().Ignored)
+	}
+	s.c.chio.mu.Lock()
+	t.Logf("DRDYNVC version %d; Display Control takes %d pixels", s.c.dvc.version, s.c.disp.maxArea)
+	s.c.chio.mu.Unlock()
+	// The last size is the first, as the other tests expect it.
+	w0, h0 := s.c.Size()
+	for _, size := range []image.Point{image.Pt(1280, 720), image.Pt(800, 600), image.Pt(w0, h0)} {
+		s.c.RequestSize(size.X, size.Y)
+		if !waitFor(30*time.Second, func() bool {
+			w, h := s.c.Size()
+			return image.Pt(w, h) == size
+		}) {
+			w, h := s.c.Size()
+			t.Fatalf("the desktop is %d×%d, want %v", w, h, size)
+		}
+		// The scene draws its wallpaper to the new edges.
+		if !waitFor(10*time.Second, func() bool {
+			img := s.scr.snapshot()
+			return img != nil && img.Bounds().Size() == size && img.RGBAAt(size.X-1, size.Y-1).A == 0xff
+		}) {
+			t.Errorf("the screen at %v was not drawn", size)
+		}
+	}
+	select {
+	case err := <-s.done:
+		t.Fatalf("Run returned %v after the resizes", err)
+	default:
+	}
+}
+
 var queryPointerBin struct {
 	once sync.Once
 	path string

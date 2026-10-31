@@ -77,10 +77,17 @@ func (c *Client) clientData() []byte {
 	w.u32(0) // encryptionMethods
 	w.u32(0) // extEncryptionMethods
 
-	// TS_UD_CS_NET, [MS-RDPBCGR] 2.2.1.3.4: no static virtual channels.
+	// TS_UD_CS_NET, [MS-RDPBCGR] 2.2.1.3.4: the static virtual
+	// channels, each a CHANNEL_DEF of a name in 8 bytes and its options.
 	w.u16(csNet)
-	w.u16(8)
-	w.u32(0)
+	w.u16(8 + 12*len(c.channels))
+	w.u32(uint32(len(c.channels))) // #nosec G115 -- a few channels
+	for _, vc := range c.channels {
+		var name [8]byte
+		copy(name[:7], vc.name)
+		w.bytes(name[:])
+		w.u32(vc.options)
+	}
 
 	// TS_UD_CS_CLUSTER, [MS-RDPBCGR] 2.2.1.3.5: redirection supported,
 	// version 4, no session to return to.
@@ -131,6 +138,9 @@ func parseServerData(p []byte) (*serverData, error) {
 		case scNet:
 			sd.ioChannel = b.u16()
 			count := int(b.u16())
+			if count > maxChannelDefs {
+				return nil, fmt.Errorf("rdp: server data lists %d static channels", count)
+			}
 			for range count {
 				sd.channels = append(sd.channels, b.u16())
 			}

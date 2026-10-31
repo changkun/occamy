@@ -71,8 +71,7 @@ func cost(ev backend.InputEvent) (int, error) {
 	case backend.Wheel:
 		return wheelEvents, nil
 	case backend.Clipboard, backend.Resize:
-		// The clipboard and display control channels come in a later
-		// phase (native-rdp-backend.md); until then viewers scale.
+		// No events: Input queues them apart.
 		return 0, nil
 	}
 	return 0, fmt.Errorf("%w: %T", ErrUnsupportedInput, ev)

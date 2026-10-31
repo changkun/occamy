@@ -22,6 +22,8 @@ import (
 	"testing"
 	"time"
 	"unicode/utf16"
+
+	"changkun.de/x/occamy/internal/rdp/rdptest"
 )
 
 // statusLogonFailure is the NTSTATUS of a wrong password.
@@ -621,4 +623,40 @@ func (s *credSSPServer) accept(r *bufio.Reader, w io.Writer, cert *x509.Certific
 	}
 	_, err = asn1.Unmarshal(ts.Credentials, &s.creds)
 	return err
+}
+
+// The client logs on through rdptest's acceptor, which implements the
+// server's side from the specifications apart from this package: with
+// HYBRID_EX, the Early User Authorization Result follows CredSSP, and
+// the clipboard channel is joined after it as without NLA.
+func TestConnectNLA(t *testing.T) {
+	for _, protocol := range []uint32{rdptest.ProtocolHybrid, rdptest.ProtocolHybridEx} {
+		srv := rdptest.Server{
+			Protocol: protocol,
+			Account:  &rdptest.Account{Domain: "CORP", Username: "Alice", Password: "pässword"},
+		}
+		cfg := Config{
+			Protocols: ProtocolHybrid | ProtocolHybridEx,
+			Domain:    "corp", Username: "alice", Password: "pässword",
+			Clipboard: ClipboardToServer,
+		}
+		c, conn, err := connectLive(t, srv, cfg)
+		if err != nil {
+			t.Fatalf("protocol %#x: %v", protocol, err)
+		}
+		c.Close()
+		want := rdptest.Credentials{Domain: "corp", Username: "alice", Password: "pässword"}
+		if conn.Delegated != want || conn.Authenticates != 1 || conn.Channels["cliprdr"] == 0 {
+			t.Errorf("protocol %#x: delegated %+v after %d authenticates, channels %v",
+				protocol, conn.Delegated, conn.Authenticates, conn.Channels)
+		}
+		if conn.Info.Password != "pässword" {
+			t.Errorf("protocol %#x: Client Info password %q", protocol, conn.Info.Password)
+		}
+	}
+	srv := rdptest.Server{Protocol: rdptest.ProtocolHybridEx, Account: &rdptest.Account{Username: "alice", Password: "right"}}
+	_, _, err := connectLive(t, srv, Config{Protocols: ProtocolHybridEx, Username: "alice", Password: "wrong"})
+	if !isLogonFailure(err) {
+		t.Errorf("a wrong password: %v, want STATUS_LOGON_FAILURE", err)
+	}
 }
