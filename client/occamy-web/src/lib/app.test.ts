@@ -36,7 +36,7 @@ describe('the shell’s screens', () => {
   it('signs in to the connection list, and opens a connection', () => {
     let s = initialState({ kind: 'signed-out' })
     expect(s.screen).toEqual({ kind: 'start' })
-    expect(s.signIn).toEqual({ message: '', exchange: null, pending: null })
+    expect(s.signIn).toEqual({ message: '', notice: '', exchange: null, pending: null })
     s = reduce(s, { type: 'signed-in', token: fresh })
     expect(s).toMatchObject({ token: fresh, screen: { kind: 'connections' }, signIn: null })
     s = reduce(s, { type: 'open', target: lab, now })
@@ -47,7 +47,8 @@ describe('the shell’s screens', () => {
     let s = initialState({ kind: 'return', target: { kind: 'session', sessionId: 'mZ3k', name: 'Lab' } })
     expect(s.screen).toEqual({ kind: 'start' })
     expect(signInOver(s)).toBe(false)
-    expect(s.signIn).toEqual({ message: 'Sign in again to return to Lab.', exchange: null, pending: { target: mine, view: null, then: null, owner: null } })
+    // It says where signing in leads, which is no error.
+    expect(s.signIn).toEqual({ message: '', notice: 'Sign in again to return to Lab.', exchange: null, pending: { target: mine, view: null, then: null, owner: null } })
     s = reduce(s, { type: 'signed-in', token: fresh })
     expect(s).toMatchObject({ token: fresh, signIn: null, action: null, screen: { kind: 'session', target: mine, view: 1, owner: null } })
   })

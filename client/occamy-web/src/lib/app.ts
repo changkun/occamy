@@ -45,6 +45,8 @@ export type Screen =
 export interface SignInState {
   /** Why the user signs in, such as an expired sign-in. */
   message: string
+  /** What signing in leads to, which is no error, such as the session a reload left; empty for none. */
+  notice: string
   /** An OIDC sign-in coming back: the exchange of its one-time code. */
   exchange: Promise<AccessToken> | null
   pending: Pending | null
@@ -88,13 +90,13 @@ export function initialState(start: Start): AppState {
     case 'join':
       return { ...base, screen: { kind: 'session', target: { kind: 'share', sessionId: start.sessionId, token: start.token }, view: 1, owner: null }, views: 1 }
     case 'oidc':
-      return { ...base, signIn: { message: '', exchange: start.token, pending: start.resume } }
+      return { ...base, signIn: { message: '', notice: '', exchange: start.token, pending: start.resume } }
     case 'oidc-error':
-      return { ...base, signIn: { message: start.message, exchange: null, pending: null } }
+      return { ...base, signIn: { message: start.message, notice: '', exchange: null, pending: null } }
     case 'return':
-      return { ...base, signIn: { message: `Sign in again to return to ${start.target.name}.`, exchange: null, pending: { target: start.target, view: null, then: null, owner: null } } }
+      return { ...base, signIn: { message: '', notice: `Sign in again to return to ${start.target.name}.`, exchange: null, pending: { target: start.target, view: null, then: null, owner: null } } }
     default:
-      return { ...base, signIn: { message: '', exchange: null, pending: null } }
+      return { ...base, signIn: { message: '', notice: '', exchange: null, pending: null } }
   }
 }
 
@@ -128,7 +130,7 @@ export function reduce(s: AppState, e: AppEvent): AppState {
       if (e.target.kind !== 'share' && (s.token === null || s.token.expires <= e.now)) {
         // Over a session view, the form opens as a dialog, and the view
         // stays until the user has signed in.
-        return { ...s, signIn: { message: s.token === null ? '' : EXPIRED, exchange: null, pending: { target: e.target, view: null, then: null, owner: null } } }
+        return { ...s, signIn: { message: s.token === null ? '' : EXPIRED, notice: '', exchange: null, pending: { target: e.target, view: null, then: null, owner: null } } }
       }
       const view = s.views + 1
       return { ...s, views: view, screen: { kind: 'session', target: e.target, view, owner: null }, signIn: null, action: null }
@@ -137,7 +139,7 @@ export function reduce(s: AppState, e: AppEvent): AppState {
       if (s.screen.kind !== 'session' || s.screen.view !== e.view) {
         return s
       }
-      return { ...s, signIn: { message: e.message, exchange: null, pending: e.pending } }
+      return { ...s, signIn: { message: e.message, notice: '', exchange: null, pending: e.pending } }
     case 'cancel-sign-in':
       return signInOver(s) ? { ...s, signIn: null } : s
     case 'leave':
@@ -147,11 +149,11 @@ export function reduce(s: AppState, e: AppEvent): AppState {
         return s
       }
       if (s.token === null) {
-        return { ...s, screen: { kind: 'start' }, signIn: { message: '', exchange: null, pending: null }, action: null }
+        return { ...s, screen: { kind: 'start' }, signIn: { message: '', notice: '', exchange: null, pending: null }, action: null }
       }
       return { ...s, screen: { kind: 'connections' }, signIn: null, action: null }
     case 'sign-out':
-      return { ...s, token: null, screen: { kind: 'start' }, signIn: { message: e.message, exchange: null, pending: null }, action: null }
+      return { ...s, token: null, screen: { kind: 'start' }, signIn: { message: e.message, notice: '', exchange: null, pending: null }, action: null }
   }
 }
 

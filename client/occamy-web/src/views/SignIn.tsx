@@ -20,6 +20,8 @@ export interface SignInProps {
   storage: Storage | undefined
   /** Why the user is here again, such as an expired sign-in. */
   message: string
+  /** What signing in leads to, which is no error, such as the session a reload left; empty for none. */
+  notice: string
   /** An OIDC sign-in coming back: the exchange of its one-time code. */
   pending: Promise<AccessToken> | null
   /** What waits for the sign-in, kept across single sign-on's visit to the identity provider. */
@@ -29,7 +31,7 @@ export interface SignInProps {
   onCancel?: () => void
 }
 
-export function SignIn({ api, storage, message, pending, resume, onSignedIn, onCancel }: SignInProps): ReactElement {
+export function SignIn({ api, storage, message, notice, pending, resume, onSignedIn, onCancel }: SignInProps): ReactElement {
   const [error, setError] = useState(message)
   const [busy, setBusy] = useState(pending !== null)
   const [oidc, setOidc] = useState(false)
@@ -101,6 +103,11 @@ export function SignIn({ api, storage, message, pending, resume, onSignedIn, onC
     <form className={over ? 'sign-in' : 'card sign-in'} onSubmit={(e) => void submit(e)} aria-busy={busy} aria-describedby={error === '' ? undefined : 'sign-in-error'}>
       {over ? <h2 id="sign-in-title">Sign in again</h2> : <h1>Occamy</h1>}
       <p className="lead">{over ? 'The session goes on while you sign in.' : 'Sign in to open a remote desktop or terminal.'}</p>
+      {notice !== '' && (
+        <p className="notice" role="status">
+          {notice}
+        </p>
+      )}
       {error !== '' && (
         <p id="sign-in-error" className="error" role="alert">
           {error}

@@ -216,6 +216,13 @@ legend {
   color: var(--muted);
 }
 
+/* What signing in leads to, which is no error. */
+.sign-in .notice {
+  padding: 0.5rem 0.75rem;
+  border-left: 3px solid var(--accent);
+  background: var(--bg);
+}
+
 .sign-in button {
   width: 100%;
 }

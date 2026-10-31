@@ -154,7 +154,9 @@ describe('App', () => {
       await Promise.resolve()
     })
     await settle()
-    expect(text()).toContain('Sign in again to return to Lab.')
+    // The page says so politely, as no error.
+    expect(container.querySelector('[role=status]')?.textContent).toBe('Sign in again to return to Lab.')
+    expect(container.querySelector('[role=alert]')).toBeNull()
     expect(NeverOpens.urls).toEqual([])
     const form = container.querySelector<HTMLFormElement>('form.sign-in')
     form?.querySelector<HTMLInputElement>('input[name=username]')?.setAttribute('value', 'demo')

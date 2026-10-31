@@ -34,6 +34,7 @@ export function App({ api, start, storage }: AppProps): ReactElement {
         api={api}
         storage={storage}
         message={signIn.message}
+        notice={signIn.notice}
         pending={signIn.exchange}
         resume={signIn.pending}
         onSignedIn={(t) => dispatch({ type: 'signed-in', token: t })}
@@ -68,6 +69,7 @@ export function App({ api, start, storage }: AppProps): ReactElement {
           api={api}
           storage={storage}
           message=""
+          notice=""
           pending={null}
           resume={null}
           onSignedIn={(t) => dispatch({ type: 'signed-in', token: t })}
