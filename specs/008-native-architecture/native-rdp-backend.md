@@ -1709,8 +1709,9 @@ RDP's guacd path, RDP no longer needs guacd at all.
   - **What xrdp sends.** The session's first screen arrives as 192
     progressive tiles in one wire-to-surface 2. Each key's swatch
     arrives as a tile of its own, 5 of 16 of them as difference tiles.
-    All of these are TILE_SIMPLE with the reduce-extrapolate
-    transform. xrdp sent no upgrades.
+    The tiles inspected, the swatch's after each key, were full-quality
+    first passes with the reduce-extrapolate transform. xrdp sent no
+    upgrades.
   - **What `TestIntegrationGFX` checks.**
     - The session's wallpaper, within 4 levels per channel everywhere
       but the swatch's tile.
