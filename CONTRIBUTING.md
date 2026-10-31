@@ -18,7 +18,7 @@ You need Go 1.26.4 or later, Node.js 22.12+ for the web client, and
 Podman or Docker with a compose provider.
 
 ```
-make build      # build the image (CONTAINER_ENGINE=docker for Docker)
+make build      # build the image (CONTAINER_ENGINE=docker on each for Docker)
 make run        # start occamy and the demo servers on localhost:5636 and :5637
 make e2e        # end-to-end tests against the running stack
 make stop

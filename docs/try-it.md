@@ -32,6 +32,10 @@ make build CONTAINER_ENGINE=docker    # for one command
 export CONTAINER_ENGINE=docker        # for every make command in this shell
 ```
 
+Give every `make` command the same engine, which exporting it does.
+`make e2e` in particular reaches the demo stack's `rdp` container
+through the compose of the engine that `make run` started it with.
+
 The integration tests in [section 7](#integration-tests) read
 `OCCAMY_CONTAINER_ENGINE` instead. The commands in this guide say
 `podman`; with Docker, write `docker` in its place. `podman compose` hands its work to a
@@ -329,11 +333,10 @@ it** shows the answer. A read-only viewer sees the remote clipboard
 but cannot send to it.
 
 If the RDP desktop's **Clipboard** panel never changes, xrdp's
-clipboard process, `xrdp-chansrv`, has probably exited. xrdp starts it
-only with a new X session, and it can exit when a connection closes
-within moments of opening. Restart the RDP server to get a new one:
-`(cd docker && podman compose restart rdp)`. The next connection then
-creates a new X session, so wait for its xterm before you type.
+clipboard process, `xrdp-chansrv`, may have exited, which it can when
+a connection closes within moments of opening. The demo image starts
+it again when the next connection opens, and the `rdp` service's log
+says `starting xrdp-chansrv again`. End the session and open it again.
 
 The demo x11vnc runs under a watchdog, which restarts it when it hits
 an X error. A freshly started x11vnc drops the first clipboard text it
@@ -454,13 +457,20 @@ With the stack from [section 3](#3-start-the-demo-stack) running:
 make e2e
 ```
 
+Run it with the engine that `make run` used, as in [section
+1](#1-what-you-need): with Docker, `make e2e CONTAINER_ENGINE=docker`,
+unless you exported it. One test kills the clipboard process in the
+`rdp` container through that engine's compose, so it fails with
+another engine.
+
 The tests open real sessions to every demo server:
 
 - through the v0 service and guacd;
 - through `occamy-v1`, natively and through guacd, with the Go client
   of protocol v1;
 - on `rdp-native`: the clipboard both ways, a resize, a viewer joined
-  by a share, and the owner's return;
+  by a share, the owner's return, and the clipboard again once its
+  process in the `rdp` container has been killed;
 - the VNC parity matrix, each feature on x11vnc and TigerVNC through
   both backends, logged as a table.
 
@@ -509,13 +519,6 @@ That adds the pressure test to the end-to-end tests. Each of its 10
 rounds opens two sessions to every demo server at once through the v0
 service. Afterwards, `occamyd`'s goroutines must return to their
 number before the storm within a minute.
-
-The pressure test runs before the v1 tests, and its RDP sessions can
-leave xrdp without `xrdp-chansrv`, as in [Clipboard](#clipboard). Then
-`TestE2EV1RDP/clipboard` fails after waiting 60 seconds for the echo,
-and the other RDP subtests each take about 10 seconds longer. That is
-the demo server, not `occamyd`: run `(cd docker && podman compose
-restart rdp)`, and `make e2e` again.
 
 ```
 make soak OCCAMY_SOAK_DURATION=5m OCCAMY_SOAK_INTERVAL=10s OCCAMY_SOAK_LIFETIME=2m

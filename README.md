@@ -266,6 +266,10 @@ make e2e
 make stop
 ```
 
+With Docker, give each of them `CONTAINER_ENGINE=docker`: `make e2e`
+reaches the stack's `rdp` container through the engine that started
+it.
+
 The pressure test also needs `OCCAMY_PRESSURE_N`, the number of rounds
 (`make e2e OCCAMY_PRESSURE_N=10`), and the stack's debug routes, which
 `make run OCCAMY_DEBUG=1` turns on, on the loopback interface only. CI
