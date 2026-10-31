@@ -15,8 +15,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"changkun.de/x/occamy/internal/race"
 )
 
 // What a hostile server could send, from the review of the spike: each
@@ -238,11 +236,10 @@ func TestDecoderKeepsScratch(t *testing.T) {
 	if &c.dec.raw[0] != raw || &c.dec.rgba[0] != rgba {
 		t.Error("the decoder's buffers moved between desktop-sized bitmaps")
 	}
-	// Under -race, sync.Pool drops a quarter of what is put back, and the
-	// statistics' fmt.Sprintf takes its printer from one, so the count
-	// is checked without it.
-	if a > 4 && !race.Enabled {
-		t.Errorf("a desktop-sized bitmap allocated %v times, want at most 4", a)
+	// The one allocation is the PDU's bitmapData, which its rectangles
+	// share: the bitmap itself allocates nothing, with or without -race.
+	if a > 1 {
+		t.Errorf("a PDU of a desktop-sized bitmap allocated %v times, want at most 1", a)
 	}
 	if _, err := c.handleShareControl(out, demandActive(800, 600)); err != nil {
 		t.Fatal(err)
@@ -269,6 +266,25 @@ func BenchmarkHostileBitmap(b *testing.B) {
 			}
 			b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/float64(size.X*size.Y), "ns/pixel")
 		})
+	}
+}
+
+// BenchmarkTileBitmaps is one PDU of 64 bitmaps of 64×64 pixels, the
+// tiles Windows sends, so that what each bitmap costs beside its pixels
+// shows.
+func BenchmarkTileBitmaps(b *testing.B) {
+	c, _ := testClock(1024, 768)
+	out := &sizeRecorder{}
+	// RLE of a background run of the tile's 4096 pixels.
+	pdu := fastPathBitmaps(64, 64, 64, 16, []byte{0xf0, 0x00, 0x10})
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := c.handleFastPath(out, frame{fastPath: true, data: pdu}); err != nil {
+			b.Fatal(err)
+		}
+	}
+	if n := c.Stats().Bitmaps["rle16"]; n == 0 {
+		b.Fatal("no bitmap decoded")
 	}
 }
 

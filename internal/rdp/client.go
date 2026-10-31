@@ -1029,13 +1029,7 @@ func (c *Client) drawBitmap(out Output, b *bitmapData) error {
 	if err != nil {
 		return err
 	}
-	kind := fmt.Sprintf("raw%d", b.bpp)
-	switch {
-	case b.compressed && b.bpp == 32:
-		kind = "planar"
-	case b.compressed:
-		kind = fmt.Sprintf("rle%d", b.bpp)
-	}
+	kind := bitmapKind(b)
 	c.count(func(s *Stats) { s.Bitmaps[kind]++ })
 	// The bitmap is decoded whole before anything is locked, and drawn in
 	// strips of whole rows, so that the output's lock is held for at most
@@ -1046,6 +1040,30 @@ func (c *Client) drawBitmap(out Output, b *bitmapData) error {
 		drawRows(out, image.Rect(r.Min.X, y0, r.Max.X, min(y0+rows, r.Max.Y)), b, sx, rgba)
 	}
 	return nil
+}
+
+// bitmapKinds are the names that Stats.Bitmaps counts bitmaps under, by
+// whether they are compressed and by their bits per pixel, for the depths
+// that decode takes. They are constants, so that counting a bitmap
+// allocates nothing.
+var bitmapKinds = [2][33]string{
+	{8: "raw8", 15: "raw15", 16: "raw16", 24: "raw24", 32: "raw32"},
+	{8: "rle8", 15: "rle15", 16: "rle16", 24: "rle24", 32: "planar"},
+}
+
+// bitmapKind reports the name that Stats.Bitmaps counts b under.
+func bitmapKind(b *bitmapData) string {
+	i := 0
+	if b.compressed {
+		i = 1
+	}
+	if b.bpp >= 0 && b.bpp < len(bitmapKinds[i]) && bitmapKinds[i][b.bpp] != "" {
+		return bitmapKinds[i][b.bpp]
+	}
+	if b.compressed {
+		return fmt.Sprintf("rle%d", b.bpp) // a depth that decode does not take
+	}
+	return fmt.Sprintf("raw%d", b.bpp)
 }
 
 // drawRows copies the strip s of the decoded bitmap b, whose pixels are
