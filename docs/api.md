@@ -717,7 +717,8 @@ name or group. A session token or a share is refused.
 |---------|---------|
 | A session token, a share, or any token that is not a valid access token | 4000 `unauthorized` |
 | No connection `{id}` that the caller may open | 4001 `forbidden`, "no such connection" |
-| The caller owns `limits.sessions_per_user` sessions, or `occamyd` runs `limits.sessions` | 4001 `forbidden`, with the limit in the reason |
+| The caller owns `limits.sessions_per_user` sessions | 4001 `forbidden`, "too many sessions open" |
+| `occamyd` runs `limits.sessions` sessions | 4001 `forbidden`, "occamyd runs as many sessions as it takes" |
 | The session could not be opened for a cause of `occamyd`'s own | 1011 `internal-error` |
 
 Once the stream has joined, the session is as one that
@@ -759,8 +760,9 @@ viewer's resizes nothing.
 ## v0 routes
 
 With `legacy_v0: true`, a v1 file also serves the v0 routes that the
-Guacamole-based web client uses, as a v0 file serves them, under
-`/api/v0`. They are removed at v1.0. Their bodies and errors are v0's,
+Guacamole-based web client uses, under `/api/v0`. It always serves both:
+`POST /api/v0/login` as well as `GET /api/v0/connect`, where a v0 file
+serves the login only with `client: true`. They are removed at v1.0. Their bodies and errors are v0's,
 not API v1's, and neither the connection registry nor
 `allow_adhoc_targets` and `adhoc_allowlist` restrict them: the login
 signs any target for anyone, and `occamyd` warns at start. The web
