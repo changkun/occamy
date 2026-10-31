@@ -33,12 +33,37 @@ const fakeHostKey = "SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"
 func TestBackendDefaults(t *testing.T) {
 	b := newBackends(config.Guacd{Address: config.DefaultGuacdAddress})
 	got := map[string]string{}
-	for p, m := range b {
-		got[p] = m.name
+	for k, m := range b {
+		got[k.protocol+"/"+k.backend] = m.name
 	}
-	want := map[string]string{"ssh": "ssh", "vnc": "vnc", "rdp": "guacd", "telnet": "guacd"}
+	// No native rdp: the native RDP backend is not registered until NLA
+	// has run end to end.
+	want := map[string]string{
+		"ssh/native": "ssh",
+		"vnc/native": "vnc", "vnc/guacd": "guacd",
+		"rdp/guacd":    "guacd",
+		"telnet/guacd": "guacd",
+	}
 	if !maps.Equal(got, want) {
 		t.Errorf("backends %v, want %v", got, want)
+	}
+	// An empty backend is the protocol's default: guacd for vnc until
+	// its native backend passes the parity gate.
+	for _, tt := range []struct{ protocol, backend, want string }{
+		{"ssh", "", "ssh"}, {"vnc", "", "guacd"}, {"vnc", "native", "vnc"}, {"vnc", "guacd", "guacd"},
+		{"rdp", "", "guacd"}, {"telnet", "", "guacd"},
+	} {
+		if m, ok := b.lookup(tt.protocol, tt.backend); !ok || m.name != tt.want {
+			t.Errorf("lookup(%q, %q) = %q, %v; want %q", tt.protocol, tt.backend, m.name, ok, tt.want)
+		}
+	}
+	for _, tt := range []struct{ protocol, backend string }{{"rdp", "native"}, {"ssh", "guacd"}, {"telnet", "native"}, {"kubernetes", ""}} {
+		if m, ok := b.lookup(tt.protocol, tt.backend); ok {
+			t.Errorf("lookup(%q, %q) = %q, want none", tt.protocol, tt.backend, m.name)
+		}
+	}
+	if !b.serves("vnc") || b.serves("kubernetes") {
+		t.Errorf("serves(vnc) = %v, serves(kubernetes) = %v", b.serves("vnc"), b.serves("kubernetes"))
 	}
 }
 
@@ -150,12 +175,27 @@ func TestNewVNC(t *testing.T) {
 	if _, err := newVNC(target{addr: "127.0.0.1:5900", creds: config.Credentials{PasswordEnv: "OCCAMY_TEST_UNSET"}}, screen{}); err == nil {
 		t.Error("an unset password variable made a backend")
 	}
+	// The hello's size, both sides or neither.
+	for _, s := range []screen{{width: 800, height: 600}, {width: 800}, {height: 600}, {cols: 80, rows: 24}} {
+		if _, err := newVNC(target{addr: "127.0.0.1:5900", creds: config.Credentials{Prompt: true}}, s); err != nil {
+			t.Errorf("screen %+v: %v", s, err)
+		}
+	}
+
+	// ard, with the key that allows it named for the operator.
+	cfg, err := vncConfig(target{connection: "mac", addr: "10.0.0.6:5900", ard: true, creds: config.Credentials{Username: "studio", Prompt: true}})
+	if err != nil || !cfg.ARD || cfg.ARDSetting != `ard: true on connection "mac"` || cfg.Username != "studio" {
+		t.Errorf("ard: %+v %v", cfg, err)
+	}
+	if cfg, _ := vncConfig(target{addr: "10.0.0.6:5900"}); cfg.ARD || !strings.Contains(cfg.ARDSetting, "ad-hoc targets have no ard") {
+		t.Errorf("ad-hoc ard: %v %q", cfg.ARD, cfg.ARDSetting)
+	}
 
 	// The connection's username and certificate policy reach the
 	// backend, with the CA file read.
 	ca := writeCA(t)
 	tls := config.ConnectionTLS{Require: true, ServerName: "nas", CAFile: ca, InsecureSkipVerify: true}
-	cfg, err := vncConfig(target{addr: "10.0.0.5:5900", creds: config.Credentials{Username: "alice", Prompt: true}, tls: tls})
+	cfg, err = vncConfig(target{addr: "10.0.0.5:5900", creds: config.Credentials{Username: "alice", Prompt: true}, tls: tls})
 	if err != nil {
 		t.Fatal(err)
 	}

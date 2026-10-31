@@ -63,12 +63,15 @@ type server struct {
 	connections []config.Connection
 	origins     map[string]bool // origins whose pages may open streams, besides occamyd's own
 	adhoc       *allowlist      // nil unless allow_adhoc_targets
-	backends    backends
-	registry    *session.Registry
-	stop        context.CancelFunc // ends every session, at shutdown
-	streamTTL   time.Duration      // of the stream token POST /api/v1/sessions returns
-	limits      config.Limits
-	streamsCfg  config.Streams
+	// adhocBackends picks the backend of ad-hoc targets by protocol; a
+	// protocol it lacks gets its default.
+	adhocBackends map[string]string
+	backends      backends
+	registry      *session.Registry
+	stop          context.CancelFunc // ends every session, at shutdown
+	streamTTL     time.Duration      // of the stream token POST /api/v1/sessions returns
+	limits        config.Limits
+	streamsCfg    config.Streams
 
 	mu       sync.Mutex
 	sessions map[string]*sessionInfo // by ID, while they run
@@ -207,20 +210,21 @@ func newServer(f *config.File) (*server, error) {
 	registry := session.NewRegistry(ctx)
 	registry.MaxShares = limits.SharesPerSession
 	s := &server{
-		verifier:    auth.NewVerifier(auth.Audience, keys),
-		signer:      signer,
-		ids:         newIdentities(f),
-		signIn:      signIn,
-		connections: f.Connections,
-		origins:     map[string]bool{},
-		backends:    newBackends(f.Guacd),
-		registry:    registry,
-		stop:        stop,
-		streamTTL:   streamTokenLifetime,
-		limits:      limits,
-		streamsCfg:  f.Streams.WithDefaults(),
-		sessions:    map[string]*sessionInfo{},
-		owned:       map[principal]int{},
+		verifier:      auth.NewVerifier(auth.Audience, keys),
+		signer:        signer,
+		ids:           newIdentities(f),
+		signIn:        signIn,
+		connections:   f.Connections,
+		origins:       map[string]bool{},
+		backends:      newBackends(f.Guacd),
+		adhocBackends: f.AdhocBackends,
+		registry:      registry,
+		stop:          stop,
+		streamTTL:     streamTokenLifetime,
+		limits:        limits,
+		streamsCfg:    f.Streams.WithDefaults(),
+		sessions:      map[string]*sessionInfo{},
+		owned:         map[principal]int{},
 	}
 	for _, o := range f.Origins {
 		s.origins[strings.ToLower(o)] = true

@@ -91,10 +91,10 @@ func sessionServer(t *testing.T, edit func(*config.File)) (*testServer, *fakeBac
 		}
 	})
 	fb := &fakeBackends{}
-	for p, m := range ts.s.backends {
-		ts.s.backends.register(p, m.name, fb.make)
+	for k, m := range ts.s.backends {
+		ts.s.backends[k] = backendMaker{name: m.name, make: fb.make}
 	}
-	ts.s.backends.register("fake", "fake", fb.make)
+	ts.s.backends.register("fake", "", "fake", fb.make)
 	return ts, fb
 }
 
@@ -533,11 +533,11 @@ func TestSessionsCapReleased(t *testing.T) {
 	fb.mu.Lock()
 	fb.fail = nil
 	fb.mu.Unlock()
-	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
+	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) {
 		return classless{backendtest.NewTerminal(80, 24, 0)}, nil
 	})
 	failing("a session that could not start")
-	ts.s.backends.register("fake", "fake", fb.make)
+	ts.s.backends.register("fake", "", "fake", fb.make)
 	ts.openSession(t, alice, "ops-shell")
 }
 

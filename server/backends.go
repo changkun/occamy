@@ -25,7 +25,10 @@ import (
 type target struct {
 	connection string // the registry's ID, empty for an ad-hoc target
 	protocol   string
-	addr       string // host:port to dial
+	// backend is what serves the target, config.BackendNative or
+	// config.BackendGuacd; empty for the protocol's default.
+	backend string
+	addr    string // host:port to dial
 	// name is the host name an ad-hoc target named, which addr holds the
 	// address of; empty otherwise. A certificate names it.
 	name  string
@@ -33,8 +36,10 @@ type target struct {
 	// The host key policy of an ssh target.
 	hostKeys              []string
 	insecureIgnoreHostKey bool
-	// tls is the certificate policy of a vnc target.
+	// tls is the certificate policy of a vnc target, and ard allows its
+	// Apple Remote Desktop authentication.
 	tls config.ConnectionTLS
+	ard bool
 }
 
 // screen is the size that the owner's hello asks for: pixels for a
@@ -53,24 +58,49 @@ type backendMaker struct {
 	make func(t target, s screen) (backend.Backend, error)
 }
 
-// backends is the backend factory: the maker of each protocol's
-// sessions.
-type backends map[string]backendMaker
+// backendKey names a backend of a protocol, config.BackendNative or
+// config.BackendGuacd.
+type backendKey struct{ protocol, backend string }
 
-// register makes protocol's sessions with make, under the backend name.
-func (b backends) register(protocol, name string, make func(target, screen) (backend.Backend, error)) {
-	b[protocol] = backendMaker{name: name, make: make}
+// backends is the backend factory: the maker of each protocol's
+// sessions on each backend that serves it.
+type backends map[backendKey]backendMaker
+
+// register makes protocol's sessions on backend, the protocol's default
+// if empty, with make, under the name the session's state reports.
+func (b backends) register(protocol, backend, name string, make func(target, screen) (backend.Backend, error)) {
+	b[backendKey{protocol, config.BackendOf(protocol, backend)}] = backendMaker{name: name, make: make}
 }
 
-// newBackends returns the factory with each protocol's default backend:
-// the native backends for ssh and vnc, and the guacd bridge at g for rdp
-// and telnet. No configuration key picks another backend yet.
+// lookup returns the maker of protocol's sessions on backend, the
+// protocol's default if empty.
+func (b backends) lookup(protocol, backend string) (backendMaker, bool) {
+	m, ok := b[backendKey{protocol, config.BackendOf(protocol, backend)}]
+	return m, ok
+}
+
+// serves reports whether any backend serves protocol.
+func (b backends) serves(protocol string) bool {
+	for k := range b {
+		if k.protocol == protocol {
+			return true
+		}
+	}
+	return false
+}
+
+// newBackends returns the factory: the native SSH backend for ssh, the
+// native VNC backend for vnc with backend: native, and the guacd bridge
+// at g for vnc, rdp and telnet. The native RDP backend is not
+// registered until NLA has run end to end
+// (specs/008-native-architecture/native-rdp-backend.md), and the
+// configuration refuses backend: native for rdp.
 func newBackends(g config.Guacd) backends {
 	b := backends{}
-	b.register("ssh", "ssh", newSSH)
-	b.register("vnc", "vnc", newVNC)
-	for _, p := range []string{"rdp", "telnet"} {
-		b.register(p, "guacd", newBridge(g, p))
+	b.register("ssh", config.BackendNative, "ssh", newSSH)
+	b.register("vnc", config.BackendNative, "vnc", newVNC)
+	for _, p := range []string{"vnc", "rdp", "telnet"} {
+		b.register(p, config.BackendGuacd, "guacd", newBridge(g, p))
 	}
 	return b
 }
@@ -119,12 +149,15 @@ func newSSH(t target, s screen) (backend.Backend, error) {
 	return &askUser{cfg: cfg}, nil
 }
 
-// newVNC makes a native VNC backend. VNC Authentication has no user
-// name, so a configured one is not used.
-func newVNC(t target, _ screen) (backend.Backend, error) {
+// newVNC makes a native VNC backend, which asks the server for the size
+// of the owner's hello once the server shows that it can resize.
+func newVNC(t target, s screen) (backend.Backend, error) {
 	cfg, err := vncConfig(t)
 	if err != nil {
 		return nil, err
+	}
+	if s.width > 0 && s.height > 0 {
+		cfg.Width, cfg.Height = s.width, s.height
 	}
 	return vnc.New(cfg)
 }
@@ -141,9 +174,11 @@ func vncConfig(t target) (vnc.Config, error) {
 		return vnc.Config{}, fmt.Errorf("reading the CA file: %w", err)
 	}
 	cfg := vnc.Config{
-		Addr:     t.addr,
-		Username: t.creds.Username,
-		Password: pw,
+		Addr:       t.addr,
+		Username:   t.creds.Username,
+		Password:   pw,
+		ARD:        t.ard,
+		ARDSetting: ardSetting(t),
 		TLS: vnc.TLS{
 			Require:            t.tls.Require,
 			ServerName:         t.tls.ServerName,
@@ -158,6 +193,15 @@ func vncConfig(t target) (vnc.Config, error) {
 		cfg.TLS.ServerName = t.name
 	}
 	return cfg, nil
+}
+
+// ardSetting names, for the error of a server that offers only Apple
+// Remote Desktop authentication, the configuration key that allows it.
+func ardSetting(t target) string {
+	if t.connection == "" {
+		return "ard: true on a connection for this target (ad-hoc targets have no ard)"
+	}
+	return fmt.Sprintf("ard: true on connection %q", t.connection)
 }
 
 // newBridge returns the maker of protocol's sessions through guacd at g.
