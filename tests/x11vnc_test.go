@@ -87,6 +87,16 @@ func TestX11vncClipboardRequestorGone(t *testing.T) {
 		}
 	}
 
+	// pid prints the process id of the x11vnc on port 5901, or nothing.
+	pid := func() string {
+		t.Helper()
+		out := inVNC(x11vncPID)
+		if strings.Trim(out, "0123456789") != "" {
+			t.Fatalf("looking for the x11vnc on port 5901: %q", out)
+		}
+		return out
+	}
+
 	// Text that the probe leaves alone, so that x11vnc keeps the
 	// clipboard. x11vnc drops cut text until it has made its selection
 	// window, which it does only once its latest client has been
@@ -106,18 +116,18 @@ func TestX11vncClipboardRequestorGone(t *testing.T) {
 			t.Fatalf("the clipboard does not hold %q after 90 s", text)
 		}
 	}
-	before, pid := watchdog(), inVNC(x11vncPID)
-	if pid == "" {
+	before, x11vnc := watchdog(), pid()
+	if x11vnc == "" {
 		t.Fatal("no x11vnc serves port 5901")
 	}
 
-	got := inVNC(goneRequestor, "PID="+pid)
+	got := inVNC(goneRequestor, "PID="+x11vnc)
 	if got != text {
 		t.Errorf("the xclip that waited got %q, want %q", got, text)
 	}
 	read(3 * time.Second) // the watchdog looks every 2 s
-	if now := inVNC(x11vncPID); now != pid {
-		t.Errorf("x11vnc on port 5901 was process %s and is %q now", pid, now)
+	if now := pid(); now != x11vnc {
+		t.Errorf("x11vnc on port 5901 was process %s and is %q now", x11vnc, now)
 	}
 	if n := watchdog() - before; n > 0 {
 		t.Errorf("the watchdog of port 5901 logged %d lines:\n%s", n, compose.run(t, "logs", "--tail", "20", "vnc"))
@@ -142,9 +152,10 @@ func TestX11vncClipboardRequestorGone(t *testing.T) {
 const readClipboard = `timeout 2 xclip -o -selection clipboard 2>/dev/null; true`
 
 // x11vncPID prints the process id of the x11vnc on port 5901. The image
-// has no procps, so it reads /proc.
+// has no procps, so it reads /proc. A process may exit before its turn,
+// so the standard error is closed before the input is opened.
 const x11vncPID = `for p in /proc/[0-9]*; do
-	case "$(tr '\0' ' ' <"$p/cmdline" 2>/dev/null)" in
+	case "$(tr '\0' ' ' 2>/dev/null <"$p/cmdline")" in
 	"x11vnc "*"-rfbport 5901 "*) echo "${p#/proc/}" ;;
 	esac
 done`
