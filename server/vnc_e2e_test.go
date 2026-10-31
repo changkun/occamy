@@ -26,6 +26,8 @@ import (
 	"changkun.de/x/occamy/client"
 	"changkun.de/x/occamy/internal/backend/vnc/vnctest"
 	"changkun.de/x/occamy/internal/config"
+	"changkun.de/x/occamy/internal/session"
+	"changkun.de/x/occamy/internal/stream"
 	"changkun.de/x/occamy/protocol"
 )
 
@@ -85,6 +87,15 @@ func (ts *testServer) streamConnection(t *testing.T, token, id string, opts clie
 
 func (ts *testServer) dialStream(t *testing.T, path, token string, opts client.Options) *client.Session {
 	t.Helper()
+	cl, err := ts.tryStream(t, path, token, opts)
+	if err != nil {
+		t.Fatalf("dialling %s: %v", path, err)
+	}
+	return cl
+}
+
+// tryStream dials the stream at path, and closes it when the test ends.
+func (ts *testServer) tryStream(t *testing.T, path, token string, opts client.Options) (*client.Session, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), vncTimeout)
 	defer cancel()
 	if opts.Name == "" {
@@ -92,10 +103,54 @@ func (ts *testServer) dialStream(t *testing.T, path, token string, opts client.O
 	}
 	cl, err := client.Dial(ctx, ts.srv.URL+path, token, opts)
 	if err != nil {
-		t.Fatalf("dialling %s: %v", path, err)
+		return nil, err
 	}
 	t.Cleanup(func() { cl.Close() })
-	return cl
+	return cl, nil
+}
+
+// failedStream streams connection id, whose backend fails before it
+// asks anything, and returns how the session ended, which it checks
+// against code. The backend can fail before the stream's welcome, and
+// then Dial returns the close as a *client.CloseError, kept in the End's
+// Err; or after it, and then the session ends. occamyd sends the same
+// close either way (TestStreamBackendFails).
+func (ts *testServer) failedStream(t *testing.T, token, id string, code protocol.CloseCode) client.End {
+	t.Helper()
+	path := "/api/v1/connections/" + url.PathEscape(id) + "/stream"
+	cl, err := ts.tryStream(t, path, token, client.Options{})
+	var ce *client.CloseError
+	switch {
+	case errors.As(err, &ce):
+		if ce.Code != code {
+			t.Errorf("the stream was refused with %v %q, want %v", ce.Code, ce.Reason, code)
+		}
+		return client.End{Code: ce.Code, Reason: ce.Reason, Err: err}
+	case err != nil:
+		t.Fatalf("dialling %s: %v", path, err)
+	}
+	return awaitEnd(t, cl, code)
+}
+
+// endBeforeWelcome holds every stream back until its session has ended,
+// so that failedStream sees the order in which the backend fails before
+// the stream's welcome, which the race otherwise picks.
+func endBeforeWelcome(t *testing.T) {
+	streamServe = func(ctx context.Context, c stream.Conn, v *session.Viewer, hello protocol.Hello, cfg stream.Config) error {
+		select {
+		case <-v.Session().Done():
+		case <-ctx.Done():
+		}
+		return stream.Serve(ctx, c, v, hello, cfg)
+	}
+	t.Cleanup(func() { streamServe = stream.Serve })
+}
+
+// beforeWelcome reports whether e, from failedStream, ended the stream
+// before its welcome.
+func beforeWelcome(e client.End) bool {
+	var ce *client.CloseError
+	return errors.As(e.Err, &ce)
 }
 
 // acceptVNC returns the next client of the fake VNC server.
@@ -417,7 +472,7 @@ func TestVNCTLS(t *testing.T) {
 	}
 
 	for _, id := range []string{"roots", "wrong-pin"} {
-		awaitEnd(t, ts.streamConnection(t, alice, id, client.Options{}), protocol.CloseBackendFailed)
+		ts.failedStream(t, alice, id, protocol.CloseBackendFailed)
 	}
 	if n, f := vs.Credentials(), vs.Failures(); n != 1 || f != 0 {
 		t.Errorf("%d credentials sent and %d failed in all, want the pinned connection's 1 and none failed: credentials went to a server the policy refused", n, f)
