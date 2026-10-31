@@ -422,6 +422,52 @@ func TestIntegrationClipboard(t *testing.T) {
 	}
 }
 
+// A viewer's Resize resizes xrdp's session through Display Control: the
+// sink takes the new size, and the session goes on drawing at it, the
+// swatch taking the colour of a key. The scene keeps its window's size,
+// so the test does not look for its wallpaper at the new size. It
+// resizes the session back, as the other tests expect it.
+func TestIntegrationResize(t *testing.T) {
+	checkGoroutines(t)
+	b := newBackend(t, xrdpConfig(t))
+	b.Demand(backend.Demand{Visible: true})
+	sink := &backendtest.Sink{}
+	r := start(t, b, sink)
+	waitLong(t, 90*time.Second, "the wallpaper", func() bool {
+		bad, _ := matchesWallpaper(sink.Pixels(), 0)
+		return bad == 0
+	})
+	first := sink.Size()
+	for i, size := range []image.Point{image.Pt(1280, 720), image.Pt(800, 600), first} {
+		begin := time.Now()
+		if err := b.Input(backend.Resize{Width: size.X, Height: size.Y}); err != nil {
+			t.Fatal(err)
+		}
+		waitLong(t, 30*time.Second, fmt.Sprintf("the sink at %v", size), func() bool {
+			img := sink.Pixels()
+			return img != nil && img.Rect.Size() == size && sink.Size() == size
+		})
+		t.Logf("%v after %v", size, time.Since(begin).Round(time.Millisecond))
+		k := 'a' + rune(i)
+		for _, ev := range []backend.InputEvent{backend.Key{Down: true, Code: hidLetter(k)}, backend.Key{Code: hidLetter(k)}} {
+			if err := b.Input(ev); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !swatchShows(sink, k, 10*time.Second) {
+			t.Fatalf("at %v, key %q: the swatch shows %v, want %v", size, k, sinkAt(sink, image.Pt(32, 32)), probeColour(k))
+		}
+	}
+	select {
+	case <-r.done:
+		t.Fatalf("Run returned %v after the resizes", r.err)
+	default:
+	}
+	if err := r.stop(t); !errors.Is(err, context.Canceled) {
+		t.Errorf("Run returned %v, want context.Canceled", err)
+	}
+}
+
 // waitLong polls cond until it holds or d passes.
 func waitLong(t *testing.T, d time.Duration, what string, cond func() bool) {
 	t.Helper()

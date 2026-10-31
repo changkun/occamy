@@ -825,16 +825,16 @@ func TestInputErrors(t *testing.T) {
 	if err := b.Input(backend.Text{Text: strings.Repeat("x", inputEvents/4+1)}); !errors.Is(err, ErrInputFull) {
 		t.Errorf("a Text over the budget: %v", err)
 	}
-	// Clipboard text is queued, charged by its bytes, of which the queue
-	// holds two clipboards of the most text; beyond the most, text is
-	// cut.
+	// A Resize is queued. Clipboard text is too, charged by its bytes, of
+	// which the queue holds two clipboards of the most text; beyond the
+	// most, text is cut.
 	big := backend.Clipboard{MIME: "text/plain", Data: bytes.Repeat([]byte("x"), rdp.MaxClipboard+1)}
 	for i := range 3 {
 		if err := b.Input(big); (err == nil) != (i < 2) || err != nil && !errors.Is(err, ErrInputFull) {
 			t.Errorf("clipboard %d of %d bytes: %v", i, len(big.Data), err)
 		}
 	}
-	n := 2
+	n := 3 // the Resize and two clipboards
 	for ; n < 1000; n++ {
 		if err := b.Input(backend.Key{Down: true, Keysym: 'a'}); err != nil {
 			if !errors.Is(err, ErrInputFull) {
