@@ -177,7 +177,11 @@ container, with a busybox pod and a ServiceAccount that may only exec
 into it. It then runs `./occamyd` from [section 2](#2-build) on
 `localhost:5639` with a v1 file of its own. The k3s container is
 privileged and needs the network to pull busybox. It is the setup of
-the backend's integration test.
+the backend's integration test. On a shared host, as in [Next to
+another stack](#next-to-another-stack), give the container a name of
+its own in place of `occamy-k3s` in every command of this step and of
+[Tear down](#8-tear-down), and other ports if something already
+listens on 16443 or 5639.
 
 ```
 K8S=$(mktemp -d)
@@ -188,7 +192,7 @@ until podman exec occamy-k3s kubectl get --raw /readyz; do sleep 2; done
 ```
 
 The loop prints errors while k3s starts, and `ok` once its API server
-is ready, after half a minute or so. Then add the pod,
+is ready, usually within half a minute. Then add the pod,
 the ServiceAccount `occamy`, and a Role that lets it exec into pods of
 the namespace and nothing else. `pods/exec` and `pods/attach` take
 `get` and `create`, as [configuration.md](configuration.md#kubernetes-pods)
