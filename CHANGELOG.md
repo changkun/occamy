@@ -306,9 +306,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the pointer and wheels, batched into input PDUs from a bounded queue
   in writes of at most 1,024 events; Suppress Output while nobody can
   see. A server's reason for ending the session decides how it ended,
-  even when a write fails as it hangs up. Clipboard and resize wait for
-  the virtual channels of its second phase. Nothing registers it in
-  occamyd until NLA has run end to end. The VNC and RDP backends share
+  even when a write fails as it hangs up. Nothing registers it in
+  occamyd yet. The VNC and RDP backends share
   one USB HID to scan code table, `internal/keymap`.
 - The native RDP backend's clipboard, the first part of its second
   phase: `internal/rdp` joins static virtual channels and reassembles
@@ -317,10 +316,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   most 4 MiB of UTF-8, as `Config.Clipboard` allows. The backend copies
   and pastes it, a paste set before the keys that follow it, unless
   `DisableCopy` or `DisablePaste` stops a direction, as guacd's
-  `disable-copy` and `disable-paste` do. `rdptest` accepts NLA through
-  CredSSP with NTLMv2, so that the backend's NLA path, prompted
-  credentials included, runs end to end in tests. Resize waits for the
-  dynamic channels of the second part.
+  `disable-copy` and `disable-paste` do. The client owes a server at
+  most 64 Format List Responses and 8 answers to its data requests; a
+  server that floods more than that without reading ends the session.
+  `rdptest` accepts NLA through CredSSP with NTLMv2, so that the
+  backend's NLA path, prompted credentials included, runs end to end in
+  tests. Resize waits for the dynamic channels of the second part.
 
 ### Changed
 

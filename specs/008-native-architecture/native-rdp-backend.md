@@ -523,7 +523,8 @@ and guacd leaves the default deployment.
     first is dropped and counted, and chunks that run past or stop
     short of the length they declared, or that are compressed, end
     the session. The client sends in chunks of 1,600 bytes, 32 chunks
-    a write, so that input written meanwhile waits for one write.
+    a write, so that input written meanwhile waits for one write; the
+    small messages that are due at once share a write.
   - The reader never writes channel PDUs: it records what is due and
     wakes a goroutine of `Run` that writes it. `SetClipboard` writes
     from its caller under the same lock, so the backend's writer can
@@ -544,7 +545,11 @@ and guacd leaves the default deployment.
     has since replaced is dropped and the newest is asked for, and
     unasked and failed answers are dropped and counted. A server that
     leaves more than 8 of its own requests unanswered ends the
-    session. The server's text is charged against the decoding rate
+    session, as does one that sends Format Lists while more than 64
+    Format List Responses wait to be written: the client owes a
+    counter, not a message, until it writes, and a server that floods
+    lists while it does not read would otherwise grow what the writer
+    builds without bound (found in review). The server's text is charged against the decoding rate
     as a pointer shape is, a tile at least, so that announcing it again
     and again makes the client wait. A Format List that does not parse
     is refused with a failed response; a message whose length is wrong
@@ -629,6 +634,20 @@ and guacd leaves the default deployment.
     byte budget (`TestRunClipboardBounded`, `TestInputErrors`);
   - the read-only role (`TestReadOnlyInputDropped`), and CredSSP 5 at
     least, through the acceptor (`TestRunNLARefused`).
+
+  A later check found that one of them, the failed answer's, had not
+  compiled, which the script took for a failed test; rewritten so that
+  it compiles, it is caught. The review of the pull request ran its own
+  and found five more that survived, now caught: the clipboard
+  channel's bound (`TestClipboardChannelBound`), writeDue's lock, so
+  that one message's chunks interleave with another's
+  (`TestChannelMessagesWhole`), the surrogate guard on an odd length
+  (`TestClipboardText`), the drop of a CLIPRDR message whose length is
+  wrong, text included (`TestClipboardLength`), and channel 0 in the
+  lookup (`TestClipboardChannelBound`). The bound on owed Format List
+  Responses and the shared writes are caught both by their unit test
+  (`TestClipboardListResponsesBounded`) and, for the bound, by a flood
+  while the writer is held up (`TestClipboardListFlood`).
 - **Fuzzing.** `FuzzChannel` feeds chunks to the reassembly and checks
   the bound; `FuzzCliprdr` feeds a CLIPRDR message, then sets the
   owner's text and writes what is due; `FuzzRun` now joins the
@@ -669,3 +688,15 @@ and guacd leaves the default deployment.
   - The Heartbeat PDU and auto-detect, with #32's Windows host.
   - Formats beyond text (HTML, images) wait for protocol v1 to carry
     them; files are out of v1.0.
+  - The owner's text goes to the server unpaced: up to 8 requests may
+    wait, each answered with up to 16 MiB of UTF-16 (4 MiB of line
+    ends, each a CR LF of four bytes).
+  - `MaxClipboard` (4 MiB) equals `protocol.DefaultMaxMessageSize`,
+    which counts the message's header, so a server's clipboard near
+    4 MiB is decoded and then dropped by every viewer's writer. The VNC
+    backend does the same.
+  - NTLM sends neither `MsvAvChannelBindings` nor `MsvAvTargetName`,
+    which a Windows server that enforces Extended Protection for
+    Authentication may require; check in phase 4.
+  - Nothing keeps `rdptest` out of the client's non-test imports: a
+    depguard rule or an import test could.
