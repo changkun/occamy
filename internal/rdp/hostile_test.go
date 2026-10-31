@@ -37,10 +37,11 @@ func (s *sizeRecorder) Lock(r image.Rectangle) *image.RGBA {
 	}
 	return s.img
 }
-func (s *sizeRecorder) Unlock(image.Rectangle)          {}
-func (s *sizeRecorder) Cursor(*image.RGBA, image.Point) {}
-func (s *sizeRecorder) CursorMove(image.Point)          {}
-func (s *sizeRecorder) Clipboard(string, []byte)        {}
+func (s *sizeRecorder) Unlock(image.Rectangle)                {}
+func (s *sizeRecorder) CopyRect(image.Rectangle, image.Point) {}
+func (s *sizeRecorder) Cursor(*image.RGBA, image.Point)       {}
+func (s *sizeRecorder) CursorMove(image.Point)                {}
+func (s *sizeRecorder) Clipboard(string, []byte)              {}
 
 // demandActive builds a share control Demand Active PDU with one bitmap
 // capability set for a w×h desktop.

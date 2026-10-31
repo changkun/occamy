@@ -24,6 +24,7 @@ import (
 	"changkun.de/x/occamy/internal/config"
 	"changkun.de/x/occamy/internal/guacamole"
 	"changkun.de/x/occamy/internal/guacd"
+	"changkun.de/x/occamy/internal/terminal"
 )
 
 // Remote desktops in the demo stack, as guacd resolves them.
@@ -159,48 +160,108 @@ func dialGuacd(ctx context.Context, addr string, cred config.JWT) (rawConn, erro
 // frame is a complete frame that drew something.
 type frame struct {
 	at     time.Time
-	damage image.Rectangle
-	marked bool // the session's marker matched in the damaged area
+	damage image.Rectangle // empty for a v1 terminal
+	marked bool            // the session's marker matched the frame
+	// content is set once the screen shows something of the remote: for
+	// a v1 terminal, from the first frame with a cell that is not blank,
+	// and for any other session from its first frame.
+	content bool
 }
 
-// session is a client that applies drawing as a browser does: it decodes
-// every image, answers every sync once the frame is applied, and sends a
-// nop every five seconds, as guacamole-common-js does.
-type session struct {
-	conn    rawConn
-	display *guacamole.Display
-	frames  chan frame
+// marker reports whether a frame shows what a scenario waits for. pixels
+// looks at the damaged area of a graphical screen, which is also how a
+// v0 terminal arrives, since guacd draws it. cells looks at a v1
+// terminal, which the client emulates (v1.go).
+type marker struct {
+	pixels func(img *image.RGBA, r image.Rectangle) bool
+	cells  func(scr *terminal.Screen) bool
+}
 
-	// marker, if set, reports whether a damaged area shows what the
-	// scenario waits for.
-	marker atomic.Pointer[func(img *image.RGBA, r image.Rectangle) bool]
+// conn is what a session sends: keys, and its end.
+type conn interface {
+	// key presses and releases a key.
+	key(keysym int) error
+	// close ends the session, which ends its reader.
+	close()
+}
+
+// session is a client session as the scenarios drive it, in either
+// protocol. Its reader applies what the server sends as a client does,
+// decoding every image into a framebuffer, and reports each complete
+// frame that drew on frames.
+type session struct {
+	conn   conn
+	frames chan frame
+
+	// marker, if set, reports whether a frame shows what the scenario
+	// waits for.
+	marker atomic.Pointer[marker]
 
 	start      time.Time
-	firstFrame atomic.Int64 // nanoseconds after start
-	drawn      atomic.Int64 // frames that drew
-	decode     atomic.Int64 // nanoseconds spent applying drawing
+	signIn     time.Duration // v1: the sign-in just before start
+	firstFrame atomic.Int64  // nanoseconds after start
+	drawn      atomic.Int64  // frames that drew
+	decode     atomic.Int64  // nanoseconds spent decoding and applying drawing
 	done       chan struct{}
 	err        error // set before done closes
+	// unsupported counts the drawing operations the client could not
+	// apply. It is set before done closes.
+	unsupported map[string]int
 }
 
-func newSession(conn rawConn, start time.Time) *session {
-	s := &session{
-		conn:    conn,
-		display: guacamole.NewDisplay(),
-		frames:  make(chan frame, 1<<16),
-		start:   start,
-		done:    make(chan struct{}),
+func newSession(start time.Time) *session {
+	return &session{
+		frames: make(chan frame, 1<<16),
+		start:  start,
+		done:   make(chan struct{}),
 	}
-	go s.read()
-	go s.keepAlive()
+}
+
+// emit reports a complete frame that drew. The first with content is
+// the session's first frame.
+func (s *session) emit(f frame) {
+	s.drawn.Add(1)
+	if f.content {
+		s.firstFrame.CompareAndSwap(0, int64(f.at.Sub(s.start)))
+	}
+	s.frames <- f
+}
+
+// v0Conn sends a v0 session's input as Guacamole instructions.
+type v0Conn struct{ raw rawConn }
+
+func (c v0Conn) key(keysym int) error {
+	k := strconv.Itoa(keysym)
+	b := guacamole.NewInstruction([]string{"key", k, "1"}).String() +
+		guacamole.NewInstruction([]string{"key", k, "0"}).String()
+	return c.raw.writeRaw([]byte(b))
+}
+
+// close drops the connection.
+func (c v0Conn) close() { c.raw.close() }
+
+// newV0Session starts a v0 session on raw, which applies drawing as a
+// browser does: it decodes every image, answers every sync once the
+// frame is applied, and sends a nop every five seconds, as
+// guacamole-common-js does.
+func newV0Session(raw rawConn, start time.Time) *session {
+	s := newSession(start)
+	s.conn = v0Conn{raw}
+	go s.readV0(raw, guacamole.NewDisplay())
+	go s.keepAlive(raw)
 	return s
 }
 
-func (s *session) read() {
+func (s *session) readV0(conn rawConn, display *guacamole.Display) {
 	defer close(s.done)
 	defer close(s.frames)
+	defer func() {
+		if len(display.Unsupported) > 0 {
+			s.unsupported = display.Unsupported
+		}
+	}()
 	for {
-		raw, err := s.conn.readRaw()
+		raw, err := conn.readRaw()
 		if err != nil {
 			if !errClosed(err) {
 				s.err = err
@@ -216,13 +277,13 @@ func (s *session) read() {
 		case "sync":
 			// Compositing the frame is part of the client's cost.
 			t := time.Now()
-			img := s.display.Image()
+			img := display.Image()
 			now := time.Now()
 			s.decode.Add(int64(now.Sub(t)))
-			damage := s.display.TakeDamage()
+			damage := display.TakeDamage()
 			// The reply acknowledges the frame, so that guacd keeps
 			// sending. close may have closed the connection meanwhile.
-			if err := s.conn.writeRaw(raw); err != nil {
+			if err := conn.writeRaw(raw); err != nil {
 				if !errClosed(err) {
 					s.err = err
 				}
@@ -231,13 +292,11 @@ func (s *session) read() {
 			if damage.Empty() {
 				continue
 			}
-			s.drawn.Add(1)
-			s.firstFrame.CompareAndSwap(0, int64(now.Sub(s.start)))
-			f := frame{at: now, damage: damage}
-			if m := s.marker.Load(); m != nil {
-				f.marked = (*m)(img, damage)
+			marked := false
+			if m := s.marker.Load(); m != nil && m.pixels != nil {
+				marked = m.pixels(img, damage)
 			}
-			s.frames <- f
+			s.emit(frame{at: now, damage: damage, marked: marked, content: true})
 		case "error":
 			args := ins.Args()
 			s.err = fmt.Errorf("guacd error: %v", args)
@@ -246,7 +305,7 @@ func (s *session) read() {
 			return
 		default:
 			t := time.Now()
-			if err := s.display.Apply(ins); err != nil {
+			if err := display.Apply(ins); err != nil {
 				s.err = err
 				return
 			}
@@ -255,7 +314,7 @@ func (s *session) read() {
 	}
 }
 
-func (s *session) keepAlive() {
+func (s *session) keepAlive(conn rawConn) {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	for {
@@ -263,13 +322,15 @@ func (s *session) keepAlive() {
 		case <-s.done:
 			return
 		case <-t.C:
-			if s.conn.writeRaw([]byte("3.nop;")) != nil {
+			if conn.writeRaw([]byte("3.nop;")) != nil {
 				return
 			}
 		}
 	}
 }
 
+// close ends the session, and returns the error that ended it before, if
+// any.
 func (s *session) close() error {
 	s.conn.close()
 	<-s.done
@@ -279,7 +340,7 @@ func (s *session) close() error {
 	return s.err
 }
 
-func (s *session) setMarker(m func(img *image.RGBA, r image.Rectangle) bool) {
+func (s *session) setMarker(m marker) {
 	s.marker.Store(&m)
 }
 
@@ -379,12 +440,7 @@ const (
 )
 
 // key presses and releases a key.
-func (s *session) key(keysym int) error {
-	k := strconv.Itoa(keysym)
-	b := guacamole.NewInstruction([]string{"key", k, "1"}).String() +
-		guacamole.NewInstruction([]string{"key", k, "0"}).String()
-	return s.conn.writeRaw([]byte(b))
-}
+func (s *session) key(keysym int) error { return s.conn.key(keysym) }
 
 // typeText presses the keys for text.
 func (s *session) typeText(text string) error {

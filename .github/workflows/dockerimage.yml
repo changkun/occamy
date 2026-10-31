@@ -158,16 +158,25 @@ jobs:
 
   bench:
     # A short run of the benchmark harness, to keep it working. Numbers
-    # from shared runners mean nothing, so nothing is compared.
+    # from shared runners mean nothing, so nothing is compared. It takes
+    # about 15 minutes; a stack that stopped answering fails it at 30
+    # rather than at GitHub's default of 6 hours. Each run stops at its
+    # first error, and the stack's logs follow a failure or a timeout.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
     - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with:
         go-version: stable
     - name: Benchmark smoke run
-      run: make bench CONTAINER_ENGINE=docker BENCH_FLAGS="-quick -net N0,N1 -engine none"
+      run: make bench CONTAINER_ENGINE=docker BENCH_FLAGS="-quick -failfast -net N0,N1 -engine none"
+    # The v1 series on the stack that make bench started: native SSH and
+    # VNC, and VNC and RDP through guacd. N1 alone, since the run above
+    # covers the proxy without delay.
+    - name: Benchmark smoke run, protocol v1
+      run: go run ./bench -quick -failfast -net N1 -engine none -series v1-native,v1-guacd -out bench-v1-results.json
     - name: Stack logs
-      if: failure()
+      if: ${{ !success() }}
       working-directory: docker
       run: docker compose -f docker-compose.yaml -f docker-compose.bench.yaml logs
