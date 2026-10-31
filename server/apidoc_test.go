@@ -7,6 +7,7 @@ package server
 import (
 	"bufio"
 	"fmt"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -68,6 +69,41 @@ func TestAPIDoc(t *testing.T) {
 // does not contact the OIDC provider, so its address need not answer.
 func registeredRoutes(t *testing.T) []string {
 	t.Helper()
+	s := allRoutesServer(t)
+	routes := slices.Concat(s.mux().patterns(), debugMux().patterns())
+	if len(routes) == 0 {
+		t.Fatal("no routes registered")
+	}
+	return routes
+}
+
+// TestRoutesResolve checks that the mux each listener serves, which
+// handler builds, takes a request for every pattern TestAPIDoc reads at
+// that very pattern, so that the routes checked against the reference
+// are the routes served.
+func TestRoutesResolve(t *testing.T) {
+	s := allRoutesServer(t)
+	wildcard := regexp.MustCompile(`\{[^}]*\}`)
+	for _, m := range []*routeMux{s.mux(), debugMux()} {
+		h := m.handler()
+		for _, p := range m.patterns() {
+			method, path, ok := strings.Cut(p, " ")
+			if !ok {
+				t.Errorf("pattern %q has no method", p)
+				continue
+			}
+			r := httptest.NewRequest(method, wildcard.ReplaceAllString(path, "x"), nil)
+			if _, got := h.Handler(r); got != p {
+				t.Errorf("%s %s goes to %q, want %q", r.Method, r.URL.Path, got, p)
+			}
+		}
+	}
+}
+
+// allRoutesServer is a server with every optional route: OIDC's and,
+// with legacy_v0, v0's.
+func allRoutesServer(t *testing.T) *server {
+	t.Helper()
 	captureLog(t) // legacy_v0's warning
 	f := testFile(t)
 	f.LegacyV0 = true
@@ -87,11 +123,7 @@ func registeredRoutes(t *testing.T) []string {
 	if s.oidc == nil || s.v0 == nil {
 		t.Fatalf("a server without its optional routes: oidc %v, legacy_v0 %v", s.oidc != nil, s.v0 != nil)
 	}
-	routes := slices.Concat(s.mux().patterns(), debugMux().patterns())
-	if len(routes) == 0 {
-		t.Fatal("no routes registered")
-	}
-	return routes
+	return s
 }
 
 // documentedRoutes returns how many headings of the file at path name
