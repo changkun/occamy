@@ -370,7 +370,9 @@ func (c *encodeCache) make(e *entry, f func(e *entry) bool) {
 }
 
 func (c *encodeCache) finish(e *entry, ok bool) {
+	defer close(e.done)
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	e.ok = ok
 	switch {
 	case e.dead:
@@ -389,8 +391,6 @@ func (c *encodeCache) finish(e *entry, ok bool) {
 			c.made = slices.DeleteFunc(c.made, func(e *entry) bool { return e.dead })
 		}
 	}
-	c.mu.Unlock()
-	close(e.done)
 }
 
 // drop takes e, made or not, out of the bytes held, as replaced; the

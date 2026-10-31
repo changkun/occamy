@@ -306,7 +306,12 @@ func TestShareWorkerPanics(t *testing.T) {
 	if a, b := <-encs, <-encs; a == b {
 		t.Error("the worker kept the encoders of a job that panicked")
 	}
-	if <-e.done; e.ok {
+	select {
+	case <-e.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the encoding whose maker panicked is never published")
+	}
+	if e.ok {
 		t.Error("the encoding whose maker panicked is published made")
 	}
 	if again, mine := sh.cache.tile(k, 1); !mine || again == e {
