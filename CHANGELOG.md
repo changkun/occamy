@@ -379,6 +379,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   The demo x11vnc runs without MIT-SHM, with which it hung now and then
   as a client connected, and under a watchdog that restarts it when it
   stops accepting connections.
+- A soak, `make soak`: sessions through the demo stack's `occamy-v1`
+  for hours, while `TestSoak` samples `occamyd`'s goroutines, live heap
+  and open files from its debug listener and fails on steady growth.
+  `/debug/vars` publishes `goroutines` and `fds`, and the demo stack's
+  `occamy-v1` serves its debug listener on the host's loopback
+  interface, port 5638 (`OCCAMY_V1_DEBUG_PORT`).
 - The native RDP backend's clipboard, the first part of its second
   phase: `internal/rdp` joins static virtual channels and reassembles
   their chunks within a bound per channel, and carries text both ways

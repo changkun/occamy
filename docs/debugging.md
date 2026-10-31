@@ -37,8 +37,11 @@ not. It needs a port of its own: `occamyd` refuses a `debug.address` on
 A CPU profile or a trace still running when `occamyd` stops is cut after
 the 5 second drain; a second SIGINT or SIGTERM stops `occamyd` at once.
 The examples below work against it with that address in place of
-`localhost:5636`. `/debug/vars` shows the command line and the runtime's
-memory statistics as JSON.
+`localhost:5636`. `/debug/vars` shows the command line, the runtime's
+memory statistics, the number of goroutines and the open file
+descriptors as JSON. The demo stack's `occamy-v1` serves its debug
+listener on the host's `localhost:5638` (`OCCAMY_V1_DEBUG_PORT`), for
+the soak.
 
 ## Profiling occamyd
 
@@ -136,6 +139,24 @@ sends that user something. Until then the user still counts, for up to
   difference gets none. The demo x11vnc runs under a watchdog, which
   logs each restart as `[<port>] watchdog: …` (`podman compose logs
   vnc`).
+- `make soak` runs `TestSoak` against the demo stack's `occamy-v1`:
+  `OCCAMY_SOAK_SESSIONS` sessions, 8 by default, to x11vnc and TigerVNC
+  through the native backend for `OCCAMY_SOAK_DURATION`, 1 hour by
+  default. Each session moves the pointer and types every 2 s, asks its
+  desktop for a terminal that scrolls for 2 s once a minute, and closes
+  after `OCCAMY_SOAK_LIFETIME`, 10 minutes by default, for another to
+  open; every other session has a read-only viewer. Every 30 s the test
+  samples `occamyd`'s goroutines, live heap (after a collection) and
+  open files from the debug listener, with the host's load average, and
+  logs them, and writes them as CSV to the file `OCCAMY_SOAK_OUT`
+  names. After a warm-up of a tenth of the run, it fails if a metric's
+  median never falls from one quarter of the samples to the next and
+  rises by more than its bound in all (`OCCAMY_SOAK_BOUNDS`,
+  `goroutines=50,heap=32,fds=25` by default, the heap in MiB), if the
+  goroutines or the open files stay above their start by more than the
+  bound a minute after the last session closed, or if a session fails.
+  `tests/soak_test.go` lists the variables. The full soak is
+  `make soak OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h`.
 - `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test. Each of its N
   rounds opens two sessions to each demo server at once: one that waits
   for the desktop and one that sends garbage. All sessions to one server

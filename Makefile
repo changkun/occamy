@@ -41,6 +41,22 @@ e2e:
 	go test -v -count=1 -timeout 20m ./tests/
 .PHONY: e2e
 
+# soak runs TestSoak against a stack started with make run: sessions
+# through occamy-v1 for a duration while it samples occamyd's
+# goroutines, heap and open files from occamy-v1's debug listener, on
+# OCCAMY_V1_DEBUG_PORT, and fails if one grows. OCCAMY_SOAK_SESSIONS
+# says how many sessions, 8 by default; tests/soak_test.go lists the
+# other variables. The full soak (specs/008-native-architecture/
+# guacd-bridge.md, Implementation notes: VNC's soak) is
+#
+#	make soak OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h
+soak:
+	OCCAMY_E2E_V1_ENDPOINT=$(or $(OCCAMY_E2E_V1_ENDPOINT),localhost:$(or $(OCCAMY_V1_PORT),5637)) \
+	OCCAMY_SOAK_DEBUG=$(or $(OCCAMY_SOAK_DEBUG),localhost:$(or $(OCCAMY_V1_DEBUG_PORT),5638)) \
+	OCCAMY_SOAK_SESSIONS=$(or $(OCCAMY_SOAK_SESSIONS),8) \
+	go test -v -count=1 -timeout 0 -run '^TestSoak$$' ./tests/
+.PHONY: soak
+
 # bench builds occamyd's image, starts the benchmark stack and measures
 # it, as described in docs/benchmarks.md. BENCH_FLAGS passes flags to the
 # harness, for example BENCH_FLAGS="-quick -scenarios T1".
