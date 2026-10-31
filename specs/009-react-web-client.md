@@ -447,7 +447,7 @@ Settled on 2026-10-31.
   - New: terminal sessions, the clipboard, credential prompts, sharing,
     viewers, visibility, the remote's cursor and title, the bell, and
     why a session ended.
-- **Tests:** 165 in `src/lib` and `src/views`, in the `web` job. Unit
+- **Tests:** 166 in `src/lib` and `src/views`, in the `web` job. Unit
   tests for the API calls against a scripted fetch (each request's
   method, path, headers and exact body, and the time limit on the
   answer and its body), the identity a token names, PKCE against RFC
@@ -466,8 +466,9 @@ Settled on 2026-10-31.
   clipping, the ending of every close code and of a takeover, and the
   prompt's markup, rendered without a DOM. The session view, the share
   panel and the shell run in happy-dom under StrictMode: an owner's
-  action and a share that waited for a sign-in are taken once, End
-  shows that it waits for occamyd and says when occamyd did not answer,
+  action and a share that waited for a sign-in are taken once, a share
+  that occamyd refuses says so, End shows that it waits for occamyd and
+  says when occamyd did not answer,
   an End that resumed for another user says whose the session is and
   ends once the owner signs in, over the view or after single sign-on
   came back as someone else, with the owner taken from the stream's

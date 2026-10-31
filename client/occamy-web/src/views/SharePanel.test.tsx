@@ -5,7 +5,8 @@
 // license that can be found in the LICENSE file.
 
 // The share panel in a DOM, under StrictMode, whose development effects
-// run twice: a share that waited for a sign-in is created once.
+// run twice: a share that waited for a sign-in is created once, and one
+// that occamyd refuses says so.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
@@ -46,11 +47,11 @@ function shares(): { api: Api; sent: string[] } {
 
 const token = { token: 'eyJ.access.token', expires: Number.MAX_SAFE_INTEGER }
 
-async function render(api: Api, request: ShareRequest | null): Promise<void> {
+async function render(api: Api, request: ShareRequest | null, onSignIn: () => void = () => undefined): Promise<void> {
   await act(async () => {
     root.render(
       <StrictMode>
-        <SharePanel api={api} token={token} sessionId="mZ3k" request={request} onClose={() => undefined} onSignIn={() => undefined} />
+        <SharePanel api={api} token={token} sessionId="mZ3k" request={request} onClose={() => undefined} onSignIn={onSignIn} />
       </StrictMode>,
     )
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -77,5 +78,19 @@ describe('SharePanel', () => {
     const { api, sent } = shares()
     await render(api, null)
     expect(sent).toEqual([])
+  })
+
+  it('says so when occamyd does not take the session for the user’s, as for another user signed in', async () => {
+    const sent: string[] = []
+    const api = new Api((path, init) => {
+      sent.push(`${init?.method} ${path}`)
+      return Promise.resolve(new Response(JSON.stringify({ error: { code: 'not_found', message: 'no such session' } }), { status: 404 }))
+    })
+    let signIns = 0
+    await render(api, { seq: 1, role: 'viewer', expiresIn: 3600 }, () => void signIns++)
+    expect(sent).toEqual(['POST /api/v1/sessions/mZ3k/shares'])
+    expect(container.textContent).toContain('The session has ended, or is not yours.')
+    expect(container.querySelector('input[readonly]')).toBeNull()
+    expect(signIns).toBe(0)
   })
 })
