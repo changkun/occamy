@@ -42,19 +42,29 @@ import (
 // parityTimeout bounds each wait of a check.
 const parityTimeout = 20 * time.Second
 
-// parityRetryPause is how long a cell waits before it tries again, and
-// parityTries how often a cell that cannot reach the desktop tries in
-// all: enough for the demo x11vnc's watchdog to find a hung x11vnc, kill
-// it and start it again (docker/demo/vnc/start.sh), even when the try
-// after the hang is the one whose connection the watchdog sees waiting.
+// parityTries is how often a cell tries in all, and parityRetryPause
+// how long it waits before it warms its server's ports and tries again:
+// enough for the demo x11vnc's watchdog to find a hung x11vnc, kill it
+// and start it again (docker/demo/vnc/start.sh).
 const (
-	parityRetryPause = 15 * time.Second
 	parityTries      = 3
+	parityRetryPause = 15 * time.Second
 )
+
+// parityBarrierTimeout bounds the wait for the echo of a barrier's
+// nonce, and parityWarmTime the warming of a server's ports.
+const (
+	parityBarrierTimeout = 10 * time.Second
+	parityWarmTime       = 90 * time.Second
+)
+
+// parityTokenAge is the age at which the demo user's access token is
+// renewed, before it expires after 15 minutes.
+const parityTokenAge = 10 * time.Minute
 
 // errUnavailable marks a check that could not reach the server's
 // desktop: the screen did not arrive, or the desktop's probe did not
-// answer. A server fault looks like this, not a backend's.
+// answer. A server fault looks like this, and so may a backend's.
 var errUnavailable = errors.New("the desktop is unavailable")
 
 // A parityColumn of the matrix: a server and a backend.
@@ -93,6 +103,13 @@ func (c parityColumn) state() string {
 	return "guacd"
 }
 
+// parityPorts holds, for each server, a connection kind for each of its
+// ports: x11vnc serves each port with an x11vnc of its own.
+var parityPorts = map[string][]string{
+	"x11vnc":   {"", "none", "de", "fr"},
+	"tigervnc": {"", "plain", "none", "de", "fr"},
+}
+
 // A parityFeature is a row of the matrix.
 type parityFeature struct {
 	name string
@@ -101,77 +118,80 @@ type parityFeature struct {
 	check   func(p *parity, c parityColumn) error
 }
 
+// runsOn says whether the feature applies to the column's server.
+func (f parityFeature) runsOn(c parityColumn) bool {
+	return f.servers == nil || slices.Contains(f.servers, c.server)
+}
+
 var tigerOnly = []string{"tigervnc"}
 
-// parityKnown holds the cells expected to fail, by "row|column", with
-// why. A cell that fails without an entry fails the test, and so does
-// one that passes with an entry, so that the matrix in guacd-bridge.md
-// stays what the suite finds.
-var parityKnown = map[string]string{
+// A parityKnownFailure is a cell expected to fail: why, as the matrix
+// shows it, and want, a part of the check's error that this failure
+// gives and no other does.
+type parityKnownFailure struct{ why, want string }
+
+// parityKnown holds the cells expected to fail, by "row|column". A cell
+// that fails without an entry fails the test, and so does one that
+// fails without its entry's want, or passes with an entry, so that the
+// matrix in guacd-bridge.md stays what the suite finds
+// (TestParityMatrixDoc).
+var parityKnown = map[string]parityKnownFailure{
 	// RFB's cut text is Latin-1. x11vnc has no Extended Clipboard, and
-	// guacd 1.6 does not ask for it.
-	"clipboard to the server, beyond Latin-1|x11vnc/native":  "x11vnc: Latin-1 only",
-	"clipboard to the server, beyond Latin-1|x11vnc/guacd":   "x11vnc: Latin-1 only",
-	"clipboard to the server, beyond Latin-1|tigervnc/guacd": "guacd: Latin-1 only",
-	"clipboard both ways, beyond Latin-1|x11vnc/native":      "x11vnc: Latin-1 only",
-	"clipboard both ways, beyond Latin-1|x11vnc/guacd":       "x11vnc: Latin-1 only",
-	"clipboard both ways, beyond Latin-1|tigervnc/guacd":     "guacd: Latin-1 only",
+	// takes and gives "? ? ??", and guacd 1.6 does not ask for it.
+	"clipboard to the server, beyond Latin-1|x11vnc/native":  {"x11vnc: Latin-1 only", `"? ? ??"`},
+	"clipboard to the server, beyond Latin-1|x11vnc/guacd":   {"x11vnc: Latin-1 only", `"? ? ??"`},
+	"clipboard to the server, beyond Latin-1|tigervnc/guacd": {"guacd: Latin-1 only", `want "€ ✓ 日本"`},
+	"clipboard both ways, beyond Latin-1|x11vnc/native":      {"x11vnc: Latin-1 only", `"? ? ??"`},
+	"clipboard both ways, beyond Latin-1|x11vnc/guacd":       {"x11vnc: Latin-1 only", `"? ? ??"`},
+	"clipboard both ways, beyond Latin-1|tigervnc/guacd":     {"guacd: Latin-1 only", `want "€ ✓ 日本"`},
 	// libvncclient asks for X509 credentials, which guacd 1.6 does not
-	// give ("Unsupported credential type requested").
-	"auth: VeNCrypt X509Plain|tigervnc/guacd": "guacd: no X509 credentials",
+	// give ("Unsupported credential type requested"), and guacd ends
+	// the session.
+	"auth: VeNCrypt X509Plain|tigervnc/guacd": {"guacd: no X509 credentials", "backend-failed"},
 }
 
 // TestVNCParity runs the matrix against occamy-v1, column by column,
-// since the columns of a server share its screens. It logs the matrix
-// as a Markdown table, and writes it to the file that
-// OCCAMY_PARITY_MATRIX names, if set.
+// since the columns of a server share its screens, after warming each
+// server's ports. It logs the matrix as a Markdown table, and writes it
+// to the file that OCCAMY_PARITY_MATRIX names, if set.
 func TestVNCParity(t *testing.T) {
-	addr := endpointV1(t)
-	token, err := signIn(addr)
-	if err != nil {
+	p := &parity{addr: endpointV1(t), signIn: signIn, now: time.Now}
+	if _, err := p.token(); err != nil {
 		t.Fatal(err)
 	}
-	p := &parity{addr: addr, token: token}
+	for _, server := range []string{"x11vnc", "tigervnc"} {
+		p.warm(t.Logf, server)
+	}
 	cells := map[string]string{}
 	for _, c := range parityColumns {
 		t.Run(c.String(), func(t *testing.T) {
 			for _, f := range parityFeatures {
 				cell := f.name + "|" + c.String()
-				if f.servers != nil && !slices.Contains(f.servers, c.server) {
+				if !f.runsOn(c) {
 					cells[cell] = "—"
 					continue
 				}
 				t.Run(f.name, func(t *testing.T) {
 					start := time.Now()
-					err := f.check(p, c)
-					known, isKnown := parityKnown[cell]
-					// A cell that could not reach the desktop tries
-					// again, up to parityTries times in all, since
-					// x11vnc has hung now and then under these
-					// sessions, through either backend. guacd is the
-					// baseline, so a cell of its tries again for any
-					// failure: libvncclient has also failed to connect
-					// to TigerVNC now and then, and x11vnc has closed
-					// guacd's connection on a message it could not
-					// parse. A native cell whose check found a
-					// difference gets no second try.
-					for try := 1; err != nil && !isKnown && try < parityTries &&
-						(errors.Is(err, errUnavailable) || c.backend == "guacd"); try++ {
-						t.Logf("failed, trying again in %v: %v", parityRetryPause, err)
-						time.Sleep(parityRetryPause)
-						err = f.check(p, c)
+					r := parityCell{
+						guacd: c.backend == "guacd",
+						check: func() error { return f.check(p, c) },
+						pause: func() {
+							time.Sleep(parityRetryPause)
+							p.warm(t.Logf, c.server)
+						},
+						logf: t.Logf,
 					}
-					switch {
-					case err == nil && !isKnown:
-						cells[cell] = "pass"
-					case err == nil:
-						cells[cell] = "pass (listed as failing)"
-						t.Errorf("passes, but parityKnown lists it as failing (%s): update the matrix", known)
-					case isKnown:
-						cells[cell] = "fail: " + known
-						t.Logf("fails as known (%s): %v", known, err)
-					default:
-						cells[cell] = "FAIL: " + err.Error()
+					if k, ok := parityKnown[cell]; ok {
+						r.known = &k
+					}
+					if !r.guacd {
+						twin := parityColumn{c.server, "guacd"}
+						r.twin = func() error { return f.check(p, twin) }
+					}
+					var err error
+					cells[cell], err = r.run()
+					if err != nil {
 						t.Error(err)
 					}
 					t.Logf("%v", time.Since(start).Round(time.Millisecond))
@@ -179,6 +199,101 @@ func TestVNCParity(t *testing.T) {
 			}
 		})
 	}
+	table := parityTable(func(f parityFeature, c parityColumn) string { return cells[f.name+"|"+c.String()] })
+	t.Logf("the matrix:\n%s", table)
+	if path := os.Getenv("OCCAMY_PARITY_MATRIX"); path != "" {
+		if err := os.WriteFile(path, []byte(table), 0o600); err != nil {
+			t.Error(err)
+		}
+	}
+}
+
+// A parityCell runs a cell's check, tries it again where a server fault
+// may explain the failure, and judges the outcome by the cell's entry in
+// parityKnown.
+type parityCell struct {
+	// known is the cell's entry in parityKnown, or nil.
+	known *parityKnownFailure
+	// guacd says whether the cell's backend is guacd.
+	guacd bool
+	// check runs the cell's check, and twin, of a native cell, the
+	// same check through guacd on the same server.
+	check, twin func() error
+	// pause waits before a cell tries again.
+	pause func()
+	logf  func(format string, args ...any)
+}
+
+// run returns what the matrix shows for the cell, with the try that
+// gave it if not the first, and an error if the cell fails the test: it
+// fails where parityKnown lists no failure, fails without the listed
+// failure's want, or passes where parityKnown lists a failure.
+//
+// A cell tries up to parityTries times in all. guacd is the baseline,
+// so a guacd cell tries again after any failure but the listed one. A
+// native cell tries again only if it could not reach the desktop
+// (errUnavailable), and its twin, run at once, could not either: then
+// the server is at fault. If the twin reaches the desktop, the native
+// failure stands.
+func (r parityCell) run() (string, error) {
+	var err error
+	try := 1
+	for {
+		err = r.check()
+		if err == nil || r.isKnown(err) || try == parityTries || !r.again(err) {
+			break
+		}
+		r.pause()
+		try++
+	}
+	at := ""
+	if try > 1 {
+		at = fmt.Sprintf(" (try %d)", try)
+	}
+	switch {
+	case err == nil && r.known == nil:
+		return "pass" + at, nil
+	case err == nil:
+		return "pass" + at + ", listed as failing", fmt.Errorf("passes, but parityKnown lists it as failing (%s): update the matrix", r.known.why)
+	case r.isKnown(err):
+		r.logf("fails as known (%s): %v", r.known.why, err)
+		return "fail: " + r.known.why + at, nil
+	case r.known != nil:
+		return "FAIL" + at + ": " + err.Error(), fmt.Errorf("try %d: fails, but not with the %q that parityKnown lists (%s): %w", try, r.known.want, r.known.why, err)
+	}
+	return "FAIL" + at + ": " + err.Error(), fmt.Errorf("try %d: %w", try, err)
+}
+
+// isKnown says whether err is the cell's listed failure.
+func (r parityCell) isKnown(err error) bool {
+	return r.known != nil && strings.Contains(err.Error(), r.known.want)
+}
+
+// again says whether the cell tries again after err.
+func (r parityCell) again(err error) bool {
+	if r.guacd {
+		r.logf("failed, trying again: %v", err)
+		return true
+	}
+	if !errors.Is(err, errUnavailable) {
+		return false
+	}
+	twinErr := r.twin()
+	switch {
+	case twinErr == nil:
+		r.logf("could not reach the desktop, but guacd did: %v", err)
+		return false
+	case !errors.Is(twinErr, errUnavailable):
+		r.logf("could not reach the desktop, but guacd did, and failed otherwise (%v): %v", twinErr, err)
+		return false
+	}
+	r.logf("could not reach the desktop, and neither could guacd (%v), trying again: %v", twinErr, err)
+	return true
+}
+
+// parityTable returns the matrix as a Markdown table, with the cells
+// that cell gives.
+func parityTable(cell func(f parityFeature, c parityColumn) string) string {
 	var b strings.Builder
 	b.WriteString("| Feature |")
 	for _, c := range parityColumns {
@@ -188,16 +303,23 @@ func TestVNCParity(t *testing.T) {
 	for _, f := range parityFeatures {
 		fmt.Fprintf(&b, "| %s |", f.name)
 		for _, c := range parityColumns {
-			fmt.Fprintf(&b, " %s |", strings.ReplaceAll(cells[f.name+"|"+c.String()], "|", "\\|"))
+			fmt.Fprintf(&b, " %s |", strings.ReplaceAll(cell(f, c), "|", "\\|"))
 		}
 		b.WriteString("\n")
 	}
-	t.Logf("the matrix:\n%s", b.String())
-	if path := os.Getenv("OCCAMY_PARITY_MATRIX"); path != "" {
-		if err := os.WriteFile(path, []byte(b.String()), 0o600); err != nil {
-			t.Error(err)
-		}
+	return b.String()
+}
+
+// parityExpected returns the cell that a run gives at each cell's first
+// try, by parityFeatures and parityKnown.
+func parityExpected(f parityFeature, c parityColumn) string {
+	if !f.runsOn(c) {
+		return "—"
 	}
+	if k, ok := parityKnown[f.name+"|"+c.String()]; ok {
+		return "fail: " + k.why
+	}
+	return "pass"
 }
 
 var parityFeatures = []parityFeature{
@@ -224,13 +346,95 @@ var parityFeatures = []parityFeature{
 	{name: "text input", check: checkText},
 	{name: "sharing: a viewer's input", check: checkViewer},
 	{name: "sharing: a read-only viewer's input dropped", check: checkReadOnly},
-	{name: "reconnect: the owner rejoins", check: checkReconnect},
+	{name: "reconnect: the owner rejoins occamyd's session", check: checkReconnect},
 }
 
-// parity holds what the checks share: occamy-v1's address and the demo
-// user's access token.
+// parity holds what the checks share: occamy-v1's address, and the demo
+// user's access token, which it renews by signIn when the token is
+// parityTokenAge old.
 type parity struct {
-	addr, token string
+	addr   string
+	signIn func(addr string) (string, error)
+	now    func() time.Time
+
+	mu       sync.Mutex
+	tok      string
+	signedIn time.Time
+}
+
+// token returns the demo user's access token.
+func (p *parity) token() (string, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	now := p.now()
+	if p.tok != "" && now.Sub(p.signedIn) < parityTokenAge {
+		return p.tok, nil
+	}
+	tok, err := p.signIn(p.addr)
+	if err != nil {
+		return "", err
+	}
+	p.tok, p.signedIn = tok, now
+	return tok, nil
+}
+
+// api sends a request to API v1 as the demo user.
+func (p *parity) api(method, path string, body []byte, out any) error {
+	tok, err := p.token()
+	if err != nil {
+		return err
+	}
+	return apiV1(p.addr, method, path, tok, body, out)
+}
+
+// stream opens a stream at path as the demo user.
+func (p *parity) stream(path string, opts client.Options) (*paritySession, error) {
+	tok, err := p.token()
+	if err != nil {
+		return nil, err
+	}
+	return p.dial(path, tok, opts)
+}
+
+// warm opens a session to each of the server's ports, through the
+// native backend, and repeats a barrier until the desktop's probe
+// answers, within parityWarmTime in all, logging the tries each port
+// took. A freshly started x11vnc does not answer the first cut text on
+// its port (guacd-bridge.md, Implementation notes: VNC's parity matrix).
+func (p *parity) warm(logf func(string, ...any), server string) {
+	deadline := time.Now().Add(parityWarmTime)
+	for _, kind := range parityPorts[server] {
+		conn := parityColumn{server, "native"}.conn(kind)
+		for try := 1; ; try++ {
+			n, err := p.echo(conn)
+			if err == nil {
+				logf("warmed %s: session %d, barrier %d", conn, try, n)
+				break
+			}
+			if time.Now().After(deadline) {
+				logf("could not warm %s in %v: %v", conn, parityWarmTime, err)
+				return
+			}
+			logf("warming %s: try %d: %v", conn, try, err)
+		}
+	}
+}
+
+// echo opens conn, and sends barriers until one is answered, within the
+// session's first parityTimeout. It returns the number of barriers sent.
+func (p *parity) echo(conn string) (int, error) {
+	s, closeSession, err := p.open(conn, client.Options{})
+	if err != nil {
+		return 0, err
+	}
+	defer closeSession()
+	deadline := time.Now().Add(parityTimeout)
+	for n := 1; ; n++ {
+		_, err := s.barrier()
+		if err == nil || time.Now().After(deadline) {
+			return n, err
+		}
+	}
 }
 
 // A paritySession is a stream with its events recorded, so that a check
@@ -247,20 +451,25 @@ type paritySession struct {
 }
 
 // open streams a connection as the demo user, and waits for the screen,
-// answering a prompt with answers. It returns the stream and a function
-// that closes the session.
+// answering a prompt with answers, which a prompt must then ask for. It
+// returns the stream and a function that closes the session.
 func (p *parity) open(conn string, opts client.Options, answers ...string) (*paritySession, func(), error) {
-	s, err := p.dial("/api/v1/connections/"+url.PathEscape(conn)+"/stream", p.token, opts)
+	s, err := p.stream("/api/v1/connections/"+url.PathEscape(conn)+"/stream", opts)
 	if err != nil {
 		return nil, nil, err
 	}
 	closeSession := func() {
-		_ = apiV1(p.addr, http.MethodDelete, "/api/v1/sessions/"+url.PathEscape(s.cl.SessionID()), p.token, nil, nil)
+		_ = p.api(http.MethodDelete, "/api/v1/sessions/"+url.PathEscape(s.cl.SessionID()), nil, nil)
 		s.close()
 	}
-	if err := s.screen(answers...); err != nil {
+	asked, err := s.screen(answers...)
+	if err != nil {
 		closeSession()
 		return nil, nil, fmt.Errorf("%w: %w", errUnavailable, err)
+	}
+	if len(answers) > 0 && !asked {
+		closeSession()
+		return nil, nil, errors.New("the screen arrived without a prompt, where the server asks for a password")
 	}
 	return s, closeSession, nil
 }
@@ -348,6 +557,22 @@ func endError(e client.End) error {
 	return err
 }
 
+// send returns the error of an input call with how the session ended,
+// if it has: the client says only that it has (client.ErrClosed).
+func (s *paritySession) send(_ uint32, err error) error {
+	if err == nil {
+		return nil
+	}
+	ev, _, waitErr := s.waitFor(time.Second, 0, "the session's end", func(ev client.Event) bool {
+		_, ok := ev.(client.End)
+		return ok
+	})
+	if waitErr != nil {
+		return fmt.Errorf("%w (%w)", err, waitErr)
+	}
+	return fmt.Errorf("%w: %w", err, endError(ev.(client.End)))
+}
+
 // mark returns the index of the next event.
 func (s *paritySession) mark() int {
 	s.mu.Lock()
@@ -393,9 +618,10 @@ func (s *paritySession) waitFor(timeout time.Duration, from int, what string, ok
 }
 
 // screen waits for a frame of a screen, answering a prompt with
-// answers; a prompt without answers is an error.
-func (s *paritySession) screen(answers ...string) error {
-	from := 0
+// answers; a prompt without answers is an error. It says whether it
+// answered a prompt.
+func (s *paritySession) screen(answers ...string) (bool, error) {
+	from, asked := 0, false
 	for {
 		ev, next, err := s.wait(from, "the screen", func(ev client.Event) bool {
 			switch ev.(type) {
@@ -407,20 +633,20 @@ func (s *paritySession) screen(answers ...string) error {
 			return false
 		})
 		if err != nil {
-			return err
+			return asked, err
 		}
 		from = next
 		pr, ok := ev.(client.Prompt)
 		if !ok {
-			return nil
+			return asked, nil
 		}
 		if len(answers) == 0 {
-			return fmt.Errorf("asked for %d fields (%q) where nothing should be asked", len(pr.Fields), pr.Name)
+			return asked, fmt.Errorf("asked for %d fields (%q) where nothing should be asked", len(pr.Fields), pr.Name)
 		}
-		if err := s.cl.PromptReply(context.Background(), pr.ID, answers[:min(len(answers), len(pr.Fields))]); err != nil {
-			return err
+		if err := s.send(0, s.cl.PromptReply(context.Background(), pr.ID, answers[:min(len(answers), len(pr.Fields))])); err != nil {
+			return asked, err
 		}
-		answers = nil
+		answers, asked = nil, true
 	}
 }
 
@@ -441,7 +667,7 @@ func (s *paritySession) size(from int, size image.Point) error {
 // with prefix.
 func (s *paritySession) clipboard(text, prefix string) (string, int, error) {
 	from := s.mark()
-	if _, err := s.cl.Clipboard(context.Background(), "text/plain", []byte(text)); err != nil {
+	if err := s.send(s.cl.Clipboard(context.Background(), "text/plain", []byte(text))); err != nil {
 		return "", from, err
 	}
 	return s.clipboardFrom(from, prefix)
@@ -459,28 +685,24 @@ func (s *paritySession) clipboardFrom(from int, prefix string) (string, int, err
 }
 
 // barrier makes sure that the desktop's probe has answered everything
-// sent before, and returns the index of the event after its answer. It
-// tries four times, five seconds each: on an x11vnc that has just
-// started, the first cut text of each of its ports did not come back,
-// through either backend.
+// sent before, and returns the index of the event after its answer: it
+// sends a fresh nonce as clipboard text, and waits parityBarrierTimeout
+// for its echo. TestVNCParity warms each port first, since a freshly
+// started x11vnc does not answer the first cut text on its port.
 func (s *paritySession) barrier() (int, error) {
-	var err error
-	for range 4 {
-		nonce := fmt.Sprintf("barrier %d", time.Now().UnixNano())
-		from := s.mark()
-		if _, err := s.cl.Clipboard(context.Background(), "text/plain", []byte("owner: "+nonce)); err != nil {
-			return from, err
-		}
-		var next int
-		_, next, err = s.waitFor(5*time.Second, from, "the echo of "+nonce, func(ev client.Event) bool {
-			c, ok := ev.(client.Clipboard)
-			return ok && string(c.Data) == "echo: "+nonce
-		})
-		if err == nil {
-			return next, nil
-		}
+	nonce := fmt.Sprintf("barrier %d", time.Now().UnixNano())
+	from := s.mark()
+	if err := s.send(s.cl.Clipboard(context.Background(), "text/plain", []byte("owner: "+nonce))); err != nil {
+		return from, err
 	}
-	return 0, fmt.Errorf("%w: %w", errUnavailable, err)
+	_, next, err := s.waitFor(parityBarrierTimeout, from, "the echo of "+nonce, func(ev client.Event) bool {
+		c, ok := ev.(client.Clipboard)
+		return ok && string(c.Data) == "echo: "+nonce
+	})
+	if err != nil {
+		return from, fmt.Errorf("%w: %w", errUnavailable, err)
+	}
+	return next, nil
 }
 
 // A key is a key press as a client sends it: the keysym it produced, or
@@ -519,18 +741,18 @@ func withoutCodes(keys []key) []key {
 func (s *paritySession) press(k key) error {
 	ctx := context.Background()
 	for _, m := range k.mods {
-		if _, err := s.cl.Key(ctx, true, m.keysym, m.code); err != nil {
+		if err := s.send(s.cl.Key(ctx, true, m.keysym, m.code)); err != nil {
 			return err
 		}
 	}
-	if _, err := s.cl.Key(ctx, true, k.keysym, k.code); err != nil {
+	if err := s.send(s.cl.Key(ctx, true, k.keysym, k.code)); err != nil {
 		return err
 	}
-	if _, err := s.cl.Key(ctx, false, k.keysym, k.code); err != nil {
+	if err := s.send(s.cl.Key(ctx, false, k.keysym, k.code)); err != nil {
 		return err
 	}
 	for _, m := range slices.Backward(k.mods) {
-		if _, err := s.cl.Key(ctx, false, m.keysym, m.code); err != nil {
+		if err := s.send(s.cl.Key(ctx, false, m.keysym, m.code)); err != nil {
 			return err
 		}
 	}
@@ -540,7 +762,7 @@ func (s *paritySession) press(k key) error {
 // typeLine points at the typing probe, sends input there with send,
 // presses Return, and returns the line that the probe read.
 func (s *paritySession) typeLine(send func() error) (string, error) {
-	if _, err := s.cl.Pointer(context.Background(), 20, 20, 0); err != nil {
+	if err := s.send(s.cl.Pointer(context.Background(), 20, 20, 0)); err != nil {
 		return "", err
 	}
 	from, err := s.barrier()
@@ -609,7 +831,7 @@ func lowercase(text string) []key {
 // state returns the session's state.
 func (p *parity) state(id string) (sessionState, error) {
 	var st sessionState
-	err := apiV1(p.addr, http.MethodGet, "/api/v1/sessions/"+url.PathEscape(id), p.token, nil, &st)
+	err := p.api(http.MethodGet, "/api/v1/sessions/"+url.PathEscape(id), nil, &st)
 	return st, err
 }
 
@@ -649,12 +871,12 @@ func checkAuthPrompt(p *parity, c parityColumn) error {
 // checkAuthWrong answers the prompt wrong: the session ends with
 // backend-failed.
 func checkAuthWrong(p *parity, c parityColumn) error {
-	s, err := p.dial("/api/v1/connections/"+url.PathEscape(c.conn("prompt"))+"/stream", p.token, client.Options{})
+	s, err := p.stream("/api/v1/connections/"+url.PathEscape(c.conn("prompt"))+"/stream", client.Options{})
 	if err != nil {
 		return err
 	}
 	defer s.close()
-	defer apiV1(p.addr, http.MethodDelete, "/api/v1/sessions/"+url.PathEscape(s.cl.SessionID()), p.token, nil, nil) //nolint:errcheck // the session should have ended
+	defer p.api(http.MethodDelete, "/api/v1/sessions/"+url.PathEscape(s.cl.SessionID()), nil, nil) //nolint:errcheck // the session should have ended
 	ev, _, err := s.wait(0, "the prompt", func(ev client.Event) bool { _, ok := ev.(client.Prompt); return ok })
 	if err != nil {
 		return err
@@ -663,7 +885,7 @@ func checkAuthWrong(p *parity, c parityColumn) error {
 	if len(pr.Fields) != 1 || !pr.Fields[0].Secret {
 		return fmt.Errorf("the prompt %q asks %+v, want one secret field", pr.Name, pr.Fields)
 	}
-	if err := s.cl.PromptReply(context.Background(), pr.ID, []string{"wrong"}); err != nil {
+	if err := s.send(0, s.cl.PromptReply(context.Background(), pr.ID, []string{"wrong"})); err != nil {
 		return err
 	}
 	ev, _, err = s.wait(0, "the end", func(ev client.Event) bool { _, ok := ev.(client.End); return ok })
@@ -688,14 +910,14 @@ func checkScreen(p *parity, c parityColumn) error {
 		return fmt.Errorf("the screen is %v, want 1024×768", got)
 	}
 	ctx := context.Background()
-	if _, err := s.cl.Pointer(ctx, 100, 100, 0); err != nil {
+	if err := s.send(s.cl.Pointer(ctx, 100, 100, 0)); err != nil {
 		return err
 	}
 	seq, err := s.cl.Key(ctx, true, 0xffe1, 0xe1) // Shift, which types nothing
-	if err != nil {
+	if err := s.send(seq, err); err != nil {
 		return err
 	}
-	if _, err := s.cl.Key(ctx, false, 0xffe1, 0xe1); err != nil {
+	if err := s.send(s.cl.Key(ctx, false, 0xffe1, 0xe1)); err != nil {
 		return err
 	}
 	if _, _, err := s.wait(0, "a frame after the input", func(ev client.Event) bool {
@@ -735,7 +957,7 @@ func checkResizeRequest(p *parity, c parityColumn) error {
 	defer s.restoreSize()
 	for _, size := range []image.Point{{800, 600}, {1024, 768}} {
 		from := s.mark()
-		if _, err := s.cl.Resize(context.Background(), uint16(size.X), uint16(size.Y)); err != nil {
+		if err := s.send(s.cl.Resize(context.Background(), uint16(size.X), uint16(size.Y))); err != nil {
 			return err
 		}
 		if err := s.size(from, size); err != nil {
@@ -762,7 +984,7 @@ func checkResizeIgnored(p *parity, c parityColumn) error {
 		return err
 	}
 	defer closeSession()
-	if _, err := s.cl.Resize(context.Background(), 800, 600); err != nil {
+	if err := s.send(s.cl.Resize(context.Background(), 800, 600)); err != nil {
 		return err
 	}
 	time.Sleep(2 * time.Second)
@@ -816,8 +1038,12 @@ func clipboardEcho(text string) func(p *parity, c parityColumn) error {
 	}
 }
 
-// checkCursor moves the pointer between the root window and an xterm,
+// checkCursor moves the pointer between an xterm and the root window,
 // whose cursors differ, and checks that each change reaches the client.
+// It first points at the typing probe's xterm, and takes the last cursor
+// that has arrived once a barrier has passed as the xterm's: the server
+// sends the cursor as it takes the move, before the probe has even
+// looked at the clipboard.
 func checkCursor(p *parity, c parityColumn) error {
 	s, closeSession, err := p.open(c.conn(""), client.Options{})
 	if err != nil {
@@ -828,26 +1054,27 @@ func checkCursor(p *parity, c parityColumn) error {
 		cur, ok := ev.(client.Cursor)
 		return ok && cur.Image != nil
 	}
+	ctx := context.Background()
+	if err := s.send(s.cl.Pointer(ctx, 20, 20, 0)); err != nil {
+		return err
+	}
+	if _, err := s.barrier(); err != nil {
+		return err
+	}
 	var last *client.Cursor
-	for i, at := range []image.Point{{1000, 740}, {20, 20}, {1000, 740}} {
-		from := s.mark()
-		if _, err := s.cl.Pointer(context.Background(), uint16(at.X), uint16(at.Y), 0); err != nil {
-			return err
+	for _, ev := range s.recorded() {
+		if isCursor(ev) {
+			cur := ev.(client.Cursor)
+			last = &cur
 		}
-		if i == 0 {
-			// The root window's cursor, which may have come with the
-			// screen.
-			time.Sleep(time.Second)
-			for _, ev := range s.recorded() {
-				if isCursor(ev) {
-					cur := ev.(client.Cursor)
-					last = &cur
-				}
-			}
-			if last == nil {
-				return errors.New("no cursor arrived")
-			}
-			continue
+	}
+	if last == nil {
+		return errors.New("no cursor arrived")
+	}
+	for _, at := range []image.Point{{1000, 740}, {20, 20}} {
+		from := s.mark()
+		if err := s.send(s.cl.Pointer(ctx, uint16(at.X), uint16(at.Y), 0)); err != nil {
+			return err
 		}
 		ev, _, err := s.wait(from, fmt.Sprintf("another cursor at %v", at), func(ev client.Event) bool {
 			return isCursor(ev) && !sameCursor(ev.(client.Cursor), *last)
@@ -949,8 +1176,7 @@ func checkText(p *parity, c parityColumn) error {
 	defer closeSession()
 	const text = "日本 ✓ naïve"
 	got, err := s.typeLine(func() error {
-		_, err := s.cl.Text(context.Background(), text)
-		return err
+		return s.send(s.cl.Text(context.Background(), text))
 	})
 	if err == nil && got != text {
 		err = fmt.Errorf("typed %q, want %q", got, text)
@@ -967,7 +1193,7 @@ func (p *parity) share(id, role string) (string, error) {
 	var out struct {
 		Token string `json:"token"`
 	}
-	err = apiV1(p.addr, http.MethodPost, "/api/v1/sessions/"+url.PathEscape(id)+"/shares", p.token, body, &out)
+	err = p.api(http.MethodPost, "/api/v1/sessions/"+url.PathEscape(id)+"/shares", body, &out)
 	return out.Token, err
 }
 
@@ -981,7 +1207,7 @@ func (p *parity) join(id, role string) (*paritySession, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := s.screen(); err != nil {
+	if _, err := s.screen(); err != nil {
 		s.close()
 		return nil, err
 	}
@@ -1041,7 +1267,7 @@ func checkReadOnly(p *parity, c parityColumn) error {
 	if _, err := ro.cl.Key(ctx, true, 'x', 0x1b); !errors.Is(err, client.ErrReadOnly) {
 		return fmt.Errorf("a read-only viewer's key: the client returned %q, want %w", fmt.Sprint(err), client.ErrReadOnly)
 	}
-	if _, err := owner.cl.Pointer(ctx, 20, 20, 0); err != nil {
+	if err := owner.send(owner.cl.Pointer(ctx, 20, 20, 0)); err != nil {
 		return err
 	}
 	from, err := owner.barrier()
@@ -1083,8 +1309,9 @@ func checkReadOnly(p *parity, c parityColumn) error {
 }
 
 // checkReconnect has the owner leave and come back within the owner
-// grace: the same session, with its screen, and input still reaching
-// the server.
+// grace: the same occamyd session, with its screen, and input still
+// reaching the server. Whether the backend kept its connection to the
+// server, or made another, the check cannot tell.
 func checkReconnect(p *parity, c parityColumn) error {
 	s, closeSession, err := p.open(c.conn(""), client.Options{})
 	if err != nil {
@@ -1097,12 +1324,12 @@ func checkReconnect(p *parity, c parityColumn) error {
 	}
 	s.close()
 	time.Sleep(time.Second)
-	back, err := p.dial("/api/v1/sessions/"+url.PathEscape(id)+"/stream", p.token, client.Options{})
+	back, err := p.stream("/api/v1/sessions/"+url.PathEscape(id)+"/stream", client.Options{})
 	if err != nil {
 		return err
 	}
 	defer back.close()
-	if err := back.screen(); err != nil {
+	if _, err := back.screen(); err != nil {
 		return err
 	}
 	if back.cl.SessionID() != id || back.cl.Role() != protocol.RoleOwner {
