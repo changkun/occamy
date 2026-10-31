@@ -76,6 +76,8 @@ type shadow struct {
 	// hashed says are current.
 	hash   []uint64
 	hashed []bool
+	// rehashed counts the rows hashed, for tests of the search's cost.
+	rehashed int
 }
 
 // reset empties the shadow for a screen tiled as g.
@@ -126,6 +128,7 @@ func (s *shadow) rowHash(c, y int) uint64 {
 			s.hash[t*s.g.tile+k] = rowHash(s.pix[t][k*w : (k+1)*w])
 		}
 		s.hashed[t] = true
+		s.rehashed += r.Dy()
 	}
 	return s.hash[t*s.g.tile+y%s.g.tile]
 }
@@ -178,6 +181,10 @@ type scroller struct {
 	slots  []int32  // the row of each slot plus one; 0 empty, -1 repeated
 	dys    []int
 	copies []scrollCopy
+
+	// What the last search cost: the runs it read and the rows it
+	// hashed.
+	searched, hashes int
 }
 
 // find returns the copies that bring the client's screen, as the shadow
@@ -188,6 +195,7 @@ type scroller struct {
 func (sc *scroller) find(fb *framebuffer.Framebuffer, order []int) []scrollCopy {
 	g := sc.g
 	sc.copies = sc.copies[:0]
+	sc.searched, sc.hashes, sc.rehashed = 0, 0, 0
 	if len(order) < scrollMinTiles || g.cols == 0 {
 		return nil
 	}
@@ -265,6 +273,7 @@ func (sc *scroller) read(fb *framebuffer.Framebuffer, rn run) bool {
 	}
 	sc.col = sc.col[:size]
 	sc.vers = sc.vers[:0]
+	sc.searched++
 	for r := rn.r0; r < rn.r1; r++ {
 		t := r*g.cols + rn.c
 		got, v := fb.ReadTile(t, sc.col[(r-rn.r0)*g.tile*w:])
@@ -325,6 +334,7 @@ func (sc *scroller) vote(rn run) int {
 	y0, y1 := sc.span(rn)
 	for y := y0 + scrollStride/2; y < y1; y += scrollStride {
 		k := rowHash(sc.cur(rn, y))
+		sc.hashes++
 		if sc.row(rn.c, y) != nil && sc.shadow.rowHash(rn.c, y) == k {
 			continue // unchanged
 		}

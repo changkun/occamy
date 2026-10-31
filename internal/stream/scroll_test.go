@@ -410,6 +410,39 @@ func TestScrollUndefinedSource(t *testing.T) {
 	}
 }
 
+// The search's cost is bounded: a change of one tile is not searched; a
+// change of the whole screen that is no scroll gives up after
+// scrollMaxMisses runs, each hashing its column once and an eighth of its
+// own rows; and a scroll of the whole screen votes once, the other
+// columns trying the offset found.
+func TestScrollBounds(t *testing.T) {
+	const w, h, tile = 1024, 768, 64
+	r := newScrollRig(t, w, h, tile)
+	drawPage(r.fb, r.fb.Bounds(), 1, 0)
+	r.frame()
+	fillFB(r.fb, image.Rect(100, 100, 110, 110), color.RGBA{0xff, 0, 0, 0xff})
+	r.frame()
+	if r.sc.searched != 0 || r.sc.hashes+r.sc.rehashed != 0 {
+		t.Errorf("one tile: %d runs searched, %d rows hashed", r.sc.searched, r.sc.hashes+r.sc.rehashed)
+	}
+	drawPage(r.fb, r.fb.Bounds(), 2, 0)
+	if copies, _ := r.frame(); len(copies) != 0 {
+		t.Fatalf("%d copies of a new page", len(copies))
+	}
+	if r.sc.searched != scrollMaxMisses || r.sc.hashes > scrollMaxMisses*h/scrollStride || r.sc.rehashed > scrollMaxMisses*h {
+		t.Errorf("a new page: %d runs searched, %d rows of it hashed and %d of the shadow; want %d runs, at most %d and %d",
+			r.sc.searched, r.sc.hashes, r.sc.rehashed, scrollMaxMisses, scrollMaxMisses*h/scrollStride, scrollMaxMisses*h)
+	}
+	drawPage(r.fb, r.fb.Bounds(), 2, 10)
+	if copies, _ := r.frame(); len(copies) != 1 {
+		t.Fatalf("%d copies of a scroll", len(copies))
+	}
+	if r.sc.searched != w/tile || r.sc.hashes > h/scrollStride || r.sc.rehashed > h {
+		t.Errorf("a scroll: %d runs searched, %d rows of it hashed and %d of the shadow; want %d runs, at most %d and %d",
+			r.sc.searched, r.sc.hashes, r.sc.rehashed, w/tile, h/scrollStride, h)
+	}
+}
+
 // Random scrolls, of the whole screen or of panes, and random paints:
 // the client always ends up showing the screen, and the shadow what the
 // client shows.
