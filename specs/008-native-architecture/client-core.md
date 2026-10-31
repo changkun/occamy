@@ -10,7 +10,7 @@ affects:
   - tests/
 effort: medium
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -358,6 +358,10 @@ layer, and any tools.
   - `stream`'s terminal writer keeps the larger of two sequence numbers
     for the pacer's input timing (`max(in.seq, seq)`), which picks the
     old one once numbers wrap. It only times one input, once in 2³².
+- **Browser counterpart:** the TypeScript core in
+  `client/occamy-web/src/protocol` follows this package's design, its
+  bounds and its delivery and acknowledgement rules, for the browser;
+  see [009](../009-react-web-client.md#implementation-notes-protocol-client).
 - **Tests:** end-to-end against `stream.Serve` with real sessions and
   the backendtest backends, in synctest bubbles: a graphical screen drawn
   and copied at random converges byte for byte, through raw tiles and
