@@ -31,18 +31,25 @@ import (
 // sets, makes x11vnc wait for the X server before it stops trapping.
 //
 // The test makes the x11vnc on port 5901 own the clipboard through a
-// session, stops it, asks for the clipboard with one xclip that waits
-// and then with one that it kills, and continues it. x11vnc checks the
-// window of the first; the second comes within 0.2 s, unchecked. The
-// first xclip must get the text, the same x11vnc must serve the port,
-// and the session must still carry the clipboard both ways. With the
-// variable, nothing can kill x11vnc here. Without it, whether the error
-// comes before x11vnc stops trapping is a race, and once a check of
-// x11vnc's has found a window gone, it waits for the X server for good,
-// until it is started again; so the test cannot fail every time. On a
-// Mac, against x11vnc processes just started, it failed in five of six
-// runs without the variable, each time as x11vnc first owned the
-// clipboard, before the stop, and passed in five of five with it.
+// session and stops it. While it is stopped, an xclip that waits asks
+// for the clipboard, and 0.6 s later another, which is killed 0.6 s
+// after that, its request sent; then x11vnc continues and answers both,
+// in that order. It checks the window of the first, which is there, and
+// as a rule answers the second within 0.2 s, unchecked. The first xclip
+// must get the text, the same x11vnc must serve the port, and the
+// session must still carry the clipboard both ways. With the variable,
+// nothing can kill x11vnc here. Without it, the test cannot fail every
+// time: whether the error comes before x11vnc stops trapping is a race;
+// a host slow enough to put more than 0.2 s between the two answers
+// has x11vnc check the second; and once a check of x11vnc's has found a
+// window gone, it waits for the X server for good, until it is started
+// again. The x11vnc that CI tests has served the parity matrix first,
+// and if it stalled for more than 2 s there while it owned the
+// clipboard, a check may have found one of the probe's xclips gone, and
+// the test cannot tell the variable's absence. On a Mac, against x11vnc
+// processes just started, it failed in five of six runs without the
+// variable, each time as x11vnc first owned the clipboard, before the
+// stop, and passed in five of five with it.
 func TestX11vncClipboardRequestorGone(t *testing.T) {
 	addr := endpointV1(t)
 	compose := composeE2E(t)
@@ -100,8 +107,8 @@ func TestX11vncClipboardRequestorGone(t *testing.T) {
 	// Text that the probe leaves alone, so that x11vnc keeps the
 	// clipboard. x11vnc drops cut text until it has made its selection
 	// window, which it does only once its latest client has been
-	// connected for some seconds (guess_dm_gone in xevents.c; about 13 s
-	// on the demo desktop, 45 s at most), and keeps from then on; so the
+	// connected for 45 s, or for 8 s once it has seen a window manager
+	// (guess_dm_gone in xevents.c), and keeps from then on; so the
 	// session sends the text until the clipboard holds it.
 	text := fmt.Sprintf("x11vnc requestor %d", time.Now().UnixNano())
 	for deadline := time.Now().Add(90 * time.Second); ; {
@@ -161,17 +168,24 @@ const x11vncPID = `for p in /proc/[0-9]*; do
 done`
 
 // goneRequestor stops x11vnc $PID, asks for the clipboard with an xclip
-// that waits, and then with one that is killed while x11vnc is stopped,
-// continues x11vnc, and prints what the first got. The probe's own
-// xclips wait 2 s, longer than x11vnc is stopped, so the first request
-// x11vnc answers, which it checks, comes from a window that is there.
-const goneRequestor = `kill -STOP "$PID"
-trap 'kill -CONT "$PID" 2>/dev/null' EXIT
+// that waits, and 0.6 s later with one that it kills 0.6 s after that,
+// which leaves time for each to send its request, in that order. It then
+// continues x11vnc, and prints what the first got. x11vnc stays stopped
+// for about 1.3 s, less than the 2 s the probe's own xclips wait, so the
+// first request x11vnc answers, which it checks, comes from a window
+// that is there; a longer stop would let one of the probe's die first,
+// and x11vnc's check of it would make it wait for the X server for good.
+const goneRequestor = `trap 'kill -CONT "$PID" 2>/dev/null' EXIT
+kill -STOP "$PID" || exit
 timeout 10 xclip -o -selection clipboard >/tmp/requestor.out 2>&1 &
 waiting=$!
-sleep 0.3
-timeout 0.4 xclip -o -selection clipboard >/dev/null 2>&1
-sleep 0.3
+sleep 0.6
+xclip -o -selection clipboard >/dev/null 2>&1 &
+gone=$!
+sleep 0.6
+kill -KILL "$gone" 2>/dev/null || echo "the xclip to kill had exited"
+wait "$gone" 2>/dev/null
+sleep 0.1
 kill -CONT "$PID"
 wait "$waiting"
 cat /tmp/requestor.out`
