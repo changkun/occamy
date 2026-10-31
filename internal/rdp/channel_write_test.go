@@ -477,3 +477,39 @@ func TestChannelWriteFailed(t *testing.T) {
 		}
 	}
 }
+
+// Once a write failed, what the client owes the server waits for nothing:
+// what it owes reaching a bound reports the failure, not the bound.
+func TestOwedAfterWriteFailed(t *testing.T) {
+	c := clipClient(&brokenConn{})
+	c.cfg.Resize = true
+	c.dynCh = &vchannel{name: "drdynvc", id: 1005}
+	if err := c.drdynvcMessage(nil, rdptest.DVCCreateRequest(1, "nobody"), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.writeDue(); !errors.Is(err, errBroken) {
+		t.Fatalf("writeDue: %v, want the write's failure", err)
+	}
+	request := cliprdrPDU(cbFormatDataRequest, 0, binary.LittleEndian.AppendUint32(nil, cfUnicodeText))
+	for _, tc := range []struct {
+		name  string
+		bound int
+		msg   func(n int) error
+	}{
+		{"dynamic channel answers", maxDynvcAnswers, func(n int) error {
+			return c.drdynvcMessage(nil, rdptest.DVCCreateRequest(uint32(n), "nobody"), false)
+		}},
+		{"data requests", maxDataRequests, func(int) error {
+			return c.cliprdrMessage(nil, request, false)
+		}},
+	} {
+		var err error
+		n := 0
+		for ; n <= tc.bound && err == nil; n++ {
+			err = tc.msg(n)
+		}
+		if n != tc.bound+1 || !errors.Is(err, errBroken) {
+			t.Errorf("%s: after %d, %v, want the write's failure", tc.name, n, err)
+		}
+	}
+}

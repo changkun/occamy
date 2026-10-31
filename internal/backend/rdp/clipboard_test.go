@@ -182,8 +182,8 @@ func TestRunClipboardDisabled(t *testing.T) {
 		cfg.DisableCopy, cfg.DisablePaste = true, true
 		b := newBackend(t, cfg)
 		start(t, b, &backendtest.Sink{})
-		if c := s.accept(t); len(c.Channels) != 0 {
-			t.Errorf("channels %v, want none", c.Channels)
+		if c := s.accept(t); c.Channels["cliprdr"] != 0 {
+			t.Errorf("channels %v, want no clipboard", c.Channels)
 		}
 		if err := b.Input(backend.Clipboard{Data: []byte("x")}); err != nil {
 			t.Fatal(err)

@@ -381,7 +381,23 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   leaves more than 8 of its data requests unanswered ends it.
   `rdptest` accepts NLA through CredSSP with NTLMv2, so that the
   backend's NLA path, prompted credentials included, runs end to end in
-  tests. Resize waits for the dynamic channels of the second part.
+  tests.
+- The native RDP backend's resize, the second part of its second
+  phase: `internal/rdp` speaks DRDYNVC, version 2 at most, and accepts
+  the Display Control channel, through which `RequestSize` asks the
+  server for a desktop size within the area it takes: the newest size,
+  at most one every half second, and again every two seconds, up to
+  eight times, until the desktop has it, since xrdp ignores a size
+  while its login is in progress. A size asked for back to the
+  desktop's own before the server applied the one before it is kept
+  while the server may yet apply that one. The backend asks for any
+  interactive viewer's `Resize`; a server without Display Control keeps
+  its size, which viewers scale. After a reactivation the client tells
+  a server it had asked to suppress its output to suppress it again,
+  unless a viewer has asked for output since. A dynamic channel id of
+  size code 3 ends the session, and once the channel writer fails, a
+  server that the client then owes too many answers ends it with the
+  write's error.
 
 ### Changed
 

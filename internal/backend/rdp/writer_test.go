@@ -85,6 +85,12 @@ func (f *fakeClient) SetClipboard(text []byte) error {
 	return f.fail
 }
 
+func (f *fakeClient) RequestSize(width, height int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.order = append(f.order, fmt.Sprintf("size %dx%d", width, height))
+}
+
 func (f *fakeClient) UnicodeInput() bool { return f.unicode }
 func (f *fakeClient) MouseXInput() bool  { return false }
 
