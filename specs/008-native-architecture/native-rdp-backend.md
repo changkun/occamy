@@ -1378,7 +1378,9 @@ RDP's guacd path, RDP no longer needs guacd at all.
   runs the pipeline against xrdp, wants a confirm, a reset, a surface
   mapped and planar bitmaps, waits for the session's screen in
   RemoteFX Progressive, and wants eight more frames from at most 40
-  keys.
+  keys. Its assertions on the reset and the planar bitmaps came with
+  the review's fixes and have not yet run live: the host's load stayed
+  between 26 and 43, above the limit of 8 for the suite.
 - **Fuzzing.** `FuzzZGFX`, `FuzzZGFXRoundTrip` (the decoder must give
   back what the tests' compressor compressed), `FuzzGFX` (messages on
   a confirmed pipeline, its state checked after each), `FuzzPlanar`
@@ -1390,7 +1392,10 @@ RDP's guacd path, RDP no longer needs guacd at all.
   (load 52) and `FuzzZGFXRoundTrip` 1.2 million (load 52), with a
   worker per CPU; then, with 4 workers, `FuzzGFX` 230,000 (load 69),
   `FuzzPlanar` 1.77 million (load 136), `FuzzDynvc` 5.2 million
-  (load 9) and `FuzzRun` 750,000 (load 13). None failed.
+  (load 9) and `FuzzRun` 750,000 (load 13). After the review's
+  fixes, again with 4 workers: `FuzzGFX` 130,000 (load 26),
+  `FuzzRun` 860,000 (load 27) and `FuzzZGFX` 2.2 million (load 31).
+  None failed.
 - **Benchmarks** (an Apple Silicon host shared with other sessions and
   under load, so the numbers are noisy): `BenchmarkGFXPlanar` about
   10 ns a pixel, `BenchmarkGFXUncompressed` about 1.4, a solid fill
