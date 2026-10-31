@@ -200,9 +200,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   joins a running one, both as protocol v1 WebSockets with the token in
   a subprotocol, never in the URL, and `Origin` checked against
   `origins`. Graphical streams offer `webp`, `jpeg`, `deflate` and
-  `raw`. ssh connections use the native backend, rdp and telnet the
-  guacd bridge, and vnc connections the guacd bridge unless they set
-  `backend: native` (below). ssh connections need `host_keys` or
+  `raw`. ssh and vnc connections use the native backends, rdp and
+  telnet the guacd bridge, and vnc connections the guacd bridge only
+  when they set `backend: guacd` (below). ssh connections need `host_keys` or
   `insecure_ignore_host_key: true`. vnc connections take a `username`
   for VeNCrypt's Plain, and a `tls` block for the server's certificate:
   a CA file, pins by fingerprint, or, alone, an insecure mode for demos. A
@@ -311,28 +311,32 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the virtual channels of its second phase. Nothing registers it in
   occamyd until NLA has run end to end. The VNC and RDP backends share
   one USB HID to scan code table, `internal/keymap`.
-- A `backend` key on each v1 connection, `guacd` or `native`, and
+- A `backend` key on each v1 connection, `native` or `guacd`, and
   `adhoc_backends`, which picks the backend of ad-hoc targets by
-  protocol. vnc takes either; ssh is always native, and rdp and telnet
-  always go through guacd: `backend: native` on rdp is refused until
-  the native RDP backend has run NLA end to end, and the session's
-  state names the backend that serves it. vnc goes through guacd by
-  default during the guacd bridge's opt-in period, so a vnc connection
-  with `tls` must set `backend: native`: guacd would not check the
-  certificate as `tls` says, and a file without it fails to load,
-  naming the key. A vnc connection without `tls` goes through guacd,
-  which checks no certificate; `backend: native` checks a VeNCrypt
-  server's certificate against the system's roots. No release served
-  v1 vnc connections. A native vnc session asks the
+  protocol. A protocol defaults to `native` wherever a native backend
+  exists, so vnc connections and ad-hoc vnc targets default to
+  occamyd's own VNC client, and `backend: guacd` (or
+  `adhoc_backends: {vnc: guacd}`) is an opt-in fallback through guacd,
+  kept as the benchmark's baseline until the benchmark shows native at
+  least 10x better. ssh is always native, and rdp and telnet always go
+  through guacd: `backend: native` on rdp is refused until the native
+  RDP backend has run NLA end to end, and the session's state names
+  the backend that serves it. guacd would not check a VeNCrypt
+  certificate as `tls` says, so a vnc connection with `tls` cannot set
+  `backend: guacd`, and a file that does fails to load, naming the
+  key. Without `tls`, the native backend checks a VeNCrypt server's
+  certificate against the system's roots. No release served v1 vnc
+  connections. A native vnc session asks the
   server for the owner's size from the stream's `hello`, on a
   connection's stream as on a session's, and a resize that reaches the
   backend before it runs is no longer dropped. A size beyond the
   backend's limits, such as a hello's 8192×8192, which is more than
   2^25 pixels, is not asked for: the server keeps its size.
-- `ard: true` on a vnc connection with `backend: native` allows Apple
+- `ard: true` on a vnc connection on the native backend allows Apple
   Remote Desktop authentication, for macOS Screen Sharing. It is
-  refused with a `tls` that requires TLS, and the error for a Mac that
-  offers only ARD names the key on the connection.
+  refused with `backend: guacd` and with a `tls` that requires TLS,
+  and the error for a Mac that offers only ARD names the key on the
+  connection.
   [docs/configuration.md](docs/configuration.md#apple-remote-desktop-ard)
   describes the risk: anyone in between can read the Mac account's
   whole password.

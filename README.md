@@ -174,8 +174,9 @@ Occamy connects to them through upstream guacd 1.6, which also runs in
 the stack. A second `occamyd`, `occamy-v1` on `localhost:5637`, serves
 API v1 from the v1 file [docker/occamy-v1.yaml](./docker/occamy-v1.yaml),
 with the user `demo` and the password `occamy`: the VNC server as the
-connection `vnc-native`, through `occamyd`'s own VNC client
-(`backend: native`), and as `vnc-guacd`, through guacd.
+connection `vnc-native`, through `occamyd`'s own VNC client, vnc's
+default, and as `vnc-guacd`, through guacd (`backend: guacd`), the
+fallback that the benchmark compares against.
 
 Here is a working video demo:
 
