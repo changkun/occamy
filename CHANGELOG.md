@@ -337,17 +337,33 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - [docs/api.md](docs/api.md), the reference of API v1: every route with
   its tokens, requests, replies, errors and limits, ad-hoc targets,
   shares, the stream upgrades and the OIDC routes. A test fails when a
-  route has no section in it, or a section names no route.
+  route has no section in it, or a section names no route; routes are
+  added only through the list that test reads, from which each
+  listener's mux is built.
+- API v1 refuses, with 400 `bad_request`, a JSON body that names a
+  field twice, at any depth, or names one in a case other than its
+  own, such as `Connection` for `connection`. encoding/json takes the
+  last of two and matches names in any case, so a proxy in front of
+  occamyd that reads the first, or matches names exactly, would have
+  seen a different request. A body nests at most 32 deep. The
+  refusals of `GET /api/v1/auth/oidc/login` carry
+  `Cache-Control: no-store`, as its redirects do.
 - `internal/backend/vnc/vnctest`, a fake RFB server for tests outside
-  the backend, and tests that drive native VNC sessions through
-  occamyd's routes with the Go client: credentials stored and
-  prompted, the screen, input, resizes, clipboard both ways, the
-  cursor, visibility, the end reasons and the `tls` policy.
+  the backend, which counts the credentials clients send, and tests
+  that drive native VNC sessions through occamyd's routes with the Go
+  client: credentials stored and prompted, the screen, input, resizes,
+  clipboard both ways, the cursor, visibility, the end reasons, the
+  `tls` policy, which sends no credential to a server it refuses, and
+  ad-hoc targets by address and by name, dialled at the address that
+  was checked. A `vnc.Config` size beyond the backend's limits, such as
+  a hello's 8192×8192, which is more than 2^25 pixels, is not asked
+  for: the server keeps its size.
 - The demo stack runs `occamy-v1` next to `occamy`, on port 5637, with
   the v1 file `docker/occamy-v1.yaml`: the demo VNC server through the
   native backend and through guacd, which `make e2e` streams with the
   Go client. `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` move a
-  second stack aside on a shared host.
+  second stack aside on a shared host, and `make e2e` follows the
+  last two.
 
 ### Changed
 

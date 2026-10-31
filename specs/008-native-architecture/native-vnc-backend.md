@@ -1305,13 +1305,20 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     stream's owner, whose resize may reach the backend before the
     session's goroutine has started `Run`, is not lost either. Each
     `Run` asks for the newest size once the server shows
-    ExtendedDesktopSize.
+    ExtendedDesktopSize. A size beyond `MaxSide` or `MaxPixels`, from
+    a `Resize` or from `Config`, is not asked for, so a hello of
+    8192×8192, within `backend.MaxResizeSide` but over 2^25 pixels,
+    leaves the server's size (`TestConfigSizeBeyondLimits`).
   - `internal/backend/vnc/vnctest` is a fake RFB 3.8 server for tests
     outside the package: None, VNC Authentication and VeNCrypt's X.509
     subtypes, Raw in the client's pixel format, Cursor, DesktopSize,
     ExtendedDesktopSize with SetDesktopSize, and cut text, answering
-    update requests itself. `server/vnc_e2e_test.go` runs the backend
-    through occamyd's routes against it with the Go client.
+    update requests itself. It counts failed authentications and,
+    right or wrong, the credentials clients send (`Credentials`), so
+    a test can tell that a refused certificate got none.
+    `server/vnc_e2e_test.go` runs the backend through occamyd's routes
+    against it with the Go client, for connections and for ad-hoc
+    targets by address and by name.
 - **Follow-ups.**
   - `vnctest` duplicates part of the package's own fake server
     (`server_test.go`), which scripts every byte and reaches into the

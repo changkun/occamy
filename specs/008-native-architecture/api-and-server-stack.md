@@ -1586,20 +1586,48 @@ place for fixes that ship on v0 before beta.
     /api/v1/sessions`, the connection stream and the ad-hoc path look
     up the connection's or `adhoc_backends`' backend. The session's
     state keeps naming it `ssh`, `vnc` or `guacd`.
-  - Routes register through a mux that records their patterns
-    (`routeMux`), so that `TestAPIDoc` can check that
+  - Routes are added to a list (`routeMux`), from which each listener's
+    `http.ServeMux` is built, so that `TestAPIDoc` can check that
     [docs/api.md](../../docs/api.md), the reference of every route
     with its tokens, requests, replies, errors and limits, has one
-    section per route of the public and debug listeners.
+    section per route of the public and debug listeners. The list
+    holds no ServeMux, so a route cannot be added past it (review).
+  - **Strict JSON (review):** `decodeJSON` reads the body, then walks
+    its tokens with `json.Decoder.Token` against the target type
+    (`checkMembers`, `server/strictjson.go`) before decoding it: a
+    member twice in any object, at any depth, or a member whose name
+    is a struct field's only in another case, is a 400 `bad_request`,
+    and so is nesting past 32. encoding/json takes the last duplicate
+    and folds case (the Kelvin sign and the long s included), so a
+    proxy that read the first, or matched exactly, saw another
+    request. `encoding/json/v2` rejects both but needs
+    `GOEXPERIMENT=jsonv2` on Go 1.26. Types that decode themselves
+    (`json.Unmarshaler`, `encoding.TextUnmarshaler`) and maps get the
+    duplicate check only; syntax errors stay the decoder's.
+  - The refusals of `GET /api/v1/auth/oidc/login` carry
+    `Cache-Control: no-store`, as its redirects and the callback's
+    `invalid_state` do (review).
 - **Deviations.** The behaviour change for v1 files on master: vnc
   connections without `backend` now go through guacd, and a vnc
   connection with `tls` must set `backend: native`, or the file fails
-  to load with the key named. No release served v1 files' vnc
-  connections, so no release changes.
+  to load with the key named. A vnc connection without `tls`, which
+  the native backend served checking a VeNCrypt certificate against
+  the system's roots, now goes through guacd, which checks none. No
+  release served v1 files' vnc connections, so no release changes.
+- **Review.** An independent review with mutation testing found no
+  bug in the production code; the tests it asked for were added:
+  `TestConnectionTarget` sets every field of a connection and wants
+  every field of `target` but `name`; `TestAdhocTargets` wants no
+  `ard` and the default `tls` on every ad-hoc target;
+  `TestVNCAdhocName` opens ad-hoc targets by `.invalid` names through
+  a resolver that answers once, so that dialling the name rather than
+  the checked address fails, and refuses a certificate that signs
+  itself with no credential sent; `TestVNCTLS` sends wrong passwords
+  on the refused connections and counts the credentials `vnctest`
+  receives. The mutants that survived before are killed, or no
+  longer compile (a route added on the ServeMux past the list).
 - **Follow-ups.**
-  - `decodeJSON` matches field names case-insensitively, as
-    `encoding/json` does, so `{"Connection":"x"}` passes the unknown
-    field check; docs/api.md does not promise either.
-  - The 400s of `GET /api/v1/auth/oidc/login` carry no
-    `Cache-Control: no-store`, while the callback's `invalid_state`
-    does.
+  - A hello of 8192×8192 passes `backend.MaxResizeSide` but exceeds
+    the native VNC backend's 2^25 pixels; the backend ignores it and
+    the server keeps its size. A stream could clamp it to the pixel
+    limit with its aspect instead.
