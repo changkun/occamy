@@ -294,6 +294,13 @@ func TestNewRDP(t *testing.T) {
 	if err != nil || cfg.TLS.ServerName != "desk.lab.internal" {
 		t.Errorf("ad-hoc: server name %q, %v", cfg.TLS.ServerName, err)
 	}
+	// DOMAIN\user logs on to the domain; a user@domain name goes as it is.
+	for user, want := range map[string][2]string{`LAB\alice`: {"LAB", "alice"}, "alice@lab.internal": {"", "alice@lab.internal"}, `\alice`: {"", "alice"}} {
+		cfg, err = rdpConfig(target{addr: "10.0.0.5:3389", creds: config.Credentials{Username: user, Prompt: true}})
+		if err != nil || cfg.Domain != want[0] || cfg.Username != want[1] {
+			t.Errorf("username %q: domain %q, username %q, %v; want %q", user, cfg.Domain, cfg.Username, err, want)
+		}
+	}
 	for name, tls := range map[string]config.ConnectionTLS{
 		"missing CA file":    {CAFile: filepath.Join(t.TempDir(), "nope")},
 		"pins and a CA file": {CAFile: ca, Pins: pins},

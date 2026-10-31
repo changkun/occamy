@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"strings"
 	"sync"
 
 	"changkun.de/x/occamy/internal/backend"
@@ -232,7 +233,8 @@ func rdpSize(s screen) (width, height int) {
 }
 
 // rdpConfig is the native RDP backend's configuration for t, with the
-// password and the CA file read.
+// password and the CA file read. A username of the form
+// DOMAIN\user logs on to the domain, as mstsc takes it.
 func rdpConfig(t target) (rdp.Config, error) {
 	pw, err := password(t.creds)
 	if err != nil {
@@ -254,6 +256,9 @@ func rdpConfig(t target) (rdp.Config, error) {
 			InsecureSkipVerify: t.tls.InsecureSkipVerify,
 		},
 		SecuritySetting: securitySetting(t),
+	}
+	if d, u, ok := strings.Cut(cfg.Username, `\`); ok {
+		cfg.Domain, cfg.Username = d, u
 	}
 	// An ad-hoc target's address is the one its name resolved to, and
 	// the certificate names the name.
