@@ -14,7 +14,7 @@ affects:
   - protocol/
 effort: large
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -102,6 +102,10 @@ quickly, in pure Go. That means choosing:
   for the exposed strip only. The baseline's G3 sends 71 KiB a frame
   over VNC and 516 KiB over RDP for a one-line scroll; the target is
   7.1 and 52 KiB. Backend CopyRect is used directly when it exists.
+  (Built 2026-10-31 for vertical offsets, with the hashes kept per
+  viewer against what its client shows rather than by the framebuffer,
+  and backend CopyRect not yet forwarded: see Implementation notes:
+  Scroll detection.)
 - **Client tile cache:** the server mirrors a bounded LRU of tiles that
   each client holds, keyed by a content hash (xxh3). A tile whose
   content the client already has is sent as a `tile` with the `cached`
@@ -279,7 +283,7 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
 | Measurement (done 2026-10-30) | A corpus of frames recorded from the bench desktop's scenes (desktop, two terminals, browser, photograph, drag, scroll, motion), and benchmarks on Go 1.27 that settle questions 1 to 3 and the lossy codec: palette or raw pixels with deflate, PNG, QOI, lossless WebP, JPEG (standard library and gen2brain/jpegn) and lossy WebP, scored for size, encode and decode time and SSIM; results in [docs/benchmarks/codecs.md](../../docs/benchmarks/codecs.md) | — |
 | Codecs (done 2026-10-30) | `internal/encoder`, an implementation of `stream.Encoder`: classification by colour count (up to 16, 17 to 256, above 256); the palette or raw container with `compress/flate` at level 1 as `deflate` (2); raw RGBA (1); lossy WebP from gen2brain/vpx/webp at method 0 (5), and JPEG from gen2brain/jpegn (4) for viewers that list JPEG but not WebP; adjacent lossy tiles of a frame encoded as one rectangle. Fixes the deflate container, including alpha for cursors, in [docs/protocol.md](../../docs/protocol.md), which marked it provisional. Adds vpx and jpegn to occamyd's `go.mod`, with the Go 1.26.4 they need, and their licence and PATENTS notices to the image's `licenses/` | Measurement |
 | Refinement | Motion heat per tile, and refinement after a still delay: exact for tiles of up to 256 colours, which go lossy while they move if they have more than 16, and a quality chosen by SSIM for photographic ones; gives `stream.Encoder` the tile's motion | Codecs |
-| Scroll detection | Row hashes per tile column (xxh3-64), the offset search, and `copy-rect` with tiles for the exposed strip | Framebuffer |
+| Scroll detection (done 2026-10-31) | Row hashes per tile column (xxh3-64), the offset search, and `copy-rect` with tiles for the exposed strip. Built per viewer against a shadow of what its client shows, vertical offsets only, verified pixel for pixel; the corpus's scroll takes 5.0 KiB a frame against 58.5 ([notes](#implementation-notes-scroll-detection)) | Framebuffer |
 | Tile cache | Content hashes (xxh3-128 from zeebo/xxh3, so collisions are out of reach), the server's mirror of each client's cache, and the `cached` codec | Codecs, protocol v1 Messages |
 | Encode cache and workers | Encoded tiles cached by tile, version, codec and quality and shared by viewers; a worker pool bounded per session | Codecs |
 
@@ -673,3 +677,333 @@ times.
   exact for lossless vectors, above `min_psnr` for lossy ones, refusing
   every invalid one.
 - Browsers' decode times are still unmeasured.
+
+## Implementation notes: Scroll detection
+
+**Status.** Built and measured on 2026-10-31, and revised the same day
+after review: the search's cost is bounded after a copy is found, copies
+keep track of lossy quality, and a copy is applied to the shadow only
+once written. occamyd serves protocol v1 through `internal/stream` since
+the Sessions and Streams tasks (#111), so every graphical viewer's
+writer has it. `stream.Config.NoScroll` turns it off; occamyd does not
+set it.
+
+**What was built.**
+
+- **The previous screen is each viewer's own.** A `copy-rect` copies the
+  pixels a client already has, so each writer keeps a *shadow* of what
+  its client shows (`internal/stream/scroll.go`). It holds:
+  - the pixels of every tile the writer sent, taken when the tile's
+    message is written;
+  - every copy the writer sent, applied in the order the client applies
+    them;
+  - which tiles the client has drawn since the last resize, before which
+    its screen is undefined;
+  - the quality of each tile's pixels on the client: lossless, or the
+    lowest lossy quality of the messages and copies that drew its rows;
+  - each tile's row hashes, xxh3-64 from `zeebo/xxh3`, computed when a
+    search first needs them and dropped when the tile is sent again.
+
+  The shadow takes the buffers the tiles were read into and gives back
+  its old ones, so no pixels are copied. Versions cannot stand in for
+  it: the framebuffer holds only the current pixels, and in a scroll the
+  source rows have changed as well. With a shadow, three cases need
+  nothing of their own:
+  - a viewer that skipped frames, on a slow link or by stalling;
+  - a viewer that was hidden;
+  - a viewer whose tiles outside its viewport are stale.
+- **The search, once a frame** (`scroller.find`):
+  - **Quick reject.** The frame's dirty tiles are split into runs down
+    each tile column. Only runs of at least two tiles are searched, so a
+    key, a caret or a button never reaches the hashing. The longest
+    runs go first.
+  - **Vote.** Every eighth row of a run, starting four rows in, is hashed and
+    looked up in an open-addressing table of the shadow's row hashes for
+    that column. Each row found votes for its distance. Three kinds of
+    row do not vote: one that has not changed, one found at its own
+    place, and one whose hash occurs twice in the column, such as a
+    blank line. The offset with the most votes wins if it has at least
+    two. A plurality is enough, because two panes in one column may
+    scroll by different amounts and every offset is verified anyway.
+  - **Verify.** `try` finds the longest span of the run's rows that equal
+    the shadow's rows at that offset, pixel for pixel (`bytes.Equal`).
+    It also finds the tiles the copy completes: those whose rows outside
+    the span already equal what the client has, in a tile the client
+    has drawn. A hash collision can cost a search but never a wrong
+    pixel.
+  - **Hint.** The offset of the last copy found is tried first in the
+    next run, so a scroll of the whole screen votes once.
+  - **Miss limit.** The search stops once it has searched three runs
+    more without a copy than it found copies in: at most 2h+3 runs for
+    h copies. Motion with no scroll costs three runs' hashing; a sidebar
+    scrolling beside motion, five.
+  - **Order.** Within a column, a copy must not read rows that an
+    earlier copy wrote, in the order they are sent.
+  - **Merge.** Copies of adjacent columns with the same rows and offset
+    are merged into one `copy-rect`.
+- **Emission** (`writer.sendFrame`):
+  - The search runs before the first tile of the frame's order. It runs
+    again when an input's effect takes the frame over.
+  - Its copies go out before the tiles of the order they were found in.
+    They are unpaced, as `frame-end` is, since each is 20 bytes.
+  - A copy is written directly, not through the writer's `write`, which
+    drops a message larger than the client takes and reports nothing. A
+    copy the client would not take is neither sent nor applied to the
+    shadow, and nor are the copies after it. No client allowed to
+    connect refuses 20 bytes, so this guards the shadow rather than
+    anything seen.
+  - A tile a copy completes is marked sent at the version read during
+    the search, if its pixels end up lossless or at least at the
+    pacer's current quality. In an input's frame it is also marked as
+    the input's effect. The frame skips such tiles, and a run of lossy
+    tiles ends before one. A tile the copy draws right but at a lower
+    quality stays dirty and is sent again, as it would be without the
+    copy; the copy still goes, for the few bytes it costs.
+  - In an input's frame, a copy that completed tiles carries the input's
+    effect: the frame reports the input, and the copy's bytes count
+    toward the frame's 16 KiB budget. A wheel whose effect is a copy
+    alone is therefore resolved by it.
+  - The debug log gives each frame's copies and search time.
+- **Tests:**
+  - **Detection** (`scroll_test.go`):
+    - offsets of 1, 13, 63, 64, 65, 100 and 300 rows up, and of 1, 13,
+      64 and 200 down;
+    - partial widths;
+    - repeated rows, as stripes, which must not vote;
+    - a hash forced to collide (the first pixel only);
+    - edge tiles smaller than 64;
+    - resizes, and sources and destinations the client has not drawn;
+    - copies that conflict within a column, and adjacent columns with
+      the same rows but different offsets, which must not merge;
+    - the bounds, counted as rows hashed, runs searched and offsets
+      tried, against literal figures, including a sidebar that scrolls
+      beside a new page;
+    - the quality a copy leaves its tiles at, against the target;
+    - a property test: 40 seeds of a scrolling sidebar and pane, after
+      which the client must equal the server and the shadow the client.
+  - **Through the writer** (`scroll_writer_test.go`), each compared
+    exactly with the server's screen, and the shadow with the client's
+    in every tile it holds lossless:
+    - remote copies and repaints;
+    - a client that stalled, was hidden, or has a viewport;
+    - two viewers on links of different speeds;
+    - a wheel, including one that arrives in the middle of a frame of
+      motion;
+    - a resize that keeps the grid;
+    - a lossy run beside a copy, and the lossless tile read ahead after
+      a lossy run, then scrolled;
+    - a photograph sent at quality 30 and scrolled at 90, whose tiles
+      are sent again, and one sent at 90 and scrolled at 30, which the
+      copy completes;
+    - a copy the client would not take, which neither goes nor moves
+      the shadow;
+    - a screen that scrolled again after its tiles were collected;
+    - 8 seeds of random panes, copies, paints, resizes, hidden spells,
+      viewports and stalls.
+  - **The shadow against the wire** (`scroll_property_test.go`, from
+    the review): random screens, scrolls by copy and by repaint,
+    resizes, viewports, stalls, wheels and viewers joining, served to
+    one to four viewers of random codecs over links of random rates.
+    Every message is decoded into a model of the client as it is
+    written, and each frame-end checks that the shadow is what the
+    client shows (exactly where it holds a tile lossless), that each
+    tile marked sent shows the server's pixels, and that copies stay on
+    the screen and move vertically. CI runs it for 3 seconds;
+    `OCCAMY_SCROLL_PROPERTY_BUDGET` runs it longer, and 150 seconds ran
+    1,409 seeds and 137,888 frames, 47,007 of them with copies, without
+    a failure.
+  - **On the corpus** (`scroll_corpus_test.go`): the bytes, below, and
+    the timing.
+- **Mutation check.** 55 mutants: the review's 41, which include the
+  first round's 24, rebuilt against this code, and 14 of the revision's
+  (the miss bound, quality through copies, the dropped copy). The tests
+  without the property test kill 53. Of the eight the first round's
+  tests missed, they now kill six: three only the review's property
+  test had killed (the lookahead's buffer lost, the shadow given the
+  wrong buffers, columns of different offsets merged) and three nothing
+  had (every row voting, apply marking a partly drawn tile defined, a
+  copy outside an input marked as its effect). The two left survive 30
+  seconds of the property test as well, and neither can draw a wrong
+  pixel:
+  - `try` also comparing the row below the screen's bottom edge, in the
+    buffers' spare rows, on a screen whose height is not a multiple of
+    the tile: this can only refuse a completion it should make, at the
+    cost of a tile;
+  - a resize during the search keeping the copies found before it, which
+    copy rows of the old screen just before the resize makes the
+    client's screen undefined.
+- **Licences.** `go.mod` gains `zeebo/xxh3` v1.1.0 (BSD-2-Clause), which
+  links `klauspost/cpuid/v2` (MIT) into amd64 builds. The image's
+  `licenses/` carries both, copied from the module cache as vpx's and
+  jpegn's are. `scripts/third-party-licenses.sh` now lists every
+  release platform's architectures as well as its systems, so cpuid's
+  licence reaches `THIRD_PARTY_LICENSES` whichever host runs it; since
+  occamyd links `internal/stream`, both are listed there.
+
+**Measurements.** Results, method and load are in
+[docs/benchmarks/scroll.md](../../docs/benchmarks/scroll.md). The
+figures are medians, on one core of the bench host, under a load average
+of 2.9 to 4.5:
+
+| Scene | KiB a frame: without · with | encode ms a frame: without · with | search ms |
+|---|---|---|---|
+| scroll | 58.5 · **5.0** | 3.59 · **0.54** | 0.234 |
+| scroll, skipping one | 58.6 · **5.0** | 3.62 · **0.53** | 0.233 |
+| drag | 9.8 · 9.8 | 2.32 · 2.30 | 0.044 |
+| motion | 393.8 · 393.8 | 8.35 · 8.62 | 0.068 |
+| browser, whole | 143.0 · 143.0 | 6.97 · 6.82 | 0.062 |
+| photo, whole | 31.3 · 31.3 | 10.96 · 11.21 | 0.065 |
+
+- **Scroll.** Each update of the corpus's scrolled text is one copy and
+  15 tiles. That is under G3's target of 7.1 KiB a frame, measured
+  without the WebSocket's framing; G3 itself, measured end to end
+  through occamyd, has not been run on protocol v1 yet. The revision
+  after review left these bytes and tiles unchanged.
+- **Other scenes** send the same bytes, and the search costs 0.6 to 1.9 %
+  of their encode time.
+- **The search alone** (`BenchmarkScrollFind`, after the revision,
+  under a load average of 3.2 to 9.1) costs, at 1024×768, 1080p and 4K:
+  - 39, 45 and 101 ns for a change of one tile;
+  - 137 ns, 323 ns and 1.1 µs for a line across a row of tiles;
+  - 58, 86 and 178 µs for a new page, given up after three runs, and
+    57, 83 and 170 µs for flat motion;
+  - 223 µs, 636 µs and 4.00 ms for a scroll of the whole screen;
+  - 128, 187 and 385 µs for a sidebar that scrolls beside a new page,
+    after five runs. Before the revision it searched every run and
+    took 415 µs, 1.14 ms and 6.40 ms.
+
+**Decisions.**
+
+- **The shadow costs memory: 4·W·H bytes a viewer,** with 8 bytes a row
+  of each tile column for the hashes, a buffer for one run's rows (a
+  column's height in 64-pixel tiles) and a vote table for one column's
+  hashes. Measured with the screen sent whole and scrolled once:
+
+  | Screen | Pixels | Hashes | Run buffer | Vote table | A viewer |
+  |---|---|---|---|---|---|
+  | 1024×768 | 3.00 MiB | 96 KiB | 192 KiB | 24 KiB | 3.3 MiB |
+  | 1920×1080 | 7.97 MiB | 255 KiB | 272 KiB | 48 KiB | 8.5 MiB |
+  | 3840×2160 | 31.88 MiB | 1020 KiB | 544 KiB | 96 KiB | 33.5 MiB |
+
+  The alternatives fail as follows:
+  - Versions cannot locate moved content.
+  - The frame last sent to everyone is wrong for a viewer that skipped
+    it.
+  - Recomputing what a client shows from its history would cost more
+    than keeping it.
+- **Vertical offsets only.** Row hashes find vertical moves cheaply.
+  Horizontal ones would need column hashes, or a 2-D search per region,
+  and the corpus has no horizontal scroll. The dragged window moves
+  diagonally, so G4 is not helped.
+- **Whole tile columns.** A copy spans whole tile columns. A column that
+  straddles a pane's edge has pixels that do not move, so its tiles go
+  as tiles, unless the part that does not move is uniform; a uniform
+  part is the same at any offset and is rightly copied too.
+- **Lossy pixels are copied as the client has them, and keep their
+  quality.** The shadow holds the pixels that were encoded, while a
+  client holds the decoder's approximation. A copy moves that
+  approximation, which is what sending the same pixels lossy again would
+  show at the same quality. The shadow records the quality each tile
+  was drawn at, and a copy completes a tile only if the pixels it ends
+  up with are lossless or at least at the pacer's quality now, so a copy
+  never keeps a viewer at a quality the pacer has since raised. A
+  photograph of 12 tiles sent at quality 30 and scrolled by 16 rows at
+  90 (`TestScrollLossyQuality`):
+
+  | | dB after the scroll | tiles | KiB |
+  |---|---|---|---|
+  | without detection | 39.8 | 12 | 147.9 |
+  | with it, before the review | 34.9 | 1 | 8.9 |
+  | with it, now | 39.8 | 12 | 147.9 |
+
+  The same photograph sent at 90 and scrolled at 30 is completed by the
+  copy: 39.1 dB from one copy and one tile in 0.7 KiB, against 34.6 dB
+  in 13.6 KiB without detection.
+- **The search reads whole runs.** It reads the run's tiles, not only
+  the rows it samples, because `try` compares every row and the
+  framebuffer hands out tiles. The reads are most of a miss's cost.
+
+**Deviations from the task.**
+
+- **Hashes are kept per viewer, not by the framebuffer** as Proposed
+  shape describes. They must be hashes of what each client has, and
+  hashing a run only when it is searched costs less than hashing every
+  drawing operation.
+- **Backend copies are not forwarded.** The framebuffer's `CopyRect`
+  still records damage, so a VNC CopyRect or a guacd `copy` reaches the
+  writer as changed tiles, and the search finds it again (the writer
+  tests do both). Forwarding a backend's copy needs every viewer's
+  shadow to hold its source, which the shadow now makes checkable.
+- **Horizontal scrolls are not detected**, as above.
+
+**Surprises.**
+
+- **The miss limit can hide a scroll.** A scroll beside a larger area of
+  new content goes as tiles: the new content's columns are searched
+  first, either as longer runs or further left, and the frame gives up
+  before reaching the scroll. A writer test found this when two paints
+  split across frames by chance. The limit stays, since motion would
+  otherwise hash every column of every frame.
+- **The miss limit stopped applying after the first copy** (found in
+  review). It counted misses only while no copy had been found, so a
+  sidebar scrolling beside a new page or beside flat motion searched
+  every run: 16 at 1024×768 and 60 at 4K, 6.4 ms a frame there. Driven
+  through a writer at 1024×768 by the review's own test, which is not
+  kept in the tree, the search was 31 % of a frame's encode time beside
+  flat motion and 8 % beside a new page. With the limit raised by one
+  run for each copy found, it is 8.7 % and 2.2 %. `BenchmarkScrollFind`
+  keeps both sidebar scenes.
+- **Copies kept lossy pixels after the pacer's quality rose** (found in
+  review). A tile a copy completed was marked sent whatever quality its
+  source was drawn at, so a photograph sent at quality 30 and scrolled
+  at 90 stayed at 30: 34.9 dB against 39.8 without detection. The
+  shadow now records each tile's quality, as above.
+- **A dropped copy would have moved the shadow** (found in review). The
+  writer's `write` drops a message larger than the client takes and
+  returns no error, so a dropped copy would have been applied to the
+  shadow and its tiles marked sent. No client allowed to connect
+  refuses 20 bytes, so it never happened; copies are now written
+  directly, and a test lowers the limit to check.
+- **The first conflict check was too strict.** It compared each copy's
+  whole reads and writes, and refused two copies of one column that the
+  client applies safely one after the other. It now checks in the order
+  the copies are sent.
+- **The corpus harness's pacer cut frames under the race detector.** It
+  measured a rate from acknowledgements that came at once, and could cut
+  the first full frame, which left tiles undefined and no copy to find.
+  The harness now never acknowledges, and fails if a frame leaves
+  anything unsent. That check then failed on CI's first run: the test
+  backend's first paint could land after the harness's first frame. The
+  harness now waits for that paint.
+- **Some mutants survived only because a flaky test killed them.** Before
+  that test was fixed, it was killing them by chance. Those three
+  mutants needed tests of their own:
+  - a span that starts inside a tile the client has never drawn;
+  - two coincidental rows that vote for two offsets;
+  - a screen that moved between collection and search.
+
+**Follow-ups.**
+
+- **Horizontal and 2-D moves**, for G4's dragged window.
+- **Forward backend copies**, a VNC CopyRect or a guacd `copy`, as
+  `copy-rect` when every viewer's shadow holds the source, which saves
+  the search.
+- **Refinement can read each tile's quality from the shadow.** A tile a
+  copy completes may hold lossy pixels moved from elsewhere; the shadow
+  records their quality, which a refinement pass can raise.
+- **Share the shadow, or its hashes,** between viewers that are caught
+  up, and with the Encode cache. Today each viewer keeps its own: 8.5
+  MiB at 1080p and 33.5 MiB at 4K, above.
+- **Search more cheaply:**
+  - read only the sampled rows until an offset wins, to make a miss
+    cheaper;
+  - keep a scroll frame's 168 allocations (the copies' tile lists) in
+    the scroller.
+- **One copy per column when columns differ.** Copies of adjacent
+  columns merge only when their rows and offset are equal. A scroll
+  whose span ends at a different row in each column, because content
+  differs, sends a copy per column.
+- **A frame the pacer cuts after a copy** shows the copied rows before
+  the exposed strip's tiles. Tiles that a copy only partly covers show
+  shifted rows above stale ones until the next frame. A frame without
+  copies that is cut shows tearing of the same kind.
