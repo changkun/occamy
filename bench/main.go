@@ -72,6 +72,7 @@ func main() {
 		quick     = flag.Bool("quick", false, "fewer samples and shorter scenarios, to check the setup")
 		ackHz     = flag.Float64("ack-hz", 60, "v1: the screen refresh at which a graphical frame is acknowledged, or 0 for at once, a diagnostic; the gate's numbers use 60")
 		runs      = flag.Int("runs", 1, "how many times to run everything; the table shows medians")
+		failfast  = flag.Bool("failfast", false, "stop at the first measurement with an error")
 		engine    = flag.String("engine", "podman", "container engine for CPU statistics, or none")
 		project   = flag.String("project", "docker", "compose project of the stack")
 		out       = flag.String("out", "bench-results.json", "JSON output file")
@@ -116,43 +117,12 @@ func main() {
 		log.Fatalf("no scenarios match %q", *scen)
 	}
 
-	report := report{
-		Started:    time.Now().UTC(),
-		Quick:      *quick,
-		Runs:       max(*runs, 1),
-		AckHz:      *ackHz,
-		FrameStamp: frameStamp,
-		Host:       hostInfo(*engine, *project),
+	p := plan{
+		series: chosenSeries, nets: chosenNets, scenarios: chosen,
+		quick: *quick, runs: *runs, ackHz: *ackHz, failfast: *failfast,
+		engine: *engine, project: *project,
 	}
-	ctx := context.Background()
-	// Each run measures everything once, so that a disturbance on the host
-	// affects one run of a measurement rather than all of them.
-	for run := range report.Runs {
-		log.Printf("run %d of %d", run+1, report.Runs)
-		for _, sr := range chosenSeries {
-			for _, nc := range chosenNets {
-				p, err := startProxy(sr.target, nc)
-				if err != nil {
-					log.Fatal(err)
-				}
-				r := &runner{
-					series: sr, net: nc, proxy: p, quick: *quick, runIndex: run,
-					cpu: newCPUSampler(*engine, *project),
-				}
-				for _, sc := range chosen {
-					if sr.serves(sc.Protocol) {
-						report.Results = append(report.Results, r.run(ctx, sc))
-					}
-				}
-				for _, proto := range protocolsOf(chosen) {
-					if sr.serves(proto) {
-						report.Results = append(report.Results, r.connect(ctx, proto))
-					}
-				}
-				p.close()
-			}
-		}
-	}
+	report := p.measure(context.Background())
 
 	b, err := json.MarshalIndent(report, "", "  ")
 	if err != nil {
@@ -162,17 +132,84 @@ func main() {
 		log.Fatal(err)
 	}
 	report.markdown(os.Stdout)
-	failed := false
-	for _, r := range report.Results {
-		failed = failed || r.Error != ""
-	}
-	if names := idle(chosenSeries, report.Results); len(names) > 0 {
+	failed := slices.ContainsFunc(report.Results, func(r result) bool { return r.Error != "" })
+	if failed && p.failfast {
+		log.Print("stopped at the first error (-failfast)")
+	} else if names := idle(chosenSeries, report.Results); len(names) > 0 {
 		log.Printf("no scenario chosen runs on %s", strings.Join(names, ", "))
 		failed = true
 	}
 	if failed {
 		os.Exit(1)
 	}
+}
+
+// plan is what a bench run measures, as its flags chose.
+type plan struct {
+	series    []series
+	nets      []netCondition
+	scenarios []scenario
+	quick     bool
+	runs      int
+	ackHz     float64
+	// failfast ends the run at the first result with an error, rather
+	// than measure the rest of a stack that stopped working.
+	failfast        bool
+	engine, project string
+}
+
+// measure runs p. Each run measures everything once, so that a
+// disturbance on the host affects one run of a measurement rather than
+// all of them.
+func (p plan) measure(ctx context.Context) report {
+	rep := report{
+		Started:    time.Now().UTC(),
+		Quick:      p.quick,
+		Runs:       max(p.runs, 1),
+		AckHz:      p.ackHz,
+		FrameStamp: frameStamp,
+		Host:       hostInfo(p.engine, p.project),
+	}
+	for run := range rep.Runs {
+		log.Printf("run %d of %d", run+1, rep.Runs)
+		for _, sr := range p.series {
+			for _, nc := range p.nets {
+				if p.measureOn(ctx, &rep, run, sr, nc) {
+					return rep
+				}
+			}
+		}
+	}
+	return rep
+}
+
+// measureOn adds to rep each chosen scenario and first frame that sr
+// serves, measured on nc, and reports whether failfast stopped there.
+func (p plan) measureOn(ctx context.Context, rep *report, run int, sr series, nc netCondition) (stopped bool) {
+	px, err := startProxy(sr.target, nc)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer px.close()
+	r := &runner{
+		series: sr, net: nc, proxy: px, quick: p.quick, runIndex: run,
+		cpu: newCPUSampler(p.engine, p.project),
+	}
+	stop := func(res result) bool {
+		rep.Results = append(rep.Results, res)
+		return p.failfast && res.Error != ""
+	}
+	for _, sc := range p.scenarios {
+		if sr.serves(sc.Protocol) && stop(r.run(ctx, sc)) {
+			return true
+		}
+	}
+	for _, proto := range protocolsOf(p.scenarios) {
+		if sr.serves(proto) && stop(r.connect(ctx, proto)) {
+			return true
+		}
+	}
+	return false
 }
 
 // idle returns the series that ran nothing, such as one that serves

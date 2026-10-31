@@ -46,6 +46,7 @@ make bench BENCH_FLAGS="-scenarios T1 -net N1 -series occamy"
 | `-net` | `N0,N1,N2` | Network conditions |
 | `-series` | `occamy,guacd` | `occamy` goes through occamyd; `guacd` connects to guacd directly; `v1-native` and `v1-guacd` speak protocol v1 to occamy-v1, with native backends or through guacd |
 | `-runs` | `1` | How many times to run everything; the table shows medians |
+| `-failfast` | off | Stop at the first measurement with an error, and exit non-zero; CI's runs set it |
 | `-quick` | off | A tenth of the samples and a sixth of the durations, to check the setup |
 | `-ack-hz` | `60` | v1: the screen refresh on whose ticks the harness shows and acknowledges frames, as a browser does; `0` acknowledges each at once ([The v1 series](#the-v1-series)) |
 | `-engine` | `podman` | Container engine for CPU time, or `none` |
@@ -55,8 +56,9 @@ make bench BENCH_FLAGS="-scenarios T1 -net N1 -series occamy"
 
 Server CPU needs podman: its container statistics report cumulative CPU
 time, and docker's do not. With docker, pass `-engine none`. CI runs a
-quick smoke variant on every push and does not compare numbers, because
-shared runners are too noisy.
+quick smoke variant on every push, with `-failfast`, and does not
+compare numbers, because shared runners are too noisy. When the job
+fails or times out, it prints the stack's logs.
 
 ## What is measured
 

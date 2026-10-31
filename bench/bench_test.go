@@ -409,8 +409,10 @@ func TestIdle(t *testing.T) {
 	}
 }
 
-// CI's bench job has a bound well below GitHub's default of 6 hours.
-func TestCIBenchTimeout(t *testing.T) {
+// CI's bench job has a bound well below GitHub's default of 6 hours,
+// each of its runs stops at the first error, and the stack's logs follow
+// a failure or the job's timeout, which cancels it.
+func TestCIBench(t *testing.T) {
 	raw, err := os.ReadFile("../.github/workflows/dockerimage.yml")
 	if err != nil {
 		t.Fatal(err)
@@ -418,12 +420,56 @@ func TestCIBenchTimeout(t *testing.T) {
 	var wf struct {
 		Jobs map[string]struct {
 			TimeoutMinutes int `yaml:"timeout-minutes"`
+			Steps          []struct {
+				Name, If, Run string
+			}
 		} `yaml:"jobs"`
 	}
 	if err := yaml.Unmarshal(raw, &wf); err != nil {
 		t.Fatal(err)
 	}
-	if m := wf.Jobs["bench"].TimeoutMinutes; m <= 0 || m > 30 {
+	job := wf.Jobs["bench"]
+	if m := job.TimeoutMinutes; m <= 0 || m > 30 {
 		t.Errorf("the bench job's timeout-minutes is %d, want 1 to 30", m)
+	}
+	runs, logs := 0, false
+	for _, s := range job.Steps {
+		if strings.Contains(s.Run, "make bench") || strings.Contains(s.Run, "go run ./bench") {
+			runs++
+			if !strings.Contains(s.Run, " -failfast ") {
+				t.Errorf("step %q runs the bench without -failfast", s.Name)
+			}
+		}
+		if s.Name == "Stack logs" {
+			logs = true
+			if s.If != "${{ !success() }}" {
+				t.Errorf("the stack's logs run if %q, want after a failure or a cancel", s.If)
+			}
+		}
+	}
+	if runs != 2 || !logs {
+		t.Errorf("%d bench runs and the stack's logs %v, want 2 and true", runs, logs)
+	}
+}
+
+// measure stops at the first result with an error with failfast, and
+// measures everything without; its report states the plan's refresh.
+func TestMeasure(t *testing.T) {
+	defer func(d time.Duration) { gap = d }(gap)
+	gap = 0
+	refused := series{Name: "v1-native", target: echoServer(t), open: func(context.Context, string, string) (*session, error) {
+		return nil, errors.New("refused")
+	}}
+	nop := func(context.Context, *runner, *session, *result) error { return nil }
+	scs := []scenario{{ID: "T1", Protocol: "ssh", run: nop}, {ID: "T2", Protocol: "ssh", run: nop}}
+	for failfast, want := range map[bool]int{true: 1, false: 3} { // T1, T2 and G7
+		p := plan{series: []series{refused}, nets: netConditions[:1], scenarios: scs, quick: true, ackHz: 30, failfast: failfast, engine: "none"}
+		rep := within(t, 10*time.Second, func() report { return p.measure(context.Background()) })
+		if len(rep.Results) != want {
+			t.Errorf("failfast %v: %d results, want %d", failfast, len(rep.Results), want)
+		}
+		if rep.Runs != 1 || rep.AckHz != 30 || rep.FrameStamp != frameStamp {
+			t.Errorf("failfast %v: %d runs, ack_hz %v, frame_stamp %q", failfast, rep.Runs, rep.AckHz, rep.FrameStamp)
+		}
 	}
 }
