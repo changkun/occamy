@@ -156,6 +156,37 @@ func TestExtendedDesktopSize(t *testing.T) {
 	}
 }
 
+// TestConfigSize checks that Config's size is asked for at the start of
+// each Run, as a Resize before Run would be: once the server has shown
+// support, and not at all by a server without it.
+func TestConfigSize(t *testing.T) {
+	checkGoroutines(t)
+	srv := newServer(t, serverOptions{})
+	b := newBackend(t, Config{Addr: srv.addr, Width: 80, Height: 60})
+	b.Demand(backend.Demand{Visible: true})
+	for i := range 2 {
+		run := start(t, b, &backendtest.Sink{})
+		c := srv.accept(t)
+		req := expect[requestMsg](t, c)
+		c.quiet(t, silence)
+		img := pattern(64, 48, 0)
+		c.send(t, putUpdate(putExtDesktopSize(0, 0, 64, 48, screenMsg{id: 3, r: img.Rect}), putRaw(c.pf, img, req.r)))
+		expectSetSize(t, c, 80, 60, 3, 0)
+		if err := run.stop(t); err == nil {
+			t.Fatalf("Run %d = nil after its cancellation", i)
+		}
+	}
+
+	// Without ExtendedDesktopSize, the server's size stays.
+	run := start(t, b, &backendtest.Sink{})
+	c := srv.accept(t)
+	req := expect[requestMsg](t, c)
+	c.send(t, putUpdate(putRaw(c.pf, pattern(64, 48, 0), req.r)))
+	expect[requestMsg](t, c)
+	c.quiet(t, silence)
+	run.stop(t)
+}
+
 func TestResizeWithoutSupport(t *testing.T) {
 	// A server without ExtendedDesktopSize keeps its size: the viewers
 	// scale it.

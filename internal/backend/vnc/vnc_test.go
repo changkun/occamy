@@ -247,6 +247,11 @@ func TestNew(t *testing.T) {
 	if _, err := New(Config{Addr: "x", DialTimeout: -time.Second}); err == nil {
 		t.Error("New accepted a negative dial timeout")
 	}
+	for _, size := range []image.Point{{-1, 600}, {800, -1}, {800, 0}, {0, 600}} {
+		if _, err := New(Config{Addr: "x", Width: size.X, Height: size.Y}); err == nil {
+			t.Errorf("New accepted the screen size %v", size)
+		}
+	}
 	b := newBackend(t, Config{Addr: "x"})
 	if b.dialTimeout != DefaultDialTimeout || b.log == nil {
 		t.Errorf("defaults: timeout %v, logger %v", b.dialTimeout, b.log)

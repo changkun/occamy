@@ -142,6 +142,16 @@ type Config struct {
 	// password's first 8 bytes. Set ARD only for Macs, on networks you
 	// trust.
 	ARD bool
+	// ARDSetting names what allows ARD where the backend's user sets it,
+	// such as a configuration key, in the error for a server that offers
+	// Apple Remote Desktop authentication and nothing else the backend
+	// takes; "Config.ARD" if empty.
+	ARDSetting string
+	// Width and Height are the screen size to ask the server for, as a
+	// Resize before Run would: with SetDesktopSize, once the server has
+	// shown that it supports ExtendedDesktopSize. Zero keeps the server's
+	// size.
+	Width, Height int
 	// DialTimeout bounds the TCP connection and defaults to 15 seconds.
 	// Only Run's context bounds the handshake that follows, since it may
 	// wait for the owner to answer a prompt.
@@ -158,6 +168,8 @@ type Backend struct {
 	password    string
 	tls         tlsPolicy
 	ard         bool
+	ardSetting  string
+	size        image.Point // asked for at the start of each Run, if not zero
 	dialTimeout time.Duration
 	log         *slog.Logger
 	limits      limits
@@ -197,12 +209,20 @@ func New(cfg Config) (*Backend, error) {
 		return nil, errors.New("vnc: Apple Remote Desktop runs without TLS: ARD cannot be allowed " +
 			"while TLS is required by TLS.Require, RootCAs or Pins")
 	}
+	if cfg.Width < 0 || cfg.Height < 0 || (cfg.Width == 0) != (cfg.Height == 0) {
+		return nil, fmt.Errorf("vnc: invalid screen size %dx%d", cfg.Width, cfg.Height)
+	}
+	if cfg.ARDSetting == "" {
+		cfg.ARDSetting = "Config.ARD"
+	}
 	return &Backend{
 		addr:        addr,
 		username:    cfg.Username,
 		password:    cfg.Password,
 		tls:         policy,
 		ard:         cfg.ARD,
+		ardSetting:  cfg.ARDSetting,
+		size:        image.Pt(cfg.Width, cfg.Height),
 		dialTimeout: cfg.DialTimeout,
 		log:         cfg.Logger,
 		limits:      defaultLimits,
@@ -417,6 +437,9 @@ func (r *run) updated(size image.Point, resized bool) {
 // goroutine that Run starts has ended when it returns.
 func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 	r := newRun()
+	if b.size != (image.Point{}) {
+		r.resize(b.size.X, b.size.Y, b.limits)
+	}
 	b.mu.Lock()
 	if b.run != nil {
 		b.mu.Unlock()
@@ -517,6 +540,7 @@ func (b *Backend) auth(ctx context.Context, sink backend.Sink, nc net.Conn, br *
 		hasUser:     b.username != "",
 		hasPassword: b.password != "",
 		ard:         b.ard,
+		ardSetting:  b.ardSetting,
 		requireTLS:  b.tls.require,
 		startTLS: func() error {
 			// The server waits for the client's hello: anything it sent
