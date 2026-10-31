@@ -751,7 +751,8 @@ that guacd was `vnc`'s default, they are corrected below.
   cell is lenient to native: guacd cannot give X509 credentials, so the
   X509Plain cell's guacd twin never reaches the desktop, and the native
   cell tries again whenever it cannot. `TestParityCell` drives this
-  logic with fake checks.
+  logic with fake checks, and logs what the cells log only when it
+  fails, so that its fake failures do not read as the matrix's own.
 - **The matrix.** x11vnc 0.9.17 (libvncserver 0.9.15) and TigerVNC
   1.15's Xvnc, Debian trixie; guacd 1.6. CI's `e2e` job runs the
   matrix in `make e2e`, on fresh containers. As it is now, with the
@@ -802,7 +803,8 @@ that guacd was `vnc`'s default, they are corrected below.
 - **What the rows check.**
   - auth: the session reaches the screen with the session's state
     naming the backend, and a typed line arrives. The password asked of
-    the owner must be asked: a screen without the prompt fails. A wrong
+    the owner must be asked: a screen without the prompt fails, which
+    `TestParityReady` checks against a server in process. A wrong
     answer to the prompt ends the session as `backend-failed`.
   - screen: 1024×768, not of one colour, and a frame acknowledging a
     key.
