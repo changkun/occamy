@@ -1291,7 +1291,7 @@ to the VNC backend.
 - **Benchmark:** the VNC backend's `BenchmarkDecode` (a 1024×768
   frame per encoding) and the framebuffer's new `BenchmarkLockUnlock`
   and `BenchmarkReadTile`, before and after, 8 runs each, medians, on
-  the shared Apple M5 Pro at load averages of 2.3 to 4.4. The baseline
+  the shared Apple M5 Pro at load averages of 2.3 to 5.0. The baseline
   ran twice, once before the change and once right after the new
   binary, to show the host's drift:
 
