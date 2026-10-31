@@ -63,3 +63,22 @@ func TestGoroutinePanics(t *testing.T) {
 		})
 	}
 }
+
+// TestLastOutputPanics checks that a panic on the shell's last output,
+// which the readers pass on after the shell has exited, still ends Run
+// with the panic, not as a shell that exited normally.
+func TestLastOutputPanics(t *testing.T) {
+	for range 20 {
+		checkGoroutines(t)
+		srv := newServer(t, serverOptions{password: "pw"})
+		b := newBackend(t, ssh.Config{Addr: srv.addr, User: "alice", Password: "pw", HostKeys: pin(srv)})
+		sink := panicSink{&backendtest.Sink{}}
+		r := start(t, b, sink)
+		waitShell(t, sink.Sink)
+		srv.end(ending{output: "bye\x01", status: 0})
+		var p backend.PanicError
+		if err := r.wait(t); !errors.As(err, &p) {
+			t.Fatalf("Run = %v, want the panic on the last output", err)
+		}
+	}
+}
