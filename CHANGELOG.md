@@ -345,6 +345,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   backends release the pixels they lock by `defer`, and a session closes
   its framebuffer when it ends, which releases any pixels still locked.
   The streams close with 1011, as for any panic the session recovers.
+- A terminal title with invalid UTF-8 comes through to viewers whole:
+  each invalid byte becomes U+FFFD, three bytes, which could make the
+  title too long for the escape sequence a terminal frame carries it in,
+  and cut it there. Titles are now cut, between characters, at what that
+  sequence carries.
 
 ### Security
 
@@ -353,8 +358,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - A panic on a goroutine a backend starts, such as the SSH backend's
   readers of the remote's output and the VNC, RDP and guacd backends'
   writers, ends its session with close 1011 instead of crashing occamyd
-  and every other session with it. A panic in the terminal emulator
-  releases its locks.
+  and every other session with it. A panic in the terminal emulator,
+  and one under the state the VNC and RDP backends share between their
+  reader, their writer and the session's input, releases its locks, so
+  that the session cannot hang on them, and a guacd writer's panic ends
+  a prompt's wait for the owner's answer.
 - No backend sends the Power key or the X11 power keysyms
   (XF86PowerOff, PowerDown, Sleep, Suspend, Hibernate, Standby), which
   the remote applies to the whole machine. The native VNC backend sent

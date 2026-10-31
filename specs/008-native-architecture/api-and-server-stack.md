@@ -1263,18 +1263,21 @@ to the VNC backend.
     interrupted, so `Close` must release exactly what was locked. It
     sets `closed` before it releases the rows, so that a writer that
     gets a row does not read pixels a straggler may still be drawing.
+    For the same reason an `Unlock` of a rectangle that no `Lock`
+    holds panics, which is recoverable, unless `Close` released it.
   - The framebuffer is closed at the session's end, not at the panic:
     only once `Run` has returned does no backend goroutine draw, and
     releasing rows a goroutine still writes would race. A backend that
     panicked on its own goroutine stops the others before `Run`
     returns.
-  - A writer's panic is the writer's error: the VNC and RDP backends
-    already returned the writer's error over the reader's once the
-    writer had closed the connection, so the panic needs no check of
-    its own (a separate check survived its mutation, and was removed).
-    The guacd bridge, whose read loop knows nothing of its writer's
-    errors, returns the writer's panic over the read error it caused,
-    and SSH's `serve` the panic over the exit it caused.
+  - A writer's panic is `Run`'s result whatever else ended the reader,
+    in every backend: it is a bug, which the session must log with its
+    stack and end with its internal reason. The first version of this
+    PR let the VNC and RDP backends return it only as the writer's
+    error, when the reader failed on the closed connection and ctx was
+    not done; the review found it lost when the server hung up first,
+    on a buffered protocol error, on a cancelled ctx and, for RDP, when
+    the server disconnected (see "Review fixes").
   - One helper for Power, in `internal/backend`, rather than a constant
     per backend, so that the web client's test reads one place and a
     new backend has nothing to remember.
@@ -1309,15 +1312,25 @@ to the VNC backend.
   decoders' deferred `Unlock`s and the functions per strip alone: they
   cost nothing measurable, every encoding within the baselines' spread
   or below it. The framebuffer's record of each `Lock` adds 3.6 ns to
-  a pair, against the microseconds a strip's pixels take to decode and
-  copy. `ReadTile`'s check of `closed` costs nothing.
-- **Fuzzing:** `FuzzWrite` ran 6 minutes with 4 workers at a load
-  average of about 4 to 5: 2.29 million inputs, 783 in the corpus, no
-  failure. Nothing to fix and no crasher to keep. To check that it
-  can fail, two bugs were injected: a cursor forward that may leave
-  the cursor one past the last column panicked on a seed, and a resize
+  a pair; the review measured 4.4 ns, and a later run here, at a load
+  average of 17 to 39, 3.8 ns (24.2 to 28.0 ns). Either is small
+  against the microseconds a strip's pixels take to decode and copy,
+  and `Lock` and `Unlock` are not on a hot path of their own.
+  `ReadTile`'s check of `closed` costs nothing. Taking `wmu` once in
+  `Unlock`, for the record and the wake together, measured 28.1 ns,
+  no gain, and held `wmu` across the versions' update, so it was not
+  kept.
+- **Fuzzing:** `FuzzWrite`'s first run, 6 minutes with 4 workers at a
+  load average of about 4 to 5, tried 2.29 million inputs without a
+  failure, but that was not enough: the review's longer run found a
+  title that does not survive `Diff`, a bug on master too (see "Review
+  fixes"), whose input is now a seed. To check that the fuzzer can
+  fail, two bugs were injected: a cursor forward that may leave the
+  cursor one past the last column panicked on a seed, and a resize
   that did not clamp the saved cursor's column failed in 6 s with
-  "saved cursor 0 (1, 0) off the screen of 1x1".
+  "saved cursor 0 (1, 0) off the screen of 1x1". After the title fix,
+  `FuzzWrite` ran 6 minutes more with 4 workers at a load average of 6
+  to 7: 2.55 million inputs, 1296 in the corpus, no failure.
 - **Tests:** `TestPanicWhileDrawing` in `server` (adopted from the
   review: a backend that panics holding a `Lock` closes the stream with
   1011, the session goes, and no writer is left in `ReadTile`),
@@ -1339,7 +1352,82 @@ to the VNC backend.
   guacd bridge's preference for its writer's panic, and `PowerKey` and
   each backend's use of it. The two checks that no test could tell
   apart, the VNC and RDP backends' own preference for the writer's
-  panic, were removed.
+  panic, were removed; the review fixes put a check back, in a form
+  the tests can tell apart.
+- **Review fixes:** an independent review found the lock record sound,
+  no panic reaching a client, and the Power drop correct, and these
+  bugs, all fixed with tests:
+  - **A race in `Lock`:** `Lock` recorded the `Lock` and only then read
+    the screen for its pixels. A `Close` in between could release its
+    hold on the screen and a `Resize` replace it. `Lock` now takes the
+    pixels before it records the `Lock`. `TestCloseStraggler` runs a
+    goroutine that locks, draws, resizes and unlocks with no handoff to
+    the one that closes, which learns of the `Lock` from the record
+    alone; it fails under `-race` on the old order.
+    `TestCloseWhileDrawing` now draws on its own goroutine, after
+    `Close`, while a writer that waited for its rows reads, and fails
+    under `-race` if `Close` lets the writer in before marking the
+    framebuffer closed. `TestScreenUntilRunReturns` checks that the
+    session closes the framebuffer only once `Run` has returned: a
+    backend still draws on the screen as it stops. The two mutations
+    the review found surviving (marking closed after the release, and
+    closing before `Run` returns) now fail these tests. `CopyRect`
+    after `Close` copies nothing, since its rows may be a released
+    `Lock`'s that a straggler still draws, and a second `Close` needs
+    no check of its own, since the first took every `Lock`.
+  - **An `Unlock` without its `Lock` did nothing:** before `Close`
+    that left the `Lock` meant held, and the next `Lock` of its rows,
+    and `Run`, waited forever. It now panics, which the session or the
+    backend recovers, unless `Close` released the `Lock`
+    (`TestUnlockWithoutLock`).
+  - **A writer that panicked holding the VNC run's state hung the
+    session:** `due` held `r.mu` without `defer`, so an `Input` waiting
+    for it on the session's owner goroutine waited forever; and once
+    `Run`'s cleanup was deferred, a reader that panicked under `r.mu`
+    waited in it for a writer blocked on `r.mu`. Every section under
+    the VNC run's `r.mu` now runs in `run.locked`, which unlocks by
+    `defer`, and every section under the RDP client's `c.mu` unlocks
+    by `defer` too (`SuppressOutput`, `count`, `activate`,
+    `shareData`, `SendInput`). `TestWriterPanicsLocked` panics in `due`
+    through a test hook while `Input` waits for `r.mu`;
+    `TestStateUnlockDeferred` and `TestClientUnlockDeferred` check in
+    the source, with `backendtest.UnlocksDeferred`, that every
+    `r.mu.Lock()` and `c.mu.Lock()` is followed by its deferred
+    `Unlock`.
+  - **The VNC and RDP backends dropped the writer's panic** when ctx
+    was done, the server hung up first (VNC's `readLoop` makes that
+    nil), a buffered protocol error came first, or, for RDP, the
+    server disconnected: the session then logged no stack and ended as
+    failed or remote-ended rather than 1011. Both now return the panic
+    whatever ended the reader, as guacd and SSH do (VNC's new `end`,
+    RDP's `end`; `TestEndPrefersPanic` in each, the RDP one adopted
+    from the review).
+  - **A title that does not survive `Diff`,** on master too: the
+    emulator replaces each invalid byte of a title with U+FFFD, three
+    bytes, so a title of up to 4094 bytes could grow to about 12 KB,
+    and the parser cut the OSC 2 that `Diff` sends it in at `maxOSC`.
+    The title is now cut, between characters, at `maxTitle`, what an
+    OSC 2 of `maxOSC` bytes carries (`TestTitleRoundTrip`, and the
+    review's crasher as a `FuzzWrite` seed). Only the title is kept of
+    the OSC strings: OSC 0 sets it, and the icon name and the rest are
+    dropped.
+  - **A guacd writer that panicked during a prompt:** `Run` returned
+    only once the owner answered the prompt, if ever. The writer's
+    panic now cancels the run's context, which the prompt waits on
+    (`TestWriterPanicsDuringPrompt`).
+  - The review's stress test of the framebuffer, 300 iterations of
+    drawers that leak, hand off and hold `Lock`s across two concurrent
+    `Close`s, with readers, `CopyRect` and `Resize`, passes, with
+    `-race` too, once its waker wakes the readers with `Resize`: it
+    woke them with `CopyRect`, which now copies nothing after `Close`.
+  - Mutations: each fix was undone in turn, 13 mutations, and a test
+    failed for every one, under `-race` where the failure is a race:
+    `Lock`'s order, marking closed after the release, closing before
+    `Run` returns, `CopyRect` after `Close`, both `Unlock` cases,
+    `run.locked` without `defer`, a VNC section around it, RDP's
+    `count` without `defer`, both `end`s, the title's cut, and guacd's
+    cancel. The 31 mutations of the first version, rerun on the final
+    code, all still fail a test.
 - **Follow-ups:**
   - Recover the v0 bridge's goroutines in `server/session.go`, with a
     seam to inject a panic, or retire them with the v0 routes.

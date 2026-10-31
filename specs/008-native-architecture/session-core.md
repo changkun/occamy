@@ -327,13 +327,16 @@ arise, rather than inheriting those fixes.
   every reason, once `Run` has returned: `Framebuffer.Close` releases
   each `Lock` not yet unlocked, which the framebuffer records until its
   `Unlock`, and from then on `ReadTile` reads nothing, `Lock` returns
-  pixels off the screen and `Unlock` of a released `Lock` does nothing.
-  `sink.TermData` and `Terminal.Write` release their locks by `defer`
-  too. A backend's own goroutines recover and return
-  `backend.PanicError` from `Run`, which ends the session as
-  `session.Internal`, as a panic of `Run` itself does
-  ([api-and-server-stack](api-and-server-stack.md), Implementation
-  notes: panic safety; `TestEndReleasesRows`, `TestTermDataPanics`).
+  pixels off the screen, `CopyRect` copies nothing and `Unlock` of a
+  released `Lock` does nothing. Before `Close`, an `Unlock` without its
+  `Lock` panics. Until `Run` returns the screen stays the backend's,
+  which may still draw as it stops. `sink.TermData` and
+  `Terminal.Write` release their locks by `defer` too. A backend's own
+  goroutines recover and return `backend.PanicError` from `Run`, which
+  ends the session as `session.Internal`, as a panic of `Run` itself
+  does ([api-and-server-stack](api-and-server-stack.md), Implementation
+  notes: panic safety; `TestEndReleasesRows`, `TestTermDataPanics`,
+  `TestScreenUntilRunReturns`).
 
 
 ## Implementation notes: viewer writer
