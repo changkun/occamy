@@ -17,10 +17,15 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   v1 against native SSH and VNC and against VNC and RDP through guacd,
   on the bench stack's `occamy-v1` service
   ([docs/benchmarks.md](docs/benchmarks.md#the-v1-series)). The harness
-  shows and acknowledges v1 frames on a 60 Hz screen's ticks, as the web
-  client does, or at once with `-ack-hz 0`. CI runs them quickly after
-  the v0 smoke run, and stops the bench job at 30 minutes. Their full
-  results wait for the rest of the graphics pipeline and for native RDP.
+  counts a v1 frame when the client core delivers it, and acknowledges a
+  graphical frame on a 60 Hz screen's next tick, as the web client
+  does, and a terminal's at once; the report records both, and
+  `-ack-hz 0` is a diagnostic. A terminal's G7 ends at its first cell
+  that is not blank. CI runs them quickly after the v0 smoke run, every
+  run with `-failfast`, which stops at the first error, stops the bench
+  job at 30 minutes, and prints the stack's logs unless the job
+  succeeded. Their full results wait for the rest of the graphics
+  pipeline and for native RDP.
   `make bench` takes a compose project and ports for a second stack on a
   shared host.
 - A public Go package for protocol v1, `changkun.de/x/occamy/protocol`,

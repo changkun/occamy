@@ -421,15 +421,17 @@ published.
     `GET /api/v1/connections/{id}/stream`, asking for 1024 × 768 pixels
     or 99 × 39 cells, and after each scenario closes the client and ends
     the session with `DELETE /api/v1/sessions/{id}`. It opens the
-    stream with `client.New` over a WebSocket that it dials as
-    `client.Dial` does, so that it learns the session from the welcome
-    even when the client then refuses the session, which it ends too.
+    stream with `client.Dial`; when the client refuses the session the
+    server welcomed it to, `client.Dial`'s `*client.RefusedError` names
+    the session, which the harness ends too.
   - Every wait of a sample is bounded, so that a stack that stopped
     answering fails the sample rather than the run: 30 s for the sign-in
     and the stream's handshake and for G7's first frame, 10 s for a
     key's update and for an input to be queued, 30 s for T2's marker.
-    CI's bench job stops at 30 minutes, and the harness exits non-zero
-    when a chosen series ran no scenario.
+    CI's bench job stops at 30 minutes and prints the stack's logs when
+    it did not succeed, and the harness exits non-zero when a chosen
+    series ran no scenario. `-failfast`, which CI sets, ends a run at
+    its first measurement with an error.
   - The session that the scenarios drive is no longer Guacamole's: it
     takes keys and reports complete frames that drew, with a marker
     checked on each, and a v0 or a v1 reader fills it. The scenarios did
@@ -458,13 +460,16 @@ published.
     framebuffer when `Next` delivers it, so the probe reads the same
     framebuffer a client draws from.
   - *Frames.* A graphical frame draws if its dirty rectangles are not
-    empty. The reader shows every frame on the next tick of a 60 Hz
-    screen (`-ack-hz`) and then calls `Next` again, which acknowledges
-    it, as the web client presents a frame at the next animation frame
-    and acknowledges it then; a frame counts from that tick. `-ack-hz 0`
-    acknowledges at once. A v1 scene's frames are the server's (see
-    Surprises): the table leaves their rate out, with a note, and the
-    JSON keeps them as `server_frames`.
+    empty. A frame counts from when `Next` delivers it applied, as a v0
+    frame from when the harness applied it, before it answers `sync`.
+    The reader then waits for the next tick of a 60 Hz screen
+    (`-ack-hz`) before it calls `Next` again, which acknowledges a
+    graphical frame, drawing or not, as the web client's `Display.run`
+    acknowledges it after the next animation frame; it calls `Next` at
+    once after a terminal's frame. `-ack-hz 0`, a diagnostic, also
+    acknowledges a graphical frame at once. A v1 scene's frames are the
+    server's (see Surprises): the table leaves their rate out, with a
+    note, and the JSON keeps them as `server_frames`.
   - *Terminals.* The SSH backend ignores keys, so the harness sends the
     bytes xterm.js sends for them as `term-input`. The client core
     passes a terminal's bytes through, and the harness writes them to
@@ -478,9 +483,11 @@ published.
     compositing, so the column compares v1's two series, not v1 with
     v0, and the table says so under it.
   - *G7* starts at the stream's upgrade and ends at the first frame
-    that shows the remote: for a terminal, the first with bytes, since
-    the session core serves an empty snapshot of a blank terminal before
-    the backend connected. The sign-in, a bcrypt check that a client
+    that shows the remote: for a terminal, the first after which a cell
+    holds a character or a coloured background, since the session core
+    serves an empty snapshot of a blank terminal before the backend
+    connected, and the SSH backend then resizes that blank terminal,
+    which reaches the client as a clear screen. The sign-in, a bcrypt check that a client
     makes once for many sessions, is recorded apart as `sign_in_ms` and
     noted on the row. v0's G7 includes its login, which v0 makes for
     every session.
@@ -498,13 +505,25 @@ published.
   - The v1 series are not in `make bench`'s default series, so that the
     documented run of the v0 baseline keeps its duration; they are named
     with `-series`.
-  - The v1 harness acknowledges at a 60 Hz screen's cadence by default,
-    as the web client does, rather than at once (decided in the review
-    of #127). The v0 series still answer each `sync` at once, as the
-    baseline did, so against the baseline the tick, 8.3 ms on average,
-    counts against v1 in latencies; `-ack-hz 0` compares like with like.
-    `docs/benchmarks.md` gives the direction of the cadence's bias for
-    each metric.
+  - When a v1 frame counts, and when it is acknowledged. The review of
+    #127 found that the first version counted a v1 frame from the 60 Hz
+    tick that showed it, which added up to 16.7 ms to every v1 latency
+    that v0, counted when its client applied the frame, did not pay, at
+    one phase for a whole run. The design since: a v1 frame counts from
+    when `Next` delivers it applied, like v0's from when the harness
+    applied it; both clients' canvases then reach the screen at the
+    display's next refresh, which guacamole-common-js, answering `sync`
+    without an animation frame, and the web client pay alike, and which
+    the 50 ms budget allows for. The tick paces only the
+    acknowledgement of a graphical frame, as the web client's
+    `Display.run` does, since that is what paces occamyd; a terminal's
+    is acknowledged at once. These defaults, 60 Hz and the stamp at
+    delivery, produce the gate's numbers, and the report records both
+    (`ack_hz`, `frame_stamp`, and the table's header); `-ack-hz 0` is a
+    diagnostic. The ticks keep one phase per process, and the probe's
+    keys, 100 ms apart, are 6 periods, so where the cadence holds a
+    frame back it adds one offset per run. `docs/benchmarks.md` gives
+    the direction of the cadence's bias for each metric.
 - **Tests:** `bench/v1_test.go` and `bench/bench_test.go`.
   - The decoders against `protocol/testdata/codecs.json` (lossless
     exactly, lossy at `min_psnr`, a rectangle other than the header's
@@ -518,14 +537,18 @@ published.
     another colour, or after a frame that changed pixels away from the
     swatch's centre while it already showed the colour, is marked only
     at its colour; a terminal session whose echo draws a frame and whose
-    Return draws the marker's cells; a terminal whose shell answers
-    after 300 ms has its first frame then, not at the blank terminal; at
-    60 Hz every frame is shown on a tick and at most one a tick, and at
-    0 as it comes; an input to a network that takes nothing fails after
-    its bound.
+    Return draws the marker's cells; G7 over a terminal whose shell
+    answers after 300 ms ends then, not at the blank terminal nor at the
+    clear screen of resizing it after 100 ms; a screen shows the remote
+    once a cell holds a character or a coloured background; at 60 Hz a
+    graphical frame is acknowledged on a tick and counted when `Next`
+    delivered it, not on one, and at 0 acknowledged at once; a
+    terminal's frames are acknowledged at once at 60 Hz; an input to a
+    network that takes nothing fails after its bound.
   - Against a fake API v1: a session whose welcome the client refuses
-    is ended with DELETE, and a handshake that hangs fails after its
-    bound.
+    is ended with DELETE, by the session that `client.Dial`'s
+    `*client.RefusedError` names, and a handshake that hangs fails after
+    its bound.
   - With sessions that never draw: G7, T1 and T2 fail after their
     bounds. `wait` takes only frames after its time, and a
     measurement's bytes, frames and decode time are what came after its
@@ -534,9 +557,13 @@ published.
     the scene's rate as well, and its frames moved to `server_frames`
     by `run`; server CPU per series with guacd's apart for
     `v1-native`; the sign-in noted on a v1 G7; the decode note under a
-    table with v1 rows. A chosen series that ran nothing is found, and
-    CI's bench job has a timeout of at most 30 minutes.
-  - `termBytes`' keys, and when a display's tick shows a frame.
+    table with v1 rows; the refresh and when frames count, in the JSON
+    and above a table with v1 rows. A chosen series that ran nothing is
+    found; `-failfast` stops at the first error and the report keeps
+    the plan's refresh; CI's bench job has a timeout of at most 30
+    minutes, runs the bench with `-failfast`, and prints the stack's
+    logs unless it succeeded.
+  - `termBytes`' keys, and which tick follows a frame.
 - **Surprises:**
   - A v1 frame is not a scene's frame. occamyd ends a frame whenever the
     viewer's window allows and the screen changed, and the harness
@@ -557,20 +584,28 @@ published.
     version of the harness counted any snapshot as drawing, so G7 over
     SSH ended at that frame, about 1 ms after the upgrade, whatever the
     shell took, which in CI read as a false 9x over v0. Review found
-    it; a snapshot now draws only if it carries bytes.
+    it; a snapshot now draws only if it carries bytes. The review of
+    the fix found that the SSH backend then resizes the blank terminal
+    to 99 × 39, which reaches the client as a seven-byte clear screen
+    and ended G7 there just the same; a terminal now shows the remote
+    from its first cell that is not blank.
 - **Follow-ups:**
   - Before the full run: the scene stamps each frame's number where the
     harness can read it, in a form that survives lossy codecs, and the
     harness counts the distinct scene frames it was shown, for both
     protocols. The stamp changes the scene's pixels, so the baseline's
     G3 to G5 are measured again with it, which is the owner's decision.
-  - Open, for the owner with the frame stamp: end G7 on a known pixel of
-    the scene in both series, rather than on the first frame that drew.
-    Today a desktop's G7 counts a frame that follows a resize, in v0 and
-    v1 alike, so the two agree; but a native RDP backend that sizes the
-    screen before its first bitmap would end G7 early. Changing it
-    changes v0's measurement, so it waits for the same decision to
-    measure the baseline again.
+  - Open, for the owner with the frame stamp: end G7 on known content
+    in both series, a known pixel of the scene or a known line of the
+    shell, rather than on the first frame that drew, with the baseline
+    measured again. Today a desktop's G7 counts a frame that follows a
+    resize, in v0 and v1 alike, so the two agree; but a native RDP
+    backend that sizes the screen before its first bitmap would end G7
+    early. Over SSH they already differ: v1 ends at the first cell that
+    is not blank, while v0 ends at guacd's first drawing, and guacd
+    makes its terminal before the SSH session. Changing it changes v0's
+    measurement, so it waits for the same decision to measure the
+    baseline again.
   - ~~Owner question: whether the v1.0 gate of 10x over guacd is a flat
     10x or each target as defined.~~ Answered on 2026-10-31: each
     target as defined, a miss of 10x only where a documented bound

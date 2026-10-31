@@ -48,7 +48,7 @@ make bench BENCH_FLAGS="-scenarios T1 -net N1 -series occamy"
 | `-runs` | `1` | How many times to run everything; the table shows medians |
 | `-failfast` | off | Stop at the first measurement with an error, and exit non-zero; CI's runs set it |
 | `-quick` | off | A tenth of the samples and a sixth of the durations, to check the setup |
-| `-ack-hz` | `60` | v1: the screen refresh on whose ticks the harness shows and acknowledges frames, as a browser does; `0` acknowledges each at once ([The v1 series](#the-v1-series)) |
+| `-ack-hz` | `60` | v1: the screen refresh on whose ticks the harness acknowledges a graphical frame, as a browser does; the gate's numbers use 60, and `0`, which acknowledges at once, is a diagnostic ([The v1 series](#the-v1-series)) |
 | `-engine` | `podman` | Container engine for CPU time, or `none` |
 | `-project` | `docker` | The stack's compose project, whose containers CPU time is read from |
 | `-addr`, `-v1`, `-guacd` | `localhost:5636`, `localhost:5637`, `localhost:4822` | occamyd for v0, occamy-v1 for v1, and guacd for the direct series |
@@ -167,7 +167,9 @@ SSH has no guacd backend in v1. A v1 session runs as follows:
   `GET /api/v1/connections/{id}/stream`, and afterwards ends the session
   with `DELETE /api/v1/sessions/{id}`, since an owner who leaves keeps
   the session for the 60 s owner grace. A session whose welcome the
-  client refuses is ended the same way.
+  client refuses, as when they have no codec in common, is ended the
+  same way: it dials with `client.Dial`, whose `*client.RefusedError`
+  names the session the server made.
 - **Codecs.** It offers what occamy's web client offers when the browser
   decodes them all: deflate, WebP, JPEG and raw, in that order. The
   client core decodes tiles in parallel as they arrive, with deflate
@@ -186,21 +188,37 @@ SSH has no guacd backend in v1. A v1 session runs as follows:
   count. Until then, the table leaves a v1 scene's frame rate out, with
   the note "server frames, not comparable until the scene frame stamp
   lands", and the JSON keeps those frames as `server_frames`.
-- **Acknowledgement.** occamy's web client shows a frame at the
-  browser's next animation frame and acknowledges it then, by asking
-  for the next event (`client/occamy-web/src/protocol/display.ts`), and
-  occamyd paces its frames by those acknowledgements, with two frames
-  in flight. The harness does the same on the ticks of a 60 Hz screen,
-  `-ack-hz`, for every frame, drawing or not: a frame counts from the
-  tick that shows it, and the reader asks for the next event after it.
-  `-ack-hz 0` acknowledges each frame as soon as the client core
-  applied it. How the cadence moves each metric:
-  - *Latency (T1, G2, G5), completion (T2, G6) and G7* end on a tick,
-    so 60 Hz adds 0 to 16.7 ms, 8.3 on average, to what `-ack-hz 0`
-    measures, which is earlier than any browser could show the frame.
-    The v0 series answer each `sync` at once, as the baseline did, so
-    against the baseline the default counts that tick against v1;
-    `-ack-hz 0` compares like with like.
+- **When a frame counts.** A v1 frame counts from when the client
+  core's `Next` delivers it applied, as a v0 frame counts from when the
+  harness applied it, before it answers `sync`. Neither is on the
+  screen yet: a browser shows either client's canvas at the display's
+  next refresh, which both pay alike and the 50 ms budget allows for.
+- **Acknowledgement.** occamyd paces its frames by the client's
+  acknowledgements, with two frames in flight. occamy's web client
+  presents a graphical frame at the browser's next animation frame and
+  acknowledges it then, by asking for the next event (`Display.run` in
+  `client/occamy-web/src/protocol/display.ts`); a terminal's frame it
+  acknowledges without waiting for a refresh. The harness does the
+  same: it acknowledges a graphical frame, drawing or not, on the next
+  tick of a 60 Hz screen (`-ack-hz`), and a terminal's at once.
+  guacamole-common-js answers `sync` as soon as it applied a frame,
+  with no animation frame, and the v0 series do the same. **These
+  defaults produce the gate's numbers;** the JSON records them as
+  `ack_hz` and `frame_stamp`, and the table's header states them.
+  `-ack-hz 0` acknowledges a graphical frame at once as well: a
+  diagnostic of what the cadence costs, not a setting for the gate. How
+  the cadence moves each metric:
+  - *Latency (G2, G5), completion (G6) and a desktop's G7* do not end
+    on a tick, but a frame that occamyd holds while two are
+    unacknowledged goes out at the tick that acknowledges one, up to
+    16.7 ms later than at once. That happens in moving scenes, and when
+    a change reaches the client in several frames, as the native VNC
+    backend's updates do. The ticks keep one phase for the whole
+    process, and the probe's keys, 100 ms apart, are 6 periods of 60 Hz,
+    so every key of a scenario's run meets the ticks at the phase that
+    the run started at: what the cadence adds is one offset per run, and
+    runs differ by it, which `-runs 3` takes the median of. Terminals
+    (T1, T2, an SSH G7) do not wait for ticks.
   - *Frame rates* reach at most 60 a second at 60 Hz, as in a browser
     on a 60 Hz screen; at once, they count every frame the server can
     end.
@@ -216,10 +234,11 @@ SSH has no guacd backend in v1. A v1 session runs as follows:
   client core passes a terminal's bytes through untouched, and the
   harness writes them to occamyd's own terminal emulator
   (`internal/terminal`), as a browser writes them to xterm.js. A
-  terminal frame draws if it carried bytes, and T2's end marker is a
-  cell with the magenta background. The terminal is 99 × 39 cells, the
-  size of guacd's at 1024 × 768 pixels and 96 DPI, so that the shell
-  prints the same screens in both protocols.
+  terminal frame draws if it carried bytes, and is acknowledged at
+  once; T2's end marker is a cell with the magenta background. The
+  terminal is 99 × 39 cells, the size of guacd's at 1024 × 768 pixels
+  and 96 DPI, so that the shell prints the same screens in both
+  protocols.
 - **Decode** is the wall time of each tile's decode, summed over the
   client core's decoding goroutines, which run in parallel, or the
   terminal emulator's time; copying decoded tiles into the framebuffer
@@ -230,15 +249,21 @@ SSH has no guacd backend in v1. A v1 session runs as follows:
   `v1-guacd`. guacd serves nothing of `v1-native`, so its CPU there is
   left out and given in a note.
 - **G7** starts at the stream's upgrade and ends at the first frame that
-  shows the remote. For a terminal, that is the first frame with bytes:
-  the session core serves a blank terminal before the backend has
-  connected, whose empty snapshot shows nothing. For a desktop, it is
+  shows the remote. For a terminal, that is the first frame after which
+  a cell holds a character or a coloured background: the session core
+  serves a blank terminal before the backend has connected, and the SSH
+  backend resizes that terminal once the shell's channel opens, which
+  reaches the client as a clear screen, and neither shows the remote.
+  The v0 series' SSH G7 ends at guacd's first drawing instead, and
+  guacd makes its terminal before the SSH session. For a desktop, it is
   the first frame that drew, as in v0, which may be the backend sizing
-  the screen before its first image; see the benchmark spec's
-  follow-ups. The sign-in before the upgrade checks a bcrypt hash and is
-  done once for many sessions, so G7 leaves it out: the JSON records it
-  as `sign_in_ms`, and the table notes it on the row. The v0 series' G7
-  includes its login, which v0 needs for every session.
+  the screen before its first image. Ending G7 on known content in both
+  series, with a baseline measured again, is one of the benchmark
+  spec's follow-ups. The sign-in before the upgrade checks a bcrypt
+  hash and is done once for many sessions, so G7 leaves it out: the
+  JSON records it as `sign_in_ms`, and the table notes it on the row.
+  The v0 series' G7 includes its login, which v0 needs for every
+  session.
 - **Bounds.** A sample that the stack does not answer fails rather than
   holding the run: 30 s to sign in and open the stream and, in G7, for
   the first frame; 10 s for a key's update and for an input to be
