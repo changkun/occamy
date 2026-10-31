@@ -681,6 +681,30 @@ RDP's guacd path, RDP no longer needs guacd at all.
   new test in 10 of 10 runs:
   - keeping 4 bytes per list grows the heap by 419 to 435 KB;
   - keeping 1 byte per list grows it by 111 to 133 KB.
+- **The orphan chunk's count, waited for (2026-10-31).**
+  `TestChannelChunks` failed once under `go test -race ./...` at a
+  load of 53, with `orphan: ignored map[]`. The test wrote a chunk
+  without its first, waited 100 ms for the client to send nothing, and
+  then read the count of dropped chunks. Under that load the client had
+  not read the chunk yet: the map was empty, not counting something
+  else. The code drops an orphan chunk and counts it under the same
+  lock that `Stats` reads.
+
+  The test now waits up to 10 seconds for the count, and fails at once
+  if `Run` returns meanwhile. It then checks that the client sends
+  nothing and that the count is exactly 1.
+
+  Results under `-race`:
+  - A 200 ms sleep before the client counts the chunk, standing in for
+    a starved reader, failed the old test in 10 of 10 runs with CI's
+    message.
+  - With the same sleep, the new test passes 10 of 10.
+  - With the count removed, the new test fails 3 of 3.
+  - When `Run` fails on an orphan, the new test fails 3 of 3, naming
+    the error.
+  - Unchanged, the old test passed 50 of 50 at a load of 41 to 46, and
+    the new one 50 of 50 at 53: the flake did not reproduce without the
+    sleep.
 - **Integration test.** `TestIntegrationClipboard`, under the
   `rdp_integration` tag, pastes text and reads the session's X
   CLIPBOARD selection, which xrdp-chansrv serves, and sets the
