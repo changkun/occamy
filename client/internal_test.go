@@ -288,6 +288,42 @@ func endOf(t *testing.T, s *Session) End {
 	}
 }
 
+// Each op counts opCost besides its message: a frame of many tiny tiles
+// is bounded by what they hold, not by their bytes. With a floor of
+// 64 KiB, 1×1 raw tiles of 27 bytes each hold 539: 100 fit, and 130 do
+// not, where their messages alone would.
+func TestOpCost(t *testing.T) {
+	old := minBacklog
+	minBacklog = 1 << 16
+	t.Cleanup(func() { minBacklog = old })
+	for _, c := range []struct {
+		tiles int
+		ends  bool
+	}{{100, false}, {130, true}} {
+		synctest.Test(t, func(t *testing.T) {
+			ms := []protocol.Message{pngWelcome(2), &protocol.Resize{Width: 4, Height: 4}}
+			for i := range c.tiles {
+				ms = append(ms, &protocol.Tile{FrameID: 1, X: uint16(i % 4), Y: uint16(i / 4 % 4), W: 1, H: 1, Codec: protocol.CodecRaw, Payload: []byte{1, 2, 3, 255}}) // #nosec G115 -- small
+			}
+			s, err := New(context.Background(), &fuzzConn{msgs: encode(ms...)}, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			synctest.Wait()
+			s.mu.Lock()
+			end := s.end
+			s.mu.Unlock()
+			if (end != nil) != c.ends {
+				t.Fatalf("%d tiles: End %+v, want an end %v", c.tiles, end, c.ends)
+			}
+			if c.ends && (end.Code != protocol.CloseProtocolError || !strings.Contains(end.Err.Error(), "undelivered")) {
+				t.Errorf("End %+v, want a protocol error for the backlog", end)
+			}
+		})
+	}
+}
+
 // A tile of a plugged codec holds its decoded pixels until it is
 // delivered, whatever its payload's size: a server that sends small
 // payloads of large tiles beyond the frame window is cut off.

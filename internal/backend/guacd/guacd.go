@@ -260,7 +260,12 @@ func (b *Backend) Input(ev backend.InputEvent) error {
 	var p []byte
 	switch ev := ev.(type) {
 	case backend.Key:
-		p = appendKey(nil, ev.Keysym, ev.Down)
+		// A key of keysym 0, such as a browser's dead key, has only its
+		// HID code, for which guacd's key instruction has no field; it is
+		// dropped, as the VNC backend drops it without QEMU's extension.
+		if ev.Keysym != 0 {
+			p = appendKey(nil, ev.Keysym, ev.Down)
+		}
 	case backend.Pointer:
 		b.in.x, b.in.y, b.in.buttons = max(ev.X, 0), max(ev.Y, 0), buttonMask(ev.Buttons)
 		p = b.appendMouse(nil, b.in.buttons)
