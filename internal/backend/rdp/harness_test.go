@@ -105,6 +105,22 @@ func (s *fakeServer) next(t *testing.T) accepted {
 	return accepted{}
 }
 
+// nextOf returns the next connection, as next does, for a Run that
+// cannot end before the server has it, and fails the test at once if
+// Run ends first, as when it could not connect.
+func (s *fakeServer) nextOf(t *testing.T, r *runner) accepted {
+	t.Helper()
+	select {
+	case a := <-s.conns:
+		return a
+	case <-r.done:
+		t.Fatalf("Run returned %v before the server had a connection", r.err)
+	case <-time.After(timeout):
+		t.Fatal("no connection")
+	}
+	return accepted{}
+}
+
 // config returns a configuration for the fake server: TLS without NLA,
 // its certificate pinned.
 func (s *fakeServer) config(t *testing.T) Config {

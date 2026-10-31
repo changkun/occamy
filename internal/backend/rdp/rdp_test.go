@@ -442,7 +442,7 @@ func TestRunPromptsForNLA(t *testing.T) {
 		return backend.PromptReply{Answers: []string{"alice", "CORP", "pw"}}, nil
 	}}
 	r := start(t, newBackend(t, cfg), sink)
-	a := s.next(t)
+	a := s.nextOf(t, r)
 	if !errors.Is(a.err, rdptest.ErrCredSSP) {
 		t.Fatalf("the server got %v, want CredSSP", a.err)
 	}
@@ -480,7 +480,7 @@ func TestRunAuthFailed(t *testing.T) {
 	cfg := s.config(t)
 	cfg.Security = SecurityNLA
 	r := start(t, newBackend(t, cfg), &backendtest.Sink{})
-	a := s.next(t)
+	a := s.nextOf(t, r)
 	if !errors.Is(a.err, rdptest.ErrCredSSP) {
 		t.Fatalf("the server got %v, want CredSSP", a.err)
 	}
@@ -502,7 +502,7 @@ func TestRunCancelDuringNLA(t *testing.T) {
 	cfg := s.config(t)
 	cfg.Security = SecurityNLA
 	r := start(t, newBackend(t, cfg), &backendtest.Sink{})
-	a := s.next(t)
+	a := s.nextOf(t, r)
 	if !errors.Is(a.err, rdptest.ErrCredSSP) {
 		t.Fatalf("the server got %v, want CredSSP", a.err)
 	}
