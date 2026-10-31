@@ -422,6 +422,41 @@ func TestRefineKeepsTurnedAway(t *testing.T) {
 	}
 }
 
+// A tile searched while the pacer's quality is below what the client has
+// is refined once the link allows more: its goal is above what the
+// client has, not equal to it. An input's photographic effect goes at
+// the pacer's quality with its goal unknown; congestion then holds the
+// pacer at 46, where the search runs out below the 72 the client has.
+func TestRefineAfterCongestion(t *testing.T) {
+	d := newRefineDirect(t, false)
+	w := d.w
+	w.p = fixedQuality(90)
+	d.show(corpusFrame(t, "photo"))
+	d.frame()
+	d.refineAll()
+	tiles := []int{2*w.g.cols + 3, 3*w.g.cols + 5, 4*w.g.cols + 7}
+	for _, t := range tiles {
+		w.sc.qual[t], w.goal[t] = 72, 0 // as an input's effect at 72 leaves them
+	}
+	w.p = fixedQuality(46)
+	d.refineAll()
+	for _, tt := range tiles {
+		if have, goal := w.quality(tt), w.goal[tt]; have != 72 || goal <= have {
+			t.Fatalf("tile %d after refinement at 46: quality %d, goal %d; want 72 below the goal", tt, have, goal)
+		}
+	}
+	if c := d.refinable(); len(c) > 0 {
+		t.Errorf("tiles %v refined at 46, which reaches less than the client has", c)
+	}
+	w.p = fixedQuality(90)
+	c := d.refinable()
+	for _, tt := range tiles {
+		if !slices.Contains(c, tt) {
+			t.Errorf("tile %d is not refined once the pacer allows 90", tt)
+		}
+	}
+}
+
 // The time between frames cools the heat, whatever the frames are: the
 // writer counts the time before each frame, of tiles or of refinement,
 // toward the cooling at the next snapshot, and not the frame's own time.

@@ -309,9 +309,10 @@ func (w *writer) refineTile(id uint32, t int) (send, ok bool) {
 	}
 	w.payload = b
 	if codec == 0 || w.msgQuality <= have {
-		// Nothing better to send: the goal is what the client has, or
-		// above the pacer's quality now.
-		w.goal[t] = max(w.msgGoal, have)
+		// Nothing better to send: the goal is above the pacer's quality
+		// now, and above what the client has, so that the tile is
+		// refined once the pacer allows more.
+		w.goal[t] = max(w.msgGoal, min(have+1, final-1))
 		if codec == 0 {
 			w.goal[t] = have
 		}
