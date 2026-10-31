@@ -1,6 +1,6 @@
 ---
 title: Native SSH backend
-status: validated
+status: complete
 track: architecture
 depends_on:
   - specs/008-native-architecture/protocol-v1.md
@@ -464,3 +464,113 @@ averages of 5 to 7 on 18 cores:
 
 The soft-wrap flag is not compared, so a client may copy a wrapped line
 as two.
+
+## Outcome
+
+**Summary.** The backend and its terminal state shipped in pull requests
+implemented directly rather than dispatched: the SSH backend in #93 and
+the emulator, screen diffs and snapshots in #99, both on 2026-10-30.
+Later pull requests added row versions for the viewer writer (#100),
+wired the backend into `occamyd` with a host key policy per connection
+and bounded terminal sizes (#111), and recovered panics on the
+backend's and the emulator's paths (#117). Drift: minimal. Of 15 items
+(9 in the proposed shape and 6 decisions), 13 shipped as specified and
+2 are not implemented: the `TERM` setting and predicted echo, which
+belongs to the clients. 87% satisfied.
+
+### What shipped
+
+- **`internal/backend/ssh`** (#93): `Config`, `New` and `Backend`,
+  about 760 lines. It dials, checks the host key against pinned keys or
+  SHA-256 fingerprints (or accepts any key with
+  `insecure_ignore_host_key`, warning), authenticates with a password,
+  a key file, or keyboard-interactive answers from the owner, requests
+  a PTY with `IUTF8`, and turns `resize-request` into `window-change`.
+  Its tests run an x/crypto server on the loopback interface and check
+  every path for leaked goroutines.
+- **`internal/terminal`** (#99): the in-house emulator, about 2,200
+  lines, and the diff, about 850. It answers the shell's queries, keeps
+  both screens, and produces diffs and snapshots that share rows
+  copy-on-write. The tests are an 83-case conformance table, four
+  recorded traces (nano, vim, less, top), a property test that replays
+  diffs into a fresh terminal, the `FuzzDiff` and `FuzzWrite` targets,
+  and benchmarks.
+- **In `occamyd`** (#111): `ssh` connections and ad-hoc targets use the
+  backend, with `host_keys` or `insecure_ignore_host_key` from the
+  connection. A v1 file refuses `backend: guacd` for ssh, so only the
+  v0 routes take SSH through guacd.
+
+### Design evolution
+
+- **Host keys** use the backend's own callback, which takes a set of
+  keys and fingerprints, instead of `ssh.FixedHostKey` (#93). The
+  backend also orders host key algorithms so that a pinned key is
+  offered first, then Ed25519, ECDSA and RSA.
+- **Terminal sizes** are bounded at 1000 columns by 500 rows, the
+  emulator's bounds, instead of 65535 (#111, 8ef0ce1).
+- **The emulator** is the in-house one, not a library: it alone passed
+  the conformance table, and it handles T2's output in 6.4 ms where the
+  charm emulators took about 850 ms (Implementation notes: terminal
+  state).
+  Decision 1 records the choice.
+
+### Not implemented
+
+- **Predicted echo.** No client predicts yet. The server's part is
+  done: `frame-end` carries the last input, and row versions tell an
+  input's echo from output already in motion. The rest belongs to the
+  web client ([009](../009-react-web-client.md)) and the client core
+  ([client-core](client-core.md)).
+- **A `term` key.** Connections cannot set `TERM`, which stays the
+  backend's `xterm-256color`.
+- **Passphrase-protected keys and keys encrypted at rest.** `New`
+  refuses a key with a passphrase. Decision 3 said encryption can
+  follow.
+- **What the emulator does not keep** (Implementation notes: terminal
+  state, Not kept yet): underline styles and colour, OSC 8 and OSC 52,
+  synchronized output, and left and right margins. The bell is among
+  them: the emulator ignores BEL and the backend never calls
+  `Sink.Bell`, so a bell in a shell never reaches viewers, although the
+  protocol's `bell` message exists and the VNC backend sends it.
+
+### Unspecified work
+
+- Row versions on each snapshot (#100), which the viewer writer uses to
+  send an input's echo at once (an improvement).
+- Panic recovery on every goroutine `Run` starts, and the emulator's
+  lock released when `Write` panics (#117, an improvement).
+- Titles cut, between characters, to what the OSC 2 that the diff
+  sends them in carries, which `FuzzWrite` found (#117, an
+  improvement).
+- Input typed while the backend connects is queued and reaches the
+  shell once it starts (#93, an improvement).
+
+### Decisions
+
+- A configured password answers one keyboard-interactive challenge that
+  asks a single hidden question, as guacd and sshpass do, and is sent at
+  most once per connection. Every other challenge goes to the owner.
+- A shell that exits with any status ends the session normally. A
+  channel that closes without one is an error.
+- `Key`, `Pointer`, `Wheel` and `Clipboard` are ignored: the viewer's
+  emulator turns keys into `term-input`.
+- Key file permissions are not checked. Decision 3's "readable only by
+  the `occamyd` user" is the operator's to ensure.
+
+### Surprises
+
+- x/crypto prefers ECDSA host keys to Ed25519, so an Ed25519 pin failed
+  against stock OpenSSH until the backend ordered the algorithms.
+- A fingerprint pin of an ECDSA or RSA key fails on a server that also
+  has an Ed25519 key, so pinning the full key is the recommended form.
+- x/crypto uses only the first auth method of each name, so a
+  configured password and a prompted one exclude each other.
+
+### Follow-ups
+
+- Predicted echo in the web client and the client core.
+- A `term` key on connections.
+- Passphrase-protected keys, and keys encrypted at rest.
+- The bell: the emulator could report BEL and the session call
+  `Sink.Bell`.
+- No spec depends on this one.
