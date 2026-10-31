@@ -47,8 +47,10 @@ type target struct {
 	tls config.ConnectionTLS
 	ard bool
 	// security is the security mode of an rdp target on the native
-	// backend, empty for its default.
-	security string
+	// backend, empty for its default, and disableGFX keeps it from
+	// asking for the graphics pipeline.
+	security   string
+	disableGFX bool
 	// kubernetes is the pod of a kubernetes target, whose addr is the
 	// API server's.
 	kubernetes config.Kubernetes
@@ -303,10 +305,11 @@ func rdpConfig(t target) (rdp.Config, error) {
 		return rdp.Config{}, fmt.Errorf("reading the CA file: %w", err)
 	}
 	cfg := rdp.Config{
-		Addr:     t.addr,
-		Username: t.creds.Username,
-		Password: pw,
-		Security: t.security,
+		Addr:       t.addr,
+		Username:   t.creds.Username,
+		Password:   pw,
+		Security:   t.security,
+		DisableGFX: t.disableGFX,
 		TLS: rdpproto.TLS{
 			ServerName:         t.tls.ServerName,
 			RootCAs:            roots,

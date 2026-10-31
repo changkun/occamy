@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"log/slog"
 	"math"
 	"slices"
 	"strings"
@@ -518,14 +519,13 @@ func TestGFXIgnored(t *testing.T) {
 	g.must(t, surfacePDUs(1, 64, 64, image.Point{})...)
 	r := image.Rect(0, 0, 8, 8)
 	g.must(t, gfxFrame(3,
-		rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, rdptest.CodecClearCodec, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, rdptest.CodecAVC420, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, rdptest.CodecAlpha, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, rdptest.CodecProgressive, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, 0x77, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(4, 4, 4, 8), nil),
-		rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, []byte{1}),
+		rdptest.WireToSurface2(1, rdptest.CodecRemoteFX, 1, rdptest.PixelXRGB, []byte{1}),
 		rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, make([]byte, 6)),
 		rdptest.GFXPDU(rdptest.GFXCacheToSurface, make([]byte, 6)),
 		rdptest.GFXPDU(rdptest.GFXMapSurfaceToScaled, make([]byte, 20)),
@@ -535,18 +535,60 @@ func TestGFXIgnored(t *testing.T) {
 		t.Fatalf("acknowledgements %+v", a)
 	}
 	ign := g.c.Stats().Ignored
-	for _, k := range []string{"GFX RemoteFX bitmaps", "GFX ClearCodec bitmaps", "GFX AVC420 bitmaps", "GFX alpha bitmaps",
-		"GFX bitmaps of unknown codecs", "empty bitmaps", "GFX codec contexts", "GFX cache PDUs"} {
+	for _, k := range []string{"GFX ClearCodec bitmaps", "GFX AVC420 bitmaps", "GFX alpha bitmaps",
+		"empty bitmaps", "GFX deletes of no codec context", "GFX cache PDUs", "GFX progressive bitmaps in wire to surface 1"} {
 		if ign[k] != 1 {
 			t.Errorf("Ignored[%q] = %d", k, ign[k])
 		}
 	}
-	// One in wire-to-surface 2, as servers send it, and one in 1.
-	if ign["GFX progressive bitmaps"] != 2 {
-		t.Errorf("%d progressive bitmaps ignored, want 2", ign["GFX progressive bitmaps"])
+	// One of an unknown codec in wire-to-surface 1, and one of RemoteFX
+	// in 2, which takes only RemoteFX Progressive.
+	if ign["GFX bitmaps of unknown codecs"] != 2 {
+		t.Errorf("%d bitmaps of unknown codecs ignored, want 2", ign["GFX bitmaps of unknown codecs"])
 	}
 	if ign["GFX PDUs"] != 2 {
 		t.Errorf("%d unknown PDUs ignored, want 2", ign["GFX PDUs"])
+	}
+}
+
+// The first PDU or bitmap of a session that the client skips and that
+// leaves the screen without what it draws, as Windows' ClearCodec and
+// bitmap cache, logs a warning that names the ways to turn GFX off, and
+// the session warns once; AVC, which the client does not offer, and an
+// empty bitmap do not warn.
+func TestGFXSkipWarning(t *testing.T) {
+	r := image.Rect(0, 0, 8, 8)
+	for _, tc := range []struct {
+		name string
+		pdu  []byte
+	}{
+		{"GFX ClearCodec bitmaps", rdptest.WireToSurface1(1, rdptest.CodecClearCodec, rdptest.PixelXRGB, r, []byte{1})},
+		{"GFX cache PDUs", rdptest.GFXPDU(rdptest.GFXCacheToSurface, make([]byte, 6))},
+		{"GFX cache PDUs", rdptest.GFXPDU(rdptest.GFXSurfaceToCache, make([]byte, 20))},
+		{"GFX alpha bitmaps", rdptest.WireToSurface1(1, rdptest.CodecAlpha, rdptest.PixelXRGB, r, []byte{1})},
+		{"GFX bitmaps of unknown codecs", rdptest.WireToSurface2(1, rdptest.CodecRemoteFX, 1, rdptest.PixelXRGB, []byte{1})},
+	} {
+		var log bytes.Buffer
+		g := newGFXTest(t, 64, 64)
+		g.c.log = slog.New(slog.NewTextHandler(&log, nil))
+		g.must(t, surfacePDUs(1, 64, 64, image.Point{})...)
+		g.must(t, gfxFrame(1,
+			rdptest.WireToSurface1(1, rdptest.CodecAVC420, rdptest.PixelXRGB, r, []byte{1}),
+			rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(4, 4, 4, 8), nil)))
+		if log.Len() != 0 {
+			t.Fatalf("%s: warned before the skip: %s", tc.name, log.String())
+		}
+		g.must(t, gfxFrame(2, tc.pdu, tc.pdu))
+		g.must(t, gfxFrame(3, rdptest.WireToSurface1(1, rdptest.CodecClearCodec, rdptest.PixelXRGB, r, []byte{1})))
+		got := log.String()
+		if n := strings.Count(got, "level=WARN"); n != 1 {
+			t.Errorf("%s: %d warnings, want 1: %s", tc.name, n, got)
+		}
+		for _, want := range []string{"disable_gfx: true", "adhoc_backends: {rdp: guacd}", fmt.Sprintf("skipped=%q", tc.name)} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s: the warning %q does not say %q", tc.name, got, want)
+			}
+		}
 	}
 }
 
@@ -1055,14 +1097,16 @@ func TestGFXPace(t *testing.T) {
 		{"map", rdptest.MapSurface(1, image.Point{}), 128 * 64, false},
 		{"fill", rdptest.SolidFill(1, red, image.Rect(0, 0, 8, 8), image.Rect(32, 32, 100, 100)), 8*8 + 68*32, false},
 		{"small copy", rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 8, 4), image.Pt(16, 16), image.Pt(32, 0)), 2 * pointerCost, false},
-		{"large copy", rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 128, 40), image.Pt(0, 8)), 128 * 40, false},
+		// A copy within a mapped surface costs at least a pointer
+		// update.
+		{"large copy", rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 128, 40), image.Pt(0, 8)), max(128*40, pointerCost), false},
 		// Copies that cannot reach the output cost their pixels alone.
 		{"offscreen", rdptest.CreateSurface(2, 16, 16, rdptest.PixelXRGB), 16 * 16, false},
 		{"offscreen copy", rdptest.SurfaceToSurface(2, 2, image.Rect(0, 0, 8, 4), image.Pt(8, 8), image.Pt(0, 8)), 2 * 8 * 4, false},
 		{"copy to offscreen", rdptest.SurfaceToSurface(1, 2, image.Rect(0, 0, 8, 4), image.Pt(4, 4)), 8 * 4, false},
 		{"copy from offscreen", rdptest.SurfaceToSurface(2, 1, image.Rect(0, 0, 8, 4), image.Pt(64, 0)), 8 * 4, false},
 		{"uncompressed", rdptest.WireToSurface1(1, rdptest.CodecUncompressed, rdptest.PixelXRGB, image.Rect(0, 0, 8, 8), rdptest.Uncompressed(img)), 8 * 8, false},
-		{"planar", rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(8, 8, 16, 16), rdptest.Planar(img)), 8 * 8, false},
+		{"planar", rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(8, 8, 16, 16), rdptest.Planar(img)), planarCost * 8 * 8, false},
 		{"stored", ignored, 0, false},
 		{"compressed", ignored, -1, true},
 		// The mapped surface drawn again; a larger desktop, so that its
@@ -1296,6 +1340,12 @@ func FuzzGFX(f *testing.F) {
 		rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 32, 32), image.Pt(40, 20), image.Pt(4, 4)))))
 	f.Add(seed(setup, slices.Concat(rdptest.ResetGraphics(200, 100), rdptest.CreateSurface(2, 50, 50, rdptest.PixelARGB),
 		rdptest.MapSurface(2, image.Pt(180, 90)), rdptest.SurfaceToSurface(1, 2, image.Rect(0, 0, 50, 50), image.Point{}), rdptest.DeleteSurface(1))))
+	// RemoteFX and a progressive context, deleted and then its surface.
+	rfx, prog := fuzzRFXSeeds()
+	f.Add(seed(slices.Concat(surfacePDUs(1, 128, 128, image.Point{})...), gfxFrame(2,
+		rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, image.Rect(0, 0, 128, 128), rfx[1]),
+		rdptest.WireToSurface2(1, rdptest.CodecProgressive, 7, rdptest.PixelXRGB, prog[1])),
+		slices.Concat(rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, []byte{1, 0, 7, 0, 0, 0}), rdptest.DeleteSurface(1))))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		g := newGFXTest(t, 128, 64)
 		for len(data) >= 2 {

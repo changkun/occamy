@@ -401,8 +401,9 @@ before the graphics pipeline's remaining tasks (Refinement, Tile cache,
 and Encode cache and workers, in
 [graphics-pipeline](graphics-pipeline.md)) and native RDP
 ([native-rdp-backend](native-rdp-backend.md)) are in occamyd. Native
-RDP has been rdp's default since #132, without RDP's graphics pipeline
-(GFX, its third phase) yet, and `v1-native` measures it. So
+RDP has been rdp's default since #132, and asks for RDP's graphics
+pipeline (GFX) by default since its third phase's second part, without
+ClearCodec and the cache yet; `v1-native` measures it. So
 `docs/benchmarks.md` documents how to run the v1 series and publishes no
 v1 results, and no target is judged met or missed yet. The full run is
 also the one that gates v1.0 (owner, 2026-10-31; see
@@ -423,8 +424,26 @@ published.
     the harness's 1024 × 768, with `security: tls`, since xrdp speaks no
     NLA, and without a certificate check, since xrdp signs its
     certificate when the image is built; occamyd warns of that at
-    start. Neither path speaks RDP's graphics pipeline: native RDP has
-    none yet, and the bridge gives guacd `disable-gfx`.
+    start. When the harness was written neither path spoke RDP's
+    graphics pipeline; native RDP now asks for it by default, and xrdp
+    draws in RemoteFX Progressive, while the bridge gives guacd
+    `disable-gfx`.
+  - Native RDP's decoding rate, which holds a session to about a core
+    of the benchmarks' host, caps full-screen RemoteFX at about 97
+    frames a second at the harness's 1024 × 768, 37 at 1920 × 1080 and
+    9 at 3840 × 2160, near the decoder's own speed on one core
+    ([native-rdp-backend](native-rdp-backend.md)'s phase 3 notes). No
+    scene reaches it at 1024 × 768. It is Occamy's bound, not one
+    outside it, so it justifies no miss.
+  - G5 over native RDP with GFX is an expected miss. G5's scene redraws
+    every pixel in every frame, so `rdp-native` with GFX decodes a full
+    screen of RemoteFX Progressive tiles a frame: about 10.3 ms of CPU
+    at 1024 × 768 on the benchmarks' host, 10.4 to 11.9 as the review
+    measured, against G5's RDP target of 5.5 ms a frame. With
+    `disable_gfx`, bitmap updates cost about 1 to 2.4 ms a frame. The
+    owner decides before the v1 run whether `rdp-native` runs G5 with
+    GFX, without it, or both, or whether the decoder gets faster first
+    (`docs/benchmarks.md`).
   - `bench/v1.go` drives the Go client core through API v1: it signs in
     at `POST /api/v1/auth/token`, opens
     `GET /api/v1/connections/{id}/stream`, asking for 1024 × 768 pixels
@@ -646,10 +665,11 @@ published.
     default colour depth. If they differ, xrdp's session manager may
     keep an X session, and a scene program, for each, so that RDP
     scenarios run beside a second scene.
-  - Once native RDP speaks RDP's graphics pipeline (its third phase),
-    `rdp-native` and `rdp-guacd` differ there, since the bridge keeps
-    `disable-gfx`; the comparison within v1 should say which it
-    measures.
+  - Native RDP now speaks RDP's graphics pipeline by default (its third
+    phase's second part), so `rdp-native` and `rdp-guacd` differ there,
+    since the bridge keeps `disable-gfx`; the comparison within v1
+    should say which it measures, and `disable_gfx: true` on
+    `rdp-native` measures native RDP without it.
   - The client core's default decoders (a follow-up of
     [client-core](client-core.md)): once `client` has them, the harness
     uses them instead of its own.

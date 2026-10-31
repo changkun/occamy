@@ -273,20 +273,38 @@ best effort, has none. The live run was repeated after the fixes.
     64 MB allocated for a 4096×2048 bitmap. The first review's budget of
     twice the desktop per PDU still let a stream of such PDUs take
     seconds of CPU for 64 KiB, since each PDU started a full budget.
-    - The client now decodes at most 32 Mi pixels a second
-      (`decodeRate`), from a token bucket that holds two desktops and a
-      tile. While the bucket is in debt the client waits, and the
-      server's updates queue behind it.
-    - The rate is 42 desktops of 1024×768 a second, 16 of 1920×1080, 4
-      of 3840×2160, or 1 of the largest. Real traffic stays under it:
-      the motion scene's 30 desktops of 1024×768 a second take at most
-      23.6 million pixels. Real content costs about two bytes a pixel as
-      bitmap updates, so reaching the rate needs over 500 Mbit/s.
-    - The cheapest PDU, one rectangle of 3 bytes of RLE, decodes at 1.8
-      to 2.9 ns a pixel (`BenchmarkHostileBitmap`; medians of five runs
-      at 1024×768 and 4096×2048, host load 20). A hostile server can
-      therefore make the client spend 60 to 100 ms of CPU a second,
-      whatever it sends.
+    - The client decodes from a token bucket (`decodeRate`). While the
+      bucket is in debt the client waits, and the server's updates
+      queue behind it. Phase 2 set the rate at 32 Mi pixels a second,
+      with a bucket of two desktops and a tile: 16 desktops of
+      1920×1080 a second as bitmap updates, and, once phase 3 charged a
+      RemoteFX tile 7 times its pixels, 2.3 full screens of tiles. That
+      made the rate the frame rate of full-motion RemoteFX, so phase 3
+      priced it anew (found in review).
+    - Phase 3's rate is 512 Mi units a second, a unit a pixel drawn or
+      copied, 2 a planar pixel, and 7 a pixel of a RemoteFX or
+      progressive tile, each priced by what it costs to decode on the
+      benchmarks' host (an Apple M5 Pro, 3 runs, 1-minute load 6.9 to
+      12.3): a unit of real content costs up to 1.88 ns, progressive
+      tiles'. The rate therefore holds a session's real content to
+      about one core of that host; crafted work that costs more a unit,
+      2.65 ns for a RemoteFX tile of 4,096 rectangles of a pixel, needs
+      about 377 MB/s of input, and the session's one reader goroutine
+      holds it to a core. The cheapest floods to send, tiles of a header
+      alone and 3-byte RLE runs, cost 1.1 to 1.5 ns a unit (medians) and
+      are held to 0.6 to 0.8 of a core. The rate is a session's, so a
+      user with ten sessions to hostile servers can take ten cores; a
+      budget for the whole process is a release item
+      ([native-rdp-backend](native-rdp-backend.md)).
+    - The bucket holds two desktops of tiles and a pointer update, so a
+      session's first screen, in any codec, never waits. Full-screen
+      RemoteFX Progressive at 1920×1080 and 30 frames a second takes
+      82% of the rate, about 0.8 of a core, and never waits; the rate
+      caps full-screen tiles at 36.8 frames a second at 1920×1080 and
+      9.2 at 3840×2160, where the decoder's own speed on one core caps
+      them as well. Bitmap updates at 1920×1080 are capped at 129
+      repaints a second in planar and 259 in RLE
+      ([native-rdp-backend](native-rdp-backend.md)'s phase 3 notes).
     - The decoder keeps its buffers instead of reallocating them for
       every large bitmap, and drops them when the desktop changes.
       xrdp's bitmaps are at most 8,192 pixels, so for real traffic the
