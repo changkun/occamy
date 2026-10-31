@@ -36,9 +36,10 @@ const DefaultEncodeCacheBytes = 32 << 20
 
 // DefaultEncodeWorkers is the workers a session has unless
 // Config.EncodeWorkers says otherwise: two, or half the cores where
-// there are fewer than four, none on one. On the corpus, more than two
-// sent a photograph sooner but browser pages and text no sooner, for
-// more CPU time (docs/benchmarks/encode-cache.md).
+// there are fewer than four, none on one. On the corpus, four or nine
+// sent a photograph sooner, but a browser page no sooner and text
+// within the runs' spread, for more CPU time
+// (docs/benchmarks/encode-cache.md).
 func DefaultEncodeWorkers() int { return min(2, runtime.GOMAXPROCS(0)/2) }
 
 // profile is what an encoder of internal/encoder sends tiles in, its
