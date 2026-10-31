@@ -19,7 +19,7 @@ affects:
   - Makefile
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -329,7 +329,7 @@ report comes from a script rather than `go-licenses report`, with
   - **Community.** `CHANGELOG.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
     `CONTRIBUTING.md`, issue forms and a PR template.
   - **CI.** `go test -race`, govulncheck and the `master`-only push
-    trigger, plus Dependabot for gomod, npm, actions and the five Docker
+    trigger, plus Dependabot for gomod, npm, actions and the four Docker
     directories. Since #65, also a build-only macOS and Windows job. Since
     #66, `go-licenses check`.
   - **Release.** `release.yml` has image (native amd64 and arm64), manifest,

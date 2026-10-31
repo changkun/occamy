@@ -10,7 +10,7 @@ affects:
   - .github/workflows/dockerimage.yml
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -23,17 +23,17 @@ The native client is a SwiftUI app, starting on macOS, that links Occamy's
 Go client core as a static library. Go does the protocol, decoding and
 session logic, shared with the server and the tests. Swift does the UI,
 input, rendering and platform integration. It replaces the Gio client
-([007](007-native-gio-client.md), archived), and it is a preview in the
-v1 beta ([008](008-native-architecture.md)).
+([007](007-native-gio-client.md), archived), and it is a preview by
+`v1.0.0-rc.1`, not a gate for beta.1 ([008](008-native-architecture.md)).
 
 ## Current State
 
 - No Swift code exists. The Gio attempt lives on branches `gio` and
-  `gio-client` (PR #51), which are not merged.
-- The Go client core is designed in
-  [client-core](008-native-architecture/client-core.md): a pure-Go
-  `client` package with a pull-style event API, chosen with this C ABI in
-  mind.
+  `gio-client` (PR #51, closed unmerged).
+- The Go client core exists: `changkun.de/x/occamy/client`, designed in
+  [client-core](008-native-architecture/client-core.md), a pure-Go
+  package with a pull-style event API (`Dial`, then `Session.Next`),
+  chosen with this C ABI in mind.
 
 ## Architecture
 
@@ -170,7 +170,8 @@ Open:
   decided before the first preview build.
 - **Gio:** the `gio` and `gio-client` branches stay.
   [guacd-bridge](008-native-architecture/guacd-bridge.md) may reuse their
-  `internal/guac`.
+  `internal/guac`. (Answered: the bridge reuses `internal/guacamole`,
+  written fresh, instead.)
 
 ## Acceptance Criteria
 

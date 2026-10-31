@@ -307,9 +307,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the pointer and wheels, batched into input PDUs from a bounded queue
   in writes of at most 1,024 events; Suppress Output while nobody can
   see. A server's reason for ending the session decides how it ended,
-  even when a write fails as it hangs up. Clipboard and resize wait for
-  the virtual channels of its second phase. Nothing registers it in
-  occamyd until NLA has run end to end. The VNC and RDP backends share
+  even when a write fails as it hangs up. Nothing registers it in
+  occamyd yet. The VNC and RDP backends share
   one USB HID to scan code table, `internal/keymap`.
 - A `backend` key on each v1 connection, `guacd` or `native`, and
   `adhoc_backends`, which picks the backend of ad-hoc targets by
@@ -364,6 +363,37 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   Go client. `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` move a
   second stack aside on a shared host, and `make e2e` follows the
   last two.
+- The native RDP backend's clipboard, the first part of its second
+  phase: `internal/rdp` joins static virtual channels and reassembles
+  their chunks within a bound per channel, and carries text both ways
+  on the clipboard channel (CLIPRDR), CF_UNICODETEXT or CF_TEXT, at
+  most 4 MiB of UTF-8, as `Config.Clipboard` allows. The backend copies
+  and pastes it, a paste set before the keys that follow it, unless
+  `DisableCopy` or `DisablePaste` stops a direction, as guacd's
+  `disable-copy` and `disable-paste` do. The Format List Responses the
+  client owes are a count, written 64 at a time as fast as the server
+  reads, so that neither a burst of lists nor copies during a long
+  paste end the session, and a flood costs no memory; a server that
+  leaves more than 8 of its data requests unanswered ends it.
+  `rdptest` accepts NLA through CredSSP with NTLMv2, so that the
+  backend's NLA path, prompted credentials included, runs end to end in
+  tests.
+- The native RDP backend's resize, the second part of its second
+  phase: `internal/rdp` speaks DRDYNVC, version 2 at most, and accepts
+  the Display Control channel, through which `RequestSize` asks the
+  server for a desktop size within the area it takes: the newest size,
+  at most one every half second, and again every two seconds, up to
+  eight times, until the desktop has it, since xrdp ignores a size
+  while its login is in progress. A size asked for back to the
+  desktop's own before the server applied the one before it is kept
+  while the server may yet apply that one. The backend asks for any
+  interactive viewer's `Resize`; a server without Display Control keeps
+  its size, which viewers scale. After a reactivation the client tells
+  a server it had asked to suppress its output to suppress it again,
+  unless a viewer has asked for output since. A dynamic channel id of
+  size code 3 ends the session, and once the channel writer fails, a
+  server that the client then owes too many answers ends it with the
+  write's error.
 
 ### Changed
 
