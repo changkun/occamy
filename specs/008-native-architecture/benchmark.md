@@ -133,6 +133,13 @@ benchmark shows native at least 10x better than guacd. It does not ship
 with a guacd fallback for any protocol still short of 10x; release
 candidates may still carry one ([008](../008-native-architecture.md)).
 
+The gate is each scenario's target as defined here, not a flat 10x
+(owner, 2026-10-31, keeping 008's acceptance clause "or each miss is
+justified there by a bound Occamy does not control"). A scenario may
+miss 10x only where a documented bound outside Occamy, such as the
+network condition or the remote server's own time, makes 10x
+impossible, and `docs/benchmarks.md` must justify each such miss.
+
 The baseline run may show that a metric is bound by something Occamy does
 not control: the RTT, the remote server, or the scene's own frame rate,
 for example. A delivered frame rate cannot exceed the scene's. Such a
@@ -564,10 +571,10 @@ published.
     screen before its first bitmap would end G7 early. Changing it
     changes v0's measurement, so it waits for the same decision to
     measure the baseline again.
-  - Owner question: whether the v1.0 gate of 10x over guacd is a flat
-    10x on each scenario's primary metric, or each target as defined
-    under [Targets](#targets), such as T1 at N1, whose target a network
-    bound caps.
+  - ~~Owner question: whether the v1.0 gate of 10x over guacd is a flat
+    10x or each target as defined.~~ Answered on 2026-10-31: each
+    target as defined, a miss of 10x only where a documented bound
+    outside Occamy makes it impossible ([Targets](#targets)).
   - The full v1 run, with `-runs 3` under N0 to N2 on an idle host,
     once Refinement, Tile cache, Encode cache and workers, and native
     RDP are in occamyd; then `docs/benchmarks.md` gets the v1 results

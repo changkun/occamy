@@ -415,7 +415,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - The plan for v1.0 (owner, 2026-10-31): it waits until the benchmark
   shows native at least 10x better than guacd, and ships no guacd
   fallback for a protocol still short of it; release candidates may
-  carry one
+  carry one. The gate is each scenario's target as defined, which may
+  fall short of 10x only where a documented bound outside Occamy makes
+  10x impossible, justified in `docs/benchmarks.md`
   ([specs/008-native-architecture/benchmark.md](specs/008-native-architecture/benchmark.md#targets)).
 - Building occamyd needs Go 1.26.4 or later, which gen2brain/vpx and
   gen2brain/jpegn require.

@@ -516,9 +516,13 @@ target.
 The targets gate the release (owner, 2026-10-31): v1.0 waits until the
 benchmark shows native at least 10x better than guacd. It does not ship
 with a guacd fallback for any protocol still short of 10x; release
-candidates may still carry one. Whether that means a flat 10x or each
-target as defined here, such as T1 at N1 capped by a network bound, is
-an open question for the owner.
+candidates may still carry one.
+
+The gate is each scenario's target as defined here, not a flat 10x
+(owner, 2026-10-31). A scenario may miss 10x only where a documented
+bound outside Occamy, such as the network condition or the remote
+server's own time, makes 10x impossible, as the bounds below do for
+some targets; this page must justify each such miss.
 
 - **Latency and completion.** At N0 a target is no lower than the remote
   server's own time, where `bench/vncprobe` measured it, plus 2 ms. A
