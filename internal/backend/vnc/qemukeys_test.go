@@ -74,6 +74,59 @@ func TestQEMUKeys(t *testing.T) {
 	key(false, 'c')
 }
 
+// TestPowerKey checks that Power, by its code or by a power keysym,
+// reaches the server neither as a KeyEvent nor as an extended key event.
+func TestPowerKey(t *testing.T) {
+	checkGoroutines(t)
+	s := connect(t, serverOptions{}, true)
+	in := func(down bool, keysym uint32, code uint16) {
+		t.Helper()
+		if err := s.b.Input(backend.Key{Down: down, Keysym: keysym, Code: code}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	power := func() {
+		t.Helper()
+		for _, k := range []backend.Key{
+			{Code: backend.HIDPower},
+			{Keysym: 0x1008ff2a, Code: backend.HIDPower}, // XF86PowerOff
+			{Keysym: 0x1008ff2a},
+			{Keysym: 0x1008ff21}, // XF86PowerDown
+			{Keysym: 0x1008ff2f}, // XF86Sleep
+			{Keysym: 0x1008ffa7}, // XF86Suspend
+			{Keysym: 0x1008ffa8}, // XF86Hibernate
+			{Keysym: 0x1008ff10}, // XF86Standby
+		} {
+			in(true, k.Keysym, k.Code)
+			in(false, k.Keysym, k.Code)
+		}
+	}
+
+	req := expect[requestMsg](t, s.c)
+	power()
+	// The key after them is the next message.
+	in(true, 'a', 0x04)
+	if m := expect[keyMsg](t, s.c); m != (keyMsg{true, 'a'}) {
+		t.Errorf("key %+v, want a pressed", m)
+	}
+
+	s.c.send(t, putUpdate(putQEMUKeys(), putRaw(s.c.pf, pattern(64, 48, 0), req.r)))
+	expect[requestMsg](t, s.c)
+	power()
+	in(true, 'b', 0x05)
+	if m := expect[qemuKeyMsg](t, s.c); m != (qemuKeyMsg{true, 'b', 0x30}) {
+		t.Errorf("extended key %+v, want b pressed", m)
+	}
+	// Text never types a power keysym: the keysyms of characters stop
+	// below XF86's.
+	if err := s.b.Input(backend.Text{Text: "\U0008ff2a"}); err != nil {
+		t.Fatal(err)
+	}
+	if m := expect[keyMsg](t, s.c); m != (keyMsg{true, 0x0108ff2a}) {
+		t.Errorf("text key %+v, want U+8FF2A's keysym pressed", m)
+	}
+}
+
 func TestHIDToXT(t *testing.T) {
 	// From the USB HID usage tables and the PC's scan code set 1, with E0
 	// as the high bit, as QEMU numbers keys; not from keycodemapdb.

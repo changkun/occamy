@@ -9,7 +9,7 @@ affects:
   - server/
 effort: large
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -319,6 +319,24 @@ arise, rather than inheriting those fixes.
   All have regression tests now.
 - **Follow-ups:** `Viewer.Session` exposes `Close` and `Join` without a
   role check, so the HTTP layer checks roles.
+- **Later fix (panic safety):** a backend that panicked between
+  `sink.Lock` and `sink.Unlock` left rows locked, and every viewer's
+  writer then waited in `ReadTile` forever, even after the session's
+  recover had ended the session. Backends now defer `Unlock`, and as
+  defence in depth the session closes its framebuffer when it ends, for
+  every reason, once `Run` has returned: `Framebuffer.Close` releases
+  each `Lock` not yet unlocked, which the framebuffer records until its
+  `Unlock`, and from then on `ReadTile` reads nothing, `Lock` returns
+  pixels off the screen, `CopyRect` copies nothing and `Unlock` of a
+  released `Lock` does nothing. Before `Close`, an `Unlock` without its
+  `Lock` panics. Until `Run` returns the screen stays the backend's,
+  which may still draw as it stops. `sink.TermData` and
+  `Terminal.Write` release their locks by `defer` too. A backend's own
+  goroutines recover and return `backend.PanicError` from `Run`, which
+  ends the session as `session.Internal`, as a panic of `Run` itself
+  does ([api-and-server-stack](api-and-server-stack.md), Implementation
+  notes: panic safety; `TestEndReleasesRows`, `TestTermDataPanics`,
+  `TestScreenUntilRunReturns`).
 
 
 ## Implementation notes: viewer writer

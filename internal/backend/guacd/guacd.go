@@ -219,6 +219,10 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 		}
 		return err
 	}
+	// Cancelled by the writer's panic too, so that a reader waiting for
+	// the owner's answer to a prompt stops then rather than at the answer.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	// Closing the connection unblocks the reader and the writer.
 	stop := context.AfterFunc(ctx, func() { nc.Close() })
 	defer stop()
@@ -235,12 +239,32 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 	}
 	quit := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Go(func() { s.writeLoop(quit) })
-	err = s.readLoop(ctx)
-	close(quit)
-	nc.Close()
-	wg.Wait()
+	var wpanic error // the writer's panic, read once it has ended
+	wg.Go(func() {
+		// A panic here is beyond the session's recover: it stops the
+		// reader and ends Run.
+		defer func() {
+			if wpanic = backend.Recovered(recover()); wpanic != nil {
+				cancel()
+				nc.Close()
+			}
+		}()
+		s.writeLoop(quit)
+	})
+	err = func() error {
+		// Deferred, so that a panic of the reader, which the session
+		// recovers from, stops the writer and closes the connection too.
+		defer func() {
+			close(quit)
+			nc.Close()
+			wg.Wait()
+		}()
+		return s.readLoop(ctx)
+	}()
 	s.recordDrawing()
+	if wpanic != nil {
+		return wpanic
+	}
 	if err != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -263,7 +287,8 @@ func (b *Backend) Input(ev backend.InputEvent) error {
 		// A key of keysym 0, such as a browser's dead key, has only its
 		// HID code, for which guacd's key instruction has no field; it is
 		// dropped, as the VNC backend drops it without QEMU's extension.
-		if ev.Keysym != 0 {
+		// Power and the power keysyms are dropped too (backend.PowerKey).
+		if ev.Keysym != 0 && !backend.PowerKey(ev) {
 			p = appendKey(nil, ev.Keysym, ev.Down)
 		}
 	case backend.Pointer:
@@ -676,9 +701,16 @@ func (s *session) flush() {
 		if r.Empty() {
 			continue
 		}
-		s.display.CopyTo(s.sink.Lock(r), r)
-		s.sink.Unlock(r)
+		s.copyOut(r)
 	}
+}
+
+// copyOut copies the display's pixels in r to the sink under one lock,
+// which a panic while it copies releases too (backend.Sink).
+func (s *session) copyOut(r image.Rectangle) {
+	dst := s.sink.Lock(r)
+	defer s.sink.Unlock(r)
+	s.display.CopyTo(dst, r)
 }
 
 // prompt asks the session's owner for the parameters guacd requires, and

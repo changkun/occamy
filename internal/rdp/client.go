@@ -473,6 +473,13 @@ func (c *Client) Size() (width, height int) {
 	return c.width, c.height
 }
 
+// share returns the share's ID, which a reactivation changes.
+func (c *Client) share() uint32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.shareID
+}
+
 // Protocol returns the security protocol the server selected.
 func (c *Client) Protocol() uint32 { return c.protocol }
 
@@ -504,9 +511,11 @@ func (c *Client) Finalized() bool {
 // updates, [MS-RDPBCGR] 2.2.11.3. On resuming, the server redraws the
 // desktop.
 func (c *Client) SuppressOutput(suppress bool) error {
-	c.mu.Lock()
-	body := c.suppressOutput(!suppress)
-	c.mu.Unlock()
+	body := func() []byte {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.suppressOutput(!suppress)
+	}()
 	return c.sendData(pdu2SuppressOutput, body)
 }
 
@@ -545,9 +554,7 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 			}
 			return err
 		}
-		c.mu.Lock()
-		c.stats.Bytes += int64(len(buf))
-		c.mu.Unlock()
+		c.count(func(s *Stats) { s.Bytes += int64(len(buf)) })
 		if f.fastPath {
 			c.errInfo = 0 // the session went on after a reason
 			err = c.handleFastPath(out, f)
@@ -644,12 +651,7 @@ func (c *Client) activate(out Output, body []byte) error {
 	if err != nil {
 		return err
 	}
-	c.mu.Lock()
-	c.shareID, c.caps = shareID, caps
-	resized := c.width != caps.width || c.height != caps.height
-	c.width, c.height = caps.width, caps.height
-	c.finalized = false
-	c.mu.Unlock()
+	resized := c.activated(shareID, caps)
 	c.fastPathInput.Store(caps.inputFlags&(inputFlagFastPathInput|inputFlagFastPathInput2) != 0)
 	if err := c.sendIO(c.confirmActive()); err != nil {
 		return err
@@ -665,6 +667,18 @@ func (c *Client) activate(out Output, body []byte) error {
 		out.Resize(caps.width, caps.height)
 	}
 	return nil
+}
+
+// activated records the share and the capabilities of a Demand Active
+// PDU, and reports whether they resize the desktop.
+func (c *Client) activated(shareID uint32, caps serverCaps) (resized bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.shareID, c.caps = shareID, caps
+	resized = c.width != caps.width || c.height != caps.height
+	c.width, c.height = caps.width, caps.height
+	c.finalized = false
+	return resized
 }
 
 // waitResize waits until resizeEvery has passed since the last resize.
@@ -777,9 +791,7 @@ func (c *Client) handleShareData(out Output, p []byte) error {
 		c.errInfo = ErrorInfo(u.u32())
 		return u.err
 	case pdu2FontMap:
-		c.mu.Lock()
-		c.finalized = true
-		c.mu.Unlock()
+		c.setFinalized()
 	}
 	return nil
 }
@@ -1031,15 +1043,22 @@ func (c *Client) drawBitmap(out Output, b *bitmapData) error {
 	rows := max(1, drawStrip/r.Dx())
 	sx := r.Min.X - b.dest.Min.X
 	for y0 := r.Min.Y; y0 < r.Max.Y; y0 += rows {
-		s := image.Rect(r.Min.X, y0, r.Max.X, min(y0+rows, r.Max.Y))
-		img := out.Lock(s)
-		for y := s.Min.Y; y < s.Max.Y; y++ {
-			o := 4 * ((y-b.dest.Min.Y)*b.width + sx)
-			copy(img.Pix[img.PixOffset(s.Min.X, y):], rgba[o:o+4*s.Dx()])
-		}
-		out.Unlock(s)
+		drawRows(out, image.Rect(r.Min.X, y0, r.Max.X, min(y0+rows, r.Max.Y)), b, sx, rgba)
 	}
 	return nil
+}
+
+// drawRows copies the strip s of the decoded bitmap b, whose pixels are
+// rgba and whose column sx is the strip's first, to out under one lock.
+// The Unlock is deferred, so that a panic while drawing, which the
+// session recovers from, releases the pixels that viewers wait for.
+func drawRows(out Output, s image.Rectangle, b *bitmapData, sx int, rgba []byte) {
+	img := out.Lock(s)
+	defer out.Unlock(s)
+	for y := s.Min.Y; y < s.Max.Y; y++ {
+		o := 4 * ((y-b.dest.Min.Y)*b.width + sx)
+		copy(img.Pix[img.PixOffset(s.Min.X, y):], rgba[o:o+4*s.Dx()])
+	}
 }
 
 // drawStrip bounds the pixels drawn under one Lock: 256 KiB of RGBA, the
@@ -1098,8 +1117,19 @@ func (c *Client) moveCursor(out Output, p image.Point) error {
 	return nil
 }
 
+// count applies f to the statistics. c.mu is released by defer here, as
+// everywhere: the writer and the session's owner goroutine wait for it,
+// and a panic of the reader that left it locked would leave them waiting
+// forever.
 func (c *Client) count(f func(*Stats)) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	f(&c.stats)
-	c.mu.Unlock()
+}
+
+// setFinalized records the server's Font Map PDU.
+func (c *Client) setFinalized() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.finalized = true
 }

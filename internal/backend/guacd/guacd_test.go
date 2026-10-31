@@ -106,6 +106,14 @@ var config = guacd.Config{
 // run in a synctest bubble.
 func start(t *testing.T, sink *backendtest.Sink) *harness {
 	t.Helper()
+	return startWith(t, sink, nil, nil)
+}
+
+// startWith is start with the sink and the connection that the Backend
+// gets wrapped by wrapSink and wrapConn, if not nil. A panic of Run is
+// what wait returns.
+func startWith(t *testing.T, sink *backendtest.Sink, wrapSink func(backend.Sink) backend.Sink, wrapConn func(net.Conn) net.Conn) *harness {
+	t.Helper()
 	cli, srv := net.Pipe()
 	h := &harness{
 		t:      t,
@@ -123,12 +131,27 @@ func start(t *testing.T, sink *backendtest.Sink) *harness {
 			if network != "tcp" || address != addr {
 				t.Errorf("Dial(%q, %q), want tcp %s", network, address, addr)
 			}
-			return orderConn{Conn: cli, events: h.events}, nil
+			var c net.Conn = orderConn{Conn: cli, events: h.events}
+			if wrapConn != nil {
+				c = wrapConn(c)
+			}
+			return c, nil
 		},
 	})
 	ctx, cancel := context.WithCancel(t.Context())
 	h.cancel = cancel
-	go func() { h.done <- h.b.Run(ctx, orderSink{Sink: sink, events: h.events}) }()
+	var bs backend.Sink = orderSink{Sink: sink, events: h.events}
+	if wrapSink != nil {
+		bs = wrapSink(bs)
+	}
+	go func() {
+		defer func() {
+			if err := backend.Recovered(recover()); err != nil {
+				h.done <- err
+			}
+		}()
+		h.done <- h.b.Run(ctx, bs)
+	}()
 
 	want := []string{
 		instruction("select", "vnc"),
@@ -632,12 +655,15 @@ func TestInput(t *testing.T) {
 		}
 
 		// Small scrolls add up, horizontal ones, control characters other
-		// than C0 and keys of keysym 0 send nothing, and neither does
-		// Demand.
+		// than C0, keys of keysym 0 and Power and the power keysyms send
+		// nothing, and neither does Demand.
 		for _, ev := range []backend.InputEvent{
 			backend.Wheel{DY: 20}, backend.Wheel{DX: 500}, backend.Wheel{DY: 1, Mode: backend.WheelLines},
 			backend.Text{Text: "\x7f\u0085"},
 			backend.Key{Down: true, Code: 0x2f}, backend.Key{Code: 0x2f},
+			backend.Key{Down: true, Keysym: 0x1008ff2a, Code: backend.HIDPower},
+			backend.Key{Down: true, Keysym: 'p', Code: backend.HIDPower},
+			backend.Key{Down: true, Keysym: 0x1008ff2f}, backend.Key{Keysym: 0x1008ff2f},
 		} {
 			if err := h.b.Input(ev); err != nil {
 				t.Fatalf("Input(%#v) = %v", ev, err)
