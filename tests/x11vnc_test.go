@@ -1,0 +1,199 @@
+// Copyright 2026 Changkun Ou. All rights reserved.
+// Use of this source code is governed by a MIT
+// license that can be found in the LICENSE file.
+
+package tests
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"testing"
+	"time"
+
+	"changkun.de/x/occamy/client"
+)
+
+// TestX11vncClipboardRequestorGone checks that the demo x11vnc, and the
+// session on it, live through a request for the clipboard from a window
+// that is gone by the time x11vnc answers.
+//
+// x11vnc owns the clipboard after a client's cut text, and answers each
+// request for it with a ChangeProperty and a SendEvent on the
+// requestor's window. It traps X errors meanwhile, but checks the window
+// only when 0.2 s have passed since its last check, and otherwise stops
+// trapping without waiting for the X server: a BadWindow that comes
+// later reaches its fatal handler, and its watchdog
+// (docker/demo/vnc/start.sh) kills it and starts it again, which ends
+// the sessions on it as backend-failed. The desktop's clipboard probe
+// asks with an xclip that it kills after 2 s, so an x11vnc that stalled
+// for longer met such requests. X11VNC_SENDEVENT_SYNC, which start.sh
+// sets, makes x11vnc wait for the X server before it stops trapping.
+//
+// The test makes the x11vnc on port 5901 own the clipboard through a
+// session and stops it. While it is stopped, an xclip that waits asks
+// for the clipboard, and 0.3 s later another, which is killed 0.3 s
+// after that, its request sent; then x11vnc continues and answers both,
+// in that order. It checks the window of the first, which is there, and
+// as a rule answers the second within 0.2 s, unchecked. The first xclip
+// must get the text, the same x11vnc must serve the port, and the
+// session must still carry the clipboard both ways. With the variable,
+// nothing can kill x11vnc here. Without it, the test cannot fail every
+// time: whether the error comes before x11vnc stops trapping is a race;
+// a host slow enough to put more than 0.2 s between the two answers
+// has x11vnc check the second; and once a check of x11vnc's has found a
+// window gone, it waits for the X server for good, until it is started
+// again. The x11vnc that CI tests has served the parity matrix first,
+// and if it stalled for more than 2 s there while it owned the
+// clipboard, a check may have found one of the probe's xclips gone, and
+// the test cannot tell the variable's absence. On a Mac, against x11vnc
+// processes just started, it failed in five of six runs without the
+// variable, each time as x11vnc first owned the clipboard, before the
+// stop, and passed in five of five with it.
+func TestX11vncClipboardRequestorGone(t *testing.T) {
+	addr := endpointV1(t)
+	compose := composeE2E(t)
+	token, err := signIn(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	cl := openDesktopV1(t, ctx, addr, "/api/v1/connections/vnc-none-native/stream", token,
+		client.Options{Width: 1024, Height: 768})
+
+	inVNC := func(script string, env ...string) string {
+		t.Helper()
+		args := []string{"exec", "-T", "-e", "DISPLAY=:0"}
+		for _, e := range env {
+			args = append(args, "-e", e)
+		}
+		return strings.TrimSpace(compose.run(t, append(args, "vnc", "bash", "-c", script)...))
+	}
+	watchdog := func() int {
+		return strings.Count(compose.run(t, "logs", "vnc"), "[5901] watchdog:")
+	}
+	// read takes the session's events for d, which acknowledges its
+	// frames, as occamyd drops a viewer that acknowledges none for 30 s.
+	// The session's end fails the test.
+	read := func(d time.Duration) {
+		t.Helper()
+		rctx, cancel := context.WithTimeout(ctx, d)
+		defer cancel()
+		for {
+			ev, err := cl.Next(rctx)
+			if err != nil {
+				if rctx.Err() != nil && ctx.Err() == nil {
+					return
+				}
+				t.Fatalf("reading the session: %v", err)
+			}
+			if e, ok := ev.(client.End); ok {
+				t.Fatalf("the session ended: %v %q (%v)", e.Code, e.Reason, e.Err)
+			}
+		}
+	}
+
+	// pid prints the process id of the x11vnc on port 5901, or nothing.
+	pid := func() string {
+		t.Helper()
+		out := inVNC(x11vncPID)
+		if strings.Trim(out, "0123456789") != "" {
+			t.Fatalf("looking for the x11vnc on port 5901: %q", out)
+		}
+		return out
+	}
+
+	// Text that the probe leaves alone, so that x11vnc keeps the
+	// clipboard. x11vnc drops cut text until it has made its selection
+	// window, which it does only once its latest client has been
+	// connected for 45 s, or for 8 s once it has seen a window manager
+	// (guess_dm_gone in xevents.c), and keeps from then on; so the
+	// session sends the text until the clipboard holds it.
+	text := fmt.Sprintf("x11vnc requestor %d", time.Now().UnixNano())
+	for deadline := time.Now().Add(90 * time.Second); ; {
+		if _, err := cl.Clipboard(ctx, "text/plain", []byte(text)); err != nil {
+			t.Fatal(err)
+		}
+		read(time.Second)
+		if inVNC(readClipboard) == text {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the clipboard does not hold %q after 90 s", text)
+		}
+	}
+	before, x11vnc := watchdog(), pid()
+	if x11vnc == "" {
+		t.Fatal("no x11vnc serves port 5901")
+	}
+
+	got := inVNC(goneRequestor, "PID="+x11vnc)
+	if got != text {
+		t.Errorf("the xclip that waited got %q, want %q", got, text)
+	}
+	read(3 * time.Second) // the watchdog looks every 2 s
+	if now := pid(); now != x11vnc {
+		t.Errorf("x11vnc on port 5901 was process %s and is %q now", x11vnc, now)
+	}
+	if n := watchdog() - before; n > 0 {
+		t.Errorf("the watchdog of port 5901 logged %d lines:\n%s", n, compose.run(t, "logs", "--tail", "20", "vnc"))
+	}
+
+	// The probe answers "owner: " text with "echo: " text, which takes
+	// the clipboard from x11vnc again, for the tests that follow. x11vnc
+	// sends the clipboard to its clients only if its length or its first
+	// 32 bytes differ from those it read last (CHKSZ in selection.c), so
+	// the text starts with its nonce: one that came after them made runs
+	// less than 10 s apart, whose echoes then had the same 32 bytes, fail.
+	barrier := fmt.Sprintf("%d x11vnc barrier", time.Now().UnixNano())
+	if _, err := cl.Clipboard(ctx, "text/plain", []byte("owner: "+barrier)); err != nil {
+		t.Fatal(err)
+	}
+	echoCtx, cancelEcho := context.WithTimeout(ctx, 20*time.Second)
+	defer cancelEcho()
+	awaitV1(t, echoCtx, cl, "the echo of the clipboard", func(ev client.Event) bool {
+		c, ok := ev.(client.Clipboard)
+		return ok && string(c.Data) == "echo: "+barrier
+	})
+	closeSessionV1(t, addr, token, cl.SessionID())
+}
+
+// readClipboard prints the clipboard of the vnc container's screen :0.
+const readClipboard = `timeout 2 xclip -o -selection clipboard 2>/dev/null; true`
+
+// x11vncPID prints the process id of the x11vnc on port 5901. The image
+// has no procps, so it reads /proc. A process may exit before its turn,
+// so the standard error is closed before the input is opened.
+const x11vncPID = `for p in /proc/[0-9]*; do
+	case "$(tr '\0' ' ' 2>/dev/null <"$p/cmdline")" in
+	"x11vnc "*"-rfbport 5901 "*) echo "${p#/proc/}" ;;
+	esac
+done`
+
+// goneRequestor stops x11vnc $PID, asks for the clipboard with an xclip
+// that waits, and 0.3 s later with one that it kills 0.3 s after that,
+// which leaves time for each to send its request, in that order; the
+// kill fails if the second has exited. It then continues x11vnc, and
+// prints what the first got. x11vnc stays stopped for about 0.7 s, much
+// less than the 2 s the probe's own xclips wait, so the first request
+// x11vnc answers, which it checks, comes from a window that is there;
+// had one of the probe's died first, x11vnc's check of it would make it
+// wait for the X server for good. A stop of 1.3 s, with 0.6 s for each
+// step, made x11vnc miss the probe's echo after it in two of sixteen
+// runs back to back, for reasons not found; this one passed in sixteen
+// of sixteen.
+const goneRequestor = `trap 'kill -CONT "$PID" 2>/dev/null' EXIT
+kill -STOP "$PID" || exit
+timeout 10 xclip -o -selection clipboard >/tmp/requestor.out 2>&1 &
+waiting=$!
+sleep 0.3
+xclip -o -selection clipboard >/dev/null 2>&1 &
+gone=$!
+sleep 0.3
+kill -KILL "$gone" 2>/dev/null || echo "the xclip to kill had exited"
+wait "$gone" 2>/dev/null
+sleep 0.1
+kill -CONT "$PID"
+wait "$waiting"
+cat /tmp/requestor.out`

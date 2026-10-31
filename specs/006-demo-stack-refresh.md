@@ -284,8 +284,17 @@ notes: VNC's parity matrix), after this spec was complete.
   MIT-SHM, once in six runs of the matrix and then four times in about
   two runs of its x11vnc columns on a Mac; without it (`-noshm`, as it
   now runs), in none of fifteen runs on the Mac, but three times in one
-  run in CI. `start.sh` sets `X11VNC_PRINT_XERROR`, so that x11vnc logs
-  the failed request, and runs each x11vnc under a watchdog, which kills
+  run in CI. The error is BadWindow from x11vnc's answer to a request
+  for the clipboard, which it owns after a client's cut text, from a
+  window that has gone: `desktop.sh`'s clipboard probe kills its xclip
+  after 2 s, and an x11vnc that stalled for longer, as clients
+  connected, answered it after that. x11vnc traps errors as it answers,
+  but unless it has just checked the window, which it does at most
+  every 0.2 s, it stops trapping before the X server reports one;
+  `X11VNC_SENDEVENT_SYNC`, set by `start.sh`, makes it sync first
+  (`TestX11vncClipboardRequestorGone`). `start.sh` also sets
+  `X11VNC_PRINT_XERROR`, so that x11vnc logs the failed request of an
+  error it does not trap, and runs each x11vnc under a watchdog, which kills
   one that reports an X error or leaves a connection unaccepted for
   26 s. That is longer than x11vnc's `-readtimeout` (20 s by default,
   LibVNCServer's `rfbMaxClientWait`), for which a live x11vnc may wait

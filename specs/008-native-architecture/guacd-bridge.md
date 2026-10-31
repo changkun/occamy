@@ -780,7 +780,7 @@ that guacd was `vnc`'s default, they are corrected below.
   | screen and input acknowledged | pass | pass | pass | pass |
   | resize: by the owner's hello | — | — | pass | pass |
   | resize: by a request | — | — | pass | pass |
-  | resize: ignored without ExtendedDesktopSize | pass | pass | — | — |
+  | resize: the server keeps its size | pass | pass | — | — |
   | clipboard to the server, Latin-1 | pass | pass | pass | pass |
   | clipboard to the server, beyond Latin-1 | fail: x11vnc: Latin-1 only | fail: x11vnc: Latin-1 only | pass | fail: guacd: Latin-1 only |
   | clipboard both ways, Latin-1 | pass | pass | pass | pass |
@@ -820,7 +820,9 @@ that guacd was `vnc`'s default, they are corrected below.
     comes a few frames later. `TestParityShowsInput` checks the
     judgement against a server in process.
   - resize: TigerVNC takes 900×700 from the owner's `hello` and
-    800×600 and back from a request; x11vnc keeps 1024×768.
+    800×600 and back from a request; x11vnc keeps 1024×768: it has
+    ExtendedDesktopSize but refuses SetDesktopSize as prohibited, which
+    the native backend then sends no more, and guacd sends none.
   - clipboard: "naïve café, ½ °C" and "€ ✓ 日本" reach the server's
     clipboard byte for byte, and "naïve café\nzweite Zeile" and
     "€ ✓ 日本" come back to the client.
@@ -910,7 +912,14 @@ that guacd was `vnc`'s default, they are corrected below.
     watchdog that waited 10 s could have killed a live x11vnc so. In
     that CI run, a cell's second try met the hung x11vnc that its first
     try had found, before the watchdog had killed it; hence up to three
-    tries. It is a fault of the server, not of either backend.
+    tries. It is a fault of the server, not of either backend. The
+    cause, found later, is x11vnc's answer to a request for the
+    clipboard, which it owns after a client's cut text, from a window
+    that has gone: the desktop's clipboard probe kills its xclip after
+    2 s, and x11vnc stalled for longer as clients connected. start.sh
+    now sets `X11VNC_SENDEVENT_SYNC`, with which x11vnc traps that
+    error ([native VNC backend](native-vnc-backend.md), Implementation
+    notes: x11vnc's X error when a clipboard requestor is gone).
   - Read-only input is dropped by the session, before any backend, so
     the row cannot differ between backends; it is in the matrix because
     the gate names sharing roles.

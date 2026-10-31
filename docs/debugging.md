@@ -175,6 +175,11 @@ sends that user something. Until then the user still counts, for up to
   `parityFeatures` and `parityKnown` give. The demo x11vnc runs under a
   watchdog, which logs each restart as `[<port>] watchdog: …`, after
   the X error that caused it, if any (`podman compose logs vnc`).
+  `X11VNC_SENDEVENT_SYNC` keeps x11vnc from dying of the X error it
+  used to meet most, `Xerror: major_opcode: 18 … error_code: 3`, a
+  clipboard request from a window that had gone
+  (`TestX11vncClipboardRequestorGone` makes one, through the stack's
+  compose, as `make e2e` runs it).
 - `make soak` runs `TestSoak` against the demo stack's `occamy-v1`,
   which `make run OCCAMY_DEBUG=1` started with its debug listener:
   `OCCAMY_SOAK_SESSIONS` sessions, 8 by default, to TigerVNC through the
