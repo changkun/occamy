@@ -147,19 +147,20 @@ make bench BENCH_FLAGS="-series v1-native,v1-guacd -runs 3"
 **There are no v1 results yet.** v1's full run waits for the rest of
 the [graphics pipeline](../specs/008-native-architecture/graphics-pipeline.md)
 (refinement, the tile cache, and the encode cache and its workers) and
-for [native RDP](../specs/008-native-architecture/native-rdp-backend.md),
-which occamyd now serves by default but the `v1-native` series does not
-take yet. Numbers taken before then would not
-be v1's verdict, so this page publishes none; the harness and the CI
-smoke run only keep the v1 path working until then.
+for [native RDP](../specs/008-native-architecture/native-rdp-backend.md)
+(owner, 2026-10-31). Native RDP has been rdp's default since #132,
+without RDP's graphics pipeline (GFX) yet, and `v1-native` measures it.
+Numbers taken before then would not be v1's verdict, so this page
+publishes none; the harness and the CI smoke run only keep the v1 path
+working until then.
 
 | Series | Backend | Protocols | Connections in `docker/bench/occamy-v1.yaml` |
 |---|---|---|---|
-| `v1-native` | occamyd's own | SSH, VNC | `ssh`, `vnc-native` |
+| `v1-native` | occamyd's own | SSH, VNC, RDP | `ssh`, `vnc-native`, `rdp-native` |
 | `v1-guacd` | the guacd bridge | VNC, RDP | `vnc-guacd`, `rdp-guacd` |
 
-Neither series runs every scenario: `v1-native` has no RDP connection
-yet, and SSH has no guacd backend in v1. A v1 session runs as follows:
+`v1-guacd` runs no terminal scenario, since SSH has no guacd backend
+in v1. A v1 session runs as follows:
 
 - **Client.** The harness drives the Go client core (`client/`) through
   the stack's `occamy-v1` service, whose file
@@ -170,7 +171,9 @@ yet, and SSH has no guacd backend in v1. A v1 session runs as follows:
   the session for the 60 s owner grace. A session whose welcome the
   client refuses, as when they have no codec in common, is ended the
   same way: it dials with `client.Dial`, whose `*client.RefusedError`
-  names the session the server made.
+  names the session the server made. A desktop's key carries its
+  physical key, a USB HID usage on a US layout, as the web client's
+  carries `KeyboardEvent.code`, which native RDP sends as a scancode.
 - **Codecs.** It offers what occamy's web client offers when the browser
   decodes them all: deflate, WebP, JPEG and raw, in that order. The
   client core decodes tiles in parallel as they arrive, with deflate
@@ -218,8 +221,12 @@ yet, and SSH has no guacd backend in v1. A v1 session runs as follows:
     process, and the probe's keys, 100 ms apart, are 6 periods of 60 Hz,
     so every key of a scenario's run meets the ticks at the phase that
     the run started at: what the cadence adds is one offset per run, and
-    runs differ by it, which `-runs 3` takes the median of. Terminals
-    (T1, T2, an SSH G7) do not wait for ticks.
+    runs differ by it, which `-runs 3` takes the median of. So one
+    run's p95 does not cover the spread of phases, and may understate
+    it by up to about 7.5 ms, in native's favour; jittering the keys is
+    a follow-up, "G5 v1 p95 phase lock", in the
+    [benchmark spec](../specs/008-native-architecture/benchmark.md#implementation-notes-the-v1-series).
+    Terminals (T1, T2, an SSH G7) do not wait for ticks.
   - *Frame rates* reach at most 60 a second at 60 Hz, as in a browser
     on a 60 Hz screen; at once, they count every frame the server can
     end.
@@ -277,6 +284,14 @@ yet, and SSH has no guacd backend in v1. A v1 session runs as follows:
   RemoteFX Progressive
   ([guacd-bridge](../specs/008-native-architecture/guacd-bridge.md)'s
   conformance notes).
+- **Native RDP** (`rdp-native`) reaches the same xrdp with the same
+  credentials and size. It sets `security: tls`, since xrdp speaks no
+  NLA, and checks no certificate, since xrdp signs its own when the
+  image is built; occamyd warns of that at start. It speaks no GFX yet,
+  so xrdp sends it plain bitmaps, as it sends guacd with
+  `disable-gfx`. It asks for 32 bits per pixel, and the bridge leaves
+  guacd's default colour depth; whether xrdp then keeps a second X
+  session is to be checked before the full run.
 
 CI runs both v1 series quickly under N1, after the v0 smoke run, on the
 same stack.

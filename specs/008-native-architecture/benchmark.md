@@ -400,7 +400,9 @@ the owner decided that v1's numbers are not to be taken as its verdict
 before the graphics pipeline's remaining tasks (Refinement, Tile cache,
 and Encode cache and workers, in
 [graphics-pipeline](graphics-pipeline.md)) and native RDP
-([native-rdp-backend](native-rdp-backend.md)) are in occamyd. So
+([native-rdp-backend](native-rdp-backend.md)) are in occamyd. Native
+RDP has been rdp's default since #132, without RDP's graphics pipeline
+(GFX, its third phase) yet, and `v1-native` measures it. So
 `docs/benchmarks.md` documents how to run the v1 series and publishes no
 v1 results, and no target is judged met or missed yet. The full run is
 also the one that gates v1.0 (owner, 2026-10-31; see
@@ -410,13 +412,19 @@ checked the harness, not the numbers, and its numbers are not
 published.
 
 - **What was done:**
-  - Two series, `v1-native` (SSH and VNC through occamyd's own
+  - Two series, `v1-native` (SSH, VNC and RDP through occamyd's own
     backends) and `v1-guacd` (VNC and RDP through the guacd bridge), on
     the scenarios, metrics, proxy and bench desktop of the v0 series. A
     series serves only the protocols it has a connection for and skips
-    the others: `v1-native` has no RDP connection yet (occamyd
-    registered native RDP as rdp's default after the harness was
-    written, in #132), and SSH has no guacd backend in v1.
+    the others: SSH has no guacd backend in v1, so `v1-guacd` runs no
+    terminal scenario.
+  - `rdp-native` joined once #132 made native RDP rdp's default. It
+    reaches the bench desktop's xrdp with `rdp-guacd`'s credentials and
+    the harness's 1024 × 768, with `security: tls`, since xrdp speaks no
+    NLA, and without a certificate check, since xrdp signs its
+    certificate when the image is built; occamyd warns of that at
+    start. Neither path speaks RDP's graphics pipeline: native RDP has
+    none yet, and the bridge gives guacd `disable-gfx`.
   - `bench/v1.go` drives the Go client core through API v1: it signs in
     at `POST /api/v1/auth/token`, opens
     `GET /api/v1/connections/{id}/stream`, asking for 1024 × 768 pixels
@@ -471,6 +479,10 @@ published.
     acknowledges a graphical frame at once. A v1 scene's frames are the
     server's (see Surprises): the table leaves their rate out, with a
     note, and the JSON keeps them as `server_frames`.
+  - *Keys.* A desktop's key carries its physical key as a USB HID usage
+    on a US layout, as the web client's carries `KeyboardEvent.code`,
+    and native RDP sends it as a scancode; without it, native RDP would
+    send a letter as a Unicode event, which no browser client causes.
   - *Terminals.* The SSH backend ignores keys, so the harness sends the
     bytes xterm.js sends for them as `term-input`. The client core
     passes a terminal's bytes through, and the harness writes them to
@@ -530,8 +542,9 @@ published.
     exactly, lossy at `min_psnr`, a rectangle other than the header's
     refused, every invalid vector refused).
   - The bench stack's v1 file loads, and has every connection the series
-    name, with its protocol and its backend named, and the user the
-    harness signs in as.
+    name, with its protocol and its backend named, `v1-native` serving
+    SSH, VNC and RDP, native RDP with `security: tls` and no certificate
+    check, and the user the harness signs in as.
   - In process, through `session.Start` and `stream.Serve` with fake
     backends: the readiness check and five probe keys over a graphical
     session; a probe key whose colour follows 50 ms after a frame in
@@ -546,7 +559,9 @@ published.
     graphical frame is acknowledged on a tick and counted when `Next`
     delivered it, not on one, and at 0 acknowledged at once; a
     terminal's frames are acknowledged at once at 60 Hz; an input to a
-    network that takes nothing fails after its bound.
+    network that takes nothing fails after its bound; a desktop's keys
+    reach the backend with the HID usages that the web client's table
+    gives the keys the scenarios press.
   - Against a fake API v1: a session whose welcome the client refuses
     is ended with DELETE, by the session that `client.Dial`'s
     `*client.RefusedError` names, and a handshake that hangs fails after
@@ -617,10 +632,24 @@ published.
     RDP are in occamyd; then `docs/benchmarks.md` gets the v1 results
     and a table per scenario of the baseline, the v1 bridge, v1 native,
     the target and whether it is met.
-  - `v1-native` gaining RDP, now that occamyd registers native RDP as
-    rdp's default (#132): an `rdp-native` connection in
-    `docker/bench/occamy-v1.yaml`, checked against the bench desktop's
-    xrdp.
+  - **G5 v1 p95 phase lock.** The probe's keys, every 100 ms, are
+    exactly 6 ticks of 60 Hz, so each key meets the acknowledgement's
+    tick at one phase for a whole run. One run's p95 therefore never
+    covers the spread of phases, 0 to 16.7 ms, and may understate it by
+    up to about 7.5 ms, in native's favour. The scene's 30 fps ticker is
+    locked to the keys the same way, for both series. Planned fix:
+    jitter each key by up to one tick either way, keeping 10 keys a
+    second on average, for every series, together with measuring the G3
+    to G5 baselines again, so that old and new numbers stay comparable.
+  - Before the full run, check xrdp's sessions on the bench desktop:
+    native RDP asks for 32 bits per pixel, and the bridge leaves guacd's
+    default colour depth. If they differ, xrdp's session manager may
+    keep an X session, and a scene program, for each, so that RDP
+    scenarios run beside a second scene.
+  - Once native RDP speaks RDP's graphics pipeline (its third phase),
+    `rdp-native` and `rdp-guacd` differ there, since the bridge keeps
+    `disable-gfx`; the comparison within v1 should say which it
+    measures.
   - The client core's default decoders (a follow-up of
     [client-core](client-core.md)): once `client` has them, the harness
     uses them instead of its own.

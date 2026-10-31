@@ -14,14 +14,15 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the bench desktop's VNC server on its own.
 - The benchmark's v1 series, `v1-native` and `v1-guacd`: the same
   scenarios over protocol v1, driven by the Go client core through API
-  v1 against native SSH and VNC and against VNC and RDP through guacd,
-  on the bench stack's `occamy-v1` service
+  v1 against native SSH, VNC and RDP and against VNC and RDP through
+  guacd, on the bench stack's `occamy-v1` service
   ([docs/benchmarks.md](docs/benchmarks.md#the-v1-series)). The harness
   counts a v1 frame when the client core delivers it, and acknowledges a
   graphical frame on a 60 Hz screen's next tick, as the web client
   does, and a terminal's at once; the report records both, and
   `-ack-hz 0` is a diagnostic. A terminal's G7 ends at its first cell
-  that is not blank. CI runs them quickly after the v0 smoke run, every
+  that is not blank. A desktop's key carries its HID usage, as the web
+  client's does. CI runs them quickly after the v0 smoke run, every
   run with `-failfast`, which stops at the first error, stops the bench
   job at 30 minutes, and prints the stack's logs unless the job
   succeeded. Their full results wait for the rest of the graphics
