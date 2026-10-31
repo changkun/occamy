@@ -435,6 +435,7 @@ func TestBadWelcome(t *testing.T) {
 		want  protocol.CloseCode
 	}{
 		{"no codec in common", &protocol.Welcome{Role: protocol.RoleOwner, Class: protocol.ClassGraphical, Capabilities: protocol.Capabilities{Codecs: []protocol.Codec{protocol.CodecPNG}}}, protocol.CloseUnsupported},
+		{"only cached in common", &protocol.Welcome{Role: protocol.RoleOwner, Class: protocol.ClassGraphical, Capabilities: protocol.Capabilities{Codecs: []protocol.Codec{protocol.CodecPNG, protocol.CodecCached}, CacheSlots: 4}}, protocol.CloseUnsupported},
 		{"no terminal", &protocol.Welcome{Role: protocol.RoleOwner, Class: protocol.ClassTerminal}, protocol.CloseUnsupported},
 		{"title first", &protocol.Title{Title: "x"}, protocol.CloseProtocolError},
 	} {

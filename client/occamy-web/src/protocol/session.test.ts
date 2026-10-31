@@ -169,6 +169,14 @@ describe('handshake', () => {
     expect(t.take('close')).toEqual([{ type: 'close', code: 1003, reason: 'no codec in common' }])
   })
 
+  it('closes with unsupported a graphical session whose only codec in common is cached', async () => {
+    const t = new FakeTransport()
+    const p = Session.start(t, {}, testDecoder(), [Codec.Deflate])
+    t.push(welcome({ capabilities: { codecs: [Codec.Cached], cacheSlots: 4 } }))
+    await expect(p).rejects.toMatchObject({ kind: 'unsupported' })
+    expect(t.take('close')).toEqual([{ type: 'close', code: 1003, reason: 'no codec in common' }])
+  })
+
   it('ignores an ignorable message of a later version before welcome', async () => {
     const t = new FakeTransport()
     const p = Session.start(t, {}, testDecoder(), [Codec.Raw])

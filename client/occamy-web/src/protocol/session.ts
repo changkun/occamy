@@ -480,9 +480,11 @@ export class Session {
     })
   }
 
-  // unsupported says why the client cannot show the session, or "".
+  // unsupported says why the client cannot show the session, or "". A
+  // cached tile names a slot that an earlier tile filled, so a graphical
+  // session needs a codec in common besides cached.
   private unsupported(): string {
-    if (this.sessionClass === SessionClass.Graphical && this.capabilities.codecs.length === 0) {
+    if (this.sessionClass === SessionClass.Graphical && !this.capabilities.codecs.some((c) => c !== Codec.Cached)) {
       return 'no codec in common'
     }
     if (this.sessionClass === SessionClass.Terminal && this.capabilities.terminal === 0) {

@@ -468,7 +468,8 @@ func (s *Session) agree(w protocol.Capabilities) protocol.Capabilities {
 func (s *Session) unsupported() string {
 	switch s.welcome.Class {
 	case protocol.ClassGraphical:
-		if len(s.agreed.Codecs) == 0 {
+		// cached draws only what another codec stored.
+		if !slices.ContainsFunc(s.agreed.Codecs, func(c protocol.Codec) bool { return c != protocol.CodecCached }) {
 			return "no codec in common"
 		}
 	case protocol.ClassTerminal:
