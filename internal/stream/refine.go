@@ -300,12 +300,15 @@ func (w *writer) refineTile(id uint32, t int) (send, ok bool) {
 			return true, true
 		}
 	}
-	b, codec, lossy := w.enc.Tile(w.payload[:0], w.tiles[0], r.Dx(), r.Dy(), false)
+	var codec protocol.Codec
+	var lossy bool
+	w.payload, codec, lossy = w.encodeTile(w.payload[:0], t, 0, version, r, false)
 	have := w.quality(t)
 	if lossy {
+		// As a run of one still tile.
 		var got int
 		var reached bool
-		b, codec, got, reached = w.enc.Still(w.payload[:0], w.tiles[0], r.Dx(), r.Dy(), r.Dx(), lo, q)
+		codec, got, reached = w.encodeRun(t, 1, w.tiles[0], r, true, q, lo)
 		if !exact(codec) {
 			w.msgQuality, w.msgGoal = stillGoal(got, q, reached)
 			if reached && have >= lossyQuality(got) {
@@ -318,7 +321,6 @@ func (w *writer) refineTile(id uint32, t int) (send, ok bool) {
 			}
 		}
 	}
-	w.payload = b
 	if codec == 0 || w.msgQuality <= have {
 		// Nothing better to send: the goal is above the pacer's quality
 		// now, and above what the client has, so that the tile is
