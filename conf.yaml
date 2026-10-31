@@ -8,7 +8,7 @@ mode: debug # options: debug/release/test
 auth:
   jwt_secret: occamy
   jwt_alg: HS256
-client: true # serve POST /api/v0/login (the web client needs a v1 file)
+client: true # serve POST /api/v0/login and /static/; the web client there needs a v1 file
 guacd:
   address: localhost:4822
   params: # per-protocol defaults, merged under token values (see README)
