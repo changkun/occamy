@@ -372,14 +372,20 @@ func composeE2E(t *testing.T) composeCmd {
 	return c
 }
 
-// run runs the compose command with args and returns what it printed.
+// run runs the compose command with args and returns what it printed
+// to its standard output. What it printed to its standard error, such
+// as the banner podman compose prints before it runs docker-compose, is
+// shown only if it fails.
 func (c composeCmd) run(t *testing.T, args ...string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, c[0], append(slices.Clone(c[1:]), args...)...).CombinedOutput()
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, c[0], append(slices.Clone(c[1:]), args...)...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("%s %s: %v\n%s", strings.Join(c, " "), strings.Join(args, " "), err, out)
+		t.Fatalf("%s %s: %v\n%s%s", strings.Join(c, " "), strings.Join(args, " "), err, out, stderr.Bytes())
 	}
 	return string(out)
 }
