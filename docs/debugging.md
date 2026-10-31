@@ -126,6 +126,29 @@ sends that user something. Until then the user still counts, for up to
   the clipboard both ways, which the image's clipboard echo answers, a
   resize, a viewer joined by a share, and the owner leaving and coming
   back.
+  `TestVNCParity`, among them, runs the guacd bridge's parity matrix for
+  VNC: each feature on x11vnc and TigerVNC, through the native backend
+  and through guacd. The demo desktops report what reached the server
+  over the session itself: a probe puts each line typed at the top left
+  on the clipboard in hex, and another echoes clipboard text that starts
+  `owner: ` as `echo: `. The test first warms each server port, since a
+  freshly started x11vnc drops the first clipboard text on its port, and
+  logs how many tries each port took. It logs the matrix as a Markdown
+  table, and writes it to the file `OCCAMY_PARITY_MATRIX` names. A cell
+  expected to fail is listed in `parityKnown`, with the reason and a
+  part of the error that only that failure gives. Any other failure
+  fails the test, and so does a listed cell that fails differently or
+  passes. A cell tries up to three times. A guacd cell tries again
+  after any failure other than its listed one. A native cell that
+  cannot reach the desktop runs the same check through guacd at once,
+  and tries again, 15 s later, only if guacd cannot reach the desktop
+  either. If guacd reaches it, the native failure stands, and so does
+  any other native failure. A cell that settles at a later try shows
+  the try, as in `pass (try 2)`. `TestParityMatrixDoc`, which needs no
+  stack, checks that the matrix in the guacd bridge's spec is the one
+  `parityFeatures` and `parityKnown` give. The demo x11vnc runs under a
+  watchdog, which logs each restart as `[<port>] watchdog: …`, after
+  the X error that caused it, if any (`podman compose logs vnc`).
 - `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test. Each of its N
   rounds opens two sessions to each demo server at once: one that waits
   for the desktop and one that sends garbage. All sessions to one server

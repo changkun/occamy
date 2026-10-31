@@ -43,13 +43,13 @@ session framebuffer. Three choices:
   authentication, `crypto/tls` for VeNCrypt, `compress/zlib` for ZRLE and
   Tight, `image/jpeg` for Tight JPEG, and `crypto/aes` plus `math/big` for
   Apple Remote Desktop authentication.
-- Test servers: x11vnc in the [006](../006-demo-stack-refresh.md)
-  stack and on the bench desktop (`docker/bench/desktop`), which the
-  integration tests use; TigerVNC's Xvnc, in an image on top of the bench
-  desktop (`internal/backend/vnc/testdata/servers`) that phase 2's
-  integration test uses, and with VeNCrypt only
-  (`docker/test/tigervnc`), which phase 3's integration test uses, both
-  still to be added to the stack; QEMU's VNC server; macOS Screen
+- Test servers: x11vnc and TigerVNC's Xvnc in the
+  [006](../006-demo-stack-refresh.md) stack, where the guacd bridge's
+  parity matrix runs ([guacd-bridge](guacd-bridge.md)); x11vnc on the
+  bench desktop (`docker/bench/desktop`), which the integration tests
+  use; the stack's TigerVNC image (`docker/demo/tigervnc`), which the
+  integration tests build, with VeNCrypt only for phase 3's and with
+  the bench scene for phase 2's; QEMU's VNC server; macOS Screen
   Sharing, checked by hand.
 
 ## Proposed scope for beta
@@ -403,8 +403,9 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     It then decodes the recording again and checks that it holds the
     encoding's rectangles, and no JPEG unless asked for. It passed
     against x11vnc 0.9.17 and TigerVNC 1.15's Xvnc (Debian trixie), at
-    1024×768 and at 64×48. `testdata/servers` builds TigerVNC on the
-    bench desktop's image.
+    1024×768 and at 64×48. `testdata/servers` built TigerVNC on the
+    bench desktop's image; it is now the stack's TigerVNC image,
+    `docker/demo/tigervnc`, started with `scene`.
   - The fuzz corpus gained a seed for each subencoding and filter, with
     zlib data in stored blocks so that the seeds do not change with Go's
     compressor, and eight recorded sessions, `recorded-<server>-<encoding>`:
@@ -615,8 +616,10 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
   - QEMU's VNC server, for recorded traffic and the integration test.
   - A per-connection JPEG quality for slow upstream links, which the
     graphics pipeline would have to treat as lossy pixels.
-  - TigerVNC in the [006](../006-demo-stack-refresh.md) stack, so that
-    the end-to-end matrix covers a server other than x11vnc.
+  - ~~TigerVNC in the [006](../006-demo-stack-refresh.md) stack, so that
+    the end-to-end matrix covers a server other than x11vnc.~~ Done with
+    the parity matrix ([guacd-bridge](guacd-bridge.md), Implementation
+    notes: VNC's parity matrix).
   - Phase 3's LastRect ends a Tight server's updates of unknown length
     (`0xFFFF` rectangles); the decoders need nothing for it. Done in
     phase 3.
@@ -764,8 +767,9 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     message, so the extensions' state is fuzzed too. 60 s of it and 45 s
     of `FuzzHandshake` found nothing.
   - Integration: `TestTigerVNC`, behind the `integration` tag, runs
-    against TigerVNC's Xvnc (`docker/test/tigervnc`, Debian trixie's
-    TigerVNC 1.15) offering only X509Vnc and X509Plain. It builds the
+    against TigerVNC's Xvnc (`docker/test/tigervnc`, now the stack's
+    `docker/demo/tigervnc`; Debian trixie's TigerVNC 1.15) on a screen
+    offering only X509Vnc and X509Plain. It builds the
     image and starts the container itself, with podman or
     `OCCAMY_CONTAINER_ENGINE`, as the RDP spike's test does: both are
     named `occamy-vnc-it-until<time>-<pid>` after the time the run ends
@@ -955,9 +959,12 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     owner may resize is session-core's to decide.
   - Send TLS's close_notify on a clean disconnect, without letting a
     server that does not read delay Run's return.
-  - TigerVNC in the demo stack, and QEMU's VNC server, which would
-    exercise QEMU key events end to end; the integration test checks
-    only that TigerVNC enables them.
+  - QEMU's VNC server, which would exercise QEMU key events end to end
+    where the code decides. ~~TigerVNC in the demo stack~~: done; the
+    parity matrix types with and without codes on its German and French
+    layouts. Without its `RawKeyboard` option, which is off by default,
+    TigerVNC maps keysyms to its own layout: a German client's keys,
+    codes included, type the German text on its us screen too.
   - Clipboard amplification: an Extended Clipboard provide of about
     8 KB of zlib decompresses to the 4 MiB kept, which goes to every
     viewer, and nothing limits how often a server sends one. A broken or
@@ -1239,7 +1246,8 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
 - **Phase 2's and 3's integration tests, run once.** Phase 2's
   `TestEncodings` had been compiled but not run since phase 3 merged.
   With images built from master's `docker/bench/desktop` and
-  `testdata/servers` under names of this run's own, on ports the engine
+  `testdata/servers` (since merged into `docker/demo/tigervnc`) under
+  names of this run's own, on ports the engine
   chose, and removed afterwards, on the shared host at a load average
   of 4 to 9:
   - `TestEncodings` passed against TigerVNC 1.15's Xvnc and against
@@ -1254,6 +1262,16 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     the likely cause, unconfirmed.
   - `TestTigerVNC` passed under the race detector in 28 s. It found no
     earlier run's containers or images to remove, and removed its own.
+  - Run again on 2026-10-31, at a load average of 7 to 15: on master
+    (`1ee3a84`) with the old images, and then with the TigerVNC images
+    merged into `docker/demo/tigervnc` (started with `scene`), each
+    `TestEncodings` session from TigerVNC had the same size to the byte
+    (Hextile 3,248,971, ZRLE 1,457,473, Tight 1,487,014 and Tight JPEG
+    972,071 bytes, the last with 52 JPEG and 24 zlib rectangles), and
+    x11vnc's Tight JPEG session 120,644 bytes. `TestEncodings` also
+    passed against x11vnc at 64×48 from the bench desktop with
+    `GEOMETRY`, and `TestTigerVNC` under the race detector in 30 s
+    against the merged image, removing its own image and container.
 - **The clean-up matcher.** `expired` took a run's name after any
   registry and path, so that a run would remove an image pulled as
   `docker.io/someone/occamy-vnc-it-until1-2`. It now takes a bare name,

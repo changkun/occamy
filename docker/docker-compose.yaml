@@ -31,26 +31,33 @@ services:
 
   occamy-v1:
     # The same image serving a v1 file (occamy-v1.yaml) on port 5637: the
-    # web client, the demo SSH server, and the demo VNC and RDP servers
-    # through the native backends, their default, and through guacd
-    # (backend: guacd), for API v1 and protocol v1 clients.
+    # web client, the demo SSH server, and the demo VNC servers, x11vnc
+    # and TigerVNC, and the RDP server, through the native backends,
+    # their default, and through guacd (backend: guacd), for API v1 and
+    # protocol v1 clients.
     image: ${OCCAMY_IMAGE:-occamy:latest}
     command: ["/occamy/occamyd", "-conf", "/occamy/v1.yaml"]
     ports:
       - "${OCCAMY_V1_PORT:-5637}:5637"
     volumes:
       - ./occamy-v1.yaml:/occamy/v1.yaml:ro
+      # The CA of TigerVNC's VeNCrypt certificate, for the tls of the
+      # connection that checks it.
+      - tigervnc-ca:/run/occamy-vnc-ca:ro
     tmpfs:
       # The signing key, which the nonroot user creates at start.
       - /run/occamy:mode=1777
     environment:
       OCCAMY_DEMO_SSH_PASSWORD: occamy
       OCCAMY_DEMO_VNC_PASSWORD: vncpassword
+      OCCAMY_DEMO_PLAIN_PASSWORD: plainpassword
       OCCAMY_DEMO_RDP_PASSWORD: occamy
     depends_on:
       guacd:
         condition: service_healthy
       vnc:
+        condition: service_healthy
+      tigervnc:
         condition: service_healthy
       rdp:
         condition: service_healthy
@@ -68,12 +75,41 @@ services:
       retries: 30
 
   vnc:
-    # host vnc:5900, password vncpassword
+    # x11vnc: host vnc:5900, password vncpassword; vnc:5901, the same
+    # screen without a password; vnc:5902 and vnc:5903, password
+    # vncpassword, with the de and fr keyboard layouts.
     build: ./demo/vnc
     environment:
       VNC_PASSWORD: vncpassword
     healthcheck:
-      test: ["CMD", "bash", "-c", "</dev/tcp/127.0.0.1/5900"]
+      # Look for the listening sockets (5900 to 5903 are 170C to 170F)
+      # rather than connect, since x11vnc logs every connection that does
+      # not speak RFB.
+      test: ["CMD", "sh", "-c", "for p in 170C 170D 170E 170F; do grep -q \":$$p [0-9A-F]*:0000 0A\" /proc/net/tcp /proc/net/tcp6 || exit 1; done"]
+      interval: 1s
+      retries: 30
+
+  tigervnc:
+    # TigerVNC's Xvnc, five screens: host tigervnc:5900, password
+    # vncpassword; tigervnc:5901, VeNCrypt only, user occamy, password
+    # plainpassword, with a certificate for the name tigervnc from a CA
+    # that it writes to the volume tigervnc-ca; tigervnc:5902 without a
+    # password; tigervnc:5903 and tigervnc:5904, password vncpassword,
+    # with the de and fr keyboard layouts.
+    build:
+      context: ..
+      dockerfile: docker/demo/tigervnc/Dockerfile
+    environment:
+      VNC_PASSWORD: vncpassword
+      PLAIN_PASSWORD: plainpassword
+      CA_DIR: /run/occamy-vnc-ca
+    volumes:
+      - tigervnc-ca:/run/occamy-vnc-ca
+    healthcheck:
+      # Look for the listening sockets (5900 to 5904 are 170C to 1710)
+      # rather than connect, since Xvnc logs every connection that does
+      # not speak RFB; and for the CA, which occamy-v1 reads at start.
+      test: ["CMD", "sh", "-c", "test -s /run/occamy-vnc-ca/ca.pem && for p in 170C 170D 170E 170F 1710; do grep -q \":$$p [0-9A-F]*:0000 0A\" /proc/net/tcp /proc/net/tcp6 || exit 1; done"]
       interval: 1s
       retries: 30
 
@@ -99,3 +135,8 @@ services:
       test: ["CMD", "sh", "-c", "grep -q ':0D3D [0-9A-F]*:0000 0A' /proc/net/tcp /proc/net/tcp6"]
       interval: 1s
       retries: 30
+
+volumes:
+  # TigerVNC's CA certificate (tigervnc's CA_DIR), which it writes at
+  # start and occamy-v1 reads.
+  tigervnc-ca:

@@ -140,7 +140,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   those, or Plain in the clear, is refused even if it offers VNC
   Authentication too. Cut text from the server allocates about
   three times the text kept, down from seven. An integration test runs
-  against TigerVNC (`docker/test/tigervnc`) in a container of its own.
+  against TigerVNC (`docker/demo/tigervnc`) in a container of its own.
 - Apple Remote Desktop authentication (security type 30) in the native
   VNC backend, so that it can log in to macOS Screen Sharing as a user
   of the Mac, but only when the backend's `vnc.Config.ARD` allows it:
@@ -417,6 +417,23 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   streams with the Go client. `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` move a
   second stack aside on a shared host, and `make e2e` follows the
   last two.
+- TigerVNC in the demo stack, beside x11vnc, and the guacd bridge's
+  parity matrix for VNC: `TestVNCParity` runs authentication, resize,
+  clipboard both ways, the cursor, keyboard layouts with AltGr and dead
+  keys, text input, sharing roles and reconnect on both servers,
+  through the native backend and through guacd, and fails on any cell
+  that differs from the matrix in the guacd bridge's spec. The demo
+  desktops report what reaches them, typed lines and clipboard text,
+  over the session's clipboard. The two TigerVNC test images became
+  one, `docker/demo/tigervnc`, which the integration tests build too.
+  x11vnc hangs now and then after an X error as a client connects; the
+  demo x11vnc runs under a watchdog that kills it when it reports an X
+  error or stops accepting connections, and starts it again. The matrix
+  tries a guacd cell up to three times, and a native cell that cannot
+  reach the desktop only while guacd cannot reach it either, and shows
+  the try at which a cell settled. A listed failure must fail with its
+  own error, and a unit test keeps the spec's matrix in step with the
+  suite.
 - The native RDP backend's clipboard, the first part of its second
   phase: `internal/rdp` joins static virtual channels and reassembles
   their chunks within a bound per channel, and carries text both ways

@@ -192,21 +192,27 @@ Occamy reaches them by compose service name:
 
 | Protocol | Host | Username | Password |
 |----------|------|----------|----------|
-| VNC | `vnc:5900` | | `vncpassword` |
+| VNC (x11vnc) | `vnc:5900` | | `vncpassword` |
+| VNC (TigerVNC) | `tigervnc:5900` | | `vncpassword` |
 | SSH | `ssh:22` | `occamy` | `occamy` |
 | RDP | `rdp:3389` | `occamy` | `occamy` |
 
-Occamy connects to them through upstream guacd 1.6, which also runs in
-the stack. A second `occamyd`, `occamy-v1` on `localhost:5637`, serves
-API v1 and the web client, at http://localhost:5637/static/, from the v1
-file [docker/occamy-v1.yaml](./docker/occamy-v1.yaml), with the user
-`demo` and the password `occamy`: the SSH server as the connection `ssh`,
-through `occamyd`'s own SSH client; the VNC server as `vnc-native`,
-through `occamyd`'s own VNC client, vnc's default, and as `vnc-guacd`,
-through guacd (`backend: guacd`), the fallback that the benchmark
-compares against; and the RDP server as `rdp-native`, through
-`occamyd`'s own RDP client, rdp's default, with `security: tls` since
-xrdp speaks no NLA, and as `rdp-guacd`, through guacd.
+The v0 service on `localhost:5636` connects to them through upstream
+guacd 1.6, which also runs in the stack. A second `occamyd`, `occamy-v1`
+on `localhost:5637`, serves API v1 and the web client, at
+http://localhost:5637/static/, from the v1 file
+[docker/occamy-v1.yaml](./docker/occamy-v1.yaml), with the user `demo`
+and the password `occamy`: the SSH server as the connection `ssh`,
+through `occamyd`'s own SSH client; each VNC server twice, through
+`occamyd`'s own VNC client, vnc's default, and through guacd
+(`backend: guacd`), the fallback that the benchmark compares against,
+for example `vnc-native` and `vnc-guacd` for x11vnc, and
+`tigervnc-native` and `tigervnc-guacd` for TigerVNC; and the RDP server
+as `rdp-native`, through `occamyd`'s own RDP client, rdp's default, with
+`security: tls` since xrdp speaks no NLA, and as `rdp-guacd`, through
+guacd. The other VNC connections reach the servers' other screens, with
+no password, with VeNCrypt, and with German and French keyboard
+layouts, for the parity matrix in [tests/](./tests).
 
 Here is a working video demo:
 
@@ -227,7 +233,9 @@ its VNC and RDP connections, native and through guacd, with the Go
 client of protocol v1, and check native RDP's clipboard both ways, a
 resize, a viewer joined by a share and the owner's return to a session,
 unless `OCCAMY_E2E_V1_ENDPOINT` is; `make e2e` sets them to
-`localhost:5636` and `localhost:5637`:
+`localhost:5636` and `localhost:5637`. The VNC parity matrix
+(`TestVNCParity`) runs each feature on x11vnc and TigerVNC through both
+backends, and logs the matrix as a table:
 
 ```
 make build
