@@ -117,7 +117,7 @@ func probeLatency(ctx context.Context, s *session, n int) ([]time.Duration, erro
 		if err := s.key(int(k)); err != nil {
 			return nil, err
 		}
-		wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		wctx, cancel := context.WithTimeout(ctx, keyWait)
 		f, err := s.wait(wctx, t0, func(f frame) bool { return f.marked })
 		cancel()
 		if err != nil {

@@ -21,6 +21,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/coder/websocket"
 	"github.com/gen2brain/vpx/webp"
 
 	"changkun.de/x/occamy/client"
@@ -52,13 +53,16 @@ const (
 	termCols, termRows = 99, 39
 )
 
-// openV1 opens v1 sessions on the connections conns names per protocol.
-func openV1(conns map[string]string) func(context.Context, string, string) (*session, error) {
+// openV1 opens v1 sessions on the connections conns names per protocol,
+// which show their frames on d.
+func openV1(conns map[string]string, d display) func(context.Context, string, string) (*session, error) {
 	return func(ctx context.Context, addr, proto string) (*session, error) {
 		id, ok := conns[proto]
 		if !ok {
 			return nil, fmt.Errorf("no v1 connection for %s", proto)
 		}
+		ctx, cancel := context.WithTimeout(ctx, openTimeout)
+		defer cancel()
 		t0 := time.Now()
 		token, err := signIn(ctx, addr)
 		if err != nil {
@@ -67,7 +71,7 @@ func openV1(conns map[string]string) func(context.Context, string, string) (*ses
 		start := time.Now()
 		s := newSession(start)
 		s.signIn = start.Sub(t0)
-		cl, err := client.Dial(ctx, "ws://"+addr+"/api/v1/connections/"+url.PathEscape(id)+"/stream", token, client.Options{
+		cl, sid, err := dialV1(ctx, "ws://"+addr+"/api/v1/connections/"+url.PathEscape(id)+"/stream", token, client.Options{
 			Name:     "occamy-bench/1",
 			Width:    width,
 			Height:   height,
@@ -76,30 +80,152 @@ func openV1(conns map[string]string) func(context.Context, string, string) (*ses
 			Decoders: decoders(&s.decode),
 		})
 		if err != nil {
+			if sid != "" { // the server welcomed the client, which then refused
+				endSession(addr, token, sid)
+			}
 			return nil, err
 		}
-		s.startV1(cl, func() {
-			// The owner's leaving keeps the session, and the remote
-			// connected, for the owner grace of 60 s, during which it
-			// would count against the user's sessions and load the
-			// remote.
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cancel()
-			err := apiV1(ctx, addr, http.MethodDelete, "/api/v1/sessions/"+url.PathEscape(cl.SessionID()), token, nil, nil)
-			if err != nil {
-				log.Printf("  ending session %s: %v", cl.SessionID(), err)
-			}
-		})
+		s.startV1(cl, d, func() { endSession(addr, token, cl.SessionID()) })
 		return s, nil
 	}
 }
 
-// startV1 runs s on cl. end, if set, ends the session on the server once
-// the client left it.
-func (s *session) startV1(cl *client.Session, end func()) {
+// endSession ends session sid on the server. The owner's leaving keeps
+// a session, and the remote connected, for the owner grace of 60 s,
+// during which it would count against the user's sessions and load the
+// remote.
+func endSession(addr, token, sid string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := apiV1(ctx, addr, http.MethodDelete, "/api/v1/sessions/"+url.PathEscape(sid), token, nil, nil); err != nil {
+		log.Printf("  ending session %s: %v", sid, err)
+	}
+}
+
+// dialV1 is client.Dial, but it also returns the ID of the session that
+// the server's welcome named, even when the client then refuses the
+// session, as when it has no codec in common with the server: the
+// server has made the session by then, and the harness ends it.
+func dialV1(ctx context.Context, rawURL, token string, opts client.Options) (*client.Session, string, error) {
+	q, err := protocol.EncodeHelloQuery(opts.Hello())
+	if err != nil {
+		return nil, "", err
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, "", err
+	}
+	v := u.Query()
+	v.Set(protocol.HelloParameter, q)
+	u.RawQuery = v.Encode()
+	// ctx bounds the handshake only. coder/websocket closes the
+	// response's body itself.
+	ws, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{ //nolint:bodyclose
+		Subprotocols: []string{protocol.Subprotocol, protocol.TokenSubprotocol(token)},
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("dial: %w", err)
+	}
+	if p := ws.Subprotocol(); p != protocol.Subprotocol {
+		_ = ws.CloseNow()
+		return nil, "", fmt.Errorf("the server answered subprotocol %q, want %s", p, protocol.Subprotocol)
+	}
+	c := &v1WS{ws: ws}
+	cl, err := client.New(ctx, c, opts)
+	return cl, c.session, err
+}
+
+// v1WS carries one protocol v1 message per binary WebSocket message, as
+// the client core's own connection does, and notes the session that the
+// first message, the welcome, names.
+type v1WS struct {
+	ws      *websocket.Conn
+	read    bool   // the first message was read
+	session string // the welcome's, set with read
+}
+
+func (c *v1WS) ReadMessage(ctx context.Context) ([]byte, error) {
+	typ, b, err := c.ws.Read(ctx)
+	if err != nil {
+		var ce websocket.CloseError
+		switch {
+		case errors.As(err, &ce):
+			return nil, &client.CloseError{Code: protocol.CloseCode(ce.Code), Reason: ce.Reason} // #nosec G115 -- a close status is a u16 on the wire
+		case errors.Is(err, websocket.ErrMessageTooBig):
+			return nil, fmt.Errorf("%w: %w", protocol.ErrTooLarge, err)
+		}
+		return nil, err
+	}
+	if typ != websocket.MessageBinary {
+		return nil, fmt.Errorf("%w: a text message", protocol.ErrUnsupported)
+	}
+	// client.New reads the welcome before it starts the session's
+	// reader, so only it writes these.
+	if !c.read {
+		c.read = true
+		if m, err := protocol.Decode(b, protocol.ServerMessages(), protocol.Limits{}); err == nil {
+			if w, ok := m.(*protocol.Welcome); ok {
+				c.session = w.SessionID
+			}
+		}
+	}
+	return b, nil
+}
+
+func (c *v1WS) WriteMessage(ctx context.Context, p []byte) error {
+	return c.ws.Write(ctx, websocket.MessageBinary, p)
+}
+
+func (c *v1WS) Close(code protocol.CloseCode, reason string) error {
+	return c.ws.Close(websocket.StatusCode(code), reason)
+}
+
+func (c *v1WS) SetReadLimit(n int64) { c.ws.SetReadLimit(n) }
+
+// startV1 runs s on cl, showing its frames on d. end, if set, ends the
+// session on the server once the client left it.
+func (s *session) startV1(cl *client.Session, d display, end func()) {
 	c := &v1Conn{cl: cl, end: end}
 	s.conn = c
-	go s.readV1(c)
+	go s.readV1(c, d)
+}
+
+// display is when a client shows a frame that Next delivered, and so
+// acknowledges it by asking for the next event: at once without a
+// period, or at the next tick of a screen that refreshes every period,
+// as occamy's web client presents a frame at the next animation frame
+// and acknowledges it then (client/occamy-web/src/protocol/display.ts).
+type display struct{ period time.Duration }
+
+// displayOrigin is the phase of every display's ticks: a session starts
+// at any point between two of them, as it does on a real screen.
+var displayOrigin = time.Now()
+
+// newDisplay returns a display that refreshes hz times a second, or at
+// once for 0.
+func newDisplay(hz float64) display {
+	if hz <= 0 {
+		return display{}
+	}
+	return display{period: time.Duration(float64(time.Second) / hz)}
+}
+
+// next returns when a frame that Next delivered at now is shown: the
+// first tick after now, or now without a period.
+func (d display) next(now time.Time) time.Time {
+	if d.period <= 0 {
+		return now
+	}
+	n := now.Sub(displayOrigin)/d.period + 1
+	return displayOrigin.Add(n * d.period)
+}
+
+// present waits until a frame that Next delivered at now is shown, and
+// returns that time.
+func (d display) present(now time.Time) time.Time {
+	at := d.next(now)
+	time.Sleep(time.Until(at))
+	return at
 }
 
 // signIn returns an access token for the bench user. A v1 client signs
@@ -160,7 +286,8 @@ type v1Conn struct {
 // key presses and releases a key. The SSH backend takes no keys, only
 // the bytes a terminal emulator makes of them, so a terminal gets those.
 func (c *v1Conn) key(keysym int) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), inputTimeout)
+	defer cancel()
 	if c.cl.Class() == protocol.ClassTerminal {
 		b, ok := termBytes(keysym)
 		if !ok {
@@ -204,12 +331,12 @@ func (c *v1Conn) close() {
 }
 
 // readV1 delivers the session's events. Frames are applied to the
-// client core's framebuffer as Next delivers them, and acknowledged at
-// the next call, so the loop takes each frame and comes back at once, as
-// a client that draws without delay does. A terminal's bytes go to a
-// terminal emulator, as a viewer's xterm.js takes them; that is the
-// client's decoding of a terminal, and marks look at its cells.
-func (s *session) readV1(c *v1Conn) {
+// client core's framebuffer as Next delivers them, shown on d, and
+// acknowledged by the next call, so a frame counts from when d shows it.
+// A terminal's bytes go to a terminal emulator, as a viewer's xterm.js
+// takes them; that is the client's decoding of a terminal, and marks
+// look at its cells.
+func (s *session) readV1(c *v1Conn, d display) {
 	defer close(s.done)
 	defer close(s.frames)
 	var (
@@ -233,7 +360,10 @@ func (s *session) readV1(c *v1Conn) {
 			term = terminal.New(size.X, size.Y, terminal.Options{})
 			term.Write(ev.Data)
 			s.decode.Add(int64(time.Since(t)))
-			drew = true
+			// The session core serves a blank terminal before the
+			// backend has connected, whose snapshot is empty: that
+			// shows nothing of the remote.
+			drew = len(ev.Data) > 0
 		case client.TermData:
 			if term == nil {
 				s.err = errors.New("term-data before term-snapshot")
@@ -244,28 +374,29 @@ func (s *session) readV1(c *v1Conn) {
 			s.decode.Add(int64(time.Since(t)))
 			drew = drew || len(ev.Data) > 0
 		case client.Frame:
-			now := time.Now()
 			m := s.marker.Load()
+			var (
+				draws, marked bool
+				damage        image.Rectangle
+			)
 			if c.cl.Class() == protocol.ClassTerminal {
-				if !drew {
-					continue
+				draws, drew = drew, false
+				marked = draws && m != nil && m.cells != nil && m.cells(term.Snapshot())
+			} else if len(ev.Dirty) > 0 {
+				draws = true
+				for _, r := range ev.Dirty {
+					damage = damage.Union(r)
 				}
-				drew = false
-				s.emit(now, image.Rectangle{}, m != nil && m.cells != nil && m.cells(term.Snapshot()))
-				continue
+				if m != nil && m.pixels != nil {
+					c.cl.Framebuffer(func(img *image.RGBA) { marked = m.pixels(img, damage) })
+				}
 			}
-			if len(ev.Dirty) == 0 {
-				continue
+			// The web client waits for the screen's next refresh for
+			// every frame, drawing or not, before it acknowledges it.
+			at := d.present(time.Now())
+			if draws {
+				s.emit(at, damage, marked)
 			}
-			var damage image.Rectangle
-			for _, r := range ev.Dirty {
-				damage = damage.Union(r)
-			}
-			marked := false
-			if m != nil && m.pixels != nil {
-				c.cl.Framebuffer(func(img *image.RGBA) { marked = m.pixels(img, damage) })
-			}
-			s.emit(now, damage, marked)
 		case client.End:
 			if !c.closing.Load() {
 				s.err = fmt.Errorf("the server ended the session: %v %q", ev.Code, ev.Reason)
@@ -281,8 +412,9 @@ func (s *session) readV1(c *v1Conn) {
 // decoders are the codecs that occamy's web client offers where the
 // browser decodes them all (client/occamy-web, LocalDecoder.codecs), in
 // its order: deflate, WebP, JPEG, and raw, which the client core has
-// built in. Each adds the time it takes to spent. The client core
-// decodes tiles in parallel as they arrive, so spent is CPU time, not
+// built in. Each adds the wall time of each Decode call to spent. The
+// client core decodes tiles in parallel as they arrive, so spent sums
+// the time of its decoding goroutines, which is neither CPU time nor
 // the time a frame waits; copying the decoded tiles into the
 // framebuffer is not in it.
 func decoders(spent *atomic.Int64) []client.Decoder {

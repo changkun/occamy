@@ -48,6 +48,13 @@ func desktopScenarios(proto string) []scenario {
 // scenario starts typing.
 const promptQuiet = 1500 * time.Millisecond
 
+// How long a scenario waits for one sample before it fails: a key's
+// update, and T2's end marker.
+var (
+	keyWait    = 10 * time.Second
+	markerWait = 30 * time.Second
+)
+
 // runTypeEcho (T1) types into an idle shell and measures the time from
 // each key until the first frame that draws after it.
 func runTypeEcho(ctx context.Context, r *runner, s *session, res *result) error {
@@ -63,9 +70,11 @@ func runTypeEcho(ctx context.Context, r *runner, s *session, res *result) error 
 		if err := s.key('a' + i%26); err != nil {
 			return err
 		}
-		f, err := s.wait(ctx, t0, func(frame) bool { return true })
+		wctx, cancel := context.WithTimeout(ctx, keyWait)
+		f, err := s.wait(wctx, t0, func(frame) bool { return true })
+		cancel()
 		if err != nil {
-			return err
+			return fmt.Errorf("key %d: %w", i, err)
 		}
 		lat = append(lat, f.at.Sub(t0))
 		time.Sleep(time.Until(next))
@@ -130,9 +139,11 @@ func runBulkOutput(ctx context.Context, r *runner, s *session, res *result) erro
 	if err := s.key(keyReturn); err != nil {
 		return err
 	}
-	f, err := s.wait(ctx, t0, func(f frame) bool { return f.marked })
+	wctx, cancel := context.WithTimeout(ctx, markerWait)
+	defer cancel()
+	f, err := s.wait(wctx, t0, func(f frame) bool { return f.marked })
 	if err != nil {
-		return err
+		return fmt.Errorf("the end marker: %w", err)
 	}
 	res.Completion = ms(f.at.Sub(t0))
 	m.finish(res, f.at)

@@ -70,6 +70,7 @@ func main() {
 		nets      = flag.String("net", "N0,N1,N2", "comma-separated network conditions")
 		seriesF   = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd, v1-native, v1-guacd")
 		quick     = flag.Bool("quick", false, "fewer samples and shorter scenarios, to check the setup")
+		ackHz     = flag.Float64("ack-hz", 60, "v1: the screen refresh at which frames are shown and acknowledged, or 0 for at once")
 		runs      = flag.Int("runs", 1, "how many times to run everything; the table shows medians")
 		engine    = flag.String("engine", "podman", "container engine for CPU statistics, or none")
 		project   = flag.String("project", "docker", "compose project of the stack")
@@ -85,7 +86,7 @@ func main() {
 	for _, name := range []string{"v1-native", "v1-guacd"} {
 		conns := v1Connections[name]
 		all = append(all, series{
-			Name: name, target: *v1Addr, open: openV1(conns),
+			Name: name, target: *v1Addr, open: openV1(conns, newDisplay(*ackHz)),
 			protocols: slices.Sorted(maps.Keys(conns)),
 		})
 	}
@@ -159,11 +160,29 @@ func main() {
 		log.Fatal(err)
 	}
 	report.markdown(os.Stdout)
+	failed := false
 	for _, r := range report.Results {
-		if r.Error != "" {
-			os.Exit(1)
+		failed = failed || r.Error != ""
+	}
+	if names := idle(chosenSeries, report.Results); len(names) > 0 {
+		log.Printf("no scenario chosen runs on %s", strings.Join(names, ", "))
+		failed = true
+	}
+	if failed {
+		os.Exit(1)
+	}
+}
+
+// idle returns the series that ran nothing, such as one that serves
+// none of the chosen scenarios' protocols.
+func idle(chosen []series, results []result) []string {
+	var names []string
+	for _, sr := range chosen {
+		if !slices.ContainsFunc(results, func(r result) bool { return r.Series == sr.Name }) {
+			names = append(names, sr.Name)
 		}
 	}
+	return names
 }
 
 func protocolsOf(scs []scenario) []string {
@@ -189,7 +208,17 @@ type runner struct {
 // gap separates sessions, so that a session with the same claims does
 // not join the previous one while it ends
 // (specs/003-session-lifecycle-hardening.md, defect 6).
-const gap = 2 * time.Second
+var gap = 2 * time.Second
+
+// Bounds on what a sample waits for, so that a stack that stopped
+// answering fails the sample instead of holding the run: openTimeout
+// for opening a session, which for v1 is the sign-in and the stream's
+// handshake, and in G7 for the first frame too; inputTimeout for a v1
+// input to be queued, which waits only while the network takes nothing.
+var (
+	openTimeout  = 30 * time.Second
+	inputTimeout = 10 * time.Second
+)
 
 func (r *runner) samples(n int) int {
 	if r.quick {
@@ -232,23 +261,27 @@ func (r *runner) run(ctx context.Context, sc scenario) result {
 		log.Printf("  %v", err)
 	}
 	res.Unsupported = s.unsupported
+	res.serverFrames()
 	return *res
 }
 
-// connect (G7) measures the time to the first frame of new sessions.
-// For v1 it starts at the stream's upgrade, after the sign-in, which it
-// records apart (v1.go).
+// connect (G7) measures the time to the first frame of new sessions
+// that shows the remote. For v1 it starts at the stream's upgrade,
+// after the sign-in, which it records apart (v1.go).
 func (r *runner) connect(ctx context.Context, proto string) result {
 	res := r.newResult("G7", proto)
 	log.Printf("%s %s %s %s", res.Series, res.Net, res.Scenario, proto)
 	var times, signIns []time.Duration
 	for range r.samples(20) {
-		s, err := r.series.open(ctx, r.proxy.addr(), proto)
+		sctx, cancel := context.WithTimeout(ctx, openTimeout)
+		s, err := r.series.open(sctx, r.proxy.addr(), proto)
 		if err != nil {
+			cancel()
 			res.Error = err.Error()
 			break
 		}
-		_, err = s.wait(ctx, s.start, func(frame) bool { return true })
+		_, err = s.wait(sctx, s.start, func(frame) bool { return true })
+		cancel()
 		s.close()
 		if err != nil {
 			res.Error = err.Error()
@@ -348,7 +381,12 @@ type result struct {
 	BytesUp   int64   `json:"bytes_up,omitempty"`
 	BytesDown int64   `json:"bytes_down,omitempty"`
 	Frames    int64   `json:"frames,omitempty"`
-	DecodeMS  float64 `json:"client_decode_ms,omitempty"`
+	// ServerFrames are a v1 scene's frames, which are the server's: one
+	// may carry part of a frame of the scene, or several, so they are
+	// not Frames until the scene stamps its frames
+	// (docs/benchmarks.md, The v1 series).
+	ServerFrames int64   `json:"server_frames,omitempty"`
+	DecodeMS     float64 `json:"client_decode_ms,omitempty"`
 	// SceneFPS is the rate at which the scene animates, which bounds
 	// Frames/Seconds.
 	SceneFPS float64            `json:"scene_fps,omitempty"`
@@ -356,6 +394,16 @@ type result struct {
 
 	Unsupported map[string]int `json:"unsupported,omitempty"`
 	Error       string         `json:"error,omitempty"`
+}
+
+// v1 reports a result of a v1 series.
+func (r *result) v1() bool { return strings.HasPrefix(r.Series, "v1-") }
+
+// serverFrames moves a v1 scene's frames to ServerFrames.
+func (r *result) serverFrames() {
+	if r.v1() && r.SceneFPS > 0 {
+		r.ServerFrames, r.Frames = r.Frames, 0
+	}
 }
 
 type report struct {
@@ -376,9 +424,16 @@ func (rep *report) markdown(w io.Writer) {
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Scenario | Series | Net | Latency p50/p95/p99 ms | First frame p50 ms | Completion ms | Down KiB | Down KiB/s | Frames/s | occamyd+guacd CPU ms | Remote CPU ms | Decode ms | Notes |")
+	fmt.Fprintln(w, "| Scenario | Series | Net | Latency p50/p95/p99 ms | First frame p50 ms | Completion ms | Down KiB | Down KiB/s | Frames/s | Server CPU ms | Remote CPU ms | Decode ms | Notes |")
 	fmt.Fprintln(w, "|---|---|---|---|---|---|---|---|---|---|---|---|---|")
-	for _, row := range table(rep.Results) {
+	rows := table(rep.Results)
+	defer func() {
+		if slices.ContainsFunc(rows, func(r row) bool { return r.first.v1() }) {
+			fmt.Fprintln(w)
+			fmt.Fprintln(w, decodeNote)
+		}
+	}()
+	for _, row := range rows {
 		r, c := row.first, row.cells
 		f := func(i int, format string) string {
 			if math.IsNaN(c[i]) {
@@ -415,6 +470,9 @@ const (
 	colServerCPU
 	colRemoteCPU
 	colDecode
+	// Numbers that go into notes.
+	colSignIn
+	colIdleGuacdCPU
 	numCols
 )
 
@@ -431,21 +489,34 @@ func cells(r *result) [numCols]float64 {
 	if r.FirstFrame != nil {
 		c[colFirst] = r.FirstFrame.P50
 	}
+	if r.SignIn != nil {
+		c[colSignIn] = r.SignIn.P50
+	}
 	if r.Completion > 0 {
 		c[colCompletion] = r.Completion
 	}
 	if r.Seconds > 0 {
 		c[colDown] = float64(r.BytesDown) / 1024
 		c[colRate] = float64(r.BytesDown) / 1024 / r.Seconds
-		c[colFPS] = float64(r.Frames) / r.Seconds
+		if !r.v1() || r.SceneFPS == 0 {
+			c[colFPS] = float64(r.Frames) / r.Seconds
+		}
 	}
 	if r.CPUMS != nil {
-		occamyd := "occamy"
-		if strings.HasPrefix(r.Series, "v1-") {
-			occamyd = "occamy-v1"
+		switch r.Series {
+		case "v1-native": // guacd serves nothing of it
+			c[colServerCPU] = r.CPUMS["occamy-v1"]
+		case "v1-guacd":
+			c[colServerCPU] = r.CPUMS["occamy-v1"] + r.CPUMS["guacd"]
+		default:
+			c[colServerCPU] = r.CPUMS["occamy"] + r.CPUMS["guacd"]
 		}
-		c[colServerCPU] = r.CPUMS[occamyd] + r.CPUMS["guacd"]
 		c[colRemoteCPU] = r.CPUMS[r.Protocol]
+		if r.Series == "v1-native" {
+			if v, ok := r.CPUMS["guacd"]; ok {
+				c[colIdleGuacdCPU] = v
+			}
+		}
 	}
 	if r.DecodeMS > 0 {
 		c[colDecode] = r.DecodeMS
@@ -453,14 +524,19 @@ func cells(r *result) [numCols]float64 {
 	return c
 }
 
-// A row whose frames come faster than the scene animates, by more than
-// partialMargin, gets partialNote. The harness counts the frames the
-// server ends, which in v1 may each carry part of a scene's frame, so
-// that frames a second and anything per frame do not count the scene's
-// frames (docs/benchmarks.md, The v1 series).
+// Notes on what a row's numbers mean.
 const (
-	partialMargin = 1.1
-	partialNote   = "frames above the scene's rate: partial frames, not scene frames"
+	// serverFramesNote replaces the frame rate of a v1 scene, whose
+	// frames are the server's (result.ServerFrames).
+	serverFramesNote = "server frames, not comparable until the scene frame stamp lands"
+	// signInNote gives a v1 G7's sign-in, which its first frame leaves
+	// out and v0's includes as its login.
+	signInNote = "sign-in p50 %.1f ms, not in the first frame; v0's first frame includes its login"
+	// idleGuacdNote gives guacd's CPU during a v1-native scenario, which
+	// guacd serves nothing of, so its server CPU leaves it out.
+	idleGuacdNote = "guacd %.0f ms CPU, not in server CPU"
+	// decodeNote follows a table with v1 rows.
+	decodeNote = "Decode ms: v0's includes compositing each frame. v1's is the wall time of each tile's decode, summed over the client core's decoding goroutines, or the terminal emulator's time, without compositing, so it compares v1's series with each other, not with v0."
 )
 
 // row is a line of the table: one measurement over all runs.
@@ -499,9 +575,15 @@ func table(results []result) []row {
 		}
 		if fps := rs[0].SceneFPS; fps > 0 {
 			row.notes = append(row.notes, fmt.Sprintf("scene %g fps", fps))
-			if row.cells[colFPS] > fps*partialMargin {
-				row.notes = append(row.notes, partialNote)
+			if rs[0].v1() {
+				row.notes = append(row.notes, serverFramesNote)
 			}
+		}
+		if v := row.cells[colSignIn]; !math.IsNaN(v) {
+			row.notes = append(row.notes, fmt.Sprintf(signInNote, v))
+		}
+		if v := row.cells[colIdleGuacdCPU]; !math.IsNaN(v) {
+			row.notes = append(row.notes, fmt.Sprintf(idleGuacdNote, v))
 		}
 		unsupported := map[string]int{}
 		for _, r := range rs {
