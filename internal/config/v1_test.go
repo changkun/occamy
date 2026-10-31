@@ -296,7 +296,7 @@ func TestParseV1Defaults(t *testing.T) {
 	if c.Name != "box" || c.Target != "box.internal:22" {
 		t.Errorf("connection name %q, target %q; want box, box.internal:22", c.Name, c.Target)
 	}
-	if f.LegacyV0 || f.AllowAdhocTargets || f.TLS != (config.TLS{}) || f.Debug.Address != "" {
+	if f.LegacyV0 || f.AllowAdhocTargets || f.TLS != (config.TLS{}) || f.Debug.Address != "" || f.WebClient != "" {
 		t.Errorf("optional features on by default: %+v", f)
 	}
 
@@ -491,7 +491,10 @@ debug: {address: "localhost:6060"}
 origins: ["HTTPS://Occamy.Example.com:8443/", "http://localhost:5173"]
 listen: "[::]:443"
 legacy_v0: true
+web_client: client/occamy-web/dist
 `},
+		{"web client", head + "web_client: DIR\n"},
+		{"web client not built yet", head + "web_client: DIR/dist\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -563,6 +566,7 @@ func TestParseV1Problems(t *testing.T) {
 		{"tls key alone", head + "tls: {key: DIR/tls.key}\n", []want{{"tls.cert", "required when tls.key is set"}}},
 		{"tls missing file", head + "tls: {cert: DIR/missing.crt, key: DIR/tls.key}\n", []want{{"tls.cert", "missing.crt does not exist"}}},
 		{"tls directory", head + "tls: {cert: DIR, key: DIR/tls.key}\n", []want{{"tls.cert", "is a directory"}}},
+		{"web client a file", head + "web_client: DIR/key\n", []want{{"web_client", "key is not a directory"}}},
 		{"debug on listen", head + "debug: {address: ':5636'}\n", []want{{"debug.address", `":5636" shares a port with listen ":5636"`}}},
 		{"debug beside a wildcard", head + "listen: ':5636'\ndebug: {address: 127.0.0.1:5636}\n", []want{{"debug.address", "shares a port with listen"}}},
 		{"debug on localhost", head + "listen: 127.0.0.1:5636\ndebug: {address: localhost:5636}\n", []want{{"debug.address", "shares a port with listen"}}},
@@ -957,6 +961,47 @@ func TestParseV1Unreadable(t *testing.T) {
 	var problems config.Problems
 	if !errors.As(err, &problems) || len(problems) != 1 || !strings.Contains(problems[0].Message, "is not readable") {
 		t.Fatalf("ParseV1() error = %v, want password_file not readable", err)
+	}
+}
+
+// TestParseV1WebClient checks web_client as the other paths are
+// checked: relative to occamyd's working directory, and refused when it
+// cannot be read, but for a directory that does not exist yet, which
+// occamyd warns of at start.
+func TestParseV1WebClient(t *testing.T) {
+	dir := fixture(t)
+	t.Chdir(dir)
+	if err := os.Mkdir("dist", 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct{ path, problem string }{
+		{"dist", ""},
+		{"./dist/", ""},
+		{"missing", ""},
+		{"key", "key is not a directory"},
+		{"../" + filepath.Base(dir) + "/password", "password is not a directory"},
+	} {
+		_, err := config.ParseV1([]byte(strings.ReplaceAll(head, "DIR", dir) + "web_client: " + tt.path + "\n"))
+		var problems config.Problems
+		switch {
+		case tt.problem == "" && err != nil:
+			t.Errorf("web_client: %s: %v", tt.path, err)
+		case tt.problem != "" && (!errors.As(err, &problems) || len(problems) != 1 || problems[0].Path != "web_client" || !strings.Contains(problems[0].Message, tt.problem)):
+			t.Errorf("web_client: %s: %v, want %q", tt.path, err, tt.problem)
+		}
+	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any directory")
+	}
+	if err := os.Chmod("dist", 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(dir, "dist"), 0o750) })
+	_, err := config.ParseV1([]byte(strings.ReplaceAll(head, "DIR", dir) + "web_client: dist\n"))
+	var problems config.Problems
+	if !errors.As(err, &problems) || len(problems) != 1 || !strings.Contains(problems[0].Message, "dist is not readable") {
+		t.Errorf("web_client of an unreadable directory: %v, want it not readable", err)
 	}
 }
 

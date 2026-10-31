@@ -66,6 +66,9 @@ type File struct {
 	AdhocBackends map[string]string `yaml:"adhoc_backends"`
 	Limits        Limits            `yaml:"limits"`
 	Streams       Streams           `yaml:"streams"`
+	// WebClient is the directory of the built web client, which occamyd
+	// serves under /static/; empty serves none.
+	WebClient string `yaml:"web_client"`
 }
 
 // The backends that serve a connection's sessions.

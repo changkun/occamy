@@ -26,9 +26,11 @@ those are closed, an operator should know the following:
 - **Tokens carry the remote credentials.** `/api/v0/login` puts the
   remote host, username and password into a signed but unencrypted JWT.
   Anyone holding a token can read them, so treat tokens as secrets.
-- **Tokens travel in URLs.** The web client passes the token in the
-  WebSocket URL. `occamyd` does not log query strings, but a reverse
-  proxy in front of it may; keep them out of its access log.
+- **Tokens travel in URLs.** `/api/v0/connect` takes the token in the
+  WebSocket URL's query, as Guacamole-protocol clients send it, since
+  browsers set no header on a WebSocket. `occamyd` does not log query
+  strings, but a reverse proxy in front of it may; keep them out of its
+  access log.
 - **No TLS.** `occamyd` speaks plain HTTP and WebSocket. Put a
   TLS-terminating reverse proxy in front of it.
 - **The login endpoint is open.** It signs a token for any host and port

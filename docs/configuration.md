@@ -11,7 +11,8 @@ another. The file comes in two versions:
   sign-in, the connection registry, TLS and the debug listener. It is
   not yet in a release. It serves `/healthz`, sign-in for static users
   and through OIDC, the connections and sessions of API v1 and their
-  streams and, with `legacy_v0`, the v0 routes (see
+  streams, with `web_client`, the web client, and with `legacy_v0`, the
+  v0 routes (see
   [Serving a v1 file](#serving-a-v1-file)).
 
 Any other `version` is an error, and so is `version: 0`: a v0 file has no
@@ -64,7 +65,8 @@ directory.
 | `tls.cert`, `tls.key` | unset | Certificate and key files, PEM. `occamyd` terminates TLS when both are set; set both or neither. Without them, put a reverse proxy that terminates TLS in front. Read at start, so a renewed certificate needs a restart |
 | `debug.address` | unset (off) | Address of the debug listener: expvar at `/debug/vars` and pprof under `/debug/pprof/`, without authentication. It needs a port of its own: not `listen`'s port on the same host, nor on `localhost` beside `127.0.0.1` or `::1`, nor beside a wildcard host (`:5636`, `0.0.0.0`, `::`), which takes every address. Keep it on the loopback interface; `occamyd` warns at start when it is not |
 | `origins` | none | Origins, `scheme://host[:port]`, whose web pages may open streams besides `occamyd`'s own. Written in lower case without a trailing slash, as browsers send them. `occamyd`'s own origin is any whose host and port are the request's `Host`, and whose scheme is `https` when `occamyd` terminates TLS. Behind a proxy that rewrites `Host`, list the origin of `occamyd`'s own pages here too. A stream request without `Origin`, which no browser sends, is accepted on its token alone |
-| `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for the Guacamole-based web client. Both are served, the login too, which a v0 file serves only with `client: true`. Their tokens are signed with a key made at each start, so they do not survive a restart. The web client itself (`/static/`) is not served from a v1 file. The login signs any target for anyone, as in v0, and `occamyd` warns at start; `allow_adhoc_targets`, `adhoc_allowlist` and the connection registry do not restrict these routes. They are removed at v1.0 |
+| `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for clients of the Guacamole protocol. Both are served, the login too, which a v0 file serves only with `client: true`. Their tokens are signed with a key made at each start, so they do not survive a restart. The login signs any target for anyone, as in v0, and `occamyd` warns at start; `allow_adhoc_targets`, `adhoc_allowlist` and the connection registry do not restrict these routes. They are removed at v1.0 |
+| `web_client` | unset (off) | A directory holding the built web client, which `occamyd` serves under `/static/` ([api.md](api.md#get-static)): `client/occamy-web/dist`, where `make client` builds it and where the image has it, or the `dist` directory of the web client's release archive. A relative path is resolved against `occamyd`'s working directory, as other paths are. A path that is not a directory, or a directory `occamyd` cannot read, is an error; a directory that does not exist yet, or holds no `index.html`, is a warning at start, and `occamyd` serves the client once it is built there. The client signs in through API v1 on `occamyd`'s origin; with OIDC, list its URL, such as `https://occamy.example/static/`, in `auth.oidc.return_urls` |
 
 ### Sign-in: `auth`
 
@@ -175,8 +177,9 @@ The access token never appears in a URL, so it reaches no server log,
 it lasts a minute, works once, and only with the verifier of the client
 that started the sign-in, so a code planted in another browser signs no
 one in. Until `occamyd` answers CORS preflights, serve the web client
-from `occamyd`'s origin, such as through the reverse proxy in front of
-both.
+from `occamyd`'s origin: with `web_client`, or through the reverse proxy
+in front of both. The web client that `web_client` serves returns to
+its own URL, `/static/`, which `return_urls` must list.
 
 Errors in the fragment:
 
@@ -548,6 +551,7 @@ WebSockets over HTTP/1.1. It serves:
 | `POST /api/v1/sessions/{id}/shares` | A share for `{"role":"viewer"}` or `"read-only"`, with `expires_in` in seconds (60 to 43200, an hour by default), owner only |
 | `GET /api/v1/connections/{id}/stream` | Open a session on the connection and stream it, as a protocol v1 WebSocket ([protocol.md](protocol.md)) |
 | `GET /api/v1/sessions/{id}/stream` | Join a session as a protocol v1 WebSocket: as its owner with the owner's access token or the stream token, with the role of a session token for the session, which a trusted issuer may mint too, or with a share |
+| `/static/` | With `web_client`, the web client ([api.md](api.md#get-static)) |
 | `/api/v0/login`, `/api/v0/connect` | With `legacy_v0: true`, the v0 routes; both always, where a v0 file serves the login only with `client: true` |
 
 `ssh` and `vnc` sessions use `occamyd`'s native backends, and `rdp`
@@ -588,7 +592,7 @@ not know:
 | `mode` | `debug` | `debug`, `release` or `test`; any other value is refused. `debug` also serves `/debug/pprof` on the public listener, without a token |
 | `auth.jwt_secret` | required | The HMAC secret of v0 tokens; an empty one is refused |
 | `auth.jwt_alg` | `HS256` | The HMAC algorithm of v0 tokens: `HS256`, `HS384` or `HS512` |
-| `client` | `false` | Serve the demo web client under `/static/`, and `POST /api/v0/login`. Without it, a v0 file serves only `/api/v0/connect` of the v0 routes |
+| `client` | `false` | Serve `POST /api/v0/login`, and `client/occamy-web/dist` under `/static/`. The web client there speaks API v1 alone, so it needs a v1 file with `web_client`. Without `client`, a v0 file serves only `/api/v0/connect` of the v0 routes |
 | `guacd.address`, `guacd.params` | `localhost:4822`, none | As in v1; token values override the parameters |
 
 A v0 file used as a v1 file reports the v0 keys it finds, with their v1
