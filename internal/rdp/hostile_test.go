@@ -272,6 +272,25 @@ func BenchmarkHostileBitmap(b *testing.B) {
 	}
 }
 
+// BenchmarkTileBitmaps is one PDU of 64 bitmaps of 64×64 pixels, the
+// tiles Windows sends, so that what each bitmap costs beside its pixels
+// shows.
+func BenchmarkTileBitmaps(b *testing.B) {
+	c, _ := testClock(1024, 768)
+	out := &sizeRecorder{}
+	// RLE of a background run of the tile's 4096 pixels.
+	pdu := fastPathBitmaps(64, 64, 64, 16, []byte{0xf0, 0x00, 0x10})
+	b.ReportAllocs()
+	for b.Loop() {
+		if err := c.handleFastPath(out, frame{fastPath: true, data: pdu}); err != nil {
+			b.Fatal(err)
+		}
+	}
+	if n := c.Stats().Bitmaps["rle16"]; n == 0 {
+		b.Fatal("no bitmap decoded")
+	}
+}
+
 // A bitmap may be larger than its destination and the desktop by a tile's
 // padding, no more.
 func TestBitmapBounds(t *testing.T) {
