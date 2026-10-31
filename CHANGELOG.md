@@ -523,9 +523,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   matches [MS-RDPRFX] 4.2.4's tile exactly through the third level's
   inverse, its components within 2/32 of a level and its pixels within
   1, and [MS-RDPEGFX] 4.1.2's progressive example exactly, whose SRL
-  bytes in 4.1.2.1.4 leave out a value its own decode has. Not yet run
-  against xrdp: the integration tests that check its colours waited
-  for a quieter host. ClearCodec and the bitmap cache, which Windows
+  bytes in 4.1.2.1.4 leave out a value its own decode has. Against
+  xrdp 0.10.1, which sends RemoteFX Progressive with the
+  reduce-extrapolate transform and difference tiles, the session's
+  wallpaper decodes within 4 levels per channel and the probe's swatch
+  within 6. ClearCodec and the bitmap cache, which Windows
   servers send, are still counted and skipped; `disable_gfx: true`
   falls back to bitmap updates
   ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)).

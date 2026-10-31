@@ -24,7 +24,7 @@ Guacamole protocol and no v0 routes
 |----------|---------------|---------------|
 | VNC | Through guacd, verified end to end | Native by default, or through guacd with `backend: guacd` |
 | SSH | Through guacd, verified end to end, including repeated sessions | Native |
-| RDP | Through guacd, verified against xrdp | Native by default, verified against xrdp but not yet Windows, or through guacd with `backend: guacd`. Native asks for GFX by default: its RemoteFX and RemoteFX Progressive are checked against the specification's vectors and wait for a live run against xrdp, and its ClearCodec and cache come next (`disable_gfx` turns GFX off) |
+| RDP | Through guacd, verified against xrdp | Native by default, verified against xrdp but not yet Windows, or through guacd with `backend: guacd`. Native asks for GFX by default: its RemoteFX Progressive is verified against xrdp and the specification's vectors, its RemoteFX against the vectors, and its ClearCodec and cache come next (`disable_gfx` turns GFX off) |
 | Kubernetes | Untested | Native: a terminal in a pod, through the API server's exec stream |
 
 v1 also serves telnet, through guacd only: it gets no native backend and

@@ -68,9 +68,9 @@ In scope:
 8. Native RDP backend, rdp's default since 2026-10-31, ahead of rc.1,
    with the guacd bridge as an explicit fallback; checked against xrdp,
    not yet Windows. Its graphics pipeline is on by default since phase
-   3's second part, with RemoteFX and RemoteFX Progressive checked
-   against the specification's vectors but not yet live, and ClearCodec
-   and the cache to come.
+   3's second part, with RemoteFX Progressive verified against xrdp
+   and RemoteFX against the specification's vectors, and ClearCodec and
+   the cache to come.
    telnet, which gets no native backend, goes through guacd until guacd
    is removed. Where a native backend exists it is the default,
    and guacd serves that protocol only with an explicit `backend: guacd`.

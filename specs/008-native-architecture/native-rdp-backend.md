@@ -1697,22 +1697,68 @@ RDP's guacd path, RDP no longer needs guacd at all.
     over 73,728 pixels of test images, 72,128 match the fixed-point
     decoder exactly and 1,600 differ by 1.
   - With rdptest's encoder at xrdp's quantization, the round trip
-    loses at most 1 to 2 levels on the wallpaper's gradients and 4 on
-    a swatch's inside; at a finer quantization, at most 6 on sharp
-    strokes (`TestRFXRoundTrip`, `TestProgressivePasses`).
-- **Live.** `TestIntegrationGFX` now waits for the session's wallpaper
-  in RemoteFX Progressive, checks it within 4 levels per channel
-  everywhere but the swatch's tile, checks the swatch at nine points of
-  its inside within 6 of each of eight keys' colours, and wants no
-  region, block or bitmap skipped. A wrong LL3, scale or band order of
-  a level is off by tens of levels. The backend's integration tests
-  check the wallpaper within 4 with GFX on, and the security test turns
-  GFX off and keeps its exact check. **None of this has run live yet**:
-  the integration suite runs only below a 1-minute load of 8, and the
-  host's load stayed between 28 and 54 throughout this pull request.
-  xrdp's quantization tables have equal HL and LH factors at each
-  level, so even a live run cannot check the band order of the
-  progressive tables; Windows can.
+    loses at most 2 levels on the wallpaper's gradients, and at most 3
+    on a solid swatch 8 pixels or more from its edges, whether the
+    encoder rounds, truncates or floors. 4 pixels from the swatch's
+    corners, it loses up to 9 when it rounds and 14 when it truncates.
+    At a finer quantization, the loss is at most 6 on sharp strokes
+    (`TestRFXRoundTrip`, `TestProgressivePasses`).
+- **Live, against xrdp 0.10.1.** Both packages' integration suites
+  ran once the host's 1-minute load fell below 8 (6.5 for the first
+  run, 4.5 to 4.7 for the last), and passed.
+  - **What xrdp sends.** The session's first screen arrives as 192
+    progressive tiles in one wire-to-surface 2. Each key's swatch
+    arrives as a tile of its own, 5 of 16 of them as difference tiles.
+    All of these are TILE_SIMPLE with the reduce-extrapolate
+    transform. xrdp sent no upgrades.
+  - **What `TestIntegrationGFX` checks.**
+    - The session's wallpaper, within 4 levels per channel everywhere
+      but the swatch's tile.
+    - The swatch, within 6 of each of eight keys' colours, at nine
+      points 8 pixels or more inside it. They came within 2.
+    - That no region, block or bitmap was skipped.
+    - PR1's assertions on the reset and the planar bitmaps, which ran
+      live for the first time here.
+  - **The backend's tests.** They pass with GFX on, with the wallpaper
+    within 4. The security test turns GFX off and keeps its exact
+    check.
+  - **The first run's failure.** The first run checked the swatch 4
+    pixels from its corners, and failed there: yellow decoded 9 off (R
+    246).
+  - **The diagnostic run.** A second run decoded each live swatch tile
+    again, with the fixed-point decoder and with the test's float64
+    reference. At every checked point, the two decoders and the screen
+    agree exactly.
+  - **Why the corners lose more.** xrdp encodes a tile with zeros in
+    its Y, Cb and Cr planes outside the rectangle it updates, so every
+    plane is −128 there after the shift. The region's rectangles keep
+    that area off the screen. For a swatch on black, xrdp's luma
+    coefficients match rdptest's encoder's within 1. The sharper edge
+    rings more, so the loss near the corners is the codec's: as above,
+    up to 9 when rounding and 14 when truncating 4 pixels in, and 3 or
+    less 8 pixels in. The test now checks 8 pixels in.
+  - **What the checks still catch.** Offline, on the tile with
+    rdptest's encoder:
+    - Shifting by q − 2 puts the swatch 64 or more off, and the
+      wallpaper 47 or more.
+    - Leaving LL3's differences unsummed puts the swatch 151 or more
+      off, and the wallpaper 99 or more.
+    - Shifting LL3 one less puts the swatch 82 or more off, and the
+      wallpaper 49 or more.
+    - Shifting by q saturates the swatch's colours, but puts the
+      wallpaper 64 off.
+  - **xrdp's tables.**
+
+    | Component | LL3 | Level 3 | Level 2 | HL1, LH1, HH1 |
+    |-----------|-----|---------|---------|---------------|
+    | Y | 6 | 6 | 7 | 8, 8, 9 |
+    | Cb, Cr | 6 | 7 | 8 | 9, 9, 9 |
+
+    HL and LH are equal at each level, so the band order of the
+    progressive tables is still unchecked live. Windows can check it.
+  - **CI.** The `e2e` job also ran occamyd from this branch against the
+    demo stack's xrdp with GFX on, covering sessions, input, resize,
+    sharing and reconnecting.
 - **Tests.** `TestRFXSpecTile`, `TestProgressiveSpecExample`,
   `TestRFXFloatReference`, `TestRFXRoundTrip` (both RLGR modes),
   `TestRFXRegionBounds` (no region, an empty one, and rectangles past
@@ -1822,18 +1868,20 @@ RDP's guacd path, RDP no longer needs guacd at all.
     matched only within a tolerance.
   - guacd's FreeRDP shifted xrdp's colours in RemoteFX Progressive by
     up to 22 levels ([guacd-bridge](guacd-bridge.md)'s conformance
-    notes), which is why occamyd gives guacd `disable-gfx`; whether
-    this decoder stays within its 4 levels against xrdp waits for the
-    live run.
+    notes), which is why occamyd gives guacd `disable-gfx`. This
+    decoder keeps xrdp's wallpaper within 4.
+  - xrdp encodes the area of a tile outside the rectangle it updates
+    as zeros in its YCbCr planes. That area would decode dark green,
+    but the region's rectangles keep it off the screen.
+  - xrdp uses the reduce-extrapolate transform and difference tiles,
+    but sent no upgrades in these runs.
 - **Follow-ups.**
-  - Run `TestIntegrationGFX` and the backend's integration tests live
-    once the host's load is below 8, and record the colours' error.
   - The third pull request: the bitmap cache and ClearCodec.
   - `rdp-native` in the benchmark's `v1-native` series now speaks GFX
     and `rdp-guacd` keeps `disable-gfx`; the comparison says which
     each measures ([benchmark](benchmark.md)).
-- **Windows (phase 4).** Against Windows, check RemoteFX Progressive
-  with quantization tables whose HL and LH factors differ, the
-  reduce-extrapolate transform, difference tiles and upgrades (xrdp's
-  use of them was not recorded), and plain RemoteFX, which xrdp does
-  not send under GFX.
+- **Windows (phase 4).** Against Windows, check:
+  - RemoteFX Progressive with quantization tables whose HL and LH
+    factors differ;
+  - upgrades, which xrdp did not send;
+  - plain RemoteFX, which xrdp does not send under GFX.
