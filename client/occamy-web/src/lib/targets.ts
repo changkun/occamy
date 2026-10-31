@@ -7,7 +7,7 @@
 // reloaded over the owner's session.
 
 import type { AccessToken, Api } from './api'
-import { type Pending, SESSION_KEY, keptSession, takeResume } from './app'
+import { type Pending, dropSession, keptSession, takeResume } from './app'
 import type { Fragment } from './fragment'
 import { newVerifier, oidcErrorMessage, takeVerifier } from './oidc'
 
@@ -57,20 +57,20 @@ export type Start =
  * the sign-in, are forgotten on every start: a sign-in that failed or
  * was abandoned leaves nothing for a later one to find. A page loaded
  * without a fragment, as on a reload, over the owner's session joins it
- * again once the user has signed in; a share link's page forgets it.
+ * again once the user has signed in; a share link's page, and a failed
+ * OIDC sign-in, forget it.
  */
 export function start(fragment: Fragment, api: Api, storage: Storage | undefined): Start {
   const verifier = takeVerifier(storage)
   const resume = takeResume(storage)
   switch (fragment.kind) {
     case 'join':
-      try {
-        storage?.removeItem(SESSION_KEY)
-      } catch {
-        // Nothing kept.
-      }
+      dropSession(storage)
       return { kind: 'join', sessionId: fragment.sessionId, token: fragment.token }
     case 'oidc-error':
+      // What waited for the sign-in is gone; so is the session a reload
+      // was to return to, as for a sign-in that failed.
+      dropSession(storage)
       return { kind: 'oidc-error', message: oidcErrorMessage(fragment.error) }
     case 'oidc-code':
       if (verifier === null) {

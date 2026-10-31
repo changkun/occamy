@@ -12,7 +12,7 @@
 import { type ReactElement, useReducer } from 'react'
 
 import type { Api, Connection } from '../lib/api'
-import { initialState, reduce, signInOver } from '../lib/app'
+import { dropSession, initialState, reduce, signInOver } from '../lib/app'
 import type { Start } from '../lib/targets'
 import { Connections } from './Connections'
 import { SessionView } from './SessionView'
@@ -82,7 +82,10 @@ export function App({ api, start, storage }: AppProps): ReactElement {
       api={api}
       token={token}
       onOpen={(c: Connection) => dispatch({ type: 'open', target: { kind: 'connection', id: c.id, name: c.name }, now: Date.now() })}
-      onSignOut={(message = '') => dispatch({ type: 'sign-out', message })}
+      onSignOut={(message = '') => {
+        dropSession(storage)
+        dispatch({ type: 'sign-out', message })
+      }}
     />
   )
 }

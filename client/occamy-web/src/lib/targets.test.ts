@@ -78,6 +78,14 @@ describe('start', () => {
     expect(start({ kind: 'none' }, api().api, s)).toEqual({ kind: 'signed-out' })
   })
 
+  it('forgets the owner’s session kept in the tab once an OIDC sign-in fails', () => {
+    const s = storage()
+    keepSession(s, { kind: 'session', sessionId: 'mZ3k', name: 'Lab' })
+    expect(start({ kind: 'oidc-error', error: 'access_denied' }, api().api, s)).toMatchObject({ kind: 'oidc-error' })
+    expect(s.getItem(SESSION_KEY)).toBeNull()
+    expect(start({ kind: 'none' }, api().api, s)).toEqual({ kind: 'signed-out' })
+  })
+
   it('exchanges the one-time code with this tab’s verifier, and spends the verifier', async () => {
     const { api: a, exchanges } = api()
     const s = storage('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')

@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { AccessToken, Identity } from './api'
-import { type AppEvent, type AppState, EXPIRED, type Pending, RESUME_KEY, SESSION_KEY, forgetSession, initialState, keepSession, keptSession, reduce, saveResume, signInOver, takeResume } from './app'
+import { type AppEvent, type AppState, EXPIRED, type Pending, RESUME_KEY, SESSION_KEY, dropSession, forgetSession, initialState, keepSession, keptSession, reduce, saveResume, signInOver, takeResume } from './app'
 import type { Target } from './targets'
 
 // token returns an access token of occamyd's for sub, signed in at idp,
@@ -254,6 +254,16 @@ describe('keepSession, keptSession and forgetSession', () => {
     keepSession(refusing, { kind: 'session', sessionId: 'mZ3k', name: 'Lab' })
     expect(keptSession(refusing)).toBeNull()
     forgetSession(refusing, 'mZ3k')
+  })
+
+  it('forgets whichever session is kept, as on signing out', () => {
+    const s = storage()
+    keepSession(s, { kind: 'session', sessionId: 'mZ3k', name: 'Lab' })
+    dropSession(s)
+    expect(keptSession(s)).toBeNull()
+    expect(s.getItem(SESSION_KEY)).toBeNull()
+    dropSession(undefined)
+    dropSession({ ...s, removeItem: () => { throw new Error('denied') } })
   })
 
   it('takes a session ID only as occamyd makes them, and clips the name as the page shows names', () => {

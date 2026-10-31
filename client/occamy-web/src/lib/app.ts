@@ -197,6 +197,15 @@ export function keepSession(storage: Storage | undefined, target: SessionTarget)
   }
 }
 
+/** dropSession forgets the kept session, whichever it is, as on signing out. */
+export function dropSession(storage: Storage | undefined): void {
+  try {
+    storage?.removeItem(SESSION_KEY)
+  } catch {
+    // Nothing kept, nothing to forget.
+  }
+}
+
 /** forgetSession forgets the kept session if it is sessionId: it has ended, occamyd refused to join it, or the user left it. */
 export function forgetSession(storage: Storage | undefined, sessionId: string): void {
   try {
