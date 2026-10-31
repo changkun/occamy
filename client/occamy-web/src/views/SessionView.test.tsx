@@ -8,8 +8,8 @@
 // run twice: an owner's action that waited for a sign-in is taken once,
 // End shows that it waits for occamyd and that it failed, an End that
 // resumed is ended or refused as occamyd decides, for the user who
-// opened the session as the stream's welcome says, and the stream's 4002
-// counts for the session ended.
+// opened the session as the stream's welcome says, and the stream closed
+// for the session's end counts for the session ended.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CloseCode, Role, type Session, SessionClass, type SessionEvent } from '../protocol'
 import { type AccessToken, Api, type Identity } from '../lib/api'
 import type { SessionAction } from '../lib/app'
+import { describeEnd } from '../lib/ending'
 import type * as controller from '../lib/controller'
 import type { Target } from '../lib/targets'
 import { SessionView, type SignInNext } from './SessionView'
@@ -69,10 +70,15 @@ class Welcomed {
     Welcomed.last = this
   }
 
+  /** push delivers ev from occamyd. */
+  push(ev: SessionEvent): void {
+    this.events.push(ev)
+    this.wake?.()
+  }
+
   /** end closes the stream from occamyd's end, as with 4002 once the session has ended for everyone. */
   end(code: number): void {
-    this.events.push({ type: 'end', code, reason: '' })
-    this.wake?.()
+    this.push({ type: 'end', code, reason: '' })
   }
 
   async next(signal?: AbortSignal): Promise<SessionEvent> {
@@ -336,15 +342,56 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
     expect(r.deletes).toHaveLength(1)
   })
 
-  it('takes the stream’s 4002 meanwhile for the session ended, ahead of a 404', async () => {
+  // The codes occamyd closes a session's streams with once the session
+  // ended for everyone (closeFor, internal/stream/serve.go), but 1011.
+  const sessionEnds = [CloseCode.ServerShutdown, CloseCode.SessionClosed, CloseCode.OwnerLeft, CloseCode.Idle, CloseCode.RemoteEnded, CloseCode.BackendFailed]
+
+  it.each(sessionEnds)('takes close %i before a resumed End for the session ended, and sends nothing', async (code) => {
+    // alice's sign-in expired, and the stream ends while she signs in.
+    const r = await render({ token: accessToken('alice', 'local', Date.now() - 1), owner: null, action: null }, notFound)
+    act(() => button('End session')?.click())
+    await settle()
+    expect(r.signIns).toHaveLength(1)
+    act(() => Welcomed.last?.end(code))
+    await settle()
+    expect(container.querySelector('#end-title')?.textContent).toBe(describeEnd(code, '', { shared: false, sessionId: 'mZ3k' }).title)
+    await r.rerender({ token: accessToken('alice'), action: end(1) })
+    expect(r.deletes).toEqual([])
+    expect(r.left).toBe(1)
+    expect(text()).not.toContain('Not ended for everyone')
+  })
+
+  it.each(sessionEnds)('takes close %i during a resumed End for the session ended, ahead of a 404', async (code) => {
     const r = await render({ token: accessToken('alice'), owner: null, action: null }, () => {
-      Welcomed.last?.end(CloseCode.SessionClosed)
+      Welcomed.last?.end(code)
       return new Promise((resolve) => setTimeout(() => resolve(notFound()), 10))
     })
     // A user who did not open the session ends it as occamyd decides.
     await r.rerender({ token: accessToken('bob'), action: end(1) })
     await settle(20)
+    expect(r.deletes).toHaveLength(1)
     expect(r.left).toBe(1)
     expect(text()).not.toContain('Not ended for everyone')
+  })
+
+  it.each(sessionEnds)('replaces what End said with close %i, once the session ended', async (code) => {
+    const r = await render({ token: accessToken('alice'), owner: null, action: null }, notFound)
+    await r.rerender({ token: accessToken('bob'), action: end(1) })
+    expect(text()).toContain('You are signed in as bob, but alice opened this session, so it was not ended for everyone.')
+    act(() => Welcomed.last?.end(code))
+    await settle()
+    expect(text()).not.toContain('Not ended for everyone')
+    expect(container.querySelector('#end-title')?.textContent).toBe(describeEnd(code, '', { shared: false, sessionId: 'mZ3k' }).title)
+  })
+
+  it.each([CloseCode.InternalError, CloseCode.Forbidden])('takes close %i for no end of the session, so a 404 may still be the session of another', async (code) => {
+    const r = await render({ token: accessToken('alice'), owner: null, action: null }, () => {
+      Welcomed.last?.end(code)
+      return new Promise((resolve) => setTimeout(() => resolve(notFound()), 10))
+    })
+    await r.rerender({ token: accessToken('bob'), action: end(1) })
+    await settle(20)
+    expect(r.left).toBe(0)
+    expect(text()).toContain('You are signed in as bob, but alice opened this session, so it was not ended for everyone.')
   })
 })

@@ -34,7 +34,7 @@ export interface EndOptions {
   now: number
   /** Closes the owner's own stream. */
   close: () => Promise<void>
-  /** Whether occamyd closed the stream with 4002, as it does once the session is ended for everyone. */
+  /** Whether occamyd closed the stream as it does once the session has ended for everyone, for whatever reason (endsSession). */
   endedForEveryone: () => boolean
 }
 
@@ -61,8 +61,8 @@ export function sessionOwner(role: Role | null, token: AccessToken | null, seed:
  * Otherwise, as for an End that waited for a sign-in, or another user
  * signed in since, occamyd decides: the session is ended with the stream
  * open, and the stream closed after. A 404 then means the session is not
- * this user's, unless occamyd closed the stream with 4002 meanwhile, as
- * after an earlier End whose answer was lost.
+ * this user's, unless occamyd closed the stream meanwhile for the
+ * session's end, as after an earlier End whose answer was lost.
  */
 export async function endSession(o: EndOptions): Promise<EndOutcome> {
   if (o.sessionId === '') {

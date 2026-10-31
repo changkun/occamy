@@ -8,11 +8,11 @@
 
 import { type ReactElement, Suspense, lazy, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
-import { CanvasSurface, CloseCode, Role, SessionClass, cursorStyle } from '../protocol'
+import { CanvasSurface, Role, SessionClass, cursorStyle } from '../protocol'
 import type { AccessToken, Api, Identity } from '../lib/api'
 import type { SessionAction } from '../lib/app'
 import { type SessionController as Controller, SessionController, type SessionState, overlayOf } from '../lib/controller'
-import type { Ending } from '../lib/ending'
+import { type Ending, endsSession } from '../lib/ending'
 import { type Size, cellGrid, deviceSize, fitSize, pixelRatio } from '../lib/layout'
 import { endSession, sessionOwner } from '../lib/owner'
 import { type Abilities, abilities, roleName } from '../lib/roles'
@@ -94,9 +94,9 @@ export function SessionView({ api, token, target, owner: seed, action, onLeave, 
   const [problem, setProblem] = useState<Problem | null>(null)
   // Whether End waits for occamyd.
   const [ending, setEnding] = useState(false)
-  // Whether occamyd ended the session for everyone, as it says by closing
-  // the stream with 4002: what an End said before is then out of date.
-  const endedForEveryone = state.code === CloseCode.SessionClosed
+  // Whether occamyd ended the session for everyone, as it says by how it
+  // closed the stream: what an End said before is then out of date.
+  const endedForEveryone = endsSession(state.code)
   const shown = endedForEveryone ? null : problem
   const handled = useRef(0)
   const name = target.kind === 'share' ? 'Shared session' : target.name
@@ -179,7 +179,7 @@ export function SessionView({ api, token, target, owner: seed, action, onLeave, 
       sessionId,
       now: Date.now(),
       close: () => controller.close(),
-      endedForEveryone: () => controller.getState().code === CloseCode.SessionClosed,
+      endedForEveryone: () => endsSession(controller.getState().code),
     }).finally(() => setEnding(false))
     switch (outcome.kind) {
       case 'ended':
