@@ -122,6 +122,15 @@ sends that user something. Until then the user still counts, for up to
 - `make e2e` runs the end-to-end tests against the demo stack
   (`make build run` first). They open a session to each demo server and
   check that the remote desktop arrives at the first attempt.
+  `TestVNCParity`, among them, runs the guacd bridge's parity matrix for
+  VNC: each feature on x11vnc and TigerVNC, through the native backend
+  and through guacd. The demo desktops report what reached the server
+  over the session itself: a probe puts each line typed at the top left
+  on the clipboard in hex, and another echoes clipboard text that starts
+  `owner: ` as `echo: `. The test logs the matrix as a Markdown table,
+  and writes it to the file `OCCAMY_PARITY_MATRIX` names. A cell
+  expected to fail is listed in `parityKnown` with the reason; any other
+  failure, or a listed cell that passes, fails the test.
 - `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test. Each of its N
   rounds opens two sessions to each demo server at once: one that waits
   for the desktop and one that sends garbage. All sessions to one server

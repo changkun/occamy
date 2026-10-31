@@ -179,16 +179,22 @@ Occamy reaches them by compose service name:
 
 | Protocol | Host | Username | Password |
 |----------|------|----------|----------|
-| VNC | `vnc:5900` | | `vncpassword` |
+| VNC (x11vnc) | `vnc:5900` | | `vncpassword` |
+| VNC (TigerVNC) | `tigervnc:5900` | | `vncpassword` |
 | SSH | `ssh:22` | `occamy` | `occamy` |
 | RDP | `rdp:3389` | `occamy` | `occamy` |
 
-Occamy connects to them through upstream guacd 1.6, which also runs in
-the stack. A second `occamyd`, `occamy-v1` on `localhost:5637`, serves
-API v1 from the v1 file [docker/occamy-v1.yaml](./docker/occamy-v1.yaml),
-with the user `demo` and the password `occamy`: the VNC server as the
-connection `vnc-native`, through `occamyd`'s own VNC client
-(`backend: native`), and as `vnc-guacd`, through guacd.
+The v0 service on `localhost:5636` connects to them through upstream
+guacd 1.6, which also runs in the stack. A second `occamyd`, `occamy-v1`
+on `localhost:5637`, serves API v1 from the v1 file
+[docker/occamy-v1.yaml](./docker/occamy-v1.yaml), with the user `demo`
+and the password `occamy`. It has each VNC server twice, through
+`occamyd`'s own VNC client (`backend: native`) and through guacd: for
+example `vnc-native` and `vnc-guacd` for x11vnc, and `tigervnc-native`
+and `tigervnc-guacd` for TigerVNC. The other VNC connections reach the
+servers' other screens, with no password, with VeNCrypt, and with German
+and French keyboard layouts, for the parity matrix in
+[tests/](./tests).
 
 Here is a working video demo:
 
@@ -205,9 +211,11 @@ go test ./...
 [tests/](./tests) holds end-to-end and pressure tests that open real
 sessions to the demo servers. They are skipped unless
 `OCCAMY_E2E_ENDPOINT` is set, and those of `occamy-v1`, which stream
-both VNC connections with the Go client of protocol v1, unless
+the VNC connections with the Go client of protocol v1, unless
 `OCCAMY_E2E_V1_ENDPOINT` is; `make e2e` sets them to `localhost:5636`
-and `localhost:5637`:
+and `localhost:5637`. The VNC parity matrix (`TestVNCParity`) runs each
+feature on x11vnc and TigerVNC through both backends, and logs the
+matrix as a table:
 
 ```
 make build

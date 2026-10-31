@@ -249,12 +249,63 @@ notes: the opt-in period), after this spec was complete.
   `TestE2E` and `TestE2EV1`, passed against the stack under its own
   project name, and `TestE2EV1` passed 7 of 7 runs.
 
+## Addendum: TigerVNC and the VNC parity matrix
+
+Added for the guacd bridge's parity gate, step 2
+([guacd-bridge](008-native-architecture/guacd-bridge.md), Implementation
+notes: VNC's parity matrix), after this spec was complete.
+
+- `docker/demo/tigervnc` replaces the two TigerVNC test images,
+  `internal/backend/vnc/testdata/servers` and `docker/test/tigervnc`, and
+  builds from the repository's root, since it carries the bench scene.
+  `start.sh demo`, the stack's service `tigervnc`, serves five Xvnc
+  screens of 1024×768: `tigervnc:5900` with VNC Authentication
+  (`vncpassword`), `:5901` with VeNCrypt's X509Vnc and X509Plain only
+  (user `occamy`, password `plainpassword`), `:5902` with None, and
+  `:5903` and `:5904` with VNC Authentication and the de and fr keyboard
+  layouts. It makes a CA and a server certificate for `localhost`,
+  `127.0.0.1` and `tigervnc` at each start, keeps them in
+  `/etc/vnc-test`, and copies the CA to the volume `tigervnc-ca`, which
+  `occamy-v1` mounts read-only for the `tls` of its VeNCrypt connection.
+  `start.sh scene` serves the bench scene on one screen for
+  `TestEncodings`. `TestTigerVNC` builds the image and uses port 5901.
+- `docker/demo/vnc` serves three Xvfb screens through x11vnc: `vnc:5900`
+  with VNC Authentication and `:5901` without, both on the us screen,
+  and `:5902` and `:5903` with VNC Authentication and the de and fr
+  layouts.
+- `docker/demo/vnc/desktop.sh`, the desktop of both images, runs an
+  xterm, a typing probe and a clipboard probe, and reports what reaches
+  the server over the session's clipboard: a line typed into the probe
+  at the top left comes back as `typed: ` and its UTF-8 bytes in hex,
+  clipboard text `owner: …` as `echo: …`, and `hex: …` as `hexed: ` and
+  its bytes in hex. It polls the clipboard every 0.3 s for a minute after
+  a change and every 2 s after that. The layouts are fixed per screen:
+  x11vnc adds a keysym missing from the layout to a spare key and keeps
+  pressing that key after `setxkbmap` has dropped it, so switching at run
+  time typed nothing.
+- `docker/occamy-v1.yaml` has every server, security type and layout
+  twice, `-native` and `-guacd`, each naming its backend:
+  `vnc`, `vnc-none`, `vnc-de`, `vnc-fr`, `tigervnc`, `tigervnc-prompt`,
+  `tigervnc-plain`, `tigervnc-none`, `tigervnc-de` and `tigervnc-fr`.
+  `occamy-v1` waits for `tigervnc` too, whose healthcheck waits for its
+  five sockets and the CA.
+- `tests/parity_test.go` (`TestVNCParity`) runs the matrix through
+  `occamy-v1` with the Go client; `make e2e` runs it with the other
+  end-to-end tests.
+- The healthchecks of `vnc` and `tigervnc` read `/proc/net/tcp` instead
+  of connecting, since both servers log every connection that does not
+  speak RFB. The bench desktop takes `GEOMETRY`, as the removed image's
+  x11vnc mode did, so that `TestEncodings` can record x11vnc at 64×48.
+
 ## Appendix: revival verification harness
 
 The throwaway harness used to verify [001](001-status-quo.md), kept here as a
 starting point for the components above. Run each server on a shared network
 with `occamy:latest`, then `go run . 127.0.0.1:5636 vnc <vnc-host>:5900 "" vncpassword`
-or `go run . 127.0.0.1:5636 ssh <ssh-host>:22 root root`.
+or `go run . 127.0.0.1:5636 ssh <ssh-host>:22 root root`. The routes it
+used have since moved to `/api/v0/`, and a v0 file serves the login only
+with `client: true` ([configuration](../docs/configuration.md)); the
+client below uses the new paths.
 
 VNC server:
 
@@ -295,7 +346,7 @@ import (
 func main() {
 	base, proto, host, user, pass := os.Args[1], os.Args[2], os.Args[3], os.Args[4], os.Args[5]
 	body, _ := json.Marshal(map[string]string{"protocol": proto, "host": host, "username": user, "password": pass})
-	resp, err := http.Post("http://"+base+"/api/v1/login", "application/json", bytes.NewReader(body))
+	resp, err := http.Post("http://"+base+"/api/v0/login", "application/json", bytes.NewReader(body))
 	if err != nil {
 		panic(err)
 	}
@@ -304,7 +355,7 @@ func main() {
 	resp.Body.Close()
 
 	d := websocket.Dialer{Subprotocols: []string{"guacamole"}}
-	ws, _, err := d.Dial("ws://"+base+"/api/v1/connect?token="+out.Token, nil)
+	ws, _, err := d.Dial("ws://"+base+"/api/v0/connect?token="+out.Token, nil)
 	if err != nil {
 		panic(err)
 	}

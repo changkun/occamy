@@ -106,8 +106,9 @@ as a fallback.
 |----------|----------------|----------------|
 | SSH | [native-ssh-backend](native-ssh-backend.md) | v1.0.0-beta.1 |
 | VNC | [native-vnc-backend](native-vnc-backend.md) | v1.0.0-beta.2 |
-| RDP | per [rdp-strategy](rdp-strategy.md) | v1.x |
-| telnet, Kubernetes | none planned | bridge only, opt-in |
+| RDP | per [rdp-strategy](rdp-strategy.md) | v1.0 |
+| telnet | none | dropped with guacd |
+| Kubernetes | none planned | bridge only, opt-in |
 
 When RDP switches, guacd leaves the default deployment entirely. The
 bridge then either stays as an opt-in backend for the remaining guacd
@@ -560,16 +561,129 @@ do not).
     streams both with the Go client (`tests/v1_test.go`); occamyd's own
     tests drive native VNC through the routes against
     `internal/backend/vnc/vnctest` (`server/vnc_e2e_test.go`).
-- **What the matrix covers so far.** Against x11vnc in the demo stack:
-  VNC Authentication with a stored password, the desktop arriving, and
-  pointer and key input acknowledged, on both backends. Against the
-  fake server: stored and prompted credentials, a refused password,
-  the screen, key, pointer and text input, resize by the hello and by
-  the client, clipboard both ways, the cursor, visibility, the end
-  reasons, the `tls` policy and an ad-hoc target. Not yet: sharing
-  roles, reconnect, AltGr and dead keys, and the performance and soak
-  steps.
-- **Follow-ups.** The rest of step 2's matrix on real servers
-  (TigerVNC's ExtendedDesktopSize and clipboard, sharing roles,
-  reconnect, keyboard layouts); steps 3 and 4; then VNC's switch of
-  default, after which `backend: guacd` stays for one minor release.
+- **What the matrix covers.** Against x11vnc and TigerVNC in the demo
+  stack, on both backends: step 2's matrix (Implementation notes: VNC's
+  parity matrix). Against the fake server: stored and prompted
+  credentials, a refused password, the screen, key, pointer and text
+  input, resize by the hello and by the client, clipboard both ways,
+  the cursor, visibility, the end reasons, the `tls` policy and an
+  ad-hoc target.
+- **Follow-ups.** ~~The rest of step 2's matrix on real servers~~
+  (done, below); steps 3 and 4; then VNC's switch of default, after
+  which `backend: guacd` stays for one minor release.
+
+## Implementation notes: VNC's parity matrix
+
+- **Status.** Step 2 of the parity gate passes for VNC: on x11vnc and
+  TigerVNC, the native backend passes every cell that guacd passes, and
+  three that guacd fails. No native failure was found, so nothing was
+  fixed. Steps 3 (performance) and 4 (soak) remain.
+- **How it runs.** `tests/parity_test.go` (`TestVNCParity`) drives
+  `occamy-v1` in the [006](../006-demo-stack-refresh.md) stack with the
+  Go client core, over API v1 and protocol v1, through a connection for
+  each server, security type and keyboard layout, once with
+  `backend: native` and once with `backend: guacd` (006, Addendum:
+  TigerVNC and the VNC parity matrix). `make e2e` runs it, so CI's
+  `e2e` job does. The servers' desktop reports what reached the server
+  over the session itself: a line typed into a probe at the top left
+  comes back on the clipboard as its UTF-8 bytes in hex, and clipboard
+  text `owner: …` comes back as `echo: …`, so each check sees the
+  server's side, not just the backend's. Before it types, a check
+  waits for the echo of a fresh nonce, so that nothing sent before is
+  still in flight. A cell expected to fail is listed in `parityKnown`
+  with the reason; any other failure fails the test, and so does a
+  listed cell that passes, so the table below is what the suite finds.
+- **The matrix.** x11vnc 0.9.17 (libvncserver 0.9.15) and TigerVNC
+  1.15's Xvnc, Debian trixie; guacd 1.6. On the shared host, at a load
+  average of 12 to 18, the whole matrix took 192 s.
+
+  | Feature | x11vnc native | x11vnc guacd | TigerVNC native | TigerVNC guacd |
+  |---|---|---|---|---|
+  | auth: None | pass | pass | pass | pass |
+  | auth: VNC Authentication, stored password | pass | pass | pass | pass |
+  | auth: VNC Authentication, asked of the owner | — | — | pass | pass |
+  | auth: VNC Authentication, wrong answer refused | — | — | pass | pass |
+  | auth: VeNCrypt X509Plain | — | — | pass | fail: no X509 credentials |
+  | screen and input acknowledged | pass | pass | pass | pass |
+  | resize: by the owner's hello | — | — | pass | pass |
+  | resize: by a request | — | — | pass | pass |
+  | resize: ignored without ExtendedDesktopSize | pass | pass | — | — |
+  | clipboard to the server, Latin-1 | pass | pass | pass | pass |
+  | clipboard to the server, beyond Latin-1 | fail: x11vnc | fail: x11vnc | pass | fail: guacd |
+  | clipboard both ways, Latin-1 | pass | pass | pass | pass |
+  | clipboard both ways, beyond Latin-1 | fail: x11vnc | fail: x11vnc | pass | fail: guacd |
+  | cursor | pass | pass | pass | pass |
+  | keyboard: us | pass | pass | pass | pass |
+  | keyboard: de, keysyms and codes | pass | pass | pass | pass |
+  | keyboard: de, keysyms only | pass | pass | pass | pass |
+  | keyboard: fr, keysyms and codes | pass | pass | pass | pass |
+  | keyboard: fr, keysyms only | pass | pass | pass | pass |
+  | keyboard: de client on a us server | pass | pass | pass | pass |
+  | text input | pass | pass | pass | pass |
+  | sharing: a viewer's input | pass | pass | pass | pass |
+  | sharing: a read-only viewer's input dropped | pass | pass | pass | pass |
+  | reconnect: the owner rejoins | pass | pass | pass | pass |
+
+  A dash is a cell not run: x11vnc offers no VeNCrypt and no
+  ExtendedDesktopSize, and the password asked of the owner, which is
+  occamyd's and the backends' rather than the server's, runs against
+  TigerVNC only. TigerVNC has ExtendedDesktopSize, so it has no row for
+  its absence.
+- **What the rows check.**
+  - auth: the session reaches the screen with the session's state
+    naming the backend, and a typed line arrives. A wrong answer to the
+    prompt ends the session as `backend-failed`.
+  - screen: 1024×768, not of one colour, and a frame acknowledging a
+    key.
+  - resize: TigerVNC takes 900×700 from the owner's `hello` and
+    800×600 and back from a request; x11vnc keeps 1024×768.
+  - clipboard: "naïve café, ½ °C" and "€ ✓ 日本" reach the server's
+    clipboard byte for byte, and "naïve café\nzweite Zeile" and
+    "€ ✓ 日本" come back to the client.
+  - cursor: the root window's cursor and the xterm's differ, and each
+    change arrives with its hot spot inside the image.
+  - keyboard: keys as a browser on that layout reports them (the keysym
+    produced, the key's code, AltGr and Shift held where the layout
+    needs them, and a dead key as a code with no keysym followed by the
+    composed character) type `Hello, World! @~123`, `zy@€{üöäß"ôé^` and
+    `aqzwéèçà@€#êë` on the screen with that layout. "keysyms only"
+    drops the codes, as a client that knows no physical keys sends them.
+  - text input: "日本 ✓ naïve" sent as `Text`.
+  - sharing: a viewer's typed line arrives and the session lists both
+    roles; a read-only viewer is refused by the client, and its pointer,
+    key and clipboard messages, written past the client, reach nothing
+    while the owner's line comes through alone.
+  - reconnect: the owner closes the stream and rejoins the session by
+    its id within the grace period, at the same size, and types.
+- **Findings.**
+  - Clipboard beyond Latin-1: RFB's cut text is Latin-1. x11vnc has no
+    Extended Clipboard, so "€ ✓ 日本" arrives as "? ? ??" through either
+    backend, and comes back so. guacd 1.6 does not ask TigerVNC for
+    the Extended Clipboard either, so only the native backend carries
+    UTF-8 there.
+  - VeNCrypt X509Plain through guacd: libvncclient asks for X509
+    credentials, and guacd 1.6 gives only a username and password; it
+    logs "Unsupported credential type requested" and ends the session
+    (status 519). guacd would also check no certificate, which is why a
+    vnc connection's `tls` needs `backend: native`.
+  - Keyboard: x11vnc offers no QEMU key events, so both backends send it
+    the same KeyEvents, keysyms only; a dead key, which has no keysym,
+    is dropped by both, and the composed character that follows arrives
+    as its keysym. x11vnc adds a keysym missing from the layout to a
+    spare key, and after `setxkbmap` drops that key still presses it,
+    typing nothing; the screens therefore keep their layouts, one per
+    port. The native backend sends TigerVNC the codes as QEMU key
+    events; without `RawKeyboard`, TigerVNC maps the keysyms to its own
+    layout, so a German client types German text on its us screen too.
+  - A freshly started x11vnc did not answer the first cut text on each
+    port, through either backend; the check's barrier retries four
+    times, five seconds each, so the first check on each x11vnc port
+    takes about 15 s.
+  - Read-only input is dropped by the session, before any backend, so
+    the row cannot differ between backends; it is in the matrix because
+    the gate names sharing roles.
+- **Not covered.** Pointer buttons and the wheel (pointer moves are
+  covered, through the cursor and the typing probe's focus); X509Vnc on
+  its own and the `tls` policy against a real server, which
+  `TestTigerVNC` covers; Apple Remote Desktop, checked by hand against
+  macOS; QEMU's VNC server.
