@@ -202,6 +202,27 @@ func awaitTerm(t *testing.T, sink *backendtest.Sink, want string) {
 	}
 }
 
+// firstInput sends ev once Run, which start runs in a goroutine, has
+// begun: Input before that is ErrNotRunning. Input while Run connects
+// is queued until the stream is open.
+func firstInput(t *testing.T, b *kubernetes.Backend, ev backend.InputEvent) {
+	t.Helper()
+	deadline := time.Now().Add(time.Minute)
+	for {
+		err := b.Input(ev)
+		if !errors.Is(err, kubernetes.ErrNotRunning) {
+			if err != nil {
+				t.Fatal(err)
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Run did not start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestIntegration(t *testing.T) {
 	c := startCluster(t)
 	token := c.token(t, "occamy")
@@ -225,7 +246,7 @@ func TestIntegration(t *testing.T) {
 		b := newBackend(t, c.config(token))
 		sink := &backendtest.Sink{}
 		r := start(t, b, sink)
-		input(t, b, backend.TermInput{Data: []byte("stty size\r")})
+		firstInput(t, b, backend.TermInput{Data: []byte("stty size\r")})
 		awaitTerm(t, sink, "24 80")
 		input(t, b, backend.Resize{Width: 100, Height: 30})
 		input(t, b, backend.TermInput{Data: []byte("stty size\r")})
@@ -295,7 +316,7 @@ func TestIntegration(t *testing.T) {
 		b := newBackend(t, c.config(token))
 		sink := &backendtest.Sink{}
 		r := start(t, b, sink)
-		input(t, b, backend.TermInput{Data: []byte("echo ready\r")})
+		firstInput(t, b, backend.TermInput{Data: []byte("echo ready\r")})
 		awaitTerm(t, sink, "ready")
 		r.cancel()
 		if err := r.wait(t); !errors.Is(err, context.Canceled) {
