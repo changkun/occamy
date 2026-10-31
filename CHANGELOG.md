@@ -379,6 +379,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   coder/websocket, so gin, gin-jwt and gorilla/websocket and their
   indirect dependencies are gone from `go.mod`. `auth.jwt_alg` must be
   HS256, HS384 or HS512, and `auth.jwt_secret` must not be empty.
+- Performance: `internal/rdp` takes the names it counts bitmaps under
+  from a table of constants instead of formatting them, so a bitmap no
+  longer allocates. A PDU of 64 bitmaps of 64×64 now makes 1 allocation
+  of 120 bytes instead of 129 allocations of 804 bytes. Its time is
+  unchanged within noise, because decoding dominates it.
 
 ### Fixed
 
