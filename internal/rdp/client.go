@@ -9,9 +9,10 @@
 // of a native RDP backend (specs/008-native-architecture/rdp-strategy.md).
 //
 // The client asks for bitmap updates only: it advertises no drawing
-// orders, caches, bulk compression, bitmap codecs or virtual channels.
-// Standard RDP security, the licensing exchange, Kerberos and the GFX
-// pipeline are not implemented.
+// orders, caches, bulk compression or bitmap codecs. Of the virtual
+// channels it speaks the clipboard's, CLIPRDR, for text, when Config
+// asks for it. Standard RDP security, the licensing exchange, Kerberos
+// and the GFX pipeline are not implemented.
 package rdp
 
 import (
@@ -66,6 +67,15 @@ type Config struct {
 	// strips NLA from the offer is noticed by the protocols the server
 	// repeats under TLS.
 	TLS TLS
+	// Clipboard selects the ways clipboard text goes through the
+	// clipboard channel (cliprdr.go). Without ClipboardFromServer or
+	// ClipboardToServer, the default, the client does not ask for the
+	// channel.
+	Clipboard ClipboardMode
+	// Resize asks for the dynamic virtual channels (DRDYNVC) and accepts
+	// the server's Display Control channel, through which RequestSize
+	// asks the server to resize the desktop (dynvc.go).
+	Resize bool
 	// Logger receives warnings; nil means slog.Default().
 	Logger *slog.Logger
 
@@ -87,6 +97,8 @@ type Output interface {
 	Cursor(img *image.RGBA, hot image.Point)
 	// CursorMove reports that the server moved the pointer.
 	CursorMove(p image.Point)
+	// Clipboard reports the server's clipboard: text/plain in UTF-8.
+	Clipboard(mime string, data []byte)
 }
 
 // Stats counts what a client received, by kind.
@@ -121,6 +133,18 @@ type Client struct {
 	shareID    uint32
 	caps       serverCaps
 
+	// channels are the static virtual channels the client asked for;
+	// clipCh is the clipboard's among them and dynCh DRDYNVC's, or nil.
+	channels []*vchannel
+	clipCh   *vchannel
+	dynCh    *vchannel
+	chio     channelIO
+	clip     cliprdr // under chio.mu
+	dvc      dynvc   // under chio.mu
+	disp     display // under chio.mu
+	// layoutEvery and layoutRetry pace monitor layouts (dynvc.go).
+	layoutEvery, layoutRetry time.Duration
+
 	fastPathInput atomic.Bool
 
 	mu        sync.Mutex // guards the fields below
@@ -128,6 +152,13 @@ type Client struct {
 	height    int
 	stats     Stats
 	finalized bool
+
+	// smu is held across reading or setting suppressed and sending the
+	// Suppress Output PDU it says, so that the PDUs go in the order of
+	// the states. suppressed is the last Suppress Output's: the client
+	// repeats it after a reactivation.
+	smu        sync.Mutex
+	suppressed bool
 
 	// Owned by Connect, then Run.
 	ctx        context.Context // ends a wait; Background if nil
@@ -143,9 +174,11 @@ type Client struct {
 	errInfo    ErrorInfo
 
 	// The tests replace these: now, if set, is the time, and sleep, if
-	// set, waits.
-	now   func() time.Time
-	sleep func(time.Duration) error
+	// set, waits; resuppress, if set, runs under smu between
+	// suppressAgain's read of the state and its send.
+	now        func() time.Time
+	sleep      func(time.Duration) error
+	resuppress func()
 }
 
 // Limits on what the server makes the client do.
@@ -254,6 +287,19 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 		height: cfg.Height,
 		stats:  Stats{Bitmaps: map[string]int{}, Ignored: map[string]int{}},
 		ctx:    ctx,
+		chio:   channelIO{kick: make(chan struct{}, 1)},
+
+		layoutEvery: layoutEvery,
+		layoutRetry: layoutRetry,
+	}
+	c.channels = c.newChannels()
+	for _, vc := range c.channels {
+		switch vc.name {
+		case "cliprdr":
+			c.clipCh = vc
+		case "drdynvc":
+			c.dynCh = vc
+		}
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Unix(1, 0)) })
 	err = c.connect(ctx)
@@ -339,6 +385,9 @@ func (c *Client) connect(ctx context.Context) error {
 		return fmt.Errorf("rdp: the server was offered security protocols %#x, not the %#x the client sent", sd.requestedProtocols, c.cfg.Protocols)
 	}
 	c.ioChannel, c.msgChannel = sd.ioChannel, sd.msgChannel
+	if err := c.assignChannels(sd.channels); err != nil {
+		return err
+	}
 
 	// Channel connection, phase 3.
 	if err := c.t.write(tpkt(erectDomainRequest())); err != nil {
@@ -357,7 +406,11 @@ func (c *Client) connect(ctx context.Context) error {
 	if c.msgChannel != 0 {
 		join = append(join, c.msgChannel)
 	}
-	join = append(join, sd.channels...)
+	for _, vc := range c.channels {
+		if vc.id != 0 {
+			join = append(join, vc.id)
+		}
+	}
 	for _, ch := range join {
 		if err := c.t.write(tpkt(channelJoinRequest(c.userID, ch))); err != nil {
 			return err
@@ -443,15 +496,29 @@ func (c *Client) readChannel() (uint16, []byte, error) {
 }
 
 // readIOData reads the data of the next Send Data Indication on the I/O
-// channel, skipping the other channels'.
+// channel. It applies what comes on the static virtual channels before
+// it, and skips the other channels'.
 func (c *Client) readIOData() ([]byte, error) {
 	for {
 		ch, data, err := c.readChannel()
 		if err != nil || ch == c.ioChannel {
 			return data, err
 		}
-		c.ignoreChannel(ch)
+		if err := c.otherChannel(nil, ch, data); err != nil {
+			return nil, err
+		}
 	}
+}
+
+// otherChannel applies the data of a Send Data Indication on a channel
+// other than the I/O channel: a chunk on a static virtual channel, or
+// something the client ignores.
+func (c *Client) otherChannel(out Output, ch uint16, data []byte) error {
+	if vc := c.channelByID(ch); vc != nil {
+		return c.channelChunk(out, vc, data)
+	}
+	c.ignoreChannel(ch)
+	return nil
 }
 
 // ignoreChannel counts a PDU on a channel other than the I/O channel: the
@@ -509,8 +576,34 @@ func (c *Client) Finalized() bool {
 
 // SuppressOutput tells the server to stop or resume sending screen
 // updates, [MS-RDPBCGR] 2.2.11.3. On resuming, the server redraws the
-// desktop.
+// desktop. The client tells a server that reactivates the session, as
+// on a resize, to stop again.
 func (c *Client) SuppressOutput(suppress bool) error {
+	c.smu.Lock()
+	defer c.smu.Unlock()
+	c.suppressed = suppress
+	return c.sendSuppressOutput(suppress)
+}
+
+// suppressAgain tells a server that reactivated the session to suppress
+// its output again, if the client last told it to: the server's output
+// state after a reactivation is its own. It reads the state as it sends,
+// under the lock SuppressOutput holds as it sends, so that the last
+// Suppress Output the server gets is the client's last.
+func (c *Client) suppressAgain() error {
+	c.smu.Lock()
+	defer c.smu.Unlock()
+	if !c.suppressed {
+		return nil
+	}
+	if c.resuppress != nil {
+		c.resuppress()
+	}
+	return c.sendSuppressOutput(true)
+}
+
+// sendSuppressOutput sends a Suppress Output PDU. smu must be held.
+func (c *Client) sendSuppressOutput(suppress bool) error {
 	body := func() []byte {
 		c.mu.Lock()
 		defer c.mu.Unlock()
@@ -532,11 +625,29 @@ func (c *Client) Close() error { return c.conn.Close() }
 // nil when the server ends the session normally, ctx.Err() when ctx is
 // done first, and another error otherwise. It closes the connection
 // before it returns.
+//
+// With virtual channels, Run writes what they answer the server from a
+// goroutine of its own, which has ended when Run returns.
 func (c *Client) Run(ctx context.Context, out Output) error {
 	defer c.conn.Close()
 	stop := context.AfterFunc(ctx, func() { c.conn.Close() })
 	defer stop()
 	c.ctx = ctx
+	if len(c.channels) > 0 {
+		wctx, cancel := context.WithCancel(ctx)
+		var wg sync.WaitGroup
+		wg.Go(func() { c.channelWriter(wctx) })
+		defer func() {
+			cancel()
+			c.conn.Close() // ends a write that waits on the server
+			wg.Wait()
+			c.chio.mu.Lock()
+			if c.disp.timer != nil {
+				c.disp.timer.Stop() // no layout is due any more
+			}
+			c.chio.mu.Unlock()
+		}()
+	}
 	w, h := c.Size()
 	out.Resize(w, h)
 	c.lastResize = c.clock()
@@ -569,7 +680,7 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 				if ch == c.ioChannel {
 					_, err = c.handleShareControl(out, data)
 				} else {
-					c.ignoreChannel(ch)
+					err = c.otherChannel(out, ch, data)
 				}
 			}
 		}
@@ -658,6 +769,12 @@ func (c *Client) activate(out Output, body []byte) error {
 	}
 	if err := c.finalize(); err != nil {
 		return err
+	}
+	if err := c.suppressAgain(); err != nil {
+		return err
+	}
+	if c.dynCh != nil {
+		c.due() // a size asked for may now be due, or no longer
 	}
 	if out != nil && resized {
 		if err := c.waitResize(); err != nil {

@@ -49,7 +49,7 @@ The target design of Occamy as a whole: core, backends, protocol.
 
 | Spec | Status | Deliverable |
 |------|--------|-------------|
-| [008-native-architecture.md](008-native-architecture.md) | In progress: 1 of 11 sub-designs complete, 10 more validated; building beta.1 (merged: backend interface, protocol framing and messages, pacer, framebuffer, auth tokens, session core, viewer writer, guacd bridge, native SSH, terminal state, config v1, native VNC phases 1 to 4 (phase 4's check against a Mac pending) and its opt-in (`backend: native`), v0 routes, codec measurement, HTTP server, Go client core, codecs, OIDC, API sessions and streams, native RDP phase 1, scroll detection); RDP spike steps 1 and 3 done against xrdp and reviewed, step 2 waits for a Windows host | Occamy v1: beta scope, path to pure Go, 11 sub-designs including the benchmark that sets the 10x and 50 ms targets (#3, #18, #21) |
+| [008-native-architecture.md](008-native-architecture.md) | In progress: 1 of 11 sub-designs complete, 10 more validated; building beta.1 (merged: backend interface, protocol framing and messages, pacer, framebuffer, auth tokens, session core, viewer writer, guacd bridge, native SSH, terminal state, config v1, native VNC phases 1 to 4 (phase 4's check against a Mac pending) and its opt-in (`backend: native`), v0 routes, codec measurement, HTTP server, Go client core, codecs, OIDC, API sessions and streams, native RDP phases 1 and 2 (static channels, clipboard, CredSSP acceptor, DRDYNVC and Display Control; the Heartbeat PDU and auto-detect deferred to phase 4), scroll detection); RDP spike steps 1 and 3 done against xrdp and reviewed, step 2 waits for a Windows host | Occamy v1: beta scope, path to pure Go, 11 sub-designs including the benchmark that sets the 10x and 50 ms targets (#3, #18, #21) |
 
 ### maintenance
 
@@ -105,5 +105,6 @@ client and 010 on
 Path from [008](008-native-architecture.md): v0.5.0, released, runs
 everything through guacd with a cgo-free `occamyd` (005) →
 `v1.0.0-beta.1` with API and protocol v1, the guacd bridge and native SSH
-→ beta.2 with native VNC → rc.1 freezes the API and protocol → v1.0 with
-guacd optional (RDP only) → native RDP in v1.x.
+→ beta.2 with native VNC → rc.1 freezes the API and protocol, with
+native RDP → v1.0 with no guacd, no Guacamole protocol and no v0 routes.
+Telnet has no native backend and is dropped with guacd.

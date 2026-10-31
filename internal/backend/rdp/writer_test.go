@@ -7,6 +7,7 @@ package rdp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net"
@@ -37,11 +38,14 @@ type fakeClient struct {
 	release chan struct{}
 	once    sync.Once
 
-	mu       sync.Mutex
-	writes   [][]rdp.InputEvent
-	caps     []int
-	suppress []bool
-	events   int
+	mu         sync.Mutex
+	writes     [][]rdp.InputEvent
+	caps       []int
+	suppress   []bool
+	events     int
+	clipboards []string
+	// order records writes of input and of the clipboard in turn.
+	order []string
 }
 
 func (f *fakeClient) SendInput(evs ...rdp.InputEvent) error {
@@ -56,6 +60,7 @@ func (f *fakeClient) SendInput(evs ...rdp.InputEvent) error {
 	f.writes = append(f.writes, slices.Clone(evs))
 	f.caps = append(f.caps, cap(evs))
 	f.events += len(evs)
+	f.order = append(f.order, fmt.Sprintf("%d events", len(evs)))
 	return f.fail
 }
 
@@ -67,6 +72,23 @@ func (f *fakeClient) SuppressOutput(suppress bool) error {
 	defer f.mu.Unlock()
 	f.suppress = append(f.suppress, suppress)
 	return f.fail
+}
+
+func (f *fakeClient) SetClipboard(text []byte) error {
+	if f.release != nil {
+		<-f.release
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.clipboards = append(f.clipboards, string(text))
+	f.order = append(f.order, "clipboard "+string(text))
+	return f.fail
+}
+
+func (f *fakeClient) RequestSize(width, height int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.order = append(f.order, fmt.Sprintf("size %dx%d", width, height))
 }
 
 func (f *fakeClient) UnicodeInput() bool { return f.unicode }
@@ -127,7 +149,7 @@ func TestWriterBatches(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := r.send(ev, n); err != nil {
+		if err := r.send(queued{ev: ev, n: n}); err != nil {
 			t.Fatal(err)
 		}
 		if ev, ok := ev.(backend.Text); ok {
@@ -183,7 +205,7 @@ func TestWriterFails(t *testing.T) {
 		r := newRun()
 		c := &fakeClient{fail: tc.fail}
 		if tc.visible {
-			r.send(backend.Key{Down: true, Code: 0x04}, keyEvents)
+			r.send(queued{ev: backend.Key{Down: true, Code: 0x04}, n: keyEvents})
 		}
 		w := startWriter(r, c, tc.visible)
 		err := w.wait(t)
@@ -196,7 +218,7 @@ func TestWriterFails(t *testing.T) {
 	// is not the writer's failure, whatever the error.
 	r := newRun()
 	c := &fakeClient{fail: broken, called: make(chan struct{}), release: make(chan struct{})}
-	r.send(backend.Key{Down: true, Code: 0x04}, keyEvents)
+	r.send(queued{ev: backend.Key{Down: true, Code: 0x04}, n: keyEvents})
 	w := startWriter(r, c, true)
 	<-c.called
 	close(w.done)
@@ -206,18 +228,50 @@ func TestWriterFails(t *testing.T) {
 	}
 }
 
+// Clipboard text is set in its place among the inputs: after the input
+// queued before it and before the input after it, which a paste needs.
+// Its bytes come back to the budget as the writer takes it.
+func TestWriterClipboardOrder(t *testing.T) {
+	checkGoroutines(t)
+	r := newRun()
+	key := backend.Key{Down: true, Code: 0x04}
+	for _, q := range []queued{
+		{ev: key, n: keyEvents},
+		{ev: backend.Clipboard{Data: []byte("one")}, n: 1, bytes: 3},
+		{ev: backend.Clipboard{Data: []byte("two")}, n: 1, bytes: 3},
+		{ev: key, n: keyEvents},
+		{ev: key, n: keyEvents},
+	} {
+		if err := r.send(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	c := &fakeClient{}
+	w := startWriter(r, c, true)
+	waitFor(t, "every input written", func() bool { return c.written() == 3 })
+	if err := w.stop(t); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"1 events", "clipboard one", "clipboard two", "2 events"}; !slices.Equal(c.order, want) {
+		t.Errorf("writes %q, want %q", c.order, want)
+	}
+	if r.queued.Load() != 0 || r.bytes.Load() != 0 {
+		t.Errorf("%d events and %d bytes left in the budget", r.queued.Load(), r.bytes.Load())
+	}
+}
+
 // Input that does not fit the queue leaves the budget as it was.
 func TestSendFull(t *testing.T) {
 	r := newRun()
 	for i := range inputQueue {
-		if err := r.send(backend.Key{}, keyEvents); err != nil {
+		if err := r.send(queued{ev: backend.Key{}, n: keyEvents}); err != nil {
 			t.Fatalf("input %d: %v", i, err)
 		}
 	}
-	if err := r.send(backend.Key{}, keyEvents); !errors.Is(err, ErrInputFull) || r.queued.Load() != inputQueue*keyEvents {
+	if err := r.send(queued{ev: backend.Key{}, n: keyEvents}); !errors.Is(err, ErrInputFull) || r.queued.Load() != inputQueue*keyEvents {
 		t.Errorf("a full queue: %v, %d events in the budget, want ErrInputFull and %d", err, r.queued.Load(), inputQueue*keyEvents)
 	}
-	if err := r.send(backend.Text{}, inputEvents); !errors.Is(err, ErrInputFull) || r.queued.Load() != inputQueue*keyEvents {
+	if err := r.send(queued{ev: backend.Text{}, n: inputEvents}); !errors.Is(err, ErrInputFull) || r.queued.Load() != inputQueue*keyEvents {
 		t.Errorf("over the budget: %v, %d events in the budget", err, r.queued.Load())
 	}
 }
