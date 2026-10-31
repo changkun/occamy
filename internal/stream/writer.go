@@ -437,9 +437,8 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 			w.sent[t] = w.runVersion[k]
 			w.changed[t] = at
 			if input {
-				// An input's effect is not motion.
+				// An input's effect is not motion (warm).
 				w.effects[t] = w.runVersion[k]
-				w.heat[t] = 0
 			}
 		}
 		if send {

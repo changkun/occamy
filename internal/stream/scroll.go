@@ -603,7 +603,6 @@ func (w *writer) scroll(ctx context.Context, id uint32, order []int, input bool)
 			w.changed[t] = at
 			if input {
 				w.effects[t] = cp.vers[k]
-				w.heat[t] = 0
 			}
 		}
 		copies++

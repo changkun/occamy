@@ -64,6 +64,9 @@ func refWorst(a, b []byte, w, h, bw int) float64 {
 	return worst
 }
 
+// near reports whether two scores agree to 1e-9; NaN agrees with nothing.
+func near(a, b float64) bool { return math.Abs(a-b) <= 1e-9 }
+
 // The scorer matches the measurement's SSIM, which builds summed-area
 // tables, on any pixels and sizes, whole or block by block, and scores
 // what it cannot window as identical.
@@ -86,18 +89,18 @@ func TestSSIMScore(t *testing.T) {
 			ia := &image.RGBA{Pix: a, Stride: 4 * sz.X, Rect: image.Rect(0, 0, sz.X, sz.Y)}
 			ib := &image.RGBA{Pix: b, Stride: 4 * sz.X, Rect: image.Rect(0, 0, sz.X, sz.Y)}
 			want := refSSIM(ia, ib)
-			if got := s.score(a, b, sz.X, sz.Y, sz.X); math.Abs(got-want) > 1e-9 {
+			if got := s.score(a, b, sz.X, sz.Y, sz.X); !near(got, want) {
 				t.Errorf("%v, image %d: %.12f, want %.12f", sz, k, got, want)
 			}
-			if got := SSIM(a, b, sz.X, sz.Y); math.Abs(got-want) > 1e-9 {
+			if got := SSIM(a, b, sz.X, sz.Y); !near(got, want) {
 				t.Errorf("%v, image %d: SSIM %.12f, want %.12f", sz, k, got, want)
 			}
 			for _, bw := range []int{3, 8, 13, 64} {
 				want := refWorst(a, b, sz.X, sz.Y, bw)
-				if got := s.score(a, b, sz.X, sz.Y, bw); math.Abs(got-want) > 1e-9 {
+				if got := s.score(a, b, sz.X, sz.Y, bw); !near(got, want) {
 					t.Errorf("%v, image %d, blocks of %d: %.12f, want %.12f", sz, k, bw, got, want)
 				}
-				if got := s.score(a, a, sz.X, sz.Y, bw); math.Abs(got-1) > 1e-9 {
+				if got := s.score(a, a, sz.X, sz.Y, bw); !near(got, 1) {
 					t.Errorf("%v, image %d, blocks of %d: %.12f against itself", sz, k, bw, got)
 				}
 			}
@@ -126,7 +129,7 @@ func FuzzSSIMScore(f *testing.F) {
 			}
 		}
 		var s ssimer
-		if got, want := s.score(a, b, W, H, BW), refWorst(a, b, W, H, BW); math.Abs(got-want) > 1e-9 {
+		if got, want := s.score(a, b, W, H, BW), refWorst(a, b, W, H, BW); !near(got, want) {
 			t.Errorf("%d×%d in blocks of %d: %.12f, want %.12f", W, H, BW, got, want)
 		}
 	})
@@ -251,4 +254,32 @@ func TestStillCorpus(t *testing.T) {
 	slices.Sort(qs)
 	t.Logf("the photograph at SSIM %.2f: %.1f KiB, rows at quality %d to %d, median %d",
 		StillSSIM, float64(total)/1024, qs[0], qs[len(qs)-1], qs[len(qs)/2])
+}
+
+// BenchmarkStill times Still against Lossy at quality 90 on the corpus
+// photograph's rows, the search a still photographic run pays, and
+// reports its allocations. Run it with -cpu 1.
+func BenchmarkStill(b *testing.B) {
+	photo := loadFrame(b, "photo")
+	var rows [][]byte
+	for y := 0; y < photo.Rect.Dy(); y += 64 {
+		rows = append(rows, pixels(photo, image.Rect(0, y, photo.Rect.Dx(), y+64)))
+	}
+	w := photo.Rect.Dx()
+	b.Run("lossy90", func(b *testing.B) {
+		e := New([]protocol.Codec{webpC, deflate})
+		var dst []byte
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			dst, _ = e.Lossy(dst[:0], rows[i%len(rows)], w, 64, 90)
+		}
+	})
+	b.Run("still", func(b *testing.B) {
+		e := New([]protocol.Codec{webpC, deflate})
+		var dst []byte
+		b.ReportAllocs()
+		for i := 0; b.Loop(); i++ {
+			dst, _, _, _ = e.Still(dst[:0], rows[i%len(rows)], w, 64, 64, 30, 90)
+		}
+	})
 }

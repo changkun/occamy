@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"image"
 	"image/color"
-	"log/slog"
 	"slices"
 	"testing"
 	"testing/synctest"
@@ -69,6 +68,16 @@ func TestHeat(t *testing.T) {
 	if w.heat[0] == 0 {
 		t.Error("a resized snapshot reset the heat")
 	}
+	// Motion starts at motionHeat, and not without refinement to raise
+	// its quality later.
+	w.heat[0] = motionHeat
+	if !w.moving(0, false) {
+		t.Errorf("heat %v is not motion", w.heat[0])
+	}
+	w.refineDelay = -1
+	if w.moving(0, false) {
+		t.Error("a tile moves with refinement off")
+	}
 }
 
 // Candidates are the tiles the client has, unchanged since, still for the
@@ -85,13 +94,13 @@ func TestCandidates(t *testing.T) {
 		versions:    []uint64{5, 5, 5, 5, 5, 5, 5, 5, 5, 5},
 		sent:        []uint64{5, 5, 5, 5, 5, 5, 4, 0, 5, 5},
 		qual:        []uint8{30, 30, 30, 61, 30, lossless, 30, 30, 30, 30},
-		goal:        []uint8{0, lossless, 61, 62, 50, lossless, 0, 0, 0, 30},
+		goal:        []uint8{0, lossless, 61, 62, 50, 0, 0, 0, 0, 30},
 		changed:     make([]time.Duration, 10),
 	}
 	// Tile 0: goal unknown. 1: below lossless. 2: its goal is above the
 	// pacer's 60. 3: has more than its goal. 4: goal 50, within 60. 5:
-	// lossless already. 6: dirty. 7: never drawn. 8: still for 250 ms
-	// only. 9: at its goal.
+	// lossless already, whatever its goal, as after a copy. 6: dirty. 7:
+	// never drawn. 8: still for 250 ms only. 9: at its goal.
 	w.changed[8] = 750 * time.Millisecond
 	wake := w.candidates(image.Rectangle{}, now)
 	if want := []int{0, 1, 4}; !slices.Equal(w.refine, want) {
@@ -423,4 +432,18 @@ func TestRefineResize(t *testing.T) {
 	})
 }
 
-var _ = slog.Default
+// A lossy quality is never taken for final or lossless pixels, however
+// high, and a search that reached its score is final.
+func TestQualities(t *testing.T) {
+	for _, q := range []int{-1, 0, 30, 90, 100, 253, 254, 255, 1000} {
+		if got := lossyQuality(q); got >= final {
+			t.Errorf("lossyQuality(%d) = %d, at or above final", q, got)
+		}
+	}
+	if q, goal := stillGoal(87, 90, true); q != final || goal != final {
+		t.Errorf("a search that reached its score at 87: quality %d, goal %d", q, goal)
+	}
+	if q, goal := stillGoal(90, 90, false); q != 90 || goal != 91 {
+		t.Errorf("a search that ran out at 90: quality %d, goal %d, want 90 and 91", q, goal)
+	}
+}

@@ -6,9 +6,11 @@ package stream
 
 import (
 	"bytes"
+	"context"
 	"flag"
 	"fmt"
 	"image"
+	"image/color"
 	"os"
 	"os/exec"
 	"runtime"
@@ -281,4 +283,126 @@ func TestRefineTimes(t *testing.T) {
 	}
 	t.Logf("load average at the end: %s", loadAverage())
 	t.Log("\n" + out.String())
+}
+
+// changing is a recorder that changes the screen once it has recorded a
+// tile message.
+type changing struct {
+	*recorder
+	change func()
+}
+
+func (c *changing) WriteMessage(ctx context.Context, p []byte) error {
+	err := c.recorder.WriteMessage(ctx, p)
+	if c.change != nil && c.tiles > 0 {
+		c.change()
+		c.change = nil
+	}
+	return err
+}
+
+// Refinement waits for an input's effect and for the ack of the frame
+// before it, sends what the pacer admits in the background, which stops
+// a frame of it at 16 KiB or so while the rate is unknown, ends a frame
+// once the screen changes, and leaves a tile that changed since it was
+// chosen to the next frame.
+func TestRefinementWaits(t *testing.T) {
+	d := newRefineDirect(t, false)
+	d.show(corpusFrame(t, "motion-0"))
+	d.frame()
+	for _, name := range []string{"motion-1", "motion-0", "motion-1"} {
+		d.age()
+		d.show(corpusFrame(t, name))
+		d.frame()
+	}
+	w := d.w
+	w.refineDelay = 0
+	idle := func() {
+		// A pacer with nothing in flight: the harness never acknowledges.
+		w.p = pacer.New(pacer.Config{Window: 1 << 20})
+	}
+	refine := func() (time.Duration, int) {
+		t.Helper()
+		d.c.tiles, d.c.bytes = 0, 0
+		w.versions = w.fb.Versions(w.versions[:0])
+		got, err := w.refinement(d.ctx, image.Rectangle{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got, d.c.tiles
+	}
+
+	idle()
+	w.in = &pending{}
+	if got, tiles := refine(); got < 0 || tiles != 0 {
+		t.Errorf("an input awaits its effect: refinement returned %v and sent %d tiles", got, tiles)
+	}
+	w.in = nil
+	if ok, _ := w.p.StartFrame(time.Now()); !ok {
+		t.Fatal("the pacer holds a frame")
+	}
+	w.p.EndFrame(time.Now(), w.frame+1)
+	if got, tiles := refine(); got < 0 || tiles != 0 {
+		t.Errorf("a frame awaits its ack: refinement returned %v and sent %d tiles", got, tiles)
+	}
+	idle()
+	got, tiles := refine()
+	if got >= 0 || tiles == 0 {
+		t.Fatalf("refinement returned %v and sent %d tiles", got, tiles)
+	}
+	if want := len(w.refine); tiles < 2 || tiles >= want || d.c.bytes > 24<<10 {
+		t.Errorf("a frame of refinement sent %d of %d tiles in %d bytes, want 16 KiB or so", tiles, want, d.c.bytes)
+	}
+
+	// A change on the screen after the first message ends the frame,
+	// wherever it is: the change's frame goes next.
+	idle()
+	corner := w.g.rect(len(w.sent) - 1)
+	w.c = &changing{recorder: d.c, change: func() {
+		paint(d.b, corner, image.NewUniform(color.RGBA{1, 2, 3, 255}))
+	}}
+	if got, tiles := refine(); got >= 0 || tiles != 1 {
+		t.Errorf("the screen changed after the first message: refinement returned %v and sent %d tiles", got, tiles)
+	}
+	w.c = d.c
+
+	// A tile chosen, then changed: the next frame sends it, not this one.
+	idle()
+	w.versions = w.fb.Versions(w.versions[:0])
+	w.candidates(image.Rectangle{}, time.Now())
+	if len(w.refine) == 0 {
+		t.Fatal("nothing left to refine")
+	}
+	tile := w.refine[0]
+	d.show(corpusFrame(t, "motion-0"))
+	if v := w.fb.Versions(nil)[tile]; v == w.sent[tile] {
+		t.Fatalf("tile %d did not change", tile)
+	}
+	if send, ok := w.refineTile(w.frame+1, tile); send || !ok {
+		t.Errorf("tile %d changed since it was chosen: send %v, ok %v", tile, send, ok)
+	}
+}
+
+// A run of lossy tiles ends where motion does: tiles in motion go at the
+// pacer's lowest quality, the still ones beside them through the search.
+func TestRunsSplitAtMotion(t *testing.T) {
+	d := newRefineDirect(t, false)
+	d.show(corpusFrame(t, "desktop"))
+	d.frame()
+	// The first four tiles of the third row are in motion.
+	row := 2 * d.w.g.cols
+	for k := range 4 {
+		d.w.heat[row+k] = 2 * motionHeat
+	}
+	d.show(corpusFrame(t, "photo"))
+	d.frame()
+	var got []image.Rectangle
+	for _, r := range d.c.rects {
+		if r.Min.Y == 128 {
+			got = append(got, r)
+		}
+	}
+	if len(got) < 2 || got[0] != image.Rect(0, 128, 256, 192) || got[1].Min.X != 256 {
+		t.Errorf("the third row went as %v, want (0,128)-(256,192) first, then the rest", got)
+	}
 }

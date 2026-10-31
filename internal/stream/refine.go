@@ -114,7 +114,8 @@ func (w *writer) candidates(viewport image.Rectangle, now time.Time) (wake time.
 	since := now.Sub(w.start)
 	q := lossyQuality(w.p.Quality())
 	for t, v := range w.versions {
-		if w.sent[t] == 0 || w.sent[t] < v || !w.refines(t, q) {
+		// Versions start at 1, so a tile never sent is below its version.
+		if w.sent[t] < v || !w.refines(t, q) {
 			continue
 		}
 		if !viewport.Empty() && !w.g.rect(t).Overlaps(viewport) {
