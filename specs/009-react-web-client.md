@@ -366,7 +366,8 @@ Settled on 2026-10-31.
     error codes, nothing sent with an expired token, which counts as
     expired 10 s early, and no call waiting longer than occamyd's 30 s
     write timeout; the identity a token names, its `sub` and its `idp`,
-    `local` where it has none), `oidc.ts` (PKCE: a 64-character
+    `local` where it has none, owners told apart by `sub` alone, as
+    occamyd does), `oidc.ts` (PKCE: a 64-character
     verifier drawn without bias, its S256 challenge, the login URL, the
     verifier kept in `sessionStorage` for the round trip), `fragment.ts`
     and `targets.ts`
@@ -375,13 +376,17 @@ Settled on 2026-10-31.
     `#code=` or `#error=`; a code without this tab's verifier is spent
     with a throwaway one; the verifier is forgotten on every start),
     `app.ts` (the screens as a reducer, and what waits for the user to
-    sign in again: a stream to open, or an owner's End or share with
-    the identity of the user it is for, kept in `sessionStorage` across
-    single sign-on), `owner.ts` (End: the owner's stream, then
-    `DELETE`; for another user's token, `DELETE` first),
-    `controller.ts` (one stream: connect with the page's size and
-    visibility, run the core's `Display`, bind input by role, keep what
-    the page shows as an immutable state for `useSyncExternalStore`),
+    sign in again: a stream to open, or an owner's End or share, taken
+    for whoever signs in, with who opened the session as the view knew,
+    kept in `sessionStorage` across single sign-on), `owner.ts` (End:
+    for the user who opened the session, its stream, then `DELETE`; for
+    an End that resumed after a sign-in, or another user's token,
+    `DELETE` with the stream open, as occamyd decides, the stream's 4002
+    counting for ended ahead of a 404), `controller.ts` (one stream:
+    connect with the page's size and visibility, run the core's
+    `Display`, bind input by role, keep what the page shows as an
+    immutable state for `useSyncExternalStore`, with the close code the
+    stream ended with),
     `ending.ts` (a close code and reason, or a failure to connect, as a
     title, a sentence, the technical detail and what to offer: join
     again, or sign in), `roles.ts`, `layout.ts` and `text.ts` (clipping
@@ -442,7 +447,7 @@ Settled on 2026-10-31.
   - New: terminal sessions, the clipboard, credential prompts, sharing,
     viewers, visibility, the remote's cursor and title, the bell, and
     why a session ended.
-- **Tests:** 156 in `src/lib` and `src/views`, in the `web` job. Unit
+- **Tests:** 165 in `src/lib` and `src/views`, in the `web` job. Unit
   tests for the API calls against a scripted fetch (each request's
   method, path, headers and exact body, and the time limit on the
   answer and its body), the identity a token names, PKCE against RFC
@@ -450,21 +455,29 @@ Settled on 2026-10-31.
   and drawn from `crypto.getRandomValues`, the fragment and its removal
   from the history entry, the start of the page and the verifier it
   forgets, the screens' reducer (an owner's End, share and Join again
-  after the token expired, the action dropped for another user, a late
+  after the token expired, the action taken whoever signs in, the view
+  opened after single sign-on taking the owner kept for it, a late
   leave of a view that is gone), End (nothing sent or closed with an
   expired token, the owner told when it fails, the stream left open and
-  the session's owner named for another user's token), layout, roles,
+  the session's owner named when occamyd refuses an End that resumed or
+  another user's, the stream's 4002 counting for ended ahead of a 404,
+  alice refused as bob and then ending her session, and a user linked
+  to single sign-on ending theirs), layout, roles,
   clipping, the ending of every close code and of a takeover, and the
-  prompt's markup, rendered without a DOM. The session view and the
-  share panel run in happy-dom under StrictMode: an owner's action and
-  a share that waited for a sign-in are taken once, End shows that it
-  waits for occamyd and says when occamyd did not answer, and an action
-  dropped for another user says whose the session is. The
+  prompt's markup, rendered without a DOM. The session view, the share
+  panel and the shell run in happy-dom under StrictMode: an owner's
+  action and a share that waited for a sign-in are taken once, End
+  shows that it waits for occamyd and says when occamyd did not answer,
+  an End that resumed for another user says whose the session is and
+  ends once the owner signs in, over the view or after single sign-on
+  came back as someone else, with the owner taken from the stream's
+  welcome, and the stream's 4002 replaces what End said before. The
   controller runs against a stand-in `connect` and session (the
   hello's size and visibility, clamping, refusals, React's development
   effects cancelling an open, close cancelling one, the owner's resize
   while another is on its way, the clipboard by role and the panel's
-  draft, a failure to show the session closing the stream) and, in the
+  draft, a failure to show the session closing the stream, the close
+  code it ended with) and, in the
   interop test, against `webinterop` built with the race detector: a
   graphical session's frames, keys, pointer, wheel, clipboard both
   ways, bell, title, resize and the end blocking input, the visibility
@@ -492,16 +505,20 @@ Settled on 2026-10-31.
     `#error=` and `#code=` forgetting the verifier and what waited;
     single sign-on leaving for occamyd, whose issuer was unreachable,
     and coming back with its error; and, with a second static user, the
-    owner whose token expired ending the session and signing in as that
-    user: the dialog closed over the session, which streamed on to the
-    viewer, said who signed in and whose the session is, and sent no
-    `DELETE`; End as that user sent a `DELETE` that occamyd answered
-    with 404, said so, and left the session running; and signing in as
-    the owner from there ended it for the viewer. No page broke the
-    Content-Security-Policy. The console showed only the browser's
-    failed-resource lines for requests meant to fail: the OIDC probe's
-    404, or 400 where single sign-on is configured, the wrong password's
-    401 and the bogus code's 401.
+    owner whose token expired pressing End and signing in as that user,
+    once in the dialog over the session and once through single
+    sign-on, its identity provider stood in for over the DevTools
+    protocol's Fetch domain with a token occamyd issued to that user:
+    occamyd answered the `DELETE` with 404, and the page said who
+    signed in and whose the session is while the session ran on for the
+    viewer, over the view that kept streaming and over the view that
+    opened on the page's return; signing in as the owner from there
+    sent a `DELETE` that occamyd answered with 204, and the viewer was
+    told the session ended. No page broke the Content-Security-Policy.
+    The console showed only the browser's failed-resource lines for
+    requests meant to fail: the OIDC probe's 404, or 400 where single
+    sign-on is configured, the wrong password's 401, the bogus code's
+    401 and the refused `DELETE`'s 404.
     Firefox and Safari were not run.
 - **Decisions:**
   - No router and no UI library: three screens in one component's
@@ -523,26 +540,37 @@ Settled on 2026-10-31.
     carry on. End with an expired token sends nothing and closes
     nothing. When `DELETE` fails, the owner is told that the session
     was not ended for everyone, with Try again; a `404` counts as ended
-    only for the token of the user who opened the session (see below).
+    only for the user who opened the session, pressing End (see below).
     Single sign-on leaves the page, so what waits is kept in
     `sessionStorage` with the verifier and the page joins the session
     again on its return, within the owner's grace, then ends or shares
     it.
-  - 2026-10-31: an owner's action waits for the user who opened the
-    session, by the identity of the access token: its `sub`, and its
-    `idp`, `local` without one, since occamyd's sessions belong to
-    where their owner signed in. One who signs in as someone else is
-    told who signed in and who opened the session, and the action is
-    dropped, with Sign in to try as the owner. End with another user's
-    token, as when that user presses End, sends `DELETE` with the
-    stream still open, closes it once occamyd has ended the session,
-    and takes a `404` as not this user's session rather than as ended:
-    occamyd answers 404 for a session that is not the caller's, so the
-    owner would otherwise be told it ended while it ran on for the
-    minute of grace. occamyd takes an OIDC user linked to the static
-    user of the same name (`link_static_users`) for that user, which
-    the page cannot tell; such a user's resumed action is dropped, and
-    End pressed again succeeds.
+  - 2026-10-31: an owner's action that waited for a sign-in is taken
+    for whoever signs in, and occamyd decides whether the session is
+    theirs. A resumed End sends `DELETE` with the stream still open and
+    closes it once occamyd has ended the session; a resumed share is a
+    `POST` whose 404 is reported. occamyd answers 404 for a session that
+    is not the caller's, so for End a 404 then says who signed in and
+    who opened the session, with Sign in to try as the owner, rather
+    than that the session ended while it ran on. End pressed by the user
+    who opened the session closes the stream first and takes a 404 for
+    ended; End pressed by another user, signed in over the view, goes
+    as a resumed one. The user who opened the session is the one
+    whose access token the view's stream opened with, once the stream's
+    welcome says `Role.Owner`; a view opened for an action on the page's
+    return from single sign-on takes the owner kept with the action
+    until then, since whoever came back may be someone else, and it
+    only words the 404. Owners are told apart by `sub` alone, as occamyd
+    does: OIDC sign-in refuses a static user's name unless
+    `link_static_users` links the two, whose sessions are then one
+    user's (server/oidc.go, server/identity.go), so comparing `idp` too
+    could only refuse a linked user wrongly. occamyd closes a session's
+    streams with 4002 once it is ended for everyone, so that close
+    counts as ended ahead of a 404, as when a `DELETE` whose answer was
+    lost had ended it, and replaces what End said before. A failed End
+    with the stream open says the session runs on, with its viewers,
+    rather than speaking of the owner's minute of grace, which does not
+    run while the stream is open.
   - 2026-10-31: every API call gives up after 30 s, occamyd's own write
     timeout, so that a stall in a proxy or the network becomes "Not
     ended for everyone" with Try again rather than a frozen frame; while
