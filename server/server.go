@@ -80,6 +80,7 @@ type server struct {
 
 	mu       sync.Mutex
 	sessions map[string]*sessionInfo // by ID, while they run
+	ended    endedSessions           // how sessions ended, for their owners' streams (ended.go)
 	owned    map[principal]int       // the sessions each user owns, while they run
 	running  int                     // the sessions that count toward limits.sessions
 	streams  tracker                 // the streams being served

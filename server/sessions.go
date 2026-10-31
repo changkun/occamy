@@ -21,6 +21,7 @@ import (
 	"changkun.de/x/occamy/internal/backend/ssh"
 	"changkun.de/x/occamy/internal/config"
 	"changkun.de/x/occamy/internal/session"
+	"changkun.de/x/occamy/internal/stream"
 )
 
 // API v1 error codes of the session routes, beside those in api.go.
@@ -376,8 +377,11 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 	s.mu.Unlock()
 	go func() {
 		<-sess.Done()
+		c := stream.CloseFor(sess.End())
 		s.mu.Lock()
+		// Removed and kept at once, so that no stream finds neither.
 		delete(s.sessions, id)
+		s.ended.add(id, owner, c, time.Now())
 		s.mu.Unlock()
 		release()
 	}()
