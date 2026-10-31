@@ -115,7 +115,17 @@ func newDirect(tb testing.TB, scroll bool) *direct {
 		tb.Fatal(err)
 	}
 	tb.Cleanup(s.Close)
-	for s.Framebuffer().Bounds().Dx() != 1024 || b.Sink() == nil {
+	// The backend resizes the screen, fills it, then paints its swatch:
+	// once the swatch shows, nothing else draws but the test.
+	swatch := backendtest.SwatchColor(0)
+	pix := make([]byte, 4*64*64)
+	for {
+		if s.Framebuffer().Bounds().Dx() == 1024 && b.Sink() != nil {
+			s.Framebuffer().ReadTile(0, pix)
+			if pix[0] == swatch.R && pix[1] == swatch.G && pix[2] == swatch.B {
+				break
+			}
+		}
 		time.Sleep(time.Millisecond)
 	}
 	if err := owner.View(true, image.Rectangle{}); err != nil {
