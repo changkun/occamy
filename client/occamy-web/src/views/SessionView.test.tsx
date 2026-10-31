@@ -6,10 +6,11 @@
 
 // The session view in a DOM, under StrictMode, whose development effects
 // run twice: an owner's action that waited for a sign-in is taken once,
-// End shows that it waits for occamyd and that it failed, an End that
-// resumed is ended or refused as occamyd decides, for the user who
-// opened the session as the stream's welcome says, and the stream closed
-// for the session's end counts for the session ended.
+// End shows that it waits for occamyd and that it failed, and takes no
+// second press meanwhile, an End that resumed is ended or refused as
+// occamyd decides, for the user who opened the session as the stream's
+// welcome says, and the stream closed for the session's end counts for
+// the session ended.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
@@ -393,5 +394,21 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
     await settle(20)
     expect(r.left).toBe(0)
     expect(text()).toContain('You are signed in as bob, but alice opened this session, so it was not ended for everyone.')
+  })
+
+  it('takes no second End while one waits for occamyd', async () => {
+    const r = await render({ token: accessToken('alice'), owner: null }, hung)
+    expect(text()).toContain('Ending the session for everyone…')
+    expect(button('End session')?.disabled).toBe(true)
+    // The remote asks for credentials meanwhile: the prompt's End waits too.
+    act(() => Welcomed.last?.push({ type: 'prompt', id: 1, name: 'Lab', instruction: '', fields: [{ label: 'Password', secret: true }] }))
+    await settle()
+    const inPrompt = [...container.querySelectorAll<HTMLButtonElement>('dialog button')].find((b) => b.textContent === 'End session')
+    expect(inPrompt).toBeDefined()
+    act(() => inPrompt?.click())
+    await settle()
+    expect(r.deletes).toEqual(['DELETE /api/v1/sessions/mZ3k'])
+    expect(Welcomed.last?.closed).toBe(false)
+    expect(text()).toContain('Ending the session for everyone…')
   })
 })

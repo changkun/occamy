@@ -203,6 +203,11 @@ export function SessionView({ api, token, target, owner: seed, action, onLeave, 
   }
 
   const leave = async (): Promise<void> => {
+    // One End at a time: another, from the credential prompt, would take
+    // the opener's way while this one waits for occamyd.
+    if (ending) {
+      return
+    }
     if (can.manage && signedIn) {
       await end(false)
       return
@@ -273,7 +278,7 @@ export function SessionView({ api, token, target, owner: seed, action, onLeave, 
           Full screen
         </button>
         {state.phase !== 'ended' && (
-          <button type="button" className="danger" onClick={() => void leave()}>
+          <button type="button" className="danger" disabled={ending} onClick={() => void leave()}>
             {can.manage ? 'End session' : 'Leave'}
           </button>
         )}
