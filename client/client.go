@@ -105,6 +105,23 @@ func (e *CloseError) Error() string {
 	return fmt.Sprintf("client: closed by the server: %v: %s", e.Code, e.Reason)
 }
 
+// RefusedError reports that the client refused the session the server
+// welcomed it to, because it cannot show it, such as when they have no
+// codec in common. The server made the session before it sent welcome,
+// and SessionID names it, so that a client can end it (DELETE
+// /api/v1/sessions/{id}) rather than leave it for the owner grace. It
+// matches protocol.ErrUnsupported.
+type RefusedError struct {
+	SessionID string
+	Reason    string
+}
+
+func (e *RefusedError) Error() string {
+	return fmt.Sprintf("client: %s: %v", e.Reason, protocol.ErrUnsupported)
+}
+
+func (e *RefusedError) Unwrap() error { return protocol.ErrUnsupported }
+
 // Errors of a Session.
 var (
 	// ErrClosed reports a call on a session that has ended, and Next
@@ -323,9 +340,10 @@ type item struct {
 
 // New starts a session over c, whose server was sent the hello of opts
 // (Options.Hello). It reads welcome, and returns a *CloseError if the
-// server closed instead, such as for a refused token. ctx bounds the
-// wait for welcome; once New returns, the session lasts until Close or
-// the server ends it.
+// server closed instead, such as for a refused token, or a
+// *RefusedError if the client cannot show the session welcome names.
+// ctx bounds the wait for welcome; once New returns, the session lasts
+// until Close or the server ends it.
 func New(ctx context.Context, c Conn, opts Options) (*Session, error) {
 	if err := opts.check(); err != nil {
 		return nil, err
@@ -356,7 +374,7 @@ func New(ctx context.Context, c Conn, opts Options) (*Session, error) {
 		closeErr := &CloseError{Code: protocol.CloseUnsupported, Reason: reason}
 		sendClose(c, protocol.Close{Code: closeErr.Code, Reason: reason})
 		closeConn(c, closeErr.Code, reason)
-		return nil, fmt.Errorf("client: %s: %w", reason, protocol.ErrUnsupported)
+		return nil, &RefusedError{SessionID: w.SessionID, Reason: reason}
 	}
 	s.start()
 	return s, nil

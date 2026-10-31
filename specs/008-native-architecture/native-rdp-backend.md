@@ -651,6 +651,36 @@ RDP's guacd path, RDP no longer needs guacd at all.
   on through the acceptor in `internal/rdp`. Coverage, with the
   reviews' tests: `internal/rdp` 88.7% of statements, `channel.go`
   98.0% and `cliprdr.go` 96.9%; `internal/backend/rdp` 98.5%.
+- **The flood's heap, measured again (2026-10-31).**
+  `TestClipboardListFlood` failed once in CI under `-race`. The heap
+  had grown by 102,968 bytes after 100,000 lists, against a bound of
+  100,000. Nothing was kept per list. The growth was what the
+  measurement counted:
+  - It measured from before the first list, so it counted what the
+    connection allocates once. The client's TLS read buffer grows to a
+    full record the first time one arrives, about 38 KB. The test
+    also built its 24 KB batch of lists between the readings.
+  - It collected once before each reading, which leaves
+    `sync.Pool`'s victim caches in the heap, crypto/tls's record
+    buffers among them.
+
+  The test now builds its batch first and measures from after a first
+  1,000 lists. It collects twice before each reading, as the server's
+  `heapInUse` does. The bound is unchanged.
+
+  Under `-race`, at a 1-minute load of 12 to 17:
+
+  | Measurement | Test run alone (30 runs) | Within the package (5 runs) |
+  |-------------|--------------------------|-----------------------------|
+  | Before the fix | 35.6 to 77.4 KB | 31.5 to 57.7 KB |
+  | After the fix | −19.1 to −2.4 KB | −19.1 to −2.4 KB |
+
+  After a first 100,000 lists, a second 100,000 shrank the heap by 8
+  to 25 KB, so nothing grows with the lists. Two mutants that keep
+  something per list in the client's clipboard state both fail the
+  new test in 10 of 10 runs:
+  - keeping 4 bytes per list grows the heap by 419 to 435 KB;
+  - keeping 1 byte per list grows it by 111 to 133 KB.
 - **Integration test.** `TestIntegrationClipboard`, under the
   `rdp_integration` tag, pastes text and reads the session's X
   CLIPBOARD selection, which xrdp-chansrv serves, and sets the

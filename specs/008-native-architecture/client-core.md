@@ -133,7 +133,13 @@ layer, and any tools.
     `close` before `welcome` is Dial's `*CloseError` with its code.
   - `New(ctx, Conn, Options)` runs over any connection with one message
     per call, such as `stream.Serve`'s end of an in-process pipe;
-    `Options.Hello` is the `hello` its caller hands the server.
+    `Options.Hello` is the `hello` its caller hands the server. A
+    `welcome` the client cannot show, with no codec or terminal level in
+    common, is refused with `unsupported`, and `New` (and so `Dial`)
+    returns a `*RefusedError` that matches `protocol.ErrUnsupported` and
+    names the session the server already made, so that the caller can
+    end it rather than leave it for the owner grace (added for the
+    benchmark's v1 series, #127).
   - The session reports `ViewerID`, `Role`, `Class`, `SessionID`, the
     agreed `Capabilities`, and `Size` as of the last `Resize` delivered.
   - `Next(ctx)` delivers `Frame` (ID, `LastSeq`, server time, dirty

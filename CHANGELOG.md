@@ -12,6 +12,23 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - The desktop baseline and the per-scenario targets for protocol v1
   ([docs/benchmarks.md](docs/benchmarks.md)). `bench/vncprobe` measures
   the bench desktop's VNC server on its own.
+- The benchmark's v1 series, `v1-native` and `v1-guacd`: the same
+  scenarios over protocol v1, driven by the Go client core through API
+  v1 against native SSH, VNC and RDP and against VNC and RDP through
+  guacd, on the bench stack's `occamy-v1` service
+  ([docs/benchmarks.md](docs/benchmarks.md#the-v1-series)). The harness
+  counts a v1 frame when the client core delivers it, and acknowledges a
+  graphical frame on a 60 Hz screen's next tick, as the web client
+  does, and a terminal's at once; the report records both, and
+  `-ack-hz 0` is a diagnostic. A terminal's G7 ends at its first cell
+  that is not blank. A desktop's key carries its HID usage, as the web
+  client's does. CI runs them quickly after the v0 smoke run, every
+  run with `-failfast`, which stops at the first error, stops the bench
+  job at 30 minutes, and prints the stack's logs unless the job
+  succeeded. Their full results wait for the rest of the graphics
+  pipeline and for native RDP.
+  `make bench` takes a compose project and ports for a second stack on a
+  shared host.
 - A public Go package for protocol v1, `changkun.de/x/occamy/protocol`,
   with its framing: the message header and its ignorable flag, the field
   encodings, a registry of message types, and the maximum message size.
@@ -270,8 +287,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   back instead of queueing frames, and input never waits for `Next`.
   The frame shown and not yet acknowledged counts against the frame
   window, and each queued message against the backlog at its size and
-  512 bytes more. Tiles of plugged codecs decode in parallel. No API
-  stability promise until the release candidate.
+  512 bytes more. Tiles of plugged codecs decode in parallel. A
+  `welcome` the client cannot show, with no codec or terminal level in
+  common, is refused with a `*RefusedError` that names the session the
+  server made, so that the caller can end it. No API stability promise
+  until the release candidate.
 - The browser's client of protocol v1, a TypeScript library in
   `client/occamy-web/src/protocol` that depends on no framework: the
   handshake over a WebSocket, deflate through `DecompressionStream`,
@@ -295,6 +315,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   remote with the window, answers the remote's credential prompts,
   shares the session through a link as a viewer or read-only, and ends
   it, signing in again over the session when the sign-in has expired;
+  an End or share that waited for the sign-in is left to occamyd, which
+  ends or shares only its owner's session: one who signs in as another
+  user is told the session has ended or is not theirs. A call to occamyd
+  gives up after 30 s, and End shows that it waits, with a way back to
+  the connections, and takes no second press meanwhile;
   the clipboard goes both ways as the role allows, and reaches the local
   clipboard on its own only for a role that gives input, so a read-only
   viewer copies it from the clipboard panel; a hidden page tells occamyd
@@ -498,6 +523,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Changed
 
+- The plan for v1.0 (owner, 2026-10-31): it waits until the benchmark
+  shows native at least 10x better than guacd, and ships no guacd
+  fallback for a protocol still short of it; release candidates may
+  carry one. The gate is each scenario's target as defined, which may
+  fall short of 10x only where a documented bound outside Occamy makes
+  10x impossible, justified in `docs/benchmarks.md`
+  ([specs/008-native-architecture/benchmark.md](specs/008-native-architecture/benchmark.md#targets)).
 - Building occamyd needs Go 1.26.4 or later, which gen2brain/vpx and
   gen2brain/jpegn require.
 - `make bench` builds occamyd's image from the working tree before
