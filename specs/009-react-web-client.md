@@ -468,7 +468,7 @@ Settled on 2026-10-31.
   ahead of a 404, alice refused as bob and then ending her session, and
   a user linked to single sign-on ending theirs), layout, roles,
   clipping, the ending of every close code and of a takeover, the close
-  codes that end a session, held to occamyd's `closeFor`, and the
+  codes that end a session, held to occamyd's `CloseFor`, and the
   prompt's markup, rendered without a DOM. The session view, the share
   panel and the shell run in happy-dom under StrictMode: an owner's
   action and a share that waited for a sign-in are taken once, a share
@@ -583,11 +583,11 @@ Settled on 2026-10-31.
     user's (server/oidc.go, server/identity.go), so comparing `idp` too
     could only refuse a linked user wrongly. occamyd closes a session's
     streams once it has ended for everyone with the code of its end, as
-    `closeFor` (internal/stream/serve.go) says: 4002 closed, 4003 owner
+    `CloseFor` (internal/stream/serve.go) says: 4002 closed, 4003 owner
     left, 4004 idle, 4005 remote ended, 4006 backend failed and 1001
     shutdown, which ends every session. Each counts as ended ahead of a
     404, as when a `DELETE` whose answer was lost had ended it, and
-    replaces what End said before. 1011 does not, though `closeFor`
+    replaces what End said before. 1011 does not, though `CloseFor`
     sends it for a session that failed on its own, since occamyd also
     closes a single stream with it, one whose reader panicked or that
     it failed to serve, while the session runs on; a 404 after it finds

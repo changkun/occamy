@@ -83,9 +83,9 @@ describe('endsSession', () => {
     expect(endsSession(1006)).toBe(false)
   })
 
-  it('matches the session ends of occamyd’s closeFor', () => {
+  it('matches the session ends of occamyd’s CloseFor', () => {
     const src = readFileSync(new URL('../../../../internal/stream/serve.go', import.meta.url), 'utf8')
-    const body = src.slice(src.indexOf('func closeFor('), src.indexOf('\n}\n', src.indexOf('func closeFor(')))
+    const body = src.slice(src.indexOf('func CloseFor('), src.indexOf('\n}\n', src.indexOf('func CloseFor(')))
     const names = [...body.matchAll(/session\.\w+:\s+protocol\.Close(\w+),/g)].map((m) => m[1])
     expect(names).toEqual(['SessionClosed', 'OwnerLeft', 'Idle', 'RemoteEnded', 'BackendFailed', 'ServerShutdown', 'InternalError'])
     // InternalError is left out: occamyd also closes one failed stream with it.

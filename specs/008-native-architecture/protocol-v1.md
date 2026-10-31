@@ -370,7 +370,7 @@ web client ([009](../009-react-web-client.md)) and the client core
     is already ours. The session core's end reasons map one to one onto
     codes: closed 4002, owner left 4003, idle 4004, remote ended 4005,
     failed 4006, shutdown 1001 and internal 1011
-    (`internal/stream/serve.go`, `closeFor`). The other codes are not
+    (`internal/stream/serve.go`, `CloseFor`). The other codes are not
     end reasons: the server sends `unauthorized`, `forbidden` and
     `viewer-limit` when it refuses a stream, and `too-slow` when it
     drops a viewer. (Corrected 2026-10-31: this said the end reasons
