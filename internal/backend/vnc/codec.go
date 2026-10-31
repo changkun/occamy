@@ -72,14 +72,16 @@ func (c *codecs) bandBuffer(n int) []byte {
 }
 
 // drawBand copies pixels decoded into band, which are opaque and in rows
-// of r's width, to the framebuffer at r, under one lock.
+// of r's width, to the framebuffer at r, under one lock. Each hold of a
+// lock is a function of its own that defers the Unlock, so that a panic
+// while it draws releases the rows (backend.Sink).
 func (d *decoder) drawBand(r image.Rectangle, band []byte) {
 	row := 4 * r.Dx()
 	img := d.sink.Lock(r)
+	defer d.sink.Unlock(r)
 	for i := range r.Dy() {
 		copy(img.Pix[i*img.Stride:i*img.Stride+row], band[i*row:])
 	}
-	d.sink.Unlock(r)
 }
 
 // fill sets w×h pixels of a tile, which has the given stride and starts
@@ -98,14 +100,18 @@ func fill(pix []byte, stride, x, y, w, h int, px uint32) {
 func (d *decoder) fillRect(r image.Rectangle, px uint32) {
 	rows := max(1, stripSize/(4*r.Dx()))
 	for y := r.Min.Y; y < r.Max.Y; y += rows {
-		strip := image.Rect(r.Min.X, y, r.Max.X, min(y+rows, r.Max.Y))
-		img := d.sink.Lock(strip)
-		first := img.Pix[:4*strip.Dx()]
-		fill(first, 0, 0, 0, strip.Dx(), 1, px)
-		for i := 1; i < strip.Dy(); i++ {
-			copy(img.Pix[i*img.Stride:], first)
-		}
-		d.sink.Unlock(strip)
+		d.fillStrip(image.Rect(r.Min.X, y, r.Max.X, min(y+rows, r.Max.Y)), px)
+	}
+}
+
+// fillStrip sets the pixels of strip to px under one lock.
+func (d *decoder) fillStrip(strip image.Rectangle, px uint32) {
+	img := d.sink.Lock(strip)
+	defer d.sink.Unlock(strip)
+	first := img.Pix[:4*strip.Dx()]
+	fill(first, 0, 0, 0, strip.Dx(), 1, px)
+	for i := 1; i < strip.Dy(); i++ {
+		copy(img.Pix[i*img.Stride:], first)
 	}
 }
 

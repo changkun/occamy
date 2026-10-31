@@ -232,10 +232,10 @@ func (d *decoder) compactLength() (int, error) {
 func (d *decoder) drawCompact(r image.Rectangle, data []byte) {
 	row := 3 * r.Dx()
 	img := d.sink.Lock(r)
+	defer d.sink.Unlock(r)
 	for j := range r.Dy() {
 		expand(img.Pix[j*img.Stride:j*img.Stride+4*r.Dx()], data[j*row:])
 	}
-	d.sink.Unlock(r)
 }
 
 // checkIndices returns an error if a row of palette data, row bytes for w
@@ -267,6 +267,7 @@ func checkIndices(data []byte, row, w, n int) error {
 func (d *decoder) drawPalette(r image.Rectangle, data []byte, row int, pal []uint32, bits bool) {
 	w := r.Dx()
 	img := d.sink.Lock(r)
+	defer d.sink.Unlock(r)
 	for j := range r.Dy() {
 		src, dst := data[j*row:(j+1)*row], img.Pix[j*img.Stride:]
 		for i := range w {
@@ -279,7 +280,6 @@ func (d *decoder) drawPalette(r image.Rectangle, data []byte, row int, pal []uin
 			binary.LittleEndian.PutUint32(dst[4*i:], pal[idx])
 		}
 	}
-	d.sink.Unlock(r)
 }
 
 // gradient reverses the gradient filter in place, row by row: each
@@ -355,12 +355,17 @@ func (d *decoder) tightJPEG(r image.Rectangle) error {
 	rows := max(1, stripSize/(4*r.Dx()))
 	for y := r.Min.Y; y < r.Max.Y; y += rows {
 		strip := image.Rect(r.Min.X, y, r.Max.X, min(y+rows, r.Max.Y))
-		dst := d.sink.Lock(strip)
-		draw.Draw(dst, strip, img, image.Pt(0, y-r.Min.Y), draw.Src)
-		d.sink.Unlock(strip)
+		d.drawImage(strip, img, image.Pt(0, y-r.Min.Y))
 	}
 	d.enc.counts[tightJPEGRect]++
 	return nil
+}
+
+// drawImage draws src from sp to strip under one lock.
+func (d *decoder) drawImage(strip image.Rectangle, src image.Image, sp image.Point) {
+	dst := d.sink.Lock(strip)
+	defer d.sink.Unlock(strip)
+	draw.Draw(dst, strip, src, sp, draw.Src)
 }
 
 // jpegFrame checks a JPEG image's markers, and returns the size its frame

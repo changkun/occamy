@@ -173,8 +173,8 @@ func (s *Screen) Run(ctx context.Context, sink backend.Sink) error {
 
 func fill(sink backend.Sink, r image.Rectangle, c color.RGBA) {
 	img := sink.Lock(r)
+	defer sink.Unlock(r)
 	draw.Draw(img, r, image.NewUniform(c), image.Point{}, draw.Src)
-	sink.Unlock(r)
 }
 
 // Terminal is a fake terminal backend. It echoes TermInput back as a

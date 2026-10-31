@@ -198,26 +198,26 @@ func (l *limitedReader) Read(p []byte) (int, error) {
 
 // clipboardCaps implements peer: the backend's caps answer the server's.
 func (r *run) clipboardCaps(flags uint32) {
-	r.mu.Lock()
-	r.clip.flags = flags
-	r.clip.caps = true
-	r.mu.Unlock()
+	r.locked(func() {
+		r.clip.flags = flags
+		r.clip.caps = true
+	})
 	r.poke()
 }
 
 // clipboardAction implements peer.
 func (r *run) clipboardAction(flags uint32) {
-	r.mu.Lock()
-	c := &r.clip
-	switch flags & clipActions {
-	case clipRequest:
-		c.provide = c.provide || flags&clipText != 0
-	case clipPeek:
-		c.notify = true
-	case clipNotify:
-		c.request = c.request || flags&clipText != 0
-	}
-	r.mu.Unlock()
+	r.locked(func() {
+		c := &r.clip
+		switch flags & clipActions {
+		case clipRequest:
+			c.provide = c.provide || flags&clipText != 0
+		case clipPeek:
+			c.notify = true
+		case clipNotify:
+			c.request = c.request || flags&clipText != 0
+		}
+	})
 	r.poke()
 }
 
@@ -226,16 +226,13 @@ func (r *run) clipboardAction(flags uint32) {
 // notification, with the text kept for the server to ask for, or the
 // text itself for a server that takes no notifications.
 func (r *run) clipboard(data []byte) []byte {
-	r.mu.Lock()
-	flags := r.clip.flags
-	r.mu.Unlock()
+	var flags uint32
+	r.locked(func() { flags = r.clip.flags })
 	if flags&clipText == 0 || flags&(clipNotify|clipProvide) == 0 {
 		return appendCutText(nil, data)
 	}
 	text := toExtendedText(data)
-	r.mu.Lock()
-	r.clip.text = text
-	r.mu.Unlock()
+	r.locked(func() { r.clip.text = text })
 	if flags&clipNotify != 0 {
 		return appendClipboard(nil, clipNotify|clipText, nil)
 	}

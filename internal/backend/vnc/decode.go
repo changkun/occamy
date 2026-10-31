@@ -216,13 +216,20 @@ func (d *decoder) raw(r image.Rectangle) error {
 		if err := d.read(buf); err != nil {
 			return err
 		}
-		img := d.sink.Lock(strip)
-		for i := range strip.Dy() {
-			copyOpaque(img.Pix[i*img.Stride:i*img.Stride+row], buf[i*row:])
-		}
-		d.sink.Unlock(strip)
+		d.drawOpaque(strip, buf)
 	}
 	return nil
+}
+
+// drawOpaque copies pixels in rows of strip's width from buf to strip,
+// opaque, under one lock.
+func (d *decoder) drawOpaque(strip image.Rectangle, buf []byte) {
+	row := 4 * strip.Dx()
+	img := d.sink.Lock(strip)
+	defer d.sink.Unlock(strip)
+	for i := range strip.Dy() {
+		copyOpaque(img.Pix[i*img.Stride:i*img.Stride+row], buf[i*row:])
+	}
 }
 
 // copyOpaque copies pixels from src to dst, which are in the same layout,

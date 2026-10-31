@@ -107,7 +107,10 @@ func TestKey(t *testing.T) {
 		{"function key", uni, backend.Key{Down: true, Keysym: 0xffbe}, []rdp.InputEvent{rdp.KeyEvent(0x3b, true)}},
 		{"unknown code, known keysym", uni, backend.Key{Down: true, Keysym: 0xff52, Code: 0x3ff}, []rdp.InputEvent{rdp.KeyEvent(0xe048, true)}},
 		{"nothing", capabilities{}, backend.Key{Down: true, Keysym: 0x20ac}, nil},
-		{"Power", uni, backend.Key{Down: true, Keysym: 0x1008ff2a, Code: hidPower}, nil},
+		{"Power", uni, backend.Key{Down: true, Keysym: 0x1008ff2a, Code: backend.HIDPower}, nil},
+		{"Power by code", uni, backend.Key{Down: true, Code: backend.HIDPower}, nil},
+		{"Power by keysym", uni, backend.Key{Down: true, Keysym: 0x1008ff2a}, nil},
+		{"Sleep by keysym", uni, backend.Key{Down: true, Keysym: 0x1008ff2f}, nil},
 		{"Break", uni, backend.Key{Down: true, Keysym: 0xff6b}, []rdp.InputEvent{rdp.KeyEvent(0xe046, true)}},
 	} {
 		var s inputState
