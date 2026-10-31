@@ -174,9 +174,11 @@ type Client struct {
 	errInfo    ErrorInfo
 
 	// The tests replace these: now, if set, is the time, and sleep, if
-	// set, waits.
-	now   func() time.Time
-	sleep func(time.Duration) error
+	// set, waits; resuppress, if set, runs under smu between
+	// suppressAgain's read of the state and its send.
+	now        func() time.Time
+	sleep      func(time.Duration) error
+	resuppress func()
 }
 
 // Limits on what the server makes the client do.
@@ -593,6 +595,9 @@ func (c *Client) suppressAgain() error {
 	defer c.smu.Unlock()
 	if !c.suppressed {
 		return nil
+	}
+	if c.resuppress != nil {
+		c.resuppress()
 	}
 	return c.sendSuppressOutput(true)
 }

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"image"
 	"net"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -618,6 +619,62 @@ func TestSuppressOutputRace(t *testing.T) {
 	}
 	if len(seq) == 0 || !seq[len(seq)-1] {
 		t.Errorf("Suppress Output allowing %v, want the last to allow", seq)
+	}
+}
+
+// The race's other order: the reactivation reads that nobody can see,
+// and a viewer asks for output before the repeat goes. The viewer's
+// request waits for the repeat, so that the last Suppress Output allows
+// output. The repeat is held between its read and its send, while the
+// viewer asks.
+func TestSuppressOutputReaderFirst(t *testing.T) {
+	l := runLive(t, rdptest.Server{}, Config{})
+	if err := l.c.SuppressOutput(true); err != nil {
+		t.Fatal(err)
+	}
+	allowed := make(chan error, 1)
+	returned := make(chan struct{})
+	l.c.smu.Lock()
+	l.c.resuppress = func() {
+		go func() {
+			allowed <- l.c.SuppressOutput(false)
+			close(returned)
+		}()
+		select {
+		case <-returned:
+		case <-time.After(100 * time.Millisecond): // it waits, as it should
+		}
+	}
+	l.c.smu.Unlock()
+	frames := append([][]byte{rdptest.DeactivateAll(), rdptest.DemandActive(800, 600, rdptest.DefaultInputFlags)}, rdptest.Finalization()...)
+	if err := l.conn.Write(frames...); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-allowed:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("SuppressOutput did not return")
+	}
+	var seq []bool
+	l.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	for {
+		m, err := l.conn.Next()
+		if err != nil {
+			break
+		}
+		if m.Type2 == rdptest.PDU2SuppressOutput {
+			allow, err := rdptest.SuppressOutput(m.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			seq = append(seq, allow)
+		}
+	}
+	if !slices.Equal(seq, []bool{false, false, true}) {
+		t.Errorf("Suppress Output allowing %v, want the suppression, its repeat, then output allowed", seq)
 	}
 }
 
