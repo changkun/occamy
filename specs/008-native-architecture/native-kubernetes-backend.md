@@ -335,6 +335,17 @@ per-protocol table moves Kubernetes to native.
     output, a resize, the session state, the exit as `remote-ended`, the
     prompt (and an empty answer's 401), a wrong pin with no request on
     the server, and a 403 as `backend-failed`.
+    Either refusal can end the session before the stream's `welcome`
+    or after it, as the race goes; before, the Go client's `Dial`
+    returns the `close`, with the same code and reason, as a
+    `*client.CloseError`. The test took `welcome` for granted until a
+    CI run on #138 had the 403 first. It now takes either order
+    (`failedStream`), and a second round holds each stream back until
+    its session has ended (`endBeforeWelcome`), so that every run
+    checks the order the race seldom picks. With a 200 ms sleep before
+    `stream.Serve`'s first `View`, the old test failed 10 of 10 with
+    CI's message and the new one passed 10 of 10. So did `TestVNCTLS`
+    and `TestRDPTLS`, which stream refused certificates the same way.
 - **Coverage** (`go test -cover`): `internal/backend/kubernetes` 95.5%,
   `internal/config` 94.7%, `server` 92.4%; after the review's fixes
   97.0%, 94.6% and 92.4%.

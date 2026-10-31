@@ -534,8 +534,24 @@ func TestChannelChunks(t *testing.T) {
 			t.Fatal(err)
 		}
 		if tc.err == "" {
+			// The chunk is dropped once the client has read it, which
+			// under load may be well after the write: wait for the
+			// count, then check that the client answered nothing and
+			// counted the chunk once.
+			orphans := func() int { return l.c.Stats().Ignored["orphan channel chunks"] }
+			for deadline := time.Now().Add(10 * time.Second); orphans() == 0; time.Sleep(5 * time.Millisecond) {
+				select {
+				case err := <-l.done:
+					l.done <- err
+					t.Fatalf("%s: Run returned %v", tc.name, err)
+				default:
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("%s: ignored %v", tc.name, l.c.Stats().Ignored)
+				}
+			}
 			l.quiet(t)
-			if n := l.c.Stats().Ignored["orphan channel chunks"]; n != 1 {
+			if n := orphans(); n != 1 {
 				t.Errorf("%s: ignored %v", tc.name, l.c.Stats().Ignored)
 			}
 			continue
