@@ -52,7 +52,8 @@ type Resize struct {
 
 // TermSnapshot replaces the terminal: the caller resets its terminal
 // emulator and writes Data to it, as the server sent it. A terminal
-// session's first frame carries one. Data is the caller's.
+// session's first frame carries one, and a later frame may, such as
+// the first after the client was hidden. Data is the caller's.
 type TermSnapshot struct {
 	Data []byte
 }

@@ -7,9 +7,10 @@ depends_on:
   - specs/008-native-architecture/graphics-pipeline.md
 affects:
   - internal/backend/vnc/
+  - internal/keymap/
 effort: large
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -173,20 +174,26 @@ items with the recommended options, checked against the code and RFC
 
 Registration in the API's backend factory for `vnc`, and the switch from
 the guacd bridge, follow the parity gate in
-[guacd-bridge](guacd-bridge.md), not these phases.
+[guacd-bridge](guacd-bridge.md), not these phases. (2026-10-30: the
+Sessions task of [api-and-server-stack](api-and-server-stack.md)
+registers the native backend as `vnc`'s default ahead of the gate,
+since no configuration key yet picks a backend; see its notes.)
 
 ## Affects
 
 New `internal/backend/vnc`. After its parity gate
 ([guacd-bridge](guacd-bridge.md)), VNC no longer needs guacd, which
-leaves only RDP on the bridge.
+leaves only RDP on the bridge. The HID-to-XT table derives from
+`internal/keymap`, the scan code table it shares with the RDP client
+since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
 
 ## Implementation notes: phase 1
 
 - **Status.** Phase 1 is done: `internal/backend/vnc` implements
   `backend.Backend` with `Config`, `New` and `Backend`, in about 1,400
   lines of code and 2,500 of tests. Nothing wires it into `occamyd`: the
-  sessions task registers backends.
+  sessions task registers backends (done: `vnc` connections and ad-hoc
+  targets use it).
 - **What was built.**
   - Run dials with the context, runs the handshake, sends
     `SetPixelFormat` and `SetEncodings` (CopyRect, Raw, Cursor,
@@ -344,8 +351,8 @@ leaves only RDP on the bridge.
   - Resizes are rate-limited by a fixed interval. A budget that scales
     with the screen's size would bound the work better: at the largest
     screen, ten resizes a second still reallocate 1.25 GiB a second.
-  - Registration for `vnc` in the API's backend factory, and the parity
-    gate against the guacd bridge.
+  - Registration for `vnc` in the API's backend factory (done, as the
+    default), and the parity gate against the guacd bridge.
 
 ## Implementation notes: phase 2
 
@@ -918,7 +925,10 @@ leaves only RDP on the bridge.
     backends; `internal/config` is unchanged here. A VNC connection
     needs `username`, and a `tls` block with `require`, `server_name`,
     `ca_file` (read into `RootCAs`), `pins` (a list) and
-    `insecure_skip_verify`; and, since phase 4, `ard`.
+    `insecure_skip_verify`; and, since phase 4, `ard`. All but `ard`
+    were done in the Sessions task's review (#111), with
+    `vnc.CheckPin` for the configuration's checks; see
+    api-and-server-stack.md. `ard` has no configuration key yet.
   - Protocol v1's web client must fill `Key.Code` from
     `KeyboardEvent.code` for QEMU key events to be used; the current
     Guacamole-protocol client sends keysyms only.

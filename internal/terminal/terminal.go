@@ -52,6 +52,15 @@ import (
 	"sync"
 )
 
+// MaxCols and MaxRows bound a terminal's size. A screen's cells take
+// memory in proportion to its area, and each viewer keeps the screens it
+// was sent, so a size that a client asks for is clamped to them, here and
+// before it reaches a backend.
+const (
+	MaxCols = 1000
+	MaxRows = 500
+)
+
 // Options configure a Terminal.
 type Options struct {
 	// Reply receives the terminal's answers to the application's queries
@@ -102,6 +111,12 @@ type Terminal struct {
 	spare    *line // a line that left the screen and can be reused
 }
 
+// clampSize clamps a size to at least 1 by 1 and at most MaxCols by
+// MaxRows.
+func clampSize(cols, rows int) (int, int) {
+	return min(max(cols, 1), MaxCols), min(max(rows, 1), MaxRows)
+}
+
 // cursor is the cursor's position and the state DECSC saves with it.
 type cursor struct {
 	x, y     int
@@ -121,9 +136,10 @@ const (
 	charsetUK              // ESC ( A, where # is £
 )
 
-// New returns a terminal of cols columns and rows rows, at least 1 each.
+// New returns a terminal of cols columns and rows rows, at least 1 each
+// and at most MaxCols and MaxRows.
 func New(cols, rows int, opts Options) *Terminal {
-	cols, rows = max(cols, 1), max(rows, 1)
+	cols, rows = clampSize(cols, rows)
 	t := &Terminal{cols: cols, rows: rows, reply: opts.Reply}
 	t.reset()
 	t.version, t.dirty = 1, false
@@ -187,11 +203,11 @@ func (t *Terminal) Write(p []byte) {
 }
 
 // Resize changes the terminal's size to cols columns and rows rows, at
-// least 1 each. Lines are cut or padded, not reflowed; when the screen
+// least 1 each and at most MaxCols and MaxRows. Lines are cut or padded, not reflowed; when the screen
 // gets shorter, lines leave the top as far as needed to keep the cursor on
 // it, as in xterm. The scroll region is reset.
 func (t *Terminal) Resize(cols, rows int) {
-	cols, rows = max(cols, 1), max(rows, 1)
+	cols, rows = clampSize(cols, rows)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if cols == t.cols && rows == t.rows {

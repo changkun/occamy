@@ -60,27 +60,51 @@ type hostKeys struct {
 func parseHostKeys(entries []string, insecure bool) (hostKeys, error) {
 	h := hostKeys{insecure: insecure}
 	for i, e := range entries {
-		e = strings.TrimSpace(e)
-		if fp, ok := strings.CutPrefix(e, "SHA256:"); ok {
-			fp = strings.TrimRight(fp, "=")
-			sum, err := base64.RawStdEncoding.DecodeString(fp)
-			if err != nil || len(sum) != sha256.Size {
-				return hostKeys{}, fmt.Errorf("ssh: host key %d is not a SHA-256 fingerprint", i)
-			}
-			h.fingerprints = append(h.fingerprints, "SHA256:"+fp)
-			continue
-		}
-		key, _, _, _, err := gossh.ParseAuthorizedKey([]byte(e))
+		key, fp, err := parseHostKey(e)
 		if err != nil {
-			return hostKeys{}, fmt.Errorf("ssh: host key %d: %w", i, err)
+			return hostKeys{}, fmt.Errorf("ssh: host key %d %w", i, err)
 		}
-		h.keys = append(h.keys, key)
+		if key != nil {
+			h.keys = append(h.keys, key)
+		} else {
+			h.fingerprints = append(h.fingerprints, fp)
+		}
 	}
 	if len(h.keys) == 0 && len(h.fingerprints) == 0 && !insecure {
 		return hostKeys{}, errors.New("ssh: no host key policy: pin host keys or ignore them explicitly")
 	}
 	h.algorithms = h.hostKeyAlgorithms()
 	return h, nil
+}
+
+// CheckHostKey reports whether entry is a host key as Config.HostKeys
+// takes it: a public key in authorized_keys format, or a SHA-256
+// fingerprint. The configuration checks its entries with it.
+func CheckHostKey(entry string) error {
+	if _, _, err := parseHostKey(entry); err != nil {
+		return fmt.Errorf("host key %w", err)
+	}
+	return nil
+}
+
+// parseHostKey parses one entry of Config.HostKeys: a public key, or
+// else a fingerprint in the form ssh.FingerprintSHA256 returns. The error
+// completes "host key ...".
+func parseHostKey(e string) (gossh.PublicKey, string, error) {
+	e = strings.TrimSpace(e)
+	if fp, ok := strings.CutPrefix(e, "SHA256:"); ok {
+		fp = strings.TrimRight(fp, "=")
+		sum, err := base64.RawStdEncoding.DecodeString(fp)
+		if err != nil || len(sum) != sha256.Size {
+			return nil, "", errors.New("is not a SHA-256 fingerprint")
+		}
+		return nil, "SHA256:" + fp, nil
+	}
+	key, _, _, _, err := gossh.ParseAuthorizedKey([]byte(e))
+	if err != nil {
+		return nil, "", fmt.Errorf("is not a public key: %w", err)
+	}
+	return key, "", nil
 }
 
 // hostKeyAlgorithms lists the algorithms of the pinned keys first, so

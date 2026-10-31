@@ -10,7 +10,8 @@ another. The file comes in two versions:
   [api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md):
   sign-in, the connection registry, TLS and the debug listener. The
   server is being built: so far it serves `/healthz`, sign-in for static
-  users and through OIDC, and, with `legacy_v0`, the v0 routes (see
+  users and through OIDC, the connections and sessions of API v1 and their streams and,
+  with `legacy_v0`, the v0 routes (see
   [Serving a v1 file](#serving-a-v1-file)).
 
 Any other `version` is an error, and so is `version: 0`: a v0 file has no
@@ -40,6 +41,7 @@ connections:
     name: Build box
     protocol: ssh
     target: build.internal
+    host_keys: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]
     credentials: {username: deploy, private_key_file: /etc/occamy/keys/deploy}
     allow: {groups: [ops]}
   - id: nas-desktop
@@ -61,7 +63,7 @@ directory.
 | `listen` | `:5636` | Address of the public listener, `host:port`: the API, the streams and `/healthz` |
 | `tls.cert`, `tls.key` | unset | Certificate and key files, PEM. `occamyd` terminates TLS when both are set; set both or neither. Without them, put a reverse proxy that terminates TLS in front. Read at start, so a renewed certificate needs a restart |
 | `debug.address` | unset (off) | Address of the debug listener: expvar at `/debug/vars` and pprof under `/debug/pprof/`, without authentication. It needs a port of its own: not `listen`'s port on the same host, nor on `localhost` beside `127.0.0.1` or `::1`, nor beside a wildcard host (`:5636`, `0.0.0.0`, `::`), which takes every address. Keep it on the loopback interface; `occamyd` warns at start when it is not |
-| `origins` | none | Origins, `scheme://host[:port]`, whose web pages may open streams besides `occamyd`'s own. Written in lower case without a trailing slash, as browsers send them |
+| `origins` | none | Origins, `scheme://host[:port]`, whose web pages may open streams besides `occamyd`'s own. Written in lower case without a trailing slash, as browsers send them. `occamyd`'s own origin is any whose host and port are the request's `Host`, and whose scheme is `https` when `occamyd` terminates TLS. Behind a proxy that rewrites `Host`, list the origin of `occamyd`'s own pages here too. A stream request without `Origin`, which no browser sends, is accepted on its token alone |
 | `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for the Guacamole-based web client. Their tokens are signed with a key made at each start, so they do not survive a restart. The web client itself (`/static/`) is not served from a v1 file. The login signs any target for anyone, as in v0, and `occamyd` warns at start; `allow_adhoc_targets`, `adhoc_allowlist` and the connection registry do not restrict these routes. They are removed at v1.0 |
 
 ### Sign-in: `auth`
@@ -72,6 +74,8 @@ directory.
 | `auth.access_token_lifetime` | `15m` | How long an access token lasts, a duration with a unit (`15m`, `1h30m`) between `1m` and `12h` |
 | `auth.trusted_issuers[].issuer` | required | Name of a third party, such as a gateway, whose tokens `occamyd` accepts. Unique, and not `occamy`, which is `occamyd`'s own. See [tokens from a trusted issuer](#tokens-from-a-trusted-issuer) |
 | `auth.trusted_issuers[].public_key_file` | required | That issuer's Ed25519 public key, PKIX PEM |
+| `auth.trusted_issuers[].link_static_users` | `false` | Lets the issuer's tokens act for a static user by naming them in `sub`. Off, such tokens are refused: see [tokens from a trusted issuer](#tokens-from-a-trusted-issuer) |
+| `auth.trusted_issuers[].allowed_groups` | none | The groups the issuer's tokens may claim in `groups`. Others are dropped, so that an issuer cannot claim `ops` and open every connection that allows `ops`, stored credentials and all, unless the file lets it. A linked issuer acting as a static user gets these groups from its token too, not the static user's |
 | `auth.users[].name` | required | A static user, who signs in with a password. Unique |
 | `auth.users[].password_hash` | required | bcrypt hash of the password, cost 10 or more. `htpasswd -nbBC 12 "" 'the password' \| cut -d: -f2` makes one. Give every user the same cost: a sign-in as an unknown user is checked against a hash of the highest cost, so a user at a lower cost signs in measurably faster, and `occamyd` warns at start when the costs differ |
 | `auth.users[].groups` | none | Groups the user belongs to |
@@ -96,14 +100,22 @@ A trusted issuer mints JWTs that `occamyd` accepts as its own:
 - `iss` is the issuer's name as configured, and `aud` is `occamy`;
 - `iat` and `exp` are set, at most 12 hours apart;
 - `kind` is `access`, with the user in `sub` and optionally `groups`, a
-  list of group names; or `session`, with `sid` (a session ID) and
-  `role` (`owner`, `viewer` or `read-only`).
+  list of group names, of which only those in the issuer's
+  `allowed_groups` count; or `session`, with the user in `sub`, `sid` (a
+  session ID) and `role` (`owner`, `viewer` or `read-only`). A session
+  token of any role joins only a session that one of the issuer's own
+  users opened, or, with `link_static_users`, a static user; an
+  `owner` token only for that user.
+- `sub` is a usable name, by the rules that `auth.oidc.subject_claim`
+  gives. A token without one is refused, whoever signed it.
 
 `occamyd`'s own tokens have the same shape with `iss: occamy`. An access
 token may also carry `idp`, where the user signed in: `occamyd` puts
 `local` on a static user's and `oidc` on one from
-[OIDC](#signing-in-through-oidc), and logs it at each sign-in. A session
-token carries no `idp`.
+[OIDC](#signing-in-through-oidc), and logs it at each sign-in. The stream
+token of one of `occamyd`'s own users carries the `idp` of the access
+token that opened the session. A trusted issuer's session token that
+carries `idp` is refused, and the `idp` of its access token is ignored.
 
 #### User names
 
@@ -113,7 +125,10 @@ with a decomposed character, so write names as the provider sends them.
 Telling OIDC users from static users casts a wider net: without
 `link_static_users`, an OIDC subject is refused when it equals a static
 user's name under Unicode case folding, once both are in NFC, so that
-`Alice` cannot pass for static `alice` in a log or to a person. Names
+`Alice` cannot pass for static `alice` in a log or to a person. With
+`link_static_users`, only the exact name is the static user, and
+another case or form is a user of its own. A trusted issuer's `sub` is
+compared the same way, under its own `link_static_users`. Names
 that only look alike, such as one with a Cyrillic `а` or a fullwidth
 `ａ`, are neither refused nor the same user; pick a `subject_claim` that
 users cannot choose.
@@ -207,15 +222,47 @@ http.
 Several `occamyd` instances behind one name need sticky sessions, since
 the sign-in cookie's key and the one-time codes live in each process.
 
+An issuer's users are its own. A session belongs to the issuer and the
+`sub` of the token that opened it, so the gateway's `carol` and
+`occamyd`'s `carol` are two users, and neither reads, closes, shares or
+streams as the owner the other's session. The stream token that
+`POST /api/v1/sessions` returns for a trusted issuer's user names that
+issuer in a `uiss` claim; no trusted issuer may set `uiss` itself. A
+trusted issuer's token whose `sub` names a static user, in any case or
+Unicode normal form (`Alice` for `alice`), is refused with
+`invalid_token` (on a stream, `close` with `unauthorized`), unless the
+issuer has `link_static_users: true`. Then a `sub` that is exactly a
+static user's name acts as that static user, and one in another case
+or form is the issuer's own user. A `sub` that is not a usable name,
+by the rules that `auth.oidc.subject_claim` gives, is refused as well,
+so that a trusted issuer and OIDC sign-in refuse the same names. Connections' `allow.users` and `allow.groups` name users
+and groups whichever issuer signed the token.
+
+Among `occamyd`'s own users, a session also belongs to where its owner
+signed in: an OIDC user and a static user are two users. The exception
+is a static user's name: with `auth.oidc.link_static_users`, the OIDC
+user who signs in under it is the static user, and owns the same
+sessions, whichever of the two opened them. Only a `sub` that is
+exactly the static user's name is linked; one in another case or
+normal form, such as `Alice` or a decomposed `zoë`, is an OIDC user of
+its own, with sessions of its own, as for a trusted issuer. Its access
+token still says `idp: oidc`, for the log. A token of such a user, whose `sub` is a
+static user's name in any case or normal form, is refused with
+`invalid_token` once `link_static_users` is off. The OIDC user keeps
+the groups of `groups_claim`, not the static user's.
+
 ### guacd: `guacd`
 
-guacd serves the `vnc`, `rdp` and `telnet` connections until their native
-backends replace it.
+guacd serves the `rdp` and `telnet` connections. `ssh` and `vnc`
+connections use `occamyd`'s native backends, and no key picks guacd for
+them yet. For `rdp`, `occamyd` passes `disable-gfx: "true"` unless
+`guacd.params.rdp` sets it: through RDP's graphics pipeline, xrdp's
+colours reached guacd shifted.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `guacd.address` | `localhost:4822` | guacd's address, `host:port` |
-| `guacd.params.<protocol>` | none | guacd connection parameters per protocol (`ssh`, `vnc`, `rdp`, `telnet`), such as `ignore-cert: "true"` for `rdp`. A connection's target and credentials override them. `hostname` and `port` come from the target, and secrets (`password`, `passphrase`, `private-key`) are not allowed here |
+| `guacd.params.<protocol>` | none | guacd connection parameters per protocol (`ssh`, `vnc`, `rdp`, `telnet`), such as `ignore-cert: "true"` for `rdp`. A connection's target and credentials override them. `hostname` and `port` come from the target, and secrets are not allowed here: any parameter whose name holds `password`, `passphrase`, `private-key` or `secret`, in any case, such as `sftp-password`, is refused. A name that ends in `-regex`, such as telnet's `password-regex`, is a prompt's pattern and is allowed. Set credentials on each connection instead. An ad-hoc target takes only the display's parameters (see [ad-hoc targets](#ad-hoc-targets)) |
 
 ### The connection registry: `connections`
 
@@ -225,6 +272,9 @@ backends replace it.
 | `connections[].name` | the ID | Display name |
 | `connections[].protocol` | required | `ssh`, `vnc`, `rdp` or `telnet` |
 | `connections[].target` | required | `host:port`, or a host alone for the protocol's default port: 22 for ssh, 5900 for vnc, 3389 for rdp, 23 for telnet. IPv6 addresses go in brackets with a port, `[fd00::22]:22` |
+| `connections[].host_keys` | required for ssh | The host keys an ssh target may present: public keys in `authorized_keys` format, as `ssh-keyscan` prints them, or SHA-256 fingerprints, as `ssh-keygen -l` prints them (`SHA256:…`). `occamyd` refuses any other key. Not for other protocols |
+| `connections[].insecure_ignore_host_key` | `false` | Accept any host key from an ssh target instead, logging its fingerprint as a warning. For demos only; set this or `host_keys`, not both |
+| `connections[].tls` | system roots | How a vnc target's certificate is checked when the server offers VeNCrypt, which `occamyd` then always chooses. By default the certificate must chain to the system's roots and name the target's host, as a browser checks it. Not for other protocols; see below |
 | `connections[].credentials` | required | How `occamyd` authenticates to the target; see below |
 | `connections[].allow.users`, `allow.groups` | required | Who may open the connection: users by name, and members of groups. At least one entry, since an empty list would let nobody in |
 
@@ -237,7 +287,10 @@ backends replace it.
 | `private_key_file` | An SSH private key file, ssh only. Keep it readable by the `occamyd` user only |
 | `prompt: true` | Nothing stored: the session's owner is asked for whatever the target requires, and the answers are not kept. Use it also for a target that needs no credentials |
 
-An ssh connection needs a `username` unless it prompts. A secret written
+An ssh connection needs a `username` unless it prompts. A vnc
+connection's `username` is for VeNCrypt's Plain authentication, which
+is then chosen over the server's other types; without one, the owner is
+asked if the server wants it. A secret written
 inline (`password:` under `credentials`, `client_secret:` under `oidc`) is
 rejected with the keys to use instead.
 
@@ -245,12 +298,96 @@ Secrets are read when they are used, not when the file is loaded:
 validation only checks that each file can be opened and each variable is
 set. A secret rotated on disk is therefore picked up by the next session.
 
+A vnc connection's `tls` takes:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `require` | `false` | Refuse a server that does not offer VeNCrypt with a certificate, so that nobody on the way can strip VeNCrypt from what the server offers. `ca_file` and `pins` imply it |
+| `server_name` | the target's host | The name the certificate must carry |
+| `ca_file` | none | PEM certificates of the CAs that replace the system's roots, as for a private CA. Read when a session starts |
+| `pins` | none | Certificates accepted as they are, as an ssh connection's `host_keys` are: their chain, names and dates are not checked. Each is a certificate in PEM or its SHA-256 fingerprint, in hex as `openssl x509 -noout -fingerprint -sha256` prints it or in base64 after `SHA256:`. Set this or `ca_file`, not both |
+| `insecure_skip_verify` | `false` | Accept any certificate, logging its fingerprint as a warning. Set this or `ca_file` or `pins`, not both, as `host_keys` and `insecure_ignore_host_key` for ssh. For demos only |
+
+A refused certificate fails the session, and `occamyd`'s log names the
+certificate's fingerprint, ready for `pins`.
+
 ### Ad-hoc targets
 
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `allow_adhoc_targets` | `false` | Let signed-in users connect to targets that are not in the registry, as v0 does |
-| `adhoc_allowlist` | none | Where ad-hoc targets may point: CIDR ranges (`10.0.0.0/8`), IP addresses, host names, or `*.` and a domain (`*.lab.internal`). Required when `allow_adhoc_targets` is `true` |
+| `adhoc_allowlist` | none | Where ad-hoc targets may point, and on which ports: CIDR ranges (`10.0.0.0/8`), IP addresses, host names, or `*.` and a domain (`*.lab.internal`), each optionally followed by `:port` or `:first-last` (`10.0.0.0/8:22`, `*.lab.internal:5900-5910`; an IPv6 range or address goes in brackets, `[fd00::/8]:22`). Required when `allow_adhoc_targets` is `true` |
+
+Any signed-in user may open an ad-hoc target, with
+`POST /api/v1/sessions`. Its credentials are always asked of the user,
+and an ssh target needs `host_keys` or `insecure_ignore_host_key: true`
+in the request, as a connection does. A vnc target's certificate, if the
+server offers VeNCrypt, must chain to the system's roots and carry the
+name the target was given, or its address if it was given one. An entry without ports allows the
+protocol's own: 22 for ssh, 5900 to 5999 for vnc, 3389 for rdp and 23
+for telnet. A target is allowed on a port that an entry allows when:
+
+- it is an IP address in a listed range, or a listed address;
+- it is a listed host name, or ends in a `*.` entry's domain
+  (`a.lab.internal` for `*.lab.internal`, but not `lab.internal`
+  itself);
+- it is any other host name, every address of which lies in a listed
+  range.
+
+`occamyd` resolves every host name and dials the first address it
+checked, so a second lookup cannot lead elsewhere. Loopback, link-local
+(such as a cloud's metadata service at `169.254.169.254`), unspecified
+and multicast addresses, and the metadata services at `fd00:ec2::254`
+(AWS over IPv6) and `100.100.100.200` (Alibaba Cloud), are refused,
+whatever range or listed name leads to them, unless an entry is that
+very address (`127.0.0.1:2222`). So are guacd's address and `occamyd`'s
+own `listen` and `debug.address`, at their ports: guacd's name is
+resolved when `occamyd` starts, and a listener on no host stands for
+every address of the host. A name that does not resolve then is logged
+as a warning.
+
+A range that holds the host's own addresses still reaches the host's
+other services on the ports it allows, such as a database on a private
+address. List ranges that leave the host out, or the host's addresses
+with the ports meant, rather than a range that holds them.
+
+An ad-hoc target passes no `guacd.params` but the display's
+(`color-depth`, `cursor`, `disable-gfx`, `enable-font-smoothing`,
+`font-name`, `font-size`, `color-scheme`, `resize-method`), so that
+parameters meant for the configured connections, such as an SFTP host,
+do not reach a target that a user chose.
+
+### Limits: `limits`
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `limits.sessions` | `1000` | Sessions `occamyd` runs at once, whoever owns them, since a trusted issuer can name new users without end. One more is refused with `503 limit_exceeded`, or on a connection's stream with `close` `forbidden` |
+| `limits.sessions_per_user` | `10` | Sessions one user owns at once. One more is refused with `429 limit_exceeded`, or on a connection's stream with `close` `forbidden` |
+| `limits.viewers_per_session` | `50` | Viewers a session takes besides its owner, who can always join. One more gets `close` `viewer-limit` |
+| `limits.shares_per_session` | `100` | Shares of a session that have not expired. One more is refused with `429 limit_exceeded` |
+
+A user is a subject of an issuer, as for owning sessions: a trusted
+issuer's users count apart from `occamyd`'s own.
+
+### Streams: `streams`
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `streams.viewer_timeout` | `30s` | How long a viewer, hidden or not, may leave the frames it was sent unacknowledged, or one write to it block, before it gets `close` `too-slow`. At least `1s` |
+
+Each visible viewer holds the screen it was last sent until it
+acknowledges a newer one, and a viewer that may type, hidden or not,
+also holds the screen of its last input; a hidden viewer holds no
+screen it was sent. A terminal of 1000 by 500 cells, the largest,
+takes about 11 MiB a screen. `viewer_timeout` drops a viewer that stops reading or
+acknowledging, but a viewer that acknowledges within it keeps its
+screens for as long as it stays: at the defaults one user's 10
+sessions, with their owners and 50 viewers each, may hold 510 such
+screens, about 5.5 GiB, and twice that, 1020 screens or about 11 GiB,
+if every viewer may type. Hidden viewers that may type hold one each,
+and read-only ones none. Lower
+`limits.viewers_per_session` or `limits.sessions_per_user` where users
+are not trusted with that much.
 
 ## Validation
 
@@ -301,18 +438,35 @@ WebSockets over HTTP/1.1. So far it serves:
 | `POST /api/v1/auth/token` | Sign-in for static users: `{"username":"alice","password":"…"}` as `application/json` in, `{"access_token":"…","token_type":"Bearer","expires_in":900}` out. A wrong password and an unknown user get the same `401` |
 | `GET /api/v1/auth/oidc/login`, `GET /api/v1/auth/oidc/callback` | With `auth.oidc`, sign-in through the provider, from a client's `return_url` and `code_challenge` to the return URL with a one-time code in the fragment; see [signing in through OIDC](#signing-in-through-oidc) |
 | `POST /api/v1/auth/oidc/token` | With `auth.oidc`: `{"code":"…","code_verifier":"…"}` as `application/json` in, the access token out, as from `POST /api/v1/auth/token` |
+| `GET /api/v1/connections` | The connections whose `allow` names the caller or one of the caller's groups: `{"connections":[{"id":"build-box","name":"Build box","protocol":"ssh"}],"adhoc_targets":false}` |
+| `POST /api/v1/sessions` | Open a session: `{"connection":"build-box"}`, or with ad-hoc targets on, `{"protocol":"ssh","target":"10.0.0.5","host_keys":["SHA256:…"]}`. `201` with `{"id":"…","role":"owner","stream_token":"…","expires_in":300}`; the owner has 60 seconds to open the session's stream |
+| `GET /api/v1/sessions/{id}` | The owner's view of the session: connection, protocol, backend, class, size and viewers |
+| `DELETE /api/v1/sessions/{id}` | Close the session, owner only; every stream of it ends |
+| `POST /api/v1/sessions/{id}/shares` | A share for `{"role":"viewer"}` or `"read-only"`, with `expires_in` in seconds (60 to 43200, an hour by default), owner only |
+| `GET /api/v1/connections/{id}/stream` | Open a session on the connection and stream it, as a protocol v1 WebSocket ([protocol.md](protocol.md)) |
+| `GET /api/v1/sessions/{id}/stream` | Join a session as a protocol v1 WebSocket: as its owner with the owner's access token or the stream token, with the role of a session token for the session, which a trusted issuer may mint too, or with a share |
 | `/api/v0/login`, `/api/v0/connect` | With `legacy_v0: true`, the v0 routes as a v0 file serves them |
+
+`ssh` and `vnc` sessions use `occamyd`'s native backends, and `rdp` and
+`telnet` sessions go through guacd. A connection the caller may not
+open, and another user's session, answer `404` as if they did not exist.
 
 API v1 answers every error with `{"error":{"code":"…","message":"…"}}`,
 where `code` is stable, such as `unauthorized`, `invalid_token`,
-`token_expired` or `not_found`, and `message` is for people. Routes that
-need a caller take the access token in `Authorization: Bearer`, never in
-the URL. The request log names each request's method, path, status,
-duration and peer, never its query string, headers or body.
+`token_expired`, `forbidden`, `not_found` or `limit_exceeded`, and
+`message` is for people. Routes that need a caller take the access token in
+`Authorization: Bearer`, never in the URL. A stream takes it in the
+`occamy.v1.token.` subprotocol instead, which a browser can send, or in
+`Authorization`, and refuses a bad token, `Origin` or `hello` with a
+protocol `close` after the upgrade. The request log names each
+request's method, path, status, duration and peer, never its query
+string, headers or body.
 
-On SIGINT or SIGTERM, `occamyd` stops accepting connections and gives
-requests in flight up to 5 seconds to finish. It then cuts what is left,
-such as a long CPU profile, with a warning, and exits with status 0. A
+On SIGINT or SIGTERM, `occamyd` stops accepting connections, ends every
+session, which sends its streams `close` with `server-shutdown`, and
+gives requests in flight up to 5 seconds to finish, and streams as long
+again. It then cuts what is left, such as a long CPU profile, with a
+warning, and exits with status 0. A
 second SIGINT or SIGTERM in those seconds ends it at once. If the signing key file
 does not exist, `occamyd` creates it and warns: tokens signed with an
 earlier key no longer verify.

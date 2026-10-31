@@ -34,7 +34,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   input by role (owner, viewer, read-only), keeps each viewer's small
   state as latest values, ends the session when the owner stays away or
   it idles, and a registry of sessions with share tokens that die with
-  them. Not served by any route yet.
+  them.
 - `internal/backend/guacd`, the guacd bridge of v1: a graphical backend
   that applies guacd's drawing and copies each frame into the session's
   framebuffer before it answers the frame's `sync`, so that guacd paces
@@ -43,8 +43,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   (but for those without a keysym, which guacd cannot take), pointer,
   wheel, text, clipboard and resizes into Guacamole instructions.
   `internal/guacamole`'s display now applies `cursor`,
-  reports damage as rectangles, and copies areas out. Not served by any
-  route yet.
+  reports damage as rectangles, and copies areas out.
 - A conformance corpus for the guacd bridge: guacd 1.6's VNC, RDP and
   SSH sessions on the bench stack, recorded with `go test -tags record`
   and replayed by `go test` without containers, which fails on any
@@ -62,7 +61,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   authenticates with key files or a password, which also answers a
   keyboard-interactive password challenge, and asks the session's owner
   for anything else. It feeds the shell's terminal output to the
-  session. `occamyd` does not use it yet.
+  session.
 - Version 1 configuration files (`version: 1`): sign-in through static
   users, OIDC and trusted issuers, a connection registry whose
   credentials name files or environment variables instead of holding
@@ -74,7 +73,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   session: immutable, versioned screen snapshots that share unchanged
   rows, and the diffs that bring a viewer's terminal from the screen it
   last received to the current one, sending scrolled lines as line feeds
-  so the client's scrollback fills. Not served by any route yet.
+  so the client's scrollback fills.
 - `internal/stream`, a viewer's connection in protocol v1: `welcome`,
   then the client's input and views applied as they come, and frames at
   the pace of the viewer's link. Small state never waits behind tiles,
@@ -85,7 +84,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   output already on the screen, and the terminal's answers to the
   shell's queries reach the shell. A client's `close` with a code other
   than `normal` is logged at info, since a browser's close frame
-  carries 1000 for most codes. Not served by any route yet.
+  carries 1000 for most codes.
 - A native VNC backend for protocol v1, `internal/backend/vnc`, in pure
   Go: RFB 3.3, 3.7 and 3.8 with the security types None and VNC
   Authentication, asking the session's owner for a password the
@@ -96,7 +95,6 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   UTF-8 when it is valid UTF-8. It checks every length the server sends
   before it reads or allocates, resizes the screen at most once an
   update and ten times a second, and bounds its queued input by bytes.
-  `occamyd` does not use it yet.
 - The native VNC backend decodes Tight, ZRLE and Hextile, and asks for
   them in that order before Raw. Tight stays lossless, since the backend
   asks for no JPEG quality, but JPEG and the gradient filter are decoded
@@ -186,6 +184,51 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   wildcard host and `localhost`. A `version` merged in with `<<` counts,
   and one outside the file's first YAML document is an error. A v0 file
   is served as before.
+- `occamyd` serves sessions and streams from a v1 file.
+  `GET /api/v1/connections` lists the connections the caller may open.
+  `POST /api/v1/sessions` opens a session on one, or on an ad-hoc target
+  that `adhoc_allowlist` covers when `allow_adhoc_targets` is on, and
+  `GET` and `DELETE /api/v1/sessions/{id}` and
+  `POST /api/v1/sessions/{id}/shares` read, close and share it for its
+  owner. `GET /api/v1/connections/{id}/stream` opens a session and
+  streams it in one request, and `GET /api/v1/sessions/{id}/stream`
+  joins a running one, both as protocol v1 WebSockets with the token in
+  a subprotocol, never in the URL, and `Origin` checked against
+  `origins`. Graphical streams offer `webp`, `jpeg`, `deflate` and
+  `raw`. ssh and vnc connections use the native backends, rdp and
+  telnet the guacd bridge. ssh connections need `host_keys` or
+  `insecure_ignore_host_key: true`. vnc connections take a `username`
+  for VeNCrypt's Plain, and a `tls` block for the server's certificate:
+  a CA file, pins by fingerprint, or, alone, an insecure mode for demos. A
+  session belongs to a subject of the issuer that signed its owner's
+  token, and of where the user signed in, and a trusted issuer may not
+  name a static user, in any case or normal form, unless its
+  `link_static_users` is on, nor use a subject that OIDC sign-in
+  would refuse. Every token names its user, and a trusted issuer's
+  session token, of any role, joins only its own users' sessions, or
+  a static user's when it is linked. A trusted issuer's `groups` count
+  only for the groups in its `allowed_groups`. A panic while handling
+  a client's message, in a stream's reader or a session's backend, ends
+  that stream or session with `internal-error` and is logged, rather
+  than ending occamyd. A viewer that acknowledges no frame, or takes
+  no message, for `streams.viewer_timeout` (30 s) gets the new
+  `close` `too-slow` 4008, and a hidden viewer of a terminal no
+  longer keeps the screen it was last sent, though one that may type
+  still keeps the screen of its last input. A static user's name follows the
+  same rule as an OIDC subject. An OIDC user
+  linked to a static user owns the static user's sessions, and occamyd's
+  own stream tokens carry `idp`. `limits` bounds the sessions occamyd
+  runs (1000) and a user owns (10), and the viewers (50) and unexpired
+  shares (100) of a session.
+  An ad-hoc target is allowed only on its protocol's port or the ports
+  its allowlist entry names, never on a loopback, link-local,
+  unspecified or multicast address, a cloud's metadata service, guacd,
+  or occamyd's own listeners unless an entry is that address,
+  and it takes only the display's `guacd.params`. `guacd.params`
+  refuses any parameter whose name holds `password`, `passphrase`,
+  `private-key` or `secret` in any case, but for a prompt's pattern
+  such as telnet's `password-regex`. A terminal is at most 1000 by 500 cells,
+  and a screen 8192 pixels a side.
 - Sign-in through an OpenID Connect provider, with `auth.oidc`: the
   authorization code flow with PKCE, the ID token's issuer, audience,
   expiry and signature checked by go-oidc with asymmetric algorithms
@@ -246,7 +289,22 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   decoding a server can ask for. It is tested live against xrdp under
   the `rdp_integration` build tag, which starts a container, and by
   replaying xrdp's recorded PDUs; NLA is not yet tested against Windows.
-  No backend uses it yet.
+- `internal/backend/rdp`, the native RDP backend's first phase
+  ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)),
+  on `internal/rdp`: NLA by default, or TLS, with the owner asked for
+  the credentials NLA needs and the configuration lacks; no routing
+  cookie, which names the user before TLS, unless `RoutingCookie` asks
+  for one for a load balancer; bitmap updates and the pointer drawn
+  into the session, pointer updates paced like bitmaps, a shape before
+  it is decoded; keys by physical code, with Control and Pause sent as
+  Break and the Power key dropped, text as Unicode keyboard events, and
+  the pointer and wheels, batched into input PDUs from a bounded queue
+  in writes of at most 1,024 events; Suppress Output while nobody can
+  see. A server's reason for ending the session decides how it ended,
+  even when a write fails as it hangs up. Clipboard and resize wait for
+  the virtual channels of its second phase. Nothing registers it in
+  occamyd until NLA has run end to end. The VNC and RDP backends share
+  one USB HID to scan code table, `internal/keymap`.
 
 ### Changed
 

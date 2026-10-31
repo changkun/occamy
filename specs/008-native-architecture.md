@@ -11,7 +11,7 @@ affects:
   - docs/
 effort: xlarge
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -176,6 +176,8 @@ Each component is a sub-design (see Design Breakdown):
 - **Native SSH, native VNC:** the first two native backends.
 - **RDP strategy:** guacd, helper process, or pure Go, decided by
   evaluation.
+- **Native RDP backend:** the backend over the strategy's pure-Go
+  client, then virtual channels, GFX without AVC, and the Windows check.
 - **Go client core:** a pure-Go protocol v1 client library for tests,
   tools and the Swift app.
 
@@ -239,6 +241,7 @@ Each beta reruns the benchmark, which also covers #18.
 | 8 | [Go client core](008-native-architecture/client-core.md) | Client library shaped for tests and a C ABI | protocol-v1, graphics-pipeline | medium | validated |
 | 9 | [RDP strategy](008-native-architecture/rdp-strategy.md) | guacd, helper process, or pure-Go RDP | session-core | large | validated |
 | 10 | [Protocol benchmark](008-native-architecture/benchmark.md) | Yardstick: scenarios, metrics, the Guacamole baseline, the 10x and 50 ms targets | — | large | complete |
+| 11 | [Native RDP backend](008-native-architecture/native-rdp-backend.md) | The backend over the RDP spike's client; channels, GFX without AVC, the Windows check | session-core, graphics-pipeline, rdp-strategy | large | validated |
 
 ```mermaid
 graph LR
@@ -253,6 +256,8 @@ graph LR
   P --> CC[8 Go client core]
   G --> CC
   S --> RDP[9 RDP strategy]
+  RDP --> NRDP[11 native RDP]
+  G --> NRDP
   BM[10 benchmark] --> G
   A[1 API and server stack]
 ```
@@ -261,4 +266,4 @@ graph LR
 baseline exists before any encoding or pacing is built. Alongside it, #1,
 #2 and #3, the foundations; the protocol is the longest-lived contract.
 Then #4 and #5. Then #6, #7 and #8. The #9 evaluation spike can run at any
-time alongside.
+time alongside; #11 follows it.

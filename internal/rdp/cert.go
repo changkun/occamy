@@ -103,6 +103,14 @@ func newTLSPolicy(c TLS, host string) (tlsPolicy, error) {
 	return p, nil
 }
 
+// Check returns the error Connect would return for t on a connection to
+// host, or nil if Connect accepts t, so that a configuration is checked
+// before anything connects.
+func (t TLS) Check(host string) error {
+	_, err := newTLSPolicy(t, host)
+	return err
+}
+
 // parsePin parses a pinned certificate or fingerprint.
 func parsePin(s string) ([sha256.Size]byte, error) {
 	var sum [sha256.Size]byte

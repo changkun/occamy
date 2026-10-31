@@ -40,6 +40,9 @@ occamy-record`), as the doc comment of
 bench desktop image and starts an xrdp container with Podman
 (`OCCAMY_CONTAINER_ENGINE=docker` for Docker) to test the RDP client
 against; `internal/rdp/integration_test.go` describes its settings.
+The same tag on `./internal/backend/rdp` tests the RDP backend against
+its own container; `internal/backend/rdp/integration_test.go` describes
+its settings.
 
 `make lint` runs golangci-lint v2 with the linters and formatters in
 `.golangci.yml`, as CI does. Code must be `gofmt`ed, with imports grouped

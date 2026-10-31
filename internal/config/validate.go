@@ -26,6 +26,8 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"changkun.de/x/occamy/internal/auth"
+	"changkun.de/x/occamy/internal/backend/ssh"
+	"changkun.de/x/occamy/internal/backend/vnc"
 )
 
 // Bounds of auth.access_token_lifetime. The upper bound is the longest
@@ -34,6 +36,10 @@ const (
 	MinAccessTokenLifetime = time.Minute
 	MaxAccessTokenLifetime = auth.DefaultMaxLifetime
 )
+
+// MinViewerTimeout is the shortest streams.viewer_timeout: a viewer
+// across a slow link may take seconds to acknowledge a large frame.
+const MinViewerTimeout = time.Second
 
 // MinBcryptCost is the lowest bcrypt cost a static user's hash may have.
 const MinBcryptCost = bcrypt.DefaultCost
@@ -141,10 +147,28 @@ func (f *File) validate(c *checker) {
 		c.add("allow_adhoc_targets", "needs adhoc_allowlist: list the networks and hosts that ad-hoc targets may reach")
 	}
 	for i, e := range f.AdhocAllowlist {
-		if !validPattern(e) {
-			c.add(fmt.Sprintf("adhoc_allowlist[%d]", i), "%q is not a CIDR range, an IP address, a host name or *.domain", e)
+		if _, err := ParseAllowEntry(e); err != nil {
+			c.add(fmt.Sprintf("adhoc_allowlist[%d]", i), "%v", err)
 		}
 	}
+	for _, l := range []struct {
+		path string
+		n    int
+	}{
+		{"limits.sessions", f.Limits.Sessions},
+		{"limits.sessions_per_user", f.Limits.SessionsPerUser},
+		{"limits.viewers_per_session", f.Limits.ViewersPerSession},
+		{"limits.shares_per_session", f.Limits.SharesPerSession},
+	} {
+		if l.n < 0 {
+			c.add(l.path, "must be at least 1, or 0 for the default")
+		}
+	}
+	f.Limits = f.Limits.WithDefaults()
+	if t := f.Streams.ViewerTimeout; t != 0 && t < MinViewerTimeout {
+		c.add("streams.viewer_timeout", "%s is less than %s", shortDuration(t), shortDuration(MinViewerTimeout))
+	}
+	f.Streams = f.Streams.WithDefaults()
 }
 
 func (a *Auth) validate(c *checker) {
@@ -175,6 +199,9 @@ func (a *Auth) validate(c *checker) {
 				issuers[ti.Issuer] = i
 			}
 		}
+		for j, g := range ti.AllowedGroups {
+			c.name(fmt.Sprintf("%s.allowed_groups[%d]", p, j), g)
+		}
 		if ti.PublicKeyFile == "" {
 			c.add(p+".public_key_file", "required")
 		} else if c.file(p+".public_key_file", ti.PublicKeyFile) {
@@ -190,6 +217,9 @@ func (a *Auth) validate(c *checker) {
 	for i, u := range a.Users {
 		p := fmt.Sprintf("auth.users[%d]", i)
 		if c.name(p+".name", u.Name) {
+			if !UsableName(u.Name) {
+				c.add(p+".name", "%q is not a usable name: it has characters that render as nothing, or is over %d bytes", u.Name, MaxNameBytes)
+			}
 			if j, ok := users[u.Name]; ok {
 				c.add(p+".name", "%q is already auth.users[%d]", u.Name, j)
 			} else {
@@ -255,14 +285,31 @@ func (f *File) validateGuacd(c *checker) {
 			c.add(p, "unknown protocol %q: use %s", protocol, protocolList)
 		}
 		for _, name := range slices.Sorted(maps.Keys(f.Guacd.Params[protocol])) {
-			switch name {
-			case "password", "passphrase", "private-key":
-				c.add(p+"."+name, "inline secrets are not allowed, so that the file can be committed: set credentials on each connection")
-			case "hostname", "port":
+			switch {
+			case secretParam(name):
+				c.add(p+"."+name, "inline secrets are not allowed, so that the file can be committed: set credentials on each connection, with password_file, password_env, private_key_file or prompt: true")
+			case strings.EqualFold(name, "hostname") || strings.EqualFold(name, "port"):
 				c.add(p+"."+name, "set from each connection's target")
 			}
 		}
 	}
+}
+
+// secretParam reports whether a guacd parameter holds a secret, such as
+// password, sftp-password, gateway-password, passphrase or
+// sftp-private-key, in any case. A name that ends in -regex, such as
+// telnet's password-regex, holds the pattern of a prompt instead.
+func secretParam(name string) bool {
+	name = strings.ToLower(name)
+	if strings.HasSuffix(name, "-regex") {
+		return false
+	}
+	for _, s := range []string{"password", "passphrase", "private-key", "secret"} {
+		if strings.Contains(name, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *File) validateConnections(c *checker) {
@@ -312,6 +359,10 @@ func (f *File) validateConnections(c *checker) {
 			cn.Target = t
 		}
 		c.credentials(p+".credentials", cn.Protocol, cn.Credentials)
+		if known {
+			c.hostKeys(p, cn)
+			c.connectionTLS(p+".tls", cn)
+		}
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
 	}
 	if o := f.Auth.OIDC; o != nil && o.RequireKnownUsers {
@@ -364,6 +415,28 @@ func SameName(a, b string) bool {
 	return strings.EqualFold(norm.NFC.String(a), norm.NFC.String(b))
 }
 
+// MaxNameBytes bounds a user name, in bytes of UTF-8. An OIDC sub is at
+// most 255 ASCII characters.
+const MaxNameBytes = 255
+
+// UsableName reports whether s can name a user: not empty, at most
+// MaxNameBytes bytes of UTF-8, of graphic characters that show, with
+// U+0020 the only space. Any other character would let a name pass for
+// another or break a log line, so it refuses control characters; format
+// characters (unicode.Cf: zero-width spaces and joiners, bidirectional
+// overrides, the soft hyphen); the other default-ignorable code points,
+// which render as nothing (the combining grapheme joiner, variation
+// selectors, the Hangul fillers); U+2800, the blank Braille pattern; the
+// line and paragraph separators; and the other spaces. It is the one
+// rule for every user's name: a static user's, an OIDC subject, and the
+// subject of any token occamyd accepts.
+func UsableName(s string) bool {
+	return s != "" && len(s) <= MaxNameBytes && utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool {
+		return !unicode.IsGraphic(r) || r != ' ' && unicode.IsSpace(r) ||
+			unicode.In(r, unicode.Other_Default_Ignorable_Code_Point, unicode.Variation_Selector) || r == '\u2800'
+	})
+}
+
 // KnownGroups returns the groups that f names: its static users' groups
 // and the groups in its connections' allow lists.
 func (f *File) KnownGroups() map[string]bool {
@@ -379,6 +452,62 @@ func (f *File) KnownGroups() map[string]bool {
 		}
 	}
 	return known
+}
+
+// hostKeys checks the host key policy of a connection: an ssh connection
+// pins host keys or ignores them explicitly, since the native SSH backend
+// accepts no other key, and other protocols have no host keys.
+func (c *checker) hostKeys(path string, cn *Connection) {
+	if cn.Protocol != "ssh" {
+		if len(cn.HostKeys) > 0 {
+			c.add(path+".host_keys", "only ssh connections have host keys")
+		}
+		if cn.InsecureIgnoreHostKey {
+			c.add(path+".insecure_ignore_host_key", "only ssh connections have host keys")
+		}
+		return
+	}
+	switch {
+	case len(cn.HostKeys) == 0 && !cn.InsecureIgnoreHostKey:
+		c.add(path+".host_keys", "required for ssh: list the server's host keys or their SHA-256 fingerprints (ssh-keyscan, ssh-keygen -l), or set insecure_ignore_host_key: true for a demo")
+	case len(cn.HostKeys) > 0 && cn.InsecureIgnoreHostKey:
+		c.add(path+".insecure_ignore_host_key", "set host_keys or insecure_ignore_host_key, not both")
+	}
+	for i, k := range cn.HostKeys {
+		if err := ssh.CheckHostKey(k); err != nil {
+			c.add(fmt.Sprintf("%s.host_keys[%d]", path, i), "%v", err)
+		}
+	}
+}
+
+// connectionTLS checks a vnc connection's certificate policy: pins
+// replace the roots that ca_file names, insecure_skip_verify replaces
+// both, as ssh's insecure_ignore_host_key replaces host_keys, and other
+// protocols have no tls.
+func (c *checker) connectionTLS(path string, cn *Connection) {
+	t := cn.TLS
+	if cn.Protocol != "vnc" {
+		if t.set() {
+			c.add(path, "only vnc connections have tls")
+		}
+		return
+	}
+	if t.CAFile != "" && len(t.Pins) > 0 {
+		c.add(path+".pins", "pins replace the roots: set ca_file or pins, not both")
+	}
+	if t.InsecureSkipVerify && (t.CAFile != "" || len(t.Pins) > 0) {
+		c.add(path+".insecure_skip_verify", "set ca_file or pins, or insecure_skip_verify, not both")
+	}
+	if c.file(path+".ca_file", t.CAFile) {
+		if _, err := t.RootCAs(); err != nil {
+			c.add(path+".ca_file", "%v", err)
+		}
+	}
+	for i, s := range t.Pins {
+		if err := vnc.CheckPin(s); err != nil {
+			c.add(fmt.Sprintf("%s.pins[%d]", path, i), "%v", err)
+		}
+	}
 }
 
 func (c *checker) credentials(path, protocol string, cr Credentials) {
@@ -671,6 +800,17 @@ func (c *checker) env(path, name string) {
 	}
 }
 
+// NormalizeTarget checks a target of protocol, host:port or a host
+// alone, and returns it as host:port with the protocol's default port
+// filled in, as ParseV1 stores the targets of connections.
+func NormalizeTarget(protocol, target string) (string, error) {
+	port, ok := defaultPorts[protocol]
+	if !ok {
+		return "", fmt.Errorf("unknown protocol %q: use %s", protocol, protocolList)
+	}
+	return normalizeTarget(target, port)
+}
+
 // normalizeTarget checks a connection target, host:port or a host alone,
 // and returns it as host:port with defaultPort filled in. With no default
 // port, for an unknown protocol, a target without a port is returned as
@@ -727,17 +867,4 @@ func validHost(h string) bool {
 		}
 	}
 	return true
-}
-
-// validPattern reports whether e is an entry of adhoc_allowlist: a CIDR
-// range, an IP address, a host name, or *. and a domain.
-func validPattern(e string) bool {
-	if _, err := netip.ParsePrefix(e); err == nil {
-		return true
-	}
-	if d, ok := strings.CutPrefix(e, "*."); ok {
-		_, err := netip.ParseAddr(d)
-		return err != nil && validHost(d)
-	}
-	return validHost(e)
 }

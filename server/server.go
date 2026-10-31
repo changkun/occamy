@@ -18,11 +18,14 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"changkun.de/x/occamy/internal/auth"
 	"changkun.de/x/occamy/internal/config"
+	"changkun.de/x/occamy/internal/session"
 )
 
 // Limits of the public listener. ReadTimeout and WriteTimeout end
@@ -49,10 +52,29 @@ var (
 // server is occamyd serving a v1 file.
 type server struct {
 	verifier *auth.Verifier
+	signer   *auth.Signer
+	ids      identities // the principals that tokens speak for
 	signIn   *staticUsers
 	oidc     *oidcSignIn // nil unless auth.oidc
 	tls      *tls.Config // nil serves plain HTTP
 	v0       *proxy      // nil unless legacy_v0
+
+	// API v1's sessions and streams.
+	connections []config.Connection
+	origins     map[string]bool // origins whose pages may open streams, besides occamyd's own
+	adhoc       *allowlist      // nil unless allow_adhoc_targets
+	backends    backends
+	registry    *session.Registry
+	stop        context.CancelFunc // ends every session, at shutdown
+	streamTTL   time.Duration      // of the stream token POST /api/v1/sessions returns
+	limits      config.Limits
+	streamsCfg  config.Streams
+
+	mu       sync.Mutex
+	sessions map[string]*sessionInfo // by ID, while they run
+	owned    map[principal]int       // the sessions each user owns, while they run
+	running  int                     // the sessions that count toward limits.sessions
+	streams  tracker                 // the streams being served
 }
 
 // Run serves a v1 file until SIGINT or SIGTERM, then drains requests in
@@ -99,10 +121,28 @@ func Run(f *config.File) error {
 	if dln != nil {
 		log.Printf("serving expvar and pprof at http://%s/debug/", dln.Addr())
 	}
-	err = serveUntil(ctx, drainTimeout, newPublicServer(s.routes(), s.tls), ln, debug, dln)
+	err = serveUntil(ctx, drainTimeout, s.publicServer(), ln, debug, dln)
+	// Shutdown neither waits for nor closes hijacked connections, so the
+	// streams, which the sessions' ends are closing, get as long again.
+	if !s.streams.wait(drainTimeout) {
+		log.Printf("warning: streams still open after a further %v were cut", drainTimeout)
+	}
 	log.Println("occamy is down, good bye!")
 	return err
 }
+
+// publicServer returns the public listener's server, which ends every
+// session, and with them their streams, when it shuts down: Shutdown
+// does not reach the hijacked connections of streams.
+func (s *server) publicServer() *http.Server {
+	public := newPublicServer(s.routes(), s.tls)
+	public.RegisterOnShutdown(s.shutdown)
+	return public
+}
+
+// shutdown ends every session, which sends their streams close with
+// server-shutdown.
+func (s *server) shutdown() { s.stop() }
 
 // listen opens the public listener and, only if debug.address is set,
 // the debug listener; dln is nil otherwise.
@@ -162,9 +202,38 @@ func newServer(f *config.File) (*server, error) {
 	if err != nil {
 		return nil, err
 	}
+	ctx, stop := context.WithCancel(context.Background())
+	limits := f.Limits.WithDefaults()
+	registry := session.NewRegistry(ctx)
+	registry.MaxShares = limits.SharesPerSession
 	s := &server{
-		verifier: auth.NewVerifier(auth.Audience, keys),
-		signIn:   signIn,
+		verifier:    auth.NewVerifier(auth.Audience, keys),
+		signer:      signer,
+		ids:         newIdentities(f),
+		signIn:      signIn,
+		connections: f.Connections,
+		origins:     map[string]bool{},
+		backends:    newBackends(f.Guacd),
+		registry:    registry,
+		stop:        stop,
+		streamTTL:   streamTokenLifetime,
+		limits:      limits,
+		streamsCfg:  f.Streams.WithDefaults(),
+		sessions:    map[string]*sessionInfo{},
+		owned:       map[principal]int{},
+	}
+	for _, o := range f.Origins {
+		s.origins[strings.ToLower(o)] = true
+	}
+	if f.AllowAdhocTargets {
+		if s.adhoc, err = newAllowlist(f.AdhocAllowlist); err != nil {
+			return nil, fmt.Errorf("adhoc_allowlist: %w", err)
+		}
+		// guacd and occamyd's own listeners stay out of a range's reach.
+		if err := s.adhoc.reserve(ctx, f.Guacd.Address, f.Listen, f.Debug.Address); err != nil {
+			// #nosec G706 -- the operator's configuration, not a client's input.
+			log.Printf("warning: adhoc_allowlist: not every address of guacd and occamyd's listeners is known, so a range may open it: %v", err)
+		}
 	}
 	if f.TLS.Cert != "" || f.TLS.Key != "" {
 		cert, err := tls.LoadX509KeyPair(f.TLS.Cert, f.TLS.Key)
@@ -218,6 +287,8 @@ func (s *server) routes() http.Handler {
 	if s.oidc != nil {
 		s.oidc.register(mux)
 	}
+	s.registerSessions(mux)
+	s.registerStreams(mux)
 	if s.v0 != nil {
 		s.v0.register(mux)
 	}

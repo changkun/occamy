@@ -21,8 +21,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
@@ -84,7 +82,7 @@ const (
 	maxProviderBody = 1 << 20
 	// maxSubject bounds the length of a user name from the provider; an
 	// OIDC sub is at most 255 ASCII characters.
-	maxSubject = 255
+	maxSubject = config.MaxNameBytes
 	// maxLogged bounds what of the provider's or a client's text reaches
 	// the log.
 	maxLogged = 256
@@ -560,21 +558,10 @@ func (o *oidcSignIn) groupsOf(user string, claims map[string]json.RawMessage) ([
 	return slices.Compact(groups), nil
 }
 
-// validSubject reports whether s can name a user: not empty, at most
-// maxSubject bytes of UTF-8, of graphic characters that show, with U+0020
-// the only space. Any other character would let a name pass for another
-// or break a log line, so it refuses control characters; format
-// characters (unicode.Cf: zero-width spaces and joiners, bidirectional
-// overrides, the soft hyphen); the other default-ignorable code points,
-// which render as nothing (the combining grapheme joiner, variation
-// selectors, the Hangul fillers); U+2800, the blank Braille pattern; the
-// line and paragraph separators; and the other spaces.
-func validSubject(s string) bool {
-	return s != "" && len(s) <= maxSubject && utf8.ValidString(s) && !strings.ContainsFunc(s, func(r rune) bool {
-		return !unicode.IsGraphic(r) || r != ' ' && unicode.IsSpace(r) ||
-			unicode.In(r, unicode.Other_Default_Ignorable_Code_Point, unicode.Variation_Selector) || r == '\u2800'
-	})
-}
+// validSubject reports whether s can name a user, by config.UsableName:
+// the one rule for the names of static users, OIDC users and trusted
+// issuers' users.
+func validSubject(s string) bool { return config.UsableName(s) }
 
 // pend keeps a signed-in user for its client to collect, and returns the
 // one-time code to collect it with. It sweeps expired codes, and drops

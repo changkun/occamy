@@ -78,8 +78,8 @@ and adds:
   parameter is at most 2731 characters and the request line stays well
   within the 8 KiB that common proxies allow.
 - the header `Sec-WebSocket-Protocol` with two subprotocols:
-  `occamy.v1`, and `occamy.v1.token.` followed by the access or share
-  token in base64url without padding. The token never goes in the URL,
+  `occamy.v1`, and `occamy.v1.token.` followed by the token, an access
+  token, a session token or a share, in base64url without padding. The token never goes in the URL,
   which proxies and servers log. A native client may instead send
   `Authorization: Bearer <token>` and offer `occamy.v1` alone.
 
@@ -109,9 +109,10 @@ one that is not base64url, and it never logs a token.
 
 ### The response
 
-The server checks `Origin`, authenticates the token, decodes `hello`,
-and answers `101 Switching Protocols` with `Sec-WebSocket-Protocol:
-occamy.v1` alone. It then sends, without waiting:
+The server checks `Origin`, finds the token, decodes `hello`, and
+answers `101 Switching Protocols` with `Sec-WebSocket-Protocol:
+occamy.v1` alone. It then authenticates the token, opens or joins the
+session, and sends, without waiting:
 
 1. `welcome`, with the viewer's ID and role, the session's class and ID,
    and the agreed [capabilities](#capabilities);
@@ -130,7 +131,9 @@ with an HTTP error, since it cannot speak to the client. If the token,
 completes the upgrade, sends `close` with `unauthorized`, `forbidden`,
 `protocol-error` or `unsupported`, and closes the WebSocket with the
 same code, because a browser cannot read the HTTP status of a refused
-upgrade.
+upgrade. A client that does not answer the WebSocket's close at once
+may find the connection dropped. Until the server has let a client in,
+it reads no message larger than the smallest maximum message size.
 
 `hello` sent as a WebSocket message, or a second `welcome`, is a
 protocol error.
@@ -474,7 +477,9 @@ fd ff ff ff              # dy: -3
 
 Type 0x0107. Asks the remote to change the screen's size, such as when
 the client's window changes. The remote may refuse or pick another
-size; `resize` reports what it did.
+size; `resize` reports what it did. `occamyd` asks for at most 8192
+pixels a side, or 1000 columns and 500 rows, and takes a larger request,
+or a hello's larger size, as that bound.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -846,7 +851,8 @@ client's scrollback fills.
 Type 0x0209. Replaces the client's terminal, as part of a frame: the
 client resets its terminal and feeds it the data, which reproduces the
 server's screen, cursor, attributes, modes and alternate screen. A
-client gets one in its first frame.
+client gets one in its first frame, and may get another at any frame,
+as occamyd sends one in a client's first frame after it was hidden.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1202,6 +1208,17 @@ the window if the window is full. A viewer therefore never has more than
 `protocol-error` a server that sends more. A client that cannot show
 frames as fast as they come keeps them unacknowledged meanwhile, which
 holds the server back instead of queueing stale frames.
+
+A client that stops acknowledging altogether is closed instead: the
+server keeps what it last sent each viewer, a terminal's whole screen,
+until the viewer acknowledges something newer. A viewer that leaves a
+frame unacknowledged and sends no `frame-ack` for the server's viewer
+timeout, or that takes no message for that long, gets `close`
+`too-slow`, hidden or not. A hidden client gets no new frames, but
+acknowledges the frames it was sent as they arrive, since it shows
+none of them: a browser tab in the background, for one, still gets
+its messages though it no longer draws. occamyd's viewer timeout is
+30 s unless configured otherwise.
 
 ### Bytes in flight
 

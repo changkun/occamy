@@ -13,6 +13,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/jpeg"
+	"log/slog"
 	"slices"
 	"sync"
 	"testing"
@@ -848,6 +849,49 @@ func (c *stuck) ReadMessage(ctx context.Context) ([]byte, error) {
 	}
 }
 
+// panicky is a connection whose reads panic, as a bug in handling a
+// client's message would on the reader's goroutine, and which keeps what
+// was written last.
+type panicky struct {
+	mu   sync.Mutex
+	last []byte
+}
+
+func (c *panicky) WriteMessage(_ context.Context, p []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.last = slices.Clone(p)
+	return nil
+}
+
+func (*panicky) ReadMessage(context.Context) ([]byte, error) { panic("the reader's bug") }
+
+// A panic on the reader's goroutine, which net/http's recover does not
+// reach, ends the stream with internal-error rather than occamyd.
+func TestReaderPanics(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		s, owner, err := session.Start(ctx, session.Config{Backend: backendtest.NewScreen(200, 150, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		c := &panicky{}
+		err = Serve(ctx, c, owner, visible, Config{Logger: slog.New(slog.DiscardHandler)})
+		var p session.PanicError
+		if !errors.As(err, &p) || p.Value != "the reader's bug" {
+			t.Errorf("Serve returned %v, want the reader's panic", err)
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		m, err := protocol.Decode(c.last, protocol.ServerMessages(), protocol.Limits{})
+		if cl, ok := m.(*protocol.Close); !ok || cl.Code != protocol.CloseInternalError {
+			t.Errorf("last message %#v %v, want close internal-error", m, err)
+		}
+	})
+}
+
 // Serve returns after a protocol error even if the client stopped
 // reading, without waiting for its context.
 func TestCloseTimeout(t *testing.T) {
@@ -872,6 +916,188 @@ func TestCloseTimeout(t *testing.T) {
 			}
 		case <-time.After(time.Hour):
 			t.Fatal("Serve still blocked an hour after the protocol error")
+		}
+	})
+}
+
+// stallConfig is the configuration of the stall tests: a short viewer
+// timeout, and no log of the viewers dropped.
+var stallConfig = Config{SessionID: "s1", ViewerTimeout: 2 * time.Second, Logger: slog.New(slog.DiscardHandler)}
+
+// servedErr reports what Serve returned, or false if it still serves.
+func (r *rig) servedErr() (error, bool) {
+	select {
+	case err := <-r.served:
+		r.served <- err // for the cleanup
+		return err, true
+	default:
+		return nil, false
+	}
+}
+
+// A visible viewer that acknowledges no frame for the viewer timeout is
+// dropped with too-slow, and one that acknowledges its frames stays.
+func TestStalledViewer(t *testing.T) {
+	for _, acks := range []bool{false, true} {
+		t.Run(fmt.Sprintf("acks=%v", acks), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				r := newRigConfig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 64, 50e6, time.Millisecond, visible, stallConfig)
+				r.cl.mu.Lock()
+				r.cl.noAcks = !acks
+				r.cl.mu.Unlock()
+				time.Sleep(10 * time.Second)
+				synctest.Wait()
+				err, done := r.servedErr()
+				r.cl.mu.Lock()
+				defer r.cl.mu.Unlock()
+				if acks {
+					if done {
+						t.Fatalf("Serve returned %v for a viewer that acknowledges its frames", err)
+					}
+					return
+				}
+				if !errors.Is(err, ErrStalled) {
+					t.Fatalf("Serve returned %v, %v; want ErrStalled", err, done)
+				}
+				if r.cl.close == nil || r.cl.close.Code != protocol.CloseTooSlow {
+					t.Errorf("close %+v, want too-slow", r.cl.close)
+				}
+				// The first frame ends within a few milliseconds: the
+				// viewer goes the viewer timeout after it.
+				if n := len(r.cl.frames); n == 0 || r.cl.frames[0].at > 50*time.Millisecond {
+					t.Fatalf("frames %+v, want the first within 50ms", r.cl.frames)
+				}
+			})
+		})
+	}
+}
+
+// The viewer goes when its timeout has passed, not before.
+func TestStalledViewerTimely(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRigConfig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 64, 50e6, time.Millisecond, visible, stallConfig)
+		r.cl.mu.Lock()
+		r.cl.noAcks = true
+		r.cl.mu.Unlock()
+		time.Sleep(stallConfig.ViewerTimeout - 100*time.Millisecond)
+		synctest.Wait()
+		if err, done := r.servedErr(); done {
+			t.Fatalf("Serve returned %v before the viewer timeout", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+		synctest.Wait()
+		if err, _ := r.servedErr(); !errors.Is(err, ErrStalled) {
+			t.Fatalf("Serve returned %v 100ms after the viewer timeout, want ErrStalled", err)
+		}
+	})
+}
+
+// An ack starts the viewer's time over, though a frame it does not cover
+// has awaited one for longer.
+func TestStalledAckRestarts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRigConfig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 64, 50e6, time.Millisecond, visible, stallConfig)
+		r.cl.mu.Lock()
+		r.cl.noAcks = true
+		r.cl.mu.Unlock()
+		time.Sleep(stallConfig.ViewerTimeout * 3 / 4)
+		r.cl.mu.Lock()
+		frames := slices.Clone(r.cl.frames)
+		r.cl.mu.Unlock()
+		if len(frames) < 2 {
+			t.Fatalf("%d frames, want a second awaiting an ack after the first's", len(frames))
+		}
+		r.cl.send(t, protocol.FrameAck{FrameID: frames[0].id})
+		time.Sleep(stallConfig.ViewerTimeout - 100*time.Millisecond)
+		synctest.Wait()
+		if err, done := r.servedErr(); done {
+			t.Fatalf("Serve returned %v though the viewer acknowledged a frame within the timeout", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+		synctest.Wait()
+		if err, _ := r.servedErr(); !errors.Is(err, ErrStalled) {
+			t.Fatalf("Serve returned %v, want ErrStalled once the timeout passed since the ack", err)
+		}
+	})
+}
+
+// Acks of frames the viewer was never sent, far ahead or long behind,
+// do not keep its time from running.
+func TestStalledBogusAcks(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRigConfig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 64, 50e6, time.Millisecond, visible, stallConfig)
+		r.cl.mu.Lock()
+		r.cl.noAcks = true
+		r.cl.mu.Unlock()
+		for range 12 {
+			time.Sleep(stallConfig.ViewerTimeout / 4)
+			synctest.Wait()
+			if _, done := r.servedErr(); done {
+				break
+			}
+			for _, id := range []uint32{1 << 30, 0} {
+				r.cl.send(t, protocol.FrameAck{FrameID: id})
+			}
+		}
+		synctest.Wait()
+		if err, _ := r.servedErr(); !errors.Is(err, ErrStalled) {
+			t.Fatalf("Serve returned %v for a viewer that acknowledges only frames it was not sent; want ErrStalled", err)
+		}
+	})
+}
+
+// A hidden viewer's time runs as a visible one's: hidden, it gets no
+// new frames, but must acknowledge those it was sent; and one that does
+// stays, hidden, for as long as it likes.
+func TestStalledHidden(t *testing.T) {
+	for _, acks := range []bool{false, true} {
+		t.Run(fmt.Sprintf("acks=%v", acks), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				r := newRigConfig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 64, 50e6, time.Millisecond, visible, stallConfig)
+				r.cl.mu.Lock()
+				r.cl.noAcks = !acks
+				r.cl.mu.Unlock()
+				time.Sleep(stallConfig.ViewerTimeout / 4)
+				r.cl.send(t, protocol.View{Visible: false})
+				time.Sleep(stallConfig.ViewerTimeout / 2)
+				synctest.Wait()
+				if err, done := r.servedErr(); done {
+					t.Fatalf("Serve returned %v before the viewer timeout", err)
+				}
+				time.Sleep(10 * time.Second)
+				synctest.Wait()
+				err, done := r.servedErr()
+				if acks && done {
+					t.Fatalf("Serve returned %v for a hidden viewer that acknowledged its frames", err)
+				}
+				if !acks && !errors.Is(err, ErrStalled) {
+					t.Fatalf("Serve returned %v, %v for a hidden viewer that acknowledged nothing; want ErrStalled", err, done)
+				}
+			})
+		})
+	}
+}
+
+// A write that blocks for the viewer timeout drops the viewer, though no
+// frame was completed for it to leave unacknowledged.
+func TestBlockedWrite(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		s, owner, err := session.Start(ctx, session.Config{Backend: backendtest.NewScreen(200, 150, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		c := &stuck{read: make(chan []byte, 1)}
+		start := time.Now()
+		err = Serve(ctx, c, owner, visible, stallConfig)
+		if !errors.Is(err, ErrStalled) {
+			t.Fatalf("Serve returned %v, want ErrStalled", err)
+		}
+		// The close for the stalled viewer blocks too, for closeTimeout.
+		if d, most := time.Since(start), stallConfig.ViewerTimeout+closeTimeout; d < stallConfig.ViewerTimeout || d > most {
+			t.Errorf("Serve returned after %v, want between %v and %v", d, stallConfig.ViewerTimeout, most)
 		}
 	})
 }
@@ -985,4 +1211,74 @@ func TestInputJoinsPending(t *testing.T) {
 			t.Errorf("key's effect after %v, want at most %v", arrived-pressed, bound)
 		}
 	})
+}
+
+// failing is a terminal backend whose remote cannot be reached.
+type failing struct{ backend.Backend }
+
+func (failing) Run(context.Context, backend.Sink) error { return errors.New("connection refused") }
+
+// sent records the messages written to it.
+type sent struct {
+	mu sync.Mutex
+	p  [][]byte
+}
+
+func (c *sent) ReadMessage(ctx context.Context) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func (c *sent) WriteMessage(_ context.Context, p []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.p = append(c.p, slices.Clone(p))
+	return nil
+}
+
+// A session that ends before its stream begins, as when the backend
+// fails at once, closes the stream with the session's end, not with an
+// internal error.
+func TestEndedBeforeServe(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, owner, err := session.Start(t.Context(), session.Config{Backend: failing{backendtest.NewTerminal(80, 24, 0)}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-s.Done()
+		c := &sent{}
+		if err := Serve(t.Context(), c, owner, termHello, Config{}); err != nil {
+			t.Errorf("Serve returned %v", err)
+		}
+		if len(c.p) != 1 {
+			t.Fatalf("sent %d messages, want close", len(c.p))
+		}
+		var m protocol.Close
+		h, body, err := protocol.Split(c.p[0], protocol.Limits{})
+		if err != nil || h.Type != protocol.TypeClose || m.Decode(body, protocol.Limits{}) != nil {
+			t.Fatalf("sent %x, want close", c.p[0])
+		}
+		if m.Code != protocol.CloseBackendFailed || m.Reason != session.Failed.String() {
+			t.Errorf("close %+v, want backend failed", m)
+		}
+	})
+}
+
+// A resize-request is clamped to what a backend of the session's class
+// is asked for.
+func TestBoundResize(t *testing.T) {
+	for _, tc := range []struct {
+		class         backend.Class
+		width, height int
+		want          backend.Resize
+	}{
+		{backend.Terminal, 80, 24, backend.Resize{Width: 80, Height: 24}},
+		{backend.Terminal, 65535, 65535, backend.Resize{Width: terminal.MaxCols, Height: terminal.MaxRows}},
+		{backend.Graphical, 1920, 1080, backend.Resize{Width: 1920, Height: 1080}},
+		{backend.Graphical, 65535, 65535, backend.Resize{Width: backend.MaxResizeSide, Height: backend.MaxResizeSide}},
+	} {
+		if got := boundResize(tc.class, tc.width, tc.height); got != tc.want {
+			t.Errorf("boundResize(%v, %d, %d) = %+v, want %+v", tc.class, tc.width, tc.height, got, tc.want)
+		}
+	}
 }
