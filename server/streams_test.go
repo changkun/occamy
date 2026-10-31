@@ -1048,7 +1048,7 @@ func TestStreamCodecs(t *testing.T) {
 		tile          protocol.Codec // of the fake's few colours
 	}{
 		{[]protocol.Codec{raw}, []protocol.Codec{raw}, raw},
-		{[]protocol.Codec{png, raw, cached, deflate, webp}, []protocol.Codec{raw, deflate, webp}, deflate},
+		{[]protocol.Codec{png, raw, cached, deflate, webp}, []protocol.Codec{raw, cached, deflate, webp}, deflate},
 		{[]protocol.Codec{webp, jpeg}, []protocol.Codec{webp, jpeg}, webp},
 		{[]protocol.Codec{jpeg}, []protocol.Codec{jpeg}, jpeg},
 	} {

@@ -296,6 +296,8 @@ func invalidMessages() []invalidMessageVector {
 		v("tile with a video tier codec", "server", nil, tile(1, 1, 0x80, 0, []byte{1})),
 		v("tile with a slot past the cache", "server", small, tile(1, 1, 3, 9, []byte{1})),
 		v("tile with a slot and no cache", "server", &limitsVector{}, tile(1, 1, 3, 1, []byte{1})),
+		v("tile in a slot of more than 4096 pixels", "server", nil, tile(65, 64, 3, 1, []byte{1})),
+		v("cached tile of more than 4096 pixels", "server", nil, tile(2, 2049, 6, 1, nil)),
 		v("cached tile without a slot", "server", nil, tile(64, 64, 6, 0, nil)),
 		v("cached tile with a payload", "server", nil, tile(64, 64, 6, 5, []byte{1})),
 		v("raw tile with a byte too few", "server", nil, tile(2, 2, 1, 0, pixels(15))),

@@ -32,9 +32,9 @@ func (m *Resize) Decode(body []byte, _ Limits) error {
 // Tile draws a rectangle of pixels at X, Y.
 //
 // Decode checks that W and H are at least 1 and at most the maximum
-// texture size, that Slot is within the cache slots, that a cached tile
-// names a slot and has no payload, and that a raw tile has 4 bytes per
-// pixel.
+// texture size, that Slot is within the cache slots, that a tile with a
+// slot covers at most MaxCachedPixels, that a cached tile names a slot
+// and has no payload, and that a raw tile has 4 bytes per pixel.
 type Tile struct {
 	FrameID    uint32
 	X, Y, W, H uint16
@@ -81,6 +81,9 @@ func (m *Tile) Decode(body []byte, l Limits) error {
 	m.Payload = d.ReadBytes()
 	if err := d.Finish(); err != nil {
 		return err
+	}
+	if m.Slot != 0 && int(m.W)*int(m.H) > MaxCachedPixels {
+		d.failf(ErrInvalid, "%dx%d tile in cache slot %d, more than %d pixels", m.W, m.H, m.Slot, MaxCachedPixels)
 	}
 	switch m.Codec {
 	case CodecCached:

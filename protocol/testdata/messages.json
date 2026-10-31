@@ -872,6 +872,18 @@
       "error": "invalid"
     },
     {
+      "name": "tile in a slot of more than 4096 pixels",
+      "from": "server",
+      "hex": "030200000100000000000000410040000301000100000001",
+      "error": "invalid"
+    },
+    {
+      "name": "cached tile of more than 4096 pixels",
+      "from": "server",
+      "hex": "0302000001000000000000000200010806010000000000",
+      "error": "invalid"
+    },
+    {
       "name": "cached tile without a slot",
       "from": "server",
       "hex": "0302000001000000000000004000400006000000000000",

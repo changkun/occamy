@@ -61,7 +61,11 @@ export interface Transport {
   send(msg: Uint8Array): void
   /** close closes the connection with a close code. */
   close(code: number, reason: string): void
-  /** The session sets these. A text message arrives as a string. */
+  /**
+   * The session sets these. A text message arrives as a string, and a
+   * binary one as an ArrayBuffer that the session keeps: the transport
+   * must not reuse it.
+   */
   onmessage: ((data: ArrayBuffer | string) => void) | null
   /**
    * onclose reports that the connection closed: with the peer's close
@@ -75,6 +79,9 @@ export const DEFAULT_NAME = 'occamy-web'
 
 /** The largest graphical screen a session takes, in pixels: 8192×8192, 256 MiB. */
 export const DEFAULT_MAX_PIXELS = 8192 * 8192
+
+/** The tile cache slots a session offers unless Options.cacheSlots says otherwise: 16 MiB of tiles at most. */
+export const DEFAULT_CACHE_SLOTS = 1024
 
 // The least the session holds of undelivered frames and events before
 // it takes the server for broken, and the least work it allows a frame.
@@ -112,10 +119,17 @@ export interface Options {
   hidden?: boolean
   /**
    * The codecs to offer, in order of preference; the decoder's codecs()
-   * by default. Raw is always offered, last, and cached never, since the
-   * client keeps no tile cache.
+   * by default. Raw is always offered after them, and then cached, unless
+   * the client keeps no tile cache.
    */
   codecs?: number[]
+  /**
+   * The tile cache slots the client offers; DEFAULT_CACHE_SLOTS by
+   * default, and 0 for no cache. A slot holds the pixels of one tile of
+   * at most 4096 pixels, 16 KiB, which the server can then draw again by
+   * naming the slot.
+   */
+  cacheSlots?: number
   /** The largest tile or cursor side the client decodes; 4096 by default. */
   maxTextureSize?: number
   /** Device pixels per CSS pixel in hundredths, such as 200; 0 states none (100). */
@@ -151,8 +165,13 @@ export function helloFor(options: Options, codecs: number[]): Hello {
     }
   }
   offered.push(Codec.Raw)
+  const slots = options.cacheSlots ?? DEFAULT_CACHE_SLOTS
+  if (slots > 0) {
+    offered.push(Codec.Cached)
+  }
   const caps = emptyCapabilities()
   caps.codecs = offered
+  caps.cacheSlots = slots
   caps.maxTextureSize = options.maxTextureSize ?? 0
   caps.terminal = 1
   caps.pixelRatio = options.pixelRatio ?? 0
@@ -175,6 +194,9 @@ export function checkOptions(o: Options): void {
   const u16 = (v: number | undefined): boolean => v === undefined || (Number.isInteger(v) && v >= 0 && v <= 0xffff)
   if (![o.width, o.height, o.cols, o.rows, o.maxTextureSize, o.pixelRatio].every(u16)) {
     throw new RangeError('occamy: a size or ratio outside 0 to 65535')
+  }
+  if (!u16(o.cacheSlots)) {
+    throw new RangeError('occamy: cache slots outside 0 to 65535')
   }
   if (o.frameWindow !== undefined && !(Number.isInteger(o.frameWindow) && o.frameWindow >= 0 && o.frameWindow <= 0xff)) {
     throw new RangeError('occamy: a frame window outside 0 to 255')
@@ -212,6 +234,7 @@ function agree(w: Capabilities, offered: Capabilities): Capabilities {
   a.pixelRatio = offered.pixelRatio
   a.frameWindow = Math.min(orDefault(w.frameWindow, DEFAULT_FRAME_WINDOW), orDefault(offered.frameWindow, DEFAULT_FRAME_WINDOW))
   a.maxMessageSize = Math.min(orDefault(w.maxMessageSize, DEFAULT_MAX_MESSAGE_SIZE), orDefault(offered.maxMessageSize, DEFAULT_MAX_MESSAGE_SIZE))
+  a.cacheSlots = Math.min(w.cacheSlots, offered.cacheSlots)
   return a
 }
 
@@ -255,6 +278,15 @@ interface Job {
   done: Promise<void>
   pixels: Pixels | null
   error: Error | null
+}
+
+// A tile cache slot: the tile stored in it, width × height, whose pixels
+// are raw, or job's once it is decoded.
+interface Slot {
+  width: number
+  height: number
+  raw: Uint8Array | null
+  job: Job | null
 }
 
 type Op =
@@ -328,6 +360,7 @@ export class Session {
   private screenW = 0
   private screenH = 0
   private fb: Framebuffer = { width: 0, height: 0, data: new Uint8ClampedArray(0) }
+  private readonly slots = new Map<number, Slot>() // the tile cache
 
   // The writer's state.
   private seq = 0
@@ -447,9 +480,11 @@ export class Session {
     })
   }
 
-  // unsupported says why the client cannot show the session, or "".
+  // unsupported says why the client cannot show the session, or "". A
+  // cached tile names a slot that an earlier tile filled, so a graphical
+  // session needs a codec in common besides cached.
   private unsupported(): string {
-    if (this.sessionClass === SessionClass.Graphical && this.capabilities.codecs.length === 0) {
+    if (this.sessionClass === SessionClass.Graphical && !this.capabilities.codecs.some((c) => c !== Codec.Cached)) {
       return 'no codec in common'
     }
     if (this.sessionClass === SessionClass.Terminal && this.capabilities.terminal === 0) {
@@ -522,7 +557,7 @@ export class Session {
       case 'resize':
         return this.onResize(m.width, m.height, n)
       case 'tile':
-        return this.tile(m.frameId, { x: m.x, y: m.y, width: m.w, height: m.h }, m.codec, m.payload, n)
+        return this.tile(m.frameId, { x: m.x, y: m.y, width: m.w, height: m.h }, m.codec, m.slot, m.payload, n)
       case 'copy-rect':
         return this.copyRect(m.frameId, m.srcX, m.srcY, { x: m.dstX, y: m.dstY, width: m.w, height: m.h }, n)
       case 'frame-end':
@@ -606,7 +641,10 @@ export class Session {
     }
   }
 
-  private tile(frameId: number, r: Rect, codec: Codec, payload: Uint8Array, n: number): void {
+  // tile adds a tile to the open frame. One that names a slot is stored
+  // in it from now on, whatever becomes of its frame, so that a cached
+  // tile later in the frame draws it.
+  private tile(frameId: number, r: Rect, codec: Codec, slot: number, payload: Uint8Array, n: number): void {
     if (!this.graphical()) {
       throw new ProtocolError('invalid', 'a tile in a terminal session')
     }
@@ -616,13 +654,29 @@ export class Session {
       throw new ProtocolError('invalid', `a tile of codec ${codec}, which was not agreed`)
     }
     const pixels = 4 * r.width * r.height
+    if (codec === Codec.Cached) {
+      const c = this.slots.get(slot)
+      if (c === undefined || c.width !== r.width || c.height !== r.height) {
+        const holds = c === undefined ? 'nothing' : `${c.width}x${c.height}`
+        throw new ProtocolError('invalid', `a ${r.width}x${r.height} tile from cache slot ${slot}, which holds ${holds}`)
+      }
+      return this.add({ kind: 'tile', rect: r, raw: c.raw, job: c.job, bytes: n, work: pixels })
+    }
     if (codec === Codec.Raw) {
-      return this.add({ kind: 'tile', rect: r, raw: payload, job: null, bytes: n, work: pixels })
+      // The payload views the message's buffer, which the session keeps.
+      this.add({ kind: 'tile', rect: r, raw: payload, job: null, bytes: n, work: pixels })
+      if (slot !== 0) {
+        this.slots.set(slot, { width: r.width, height: r.height, raw: payload, job: null })
+      }
+      return
     }
     // The decoded pixels count from the start, whatever the payload's size.
     const o: Op = { kind: 'tile', rect: r, raw: null, job: null, bytes: n + pixels, work: pixels }
     this.add(o)
     o.job = this.submit({ codec, payload, width: r.width, height: r.height })
+    if (slot !== 0) {
+      this.slots.set(slot, { width: r.width, height: r.height, raw: null, job: o.job })
+    }
   }
 
   // submit starts decoding job. A payload that does not decode ends the

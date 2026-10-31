@@ -55,10 +55,11 @@ type recorder struct {
 	rects                []image.Rectangle // of the tile messages, in order
 	errs                 []error
 	reg                  *protocol.Registry
+	cache                testSlots
 }
 
 func (c *recorder) WriteMessage(_ context.Context, p []byte) error {
-	m, err := protocol.Decode(p, c.reg, protocol.Limits{MaxMessageSize: 1 << 30})
+	m, err := protocol.Decode(p, c.reg, testLimits)
 	if err != nil {
 		c.errs = append(c.errs, err)
 		return nil
@@ -68,7 +69,7 @@ func (c *recorder) WriteMessage(_ context.Context, p []byte) error {
 		c.img = image.NewRGBA(image.Rect(0, 0, int(m.Width), int(m.Height)))
 	case *protocol.Tile:
 		r := image.Rect(int(m.X), int(m.Y), int(m.X)+int(m.W), int(m.Y)+int(m.H))
-		if err := decodeTile(c.img.SubImage(r).(*image.RGBA), m.Codec, m.Payload); err != nil {
+		if err := c.cache.draw(c.img, m); err != nil {
 			c.errs = append(c.errs, err)
 		}
 		c.lossy = c.lossy || m.Codec == protocol.CodecWebP || m.Codec == protocol.CodecJPEG

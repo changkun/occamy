@@ -142,6 +142,9 @@ const (
 	// DefaultMaxPixels is the largest graphical screen a Session takes,
 	// in pixels, if Options.MaxPixels is zero: 8192×8192, 256 MiB.
 	DefaultMaxPixels = 8192 * 8192
+	// DefaultCacheSlots is the tile cache slots a Session offers if
+	// Options.CacheSlots is zero: 16 MiB of tiles at most.
+	DefaultCacheSlots = 1024
 )
 
 // closeTimeout bounds the wait to send close to a server that does not
@@ -210,6 +213,13 @@ type Options struct {
 	// DecodeWorkers is the number of goroutines that decode tiles of
 	// plugged codecs; runtime.GOMAXPROCS(0) if zero.
 	DecodeWorkers int
+	// CacheSlots is the number of tile cache slots the client offers,
+	// DefaultCacheSlots if zero. A slot holds the pixels of one tile of
+	// at most protocol.MaxCachedPixels, 16 KiB, which the server can
+	// then draw again by naming the slot. NoCache offers no slots and
+	// not the cached codec.
+	CacheSlots uint16
+	NoCache    bool
 
 	// HTTPClient and HTTPHeader are Dial's: the client of the upgrade
 	// request, http.DefaultClient if nil, and headers to add to it, such
@@ -239,12 +249,13 @@ func (o Options) Hello() protocol.Hello {
 			PixelRatio:     o.PixelRatio,
 			FrameWindow:    o.FrameWindow,
 			MaxMessageSize: o.MaxMessageSize,
+			CacheSlots:     o.cacheSlots(),
 		},
 	}
 }
 
-// codecs are the codecs o offers, in its order of preference, raw last.
-// The cached codec is not offered: the client keeps no tile cache.
+// codecs are the codecs o offers, in its order of preference, raw last,
+// and then cached, unless the client keeps no tile cache.
 func (o Options) codecs() []protocol.Codec {
 	var cs []protocol.Codec
 	for _, d := range o.Decoders {
@@ -253,7 +264,22 @@ func (o Options) codecs() []protocol.Codec {
 			cs = append(cs, c)
 		}
 	}
-	return append(cs, protocol.CodecRaw)
+	cs = append(cs, protocol.CodecRaw)
+	if !o.NoCache {
+		cs = append(cs, protocol.CodecCached)
+	}
+	return cs
+}
+
+// cacheSlots is the number of tile cache slots o offers.
+func (o Options) cacheSlots() uint16 {
+	switch {
+	case o.NoCache:
+		return 0
+	case o.CacheSlots == 0:
+		return DefaultCacheSlots
+	}
+	return o.CacheSlots
 }
 
 func (o Options) check() error {
@@ -309,6 +335,7 @@ type Session struct {
 	sized   bool        // a resize was read
 	lastEnd uint32      // the ID of the last frame-end read
 	open    *frame      // the frame being read, nil between frames
+	slots   []slot      // the tile cache, slot s at s-1
 
 	mu        sync.Mutex
 	queue     []item  // undelivered, in order
@@ -450,6 +477,7 @@ func (s *Session) agree(w protocol.Capabilities) protocol.Capabilities {
 	a.PixelRatio = offered.PixelRatio
 	a.FrameWindow = min(orDefault(w.FrameWindow, protocol.DefaultFrameWindow), orDefault(offered.FrameWindow, protocol.DefaultFrameWindow))
 	a.MaxMessageSize = min(orDefault(w.MaxMessageSize, protocol.DefaultMaxMessageSize), orDefault(offered.MaxMessageSize, protocol.DefaultMaxMessageSize))
+	a.CacheSlots = min(w.CacheSlots, offered.CacheSlots)
 	return a
 }
 
@@ -458,7 +486,8 @@ func (s *Session) agree(w protocol.Capabilities) protocol.Capabilities {
 func (s *Session) unsupported() string {
 	switch s.welcome.Class {
 	case protocol.ClassGraphical:
-		if len(s.agreed.Codecs) == 0 {
+		// cached draws only what another codec stored.
+		if !slices.ContainsFunc(s.agreed.Codecs, func(c protocol.Codec) bool { return c != protocol.CodecCached }) {
 			return "no codec in common"
 		}
 	case protocol.ClassTerminal:
@@ -472,11 +501,12 @@ func (s *Session) unsupported() string {
 func (s *Session) start() {
 	if s.welcome.Class == protocol.ClassGraphical {
 		for _, c := range s.agreed.Codecs {
-			if c != protocol.CodecRaw {
+			if c != protocol.CodecRaw && c != protocol.CodecCached {
 				s.pool = newPool(s.opts.DecodeWorkers, s.abort, &s.wg)
 				break
 			}
 		}
+		s.slots = make([]slot, s.agreed.CacheSlots)
 	}
 	s.wg.Add(2)
 	go s.read()

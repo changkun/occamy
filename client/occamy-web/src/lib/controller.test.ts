@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { CloseCode, CloseError, ConnectionError, type ConnectOptions, Role, type Session, SessionClass, type SessionEvent } from '../protocol'
+import { CloseCode, CloseError, ConnectionError, type ConnectOptions, ProtocolError, Role, type Session, SessionClass, type SessionEvent } from '../protocol'
 import { type ControllerOptions, SessionController, type SessionState, type TerminalSink, overlayOf } from './controller'
 import { describeEnd } from './ending'
 
@@ -27,6 +27,10 @@ class FakeSession {
   readonly framebuffer = { width: 0, height: 0, data: new Uint8ClampedArray(0) }
   readonly resizes: [number, number][] = []
   readonly closes: { code: number; reason: string }[] = []
+  /** The clipboard texts the controller sent. */
+  readonly clipboards: string[] = []
+  /** The longest clipboard text a message holds, as the core checks. */
+  clipboardLimit = Infinity
   private readonly events: SessionEvent[] = []
   private wake: (() => void) | null = null
 
@@ -65,7 +69,11 @@ class FakeSession {
 
   view(): void {}
 
-  clipboard(): number {
+  clipboard(_mime: string, text: string): number {
+    if (text.length > this.clipboardLimit) {
+      throw new ProtocolError('too-large', `${text.length} bytes, limit ${this.clipboardLimit}`)
+    }
+    this.clipboards.push(text)
     return 1
   }
 }
@@ -198,7 +206,7 @@ describe('SessionController', () => {
 
   it('takes no input before it is open', () => {
     const c = controller(() => Promise.reject(new ConnectionError('refused')))
-    expect(c.sendClipboard('x')).toBe(false)
+    expect(c.sendClipboard('x')).toEqual({ kind: 'not-open' })
     expect(c.syncClipboard('x')).toBe(false)
     c.sendTerminalInput('x')
     c.requestResize(100, 100)
@@ -265,6 +273,67 @@ describe('SessionController', () => {
     expect(c.getState()).toMatchObject({ clipboard: 'third', draft: 'third' })
   })
 
+  it('takes the text it sent for the remote clipboard’s, which the next one replaces', async () => {
+    const s = new FakeSession(Role.Owner)
+    const c = await opened(s)
+    s.push(clipboardEvent('first'))
+    await settle()
+
+    // The user edits the panel's text and sends it: the remote holds it
+    // now, though the remote does not say so.
+    c.setDraft('mine')
+    expect(c.sendClipboard('mine')).toEqual({ kind: 'sent' })
+    expect(s.clipboards).toEqual(['mine'])
+    expect(c.getState()).toMatchObject({ clipboard: 'mine', draft: 'mine' })
+    s.push(clipboardEvent('second'))
+    await settle()
+    expect(c.getState()).toMatchObject({ clipboard: 'second', draft: 'second' })
+
+    // Text typed after a send is an edit, which the next one leaves alone.
+    expect(c.sendClipboard('sent')).toEqual({ kind: 'sent' })
+    c.setDraft('typed')
+    s.push(clipboardEvent('third'))
+    await settle()
+    expect(c.getState()).toMatchObject({ clipboard: 'third', draft: 'typed' })
+  })
+
+  it('leaves text the core refuses the user’s, to send again', async () => {
+    const s = new FakeSession(Role.Owner)
+    const c = await opened(s)
+    s.push(clipboardEvent('first'))
+    await settle()
+
+    s.clipboardLimit = 8
+    c.setDraft('too long for a message')
+    const r = c.sendClipboard('too long for a message')
+    expect(r.kind).toBe('failed')
+    expect(r.kind === 'failed' && r.error instanceof ProtocolError && r.error.kind).toBe('too-large')
+    // The remote holds what it held, and the text stays an edit.
+    expect(c.getState()).toMatchObject({ clipboard: 'first', draft: 'too long for a message' })
+    expect(c.syncClipboard('too long for a message')).toBe(false)
+    // Once the core takes it, the same text goes.
+    s.clipboardLimit = Infinity
+    expect(c.syncClipboard('too long for a message')).toBe(true)
+    expect(s.clipboards).toEqual(['too long for a message'])
+    expect(c.getState()).toMatchObject({ clipboard: 'too long for a message', draft: 'too long for a message' })
+  })
+
+  it('keeps an edit when the local clipboard goes to the remote, and follows it otherwise', async () => {
+    const s = new FakeSession(Role.Owner)
+    const c = await opened(s)
+    s.push(clipboardEvent('first'))
+    await settle()
+
+    expect(c.syncClipboard('copied')).toBe(true)
+    expect(c.getState()).toMatchObject({ clipboard: 'copied', draft: 'copied' })
+    c.setDraft('mine')
+    expect(c.syncClipboard('copied again')).toBe(true)
+    expect(c.getState()).toMatchObject({ clipboard: 'copied again', draft: 'mine' })
+    // What the remote holds already is not sent again.
+    expect(c.syncClipboard('copied again')).toBe(false)
+    expect(s.clipboards).toEqual(['copied', 'copied again'])
+  })
+
   it('closes the stream as unsupported when it fails to show it', async () => {
     const s = new FakeSession(Role.Owner)
     const broken: TerminalSink = { ...sink, write: () => Promise.reject(new Error('the emulator broke')) }
@@ -285,6 +354,15 @@ describe('SessionController', () => {
     expect(mine.getState().code).toBe(0)
     await mine.close()
     expect(mine.getState()).toMatchObject({ phase: 'ended', code: 0 })
+  })
+
+  it('keeps the close code occamyd refused the stream with, and none for a failure to connect', async () => {
+    const refused = controller(() => Promise.reject(new CloseError(CloseCode.Forbidden, 'no such session')))
+    await refused.open(size)
+    expect(refused.getState()).toMatchObject({ phase: 'ended', code: CloseCode.Forbidden, ending: { title: 'Access refused' } })
+    const unreachable = controller(() => Promise.reject(new ConnectionError('refused')))
+    await unreachable.open(size)
+    expect(unreachable.getState()).toMatchObject({ phase: 'ended', code: 0, ending: { title: 'Connection lost' } })
   })
 
   it('cancels an open under way on close', async () => {

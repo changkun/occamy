@@ -47,6 +47,12 @@ export const MIN_MESSAGE_SIZE = 64 << 10
 /** The largest tile or cursor side, in pixels, unless the client states another. */
 export const DEFAULT_MAX_TEXTURE_SIZE = 4096
 
+/**
+ * The most pixels of a tile stored in a cache slot, so that a client
+ * bounds its cache at 16 KiB a slot.
+ */
+export const MAX_CACHED_PIXELS = 4096
+
 /** The largest number of elements in a list. */
 export const MAX_COUNT = 0xffff
 

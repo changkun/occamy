@@ -10,6 +10,7 @@
 import {
   type Header,
   type Limits,
+  MAX_CACHED_PIXELS,
   MIN_MESSAGE_SIZE,
   ProtocolError,
   Reader,
@@ -498,6 +499,9 @@ function decodeTile(r: Reader, l: Limits): Tile {
   }
   const payload = r.bytes()
   r.finish()
+  if (slot !== 0 && w * h > MAX_CACHED_PIXELS) {
+    throw new ProtocolError('invalid', `${w}x${h} tile in cache slot ${slot}, more than ${MAX_CACHED_PIXELS} pixels`)
+  }
   if (codec === Codec.Cached && (slot === 0 || payload.length !== 0)) {
     throw new ProtocolError('invalid', `cached tile with slot ${slot} and a ${payload.length}-byte payload`)
   }

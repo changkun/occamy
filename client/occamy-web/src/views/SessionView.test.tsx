@@ -10,15 +10,19 @@
 // second press meanwhile, an End that resumed is ended or refused as
 // occamyd decides, for the user who opened the session as the stream's
 // welcome says, and the stream closed for the session's end counts for
-// the session ended.
+// the session ended; the owner's session is kept in the tab's storage
+// for a reload until it ends, occamyd refuses the view's stream to it or
+// the user leaves it, though not while occamyd cannot be reached; and
+// the clipboard panel takes text sent for the remote's, and says when
+// the core refused to send it.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { CloseCode, Role, type Session, SessionClass, type SessionEvent } from '../protocol'
+import { CloseCode, CloseError, ConnectionError, ProtocolError, Role, type Session, SessionClass, type SessionEvent } from '../protocol'
 import { type AccessToken, Api, type Identity } from '../lib/api'
-import type { SessionAction } from '../lib/app'
+import { SESSION_KEY, type SessionAction } from '../lib/app'
 import { describeEnd } from '../lib/ending'
 import type * as controller from '../lib/controller'
 import type { Target } from '../lib/targets'
@@ -59,11 +63,15 @@ class Welcomed {
   static last: Welcomed | null = null
   readonly sessionId = 'mZ3k'
   readonly viewerId = 1
-  readonly role = Role.Owner
+  role: Role = Role.Owner
   readonly sessionClass = SessionClass.Graphical
   readonly framebuffer = { width: 0, height: 0, data: new Uint8ClampedArray(0) }
   /** Whether the client closed the stream. */
   closed = false
+  /** The clipboard texts the client sent. */
+  readonly clipboards: string[] = []
+  /** The longest clipboard text the core sends, as for occamyd's maximum message size. */
+  clipboardLimit = Infinity
   private readonly events: SessionEvent[] = []
   private wake: (() => void) | null = null
 
@@ -106,7 +114,11 @@ class Welcomed {
 
   view(): void {}
 
-  clipboard(): number {
+  clipboard(_mime: string, text: string): number {
+    if (text.length > this.clipboardLimit) {
+      throw new ProtocolError('too-large', `${text.length} bytes, limit ${this.clipboardLimit}`)
+    }
+    this.clipboards.push(text)
     return 1
   }
 }
@@ -162,6 +174,7 @@ function occamyd(owner: string): Answer {
 }
 
 interface Props {
+  target: Target
   token: AccessToken
   /** Who opened the session, as the page knew before the view. */
   owner: Identity | null
@@ -169,6 +182,8 @@ interface Props {
 }
 
 interface Rendered {
+  /** The tab's storage, as the view left it. */
+  storage: Storage
   deletes: string[]
   left: number
   signIns: [string, SignInNext][]
@@ -180,8 +195,8 @@ const settle = (ms = 0): Promise<void> => act(() => new Promise<void>((resolve) 
 // render shows the session view of target, signed in as demo, for an End
 // that waited for demo unless props say otherwise, with an Api whose
 // DELETE answers with answer.
-async function render(props: Partial<Props>, answer: Answer, timeout?: number): Promise<Rendered> {
-  let p: Props = { token: accessToken('demo'), owner: demo, action: { seq: 1, action: { kind: 'end' } }, ...props }
+async function render(props: Partial<Props>, answer: Answer, timeout?: number, storage = memory()): Promise<Rendered> {
+  let p: Props = { target, token: accessToken('demo'), owner: demo, action: { seq: 1, action: { kind: 'end' } }, ...props }
   const api = new Api(
     (path, init) => {
       r.deletes.push(`${init?.method} ${path}`)
@@ -195,9 +210,10 @@ async function render(props: Partial<Props>, answer: Answer, timeout?: number): 
       <SessionView
         api={api}
         token={p.token}
-        target={target}
+        target={p.target}
         owner={p.owner}
         action={p.action}
+        storage={storage}
         onLeave={() => void r.left++}
         onSignIn={(message, next) => void r.signIns.push([message, next])}
         onRejoin={() => undefined}
@@ -212,6 +228,7 @@ async function render(props: Partial<Props>, answer: Answer, timeout?: number): 
     await settle()
   }
   const r: Rendered = {
+    storage,
     deletes: [],
     left: 0,
     signIns: [],
@@ -222,6 +239,20 @@ async function render(props: Partial<Props>, answer: Answer, timeout?: number): 
   }
   await show()
   return r
+}
+
+// memory is a tab's sessionStorage.
+function memory(items = new Map<string, string>()): Storage {
+  return {
+    get length() {
+      return items.size
+    },
+    clear: () => items.clear(),
+    getItem: (k) => items.get(k) ?? null,
+    key: () => null,
+    removeItem: (k) => void items.delete(k),
+    setItem: (k, v) => void items.set(k, v),
+  }
 }
 
 const ended = (): Promise<Response> => Promise.resolve(new Response(null, { status: 204 }))
@@ -412,5 +443,193 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
     expect(r.deletes).toEqual(['DELETE /api/v1/sessions/mZ3k'])
     expect(Welcomed.last?.closed).toBe(false)
     expect(text()).toContain('Ending the session for everyone…')
+  })
+})
+
+describe('The clipboard panel of a stream welcomed as the owner’s', () => {
+  beforeEach(welcomed)
+
+  const box = (): HTMLTextAreaElement | null => container.querySelector('textarea')
+  // type puts text in the panel's box as the user would, for React's onChange.
+  const type = (text: string): void => {
+    const el = box()
+    if (el === null) {
+      throw new Error('no clipboard box')
+    }
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(el, text)
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+  const remote = (text: string): void => Welcomed.last?.push({ type: 'clipboard', mime: 'text/plain;charset=utf-8', data: new TextEncoder().encode(text) })
+  const edited = 'Edited: the remote clipboard holds other text.'
+  const status = (): string | null | undefined => container.querySelector('.panel [role=status]')?.textContent
+
+  it('shows the next remote clipboard after text was sent, and keeps only what was typed since', async () => {
+    await render({ token: accessToken('demo'), action: null }, ended)
+    act(() => remote('first'))
+    await settle()
+    act(() => button('Clipboard')?.click())
+    expect(box()?.value).toBe('first')
+
+    act(() => type('mine'))
+    expect(text()).toContain(edited)
+    act(() => button('Send')?.click())
+    await settle()
+    expect(Welcomed.last?.clipboards).toEqual(['mine'])
+    expect(text()).toContain('Sent to the remote clipboard.')
+    expect(box()?.value).toBe('mine')
+    expect(text()).not.toContain(edited)
+
+    // The remote clipboard changes: the box shows it, and what Send said
+    // goes.
+    act(() => remote('second'))
+    await settle()
+    expect(box()?.value).toBe('second')
+    expect(text()).not.toContain(edited)
+    expect(status()).toBe('')
+
+    // Text typed after a send stays, with the remote's a press away; the
+    // edit takes what Send said away.
+    act(() => button('Send')?.click())
+    expect(status()).toBe('Sent to the remote clipboard.')
+    act(() => type('typed'))
+    expect(status()).toBe('')
+    act(() => remote('third'))
+    await settle()
+    expect(box()?.value).toBe('typed')
+    expect(text()).toContain(edited)
+    act(() => button('Show it')?.click())
+    expect(box()?.value).toBe('third')
+  })
+
+  it('says text too large to send was not sent, and keeps it the user’s to send again', async () => {
+    await render({ token: accessToken('demo'), action: null }, ended)
+    act(() => remote('first'))
+    await settle()
+    act(() => button('Clipboard')?.click())
+    const s = Welcomed.last
+    if (s === null) {
+      throw new Error('no stream')
+    }
+    s.clipboardLimit = 8
+    act(() => type('more than eight'))
+    act(() => button('Send')?.click())
+    expect(s.clipboards).toEqual([])
+    expect(status()).toBe('Not sent: the text is too large for one message to occamyd. Send less of it.')
+    expect(box()?.value).toBe('more than eight')
+    expect(text()).toContain(edited)
+
+    // The next remote clipboard leaves the text, which was never sent, as
+    // typed.
+    act(() => remote('second'))
+    await settle()
+    expect(box()?.value).toBe('more than eight')
+    expect(status()).toBe('')
+
+    act(() => type('less'))
+    act(() => button('Send')?.click())
+    expect(s.clipboards).toEqual(['less'])
+    expect(status()).toBe('Sent to the remote clipboard.')
+    expect(text()).not.toContain(edited)
+  })
+})
+
+describe('The owner’s session kept for a reload', () => {
+  beforeEach(welcomed)
+
+  const kept = (r: Rendered): unknown => JSON.parse(r.storage.getItem(SESSION_KEY) ?? 'null')
+  const lab = { kind: 'session', sessionId: 'mZ3k', name: 'Lab' }
+
+  it('is kept while the connection is lost, and forgotten once the user leaves', async () => {
+    const r = await render({ token: accessToken('demo'), action: null }, ended)
+    expect(kept(r)).toEqual(lab)
+    // The connection fails: the session may run on, and Join again joins it.
+    act(() => Welcomed.last?.end(1006))
+    await settle()
+    expect(button('Join again')).toBeDefined()
+    expect(kept(r)).toEqual(lab)
+    act(() => button('Back to connections')?.click())
+    expect(r.left).toBe(1)
+    expect(kept(r)).toBeNull()
+  })
+
+  it('stays kept when the page goes away, as on a reload', async () => {
+    const r = await render({ token: accessToken('demo'), action: null }, ended)
+    expect(kept(r)).toEqual(lab)
+    // The page closes its stream, which the core ends as a normal close.
+    act(() => void window.dispatchEvent(new Event('pagehide')))
+    expect(Welcomed.last?.closed).toBe(true)
+    act(() => Welcomed.last?.end(CloseCode.Normal))
+    await settle()
+    expect(kept(r)).toEqual(lab)
+  })
+
+  it('stays kept when another of the owner’s streams takes the session over, as Join again takes it back', async () => {
+    const r = await render({ token: accessToken('demo'), action: null }, ended)
+    act(() => Welcomed.last?.push({ type: 'end', code: CloseCode.Normal, reason: 'the owner connected again' }))
+    await settle()
+    expect(button('Join again')).toBeDefined()
+    expect(kept(r)).toEqual(lab)
+  })
+
+  it('is forgotten once the session has ended', async () => {
+    const r = await render({ token: accessToken('demo'), action: null }, ended)
+    expect(kept(r)).toEqual(lab)
+    act(() => Welcomed.last?.end(CloseCode.OwnerLeft))
+    await settle()
+    expect(kept(r)).toBeNull()
+    expect(r.left).toBe(0)
+  })
+
+  it('is forgotten once End has ended it', async () => {
+    const r = await render({ token: accessToken('demo'), action: null }, ended)
+    expect(kept(r)).toEqual(lab)
+    act(() => button('End session')?.click())
+    await settle()
+    expect(r.deletes).toEqual(['DELETE /api/v1/sessions/mZ3k'])
+    expect(r.left).toBe(1)
+    expect(kept(r)).toBeNull()
+  })
+
+  it('stays kept when End fails, as the session runs on for the owner’s grace', async () => {
+    const r = await render({ token: accessToken('demo'), action: null }, failed)
+    act(() => button('End session')?.click())
+    await settle()
+    expect(r.deletes).toEqual(['DELETE /api/v1/sessions/mZ3k'])
+    expect(text()).toContain('Not ended for everyone')
+    expect(Welcomed.last?.closed).toBe(true)
+    expect(kept(r)).toEqual(lab)
+  })
+
+  it.each([
+    [CloseCode.Forbidden, 'no such session', 'Access refused'],
+    [CloseCode.Unauthorized, 'token expired', 'Signed out'],
+  ])('is forgotten when occamyd refuses to join it again with %i, as once it has ended', async (code, reason, title) => {
+    stream.connect = () => Promise.reject(new CloseError(code, reason))
+    const storage = memory(new Map([[SESSION_KEY, JSON.stringify(lab)]]))
+    const r = await render({ token: accessToken('demo'), owner: null, action: null }, ended, undefined, storage)
+    expect(text()).toContain(title)
+    expect(kept(r)).toBeNull()
+  })
+
+  it('stays kept when occamyd cannot be reached, often why the page was reloaded', async () => {
+    stream.connect = () => Promise.reject(new ConnectionError('cannot reach occamyd'))
+    const storage = memory(new Map([[SESSION_KEY, JSON.stringify(lab)]]))
+    const r = await render({ token: accessToken('demo'), owner: null, action: null }, ended, undefined, storage)
+    expect(text()).toContain('Connection lost')
+    expect(kept(r)).toEqual(lab)
+  })
+
+  it('is not kept for a stream welcomed other than as the owner’s', async () => {
+    stream.connect = () => Promise.resolve(Object.assign(new Welcomed(), { role: Role.Viewer }) as unknown as Session)
+    const r = await render({ token: accessToken('demo'), owner: null, action: null }, ended)
+    expect(button('Clipboard')).toBeDefined()
+    expect(kept(r)).toBeNull()
+  })
+
+  it('is not a share’s', async () => {
+    const r = await render({ target: { kind: 'share', sessionId: 'mZ3k', token: 'q8Gf' }, token: accessToken('demo'), owner: null, action: null }, ended)
+    // The stream is open.
+    expect(button('Clipboard')).toBeDefined()
+    expect(kept(r)).toBeNull()
   })
 })

@@ -99,6 +99,7 @@ func newServer(logger *slog.Logger) *server {
 	s.mux.HandleFunc("/cursor", s.state(func(d *desk) any { return d.cursor() }))
 	s.mux.HandleFunc("/inputs", s.state(func(d *desk) any { return d.recorded() }))
 	s.mux.HandleFunc("/log", s.state(func(d *desk) any { return d.logged() }))
+	s.mux.HandleFunc("/cached", s.state(func(d *desk) any { return d.cachedTiles() }))
 	return s
 }
 
@@ -218,6 +219,7 @@ type desk struct {
 	img    *image.RGBA // the screen as painted
 	inputs []inputJSON
 	log    []string // what /log reports
+	cached int      // the tiles sent from the client's tile cache
 }
 
 var _ backend.Backend = (*desk)(nil)
@@ -252,15 +254,30 @@ func (d *desk) Demand(dm backend.Demand) {
 
 // sent logs a frame-end its viewer is sent, in order with the demands:
 // the session records a viewer's hiding before the stream's writer can
-// see it, so a frame logged after "hidden" was started after it.
+// see it, so a frame logged after "hidden" was started after it. It
+// counts the tiles drawn from the client's tile cache.
 func (d *desk) sent(p []byte) {
-	if m, err := protocol.Decode(p, protocol.ServerMessages(), protocol.Limits{}); err == nil {
-		if fe, ok := m.(*protocol.FrameEnd); ok {
-			d.mu.Lock()
-			d.log = append(d.log, fmt.Sprintf("frame %d", fe.FrameID))
-			d.mu.Unlock()
+	m, err := protocol.Decode(p, protocol.ServerMessages(), protocol.Limits{MaxMessageSize: maxMessage, CacheSlots: 1<<16 - 1})
+	if err != nil {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	switch m := m.(type) {
+	case *protocol.FrameEnd:
+		d.log = append(d.log, fmt.Sprintf("frame %d", m.FrameID))
+	case *protocol.Tile:
+		if m.Codec == protocol.CodecCached {
+			d.cached++
 		}
 	}
+}
+
+// cachedTiles is what /cached reports.
+func (d *desk) cachedTiles() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.cached
 }
 
 func (d *desk) Run(ctx context.Context, sink backend.Sink) error {
