@@ -169,6 +169,12 @@ func New(codecs []protocol.Codec) *Encoder {
 	return e
 }
 
+// Kinds returns the codecs tiles go in: lossless ones, and lossy ones, 0
+// for none. Encoders of the same kinds encode the same pixels alike, as
+// far as Tile and Lossy go; Still's choice of quality also depends on the
+// encoder's last.
+func (e *Encoder) Kinds() (lossless, lossy protocol.Codec) { return e.lossless, e.lossy }
+
 // Tile appends the encoding of a tile's pixels, w by h in RGBA order row
 // by row, to dst and returns it with its codec; or, if the tile goes
 // lossy, returns dst unchanged and lossy set, so that the caller can
