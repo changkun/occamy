@@ -290,8 +290,9 @@ type Kubernetes struct {
 	Namespace string `yaml:"namespace"`
 	// Pod is the pod's name. Required.
 	Pod string `yaml:"pod"`
-	// Container is the container's name; empty for the pod's default
-	// container.
+	// Container is the container's name. Empty works only for a pod
+	// with one container: the API server refuses it for a pod with
+	// more.
 	Container string `yaml:"container"`
 	// Command is what runs, one element per argument. ParseV1 fills in
 	// a shell that prefers bash, unless Attach is set.

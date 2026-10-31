@@ -340,7 +340,7 @@ server's `pods/exec`, or `pods/attach`, as `kubectl exec -it` does. Its
 |-----|---------|---------|
 | `namespace` | `default` | The pod's namespace |
 | `pod` | required | The pod's name |
-| `container` | the pod's default container | The container's name |
+| `container` | the pod's only container | The container's name. Required for a pod with more than one container: the API server refuses the stream with 400 without it, since it does not read kubectl's `kubectl.kubernetes.io/default-container` annotation |
 | `command` | a shell: `bash`, or `sh` where the image has no `bash` | What runs, one element per argument, such as `[/bin/ls, -l]`. Not with `attach` |
 | `attach` | `false` | Attach to the container's main process instead of running a command, as `kubectl attach -it` does. The container needs `stdin: true` in its spec, and `tty: true` unless `tty` is `false` |
 | `tty` | `true` | Run the command in a terminal. Without one, its output and errors are shown together, and resizes are not sent |

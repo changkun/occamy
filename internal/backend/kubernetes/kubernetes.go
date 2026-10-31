@@ -93,8 +93,10 @@ type Config struct {
 	Namespace string
 	// Pod is the pod's name.
 	Pod string
-	// Container is the container's name. Empty picks the pod's default
-	// container, as kubectl does.
+	// Container is the container's name. Empty works for a pod with one
+	// container, which the API server then picks; for a pod with more,
+	// the API server refuses the stream with 400, since it does not read
+	// kubectl's kubectl.kubernetes.io/default-container annotation.
 	Container string
 	// Command is the command to run, one element per argument. Empty
 	// runs DefaultCommand, unless Attach is set.
