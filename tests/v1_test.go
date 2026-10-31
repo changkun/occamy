@@ -310,6 +310,7 @@ func TestE2EV1RDP(t *testing.T) {
 			return n
 		}
 		before, alive := restarts(), running()
+		t.Logf("%d channel servers run before the first clipboard check", alive)
 		clipboard(t)
 		want := before
 		if alive == 0 { // an earlier connection's left none
@@ -322,12 +323,14 @@ func TestE2EV1RDP(t *testing.T) {
 			t.Fatalf("%d channel servers run, want 1", n)
 		}
 
+		t.Log("killing the channel server")
 		compose.run(t, "exec", "-T", "rdp", "sh", "-c", killChansrv)
 		for deadline := time.Now().Add(10 * time.Second); running() > 0; time.Sleep(100 * time.Millisecond) {
 			if time.Now().After(deadline) {
 				t.Fatal("the channel server still runs after it was killed")
 			}
 		}
+		t.Log("checking the clipboard again")
 		clipboard(t)
 		if n := restarts(); n != want+1 {
 			t.Errorf("the channel server was restarted %d times after it was killed, want 1", n-want)
