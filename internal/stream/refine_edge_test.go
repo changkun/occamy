@@ -154,22 +154,53 @@ func TestMotionSlowWriter(t *testing.T) {
 
 // A tile that changes less often than the refine delay is not in
 // motion: it goes at its final quality when it changes, not lossy first
-// and then again refined. One that changes more often is in motion.
+// and then again refined, also while something else on the screen
+// animates and the writer sends frames for it between the snapshots.
+// One that changes more often is in motion.
 func TestBlink(t *testing.T) {
 	for _, c := range []struct {
 		period time.Duration
 		moving bool
+		busy   time.Duration // how often another region changes, 0 for never
+		delay  time.Duration // the refine delay, the default if 0
 	}{
-		{100 * time.Millisecond, true},
-		{530 * time.Millisecond, false}, // a Windows caret
-		{600 * time.Millisecond, false}, // a GTK caret
+		{100 * time.Millisecond, true, 0, 0},
+		{530 * time.Millisecond, false, 0, 0}, // a Windows caret
+		{600 * time.Millisecond, false, 0, 0}, // a GTK caret
+		{530 * time.Millisecond, false, time.Second / 30, 0},
+		{530 * time.Millisecond, false, time.Second / 60, 0},
+		{time.Second, false, time.Second / 30, 0}, // a clock
+		// Below minHalfLife, the half-life is minHalfLife.
+		{time.Second / 30, true, 0, 50 * time.Millisecond},
 	} {
-		t.Run(c.period.String(), func(t *testing.T) {
+		name := c.period.String()
+		if c.busy > 0 {
+			name += "/beside " + c.busy.String()
+		}
+		if c.delay > 0 {
+			name += "/refined after " + c.delay.String()
+		}
+		t.Run(name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				b := &tapped{Backend: backendtest.NewScreen(512, 256, 0)}
-				r := newRigConfig(t, b, 64, 50e6, time.Millisecond, webpDeflate, Config{})
+				r := newRigConfig(t, b, 64, 50e6, time.Millisecond, webpDeflate, Config{RefineDelay: c.delay})
 				time.Sleep(500 * time.Millisecond)
 				synctest.Wait()
+				stop, done := make(chan struct{}), make(chan struct{})
+				go func() {
+					// A region of one colour, which goes exact moving or
+					// not, changing every c.busy.
+					defer close(done)
+					for k := 0; c.busy > 0; k++ {
+						select {
+						case <-stop:
+							return
+						default:
+						}
+						paint(b, image.Rect(384, 192, 448, 256), image.NewUniform(color.RGBA{uint8(k), 0, 0, 255})) // #nosec G115 -- wraps
+						time.Sleep(c.busy)
+					}
+				}()
 				webp0, deflate0 := r.cl.codecCount(protocol.CodecWebP), r.cl.codecCount(protocol.CodecDeflate)
 				blinks := 0
 				for d := time.Duration(0); d < 8*time.Second; d += c.period {
@@ -178,14 +209,18 @@ func TestBlink(t *testing.T) {
 					time.Sleep(c.period)
 					synctest.Wait()
 				}
+				close(stop)
+				<-done
 				webp := r.cl.codecCount(protocol.CodecWebP) - webp0
 				deflate := r.cl.codecCount(protocol.CodecDeflate) - deflate0
 				t.Logf("%d changes: %d tiles WebP, %d deflate", blinks, webp, deflate)
 				switch {
 				case c.moving && webp == 0:
 					t.Errorf("changes %v apart went exact, want them in motion", c.period)
-				case !c.moving && (webp > 0 || deflate > blinks):
-					t.Errorf("%d changes %v apart went as %d WebP and %d deflate tiles, want one deflate tile each", blinks, c.period, webp, deflate)
+				case !c.moving && webp > 0:
+					t.Errorf("%d changes %v apart went as %d WebP tiles, want none", blinks, c.period, webp)
+				case !c.moving && c.busy == 0 && deflate > blinks:
+					t.Errorf("%d changes %v apart went as %d deflate tiles, want one each", blinks, c.period, deflate)
 				}
 			})
 		})
@@ -384,5 +419,124 @@ func TestRefineKeepsTurnedAway(t *testing.T) {
 	}
 	if still-still0 != sent {
 		t.Errorf("%d searches for %d tiles sent", still-still0, sent)
+	}
+}
+
+// A tile searched while the pacer's quality is below what the client has
+// is refined once the link allows more: its goal is above what the
+// client has, not equal to it. An input's photographic effect goes at
+// the pacer's quality with its goal unknown; congestion then holds the
+// pacer at 46, where the search runs out below the 72 the client has.
+func TestRefineAfterCongestion(t *testing.T) {
+	d := newRefineDirect(t, false)
+	w := d.w
+	w.p = fixedQuality(90)
+	d.show(corpusFrame(t, "photo"))
+	d.frame()
+	d.refineAll()
+	tiles := []int{2*w.g.cols + 3, 3*w.g.cols + 5, 4*w.g.cols + 7}
+	for _, t := range tiles {
+		w.sc.qual[t], w.goal[t] = 72, 0 // as an input's effect at 72 leaves them
+	}
+	w.p = fixedQuality(46)
+	d.refineAll()
+	for _, tt := range tiles {
+		if have, goal := w.quality(tt), w.goal[tt]; have != 72 || goal <= have {
+			t.Fatalf("tile %d after refinement at 46: quality %d, goal %d; want 72 below the goal", tt, have, goal)
+		}
+	}
+	if c := d.refinable(); len(c) > 0 {
+		t.Errorf("tiles %v refined at 46, which reaches less than the client has", c)
+	}
+	w.p = fixedQuality(90)
+	c := d.refinable()
+	for _, tt := range tiles {
+		if !slices.Contains(c, tt) {
+			t.Errorf("tile %d is not refined once the pacer allows 90", tt)
+		}
+	}
+}
+
+// An input whose effect showed, but whose frame was cut short before any
+// of it went, and whose effect the viewport has since left, holds
+// refinement back only until the writer gives it up, inputTimeout after
+// it came: the writer wakes then.
+func TestRefineAfterEffectLeftView(t *testing.T) {
+	d := newRefineDirect(t, false)
+	w := d.w
+	img := corpusFrame(t, "photo")
+	d.show(img)
+	d.frame()
+	in := 7*w.g.cols + 10 // in the viewport below, at 30 as motion leaves it
+	w.sc.qual[in], w.goal[in] = 30, 0
+	clock := w.fb.Clock()
+	next := image.NewRGBA(img.Rect)
+	copy(next.Pix, img.Pix)
+	draw.Draw(next, image.Rect(0, 0, 64, 64), image.NewUniform(color.RGBA{0x20, 0x40, 0x60, 0xff}), image.Point{}, draw.Src)
+	d.show(next)
+	seq, _ := w.v.LastInput()
+	w.in = &pending{first: seq, seq: seq, clock: clock, at: time.Now(), boosted: true}
+
+	view := image.Rect(512, 384, 1024, 768)
+	if fresh, _ := w.collect(view); fresh != 0 || w.in == nil {
+		t.Fatalf("%d tiles of the effect in a viewport without it, or the input given up at once", fresh)
+	}
+	if wait, err := w.refinement(d.ctx, view); err != nil || wait <= 0 || wait > inputTimeout+time.Millisecond {
+		t.Fatalf("refinement waits %v for the input (%v), want until it times out", wait, err)
+	}
+	w.in.at = time.Now().Add(-inputTimeout - time.Millisecond)
+	// Its effect still to send in the viewport, as when the pacer holds
+	// frames back on a slow link, it is kept however long it takes.
+	if fresh, _ := w.collect(image.Rectangle{}); fresh != 1 || w.in == nil {
+		t.Fatalf("%d tiles of the effect in the whole screen, or the input given up with its effect unsent", fresh)
+	}
+	if _, _ = w.collect(view); w.in != nil {
+		t.Fatal("the input is not given up once it timed out")
+	}
+	// It looks for tiles to refine: one waits to be still long enough,
+	// or, on a slow run, is refined once the frames in flight are acked.
+	w.refine = w.refine[:0]
+	if wait, err := w.refinement(d.ctx, view); err != nil || wait == 0 && !slices.Contains(w.refine, in) {
+		t.Errorf("refinement waits %v (%v) once the input is given up, and found %v to refine", wait, err, w.refine)
+	}
+}
+
+// The time between frames cools the heat, whatever the frames are: the
+// writer counts the time before each frame, of tiles or of refinement,
+// toward the cooling at the next snapshot, and not the frame's own time.
+func TestHeatCountsIdle(t *testing.T) {
+	d := newRefineDirect(t, false)
+	w := d.w
+	d.show(corpusFrame(t, "photo"))
+	d.frame()
+	d.age()
+	d.show(corpusFrame(t, "desktop"))
+	d.frame()
+	if w.heatAt.IsZero() {
+		t.Fatal("no heat yet")
+	}
+
+	w.refine = w.refine[:0]
+	w.heatAt, w.heatIdle = time.Now().Add(-time.Second), 0
+	if err := w.refineFrame(d.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if w.heatIdle < time.Second || time.Since(w.heatAt) > time.Second/2 {
+		t.Errorf("a frame of refinement a second after the last frame: %v idle, the last frame ended %v ago", w.heatIdle, time.Since(w.heatAt))
+	}
+
+	d.show(corpusFrame(t, "browser"))
+	if _, ok := w.collect(image.Rectangle{}); !ok {
+		t.Fatal("resized")
+	}
+	w.heatAt, w.heatIdle = time.Now().Add(-time.Second), 0
+	if ok, _ := w.p.StartFrame(time.Now()); !ok {
+		t.Fatal("the pacer holds the frame")
+	}
+	if err := w.sendFrame(d.ctx, w.order, false); err != nil {
+		t.Fatal(err)
+	}
+	if w.heatIdle < time.Second || time.Since(w.heatAt) > time.Second/2 {
+		t.Errorf("a frame a second after the last frame: %v idle, the last frame ended %v ago", w.heatIdle, time.Since(w.heatAt))
 	}
 }

@@ -89,7 +89,7 @@ func (c *Client) newChannels() []*vchannel {
 			handle:  (*Client).cliprdrMessage,
 		})
 	}
-	if c.cfg.Resize {
+	if c.cfg.Resize || c.cfg.GFX {
 		chans = append(chans, &vchannel{
 			name:    "drdynvc",
 			options: chanOptionInitialized | chanOptionEncryptRDP,

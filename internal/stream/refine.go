@@ -44,8 +44,25 @@ const motionHeat = 2
 
 // halfLife is the time in which heat halves: the refine delay, so that
 // what is in motion and what is refined between its changes do not
-// overlap, but no shorter than the time between snapshots.
-func (w *writer) halfLife() time.Duration { return max(w.refineDelay, activeWindow) }
+// overlap, but no shorter than minHalfLife.
+func (w *writer) halfLife() time.Duration { return max(w.refineDelay, minHalfLife) }
+
+// minHalfLife is the shortest half-life at which content that changes in
+// every snapshot, at least activeWindow apart, is in motion after three:
+// 1 + f + f² reaches motionHeat for f = 2^(-activeWindow/halfLife) from
+// a half-life of 144 ms. A refine delay below it makes content that
+// changes between the refine delay and about 0.7 half-lives apart both
+// in motion and refined between its changes.
+const minHalfLife = 150 * time.Millisecond
+
+// busy marks the start of a frame: the time since the last snapshot or
+// frame counts toward the heat's cooling at the next snapshot, and the
+// frame's own time does not.
+func (w *writer) busy() {
+	if !w.heatAt.IsZero() {
+		w.heatIdle += time.Since(w.heatAt)
+	}
+}
 
 // rested marks the end of a frame: the heat cools only from now, since
 // the writer took no snapshot while it sent the frame.
@@ -56,17 +73,19 @@ func (w *writer) rested() {
 }
 
 // warm updates every tile's heat at now, from the versions of the last
-// snapshot, w.snap, to the current ones, w.versions. A change that went
-// out as an input's effect is not motion.
+// snapshot, w.snap, to the current ones, w.versions, after cooling it by
+// the time the writer spent between frames since the last snapshot. A
+// change that went out as an input's effect is not motion.
 func (w *writer) warm(now time.Time) {
 	if len(w.heat) != len(w.versions) || len(w.snap) != len(w.versions) {
 		return
 	}
 	f := float32(1)
 	if !w.heatAt.IsZero() {
-		f = float32(math.Exp2(-now.Sub(w.heatAt).Seconds() / w.halfLife().Seconds()))
+		idle := w.heatIdle + now.Sub(w.heatAt)
+		f = float32(math.Exp2(-idle.Seconds() / w.halfLife().Seconds()))
 	}
-	w.heatAt = now
+	w.heatAt, w.heatIdle = now, 0
 	for t, v := range w.versions {
 		h := w.heat[t] * f
 		if v > w.snap[t] && v != w.effects[t] {
@@ -165,12 +184,10 @@ func (w *writer) candidates(viewport image.Rectangle, now time.Time) (wake time.
 // input ends the wait too.
 func (w *writer) refinement(ctx context.Context, viewport image.Rectangle) (time.Duration, error) {
 	if w.in != nil {
-		// Its effect may come yet. An input that shows nothing is given
-		// up after inputTimeout, which collect finds once the writer
-		// wakes; one whose effect showed goes with its frame.
-		if w.in.boosted {
-			return 0, nil
-		}
+		// Its effect may come yet, or go in its frame. An input that
+		// shows nothing, or whose effect showed but left the viewport
+		// unsent, is given up after inputTimeout, which collect finds
+		// once the writer wakes.
 		return max(time.Until(w.in.at.Add(inputTimeout))+time.Millisecond, time.Millisecond), nil
 	}
 	now := time.Now()
@@ -195,6 +212,7 @@ func (w *writer) refinement(ctx context.Context, viewport image.Rectangle) (time
 // change's, goes next. The message Background turned away is kept for
 // the next frame of refinement.
 func (w *writer) refineFrame(ctx context.Context) error {
+	w.busy()
 	defer w.rested()
 	w.frame++
 	id := w.frame
@@ -302,9 +320,10 @@ func (w *writer) refineTile(id uint32, t int) (send, ok bool) {
 	}
 	w.payload = b
 	if codec == 0 || w.msgQuality <= have {
-		// Nothing better to send: the goal is what the client has, or
-		// above the pacer's quality now.
-		w.goal[t] = max(w.msgGoal, have)
+		// Nothing better to send: the goal is above the pacer's quality
+		// now, and above what the client has, so that the tile is
+		// refined once the pacer allows more.
+		w.goal[t] = max(w.msgGoal, min(have+1, final-1))
 		if codec == 0 {
 			w.goal[t] = have
 		}

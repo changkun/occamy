@@ -112,16 +112,19 @@ type writer struct {
 	msgKey  cacheKey
 	msgFrom uint16
 
-	// Refinement (refine.go). heat is each tile's motion as of heatAt;
-	// changed is when each tile last went out changed, since start; goal
-	// is the quality each tile's pixels are to reach on the client, 0
-	// while not known; qual is the quality the client has each tile at
-	// when there is no shadow to say; refineDelay is how long a tile
-	// stays unchanged before it is refined, negative for never; refine
-	// holds the tiles to refine, and held the refinement the pacer turned
-	// away last.
+	// Refinement (refine.go). heat is each tile's motion as of the last
+	// snapshot; heatAt is that snapshot, or the end of the last frame
+	// since, and heatIdle the time between frames from the snapshot to
+	// the start of that frame; changed is when each tile last went out
+	// changed, since start; goal is the quality each tile's pixels are to
+	// reach on the client, 0 while not known; qual is the quality the
+	// client has each tile at when there is no shadow to say;
+	// refineDelay is how long a tile stays unchanged before it is
+	// refined, negative for never; refine holds the tiles to refine, and
+	// held the refinement the pacer turned away last.
 	heat        []float32
 	heatAt      time.Time
+	heatIdle    time.Duration
 	changed     []time.Duration
 	goal        []uint8
 	qual        []uint8
@@ -342,6 +345,21 @@ func (w *writer) collect(viewport image.Rectangle) (fresh int, ok bool) {
 	if w.in != nil && !w.in.boosted && now.Sub(w.in.at) > inputTimeout {
 		w.resolve()
 	}
+	fresh = w.dirtyNow(viewport, clock)
+	if fresh == 0 && w.in != nil && w.in.boosted && now.Sub(w.in.at) > inputTimeout {
+		// Its effect showed, but none of it is left to send in the
+		// viewport: the frame that was to carry it was cut short, and
+		// the viewport moved off it since. It is given up too.
+		w.resolve()
+		fresh = w.dirtyNow(viewport, clock)
+	}
+	return fresh, true
+}
+
+// dirtyNow fills w.order with the dirty tiles in the viewport at clock,
+// those that show the pending input's effect first, and reports how many
+// those are.
+func (w *writer) dirtyNow(viewport image.Rectangle, clock uint64) (fresh int) {
 	var after uint64
 	var active []bool
 	if w.in != nil {
@@ -351,7 +369,7 @@ func (w *writer) collect(viewport image.Rectangle) (fresh int, ok bool) {
 		}
 	}
 	w.order, fresh = dirty(w.order, w.g, w.versions, w.sent, viewport, after, active)
-	return fresh, true
+	return fresh
 }
 
 // sendFrame sends tiles as one frame. If input is set, they are the
@@ -362,6 +380,7 @@ func (w *writer) collect(viewport image.Rectangle) (fresh int, ok bool) {
 // in flight, when the screen is resized or hidden, or after the tiles of
 // an input whose effect appears meanwhile.
 func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
+	w.busy()
 	defer w.rested()
 	w.frame++
 	id := w.frame
