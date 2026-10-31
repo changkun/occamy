@@ -12,6 +12,7 @@ import (
 	"image/color"
 	"image/draw"
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	"changkun.de/x/occamy/internal/framebuffer"
@@ -238,14 +239,16 @@ func TestScrollPartialWidth(t *testing.T) {
 }
 
 // Content made of repeated rows gives no row a unique hash, so nothing
-// votes and nothing is copied, though a copy would be right.
+// votes, no offset is compared and nothing is copied, though a copy
+// would be right.
 func TestScrollRepeatedRows(t *testing.T) {
 	const w, h = 256, 256
-	stripes := func(fb *framebuffer.Framebuffer, phase int) {
+	// Stripes of the given height, black then white, moved down by phase.
+	stripes := func(fb *framebuffer.Framebuffer, height, phase int) {
 		img := fb.Lock(fb.Bounds())
 		for y := range h {
 			c := color.RGBA{0xff, 0xff, 0xff, 0xff}
-			if (y+phase)%2 == 0 {
+			if (y+phase)/height%2 == 0 {
 				c = color.RGBA{0, 0, 0, 0xff}
 			}
 			draw.Draw(img, image.Rect(0, y, w, y+1), image.NewUniform(c), image.Point{}, draw.Src)
@@ -253,18 +256,26 @@ func TestScrollRepeatedRows(t *testing.T) {
 		fb.Unlock(fb.Bounds())
 	}
 	r := newScrollRig(t, w, h, 64)
-	stripes(r.fb, 0)
-	r.frame()
-	stripes(r.fb, 1)
-	if copies, _ := r.frame(); len(copies) != 0 {
-		t.Errorf("stripes: %d copies, want none", len(copies))
+	idle := func(what string) {
+		t.Helper()
+		copies, _ := r.frame()
+		if len(copies) != 0 || r.sc.searched == 0 || r.sc.tried != 0 {
+			t.Errorf("%s: %d copies, %d runs searched and %d offsets compared; want none, some and none", what, len(copies), r.sc.searched, r.sc.tried)
+		}
+	}
+	for _, height := range []int{1, 8} {
+		stripes(r.fb, height, 0)
+		r.frame()
+		// Moved by half a stripe, every sampled row changed. Rows sampled
+		// 8 apart fall on alternate stripes of 8, so pairs of them would
+		// vote alike if the first black and the first white row counted.
+		stripes(r.fb, height, max(1, height/2))
+		idle(fmt.Sprintf("stripes of %d", height))
 	}
 	fillFB(r.fb, r.fb.Bounds(), color.RGBA{0x10, 0x20, 0x30, 0xff})
 	r.frame()
 	fillFB(r.fb, r.fb.Bounds(), color.RGBA{0x10, 0x20, 0x31, 0xff})
-	if copies, _ := r.frame(); len(copies) != 0 {
-		t.Errorf("a new colour: %d copies, want none", len(copies))
-	}
+	idle("a new colour")
 	// A page whose rows repeat every 8 rows, scrolled by 3.
 	period := func(phase int) {
 		img := r.fb.Lock(r.fb.Bounds())
@@ -410,6 +421,31 @@ func TestScrollUndefinedSource(t *testing.T) {
 	}
 }
 
+// A copy that draws part of a tile the client has no pixels for does not
+// complete it: the rest of the tile is still undefined.
+func TestScrollUndefinedDestination(t *testing.T) {
+	r := newScrollRig(t, 128, 256, 64)
+	drawPage(r.fb, r.fb.Bounds(), 9, 0)
+	r.frame()
+	// Forget the second row of tiles, rows 64 to 127, and blank them on
+	// the client, as if never sent.
+	for c := range 2 {
+		r.sc.valid[1*2+c] = false
+	}
+	draw.Draw(r.client, image.Rect(0, 64, 128, 128), image.Transparent, image.Point{}, draw.Src)
+	// Rows 24 to 87 would come from the forgotten tile; the longest span
+	// that moves is rows 88 to 215, which covers the forgotten tile's
+	// rows from 88 on only.
+	drawPage(r.fb, r.fb.Bounds(), 9, 40)
+	copies, tiles := r.frame()
+	if len(copies) != 1 || copies[0].a != 88 || copies[0].b != 216 {
+		t.Fatalf("copies %+v, want rows 88 to 216", copies)
+	}
+	if !slices.Equal(copies[0].done, []int{4, 5}) || tiles != 6 {
+		t.Fatalf("copy completed tiles %v and %d went as tiles, want 4 and 5, and 6", copies[0].done, tiles)
+	}
+}
+
 // The search's cost is bounded: a change of one tile is not searched; a
 // change of the whole screen that is no scroll gives up after
 // scrollMaxMisses runs, each hashing its column once and an eighth of its
@@ -424,6 +460,32 @@ func TestScrollBounds(t *testing.T) {
 	r.frame()
 	if r.sc.searched != 0 || r.sc.hashes+r.sc.rehashed != 0 {
 		t.Errorf("one tile: %d runs searched, %d rows hashed", r.sc.searched, r.sc.hashes+r.sc.rehashed)
+	}
+	// A word across two tiles side by side, or a line across the screen.
+	fillFB(r.fb, image.Rect(100, 100, 140, 110), color.RGBA{0, 0xff, 0, 0xff})
+	r.frame()
+	fillFB(r.fb, image.Rect(0, 300, w, 310), color.RGBA{0, 0xff, 0, 0xff})
+	r.frame()
+	if r.sc.searched != 0 || r.sc.hashes+r.sc.rehashed != 0 {
+		t.Errorf("a row of tiles: %d runs searched, %d rows hashed", r.sc.searched, r.sc.hashes+r.sc.rehashed)
+	}
+	// A new page that has, by chance, one row of the old one elsewhere:
+	// one vote, and no offset compared.
+	drawPage(r.fb, r.fb.Bounds(), 1, 0)
+	r.frame()
+	drawPage(r.fb, r.fb.Bounds(), 3, 0)
+	drawPage(r.fb, image.Rect(0, 4, w, 5), 1, 500)
+	if r.frame(); r.sc.tried != 0 {
+		t.Errorf("one row in common: %d offsets compared, want none", r.sc.tried)
+	}
+	// Two such rows, each at its own offset: two votes, one each.
+	drawPage(r.fb, r.fb.Bounds(), 1, 0)
+	r.frame()
+	drawPage(r.fb, r.fb.Bounds(), 3, 0)
+	drawPage(r.fb, image.Rect(0, 4, w, 5), 1, 500)
+	drawPage(r.fb, image.Rect(0, 12, w, 13), 1, 88)
+	if r.frame(); r.sc.tried != 0 {
+		t.Errorf("two rows in common at two offsets: %d offsets compared, want none", r.sc.tried)
 	}
 	drawPage(r.fb, r.fb.Bounds(), 2, 0)
 	if copies, _ := r.frame(); len(copies) != 0 {

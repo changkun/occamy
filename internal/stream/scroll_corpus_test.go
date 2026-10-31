@@ -102,7 +102,9 @@ type direct struct {
 
 // newDirect returns a writer of a 1024×768 session for a viewer of WebP
 // and deflate at quality 70, as the codec measurement encoded, with
-// scroll detection if scroll is set.
+// scroll detection if scroll is set. No frame is ever acknowledged, so
+// the pacer measures no rate: it neither cuts a frame nor paces it, and
+// each frame goes out whole and at once, however slowly it is encoded.
 func newDirect(tb testing.TB, scroll bool) *direct {
 	tb.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -120,7 +122,7 @@ func newDirect(tb testing.TB, scroll bool) *direct {
 		tb.Fatal(err)
 	}
 	c := &recorder{reg: protocol.ServerMessages()}
-	p := pacer.New(pacer.Config{MinQuality: 70, MaxQuality: 70, InitialCap: 1 << 30})
+	p := pacer.New(pacer.Config{Window: 1 << 20, MinQuality: 70, MaxQuality: 70, InitialCap: 1 << 30})
 	enc := newEncoder([]protocol.Codec{protocol.CodecWebP, protocol.CodecDeflate})
 	w := newWriter(c, owner, p, enc, protocol.Limits{}, slog.New(slog.DiscardHandler))
 	if scroll {
@@ -152,7 +154,8 @@ func (d *direct) show(img *image.RGBA) {
 }
 
 // frame sends what changed as one frame and reports its bytes, tiles and
-// copies, its encode time, and the part of it the scroll search took.
+// copies, its encode time, and the part of it the scroll search took. It
+// fails if the frame left any of the screen's changes unsent.
 func (d *direct) frame() (bytes, tiles, copies int, encode, search time.Duration) {
 	d.tb.Helper()
 	w := d.w
@@ -169,9 +172,13 @@ func (d *direct) frame() (bytes, tiles, copies int, encode, search time.Duration
 	if err := w.sendFrame(d.ctx, w.order, false); err != nil {
 		d.tb.Fatal(err)
 	}
-	w.p.Ack(time.Now(), w.frame, 0)
 	if len(d.c.errs) > 0 {
 		d.tb.Fatal(d.c.errs[0])
+	}
+	for t, v := range w.fb.Versions(nil) {
+		if v > w.sent[t] {
+			d.tb.Fatalf("tile %d left unsent by the frame", t)
+		}
 	}
 	return d.c.bytes, d.c.tiles, d.c.copies, w.encodeTime, w.scrollTime
 }

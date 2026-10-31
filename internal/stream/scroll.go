@@ -179,9 +179,9 @@ type scroller struct {
 	dys    []int
 	copies []scrollCopy
 
-	// What the last search cost: the runs it read and the rows it
-	// hashed.
-	searched, hashes int
+	// What the last search cost: the runs it read, the rows of them it
+	// hashed, and the offsets that won a vote and were compared.
+	searched, hashes, tried int
 }
 
 // find returns the copies that bring the client's screen, as the shadow
@@ -192,7 +192,7 @@ type scroller struct {
 func (sc *scroller) find(fb *framebuffer.Framebuffer, order []int) []scrollCopy {
 	g := sc.g
 	sc.copies = sc.copies[:0]
-	sc.searched, sc.hashes, sc.rehashed = 0, 0, 0
+	sc.searched, sc.hashes, sc.tried, sc.rehashed = 0, 0, 0, 0
 	if len(order) < scrollMinTiles || g.cols == 0 {
 		return nil
 	}
@@ -245,6 +245,7 @@ func (sc *scroller) find(fb *framebuffer.Framebuffer, order []int) []scrollCopy 
 		}
 		if !ok {
 			if dy := sc.vote(rn); dy != 0 {
+				sc.tried++
 				cp, ok = sc.try(rn, dy)
 			}
 		}
@@ -390,8 +391,8 @@ func (sc *scroller) try(rn run, dy int) (scrollCopy, bool) {
 		t := r*sc.g.cols + rn.c
 		ty0, ty1 := r*tile, min((r+1)*tile, h)
 		// Rows outside the copy must already be right, in a tile whose
-		// pixels the client has.
-		complete := sc.valid[t] || (a <= ty0 && ty1 <= b)
+		// pixels the client has: row is nil in one it has not.
+		complete := true
 		for y := ty0; complete && y < ty1; y++ {
 			if y < a || y >= b {
 				own := sc.row(rn.c, y)

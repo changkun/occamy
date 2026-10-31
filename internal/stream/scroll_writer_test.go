@@ -9,6 +9,7 @@ import (
 	"context"
 	"image"
 	"image/color"
+	"image/draw"
 	"math/rand/v2"
 	"testing"
 	"testing/synctest"
@@ -411,5 +412,221 @@ func TestScrollStreamRandom(t *testing.T) {
 				t.Errorf("seed %d: no copy", seed)
 			}
 		})
+	}
+}
+
+// A resize that keeps the number of tiles still leaves the client's
+// screen undefined: nothing is copied from it until it is sent again.
+func TestScrollResizeSameGrid(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &tapped{Backend: backendtest.NewScreen(320, 256, 0)}
+		r := newRig(t, b, 50e6, time.Millisecond, visible)
+		time.Sleep(100 * time.Millisecond)
+		pageSink(b, image.Rect(0, 0, 320, 256), 8, 0)
+		time.Sleep(100 * time.Millisecond)
+		n := r.cl.frameCount()
+		// 300×250 is 5×4 tiles of 64 too.
+		b.Sink().Resize(300, 250)
+		pageSink(b, image.Rect(0, 0, 300, 250), 8, 10)
+		time.Sleep(100 * time.Millisecond)
+		matches(t, r.s, r.cl, "after the resize")
+		if _, copies, _, _, _ := r.cl.since(n); copies != 0 {
+			t.Errorf("%d copies from the screen before the resize", copies)
+		}
+	})
+}
+
+// A run of lossy tiles ends before a tile that a copy completed: the
+// copy is not sent again inside the run.
+func TestScrollLossyRun(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const w, h = 512, 256
+		img := photo(t)
+		b := &tapped{Backend: backendtest.NewScreen(w, h, 0)}
+		hello := protocol.Hello{Visible: true, Capabilities: protocol.Capabilities{Codecs: []protocol.Codec{protocol.CodecWebP, protocol.CodecDeflate}}}
+		r := newRig(t, b, 50e6, time.Millisecond, hello)
+		time.Sleep(100 * time.Millisecond)
+		// The photograph's rows from 0.
+		paint(b, image.Rect(0, 0, w, h), img)
+		time.Sleep(100 * time.Millisecond)
+		n := r.cl.frameCount()
+		r.cl.mu.Lock()
+		webp := r.cl.codecs[protocol.CodecWebP]
+		r.cl.mu.Unlock()
+		// In one drawing operation, the top tile of the first column shows
+		// other rows and the other columns scroll by 20: the top row's
+		// lossy run, which the first column's tile begins, ends where the
+		// copy's tiles begin. The first column's run is one search that
+		// misses.
+		next := image.NewRGBA(image.Rect(0, 0, w, h))
+		draw.Draw(next, next.Rect, img, image.Point{}, draw.Src)
+		draw.Draw(next, image.Rect(0, 0, 64, 64), img, image.Pt(0, 300), draw.Src)
+		draw.Draw(next, image.Rect(64, 0, w, h), img, image.Pt(64, 20), draw.Src)
+		paint(b, next.Rect, next)
+		time.Sleep(100 * time.Millisecond)
+		_, copies, _, _, _ := r.cl.since(n)
+		if copies != 1 {
+			t.Fatalf("%d copies, want 1", copies)
+		}
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		copied := image.Rect(64, 0, w, 192) // the tiles the copy completes
+		for _, f := range r.cl.frames[n:] {
+			for _, rect := range f.rects {
+				if rect.Overlaps(copied) {
+					t.Errorf("a tile message at %v covers what the copy completed", rect)
+				}
+			}
+		}
+		if r.cl.codecs[protocol.CodecWebP] == webp {
+			t.Error("no lossy tile sent: the test does not test a run")
+		}
+	})
+}
+
+// motion repaints r every period in a new colour until ctx is done.
+func motion(ctx context.Context, b *tapped, r image.Rectangle, period time.Duration) {
+	for i := 0; ; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(period):
+			paint(b, r, image.NewUniform(color.RGBA{byte(i), byte(i >> 8), 0x40, 0xff}))
+		}
+	}
+}
+
+// A wheel whose scroll shows while a frame of motion is being sent: the
+// frame turns to the input's effect, and the effect is the copy.
+func TestScrollWheelMidFrame(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		const w, h = 320, 512
+		b := &wheeled{tapped: &tapped{Backend: backendtest.NewScreen(w, h, 0)}, mu: make(chan struct{}, 1)}
+		// The motion below the page is 160 KiB raw a frame, 80 ms of the
+		// link: a wheel finds a frame half sent.
+		r := newRig(t, b, 2e6, 5*time.Millisecond, visible)
+		time.Sleep(100 * time.Millisecond)
+		pageSink(b.tapped, image.Rect(0, 0, w, 256), 6, 0)
+		time.Sleep(time.Second)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go motion(ctx, b.tapped, image.Rect(0, 256, w, h), 10*time.Millisecond)
+		time.Sleep(500 * time.Millisecond)
+		mid := 0
+		for seq := uint32(1); seq <= 4; seq++ {
+			n := r.cl.frameCount()
+			r.cl.send(t, protocol.Wheel{Seq: seq, DY: 1})
+			time.Sleep(300 * time.Millisecond)
+			r.cl.mu.Lock()
+			var carrier *frameRecord
+			for i := range r.cl.frames[n:] {
+				if f := &r.cl.frames[n+i]; f.lastSeq >= seq {
+					carrier = f
+					break
+				}
+			}
+			r.cl.mu.Unlock()
+			switch {
+			case carrier == nil:
+				t.Fatalf("no frame reported wheel %d", seq)
+			case len(carrier.copies) != 1:
+				t.Errorf("wheel %d: its frame carried %d copies and %d tiles", seq, len(carrier.copies), carrier.tiles)
+			case carrier.late > 0:
+				mid++
+			}
+		}
+		if mid == 0 {
+			t.Error("no wheel's scroll showed mid-frame: the test does not test that")
+		}
+	})
+}
+
+// document is a 1024×768 screen of a document scrolled to row top: rows
+// of text down to row 600, blank ones below. It has 64 colours, so that
+// its tiles go lossless and the client's screen is exact.
+func document(top int) *image.RGBA {
+	img := image.NewRGBA(image.Rect(0, 0, 1024, 768))
+	for y := range 768 {
+		for x := range 1024 {
+			c := color.RGBA{0xfa, 0xfa, 0xf5, 0xff}
+			if top+y < 600 {
+				c = pagePixel(9, x, top+y)
+				c.R, c.G, c.B = c.R&0xc0, c.G&0xc0, c.B&0xc0
+			}
+			img.SetRGBA(x, y, c)
+		}
+	}
+	return img
+}
+
+// The tiles a copy completes are sent as of the pixels it was found
+// against: a screen that scrolled again after the frame's tiles were
+// collected is sent once, by the copy.
+func TestScrollMovedSinceCollected(t *testing.T) {
+	d := newDirect(t, true)
+	d.show(document(0))
+	d.frame()
+	d.show(document(16))
+	if _, ok := d.w.collect(image.Rectangle{}); !ok {
+		t.Fatal("resized")
+	}
+	d.show(document(32))
+	if ok, _ := d.w.p.StartFrame(time.Now()); !ok {
+		t.Fatal("the pacer holds the frame")
+	}
+	d.c.bytes, d.c.tiles, d.c.copies = 0, 0, 0
+	if err := d.w.sendFrame(d.ctx, d.w.order, false); err != nil {
+		t.Fatal(err)
+	}
+	if d.c.copies != 1 || d.c.tiles != 0 {
+		t.Fatalf("the scroll went as %d copies and %d tiles, want a copy alone", d.c.copies, d.c.tiles)
+	}
+	d.exact()
+	if _, tiles, copies, _, _ := d.frame(); tiles != 0 || copies != 0 {
+		t.Errorf("the next frame sent %d tiles and %d copies, want none", tiles, copies)
+	}
+}
+
+// An input whose effect is a copy alone is resolved by it: the next
+// input is awaited afresh.
+func TestScrollCopyAloneResolves(t *testing.T) {
+	d := newDirect(t, true)
+	// Scrolled by 16 rows, the document exposes blank rows where the
+	// client has blank already.
+	doc := document
+	d.show(doc(0))
+	d.frame()
+	if err := d.w.v.Input(1, backend.Wheel{DY: 1}); err != nil {
+		t.Fatal(err)
+	}
+	// Painted whole, as a server without CopyRect would.
+	paint(d.b, image.Rect(0, 0, 1024, 768), doc(16))
+	if err := d.w.small(d.ctx); err != nil {
+		t.Fatal(err)
+	}
+	if d.w.in == nil {
+		t.Fatal("the wheel is not pending")
+	}
+	fresh, ok := d.w.collect(image.Rectangle{})
+	if !ok || fresh == 0 {
+		t.Fatalf("the wheel's effect is not fresh: %d tiles", fresh)
+	}
+	d.w.p.Input()
+	d.w.in.boosted = true
+	if ok, _ := d.w.p.StartFrame(time.Now()); !ok {
+		t.Fatal("the pacer holds the input's frame")
+	}
+	d.c.bytes, d.c.tiles, d.c.copies = 0, 0, 0
+	order := d.w.order[:fresh]
+	byDamage(order, d.w.versions)
+	if err := d.w.sendFrame(d.ctx, order, true); err != nil {
+		t.Fatal(err)
+	}
+	if d.c.copies != 1 || d.c.tiles != 0 {
+		t.Fatalf("the effect went as %d copies and %d tiles of %d fresh, want a copy alone", d.c.copies, d.c.tiles, fresh)
+	}
+	d.exact()
+	if d.w.in != nil {
+		t.Error("the wheel is still pending after its effect was sent")
 	}
 }
