@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     useradd --create-home --shell /bin/bash occamy && \
     sed -i 's/^#EnableConsole=false/EnableConsole=true/; s/^EnableSyslog=true/EnableSyslog=false/' \
         /etc/xrdp/xrdp.ini /etc/xrdp/sesman.ini
-COPY startwm.sh /etc/xrdp/
+COPY reconnectwm.sh startwm.sh /etc/xrdp/
 COPY clipboard-echo.sh start.sh /usr/local/bin/
 ENV RDP_PASSWORD=occamy
 EXPOSE 3389
