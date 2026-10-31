@@ -124,6 +124,9 @@ The limits that follow, which docs/configuration.md states too:
   GKE's `gke-gcloud-auth-plugin`, and **no legacy `auth-provider`
   entries.** `occamyd` deliberately runs no external credential
   binaries: a session never starts a process on the server.
+- **No path prefix.** An API server behind one, such as a cluster that
+  Rancher proxies at `/k8s/clusters/<id>`, cannot be reached yet, since
+  `target` is a `host:port` (option A below).
 - **What works:** a bearer token, such as a ServiceAccount token, which
   managed clusters accept too, or a client certificate, with the API
   server checked against the system's roots, a CA or pins.

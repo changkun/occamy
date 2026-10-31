@@ -372,7 +372,10 @@ up by the next session. `occamyd` does not support:
   and the token or certificate in `credentials` instead;
 - exec credential plugins, such as EKS's `aws eks get-token` or GKE's
   `gke-gcloud-auth-plugin`;
-- the legacy `auth-provider` entries of a kubeconfig.
+- the legacy `auth-provider` entries of a kubeconfig;
+- an API server behind a path prefix, such as a cluster that Rancher
+  proxies at `https://rancher.example/k8s/clusters/c-m-abc12`: `target`
+  is a `host:port`, and `occamyd` asks for `/api/v1/...` at its root.
 
 `occamyd` deliberately runs no external credential binaries: a session
 never starts a process on the server, and a credential is one file or
