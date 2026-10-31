@@ -74,6 +74,12 @@ export interface SessionState {
   shown: boolean
   /** Why it ended, once ended; null for an open the user cancelled. */
   ending: Ending | null
+  /**
+   * The close code the stream ended with, as its end event gives it,
+   * such as 4002 once occamyd ended the session for everyone; 0 until
+   * then, for a stream the page closed, and for one that never opened.
+   */
+  code: number
 }
 
 /** What a stream asks the remote for in its hello. */
@@ -140,6 +146,7 @@ const initial: SessionState = {
   size: { width: 0, height: 0 },
   shown: false,
   ending: null,
+  code: 0,
 }
 
 /**
@@ -410,7 +417,7 @@ export class SessionController {
         this.update({ viewers: this.state.viewers.filter((v) => v.id !== ev.viewerId) })
         return
       case 'end':
-        this.finish(describeEnd(ev.code, ev.reason, this.context()))
+        this.finish(describeEnd(ev.code, ev.reason, this.context()), ev.code)
         return
     }
   }
@@ -450,14 +457,14 @@ export class SessionController {
     })
   }
 
-  private finish(ending: Ending | null): void {
+  private finish(ending: Ending | null, code = 0): void {
     if (this.state.phase === 'ended') {
       return
     }
     for (const u of this.unbinds.splice(0)) {
       u()
     }
-    this.update({ phase: 'ended', ending, prompts: [] })
+    this.update({ phase: 'ended', ending, prompts: [], code })
   }
 
   /** sendTerminalInput sends what the terminal emulator produced, if the role gives input. */

@@ -275,6 +275,18 @@ describe('SessionController', () => {
     expect(s.closes).toEqual([{ code: CloseCode.Unsupported, reason: 'the client failed to show the session' }])
   })
 
+  it('keeps the close code occamyd ended the stream with, and none for its own close', async () => {
+    const s = new FakeSession(Role.Owner)
+    const c = await opened(s)
+    s.push({ type: 'end', code: CloseCode.SessionClosed, reason: '' })
+    await settle()
+    expect(c.getState()).toMatchObject({ phase: 'ended', code: CloseCode.SessionClosed, ending: { title: 'Session ended' } })
+    const mine = await opened(new FakeSession(Role.Owner))
+    expect(mine.getState().code).toBe(0)
+    await mine.close()
+    expect(mine.getState()).toMatchObject({ phase: 'ended', code: 0 })
+  })
+
   it('cancels an open under way on close', async () => {
     const s = new FakeSession(Role.Owner)
     let connected: (s: Session) => void = () => undefined
