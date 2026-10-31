@@ -788,8 +788,8 @@ and guacd leaves the default deployment.
     resized and resized back before the server applied the first size
     was left with it). A server that applies the earlier layout after
     its two seconds still leaves the viewer at that size, as the client
-    no longer wants the size asked for back by then; the viewer resizes
-    again. Closing the channel forgets the capabilities and
+    no longer wants the size asked for back by then, until the viewer
+    resizes again. Closing the channel forgets the capabilities and
     keeps the size, which goes again when a channel opens. `Run` stops
     the layout timer as it returns.
   - After a reactivation, the client tells a server it had asked to
@@ -855,7 +855,10 @@ and guacd leaves the default deployment.
   back to 1024×768, a key painting the probe's swatch at each size.
   The rest of both packages' integration tests passed with the channel
   joined. After the review's fixes both packages' integration tests
-  passed again (host load 3 before, 7 after).
+  passed again (host load 3 before, 7 after). They have not run again
+  since the second review, as the shared host's load stayed above 8;
+  its changes here are a test seam, which is nil outside tests, and
+  the clipboard's count merged in.
 - **Mutation checks.** Each was broken in turn, 34 in all, and a test
   failed for 32; a mutant that no longer compiled was rewritten until
   it did. Caught:
