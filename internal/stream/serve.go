@@ -45,7 +45,9 @@ type Config struct {
 	// it went at a lower quality while it moved, or while the viewer's
 	// link held its quality down. Refinement is background work: it goes
 	// only while nothing else is to be sent and no other frame awaits an
-	// ack, a little at a time, and gives way to any input or change.
+	// ack, a little at a time, and gives way to any input or change. It
+	// also bounds motion: a tile is in motion when it changes more often
+	// than the refine delay.
 	RefineDelay time.Duration
 	// NoRefine turns refinement off, and with it motion: nothing goes
 	// at a lower quality than the pacer's for refinement to raise.
@@ -69,9 +71,10 @@ type Config struct {
 // DefaultViewerTimeout is Config.ViewerTimeout's default.
 const DefaultViewerTimeout = 30 * time.Second
 
-// DefaultRefineDelay is Config.RefineDelay's default: longer than the
-// time between the changes of a tile in motion, which changes more than
-// once a second, so that a tile is rarely refined between two of them.
+// DefaultRefineDelay is Config.RefineDelay's default. A tile in motion
+// changes more often than the refine delay, since heat halves each
+// refine delay (refine.go), so it is not refined between its changes;
+// one that changes less often goes at its final quality at once.
 const DefaultRefineDelay = 300 * time.Millisecond
 
 // ErrStalled ends the stream of a viewer that acknowledged no frame, or

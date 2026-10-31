@@ -262,7 +262,9 @@ func (e *Encoder) fallback(dst, pix []byte, w, h int) ([]byte, protocol.Codec) {
 // false. It tries qualities QualityStep apart, and hi, starting where its
 // last search ended, since a screen's photographic tiles tend to need
 // alike: on most rectangles it encodes and decodes twice. A rectangle
-// smaller than SSIM's 8×8 window goes at hi. For a viewer with no lossy
+// smaller than SSIM's 8×8 window has no score: it goes at hi, and
+// reached is false, so that a writer raises it as hi rises. For a
+// viewer with no lossy
 // codec, or a rectangle the lossy encoder refuses, the encoding is
 // lossless, at quality 100.
 func (e *Encoder) Still(dst, pix []byte, w, h, tile, lo, hi int) (b []byte, c protocol.Codec, quality int, reached bool) {
@@ -271,7 +273,7 @@ func (e *Encoder) Still(dst, pix []byte, w, h, tile, lo, hi int) (b []byte, c pr
 	pix = e.opaque(pix[:4*w*h])
 	if w < ssimWindow || h < ssimWindow {
 		if b, ok := e.lossyAt(dst, pix, w, h, hi); ok {
-			return b, e.lossy, hi, true
+			return b, e.lossy, hi, false
 		}
 		b, c := e.fallback(dst, pix, w, h)
 		return b, c, 100, true

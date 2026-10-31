@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"image"
 	"image/color"
+	"math"
 	"slices"
 	"testing"
 	"testing/synctest"
@@ -20,10 +21,10 @@ import (
 )
 
 // A tile warms by one for each snapshot it changed in and cools by half
-// a second; it moves from its third snapshot of changes in a row, and a
-// change that went out as an input's effect is not motion.
+// every refine delay; it moves from its third snapshot of changes in a
+// row, and a change that went out as an input's effect is not motion.
 func TestHeat(t *testing.T) {
-	w := &writer{heat: make([]float32, 3), effects: make([]uint64, 3)}
+	w := &writer{heat: make([]float32, 3), effects: make([]uint64, 3), refineDelay: DefaultRefineDelay}
 	now := time.Unix(0, 0)
 	w.versions = []uint64{1, 1, 1}
 	var moved []int
@@ -49,18 +50,18 @@ func TestHeat(t *testing.T) {
 	if !slices.Equal(moved, []int{4, 5, 6}) {
 		t.Errorf("tile 0 moving at snapshots %v, want 4 to 6", moved)
 	}
-	if h := w.heat[1]; h >= 1 || h < 0.6 {
-		t.Errorf("tile 1 changed once, 400 ms ago: heat %v", h)
+	if h, want := w.heat[1], math.Exp2(-4*activeWindow.Seconds()/DefaultRefineDelay.Seconds()); math.Abs(float64(h)-want) > 1e-6 {
+		t.Errorf("tile 1 changed once, 400 ms ago: heat %v, want %v", h, want)
 	}
 	if w.heat[2] != 0 || w.moving(2, false) {
 		t.Errorf("tile 2 changed only as inputs' effects: heat %v", w.heat[2])
 	}
-	// A second without changes halves the heat.
+	// A refine delay without changes halves the heat.
 	h := w.heat[0]
 	w.snap = slices.Clone(w.versions)
-	w.warm(now.Add(time.Second))
+	w.warm(now.Add(DefaultRefineDelay))
 	if got := w.heat[0]; got < h/2-1e-6 || got > h/2+1e-6 {
-		t.Errorf("heat %v a second after %v, want half", got, h)
+		t.Errorf("heat %v a refine delay after %v, want half", got, h)
 	}
 	// Versions of another screen size leave the heat alone.
 	w.versions = []uint64{9}

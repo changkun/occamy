@@ -101,6 +101,7 @@ type direct struct {
 	w    *writer
 	c    *recorder
 	prev *image.RGBA
+	aged bool // the next frame dates the last snapshot (age)
 }
 
 // newDirect returns a writer of a 1024×768 session for a viewer of WebP
@@ -176,6 +177,7 @@ func (d *direct) frame() (bytes, tiles, copies int, encode, search time.Duration
 	if err := w.syncSize(d.ctx); err != nil {
 		d.tb.Fatal(err)
 	}
+	d.aging()
 	if _, ok := w.collect(image.Rectangle{}); !ok {
 		d.tb.Fatal("resized")
 	}

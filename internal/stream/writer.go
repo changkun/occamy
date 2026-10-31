@@ -116,7 +116,8 @@ type writer struct {
 	// while not known; qual is the quality the client has each tile at
 	// when there is no shadow to say; refineDelay is how long a tile
 	// stays unchanged before it is refined, negative for never; refine
-	// holds the tiles to refine.
+	// holds the tiles to refine, and held the refinement the pacer turned
+	// away last.
 	heat        []float32
 	heatAt      time.Time
 	changed     []time.Duration
@@ -124,6 +125,7 @@ type writer struct {
 	qual        []uint8
 	refineDelay time.Duration
 	refine      []int
+	held        heldTile
 
 	// sc finds scrolls against the screen as the client has it, nil if
 	// scroll detection is off; scrollTime is what it took in the frame
@@ -358,6 +360,7 @@ func (w *writer) collect(viewport image.Rectangle) (fresh int, ok bool) {
 // in flight, when the screen is resized or hidden, or after the tiles of
 // an input whose effect appears meanwhile.
 func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
+	defer w.rested()
 	w.frame++
 	id := w.frame
 	readAt := time.Now()

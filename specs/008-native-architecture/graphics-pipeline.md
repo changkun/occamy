@@ -1041,10 +1041,18 @@ refinement is a frame of `tile` messages, which any v1 client takes.
   snapshot of the versions at most once per `activeWindow` (100 ms).
   At each one, a tile that changed since the last gains one unless the
   change went out as an input's effect, and every heat halves each
-  second. A tile at 2 or more is in motion: one that changed in three
-  snapshots in a row, or more than once a second for a while. An
-  input's effect is never in motion, so typing and what a click redraws
-  go at the pacer's quality, as before.
+  refine delay. A tile at 2 or more is in motion: one that changes more
+  often than the refine delay, after three snapshots in a row while
+  they are less than about 0.7 refine delays apart. A tile that changes
+  less often is not in motion and goes at its final quality: refinement
+  would raise it between its changes anyway, so the two ranges do not
+  overlap. The heat cools only while the writer is between frames: it
+  takes no snapshot while it sends one, so content that changes in
+  every snapshot is in motion however long the frames take. The time a
+  writer waits for acks counts as time between frames; it takes a
+  snapshot every `activeWindow` meanwhile. An input's effect is never in
+  motion, so typing and what a click redraws go at the pacer's quality,
+  as before.
 - **Motion picks the quality, and content still picks the codec.**
   `stream.Encoder.Tile` takes the tile's motion, and a tile of 17 to 256
   colours goes lossy while it moves (`encoder.Many`). A run of lossy
@@ -1069,20 +1077,34 @@ refinement is a frame of `tile` messages, which any v1 client takes.
     do;
   - a lossy quality above the pacer's, when the search ran out, for when
     the link allows;
-  - unknown for a moving tile, an input's effect, or a tile that a copy
-    completed, which refinement looks at again.
+  - unknown for a moving tile or an input's effect, which refinement
+    looks at again. Where the search finds that the client has the
+    pixels at the quality the score needs or above, as an input's effect
+    at the pacer's quality usually is, they are `final` as they are, and
+    nothing is sent.
+
+  A copy carries the goal of the pixels it moves as it carries their
+  quality: the tiles it lands in take the lowest goal of the tiles their
+  rows come from. A copy of `final` pixels stays `final`, and one of
+  pixels whose goal is unknown has none, so refinement raises it even
+  where the tile's own goal was beyond the pacer's reach.
 - **Refinement frames** (`writer.refinement`). A frame of refinement
   goes only when nothing is dirty, no input awaits its effect and no
   frame awaits an ack. It takes the tiles the client has, unchanged
   since, in its viewport, still for the delay and below their goal, and
   sends them one tile a message: exact if the tile has up to 256
-  colours, through `Still` otherwise. Before each message it gives way
-  to a pending input, and after the first, to any change on the screen.
-  `pacer.Background` admits the frame's bytes: the first message always,
-  then up to what the link carries in the pacer's target delay (5 ms),
-  or 16 KiB before a rate is known, while pacing allows. A frame of
-  refinement is acked like any other, so the next waits for its ack, and
-  a hidden viewer is refined nothing.
+  colours, through `Still` otherwise. Before each tile it gives way to a
+  pending input, and after the first it tried, sent or not, to any
+  change on the screen. `pacer.Background` admits the frame's bytes: the
+  first message always, then up to what the link carries in the pacer's
+  target delay (5 ms), or 16 KiB before a rate is known, while pacing
+  allows. The message it turns away goes first in the next frame of
+  refinement, as it was encoded, unless the tile or the pacer's quality
+  changed. A frame of refinement is acked like any other, so the next
+  waits for its ack, and a hidden viewer is refined nothing. An input
+  that shows nothing, such as a key-up, holds refinement back only until
+  the writer gives it up, `inputTimeout` (1 s) after it came: the writer
+  wakes then.
 
 **Measured.** On the codec measurement's frames, against the encoder as
 it was before, from `go test ./internal/stream -run TestRefineCorpus`
@@ -1094,7 +1116,7 @@ The full tables and the method are in
 | Scene | KiB a frame: before · after | encode ms a frame: before · after | refinement once still: KiB · messages |
 |---|---|---|---|
 | motion (G5) | 392.4 · 13.8 | 9.53 · 11.65 | 391.0 · 192, then exact |
-| drag (G4) | 30.6 · 5.2 | 4.25 · 2.13 | 18.9 · 35 |
+| drag (G4) | 30.6 · 5.2 | 4.25 · 2.13 | 17.9 · 30 |
 | scroll (G3) | 5.0 · 5.0 | 0.62 · 0.66 | none |
 | photo, once (G6) | 150.8 · 121.8 | 21.99 · 66.68 | none |
 | browser, once | 147.3 · 140.1 | 7.93 · 15.99 | none |
@@ -1156,7 +1178,7 @@ fuzzer (`FuzzSSIMScore`, 30 seconds and 3.5 million inputs without a
 failure). The scroll property test ran 120 seconds, 717 seeds and
 70,878 frames, without a failure.
 
-**Mutation check.** 36 mutants of the new code. The tests kill 31,
+**Mutation check.** 36 mutants of the new code. The tests killed 31,
 nine of them only after tests were added for them: motion from exactly
 the threshold; a lossless tile with an unknown goal; refinement while an
 input awaits its effect, or after a change mid-frame, or of a tile that
@@ -1166,15 +1188,57 @@ scorer's empty blocks, whose NaN the comparison let through. Two
 survivors were code that did nothing, now removed: a check that a tile
 was ever sent, which its version already implies, and a reset of the
 heat on an input's effect, which `warm` already does not count. Three
-survive:
+survived; the review found two of them reachable, and tests now kill
+them:
 
-- the goal reset of a tile a copy completes, which differs only when the
-  copied pixels need more than the goal of the pixels they replace;
+- the goal reset of a tile a copy completes. A tile whose search ran
+  out at 90 has goal 91; on a congested link a copy can complete it with
+  pixels at 30, which without the reset would never be refined. The
+  copy now carries the goal of the pixels it moves, and
+  `TestCopyCarriesGoal` kills the reset's removal and a copy that takes
+  the highest goal;
 - `Still`'s fallback to lossless when an encode fails after one at
   another quality succeeded, which the encoders never do, since they
-  fail on size alone;
+  fail on size alone. It survives;
 - a frame of refinement ending at a change before its first message
-  rather than after it, microseconds apart.
+  rather than after it. That was microseconds apart only when the first
+  tile it tried was sent; tiles that send nothing are each a search of
+  about 0.5 ms, and a change waited behind all of them. The frame now
+  ends after the first tile it tried, and `TestRefineYieldsWithoutSending`
+  kills the old condition.
+
+**Review fixes.** An independent review of the pull request found the
+following, each fixed with a test that fails without it (13 mutants of
+the fixes, all killed):
+
+- An input that showed nothing, such as a key-up after motion stopped,
+  kept refinement waiting with no timer, so tiles stayed at 30 until the
+  next change. The writer now wakes when the input times out
+  (`TestRefineAfterSilentInput`).
+- Heat halved each second of wall time, so a writer whose frames took a
+  second, on a loaded host, at 4K or on a slow link, found no motion.
+  It now cools only between frames (`TestMotionSlowWriter`).
+- A tile changing every 0.3 to 1 s, a caret at 530 or 600 ms, was in
+  motion and also refined between its changes, so it went lossy and then
+  exact on each change. Heat now halves each refine delay, so it goes
+  exact once a change (`TestBlink`).
+- Refinement sent an input's photographic effect again at the quality
+  the search found, below the pacer's quality it went at: 24 tiles and
+  16,250 bytes, mean SSIM 0.9489 to 0.9202. The search's agreement now
+  makes it `final` with nothing sent (`TestInputEffectNotResent`). On the
+  corpus, the dragged window's refinement drops from 35 messages and
+  18.9 KiB to 30 and 17.9: five moving tiles that reach the score at 30
+  went again at 30.
+- Tiles a copy completed from `final` pixels were searched again for
+  nothing, 48 of them and about 25 ms of a core after a 32-pixel scroll
+  at 512×512; see the copy's goal above (`TestCopyCarriesGoal`).
+- `Still` called a rectangle smaller than SSIM's window, the 4-pixel
+  bottom row of a 900-line screen, reached at whatever quality it went,
+  so it stayed there; it is now not reached, and rises with the pacer
+  (`TestStill`).
+- The message `pacer.Background` turned away was searched again in the
+  next frame; it is kept (`TestRefineKeepsTurnedAway`: 192 searches for
+  192 tiles, against 203).
 
 **Surprises.**
 
@@ -1194,6 +1258,13 @@ survive:
 
 **Follow-ups.**
 
+- **Refinement on a long round trip is slow**: about 30 to 50 seconds
+  for a 1080p screen of photograph at 10 Mbit/s and 100 ms, since a
+  frame of refinement waits for the last one's ack and takes the
+  pacer's 5 ms of bytes.
+- **A paused video can stay at 30** while something else on the screen
+  animates, since refinement goes only when nothing is dirty; see the
+  next item but one.
 - **A pointer drag is an input's effect**, never motion, so a window the
   viewer drags goes at the pacer's quality, not its lowest. Telling a
   drag's motion from a click's effect needs the pointer's history.
