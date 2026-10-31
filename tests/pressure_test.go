@@ -104,7 +104,8 @@ func TestConnectionPressure(t *testing.T) {
 const goroutineSlack = 5
 
 // goroutines returns the number of goroutines occamyd runs, from the pprof
-// routes that the demo stack serves in debug mode.
+// routes that the demo stack serves in debug mode, which make run
+// OCCAMY_DEBUG=1 turns on.
 func goroutines(t *testing.T, addr string) int {
 	t.Helper()
 	n, _, err := goroutineProfile(addr)
@@ -152,7 +153,7 @@ func goroutineProfile(addr string) (int, string, error) {
 		return 0, "", fmt.Errorf("goroutine profile: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return 0, "", fmt.Errorf("goroutine profile: %s, is occamy in debug mode?", resp.Status)
+		return 0, "", fmt.Errorf("goroutine profile: %s: occamy is not in debug mode; start the demo stack with make run OCCAMY_DEBUG=1", resp.Status)
 	}
 	var n int
 	if _, err := fmt.Sscanf(string(b), "goroutine profile: total %d", &n); err != nil {

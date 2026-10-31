@@ -65,4 +65,61 @@ func TestDemoV1File(t *testing.T) {
 	if len(f.Auth.Users) != 1 || bcrypt.CompareHashAndPassword([]byte(f.Auth.Users[0].PasswordHash), []byte("occamy")) != nil {
 		t.Errorf("users %+v, want demo with the password occamy", f.Auth.Users)
 	}
+	// The debug listener is off but where make run OCCAMY_DEBUG=1 sets
+	// OCCAMY_V1_DEBUG_ADDRESS (docker-compose.yaml passes it on, empty
+	// by default).
+	for _, address := range []string{"", "0.0.0.0:5638"} {
+		t.Setenv("OCCAMY_V1_DEBUG_ADDRESS", address)
+		f, err := config.ParseV1(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if f.Debug.Address != address {
+			t.Errorf("with OCCAMY_V1_DEBUG_ADDRESS=%q, the debug listener is on %q", address, f.Debug.Address)
+		}
+	}
+}
+
+// TestDemoV0Files checks the demo stack's v0 files: occamy.yaml, in
+// release mode, which serves no pprof, and occamy-debug.yaml, which make
+// run OCCAMY_DEBUG=1 mounts in its place for the pressure test, the same
+// but in debug mode.
+func TestDemoV0Files(t *testing.T) {
+	read := func(name string) string {
+		raw, err := os.ReadFile("../../docker/" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	release, debug := read("occamy.yaml"), read("occamy-debug.yaml")
+	for _, tt := range []struct {
+		name, raw string
+		debug     bool
+	}{
+		{"occamy.yaml", release, false},
+		{"occamy-debug.yaml", debug, true},
+	} {
+		c, err := config.Parse([]byte(tt.raw))
+		if err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		if c.Debug() != tt.debug {
+			t.Errorf("%s: debug mode %v, want %v", tt.name, c.Debug(), tt.debug)
+		}
+	}
+	// The settings, past the comments on top, but for the mode.
+	settings := func(raw string) string {
+		_, body, _ := strings.Cut(raw, "\n---\n")
+		var lines []string
+		for line := range strings.SplitSeq(body, "\n") {
+			if !strings.HasPrefix(line, "mode:") {
+				lines = append(lines, line)
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
+	if settings(release) != settings(debug) {
+		t.Errorf("occamy-debug.yaml differs from occamy.yaml in more than the mode:\n%s\n---\n%s", settings(release), settings(debug))
+	}
 }

@@ -21,15 +21,22 @@ build:
 	$(CONTAINER_ENGINE) build -t $(IMAGE):$(VERSION) -t $(IMAGE):latest -f docker/Dockerfile .
 .PHONY: build
 
+# run starts the demo stack. OCCAMY_DEBUG=1 turns on its debug routes,
+# which have no authentication, on the host's loopback interface: the v0
+# service's pprof on OCCAMY_PORT, in debug mode (docker/occamy-debug.yaml),
+# for the pressure test, and occamy-v1's debug listener on
+# OCCAMY_V1_DEBUG_PORT, for make soak. make run without it turns them off
+# again.
 run:
-	cd docker && $(CONTAINER_ENGINE) compose up -d --build --wait
+	cd docker && $(if $(filter 1,$(OCCAMY_DEBUG)),OCCAMY_V0_CONF=occamy-debug.yaml OCCAMY_V1_DEBUG_ADDRESS=0.0.0.0:5638 )$(CONTAINER_ENGINE) compose up -d --build --wait
 .PHONY: run
 
 stop:
 	cd docker && $(CONTAINER_ENGINE) compose down --remove-orphans
 .PHONY: stop
 
-# e2e runs the end-to-end tests against a stack started with make run:
+# e2e runs the end-to-end tests against a stack started with make run,
+# with OCCAMY_DEBUG=1 for the pressure test (OCCAMY_PRESSURE_N):
 # the v0 service's on OCCAMY_E2E_ENDPOINT and occamy-v1's, API v1 with
 # native VNC next to guacd's, on OCCAMY_E2E_V1_ENDPOINT. Both default to
 # the ports the stack publishes, OCCAMY_PORT and OCCAMY_V1_PORT as
@@ -41,7 +48,8 @@ e2e:
 	go test -v -count=1 -timeout 20m ./tests/
 .PHONY: e2e
 
-# soak runs TestSoak against a stack started with make run: sessions
+# soak runs TestSoak against a stack started with make run
+# OCCAMY_DEBUG=1: sessions
 # through occamy-v1 for a duration while it samples occamyd's
 # goroutines, heap and open files from occamy-v1's debug listener, on
 # OCCAMY_V1_DEBUG_PORT, and fails if one grows. OCCAMY_SOAK_SESSIONS
