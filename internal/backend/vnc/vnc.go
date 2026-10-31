@@ -510,14 +510,12 @@ func (b *Backend) connect(ctx context.Context, sink backend.Sink, r *run) error 
 		}()
 		return r.readLoop(dec)
 	}()
-	if errors.As(r.werr, new(backend.PanicError)) {
-		return r.werr
-	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	if err != nil && r.werr != nil {
-		// The failed write closed the connection under the reader.
+		// The failed write, or the writer's panic, closed the connection
+		// under the reader.
 		return r.werr
 	}
 	return err
