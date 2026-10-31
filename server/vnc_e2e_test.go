@@ -12,11 +12,14 @@ import (
 	"image/color"
 	"image/draw"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -450,4 +453,85 @@ func TestVNCAdhoc(t *testing.T) {
 		t.Fatal(err)
 	}
 	awaitPixel(t, cl, image.Pt(4, 4), red)
+}
+
+// TestVNCAdhocName opens ad-hoc vnc targets by name through the native
+// backend. occamyd resolves a name once, checks the address against
+// adhoc_allowlist and dials that address, not the name: the names are
+// under .invalid, which resolves nowhere, and the test's resolver
+// answers each name once. An ad-hoc target has no tls policy, so a
+// certificate must chain to the system's roots: a server whose
+// certificate signs itself is refused before any credential reaches it.
+func TestVNCAdhocName(t *testing.T) {
+	const plainName, tlsName = "plain.occamy-test.invalid", "tls.occamy-test.invalid"
+	plain := newVNCServer(t, vnctest.Options{Password: "secret"})
+	cert, err := vnctest.SelfSigned(tlsName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withTLS := newVNCServer(t, vnctest.Options{Certificate: &cert.TLS, Password: "secret"})
+	ts, alice := vncTestServer(t, func(f *config.File) {
+		f.AllowAdhocTargets = true
+		f.AdhocAllowlist = []string{"127.0.0.1:1-65535"}
+		f.AdhocBackends = map[string]string{"vnc": config.BackendNative}
+	})
+	var mu sync.Mutex
+	lookups := map[string]int{}
+	ts.s.adhoc.lookup = func(_ context.Context, host string) ([]netip.Addr, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		if lookups[host]++; lookups[host] > 1 {
+			return nil, errors.New("no second answer")
+		}
+		return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
+	}
+	open := func(name string, vs *vnctest.Server) *client.Session {
+		t.Helper()
+		_, port, _ := net.SplitHostPort(vs.Addr())
+		r := ts.api(t, http.MethodPost, "/api/v1/sessions", alice, `{"protocol":"vnc","target":"`+net.JoinHostPort(name, port)+`"}`)
+		var o openResponse
+		if err := json.Unmarshal(r.body, &o); err != nil || r.code != http.StatusCreated {
+			t.Fatalf("POST /api/v1/sessions for %s: %d %s", name, r.code, r.body)
+		}
+		return ts.dialStream(t, "/api/v1/sessions/"+url.PathEscape(o.ID)+"/stream", o.StreamToken, client.Options{})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), vncTimeout)
+	defer cancel()
+
+	cl := open(plainName, plain)
+	ev := awaitEvent(t, cl, "the prompt", func(ev client.Event) bool { _, ok := ev.(client.Prompt); return ok })
+	if err := cl.PromptReply(ctx, ev.(client.Prompt).ID, []string{"secret"}); err != nil {
+		t.Fatal(err)
+	}
+	c := acceptVNC(t, plain)
+	if err := c.Draw(uniform(image.Rect(0, 0, 8, 8), red)); err != nil {
+		t.Fatal(err)
+	}
+	awaitPixel(t, cl, image.Pt(4, 4), red)
+	cl.Close()
+
+	// The password is asked for after the certificate is checked, so a
+	// prompt means that the certificate passed.
+	cl = open(tlsName, withTLS)
+	ev = awaitEvent(t, cl, "the end", func(ev client.Event) bool {
+		switch ev.(type) {
+		case client.Prompt, client.End:
+			return true
+		}
+		return false
+	})
+	if e, ok := ev.(client.End); !ok || e.Code != protocol.CloseBackendFailed {
+		t.Errorf("%T %+v, want the end with backend-failed: a certificate that signs itself passed", ev, ev)
+	}
+	if n := withTLS.Credentials(); n != 0 {
+		t.Errorf("%d credentials sent to a server whose certificate the system's roots refuse", n)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	for _, name := range []string{plainName, tlsName} {
+		if n := lookups[name]; n != 1 {
+			t.Errorf("%s resolved %d times, want once", name, n)
+		}
+	}
 }

@@ -150,7 +150,8 @@ type Config struct {
 	// Width and Height are the screen size to ask the server for, as a
 	// Resize before Run does: with SetDesktopSize, once the server has
 	// shown that it supports ExtendedDesktopSize. Zero keeps the server's
-	// size.
+	// size, and so does a size beyond MaxSide or MaxPixels, which a
+	// Resize could not ask for either.
 	Width, Height int
 	// DialTimeout bounds the TCP connection and defaults to 15 seconds.
 	// Only Run's context bounds the handshake that follows, since it may

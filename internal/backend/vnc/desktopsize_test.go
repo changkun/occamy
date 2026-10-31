@@ -187,6 +187,28 @@ func TestConfigSize(t *testing.T) {
 	run.stop(t)
 }
 
+// TestConfigSizeBeyondLimits checks that a Config size beyond the
+// limits, which New takes, is not asked for: 8192×8192 is within MaxSide,
+// as within the most that a session's hello may ask for, but beyond
+// MaxPixels.
+func TestConfigSizeBeyondLimits(t *testing.T) {
+	checkGoroutines(t)
+	if 8192 > MaxSide || 8192*8192 <= MaxPixels || 8192 > backend.MaxResizeSide {
+		t.Fatal("8192×8192 no longer tests the pixel limit alone")
+	}
+	srv := newServer(t, serverOptions{})
+	b := newBackend(t, Config{Addr: srv.addr, Width: 8192, Height: 8192})
+	b.Demand(backend.Demand{Visible: true})
+	run := start(t, b, &backendtest.Sink{})
+	c := srv.accept(t)
+	req := expect[requestMsg](t, c)
+	img := pattern(64, 48, 0)
+	c.send(t, putUpdate(putExtDesktopSize(0, 0, 64, 48, screenMsg{id: 3, r: img.Rect}), putRaw(c.pf, img, req.r)))
+	expect[requestMsg](t, c)
+	c.quiet(t, silence)
+	run.stop(t)
+}
+
 // TestResizeBeforeRun checks that a Resize before Run, as the session's
 // owner may send before the session's goroutine has started Run, is
 // asked for once Run starts, and that the newest size asked for is kept

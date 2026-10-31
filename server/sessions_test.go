@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -629,6 +630,42 @@ func TestAdhocReserved(t *testing.T) {
 	}
 }
 
+// TestConnectionTarget checks that a session on a connection of the
+// registry gets every setting of the connection that a backend reads.
+// The connection sets them all, and the target it wants sets every field
+// but name, which only an ad-hoc target has, so that a field added to
+// target is added here too.
+func TestConnectionTarget(t *testing.T) {
+	c := config.Connection{
+		ID: "mac", Name: "Mac", Protocol: "vnc", Target: "mac.lab.internal:5900", Backend: config.BackendNative,
+		HostKeys: []string{fakeHostKey}, InsecureIgnoreHostKey: true,
+		TLS:         config.ConnectionTLS{Require: true, ServerName: "mac", CAFile: "/ca.pem", Pins: []string{"SHA256:pin"}, InsecureSkipVerify: true},
+		ARD:         true,
+		Credentials: config.Credentials{Username: "studio", PasswordFile: "/password", Prompt: true},
+		Allow:       config.Allow{Users: []string{"alice"}},
+	}
+	want := target{
+		connection:            "mac",
+		protocol:              "vnc",
+		backend:               config.BackendNative,
+		addr:                  "mac.lab.internal:5900",
+		creds:                 c.Credentials,
+		hostKeys:              c.HostKeys,
+		insecureIgnoreHostKey: true,
+		tls:                   c.TLS,
+		ard:                   true,
+	}
+	if got := connectionTarget(&c); !reflect.DeepEqual(got, want) {
+		t.Errorf("connectionTarget = %+v, want %+v", got, want)
+	}
+	v := reflect.ValueOf(want)
+	for i := range v.NumField() {
+		if name := v.Type().Field(i).Name; name != "name" && v.Field(i).IsZero() {
+			t.Errorf("the test sets no target.%s", name)
+		}
+	}
+}
+
 func TestAdhocTargets(t *testing.T) {
 	ts, fb := sessionServer(t, func(f *config.File) {
 		f.AllowAdhocTargets = true
@@ -692,6 +729,11 @@ func TestAdhocTargets(t *testing.T) {
 		tg, _, _ := fb.last()
 		if tg.addr != tt.addr || tg.name != tt.name || tg.connection != "" || !tg.creds.Prompt {
 			t.Errorf("%s: target %+v, want %s named %q with prompted credentials", tt.body, tg, tt.addr, tt.name)
+		}
+		// An ad-hoc target has no setting that only a connection can
+		// make: no ard, and the default tls policy, the system's roots.
+		if tg.ard || !reflect.DeepEqual(tg.tls, config.ConnectionTLS{}) {
+			t.Errorf("%s: target with ard %v and tls %+v, want neither", tt.body, tg.ard, tg.tls)
 		}
 		var o openResponse
 		_ = json.Unmarshal(r.body, &o)
