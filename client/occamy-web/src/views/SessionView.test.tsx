@@ -11,14 +11,15 @@
 // occamyd decides, for the user who opened the session as the stream's
 // welcome says, and the stream closed for the session's end counts for
 // the session ended; the owner's session is kept in the tab's storage
-// for a reload until it ends, the view cannot join it or the user leaves
-// it; and the clipboard panel takes text sent for the remote's.
+// for a reload until it ends, occamyd refuses the view's stream to it or
+// the user leaves it, though not while occamyd cannot be reached; and
+// the clipboard panel takes text sent for the remote's.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { CloseCode, CloseError, Role, type Session, SessionClass, type SessionEvent } from '../protocol'
+import { CloseCode, CloseError, ConnectionError, Role, type Session, SessionClass, type SessionEvent } from '../protocol'
 import { type AccessToken, Api, type Identity } from '../lib/api'
 import { SESSION_KEY, type SessionAction } from '../lib/app'
 import { describeEnd } from '../lib/ending'
@@ -562,12 +563,23 @@ describe('The owner’s session kept for a reload', () => {
     expect(kept(r)).toEqual(lab)
   })
 
-  it('is forgotten when occamyd refuses to join it again, as once it has ended', async () => {
-    stream.connect = () => Promise.reject(new CloseError(CloseCode.Forbidden, 'no such session'))
+  it.each([
+    [CloseCode.Forbidden, 'no such session', 'Access refused'],
+    [CloseCode.Unauthorized, 'token expired', 'Signed out'],
+  ])('is forgotten when occamyd refuses to join it again with %i, as once it has ended', async (code, reason, title) => {
+    stream.connect = () => Promise.reject(new CloseError(code, reason))
     const storage = memory(new Map([[SESSION_KEY, JSON.stringify(lab)]]))
     const r = await render({ token: accessToken('demo'), owner: null, action: null }, ended, undefined, storage)
-    expect(text()).toContain('Access refused')
+    expect(text()).toContain(title)
     expect(kept(r)).toBeNull()
+  })
+
+  it('stays kept when occamyd cannot be reached, often why the page was reloaded', async () => {
+    stream.connect = () => Promise.reject(new ConnectionError('cannot reach occamyd'))
+    const storage = memory(new Map([[SESSION_KEY, JSON.stringify(lab)]]))
+    const r = await render({ token: accessToken('demo'), owner: null, action: null }, ended, undefined, storage)
+    expect(text()).toContain('Connection lost')
+    expect(kept(r)).toEqual(lab)
   })
 
   it('is not kept for a stream welcomed other than as the owner’s', async () => {

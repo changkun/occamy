@@ -196,7 +196,7 @@ export function keepSession(storage: Storage | undefined, target: SessionTarget)
   }
 }
 
-/** forgetSession forgets the kept session if it is sessionId: it has ended, its view could not join it, or the user left it. */
+/** forgetSession forgets the kept session if it is sessionId: it has ended, occamyd refused to join it, or the user left it. */
 export function forgetSession(storage: Storage | undefined, sessionId: string): void {
   try {
     if (sessionId !== '' && keptSession(storage)?.sessionId === sessionId) {

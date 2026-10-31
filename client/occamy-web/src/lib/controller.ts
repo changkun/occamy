@@ -11,6 +11,7 @@
 
 import {
   CloseCode,
+  CloseError,
   ClosedError,
   type ConnectOptions,
   type CursorEvent,
@@ -77,8 +78,10 @@ export interface SessionState {
   ending: Ending | null
   /**
    * The close code the stream ended with, as its end event gives it,
-   * such as 4002 once occamyd ended the session for everyone; 0 until
-   * then, for a stream the page closed, and for one that never opened.
+   * such as 4002 once occamyd ended the session for everyone, or that
+   * refused it, such as 4001; 0 until then, for a stream the page
+   * closed, and for one that failed to open without a code, as when
+   * occamyd could not be reached.
    */
   code: number
 }
@@ -267,7 +270,7 @@ export class SessionController {
       })
     } catch (err) {
       if (!signal.aborted) {
-        this.finish(describeFailure(err, this.context()))
+        this.finish(describeFailure(err, this.context()), err instanceof CloseError ? err.code : 0)
       }
       return
     }

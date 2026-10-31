@@ -8,7 +8,7 @@
 
 import { type ReactElement, Suspense, lazy, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
-import { CanvasSurface, Role, SessionClass, cursorStyle } from '../protocol'
+import { CanvasSurface, CloseCode, Role, SessionClass, cursorStyle } from '../protocol'
 import type { AccessToken, Api, Identity } from '../lib/api'
 import { type SessionAction, forgetSession, keepSession } from '../lib/app'
 import { type SessionController as Controller, SessionController, type SessionState, overlayOf } from '../lib/controller'
@@ -109,18 +109,19 @@ export function SessionView({ api, token, target, owner: seed, action, storage, 
   // The owner's session is kept in the tab's storage, so that a reload of
   // the page, which signs in again, joins it again after: the page going
   // away closes the stream, and occamyd keeps the session for the owner's
-  // grace. It is forgotten once the session has ended, once this view
-  // could not join it, or once the user leaves it.
+  // grace. It is forgotten once the session has ended, once occamyd
+  // refuses this view's stream to it, or once the user leaves it; not
+  // when occamyd cannot be reached, often why the page was reloaded.
   useEffect(() => {
     if (target.kind === 'share' || sessionId === '') {
       return
     }
     if (state.phase === 'open' && state.role === Role.Owner) {
       keepSession(storage, { kind: 'session', sessionId, name })
-    } else if (state.phase === 'ended' && (endsSession(state.code) || state.sessionId === '')) {
+    } else if (state.phase === 'ended' && (endsSession(state.code) || state.code === CloseCode.Forbidden || state.code === CloseCode.Unauthorized)) {
       forgetSession(storage, sessionId)
     }
-  }, [storage, target.kind, sessionId, name, state.phase, state.role, state.code, state.sessionId])
+  }, [storage, target.kind, sessionId, name, state.phase, state.role, state.code])
 
   // onLeave leaves the session, which a reload then no longer joins.
   const onLeave = (): void => {

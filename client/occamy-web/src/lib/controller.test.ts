@@ -330,6 +330,15 @@ describe('SessionController', () => {
     expect(mine.getState()).toMatchObject({ phase: 'ended', code: 0 })
   })
 
+  it('keeps the close code occamyd refused the stream with, and none for a failure to connect', async () => {
+    const refused = controller(() => Promise.reject(new CloseError(CloseCode.Forbidden, 'no such session')))
+    await refused.open(size)
+    expect(refused.getState()).toMatchObject({ phase: 'ended', code: CloseCode.Forbidden, ending: { title: 'Access refused' } })
+    const unreachable = controller(() => Promise.reject(new ConnectionError('refused')))
+    await unreachable.open(size)
+    expect(unreachable.getState()).toMatchObject({ phase: 'ended', code: 0, ending: { title: 'Connection lost' } })
+  })
+
   it('cancels an open under way on close', async () => {
     const s = new FakeSession(Role.Owner)
     let connected: (s: Session) => void = () => undefined
