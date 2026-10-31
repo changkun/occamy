@@ -1420,9 +1420,10 @@ RDP's guacd path, RDP no longer needs guacd at all.
   - xrdp sends its first screen, before the session's, as planar tiles
     under GFX, and the session's in RemoteFX Progressive alone; in
     these runs it sent no solid fill and no surface-to-surface copy.
-  - xrdp also opens Display Control, which a client without
-    `Config.Resize` refuses and counts; the backend, which sets
-    `Resize`, will take both once it sets `GFX`.
+  - xrdp also opens a second dynamic channel, which a client without
+    `Config.Resize` refuses and counts; by all appearances Display
+    Control, which the backend, setting `Resize` as well, will accept
+    once it sets `GFX`. The runs did not record its name.
 - **Follow-ups.**
   - The second pull request: RemoteFX and RemoteFX Progressive, GFX on
     by default, and the key that turns it off.
