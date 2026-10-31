@@ -228,7 +228,8 @@ func TestNewVNC(t *testing.T) {
 }
 
 // TestLoadWarnings checks the warnings of a file whose guacd.params no
-// session reads, for any protocol.
+// session reads, for any protocol, and of an rdp connection that may
+// send its password inside TLS that checks no certificate.
 func TestLoadWarnings(t *testing.T) {
 	conn := func(id, protocol, backend string) config.Connection {
 		return config.Connection{ID: id, Protocol: protocol, Backend: backend}
@@ -271,6 +272,16 @@ func TestLoadWarnings(t *testing.T) {
 			AdhocBackends: map[string]string{"rdp": "guacd"},
 		}, []string{"guacd.params.rdp sets color-depth,"}},
 		{"legacy_v0", config.File{Guacd: config.Guacd{Params: params}, LegacyV0: true}, nil},
+		{"unchecked TLS", config.File{Connections: []config.Connection{
+			{ID: "tls", Protocol: "rdp", Security: rdp.SecurityTLS, TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
+			{ID: "any", Protocol: "rdp", Security: rdp.SecurityAny, TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
+			{ID: "nla", Protocol: "rdp", TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
+			{ID: "pinned", Protocol: "rdp", Security: rdp.SecurityTLS, TLS: config.ConnectionTLS{Pins: []string{"SHA256:x"}}},
+			{ID: "vnc", Protocol: "vnc", TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
+		}}, []string{
+			`connection "tls": security: tls may send the password inside TLS whose certificate tls.insecure_skip_verify accepts unchecked`,
+			`connection "any": security: any may send the password`,
+		}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got := loadWarnings(&tt.f)

@@ -306,6 +306,10 @@ func newBridge(g config.Guacd, protocol string) func(target, screen) (backend.Ba
 // recording-path, would otherwise lose them unnoticed when its
 // connections moved to a native default. With legacy_v0, the v0 routes
 // pass every parameter to their sessions, so nothing is unused.
+//
+// Another names each rdp connection that sends the password inside TLS
+// without checking the certificate: security tls or any, which may
+// skip NLA, with tls.insecure_skip_verify.
 func loadWarnings(f *config.File) []string {
 	var warnings []string
 	for _, p := range slices.Sorted(maps.Keys(f.Guacd.Params)) {
@@ -330,6 +334,13 @@ func loadWarnings(f *config.File) []string {
 		}
 		warnings = append(warnings, fmt.Sprintf("guacd.params.%s sets %s, which no session reads: %s, and the native backends read none of guacd.params",
 			p, strings.Join(unused, ", "), why))
+	}
+	// The file allows security on native rdp connections alone.
+	for _, c := range f.Connections {
+		if (c.Security == rdp.SecurityTLS || c.Security == rdp.SecurityAny) && c.TLS.InsecureSkipVerify {
+			warnings = append(warnings, fmt.Sprintf("connection %q: security: %s may send the password inside TLS whose certificate tls.insecure_skip_verify accepts unchecked, so anyone in between can read it; for demos only",
+				c.ID, c.Security))
+		}
 	}
 	return warnings
 }
