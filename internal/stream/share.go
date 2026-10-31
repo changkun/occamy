@@ -35,9 +35,11 @@ import (
 const DefaultEncodeCacheBytes = 32 << 20
 
 // DefaultEncodeWorkers is the workers a session has unless
-// Config.EncodeWorkers says otherwise: half the cores, so that a busy
-// session leaves the other half to the rest.
-func DefaultEncodeWorkers() int { return max(1, runtime.GOMAXPROCS(0)/2) }
+// Config.EncodeWorkers says otherwise: two, or half the cores where
+// there are fewer than four, none on one. On the corpus, more than two
+// sent a photograph sooner but browser pages and text no sooner, for
+// more CPU time (docs/benchmarks/encode-cache.md).
+func DefaultEncodeWorkers() int { return min(2, runtime.GOMAXPROCS(0)/2) }
 
 // profile is what an encoder of internal/encoder sends tiles in, its
 // lossless and lossy codecs: encoders of one profile encode the same

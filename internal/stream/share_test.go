@@ -10,6 +10,7 @@ import (
 	"image"
 	"image/draw"
 	"math/rand/v2"
+	"runtime"
 	"slices"
 	"testing"
 	"testing/synctest"
@@ -887,5 +888,17 @@ func TestEncodeCacheHint(t *testing.T) {
 	c = newEncodeCache(DefaultEncodeCacheBytes)
 	if got, tries := still(c, own); got != q || tries > 2 {
 		t.Errorf("an encoder's own hint: %d in %d tries, want %d in 2 at most", got, tries, q)
+	}
+}
+
+// A session has two workers by default, or half the cores where there
+// are fewer than four, and none on one.
+func TestDefaultEncodeWorkers(t *testing.T) {
+	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(0))
+	for _, c := range []struct{ procs, want int }{{1, 0}, {2, 1}, {3, 1}, {4, 2}, {5, 2}, {18, 2}} {
+		runtime.GOMAXPROCS(c.procs)
+		if got := DefaultEncodeWorkers(); got != c.want {
+			t.Errorf("on %d cores: %d workers, want %d", c.procs, got, c.want)
+		}
 	}
 }
