@@ -645,9 +645,9 @@ Settled on 2026-10-31.
     4001, which refuses a session that is not the user's, and one that
     ended, alike, for anyone but its owner and for its owner too once
     the owner grace after its end has passed; within it, the owner
-    gets the end's own code. While End waits for occamyd, the toolbar's End is
-    disabled and the credential prompt's End does nothing, so that a
-    second End neither sends another `DELETE` nor closes the stream
+    gets the end's own code. While End waits for occamyd, the toolbar's
+    End is disabled and the credential prompt's End does nothing, so
+    that a second End neither sends another `DELETE` nor closes the stream
     before occamyd answers the first. A failed End
     with the stream open says the session runs on, with its viewers,
     rather than speaking of the owner's minute of grace, which does not
@@ -683,9 +683,12 @@ Settled on 2026-10-31.
     the user to sign in again, in a notice beside the form's errors,
     since nothing failed, with `role="status"` so that screen readers
     announce it politely, and with Go to the connections instead, which
-    forgets it; then it joins it. occamyd decides, so a session past
-    its grace, or a user who is not its owner, is refused with 4001 and
-    the view says so. It stays kept through a lost connection, a
+    forgets it; then it joins it. occamyd decides. A session that ended
+    less than the owner grace before the join gives its owner the close
+    it ended with, 4002 to 4006, such as 4003 `owner-left` once the
+    grace ran out, and the view says how it ended and forgets it, as
+    for any end. A session that ended longer ago, or a user who is not
+    its owner, is refused with 4001 and the view says so. It stays kept through a lost connection, a
     takeover and the page's own close on `pagehide`, as Join again
     would join it, through an End whose `DELETE` failed, after which
     the session runs on for the owner's grace, and through a join that
