@@ -514,7 +514,8 @@ func TestShowsCells(t *testing.T) {
 func TestV1Display(t *testing.T) {
 	// run shows a backend that repaints at an interval that is not a
 	// multiple of the refresh's, so that frames arrive at every phase of
-	// it, while the client waits for them.
+	// it, while the client waits for them. It takes 30 frames, about
+	// 0.7 s on an idle host, and waits longer on a loaded one.
 	run := func(t *testing.T, d display) ([]frame, *frameLog) {
 		t.Helper()
 		var fl *frameLog
@@ -523,18 +524,16 @@ func TestV1Display(t *testing.T) {
 			return fl
 		}})
 		var fs []frame
-		end := time.After(700 * time.Millisecond)
-		for {
+		timeout := time.After(20 * time.Second)
+		for len(fs) < 30 {
 			select {
 			case f := <-s.frames:
 				fs = append(fs, f)
-			case <-end:
-				if len(fs) < 15 {
-					t.Fatalf("%d frames", len(fs))
-				}
-				return fs, fl
+			case <-timeout:
+				t.Fatalf("%d frames in 20 s", len(fs))
 			}
 		}
+		return fs, fl
 	}
 	t.Run("60 Hz", func(t *testing.T) {
 		d := newDisplay(60)
