@@ -296,10 +296,14 @@ func TestRDPEndToEnd(t *testing.T) {
 	awaitEnd(t, cl, protocol.CloseRemoteEnded)
 }
 
-// TestRDPPrompt opens a session whose connection stores no password: the
-// owner, and not the viewer who joined first, is asked for it before the
-// backend connects, and the server takes the answer through NLA. A wrong
-// answer ends the session with backend-failed.
+// TestRDPPrompt opens a session whose connection stores no password. The
+// backend asks for it when the session opens, before it connects, so the
+// prompt is raised before any stream does and is held for the owner:
+// the viewer, whose stream opens first, never gets it, and the server
+// takes the owner's answer through NLA. A wrong answer ends the session
+// with backend-failed. The backend prompts only before it connects, so
+// a prompt raised after a viewer has joined is internal/session's
+// TestPrompt.
 func TestRDPPrompt(t *testing.T) {
 	rs := newRDPServer(t, nlaServer())
 	ts, alice := vncTestServer(t, nil, rdpConnection(t, "desk", rs.addr(), config.Credentials{Username: "alice", Prompt: true}))
