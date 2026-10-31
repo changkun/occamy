@@ -1,8 +1,9 @@
 # HTTP API v1
 
 This document describes every route that `occamyd` serves for a v1
-configuration file: API v1 under `/api/v1`, `/healthz`, the v0 routes
-that `legacy_v0` keeps, and the debug listener. The keys that turn
+configuration file: API v1 under `/api/v1`, `/healthz`, the web client
+under `/static/`, the v0 routes that `legacy_v0` keeps, and the debug
+listener. The keys that turn
 routes on and set their limits are described in
 [configuration.md](configuration.md); the stream that the two stream
 routes carry after the upgrade is protocol v1, described in
@@ -22,6 +23,7 @@ section here, and that every section here is a route (`TestAPIDoc`).
 - [Ad-hoc targets](#ad-hoc-targets)
 - [Shares](#shares)
 - [Streams](#streams)
+- [Web client](#web-client)
 - [v0 routes](#v0-routes)
 - [The debug listener](#the-debug-listener)
 
@@ -48,6 +50,7 @@ HTTP/1.1 only, with or without TLS: the streams are WebSockets, which
 | [`POST /api/v1/sessions/{id}/shares`](#post-apiv1sessionsidshares) | the owner's access token | always |
 | [`GET /api/v1/connections/{id}/stream`](#get-apiv1connectionsidstream) | an access token | always |
 | [`GET /api/v1/sessions/{id}/stream`](#get-apiv1sessionsidstream) | an access token, a session token or a share | always |
+| [`GET /static/`](#get-static) | a browser | with `web_client` |
 | [`POST /api/v0/login`](#post-apiv0login) | anyone | with `legacy_v0` |
 | [`GET /api/v0/connect`](#get-apiv0connect) | a v0 token | with `legacy_v0` |
 | [`GET /debug/vars`](#get-debugvars) and `/debug/pprof/` | anyone who reaches the debug listener | with `debug.address`, on that listener only |
@@ -90,7 +93,8 @@ API v1's conventions:
   answers `404 not_found`, and a route asked with a method it does not
   take answers `405 method_not_allowed` with `Allow` listing the methods
   it takes, both in API v1's [error shape](#errors). Elsewhere, such as
-  `/healthz` or `/api/v0/`, Go's `net/http` answers in plain text.
+  `/healthz`, `/static/` or `/api/v0/`, Go's `net/http` answers in
+  plain text.
 
 ## Authentication
 
@@ -756,16 +760,41 @@ that died without `occamyd` noticing would otherwise keep the owner out
 of their own session. The owner's `hello` resizes the session; a
 viewer's resizes nothing.
 
+## Web client
+
+### `GET /static/`
+
+The web client ([client/occamy-web](../client/occamy-web)), built into
+the directory that `web_client` names, as `make client` builds it in
+`client/occamy-web/dist`. Served only with `web_client`; without it,
+`/static/` is `net/http`'s plain-text `404`. It takes no token: the
+page signs in through API v1, on this origin, since `occamyd` answers no
+CORS preflight. `GET /static` redirects here.
+
+Response: the file under the directory, `index.html` for a directory,
+or `404`, with the type its extension names and these headers:
+
+| Header | Value | Why |
+|--------|-------|-----|
+| `Cache-Control` | `no-cache` | A page of an earlier build never asks for scripts that a newer build replaced |
+| `X-Content-Type-Options` | `nosniff` | |
+| `Content-Security-Policy` | `frame-ancestors 'none'` | No other page may frame a remote desktop and take its clicks |
+| `Referrer-Policy` | `no-referrer` | |
+
+`occamyd` warns at start when the directory has no `index.html`, and
+serves what it holds once it is built, without a restart.
+
 ## v0 routes
 
-With `legacy_v0: true`, a v1 file also serves the v0 routes that the
-Guacamole-based web client uses, as a v0 file serves them, under
+With `legacy_v0: true`, a v1 file also serves the v0 routes that
+Guacamole-protocol clients use, as a v0 file serves them, under
 `/api/v0`. They are removed at v1.0. Their bodies and errors are v0's,
 not API v1's, and neither the connection registry nor
 `allow_adhoc_targets` and `adhoc_allowlist` restrict them: the login
-signs any target for anyone, and `occamyd` warns at start. The web
-client itself, `GET /static/`, is served only by a v0 file with
-`client: true`, never by a v1 file. Protocol v0 is described in
+signs any target for anyone, and `occamyd` warns at start. A v0 file
+with `client: true` serves `/static/` from `client/occamy-web/dist` as
+well, but the web client there needs API v1, which only a v1 file
+serves. Protocol v0 is described in
 [protocol-cn.md](protocol-cn.md), and v0 files in
 [configuration.md](configuration.md#v0-files).
 

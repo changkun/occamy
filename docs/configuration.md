@@ -10,8 +10,8 @@ another. The file comes in two versions:
   [api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md):
   sign-in, the connection registry, TLS and the debug listener. The
   server is being built: so far it serves `/healthz`, sign-in for static
-  users and through OIDC, the connections and sessions of API v1 and their streams and,
-  with `legacy_v0`, the v0 routes (see
+  users and through OIDC, the connections and sessions of API v1 and their streams,
+  with `web_client`, the web client, and with `legacy_v0`, the v0 routes (see
   [Serving a v1 file](#serving-a-v1-file)).
 
 Any other `version` is an error, and so is `version: 0`: a v0 file has no
@@ -65,7 +65,8 @@ directory.
 | `tls.cert`, `tls.key` | unset | Certificate and key files, PEM. `occamyd` terminates TLS when both are set; set both or neither. Without them, put a reverse proxy that terminates TLS in front. Read at start, so a renewed certificate needs a restart |
 | `debug.address` | unset (off) | Address of the debug listener: expvar at `/debug/vars` and pprof under `/debug/pprof/`, without authentication. It needs a port of its own: not `listen`'s port on the same host, nor on `localhost` beside `127.0.0.1` or `::1`, nor beside a wildcard host (`:5636`, `0.0.0.0`, `::`), which takes every address. Keep it on the loopback interface; `occamyd` warns at start when it is not |
 | `origins` | none | Origins, `scheme://host[:port]`, whose web pages may open streams besides `occamyd`'s own. Written in lower case without a trailing slash, as browsers send them. `occamyd`'s own origin is any whose host and port are the request's `Host`, and whose scheme is `https` when `occamyd` terminates TLS. Behind a proxy that rewrites `Host`, list the origin of `occamyd`'s own pages here too. A stream request without `Origin`, which no browser sends, is accepted on its token alone |
-| `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for the Guacamole-based web client. Their tokens are signed with a key made at each start, so they do not survive a restart. The web client itself (`/static/`) is not served from a v1 file. The login signs any target for anyone, as in v0, and `occamyd` warns at start; `allow_adhoc_targets`, `adhoc_allowlist` and the connection registry do not restrict these routes. They are removed at v1.0 |
+| `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for clients of the Guacamole protocol. Their tokens are signed with a key made at each start, so they do not survive a restart. The login signs any target for anyone, as in v0, and `occamyd` warns at start; `allow_adhoc_targets`, `adhoc_allowlist` and the connection registry do not restrict these routes. They are removed at v1.0 |
+| `web_client` | unset (off) | A directory holding the built web client, which `occamyd` serves under `/static/` ([api.md](api.md#get-static)): `client/occamy-web/dist`, where `make client` builds it and where the image has it, or the `dist` directory of the web client's release archive. `occamyd` warns at start when it holds no `index.html`. The client signs in through API v1 on `occamyd`'s origin; with OIDC, list its URL, such as `https://occamy.example/static/`, in `auth.oidc.return_urls` |
 
 ### Sign-in: `auth`
 
@@ -176,8 +177,9 @@ The access token never appears in a URL, so it reaches no server log,
 it lasts a minute, works once, and only with the verifier of the client
 that started the sign-in, so a code planted in another browser signs no
 one in. Until `occamyd` answers CORS preflights, serve the web client
-from `occamyd`'s origin, such as through the reverse proxy in front of
-both.
+from `occamyd`'s origin: with `web_client`, or through the reverse proxy
+in front of both. The web client that `web_client` serves returns to
+its own URL, `/static/`, which `return_urls` must list.
 
 Errors in the fragment:
 
@@ -541,6 +543,7 @@ WebSockets over HTTP/1.1. So far it serves:
 | `POST /api/v1/sessions/{id}/shares` | A share for `{"role":"viewer"}` or `"read-only"`, with `expires_in` in seconds (60 to 43200, an hour by default), owner only |
 | `GET /api/v1/connections/{id}/stream` | Open a session on the connection and stream it, as a protocol v1 WebSocket ([protocol.md](protocol.md)) |
 | `GET /api/v1/sessions/{id}/stream` | Join a session as a protocol v1 WebSocket: as its owner with the owner's access token or the stream token, with the role of a session token for the session, which a trusted issuer may mint too, or with a share |
+| `/static/` | With `web_client`, the web client ([api.md](api.md#get-static)) |
 | `/api/v0/login`, `/api/v0/connect` | With `legacy_v0: true`, the v0 routes as a v0 file serves them |
 
 `ssh` sessions use `occamyd`'s native backend, `rdp` and `telnet`

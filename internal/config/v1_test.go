@@ -296,7 +296,7 @@ func TestParseV1Defaults(t *testing.T) {
 	if c.Name != "box" || c.Target != "box.internal:22" {
 		t.Errorf("connection name %q, target %q; want box, box.internal:22", c.Name, c.Target)
 	}
-	if f.LegacyV0 || f.AllowAdhocTargets || f.TLS != (config.TLS{}) || f.Debug.Address != "" {
+	if f.LegacyV0 || f.AllowAdhocTargets || f.TLS != (config.TLS{}) || f.Debug.Address != "" || f.WebClient != "" {
 		t.Errorf("optional features on by default: %+v", f)
 	}
 
@@ -476,6 +476,7 @@ debug: {address: "localhost:6060"}
 origins: ["HTTPS://Occamy.Example.com:8443/", "http://localhost:5173"]
 listen: "[::]:443"
 legacy_v0: true
+web_client: client/occamy-web/dist
 `},
 	}
 	for _, tt := range tests {
