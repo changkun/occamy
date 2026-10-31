@@ -24,7 +24,7 @@ Guacamole protocol and no v0 routes
 |----------|---------------|---------------|
 | VNC | Through guacd, verified end to end | Native by default, or through guacd with `backend: guacd` |
 | SSH | Through guacd, verified end to end, including repeated sessions | Native |
-| RDP | Through guacd, verified against xrdp | Native by default, verified against xrdp but not yet Windows, or through guacd with `backend: guacd` |
+| RDP | Through guacd, verified against xrdp | Native by default, verified against xrdp but not yet Windows, and without GFX (phase 3), or through guacd with `backend: guacd` |
 
 v1 also serves telnet, through guacd only: it gets no native backend and
 goes when guacd does.
@@ -210,9 +210,10 @@ go test ./...
 sessions to the demo servers. They are skipped unless
 `OCCAMY_E2E_ENDPOINT` is set, and those of `occamy-v1`, which stream
 its VNC and RDP connections, native and through guacd, with the Go
-client of protocol v1, unless
-`OCCAMY_E2E_V1_ENDPOINT` is; `make e2e` sets them to `localhost:5636`
-and `localhost:5637`:
+client of protocol v1, and check native RDP's clipboard both ways, a
+resize, a viewer joined by a share and the owner's return to a session,
+unless `OCCAMY_E2E_V1_ENDPOINT` is; `make e2e` sets them to
+`localhost:5636` and `localhost:5637`:
 
 ```
 make build

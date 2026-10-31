@@ -1051,7 +1051,21 @@ RDP's guacd path, RDP no longer needs guacd at all.
     (phase 2).
   - A username of the form `DOMAIN\user` logs on to that domain, as
     mstsc takes it; `user@domain` goes as it is, which NTLM takes with
-    an empty domain.
+    an empty domain. The backend splits it, only without a domain and
+    only when both parts are there, so that `alice\` and `\alice` go as
+    they are; a username the owner gives at the prompt with the domain
+    left empty is split the same way.
+  - `occamyd` warns when it loads the file, by protocol and for vnc as
+    for rdp, of the `guacd.params` that no session reads: those of a
+    protocol none of whose connections goes through guacd, except the
+    display's when its ad-hoc targets go through guacd, and none with
+    `legacy_v0`. A file written for guacd, with `disable-copy` or
+    `recording-path`, would otherwise lose them unnoticed when its
+    connections moved to the native default. It also names each
+    connection whose `security: tls` or `any` comes with
+    `tls.insecure_skip_verify`, which may send the password to whoever
+    is in between. The example file's `guacd.params.rdp` has an rdp
+    connection on guacd to apply to.
   - Prompts go to the owner alone and end reasons map as for VNC: a
     deliberate end by the server (no reason, the user's logoff or
     disconnect, or Set Error Info 1 to 5: an administrator's
@@ -1064,19 +1078,38 @@ RDP's guacd path, RDP no longer needs guacd at all.
     since the image signs its certificate when it is built) and as
     `rdp-guacd`, and `make e2e` streams both (`tests/v1_test.go`; keys
     carry their HID code, which the native backend sends as a
-    scancode).
+    scancode). occamyd warns at start of `rdp-native`'s unchecked TLS,
+    as it should. `TestE2EV1RDP` takes `rdp-native` further, as the
+    owner would: text pasted into the session comes back from xrdp
+    through the image's clipboard echo (`clipboard-echo.sh`, with
+    xclip, beside the xterm), which carries the clipboard both ways in
+    one round trip; a resize to 800×600 and back reaches the screen and
+    the session's state; a viewer joined by a share sees the owner's
+    size and types; and the owner closes the stream and comes back to
+    the same session within the owner grace. TestE2EV1's second run of
+    each connection covers a session opened again after one ended. All
+    four passed 6 of 6 runs against the demo image with a local
+    occamyd.
 - **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
   through occamyd's routes with the Go client against `rdptest`: NLA
   with stored credentials, the hello's size, the screen, scancodes,
   the pointer and Unicode text, a resize through Display Control, the
   clipboard both ways with CR LF, and a logoff as `remote-ended`
-  (`TestRDPEndToEnd`); the owner's prompt with a viewer already joined,
-  and a wrong password as `backend-failed` (`TestRDPPrompt`); pins,
-  the system's roots and a wrong pin refused before NLA (`TestRDPTLS`);
-  an ad-hoc target, native by default (`TestRDPAdhoc`); and the
-  clipboard by role (`TestRDPClipboardRoles`). `TestNewRDP` covers the
-  configuration, `TestParseV1Backends` and `TestParseV1Problems` the
-  file, and `TestRunStandardSecurity` the hint.
+  (`TestRDPEndToEnd`); the owner's prompt, raised when the session
+  opens and held for the owner, which the viewer whose stream opened
+  first never gets, and a wrong password as `backend-failed`
+  (`TestRDPPrompt`; the backend prompts only before it connects, so a
+  prompt raised after a viewer has joined is session-core's
+  `TestPrompt`); pins, the system's roots and a wrong pin refused
+  before NLA (`TestRDPTLS`); an ad-hoc target, native by default
+  (`TestRDPAdhoc`); and the clipboard by role
+  (`TestRDPClipboardRoles`). `TestNewRDP` covers the configuration,
+  `TestParseV1Backends` and `TestParseV1Problems` the file,
+  `TestRunStandardSecurity` the hint, `TestRunSplitsDomain` the
+  domain, configured and prompted, and `TestLoadWarnings` and
+  `TestLoadWarningsLogged` the warnings at load; `TestParseV1Example`
+  checks that the example's `guacd.params` each have a connection on
+  guacd.
 - **Mutation checks.** Each of these fails a test: rdp's default back to
   `guacd`; the native refusal restored; the `tls` refusal with
   `backend: guacd` dropped; each of `security`'s checks dropped, a mode
@@ -1084,9 +1117,13 @@ RDP's guacd path, RDP no longer needs guacd at all.
   not registered; the security mode, the setting, the username, the
   password, each of the `TLS` fields, or the ad-hoc server name not
   passed; the size not passed, not clamped, or taken from one side;
-  the domain not split; the connection's `security` not carried to the
-  target; and the hint given for any refused protocol, or without the
-  setting. Parsing rdp's pins with the VNC backend's parser, the same
+  the domain not split, in `New` or after the prompt, or split with a
+  domain set or with either part empty; the connection's `security`
+  not carried to the target; the hint given for any refused protocol,
+  or without the setting; and of the warnings at load, the protocol
+  match, the `legacy_v0` skip, the ad-hoc gate and its display
+  parameters, the skip when nothing is left, `tls` or `any` dropped,
+  `insecure_skip_verify` not checked, and the warnings not logged. Parsing rdp's pins with the VNC backend's parser, the same
   code, is an equivalent mutant.
 - **Decisions.**
   - `security` is a key of its own, not `guacd.params.rdp.security`:
@@ -1121,6 +1158,15 @@ RDP's guacd path, RDP no longer needs guacd at all.
       opens more dynamic channels at connect than xrdp; check that a
       burst of creates stays within the queue.
   - A `domain` key, if `DOMAIN\user` in `username` is not enough.
+  - A clipboard key on connections for every protocol and backend,
+    which v1 does not specify: guacd's `disable-copy` and
+    `disable-paste` restrict the clipboard through guacd only, and the
+    native backends have no restriction, so a connection that needs one
+    stays on guacd. It belongs to the API's connection schema
+    ([api-and-server-stack](api-and-server-stack.md)), not to RDP.
+  - Session recording on the native backends, which guacd's
+    `recording-path` gives through guacd alone; session-core leaves it
+    out of beta (its decision 6).
   - The bridge's other RDP parameters that guacd users set
     (`server-layout`, `console`, `initial-program`, the gateway, load
     balancing info) have no native equivalent yet.

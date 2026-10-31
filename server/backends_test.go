@@ -227,6 +227,76 @@ func TestNewVNC(t *testing.T) {
 	}
 }
 
+// TestLoadWarnings checks the warnings of a file whose guacd.params no
+// session reads, for any protocol, and of an rdp connection that may
+// send its password inside TLS that checks no certificate.
+func TestLoadWarnings(t *testing.T) {
+	conn := func(id, protocol, backend string) config.Connection {
+		return config.Connection{ID: id, Protocol: protocol, Backend: backend}
+	}
+	params := map[string]map[string]string{
+		"rdp": {"disable-copy": "true", "recording-path": "/var/rec", "color-depth": "24"},
+		"vnc": {"disable-paste": "true"},
+		"ssh": {},
+	}
+	for _, tt := range []struct {
+		name string
+		f    config.File
+		want []string
+	}{
+		{"native defaults", config.File{
+			Guacd:       config.Guacd{Params: params},
+			Connections: []config.Connection{conn("a", "rdp", ""), conn("b", "vnc", "native"), conn("c", "ssh", "")},
+		}, []string{
+			"guacd.params.rdp sets color-depth, disable-copy, recording-path, which no session reads: no rdp connection goes through guacd",
+			"guacd.params.vnc sets disable-paste, which no session reads: no vnc connection goes through guacd",
+		}},
+		{"guacd fallbacks", config.File{
+			Guacd:       config.Guacd{Params: params},
+			Connections: []config.Connection{conn("a", "rdp", "guacd"), conn("b", "vnc", "guacd")},
+		}, nil},
+		{"another protocol's fallback", config.File{
+			Guacd:       config.Guacd{Params: params},
+			Connections: []config.Connection{conn("a", "rdp", "native"), conn("b", "vnc", "guacd")},
+		}, []string{"guacd.params.rdp sets color-depth,"}},
+		{"ad-hoc targets through guacd", config.File{
+			Guacd:             config.Guacd{Params: params},
+			AllowAdhocTargets: true,
+			AdhocBackends:     map[string]string{"rdp": "guacd", "vnc": "native"},
+		}, []string{
+			"guacd.params.rdp sets disable-copy, recording-path, which no session reads: no rdp connection goes through guacd, and ad-hoc rdp targets take only the display's parameters",
+			"guacd.params.vnc sets disable-paste,",
+		}},
+		{"ad-hoc targets off", config.File{
+			Guacd:         config.Guacd{Params: map[string]map[string]string{"rdp": {"color-depth": "24"}}},
+			AdhocBackends: map[string]string{"rdp": "guacd"},
+		}, []string{"guacd.params.rdp sets color-depth,"}},
+		{"legacy_v0", config.File{Guacd: config.Guacd{Params: params}, LegacyV0: true}, nil},
+		{"unchecked TLS", config.File{Connections: []config.Connection{
+			{ID: "tls", Protocol: "rdp", Security: rdp.SecurityTLS, TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
+			{ID: "any", Protocol: "rdp", Security: rdp.SecurityAny, TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
+			{ID: "nla", Protocol: "rdp", TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
+			{ID: "pinned", Protocol: "rdp", Security: rdp.SecurityTLS, TLS: config.ConnectionTLS{Pins: []string{"SHA256:x"}}},
+			{ID: "vnc", Protocol: "vnc", TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
+		}}, []string{
+			`connection "tls": security: tls may send the password inside TLS whose certificate tls.insecure_skip_verify accepts unchecked`,
+			`connection "any": security: any may send the password`,
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got := loadWarnings(&tt.f)
+			if len(got) != len(tt.want) {
+				t.Fatalf("warnings %q, want %d", got, len(tt.want))
+			}
+			for i, w := range tt.want {
+				if !strings.HasPrefix(got[i], w) {
+					t.Errorf("warning %d: %q, want it to start %q", i, got[i], w)
+				}
+			}
+		})
+	}
+}
+
 func TestNewRDP(t *testing.T) {
 	t.Setenv("OCCAMY_TEST_RDP_PASSWORD", "pw")
 	b, err := newRDP(target{addr: "127.0.0.1:3389", creds: config.Credentials{PasswordEnv: "OCCAMY_TEST_RDP_PASSWORD"}}, screen{})
@@ -294,12 +364,11 @@ func TestNewRDP(t *testing.T) {
 	if err != nil || cfg.TLS.ServerName != "desk.lab.internal" {
 		t.Errorf("ad-hoc: server name %q, %v", cfg.TLS.ServerName, err)
 	}
-	// DOMAIN\user logs on to the domain; a user@domain name goes as it is.
-	for user, want := range map[string][2]string{`LAB\alice`: {"LAB", "alice"}, "alice@lab.internal": {"", "alice@lab.internal"}, `\alice`: {"", "alice"}} {
-		cfg, err = rdpConfig(target{addr: "10.0.0.5:3389", creds: config.Credentials{Username: user, Prompt: true}})
-		if err != nil || cfg.Domain != want[0] || cfg.Username != want[1] {
-			t.Errorf("username %q: domain %q, username %q, %v; want %q", user, cfg.Domain, cfg.Username, err, want)
-		}
+	// The username goes as it is: the backend splits DOMAIN\user
+	// (internal/backend/rdp's TestRunSplitsDomain).
+	cfg, err = rdpConfig(target{addr: "10.0.0.5:3389", creds: config.Credentials{Username: `LAB\alice`, Prompt: true}})
+	if err != nil || cfg.Domain != "" || cfg.Username != `LAB\alice` {
+		t.Errorf("username: domain %q, username %q, %v; want LAB\\alice as it is", cfg.Domain, cfg.Username, err)
 	}
 	for name, tls := range map[string]config.ConnectionTLS{
 		"missing CA file":    {CAFile: filepath.Join(t.TempDir(), "nope")},

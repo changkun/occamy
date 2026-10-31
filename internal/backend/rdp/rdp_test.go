@@ -654,6 +654,53 @@ func TestRunPromptsOnlyForNLA(t *testing.T) {
 	}
 }
 
+// Without a domain, a username of the form DOMAIN\user, configured or
+// given at the prompt, names both; one that lacks either part, or comes
+// with a domain, goes as it is.
+func TestRunSplitsDomain(t *testing.T) {
+	checkGoroutines(t)
+	s := listen(t, rdptest.Server{})
+	for _, tt := range []struct {
+		domain, username, wantDomain, wantUsername string
+	}{
+		{"", `LAB\alice`, "LAB", "alice"},
+		{"", `LAB\ops\alice`, "LAB", `ops\alice`},
+		{"", `alice\`, "", `alice\`},
+		{"", `\alice`, "", `\alice`},
+		{"CORP", `LAB\alice`, "CORP", `LAB\alice`},
+		{"", "alice@lab.internal", "", "alice@lab.internal"},
+	} {
+		cfg := s.config(t)
+		cfg.Domain, cfg.Username = tt.domain, tt.username
+		start(t, newBackend(t, cfg), &backendtest.Sink{})
+		if c := s.accept(t); c.Info.Domain != tt.wantDomain || c.Info.Username != tt.wantUsername {
+			t.Errorf("domain %q, username %q: the server got %q, %q; want %q, %q",
+				tt.domain, tt.username, c.Info.Domain, c.Info.Username, tt.wantDomain, tt.wantUsername)
+		}
+	}
+
+	// The owner's answers: a username with an empty domain names both;
+	// with a domain, it goes as it is.
+	for _, tt := range []struct {
+		answers                  []string
+		wantDomain, wantUsername string
+	}{
+		{[]string{`LAB\bob`, "", "pw"}, "LAB", "bob"},
+		{[]string{`LAB\bob`, "CORP", "pw"}, "CORP", `LAB\bob`},
+		{[]string{`bob\`, "", "pw"}, "", `bob\`},
+	} {
+		cfg := s.config(t)
+		cfg.Security, cfg.Username, cfg.Password = SecurityAny, "", ""
+		sink := &backendtest.Sink{Answer: func(backend.Prompt) (backend.PromptReply, error) {
+			return backend.PromptReply{Answers: tt.answers}, nil
+		}}
+		start(t, newBackend(t, cfg), sink)
+		if c := s.accept(t); c.Info.Domain != tt.wantDomain || c.Info.Username != tt.wantUsername || c.Info.Password != "pw" {
+			t.Errorf("answers %q: the server got %+v; want %q, %q", tt.answers, c.Info, tt.wantDomain, tt.wantUsername)
+		}
+	}
+}
+
 func TestRunPromptFails(t *testing.T) {
 	checkGoroutines(t)
 	failed := errors.New("no")

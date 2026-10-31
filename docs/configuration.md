@@ -64,7 +64,7 @@ directory.
 | `tls.cert`, `tls.key` | unset | Certificate and key files, PEM. `occamyd` terminates TLS when both are set; set both or neither. Without them, put a reverse proxy that terminates TLS in front. Read at start, so a renewed certificate needs a restart |
 | `debug.address` | unset (off) | Address of the debug listener: expvar at `/debug/vars` and pprof under `/debug/pprof/`, without authentication. It needs a port of its own: not `listen`'s port on the same host, nor on `localhost` beside `127.0.0.1` or `::1`, nor beside a wildcard host (`:5636`, `0.0.0.0`, `::`), which takes every address. Keep it on the loopback interface; `occamyd` warns at start when it is not |
 | `origins` | none | Origins, `scheme://host[:port]`, whose web pages may open streams besides `occamyd`'s own. Written in lower case without a trailing slash, as browsers send them. `occamyd`'s own origin is any whose host and port are the request's `Host`, and whose scheme is `https` when `occamyd` terminates TLS. Behind a proxy that rewrites `Host`, list the origin of `occamyd`'s own pages here too. A stream request without `Origin`, which no browser sends, is accepted on its token alone |
-| `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for the Guacamole-based web client. Their tokens are signed with a key made at each start, so they do not survive a restart. The web client itself (`/static/`) is not served from a v1 file. The login signs any target for anyone, as in v0, and `occamyd` warns at start; `allow_adhoc_targets`, `adhoc_allowlist` and the connection registry do not restrict these routes. They are removed at v1.0 |
+| `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for the Guacamole-based web client. Both are served, the login too, which a v0 file serves only with `client: true`. Their tokens are signed with a key made at each start, so they do not survive a restart. The web client itself (`/static/`) is not served from a v1 file. The login signs any target for anyone, as in v0, and `occamyd` warns at start; `allow_adhoc_targets`, `adhoc_allowlist` and the connection registry do not restrict these routes. They are removed at v1.0 |
 
 ### Sign-in: `auth`
 
@@ -258,6 +258,11 @@ connections that set `backend: guacd`. `ssh` connections always use
 `occamyd`'s native backend, and `vnc` and `rdp` connections use it by
 default (see [backends](#backends)), so `guacd.params.vnc` and
 `guacd.params.rdp` apply only to connections with `backend: guacd`.
+`occamyd` warns when it starts of each protocol's parameters that no
+session reads: those of a protocol none of whose connections goes
+through guacd, unless its ad-hoc targets do and the parameters are the
+display's, which they take. With `legacy_v0`, the v0 routes read them
+all.
 For `rdp` through guacd, `occamyd` passes `disable-gfx: "true"` unless
 `guacd.params.rdp` sets it: through RDP's graphics pipeline, xrdp's
 colours reached guacd shifted.
@@ -298,9 +303,10 @@ connection's `username` is for VeNCrypt's Plain authentication, which
 is then chosen over the server's other types; without one, the owner is
 asked if the server wants it. An rdp connection on the native backend
 logs on with `username` and the password; a `username` of the form
-`DOMAIN\user` logs on to that domain. With NLA, the owner is asked for
-what `credentials` does not store: the username and the domain, if no
-`username` is stored, and the password. Without NLA (`security: tls`),
+`DOMAIN\user`, with both parts, logs on to that domain, as does such a
+username the owner gives at the prompt with the domain left empty. With
+NLA, the owner is asked for what `credentials` does not store: the
+username and the domain, if no `username` is stored, and the password. Without NLA (`security: tls`),
 nothing is asked, and a missing username or password leaves the
 server's logon screen to the owner. A secret written
 inline (`password:` under `credentials`, `client_secret:` under `oidc`) is
@@ -393,7 +399,11 @@ needs `security: tls` (or `any`). The session's error in `occamyd`'s
 log then names the key to set, such as
 `security: tls on connection "lab-desktop"`. With `security: tls`, the
 password goes to the server inside TLS, so `tls` must check the
-certificate: pin a self-signed one by its fingerprint.
+certificate: pin a self-signed one by its fingerprint. A connection
+that sets `security: tls` or `any` with
+`tls: {insecure_skip_verify: true}`, as the demo does, may send the
+password to whoever is in between, and `occamyd` warns of it by name
+when it starts.
 
 An rdp connection that served sessions through guacd before
 `backend` defaulted to `native` now gets the native backend, which
@@ -405,7 +415,20 @@ reads none of `guacd.params.rdp`. So:
   fingerprint the refusal logs;
 - its security mode is `security`, NLA by default, and guacd's
   `security` no longer applies: an xrdp target needs `security: tls`;
+- guacd's `disable-copy` and `disable-paste` no longer apply, and the
+  native backend has no setting yet that restricts the clipboard: the
+  server's clipboard reaches every viewer, and the owner's and
+  interactive viewers' reach the server;
+- guacd's `recording-path` and the other recording parameters no
+  longer apply, and the native backend records no session yet;
 - `backend: guacd` restores the old path, with `guacd.params.rdp`.
+
+The same holds for a vnc connection and `guacd.params.vnc`. A vnc or rdp
+connection whose clipboard must be restricted, or whose sessions must
+be recorded, needs `backend: guacd` until the native backends can do
+either. `occamyd` warns when it starts of the `guacd.params` that no
+session reads, so that a file written for guacd shows what the native
+default dropped.
 
 Through guacd, `tls`'s keys would be ignored, since guacd checks no VNC
 certificate, and an RDP certificate only as `guacd.params.rdp` says, so
@@ -484,8 +507,10 @@ requires TLS (`require`, `ca_file` or `pins`).
 An rdp target served by the native backend always runs TLS, with the
 certificate checked against the system's roots and the name the target
 was given, or its address if it was given one, and logs on with NLA
-alone, its default `security`: the user is asked for the username, the
-domain and the password. A server whose certificate does not chain to
+alone, its default `security`: the user is asked for the password, and,
+when the request carries no `username`, for the username and the
+domain too. A request's `username` of the form `DOMAIN\user` names the
+domain. A server whose certificate does not chain to
 the system's roots, as a self-signed one, or that speaks no NLA, as
 xrdp, needs a connection, whose `tls` and `security` can say so.
 
@@ -617,7 +642,7 @@ WebSockets over HTTP/1.1. It serves:
 | `POST /api/v1/sessions/{id}/shares` | A share for `{"role":"viewer"}` or `"read-only"`, with `expires_in` in seconds (60 to 43200, an hour by default), owner only |
 | `GET /api/v1/connections/{id}/stream` | Open a session on the connection and stream it, as a protocol v1 WebSocket ([protocol.md](protocol.md)) |
 | `GET /api/v1/sessions/{id}/stream` | Join a session as a protocol v1 WebSocket: as its owner with the owner's access token or the stream token, with the role of a session token for the session, which a trusted issuer may mint too, or with a share |
-| `/api/v0/login`, `/api/v0/connect` | With `legacy_v0: true`, the v0 routes as a v0 file serves them |
+| `/api/v0/login`, `/api/v0/connect` | With `legacy_v0: true`, the v0 routes; both always, where a v0 file serves the login only with `client: true` |
 
 `ssh`, `vnc` and `rdp` sessions use `occamyd`'s native backends, and
 `telnet` sessions go through guacd. A `vnc` or `rdp` session goes

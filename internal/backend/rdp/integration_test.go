@@ -349,7 +349,7 @@ func TestIntegration(t *testing.T) {
 // xrdp offers TLS alone: the backend connects when TLS is among the
 // protocols it offers. Offered only NLA, xrdp selects standard RDP
 // security rather than failing the negotiation, which the client
-// refuses at once.
+// refuses at once with the hint that names the setting allowing TLS.
 func TestIntegrationSecurity(t *testing.T) {
 	checkGoroutines(t)
 	cfg := xrdpConfig(t)
@@ -368,8 +368,8 @@ func TestIntegrationSecurity(t *testing.T) {
 	r = start(t, newBackend(t, cfg), &backendtest.Sink{})
 	begin := time.Now()
 	err := r.wait(t)
-	if err == nil || !strings.Contains(err.Error(), "selected security protocol 0x0") || time.Since(begin) > 5*time.Second {
-		t.Errorf("security nla: Run returned %v after %v, want standard RDP security refused", err, time.Since(begin))
+	if err == nil || !strings.Contains(err.Error(), "selected security protocol 0x0") || !strings.Contains(err.Error(), "allow TLS with Config.Security") || time.Since(begin) > 5*time.Second {
+		t.Errorf("security nla: Run returned %v after %v, want standard RDP security refused with the hint", err, time.Since(begin))
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 
@@ -58,8 +59,8 @@ type screen struct {
 
 // backendMaker makes the backend of one session.
 type backendMaker struct {
-	// name is the backend as the session's state reports it: ssh, vnc or
-	// guacd.
+	// name is the backend as the session's state reports it: ssh, vnc,
+	// rdp or guacd.
 	name string
 	make func(t target, s screen) (backend.Backend, error)
 }
@@ -233,8 +234,8 @@ func rdpSize(s screen) (width, height int) {
 }
 
 // rdpConfig is the native RDP backend's configuration for t, with the
-// password and the CA file read. A username of the form
-// DOMAIN\user logs on to the domain, as mstsc takes it.
+// password and the CA file read. The backend splits a username of the
+// form DOMAIN\user.
 func rdpConfig(t target) (rdp.Config, error) {
 	pw, err := password(t.creds)
 	if err != nil {
@@ -256,9 +257,6 @@ func rdpConfig(t target) (rdp.Config, error) {
 			InsecureSkipVerify: t.tls.InsecureSkipVerify,
 		},
 		SecuritySetting: securitySetting(t),
-	}
-	if d, u, ok := strings.Cut(cfg.Username, `\`); ok {
-		cfg.Domain, cfg.Username = d, u
 	}
 	// An ad-hoc target's address is the one its name resolved to, and
 	// the certificate names the name.
@@ -293,6 +291,55 @@ func newBridge(g config.Guacd, protocol string) func(target, screen) (backend.Ba
 		}
 		return bridge.New(g.Address, cfg, bridge.Options{}), nil
 	}
+}
+
+// loadWarnings returns what occamyd warns of when it loads f.
+//
+// One warning names, per protocol, the guacd.params that no session
+// reads, since the native backends read none of them. That happens when
+// no connection of that protocol goes through guacd, and ad-hoc targets
+// of that protocol either do not go through guacd or take only the
+// display's parameters. A file written for guacd, with disable-copy or
+// recording-path, would otherwise lose them unnoticed when its
+// connections moved to a native default. With legacy_v0, the v0 routes
+// pass every parameter to their sessions, so nothing is unused.
+//
+// Another names each rdp connection that sends the password inside TLS
+// without checking the certificate: security tls or any, which may
+// skip NLA, with tls.insecure_skip_verify.
+func loadWarnings(f *config.File) []string {
+	var warnings []string
+	for _, p := range slices.Sorted(maps.Keys(f.Guacd.Params)) {
+		if f.LegacyV0 || slices.ContainsFunc(f.Connections, func(c config.Connection) bool {
+			return c.Protocol == p && config.BackendOf(p, c.Backend) == config.BackendGuacd
+		}) {
+			continue
+		}
+		adhoc := f.AllowAdhocTargets && config.BackendOf(p, f.AdhocBackends[p]) == config.BackendGuacd
+		var unused []string
+		for _, name := range slices.Sorted(maps.Keys(f.Guacd.Params[p])) {
+			if !adhoc || !adhocParams[name] {
+				unused = append(unused, name)
+			}
+		}
+		if len(unused) == 0 {
+			continue
+		}
+		why := fmt.Sprintf("no %s connection goes through guacd", p)
+		if adhoc {
+			why += fmt.Sprintf(", and ad-hoc %s targets take only the display's parameters", p)
+		}
+		warnings = append(warnings, fmt.Sprintf("guacd.params.%s sets %s, which no session reads: %s, and the native backends read none of guacd.params",
+			p, strings.Join(unused, ", "), why))
+	}
+	// The file allows security on native rdp connections alone.
+	for _, c := range f.Connections {
+		if (c.Security == rdp.SecurityTLS || c.Security == rdp.SecurityAny) && c.TLS.InsecureSkipVerify {
+			warnings = append(warnings, fmt.Sprintf("connection %q: security: %s may send the password inside TLS whose certificate tls.insecure_skip_verify accepts unchecked, so anyone in between can read it; for demos only",
+				c.ID, c.Security))
+		}
+	}
+	return warnings
 }
 
 // adhocParams are the guacd parameters that an ad-hoc target takes from

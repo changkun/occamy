@@ -14,10 +14,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"changkun.de/x/occamy/client"
+	"changkun.de/x/occamy/protocol"
 )
 
 // The demo stack's occamy-v1 service (docker/occamy-v1.yaml): its user,
@@ -128,40 +131,164 @@ func checkSessionV1(t *testing.T, addr, connection, backend string) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	cl, err := client.Dial(ctx, "ws://"+addr+"/api/v1/connections/"+url.PathEscape(connection)+"/stream", token,
-		client.Options{Name: "occamy-e2e/1", Width: 1024, Height: 768})
+	cl := openDesktopV1(t, ctx, addr, "/api/v1/connections/"+url.PathEscape(connection)+"/stream", token,
+		client.Options{Width: 1024, Height: 768})
+	if state := sessionV1(t, addr, token, cl.SessionID()); state.Backend != backend {
+		t.Errorf("the session's backend is %q, want %q", state.Backend, backend)
+	}
+	typeV1(t, ctx, cl)
+	closeSessionV1(t, addr, token, cl.SessionID())
+}
+
+// TestE2EV1RDP checks, against the demo xrdp server through the native
+// RDP backend, what an owner of an rdp connection does beyond
+// TestE2EV1's desktop, input and a session opened again after one
+// ended: the clipboard both ways, a resize, a viewer joined by a share,
+// and the owner leaving the session and coming back to it.
+func TestE2EV1RDP(t *testing.T) {
+	addr := endpointV1(t)
+	open := func(t *testing.T) (context.Context, string, *client.Session) {
+		token, err := signIn(addr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		t.Cleanup(cancel)
+		cl := openDesktopV1(t, ctx, addr, "/api/v1/connections/rdp-native/stream", token,
+			client.Options{Width: 1024, Height: 768})
+		return ctx, token, cl
+	}
+
+	// Text the owner pastes reaches the X session's CLIPBOARD through
+	// xrdp's clipboard channel, where the demo image's clipboard echo
+	// (docker/demo/rdp/clipboard-echo.sh) puts it back with echo: in
+	// front, and xrdp offers that to the viewers.
+	t.Run("clipboard", func(t *testing.T) {
+		ctx, token, cl := open(t)
+		pasted := fmt.Sprintf("occamy-e2e:%d", time.Now().UnixNano())
+		if _, err := cl.Clipboard(ctx, "text/plain", []byte(pasted)); err != nil {
+			t.Fatal(err)
+		}
+		awaitV1(t, ctx, cl, "the echo of the pasted text", func(ev client.Event) bool {
+			c, ok := ev.(client.Clipboard)
+			return ok && strings.HasPrefix(c.MIME, "text/plain") && string(c.Data) == "echo:"+pasted
+		})
+		closeSessionV1(t, addr, token, cl.SessionID())
+	})
+
+	// The owner's resize goes through Display Control, and xrdp resizes
+	// the X session: the screen and the session's size follow. The
+	// second resize leaves the X session, which xrdp keeps for the next
+	// connection, at the size the other tests ask for.
+	t.Run("resize", func(t *testing.T) {
+		ctx, token, cl := open(t)
+		for _, size := range []image.Point{{800, 600}, {1024, 768}} {
+			if _, err := cl.Resize(ctx, uint16(size.X), uint16(size.Y)); err != nil {
+				t.Fatal(err)
+			}
+			awaitV1(t, ctx, cl, fmt.Sprintf("the desktop at %d×%d", size.X, size.Y), func(ev client.Event) bool {
+				_, ok := ev.(client.Frame)
+				return ok && cl.Size() == size
+			})
+			if s := sessionV1(t, addr, token, cl.SessionID()).Size; s.Width != size.X || s.Height != size.Y {
+				t.Errorf("the session's size is %d×%d, want %d×%d", s.Width, s.Height, size.X, size.Y)
+			}
+		}
+		typeV1(t, ctx, cl)
+		closeSessionV1(t, addr, token, cl.SessionID())
+	})
+
+	// A viewer joined by the owner's share sees the owner's desktop, at
+	// the owner's size whatever its hello asks for, and its input
+	// reaches the remote too.
+	t.Run("shared-viewer", func(t *testing.T) {
+		ctx, token, cl := open(t)
+		id := cl.SessionID()
+		var share struct {
+			Token string `json:"token"`
+		}
+		if err := apiV1(addr, http.MethodPost, "/api/v1/sessions/"+url.PathEscape(id)+"/shares", token, []byte(`{"role":"viewer"}`), &share); err != nil {
+			t.Fatal(err)
+		}
+		viewer := openDesktopV1(t, ctx, addr, "/api/v1/sessions/"+url.PathEscape(id)+"/stream", share.Token,
+			client.Options{Width: 640, Height: 480})
+		if viewer.SessionID() != id || viewer.Role() != protocol.RoleViewer || viewer.Size() != cl.Size() {
+			t.Errorf("the viewer joined %q as %v at %v, want %q as a viewer at the owner's %v", viewer.SessionID(), viewer.Role(), viewer.Size(), id, cl.Size())
+		}
+		var roles []string
+		for _, v := range sessionV1(t, addr, token, id).Viewers {
+			roles = append(roles, v.Role)
+		}
+		if !slices.Equal(roles, []string{"owner", "viewer"}) {
+			t.Errorf("the session's viewers are %q, want the owner and the viewer", roles)
+		}
+		typeV1(t, ctx, viewer)
+		typeV1(t, ctx, cl)
+		closeSessionV1(t, addr, token, id)
+	})
+
+	// The owner closes the stream and opens the session's own stream
+	// with the access token, within the owner grace: the same session
+	// and its RDP connection carry on.
+	t.Run("reconnect", func(t *testing.T) {
+		ctx, token, cl := open(t)
+		id := cl.SessionID()
+		typeV1(t, ctx, cl)
+		if err := cl.Close(); err != nil {
+			t.Fatal(err)
+		}
+		back := openDesktopV1(t, ctx, addr, "/api/v1/sessions/"+url.PathEscape(id)+"/stream", token,
+			client.Options{Width: 1024, Height: 768})
+		if back.SessionID() != id || back.Role() != protocol.RoleOwner {
+			t.Errorf("the owner came back to %q as %v, want %q as the owner", back.SessionID(), back.Role(), id)
+		}
+		typeV1(t, ctx, back)
+		closeSessionV1(t, addr, token, id)
+	})
+}
+
+// openDesktopV1 opens the stream at path with token and waits for the
+// desktop: a frame of a screen that is not empty. The stream closes
+// when the test ends.
+func openDesktopV1(t *testing.T, ctx context.Context, addr, path, token string, opts client.Options) *client.Session {
+	t.Helper()
+	opts.Name = "occamy-e2e/1"
+	cl, err := client.Dial(ctx, "ws://"+addr+path, token, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer cl.Close()
+	t.Cleanup(func() { cl.Close() })
+	awaitV1(t, ctx, cl, "the desktop", func(ev client.Event) bool {
+		_, ok := ev.(client.Frame)
+		return ok && !cl.Size().Eq(image.Point{})
+	})
+	return cl
+}
 
-	// The desktop arrives: a frame of a screen that is not empty.
-	for shown := false; !shown; {
+// awaitV1 reads cl's events until done takes one. The session's end
+// first fails the test.
+func awaitV1(t *testing.T, ctx context.Context, cl *client.Session, what string, done func(client.Event) bool) {
+	t.Helper()
+	for {
 		ev, err := cl.Next(ctx)
 		if err != nil {
-			t.Fatalf("waiting for the desktop: %v", err)
+			t.Fatalf("waiting for %s: %v", what, err)
 		}
-		switch ev := ev.(type) {
-		case client.Frame:
-			shown = !cl.Size().Eq(image.Point{})
-		case client.End:
-			t.Fatalf("the session ended before the desktop arrived: %v %q (%v)", ev.Code, ev.Reason, ev.Err)
+		if e, ok := ev.(client.End); ok {
+			t.Fatalf("the session ended before %s: %v %q (%v)", what, e.Code, e.Reason, e.Err)
+		}
+		if done(ev) {
+			return
 		}
 	}
-	var state struct {
-		Backend string `json:"backend"`
-	}
-	if err := apiV1(addr, http.MethodGet, "/api/v1/sessions/"+url.PathEscape(cl.SessionID()), token, nil, &state); err != nil {
-		t.Fatal(err)
-	}
-	if state.Backend != backend {
-		t.Errorf("the session's backend is %q, want %q", state.Backend, backend)
-	}
+}
 
-	// Input reaches the remote: the frame that shows its effect, the
-	// xterm's echo of the key under the pointer, or a later one, reports
-	// it. The key carries its physical code, HID usage 0x04, as a
-	// browser's does, which the RDP backend sends as a scancode.
+// typeV1 checks that input reaches the remote: the frame that shows its
+// effect, the xterm's echo of the key under the pointer, or a later one,
+// reports it. The key carries its physical code, HID usage 0x04, as a
+// browser's does, which the RDP backend sends as a scancode.
+func typeV1(t *testing.T, ctx context.Context, cl *client.Session) {
+	t.Helper()
 	if _, err := cl.Pointer(ctx, 100, 100, 0); err != nil {
 		t.Fatal(err)
 	}
@@ -172,19 +299,39 @@ func checkSessionV1(t *testing.T, addr, connection, backend string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for {
-		ev, err := cl.Next(ctx)
-		if err != nil {
-			t.Fatalf("waiting for a frame after the input: %v", err)
-		}
-		if f, ok := ev.(client.Frame); ok && f.LastSeq >= seq {
-			break
-		}
-		if e, ok := ev.(client.End); ok {
-			t.Fatalf("the session ended after the input: %v %q (%v)", e.Code, e.Reason, e.Err)
-		}
+	awaitV1(t, ctx, cl, "a frame after the input", func(ev client.Event) bool {
+		f, ok := ev.(client.Frame)
+		return ok && f.LastSeq >= seq
+	})
+}
+
+// sessionStateV1 is what GET /api/v1/sessions/{id} says of a session
+// that the tests check.
+type sessionStateV1 struct {
+	Backend string `json:"backend"`
+	Size    struct {
+		Width  int `json:"width"`
+		Height int `json:"height"`
+	} `json:"size"`
+	Viewers []struct {
+		Role string `json:"role"`
+	} `json:"viewers"`
+}
+
+// sessionV1 returns session id's state.
+func sessionV1(t *testing.T, addr, token, id string) sessionStateV1 {
+	t.Helper()
+	var state sessionStateV1
+	if err := apiV1(addr, http.MethodGet, "/api/v1/sessions/"+url.PathEscape(id), token, nil, &state); err != nil {
+		t.Fatal(err)
 	}
-	if err := apiV1(addr, http.MethodDelete, "/api/v1/sessions/"+url.PathEscape(cl.SessionID()), token, nil, nil); err != nil {
+	return state
+}
+
+// closeSessionV1 closes session id.
+func closeSessionV1(t *testing.T, addr, token, id string) {
+	t.Helper()
+	if err := apiV1(addr, http.MethodDelete, "/api/v1/sessions/"+url.PathEscape(id), token, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 }
