@@ -655,12 +655,15 @@ func TestInput(t *testing.T) {
 		}
 
 		// Small scrolls add up, horizontal ones, control characters other
-		// than C0 and keys of keysym 0 send nothing, and neither does
-		// Demand.
+		// than C0, keys of keysym 0 and Power and the power keysyms send
+		// nothing, and neither does Demand.
 		for _, ev := range []backend.InputEvent{
 			backend.Wheel{DY: 20}, backend.Wheel{DX: 500}, backend.Wheel{DY: 1, Mode: backend.WheelLines},
 			backend.Text{Text: "\x7f\u0085"},
 			backend.Key{Down: true, Code: 0x2f}, backend.Key{Code: 0x2f},
+			backend.Key{Down: true, Keysym: 0x1008ff2a, Code: backend.HIDPower},
+			backend.Key{Down: true, Keysym: 'p', Code: backend.HIDPower},
+			backend.Key{Down: true, Keysym: 0x1008ff2f}, backend.Key{Keysym: 0x1008ff2f},
 		} {
 			if err := h.b.Input(ev); err != nil {
 				t.Fatalf("Input(%#v) = %v", ev, err)

@@ -68,8 +68,13 @@ func (r *run) qemuKeys() {
 // key returns the message for a key: an extended key event if the
 // server takes them and the code maps, or was pressed with one; a
 // KeyEvent if not; nothing for a key with neither a keysym nor an
-// extended event.
+// extended event, or for Power and the power keysyms
+// (backend.PowerKey), which a server such as QEMU's would give the
+// whole machine.
 func (r *run) key(ev backend.Key) []byte {
+	if backend.PowerKey(ev) {
+		return nil
+	}
 	xt := xtKeycode(ev.Code)
 	ext := false
 	if xt != 0 {

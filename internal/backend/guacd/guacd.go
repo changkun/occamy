@@ -282,7 +282,8 @@ func (b *Backend) Input(ev backend.InputEvent) error {
 		// A key of keysym 0, such as a browser's dead key, has only its
 		// HID code, for which guacd's key instruction has no field; it is
 		// dropped, as the VNC backend drops it without QEMU's extension.
-		if ev.Keysym != 0 {
+		// Power and the power keysyms are dropped too (backend.PowerKey).
+		if ev.Keysym != 0 && !backend.PowerKey(ev) {
 			p = appendKey(nil, ev.Keysym, ev.Down)
 		}
 	case backend.Pointer:
