@@ -18,6 +18,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -394,10 +395,32 @@ func newDebugServer() *http.Server {
 
 // debugMux returns the debug listener's routes.
 func debugMux() *routeMux {
+	publishVars()
 	mux := newRouteMux()
 	mux.Handle("GET /debug/vars", expvar.Handler())
 	profile(func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, h) })
 	return mux
+}
+
+// publishVars adds occamyd's own variables to expvar's, once:
+// goroutines, the number of goroutines, and fds, the open file
+// descriptors, or -1 where occamyd cannot count them. The soak test
+// watches them for growth (tests/soak_test.go).
+var publishVars = sync.OnceFunc(func() {
+	expvar.Publish("goroutines", expvar.Func(func() any { return runtime.NumGoroutine() }))
+	expvar.Publish("fds", expvar.Func(func() any { return openFiles() }))
+})
+
+// openFiles counts the process's open file descriptors in /proc/self/fd
+// on Linux or /dev/fd on macOS, less the one that reading the directory
+// takes, or returns -1 elsewhere.
+func openFiles() int {
+	for _, dir := range []string{"/proc/self/fd", "/dev/fd"} {
+		if entries, err := os.ReadDir(dir); err == nil {
+			return len(entries) - 1
+		}
+	}
+	return -1
 }
 
 // serveUntil serves public on ln, with TLS if public has a TLSConfig, and
