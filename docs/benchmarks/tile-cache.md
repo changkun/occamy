@@ -42,8 +42,8 @@ desktop that the [codec measurement](./codecs.md) and the
   of the window at a new offset, the scroll goes as `copy-rect`, and
   the photograph is lossy.
 - **The browser page and the terminal shown once** take a little less:
-  26 and 37 of their tiles repeat a tile sent earlier in the same frame,
-  such as a blank margin or a row of the terminal's background.
+  26 and 37 of their tiles repeat one the client already has, sent
+  earlier in the frame or with the desktop, such as a blank margin.
 - **No scene takes more bytes**, and every scene ends with the client
   showing what it showed without the cache, exactly where it did then,
   as `TestCacheCorpus` checks.
