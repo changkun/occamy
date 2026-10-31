@@ -197,7 +197,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   than ending occamyd. A viewer that acknowledges no frame, or takes
   no message, for `streams.viewer_timeout` (30 s) gets the new
   `close` `too-slow` 4008, and a hidden viewer of a terminal no
-  longer keeps the screen it was last sent. A static user's name follows the
+  longer keeps the screen it was last sent, though one that may type
+  still keeps the screen of its last input. A static user's name follows the
   same rule as an OIDC subject. An OIDC user
   linked to a static user owns the static user's sessions, and occamyd's
   own stream tokens carry `idp`. `limits` bounds the sessions occamyd

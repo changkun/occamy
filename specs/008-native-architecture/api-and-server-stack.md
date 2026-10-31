@@ -799,16 +799,23 @@ place for fixes that ship on v0 before beta.
     same attack for one more message. The terminal writer therefore
     also drops the screen it diffs against while the viewer is
     hidden, and sends a `term-snapshot` once it is visible again, so
-    a hidden viewer holds no screen. What remains at the defaults:
-    every visible viewer that acknowledges within the timeout holds
-    its last-sent screen, and its last input's if it may type, so one
-    user's 10 sessions of 51 viewers hold up to about 5.5 GiB of 1000
-    by 500 screens, twice that if all type; `limits` bounds it, and
-    docs/configuration.md says so. `TestStalledViewersRelease` holds
-    eight stalled viewers at 10.7 MiB each and finds 0.5 MiB each
-    once they are dropped, and `TestHiddenViewersRelease` finds eight
-    viewers that acknowledged and hid holding under 2 MiB each while
-    they stay; `TestStalledViewer`, `TestStalledViewerTimely`,
+    a hidden viewer holds no screen it was sent. One that may type
+    still holds the screen of its last input, which the session keeps
+    for each viewer to tell an input's effect from motion
+    (`Viewer.inputScreen`), hidden or not. What remains at the
+    defaults: every visible viewer that acknowledges within the
+    timeout holds its last-sent screen, and every viewer that may type
+    its last input's, so one user's 10 sessions of 51 viewers hold up
+    to 510 screens of 1000 by 500 cells, about 5.5 GiB, if they are
+    read-only, and up to 1020, about 11 GiB, if all may type; hidden,
+    those that may type hold 510 and read-only ones none. `limits`
+    bounds it, and docs/configuration.md says so.
+    `TestStalledViewersRelease` holds eight stalled viewers at
+    10.7 MiB each and finds 0.5 MiB each once they are dropped, and
+    `TestHiddenViewersRelease` finds eight read-only viewers that
+    acknowledged and hid holding about 1.3 MiB each while they stay,
+    the writer's buffer of the last snapshot it encoded, not a
+    screen; `TestStalledViewer`, `TestStalledViewerTimely`,
     `TestStalledAckRestarts`, `TestStalledHidden`, `TestBlockedWrite`,
     `TestTerminalHidden` and `TestStalledViewerTooSlow` cover the
     rule. Mutations of the write deadline, the stall timer, the ack's
@@ -947,7 +954,17 @@ place for fixes that ship on v0 before beta.
   now resolves). Allowing an address with a zone, listed above, no
   longer fails one: every allowlist entry is a `netip.Prefix`, and
   `Prefix.Contains` is false for a zoned address, so the check in
-  `allow` is a second guard.
+  `allow` is a second guard. The final review's survivors fail a test
+  each too: `server.running` not given back at a session's end, or
+  when its backend is not made or `registry.Open` fails
+  (`TestSessionsCapReleased`); a linked issuer's session token
+  granted on any session of occamyd's, an OIDC user's too, without
+  `owner.idp == auth.IdPLocal` in `grants` (`TestPrincipalMatrix`,
+  every principal, role, share and forged `idp` or `uiss` over every
+  session path, with and without `auth.oidc.link_static_users`);
+  `lastAck` set by an ack of a frame never sent, so that such acks
+  kept a viewer forever (`TestStalledBogusAcks`); and `pacer.Oldest`
+  reporting the newest frame (`TestOldest`).
 - **Follow-ups:**
   - A per-connection `backend:` key (guacd-bridge's parity gate), `term`
     for ssh (the backend's `xterm-256color` until then) and per-connection
@@ -1117,6 +1134,27 @@ place for fixes that ship on v0 before beta.
   shared benchmark host's load average was 46 at the time. The tests run
   the routes against fake backends only.
 - **Follow-ups:**
+  - Recover gaps the final review found, for a PR of their own. A
+    panic leaves the session's state locked where a lock is not
+    released by `defer`:
+    - The VNC and guacd decoders hold rows between `sink.Lock` and
+      `sink.Unlock` without `defer` (vnc's `drawBand`, `fillRect`,
+      `raw`, `drawCompact`, `drawPalette` and `tightJPEG`, guacd's
+      `flush`), so a panic there, which the session's recover turns
+      into its end, leaves rows locked, and the viewers' writers wait
+      in `ReadTile` forever.
+    - SSH's `pump` goroutines run outside the session's recover, and
+      `sink.TermData` and `Terminal.Write` hold their locks without
+      `defer`; the terminal's parser has no fuzzer.
+    - VNC's cleanup after `readLoop` (`close(done)`, `nc.Close()`) is
+      not deferred, so a panic in `readLoop` leaves the writer loop
+      and the connection behind.
+  - The viewer timeout bounds each message's write, so a link too slow
+    to carry one message in 30 s, such as a terminal's snapshot of a
+    few megabytes at under 100 kB/s, drops its viewer. Tiles are small;
+    a terminal's frame goes whole. A deadline per byte, or a terminal
+    frame cut into messages the writer can pace, would serve such
+    links.
   - Document: `docs/api.md` for the five session routes and the two
     stream routes, with the replies above.
   - CORS is still not served, so a page on another origin in `origins`

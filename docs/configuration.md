@@ -125,9 +125,10 @@ with a decomposed character, so write names as the provider sends them.
 Telling OIDC users from static users casts a wider net: without
 `link_static_users`, an OIDC subject is refused when it equals a static
 user's name under Unicode case folding, once both are in NFC, so that
-`Alice` cannot pass for static `alice` in a log or to a person. A
-trusted issuer's `sub` is compared the same way, unless the issuer has
-its own `link_static_users`. Names
+`Alice` cannot pass for static `alice` in a log or to a person. With
+`link_static_users`, only the exact name is the static user, and
+another case or form is a user of its own. A trusted issuer's `sub` is
+compared the same way, under its own `link_static_users`. Names
 that only look alike, such as one with a Cyrillic `а` or a fullwidth
 `ａ`, are neither refused nor the same user; pick a `subject_claim` that
 users cannot choose.
@@ -241,8 +242,11 @@ Among `occamyd`'s own users, a session also belongs to where its owner
 signed in: an OIDC user and a static user are two users. The exception
 is a static user's name: with `auth.oidc.link_static_users`, the OIDC
 user who signs in under it is the static user, and owns the same
-sessions, whichever of the two opened them. Its access token still
-says `idp: oidc`, for the log. A token of such a user, whose `sub` is a
+sessions, whichever of the two opened them. Only a `sub` that is
+exactly the static user's name is linked; one in another case or
+normal form, such as `Alice` or a decomposed `zoë`, is an OIDC user of
+its own, with sessions of its own, as for a trusted issuer. Its access
+token still says `idp: oidc`, for the log. A token of such a user, whose `sub` is a
 static user's name in any case or normal form, is refused with
 `invalid_token` once `link_static_users` is off. The OIDC user keeps
 the groups of `groups_claim`, not the static user's.
@@ -372,13 +376,16 @@ issuer's users count apart from `occamyd`'s own.
 | `streams.viewer_timeout` | `30s` | How long a viewer, hidden or not, may leave the frames it was sent unacknowledged, or one write to it block, before it gets `close` `too-slow`. At least `1s` |
 
 Each visible viewer holds the screen it was last sent until it
-acknowledges a newer one, and a viewer that may type also holds the
-screen of its last input; a hidden viewer holds no screen. A terminal of 1000 by 500 cells, the largest, takes about
-11 MiB a screen. `viewer_timeout` drops a viewer that stops reading or
+acknowledges a newer one, and a viewer that may type, hidden or not,
+also holds the screen of its last input; a hidden viewer holds no
+screen it was sent. A terminal of 1000 by 500 cells, the largest,
+takes about 11 MiB a screen. `viewer_timeout` drops a viewer that stops reading or
 acknowledging, but a viewer that acknowledges within it keeps its
 screens for as long as it stays: at the defaults one user's 10
 sessions, with their owners and 50 viewers each, may hold 510 such
-screens, about 5.5 GiB, and twice that if every viewer types. Lower
+screens, about 5.5 GiB, and twice that, 1020 screens or about 11 GiB,
+if every viewer may type. Hidden viewers that may type hold one each,
+and read-only ones none. Lower
 `limits.viewers_per_session` or `limits.sessions_per_user` where users
 are not trusted with that much.
 
