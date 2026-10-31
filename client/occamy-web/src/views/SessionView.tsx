@@ -6,18 +6,20 @@
 // emulator for a terminal session), the clipboard and share panels, the
 // owner's credential prompts, and why the session ended.
 
-import { type ReactElement, Suspense, lazy, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { type ReactElement, Suspense, lazy, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
 import { CanvasSurface, Role, SessionClass, cursorStyle } from '../protocol'
 import type { AccessToken, Api } from '../lib/api'
+import type { SessionAction } from '../lib/app'
 import { type SessionController as Controller, SessionController, type SessionState, overlayOf } from '../lib/controller'
 import type { Ending } from '../lib/ending'
 import { type Size, cellGrid, deviceSize, fitSize, pixelRatio } from '../lib/layout'
+import { endSession } from '../lib/owner'
 import { type Abilities, abilities, roleName } from '../lib/roles'
 import { type Target, streamToken, streamURL } from '../lib/targets'
 import { ClipboardPanel } from './ClipboardPanel'
 import { PromptDialog } from './PromptDialog'
-import { SharePanel } from './SharePanel'
+import { SharePanel, type ShareRequest } from './SharePanel'
 import { TERMINAL_FONT, TERMINAL_FONT_SIZE, readLocalClipboard, useBoxSize, writeLocalClipboard } from './dom'
 
 const TerminalView = lazy(() => import('./TerminalView'))
@@ -26,13 +28,26 @@ const TerminalView = lazy(() => import('./TerminalView'))
 // for it, so that a drag asks once.
 const RESIZE_DELAY = 300
 
+/** What waits for the user to sign in again, as a session view asks. */
+export interface SignInNext {
+  /** The stream to open after, unless here. */
+  target: Target
+  /** What the view does after. */
+  then: SessionAction | null
+  /** The view stays, rather than target opening in its place. */
+  here: boolean
+}
+
 export interface SessionViewProps {
   api: Api
   token: AccessToken | null
   target: Target
+  /** An owner's action that waited for the owner to sign in again, numbered so that it is taken once. */
+  action: { seq: number; action: SessionAction } | null
   /** Back to where the user came from. */
   onLeave: () => void
-  onSignIn: (message: string) => void
+  /** Asks the user to sign in again, over this view. */
+  onSignIn: (message: string, next: SignInNext) => void
   /** Join the same session again, as after a lost connection. */
   onRejoin: (target: Target) => void
 }
@@ -48,7 +63,7 @@ function cellSize(): Size {
   return { width: ctx.measureText('W').width, height: Math.ceil(TERMINAL_FONT_SIZE * 1.2) }
 }
 
-export function SessionView({ api, token, target, onLeave, onSignIn, onRejoin }: SessionViewProps): ReactElement {
+export function SessionView({ api, token, target, action, onLeave, onSignIn, onRejoin }: SessionViewProps): ReactElement {
   const [controller] = useState(
     () =>
       new SessionController({
@@ -66,8 +81,14 @@ export function SessionView({ api, token, target, onLeave, onSignIn, onRejoin }:
   const toolbarRef = useRef<HTMLElement>(null)
   const box = useBoxSize(stageRef)
   const [panel, setPanel] = useState<'clipboard' | 'share' | null>(null)
+  const [shareRequest, setShareRequest] = useState<ShareRequest | null>(null)
+  // Why End did not end the session for everyone; empty for none.
+  const [problem, setProblem] = useState('')
+  const handled = useRef(0)
   const name = target.kind === 'share' ? 'Shared session' : target.name
   const signedIn = target.kind !== 'share'
+  // The session's ID: from welcome, or the one this view joins again.
+  const sessionId = state.sessionId !== '' ? state.sessionId : target.kind === 'session' ? target.sessionId : ''
 
   useEffect(() => {
     const r = stageRef.current?.getBoundingClientRect() ?? { width: 0, height: 0 }
@@ -118,23 +139,73 @@ export function SessionView({ api, token, target, onLeave, onSignIn, onRejoin }:
     return () => stage.removeEventListener('keydown', onKeyDown, { capture: true })
   }, [])
 
-  const leave = async (): Promise<void> => {
-    const { sessionId } = state
-    await controller.close()
-    if (can.manage && token !== null && sessionId !== '') {
-      // Ends it for everyone at once; without it, the session waits a
-      // minute for its owner to come back.
-      await api.endSession(token, sessionId).catch(() => undefined)
+  // again is the stream that joins this session again: the share, the
+  // owner's session, or the connection of a stream that never opened.
+  const again = (): Target => {
+    if (target.kind === 'share') {
+      return { ...target, sessionId: sessionId !== '' ? sessionId : target.sessionId }
     }
+    return sessionId !== '' ? { kind: 'session', sessionId, name } : target
+  }
+
+  // end ends the session for everyone, as its owner. With an expired
+  // sign-in, the owner signs in over the session, and End resumes.
+  const end = async (): Promise<void> => {
+    setProblem('')
+    const outcome = await endSession({ api, token, sessionId, now: Date.now(), close: () => controller.close() })
+    switch (outcome.kind) {
+      case 'ended':
+        onLeave()
+        return
+      case 'sign-in':
+        if (outcome.closed) {
+          // Should the owner cancel the sign-in, the closed stream's
+          // view still says the session runs on.
+          setProblem('The session was not ended for everyone: your sign-in has expired. Its viewers stay until your minute of grace runs out.')
+        }
+        onSignIn(outcome.message, { target: again(), then: { kind: 'end' }, here: true })
+        return
+      case 'failed':
+        setProblem(outcome.message)
+        return
+    }
+  }
+
+  const leave = async (): Promise<void> => {
+    if (can.manage && signedIn) {
+      await end()
+      return
+    }
+    await controller.close()
     onLeave()
   }
 
-  const rejoin = (): void => {
-    if (target.kind === 'share') {
-      onRejoin({ ...target, sessionId: state.sessionId })
-    } else {
-      onRejoin({ kind: 'session', sessionId: state.sessionId, name })
+  // An action that waited for the owner to sign in again is taken once,
+  // though React's development effects run twice: End at once, which
+  // needs no stream, and a share once the stream is open.
+  const take = useEffectEvent((a: { seq: number; action: SessionAction }) => {
+    if (a.action.kind === 'end') {
+      void end()
+      return
     }
+    setPanel('share')
+    setShareRequest({ seq: a.seq, role: a.action.role, expiresIn: a.action.expiresIn })
+  })
+  useEffect(() => {
+    if (action === null || action.seq === handled.current || (action.action.kind === 'share' && state.phase !== 'open')) {
+      return
+    }
+    handled.current = action.seq
+    take(action)
+  }, [action, state.phase])
+
+  const togglePanel = (p: 'clipboard' | 'share'): void => {
+    setShareRequest(null)
+    setPanel(panel === p ? null : p)
+  }
+  const closePanel = (): void => {
+    setShareRequest(null)
+    setPanel(null)
   }
 
   const fullScreen = (): void => {
@@ -157,11 +228,11 @@ export function SessionView({ api, token, target, onLeave, onSignIn, onRejoin }:
         <span className="spacer" />
         {state.phase === 'open' && (
           <>
-            <button type="button" aria-pressed={panel === 'clipboard'} onClick={() => setPanel(panel === 'clipboard' ? null : 'clipboard')}>
+            <button type="button" aria-pressed={panel === 'clipboard'} onClick={() => togglePanel('clipboard')}>
               Clipboard
             </button>
             {can.manage && token !== null && (
-              <button type="button" aria-pressed={panel === 'share'} onClick={() => setPanel(panel === 'share' ? null : 'share')}>
+              <button type="button" aria-pressed={panel === 'share'} onClick={() => togglePanel('share')}>
                 Share
               </button>
             )}
@@ -190,28 +261,45 @@ export function SessionView({ api, token, target, onLeave, onSignIn, onRejoin }:
           {state.bells > 0 ? `Bell ${state.bells}` : ''}
         </p>
         {panel === 'clipboard' && state.phase === 'open' && (
-          <ClipboardPanel controller={controller} remote={state.clipboard} draft={state.draft} can={can} onClose={() => setPanel(null)} />
+          <ClipboardPanel controller={controller} remote={state.clipboard} draft={state.draft} can={can} onClose={closePanel} />
         )}
         {panel === 'share' && state.phase === 'open' && token !== null && (
-          <SharePanel api={api} token={token} sessionId={state.sessionId} onClose={() => setPanel(null)} onSignIn={onSignIn} />
+          <SharePanel
+            api={api}
+            token={token}
+            sessionId={state.sessionId}
+            request={shareRequest}
+            onClose={closePanel}
+            onSignIn={(message, then) => onSignIn(message, { target: again(), then, here: true })}
+          />
         )}
-        {overlayOf(state) === 'connecting' && (
+        {problem === '' && overlayOf(state) === 'connecting' && (
           <div className="overlay" role="status">
             <div className="card">
               <p>Connecting to {name}…</p>
-              <button type="button" onClick={onLeave}>
+              <button type="button" onClick={() => void controller.close().then(onLeave)}>
                 Cancel
               </button>
             </div>
           </div>
         )}
-        {overlayOf(state) === 'ended' && state.ending !== null && (
+        {problem === '' && overlayOf(state) === 'ended' && state.ending !== null && (
           <EndOverlay
             ending={state.ending}
             leaveLabel={signedIn ? 'Back to connections' : 'Close'}
             onLeave={onLeave}
-            onSignIn={() => onSignIn(state.ending?.detail ?? '')}
-            onRejoin={rejoin}
+            onSignIn={() => onSignIn(state.ending?.detail ?? '', { target: again(), then: null, here: false })}
+            onRejoin={() => onRejoin(again())}
+          />
+        )}
+        {problem !== '' && (
+          <EndOverlay
+            ending={{ title: 'Not ended for everyone', detail: problem, technical: '', signIn: false, rejoin: false, quiet: false }}
+            leaveLabel="Back to connections"
+            onLeave={onLeave}
+            onSignIn={() => undefined}
+            onRejoin={() => undefined}
+            onRetry={() => void end()}
           />
         )}
       </div>
@@ -305,9 +393,11 @@ interface EndOverlayProps {
   onLeave: () => void
   onSignIn: () => void
   onRejoin: () => void
+  /** Tries again what failed, such as End; without it, nothing is offered. */
+  onRetry?: () => void
 }
 
-function EndOverlay({ ending, leaveLabel, onLeave, onSignIn, onRejoin }: EndOverlayProps): ReactElement {
+function EndOverlay({ ending, leaveLabel, onLeave, onSignIn, onRejoin, onRetry }: EndOverlayProps): ReactElement {
   const headingRef = useRef<HTMLHeadingElement>(null)
   useEffect(() => headingRef.current?.focus(), [])
   return (
@@ -326,6 +416,11 @@ function EndOverlay({ ending, leaveLabel, onLeave, onSignIn, onRejoin }: EndOver
           </details>
         )}
         <div className="actions">
+          {onRetry !== undefined && (
+            <button type="button" className="primary" onClick={onRetry}>
+              Try again
+            </button>
+          )}
           {ending.rejoin && (
             <button type="button" className="primary" onClick={onRejoin}>
               Join again

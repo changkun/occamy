@@ -4,10 +4,13 @@
 
 // Sign-in: a static user's password (POST /api/v1/auth/token) and, where
 // occamyd has auth.oidc, single sign-on through its identity provider.
+// It is a page of its own, or a dialog over a session whose owner signs
+// in again, which the owner may cancel.
 
-import { type FormEvent, type ReactElement, useEffect, useEffectEvent, useState } from 'react'
+import { type FormEvent, type ReactElement, type ReactNode, useEffect, useEffectEvent, useRef, useState } from 'react'
 
 import { type AccessToken, type Api, ApiError, errorMessage } from '../lib/api'
+import { type Pending, saveResume } from '../lib/app'
 import { pageURL } from '../lib/fragment'
 import { challengeOf, loginURL, newVerifier, saveVerifier } from '../lib/oidc'
 import { formText } from './dom'
@@ -19,10 +22,14 @@ export interface SignInProps {
   message: string
   /** An OIDC sign-in coming back: the exchange of its one-time code. */
   pending: Promise<AccessToken> | null
+  /** What waits for the sign-in, kept across single sign-on's visit to the identity provider. */
+  resume: Pending | null
   onSignedIn: (token: AccessToken) => void
+  /** Shows the form as a dialog over the page, which this closes; without it, the form is the page. */
+  onCancel?: () => void
 }
 
-export function SignIn({ api, storage, message, pending, onSignedIn }: SignInProps): ReactElement {
+export function SignIn({ api, storage, message, pending, resume, onSignedIn, onCancel }: SignInProps): ReactElement {
   const [error, setError] = useState(message)
   const [busy, setBusy] = useState(pending !== null)
   const [oidc, setOidc] = useState(false)
@@ -80,7 +87,7 @@ export function SignIn({ api, storage, message, pending, onSignedIn }: SignInPro
     setError('')
     try {
       const verifier = newVerifier()
-      if (!saveVerifier(storage, verifier)) {
+      if (!saveVerifier(storage, verifier) || !saveResume(storage, resume)) {
         throw new Error('This browser keeps no session storage for the page, which single sign-on needs.')
       }
       location.assign(loginURL(pageURL(location), await challengeOf(verifier)))
@@ -89,36 +96,67 @@ export function SignIn({ api, storage, message, pending, onSignedIn }: SignInPro
     }
   }
 
-  return (
-    <main className="center">
-      <form className="card sign-in" onSubmit={(e) => void submit(e)} aria-busy={busy} aria-describedby={error === '' ? undefined : 'sign-in-error'}>
-        <h1>Occamy</h1>
-        <p className="lead">Sign in to open a remote desktop or terminal.</p>
-        {error !== '' && (
-          <p id="sign-in-error" className="error" role="alert">
-            {error}
-          </p>
-        )}
-        <label>
-          User name
-          <input name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required disabled={busy} autoFocus />
-        </label>
-        <label>
-          Password
-          <input name="password" type="password" autoComplete="current-password" required disabled={busy} />
-        </label>
-        <button type="submit" className="primary" disabled={busy}>
-          {busy ? 'Signing in…' : 'Sign in'}
+  const over = onCancel !== undefined
+  const form = (
+    <form className={over ? 'sign-in' : 'card sign-in'} onSubmit={(e) => void submit(e)} aria-busy={busy} aria-describedby={error === '' ? undefined : 'sign-in-error'}>
+      {over ? <h2 id="sign-in-title">Sign in again</h2> : <h1>Occamy</h1>}
+      <p className="lead">{over ? 'The session goes on while you sign in.' : 'Sign in to open a remote desktop or terminal.'}</p>
+      {error !== '' && (
+        <p id="sign-in-error" className="error" role="alert">
+          {error}
+        </p>
+      )}
+      <label>
+        User name
+        <input name="username" autoComplete="username" autoCapitalize="none" spellCheck={false} required disabled={busy} autoFocus />
+      </label>
+      <label>
+        Password
+        <input name="password" type="password" autoComplete="current-password" required disabled={busy} />
+      </label>
+      <button type="submit" className="primary" disabled={busy}>
+        {busy ? 'Signing in…' : 'Sign in'}
+      </button>
+      {oidc && (
+        <>
+          <p className="divider">or</p>
+          <button type="button" onClick={() => void singleSignOn()} disabled={busy}>
+            Sign in with single sign-on
+          </button>
+        </>
+      )}
+      {over && (
+        <button type="button" onClick={onCancel} disabled={busy}>
+          Cancel
         </button>
-        {oidc && (
-          <>
-            <p className="divider">or</p>
-            <button type="button" onClick={() => void singleSignOn()} disabled={busy}>
-              Sign in with single sign-on
-            </button>
-          </>
-        )}
-      </form>
-    </main>
+      )}
+    </form>
+  )
+  return over ? <Dialog onCancel={onCancel}>{form}</Dialog> : <main className="center">{form}</main>
+}
+
+// Dialog shows children as a modal dialog, which keeps the keys and the
+// pointer from the session under it; Escape cancels it.
+function Dialog({ children, onCancel }: { children: ReactNode; onCancel: () => void }): ReactElement {
+  const ref = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const dialog = ref.current
+    if (dialog !== null && !dialog.open) {
+      dialog.showModal()
+    }
+    return () => dialog?.close()
+  }, [])
+  return (
+    <dialog
+      ref={ref}
+      className="prompt"
+      aria-labelledby="sign-in-title"
+      onCancel={(e) => {
+        e.preventDefault()
+        onCancel()
+      }}
+    >
+      {children}
+    </dialog>
   )
 }

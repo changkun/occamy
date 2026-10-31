@@ -6,6 +6,7 @@
 // starts: signed out, back from an OIDC sign-in, or from a share link.
 
 import type { AccessToken, Api } from './api'
+import { type Pending, takeResume } from './app'
 import type { Fragment } from './fragment'
 import { newVerifier, oidcErrorMessage, takeVerifier } from './oidc'
 
@@ -36,8 +37,8 @@ export function streamToken(target: Target, access: AccessToken | null): string 
 export type Start =
   | { kind: 'signed-out' }
   | { kind: 'join'; sessionId: string; token: string }
-  /** Back from OIDC: the exchange of the one-time code, under way. */
-  | { kind: 'oidc'; token: Promise<AccessToken> }
+  /** Back from OIDC: the exchange of the one-time code, under way, and what waited for it. */
+  | { kind: 'oidc'; token: Promise<AccessToken>; resume: Pending | null }
   | { kind: 'oidc-error'; message: string }
 
 /**
@@ -46,12 +47,13 @@ export type Start =
  * spent exactly once. A code without a verifier in this tab was not this
  * tab's sign-in: someone may have sent the browser there with a
  * challenge of their own, so the code is spent with a throwaway
- * verifier and nobody is signed in. The verifier is forgotten on every
- * start: a sign-in that failed or was abandoned leaves none for a later
- * one to find.
+ * verifier and nobody is signed in. The verifier, and what waited for
+ * the sign-in, are forgotten on every start: a sign-in that failed or
+ * was abandoned leaves nothing for a later one to find.
  */
 export function start(fragment: Fragment, api: Api, storage: Storage | undefined): Start {
   const verifier = takeVerifier(storage)
+  const resume = takeResume(storage)
   switch (fragment.kind) {
     case 'join':
       return { kind: 'join', sessionId: fragment.sessionId, token: fragment.token }
@@ -62,7 +64,7 @@ export function start(fragment: Fragment, api: Api, storage: Storage | undefined
         api.oidcToken(fragment.code, newVerifier()).catch(() => undefined)
         return { kind: 'oidc-error', message: 'That sign-in was not started in this tab, so it was not used. Sign in here.' }
       }
-      return { kind: 'oidc', token: api.oidcToken(fragment.code, verifier) }
+      return { kind: 'oidc', token: api.oidcToken(fragment.code, verifier), resume }
     default:
       return { kind: 'signed-out' }
   }

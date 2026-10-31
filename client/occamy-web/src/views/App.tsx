@@ -2,35 +2,20 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-// The shell's screens: sign-in, the connection list, and a session. The
-// access token lives in memory only, for its lifetime of minutes; a new
-// tab or a reload signs in again, as occamyd issues no refresh tokens.
+// The shell's screens: sign-in, the connection list, and a session, as
+// src/lib/app.ts decides them. The access token lives in memory only,
+// for its lifetime of minutes; a new tab or a reload signs in again, as
+// occamyd issues no refresh tokens. An owner whose token expired signs
+// in over the session, which streams on underneath.
 
-import { type ReactElement, useState } from 'react'
+import { type ReactElement, useReducer } from 'react'
 
-import type { AccessToken, Api, Connection } from '../lib/api'
-import type { Start, Target } from '../lib/targets'
+import type { Api, Connection } from '../lib/api'
+import { initialState, reduce, signInOver } from '../lib/app'
+import type { Start } from '../lib/targets'
 import { Connections } from './Connections'
 import { SessionView } from './SessionView'
 import { SignIn } from './SignIn'
-
-type Screen =
-  | { kind: 'sign-in'; message: string; pending: Promise<AccessToken> | null }
-  | { kind: 'connections' }
-  | { kind: 'session'; target: Target; attempt: number }
-
-function firstScreen(start: Start): Screen {
-  switch (start.kind) {
-    case 'join':
-      return { kind: 'session', target: { kind: 'share', sessionId: start.sessionId, token: start.token }, attempt: 0 }
-    case 'oidc':
-      return { kind: 'sign-in', message: '', pending: start.token }
-    case 'oidc-error':
-      return { kind: 'sign-in', message: start.message, pending: null }
-    default:
-      return { kind: 'sign-in', message: '', pending: null }
-  }
-}
 
 export interface AppProps {
   api: Api
@@ -39,60 +24,60 @@ export interface AppProps {
 }
 
 export function App({ api, start, storage }: AppProps): ReactElement {
-  const [token, setToken] = useState<AccessToken | null>(null)
-  const [screen, setScreen] = useState<Screen>(() => firstScreen(start))
+  const [state, dispatch] = useReducer(reduce, start, initialState)
+  const { token, screen, signIn } = state
 
-  const signIn = (message = ''): void => {
-    setToken(null)
-    setScreen({ kind: 'sign-in', message, pending: null })
-  }
-  const signedIn = (t: AccessToken): void => {
-    setToken(t)
-    setScreen({ kind: 'connections' })
-  }
-  const open = (target: Target, attempt = 0): void => {
-    if (target.kind !== 'share' && (token === null || token.expires <= Date.now())) {
-      signIn('Your sign-in has expired. Sign in again.')
-      return
-    }
-    setScreen({ kind: 'session', target, attempt })
-  }
+  const form =
+    signIn === null ? null : (
+      <SignIn
+        api={api}
+        storage={storage}
+        message={signIn.message}
+        pending={signIn.exchange}
+        resume={signIn.pending}
+        onSignedIn={(t) => dispatch({ type: 'signed-in', token: t })}
+        onCancel={signInOver(state) ? () => dispatch({ type: 'cancel-sign-in' }) : undefined}
+      />
+    )
 
-  switch (screen.kind) {
-    case 'connections':
-      if (token !== null) {
-        return (
-          <Connections
-            api={api}
-            token={token}
-            onOpen={(c: Connection) => open({ kind: 'connection', id: c.id, name: c.name })}
-            onSignOut={signIn}
-          />
-        )
-      }
-      break
-    case 'session':
-      return (
+  if (screen.kind === 'session') {
+    const view = screen.view
+    return (
+      <>
         <SessionView
-          key={screen.attempt}
+          key={view}
           api={api}
           token={token}
           target={screen.target}
-          onLeave={() => (token !== null ? setScreen({ kind: 'connections' }) : signIn())}
-          onSignIn={signIn}
-          onRejoin={(target) => open(target, screen.attempt + 1)}
+          action={state.action?.view === view ? state.action : null}
+          onLeave={() => dispatch({ type: 'leave', view })}
+          onSignIn={(message, next) => dispatch({ type: 'sign-in-again', view, message, pending: { target: next.target, view: next.here ? view : null, then: next.then } })}
+          onRejoin={(target) => dispatch({ type: 'open', target, now: Date.now() })}
+        />
+        {form}
+      </>
+    )
+  }
+  if (form !== null || token === null || screen.kind === 'start') {
+    return (
+      form ?? (
+        <SignIn
+          api={api}
+          storage={storage}
+          message=""
+          pending={null}
+          resume={null}
+          onSignedIn={(t) => dispatch({ type: 'signed-in', token: t })}
         />
       )
-    default:
-      break
+    )
   }
   return (
-    <SignIn
+    <Connections
       api={api}
-      storage={storage}
-      message={screen.kind === 'sign-in' ? screen.message : ''}
-      pending={screen.kind === 'sign-in' ? screen.pending : null}
-      onSignedIn={signedIn}
+      token={token}
+      onOpen={(c: Connection) => dispatch({ type: 'open', target: { kind: 'connection', id: c.id, name: c.name }, now: Date.now() })}
+      onSignOut={(message = '') => dispatch({ type: 'sign-out', message })}
     />
   )
 }

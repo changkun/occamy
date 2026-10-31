@@ -5,6 +5,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { Api } from './api'
+import { RESUME_KEY, saveResume } from './app'
 import { VERIFIER_KEY } from './oidc'
 import { start, streamToken, streamURL } from './targets'
 
@@ -88,11 +89,25 @@ describe('start', () => {
     expect(body.code_verifier).toMatch(/^[A-Za-z0-9._~-]{43,128}$/)
   })
 
-  it('forgets the verifier of a sign-in that failed or was abandoned', () => {
+  it('brings back what waited for the sign-in, with the code', async () => {
+    const s = storage('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')
+    const pending = { target: { kind: 'session', sessionId: 'mZ3k', name: 'Build box' }, view: 4, then: { kind: 'end' } } as const
+    expect(saveResume(s, pending)).toBe(true)
+    const got = start({ kind: 'oidc-code', code: 'JX2E7' }, api().api, s)
+    expect(got).toMatchObject({ kind: 'oidc', resume: { ...pending, view: null } })
+    if (got.kind === 'oidc') {
+      await got.token
+    }
+    expect(s.getItem(RESUME_KEY)).toBeNull()
+  })
+
+  it('forgets the verifier, and what waited, of a sign-in that failed or was abandoned', () => {
     for (const fragment of [{ kind: 'none' }, { kind: 'oidc-error', error: 'access_denied' }, { kind: 'join', sessionId: 's', token: 't' }] as const) {
       const s = storage('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')
+      saveResume(s, { target: { kind: 'connection', id: 'lab', name: 'Lab' }, view: null, then: null })
       start(fragment, api().api, s)
       expect(s.getItem(VERIFIER_KEY)).toBeNull()
+      expect(s.getItem(RESUME_KEY)).toBeNull()
     }
   })
 
