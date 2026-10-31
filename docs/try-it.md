@@ -583,7 +583,7 @@ go test -run '^$' -fuzz '^FuzzSession$' -fuzztime 30s -parallel 4 ./client
 
 `-parallel 4` keeps the fuzzer to four workers, which leaves the
 machine usable. To fuzz them all, 30 seconds each, which takes about
-25 minutes:
+20 minutes:
 
 ```
 for pkg in $(go list ./...); do
@@ -644,3 +644,13 @@ the base images `debian:trixie-slim`, `golang:1.27-trixie`,
 `node:25-trixie-slim` and `gcr.io/distroless/static-debian13:nonroot`.
 So does `occamy-bench-desktop`, if you built it for `TestBenchDesktop`.
 `podman rmi` removes them.
+
+Podman also keeps the build stages of every image it built, as
+untagged images that it uses as its build cache: those of `make
+build`, of the demo servers' images and of the integration tests'
+images, a gigabyte or so each. `make clean` leaves them, since nothing
+marks them as Occamy's. `podman images -f dangling=true` lists them,
+and `podman image prune` removes them, with every other untagged image
+of the engine, so run it only if no one else's images are on it.
+Docker keeps its build cache apart from its images; `docker builder
+prune` removes it.
