@@ -454,6 +454,7 @@ describe('The clipboard panel of a stream welcomed as the owner’s', () => {
   }
   const remote = (text: string): void => Welcomed.last?.push({ type: 'clipboard', mime: 'text/plain;charset=utf-8', data: new TextEncoder().encode(text) })
   const edited = 'Edited: the remote clipboard holds other text.'
+  const status = (): string | null | undefined => container.querySelector('.panel [role=status]')?.textContent
 
   it('shows the next remote clipboard after text was sent, and keeps only what was typed since', async () => {
     await render({ token: accessToken('demo'), action: null }, ended)
@@ -471,15 +472,20 @@ describe('The clipboard panel of a stream welcomed as the owner’s', () => {
     expect(box()?.value).toBe('mine')
     expect(text()).not.toContain(edited)
 
-    // The remote clipboard changes: the box shows it.
+    // The remote clipboard changes: the box shows it, and what Send said
+    // goes.
     act(() => remote('second'))
     await settle()
     expect(box()?.value).toBe('second')
     expect(text()).not.toContain(edited)
+    expect(status()).toBe('')
 
-    // Text typed after a send stays, with the remote's a press away.
+    // Text typed after a send stays, with the remote's a press away; the
+    // edit takes what Send said away.
     act(() => button('Send')?.click())
+    expect(status()).toBe('Sent to the remote clipboard.')
     act(() => type('typed'))
+    expect(status()).toBe('')
     act(() => remote('third'))
     await settle()
     expect(box()?.value).toBe('typed')

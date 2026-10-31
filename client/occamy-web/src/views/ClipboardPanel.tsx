@@ -6,7 +6,8 @@
 // put on the remote's clipboard, for the times the browser does not let
 // the page reach the local clipboard on its own. The text being edited
 // is the controller's draft, so that a new remote clipboard does not
-// throw away what the user typed.
+// throw away what the user typed. What the last action said goes once
+// the remote clipboard changes or the user edits the text.
 
 import { type FormEvent, type ReactElement, useId, useState } from 'react'
 
@@ -25,28 +26,35 @@ export interface ClipboardPanelProps {
 }
 
 export function ClipboardPanel({ controller, remote, draft: text, can, onClose }: ClipboardPanelProps): ReactElement {
-  const setText = (t: string): void => controller.setDraft(t)
-  const [status, setStatus] = useState('')
+  // What the last action said, with the remote clipboard it was said
+  // over: it shows while the remote clipboard stays that.
+  const [status, setStatus] = useState<{ text: string; remote: string | null } | null>(null)
+  const say = (s: string): void => setStatus({ text: s, remote: controller.getState().clipboard })
+  const shown = status !== null && status.remote === remote ? status.text : ''
+  // edit puts t in the box, which makes what was said out of date.
+  const edit = (t: string): void => {
+    controller.setDraft(t)
+    setStatus(null)
+  }
   const id = useId()
 
   const send = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault()
-    setStatus(controller.sendClipboard(text) ? 'Sent to the remote clipboard.' : 'The remote clipboard is not open to you.')
+    say(controller.sendClipboard(text) ? 'Sent to the remote clipboard.' : 'The remote clipboard is not open to you.')
   }
   const paste = async (): Promise<void> => {
     try {
-      setText(await pasteLocalClipboard())
-      setStatus('')
+      edit(await pasteLocalClipboard())
     } catch {
-      setStatus('The browser did not let the page read the clipboard. Paste into the box instead.')
+      say('The browser did not let the page read the clipboard. Paste into the box instead.')
     }
   }
   const copy = async (): Promise<void> => {
     try {
       await copyText(text)
-      setStatus('Copied.')
+      say('Copied.')
     } catch {
-      setStatus('The browser did not let the page write the clipboard. Select the text and copy it instead.')
+      say('The browser did not let the page write the clipboard. Select the text and copy it instead.')
     }
   }
 
@@ -63,12 +71,12 @@ export function ClipboardPanel({ controller, remote, draft: text, can, onClose }
         readOnly={!can.clipboard}
         spellCheck={false}
         autoFocus
-        onChange={(e) => setText(e.target.value)}
+        onChange={(e) => edit(e.target.value)}
       />
       {remote !== null && remote !== text && (
         <p className="muted">
           Edited: the remote clipboard holds other text.{' '}
-          <button type="button" onClick={() => setText(remote)}>
+          <button type="button" onClick={() => edit(remote)}>
             Show it
           </button>
         </p>
@@ -92,7 +100,7 @@ export function ClipboardPanel({ controller, remote, draft: text, can, onClose }
         </button>
       </div>
       <p className="muted" role="status">
-        {status}
+        {shown}
       </p>
     </form>
   )
