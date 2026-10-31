@@ -3,12 +3,13 @@
 # license that can be found in the LICENSE file.
 
 # The v1 file of the demo stack's occamy-v1 service
-# (docker-compose.yaml), which serves API v1 and protocol v1 on port 5637
-# next to the v0 service: the demo VNC and RDP servers through occamyd's
-# native backends, their default, and through guacd, the explicit
-# fallback and the benchmark's baseline, side by side
-# (specs/008-native-architecture/guacd-bridge.md, Parity gate). The user
-# demo signs in with the password occamy:
+# (docker-compose.yaml), which serves API v1, protocol v1 and the web
+# client on port 5637 next to the v0 service: the demo SSH server, and
+# the demo VNC and RDP servers through occamyd's native backends, their
+# default, and through guacd, the explicit fallback and the benchmark's
+# baseline, side by side (specs/008-native-architecture/guacd-bridge.md,
+# Parity gate). The user demo signs in with the password occamy, in the
+# web client at http://localhost:5637/static/ or with curl:
 #
 #	curl -s localhost:5637/api/v1/auth/token \
 #	  -H 'Content-Type: application/json' \
@@ -16,6 +17,8 @@
 
 version: 1
 listen: 0.0.0.0:5637
+# The image's build of the web client, served under /static/.
+web_client: client/occamy-web/dist
 auth:
   # On a tmpfs (docker-compose.yaml): occamyd creates the key at start,
   # and tokens die with the container.
@@ -24,6 +27,14 @@ auth:
     - name: demo
       password_hash: "$2a$10$DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
 connections:
+  - id: ssh
+    name: SSH
+    protocol: ssh
+    target: ssh:22
+    # The demo server makes its host keys when it starts.
+    insecure_ignore_host_key: true
+    credentials: {username: occamy, password_env: OCCAMY_DEMO_SSH_PASSWORD}
+    allow: {users: [demo]}
   - id: vnc-native
     name: VNC, native backend
     protocol: vnc

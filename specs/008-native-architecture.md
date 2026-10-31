@@ -145,7 +145,8 @@ server.
 - **Protocol.** Text instructions carry image data as base64 PNG, JPEG or
   WebP in `blob` instructions. That adds a third to the encoded size and
   forces text WebSocket frames. Clients must implement Guacamole's layers
-  and drawing model (the 9k-line `client/occamy-web/src/components/occamy.js`).
+  and drawing model (the 9k-line fork of guacamole-common-js that the Vue
+  client carried as `occamy.js`, until [009](009-react-web-client.md)).
 - **Terminals as pixels.** SSH output is emulated server-side and drawn
   with Pango and Cairo into PNG tiles. Traffic scales with pixels, not
   characters, and clients cannot select text or choose fonts.

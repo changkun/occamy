@@ -7,6 +7,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"net"
@@ -133,6 +134,7 @@ func (f *File) validate(c *checker) {
 	}
 	c.file("tls.cert", f.TLS.Cert)
 	c.file("tls.key", f.TLS.Key)
+	c.webClient("web_client", f.WebClient)
 	if f.Debug.Address != "" {
 		c.address("debug.address", f.Debug.Address, false)
 		if Overlap(f.Listen, f.Debug.Address) {
@@ -854,6 +856,39 @@ func (c *checker) file(path, name string) bool {
 	}
 	fh.Close()
 	return true
+}
+
+// webClient checks the web client's directory, if set: a directory that
+// occamyd can read. It may be missing, as a client not built yet is,
+// which occamyd warns of at start.
+func (c *checker) webClient(path, name string) {
+	if name == "" {
+		return
+	}
+	info, err := os.Stat(name)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return
+	case err != nil:
+		c.add(path, "%v", err)
+		return
+	case !info.IsDir():
+		c.add(path, "%s is not a directory", name)
+		return
+	}
+	fh, err := os.Open(name) // #nosec G304 -- the path comes from the operator's configuration
+	switch {
+	case errors.Is(err, fs.ErrPermission):
+		c.add(path, "%s is not readable", name)
+		return
+	case err != nil:
+		c.add(path, "%v", err)
+		return
+	}
+	defer fh.Close()
+	if _, err := fh.ReadDir(1); err != nil && !errors.Is(err, io.EOF) {
+		c.add(path, "%s is not readable: %v", name, err)
+	}
 }
 
 // signingKey checks the signing key file, which may be missing because
