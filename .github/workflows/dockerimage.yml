@@ -121,8 +121,11 @@ jobs:
         go-version: stable
     - name: Build the image
       run: make build CONTAINER_ENGINE=docker
+    # OCCAMY_DEBUG=1 serves the v0 service's pprof, from which the
+    # pressure test counts occamyd's goroutines, on the loopback
+    # interface.
     - name: Start the demo stack
-      run: make run CONTAINER_ENGINE=docker
+      run: make run CONTAINER_ENGINE=docker OCCAMY_DEBUG=1
     - name: Resources before the tests
       working-directory: docker
       run: |

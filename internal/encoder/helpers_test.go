@@ -178,11 +178,11 @@ func decodeLossy(c protocol.Codec, payload []byte, w, h int) (image.Image, error
 	return webp.Decode(bytes.NewReader(payload), opts)
 }
 
-// SSIM is the structural similarity of b to a (Wang et al., 2004) on
+// refSSIM is the structural similarity of b to a (Wang et al., 2004) on
 // luma, BT.601 weights, over every 8×8 window, with the usual constants,
 // as the codec measurement scores lossy codecs (bench/codecs/ssim.go). a
 // and b must have the same size and be at least 8×8. 1 means identical.
-func SSIM(a, b *image.RGBA) float64 {
+func refSSIM(a, b *image.RGBA) float64 {
 	w, h := a.Rect.Dx(), a.Rect.Dy()
 	ya, yb := luma(a), luma(b)
 	sw := w + 1

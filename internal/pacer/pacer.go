@@ -433,6 +433,45 @@ func (p *Pacer) endRound(now time.Time) {
 // Quality is the lossy quality for the viewer's next tiles.
 func (p *Pacer) Quality() int { return p.quality }
 
+// MinQuality is the lowest quality the pacer steps down to, at which
+// tiles in motion go.
+func (p *Pacer) MinQuality() int { return p.cfg.MinQuality }
+
+// Background reports whether the writer may write n more bytes of the
+// open frame as background work, such as refining tiles, which must never
+// delay the frame of an input:
+//
+//   - only while no earlier frame awaits an ack, so that an input's
+//     bytes queue behind this frame's alone;
+//   - at most what the path delivers in the target queueing delay, or
+//     minBurst while the rate is unknown, the frame's first write
+//     excepted;
+//   - only while pacing would not hold the bytes back. Background bytes
+//     never wait for the path, so the wait counts against no quality.
+//
+// The writer ends the frame when it reports false.
+func (p *Pacer) Background(now time.Time, n int) bool {
+	if !p.open || len(p.inflight) > 0 {
+		return false
+	}
+	if p.cur.bytes == 0 {
+		return true
+	}
+	budget := minBurst
+	if p.rate > 0 {
+		budget = int(p.rate * p.cfg.Target.Seconds())
+	}
+	if p.cur.bytes+n > budget {
+		return false
+	}
+	rate := p.pacingRate()
+	if rate == 0 {
+		return true
+	}
+	p.refill(now, rate)
+	return p.tokens > 0
+}
+
 // Interval is the shortest time between the starts of two frames: the
 // configured minimum, or the viewer's decode time if that is longer.
 func (p *Pacer) Interval() time.Duration { return max(p.cfg.MinInterval, p.decode) }
