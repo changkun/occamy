@@ -633,10 +633,11 @@ func (b *Backend) credentials(ctx context.Context, sink backend.Sink) (rdp.Confi
 
 // splitDomain returns the domain and the username to log on with: a
 // username of the form DOMAIN\user, without a domain, names both, as
-// mstsc takes it. Both parts must be there, so that a stray backslash
-// neither empties the username nor stands for a domain.
+// mstsc takes it, and \user names the user alone, as FreeRDP takes it.
+// A username that ends in the backslash goes as it is, so that the split
+// never empties the username.
 func splitDomain(domain, username string) (string, string) {
-	if d, u, ok := strings.Cut(username, `\`); ok && domain == "" && d != "" && u != "" {
+	if d, u, ok := strings.Cut(username, `\`); ok && domain == "" && u != "" {
 		return d, u
 	}
 	return domain, username
