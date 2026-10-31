@@ -2,6 +2,10 @@
 
 You may interested in the following document:
 
+- [Try Occamy](./try-it.md)
+  + TL;DR: From a fresh checkout to the demo stack in a browser: one
+    connection of each protocol, sharing, the clipboard, resizing,
+    reconnecting, every test suite, and tearing it down.
 - [Occamy Architecture](./architecture.md)
   + TL;DR: Occamy v0 authenticates with JWT and proxies each connection to
     guacd; v1, in progress, has its own protocol and backends.

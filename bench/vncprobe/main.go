@@ -9,8 +9,8 @@
 // inside the VNC container:
 //
 //	GOOS=linux GOARCH=arm64 go build -o vncprobe ./bench/vncprobe
-//	podman cp vncprobe docker-vnc-1:/tmp/vncprobe
-//	podman exec docker-vnc-1 /tmp/vncprobe
+//	podman cp vncprobe occamy-vnc-1:/tmp/vncprobe
+//	podman exec occamy-vnc-1 /tmp/vncprobe
 //
 // -scene picks the scene the keys are pressed in, by its function key: 2,
 // the default, is a still desktop, and 3 to 5 animate (bench/scene). The

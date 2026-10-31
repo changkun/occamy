@@ -4,7 +4,11 @@
 
 package config
 
-var Parse = parse
+var (
+	Parse = parse
+	Flags = flags
+	Usage = usage
+)
 
 // Revalidate validates a File again, as ParseV1 does, and returns the
 // problems found.

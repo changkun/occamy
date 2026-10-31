@@ -21,6 +21,8 @@
 
 # project irrelevant ignores
 .vscode
+# occamyd, as make compile builds it
+/occamyd
 # release builds (goreleaser, scripts/third-party-licenses.sh)
 /dist/
 /THIRD_PARTY_LICENSES

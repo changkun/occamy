@@ -9,6 +9,19 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- [docs/try-it.md](docs/try-it.md), a guide to running Occamy v1 for
+  the first time, from a fresh checkout. It covers:
+  - the prerequisites and the build;
+  - the demo stack, with where its configuration and signing key live,
+    and how to run it next to another stack on one host;
+  - a connection of each protocol and what it shows, with a k3s
+    cluster for Kubernetes;
+  - sharing, the clipboard, resizing, reconnecting and the guacd
+    fallback;
+  - every test suite: unit, lint, the web client's, end-to-end,
+    pressure, soak, integration and fuzz;
+  - the debug routes' gating;
+  - tearing it all down.
 - The desktop baseline and the per-scenario targets for protocol v1
   ([docs/benchmarks.md](docs/benchmarks.md)). `bench/vncprobe` measures
   the bench desktop's VNC server on its own.
@@ -595,6 +608,26 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Changed
 
+- `occamyd -h` says what occamyd serves now, a v1 file through API v1
+  and a v0 file through the v0 routes, not "a modern guacamole protocol
+  based remote desktop proxy", and lists its flag on a line of its own
+  instead of after "Usage:". `.gitignore` ignores the `occamyd` that
+  `make compile` builds.
+- The demo stack's compose project is named `occamy` in
+  `docker/docker-compose.yaml`, so its containers are `occamy-<service>-1`.
+  It was named after the file's directory, `docker`, which every
+  other checkout and any other compose file in a `docker` directory
+  share. `make bench` and the harness's `-project` default to `occamy`
+  too. `COMPOSE_PROJECT_NAME` still names another project. A stack
+  started before this change runs under the project `docker`; stop it
+  once with `(cd docker && podman compose -p docker down)`, or `docker
+  compose` for Docker, before `make run` starts the new one, since both
+  publish the same ports.
+- The README starts with v1: the demo stack and the web client first,
+  then a native build that serves a v1 file. The run instructions for
+  guacd and a v0 file, and the v0 token's connection parameters, move
+  to a short section on the released v0. The README's test command is
+  `go test -race ./...`, as CI runs it.
 - The plan for v1.0 (owner, 2026-10-31): it waits until the benchmark
   shows native at least 10x better than guacd, and ships no guacd
   fallback for a protocol still short of it; release candidates may
@@ -696,6 +729,20 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   `OCCAMY_DEBUG=1`, so a variable left in the shell or in `docker/.env`
   cannot turn them on. The pressure test and the soak need
   `OCCAMY_DEBUG=1`.
+- The demo stack publishes `occamy-v1`, whose demo user's password is
+  public, on the host's loopback interface. It was published on every
+  interface. `OCCAMY_BIND` names another address for it, such as
+  `0.0.0.0` for every interface; `make run` and `make bench` pass
+  `127.0.0.1` unless it is set, so `docker/.env` cannot widen it. The
+  v0 service and `occamy-v1`'s debug port stay on the loopback
+  interface whatever `OCCAMY_BIND` says: the v0 login signs a token for
+  any host with the demo's public secret, and guacd would connect
+  wherever such a token points.
+- `make clean` removes only Occamy's own: the demo stack's containers,
+  volume and demo images through `compose down` in its own project,
+  `occamy`, and the untagged images of earlier `make build` runs, which
+  `make build` now labels `de.changkun.occamy.make=build`. It pruned
+  every dangling image of the engine, whoever built it.
 
 ## [0.6.0] - 2026-10-30
 
