@@ -2,7 +2,7 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { VERIFIER_KEY, VERIFIER_LENGTH, base64url, challengeOf, loginURL, newVerifier, oidcErrorMessage, saveVerifier, takeVerifier } from './oidc'
 
@@ -46,6 +46,23 @@ describe('newVerifier', () => {
     })
     expect(calls).toBe(2)
     expect(v).toBe('A'.repeat(VERIFIER_LENGTH))
+  })
+
+  it('draws from the browser’s cryptographic generator', () => {
+    const random = vi.spyOn(crypto, 'getRandomValues')
+    const before = Math.random
+    Math.random = () => {
+      throw new Error('a verifier from Math.random can be guessed')
+    }
+    try {
+      newVerifier()
+      expect(random).toHaveBeenCalled()
+      const drawn = random.mock.calls.flat() as unknown[]
+      expect(drawn.every((b) => b instanceof Uint8Array && b.length >= VERIFIER_LENGTH)).toBe(true)
+    } finally {
+      Math.random = before
+      random.mockRestore()
+    }
   })
 })
 

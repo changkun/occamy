@@ -35,6 +35,21 @@ export function readFragment(hash: string): Fragment {
 }
 
 /**
+ * takeFragment reads the page's fragment, once, as the page loads, and
+ * removes one that asks for something from the address bar and from the
+ * history entry: it may carry an OIDC one-time code or a share, neither
+ * of which should outlive the load, be bookmarked, or come back with
+ * the Back button.
+ */
+export function takeFragment(location: Pick<Location, 'hash' | 'pathname' | 'search'>, history: Pick<History, 'replaceState'>): Fragment {
+  const fragment = readFragment(location.hash)
+  if (fragment.kind !== 'none') {
+    history.replaceState(null, '', location.pathname + location.search)
+  }
+  return fragment
+}
+
+/**
  * shareLink returns a link to page that joins session sessionId with a
  * share. The share rides in the fragment, which no server or proxy sees;
  * whoever holds the link holds the share until it expires.

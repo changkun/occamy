@@ -9,18 +9,13 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 
 import { Api } from './lib/api'
-import { readFragment } from './lib/fragment'
+import { takeFragment } from './lib/fragment'
 import { start } from './lib/targets'
 import { App } from './views/App'
 import './styles.css'
 
-// The fragment is read once, before the first render, and removed from
-// the address bar and the history entry: it may carry an OIDC one-time
-// code or a share, neither of which should outlive this load.
-const fragment = readFragment(location.hash)
-if (fragment.kind !== 'none') {
-  history.replaceState(null, '', location.pathname + location.search)
-}
+// The fragment is taken once, before the first render.
+const fragment = takeFragment(location, history)
 
 let storage: Storage | undefined
 try {

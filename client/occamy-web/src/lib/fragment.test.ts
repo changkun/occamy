@@ -2,9 +2,11 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
+import { readFileSync } from 'node:fs'
+
 import { describe, expect, it } from 'vitest'
 
-import { pageURL, readFragment, shareLink } from './fragment'
+import { pageURL, readFragment, shareLink, takeFragment } from './fragment'
 
 describe('readFragment', () => {
   it('reads an OIDC one-time code and error, as occamyd’s callback sends them', () => {
@@ -43,6 +45,35 @@ describe('shareLink', () => {
   it('replaces the page’s own fragment, and escapes what needs it', () => {
     const link = shareLink('https://occamy.example/static/#code=x', 'a&b', 'c=d')
     expect(readFragment(new URL(link).hash)).toEqual({ kind: 'join', sessionId: 'a&b', token: 'c=d' })
+  })
+})
+
+describe('takeFragment', () => {
+  function page(hash: string): { location: { hash: string; pathname: string; search: string }; replaced: unknown[][]; history: Pick<History, 'replaceState'> } {
+    const replaced: unknown[][] = []
+    return { location: { hash, pathname: '/static/', search: '?lang=en' }, replaced, history: { replaceState: (...args: unknown[]) => void replaced.push(args) } }
+  }
+
+  it('removes a one-time code, an error and a share from the address bar and the history entry', () => {
+    for (const hash of ['#code=JX2E7', '#error=access_denied', '#join=s&token=t']) {
+      const p = page(hash)
+      expect(takeFragment(p.location, p.history)).toEqual(readFragment(hash))
+      expect(p.replaced).toEqual([[null, '', '/static/?lang=en']])
+    }
+  })
+
+  it('is how the page reads its fragment', () => {
+    const main = readFileSync(new URL('../main.tsx', import.meta.url), 'utf8')
+    expect(main).toContain('takeFragment(location, history)')
+    expect(main).not.toMatch(/readFragment|location\.hash/)
+  })
+
+  it('leaves a fragment that asks for nothing', () => {
+    for (const hash of ['', '#', '#section']) {
+      const p = page(hash)
+      expect(takeFragment(p.location, p.history)).toEqual({ kind: 'none' })
+      expect(p.replaced).toEqual([])
+    }
   })
 })
 
