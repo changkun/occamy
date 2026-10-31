@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 
@@ -293,6 +294,44 @@ func newBridge(g config.Guacd, protocol string) func(target, screen) (backend.Ba
 		}
 		return bridge.New(g.Address, cfg, bridge.Options{}), nil
 	}
+}
+
+// loadWarnings returns what occamyd warns of when it loads f.
+//
+// One warning names, per protocol, the guacd.params that no session
+// reads, since the native backends read none of them. That happens when
+// no connection of that protocol sets backend: guacd, and ad-hoc targets
+// of that protocol either do not go through guacd or take only the
+// display's parameters. A file written for guacd, with disable-copy or
+// recording-path, would otherwise lose them unnoticed when its
+// connections moved to a native default. With legacy_v0, the v0 routes
+// pass every parameter to their sessions, so nothing is unused.
+func loadWarnings(f *config.File) []string {
+	var warnings []string
+	for _, p := range slices.Sorted(maps.Keys(f.Guacd.Params)) {
+		if f.LegacyV0 || slices.ContainsFunc(f.Connections, func(c config.Connection) bool {
+			return c.Protocol == p && config.BackendOf(p, c.Backend) == config.BackendGuacd
+		}) {
+			continue
+		}
+		adhoc := f.AllowAdhocTargets && config.BackendOf(p, f.AdhocBackends[p]) == config.BackendGuacd
+		var unused []string
+		for _, name := range slices.Sorted(maps.Keys(f.Guacd.Params[p])) {
+			if !adhoc || !adhocParams[name] {
+				unused = append(unused, name)
+			}
+		}
+		if len(unused) == 0 {
+			continue
+		}
+		why := fmt.Sprintf("no %s connection sets backend: guacd", p)
+		if adhoc {
+			why += fmt.Sprintf(", and ad-hoc %s targets take only the display's parameters", p)
+		}
+		warnings = append(warnings, fmt.Sprintf("guacd.params.%s sets %s, which no session reads: %s, and the native backends read none of guacd.params",
+			p, strings.Join(unused, ", "), why))
+	}
+	return warnings
 }
 
 // adhocParams are the guacd parameters that an ad-hoc target takes from
