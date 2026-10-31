@@ -178,20 +178,24 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   links into amd64 builds, and `scripts/third-party-licenses.sh` lists
   both architectures of every release platform.
 - Refinement in the graphics pipeline. Each viewer's writer keeps a heat
-  per tile: a tile that changes in three snapshots of the screen in a
-  row is in motion, and goes at the pacer's lowest quality, and lossy if
-  it has 17 to 256 colours; an input's effect never is. A still lossy
-  tile goes at the lowest quality, up to the pacer's, at which each
-  tile's SSIM reaches 0.91 (`encoder.StillSSIM`). Once a tile has been
-  still for 300 ms (`stream.Config.RefineDelay`), background frames send
-  it again: exact if it has up to 256 colours, at the SSIM's quality if
-  it has more. Refinement goes only while nothing else is to be sent and
-  no frame awaits an ack, a tile a message within the pacer's 5 ms of
-  bytes, and gives way to an input or a change before each message. On
-  the recorded scenes the plasma takes 13.8 KiB a frame against 392.4,
-  the dragged window 5.2 against 30.6, and the photograph shown once
-  121.8 against 150.8, under G6's 139
-  ([docs/benchmarks/refinement.md](docs/benchmarks/refinement.md)).
+  per tile, which halves each refine delay of the writer's time between
+  frames: a tile that changes more often than the refine delay is in
+  motion, and goes at the pacer's lowest quality, and lossy if it has 17
+  to 256 colours; one that changes less often goes at its final quality.
+  An input's effect is never in motion, and one the search finds at the
+  quality it needs is not sent again. A still lossy tile goes at the
+  lowest quality, up to the pacer's, at which each tile's SSIM reaches
+  0.91 (`encoder.StillSSIM`). Once a tile has been still for 300 ms
+  (`stream.Config.RefineDelay`), background frames send it again: exact
+  if it has up to 256 colours, at the SSIM's quality if it has more.
+  Refinement goes only while nothing else is to be sent and no frame
+  awaits an ack, a tile a message within the pacer's 5 ms of bytes, and
+  gives way to an input before each message, and to a change after the
+  first tile it tries. A copy carries the goal of the pixels it moves.
+  On the recorded scenes the plasma takes 13.8 KiB a frame against
+  392.4, the dragged window 5.2 against 30.6 and 17.9 KiB of refinement
+  once still, and the photograph shown once 121.8 against 150.8, under
+  G6's 139 ([docs/benchmarks/refinement.md](docs/benchmarks/refinement.md)).
   `stream.Config.NoRefine` turns refinement off, and motion with it.
 - `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
   (static users sign in with a password for an access token), TLS when

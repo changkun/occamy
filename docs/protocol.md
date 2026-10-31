@@ -1059,7 +1059,8 @@ client that lists no lossy codec gets every tile lossless, and one that
 lists no lossless codec gets every tile lossy. A lossy tile message may
 cover several tiles side by side, so that the lossy format's headers are
 paid once. A tile in motion, one that changed in each of the last few
-frames other than as an input's effect, goes at a low quality, and lossy
+snapshots of the screen occamyd takes, at most ten a second, other than
+as an input's effect, goes at a low quality, and lossy
 if it has 17 to 256 colours; once it has been still for a moment
 (300 ms by default), occamyd sends it again, exact if it has up to 256
 colours and at a higher quality if it has more. Such a frame of
