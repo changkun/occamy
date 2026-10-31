@@ -1153,6 +1153,9 @@ place for fixes that ship on v0 before beta.
     - `TestEndedSessionsBounded` covers the time and the count bounds.
     - `TestEndedSessionsSized` checks the count against
       `limits.sessions`: 1024 for 0 and 100, 5000 for 5000.
+    - `TestEndedSessionsExpireOutOfOrder` checks that `get` gives no
+      session past its grace when one kept longer came before it, as
+      when the grace changed between them.
     - `TestEndedSessionOwnerGrace` gives the server a grace of 1 s: a
       session whose owner never comes ends after it, and the owner's
       stream gets 4003 `owner-left` until it has passed again.
@@ -1196,6 +1199,10 @@ place for fixes that ship on v0 before beta.
       `TestJoinEndingSessionWaits` failed 10 of 10. The latter's owner
       got "no such session" while the backend still held on, so it
       does join within the moment it means to.
+    - `get` trusting `prune` alone, which stops at the first session
+      kept beyond now: `TestEndedSessionsExpireOutOfOrder`, whose
+      session kept for 1 ms comes after one kept for an hour, failed
+      20 of 20.
   - **DELETE answers once the session is let go (added in review):**
     `closeSession` waited for `Session.Close`, which returns at the
     session's end. The server forgot the session and released its count
@@ -1208,9 +1215,13 @@ place for fixes that ship on v0 before beta.
       it, and so answers after the end is kept, too. The wait cannot
       hang: the goroutine waits for the end that `Close` has already
       waited for, and then only for `mu`, which nobody holds for long.
-    - The registry may still forget the session a moment later. Every
-      route finds a session through the server's map first, so none
-      finds it in the registry alone.
+    - The registry may still forget the session a moment later. The
+      REST routes, and a stream with an access token or a session
+      token, find a session through the server's map, never in the
+      registry alone. A share's stream asks the registry first
+      (`registry.JoinShared`), but a share of a closed session gets
+      4000 "invalid token" either way: the registry no longer has the
+      session, or its `Join` answers `ErrEnded`.
 
     Tests (server/sessions_test.go):
     - `TestSessionOwnerOnly` requires the session gone as `DELETE`
@@ -1219,18 +1230,31 @@ place for fixes that ship on v0 before beta.
     - `TestDeleteForgetsSession`, at one session per user: `DELETE`,
       then at once a `POST /api/v1/sessions` (201), a `GET` (404) and a
       share (404) of the closed session, three times.
+    - Both set the server's `forgetting` hook, nil but in tests, to wait
+      100 ms after a session's end before the server forgets it, and
+      again before it releases its count, as a busy host may. Without
+      it, the goroutine that forgets the session won the race on a
+      quiet host, and the review found that the tests passed 20 of 20
+      with the wait removed.
 
-    With 100 ms between a session's end and both its server's and its
-    registry's removal, each ran 10 times at a load of 6 to 8:
-    - The fix: both passed 10 of 10, so a share is refused while the
-      registry still holds the session.
-    - Without the wait: both failed 10 of 10. After `DELETE`, a `GET`
-      answered 200, a second `DELETE` 204, a share 201, and the new
-      session 429.
-    - `TestDeleteEndsStreams` passed either way. Without the wait, the
+    Each ran 20 times with `-race`, as committed, at a load of 6 to 11:
+    - The fix: both passed 20 of 20.
+    - No wait: both failed 20 of 20. After `DELETE`, a `GET` answered
+      200, a second `DELETE` 204, and the new session 429.
+    - `gone` closed before the count is released, or just before the
+      removal's lock, after the hook: `TestDeleteForgetsSession` failed
+      20 of 20, its new session refused with 429.
+    - `gone` closed at once after the end: both failed 20 of 20.
+    - `TestDeleteEndsStreams` passed for each. Without the wait, the
       owner's stream after `DELETE` found the session still running,
       `Join` answered `ErrEnded`, and it got 4002 from that. With the
       wait, it always gets 4002 from the kept end.
+
+    Before the hook, a patch, not committed, waited 100 ms between a
+    session's end and both its server's and its registry's removal.
+    With it, master failed `TestSessionOwnerOnly` 10 of 10 with CI's
+    message, and the fix passed, a share refused while the registry
+    still held the session.
   - **Capabilities:** terminal level 1, and the codecs
     `internal/encoder` sends (`encoder.Codecs()`: webp, jpeg, deflate,
     raw), with a viewer's encoder from `encoder.New` for the codecs it

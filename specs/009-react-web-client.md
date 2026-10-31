@@ -685,11 +685,14 @@ Settled on 2026-10-31.
     announce it politely, and with Go to the connections instead, which
     forgets it; then it joins it. occamyd decides. A session that ended
     less than the owner grace before the join gives its owner the close
-    it ended with, 4002 to 4006, such as 4003 `owner-left` once the
-    grace ran out, and the view says how it ended and forgets it, as
-    for any end. A session that ended longer ago, or a user who is not
-    its owner, is refused with 4001 and the view says so. It stays kept through a lost connection, a
-    takeover and the page's own close on `pagehide`, as Join again
+    it ended with, such as 4003 `owner-left` once the grace ran out, and
+    the view says how it ended. For 4002 to 4006 and 1001 it forgets the
+    session, as for any end. After 1011, a session that failed inside
+    occamyd, it keeps it for one more reload, which gets 1011 again, or
+    4001 once the grace has passed. A session that ended longer ago, or
+    a user who is not its owner, is refused with 4001 and the view says
+    so. It stays kept through a lost connection, a takeover and the
+    page's own close on `pagehide`, as Join again
     would join it, through an End whose `DELETE` failed, after which
     the session runs on for the owner's grace, and through a join that
     cannot reach occamyd, often why the page was reloaded. It is
