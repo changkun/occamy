@@ -25,7 +25,9 @@ dispatched_task_id: null
 and its spike built the protocol client in `internal/rdp`. What is left
 is the backend that runs it in a session, and the protocol features a
 backend needs to pass the bridge's parity gate
-([guacd-bridge](guacd-bridge.md)) without guacd, Guacamole or cgo:
+([guacd-bridge](guacd-bridge.md)), which since 2026-10-31 decides when
+RDP's guacd path is deleted, not when native becomes the default,
+without guacd, Guacamole or cgo:
 
 - how the backend maps credentials, input, demand and the session's end
   onto RDP, and what it bounds;
@@ -68,8 +70,13 @@ backend needs to pass the bridge's parity gate
     an initial program, Wake-on-LAN, and session recording.
 - The parity gate requires the [006](../006-demo-stack-refresh.md)
   matrix for authentication modes, resize, clipboard both ways, cursor,
-  sharing roles, reconnect, and keyboard input with AltGr and dead keys;
-  traffic and CPU no worse than the bridge; and a soak.
+  sharing roles, reconnect, and keyboard input with AltGr and dead keys,
+  and, since the owner's decision of 2026-10-31, the benchmark showing
+  native at least 10x better than the guacd baseline on each scenario's
+  primary metric. It gates deleting RDP's guacd path; the native
+  backend becomes rdp's default as soon as it is registered. (It first
+  asked for traffic and CPU no worse than the bridge and a soak, before
+  a switch of default.)
 - Protocol v1 carries keys, text, pointer, wheel, clipboard and
   `resize-request`, but no audio and no files. The session core
   ([session-core](session-core.md)) expects RDP to pace the server with
@@ -198,20 +205,27 @@ them:
   in `occamyd` until NLA has run end to end, live against Windows or
   against the CredSSP acceptor of phase 2, since NLA is the default
   security mode and nothing has run it against a server that accepts
-  it. Registration in the API's backend factory and the switch from
-  the bridge then follow the parity gate in
-  [guacd-bridge](guacd-bridge.md), not these phases. (Since the
-  Sessions task of [api-and-server-stack](api-and-server-stack.md),
-  `rdp` connections run on the guacd bridge in that factory,
-  `server/backends.go`; registration replaces that entry.)
+  it. Once it has, registration in the API's backend factory makes the
+  backend `rdp`'s default, by the owner's decision of 2026-10-31 that
+  native is the default wherever a native backend exists
+  ([guacd-bridge](guacd-bridge.md), Parity gate), with
+  `backend: guacd` as an explicit fallback and the benchmark's
+  baseline. The parity gate, not these phases, then decides when
+  RDP's guacd path is deleted. (Since the Sessions task of
+  [api-and-server-stack](api-and-server-stack.md), `rdp` connections
+  run on the guacd bridge in that factory, `server/backends.go`;
+  registration adds the native backend beside that entry and makes
+  it the default.)
 
 ## Affects
 
 New `internal/backend/rdp` and `internal/keymap`; `internal/rdp` gains
 what the backend needs, and `internal/rdp/rdptest`, a fake server for
 tests. `internal/backend/vnc` takes its scan codes from
-`internal/keymap`. After the parity gate, RDP no longer needs guacd,
-and guacd leaves the default deployment.
+`internal/keymap`. Once the backend is registered, RDP no longer needs
+guacd by default, which leaves telnet as guacd's only default use; once
+the parity gate deletes RDP's guacd path, RDP no longer needs guacd at
+all.
 
 ## Implementation notes: phase 1
 
