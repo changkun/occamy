@@ -157,37 +157,38 @@ publishes checksummed, attested artifacts.
 
 Added to "Builds":
 
-- `go test -race` in the `go` job, which has libguac installed;
+- `go test -race` in the `go` job, which had libguac installed until
+  [remove-libguac](005-upstream-guacamole/remove-libguac.md);
 - `on: push` limited to `master`, plus `pull_request`, so a PR branch no
   longer runs every job twice;
-- a `govulncheck` job;
+- `govulncheck`, as the `Vulnerabilities` step of the `go` job;
 - `.github/dependabot.yml` for `gomod`, `npm` (`client/occamy-web`),
   `github-actions` and `docker` (`docker/`, `docker/demo/*`). It runs
   weekly with grouped minor and patch updates.
 
 ### Release pipeline
 
-`.github/workflows/release.yml` runs on `v*` tags, and on
-`workflow_dispatch` as a dry run that builds everything and publishes
-nothing. It has four jobs:
+`.github/workflows/release.yml` runs on `v*` tags, and as a dry run
+that builds everything and publishes nothing on `workflow_dispatch` and
+on pull requests that change the release build. It has five jobs:
 
-1. **image**:
-   - builds `docker/Dockerfile` natively on `ubuntu-latest` (amd64) and
-     `ubuntu-24.04-arm` (arm64), which is faster than QEMU;
-   - pushes by digest to `ghcr.io/changkun/occamy`, then merges a
-     multi-arch manifest tagged with the version, plus `latest` for
-     non-prereleases;
+1. **image**: builds `docker/Dockerfile` natively on `ubuntu-latest`
+   (amd64) and `ubuntu-24.04-arm` (arm64), which is faster than QEMU,
+   and pushes each by digest to `ghcr.io/changkun/occamy`.
+2. **manifest**, on tags only:
+   - merges the digests into a multi-arch manifest tagged with the
+     version, plus `latest` for non-prereleases;
    - attests build provenance with `actions/attest-build-provenance`
      (`push-to-registry: true`).
-2. **web**: builds `client/occamy-web` into
+3. **web**: builds `client/occamy-web` into
    `occamy-web-<version>.tar.gz`.
-3. **binaries**, after
+4. **binaries**, after
    [remove-libguac](005-upstream-guacamole/remove-libguac.md):
    - GoReleaser builds `occamyd` with `CGO_ENABLED=0` for
      linux/darwin/windows × amd64/arm64;
    - archives include `LICENSE`, `README.md`, `conf.yaml` and the
      third-party license report.
-4. **release**:
+5. **release**:
    - writes `SHA256SUMS` over all files;
    - attests provenance for every file;
    - runs `gh release create` with the changelog section as notes, marked

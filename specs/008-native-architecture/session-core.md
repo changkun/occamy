@@ -244,6 +244,14 @@ follow the recommendations above.
    - A session with no input from anyone for `session.idle_timeout`
      (default 30 min) ends the same way.
    - Share tokens die with the session.
+
+   (2026-10-31: `session.owner_grace` and `session.idle_timeout` were
+   never added to the configuration. `session.Config` has `OwnerGrace`
+   and `IdleTimeout`, but occamyd sets neither, so the 60 s and 30 min
+   defaults always apply. What the configuration has instead is
+   `streams.viewer_timeout` and the `limits` keys: `sessions`,
+   `sessions_per_user`, `viewers_per_session` and
+   `shares_per_session`.)
 6. **Recording is out of scope for beta.** The `Sink` interface leaves
    room for a tap later.
 7. **IPC for out-of-process backends waits** until
