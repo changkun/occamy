@@ -339,6 +339,13 @@ describe('image headers', () => {
     expect(webpSize(riff([vp8(300, 200)]))).toEqual({ width: 300, height: 200 })
   })
 
+  it('reads a VP8L header, width first', () => {
+    // The width and height less one in 14 bits each, LSB first.
+    const bits = (300 - 1) | ((200 - 1) << 14)
+    const vp8l = chunk('VP8L', [0x2f, bits & 0xff, (bits >> 8) & 0xff, (bits >> 16) & 0xff, (bits >>> 24) & 0xff])
+    expect(webpSize(riff([vp8l]))).toEqual({ width: 300, height: 200 })
+  })
+
   it('refuses a VP8 inter frame', () => {
     const c = vp8(4, 4)
     c[8] |= 1

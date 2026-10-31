@@ -90,6 +90,14 @@ const MAX_BELLS = 3
 // The most the backlog follows the screen up to.
 const MAX_BACKLOG = 1 << 30
 
+// What an op of an undelivered frame holds beyond its message, counted
+// in the backlog with it: its objects, a view of its message, and a
+// decoding tile's job and pixels' array. Measured in Node with 200,000
+// ops of 1×1 pixels: 339 bytes beyond the message for a raw tile, 118
+// for a copy-rect and 405 for a deflate tile, decoded. Without it, a
+// frame of tiny ops would hold about 13 times what it counts.
+const OP_COST = 512
+
 /** Options configure a session. */
 export interface Options {
   /** Names the client and its version in hello; DEFAULT_NAME if empty. */
@@ -655,10 +663,12 @@ export class Session {
     this.add({ kind, data, bytes: n, work: 0 })
   }
 
-  // add adds o to the open frame.
+  // add adds o to the open frame. o holds its message's bytes and, as
+  // the session counts it, OP_COST.
   private add(o: Op): void {
     this.open ??= { ops: [], id: 0, lastSeq: 0, serverTime: 0, arrived: 0, bytes: 0, work: 0, area: 0 }
     const f = this.open
+    o.bytes += OP_COST
     f.ops.push(o)
     f.bytes += o.bytes
     f.work += o.work
@@ -686,12 +696,21 @@ export class Session {
     f.serverTime = Number(serverTime)
     f.arrived = this.now()
     f.area = Math.max(f.area, this.wireW * this.wireH)
-    if (this.frames > this.window) {
+    // With this one, the frames the server sent that the client has not
+    // acknowledged: those queued, and the one taken from the queue whose
+    // acknowledgement waits for the next call of next().
+    if (this.frames + this.unacknowledged() > this.window) {
       throw new ProtocolError('invalid', `more than ${this.window + 1} frames unacknowledged`)
     }
     this.queue.push({ kind: 'frame', f })
     this.frames++
     this.poke()
+  }
+
+  // unacknowledged counts the frame next() took from the queue and has
+  // not acknowledged: one that is being delivered, or was delivered last.
+  private unacknowledged(): number {
+    return this.shown !== null || this.pending.some((ev) => ev.type === 'frame') ? 1 : 0
   }
 
   // maxBacklog is the most the session holds of undelivered frames and

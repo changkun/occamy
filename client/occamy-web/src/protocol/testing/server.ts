@@ -41,7 +41,14 @@ export class FakeTransport implements Transport {
     this.sent.push(m)
   }
 
+  /** close closes the connection as a browser's WebSocket does, refusing what a browser refuses. */
   close(code: number, reason: string): void {
+    if (code !== 1000 && !(code >= 3000 && code <= 4999)) {
+      throw new DOMException(`close code ${code}`, 'InvalidAccessError')
+    }
+    if (new TextEncoder().encode(reason).length > 123) {
+      throw new DOMException('a close reason longer than 123 bytes', 'SyntaxError')
+    }
     if (this.closed !== null) {
       return
     }

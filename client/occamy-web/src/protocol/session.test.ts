@@ -96,6 +96,14 @@ describe('handshake', () => {
     expect(s.capabilities.maxMessageSize).toBe(1 << 20)
   })
 
+  it('takes no frame window above its offer, whatever the server states', async () => {
+    const offered = await open({ options: { frameWindow: 2 }, capabilities: { frameWindow: 9 } })
+    expect(offered.s.capabilities.frameWindow).toBe(2)
+    // An unstated offer is the default, 2.
+    const unstated = await open({ capabilities: { frameWindow: 9 } })
+    expect(unstated.s.capabilities.frameWindow).toBe(2)
+  })
+
   it('takes the defaults for what neither side states', async () => {
     const { s } = await open({ capabilities: { frameWindow: 0, maxMessageSize: 0 } })
     expect(s.capabilities.frameWindow).toBe(2)
@@ -290,12 +298,23 @@ describe('frames', () => {
     await nextOf(s, 'frame')
     // Skip to the end of the numbers, as four billion frames would.
     ;(s as unknown as { lastEnd: number }).lastEnd = 0xfffffffe
-    t.push(frameEnd(0xffffffff))
-    t.push(frameEnd(0))
+    for (const id of [0xffffffff, 0, 1]) {
+      t.push(frameEnd(id))
+      expect((await nextOf(s, 'frame')).id).toBe(id)
+    }
+  })
+
+  it('takes the tiles of frame 0 after the wrap', async () => {
+    const { t, s } = await open()
+    t.push({ type: 'resize', width: 2, height: 1 })
     t.push(frameEnd(1))
-    expect((await nextOf(s, 'frame')).id).toBe(0xffffffff)
+    await nextOf(s, 'resize')
+    await nextOf(s, 'frame')
+    ;(s as unknown as { lastEnd: number }).lastEnd = 0xffffffff
+    t.push(tile(0, 1, 0, 1, 1, GREEN))
+    t.push(frameEnd(0))
     expect((await nextOf(s, 'frame')).id).toBe(0)
-    expect((await nextOf(s, 'frame')).id).toBe(1)
+    expect(pixel(s.framebuffer, 1, 0)).toEqual(GREEN)
   })
 
   it('closes with protocol-error a frame-end out of order', async () => {
@@ -397,17 +416,131 @@ describe('bounds', () => {
     expect(end.error?.message).toMatch(/more than 3 frames unacknowledged/)
   })
 
+  it('counts the frame delivered and not yet acknowledged against the window', async () => {
+    const { t, s } = await open({ capabilities: { frameWindow: 2 } })
+    t.push({ type: 'resize', width: 1, height: 1 })
+    t.push(frameEnd(1))
+    await nextOf(s, 'resize')
+    await nextOf(s, 'frame')
+    // Frame 1 is shown, and acknowledged at the next call: with frames 2
+    // and 3, the server holds three unacknowledged, the window and one.
+    t.push(frameEnd(2))
+    t.push(frameEnd(3))
+    expect(s.ended).toBe(false)
+    t.push(frameEnd(4))
+    expect(s.ended).toBe(true)
+    await nextOf(s, 'frame')
+    await nextOf(s, 'frame')
+    expect((await endOf(s)).error?.message).toMatch(/more than 3 frames unacknowledged/)
+  })
+
+  it('stops counting a frame once it acknowledged it', async () => {
+    const { t, s } = await open({ capabilities: { frameWindow: 2 } })
+    t.push({ type: 'resize', width: 1, height: 1 })
+    t.push(frameEnd(1))
+    t.push(frameEnd(2))
+    await nextOf(s, 'resize')
+    await nextOf(s, 'frame')
+    // Acknowledges frame 1 and shows frame 2; 2, 3 and 4 are the window
+    // and one.
+    await nextOf(s, 'frame')
+    t.push(frameEnd(3))
+    t.push(frameEnd(4))
+    expect(s.ended).toBe(false)
+    t.push(frameEnd(5))
+    expect(s.ended).toBe(true)
+  })
+
+  it('counts what each op holds, not its message only', async () => {
+    // A floor of 64 KiB: 1×1 tiles of 27 bytes each hold 539 with their
+    // op, so 100 fit, and 130 do not, where their messages alone would.
+    const { t, s } = await open({ options: { minBacklog: 65536 } })
+    t.push({ type: 'resize', width: 4, height: 4 })
+    for (let i = 0; i < 100; i++) {
+      t.push(tile(1, i % 4, (i >> 2) % 4, 1, 1, RED))
+    }
+    expect(s.ended).toBe(false)
+    for (let i = 0; i < 30; i++) {
+      t.push(tile(1, i % 4, (i >> 2) % 4, 1, 1, RED))
+    }
+    expect(s.ended).toBe(true)
+    expect((await endOf(s)).error?.message).toMatch(/undelivered, more than 65536/)
+  })
+
+  it('frees what a frame holds once it is delivered', async () => {
+    // A 64×64 screen holds 192 KiB; each frame holds about 33 KiB, so a
+    // dozen frames would not fit if delivering one did not free it.
+    const { t, s } = await open({ options: { minBacklog: 4096 } })
+    t.push({ type: 'resize', width: 64, height: 64 })
+    t.push(frameEnd(1))
+    await nextOf(s, 'resize')
+    await nextOf(s, 'frame')
+    for (let id = 2; id < 30; id++) {
+      t.push(tile(id, 0, 0, 64, 64, RED))
+      t.push(tile(id, 0, 0, 64, 64, GREEN))
+      t.push(frameEnd(id))
+      expect((await nextOf(s, 'frame')).id).toBe(id)
+    }
+    expect(s.ended).toBe(false)
+    expect((s as unknown as { backlog: number }).backlog).toBe(0)
+  })
+
+  it('drops what a frame drew before a resize from what it holds', async () => {
+    // Forty full-screen tiles, each after a resize: each resize drops the
+    // tile before it, so the frame writes two screens, not eighty, and
+    // holds one tile.
+    const { t, s } = await open({ options: { minBacklog: 4096 } })
+    for (let i = 0; i < 40; i++) {
+      t.push({ type: 'resize', width: 64, height: 64 })
+      t.push(tile(1, 0, 0, 64, 64, i % 2 === 0 ? RED : GREEN))
+    }
+    expect(s.ended).toBe(false)
+    expect((s as unknown as { open: { ops: unknown[] } }).open.ops.length).toBe(2)
+    t.push(frameEnd(1))
+    await nextOf(s, 'resize')
+    await nextOf(s, 'frame')
+    expect(pixel(s.framebuffer, 0, 0)).toEqual(GREEN)
+    expect((s as unknown as { backlog: number }).backlog).toBe(0)
+  })
+
+  it('counts the pixels of a tile being decoded from the start', async () => {
+    // Tiles whose decoding never ends hold their 16 KiB of pixels each,
+    // whatever their payload: a 64×64 screen holds 192 KiB, which eleven
+    // fit in and twelve do not. Four a frame keep each frame's work
+    // within its bound.
+    const decoder: TileDecoder = {
+      codecs: () => Promise.resolve([Codec.Deflate, Codec.Raw]),
+      decode: () => new Promise(() => undefined),
+      close: () => undefined,
+    }
+    const { t, s } = await open({ decoder, options: { minBacklog: 4096 } })
+    const big = (id: number): Message => ({ type: 'tile', frameId: id, x: 0, y: 0, w: 64, h: 64, codec: Codec.Deflate, slot: 0, payload: Uint8Array.of(1) })
+    t.push({ type: 'resize', width: 64, height: 64 })
+    for (let i = 0; i < 11; i++) {
+      const id = 1 + Math.floor(i / 4)
+      t.push(big(id))
+      if (i % 4 === 3) {
+        t.push(frameEnd(id))
+      }
+    }
+    expect(s.ended).toBe(false)
+    t.push(big(3))
+    expect(s.ended).toBe(true)
+    expect(t.take('close')).toEqual([{ type: 'close', code: 1002, reason: 'protocol error' }])
+  })
+
   it('bounds what it holds undelivered', async () => {
     // A 4×4 screen and a floor of 4 KiB: (2+2) × 3 × 4 × 16 is below it.
     const { t, s } = await open({ options: { minBacklog: 4096 } })
+    // The resize holds its 8 bytes and an op's 512, each join its 1213
+    // bytes: two joins fit, and a third does not.
     t.push({ type: 'resize', width: 4, height: 4 })
-    // Each join holds its 1213 bytes.
     const name = 'x'.repeat(1200)
-    for (let i = 1; i <= 3; i++) {
+    for (let i = 1; i <= 2; i++) {
       t.push({ type: 'viewer-joined', viewerId: i, role: Role.Viewer, name })
     }
     expect(s.ended).toBe(false)
-    t.push({ type: 'viewer-joined', viewerId: 4, role: Role.Viewer, name })
+    t.push({ type: 'viewer-joined', viewerId: 3, role: Role.Viewer, name })
     expect(s.ended).toBe(true)
     await failsWith(t, s, 1002, /bytes of frames and events undelivered, more than 4096/)
   })
@@ -420,8 +553,8 @@ describe('bounds', () => {
     t.push(tile(1, 0, 0, 64, 64, RED))
     t.push(frameEnd(1))
     expect(s.ended).toBe(false)
-    // The frame holds 8 + 2 × 16407 bytes, each join 10013: 16 fit in
-    // 196608 bytes, and the 17th does not.
+    // The frame holds 8 + 2 × 16407 bytes of messages and 3 × 512 of
+    // ops, each join 10013: 16 fit in 196608 bytes, and the 17th does not.
     for (let i = 1; i <= 16; i++) {
       t.push({ type: 'viewer-joined', viewerId: i, role: Role.Viewer, name: 'x'.repeat(10000) })
     }
@@ -432,17 +565,17 @@ describe('bounds', () => {
   })
 
   it('bounds the work of a frame', async () => {
-    // 8×8 pixels: a frame may write max(8 × 4 × 64, 4096) bytes of pixels,
-    // 16 copies of the screen.
+    // 32×32 pixels, above the floor: a frame may write eight screens of
+    // pixels, 8 × 4 × 1024 bytes, and the backlog holds far more.
     const { t, s } = await open({ options: { minBacklog: 4096 } })
-    t.push({ type: 'resize', width: 8, height: 8 })
+    t.push({ type: 'resize', width: 32, height: 32 })
     t.push(frameEnd(1))
-    for (let i = 0; i < 16; i++) {
-      t.push({ type: 'copy-rect', frameId: 2, srcX: 0, srcY: 0, dstX: 0, dstY: 0, w: 8, h: 8 })
+    for (let i = 0; i < 8; i++) {
+      t.push({ type: 'copy-rect', frameId: 2, srcX: 0, srcY: 0, dstX: 0, dstY: 0, w: 32, h: 32 })
     }
     expect(s.ended).toBe(false)
-    t.push({ type: 'copy-rect', frameId: 2, srcX: 0, srcY: 0, dstX: 0, dstY: 0, w: 8, h: 8 })
-    await failsWith(t, s, 1002, /writes 4352 bytes of pixels, more than 4096/)
+    t.push({ type: 'copy-rect', frameId: 2, srcX: 0, srcY: 0, dstX: 0, dstY: 0, w: 32, h: 32 })
+    await failsWith(t, s, 1002, /writes 36864 bytes of pixels, more than 32768/)
   })
 
   it('bounds the events undelivered', async () => {
@@ -471,6 +604,23 @@ describe('bounds', () => {
     expect(s.ended).toBe(true)
     expect(decodes).toBe(0)
     await failsWith(t, s, 1002, /a cursor of 4096 bytes/)
+  })
+
+  it('credits the undelivered cursor a cursor replaces', async () => {
+    const decoder: TileDecoder = {
+      codecs: () => Promise.resolve([Codec.Deflate, Codec.Raw]),
+      decode: (job: DecodeJob) => Promise.resolve(new Uint8ClampedArray(4 * job.width * job.height)),
+      close: () => undefined,
+    }
+    // A floor of 4 KiB: the resize holds 520 bytes and a 32×16 cursor
+    // 2 KiB, so a second fits only in place of the first.
+    const { t, s } = await open({ decoder, options: { minBacklog: 4096 } })
+    t.push({ type: 'resize', width: 4, height: 4 })
+    for (let i = 0; i < 2; i++) {
+      t.push({ type: 'cursor', hotX: i, hotY: 0, w: 32, h: 16, codec: Codec.Deflate, payload: Uint8Array.of(1) })
+    }
+    expect(s.ended).toBe(false)
+    expect(await nextOf(s, 'cursor')).toMatchObject({ hotX: 1 })
   })
 
   it('closes with too-large a message beyond max_message_size', async () => {
@@ -612,6 +762,24 @@ describe('the end', () => {
     expect(end.error).toBeInstanceOf(ConnectionError)
   })
 
+  it('reports a connection closed without a status, or over TLS, as failed', async () => {
+    for (const code of [1005, 1015]) {
+      const { t, s } = await open()
+      t.drop(code)
+      const end = await nextOf(s, 'end')
+      expect(end.code).toBe(0)
+      expect(end.error).toBeInstanceOf(ConnectionError)
+    }
+  })
+
+  it('echoes a server’s close without a reason too long for a close frame', async () => {
+    const { t, s } = await open()
+    const reason = 'é'.repeat(62)
+    t.push({ type: 'close', code: 4005, reason })
+    expect(await s.next()).toEqual({ type: 'end', code: 4005, reason })
+    expect(t.closed).toEqual({ code: 4005, reason: '' })
+  })
+
   it('reports the code of a WebSocket the server closed without a close message', async () => {
     const { t, s } = await open()
     t.drop(4004, 'idle')
@@ -678,6 +846,14 @@ describe('input', () => {
     ])
   })
 
+  it('numbers input past a view and a prompt reply', async () => {
+    const { s } = await open()
+    expect(s.key(true, 0x61, 4)).toBe(1)
+    s.view(false)
+    s.promptReply(1, [])
+    expect(s.key(false, 0x61, 4)).toBe(2)
+  })
+
   it('wraps the sequence number from 2³²−1 to 1', async () => {
     const { s } = await open()
     ;(s as unknown as { seq: number }).seq = 0xfffffffe
@@ -710,6 +886,11 @@ describe('input', () => {
     const { t, s } = await open({ welcome: { role: Role.ReadOnly } })
     expect(() => s.key(true, 0x61, 4)).toThrow(ReadOnlyError)
     expect(() => s.pointer(0, 0, 0)).toThrow(ReadOnlyError)
+    expect(() => s.text('a')).toThrow(ReadOnlyError)
+    expect(() => s.termInput('a')).toThrow(ReadOnlyError)
+    expect(() => s.wheel(0, 1)).toThrow(ReadOnlyError)
+    expect(() => s.resize(10, 10)).toThrow(ReadOnlyError)
+    expect(() => s.clipboard('text/plain', 'a')).toThrow(ReadOnlyError)
     s.view(false)
     expect(t.sent).toEqual([{ type: 'view', visible: false, x: 0, y: 0, w: 0, h: 0 }])
   })
@@ -721,6 +902,9 @@ describe('input', () => {
     expect(() => s.view(true, { x: -50, y: 0, width: 20, height: 10 })).toThrow(RangeError)
     s.view(true, { x: 5, y: 5, width: 0, height: 10 })
     expect(t.take('view')).toEqual([{ type: 'view', visible: true, x: 0, y: 0, w: 0, h: 0 }])
+    // Beyond the right edge of the coordinates, and rounded outward.
+    s.view(true, { x: 65000, y: 0.5, width: 1000, height: 1 })
+    expect(t.take('view')).toEqual([{ type: 'view', visible: true, x: 65000, y: 0, w: 535, h: 2 }])
   })
 
   it('sends hidden in hello, and the view as it changes', () => {
@@ -747,6 +931,19 @@ describe('frame acknowledgement', () => {
     clock = 4.25
     await s.next()
     expect(t.take('frame-ack')).toEqual([{ type: 'frame-ack', frameId: 2, decodeTime: 2250 }])
+  })
+
+  it('acknowledges a frame once', async () => {
+    const { t, s } = await open()
+    t.push({ type: 'resize', width: 1, height: 1 })
+    t.push(frameEnd(1))
+    t.push({ type: 'bell' })
+    t.push({ type: 'title', title: 't' })
+    await nextOf(s, 'resize')
+    await nextOf(s, 'frame')
+    await nextOf(s, 'bell')
+    await nextOf(s, 'title')
+    expect(t.take('frame-ack').map((m) => (m as { frameId: number }).frameId)).toEqual([1])
   })
 
   it('sends nothing after the end', async () => {
