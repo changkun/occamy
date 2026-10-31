@@ -509,7 +509,7 @@ Response: `200`, with `Cache-Control: no-store`.
 | `id` | The session's ID |
 | `connection` | The connection's ID; absent for an ad-hoc target |
 | `protocol` | `ssh`, `vnc`, `rdp`, `telnet` or `kubernetes` |
-| `backend` | What serves the session: `ssh`, `occamyd`'s native SSH backend; `vnc`, its native VNC backend; `kubernetes`, its native Kubernetes backend; or `guacd`, the guacd bridge. ssh and kubernetes are always native, and rdp and telnet always go through guacd. vnc goes through guacd unless the connection's `backend` key, or `adhoc_backends` for an ad-hoc target, says `native` ([configuration.md](configuration.md#backends)) |
+| `backend` | What serves the session: `ssh`, `occamyd`'s native SSH backend; `vnc`, its native VNC backend; `kubernetes`, its native Kubernetes backend; or `guacd`, the guacd bridge. ssh and kubernetes are always native, and rdp and telnet always go through guacd. vnc is native by default, and goes through guacd only when the connection's `backend` key, or `adhoc_backends` for an ad-hoc target, says `guacd` ([configuration.md](configuration.md#backends)) |
 | `class` | `terminal` (ssh and kubernetes) or `graphical` (the others, telnet through guacd included): whether the stream carries a terminal or tiles of pixels |
 | `size` | `width` and `height`, in character cells for a terminal and in pixels for a graphical session; absent until the remote reports a size |
 | `viewers` | The viewers connected now, the owner first if connected, then the others in the order they joined: each one's `id`, as in `viewer-joined`, and `role`, `owner`, `viewer` or `read-only`. Empty, `[]`, while nobody is connected |
@@ -588,9 +588,9 @@ link-local, unspecified and multicast addresses, the clouds' metadata
 services, guacd's address and `occamyd`'s own listeners are refused
 unless an entry is that very address.
 
-ssh targets use the native SSH backend, and rdp and telnet targets go
-through guacd. vnc targets go through guacd unless `adhoc_backends`
-says `vnc: native`. A vnc target served by the native backend checks the
+ssh and vnc targets use the native SSH and VNC backends, and rdp and
+telnet targets go through guacd. vnc targets go through guacd only when
+`adhoc_backends` says `vnc: guacd`. A vnc target served by the native backend checks the
 server's certificate, if the server offers VeNCrypt, against the
 system's roots and the host name the request gave, or its address if
 it gave an address. Through guacd, an ad-hoc target gets none of

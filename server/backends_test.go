@@ -49,10 +49,10 @@ func TestBackendDefaults(t *testing.T) {
 	if !maps.Equal(got, want) {
 		t.Errorf("backends %v, want %v", got, want)
 	}
-	// An empty backend is the protocol's default: guacd for vnc until
-	// its native backend passes the parity gate.
+	// An empty backend is the protocol's default: native for vnc, with
+	// guacd as its explicit fallback.
 	for _, tt := range []struct{ protocol, backend, want string }{
-		{"ssh", "", "ssh"}, {"vnc", "", "guacd"}, {"vnc", "native", "vnc"}, {"vnc", "guacd", "guacd"},
+		{"ssh", "", "ssh"}, {"vnc", "", "vnc"}, {"vnc", "native", "vnc"}, {"vnc", "guacd", "guacd"},
 		{"rdp", "", "guacd"}, {"telnet", "", "guacd"},
 		{"kubernetes", "", "kubernetes"}, {"kubernetes", "native", "kubernetes"},
 	} {

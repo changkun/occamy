@@ -543,10 +543,10 @@ func AdhocProtocol(protocol string) bool {
 // a kubernetes connection's API server: pins replace the roots that
 // ca_file names, insecure_skip_verify replaces both, as ssh's
 // insecure_ignore_host_key replaces host_keys, and other protocols have
-// no tls. Only the native VNC backend checks it, so a vnc connection
-// through guacd has none either: guacd would not check the certificate
-// as the file says. A kubernetes connection always uses TLS, so require
-// changes nothing there.
+// no tls. Only the native VNC backend, vnc's default, checks it, so a
+// vnc connection with backend: guacd has none either: guacd would not
+// check the certificate as the file says. A kubernetes connection
+// always uses TLS, so require changes nothing there.
 func (c *checker) connectionTLS(path string, cn *Connection) {
 	t := cn.TLS
 	if cn.Protocol != "vnc" && cn.Protocol != "kubernetes" {
@@ -556,7 +556,7 @@ func (c *checker) connectionTLS(path string, cn *Connection) {
 		return
 	}
 	if t.set() && cn.Backend != BackendNative && cn.Protocol == "vnc" {
-		c.add(path, "only the native VNC backend checks the certificate as tls says: set backend: native, since guacd, which serves vnc connections by default, would not")
+		c.add(path, "only the native VNC backend checks the certificate as tls says, and backend: %s would not: leave backend out, or set native", cn.Backend)
 		return
 	}
 	if t.CAFile != "" && len(t.Pins) > 0 {
@@ -630,7 +630,7 @@ func (c *checker) ard(path string, cn *Connection) {
 	case cn.Protocol != "vnc":
 		c.add(path, "only vnc connections have ard")
 	case cn.Backend != BackendNative:
-		c.add(path, "only the native VNC backend speaks Apple Remote Desktop authentication: set backend: native")
+		c.add(path, "only the native VNC backend speaks Apple Remote Desktop authentication, and backend: %s does not: leave backend out, or set native", cn.Backend)
 	case cn.TLS.required():
 		c.add(path, "Apple Remote Desktop authentication runs without TLS, so it cannot be allowed while tls requires TLS (require, ca_file or pins)")
 	}
