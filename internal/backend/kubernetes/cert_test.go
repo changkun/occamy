@@ -9,12 +9,20 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"math/big"
+	"net"
+	"testing"
 	"time"
+
+	"changkun.de/x/occamy/internal/backend/backendtest"
+	"changkun.de/x/occamy/internal/backend/kubernetes"
+	"changkun.de/x/occamy/internal/backend/kubernetes/kubetest"
 )
 
 // testCA is a CA that issues client certificates.
@@ -84,4 +92,80 @@ func (ca *testCA) issue(user string) (certPEM, keyPEM []byte, err error) {
 func base64Pin(cert *x509.Certificate) string {
 	sum := sha256.Sum256(cert.Raw)
 	return "SHA256:" + base64.RawStdEncoding.EncodeToString(sum[:])
+}
+
+// sign issues a certificate from tmpl for a new key, signed by parent
+// and its key.
+func sign(t *testing.T, tmpl, parent *x509.Certificate, parentKey *ecdsa.PrivateKey) (*x509.Certificate, *ecdsa.PrivateKey) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl.NotBefore, tmpl.NotAfter = time.Now().Add(-time.Hour), time.Now().Add(time.Hour)
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, parent, &key.PublicKey, parentKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cert, key
+}
+
+// TestCertificateChain checks an API server whose certificate a CA's
+// intermediate signed: the chain it presents is verified through the
+// intermediate to the configured CA, and without the intermediate the
+// certificate is refused, since nothing fetches it.
+func TestCertificateChain(t *testing.T) {
+	ca, err := newCA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inter, interKey := sign(t, &x509.Certificate{
+		SerialNumber:          big.NewInt(10),
+		Subject:               pkix.Name{CommonName: "test intermediate CA"},
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}, ca.cert, ca.key)
+	leaf, leafKey := sign(t, &x509.Certificate{
+		SerialNumber: big.NewInt(11),
+		Subject:      pkix.Name{CommonName: "kube-apiserver"},
+		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}, inter, interKey)
+	for _, tc := range []struct {
+		name  string
+		chain [][]byte
+		ok    bool
+	}{
+		{"with the intermediate", [][]byte{leaf.Raw, inter.Raw}, true},
+		{"without it", [][]byte{leaf.Raw}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkGoroutines(t)
+			s := newServer(t, kubetest.Options{Certificate: &tls.Certificate{Certificate: tc.chain, PrivateKey: leafKey}})
+			cfg := config(s)
+			cfg.TLS = kubernetes.TLS{RootCAs: ca.pool()}
+			b := newBackend(t, cfg)
+			r := start(t, b, &backendtest.Sink{})
+			if !tc.ok {
+				var ce *kubernetes.CertificateError
+				if err := r.wait(t); !errors.As(err, &ce) {
+					t.Errorf("Run = %v, want a CertificateError", err)
+				}
+				return
+			}
+			e := accept(t, s)
+			if err := e.Exit(0); err != nil {
+				t.Fatal(err)
+			}
+			if err := r.wait(t); err != nil {
+				t.Errorf("Run = %v, want nil", err)
+			}
+		})
+	}
 }
