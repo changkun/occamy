@@ -107,8 +107,10 @@ wherever a native backend exists. guacd stays only as an explicit
 deleted per protocol once the benchmark shows the native backend at
 least 10x better. RDP is native in v1.0, with no helper
 ([rdp-strategy](008-native-architecture/rdp-strategy.md) decision 5),
-and Windows is checked later, once a host is available. Telnet gets no
-native backend: it stays on guacd and is dropped when guacd is removed.
+and Windows is checked later, once a host is available. v1.0 also needs
+a native Kubernetes backend (pod exec), specified separately, and the
+React web client on protocol v1. Telnet gets no native backend: it
+stays on guacd and is dropped when guacd is removed.
 
 | Milestone | Delivers | guacd needed for |
 |-----------|----------|------------------|
