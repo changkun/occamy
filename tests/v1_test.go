@@ -209,21 +209,22 @@ func TestE2EV1RDP(t *testing.T) {
 		// slow after streams.viewer_timeout.
 		drainCtx, stopDrain := context.WithCancel(ctx)
 		defer stopDrain()
-		drained := make(chan error, 1)
+		// drained carries what went wrong, or "" once the drain stopped.
+		drained := make(chan string, 1)
 		go func() {
 			for {
 				ev, err := cl.Next(drainCtx)
-				if err != nil {
-					if drainCtx.Err() != nil {
-						err = nil
-					}
-					drained <- err
-					return
+				switch e, end := ev.(client.End); {
+				case err != nil && drainCtx.Err() != nil:
+					drained <- ""
+				case err != nil:
+					drained <- "reading the owner's events: " + err.Error()
+				case end:
+					drained <- fmt.Sprintf("the owner's session ended while the viewer joined: %v %q (%v)", e.Code, e.Reason, e.Err)
+				default:
+					continue
 				}
-				if e, ok := ev.(client.End); ok {
-					drained <- fmt.Errorf("the owner's session ended while the viewer joined: %v %q (%v)", e.Code, e.Reason, e.Err)
-					return
-				}
+				return
 			}
 		}()
 		var share struct {
@@ -246,8 +247,8 @@ func TestE2EV1RDP(t *testing.T) {
 		}
 		typeV1(t, ctx, viewer)
 		stopDrain()
-		if err := <-drained; err != nil {
-			t.Fatal(err)
+		if msg := <-drained; msg != "" {
+			t.Fatal(msg)
 		}
 		typeV1(t, ctx, cl)
 		closeSessionV1(t, addr, token, id)
