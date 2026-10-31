@@ -780,7 +780,7 @@ that guacd was `vnc`'s default, they are corrected below.
   | screen and input acknowledged | pass | pass | pass | pass |
   | resize: by the owner's hello | — | — | pass | pass |
   | resize: by a request | — | — | pass | pass |
-  | resize: ignored without ExtendedDesktopSize | pass | pass | — | — |
+  | resize: the server keeps its size | pass | pass | — | — |
   | clipboard to the server, Latin-1 | pass | pass | pass | pass |
   | clipboard to the server, beyond Latin-1 | fail: x11vnc: Latin-1 only | fail: x11vnc: Latin-1 only | pass | fail: guacd: Latin-1 only |
   | clipboard both ways, Latin-1 | pass | pass | pass | pass |
@@ -820,7 +820,9 @@ that guacd was `vnc`'s default, they are corrected below.
     comes a few frames later. `TestParityShowsInput` checks the
     judgement against a server in process.
   - resize: TigerVNC takes 900×700 from the owner's `hello` and
-    800×600 and back from a request; x11vnc keeps 1024×768.
+    800×600 and back from a request; x11vnc keeps 1024×768: it has
+    ExtendedDesktopSize but refuses SetDesktopSize as prohibited, which
+    the native backend then sends no more, and guacd sends none.
   - clipboard: "naïve café, ½ °C" and "€ ✓ 日本" reach the server's
     clipboard byte for byte, and "naïve café\nzweite Zeile" and
     "€ ✓ 日本" come back to the client.

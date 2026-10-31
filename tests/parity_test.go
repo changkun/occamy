@@ -339,7 +339,7 @@ var parityFeatures = []parityFeature{
 	{name: "screen and input acknowledged", check: checkScreen},
 	{name: "resize: by the owner's hello", servers: tigerOnly, check: checkResizeHello},
 	{name: "resize: by a request", servers: tigerOnly, check: checkResizeRequest},
-	{name: "resize: ignored without ExtendedDesktopSize", servers: []string{"x11vnc"}, check: checkResizeIgnored},
+	{name: "resize: the server keeps its size", servers: []string{"x11vnc"}, check: checkResizeIgnored},
 	{name: "clipboard to the server, Latin-1", check: clipboardIn("naïve café, ½ °C")},
 	{name: "clipboard to the server, beyond Latin-1", check: clipboardIn("€ ✓ 日本")},
 	{name: "clipboard both ways, Latin-1", check: clipboardEcho("naïve café\nzweite Zeile")},
@@ -1045,8 +1045,10 @@ func (s *paritySession) restoreSize() {
 	}
 }
 
-// checkResizeIgnored asks a server without ExtendedDesktopSize for
-// another size: the screen stays, and the session goes on.
+// checkResizeIgnored asks x11vnc for another size: it has
+// ExtendedDesktopSize, but refuses every SetDesktopSize ("resize
+// prohibited"), and guacd sends none. The screen stays, and the session
+// goes on.
 func checkResizeIgnored(p *parity, c parityColumn) error {
 	s, closeSession, err := p.open(c.conn(""), client.Options{})
 	if err != nil {
