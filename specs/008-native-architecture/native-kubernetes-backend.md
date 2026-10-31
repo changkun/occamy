@@ -188,7 +188,7 @@ protocol's default.
    WebSockets with v4: all maintained releases (1.35 to 1.37 on this
    date) and older ones back to long before them; v5 where the API
    server translates (1.30 on, 1.29 with its gate). The integration
-   test runs against k3s.
+   test runs against k3s v1.34.1.
 3. **Channels.** stdin 0, stdout 1, stderr 2, error 3, resize 4, and
    v5's close 255. Output on 1 and 2 goes to the terminal; the status on
    3 decides how Run ends; a size goes to 4 when the session starts and
@@ -264,8 +264,8 @@ per-protocol table moves Kubernetes to native.
   `server/backends.go` (`kubernetes/native`; the session state names the
   backend `kubernetes`, class `terminal`). Ad-hoc targets refuse
   `kubernetes` with `400`, by `config.AdhocProtocol`. Every decision
-  above is built as written. The k3s integration test is written but has
-  not run yet (see below).
+  above is built as written, and the k3s integration test passes (see
+  below).
 - **What was built.** `Config`, `New`, `Backend` and `Token`, with
   `CheckNamespace`, `CheckPod`, `CheckContainer` and `CheckPin` for the
   configuration. Run asks for a token if it prompts, dials, sends the
@@ -359,13 +359,23 @@ per-protocol table moves Kubernetes to native.
   checks a command's output, input and non-zero exit, the default
   shell's `stty size` before and after a resize, no TTY, a missing
   container, 403, 401, the system roots refusing the cluster's CA, and
-  cancel. It has not run: the shared host's load stayed between 12 and
-  24 while this was built, above the limit of 8 set for starting a
-  cluster. Run it with
+  cancel. Run it with
   `go test -tags kubernetes_integration -run Integration -timeout 15m ./internal/backend/kubernetes`.
+  - It ran on 2026-10-31 against k3s v1.34.1 (`rancher/k3s:v1.34.1-k3s1`)
+    in podman, with the host's load at 7.6 at the start and 7.0 at the
+    end. All eight subtests passed in 23 s, and the container was
+    removed.
+  - The first run, at load 6.6, failed two subtests on the test's own
+    race: they sent input right after starting Run in a goroutine, and
+    Input before Run has begun is `ErrNotRunning`, as SSH's is. They now
+    wait for Run to begin before their first input.
+  - The ServiceAccount with `get` and `create` on `pods/exec` is
+    allowed; the one without them gets 403. Since v1.34 predates the
+    1.35 `create` check, this run exercised the `get` path.
 - **Deviations.** None from the decisions. One addition: `tls.require`
   is accepted and means nothing for kubernetes, since TLS is always
   required.
-- **Follow-ups.** Run the k3s integration test once the host is idle.
-  Merge the three copies of the certificate policy (VNC, RDP,
+- **Follow-ups.** Run the integration test against a 1.35 or later
+  API server too, where the `create` check applies. Merge the three
+  copies of the certificate policy (VNC, RDP,
   Kubernetes) into one package.
