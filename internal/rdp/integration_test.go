@@ -448,27 +448,41 @@ func TestIntegrationResize(t *testing.T) {
 // resets the graphics to the size the client asked for, creates and
 // maps a surface, draws its first screen in planar, and sends frames,
 // which the client acknowledges. The session's screen comes in RemoteFX
-// Progressive, which the client does not take yet: it is counted and
-// skipped. xrdp went on sending a frame a key; a run without the
+// Progressive: the wallpaper decodes within gfxWallpaperTolerance of
+// what the scene draws, everywhere but the swatch's tile, and the swatch
+// within gfxSwatchTolerance of each key's colour, at points across its
+// inside, as xrdp sends its tile again for each key. A wrong
+// dequantization, LL3 or colour conversion is off by tens of levels.
+// xrdp went on sending a frame a key; a run without the
 // acknowledgements, to show that they pace it, was not made.
 func TestIntegrationGFX(t *testing.T) {
 	s := dial(t, Config{GFX: true})
 	frames := func() int { return s.c.Stats().GFX["end frame"] }
 	// xrdp shows its own screens in planar while sesman starts the
 	// session, which then draws in RemoteFX Progressive.
-	if !waitFor(90*time.Second, func() bool { return s.c.Stats().Ignored["GFX progressive bitmaps"] > 0 }) {
-		st := s.c.Stats()
-		t.Fatalf("no session screen: GFX %v, bitmaps %v, ignored %v", st.GFX, st.Bitmaps, st.Ignored)
-	}
+	ok := waitFor(90*time.Second, func() bool {
+		if s.c.Stats().Bitmaps["gfx progressive"] == 0 {
+			return false
+		}
+		bad, _ := gfxWallpaper(s.scr.snapshot())
+		return bad == 0
+	})
 	dump(t, s, "gfx")
 	st := s.c.Stats()
 	t.Logf("GFX %v; bitmaps %v; ignored %v", st.GFX, st.Bitmaps, st.Ignored)
+	if !ok {
+		bad, first := gfxWallpaper(s.scr.snapshot())
+		t.Fatalf("%d pixels differ from the wallpaper by more than %d, the first at %v: %v, want %v",
+			bad, gfxWallpaperTolerance, first, s.scr.at(first.X, first.Y), wallpaper(first.Y, s.scr.snapshot().Rect.Dy()))
+	}
 	if st.GFX["caps confirm"] != 1 || st.GFX["reset graphics"] == 0 || st.GFX["create surface"] == 0 || st.GFX["map surface to output"] == 0 {
 		t.Errorf("GFX %v, want a confirm, a reset and a surface mapped", st.GFX)
 	}
 	if st.Bitmaps["gfx planar"] == 0 {
 		t.Errorf("bitmaps %v, want xrdp's first screen in planar", st.Bitmaps)
 	}
+	gfxNothingSkipped(t, s)
+
 	// Each key repaints the swatch, in a frame of its own if xrdp has
 	// the acknowledgements of the frames before.
 	n := frames()
@@ -479,12 +493,107 @@ func TestIntegrationGFX(t *testing.T) {
 	if frames() < n+8 {
 		t.Errorf("%d frames after 40 keys, %d before", frames(), n)
 	}
+	// F2 resets the swatch and a letter paints it, as in TestIntegration;
+	// then each letter's colour reaches the swatch's inside.
+	painted := false
+	for i := range 10 {
+		k := 'y' + rune(i%2)
+		tap(t, s.c, 0x3c) // F2
+		tap(t, s.c, letter(t, k))
+		if swatchShows(s, k, 3*time.Second) {
+			painted = true
+			break
+		}
+	}
+	if !painted {
+		t.Fatalf("the swatch does not take the colour of the letter keys: %v", s.scr.at(32, 32))
+	}
+	for _, k := range "abcdefgh" {
+		tap(t, s.c, letter(t, k))
+		want := probeColour(k)
+		var bad image.Point
+		if !waitFor(5*time.Second, func() bool {
+			bad = gfxSwatch(s.scr.snapshot(), want)
+			return bad == image.Point{}
+		}) {
+			t.Fatalf("key %q: the swatch at %v is %v, want %v within %d", k, bad, s.scr.at(bad.X, bad.Y), want, gfxSwatchTolerance)
+		}
+	}
+	if bad, first := gfxWallpaper(s.scr.snapshot()); bad != 0 {
+		t.Errorf("after the keys, %d pixels differ from the wallpaper, the first at %v: %v", bad, first, s.scr.at(first.X, first.Y))
+	}
+	dump(t, s, "gfx-keys")
+	gfxNothingSkipped(t, s)
 	st = s.c.Stats()
 	t.Logf("GFX %v; bitmaps %v; ignored %v", st.GFX, st.Bitmaps, st.Ignored)
 	select {
 	case err := <-s.done:
 		t.Fatalf("Run returned %v", err)
 	default:
+	}
+}
+
+// The tolerances of TestIntegrationGFX, per channel. rdptest's encoder,
+// at xrdp's quantization, decodes the wallpaper within 2 and the
+// swatch's inside within 4; xrdp's encoder converts colours in its own
+// integers, which the margin allows.
+const (
+	gfxWallpaperTolerance = 4
+	gfxSwatchTolerance    = 6
+)
+
+// gfxWallpaper counts the pixels outside the swatch's tile, (0, 0) to
+// (64, 64), whose wavelets the swatch's edges ring through, that differ
+// from the scene's wallpaper by more than gfxWallpaperTolerance.
+func gfxWallpaper(img *image.RGBA) (bad int, first image.Point) {
+	if img == nil {
+		return -1, image.Point{}
+	}
+	w, h := img.Rect.Dx(), img.Rect.Dy()
+	for y := range h {
+		want := wallpaper(y, h)
+		for x := range w {
+			if x < 64 && y < 64 {
+				continue
+			}
+			got := img.RGBAAt(x, y)
+			if !near(got.R, want.R, gfxWallpaperTolerance) || !near(got.G, want.G, gfxWallpaperTolerance) || !near(got.B, want.B, gfxWallpaperTolerance) {
+				if bad == 0 {
+					first = image.Pt(x, y)
+				}
+				bad++
+			}
+		}
+	}
+	return bad, first
+}
+
+// gfxSwatch returns the first of the points inside the swatch, (16, 16)
+// to (48, 48), at least 4 pixels from its edges, that is not want within
+// gfxSwatchTolerance, or the zero point.
+func gfxSwatch(img *image.RGBA, want color.RGBA) image.Point {
+	if img == nil {
+		return image.Pt(32, 32)
+	}
+	for _, p := range []image.Point{{32, 32}, {20, 20}, {44, 20}, {20, 44}, {44, 44}, {32, 20}, {20, 32}, {44, 32}, {32, 44}} {
+		got := img.RGBAAt(p.X, p.Y)
+		if !near(got.R, want.R, gfxSwatchTolerance) || !near(got.G, want.G, gfxSwatchTolerance) || !near(got.B, want.B, gfxSwatchTolerance) {
+			return p
+		}
+	}
+	return image.Point{}
+}
+
+// gfxNothingSkipped checks that no progressive region or block went
+// unapplied, and no bitmap of a codec the client does not take came.
+func gfxNothingSkipped(t *testing.T, s *session) {
+	t.Helper()
+	ign := s.c.Stats().Ignored
+	for _, k := range []string{"GFX progressive regions outside a frame", "GFX progressive blocks", "GFX bitmaps of unknown codecs",
+		"GFX progressive bitmaps in wire to surface 1", "GFX ClearCodec bitmaps", "GFX deletes of no codec context"} {
+		if ign[k] != 0 {
+			t.Errorf("ignored %d %s", ign[k], k)
+		}
 	}
 }
 

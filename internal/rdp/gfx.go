@@ -171,6 +171,16 @@ type gfx struct {
 	// decoded is totalFramesDecoded, the frames acknowledged since the
 	// connection began ([MS-RDPEGFX] 2.2.2.13), on every channel.
 	decoded uint32
+	// The RemoteFX tiles' decoder, kept across channels, and the tiles
+	// that the progressive contexts keep, with sign arrays given back.
+	rfx       *rfxDecoder
+	progTiles int
+	signs     []*[3][4096]int8
+	// Scratch space of the RemoteFX codecs, kept between PDUs.
+	clips      []image.Rectangle
+	quants     []rfxQuant
+	progQuants [][3]rfxQuant
+	changed    []*progTile
 }
 
 // surface is an offscreen surface: opaque RGBA rows, 4*w bytes each.
@@ -179,7 +189,8 @@ type surface struct {
 	w, h   int
 	pix    []byte
 	mapped bool
-	at     image.Point // its origin on the output, if mapped
+	at     image.Point  // its origin on the output, if mapped
+	prog   *progContext // its RemoteFX Progressive codec context, if any
 	// The cells that changed since the surface last went to the output,
 	// cols across, and their bounds in cells.
 	cols  int
@@ -265,6 +276,8 @@ func copyPixels(dst *surface, p image.Point, src *surface, r image.Rectangle) {
 // nothing.
 var gfxNames = map[int]string{
 	gfxWireToSurface1:     "wire to surface 1",
+	gfxWireToSurface2:     "wire to surface 2",
+	gfxDeleteEncodingCtx:  "delete encoding context",
 	gfxSolidFill:          "solid fill",
 	gfxSurfaceToSurface:   "surface to surface",
 	gfxCreateSurface:      "create surface",
@@ -277,18 +290,15 @@ var gfxNames = map[int]string{
 }
 
 var gfxIgnored = map[int]string{
-	gfxWireToSurface2:    "GFX progressive bitmaps",
-	gfxDeleteEncodingCtx: "GFX codec contexts",
-	gfxSurfaceToCache:    "GFX cache PDUs",
-	gfxCacheToSurface:    "GFX cache PDUs",
-	gfxEvictCacheEntry:   "GFX cache PDUs",
-	gfxCacheImportReply:  "GFX cache PDUs",
+	gfxSurfaceToCache:   "GFX cache PDUs",
+	gfxCacheToSurface:   "GFX cache PDUs",
+	gfxEvictCacheEntry:  "GFX cache PDUs",
+	gfxCacheImportReply: "GFX cache PDUs",
 }
 
 var gfxCodecNames = map[int]string{
-	gfxCodecRemoteFX:    "GFX RemoteFX bitmaps",
 	gfxCodecClearCodec:  "GFX ClearCodec bitmaps",
-	gfxCodecProgressive: "GFX progressive bitmaps",
+	gfxCodecProgressive: "GFX progressive bitmaps in wire to surface 1",
 	gfxCodecAVC420:      "GFX AVC420 bitmaps",
 	gfxCodecAlpha:       "GFX alpha bitmaps",
 	gfxCodecAVC444:      "GFX AVC444 bitmaps",
@@ -299,7 +309,7 @@ var gfxCodecNames = map[int]string{
 // just opened, and queues the client's capabilities after the answer
 // that accepts it. chio.mu must be held.
 func (c *Client) gfxOpened(dc *dynChannel) error {
-	c.gfx = gfx{ch: dc, z: c.gfx.z, decoded: c.gfx.decoded}
+	c.gfx = gfx{ch: dc, z: c.gfx.z, decoded: c.gfx.decoded, rfx: c.gfx.rfx}
 	c.gfx.z.reset()
 	return c.dvcAnswer(c.gfxData(dc, capsAdvertise()))
 }
@@ -309,7 +319,7 @@ func (c *Client) gfxOpened(dc *dynChannel) error {
 // The ZGFX buffers stay for the next channel, which clears them, and so
 // does the count of frames decoded. chio.mu must be held.
 func (c *Client) gfxClosed() {
-	c.gfx = gfx{z: c.gfx.z, decoded: c.gfx.decoded}
+	c.gfx = gfx{z: c.gfx.z, decoded: c.gfx.decoded, rfx: c.gfx.rfx}
 	clear(c.dvc.acks)
 	c.dvc.acks = c.dvc.acks[:0]
 }
@@ -420,6 +430,10 @@ func (c *Client) gfxPDU(out Output, cmd int, body []byte) error {
 		err = c.gfxSurfaceToSurface(out, &r)
 	case gfxWireToSurface1:
 		err = c.gfxWireToSurface1(&r)
+	case gfxWireToSurface2:
+		err = c.gfxWireToSurface2(&r)
+	case gfxDeleteEncodingCtx:
+		err = c.gfxDeleteContext(&r)
 	default:
 		name, ok := gfxIgnored[cmd]
 		if !ok {
@@ -602,6 +616,7 @@ func (c *Client) gfxRemove(s *surface) int {
 	g := &c.gfx
 	delete(g.surfaces, s.id)
 	g.pixels -= s.w * s.h
+	c.progDrop(s)
 	if !s.mapped {
 		return 0
 	}
@@ -846,6 +861,9 @@ func (c *Client) gfxWireToSurface1(r *reader) error {
 	}
 	if !dr.In(s.bounds()) {
 		return fmt.Errorf("bitmap at %v outside surface %d of %d×%d", dr, id, s.w, s.h)
+	}
+	if codec == gfxCodecRemoteFX {
+		return c.gfxRemoteFX(s, dr, data)
 	}
 	if codec != gfxCodecUncompressed && codec != gfxCodecPlanar {
 		name, ok := gfxCodecNames[codec]

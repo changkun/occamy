@@ -13,8 +13,9 @@
 // codecs. Of the virtual channels it speaks the clipboard's, CLIPRDR,
 // for text, and DRDYNVC's Display Control, when Config asks for them.
 // With Config.GFX it speaks the graphics pipeline ([MS-RDPEGFX]) with
-// ZGFX, surfaces, fills, copies and the uncompressed and planar codecs;
-// its other codecs and its cache are not implemented yet. Standard RDP
+// ZGFX, surfaces, fills, copies and the uncompressed, planar, RemoteFX
+// and RemoteFX Progressive codecs; ClearCodec, AVC and the cache are not
+// implemented yet. Standard RDP
 // security, the licensing exchange, Kerberos and H.264 are not
 // implemented.
 package rdp
@@ -83,10 +84,11 @@ type Config struct {
 	// GFX asks for the graphics pipeline ([MS-RDPEGFX]) on a dynamic
 	// channel: surfaces that the client composes onto the desktop, solid
 	// fills, copies, and bitmaps in the uncompressed and planar codecs
-	// (gfx.go). Bitmaps in the codecs the client does not take yet,
-	// RemoteFX Progressive among them, which xrdp sends, are skipped, so
-	// it is off by default. A server that does not open the channel draws with bitmap
-	// updates as without it.
+	// (gfx.go), RemoteFX (rfx.go) and RemoteFX Progressive
+	// (progressive.go), which xrdp draws its sessions in. Bitmaps in the
+	// codecs the client does not take yet, ClearCodec and AVC, are
+	// skipped, and so are the cache's PDUs. A server that does not open
+	// the channel draws with bitmap updates as without it.
 	GFX bool
 	// Logger receives warnings; nil means slog.Default().
 	Logger *slog.Logger
