@@ -308,7 +308,8 @@ func (s *server) mux() *routeMux {
 // routeMux collects routes, and builds the ServeMux that serves them,
 // so that a test can check that docs/api.md describes each route's
 // pattern. It holds no ServeMux that a route could be added to past the
-// list: the ServeMux that serves is built from it.
+// list, and hands out the one it builds as a routeHandler, which has no
+// method that adds a route.
 type routeMux struct {
 	routes []route
 }
@@ -340,14 +341,21 @@ func (m *routeMux) patterns() []string {
 	return p
 }
 
-// serveMux returns a ServeMux that serves the routes. Like
+// handler returns a ServeMux that serves the routes. Like
 // http.ServeMux.Handle, it panics if two patterns conflict.
-func (m *routeMux) serveMux() *http.ServeMux {
+func (m *routeMux) handler() routeHandler {
 	mux := http.NewServeMux()
 	for _, r := range m.routes {
 		mux.Handle(r.pattern, r.h)
 	}
 	return mux
+}
+
+// routeHandler is what a routeMux builds: it serves requests and finds
+// the route of a request, as http.ServeMux does, but adds no route.
+type routeHandler interface {
+	http.Handler
+	Handler(r *http.Request) (h http.Handler, pattern string)
 }
 
 // newPublicServer returns the public listener's server for h, which
@@ -378,7 +386,7 @@ func newPublicServer(h http.Handler, tlsConfig *tls.Config) *http.Server {
 // as long as asked.
 func newDebugServer() *http.Server {
 	return &http.Server{
-		Handler:           logRequests(recovery(debugMux().serveMux())),
+		Handler:           logRequests(recovery(debugMux().handler())),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}
