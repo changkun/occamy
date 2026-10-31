@@ -218,10 +218,15 @@ func TestRunClipboardBounded(t *testing.T) {
 	}
 	close(answer)
 	c := s.accept(t)
-	clipReady(t, c)
-	isList(t, clip(t, c), rdptest.CFUnicodeText, rdptest.CFText)
+	// The writer may set the text before Monitor Ready, and the first
+	// Format List has it, or after, and a second one does.
+	m := clipReady(t, c)
+	if ids, _ := rdptest.FormatIDs(m.Data, true); len(ids) == 0 {
+		m = clip(t, c)
+	}
+	isList(t, m, rdptest.CFUnicodeText, rdptest.CFText)
 	sendClip(t, c, rdptest.FormatDataRequest(rdptest.CFUnicodeText))
-	m := clip(t, c)
+	m = clip(t, c)
 	if got, err := rdptest.FromUnicodeText(m.Data); err != nil || len(got) != rdp.MaxClipboard {
 		t.Errorf("the server got %d bytes, %v; want %d", len(got), err, rdp.MaxClipboard)
 	}
