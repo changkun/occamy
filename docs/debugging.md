@@ -142,20 +142,21 @@ sends that user something. Until then the user still counts, for up to
 - `make soak` runs `TestSoak` against the demo stack's `occamy-v1`:
   `OCCAMY_SOAK_SESSIONS` sessions, 8 by default, to x11vnc and TigerVNC
   through the native backend for `OCCAMY_SOAK_DURATION`, 1 hour by
-  default. Each session moves the pointer and types every 2 s, asks its
-  desktop for a terminal that scrolls for 2 s once a minute, and closes
-  after `OCCAMY_SOAK_LIFETIME`, 10 minutes by default, for another to
-  open; every other session has a read-only viewer. Every 30 s the test
-  samples `occamyd`'s goroutines, live heap (after a collection) and
-  open files from the debug listener, with the host's load average, and
-  logs them, and writes them as CSV to the file `OCCAMY_SOAK_OUT`
-  names. After a warm-up of a tenth of the run, it fails if a metric's
-  median never falls from one quarter of the samples to the next and
-  rises by more than its bound in all (`OCCAMY_SOAK_BOUNDS`,
-  `goroutines=50,heap=32,fds=25` by default, the heap in MiB), if the
-  goroutines or the open files stay above their start by more than the
-  bound a minute after the last session closed, or if a session fails.
-  `tests/soak_test.go` lists the variables. The full soak is
+  default. Each session moves the pointer, below the typing probe, and
+  types every 2 s, asks its desktop for a terminal that scrolls for 2 s
+  once a minute, and closes after `OCCAMY_SOAK_LIFETIME`, 10 minutes by
+  default, for another to open; every other session has a read-only
+  viewer. Every 30 s the test samples `occamyd`'s goroutines, live heap
+  (after a collection) and open files from the debug listener, with the
+  host's load average, and logs them, and writes them as CSV to the file
+  `OCCAMY_SOAK_OUT` names. After a warm-up of a tenth of the run, it
+  fails if a metric's median never falls from one quarter of the samples
+  to the next and rises by more than its bound in all
+  (`OCCAMY_SOAK_BOUNDS`, `goroutines=50,heap=32,fds=25` by default, the
+  heap in MiB), if the goroutines or the open files stay above their
+  start by more than the bound a minute after the last session closed,
+  or if a session fails. `tests/soak_test.go` lists the variables. The
+  full soak is
   `make soak OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h`.
 - `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test. Each of its N
   rounds opens two sessions to each demo server at once: one that waits

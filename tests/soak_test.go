@@ -430,7 +430,10 @@ func soakSession(ctx context.Context, addr string, i int, conn string, cfg soakC
 			stats.inputs.Add(1)
 			return err
 		}
-		x, y := uint16(rng.IntN(1024)), uint16(rng.IntN(768))
+		// Below the typing probe at the top left (desktop.sh), so that
+		// the letters typed do not reach it and the parity matrix's
+		// first typed line after a soak is its own.
+		x, y := uint16(rng.IntN(1024)), uint16(100+rng.IntN(768-100))
 		if err := send(cl.Pointer(ctx, x, y, 0)); err != nil {
 			return err
 		}
