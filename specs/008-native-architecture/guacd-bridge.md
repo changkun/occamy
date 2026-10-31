@@ -963,20 +963,27 @@ that guacd was `vnc`'s default, they are corrected below.
   release mode without it.
 - **What fails it.** After a warm-up of a tenth of the run, a metric
   grew if the median of the last quarter of its samples exceeds the
-  first quarter's by more than a bound, and no quarter's median falls
-  below the first's: 50 goroutines, 32 MiB of heap and 25 file
-  descriptors. Medians, so that a sample taken while sessions open or
-  close does not decide. A dip between the first quarter and the last
-  does not hide growth, as a rule that wanted every median to rise on
-  the one before did (medians of 100, 200, 199 and 400 grew); a
-  quarter below the first says that the first was high. Fewer than
-  eight samples after the warm-up fail the run, and a soak too short
-  for eight is refused before it starts. Once every session has closed,
+  first quarter's by more than a bound, whatever the quarters between
+  do: 50 goroutines, 32 MiB of heap and 25 file descriptors. Medians,
+  so that a sample taken while sessions open or close does not decide:
+  a quarter has three samples at least, so no one sample is its median,
+  and a quarter of even length takes the mean of its middle two. A dip
+  between the first quarter and the last does not hide growth, as a
+  rule that wanted every median to rise on the one before did (medians
+  of 100, 200, 199 and 400 grew), nor does a dip below the first, as a
+  rule that wanted no quarter below the first did: a leak of 300
+  goroutines whose second quarter dipped, medians of 121.5, 106.5,
+  271.5 and 346.5, passed it. A last quarter more than the bound above
+  the first has grown, however low the quarters between were. Fewer
+  than twelve samples after the warm-up fail the run, and a soak too
+  short for twelve is refused before it starts; with eight, a quarter
+  of two took its higher sample for its median, so that one spike in
+  the last quarter failed the run. Once every session has closed,
   the goroutines, the heap and the files must come back to within the
   bound of where they started, within a minute. Any session that fails
   fails the run. `TestSoakGrowth` checks the judgement on made-up
-  series, at the bound, with plateaus, low outliers, eight samples,
-  early growth and a dip, and `TestSoakAfter`, `TestSoakRetry` and
+  series, at the bound, with plateaus, outliers, the fewest samples,
+  early growth and dips, and `TestSoakAfter`, `TestSoakRetry` and
   `TestSoakConfig` the rest. The bounds
   suit the full run, about a thousand sessions, in which a leak of one
   goroutine or one descriptor per session exceeds them many times over;

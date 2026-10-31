@@ -87,8 +87,9 @@ type soakConfig struct {
 var soakMetrics = []string{"goroutines", "heap", "fds"}
 
 // soakMinSamples is the fewest samples after the warm-up that soakGrowth
-// judges: two in each quarter.
-const soakMinSamples = 8
+// judges: three in each quarter, so that no one sample is a quarter's
+// median.
+const soakMinSamples = 12
 
 // soakSampleTries is how often the soak tries to sample occamyd before it
 // gives up, soakSamplePause apart.
@@ -305,12 +306,14 @@ func soakRetry(tries int, pause time.Duration, logf func(string, ...any), get fu
 
 // soakGrowth judges a series of samples taken after the warm-up, by the
 // medians of its four quarters: it grew if the last median exceeds the
-// first by more than bound, and no median falls below the first.
-// Medians, so that a sample taken while sessions open or close does not
-// decide; a dip between the first quarter and the last does not hide
-// growth, but a quarter below the first says that the first was high
-// rather than that the rest grew. Fewer than soakMinSamples samples are
-// an error.
+// first by more than bound, whatever the quarters between do. Medians,
+// so that a sample taken while sessions open or close does not decide:
+// a quarter has three samples at least (soakMinSamples), and one of
+// even length takes the mean of its middle two. A dip between the
+// first quarter and the last, even below the first, does not excuse
+// growth: the last quarter still ends more than bound above the first,
+// and further above the dip. Fewer than soakMinSamples samples are an
+// error.
 func soakGrowth(series []float64, bound float64) (bool, string, error) {
 	if len(series) < soakMinSamples {
 		return false, "", fmt.Errorf("%d samples after the warm-up, fewer than the %d that judging growth takes", len(series), soakMinSamples)
@@ -319,14 +322,10 @@ func soakGrowth(series []float64, bound float64) (bool, string, error) {
 	for q := range 4 {
 		part := slices.Clone(series[q*len(series)/4 : (q+1)*len(series)/4])
 		slices.Sort(part)
-		medians = append(medians, part[len(part)/2])
-	}
-	grew := medians[3]-medians[0] > bound
-	for _, m := range medians[1:] {
-		grew = grew && m >= medians[0]
+		medians = append(medians, (part[(len(part)-1)/2]+part[len(part)/2])/2)
 	}
 	detail := fmt.Sprintf("medians of the quarters %.1f, range %.1f to %.1f", medians, slices.Min(series), slices.Max(series))
-	return grew, detail, nil
+	return medians[3]-medians[0] > bound, detail, nil
 }
 
 // soakSampleDebug reads occamyd's state from its debug listener: a heap
@@ -531,6 +530,9 @@ func TestSoakGrowth(t *testing.T) {
 	// Quarters of 100, 110 with one sample of 50, 120 and 130.
 	lowOutlier := quarters(10, 100, 110, 120, 130)
 	lowOutlier[13] = 50
+	// Quarters of four at 100 but the last, half of it at 160: its
+	// median is 130.
+	halfHigh := append(quarters(4, 100, 100, 100), 100, 100, 160, 160)
 	for _, tt := range []struct {
 		name   string
 		series []float64
@@ -550,10 +552,18 @@ func TestSoakGrowth(t *testing.T) {
 		{"a plateau", quarters(10, 100, 100, 150, 200), 10, true},
 		{"a plateau at the end", quarters(10, 100, 150, 200, 200), 10, true},
 		{"a low outlier in a quarter", lowOutlier, 10, true},
-		{"exactly the fewest samples", quarters(2, 100, 120, 140, 160), 10, true},
+		{"exactly the fewest samples", quarters(3, 100, 120, 140, 160), 10, true},
+		{"a spike at the fewest samples", append(ramp(soakMinSamples-1, 100, 0), 500), 10, false},
+		{"a low first sample at the fewest samples", append([]float64{50}, ramp(soakMinSamples-1, 100, 0)...), 10, false},
+		{"half a quarter high, the median within the bound", halfHigh, 40, false},
+		{"half a quarter high, the median past the bound", halfHigh, 20, true},
 		{"growth early, then level", quarters(10, 100, 200, 200, 205), 10, true},
 		{"a dip after growth", quarters(10, 100, 200, 199, 400), 10, true},
-		{"a quarter below the first", quarters(10, 100, 90, 150, 200), 10, false},
+		{"a dip below the first, then growth", quarters(10, 100, 90, 150, 200), 10, true},
+		{"a dip within the bound, then growth", quarters(10, 100, 99, 300, 400), 50, true},
+		// A leak of 300 goroutines in a run whose second quarter dips.
+		{"a leak with a dip", quarters(10, 121.5, 106.5, 271.5, 346.5), 50, true},
+		{"a dip past the bound, then growth", quarters(10, 200, 100, 300, 400), 50, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			grew, detail, err := soakGrowth(tt.series, tt.bound)
@@ -565,8 +575,12 @@ func TestSoakGrowth(t *testing.T) {
 			}
 		})
 	}
-	if _, _, err := soakGrowth(ramp(soakMinSamples-1, 100, 100), 10); err == nil {
-		t.Errorf("soakGrowth judged %d samples", soakMinSamples-1)
+	// Fewer samples are refused, among them eight, where a quarter of
+	// two would take one sample, such as a spike, for its median.
+	for _, n := range []int{soakMinSamples - 1, 8} {
+		if grew, detail, err := soakGrowth(append(ramp(n-1, 100, 0), 500), 10); err == nil {
+			t.Errorf("soakGrowth judged %d samples: grew %v (%s)", n, grew, detail)
+		}
 	}
 }
 
@@ -640,9 +654,9 @@ func TestSoakConfig(t *testing.T) {
 		ok                         bool
 	}{
 		{"1h", "", "30s", true},
-		{"5m", "1m", "30s", true},
-		{"5m", "1m", "31s", false},
-		{"4m", "", "30s", false},
+		{"7m", "1m", "30s", true},
+		{"7m", "1m", "31s", false},
+		{"6m", "", "30s", false},
 	} {
 		t.Setenv("OCCAMY_SOAK_DURATION", tt.duration)
 		t.Setenv("OCCAMY_SOAK_WARMUP", tt.warmup)

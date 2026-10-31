@@ -177,11 +177,11 @@ sends that user something. Until then the user still counts, for up to
   them, and writes them as CSV to the file `OCCAMY_SOAK_OUT` names.
   After a warm-up of a tenth of the run, it fails if the median of a
   metric's last quarter of samples exceeds the first quarter's by more
-  than its bound with no quarter below the first (`OCCAMY_SOAK_BOUNDS`,
-  `goroutines=50,heap=32,fds=25` by default, the heap in MiB), if a
-  metric stays above its start by more than the bound a minute after
-  the last session closed, if fewer than eight samples follow the
-  warm-up, or if a session fails. `tests/soak_test.go` lists the
+  than its bound, whatever the quarters between do
+  (`OCCAMY_SOAK_BOUNDS`, `goroutines=50,heap=32,fds=25` by default, the
+  heap in MiB), if a metric stays above its start by more than the
+  bound a minute after the last session closed, if fewer than twelve
+  samples follow the warm-up, or if a session fails. `tests/soak_test.go` lists the
   variables. The full soak is
   `make soak OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h`.
 - `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test, which counts
