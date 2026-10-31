@@ -26,11 +26,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/coder/websocket"
+
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/backend/backendtest"
 	"changkun.de/x/occamy/internal/backend/kubernetes"
 	"changkun.de/x/occamy/internal/backend/kubernetes/kubetest"
-	"github.com/coder/websocket"
 )
 
 const timeout = 10 * time.Second
