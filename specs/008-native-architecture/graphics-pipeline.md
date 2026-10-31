@@ -113,8 +113,8 @@ quickly, in pure Go. That means choosing:
   content the client already has is sent as a `tile` with the `cached`
   codec and the slot number, a few bytes instead of the pixels.
   Repeated content (toolbars, desktop backgrounds, a window moved back)
-  then costs nothing to resend. (Built 2026-10-31 with xxh3-128 and
-  1024 slots by default, storing only tiles sent alone and exact: see
+  then costs nothing to resend. (Built 2026-10-31 with xxh3-128 under
+  a secret seed for each viewer and 1024 slots by default, storing only tiles sent alone and exact: see
   Implementation notes: Tile cache.)
 - **Adaptive quality per viewer:** the lossy quality and the frame
   interval follow each viewer's frame-ack round trips and decode times
@@ -295,7 +295,7 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
 | Codecs (done 2026-10-30) | `internal/encoder`, an implementation of `stream.Encoder`: classification by colour count (up to 16, 17 to 256, above 256); the palette or raw container with `compress/flate` at level 1 as `deflate` (2); raw RGBA (1); lossy WebP from gen2brain/vpx/webp at method 0 (5), and JPEG from gen2brain/jpegn (4) for viewers that list JPEG but not WebP; adjacent lossy tiles of a frame encoded as one rectangle. Fixes the deflate container, including alpha for cursors, in [docs/protocol.md](../../docs/protocol.md), which marked it provisional. Adds vpx and jpegn to occamyd's `go.mod`, with the Go 1.26.4 they need, and their licence and PATENTS notices to the image's `licenses/` | Measurement |
 | Refinement (done 2026-10-31) | Motion heat per tile, and refinement after a still delay: exact for tiles of up to 256 colours, which go lossy while they move if they have more than 16, and a quality chosen by SSIM for photographic ones; gives `stream.Encoder` the tile's motion. Built with SSIM 0.91 on each tile and background frames paced by `pacer.Background`; the plasma takes 13.8 KiB a frame against 392.4 while it moves, and the photograph 121.8 KiB against 150.8, under G6's 139 ([notes](#implementation-notes-refinement)) | Codecs |
 | Scroll detection (done 2026-10-31) | Row hashes per tile column (xxh3-64), the offset search, and `copy-rect` with tiles for the exposed strip. Built per viewer against a shadow of what its client shows, vertical offsets only, verified pixel for pixel; the corpus's scroll takes 5.0 KiB a frame against 58.5 ([notes](#implementation-notes-scroll-detection)) | Framebuffer |
-| Tile cache (done 2026-10-31) | Content hashes (xxh3-128 from zeebo/xxh3, so collisions are out of reach), the server's mirror of each client's cache, and the `cached` codec. Built with 1024 slots by default in occamyd, the Go client and the web client's protocol core, storing tiles sent alone and exact; a window switched back and forth over the desktop takes 9.4 KiB a frame against 79.7, and the mirror 70 KiB a viewer ([notes](#implementation-notes-tile-cache)) | Codecs, protocol v1 Messages |
+| Tile cache (done 2026-10-31) | Content hashes (xxh3-128 from zeebo/xxh3, under a secret seed for each viewer), the server's mirror of each client's cache, and the `cached` codec. Built with 1024 slots by default in occamyd, the Go client and the web client's protocol core, storing tiles sent alone and exact; a window switched back and forth over the desktop takes 9.4 KiB a frame against 79.7, and the mirror 70 KiB a viewer ([notes](#implementation-notes-tile-cache)) | Codecs, protocol v1 Messages |
 | Encode cache and workers | Encoded tiles cached by tile, version, codec and quality and shared by viewers; a worker pool bounded per session | Codecs |
 
 ## Affects
@@ -1300,17 +1300,19 @@ to the codec and to slots gets a mirror; any other is served as before.
   [docs/protocol.md](../../docs/protocol.md) now states the cache's
   rules.
 - **The mirror** (`internal/stream/cache.go`). A slot's key is the
-  xxh3-128 hash of its tile's pixels, with the tile's width and height,
-  since the same bytes at two sizes are two tiles. The slots sit in an
+  xxh3-128 hash of its tile's pixels under the mirror's secret seed,
+  with the tile's width and height, since the same bytes at two sizes
+  are two tiles. The slots sit in an
   array, linked in the order of use, beside a map from key to slot. The
   slot to store in next is one never used, or the one used least
   recently.
 - **Lookups and stores** (`encode.go`, `refine.go`). The writer hashes
   each tile it reads before encoding it, and sends it as `cached` if a
-  slot holds its key, which marks that slot used. Otherwise it encodes
-  the tile. A tile that goes alone and exact (raw or deflate) names the
-  next slot in its message, and the mirror records the store once the
-  message is written. A run of lossy tiles ends before a tile that a
+  slot holds its key. Otherwise it encodes the tile. A tile that goes
+  alone and exact (raw, deflate or PNG) names the next slot in its
+  message. The mirror records a store, and marks a slot drawn from as
+  used, once the message is written: a message the pacer holds back
+  changes nothing in it. A run of lossy tiles ends before a tile that a
   slot holds. Refinement looks up and stores as a frame does. A tile
   sent as `cached` is exact, so the writer records it as lossless for
   refinement and the scroll shadow.
@@ -1321,9 +1323,12 @@ to the codec and to slots gets a mirror; any other is served as before.
 - **The clients** (`client/read.go`; `session.ts` in
   `client/occamy-web/src/protocol`). A tile that names a slot is stored
   in it as the message is read: a raw tile's pixels, or the tile's
-  decode, whose pixels the slot shares once decoded. A raw tile's
-  pixels stay in their message, which the transport hands over for the
-  session to keep. The slot holds it
+  decode, whose pixels the slot shares once decoded. The Go client
+  keeps a copy of a raw tile's pixels, sized to them: their message's
+  buffer has room to spare, 18,432 bytes for the 16,407 of a 64×64
+  tile, which would have made 18 MiB of 1024 slots rather than 16. The
+  web core keeps the raw tile's message, an `ArrayBuffer` of its own,
+  23 bytes over the pixels. The slot holds the tile
   whatever becomes of the frame, so a cached tile later in the same
   frame draws it, and so does one after a resize that dropped the frame.
   Slots survive resizes and hidden spells. A cached tile of an empty
@@ -1341,13 +1346,30 @@ to the codec and to slots gets a mirror; any other is served as before.
 - **Every tile is hashed.** The hash costs 0.53 µs a 64×64 tile, 31
   GB/s on one core, so 0.1 ms for the 192 tiles of 1024×768. Any test of
   whether a tile could hit would cost about as much as the hash.
-- **xxh3-128**, so that two contents with one hash are out of reach.
-  The mirror trusts the hash: a collision would show the wrong tile
-  until the tile next changed.
-- **A store counts once the message is written**, not once its frame
-  is acknowledged. The client stores as it reads, whatever becomes of
-  the frame, and reads messages in order. A failed write ends the
-  connection, and the cache with it.
+- **xxh3-128 under a secret seed for each viewer.** The mirror trusts
+  the hash: a collision would show the viewer the wrong tile until the
+  tile next changed, and scroll detection and refinement would take
+  those pixels as exact. 128 bits put an accidental collision out of
+  reach, but not a crafted one: xxh3 is no cryptographic hash, and
+  with its public default secret two 64×64 tiles that differ in two
+  pixels share a hash after a search of under a second (the review of
+  2026-10-31 built such a pair; `TestCacheKeySeeded` builds one). The
+  remote host draws the pixels, so a program there could draw such a
+  pair. Each mirror therefore draws a 64-bit seed from `crypto/rand`
+  and keys with `xxh3.Hash128Seed`, from which xxh3 derives its secret.
+  The threat model: the remote host chooses pixels, but never sees the
+  seed or the occamyd→client leg, so it cannot learn the seed or test
+  whether a pair collided, and a pair built for one seed is none for
+  another. The seed costs nothing measurable: 0.56 µs a tile seeded or
+  not (medians of ten interleaved runs, at a load of 15).
+- **A store, or a use, counts once the message is written**, not once
+  its frame is acknowledged, nor once the tile is looked up. The client
+  stores as it reads, whatever becomes of the frame, and reads messages
+  in order. A failed write ends the connection, and the cache with it.
+  A message the pacer holds back reaches the client in no form, so the
+  mirror records nothing of it: its tile is stored again in the next
+  frame rather than drawn from a slot the client never filled, and a
+  slot it would have drawn from is not made the one used last.
 
 **Measurements** (on the codec measurement's corpus;
 [docs/benchmarks/tile-cache.md](../../docs/benchmarks/tile-cache.md)
@@ -1407,6 +1429,19 @@ has the method and every scene):
   stores nothing; and what the server offers and agrees to, with
   `NoCache`, with fewer slots, and to a client that offers the codec
   without slots or slots without the codec.
+- `TestCacheHeldBack` sends frames whose pacer lets only their first
+  message go. A tile held back from a frame goes stored in the next,
+  not drawn from the slot it would have filled; and a cached tile held
+  back does not make its slot the one used last, so the next store
+  replaces it.
+- `TestCacheKeySeeded` builds two 64×64 tiles that unseeded xxh3-128
+  hashes alike, by the review's search: it checks that they collide
+  unseeded, that a mirror keys them apart, and that two mirrors draw
+  different seeds.
+- The Go client's `TestCacheRawSlotSize`: a raw tile's slot holds no
+  more than the tile's pixels. Both clients refuse as unsupported a
+  graphical session whose only codec in common is `cached`, which
+  draws only what another codec stored.
 - The web core's interop test runs against `internal/stream` through
   `client/internal/webinterop`, and checks that the server sent cached
   tiles and the client drew them.
@@ -1417,18 +1452,50 @@ has the method and every scene):
 
 **Mutation check.** 42 mutants of the new code: 34 in Go (the mirror,
 the writer, `Serve`'s agreement, the Go client and the protocol's
-rule) and 8 in the web core. The tests kill 39, eight of them only
+rule) and 8 in the web core. The tests killed 39, eight of them only
 after tests were added for them: a run that ends before a tile a slot
 holds; a run sent exact, which names no slot; the tile encoded ahead of
 a run, stored; refinement's lookup and store; a message of refinement
 the pacer holds back; `NoCache`'s offer; and a Go client without a
-cache offering the codec. Two survivors were code that did nothing, now
-removed: both clients copied a raw tile they stored out of its message,
-which the transport already hands over for good. One survives: the
-second lookup of the tile encoded ahead of a run, which differs only
-when the run, one tile sent exact, stored the same content. That takes
-an encoder that sends the same pixels lossy, then exact, which
-`internal/encoder` never does.
+cache offering the codec. The 42 missed one that the review found: a
+frame's store recorded before the pacer's verdict, rather than once
+the message is written, survived every test, since only refinement's
+held-back message had one (`TestCacheHeldBack` now kills it). Two
+survivors were taken for code that did nothing and removed: both
+clients copied a raw tile they stored out of its message. That holds
+for the web core, whose transport hands over a buffer of the message's
+size, but not for the Go client, whose buffer has room to spare; the
+review had its copy put back, with a test that the slot does not keep
+the buffer. One survives: the second lookup of the tile encoded ahead
+of a run, which differs only when the run, one tile sent exact, stored
+the same content. That takes an encoder that sends the same pixels
+lossy, then exact, which `internal/encoder` never does.
+
+**Review fixes.** An independent review of the pull request found the
+following, each fixed with a test that fails without it. 15 mutants of
+the fixes, 11 in the mirror and the writer, 3 in the Go client and 1
+in the web core: 14 killed, and one survivor, a field cleared that
+every message sets anew, was removed.
+
+- The mirror keyed tiles by unseeded xxh3-128, so a program on the
+  remote host could draw two tiles that hash alike and show a viewer
+  one for the other. Each mirror now hashes under a secret seed of its
+  own (`TestCacheKeySeeded`; see Choices).
+- A lookup marked its slot used before the pacer's verdict, so a cached
+  tile held back still counted, and the test of a store held back
+  covered refinement only. A slot drawn from, like one stored in, now
+  counts once the message is written, and `TestCacheHeldBack` holds
+  back a frame's stored and cached tiles.
+- docs/protocol.md said occamyd stores tiles sent `raw` or `deflate`,
+  but it stores `png` ones too, which are as exact; it says so now.
+- The Go client's raw slot kept its message's buffer, 18,432 bytes for
+  16,384 of pixels, beyond the 16 KiB a slot that the protocol states.
+  It keeps a copy (`TestCacheRawSlotSize`).
+- Both clients took `cached` for a codec in common, so a session that
+  agreed to it alone would start, and could draw nothing. They now end
+  it as unsupported (`TestBadWelcome`, and the web core's handshake
+  test).
+- occamyd has no switch to turn the cache off: a follow-up below.
 
 **Surprises.**
 
@@ -1457,6 +1524,11 @@ an encoder that sends the same pixels lossy, then exact, which
   at offsets that are new each frame. Horizontal and 2-D move detection
   is what G4 needs.
 - **Each viewer hashes its tiles itself.** Two viewers of a session at
-  the same quality hash, look up and encode the same tiles twice; the
-  Encode cache and workers task can share the hashes with the encoded
-  tiles.
+  the same quality hash, look up and encode the same tiles twice. Each
+  hashes under its own seed, so the hashes cannot be shared; the Encode
+  cache and workers task can share the encoded tiles.
+- **occamyd has no switch to turn the cache off.** It never sets
+  `stream.Config.NoCache`, so only a client can decline the cache, by
+  offering no slots. An operator's kill switch belongs in the v1 config
+  schema, with the other settings of a session's stream, rather than in
+  a flag of its own.

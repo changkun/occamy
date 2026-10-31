@@ -690,11 +690,13 @@ The tile cache works as follows:
   resizes, and while the client is hidden.
 - The server mirrors each client's slots, and sends `cached` only for a
   slot that holds the tile's content. occamyd stores a tile only when it
-  sends it alone and exactly (`raw` or `deflate`), so a slot holds
-  pixels that the server's screen held. It replaces the slot used least
-  recently.
-- A client bounds its cache at the agreed `cache_slots` times 16 KiB:
-  16 MiB for occamyd's 1024.
+  sends it alone and exactly (`raw`, `deflate` or `png`), so a slot
+  holds pixels that the server's screen held. It replaces the slot used
+  least recently. It keys its mirror by a 128-bit hash of the pixels
+  under a secret seed it draws for each client, so that content made to
+  collide cannot choose the slot a tile is drawn from.
+- A client bounds its cache at the agreed `cache_slots` times 16 KiB of
+  pixels: 16 MiB for occamyd's 1024.
 
 The 4096-pixel rule came in with occamyd's tile cache (2026-10-31). No
 server had sent a slot other than 0 before it, so no traffic that was

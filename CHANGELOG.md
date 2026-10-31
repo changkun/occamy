@@ -203,9 +203,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   `cacheSlots`), and keep in each slot the tile the server stores there,
   16 KiB at most. occamyd offers 1024 slots (`stream.Config.NoCache`
   turns the cache off), mirrors each client's slots by the xxh3-128 hash
-  of the tile each holds, stores a tile it sends alone and exactly in
-  the slot used least recently, and sends a tile whose content a slot
-  holds as a 23-byte `cached` tile of that slot. On the recorded scenes
+  of the tile each holds, under a secret seed drawn for each client so
+  that a remote host cannot draw two tiles that hash alike, stores a
+  tile it sends alone and exactly in the slot used least recently once
+  the message is written, and sends a tile whose content a slot holds as
+  a 23-byte `cached` tile of that slot. Neither client starts a
+  graphical session whose only codec in common is `cached`. On the recorded scenes
   a window switched back and forth over the desktop takes 9.4 KiB a
   frame against 79.7, and an eighth of the encode time; no scene takes
   more ([docs/benchmarks/tile-cache.md](docs/benchmarks/tile-cache.md)).
