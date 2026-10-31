@@ -1,6 +1,6 @@
 ---
 title: React web client
-status: vague
+status: validated
 track: client
 depends_on: []
 affects:
@@ -20,9 +20,11 @@ dispatched_task_id: null
 
 ## Overview
 
-The demo web client was moved to Vue 3 during the revival. Rebuilding it with
-React is under consideration. This spec captures the recommended shape so that
-the decision does not block on [008](008-native-architecture.md).
+The demo web client was moved to Vue 3 during the revival. On 2026-10-31
+the owner decided to rebuild it with React (see Decisions), as the web
+client of protocol v1 and API v1: with it, the Vue app, `occamy.js` and
+the client's last use of the Guacamole protocol go. This spec captures
+the shape of that client.
 
 ## Current State
 
@@ -50,11 +52,22 @@ Recommended in two steps:
    a terminal view (xterm.js) for terminal backends. It is tested against
    the golden vectors from the Go `protocol` package.
 
-Open questions:
+## Decisions
 
-- React or stay on Vue 3? React has the larger ecosystem, including terminal
-  widgets; the current Vue code is small, so either choice is cheap now.
-- UI component library, or plain components? The client has one form.
+Settled on 2026-10-31.
+
+- **React, by the owner's decision.** The web client is rebuilt in
+  React, and Vue 3 goes. The goal is to remove Guacamole entirely: no
+  guacd, no Guacamole protocol and no v0 routes, so the shell speaks
+  protocol v1 through the TypeScript core and API v1 alone, never
+  `occamy.js` or `/api/v0`. This resolves the open question "React or
+  stay on Vue 3?": React has the larger ecosystem, terminal widgets
+  included, and the Vue code was small, so the switch was cheap.
+- **Plain components, no UI library.** The client has a sign-in form, a
+  list and a session view; element-plus and vue-router go with Vue.
+- **Order:** the two steps of Architecture collapse into one. The
+  protocol core came first, so the React shell is built on it directly,
+  with no interim shell around `occamy.js`.
 
 ## Testing Strategy
 
@@ -65,17 +78,17 @@ Open questions:
 
 ## Acceptance Criteria
 
-- [ ] Decision recorded (React or Vue).
+- [x] Decision recorded (React or Vue): React, by the owner, on
+      2026-10-31.
 - [ ] If React: shell at parity with the Vue client, with lint and build in
       CI.
 
 ## Implementation notes: protocol client
 
 - **Status:** step 2's protocol core is built, ahead of step 1. The
-  shell decision, React or Vue, is still open, and the core does not
+  shell decision was open when it was built, and the core does not
   depend on it: it imports no framework, so either shell wraps it. The
-  Vue app does not use it yet, and `occamy.js` and the v0 routes are
-  untouched. The spec stays `vague` until the shell is decided.
+  owner chose React on 2026-10-31 (see Decisions).
 - **What was built:** `client/occamy-web/src/protocol`, strict
   TypeScript with no runtime dependency, about 4,900 lines and 3,300 of
   tests. It is the browser's counterpart of the Go client
@@ -318,8 +331,8 @@ Open questions:
     loading the demo page under the DevTools protocol; the headless
     shell of the same build loads and runs it.
 - **Follow-ups:**
-  - Decide React or Vue, then build the shell on this core and retire
-    `occamy.js` with v0. The shell clips the server's text before it
+  - Build the React shell on this core and retire `occamy.js`; the v0
+    routes go at v1.0. The shell clips the server's text before it
     shows it.
   - A browser job (Playwright with Chromium, Firefox and WebKit) that
     runs the demo's checks against `webinterop`.
