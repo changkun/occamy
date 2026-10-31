@@ -18,7 +18,7 @@ desktop that the [codec measurement](./codecs.md) and the
 | switch, terminal | 12.1 · **2.4** | 108 | 1.57 · **0.20** | none |
 | switch, photo | 70.6 · **63.1** | 96 | 35.40 · 33.67 | none |
 | motion (G5) | 13.8 · 4.3 | 192 | 11.44 · 0.32 | 391.0 · 0.0 |
-| drag (G4) | 5.2 · 5.2 | 0 | 2.16 · 2.31 | 18.9 · 18.9 |
+| drag (G4) | 5.2 · 5.2 | 0 | 2.16 · 2.31 | 17.9 · 17.9 |
 | scroll (G3) | 5.0 · 5.0 | 0 | 0.76 · 0.88 | none |
 | photo, once (G6) | 121.8 · 121.8 | 0 | 78.71 · 71.89 | none |
 | browser, once | 140.1 · 139.2 | 26 | 16.49 · 15.28 | none |
