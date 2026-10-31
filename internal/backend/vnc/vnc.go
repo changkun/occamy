@@ -24,6 +24,11 @@
 // with Fence (continuous.go); QEMU Extended Key Events with physical key
 // codes (qemukeys.go); Extended Clipboard in UTF-8 (clipboard.go); and
 // LastRect (extensions.go).
+//
+// Apple Remote Desktop authentication, the security type with which
+// macOS Screen Sharing logs in its users, is spoken only when
+// Config.ARD allows it (ard.go), since its key exchange authenticates
+// no server.
 package vnc
 
 import (
@@ -103,19 +108,40 @@ type Config struct {
 	// Addr is the server's host and TCP port, not a VNC display number.
 	// The port defaults to 5900.
 	Addr string
-	// Username is the username for VeNCrypt's Plain authentication. If
-	// it is set, Plain is chosen over VeNCrypt's other subtypes.
+	// Username is the username for VeNCrypt's Plain authentication, or
+	// for Apple Remote Desktop's. If it is set, Plain is chosen over
+	// VeNCrypt's other subtypes, and Apple Remote Desktop, if ARD allows
+	// it, over None and VNC Authentication.
 	Username string
 	// Password is the VNC password, of which VNC Authentication uses the
-	// first 8 bytes, or the password for VeNCrypt's Plain, which uses all
-	// of it. If it is empty and the server asks for one, the session's
-	// owner is asked, as for a username that Plain needs. If it is set and
-	// the server offers both None and VNC Authentication, VNC
-	// Authentication is chosen.
+	// first 8 bytes, or the password for VeNCrypt's Plain or Apple Remote
+	// Desktop, which use all of it. If it is empty and the server asks
+	// for one, the session's owner is asked, as for a username that Plain
+	// or Apple Remote Desktop needs. If it is set and the server offers
+	// both None and VNC Authentication, VNC Authentication is chosen.
 	Password string
 	// TLS is the policy for the server's certificate when VeNCrypt runs
 	// TLS. VeNCrypt is chosen whenever a server offers it.
 	TLS TLS
+	// ARD allows Apple Remote Desktop authentication (security type 30),
+	// which macOS Screen Sharing needs to log in a user of the Mac. It
+	// is off by default: its Diffie-Hellman key exchange authenticates no
+	// server, so that anyone between the backend and the server can read
+	// the username and the password, which are the Mac account's own,
+	// and the session that follows is not encrypted. With ARD, type 30 is
+	// chosen when the server does not offer VeNCrypt and either Username
+	// is set or the server offers neither None nor VNC Authentication.
+	// It sends Username and Password, each of at most 63 bytes and
+	// without a NUL. ARD cannot be combined with a TLS requirement.
+	//
+	// ARD raises what an attacker in between gets from any server, not
+	// only from a Mac: without a TLS requirement, it can strip VeNCrypt
+	// from the server's offer and offer type 30 alone, and the backend
+	// sends it the whole password. Without ARD, the most such a
+	// downgrade gets is VNC Authentication's DES response, from the
+	// password's first 8 bytes. Set ARD only for Macs, on networks you
+	// trust.
+	ARD bool
 	// DialTimeout bounds the TCP connection and defaults to 15 seconds.
 	// Only Run's context bounds the handshake that follows, since it may
 	// wait for the owner to answer a prompt.
@@ -131,6 +157,7 @@ type Backend struct {
 	username    string
 	password    string
 	tls         tlsPolicy
+	ard         bool
 	dialTimeout time.Duration
 	log         *slog.Logger
 	limits      limits
@@ -166,11 +193,16 @@ func New(cfg Config) (*Backend, error) {
 	if err != nil {
 		return nil, err
 	}
+	if cfg.ARD && policy.require {
+		return nil, errors.New("vnc: Apple Remote Desktop runs without TLS: ARD cannot be allowed " +
+			"while TLS is required by TLS.Require, RootCAs or Pins")
+	}
 	return &Backend{
 		addr:        addr,
 		username:    cfg.Username,
 		password:    cfg.Password,
 		tls:         policy,
+		ard:         cfg.ARD,
 		dialTimeout: cfg.DialTimeout,
 		log:         cfg.Logger,
 		limits:      defaultLimits,
@@ -430,6 +462,10 @@ func (b *Backend) connect(ctx context.Context, sink backend.Sink, r *run) error 
 	}
 	b.log.Debug("vnc: connected", "addr", b.addr, "version", fmt.Sprintf("3.%d", init.version),
 		"security", init.security, "width", init.size.X, "height", init.size.Y)
+	if init.security == secARD {
+		b.log.Warn("vnc: logged in with Apple Remote Desktop authentication, which authenticates no server "+
+			"and leaves the session unencrypted", "addr", b.addr)
+	}
 	if _, err := c.Write(appendSetup(nil)); err != nil {
 		return failure(ctx, fmt.Errorf("vnc: %w", err))
 	}
@@ -480,6 +516,7 @@ func (b *Backend) auth(ctx context.Context, sink backend.Sink, nc net.Conn, br *
 		},
 		hasUser:     b.username != "",
 		hasPassword: b.password != "",
+		ard:         b.ard,
 		requireTLS:  b.tls.require,
 		startTLS: func() error {
 			// The server waits for the client's hello: anything it sent
