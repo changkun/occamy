@@ -21,8 +21,8 @@ import (
 )
 
 // The demo stack's occamy-v1 service (docker/occamy-v1.yaml): its user,
-// and its connections to the demo VNC server with the backend that each
-// session's state should report.
+// and its connections to the demo VNC and RDP servers with the backend
+// that each session's state should report.
 const (
 	v1User     = "demo"
 	v1Password = "occamy"
@@ -31,6 +31,8 @@ const (
 var v1Connections = []struct{ id, backend string }{
 	{"vnc-native", "vnc"},
 	{"vnc-guacd", "guacd"},
+	{"rdp-native", "rdp"},
+	{"rdp-guacd", "guacd"},
 }
 
 // endpointV1 returns the occamy-v1 address from OCCAMY_E2E_V1_ENDPOINT
@@ -100,11 +102,11 @@ func apiV1(addr, method, path, token string, body []byte, out any) error {
 	return json.Unmarshal(d, out)
 }
 
-// TestE2EV1 streams the demo VNC server through occamy-v1 with the Go
-// client, through the native backend and through guacd, twice each: the
-// desktop must arrive, the session's state must name the backend the
-// connection picks, and input must reach the remote without ending the
-// session.
+// TestE2EV1 streams the demo VNC and RDP servers through occamy-v1 with
+// the Go client, through the native backends and through guacd, twice
+// each: the desktop must arrive, the session's state must name the
+// backend the connection picks, and input must reach the remote without
+// ending the session.
 func TestE2EV1(t *testing.T) {
 	addr := endpointV1(t)
 	for _, c := range v1Connections {
@@ -155,14 +157,15 @@ func checkSessionV1(t *testing.T, addr, connection, backend string) {
 
 	// Input reaches the remote: the frame that shows its effect, the
 	// xterm's echo of the key under the pointer, or a later one, reports
-	// it.
+	// it. The key carries its physical code, HID usage 0x04, as a
+	// browser's does, which the RDP backend sends as a scancode.
 	if _, err := cl.Pointer(ctx, 100, 100, 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := cl.Key(ctx, true, 'a', 0); err != nil {
+	if _, err := cl.Key(ctx, true, 'a', 0x04); err != nil {
 		t.Fatal(err)
 	}
-	seq, err := cl.Key(ctx, false, 'a', 0)
+	seq, err := cl.Key(ctx, false, 'a', 0x04)
 	if err != nil {
 		t.Fatal(err)
 	}

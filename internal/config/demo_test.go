@@ -5,6 +5,7 @@
 package config_test
 
 import (
+	"maps"
 	"os"
 	"strings"
 	"testing"
@@ -23,9 +24,10 @@ func TestDemoV1File(t *testing.T) {
 		t.Fatal(err)
 	}
 	// What the compose service gives it: a tmpfs for the signing key,
-	// and the VNC password.
+	// and the VNC and RDP passwords.
 	raw = []byte(strings.ReplaceAll(string(raw), "/run/occamy/", t.TempDir()+"/"))
 	t.Setenv("OCCAMY_DEMO_VNC_PASSWORD", "vncpassword")
+	t.Setenv("OCCAMY_DEMO_RDP_PASSWORD", "occamy")
 	f, err := config.ParseV1(raw)
 	if err != nil {
 		t.Fatal(err)
@@ -34,8 +36,12 @@ func TestDemoV1File(t *testing.T) {
 	for _, c := range f.Connections {
 		backends[c.ID] = c.Backend
 	}
-	if backends["vnc-native"] != config.BackendNative || backends["vnc-guacd"] != config.BackendGuacd || len(backends) != 2 {
-		t.Errorf("backends %v, want vnc-native native and vnc-guacd guacd", backends)
+	want := map[string]string{
+		"vnc-native": config.BackendNative, "vnc-guacd": config.BackendGuacd,
+		"rdp-native": config.BackendNative, "rdp-guacd": config.BackendGuacd,
+	}
+	if !maps.Equal(backends, want) {
+		t.Errorf("backends %v, want %v", backends, want)
 	}
 	if len(f.Auth.Users) != 1 || bcrypt.CompareHashAndPassword([]byte(f.Auth.Users[0].PasswordHash), []byte("occamy")) != nil {
 		t.Errorf("users %+v, want demo with the password occamy", f.Auth.Users)
