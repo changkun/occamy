@@ -42,10 +42,12 @@ those are closed, an operator should know the following:
   for local testing only.
 
 A v1 file (`version: 1`, [docs/configuration.md](docs/configuration.md)),
-not yet in a release, addresses the first five: its tokens name a user
-or a session and carry no remote credentials; requests and streams take
-their tokens in headers or a WebSocket subprotocol, never in the URL;
-`tls.cert` and `tls.key`
+not yet in a release, addresses the first five unless it sets
+`legacy_v0: true`, which serves the v0 routes and their gaps again. Its
+tokens name a user or a session and carry no remote credentials, and
+are signed with an Ed25519 key in `auth.signing_key_file`, created if
+missing, not a shared secret; requests and streams take their tokens in headers or
+a WebSocket subprotocol, never in the URL; `tls.cert` and `tls.key`
 turn on TLS; sessions open only on the registry's connections that
 allow the user, or on ad-hoc targets that `adhoc_allowlist` covers once
 `allow_adhoc_targets` is on; and pprof is served only on the debug
