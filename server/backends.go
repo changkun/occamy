@@ -296,10 +296,10 @@ func newBridge(g config.Guacd, protocol string) func(target, screen) (backend.Ba
 // loadWarnings returns what occamyd warns of when it loads f.
 //
 // One warning names, per protocol, the guacd.params that no session
-// reads, since the native backends read none of them. That happens when
-// no connection of that protocol goes through guacd, and ad-hoc targets
-// of that protocol either do not go through guacd or take only the
-// display's parameters. A file written for guacd, with disable-copy or
+// reads, since the native backends read none of them, and says why in
+// the protocol's terms. That happens when no connection of that
+// protocol goes through guacd, and ad-hoc targets of that protocol
+// either do not go through guacd or take only the display's parameters. A file written for guacd, with disable-copy or
 // recording-path, would otherwise lose them unnoticed when its
 // connections moved to a native default. With legacy_v0, the v0 routes
 // pass every parameter to their sessions, so nothing is unused.
@@ -325,11 +325,19 @@ func loadWarnings(f *config.File) []string {
 		if len(unused) == 0 {
 			continue
 		}
-		why := fmt.Sprintf("no %s connection goes through guacd", p)
+		var why string
+		switch {
+		case p == "ssh":
+			why = "ssh never goes through guacd"
+		case config.DefaultBackend(p) == config.BackendGuacd:
+			why = fmt.Sprintf("no %s connection is configured", p)
+		default:
+			why = fmt.Sprintf("no %s connection sets backend: guacd", p)
+		}
 		if adhoc {
 			why += fmt.Sprintf(", and ad-hoc %s targets take only the display's parameters", p)
 		}
-		warnings = append(warnings, fmt.Sprintf("guacd.params.%s sets %s, which no session reads: %s, and the native backends read none of guacd.params",
+		warnings = append(warnings, fmt.Sprintf("guacd.params.%s sets %s, which no session reads: %s",
 			p, strings.Join(unused, ", "), why))
 	}
 	// The file allows security on native rdp connections alone.

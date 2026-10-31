@@ -248,8 +248,8 @@ func TestLoadWarnings(t *testing.T) {
 			Guacd:       config.Guacd{Params: params},
 			Connections: []config.Connection{conn("a", "rdp", ""), conn("b", "vnc", "native"), conn("c", "ssh", "")},
 		}, []string{
-			"guacd.params.rdp sets color-depth, disable-copy, recording-path, which no session reads: no rdp connection goes through guacd",
-			"guacd.params.vnc sets disable-paste, which no session reads: no vnc connection goes through guacd",
+			"guacd.params.rdp sets color-depth, disable-copy, recording-path, which no session reads: no rdp connection sets backend: guacd",
+			"guacd.params.vnc sets disable-paste, which no session reads: no vnc connection sets backend: guacd",
 		}},
 		{"guacd fallbacks", config.File{
 			Guacd:       config.Guacd{Params: params},
@@ -264,7 +264,7 @@ func TestLoadWarnings(t *testing.T) {
 			AllowAdhocTargets: true,
 			AdhocBackends:     map[string]string{"rdp": "guacd", "vnc": "native"},
 		}, []string{
-			"guacd.params.rdp sets disable-copy, recording-path, which no session reads: no rdp connection goes through guacd, and ad-hoc rdp targets take only the display's parameters",
+			"guacd.params.rdp sets disable-copy, recording-path, which no session reads: no rdp connection sets backend: guacd, and ad-hoc rdp targets take only the display's parameters",
 			"guacd.params.vnc sets disable-paste,",
 		}},
 		{"ad-hoc targets off", config.File{
@@ -272,6 +272,16 @@ func TestLoadWarnings(t *testing.T) {
 			AdhocBackends: map[string]string{"rdp": "guacd"},
 		}, []string{"guacd.params.rdp sets color-depth,"}},
 		{"legacy_v0", config.File{Guacd: config.Guacd{Params: params}, LegacyV0: true}, nil},
+		{"each protocol's terms", config.File{
+			Guacd: config.Guacd{Params: map[string]map[string]string{
+				"ssh":    {"font-size": "12"},
+				"telnet": {"terminal-type": "xterm", "color-scheme": "gray-black"},
+			}},
+			AllowAdhocTargets: true,
+		}, []string{
+			"guacd.params.ssh sets font-size, which no session reads: ssh never goes through guacd",
+			"guacd.params.telnet sets terminal-type, which no session reads: no telnet connection is configured, and ad-hoc telnet targets take only the display's parameters",
+		}},
 		{"unchecked TLS", config.File{Connections: []config.Connection{
 			{ID: "tls", Protocol: "rdp", Security: rdp.SecurityTLS, TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
 			{ID: "any", Protocol: "rdp", Security: rdp.SecurityAny, TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
