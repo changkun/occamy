@@ -8,6 +8,7 @@
 # Xvnc or the scene exits, so does the container.
 
 set -euo pipefail
+trap 'exit 0' TERM INT
 
 dir=/etc/vnc-test
 mkdir -p "$dir"
