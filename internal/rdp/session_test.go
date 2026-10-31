@@ -300,6 +300,7 @@ func TestRunErrorInfoStale(t *testing.T) {
 		{"a fast-path update after it", [][]byte{rdptest.SetErrorInfo(0x1), rdptest.FastPath(rdptest.Update(rdptest.FPBitmap, bitmap))}, io.EOF},
 		{"a slow-path update after it", [][]byte{rdptest.SetErrorInfo(0x1), rdptest.SlowPathUpdate(bitmap)}, io.EOF},
 		{"a slow-path update, then the ultimatum", [][]byte{rdptest.SetErrorInfo(0x9), rdptest.SlowPathUpdate(bitmap), rdptest.DisconnectUltimatum()}, nil},
+		{"a reactivation after it", [][]byte{rdptest.SetErrorInfo(0x1), rdptest.DeactivateAll(), rdptest.DemandActive(1024, 768, rdptest.InputScancodes)}, io.EOF},
 		{"Deactivate All after it", [][]byte{rdptest.SetErrorInfo(0x9), rdptest.DeactivateAll()}, ErrorInfo(0x9)},
 		{"Deactivate All and the ultimatum", [][]byte{rdptest.SetErrorInfo(0x9), rdptest.DeactivateAll(), rdptest.DisconnectUltimatum()}, ErrorInfo(0x9)},
 		{"a second reason", [][]byte{rdptest.SetErrorInfo(0x9), rdptest.SetErrorInfo(0x3)}, ErrorInfo(0x3)},
