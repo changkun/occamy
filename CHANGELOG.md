@@ -180,8 +180,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   only for the groups in its `allowed_groups`. A static user's name follows the
   same rule as an OIDC subject. An OIDC user
   linked to a static user owns the static user's sessions, and occamyd's
-  own stream tokens carry `idp`. `limits` bounds the sessions a user owns
-  (10), and the viewers (50) and unexpired shares (100) of a session.
+  own stream tokens carry `idp`. `limits` bounds the sessions occamyd
+  runs (1000) and a user owns (10), and the viewers (50) and unexpired
+  shares (100) of a session.
   An ad-hoc target is allowed only on its protocol's port or the ports
   its allowlist entry names, never on a loopback, link-local,
   unspecified or multicast address unless an entry is that address,

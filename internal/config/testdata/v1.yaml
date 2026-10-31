@@ -149,6 +149,8 @@ adhoc_allowlist:
 
 # What one user or one session may hold. Zero or absent is the default.
 limits:
+  # Sessions occamyd runs at once, whoever owns them. Default 1000.
+  sessions: 500
   # Sessions one user owns at once. Default 10.
   sessions_per_user: 20
   # Viewers a session takes besides its owner. Default 50.

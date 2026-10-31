@@ -31,6 +31,7 @@ const (
 
 // Default limits, filled in by ParseV1 and by Limits.WithDefaults.
 const (
+	DefaultSessions          = 1000
 	DefaultSessionsPerUser   = 10
 	DefaultViewersPerSession = 50
 	DefaultSharesPerSession  = 100
@@ -61,6 +62,10 @@ type File struct {
 // Limits bound what one user or one session holds, so that no user takes
 // what the others need. Zero is the default.
 type Limits struct {
+	// Sessions is the most sessions occamyd runs at once, whoever owns
+	// them: a trusted issuer can name new users without end, and each
+	// has SessionsPerUser of its own.
+	Sessions int `yaml:"sessions"`
 	// SessionsPerUser is the most sessions one user owns at once.
 	SessionsPerUser int `yaml:"sessions_per_user"`
 	// ViewersPerSession is the most viewers a session takes besides its
@@ -72,6 +77,9 @@ type Limits struct {
 
 // WithDefaults returns l with the defaults in place of zero.
 func (l Limits) WithDefaults() Limits {
+	if l.Sessions == 0 {
+		l.Sessions = DefaultSessions
+	}
 	if l.SessionsPerUser == 0 {
 		l.SessionsPerUser = DefaultSessionsPerUser
 	}

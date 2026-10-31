@@ -238,7 +238,7 @@ func TestParseV1Example(t *testing.T) {
 			},
 		},
 		AdhocAllowlist: []string{"10.0.0.0/8", "*.lab.internal:22"},
-		Limits:         config.Limits{SessionsPerUser: 20, ViewersPerSession: 50, SharesPerSession: 100},
+		Limits:         config.Limits{Sessions: 500, SessionsPerUser: 20, ViewersPerSession: 50, SharesPerSession: 100},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ParseV1(testdata/v1.yaml) =\n%+v\nwant\n%+v", got, want)
@@ -276,7 +276,7 @@ func TestParseV1Defaults(t *testing.T) {
 	if f.Auth.AccessTokenLifetime != config.DefaultAccessTokenLifetime {
 		t.Errorf("access_token_lifetime = %v, want %v", f.Auth.AccessTokenLifetime, config.DefaultAccessTokenLifetime)
 	}
-	if want := (config.Limits{SessionsPerUser: config.DefaultSessionsPerUser, ViewersPerSession: config.DefaultViewersPerSession, SharesPerSession: config.DefaultSharesPerSession}); f.Limits != want {
+	if want := (config.Limits{Sessions: config.DefaultSessions, SessionsPerUser: config.DefaultSessionsPerUser, ViewersPerSession: config.DefaultViewersPerSession, SharesPerSession: config.DefaultSharesPerSession}); f.Limits != want {
 		t.Errorf("limits = %+v, want %+v", f.Limits, want)
 	}
 	c := f.Connections[0]
@@ -733,7 +733,8 @@ connections:
 		}},
 
 		// Limits.
-		{"negative limits", head + "limits: {sessions_per_user: -1, viewers_per_session: -2, shares_per_session: -3}\n", []want{
+		{"negative limits", head + "limits: {sessions: -4, sessions_per_user: -1, viewers_per_session: -2, shares_per_session: -3}\n", []want{
+			{"limits.sessions", "must be at least 1"},
 			{"limits.sessions_per_user", "must be at least 1"},
 			{"limits.viewers_per_session", "must be at least 1"},
 			{"limits.shares_per_session", "must be at least 1"},

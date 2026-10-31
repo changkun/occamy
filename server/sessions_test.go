@@ -440,6 +440,24 @@ func TestLimits(t *testing.T) {
 		return ts.api(t, http.MethodPost, "/api/v1/sessions", alice, `{"connection":"ops-shell"}`).code == http.StatusCreated
 	})
 
+	// occamyd's own limit counts every user's sessions: alice's two and
+	// carol's one fill it.
+	ts.s.mu.Lock()
+	ts.s.limits.Sessions = 3
+	ts.s.mu.Unlock()
+	dave := ts.token(t, "dave", "ops")
+	if r := ts.api(t, http.MethodPost, "/api/v1/sessions", dave, `{"connection":"ops-shell"}`); r.code != http.StatusServiceUnavailable || decodeError(t, r.body).Code != codeLimitExceeded {
+		t.Errorf("a session over limits.sessions: %d %s, want 503 limit_exceeded", r.code, r.body)
+	}
+	c, status, err = dial(ts.srv.URL+"/api/v1/connections/ops-shell/stream", withToken(dave), &termHello, nil)
+	if err != nil {
+		t.Fatalf("%d %v", status, err)
+	}
+	c.closed(t, protocol.CloseForbidden)
+	ts.s.mu.Lock()
+	ts.s.limits.Sessions = config.DefaultSessions
+	ts.s.mu.Unlock()
+
 	o := ts.openSession(t, ts.token(t, "bob", "ops"), "ops-shell")
 	bob := ts.token(t, "bob", "ops")
 	var shares []string

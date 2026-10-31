@@ -764,6 +764,14 @@ place for fixes that ship on v0 before beta.
     others from the claims, so every route that reads groups sees only
     the allowed ones. `TestIssuerGroups` and `TestListConnections`
     cover the REST and stream routes.
+  - **A limit for the whole server (delta review):**
+    `limits.sessions`, 1000 by default, bounds the sessions occamyd
+    runs whoever owns them, since `sessions_per_user` bounds each user
+    and a trusted issuer can mint new subjects without end. It counts
+    in `server.running` beside `owned`, under the same lock, from the
+    check to the session's end. One more is `503 limit_exceeded`, as
+    the server, not the caller, is full, and `close` `forbidden` on a
+    connection's stream, as the user's own limit is.
   - **Absent rather than forbidden:** a connection the caller may not
     open answers 404, as an unknown one does, and so does another
     user's session on `GET`, `DELETE` and shares, so IDs cannot be

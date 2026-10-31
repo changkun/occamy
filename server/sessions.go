@@ -33,6 +33,10 @@ const (
 // limits.sessions_per_user allows.
 var errSessionLimit = errors.New("too many sessions open")
 
+// errSessionsFull refuses a session when occamyd runs as many as
+// limits.sessions allows, whoever owns them.
+var errSessionsFull = errors.New("occamyd runs as many sessions as it takes")
+
 // Lifetimes of what the session routes hand out.
 const (
 	// streamTokenLifetime is how long the stream token that
@@ -189,6 +193,10 @@ func (s *server) openSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, codeLimitExceeded, fmt.Sprintf("you have %d sessions open, as many as a user may: close one first", s.limits.SessionsPerUser))
 		return
 	}
+	if errors.Is(err, errSessionsFull) {
+		writeError(w, http.StatusServiceUnavailable, codeLimitExceeded, "occamyd runs as many sessions as it takes: try again later")
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, codeInternal, "the session could not be opened")
 		return
@@ -313,20 +321,27 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 	if !ok {
 		return fail(fmt.Errorf("no backend serves %s", t.protocol))
 	}
-	// The session counts toward the owner's from now until it ends, so
-	// that concurrent requests cannot all pass the limit.
+	// The session counts toward the owner's, and occamyd's, from now
+	// until it ends, so that concurrent requests cannot all pass the
+	// limits.
 	s.mu.Lock()
-	if s.owned[owner] >= s.limits.SessionsPerUser {
+	switch {
+	case s.owned[owner] >= s.limits.SessionsPerUser:
 		s.mu.Unlock()
 		return fail(errSessionLimit)
+	case s.running >= s.limits.Sessions:
+		s.mu.Unlock()
+		return fail(errSessionsFull)
 	}
 	s.owned[owner]++
+	s.running++
 	s.mu.Unlock()
 	release := func() {
 		s.mu.Lock()
 		if s.owned[owner]--; s.owned[owner] <= 0 {
 			delete(s.owned, owner)
 		}
+		s.running--
 		s.mu.Unlock()
 	}
 	b, err := maker.make(t, sz)

@@ -151,6 +151,7 @@ func (f *File) validate(c *checker) {
 		path string
 		n    int
 	}{
+		{"limits.sessions", f.Limits.Sessions},
 		{"limits.sessions_per_user", f.Limits.SessionsPerUser},
 		{"limits.viewers_per_session", f.Limits.ViewersPerSession},
 		{"limits.shares_per_session", f.Limits.SharesPerSession},

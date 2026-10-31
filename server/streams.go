@@ -101,8 +101,8 @@ func (s *server) connectionStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info, owner, err := s.open(connectionTarget(c), p, screenOf(req.hello))
-	if errors.Is(err, errSessionLimit) {
-		req.c.refuse(protocol.Close{Code: protocol.CloseForbidden, Reason: errSessionLimit.Error()})
+	if errors.Is(err, errSessionLimit) || errors.Is(err, errSessionsFull) {
+		req.c.refuse(protocol.Close{Code: protocol.CloseForbidden, Reason: err.Error()})
 		return
 	}
 	if err != nil {

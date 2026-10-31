@@ -346,6 +346,7 @@ do not reach a target that a user chose.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
+| `limits.sessions` | `1000` | Sessions `occamyd` runs at once, whoever owns them, since a trusted issuer can name new users without end. One more is refused with `503 limit_exceeded`, or on a connection's stream with `close` `forbidden` |
 | `limits.sessions_per_user` | `10` | Sessions one user owns at once. One more is refused with `429 limit_exceeded`, or on a connection's stream with `close` `forbidden` |
 | `limits.viewers_per_session` | `50` | Viewers a session takes besides its owner, who can always join. One more gets `close` `viewer-limit` |
 | `limits.shares_per_session` | `100` | Shares of a session that have not expired. One more is refused with `429 limit_exceeded` |
