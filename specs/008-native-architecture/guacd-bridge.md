@@ -715,10 +715,15 @@ that guacd was `vnc`'s default, they are corrected below.
   logic with fake checks.
 - **The matrix.** x11vnc 0.9.17 (libvncserver 0.9.15) and TigerVNC
   1.15's Xvnc, Debian trixie; guacd 1.6. On the shared host, at a load
-  average of 7 to 18, the whole matrix took 192 s on fresh servers and
+  average of 7 to 18, the matrix as first written, with a barrier that
+  tried four times and no warm-up, took 192 s on fresh servers and
   124 to 128 s on warm ones. Every run gave the table below. The runs
   that failed cells did so on server faults (next items), or, once, on
   the first version of the x11vnc watchdog, which killed a live x11vnc.
+  A whole run with the warm-up, the single-shot barrier and the guacd
+  twin of a native cell (How a cell is judged) is pending a local run;
+  its time, and whether it gives this table at every cell's first try,
+  are not yet recorded. CI runs it in `make e2e`.
 
   | Feature | x11vnc/native | x11vnc/guacd | tigervnc/native | tigervnc/guacd |
   |---|---|---|---|---|
@@ -807,10 +812,18 @@ that guacd was `vnc`'s default, they are corrected below.
     port. The native backend sends TigerVNC the codes as QEMU key
     events; without `RawKeyboard`, TigerVNC maps the keysyms to its own
     layout, so a German client types German text on its us screen too.
-  - A freshly started x11vnc did not answer the first cut text on each
-    port, through either backend; the check's barrier retries four
-    times, five seconds each, so the first check on each x11vnc port
-    takes about 15 s.
+  - A freshly started x11vnc drops the first cut text sent to it,
+    whichever backend sends it; the next comes back in about 5 s, and
+    every session's first after that within a second or two, through
+    either backend. On fresh servers, with two sessions of two nonces
+    each per port and backend, the native backend's first nonce on
+    each of the four x11vnc ports was lost and guacd's sessions after
+    it lost none; after a restart of the x11vnc container, with guacd
+    first, guacd's first nonce on each port was lost and the native
+    backend's lost none. TigerVNC lost none. It is x11vnc's start, not
+    a backend: the barrier no longer tries four times, which hid that,
+    and the test warms each port before the matrix and before a retry,
+    and logs what each port took.
   - Once in six whole runs, a guacd session to TigerVNC ended as it
     connected: libvncclient logged "Error handling message from VNC
     server", and guacd ended with status 515. The next check on the
@@ -836,7 +849,8 @@ that guacd was `vnc`'s default, they are corrected below.
     and starts it again, backing off up to 16 s while it keeps exiting
     ([006](../006-demo-stack-refresh.md), Addendum: TigerVNC and the
     VNC parity matrix). x11vnc serves its clients in one thread, and
-    waits up to its `-rfbwait`, 20 s by default, for a client that does
+    waits up to its `-readtimeout` (LibVNCServer's `rfbMaxClientWait`,
+    which `-rfbwait` also sets), 20 s by default, for a client that does
     not take what it sends, accepting nobody meanwhile; a first
     watchdog that waited 10 s could have killed a live x11vnc so. In
     that CI run, a cell's second try met the hung x11vnc that its first
