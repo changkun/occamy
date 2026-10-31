@@ -385,6 +385,9 @@ per-protocol table moves Kubernetes to native.
   - The ServiceAccount with `get` and `create` on `pods/exec` is
     allowed; the one without them gets 403. Since v1.34 predates the
     1.35 `create` check, this run exercised the `get` path.
+  - On d80310e, with the review's fixes, it passed 8 of 8 again against
+    k3s v1.34.1, at load 6.7 over v5, and at load 7.9 over v4 alone, in
+    a copy that offered only v4.
 - **Independent review** of the PR at a4db355. It found the security
   design sound, and the certificate checked before any byte is sent.
   Its findings, each fixed with a test that fails without the fix:
