@@ -326,7 +326,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   `backend: native` keeps the check. A native vnc session asks the
   server for the owner's size from the stream's `hello`, on a
   connection's stream as on a session's, and a resize that reaches the
-  backend before it runs is no longer dropped.
+  backend before it runs is no longer dropped. A size beyond the
+  backend's limits, such as a hello's 8192×8192, which is more than
+  2^25 pixels, is not asked for: the server keeps its size.
 - `ard: true` on a vnc connection with `backend: native` allows Apple
   Remote Desktop authentication, for macOS Screen Sharing. It is
   refused with a `tls` that requires TLS, and the error for a Mac that
@@ -355,9 +357,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   clipboard both ways, the cursor, visibility, the end reasons, the
   `tls` policy, which sends no credential to a server it refuses, and
   ad-hoc targets by address and by name, dialled at the address that
-  was checked. A `vnc.Config` size beyond the backend's limits, such as
-  a hello's 8192×8192, which is more than 2^25 pixels, is not asked
-  for: the server keeps its size.
+  was checked.
 - The demo stack runs `occamy-v1` next to `occamy`, on port 5637, with
   the v1 file `docker/occamy-v1.yaml`: the demo VNC server through the
   native backend and through guacd, which `make e2e` streams with the
