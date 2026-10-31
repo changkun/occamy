@@ -35,9 +35,10 @@ import (
 )
 
 // Codecs returns the codecs an Encoder sends, which the server offers in
-// the handshake.
+// the handshake, and cached, which the server sends for a tile that the
+// client's tile cache holds.
 func Codecs() []protocol.Codec {
-	return []protocol.Codec{protocol.CodecWebP, protocol.CodecJPEG, protocol.CodecDeflate, protocol.CodecRaw}
+	return []protocol.Codec{protocol.CodecWebP, protocol.CodecJPEG, protocol.CodecDeflate, protocol.CodecRaw, protocol.CodecCached}
 }
 
 // Class is a tile's class by its colours, which picks its codec.
