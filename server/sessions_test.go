@@ -378,7 +378,7 @@ func TestDeleteForgetsSession(t *testing.T) {
 		if r := ts.api(t, http.MethodDelete, "/api/v1/sessions/"+o.ID, alice, ""); r.code != http.StatusNoContent {
 			t.Fatalf("DELETE: %d %s", r.code, r.body)
 		}
-		next := ts.openSession(t, alice, "ops-shell")
+		next := ts.api(t, http.MethodPost, "/api/v1/sessions", alice, `{"connection":"ops-shell"}`)
 		for _, route := range []struct{ method, path, body string }{
 			{http.MethodGet, "/api/v1/sessions/" + o.ID, ""},
 			{http.MethodPost, "/api/v1/sessions/" + o.ID + "/shares", `{"role":"viewer"}`},
@@ -388,7 +388,12 @@ func TestDeleteForgetsSession(t *testing.T) {
 				t.Errorf("%s %s after DELETE: %d %s, want 404", route.method, route.path, r.code, r.body)
 			}
 		}
-		o = next
+		if next.code != http.StatusCreated {
+			t.Fatalf("POST /api/v1/sessions right after DELETE: %d %s, want 201", next.code, next.body)
+		}
+		if err := json.Unmarshal(next.body, &o); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
