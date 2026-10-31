@@ -66,28 +66,33 @@ type File struct {
 	AdhocBackends map[string]string `yaml:"adhoc_backends"`
 	Limits        Limits            `yaml:"limits"`
 	Streams       Streams           `yaml:"streams"`
+	// WebClient is the directory of the built web client, which occamyd
+	// serves under /static/; empty serves none.
+	WebClient string `yaml:"web_client"`
 }
 
 // The backends that serve a connection's sessions.
 const (
-	// BackendNative is occamyd's own client of the protocol, for ssh
-	// and vnc.
+	// BackendNative is occamyd's own client of the protocol, for ssh,
+	// vnc and kubernetes.
 	BackendNative = "native"
-	// BackendGuacd is the guacd bridge, for every protocol but ssh: the
-	// only backend of rdp and telnet, and vnc's opt-in fallback.
+	// BackendGuacd is the guacd bridge, for every protocol but ssh and
+	// kubernetes: the only backend of rdp and telnet, and vnc's opt-in
+	// fallback.
 	BackendGuacd = "guacd"
 )
 
 // DefaultBackend returns the backend that serves protocol's sessions
 // when the configuration does not pick one: native wherever a native
-// backend exists, which is ssh and vnc, and guacd for rdp and telnet,
-// which have none yet. For vnc, backend: guacd is an explicit fallback
-// and the benchmark's baseline, kept until the benchmark shows native
-// at least 10x better (specs/008-native-architecture/guacd-bridge.md,
-// Parity gate).
+// backend exists, which is ssh, vnc and kubernetes, and guacd for rdp
+// and telnet, which have none yet. For vnc, backend: guacd is an
+// explicit fallback and the benchmark's baseline, kept until the
+// benchmark shows native at least 10x better
+// (specs/008-native-architecture/guacd-bridge.md, Parity gate); ssh and
+// kubernetes have no guacd backend.
 func DefaultBackend(protocol string) string {
 	switch protocol {
-	case "ssh", "vnc":
+	case "ssh", "vnc", "kubernetes":
 		return BackendNative
 	}
 	return BackendGuacd
@@ -110,9 +115,11 @@ func backendProblem(protocol, b string) string {
 		return fmt.Sprintf("unknown backend %q: use %s or %s", b, BackendGuacd, BackendNative)
 	case protocol == "ssh" && b == BackendGuacd:
 		return "ssh connections always use occamyd's native SSH backend: leave backend out, or set native"
+	case protocol == "kubernetes" && b == BackendGuacd:
+		return "kubernetes connections always use occamyd's native Kubernetes backend: leave backend out, or set native"
 	case protocol == "rdp" && b == BackendNative:
 		return "the native RDP backend is not available yet: it is not registered until NLA has run end to end. Leave backend out, or set guacd"
-	case protocol != "ssh" && protocol != "vnc" && b == BackendNative:
+	case protocol != "ssh" && protocol != "vnc" && protocol != "kubernetes" && b == BackendNative:
 		return fmt.Sprintf("%s has no native backend: leave backend out, or set guacd", protocol)
 	}
 	return ""
@@ -260,7 +267,8 @@ type Connection struct {
 	// a warning, for demos.
 	InsecureIgnoreHostKey bool `yaml:"insecure_ignore_host_key"`
 	// TLS is the certificate policy of a vnc target's VeNCrypt, which
-	// only the native VNC backend checks. Other protocols have none.
+	// only the native VNC backend checks, and of a kubernetes target's
+	// API server. Other protocols have none.
 	TLS ConnectionTLS `yaml:"tls"`
 	// ARD allows Apple Remote Desktop authentication (security type 30)
 	// on a vnc connection with the native backend, which macOS Screen
@@ -270,9 +278,38 @@ type Connection struct {
 	// downgrade from any server, not only a Mac, gets the whole password.
 	// It cannot be set with a TLS requirement, under which type 30 is
 	// never chosen.
-	ARD         bool        `yaml:"ard"`
+	ARD bool `yaml:"ard"`
+	// Kubernetes is the pod of a kubernetes connection, whose Target is
+	// the API server. Other protocols have none.
+	Kubernetes  Kubernetes  `yaml:"kubernetes"`
 	Credentials Credentials `yaml:"credentials"`
 	Allow       Allow       `yaml:"allow"`
+}
+
+// Kubernetes names the container a kubernetes connection opens a
+// terminal in, and what runs there. ParseV1 fills in the defaults.
+type Kubernetes struct {
+	// Namespace is the pod's namespace, "default" if empty.
+	Namespace string `yaml:"namespace"`
+	// Pod is the pod's name. Required.
+	Pod string `yaml:"pod"`
+	// Container is the container's name. Empty works only for a pod
+	// with one container: the API server refuses it for a pod with
+	// more.
+	Container string `yaml:"container"`
+	// Command is what runs, one element per argument. ParseV1 fills in
+	// a shell that prefers bash, unless Attach is set.
+	Command []string `yaml:"command"`
+	// Attach connects to the container's main process instead of
+	// running a command, as guacd does without exec-command.
+	Attach bool `yaml:"attach"`
+	// TTY runs the command in a terminal. ParseV1 fills in true.
+	TTY *bool `yaml:"tty"`
+}
+
+// set reports whether any of k's keys is set.
+func (k Kubernetes) set() bool {
+	return k.Namespace != "" || k.Pod != "" || k.Container != "" || len(k.Command) > 0 || k.Attach || k.TTY != nil
 }
 
 // ConnectionTLS is the policy for the certificate that a vnc target
@@ -331,13 +368,21 @@ func (t ConnectionTLS) RootCAs() (*x509.CertPool, error) {
 }
 
 // Credentials say how occamyd authenticates to a connection's target.
-// Exactly one of PasswordFile, PasswordEnv, PrivateKeyFile and Prompt is
-// set.
+// Exactly one source is set: PasswordFile, PasswordEnv, PrivateKeyFile
+// or Prompt; for a kubernetes target, TokenFile, TokenEnv, the pair
+// ClientCertFile and ClientKeyFile, or Prompt.
 type Credentials struct {
 	Username       string `yaml:"username"`
 	PasswordFile   string `yaml:"password_file"`
 	PasswordEnv    string `yaml:"password_env"`
 	PrivateKeyFile string `yaml:"private_key_file"`
+	// TokenFile and TokenEnv hold a kubernetes target's bearer token.
+	TokenFile string `yaml:"token_file"`
+	TokenEnv  string `yaml:"token_env"`
+	// ClientCertFile and ClientKeyFile are a kubernetes target's client
+	// certificate and its key, in PEM.
+	ClientCertFile string `yaml:"client_cert_file"`
+	ClientKeyFile  string `yaml:"client_key_file"`
 	// Prompt stores nothing: the session owner is asked for whatever the
 	// target requires, and the answers are not kept.
 	Prompt bool `yaml:"prompt"`
@@ -359,6 +404,13 @@ func (c Credentials) Password() (string, error) {
 	return readSecret(c.PasswordFile, c.PasswordEnv)
 }
 
+// Token reads the bearer token from TokenFile or TokenEnv. Trailing line
+// breaks are dropped from both, since a token never ends in one.
+func (c Credentials) Token() (string, error) {
+	t, err := readSecret(c.TokenFile, c.TokenEnv)
+	return strings.TrimRight(t, "\r\n"), err
+}
+
 // PrivateKey reads PrivateKeyFile.
 func (c Credentials) PrivateKey() ([]byte, error) {
 	if c.PrivateKeyFile == "" {
@@ -373,12 +425,25 @@ func (o OIDC) ClientSecret() (string, error) {
 	return readSecret(o.ClientSecretFile, o.ClientSecretEnv)
 }
 
+// maxSecretFile is the most a secret file may hold: a password, a token
+// or a client secret is far smaller, and a path such as /dev/zero must
+// not fill occamyd's memory.
+const maxSecretFile = 64 << 10
+
 func readSecret(file, env string) (string, error) {
 	switch {
 	case file != "":
-		b, err := os.ReadFile(file) // #nosec G304 -- the path comes from the operator's configuration
+		f, err := os.Open(file) // #nosec G304 -- the path comes from the operator's configuration
 		if err != nil {
 			return "", err
+		}
+		defer f.Close()
+		b, err := io.ReadAll(io.LimitReader(f, maxSecretFile+1))
+		if err != nil {
+			return "", err
+		}
+		if len(b) > maxSecretFile {
+			return "", fmt.Errorf("config: %s holds more than %d bytes, too many for a secret", file, maxSecretFile)
 		}
 		return strings.TrimRight(string(b), "\r\n"), nil
 	case env != "":
@@ -679,6 +744,7 @@ var hints = map[reflect.Type]map[string]string{
 	reflect.TypeFor[Credentials](): {
 		"password":    "inline secrets are not allowed, so that the file can be committed: use password_file, password_env or prompt: true",
 		"private_key": "inline keys are not allowed, so that the file can be committed: use private_key_file",
+		"token":       "inline secrets are not allowed, so that the file can be committed: use token_file, token_env or prompt: true",
 	},
 	reflect.TypeFor[OIDC](): {
 		"client_secret": "inline secrets are not allowed, so that the file can be committed: use client_secret_file or client_secret_env",

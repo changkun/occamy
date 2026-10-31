@@ -1,37 +1,53 @@
 import js from '@eslint/js'
-import pluginVue from 'eslint-plugin-vue'
+import reactHooks from 'eslint-plugin-react-hooks'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
 
-// The protocol v1 client core (src/protocol) is TypeScript, linted with
-// type information from tsconfig.test.json, which covers the library and
-// its tests.
+// The shell (src/main.tsx, src/views, src/lib) and the protocol v1
+// client core (src/protocol) are TypeScript, linted with type
+// information from tsconfig.test.json, which covers both and their
+// tests.
 const typescript = tseslint.configs.recommendedTypeChecked.map((c) => ({
   ...c,
-  files: ['**/*.ts'],
+  files: ['**/*.{ts,tsx}'],
 }))
 
 export default [
   { ignores: ['dist/'] },
   js.configs.recommended,
-  ...pluginVue.configs['flat/essential'],
   {
     languageOptions: {
       globals: { ...globals.browser },
     },
-    rules: {
-      // Login and Desktop are route views, not reusable components.
-      'vue/multi-word-component-names': 'off',
-    },
   },
   ...typescript,
   {
-    files: ['**/*.ts'],
+    files: ['**/*.{ts,tsx}'],
     languageOptions: {
       parserOptions: {
         project: ['./tsconfig.test.json'],
         tsconfigRootDir: import.meta.dirname,
       },
+    },
+  },
+  {
+    // The rules of hooks, with the React Compiler's checks of purity,
+    // refs and state in effects.
+    files: ['src/**/*.{ts,tsx}'],
+    ...reactHooks.configs.flat.recommended,
+  },
+  {
+    // The shell uses the client core through its public API, the index,
+    // so that the core's modules may change behind it.
+    // src/lib/lint.test.ts checks this rule.
+    files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/protocol/**'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { regex: '(^|/)protocol/.', message: 'The shell imports the client core through its index alone: import from \'../protocol\'.' },
+        ],
+      }],
     },
   },
   {

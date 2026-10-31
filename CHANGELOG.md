@@ -296,8 +296,34 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   falls silent, and in a hidden page acknowledges frames as they
   arrive. It runs every golden vector of `protocol/testdata` under
   vitest, and an interop test against occamyd's stream code, built with
-  the race detector, in the `web` job. The Vue app does not use it yet
+  the race detector, in the `web` job. The web client runs on it
   (specs/009).
+- The web client, rebuilt in React on the browser's client of protocol
+  v1 (specs/009). It speaks API v1 alone: sign-in with a static user's
+  password or through OIDC with PKCE, the connections the user may
+  open, and a session on protocol v1, a graphical one on a canvas scaled
+  to the window and a terminal one in xterm.js. The owner resizes the
+  remote with the window, answers the remote's credential prompts,
+  shares the session through a link as a viewer or read-only, and ends
+  it, signing in again over the session when the sign-in has expired;
+  the clipboard goes both ways as the role allows, and reaches the local
+  clipboard on its own only for a role that gives input, so a read-only
+  viewer copies it from the clipboard panel; a hidden page tells occamyd
+  so and keeps acknowledging frames; and the end of a session says why
+  it ended, a takeover by the owner's newer stream too. Its build
+  writes the licenses of the packages it bundles to
+  `dist/THIRD_PARTY_LICENSES.md`, which the image ships in
+  `licenses/web/` and the web client archive in `dist/`.
+- `web_client` in a v1 file: the directory of the built web client,
+  which occamyd serves under `/static/` with a Content-Security-Policy
+  that keeps the page to its own origin, without directory listings or
+  symbolic links out of the directory, and with its hashed `assets/`
+  cached for a year; a v0 file's `client: true` serves `/static/` the
+  same way. Validation refuses a `web_client` that is a file or that
+  occamyd cannot read; one not built yet is a warning. The demo stack's
+  `occamy-v1` serves the image's at http://localhost:5637/static/, and
+  opens the demo SSH server as the connection `ssh` through the native
+  SSH backend.
 - `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS with the
   VNC backend's certificate policy, NLA through CredSSP 5 or later with
   NTLMv2 of its own, offered by default, the connection sequence, bitmap
@@ -409,6 +435,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   size code 3 ends the session, and once the channel writer fails, a
   server that the client then owes too many answers ends it with the
   write's error.
+- A native Kubernetes backend, `internal/backend/kubernetes`, in pure
+  Go and without client-go: a `kubernetes` connection opens a terminal
+  in a pod's container through the API server's `pods/exec` (or
+  `pods/attach`), over the `v5.channel.k8s.io` WebSocket subprotocol
+  with `v4.channel.k8s.io` as fallback. It authenticates with a bearer
+  token (`token_file`, `token_env` or a prompt) or a client
+  certificate, sends the token only after the API server's certificate
+  is checked against `tls` (the system's roots, `ca_file` or `pins`),
+  never logs it, and refuses names that are not Kubernetes's. It has no
+  guacd backend and no ad-hoc targets.
 
 ### Changed
 
@@ -436,6 +472,15 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   longer allocates. A PDU of 64 bitmaps of 64×64 now makes 1 allocation
   of 120 bytes instead of 129 allocations of 804 bytes. Its time is
   unchanged within noise, because decoding dominates it.
+
+### Removed
+
+- The Vue web client, with its fork of guacamole-common-js
+  (`occamy.js`) and the fork's Apache LICENSE and NOTICE, element-plus,
+  vue-router and axios. The web client no longer speaks the v0 routes
+  or the Guacamole protocol, which occamyd still serves to other
+  clients until v1.0. A v0 file's `client: true` still serves
+  `/static/`, but the web client there needs a v1 file.
 
 ### Fixed
 
@@ -467,6 +512,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 - occamyd's request log no longer records query strings, which carry the
   v0 token and with it the remote credentials.
+- A secret file, `password_file`, `token_file` or
+  `auth.oidc.client_secret_file`, of more than 64 KiB is refused, so
+  that a path such as `/dev/zero` cannot fill occamyd's memory.
 - A panic on a goroutine a backend starts, such as the SSH backend's
   readers of the remote's output and the VNC, RDP and guacd backends'
   writers, ends its session with close 1011 instead of crashing occamyd

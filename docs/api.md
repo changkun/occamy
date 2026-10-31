@@ -1,8 +1,9 @@
 # HTTP API v1
 
 This document describes every route that `occamyd` serves for a v1
-configuration file: API v1 under `/api/v1`, `/healthz`, the v0 routes
-that `legacy_v0` keeps, and the debug listener. The keys that turn
+configuration file: API v1 under `/api/v1`, `/healthz`, the web client
+under `/static/`, the v0 routes that `legacy_v0` keeps, and the debug
+listener. The keys that turn
 routes on and set their limits are described in
 [configuration.md](configuration.md); the stream that the two stream
 routes carry after the upgrade is protocol v1, described in
@@ -22,6 +23,7 @@ section here, and that every section here is a route (`TestAPIDoc`).
 - [Ad-hoc targets](#ad-hoc-targets)
 - [Shares](#shares)
 - [Streams](#streams)
+- [Web client](#web-client)
 - [v0 routes](#v0-routes)
 - [The debug listener](#the-debug-listener)
 
@@ -48,6 +50,7 @@ HTTP/1.1 only, with or without TLS: the streams are WebSockets, which
 | [`POST /api/v1/sessions/{id}/shares`](#post-apiv1sessionsidshares) | the owner's access token | always |
 | [`GET /api/v1/connections/{id}/stream`](#get-apiv1connectionsidstream) | an access token | always |
 | [`GET /api/v1/sessions/{id}/stream`](#get-apiv1sessionsidstream) | an access token, a session token or a share | always |
+| [`GET /static/`](#get-static) | a browser | with `web_client` |
 | [`POST /api/v0/login`](#post-apiv0login) | anyone | with `legacy_v0` |
 | [`GET /api/v0/connect`](#get-apiv0connect) | a v0 token | with `legacy_v0` |
 | [`GET /debug/vars`](#get-debugvars) and `/debug/pprof/` | anyone who reaches the debug listener | with `debug.address`, on that listener only |
@@ -90,7 +93,8 @@ API v1's conventions:
   answers `404 not_found`, and a route asked with a method it does not
   take answers `405 method_not_allowed` with `Allow` listing the methods
   it takes, both in API v1's [error shape](#errors). Elsewhere, such as
-  `/healthz` or `/api/v0/`, Go's `net/http` answers in plain text.
+  `/healthz`, `/static/` or `/api/v0/`, Go's `net/http` answers in
+  plain text.
 
 ## Authentication
 
@@ -431,8 +435,8 @@ file.
 
 Response: `200`, with `Cache-Control: no-store`. Each connection has its
 `id`, its `name`, which is the ID unless the file gives one, and its
-`protocol`: `ssh`, `vnc`, `rdp` or `telnet`. Its target, credentials and
-backend are left out. `adhoc_targets` tells whether
+`protocol`: `ssh`, `vnc`, `rdp`, `telnet` or `kubernetes`. Its target,
+credentials, backend and pod are left out. `adhoc_targets` tells whether
 [`POST /api/v1/sessions`](#post-apiv1sessions) takes ad-hoc targets. A
 caller who may open nothing gets `"connections":[]`.
 
@@ -508,9 +512,9 @@ Response: `200`, with `Cache-Control: no-store`.
 |-------|---------|
 | `id` | The session's ID |
 | `connection` | The connection's ID; absent for an ad-hoc target |
-| `protocol` | `ssh`, `vnc`, `rdp` or `telnet` |
-| `backend` | What serves the session: `ssh`, `occamyd`'s native SSH backend; `vnc`, its native VNC backend; or `guacd`, the guacd bridge. ssh is always native, and rdp and telnet always go through guacd. vnc is native by default, and goes through guacd only when the connection's `backend` key, or `adhoc_backends` for an ad-hoc target, says `guacd` ([configuration.md](configuration.md#backends)) |
-| `class` | `terminal` (ssh) or `graphical` (the others, telnet through guacd included): whether the stream carries a terminal or tiles of pixels |
+| `protocol` | `ssh`, `vnc`, `rdp`, `telnet` or `kubernetes` |
+| `backend` | What serves the session: `ssh`, `occamyd`'s native SSH backend; `vnc`, its native VNC backend; `kubernetes`, its native Kubernetes backend; or `guacd`, the guacd bridge. ssh and kubernetes are always native, and rdp and telnet always go through guacd. vnc is native by default, and goes through guacd only when the connection's `backend` key, or `adhoc_backends` for an ad-hoc target, says `guacd` ([configuration.md](configuration.md#backends)) |
+| `class` | `terminal` (ssh and kubernetes) or `graphical` (the others, telnet through guacd included): whether the stream carries a terminal or tiles of pixels |
 | `size` | `width` and `height`, in character cells for a terminal and in pixels for a graphical session; absent until the remote reports a size |
 | `viewers` | The viewers connected now, the owner first if connected, then the others in the order they joined: each one's `id`, as in `viewer-joined`, and `role`, `owner`, `viewer` or `read-only`. Empty, `[]`, while nobody is connected |
 | `opened` | When the session was opened, RFC 3339 in UTC, to the second |
@@ -569,7 +573,7 @@ are described in [configuration.md](configuration.md#ad-hoc-targets).
 
 | Field | Meaning |
 |-------|---------|
-| `protocol` | Required: `ssh`, `vnc`, `rdp` or `telnet` |
+| `protocol` | Required: `ssh`, `vnc`, `rdp` or `telnet`. kubernetes has no ad-hoc targets: its pod and credentials are a connection's |
 | `target` | Required: `host:port`, or a host alone for the protocol's default port (22, 5900, 3389, 23). An IPv6 address goes in brackets with a port, `[fd00::22]:22` |
 | `username` | Optional: the user name to log in as. Without one, the owner is asked for it if the remote needs one |
 | `host_keys` | ssh only: the host keys the target may present, as a connection's `host_keys` takes them: public keys in `authorized_keys` format or `SHA256:` fingerprints |
@@ -578,7 +582,7 @@ are described in [configuration.md](configuration.md#ad-hoc-targets).
 The request carries no secret, and the target takes none from the file:
 its credentials are always asked of the owner on the session's stream,
 and are not kept. The target is refused with `400 bad_request` for an
-unknown protocol, a target that does not parse, an ssh target without
+unknown protocol, `kubernetes`, a target that does not parse, an ssh target without
 exactly one of `host_keys` and `insecure_ignore_host_key`, a host key
 that does not parse, or host key fields on another protocol. It is
 refused with `403 forbidden` when `adhoc_allowlist` does not allow it:
@@ -754,22 +758,72 @@ access token or else a session token.
 A newer stream of the owner takes over from an older one, which gets
 `close` 1000 `normal` with "the owner connected again"; a connection
 that died without `occamyd` noticing would otherwise keep the owner out
-of their own session. The owner's `hello` resizes the session; a
-viewer's resizes nothing.
+of their own session. The reason is fixed, so that a client tells a
+takeover from its own close: the web client says the session was
+opened elsewhere and offers to join it again. The owner's `hello`
+resizes the session; a viewer's resizes nothing.
+
+## Web client
+
+### `GET /static/`
+
+The web client ([client/occamy-web](../client/occamy-web)), built into
+the directory that `web_client` names, as `make client` builds it in
+`client/occamy-web/dist`. Served only with `web_client`; without it,
+`/static/` is `net/http`'s plain-text `404`. It takes no token: the
+page signs in through API v1, on this origin, since `occamyd` answers no
+CORS preflight. `GET /static` redirects here.
+
+Response: the file under the directory, with the type its extension
+names, or the `index.html` of a directory. Anything else is `404`: a
+directory without an `index.html`, which is never listed, and a
+symbolic link that leads out of the directory, which is not followed
+(one within it is). Every response has these headers:
+
+| Header | Value | Why |
+|--------|-------|-----|
+| `Cache-Control` | `public, max-age=31536000, immutable` for a file served from `assets/`; `no-cache` for anything else, a missing asset too | Vite names the files in `assets/` by a hash of their content, so a new build names new files; a page of an earlier build never asks for scripts that a newer build replaced |
+| `X-Content-Type-Options` | `nosniff` | |
+| `Content-Security-Policy` | see below | |
+| `Referrer-Policy` | `no-referrer` | |
+
+The Content-Security-Policy, for a request to `host`:
+
+```text
+default-src 'self'; script-src 'self'; worker-src 'self';
+connect-src 'self' ws://host wss://host; img-src 'self' data:;
+style-src 'self' 'unsafe-inline'; font-src 'self'; object-src 'none';
+base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+```
+
+The page runs its own scripts and the Worker that decodes tiles; calls
+API v1 and opens streams on its own origin, which `ws://host` and
+`wss://host` name for browsers that do not count WebSockets as
+`'self'`; shows the remote's pointer as a `data:` image; and takes
+inline styles, which React's style attributes and the terminal
+emulator's stylesheet are. No other page may frame it, so none can lay
+itself over a remote desktop and take its clicks. A `Host` that is not
+a plain name or address with an optional port is left out of
+`connect-src`, so that a request cannot add to the policy.
+
+`occamyd` opens the directory for each request: it warns at start when
+the directory has no `index.html`, or does not exist, and serves the
+client once it is built, without a restart.
 
 ## v0 routes
 
-With `legacy_v0: true`, a v1 file also serves the v0 routes that the
-Guacamole-based web client uses, under `/api/v0`. It always serves both:
+With `legacy_v0: true`, a v1 file also serves the v0 routes that
+Guacamole-protocol clients use, under `/api/v0`. It always serves both:
 `POST /api/v0/login` as well as `GET /api/v0/connect`, where a v0 file
-serves the login only with `client: true`. They are removed at v1.0. Their bodies and errors are v0's,
-not API v1's, and neither the connection registry nor
-`allow_adhoc_targets` and `adhoc_allowlist` restrict them: the login
-signs any target for anyone, and `occamyd` warns at start. The web
-client itself, `GET /static/`, is served only by a v0 file with
-`client: true`, never by a v1 file. Protocol v0 is described in
-[protocol-cn.md](protocol-cn.md), and v0 files in
-[configuration.md](configuration.md#v0-files).
+serves the login only with `client: true`. They are removed at v1.0.
+Their bodies and errors are v0's, not API v1's, and neither the
+connection registry nor `allow_adhoc_targets` and `adhoc_allowlist`
+restrict them: the login signs any target for anyone, and `occamyd`
+warns at start. A v0 file with `client: true` serves `/static/` from
+`client/occamy-web/dist` as well, as [`GET /static/`](#get-static)
+describes, but the web client there needs API v1, which only a v1 file
+serves. Protocol v0 is described in [protocol-cn.md](protocol-cn.md),
+and v0 files in [configuration.md](configuration.md#v0-files).
 
 ### `POST /api/v0/login`
 
