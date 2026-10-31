@@ -1198,15 +1198,28 @@ RDP's guacd path, RDP no longer needs guacd at all.
     4. The log must gain one `starting xrdp-chansrv again`, and exactly
        one channel server must run.
 
-    Without the script, the subtest fails. CI showed it on a throwaway
-    commit that left the script out of the image (run 41208460674):
-    the run's first clipboard check had cost the channel server, as in
-    the flake, so every later connection waited 10 seconds for it, and
-    the subtest's first clipboard check timed out. The first throwaway
-    run, and the run after its revert, failed sooner, on reading the
-    log: CI ran `make e2e` with the Makefile's default engine, podman,
-    whose compose reached no daemon on the runner. CI now gives
-    `make e2e` `CONTAINER_ENGINE=docker`, as it gives `make run`.
+    Without the script, the subtest fails. CI showed it with a throwaway
+    commit that left the script out of the image, and the head that
+    reverted it:
+    - Without the script (run 41223126227), the subtest logged 0
+      channel servers before its first clipboard check, and that check
+      timed out after 60 s. The rdp log has `error in trans_connect
+      chan` for `resize`'s connection and for the subtest's, and no
+      restart line.
+    - With it (run 41223169024), the subtest also began with 0 channel
+      servers. Both of its clipboard checks passed, and it took 6.00 s.
+
+    In both runs the `clipboard` subtest's connection cost the channel
+    server. `resize` then took 10.62 s without the script, waiting out
+    xrdp's retries, and 2.58 s with it. The clipboard check fails only
+    when the channel server dies before it, which is why the flake
+    showed itself seldom.
+
+    An earlier throwaway run and its revert failed sooner, on reading
+    the log, and so proved nothing. CI ran `make e2e` with the
+    Makefile's default engine, podman, whose compose reached no daemon
+    on the runner. CI now gives `make e2e` `CONTAINER_ENGINE=docker`,
+    as it gives `make run`.
 - **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
   through occamyd's routes with the Go client against `rdptest`: NLA
   with stored credentials, the hello's size, the screen, scancodes,
