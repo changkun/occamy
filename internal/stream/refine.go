@@ -176,12 +176,10 @@ func (w *writer) candidates(viewport image.Rectangle, now time.Time) (wake time.
 // input ends the wait too.
 func (w *writer) refinement(ctx context.Context, viewport image.Rectangle) (time.Duration, error) {
 	if w.in != nil {
-		// Its effect may come yet. An input that shows nothing is given
-		// up after inputTimeout, which collect finds once the writer
-		// wakes; one whose effect showed goes with its frame.
-		if w.in.boosted {
-			return 0, nil
-		}
+		// Its effect may come yet, or go in its frame. An input that
+		// shows nothing, or whose effect showed but left the viewport
+		// unsent, is given up after inputTimeout, which collect finds
+		// once the writer wakes.
 		return max(time.Until(w.in.at.Add(inputTimeout))+time.Millisecond, time.Millisecond), nil
 	}
 	now := time.Now()

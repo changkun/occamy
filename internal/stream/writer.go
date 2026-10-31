@@ -335,6 +335,21 @@ func (w *writer) collect(viewport image.Rectangle) (fresh int, ok bool) {
 	if w.in != nil && !w.in.boosted && now.Sub(w.in.at) > inputTimeout {
 		w.resolve()
 	}
+	fresh = w.dirtyNow(viewport, clock)
+	if fresh == 0 && w.in != nil && w.in.boosted && now.Sub(w.in.at) > inputTimeout {
+		// Its effect showed, but none of it is left to send in the
+		// viewport: the frame that was to carry it was cut short, and
+		// the viewport moved off it since. It is given up too.
+		w.resolve()
+		fresh = w.dirtyNow(viewport, clock)
+	}
+	return fresh, true
+}
+
+// dirtyNow fills w.order with the dirty tiles in the viewport at clock,
+// those that show the pending input's effect first, and reports how many
+// those are.
+func (w *writer) dirtyNow(viewport image.Rectangle, clock uint64) (fresh int) {
 	var after uint64
 	var active []bool
 	if w.in != nil {
@@ -344,7 +359,7 @@ func (w *writer) collect(viewport image.Rectangle) (fresh int, ok bool) {
 		}
 	}
 	w.order, fresh = dirty(w.order, w.g, w.versions, w.sent, viewport, after, active)
-	return fresh, true
+	return fresh
 }
 
 // sendFrame sends tiles as one frame. If input is set, they are the

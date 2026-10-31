@@ -457,6 +457,47 @@ func TestRefineAfterCongestion(t *testing.T) {
 	}
 }
 
+// An input whose effect showed, but whose frame was cut short before any
+// of it went, and whose effect the viewport has since left, holds
+// refinement back only until the writer gives it up, inputTimeout after
+// it came: the writer wakes then.
+func TestRefineAfterEffectLeftView(t *testing.T) {
+	d := newRefineDirect(t, false)
+	w := d.w
+	img := corpusFrame(t, "photo")
+	d.show(img)
+	d.frame()
+	in := 7*w.g.cols + 10 // in the viewport below, at 30 as motion leaves it
+	w.sc.qual[in], w.goal[in] = 30, 0
+	clock := w.fb.Clock()
+	next := image.NewRGBA(img.Rect)
+	copy(next.Pix, img.Pix)
+	draw.Draw(next, image.Rect(0, 0, 64, 64), image.NewUniform(color.RGBA{0x20, 0x40, 0x60, 0xff}), image.Point{}, draw.Src)
+	d.show(next)
+	seq, _ := w.v.LastInput()
+	w.in = &pending{first: seq, seq: seq, clock: clock, at: time.Now(), boosted: true}
+
+	view := image.Rect(512, 384, 1024, 768)
+	if fresh, _ := w.collect(view); fresh != 0 || w.in == nil {
+		t.Fatalf("%d tiles of the effect in a viewport without it, or the input given up at once", fresh)
+	}
+	if wait, err := w.refinement(d.ctx, view); err != nil || wait <= 0 || wait > inputTimeout+time.Millisecond {
+		t.Fatalf("refinement waits %v for the input (%v), want until it times out", wait, err)
+	}
+	w.in.at = time.Now().Add(-inputTimeout - time.Millisecond)
+	// Its effect still to send in the viewport, as when the pacer holds
+	// frames back on a slow link, it is kept however long it takes.
+	if fresh, _ := w.collect(image.Rectangle{}); fresh != 1 || w.in == nil {
+		t.Fatalf("%d tiles of the effect in the whole screen, or the input given up with its effect unsent", fresh)
+	}
+	if _, _ = w.collect(view); w.in != nil {
+		t.Fatal("the input is not given up once it timed out")
+	}
+	if wait, err := w.refinement(d.ctx, view); err != nil || wait == 0 {
+		t.Errorf("refinement waits %v (%v) once the input is given up, with tiles to refine", wait, err)
+	}
+}
+
 // The time between frames cools the heat, whatever the frames are: the
 // writer counts the time before each frame, of tiles or of refinement,
 // toward the cooling at the next snapshot, and not the frame's own time.
