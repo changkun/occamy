@@ -431,8 +431,8 @@ file.
 
 Response: `200`, with `Cache-Control: no-store`. Each connection has its
 `id`, its `name`, which is the ID unless the file gives one, and its
-`protocol`: `ssh`, `vnc`, `rdp` or `telnet`. Its target, credentials and
-backend are left out. `adhoc_targets` tells whether
+`protocol`: `ssh`, `vnc`, `rdp`, `telnet` or `kubernetes`. Its target,
+credentials, backend and pod are left out. `adhoc_targets` tells whether
 [`POST /api/v1/sessions`](#post-apiv1sessions) takes ad-hoc targets. A
 caller who may open nothing gets `"connections":[]`.
 
@@ -508,9 +508,9 @@ Response: `200`, with `Cache-Control: no-store`.
 |-------|---------|
 | `id` | The session's ID |
 | `connection` | The connection's ID; absent for an ad-hoc target |
-| `protocol` | `ssh`, `vnc`, `rdp` or `telnet` |
-| `backend` | What serves the session: `ssh`, `occamyd`'s native SSH backend; `vnc`, its native VNC backend; or `guacd`, the guacd bridge. ssh is always native, and rdp and telnet always go through guacd. vnc goes through guacd unless the connection's `backend` key, or `adhoc_backends` for an ad-hoc target, says `native` ([configuration.md](configuration.md#backends)) |
-| `class` | `terminal` (ssh) or `graphical` (the others, telnet through guacd included): whether the stream carries a terminal or tiles of pixels |
+| `protocol` | `ssh`, `vnc`, `rdp`, `telnet` or `kubernetes` |
+| `backend` | What serves the session: `ssh`, `occamyd`'s native SSH backend; `vnc`, its native VNC backend; `kubernetes`, its native Kubernetes backend; or `guacd`, the guacd bridge. ssh and kubernetes are always native, and rdp and telnet always go through guacd. vnc goes through guacd unless the connection's `backend` key, or `adhoc_backends` for an ad-hoc target, says `native` ([configuration.md](configuration.md#backends)) |
+| `class` | `terminal` (ssh and kubernetes) or `graphical` (the others, telnet through guacd included): whether the stream carries a terminal or tiles of pixels |
 | `size` | `width` and `height`, in character cells for a terminal and in pixels for a graphical session; absent until the remote reports a size |
 | `viewers` | The viewers connected now, the owner first if connected, then the others in the order they joined: each one's `id`, as in `viewer-joined`, and `role`, `owner`, `viewer` or `read-only`. Empty, `[]`, while nobody is connected |
 | `opened` | When the session was opened, RFC 3339 in UTC, to the second |
@@ -569,7 +569,7 @@ are described in [configuration.md](configuration.md#ad-hoc-targets).
 
 | Field | Meaning |
 |-------|---------|
-| `protocol` | Required: `ssh`, `vnc`, `rdp` or `telnet` |
+| `protocol` | Required: `ssh`, `vnc`, `rdp` or `telnet`. kubernetes has no ad-hoc targets: its pod and credentials are a connection's |
 | `target` | Required: `host:port`, or a host alone for the protocol's default port (22, 5900, 3389, 23). An IPv6 address goes in brackets with a port, `[fd00::22]:22` |
 | `username` | Optional: the user name to log in as. Without one, the owner is asked for it if the remote needs one |
 | `host_keys` | ssh only: the host keys the target may present, as a connection's `host_keys` takes them: public keys in `authorized_keys` format or `SHA256:` fingerprints |
@@ -578,7 +578,7 @@ are described in [configuration.md](configuration.md#ad-hoc-targets).
 The request carries no secret, and the target takes none from the file:
 its credentials are always asked of the owner on the session's stream,
 and are not kept. The target is refused with `400 bad_request` for an
-unknown protocol, a target that does not parse, an ssh target without
+unknown protocol, `kubernetes`, a target that does not parse, an ssh target without
 exactly one of `host_keys` and `insecure_ignore_host_key`, a host key
 that does not parse, or host key fields on another protocol. It is
 refused with `403 forbidden` when `adhoc_allowlist` does not allow it:

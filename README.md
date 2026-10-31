@@ -25,6 +25,7 @@ Guacamole protocol and no v0 routes
 | VNC | Through guacd, verified end to end | Through guacd, or native with `backend: native` |
 | SSH | Through guacd, verified end to end, including repeated sessions | Native |
 | RDP | Through guacd, verified against xrdp | Through guacd; the native backend is built but not yet served |
+| Kubernetes | Untested | Native: a terminal in a pod, through the API server's exec stream |
 
 v1 also serves telnet, through guacd only: it gets no native backend and
 goes when guacd does.
