@@ -228,7 +228,7 @@ func TestPlanarRoundTrip(t *testing.T) {
 		src := planarEncode(planes, tc.w, tc.h, tc.alpha)
 		var d decoder
 		dst := make([]byte, 4*tc.w*tc.h)
-		if err := d.planarDecode(src, tc.w, tc.h, dst, false); err != nil {
+		if err := d.planarDecode(src, tc.w, tc.h, dst, 4*tc.w, planarGFX); err != nil {
 			t.Fatalf("%dx%d: %v", tc.w, tc.h, err)
 		}
 		for y := range tc.h {
@@ -254,20 +254,25 @@ func TestPlanarRawAndBottomUp(t *testing.T) {
 		0} // pad
 	var d decoder
 	dst := make([]byte, 16)
-	if err := d.planarDecode(src, 2, 2, dst, true); err != nil {
+	if err := d.planarDecode(src, 2, 2, dst, 8, planarBitmap); err != nil {
 		t.Fatal(err)
 	}
 	want := []byte{3, 7, 11, 0xff, 4, 8, 12, 0xff, 1, 5, 9, 0xff, 2, 6, 10, 0xff}
 	if !bytes.Equal(dst, want) {
 		t.Errorf("got %v, want %v", dst, want)
 	}
-	if err := d.planarDecode(src[:10], 2, 2, dst, true); err == nil {
+	if err := d.planarDecode(src[:10], 2, 2, dst, 8, planarBitmap); err == nil {
 		t.Error("truncated raw planes: no error")
 	}
-	if err := d.planarDecode([]byte{0x01}, 2, 2, dst, true); err == nil {
-		t.Error("colour loss: no error")
+	for _, hdr := range []byte{planarNA | 1, planarNA | planarCS | 1} {
+		if err := d.planarDecode(planarYCoCg(gradient(2, 2), hdr), 2, 2, dst, 8, planarBitmap); err == nil {
+			t.Errorf("AYCoCg of header %#02x in a bitmap update: no error", hdr)
+		}
+		if err := d.planarDecode(planarYCoCg(gradient(2, 2), hdr), 2, 2, dst, 8, planarGFX); err != nil {
+			t.Errorf("AYCoCg of header %#02x on a surface: %v", hdr, err)
+		}
 	}
-	if err := d.planarDecode([]byte{planarRLE | planarNA, 0x03}, 2, 2, dst, true); err == nil {
+	if err := d.planarDecode([]byte{planarRLE | planarNA, 0x03}, 2, 2, dst, 8, planarBitmap); err == nil {
 		t.Error("run past the row: no error")
 	}
 }
@@ -427,7 +432,7 @@ func testClock(w, h int) (*Client, *fakeClock) {
 	clock := &fakeClock{t: time.Unix(1<<30, 0)}
 	c := &Client{
 		width: w, height: h,
-		stats: Stats{Bitmaps: map[string]int{}, Ignored: map[string]int{}},
+		stats: newStats(),
 		t:     &transport{conn: discardConn{}},
 		now:   clock.now,
 		sleep: clock.sleep,

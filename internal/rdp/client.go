@@ -8,11 +8,15 @@
 // pointer updates, and keyboard and mouse input. It is the protocol half
 // of a native RDP backend (specs/008-native-architecture/rdp-strategy.md).
 //
-// The client asks for bitmap updates only: it advertises no drawing
-// orders, caches, bulk compression or bitmap codecs. Of the virtual
-// channels it speaks the clipboard's, CLIPRDR, for text, when Config
-// asks for it. Standard RDP security, the licensing exchange, Kerberos
-// and the GFX pipeline are not implemented.
+// Without the graphics pipeline the client asks for bitmap updates only:
+// it advertises no drawing orders, caches, bulk compression or bitmap
+// codecs. Of the virtual channels it speaks the clipboard's, CLIPRDR,
+// for text, and DRDYNVC's Display Control, when Config asks for them.
+// With Config.GFX it speaks the graphics pipeline ([MS-RDPEGFX]) with
+// ZGFX, surfaces, fills, copies and the uncompressed and planar codecs;
+// its other codecs and its cache are not implemented yet. Standard RDP
+// security, the licensing exchange, Kerberos and H.264 are not
+// implemented.
 package rdp
 
 import (
@@ -76,6 +80,14 @@ type Config struct {
 	// the server's Display Control channel, through which RequestSize
 	// asks the server to resize the desktop (dynvc.go).
 	Resize bool
+	// GFX asks for the graphics pipeline ([MS-RDPEGFX]) on a dynamic
+	// channel: surfaces that the client composes onto the desktop, solid
+	// fills, copies, and bitmaps in the uncompressed and planar codecs
+	// (gfx.go). Bitmaps in the codecs the client does not take yet,
+	// RemoteFX Progressive among them, which xrdp sends, are skipped, so
+	// it is off by default. A server that does not open the channel draws with bitmap
+	// updates as without it.
+	GFX bool
 	// Logger receives warnings; nil means slog.Default().
 	Logger *slog.Logger
 
@@ -93,6 +105,9 @@ type Output interface {
 	// drawing, and Unlock releases them.
 	Lock(r image.Rectangle) *image.RGBA
 	Unlock(r image.Rectangle)
+	// CopyRect copies the pixels of dst's size at src to dst, both on the
+	// desktop, as the graphics pipeline copies within a surface.
+	CopyRect(dst image.Rectangle, src image.Point)
 	// Cursor sets the pointer's shape; nil hides it.
 	Cursor(img *image.RGBA, hot image.Point)
 	// CursorMove reports that the server moved the pointer.
@@ -104,8 +119,12 @@ type Output interface {
 // Stats counts what a client received, by kind.
 type Stats struct {
 	// Bitmaps counts bitmap rectangles by codec: "planar", "rle8",
-	// "rle15", "rle16", "rle24", "raw16", "raw32" and so on.
+	// "rle15", "rle16", "rle24", "raw16", "raw32" and so on, and the
+	// graphics pipeline's "gfx planar" and "gfx uncompressed".
 	Bitmaps map[string]int
+	// GFX counts the graphics pipeline's PDUs the client applied, by
+	// kind: "create surface", "solid fill", "end frame" and so on.
+	GFX map[string]int
 	// FastPath and SlowPath count update PDUs by path.
 	FastPath, SlowPath int
 	// Ignored counts what the client received and did not apply, such as
@@ -115,6 +134,11 @@ type Stats struct {
 	Bytes int64
 	// Pointers counts pointer shape updates.
 	Pointers int
+}
+
+// newStats returns statistics of nothing, their maps made.
+func newStats() Stats {
+	return Stats{Bitmaps: map[string]int{}, Ignored: map[string]int{}, GFX: map[string]int{}}
 }
 
 // Client is a connection to an RDP server.
@@ -163,6 +187,7 @@ type Client struct {
 	// Owned by Connect, then Run.
 	ctx        context.Context // ends a wait; Background if nil
 	dec        decoder
+	gfx        gfx
 	cursors    [maxPointerCache]cursor
 	shown      shownCursor
 	frag       []byte
@@ -285,7 +310,7 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 		t:      newTransport(conn, cfg.Trace),
 		width:  cfg.Width,
 		height: cfg.Height,
-		stats:  Stats{Bitmaps: map[string]int{}, Ignored: map[string]int{}},
+		stats:  newStats(),
 		ctx:    ctx,
 		chio:   channelIO{kick: make(chan struct{}, 1)},
 
@@ -575,6 +600,10 @@ func (c *Client) Stats() Stats {
 	s.Ignored = make(map[string]int, len(c.stats.Ignored))
 	for k, v := range c.stats.Ignored {
 		s.Ignored[k] = v
+	}
+	s.GFX = make(map[string]int, len(c.stats.GFX))
+	for k, v := range c.stats.GFX {
+		s.GFX[k] = v
 	}
 	return s
 }
