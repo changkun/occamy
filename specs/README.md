@@ -108,7 +108,8 @@ everything through guacd with a cgo-free `occamyd` (005) →
 and native VNC and RDP as their protocols' defaults → beta.2 with
 VNC's guacd fallback deleted once the benchmark shows native 10x better
 → rc.1 freezes the API and protocol, with native RDP's graphics
-pipeline and its check against Windows → v1.0 with no guacd,
+pipeline; its check against Windows runs once a host is available
+(#32) → v1.0 with no guacd,
 no Guacamole protocol and no v0 routes. Telnet has no native backend and
 is dropped with guacd. Native is the default wherever a native backend
 exists, and guacd stays only as an explicit fallback and the benchmark's

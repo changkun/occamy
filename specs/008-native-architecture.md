@@ -124,7 +124,7 @@ stays on guacd and is dropped when guacd is removed.
 | v0.5.0 ([005](005-upstream-guacamole.md), released 2026-10-29) | `occamyd` without cgo; everything through guacd | VNC, SSH, RDP |
 | v1.0.0-beta.1 | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, native VNC as vnc's default, native RDP as rdp's default (not yet checked against Windows), web client on v1 | VNC and RDP only with `backend: guacd` |
 | v1.0.0-beta.2 | Native VNC through the parity gate: VNC's guacd fallback deleted once the benchmark shows native at least 10x better | RDP only with `backend: guacd` |
-| v1.0.0-rc.1 | API and protocol frozen; native RDP with GFX and checked against Windows; Swift client preview | nothing by default; any fallback still short of the gate |
+| v1.0.0-rc.1 | API and protocol frozen; native RDP with GFX; the Windows check runs once a host is available (#32), as [rdp-strategy](008-native-architecture/rdp-strategy.md) decision 5 says; Swift client preview | nothing by default; any fallback still short of the gate |
 | v1.0.0 | No guacd and no Guacamole protocol, so no telnet; the v0 routes are removed | nothing |
 | v1.x | Kerberos, audio and the rest of RDP's later scope per [rdp-strategy](008-native-architecture/rdp-strategy.md) | nothing |
 
