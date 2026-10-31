@@ -296,6 +296,7 @@ colours reached guacd shifted.
 | `connections[].insecure_ignore_host_key` | `false` | Accept any host key from an ssh target instead, logging its fingerprint as a warning. For demos only; set this or `host_keys`, not both |
 | `connections[].tls` | system roots on the native backend, the default of vnc and rdp, and for kubernetes; none with `backend: guacd` | How the target's certificate is checked: a vnc target's when the server offers VeNCrypt, which the native backend then always chooses, an rdp target's always, since the native RDP backend always runs TLS, and a kubernetes target's API server's. Without `tls`, the certificate must chain to the system's roots and name the target's host, as a browser checks it. Through guacd, `tls` is not what checks the certificate, so a vnc or rdp connection with `tls` cannot set `backend: guacd`; not for ssh or telnet. See below |
 | `connections[].security` | `nla` | An rdp connection's security mode on the native backend, named as guacd names them: `nla`, NLA (CredSSP with NTLMv2) over TLS; `nla-ext`, the same with the early user authorization result only; `tls`, TLS without NLA, which sends the password to whichever server passed the certificate check; or `any`, which offers TLS and NLA and lets the server choose. xrdp speaks no NLA, so an xrdp target needs `tls` or `any`. Standard RDP security, without TLS, is never used. Not with `backend: guacd`, which takes its mode from `guacd.params.rdp`'s `security`, and only for rdp. See [backends](#backends) |
+| `connections[].disable_gfx` | `false` | Keep an rdp connection on the native backend from asking for RDP's graphics pipeline (GFX), so that the server draws with plain bitmap updates, as guacd's `disable-gfx` does. For a server whose GFX codecs the native backend does not take yet, such as a Windows server's ClearCodec. Not with `backend: guacd`, which takes it from `guacd.params.rdp`'s `disable-gfx`, and only for rdp. See [backends](#backends) |
 | `connections[].ard` | `false` | Allow Apple Remote Desktop authentication, which macOS Screen Sharing needs to log in a user of the Mac. A vnc connection on the native backend only, not with `backend: guacd`, and never with a `tls` that requires TLS. Read [the risk](#apple-remote-desktop-ard) first |
 | `connections[].kubernetes` | required for kubernetes | The pod a kubernetes connection opens a terminal in, and what runs there; see [Kubernetes](#kubernetes-pods) |
 | `connections[].credentials` | required | How `occamyd` authenticates to the target; see below |
@@ -491,8 +492,11 @@ A native rdp session:
   8192 pixels a side and at most 2^25 pixels in all, and for a later
   resize through the Display Control channel, where the server has it;
   a server that keeps another size is scaled by the viewers;
-- draws the server's bitmap updates, in interleaved RLE and planar, and
-  its pointer; sends keys as scancodes by their physical key, text as
+- asks for RDP's graphics pipeline (GFX), unless `disable_gfx` says
+  otherwise, and draws its surfaces, fills, copies and bitmaps in the
+  uncompressed, planar, RemoteFX and RemoteFX Progressive codecs, and,
+  from a server that does not open GFX, its bitmap updates, in
+  interleaved RLE and planar; draws the pointer; sends keys as scancodes by their physical key, text as
   Unicode keyboard events, and the pointer and wheel as mouse events;
   tells the server to suppress its output while no viewer can see the
   session;
@@ -507,14 +511,15 @@ The native RDP backend has been tested against xrdp and against
 occamy's own test server, not yet against Windows: Windows servers are
 not yet verified, which the backend's fourth phase does
 ([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)).
-Nor does it ask for RDP's graphics pipeline (GFX) yet, so a server
-sends it plain bitmap updates, as it sends guacd with `disable-gfx`:
-the client under it speaks GFX's surfaces, fills and copies and its
-planar and uncompressed codecs, but not yet RemoteFX Progressive,
-which xrdp sends, nor RemoteFX, ClearCodec or the cache, which the
-backend's third phase adds. There is no key that turns GFX on or off
-yet; the key that turns it off comes with the phase that turns it on.
-Until Windows is verified, `backend: guacd` is the fallback for a
+It asks for RDP's graphics pipeline (GFX) by default, through which
+xrdp draws its sessions in RemoteFX Progressive. Of GFX it does not
+yet take ClearCodec, which Windows servers draw text and small
+regions in, nor the bitmap cache, which the backend's third phase
+adds next, nor AVC (H.264), which it does not ask for: until then, a
+bitmap in ClearCodec, or from the cache, is skipped, and leaves its
+region as it was. `disable_gfx: true` on the connection turns GFX off,
+so that the server sends plain bitmap updates, as it sends guacd with
+`disable-gfx`. Until Windows is verified, `backend: guacd` is the fallback for a
 Windows server that the native backend cannot serve.
 
 xrdp speaks no NLA: offered NLA alone, it selects standard RDP
@@ -539,6 +544,8 @@ reads none of `guacd.params.rdp`. So:
   fingerprint the refusal logs;
 - its security mode is `security`, NLA by default, and guacd's
   `security` no longer applies: an xrdp target needs `security: tls`;
+- guacd's `disable-gfx` no longer applies: the native backend asks for
+  the graphics pipeline unless `disable_gfx` is set;
 - guacd's `disable-copy` and `disable-paste` no longer apply, and the
   configuration has no key yet that restricts the clipboard: the
   server's clipboard reaches every viewer, and the owner's and
@@ -733,8 +740,8 @@ that:
 - each connection's `backend`, and each of `adhoc_backends`, serves its
   protocol; `tls` is set only on vnc and rdp connections on the native
   backend, not with `backend: guacd`, and on kubernetes connections;
-  `ard` only on vnc connections and `security` only on rdp connections,
-  each on the native backend; `ard` never with a `tls` that requires
+  `ard` only on vnc connections and `security` and `disable_gfx` only
+  on rdp connections, each on the native backend; `ard` never with a `tls` that requires
   TLS, and `security` is `nla`, `nla-ext`, `tls` or `any`;
 - a kubernetes connection names a pod, with Kubernetes's names, and
   either `attach` or a `command`; it authenticates with `token_file`,

@@ -461,8 +461,8 @@ func TestOverlap(t *testing.T) {
 // adhoc_backends ends up with a backend: its own, or the protocol's
 // default, which is native where a native backend exists (ssh, vnc,
 // rdp and kubernetes) and guacd for telnet. For vnc and rdp, backend:
-// guacd is an explicit fallback, and tls, ard and security need no
-// backend key, since native is the default.
+// guacd is an explicit fallback, and tls, ard, security and
+// disable_gfx need no backend key, since native is the default.
 func TestParseV1Backends(t *testing.T) {
 	f, err := parse(t, head+`connections:
   - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
@@ -478,7 +478,7 @@ func TestParseV1Backends(t *testing.T) {
   - {id: k, protocol: telnet, target: k, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: l, protocol: rdp, backend: guacd, target: l, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: m, protocol: rdp, backend: native, security: tls, target: m, tls: {require: true, insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: n, protocol: rdp, security: any, target: n, tls: {pins: ["SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: n, protocol: rdp, security: any, disable_gfx: true, target: n, tls: {pins: ["SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="]}, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: o, protocol: kubernetes, target: o, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: p, protocol: kubernetes, backend: native, target: p, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}
 `)
@@ -492,6 +492,9 @@ func TestParseV1Backends(t *testing.T) {
 	want := []string{"a:native", "b:native", "c:native", "d:native", "e:guacd", "f:native", "g:native", "h:guacd", "i:native", "j:native", "k:guacd", "l:guacd", "m:native", "n:native", "o:native", "p:native"}
 	if !slices.Equal(got, want) {
 		t.Errorf("backends %v, want %v", got, want)
+	}
+	if !f.Connections[13].DisableGFX || f.Connections[6].DisableGFX {
+		t.Errorf("disable_gfx %v and %v, want true and false", f.Connections[13].DisableGFX, f.Connections[6].DisableGFX)
 	}
 	// Without adhoc_backends, ad-hoc vnc and rdp targets are native too.
 	if want := map[string]string{"ssh": "native", "vnc": "native", "rdp": "native", "telnet": "guacd"}; !maps.Equal(f.AdhocBackends, want) {
@@ -873,6 +876,10 @@ connections:
   - {id: h, protocol: rdp, security: NLA, target: h, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: i, protocol: rdp, security: nla-ext, target: i, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: j, protocol: rdp, backend: native, security: any, target: j, tls: {pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: k, protocol: rdp, disable_gfx: true, target: k, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: l, protocol: rdp, backend: guacd, disable_gfx: true, target: l, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: m, protocol: vnc, disable_gfx: true, target: m, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: n, protocol: rdp, backend: guacd, disable_gfx: false, target: n, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
 			{"connections[0].tls.pins[0]", "not a certificate or a SHA-256 fingerprint"},
 			{"connections[1].tls", "only the native RDP backend checks the certificate as tls says, and backend: guacd would not: leave backend out, or set native; through guacd, guacd.params.rdp's ignore-cert"},
@@ -881,6 +888,8 @@ connections:
 			{"connections[5].security", "only rdp connections have security"},
 			{"connections[6].security", `unknown security mode "rdp"`},
 			{"connections[7].security", `unknown security mode "NLA"`},
+			{"connections[11].disable_gfx", "backend: guacd does not: leave backend out, or set native; through guacd, guacd.params.rdp.disable-gfx sets it"},
+			{"connections[12].disable_gfx", "only rdp connections have disable_gfx"},
 		}},
 		{"kubernetes", head + `connections:
   - {id: a, protocol: kubernetes, backend: guacd, target: a, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}

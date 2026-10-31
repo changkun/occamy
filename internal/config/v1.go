@@ -273,6 +273,11 @@ type Connection struct {
 	// tls or any. Through guacd, guacd.params.rdp.security sets it
 	// instead. xrdp speaks no NLA, so an xrdp target needs tls or any.
 	Security string `yaml:"security"`
+	// DisableGFX keeps an rdp connection on the native backend from
+	// asking for RDP's graphics pipeline, which it asks for by default,
+	// so that the server draws with bitmap updates. Through guacd,
+	// guacd.params.rdp.disable-gfx sets it instead.
+	DisableGFX bool `yaml:"disable_gfx"`
 	// ARD allows Apple Remote Desktop authentication (security type 30)
 	// on a vnc connection with the native backend, which macOS Screen
 	// Sharing needs to log in a user of the Mac. Its key exchange
