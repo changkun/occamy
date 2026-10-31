@@ -623,7 +623,7 @@ and guacd leaves the default deployment.
   wrong public key proof, each without credentials delegated; and
   cancel while the server stalls at either step. The client also logs
   on through the acceptor in `internal/rdp`. Coverage, with the
-  reviews' tests: `internal/rdp` 88.6% of statements, `channel.go`
+  reviews' tests: `internal/rdp` 88.7% of statements, `channel.go`
   98.0% and `cliprdr.go` 96.9%; `internal/backend/rdp` 98.5%.
 - **Integration test.** `TestIntegrationClipboard`, under the
   `rdp_integration` tag, pastes text and reads the session's X
