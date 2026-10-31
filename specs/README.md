@@ -35,7 +35,7 @@ replaced one protocol at a time.
 | ● | [006](006-demo-stack-refresh.md) Demo stack refresh and end-to-end tests | complete |
 | ✕ | [007](007-native-gio-client.md) Native Gio client | archived |
 | ○ | [008](008-native-architecture.md) Occamy v1 architecture | drafted |
-| ○ | [009](009-react-web-client.md) React web client | vague |
+| ◐ | [009](009-react-web-client.md) React web client | testing |
 | ○ | [010](010-native-swift-client.md) Native Swift client on a Go core | validated |
 | ● | [011](011-release-readiness.md) Open source release readiness | complete |
 
@@ -79,7 +79,7 @@ Clients that speak to `occamyd`.
 | Spec | Status | Deliverable |
 |------|--------|-------------|
 | [007-native-gio-client.md](007-native-gio-client.md) | Archived | Retired in favour of 010 |
-| [009-react-web-client.md](009-react-web-client.md) | In progress: protocol client core built, shell decision open | Decision on React and, if chosen, a React shell, then protocol v1; the TypeScript protocol v1 core (`src/protocol`) comes first, independent of the shell |
+| [009-react-web-client.md](009-react-web-client.md) | In testing: protocol client core and React shell built, served from a v1 file with `web_client`; the Vue app and `occamy.js` removed; a browser job in CI to come | A React shell on the TypeScript protocol v1 core (`src/protocol`) and API v1, replacing the Vue app and `occamy.js` |
 | [010-native-swift-client.md](010-native-swift-client.md) | Not started | SwiftUI app for macOS 14+ linking the Go client core as a static library, on protocol v1 |
 
 ## Dependency graph

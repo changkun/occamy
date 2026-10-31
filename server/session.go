@@ -33,8 +33,8 @@ type Session struct {
 	users int           // guarded by proxy.mu
 }
 
-// Guacamole status codes that occamy.js reads from the WebSocket close
-// reason.
+// Guacamole status codes, which a Guacamole-protocol client of
+// /api/v0/connect reads from the WebSocket close reason.
 const (
 	statusSuccess          = 0x0000
 	statusServerError      = 0x0200
