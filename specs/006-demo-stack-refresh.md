@@ -323,6 +323,28 @@ notes: VNC's parity matrix), after this spec was complete.
   speak RFB. The bench desktop takes `GEOMETRY`, as the removed image's
   x11vnc mode did, so that `TestEncodings` can record x11vnc at 64×48.
 
+## Addendum: the loopback interface, and make clean
+
+Added with the run-and-test guide (`docs/try-it.md`), after this spec
+was complete.
+
+- Both `occamyd` services are published on `${OCCAMY_BIND:-127.0.0.1}`.
+  `occamy-v1` had been published on every interface, with the demo
+  user's public password. `make run` and `make bench` pass
+  `OCCAMY_BIND`, `127.0.0.1` unless the shell or the command line says
+  otherwise, so that `docker/.env` cannot widen it. They refuse
+  another address with `OCCAMY_DEBUG=1`, since the v0 service then
+  serves pprof on its own port. `occamy-v1`'s debug port stays on
+  `127.0.0.1`. The end-to-end tests, the soak and the benchmark reach
+  the stack on `localhost`, as CI does, so they are unchanged.
+  `internal/config`'s `TestDemoBind` checks the addresses compose
+  publishes on, with and without `make run`, and the refusal.
+- `make build` labels its image `de.changkun.occamy.make=build`.
+  `make clean` runs `compose down --remove-orphans --volumes --rmi
+  local` for the stack's project and prunes only the dangling images
+  with that label. It had pruned every dangling image of the engine.
+  `TestMakeClean` checks what `make -n clean` runs.
+
 ## Appendix: revival verification harness
 
 The throwaway harness used to verify [001](001-status-quo.md), kept here as a

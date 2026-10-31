@@ -78,14 +78,19 @@ runs the image that `make build` makes.
 
 | Service | On the host | What it is |
 |---------|-------------|------------|
-| `occamy-v1` | `5637`, on every interface | `occamyd` with the v1 file [docker/occamy-v1.yaml](../docker/occamy-v1.yaml): API v1, protocol v1 and the web client |
+| `occamy-v1` | `127.0.0.1:5637` | `occamyd` with the v1 file [docker/occamy-v1.yaml](../docker/occamy-v1.yaml): API v1, protocol v1 and the web client |
 | `occamy` | `127.0.0.1:5636` | `occamyd` with the v0 file [docker/occamy.yaml](../docker/occamy.yaml), for clients of the Guacamole protocol. The web client does not use it, and v1.0 removes it |
 | `guacd` | not published | guacd 1.6, for the v0 service and for the v1 connections that set `backend: guacd` |
 | `vnc`, `tigervnc`, `ssh`, `rdp` | not published | the demo servers: x11vnc, TigerVNC, OpenSSH and xrdp, on Debian |
 
-Port 5637 is open on every interface of the host, and anyone who has
-read this guide knows the demo password. Run the stack only on a
-machine and a network you trust.
+The stack publishes both `occamyd` services on the host's loopback
+interface only, since anyone who has read this guide knows the demo
+password. To reach it from another machine, publish them on every
+interface with `make run OCCAMY_BIND=0.0.0.0`, or on one address of
+the host's, and only on a network you trust. Set `OCCAMY_BIND` on
+`make`'s command line or export it, since `make run` does not read it
+from `docker/.env`. `make run OCCAMY_DEBUG=1` refuses any address but
+`127.0.0.1`, since the debug routes have no authentication.
 
 Open <http://localhost:5637/static/> and sign in as `demo` with the
 password `occamy`. **Connections** lists 23 connections, and the bar
@@ -595,18 +600,22 @@ make stop
 ```
 
 `make stop` stops and removes the stack's containers and its network.
-To also remove what `make run` built and made, run the following. The
-first command removes the demo servers' images and the volume of
-TigerVNC's CA. The second removes the image of `make build`, which
-`compose down` does not, since it is named:
+To also remove what `make build` and `make run` built and made:
 
 ```
-(cd docker && podman compose down --volumes --rmi local)
+make clean
 podman rmi occamy:latest "occamy:$(git describe --always --tags)"
 ```
 
+`make clean` removes nothing that is not Occamy's. It runs `compose
+down` with `--volumes --rmi local` for the stack's project, which
+removes the demo servers' images and the volume of TigerVNC's CA. It
+then prunes the images of earlier `make build` runs that a later build
+left untagged, which `make build` labels. The tagged image of `make
+build` stays, so `podman rmi` removes it.
+
 With the variables of [Next to another stack](#next-to-another-stack),
-keep them exported for `make stop` and `compose down`, and name your
+keep them exported for `make stop` and `make clean`, and name your
 image instead: `podman rmi occamy-try:latest "occamy-try:$(git describe
 --always --tags)"`.
 
@@ -631,5 +640,3 @@ the base images `debian:trixie-slim`, `golang:1.27-trixie`,
 `node:25-trixie-slim` and `gcr.io/distroless/static-debian13:nonroot`.
 So does `occamy-bench-desktop`, if you built it for `TestBenchDesktop`.
 `podman rmi` removes them.
-Avoid `make clean` on a shared host: it prunes the engine's dangling
-images, whoever made them.

@@ -582,6 +582,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Changed
 
+- `occamyd -h` says what occamyd serves now, a v1 file through API v1
+  and a v0 file through the v0 routes, not "a modern guacamole protocol
+  based remote desktop proxy", and lists its flag on a line of its own
+  instead of after "Usage:". `.gitignore` ignores the `occamyd` that
+  `make compile` builds.
 - The README starts with v1: the demo stack and the web client first,
   then a native build that serves a v1 file. The run instructions for
   guacd and a v0 file, and the v0 token's connection parameters, move
@@ -678,6 +683,17 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   `OCCAMY_DEBUG=1`, so a variable left in the shell or in `docker/.env`
   cannot turn them on. The pressure test and the soak need
   `OCCAMY_DEBUG=1`.
+- The demo stack publishes `occamy-v1`, whose demo user's password is
+  public, on the host's loopback interface. It was published on every
+  interface. `OCCAMY_BIND` names another address for both `occamyd`
+  services, such as `0.0.0.0` for every interface. `make run` and
+  `make bench` refuse it with `OCCAMY_DEBUG=1`, since the v0 service
+  then serves pprof on its port.
+- `make clean` removes only Occamy's own: the demo stack's containers,
+  volume and demo images through `compose down`, and the untagged images
+  of earlier `make build` runs, which `make build` now labels
+  `de.changkun.occamy.make=build`. It pruned every dangling image of the
+  engine, whoever built it.
 
 ## [0.6.0] - 2026-10-30
 

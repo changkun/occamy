@@ -198,9 +198,10 @@ make stop
 
 [docs/try-it.md](./docs/try-it.md) walks through the demo connection by
 connection, and shows how to run the stack next to another one on the
-same host. `occamy-v1` publishes port 5637 on every interface, with a
-demo password anyone can read here, so run the stack only on a machine
-and a network you trust.
+same host. The stack publishes `occamy` and `occamy-v1` on the host's
+loopback interface only. `make run OCCAMY_BIND=0.0.0.0` publishes them
+on every interface, with a demo password anyone can read here, so do
+that only on a network you trust.
 
 [docker/docker-compose.yaml](./docker/docker-compose.yaml) builds small
 Debian demo servers from [docker/demo](./docker/demo) for amd64 and arm64.

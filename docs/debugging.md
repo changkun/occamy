@@ -17,7 +17,8 @@ a file without `mode` runs in debug mode, and any other value stops
 `make run OCCAMY_DEBUG=1` mounts
 [docker/occamy-debug.yaml](../docker/occamy-debug.yaml), the same file
 in debug mode, in its place; the stack publishes the v0 service on the
-host's loopback interface only. In debug mode,
+host's loopback interface, and `make run OCCAMY_DEBUG=1` refuses an
+`OCCAMY_BIND` that would publish it on another address. In debug mode,
 `occamyd` serves Go's profiling routes under `/debug/pprof/` on its own
 address, with no token, and says so in its log at start.
 Anyone who can reach `occamyd` can then read its profiles and its
