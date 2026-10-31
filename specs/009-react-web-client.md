@@ -419,7 +419,9 @@ Settled on 2026-10-31.
     hand, and keeps what the user typed there when the remote's
     clipboard changes. Text sent there, or from the local clipboard,
     counts as the remote's, so the next remote clipboard replaces it;
-    only text typed since is kept. Control, Alt and Shift together
+    only text typed since is kept. What the panel last said, such as
+    that the text was sent, goes once the remote clipboard changes or
+    the user edits the text. Control, Alt and Shift together
     leave the canvas or the terminal for the toolbar, since the remote
     takes every other key, Tab included.
   - `vite build` writes the licenses of the packages it bundles to
@@ -495,9 +497,11 @@ Settled on 2026-10-31.
   on `pagehide` and an End that failed, not for a share or a role other
   than the owner's, and forgotten once it ends, once occamyd refuses to
   join it, and once the user leaves it, as after End ended it; a reload
-  over it signs in again and joins it;
+  over it says so in a notice with `role="status"`, not an error, signs
+  in again and joins it;
   and the clipboard panel shows the remote's next clipboard after text
-  was sent, keeping only what was typed since. The
+  was sent, keeping only what was typed since, and drops what Send said
+  once the remote clipboard changes or the box is edited. The
   controller runs against a stand-in `connect` and session (the
   hello's size and visibility, clamping, refusals, React's development
   effects cancelling an open, close cancelling one, the owner's resize
@@ -545,10 +549,12 @@ Settled on 2026-10-31.
     told the session ended. Later, with a fake RFB server whose
     clipboard changed on a key: text typed in the clipboard panel and
     sent reached the server, the panel no longer called it edited, and
-    the server's next clipboard replaced it, while text typed after a
-    send stayed, with Show it; and, with a read-only viewer watching, a
-    reload of the owner's page asked to sign in again to return to the
-    connection and, signed in, joined the same session as its owner
+    the server's next clipboard replaced it and what Send had said,
+    while text typed after a send stayed, with Show it, and took what
+    Send had said away; and, with a read-only viewer watching, a reload
+    of the owner's page asked to sign in again to return to the
+    connection, in a notice in the text's colour with `role="status"`
+    and no alert, and, signed in, joined the same session as its owner
     about a second later, the viewer watching throughout; after End, a
     reload signed in to the connection list. No page broke the
     Content-Security-Policy.
@@ -648,8 +654,10 @@ Settled on 2026-10-31.
     so that another tab does not take it over, as single sign-on
     already keeps a session to return to; the ID is no credential, as
     occamyd joins a session only for its owner's access token. A load
-    without a fragment over it asks the user to sign in again, then
-    joins it; occamyd decides, so a session past its grace, or a user
+    without a fragment over it asks the user to sign in again, in a
+    notice beside the form's errors, since nothing failed, with
+    `role="status"` so that screen readers announce it politely; then
+    it joins it. occamyd decides, so a session past its grace, or a user
     who is not its owner, is refused with 4001 and the view says so.
     It stays kept through a lost connection, a takeover and the page's
     own close on `pagehide`, as Join again would join it, and through
