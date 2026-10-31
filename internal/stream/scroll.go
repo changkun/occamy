@@ -201,6 +201,7 @@ type scroller struct {
 	slots  []int32  // the row of each slot plus one; 0 empty, -1 repeated
 	dys    []int
 	quals  []uint8 // apply's qualities of a column's tiles
+	goals  []uint8 // and their goals
 	copies []scrollCopy
 
 	// What the last search cost: the runs it read, the rows of them it
@@ -450,18 +451,23 @@ func (sc *scroller) try(rn run, dy, target int) (scrollCopy, bool) {
 // rows a to b of the column take those dy below: the lowest quality of
 // the tiles its copied rows come from, and of its own if it keeps any of
 // its rows.
-func (s *shadow) copied(c, r, a, b, dy int) uint8 {
+func (s *shadow) copied(c, r, a, b, dy int) uint8 { return s.lowest(s.qual, c, r, a, b, dy) }
+
+// lowest returns the lowest of of's values, one a tile, over the tiles
+// that the pixels of tile row r of column c come from once rows a to b
+// of the column take those dy below, as copied does.
+func (s *shadow) lowest(of []uint8, c, r, a, b, dy int) uint8 {
 	tile := s.g.tile
 	ty0, ty1 := r*tile, min((r+1)*tile, s.g.bounds.Dy())
 	y0, y1 := max(a, ty0), min(b, ty1)
 	q := uint8(lossless)
 	if y0 < y1 {
 		for sr := (y0 + dy) / tile; sr <= (y1-1+dy)/tile; sr++ {
-			q = min(q, s.qual[sr*s.g.cols+c])
+			q = min(q, of[sr*s.g.cols+c])
 		}
 	}
 	if y0 > ty0 || y1 < ty1 {
-		q = min(q, s.qual[r*s.g.cols+c])
+		q = min(q, of[r*s.g.cols+c])
 	}
 	return q
 }
@@ -528,15 +534,22 @@ func (sc *scroller) merge() {
 
 // apply makes the shadow show cp as the client does once it applies it:
 // the rows a to b of its columns become those dy below, with their
-// hashes, and the tiles they land in take their quality.
-func (sc *scroller) apply(cp scrollCopy) {
+// hashes, and the tiles they land in take their quality. If goal is not
+// nil, it holds each tile's goal (refine.go), and the tiles the rows
+// land in take the lowest goal of the tiles they come from as they take
+// the lowest quality: a copy of final pixels stays final, and one of
+// pixels whose goal is unknown, 0, has none.
+func (sc *scroller) apply(cp scrollCopy, goal []uint8) {
 	g, tile := sc.g, sc.g.tile
 	r0, r1 := cp.a/tile, (cp.b-1)/tile
 	for c := cp.c0; c < cp.c1; c++ {
-		// The qualities as the rows had them before the copy.
-		sc.quals = sc.quals[:0]
+		// The qualities and goals as the rows had them before the copy.
+		sc.quals, sc.goals = sc.quals[:0], sc.goals[:0]
 		for r := r0; r <= r1; r++ {
 			sc.quals = append(sc.quals, sc.copied(c, r, cp.a, cp.b, cp.dy))
+			if goal != nil {
+				sc.goals = append(sc.goals, sc.lowest(goal, c, r, cp.a, cp.b, cp.dy))
+			}
 		}
 		w := 4 * g.rect(c).Dx()
 		// Sources below are read before they are written, top to bottom;
@@ -562,6 +575,9 @@ func (sc *scroller) apply(cp scrollCopy) {
 		for r := r0; r <= r1; r++ {
 			t := r*g.cols + c
 			sc.qual[t] = sc.quals[r-r0]
+			if goal != nil {
+				goal[t] = sc.goals[r-r0]
+			}
 			if cp.a <= r*tile && min((r+1)*tile, g.bounds.Max.Y) <= cp.b {
 				sc.valid[t] = true
 			}
@@ -593,13 +609,12 @@ func (w *writer) scroll(ctx context.Context, id uint32, order []int, input bool)
 		if err := w.c.WriteMessage(ctx, w.sbuf); err != nil {
 			return copies, done, size, err
 		}
-		w.sc.apply(cp)
+		// The tiles the copy lands in take the quality and the goal of
+		// the pixels it moves in.
+		w.sc.apply(cp, w.goal)
 		at := time.Since(w.start)
 		for k, t := range cp.done {
 			w.sent[t] = cp.vers[k]
-			// Pixels moved in from elsewhere: refinement finds out what
-			// they are to reach.
-			w.goal[t] = 0
 			w.changed[t] = at
 			if input {
 				w.effects[t] = cp.vers[k]
