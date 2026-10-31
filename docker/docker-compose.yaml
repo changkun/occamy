@@ -31,8 +31,9 @@ services:
 
   occamy-v1:
     # The same image serving a v1 file (occamy-v1.yaml) on port 5637: the
-    # demo VNC servers, x11vnc and TigerVNC, through the native backend
-    # and through guacd, for API v1 and protocol v1 clients.
+    # demo VNC servers, x11vnc and TigerVNC, through the native backend,
+    # vnc's default, and through guacd (backend: guacd), for API v1 and
+    # protocol v1 clients.
     image: ${OCCAMY_IMAGE:-occamy:latest}
     command: ["/occamy/occamyd", "-conf", "/occamy/v1.yaml"]
     ports:

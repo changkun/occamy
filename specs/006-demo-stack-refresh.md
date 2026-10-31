@@ -227,7 +227,14 @@ notes: the opt-in period), after this spec was complete.
   from the same image with `-conf /occamy/v1.yaml`, published on 5637.
   Its v1 file, `docker/occamy-v1.yaml`, has the static user `demo`
   (password `occamy`) and two connections to `vnc:5900`: `vnc-native`
-  with `backend: native` and `vnc-guacd` through guacd. The VNC password
+  and `vnc-guacd`. When the opt-in period started, `vnc-native` set
+  `backend: native` and `vnc-guacd` took guacd as vnc's default. Since
+  the owner's decision of 2026-10-31 that native is the default
+  wherever a native backend exists
+  ([guacd-bridge](008-native-architecture/guacd-bridge.md), Parity
+  gate), `vnc-native` leaves `backend` out and gets that default, and
+  `vnc-guacd` sets `backend: guacd`, the fallback that stays as the
+  benchmark's baseline. The VNC password
   comes from `OCCAMY_DEMO_VNC_PASSWORD`, and the signing key goes to a
   tmpfs at `/run/occamy`, since the distroless image's `nonroot` user
   cannot write `/occamy`. `occamy-v1` waits for `guacd` and `vnc` only.
@@ -251,7 +258,7 @@ notes: the opt-in period), after this spec was complete.
 
 ## Addendum: TigerVNC and the VNC parity matrix
 
-Added for the guacd bridge's parity gate, step 2
+Added for the parity matrix of the guacd bridge's deletion gate
 ([guacd-bridge](008-native-architecture/guacd-bridge.md), Implementation
 notes: VNC's parity matrix), after this spec was complete.
 
@@ -284,7 +291,8 @@ notes: VNC's parity matrix), after this spec was complete.
   pressing that key after `setxkbmap` has dropped it, so switching at run
   time typed nothing.
 - `docker/occamy-v1.yaml` has every server, security type and layout
-  twice, `-native` and `-guacd`, each naming its backend:
+  twice, `-native` and `-guacd`, each naming its backend but
+  `vnc-native`, which serves vnc's default:
   `vnc`, `vnc-none`, `vnc-de`, `vnc-fr`, `tigervnc`, `tigervnc-prompt`,
   `tigervnc-plain`, `tigervnc-none`, `tigervnc-de` and `tigervnc-fr`.
   `occamy-v1` waits for `tigervnc` too, whose healthcheck waits for its

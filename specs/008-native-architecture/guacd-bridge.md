@@ -20,14 +20,19 @@ dispatched_task_id: null
 
 ## Design Problem
 
-During v1, some protocols still run on guacd: everything at beta.1
-except SSH, and RDP until a native backend exists. Their sessions must
+During v1, some protocols still run on guacd: RDP until its native
+backend is registered, telnet until guacd is removed, and VNC where a
+connection asks for guacd as a fallback (as of 2026-10-31; the first
+plan had everything at beta.1 except SSH on guacd). Their sessions must
 reach v1 clients through protocol v1. Two things need deciding:
 
 - **How guacd's Guacamole instruction stream becomes protocol v1.** This
   determines whether clients need to know Guacamole at all.
 - **The parity gate.** When does a native backend replace the bridge for
   a protocol? These gates are the concrete path to "no guacd".
+  (Answered by the owner on 2026-10-31: native is the default as soon
+  as it exists, and the gate decides when a protocol's guacd path is
+  deleted; see Parity gate.)
 
 ## Context
 
@@ -80,39 +85,65 @@ reach v1 clients through protocol v1. Two things need deciding:
 
 ### Bridged terminals
 
-guacd's SSH renders terminals as pixels, so a bridged SSH session is
-graphical. That is acceptable until the native SSH backend passes its
-gate, which is planned for beta.1 anyway.
+guacd's SSH renders terminals as pixels, so a bridged SSH session would
+be graphical. In v1 there is none: ssh is native from the start, the
+configuration refuses `backend: guacd` for it, and the bridge never
+serves it.
 
 ## Parity gate (bridge to native, per protocol)
 
-A protocol's default moves from `guacd` to `native` when all of these
-hold:
+**The owner's decisions, 2026-10-31.** They override this spec where
+they differ:
 
-1. **Opt-in period:** the native backend shipped behind a per-connection
-   `backend: native` for at least one beta.
-2. **End-to-end parity:** the [006](../006-demo-stack-refresh.md) matrix
-   passes for authentication modes, resize, clipboard in both directions,
-   cursor, sharing roles, reconnect, and keyboard input including AltGr
-   and dead keys.
-3. **Performance:** traffic and CPU are no worse than the bridge on the
-   baseline scenarios from [008](../008-native-architecture.md).
-4. **Soak:** N sessions for H hours with no goroutine or memory growth.
+- The goal is to remove Guacamole entirely: no guacd and no Guacamole
+  protocol in v1.0.
+- guacd is kept, as an opt-in fallback and as the benchmark baseline,
+  until there is clear benchmark evidence that native outperforms it
+  10x or more. Then it is deleted, protocol by protocol.
+- So native must be the default wherever a native backend exists. guacd
+  is never the default for a protocol that has one.
+- Telnet gets no native backend: v1.0 doesn't need telnet. It stays
+  guacd-only for now, and is dropped when guacd is removed in v1.0.
 
-After the switch, `backend: guacd` stays available for one minor release
-as a fallback.
+The gate therefore no longer decides when a protocol's default moves to
+`native`; it decides when the protocol's guacd path is deleted:
 
-| Protocol | Native backend | Planned switch |
-|----------|----------------|----------------|
-| SSH | [native-ssh-backend](native-ssh-backend.md) | v1.0.0-beta.1 |
-| VNC | [native-vnc-backend](native-vnc-backend.md) | v1.0.0-beta.2 |
-| RDP | per [rdp-strategy](rdp-strategy.md) | v1.0 |
-| telnet | none | dropped with guacd |
-| Kubernetes | none planned | bridge only, opt-in |
+1. **Default:** native is the default as soon as a native backend
+   exists, with no opt-in period before it.
+2. **Fallback:** guacd stays only as an explicit fallback,
+   `backend: guacd` on a connection or in `adhoc_backends`, and as the
+   benchmark's baseline.
+3. **Deletion:** deleting a protocol's guacd path requires the
+   benchmark to show native at least 10x better than the guacd
+   baseline on each scenario's primary metric, per
+   [benchmark](benchmark.md) and
+   [docs/benchmarks.md](../../docs/benchmarks.md), plus the parity
+   matrix: the [006](../006-demo-stack-refresh.md) matrix passes for
+   authentication modes, resize, clipboard in both directions, cursor,
+   sharing roles, reconnect, and keyboard input including AltGr and
+   dead keys.
 
-When RDP switches, guacd leaves the default deployment entirely. The
-bridge then either stays as an opt-in backend for the remaining guacd
-protocols or is deleted.
+Superseded by these decisions: the gate as first written, which moved a
+protocol's default to `native` only after an opt-in period of at least
+one beta behind `backend: native`, end-to-end parity, traffic and CPU
+no worse than the bridge's and a soak, and then kept `backend: guacd`
+for one minor release. Instead of that minor release, `backend: guacd`
+now stays until the benchmark shows native at least 10x better, and
+the protocol's guacd path is then deleted. The soak (Decision 4) is not
+one of the owner's conditions.
+
+| Protocol | Native backend | Default | guacd path |
+|----------|----------------|---------|------------|
+| SSH | [native-ssh-backend](native-ssh-backend.md) | `native`, from the start of v1 | none: `backend: guacd` is refused |
+| VNC | [native-vnc-backend](native-vnc-backend.md) | `native`, since 2026-10-31 | `backend: guacd`, an explicit fallback and the benchmark's baseline, until the deletion gate passes |
+| RDP | [native-rdp-backend](native-rdp-backend.md), per [rdp-strategy](rdp-strategy.md) | `guacd` until the native RDP backend is registered, once NLA has run end to end; `native` from then on | the only path until then; afterwards an explicit fallback until the deletion gate passes |
+| telnet | none: v1.0 doesn't need telnet (owner, 2026-10-31) | `guacd`, for now | the only path; telnet is dropped when guacd is removed in v1.0 |
+| Kubernetes | none planned | not registered (Implementation notes: registration) | none |
+
+Once native RDP is registered, guacd is the default for telnet alone,
+and it runs otherwise only for connections that opt into the fallback
+and for the benchmark. The bridge is deleted with the last guacd path,
+and v1.0 ships without it (Decision 5).
 
 ## Open Questions
 
@@ -131,12 +162,16 @@ protocols or is deleted.
    its terminal's `color-scheme`, `font-name` and `font-size` for a
    client to change; the bridge refuses each with an `ack` (0x0100), as
    viewers cannot change them, and the corpus checks that it does.
-4. Gate values: N, H, and the performance tolerance?
+4. Gate values: N, H, and the performance tolerance? Answered by
+   Decision 4, whose tolerance the owner's 10x gate superseded on
+   2026-10-31 (see Parity gate).
 5. ~~After RDP goes native: keep the bridge, or delete it?~~ Answered
    2026-10-30: v1.0 ships without guacd
    ([008](../008-native-architecture.md), Path to pure Go), so the bridge
    is removed with it. It carries VNC and RDP over protocol v1 only until
-   their native backends pass its parity gate.
+   their native backends pass its parity gate. Since 2026-10-31 it does
+   so as an explicit fallback once a protocol has a native backend, not
+   as the default (see Parity gate).
 
 ## Decisions
 
@@ -162,6 +197,12 @@ Settled on 2026-10-30, following the recommendations above.
    bridge's on every baseline scenario. The 10x target in
    [008](../008-native-architecture.md) is measured against guacd, not
    against this gate; the gate only stops a regression.
+   **Superseded on 2026-10-31** by the owner's decisions (see Parity
+   gate): no performance condition comes before a native default, and
+   a protocol's guacd path is deleted only when native is at least 10x
+   better than the guacd baseline on each scenario's primary metric,
+   so the 10x target is now the gate and the 10% tolerance decides
+   nothing. The soak values are not one of the owner's conditions.
 5. **The bridge is removed at v1.0** (open question 5, answered above).
 
 ## Task Breakdown
@@ -173,8 +214,8 @@ Settled on 2026-10-30, following the recommendations above.
 | Conformance corpus | Instruction streams recorded from guacd 1.6's VNC, RDP and SSH plugins on the bench stack (the bench desktop over VNC and RDP, the demo SSH server; logging in, typing, scrolling, moving a window, resizing), replayed through the bridge in tests: no unsupported operation, no error, the idle screen at checkpoints, and the final frame's hash pinned | Bridge backend |
 | Registration | The bridge registered in the API's backend factory for `vnc` and `rdp`, and for `telnet` and `kubernetes` behind an opt-in, with guacd parameters from the configuration under the connection's (built for `rdp` and `telnet`; see Implementation notes: registration) | Bridge backend; API Sessions |
 
-The soak and performance gates run per protocol when a native backend
-asks to replace the bridge, not as tasks here.
+The parity gate runs per protocol, when a protocol's guacd path is to
+be deleted, not as a task here.
 
 ## Affects
 
@@ -528,9 +569,13 @@ do not).
   - `vnc` went to the native backend by default, ahead of the parity
     gate's opt-in period, and no configuration key (`backend:`) picked
     the bridge for it, so a v1 file could not serve VNC through guacd.
-    Resolved: see Implementation notes: the opt-in period.
+    Resolved: see Implementation notes: the opt-in period. Since
+    2026-10-31, by the owner's decisions (Parity gate), native is
+    `vnc`'s default again, now with `backend: guacd` as the fallback
+    (Implementation notes: native by default).
   - telnet needs no opt-in beyond a configured connection, or an ad-hoc
-    target where those are allowed.
+    target where those are allowed. It stays on the bridge alone and is
+    dropped when guacd is removed in v1.0.
   - Kubernetes is not registered: connections have `host:port` targets
     only, and Kubernetes needs a cluster, a namespace and a pod.
 - **Follow-ups.** ~~The `backend:` key of the parity gate, so that VNC
@@ -538,51 +583,99 @@ do not).
 
 ## Implementation notes: the opt-in period
 
-- **Status.** VNC's opt-in period (parity gate, step 1) has started:
-  the bridge serves `vnc` by default, and `backend: native` opts a
-  connection in. SSH has no opt-in period: it was native from the
-  start, and the bridge does not serve it.
+**Superseded on 2026-10-31 by the owner's decisions** (Parity gate):
+native is the default as soon as a native backend exists, so VNC's
+opt-in period ended without the steps it waited for, and the bridge
+serves `vnc` only as an explicit fallback (Implementation notes: native
+by default). What the opt-in period built stays; where these notes said
+that guacd was `vnc`'s default, they are corrected below.
+
+- **Status.** VNC's opt-in period (the first gate's step 1) ran from the
+  `backend:` key's introduction until 2026-10-31: the bridge served
+  `vnc` by default then, and `backend: native` opted a connection in.
+  SSH had no opt-in period: it was native from the start, and the bridge
+  does not serve it.
 - **What was done.**
   - Configuration v1 has `backend` on each connection, `guacd` or
     `native`, which `ParseV1` fills with the protocol's default: `native`
-    for ssh, `guacd` for the others. `adhoc_backends` does the same for
-    ad-hoc targets, by protocol. ssh refuses `guacd`; rdp refuses
-    `native` until the native RDP backend has run NLA end to end
-    ([rdp-strategy](rdp-strategy.md)); telnet has no native backend.
+    for ssh, and, since 2026-10-31, for vnc; `guacd` for rdp and telnet.
+    `adhoc_backends` does the same for ad-hoc targets, by protocol. ssh
+    refuses `guacd`; rdp refuses `native` until the native RDP backend
+    has run NLA end to end ([rdp-strategy](rdp-strategy.md)); telnet has
+    no native backend.
   - The backend factory in `server/backends.go` is keyed by protocol and
     backend: ssh/native, vnc/native, and vnc, rdp and telnet on guacd.
     The session's state names the backend as before (`ssh`, `vnc`,
     `guacd`).
-  - A vnc connection's `tls` needs `backend: native`, since the bridge
+  - A vnc connection's `tls` needs the native backend, since the bridge
     would not check the certificate as `tls` says; `ard` too
-    ([native-vnc-backend](native-vnc-backend.md), phase 4).
+    ([native-vnc-backend](native-vnc-backend.md), phase 4). Both are
+    refused with `backend: guacd`.
   - The [006](../006-demo-stack-refresh.md) stack runs `occamy-v1` with
     the demo VNC server as `vnc-native` and `vnc-guacd`, and `make e2e`
     streams both with the Go client (`tests/v1_test.go`); occamyd's own
     tests drive native VNC through the routes against
     `internal/backend/vnc/vnctest` (`server/vnc_e2e_test.go`).
-- **What the matrix covers.** Against x11vnc and TigerVNC in the demo
-  stack, on both backends: step 2's matrix (Implementation notes: VNC's
-  parity matrix). Against the fake server: stored and prompted
-  credentials, a refused password, the screen, key, pointer and text
-  input, resize by the hello and by the client, clipboard both ways,
-  the cursor, visibility, the end reasons, the `tls` policy and an
-  ad-hoc target.
-- **Follow-ups.** ~~The rest of step 2's matrix on real servers~~
-  (done, below); steps 3 and 4; then VNC's switch of default, after
-  which `backend: guacd` stays for one minor release.
+- **What the matrix covers so far.** Against x11vnc in the demo stack:
+  VNC Authentication with a stored password, the desktop arriving, and
+  pointer and key input acknowledged, on both backends. Against the
+  fake server: stored and prompted credentials, a refused password,
+  the screen, key, pointer and text input, resize by the hello and by
+  the client, clipboard both ways, the cursor, visibility, the end
+  reasons, the `tls` policy and an ad-hoc target. Not yet: sharing
+  roles, reconnect, AltGr and dead keys, which the parity matrix has
+  since covered on x11vnc and TigerVNC (Implementation notes: VNC's
+  parity matrix).
+- **Follow-ups.** Moved to Implementation notes: native by default. The
+  first gate's steps 3 and 4 are superseded, and so is the minor release
+  that would have kept `backend: guacd` after a switch: `backend: guacd`
+  stays until the benchmark shows native at least 10x better, and VNC's
+  guacd path is then deleted.
+
+## Implementation notes: native by default
+
+- **Status.** Done on 2026-10-31, by the owner's decisions (Parity
+  gate): `vnc` defaults to the native backend, and `backend: guacd` is
+  an opt-in fallback and the benchmark's baseline.
+- **What was done.**
+  - `config.DefaultBackend` returns `native` for ssh and vnc and
+    `guacd` for rdp and telnet, so a vnc connection without `backend`,
+    and an ad-hoc vnc target without `adhoc_backends`, get the native
+    backend. `backend: guacd` stays valid for vnc, and
+    `adhoc_backends: {vnc: guacd}` for ad-hoc targets.
+  - `tls` and `ard` still need the native backend; their refusals now
+    name the backend that was set (`backend: guacd would not: leave
+    backend out, or set native`), since a connection without `backend`
+    no longer reaches them.
+  - The demo stack's `vnc-native` leaves `backend` out, so `make e2e`
+    streams vnc's default, and `vnc-guacd` sets `backend: guacd` for the
+    baseline. `TestDemoV1File` checks both.
+  - Tests: `TestParseV1Backends` (the default for connections and
+    ad-hoc targets, explicit `guacd`, `tls` and `ard` without
+    `backend`), `TestParseV1Problems` (`tls` and `ard` with
+    `backend: guacd` refused) and `TestBackendDefaults`. Flipping vnc's
+    default back to `guacd` fails all three, `TestParseV1Example` and
+    `TestDemoV1File`.
+- **Follow-ups.** The deletion gate for VNC: ~~the rest of the parity
+  matrix on real servers (TigerVNC's ExtendedDesktopSize and clipboard,
+  sharing roles, reconnect, keyboard layouts)~~ (done: Implementation
+  notes: VNC's parity matrix), and the benchmark comparing native VNC
+  with the guacd baseline on each scenario's primary metric. RDP
+  defaults to `native` when the native RDP backend is registered.
 
 ## Implementation notes: VNC's parity matrix
 
-- **Status.** Step 2 of the parity gate passes for VNC: on x11vnc and
+- **Status.** The parity matrix, one of the two conditions for
+  deleting VNC's guacd path (Parity gate, 3), passes: on x11vnc and
   TigerVNC, the native backend passes every cell that guacd passes, and
   three that guacd fails. No native failure was found, so nothing was
-  fixed. Steps 3 (performance) and 4 (soak) remain.
+  fixed. The other condition, the benchmark showing native at least 10x
+  better than the guacd baseline, remains.
 - **How it runs.** `tests/parity_test.go` (`TestVNCParity`) drives
   `occamy-v1` in the [006](../006-demo-stack-refresh.md) stack with the
   Go client core, over API v1 and protocol v1, through a connection for
-  each server, security type and keyboard layout, once with
-  `backend: native` and once with `backend: guacd` (006, Addendum:
+  each server, security type and keyboard layout, once on the native
+  backend and once with `backend: guacd` (006, Addendum:
   TigerVNC and the VNC parity matrix). `make e2e` runs it, so CI's
   `e2e` job does. The servers' desktop reports what reached the server
   over the session itself: a line typed into a probe at the top left

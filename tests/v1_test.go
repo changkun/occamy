@@ -22,7 +22,9 @@ import (
 
 // The demo stack's occamy-v1 service (docker/occamy-v1.yaml): its user,
 // and its connections to the demo VNC server with the backend that each
-// session's state should report.
+// session's state should report: vnc-native leaves backend out, so it
+// gets vnc's default, the native backend, and vnc-guacd sets
+// backend: guacd, the fallback and the benchmark's baseline.
 const (
 	v1User     = "demo"
 	v1Password = "occamy"

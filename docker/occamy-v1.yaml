@@ -5,10 +5,11 @@
 # The v1 file of the demo stack's occamy-v1 service
 # (docker-compose.yaml), which serves API v1 and protocol v1 on port 5637
 # next to the v0 service: the demo VNC servers, x11vnc and TigerVNC,
-# through occamyd's native backend and through guacd, side by side, for
-# the guacd bridge's parity gate
-# (specs/008-native-architecture/guacd-bridge.md). The user demo signs in
-# with the password occamy:
+# through occamyd's native backend, vnc's default, and through guacd, the
+# explicit fallback and the benchmark's baseline, side by side, for the
+# guacd bridge's parity gate
+# (specs/008-native-architecture/guacd-bridge.md, Parity gate). The user
+# demo signs in with the password occamy:
 #
 #	curl -s localhost:5637/api/v1/auth/token \
 #	  -H 'Content-Type: application/json' \
@@ -25,7 +26,8 @@ auth:
       password_hash: "$2a$10$DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
 connections:
   # Each server and security type twice, through occamyd's native backend
-  # and through guacd, which tests/parity_test.go compares. The
+  # and through guacd, which tests/parity_test.go compares. Each names its
+  # backend but vnc-native, which serves vnc's default. The
   # connections that prompt ask the owner for whatever the server wants,
   # and for nothing where it wants nothing (None). The de and fr
   # connections reach screens with the German and French keyboard
@@ -33,13 +35,15 @@ connections:
   - id: vnc-native
     name: x11vnc, native backend
     protocol: vnc
-    backend: native
+    # No backend: native is vnc's default, so this connection serves
+    # the default end to end.
     target: vnc:5900
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
   - id: vnc-guacd
     name: x11vnc, through guacd
     protocol: vnc
+    # guacd serves vnc only when a connection asks for it.
     backend: guacd
     target: vnc:5900
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
