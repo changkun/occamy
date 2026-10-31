@@ -641,6 +641,25 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   container and checks that the next connection has the clipboard. Give
   it the `CONTAINER_ENGINE` that `make run` took, since it reaches the
   container through that engine's compose.
+- The demo x11vnc no longer dies of an X error (`Xerror: major_opcode:
+  18 … error_code: 3`) when it answers a request for the clipboard from
+  a window that has gone, which ended the sessions on it as
+  `backend-failed` until its watchdog had started it again. x11vnc
+  0.9.17 owns the clipboard after a client's cut text and traps errors
+  as it answers, but stops trapping before the X server reports one
+  unless it syncs; the desktop's clipboard probe kills its xclip after
+  2 s, and an x11vnc that stalled for longer, as clients connected on a
+  loaded host, answered such requests. `start.sh` sets
+  `X11VNC_SENDEVENT_SYNC`, which makes it sync. The error came after a
+  refused resize once, but has nothing to do with it, nor with either
+  VNC backend. `make e2e` makes such a request
+  (`TestX11vncClipboardRequestorGone`) and checks that x11vnc and the
+  session on it live through it, which shows that the variable reaches
+  x11vnc; without the variable, x11vnc dies of it only now and then,
+  as the error's escape is a race. The parity row `resize: ignored
+  without ExtendedDesktopSize` is now `resize: the server keeps its
+  size`: x11vnc has ExtendedDesktopSize, and refuses SetDesktopSize as
+  prohibited.
 
 ### Security
 

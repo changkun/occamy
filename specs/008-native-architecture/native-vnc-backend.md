@@ -1369,3 +1369,106 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     need no scripting.
   - `vnctest` sends Raw only; the encodings stay tested inside the
     package and against TigerVNC.
+
+## Implementation notes: x11vnc's X error after a refused resize
+
+- **What was seen.** On 2026-10-31 a walk through the v1 demo stack,
+  built from master at fb58a6b on a host with a 1-minute load of 14,
+  opened `vnc-native` at 1024×768 and asked for 1280×720. At 16:40:03
+  the backend logged `the server prohibits resizing the screen; it is
+  asked no more`, as x11vnc logged `resize prohibited`. x11vnc then
+  logged `Xerror: major_opcode: 18 minor_opcode: 0 error_code: 3` and
+  `caught X11 error:`. Its watchdog killed it and started it again, and
+  the session ended at 16:40:07 as `backend-failed`, with `read:
+  connection reset by peer`, before the walk's second request, for
+  1024×768. Walked again, the session made both requests; x11vnc
+  logged one refusal, since the backend asks no more after it, and
+  lived.
+- **The resize did not cause it.** Request 18 is ChangeProperty, and
+  error 3 is BadWindow. LibVNCServer refuses SetDesktopSize itself and
+  makes no X request for it. x11vnc 0.9.17 calls ChangeProperty on the
+  root window, on its own windows, and, in `selection_request`
+  (`src/selection.c`), on the window of a client that asks for a
+  selection x11vnc owns; with the demo's options only the last can
+  meet a window that has gone. The same error killed the x11vnc on
+  port 5901 of that stack at 19:12:27, with no resize, as the parity
+  matrix's warm-up moved from port 5900 to 5901 (`warming
+  vnc-none-native: try 1: … backend-failed`).
+- **The cause is x11vnc's.** x11vnc owns PRIMARY and CLIPBOARD after a
+  client's cut text, and keeps them until another X client takes them.
+  It answers a request with ChangeProperty and SendEvent on the
+  requestor's window, and installs an error trap meanwhile. It checks
+  the window, a round trip that collects the error inside the trap,
+  only when 0.2 s have passed since its last check; otherwise it
+  flushes and takes the trap away before the X server's BadWindow
+  arrives, which then reaches its fatal handler. Once a check has found
+  a window gone, it syncs before taking the trap away, for good, as
+  `X11VNC_SENDEVENT_SYNC` makes it do from the start. The demo desktop's
+  clipboard probe (`desktop.sh`) asks for the clipboard every 0.3 s,
+  every 2 s after a quiet minute, with an xclip that it kills after
+  2 s. An x11vnc that stalls for longer while it owns the clipboard,
+  as one did as clients connected on loaded hosts, answers requests
+  from xclips that are gone, back to back, and dies at the first that
+  falls inside the 0.2 s and whose error comes late, unless a check
+  found one first.
+- **Reproduced without Occamy.** In containers of the demo image, a
+  client written in bash with `/dev/tcp` sent cut text to an x11vnc on
+  `:0` with the demo's options, which then owned the clipboard, and
+  x11vnc was stopped (SIGSTOP) and continued while xclips asked for the
+  clipboard. In eight runs of three to eight stops each, x11vnc died in
+  three, every time of BadWindow for the window of an xclip killed while
+  it was stopped: in one, with `-debug_sel`, after answering requestor
+  0x2400001, `Xerror: major_opcode: 18 … error_code: 3`, then BadWindow
+  for SendEvent (request 25) on 0x2400001; in another, after a 1 s stop
+  in which an xclip that waited asked first and a killed one second,
+  ChangeProperty and SendEvent on the killed one's window, 0x2800001.
+  Of the five that lived, those traced or counted had a check of
+  x11vnc's find a gone window before an unchecked answer's error
+  escaped, after which it syncs for good; a process the watchdog starts
+  again begins without that. Whether the error comes before x11vnc
+  stops trapping is a race, so no form of the test kills it every
+  time. The Debian binary reads `X11VNC_SENDEVENT_SYNC`, and with it the
+  error cannot escape the trap: XSync collects it inside.
+- **Neither backend is at fault, and both meet it.** The native backend
+  sends SetDesktopSize only after the server's first
+  ExtendedDesktopSize, which x11vnc sends on connecting; for the
+  parity row's session that asks once, x11vnc's statistics count one
+  SetDesktopSize of 24 bytes, a header and one screen; and after the
+  refusal it sends no more (`desktopsize.go`). guacd sends x11vnc no SetDesktopSize, but
+  sends cut text, so its sessions make x11vnc own the clipboard too:
+  the CI run that first saw `caught X11 error:` saw it three times, all
+  as guacd connected ([guacd-bridge](guacd-bridge.md), Implementation
+  notes: VNC's parity matrix). A raw RFB client does as well.
+- **What changed.** `docker/demo/vnc/start.sh` sets
+  `X11VNC_SENDEVENT_SYNC=1`. `TestX11vncClipboardRequestorGone`
+  (`tests/x11vnc_test.go`, in `make e2e` through the stack's compose)
+  makes the x11vnc on port 5901 own the clipboard through a session,
+  runs the short stop with the two xclips, and checks that the xclip
+  that waited got the text, that the same x11vnc process serves the
+  port, that its watchdog logged nothing, and that the session carries
+  the clipboard both ways after it. It shows that the variable reaches
+  the x11vnc of the image CI builds and that the stack lives through the
+  request; without the variable it does not fail reliably, for the
+  race above. The watchdog stays, for x11vnc's waits on clients that
+  do not read and for any other error. The parity
+  row `resize: ignored without ExtendedDesktopSize` is now `resize:
+  the server keeps its size`, since x11vnc has ExtendedDesktopSize and
+  refuses SetDesktopSize as prohibited.
+- **The session's end is right.** Run ends a session as `remote-ended`
+  when the server closes the connection between messages, which is how
+  RFB ends one, and as `backend-failed` for any other end. x11vnc,
+  killed with the backend's requests unread, reset the connection, and
+  `backend-failed` says that the server failed; a server that dies
+  with nothing unread closes it instead, and its session ends as
+  `remote-ended`, since RFB cannot tell that from a deliberate end. The
+  backend does not connect again, and should not for this: RFB cannot
+  resume a session, so a new connection would authenticate again, with
+  a prompt the owner may have answered, and start a new screen; the
+  server back a second later is the demo's watchdog at work; and
+  connecting again would hide a server that keeps failing behind a
+  session that seems to go on. The owner opens the connection again,
+  as with guacd, whose sessions end too.
+- **Follow-ups.**
+  - With the error gone, the parity matrix's third try of a guacd cell,
+    the watchdog's backoff, and `vnc-native`'s absence from the soak's
+    default could go, once CI runs of the matrix show no X error.
