@@ -50,7 +50,11 @@ unset or empty. The demo stack's `occamy-v1` takes its address from
 serves its debug listener on the host's `localhost:5638`
 (`OCCAMY_V1_DEBUG_PORT`), for the soak. The stack's other services can
 reach both debug routes while they are on; `make run` without
-`OCCAMY_DEBUG=1` turns them off again.
+`OCCAMY_DEBUG=1` turns them off again. `make run` and `make bench` set
+`OCCAMY_V0_CONF` and `OCCAMY_V1_DEBUG_ADDRESS` either way, so that the
+same variables left in the shell or in `docker/.env` do not turn the
+routes on; `compose up` run by hand reads them from there, and with
+neither set leaves the routes off.
 
 ## Profiling occamyd
 

@@ -960,7 +960,10 @@ that guacd was `vnc`'s default, they are corrected below.
   it while it is on. `OCCAMY_DEBUG=1` also mounts the v0 service's
   file in debug mode (`occamy-debug.yaml`) for the pressure test; the
   v0 service is now published on the loopback interface only, and in
-  release mode without it.
+  release mode without it. `make run` sets both variables either way,
+  so that a leftover export or `docker/.env` cannot turn the routes on;
+  `TestDemoDebugGating` reads `docker-compose.yaml` with what
+  `make run` passes it, from such a shell and with `OCCAMY_DEBUG=1`.
 - **What fails it.** After a warm-up of a tenth of the run, a metric
   grew if the median of the last quarter of its samples exceeds the
   first quarter's by more than a bound, whatever the quarters between

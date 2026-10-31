@@ -628,8 +628,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   (`OCCAMY_V1_DEBUG_PORT`), and the v0 service's pprof, from
   `docker/occamy-debug.yaml`. `docker/occamy.yaml`, which served pprof
   to anyone who could reach the v0 service, is now in release mode, and
-  the v0 service is published on the loopback interface only. The
-  pressure test and the soak need `OCCAMY_DEBUG=1`.
+  the v0 service is published on the loopback interface only.
+  `make run` and `make bench` turn the routes off explicitly without
+  `OCCAMY_DEBUG=1`, so a variable left in the shell or in `docker/.env`
+  cannot turn them on. The pressure test and the soak need
+  `OCCAMY_DEBUG=1`.
 
 ## [0.6.0] - 2026-10-30
 
