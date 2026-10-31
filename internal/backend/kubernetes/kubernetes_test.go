@@ -28,6 +28,7 @@ import (
 	"changkun.de/x/occamy/internal/backend/backendtest"
 	"changkun.de/x/occamy/internal/backend/kubernetes"
 	"changkun.de/x/occamy/internal/backend/kubernetes/kubetest"
+	"github.com/coder/websocket"
 )
 
 const timeout = 10 * time.Second
@@ -417,6 +418,56 @@ func TestCancel(t *testing.T) {
 				t.Errorf("close signals %v, want %v", closes, want)
 			}
 		})
+	}
+}
+
+// TestCancelBeforeSize cancels Run between the dial and its first write,
+// the terminal's size. coder/websocket fails that write in one of two
+// ways, at random: before it has the stream's locks, leaving the stream
+// open, or once it has them, by closing the stream. Either way Run ends
+// with the cancel and the stream is closed, so the test makes the
+// cancel 16 times.
+func TestCancelBeforeSize(t *testing.T) {
+	for range 16 {
+		checkGoroutines(t)
+		s := newServer(t, kubetest.Options{})
+		b := newBackend(t, config(s))
+		ctx, cancel := context.WithCancel(context.Background())
+		kubernetes.OnDialed(t, cancel)
+		if err := b.Run(ctx, &backendtest.Sink{}); !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run = %v, want context.Canceled", err)
+		}
+		e := accept(t, s)
+		select {
+		case <-e.Done():
+		case <-time.After(3 * time.Second):
+			t.Fatal("the stream is still open after the size could not be sent")
+		}
+	}
+}
+
+// TestCancelRace reproduces the race in which a cancelled Run ended with
+// the reader's error instead of the cancel's. coder/websocket closes the
+// stream when the context of a write in progress ends, which ends the
+// reader; when that happens before serve waits, serve finds both the
+// cancel and the reader's end ready, and picks one at random. The hook
+// cancels, closes the stream as coder/websocket does, and waits for the
+// reader to end, and the test does so 32 times, so that serve's pick
+// goes both ways.
+func TestCancelRace(t *testing.T) {
+	for range 32 {
+		checkGoroutines(t)
+		s := newServer(t, kubetest.Options{})
+		b := newBackend(t, config(s))
+		ctx, cancel := context.WithCancel(context.Background())
+		kubernetes.OnServing(t, func(conn *websocket.Conn, ended chan error) {
+			cancel()
+			_ = conn.CloseNow()
+			ended <- <-ended
+		})
+		if err := b.Run(ctx, &backendtest.Sink{}); !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run = %v, want context.Canceled", err)
+		}
 	}
 }
 

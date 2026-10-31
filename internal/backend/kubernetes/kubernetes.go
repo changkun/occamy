@@ -65,6 +65,15 @@ const readSize = 32 << 10
 // without its pong ends nothing: TCP's keepalives find a dead peer.
 var keepalive = 30 * time.Second
 
+// Hooks for tests, nil otherwise: dialed runs in Run once the stream is
+// open, before anything is written to it, and serving in serve once its
+// goroutines run, before it waits for them, with the stream and the
+// channel of the reader's result.
+var (
+	testHookDialed  func()
+	testHookServing func(conn *websocket.Conn, ended chan error)
+)
+
 var (
 	// ErrNotRunning is returned by Input before Run has started or after
 	// it has returned.
@@ -404,6 +413,9 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 	if err != nil {
 		return err
 	}
+	if testHookDialed != nil {
+		testHookDialed()
+	}
 	return b.serve(ctx, sink, r, conn)
 }
 
@@ -487,6 +499,10 @@ func refused(resp *http.Response) error {
 // serve copies between the stream and the session until the command
 // exits or ctx is done.
 func (b *Backend) serve(ctx context.Context, sink backend.Sink, r *run, conn *websocket.Conn) (err error) {
+	// However serve ends, a panic in the first Resize, on Run's own
+	// goroutine, included, the stream is closed, so that the command
+	// does not run on until the kubelet's idle timeout.
+	defer func() { _ = conn.CloseNow() }()
 	conn.SetReadLimit(maxMessage)
 	v5 := conn.Subprotocol() == ProtocolV5
 	wctx, cancel := context.WithCancel(ctx)
@@ -501,7 +517,6 @@ func (b *Backend) serve(ctx context.Context, sink backend.Sink, r *run, conn *we
 	cols, rows := r.size()
 	if b.tty {
 		if err := conn.Write(wctx, websocket.MessageBinary, resizeMessage(cols, rows)); err != nil {
-			_ = conn.CloseNow()
 			return failure(ctx, fmt.Errorf("send the terminal's size: %w", err))
 		}
 	}
@@ -529,6 +544,9 @@ func (b *Backend) serve(ctx context.Context, sink backend.Sink, r *run, conn *we
 	reader.Go(safe(func() { ended <- b.read(conn, sink) }))
 	others.Go(safe(func() { r.write(wctx, conn, sink, b.tty, done) }))
 	others.Go(safe(func() { ping(wctx, conn, done) }))
+	if testHookServing != nil {
+		testHookServing(conn, ended)
+	}
 
 	select {
 	case <-ctx.Done():
