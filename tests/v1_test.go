@@ -204,6 +204,28 @@ func TestE2EV1RDP(t *testing.T) {
 	t.Run("shared-viewer", func(t *testing.T) {
 		ctx, token, cl := open(t)
 		id := cl.SessionID()
+		// The owner reads on, and so acknowledges its frames, while the
+		// viewer joins and types, so that occamy does not drop it as too
+		// slow after streams.viewer_timeout.
+		drainCtx, stopDrain := context.WithCancel(ctx)
+		defer stopDrain()
+		drained := make(chan error, 1)
+		go func() {
+			for {
+				ev, err := cl.Next(drainCtx)
+				if err != nil {
+					if drainCtx.Err() != nil {
+						err = nil
+					}
+					drained <- err
+					return
+				}
+				if e, ok := ev.(client.End); ok {
+					drained <- fmt.Errorf("the owner's session ended while the viewer joined: %v %q (%v)", e.Code, e.Reason, e.Err)
+					return
+				}
+			}
+		}()
 		var share struct {
 			Token string `json:"token"`
 		}
@@ -223,6 +245,10 @@ func TestE2EV1RDP(t *testing.T) {
 			t.Errorf("the session's viewers are %q, want the owner and the viewer", roles)
 		}
 		typeV1(t, ctx, viewer)
+		stopDrain()
+		if err := <-drained; err != nil {
+			t.Fatal(err)
+		}
 		typeV1(t, ctx, cl)
 		closeSessionV1(t, addr, token, id)
 	})
