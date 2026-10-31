@@ -345,11 +345,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   backends release the pixels they lock by `defer`, and a session closes
   its framebuffer when it ends, which releases any pixels still locked.
   The streams close with 1011, as for any panic the session recovers.
-- A terminal title with invalid UTF-8 comes through to viewers whole:
-  each invalid byte becomes U+FFFD, three bytes, which could make the
-  title too long for the escape sequence a terminal frame carries it in,
-  and cut it there. Titles are now cut, between characters, at what that
-  sequence carries.
+- Viewers get a terminal's title as the session holds it, even when the
+  title has invalid UTF-8: each invalid byte becomes U+FFFD, three
+  bytes, which could make the title too long for the escape sequence a
+  terminal frame carries it in, so that a viewer got it cut there, with
+  no regard for characters. Titles are now cut, between characters, at
+  what that sequence carries.
 
 ### Security
 
