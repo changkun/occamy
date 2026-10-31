@@ -24,7 +24,7 @@ Guacamole protocol and no v0 routes
 |----------|---------------|---------------|
 | VNC | Through guacd, verified end to end | Native by default, or through guacd with `backend: guacd` |
 | SSH | Through guacd, verified end to end, including repeated sessions | Native |
-| RDP | Through guacd, verified against xrdp | Through guacd; the native backend is built but not yet served |
+| RDP | Through guacd, verified against xrdp | Native by default, verified against xrdp but not yet Windows, and without GFX (phase 3), or through guacd with `backend: guacd` |
 | Kubernetes | Untested | Native: a terminal in a pod, through the API server's exec stream |
 
 v1 also serves telnet, through guacd only: it gets no native backend and
@@ -201,10 +201,12 @@ the stack. A second `occamyd`, `occamy-v1` on `localhost:5637`, serves
 API v1 and the web client, at http://localhost:5637/static/, from the v1
 file [docker/occamy-v1.yaml](./docker/occamy-v1.yaml), with the user
 `demo` and the password `occamy`: the SSH server as the connection `ssh`,
-through `occamyd`'s own SSH client, and the VNC server as `vnc-native`,
+through `occamyd`'s own SSH client; the VNC server as `vnc-native`,
 through `occamyd`'s own VNC client, vnc's default, and as `vnc-guacd`,
 through guacd (`backend: guacd`), the fallback that the benchmark
-compares against.
+compares against; and the RDP server as `rdp-native`, through
+`occamyd`'s own RDP client, rdp's default, with `security: tls` since
+xrdp speaks no NLA, and as `rdp-guacd`, through guacd.
 
 Here is a working video demo:
 
@@ -221,9 +223,11 @@ go test ./...
 [tests/](./tests) holds end-to-end and pressure tests that open real
 sessions to the demo servers. They are skipped unless
 `OCCAMY_E2E_ENDPOINT` is set, and those of `occamy-v1`, which stream
-both VNC connections with the Go client of protocol v1, unless
-`OCCAMY_E2E_V1_ENDPOINT` is; `make e2e` sets them to `localhost:5636`
-and `localhost:5637`:
+its VNC and RDP connections, native and through guacd, with the Go
+client of protocol v1, and check native RDP's clipboard both ways, a
+resize, a viewer joined by a share and the owner's return to a session,
+unless `OCCAMY_E2E_V1_ENDPOINT` is; `make e2e` sets them to
+`localhost:5636` and `localhost:5637`:
 
 ```
 make build
