@@ -73,7 +73,8 @@ auth:
     # user. Off, such a sign-in is refused.
     link_static_users: false
 
-# guacd serves the vnc, rdp and telnet connections.
+# guacd serves the rdp and telnet connections, and the vnc connections
+# that do not set backend: native.
 guacd:
   address: localhost:4822
   # guacd parameters per protocol. Connection targets and credentials
@@ -105,6 +106,10 @@ connections:
     name: NAS desktop
     protocol: vnc
     target: nas.internal # the protocol's default port, 5900
+    # occamyd's own VNC client rather than guacd, the default for vnc
+    # until the native backend passes its parity gate. tls and ard need
+    # it.
+    backend: native
     # The NAS's self-signed certificate, by the fingerprint that
     # openssl x509 -noout -fingerprint -sha256 prints.
     tls:
@@ -113,6 +118,23 @@ connections:
       password_env: OCCAMY_NAS_VNC_PASSWORD
     allow:
       groups: [ops, dev]
+
+  - id: studio-mac
+    name: Studio Mac
+    protocol: vnc
+    target: studio-mac.internal
+    backend: native
+    # Apple Remote Desktop authentication, which macOS Screen Sharing
+    # needs to log in a user of the Mac. Its key exchange authenticates no
+    # server: anyone between occamyd and the Mac reads the account's
+    # password. Only on a network you trust; not with a tls requirement.
+    ard: true
+    credentials:
+      # The Mac's account; its password is asked of the session's owner.
+      username: studio
+      prompt: true
+    allow:
+      users: [alice]
 
   - id: windows
     name: Windows workstation
@@ -146,6 +168,10 @@ allow_adhoc_targets: false
 adhoc_allowlist:
   - 10.0.0.0/8
   - "*.lab.internal:22"
+# The backend of ad-hoc targets by protocol, as a connection's backend:
+# ssh is native, and vnc, rdp and telnet go through guacd unless set.
+adhoc_backends:
+  vnc: native
 
 # What one user or one session may hold. Zero or absent is the default.
 limits:

@@ -68,7 +68,7 @@ func waiting(fn, wait string) bool {
 func TestPanicWhileDrawing(t *testing.T) {
 	ts, _ := sessionServer(t, nil)
 	b := lockPanics{locked: make(chan struct{}), release: make(chan struct{})}
-	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) { return b, nil })
+	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) { return b, nil })
 	alice := ts.token(t, "alice", "ops")
 	o := ts.openSession(t, alice, "ops-shell")
 	<-b.locked

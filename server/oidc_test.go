@@ -721,7 +721,7 @@ func TestOIDCOpenRedirect(t *testing.T) {
 		"https://app.example.com/signed-in#",
 	} {
 		r := newBrowser(t).get(t, ot.loginURL(bad, challenge))
-		if r.code != http.StatusBadRequest || r.header.Get("Location") != "" || len(r.header.Values("Set-Cookie")) != 0 {
+		if r.code != http.StatusBadRequest || r.header.Get("Location") != "" || len(r.header.Values("Set-Cookie")) != 0 || r.header.Get("Cache-Control") != "no-store" {
 			t.Errorf("return_url %q: %d to %q, cookies %q", bad, r.code, r.header.Get("Location"), r.header.Values("Set-Cookie"))
 			continue
 		}
@@ -786,8 +786,8 @@ func TestOIDCLoginChallenge(t *testing.T) {
 		"twice":         {"return_url": {testReturnURL}, "code_challenge": {good, good}},
 	} {
 		r := newBrowser(t).get(t, ot.url+"/api/v1/auth/oidc/login?"+q.Encode())
-		if r.code != http.StatusBadRequest || len(r.header.Values("Set-Cookie")) != 0 {
-			t.Errorf("challenge %s: %d %s", name, r.code, r.body)
+		if r.code != http.StatusBadRequest || len(r.header.Values("Set-Cookie")) != 0 || r.header.Get("Cache-Control") != "no-store" {
+			t.Errorf("challenge %s: %d %q %s", name, r.code, r.header.Get("Cache-Control"), r.body)
 		}
 	}
 	q := url.Values{"return_url": {testReturnURL}, "code_challenge": {good}, "code_challenge_method": {"S256"}}

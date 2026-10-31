@@ -156,6 +156,91 @@ func TestExtendedDesktopSize(t *testing.T) {
 	}
 }
 
+// TestConfigSize checks that Config's size is asked for at the start of
+// each Run, as a Resize before Run would be: once the server has shown
+// support, and not at all by a server without it.
+func TestConfigSize(t *testing.T) {
+	checkGoroutines(t)
+	srv := newServer(t, serverOptions{})
+	b := newBackend(t, Config{Addr: srv.addr, Width: 80, Height: 60})
+	b.Demand(backend.Demand{Visible: true})
+	for i := range 2 {
+		run := start(t, b, &backendtest.Sink{})
+		c := srv.accept(t)
+		req := expect[requestMsg](t, c)
+		c.quiet(t, silence)
+		img := pattern(64, 48, 0)
+		c.send(t, putUpdate(putExtDesktopSize(0, 0, 64, 48, screenMsg{id: 3, r: img.Rect}), putRaw(c.pf, img, req.r)))
+		expectSetSize(t, c, 80, 60, 3, 0)
+		if err := run.stop(t); err == nil {
+			t.Fatalf("Run %d = nil after its cancellation", i)
+		}
+	}
+
+	// Without ExtendedDesktopSize, the server's size stays.
+	run := start(t, b, &backendtest.Sink{})
+	c := srv.accept(t)
+	req := expect[requestMsg](t, c)
+	c.send(t, putUpdate(putRaw(c.pf, pattern(64, 48, 0), req.r)))
+	expect[requestMsg](t, c)
+	c.quiet(t, silence)
+	run.stop(t)
+}
+
+// TestConfigSizeBeyondLimits checks that a Config size beyond the
+// limits, which New takes, is not asked for: 8192×8192 is within MaxSide,
+// as within the most that a session's hello may ask for, but beyond
+// MaxPixels.
+func TestConfigSizeBeyondLimits(t *testing.T) {
+	checkGoroutines(t)
+	if 8192 > MaxSide || 8192*8192 <= MaxPixels || 8192 > backend.MaxResizeSide {
+		t.Fatal("8192×8192 no longer tests the pixel limit alone")
+	}
+	srv := newServer(t, serverOptions{})
+	b := newBackend(t, Config{Addr: srv.addr, Width: 8192, Height: 8192})
+	b.Demand(backend.Demand{Visible: true})
+	run := start(t, b, &backendtest.Sink{})
+	c := srv.accept(t)
+	req := expect[requestMsg](t, c)
+	img := pattern(64, 48, 0)
+	c.send(t, putUpdate(putExtDesktopSize(0, 0, 64, 48, screenMsg{id: 3, r: img.Rect}), putRaw(c.pf, img, req.r)))
+	expect[requestMsg](t, c)
+	c.quiet(t, silence)
+	run.stop(t)
+}
+
+// TestResizeBeforeRun checks that a Resize before Run, as the session's
+// owner may send before the session's goroutine has started Run, is
+// asked for once Run starts, and that the newest size asked for is kept
+// for the next Run.
+func TestResizeBeforeRun(t *testing.T) {
+	checkGoroutines(t)
+	srv := newServer(t, serverOptions{})
+	b := newBackend(t, Config{Addr: srv.addr, Width: 80, Height: 60})
+	b.Demand(backend.Demand{Visible: true})
+	for _, size := range []image.Point{{90, 70}, {0, 70}, {1 << 20, 70}} {
+		if err := b.Input(backend.Resize{Width: size.X, Height: size.Y}); err != nil {
+			t.Fatalf("Input(Resize %v) before Run = %v", size, err)
+		}
+	}
+	for i, want := range []image.Point{{90, 70}, {100, 75}} {
+		run := start(t, b, &backendtest.Sink{})
+		c := srv.accept(t)
+		req := expect[requestMsg](t, c)
+		img := pattern(64, 48, 0)
+		c.send(t, putUpdate(putExtDesktopSize(0, 0, 64, 48, screenMsg{id: 3, r: img.Rect}), putRaw(c.pf, img, req.r)))
+		expectSetSize(t, c, want.X, want.Y, 3, 0)
+		expect[requestMsg](t, c)
+		if i == 0 {
+			if err := b.Input(backend.Resize{Width: 100, Height: 75}); err != nil {
+				t.Fatal(err)
+			}
+			c.quiet(t, silence) // the last SetDesktopSize awaits its answer
+		}
+		run.stop(t)
+	}
+}
+
 func TestResizeWithoutSupport(t *testing.T) {
 	// A server without ExtendedDesktopSize keeps its size: the viewers
 	// scale it.

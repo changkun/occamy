@@ -5,11 +5,13 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
 	"mime"
 	"net/http"
+	"reflect"
 	"strings"
 )
 
@@ -58,20 +60,27 @@ func respond(w http.ResponseWriter, status int, v any) {
 const maxJSONBody = 64 << 10
 
 // decodeJSON reads the request's body, which must be one JSON object of
-// type application/json with no fields that v lacks. On failure it has
-// replied with API v1's error and returns false. Requiring the JSON type
-// also keeps a cross-site HTML form from posting to the API, since a form
-// cannot send it without a CORS preflight.
+// type application/json that names each of its fields once, exactly as v
+// names them, in case, and no field that v lacks (checkMembers). On
+// failure it has replied with API v1's error and returns false. Requiring
+// the JSON type also keeps a cross-site HTML form from posting to the
+// API, since a form cannot send it without a CORS preflight.
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	if mt, _, _ := mime.ParseMediaType(r.Header.Get("Content-Type")); mt != "application/json" {
 		writeError(w, http.StatusUnsupportedMediaType, codeUnsupportedMediaType, "the body must be application/json")
 		return false
 	}
-	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxJSONBody))
-	dec.DisallowUnknownFields()
-	err := dec.Decode(v)
-	if err == nil && !errors.Is(dec.Decode(&struct{}{}), io.EOF) {
-		err = errors.New("the body holds more than one JSON value")
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxJSONBody))
+	if err == nil {
+		err = checkMembers(body, reflect.TypeOf(v))
+	}
+	if err == nil {
+		dec := json.NewDecoder(bytes.NewReader(body))
+		dec.DisallowUnknownFields()
+		err = dec.Decode(v)
+		if err == nil && !errors.Is(dec.Decode(&struct{}{}), io.EOF) {
+			err = errors.New("the body holds more than one JSON value")
+		}
 	}
 	var tooLarge *http.MaxBytesError
 	switch {
@@ -88,11 +97,12 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return false
 }
 
-// apiFallback answers requests for /api/v1 and under it that no route of
-// mux takes with API v1's error, where the ServeMux would answer in plain
-// text: 404 for a path without a route, and 405 with Allow for a route
-// that takes other methods. Everything else goes to mux.
-func apiFallback(mux *http.ServeMux) http.Handler {
+// apiFallback serves routes, and answers requests for /api/v1 and under
+// it that no route takes with API v1's error, where the ServeMux would
+// answer in plain text: 404 for a path without a route, and 405 with
+// Allow for a route that takes other methods.
+func apiFallback(routes *routeMux) http.Handler {
+	mux := routes.handler()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1" && !strings.HasPrefix(r.URL.Path, "/api/v1/") {
 			mux.ServeHTTP(w, r)

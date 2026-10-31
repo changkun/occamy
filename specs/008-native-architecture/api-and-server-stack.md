@@ -691,9 +691,11 @@ place for fixes that ship on v0 before beta.
     `ssh.CheckHostKey`.
 - **Decisions:**
   - **Backend per protocol:** native SSH and native VNC; the guacd
-    bridge for RDP and telnet. No configuration key picks another
-    backend: `backend:` would be new configuration that no spec has
-    settled beyond guacd-bridge's parity gate. RDP gets
+    bridge for RDP and telnet. No configuration key picked another
+    backend then, since `backend:` was new configuration that no spec
+    had settled beyond guacd-bridge's parity gate. (Superseded: `backend:`
+    now picks it, and VNC defaults to the bridge; see Implementation
+    notes: backends and the API reference.) RDP gets
     `disable-gfx: "true"` unless `guacd.params.rdp` sets it, trading the
     graphics pipeline's bandwidth, saved between guacd and the remote
     rather than on the viewers' links, for exact colours (guacd-bridge's
@@ -920,7 +922,8 @@ place for fixes that ship on v0 before beta.
   - VNC defaults to the native backend, where guacd-bridge's parity gate
     keeps the bridge until beta.2 with the native backend behind
     `backend: native`; with no `backend:` key, a v1 file cannot send VNC
-    through the bridge. telnet goes through the bridge for any configured
+    through the bridge. (Resolved: VNC now defaults to the bridge, and
+    `backend: native` opts in.) telnet goes through the bridge for any configured
     connection: the connection is the opt-in that guacd-bridge's
     Registration row asks for.
   - The row named the native SSH backend and the bridge; native VNC
@@ -1013,7 +1016,8 @@ place for fixes that ship on v0 before beta.
   - **Refusals:** a request that offers no `occamy.v1` gets 400
     `bad_request` as JSON. Every other refusal gets the upgrade, `close`
     and a WebSocket close with the same code: 4001 for `Origin`, 4000
-    for the token, 1002 or 1003 for `hello`, 4001 for a connection or
+    for the token, 1002 or 1003 for `hello` (1009 for one over 2048
+    bytes), 4001 for a connection or
     session the token does not open. The read limit is 64 KiB until
     `serve` lets the client in, after the route has verified its token,
     then the agreed message size. A refused client gets 1 s from its
@@ -1052,7 +1056,8 @@ place for fixes that ship on v0 before beta.
     of their own session until TCP gives up.
   - **The owner's hello sizes the session:** on the connection route the
     backend is made at that size (columns and rows for ssh, pixels for
-    guacd; native VNC takes the server's size); on the session route the
+    guacd; native VNC took the server's size, and now asks the server
+    for the hello's); on the session route the
     owner's hello becomes a `backend.Resize`. A viewer's hello resizes
     nothing.
   - **Sizes (added in review):** a terminal is at most 1000 columns by
@@ -1831,3 +1836,72 @@ to the VNC backend.
     return URL: a login CSRF, as the attacker. Both need a leak beyond
     the flow. Binding the code to the browser as well, with a cookie,
     would close both for clients on occamyd's origin.
+
+## Implementation notes: backends and the API reference
+
+- **Status.** Done in the change that started VNC's opt-in period
+  ([guacd-bridge](guacd-bridge.md), Implementation notes: the opt-in
+  period).
+- **What was done.**
+  - Configuration v1: `backend` on each connection (`guacd` or
+    `native`, filled with the protocol's default: `native` for ssh,
+    `guacd` for the others), `adhoc_backends` for ad-hoc targets by
+    protocol, and `ard` on vnc connections
+    ([native-vnc-backend](native-vnc-backend.md), Implementation notes:
+    registration). ssh refuses `guacd`, rdp refuses `native` until NLA
+    has run end to end, telnet has no native backend, and `tls` and
+    `ard` need `backend: native`.
+  - The backend factory is keyed by protocol and backend; `POST
+    /api/v1/sessions`, the connection stream and the ad-hoc path look
+    up the connection's or `adhoc_backends`' backend. The session's
+    state keeps naming it `ssh`, `vnc` or `guacd`.
+  - Routes are added to a list (`routeMux`), from which each listener's
+    `http.ServeMux` is built, so that `TestAPIDoc` can check that
+    [docs/api.md](../../docs/api.md), the reference of every route
+    with its tokens, requests, replies, errors and limits, has one
+    section per route of the public and debug listeners. The list
+    holds no ServeMux, and the one it builds is handed out as a
+    `routeHandler`, which serves and finds routes but has no method
+    that adds one, so a route cannot be added past the list without a
+    type assertion (review).
+  - **Strict JSON (review):** `decodeJSON` reads the body, then walks
+    its tokens with `json.Decoder.Token` against the target type
+    (`checkMembers`, `server/strictjson.go`) before decoding it: a
+    member twice in any object, at any depth, or a member whose name
+    is a struct field's only in another case, is a 400 `bad_request`,
+    and so is nesting past 32. encoding/json takes the last duplicate
+    and folds case (the Kelvin sign and the long s included), so a
+    proxy that read the first, or matched exactly, saw another
+    request. `encoding/json/v2` rejects both but needs
+    `GOEXPERIMENT=jsonv2` on Go 1.26. Types that decode themselves
+    (`json.Unmarshaler`, `encoding.TextUnmarshaler`) and maps get the
+    duplicate check only; syntax errors stay the decoder's.
+  - The refusals of `GET /api/v1/auth/oidc/login` carry
+    `Cache-Control: no-store`, as its redirects and the callback's
+    `invalid_state` do (review).
+- **Deviations.** The behaviour change for v1 files on master: vnc
+  connections without `backend` now go through guacd, and a vnc
+  connection with `tls` must set `backend: native`, or the file fails
+  to load with the key named. A vnc connection without `tls`, which
+  the native backend served checking a VeNCrypt certificate against
+  the system's roots, now goes through guacd, which checks none. No
+  release served v1 files' vnc connections, so no release changes.
+- **Review.** An independent review with mutation testing found no
+  bug in the production code; the tests it asked for were added:
+  `TestConnectionTarget` sets every field of a connection and wants
+  every field of `target` but `name`; `TestAdhocTargets` wants no
+  `ard` and the default `tls` on every ad-hoc target;
+  `TestVNCAdhocName` opens ad-hoc targets by `.invalid` names through
+  a resolver that answers once, so that dialling the name rather than
+  the checked address fails, and refuses a certificate that signs
+  itself with no credential sent; `TestVNCTLS` sends wrong passwords
+  on the refused connections and counts the credentials `vnctest`
+  receives. The mutants that survived before are killed, or no
+  longer compile (a route added on the ServeMux past the list). One
+  is equivalent: `Run` asking for the kept size even when it is
+  empty, which the limits check refuses anyway.
+- **Follow-ups.**
+  - A hello of 8192×8192 passes `backend.MaxResizeSide` but exceeds
+    the native VNC backend's 2^25 pixels; the backend ignores it and
+    the server keeps its size. A stream could clamp it to the pixel
+    limit with its aspect instead.

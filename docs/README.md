@@ -5,6 +5,10 @@ You may interested in the following document:
 - [Occamy Architecture](./architecture.md)
   + TL;DR: Occamy v0 authenticates with JWT and proxies each connection to
     guacd; v1, in progress, has its own protocol and backends.
+- [HTTP API (v1)](./api.md)
+  + TL;DR: Every route a v1 configuration file serves: sign-in, the
+    connections and sessions, shares, the stream upgrades, their tokens,
+    replies, errors and limits.
 - [Occamy Protocol (v1)](./protocol.md)
   + TL;DR: The wire protocol of Occamy v1: binary messages over one
     WebSocket, a handshake in one round trip, and frames acknowledged

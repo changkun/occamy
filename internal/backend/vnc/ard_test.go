@@ -436,6 +436,16 @@ func TestARD(t *testing.T) {
 			cfg: Config{Username: "alice", Password: "hunter2"}, err: ErrNoSecurityType, errText: "set Config.ARD",
 		},
 		{
+			name: "not allowed, the setting named", types: []byte{secARD},
+			cfg: Config{Username: "alice", Password: "hunter2", ARDSetting: `ard: true on connection "mac"`},
+			err: ErrNoSecurityType, errText: `set ard: true on connection "mac" to allow it`,
+		},
+		{
+			name: "not allowed, the setting named, 3.3", version: "003.003", types: []byte{secARD},
+			cfg: Config{Username: "alice", Password: "hunter2", ARDSetting: `ard: true on connection "mac"`},
+			err: ErrNoSecurityType, errText: `set ard: true on connection "mac" to allow it`,
+		},
+		{
 			name: "not allowed, with VNC Authentication", types: []byte{secARD, secVNCAuth},
 			cfg: Config{Username: "alice", Password: "hunter2"}, want: secVNCAuth,
 		},
