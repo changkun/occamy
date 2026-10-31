@@ -924,6 +924,23 @@ func checkScreen(p *parity, c parityColumn) error {
 		return err
 	}
 	defer closeSession()
+	return s.showsInput(parityTimeout)
+}
+
+// showsInput checks that the screen is 1024×768, sends a pointer move
+// and Shift, which types nothing, and waits up to timeout for a frame
+// that acknowledges them, after which the screen shows the desktop: two
+// opaque colours at least. If it gets neither, or only one,
+// it says which it did not get.
+//
+// The frame that first acknowledges the input can come before the
+// desktop does. Through guacd, the screen is black until x11vnc's first
+// update, some 40 ms after the first frame, and a frame that draws all
+// of that black shows nothing yet; the desktop follows a few frames
+// later. Only opaque pixels count: pixels not drawn yet are
+// transparent, and a screen of black and undrawn pixels shows nothing
+// either.
+func (s *paritySession) showsInput(timeout time.Duration) error {
 	if got := s.cl.Size(); got != image.Pt(1024, 768) {
 		return fmt.Errorf("the screen is %v, want 1024×768", got)
 	}
@@ -938,22 +955,56 @@ func checkScreen(p *parity, c parityColumn) error {
 	if err := s.send(s.cl.Key(ctx, false, 0xffe1, 0xe1)); err != nil {
 		return err
 	}
-	if _, _, err := s.wait(0, "a frame after the input", func(ev client.Event) bool {
+	// The screen is the client's as of the last frame Next delivered,
+	// which is this one or a later one. A frame's LastSeq only grows, so
+	// a later frame acknowledges the input too.
+	acked := false
+	_, _, err = s.waitFor(timeout, 0, "a frame that acknowledges the input, with the desktop on the screen", func(ev client.Event) bool {
 		f, ok := ev.(client.Frame)
-		return ok && f.LastSeq >= seq
-	}); err != nil {
+		if !ok || f.LastSeq < seq {
+			return false
+		}
+		acked = true
+		_, blank := blankScreen(s.cl.Screenshot())
+		return !blank
+	})
+	if err == nil {
+		return nil
+	}
+	var why []string
+	if !acked {
+		why = append(why, fmt.Sprintf("no frame acknowledged the input (seq %d)", seq))
+	}
+	if shown, blank := blankScreen(s.cl.Screenshot()); blank {
+		why = append(why, "the screen shows no desktop: "+shown)
+	}
+	if len(why) == 0 { // the wait failed otherwise, as by the session's end
 		return err
 	}
-	img := s.cl.Screenshot()
-	first := img.RGBAAt(0, 0)
+	return fmt.Errorf("%w: %s", err, strings.Join(why, "; "))
+}
+
+// blankScreen says whether img has fewer than two opaque colours, and
+// what it has then. Pixels not drawn yet are transparent.
+func blankScreen(img *image.RGBA) (string, bool) {
+	var first []byte
 	for y := range img.Rect.Dy() {
-		for x := range img.Rect.Dx() {
-			if img.RGBAAt(x, y) != first {
-				return nil
+		row := img.Pix[y*img.Stride : y*img.Stride+4*img.Rect.Dx()]
+		for x := 0; x < len(row); x += 4 {
+			px := row[x : x+4]
+			switch {
+			case px[3] != 0xff: // not drawn, or not wholly
+			case first == nil:
+				first = px
+			case !bytes.Equal(px, first):
+				return "", false
 			}
 		}
 	}
-	return fmt.Errorf("the screen is all %v", first)
+	if first == nil {
+		return "nothing opaque", true
+	}
+	return fmt.Sprintf("all %v where opaque", first), true
 }
 
 func checkResizeHello(p *parity, c parityColumn) error {
