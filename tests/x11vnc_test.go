@@ -141,8 +141,12 @@ func TestX11vncClipboardRequestorGone(t *testing.T) {
 	}
 
 	// The probe answers "owner: " text with "echo: " text, which takes
-	// the clipboard from x11vnc again, for the tests that follow.
-	barrier := fmt.Sprintf("x11vnc requestor %d", time.Now().UnixNano())
+	// the clipboard from x11vnc again, for the tests that follow. x11vnc
+	// sends the clipboard to its clients only if its length or its first
+	// 32 bytes differ from those it read last (CHKSZ in selection.c), so
+	// the text starts with its nonce: one that came after them made runs
+	// less than 10 s apart, whose echoes then had the same 32 bytes, fail.
+	barrier := fmt.Sprintf("%d x11vnc barrier", time.Now().UnixNano())
 	if _, err := cl.Clipboard(ctx, "text/plain", []byte("owner: "+barrier)); err != nil {
 		t.Fatal(err)
 	}
