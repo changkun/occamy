@@ -17,9 +17,10 @@
 # (-noshm) it did so less often on a Mac, but still did in CI.
 # X11VNC_PRINT_XERROR makes it log the failed request first. Each x11vnc
 # runs under a watchdog, which kills one that logs an X error or leaves a
-# connection unaccepted for ten seconds, and starts one that exits again,
-# and says so in the log. Its log lines start with its port. If an Xvfb
-# or a desktop exits, so does the container.
+# connection unaccepted for 26 seconds, and starts one that exits again,
+# backing off while x11vnc keeps exiting, and says so in the log. Its log
+# lines start with its port. If an Xvfb or a desktop exits, so does the
+# container.
 
 set -euo pipefail
 trap 'exit 0' TERM INT
@@ -61,20 +62,25 @@ log() {
 
 # serve port display args… runs x11vnc for display on port, and starts it
 # again whenever it exits, reports an X error, or leaves a connection
-# unaccepted for 10 s. A live x11vnc accepts within a second, however
+# unaccepted for 26 s. A live x11vnc accepts within a second, however
 # often clients connect, so the watchdog follows each waiting connection
-# rather than the queue's length.
+# rather than the queue's length; but it serves its clients in one
+# thread, and waits up to -rfbwait, 20 s by default, for a client that
+# does not take what it sends, accepting nobody meanwhile. It starts
+# x11vnc again a second after it exits, or, while x11vnc lives less than
+# 30 s, after twice the last delay, up to 16 s.
 serve() {
-	local port=$1 display=$2 pid waited now looks
+	local port=$1 display=$2 pid waited now looks started delay=1
 	shift 2
 	while :; do
 		rm -f "/tmp/x11vnc-$port.failed"
+		started=$SECONDS
 		x11vnc -display "$display" -rfbport "$port" -forever -shared -noshm "$@" \
 			> >(log "$port") 2>&1 &
 		pid=$!
 		# waited holds the connections that have waited at every look
 		# for looks looks.
-		waited= looks=0
+		waited='' looks=0
 		while kill -0 "$pid" 2>/dev/null; do
 			sleep 2
 			if [ -e "/tmp/x11vnc-$port.failed" ]; then
@@ -92,15 +98,20 @@ serve() {
 			else
 				waited=$now looks=0
 			fi
-			if [ "$looks" -ge 5 ]; then
-				echo "[$port] watchdog: x11vnc has left a connection unaccepted for 10 s, killing it"
+			if [ "$looks" -ge 13 ]; then
+				echo "[$port] watchdog: x11vnc has left a connection unaccepted for 26 s, killing it"
 				kill -9 "$pid" 2>/dev/null || true
 				break
 			fi
 		done
 		wait "$pid" || true
-		echo "[$port] watchdog: x11vnc exited, starting it again"
-		sleep 1
+		if [ $((SECONDS - started)) -lt 30 ]; then
+			delay=$((delay * 2 > 16 ? 16 : delay * 2))
+		else
+			delay=1
+		fi
+		echo "[$port] watchdog: x11vnc exited, starting it again in $delay s"
+		sleep "$delay"
 	done
 }
 

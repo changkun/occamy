@@ -286,12 +286,15 @@ notes: VNC's parity matrix), after this spec was complete.
   now runs), in none of fifteen runs on the Mac, but three times in one
   run in CI. `start.sh` sets `X11VNC_PRINT_XERROR`, so that x11vnc logs
   the failed request, and runs each x11vnc under a watchdog, which kills
-  one that reports an X error or leaves a connection unaccepted for ten
-  seconds, starts one that exits again, and logs that it did. It
-  follows each waiting connection in `/proc/net/tcp`: a first version
-  that went by the length of the accept queue killed a live x11vnc,
-  which clients reached every second or two. Its log lines start with
-  its port. The restart is logged rather than silent, so the reason
+  one that reports an X error or leaves a connection unaccepted for
+  26 s. That is longer than x11vnc's `-rfbwait` (20 s by default), for
+  which a live x11vnc may wait on a client that does not read,
+  accepting nobody meanwhile. It starts one that exits again after a
+  second, or, while x11vnc lives less than 30 s, after twice the last
+  delay, up to 16 s, and logs that it did. It follows each waiting
+  connection in `/proc/net/tcp`: a first version that went by the
+  length of the accept queue killed a live x11vnc, which clients
+  reached every second or two. Its log lines start with its port. The restart is logged rather than silent, so the reason
   this spec gives for having no restart policy, that crashes stay
   visible, still holds.
 - `docker/demo/vnc/desktop.sh`, the desktop of both images, runs an
