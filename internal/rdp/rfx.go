@@ -127,7 +127,13 @@ func (d *rfxDecoder) component(dst *[4096]int32, coef *[4096]int16, q *rfxQuant,
 	}
 	band := func(k int) []int32 { return d.work[b[k].off : b[k].off+b[k].w*b[k].h] }
 	// Level 3 into l3, level 2 into l2, level 1 into dst: each takes the
-	// low band the level below gave, and its own three high bands.
+	// low band the level below gave, and its own three high bands. With
+	// factors of 15, which no encoder sends for content, coefficients
+	// near the bounds of 16 bits are 2^29 once shifted, and the
+	// lifting's sums of them may pass 32 bits and wrap, as Go defines.
+	// The planes go nowhere but rgbOf, which clamps them first, so a
+	// wrapped sample is a wrong colour within its tile, as the server
+	// could have sent anyway (TestRFXWrap).
 	idwtLevel(d.l3[:], band(bandLL3), band(bandHL3), band(bandLH3), band(bandHH3),
 		b[bandLL3].w, b[bandHL3].w, b[bandLL3].h, b[bandLH3].h, false, &d.rows)
 	idwtLevel(d.l2[:], d.l3[:], band(bandHL2), band(bandLH2), band(bandHH2),
@@ -306,12 +312,16 @@ func clipCost(p image.Point, clips []image.Rectangle) int {
 }
 
 // rfxTileCost is what decoding a tile's coefficients and inverting
-// their transform costs, charged against the decoding rate in pixels
-// before the pixels it draws: a tile decoded and drawn takes about 6.5
-// times what a planar bitmap of its size takes (BenchmarkGFXRemoteFX
-// and BenchmarkGFXProgressive against BenchmarkGFXPlanar), so it is
-// charged 7 times its pixels in all.
-const rfxTileCost = 6 * rfxTile * rfxTile
+// their transform costs, charged against the decoding rate before the
+// pixels it draws, so that a tile drawn whole is charged rfxPixelCost
+// units a pixel. Decoded and drawn, a tile of real content takes 11 to
+// 13 ns a pixel (BenchmarkGFXRemoteFX, BenchmarkGFXProgressive), and
+// one of a header alone 8 to 10 (BenchmarkHostileTiles): 1.1 to 1.9 ns
+// a unit, as a planar bitmap's pixel at 2 units takes 1.1 to 1.3.
+const (
+	rfxPixelCost = 7
+	rfxTileCost  = (rfxPixelCost - 1) * rfxTile * rfxTile
+)
 
 // TS_RFX blocks ([MS-RDPRFX] 2.2.2).
 const (

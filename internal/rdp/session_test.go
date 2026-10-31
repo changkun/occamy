@@ -164,14 +164,14 @@ func (s *cursorCount) CursorMove(p image.Point) {
 }
 
 // Pointer updates are charged against the decoding budget: a move or a
-// small shape as a 64×64 tile, a large shape as its pixels. A server
+// shape as pointerCost, a shape larger than that as its pixels. A server
 // cannot make the client hand shapes and moves to every viewer faster
 // than it could hand them bitmaps.
 func TestPointerPaced(t *testing.T) {
 	const w, h = 1024, 768
-	burst := 2*w*h + (bitmapPad+1)*(bitmapPad+1)
+	burst := paceBurst(w, h)
 	wait := func(pixels int) time.Duration {
-		return time.Duration(float64(pixels-burst) / decodeRate * float64(time.Second))
+		return time.Duration((float64(pixels) - burst) / decodeRate * float64(time.Second))
 	}
 	near := func(got, want time.Duration) bool { return got > want-time.Millisecond && got < want+time.Millisecond }
 
@@ -202,12 +202,12 @@ func TestPointerPaced(t *testing.T) {
 	if err := runFrames(c, out, frames...); !errors.Is(err, io.EOF) || out.shapes != 2*shapes {
 		t.Fatalf("shapes: Run returned %v after %d shapes", err, out.shapes)
 	}
-	if want := wait(shapes * (pointerCost + 80*80)); !near(clock.slept, want) {
+	if want := wait(shapes * (cursorCost(16, 16) + cursorCost(80, 80))); !near(clock.slept, want) {
 		t.Errorf("%d shapes waited %v, want %v", 2*shapes, clock.slept, want)
 	}
 
 	// Hiding the pointer and showing the default one are changes, and
-	// each costs a tile.
+	// each costs pointerCost.
 	frames = frames[:0]
 	for i := range moves {
 		code := uint8(rdptest.FPPtrNull)

@@ -577,7 +577,7 @@ func TestClipboardPaced(t *testing.T) {
 	c.chio.kick = make(chan struct{}, 1)
 	c.clipCh = &vchannel{name: "cliprdr", limit: maxCliprdrMessage}
 	out := &screen{}
-	burst := 2*64*64 + (bitmapPad+1)*(bitmapPad+1)
+	burst := int(paceBurst(64, 64))
 	n := 0
 	for ; clock.slept == 0 && n < 100; n++ {
 		c.clip.requested = cfUnicodeText

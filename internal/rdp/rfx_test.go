@@ -1221,6 +1221,9 @@ func TestRFXPace(t *testing.T) {
 		want  int
 	}{
 		{"remotefx", nil, rfx, 2*rfxTileCost + 2 + 64*30 + 64*24 + 2 + 36*30},
+		// An empty rectangle, which clips the tiles away, is not decoded.
+		{"remotefx, empty", nil, rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, image.Rect(16, 16, 16, 80),
+			rdptest.RemoteFX(rdptest.RLGR1, nil, fineQuant[:1], []rdptest.RFXTile{tile, t2})), 0},
 		// The first region's two tiles, and the second's upgrade of the
 		// first, drawn again.
 		{"progressive", nil, prog, 3*rfxTileCost + 1 + 64*64 + 1 + 36*64 + 1 + 64*64},
@@ -1249,6 +1252,134 @@ func TestRFXPace(t *testing.T) {
 			t.Errorf("%s: charged %v pixels, want %d", tc.name, got, tc.want)
 		}
 	}
+}
+
+// fullScreen is a frame's PDUs that draw a desktop of w×h in codec: a
+// PDU a tile of 64×64, but for progressive, one region of every tile in
+// one PDU, as xrdp sends a screen. With empty, progressive's tiles are
+// headers alone, which decode as zeros.
+func fullScreen(w, h int, codec string, empty bool) [][]byte {
+	coef := rdptest.EncodeTile(testImage(1, 0), image.Point{}, &xrdpQuant, false)
+	if codec == "progressive" {
+		block := newProgEnc(0, 0, false).first(coef, false, true, progFull, fullPass)
+		if empty {
+			tile := rdptest.ProgTile{Type: rdptest.ProgTileSimple}
+			block = tile.Block()
+		}
+		var tiles [][]byte
+		for y := 0; y < h; y += 64 {
+			for x := 0; x < w; x += 64 {
+				t := slices.Clone(block)
+				binary.LittleEndian.PutUint16(t[9:], uint16(x/64))  // #nosec G115 -- small
+				binary.LittleEndian.PutUint16(t[11:], uint16(y/64)) // #nosec G115 -- small
+				tiles = append(tiles, t)
+			}
+		}
+		region := rdptest.ProgRegion{Rects: []image.Rectangle{image.Rect(0, 0, w, h)}, Quants: xrdpQuant[:], Tiles: tiles}
+		return [][]byte{rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, rdptest.Progressive(1, region))}
+	}
+	rfx := rfxEncode(testImage(1, 0), rdptest.RLGR1)
+	var pdus [][]byte
+	for y := 0; y < h; y += 64 {
+		for x := 0; x < w; x += 64 {
+			r := image.Rect(x, y, min(x+64, w), min(y+64, h))
+			img := gradient(r.Dx(), r.Dy())
+			switch codec {
+			case "remotefx":
+				pdus = append(pdus, rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, r, rfx))
+			case "planar":
+				pdus = append(pdus, rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, r, planarEncodeImage(img)))
+			case "uncompressed":
+				pdus = append(pdus, rdptest.WireToSurface1(1, rdptest.CodecUncompressed, rdptest.PixelXRGB, r, rdptest.Uncompressed(img)))
+			}
+		}
+	}
+	return pdus
+}
+
+// sendFrame sends the frame id of pdus, in messages of a row of tiles.
+func (g *gfxTest) sendFrame(t testing.TB, id uint32, pdus [][]byte) {
+	t.Helper()
+	g.must(t, rdptest.StartFrame(id))
+	for len(pdus) > 0 {
+		n := min(len(pdus), 32)
+		g.must(t, pdus[:n]...)
+		pdus = pdus[n:]
+	}
+	g.must(t, rdptest.EndFrame(id))
+}
+
+// The decoding rate lets full-motion content through and holds a flood
+// back (decodeRate). At 1920×1080: a session's first screen, in any
+// codec, does not wait; full-screen frames at 30 a second, in RemoteFX
+// Progressive, the costliest, or planar, keep up for 10 seconds without
+// a wait; and tiles of a header alone, the cheapest to send, at ten
+// times that rate wait, held to decodeRate's share of tiles a second.
+func TestDecodeBudget(t *testing.T) {
+	const w, h = 1920, 1080
+	frameEvery := time.Second / 30
+	for _, codec := range []string{"progressive", "remotefx", "planar", "uncompressed"} {
+		g := newGFXTest(t, w, h)
+		g.must(t, surfacePDUs(1, w, h, image.Point{})...)
+		frame := fullScreen(w, h, codec, false)
+		g.sendFrame(t, 1, frame)
+		if slept := g.clock.waited(); slept != 0 {
+			t.Errorf("%s: the first screen waited %v", codec, slept)
+		}
+		if codec != "progressive" && codec != "planar" {
+			continue
+		}
+		// What a frame costs, from a full bucket and a still clock.
+		g.clock.advance(time.Second)
+		if err := g.c.pace(0); err != nil {
+			t.Fatal(err)
+		}
+		before := g.c.tokens
+		g.sendFrame(t, 2, frame)
+		cost := before - g.c.tokens
+		// Three more frames decoded, and 10 seconds of them charged.
+		for i := range 3 {
+			g.clock.advance(frameEvery)
+			g.sendFrame(t, uint32(3+i), frame) // #nosec G115 -- small
+		}
+		for range 300 {
+			g.clock.advance(frameEvery)
+			if err := g.c.pace(int(cost)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if slept := g.clock.waited(); slept != 0 {
+			t.Errorf("%s: frames of %.0f units at 30 a second waited %v", codec, cost, slept)
+		}
+		t.Logf("%s: a frame of %d×%d costs %.1f Mi units, %.0f%% of decodeRate at 30 a second", codec, w, h, cost/(1<<20), 100*30*cost/decodeRate)
+	}
+
+	// The flood: a screen of tiles of a header alone every 1/300 s.
+	g := newGFXTest(t, w, h)
+	g.must(t, surfacePDUs(1, w, h, image.Point{})...)
+	flood := fullScreen(w, h, "progressive", true)
+	g.clock.advance(time.Second)
+	if err := g.c.pace(0); err != nil {
+		t.Fatal(err)
+	}
+	before := g.c.tokens
+	g.sendFrame(t, 1, flood)
+	cost := before - g.c.tokens
+	var last time.Duration
+	for i := range 6 {
+		g.clock.advance(time.Second / 300)
+		slept := g.clock.waited()
+		g.sendFrame(t, uint32(2+i), flood) // #nosec G115 -- small
+		last = g.clock.waited() - slept
+	}
+	// Once the bucket is spent, each screen waits for its cost at
+	// decodeRate, less the time it took to come.
+	want := time.Duration(cost/decodeRate*float64(time.Second)) - time.Second/300
+	if last < want-time.Millisecond || last > want+time.Millisecond {
+		t.Errorf("a screen of empty tiles waited %v, want %v", last, want)
+	}
+	tiles := (w + 63) / 64 * ((h + 63) / 64)
+	t.Logf("a flood of empty tiles gets %.0f tiles a second, %.0f screens", float64(tiles)*decodeRate/cost, decodeRate/cost)
 }
 
 // The contexts keep at most progTileLimit tiles, across surfaces.
@@ -1388,6 +1519,35 @@ func TestRLGRRoundTrip(t *testing.T) {
 	}
 }
 
+// Coefficients at the bounds of 16 bits under factors of 15 are 2^29
+// once shifted, and the inverse transform's odd samples, twice a high
+// coefficient and half the sum of two even ones, pass 32 bits and wrap:
+// the tile decodes and draws, opaque, without a panic, in both
+// transforms.
+func TestRFXWrap(t *testing.T) {
+	var coef [3][4096]int16
+	for c := range coef {
+		for i := range coef[c] {
+			coef[c][i] = 32767
+			if (i/7+c)%2 == 1 {
+				coef[c][i] = -32768
+			}
+		}
+	}
+	quant := [3]rfxQuant{rfxQuant(uniformQuant(15)), rfxQuant(uniformQuant(15)), rfxQuant(uniformQuant(15))}
+	for _, extra := range []bool{false, true} {
+		var d rfxDecoder
+		d.planesOf(&coef, &quant, extra)
+		s := newSurface(1, 64, 64)
+		d.draw(s, image.Point{}, []image.Rectangle{s.bounds()})
+		for i := 3; i < len(s.pix); i += 4 {
+			if s.pix[i] != 0xff {
+				t.Fatalf("extra %v: pixel %d not opaque", extra, i/4)
+			}
+		}
+	}
+}
+
 // RLGR saturates values beyond 16 bits, and bounds a Golomb-Rice code's
 // unary part: a stream of ones, a run of one zero and then a negative
 // value of 2^17 ones, decodes to the value saturated, and zeros after.
@@ -1522,6 +1682,27 @@ func BenchmarkGFXProgressive(b *testing.B) {
 		tile := newProgEnc(r.Min.X/64, r.Min.Y/64, false).first(coef, false, true, progFull, fullPass)
 		region := rdptest.ProgRegion{Rects: []image.Rectangle{r}, Quants: xrdpQuant[:], Tiles: [][]byte{tile}}
 		return rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, rdptest.Progressive(1, region))
+	})
+}
+
+// BenchmarkHostileTiles is the cheapest tile to send for the most
+// decoding: a tile's header and no coefficients, which decode as zeros
+// through the whole inverse transform, a PDU each over a frame, as
+// BenchmarkGFXRemoteFX's. Its ns/pixel times 64×64 is what a tile costs,
+// and decodeRate's share of tiles a second times that is the CPU that a
+// hostile server can make the client spend on them.
+func BenchmarkHostileTiles(b *testing.B) {
+	b.Run("remotefx", func(b *testing.B) {
+		benchFrame(b, func(r image.Rectangle, _ *image.RGBA) []byte {
+			return rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, r, rdptest.RemoteFX(rdptest.RLGR1, nil, xrdpQuant[:1], []rdptest.RFXTile{{}}))
+		})
+	})
+	b.Run("progressive", func(b *testing.B) {
+		benchFrame(b, func(r image.Rectangle, _ *image.RGBA) []byte {
+			tile := rdptest.ProgTile{Type: rdptest.ProgTileSimple, X: r.Min.X / 64, Y: r.Min.Y / 64}
+			region := rdptest.ProgRegion{Rects: []image.Rectangle{r}, Quants: xrdpQuant[:1], Tiles: [][]byte{tile.Block()}}
+			return rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, rdptest.Progressive(1, region))
+		})
 	})
 }
 

@@ -298,6 +298,34 @@ var gfxIgnored = map[int]string{
 	gfxCacheImportReply: "GFX cache PDUs",
 }
 
+// gfxMissing are the PDUs and bitmaps that the client skips, by the
+// names it counts them under, that leave the screen without what the
+// server draws: Windows sends ClearCodec and the bitmap cache, which
+// the client does not take yet. AVC, which the client does not offer,
+// is not among them.
+var gfxMissing = map[string]bool{
+	"GFX cache PDUs":                               true,
+	"GFX ClearCodec bitmaps":                       true,
+	"GFX alpha bitmaps":                            true,
+	"GFX progressive bitmaps in wire to surface 1": true,
+	"GFX bitmaps of unknown codecs":                true,
+}
+
+// gfxSkipped counts a GFX PDU or bitmap that the client skips, by name,
+// and warns at the first of a session that leaves the screen without
+// what it draws: until the client takes them, GFX off has the server
+// draw in what it does take.
+func (c *Client) gfxSkipped(name string) {
+	c.count(func(s *Stats) { s.Ignored[name]++ })
+	if c.gfxWarned || !gfxMissing[name] {
+		return
+	}
+	c.gfxWarned = true
+	c.log.Warn("rdp: the server draws with GFX that the client does not decode yet, so parts of the screen may stay missing or stale; "+
+		"to turn GFX off, set disable_gfx: true on the target's connection, or, for an ad-hoc target, adhoc_backends: {rdp: guacd}",
+		"addr", c.addr, "skipped", name)
+}
+
 var gfxCodecNames = map[int]string{
 	gfxCodecClearCodec:  "GFX ClearCodec bitmaps",
 	gfxCodecProgressive: "GFX progressive bitmaps in wire to surface 1",
@@ -441,7 +469,7 @@ func (c *Client) gfxPDU(out Output, cmd int, body []byte) error {
 		if !ok {
 			name = "GFX PDUs"
 		}
-		c.count(func(s *Stats) { s.Ignored[name]++ })
+		c.gfxSkipped(name)
 		return nil
 	}
 	if err == nil && r.err != nil {
@@ -865,20 +893,22 @@ func (c *Client) gfxWireToSurface1(r *reader) error {
 	if !dr.In(s.bounds()) {
 		return fmt.Errorf("bitmap at %v outside surface %d of %d×%d", dr, id, s.w, s.h)
 	}
-	if codec == gfxCodecRemoteFX {
-		return c.gfxRemoteFX(s, dr, data)
-	}
-	if codec != gfxCodecUncompressed && codec != gfxCodecPlanar {
+	if codec != gfxCodecRemoteFX && codec != gfxCodecUncompressed && codec != gfxCodecPlanar {
 		name, ok := gfxCodecNames[codec]
 		if !ok {
 			name = "GFX bitmaps of unknown codecs"
 		}
-		c.count(func(s *Stats) { s.Ignored[name]++ })
+		c.gfxSkipped(name)
 		return nil
 	}
 	if dr.Empty() {
+		// Nothing of it would show: a RemoteFX message's tiles are
+		// clipped to the rectangle.
 		c.count(func(s *Stats) { s.Ignored["empty bitmaps"]++ })
 		return nil
+	}
+	if codec == gfxCodecRemoteFX {
+		return c.gfxRemoteFX(s, dr, data)
 	}
 	w, h := dr.Dx(), dr.Dy()
 	if codec == gfxCodecPlanar && w*h > maxBitmapPixels {
@@ -886,7 +916,11 @@ func (c *Client) gfxWireToSurface1(r *reader) error {
 		// updates.
 		return fmt.Errorf("planar bitmap of %d×%d, over the bound of %d pixels", w, h, maxBitmapPixels)
 	}
-	if err := c.pace(w * h); err != nil {
+	cost := w * h
+	if codec == gfxCodecPlanar {
+		cost *= planarCost
+	}
+	if err := c.pace(cost); err != nil {
 		return err
 	}
 	dst := s.pix[s.offset(dr.Min.X, dr.Min.Y):]

@@ -151,7 +151,7 @@ func (c *Client) gfxWireToSurface2(r *reader) error {
 		return err
 	}
 	if codec != gfxCodecProgressive {
-		c.count(func(s *Stats) { s.Ignored["GFX bitmaps of unknown codecs"]++ })
+		c.gfxSkipped("GFX bitmaps of unknown codecs")
 		return nil
 	}
 	st := s.prog

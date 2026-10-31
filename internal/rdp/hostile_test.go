@@ -151,8 +151,8 @@ func fastPathBitmaps(n, w, h, bpp int, data []byte) []byte {
 func TestDecodeRate(t *testing.T) {
 	const w, h, n = 1024, 768, 50
 	desktop := fastPathBitmaps(1, w, h, 16, []byte{0xf0, 0xff, 0xff})
-	burst := 2*w*h + (bitmapPad+1)*(bitmapPad+1)
-	want := time.Duration(float64(n*w*h-burst) / decodeRate * float64(time.Second))
+	burst := paceBurst(w, h)
+	want := time.Duration((float64(n*w*h) - burst) / decodeRate * float64(time.Second))
 	near := func(d time.Duration) bool { return d > want-time.Millisecond && d < want+time.Millisecond }
 	scr := &screen{}
 	scr.Resize(w, h)
@@ -175,11 +175,12 @@ func TestDecodeRate(t *testing.T) {
 		t.Errorf("%d PDUs of one desktop: waited %v, want %v", n, clock.slept, want)
 	}
 
-	// Without a wait, the bucket holds two desktops and a tile.
+	// Without a wait, the bucket holds two desktops of tiles and a
+	// pointer update: 14 desktops of RLE.
 	c = testClient(w, h)
 	err := c.handleFastPath(scr, frame{fastPath: true, data: fastPathBitmaps(n, w, h, 16, []byte{0xf0, 0xff, 0xff})})
-	if !errors.Is(err, errPaced) || c.Stats().Bitmaps["rle16"] != 2 {
-		t.Errorf("an empty bucket: %v after %d desktops, want 2", err, c.Stats().Bitmaps["rle16"])
+	if !errors.Is(err, errPaced) || c.Stats().Bitmaps["rle16"] != 14 {
+		t.Errorf("an empty bucket: %v after %d desktops, want 14", err, c.Stats().Bitmaps["rle16"])
 	}
 
 	// A bitmap larger than the bucket, as a desktop of 1×8192 allows,
@@ -187,7 +188,7 @@ func TestDecodeRate(t *testing.T) {
 	c, clock = testClock(1, 8192)
 	bw, bh := 1+bitmapPad, 8192+bitmapPad
 	big := fastPathBitmaps(1, bw, bh, 16, []byte{0xf0, 0xff, 0xff})
-	wantBig := time.Duration(float64(bw*bh-(2*8192+(bitmapPad+1)*(bitmapPad+1))) / decodeRate * float64(time.Second))
+	wantBig := time.Duration((float64(bw*bh) - paceBurst(1, 8192)) / decodeRate * float64(time.Second))
 	if err := c.handleFastPath(&sizeRecorder{}, frame{fastPath: true, data: big}); err != nil || clock.slept != wantBig {
 		t.Errorf("a bitmap of %d×%d on a desktop of 1×8192: %v, waited %v, want %v", bw, bh, err, clock.slept, wantBig)
 	}
@@ -248,6 +249,37 @@ func TestDecoderKeepsScratch(t *testing.T) {
 	}
 	if c.dec.raw != nil || c.dec.rgba != nil {
 		t.Errorf("the decoder kept %d and %d bytes after a resize", 4*cap(c.dec.raw), cap(c.dec.rgba))
+	}
+}
+
+// A planar bitmap is charged planarCost a pixel, as it takes twice what
+// an RLE or raw one takes to decode; the others a unit a pixel. A
+// pointer update is charged an 8,192th of decodeRate.
+func TestBitmapCost(t *testing.T) {
+	if n := decodeRate / pointerCost; n != 8192 {
+		t.Errorf("%d pointer updates a second", n)
+	}
+	r := image.Rect(0, 0, 8, 8)
+	for _, tc := range []struct {
+		kind string
+		b    *bitmapData
+		want int
+	}{
+		{"planar", &bitmapData{dest: r, width: 8, height: 8, bpp: 32, compressed: true, data: planarEncodeImage(gradient(8, 8))}, 2 * 64},
+		{"raw32", &bitmapData{dest: r, width: 8, height: 8, bpp: 32, data: make([]byte, 4*64)}, 64},
+		{"rle16", &bitmapData{dest: r, width: 8, height: 8, bpp: 16, compressed: true, data: []byte{0xf0, 64, 0}}, 64},
+	} {
+		c, _ := testClock(64, 64)
+		if err := c.pace(0); err != nil {
+			t.Fatal(err)
+		}
+		before := c.tokens
+		if err := c.drawBitmap(&sizeRecorder{}, tc.b); err != nil {
+			t.Fatalf("%s: %v", tc.kind, err)
+		}
+		if got := before - c.tokens; got != float64(tc.want) || c.Stats().Bitmaps[tc.kind] != 1 {
+			t.Errorf("%s: charged %v, want %d; decoded %v", tc.kind, got, tc.want, c.Stats().Bitmaps)
+		}
 	}
 }
 
