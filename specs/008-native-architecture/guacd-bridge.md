@@ -656,6 +656,9 @@ that guacd was `vnc`'s default, they are corrected below.
     and an ad-hoc vnc target without `adhoc_backends`, get the native
     backend. `backend: guacd` stays valid for vnc, and
     `adhoc_backends: {vnc: guacd}` for ad-hoc targets.
+  - Note, 2026-10-31, later the same day: `config.DefaultBackend` now
+    also returns `native` for kubernetes, its only backend
+    ([native-kubernetes-backend](native-kubernetes-backend.md)).
   - `tls` and `ard` still need the native backend; their refusals now
     name the backend that was set (`backend: guacd would not: leave
     backend out, or set native`), since a connection without `backend`
