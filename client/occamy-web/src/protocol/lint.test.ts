@@ -11,7 +11,13 @@ import { fileURLToPath } from 'node:url'
 import { ESLint } from 'eslint'
 import { describe, expect, it } from 'vitest'
 
-const eslint = new ESLint({ cwd: fileURLToPath(new URL('../..', import.meta.url)) })
+// With CI set, typescript-eslint infers a single pass over the files on
+// disk, and the first text linted here came back without a message; the
+// test lints texts, not files, so it turns that inference off.
+const eslint = new ESLint({
+  cwd: fileURLToPath(new URL('../..', import.meta.url)),
+  overrideConfig: { files: ['**/*.ts'], languageOptions: { parserOptions: { disallowAutomaticSingleRunInference: true } } },
+})
 
 async function restricted(filePath: string, source: string): Promise<boolean> {
   const [result] = await eslint.lintText(`import * as m from '${source}'\nexport const used = m\n`, { filePath })
