@@ -131,10 +131,22 @@ func (f *File) validate(c *checker) {
 	}
 	c.file("tls.cert", f.TLS.Cert)
 	c.file("tls.key", f.TLS.Key)
+	debugKey := "debug.address"
+	if f.Debug.AddressEnv != "" {
+		switch {
+		case f.Debug.Address != "":
+			c.add("debug.address_env", "set beside debug.address: give one")
+		case !envPattern.MatchString(f.Debug.AddressEnv):
+			c.add("debug.address_env", "%q is not an environment variable name", f.Debug.AddressEnv)
+		default:
+			// Unset or empty, the variable leaves the listener off.
+			f.Debug.Address, debugKey = os.Getenv(f.Debug.AddressEnv), "debug.address_env"
+		}
+	}
 	if f.Debug.Address != "" {
-		c.address("debug.address", f.Debug.Address, false)
+		c.address(debugKey, f.Debug.Address, false)
 		if Overlap(f.Listen, f.Debug.Address) {
-			c.add("debug.address", "%q shares a port with listen %q: give the debug listener a port of its own, since whatever reaches the one could reach the other", f.Debug.Address, f.Listen)
+			c.add(debugKey, "%q shares a port with listen %q: give the debug listener a port of its own, since whatever reaches the one could reach the other", f.Debug.Address, f.Listen)
 		}
 	}
 	for i, o := range f.Origins {

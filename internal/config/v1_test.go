@@ -888,6 +888,60 @@ connections:
 	}
 }
 
+// TestParseV1DebugAddressEnv checks debug.address_env: the address comes
+// from the variable it names, the listener stays off while the variable
+// is unset or empty, and the address is checked as debug.address is.
+func TestParseV1DebugAddressEnv(t *testing.T) {
+	const raw = head + "listen: ':5636'\ndebug: {address_env: OCCAMY_TEST_DEBUG}\n"
+	for _, tt := range []struct {
+		name    string
+		set     bool
+		value   string
+		address string
+		problem string
+	}{
+		{name: "unset", address: ""},
+		{name: "empty", set: true, value: "", address: ""},
+		{name: "set", set: true, value: "127.0.0.1:6060", address: "127.0.0.1:6060"},
+		{name: "not an address", set: true, value: "localhost", problem: "is not host:port"},
+		{name: "on listen's port", set: true, value: "127.0.0.1:5636", problem: "shares a port with listen"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.set {
+				t.Setenv("OCCAMY_TEST_DEBUG", tt.value)
+			} else {
+				os.Unsetenv("OCCAMY_TEST_DEBUG")
+			}
+			f, err := parse(t, raw)
+			if tt.problem != "" {
+				var problems config.Problems
+				if !errors.As(err, &problems) || len(problems) != 1 || problems[0].Path != "debug.address_env" || !strings.Contains(problems[0].Message, tt.problem) {
+					t.Fatalf("ParseV1() = %v; want one problem at debug.address_env: ...%s...", err, tt.problem)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if f.Debug.Address != tt.address {
+				t.Errorf("the debug listener's address is %q, want %q", f.Debug.Address, tt.address)
+			}
+		})
+	}
+	for _, tt := range []struct{ name, debug, problem string }{
+		{"beside address", "{address: 'localhost:6060', address_env: OCCAMY_TEST_DEBUG}", "set beside debug.address"},
+		{"not a name", "{address_env: 'OCCAMY TEST'}", "is not an environment variable name"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := parse(t, head+"debug: "+tt.debug+"\n")
+			var problems config.Problems
+			if !errors.As(err, &problems) || len(problems) != 1 || problems[0].Path != "debug.address_env" || !strings.Contains(problems[0].Message, tt.problem) {
+				t.Fatalf("ParseV1() = %v; want one problem at debug.address_env: ...%s...", err, tt.problem)
+			}
+		})
+	}
+}
+
 // TestParseV1Lines checks that problems name their lines, including a
 // problem about a key that is not in the file.
 func TestParseV1Lines(t *testing.T) {

@@ -176,9 +176,14 @@ type TLS struct {
 	Key  string `yaml:"key"`
 }
 
-// Debug configures the debug listener, which is off when Address is empty.
+// Debug configures the debug listener, which is off when Address is
+// empty. AddressEnv names an environment variable that holds the address
+// instead, so that a deployment can turn the listener on without
+// another file; ParseV1 reads it into Address, and the listener stays
+// off while the variable is unset or empty.
 type Debug struct {
-	Address string `yaml:"address"`
+	Address    string `yaml:"address"`
+	AddressEnv string `yaml:"address_env"`
 }
 
 // Auth configures how callers sign in and how tokens are signed.
