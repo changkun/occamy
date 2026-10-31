@@ -6,7 +6,9 @@
 # (docker-compose.bench.yaml), which replaces the demo's: the bench
 # desktop and the demo shell through every backend that API v1 serves
 # them with, for the harness's v1 series (bench/v1.go). Native RDP is
-# not registered yet, and SSH has no guacd backend.
+# not registered yet, and SSH has no guacd backend. Every connection
+# names its backend, so that a change of a protocol's default does not
+# move a series to another backend.
 
 version: 1
 listen: 0.0.0.0:5637
@@ -20,6 +22,7 @@ auth:
 connections:
   - id: ssh
     protocol: ssh
+    backend: native
     target: ssh:22
     # The demo shell's host key changes with its image.
     insecure_ignore_host_key: true
@@ -39,6 +42,7 @@ connections:
     allow: {users: [demo]}
   - id: rdp-guacd
     protocol: rdp
+    backend: guacd
     target: rdp:3389
     credentials: {username: occamy, password_env: OCCAMY_BENCH_RDP_PASSWORD}
     allow: {users: [demo]}
