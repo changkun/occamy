@@ -1,9 +1,8 @@
 {
-  // The protocol v1 client core (src/protocol) is TypeScript; the Vue app
-  // around it stays JavaScript. This config checks the library alone,
-  // with the browser's types and no Node types, so that the library
-  // cannot use Node's APIs by accident. tsconfig.test.json checks the
-  // tests, which run in Node.
+  // The protocol v1 client core (src/protocol) alone, with the browser's
+  // types and no others, so that the library cannot use Node's or the
+  // shell's by accident. tsconfig.app.json checks the React shell around
+  // it, and tsconfig.test.json the tests, which run in Node.
   "compilerOptions": {
     "target": "ES2022",
     "module": "ESNext",

@@ -178,20 +178,24 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   links into amd64 builds, and `scripts/third-party-licenses.sh` lists
   both architectures of every release platform.
 - Refinement in the graphics pipeline. Each viewer's writer keeps a heat
-  per tile: a tile that changes in three snapshots of the screen in a
-  row is in motion, and goes at the pacer's lowest quality, and lossy if
-  it has 17 to 256 colours; an input's effect never is. A still lossy
-  tile goes at the lowest quality, up to the pacer's, at which each
-  tile's SSIM reaches 0.91 (`encoder.StillSSIM`). Once a tile has been
-  still for 300 ms (`stream.Config.RefineDelay`), background frames send
-  it again: exact if it has up to 256 colours, at the SSIM's quality if
-  it has more. Refinement goes only while nothing else is to be sent and
-  no frame awaits an ack, a tile a message within the pacer's 5 ms of
-  bytes, and gives way to an input or a change before each message. On
-  the recorded scenes the plasma takes 13.8 KiB a frame against 392.4,
-  the dragged window 5.2 against 30.6, and the photograph shown once
-  121.8 against 150.8, under G6's 139
-  ([docs/benchmarks/refinement.md](docs/benchmarks/refinement.md)).
+  per tile, which halves each refine delay of the writer's time between
+  frames: a tile that changes more often than the refine delay is in
+  motion, and goes at the pacer's lowest quality, and lossy if it has 17
+  to 256 colours; one that changes less often goes at its final quality.
+  An input's effect is never in motion, and one the search finds at the
+  quality it needs is not sent again. A still lossy tile goes at the
+  lowest quality, up to the pacer's, at which each tile's SSIM reaches
+  0.91 (`encoder.StillSSIM`). Once a tile has been still for 300 ms
+  (`stream.Config.RefineDelay`), background frames send it again: exact
+  if it has up to 256 colours, at the SSIM's quality if it has more.
+  Refinement goes only while nothing else is to be sent and no frame
+  awaits an ack, a tile a message within the pacer's 5 ms of bytes, and
+  gives way to an input before each message, and to a change after the
+  first tile it tries. A copy carries the goal of the pixels it moves.
+  On the recorded scenes the plasma takes 13.8 KiB a frame against
+  392.4, the dragged window 5.2 against 30.6 and 17.9 KiB of refinement
+  once still, and the photograph shown once 121.8 against 150.8, under
+  G6's 139 ([docs/benchmarks/refinement.md](docs/benchmarks/refinement.md)).
   `stream.Config.NoRefine` turns refinement off, and motion with it.
 - A tile cache in the graphics pipeline. The Go client and the web
   client's protocol core offer the `cached` codec and 1024 cache slots
@@ -199,9 +203,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   `cacheSlots`), and keep in each slot the tile the server stores there,
   16 KiB at most. occamyd offers 1024 slots (`stream.Config.NoCache`
   turns the cache off), mirrors each client's slots by the xxh3-128 hash
-  of the tile each holds, stores a tile it sends alone and exactly in
-  the slot used least recently, and sends a tile whose content a slot
-  holds as a 23-byte `cached` tile of that slot. On the recorded scenes
+  of the tile each holds, under a secret seed drawn for each client so
+  that a remote host cannot draw two tiles that hash alike, stores a
+  tile it sends alone and exactly in the slot used least recently once
+  the message is written, and sends a tile whose content a slot holds as
+  a 23-byte `cached` tile of that slot. Neither client starts a
+  graphical session whose only codec in common is `cached`. On the recorded scenes
   a window switched back and forth over the desktop takes 9.4 KiB a
   frame against 79.7, and an eighth of the encode time; no scene takes
   more ([docs/benchmarks/tile-cache.md](docs/benchmarks/tile-cache.md)).
@@ -232,8 +239,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   joins a running one, both as protocol v1 WebSockets with the token in
   a subprotocol, never in the URL, and `Origin` checked against
   `origins`. Graphical streams offer `webp`, `jpeg`, `deflate` and
-  `raw`. ssh and vnc connections use the native backends, rdp and
-  telnet the guacd bridge, and vnc connections the guacd bridge only
+  `raw`. ssh, vnc and rdp connections use the native backends, telnet
+  the guacd bridge, and vnc and rdp connections the guacd bridge only
   when they set `backend: guacd` (below). ssh connections need `host_keys` or
   `insecure_ignore_host_key: true`. vnc connections take a `username`
   for VeNCrypt's Plain, and a `tls` block for the server's certificate:
@@ -317,8 +324,34 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   falls silent, and in a hidden page acknowledges frames as they
   arrive. It runs every golden vector of `protocol/testdata` under
   vitest, and an interop test against occamyd's stream code, built with
-  the race detector, in the `web` job. The Vue app does not use it yet
+  the race detector, in the `web` job. The web client runs on it
   (specs/009).
+- The web client, rebuilt in React on the browser's client of protocol
+  v1 (specs/009). It speaks API v1 alone: sign-in with a static user's
+  password or through OIDC with PKCE, the connections the user may
+  open, and a session on protocol v1, a graphical one on a canvas scaled
+  to the window and a terminal one in xterm.js. The owner resizes the
+  remote with the window, answers the remote's credential prompts,
+  shares the session through a link as a viewer or read-only, and ends
+  it, signing in again over the session when the sign-in has expired;
+  the clipboard goes both ways as the role allows, and reaches the local
+  clipboard on its own only for a role that gives input, so a read-only
+  viewer copies it from the clipboard panel; a hidden page tells occamyd
+  so and keeps acknowledging frames; and the end of a session says why
+  it ended, a takeover by the owner's newer stream too. Its build
+  writes the licenses of the packages it bundles to
+  `dist/THIRD_PARTY_LICENSES.md`, which the image ships in
+  `licenses/web/` and the web client archive in `dist/`.
+- `web_client` in a v1 file: the directory of the built web client,
+  which occamyd serves under `/static/` with a Content-Security-Policy
+  that keeps the page to its own origin, without directory listings or
+  symbolic links out of the directory, and with its hashed `assets/`
+  cached for a year; a v0 file's `client: true` serves `/static/` the
+  same way. Validation refuses a `web_client` that is a file or that
+  occamyd cannot read; one not built yet is a warning. The demo stack's
+  `occamy-v1` serves the image's at http://localhost:5637/static/, and
+  opens the demo SSH server as the connection `ssh` through the native
+  SSH backend.
 - `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS with the
   VNC backend's certificate policy, NLA through CredSSP 5 or later with
   NTLMv2 of its own, offered by default, the connection sequence, bitmap
@@ -339,25 +372,24 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the pointer and wheels, batched into input PDUs from a bounded queue
   in writes of at most 1,024 events; Suppress Output while nobody can
   see. A server's reason for ending the session decides how it ended,
-  even when a write fails as it hangs up. Nothing registers it in
-  occamyd yet. The VNC and RDP backends share
-  one USB HID to scan code table, `internal/keymap`.
+  even when a write fails as it hangs up. occamyd serves rdp with it
+  by default (below). The VNC and RDP backends share one USB HID to
+  scan code table, `internal/keymap`.
 - A `backend` key on each v1 connection, `native` or `guacd`, and
   `adhoc_backends`, which picks the backend of ad-hoc targets by
   protocol. A protocol defaults to `native` wherever a native backend
-  exists, so vnc connections and ad-hoc vnc targets default to
-  occamyd's own VNC client, and `backend: guacd` (or
-  `adhoc_backends: {vnc: guacd}`) is an opt-in fallback through guacd,
-  kept as the benchmark's baseline until the benchmark shows native at
-  least 10x better. ssh is always native, and rdp and telnet always go
-  through guacd: `backend: native` on rdp is refused until the native
-  RDP backend has run NLA end to end, and the session's state names
-  the backend that serves it. guacd would not check a VeNCrypt
+  exists, so vnc and rdp connections and ad-hoc vnc and rdp targets
+  default to occamyd's own VNC and RDP clients, and `backend: guacd`
+  (or `adhoc_backends: {vnc: guacd}`) is an opt-in fallback through
+  guacd, kept as the benchmark's baseline until the benchmark shows
+  native at least 10x better. ssh is always native, and telnet always
+  goes through guacd, and the session's state names the backend that
+  serves it. guacd would not check a VeNCrypt
   certificate as `tls` says, so a vnc connection with `tls` cannot set
   `backend: guacd`, and a file that does fails to load, naming the
   key. Without `tls`, the native backend checks a VeNCrypt server's
-  certificate against the system's roots. No release served v1 vnc
-  connections. A native vnc session asks the
+  certificate against the system's roots. No release served v1 vnc or
+  rdp connections. A native vnc session asks the
   server for the owner's size from the stream's `hello`, on a
   connection's stream as on a session's, and a resize that reaches the
   backend before it runs is no longer dropped. A size beyond the
@@ -394,9 +426,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   ad-hoc targets by address and by name, dialled at the address that
   was checked.
 - The demo stack runs `occamy-v1` next to `occamy`, on port 5637, with
-  the v1 file `docker/occamy-v1.yaml`: the demo VNC server through the
-  native backend and through guacd, which `make e2e` streams with the
-  Go client. `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` move a
+  the v1 file `docker/occamy-v1.yaml`: the demo VNC and RDP servers
+  through the native backends and through guacd, which `make e2e`
+  streams with the Go client. `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` move a
   second stack aside on a shared host, and `make e2e` follows the
   last two.
 - The native RDP backend's clipboard, the first part of its second
@@ -430,6 +462,50 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   size code 3 ends the session, and once the channel writer fails, a
   server that the client then owes too many answers ends it with the
   write's error.
+- occamyd serves rdp connections and ad-hoc rdp targets with the native
+  RDP backend by default, with `backend: guacd` (or
+  `adhoc_backends: {rdp: guacd}`) as the fallback through guacd. A
+  native rdp connection takes `tls`, the certificate policy of vnc's,
+  checked on every connection since the backend always runs TLS, with
+  pins of RDP certificates, and `security`, the mode as guacd names it:
+  `nla` by default, `nla-ext`, `tls` or `any`. Both are refused with
+  `backend: guacd`, which reads `guacd.params.rdp` instead. xrdp speaks
+  no NLA, and a server that selects standard RDP security when offered
+  NLA alone fails the session with an error that names the key to set,
+  `security: tls on connection "…"`. A `username` of the form
+  `DOMAIN\user`, with both parts, logs on to the domain, as does one the
+  owner gives at the prompt with the domain left empty, and `\user` logs
+  on as the user alone. The owner, and only the owner, is asked for the
+  credentials NLA needs that the connection does not store; the hello's
+  size is asked for within an RDP desktop's, 200 to 8192 pixels a side
+  and 2^25 in all; clipboard text reaches the server from the owner and
+  interactive viewers and every viewer from the server; a logoff ends
+  the session with `remote-ended`, and a refused logon or certificate
+  with `backend-failed`. occamyd warns when it loads the file of the
+  `guacd.params` that no session reads, for every protocol, and of each
+  connection whose `security: tls` or `any` comes with
+  `tls.insecure_skip_verify`. guacd's `disable-copy`, `disable-paste`
+  and recording parameters have no native equivalent yet, so a
+  connection that needs them keeps `backend: guacd`. Tests drive native
+  RDP sessions through occamyd's routes against `rdptest`, and the demo
+  stack serves its xrdp server as `rdp-native` (`security: tls`) and
+  `rdp-guacd`, both streamed by `make e2e`, which also takes
+  `rdp-native` through the clipboard both ways, answered by a clipboard
+  echo in the demo image, a resize, a viewer joined by a share, and the
+  owner leaving and coming back. The native RDP backend is
+  not yet verified against Windows, and does not speak RDP's graphics
+  pipeline yet
+  ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)).
+- A native Kubernetes backend, `internal/backend/kubernetes`, in pure
+  Go and without client-go: a `kubernetes` connection opens a terminal
+  in a pod's container through the API server's `pods/exec` (or
+  `pods/attach`), over the `v5.channel.k8s.io` WebSocket subprotocol
+  with `v4.channel.k8s.io` as fallback. It authenticates with a bearer
+  token (`token_file`, `token_env` or a prompt) or a client
+  certificate, sends the token only after the API server's certificate
+  is checked against `tls` (the system's roots, `ca_file` or `pins`),
+  never logs it, and refuses names that are not Kubernetes's. It has no
+  guacd backend and no ad-hoc targets.
 
 ### Changed
 
@@ -450,6 +526,15 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   longer allocates. A PDU of 64 bitmaps of 64×64 now makes 1 allocation
   of 120 bytes instead of 129 allocations of 804 bytes. Its time is
   unchanged within noise, because decoding dominates it.
+
+### Removed
+
+- The Vue web client, with its fork of guacamole-common-js
+  (`occamy.js`) and the fork's Apache LICENSE and NOTICE, element-plus,
+  vue-router and axios. The web client no longer speaks the v0 routes
+  or the Guacamole protocol, which occamyd still serves to other
+  clients until v1.0. A v0 file's `client: true` still serves
+  `/static/`, but the web client there needs a v1 file.
 
 ### Fixed
 
@@ -481,6 +566,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 - occamyd's request log no longer records query strings, which carry the
   v0 token and with it the remote credentials.
+- A secret file, `password_file`, `token_file` or
+  `auth.oidc.client_secret_file`, of more than 64 KiB is refused, so
+  that a path such as `/dev/zero` cannot fill occamyd's memory.
 - A panic on a goroutine a backend starts, such as the SSH backend's
   readers of the remote's output and the VNC, RDP and guacd backends'
   writers, ends its session with close 1011 instead of crashing occamyd

@@ -14,7 +14,7 @@ that the [codec measurement](./codecs.md) used.
 | Scene | KiB a frame: before · after | encode ms a frame: before · after | refinement once still: KiB · messages · encode ms | longest message of it, ms |
 |---|---|---|---|---|
 | motion (G5) | 392.4 · **13.8** | 9.53 · 11.65 | 391.0 · 192 · 9.07 | 0.10 |
-| drag (G4) | 30.6 · **5.2** | 4.25 · 2.13 | 18.9 · 35 · 34.00 | 2.56 |
+| drag (G4) | 30.6 · **5.2** | 4.25 · 2.13 | 17.9 · 30 · 34.00 | 2.56 |
 | scroll (G3) | 5.0 · 5.0 | 0.62 · 0.66 | none | |
 | photo, once (G6) | 150.8 · **121.8** | 21.99 · 66.68 | none | |
 | browser, once | 147.3 · 140.1 | 7.93 · 15.99 | none | |
@@ -28,8 +28,10 @@ that the [codec measurement](./codecs.md) used.
   client then shows the server's screen exactly.
 - **The dragged window takes a sixth of the bytes.** It is photographic,
   so it went lossy before too, but at the pacer's quality of 90. In
-  motion it goes at 30. Once still, its 35 tiles go again at the quality
-  SSIM picks: 18.9 KiB. They take 34 ms of one core in all, and at most
+  motion it goes at 30. Once still, 30 of its tiles go again at the
+  quality SSIM picks: 17.9 KiB. Five more reach the score at 30, as they
+  are, and go no more. Searching them takes 34 ms of one core in all, as
+  measured before that change, and at most
   2.6 ms for one message, which is the longest that refinement holds up
   an input on the writer.
 - **The photograph shown once goes under G6's 139 KiB**: 121.8 KiB

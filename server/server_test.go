@@ -306,6 +306,20 @@ func TestDummyHashCost(t *testing.T) {
 	}
 }
 
+// TestLoadWarningsLogged checks that newServer logs loadWarnings: ssh
+// connections never go through guacd, so guacd.params.ssh is unused.
+func TestLoadWarningsLogged(t *testing.T) {
+	logs := captureLog(t)
+	f := testFile(t)
+	f.Guacd.Params = map[string]map[string]string{"ssh": {"font-size": "12"}}
+	if _, err := newServer(f); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(logs(), "warning: guacd.params.ssh sets font-size, which no session reads") {
+		t.Errorf("no warning for guacd.params.ssh:\n%s", logs())
+	}
+}
+
 // TestSigningKey checks that newServer creates a missing signing key
 // with a warning, and that a second start uses it, so tokens survive a
 // restart.

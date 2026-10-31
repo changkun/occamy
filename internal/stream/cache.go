@@ -5,6 +5,8 @@
 package stream
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"image"
 
 	"github.com/zeebo/xxh3"
@@ -27,8 +29,19 @@ import (
 // tiles on the client, and 70 KiB of mirror a viewer on the server.
 const DefaultCacheSlots = 1024
 
-// cacheKey is a tile's content: the xxh3-128 hash of its pixels and its
-// size, since the same bytes at another size are another tile.
+// cacheKey is a tile's content: the xxh3-128 hash of its pixels, with
+// the mirror's secret seed, and its size, since the same bytes at
+// another size are another tile.
+//
+// The seed is what keeps a remote host from making a viewer draw one
+// tile for another. Unseeded, xxh3 mixes long inputs with its public
+// secret, and two tiles with one hash take a moment to build, as
+// TestCacheKeySeeded does; content that the remote host draws could
+// then show a viewer other pixels than the screen, which scroll
+// detection and refinement would take as exact. Seeded, xxh3 derives
+// its secret from the seed, which the remote host never learns: it sees
+// neither the mirror nor what occamyd sends the client. Accidental
+// collisions of 128 bits are out of reach either way.
 type cacheKey struct {
 	sum  xxh3.Uint128
 	w, h uint16
@@ -40,6 +53,7 @@ type cacheKey struct {
 // links nothing. A tile is stored only when no slot holds its content,
 // so each content is in one slot; were it in two, keys names the newer.
 type tileCache struct {
+	seed       uint64 // the hash's, secret, a mirror's own
 	keys       map[cacheKey]uint16
 	slots      []cacheSlot // slot s at s-1
 	head, tail uint16      // the most and the least recently used
@@ -58,7 +72,13 @@ func newTileCache(n int) *tileCache {
 		return nil
 	}
 	n = min(n, 1<<16-1)
-	return &tileCache{keys: make(map[cacheKey]uint16), slots: make([]cacheSlot, n)}
+	var seed [8]byte
+	_, _ = rand.Read(seed[:]) // crypto/rand.Read never fails
+	return &tileCache{
+		seed:  binary.LittleEndian.Uint64(seed[:]),
+		keys:  make(map[cacheKey]uint16),
+		slots: make([]cacheSlot, n),
+	}
 }
 
 // key returns the key of pix, the pixels of r in RGBA order row by row,
@@ -68,7 +88,7 @@ func (c *tileCache) key(pix []byte, r image.Rectangle) (cacheKey, bool) {
 	if c == nil || w*h > protocol.MaxCachedPixels {
 		return cacheKey{}, false
 	}
-	return cacheKey{sum: xxh3.Hash128(pix[:4*w*h]), w: uint16(w), h: uint16(h)}, true // #nosec G115 -- at most MaxCachedPixels
+	return cacheKey{sum: xxh3.Hash128Seed(pix[:4*w*h], c.seed), w: uint16(w), h: uint16(h)}, true // #nosec G115 -- at most MaxCachedPixels
 }
 
 // has reports whether a slot holds k.
@@ -77,12 +97,10 @@ func (c *tileCache) has(k cacheKey) bool {
 	return ok
 }
 
-// lookup returns the slot that holds k, and marks it used.
+// lookup returns the slot that holds k. The slot counts as used once a
+// message drawing from it is written (touch).
 func (c *tileCache) lookup(k cacheKey) (uint16, bool) {
 	s, ok := c.keys[k]
-	if ok {
-		c.touch(s)
-	}
 	return s, ok
 }
 

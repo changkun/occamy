@@ -1,0 +1,12 @@
+{
+  // The React shell (src/main.tsx, src/views, src/lib) and the core it
+  // imports, as browsers run them: the browser's types, Vite's for the
+  // stylesheets it imports, and JSX through React's automatic runtime.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "types": ["vite/client"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/protocol/testing/**", "src/protocol/demo/vite.config.ts"]
+}

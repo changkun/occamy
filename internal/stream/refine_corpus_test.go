@@ -53,10 +53,18 @@ func newRefineDirect(tb testing.TB, before bool) *direct {
 
 // age makes the next frame take a snapshot of the versions, as frames at
 // least activeWindow apart do: motion at 30 frames a second changes a
-// tile in every snapshot. The snapshot is activeWindow after the last
-// whatever the frames took to encode, so that a slow machine, or the
-// race detector, cools no tile below motion.
-func (d *direct) age() {
+// tile in every snapshot. The frame finds the last snapshot activeWindow
+// old, whatever the frames took to encode and the screen to change, so
+// that a slow machine, or the race detector, cools no tile below motion.
+func (d *direct) age() { d.aged = true }
+
+// aging dates the last snapshot as age asked, just before a frame
+// collects.
+func (d *direct) aging() {
+	if !d.aged {
+		return
+	}
+	d.aged = false
 	at := time.Now().Add(-activeWindow)
 	d.w.snapAt = at
 	if !d.w.heatAt.IsZero() {

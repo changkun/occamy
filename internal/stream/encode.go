@@ -242,8 +242,15 @@ func (w *writer) storeIn(key cacheKey, keyed bool, codec protocol.Codec) {
 	}
 }
 
-// message puts a tile message of w.payload in w.buf, naming slot.
+// message puts a tile message of w.payload in w.buf, naming slot: the
+// slot the tile is stored in or, cached, drawn from. It sets w.msgFrom
+// to the slot drawn from, which drawn marks used once the message is
+// written; a message held back leaves nothing for the next one.
 func (w *writer) message(id uint32, r image.Rectangle, codec protocol.Codec, slot uint16) {
+	w.msgFrom = 0
+	if codec == protocol.CodecCached {
+		w.msgFrom = slot
+	}
 	w.buf = protocol.Tile{
 		FrameID: id,
 		X:       uint16(r.Min.X), // #nosec G115 -- screens are at most 65535 pixels wide

@@ -18,7 +18,7 @@ desktop that the [codec measurement](./codecs.md) and the
 | switch, terminal | 12.1 · **2.4** | 108 | 1.57 · **0.20** | none |
 | switch, photo | 70.6 · **63.1** | 96 | 35.40 · 33.67 | none |
 | motion (G5) | 13.8 · 4.3 | 192 | 11.44 · 0.32 | 391.0 · 0.0 |
-| drag (G4) | 5.2 · 5.2 | 0 | 2.16 · 2.31 | 18.9 · 18.9 |
+| drag (G4) | 5.2 · 5.2 | 0 | 2.16 · 2.31 | 17.9 · 17.9 |
 | scroll (G3) | 5.0 · 5.0 | 0 | 0.76 · 0.88 | none |
 | photo, once (G6) | 121.8 · 121.8 | 0 | 78.71 · 71.89 | none |
 | browser, once | 140.1 · 139.2 | 26 | 16.49 · 15.28 | none |
@@ -77,13 +77,19 @@ scenes whose bytes do not change keep their latency.
   takes only tiles of up to 4096 pixels (`protocol.MaxCachedPixels`):
   16 MiB at the default 1024 slots. The Go client and the web client's
   protocol core keep a raw tile's pixels, or the decoded pixels of any
-  other tile; neither keeps a payload once it is decoded. A client offers fewer
+  other tile; neither keeps a payload once it is decoded. The Go client
+  copies a raw tile's pixels out of its message, whose buffer has room
+  to spare; the web core keeps the message, 23 bytes over the pixels.
+  A client offers fewer
   slots, or none, with `client.Options.CacheSlots` and `NoCache`, or the
   web core's `cacheSlots`.
 - **The hash** is xxh3-128 over the tile's pixels, 0.53 µs for a 64×64
   tile, 31 GB/s (`BenchmarkTileKey`, one core): 0.1 ms for the 192
   tiles of a 1024×768 screen. The server hashes every tile it is about
-  to encode, so that it can look it up.
+  to encode, so that it can look it up. Each mirror hashes under a
+  secret seed of its own, which costs nothing measurable: 0.56 µs a
+  tile seeded and unseeded, the medians of ten runs of each in turn at a
+  load of 15 (2026-10-31, logged in `tile-cache-load.log`).
 
 ## How it was measured
 
