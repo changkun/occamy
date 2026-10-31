@@ -22,7 +22,9 @@ import (
 // client decodes. What changed is kept in cells of gfxCell pixels a
 // side, the framebuffer's tiles. A copy within a mapped surface, as a
 // scroll, goes to the output as Output.CopyRect when the output has what
-// it copies.
+// it copies: for that, where a surface leaves the output, or a bitmap
+// update draws under a mapped surface, the mapped surfaces there draw
+// again.
 //
 // The client takes solid fills, copies between surfaces, and bitmaps in
 // the uncompressed and planar codecs. Bitmaps in other codecs, and the
@@ -137,6 +139,10 @@ const (
 	// maxGFXOrigin bounds where a surface is mapped, the largest output
 	// [MS-RDPEGFX] 2.2.2.14 allows.
 	maxGFXOrigin = 32766
+	// maxGFXMapped bounds the surfaces mapped at once: Windows and xrdp
+	// map one a monitor, and a copy, a flush, a delete or a mapping
+	// looks at each of them.
+	maxGFXMapped = 64
 	// gfxCell is the side of the cells the client keeps changes in.
 	gfxCell = 64
 	// retainGFX bounds each of the channel's buffers that the client
@@ -162,7 +168,9 @@ type gfx struct {
 	mapped    []*surface // the mapped surfaces, in the order of their mapping
 	pixels    int        // the surfaces' pixels in all
 	inFrame   bool       // a frame started and has not ended
-	decoded   uint32     // the frames acknowledged, totalFramesDecoded
+	// decoded is totalFramesDecoded, the frames acknowledged since the
+	// connection began ([MS-RDPEGFX] 2.2.2.13), on every channel.
+	decoded uint32
 }
 
 // surface is an offscreen surface: opaque RGBA rows, 4*w bytes each.
@@ -283,15 +291,17 @@ var gfxCodecNames = map[int]string{
 // just opened, and queues the client's capabilities after the answer
 // that accepts it. chio.mu must be held.
 func (c *Client) gfxOpened(dc *dynChannel) error {
-	c.gfx = gfx{ch: dc}
+	c.gfx = gfx{ch: dc, z: c.gfx.z, decoded: c.gfx.decoded}
+	c.gfx.z.reset()
 	return c.dvcAnswer(c.gfxData(dc, capsAdvertise()))
 }
 
 // gfxClosed drops the pipeline's state with its channel, and the
 // acknowledgements for it that wait. What it drew stays on the output.
-// chio.mu must be held.
+// The ZGFX buffers stay for the next channel, which clears them, and so
+// does the count of frames decoded. chio.mu must be held.
 func (c *Client) gfxClosed() {
-	c.gfx = gfx{}
+	c.gfx = gfx{z: c.gfx.z, decoded: c.gfx.decoded}
 	clear(c.dvc.acks)
 	c.dvc.acks = c.dvc.acks[:0]
 }
@@ -331,6 +341,14 @@ func (c *Client) gfxMessage(out Output, msg []byte) error {
 	data, err := g.z.decompress(msg, maxGFXData)
 	if err != nil {
 		return err
+	}
+	// What compression added is charged as pixels of 4 bytes, since a
+	// few bytes may expand to 16 MiB: stored messages, xrdp's, are not
+	// charged twice for what their PDUs draw.
+	if grown := len(data) - len(msg); grown > 0 {
+		if err := c.pace(grown / 4); err != nil {
+			return err
+		}
 	}
 	for len(data) > 0 {
 		r := reader{b: data}
@@ -473,7 +491,9 @@ func (c *Client) gfxResize(out Output, w, h int) error {
 	if out != nil {
 		out.Resize(w, h)
 	}
-	c.gfxRedraw()
+	if err := c.gfxRedraw(); err != nil {
+		return err
+	}
 	if c.dynCh != nil {
 		c.due() // a size asked for may now be due, or no longer
 	}
@@ -488,10 +508,36 @@ func (c *Client) setSize(w, h int) {
 }
 
 // gfxRedraw has the mapped surfaces go to the output whole, as after a
-// resize, which clears it.
-func (c *Client) gfxRedraw() {
+// resize, which clears it, charged as bitmaps of their pixels.
+func (c *Client) gfxRedraw() error {
+	n := 0
+	for _, s := range c.gfx.mapped {
+		n += s.w * s.h
+	}
+	if n == 0 {
+		return nil
+	}
+	if err := c.pace(n); err != nil {
+		return err
+	}
 	for _, s := range c.gfx.mapped {
 		s.touch(s.bounds())
+	}
+	return nil
+}
+
+// gfxExpose has the mapped surfaces other than skip draw again where
+// they lie under r, on the output: r is where a surface showed until it
+// was deleted, replaced or mapped elsewhere, or where a bitmap update
+// drew over them. So the output under a mapped surface comes back to
+// its pixels at the next flush, which a copy within the surface sent as
+// CopyRect relies on. Where no surface is mapped, the output keeps what
+// was drawn.
+func (c *Client) gfxExpose(r image.Rectangle, skip *surface) {
+	for _, m := range c.gfx.mapped {
+		if m != skip {
+			m.touch(r.Sub(m.at).Intersect(m.bounds()))
+		}
 	}
 }
 
@@ -541,16 +587,19 @@ func (c *Client) gfxCreate(r *reader) error {
 	return nil
 }
 
-// gfxRemove deletes the surface s.
+// gfxRemove deletes the surface s; the surfaces it covered show again.
 func (c *Client) gfxRemove(s *surface) {
 	g := &c.gfx
 	delete(g.surfaces, s.id)
 	g.pixels -= s.w * s.h
-	g.mapped = slices.DeleteFunc(g.mapped, func(m *surface) bool { return m == s })
+	if s.mapped {
+		c.gfxExpose(s.bounds().Add(s.at), s)
+		g.mapped = slices.DeleteFunc(g.mapped, func(m *surface) bool { return m == s })
+	}
 }
 
 // gfxDelete applies RDPGFX_DELETE_SURFACE_PDU. What the surface drew
-// stays on the output.
+// stays on the output where no other surface is mapped.
 func (c *Client) gfxDelete(r *reader) error {
 	id := r.u16()
 	if r.err != nil {
@@ -581,11 +630,16 @@ func (c *Client) gfxMap(r *reader) error {
 	if x > maxGFXOrigin || y > maxGFXOrigin {
 		return fmt.Errorf("surface %d mapped at %d,%d", id, x, y)
 	}
+	g := &c.gfx
+	if !s.mapped && len(g.mapped) == maxGFXMapped {
+		return fmt.Errorf("more than %d surfaces mapped", maxGFXMapped)
+	}
 	if err := c.pace(s.w * s.h); err != nil {
 		return err
 	}
-	g := &c.gfx
 	if s.mapped {
+		// Mapped again, maybe elsewhere: what it covered shows again.
+		c.gfxExpose(s.bounds().Add(s.at), s)
 		g.mapped = slices.DeleteFunc(g.mapped, func(m *surface) bool { return m == s })
 	}
 	g.mapped = append(g.mapped, s)
@@ -698,7 +752,9 @@ func (c *Client) gfxSurfaceToSurface(out Output, r *reader) error {
 	if r.len() < 4*n {
 		return fmt.Errorf("%d points in %d bytes", n, r.len())
 	}
-	if err := c.pace(n * sr.Dx() * sr.Dy()); err != nil {
+	// Each point at least as a pointer update, since each costs a look
+	// at the mapped surfaces however small its rectangle.
+	if err := c.pace(n * max(sr.Dx()*sr.Dy(), pointerCost)); err != nil {
 		return err
 	}
 	for range n {
@@ -785,6 +841,11 @@ func (c *Client) gfxWireToSurface1(r *reader) error {
 		return nil
 	}
 	w, h := dr.Dx(), dr.Dy()
+	if codec == gfxCodecPlanar && w*h > maxBitmapPixels {
+		// The decoder keeps planes of its largest bitmap, as for bitmap
+		// updates.
+		return fmt.Errorf("planar bitmap of %d×%d, over the bound of %d pixels", w, h, maxBitmapPixels)
+	}
 	if err := c.pace(w * h); err != nil {
 		return err
 	}

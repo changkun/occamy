@@ -224,6 +224,11 @@ func TestZGFXErrors(t *testing.T) {
 		if err == nil {
 			t.Errorf("%s: %q, no error", tc.name, out)
 		}
+		// Nothing past a segment's bound was appended before the error:
+		// a match is checked before it copies.
+		if len(z.out) > zgfxSegment {
+			t.Errorf("%s: %d bytes held after the error", tc.name, len(z.out))
+		}
 	}
 	// The longest length code has 13 1 bits after the first: 14 begin no
 	// length of the code, though any length they began would be too long
@@ -232,6 +237,24 @@ func TestZGFXErrors(t *testing.T) {
 	msg := new(bits).put('a', 9).put(0b10001, 5).put(1, 5).put(0x7fff, 15).put(0, 1).put(0, 16).single()
 	if _, err := z.decompress(msg, maxGFXData); err == nil || !strings.Contains(err.Error(), "past the code") {
 		t.Errorf("a length of 14 1 bits: %v, want it past the code", err)
+	}
+}
+
+// The literals with codes of their own also come as "0" and their 8
+// bits, which [MS-RDPEGFX] 3.1.9.1.2.3 reserves and an encoder must not
+// write. The client takes them as the literals they spell, as FreeRDP
+// does: nothing reads them otherwise.
+func TestZGFXReservedLiterals(t *testing.T) {
+	short := []byte{0x00, 0x01, 0x02, 0x03, 0xff, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b,
+		0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f, 0x40, 0x80, 0x0c, 0x38, 0x39, 0x66}
+	var w bits
+	for _, v := range short {
+		w.put(uint32(v), 9)
+	}
+	var z zgfx
+	got, err := z.decompress(w.single(), maxGFXData)
+	if err != nil || !bytes.Equal(got, short) {
+		t.Errorf("got %x, %v, want %x", got, err, short)
 	}
 }
 

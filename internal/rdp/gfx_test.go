@@ -365,6 +365,62 @@ func TestGFXCopyRectWhen(t *testing.T) {
 	}
 }
 
+// Where a surface leaves the output, deleted, replaced or mapped
+// elsewhere, or where a bitmap update draws under a mapped surface, the
+// surfaces under it draw again: the output under surface 1 is its
+// pixels once more, black, and a copy within it sent as CopyRect copies
+// black, not what was drawn over it. Surface 1 lies a cell from the
+// output's origin, so that where it draws again is found from where it
+// is mapped.
+func TestGFXCopyRectExposed(t *testing.T) {
+	at := image.Pt(64, 0)
+	over := image.Rect(0, 0, 32, 32).Add(at) // surface 1's (0,0)-(32,32) on the output
+	for _, tc := range []struct {
+		name  string
+		cover [][]byte // red over the output's over
+		leave func(g *gfxTest) error
+	}{
+		{"deleted", surfacePDUs(2, 32, 32, at), func(g *gfxTest) error {
+			return g.send(rdptest.DeleteSurface(2))
+		}},
+		{"replaced", surfacePDUs(2, 32, 32, at), func(g *gfxTest) error {
+			return g.send(rdptest.CreateSurface(2, 16, 16, rdptest.PixelXRGB))
+		}},
+		{"mapped elsewhere", surfacePDUs(2, 32, 32, at), func(g *gfxTest) error {
+			return g.send(rdptest.MapSurface(2, image.Pt(200, 0)))
+		}},
+		{"a bitmap update", nil, func(g *gfxTest) error {
+			b := &bitmapData{dest: over, width: 32, height: 32, bpp: 32, data: bytes.Repeat([]byte{0, 0, 0xff, 0xff}, 32*32)}
+			if err := g.c.drawBitmap(g.out, b); err != nil {
+				return err
+			}
+			wantRect(t, g.out.snapshot(), over, red)
+			return nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newGFXTest(t, 256, 128)
+			g.must(t, surfacePDUs(1, 128, 128, at)...)
+			if tc.cover != nil {
+				g.must(t, tc.cover...)
+				g.must(t, gfxFrame(1, rdptest.SolidFill(2, red, image.Rect(0, 0, 32, 32))))
+				wantRect(t, g.out.snapshot(), over, red)
+			}
+			if err := tc.leave(g); err != nil {
+				t.Fatal(err)
+			}
+			copies := g.out.copies
+			g.must(t, gfxFrame(2, rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 32, 32), image.Pt(64, 64))))
+			if g.out.copies == copies {
+				t.Error("the copy was not sent as CopyRect")
+			}
+			scr := g.out.snapshot()
+			wantRect(t, scr, over, black)
+			wantRect(t, scr, image.Rect(64, 64, 96, 96).Add(at), black)
+		})
+	}
+}
+
 // A copy reads what the frame drew before it: the output gets what the
 // surface changed before the copy.
 func TestGFXCopyAfterFill(t *testing.T) {
@@ -416,11 +472,13 @@ func TestGFXResetGraphics(t *testing.T) {
 	if g.c.activated(g.c.share(), serverCaps{width: 512, height: 300}) {
 		t.Error("the reactivation after the reset resizes")
 	}
-	// Resizes come at most every resizeEvery, as a reactivation's do.
-	slept := g.clock.slept
+	// Resizes come at most every resizeEvery, as a reactivation's do,
+	// whatever else the client waited for between them (the redraw's
+	// charge here).
+	first := g.c.lastResize
 	g.must(t, rdptest.ResetGraphics(256, 256))
-	if d := g.clock.slept - slept; d != resizeEvery {
-		t.Errorf("a second resize at once waited %v, want %v", d, resizeEvery)
+	if d := g.c.lastResize.Sub(first); d != resizeEvery {
+		t.Errorf("a second resize at once came %v after the first, want %v", d, resizeEvery)
 	}
 }
 
@@ -538,6 +596,63 @@ func TestGFXSurfaces(t *testing.T) {
 	}
 	if got := surfaceLimit(3840, 2160); got != 4*3840*2160 {
 		t.Errorf("the bound on 4K is %d", got)
+	}
+}
+
+// planarBlack is a planar bitmap of w×h, black, in RLE planes without
+// alpha: each row a raw zero, then runs of zeros.
+func planarBlack(w, h int) []byte {
+	var row []byte
+	row = append(row, 0x10, 0) // one raw byte
+	left := w - 1
+	for ; left >= 47; left -= 47 {
+		row = append(row, 0xf2) // a run of 32+15
+	}
+	if left > 0 {
+		row = append(row, byte(left)<<4)
+		row = append(row, make([]byte, left)...)
+	}
+	plane := bytes.Repeat(row, h)
+	return slices.Concat([]byte{planarRLE | planarNA}, plane, plane, plane)
+}
+
+// A planar bitmap of the graphics pipeline is bounded as a bitmap
+// update's is, since the decoder keeps planes of its largest.
+func TestGFXPlanarBound(t *testing.T) {
+	g := newGFXTest(t, 1024, 768)
+	g.must(t, rdptest.CreateSurface(1, 4096, 2049, rdptest.PixelXRGB))
+	g.must(t, rdptest.SolidFill(1, red, image.Rect(0, 0, 4096, 2049)))
+	at := image.Rect(0, 0, 4096, 2048)
+	g.must(t, rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, at, planarBlack(4096, 2048)))
+	if s := g.c.gfx.surfaces[1]; !bytes.Equal(s.pix[s.offset(4095, 2047):][:4], []byte{0, 0, 0, 0xff}) {
+		t.Error("the bitmap at the bound was not decoded")
+	}
+	err := g.send(rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(0, 0, 4096, 2049), planarBlack(4096, 2049)))
+	if err == nil || !strings.Contains(err.Error(), "over the bound of 8388608 pixels") {
+		t.Errorf("a planar bitmap past the bound: %v", err)
+	}
+	for i, p := range g.c.dec.planes {
+		if cap(p) > maxBitmapPixels {
+			t.Errorf("plane %d of %d bytes kept", i, cap(p))
+		}
+	}
+}
+
+// The surfaces mapped at once are bounded, since a copy, a flush, a
+// delete or a mapping looks at each; one mapped again counts once.
+func TestGFXMappedBound(t *testing.T) {
+	g := newGFXTest(t, 64, 64)
+	var pdus [][]byte
+	for id := range maxGFXMapped + 1 {
+		pdus = append(pdus, rdptest.CreateSurface(id, 1, 1, rdptest.PixelXRGB))
+		if id < maxGFXMapped {
+			pdus = append(pdus, rdptest.MapSurface(id, image.Pt(id, 0)))
+		}
+	}
+	g.must(t, pdus...)
+	g.must(t, rdptest.MapSurface(0, image.Pt(0, 1)))
+	if err := g.send(rdptest.MapSurface(maxGFXMapped, image.Point{})); err == nil || !strings.Contains(err.Error(), "more than 64 surfaces mapped") {
+		t.Errorf("a surface mapped past the bound: %v", err)
 	}
 }
 
@@ -927,23 +1042,40 @@ func TestGFXPace(t *testing.T) {
 		t.Fatal(err)
 	}
 	img := gradient(8, 8)
+	ignored := rdptest.GFXPDU(rdptest.GFXCacheImportReply, make([]byte, 40000))
 	for _, tc := range []struct {
 		name string
 		pdu  []byte
-		n    int
+		n    int // -1: what compression added, in pixels of 4 bytes
+		zip  bool
 	}{
-		{"create", rdptest.CreateSurface(1, 64, 32, rdptest.PixelXRGB), 64 * 32},
-		{"replace", rdptest.CreateSurface(1, 64, 64, rdptest.PixelXRGB), 64 * 64},
-		{"map", rdptest.MapSurface(1, image.Point{}), 64 * 64},
-		{"fill", rdptest.SolidFill(1, red, image.Rect(0, 0, 8, 8), image.Rect(32, 32, 100, 100)), 8*8 + 32*32},
-		{"copy", rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 8, 4), image.Pt(16, 16), image.Pt(32, 0)), 2 * 8 * 4},
-		{"uncompressed", rdptest.WireToSurface1(1, rdptest.CodecUncompressed, rdptest.PixelXRGB, image.Rect(0, 0, 8, 8), rdptest.Uncompressed(img)), 8 * 8},
-		{"planar", rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(8, 8, 16, 16), rdptest.Planar(img)), 8 * 8},
+		{"create", rdptest.CreateSurface(1, 64, 32, rdptest.PixelXRGB), 64 * 32, false},
+		{"replace", rdptest.CreateSurface(1, 128, 64, rdptest.PixelXRGB), 128 * 64, false},
+		{"map", rdptest.MapSurface(1, image.Point{}), 128 * 64, false},
+		{"fill", rdptest.SolidFill(1, red, image.Rect(0, 0, 8, 8), image.Rect(32, 32, 100, 100)), 8*8 + 68*32, false},
+		{"small copy", rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 8, 4), image.Pt(16, 16), image.Pt(32, 0)), 2 * pointerCost, false},
+		{"large copy", rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 128, 40), image.Pt(0, 8)), 128 * 40, false},
+		{"uncompressed", rdptest.WireToSurface1(1, rdptest.CodecUncompressed, rdptest.PixelXRGB, image.Rect(0, 0, 8, 8), rdptest.Uncompressed(img)), 8 * 8, false},
+		{"planar", rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(8, 8, 16, 16), rdptest.Planar(img)), 8 * 8, false},
+		{"stored", ignored, 0, false},
+		{"compressed", ignored, -1, true},
+		// The mapped surface drawn again; a larger desktop, so that its
+		// larger bucket does not clamp what is left.
+		{"reset", rdptest.ResetGraphics(300, 300), 128 * 64, false},
 	} {
 		before := g.c.tokens
-		g.must(t, tc.pdu)
-		if got := before - g.c.tokens; got != float64(tc.n) {
-			t.Errorf("%s: charged %v pixels, want %d", tc.name, got, tc.n)
+		want := tc.n
+		if tc.zip {
+			msg := g.enc.Single(tc.pdu, rdptest.SegCompressed)
+			want = (len(tc.pdu) - len(msg)) / 4
+			if err := g.c.gfxMessage(g.out, msg); err != nil {
+				t.Fatal(err)
+			}
+		} else {
+			g.must(t, tc.pdu)
+		}
+		if got := before - g.c.tokens; got != float64(want) {
+			t.Errorf("%s: charged %v pixels, want %d", tc.name, got, want)
 		}
 	}
 }
@@ -988,7 +1120,8 @@ func TestGFXUnfinished(t *testing.T) {
 }
 
 // A channel that closes takes the pipeline's state with it: the
-// surfaces, the history and the acknowledgements that wait.
+// surfaces and the acknowledgements that wait. The history's ring stays
+// for the next channel (TestGFXReopenHistory).
 func TestGFXClosed(t *testing.T) {
 	g := newGFXTest(t, 64, 64)
 	g.must(t, surfacePDUs(1, 64, 64, image.Point{})...)
@@ -997,14 +1130,47 @@ func TestGFXClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	gf := &g.c.gfx
-	if gf.ch != nil || gf.confirmed || gf.surfaces != nil || gf.mapped != nil || gf.pixels != 0 || gf.z.hist != nil {
-		t.Errorf("channel %v, confirmed %v, %d surfaces, %d mapped, %d pixels, history of %d bytes after the close",
-			gf.ch, gf.confirmed, len(gf.surfaces), len(gf.mapped), gf.pixels, len(gf.z.hist))
+	if gf.ch != nil || gf.confirmed || gf.surfaces != nil || gf.mapped != nil || gf.pixels != 0 {
+		t.Errorf("channel %v, confirmed %v, %d surfaces, %d mapped, %d pixels after the close",
+			gf.ch, gf.confirmed, len(gf.surfaces), len(gf.mapped), gf.pixels)
 	}
 	if n := len(g.c.dvc.acks); n != 0 {
 		t.Errorf("%d acknowledgements wait after the close", n)
 	}
 	wantRect(t, g.out.snapshot(), image.Rect(0, 0, 8, 8), red)
+}
+
+// A channel opened again starts with an empty history in the ring the
+// last one used, zeroed rather than allocated again, and counts its
+// frames on from the last channel's: totalFramesDecoded counts them
+// since the connection began.
+func TestGFXReopenHistory(t *testing.T) {
+	g := newGFXTest(t, 64, 64)
+	g.must(t, surfacePDUs(1, 64, 64, image.Point{})...)
+	g.must(t, gfxFrame(1, rdptest.SolidFill(1, red, image.Rect(0, 0, 8, 8))))
+	g.acks(t)
+	hist := g.c.gfx.z.hist
+	if g.c.gfx.z.filled == 0 {
+		t.Fatal("nothing in the history")
+	}
+	for _, p := range [][]byte{rdptest.DVCClosePDU(gfxID), rdptest.DVCCreateRequest(gfxID, rdptest.Graphics)} {
+		if err := g.c.drdynvcMessage(nil, p, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	z := &g.c.gfx.z
+	if &z.hist[0] != &hist[0] || z.pos != 0 || z.filled != 0 {
+		t.Errorf("the history reallocated: %v, or at %d with %d written", &z.hist[0] != &hist[0], z.pos, z.filled)
+	}
+	if i := slices.IndexFunc(z.hist, func(b byte) bool { return b != 0 }); i >= 0 {
+		t.Errorf("the last channel's history at %d", i)
+	}
+	g.enc = rdptest.ZGFX{}
+	g.must(t, rdptest.CapsConfirm(rdptest.CapVersion107, 0))
+	g.must(t, gfxFrame(7))
+	if acks := g.acks(t); len(acks) != 1 || acks[0].TotalFramesDecoded != 2 {
+		t.Errorf("acknowledgements %+v, want a second frame decoded", acks)
+	}
 }
 
 // A server that does not confirm, or closes the channel, draws with
@@ -1120,6 +1286,27 @@ func TestFuzzGFXSeed(t *testing.T) {
 	}
 	if n := sink.Resizes(); n != 2 {
 		t.Errorf("%d resizes, want the first and the reactivation's", n)
+	}
+	// The reactivation's resize cleared the output, and the surface went
+	// to it again whole, not only the cells frame 2 changed.
+	px := sink.Pixels()
+	img := gradient(32, 32)
+	for _, w := range []struct {
+		p    image.Point
+		want color.RGBA
+	}{
+		{image.Pt(5, 5), blue},
+		{image.Pt(40, 40), red},
+		{image.Pt(80, 20), red},
+		{image.Pt(110, 10), img.RGBAAt(10, 10)},
+		{image.Pt(210, 20), img.RGBAAt(10, 20)},
+		{image.Pt(350, 40), red}, // copied from (50,10)
+		{image.Pt(520, 50), black},
+		{image.Pt(10, 100), black}, // below the surface
+	} {
+		if got := px.RGBAAt(w.p.X, w.p.Y); got != w.want {
+			t.Errorf("output at %v is %v, want %v", w.p, got, w.want)
+		}
 	}
 }
 

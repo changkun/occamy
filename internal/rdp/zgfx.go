@@ -105,11 +105,22 @@ var zgfxTokens = func() (lut [512]zgfxToken) {
 }()
 
 // zgfx decompresses one graphics channel's messages. Its history lives
-// as long as the channel.
+// as long as the channel; the client keeps the ring for the next
+// channel, cleared.
 type zgfx struct {
-	hist []byte // the history ring, allocated by the first segment
-	pos  int    // where the next byte goes in hist
-	out  []byte // the last message
+	hist   []byte // the history ring, allocated by the first segment
+	pos    int    // where the next byte goes in hist
+	filled int    // the bytes of hist written since the last reset
+	out    []byte // the last message
+}
+
+// reset empties the history for a new channel. It zeroes what was
+// written of the ring rather than allocating it again, so that a
+// channel opened and closed over and over costs what it wrote, not
+// 2.5 MB each time.
+func (z *zgfx) reset() {
+	clear(z.hist[:z.filled])
+	z.pos, z.filled = 0, 0
 }
 
 var errZGFXShort = errors.New("rdp: GFX bulk data: truncated")
@@ -204,7 +215,9 @@ func (z *zgfx) record(b []byte) {
 	for len(b) > 0 {
 		n := copy(z.hist[z.pos:], b)
 		b = b[n:]
-		if z.pos += n; z.pos == len(z.hist) {
+		z.pos += n
+		z.filled = max(z.filled, z.pos)
+		if z.pos == len(z.hist) {
 			z.pos = 0
 		}
 	}

@@ -445,10 +445,12 @@ func TestIntegrationResize(t *testing.T) {
 }
 
 // With GFX, xrdp opens the graphics pipeline, confirms a capability set,
-// creates and maps a surface, and sends frames, which the client
-// acknowledges, so that xrdp, which allows few frames in flight, goes on
-// sending them. The session's screen comes in RemoteFX Progressive,
-// which the client does not take yet: it is counted and skipped.
+// resets the graphics to the size the client asked for, creates and
+// maps a surface, draws its first screen in planar, and sends frames,
+// which the client acknowledges. The session's screen comes in RemoteFX
+// Progressive, which the client does not take yet: it is counted and
+// skipped. xrdp went on sending a frame a key; a run without the
+// acknowledgements, to show that they pace it, was not made.
 func TestIntegrationGFX(t *testing.T) {
 	s := dial(t, Config{GFX: true})
 	frames := func() int { return s.c.Stats().GFX["end frame"] }
@@ -461,8 +463,11 @@ func TestIntegrationGFX(t *testing.T) {
 	dump(t, s, "gfx")
 	st := s.c.Stats()
 	t.Logf("GFX %v; bitmaps %v; ignored %v", st.GFX, st.Bitmaps, st.Ignored)
-	if st.GFX["caps confirm"] != 1 || st.GFX["create surface"] == 0 || st.GFX["map surface to output"] == 0 {
-		t.Errorf("GFX %v, want a confirm and a surface mapped", st.GFX)
+	if st.GFX["caps confirm"] != 1 || st.GFX["reset graphics"] == 0 || st.GFX["create surface"] == 0 || st.GFX["map surface to output"] == 0 {
+		t.Errorf("GFX %v, want a confirm, a reset and a surface mapped", st.GFX)
+	}
+	if st.Bitmaps["gfx planar"] == 0 {
+		t.Errorf("bitmaps %v, want xrdp's first screen in planar", st.Bitmaps)
 	}
 	// Each key repaints the swatch, in a frame of its own if xrdp has
 	// the acknowledgements of the frames before.

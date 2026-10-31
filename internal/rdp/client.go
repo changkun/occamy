@@ -824,6 +824,10 @@ func (c *Client) activate(out Output, body []byte) error {
 		}
 		c.dec.drop()
 		out.Resize(caps.width, caps.height)
+		// The resize cleared the output under the mapped surfaces.
+		if err := c.gfxRedraw(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1198,6 +1202,9 @@ func (c *Client) drawBitmap(out Output, b *bitmapData) error {
 	for y0 := r.Min.Y; y0 < r.Max.Y; y0 += rows {
 		drawRows(out, image.Rect(r.Min.X, y0, r.Max.X, min(y0+rows, r.Max.Y)), b, sx, rgba)
 	}
+	// Under a mapped surface the output is the surface's: it draws
+	// there again at the pipeline's next flush.
+	c.gfxExpose(r, nil)
 	return nil
 }
 
