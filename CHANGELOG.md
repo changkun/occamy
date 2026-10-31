@@ -641,6 +641,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   container and checks that the next connection has the clipboard. Give
   it the `CONTAINER_ENGINE` that `make run` took, since it reaches the
   container through that engine's compose.
+- After `POST /api/v1/sessions`, the owner's stream gets `close` 4006
+  `backend-failed`, as docs/api.md says, even when the remote failed
+  before the stream came. Before, the session was gone by the time the
+  stream came, and the stream got 4001 "no such session". For the owner
+  grace after a session ends, occamyd keeps its owner and its close, at
+  most 1024 sessions' worth, and gives the close to the owner's stream
+  alone; anyone else still gets "no such session". An owner who
+  reconnects after closing a session gets 4002 `session-closed`.
 
 ### Security
 

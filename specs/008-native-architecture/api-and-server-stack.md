@@ -1105,6 +1105,57 @@ place for fixes that ship on v0 before beta.
     `View` before `welcome` finds the session ended, as when its backend
     fails at once, `Serve` sends the session's own end, such as
     `backend-failed`, rather than an internal error.
+  - **An owner who comes after the end:** after `POST /api/v1/sessions`,
+    a remote that fails before the owner's stream comes ended the
+    session, and `join` found no session and answered 4001 "no such
+    session", not the 4006 `backend-failed` that docs/api.md promised.
+    `TestVNCAdhocName` was a latent flake for this reason. A
+    self-signed certificate refused that way failed it 1 run in 30
+    locally (load 54), and 10 in 10 with 200 ms between `POST` and the
+    stream.
+    - occamyd now keeps each ended session's owner and close, and no
+      more, for the owner grace, 60 s (`endedFor`). It keeps at most
+      1024 (`maxEnded`), and forgets the oldest first. The session
+      moves from running to ended under one lock, so no stream finds
+      neither (server/ended.go).
+    - `join` runs its owner checks unchanged against the ended
+      session's owner. The owner, with an access token or an `owner`
+      session token, gets the recorded close. Anyone else gets "no such
+      session", as for a session that never existed. That includes a
+      `viewer` or `read-only` session token, even the owner's own.
+    - A session that has ended but is still among the running ones
+      (`Join` answers `ErrEnded`) gives its owner its end the same way.
+    - `stream.CloseFor` is the end's close for both.
+    - Every end is kept, not only a failure, so an owner who reconnects
+      after `DELETE` now gets 4002 `session-closed` rather than "no
+      such session" (`TestDeleteEndsStreams`).
+
+    Tests (server/ended_test.go):
+    - `TestEndedSessionOwner` opens its stream 200 ms after `POST`, once
+      the session has ended. The stream token and the access token both
+      get `backend-failed`.
+    - `TestEndedSessionOthers` covers another user's access token and
+      owner session token, the owner's viewer and read-only session
+      tokens, and the owner's token for another session. All get the
+      close a session that never existed gives.
+    - `TestEndedSessionsBounded` covers the time and the count bounds.
+    - `TestJoinEndingSession` covers the ending session.
+    - `TestVNCAdhocName` takes the close before `welcome`.
+
+    Each mutant ran 10 times at a load of 6 to 12:
+    - No fix: `TestEndedSessionOwner`, `TestEndedSessionsBounded`,
+      `TestJoinEndingSession` and `TestDeleteEndsStreams` failed 10 of
+      10.
+    - The close to any of the owner's roles: `TestEndedSessionOthers`
+      failed 10 of 10.
+    - The close before the owner checks: `TestEndedSessionOthers`
+      failed 10 of 10.
+    - The ending session's close to any role: `TestJoinEndingSession`
+      failed 10 of 10.
+    - No expiry, or no count bound: `TestEndedSessionsBounded` failed
+      10 of 10.
+    - With 200 ms between `POST` and the stream, `TestVNCAdhocName`
+      failed 10 of 10 without the fix and passed 10 of 10 with it.
   - **Capabilities:** terminal level 1, and the codecs
     `internal/encoder` sends (`encoder.Codecs()`: webp, jpeg, deflate,
     raw), with a viewer's encoder from `encoder.New` for the codecs it
