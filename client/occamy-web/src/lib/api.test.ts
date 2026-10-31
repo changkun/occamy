@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { Api, ApiError, errorMessage, subjectOf } from './api'
+import { API_TIMEOUT, Api, ApiError, errorMessage, identityOf, sameIdentity, subjectOf } from './api'
 
 interface Sent {
   path: string
@@ -168,11 +168,83 @@ describe('the routes that take an access token', () => {
   })
 })
 
+describe('the time limit', () => {
+  // hung answers once the request's signal aborts, with its reason.
+  const hung = (_: string, init?: RequestInit): Promise<Response> =>
+    new Promise((_, reject) => init?.signal?.addEventListener('abort', () => reject(init.signal?.reason as Error)))
+
+  it('gives up on occamyd when it does not answer in time', async () => {
+    const api = new Api(hung, () => 1_000_000, 20)
+    const err = await api.connections(token).catch((e: unknown) => e)
+    expect(err).toMatchObject({ status: 0, code: 'timeout', message: 'occamyd did not answer in time.', signedOut: false })
+    expect(errorMessage(err)).toBe('occamyd did not answer in time.')
+    await expect(api.endSession(token, 's')).rejects.toMatchObject({ code: 'timeout' })
+    await expect(api.signIn('a', 'b')).rejects.toMatchObject({ code: 'timeout' })
+    expect(await api.oidcAvailable()).toBe(false)
+  })
+
+  it('takes the answer’s body under the same limit', async () => {
+    const api = new Api(
+      (_, init) => {
+        const body = new ReadableStream<Uint8Array>({
+          start(c) {
+            c.enqueue(new TextEncoder().encode('{"connections":'))
+            init?.signal?.addEventListener('abort', () => c.error(init.signal?.reason))
+          },
+        })
+        return Promise.resolve(new Response(body, { status: 200 }))
+      },
+      () => 1_000_000,
+      20,
+    )
+    await expect(api.connections(token)).rejects.toMatchObject({ status: 0, code: 'timeout' })
+  })
+
+  it('lasts as long as occamyd takes to give up on a request', async () => {
+    let signal: AbortSignal | undefined
+    const api = new Api((_, init) => {
+      signal = init?.signal ?? undefined
+      return Promise.resolve(json(200, { connections: [] }))
+    }, () => 1_000_000)
+    await api.connections(token)
+    expect(signal?.aborted).toBe(false)
+    // occamyd's writeTimeout, in server/server.go.
+    expect(API_TIMEOUT).toBe(30_000)
+  })
+})
+
+const jwt = (claims: unknown): string => {
+  const b64 = (s: string): string => Buffer.from(s).toString('base64url')
+  return `${b64('{"alg":"EdDSA"}')}.${b64(JSON.stringify(claims))}.c2ln`
+}
+
+describe('identityOf', () => {
+  it('reads the user and where they signed in', () => {
+    expect(identityOf({ token: jwt({ sub: 'alice', idp: 'oidc', kind: 'access' }), expires: 0 })).toEqual({ subject: 'alice', idp: 'oidc' })
+    expect(identityOf({ token: jwt({ sub: 'alice', idp: 'local' }), expires: 0 })).toEqual({ subject: 'alice', idp: 'local' })
+  })
+
+  it('takes a token without idp for a static user’s, as occamyd does', () => {
+    expect(identityOf({ token: jwt({ sub: 'alice' }), expires: 0 })).toEqual({ subject: 'alice', idp: 'local' })
+  })
+
+  it('reads no identity from a token it cannot read', () => {
+    for (const token of ['', 'opaque', 'a.!!!.c', jwt({ sub: 7 }), jwt({ sub: '' }), jwt({ sub: 'alice', idp: '' }), jwt({ sub: 'alice', idp: 1 }), jwt(['alice'])]) {
+      expect(identityOf({ token, expires: 0 })).toBeNull()
+    }
+  })
+
+  it('tells owners apart by name alone, as occamyd does', () => {
+    const alice = { subject: 'alice', idp: 'local' }
+    expect(sameIdentity(alice, { subject: 'alice', idp: 'local' })).toBe(true)
+    // An OIDC user named as a static user is that user, by link_static_users.
+    expect(sameIdentity(alice, { subject: 'alice', idp: 'oidc' })).toBe(true)
+    expect(sameIdentity(alice, { subject: 'Alice', idp: 'local' })).toBe(false)
+    expect(sameIdentity(alice, { subject: 'bob', idp: 'local' })).toBe(false)
+  })
+})
+
 describe('subjectOf', () => {
-  const jwt = (claims: unknown): string => {
-    const b64 = (s: string): string => Buffer.from(s).toString('base64url')
-    return `${b64('{"alg":"EdDSA"}')}.${b64(JSON.stringify(claims))}.c2ln`
-  }
 
   it('reads the user the token names', () => {
     expect(subjectOf({ token: jwt({ sub: 'alice', kind: 'access' }), expires: 0 })).toBe('alice')

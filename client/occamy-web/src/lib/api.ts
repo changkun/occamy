@@ -34,9 +34,10 @@ export type ShareRole = 'viewer' | 'read-only'
 
 /**
  * ApiError is an answer of API v1 other than success: its HTTP status
- * and the code of its error body, or "network" for no answer, "http" for
- * an answer without API v1's error body, such as an occamyd serving no
- * API v1, and "bad_response" for a success that did not parse.
+ * and the code of its error body, or "network" for no answer, "timeout"
+ * for none within the call's time limit, "http" for an answer without
+ * API v1's error body, such as an occamyd serving no API v1, and
+ * "bad_response" for a success that did not parse.
  */
 export class ApiError extends Error {
   readonly status: number
@@ -59,15 +60,25 @@ export class ApiError extends Error {
 // request does not race its expiry.
 const EXPIRY_MARGIN = 10_000
 
+/**
+ * How long a call waits for occamyd's answer, in milliseconds: occamyd
+ * gives up on a request after its write timeout of 30 s (server/server.go),
+ * so a call that takes longer is stuck in a proxy or the network, and
+ * the page says so rather than waiting on it.
+ */
+export const API_TIMEOUT = 30_000
+
 type Fetch = (input: string, init?: RequestInit) => Promise<Response>
 
 export class Api {
   private readonly fetch: Fetch
   private readonly now: () => number
+  private readonly timeout: number
 
-  constructor(fetchFn: Fetch = (input, init) => globalThis.fetch(input, init), now: () => number = Date.now) {
+  constructor(fetchFn: Fetch = (input, init) => globalThis.fetch(input, init), now: () => number = Date.now, timeout = API_TIMEOUT) {
     this.fetch = fetchFn
     this.now = now
+    this.timeout = timeout
   }
 
   /** signIn signs a static user in with a password (POST /api/v1/auth/token). */
@@ -83,7 +94,7 @@ export class Api {
    */
   async oidcAvailable(): Promise<boolean> {
     try {
-      const res = await this.fetch('/api/v1/auth/oidc/login', { method: 'GET', redirect: 'manual', cache: 'no-store' })
+      const res = await this.fetch('/api/v1/auth/oidc/login', { method: 'GET', redirect: 'manual', cache: 'no-store', signal: AbortSignal.timeout(this.timeout) })
       return res.status === 400
     } catch {
       return false
@@ -143,13 +154,20 @@ export class Api {
       headers['Content-Type'] = 'application/json'
       body = JSON.stringify(o.body)
     }
+    // The time limit covers the answer's body too, which fetch reads
+    // under the same signal.
+    const signal = AbortSignal.timeout(this.timeout)
     let res: Response
+    let text: string
     try {
-      res = await this.fetch(path, { method, headers, body, cache: 'no-store', credentials: 'same-origin' })
-    } catch {
+      res = await this.fetch(path, { method, headers, body, cache: 'no-store', credentials: 'same-origin', signal })
+      text = await res.text()
+    } catch (err) {
+      if (signal.aborted || (err instanceof Error && err.name === 'TimeoutError')) {
+        throw new ApiError(0, 'timeout', 'occamyd did not answer in time.')
+      }
       throw new ApiError(0, 'network', 'occamyd cannot be reached.')
     }
-    const text = await res.text()
     let json: unknown = null
     if (text !== '') {
       try {
@@ -185,19 +203,54 @@ function badResponse(): ApiError {
 }
 
 /**
- * subjectOf returns the user an access token names in sub, clipped, for
- * the page to show, or empty. The token is occamyd's to verify; this
- * only reads it.
+ * Identity is the user an access token of occamyd's speaks for: the
+ * subject, and where the user signed in, "local" with a password or
+ * "oidc" through single sign-on.
  */
-export function subjectOf(token: AccessToken): string {
+export interface Identity {
+  subject: string
+  idp: string
+}
+
+/**
+ * identityOf reads the identity an access token names in its sub and idp
+ * claims, or returns null for a token it cannot read. A token without
+ * idp predates single sign-on, and is a static user's, as occamyd takes
+ * it. The token is occamyd's to verify; this only reads it.
+ */
+export function identityOf(token: AccessToken): Identity | null {
   const payload = token.token.split('.')[1] ?? ''
   try {
     const bytes = Uint8Array.from(atob(payload.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
     const claims: unknown = JSON.parse(new TextDecoder().decode(bytes))
-    return isObject(claims) && typeof claims.sub === 'string' ? clip(claims.sub, MAX_LABEL) : ''
+    if (!isObject(claims) || typeof claims.sub !== 'string' || claims.sub === '') {
+      return null
+    }
+    const idp = claims.idp === undefined ? 'local' : claims.idp
+    return typeof idp === 'string' && idp !== '' ? { subject: claims.sub, idp } : null
   } catch {
-    return ''
+    return null
   }
+}
+
+/**
+ * sameIdentity reports whether a and b are the same owner to occamyd,
+ * which they are by subject alone, wherever they signed in: OIDC sign-in
+ * refuses a static user's name unless auth.oidc.link_static_users makes
+ * the two one user, whose sessions are the static user's
+ * (server/oidc.go, server/identity.go).
+ */
+export function sameIdentity(a: Identity, b: Identity): boolean {
+  return a.subject === b.subject
+}
+
+/**
+ * subjectOf returns the user an access token names in sub, clipped, for
+ * the page to show, or empty.
+ */
+export function subjectOf(token: AccessToken): string {
+  const i = identityOf(token)
+  return i === null ? '' : clip(i.subject, MAX_LABEL)
 }
 
 /**

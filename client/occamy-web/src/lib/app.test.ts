@@ -4,12 +4,21 @@
 
 import { describe, expect, it } from 'vitest'
 
+import type { AccessToken, Identity } from './api'
 import { type AppEvent, type AppState, EXPIRED, type Pending, RESUME_KEY, initialState, reduce, saveResume, signInOver, takeResume } from './app'
 import type { Target } from './targets'
 
+// token returns an access token of occamyd's for sub, signed in at idp,
+// lasting until expires.
+function token(sub: string, idp: string | undefined, expires: number): AccessToken {
+  const b64 = (s: string): string => Buffer.from(s).toString('base64url')
+  return { token: `${b64('{"alg":"EdDSA"}')}.${b64(JSON.stringify({ kind: 'access', sub, idp }))}.c2ln`, expires }
+}
+
 const now = 1_000_000
-const fresh = { token: 'eyJ.fresh', expires: now + 600_000 }
-const expired = { token: 'eyJ.old', expires: now - 1 }
+const fresh = token('demo', 'local', now + 600_000)
+const expired = token('demo', 'local', now - 1)
+const demo: Identity = { subject: 'demo', idp: 'local' }
 const lab: Target = { kind: 'connection', id: 'lab', name: 'Lab' }
 const mine: Target = { kind: 'session', sessionId: 'mZ3k', name: 'Lab' }
 
@@ -31,7 +40,7 @@ describe('the shell’s screens', () => {
     s = reduce(s, { type: 'signed-in', token: fresh })
     expect(s).toMatchObject({ token: fresh, screen: { kind: 'connections' }, signIn: null })
     s = reduce(s, { type: 'open', target: lab, now })
-    expect(s.screen).toEqual({ kind: 'session', target: lab, view: 1 })
+    expect(s.screen).toEqual({ kind: 'session', target: lab, view: 1, owner: null })
   })
 
   it('opens a share link without signing in', () => {
@@ -44,7 +53,7 @@ describe('the shell’s screens', () => {
     s = reduce(s, { type: 'open', target: lab, now })
     expect(s.screen).toEqual({ kind: 'connections' })
     expect(signInOver(s)).toBe(false)
-    expect(s.signIn).toMatchObject({ message: EXPIRED, pending: { target: lab, view: null, then: null } })
+    expect(s.signIn).toMatchObject({ message: EXPIRED, pending: { target: lab, view: null, then: null, owner: null } })
     s = reduce(s, { type: 'signed-in', token: fresh })
     expect(s).toMatchObject({ token: fresh, signIn: null, screen: { kind: 'session', target: lab } })
   })
@@ -53,25 +62,26 @@ describe('the shell’s screens', () => {
 describe('an owner’s action after the token expired', () => {
   it('keeps the session view on screen while the owner signs in to share it, then shares', () => {
     const before = onSession()
-    const pending: Pending = { target: mine, view: 1, then: { kind: 'share', role: 'viewer', expiresIn: 3600 } }
+    const pending: Pending = { target: mine, view: 1, then: { kind: 'share', role: 'viewer', expiresIn: 3600 }, owner: demo }
     let s = reduce(before, { type: 'sign-in-again', view: 1, message: EXPIRED, pending })
     // The session view is not replaced: the stream runs on under the form.
     expect(s.screen).toBe(before.screen)
     expect(signInOver(s)).toBe(true)
-    s = reduce(s, { type: 'signed-in', token: { ...fresh, token: 'eyJ.new' } })
+    const again = token('demo', 'local', now + 900_000)
+    s = reduce(s, { type: 'signed-in', token: again })
     expect(s.screen).toBe(before.screen)
-    expect(s).toMatchObject({ token: { token: 'eyJ.new' }, signIn: null, action: { view: 1, action: { kind: 'share', role: 'viewer', expiresIn: 3600 } } })
+    expect(s).toMatchObject({ token: again, signIn: null, action: { view: 1, action: { kind: 'share', role: 'viewer', expiresIn: 3600 } } })
   })
 
   it('ends the session once the owner has signed in', () => {
     const before = onSession()
-    let s = reduce(before, { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then: { kind: 'end' } } })
+    let s = reduce(before, { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then: { kind: 'end' }, owner: demo } })
     s = reduce(s, { type: 'signed-in', token: fresh })
     expect(s.screen).toBe(before.screen)
     expect(s.action).toMatchObject({ view: 1, action: { kind: 'end' } })
     // A second End after another sign-in is another action.
     const seq = s.action?.seq
-    s = run(s, { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then: { kind: 'end' } } }, { type: 'signed-in', token: fresh })
+    s = run(s, { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then: { kind: 'end' }, owner: demo } }, { type: 'signed-in', token: fresh })
     expect(s.action?.seq).not.toBe(seq)
   })
 
@@ -88,17 +98,48 @@ describe('an owner’s action after the token expired', () => {
 
   it('leaves the session view as it was when the owner cancels', () => {
     const before = onSession()
-    const s = run(before, { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then: { kind: 'end' } } }, { type: 'cancel-sign-in' })
+    const s = run(before, { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then: { kind: 'end' }, owner: demo } }, { type: 'cancel-sign-in' })
     expect(s).toEqual(before)
   })
 
   it('opens the session again with its action when the owner came back from single sign-on', async () => {
-    const token = Promise.resolve(fresh)
-    let s = initialState({ kind: 'oidc', token, resume: { target: mine, view: null, then: { kind: 'share', role: 'read-only', expiresIn: 600 } } })
-    expect(s.signIn).toMatchObject({ exchange: token })
-    s = reduce(s, { type: 'signed-in', token: await token })
-    expect(s.screen).toEqual({ kind: 'session', target: mine, view: 1 })
+    const exchange = Promise.resolve(fresh)
+    let s = initialState({ kind: 'oidc', token: exchange, resume: { target: mine, view: null, then: { kind: 'share', role: 'read-only', expiresIn: 600 }, owner: demo } })
+    expect(s.signIn).toMatchObject({ exchange })
+    s = reduce(s, { type: 'signed-in', token: await exchange })
+    expect(s.screen).toEqual({ kind: 'session', target: mine, view: 1, owner: demo })
     expect(s.action).toMatchObject({ view: 1, action: { kind: 'share', role: 'read-only', expiresIn: 600 } })
+  })
+})
+
+describe('an owner’s action when someone else signs in', () => {
+  const end = { kind: 'end' } as const
+  const share = { kind: 'share', role: 'viewer', expiresIn: 3600 } as const
+
+  it('takes the action all the same, for occamyd to decide whose the session is', () => {
+    for (const then of [end, share]) {
+      const before = onSession()
+      let s = reduce(before, { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then, owner: demo } })
+      s = reduce(s, { type: 'signed-in', token: token('mallory', 'local', now + 600_000) })
+      // The session view stays, with its stream, and takes the action.
+      expect(s.screen).toBe(before.screen)
+      expect(s.action).toMatchObject({ view: 1, action: then })
+    }
+  })
+
+  it('opens a session view gone through single sign-on for the owner it was for', async () => {
+    const exchange = Promise.resolve(token('mallory', 'oidc', now + 600_000))
+    let s = initialState({ kind: 'oidc', token: exchange, resume: { target: mine, view: null, then: end, owner: demo } })
+    s = reduce(s, { type: 'signed-in', token: await exchange })
+    // The view takes demo for the owner until its stream says.
+    expect(s.screen).toEqual({ kind: 'session', target: mine, view: 1, owner: demo })
+    expect(s.action?.action).toEqual(end)
+  })
+
+  it('takes an action whose owner the session view did not know', () => {
+    let s = reduce(onSession(), { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then: end, owner: null } })
+    s = reduce(s, { type: 'signed-in', token: fresh })
+    expect(s.action?.action).toEqual(end)
   })
 })
 
@@ -115,7 +156,7 @@ describe('leaving a session view', () => {
     s = reduce(s, { type: 'leave', view: 1 })
     expect(s.screen).toMatchObject({ kind: 'session', view: 2 })
     // Nor does a view that is gone ask for a sign-in.
-    expect(reduce(s, { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then: null } })).toBe(s)
+    expect(reduce(s, { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then: null, owner: demo } })).toBe(s)
   })
 })
 
@@ -134,11 +175,16 @@ describe('saveResume and takeResume', () => {
     }
   }
 
-  it('keeps the target and the action across the page’s visit to the identity provider, once', () => {
+  it('keeps the target, the action and its owner across the page’s visit to the identity provider, once', () => {
     const s = storage()
-    expect(saveResume(s, { target: mine, view: 3, then: { kind: 'share', role: 'viewer', expiresIn: 3600 } })).toBe(true)
-    expect(takeResume(s)).toEqual({ target: mine, view: null, then: { kind: 'share', role: 'viewer', expiresIn: 3600 } })
+    expect(saveResume(s, { target: mine, view: 3, then: { kind: 'share', role: 'viewer', expiresIn: 3600 }, owner: demo })).toBe(true)
+    expect(takeResume(s)).toEqual({ target: mine, view: null, then: { kind: 'share', role: 'viewer', expiresIn: 3600 }, owner: demo })
     expect(takeResume(s)).toBeNull()
+    expect(saveResume(s, { target: lab, view: null, then: null, owner: null })).toBe(true)
+    expect(takeResume(s)).toEqual({ target: lab, view: null, then: null, owner: null })
+    // An action whose owner the session view did not know is kept too.
+    expect(saveResume(s, { target: mine, view: 1, then: { kind: 'end' }, owner: null })).toBe(true)
+    expect(takeResume(s)).toEqual({ target: mine, view: null, then: { kind: 'end' }, owner: null })
     expect(saveResume(undefined, null)).toBe(false)
   })
 
@@ -147,11 +193,15 @@ describe('saveResume and takeResume', () => {
     for (const raw of [
       'not json',
       '[]',
-      '{"target":{"kind":"share","sessionId":"s","token":"t"},"then":null}',
-      '{"target":{"kind":"session","sessionId":"","name":"x"},"then":null}',
-      '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"delete"}}',
-      '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"share","role":"owner","expiresIn":600}}',
-      '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"share","role":"viewer","expiresIn":1}}',
+      '{"target":{"kind":"share","sessionId":"s","token":"t"},"then":null,"owner":null}',
+      '{"target":{"kind":"session","sessionId":"","name":"x"},"then":null,"owner":null}',
+      '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"delete"},"owner":{"subject":"a","idp":"local"}}',
+      '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"share","role":"owner","expiresIn":600},"owner":{"subject":"a","idp":"local"}}',
+      '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"share","role":"viewer","expiresIn":1},"owner":{"subject":"a","idp":"local"}}',
+      // Kept before the owner was.
+      '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"end"}}',
+      '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"end"},"owner":{"subject":"","idp":"local"}}',
+      '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"end"},"owner":{"subject":"a"}}',
     ]) {
       s.setItem(RESUME_KEY, raw)
       expect(takeResume(s)).toBeNull()
