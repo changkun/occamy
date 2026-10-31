@@ -11,9 +11,13 @@
 // The PDUs are what a client needs to see, not all a server sends: the
 // server data blocks hold the core, security and network blocks, the
 // Demand Active the general, bitmap and input capability sets, and
-// licensing is the STATUS_VALID_CLIENT shortcut. CredSSP is not
-// implemented: a Server that selects NLA stops at the client's first
-// TSRequest, which a test may refuse with TSRequestError.
+// licensing is the STATUS_VALID_CLIENT shortcut. A Server that selects
+// NLA runs CredSSP with NTLMv2 for its Account (credssp.go); without one
+// it stops at the client's first TSRequest, which a test may refuse with
+// TSRequestError. The static virtual channels a client asks for get MCS
+// channels, and the server reassembles what the client sends on them
+// and sends its own in chunks (channel.go), with the PDUs of the
+// clipboard channel ([MS-RDPECLIP]).
 package rdptest
 
 import (
@@ -137,8 +141,15 @@ func ConnectionConfirm(protocol uint32) []byte {
 
 // ConnectResponse is the MCS Connect Response with the GCC Conference
 // Create Response, [MS-RDPBCGR] 2.2.1.4, whose server core data block
-// says the server was offered the protocols requested.
+// says the server was offered the protocols requested, and which gives
+// no static channels.
 func ConnectResponse(requested uint32) []byte {
+	return ConnectResponseChannels(requested, nil)
+}
+
+// ConnectResponseChannels is ConnectResponse with the MCS channels of
+// the client's static channels, in the order the client named them.
+func ConnectResponseChannels(requested uint32, channels []uint16) []byte {
 	var data w
 	data.u16(0x0c01) // TS_UD_SC_CORE
 	data.u16(16)
@@ -149,10 +160,17 @@ func ConnectResponse(requested uint32) []byte {
 	data.u16(12)
 	data.u32(0)
 	data.u32(0)
-	data.u16(0x0c03) // TS_UD_SC_NET: the I/O channel, no others
-	data.u16(8)
+	data.u16(0x0c03) // TS_UD_SC_NET: the I/O channel, the static channels
+	pad := len(channels) % 2
+	data.u16(n16(8 + 2*len(channels) + 2*pad))
 	data.u16(IOChannel)
-	data.u16(0)
+	data.u16(n16(len(channels)))
+	for _, ch := range channels {
+		data.u16(ch)
+	}
+	if pad != 0 {
+		data.u16(0)
+	}
 
 	// The GCC Conference Create Response as in [MS-RDPBCGR] 4.1.4.
 	ccr := []byte{0x14, 0x76, 0x0a, 0x01, 0x01, 0x00, 0x01, 0xc0, 0x00}
