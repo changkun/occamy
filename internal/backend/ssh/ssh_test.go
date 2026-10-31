@@ -566,7 +566,7 @@ func TestResize(t *testing.T) {
 		s := srv.Sizes()
 		return len(s) == 2 && s[1] == image.Pt(132, 43) && sink.Size() == image.Pt(132, 43)
 	})
-	for _, bad := range []backend.Resize{{Width: 0, Height: 10}, {Width: 10, Height: -1}, {Width: ssh.MaxSize + 1, Height: 10}} {
+	for _, bad := range []backend.Resize{{Width: 0, Height: 10}, {Width: 10, Height: -1}, {Width: ssh.MaxCols + 1, Height: 10}, {Width: 10, Height: ssh.MaxRows + 1}} {
 		if err := b.Input(bad); err == nil {
 			t.Errorf("Input(%+v) = nil, want an error", bad)
 		}
@@ -761,7 +761,7 @@ func TestNewRejects(t *testing.T) {
 		{"missing key file", func(c *ssh.Config) { c.KeyFiles = []string{key + ".missing"} }, "id_test.missing"},
 		{"encrypted key file", func(c *ssh.Config) { c.KeyFiles = []string{encrypted} }, "passphrase"},
 		{"negative size", func(c *ssh.Config) { c.Cols = -1 }, "size"},
-		{"huge size", func(c *ssh.Config) { c.Rows = ssh.MaxSize + 1 }, "size"},
+		{"huge size", func(c *ssh.Config) { c.Rows = ssh.MaxRows + 1 }, "size"},
 		{"negative timeout", func(c *ssh.Config) { c.DialTimeout = -time.Second }, "timeout"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

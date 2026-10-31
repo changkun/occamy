@@ -7,9 +7,11 @@ package stream
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"io"
 	"log/slog"
+	"time"
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/encoder"
@@ -35,6 +37,38 @@ type Config struct {
 	NewEncoder func(codecs []protocol.Codec) Encoder
 	// Logger receives the stream's log, slog.Default() if nil.
 	Logger *slog.Logger
+	// ViewerTimeout bounds how long a viewer, hidden or not, may leave
+	// the frames it was sent unacknowledged, and how long one write to
+	// it may block, DefaultViewerTimeout if zero. A viewer that stops
+	// reading or acknowledging otherwise keeps the screen it was last
+	// sent, a terminal's whole screen, for as long as it stays
+	// connected.
+	ViewerTimeout time.Duration
+}
+
+// DefaultViewerTimeout is Config.ViewerTimeout's default.
+const DefaultViewerTimeout = 30 * time.Second
+
+// ErrStalled ends the stream of a viewer that acknowledged no frame, or
+// took no message, for Config.ViewerTimeout. Serve tells it so with
+// close too-slow, if it still reads.
+var ErrStalled = errors.New("stream: the viewer stopped taking frames")
+
+// timedConn bounds each write to its Conn by d: a write that blocks
+// that long is the viewer's stall, ErrStalled.
+type timedConn struct {
+	Conn
+	d time.Duration
+}
+
+func (c timedConn) WriteMessage(ctx context.Context, p []byte) error {
+	wctx, cancel := context.WithTimeout(ctx, c.d)
+	defer cancel()
+	err := c.Conn.WriteMessage(wctx, p)
+	if err != nil && ctx.Err() == nil && errors.Is(wctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("%w: a write blocked for %v: %w", ErrStalled, c.d, err)
+	}
+	return err
 }
 
 // Encoder encodes a viewer's tiles and cursor in the codecs it agreed
@@ -97,6 +131,10 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.ViewerTimeout <= 0 {
+		cfg.ViewerTimeout = DefaultViewerTimeout
+	}
+	c = timedConn{Conn: c, d: cfg.ViewerTimeout}
 	agreed := protocol.Agree(hello.Capabilities, cfg.Capabilities)
 	limits := agreed.Limits()
 	class := protocol.ClassGraphical
@@ -113,6 +151,12 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	// The client's visibility applies before the first frame, so that a
 	// client that starts hidden is sent none.
 	if err := v.View(hello.Visible, image.Rectangle{}); err != nil {
+		if errors.Is(err, session.ErrEnded) {
+			// The session ended before the stream began, as when its
+			// backend fails at once: the client learns why, as it would
+			// have a moment later.
+			return closeEnded(ctx, c, s)
+		}
 		return err
 	}
 	welcome := protocol.Welcome{
@@ -132,9 +176,10 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	pc := cfg.Pacer
 	pc.Window = int(agreed.FrameWindow)
 	w := newWriter(c, v, pacer.New(pc), enc, limits, cfg.Logger)
+	w.stallTimeout = cfg.ViewerTimeout
 	read := make(chan error, 1)
 	go func() {
-		err := w.read(ctx, limits)
+		err := w.safeRead(ctx, limits)
 		// When the session ends, the writer still sends close.
 		if !errors.Is(err, session.ErrEnded) {
 			cancel()
@@ -144,7 +189,16 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	err := w.run(ctx)
 	cancel()
 	rerr := <-read
+	var p session.PanicError
 	switch {
+	case errors.Is(err, ErrStalled):
+		// The viewer kept the stream's state, a terminal's screen among
+		// it, without taking frames: it goes, told why if it still reads.
+		w.log.Info("viewer dropped", "viewer", v.ID(), "err", err)
+		if cerr := closeWith(parent, c, protocol.Close{Code: protocol.CloseTooSlow, Reason: "the viewer did not keep up"}); cerr != nil {
+			w.log.Debug("close not sent", "err", cerr)
+		}
+		return err
 	case errors.Is(err, errEnded),
 		errors.Is(rerr, errClientClosed), errors.Is(rerr, io.EOF),
 		errors.Is(rerr, session.ErrEnded), errors.Is(rerr, session.ErrLeft):
@@ -153,6 +207,14 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 		return err // the writer ended first
 	case errors.As(rerr, new(connError)):
 		return rerr // the connection failed, and nobody is left to tell
+	case errors.As(rerr, &p):
+		// occamyd failed on its own: the client learns that much, and
+		// the log the rest.
+		w.log.Error("stream reader panicked", "panic", p.Value, "stack", string(p.Stack))
+		if cerr := closeWith(parent, c, protocol.Close{Code: protocol.CloseInternalError, Reason: "internal error"}); cerr != nil {
+			w.log.Debug("close not sent", "err", cerr)
+		}
+		return rerr
 	}
 	// The client broke the protocol; tell it why, if it still listens.
 	if cerr := closeWith(parent, c, protocol.Close{Code: protocol.CloseCodeFor(rerr), Reason: "protocol error"}); cerr != nil {
@@ -167,6 +229,17 @@ func closeWith(ctx context.Context, c Conn, m protocol.Close) error {
 	ctx, cancel := context.WithTimeout(ctx, closeTimeout)
 	defer cancel()
 	return c.WriteMessage(ctx, m.Append(nil))
+}
+
+// closeEnded sends the close for the end of s, which is ending, once its
+// end is known.
+func closeEnded(ctx context.Context, c Conn, s *session.Session) error {
+	select {
+	case <-s.Done():
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return closeWith(ctx, c, closeFor(s.End()))
 }
 
 func role(r session.Role) protocol.Role {
@@ -189,6 +262,7 @@ func closeFor(e session.End) protocol.Close {
 		session.RemoteEnded: protocol.CloseRemoteEnded,
 		session.Failed:      protocol.CloseBackendFailed,
 		session.Shutdown:    protocol.CloseServerShutdown,
+		session.Internal:    protocol.CloseInternalError,
 	}[e.Reason]
 	if code == 0 {
 		code = protocol.CloseInternalError

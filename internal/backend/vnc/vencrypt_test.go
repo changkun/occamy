@@ -457,6 +457,12 @@ func TestNewTLSPolicy(t *testing.T) {
 		if err != nil || got != sum {
 			t.Errorf("parsePin(%q) = %x, %v; want %x", s, got, err, sum)
 		}
+		if err := CheckPin(s); err != nil {
+			t.Errorf("CheckPin(%q) = %v", s, err)
+		}
+	}
+	if err := CheckPin("SHA256:short"); err == nil {
+		t.Error("CheckPin took a short fingerprint")
 	}
 }
 

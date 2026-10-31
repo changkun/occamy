@@ -15,6 +15,7 @@ import (
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/session"
+	"changkun.de/x/occamy/internal/terminal"
 	"changkun.de/x/occamy/protocol"
 )
 
@@ -27,6 +28,18 @@ type connError struct{ err error }
 
 func (e connError) Error() string { return e.err.Error() }
 func (e connError) Unwrap() error { return e.err }
+
+// safeRead is read, which returns a session.PanicError if it panics: the
+// reader runs on its own goroutine, where net/http's recover does not
+// reach, and a client's message must not crash occamyd.
+func (w *writer) safeRead(ctx context.Context, l protocol.Limits) (err error) {
+	defer func() {
+		if perr := session.Recovered(recover()); perr != nil {
+			err = perr
+		}
+	}()
+	return w.read(ctx, l)
+}
 
 // read applies the client's messages until it closes, breaks the
 // protocol, or ctx is done.
@@ -65,7 +78,7 @@ func (w *writer) apply(m protocol.Message) error {
 	case *protocol.TermInput:
 		return w.input(m.Seq, backend.TermInput{Data: slices.Clone(m.Data)})
 	case *protocol.ResizeRequest:
-		return w.input(m.Seq, backend.Resize{Width: int(m.Width), Height: int(m.Height)})
+		return w.input(m.Seq, boundResize(w.s.Class(), int(m.Width), int(m.Height)))
 	case *protocol.ClientClipboard:
 		return w.input(m.Seq, backend.Clipboard{MIME: m.MIME, Data: slices.Clone(m.Data)})
 	case *protocol.View:
@@ -139,4 +152,14 @@ func (w *writer) input(seq uint32, ev backend.InputEvent) error {
 		w.log.Debug("input dropped", "seq", seq, "err", err)
 	}
 	return nil
+}
+
+// boundResize is the resize a client asks of a session of class, clamped
+// to the largest a backend is asked for: a terminal holds every cell of
+// its screen, and each viewer keeps the screens it was sent.
+func boundResize(class backend.Class, width, height int) backend.Resize {
+	if class == backend.Terminal {
+		return backend.Resize{Width: min(width, terminal.MaxCols), Height: min(height, terminal.MaxRows)}
+	}
+	return backend.Resize{Width: min(width, backend.MaxResizeSide), Height: min(height, backend.MaxResizeSide)}
 }

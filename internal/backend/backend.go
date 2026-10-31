@@ -191,10 +191,17 @@ type Clipboard struct {
 }
 
 // Resize asks the remote to change the screen's size, in pixels for a
-// graphical backend and in character cells for a terminal.
+// graphical backend and in character cells for a terminal. Clients ask
+// for sizes, so occamyd clamps what they ask for before a backend sees
+// it: a graphical screen's sides to MaxResizeSide, and a terminal's to
+// the terminal emulator's MaxCols and MaxRows.
 type Resize struct {
 	Width, Height int
 }
+
+// MaxResizeSide is the largest width and height, in pixels, that a
+// Resize asks of a graphical backend.
+const MaxResizeSide = 8192
 
 func (Key) input()       {}
 func (Pointer) input()   {}

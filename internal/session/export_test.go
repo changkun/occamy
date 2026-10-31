@@ -10,3 +10,10 @@ func (r *Registry) Shares() int {
 	defer r.mu.Unlock()
 	return len(r.shares)
 }
+
+// Indexed is the number of sessions in the registry's index of shares.
+func (r *Registry) Indexed() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.byID)
+}
