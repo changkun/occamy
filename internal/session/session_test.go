@@ -107,12 +107,16 @@ func TestReadOnlyInputDropped(t *testing.T) {
 		if err := ro.Input(1, backend.Key{Down: true, Keysym: 0x62}); err != nil {
 			t.Fatal(err)
 		}
+		// Nor may a read-only viewer set the remote clipboard.
+		if err := ro.Input(2, backend.Clipboard{MIME: "text/plain", Data: []byte("paste")}); err != nil {
+			t.Fatal(err)
+		}
 		if err := owner.Input(1, backend.Key{Down: true, Keysym: 0x63}); err != nil {
 			t.Fatal(err)
 		}
 		synctest.Wait()
-		if got := s.DroppedInputs(); got != 1 {
-			t.Errorf("%d inputs dropped, want 1", got)
+		if got := s.DroppedInputs(); got != 2 {
+			t.Errorf("%d inputs dropped, want 2", got)
 		}
 		if got := screen.Inputs(); len(got) != 1 || got[0].(backend.Key).Keysym != 0x63 {
 			t.Errorf("backend received %v, want only the owner's key", got)

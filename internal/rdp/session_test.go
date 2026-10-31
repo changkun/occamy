@@ -420,10 +420,41 @@ func FuzzRun(f *testing.F) {
 			),
 		},
 		{rdptest.SetErrorInfo(0x9), rdptest.DisconnectUltimatum()},
+		slices.Concat(
+			rdptest.ChannelChunks(fuzzClipboard, rdptest.ClipCaps(true), rdptest.ChunkSize),
+			rdptest.ChannelChunks(fuzzClipboard, rdptest.MonitorReady(), rdptest.ChunkSize),
+			rdptest.ChannelChunks(fuzzClipboard, rdptest.FormatList(true, rdptest.CFUnicodeText), rdptest.ChunkSize),
+			rdptest.ChannelChunks(fuzzClipboard, rdptest.FormatDataResponse(true, rdptest.UnicodeText("a\r\nb")), 3),
+			rdptest.ChannelChunks(fuzzClipboard, rdptest.FormatDataRequest(rdptest.CFText), rdptest.ChunkSize),
+		),
+		slices.Concat(
+			rdptest.ChannelChunks(fuzzDynvc, rdptest.DVCCapsPDU(3), rdptest.ChunkSize),
+			rdptest.ChannelChunks(fuzzDynvc, rdptest.DVCCreateRequest(7, rdptest.DisplayControl), rdptest.ChunkSize),
+			rdptest.ChannelChunks(fuzzDynvc, rdptest.DVCDataPDU(7, rdptest.DisplayCaps(16, 8192, 8192)), 5),
+			[][]byte{rdptest.DeactivateAll(), rdptest.DemandActive(1280, 720, rdptest.DefaultInputFlags)},
+			rdptest.Finalization(),
+			rdptest.ChannelChunks(fuzzDynvc, rdptest.DVCClosePDU(7), rdptest.ChunkSize),
+		),
 	} {
 		f.Add(slices.Concat(seed...))
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		runFrames(testClient(fuzzWidth, fuzzHeight), &backendtest.Sink{}, data)
+		c := testClient(fuzzWidth, fuzzHeight)
+		c.cfg.Clipboard = ClipboardFromServer | ClipboardToServer
+		c.cfg.Resize = true
+		c.chio.kick = make(chan struct{}, 1)
+		c.layoutEvery = layoutEvery
+		c.channels = c.newChannels()
+		c.clipCh, c.dynCh = c.channels[0], c.channels[1]
+		c.clipCh.id, c.dynCh.id = fuzzClipboard, fuzzDynvc
+		c.RequestSize(1280, 720)
+		runFrames(c, &backendtest.Sink{}, data)
 	})
 }
+
+// fuzzClipboard and fuzzDynvc are the MCS channels of the clipboard and
+// of DRDYNVC in FuzzRun.
+const (
+	fuzzClipboard = rdptest.IOChannel + 1
+	fuzzDynvc     = rdptest.IOChannel + 2
+)
