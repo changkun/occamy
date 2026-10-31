@@ -428,6 +428,14 @@ published.
     graphics pipeline; native RDP now asks for it by default, and xrdp
     draws in RemoteFX Progressive, while the bridge gives guacd
     `disable-gfx`.
+  - Native RDP's decoding rate, which holds a session to about a core
+    of the benchmarks' host, caps full-screen RemoteFX at about 97
+    frames a second at the harness's 1024 × 768, 37 at 1920 × 1080 and
+    9 at 3840 × 2160, near the decoder's own speed on one core
+    ([native-rdp-backend](native-rdp-backend.md)'s phase 3 notes). No
+    scene reaches it at 1024 × 768. It is Occamy's bound, not one
+    outside it, so it justifies no miss; `docs/benchmarks.md` notes
+    where the decoding's own CPU may.
   - `bench/v1.go` drives the Go client core through API v1: it signs in
     at `POST /api/v1/auth/token`, opens
     `GET /api/v1/connections/{id}/stream`, asking for 1024 × 768 pixels

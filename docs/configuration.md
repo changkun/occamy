@@ -518,10 +518,16 @@ yet take ClearCodec, which Windows servers draw text and small
 regions in, nor the bitmap cache, which the backend's third phase
 adds next, nor AVC (H.264), which it does not ask for: until then, a
 bitmap in ClearCodec, or from the cache, is skipped, and leaves its
-region as it was. `disable_gfx: true` on the connection turns GFX off,
-so that the server sends plain bitmap updates, as it sends guacd with
-`disable-gfx`. Until Windows is verified, `backend: guacd` is the fallback for a
-Windows server that the native backend cannot serve.
+region as it was, so a Windows server's screen may show gaps or stale
+regions under GFX. At the first such PDU of a session, `occamyd` logs
+a warning that names the two ways around it. `disable_gfx: true` on
+the connection turns GFX off, so that the server sends plain bitmap
+updates, as it sends guacd with `disable-gfx`. An ad-hoc rdp target on
+the native backend always asks for GFX, since `disable_gfx` is a
+connection's key; `adhoc_backends: {rdp: guacd}` sends ad-hoc rdp
+targets through guacd instead. Until Windows is verified,
+`backend: guacd` is the fallback for a Windows server that the native
+backend cannot serve.
 
 xrdp speaks no NLA: offered NLA alone, it selects standard RDP
 security, which the native backend refuses, so an xrdp connection
@@ -646,7 +652,18 @@ when the request carries no `username`, for the username and the
 domain too. A request's `username` of the form `DOMAIN\user`, with both
 parts, names the domain. A server whose certificate does not chain to
 the system's roots, as a self-signed one, or that speaks no NLA, as
-xrdp, needs a connection, whose `tls` and `security` can say so.
+xrdp, needs a connection, whose `tls` and `security` can say so. It
+also always asks for RDP's graphics pipeline (GFX), since only a
+connection can set `disable_gfx`. A Windows server draws parts of its
+screen under GFX in ClearCodec and from its bitmap cache, which the
+native backend does not take until its third phase adds them, so those parts
+stay missing or stale; `occamyd` logs a warning when that happens. To
+reach such servers ad hoc meanwhile, send ad-hoc rdp targets through
+guacd:
+
+```yaml
+adhoc_backends: {rdp: guacd}
+```
 
 An entry of `adhoc_allowlist` without ports allows the protocol's own:
 22 for ssh, 5900 to 5999 for vnc, 3389 for rdp and 23 for telnet. A

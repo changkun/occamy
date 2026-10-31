@@ -294,6 +294,21 @@ in v1. A v1 session runs as follows:
   there. It asks for 32 bits per pixel, and the bridge leaves
   guacd's default colour depth; whether xrdp then keeps a second X
   session is to be checked before the full run.
+- **Native RDP's decoding rate** holds a session's decoding to about a
+  core of the benchmarks' host (an Apple M5 Pro), whatever the server
+  sends
+  ([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)'s
+  phase 3 notes). It caps full-screen RemoteFX and RemoteFX
+  Progressive at about 97 frames a second at the harness's 1024 × 768,
+  37 at 1920 × 1080 and 9 at 3840 × 2160, about what the decoder
+  manages on one core of that host anyway. No scene reaches it: the
+  fastest, G3's 62.5 frames a second, would take 64% of the rate if
+  every frame were a full screen of tiles. The rate is Occamy's own
+  bound, so it does not excuse a miss. The decoding itself may: a full
+  screen of progressive tiles at 1024 × 768 takes about 10 ms of CPU
+  on that host (`BenchmarkGFXProgressive`), above G5's RDP target of
+  5.5 ms a frame if xrdp redraws the whole screen each frame, which
+  the v1 run is to show.
 
 CI runs both v1 series quickly under N1, after the v0 smoke run, on the
 same stack.

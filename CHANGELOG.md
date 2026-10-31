@@ -565,10 +565,22 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   decoder is pure Go in integer arithmetic: RLGR1 and RLGR3, the 11.5
   fixed point of [MS-RDPRFX] 4.2.4.3, the reduce-extrapolate
   transform, first passes, difference tiles and upgrades with SRL and
-  raw bits, one codec context per surface, and tiles drawn within
-  their region's rectangles at its end. Each tile is charged against
-  the decoding rate, the contexts keep at most twice the desktop's
-  tiles (at least 1,024), and malformed input ends the session. It
+  raw bits, and tiles drawn within their region's rectangles at its
+  end. A surface's tiles keep their coefficients until the surface is
+  deleted, as [MS-RDPEGFX] 3.3.1.3 requires, and their signs only
+  while their codec context lives (3.3.1.2), so a difference tile after
+  a context's delete or switch adds to the tile, and an upgrade after
+  either ends the session. The tiles are at most twice those of the
+  largest desktop the session had (at least 1,024), 576 MiB at worst,
+  and malformed input ends the session. The decoding rate is priced by
+  measured cost, a RemoteFX tile's pixel 7 units and a planar one 2, at
+  512 Mi units a second: about one core of an Apple M5 Pro at most for
+  a session, whatever the server sends. A session's first screen does
+  not wait, and full-screen RemoteFX Progressive at 1920 × 1080 and 30
+  frames a second takes 82% of it; before, the rate held it to 2.3
+  frames a second. At the first ClearCodec, cache or other GFX PDU
+  that it skips, a session logs a warning naming `disable_gfx: true`
+  and `adhoc_backends: {rdp: guacd}`. The decoder
   matches [MS-RDPRFX] 4.2.4's tile exactly through the third level's
   inverse, its components within 2/32 of a level and its pixels within
   1, and [MS-RDPEGFX] 4.1.2's progressive example exactly, whose SRL

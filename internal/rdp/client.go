@@ -234,7 +234,7 @@ const (
 	// a unit, so 0.6 to 0.8 of a core (BenchmarkHostileTiles,
 	// BenchmarkHostileBitmap). It cannot be lower without holding back
 	// full-motion RemoteFX: full-screen tiles at 1920×1080 and 30 frames
-	// a second take 438 Mi units a second, 82% of it, and about 0.8 of a
+	// a second take 418 Mi units a second, 82% of it, and about 0.8 of a
 	// core. They come through without a wait; at 3840×2160, the rate
 	// holds them to 9 frames a second, about what the decoder manages in
 	// that core. A token bucket holds two desktops of tiles and a tile

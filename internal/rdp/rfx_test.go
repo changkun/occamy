@@ -109,11 +109,14 @@ func loadRFXVector(t testing.TB) *rfxVector {
 // The decoder reproduces [MS-RDPRFX] 4.2.4's tile: RLGR3, LL3's
 // differences and dequantization, and the inverse of the transform's
 // third level exactly; the components within 2/32 of a level, and the
-// image within a level per channel. The specification's dumps of the
-// second level's columns differ from its own lifting equations (figure
-// 14) in a sixteenth of their samples by 1/32, and its conversion to
-// RGB rounds in a way that no single rule reproduces, so those stages
-// match within those bounds and not exactly.
+// image within a level per channel. The specification's dump of the
+// second level's columns (4.2.4.3.2.7) differs from its own lifting
+// equations (figure 14) in 16 of 1,024 samples, each 1/32 higher: all
+// in odd rows and odd columns, in pairs of rows 2n−1 and 2n+1 of one
+// column, each pair what the equations give if the even sample they
+// share, row 2n, were 1 higher. Its conversion to RGB rounds in a way
+// that no single rule reproduces, so those stages match within those
+// bounds and not exactly.
 func TestRFXSpecTile(t *testing.T) {
 	v := loadRFXVector(t)
 	b := v.tileset
