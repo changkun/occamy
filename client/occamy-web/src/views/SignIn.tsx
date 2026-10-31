@@ -20,6 +20,8 @@ export interface SignInProps {
   storage: Storage | undefined
   /** Why the user is here again, such as an expired sign-in. */
   message: string
+  /** What signing in leads to, which is no error, such as the session a reload left; empty for none. */
+  notice: string
   /** An OIDC sign-in coming back: the exchange of its one-time code. */
   pending: Promise<AccessToken> | null
   /** What waits for the sign-in, kept across single sign-on's visit to the identity provider. */
@@ -27,9 +29,11 @@ export interface SignInProps {
   onSignedIn: (token: AccessToken) => void
   /** Shows the form as a dialog over the page, which this closes; without it, the form is the page. */
   onCancel?: () => void
+  /** Offered with the notice: sign in for the connection list instead of where the notice leads. */
+  onSkip?: () => void
 }
 
-export function SignIn({ api, storage, message, pending, resume, onSignedIn, onCancel }: SignInProps): ReactElement {
+export function SignIn({ api, storage, message, notice, pending, resume, onSignedIn, onCancel, onSkip }: SignInProps): ReactElement {
   const [error, setError] = useState(message)
   const [busy, setBusy] = useState(pending !== null)
   const [oidc, setOidc] = useState(false)
@@ -101,6 +105,16 @@ export function SignIn({ api, storage, message, pending, resume, onSignedIn, onC
     <form className={over ? 'sign-in' : 'card sign-in'} onSubmit={(e) => void submit(e)} aria-busy={busy} aria-describedby={error === '' ? undefined : 'sign-in-error'}>
       {over ? <h2 id="sign-in-title">Sign in again</h2> : <h1>Occamy</h1>}
       <p className="lead">{over ? 'The session goes on while you sign in.' : 'Sign in to open a remote desktop or terminal.'}</p>
+      {notice !== '' && (
+        <div className="notice">
+          <p role="status">{notice}</p>
+          {onSkip !== undefined && (
+            <button type="button" onClick={onSkip} disabled={busy}>
+              Go to the connections instead
+            </button>
+          )}
+        </div>
+      )}
       {error !== '' && (
         <p id="sign-in-error" className="error" role="alert">
           {error}
