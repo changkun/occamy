@@ -545,15 +545,24 @@ and guacd leaves the default deployment.
     has since replaced is dropped and the newest is asked for, and
     unasked and failed answers are dropped and counted. A server that
     leaves more than 8 of its own requests unanswered ends the
-    session, as does one that sends Format Lists while more than 64
-    Format List Responses wait to be written: the client owes a
-    counter, not a message, until it writes, and a server that floods
-    lists while it does not read would otherwise grow what the writer
-    builds without bound (found in review). The server's text is charged against the decoding rate
-    as a pointer shape is, a tile at least, so that announcing it again
-    and again makes the client wait. A Format List that does not parse
-    is refused with a failed response; a message whose length is wrong
-    is dropped; locks and file PDUs are ignored.
+    session. The Format List Responses the client owes are a count of
+    64 bits, not a queue, and no number of them ends the session: the
+    writer sends 64 a pass, in two writes, and looks again for the rest
+    once a pass is written, so that what it builds stays bounded
+    however much is owed, and a server that sends lists faster than it
+    reads gets the responses as fast as it reads. A first version ended
+    the session past 64 owed, for a server that floods lists without
+    reading; the review found that this ended sessions with servers
+    that read too: a burst of 65 lists in one write, or a server's user
+    copying while a long paste held the writer up (xrdp does not wait
+    for the responses). In a burst, a Format Data Request for the
+    newest list can now go before the responses to the lists before
+    it, which xrdp, not waiting for them, does not mind; Windows is to
+    be checked in phase 4. The server's text is charged against the
+    decoding rate as a pointer shape is, a tile at least, so that
+    announcing it again and again makes the client wait. A Format List
+    that does not parse is refused with a failed response; a message
+    whose length is wrong is dropped; locks and file PDUs are ignored.
   - The backend (`internal/backend/rdp`): `DisableCopy` and
     `DisablePaste`, as guacd's `disable-copy` and `disable-paste`, map
     onto the two modes; with both, no channel. `Input` queues a
@@ -592,7 +601,18 @@ and guacd leaves the default deployment.
   announced twice, no text, stale, unasked and failed answers, each
   mode alone, the bounds either way, the requests' bound, pacing, the
   conversions, format lists, and the order of capabilities and Format
-  List under a race. The backend: both ways through the sink with the
+  List under a race; the Format List Responses owed, a pass of 64 at a
+  time with the writer looking again for the rest
+  (`TestClipboardListResponsesPaced`), its allocations the same with
+  65 owed as with a million (`TestClipboardListResponsesAllocs`), a
+  flood of 100,000 lists the server does not read with the session
+  kept and the heap not grown (`TestClipboardListFlood`), bursts of
+  65 and 1,000 lists in one write each answered
+  (`TestClipboardListBurst`), and a paste held up while the server's
+  user copies 1,000 times (`TestClipboardPasteHeldUp`) or read slowly
+  while it copies every 2 ms (`TestClipboardSlowPaste`); a write that
+  fails, the last or one within a message, stopping the writer
+  (`TestChannelWriteFailed`). The backend: both ways through the sink with the
   Format List before the paste's keys, non-text dropped, each of
   `DisableCopy` and `DisablePaste` and both, the byte budget, the
   writer's order against a fake client, and NLA end to end: prompted
@@ -602,8 +622,8 @@ and guacd leaves the default deployment.
   wrong public key proof, each without credentials delegated; and
   cancel while the server stalls at either step. The client also logs
   on through the acceptor in `internal/rdp`. Coverage, with the
-  review's tests: `internal/rdp` 88.5% of statements, `channel.go`
-  94.3% and `cliprdr.go` 96.9%; `internal/backend/rdp` 98.5%.
+  reviews' tests: `internal/rdp` 88.6% of statements, `channel.go`
+  98.0% and `cliprdr.go` 96.9%; `internal/backend/rdp` 98.5%.
 - **Integration test.** `TestIntegrationClipboard`, under the
   `rdp_integration` tag, pastes text and reads the session's X
   CLIPBOARD selection, which xrdp-chansrv serves, and sets the
@@ -644,10 +664,16 @@ and guacd leaves the default deployment.
   (`TestChannelMessagesWhole`), the surrogate guard on an odd length
   (`TestClipboardText`), the drop of a CLIPRDR message whose length is
   wrong, text included (`TestClipboardLength`), and channel 0 in the
-  lookup (`TestClipboardChannelBound`). The bound on owed Format List
-  Responses and the shared writes are caught both by their unit test
-  (`TestClipboardListResponsesBounded`) and, for the bound, by a flood
-  while the writer is held up (`TestClipboardListFlood`).
+  lookup (`TestClipboardChannelBound`). A second review ran 9 more on
+  the fixes and found two survivors: a failed write not recorded,
+  either the last of a pass or one within a message, so that the
+  writer would go on writing; `TestChannelWriteFailed` now catches
+  both. The responses owed, sent a pass at a time, were broken in
+  turn too, 6 mutants, all caught: no bound on a pass, a pass of 65,
+  no look again for the rest, refusals sent as acceptances, an
+  acceptance kept back, and the first version's bound
+  (`TestClipboardListResponsesPaced`, `TestClipboardListResponsesAllocs`,
+  `TestClipboardListBurst`, `TestClipboardPasteHeldUp`).
 - **Fuzzing.** `FuzzChannel` feeds chunks to the reassembly and checks
   the bound; `FuzzCliprdr` feeds a CLIPRDR message, then sets the
   owner's text and writes what is due; `FuzzRun` now joins the

@@ -370,9 +370,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   most 4 MiB of UTF-8, as `Config.Clipboard` allows. The backend copies
   and pastes it, a paste set before the keys that follow it, unless
   `DisableCopy` or `DisablePaste` stops a direction, as guacd's
-  `disable-copy` and `disable-paste` do. The client owes a server at
-  most 64 Format List Responses and 8 answers to its data requests; a
-  server that floods more than that without reading ends the session.
+  `disable-copy` and `disable-paste` do. The Format List Responses the
+  client owes are a count, written 64 at a time as fast as the server
+  reads, so that neither a burst of lists nor copies during a long
+  paste end the session, and a flood costs no memory; a server that
+  leaves more than 8 of its data requests unanswered ends it.
   `rdptest` accepts NLA through CredSSP with NTLMv2, so that the
   backend's NLA path, prompted credentials included, runs end to end in
   tests. Resize waits for the dynamic channels of the second part.
