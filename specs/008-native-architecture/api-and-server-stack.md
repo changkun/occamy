@@ -11,7 +11,7 @@ affects:
   - docs/
 effort: large
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -1134,21 +1134,22 @@ place for fixes that ship on v0 before beta.
   shared benchmark host's load average was 46 at the time. The tests run
   the routes against fake backends only.
 - **Follow-ups:**
-  - Recover gaps the final review found, for a PR of their own. A
+  - ~~Recover gaps the final review found, for a PR of their own. A
     panic leaves the session's state locked where a lock is not
-    released by `defer`:
-    - The VNC and guacd decoders hold rows between `sink.Lock` and
+    released by `defer`:~~ Done: see "Implementation notes: panic
+    safety".
+    - ~~The VNC and guacd decoders hold rows between `sink.Lock` and
       `sink.Unlock` without `defer` (vnc's `drawBand`, `fillRect`,
       `raw`, `drawCompact`, `drawPalette` and `tightJPEG`, guacd's
       `flush`), so a panic there, which the session's recover turns
       into its end, leaves rows locked, and the viewers' writers wait
-      in `ReadTile` forever.
-    - SSH's `pump` goroutines run outside the session's recover, and
+      in `ReadTile` forever.~~
+    - ~~SSH's `pump` goroutines run outside the session's recover, and
       `sink.TermData` and `Terminal.Write` hold their locks without
-      `defer`; the terminal's parser has no fuzzer.
-    - VNC's cleanup after `readLoop` (`close(done)`, `nc.Close()`) is
+      `defer`; the terminal's parser has no fuzzer.~~
+    - ~~VNC's cleanup after `readLoop` (`close(done)`, `nc.Close()`) is
       not deferred, so a panic in `readLoop` leaves the writer loop
-      and the connection behind.
+      and the connection behind.~~
   - The viewer timeout bounds each message's write, so a link too slow
     to carry one message in 30 s, such as a terminal's snapshot of a
     few megabytes at under 100 kB/s, drops its viewer. Tiles are small;
@@ -1198,6 +1199,153 @@ place for fixes that ship on v0 before beta.
     `welcome` for a refusal; reconnect as the owner with an access token
     (the stream token lasts 5 minutes); read `close` 1000 with "the
     owner connected again" as being replaced, not as an error.
+
+## Implementation notes: panic safety
+
+The recover gaps the Streams review found, closed in every backend and
+the session core, with the Power key that the RDP spec's follow-ups left
+to the VNC backend.
+
+- **What was done:**
+  - Every `sink.Lock` is released by `defer`: the VNC backend's
+    `drawBand`, `fillStrip` (out of `fillRect`), `drawOpaque` (out of
+    `raw`), `drawCompact`, `drawPalette` and `drawImage` (out of
+    `tightJPEG`), the guacd bridge's `copyOut` (out of `flush`) and the
+    RDP client's `drawRows`. A loop that locked a strip at a time now
+    calls a function per strip, so that the defer runs per strip.
+    `Sink.Lock`'s documentation asks for it.
+  - The framebuffer records each `Lock` until its `Unlock`, and
+    `Framebuffer.Close` releases the ones left: their rows and the read
+    lock on the screen that each holds. The session closes its
+    framebuffer when it ends, for every reason, once `Run` has
+    returned. From then on `ReadTile` reads nothing, `Lock` returns
+    pixels off the screen, and `Unlock` of a released `Lock` does
+    nothing, so a writer that waited in `ReadTile` returns and finds the
+    session's end.
+  - Every goroutine a backend starts recovers, closes the connection to
+    stop the others, and the panic comes back from `Run` as
+    `backend.PanicError`, which the session ends with as
+    `session.Internal`, close 1011, and logs at Error with its stack:
+    the SSH backend's five (the readers of stdout and stderr, the input
+    writer, the size loop and `Wait`), and the writers of the VNC, RDP
+    and guacd backends. `PanicError` and `Recovered` moved from
+    `internal/session` to `internal/backend`, which every backend
+    imports; the session's names are aliases.
+  - The cleanup after the read loop (closing `done`, the connection,
+    waiting for the writer) is deferred in the VNC, RDP and guacd
+    backends, so a panic in the read loop, which the session recovers,
+    leaves no writer or connection behind.
+  - `sink.TermData` holds `outMu` and `Terminal.Write` holds the
+    emulator's lock by `defer`; `Write` still answers queries after it
+    unlocks.
+  - Power: the VNC backend sent Power through QEMU's extended key
+    events, and the VNC and guacd backends sent the X11 power keysyms
+    as keysyms. `backend.PowerKey` now decides for the VNC, RDP and
+    guacd backends: Power by its HID usage (`backend.HIDPower`), and
+    XF86PowerOff, PowerDown, Sleep, Suspend, Hibernate and Standby by
+    keysym. Text cannot type them, since the keysyms of characters end
+    at 0x0110ffff. The web client's keyboard test reads `HIDPower`
+    from `internal/backend/power.go`; the client still maps Power, and
+    no backend sends it.
+  - `FuzzWrite` in `internal/terminal`: arbitrary bytes through `Write`
+    in pieces of arbitrary size, at sizes from 0 to beyond the largest,
+    with resizes and snapshots in between, checking after each step
+    that the cursor, the saved cursors and the scroll region are on the
+    screen, that both screens and the tab stops have the terminal's
+    size, that a snapshot's shape, versions and cells agree (a wide
+    character's right half follows it and nothing else), that
+    snapshots never change once taken, and that the diffs between them
+    rebuild them.
+- **Decisions:**
+  - Exact tracking rather than unlocking every row: unlocking a
+    `sync.RWMutex` that is not locked is a fatal error, which no
+    recover catches, and a goroutine waiting for a lock cannot be
+    interrupted, so `Close` must release exactly what was locked. It
+    sets `closed` before it releases the rows, so that a writer that
+    gets a row does not read pixels a straggler may still be drawing.
+  - The framebuffer is closed at the session's end, not at the panic:
+    only once `Run` has returned does no backend goroutine draw, and
+    releasing rows a goroutine still writes would race. A backend that
+    panicked on its own goroutine stops the others before `Run`
+    returns.
+  - A writer's panic is the writer's error: the VNC and RDP backends
+    already returned the writer's error over the reader's once the
+    writer had closed the connection, so the panic needs no check of
+    its own (a separate check survived its mutation, and was removed).
+    The guacd bridge, whose read loop knows nothing of its writer's
+    errors, returns the writer's panic over the read error it caused,
+    and SSH's `serve` the panic over the exit it caused.
+  - One helper for Power, in `internal/backend`, rather than a constant
+    per backend, so that the web client's test reads one place and a
+    new backend has nothing to remember.
+- **Audit of the other goroutines:** the guacd bridge's read loop,
+  prompts and clipboard run on `Run`'s goroutine, under the session's
+  recover. Not recovered, and why: x/crypto/ssh's and coder/websocket's
+  own goroutines are the libraries'; the registry's and the server's
+  waiters on `Session.Done` only delete and release; the
+  `context.AfterFunc` callbacks only close connections or set
+  deadlines; the stream's reader recovers since #111. The v0 bridge's
+  two goroutines in `server/session.go` parse the client's and guacd's
+  Guacamole bytes outside any recover (`guacamole.ReadRaw`, which
+  `FuzzReadRaw` covers); see the follow-ups.
+- **Benchmark:** the VNC backend's `BenchmarkDecode` (a 1024×768
+  frame per encoding) and the framebuffer's new `BenchmarkLockUnlock`
+  and `BenchmarkReadTile`, before and after, 8 runs each, medians, on
+  the shared Apple M5 Pro at load averages of 2.3 to 4.4. The baseline
+  ran twice, once before the change and once right after the new
+  binary, to show the host's drift:
+
+  | Benchmark | Before | Before, again | After |
+  |---|---|---|---|
+  | Decode raw | 307 µs | 281 µs | 280 µs |
+  | Decode Hextile | 516 µs | 526 µs | 492 µs |
+  | Decode ZRLE | 3.60 ms | 3.72 ms | 3.49 ms |
+  | Decode Tight | 4.22 ms | 4.33 ms | 4.02 ms |
+  | Decode Tight JPEG | 4.61 ms | 4.63 ms | 4.54 ms |
+  | `Lock` and `Unlock` | 24.7 ns | 24.7 ns | 28.3 ns |
+  | `ReadTile` | 337.6 ns | 337.1 ns | 336.8 ns |
+
+  The decode benchmark draws into the test sink, so it measures the
+  decoders' deferred `Unlock`s and the functions per strip alone: they
+  cost nothing measurable, every encoding within the baselines' spread
+  or below it. The framebuffer's record of each `Lock` adds 3.6 ns to
+  a pair, against the microseconds a strip's pixels take to decode and
+  copy. `ReadTile`'s check of `closed` costs nothing.
+- **Fuzzing:** `FuzzWrite` ran 6 minutes with 4 workers at a load
+  average of about 4 to 5: 2.29 million inputs, 783 in the corpus, no
+  failure. Nothing to fix and no crasher to keep. To check that it
+  can fail, two bugs were injected: a cursor forward that may leave
+  the cursor one past the last column panicked on a seed, and a resize
+  that did not clamp the saved cursor's column failed in 6 s with
+  "saved cursor 0 (1, 0) off the screen of 1x1".
+- **Tests:** `TestPanicWhileDrawing` in `server` (adopted from the
+  review: a backend that panics holding a `Lock` closes the stream with
+  1011, the session goes, and no writer is left in `ReadTile`),
+  `TestEndReleasesRows` and `TestTermDataPanics` in `internal/session`,
+  `TestCloseReleasesLocks` and `TestCloseWhileDrawing` in
+  `internal/framebuffer`, `TestWritePanicUnlocks` in
+  `internal/terminal`; `TestPanicWhileDrawing` for each VNC decoder
+  (raw, Hextile, ZRLE, Tight fill, palette, copy and JPEG) and for the
+  guacd bridge, `TestReaderPanics` and `TestWriterPanics` for VNC, RDP
+  and guacd, `TestGoroutinePanics` and `TestLastOutputPanics` for SSH;
+  `TestPowerKey` in `internal/backend` and the VNC backend, and the
+  Power cases of the RDP and guacd input tests. Each new `defer`,
+  recover, release and drop was undone in turn, 31 mutations, and a
+  test failed for every one: the deferred `Unlock` of each draw
+  function, each cleanup and writer recover, `Close`'s release of the
+  rows and of the screen's lock, `ReadTile`, `Lock` and `Unlock` after
+  `Close`, the session's `Close`, both deferred terminal locks, SSH's
+  recover, its wake on a panic and its panic after the exit, the
+  guacd bridge's preference for its writer's panic, and `PowerKey` and
+  each backend's use of it. The two checks that no test could tell
+  apart, the VNC and RDP backends' own preference for the writer's
+  panic, were removed.
+- **Follow-ups:**
+  - Recover the v0 bridge's goroutines in `server/session.go`, with a
+    seam to inject a panic, or retire them with the v0 routes.
+  - The Go client's decoding workers (`client/decode.go`) and reader
+    decode the server's data outside any recover, which would crash
+    the client's process, not occamyd.
 
 ## Implementation notes: OIDC
 

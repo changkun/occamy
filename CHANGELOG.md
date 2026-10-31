@@ -321,11 +321,27 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   one wider or taller than 16,384 pixels or larger than 8192×8192 in
   all, so that an `img` stream cannot make the guacd bridge allocate
   gigabytes.
+- A panic while a backend draws, which a decoder's bug and a remote
+  server's data can cause, no longer leaves the session's screen locked
+  with every viewer's stream waiting for it: the VNC, RDP and guacd
+  backends release the pixels they lock by `defer`, and a session closes
+  its framebuffer when it ends, which releases any pixels still locked.
+  The streams close with 1011, as for any panic the session recovers.
 
 ### Security
 
 - occamyd's request log no longer records query strings, which carry the
   v0 token and with it the remote credentials.
+- A panic on a goroutine a backend starts, such as the SSH backend's
+  readers of the remote's output and the VNC, RDP and guacd backends'
+  writers, ends its session with close 1011 instead of crashing occamyd
+  and every other session with it. A panic in the terminal emulator
+  releases its locks.
+- No backend sends the Power key or the X11 power keysyms
+  (XF86PowerOff, PowerDown, Sleep, Suspend, Hibernate, Standby), which
+  the remote applies to the whole machine. The native VNC backend sent
+  Power through QEMU's extended key events, and the VNC and guacd
+  backends sent the keysyms.
 
 ## [0.6.0] - 2026-10-30
 
