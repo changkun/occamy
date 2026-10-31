@@ -1219,10 +1219,14 @@ RDP's guacd path, RDP no longer needs guacd at all.
     do not set THINCLIENT, which would ask for plain RemoteFX. PDUs
     before the server's confirm are counted and ignored
     ([MS-RDPEGFX] 3.3.5.19), as is a confirm of a version the
-    specification does not define. A close drops the pipeline's state,
-    its history and the acknowledgements still waiting; a channel
-    opened again starts anew. A server that never opens the channel, or
-    closes it, draws with bitmap updates as before.
+    specification does not define. A close drops the pipeline's state
+    and the acknowledgements still waiting; a channel opened again
+    starts anew, its history empty, in the ring the last channel used,
+    zeroed as far as it was written rather than allocated again (2.5 MB
+    a reopen otherwise). The count of frames decoded goes on across
+    channels, since totalFramesDecoded counts them since the connection
+    began ([MS-RDPEGFX] 2.2.2.13). A server that never opens the
+    channel, or closes it, draws with bitmap updates as before.
   - ZGFX (`internal/rdp/zgfx.go`, [MS-RDPEGFX] 2.2.9 and 3.1.9.1):
     single and multipart messages, stored and compressed segments, the
     2,500,000-byte history ring, which stored segments enter too, and
@@ -1238,14 +1242,21 @@ RDP's guacd path, RDP no longer needs guacd at all.
     cells of a row at a time, in strips of at most `drawStrip` pixels,
     each under one lock released by defer. The surfaces' changes are
     drawn in the order of mapping, so where surfaces overlap the last
-    change wins, as in FreeRDP's output.
+    change wins, as in FreeRDP's output. Where a mapped surface leaves
+    the output (deleted, replaced by a surface of its id, or mapped
+    again elsewhere), and where a bitmap update draws under a mapped
+    surface, the other mapped surfaces' cells there are marked, so that
+    the next flush draws them again; where no surface is mapped the
+    output keeps what was drawn. At most 64 surfaces are mapped at once.
   - Solid fills, clipped to the surface as FreeRDP clips them, and
     surface-to-surface copies, whose rectangles must lie within their
     surfaces, as FreeRDP requires, copied bottom-up where they overlap
     downwards. A copy within one mapped surface whose source and
     destination lie on the desktop, under no other mapped surface, goes
     to the output as `CopyRect`, after the surface's earlier changes;
-    any other copy is drawn as a change.
+    any other copy is drawn as a change. `CopyRect` is right only where
+    the output shows the surface's own pixels, which the marking above
+    restores before the copy's flush.
   - Wire-to-surface 1 in the uncompressed codec (B, G, R and X or A,
     swizzled a pixel at a time) and the planar codec ([MS-RDPEGDI]
     2.2.2.5): rows top-down, planes raw or RLE, and AYCoCg with colour
@@ -1258,7 +1269,8 @@ RDP's guacd path, RDP no longer needs guacd at all.
     skipped; their frames are still acknowledged.
   - ResetGraphics resizes the output as a reactivation does, at most
     once every `resizeEvery`, and only if the size differs, then draws
-    the mapped surfaces again; it keeps the surfaces.
+    the mapped surfaces again; it keeps the surfaces. A reactivation
+    that resizes the output draws them again too.
   - Frame acknowledgements: at each EndFrame, once its changes are
     drawn, with queueDepth 0 (QUEUE_DEPTH_UNAVAILABLE), the frame's id
     and the frames acknowledged so far. They wait for the channel
@@ -1283,33 +1295,52 @@ RDP's guacd path, RDP no longer needs guacd at all.
     pixels), and all of them within four desktops' pixels, but at
     least 2^24 (64 MiB) and at most 2^26 (256 MiB). Monitors in a
     reset: 16. A mapping's origin: 32,766, the largest output
-    [MS-RDPEGFX] 2.2.2.14 allows.
+    [MS-RDPEGFX] 2.2.2.14 allows. Surfaces mapped at once: 64, since
+    each copied point, flush, delete and mapping looks at each of
+    them; without the bound, 65,534 mapped 1×1 surfaces made one copy
+    PDU of 16,000 points cost 1.85 s.
+  - A planar bitmap in wire-to-surface 1: `maxBitmapPixels` (2^23), as
+    a bitmap update's, since the decoder keeps planes of its largest
+    bitmap until the desktop changes; without it, one RLE bitmap of a
+    surface of 8192×4096 kept 96 to 128 MiB of planes.
   - Acknowledgements waiting for the writer: 256; a server that does
     not read them ends the session, or reports the writer's failure.
   - Buffers kept between messages: 4 MiB each for the reassembled and
     the decompressed message, rather than `retainFrag`'s 1 MiB, since
     xrdp's 3 MiB messages come every frame.
   - Pacing: creating and mapping a surface, a fill's clipped
-    rectangles, each point of a copy and each bitmap are charged
-    against the decoding rate as bitmaps of their pixels.
+    rectangles, each point of a copy (at least `pointerCost`, a tile
+    of 64×64, however small its rectangle), each bitmap, and the
+    mapped surfaces drawn again after a resize are charged against the
+    decoding rate as bitmaps of their pixels; and what decompression
+    adds to a message, in pixels of 4 bytes, since 2,840 bytes may
+    decompress to 16 MiB of a PDU the client ignores. Stored messages,
+    xrdp's, add nothing, so that what they draw is not charged twice.
   - Malformed PDUs end the session: an unknown surface, a rectangle
     inverted or outside its surface, a pixel format other than XRGB
     and ARGB, a count past the PDU, a PDU length past the message, and
-    every ZGFX malformation (a reserved code, a 9-bit distance, a
-    distance past the history, a length past the code, a token or run
-    past its segment, a segment over 65,535 bytes, unused bits past
-    the stream, a multipart that does not add up).
+    ZGFX's malformations that leave the stream undecodable (a reserved
+    prefix, a 9-bit distance, a distance past the history, a length
+    past the code, a token or run past its segment, a segment over
+    65,535 bytes, unused bits past the stream, a multipart that does
+    not add up). A match is checked against the segment's bound before
+    it copies, so that nothing past it is appended. The literals that
+    have codes of their own, sent as "0" and 8 bits, which
+    [MS-RDPEGFX] 3.1.9.1.2.3 reserves, are taken as the literals they
+    spell, as FreeRDP takes them (`TestZGFXReservedLiterals`).
 - **Verified live and against vectors.**
   - Live against xrdp 0.10.1 (`TestIntegrationGFX`, run at a load of
     7.8): the channel, the early capability flag, the capability
-    exchange, ResetGraphics, a surface created and mapped, ZGFX's
-    stored segments (every message xrdp sends), planar bitmaps in
-    wire-to-surface 1 (192 tiles of 64×64, xrdp's whole first screen,
-    which is black, so they decode but their colours are not checked
-    live), RemoteFX Progressive in wire-to-surface 2 counted and
-    skipped, and frame acknowledgements as pacing: eight keys gave
-    eight more frames, which xrdp sends only as earlier frames are
-    acknowledged.
+    exchange, ResetGraphics (to the size the desktop already has, so
+    only the path that does not resize ran live), a surface created
+    and mapped, ZGFX's stored segments (every message xrdp sends),
+    planar bitmaps in wire-to-surface 1 (192 tiles of 64×64, xrdp's
+    whole first screen, which is black, so they decode but their
+    colours are not checked live), RemoteFX Progressive in
+    wire-to-surface 2 counted and skipped, and frame acknowledgements:
+    eight keys gave eight more frames. That xrdp waits for the
+    acknowledgements before it sends more, as its source suggests, was
+    not checked against a run without them.
   - Against the specification and the tests only: compressed ZGFX
     (the specification's examples and the tests' own compressor; xrdp
     never sets PACKET_COMPRESSED, its `xrdp_egfx.c` writing only the
@@ -1324,11 +1355,14 @@ RDP's guacd path, RDP no longer needs guacd at all.
   `TestGFXFlushStrips`, `TestGFXWithoutOutput`,
   `TestGFXSurfaceToSurfaceOverlap` in eight directions,
   `TestCopyPixelsDirection`, `TestGFXCopyRectWhen`,
-  `TestGFXCopyAfterFill`, `TestGFXCopyBetweenSurfaces`,
-  `TestGFXResetGraphics`, `TestGFXBeforeConfirm`, `TestGFXIgnored`,
-  `TestGFXFrameOrder`, `TestGFXSurfaces`, `TestGFXMalformed` with the
-  reason each case fails for, `TestGFXAcksBounded`, `TestGFXPace`,
-  `TestGFXRetain`, `TestGFXUnfinished`, `TestGFXClosed`, and
+  `TestGFXCopyRectExposed`, `TestGFXCopyAfterFill`,
+  `TestGFXCopyBetweenSurfaces`, `TestGFXResetGraphics`,
+  `TestGFXBeforeConfirm`, `TestGFXIgnored`, `TestGFXFrameOrder`,
+  `TestGFXSurfaces`, `TestGFXMappedBound`, `TestGFXPlanarBound`,
+  `TestGFXMalformed` with the reason each case fails for,
+  `TestGFXAcksBounded`, `TestGFXPace`, `TestGFXRetain`,
+  `TestGFXUnfinished`, `TestGFXClosed`, `TestGFXReopenHistory`,
+  `TestFuzzGFXSeed` with the output's pixels after a reactivation, and
   `TestPlanarYCoCg` over every colour loss level with and without
   subsampling, odd sizes included); against `rdptest`'s server
   (`TestGFXAsked`, `TestGFXCapsAdvertise`, `TestGFXSession`,
@@ -1337,10 +1371,12 @@ RDP's guacd path, RDP no longer needs guacd at all.
   (`TestZGFXExamples`), the history across stored segments, around
   the ring, past it and into the segment (`TestZGFXStoredHistory`,
   `TestZGFXHistoryWrap`, `TestZGFXHistoryUnwritten`,
-  `TestZGFXHistoryIntoSegment`), every
-  malformation (`TestZGFXErrors`) and the tests' compressor
+  `TestZGFXHistoryIntoSegment`), the malformations
+  (`TestZGFXErrors`), the reserved literals
+  (`TestZGFXReservedLiterals`) and the tests' compressor
   (`TestZGFXRoundTrip`). `TestIntegrationGFX` (`rdp_integration`)
-  runs the pipeline against xrdp, waits for the session's screen in
+  runs the pipeline against xrdp, wants a confirm, a reset, a surface
+  mapped and planar bitmaps, waits for the session's screen in
   RemoteFX Progressive, and wants eight more frames from at most 40
   keys.
 - **Fuzzing.** `FuzzZGFX`, `FuzzZGFXRoundTrip` (the decoder must give
@@ -1372,7 +1408,10 @@ RDP's guacd path, RDP no longer needs guacd at all.
     not cut where the history ends, or not going on into the segment
     (`TestZGFXHistoryIntoSegment`); a match longer than its distance
     copied at once rather than repeated (`TestZGFXExamples`,
-    `TestZGFXRoundTrip`).
+    `TestZGFXRoundTrip`); a match not checked against the segment's
+    bound before it copies (`TestZGFXErrors`); the ring not zeroed for
+    a new channel, zeroed only in part, or what was written of it not
+    tracked (`TestGFXReopenHistory`).
   - The pipeline: an overlapping copy in the wrong direction
     (`TestCopyPixelsDirection`, `TestGFXSurfaceToSurfaceOverlap`); a
     `CopyRect` before the surface's earlier changes reach the output
@@ -1397,7 +1436,17 @@ RDP's guacd path, RDP no longer needs guacd at all.
     (`TestGFXUnfinished`); the strict bound dropped
     (`TestGFXMessageBound`); a second channel accepted
     (`TestGFXReopen`); the early capability flag or the `drdynvc`
-    request left out (`TestGFXAsked`).
+    request left out (`TestGFXAsked`); the surfaces under a surface
+    deleted or replaced, or mapped elsewhere, or under a bitmap
+    update, not drawn again, or found without the surface's origin
+    (`TestGFXCopyRectExposed`); the redraw after a reactivation's
+    resize dropped (`TestFuzzGFXSeed`); the charges for decompression's
+    growth, the floor of a copied point, its area above the floor, or
+    the redraw after a reset dropped or changed (`TestGFXPace`); the
+    planar bound doubled or made strict (`TestGFXPlanarBound`); the
+    mapped bound one higher, or applied to a surface mapped again
+    (`TestGFXMappedBound`); the ZGFX ring or the count of frames
+    decoded dropped at a close or an open (`TestGFXReopenHistory`).
   - Planar: the subsampled chroma's column or row, the colour loss
     shift, the order of red and blue, or the planes' start
     (`TestPlanarYCoCg`); a bitmap update's rows top-down, or colour
@@ -1432,6 +1481,20 @@ RDP's guacd path, RDP no longer needs guacd at all.
     Windows checks this (below).
   - The early capability flag is set only with `Config.GFX`, since a
     server that sees it may wait for the GFX channel.
+  - Where a surface leaves the output, the surfaces under it draw
+    again, as a compositor's would; FreeRDP leaves what was there. The
+    reason is `CopyRect`, which copies the output: an independent
+    review found that after a covering surface was deleted, a copy
+    within the surface under it copied the deleted surface's red. A
+    bitmap update under a mapped surface is drawn, then drawn over by
+    the surface at the next flush, for the same reason; servers do not
+    send both.
+  - Review of the first pull request: the exposure above, the redraw
+    after a reactivation's resize, the charges for decompression's
+    growth, copied points and redraws, the planar bound, the bound on
+    mapped surfaces, the ZGFX ring kept across channels and
+    totalFramesDecoded across them, each with the test above that
+    fails without it.
 - **Surprises.**
   - xrdp opens the GFX channel only for a client with
     RNS_UD_CS_SUPPORT_DYNVC_GFX_PROTOCOL in its core data, which
