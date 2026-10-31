@@ -255,3 +255,117 @@ New `internal/backend/kubernetes`. `internal/config` gains the
 the backend and refuses ad-hoc Kubernetes targets. Clients need nothing:
 a Kubernetes session is a terminal like SSH's. guacd-bridge's
 per-protocol table moves Kubernetes to native.
+
+## Implementation notes
+
+- **Status.** Built on 2026-10-31 in the same change as this spec:
+  `internal/backend/kubernetes` with its fake API server `kubetest`, the
+  `kubernetes` protocol in `internal/config`, and its registration in
+  `server/backends.go` (`kubernetes/native`; the session state names the
+  backend `kubernetes`, class `terminal`). Ad-hoc targets refuse
+  `kubernetes` with `400`, by `config.AdhocProtocol`. Every decision
+  above is built as written. The k3s integration test is written but has
+  not run yet (see below).
+- **What was built.** `Config`, `New`, `Backend` and `Token`, with
+  `CheckNamespace`, `CheckPod`, `CheckContainer` and `CheckPin` for the
+  configuration. Run asks for a token if it prompts, dials, sends the
+  size and reports it with `Sink.Resize`, then runs three goroutines: a
+  reader that demultiplexes the channels into `Sink.TermData` and the
+  status, a writer for stdin and resizes, and a keepalive. Each one
+  recovers its own panic. Input queues up to 64 writes, so a resize or
+  keys sent while the stream opens are written once it is open.
+- **Decisions made during implementation.**
+  - The certificate policy is a copy of the VNC backend's (`cert.go`),
+    as `internal/rdp` copied it. It accepts the same `tls` keys, and its
+    pins are checked by `kubernetes.CheckPin`. The three copies could
+    become one package.
+  - A WebSocket ping every 30 seconds keeps idle sessions alive through
+    load balancers. A missing pong does not end the session: only the
+    stream's end or a failed write does.
+  - Without a TTY, line feeds become CRLF (ONLCR) before the terminal
+    sees them, since no TTY translated them, and stderr is shown with
+    stdout.
+  - An empty prompt answer sends no `Authorization` header, as the
+    decision says, and the API server's 401 then ends the session.
+  - The API server's refusal (a non-101 response) is read from the at
+    most 1 KiB of body that `coder/websocket` keeps, and its `Status` is
+    quoted in the error.
+  - coder/websocket closes the connection when a write's context ends
+    while the write is in progress. A cancel during a write could
+    therefore end the reader before Run saw the context, and Run then
+    returned "the stream ended without an exit status". CI caught this
+    once on v4. Run now returns the context's error whenever the reader
+    fails after the cancel. Over v5, the close of stdin is best effort:
+    a cancel that lands in a write closes the connection before it can
+    be sent.
+- **Tests.**
+  - The unit tests run against `kubetest`, a TLS `httptest` server that
+    speaks v4 and v5 framing and records each request. They cover exec
+    and attach, v4 and v5, the initial and later sizes, exit statuses,
+    failure statuses, a stream that ends without a status, cancel (v5
+    sends `[255, 0]`, v4 does not), no TTY, queued and full input,
+    keepalive, and the output and status bounds.
+  - Refusals: unknown messages and text messages; a subprotocol that is
+    neither v5 nor v4; 401, 403, 404 and 502 with the token absent from
+    every error and log line; a redirect not followed; TLS 1.1 refused;
+    no proxy from the environment.
+  - Certificates: the system's roots, pins in hex, base64 and PEM,
+    another pin, a CA with the right and the wrong name, and insecure
+    mode with its warning. Every refused certificate leaves zero
+    requests on the server, so no token was sent.
+  - Also client certificates, the prompt, names that would reach
+    another path, token redaction in fmt and slog, panics on every
+    goroutine, and deferred unlocks.
+  - `server/kubernetes_e2e_test.go` streams a kubernetes connection
+    through occamyd's routes with the Go client. It checks the request's
+    path and query, the token header, v5, the hello's size, input,
+    output, a resize, the session state, the exit as `remote-ended`, the
+    prompt (and an empty answer's 401), a wrong pin with no request on
+    the server, and a 403 as `backend-failed`.
+- **Coverage** (`go test -cover`): `internal/backend/kubernetes` 95.5%,
+  `internal/config` 94.7%, `server` 92.4%.
+- **Fuzzing**, 60 seconds each with `-parallel 4` on a shared host
+  (load about 13):
+  - `FuzzDemux`: 3,016,408 executions, 22 new interesting inputs, no
+    failure. It checks that stdout and stderr pass whole in pieces of at
+    most the buffer, that at most one byte past the status bound is
+    kept, and that only an oversized status fails.
+  - `FuzzParseStatus`: 4,330,576 executions, 312 new interesting inputs,
+    no failure. It checks that it never panics, that an exit code falls
+    in 0 to 255, and that an error is short, valid UTF-8 and free of
+    control characters, whatever the server wrote.
+- **Mutation check**: 25 security mutants, each applied to a copy of
+  the tree with the tests of its package run against it.
+  - The first pass killed 20 of the 25: certificate acceptance, the
+    server name, insecure mode's warning, VerifyConnection removed,
+    redirects, a slash in a label, `..` in a pod, unescaped paths,
+    token redaction in fmt and slog, control characters in a token, the
+    status cap, the read limit, quoting, any subprotocol, a URL as a
+    target, a failure status taken as an exit, the configuration's
+    namespace check, guacd allowed for kubernetes, and ad-hoc kubernetes
+    in the server.
+  - "Any pin matches" did not build in the first pass and was rewritten.
+    The other four survived: TLS 1.0 allowed, a proxy from the
+    environment, an unbounded label length inside a pod name, and the
+    status read without its limit (the cap still failed the session but
+    held the whole message). TestTLSVersion, TestNoProxy, a pod name
+    with a 64-character label, and a 1 MiB status message were added.
+    The second pass killed all five.
+  - Result: 25 of 25 killed.
+- **Integration test.** `integration_test.go`, behind the
+  `kubernetes_integration` tag, starts k3s in a privileged container of
+  its own name, applies a namespace, a busybox pod, a ServiceAccount
+  with the Role of docs/configuration.md, and one without it. It then
+  checks a command's output, input and non-zero exit, the default
+  shell's `stty size` before and after a resize, no TTY, a missing
+  container, 403, 401, the system roots refusing the cluster's CA, and
+  cancel. It has not run: the shared host's load stayed between 12 and
+  24 while this was built, above the limit of 8 set for starting a
+  cluster. Run it with
+  `go test -tags kubernetes_integration -run Integration -timeout 15m ./internal/backend/kubernetes`.
+- **Deviations.** None from the decisions. One addition: `tls.require`
+  is accepted and means nothing for kubernetes, since TLS is always
+  required.
+- **Follow-ups.** Run the k3s integration test once the host is idle.
+  Merge the three copies of the certificate policy (VNC, RDP,
+  Kubernetes) into one package.
