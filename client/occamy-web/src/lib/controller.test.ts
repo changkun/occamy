@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { CloseCode, CloseError, ConnectionError, type ConnectOptions, Role, type Session, SessionClass, type SessionEvent } from '../protocol'
+import { CloseCode, CloseError, ConnectionError, type ConnectOptions, ProtocolError, Role, type Session, SessionClass, type SessionEvent } from '../protocol'
 import { type ControllerOptions, SessionController, type SessionState, type TerminalSink, overlayOf } from './controller'
 import { describeEnd } from './ending'
 
@@ -29,6 +29,8 @@ class FakeSession {
   readonly closes: { code: number; reason: string }[] = []
   /** The clipboard texts the controller sent. */
   readonly clipboards: string[] = []
+  /** The longest clipboard text a message holds, as the core checks. */
+  clipboardLimit = Infinity
   private readonly events: SessionEvent[] = []
   private wake: (() => void) | null = null
 
@@ -68,6 +70,9 @@ class FakeSession {
   view(): void {}
 
   clipboard(_mime: string, text: string): number {
+    if (text.length > this.clipboardLimit) {
+      throw new ProtocolError('too-large', `${text.length} bytes, limit ${this.clipboardLimit}`)
+    }
     this.clipboards.push(text)
     return 1
   }
@@ -201,7 +206,7 @@ describe('SessionController', () => {
 
   it('takes no input before it is open', () => {
     const c = controller(() => Promise.reject(new ConnectionError('refused')))
-    expect(c.sendClipboard('x')).toBe(false)
+    expect(c.sendClipboard('x')).toEqual({ kind: 'not-open' })
     expect(c.syncClipboard('x')).toBe(false)
     c.sendTerminalInput('x')
     c.requestResize(100, 100)
@@ -277,7 +282,7 @@ describe('SessionController', () => {
     // The user edits the panel's text and sends it: the remote holds it
     // now, though the remote does not say so.
     c.setDraft('mine')
-    expect(c.sendClipboard('mine')).toBe(true)
+    expect(c.sendClipboard('mine')).toEqual({ kind: 'sent' })
     expect(s.clipboards).toEqual(['mine'])
     expect(c.getState()).toMatchObject({ clipboard: 'mine', draft: 'mine' })
     s.push(clipboardEvent('second'))
@@ -285,11 +290,32 @@ describe('SessionController', () => {
     expect(c.getState()).toMatchObject({ clipboard: 'second', draft: 'second' })
 
     // Text typed after a send is an edit, which the next one leaves alone.
-    expect(c.sendClipboard('sent')).toBe(true)
+    expect(c.sendClipboard('sent')).toEqual({ kind: 'sent' })
     c.setDraft('typed')
     s.push(clipboardEvent('third'))
     await settle()
     expect(c.getState()).toMatchObject({ clipboard: 'third', draft: 'typed' })
+  })
+
+  it('leaves text the core refuses the user’s, to send again', async () => {
+    const s = new FakeSession(Role.Owner)
+    const c = await opened(s)
+    s.push(clipboardEvent('first'))
+    await settle()
+
+    s.clipboardLimit = 8
+    c.setDraft('too long for a message')
+    const r = c.sendClipboard('too long for a message')
+    expect(r.kind).toBe('failed')
+    expect(r.kind === 'failed' && r.error instanceof ProtocolError && r.error.kind).toBe('too-large')
+    // The remote holds what it held, and the text stays an edit.
+    expect(c.getState()).toMatchObject({ clipboard: 'first', draft: 'too long for a message' })
+    expect(c.syncClipboard('too long for a message')).toBe(false)
+    // Once the core takes it, the same text goes.
+    s.clipboardLimit = Infinity
+    expect(c.syncClipboard('too long for a message')).toBe(true)
+    expect(s.clipboards).toEqual(['too long for a message'])
+    expect(c.getState()).toMatchObject({ clipboard: 'too long for a message', draft: 'too long for a message' })
   })
 
   it('keeps an edit when the local clipboard goes to the remote, and follows it otherwise', async () => {

@@ -13,13 +13,14 @@
 // the session ended; the owner's session is kept in the tab's storage
 // for a reload until it ends, occamyd refuses the view's stream to it or
 // the user leaves it, though not while occamyd cannot be reached; and
-// the clipboard panel takes text sent for the remote's.
+// the clipboard panel takes text sent for the remote's, and says when
+// the core refused to send it.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { CloseCode, CloseError, ConnectionError, Role, type Session, SessionClass, type SessionEvent } from '../protocol'
+import { CloseCode, CloseError, ConnectionError, ProtocolError, Role, type Session, SessionClass, type SessionEvent } from '../protocol'
 import { type AccessToken, Api, type Identity } from '../lib/api'
 import { SESSION_KEY, type SessionAction } from '../lib/app'
 import { describeEnd } from '../lib/ending'
@@ -69,6 +70,8 @@ class Welcomed {
   closed = false
   /** The clipboard texts the client sent. */
   readonly clipboards: string[] = []
+  /** The longest clipboard text the core sends, as for occamyd's maximum message size. */
+  clipboardLimit = Infinity
   private readonly events: SessionEvent[] = []
   private wake: (() => void) | null = null
 
@@ -112,6 +115,9 @@ class Welcomed {
   view(): void {}
 
   clipboard(_mime: string, text: string): number {
+    if (text.length > this.clipboardLimit) {
+      throw new ProtocolError('too-large', `${text.length} bytes, limit ${this.clipboardLimit}`)
+    }
     this.clipboards.push(text)
     return 1
   }
@@ -493,6 +499,37 @@ describe('The clipboard panel of a stream welcomed as the owner’s', () => {
     expect(text()).toContain(edited)
     act(() => button('Show it')?.click())
     expect(box()?.value).toBe('third')
+  })
+
+  it('says text too large to send was not sent, and keeps it the user’s to send again', async () => {
+    await render({ token: accessToken('demo'), action: null }, ended)
+    act(() => remote('first'))
+    await settle()
+    act(() => button('Clipboard')?.click())
+    const s = Welcomed.last
+    if (s === null) {
+      throw new Error('no stream')
+    }
+    s.clipboardLimit = 8
+    act(() => type('more than eight'))
+    act(() => button('Send')?.click())
+    expect(s.clipboards).toEqual([])
+    expect(status()).toBe('Not sent: the text is too large for one message to occamyd. Send less of it.')
+    expect(box()?.value).toBe('more than eight')
+    expect(text()).toContain(edited)
+
+    // The next remote clipboard leaves the text, which was never sent, as
+    // typed.
+    act(() => remote('second'))
+    await settle()
+    expect(box()?.value).toBe('more than eight')
+    expect(status()).toBe('')
+
+    act(() => type('less'))
+    act(() => button('Send')?.click())
+    expect(s.clipboards).toEqual(['less'])
+    expect(status()).toBe('Sent to the remote clipboard.')
+    expect(text()).not.toContain(edited)
   })
 })
 

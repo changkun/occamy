@@ -86,6 +86,9 @@ export interface SessionState {
   code: number
 }
 
+/** What became of clipboard text sent: sent, not open to the role or the stream, or refused, with why. */
+export type ClipboardSend = { kind: 'sent' } | { kind: 'not-open' } | { kind: 'failed'; error: Error }
+
 /** What a stream asks the remote for in its hello. */
 export interface HelloSize {
   /** Device pixels, for a graphical session. */
@@ -477,15 +480,24 @@ export class SessionController {
     }
   }
 
-  /** sendClipboard puts text on the remote's clipboard; false if the role may not. */
-  sendClipboard(text: string): boolean {
+  /**
+   * sendClipboard puts text on the remote's clipboard, and says whether
+   * it did: not for a role that may not, nor for a stream not open, nor
+   * for text the core refuses, such as one too large for a message, which
+   * then stays the user's, to send again.
+   */
+  sendClipboard(text: string): ClipboardSend {
     const s = this.session
     if (s === null || !this.can.clipboard || this.state.phase !== 'open') {
-      return false
+      return { kind: 'not-open' }
     }
-    safely(() => s.clipboard(TEXT_MIME, text))
+    try {
+      s.clipboard(TEXT_MIME, text)
+    } catch (err) {
+      return { kind: 'failed', error: err instanceof Error ? err : new Error(String(err)) }
+    }
     this.agree(text)
-    return true
+    return { kind: 'sent' }
   }
 
   // agree takes text for the remote clipboard's, as the remote said or as
@@ -505,7 +517,7 @@ export class SessionController {
     if (text === this.lastClipboard) {
       return false
     }
-    return this.sendClipboard(text)
+    return this.sendClipboard(text).kind === 'sent'
   }
 
   /**

@@ -11,7 +11,9 @@
 
 import { type FormEvent, type ReactElement, useId, useState } from 'react'
 
-import type { SessionController } from '../lib/controller'
+import { ProtocolError } from '../protocol'
+import type { ClipboardSend, SessionController } from '../lib/controller'
+import { MAX_LABEL, clip } from '../lib/text'
 import type { Abilities } from '../lib/roles'
 import { copyText, pasteLocalClipboard } from './dom'
 
@@ -40,7 +42,7 @@ export function ClipboardPanel({ controller, remote, draft: text, can, onClose }
 
   const send = (e: FormEvent<HTMLFormElement>): void => {
     e.preventDefault()
-    say(controller.sendClipboard(text) ? 'Sent to the remote clipboard.' : 'The remote clipboard is not open to you.')
+    say(sent(controller.sendClipboard(text)))
   }
   const paste = async (): Promise<void> => {
     try {
@@ -104,4 +106,18 @@ export function ClipboardPanel({ controller, remote, draft: text, can, onClose }
       </p>
     </form>
   )
+}
+
+// sent says what became of text sent to the remote's clipboard.
+function sent(r: ClipboardSend): string {
+  switch (r.kind) {
+    case 'sent':
+      return 'Sent to the remote clipboard.'
+    case 'not-open':
+      return 'The remote clipboard is not open to you.'
+    case 'failed':
+      return r.error instanceof ProtocolError && r.error.kind === 'too-large'
+        ? 'Not sent: the text is too large for one message to occamyd. Send less of it.'
+        : `Not sent: ${clip(r.error.message, MAX_LABEL)}`
+  }
 }
