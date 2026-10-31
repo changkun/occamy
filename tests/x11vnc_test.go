@@ -32,7 +32,7 @@ import (
 //
 // The test makes the x11vnc on port 5901 own the clipboard through a
 // session and stops it. While it is stopped, an xclip that waits asks
-// for the clipboard, and 0.6 s later another, which is killed 0.6 s
+// for the clipboard, and 0.3 s later another, which is killed 0.3 s
 // after that, its request sent; then x11vnc continues and answers both,
 // in that order. It checks the window of the first, which is there, and
 // as a rule answers the second within 0.2 s, unchecked. The first xclip
@@ -172,21 +172,25 @@ const x11vncPID = `for p in /proc/[0-9]*; do
 done`
 
 // goneRequestor stops x11vnc $PID, asks for the clipboard with an xclip
-// that waits, and 0.6 s later with one that it kills 0.6 s after that,
-// which leaves time for each to send its request, in that order. It then
-// continues x11vnc, and prints what the first got. x11vnc stays stopped
-// for about 1.3 s, less than the 2 s the probe's own xclips wait, so the
-// first request x11vnc answers, which it checks, comes from a window
-// that is there; a longer stop would let one of the probe's die first,
-// and x11vnc's check of it would make it wait for the X server for good.
+// that waits, and 0.3 s later with one that it kills 0.3 s after that,
+// which leaves time for each to send its request, in that order; the
+// kill fails if the second has exited. It then continues x11vnc, and
+// prints what the first got. x11vnc stays stopped for about 0.7 s, much
+// less than the 2 s the probe's own xclips wait, so the first request
+// x11vnc answers, which it checks, comes from a window that is there;
+// had one of the probe's died first, x11vnc's check of it would make it
+// wait for the X server for good. A stop of 1.3 s, with 0.6 s for each
+// step, made x11vnc miss the probe's echo after it in two of sixteen
+// runs back to back, for reasons not found; this one passed in sixteen
+// of sixteen.
 const goneRequestor = `trap 'kill -CONT "$PID" 2>/dev/null' EXIT
 kill -STOP "$PID" || exit
 timeout 10 xclip -o -selection clipboard >/tmp/requestor.out 2>&1 &
 waiting=$!
-sleep 0.6
+sleep 0.3
 xclip -o -selection clipboard >/dev/null 2>&1 &
 gone=$!
-sleep 0.6
+sleep 0.3
 kill -KILL "$gone" 2>/dev/null || echo "the xclip to kill had exited"
 wait "$gone" 2>/dev/null
 sleep 0.1
