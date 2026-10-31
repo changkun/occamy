@@ -166,7 +166,7 @@ flowchart LR
   SW[Swift client] --> CC[Go client core] -- protocol v1 --> GW
   GW[API v1: auth, registry, sessions] --> SE[Session owner]
   SE --> TB[Terminal backends: SSH, Kubernetes]
-  SE --> GB[Graphical backends: VNC, RDP later]
+  SE --> GB[Graphical backends: VNC, RDP]
   SE --> BR[guacd bridge]
   GB --> FB[Framebuffer and damage]
   BR --> FB
