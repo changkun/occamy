@@ -256,7 +256,7 @@ func (l *lockRecorder) Lock(r image.Rectangle) *image.RGBA {
 }
 
 func (l *lockRecorder) CopyRect(dst image.Rectangle, src image.Point) {
-	l.copies = append(l.copies, [2]image.Rectangle{dst, image.Rectangle{Min: src, Max: src.Add(dst.Size())}})
+	l.copies = append(l.copies, [2]image.Rectangle{dst, {Min: src, Max: src.Add(dst.Size())}})
 }
 
 // Without an output, during the connection sequence, the changes wait
@@ -462,6 +462,8 @@ func TestGFXIgnored(t *testing.T) {
 		rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, rdptest.CodecClearCodec, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, rdptest.CodecAVC420, rdptest.PixelXRGB, r, []byte{1}),
+		rdptest.WireToSurface1(1, rdptest.CodecAlpha, rdptest.PixelXRGB, r, []byte{1}),
+		rdptest.WireToSurface1(1, rdptest.CodecProgressive, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, 0x77, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(4, 4, 4, 8), nil),
 		rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, []byte{1}),
@@ -474,11 +476,15 @@ func TestGFXIgnored(t *testing.T) {
 		t.Fatalf("acknowledgements %+v", a)
 	}
 	ign := g.c.Stats().Ignored
-	for _, k := range []string{"GFX RemoteFX bitmaps", "GFX ClearCodec bitmaps", "GFX AVC420 bitmaps", "GFX bitmaps of unknown codecs",
-		"empty bitmaps", "GFX progressive bitmaps", "GFX codec contexts", "GFX cache PDUs"} {
+	for _, k := range []string{"GFX RemoteFX bitmaps", "GFX ClearCodec bitmaps", "GFX AVC420 bitmaps", "GFX alpha bitmaps",
+		"GFX bitmaps of unknown codecs", "empty bitmaps", "GFX codec contexts", "GFX cache PDUs"} {
 		if ign[k] != 1 {
 			t.Errorf("Ignored[%q] = %d", k, ign[k])
 		}
+	}
+	// One in wire-to-surface 2, as servers send it, and one in 1.
+	if ign["GFX progressive bitmaps"] != 2 {
+		t.Errorf("%d progressive bitmaps ignored, want 2", ign["GFX progressive bitmaps"])
 	}
 	if ign["GFX PDUs"] != 2 {
 		t.Errorf("%d unknown PDUs ignored, want 2", ign["GFX PDUs"])

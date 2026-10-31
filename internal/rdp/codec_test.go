@@ -12,6 +12,7 @@ import (
 	"image/color"
 	"math/rand/v2"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 )
@@ -441,16 +442,25 @@ func testClock(w, h int) (*Client, *fakeClock) {
 }
 
 // fakeClock is a client's clock in the tests. Its sleeps pass at once
-// and add up, or fail with err.
+// and add up, or fail with err. The reader sleeps while the channel
+// writer reads the time, so both take mu; a test reads slept once the
+// client is done.
 type fakeClock struct {
+	mu    sync.Mutex
 	t     time.Time
 	slept time.Duration
 	err   error
 }
 
-func (f *fakeClock) now() time.Time { return f.t }
+func (f *fakeClock) now() time.Time {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.t
+}
 
 func (f *fakeClock) sleep(d time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.err != nil {
 		return f.err
 	}

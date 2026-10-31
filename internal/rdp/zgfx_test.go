@@ -153,6 +153,21 @@ func TestZGFXHistoryUnwritten(t *testing.T) {
 	}
 }
 
+// A match that starts in the history and runs past its end goes on into
+// the segment's own bytes, which the history does not hold yet.
+func TestZGFXHistoryIntoSegment(t *testing.T) {
+	var z zgfx
+	if _, err := z.decompress([]byte{zgfxSingle, zgfxTypeRDP8, 'a', 'b'}, maxGFXData); err != nil {
+		t.Fatal(err)
+	}
+	var w bits
+	w.put('c', 9).put(0b10001, 5).put(2, 5).put(0b10, 2).put(0, 2) // 'c', then 4 bytes 2 back
+	got, err := z.decompress(w.single(), maxGFXData)
+	if err != nil || string(got) != "cbcbc" {
+		t.Errorf("got %q, %v, want %q", got, err, "cbcbc")
+	}
+}
+
 func TestZGFXErrors(t *testing.T) {
 	big := make([]byte, zgfxSegment+1)
 	for _, tc := range []struct {

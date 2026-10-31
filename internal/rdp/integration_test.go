@@ -444,6 +444,45 @@ func TestIntegrationResize(t *testing.T) {
 	}
 }
 
+// With GFX, xrdp opens the graphics pipeline, confirms a capability set,
+// creates and maps a surface, and sends frames, which the client
+// acknowledges, so that xrdp, which allows few frames in flight, goes on
+// sending them. The session's screen comes in RemoteFX Progressive,
+// which the client does not take yet: it is counted and skipped.
+func TestIntegrationGFX(t *testing.T) {
+	s := dial(t, Config{GFX: true})
+	frames := func() int { return s.c.Stats().GFX["end frame"] }
+	// xrdp shows its own screens in planar while sesman starts the
+	// session, which then draws in RemoteFX Progressive.
+	if !waitFor(90*time.Second, func() bool { return s.c.Stats().Ignored["GFX progressive bitmaps"] > 0 }) {
+		st := s.c.Stats()
+		t.Fatalf("no session screen: GFX %v, bitmaps %v, ignored %v", st.GFX, st.Bitmaps, st.Ignored)
+	}
+	dump(t, s, "gfx")
+	st := s.c.Stats()
+	t.Logf("GFX %v; bitmaps %v; ignored %v", st.GFX, st.Bitmaps, st.Ignored)
+	if st.GFX["caps confirm"] != 1 || st.GFX["create surface"] == 0 || st.GFX["map surface to output"] == 0 {
+		t.Errorf("GFX %v, want a confirm and a surface mapped", st.GFX)
+	}
+	// Each key repaints the swatch, in a frame of its own if xrdp has
+	// the acknowledgements of the frames before.
+	n := frames()
+	for i := 0; i < 40 && frames() < n+8; i++ {
+		tap(t, s.c, letter(t, 'y'+rune(i%2)))
+		time.Sleep(250 * time.Millisecond)
+	}
+	if frames() < n+8 {
+		t.Errorf("%d frames after 40 keys, %d before", frames(), n)
+	}
+	st = s.c.Stats()
+	t.Logf("GFX %v; bitmaps %v; ignored %v", st.GFX, st.Bitmaps, st.Ignored)
+	select {
+	case err := <-s.done:
+		t.Fatalf("Run returned %v", err)
+	default:
+	}
+}
+
 var queryPointerBin struct {
 	once sync.Once
 	path string
