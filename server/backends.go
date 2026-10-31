@@ -59,8 +59,8 @@ type screen struct {
 
 // backendMaker makes the backend of one session.
 type backendMaker struct {
-	// name is the backend as the session's state reports it: ssh, vnc or
-	// guacd.
+	// name is the backend as the session's state reports it: ssh, vnc,
+	// rdp or guacd.
 	name string
 	make func(t target, s screen) (backend.Backend, error)
 }
