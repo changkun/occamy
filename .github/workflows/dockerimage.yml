@@ -129,9 +129,11 @@ jobs:
         docker stats --no-stream
         docker compose top guacd
     # OCCAMY_PRESSURE_N=10 adds the pressure test: 60 concurrent sessions
-    # over the three demo servers.
+    # over the three demo servers. A test kills a process in the rdp
+    # container and reads its log with the compose command that started
+    # the stack, so it takes the same CONTAINER_ENGINE as make run.
     - name: End-to-end and pressure tests
-      run: make e2e OCCAMY_PRESSURE_N=10
+      run: make e2e OCCAMY_PRESSURE_N=10 CONTAINER_ENGINE=docker
     # guacd forks a process for each connection, which should exit once
     # the connection's last user has left. Under the pressure test, guacd
     # 1.6 has kept a VNC process whose users had all left (specs/003), so

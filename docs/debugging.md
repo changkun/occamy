@@ -132,7 +132,9 @@ sends that user something. Until then the user still counts, for up to
   `starting xrdp-chansrv again` when it does. `make e2e` checks that
   restart too: it kills the channel server in the rdp container, through
   the stack's compose command in `OCCAMY_E2E_COMPOSE`, then checks the
-  clipboard again.
+  clipboard again. That command runs `CONTAINER_ENGINE`, `podman` by
+  default, so give `make e2e` the `CONTAINER_ENGINE` that `make run`
+  took, as CI gives both `docker`.
 - `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test. Each of its N
   rounds opens two sessions to each demo server at once: one that waits
   for the desktop and one that sends garbage. All sessions to one server

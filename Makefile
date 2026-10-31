@@ -35,7 +35,8 @@ stop:
 # default to the ports the stack publishes, OCCAMY_PORT and
 # OCCAMY_V1_PORT as docker-compose.yaml takes them. OCCAMY_E2E_COMPOSE
 # is the stack's compose command, with which a test kills a process in
-# the rdp container and reads its log.
+# the rdp container and reads its log: CONTAINER_ENGINE's by default, so
+# e2e takes the CONTAINER_ENGINE that run took.
 e2e:
 	OCCAMY_E2E_ENDPOINT=$(or $(OCCAMY_E2E_ENDPOINT),localhost:$(or $(OCCAMY_PORT),5636)) \
 	OCCAMY_E2E_V1_ENDPOINT=$(or $(OCCAMY_E2E_V1_ENDPOINT),localhost:$(or $(OCCAMY_V1_PORT),5637)) \
