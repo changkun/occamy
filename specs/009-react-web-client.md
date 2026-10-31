@@ -131,8 +131,9 @@ Open questions:
     checked against the rectangle and without their EXIF (below). The
     client offers deflate where `DecompressionStream` takes
     `deflate-raw`, WebP where a 1×1 probe decodes, JPEG where
-    `createImageBitmap` exists, raw always, and never `cached`, since it
-    keeps no tile cache.
+    `createImageBitmap` exists, raw always, and then `cached`, keeping a
+    tile cache of 1024 slots by default (`cacheSlots`; added by the
+    graphics pipeline's Tile cache task on 2026-10-31).
   - `Display` waits for an animation frame and presents each frame's
     dirty rectangles to a `Surface` in one task, so the browser never
     paints half a frame; `CanvasSurface` puts them on a canvas or an

@@ -673,14 +673,32 @@ message waits behind at most one tile.
 | slot | u16 | The client cache slot to store the decoded tile in, from 1 to the agreed cache slots, or 0 to store nothing. For `cached`, the slot to draw. |
 | payload | bytes | The encoded pixels; empty for `cached`. |
 
-Rules between fields: a `cached` tile has a slot other than 0 and an
+Rules between fields: a tile with a slot other than 0 covers at most
+4096 pixels (`w × h`), a `cached` tile has a slot other than 0 and an
 empty payload, and a `raw` tile's payload is exactly `w × h × 4` bytes.
 Against the session: the rectangle lies within the screen, and a
 `cached` tile names a slot that holds a tile of size `w × h`.
 
-A tile stored in a slot replaces what the slot held. The server mirrors
-each client's slots, so it sends `cached` only for a slot that holds the
-tile's content.
+The tile cache works as follows:
+
+- A tile that names a slot is stored in it as the client reads the
+  message, as the tile's pixels once decoded. It replaces what the slot
+  held.
+- The slot holds the tile from then on, whatever becomes of its frame.
+  A `cached` tile later in the same frame draws it, and so does one
+  after a `resize` that dropped the frame. Slots are kept across
+  resizes, and while the client is hidden.
+- The server mirrors each client's slots, and sends `cached` only for a
+  slot that holds the tile's content. occamyd stores a tile only when it
+  sends it alone and exactly (`raw` or `deflate`), so a slot holds
+  pixels that the server's screen held. It replaces the slot used least
+  recently.
+- A client bounds its cache at the agreed `cache_slots` times 16 KiB:
+  16 MiB for occamyd's 1024.
+
+The 4096-pixel rule came in with occamyd's tile cache (2026-10-31). No
+server had sent a slot other than 0 before it, so no traffic that was
+valid becomes invalid.
 
 ```hex
 # vector: tile raw
@@ -1028,7 +1046,7 @@ A codec ID is a u8. Codec 0 is not a codec: it appears only in a hidden
 | 3 | `png` | A PNG file | Nothing |
 | 4 | `jpeg` | A JFIF file, opaque | Tiles of more than 256 colours, and of 17 to 256 in motion, to a client that lists `jpeg` but not `webp` |
 | 5 | `webp` | A WebP file, lossy or lossless, with straight alpha | Tiles of more than 256 colours, and of 17 to 256 in motion, lossy and opaque; cursors, lossless, to a client that lists neither `deflate` nor `raw` |
-| 6 | `cached` | Empty: the tile is drawn from its cache slot | Tiles only, once the server has a tile cache |
+| 6 | `cached` | Empty: the tile is drawn from its cache slot | Tiles whose content a cache slot of the client holds, to a client that lists `cached` and agrees to `cache_slots` |
 | 7 to 0x7F | | Unassigned | |
 | 0x80 to 0xFF | | Reserved for a video tier after 1.0 | |
 
@@ -1065,10 +1083,13 @@ if it has 17 to 256 colours; once it has been still for a moment
 colours and at a higher quality if it has more. Such a frame of
 refinement is an ordinary frame of `tile` messages, so the client needs
 nothing to take it: a client sees the same tile drawn twice, the second
-time sharper. The screen is opaque, and occamyd encodes a lossy tile
-without alpha. A cursor's alpha is straight in every codec, as it is in
-`raw`. JPEG has no alpha, so a client that lists only `jpeg` gets no
-`cursor` and draws its own pointer.
+time sharper. A tile whose content a slot of the client's
+[tile cache](#tile) holds goes as `cached` instead, whatever its codec
+would be, motion or not, and is then exact. The screen is opaque, and
+occamyd encodes a lossy tile without alpha. A cursor's alpha is
+straight in every codec, as it is in `raw`. JPEG has no alpha, so a
+client that lists only `jpeg` gets no `cursor` and draws its own
+pointer.
 
 ### The deflate container
 

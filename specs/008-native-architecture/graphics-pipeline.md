@@ -113,7 +113,9 @@ quickly, in pure Go. That means choosing:
   content the client already has is sent as a `tile` with the `cached`
   codec and the slot number, a few bytes instead of the pixels.
   Repeated content (toolbars, desktop backgrounds, a window moved back)
-  then costs nothing to resend.
+  then costs nothing to resend. (Built 2026-10-31 with xxh3-128 and
+  1024 slots by default, storing only tiles sent alone and exact: see
+  Implementation notes: Tile cache.)
 - **Adaptive quality per viewer:** the lossy quality and the frame
   interval follow each viewer's frame-ack round trips and decode times
   (additive increase, multiplicative decrease), as
@@ -212,7 +214,11 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
    SSIM reaches 0.91 on each tile, and refinement raises what motion
    lowered; see Implementation notes: Refinement.)
 4. **Scroll and move detection and the client tile cache are in beta,**
-   since G3 and G4's targets need them.
+   since G3 and G4's targets need them. (Built 2026-10-31: on the
+   corpus the tile cache takes a window switched back and forth over
+   the desktop to an eighth of the bytes, but saves nothing on G3 and
+   G4's scenes, whose changed tiles go as `copy-rect` or hold content
+   new each frame; see Implementation notes: Tile cache.)
 5. **No server-side downscaling in beta.** Encoding only the visible
    viewport covers small screens; scaling can come later as a capability.
 6. **The lossless codec, the tile size and the pixel layout** (questions
@@ -289,7 +295,7 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
 | Codecs (done 2026-10-30) | `internal/encoder`, an implementation of `stream.Encoder`: classification by colour count (up to 16, 17 to 256, above 256); the palette or raw container with `compress/flate` at level 1 as `deflate` (2); raw RGBA (1); lossy WebP from gen2brain/vpx/webp at method 0 (5), and JPEG from gen2brain/jpegn (4) for viewers that list JPEG but not WebP; adjacent lossy tiles of a frame encoded as one rectangle. Fixes the deflate container, including alpha for cursors, in [docs/protocol.md](../../docs/protocol.md), which marked it provisional. Adds vpx and jpegn to occamyd's `go.mod`, with the Go 1.26.4 they need, and their licence and PATENTS notices to the image's `licenses/` | Measurement |
 | Refinement (done 2026-10-31) | Motion heat per tile, and refinement after a still delay: exact for tiles of up to 256 colours, which go lossy while they move if they have more than 16, and a quality chosen by SSIM for photographic ones; gives `stream.Encoder` the tile's motion. Built with SSIM 0.91 on each tile and background frames paced by `pacer.Background`; the plasma takes 13.8 KiB a frame against 392.4 while it moves, and the photograph 121.8 KiB against 150.8, under G6's 139 ([notes](#implementation-notes-refinement)) | Codecs |
 | Scroll detection (done 2026-10-31) | Row hashes per tile column (xxh3-64), the offset search, and `copy-rect` with tiles for the exposed strip. Built per viewer against a shadow of what its client shows, vertical offsets only, verified pixel for pixel; the corpus's scroll takes 5.0 KiB a frame against 58.5 ([notes](#implementation-notes-scroll-detection)) | Framebuffer |
-| Tile cache | Content hashes (xxh3-128 from zeebo/xxh3, so collisions are out of reach), the server's mirror of each client's cache, and the `cached` codec | Codecs, protocol v1 Messages |
+| Tile cache (done 2026-10-31) | Content hashes (xxh3-128 from zeebo/xxh3, so collisions are out of reach), the server's mirror of each client's cache, and the `cached` codec. Built with 1024 slots by default in occamyd, the Go client and the web client's protocol core, storing tiles sent alone and exact; a window switched back and forth over the desktop takes 9.4 KiB a frame against 79.7, and the mirror 70 KiB a viewer ([notes](#implementation-notes-tile-cache)) | Codecs, protocol v1 Messages |
 | Encode cache and workers | Encoded tiles cached by tile, version, codec and quality and shared by viewers; a worker pool bounded per session | Codecs |
 
 ## Affects
@@ -655,7 +661,9 @@ times.
   owner's.
 - Tile cache: `cached` (6) is not in `encoder.Codecs()`. A cached tile
   is looked up before classification, and a run of lossy tiles is
-  broken at a cached one.
+  broken at a cached one. (Done 2026-10-31: `encoder.Codecs()` lists
+  `cached` last, and the writer looks each tile up before it encodes
+  it.)
 - Encode cache and workers: classification and payloads keyed by tile,
   version, codec and quality, shared across viewers; a run's payload
   depends on which neighbours are dirty, so the cache holds single
@@ -1200,3 +1208,184 @@ survive:
   vpx's decoder to take one.
 - **Lossless WebP for still antialiased text**, the refinement of
   exact tiles, still needs its measurement.
+
+## Implementation notes: Tile cache
+
+**Status.** Built and measured on 2026-10-31. occamyd offers the
+`cached` codec and 1024 cache slots (`stream.DefaultCacheSlots`) to
+every graphical viewer. `stream.Config.NoCache` offers neither, and
+`Config.Capabilities.CacheSlots` another number of slots. The Go client
+(`client.Options.CacheSlots` and `NoCache`) and the web client's
+protocol core (`cacheSlots`) offer 1024 by default. A viewer that agrees
+to the codec and to slots gets a mirror; any other is served as before.
+
+**What was built.**
+
+- **The wire** (`protocol`). A tile that names a slot covers at most
+  4096 pixels (`protocol.MaxCachedPixels`), so a client's cache is
+  bounded by its slots times 16 KiB. The Go and TypeScript decoders
+  refuse a larger one as invalid, and new golden vectors pin it. No
+  server had named a slot before, so no valid traffic became invalid.
+  [docs/protocol.md](../../docs/protocol.md) now states the cache's
+  rules.
+- **The mirror** (`internal/stream/cache.go`). A slot's key is the
+  xxh3-128 hash of its tile's pixels, with the tile's width and height,
+  since the same bytes at two sizes are two tiles. The slots sit in an
+  array, linked in the order of use, beside a map from key to slot. The
+  slot to store in next is one never used, or the one used least
+  recently.
+- **Lookups and stores** (`encode.go`, `refine.go`). The writer hashes
+  each tile it reads before encoding it, and sends it as `cached` if a
+  slot holds its key, which marks that slot used. Otherwise it encodes
+  the tile. A tile that goes alone and exact (raw or deflate) names the
+  next slot in its message, and the mirror records the store once the
+  message is written. A run of lossy tiles ends before a tile that a
+  slot holds. Refinement looks up and stores as a frame does. A tile
+  sent as `cached` is exact, so the writer records it as lossless for
+  refinement and the scroll shadow.
+- **Only single, exact tiles are stored.** A lossy tile's pixels are
+  the client's decode, which the server does not have, and a run is
+  more than 4096 pixels. So a slot holds pixels that the server's
+  screen held, and a cached tile draws them exactly.
+- **The clients** (`client/read.go`; `session.ts` in
+  `client/occamy-web/src/protocol`). A tile that names a slot is stored
+  in it as the message is read: a raw tile's pixels, or the tile's
+  decode, whose pixels the slot shares once decoded. A raw tile's
+  pixels stay in their message, which the transport hands over for the
+  session to keep. The slot holds it
+  whatever becomes of the frame, so a cached tile later in the same
+  frame draws it, and so does one after a resize that dropped the frame.
+  Slots survive resizes and hidden spells. A cached tile of an empty
+  slot, or of one that holds another size, ends the session as invalid.
+  Neither client chooses slots: it does what the messages say.
+- **Agreement.** Both clients offer `cached` after raw, and agree to
+  the fewer slots of theirs and the server's, as `protocol.Agree` does.
+
+**Choices.**
+
+- **1024 slots by default.** That is five screens of 1024×768 in
+  64-pixel tiles, or two of 1080p: up to 16 MiB on the client and 70.4
+  KiB of mirror a viewer. A window switched over the desktop needs two
+  screens' worth.
+- **Every tile is hashed.** The hash costs 0.53 µs a 64×64 tile, 31
+  GB/s on one core, so 0.1 ms for the 192 tiles of 1024×768. Any test of
+  whether a tile could hit would cost about as much as the hash.
+- **xxh3-128**, so that two contents with one hash are out of reach.
+  The mirror trusts the hash: a collision would show the wrong tile
+  until the tile next changed.
+- **A store counts once the message is written**, not once its frame
+  is acknowledged. The client stores as it reads, whatever becomes of
+  the frame, and reads messages in order. A failed write ends the
+  connection, and the cache with it.
+
+**Measurements** (on the codec measurement's corpus;
+[docs/benchmarks/tile-cache.md](../../docs/benchmarks/tile-cache.md)
+has the method and every scene):
+
+| Scene | KiB a frame: without · with | cached tiles a frame | encode ms a frame: without · with |
+|---|---|---|---|
+| switch, browser | 79.7 · 9.4 | 186 | 6.20 · 1.61 |
+| switch, terminal | 12.1 · 2.4 | 108 | 1.57 · 0.20 |
+| switch, photo | 70.6 · 63.1 | 96 | 35.40 · 33.67 |
+| motion (G5) | 13.8 · 4.3 | 192 | 11.44 · 0.32 |
+| drag (G4), scroll (G3), photo once (G6) | the same | 0 | the same, within the runs' spread |
+| browser, once | 140.1 · 139.2 | 26 | 16.49 · 15.28 |
+| terminal-aa, once | 103.5 · 102.5 | 37 | 4.57 · 4.28 |
+
+- A window switched back and forth over the desktop takes an eighth of
+  the bytes once the cache holds both. On N2, the switched browser page
+  reaches the client in 30.5 ms against 63.8 (encode, bytes at the
+  link's rate, and its 25 ms one-way delay).
+- The motion scene's gain is the corpus's: it shows two recorded frames
+  of the plasma in turn, so every tile repeats. A real plasma never
+  repeats, and its moving tiles are lossy, so the cache gives G5 nothing
+  but costs it 0.1 ms a frame of hashes.
+- No scene takes more bytes, and each ends with the client showing what
+  it showed without the cache (`TestCacheCorpus`).
+
+**Testing.**
+
+- `TestTileCacheModel` runs the mirror against a plain model of a cache
+  that replaces the slot used least recently, for one to 16 slots and
+  20 seeds of 2000 steps: a lookup, and a store on a miss and now and
+  then on a hit. Each lookup's slot and each slot chosen to store in
+  must match the model's.
+- `TestCacheConverges` sends a writer with four slots random screens of
+  repeating tile patterns, with resizes and hidden spells, eight seeds
+  of 40 frames. The test's client is a model of its own, written from
+  the protocol rather than from the mirror. After every frame its
+  screen is the server's, byte for byte, and the run must hit a slot,
+  replace one, and draw a tile stored earlier in the same frame. The Go
+  client's `TestCacheConverges` does the same with `stream.Serve` and
+  the real client, four seeds of 30 steps.
+- `TestCacheGolden` records `protocol/testdata/cache.json`: six frames
+  that store and draw tiles in one frame and across frames, replace the
+  slot used least recently, keep slots across resizes, and tell the
+  same bytes at two sizes apart. The Go client and the web core replay
+  it and check the SHA-256 of each screen.
+- Unit tests of both clients: a slot drawn in the frame that stored it,
+  including a tile still being decoded; a slot kept across a frame that
+  a resize dropped; a slot stored again; and cached tiles of an empty
+  slot, of another size and of the transposed size, which end the
+  session.
+- Tests of the writer (`cache_writer_test.go`): a run of lossy tiles
+  that ends before a tile a slot holds; a run sent exact, stored only
+  when it is one tile; the tile encoded ahead of a run, stored;
+  refinement that draws a tile from a slot, and stores what it sends
+  exact; a message of refinement that the pacer holds back, which
+  stores nothing; and what the server offers and agrees to, with
+  `NoCache`, with fewer slots, and to a client that offers the codec
+  without slots or slots without the codec.
+- The web core's interop test runs against `internal/stream` through
+  `client/internal/webinterop`, and checks that the server sent cached
+  tiles and the client drew them.
+- The client's fuzzer gets a welcome with `cached` and four slots, and
+  a seed of cached tiles: 60 seconds, 4.49 million inputs, no failure.
+- The refinement and scroll tests' clients now keep a cache, so those
+  tests run with it.
+
+**Mutation check.** 42 mutants of the new code: 34 in Go (the mirror,
+the writer, `Serve`'s agreement, the Go client and the protocol's
+rule) and 8 in the web core. The tests kill 39, eight of them only
+after tests were added for them: a run that ends before a tile a slot
+holds; a run sent exact, which names no slot; the tile encoded ahead of
+a run, stored; refinement's lookup and store; a message of refinement
+the pacer holds back; `NoCache`'s offer; and a Go client without a
+cache offering the codec. Two survivors were code that did nothing, now
+removed: both clients copied a raw tile they stored out of its message,
+which the transport already hands over for good. One survives: the
+second lookup of the tile encoded ahead of a run, which differs only
+when the run, one tile sent exact, stored the same content. That takes
+an encoder that sends the same pixels lossy, then exact, which
+`internal/encoder` never does.
+
+**Surprises.**
+
+- The record of `cache.json` differed from run to run, since a
+  frame-end carries the server's time. The recording sets it from the
+  frame's number. Deflate's bytes can change with Go's version, so the
+  test compares what the file says and shows, not its bytes.
+- Painting a tile with what it already shows still makes it dirty, and
+  it is sent again, from its slot. The golden script paints only the
+  tiles that change, so that each frame says what it means to.
+- The corpus's motion scene came out at a third of the bytes with the
+  cache, which a real plasma would not. Its two recorded frames repeat.
+
+**Follow-ups.**
+
+- **Lossy tiles are not stored**, so a photograph switched back comes
+  again in full: 63.1 KiB a frame of the switched photograph's 70.6.
+  Storing them would need the mirror to keep each slot's quality, for
+  refinement to raise a lossy tile drawn from a slot, and the photograph
+  sent in single tiles where it repeats rather than in runs.
+- **A tile of more than 4096 pixels is never cached**, so the cache
+  takes only 64-pixel tiles, the size occamyd uses; a framebuffer of
+  larger tiles would cache only its smaller edge tiles.
+- **The cache does nothing for G3 and G4** on the corpus: the scroll
+  goes as `copy-rect`, and a dragged window's changed tiles hold content
+  at offsets that are new each frame. Horizontal and 2-D move detection
+  is what G4 needs.
+- **Each viewer hashes its tiles itself.** Two viewers of a session at
+  the same quality hash, look up and encode the same tiles twice; the
+  Encode cache and workers task can share the hashes with the encoded
+  tiles.
