@@ -336,12 +336,17 @@ On **x11vnc, native backend**, **TigerVNC, native backend** or
    clipboard without asking.
 
 The VNC desktops also answer the clipboard by themselves: send
-`owner: hi`, and the remote's clipboard becomes `echo: hi` a moment
-later. The RDP desktop does the same with `occamy-e2e:hi`, which comes
-back as `echo:occamy-e2e:hi`. The panel keeps the text you sent in its
-box and says "Edited: the remote clipboard holds other text."; **Show
-it** shows the answer. A read-only viewer sees the remote clipboard
-but cannot send to it.
+`owner: hi`, and a moment later the box shows `echo: hi`, the remote's
+clipboard. The RDP desktop does the same with `occamy-e2e:hi`, which
+comes back as `echo:occamy-e2e:hi`. Once sent, the box's text counts
+as the remote's, so the next remote clipboard replaces it. Text that
+you type after the send stays when the remote clipboard changes, and
+the panel says "Edited: the remote clipboard holds other text.";
+**Show it** puts the remote's text in the box. Text too large for one
+message is not sent: the panel says "Not sent: the text is too large
+for one message to occamyd. Send less of it.", and the text stays in
+the box as your edit. A read-only viewer sees the remote clipboard but
+cannot send to it.
 
 If the RDP desktop's **Clipboard** panel never changes, xrdp's
 clipboard process, `xrdp-chansrv`, may have exited, which it can when
@@ -378,8 +383,15 @@ When the page loses its connection while the session runs on, it says
 seconds to come back to the same session, with the remote's state as
 it was. A newer connection of the owner takes the session over from
 an older one. The older page then says "Opened elsewhere" and offers
-**Join again** to take it back. Reloading the page does not rejoin: it
-asks for a sign-in, and the session ends when the 60 seconds pass.
+**Join again** to take it back.
+
+**Reload.** The page keeps its sign-in in memory only, so reloading the
+owner's page asks for a sign-in again, with the notice "Sign in again
+to return to <the connection's name>." and a **Go to the connections
+instead** button. Sign in within the 60 seconds, and the page rejoins
+the same session. Signing out forgets the session, so the next sign-in
+goes to the connections. A viewer who joined through a share link
+loses the share on a reload and needs the link again.
 
 To watch an owner leave and come back without breaking a network, run
 the end-to-end test that does it against the running stack:
@@ -405,9 +417,11 @@ fallback goes away in v1.0, with guacd
 
 To compare the two, open **x11vnc, through guacd** (`vnc-guacd`) and
 **RDP, through guacd** (`rdp-guacd`) next to their native twins. Each
-shows the same desktop. Through guacd, the first frame takes a second
-or two instead of a fraction of one, and the desktop keeps the size it
-opened at. The log names the backend of each session:
+shows the same desktop. Through guacd, the desktop keeps the size it
+opened at, and RDP's first frame takes about two seconds instead of a
+few hundredths of one. VNC's takes about as long either way: a third
+to half a second on x11vnc, and a hundredth or two on TigerVNC. The
+log names the backend of each session:
 
 ```
 (cd docker && podman compose logs occamy-v1) | grep 'opened connection'
@@ -597,7 +611,7 @@ integration tests take `OCCAMY_CONTAINER_ENGINE=docker` for Docker.
 ### Fuzz tests
 
 The parsers of everything that comes over a network have fuzz
-targets, 33 of them. `go test -list '^Fuzz' ./...` lists them by
+targets, 35 of them. `go test -list '^Fuzz' ./...` lists them by
 package. `go test` runs one target at a time, so fuzz each for a while
 like this:
 
