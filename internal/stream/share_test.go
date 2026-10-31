@@ -322,6 +322,90 @@ func TestShareWorkerPanics(t *testing.T) {
 	}
 }
 
+// A panic after the cache hands an encoding out and before it is made,
+// as a worker asks for another, gathers a run's pixels, or as a writer
+// hands its rows over, publishes it failed: the next to ask is handed it
+// to make, rather than waiting for it forever.
+func TestShareHandedOutPanics(t *testing.T) {
+	p := profile{protocol.CodecDeflate, protocol.CodecWebP}
+	r := image.Rect(0, 0, 64, 64)
+	panics := func(t *testing.T, f func()) {
+		t.Helper()
+		defer func() {
+			if recover() == nil {
+				t.Fatal("nothing panicked")
+			}
+		}()
+		f()
+	}
+	// writer is a writer whose handing over of its rows panics, at a
+	// tile past the screen.
+	writer := func(t *testing.T) (*writer, *shared) {
+		d := newDirect(t, false)
+		sh := sharedWriter(t, d)
+		sh.jobs = make(chan func(*worker), 64)
+		w := d.w
+		w.pending = []int{0, len(w.sent) + 16}
+		w.runVersion = append(w.runVersion[:0], 1)
+		return w, sh
+	}
+	t.Run("a worker's tile, asking for another worker", func(t *testing.T) {
+		c := newEncodeCache(1 << 20)
+		// No share to ask: asking panics.
+		f := &prefetch{cache: c, p: p, rows: []int{0, 1, 2}, most: 2}
+		f.busy.Store(1)
+		wk := newWorker()
+		wk.tile(0, 64)
+		panics(t, func() { f.tile(wk, wk.encoder(p), 3, 1, 0, r, false, cacheKey{}, false, 0) })
+		if _, mine := c.tile(tileKey{p, 3, false}, 1); !mine {
+			t.Error("the tile's encoding is still being made")
+		}
+	})
+	t.Run("a worker's run, asking for another worker", func(t *testing.T) {
+		c := newEncodeCache(1 << 20)
+		f := &prefetch{cache: c, p: p, q: 70, lo: 30, g: grid{tile: 64}, rows: []int{0, 1, 2}, most: 2}
+		f.busy.Store(1)
+		wk := newWorker()
+		wk.tile(0, 64)
+		wk.tile(1, 64)
+		wk.versions = append(wk.versions[:0], 1, 1)
+		wk.rects[0], wk.rects[1] = r, r.Add(image.Pt(64, 0))
+		panics(t, func() { f.run(wk, wk.encoder(p), 3, 2, false) })
+		still, q, lo := runMode(f.q, f.lo, false, false)
+		if _, mine := c.run(runKey{p, 3, 2, still, q, lo}, []uint64{1, 1}); !mine {
+			t.Error("the run's encoding is still being made")
+		}
+	})
+	t.Run("a worker's run, gathering its pixels", func(t *testing.T) {
+		c := newEncodeCache(1 << 20)
+		f := &prefetch{cache: c, p: p, q: 70, lo: 30, g: grid{tile: 64}}
+		wk := newWorker()
+		// Two tiles' places, and no pixels: gathering them panics.
+		wk.versions = append(wk.versions[:0], 1, 1)
+		wk.rects[0], wk.rects[1] = r, r.Add(image.Pt(64, 0))
+		panics(t, func() { f.run(wk, wk.encoder(p), 3, 2, false) })
+		still, q, lo := runMode(f.q, f.lo, false, false)
+		if _, mine := c.run(runKey{p, 3, 2, still, q, lo}, []uint64{1, 1}); !mine {
+			t.Error("the run's encoding is still being made")
+		}
+	})
+	t.Run("a writer's tile, handing its rows over", func(t *testing.T) {
+		w, sh := writer(t)
+		panics(t, func() { w.encodeTile(nil, 0, 0, 1, r, false) })
+		if _, mine := sh.cache.tile(tileKey{w.prof, 0, false}, 1); !mine {
+			t.Error("the tile's encoding is still being made")
+		}
+	})
+	t.Run("a writer's run, handing its rows over", func(t *testing.T) {
+		w, sh := writer(t)
+		pix := make([]byte, 4*64*64)
+		panics(t, func() { w.encodeRun(0, 1, pix, r, false, 70, 0) })
+		if _, mine := sh.cache.run(runKey{w.prof, 0, 1, false, 70, 0}, []uint64{1}); !mine {
+			t.Error("the run's encoding is still being made")
+		}
+	})
+}
+
 // Only internal/encoder's encoders share, by the codecs they send in.
 func TestProfile(t *testing.T) {
 	if _, ok := profileOf(&markEncoder{}); ok {

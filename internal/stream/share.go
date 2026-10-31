@@ -362,7 +362,8 @@ func (c *encodeCache) run(k runKey, versions []uint64) (e *entry, mine bool) {
 // make makes e, which tile or run gave the caller, with f, which
 // reports whether it could, and publishes it: if not, the next to ask
 // makes it again. A panic in f publishes it failed, so that nobody waits
-// for it forever.
+// for it forever; the caller therefore calls make as soon as it has e,
+// and does all its work for e in f.
 func (c *encodeCache) make(e *entry, f func(e *entry) bool) {
 	ok := false
 	defer func() { c.finish(e, ok) }()
@@ -458,12 +459,13 @@ func (w *writer) encodeTile(dst []byte, t, k int, version uint64, r image.Rectan
 			e = nil
 		}
 	}
-	w.startFetch()
 	if e == nil {
+		w.startFetch()
 		return w.enc.Tile(dst, w.tiles[k], r.Dx(), r.Dy(), moving)
 	}
 	var b []byte
 	w.sh.cache.make(e, func(e *entry) bool {
+		w.startFetch()
 		b, e.codec, e.lossy = w.enc.Tile(dst, w.tiles[k], r.Dx(), r.Dy(), moving)
 		e.payload = slices.Clone(b[len(dst):])
 		return true
@@ -499,12 +501,13 @@ func (w *writer) encodeRun(t, n int, pix []byte, rect image.Rectangle, still boo
 			w.payload, codec = w.enc.Lossy(w.payload[:0], pix, rect.Dx(), rect.Dy(), q)
 		}
 	}
-	w.startFetch()
 	if e == nil {
+		w.startFetch()
 		enc()
 		return codec, got, reached
 	}
 	w.sh.cache.make(e, func(e *entry) bool {
+		w.startFetch()
 		enc()
 		e.payload, e.codec, e.quality, e.reached = slices.Clone(w.payload), codec, got, reached
 		return codec != 0
@@ -699,8 +702,8 @@ func (f *prefetch) tile(wk *worker, enc *encoder.Encoder, t int, v uint64, k int
 	case e == nil:
 		return false, false
 	case mine:
-		f.recruit()
 		f.cache.make(e, func(e *entry) bool {
+			f.recruit()
 			wk.payload, e.codec, e.lossy = enc.Tile(wk.payload[:0], wk.tiles[k], r.Dx(), r.Dy(), moving)
 			e.payload = slices.Clone(wk.payload)
 			return true
@@ -734,10 +737,10 @@ func (f *prefetch) run(wk *worker, enc *encoder.Encoder, t, n int, moving bool) 
 	if !mine {
 		return
 	}
-	f.recruit()
-	rect := wk.rects[0].Union(wk.rects[n-1])
-	wk.pix = assemble(wk.pix, wk.tiles[:n], wk.rects[:n], rect)
 	f.cache.make(e, func(e *entry) bool {
+		f.recruit()
+		rect := wk.rects[0].Union(wk.rects[n-1])
+		wk.pix = assemble(wk.pix, wk.tiles[:n], wk.rects[:n], rect)
 		if still {
 			wk.payload, e.codec, e.quality, e.reached = f.cache.still(f.p, enc, wk.payload[:0], wk.pix, rect.Dx(), rect.Dy(), f.g.tile, lo, q)
 		} else {

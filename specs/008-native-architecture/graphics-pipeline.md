@@ -1661,7 +1661,10 @@ chose, so that every scene sends the same bytes as before.
   others wait for it. Newer versions replace an encoding; a viewer whose
   pixels are older than the cache's encodes them alone. An encoding
   that could not be made, or whose maker panicked, is made again by the
-  next to ask. Once the bytes held pass the budget, the oldest encodings
+  next to ask: whoever the cache hands an encoding to does all its work
+  for it, from asking for a worker to gathering a run's pixels, in
+  `make`'s callback, so that a panic anywhere after the lookup
+  publishes it failed rather than leaving the others waiting. Once the bytes held pass the budget, the oldest encodings
   go, each counted as its payload and 256 bytes.
 - **The writers** look each tile and each run up in the cache before
   they encode it (`encodeTile` and `encodeRun`), in frames and in
@@ -1865,7 +1868,11 @@ a session, before this task and with the defaults, at a load of 8 to
   the last viewer leaves, two hundred times over, never send on the
   closed queue; and a job that panics leaves its worker running, with
   new encoders, its encoding made again by the next to ask, and the
-  panic logged.
+  panic logged. `TestShareHandedOutPanics` panics after the cache hands
+  an encoding out and before it is made, as a worker asks for another
+  worker for a tile or a run, as it gathers a run's pixels, and as a
+  writer hands its rows over for a tile or a run: each time the next to
+  ask is handed it to make.
 - `TestPrefetchMatchesWriter` hands a frame's rows to a worker, then
   sends the frame with no workers: every encoding the worker made, of
   tiles and of runs that a pattern, a clean tile or a cached tile ends,
@@ -1926,7 +1933,10 @@ on the closed queue, checking it outside the lock, or the close not
 marked; a job's panic not recovered, reported as no panic, not logged,
 or leaving its worker the encoders it broke. The check outside the lock
 is killed by `TestShareReleaseRace`, by its panic, or under `-race` by
-the race.
+the race. The delta review found that a panic between a lookup and
+`make` left the encoding waited for forever; six more mutants, each
+putting back work between the two or publishing only when `make`'s
+callback returns, are killed, 6 of 6.
 
 **Surprises.**
 
@@ -1962,6 +1972,13 @@ the race.
   that recovered nothing: a session of two viewers ending during a
   photograph's frame could do it. Queueing and closing now take one
   lock, and a worker recovers each job.
+- **A panic before `make` left an encoding pending forever** (found in
+  the delta review). `make` publishes what its callback could not
+  make, but a worker asked for another worker, and gathered a run's
+  pixels, and a writer handed its rows over, after the lookup and
+  before `make`; a panic there left every later asker of the encoding
+  waiting, a writer that never returned and a worker that held up the
+  last viewer's leaving. That work now runs in the callback.
 
 **Follow-ups.**
 
