@@ -44,7 +44,14 @@ func TestEndlessSecretFile(t *testing.T) {
 	}()
 	t.Cleanup(func() {
 		close(release)
-		<-written
+		// Code that refuses the file before it opens it leaves the
+		// writer waiting in OpenFile for a reader: fail, rather than
+		// hang until -timeout.
+		select {
+		case <-written:
+		case <-time.After(5 * time.Second):
+			t.Error("the FIFO's writer is still waiting for a reader")
+		}
 	})
 	done := make(chan error, 1)
 	go func() {
