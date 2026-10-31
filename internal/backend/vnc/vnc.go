@@ -510,13 +510,22 @@ func (b *Backend) connect(ctx context.Context, sink backend.Sink, r *run) error 
 		}()
 		return r.readLoop(dec)
 	}()
-	if ctx.Err() != nil {
+	return end(ctx, err, r.werr)
+}
+
+// end returns Run's result for the reader's, err, and the writer's,
+// werr: the writer's panic whatever else happened meanwhile, since it is
+// a bug the session logs and ends with its internal reason; ctx's error
+// once ctx is done; and the writer's error when its failure closed the
+// connection under the reader.
+func end(ctx context.Context, err, werr error) error {
+	switch {
+	case errors.As(werr, new(backend.PanicError)):
+		return werr
+	case ctx.Err() != nil:
 		return ctx.Err()
-	}
-	if err != nil && r.werr != nil {
-		// The failed write, or the writer's panic, closed the connection
-		// under the reader.
-		return r.werr
+	case err != nil && werr != nil:
+		return werr
 	}
 	return err
 }

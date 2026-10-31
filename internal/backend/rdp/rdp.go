@@ -441,14 +441,19 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 }
 
 // end returns Run's result for the client's, and the writer's error,
-// which is the result only when it stopped the client.
+// which is the result when it is a panic, whatever the client returned,
+// and otherwise only when it stopped the client.
 func (b *Backend) end(ctx context.Context, err, werr error) error {
+	if errors.As(werr, new(backend.PanicError)) {
+		// A bug, whatever else happened meanwhile: the session ends with
+		// its internal reason and logs the stack.
+		return werr
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
 	if werr != nil && errors.Is(err, net.ErrClosed) {
-		// The failed write, or the writer's panic, closed the connection
-		// under the reader.
+		// The failed write closed the connection under the reader.
 		return werr
 	}
 	var info rdp.ErrorInfo

@@ -136,3 +136,38 @@ func TestWriterPanics(t *testing.T) {
 		t.Fatalf("Run = %v, want the writer's panic", err)
 	}
 }
+
+// TestEndPrefersPanic checks that the writer's panic is Run's result
+// whatever the reader returned meanwhile, so that the session logs it
+// and ends with its internal reason (from the review of #117).
+func TestEndPrefersPanic(t *testing.T) {
+	p := backend.PanicError{Value: "the writer's bug"}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		err  error
+	}{
+		{"closed", context.Background(), net.ErrClosed},
+		{"ctx done", canceled, net.ErrClosed},
+		{"server hung up first, between messages", context.Background(), nil},
+		{"protocol error from buffered data", context.Background(), errors.New("vnc: bad message")},
+	} {
+		if got := end(tc.ctx, tc.err, p); !errors.As(got, new(backend.PanicError)) {
+			t.Errorf("%s: end = %v, want the writer's panic", tc.name, got)
+		}
+	}
+	// Without a panic, ctx's error comes first, then the writer's error
+	// that closed the connection under the reader.
+	werr := errors.New("write: broken pipe")
+	if got := end(canceled, net.ErrClosed, werr); !errors.Is(got, context.Canceled) {
+		t.Errorf("end after ctx = %v, want ctx's error", got)
+	}
+	if got := end(context.Background(), net.ErrClosed, werr); !errors.Is(got, werr) {
+		t.Errorf("end after a failed write = %v, want the write's error", got)
+	}
+	if got := end(context.Background(), nil, nil); got != nil {
+		t.Errorf("end of a server that hung up = %v, want nil", got)
+	}
+}

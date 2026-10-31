@@ -7,8 +7,10 @@ package rdp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"image/color"
+	"io"
 	"net"
 	"sync/atomic"
 	"testing"
@@ -102,5 +104,30 @@ func TestWriterPanics(t *testing.T) {
 	var p backend.PanicError
 	if err := r.wait(t); !errors.As(err, &p) || p.Value != "the writer's bug" {
 		t.Errorf("Run returned %v, want the writer's panic", err)
+	}
+}
+
+// TestEndPrefersPanic checks that the writer's panic is Run's result
+// whatever the client returned meanwhile, so that the session logs it
+// and ends with its internal reason (from the review of #117).
+func TestEndPrefersPanic(t *testing.T) {
+	b := &Backend{log: quiet}
+	p := backend.PanicError{Value: "the writer's bug"}
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, tc := range []struct {
+		name string
+		ctx  context.Context
+		err  error
+	}{
+		{"closed", context.Background(), fmt.Errorf("read: %w", net.ErrClosed)},
+		{"ctx done", canceled, fmt.Errorf("read: %w", net.ErrClosed)},
+		{"server hung up first", context.Background(), io.EOF},
+		{"protocol error from buffered data", context.Background(), errors.New("rdp: bad PDU")},
+		{"server disconnected", context.Background(), nil},
+	} {
+		if got := b.end(tc.ctx, tc.err, p); !errors.As(got, new(backend.PanicError)) {
+			t.Errorf("%s: end = %v, want the writer's panic", tc.name, got)
+		}
 	}
 }
