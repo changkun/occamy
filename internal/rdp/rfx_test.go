@@ -951,56 +951,62 @@ func deleteContext(ctx uint32) []byte {
 	return rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, binary.LittleEndian.AppendUint32([]byte{1, 0}, ctx))
 }
 
-// A codec context of another id ends the surface's, as deleting it
-// does: the tiles keep their coefficients and give their signs back,
-// and an upgrade of a tile whose first pass was in it has none.
-// Deleting a context the surface does not have, a region outside a
-// frame, and a W2S2 of another codec are ignored and counted; and
+// A surface's codec contexts ([MS-RDPEGFX] 3.3.1): a W2S2 of another
+// context ends nothing, and an upgrade in it applies. Deleting the
+// context of a tile's last first pass ends the tile's tile context: the
+// tile keeps its coefficients and gives its signs back, and its
+// upgrades are skipped and counted, without ending the session, until
+// its next first pass. An upgrade of a tile never made is skipped too.
+// Deleting a context that no tile has, a region outside a frame of its
+// context, and a W2S2 of another codec are ignored and counted; and
 // deleting the surface lets its tiles go.
 func TestProgressiveContexts(t *testing.T) {
 	p := newProgSurface(t, 128, 64)
 	coef := rdptest.EncodeTile(testImage(0, 0), image.Point{}, &fineQuant, false)
 	e := newProgEnc(0, 0, false)
+	p.must(t, 1, false, nil, newProgEnc(0, 0, false).upgrade(1, progQualities[1].BitPos))
+	if p.c.gfx.progTiles != 0 {
+		t.Fatalf("an upgrade of no tile made %d", p.c.gfx.progTiles)
+	}
 	p.must(t, 1, false, nil, e.first(coef, false, false, 0, progQualities[0].BitPos), newProgEnc(1, 0, false).first(coef, false, true, progFull, fullPass))
 	if p.c.gfx.progTiles != 2 || len(p.c.gfx.signs) != 0 {
 		t.Fatalf("%d tiles, %d spare signs", p.c.gfx.progTiles, len(p.c.gfx.signs))
 	}
-	// Another context: an upgrade of a tile of the old one has no first
-	// pass, and the tiles stay, without their signs.
-	kept := p.tile(t, 0, 0).coef
-	if err := p.send(2, false, nil, e.upgrade(1, progQualities[1].BitPos)); err == nil || !strings.Contains(err.Error(), "no first pass") {
-		t.Fatalf("upgrade in a new context: %v", err)
-	}
-	if st := p.c.gfx.surfaces[1].prog; p.c.gfx.progTiles != 2 || st.ctx != 2 || st.signed != 0 || len(p.c.gfx.signs) != 1 {
-		t.Fatalf("%d tiles, context %d, %d with signs and %d spare after the context was replaced", p.c.gfx.progTiles, st.ctx, st.signed, len(p.c.gfx.signs))
-	}
-	if tile := p.tile(t, 0, 0); tile.coef != kept || tile.sign != nil {
-		t.Fatal("the tile lost its coefficients, or kept its signs, with its codec context")
-	}
-	// A first pass in the new context has upgrades.
-	p.must(t, 2, false, nil, e.first(coef, false, false, 0, progQualities[0].BitPos))
+	// Another context, which ends nothing: the upgrade applies.
 	p.must(t, 2, false, nil, e.upgrade(1, progQualities[1].BitPos))
 	p.wantTile(t, e, true)
-	p.gfxTest.must(t, deleteContext(9))
-	if st := p.c.gfx.surfaces[1].prog; !st.live || st.signed != 1 {
-		t.Fatal("deleting another context ended the surface's")
-	}
+	// Deleting a context that is not the tile's leaves its tile context.
 	p.gfxTest.must(t, deleteContext(2))
-	if st := p.c.gfx.surfaces[1].prog; st.live || st.signed != 0 || p.c.gfx.progTiles != 2 {
-		t.Fatal("the deleted context stays")
+	if tile := p.tile(t, 0, 0); !tile.tc || tile.sign == nil {
+		t.Fatal("deleting another context ended the tile's")
 	}
-	// Deleted again, it is a context the surface does not have.
-	p.gfxTest.must(t, deleteContext(2))
-	if err := p.send(3, false, nil, e.upgrade(2, progQualities[2].BitPos)); err == nil || !strings.Contains(err.Error(), "no first pass") {
-		t.Fatalf("upgrade after its context was deleted: %v", err)
+	// Deleting the tile's: its coefficients stay, its signs go back.
+	kept := p.tile(t, 0, 0).coef
+	p.gfxTest.must(t, deleteContext(1))
+	if tile := p.tile(t, 0, 0); tile.tc || tile.sign != nil || tile.coef != kept || len(p.c.gfx.signs) != 1 || p.c.gfx.progTiles != 2 {
+		t.Fatal("the tile kept its tile context, or lost its coefficients, with its codec context")
 	}
+	// Deleted again, it is a context that no tile has.
+	p.gfxTest.must(t, deleteContext(1))
+	// The tile's upgrades are skipped, in any context, and it stays.
+	p.must(t, 1, false, nil, e.upgrade(2, progQualities[2].BitPos))
+	p.must(t, 3, false, nil, e.upgrade(progFull, fullPass))
+	if tile := p.tile(t, 0, 0); tile.coef != kept || tile.sign != nil {
+		t.Fatal("an upgrade without a tile context changed the tile")
+	}
+	// A first pass in a new context has upgrades.
+	e = newProgEnc(0, 0, false)
+	p.must(t, 3, false, nil, e.first(coef, false, false, 0, progQualities[0].BitPos))
+	p.must(t, 3, false, nil, e.upgrade(1, progQualities[1].BitPos))
+	p.wantTile(t, e, true)
 	// Regions outside a frame, before one and after one, in a new
 	// context, which starts outside a frame, and another codec.
 	region := rdptest.ProgRegion{Quants: xrdpQuant[:], Tiles: [][]byte{newProgEnc(0, 0, false).first(coef, false, true, progFull, fullPass)}}
 	p.gfxTest.must(t, rdptest.WireToSurface2(1, rdptest.CodecProgressive, 4, rdptest.PixelXRGB, slices.Concat(region.Block(), rdptest.Progressive(1), region.Block())))
 	p.gfxTest.must(t, rdptest.WireToSurface2(1, rdptest.CodecRemoteFX, 3, rdptest.PixelXRGB, nil))
 	st := p.c.Stats()
-	if st.Ignored["GFX deletes of no codec context"] != 2 || st.Ignored["GFX progressive regions outside a frame"] != 2 || st.Ignored["GFX bitmaps of unknown codecs"] != 1 || p.c.gfx.progTiles != 2 {
+	if st.Ignored["GFX deletes of no codec context"] != 2 || st.Ignored["GFX progressive upgrades without a tile context"] != 3 ||
+		st.Ignored["GFX progressive regions outside a frame"] != 2 || st.Ignored["GFX bitmaps of unknown codecs"] != 1 || p.c.gfx.progTiles != 2 {
 		t.Fatalf("ignored %+v, %d tiles", st.Ignored, p.c.gfx.progTiles)
 	}
 	p.gfxTest.must(t, rdptest.DeleteSurface(1))
@@ -1009,8 +1015,36 @@ func TestProgressiveContexts(t *testing.T) {
 	}
 }
 
+// Codec contexts interleave ([MS-RDPEGFX] 3.3.1.1, 3.3.1.2): a first
+// pass of tile 0 in context 1, of tile 1 in context 2, and each tile's
+// upgrades in its own context apply in any order. Deleting context 1
+// ends tile 0's tile context and leaves tile 1's, whose upgrades go on.
+func TestProgressiveInterleavedContexts(t *testing.T) {
+	p := newProgSurface(t, 128, 64)
+	coef := rdptest.EncodeTile(testImage(0, 0), image.Point{}, &fineQuant, false)
+	e0, e1 := newProgEnc(0, 0, false), newProgEnc(1, 0, false)
+	p.must(t, 1, false, nil, e0.first(coef, false, false, 0, progQualities[0].BitPos))
+	p.must(t, 2, false, nil, e1.first(coef, false, false, 0, progQualities[0].BitPos))
+	p.must(t, 1, false, nil, e0.upgrade(1, progQualities[1].BitPos))
+	p.must(t, 2, false, nil, e1.upgrade(1, progQualities[1].BitPos))
+	p.wantTile(t, e0, true)
+	p.wantTile(t, e1, true)
+	p.gfxTest.must(t, deleteContext(1))
+	if p.tile(t, 0, 0).sign != nil || p.tile(t, 1, 0).sign == nil || len(p.c.gfx.signs) != 1 {
+		t.Fatal("deleting context 1 did not end tile 0's tile context alone")
+	}
+	p.must(t, 2, false, nil, e1.upgrade(2, progQualities[2].BitPos))
+	p.must(t, 2, false, nil, e1.upgrade(progFull, fullPass))
+	p.wantTile(t, e1, false)
+	kept := p.tile(t, 0, 0).coef
+	p.must(t, 1, false, nil, e0.upgrade(2, progQualities[2].BitPos))
+	if p.tile(t, 0, 0).coef != kept || p.c.Stats().Ignored["GFX progressive upgrades without a tile context"] != 1 {
+		t.Fatal("tile 0's upgrade after its context's delete was not skipped")
+	}
+}
+
 // The tiles' coefficients outlast their codec context ([MS-RDPEGFX]
-// 3.3.1.3): after the context is deleted, or another replaces it, a
+// 3.3.1.3): after the context is deleted, or in another context, a
 // difference tile adds to them, and decodes as the tile sent whole.
 func TestProgressiveDifferenceAcrossContexts(t *testing.T) {
 	a := rdptest.EncodeTile(testImage(0, 1), image.Point{}, &xrdpQuant, false)
@@ -1034,30 +1068,78 @@ func TestProgressiveDifferenceAcrossContexts(t *testing.T) {
 }
 
 // An upgrade, or a difference tile, in another transform than the
-// tile's coefficients ends the session: the bands lie elsewhere, and
-// the signs that a first pass set are another transform's.
+// tile's coefficients is skipped and counted, without ending the
+// session: the bands lie elsewhere, and the signs that a first pass set
+// are another transform's. The tile keeps what it has, and its next
+// upgrade, in its own transform, is skipped too, as its bit positions
+// follow the skipped pass's; a first pass sent whole starts it again.
 func TestProgressiveTransformChange(t *testing.T) {
 	var coef [2]*[3][4096]int16
 	for i, extra := range []bool{false, true} {
 		coef[i] = rdptest.EncodeTile(testImage(0, 0), image.Point{}, &fineQuant, extra)
 	}
 	for i, extra := range []bool{false, true} {
-		p := newProgSurface(t, 64, 64)
-		e := newProgEnc(0, 0, extra)
-		p.must(t, 1, extra, nil, e.first(coef[i], false, false, 0, progQualities[0].BitPos))
-		// The passes' bits are of the tile's transform; the regions say
-		// the other.
-		if err := p.send(1, !extra, nil, e.upgrade(1, progQualities[1].BitPos)); err == nil || !strings.Contains(err.Error(), "another transform") {
-			t.Fatalf("extra %v: upgrade in the other transform: %v", extra, err)
+		for _, pass := range []string{"upgrade", "difference"} {
+			p := newProgSurface(t, 64, 64)
+			e := newProgEnc(0, 0, extra)
+			p.must(t, 1, extra, nil, e.first(coef[i], false, false, 0, progQualities[0].BitPos))
+			kept := p.tile(t, 0, 0).coef
+			// mirror has what the client has: the tile's next upgrade.
+			mirror := newProgEnc(0, 0, extra)
+			mirror.first(coef[i], false, false, 0, progQualities[0].BitPos)
+			// The pass's bits are of the tile's transform; the region
+			// says the other.
+			other := e.upgrade(1, progQualities[1].BitPos)
+			if pass == "difference" {
+				other = e.first(coef[i], true, true, progFull, fullPass)
+			}
+			p.must(t, 1, !extra, nil, other)
+			p.must(t, 1, extra, nil, mirror.upgrade(1, progQualities[1].BitPos))
+			ign := p.c.Stats().Ignored
+			if tile := p.tile(t, 0, 0); tile.coef != kept || tile.sign != nil || ign["GFX progressive tiles in another transform"] != 1 || ign["GFX progressive upgrades without a tile context"] != 1 {
+				t.Fatalf("extra %v, %s in the other transform: the tile changed, kept its signs, or ignored %+v", extra, pass, ign)
+			}
+			// Sent whole, the tile may change its transform, and its
+			// upgrades apply again; a new tile may come as a difference
+			// in either.
+			e = newProgEnc(0, 0, !extra)
+			p.must(t, 1, !extra, nil, e.first(coef[1-i], false, false, 0, progQualities[0].BitPos))
+			p.must(t, 1, !extra, nil, e.upgrade(1, progQualities[1].BitPos))
+			p.wantTile(t, e, true)
+			q := newProgSurface(t, 64, 64)
+			d := newProgEnc(0, 0, !extra)
+			q.must(t, 1, !extra, nil, d.first(coef[1-i], true, true, progFull, fullPass))
+			q.wantTile(t, d, false)
 		}
-		if err := p.send(1, !extra, nil, e.first(coef[i], true, true, progFull, fullPass)); err == nil || !strings.Contains(err.Error(), "another transform") {
-			t.Fatalf("extra %v: difference tile in the other transform: %v", extra, err)
-		}
-		// Sent whole, the tile may change its transform, and a new tile
-		// may come as a difference in either.
-		p.must(t, 1, !extra, nil, newProgEnc(0, 0, !extra).first(coef[1-i], false, true, progFull, fullPass))
-		q := newProgSurface(t, 64, 64)
-		q.must(t, 1, !extra, nil, newProgEnc(0, 0, !extra).first(coef[1-i], true, true, progFull, fullPass))
+	}
+}
+
+// A surface has one open frame, of the codec context that began it: a
+// region in another context is outside a frame, the end of another
+// context's frame closes nothing, and deleting the context closes it.
+func TestProgressiveFrameContext(t *testing.T) {
+	p := newProgSurface(t, 64, 64)
+	coef := rdptest.EncodeTile(testImage(0, 0), image.Point{}, &fineQuant, false)
+	region := rdptest.ProgRegion{Rects: []image.Rectangle{image.Rect(0, 0, 64, 64)}, Quants: xrdpQuant[:],
+		Tiles: [][]byte{newProgEnc(0, 0, false).first(coef, false, true, progFull, fullPass)}}
+	frame := rdptest.Progressive(1) // FRAME_BEGIN, 12 bytes, and FRAME_END
+	stream := func(ctx uint32, blocks ...[]byte) []byte {
+		return rdptest.WireToSurface2(1, rdptest.CodecProgressive, ctx, rdptest.PixelXRGB, slices.Concat(blocks...))
+	}
+	counts := func() (outside, applied int) {
+		st := p.c.Stats()
+		return st.Ignored["GFX progressive regions outside a frame"], st.Bitmaps["gfx progressive"]
+	}
+	p.gfxTest.must(t, stream(5, frame[:12]))
+	p.gfxTest.must(t, stream(6, region.Block(), frame[12:]))
+	p.gfxTest.must(t, stream(5, region.Block()))
+	if outside, applied := counts(); outside != 1 || applied != 1 {
+		t.Fatalf("%d regions outside a frame and %d tiles applied, want 1 and 1", outside, applied)
+	}
+	p.gfxTest.must(t, deleteContext(5))
+	p.gfxTest.must(t, stream(5, region.Block()))
+	if outside, applied := counts(); outside != 2 || applied != 1 {
+		t.Fatalf("after the delete, %d regions outside a frame and %d tiles applied, want 2 and 1", outside, applied)
 	}
 }
 
@@ -1176,7 +1258,6 @@ func TestRFXMalformed(t *testing.T) {
 		{"first below", "outside its surface", frame(region(edit(first, 11, 2)))},
 		{"upgrade short", "progressive upgrade of 25 bytes", frame(region(first, edit(upgrade, 2, u32(25)...)[:25]))},
 		{"upgrade lengths", "progressive upgrade of", frame(region(first, edit(upgrade, 14, 0xff, 0xff)))},
-		{"upgrade first", "no first pass", frame(region(upgrade))},
 		{"upgrade rises", "from bit", frame(region(first50, edit(upgrade, 13, 0)))},
 		{"upgrade quality", "quality 9 of 3", frame(region(first, edit(upgrade, 13, 9)))},
 	}
@@ -1232,10 +1313,12 @@ func TestRFXPace(t *testing.T) {
 		{"progressive", nil, prog, 3*rfxTileCost + 1 + 64*64 + 1 + 36*64 + 1 + 64*64},
 		// A tile that a region changes twice is drawn once.
 		{"progressive twice", nil, progTwice, 2*rfxTileCost + 1 + 64*64},
-		// The end of a codec context whose tiles keep signs looks at the
-		// surface's 16 tiles; of one whose tiles keep none, at none.
-		{"context end, signs", progTwice, deleteContext(1), 16},
-		{"context end, no signs", full, deleteContext(1), 0},
+		// Deleting a codec context looks at the surface's 16 tiles,
+		// whether they keep signs or not; a W2S2 of another context ends
+		// nothing, and looks at none.
+		{"context delete, signs", progTwice, deleteContext(1), 16},
+		{"context delete, no signs", full, deleteContext(1), 16},
+		{"context switch", progTwice, rdptest.WireToSurface2(1, rdptest.CodecProgressive, 2, rdptest.PixelXRGB, nil), 0},
 	} {
 		g := newGFXTest(t, 256, 256)
 		g.must(t, surfacePDUs(1, 256, 256, image.Point{})...)
@@ -1383,6 +1466,12 @@ func TestDecodeBudget(t *testing.T) {
 	}
 	tiles := (w + 63) / 64 * ((h + 63) / 64)
 	t.Logf("a flood of empty tiles gets %.0f tiles a second, %.0f screens", float64(tiles)*decodeRate/cost, decodeRate/cost)
+	// The bound in absolute terms, from the clock rather than from
+	// decodeRate: about 18,744 tiles a second, which BenchmarkHostileTiles
+	// prices at about 0.8 of a core of the benchmarks' host.
+	if got := float64(tiles) / (last + time.Second/300).Seconds(); got < 18600 || got > 18900 {
+		t.Errorf("a flood of empty tiles gets %.0f tiles a second, want about 18,744", got)
+	}
 }
 
 // The contexts keep at most progTileLimit tiles, across surfaces.
@@ -1482,13 +1571,13 @@ func TestRFXAllocs(t *testing.T) {
 	first := rdptest.Progressive(1, rdptest.ProgRegion{Quants: xrdpQuant[:], ProgQuants: progQualities, Tiles: [][]byte{e.first(coef, false, false, 0, progQualities[0].BitPos)}})
 	upgrade := rdptest.Progressive(1, rdptest.ProgRegion{Quants: xrdpQuant[:], ProgQuants: progQualities, Tiles: [][]byte{e.upgrade(1, progQualities[1].BitPos)}})
 	full := rdptest.Progressive(1, rdptest.ProgRegion{Quants: xrdpQuant[:], ProgQuants: progQualities, Tiles: [][]byte{e.upgrade(progFull, fullPass)}})
-	s.prog = &progState{ctx: 1, live: true, cols: 1, tiles: make([]*progTile, 1)}
-	if err := g.c.progStream(s, first); err != nil {
+	s.prog = &progState{cols: 1, tiles: make([]*progTile, 1)}
+	if err := g.c.progStream(s, 1, first); err != nil {
 		t.Fatal(err)
 	}
 	if n := testing.AllocsPerRun(20, func() {
 		for _, m := range [][]byte{first, upgrade, full} {
-			if err := g.c.progStream(s, m); err != nil {
+			if err := g.c.progStream(s, 1, m); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -1651,19 +1740,14 @@ func FuzzProgressive(f *testing.F) {
 			if p := g.c.gfx.progTiles; p > progTileLimit(128, 128) || p < 0 {
 				t.Fatalf("%d tiles", p)
 			}
-			// The count of tiles with signs, which a context's end
-			// trusts to skip its scan, is the tiles', and the pool
+			// Only a tile with a tile context keeps signs, so that
+			// deleting its codec context gives them back, and the pool
 			// stays bounded.
 			if s := g.c.gfx.surfaces[1]; s != nil && s.prog != nil {
-				st := s.prog
-				signed := 0
-				for _, tile := range st.tiles {
-					if tile != nil && tile.sign != nil {
-						signed++
+				for _, tile := range s.prog.tiles {
+					if tile != nil && tile.sign != nil && !tile.tc {
+						t.Fatalf("tile at %v keeps signs without a tile context", tile.at)
 					}
-				}
-				if signed != st.signed {
-					t.Fatalf("%d tiles keep signs, counted %d", signed, st.signed)
 				}
 			}
 			if n := len(g.c.gfx.signs); n > maxSignPool {
@@ -1741,11 +1825,11 @@ func BenchmarkProgressivePasses(b *testing.B) {
 		msgs = append(msgs, rdptest.Progressive(uint32(i), rdptest.ProgRegion{Quants: xrdpQuant[:], ProgQuants: progQualities, Tiles: [][]byte{tile}}))
 	}
 	s := g.c.gfx.surfaces[1]
-	s.prog = &progState{ctx: 1, live: true, cols: 1, tiles: make([]*progTile, 1)}
+	s.prog = &progState{cols: 1, tiles: make([]*progTile, 1)}
 	b.ReportAllocs()
 	for b.Loop() {
 		for _, m := range msgs {
-			if err := g.c.progStream(s, m); err != nil {
+			if err := g.c.progStream(s, 1, m); err != nil {
 				b.Fatal(err)
 			}
 		}

@@ -711,6 +711,16 @@ do not reach a target that a user chose.
 A user is a subject of an issuer, as for owning sessions: a trusted
 issuer's users count apart from `occamyd`'s own.
 
+No limit yet bounds the CPU that decoding takes across sessions. A
+native RDP session may take about one core decoding what its server
+sends, whatever that is, so one user with the default 10 sessions to
+hostile servers, such as ad-hoc targets they chose, can take about 10
+cores, and `limits.sessions` sessions that many. A budget for the whole
+process is to come before the release
+([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)).
+Until then, lower `limits.sessions_per_user` where users are not
+trusted with that much, or keep `allow_adhoc_targets` off.
+
 ### Streams: `streams`
 
 | Key | Default | Meaning |

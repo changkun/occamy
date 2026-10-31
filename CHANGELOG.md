@@ -567,24 +567,31 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   transform, first passes, difference tiles and upgrades with SRL and
   raw bits, and tiles drawn within their region's rectangles at its
   end. A surface's tiles keep their coefficients until the surface is
-  deleted, as [MS-RDPEGFX] 3.3.1.3 requires, and their signs only
-  while their codec context lives (3.3.1.2), so a difference tile after
-  a context's delete or switch adds to the tile, and an upgrade after
-  either ends the session. The tiles are at most twice those of the
-  largest desktop the session had (at least 1,024), 576 MiB at worst,
-  and malformed input ends the session. The decoding rate is priced by
-  measured cost, a RemoteFX tile's pixel 7 units and a planar one 2, at
-  512 Mi units a second: about one core of an Apple M5 Pro at most for
-  a session, whatever the server sends. A session's first screen does
-  not wait, and full-screen RemoteFX Progressive at 1920 × 1080 and 30
-  frames a second takes 82% of it; before, the rate held it to 2.3
-  frames a second. At the first ClearCodec, cache or other GFX PDU
-  that it skips, a session logs a warning naming `disable_gfx: true`
-  and `adhoc_backends: {rdp: guacd}`. The decoder
-  matches [MS-RDPRFX] 4.2.4's tile exactly through the third level's
-  inverse, its components within 2/32 of a level and its pixels within
-  1, and [MS-RDPEGFX] 4.1.2's progressive example exactly, whose SRL
-  bytes in 4.1.2.1.4 leave out a value its own decode has. Against
+  deleted, as [MS-RDPEGFX] 3.3.1.3 requires, and their signs while
+  the codec context of their last first pass lives (3.3.1.2). Codec
+  contexts may interleave: a W2S2 of one ends no other, and deleting
+  one ends its own tiles' tile contexts alone. A difference tile after
+  a context's delete adds to the tile, and an upgrade the client
+  cannot apply, after its context's delete or in the other transform,
+  is skipped and counted, with the tile's later upgrades until its
+  next first pass, rather than ending the session. The tiles are at
+  most twice those of the largest desktop the session had (at least
+  1,024), 576 MiB at worst, and malformed input ends the session. The
+  decoding rate is priced by measured cost, a RemoteFX tile's pixel 7
+  units and a planar one 2, at 512 Mi units a second: about one core
+  of an Apple M5 Pro for a session's real content, and a session's
+  one reader holds it to a core whatever the server sends. No budget
+  bounds sessions together yet, which is to come before the release.
+  A session's first screen does not wait, and full-screen RemoteFX
+  Progressive at 1920 × 1080 and 30 frames a second takes 82% of the
+  rate; before, the rate held it to 2.3 frames a second. At the first
+  ClearCodec, cache or other GFX PDU that it skips, a session logs a
+  warning naming `disable_gfx: true` and `adhoc_backends: {rdp: guacd}`.
+  The decoder matches [MS-RDPRFX] 4.2.4's tile exactly through the
+  third level's inverse, its components within 2/32 of a level and its
+  pixels within 1, and [MS-RDPEGFX] 4.1.2's progressive example
+  exactly, whose SRL bytes in 4.1.2.1.4 leave out a value its own
+  decode has. Against
   xrdp 0.10.1, which sends RemoteFX Progressive with the
   reduce-extrapolate transform and difference tiles, the session's
   wallpaper decodes within 4 levels per channel and the probe's swatch

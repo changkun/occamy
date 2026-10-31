@@ -285,11 +285,17 @@ best effort, has none. The live run was repeated after the fixes.
       copied, 2 a planar pixel, and 7 a pixel of a RemoteFX or
       progressive tile, each priced by what it costs to decode on the
       benchmarks' host (an Apple M5 Pro, 3 runs, 1-minute load 6.9 to
-      12.3): a unit costs 1.88 ns at most, progressive tiles of real
-      content. The rate therefore holds a session to about one core of
-      that host, whatever the server sends; the cheapest floods to
-      send, tiles of a header alone and 3-byte RLE runs, cost 1.1 to
-      1.8 ns a unit and are held to 0.6 to 0.8 of a core.
+      12.3): a unit of real content costs up to 1.88 ns, progressive
+      tiles'. The rate therefore holds a session's real content to
+      about one core of that host; crafted work that costs more a unit,
+      2.65 ns for a RemoteFX tile of 4,096 rectangles of a pixel, needs
+      about 377 MB/s of input, and the session's one reader goroutine
+      holds it to a core. The cheapest floods to send, tiles of a header
+      alone and 3-byte RLE runs, cost 1.1 to 1.5 ns a unit (medians) and
+      are held to 0.6 to 0.8 of a core. The rate is a session's, so a
+      user with ten sessions to hostile servers can take ten cores; a
+      budget for the whole process is a release item
+      ([native-rdp-backend](native-rdp-backend.md)).
     - The bucket holds two desktops of tiles and a pointer update, so a
       session's first screen, in any codec, never waits. Full-screen
       RemoteFX Progressive at 1920×1080 and 30 frames a second takes

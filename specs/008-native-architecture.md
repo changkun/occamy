@@ -95,6 +95,11 @@ Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
 - The [004](004-security-hardening.md) properties hold by design: no
   credentials in tokens or logs, an allowlisted connection registry, and
   no debug endpoints on the public listener.
+- Decoding is bounded for the process, not only per session: a native
+  RDP session may take about a core, so one user's
+  `limits.sessions_per_user` sessions to hostile servers take that many
+  cores ([native-rdp-backend](008-native-architecture/native-rdp-backend.md),
+  phase 3's follow-ups).
 - `docs/protocol.md` and the API reference are complete.
 
 ## Path to pure Go

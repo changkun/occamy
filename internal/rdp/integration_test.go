@@ -596,7 +596,8 @@ func gfxNothingSkipped(t *testing.T, s *session) {
 	t.Helper()
 	ign := s.c.Stats().Ignored
 	for _, k := range []string{"GFX progressive regions outside a frame", "GFX progressive blocks", "GFX bitmaps of unknown codecs",
-		"GFX progressive bitmaps in wire to surface 1", "GFX ClearCodec bitmaps", "GFX deletes of no codec context"} {
+		"GFX progressive bitmaps in wire to surface 1", "GFX ClearCodec bitmaps", "GFX deletes of no codec context",
+		"GFX progressive upgrades without a tile context", "GFX progressive tiles in another transform"} {
 		if ign[k] != 0 {
 			t.Errorf("ignored %d %s", ign[k], k)
 		}

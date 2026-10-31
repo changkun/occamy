@@ -304,12 +304,22 @@ in v1. A v1 session runs as follows:
   manages on one core of that host anyway. No scene reaches it: the
   fastest, G3's 62.5 frames a second, would take 64% of the rate if
   every frame were a full screen of tiles. The rate and the decoder
-  are both Occamy's, so neither justifies a miss. One risk for the v1
-  run to measure: a full screen of progressive tiles at 1024 × 768
-  takes about 10 ms of CPU to decode on that host
-  (`BenchmarkGFXProgressive`), above G5's RDP target of 5.5 ms a frame
-  in all. If xrdp redraws the whole screen each frame, native RDP
-  misses that target unless the decoder gets faster.
+  are both Occamy's, so neither justifies a miss.
+- **G5 over native RDP with GFX is an expected miss.** G5's scene
+  redraws every pixel in every frame (`bench/scene/content.go`'s
+  plasma), so with GFX on, `rdp-native` decodes a full screen of
+  RemoteFX Progressive tiles for each delivered frame: 10.3 ms of CPU
+  at 1024 × 768 on the benchmarks' host (`BenchmarkGFXProgressive`,
+  13.1 ns a pixel), and 10.4 to 11.9 ms as the review measured it,
+  against G5's RDP target of 5.5 ms a frame for occamyd in all.
+  Decoding alone misses the target, before anything is encoded for the
+  viewer. With `disable_gfx`, xrdp sends bitmap updates instead, which
+  cost about 1 to 2.4 ms a frame to decode (the review's 1 to 1.6;
+  here 1.8 to 2.4 for planar, which xrdp sends at 32 bits per pixel,
+  `BenchmarkGFXPlanar`). The owner is to choose before the v1
+  run: measure `rdp-native` in G5 with GFX, without it, or both; or
+  make the decoder faster first. Until then G5's RDP row is not
+  expected to meet its target with GFX.
 
 CI runs both v1 series quickly under N1, after the v0 smoke run, on the
 same stack.

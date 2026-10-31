@@ -227,12 +227,15 @@ const (
 	// 2 units and a RemoteFX tile's 7 (rfxTileCost), as they take the
 	// longest to decode; other work is charged a unit a pixel it draws
 	// or copies. On the host of the benchmarks (an Apple M5 Pro), a unit
-	// costs at most 1.9 ns, a RemoteFX Progressive tile of real content,
+	// of real content costs up to 1.9 ns, a RemoteFX Progressive tile's,
 	// so the rate holds a session to about one core, as its one reader
 	// goroutine does anyway; the cheapest floods to send, tiles of a
 	// header and no coefficients and 3-byte RLE runs, cost 1.1 to 1.5 ns
 	// a unit, so 0.6 to 0.8 of a core (BenchmarkHostileTiles,
-	// BenchmarkHostileBitmap). It cannot be lower without holding back
+	// BenchmarkHostileBitmap). Crafted work can cost more a unit, as a
+	// RemoteFX tile of 4,096 rectangles of a pixel, measured at 2.65 ns
+	// in review, but needs about 377 MB/s of input to keep up, and the
+	// reader holds it to a core. It cannot be lower without holding back
 	// full-motion RemoteFX: full-screen tiles at 1920×1080 and 30 frames
 	// a second take 418 Mi units a second, 82% of it, and about 0.8 of a
 	// core. They come through without a wait; at 3840×2160, the rate

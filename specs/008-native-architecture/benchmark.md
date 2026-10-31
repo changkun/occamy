@@ -434,10 +434,16 @@ published.
     9 at 3840 × 2160, near the decoder's own speed on one core
     ([native-rdp-backend](native-rdp-backend.md)'s phase 3 notes). No
     scene reaches it at 1024 × 768. It is Occamy's bound, not one
-    outside it, so it justifies no miss. `docs/benchmarks.md` notes a
-    risk for the v1 run: decoding a full screen of progressive tiles
-    at 1024 × 768 takes about 10 ms of CPU, above G5's RDP target of
-    5.5 ms a frame if xrdp redraws the whole screen each frame.
+    outside it, so it justifies no miss.
+  - G5 over native RDP with GFX is an expected miss. G5's scene redraws
+    every pixel in every frame, so `rdp-native` with GFX decodes a full
+    screen of RemoteFX Progressive tiles a frame: about 10.3 ms of CPU
+    at 1024 × 768 on the benchmarks' host, 10.4 to 11.9 as the review
+    measured, against G5's RDP target of 5.5 ms a frame. With
+    `disable_gfx`, bitmap updates cost about 1 to 2.4 ms a frame. The
+    owner decides before the v1 run whether `rdp-native` runs G5 with
+    GFX, without it, or both, or whether the decoder gets faster first
+    (`docs/benchmarks.md`).
   - `bench/v1.go` drives the Go client core through API v1: it signs in
     at `POST /api/v1/auth/token`, opens
     `GET /api/v1/connections/{id}/stream`, asking for 1024 × 768 pixels
