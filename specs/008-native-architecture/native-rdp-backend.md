@@ -283,7 +283,14 @@ and guacd leaves the default deployment.
     hangs up before the reader has read what it sent, as at a high
     rate of input; the writer then gives the reader a second to end
     on its own, with the server's reason, before it closes the
-    connection.
+    connection. The review's repro, a server that ends the session
+    and closes while a viewer moves the pointer at 20 kHz, reported 1
+    to 6 of 100 deliberate ends as errors before the fix on this host
+    (the review saw 14 of 40 under load), and 0 of 100 in each of
+    four runs after it. Without the grace it also gave 0 of 100 here,
+    three times: the grace covers a write that fails on its own before
+    the reader is done, which `TestRunWriteFailsThenServerEnds` makes
+    happen and which this host's loopback did not.
   - Control and Pause (Break) could not be sent: Pause always sent
     its sequence. Now it is Break while Control is down by the keys
     sent (decision 4), and keysym Break maps to E0 46 too.
@@ -292,7 +299,10 @@ and guacd leaves the default deployment.
     for that end. Now a reason holds only until a share data PDU other
     than another reason, a fast-path update or a reactivation; a
     Deactivate All keeps it, since [MS-RDPBCGR] 1.3.1.4.2 puts one
-    between the reason and the Disconnect Provider Ultimatum.
+    between the reason and the Disconnect Provider Ultimatum. FreeRDP
+    never clears a reason, so this diverges from it: phase 4 checks
+    Windows' logoff and disconnect sequences for any share data PDU
+    between the reason and the end, which would clear it.
 
   It also led to: a `Text` typed a part at a time, so that the writer
   holds at most 1,024 events where one large `Text` used to keep
