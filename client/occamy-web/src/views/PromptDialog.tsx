@@ -61,7 +61,7 @@ export function PromptDialog({ prompt, onAnswer, onEnd }: PromptDialogProps): Re
             <input
               name={`answer-${i}`}
               type={f.secret ? 'password' : 'text'}
-              autoComplete={f.secret ? 'current-password' : 'off'}
+              autoComplete={f.secret ? 'one-time-code' : 'off'}
               autoCapitalize="none"
               spellCheck={false}
               autoFocus={i === 0}

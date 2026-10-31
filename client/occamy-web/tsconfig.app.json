@@ -8,5 +8,5 @@
     "types": ["vite/client"]
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["src/**/*.test.ts", "src/protocol/testing/**", "src/protocol/demo/vite.config.ts"]
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/protocol/testing/**", "src/protocol/demo/vite.config.ts"]
 }
