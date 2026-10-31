@@ -26,6 +26,7 @@ package rdp
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -123,6 +124,11 @@ type Config struct {
 	// SecurityNLAExt, SecurityTLS or SecurityAny. Standard RDP security
 	// is not supported.
 	Security string
+	// SecuritySetting names what sets Security where the backend's user
+	// sets it, such as a configuration key, in the error for a server
+	// that selects standard RDP security when offered NLA alone, as
+	// xrdp does although it takes TLS; "Config.Security" if empty.
+	SecuritySetting string
 	// TLS is the policy for the server's certificate, shared in meaning
 	// with the VNC backend's. Its ServerName defaults to Addr's host.
 	TLS rdp.TLS
@@ -160,6 +166,8 @@ type Backend struct {
 	cfg         rdp.Config // without the logger's default
 	dialTimeout time.Duration
 	log         *slog.Logger
+	// securitySetting is Config.SecuritySetting, with its default.
+	securitySetting string
 	// dial connects to the server; tests replace it.
 	dial func(ctx context.Context) (net.Conn, error)
 	// grace is hangUpGrace; tests shorten it.
@@ -235,9 +243,10 @@ func New(cfg Config) (*Backend, error) {
 			Resize:         true,
 			Logger:         cfg.Logger,
 		},
-		dialTimeout: cfg.DialTimeout,
-		log:         cfg.Logger,
-		grace:       hangUpGrace,
+		dialTimeout:     cfg.DialTimeout,
+		log:             cfg.Logger,
+		securitySetting: cmp.Or(cfg.SecuritySetting, "Config.Security"),
+		grace:           hangUpGrace,
 	}
 	b.dial = func(ctx context.Context) (net.Conn, error) {
 		d := net.Dialer{Timeout: b.dialTimeout}
@@ -459,8 +468,12 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 	c, err := rdp.Connect(ctx, nc, cfg) // closes nc on an error
 	if err != nil {
 		var ce *rdp.CredSSPError
-		if errors.As(err, &ce) {
+		var pe *rdp.ProtocolError
+		switch {
+		case errors.As(err, &ce):
 			err = fmt.Errorf("%w: %w", ErrAuthFailed, err)
+		case errors.As(err, &pe) && pe.Selected == rdp.ProtocolRDP && pe.Offered&rdp.ProtocolSSL == 0:
+			err = fmt.Errorf("%w; a server that selects standard RDP security when offered NLA alone may still take TLS, as xrdp does: allow TLS with %s", err, b.securitySetting)
 		}
 		return failure(ctx, err)
 	}

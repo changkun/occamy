@@ -547,6 +547,38 @@ func TestRunDefaultRefusesTLS(t *testing.T) {
 	}
 }
 
+// A server that selects standard RDP security when offered NLA alone,
+// as xrdp does, is refused with an error that names the setting that
+// would let it take TLS; offered TLS too, it is refused without one.
+func TestRunStandardSecurity(t *testing.T) {
+	for _, tt := range []struct {
+		security, setting, want string
+	}{
+		{"", "", "allow TLS with Config.Security"},
+		{SecurityNLAExt, `security: tls on connection "desk"`, `allow TLS with security: tls on connection "desk"`},
+		{SecurityAny, "", ""},
+	} {
+		t.Run(tt.security, func(t *testing.T) {
+			checkGoroutines(t)
+			s := listen(t, rdptest.Server{Standard: true})
+			cfg := s.config(t)
+			cfg.Security, cfg.SecuritySetting = tt.security, tt.setting
+			r := start(t, newBackend(t, cfg), &backendtest.Sink{})
+			if a := s.next(t); !errors.Is(a.err, rdptest.ErrStandardSecurity) {
+				t.Fatalf("the server's Accept returned %v", a.err)
+			}
+			err := r.wait(t)
+			var pe *rdp.ProtocolError
+			if !errors.As(err, &pe) || pe.Selected != rdp.ProtocolRDP {
+				t.Fatalf("Run returned %v, want the server's protocol refused", err)
+			}
+			if hint := strings.Contains(err.Error(), "allow TLS with"); tt.want == "" && hint || tt.want != "" && !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("Run returned %q, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
 // stripNLA is a man in the middle in front of upstream: it rewrites the
 // protocols the client offers in its connection request to TLS alone,
 // and relays the rest untouched. It returns its address.
