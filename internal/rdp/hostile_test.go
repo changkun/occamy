@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"changkun.de/x/occamy/internal/race"
 )
 
 // What a hostile server could send, from the review of the spike: each
@@ -229,12 +231,19 @@ func TestDecoderKeepsScratch(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, rgba := &c.dec.raw[0], &c.dec.rgba[0]
-	if a := testing.AllocsPerRun(10, func() {
+	a := testing.AllocsPerRun(10, func() {
 		if err := c.handleFastPath(out, frame{fastPath: true, data: pdu}); err != nil {
 			t.Fatal(err)
 		}
-	}); a > 4 || &c.dec.raw[0] != raw || &c.dec.rgba[0] != rgba {
-		t.Errorf("a desktop-sized bitmap allocated %v times, and the buffers moved", a)
+	})
+	if &c.dec.raw[0] != raw || &c.dec.rgba[0] != rgba {
+		t.Error("the decoder's buffers moved between desktop-sized bitmaps")
+	}
+	// Under -race, sync.Pool drops a quarter of what is put back, and the
+	// statistics' fmt.Sprintf takes its printer from one, so the count
+	// is checked without it.
+	if a > 4 && !race.Enabled {
+		t.Errorf("a desktop-sized bitmap allocated %v times, want at most 4", a)
 	}
 	if _, err := c.handleShareControl(out, demandActive(800, 600)); err != nil {
 		t.Fatal(err)

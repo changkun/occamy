@@ -63,12 +63,15 @@ type server struct {
 	connections []config.Connection
 	origins     map[string]bool // origins whose pages may open streams, besides occamyd's own
 	adhoc       *allowlist      // nil unless allow_adhoc_targets
-	backends    backends
-	registry    *session.Registry
-	stop        context.CancelFunc // ends every session, at shutdown
-	streamTTL   time.Duration      // of the stream token POST /api/v1/sessions returns
-	limits      config.Limits
-	streamsCfg  config.Streams
+	// adhocBackends picks the backend of ad-hoc targets by protocol; a
+	// protocol it lacks gets its default.
+	adhocBackends map[string]string
+	backends      backends
+	registry      *session.Registry
+	stop          context.CancelFunc // ends every session, at shutdown
+	streamTTL     time.Duration      // of the stream token POST /api/v1/sessions returns
+	limits        config.Limits
+	streamsCfg    config.Streams
 
 	mu       sync.Mutex
 	sessions map[string]*sessionInfo // by ID, while they run
@@ -207,20 +210,21 @@ func newServer(f *config.File) (*server, error) {
 	registry := session.NewRegistry(ctx)
 	registry.MaxShares = limits.SharesPerSession
 	s := &server{
-		verifier:    auth.NewVerifier(auth.Audience, keys),
-		signer:      signer,
-		ids:         newIdentities(f),
-		signIn:      signIn,
-		connections: f.Connections,
-		origins:     map[string]bool{},
-		backends:    newBackends(f.Guacd),
-		registry:    registry,
-		stop:        stop,
-		streamTTL:   streamTokenLifetime,
-		limits:      limits,
-		streamsCfg:  f.Streams.WithDefaults(),
-		sessions:    map[string]*sessionInfo{},
-		owned:       map[principal]int{},
+		verifier:      auth.NewVerifier(auth.Audience, keys),
+		signer:        signer,
+		ids:           newIdentities(f),
+		signIn:        signIn,
+		connections:   f.Connections,
+		origins:       map[string]bool{},
+		backends:      newBackends(f.Guacd),
+		adhocBackends: f.AdhocBackends,
+		registry:      registry,
+		stop:          stop,
+		streamTTL:     streamTokenLifetime,
+		limits:        limits,
+		streamsCfg:    f.Streams.WithDefaults(),
+		sessions:      map[string]*sessionInfo{},
+		owned:         map[principal]int{},
 	}
 	for _, o := range f.Origins {
 		s.origins[strings.ToLower(o)] = true
@@ -281,7 +285,13 @@ func newLegacyV0(g config.Guacd) (*proxy, error) {
 // response writer, which is the only one through which a body over the
 // limit can have net/http close the connection.
 func (s *server) routes() http.Handler {
-	mux := http.NewServeMux()
+	return limitBodies(maxBodyBytes)(logRequests(recovery(apiFallback(s.mux()))))
+}
+
+// mux returns the public listener's routes: API v1, /healthz and, with
+// legacy_v0, the v0 routes.
+func (s *server) mux() *routeMux {
+	mux := newRouteMux()
 	mux.HandleFunc("GET /healthz", healthz)
 	mux.HandleFunc("POST /api/v1/auth/token", s.signIn.token)
 	if s.oidc != nil {
@@ -292,7 +302,60 @@ func (s *server) routes() http.Handler {
 	if s.v0 != nil {
 		s.v0.register(mux)
 	}
-	return limitBodies(maxBodyBytes)(logRequests(recovery(apiFallback(mux))))
+	return mux
+}
+
+// routeMux collects routes, and builds the ServeMux that serves them,
+// so that a test can check that docs/api.md describes each route's
+// pattern. It holds no ServeMux that a route could be added to past the
+// list, and hands out the one it builds as a routeHandler, which has no
+// method that adds a route.
+type routeMux struct {
+	routes []route
+}
+
+type route struct {
+	pattern string
+	h       http.Handler
+}
+
+func newRouteMux() *routeMux { return &routeMux{} }
+
+// Handle adds a route for pattern to h, as http.ServeMux.Handle does.
+func (m *routeMux) Handle(pattern string, h http.Handler) {
+	m.routes = append(m.routes, route{pattern, h})
+}
+
+// HandleFunc adds a route for pattern to h, as http.ServeMux.HandleFunc
+// does.
+func (m *routeMux) HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request)) {
+	m.Handle(pattern, http.HandlerFunc(h))
+}
+
+// patterns returns the routes' patterns, in the order they were added.
+func (m *routeMux) patterns() []string {
+	p := make([]string, len(m.routes))
+	for i, r := range m.routes {
+		p[i] = r.pattern
+	}
+	return p
+}
+
+// handler returns a ServeMux that serves the routes. Like
+// http.ServeMux.Handle, it panics if two patterns conflict.
+func (m *routeMux) handler() routeHandler {
+	mux := http.NewServeMux()
+	for _, r := range m.routes {
+		mux.Handle(r.pattern, r.h)
+	}
+	return mux
+}
+
+// routeHandler is what a routeMux builds: it serves requests and finds
+// the route of a request, as http.ServeMux does, but adds no route.
+type routeHandler interface {
+	http.Handler
+	Handler(r *http.Request) (h http.Handler, pattern string)
 }
 
 // newPublicServer returns the public listener's server for h, which
@@ -322,14 +385,19 @@ func newPublicServer(h http.Handler, tlsConfig *tls.Config) *http.Server {
 // listener. It has no write timeout, since a CPU profile or trace takes
 // as long as asked.
 func newDebugServer() *http.Server {
-	mux := http.NewServeMux()
-	mux.Handle("GET /debug/vars", expvar.Handler())
-	profile(func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, h) })
 	return &http.Server{
-		Handler:           logRequests(recovery(mux)),
+		Handler:           logRequests(recovery(debugMux().handler())),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}
+}
+
+// debugMux returns the debug listener's routes.
+func debugMux() *routeMux {
+	mux := newRouteMux()
+	mux.Handle("GET /debug/vars", expvar.Handler())
+	profile(func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, h) })
+	return mux
 }
 
 // serveUntil serves public on ln, with TLS if public has a TLSConfig, and

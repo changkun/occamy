@@ -141,7 +141,9 @@ Occamy offers two APIs, the v0 routes:
 
 They were `/api/v1/login` and `/api/v1/connect` through 0.6.0; `/api/v1`
 now belongs to API v1, which is in progress
-([specs/008](./specs/008-native-architecture/api-and-server-stack.md)).
+([specs/008](./specs/008-native-architecture/api-and-server-stack.md))
+and which a v1 configuration file serves. [docs/api.md](./docs/api.md)
+is its reference: every route, its tokens, requests, replies and errors.
 The v0 routes are removed at v1.0.
 
 If you build Occamy with web client, you can also access `/static` for web client demo.
@@ -154,7 +156,7 @@ working demo with:
 
 ```
 make build      # the occamy image
-make run        # occamy plus the demo servers, on localhost:5636
+make run        # occamy plus the demo servers, on localhost:5636 and :5637
 make stop
 ```
 
@@ -169,7 +171,11 @@ Occamy reaches them by compose service name:
 | RDP | `rdp:3389` | `occamy` | `occamy` |
 
 Occamy connects to them through upstream guacd 1.6, which also runs in
-the stack.
+the stack. A second `occamyd`, `occamy-v1` on `localhost:5637`, serves
+API v1 from the v1 file [docker/occamy-v1.yaml](./docker/occamy-v1.yaml),
+with the user `demo` and the password `occamy`: the VNC server as the
+connection `vnc-native`, through `occamyd`'s own VNC client
+(`backend: native`), and as `vnc-guacd`, through guacd.
 
 Here is a working video demo:
 
@@ -185,7 +191,10 @@ go test ./...
 
 [tests/](./tests) holds end-to-end and pressure tests that open real
 sessions to the demo servers. They are skipped unless
-`OCCAMY_E2E_ENDPOINT` is set; `make e2e` sets it to `localhost:5636`:
+`OCCAMY_E2E_ENDPOINT` is set, and those of `occamy-v1`, which stream
+both VNC connections with the Go client of protocol v1, unless
+`OCCAMY_E2E_V1_ENDPOINT` is; `make e2e` sets them to `localhost:5636`
+and `localhost:5637`:
 
 ```
 make build

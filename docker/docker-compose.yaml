@@ -3,17 +3,20 @@
 # license that can be found in the LICENSE file.
 
 # Demo stack: occamy plus demo servers built from docker/demo/. Services
-# reach each other by name on the default network; only occamy is
-# published. occamy starts once the servers accept connections, because a
-# connection to a server that is not up yet would fail. occamy is not
-# restarted automatically, so that a crash fails the end-to-end tests
-# instead of going unnoticed.
+# reach each other by name on the default network; only occamy and
+# occamy-v1 are published. occamy starts once the servers accept
+# connections, because a connection to a server that is not up yet would
+# fail. occamy is not restarted automatically, so that a crash fails the
+# end-to-end tests instead of going unnoticed.
+#
+# OCCAMY_IMAGE, OCCAMY_PORT and OCCAMY_V1_PORT run a second stack next to
+# the first, under another project name (-p), on a shared host.
 
 services:
   occamy:
-    image: occamy:latest
+    image: ${OCCAMY_IMAGE:-occamy:latest}
     ports:
-      - "5636:5636"
+      - "${OCCAMY_PORT:-5636}:5636"
     volumes:
       - ./occamy.yaml:/occamy/conf.yaml:ro
     depends_on:
@@ -26,8 +29,29 @@ services:
       rdp:
         condition: service_healthy
 
+  occamy-v1:
+    # The same image serving a v1 file (occamy-v1.yaml) on port 5637: the
+    # demo VNC server through the native backend (backend: native) and
+    # through guacd, for API v1 and protocol v1 clients.
+    image: ${OCCAMY_IMAGE:-occamy:latest}
+    command: ["/occamy/occamyd", "-conf", "/occamy/v1.yaml"]
+    ports:
+      - "${OCCAMY_V1_PORT:-5637}:5637"
+    volumes:
+      - ./occamy-v1.yaml:/occamy/v1.yaml:ro
+    tmpfs:
+      # The signing key, which the nonroot user creates at start.
+      - /run/occamy:mode=1777
+    environment:
+      OCCAMY_DEMO_VNC_PASSWORD: vncpassword
+    depends_on:
+      guacd:
+        condition: service_healthy
+      vnc:
+        condition: service_healthy
+
   guacd:
-    # occamy reaches it as guacd:4822 (occamy.yaml). guacd opens the
+    # occamy reaches it as guacd:4822 (occamy.yaml, occamy-v1.yaml). guacd opens the
     # connections to the demo servers, so the hosts in tokens must resolve
     # from here.
     image: docker.io/guacamole/guacd:1.6.0

@@ -68,7 +68,7 @@ type sessionInfo struct {
 
 // registerSessions registers the routes of connections and sessions,
 // each for callers with an access token.
-func (s *server) registerSessions(mux *http.ServeMux) {
+func (s *server) registerSessions(mux *routeMux) {
 	authed := authenticate(s.verifier, s.ids)
 	mux.Handle("GET /api/v1/connections", authed(http.HandlerFunc(s.listConnections)))
 	mux.Handle("POST /api/v1/sessions", authed(http.HandlerFunc(s.openSession)))
@@ -245,11 +245,13 @@ func connectionTarget(c *config.Connection) target {
 	return target{
 		connection:            c.ID,
 		protocol:              c.Protocol,
+		backend:               c.Backend,
 		addr:                  c.Target,
 		creds:                 c.Credentials,
 		hostKeys:              c.HostKeys,
 		insecureIgnoreHostKey: c.InsecureIgnoreHostKey,
 		tls:                   c.TLS,
+		ard:                   c.ARD,
 	}
 }
 
@@ -259,7 +261,7 @@ func (s *server) adhocTarget(ctx context.Context, req *openRequest) (target, *re
 	if s.adhoc == nil {
 		return target{}, &requestError{http.StatusForbidden, codeForbidden, "ad-hoc targets are off: name a connection"}
 	}
-	if _, ok := s.backends[req.Protocol]; !ok {
+	if !s.backends.serves(req.Protocol) {
 		return target{}, badRequest("unknown protocol %q", req.Protocol)
 	}
 	addr, err := config.NormalizeTarget(req.Protocol, req.Target)
@@ -292,6 +294,7 @@ func (s *server) adhocTarget(ctx context.Context, req *openRequest) (target, *re
 	}
 	t := target{
 		protocol:              req.Protocol,
+		backend:               s.adhocBackends[req.Protocol],
 		addr:                  net.JoinHostPort(dial.String(), port),
 		creds:                 config.Credentials{Username: req.Username, Prompt: true},
 		hostKeys:              req.HostKeys,
@@ -317,9 +320,9 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 		log.Printf("user %q opening %s: %v", owner.String(), what, err)
 		return nil, nil, err
 	}
-	maker, ok := s.backends[t.protocol]
+	maker, ok := s.backends.lookup(t.protocol, t.backend)
 	if !ok {
-		return fail(fmt.Errorf("no backend serves %s", t.protocol))
+		return fail(fmt.Errorf("no backend %q serves %s", config.BackendOf(t.protocol, t.backend), t.protocol))
 	}
 	// The session counts toward the owner's, and occamyd's, from now
 	// until it ends, so that concurrent requests cannot all pass the

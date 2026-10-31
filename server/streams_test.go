@@ -627,7 +627,7 @@ func TestShutdownEndsStreams(t *testing.T) {
 		t.Fatal(err)
 	}
 	fb := &fakeBackends{}
-	s.backends.register("fake", "fake", fb.make)
+	s.backends.register("fake", "", "fake", fb.make)
 	ln := localListener(t)
 	stop := serving(t, time.Second, s.publicServer(), ln, nil, nil)
 	ts := &testServer{s: s, srv: nil}
@@ -1008,7 +1008,7 @@ func TestStreamSizeBounds(t *testing.T) {
 	resized(term.Inputs, backend.Resize{Width: terminal.MaxCols, Height: terminal.MaxRows})
 
 	var scr *backendtest.Screen
-	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
+	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) {
 		scr = backendtest.NewScreen(64, 48, 0)
 		return scr, nil
 	})
@@ -1027,7 +1027,7 @@ func TestStreamSizeBounds(t *testing.T) {
 // with unsupported.
 func TestStreamCodecs(t *testing.T) {
 	ts, _ := sessionServer(t, nil)
-	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
+	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) {
 		return backendtest.NewScreen(64, 48, 0), nil
 	})
 	alice := ts.token(t, "alice", "ops")
@@ -1085,7 +1085,7 @@ func (failing) Run(context.Context, backend.Sink) error { return errors.New("con
 // after.
 func TestStreamBackendFails(t *testing.T) {
 	ts, _ := sessionServer(t, nil)
-	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
+	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) {
 		return failing{backendtest.NewTerminal(80, 24, 0)}, nil
 	})
 	alice := ts.token(t, "alice", "ops")
@@ -1111,7 +1111,7 @@ func (panicsOnInput) Input(backend.InputEvent) error { panic("the backend's inpu
 // viewer, and that occamyd goes on serving.
 func TestBackendPanicEndsSession(t *testing.T) {
 	ts, _ := sessionServer(t, nil)
-	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
+	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) {
 		return panicsOnInput{backendtest.NewTerminal(80, 24, 0)}, nil
 	})
 	alice := ts.token(t, "alice", "ops")
@@ -1204,22 +1204,95 @@ func heapInUse() uint64 {
 	return m.HeapInuse
 }
 
-// keepReading reads c and acknowledges its frames until the stream ends,
-// with no deadline, as an owner who keeps up does.
-func keepReading(c *streamClient) {
+// waitLong is waitFor for what moves whole screens, which on a loaded
+// machine under -race may take seconds.
+func waitLong(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(30 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// ownerClient is the stream of an owner who keeps up: it reads with no
+// deadline, acknowledges every frame, and renders the terminal its
+// frames give, as a client does.
+type ownerClient struct {
+	*streamClient
+
+	mu     sync.Mutex
+	screen *terminal.Screen // the owner's screen as of the last frame's end
+	pong   uint32           // the nonce of the last pong
+	nonce  uint32           // of the last ping
+}
+
+// read reads until the stream ends.
+func (o *ownerClient) read() {
 	ctx := context.Background()
+	var term *terminal.Terminal
+	var size image.Point
 	for {
-		_, p, err := c.ws.Read(ctx)
+		_, p, err := o.ws.Read(ctx)
 		if err != nil {
 			return
 		}
 		m, err := protocol.Decode(p, protocol.ServerMessages(), protocol.Limits{})
-		if f, ok := m.(*protocol.FrameEnd); ok && err == nil {
-			if c.ws.Write(ctx, websocket.MessageBinary, protocol.FrameAck{FrameID: f.FrameID, DecodeTime: 1}.Append(nil)) != nil {
+		if err != nil {
+			continue
+		}
+		switch m := m.(type) {
+		case *protocol.Resize:
+			size = image.Pt(int(m.Width), int(m.Height))
+			if term != nil {
+				term.Resize(size.X, size.Y)
+			}
+		case *protocol.TermSnapshot:
+			term = terminal.New(size.X, size.Y, terminal.Options{})
+			term.Write(m.Data)
+		case *protocol.TermData:
+			if term != nil {
+				term.Write(m.Data)
+			}
+		case *protocol.FrameEnd:
+			if term != nil {
+				s := term.Snapshot()
+				o.mu.Lock()
+				o.screen = s
+				o.mu.Unlock()
+			}
+			if o.ws.Write(ctx, websocket.MessageBinary, protocol.FrameAck{FrameID: m.FrameID, DecodeTime: 1}.Append(nil)) != nil {
 				return
 			}
+		case *protocol.Pong:
+			o.mu.Lock()
+			o.pong = m.Nonce
+			o.mu.Unlock()
 		}
 	}
+}
+
+// has waits until the owner has screen and its stream holds no other.
+// The owner's writer holds the screen it last sent until the frame of
+// the next one ends, and keeps that frame's screen before it answers a
+// ping again, so a ping sent once the owner has screen is answered once
+// the writer holds that screen alone.
+func (o *ownerClient) has(t *testing.T, screen *terminal.Screen) {
+	t.Helper()
+	waitLong(t, "the owner to have the screen", func() bool {
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		return o.screen.Equal(screen)
+	})
+	o.nonce++
+	o.send(t, protocol.Ping{Nonce: o.nonce})
+	waitLong(t, "the owner's pong", func() bool {
+		o.mu.Lock()
+		defer o.mu.Unlock()
+		return o.pong == o.nonce
+	})
 }
 
 // screenful is a session of alice's terminal at 1000x500 cells, the
@@ -1231,7 +1304,7 @@ type screenful struct {
 	path  string // of its stream
 	share string // a read-only share token
 	hello protocol.Hello
-	owner *streamClient
+	owner *ownerClient
 	seq   uint32
 }
 
@@ -1243,8 +1316,8 @@ func newScreenful(t *testing.T, viewerTimeout time.Duration) *screenful {
 	sf.hello.Cols, sf.hello.Rows = 1000, 500
 	o := ts.openSession(t, alice, "ops-shell")
 	sf.path = "/api/v1/sessions/" + o.ID + "/stream"
-	sf.owner = ts.stream(t, sf.path, o.StreamToken, sf.hello)
-	go keepReading(sf.owner)
+	sf.owner = &ownerClient{streamClient: ts.stream(t, sf.path, o.StreamToken, sf.hello)}
+	go sf.owner.read()
 	sf.info = ts.s.session(o.ID)
 	waitFor(t, "the size", func() bool { return sf.info.s.Size().X == 1000 })
 	sf.redraw(t, 'a')
@@ -1258,18 +1331,31 @@ func newScreenful(t *testing.T, viewerTimeout time.Duration) *screenful {
 }
 
 // redraw fills the screen with c, so that a viewer that has the screen
-// from before holds a screen the session no longer does.
+// from before holds a screen the session no longer does. It returns once
+// the owner has the screen redrawn, so that the owner's stream holds the
+// same at every redraw: under -race, sending it the redraw can take
+// longer than any fixed wait, and until it is sent the owner's writer
+// holds the screen from before, as much as a viewer that kept one.
 func (sf *screenful) redraw(t *testing.T, c byte) {
 	t.Helper()
-	// Home, then 500 rows of 1000 cells, in messages under 64 KiB.
-	body := "\x1b[H" + strings.Repeat(string(c), 1000*500-1)
-	for len(body) > 0 {
-		n := min(len(body), 60000)
+	// Home, then 500 rows of 1000 cells but the last, in messages under
+	// 64 KiB. Each goes once the session's screen shows the one before:
+	// the owner's last input keeps the screen it was applied to, which
+	// then differs from the redrawn one only in the rows the last
+	// message writes.
+	const home = "\x1b[H"
+	body := home + strings.Repeat(string(c), 1000*500-1)
+	for sent := 0; sent < len(body); {
+		n := min(len(body)-sent, 60000)
 		sf.seq++
-		sf.owner.send(t, protocol.TermInput{Seq: sf.seq, Data: []byte(body[:n])})
-		body = body[n:]
+		sf.owner.send(t, protocol.TermInput{Seq: sf.seq, Data: []byte(body[sent : sent+n])})
+		sent += n
+		end := sent - len(home) - 1 // the last cell written
+		waitLong(t, "the session's screen to show the input", func() bool {
+			return sf.info.s.Screen().Cell(end%1000, end/1000).Content == string(c)
+		})
 	}
-	time.Sleep(150 * time.Millisecond)
+	sf.owner.has(t, sf.info.s.Screen())
 }
 
 // ownerAlone fails t unless the owner is the session's only viewer.
@@ -1333,7 +1419,13 @@ func TestHiddenViewersRelease(t *testing.T) {
 	for i := range n {
 		v := sf.ts.stream(t, sf.path, sf.share, sf.hello)
 		v.until(t, "the first frame", func(m protocol.Message) bool { _, ok := m.(*protocol.FrameEnd); return ok })
-		v.send(t, protocol.View{Visible: false}) // then reads nothing more
+		v.send(t, protocol.View{Visible: false})
+		// The stream reads its messages in order, so once it answers a
+		// ping sent after view the session has the viewer hidden, and
+		// the redraw sends it no frame.
+		v.send(t, protocol.Ping{Nonce: 1})
+		v.until(t, "the pong", func(m protocol.Message) bool { _, ok := m.(*protocol.Pong); return ok })
+		// It reads nothing more.
 		sf.redraw(t, byte('b'+i))
 	}
 	held := heapInUse()
