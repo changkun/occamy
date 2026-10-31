@@ -472,6 +472,14 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 	var werr error
 	var wg sync.WaitGroup
 	wg.Go(func() {
+		// The writer turns viewers' input into RDP's, beyond the
+		// session's recover: a panic stops the client and ends Run.
+		defer func() {
+			if perr := backend.Recovered(recover()); perr != nil {
+				werr = perr
+				c.Close()
+			}
+		}()
 		if werr = r.writeLoop(c, done, &b.visible); werr == nil {
 			return
 		}
@@ -487,16 +495,28 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 			c.Close()
 		}
 	})
-	err = c.Run(ctx, sink)
-	close(done)
-	c.Close()
-	wg.Wait()
+	err = func() error {
+		// Deferred, so that a panic of the client, which the session
+		// recovers from, stops the writer and closes the connection too.
+		defer func() {
+			close(done)
+			c.Close()
+			wg.Wait()
+		}()
+		return c.Run(ctx, sink)
+	}()
 	return b.end(ctx, err, werr)
 }
 
 // end returns Run's result for the client's, and the writer's error,
-// which is the result only when it stopped the client.
+// which is the result when it is a panic, whatever the client returned,
+// and otherwise only when it stopped the client.
 func (b *Backend) end(ctx context.Context, err, werr error) error {
+	if errors.As(werr, new(backend.PanicError)) {
+		// A bug, whatever else happened meanwhile: the session ends with
+		// its internal reason and logs the stack.
+		return werr
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

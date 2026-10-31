@@ -47,6 +47,12 @@ const maxCliprdrMessage = 8 + 2*MaxClipboard
 // so more mean a server that does not read.
 const maxDataRequests = 8
 
+// maxListResponses bounds the Format List Responses the client owes the
+// server. A server sends a Format List when its clipboard changes, and
+// the channel writer answers at once, so more mean a server that floods
+// lists while it does not read, or faster than the client writes.
+const maxListResponses = 64
+
 // ClipboardMode selects which ways clipboard text goes. With neither
 // direction the client does not ask for the clipboard channel.
 type ClipboardMode uint8
@@ -149,6 +155,10 @@ func (c *Client) cliprdrMessage(out Output, msg []byte, truncated bool) error {
 		// The reader alone changes longNames, so it reads it unlocked.
 		format, ok := textFormat(body, cl.longNames)
 		c.chio.mu.Lock()
+		if cl.listOK+cl.listFail == maxListResponses {
+			c.chio.mu.Unlock()
+			return fmt.Errorf("rdp: more than %d clipboard Format List Responses await writing", maxListResponses)
+		}
 		cl.owned = false
 		if ok {
 			cl.listOK++

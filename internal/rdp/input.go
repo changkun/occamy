@@ -273,9 +273,7 @@ func (c *Client) SendInput(events ...InputEvent) error {
 	if len(events) == 0 {
 		return nil
 	}
-	c.mu.Lock()
-	w, h := c.width, c.height
-	c.mu.Unlock()
+	w, h := c.Size()
 	fastPath := c.fastPathInput.Load()
 	batch := make([]inputEvent, 0, min(len(events), maxInputBatch))
 	var frames [][]byte

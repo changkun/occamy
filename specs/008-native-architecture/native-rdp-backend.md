@@ -148,7 +148,10 @@ standing approval to resolve open items; open to the owner's review.
    down or put it to sleep for every user, which is more than a
    viewer's input to one session should reach. Sleep and Wake are
    Generic Desktop usages, which keys do not carry, so there is nothing
-   else to drop.
+   else to drop. Every backend now drops it, by `backend.PowerKey`
+   (`internal/backend/power.go`), which also drops the X11 power
+   keysyms (XF86PowerOff, PowerDown, Sleep, Suspend, Hibernate,
+   Standby) that a key without a code may carry.
 5. **The server's deliberate ends are remote ends.** Run returns nil,
    which the session reports as `remote-ended` (4005), for no reason,
    the user's logoff or disconnect, and also for the reasons guacd
@@ -480,8 +483,12 @@ and guacd leaves the default deployment.
   - Inherited from the VNC backend's text mapping: U+0014 taps Scroll
     Lock, since the C0 controls map to keysyms 0xff00 and up, and CR LF
     types Return twice.
-  - The VNC backend sends Power (E0 5E) through QEMU's extended key
-    events; it may want the same drop as RDP.
+  - ~~The VNC backend sends Power (E0 5E) through QEMU's extended key
+    events; it may want the same drop as RDP.~~ Done in the
+    panic-safety PR: the VNC, RDP and guacd backends drop Power and the
+    power keysyms through one helper, `backend.PowerKey`, whose
+    `HIDPower` the web client's keyboard test reads. The web client
+    still maps Power; no backend sends it.
   - Lang1 and Lang2's scancodes, unchecked against Windows.
   - At registration in `occamyd`'s backend factory, with the
     connection configuration's `rdp` parameters (`RoutingCookie` among
@@ -517,7 +524,8 @@ and guacd leaves the default deployment.
     first is dropped and counted, and chunks that run past or stop
     short of the length they declared, or that are compressed, end
     the session. The client sends in chunks of 1,600 bytes, 32 chunks
-    a write, so that input written meanwhile waits for one write.
+    a write, so that input written meanwhile waits for one write; the
+    small messages that are due at once share a write.
   - The reader never writes channel PDUs: it records what is due and
     wakes a goroutine of `Run` that writes it. `SetClipboard` writes
     from its caller under the same lock, so the backend's writer can
@@ -538,7 +546,11 @@ and guacd leaves the default deployment.
     has since replaced is dropped and the newest is asked for, and
     unasked and failed answers are dropped and counted. A server that
     leaves more than 8 of its own requests unanswered ends the
-    session. The server's text is charged against the decoding rate
+    session, as does one that sends Format Lists while more than 64
+    Format List Responses wait to be written: the client owes a
+    counter, not a message, until it writes, and a server that floods
+    lists while it does not read would otherwise grow what the writer
+    builds without bound (found in review). The server's text is charged against the decoding rate
     as a pointer shape is, a tile at least, so that announcing it again
     and again makes the client wait. A Format List that does not parse
     is refused with a failed response; a message whose length is wrong
@@ -623,6 +635,20 @@ and guacd leaves the default deployment.
     byte budget (`TestRunClipboardBounded`, `TestInputErrors`);
   - the read-only role (`TestReadOnlyInputDropped`), and CredSSP 5 at
     least, through the acceptor (`TestRunNLARefused`).
+
+  A later check found that one of them, the failed answer's, had not
+  compiled, which the script took for a failed test; rewritten so that
+  it compiles, it is caught. The review of the pull request ran its own
+  and found five more that survived, now caught: the clipboard
+  channel's bound (`TestClipboardChannelBound`), writeDue's lock, so
+  that one message's chunks interleave with another's
+  (`TestChannelMessagesWhole`), the surrogate guard on an odd length
+  (`TestClipboardText`), the drop of a CLIPRDR message whose length is
+  wrong, text included (`TestClipboardLength`), and channel 0 in the
+  lookup (`TestClipboardChannelBound`). The bound on owed Format List
+  Responses and the shared writes are caught both by their unit test
+  (`TestClipboardListResponsesBounded`) and, for the bound, by a flood
+  while the writer is held up (`TestClipboardListFlood`).
 - **Fuzzing.** `FuzzChannel` feeds chunks to the reassembly and checks
   the bound; `FuzzCliprdr` feeds a CLIPRDR message, then sets the
   owner's text and writes what is due; `FuzzRun` now joins the
@@ -664,6 +690,18 @@ and guacd leaves the default deployment.
   - The Heartbeat PDU and auto-detect, with #32's Windows host.
   - Formats beyond text (HTML, images) wait for protocol v1 to carry
     them; files are out of v1.0.
+  - The owner's text goes to the server unpaced: up to 8 requests may
+    wait, each answered with up to 16 MiB of UTF-16 (4 MiB of line
+    ends, each a CR LF of four bytes).
+  - `MaxClipboard` (4 MiB) equals `protocol.DefaultMaxMessageSize`,
+    which counts the message's header, so a server's clipboard near
+    4 MiB is decoded and then dropped by every viewer's writer. The VNC
+    backend does the same.
+  - NTLM sends neither `MsvAvChannelBindings` nor `MsvAvTargetName`,
+    which a Windows server that enforces Extended Protection for
+    Authentication may require; check in phase 4.
+  - Nothing keeps `rdptest` out of the client's non-test imports: a
+    depguard rule or an import test could.
 
 ## Implementation notes: phase 2, DRDYNVC and Display Control
 

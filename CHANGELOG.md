@@ -306,9 +306,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the pointer and wheels, batched into input PDUs from a bounded queue
   in writes of at most 1,024 events; Suppress Output while nobody can
   see. A server's reason for ending the session decides how it ended,
-  even when a write fails as it hangs up. Clipboard and resize wait for
-  the virtual channels of its second phase. Nothing registers it in
-  occamyd until NLA has run end to end. The VNC and RDP backends share
+  even when a write fails as it hangs up. Nothing registers it in
+  occamyd yet. The VNC and RDP backends share
   one USB HID to scan code table, `internal/keymap`.
 - The native RDP backend's clipboard, the first part of its second
   phase: `internal/rdp` joins static virtual channels and reassembles
@@ -317,9 +316,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   most 4 MiB of UTF-8, as `Config.Clipboard` allows. The backend copies
   and pastes it, a paste set before the keys that follow it, unless
   `DisableCopy` or `DisablePaste` stops a direction, as guacd's
-  `disable-copy` and `disable-paste` do. `rdptest` accepts NLA through
-  CredSSP with NTLMv2, so that the backend's NLA path, prompted
-  credentials included, runs end to end in tests.
+  `disable-copy` and `disable-paste` do. The client owes a server at
+  most 64 Format List Responses and 8 answers to its data requests; a
+  server that floods more than that without reading ends the session.
+  `rdptest` accepts NLA through CredSSP with NTLMv2, so that the
+  backend's NLA path, prompted credentials included, runs end to end in
+  tests.
 - The native RDP backend's resize, the second part of its second
   phase: `internal/rdp` speaks DRDYNVC, version 2 at most, and accepts
   the Display Control channel, through which `RequestSize` asks the
@@ -359,11 +361,36 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   one wider or taller than 16,384 pixels or larger than 8192×8192 in
   all, so that an `img` stream cannot make the guacd bridge allocate
   gigabytes.
+- A panic while a backend draws, which a decoder's bug and a remote
+  server's data can cause, no longer leaves the session's screen locked
+  with every viewer's stream waiting for it: the VNC, RDP and guacd
+  backends release the pixels they lock by `defer`, and a session closes
+  its framebuffer when it ends, which releases any pixels still locked.
+  The streams close with 1011, as for any panic the session recovers.
+- Viewers get a terminal's title as the session holds it, even when the
+  title has invalid UTF-8: each invalid byte becomes U+FFFD, three
+  bytes, which could make the title too long for the escape sequence a
+  terminal frame carries it in, so that a viewer got it cut there, with
+  no regard for characters. Titles are now cut, between characters, at
+  what that sequence carries.
 
 ### Security
 
 - occamyd's request log no longer records query strings, which carry the
   v0 token and with it the remote credentials.
+- A panic on a goroutine a backend starts, such as the SSH backend's
+  readers of the remote's output and the VNC, RDP and guacd backends'
+  writers, ends its session with close 1011 instead of crashing occamyd
+  and every other session with it. A panic in the terminal emulator,
+  and one under the state the VNC and RDP backends share between their
+  reader, their writer and the session's input, releases its locks, so
+  that the session cannot hang on them, and a guacd writer's panic ends
+  a prompt's wait for the owner's answer.
+- No backend sends the Power key or the X11 power keysyms
+  (XF86PowerOff, PowerDown, Sleep, Suspend, Hibernate, Standby), which
+  the remote applies to the whole machine. The native VNC backend sent
+  Power through QEMU's extended key events, and the VNC and guacd
+  backends sent the keysyms.
 
 ## [0.6.0] - 2026-10-30
 

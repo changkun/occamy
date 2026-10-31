@@ -62,9 +62,7 @@ func shareControl(typ int, source uint16, body []byte) []byte {
 // shareData wraps a PDU in share control and share data headers,
 // [MS-RDPBCGR] 2.2.8.1.1.1.2.
 func (c *Client) shareData(typ2 int, body []byte) []byte {
-	c.mu.Lock()
-	shareID := c.shareID
-	c.mu.Unlock()
+	shareID := c.share()
 	var w writer
 	w.u32(shareID)
 	w.u8(0)              // pad1
