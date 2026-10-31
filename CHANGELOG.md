@@ -664,10 +664,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   `backend-failed`, as docs/api.md says, even when the remote failed
   before the stream came. Before, the session was gone by the time the
   stream came, and the stream got 4001 "no such session". For the owner
-  grace after a session ends, occamyd keeps its owner and its close, at
-  most 1024 sessions' worth, and gives the close to the owner's stream
-  alone; anyone else still gets "no such session". An owner who
-  reconnects after closing a session gets 4002 `session-closed`.
+  grace after a session ends, occamyd keeps its owner and its close, for
+  as many sessions as `limits.sessions` and 1024 at the least, and gives
+  the close to the owner's stream alone; anyone else still gets "no
+  such session". An owner who reconnects after closing a session gets
+  4002 `session-closed`.
+- `DELETE /api/v1/sessions/{id}` answers once occamyd has let the
+  session go, not only once it has ended. Before, a `GET` or a second
+  `DELETE` right after it could still find the session, a share of it
+  could still be made, and its owner, at `limits.sessions_per_user`,
+  could be refused a new session with 429.
 
 ### Security
 

@@ -527,9 +527,12 @@ Response: `200`, with `Cache-Control: no-store`.
 
 ### `DELETE /api/v1/sessions/{id}`
 
-Closes a session, for its owner. It answers once the session has ended,
-and every stream of the session gets `close` 4002 `session-closed`,
-whatever tokens and shares are still valid.
+Closes a session, for its owner. It answers once the session has ended
+and `occamyd` has let it go: a `GET`, `DELETE` or share of it after the
+answer gets 404, and the session no longer counts toward
+`limits.sessions_per_user` or `limits.sessions`, so its owner may open
+another at once. Every stream of the session gets `close` 4002
+`session-closed`, whatever tokens and shares are still valid.
 
 Response: `204 No Content`, with no body.
 
@@ -776,10 +779,11 @@ after [`POST /api/v1/sessions`](#post-apiv1sessions), or 4002
 [`DELETE /api/v1/sessions/{id}`](#delete-apiv1sessionsid). Everyone
 else gets 4001 "no such session", as for a session that never existed,
 so the answer tells nobody else whether a session existed or how it
-ended. `occamyd` keeps at most 1024 ended sessions, the owner and the
-`close` of each and no more, and forgets the oldest first, so a client
-that opens sessions whose remotes fail cannot grow them; an owner whose
-session was forgotten gets "no such session" too.
+ended. `occamyd` keeps as many ended sessions as `limits.sessions`, and
+1024 at the least, the owner and the `close` of each and no more, and
+forgets the oldest first, so a client that opens sessions whose remotes
+fail cannot grow them; an owner whose session was forgotten gets "no
+such session" too.
 
 A newer stream of the owner takes over from an older one, which gets
 `close` 1000 `normal` with "the owner connected again"; a connection

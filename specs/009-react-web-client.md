@@ -593,8 +593,10 @@ Settled on 2026-10-31.
     closes a single stream with it, one whose reader panicked or that
     it failed to serve, while the session runs on; a 404 after it finds
     no stream open, and so says the session may have ended. Nor does
-    4001, which refuses a session that has ended and one that is not
-    the user's alike. While End waits for occamyd, the toolbar's End is
+    4001, which refuses a session that is not the user's, and one that
+    ended, alike, for anyone but its owner and for its owner too once
+    the owner grace after its end has passed; within it, the owner
+    gets the end's own code. While End waits for occamyd, the toolbar's End is
     disabled and the credential prompt's End does nothing, so that a
     second End neither sends another `DELETE` nor closes the stream
     before occamyd answers the first. A failed End
