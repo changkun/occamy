@@ -1937,7 +1937,8 @@ RDP's guacd path, RDP no longer needs guacd at all.
   ran once the host's 1-minute load fell below 8 (6.5 for the first
   run, 4.5 to 4.7 for the last), and passed. After review's fixes they
   ran again, at a load of 5.7 rising to 7.1, and passed, with no GFX
-  skipped and so no warning.
+  skipped and so no warning. After the second review's, at 5.1 to 5.8,
+  they passed again, with no progressive upgrade or tile skipped.
   - **What xrdp sends.** The session's first screen arrives as 192
     progressive tiles in one wire-to-surface 2. Each key's swatch
     arrives as a tile of its own, 5 of 16 of them as difference tiles.
@@ -2059,6 +2060,10 @@ RDP's guacd path, RDP no longer needs guacd at all.
     and `FuzzConnectionSequence`, for the bitmap updates' new charges,
     4.1 million (load 19.9). None failed. `FuzzRLGR`'s code did not
     change.
+  - After the second review, `FuzzProgressive` checks instead that
+    only a tile with a tile context keeps signs. It ran again for 70 s,
+    459,000 executions (load 5.8), and `FuzzGFX` 129,000 (load 7.4),
+    each alone with 4 workers and `-fuzzminimizetime 5s`. None failed.
 - **Benchmarks** (3 runs each, the host's 1-minute load 6.9 when they
   started and 12.3 when they ended): a frame of 1024 × 768 in tiles of
   64 × 64, a PDU each, decoded and drawn: `BenchmarkGFXRemoteFX` 11.1
