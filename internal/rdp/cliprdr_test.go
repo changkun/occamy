@@ -687,12 +687,12 @@ func TestChannelLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	chunk(30, chanFlagFirst, "0123456789")
-	chunk(30, 0, "abcdefghij")
+	chunk(21, chanFlagFirst, "0123456")
+	chunk(21, 0, "789abcd") // straddles the limit
 	if len(vc.buf) > vc.limit || got != nil {
 		t.Fatalf("kept %d bytes of a message not finished; handled %q", len(vc.buf), got)
 	}
-	chunk(30, chanFlagLast, "ABCDEFGHIJ")
+	chunk(21, chanFlagLast, "efghijk")
 	if string(got) != "0123456789" || !cut {
 		t.Errorf("handled %q, cut %v; want the first 10 bytes, cut", got, cut)
 	}
