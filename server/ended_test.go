@@ -5,6 +5,8 @@
 package server
 
 import (
+	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -250,5 +252,68 @@ func TestJoinEndingSession(t *testing.T) {
 		if c := refused(t, ts, id, token); c != noSuchSession {
 			t.Errorf("%s: close %v %q, want no such session", name, c.Code, c.Reason)
 		}
+	}
+}
+
+// held is a backend whose Run, once its session ends, holds on until
+// release is closed, as a remote slow to hang up does: its session has
+// ended, but is not done.
+type held struct {
+	backend.Backend
+	cancelled chan struct{} // closed once Run's context is done
+	release   chan struct{}
+}
+
+func (h held) Run(ctx context.Context, _ backend.Sink) error {
+	<-ctx.Done()
+	close(h.cancelled)
+	<-h.release
+	return ctx.Err()
+}
+
+// TestJoinEndingSessionWaits joins a session between its end and its
+// backend's return, while it is still among the running ones: anyone
+// but the owner gets no such session at once, and the owner's stream
+// waits for the end, and gets its close.
+func TestJoinEndingSessionWaits(t *testing.T) {
+	ts, _ := sessionServer(t, nil)
+	h := held{backendtest.NewTerminal(80, 24, 0), make(chan struct{}), make(chan struct{})}
+	var once sync.Once
+	release := func() { once.Do(func() { close(h.release) }) }
+	t.Cleanup(release)
+	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) { return h, nil })
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	go ts.s.session(o.ID).s.Close()
+	<-h.cancelled
+	for name, token := range map[string]string{
+		"another user's access token":      ts.token(t, "bob", "ops"),
+		"the owner's viewer session token": sessionToken(t, ts, o.ID, auth.RoleViewer, "alice"),
+	} {
+		if c := refused(t, ts, o.ID, token); c != noSuchSession {
+			t.Errorf("%s: close %v %q, want no such session", name, c.Code, c.Reason)
+		}
+	}
+	c, status, err := dial(ts.srv.URL+"/api/v1/sessions/"+o.ID+"/stream", withToken(o.StreamToken), &termHello, nil)
+	if err != nil {
+		t.Fatalf("%d %v", status, err)
+	}
+	t.Cleanup(func() { _ = c.ws.CloseNow() })
+	got := make(chan protocol.Message, 1)
+	go func() {
+		m, _ := c.next()
+		got <- m
+	}()
+	select {
+	case m := <-got:
+		t.Fatalf("the owner got %#v before the backend returned", m)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if ts.s.session(o.ID) == nil {
+		t.Fatal("the session is no longer among the running ones")
+	}
+	release()
+	if cl, ok := (<-got).(*protocol.Close); !ok || cl.Code != protocol.CloseSessionClosed {
+		t.Errorf("the owner: %#v, want close session-closed", cl)
 	}
 }
