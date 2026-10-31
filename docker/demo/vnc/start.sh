@@ -10,21 +10,30 @@
 # with fr on 5903, both with VNC Authentication, for its keyboard rows.
 # No port is published, as no service of the stack is but occamyd's.
 #
-# x11vnc 0.9.17 hangs for good, now and then, after an X error as a
-# client connects under the parity matrix's sessions: it logs "caught X11
-# error:", drops its polling images on its way to exit, and stops in a
-# futex wait with connections waiting to be accepted. Without MIT-SHM
-# (-noshm) it did so less often on a Mac, but still did in CI.
-# X11VNC_PRINT_XERROR makes it log the failed request first. Each x11vnc
-# runs under a watchdog, which kills one that logs an X error or leaves a
-# connection unaccepted for 26 seconds, and starts one that exits again,
-# backing off while x11vnc keeps exiting, and says so in the log. Its log
-# lines start with its port. If an Xvfb or a desktop exits, so does the
-# container.
+# x11vnc 0.9.17 owns the clipboard after a client's cut text, and
+# answers each request for it with a ChangeProperty on the requestor's
+# window. It traps X errors meanwhile, but checks the window only when
+# 0.2 s have passed since its last check, and stops trapping without
+# waiting for the X server's answer: a BadWindow from a window that has
+# gone (request 18, error 3) reaches its fatal handler, and it logs
+# "caught X11 error:", drops its polling images on its way to exit, and
+# at times stops in a futex wait with connections waiting to be
+# accepted. The clipboard probe (desktop.sh) asks with an xclip that it
+# kills after 2 s, so an x11vnc that stalled for longer met such
+# requests; it did as clients connected, on loaded hosts.
+# X11VNC_SENDEVENT_SYNC makes it wait for the X server (XSync) before it
+# stops trapping, as it does by itself once its check has found a gone
+# window, so that the error is trapped (tests/x11vnc_test.go).
+# X11VNC_PRINT_XERROR makes it log the failed request of an error it
+# does not trap. Each x11vnc runs under a watchdog, which kills one that
+# logs an X error or leaves a connection unaccepted for 26 seconds, and
+# starts one that exits again, backing off while x11vnc keeps exiting,
+# and says so in the log. Its log lines start with its port. If an Xvfb
+# or a desktop exits, so does the container.
 
 set -euo pipefail
 trap 'exit 0' TERM INT
-export X11VNC_PRINT_XERROR=1
+export X11VNC_SENDEVENT_SYNC=1 X11VNC_PRINT_XERROR=1
 
 x11vnc -storepasswd "$VNC_PASSWORD" /tmp/vncpasswd >/dev/null
 n=0
