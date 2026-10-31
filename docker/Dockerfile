@@ -27,6 +27,11 @@ RUN mkdir -p /licenses/vpx /licenses/jpegn \
 	&& vpx=$(go list -m -f '{{.Dir}}' github.com/gen2brain/vpx) \
 	&& cp "$vpx/COPYING" "$vpx/COPYING.webpkit" "$vpx/PATENTS" /licenses/vpx/ \
 	&& cp "$(go list -m -f '{{.Dir}}' github.com/gen2brain/jpegn)/LICENSE" /licenses/jpegn/
+# The licences of scroll detection's row hash, xxh3, and of the CPU
+# feature detection it compiles into amd64 builds.
+RUN mkdir -p /licenses/xxh3 /licenses/cpuid \
+	&& cp "$(go list -m -f '{{.Dir}}' github.com/zeebo/xxh3)/LICENSE" /licenses/xxh3/ \
+	&& cp "$(go list -m -f '{{.Dir}}' github.com/klauspost/cpuid/v2)/LICENSE" /licenses/cpuid/
 
 # Stage 3: runtime image, without a shell or C libraries, running as the
 # unprivileged user nonroot. occamyd writes no files.
@@ -40,6 +45,8 @@ COPY client/occamy-web/LICENSE.guacamole ./licenses/guacamole/LICENSE
 COPY client/occamy-web/NOTICE.guacamole ./licenses/guacamole/NOTICE
 COPY --from=build /licenses/vpx ./licenses/vpx/
 COPY --from=build /licenses/jpegn ./licenses/jpegn/
+COPY --from=build /licenses/xxh3 ./licenses/xxh3/
+COPY --from=build /licenses/cpuid ./licenses/cpuid/
 # jpegn's adaptive quantisation and progressive scans are ported from
 # jpegli, whose notice jpegn's own LICENSE does not carry.
 COPY third_party/jpegli/LICENSE ./licenses/jpegli/
