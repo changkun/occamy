@@ -9,12 +9,12 @@
 import { type ReactElement, Suspense, lazy, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
 import { CanvasSurface, Role, SessionClass, cursorStyle } from '../protocol'
-import type { AccessToken, Api } from '../lib/api'
+import type { AccessToken, Api, Identity } from '../lib/api'
 import type { SessionAction } from '../lib/app'
 import { type SessionController as Controller, SessionController, type SessionState, overlayOf } from '../lib/controller'
-import type { Ending } from '../lib/ending'
+import { type Ending, endsSession } from '../lib/ending'
 import { type Size, cellGrid, deviceSize, fitSize, pixelRatio } from '../lib/layout'
-import { endSession } from '../lib/owner'
+import { endSession, sessionOwner } from '../lib/owner'
 import { type Abilities, abilities, roleName } from '../lib/roles'
 import { type Target, streamToken, streamURL } from '../lib/targets'
 import { ClipboardPanel } from './ClipboardPanel'
@@ -36,13 +36,17 @@ export interface SignInNext {
   then: SessionAction | null
   /** The view stays, rather than target opening in its place. */
   here: boolean
+  /** Who opened the session, for whom then is. */
+  owner: Identity | null
 }
 
 export interface SessionViewProps {
   api: Api
   token: AccessToken | null
   target: Target
-  /** An owner's action that waited for the owner to sign in again, numbered so that it is taken once. */
+  /** Who opened the session, as the page knew before this view; null for none. The view takes it for the owner until its stream says. */
+  owner: Identity | null
+  /** An owner's action that waited for the user to sign in again, numbered so that it is taken once. */
   action: { seq: number; action: SessionAction } | null
   /** Back to where the user came from. */
   onLeave: () => void
@@ -63,7 +67,7 @@ function cellSize(): Size {
   return { width: ctx.measureText('W').width, height: Math.ceil(TERMINAL_FONT_SIZE * 1.2) }
 }
 
-export function SessionView({ api, token, target, action, onLeave, onSignIn, onRejoin }: SessionViewProps): ReactElement {
+export function SessionView({ api, token, target, owner: seed, action, onLeave, onSignIn, onRejoin }: SessionViewProps): ReactElement {
   const [controller] = useState(
     () =>
       new SessionController({
@@ -82,8 +86,18 @@ export function SessionView({ api, token, target, action, onLeave, onSignIn, onR
   const box = useBoxSize(stageRef)
   const [panel, setPanel] = useState<'clipboard' | 'share' | null>(null)
   const [shareRequest, setShareRequest] = useState<ShareRequest | null>(null)
-  // Why End did not end the session for everyone; empty for none.
-  const [problem, setProblem] = useState('')
+  // Who opened the session: the user of the access token the stream was
+  // opened with, once its welcome says the stream is the owner's.
+  const [opener] = useState(() => (target.kind === 'share' ? null : token))
+  const owner = sessionOwner(state.role, opener, seed)
+  // Why an owner's action was not done; null for none.
+  const [problem, setProblem] = useState<Problem | null>(null)
+  // Whether End waits for occamyd.
+  const [ending, setEnding] = useState(false)
+  // Whether occamyd ended the session for everyone, as it says by how it
+  // closed the stream: what an End said before is then out of date.
+  const endedForEveryone = endsSession(state.code)
+  const shown = endedForEveryone ? null : problem
   const handled = useRef(0)
   const name = target.kind === 'share' ? 'Shared session' : target.name
   const signedIn = target.kind !== 'share'
@@ -148,11 +162,26 @@ export function SessionView({ api, token, target, action, onLeave, onSignIn, onR
     return sessionId !== '' ? { kind: 'session', sessionId, name } : target
   }
 
+  const signInFor = (message: string, then: SessionAction | null): void => onSignIn(message, { target: again(), then, here: true, owner })
+
   // end ends the session for everyone, as its owner. With an expired
-  // sign-in, the owner signs in over the session, and End resumes.
-  const end = async (): Promise<void> => {
-    setProblem('')
-    const outcome = await endSession({ api, token, sessionId, now: Date.now(), close: () => controller.close() })
+  // sign-in, the user signs in over the session, and End resumes: occamyd
+  // then decides whether the session is theirs, as it does for an End
+  // that resumed before.
+  const end = async (resumed: boolean): Promise<void> => {
+    setProblem(null)
+    setEnding(true)
+    const outcome = await endSession({
+      api,
+      token,
+      owner,
+      resumed,
+      sessionId,
+      now: Date.now(),
+      close: () => controller.close(),
+      endedForEveryone: () => endsSession(controller.getState().code),
+      streaming: () => controller.getState().phase === 'open',
+    }).finally(() => setEnding(false))
     switch (outcome.kind) {
       case 'ended':
         onLeave()
@@ -161,31 +190,39 @@ export function SessionView({ api, token, target, action, onLeave, onSignIn, onR
         if (outcome.closed) {
           // Should the owner cancel the sign-in, the closed stream's
           // view still says the session runs on.
-          setProblem('The session was not ended for everyone: your sign-in has expired. Its viewers stay until your minute of grace runs out.')
+          setProblem({ title: NOT_ENDED, detail: 'The session was not ended for everyone: your sign-in has expired. Its viewers stay until your minute of grace runs out.', signIn: false, resumed })
         }
-        onSignIn(outcome.message, { target: again(), then: { kind: 'end' }, here: true })
+        signInFor(outcome.message, { kind: 'end' })
         return
       case 'failed':
-        setProblem(outcome.message)
+        setProblem({ title: NOT_ENDED, detail: outcome.message, signIn: false, resumed })
+        return
+      case 'not-owner':
+        setProblem({ title: NOT_ENDED, detail: outcome.message, signIn: true, resumed: true })
         return
     }
   }
 
   const leave = async (): Promise<void> => {
+    // One End at a time: another, from the credential prompt, would take
+    // the opener's way while this one waits for occamyd.
+    if (ending) {
+      return
+    }
     if (can.manage && signedIn) {
-      await end()
+      await end(false)
       return
     }
     await controller.close()
     onLeave()
   }
 
-  // An action that waited for the owner to sign in again is taken once,
+  // An action that waited for the user to sign in again is taken once,
   // though React's development effects run twice: End at once, which
   // needs no stream, and a share once the stream is open.
   const take = useEffectEvent((a: { seq: number; action: SessionAction }) => {
     if (a.action.kind === 'end') {
-      void end()
+      void end(true)
       return
     }
     setPanel('share')
@@ -242,7 +279,7 @@ export function SessionView({ api, token, target, action, onLeave, onSignIn, onR
           Full screen
         </button>
         {state.phase !== 'ended' && (
-          <button type="button" className="danger" onClick={() => void leave()}>
+          <button type="button" className="danger" disabled={ending} onClick={() => void leave()}>
             {can.manage ? 'End session' : 'Leave'}
           </button>
         )}
@@ -270,10 +307,10 @@ export function SessionView({ api, token, target, action, onLeave, onSignIn, onR
             sessionId={state.sessionId}
             request={shareRequest}
             onClose={closePanel}
-            onSignIn={(message, then) => onSignIn(message, { target: again(), then, here: true })}
+            onSignIn={signInFor}
           />
         )}
-        {problem === '' && overlayOf(state) === 'connecting' && (
+        {shown === null && !ending && overlayOf(state) === 'connecting' && (
           <div className="overlay" role="status">
             <div className="card">
               <p>Connecting to {name}…</p>
@@ -283,23 +320,35 @@ export function SessionView({ api, token, target, action, onLeave, onSignIn, onR
             </div>
           </div>
         )}
-        {problem === '' && overlayOf(state) === 'ended' && state.ending !== null && (
+        {shown === null && !ending && overlayOf(state) === 'ended' && state.ending !== null && (
           <EndOverlay
             ending={state.ending}
             leaveLabel={signedIn ? 'Back to connections' : 'Close'}
             onLeave={onLeave}
-            onSignIn={() => onSignIn(state.ending?.detail ?? '', { target: again(), then: null, here: false })}
+            onSignIn={() => onSignIn(state.ending?.detail ?? '', { target: again(), then: null, here: false, owner })}
             onRejoin={() => onRejoin(again())}
           />
         )}
-        {problem !== '' && (
+        {shown === null && ending && (
+          // End waits for occamyd: the user may leave rather than wait.
+          <div className="overlay" role="status">
+            <div className="card">
+              <p>Ending the session for everyone…</p>
+              <button type="button" onClick={onLeave}>
+                Back to connections
+              </button>
+            </div>
+          </div>
+        )}
+        {shown !== null && (
           <EndOverlay
-            ending={{ title: 'Not ended for everyone', detail: problem, technical: '', signIn: false, rejoin: false, quiet: false }}
+            ending={{ title: shown.title, detail: shown.detail, technical: '', signIn: shown.signIn, rejoin: false, quiet: false }}
             leaveLabel="Back to connections"
             onLeave={onLeave}
-            onSignIn={() => undefined}
+            onSignIn={() => signInFor(shown.detail, { kind: 'end' })}
             onRejoin={() => undefined}
-            onRetry={() => void end()}
+            onRetry={shown.signIn ? undefined : () => void end(shown.resumed)}
+            onBack={state.phase === 'open' ? () => setProblem(null) : undefined}
           />
         )}
       </div>
@@ -308,6 +357,18 @@ export function SessionView({ api, token, target, action, onLeave, onSignIn, onR
       )}
     </div>
   )
+}
+
+const NOT_ENDED = 'Not ended for everyone'
+
+/** Why End was not done, and what the user may do. */
+interface Problem {
+  title: string
+  detail: string
+  /** Offer to sign in again, as the session's owner, rather than to try again. */
+  signIn: boolean
+  /** End is tried again as occamyd decides on, as was the one that failed, rather than as its opener's. */
+  resumed: boolean
 }
 
 function Viewers({ state }: { state: SessionState }): ReactElement | null {
@@ -395,9 +456,11 @@ interface EndOverlayProps {
   onRejoin: () => void
   /** Tries again what failed, such as End; without it, nothing is offered. */
   onRetry?: () => void
+  /** Back to a session that goes on; without it, nothing is offered. */
+  onBack?: () => void
 }
 
-function EndOverlay({ ending, leaveLabel, onLeave, onSignIn, onRejoin, onRetry }: EndOverlayProps): ReactElement {
+function EndOverlay({ ending, leaveLabel, onLeave, onSignIn, onRejoin, onRetry, onBack }: EndOverlayProps): ReactElement {
   const headingRef = useRef<HTMLHeadingElement>(null)
   useEffect(() => headingRef.current?.focus(), [])
   return (
@@ -429,6 +492,11 @@ function EndOverlay({ ending, leaveLabel, onLeave, onSignIn, onRejoin, onRetry }
           {ending.signIn && (
             <button type="button" className="primary" onClick={onSignIn}>
               Sign in
+            </button>
+          )}
+          {onBack !== undefined && (
+            <button type="button" onClick={onBack}>
+              Back to the session
             </button>
           )}
           <button type="button" onClick={onLeave}>

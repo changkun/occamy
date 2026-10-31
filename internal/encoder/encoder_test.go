@@ -106,7 +106,7 @@ func TestTile(t *testing.T) {
 				pix := tileWith(s.X, s.Y, n, uint64(n))
 				var p codec.Palette
 				photo := Classify(codec.Colours(pix, s.X, s.Y, &p)) == Photo
-				b, c, lossy := e.Tile([]byte("prefix"), pix, s.X, s.Y)
+				b, c, lossy := e.Tile([]byte("prefix"), pix, s.X, s.Y, false)
 				if lossy != (photo && hasLossy) {
 					t.Errorf("%v, %d colours, %v: lossy %v", codecs, n, s, lossy)
 				}
@@ -137,7 +137,7 @@ func TestTile(t *testing.T) {
 // A solid tile costs a few bytes.
 func TestSolidTile(t *testing.T) {
 	e := New([]protocol.Codec{deflate})
-	b, c, _ := e.Tile(nil, tileWith(64, 64, 1, 1), 64, 64)
+	b, c, _ := e.Tile(nil, tileWith(64, 64, 1, 1), 64, 64, false)
 	if c != deflate || len(b) > 16 {
 		t.Errorf("a solid tile: %d bytes of %v, want at most 16 of deflate", len(b), c)
 	}
@@ -171,7 +171,7 @@ func TestLossy(t *testing.T) {
 				}
 				sizes = append(sizes, len(b))
 				if r.Dy() >= 8 {
-					scores = append(scores, SSIM(src, out))
+					scores = append(scores, refSSIM(src, out))
 				}
 			}
 			if sizes[0] >= sizes[1] {
@@ -197,7 +197,7 @@ func TestLossyFallbacks(t *testing.T) {
 	}
 	e = New([]protocol.Codec{jpegC})
 	text := tileWith(64, 64, 2, 3)
-	if b, c, lossy := e.Tile(nil, text, 64, 64); !lossy || c != 0 || len(b) != 0 {
+	if b, c, lossy := e.Tile(nil, text, 64, 64, false); !lossy || c != 0 || len(b) != 0 {
 		t.Errorf("JPEG only: a two-colour tile is not lossy: %v", c)
 	}
 	// Rectangles beyond what WebP holds fall back to the lossless codec.

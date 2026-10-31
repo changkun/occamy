@@ -140,7 +140,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   those, or Plain in the clear, is refused even if it offers VNC
   Authentication too. Cut text from the server allocates about
   three times the text kept, down from seven. An integration test runs
-  against TigerVNC (`docker/test/tigervnc`) in a container of its own.
+  against TigerVNC (`docker/demo/tigervnc`) in a container of its own.
 - Apple Remote Desktop authentication (security type 30) in the native
   VNC backend, so that it can log in to macOS Screen Sharing as a user
   of the Mac, but only when the backend's `vnc.Config.ARD` allows it:
@@ -194,6 +194,28 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   carries the notices of zeebo/xxh3 and of klauspost/cpuid, which it
   links into amd64 builds, and `scripts/third-party-licenses.sh` lists
   both architectures of every release platform.
+- Refinement in the graphics pipeline. Each viewer's writer keeps a heat
+  per tile, which halves each refine delay, 150 ms at the least, of the
+  writer's time between frames: a tile that changes more often than the
+  refine delay is in
+  motion, and goes at the pacer's lowest quality, and lossy if it has 17
+  to 256 colours; one that changes less often goes at its final quality.
+  An input's effect is never in motion, and one the search finds at the
+  quality it needs is not sent again. A still lossy tile goes at the
+  lowest quality, up to the pacer's, at which each tile's SSIM reaches
+  0.91 (`encoder.StillSSIM`). Once a tile has been still for 300 ms
+  (`stream.Config.RefineDelay`), background frames send it again: exact
+  if it has up to 256 colours, at the SSIM's quality if it has more.
+  Refinement goes only while nothing else is to be sent and no frame
+  awaits an ack, a tile a message within the pacer's 5 ms of bytes, and
+  gives way to an input before each message, and to a change after the
+  first tile it tries. A copy carries the goal of the pixels it moves,
+  and a tile searched while the link held the quality below what the
+  client has is raised once it recovers. On the recorded scenes the plasma takes 13.8 KiB a frame against
+  392.4, the dragged window 5.2 against 30.6 and 17.9 KiB of refinement
+  once still, and the photograph shown once 121.8 against 150.8, under
+  G6's 139 ([docs/benchmarks/refinement.md](docs/benchmarks/refinement.md)).
+  `stream.Config.NoRefine` turns refinement off, and motion with it.
 - `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
   (static users sign in with a password for an access token), TLS when
   `tls.cert` and `tls.key` are set, expvar and pprof on the debug
@@ -315,6 +337,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   remote with the window, answers the remote's credential prompts,
   shares the session through a link as a viewer or read-only, and ends
   it, signing in again over the session when the sign-in has expired;
+  an End or share that waited for the sign-in is left to occamyd, which
+  ends or shares only its owner's session: one who signs in as another
+  user is told the session has ended or is not theirs. A call to occamyd
+  gives up after 30 s, and End shows that it waits, with a way back to
+  the connections, and takes no second press meanwhile;
   the clipboard goes both ways as the role allows, and reaches the local
   clipboard on its own only for a role that gives input, so a read-only
   viewer copies it from the clipboard panel; a hidden page tells occamyd
@@ -412,6 +439,30 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   streams with the Go client. `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` move a
   second stack aside on a shared host, and `make e2e` follows the
   last two.
+- TigerVNC in the demo stack, beside x11vnc, and the guacd bridge's
+  parity matrix for VNC: `TestVNCParity` runs authentication, resize,
+  clipboard both ways, the cursor, keyboard layouts with AltGr and dead
+  keys, text input, sharing roles and reconnect on both servers,
+  through the native backend and through guacd, and fails on any cell
+  that differs from the matrix in the guacd bridge's spec. The demo
+  desktops report what reaches them, typed lines and clipboard text,
+  over the session's clipboard. The two TigerVNC test images became
+  one, `docker/demo/tigervnc`, which the integration tests build too.
+  x11vnc hangs now and then after an X error as a client connects; the
+  demo x11vnc runs under a watchdog that kills it when it reports an X
+  error or stops accepting connections, and starts it again. The matrix
+  tries a guacd cell up to three times, and a native cell that cannot
+  reach the desktop only while guacd cannot reach it either, and shows
+  the try at which a cell settled. A listed failure must fail with its
+  own error, and a unit test keeps the spec's matrix in step with the
+  suite.
+- A soak, `make soak`: sessions through the demo stack's `occamy-v1`
+  for hours, while `TestSoak` samples `occamyd`'s goroutines, live heap
+  and open files from its debug listener and fails on growth.
+  `/debug/vars` publishes `goroutines` and `fds`. A v1 file's
+  `debug.address_env` takes the debug listener's address from an
+  environment variable, and leaves the listener off while it is unset
+  or empty, which `occamyd` logs at start with the variable's name.
 - The native RDP backend's clipboard, the first part of its second
   phase: `internal/rdp` joins static virtual channels and reassembles
   their chunks within a bound per channel, and carries text both ways
@@ -608,6 +659,17 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the remote applies to the whole machine. The native VNC backend sent
   Power through QEMU's extended key events, and the VNC and guacd
   backends sent the keysyms.
+- The demo stack's debug routes, which have no authentication, are off
+  unless `make run OCCAMY_DEBUG=1` turns them on: `occamy-v1`'s debug
+  listener on the host's loopback interface, port 5638
+  (`OCCAMY_V1_DEBUG_PORT`), and the v0 service's pprof, from
+  `docker/occamy-debug.yaml`. `docker/occamy.yaml`, which served pprof
+  to anyone who could reach the v0 service, is now in release mode, and
+  the v0 service is published on the loopback interface only.
+  `make run` and `make bench` turn the routes off explicitly without
+  `OCCAMY_DEBUG=1`, so a variable left in the shell or in `docker/.env`
+  cannot turn them on. The pressure test and the soak need
+  `OCCAMY_DEBUG=1`.
 
 ## [0.6.0] - 2026-10-30
 

@@ -1032,11 +1032,11 @@ A codec ID is a u8. Codec 0 is not a codec: it appears only in a hidden
 
 | ID | Name | Payload | What occamyd sends it for |
 |----|------|---------|---------------------------|
-| 1 | `raw` | `w × h × 4` bytes, rows from top to bottom without padding, in RGBA order with straight alpha | Tiles of up to 256 colours and cursors, to a client that lists `raw` but not `deflate` |
-| 2 | `deflate` | A raw DEFLATE stream ([RFC 1951](https://www.rfc-editor.org/rfc/rfc1951)) of a [deflate container](#the-deflate-container); browsers inflate it with `DecompressionStream('deflate-raw')` | Tiles of up to 256 colours, and cursors |
+| 1 | `raw` | `w × h × 4` bytes, rows from top to bottom without padding, in RGBA order with straight alpha | Tiles of up to 256 colours, those of 17 or more only while still if the client lists a lossy codec, and cursors, to a client that lists `raw` but not `deflate` |
+| 2 | `deflate` | A raw DEFLATE stream ([RFC 1951](https://www.rfc-editor.org/rfc/rfc1951)) of a [deflate container](#the-deflate-container); browsers inflate it with `DecompressionStream('deflate-raw')` | Tiles of up to 256 colours, those of 17 or more only while still if the client lists a lossy codec, and cursors |
 | 3 | `png` | A PNG file | Nothing |
-| 4 | `jpeg` | A JFIF file, opaque | Tiles of more than 256 colours, to a client that lists `jpeg` but not `webp` |
-| 5 | `webp` | A WebP file, lossy or lossless, with straight alpha | Tiles of more than 256 colours, lossy and opaque; cursors, lossless, to a client that lists neither `deflate` nor `raw` |
+| 4 | `jpeg` | A JFIF file, opaque | Tiles of more than 256 colours, and of 17 to 256 in motion, to a client that lists `jpeg` but not `webp` |
+| 5 | `webp` | A WebP file, lossy or lossless, with straight alpha | Tiles of more than 256 colours, and of 17 to 256 in motion, lossy and opaque; cursors, lossless, to a client that lists neither `deflate` nor `raw` |
 | 6 | `cached` | Empty: the tile is drawn from its cache slot | Tiles only, once the server has a tile cache |
 | 7 to 0x7F | | Unassigned | |
 | 0x80 to 0xFF | | Reserved for a video tier after 1.0 | |
@@ -1067,7 +1067,15 @@ the best codec of each kind that the client lists, whatever its order. A
 client that lists no lossy codec gets every tile lossless, and one that
 lists no lossless codec gets every tile lossy. A lossy tile message may
 cover several tiles side by side, so that the lossy format's headers are
-paid once. The screen is opaque, and occamyd encodes a lossy tile
+paid once. A tile in motion, one that changed in each of the last few
+snapshots of the screen occamyd takes, at most ten a second, other than
+as an input's effect, goes at a low quality, and lossy
+if it has 17 to 256 colours; once it has been still for a moment
+(300 ms by default), occamyd sends it again, exact if it has up to 256
+colours and at a higher quality if it has more. Such a frame of
+refinement is an ordinary frame of `tile` messages, so the client needs
+nothing to take it: a client sees the same tile drawn twice, the second
+time sharper. The screen is opaque, and occamyd encodes a lossy tile
 without alpha. A cursor's alpha is straight in every codec, as it is in
 `raw`. JPEG has no alpha, so a client that lists only `jpeg` gets no
 `cursor` and draws its own pointer.
