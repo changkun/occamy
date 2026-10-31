@@ -864,7 +864,9 @@ of 2.9 to 4.5:
   measured a rate from acknowledgements that came at once, and could cut
   the first full frame, which left tiles undefined and no copy to find.
   The harness now never acknowledges, and fails if a frame leaves
-  anything unsent.
+  anything unsent. That check then failed on CI's first run: the test
+  backend's first paint could land after the harness's first frame. The
+  harness now waits for that paint.
 - **Some mutants survived only because a flaky test killed them.** Before
   that test was fixed, it was killing them by chance. Those three
   mutants needed tests of their own:
