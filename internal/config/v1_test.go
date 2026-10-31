@@ -239,8 +239,14 @@ func TestParseV1Example(t *testing.T) {
 				Allow:       config.Allow{Users: []string{"alice"}},
 			},
 			{
-				ID: "windows", Name: "Windows workstation", Protocol: "rdp", Target: "10.0.4.20:3389", Backend: "guacd",
+				ID: "windows", Name: "Windows workstation", Protocol: "rdp", Target: "10.0.4.20:3389", Backend: "native",
+				TLS:         config.ConnectionTLS{Pins: []string{"3F:A1:07:5C:92:E4:6B:D8:21:0A:F3:8E:57:C6:19:B4:E2:7D:40:95:A8:1C:6F:D3:0B:72:E9:58:34:AC:66:1F"}},
 				Credentials: config.Credentials{Username: "Administrator", PasswordFile: path("run/secrets/windows-password")},
+				Allow:       config.Allow{Groups: []string{"ops"}},
+			},
+			{
+				ID: "old-terminal-server", Name: "Old terminal server", Protocol: "rdp", Target: "10.0.4.21:3389", Backend: "guacd",
+				Credentials: config.Credentials{Username: "Administrator", Prompt: true},
 				Allow:       config.Allow{Groups: []string{"ops"}},
 			},
 			{
@@ -261,12 +267,22 @@ func TestParseV1Example(t *testing.T) {
 			},
 		},
 		AdhocAllowlist: []string{"10.0.0.0/8", "*.lab.internal:22"},
-		AdhocBackends:  map[string]string{"ssh": "native", "vnc": "native", "rdp": "guacd", "telnet": "guacd"},
+		AdhocBackends:  map[string]string{"ssh": "native", "vnc": "native", "rdp": "native", "telnet": "guacd"},
 		Limits:         config.Limits{Sessions: 500, SessionsPerUser: 20, ViewersPerSession: 50, SharesPerSession: 100},
 		Streams:        config.Streams{ViewerTimeout: 45 * time.Second},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ParseV1(testdata/v1.yaml) =\n%+v\nwant\n%+v", got, want)
+	}
+	// Each protocol the example gives guacd parameters for has a
+	// connection on guacd to read them; occamyd warns at start of those
+	// no session reads.
+	for p := range got.Guacd.Params {
+		if !slices.ContainsFunc(got.Connections, func(c config.Connection) bool {
+			return c.Protocol == p && config.BackendOf(p, c.Backend) == config.BackendGuacd
+		}) {
+			t.Errorf("guacd.params.%s: no %s connection in the example is on guacd", p, p)
+		}
 	}
 }
 
@@ -443,10 +459,10 @@ func TestOverlap(t *testing.T) {
 
 // TestParseV1Backends checks that every connection and every protocol of
 // adhoc_backends ends up with a backend: its own, or the protocol's
-// default, which is native where a native backend exists (ssh, vnc and
-// kubernetes) and guacd for rdp and telnet. For vnc, backend: guacd is an explicit
-// fallback, and tls and ard need no backend key, since native is the
-// default.
+// default, which is native where a native backend exists (ssh, vnc,
+// rdp and kubernetes) and guacd for telnet. For vnc and rdp, backend:
+// guacd is an explicit fallback, and tls, ard and security need no
+// backend key, since native is the default.
 func TestParseV1Backends(t *testing.T) {
 	f, err := parse(t, head+`connections:
   - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
@@ -460,8 +476,11 @@ func TestParseV1Backends(t *testing.T) {
   - {id: i, protocol: vnc, target: i, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: j, protocol: vnc, ard: true, target: j, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
   - {id: k, protocol: telnet, target: k, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: l, protocol: kubernetes, target: l, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: m, protocol: kubernetes, backend: native, target: m, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: l, protocol: rdp, backend: guacd, target: l, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: m, protocol: rdp, backend: native, security: tls, target: m, tls: {require: true, insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: n, protocol: rdp, security: any, target: n, tls: {pins: ["SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: o, protocol: kubernetes, target: o, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: p, protocol: kubernetes, backend: native, target: p, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}
 `)
 	if err != nil {
 		t.Fatal(err)
@@ -470,12 +489,12 @@ func TestParseV1Backends(t *testing.T) {
 	for _, c := range f.Connections {
 		got = append(got, c.ID+":"+c.Backend)
 	}
-	want := []string{"a:native", "b:native", "c:native", "d:native", "e:guacd", "f:native", "g:guacd", "h:guacd", "i:native", "j:native", "k:guacd", "l:native", "m:native"}
+	want := []string{"a:native", "b:native", "c:native", "d:native", "e:guacd", "f:native", "g:native", "h:guacd", "i:native", "j:native", "k:guacd", "l:guacd", "m:native", "n:native", "o:native", "p:native"}
 	if !slices.Equal(got, want) {
 		t.Errorf("backends %v, want %v", got, want)
 	}
-	// Without adhoc_backends, ad-hoc vnc targets are native too.
-	if want := map[string]string{"ssh": "native", "vnc": "native", "rdp": "guacd", "telnet": "guacd"}; !maps.Equal(f.AdhocBackends, want) {
+	// Without adhoc_backends, ad-hoc vnc and rdp targets are native too.
+	if want := map[string]string{"ssh": "native", "vnc": "native", "rdp": "native", "telnet": "guacd"}; !maps.Equal(f.AdhocBackends, want) {
 		t.Errorf("adhoc_backends %v, want %v", f.AdhocBackends, want)
 	}
 	// adhoc_backends opts ad-hoc vnc targets into guacd, and leaves the
@@ -484,12 +503,12 @@ func TestParseV1Backends(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := map[string]string{"ssh": "native", "vnc": "guacd", "rdp": "guacd", "telnet": "guacd"}; !maps.Equal(f.AdhocBackends, want) {
+	if want := map[string]string{"ssh": "native", "vnc": "guacd", "rdp": "native", "telnet": "guacd"}; !maps.Equal(f.AdhocBackends, want) {
 		t.Errorf("adhoc_backends with vnc: guacd %v, want %v", f.AdhocBackends, want)
 	}
 	for _, tt := range []struct{ protocol, backend, want string }{
-		{"ssh", "", "native"}, {"vnc", "", "native"}, {"rdp", "", "guacd"}, {"telnet", "", "guacd"}, {"kubernetes", "", "native"},
-		{"vnc", "native", "native"}, {"vnc", "guacd", "guacd"}, {"rdp", "guacd", "guacd"},
+		{"ssh", "", "native"}, {"vnc", "", "native"}, {"rdp", "", "native"}, {"telnet", "", "guacd"}, {"kubernetes", "", "native"},
+		{"vnc", "native", "native"}, {"vnc", "guacd", "guacd"}, {"rdp", "native", "native"}, {"rdp", "guacd", "guacd"},
 	} {
 		if got := config.BackendOf(tt.protocol, tt.backend); got != tt.want {
 			t.Errorf("BackendOf(%q, %q) = %q, want %q", tt.protocol, tt.backend, got, tt.want)
@@ -834,7 +853,7 @@ connections:
   - {id: h, protocol: vnc, backend: native, target: h, tls: {ca_file: DIR/ca.pem, insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: i, protocol: vnc, backend: native, target: i, tls: {insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
-			{"connections[0].tls", "only vnc and kubernetes connections have tls"},
+			{"connections[0].tls", "only vnc, rdp and kubernetes connections have tls"},
 			{"connections[1].tls.pins", "set ca_file or pins, not both"},
 			{"connections[2].tls.ca_file", "holds no PEM certificate"},
 			{"connections[3].tls.ca_file", "missing.pem does not exist"},
@@ -842,6 +861,26 @@ connections:
 			{"connections[4].tls.pins[1]", "not a certificate or a SHA-256 fingerprint"},
 			{"connections[6].tls.insecure_skip_verify", "set ca_file or pins, or insecure_skip_verify, not both"},
 			{"connections[7].tls.insecure_skip_verify", "set ca_file or pins, or insecure_skip_verify, not both"},
+		}},
+		{"rdp tls and security", head + `connections:
+  - {id: a, protocol: rdp, target: a, tls: {pins: ["SHA256:short"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: rdp, backend: guacd, target: b, tls: {insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: rdp, target: c, tls: {ca_file: DIR/ca.pem, pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: d, protocol: rdp, target: d, security: tls, tls: {require: true, server_name: desk, ca_file: DIR/ca.pem}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: e, protocol: rdp, backend: guacd, security: tls, target: e, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: f, protocol: vnc, backend: native, security: tls, target: f, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: g, protocol: rdp, security: rdp, target: g, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: h, protocol: rdp, security: NLA, target: h, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: i, protocol: rdp, security: nla-ext, target: i, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: j, protocol: rdp, backend: native, security: any, target: j, tls: {pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+`, []want{
+			{"connections[0].tls.pins[0]", "not a certificate or a SHA-256 fingerprint"},
+			{"connections[1].tls", "only the native RDP backend checks the certificate as tls says, and backend: guacd would not: leave backend out, or set native; through guacd, guacd.params.rdp's ignore-cert"},
+			{"connections[2].tls.pins", "set ca_file or pins, not both"},
+			{"connections[4].security", "backend: guacd does not: leave backend out, or set native; through guacd, guacd.params.rdp.security sets it"},
+			{"connections[5].security", "only rdp connections have security"},
+			{"connections[6].security", `unknown security mode "rdp"`},
+			{"connections[7].security", `unknown security mode "NLA"`},
 		}},
 		{"kubernetes", head + `connections:
   - {id: a, protocol: kubernetes, backend: guacd, target: a, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}
@@ -918,7 +957,6 @@ connections:
   - {id: g, protocol: vnc, backend: nativ, target: g, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
 			{"connections[0].backend", "ssh connections always use occamyd's native SSH backend"},
-			{"connections[1].backend", "the native RDP backend is not available yet"},
 			{"connections[2].backend", "telnet has no native backend"},
 			{"connections[3].backend", `unknown backend "nativ": use guacd or native`},
 			{"connections[4].tls", "backend: guacd would not: leave backend out, or set native"},
@@ -943,7 +981,6 @@ connections:
 		{"adhoc backends", head + `adhoc_backends: {ssh: guacd, vnc: native, rdp: native, telnet: guacd, kubernetes: guacd, x: y}
 `, []want{
 			{"adhoc_backends.kubernetes", "kubernetes has no ad-hoc targets"},
-			{"adhoc_backends.rdp", "the native RDP backend is not available yet"},
 			{"adhoc_backends.ssh", "ssh connections always use occamyd's native SSH backend"},
 			{"adhoc_backends.x", `unknown protocol "x"`},
 		}},

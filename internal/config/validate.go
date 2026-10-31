@@ -28,8 +28,10 @@ import (
 
 	"changkun.de/x/occamy/internal/auth"
 	"changkun.de/x/occamy/internal/backend/kubernetes"
+	rdpb "changkun.de/x/occamy/internal/backend/rdp"
 	"changkun.de/x/occamy/internal/backend/ssh"
 	"changkun.de/x/occamy/internal/backend/vnc"
+	"changkun.de/x/occamy/internal/rdp"
 )
 
 // Bounds of auth.access_token_lifetime. The upper bound is the longest
@@ -374,6 +376,7 @@ func (f *File) validateConnections(c *checker) {
 			c.hostKeys(p, cn)
 			c.connectionTLS(p+".tls", cn)
 			c.ard(p+".ard", cn)
+			c.security(p+".security", cn)
 			c.kubernetes(p+".kubernetes", cn)
 		}
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
@@ -541,24 +544,34 @@ func AdhocProtocol(protocol string) bool {
 	return known && protocol != "kubernetes"
 }
 
-// connectionTLS checks the certificate policy of a vnc connection or of
-// a kubernetes connection's API server: pins replace the roots that
-// ca_file names, insecure_skip_verify replaces both, as ssh's
-// insecure_ignore_host_key replaces host_keys, and other protocols have
-// no tls. Only the native VNC backend, vnc's default, checks it, so a
-// vnc connection with backend: guacd has none either: guacd would not
-// check the certificate as the file says. A kubernetes connection
-// always uses TLS, so require changes nothing there.
+// connectionTLS checks the certificate policy of a vnc or rdp
+// connection, or of a kubernetes connection's API server: pins replace
+// the roots that ca_file names, insecure_skip_verify replaces both, as
+// ssh's insecure_ignore_host_key replaces host_keys, and other
+// protocols have no tls. Only the native backends check a vnc or rdp
+// target's certificate, so such a connection through guacd has none
+// either: guacd would not check it as the file says. The native RDP
+// backend and a kubernetes connection always use TLS, so require
+// changes nothing there.
 func (c *checker) connectionTLS(path string, cn *Connection) {
 	t := cn.TLS
-	if cn.Protocol != "vnc" && cn.Protocol != "kubernetes" {
+	checkPin, name, hint := vnc.CheckPin, "VNC", ""
+	switch cn.Protocol {
+	case "vnc":
+	case "rdp":
+		checkPin, name = rdp.CheckPin, "RDP"
+		hint = "; through guacd, guacd.params.rdp's ignore-cert and cert-fingerprints decide"
+	case "kubernetes":
+		// Its backend is always native: backendProblem refuses guacd.
+		checkPin, name = kubernetes.CheckPin, ""
+	default:
 		if t.set() {
-			c.add(path, "only vnc and kubernetes connections have tls")
+			c.add(path, "only vnc, rdp and kubernetes connections have tls")
 		}
 		return
 	}
-	if t.set() && cn.Backend != BackendNative && cn.Protocol == "vnc" {
-		c.add(path, "only the native VNC backend checks the certificate as tls says, and backend: %s would not: leave backend out, or set native", cn.Backend)
+	if t.set() && name != "" && cn.Backend != BackendNative {
+		c.add(path, "only the native %s backend checks the certificate as tls says, and backend: %s would not: leave backend out, or set native%s", name, cn.Backend, hint)
 		return
 	}
 	if t.CAFile != "" && len(t.Pins) > 0 {
@@ -573,11 +586,7 @@ func (c *checker) connectionTLS(path string, cn *Connection) {
 		}
 	}
 	for i, s := range t.Pins {
-		check := vnc.CheckPin
-		if cn.Protocol == "kubernetes" {
-			check = kubernetes.CheckPin
-		}
-		if err := check(s); err != nil {
+		if err := checkPin(s); err != nil {
 			c.add(fmt.Sprintf("%s.pins[%d]", path, i), "%v", err)
 		}
 	}
@@ -635,6 +644,25 @@ func (c *checker) ard(path string, cn *Connection) {
 		c.add(path, "only the native VNC backend speaks Apple Remote Desktop authentication, and backend: %s does not: leave backend out, or set native", cn.Backend)
 	case cn.TLS.required():
 		c.add(path, "Apple Remote Desktop authentication runs without TLS, so it cannot be allowed while tls requires TLS (require, ca_file or pins)")
+	}
+}
+
+// security checks a connection's security mode: only the native RDP
+// backend reads it, since guacd takes its mode from
+// guacd.params.rdp.security.
+func (c *checker) security(path string, cn *Connection) {
+	switch {
+	case cn.Security == "":
+	case cn.Protocol != "rdp":
+		c.add(path, "only rdp connections have security")
+	case cn.Backend != BackendNative:
+		c.add(path, "only the native RDP backend reads security, and backend: %s does not: leave backend out, or set native; through guacd, guacd.params.rdp.security sets it", cn.Backend)
+	default:
+		switch cn.Security {
+		case rdpb.SecurityNLA, rdpb.SecurityNLAExt, rdpb.SecurityTLS, rdpb.SecurityAny:
+		default:
+			c.add(path, "unknown security mode %q: use %s (the default), %s, %s or %s", cn.Security, rdpb.SecurityNLA, rdpb.SecurityNLAExt, rdpb.SecurityTLS, rdpb.SecurityAny)
+		}
 	}
 }
 
