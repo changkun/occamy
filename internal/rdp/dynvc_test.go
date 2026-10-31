@@ -422,6 +422,58 @@ func TestSuppressOutputAfterReactivation(t *testing.T) {
 	suppressions(1)
 }
 
+// A viewer who can see again while the server reactivates the session
+// is not undone by the repeated Suppress Output: the client reads its
+// state as it sends, under the lock SuppressOutput holds as it sends, so
+// the last Suppress Output the server gets allows output. The test holds
+// the client's writes so that the reactivation waits to write its
+// Confirm Active, and SuppressOutput(false) waits behind it.
+func TestSuppressOutputRace(t *testing.T) {
+	l := runLive(t, rdptest.Server{}, Config{})
+	if err := l.c.SuppressOutput(true); err != nil {
+		t.Fatal(err)
+	}
+	l.c.t.wmu.Lock()
+	held := true
+	defer func() {
+		if held {
+			l.c.t.wmu.Unlock()
+		}
+	}()
+	frames := append([][]byte{rdptest.DeactivateAll(), rdptest.DemandActive(800, 600, rdptest.DefaultInputFlags)}, rdptest.Finalization()...)
+	if err := l.conn.Write(frames...); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(100 * time.Millisecond) // the reactivation waits to write
+	allowed := make(chan error, 1)
+	go func() { allowed <- l.c.SuppressOutput(false) }()
+	time.Sleep(50 * time.Millisecond) // and SuppressOutput behind it
+	l.c.t.wmu.Unlock()
+	held = false
+	if err := <-allowed; err != nil {
+		t.Fatal(err)
+	}
+	var seq []bool
+	l.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+	for {
+		m, err := l.conn.Next()
+		if err != nil {
+			break
+		}
+		if m.Type2 != rdptest.PDU2SuppressOutput {
+			continue
+		}
+		allow, err := rdptest.SuppressOutput(m.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seq = append(seq, allow)
+	}
+	if len(seq) == 0 || !seq[len(seq)-1] {
+		t.Errorf("Suppress Output allowing %v, want the last to allow", seq)
+	}
+}
+
 // FuzzDynvc feeds DRDYNVC PDUs, each after its length, to a client that
 // takes Display Control, and writes what is due after each: no panic,
 // and the answers within their bound.

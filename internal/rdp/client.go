@@ -152,8 +152,12 @@ type Client struct {
 	height    int
 	stats     Stats
 	finalized bool
-	// suppressed is the last Suppress Output's: the client repeats it
-	// after a reactivation.
+
+	// smu is held across reading or setting suppressed and sending the
+	// Suppress Output PDU it says, so that the PDUs go in the order of
+	// the states. suppressed is the last Suppress Output's: the client
+	// repeats it after a reactivation.
+	smu        sync.Mutex
 	suppressed bool
 
 	// Owned by Connect, then Run.
@@ -573,10 +577,31 @@ func (c *Client) Finalized() bool {
 // desktop. The client tells a server that reactivates the session, as
 // on a resize, to stop again.
 func (c *Client) SuppressOutput(suppress bool) error {
+	c.smu.Lock()
+	defer c.smu.Unlock()
+	c.suppressed = suppress
+	return c.sendSuppressOutput(suppress)
+}
+
+// suppressAgain tells a server that reactivated the session to suppress
+// its output again, if the client last told it to: the server's output
+// state after a reactivation is its own. It reads the state as it sends,
+// under the lock SuppressOutput holds as it sends, so that the last
+// Suppress Output the server gets is the client's last.
+func (c *Client) suppressAgain() error {
+	c.smu.Lock()
+	defer c.smu.Unlock()
+	if !c.suppressed {
+		return nil
+	}
+	return c.sendSuppressOutput(true)
+}
+
+// sendSuppressOutput sends a Suppress Output PDU. smu must be held.
+func (c *Client) sendSuppressOutput(suppress bool) error {
 	body := func() []byte {
 		c.mu.Lock()
 		defer c.mu.Unlock()
-		c.suppressed = suppress
 		return c.suppressOutput(!suppress)
 	}()
 	return c.sendData(pdu2SuppressOutput, body)
@@ -728,11 +753,6 @@ func (c *Client) activate(out Output, body []byte) error {
 		return err
 	}
 	resized := c.activated(shareID, caps)
-	suppressed := func() bool {
-		c.mu.Lock()
-		defer c.mu.Unlock()
-		return c.suppressed
-	}()
 	c.fastPathInput.Store(caps.inputFlags&(inputFlagFastPathInput|inputFlagFastPathInput2) != 0)
 	if err := c.sendIO(c.confirmActive()); err != nil {
 		return err
@@ -740,12 +760,8 @@ func (c *Client) activate(out Output, body []byte) error {
 	if err := c.finalize(); err != nil {
 		return err
 	}
-	if suppressed {
-		// The server's output state after a reactivation is its own; tell
-		// it again that nobody can see.
-		if err := c.sendData(pdu2SuppressOutput, c.suppressOutput(false)); err != nil {
-			return err
-		}
+	if err := c.suppressAgain(); err != nil {
+		return err
 	}
 	if c.dynCh != nil {
 		c.due() // a size asked for may now be due, or no longer
