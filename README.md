@@ -228,8 +228,12 @@ make stop
 The pressure test also needs `OCCAMY_PRESSURE_N`, the number of rounds
 (`make e2e OCCAMY_PRESSURE_N=10`). CI runs it with 10 rounds. After the
 storm it checks that new sessions work and that `occamyd`'s goroutines
-return to their number before it. [docs/debugging.md](./docs/debugging.md)
-covers profiling and measuring `occamyd`.
+return to their number before it. The soak (`make soak`) runs 8
+sessions at a time through `occamy-v1` for an hour by default, and fails if
+`occamyd`'s goroutines, heap or open files keep growing, which it reads
+from `occamy-v1`'s debug listener on `localhost:5638`.
+[docs/debugging.md](./docs/debugging.md) covers profiling and measuring
+`occamyd`, and the soak's settings.
 
 ## Contributing
 
