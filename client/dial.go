@@ -24,9 +24,10 @@ import (
 // for a client that authenticates through Options.HTTPHeader.
 //
 // If the server refuses the client after the upgrade, such as for its
-// token, Dial returns a *CloseError with the server's code. ctx bounds
-// the handshake; once Dial returns, the session lasts until Close or the
-// server ends it.
+// token, Dial returns a *CloseError with the server's code, and if the
+// client refuses the session the server welcomed it to, a *RefusedError
+// (New). ctx bounds the handshake; once Dial returns, the session lasts
+// until Close or the server ends it.
 func Dial(ctx context.Context, rawURL, token string, opts Options) (*Session, error) {
 	if err := opts.check(); err != nil {
 		return nil, err

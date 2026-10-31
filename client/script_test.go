@@ -426,23 +426,32 @@ func TestRefusedBeforeWelcome(t *testing.T) {
 	})
 }
 
-// A welcome the client cannot use is refused with unsupported; one
-// that is not a welcome, with a protocol error.
+// A welcome the client cannot use is refused with unsupported, and New
+// names the session the server made for it; one that is not a welcome,
+// with a protocol error.
 func TestBadWelcome(t *testing.T) {
 	for _, c := range []struct {
-		name  string
-		first protocol.Message
-		want  protocol.CloseCode
+		name    string
+		first   protocol.Message
+		want    protocol.CloseCode
+		refused string // the reason of New's *RefusedError, if any
 	}{
-		{"no codec in common", &protocol.Welcome{Role: protocol.RoleOwner, Class: protocol.ClassGraphical, Capabilities: protocol.Capabilities{Codecs: []protocol.Codec{protocol.CodecPNG}}}, protocol.CloseUnsupported},
-		{"no terminal", &protocol.Welcome{Role: protocol.RoleOwner, Class: protocol.ClassTerminal}, protocol.CloseUnsupported},
-		{"title first", &protocol.Title{Title: "x"}, protocol.CloseProtocolError},
+		{"no codec in common", &protocol.Welcome{SessionID: "s1", Role: protocol.RoleOwner, Class: protocol.ClassGraphical, Capabilities: protocol.Capabilities{Codecs: []protocol.Codec{protocol.CodecPNG}}}, protocol.CloseUnsupported, "no codec in common"},
+		{"no terminal", &protocol.Welcome{SessionID: "s1", Role: protocol.RoleOwner, Class: protocol.ClassTerminal}, protocol.CloseUnsupported, "no terminal level in common"},
+		{"title first", &protocol.Title{Title: "x"}, protocol.CloseProtocolError, ""},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				sc, err := startScripted(t, client.Options{}, c.first)
 				if err == nil || protocol.CloseCodeFor(err) != c.want {
 					t.Errorf("New returned %v, want code %v", err, c.want)
+				}
+				var re *client.RefusedError
+				switch {
+				case c.refused == "" && errors.As(err, &re):
+					t.Errorf("New returned %#v for a message that is not a welcome", re)
+				case c.refused != "" && (!errors.As(err, &re) || re.SessionID != "s1" || re.Reason != c.refused || !errors.Is(err, protocol.ErrUnsupported)):
+					t.Errorf("New returned %#v, want a *RefusedError of session s1 for %q that is unsupported", err, c.refused)
 				}
 				if m, ok := sc.recv().(*protocol.Close); !ok || m.Code != c.want {
 					t.Errorf("the client sent %#v, want close %v", m, c.want)

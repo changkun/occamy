@@ -32,10 +32,10 @@ const (
 
 // probeMarker reports frames that show the colour key k paints the
 // swatch.
-func probeMarker(k rune) func(img *image.RGBA, r image.Rectangle) bool {
-	return func(img *image.RGBA, r image.Rectangle) bool {
+func probeMarker(k rune) marker {
+	return marker{pixels: func(img *image.RGBA, r image.Rectangle) bool {
 		return probe.Centre.In(r) && probe.Match(img.RGBAAt(probe.Centre.X, probe.Centre.Y), k)
-	}
+	}}
 }
 
 // ready waits until the scene program answers, which takes a while on
@@ -117,7 +117,7 @@ func probeLatency(ctx context.Context, s *session, n int) ([]time.Duration, erro
 		if err := s.key(int(k)); err != nil {
 			return nil, err
 		}
-		wctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		wctx, cancel := context.WithTimeout(ctx, keyWait)
 		f, err := s.wait(wctx, t0, func(f frame) bool { return f.marked })
 		cancel()
 		if err != nil {

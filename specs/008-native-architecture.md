@@ -121,7 +121,12 @@ a native Kubernetes backend (pod exec), specified in
 [native-kubernetes-backend](008-native-architecture/native-kubernetes-backend.md)
 and never served through guacd, and the React web client on protocol
 v1. Telnet gets no native backend: it
-stays on guacd and is dropped when guacd is removed.
+stays on guacd and is dropped when guacd is removed. A further call
+that day (owner, 2026-10-31): v1.0 waits until the benchmark shows
+native at least 10x better than guacd. It does not ship with a guacd
+fallback for any protocol still short of 10x; release candidates may
+still carry one ([benchmark](008-native-architecture/benchmark.md),
+Targets).
 
 | Milestone | Delivers | guacd needed for |
 |-----------|----------|------------------|
