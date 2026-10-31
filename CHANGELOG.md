@@ -468,7 +468,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   reach the desktop only while guacd cannot reach it either, and shows
   the try at which a cell settled. A listed failure must fail with its
   own error, and a unit test keeps the spec's matrix in step with the
-  suite.
+  suite. The screen row waits, after the frame that acknowledges its
+  input, for the desktop, two opaque colours: through guacd the first
+  such frame can still be black, and a screen of black and pixels not
+  drawn yet no longer passes for the desktop.
 - A soak, `make soak`: sessions through the demo stack's `occamy-v1`
   for hours, while `TestSoak` samples `occamyd`'s goroutines, live heap
   and open files from its debug listener and fails on growth.
