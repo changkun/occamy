@@ -10,7 +10,7 @@ affects:
   - internal/terminal/
 effort: medium
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -169,24 +169,24 @@ recommendations above.
 
 New `internal/backend/ssh` and `internal/terminal`. The web client
 gains a terminal view ([009](../009-react-web-client.md)), and so does
-the Swift client ([010](../010-native-swift-client.md)). After its
-parity gate ([guacd-bridge](guacd-bridge.md)), SSH connections no longer
-need guacd.
+the Swift client ([010](../010-native-swift-client.md)). SSH
+connections of a v1 file never need guacd: the configuration refuses
+`backend: guacd` for them. Only the v0 routes still take SSH through
+guacd.
 
 ## Implementation notes
 
 - **Status.** The SSH backend is done: `internal/backend/ssh` implements
   `backend.Backend`. The terminal state (decision 1: the headless
   emulator, screen diffs and snapshots) is built as `internal/terminal`
-  (see Implementation notes: terminal state), but the session does not
-  feed it yet. Predicted echo, which belongs to the clients, is not
-  built. Nothing wires the backend into `occamyd` yet: the registry
-  entry and its credential reference come with
-  [api-and-server-stack](api-and-server-stack.md). (Done by its
-  Sessions task: `ssh` connections and ad-hoc targets use this backend,
-  with `host_keys` or `insecure_ignore_host_key` from the connection,
-  and a prompting connection without a user name asks the owner for
-  one before it dials.)
+  (see Implementation notes: terminal state), and the session feeds it
+  the backend's output. Predicted echo, which belongs to the clients, is
+  not built. The Sessions task of
+  [api-and-server-stack](api-and-server-stack.md) wires the backend into
+  `occamyd`: `ssh` connections and ad-hoc targets use it, with
+  `host_keys` or `insecure_ignore_host_key` from the connection, and a
+  prompting connection without a user name asks the owner for one
+  before it dials.
 - **What was built.** `Config`, `New` and `Backend`. Run dials with the
   context, checks the host key, authenticates, requests a PTY, starts a
   shell, reports the size with `Sink.Resize`, and copies stdout and
@@ -236,7 +236,8 @@ need guacd.
   - `New` reads and parses the key files, so a missing key fails there,
     and a key protected by a passphrase is refused as not supported yet.
     File permissions are not checked. `New` also requires a user and a
-    host key policy, and sizes from 1 to 65535.
+    host key policy, and sizes from 1 by 1 to 1000 columns by 500 rows,
+    the terminal emulator's bounds (65535 when first built).
   - A configured password also answers a keyboard-interactive challenge
     that asks a single hidden question, as guacd and sshpass do. PAM
     servers that disable the `password` method ask for the password
@@ -283,7 +284,9 @@ need guacd.
 ### Terminal state
 
 Built on 2026-10-30 as `internal/terminal`, the emulator of decision 1.
-The session does not feed it the SSH backend's output yet.
+The session feeds it the SSH backend's output
+([session-core](session-core.md), Implementation notes: terminal
+frames).
 
 **Conformance.** A table of 83 cases in 15 categories
 (`internal/terminal/conformance_table_test.go`) covers cursor movement,

@@ -300,10 +300,10 @@ place for fixes that ship on v0 before beta.
     decided; see Implementation notes: Sessions).
   - Per-connection guacd params (an RDP domain per host), a per-protocol
     backend choice (`backend: guacd` after a parity switch), and serving
-    the web client from a v1 file have no keys yet. (The backend choice
-    is done: `backend` and `adhoc_backends`, with `backend: guacd` as
-    vnc's fallback; see Implementation notes: backends and the API
-    reference.)
+    the web client from a v1 file have no keys yet (the backend choice
+    is done: `backend` on each connection and `adhoc_backends`, with
+    `backend: guacd` as vnc's fallback; see Implementation notes:
+    backends and the API reference).
   - Document: a password hashing command (`occamyd hash-password`) and
     `conf.yaml` as a v1 example.
 
@@ -650,7 +650,8 @@ place for fixes that ship on v0 before beta.
     `server.publicServer` registers the hook).
   - Document: `docs/api.md` for `/healthz`, the token endpoint and the
     error shape above; certificate reload (today a restart) and the
-    HTTP/1.1 decision in the TLS section.
+    HTTP/1.1 decision in the TLS section (done: docs/api.md, and the
+    `tls.cert` row of docs/configuration.md).
 
 ## Implementation notes: Sessions
 
@@ -981,10 +982,11 @@ place for fixes that ship on v0 before beta.
   kept a viewer forever (`TestStalledBogusAcks`); and `pacer.Oldest`
   reporting the newest frame (`TestOldest`).
 - **Follow-ups:**
-  - A per-connection `backend:` key (guacd-bridge's parity gate; done,
-    see Implementation notes: backends and the API reference), `term`
+  - A per-connection `backend:` key (guacd-bridge's parity gate), `term`
     for ssh (the backend's `xterm-256color` until then) and per-connection
-    guacd parameters.
+    guacd parameters. The `backend:` key is done, with `adhoc_backends`
+    (Implementation notes: backends and the API reference); the other
+    two are not.
   - VNC phase 3's user name and TLS policy (done in review, once #106
     merged): `credentials.username` reaches `vnc.Config.Username`, and a
     vnc connection's `tls` block (`config.ConnectionTLS`: `require`,
@@ -1152,22 +1154,9 @@ place for fixes that ship on v0 before beta.
   shared benchmark host's load average was 46 at the time. The tests run
   the routes against fake backends only.
 - **Follow-ups:**
-  - ~~Recover gaps the final review found, for a PR of their own. A
-    panic leaves the session's state locked where a lock is not
-    released by `defer`:~~ Done: see "Implementation notes: panic
+  - Recover gaps the final review found, where a panic left the
+    session's state locked: done, see "Implementation notes: panic
     safety".
-    - ~~The VNC and guacd decoders hold rows between `sink.Lock` and
-      `sink.Unlock` without `defer` (vnc's `drawBand`, `fillRect`,
-      `raw`, `drawCompact`, `drawPalette` and `tightJPEG`, guacd's
-      `flush`), so a panic there, which the session's recover turns
-      into its end, leaves rows locked, and the viewers' writers wait
-      in `ReadTile` forever.~~
-    - ~~SSH's `pump` goroutines run outside the session's recover, and
-      `sink.TermData` and `Terminal.Write` hold their locks without
-      `defer`; the terminal's parser has no fuzzer.~~
-    - ~~VNC's cleanup after `readLoop` (`close(done)`, `nc.Close()`) is
-      not deferred, so a panic in `readLoop` leaves the writer loop
-      and the connection behind.~~
   - The viewer timeout bounds each message's write, so a link too slow
     to carry one message in 30 s, such as a terminal's snapshot of a
     few megabytes at under 100 kB/s, drops its viewer. Tiles are small;
@@ -1175,12 +1164,9 @@ place for fixes that ship on v0 before beta.
     frame cut into messages the writer can pace, would serve such
     links.
   - Document: `docs/api.md` for the five session routes and the two
-    stream routes, with the replies above.
+    stream routes, with the replies above (done).
   - CORS is still not served, so a page on another origin in `origins`
     can open streams but not call the JSON routes.
-  - ~~A terminal's hello may ask for up to 65535 columns or rows, which
-    reach the backend unbounded.~~ Fixed in review: see "Sizes (added
-    in review)".
   - ~~`TestStreamProtocolErrors` failed twice in the review's
     full-suite runs at a load average of 112 to 150.~~ Fixed once it
     failed again, with `broken pipe` in its oversized message: the
