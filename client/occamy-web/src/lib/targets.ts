@@ -3,10 +3,11 @@
 // license that can be found in the LICENSE file.
 
 // What a session view streams (docs/api.md, Streams), and how the page
-// starts: signed out, back from an OIDC sign-in, or from a share link.
+// starts: signed out, back from an OIDC sign-in, from a share link, or
+// reloaded over the owner's session.
 
 import type { AccessToken, Api } from './api'
-import { type Pending, takeResume } from './app'
+import { type Pending, SESSION_KEY, keptSession, takeResume } from './app'
 import type { Fragment } from './fragment'
 import { newVerifier, oidcErrorMessage, takeVerifier } from './oidc'
 
@@ -18,6 +19,9 @@ export type Target =
   | { kind: 'session'; sessionId: string; name: string }
   /** Join a running session with a share. */
   | { kind: 'share'; sessionId: string; token: string }
+
+/** The owner's session, to join again. */
+export type SessionTarget = Extract<Target, { kind: 'session' }>
 
 /** streamURL is the WebSocket URL of target's stream route on the page's origin. */
 export function streamURL(origin: string, target: Target): string {
@@ -40,6 +44,8 @@ export type Start =
   /** Back from OIDC: the exchange of the one-time code, under way, and what waited for it. */
   | { kind: 'oidc'; token: Promise<AccessToken>; resume: Pending | null }
   | { kind: 'oidc-error'; message: string }
+  /** Reloaded over the owner's session: sign in again and join it again. */
+  | { kind: 'return'; target: SessionTarget }
 
 /**
  * start decides what the page starts with from its fragment, once, before
@@ -49,13 +55,20 @@ export type Start =
  * challenge of their own, so the code is spent with a throwaway
  * verifier and nobody is signed in. The verifier, and what waited for
  * the sign-in, are forgotten on every start: a sign-in that failed or
- * was abandoned leaves nothing for a later one to find.
+ * was abandoned leaves nothing for a later one to find. A page loaded
+ * without a fragment, as on a reload, over the owner's session joins it
+ * again once the user has signed in; a share link's page forgets it.
  */
 export function start(fragment: Fragment, api: Api, storage: Storage | undefined): Start {
   const verifier = takeVerifier(storage)
   const resume = takeResume(storage)
   switch (fragment.kind) {
     case 'join':
+      try {
+        storage?.removeItem(SESSION_KEY)
+      } catch {
+        // Nothing kept.
+      }
       return { kind: 'join', sessionId: fragment.sessionId, token: fragment.token }
     case 'oidc-error':
       return { kind: 'oidc-error', message: oidcErrorMessage(fragment.error) }
@@ -65,7 +78,9 @@ export function start(fragment: Fragment, api: Api, storage: Storage | undefined
         return { kind: 'oidc-error', message: 'That sign-in was not started in this tab, so it was not used. Sign in here.' }
       }
       return { kind: 'oidc', token: api.oidcToken(fragment.code, verifier), resume }
-    default:
-      return { kind: 'signed-out' }
+    default: {
+      const target = keptSession(storage)
+      return target === null ? { kind: 'signed-out' } : { kind: 'return', target }
+    }
   }
 }

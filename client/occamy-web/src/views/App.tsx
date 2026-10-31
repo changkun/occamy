@@ -5,8 +5,9 @@
 // The shell's screens: sign-in, the connection list, and a session, as
 // src/lib/app.ts decides them. The access token lives in memory only,
 // for its lifetime of minutes; a new tab or a reload signs in again, as
-// occamyd issues no refresh tokens. An owner whose token expired signs
-// in over the session, which streams on underneath.
+// occamyd issues no refresh tokens, and a reload over the owner's session
+// joins it again after. An owner whose token expired signs in over the
+// session, which streams on underneath.
 
 import { type ReactElement, useReducer } from 'react'
 
@@ -51,6 +52,7 @@ export function App({ api, start, storage }: AppProps): ReactElement {
           target={screen.target}
           owner={screen.owner}
           action={state.action?.view === view ? state.action : null}
+          storage={storage}
           onLeave={() => dispatch({ type: 'leave', view })}
           onSignIn={(message, next) => dispatch({ type: 'sign-in-again', view, message, pending: { target: next.target, view: next.here ? view : null, then: next.then, owner: next.owner } })}
           onRejoin={(target) => dispatch({ type: 'open', target, now: Date.now() })}

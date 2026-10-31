@@ -11,9 +11,11 @@
 // the PKCE verifier, and the page joins the session again on its
 // return, within the owner's minute of grace. Whoever signs in, the
 // action is taken, and occamyd decides whether the session is theirs.
+// The owner's session on screen is kept in sessionStorage too, so that
+// a reload, which signs in again, joins it again after.
 
 import type { AccessToken, Identity, ShareRole } from './api'
-import type { Start, Target } from './targets'
+import type { SessionTarget, Start, Target } from './targets'
 
 /** What a session view does for its owner once the user has signed in again. */
 export type SessionAction =
@@ -89,6 +91,8 @@ export function initialState(start: Start): AppState {
       return { ...base, signIn: { message: '', exchange: start.token, pending: start.resume } }
     case 'oidc-error':
       return { ...base, signIn: { message: start.message, exchange: null, pending: null } }
+    case 'return':
+      return { ...base, signIn: { message: `Sign in again to return to ${start.target.name}.`, exchange: null, pending: { target: start.target, view: null, then: null, owner: null } } }
     default:
       return { ...base, signIn: { message: '', exchange: null, pending: null } }
   }
@@ -169,6 +173,46 @@ export function saveResume(storage: Storage | undefined, pending: Pending | null
     return storage !== undefined
   } catch {
     return false
+  }
+}
+
+/** Where the owner's session on screen is kept, for a reload of the page to join it again. */
+export const SESSION_KEY = 'occamy.session'
+
+/**
+ * keepSession keeps target, the session of the owner's view on screen,
+ * in the tab's storage, so that a reload of the page, after which the
+ * user signs in again, joins it again: occamyd keeps it for its owner's
+ * minute of grace. A share is not kept: its token must not outlive the
+ * page.
+ */
+export function keepSession(storage: Storage | undefined, target: SessionTarget): void {
+  try {
+    storage?.setItem(SESSION_KEY, JSON.stringify({ kind: target.kind, sessionId: target.sessionId, name: target.name }))
+  } catch {
+    // Without storage, a reload returns to the connection list.
+  }
+}
+
+/** forgetSession forgets the kept session if it is sessionId: it has ended, its view could not join it, or the user left it. */
+export function forgetSession(storage: Storage | undefined, sessionId: string): void {
+  try {
+    if (sessionId !== '' && keptSession(storage)?.sessionId === sessionId) {
+      storage?.removeItem(SESSION_KEY)
+    }
+  } catch {
+    // Nothing kept, nothing to forget.
+  }
+}
+
+/** keptSession returns the session keepSession kept, which stays kept, or null. */
+export function keptSession(storage: Storage | undefined): SessionTarget | null {
+  try {
+    const raw = storage?.getItem(SESSION_KEY) ?? null
+    const target = raw === null ? null : targetOf(JSON.parse(raw))
+    return target?.kind === 'session' ? target : null
+  } catch {
+    return null
   }
 }
 

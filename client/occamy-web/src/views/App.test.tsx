@@ -6,14 +6,17 @@
 
 // The shell in a DOM, under StrictMode: an End that waited for the
 // owner's single sign-on, which came back signed in as someone else, is
-// ended as occamyd decides, once the owner signs in over the session.
+// ended as occamyd decides, once the owner signs in over the session;
+// and a reload over the owner's session joins it again once the user has
+// signed in.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { type AccessToken, Api, type Identity } from '../lib/api'
-import type { Target } from '../lib/targets'
+import { SESSION_KEY } from '../lib/app'
+import { type Target, start } from '../lib/targets'
 import { App } from './App'
 
 declare global {
@@ -23,9 +26,15 @@ declare global {
 // NeverOpens is a WebSocket that stays connecting, as a stream of a
 // session that is not the user's does not open.
 class NeverOpens extends EventTarget {
+  /** The URLs of the streams opened. */
+  static urls: string[] = []
   binaryType = 'blob'
   protocol = ''
   readyState = 0
+  constructor(url: string | URL) {
+    super()
+    NeverOpens.urls.push(String(url))
+  }
   close(): void {
     this.readyState = 3
   }
@@ -36,6 +45,7 @@ let root: Root
 let container: HTMLElement
 
 beforeEach(() => {
+  NeverOpens.urls = []
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   vi.stubGlobal('WebSocket', NeverOpens)
   container = document.createElement('div')
@@ -117,5 +127,49 @@ describe('App', () => {
     expect(log.filter((l) => l.startsWith('DELETE'))).toEqual(['DELETE /api/v1/sessions/mZ3k', 'DELETE /api/v1/sessions/mZ3k'])
     expect(log).toContain('GET /api/v1/connections')
     expect(container.querySelector('dialog')).toBeNull()
+  })
+
+  it('joins the owner’s session again after a reload, once the user has signed in', async () => {
+    const items = new Map([[SESSION_KEY, JSON.stringify({ kind: 'session', sessionId: 'mZ3k', name: 'Lab' })]])
+    const storage: Storage = {
+      get length() {
+        return items.size
+      },
+      clear: () => items.clear(),
+      getItem: (k) => items.get(k) ?? null,
+      key: () => null,
+      removeItem: (k) => void items.delete(k),
+      setItem: (k, v) => void items.set(k, v),
+    }
+    const log: string[] = []
+    const api = occamyd('demo', log)
+    // The page loads again, with no fragment, as on a reload.
+    const begin = start({ kind: 'none' }, api, storage)
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <App api={api} start={begin} storage={storage} />
+        </StrictMode>,
+      )
+      await Promise.resolve()
+    })
+    await settle()
+    expect(text()).toContain('Sign in again to return to Lab.')
+    expect(NeverOpens.urls).toEqual([])
+    const form = container.querySelector<HTMLFormElement>('form.sign-in')
+    form?.querySelector<HTMLInputElement>('input[name=username]')?.setAttribute('value', 'demo')
+    form?.querySelector<HTMLInputElement>('input[name=password]')?.setAttribute('value', 'occamy')
+    act(() => form?.requestSubmit())
+    await settle(10)
+    // Signed in, the page joins the session rather than list connections.
+    expect(log).toContain('POST /api/v1/auth/token')
+    expect(log).not.toContain('GET /api/v1/connections')
+    expect(NeverOpens.urls.map((u) => u.split('?')[0])).toEqual([`ws://${location.host}/api/v1/sessions/mZ3k/stream`])
+    expect(text()).toContain('Connecting to Lab…')
+    // The user leaves it: a reload no longer joins it.
+    act(() => button('Cancel')?.click())
+    await settle()
+    expect(log).toContain('GET /api/v1/connections')
+    expect(items.has(SESSION_KEY)).toBe(false)
   })
 })

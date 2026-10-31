@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { Api } from './api'
-import { RESUME_KEY, saveResume } from './app'
+import { RESUME_KEY, SESSION_KEY, keepSession, saveResume } from './app'
 import { VERIFIER_KEY } from './oidc'
 import { start, streamToken, streamURL } from './targets'
 
@@ -64,6 +64,18 @@ describe('start', () => {
 
   it('joins from a share link', () => {
     expect(start({ kind: 'join', sessionId: 's', token: 't' }, api().api, storage())).toEqual({ kind: 'join', sessionId: 's', token: 't' })
+  })
+
+  it('returns to the owner’s session kept in the tab after a reload, and forgets it for a share link', () => {
+    const s = storage()
+    const lab = { kind: 'session', sessionId: 'mZ3k', name: 'Lab' } as const
+    keepSession(s, lab)
+    expect(start({ kind: 'none' }, api().api, s)).toEqual({ kind: 'return', target: lab })
+    // It stays kept, for a reload before the user signs in.
+    expect(start({ kind: 'none' }, api().api, s)).toEqual({ kind: 'return', target: lab })
+    expect(start({ kind: 'join', sessionId: 's', token: 't' }, api().api, s)).toEqual({ kind: 'join', sessionId: 's', token: 't' })
+    expect(s.getItem(SESSION_KEY)).toBeNull()
+    expect(start({ kind: 'none' }, api().api, s)).toEqual({ kind: 'signed-out' })
   })
 
   it('exchanges the one-time code with this tab’s verifier, and spends the verifier', async () => {

@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { AccessToken, Identity } from './api'
-import { type AppEvent, type AppState, EXPIRED, type Pending, RESUME_KEY, initialState, reduce, saveResume, signInOver, takeResume } from './app'
+import { type AppEvent, type AppState, EXPIRED, type Pending, RESUME_KEY, SESSION_KEY, forgetSession, initialState, keepSession, keptSession, reduce, saveResume, signInOver, takeResume } from './app'
 import type { Target } from './targets'
 
 // token returns an access token of occamyd's for sub, signed in at idp,
@@ -41,6 +41,15 @@ describe('the shell’s screens', () => {
     expect(s).toMatchObject({ token: fresh, screen: { kind: 'connections' }, signIn: null })
     s = reduce(s, { type: 'open', target: lab, now })
     expect(s.screen).toEqual({ kind: 'session', target: lab, view: 1, owner: null })
+  })
+
+  it('signs in again after a reload over the owner’s session, and joins it again', () => {
+    let s = initialState({ kind: 'return', target: { kind: 'session', sessionId: 'mZ3k', name: 'Lab' } })
+    expect(s.screen).toEqual({ kind: 'start' })
+    expect(signInOver(s)).toBe(false)
+    expect(s.signIn).toEqual({ message: 'Sign in again to return to Lab.', exchange: null, pending: { target: mine, view: null, then: null, owner: null } })
+    s = reduce(s, { type: 'signed-in', token: fresh })
+    expect(s).toMatchObject({ token: fresh, signIn: null, action: null, screen: { kind: 'session', target: mine, view: 1, owner: null } })
   })
 
   it('opens a share link without signing in', () => {
@@ -206,6 +215,51 @@ describe('saveResume and takeResume', () => {
       s.setItem(RESUME_KEY, raw)
       expect(takeResume(s)).toBeNull()
       expect(s.getItem(RESUME_KEY)).toBeNull()
+    }
+  })
+})
+
+describe('keepSession, keptSession and forgetSession', () => {
+  function storage(): Storage {
+    const items = new Map<string, string>()
+    return {
+      get length() {
+        return items.size
+      },
+      clear: () => items.clear(),
+      getItem: (k) => items.get(k) ?? null,
+      key: () => null,
+      removeItem: (k) => void items.delete(k),
+      setItem: (k, v) => void items.set(k, v),
+    }
+  }
+
+  it('keeps the owner’s session for every load, until it is forgotten', () => {
+    const s = storage()
+    expect(keptSession(s)).toBeNull()
+    keepSession(s, { kind: 'session', sessionId: 'mZ3k', name: 'Lab' })
+    expect(keptSession(s)).toEqual(mine)
+    expect(keptSession(s)).toEqual(mine)
+    // Another session's view forgets nothing of this one.
+    forgetSession(s, 'other')
+    expect(keptSession(s)).toEqual(mine)
+    forgetSession(s, 'mZ3k')
+    expect(keptSession(s)).toBeNull()
+    expect(s.getItem(SESSION_KEY)).toBeNull()
+    // Without storage, or with storage that throws, nothing is kept.
+    keepSession(undefined, { kind: 'session', sessionId: 'mZ3k', name: 'Lab' })
+    expect(keptSession(undefined)).toBeNull()
+    const refusing = { ...s, getItem: () => { throw new Error('denied') }, setItem: () => { throw new Error('denied') } }
+    keepSession(refusing, { kind: 'session', sessionId: 'mZ3k', name: 'Lab' })
+    expect(keptSession(refusing)).toBeNull()
+    forgetSession(refusing, 'mZ3k')
+  })
+
+  it('takes nothing it does not know', () => {
+    const s = storage()
+    for (const raw of ['not json', '[]', 'null', '{"kind":"share","sessionId":"s","token":"t"}', '{"kind":"connection","id":"lab","name":"Lab"}', '{"kind":"session","sessionId":"","name":"x"}', '{"kind":"session","sessionId":"s"}']) {
+      s.setItem(SESSION_KEY, raw)
+      expect(keptSession(s)).toBeNull()
     }
   })
 })
