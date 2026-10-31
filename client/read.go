@@ -207,10 +207,7 @@ func (s *Session) tile(m *protocol.Tile, n int) error {
 		o.data, o.job = c.data, c.job
 		return s.add(o)
 	case protocol.CodecRaw:
-		o.data = m.Payload
-		if m.Slot != 0 {
-			o.data = slices.Clone(m.Payload) // not the message's buffer
-		}
+		o.data = m.Payload // the Session's to keep, as Conn says
 	default:
 		o.job = &job{dec: s.decoders[m.Codec], payload: m.Payload, w: r.Dx(), h: r.Dy(), done: make(chan struct{})}
 		o.bytes += 4 * r.Dx() * r.Dy() // the decoded pixels

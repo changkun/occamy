@@ -142,23 +142,6 @@ describe('tile cache', () => {
     await s.close()
   })
 
-  it('keeps a copy of a raw tile, not its message', async () => {
-    const { t, s } = await open(withCache)
-    const m = raw(1, 0, 0, 2, 2, RED, 1)
-    t.push({ type: 'resize', width: 4, height: 4 })
-    t.push(m)
-    t.push(frameEnd(1))
-    await nextFrame(s)
-    if (m.type === 'tile') {
-      m.payload.fill(0) // what a reused buffer would do
-    }
-    t.push(cached(2, 2, 2, 2, 2, 1))
-    t.push(frameEnd(2))
-    await nextFrame(s)
-    expect(pixel(s.framebuffer, 3, 3)).toEqual(RED)
-    await s.close()
-  })
-
   for (const [name, m] of [
     ['an empty slot', cached(1, 0, 0, 4, 4, 2)],
     ['a slot of another size', cached(1, 0, 0, 4, 2, 1)],

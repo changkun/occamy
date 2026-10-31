@@ -61,7 +61,11 @@ export interface Transport {
   send(msg: Uint8Array): void
   /** close closes the connection with a close code. */
   close(code: number, reason: string): void
-  /** The session sets these. A text message arrives as a string. */
+  /**
+   * The session sets these. A text message arrives as a string, and a
+   * binary one as an ArrayBuffer that the session keeps: the transport
+   * must not reuse it.
+   */
   onmessage: ((data: ArrayBuffer | string) => void) | null
   /**
    * onclose reports that the connection closed: with the peer's close
@@ -657,11 +661,10 @@ export class Session {
       return this.add({ kind: 'tile', rect: r, raw: c.raw, job: c.job, bytes: n, work: pixels })
     }
     if (codec === Codec.Raw) {
-      // A stored tile keeps a copy, not its message's buffer.
-      const raw = slot !== 0 ? payload.slice() : payload
-      this.add({ kind: 'tile', rect: r, raw, job: null, bytes: n, work: pixels })
+      // The payload views the message's buffer, which the session keeps.
+      this.add({ kind: 'tile', rect: r, raw: payload, job: null, bytes: n, work: pixels })
       if (slot !== 0) {
-        this.slots.set(slot, { width: r.width, height: r.height, raw, job: null })
+        this.slots.set(slot, { width: r.width, height: r.height, raw: payload, job: null })
       }
       return
     }
