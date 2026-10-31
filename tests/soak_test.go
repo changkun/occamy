@@ -271,7 +271,7 @@ func soakGrowth(series []float64, bound float64) (bool, string) {
 	for i := 1; i < len(medians); i++ {
 		rising = rising && medians[i] >= medians[i-1]
 	}
-	detail := fmt.Sprintf("medians of the quarters %v, range %v to %v", medians, slices.Min(series), slices.Max(series))
+	detail := fmt.Sprintf("medians of the quarters %.1f, range %.1f to %.1f", medians, slices.Min(series), slices.Max(series))
 	return rising && medians[3]-medians[0] > bound, detail
 }
 
