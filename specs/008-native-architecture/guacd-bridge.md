@@ -808,8 +808,17 @@ that guacd was `vnc`'s default, they are corrected below.
     the owner must be asked: a screen without the prompt fails, which
     `TestParityReady` checks against a server in process. A wrong
     answer to the prompt ends the session as `backend-failed`.
-  - screen: 1024×768, not of one colour, and a frame acknowledging a
-    key.
+  - screen: 1024×768, and a frame acknowledging a key, after which the
+    screen shows the desktop, two opaque colours at least; a failure
+    says which of the two did not come. Pixels not drawn yet are
+    transparent and do not count. The check first judged the screen at
+    the first acknowledging frame, and took any two pixel values for
+    the desktop: through guacd, the screen is black until x11vnc's
+    first update, some 40 ms after the first frame, so a frame that
+    drew all of that black at once failed it, as #136's tile cache did,
+    and a screen of black and undrawn pixels passed it. The desktop
+    comes a few frames later. `TestParityShowsInput` checks the
+    judgement against a server in process.
   - resize: TigerVNC takes 900×700 from the owner's `hello` and
     800×600 and back from a request; x11vnc keeps 1024×768.
   - clipboard: "naïve café, ½ °C" and "€ ✓ 日本" reach the server's
