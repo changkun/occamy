@@ -482,7 +482,10 @@ The graphics pipeline's codecs, tile size and pixel layout were chosen
 by a separate measurement on frames recorded from the bench desktop:
 [benchmarks/codecs.md](./benchmarks/codecs.md). It also bears on G5's
 bytes, which no pure-Go codec measured there brings near 4.9 KiB a
-frame.
+frame. Scroll detection, measured on the same frames in
+[benchmarks/scroll.md](./benchmarks/scroll.md), sends the recorded
+scrolling text in 5.0 KiB a frame against 58.5, under G3's target of
+7.1 over VNC.
 
 Four measurements would replace assumptions here: an RDP counterpart of
 `bench/vncprobe`, for xrdp's reaction and its frame-rate ceiling; each

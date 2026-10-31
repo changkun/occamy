@@ -35,12 +35,17 @@ section() {
 # platform, formatted by the template $1, to the file $2, sorted and
 # without duplicates. Each go list writes to a file of its own, since in
 # a pipeline its failure would go unseen: the build stage's sh, dash, has
-# no pipefail.
+# no pipefail. Both architectures are listed, whatever the host's, since
+# a module may be compiled into one only, as zeebo/xxh3 compiles
+# klauspost/cpuid into amd64 builds.
 deps() {
 	for goos in linux darwin windows; do
-		GOOS=$goos go list -deps -f "$1" . > "$tmp/$goos" || fail "go list for $goos failed"
+		for goarch in amd64 arm64; do
+			GOOS=$goos GOARCH=$goarch go list -deps -f "$1" . > "$tmp/$goos-$goarch" ||
+				fail "go list for $goos/$goarch failed"
+		done
 	done
-	sort -u "$tmp/linux" "$tmp/darwin" "$tmp/windows" > "$2"
+	sort -u "$tmp"/*-amd64 "$tmp"/*-arm64 > "$2"
 }
 
 deps '{{with .Module}}{{if not .Main}}{{.Path}} {{.Version}} {{.Dir}}{{end}}{{end}}' "$tmp/modules"
