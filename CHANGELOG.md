@@ -235,6 +235,33 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   records a session for clients to replay. Protocol v1: a tile that
   names a slot covers at most 4096 pixels (`protocol.MaxCachedPixels`);
   no server had named one before.
+- An encode cache and workers in the graphics pipeline. The viewers of a
+  session whose encoders send in the same codecs share the session's
+  encodings, made once by whichever viewer or worker asks first: a
+  tile's, by its version and whether it moves, and a run of lossy
+  tiles', by its tiles' versions, its quality and its lowest quality,
+  refinement's searches among them; 32 MiB a session at most, the oldest
+  going first. Once a writer has a tile to encode itself, it hands the
+  rows after its own to one of the session's workers, which asks for
+  another each time it begins an encoding, up to two, or half the cores
+  below four; a frame whose tiles go cached wakes none, and the workers
+  drop what is left once the frame is sent. A session's searches start
+  where its last ended, whichever encoder made it. On the recorded
+  scenes every scene that encodes reaches its viewers in 38 to 56 %
+  less time, a photograph shown once in 44 ms against 96, and four
+  viewers take 32 to 58 % less CPU; one viewer takes up to a fifth more
+  CPU for its first frames of text and photographs, and the scenes
+  whose frames come from the tile cache are unchanged
+  ([docs/benchmarks/encode-cache.md](docs/benchmarks/encode-cache.md)).
+  `stream.Config.NoShare` turns both off, `EncodeWorkers` sets the
+  workers, none if negative, and `EncodeCacheBytes` the budget; occamyd
+  sets none of them. Nothing changes on the wire.
+- `encoder.Encoder.Still` gallops: past three steps from where its
+  search starts, it goes two steps, four and so on, and halves the gap
+  it finds, so that a search far from its start, as an encoder's first
+  on a page of text, takes 7 tries rather than 18. `Hint`, `SetHint` and
+  `Tries` expose where its next search starts and what its searches
+  cost.
 - `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
   (static users sign in with a password for an access token), TLS when
   `tls.cert` and `tls.key` are set, expvar and pprof on the debug
