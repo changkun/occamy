@@ -48,6 +48,11 @@ const (
 	jpegChunk = 64 << 10
 )
 
+// decodeJPEG decodes a Tight JPEG image once its markers and size have
+// passed jpegFrame. It is a variable so that tests can count the images
+// that reach image/jpeg.
+var decodeJPEG = jpeg.Decode
+
 // tight draws a Tight rectangle. Its compression control resets any of
 // the connection's four zlib streams first, then says how the rectangle
 // is sent: filled with one colour, as a JPEG image, or with the basic
@@ -336,7 +341,7 @@ func (d *decoder) tightJPEG(r image.Rectangle) error {
 	if size != r.Size() {
 		return fmt.Errorf("a tight jpeg image of %d×%d for a rectangle of %d×%d", size.X, size.Y, r.Dx(), r.Dy())
 	}
-	img, err := jpeg.Decode(bytes.NewReader(buf))
+	img, err := decodeJPEG(bytes.NewReader(buf))
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		// The data arrived whole; it is the image that is cut short, which
 		// is not the connection's io.ErrUnexpectedEOF.

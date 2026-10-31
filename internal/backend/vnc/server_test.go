@@ -13,6 +13,8 @@ import (
 	"bufio"
 	"bytes"
 	"compress/zlib"
+	"crypto/aes"
+	"crypto/md5"
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/binary"
@@ -20,6 +22,7 @@ import (
 	"image"
 	"image/color"
 	"io"
+	"math/big"
 	"net"
 	"slices"
 	"sync"
@@ -139,7 +142,7 @@ type serverOptions struct {
 	version  string      // the server's version, "003.008" if empty
 	types    []byte      // offered security types, [None] if nil; 3.3 uses the first
 	refuse   string      // a reason to refuse every connection with
-	password string      // for VNC Authentication and VeNCrypt's Plain
+	password string      // for VNC Authentication, VeNCrypt's Plain and Apple Remote Desktop
 	size     image.Point // the screen, 64×48 if zero
 	name     string
 
@@ -148,7 +151,7 @@ type serverOptions struct {
 	vcVersion [2]byte         // VeNCrypt's version, 0.2 if zero
 	cert      tls.Certificate // for the TLS and X.509 subtypes
 	tlsMax    uint16          // the newest TLS version, and TLS 1.0 the oldest, if not zero
-	user      string          // for Plain
+	user      string          // for Plain and Apple Remote Desktop
 }
 
 // fakeServer is an RFB server on the loopback interface.
@@ -163,6 +166,7 @@ type fakeServer struct {
 	failures int      // failed authentications
 	subtypes []uint32 // the VeNCrypt subtypes the clients chose
 	plains   []string // Plain's credentials, as "user:password"
+	ards     []string // Apple Remote Desktop's credentials, as "user:password"
 }
 
 // newServer starts a fake server that serves until the test ends.
@@ -305,6 +309,11 @@ func (s *fakeServer) serve(nc net.Conn) {
 	case secVeNCrypt:
 		var ok bool
 		if nc, r, inner, authOK, ok = s.veNCrypt(nc, r); !ok {
+			return
+		}
+	case secARD:
+		var ok bool
+		if authOK, ok = s.ard(nc, r); !ok {
 			return
 		}
 	}
@@ -457,6 +466,55 @@ func (s *fakeServer) Plains() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return slices.Clone(s.plains)
+}
+
+// ard runs the server's side of Apple Remote Desktop authentication in
+// RFC 2409's group 2 with the generator 2, as macOS sent it in 2017,
+// and decrypts the credentials with code of its own. It returns whether
+// they were right, and false for ok if the connection failed.
+func (s *fakeServer) ard(nc net.Conn, r *bufio.Reader) (right, ok bool) {
+	p := rfc2409Group2
+	n := (p.BitLen() + 7) / 8
+	x, _ := rand.Int(rand.Reader, new(big.Int).Sub(p, big.NewInt(3)))
+	x.Add(x, big.NewInt(2))
+	y := new(big.Int).Exp(big.NewInt(2), x, p)
+	msg := binary.BigEndian.AppendUint16(nil, 2)
+	msg = binary.BigEndian.AppendUint16(msg, uint16(n))
+	msg = append(msg, p.FillBytes(make([]byte, n))...)
+	nc.Write(append(msg, y.FillBytes(make([]byte, n))...))
+
+	resp := make([]byte, 128+n)
+	if _, err := io.ReadFull(r, resp); err != nil {
+		return false, false
+	}
+	pub := new(big.Int).SetBytes(resp[128:])
+	if pub.Cmp(big.NewInt(2)) < 0 || pub.Cmp(new(big.Int).Sub(p, big.NewInt(2))) > 0 {
+		s.t.Errorf("fake server: the client's Apple Remote Desktop public key is not within [2, p-2]")
+		return false, false
+	}
+	key := md5.Sum(new(big.Int).Exp(pub, x, p).FillBytes(make([]byte, n)))
+	block, _ := aes.NewCipher(key[:])
+	plain := make([]byte, 128)
+	for i := 0; i < len(plain); i += block.BlockSize() {
+		block.Decrypt(plain[i:], resp[i:])
+	}
+	u, _, uok := bytes.Cut(plain[:64], []byte{0})
+	pw, _, pok := bytes.Cut(plain[64:], []byte{0})
+	if !uok || !pok {
+		s.t.Errorf("fake server: an Apple Remote Desktop field without its NUL: %q", plain)
+		return false, false
+	}
+	s.mu.Lock()
+	s.ards = append(s.ards, string(u)+":"+string(pw))
+	s.mu.Unlock()
+	return string(u) == s.opts.user && string(pw) == s.opts.password, true
+}
+
+// ARDs returns Apple Remote Desktop's credentials, as "user:password".
+func (s *fakeServer) ARDs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.ards)
 }
 
 // appendString appends a string with its U32 length.
