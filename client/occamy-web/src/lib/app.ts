@@ -16,6 +16,7 @@
 
 import type { AccessToken, Identity, ShareRole } from './api'
 import type { SessionTarget, Start, Target } from './targets'
+import { MAX_LABEL, clip } from './text'
 
 /** What a session view does for its owner once the user has signed in again. */
 export type SessionAction =
@@ -251,17 +252,24 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-// targetOf reads a kept target: a connection, or the user's session. A
-// share never waits for a sign-in.
+// SESSION_ID is what occamyd's session IDs are, unpadded base64url
+// (internal/session/registry.go), bounded: a kept one joins a path under
+// /api/v1/sessions/, which no other text may name.
+const SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/
+
+// targetOf reads a kept target: a connection, or the user's session,
+// with its name clipped as the page shows names. A share never waits for
+// a sign-in.
 function targetOf(v: unknown): Target | null {
   if (!isObject(v) || typeof v.name !== 'string') {
     return null
   }
+  const name = clip(v.name, MAX_LABEL)
   if (v.kind === 'connection' && typeof v.id === 'string' && v.id !== '') {
-    return { kind: 'connection', id: v.id, name: v.name }
+    return { kind: 'connection', id: v.id, name }
   }
-  if (v.kind === 'session' && typeof v.sessionId === 'string' && v.sessionId !== '') {
-    return { kind: 'session', sessionId: v.sessionId, name: v.name }
+  if (v.kind === 'session' && typeof v.sessionId === 'string' && SESSION_ID.test(v.sessionId)) {
+    return { kind: 'session', sessionId: v.sessionId, name }
   }
   return null
 }

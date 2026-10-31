@@ -256,9 +256,33 @@ describe('keepSession, keptSession and forgetSession', () => {
     forgetSession(refusing, 'mZ3k')
   })
 
+  it('takes a session ID only as occamyd makes them, and clips the name as the page shows names', () => {
+    const s = storage()
+    const longest = 'A'.repeat(64)
+    s.setItem(SESSION_KEY, JSON.stringify({ kind: 'session', sessionId: `${longest.slice(2)}_-`, name: 'Lab' }))
+    expect(keptSession(s)).toEqual({ kind: 'session', sessionId: `${longest.slice(2)}_-`, name: 'Lab' })
+    s.setItem(SESSION_KEY, JSON.stringify({ kind: 'session', sessionId: 'mZ3k', name: `${'n'.repeat(300)}\u202e` }))
+    expect(keptSession(s)).toEqual({ kind: 'session', sessionId: 'mZ3k', name: `${'n'.repeat(199)}…` })
+    s.setItem(SESSION_KEY, JSON.stringify({ kind: 'session', sessionId: 'mZ3k', name: 'Lab\u202e' }))
+    expect(keptSession(s)).toEqual({ kind: 'session', sessionId: 'mZ3k', name: 'Lab ' })
+  })
+
   it('takes nothing it does not know', () => {
     const s = storage()
-    for (const raw of ['not json', '[]', 'null', '{"kind":"share","sessionId":"s","token":"t"}', '{"kind":"connection","id":"lab","name":"Lab"}', '{"kind":"session","sessionId":"","name":"x"}', '{"kind":"session","sessionId":"s"}']) {
+    for (const raw of [
+      'not json',
+      '[]',
+      'null',
+      '{"kind":"share","sessionId":"s","token":"t"}',
+      '{"kind":"connection","id":"lab","name":"Lab"}',
+      '{"kind":"session","sessionId":"","name":"x"}',
+      '{"kind":"session","sessionId":"s"}',
+      // Not a session ID of occamyd's, which would join another path.
+      '{"kind":"session","sessionId":"../connections","name":"x"}',
+      '{"kind":"session","sessionId":"mZ3k?x=1","name":"x"}',
+      '{"kind":"session","sessionId":"mZ3k=","name":"x"}',
+      `{"kind":"session","sessionId":"${'A'.repeat(65)}","name":"x"}`,
+    ]) {
       s.setItem(SESSION_KEY, raw)
       expect(keptSession(s)).toBeNull()
     }
