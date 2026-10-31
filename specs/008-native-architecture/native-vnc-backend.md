@@ -1370,7 +1370,7 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
   - `vnctest` sends Raw only; the encodings stay tested inside the
     package and against TigerVNC.
 
-## Implementation notes: x11vnc's X error after a refused resize
+## Implementation notes: x11vnc's X error when a clipboard requestor is gone
 
 - **What was seen.** On 2026-10-31 a walk through the v1 demo stack,
   built from master at fb58a6b on a host with a 1-minute load of 14,
@@ -1445,30 +1445,50 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
 - **What changed.** `docker/demo/vnc/start.sh` sets
   `X11VNC_SENDEVENT_SYNC=1`. `TestX11vncClipboardRequestorGone`
   (`tests/x11vnc_test.go`, in `make e2e` through the stack's compose)
-  makes the x11vnc on port 5901 own the clipboard through a session,
-  runs the short stop with the two xclips, and checks that the xclip
-  that waited got the text, that the same x11vnc process serves the
-  port, that its watchdog logged nothing, and that the session carries
-  the clipboard both ways after it. On a Mac, against x11vnc processes
-  just started (by the watchdog, or by restarting the container), it
-  failed in five of six runs with `origin/master`'s `start.sh`, each
-  time with `Xerror: major_opcode: 18 … error_code: 3` about 13 s after
-  the session connected, as x11vnc first owned the clipboard and before
-  the stop, with the session ending as `remote-ended`; and it passed in
-  five of five with this one. It cannot fail every time, for the race
+  makes the x11vnc on port 5901 own the clipboard through a session, and
+  stops it for about 0.7 s: an xclip that waits asks for the clipboard,
+  another asks 0.3 s later and is killed 0.3 s after that, and x11vnc
+  continues and answers both, checking the first. The test checks that
+  the xclip that waited got the text, that the same x11vnc process
+  serves the port, that its watchdog logged nothing, and that the
+  session carries the clipboard both ways after it. The stop stays well
+  under the 2 s that the probe's xclips wait, so that none of theirs
+  dies, is answered first and checked, and makes x11vnc sync for good. A
+  stop of 1.3 s, with 0.6 s for each step, made x11vnc miss the probe's
+  echo after it in two of sixteen runs back to back, for reasons not
+  found. The x11vnc that CI tests has served the parity matrix first; if
+  a check of its found a gone window there, after a stall of more than
+  2 s, the test cannot tell the variable's absence. The text of the
+  test's last step starts with its nonce: x11vnc sends the clipboard to
+  its clients only if its length or its first 32 bytes differ from those
+  it read last (`CHKSZ`, `selection.c`), and with the nonce after them,
+  three of sixteen runs made back to back, less than 10 s apart, got no
+  echo. The parity matrix's barrier, `echo: barrier <ns>`, has all but
+  the nonce's last digit in them. On a Mac, against x11vnc processes
+  just started (by the watchdog, or by restarting the container), the
+  test failed in five of six runs with `origin/master`'s `start.sh`,
+  each time with `Xerror: major_opcode: 18 … error_code: 3` about 13 s
+  after the session connected, as x11vnc first owned the clipboard and
+  before the stop, with the session ending as `remote-ended`; and it
+  passed in five of five with this one. Those runs had a first form of
+  the stop, whose second xclip a `timeout` killed 0.4 s after it
+  started; with this form, which kills it itself, the test passed in
+  sixteen of sixteen runs back to back, and in four more after
+  restarting the container. It cannot fail every time, for the race
   above. x11vnc drops cut text until it has made its selection window,
-  which it does only once its latest client has been connected for
-  some seconds (`guess_dm_gone`, `xevents.c`), so the test sends the
-  text until the clipboard holds it. The tests that reach into the
-  stack now run compose with `PODMAN_COMPOSE_WARNING_LOGS=false`:
-  podman compose prints a banner to its standard error, which came
-  first in what they read and made every comparison fail with podman.
-  They still read both streams, since compose may print what a
-  container wrote to its standard error on its own. The watchdog stays, for x11vnc's
-  waits on clients that do not read and for any other error. The
-  parity row `resize: ignored without ExtendedDesktopSize` is now
-  `resize: the server keeps its size`, since x11vnc has
-  ExtendedDesktopSize and refuses SetDesktopSize as prohibited.
+  which it does only once its latest client has been connected for 45 s,
+  or for 8 s once it has seen a window manager (`guess_dm_gone`,
+  `xevents.c`), so the test sends the text until the clipboard holds it,
+  for up to 90 s. The tests that reach into the stack now run compose
+  with `PODMAN_COMPOSE_WARNING_LOGS=false`: podman compose prints a
+  banner to its standard error, which came first in what they read and
+  made every comparison fail with podman. They still read both streams,
+  since compose may print what a container wrote to its standard error
+  on its own. The watchdog stays, for x11vnc's waits on clients that do
+  not read and for any other error. The parity row `resize: ignored
+  without ExtendedDesktopSize` is now `resize: the server keeps its
+  size`, since x11vnc has ExtendedDesktopSize and refuses SetDesktopSize
+  as prohibited.
 - **The session's end is right.** Run ends a session as `remote-ended`
   when the server closes the connection between messages, which is how
   RFB ends one, and as `backend-failed` for any other end. x11vnc,
