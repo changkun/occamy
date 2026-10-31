@@ -6,12 +6,12 @@
 
 package vnc
 
-// TestTigerVNC runs the backend against TigerVNC's Xvnc
-// (docker/test/tigervnc) that offers only VeNCrypt's X509Vnc and
-// X509Plain, with a server certificate for localhost and 127.0.0.1
-// signed by a CA of the image's own, and a loop on the display that
-// answers clipboard text that starts "owner: " with "echo: " and the
-// rest:
+// TestTigerVNC runs the backend against the demo stack's TigerVNC
+// (docker/demo/tigervnc), on its screen that offers only VeNCrypt's
+// X509Vnc and X509Plain, with a server certificate for localhost and
+// 127.0.0.1 signed by a CA of the container's own, and the demo
+// desktop's clipboard probe, which answers text that starts "owner: "
+// with "echo: " and the rest:
 //
 //	go test -tags integration -run TestTigerVNC ./internal/backend/vnc
 //
@@ -93,7 +93,7 @@ func tigerVNC(t *testing.T) (addr string, caPEM, certPEM []byte) {
 	img := os.Getenv("OCCAMY_VNC_TLS_IMAGE")
 	if img == "" {
 		img = name
-		if out, err := exec.Command(engine, "build", "-q", "-t", img, "../../../docker/test/tigervnc").CombinedOutput(); err != nil {
+		if out, err := exec.Command(engine, "build", "-q", "-t", img, "-f", "../../../docker/demo/tigervnc/Dockerfile", "../../..").CombinedOutput(); err != nil {
 			t.Fatalf("building the TigerVNC image: %v: %s", err, out)
 		}
 		t.Cleanup(func() { _ = exec.Command(engine, "rmi", "-f", img).Run() })
@@ -107,15 +107,8 @@ func tigerVNC(t *testing.T) (addr string, caPEM, certPEM []byte) {
 		t.Fatalf("the port of %s: %v", name, err)
 	}
 	addr = strings.TrimSpace(strings.Split(string(out), "\n")[0])
-	file := func(path string) []byte {
-		b, err := exec.Command(engine, "exec", name, "cat", path).Output()
-		if err != nil {
-			t.Fatalf("%s of %s: %v", path, name, err)
-		}
-		return b
-	}
-	caPEM, certPEM = file("/etc/vnc-test/ca.pem"), file("/etc/vnc-test/server.pem")
-	// Wait until Xvnc sends its version.
+	// Wait until Xvnc sends its version: the container makes the
+	// certificates before it starts Xvnc.
 	for deadline := time.Now().Add(60 * time.Second); ; {
 		if probeRFB(addr) == nil {
 			break
@@ -125,7 +118,14 @@ func tigerVNC(t *testing.T) (addr string, caPEM, certPEM []byte) {
 		}
 		time.Sleep(200 * time.Millisecond)
 	}
-	return addr, caPEM, certPEM
+	file := func(path string) []byte {
+		b, err := exec.Command(engine, "exec", name, "cat", path).Output()
+		if err != nil {
+			t.Fatalf("%s of %s: %v", path, name, err)
+		}
+		return b
+	}
+	return addr, file("/etc/vnc-test/ca.pem"), file("/etc/vnc-test/server.pem")
 }
 
 // probeRFB reads the server's ProtocolVersion.
