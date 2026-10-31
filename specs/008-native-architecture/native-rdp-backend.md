@@ -816,7 +816,8 @@ and guacd leaves the default deployment.
   `TestIntegrationResize` resized the sink to 1280×720, 800×600 and
   back to 1024×768, a key painting the probe's swatch at each size.
   The rest of both packages' integration tests passed with the channel
-  joined.
+  joined. After the review's fixes both packages' integration tests
+  passed again (host load 3 before, 7 after).
 - **Mutation checks.** Each was broken in turn, 34 in all, and a test
   failed for 32; a mutant that no longer compiled was rewritten until
   it did. Caught:
