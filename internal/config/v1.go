@@ -60,8 +60,59 @@ type File struct {
 	Connections       []Connection `yaml:"connections"`
 	AllowAdhocTargets bool         `yaml:"allow_adhoc_targets"`
 	AdhocAllowlist    []string     `yaml:"adhoc_allowlist"`
-	Limits            Limits       `yaml:"limits"`
-	Streams           Streams      `yaml:"streams"`
+	// AdhocBackends picks the backend of ad-hoc targets by protocol, as a
+	// connection's Backend does; a protocol it leaves out gets
+	// DefaultBackend's. ParseV1 fills in every protocol.
+	AdhocBackends map[string]string `yaml:"adhoc_backends"`
+	Limits        Limits            `yaml:"limits"`
+	Streams       Streams           `yaml:"streams"`
+}
+
+// The backends that serve a connection's sessions.
+const (
+	// BackendNative is occamyd's own client of the protocol: ssh, and
+	// vnc with backend: native.
+	BackendNative = "native"
+	// BackendGuacd is the guacd bridge, for every protocol but ssh.
+	BackendGuacd = "guacd"
+)
+
+// DefaultBackend returns the backend that serves protocol's sessions
+// when the configuration does not pick one: native for ssh, which has
+// no other, and guacd for the others. vnc stays on guacd until its
+// native backend passes the guacd bridge's parity gate
+// (specs/008-native-architecture/guacd-bridge.md): backend: native opts
+// a connection in.
+func DefaultBackend(protocol string) string {
+	if protocol == "ssh" {
+		return BackendNative
+	}
+	return BackendGuacd
+}
+
+// BackendOf returns the backend that b names for protocol, or its
+// default if b is empty, as for a File that ParseV1 did not fill in.
+func BackendOf(protocol, b string) string {
+	if b == "" {
+		return DefaultBackend(protocol)
+	}
+	return b
+}
+
+// backendProblem describes why protocol cannot be served by backend b,
+// or returns "" if it can.
+func backendProblem(protocol, b string) string {
+	switch {
+	case b != BackendNative && b != BackendGuacd:
+		return fmt.Sprintf("unknown backend %q: use %s or %s", b, BackendGuacd, BackendNative)
+	case protocol == "ssh" && b == BackendGuacd:
+		return "ssh connections always use occamyd's native SSH backend: leave backend out, or set native"
+	case protocol == "rdp" && b == BackendNative:
+		return "the native RDP backend is not available yet: it is not registered until NLA has run end to end. Leave backend out, or set guacd"
+	case protocol != "ssh" && protocol != "vnc" && b == BackendNative:
+		return fmt.Sprintf("%s has no native backend: leave backend out, or set guacd", protocol)
+	}
+	return ""
 }
 
 // Streams bounds what occamyd keeps for one viewer.
@@ -193,6 +244,10 @@ type Connection struct {
 	Name     string `yaml:"name"`
 	Protocol string `yaml:"protocol"`
 	Target   string `yaml:"target"`
+	// Backend picks what serves the connection's sessions: BackendGuacd,
+	// the guacd bridge, or BackendNative, occamyd's own client. ParseV1
+	// fills in DefaultBackend's when it is empty.
+	Backend string `yaml:"backend"`
 	// HostKeys are the host keys an ssh target may present, each a public
 	// key in authorized_keys format or a SHA-256 fingerprint as
 	// ssh-keygen -l prints it. An ssh connection has HostKeys or
@@ -201,11 +256,20 @@ type Connection struct {
 	// InsecureIgnoreHostKey accepts any host key from an ssh target, with
 	// a warning, for demos.
 	InsecureIgnoreHostKey bool `yaml:"insecure_ignore_host_key"`
-	// TLS is the certificate policy of a vnc target's VeNCrypt. Other
-	// protocols have none.
-	TLS         ConnectionTLS `yaml:"tls"`
-	Credentials Credentials   `yaml:"credentials"`
-	Allow       Allow         `yaml:"allow"`
+	// TLS is the certificate policy of a vnc target's VeNCrypt, which
+	// only the native VNC backend checks. Other protocols have none.
+	TLS ConnectionTLS `yaml:"tls"`
+	// ARD allows Apple Remote Desktop authentication (security type 30)
+	// on a vnc connection with the native backend, which macOS Screen
+	// Sharing needs to log in a user of the Mac. Its key exchange
+	// authenticates no server, so that anyone in between reads the
+	// account's username and password; and without a TLS requirement, a
+	// downgrade from any server, not only a Mac, gets the whole password.
+	// It cannot be set with a TLS requirement, under which type 30 is
+	// never chosen.
+	ARD         bool        `yaml:"ard"`
+	Credentials Credentials `yaml:"credentials"`
+	Allow       Allow       `yaml:"allow"`
 }
 
 // ConnectionTLS is the policy for the certificate that a vnc target
@@ -238,6 +302,12 @@ type ConnectionTLS struct {
 // set reports whether any of t's keys is set.
 func (t ConnectionTLS) set() bool {
 	return t.Require || t.ServerName != "" || t.CAFile != "" || len(t.Pins) > 0 || t.InsecureSkipVerify
+}
+
+// required reports whether t requires TLS: require, or the trust that
+// ca_file or pins configure, which implies it.
+func (t ConnectionTLS) required() bool {
+	return t.Require || t.CAFile != "" || len(t.Pins) > 0
 }
 
 // RootCAs reads the certificates in CAFile, and returns nil, for the

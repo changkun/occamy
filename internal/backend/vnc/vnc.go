@@ -83,7 +83,7 @@ const (
 
 var (
 	// ErrNotRunning is returned by Input before Run has started or after
-	// it has returned.
+	// it has returned, except for a Resize, which the next Run asks for.
 	ErrNotRunning = errors.New("vnc: backend not running")
 	// ErrInputFull is returned by Input when too many inputs, or too many
 	// bytes of them, wait to be written, as when the server has stopped
@@ -142,6 +142,17 @@ type Config struct {
 	// password's first 8 bytes. Set ARD only for Macs, on networks you
 	// trust.
 	ARD bool
+	// ARDSetting names what allows ARD where the backend's user sets it,
+	// such as a configuration key, in the error for a server that offers
+	// Apple Remote Desktop authentication and nothing else the backend
+	// takes; "Config.ARD" if empty.
+	ARDSetting string
+	// Width and Height are the screen size to ask the server for, as a
+	// Resize before Run does: with SetDesktopSize, once the server has
+	// shown that it supports ExtendedDesktopSize. Zero keeps the server's
+	// size, and so does a size beyond MaxSide or MaxPixels, which a
+	// Resize could not ask for either.
+	Width, Height int
 	// DialTimeout bounds the TCP connection and defaults to 15 seconds.
 	// Only Run's context bounds the handshake that follows, since it may
 	// wait for the owner to answer a prompt.
@@ -158,6 +169,7 @@ type Backend struct {
 	password    string
 	tls         tlsPolicy
 	ard         bool
+	ardSetting  string
 	dialTimeout time.Duration
 	log         *slog.Logger
 	limits      limits
@@ -173,6 +185,9 @@ type Backend struct {
 
 	mu  sync.Mutex
 	run *run // the state that Input shares with Run, nil when not running
+	// size is the newest size asked for, by Config or a Resize, which
+	// each Run asks for at its start; zero if none.
+	size image.Point
 }
 
 var _ backend.Backend = (*Backend)(nil)
@@ -202,12 +217,20 @@ func New(cfg Config) (*Backend, error) {
 		return nil, errors.New("vnc: Apple Remote Desktop runs without TLS: ARD cannot be allowed " +
 			"while TLS is required by TLS.Require, RootCAs or Pins")
 	}
+	if cfg.Width < 0 || cfg.Height < 0 || (cfg.Width == 0) != (cfg.Height == 0) {
+		return nil, fmt.Errorf("vnc: invalid screen size %dx%d", cfg.Width, cfg.Height)
+	}
+	if cfg.ARDSetting == "" {
+		cfg.ARDSetting = "Config.ARD"
+	}
 	return &Backend{
 		addr:        addr,
 		username:    cfg.Username,
 		password:    cfg.Password,
 		tls:         policy,
 		ard:         cfg.ARD,
+		ardSetting:  cfg.ARDSetting,
+		size:        image.Pt(cfg.Width, cfg.Height),
 		dialTimeout: cfg.DialTimeout,
 		log:         cfg.Logger,
 		limits:      defaultLimits,
@@ -269,13 +292,19 @@ func (b *Backend) Demand(d backend.Demand) {
 // Extended Key Event once the server has asked for them. Resize asks for
 // the screen's new size with SetDesktopSize once the server has shown
 // that it supports ExtendedDesktopSize; without it, the server's size is
-// fixed and viewers scale. TermInput fails with ErrUnsupportedInput.
+// fixed and viewers scale. A Resize is also kept for the next Run, so
+// that one before Run is asked for once Run starts, as Config's size
+// would be. TermInput fails with ErrUnsupportedInput.
 //
 // Input queues what it is given and returns at once. Input that arrives
 // while Run is still connecting is written once the handshake ends. The
 // queue holds 256 inputs and about 8 MiB, so a single Text of more than
 // about 500,000 characters, at 16 bytes each, fails with ErrInputFull.
 func (b *Backend) Input(ev backend.InputEvent) error {
+	if ev, ok := ev.(backend.Resize); ok {
+		b.resize(ev.Width, ev.Height)
+		return nil
+	}
 	b.mu.Lock()
 	r := b.run
 	b.mu.Unlock()
@@ -301,13 +330,25 @@ func (b *Backend) Input(ev backend.InputEvent) error {
 			return nil
 		}
 		p = r.clipboard(ev.Data)
-	case backend.Resize:
-		r.resize(ev.Width, ev.Height, b.limits)
-		return nil
 	default:
 		return fmt.Errorf("%w: %T", ErrUnsupportedInput, ev)
 	}
 	return r.send(p)
+}
+
+// resize asks for a screen of w×h in the Run that runs, if any, and in
+// every Run that follows. A size beyond the limits is ignored.
+func (b *Backend) resize(w, h int) {
+	if b.limits.check(w, h) != nil {
+		return
+	}
+	b.mu.Lock()
+	b.size = image.Pt(w, h)
+	r := b.run
+	b.mu.Unlock()
+	if r != nil {
+		r.resize(w, h, b.limits)
+	}
 }
 
 // run is the state of one Run that Input and Demand share.
@@ -444,6 +485,9 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 		b.mu.Unlock()
 		return errors.New("vnc: Run called while running")
 	}
+	if b.size != (image.Point{}) {
+		r.resize(b.size.X, b.size.Y, b.limits)
+	}
 	b.run = r
 	b.mu.Unlock()
 	defer func() {
@@ -564,6 +608,7 @@ func (b *Backend) auth(ctx context.Context, sink backend.Sink, nc net.Conn, br *
 		hasUser:     b.username != "",
 		hasPassword: b.password != "",
 		ard:         b.ard,
+		ardSetting:  b.ardSetting,
 		requireTLS:  b.tls.require,
 		startTLS: func() error {
 			// The server waits for the client's hello: anything it sent

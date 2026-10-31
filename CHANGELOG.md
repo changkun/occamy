@@ -129,8 +129,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   of the Mac, but only when the backend's `vnc.Config.ARD` allows it:
   its key exchange authenticates no server, so anyone between Occamy and
   the Mac can read the account's password, or, with `ARD` set, strip
-  VeNCrypt from any server's offer to get it. No configuration key sets
-  `ARD` yet; that is a follow-up. A server that offers only type 30
+  VeNCrypt from any server's offer to get it. A connection's `ard: true`
+  sets it (below). A server that offers only type 30
   otherwise fails with an error that names the setting. The
   server's key length, prime, generator and public key are checked
   before anything else, a username or password longer than 63 bytes is
@@ -200,8 +200,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   joins a running one, both as protocol v1 WebSockets with the token in
   a subprotocol, never in the URL, and `Origin` checked against
   `origins`. Graphical streams offer `webp`, `jpeg`, `deflate` and
-  `raw`. ssh and vnc connections use the native backends, rdp and
-  telnet the guacd bridge. ssh connections need `host_keys` or
+  `raw`. ssh connections use the native backend, rdp and telnet the
+  guacd bridge, and vnc connections the guacd bridge unless they set
+  `backend: native` (below). ssh connections need `host_keys` or
   `insecure_ignore_host_key: true`. vnc connections take a `username`
   for VeNCrypt's Plain, and a `tls` block for the server's certificate:
   a CA file, pins by fingerprint, or, alone, an insecure mode for demos. A
@@ -309,6 +310,59 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   even when a write fails as it hangs up. Nothing registers it in
   occamyd yet. The VNC and RDP backends share
   one USB HID to scan code table, `internal/keymap`.
+- A `backend` key on each v1 connection, `guacd` or `native`, and
+  `adhoc_backends`, which picks the backend of ad-hoc targets by
+  protocol. vnc takes either; ssh is always native, and rdp and telnet
+  always go through guacd: `backend: native` on rdp is refused until
+  the native RDP backend has run NLA end to end, and the session's
+  state names the backend that serves it. vnc goes through guacd by
+  default during the guacd bridge's opt-in period, so a vnc connection
+  with `tls` must set `backend: native`: guacd would not check the
+  certificate as `tls` says, and a file without it fails to load,
+  naming the key. A vnc connection without `tls`, which master served
+  natively, checking a VeNCrypt server's certificate against the
+  system's roots, now goes through guacd, which checks no certificate;
+  `backend: native` keeps the check. A native vnc session asks the
+  server for the owner's size from the stream's `hello`, on a
+  connection's stream as on a session's, and a resize that reaches the
+  backend before it runs is no longer dropped. A size beyond the
+  backend's limits, such as a hello's 8192×8192, which is more than
+  2^25 pixels, is not asked for: the server keeps its size.
+- `ard: true` on a vnc connection with `backend: native` allows Apple
+  Remote Desktop authentication, for macOS Screen Sharing. It is
+  refused with a `tls` that requires TLS, and the error for a Mac that
+  offers only ARD names the key on the connection.
+  [docs/configuration.md](docs/configuration.md#apple-remote-desktop-ard)
+  describes the risk: anyone in between can read the Mac account's
+  whole password.
+- [docs/api.md](docs/api.md), the reference of API v1: every route with
+  its tokens, requests, replies, errors and limits, ad-hoc targets,
+  shares, the stream upgrades and the OIDC routes. A test fails when a
+  route has no section in it, or a section names no route; routes are
+  added only through the list that test reads, from which each
+  listener's mux is built.
+- API v1 refuses, with 400 `bad_request`, a JSON body that names a
+  field twice, at any depth, or names one in a case other than its
+  own, such as `Connection` for `connection`. encoding/json takes the
+  last of two and matches names in any case, so a proxy in front of
+  occamyd that reads the first, or matches names exactly, would have
+  seen a different request. A body nests at most 32 deep. The
+  refusals of `GET /api/v1/auth/oidc/login` carry
+  `Cache-Control: no-store`, as its redirects do.
+- `internal/backend/vnc/vnctest`, a fake RFB server for tests outside
+  the backend, which counts the credentials clients send, and tests
+  that drive native VNC sessions through occamyd's routes with the Go
+  client: credentials stored and prompted, the screen, input, resizes,
+  clipboard both ways, the cursor, visibility, the end reasons, the
+  `tls` policy, which sends no credential to a server it refuses, and
+  ad-hoc targets by address and by name, dialled at the address that
+  was checked.
+- The demo stack runs `occamy-v1` next to `occamy`, on port 5637, with
+  the v1 file `docker/occamy-v1.yaml`: the demo VNC server through the
+  native backend and through guacd, which `make e2e` streams with the
+  Go client. `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` move a
+  second stack aside on a shared host, and `make e2e` follows the
+  last two.
 - The native RDP backend's clipboard, the first part of its second
   phase: `internal/rdp` joins static virtual channels and reassembles
   their chunks within a bound per channel, and carries text both ways

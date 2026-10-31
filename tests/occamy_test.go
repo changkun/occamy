@@ -9,7 +9,10 @@
 //	make run
 //	make e2e
 //
-// The tests are skipped unless OCCAMY_E2E_ENDPOINT is set.
+// The tests of the v0 service are skipped unless OCCAMY_E2E_ENDPOINT is
+// set, and those of the occamy-v1 service, which serves API v1 and
+// protocol v1 from docker/occamy-v1.yaml, unless OCCAMY_E2E_V1_ENDPOINT
+// is.
 package tests
 
 import (
@@ -238,6 +241,12 @@ func TestMain(m *testing.M) {
 		time.Sleep(2 * time.Second)
 		if _, err := login(addr, credentials["vnc"]); err != nil {
 			fmt.Fprintf(os.Stderr, "occamy did not survive the tests: %v\n", err)
+			code = 1
+		}
+	}
+	if addr := os.Getenv("OCCAMY_E2E_V1_ENDPOINT"); addr != "" && code == 0 {
+		if _, err := signIn(addr); err != nil {
+			fmt.Fprintf(os.Stderr, "occamy-v1 did not survive the tests: %v\n", err)
 			code = 1
 		}
 	}

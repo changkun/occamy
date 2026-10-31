@@ -10,10 +10,12 @@ import (
 	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"maps"
 	"math/big"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -214,30 +216,37 @@ func TestParseV1Example(t *testing.T) {
 		},
 		Connections: []config.Connection{
 			{
-				ID: "build-box", Name: "Build box", Protocol: "ssh", Target: "build.internal:22",
+				ID: "build-box", Name: "Build box", Protocol: "ssh", Target: "build.internal:22", Backend: "native",
 				HostKeys:    []string{"SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"},
 				Credentials: config.Credentials{Username: "deploy", PrivateKeyFile: path("etc/occamy/keys/deploy")},
 				Allow:       config.Allow{Users: []string{"alice"}, Groups: []string{"ops"}},
 			},
 			{
-				ID: "nas-desktop", Name: "NAS desktop", Protocol: "vnc", Target: "nas.internal:5900",
+				ID: "nas-desktop", Name: "NAS desktop", Protocol: "vnc", Target: "nas.internal:5900", Backend: "native",
 				TLS:         config.ConnectionTLS{Pins: []string{"B7:2C:51:9E:0D:44:A3:6F:18:E2:95:7B:C0:3A:61:DD:4F:89:12:B6:E7:05:9C:73:2A:F1:58:0E:C4:93:6B:1D"}},
 				Credentials: config.Credentials{PasswordEnv: "OCCAMY_NAS_VNC_PASSWORD"},
 				Allow:       config.Allow{Groups: []string{"ops", "dev"}},
 			},
 			{
-				ID: "windows", Name: "Windows workstation", Protocol: "rdp", Target: "10.0.4.20:3389",
+				ID: "studio-mac", Name: "Studio Mac", Protocol: "vnc", Target: "studio-mac.internal:5900", Backend: "native",
+				ARD:         true,
+				Credentials: config.Credentials{Username: "studio", Prompt: true},
+				Allow:       config.Allow{Users: []string{"alice"}},
+			},
+			{
+				ID: "windows", Name: "Windows workstation", Protocol: "rdp", Target: "10.0.4.20:3389", Backend: "guacd",
 				Credentials: config.Credentials{Username: "Administrator", PasswordFile: path("run/secrets/windows-password")},
 				Allow:       config.Allow{Groups: []string{"ops"}},
 			},
 			{
-				ID: "lab-shell", Name: "Lab shell", Protocol: "ssh", Target: "[fd00::22]:22",
+				ID: "lab-shell", Name: "Lab shell", Protocol: "ssh", Target: "[fd00::22]:22", Backend: "native",
 				InsecureIgnoreHostKey: true,
 				Credentials:           config.Credentials{Prompt: true},
 				Allow:                 config.Allow{Groups: []string{"dev"}},
 			},
 		},
 		AdhocAllowlist: []string{"10.0.0.0/8", "*.lab.internal:22"},
+		AdhocBackends:  map[string]string{"ssh": "native", "vnc": "native", "rdp": "guacd", "telnet": "guacd"},
 		Limits:         config.Limits{Sessions: 500, SessionsPerUser: 20, ViewersPerSession: 50, SharesPerSession: 100},
 		Streams:        config.Streams{ViewerTimeout: 45 * time.Second},
 	}
@@ -389,6 +398,45 @@ func TestOverlap(t *testing.T) {
 		}
 		if got := config.Overlap(tt.b, tt.a); got != tt.want {
 			t.Errorf("Overlap(%q, %q) = %v, want %v", tt.b, tt.a, got, tt.want)
+		}
+	}
+}
+
+// TestParseV1Backends checks that every connection and every protocol of
+// adhoc_backends ends up with a backend: its own, or the protocol's
+// default, which is native for ssh and guacd for the others.
+func TestParseV1Backends(t *testing.T) {
+	f, err := parse(t, head+`connections:
+  - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: ssh, backend: native, insecure_ignore_host_key: true, target: b, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: vnc, target: c, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: d, protocol: vnc, backend: native, target: d, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: e, protocol: vnc, backend: guacd, target: e, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: f, protocol: vnc, backend: native, ard: true, target: f, tls: {insecure_skip_verify: true}, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
+  - {id: g, protocol: rdp, target: g, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: h, protocol: telnet, backend: guacd, target: h, credentials: {prompt: true}, allow: {users: [alice]}}
+adhoc_backends: {vnc: native}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range f.Connections {
+		got = append(got, c.ID+":"+c.Backend)
+	}
+	want := []string{"a:native", "b:native", "c:guacd", "d:native", "e:guacd", "f:native", "g:guacd", "h:guacd"}
+	if !slices.Equal(got, want) {
+		t.Errorf("backends %v, want %v", got, want)
+	}
+	if want := map[string]string{"ssh": "native", "vnc": "native", "rdp": "guacd", "telnet": "guacd"}; !maps.Equal(f.AdhocBackends, want) {
+		t.Errorf("adhoc_backends %v, want %v", f.AdhocBackends, want)
+	}
+	for _, tt := range []struct{ protocol, backend, want string }{
+		{"ssh", "", "native"}, {"vnc", "", "guacd"}, {"rdp", "", "guacd"}, {"telnet", "", "guacd"},
+		{"vnc", "native", "native"}, {"rdp", "guacd", "guacd"},
+	} {
+		if got := config.BackendOf(tt.protocol, tt.backend); got != tt.want {
+			t.Errorf("BackendOf(%q, %q) = %q, want %q", tt.protocol, tt.backend, got, tt.want)
 		}
 	}
 }
@@ -708,14 +756,14 @@ connections:
 		}},
 		{"vnc tls", head + `connections:
   - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: b, protocol: vnc, target: b, tls: {ca_file: DIR/ca.pem, pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: c, protocol: vnc, target: c, tls: {ca_file: DIR/password}, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: d, protocol: vnc, target: d, tls: {ca_file: DIR/missing.pem}, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: e, protocol: vnc, target: e, tls: {pins: ["SHA256:short", "zz"]}, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: f, protocol: vnc, target: f, tls: {require: true, server_name: nas, ca_file: DIR/ca.pem}, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
-  - {id: g, protocol: vnc, target: g, tls: {pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"], insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: h, protocol: vnc, target: h, tls: {ca_file: DIR/ca.pem, insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: i, protocol: vnc, target: i, tls: {insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: vnc, backend: native, target: b, tls: {ca_file: DIR/ca.pem, pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: vnc, backend: native, target: c, tls: {ca_file: DIR/password}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: d, protocol: vnc, backend: native, target: d, tls: {ca_file: DIR/missing.pem}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: e, protocol: vnc, backend: native, target: e, tls: {pins: ["SHA256:short", "zz"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: f, protocol: vnc, backend: native, target: f, tls: {require: true, server_name: nas, ca_file: DIR/ca.pem}, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
+  - {id: g, protocol: vnc, backend: native, target: g, tls: {pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"], insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: h, protocol: vnc, backend: native, target: h, tls: {ca_file: DIR/ca.pem, insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: i, protocol: vnc, backend: native, target: i, tls: {insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
 			{"connections[0].tls", "only vnc connections have tls"},
 			{"connections[1].tls.pins", "set ca_file or pins, not both"},
@@ -725,6 +773,42 @@ connections:
 			{"connections[4].tls.pins[1]", "not a certificate or a SHA-256 fingerprint"},
 			{"connections[6].tls.insecure_skip_verify", "set ca_file or pins, or insecure_skip_verify, not both"},
 			{"connections[7].tls.insecure_skip_verify", "set ca_file or pins, or insecure_skip_verify, not both"},
+		}},
+		{"backend", head + `connections:
+  - {id: a, protocol: ssh, backend: guacd, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: rdp, backend: native, target: b, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: telnet, backend: native, target: c, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: d, protocol: vnc, backend: nativ, target: d, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: e, protocol: vnc, target: e, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: f, protocol: vnc, backend: guacd, target: f, tls: {insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+`, []want{
+			{"connections[0].backend", "ssh connections always use occamyd's native SSH backend"},
+			{"connections[1].backend", "the native RDP backend is not available yet"},
+			{"connections[2].backend", "telnet has no native backend"},
+			{"connections[3].backend", `unknown backend "nativ": use guacd or native`},
+			{"connections[4].tls", "set backend: native"},
+			{"connections[5].tls", "set backend: native"},
+		}},
+		{"ard", head + `connections:
+  - {id: a, protocol: ssh, ard: true, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: vnc, ard: true, target: b, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: vnc, backend: native, ard: true, tls: {require: true}, target: c, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: d, protocol: vnc, backend: native, ard: true, tls: {pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, target: d, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: e, protocol: vnc, backend: native, ard: true, tls: {ca_file: DIR/ca.pem}, target: e, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: f, protocol: vnc, backend: native, ard: true, tls: {insecure_skip_verify: true, server_name: mac}, target: f, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
+`, []want{
+			{"connections[0].ard", "only vnc connections have ard"},
+			{"connections[1].ard", "set backend: native"},
+			{"connections[2].ard", "cannot be allowed while tls requires TLS"},
+			{"connections[3].ard", "cannot be allowed while tls requires TLS"},
+			{"connections[4].ard", "cannot be allowed while tls requires TLS"},
+		}},
+		{"adhoc backends", head + `adhoc_backends: {ssh: guacd, vnc: native, rdp: native, telnet: guacd, kubernetes: guacd, x: y}
+`, []want{
+			{"adhoc_backends.kubernetes", `unknown protocol "kubernetes"`},
+			{"adhoc_backends.rdp", "the native RDP backend is not available yet"},
+			{"adhoc_backends.ssh", "ssh connections always use occamyd's native SSH backend"},
+			{"adhoc_backends.x", `unknown protocol "x"`},
 		}},
 		{"allow", head + `connections:
   - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}}

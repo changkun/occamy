@@ -176,8 +176,11 @@ Registration in the API's backend factory for `vnc`, and the switch from
 the guacd bridge, follow the parity gate in
 [guacd-bridge](guacd-bridge.md), not these phases. (2026-10-30: the
 Sessions task of [api-and-server-stack](api-and-server-stack.md)
-registers the native backend as `vnc`'s default ahead of the gate,
-since no configuration key yet picks a backend; see its notes.)
+registered the native backend as `vnc`'s default ahead of the gate,
+since no configuration key picked a backend then. 2026-10-31: the gate's
+opt-in period started; the guacd bridge is `vnc`'s default and
+`backend: native` registers this backend for a connection. See
+Implementation notes: registration.)
 
 ## Affects
 
@@ -928,7 +931,8 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     `insecure_skip_verify`; and, since phase 4, `ard`. All but `ard`
     were done in the Sessions task's review (#111), with
     `vnc.CheckPin` for the configuration's checks; see
-    api-and-server-stack.md. `ard` has no configuration key yet.
+    api-and-server-stack.md. `ard` was added with the opt-in period;
+    see Implementation notes: registration.
   - Protocol v1's web client must fill `Key.Code` from
     `KeyboardEvent.code` for QEMU key events to be used; the current
     Guacamole-protocol client sends keysyms only.
@@ -1262,11 +1266,11 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
      Screen Sharing off again.
 - **Follow-ups.**
   - The check by hand above, on current macOS.
-  - Configuration v1's `ard` key for VNC connections (phase 3's list),
+  - ~~Configuration v1's `ard` key for VNC connections (phase 3's list),
     documented with its risk in `docs/configuration.md` once it exists.
     When it lands, the error for a server that offers only type 30
     should name that key rather than `Config.ARD`, which an operator
-    cannot set.
+    cannot set.~~ Done; see Implementation notes: registration.
   - Apple's types 33, 35 and 36, with SRP and Kerberos, would log in to
     a Mac without type 30's exposure; each needs a Mac to be built
     against.
@@ -1276,3 +1280,53 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     pseudo-encodings, so its Tight JPEG session from TigerVNC doubled
     under continuous updates. Confirm why, or have it clear
     `extensions` as it replaces `encodings`.
+
+## Implementation notes: registration
+
+- **Status.** The backend serves vnc connections and ad-hoc targets
+  that opt in with `backend: native` (or `adhoc_backends: {vnc:
+  native}`), during the parity gate's opt-in period
+  ([guacd-bridge](guacd-bridge.md)); the guacd bridge serves vnc by
+  default. Before, it served every vnc session, with no key.
+- **What was done.**
+  - `ard: true` on a vnc connection sets `Config.ARD`. Configuration
+    v1 refuses it on other protocols, without `backend: native`, and
+    with a `tls` that requires TLS (`require`, `ca_file` or `pins`),
+    since type 30 runs without TLS. `docs/configuration.md` describes
+    the risk. Ad-hoc targets cannot have it.
+  - `Config.ARDSetting` names the key in the error for a server that
+    offers only type 30: `ard: true on connection "studio-mac"`, or,
+    for an ad-hoc target, a connection for it, since ad-hoc targets have
+    no `ard`.
+  - `Config.Width` and `Height` carry the owner's `hello` size, which
+    occamyd's connection stream passed to no one before: `Input`
+    returned `ErrNotRunning` for a `Resize` that came before `Run`. A
+    `Resize` is now kept for the next `Run` in any case, so a session
+    stream's owner, whose resize may reach the backend before the
+    session's goroutine has started `Run`, is not lost either. Each
+    `Run` asks for the newest size once the server shows
+    ExtendedDesktopSize. A size beyond `MaxSide` or `MaxPixels`, from
+    a `Resize` or from `Config`, is not asked for, so a hello of
+    8192×8192, within `backend.MaxResizeSide` but over 2^25 pixels,
+    leaves the server's size (`TestConfigSizeBeyondLimits`).
+  - `internal/backend/vnc/vnctest` is a fake RFB 3.8 server for tests
+    outside the package: None, VNC Authentication and VeNCrypt's X.509
+    subtypes, Raw in the client's pixel format, Cursor, DesktopSize,
+    ExtendedDesktopSize with SetDesktopSize, and cut text, answering
+    update requests itself. It counts failed authentications and,
+    right or wrong, the credentials clients send (`Credentials`), so
+    a test can tell that a refused certificate got none. `Conn.Close`
+    shuts the server's side down and reads until the client closes
+    its own: closing with bytes unread reset the connection on Linux,
+    which `TestServerEnds` saw in CI about once in a hundred runs under
+    the race detector.
+    `server/vnc_e2e_test.go` runs the backend through occamyd's routes
+    against it with the Go client, for connections and for ad-hoc
+    targets by address and by name.
+- **Follow-ups.**
+  - `vnctest` duplicates part of the package's own fake server
+    (`server_test.go`), which scripts every byte and reaches into the
+    backend; the package's tests could move to `vnctest` where they
+    need no scripting.
+  - `vnctest` sends Raw only; the encodings stay tested inside the
+    package and against TigerVNC.

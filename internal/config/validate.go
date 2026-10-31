@@ -151,6 +151,7 @@ func (f *File) validate(c *checker) {
 			c.add(fmt.Sprintf("adhoc_allowlist[%d]", i), "%v", err)
 		}
 	}
+	f.validateAdhocBackends(c)
 	for _, l := range []struct {
 		path string
 		n    int
@@ -360,8 +361,10 @@ func (f *File) validateConnections(c *checker) {
 		}
 		c.credentials(p+".credentials", cn.Protocol, cn.Credentials)
 		if known {
+			c.backend(p, cn)
 			c.hostKeys(p, cn)
 			c.connectionTLS(p+".tls", cn)
+			c.ard(p+".ard", cn)
 		}
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
 	}
@@ -480,16 +483,57 @@ func (c *checker) hostKeys(path string, cn *Connection) {
 	}
 }
 
+// backend checks a connection's backend, and fills in the protocol's
+// default if it has none.
+func (c *checker) backend(path string, cn *Connection) {
+	if cn.Backend == "" {
+		cn.Backend = DefaultBackend(cn.Protocol)
+		return
+	}
+	if p := backendProblem(cn.Protocol, cn.Backend); p != "" {
+		c.add(path+".backend", "%s", p)
+	}
+}
+
+// validateAdhocBackends checks adhoc_backends, and fills in the default
+// of each protocol it leaves out.
+func (f *File) validateAdhocBackends(c *checker) {
+	for _, protocol := range slices.Sorted(maps.Keys(f.AdhocBackends)) {
+		p := "adhoc_backends." + protocol
+		if _, ok := defaultPorts[protocol]; !ok {
+			c.add(p, "unknown protocol %q: use %s", protocol, protocolList)
+			continue
+		}
+		if problem := backendProblem(protocol, f.AdhocBackends[protocol]); problem != "" {
+			c.add(p, "%s", problem)
+		}
+	}
+	if f.AdhocBackends == nil {
+		f.AdhocBackends = map[string]string{}
+	}
+	for protocol := range defaultPorts {
+		if f.AdhocBackends[protocol] == "" {
+			f.AdhocBackends[protocol] = DefaultBackend(protocol)
+		}
+	}
+}
+
 // connectionTLS checks a vnc connection's certificate policy: pins
 // replace the roots that ca_file names, insecure_skip_verify replaces
 // both, as ssh's insecure_ignore_host_key replaces host_keys, and other
-// protocols have no tls.
+// protocols have no tls. Only the native VNC backend checks it, so a
+// vnc connection through guacd has none either: guacd would not check
+// the certificate as the file says.
 func (c *checker) connectionTLS(path string, cn *Connection) {
 	t := cn.TLS
 	if cn.Protocol != "vnc" {
 		if t.set() {
 			c.add(path, "only vnc connections have tls")
 		}
+		return
+	}
+	if t.set() && cn.Backend != BackendNative {
+		c.add(path, "only the native VNC backend checks the certificate as tls says: set backend: native, since guacd, which serves vnc connections by default, would not")
 		return
 	}
 	if t.CAFile != "" && len(t.Pins) > 0 {
@@ -507,6 +551,21 @@ func (c *checker) connectionTLS(path string, cn *Connection) {
 		if err := vnc.CheckPin(s); err != nil {
 			c.add(fmt.Sprintf("%s.pins[%d]", path, i), "%v", err)
 		}
+	}
+}
+
+// ard checks a connection's ard: only the native VNC backend speaks
+// Apple Remote Desktop authentication, and never while TLS is required,
+// since type 30 has no TLS.
+func (c *checker) ard(path string, cn *Connection) {
+	switch {
+	case !cn.ARD:
+	case cn.Protocol != "vnc":
+		c.add(path, "only vnc connections have ard")
+	case cn.Backend != BackendNative:
+		c.add(path, "only the native VNC backend speaks Apple Remote Desktop authentication: set backend: native")
+	case cn.TLS.required():
+		c.add(path, "Apple Remote Desktop authentication runs without TLS, so it cannot be allowed while tls requires TLS (require, ca_file or pins)")
 	}
 }
 

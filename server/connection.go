@@ -93,14 +93,14 @@ func (p *proxy) serve(addr string) {
 // routes returns the handler of a v0 file: the v0 routes on a ServeMux,
 // behind the request log.
 func (p *proxy) routes() http.Handler {
-	mux := http.NewServeMux()
+	mux := newRouteMux()
 	p.register(mux)
-	return logRequests(mux)
+	return logRequests(mux.handler())
 }
 
 // register adds the v0 routes to mux, each behind recoverV0, which
 // answers a panic with a bare 500 as gin's recovery did.
-func (p *proxy) register(mux *http.ServeMux) {
+func (p *proxy) register(mux *routeMux) {
 	handle := func(pattern string, h http.HandlerFunc) {
 		mux.Handle(pattern, recoverV0(h))
 	}

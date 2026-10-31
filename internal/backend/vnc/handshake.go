@@ -71,9 +71,12 @@ type auth struct {
 	// for credentials that a server does not need.
 	hasUser, hasPassword bool
 	// ard allows Apple Remote Desktop authentication (ard.go), whose keys
-	// rand makes, or crypto/rand if it is nil.
-	ard  bool
-	rand io.Reader
+	// rand makes, or crypto/rand if it is nil. ardSetting names what
+	// allows it, for the error when it is not allowed; "Config.ARD" if
+	// empty.
+	ard        bool
+	ardSetting string
+	rand       io.Reader
 	// startTLS runs a TLS handshake on the connection, after which the
 	// handshake's reads and writes go through TLS. Nil leaves VeNCrypt
 	// out.
@@ -296,9 +299,13 @@ func choose(offered []byte, a auth) byte {
 // allowed, it names the setting that allows it.
 func noSecurityType(offered []byte, a auth) error {
 	if slices.Contains(offered, secARD) && !a.ard && !a.requireTLS {
+		setting := a.ardSetting
+		if setting == "" {
+			setting = "Config.ARD"
+		}
 		return fmt.Errorf("%w: the server offers %v; Apple Remote Desktop authentication (type 30) is not "+
 			"allowed, since its key exchange authenticates no server and anyone in between could read the "+
-			"password: set Config.ARD to allow it", ErrNoSecurityType, offered)
+			"password: set %s to allow it", ErrNoSecurityType, offered, setting)
 	}
 	return fmt.Errorf("%w: the server offers %v", ErrNoSecurityType, offered)
 }
