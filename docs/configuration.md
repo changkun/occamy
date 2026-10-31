@@ -304,11 +304,12 @@ is then chosen over the server's other types; without one, the owner is
 asked if the server wants it. An rdp connection on the native backend
 logs on with `username` and the password; a `username` of the form
 `DOMAIN\user`, with both parts, logs on to that domain, as does such a
-username the owner gives at the prompt with the domain left empty. With
-NLA, the owner is asked for what `credentials` does not store: the
-username and the domain, if no `username` is stored, and the password. Without NLA (`security: tls`),
-nothing is asked, and a missing username or password leaves the
-server's logon screen to the owner. A secret written
+username the owner gives at the prompt with the domain left empty;
+`\user` logs on as the user alone. With NLA, the owner is asked for
+what `credentials` does not store: the username and the domain, if no
+`username` is stored, and the password. Without NLA
+(`security: tls`), nothing is asked, and a missing username or
+password leaves the server's logon screen to the owner. A secret written
 inline (`password:` under `credentials`, `client_secret:` under `oidc`) is
 rejected with the keys to use instead.
 
@@ -416,17 +417,18 @@ reads none of `guacd.params.rdp`. So:
 - its security mode is `security`, NLA by default, and guacd's
   `security` no longer applies: an xrdp target needs `security: tls`;
 - guacd's `disable-copy` and `disable-paste` no longer apply, and the
-  native backend has no setting yet that restricts the clipboard: the
+  configuration has no key yet that restricts the clipboard: the
   server's clipboard reaches every viewer, and the owner's and
   interactive viewers' reach the server;
 - guacd's `recording-path` and the other recording parameters no
   longer apply, and the native backend records no session yet;
 - `backend: guacd` restores the old path, with `guacd.params.rdp`.
 
-The same holds for a vnc connection and `guacd.params.vnc`. A vnc or rdp
-connection whose clipboard must be restricted, or whose sessions must
-be recorded, needs `backend: guacd` until the native backends can do
-either. `occamyd` warns when it starts of the `guacd.params` that no
+The clipboard and recording bullets hold for a vnc connection and
+`guacd.params.vnc` too; the certificate and `security` bullets are
+rdp's alone. A vnc or rdp connection whose clipboard must be
+restricted, or whose sessions must be recorded, needs `backend: guacd`
+until the native backends can do either. `occamyd` warns when it starts of the `guacd.params` that no
 session reads, so that a file written for guacd shows what the native
 default dropped.
 
@@ -509,8 +511,8 @@ certificate checked against the system's roots and the name the target
 was given, or its address if it was given one, and logs on with NLA
 alone, its default `security`: the user is asked for the password, and,
 when the request carries no `username`, for the username and the
-domain too. A request's `username` of the form `DOMAIN\user` names the
-domain. A server whose certificate does not chain to
+domain too. A request's `username` of the form `DOMAIN\user`, with both
+parts, names the domain. A server whose certificate does not chain to
 the system's roots, as a self-signed one, or that speaks no NLA, as
 xrdp, needs a connection, whose `tls` and `security` can say so.
 

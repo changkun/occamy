@@ -409,14 +409,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   NLA alone fails the session with an error that names the key to set,
   `security: tls on connection "…"`. A `username` of the form
   `DOMAIN\user`, with both parts, logs on to the domain, as does one the
-  owner gives at the prompt with the domain left empty. The owner, and
-  only the owner, is asked for the credentials NLA needs that the
-  connection does not store; the hello's size is asked for within an
-  RDP desktop's, 200 to 8192 pixels a side and 2^25 in all; clipboard
-  text reaches the server from the owner and interactive viewers and
-  every viewer from the server; a logoff ends the session with
-  `remote-ended`, and a refused logon or certificate with
-  `backend-failed`. occamyd warns when it loads the file of the
+  owner gives at the prompt with the domain left empty, and `\user` logs
+  on as the user alone. The owner, and only the owner, is asked for the
+  credentials NLA needs that the connection does not store; the hello's
+  size is asked for within an RDP desktop's, 200 to 8192 pixels a side
+  and 2^25 in all; clipboard text reaches the server from the owner and
+  interactive viewers and every viewer from the server; a logoff ends
+  the session with `remote-ended`, and a refused logon or certificate
+  with `backend-failed`. occamyd warns when it loads the file of the
   `guacd.params` that no session reads, for every protocol, and of each
   connection whose `security: tls` or `any` comes with
   `tls.insecure_skip_verify`. guacd's `disable-copy`, `disable-paste`
