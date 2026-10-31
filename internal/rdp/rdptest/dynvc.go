@@ -45,9 +45,9 @@ func dvcSize(v uint32) int {
 func appendSized(p []byte, size int, v uint32) []byte {
 	switch size {
 	case 0:
-		return append(p, byte(v))
+		return append(p, byte(v)) // #nosec G115 -- of size code 0
 	case 1:
-		return binary.LittleEndian.AppendUint16(p, uint16(v))
+		return binary.LittleEndian.AppendUint16(p, uint16(v)) // #nosec G115 -- of size code 1
 	}
 	return binary.LittleEndian.AppendUint32(p, v)
 }
@@ -56,7 +56,7 @@ func appendSized(p []byte, size int, v uint32) []byte {
 // and body after the id.
 func DVCPDU(cmd, sp int, id uint32, body []byte) []byte {
 	size := dvcSize(id)
-	p := []byte{byte(cmd<<4 | sp<<2 | size)}
+	p := []byte{byte(cmd<<4 | sp<<2 | size)} // #nosec G115 -- tests keep the fields in range
 	p = appendSized(p, size, id)
 	return append(p, body...)
 }
@@ -64,7 +64,7 @@ func DVCPDU(cmd, sp int, id uint32, body []byte) []byte {
 // DVCCapsPDU is DYNVC_CAPS_VERSION1, 2 or 3 of version.
 func DVCCapsPDU(version int) []byte {
 	p := []byte{DVCCaps << 4, 0}
-	p = binary.LittleEndian.AppendUint16(p, uint16(version))
+	p = binary.LittleEndian.AppendUint16(p, uint16(version)) // #nosec G115 -- tests keep it in range
 	if version >= 2 {
 		p = append(p, make([]byte, 8)...) // the priority charges
 	}
@@ -95,7 +95,7 @@ func DVCMessage(id uint32, msg []byte, size int) [][]byte {
 	if len(msg) <= size {
 		return [][]byte{DVCDataPDU(id, msg)}
 	}
-	pdus := [][]byte{DVCDataFirstPDU(id, uint32(len(msg)), msg[:size])}
+	pdus := [][]byte{DVCDataFirstPDU(id, uint32(len(msg)), msg[:size])} // #nosec G115 -- tests send less than 4 GiB
 	for i := size; i < len(msg); i += size {
 		pdus = append(pdus, DVCDataPDU(id, msg[i:min(i+size, len(msg))]))
 	}

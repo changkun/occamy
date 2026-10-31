@@ -106,8 +106,11 @@ func (c *Client) drdynvcMessage(out Output, msg []byte, truncated bool) error {
 	case dvcCaps:
 		r.skip(1) // Pad
 		v := int(r.u16())
-		if r.err != nil || v < 1 {
-			return fmt.Errorf("rdp: dynamic channel capabilities of version %d: %v", v, r.err)
+		if r.err != nil {
+			return fmt.Errorf("rdp: dynamic channel capabilities: %w", r.err)
+		}
+		if v < 1 {
+			return fmt.Errorf("rdp: dynamic channel capabilities of version %d", v)
 		}
 		v = min(v, dvcVersion)
 		c.chio.mu.Lock()
@@ -288,13 +291,13 @@ func (c *Client) dynvcDue(msgs []dueMessage, now time.Time) []dueMessage {
 
 // dvcCapsResponse is DYNVC_CAPS_RSP ([MS-RDPEDYC] 2.2.1.2).
 func dvcCapsResponse(version int) []byte {
-	return []byte{dvcCaps << 4, 0, byte(version), byte(version >> 8)}
+	return binary.LittleEndian.AppendUint16([]byte{dvcCaps << 4, 0}, uint16(version)) // #nosec G115 -- 1 or 2
 }
 
 // dvcPDU is a DRDYNVC PDU of cmd with the channel id in the size cbID
 // gives, sp in the header's middle bits, and body after the id.
 func dvcPDU(cmd, sp, cbID int, id uint32, body []byte) []byte {
-	p := []byte{byte(cmd<<4 | sp<<2 | cbID)}
+	p := []byte{byte(cmd<<4 | sp<<2 | cbID)} // #nosec G115 -- a command of 4 bits, sizes of 2
 	p = appendVarUint(p, cbID, id)
 	return append(p, body...)
 }
@@ -315,7 +318,7 @@ func varUint(r *reader, size int) uint32 {
 func appendVarUint(p []byte, size int, v uint32) []byte {
 	switch size {
 	case 0:
-		return append(p, byte(v))
+		return append(p, byte(v)) // #nosec G115 -- the server's own id, of this size
 	case 1:
 		return binary.LittleEndian.AppendUint16(p, uint16(v)) // #nosec G115 -- the server's own id, of this size
 	}
