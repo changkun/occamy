@@ -813,12 +813,16 @@ place for fixes that ship on v0 before beta.
     those that may type hold 510 and read-only ones none. `limits`
     bounds it, and docs/configuration.md says so.
     `TestStalledViewersRelease` holds eight stalled viewers at
-    10.7 MiB each and finds 0.5 MiB each once they are dropped, and
+    10.8 MiB each and finds 0.7 MiB each once they are dropped, and
     `TestHiddenViewersRelease` finds eight read-only viewers that
-    acknowledged and hid holding about 1.3 MiB each while they stay,
-    the writer's buffer of the last snapshot it encoded, not a
-    screen; `TestStalledViewer`, `TestStalledViewerTimely`,
-    `TestStalledAckRestarts`, `TestStalledHidden`, `TestBlockedWrite`,
+    acknowledged and hid holding about 1.0 MiB each while they stay,
+    not a screen: 0.5 MiB is the writer's buffer of the last snapshot
+    it encoded, and 0.5 MiB the fake backend's record of the owner's
+    redraw that followed each join. Both tests measure once the owner
+    has the redrawn screen (see the follow-up on
+    `TestHiddenViewersRelease`); `TestStalledViewer`,
+    `TestStalledViewerTimely`, `TestStalledAckRestarts`,
+    `TestStalledHidden`, `TestBlockedWrite`,
     `TestTerminalHidden` and `TestStalledViewerTooSlow` cover the
     rule. Mutations of the write deadline, the stall timer, the ack's
     restart, the close, the server's timeout, the minimum and the
@@ -1199,6 +1203,33 @@ place for fixes that ship on v0 before beta.
     Follow-up: start the session's terminal at the size the owner's
     hello asks for, with a size in `session.Config`, since the
     terminal's `Options.Reply` is the session's own.
+  - ~~`TestHiddenViewersRelease` failed under `-race`, at 2.1 to
+    2.7 MiB a hidden viewer against its cap of 2 MiB, on CI for two
+    branches, and in 3 runs of 4 after `TestStalledViewersRelease`
+    here.~~ Fixed: the hidden viewers held nothing; the owner's
+    stream did. Each measurement came a fixed 150 ms after the
+    owner's redraw, and under `-race` the owner's writer could still
+    be sending it, so it held the screen the owner had before, whose
+    lines the new one shares none of: 9 to 11 MiB, an eighth of it
+    on each viewer. A probe of each writer's state at the
+    measurement found the owner mid-frame with 441 to 500 lines the
+    session no longer had in every high run, and every hidden writer
+    with no screen; the low runs, down to 0.6 MiB, had caught the
+    owner mid-frame at the base instead. The race detector's own
+    memory is not in `HeapInuse`: with the owner idle, `-race`
+    measured about 1 MiB, as without. `redraw` now sends each
+    message once the session's screen shows the one before, so that
+    the owner's last input keeps a screen that differs in the same
+    21 rows every time, then waits until the owner, which now
+    renders its frames, has the session's screen, and for the pong
+    to a ping sent after that, which the writer answers only once it
+    keeps that frame's screen.
+    A hidden viewer pings after `view` and reads the pong, so the
+    session has it hidden before the redraw. Both tests then passed
+    30 runs of 30 together with `-race` at a load average of about 2,
+    the hidden viewers at 0.9 to 1.1 MiB each; with the hidden
+    branch's `last = nil` removed from `runTerminal`, the test fails
+    at 10.7 to 10.9 MiB a viewer.
   - [009](../009-react-web-client.md) and the Go client: send `hello` in
     the query and the token in the subprotocol; expect `close` before
     `welcome` for a refusal; reconnect as the owner with an access token
