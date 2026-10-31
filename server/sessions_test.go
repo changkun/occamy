@@ -490,6 +490,32 @@ func TestLimits(t *testing.T) {
 	ts.stream(t, path, bob, termHello) // the owner, beside a full session
 }
 
+// TestAdhocReserved checks that the server keeps guacd and its own
+// listeners out of an ad-hoc range's reach.
+func TestAdhocReserved(t *testing.T) {
+	ts, _ := sessionServer(t, func(f *config.File) {
+		f.AllowAdhocTargets = true
+		f.AdhocAllowlist = []string{"10.0.0.0/8:1-65535"}
+		f.Guacd.Address = "10.9.9.9:4822"
+		f.Listen = "10.8.8.8:8443"
+		f.Debug.Address = "10.8.8.8:6060"
+	})
+	carol := ts.token(t, "carol")
+	for _, tt := range []struct {
+		target string
+		status int
+	}{
+		{"10.9.9.9:4822", http.StatusForbidden},
+		{"10.8.8.8:8443", http.StatusForbidden},
+		{"10.8.8.8:6060", http.StatusForbidden},
+		{"10.9.9.9:3389", http.StatusCreated},
+	} {
+		if r := ts.api(t, http.MethodPost, "/api/v1/sessions", carol, `{"protocol":"rdp","target":"`+tt.target+`"}`); r.code != tt.status {
+			t.Errorf("%s: %d %s, want %d", tt.target, r.code, r.body, tt.status)
+		}
+	}
+}
+
 func TestAdhocTargets(t *testing.T) {
 	ts, fb := sessionServer(t, func(f *config.File) {
 		f.AllowAdhocTargets = true

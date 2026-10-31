@@ -333,8 +333,19 @@ for telnet. A target is allowed on a port that an entry allows when:
 `occamyd` resolves every host name and dials the first address it
 checked, so a second lookup cannot lead elsewhere. Loopback, link-local
 (such as a cloud's metadata service at `169.254.169.254`), unspecified
-and multicast addresses are refused, whatever range or listed name leads
-to them, unless an entry is that very address (`127.0.0.1:2222`).
+and multicast addresses, and the metadata services at `fd00:ec2::254`
+(AWS over IPv6) and `100.100.100.200` (Alibaba Cloud), are refused,
+whatever range or listed name leads to them, unless an entry is that
+very address (`127.0.0.1:2222`). So are guacd's address and `occamyd`'s
+own `listen` and `debug.address`, at their ports: guacd's name is
+resolved when `occamyd` starts, and a listener on no host stands for
+every address of the host. A name that does not resolve then is logged
+as a warning.
+
+A range that holds the host's own addresses still reaches the host's
+other services on the ports it allows, such as a database on a private
+address. List ranges that leave the host out, or the host's addresses
+with the ports meant, rather than a range that holds them.
 
 An ad-hoc target passes no `guacd.params` but the display's
 (`color-depth`, `cursor`, `disable-gfx`, `enable-font-smoothing`,

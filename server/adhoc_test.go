@@ -7,9 +7,59 @@ package server
 import (
 	"context"
 	"errors"
+	"net"
 	"net/netip"
+	"strings"
 	"testing"
 )
+
+// TestAllowlistReserved checks that guacd's address and occamyd's own
+// listeners stay out of a range's reach, at their ports, unless an entry
+// is that very address, and that a listener on no host stands for every
+// address of the host.
+func TestAllowlistReserved(t *testing.T) {
+	a, err := newAllowlist([]string{"10.0.0.0/8:1-65535", "[fd00::/8]:1-65535", "10.9.9.10:4822", "*.lab.internal:1-65535"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.lookup = func(_ context.Context, host string) ([]netip.Addr, error) {
+		switch host {
+		case "guacd", "guacd.lab.internal":
+			return []netip.Addr{netip.MustParseAddr("10.9.9.9")}, nil
+		}
+		return nil, errors.New("no such host")
+	}
+	interfaceAddrs = func() ([]net.Addr, error) {
+		return []net.Addr{
+			&net.IPNet{IP: net.ParseIP("10.7.7.7"), Mask: net.CIDRMask(8, 32)},
+			&net.IPNet{IP: net.ParseIP("fd00::7"), Mask: net.CIDRMask(64, 128)},
+		}, nil
+	}
+	t.Cleanup(func() { interfaceAddrs = net.InterfaceAddrs })
+	err = a.reserve(context.Background(), "guacd:4822", "10.9.9.10:4822", ":8443", "[fd00::5]:6060", "nowhere:1")
+	if err == nil || !strings.Contains(err.Error(), "nowhere") {
+		t.Errorf("reserve: %v, want the name that did not resolve", err)
+	}
+	for _, tt := range []struct {
+		protocol, host string
+		port           uint16
+		ok             bool
+	}{
+		{"rdp", "10.9.9.9", 4822, false},           // guacd, by its name
+		{"rdp", "10.9.9.9", 3389, true},            // another port of its host
+		{"rdp", "guacd.lab.internal", 4822, false}, // a listed name that leads to it
+		{"rdp", "10.9.9.10", 4822, true},           // an entry that is the address
+		{"ssh", "10.7.7.7", 8443, false},           // the listener on every address
+		{"ssh", "fd00::7", 8443, false},
+		{"ssh", "10.7.7.7", 22, true},
+		{"ssh", "fd00::5", 6060, false}, // the debug listener
+		{"ssh", "fd00::5", 22, true},
+	} {
+		if _, err := a.allow(context.Background(), tt.protocol, tt.host, tt.port); (err == nil) != tt.ok {
+			t.Errorf("%s %s:%d: %v, want allowed %v", tt.protocol, tt.host, tt.port, err, tt.ok)
+		}
+	}
+}
 
 func TestAllowlist(t *testing.T) {
 	a, err := newAllowlist([]string{
@@ -33,7 +83,9 @@ func TestAllowlist(t *testing.T) {
 			return []netip.Addr{netip.MustParseAddr("10.1.1.1"), netip.MustParseAddr("1.1.1.1")}, nil
 		case "empty.example":
 			return nil, nil
-		case "host.lab.internal", "a.b.lab.internal", "build.example", "ports.example":
+		// evillab.internal resolves, so that only the dot before a
+		// *.domain entry's domain keeps it out.
+		case "host.lab.internal", "a.b.lab.internal", "build.example", "ports.example", "evillab.internal", "xlab.internal":
 			return []netip.Addr{netip.MustParseAddr("203.0.113.9")}, nil
 		case "rebound.lab.internal", "localhost":
 			return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
@@ -93,6 +145,7 @@ func TestAllowlist(t *testing.T) {
 		{"ssh", "localhost", 2222, "127.0.0.1", true},
 		{"ssh", "lab.internal", 22, "", true},
 		{"ssh", "evillab.internal", 22, "", true},
+		{"ssh", "xlab.internal.", 22, "", true},
 		{"ssh", "sub.build.example", 22, "", true},
 		{"ssh", "inside.example", 22, "10.1.1.1", true},
 		{"ssh", "mapped.example", 22, "10.2.2.2", true},
@@ -111,6 +164,30 @@ func TestAllowlist(t *testing.T) {
 		}
 		if (len(looked) > 0) != tt.lookup {
 			t.Errorf("%s %s:%d: looked up %v", tt.protocol, tt.host, tt.port, looked)
+		}
+	}
+
+	// The clouds' metadata services outside the link-local range are
+	// special too.
+	{
+		a, err := newAllowlist([]string{"fd00::/8", "100.64.0.0/10", "100.100.100.200:80"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, tt := range []struct {
+			host string
+			port uint16
+			ok   bool
+		}{
+			{"fd00:ec2::254", 22, false},
+			{"fd00:ec2::253", 22, true},
+			{"100.100.100.200", 22, false},
+			{"100.100.100.200", 80, true}, // an entry that is the address
+			{"100.64.0.1", 22, true},
+		} {
+			if _, err := a.allow(context.Background(), "ssh", tt.host, tt.port); (err == nil) != tt.ok {
+				t.Errorf("%s:%d: %v, want allowed %v", tt.host, tt.port, err, tt.ok)
+			}
 		}
 	}
 

@@ -227,6 +227,11 @@ func newServer(f *config.File) (*server, error) {
 		if s.adhoc, err = newAllowlist(f.AdhocAllowlist); err != nil {
 			return nil, fmt.Errorf("adhoc_allowlist: %w", err)
 		}
+		// guacd and occamyd's own listeners stay out of a range's reach.
+		if err := s.adhoc.reserve(ctx, f.Guacd.Address, f.Listen, f.Debug.Address); err != nil {
+			// #nosec G706 -- the operator's configuration, not a client's input.
+			log.Printf("warning: adhoc_allowlist: not every address of guacd and occamyd's listeners is known, so a range may open it: %v", err)
+		}
 	}
 	if f.TLS.Cert != "" || f.TLS.Key != "" {
 		cert, err := tls.LoadX509KeyPair(f.TLS.Cert, f.TLS.Key)

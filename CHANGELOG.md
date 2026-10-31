@@ -185,7 +185,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   shares (100) of a session.
   An ad-hoc target is allowed only on its protocol's port or the ports
   its allowlist entry names, never on a loopback, link-local,
-  unspecified or multicast address unless an entry is that address,
+  unspecified or multicast address, a cloud's metadata service, guacd,
+  or occamyd's own listeners unless an entry is that address,
   and it takes only the display's `guacd.params`. `guacd.params`
   refuses any parameter whose name holds `password`, `passphrase`,
   `private-key` or `secret` in any case, but for a prompt's pattern

@@ -811,6 +811,16 @@ place for fixes that ship on v0 before beta.
     such addresses. A list without ranges resolves only the names it
     lists. The name is kept beside the address for a certificate's
     server name.
+    (Delta review: the special set also holds the metadata services
+    outside the link-local range, `fd00:ec2::254` and
+    `100.100.100.200`, and, by address and port, guacd's address, its
+    name resolved at start, and occamyd's `listen` and `debug.address`,
+    a listener on no host standing for every interface address
+    (`allowlist.reserve`), so that a range with explicit ports cannot
+    reach them. A name that does not resolve at start is logged. The
+    host's other addresses stay a documented warning: making every
+    interface address special would refuse the hosts a range is
+    usually written for when occamyd runs among them.)
   - **guacd parameters (added in review):** `guacd.params` refuses any
     parameter whose name holds `password`, `passphrase`, `private-key`
     or `secret`, where it refused those three names alone, so that

@@ -7,8 +7,10 @@ package server
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"net/netip"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,18 +36,21 @@ const resolveTimeout = 5 * time.Second
 // lookup cannot lead elsewhere.
 //
 // Loopback, link-local (such as a cloud's metadata service at
-// 169.254.169.254), unspecified and multicast addresses are refused
-// whatever range or name leads to them, unless an entry is that very
-// address.
+// 169.254.169.254), unspecified and multicast addresses, the other
+// clouds' metadata services, and the addresses and ports that occamyd
+// itself listens on or talks to guacd at are refused whatever range or
+// name leads to them, unless an entry is that very address.
 type allowlist struct {
-	entries []config.AllowEntry
-	ranges  bool // whether any entry is a range or an address
-	lookup  func(ctx context.Context, host string) ([]netip.Addr, error)
+	entries  []config.AllowEntry
+	ranges   bool                    // whether any entry is a range or an address
+	reserved map[netip.AddrPort]bool // occamyd's own endpoints, and guacd's
+	lookup   func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
 // newAllowlist reads entries, which ParseV1 has checked.
 func newAllowlist(entries []string) (*allowlist, error) {
 	a := &allowlist{
+		reserved: map[netip.AddrPort]bool{},
 		lookup: func(ctx context.Context, host string) ([]netip.Addr, error) {
 			return net.DefaultResolver.LookupNetIP(ctx, "ip", host)
 		},
@@ -59,6 +64,59 @@ func newAllowlist(entries []string) (*allowlist, error) {
 		a.ranges = a.ranges || e.Prefix.IsValid()
 	}
 	return a, nil
+}
+
+// interfaceAddrs lists the host's addresses, a variable for tests.
+var interfaceAddrs = net.InterfaceAddrs
+
+// reserve makes each of addresses, a host and port such as guacd's or
+// occamyd's own listener, special at its port: a range that holds it
+// opens it only through an entry that is that very address. A name is
+// resolved now, and a listener on no host stands for every address of
+// the host. An address that does not resolve is returned in the error,
+// and the others are still reserved.
+func (a *allowlist) reserve(ctx context.Context, addresses ...string) error {
+	var errs []error
+	for _, s := range addresses {
+		if s == "" {
+			continue
+		}
+		host, p, err := net.SplitHostPort(s)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		port, err := strconv.ParseUint(p, 10, 16)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", s, err))
+			continue
+		}
+		var ips []netip.Addr
+		if ip, err := netip.ParseAddr(host); err == nil && !ip.IsUnspecified() {
+			ips = []netip.Addr{ip}
+		} else if host == "" || err == nil {
+			addrs, err := interfaceAddrs()
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", s, err))
+			}
+			for _, x := range addrs {
+				if pfx, err := netip.ParsePrefix(x.String()); err == nil {
+					ips = append(ips, pfx.Addr())
+				}
+			}
+		} else {
+			rctx, cancel := context.WithTimeout(ctx, resolveTimeout)
+			ips, err = a.lookup(rctx, host)
+			cancel()
+			if err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", s, err))
+			}
+		}
+		for _, ip := range ips {
+			a.reserved[netip.AddrPortFrom(ip.Unmap().WithZone(""), uint16(port))] = true
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // canonicalName is a host name in lower case without a trailing dot.
@@ -89,7 +147,7 @@ func (a *allowlist) allow(ctx context.Context, protocol, host string, port uint1
 	for i, ip := range addrs {
 		ip = ip.Unmap().WithZone("")
 		addrs[i] = ip
-		if listed && !special(ip) || a.covers(protocol, ip, port) {
+		if listed && !a.special(ip, port) || a.covers(protocol, ip, port) {
 			continue
 		}
 		return netip.Addr{}, errNotAllowed
@@ -110,7 +168,7 @@ func (a *allowlist) names(protocol, name string, port uint16) bool {
 // covers reports whether an entry's range or address holds ip, with
 // port. A special address must be the entry's very address.
 func (a *allowlist) covers(protocol string, ip netip.Addr, port uint16) bool {
-	sp := special(ip)
+	sp := a.special(ip, port)
 	for _, e := range a.entries {
 		if e.Prefix.Contains(ip) && (!sp || e.Prefix.IsSingleIP()) && e.AllowsPort(protocol, port) {
 			return true
@@ -119,9 +177,26 @@ func (a *allowlist) covers(protocol string, ip netip.Addr, port uint16) bool {
 	return false
 }
 
-// special reports whether ip is loopback, link-local, unspecified or
-// multicast: addresses of the host occamyd runs on, of its link, or of
-// no one host, which a range should not open by accident.
+// special reports whether ip at port is special: special(ip), or one of
+// the endpoints that reserve took.
+func (a *allowlist) special(ip netip.Addr, port uint16) bool {
+	return special(ip) || a.reserved[netip.AddrPortFrom(ip, port)]
+}
+
+// metadata are the clouds' metadata services outside the link-local
+// range: AWS's over IPv6, in the unique local range, and Alibaba Cloud's,
+// in the shared address space that carrier-grade NAT uses. Their
+// credentials are the host's, so a range must not open them by accident.
+var metadata = map[netip.Addr]bool{
+	netip.MustParseAddr("fd00:ec2::254"):   true,
+	netip.MustParseAddr("100.100.100.200"): true,
+}
+
+// special reports whether ip is loopback, link-local (such as the
+// metadata service at 169.254.169.254), unspecified, multicast or a
+// metadata service: addresses of the host occamyd runs on, of its link,
+// of no one host, or of the host's cloud, which a range should not open
+// by accident.
 func special(ip netip.Addr) bool {
-	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast()
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() || ip.IsMulticast() || metadata[ip]
 }
