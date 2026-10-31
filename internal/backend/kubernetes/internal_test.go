@@ -102,6 +102,26 @@ func TestQuote(t *testing.T) {
 	}
 }
 
+func TestCut(t *testing.T) {
+	long := strings.Repeat("é", maxQuoted) // two bytes each
+	for _, tt := range []struct{ in, want string }{
+		{"plain", "plain"},
+		{`Get "https://k8s:443/": EOF`, `Get "https://k8s:443/": EOF`},
+		{"\x1b[2J\r\nX-Evil: 1\t", "�[2J��X-Evil: 1�"},
+		{"a\xffb", "a�b"},
+		{long, long[:maxQuoted] + "..."},
+		{"a" + long, "a" + long[:maxQuoted-2] + "..."},
+	} {
+		if got := cut(tt.in); got != tt.want {
+			t.Errorf("cut(%.20q) = %.40q, want %.40q", tt.in, got, tt.want)
+		}
+	}
+	err := serverText{io.ErrUnexpectedEOF}
+	if !errors.Is(err, io.ErrUnexpectedEOF) || err.Error() != io.ErrUnexpectedEOF.Error() {
+		t.Errorf("serverText = %v, does not wrap its error", err)
+	}
+}
+
 func TestONLCR(t *testing.T) {
 	for _, tt := range []struct{ in, want string }{
 		{"", ""},

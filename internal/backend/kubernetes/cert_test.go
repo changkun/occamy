@@ -15,8 +15,10 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"math/big"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -167,5 +169,50 @@ func TestCertificateChain(t *testing.T) {
 				t.Errorf("Run = %v, want nil", err)
 			}
 		})
+	}
+}
+
+// TestCertificateErrorCut checks that the error for a refused
+// certificate quotes at most 256 bytes of each thing the server chose,
+// its subject and the names that x509 lists, and still says why, even
+// after a long request URL.
+func TestCertificateErrorCut(t *testing.T) {
+	checkGoroutines(t)
+	ca, err := newCA()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// x509 lists up to 99 names, and counts more.
+	names := make([]string, 99)
+	for i := range names {
+		names[i] = fmt.Sprintf("name-%03d.%s.cluster.example", i, strings.Repeat("n", 60))
+	}
+	leaf, leafKey := sign(t, &x509.Certificate{
+		SerialNumber: big.NewInt(12),
+		Subject:      pkix.Name{CommonName: "kube-apiserver", Organization: []string{strings.Repeat("o", 5000) + "\x1b[31m"}},
+		DNSNames:     names,
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}, ca.cert, ca.key)
+	s := newServer(t, kubetest.Options{Certificate: &tls.Certificate{Certificate: [][]byte{leaf.Raw}, PrivateKey: leafKey}})
+	cfg := config(s)
+	// A name the certificate lacks, so that x509 lists the ones it has.
+	cfg.TLS = kubernetes.TLS{RootCAs: ca.pool(), ServerName: "api.example.org"}
+	cfg.Command = []string{"sh", "-c", strings.Repeat("echo a long command; ", 50)}
+	b := newBackend(t, cfg)
+	err = run(t, b, &backendtest.Sink{})
+	var ce *kubernetes.CertificateError
+	if !errors.As(err, &ce) {
+		t.Fatalf("Run = %v, want a CertificateError", err)
+	}
+	msg := err.Error()
+	if len(msg) > 1024 {
+		t.Errorf("an error of %d bytes: %.300s", len(msg), msg)
+	}
+	if !strings.Contains(msg, "is not trusted: x509: certificate is valid for name-000") {
+		t.Errorf("the error does not say why: %s", msg)
+	}
+	if strings.ContainsRune(msg, 0x1b) {
+		t.Errorf("a control character in %q", msg)
 	}
 }

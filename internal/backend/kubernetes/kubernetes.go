@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -442,7 +443,9 @@ func (b *Backend) askToken(ctx context.Context, sink backend.Sink) (Token, error
 }
 
 // dial opens the WebSocket. The certificate is checked during the TLS
-// handshake, before the request, and so the token, is written.
+// handshake, before the request, and so the token, is written. Its
+// errors cut what the server sent, as quote does, since a failed
+// upgrade's error can hold its headers whole.
 func (b *Backend) dial(ctx context.Context, token Token) (*websocket.Conn, error) {
 	hctx, cancel := context.WithTimeout(ctx, b.dialTimeout)
 	defer cancel()
@@ -466,7 +469,19 @@ func (b *Backend) dial(ctx context.Context, token Token) (*websocket.Conn, error
 		if errors.Is(err, context.DeadlineExceeded) {
 			return nil, fmt.Errorf("kubernetes: no stream from %s within %v", b.addr, b.dialTimeout)
 		}
-		return nil, fmt.Errorf("kubernetes: open a stream to %s at %s: %w", b.target, b.addr, err)
+		// A refused certificate's error says why on its own, cut, which
+		// the request's URL before it would push out of the cut below.
+		var ce *CertificateError
+		if errors.As(err, &ce) {
+			return nil, fmt.Errorf("kubernetes: open a stream to %s at %s: %w", b.target, b.addr, ce)
+		}
+		// So would the URL that a url.Error repeats, which is ours:
+		// what failed is the error it wraps.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return nil, fmt.Errorf("kubernetes: open a stream to %s at %s: %w", b.target, b.addr, serverText{err})
 	}
 	switch p := conn.Subprotocol(); p {
 	case ProtocolV5, ProtocolV4:

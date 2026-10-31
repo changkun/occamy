@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -188,15 +190,45 @@ func parseStatus(b []byte) (int, error) {
 // quote quotes s for an error or a log line: at most maxQuoted bytes,
 // cut at a character, with every control and invalid byte escaped.
 func quote(s string) string {
+	s, more := head(s)
+	return strconv.QuoteToGraphic(s) + more
+}
+
+// cut is quote without the quotes, for the text of an error that holds
+// what the server sent, such as a header of a failed upgrade or the
+// names in its certificate: at most maxQuoted bytes, cut at a
+// character, with every control character and invalid byte turned into
+// U+FFFD, so that the text cannot break a log line.
+func cut(s string) string {
+	s, more := head(s)
+	s = strings.ToValidUTF8(s, "\uFFFD")
+	return strings.Map(func(r rune) rune {
+		if unicode.IsGraphic(r) {
+			return r
+		}
+		return utf8.RuneError
+	}, s) + more
+}
+
+// head returns at most maxQuoted bytes of s, cut at a character, and
+// "..." if that is not all of s.
+func head(s string) (string, string) {
 	if len(s) <= maxQuoted {
-		return strconv.QuoteToGraphic(s)
+		return s, ""
 	}
 	i := maxQuoted
 	for i > 0 && !utf8.RuneStart(s[i]) {
 		i--
 	}
-	return strconv.QuoteToGraphic(s[:i]) + "..."
+	return s[:i], "..."
 }
+
+// serverText is an error whose text holds what the server sent: it
+// prints cut, and unwraps to the error.
+type serverText struct{ err error }
+
+func (e serverText) Error() string { return cut(e.err.Error()) }
+func (e serverText) Unwrap() error { return e.err }
 
 // onlcr turns each line feed in p into a carriage return and a line
 // feed, as a terminal's ONLCR does, for output that no TTY translated.

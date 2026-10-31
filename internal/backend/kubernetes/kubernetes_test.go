@@ -7,8 +7,10 @@ package kubernetes_test
 import (
 	"bytes"
 	"context"
+	"crypto/sha1" // #nosec G505 -- the WebSocket accept key, not a signature
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -754,6 +756,75 @@ func TestSubprotocol(t *testing.T) {
 	err := run(t, b, &backendtest.Sink{})
 	if err == nil || !strings.Contains(err.Error(), `chose the subprotocol ""`) {
 		t.Errorf("Run = %v, want a refusal of the empty subprotocol", err)
+	}
+}
+
+// forgedUpgrade answers the upgrade itself with the status line and the
+// headers that response makes from the request's Sec-WebSocket-Key, and
+// hangs up, so that coder/websocket, which reads a little of a failed
+// upgrade's body, does not wait for more.
+func forgedUpgrade(response func(key string) string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("Sec-WebSocket-Key")
+		c, rw, err := http.NewResponseController(w).Hijack()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		_, _ = rw.WriteString(response(key))
+		_ = rw.Flush()
+	})
+}
+
+// acceptKey is the Sec-WebSocket-Accept for key (RFC 6455).
+func acceptKey(key string) string {
+	h := sha1.New() // #nosec G401 -- the WebSocket accept key, not a signature
+	h.Write([]byte(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+}
+
+// TestForgedUpgrade checks that an error for an upgrade that a server
+// got wrong quotes at most 256 bytes of what the server sent, with no
+// control character, whichever header holds it.
+func TestForgedUpgrade(t *testing.T) {
+	long := strings.Repeat("x", 40000)
+	evil := "\x1b[31m\x00" + long
+	upgrade := func(headers string) func(string) string {
+		return func(key string) string {
+			return "HTTP/1.1 101 Switching Protocols\r\n" + strings.ReplaceAll(headers, "ACCEPT", acceptKey(key)) + "\r\n"
+		}
+	}
+	for _, tc := range []struct {
+		name     string
+		response func(key string) string
+	}{
+		{"subprotocol", upgrade("Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ACCEPT\r\nSec-WebSocket-Protocol: " + long + "\r\n")},
+		{"control characters", upgrade("Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ACCEPT\r\nSec-WebSocket-Protocol: " + evil + "\r\n")},
+		{"upgrade", upgrade("Upgrade: " + long + "\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ACCEPT\r\n")},
+		{"connection", upgrade("Upgrade: websocket\r\nConnection: " + long + "\r\nSec-WebSocket-Accept: ACCEPT\r\n")},
+		{"accept", upgrade("Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + long + "\r\n")},
+		{"extensions", upgrade("Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ACCEPT\r\nSec-WebSocket-Protocol: v5.channel.k8s.io\r\nSec-WebSocket-Extensions: " + long + "\r\n")},
+		{"status line", func(string) string { return "HTTP/1.1 1" + long + "\r\n\r\n" }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			checkGoroutines(t)
+			s := newServer(t, kubetest.Options{Handler: forgedUpgrade(tc.response)})
+			b := newBackend(t, config(s))
+			err := run(t, b, &backendtest.Sink{})
+			if err == nil {
+				t.Fatal("Run = nil for a forged upgrade")
+			}
+			msg := err.Error()
+			if len(msg) > 1024 {
+				t.Errorf("an error of %d bytes: %.300s", len(msg), msg)
+			}
+			if i := strings.IndexFunc(msg, func(r rune) bool { return r < 0x20 || r == 0x7f }); i >= 0 {
+				t.Errorf("a control character in %q", msg)
+			}
+			if strings.Contains(msg, token) {
+				t.Errorf("the token leaked: %v", err)
+			}
+		})
 	}
 }
 

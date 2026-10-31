@@ -54,8 +54,10 @@ type CertificateError struct {
 	Err         error  // why it was not accepted
 }
 
+// Error quotes the subject and cuts the reason, which can list every
+// name in the certificate, as it does any text from the server.
 func (e *CertificateError) Error() string {
-	return fmt.Sprintf("kubernetes: the API server's certificate %q (SHA-256 %s) is not trusted: %v", e.Subject, e.Fingerprint, e.Err)
+	return fmt.Sprintf("kubernetes: the API server's certificate %s (SHA-256 %s) is not trusted: %s", quote(e.Subject), e.Fingerprint, cut(e.Err.Error()))
 }
 
 func (e *CertificateError) Unwrap() error { return e.Err }
