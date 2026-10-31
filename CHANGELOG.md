@@ -378,8 +378,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   one, `docker/demo/tigervnc`, which the integration tests build too.
   x11vnc hangs now and then after an X error as a client connects; the
   demo x11vnc runs under a watchdog that kills it when it reports an X
-  error or stops accepting connections, and starts it again, and the
-  matrix tries a cell that cannot reach the desktop up to three times.
+  error or stops accepting connections, and starts it again. The matrix
+  tries a guacd cell up to three times, and a native cell that cannot
+  reach the desktop only while guacd cannot reach it either, and shows
+  the try at which a cell settled. A listed failure must fail with its
+  own error, and a unit test keeps the spec's matrix in step with the
+  suite.
 - The native RDP backend's clipboard, the first part of its second
   phase: `internal/rdp` joins static virtual channels and reassembles
   their chunks within a bound per channel, and carries text both ways

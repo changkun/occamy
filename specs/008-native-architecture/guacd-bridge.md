@@ -682,16 +682,35 @@ that guacd was `vnc`'s default, they are corrected below.
   comes back on the clipboard as its UTF-8 bytes in hex, and clipboard
   text `owner: …` comes back as `echo: …`, so each check sees the
   server's side, not just the backend's. Before it types, a check
-  waits for the echo of a fresh nonce, so that nothing sent before is
-  still in flight. A cell expected to fail is listed in `parityKnown`
-  with the reason; any other failure fails the test, and so does a
-  listed cell that passes, so the table below is what the suite finds.
-  A cell that cannot reach the desktop, whose screen does not arrive or
-  whose probe never answers, tries again 15 s later, up to three times
-  in all, through either backend, since that is how a hung server
-  looks. A guacd cell does the same for any failure, which is generous
-  to the baseline; a native cell whose check found a difference gets no
-  second try.
+  waits 10 s for the echo of a fresh nonce, once, so that nothing sent
+  before is still in flight. A freshly started x11vnc drops the first
+  clipboard text on its port (Findings), so before the matrix the test
+  warms each port of both servers: through the native backend, it
+  repeats the nonce until the probe answers, and logs how many sessions
+  and nonces each port took.
+- **How a cell is judged.** A cell expected to fail is listed in
+  `parityKnown` with the reason and a part of the error that only that
+  failure gives: `"? ? ??"` for x11vnc's Latin-1, `want "€ ✓ 日本"` for
+  guacd's, and `backend-failed` for guacd's X509. Any other failure
+  fails the test, and so does a listed cell that fails without that
+  part, or passes, so the table below is what the suite finds;
+  `TestParityMatrixDoc` checks that it is the table that
+  `parityFeatures` and `parityKnown` give. A cell tries up to three
+  times, and before it tries again, waits 15 s and warms the server's
+  ports through the native backend. guacd is the baseline, so a guacd
+  cell tries again after any failure but its listed one. A native cell
+  that cannot reach the desktop, whose screen does not arrive or whose
+  probe does not answer, runs the same check through guacd on the same
+  server at once, and tries again only if guacd cannot reach the
+  desktop either, which is how a hung server looks. If guacd reaches
+  the desktop, the native failure stands, and so does a native failure
+  that found a difference. A cell that
+  passes, or fails as listed, at a later try shows that try, as in
+  `pass (try 2)`, so a retried cell does not read as a plain pass. One
+  cell is lenient to native: guacd cannot give X509 credentials, so the
+  X509Plain cell's guacd twin never reaches the desktop, and the native
+  cell tries again whenever it cannot. `TestParityCell` drives this
+  logic with fake checks.
 - **The matrix.** x11vnc 0.9.17 (libvncserver 0.9.15) and TigerVNC
   1.15's Xvnc, Debian trixie; guacd 1.6. On the shared host, at a load
   average of 7 to 18, the whole matrix took 192 s on fresh servers and
@@ -699,21 +718,21 @@ that guacd was `vnc`'s default, they are corrected below.
   that failed cells did so on server faults (next items), or, once, on
   the first version of the x11vnc watchdog, which killed a live x11vnc.
 
-  | Feature | x11vnc native | x11vnc guacd | TigerVNC native | TigerVNC guacd |
+  | Feature | x11vnc/native | x11vnc/guacd | tigervnc/native | tigervnc/guacd |
   |---|---|---|---|---|
   | auth: None | pass | pass | pass | pass |
   | auth: VNC Authentication, stored password | pass | pass | pass | pass |
   | auth: VNC Authentication, asked of the owner | — | — | pass | pass |
   | auth: VNC Authentication, wrong answer refused | — | — | pass | pass |
-  | auth: VeNCrypt X509Plain | — | — | pass | fail: no X509 credentials |
+  | auth: VeNCrypt X509Plain | — | — | pass | fail: guacd: no X509 credentials |
   | screen and input acknowledged | pass | pass | pass | pass |
   | resize: by the owner's hello | — | — | pass | pass |
   | resize: by a request | — | — | pass | pass |
   | resize: ignored without ExtendedDesktopSize | pass | pass | — | — |
   | clipboard to the server, Latin-1 | pass | pass | pass | pass |
-  | clipboard to the server, beyond Latin-1 | fail: x11vnc | fail: x11vnc | pass | fail: guacd |
+  | clipboard to the server, beyond Latin-1 | fail: x11vnc: Latin-1 only | fail: x11vnc: Latin-1 only | pass | fail: guacd: Latin-1 only |
   | clipboard both ways, Latin-1 | pass | pass | pass | pass |
-  | clipboard both ways, beyond Latin-1 | fail: x11vnc | fail: x11vnc | pass | fail: guacd |
+  | clipboard both ways, beyond Latin-1 | fail: x11vnc: Latin-1 only | fail: x11vnc: Latin-1 only | pass | fail: guacd: Latin-1 only |
   | cursor | pass | pass | pass | pass |
   | keyboard: us | pass | pass | pass | pass |
   | keyboard: de, keysyms and codes | pass | pass | pass | pass |
@@ -724,7 +743,7 @@ that guacd was `vnc`'s default, they are corrected below.
   | text input | pass | pass | pass | pass |
   | sharing: a viewer's input | pass | pass | pass | pass |
   | sharing: a read-only viewer's input dropped | pass | pass | pass | pass |
-  | reconnect: the owner rejoins | pass | pass | pass | pass |
+  | reconnect: the owner rejoins occamyd's session | pass | pass | pass | pass |
 
   A dash is a cell not run: x11vnc offers no VeNCrypt and no
   ExtendedDesktopSize, and the password asked of the owner, which is
@@ -733,8 +752,9 @@ that guacd was `vnc`'s default, they are corrected below.
   its absence.
 - **What the rows check.**
   - auth: the session reaches the screen with the session's state
-    naming the backend, and a typed line arrives. A wrong answer to the
-    prompt ends the session as `backend-failed`.
+    naming the backend, and a typed line arrives. The password asked of
+    the owner must be asked: a screen without the prompt fails. A wrong
+    answer to the prompt ends the session as `backend-failed`.
   - screen: 1024×768, not of one colour, and a frame acknowledging a
     key.
   - resize: TigerVNC takes 900×700 from the owner's `hello` and
@@ -743,7 +763,11 @@ that guacd was `vnc`'s default, they are corrected below.
     clipboard byte for byte, and "naïve café\nzweite Zeile" and
     "€ ✓ 日本" come back to the client.
   - cursor: the root window's cursor and the xterm's differ, and each
-    change arrives with its hot spot inside the image.
+    change arrives with its hot spot inside the image. The xterm's
+    cursor is the last to have arrived once a nonce, sent after the
+    pointer moved onto the xterm, has come back: the server sends the
+    cursor as it takes the move, before the probe even reads the
+    clipboard.
   - keyboard: keys as a browser on that layout reports them (the keysym
     produced, the key's code, AltGr and Shift held where the layout
     needs them, and a dead key as a code with no keysym followed by the
@@ -755,8 +779,12 @@ that guacd was `vnc`'s default, they are corrected below.
     roles; a read-only viewer is refused by the client, and its pointer,
     key and clipboard messages, written past the client, reach nothing
     while the owner's line comes through alone.
-  - reconnect: the owner closes the stream and rejoins the session by
-    its id within the grace period, at the same size, and types.
+  - reconnect: the owner closes the stream and rejoins occamyd's
+    session by its id within the grace period, at the same size, and
+    types. The check cannot tell whether the backend kept its
+    connection to the server through the grace period or made another;
+    it shows that occamyd's session, not the VNC connection, carries
+    on.
 - **Findings.**
   - Clipboard beyond Latin-1: RFB's cut text is Latin-1. x11vnc has no
     Extended Clipboard, so "€ ✓ 日本" arrives as "? ? ??" through either
@@ -802,12 +830,16 @@ that guacd was `vnc`'s default, they are corrected below.
     error, but the first run in CI had three, all in guacd cells as
     guacd connected. The demo x11vnc now logs the failed request
     (`X11VNC_PRINT_XERROR`), and runs under a watchdog that kills one
-    that reports an X error or leaves a connection unaccepted for 10 s,
-    and starts it again ([006](../006-demo-stack-refresh.md), Addendum:
-    TigerVNC and the VNC parity matrix). In that CI run, a cell's second
-    try met the hung x11vnc that its first try had found, before the
-    watchdog had killed it; hence up to three tries. It is a fault of
-    the server, not of either backend.
+    that reports an X error or leaves a connection unaccepted for 26 s,
+    and starts it again, backing off up to 16 s while it keeps exiting
+    ([006](../006-demo-stack-refresh.md), Addendum: TigerVNC and the
+    VNC parity matrix). x11vnc serves its clients in one thread, and
+    waits up to its `-rfbwait`, 20 s by default, for a client that does
+    not take what it sends, accepting nobody meanwhile; a first
+    watchdog that waited 10 s could have killed a live x11vnc so. In
+    that CI run, a cell's second try met the hung x11vnc that its first
+    try had found, before the watchdog had killed it; hence up to three
+    tries. It is a fault of the server, not of either backend.
   - Read-only input is dropped by the session, before any backend, so
     the row cannot differ between backends; it is in the matrix because
     the gate names sharing roles.
