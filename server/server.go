@@ -191,6 +191,10 @@ func newServer(f *config.File) (*server, error) {
 		// #nosec G706 -- the operator's configuration, not a client's input.
 		log.Printf("warning: created a new signing key in %s; tokens signed with any earlier key no longer verify", f.Auth.SigningKeyFile)
 	}
+	for _, w := range loadWarnings(f) {
+		// #nosec G706 -- the operator's configuration, not a client's input.
+		log.Printf("warning: %s", w)
+	}
 	pub, ok := key.Public().(ed25519.PublicKey)
 	if !ok {
 		return nil, errors.New("auth: the signing key has no Ed25519 public key")

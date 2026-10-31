@@ -1868,17 +1868,18 @@ to the VNC backend.
 - **What was done.**
   - Configuration v1: `backend` on each connection (`guacd` or
     `native`, filled with the protocol's default: `native` for ssh and,
-    since 2026-10-31, vnc; `guacd` for rdp and telnet), `adhoc_backends`
+    since 2026-10-31, vnc and rdp; `guacd` for telnet), `adhoc_backends`
     for ad-hoc targets by protocol, and `ard` on vnc connections
     ([native-vnc-backend](native-vnc-backend.md), Implementation notes:
-    registration). ssh refuses `guacd`, rdp refuses `native` until NLA
-    has run end to end, telnet has no native backend, and `tls` and
-    `ard` need the native backend, so they are refused with
-    `backend: guacd`.
+    registration). ssh refuses `guacd`, rdp refused `native` until NLA
+    had run end to end ([native-rdp-backend](native-rdp-backend.md),
+    Implementation notes: registration), telnet has no native backend,
+    and `tls`, `ard` and rdp's `security` need the native backend, so
+    they are refused with `backend: guacd`.
   - The backend factory is keyed by protocol and backend; `POST
     /api/v1/sessions`, the connection stream and the ad-hoc path look
     up the connection's or `adhoc_backends`' backend. The session's
-    state keeps naming it `ssh`, `vnc` or `guacd`.
+    state keeps naming it `ssh`, `vnc`, `rdp` or `guacd`.
   - Routes are added to a list (`routeMux`), from which each listener's
     `http.ServeMux` is built, so that `TestAPIDoc` can check that
     [docs/api.md](../../docs/api.md), the reference of every route

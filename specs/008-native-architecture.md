@@ -65,9 +65,11 @@ In scope:
    path ([native-kubernetes-backend](008-native-architecture/native-kubernetes-backend.md)).
 7. Native VNC backend, vnc's default (the owner's decision of
    2026-10-31), with the guacd bridge as an explicit fallback.
-8. RDP through the guacd bridge until its native backend takes over by
-   rc.1, and telnet, which gets no native backend, through guacd until
-   guacd is removed. Where a native backend exists it is the default,
+8. Native RDP backend, rdp's default since 2026-10-31, ahead of rc.1,
+   with the guacd bridge as an explicit fallback; checked against xrdp,
+   not yet Windows, and without the graphics pipeline until its phase 3.
+   telnet, which gets no native backend, goes through guacd until guacd
+   is removed. Where a native backend exists it is the default,
    and guacd serves that protocol only with an explicit `backend: guacd`.
 9. Clients: the web client on protocol v1 ([009](009-react-web-client.md))
    and the Go client core, which the end-to-end tests and the Swift client
@@ -75,8 +77,8 @@ In scope:
    preview by rc.1 and does not gate beta.1.
 
 Out of scope for beta: video encoding (H.264 and similar), audio, file
-transfer and SFTP, a recording player, WebTransport, native RDP, and
-multi-node deployment.
+transfer and SFTP, a recording player, WebTransport, native RDP beyond
+its registration (GFX and Windows), and multi-node deployment.
 
 Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
 
@@ -129,9 +131,9 @@ Targets).
 | Milestone | Delivers | guacd needed for |
 |-----------|----------|------------------|
 | v0.5.0 ([005](005-upstream-guacamole.md), released 2026-10-29) | `occamyd` without cgo; everything through guacd | VNC, SSH, RDP |
-| v1.0.0-beta.1 | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, native VNC as vnc's default, web client on v1 | RDP; VNC only with `backend: guacd` |
-| v1.0.0-beta.2 | Native VNC through the parity gate: VNC's guacd fallback deleted once the benchmark shows native at least 10x better | RDP |
-| v1.0.0-rc.1 | API and protocol frozen; native RDP as rdp's default; Swift client preview | nothing by default; any fallback still short of the gate |
+| v1.0.0-beta.1 | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, native VNC as vnc's default, native RDP as rdp's default (not yet checked against Windows), web client on v1 | VNC and RDP only with `backend: guacd` |
+| v1.0.0-beta.2 | Native VNC through the parity gate: VNC's guacd fallback deleted once the benchmark shows native at least 10x better | RDP only with `backend: guacd` |
+| v1.0.0-rc.1 | API and protocol frozen; native RDP with GFX; the Windows check runs once a host is available (#32), as [rdp-strategy](008-native-architecture/rdp-strategy.md) decision 5 says; Swift client preview | nothing by default; any fallback still short of the gate |
 | v1.0.0 | No guacd and no Guacamole protocol, so no telnet; the v0 routes are removed | nothing |
 | v1.x | Kerberos, audio and the rest of RDP's later scope per [rdp-strategy](008-native-architecture/rdp-strategy.md) | nothing |
 
@@ -169,7 +171,7 @@ flowchart LR
   SW[Swift client] --> CC[Go client core] -- protocol v1 --> GW
   GW[API v1: auth, registry, sessions] --> SE[Session owner]
   SE --> TB[Terminal backends: SSH, Kubernetes]
-  SE --> GB[Graphical backends: VNC, RDP later]
+  SE --> GB[Graphical backends: VNC, RDP]
   SE --> BR[guacd bridge]
   GB --> FB[Framebuffer and damage]
   BR --> FB

@@ -74,25 +74,25 @@ type File struct {
 // The backends that serve a connection's sessions.
 const (
 	// BackendNative is occamyd's own client of the protocol, for ssh,
-	// vnc and kubernetes.
+	// vnc, rdp and kubernetes.
 	BackendNative = "native"
 	// BackendGuacd is the guacd bridge, for every protocol but ssh and
-	// kubernetes: the only backend of rdp and telnet, and vnc's opt-in
-	// fallback.
+	// kubernetes: the only backend of telnet, and the opt-in fallback of
+	// vnc and rdp.
 	BackendGuacd = "guacd"
 )
 
 // DefaultBackend returns the backend that serves protocol's sessions
 // when the configuration does not pick one: native wherever a native
-// backend exists, which is ssh, vnc and kubernetes, and guacd for rdp
-// and telnet, which have none yet. For vnc, backend: guacd is an
+// backend exists, which is ssh, vnc, rdp and kubernetes, and guacd for
+// telnet, which has none. For vnc and rdp, backend: guacd is an
 // explicit fallback and the benchmark's baseline, kept until the
 // benchmark shows native at least 10x better
 // (specs/008-native-architecture/guacd-bridge.md, Parity gate); ssh and
 // kubernetes have no guacd backend.
 func DefaultBackend(protocol string) string {
 	switch protocol {
-	case "ssh", "vnc", "kubernetes":
+	case "ssh", "vnc", "rdp", "kubernetes":
 		return BackendNative
 	}
 	return BackendGuacd
@@ -117,9 +117,7 @@ func backendProblem(protocol, b string) string {
 		return "ssh connections always use occamyd's native SSH backend: leave backend out, or set native"
 	case protocol == "kubernetes" && b == BackendGuacd:
 		return "kubernetes connections always use occamyd's native Kubernetes backend: leave backend out, or set native"
-	case protocol == "rdp" && b == BackendNative:
-		return "the native RDP backend is not available yet: it is not registered until NLA has run end to end. Leave backend out, or set guacd"
-	case protocol != "ssh" && protocol != "vnc" && protocol != "kubernetes" && b == BackendNative:
+	case protocol != "ssh" && protocol != "vnc" && protocol != "rdp" && protocol != "kubernetes" && b == BackendNative:
 		return fmt.Sprintf("%s has no native backend: leave backend out, or set guacd", protocol)
 	}
 	return ""
@@ -266,10 +264,15 @@ type Connection struct {
 	// InsecureIgnoreHostKey accepts any host key from an ssh target, with
 	// a warning, for demos.
 	InsecureIgnoreHostKey bool `yaml:"insecure_ignore_host_key"`
-	// TLS is the certificate policy of a vnc target's VeNCrypt, which
-	// only the native VNC backend checks, and of a kubernetes target's
-	// API server. Other protocols have none.
+	// TLS is the certificate policy of a vnc target's VeNCrypt or an rdp
+	// target's TLS, which only the native backends check, and of a
+	// kubernetes target's API server. Other protocols have none.
 	TLS ConnectionTLS `yaml:"tls"`
+	// Security is the security mode of an rdp connection on the native
+	// backend, named as guacd names them: nla (the default), nla-ext,
+	// tls or any. Through guacd, guacd.params.rdp.security sets it
+	// instead. xrdp speaks no NLA, so an xrdp target needs tls or any.
+	Security string `yaml:"security"`
 	// ARD allows Apple Remote Desktop authentication (security type 30)
 	// on a vnc connection with the native backend, which macOS Screen
 	// Sharing needs to log in a user of the Mac. Its key exchange
@@ -312,14 +315,18 @@ func (k Kubernetes) set() bool {
 	return k.Namespace != "" || k.Pod != "" || k.Container != "" || len(k.Command) > 0 || k.Attach || k.TTY != nil
 }
 
-// ConnectionTLS is the policy for the certificate that a vnc target
-// presents when VeNCrypt runs TLS, which the native VNC backend prefers
-// whenever a server offers it. By default the certificate must chain to
-// the system's roots and name the target's host.
+// ConnectionTLS is the policy for the certificate that a target
+// presents: a vnc target when VeNCrypt runs TLS, which the native VNC
+// backend prefers whenever a server offers it, an rdp target, whose
+// native backend always runs TLS, and a kubernetes connection's API
+// server. By default the certificate must chain to the system's roots
+// and name the target's host.
 type ConnectionTLS struct {
-	// Require refuses a server that does not offer VeNCrypt with a
+	// Require refuses a vnc server that does not offer VeNCrypt with a
 	// certificate, so that nobody on the way can strip it from the
-	// security types the server offers. CAFile and Pins imply it.
+	// security types the server offers. CAFile and Pins imply it. The
+	// native RDP backend and a kubernetes connection require TLS whether
+	// it is set or not.
 	Require bool `yaml:"require"`
 	// ServerName is the name the certificate must carry, if not the
 	// target's host.

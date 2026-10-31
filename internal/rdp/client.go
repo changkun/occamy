@@ -314,6 +314,19 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 	return c, nil
 }
 
+// ProtocolError is Connect's error for a server that selects a security
+// protocol the client did not offer or does not support, as xrdp
+// selects standard RDP security (ProtocolRDP) when offered CredSSP
+// alone.
+type ProtocolError struct {
+	Selected uint32 // the protocol the server selected
+	Offered  uint32 // the protocols the client offered, Config.Protocols
+}
+
+func (e *ProtocolError) Error() string {
+	return fmt.Sprintf("rdp: the server selected security protocol %#x, which the client did not offer or does not support", e.Selected)
+}
+
 func (c *Client) connect(ctx context.Context) error {
 	// Connection initiation, [MS-RDPBCGR] 1.3.1.1 phase 1.
 	cookie := ""
@@ -332,7 +345,7 @@ func (c *Client) connect(ctx context.Context) error {
 	}
 	if c.protocol&c.cfg.Protocols == 0 || c.protocol&^(ProtocolSSL|ProtocolHybrid|ProtocolHybridEx) != 0 {
 		// xrdp selects standard RDP security when asked for CredSSP alone.
-		return fmt.Errorf("rdp: the server selected security protocol %#x, which the client did not offer or does not support", c.protocol)
+		return &ProtocolError{Selected: c.protocol, Offered: c.cfg.Protocols}
 	}
 
 	tc := tls.Client(c.conn, c.tls.config(c.addr, c.log))

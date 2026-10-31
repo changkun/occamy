@@ -31,9 +31,9 @@ services:
 
   occamy-v1:
     # The same image serving a v1 file (occamy-v1.yaml) on port 5637: the
-    # web client, the demo SSH server, and the demo VNC server through the
-    # native backend, vnc's default, and through guacd (backend: guacd),
-    # for API v1 and protocol v1 clients.
+    # web client, the demo SSH server, and the demo VNC and RDP servers
+    # through the native backends, their default, and through guacd
+    # (backend: guacd), for API v1 and protocol v1 clients.
     image: ${OCCAMY_IMAGE:-occamy:latest}
     command: ["/occamy/occamyd", "-conf", "/occamy/v1.yaml"]
     ports:
@@ -46,10 +46,13 @@ services:
     environment:
       OCCAMY_DEMO_SSH_PASSWORD: occamy
       OCCAMY_DEMO_VNC_PASSWORD: vncpassword
+      OCCAMY_DEMO_RDP_PASSWORD: occamy
     depends_on:
       guacd:
         condition: service_healthy
       vnc:
+        condition: service_healthy
+      rdp:
         condition: service_healthy
       ssh:
         condition: service_healthy

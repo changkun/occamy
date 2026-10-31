@@ -73,13 +73,16 @@ auth:
     # user. Off, such a sign-in is refused.
     link_static_users: false
 
-# guacd serves the rdp and telnet connections, and the vnc connections
+# guacd serves the telnet connections, and the vnc and rdp connections
 # that set backend: guacd.
 guacd:
   address: localhost:4822
   # guacd parameters per protocol. Connection targets and credentials
-  # override them.
+  # override them. They apply only to connections on guacd, and occamyd
+  # warns at start of those that no session reads.
   params:
+    # For the rdp connection old-terminal-server, the only one on guacd:
+    # its certificate is not checked.
     rdp:
       ignore-cert: "true"
 
@@ -139,9 +142,32 @@ connections:
     name: Windows workstation
     protocol: rdp
     target: 10.0.4.20:3389
+    # occamyd's own RDP client serves rdp connections unless backend:
+    # guacd keeps one on guacd. It has not been checked against Windows
+    # yet, only xrdp. security is nla by default; xrdp, which speaks no
+    # NLA, needs security: tls or any.
+    # Windows signs its RDP certificate itself unless given one: pin it,
+    # by the fingerprint that openssl x509 -noout -fingerprint -sha256
+    # prints.
+    tls:
+      pins: ["3F:A1:07:5C:92:E4:6B:D8:21:0A:F3:8E:57:C6:19:B4:E2:7D:40:95:A8:1C:6F:D3:0B:72:E9:58:34:AC:66:1F"]
     credentials:
       username: Administrator
       password_file: /run/secrets/windows-password
+    allow:
+      groups: [ops]
+
+  - id: old-terminal-server
+    name: Old terminal server
+    protocol: rdp
+    target: 10.0.4.21
+    # Through guacd, the fallback, kept until the benchmark shows native
+    # 10x better. guacd.params.rdp applies to it; tls and security do
+    # not, and the file refuses them here.
+    backend: guacd
+    credentials:
+      username: Administrator
+      prompt: true
     allow:
       groups: [ops]
 
@@ -192,8 +218,10 @@ adhoc_allowlist:
   - 10.0.0.0/8
   - "*.lab.internal:22"
 # The backend of ad-hoc targets by protocol, as a connection's backend:
-# native for ssh and vnc, and guacd for rdp and telnet, unless set.
+# native for ssh, vnc and rdp, and guacd for telnet, unless set.
 # vnc: guacd would send ad-hoc vnc targets through guacd, the fallback.
+# An ad-hoc rdp target on the native backend takes NLA, and a
+# certificate that chains to the system's roots.
 adhoc_backends:
   vnc: native
 

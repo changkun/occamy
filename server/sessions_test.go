@@ -641,6 +641,7 @@ func TestConnectionTarget(t *testing.T) {
 		HostKeys: []string{fakeHostKey}, InsecureIgnoreHostKey: true,
 		TLS:         config.ConnectionTLS{Require: true, ServerName: "mac", CAFile: "/ca.pem", Pins: []string{"SHA256:pin"}, InsecureSkipVerify: true},
 		ARD:         true,
+		Security:    "tls",
 		Kubernetes:  config.Kubernetes{Namespace: "web", Pod: "web-0", Container: "app", Command: []string{"sh"}},
 		Credentials: config.Credentials{Username: "studio", PasswordFile: "/password", Prompt: true},
 		Allow:       config.Allow{Users: []string{"alice"}},
@@ -655,6 +656,7 @@ func TestConnectionTarget(t *testing.T) {
 		insecureIgnoreHostKey: true,
 		tls:                   c.TLS,
 		ard:                   true,
+		security:              "tls",
 		kubernetes:            c.Kubernetes,
 	}
 	if got := connectionTarget(&c); !reflect.DeepEqual(got, want) {

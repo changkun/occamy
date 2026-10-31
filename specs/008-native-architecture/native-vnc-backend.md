@@ -190,8 +190,8 @@ Implementation notes: registration.)
 
 New `internal/backend/vnc`. Once the parity gate deletes VNC's guacd
 path ([guacd-bridge](guacd-bridge.md)), VNC no longer needs guacd, which
-leaves only RDP, until its native backend is registered, and telnet on
-the bridge. The HID-to-XT table derives from `internal/keymap`, the
+leaves RDP's fallback, until its own deletion gate, and telnet on the
+bridge. The HID-to-XT table derives from `internal/keymap`, the
 scan code table it shares with the RDP client
 since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
 
