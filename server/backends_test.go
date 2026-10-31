@@ -22,6 +22,7 @@ import (
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/backend/backendtest"
+	"changkun.de/x/occamy/internal/backend/kubernetes"
 	"changkun.de/x/occamy/internal/backend/rdp"
 	"changkun.de/x/occamy/internal/backend/ssh"
 	"changkun.de/x/occamy/internal/backend/vnc"
@@ -41,7 +42,8 @@ func TestBackendDefaults(t *testing.T) {
 		"ssh/native": "ssh",
 		"vnc/native": "vnc", "vnc/guacd": "guacd",
 		"rdp/native": "rdp", "rdp/guacd": "guacd",
-		"telnet/guacd": "guacd",
+		"telnet/guacd":      "guacd",
+		"kubernetes/native": "kubernetes",
 	}
 	if !maps.Equal(got, want) {
 		t.Errorf("backends %v, want %v", got, want)
@@ -51,18 +53,19 @@ func TestBackendDefaults(t *testing.T) {
 	for _, tt := range []struct{ protocol, backend, want string }{
 		{"ssh", "", "ssh"}, {"vnc", "", "vnc"}, {"vnc", "native", "vnc"}, {"vnc", "guacd", "guacd"},
 		{"rdp", "", "rdp"}, {"rdp", "native", "rdp"}, {"rdp", "guacd", "guacd"}, {"telnet", "", "guacd"},
+		{"kubernetes", "", "kubernetes"}, {"kubernetes", "native", "kubernetes"},
 	} {
 		if m, ok := b.lookup(tt.protocol, tt.backend); !ok || m.name != tt.want {
 			t.Errorf("lookup(%q, %q) = %q, %v; want %q", tt.protocol, tt.backend, m.name, ok, tt.want)
 		}
 	}
-	for _, tt := range []struct{ protocol, backend string }{{"ssh", "guacd"}, {"telnet", "native"}, {"kubernetes", ""}} {
+	for _, tt := range []struct{ protocol, backend string }{{"ssh", "guacd"}, {"telnet", "native"}, {"kubernetes", "guacd"}, {"spice", ""}} {
 		if m, ok := b.lookup(tt.protocol, tt.backend); ok {
 			t.Errorf("lookup(%q, %q) = %q, want none", tt.protocol, tt.backend, m.name)
 		}
 	}
-	if !b.serves("vnc") || b.serves("kubernetes") {
-		t.Errorf("serves(vnc) = %v, serves(kubernetes) = %v", b.serves("vnc"), b.serves("kubernetes"))
+	if !b.serves("vnc") || !b.serves("kubernetes") || b.serves("spice") {
+		t.Errorf("serves(vnc) = %v, serves(kubernetes) = %v, serves(spice) = %v", b.serves("vnc"), b.serves("kubernetes"), b.serves("spice"))
 	}
 }
 
@@ -248,8 +251,8 @@ func TestLoadWarnings(t *testing.T) {
 			Guacd:       config.Guacd{Params: params},
 			Connections: []config.Connection{conn("a", "rdp", ""), conn("b", "vnc", "native"), conn("c", "ssh", "")},
 		}, []string{
-			"guacd.params.rdp sets color-depth, disable-copy, recording-path, which no session reads: no rdp connection goes through guacd",
-			"guacd.params.vnc sets disable-paste, which no session reads: no vnc connection goes through guacd",
+			"guacd.params.rdp sets color-depth, disable-copy, recording-path, which no session reads: no rdp connection sets backend: guacd",
+			"guacd.params.vnc sets disable-paste, which no session reads: no vnc connection sets backend: guacd",
 		}},
 		{"guacd fallbacks", config.File{
 			Guacd:       config.Guacd{Params: params},
@@ -264,7 +267,7 @@ func TestLoadWarnings(t *testing.T) {
 			AllowAdhocTargets: true,
 			AdhocBackends:     map[string]string{"rdp": "guacd", "vnc": "native"},
 		}, []string{
-			"guacd.params.rdp sets disable-copy, recording-path, which no session reads: no rdp connection goes through guacd, and ad-hoc rdp targets take only the display's parameters",
+			"guacd.params.rdp sets disable-copy, recording-path, which no session reads: no rdp connection sets backend: guacd, and ad-hoc rdp targets take only the display's parameters",
 			"guacd.params.vnc sets disable-paste,",
 		}},
 		{"ad-hoc targets off", config.File{
@@ -272,6 +275,16 @@ func TestLoadWarnings(t *testing.T) {
 			AdhocBackends: map[string]string{"rdp": "guacd"},
 		}, []string{"guacd.params.rdp sets color-depth,"}},
 		{"legacy_v0", config.File{Guacd: config.Guacd{Params: params}, LegacyV0: true}, nil},
+		{"each protocol's terms", config.File{
+			Guacd: config.Guacd{Params: map[string]map[string]string{
+				"ssh":    {"font-size": "12"},
+				"telnet": {"terminal-type": "xterm", "color-scheme": "gray-black"},
+			}},
+			AllowAdhocTargets: true,
+		}, []string{
+			"guacd.params.ssh sets font-size, which no session reads: ssh never goes through guacd",
+			"guacd.params.telnet sets terminal-type, which no session reads: no telnet connection is configured, and ad-hoc telnet targets take only the display's parameters",
+		}},
 		{"unchecked TLS", config.File{Connections: []config.Connection{
 			{ID: "tls", Protocol: "rdp", Security: rdp.SecurityTLS, TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
 			{ID: "any", Protocol: "rdp", Security: rdp.SecurityAny, TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
@@ -410,6 +423,63 @@ func writeCA(t *testing.T) string {
 
 // TestAskUser checks that a prompting ssh connection without a user name
 // asks the owner for one, and keeps the size it is given before.
+func TestNewKubernetes(t *testing.T) {
+	t.Setenv("OCCAMY_TEST_K8S_TOKEN", "kube-token")
+	no := false
+	pod := config.Kubernetes{Namespace: "web", Pod: "web-0", Container: "app", Command: []string{"sh"}, TTY: &no}
+	b, err := newKubernetes(target{addr: "k8s.internal:6443", kubernetes: pod, creds: config.Credentials{TokenEnv: "OCCAMY_TEST_K8S_TOKEN"}}, screen{cols: 120, rows: 40})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := b.(*kubernetes.Backend); !ok || b.Class() != backend.Terminal {
+		t.Errorf("%T of class %v, want a *kubernetes.Backend terminal", b, b.Class())
+	}
+	if _, err := newKubernetes(target{addr: "k8s.internal:6443", kubernetes: pod, creds: config.Credentials{TokenEnv: "OCCAMY_TEST_UNSET"}}, screen{}); err == nil {
+		t.Error("an unset token variable made a backend")
+	}
+	// A terminal too large for the backend is refused, as the SSH
+	// backend refuses it.
+	if _, err := newKubernetes(target{addr: "k8s.internal:6443", kubernetes: pod, creds: config.Credentials{Prompt: true}}, screen{cols: kubernetes.MaxCols + 1, rows: 24}); err == nil {
+		t.Error("a terminal wider than MaxCols made a backend")
+	}
+
+	// The connection's pod, credentials and certificate policy reach the
+	// backend, with the token and the CA file read.
+	ca := writeCA(t)
+	tls := config.ConnectionTLS{ServerName: "kubernetes.default.svc", CAFile: ca}
+	cfg, err := kubernetesConfig(target{addr: "k8s.internal:6443", kubernetes: pod, creds: config.Credentials{TokenEnv: "OCCAMY_TEST_K8S_TOKEN"}, tls: tls})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Addr != "k8s.internal:6443" || cfg.Namespace != "web" || cfg.Pod != "web-0" || cfg.Container != "app" ||
+		!slices.Equal(cfg.Command, []string{"sh"}) || cfg.Attach || !cfg.NoTTY || cfg.Token != "kube-token" || cfg.PromptToken ||
+		cfg.TLS.ServerName != "kubernetes.default.svc" || cfg.TLS.RootCAs == nil || cfg.TLS.InsecureSkipVerify {
+		t.Errorf("kubernetesConfig = %+v", cfg)
+	}
+	yes := true
+	pins := []string{"SHA256:" + strings.Repeat("A", 43)}
+	cfg, err = kubernetesConfig(target{
+		addr:       "k8s.internal:443",
+		kubernetes: config.Kubernetes{Namespace: "default", Pod: "p", Attach: true, TTY: &yes},
+		creds:      config.Credentials{ClientCertFile: "/c.pem", ClientKeyFile: "/k.pem"},
+		tls:        config.ConnectionTLS{Pins: pins, InsecureSkipVerify: true},
+	})
+	if err != nil || !cfg.Attach || cfg.NoTTY || cfg.Token != "" || cfg.CertFile != "/c.pem" || cfg.KeyFile != "/k.pem" ||
+		!slices.Equal(cfg.TLS.Pins, pins) || !cfg.TLS.InsecureSkipVerify || cfg.TLS.RootCAs != nil {
+		t.Errorf("kubernetesConfig = %+v, %v", cfg, err)
+	}
+	if cfg, err := kubernetesConfig(target{addr: "k8s.internal:443", kubernetes: pod, creds: config.Credentials{Prompt: true}}); err != nil || !cfg.PromptToken || cfg.Token != "" {
+		t.Errorf("prompt: %+v, %v", cfg, err)
+	}
+	notPEM := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(notPEM, []byte("not a certificate"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newKubernetes(target{addr: "k8s.internal:443", kubernetes: pod, creds: config.Credentials{Prompt: true}, tls: config.ConnectionTLS{CAFile: notPEM}}, screen{}); err == nil || !strings.Contains(err.Error(), "CA file") {
+		t.Errorf("a CA file without a certificate: %v", err)
+	}
+}
+
 func TestAskUser(t *testing.T) {
 	b := &askUser{cfg: ssh.Config{Addr: "127.0.0.1:1", InsecureIgnoreHostKey: true, Cols: 80, Rows: 24}}
 	if b.Class() != backend.Terminal {

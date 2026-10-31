@@ -7,6 +7,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
 	"net"
@@ -26,6 +27,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"changkun.de/x/occamy/internal/auth"
+	"changkun.de/x/occamy/internal/backend/kubernetes"
 	rdpb "changkun.de/x/occamy/internal/backend/rdp"
 	"changkun.de/x/occamy/internal/backend/ssh"
 	"changkun.de/x/occamy/internal/backend/vnc"
@@ -47,10 +49,10 @@ const MinViewerTimeout = time.Second
 const MinBcryptCost = bcrypt.DefaultCost
 
 // defaultPorts maps each protocol a connection may use to the port that a
-// target without one gets.
-var defaultPorts = map[string]string{"ssh": "22", "vnc": "5900", "rdp": "3389", "telnet": "23"}
+// target without one gets: for kubernetes, the API server's.
+var defaultPorts = map[string]string{"ssh": "22", "vnc": "5900", "rdp": "3389", "telnet": "23", "kubernetes": "443"}
 
-const protocolList = "ssh, vnc, rdp or telnet"
+const protocolList = "ssh, vnc, rdp, telnet or kubernetes"
 
 var (
 	idPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -133,6 +135,7 @@ func (f *File) validate(c *checker) {
 	}
 	c.file("tls.cert", f.TLS.Cert)
 	c.file("tls.key", f.TLS.Key)
+	c.webClient("web_client", f.WebClient)
 	if f.Debug.Address != "" {
 		c.address("debug.address", f.Debug.Address, false)
 		if Overlap(f.Listen, f.Debug.Address) {
@@ -287,6 +290,10 @@ func (f *File) validateGuacd(c *checker) {
 		if _, ok := defaultPorts[protocol]; !ok {
 			c.add(p, "unknown protocol %q: use %s", protocol, protocolList)
 		}
+		if protocol == "kubernetes" {
+			c.add(p, "guacd does not serve kubernetes: occamyd's native backend does, configured on each connection")
+			continue
+		}
 		for _, name := range slices.Sorted(maps.Keys(f.Guacd.Params[protocol])) {
 			switch {
 			case secretParam(name):
@@ -356,6 +363,8 @@ func (f *File) validateConnections(c *checker) {
 		}
 		if cn.Target == "" {
 			c.add(p+".target", "required")
+		} else if cn.Protocol == "kubernetes" && strings.Contains(cn.Target, "://") {
+			c.add(p+".target", "%q: write the API server as host:port, such as k8s.example.com:6443; occamyd always uses https", cn.Target)
 		} else if t, err := normalizeTarget(cn.Target, port); err != nil {
 			c.add(p+".target", "%v", err)
 		} else {
@@ -368,6 +377,7 @@ func (f *File) validateConnections(c *checker) {
 			c.connectionTLS(p+".tls", cn)
 			c.ard(p+".ard", cn)
 			c.security(p+".security", cn)
+			c.kubernetes(p+".kubernetes", cn)
 		}
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
 	}
@@ -507,6 +517,10 @@ func (f *File) validateAdhocBackends(c *checker) {
 			c.add(p, "unknown protocol %q: use %s", protocol, protocolList)
 			continue
 		}
+		if !AdhocProtocol(protocol) {
+			c.add(p, "%s has no ad-hoc targets: configure a connection", protocol)
+			continue
+		}
 		if problem := backendProblem(protocol, f.AdhocBackends[protocol]); problem != "" {
 			c.add(p, "%s", problem)
 		}
@@ -515,18 +529,30 @@ func (f *File) validateAdhocBackends(c *checker) {
 		f.AdhocBackends = map[string]string{}
 	}
 	for protocol := range defaultPorts {
-		if f.AdhocBackends[protocol] == "" {
+		if f.AdhocBackends[protocol] == "" && AdhocProtocol(protocol) {
 			f.AdhocBackends[protocol] = DefaultBackend(protocol)
 		}
 	}
 }
 
-// connectionTLS checks a vnc or rdp connection's certificate policy:
-// pins replace the roots that ca_file names, insecure_skip_verify
-// replaces both, as ssh's insecure_ignore_host_key replaces host_keys,
-// and other protocols have no tls. Only the native backends check it,
-// so a connection through guacd has none either: guacd would not check
-// the certificate as the file says.
+// AdhocProtocol reports whether an ad-hoc target may use protocol. A
+// kubernetes target is a namespace, a pod and a container on an API
+// server, with credentials that a user would have to bring, so it is a
+// connection of the registry only.
+func AdhocProtocol(protocol string) bool {
+	_, known := defaultPorts[protocol]
+	return known && protocol != "kubernetes"
+}
+
+// connectionTLS checks the certificate policy of a vnc or rdp
+// connection, or of a kubernetes connection's API server: pins replace
+// the roots that ca_file names, insecure_skip_verify replaces both, as
+// ssh's insecure_ignore_host_key replaces host_keys, and other
+// protocols have no tls. Only the native backends check a vnc or rdp
+// target's certificate, so such a connection through guacd has none
+// either: guacd would not check it as the file says. The native RDP
+// backend and a kubernetes connection always use TLS, so require
+// changes nothing there.
 func (c *checker) connectionTLS(path string, cn *Connection) {
 	t := cn.TLS
 	checkPin, name, hint := vnc.CheckPin, "VNC", ""
@@ -535,13 +561,16 @@ func (c *checker) connectionTLS(path string, cn *Connection) {
 	case "rdp":
 		checkPin, name = rdp.CheckPin, "RDP"
 		hint = "; through guacd, guacd.params.rdp's ignore-cert and cert-fingerprints decide"
+	case "kubernetes":
+		// Its backend is always native: backendProblem refuses guacd.
+		checkPin, name = kubernetes.CheckPin, ""
 	default:
 		if t.set() {
-			c.add(path, "only vnc and rdp connections have tls")
+			c.add(path, "only vnc, rdp and kubernetes connections have tls")
 		}
 		return
 	}
-	if t.set() && cn.Backend != BackendNative {
+	if t.set() && name != "" && cn.Backend != BackendNative {
 		c.add(path, "only the native %s backend checks the certificate as tls says, and backend: %s would not: leave backend out, or set native%s", name, cn.Backend, hint)
 		return
 	}
@@ -560,6 +589,46 @@ func (c *checker) connectionTLS(path string, cn *Connection) {
 		if err := checkPin(s); err != nil {
 			c.add(fmt.Sprintf("%s.pins[%d]", path, i), "%v", err)
 		}
+	}
+}
+
+// kubernetes checks a kubernetes connection's pod and fills in its
+// defaults. The names must be Kubernetes's, so that none can reach
+// another path of the API server. Other protocols have no kubernetes.
+func (c *checker) kubernetes(path string, cn *Connection) {
+	k := &cn.Kubernetes
+	if cn.Protocol != "kubernetes" {
+		if k.set() {
+			c.add(path, "only kubernetes connections have kubernetes")
+		}
+		return
+	}
+	if k.Namespace == "" {
+		k.Namespace = kubernetes.DefaultNamespace
+	} else if err := kubernetes.CheckNamespace(k.Namespace); err != nil {
+		c.add(path+".namespace", "%v", err)
+	}
+	if k.Pod == "" {
+		c.add(path+".pod", "required: the pod to open a terminal in")
+	} else if err := kubernetes.CheckPod(k.Pod); err != nil {
+		c.add(path+".pod", "%v", err)
+	}
+	if k.Container != "" {
+		if err := kubernetes.CheckContainer(k.Container); err != nil {
+			c.add(path+".container", "%v", err)
+		}
+	}
+	switch {
+	case k.Attach && len(k.Command) > 0:
+		c.add(path+".command", "attach runs no command: set attach or command, not both")
+	case len(k.Command) > 0 && k.Command[0] == "":
+		c.add(path+".command[0]", "must not be empty")
+	case !k.Attach && len(k.Command) == 0:
+		k.Command = slices.Clone(kubernetes.DefaultCommand)
+	}
+	if k.TTY == nil {
+		tty := true
+		k.TTY = &tty
 	}
 }
 
@@ -606,6 +675,10 @@ func (c *checker) credentials(path, protocol string, cr Credentials) {
 		{"password_file", cr.PasswordFile != ""},
 		{"password_env", cr.PasswordEnv != ""},
 		{"private_key_file", cr.PrivateKeyFile != ""},
+		{"token_file", cr.TokenFile != ""},
+		{"token_env", cr.TokenEnv != ""},
+		// A client certificate and its key are one source.
+		{"client_cert_file", cr.ClientCertFile != "" || cr.ClientKeyFile != ""},
 		{"prompt", cr.Prompt},
 	} {
 		if s.on {
@@ -614,7 +687,11 @@ func (c *checker) credentials(path, protocol string, cr Credentials) {
 	}
 	switch len(set) {
 	case 0:
-		c.add(path, "no credential source: set one of password_file, password_env, private_key_file or prompt: true")
+		if protocol == "kubernetes" {
+			c.add(path, "no credential source: set one of token_file, token_env, client_cert_file with client_key_file, or prompt: true")
+		} else {
+			c.add(path, "no credential source: set one of password_file, password_env, private_key_file or prompt: true")
+		}
 	case 1:
 	default:
 		c.add(path, "more than one credential source (%s): set exactly one", strings.Join(set, ", "))
@@ -622,8 +699,46 @@ func (c *checker) credentials(path, protocol string, cr Credentials) {
 	c.file(path+".password_file", cr.PasswordFile)
 	c.env(path+".password_env", cr.PasswordEnv)
 	c.file(path+".private_key_file", cr.PrivateKeyFile)
+	c.file(path+".token_file", cr.TokenFile)
+	c.env(path+".token_env", cr.TokenEnv)
+	c.file(path+".client_cert_file", cr.ClientCertFile)
+	c.file(path+".client_key_file", cr.ClientKeyFile)
+	switch {
+	case cr.ClientCertFile != "" && cr.ClientKeyFile == "":
+		c.add(path+".client_key_file", "required with client_cert_file")
+	case cr.ClientKeyFile != "" && cr.ClientCertFile == "":
+		c.add(path+".client_cert_file", "required with client_key_file")
+	}
 	if cr.PrivateKeyFile != "" && protocol != "ssh" {
 		c.add(path+".private_key_file", "only ssh connections use a private key")
+	}
+	if protocol == "kubernetes" {
+		for _, s := range []struct {
+			name string
+			on   bool
+		}{
+			{"username", cr.Username != ""},
+			{"password_file", cr.PasswordFile != ""},
+			{"password_env", cr.PasswordEnv != ""},
+		} {
+			if s.on {
+				c.add(path+"."+s.name, "kubernetes connections authenticate with a bearer token (token_file, token_env or prompt: true) or a client certificate (client_cert_file and client_key_file)")
+			}
+		}
+	} else {
+		for _, s := range []struct {
+			name string
+			on   bool
+		}{
+			{"token_file", cr.TokenFile != ""},
+			{"token_env", cr.TokenEnv != ""},
+			{"client_cert_file", cr.ClientCertFile != ""},
+			{"client_key_file", cr.ClientKeyFile != ""},
+		} {
+			if s.on {
+				c.add(path+"."+s.name, "only kubernetes connections use a bearer token or a client certificate")
+			}
+		}
 	}
 	if protocol == "ssh" && cr.Username == "" && !cr.Prompt {
 		c.add(path+".username", "required for ssh unless prompt is true")
@@ -854,6 +969,39 @@ func (c *checker) file(path, name string) bool {
 	}
 	fh.Close()
 	return true
+}
+
+// webClient checks the web client's directory, if set: a directory that
+// occamyd can read. It may be missing, as a client not built yet is,
+// which occamyd warns of at start.
+func (c *checker) webClient(path, name string) {
+	if name == "" {
+		return
+	}
+	info, err := os.Stat(name)
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
+		return
+	case err != nil:
+		c.add(path, "%v", err)
+		return
+	case !info.IsDir():
+		c.add(path, "%s is not a directory", name)
+		return
+	}
+	fh, err := os.Open(name) // #nosec G304 -- the path comes from the operator's configuration
+	switch {
+	case errors.Is(err, fs.ErrPermission):
+		c.add(path, "%s is not readable", name)
+		return
+	case err != nil:
+		c.add(path, "%v", err)
+		return
+	}
+	defer fh.Close()
+	if _, err := fh.ReadDir(1); err != nil && !errors.Is(err, io.EOF) {
+		c.add(path, "%s is not readable: %v", name, err)
+	}
 }
 
 // signingKey checks the signing key file, which may be missing because

@@ -184,6 +184,30 @@ connections:
     allow:
       groups: [dev]
 
+  - id: web-shell
+    name: Web pod shell
+    protocol: kubernetes
+    # The cluster's API server, as host:port: always HTTPS, port 443
+    # unless named.
+    target: k8s.internal:6443
+    # The pod to run a command in, by the API server's pods/exec. The
+    # command defaults to bash, or sh where the image has no bash.
+    kubernetes:
+      namespace: web
+      pod: web-0
+      container: app
+    # The API server's certificate is checked against the system's roots
+    # unless a CA file or pins are named, as for vnc.
+    tls:
+      ca_file: /etc/occamy/k8s-ca.crt
+    credentials:
+      # A service account token that may get and create pods/exec in the
+      # namespace. Never logged, and sent only once the certificate
+      # checks out.
+      token_file: /run/secrets/k8s-token
+    allow:
+      groups: [ops]
+
 # Ad-hoc targets let users connect to hosts that are not in the registry.
 # Off by default; when on, only targets in the allowlist are reachable,
 # on the protocol's own ports (ssh 22, vnc 5900-5999, rdp 3389, telnet

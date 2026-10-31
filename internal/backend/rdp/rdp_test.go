@@ -666,7 +666,7 @@ func TestRunSplitsDomain(t *testing.T) {
 		{"", `LAB\alice`, "LAB", "alice"},
 		{"", `LAB\ops\alice`, "LAB", `ops\alice`},
 		{"", `alice\`, "", `alice\`},
-		{"", `\alice`, "", `\alice`},
+		{"", `\alice`, "", "alice"},
 		{"CORP", `LAB\alice`, "CORP", `LAB\alice`},
 		{"", "alice@lab.internal", "", "alice@lab.internal"},
 	} {
@@ -688,6 +688,7 @@ func TestRunSplitsDomain(t *testing.T) {
 		{[]string{`LAB\bob`, "", "pw"}, "LAB", "bob"},
 		{[]string{`LAB\bob`, "CORP", "pw"}, "CORP", `LAB\bob`},
 		{[]string{`bob\`, "", "pw"}, "", `bob\`},
+		{[]string{`\bob`, "", "pw"}, "", "bob"},
 	} {
 		cfg := s.config(t)
 		cfg.Security, cfg.Username, cfg.Password = SecurityAny, "", ""

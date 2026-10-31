@@ -25,7 +25,7 @@ async function restricted(filePath: string, source: string): Promise<boolean> {
 }
 
 describe('the client core’s imports', () => {
-  it.each(['pako', 'fs', 'node:fs', 'vue', '@vueuse/core', '../main.js', '../api/client', './demo/../../main.js'])('refuse %s in a library file', async (source) => {
+  it.each(['pako', 'fs', 'node:fs', 'react', 'vue', '../main.js', '../lib/api', './demo/../../main.js'])('refuse %s in a library file', async (source) => {
     expect(await restricted('src/protocol/session.ts', source)).toBe(true)
   })
 

@@ -204,6 +204,29 @@ func TestE2EV1RDP(t *testing.T) {
 	t.Run("shared-viewer", func(t *testing.T) {
 		ctx, token, cl := open(t)
 		id := cl.SessionID()
+		// The owner reads on, and so acknowledges its frames, while the
+		// viewer joins and types, so that occamy does not drop it as too
+		// slow after streams.viewer_timeout.
+		drainCtx, stopDrain := context.WithCancel(ctx)
+		defer stopDrain()
+		// drained carries what went wrong, or "" once the drain stopped.
+		drained := make(chan string, 1)
+		go func() {
+			for {
+				ev, err := cl.Next(drainCtx)
+				switch e, end := ev.(client.End); {
+				case err != nil && drainCtx.Err() != nil:
+					drained <- ""
+				case err != nil:
+					drained <- "reading the owner's events: " + err.Error()
+				case end:
+					drained <- fmt.Sprintf("the owner's session ended while the viewer joined: %v %q (%v)", e.Code, e.Reason, e.Err)
+				default:
+					continue
+				}
+				return
+			}
+		}()
 		var share struct {
 			Token string `json:"token"`
 		}
@@ -223,6 +246,10 @@ func TestE2EV1RDP(t *testing.T) {
 			t.Errorf("the session's viewers are %q, want the owner and the viewer", roles)
 		}
 		typeV1(t, ctx, viewer)
+		stopDrain()
+		if msg := <-drained; msg != "" {
+			t.Fatal(msg)
+		}
 		typeV1(t, ctx, cl)
 		closeSessionV1(t, addr, token, id)
 	})
@@ -237,6 +264,16 @@ func TestE2EV1RDP(t *testing.T) {
 		if err := cl.Close(); err != nil {
 			t.Fatal(err)
 		}
+		// Once the session lists no viewer, the owner has left, so it
+		// comes back through the grace rather than taking over from its
+		// older stream.
+		for len(sessionV1(t, addr, token, id).Viewers) > 0 {
+			select {
+			case <-ctx.Done():
+				t.Fatal("the session still lists the owner's closed stream")
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
 		back := openDesktopV1(t, ctx, addr, "/api/v1/sessions/"+url.PathEscape(id)+"/stream", token,
 			client.Options{Width: 1024, Height: 768})
 		if back.SessionID() != id || back.Role() != protocol.RoleOwner {
@@ -249,7 +286,8 @@ func TestE2EV1RDP(t *testing.T) {
 
 // openDesktopV1 opens the stream at path with token and waits for the
 // desktop: a frame of a screen that is not empty. The stream closes
-// when the test ends.
+// when the test ends, and so does the session if the stream joined as
+// its owner.
 func openDesktopV1(t *testing.T, ctx context.Context, addr, path, token string, opts client.Options) *client.Session {
 	t.Helper()
 	opts.Name = "occamy-e2e/1"
@@ -258,6 +296,17 @@ func openDesktopV1(t *testing.T, ctx context.Context, addr, path, token string, 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cl.Close() })
+	if cl.Role() == protocol.RoleOwner {
+		// A test that fails before it closes the session would leave it
+		// for the owner grace, connected to the remote, which the next
+		// test reaches as the same user, and counted against the user's
+		// sessions. Its error, such as the 404 after the test closed
+		// the session, is of no interest.
+		id := cl.SessionID()
+		t.Cleanup(func() {
+			_ = apiV1(addr, http.MethodDelete, "/api/v1/sessions/"+url.PathEscape(id), token, nil, nil)
+		})
+	}
 	awaitV1(t, ctx, cl, "the desktop", func(ev client.Event) bool {
 		_, ok := ev.(client.Frame)
 		return ok && !cl.Size().Eq(image.Point{})
