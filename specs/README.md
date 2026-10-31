@@ -49,7 +49,7 @@ The target design of Occamy as a whole: core, backends, protocol.
 
 | Spec | Status | Deliverable |
 |------|--------|-------------|
-| [008-native-architecture.md](008-native-architecture.md) | In progress: 3 of 11 sub-designs complete, 8 more validated; building beta.1 (merged: backend interface, protocol framing and messages, pacer, framebuffer, auth tokens, session core, viewer writer, guacd bridge, native SSH, terminal state, config v1, native VNC phases 1 to 4 (phase 4's check against a Mac pending), native as vnc's default with `backend: guacd` as a fallback until the benchmark shows native 10x better (owner, 2026-10-31), v0 routes, codec measurement, HTTP server, Go client core, codecs, OIDC, API sessions and streams, native RDP phases 1 and 2 (static channels, clipboard, CredSSP acceptor, DRDYNVC and Display Control; the Heartbeat PDU and auto-detect deferred to phase 4), scroll detection); RDP spike steps 1 and 3 done against xrdp and reviewed, step 2 waits for a Windows host | Occamy v1: beta scope, path to pure Go, 11 sub-designs including the benchmark that sets the 10x and 50 ms targets (#3, #18, #21) |
+| [008-native-architecture.md](008-native-architecture.md) | In progress: 3 of 12 sub-designs complete, 9 more validated; building beta.1 (merged: backend interface, protocol framing and messages, pacer, framebuffer, auth tokens, session core, viewer writer, guacd bridge, native SSH, terminal state, config v1, native VNC phases 1 to 4 (phase 4's check against a Mac pending), native as vnc's default with `backend: guacd` as a fallback until the benchmark shows native 10x better (owner, 2026-10-31), v0 routes, codec measurement, HTTP server, Go client core, codecs, OIDC, API sessions and streams, native RDP phases 1 and 2 (static channels, clipboard, CredSSP acceptor, DRDYNVC and Display Control; the Heartbeat PDU and auto-detect deferred to phase 4), scroll detection, native Kubernetes (pod exec)); RDP spike steps 1 and 3 done against xrdp and reviewed, step 2 waits for a Windows host | Occamy v1: beta scope, path to pure Go, 12 sub-designs including the benchmark that sets the 10x and 50 ms targets (#3, #18, #21) |
 
 ### maintenance
 
@@ -90,7 +90,7 @@ flowchart TD
   s006 --> s005[005 upstream guacd: 7 tasks]
   s006 --> s003[003 session lifecycle]
   s005 --> s003
-  s005 --> s008[008 v1 architecture: 11 sub-designs]
+  s005 --> s008[008 v1 architecture: 12 sub-designs]
   s008 --> s010[010 Swift client]
   s008 --> s009[009 React client]
   s004[004 security]
@@ -108,8 +108,9 @@ everything through guacd with a cgo-free `occamyd` (005) →
 and native VNC as vnc's default → beta.2 with VNC's guacd fallback
 deleted once the benchmark shows native 10x better → rc.1 freezes the
 API and protocol, with native RDP as rdp's default → v1.0 with no guacd,
-no Guacamole protocol and no v0 routes. Telnet has no native backend and
-is dropped with guacd. Native is the default wherever a native backend
-exists, and guacd stays only as an explicit fallback and the benchmark's
-baseline (owner, 2026-10-31;
+no Guacamole protocol and no v0 routes. Kubernetes is native only,
+never through guacd. Telnet has no native backend and is dropped with
+guacd. Native is the default wherever a native backend exists, and
+guacd stays only as an explicit fallback and the benchmark's baseline
+(owner, 2026-10-31;
 [guacd-bridge](008-native-architecture/guacd-bridge.md), Parity gate).

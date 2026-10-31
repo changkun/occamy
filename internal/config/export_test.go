@@ -5,3 +5,6 @@
 package config
 
 var Parse = parse
+
+// MaxSecretFile is the most a secret file may hold, for the test.
+const MaxSecretFile = maxSecretFile
