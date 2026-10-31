@@ -68,6 +68,7 @@ type server struct {
 	stop        context.CancelFunc // ends every session, at shutdown
 	streamTTL   time.Duration      // of the stream token POST /api/v1/sessions returns
 	limits      config.Limits
+	streamsCfg  config.Streams
 
 	mu       sync.Mutex
 	sessions map[string]*sessionInfo // by ID, while they run
@@ -217,6 +218,7 @@ func newServer(f *config.File) (*server, error) {
 		stop:        stop,
 		streamTTL:   streamTokenLifetime,
 		limits:      limits,
+		streamsCfg:  f.Streams.WithDefaults(),
 		sessions:    map[string]*sessionInfo{},
 		owned:       map[principal]int{},
 	}

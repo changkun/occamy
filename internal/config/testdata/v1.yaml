@@ -157,3 +157,10 @@ limits:
   viewers_per_session: 50
   # Unexpired shares a session has. Default 100.
   shares_per_session: 100
+
+# What occamyd keeps for one viewer.
+streams:
+  # How long a visible viewer may leave frames unacknowledged, or one
+  # write to it block, before it is dropped with close too-slow.
+  # Default 30s.
+  viewer_timeout: 45s

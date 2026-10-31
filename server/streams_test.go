@@ -1117,3 +1117,116 @@ func TestBackendPanicEndsSession(t *testing.T) {
 	waitFor(t, "the session to go", func() bool { return ts.s.session(o.ID) == nil })
 	ts.openSession(t, alice, "ops-shell")
 }
+
+// TestStalledViewerTooSlow checks that a viewer that reads its frames
+// but acknowledges none is closed with too-slow, over the WebSocket too.
+func TestStalledViewerTooSlow(t *testing.T) {
+	ts, _ := sessionServer(t, func(f *config.File) { f.Streams.ViewerTimeout = time.Second })
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	c := ts.stream(t, "/api/v1/sessions/"+o.ID+"/stream", o.StreamToken, termHello)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	for {
+		_, p, err := c.ws.Read(ctx)
+		if err != nil {
+			t.Fatalf("read before close too-slow: %v", err)
+		}
+		m, err := protocol.Decode(p, protocol.ServerMessages(), protocol.Limits{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cl, ok := m.(*protocol.Close); ok {
+			if cl.Code != protocol.CloseTooSlow {
+				t.Fatalf("close %v %q, want too-slow", cl.Code, cl.Reason)
+			}
+			break
+		}
+	}
+	if d := time.Since(start); d < time.Second {
+		t.Errorf("closed after %v, before the viewer timeout", d)
+	}
+	_, _, err := c.ws.Read(ctx)
+	if got := websocket.CloseStatus(err); got != websocket.StatusCode(protocol.CloseTooSlow) {
+		t.Errorf("WebSocket closed with %v (%v), want %v", got, err, protocol.CloseTooSlow)
+	}
+}
+
+// heapInUse is the heap in use after a full collection.
+func heapInUse() uint64 {
+	runtime.GC()
+	runtime.GC()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m.HeapInuse
+}
+
+// TestStalledViewersRelease checks that viewers that stop reading, each
+// holding another 1000x500 screen of an owner who redraws it between
+// their joins, are dropped and hold nothing once the viewer timeout has
+// passed.
+func TestStalledViewersRelease(t *testing.T) {
+	if testing.Short() {
+		t.Skip("takes seconds")
+	}
+	ts, _ := sessionServer(t, func(f *config.File) { f.Streams.ViewerTimeout = 3 * time.Second })
+	alice := ts.token(t, "alice", "ops")
+	hello := termHello
+	hello.Cols, hello.Rows = 1000, 500
+	o := ts.openSession(t, alice, "ops-shell")
+	path := "/api/v1/sessions/" + o.ID + "/stream"
+	owner := ts.stream(t, path, o.StreamToken, hello)
+	go func() { // the owner keeps reading and acknowledging
+		for {
+			if _, err := owner.next(); err != nil {
+				return
+			}
+		}
+	}()
+	info := ts.s.session(o.ID)
+	waitFor(t, "the size", func() bool { return info.s.Size().X == 1000 })
+	seq := uint32(0)
+	redraw := func(c byte) {
+		// Home, then 500 rows of 1000 cells, in messages under 64 KiB.
+		body := "\x1b[H" + strings.Repeat(string(c), 1000*500-1)
+		for len(body) > 0 {
+			n := min(len(body), 60000)
+			seq++
+			owner.send(t, protocol.TermInput{Seq: seq, Data: []byte(body[:n])})
+			body = body[n:]
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	redraw('a')
+	r := ts.api(t, http.MethodPost, "/api/v1/sessions/"+o.ID+"/shares", alice, `{"role":"read-only"}`)
+	var sh shareResponse
+	if err := json.Unmarshal(r.body, &sh); err != nil {
+		t.Fatal(err)
+	}
+	base := heapInUse()
+	const n = 8
+	for i := range n {
+		ts.stream(t, path, sh.Token, hello) // reads its welcome, then stops
+		redraw(byte('b' + i))
+	}
+	held := heapInUse()
+	deadline := time.Now().Add(20 * time.Second)
+	for len(info.s.Viewers()) > 1 {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d stalled viewers still in the session", len(info.s.Viewers())-1)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	after := heapInUse()
+	perHeld := (float64(held) - float64(base)) / n / (1 << 20)
+	perAfter := (float64(after) - float64(base)) / n / (1 << 20)
+	t.Logf("heap in use per stalled viewer: %.1f MiB while they stayed, %.1f MiB once dropped", perHeld, perAfter)
+	// A screen of 1000x500 cells takes about 11 MiB.
+	if perHeld < 4 {
+		t.Errorf("%.1f MiB held per stalled viewer: the test does not show viewers holding screens", perHeld)
+	}
+	if perAfter > 2 {
+		t.Errorf("%.1f MiB still held per stalled viewer once they were dropped, want at most 2 MiB", perAfter)
+	}
+}

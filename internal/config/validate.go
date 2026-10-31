@@ -37,6 +37,10 @@ const (
 	MaxAccessTokenLifetime = auth.DefaultMaxLifetime
 )
 
+// MinViewerTimeout is the shortest streams.viewer_timeout: a viewer
+// across a slow link may take seconds to acknowledge a large frame.
+const MinViewerTimeout = time.Second
+
 // MinBcryptCost is the lowest bcrypt cost a static user's hash may have.
 const MinBcryptCost = bcrypt.DefaultCost
 
@@ -161,6 +165,10 @@ func (f *File) validate(c *checker) {
 		}
 	}
 	f.Limits = f.Limits.WithDefaults()
+	if t := f.Streams.ViewerTimeout; t != 0 && t < MinViewerTimeout {
+		c.add("streams.viewer_timeout", "%s is less than %s", shortDuration(t), shortDuration(MinViewerTimeout))
+	}
+	f.Streams = f.Streams.WithDefaults()
 }
 
 func (a *Auth) validate(c *checker) {

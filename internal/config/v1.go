@@ -37,6 +37,10 @@ const (
 	DefaultSharesPerSession  = 100
 )
 
+// DefaultViewerTimeout is streams.viewer_timeout's default, filled in
+// by ParseV1 and by Streams.WithDefaults.
+const DefaultViewerTimeout = 30 * time.Second
+
 // DefaultOIDCScopes are the scopes requested when oidc.scopes is empty.
 var DefaultOIDCScopes = []string{"openid", "profile", "email"}
 
@@ -57,6 +61,26 @@ type File struct {
 	AllowAdhocTargets bool         `yaml:"allow_adhoc_targets"`
 	AdhocAllowlist    []string     `yaml:"adhoc_allowlist"`
 	Limits            Limits       `yaml:"limits"`
+	Streams           Streams      `yaml:"streams"`
+}
+
+// Streams bounds what occamyd keeps for one viewer.
+type Streams struct {
+	// ViewerTimeout is how long a viewer may leave the frames it was
+	// sent unacknowledged while it is visible, or one write to it
+	// blocked, before occamyd drops it with close too-slow. Each viewer
+	// holds the screen it was last sent, which a viewer that stalls
+	// would keep for as long as it stayed connected. Zero is the
+	// default.
+	ViewerTimeout time.Duration `yaml:"viewer_timeout"`
+}
+
+// WithDefaults returns s with the defaults in place of zero.
+func (s Streams) WithDefaults() Streams {
+	if s.ViewerTimeout == 0 {
+		s.ViewerTimeout = DefaultViewerTimeout
+	}
+	return s
 }
 
 // Limits bound what one user or one session holds, so that no user takes

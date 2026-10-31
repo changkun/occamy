@@ -777,6 +777,36 @@ place for fixes that ship on v0 before beta.
     panicked returns `ErrEnded` to its caller. Both log the stack.
     `TestReaderPanics`, `TestBackendPanics` and
     `TestBackendPanicEndsSession` inject the panics.
+  - **Stalled viewers are dropped (delta review):** each viewer's
+    writer keeps the screen it last sent, a terminal's whole screen of
+    up to 1000 by 500 cells, about 11 MiB, and a viewer that read its
+    welcome and then stopped kept it for as long as it stayed, while
+    the owner's redraws gave each such viewer another screen:
+    50 stalled viewers on each of a user's 10 sessions held about
+    5 GiB. `streams.viewer_timeout`, 30 s by default and at least 1 s,
+    now drops a viewer with the new close code `too-slow` 4008 once a
+    frame has waited that long since its end, or since the last ack
+    that acknowledged a frame, and wraps every write in a deadline of
+    that length (`stream.Config.ViewerTimeout`, `stream.ErrStalled`,
+    `pacer.Oldest`). The time stops while the viewer is hidden, since
+    a browser tab in the background may acknowledge nothing until it
+    is shown, and starts over once it is visible; a hidden viewer
+    gets no frames meanwhile, so it holds no more than one that
+    acknowledges. What remains at the defaults: every viewer that
+    acknowledges within the timeout holds its last-sent screen, and
+    its last input's if it may type, so one user's 10 sessions of 51
+    viewers hold up to about 5.5 GiB of 1000 by 500 screens, twice
+    that if all type; `limits` bounds it, and docs/configuration.md
+    says so. `TestStalledViewersRelease` holds eight stalled viewers
+    at 10.7 MiB each and finds 0.5 MiB each once they are dropped;
+    `TestStalledViewer`, `TestStalledViewerTimely`,
+    `TestStalledAckRestarts`, `TestStalledHidden`, `TestBlockedWrite`
+    and `TestStalledViewerTooSlow` cover the rule. Mutations of the
+    write deadline, the stall timer, the hidden pause, its restart,
+    the ack's restart, the close, the server's timeout and the
+    minimum are each caught; the server's own case for
+    `ErrStalled`, which only keeps the drop out of its error log, is
+    not, as the close it would send has gone already.
   - **A limit for the whole server (delta review):**
     `limits.sessions`, 1000 by default, bounds the sessions occamyd
     runs whoever owns them, since `sessions_per_user` bounds each user

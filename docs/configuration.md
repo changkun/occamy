@@ -365,6 +365,23 @@ do not reach a target that a user chose.
 A user is a subject of an issuer, as for owning sessions: a trusted
 issuer's users count apart from `occamyd`'s own.
 
+### Streams: `streams`
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `streams.viewer_timeout` | `30s` | How long a visible viewer may leave the frames it was sent unacknowledged, or one write to it block, before it gets `close` `too-slow`. At least `1s`. The time stops while the viewer is hidden, and starts over once it is visible |
+
+Each viewer holds the screen it was last sent until it acknowledges a
+newer one, and a viewer that may type also holds the screen of its
+last input. A terminal of 1000 by 500 cells, the largest, takes about
+11 MiB a screen. `viewer_timeout` drops a viewer that stops reading or
+acknowledging, but a viewer that acknowledges within it keeps its
+screens for as long as it stays: at the defaults one user's 10
+sessions, with their owners and 50 viewers each, may hold 510 such
+screens, about 5.5 GiB, and twice that if every viewer types. Lower
+`limits.viewers_per_session` or `limits.sessions_per_user` where users
+are not trusted with that much.
+
 ## Validation
 
 A v1 file is checked as a whole, and every problem is reported with its

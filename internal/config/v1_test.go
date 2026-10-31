@@ -239,6 +239,7 @@ func TestParseV1Example(t *testing.T) {
 		},
 		AdhocAllowlist: []string{"10.0.0.0/8", "*.lab.internal:22"},
 		Limits:         config.Limits{Sessions: 500, SessionsPerUser: 20, ViewersPerSession: 50, SharesPerSession: 100},
+		Streams:        config.Streams{ViewerTimeout: 45 * time.Second},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ParseV1(testdata/v1.yaml) =\n%+v\nwant\n%+v", got, want)
@@ -278,6 +279,9 @@ func TestParseV1Defaults(t *testing.T) {
 	}
 	if want := (config.Limits{Sessions: config.DefaultSessions, SessionsPerUser: config.DefaultSessionsPerUser, ViewersPerSession: config.DefaultViewersPerSession, SharesPerSession: config.DefaultSharesPerSession}); f.Limits != want {
 		t.Errorf("limits = %+v, want %+v", f.Limits, want)
+	}
+	if f.Streams.ViewerTimeout != config.DefaultViewerTimeout {
+		t.Errorf("streams.viewer_timeout = %v, want %v", f.Streams.ViewerTimeout, config.DefaultViewerTimeout)
 	}
 	c := f.Connections[0]
 	if c.Name != "box" || c.Target != "box.internal:22" {
@@ -739,6 +743,8 @@ connections:
 			{"limits.viewers_per_session", "must be at least 1"},
 			{"limits.shares_per_session", "must be at least 1"},
 		}},
+		{"short viewer timeout", head + "streams: {viewer_timeout: 500ms}\n", []want{{"streams.viewer_timeout", "500ms is less than 1s"}}},
+		{"negative viewer timeout", head + "streams: {viewer_timeout: -1s}\n", []want{{"streams.viewer_timeout", "-1s is less than 1s"}}},
 
 		// Ad-hoc targets.
 		{"adhoc without allowlist", head + "allow_adhoc_targets: true\n", []want{{"allow_adhoc_targets", "needs adhoc_allowlist"}}},

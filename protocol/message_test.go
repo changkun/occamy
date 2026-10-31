@@ -291,7 +291,7 @@ func TestCloseCodes(t *testing.T) {
 		1000: "normal", 1001: "server-shutdown", 1002: "protocol-error", 1003: "unsupported",
 		1009: "too-large", 1011: "internal-error", 4000: "unauthorized", 4001: "forbidden",
 		4002: "session-closed", 4003: "owner-left", 4004: "idle", 4005: "remote-ended",
-		4006: "backend-failed", 4007: "viewer-limit",
+		4006: "backend-failed", 4007: "viewer-limit", 4008: "too-slow",
 	}
 	for c, name := range codes {
 		if c.String() != name {

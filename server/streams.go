@@ -405,7 +405,12 @@ func (s *server) serve(ctx context.Context, c *wsConn, info *sessionInfo, v *ses
 	}
 	// The client is let in: its messages may be as large as agreed.
 	c.ws.SetReadLimit(int64(protocol.Agree(hello.Capabilities, streamCapabilities).Limits().MaxMessageSize))
-	err := serveStream(ctx, c, v, hello, stream.Config{SessionID: info.id, Capabilities: streamCapabilities, NewEncoder: newEncoder})
+	err := serveStream(ctx, c, v, hello, stream.Config{
+		SessionID:     info.id,
+		Capabilities:  streamCapabilities,
+		NewEncoder:    newEncoder,
+		ViewerTimeout: s.streamsCfg.ViewerTimeout,
+	})
 	if own != nil {
 		info.mu.Lock()
 		if info.ownerStream == own {
@@ -433,6 +438,10 @@ func (s *server) serve(ctx context.Context, c *wsConn, info *sessionInfo, v *ses
 		// The client's mistake, which coder/websocket has answered with
 		// 1009 already.
 		c.finish(protocol.Close{Code: protocol.CloseTooLarge}, false)
+	case errors.Is(err, stream.ErrStalled):
+		// Serve has logged it and sent close, unless a write blocked,
+		// which leaves nothing to tell.
+		c.finish(protocol.Close{Code: protocol.CloseTooSlow}, false)
 	default:
 		// #nosec G706 -- the session's ID is occamyd's, and the error is the stream's.
 		log.Printf("session %s: viewer %d: the stream ended: %v", info.id, v.ID(), err)

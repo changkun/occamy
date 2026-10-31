@@ -6,6 +6,7 @@ package stream
 
 import (
 	"context"
+	"fmt"
 	"image"
 	"log/slog"
 	"sync"
@@ -64,6 +65,14 @@ type writer struct {
 	poke  chan struct{} // holds a token when the reader has news
 	mu    sync.Mutex
 	pings []protocol.Ping // not yet answered, oldest first
+
+	// stallTimeout bounds the time frames stay unacknowledged since
+	// lastAck, the last ack that acknowledged one, or since the oldest
+	// of them ended.
+	stallTimeout time.Duration
+	lastAck      time.Time
+	hidden       bool      // the viewer was hidden when stallLeft last looked
+	shown        time.Time // when stallLeft saw the viewer visible again
 
 	g        grid
 	sent     []uint64 // the version of each tile the viewer has
@@ -621,12 +630,41 @@ func (w *writer) cursor(ctx context.Context, c *session.Cursor) error {
 func (w *writer) takeAcks() {
 	w.ackbuf = w.acks.take(w.ackbuf[:0])
 	for _, a := range w.ackbuf {
-		w.p.Ack(a.at, a.id, a.decode)
+		if w.p.Ack(a.at, a.id, a.decode) {
+			w.lastAck = a.at
+		}
 	}
 }
 
+// stallLeft reports how long the viewer has left to acknowledge the
+// frames it was sent before it counts as stalled, and false if no frame
+// awaits an ack or the viewer is hidden. A hidden client, such as a
+// browser tab in the background, may show nothing, and so acknowledge
+// nothing, until it is visible again; it gets no frames meanwhile, and
+// its time starts over once it is.
+func (w *writer) stallLeft() (time.Duration, bool) {
+	oldest, ok := w.p.Oldest()
+	if !ok || w.stallTimeout <= 0 {
+		return 0, false
+	}
+	if visible, _ := w.v.Visibility(); !visible {
+		w.hidden = true
+		return 0, false
+	}
+	if w.hidden {
+		w.hidden, w.shown = false, time.Now()
+	}
+	for _, t := range [...]time.Time{w.lastAck, w.shown} {
+		if t.After(oldest) {
+			oldest = t
+		}
+	}
+	return w.stallTimeout - time.Since(oldest), true
+}
+
 // wait blocks until there is news: small state, the reader's, an ack, a
-// change on changed, or d passing if positive.
+// change on changed, or d passing if positive. It returns ErrStalled
+// once frames have waited for an ack for the stall timeout.
 func (w *writer) wait(ctx context.Context, changed <-chan struct{}, d time.Duration) error {
 	var timer <-chan time.Time
 	if d > 0 {
@@ -634,7 +672,18 @@ func (w *writer) wait(ctx context.Context, changed <-chan struct{}, d time.Durat
 		defer t.Stop()
 		timer = t.C
 	}
+	var stall <-chan time.Time
+	if left, ok := w.stallLeft(); ok {
+		if left <= 0 {
+			return fmt.Errorf("%w: no frame acknowledged for %v", ErrStalled, w.stallTimeout)
+		}
+		t := time.NewTimer(left)
+		defer t.Stop()
+		stall = t.C
+	}
 	select {
+	case <-stall:
+		return fmt.Errorf("%w: no frame acknowledged for %v", ErrStalled, w.stallTimeout)
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-w.v.Wake():

@@ -1133,6 +1133,7 @@ own, such as on its read limit, then uses the right code.
 | 4005 | `remote-ended` | The remote ended the session, such as a shell that exits. |
 | 4006 | `backend-failed` | The connection to the remote failed. |
 | 4007 | `viewer-limit` | The session has as many viewers as it allows. |
+| 4008 | `too-slow` | The viewer acknowledged no frame, or took no message, for the server's viewer timeout. |
 
 A receiver treats a code it does not know as an error described by the
 reason. Codes are never given another meaning.
@@ -1172,6 +1173,16 @@ the window if the window is full. A viewer therefore never has more than
 `protocol-error` a server that sends more. A client that cannot show
 frames as fast as they come keeps them unacknowledged meanwhile, which
 holds the server back instead of queueing stale frames.
+
+A client that stops acknowledging altogether is closed instead: the
+server keeps what it last sent each viewer, a terminal's whole screen,
+until the viewer acknowledges something newer. A visible viewer that
+leaves a frame unacknowledged and sends no `frame-ack` for the server's
+viewer timeout, or that takes no message for that long, gets `close`
+`too-slow`. The time stops while the viewer is hidden, since a hidden
+client may show, and so acknowledge, nothing; it starts over once the
+viewer is visible again. occamyd's viewer timeout is 30 s unless
+configured otherwise.
 
 ### Bytes in flight
 

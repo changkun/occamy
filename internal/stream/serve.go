@@ -7,9 +7,11 @@ package stream
 import (
 	"context"
 	"errors"
+	"fmt"
 	"image"
 	"io"
 	"log/slog"
+	"time"
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/encoder"
@@ -35,6 +37,37 @@ type Config struct {
 	NewEncoder func(codecs []protocol.Codec) Encoder
 	// Logger receives the stream's log, slog.Default() if nil.
 	Logger *slog.Logger
+	// ViewerTimeout bounds how long a viewer may leave the frames it was
+	// sent unacknowledged, and how long one write to it may block,
+	// DefaultViewerTimeout if zero. A viewer that stops reading or
+	// acknowledging otherwise keeps the screen it was last sent, a
+	// terminal's whole screen, for as long as it stays connected.
+	ViewerTimeout time.Duration
+}
+
+// DefaultViewerTimeout is Config.ViewerTimeout's default.
+const DefaultViewerTimeout = 30 * time.Second
+
+// ErrStalled ends the stream of a viewer that acknowledged no frame, or
+// took no message, for Config.ViewerTimeout. Serve tells it so with
+// close too-slow, if it still reads.
+var ErrStalled = errors.New("stream: the viewer stopped taking frames")
+
+// timedConn bounds each write to its Conn by d: a write that blocks
+// that long is the viewer's stall, ErrStalled.
+type timedConn struct {
+	Conn
+	d time.Duration
+}
+
+func (c timedConn) WriteMessage(ctx context.Context, p []byte) error {
+	wctx, cancel := context.WithTimeout(ctx, c.d)
+	defer cancel()
+	err := c.Conn.WriteMessage(wctx, p)
+	if err != nil && ctx.Err() == nil && errors.Is(wctx.Err(), context.DeadlineExceeded) {
+		return fmt.Errorf("%w: a write blocked for %v: %w", ErrStalled, c.d, err)
+	}
+	return err
 }
 
 // Encoder encodes a viewer's tiles and cursor in the codecs it agreed
@@ -97,6 +130,10 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.ViewerTimeout <= 0 {
+		cfg.ViewerTimeout = DefaultViewerTimeout
+	}
+	c = timedConn{Conn: c, d: cfg.ViewerTimeout}
 	agreed := protocol.Agree(hello.Capabilities, cfg.Capabilities)
 	limits := agreed.Limits()
 	class := protocol.ClassGraphical
@@ -138,6 +175,7 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	pc := cfg.Pacer
 	pc.Window = int(agreed.FrameWindow)
 	w := newWriter(c, v, pacer.New(pc), enc, limits, cfg.Logger)
+	w.stallTimeout = cfg.ViewerTimeout
 	read := make(chan error, 1)
 	go func() {
 		err := w.safeRead(ctx, limits)
@@ -152,6 +190,14 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	rerr := <-read
 	var p session.PanicError
 	switch {
+	case errors.Is(err, ErrStalled):
+		// The viewer kept the stream's state, a terminal's screen among
+		// it, without taking frames: it goes, told why if it still reads.
+		w.log.Info("viewer dropped", "viewer", v.ID(), "err", err)
+		if cerr := closeWith(parent, c, protocol.Close{Code: protocol.CloseTooSlow, Reason: "the viewer did not keep up"}); cerr != nil {
+			w.log.Debug("close not sent", "err", cerr)
+		}
+		return err
 	case errors.Is(err, errEnded),
 		errors.Is(rerr, errClientClosed), errors.Is(rerr, io.EOF),
 		errors.Is(rerr, session.ErrEnded), errors.Is(rerr, session.ErrLeft):

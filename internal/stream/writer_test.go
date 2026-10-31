@@ -898,6 +898,162 @@ func TestCloseTimeout(t *testing.T) {
 	})
 }
 
+// stallConfig is the configuration of the stall tests: a short viewer
+// timeout, and no log of the viewers dropped.
+var stallConfig = Config{SessionID: "s1", ViewerTimeout: 2 * time.Second, Logger: slog.New(slog.DiscardHandler)}
+
+// servedErr reports what Serve returned, or false if it still serves.
+func (r *rig) servedErr() (error, bool) {
+	select {
+	case err := <-r.served:
+		r.served <- err // for the cleanup
+		return err, true
+	default:
+		return nil, false
+	}
+}
+
+// A visible viewer that acknowledges no frame for the viewer timeout is
+// dropped with too-slow, and one that acknowledges its frames stays.
+func TestStalledViewer(t *testing.T) {
+	for _, acks := range []bool{false, true} {
+		t.Run(fmt.Sprintf("acks=%v", acks), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				r := newRigConfig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 64, 50e6, time.Millisecond, visible, stallConfig)
+				r.cl.mu.Lock()
+				r.cl.noAcks = !acks
+				r.cl.mu.Unlock()
+				time.Sleep(10 * time.Second)
+				synctest.Wait()
+				err, done := r.servedErr()
+				r.cl.mu.Lock()
+				defer r.cl.mu.Unlock()
+				if acks {
+					if done {
+						t.Fatalf("Serve returned %v for a viewer that acknowledges its frames", err)
+					}
+					return
+				}
+				if !errors.Is(err, ErrStalled) {
+					t.Fatalf("Serve returned %v, %v; want ErrStalled", err, done)
+				}
+				if r.cl.close == nil || r.cl.close.Code != protocol.CloseTooSlow {
+					t.Errorf("close %+v, want too-slow", r.cl.close)
+				}
+				// The first frame ends within a few milliseconds: the
+				// viewer goes the viewer timeout after it.
+				if n := len(r.cl.frames); n == 0 || r.cl.frames[0].at > 50*time.Millisecond {
+					t.Fatalf("frames %+v, want the first within 50ms", r.cl.frames)
+				}
+			})
+		})
+	}
+}
+
+// The viewer goes when its timeout has passed, not before.
+func TestStalledViewerTimely(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRigConfig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 64, 50e6, time.Millisecond, visible, stallConfig)
+		r.cl.mu.Lock()
+		r.cl.noAcks = true
+		r.cl.mu.Unlock()
+		time.Sleep(stallConfig.ViewerTimeout - 100*time.Millisecond)
+		synctest.Wait()
+		if err, done := r.servedErr(); done {
+			t.Fatalf("Serve returned %v before the viewer timeout", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+		synctest.Wait()
+		if err, _ := r.servedErr(); !errors.Is(err, ErrStalled) {
+			t.Fatalf("Serve returned %v 100ms after the viewer timeout, want ErrStalled", err)
+		}
+	})
+}
+
+// An ack starts the viewer's time over, though a frame it does not cover
+// has awaited one for longer.
+func TestStalledAckRestarts(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRigConfig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 64, 50e6, time.Millisecond, visible, stallConfig)
+		r.cl.mu.Lock()
+		r.cl.noAcks = true
+		r.cl.mu.Unlock()
+		time.Sleep(stallConfig.ViewerTimeout * 3 / 4)
+		r.cl.mu.Lock()
+		frames := slices.Clone(r.cl.frames)
+		r.cl.mu.Unlock()
+		if len(frames) < 2 {
+			t.Fatalf("%d frames, want a second awaiting an ack after the first's", len(frames))
+		}
+		r.cl.send(t, protocol.FrameAck{FrameID: frames[0].id})
+		time.Sleep(stallConfig.ViewerTimeout - 100*time.Millisecond)
+		synctest.Wait()
+		if err, done := r.servedErr(); done {
+			t.Fatalf("Serve returned %v though the viewer acknowledged a frame within the timeout", err)
+		}
+		time.Sleep(200 * time.Millisecond)
+		synctest.Wait()
+		if err, _ := r.servedErr(); !errors.Is(err, ErrStalled) {
+			t.Fatalf("Serve returned %v, want ErrStalled once the timeout passed since the ack", err)
+		}
+	})
+}
+
+// A hidden viewer's time stops, since a client may show nothing, and so
+// acknowledge nothing, while it is hidden; once it is visible again its
+// time starts over.
+func TestStalledHidden(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		r := newRigConfig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 64, 50e6, time.Millisecond, visible, stallConfig)
+		r.cl.mu.Lock()
+		r.cl.noAcks = true
+		r.cl.mu.Unlock()
+		time.Sleep(stallConfig.ViewerTimeout / 2)
+		r.cl.send(t, protocol.View{Visible: false})
+		time.Sleep(10 * time.Second)
+		synctest.Wait()
+		if err, done := r.servedErr(); done {
+			t.Fatalf("Serve returned %v for a hidden viewer", err)
+		}
+		shown := time.Now()
+		r.cl.send(t, protocol.View{Visible: true})
+		time.Sleep(stallConfig.ViewerTimeout - 100*time.Millisecond)
+		synctest.Wait()
+		if err, done := r.servedErr(); done {
+			t.Fatalf("Serve returned %v %v after the viewer was visible again, want the whole timeout", err, time.Since(shown))
+		}
+		time.Sleep(200 * time.Millisecond)
+		synctest.Wait()
+		if err, _ := r.servedErr(); !errors.Is(err, ErrStalled) {
+			t.Fatalf("Serve returned %v, want ErrStalled once the timeout passed", err)
+		}
+	})
+}
+
+// A write that blocks for the viewer timeout drops the viewer, though no
+// frame was completed for it to leave unacknowledged.
+func TestBlockedWrite(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		s, owner, err := session.Start(ctx, session.Config{Backend: backendtest.NewScreen(200, 150, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		c := &stuck{read: make(chan []byte, 1)}
+		start := time.Now()
+		err = Serve(ctx, c, owner, visible, stallConfig)
+		if !errors.Is(err, ErrStalled) {
+			t.Fatalf("Serve returned %v, want ErrStalled", err)
+		}
+		// The close for the stalled viewer blocks too, for closeTimeout.
+		if d, most := time.Since(start), stallConfig.ViewerTimeout+closeTimeout; d < stallConfig.ViewerTimeout || d > most {
+			t.Errorf("Serve returned after %v, want between %v and %v", d, stallConfig.ViewerTimeout, most)
+		}
+	})
+}
+
 // A hello after the handshake is a protocol error.
 func TestHelloAfterHandshake(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

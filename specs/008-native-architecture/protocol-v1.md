@@ -364,7 +364,8 @@ web client ([009](../009-react-web-client.md)) and the client core
     1001, `protocol-error` 1002, `unsupported` 1003, `too-large` 1009,
     `internal-error` 1011, then `unauthorized` 4000, `forbidden` 4001,
     `session-closed` 4002, `owner-left` 4003, `idle` 4004,
-    `remote-ended` 4005, `backend-failed` 4006, `viewer-limit` 4007. A
+    `remote-ended` 4005, `backend-failed` 4006, `viewer-limit` 4007,
+    and, since the delta review of the server, `too-slow` 4008. A
     WebSocket library that closes on its own read limit uses 1009, which
     is already ours. The session core's end reasons map one to one onto
     the codes from 4002 and onto 1001.

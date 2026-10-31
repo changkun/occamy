@@ -299,6 +299,9 @@ const (
 	// CloseViewerLimit says that the session has as many viewers as it
 	// allows.
 	CloseViewerLimit CloseCode = 4007
+	// CloseTooSlow says that the viewer acknowledged no frame, or took no
+	// message, for the server's viewer timeout.
+	CloseTooSlow CloseCode = 4008
 )
 
 var closeCodeNames = map[CloseCode]string{
@@ -316,6 +319,7 @@ var closeCodeNames = map[CloseCode]string{
 	CloseRemoteEnded:    "remote-ended",
 	CloseBackendFailed:  "backend-failed",
 	CloseViewerLimit:    "viewer-limit",
+	CloseTooSlow:        "too-slow",
 }
 
 // String returns the name of c, such as "protocol-error", or its number
