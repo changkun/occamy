@@ -149,7 +149,8 @@ the [graphics pipeline](../specs/008-native-architecture/graphics-pipeline.md)
 (refinement, the tile cache, and the encode cache and its workers) and
 for [native RDP](../specs/008-native-architecture/native-rdp-backend.md)
 (owner, 2026-10-31). Native RDP has been rdp's default since #132,
-without RDP's graphics pipeline (GFX) yet, and `v1-native` measures it.
+and asks for RDP's graphics pipeline (GFX) by default, without its
+ClearCodec and cache yet; `v1-native` measures it.
 Numbers taken before then would not be v1's verdict, so this page
 publishes none; the harness and the CI smoke run only keep the v1 path
 working until then.
@@ -287,9 +288,10 @@ in v1. A v1 session runs as follows:
 - **Native RDP** (`rdp-native`) reaches the same xrdp with the same
   credentials and size. It sets `security: tls`, since xrdp speaks no
   NLA, and checks no certificate, since xrdp signs its own when the
-  image is built; occamyd warns of that at start. It speaks no GFX yet,
-  so xrdp sends it plain bitmaps, as it sends guacd with
-  `disable-gfx`. It asks for 32 bits per pixel, and the bridge leaves
+  image is built; occamyd warns of that at start. It asks for GFX by
+  default, so xrdp draws its sessions in RemoteFX Progressive, while
+  guacd gets `disable-gfx` and plain bitmaps: the two RDP paths differ
+  there. It asks for 32 bits per pixel, and the bridge leaves
   guacd's default colour depth; whether xrdp then keeps a second X
   session is to be checked before the full run.
 

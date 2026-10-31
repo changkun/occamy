@@ -479,37 +479,56 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   `rdp-native` through the clipboard both ways, answered by a clipboard
   echo in the demo image, a resize, a viewer joined by a share, and the
   owner leaving and coming back. The native RDP backend is
-  not yet verified against Windows, and does not speak RDP's graphics
-  pipeline yet
+  not yet verified against Windows; it speaks RDP's graphics pipeline
+  as the entries below describe
   ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)).
 - The graphics pipeline (GFX) in `internal/rdp`, the first part of the
   native RDP backend's third phase, behind `Config.GFX`, which the
-  backend does not set yet: the capability exchange over DRDYNVC, ZGFX
-  decompression with its 2.5 MB history, surfaces within a bound on
-  their pixels composed onto the desktop, at most 64 of them mapped,
-  solid fills, copies within and between surfaces (a copy within a
-  surface goes to viewers as a copy where no other surface covers it
-  and the output shows the surface's own pixels, which the surfaces
-  under one deleted, replaced or moved, or under a bitmap update, draw
-  again to keep), uncompressed and planar bitmaps (AYCoCg, colour loss
-  and chroma subsampling included, planar within a bitmap update's
-  bound), and frame acknowledgements, bounded, which the server waits
-  for. Decompression's growth, each copied point, each redraw after a
-  resize, and every cell that the surfaces draw again where a surface
-  left the output or a bitmap update drew under them are charged to
-  the decoding rate. A server that does not open the
-  channel, or closes it, draws with bitmap updates. RemoteFX
-  Progressive, RemoteFX, ClearCodec and the cache come next, and with
-  them GFX by default and a key that turns it off. Against xrdp 0.10.1
-  the channel, the capabilities, a reset to the size the desktop has,
-  ZGFX's stored segments, a surface, planar bitmaps of xrdp's first,
-  black screen, and frame acknowledgements (a frame a key) ran live;
-  that the acknowledgements pace xrdp was not checked against a run
-  without them. Compressed ZGFX, planar's
-  AYCoCg, solid fills, surface-to-surface copies and uncompressed
-  bitmaps, which xrdp did not send, are checked against the
-  specification's examples, the tests' own compressor and encoder, and
-  `rdptest` only, until a Windows host checks them.
+  backend sets since the RemoteFX entry below: the capability exchange
+  over DRDYNVC, ZGFX decompression with its 2.5 MB history, surfaces
+  within a bound on their pixels composed onto the desktop, at most 64
+  of them mapped, solid fills, copies within and between surfaces (a
+  copy within a surface goes to viewers as a copy where no other surface
+  covers it and the output shows the surface's own pixels, which the
+  surfaces under one deleted, replaced or moved, or under a bitmap
+  update, draw again to keep), uncompressed and planar bitmaps (AYCoCg,
+  colour loss and chroma subsampling included, planar within a bitmap
+  update's bound), and frame acknowledgements, bounded, which the server
+  waits for. Decompression's growth, each copied point, each redraw
+  after a resize, and every cell that the surfaces draw again where a
+  surface left the output or a bitmap update drew under them are charged
+  to the decoding rate. A server that does not open the channel, or
+  closes it, draws with bitmap updates. RemoteFX and RemoteFX
+  Progressive, with GFX on by default, came next (below); ClearCodec and
+  the cache come after. Against xrdp 0.10.1 the channel, the
+  capabilities, a reset to the size the desktop has, ZGFX's stored
+  segments, a surface, planar bitmaps of xrdp's first, black screen, and
+  frame acknowledgements (a frame a key) ran live; that the
+  acknowledgements pace xrdp was not checked against a run without them.
+  Compressed ZGFX, planar's AYCoCg, solid fills, surface-to-surface
+  copies and uncompressed bitmaps, which xrdp did not send, are checked
+  against the specification's examples, the tests' own compressor and
+  encoder, and `rdptest` only, until a Windows host checks them.
+- RemoteFX and RemoteFX Progressive in `internal/rdp`'s graphics
+  pipeline, and GFX on by default in the native RDP backend, with
+  `connections[].disable_gfx` to turn it off (refused with
+  `backend: guacd`, which takes `guacd.params.rdp.disable-gfx`). The
+  decoder is pure Go in integer arithmetic: RLGR1 and RLGR3, the 11.5
+  fixed point of [MS-RDPRFX] 4.2.4.3, the reduce-extrapolate
+  transform, first passes, difference tiles and upgrades with SRL and
+  raw bits, one codec context per surface, and tiles drawn within
+  their region's rectangles at its end. Each tile is charged against
+  the decoding rate, the contexts keep at most twice the desktop's
+  tiles (at least 1,024), and malformed input ends the session. It
+  matches [MS-RDPRFX] 4.2.4's tile exactly through the third level's
+  inverse, its components within 2/32 of a level and its pixels within
+  1, and [MS-RDPEGFX] 4.1.2's progressive example exactly, whose SRL
+  bytes in 4.1.2.1.4 leave out a value its own decode has. Not yet run
+  against xrdp: the integration tests that check its colours waited
+  for a quieter host. ClearCodec and the bitmap cache, which Windows
+  servers send, are still counted and skipped; `disable_gfx: true`
+  falls back to bitmap updates
+  ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)).
 - A native Kubernetes backend, `internal/backend/kubernetes`, in pure
   Go and without client-go: a `kubernetes` connection opens a terminal
   in a pod's container through the API server's `pods/exec` (or

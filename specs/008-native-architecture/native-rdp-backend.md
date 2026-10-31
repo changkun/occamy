@@ -1234,7 +1234,8 @@ RDP's guacd path, RDP no longer needs guacd at all.
   the key that turns it off; the third adds the bitmap cache and
   ClearCodec. Until the second, GFX is `rdp.Config.GFX`, which the
   backend does not set, so occamyd's sessions still draw with bitmap
-  updates.
+  updates. (The second has landed: Implementation notes: phase 3,
+  RemoteFX and RemoteFX Progressive.)
 - **What was built.**
   - The channel (`internal/rdp/gfx.go`, [MS-RDPEGFX]). With
     `Config.GFX` the client asks for `drdynvc`, sets
@@ -1584,3 +1585,255 @@ RDP's guacd path, RDP no longer needs guacd at all.
     surfaces, drawn in the order FreeRDP's output draws them;
   - frame acknowledgements with queueDepth 0 as Windows' pacing, and
     how many frames it keeps in flight.
+
+## Implementation notes: phase 3, RemoteFX and RemoteFX Progressive
+
+- **Status.** The second of phase 3's three pull requests: RemoteFX in
+  wire-to-surface 1, RemoteFX Progressive in wire-to-surface 2, GFX on
+  by default in the backend, and `disable_gfx` to turn it off. The
+  third adds the bitmap cache and ClearCodec. Until then a server that
+  sends those draws nothing where it sends them; the client counts and
+  skips them, and `disable_gfx: true` falls back to bitmap updates.
+- **What was built.**
+  - RLGR (`internal/rdp/rlgr.go`, [MS-RDPRFX] 3.1.8.1.7): RLGR1 and
+    RLGR3 through a 64-bit bit reader, with the adaptive parameters
+    and constants of 3.1.8.1.7.3, and RLGR3's pair of values whose
+    first is read in as many bits as their sum takes. Values saturate
+    to 16 bits. Also the simplified run-length coder (SRL) and the raw
+    bits of progressive upgrades ([MS-RDPEGFX] 3.1.8.1.5 and
+    3.2.8.1.5.2.1).
+  - The tile decoder (`internal/rdp/rfx.go`): the LL3 band's
+    differences summed ([MS-RDPRFX] 3.1.8.2.2), dequantization, the
+    inverse transform, and the colour conversion, in the 11.5 fixed
+    point that [MS-RDPRFX] 4.2.4.3 gives: a coefficient of quantization
+    factor q is shifted left by q − 1, the inverse lifting of figure 14
+    runs on those integers, rows then columns, a level at a time, and
+    the conversion takes the matrix of 3.1.8.2.5 times 2^14 and divides
+    by 32 with rounding. Each level inverts its columns a row of them
+    at a time, so the inner loops run over whole rows. The decoder's
+    scratch space is kept between tiles; a tile allocates nothing.
+  - The reduce-extrapolate transform ([MS-RDPEGFX] 3.2.8.1.2.2 and
+    3.3.8.2.2): its bands' sizes (the first level 33 low and 31 high
+    coefficients a side), a zero as the extra high coefficient, and the
+    65th sample dropped.
+  - RemoteFX in wire-to-surface 1 ([MS-RDPRFX] 2.2.2.3): the frame's
+    region and tile set, with RLGR1 or RLGR3 as the tile set's
+    properties say, the quantization tables, and the tiles at their
+    places from the PDU's rectangle, drawn where the region's
+    rectangles, from the same origin, and the PDU's rectangle cover
+    them. A tile set before any region takes the PDU's rectangle, as a
+    region of no rectangles does. RemoteFX keeps no state between
+    messages, and the sync, version, channel and context blocks are
+    skipped.
+  - RemoteFX Progressive in wire-to-surface 2 (`progressive.go`,
+    [MS-RDPEGFX] 2.2.4.2 and 3.3.8.2): a codec context per surface,
+    its tiles' DecDwtQ in 16 bits and, while a tile has upgrades to
+    come, the sign of each coefficient but LL3's; TILE_SIMPLE and
+    TILE_FIRST as first passes, difference tiles added to what the
+    tile has, and TILE_UPGRADE with LL3's bits and those of
+    coefficients with a sign raw and the others' from SRL, which sets
+    their signs. At each region's end, the tiles it changed are
+    dequantized, inverted and drawn where its rectangles, clipped to
+    the surface, cover them. Regions outside a frame, unknown blocks,
+    a delete of a context the surface does not have, and a
+    progressive bitmap in wire-to-surface 1 are counted and skipped.
+  - The quantization tables are read in the band order each
+    specification gives: TS_RFX_CODEC_QUANT ([MS-RDPRFX] 2.2.2.1.5)
+    puts each level's LH before its HL, and RFX_COMPONENT_CODEC_QUANT
+    ([MS-RDPEGFX] 2.2.4.2.1.5.2) its HL before its LH.
+  - In the backend, `Config.GFX` and `Config.Resize` are on, and
+    `disable_gfx` on an rdp connection with the native backend turns
+    GFX off (`internal/config`, `server`). With `backend: guacd` the
+    key is refused, as guacd takes `guacd.params.rdp.disable-gfx`.
+  - `rdptest/rfx.go`: an encoder written from the specifications, not
+    from the decoder: the forward colour conversion and transform,
+    both layouts, quantization, RLGR1 and RLGR3, the progressive
+    passes (a first pass, upgrades with SRL and raw bits), and the
+    RemoteFX and progressive messages.
+- **Bounds.**
+  - Each tile, and each tile block of a progressive region, is charged
+    `rfxTileCost` (6 × 64 × 64 pixels) against the decoding rate
+    before it decodes, and each tile drawn what it draws within the
+    rectangles and a pixel a rectangle: decoded and drawn, a tile took
+    6.5 to 7 times what a planar bitmap of its size takes in the
+    benchmarks below, so it is charged 7 times its pixels in all. A
+    tile that a region changes twice is drawn once.
+  - The contexts' tiles: at most `progTileLimit`, twice the desktop's
+    tiles and at least 1,024, across surfaces. A tile takes 24 KiB of
+    coefficients, and 12 KiB of signs while upgrades are to come, so
+    the tiles take at most 36 MiB at 1920 × 1080 (1,024 tiles), and
+    576 MiB at the largest desktop, 2^25 pixels (16,384 tiles); the
+    surfaces' own bound is 256 MiB. A full pass gives a tile's signs
+    back to a pool of at most 64. When a surface's context is
+    replaced, its slice of tiles is reused, emptied.
+  - Malformed input ends the session: a block or tile past its
+    message, a tile size other than 64, an RLGR mode other than 1 and
+    3, quantization tables or rectangles past their block, a table
+    index or quality past the region's tables, a tile outside its
+    surface's tiles, a length past the tile, RLGR3's first value above
+    its sum, an upgrade of a tile with no first pass, and an upgrade
+    whose bit positions rise.
+- **Verified against the specification.**
+  - [MS-RDPRFX] 4.2.4's tile (`TestRFXSpecTile`, its dumps in
+    `testdata/rdprfx-tile.txt.gz`): RLGR3's output, LL3 dequantized,
+    and the inverse of the third level match exactly. The components
+    after the whole inverse are within 2/32 of a level: 581, 811 and
+    1,328 of 4,096 samples differ for Y, Cb and Cr. The section's
+    dumps of the second level's columns differ from its own lifting
+    equations (figure 14) by 1/32 in about a sixteenth of their
+    samples, and the decoder follows the equations. The tile's XRGB
+    through the pipeline is within 1 per channel, 685 of 4,096 pixels
+    differing: no single rounding of the matrix reproduces the
+    section's pixels (rounding leaves 658 different, flooring 3,327),
+    so this is the stated tolerance.
+  - [MS-RDPEGFX] 4.1.2's example (`TestProgressiveSpecExample`): each
+    pass's DecDwtQ and signs match 4.1.2.2 exactly, the difference
+    tile of 4.1.2.2.3 included, whose first pass sums its LL3
+    differences as 3.3.8.2.1.1 says. rdptest's encoder reproduces the
+    example's bytes but one pass's (below), for which the test takes
+    the encoder's bytes and checks that the specification's decode
+    otherwise.
+  - A float64 decoder written in the test (`TestRFXFloatReference`):
+    over 73,728 pixels of test images, 72,128 match the fixed-point
+    decoder exactly and 1,600 differ by 1.
+  - With rdptest's encoder at xrdp's quantization, the round trip
+    loses at most 1 to 2 levels on the wallpaper's gradients and 4 on
+    a swatch's inside; at a finer quantization, at most 6 on sharp
+    strokes (`TestRFXRoundTrip`, `TestProgressivePasses`).
+- **Live.** `TestIntegrationGFX` now waits for the session's wallpaper
+  in RemoteFX Progressive, checks it within 4 levels per channel
+  everywhere but the swatch's tile, checks the swatch at nine points of
+  its inside within 6 of each of eight keys' colours, and wants no
+  region, block or bitmap skipped. A wrong LL3, scale or band order of
+  a level is off by tens of levels. The backend's integration tests
+  check the wallpaper within 4 with GFX on, and the security test turns
+  GFX off and keeps its exact check. **None of this has run live yet**:
+  the integration suite runs only below a 1-minute load of 8, and the
+  host's load stayed between 28 and 54 throughout this pull request.
+  xrdp's quantization tables have equal HL and LH factors at each
+  level, so even a live run cannot check the band order of the
+  progressive tables; Windows can.
+- **Tests.** `TestRFXSpecTile`, `TestProgressiveSpecExample`,
+  `TestRFXFloatReference`, `TestRFXRoundTrip` (both RLGR modes),
+  `TestRFXRegionBounds` (no region, an empty one, and rectangles past
+  the PDU's rectangle), `TestProgressivePasses` (four passes of each
+  test image, with and without reduce-extrapolate, against the whole
+  tile), `TestProgressiveDifferenceSimple`,
+  `TestProgressiveRegionClip` (rectangles, regions of a frame, and a
+  surface of 100 × 50 against one of 128 × 64), `TestProgressiveContexts`
+  (a context replaced, deleted, regions before and after a frame, the
+  surface deleted), `TestProgressiveSignPool`, `TestRFXMalformed` (13
+  RemoteFX and 16 progressive cases, each with its reason),
+  `TestRFXPace`, `TestProgressiveTileLimit`, `TestRFXAllocs`,
+  `TestRLGRRoundTrip`, `TestRLGRSaturates`; `TestGFXIgnored` for what
+  is still skipped; `TestNew` in the backend, `TestParseV1Problems` and
+  `TestParseV1Backends` for the key, `TestNewRDP` and
+  `TestConnectionTarget` in `server`.
+- **Fuzzing.** `FuzzRLGR` (what decodes must encode and decode the
+  same), `FuzzRemoteFX`, `FuzzProgressive` (two messages, in one
+  context or two, the tiles' count checked after each), and `FuzzGFX`
+  with a new seed of RemoteFX, a progressive context, its delete and
+  its surface's. Each ran alone, with 4 workers and
+  `-fuzzminimizetime 5s`, on the shared host; the 1-minute load when
+  each started is given: `FuzzRLGR` 70 s, 1.2 million executions (load
+  31); `FuzzRemoteFX` 70 s, 6,400 (load 34), and again 120 s, 147,000
+  (load 28); `FuzzProgressive` 70 s, 24,000 (load 37); `FuzzGFX` 70 s,
+  473,000 (load 34). None failed. RemoteFX's and Progressive's targets
+  are slow because each execution makes a client and a surface and
+  decodes whole tiles; with the default minimization time of 60 s,
+  minimizing their slow inputs made an earlier RemoteFX run appear to
+  stall at 0 executions a second, hence 5 s.
+- **Benchmarks** (one run each, at a load of 33 to 46, so noisy): a
+  frame of 1920 × 1080 in tiles of 64 × 64, a PDU each:
+  `BenchmarkGFXRemoteFX` 41 to 43 ns a pixel and
+  `BenchmarkGFXProgressive` 41.5, against `BenchmarkGFXPlanar`'s 6.25
+  in the same run, each with 7 allocations a frame and none a tile;
+  `BenchmarkProgressivePasses` 0.83 ms for a tile's four passes, with
+  no allocations; `BenchmarkRLGR` 45 to 49 µs a component of 4,096
+  coefficients. Inverting the columns a row at a time took RemoteFX
+  from 68 to 43 ns a pixel and Progressive from 85 to 41.5.
+- **Mutation checks.** Each of these fails a test: a difference tile
+  not added (`TestProgressiveSpecExample`, `TestProgressivePasses`,
+  `TestProgressiveDifferenceSimple`); an upgrade's LL3 read from SRL,
+  or a negative sign's raw bits not negated
+  (`TestProgressiveSpecExample`, `TestProgressivePasses`); rising bit
+  positions accepted (`TestRFXMalformed`); the extrapolated sample
+  not padded (`TestRFXFloatReference`, `TestProgressivePasses`); each
+  charge to the pacing dropped, RemoteFX's tile cost, its clip cost,
+  the progressive tile's and the progressive draw's, or a tile that a
+  region changes twice drawn twice (`TestRFXPace`); the context kept
+  when its surface is deleted, its tiles kept when it is replaced, or
+  a context of another id taken as the same, a region after a frame's
+  end or before its beginning applied (`TestProgressiveContexts`);
+  LL3's differences not summed in RemoteFX (`TestRFXSpecTile`) or in
+  a first pass (`TestProgressivePasses`), or summed without
+  saturating (`TestRLGRSaturates`); the shift q − 1 made q − 2 or q
+  (`TestRFXSpecTile`); the sign pool unbounded, not reused
+  (`TestProgressiveSignPool`, `TestRFXAllocs`), or not given back after
+  a full upgrade or a full first pass (`TestProgressiveSignPool`,
+  `TestProgressiveDifferenceSimple`); the tile bound loosened
+  (`TestProgressiveTileLimit`); RemoteFX's rectangles not clipped to
+  the PDU's (`TestRFXRegionBounds`); a progressive region's rectangles
+  not clipped to the surface (`TestProgressiveRegionClip`); a tile's x
+  past its surface's columns accepted (`TestRFXMalformed`);
+  `disable_gfx` not checked, or allowed on another protocol or backend
+  (`TestParseV1Problems`), or dropped in `server`
+  (`TestNewRDP`, `TestConnectionTarget`); GFX always on or always off
+  in the backend (`TestNew`). Equivalent mutants: clearing a tile's
+  signs before an upgrade of a tile whose last pass was full (every
+  bit position is then 0, so the upgrade adds nothing or fails), and
+  recording LL3's signs (an upgrade reads LL3 raw).
+- **Decisions** (left open by the specification and the task).
+  - GFX is on by default. With it, xrdp draws its sessions in
+    RemoteFX Progressive; a server whose ClearCodec or cache the
+    client does not take yet, such as Windows, leaves gaps where it
+    sends them until the third pull request, and `disable_gfx: true`
+    is the fallback. The key is refused on guacd connections, which
+    take `disable-gfx` from `guacd.params.rdp`.
+  - One codec context per surface: a wire-to-surface 2 with another
+    context id replaces it, its tiles dropped, rather than keeping
+    several; a server deletes a context it is done with
+    (RDPGFX_DELETE_ENCODING_CONTEXT_PDU). FreeRDP keys its progressive
+    state by surface as well.
+  - A region's tiles are drawn at its end, within its rectangles. A
+    tile from an earlier region of the frame under a later region's
+    rectangles is not drawn again for them, which RFX_PROGRESSIVE_REGION
+    ([MS-RDPEGFX] 2.2.4.2.1.5) allows either way.
+  - Quantization factors below 6, outside [MS-RDPRFX] 2.2.2.1.5's
+    range, are taken as the shift q − 1 gives, floored at 0, rather
+    than refused.
+  - A first pass on a tile that already has one starts it over; an
+    upgrade of a tile whose last pass was full is allowed when it adds
+    no bits.
+  - A context's frame state spans its messages: a FRAME_BEGIN in one
+    wire-to-surface 2 and its region in the next are applied.
+  - Past the end of a component's data, RLGR and SRL read zeros, so a
+    short stream decodes to its coefficients and zeros after, as a
+    stream whose trailing zeros were cut would; only RLGR3's first
+    value above its sum is an error.
+- **Surprises.**
+  - [MS-RDPEGFX] 4.1.2.1.4's SRL bytes for frame 2's upgrade to 50%,
+    `80 07 00 16 9C`, leave out HL[4]'s value, +1 (the bits `01`),
+    which the section's own table of SRL entries and 4.1.2.2.4's
+    decode have; the stream that matches them is
+    `…|01|01|1|01|0011|100`.
+  - [MS-RDPRFX] 4.2.4's dumps differ from its equations and from any
+    one rounding of its matrix, as above, so its last stages can be
+    matched only within a tolerance.
+  - guacd's FreeRDP shifted xrdp's colours in RemoteFX Progressive by
+    up to 22 levels ([guacd-bridge](guacd-bridge.md)'s conformance
+    notes), which is why occamyd gives guacd `disable-gfx`; whether
+    this decoder stays within its 4 levels against xrdp waits for the
+    live run.
+- **Follow-ups.**
+  - Run `TestIntegrationGFX` and the backend's integration tests live
+    once the host's load is below 8, and record the colours' error.
+  - The third pull request: the bitmap cache and ClearCodec.
+  - `rdp-native` in the benchmark's `v1-native` series now speaks GFX
+    and `rdp-guacd` keeps `disable-gfx`; the comparison says which
+    each measures ([benchmark](benchmark.md)).
+- **Windows (phase 4).** Against Windows, check RemoteFX Progressive
+  with quantization tables whose HL and LH factors differ, the
+  reduce-extrapolate transform, difference tiles and upgrades (xrdp's
+  use of them was not recorded), and plain RemoteFX, which xrdp does
+  not send under GFX.
