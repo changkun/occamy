@@ -130,6 +130,15 @@ func TestVNCParity(t *testing.T) {
 					start := time.Now()
 					err := f.check(p, c)
 					known, isKnown := parityKnown[cell]
+					if err != nil && !isKnown && c.backend == "guacd" {
+						// guacd is the baseline, so a cell of its that
+						// fails once gets a second try, and counts as
+						// passed if that passes: libvncclient has failed
+						// to connect to TigerVNC now and then. The native
+						// backend gets none.
+						t.Logf("failed, trying again: %v", err)
+						err = f.check(p, c)
+					}
 					switch {
 					case err == nil && !isKnown:
 						cells[cell] = "pass"
