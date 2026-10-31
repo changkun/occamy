@@ -493,8 +493,11 @@ func TestRefineAfterEffectLeftView(t *testing.T) {
 	if _, _ = w.collect(view); w.in != nil {
 		t.Fatal("the input is not given up once it timed out")
 	}
-	if wait, err := w.refinement(d.ctx, view); err != nil || wait == 0 {
-		t.Errorf("refinement waits %v (%v) once the input is given up, with tiles to refine", wait, err)
+	// It looks for tiles to refine: one waits to be still long enough,
+	// or, on a slow run, is refined once the frames in flight are acked.
+	w.refine = w.refine[:0]
+	if wait, err := w.refinement(d.ctx, view); err != nil || wait == 0 && !slices.Contains(w.refine, in) {
+		t.Errorf("refinement waits %v (%v) once the input is given up, and found %v to refine", wait, err, w.refine)
 	}
 }
 
