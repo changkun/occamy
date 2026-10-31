@@ -8,11 +8,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/netip"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -492,6 +494,70 @@ func TestLimits(t *testing.T) {
 
 // TestAdhocReserved checks that the server keeps guacd and its own
 // listeners out of an ad-hoc range's reach.
+// TestConcurrentLimits checks that requests that open sessions at once,
+// over REST and streams, cannot all pass a limit: each counts from its
+// check on.
+func TestConcurrentLimits(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		edit    func(*config.File)
+		user    func(i int) string
+		refused protocol.CloseCode
+		status  int
+	}{
+		{"per user", func(f *config.File) { f.Limits.SessionsPerUser = 3 }, func(int) string { return "alice" }, protocol.CloseForbidden, http.StatusTooManyRequests},
+		{"occamyd", func(f *config.File) { f.Limits.Sessions = 3 }, func(i int) string { return fmt.Sprintf("user%d", i) }, protocol.CloseForbidden, http.StatusServiceUnavailable},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ts, _ := sessionServer(t, tt.edit)
+			var opened, refused atomic.Int32
+			var wg sync.WaitGroup
+			start := make(chan struct{})
+			for i := range 40 {
+				tok := ts.token(t, tt.user(i), "ops")
+				wg.Go(func() {
+					<-start
+					if i%2 == 0 {
+						r := do(t, http.MethodPost, ts.srv.URL+"/api/v1/sessions", bearer(tok), `{"connection":"ops-shell"}`)
+						switch r.code {
+						case http.StatusCreated:
+							opened.Add(1)
+						case tt.status:
+							refused.Add(1)
+						default:
+							t.Errorf("POST: %d %s", r.code, r.body)
+						}
+						return
+					}
+					c, _, err := dial(ts.srv.URL+"/api/v1/connections/ops-shell/stream", withToken(tok), &termHello, nil)
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					defer func() { _ = c.ws.CloseNow() }()
+					m, err := c.next()
+					switch m := m.(type) {
+					case *protocol.Welcome:
+						opened.Add(1)
+					case *protocol.Close:
+						if m.Code != tt.refused {
+							t.Errorf("close %v %q, want %v", m.Code, m.Reason, tt.refused)
+						}
+						refused.Add(1)
+					default:
+						t.Errorf("stream: %#v %v", m, err)
+					}
+				})
+			}
+			close(start)
+			wg.Wait()
+			if opened.Load() != 3 || refused.Load() != 37 {
+				t.Errorf("%d opened and %d refused at a limit of 3", opened.Load(), refused.Load())
+			}
+		})
+	}
+}
+
 func TestAdhocReserved(t *testing.T) {
 	ts, _ := sessionServer(t, func(f *config.File) {
 		f.AllowAdhocTargets = true

@@ -65,6 +65,9 @@ func TestBridgeConfig(t *testing.T) {
 	if cfg.Protocol != "rdp" || !maps.Equal(cfg.Params, want) || cfg.Width != 1920 || cfg.Height != backend.MaxResizeSide {
 		t.Errorf("config %+v", cfg)
 	}
+	if cfg, err := bridgeConfig(g, "rdp", tg, screen{width: 99999, height: 1080}); err != nil || cfg.Width != backend.MaxResizeSide || cfg.Height != 1080 {
+		t.Errorf("a screen too wide: %dx%d %v, want %dx1080", cfg.Width, cfg.Height, err, backend.MaxResizeSide)
+	}
 	if g.Params["rdp"]["hostname"] != "configured" || len(g.Params["rdp"]) != 2 {
 		t.Errorf("the configured parameters changed: %v", g.Params["rdp"])
 	}
@@ -223,8 +226,10 @@ func TestAskUser(t *testing.T) {
 	if err := b.Input(backend.Resize{Width: 100, Height: 30}); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Input(backend.Resize{Width: 0, Height: 30}); err == nil {
-		t.Error("an empty size accepted")
+	for _, r := range []backend.Resize{{Width: 0, Height: 30}, {Width: ssh.MaxCols + 1, Height: 30}, {Width: 100, Height: ssh.MaxRows + 1}} {
+		if err := b.Input(r); err == nil {
+			t.Errorf("size %dx%d accepted", r.Width, r.Height)
+		}
 	}
 	if err := b.Input(backend.TermInput{Data: []byte("x")}); !errors.Is(err, ssh.ErrNotRunning) {
 		t.Errorf("input before the user name: %v", err)

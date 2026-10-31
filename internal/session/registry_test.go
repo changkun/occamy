@@ -141,7 +141,7 @@ func TestRegistryShareLimit(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		other, _, _, err := r.Open(session.Config{Backend: backendtest.NewScreen(64, 48, 0)})
+		other, so, _, err := r.Open(session.Config{Backend: backendtest.NewScreen(64, 48, 0)})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -172,6 +172,14 @@ func TestRegistryShareLimit(t *testing.T) {
 		synctest.Wait()
 		if n := r.Shares(); n != 1 {
 			t.Errorf("%d shares held after the session ended, want the other's", n)
+		}
+		if n := r.Indexed(); n != 1 {
+			t.Errorf("%d sessions indexed after one ended, want the other", n)
+		}
+		so.Close()
+		synctest.Wait()
+		if n, m := r.Shares(), r.Indexed(); n != 0 || m != 0 {
+			t.Errorf("%d shares and %d sessions indexed after both ended", n, m)
 		}
 	})
 }

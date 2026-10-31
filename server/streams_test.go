@@ -1118,6 +1118,33 @@ func TestBackendPanicEndsSession(t *testing.T) {
 	ts.openSession(t, alice, "ops-shell")
 }
 
+// TestReadLimitAfterHello checks that a stream takes messages up to the
+// agreed size once the client is let in, though the WebSocket took no
+// more than protocol.MinMessageSize before.
+func TestReadLimitAfterHello(t *testing.T) {
+	ts, _ := sessionServer(t, nil)
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	c := ts.stream(t, "/api/v1/sessions/"+o.ID+"/stream", o.StreamToken, termHello)
+	if got := c.welcome.Capabilities.MaxMessageSize; got <= 2*protocol.MinMessageSize {
+		t.Fatalf("agreed max_message_size %d, want above %d", got, 2*protocol.MinMessageSize)
+	}
+	c.send(t, protocol.ClientClipboard{MIME: "text/plain", Data: bytes.Repeat([]byte("x"), 2*protocol.MinMessageSize)})
+	c.send(t, protocol.Ping{Nonce: 7})
+	for {
+		m, err := c.next()
+		if err != nil {
+			t.Fatalf("waiting for the pong after a message of %d bytes: %v", 2*protocol.MinMessageSize, err)
+		}
+		if cl, ok := m.(*protocol.Close); ok {
+			t.Fatalf("close %v %q after a message of %d bytes", cl.Code, cl.Reason, 2*protocol.MinMessageSize)
+		}
+		if p, ok := m.(*protocol.Pong); ok && p.Nonce == 7 {
+			return
+		}
+	}
+}
+
 // TestStalledViewerTooSlow checks that a viewer that reads its frames
 // but acknowledges none is closed with too-slow, over the WebSocket too.
 func TestStalledViewerTooSlow(t *testing.T) {
