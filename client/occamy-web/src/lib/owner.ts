@@ -6,8 +6,9 @@
 // ends for everyone through API v1, so that its viewers are told at
 // once rather than after the owner's minute of grace.
 
-import { type AccessToken, type Api, ApiError, type Identity, describeIdentity, errorMessage, identityOf, sameIdentity } from './api'
-import type { SessionAction } from './app'
+import { Role } from '../protocol'
+import { type AccessToken, type Api, ApiError, type Identity, errorMessage, identityOf, sameIdentity } from './api'
+import { MAX_LABEL, clip } from './text'
 
 /** How an End went. */
 export type EndOutcome =
@@ -23,8 +24,10 @@ export type EndOutcome =
 export interface EndOptions {
   api: Api
   token: AccessToken | null
-  /** Who opened the session view, the session's owner; null for none known. */
+  /** Who opened the session, as sessionOwner says; null for none known. */
   owner: Identity | null
+  /** An End that waited for a sign-in, which occamyd decides on with the stream open. */
+  resumed: boolean
   /** The session's ID; empty for a stream that never opened, which has nothing to end. */
   sessionId: string
   /** Now, in milliseconds since the epoch. */
@@ -34,17 +37,29 @@ export interface EndOptions {
 }
 
 /**
+ * sessionOwner is who opened the session a view shows: the user of the
+ * token its stream was opened with, once occamyd's welcome says the
+ * stream is the owner's. Until then, and for another role, it is seed,
+ * the owner a view opened for an action that waited for a sign-in is
+ * for, or null.
+ */
+export function sessionOwner(role: Role | null, token: AccessToken | null, seed: Identity | null): Identity | null {
+  return role === Role.Owner && token !== null ? (identityOf(token) ?? seed) : seed
+}
+
+/**
  * endSession ends the owner's session for everyone. With an access token
  * that has expired it sends nothing and leaves the stream open, so that
- * the owner signs in again with the session still on screen. With the
- * token of the user who opened the session, it closes the owner's stream
- * first, so that the owner is not told the session was closed, and then
- * ends the session; occamyd's 404 then means it had ended already. With
- * another user's token, signed in since, the stream stays open until
- * occamyd has ended the session, since its 404 may mean the session is
- * not this user's: occamyd takes some users for one owner, which the
- * page cannot tell. If the session does not end, the owner is told,
- * since the viewers stay until the owner's grace ends.
+ * the owner signs in again with the session still on screen.
+ *
+ * The user who opened the session, pressing End, has their stream closed
+ * first, so that they are not told the session was closed, and then the
+ * session ended; occamyd's 404 then means it had ended already.
+ *
+ * Otherwise, as for an End that waited for a sign-in, or another user
+ * signed in since, occamyd decides: the session is ended with the stream
+ * open, and the stream closed after. A 404 then means the session is not
+ * this user's.
  */
 export async function endSession(o: EndOptions): Promise<EndOutcome> {
   if (o.sessionId === '') {
@@ -55,43 +70,40 @@ export async function endSession(o: EndOptions): Promise<EndOutcome> {
     return { kind: 'sign-in', message: 'Your sign-in has expired. Sign in again to end the session for everyone.', closed: false }
   }
   const user = identityOf(o.token)
-  const mine = o.owner !== null && user !== null && sameIdentity(o.owner, user)
-  if (mine) {
+  const opener = !o.resumed && o.owner !== null && user !== null && sameIdentity(o.owner, user)
+  if (opener) {
     await o.close()
   }
   try {
     await o.api.endSession(o.token, o.sessionId)
   } catch (err) {
     if (err instanceof ApiError && err.code === 'not_found') {
-      return mine ? { kind: 'ended' } : { kind: 'not-owner', message: notOwner({ kind: 'end' }, o.owner, user) }
+      return opener ? { kind: 'ended' } : { kind: 'not-owner', message: notOwner(o.owner, user) }
     }
     if (err instanceof ApiError && err.signedOut) {
       // A stream closed already: the owner is told so, in case the
       // sign-in is cancelled.
-      return { kind: 'sign-in', message: 'occamyd no longer takes your sign-in. Sign in again to end the session for everyone.', closed: mine }
+      return { kind: 'sign-in', message: 'occamyd no longer takes your sign-in. Sign in again to end the session for everyone.', closed: opener }
     }
     return {
       kind: 'failed',
       message: `The session was not ended for everyone: ${errorMessage(err)} Its viewers stay until your minute of grace runs out.`,
     }
   }
-  if (!mine) {
+  if (!opener) {
     await o.close()
   }
   return { kind: 'ended' }
 }
 
-/**
- * notOwner says that what the owner asked for was not done, since the
- * user now signed in, user, is not owner, who opened the session; null
- * for one not known.
- */
-export function notOwner(then: SessionAction, owner: Identity | null, user: Identity | null): string {
-  const [done, todo] = then.kind === 'end' ? ['it was not ended for everyone', 'end it'] : ['no share link was made', 'share it']
-  const who = user === null ? 'someone else' : describeIdentity(user)
-  if (owner === null) {
-    return `You are signed in as ${who}, whom occamyd does not take for this session's owner, so ${done}.`
+// notOwner says why occamyd found no session to end for user, now signed
+// in: owner, who opened it, is someone else, or the session has ended.
+// Either is null for one not known.
+function notOwner(owner: Identity | null, user: Identity | null): string {
+  if (owner === null || user === null || sameIdentity(owner, user)) {
+    const who = user === null ? '' : `, signed in as ${clip(user.subject, MAX_LABEL)}`
+    return `occamyd has no session of yours to end${who}: it has ended, or someone else opened it.`
   }
-  const opener = describeIdentity(owner)
-  return `You are signed in as ${who}, but ${opener} opened this session, so ${done}. Sign in as ${opener} to ${todo}.`
+  const name = clip(owner.subject, MAX_LABEL)
+  return `You are signed in as ${clip(user.subject, MAX_LABEL)}, but ${name} opened this session, so it was not ended for everyone. Sign in as ${name} to end it.`
 }

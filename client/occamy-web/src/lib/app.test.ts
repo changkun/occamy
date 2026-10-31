@@ -40,7 +40,7 @@ describe('the shell’s screens', () => {
     s = reduce(s, { type: 'signed-in', token: fresh })
     expect(s).toMatchObject({ token: fresh, screen: { kind: 'connections' }, signIn: null })
     s = reduce(s, { type: 'open', target: lab, now })
-    expect(s.screen).toEqual({ kind: 'session', target: lab, view: 1 })
+    expect(s.screen).toEqual({ kind: 'session', target: lab, view: 1, owner: null })
   })
 
   it('opens a share link without signing in', () => {
@@ -107,7 +107,7 @@ describe('an owner’s action after the token expired', () => {
     let s = initialState({ kind: 'oidc', token: exchange, resume: { target: mine, view: null, then: { kind: 'share', role: 'read-only', expiresIn: 600 }, owner: demo } })
     expect(s.signIn).toMatchObject({ exchange })
     s = reduce(s, { type: 'signed-in', token: await exchange })
-    expect(s.screen).toEqual({ kind: 'session', target: mine, view: 1 })
+    expect(s.screen).toEqual({ kind: 'session', target: mine, view: 1, owner: demo })
     expect(s.action).toMatchObject({ view: 1, action: { kind: 'share', role: 'read-only', expiresIn: 600 } })
   })
 })
@@ -116,48 +116,30 @@ describe('an owner’s action when someone else signs in', () => {
   const end = { kind: 'end' } as const
   const share = { kind: 'share', role: 'viewer', expiresIn: 3600 } as const
 
-  it('drops the action, and says who signed in and whose the session is', () => {
-    for (const [then, done] of [
-      [end, /so it was not ended for everyone\. Sign in as demo \(password\) to end it\./],
-      [share, /so no share link was made\. Sign in as demo \(password\) to share it\./],
-    ] as const) {
+  it('takes the action all the same, for occamyd to decide whose the session is', () => {
+    for (const then of [end, share]) {
       const before = onSession()
       let s = reduce(before, { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then, owner: demo } })
       s = reduce(s, { type: 'signed-in', token: token('mallory', 'local', now + 600_000) })
-      // The session view stays, with its stream, and is told why.
+      // The session view stays, with its stream, and takes the action.
       expect(s.screen).toBe(before.screen)
-      expect(s.action).toMatchObject({ view: 1, action: { kind: 'refused', then } })
-      const message = s.action?.action.kind === 'refused' ? s.action.action.message : ''
-      expect(message).toMatch(/^You are signed in as mallory \(password\), but demo \(password\) opened this session/)
-      expect(message).toMatch(done)
+      expect(s.action).toMatchObject({ view: 1, action: then })
     }
   })
 
-  it('takes the same name signed in elsewhere for someone else, as occamyd may', () => {
-    let s = reduce(onSession(), { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then: end, owner: demo } })
-    s = reduce(s, { type: 'signed-in', token: token('demo', 'oidc', now + 600_000) })
-    expect(s.action?.action).toMatchObject({ kind: 'refused', then: end })
-    expect(s.action?.action.kind === 'refused' && s.action.action.message).toMatch(/^You are signed in as demo \(single sign-on\), but demo \(password\)/)
-  })
-
-  it('takes a token without idp for a password’s, as occamyd does', () => {
-    let s = reduce(onSession(), { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then: end, owner: demo } })
-    s = reduce(s, { type: 'signed-in', token: token('demo', undefined, now + 600_000) })
-    expect(s.action?.action).toEqual(end)
-  })
-
-  it('drops the action of a session view gone through single sign-on', async () => {
+  it('opens a session view gone through single sign-on for the owner it was for', async () => {
     const exchange = Promise.resolve(token('mallory', 'oidc', now + 600_000))
     let s = initialState({ kind: 'oidc', token: exchange, resume: { target: mine, view: null, then: end, owner: demo } })
     s = reduce(s, { type: 'signed-in', token: await exchange })
-    expect(s.screen).toEqual({ kind: 'session', target: mine, view: 1 })
-    expect(s.action?.action).toMatchObject({ kind: 'refused', then: end })
+    // The view takes demo for the owner until its stream says.
+    expect(s.screen).toEqual({ kind: 'session', target: mine, view: 1, owner: demo })
+    expect(s.action?.action).toEqual(end)
   })
 
-  it('drops an action without an owner', () => {
+  it('takes an action whose owner the session view did not know', () => {
     let s = reduce(onSession(), { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: mine, view: 1, then: end, owner: null } })
     s = reduce(s, { type: 'signed-in', token: fresh })
-    expect(s.action?.action).toMatchObject({ kind: 'refused', then: end })
+    expect(s.action?.action).toEqual(end)
   })
 })
 
@@ -200,6 +182,9 @@ describe('saveResume and takeResume', () => {
     expect(takeResume(s)).toBeNull()
     expect(saveResume(s, { target: lab, view: null, then: null, owner: null })).toBe(true)
     expect(takeResume(s)).toEqual({ target: lab, view: null, then: null, owner: null })
+    // An action whose owner the session view did not know is kept too.
+    expect(saveResume(s, { target: mine, view: 1, then: { kind: 'end' }, owner: null })).toBe(true)
+    expect(takeResume(s)).toEqual({ target: mine, view: null, then: { kind: 'end' }, owner: null })
     expect(saveResume(undefined, null)).toBe(false)
   })
 
@@ -213,9 +198,8 @@ describe('saveResume and takeResume', () => {
       '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"delete"},"owner":{"subject":"a","idp":"local"}}',
       '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"share","role":"owner","expiresIn":600},"owner":{"subject":"a","idp":"local"}}',
       '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"share","role":"viewer","expiresIn":1},"owner":{"subject":"a","idp":"local"}}',
-      // An action without its owner, as saved before the owner was kept.
+      // Kept before the owner was.
       '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"end"}}',
-      '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"end"},"owner":null}',
       '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"end"},"owner":{"subject":"","idp":"local"}}',
       '{"target":{"kind":"session","sessionId":"s","name":"x"},"then":{"kind":"end"},"owner":{"subject":"a"}}',
     ]) {

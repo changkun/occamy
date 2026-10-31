@@ -205,9 +205,7 @@ function badResponse(): ApiError {
 /**
  * Identity is the user an access token of occamyd's speaks for: the
  * subject, and where the user signed in, "local" with a password or
- * "oidc" through single sign-on. occamyd's sessions belong to such a
- * user (server/identity.go), so that alice with a password and alice
- * through single sign-on may be two owners.
+ * "oidc" through single sign-on.
  */
 export interface Identity {
   subject: string
@@ -236,19 +234,14 @@ export function identityOf(token: AccessToken): Identity | null {
 }
 
 /**
- * sameIdentity reports whether a and b are the same user by their tokens.
- * occamyd may take two of them for one owner, an OIDC user linked to the
- * static user of the same name, which only occamyd knows; the page never
- * takes two for one where occamyd would not.
+ * sameIdentity reports whether a and b are the same owner to occamyd,
+ * which they are by subject alone, wherever they signed in: OIDC sign-in
+ * refuses a static user's name unless auth.oidc.link_static_users makes
+ * the two one user, whose sessions are the static user's
+ * (server/oidc.go, server/identity.go).
  */
 export function sameIdentity(a: Identity, b: Identity): boolean {
-  return a.subject === b.subject && a.idp === b.idp
-}
-
-/** describeIdentity names a user and where they signed in, clipped, for the page: "alice (password)". */
-export function describeIdentity(i: Identity): string {
-  const how = i.idp === 'local' ? 'password' : i.idp === 'oidc' ? 'single sign-on' : clip(i.idp, MAX_LABEL)
-  return `${clip(i.subject, MAX_LABEL)} (${how})`
+  return a.subject === b.subject
 }
 
 /**

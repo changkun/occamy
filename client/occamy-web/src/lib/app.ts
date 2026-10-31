@@ -9,12 +9,10 @@
 // the action resumes once the user has signed in. A sign-in through
 // OIDC leaves the page, so what waits is kept in sessionStorage next to
 // the PKCE verifier, and the page joins the session again on its
-// return, within the owner's minute of grace. An owner's action waits
-// for the owner: a user who signs in as someone else is told so, and
-// the action is dropped.
+// return, within the owner's minute of grace. Whoever signs in, the
+// action is taken, and occamyd decides whether the session is theirs.
 
-import { type AccessToken, type Identity, type ShareRole, identityOf, sameIdentity } from './api'
-import { notOwner } from './owner'
+import type { AccessToken, Identity, ShareRole } from './api'
 import type { Start, Target } from './targets'
 
 /** What a session view does for its owner once the user has signed in again. */
@@ -24,9 +22,6 @@ export type SessionAction =
   /** Create a share link. */
   | { kind: 'share'; role: ShareRole; expiresIn: number }
 
-/** What a session view does once the user has signed in again: an owner's action, or why it was dropped. */
-export type ViewAction = SessionAction | { kind: 'refused'; then: SessionAction; message: string }
-
 /** What waits for the user to sign in again. */
 export interface Pending {
   /** The stream to open once signed in: a connection, or the user's session again. */
@@ -35,11 +30,15 @@ export interface Pending {
   view: number | null
   /** What that session view, or the one opened, does next. */
   then: SessionAction | null
-  /** Who opened the session view, whose session then is for; null for none. */
+  /** Who opened the session, as the session view knew; null for none. A view opened for then takes it for the owner until its stream says. */
   owner: Identity | null
 }
 
-export type Screen = { kind: 'start' } | { kind: 'connections' } | { kind: 'session'; target: Target; view: number }
+export type Screen =
+  | { kind: 'start' }
+  | { kind: 'connections' }
+  /** A session view, numbered; owner is who opened the session, as far as the page knows before the stream says. */
+  | { kind: 'session'; target: Target; view: number; owner: Identity | null }
 
 export interface SignInState {
   /** Why the user signs in, such as an expired sign-in. */
@@ -55,7 +54,7 @@ export interface AppState {
   /** The sign-in form: over the session view, if one is on screen, or else on its own; null for none. */
   signIn: SignInState | null
   /** The action the session view numbered view takes, numbered seq so that it is taken once. */
-  action: { view: number; seq: number; action: ViewAction } | null
+  action: { view: number; seq: number; action: SessionAction } | null
   /** The last session view's number. */
   views: number
   /** The last action's number. */
@@ -85,7 +84,7 @@ export function initialState(start: Start): AppState {
   const base: AppState = { token: null, screen: { kind: 'start' }, signIn: null, action: null, views: 0, seq: 0 }
   switch (start.kind) {
     case 'join':
-      return { ...base, screen: { kind: 'session', target: { kind: 'share', sessionId: start.sessionId, token: start.token }, view: 1 }, views: 1 }
+      return { ...base, screen: { kind: 'session', target: { kind: 'share', sessionId: start.sessionId, token: start.token }, view: 1, owner: null }, views: 1 }
     case 'oidc':
       return { ...base, signIn: { message: '', exchange: start.token, pending: start.resume } }
     case 'oidc-error':
@@ -105,20 +104,13 @@ function signedIn(s: AppState, token: AccessToken): AppState {
   if (view === null || s.screen.kind !== 'session' || s.screen.view !== view) {
     view = s.views + 1
     base.views = view
-    base.screen = { kind: 'session', target: pending.target, view }
+    base.screen = { kind: 'session', target: pending.target, view, owner: pending.owner }
     base.action = null
   }
   if (pending.then !== null) {
-    // The owner's action is taken only for the user who opened the
-    // session: another user's would fail, or worse, look done.
-    const user = identityOf(token)
-    const owner = pending.owner
+    // Whoever signed in, occamyd decides whether the session is theirs.
     base.seq = s.seq + 1
-    base.action = {
-      view,
-      seq: base.seq,
-      action: owner !== null && user !== null && sameIdentity(owner, user) ? pending.then : { kind: 'refused', then: pending.then, message: notOwner(pending.then, owner, user) },
-    }
+    base.action = { view, seq: base.seq, action: pending.then }
   }
   return base
 }
@@ -135,7 +127,7 @@ export function reduce(s: AppState, e: AppEvent): AppState {
         return { ...s, signIn: { message: s.token === null ? '' : EXPIRED, exchange: null, pending: { target: e.target, view: null, then: null, owner: null } } }
       }
       const view = s.views + 1
-      return { ...s, views: view, screen: { kind: 'session', target: e.target, view }, signIn: null, action: null }
+      return { ...s, views: view, screen: { kind: 'session', target: e.target, view, owner: null }, signIn: null, action: null }
     }
     case 'sign-in-again':
       if (s.screen.kind !== 'session' || s.screen.view !== e.view) {
@@ -200,8 +192,7 @@ export function takeResume(storage: Storage | undefined): Pending | null {
     const target = targetOf(v.target)
     const then = v.then === null ? null : actionOf(v.then)
     const owner = v.owner === null ? null : identityFrom(v.owner)
-    // An action keeps its owner, without whom it is not taken.
-    if (target === null || then === undefined || owner === undefined || (then !== null && owner === null)) {
+    if (target === null || then === undefined || owner === undefined) {
       return null
     }
     return { target, view: null, then, owner }

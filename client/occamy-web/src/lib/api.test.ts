@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { API_TIMEOUT, Api, ApiError, describeIdentity, errorMessage, identityOf, sameIdentity, subjectOf } from './api'
+import { API_TIMEOUT, Api, ApiError, errorMessage, identityOf, sameIdentity, subjectOf } from './api'
 
 interface Sent {
   path: string
@@ -234,17 +234,13 @@ describe('identityOf', () => {
     }
   })
 
-  it('tells users apart by name and by where they signed in', () => {
+  it('tells owners apart by name alone, as occamyd does', () => {
     const alice = { subject: 'alice', idp: 'local' }
     expect(sameIdentity(alice, { subject: 'alice', idp: 'local' })).toBe(true)
+    // An OIDC user named as a static user is that user, by link_static_users.
+    expect(sameIdentity(alice, { subject: 'alice', idp: 'oidc' })).toBe(true)
     expect(sameIdentity(alice, { subject: 'Alice', idp: 'local' })).toBe(false)
-    expect(sameIdentity(alice, { subject: 'alice', idp: 'oidc' })).toBe(false)
-  })
-
-  it('names the user and where they signed in', () => {
-    expect(describeIdentity({ subject: 'alice', idp: 'local' })).toBe('alice (password)')
-    expect(describeIdentity({ subject: 'alice', idp: 'oidc' })).toBe('alice (single sign-on)')
-    expect(describeIdentity({ subject: 'x'.repeat(300), idp: 'y'.repeat(300) })).toBe(`${'x'.repeat(199)}… (${'y'.repeat(199)}…)`)
+    expect(sameIdentity(alice, { subject: 'bob', idp: 'local' })).toBe(false)
   })
 })
 
