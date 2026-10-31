@@ -730,6 +730,9 @@ func TestRunReasonThenReset(t *testing.T) {
 		if err := c.Write(rdptest.SetErrorInfo(0x2)); err != nil {
 			t.Fatal(err)
 		}
+		// Let the reason leave the server's kernel, whose reset drops
+		// what it has not sent.
+		time.Sleep(10 * time.Millisecond)
 		c.Reset()
 		if err := r.wait(t); err != nil {
 			t.Errorf("run %d: Run returned %v, want nil for an administrator's logoff", i, err)

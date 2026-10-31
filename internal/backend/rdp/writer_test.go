@@ -389,6 +389,7 @@ func TestRunWriteFailsThenServerEnds(t *testing.T) {
 	checkGoroutines(t)
 	s := listen(t, rdptest.Server{})
 	b, conns := failing(t, s)
+	b.grace = timeout // the server's end comes well within it
 	b.Demand(backend.Demand{Visible: true})
 	r := start(t, b, &backendtest.Sink{})
 	c := s.accept(t)
