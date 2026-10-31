@@ -20,6 +20,14 @@ version: 1
 listen: 0.0.0.0:5637
 # The image's build of the web client, served under /static/.
 web_client: client/occamy-web/dist
+# The debug listener, for the soak (tests/soak_test.go), which samples
+# occamyd's goroutines, heap and open files from it: off unless make run
+# OCCAMY_DEBUG=1 sets OCCAMY_V1_DEBUG_ADDRESS, which docker-compose.yaml
+# passes on, and then published on the host's loopback interface only.
+# occamyd warns at start that it is not on a loopback address, which
+# inside the container it cannot be and still be published.
+debug:
+  address_env: OCCAMY_V1_DEBUG_ADDRESS
 auth:
   # On a tmpfs (docker-compose.yaml): occamyd creates the key at start,
   # and tokens die with the container.

@@ -11,14 +11,23 @@
 #
 # OCCAMY_IMAGE, OCCAMY_PORT and OCCAMY_V1_PORT run a second stack next to
 # the first, under another project name (-p), on a shared host.
+#
+# The debug routes have no authentication, and stay off unless make run
+# OCCAMY_DEBUG=1 sets OCCAMY_V0_CONF to occamy-debug.yaml, which serves
+# /debug/pprof on occamy's own port, and OCCAMY_V1_DEBUG_ADDRESS, which
+# opens occamy-v1's debug listener. make run without it sets both to
+# off, whatever the shell or .env holds; compose up by hand takes them
+# from there. Both ports are published on the host's loopback interface
+# only; the stack's other services can reach them while they are on
+# (TestDemoDebugGating).
 
 services:
   occamy:
     image: ${OCCAMY_IMAGE:-occamy:latest}
     ports:
-      - "${OCCAMY_PORT:-5636}:5636"
+      - "127.0.0.1:${OCCAMY_PORT:-5636}:5636"
     volumes:
-      - ./occamy.yaml:/occamy/conf.yaml:ro
+      - ./${OCCAMY_V0_CONF:-occamy.yaml}:/occamy/conf.yaml:ro
     depends_on:
       guacd:
         condition: service_healthy
@@ -39,6 +48,10 @@ services:
     command: ["/occamy/occamyd", "-conf", "/occamy/v1.yaml"]
     ports:
       - "${OCCAMY_V1_PORT:-5637}:5637"
+      # The debug listener (occamy-v1.yaml), for make soak, on the
+      # loopback interface only: it has no authentication. Nothing
+      # listens there unless OCCAMY_V1_DEBUG_ADDRESS is set.
+      - "127.0.0.1:${OCCAMY_V1_DEBUG_PORT:-5638}:5638"
     volumes:
       - ./occamy-v1.yaml:/occamy/v1.yaml:ro
       # The CA of TigerVNC's VeNCrypt certificate, for the tls of the
@@ -52,6 +65,7 @@ services:
       OCCAMY_DEMO_VNC_PASSWORD: vncpassword
       OCCAMY_DEMO_PLAIN_PASSWORD: plainpassword
       OCCAMY_DEMO_RDP_PASSWORD: occamy
+      OCCAMY_V1_DEBUG_ADDRESS: ${OCCAMY_V1_DEBUG_ADDRESS:-}
     depends_on:
       guacd:
         condition: service_healthy

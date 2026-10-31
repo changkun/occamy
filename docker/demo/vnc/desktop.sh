@@ -19,7 +19,12 @@
 #   desktop.sh clipboard answers the clipboard: text that starts
 #   "owner: " comes back as "echo: " and the rest, and text that starts
 #   "hex: " as "hexed: " and the rest's UTF-8 bytes in hex, which shows
-#   what the server took whatever it sends back.
+#   what the server took whatever it sends back. Text "motion: " and a
+#   number of seconds from 1 to 60 opens a terminal that scrolls for that
+#   long and answers "moving: " and the number, which gives the soak
+#   (tests/soak_test.go) screen updates to carry; while four such
+#   terminals scroll, it opens none, and answers "still: " and the
+#   number.
 #
 # The layout stays as it starts: x11vnc adds a keysym missing from the
 # layout to an unused key when a client sends one, remembers where, and
@@ -72,7 +77,7 @@ clipboard)
 	# It looks every 0.3 seconds for a minute after the clipboard last
 	# changed, and every 2 seconds after that, so that an idle desktop
 	# costs little, as in the benchmark stack.
-	last= quiet=0
+	last='' quiet=0 moving=
 	while :; do
 		t=$(get)
 		if [ "$t" != "$last" ]; then
@@ -85,6 +90,33 @@ clipboard)
 			"hex: "*)
 				last="hexed: $(hex "${t#hex: }")"
 				put "$last"
+				;;
+			"motion: "*)
+				# Screen motion for the soak (tests/soak_test.go): a
+				# terminal that scrolls for the seconds asked, from 1 to
+				# 60, of which at most four at once; timeout 0 would
+				# never stop.
+				n=${t#motion: }
+				case "$n" in
+				[1-9] | [1-5][0-9] | 60)
+					still=''
+					for pid in $moving; do
+						! kill -0 "$pid" 2>/dev/null || still="$still $pid"
+					done
+					moving=$still
+					# shellcheck disable=SC2086 # counts the words
+					if [ "$(set -- $moving && echo $#)" -ge 4 ]; then
+						last="still: $n"
+						put "$last"
+					else
+						last="moving: $n"
+						put "$last"
+						timeout "$n" xterm -geometry 100x30+200+150 -T motion \
+							-e sh -c 'while :; do ls -l /usr/bin; done' >/dev/null 2>&1 &
+						moving="$moving $!"
+					fi
+					;;
+				esac
 				;;
 			esac
 		fi
