@@ -8,6 +8,10 @@ GOPATH=$(shell go env GOPATH)
 
 IMAGE = occamy
 CONTAINER_ENGINE ?= podman
+# BUILD_LABEL marks the images that make build makes, so that make clean
+# removes those, once a later build has untagged them, and no other
+# image of the engine.
+BUILD_LABEL = de.changkun.occamy.make=build
 
 compile:
 	CGO_ENABLED=0 go build -trimpath -o occamyd
@@ -18,7 +22,7 @@ client:
 .PHONY: client
 
 build:
-	$(CONTAINER_ENGINE) build -t $(IMAGE):$(VERSION) -t $(IMAGE):latest -f docker/Dockerfile .
+	$(CONTAINER_ENGINE) build --label $(BUILD_LABEL) -t $(IMAGE):$(VERSION) -t $(IMAGE):latest -f docker/Dockerfile .
 .PHONY: build
 
 # DEMO_DEBUG sets the variables of docker-compose.yaml that turn the demo
@@ -112,9 +116,14 @@ test:
 	go test -cover -coverprofile=cover.test -v ./...
 	go tool cover -html=cover.test -o cover.html
 
+# clean removes what make build and make run leave behind, and nothing
+# else of the engine's, which other projects may share: the demo
+# stack's containers, network and volume and the images that compose
+# built for it (compose down, in COMPOSE_PROJECT_NAME's project), and
+# the images of make build that a later build untagged, which carry
+# BUILD_LABEL. The tagged images stay; podman rmi or docker rmi removes
+# them.
 clean:
-	$(CONTAINER_ENGINE) images -f "dangling=true" -q | xargs $(CONTAINER_ENGINE) rmi -f
-	$(CONTAINER_ENGINE) image prune -f
-	# docker rm $(docker ps -a -q)
-	# docker rmi $(docker images | grep occamy)
+	cd docker && $(CONTAINER_ENGINE) compose down --remove-orphans --volumes --rmi local
+	$(CONTAINER_ENGINE) image prune -f --filter label=$(BUILD_LABEL)
 .PHONY: clean

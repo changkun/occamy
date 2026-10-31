@@ -228,6 +228,45 @@ func TestDemoDebugGating(t *testing.T) {
 	}
 }
 
+// TestMakeClean checks that make clean removes Occamy's own containers
+// and images and no other of the engine's, which other projects on the
+// host may share: the demo stack through compose, and only the images
+// that make build labels, which it labels.
+func TestMakeClean(t *testing.T) {
+	if _, err := exec.LookPath("make"); err != nil {
+		t.Skip("no make")
+	}
+	dryRun := func(target string) []string {
+		out, err := exec.Command("make", "-s", "-n", "-C", "../..", target, "CONTAINER_ENGINE=engine").Output()
+		if err != nil {
+			t.Fatalf("make -n %s: %v", target, err)
+		}
+		return strings.Split(strings.TrimSpace(string(out)), "\n")
+	}
+	var label string
+	for _, line := range dryRun("build") {
+		if _, rest, ok := strings.Cut(line, " --label "); ok {
+			label, _, _ = strings.Cut(rest, " ")
+		}
+	}
+	if label == "" {
+		t.Fatalf("make build labels no image: %q", dryRun("build"))
+	}
+	for _, line := range dryRun("clean") {
+		fields := strings.Fields(line)
+		switch {
+		case strings.HasPrefix(line, "cd docker && engine compose down"):
+			// The stack's own project.
+		case len(fields) > 2 && fields[0] == "engine" && fields[1] == "image" && fields[2] == "prune":
+			if !strings.Contains(line, "--filter label="+label) {
+				t.Errorf("make clean prunes beyond the images that make build labels %s: %q", label, line)
+			}
+		default:
+			t.Errorf("make clean runs %q, which this test does not know to remove only Occamy's own", line)
+		}
+	}
+}
+
 // TestCompiledBinaryIgnored checks that git ignores the occamyd that
 // make compile leaves at the repository's root.
 func TestCompiledBinaryIgnored(t *testing.T) {
