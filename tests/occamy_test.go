@@ -12,7 +12,11 @@
 // The tests of the v0 service are skipped unless OCCAMY_E2E_ENDPOINT is
 // set, and those of the occamy-v1 service, which serves API v1 and
 // protocol v1 from docker/occamy-v1.yaml, unless OCCAMY_E2E_V1_ENDPOINT
-// is.
+// is. A test that reaches into the stack's rdp container, to kill its
+// channel server and read its log, also needs OCCAMY_E2E_COMPOSE, the
+// stack's compose command, such as
+// "docker compose -f docker/docker-compose.yaml" with an absolute path.
+// make e2e sets all three.
 package tests
 
 import (

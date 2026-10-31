@@ -143,7 +143,16 @@ sends that user something. Until then the user still counts, for up to
   `TestE2EV1RDP` also takes the demo xrdp server's `rdp-native` through
   the clipboard both ways, which the image's clipboard echo answers, a
   resize, a viewer joined by a share, and the owner leaving and coming
-  back.
+  back. If the clipboard check times out, look in the rdp server's log
+  for `error in trans_connect chan`. That line means xrdp found no
+  channel server, the process that carries the clipboard. The image's
+  `reconnectwm.sh` starts one again on the next connection, and logs
+  `starting xrdp-chansrv again` when it does. `make e2e` checks that
+  restart too: it kills the channel server in the rdp container, through
+  the stack's compose command in `OCCAMY_E2E_COMPOSE`, then checks the
+  clipboard again. That command runs `CONTAINER_ENGINE`, `podman` by
+  default, so give `make e2e` the `CONTAINER_ENGINE` that `make run`
+  took, as CI gives both `docker`.
   `TestVNCParity`, among them, runs the guacd bridge's parity matrix for
   VNC: each feature on x11vnc and TigerVNC, through the native backend
   and through guacd. The demo desktops report what reached the server
