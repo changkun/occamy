@@ -870,9 +870,12 @@ place for fixes that ship on v0 before beta.
     protocols, `ca_file` with `pins`, a CA file without a PEM
     certificate, and a pin that `vnc.CheckPin` refuses. Pins take the
     forms the backend parses (a PEM certificate, or a SHA-256
-    fingerprint in hex or in base64 after `SHA256:`), and
-    `insecure_skip_verify` does not exclude them, as in the backend,
-    where it accepts what is not pinned. An ad-hoc vnc target's
+    fingerprint in hex or in base64 after `SHA256:`). The first version
+    let `insecure_skip_verify` stand beside them, as the backend takes
+    it, accepting what is not pinned; since the delta review it is
+    refused beside `pins` or `ca_file`, as ssh refuses
+    `insecure_ignore_host_key` beside `host_keys`, so that a file does
+    not read as pinned while it accepts anything. An ad-hoc vnc target's
     certificate must name the host name the request gave
     (`target.name`), not the address dialled. Left over: an ad-hoc
     request carries no pins or CA, so a server with a self-signed

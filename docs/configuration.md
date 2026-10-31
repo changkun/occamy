@@ -300,7 +300,7 @@ A vnc connection's `tls` takes:
 | `server_name` | the target's host | The name the certificate must carry |
 | `ca_file` | none | PEM certificates of the CAs that replace the system's roots, as for a private CA. Read when a session starts |
 | `pins` | none | Certificates accepted as they are, as an ssh connection's `host_keys` are: their chain, names and dates are not checked. Each is a certificate in PEM or its SHA-256 fingerprint, in hex as `openssl x509 -noout -fingerprint -sha256` prints it or in base64 after `SHA256:`. Set this or `ca_file`, not both |
-| `insecure_skip_verify` | `false` | Accept any certificate that is not pinned, logging its fingerprint as a warning. For demos only |
+| `insecure_skip_verify` | `false` | Accept any certificate, logging its fingerprint as a warning. Set this or `ca_file` or `pins`, not both, as `host_keys` and `insecure_ignore_host_key` for ssh. For demos only |
 
 A refused certificate fails the session, and `occamyd`'s log names the
 certificate's fingerprint, ready for `pins`.

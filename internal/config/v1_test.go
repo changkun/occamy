@@ -706,7 +706,10 @@ connections:
   - {id: c, protocol: vnc, target: c, tls: {ca_file: DIR/password}, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: d, protocol: vnc, target: d, tls: {ca_file: DIR/missing.pem}, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: e, protocol: vnc, target: e, tls: {pins: ["SHA256:short", "zz"]}, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: f, protocol: vnc, target: f, tls: {require: true, server_name: nas, ca_file: DIR/ca.pem, insecure_skip_verify: true}, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
+  - {id: f, protocol: vnc, target: f, tls: {require: true, server_name: nas, ca_file: DIR/ca.pem}, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
+  - {id: g, protocol: vnc, target: g, tls: {pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"], insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: h, protocol: vnc, target: h, tls: {ca_file: DIR/ca.pem, insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: i, protocol: vnc, target: i, tls: {insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
 			{"connections[0].tls", "only vnc connections have tls"},
 			{"connections[1].tls.pins", "set ca_file or pins, not both"},
@@ -714,6 +717,8 @@ connections:
 			{"connections[3].tls.ca_file", "missing.pem does not exist"},
 			{"connections[4].tls.pins[0]", "not a certificate or a SHA-256 fingerprint"},
 			{"connections[4].tls.pins[1]", "not a certificate or a SHA-256 fingerprint"},
+			{"connections[6].tls.insecure_skip_verify", "set ca_file or pins, or insecure_skip_verify, not both"},
+			{"connections[7].tls.insecure_skip_verify", "set ca_file or pins, or insecure_skip_verify, not both"},
 		}},
 		{"allow", head + `connections:
   - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}}

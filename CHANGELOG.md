@@ -169,7 +169,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   telnet the guacd bridge. ssh connections need `host_keys` or
   `insecure_ignore_host_key: true`. vnc connections take a `username`
   for VeNCrypt's Plain, and a `tls` block for the server's certificate:
-  a CA file, pins by fingerprint, or an insecure mode for demos. A
+  a CA file, pins by fingerprint, or, alone, an insecure mode for demos. A
   session belongs to a subject of the issuer that signed its owner's
   token, and of where the user signed in, and a trusted issuer may not
   name a static user, in any case or normal form, unless its

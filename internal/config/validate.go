@@ -469,7 +469,9 @@ func (c *checker) hostKeys(path string, cn *Connection) {
 }
 
 // connectionTLS checks a vnc connection's certificate policy: pins
-// replace the roots that ca_file names, and other protocols have no tls.
+// replace the roots that ca_file names, insecure_skip_verify replaces
+// both, as ssh's insecure_ignore_host_key replaces host_keys, and other
+// protocols have no tls.
 func (c *checker) connectionTLS(path string, cn *Connection) {
 	t := cn.TLS
 	if cn.Protocol != "vnc" {
@@ -480,6 +482,9 @@ func (c *checker) connectionTLS(path string, cn *Connection) {
 	}
 	if t.CAFile != "" && len(t.Pins) > 0 {
 		c.add(path+".pins", "pins replace the roots: set ca_file or pins, not both")
+	}
+	if t.InsecureSkipVerify && (t.CAFile != "" || len(t.Pins) > 0) {
+		c.add(path+".insecure_skip_verify", "set ca_file or pins, or insecure_skip_verify, not both")
 	}
 	if c.file(path+".ca_file", t.CAFile) {
 		if _, err := t.RootCAs(); err != nil {
