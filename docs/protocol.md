@@ -285,8 +285,8 @@ closes too. A browser may close a WebSocket only with 1000 or a code
 from 3000 to 4999, so a browser client that sends another code, such as
 `protocol-error`, closes the WebSocket with 1000; a native client still
 closes with the code itself. The server takes the code from this
-message, and a close frame of 1000 after it as part of the same close,
-not as a normal one. A browser whose page goes away, as on navigating
+message, and expects the close frame that follows, 1000 or the same
+code; that frame changes nothing. A browser whose page goes away, as on navigating
 or reloading, closes the WebSocket with 1001 without sending `close`
 first; the server takes that close frame as the client leaving, as it
 does any close frame without `close` before it, not as
