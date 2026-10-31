@@ -537,7 +537,8 @@ published.
     another colour, or after a frame that changed pixels away from the
     swatch's centre while it already showed the colour, is marked only
     at its colour; a terminal session whose echo draws a frame and whose
-    Return draws the marker's cells; G7 over a terminal whose shell
+    Return draws the marker's cells; the blank terminal served before
+    the backend connected draws nothing; G7 over a terminal whose shell
     answers after 300 ms ends then, not at the blank terminal nor at the
     clear screen of resizing it after 100 ms; a screen shows the remote
     once a cell holds a character or a coloured background; at 60 Hz a

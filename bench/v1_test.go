@@ -375,6 +375,28 @@ func TestV1Terminal(t *testing.T) {
 	}
 }
 
+// A terminal frame draws only if it carried bytes: the blank terminal
+// that the session core serves before the backend connected, whose
+// snapshot is empty, draws nothing.
+func TestV1TerminalBlank(t *testing.T) {
+	var fl *frameLog
+	s := v1RigWith(t, newShell(time.Hour), rig{wrap: func(e pipeEnd) client.Conn {
+		fl = newFrameLog(e)
+		return fl
+	}})
+	// The reader acknowledges a frame once it handled it.
+	deadline := time.Now().Add(5 * time.Second)
+	for len(fl.acked()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the blank terminal's frame was not acknowledged")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := s.drawn.Load(); n != 0 {
+		t.Errorf("%d frames drew before the shell printed", n)
+	}
+}
+
 // A terminal's first frame is the first that shows the remote: not the
 // blank terminal the session core serves before the backend connected,
 // nor the clear screen that resizing a blank terminal sends, as the SSH
