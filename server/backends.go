@@ -356,7 +356,8 @@ func newBridge(g config.Guacd, protocol string) func(target, screen) (backend.Ba
 // reads, since the native backends read none of them, and says why in
 // the protocol's terms. That happens when no connection of that
 // protocol goes through guacd, and ad-hoc targets of that protocol
-// either do not go through guacd or take only the display's parameters. A file written for guacd, with disable-copy or
+// either do not go through guacd or take only the display's
+// parameters. A file written for guacd, with disable-copy or
 // recording-path, would otherwise lose them unnoticed when its
 // connections moved to a native default. With legacy_v0, the v0 routes
 // pass every parameter to their sessions, so nothing is unused.
