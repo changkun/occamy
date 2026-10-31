@@ -168,6 +168,11 @@ jobs:
         go-version: stable
     - name: Benchmark smoke run
       run: make bench CONTAINER_ENGINE=docker BENCH_FLAGS="-quick -net N0,N1 -engine none"
+    # The v1 series on the stack that make bench started: native SSH and
+    # VNC, and VNC and RDP through guacd. N1 alone, since the run above
+    # covers the proxy without delay.
+    - name: Benchmark smoke run, protocol v1
+      run: go run ./bench -quick -net N1 -engine none -series v1-native,v1-guacd -out bench-v1-results.json
     - name: Stack logs
       if: failure()
       working-directory: docker
