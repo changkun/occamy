@@ -202,7 +202,9 @@ Settled on 2026-10-30, following the recommendations above.
    a protocol's guacd path is deleted only when native is at least 10x
    better than the guacd baseline on each scenario's primary metric,
    so the 10x target is now the gate and the 10% tolerance decides
-   nothing. The soak values are not one of the owner's conditions.
+   nothing. The soak values are not one of the owner's conditions; the
+   soak runs as a check for leaks in `occamyd` (Implementation notes:
+   VNC's soak).
 5. **The bridge is removed at v1.0** (open question 5, answered above).
 
 ## Task Breakdown
@@ -809,3 +811,56 @@ that guacd was `vnc`'s default, they are corrected below.
   its own and the `tls` policy against a real server, which
   `TestTigerVNC` covers; Apple Remote Desktop, checked by hand against
   macOS; QEMU's VNC server.
+
+## Implementation notes: VNC's soak
+
+- **Status.** A short soak of `occamyd` serving VNC passed: 8 sessions
+  at a time for 30 minutes, with no growth in goroutines, live heap or
+  open files. The owner's decisions of 2026-10-31 took the soak out of
+  the conditions for deleting a guacd path (Parity gate), so it decides
+  nothing there; it looks for leaks in `occamyd`. Decision 4's values
+  make the full run, 20 sessions (N) for 8 hours (H), which has not
+  been done.
+- **How it runs.** `tests/soak_test.go` (`TestSoak`), through
+  `make soak` against the [006](../006-demo-stack-refresh.md) stack:
+  sessions to `vnc-native` and `tigervnc-native`, in turn, with the Go
+  client core over API v1 and protocol v1. Each session moves the
+  pointer, below the parity matrix's typing probe so that the letters do
+  not reach it, and types a letter every 2 s, presses Return every 20 s
+  and, once a minute, asks its desktop, over the clipboard, for a
+  terminal that scrolls for 2 s (`desktop.sh`'s `motion:`). Every other
+  session has a read-only viewer, by a share. A session closes after 10
+  minutes and another opens; the first ones close at staggered times, so
+  that sessions turn over all through the run. Every 30 s the test asks
+  the debug listener for a heap profile with `gc=1`, which collects,
+  then reads `/debug/vars`: `goroutines` and `fds`, which `occamyd`
+  publishes for this, and `memstats.HeapAlloc`, the live heap after that
+  collection. It logs each sample with the host's load average, and
+  writes them as CSV to `OCCAMY_SOAK_OUT`.
+- **What fails it.** After a warm-up of a tenth of the run, a metric
+  grew if the medians of the four quarters of its samples never fall and
+  the last exceeds the first by more than a bound: 50 goroutines, 32 MiB
+  of heap and 25 file descriptors. Medians, so that a sample taken while
+  sessions open or close does not decide. Once every session has closed,
+  the goroutines and files must come back to within the bound of where
+  they started, within a minute. Any session that fails fails the run.
+  `TestSoakGrowth` checks the judgement on made-up series. The bounds
+  suit the full run, about a thousand sessions, in which a leak of one
+  goroutine or one descriptor per session exceeds them many times over;
+  the short run, about thirty sessions, catches a leaked descriptor per
+  session but only two or more goroutines.
+- **The run.** On 2026-10-31, `make soak` with 8 sessions for 30
+  minutes, against the stack under its own project name on the shared
+  host, at a one-minute load average of 8 to 46 (median 17): 31 sessions
+  opened, 123,897 frames and 21,275 inputs, and no session failed. After
+  the warm-up, `occamyd` held 83 to 85 goroutines, 69.8 to 70.9 MiB of
+  live heap and 30 or 31 open files, with 8 sessions and 4 viewers
+  streaming; the quarters' medians were 84 goroutines and 30 files
+  throughout, and 70.1, 70.2, 70.4 and 70.5 MiB of heap, a rise far
+  inside the bound. Before the first session it had 8 goroutines, 1.6
+  MiB and 10 files, and once the last had closed 9, 2.1 MiB and 11.
+- **Not covered.** guacd's sessions, whose leaks would be guacd's, and
+  native RDP and SSH sessions; `OCCAMY_SOAK_CONNECTIONS` takes any of
+  `occamy-v1`'s connections, and the stack has none for RDP or SSH
+  through API v1 yet. Clipboard text larger than a line, and the
+  reconnects that the parity matrix covers.
