@@ -939,7 +939,9 @@ that guacd was `vnc`'s default, they are corrected below.
   That run took `vnc-native` and `tigervnc-native` in turn, and judged
   growth by the earlier rule, with the heap left out of the check once
   the sessions had closed; its samples pass the present rule and check
-  too.
+  too. A run of the soak as it now is, against a stack started with
+  `make run OCCAMY_DEBUG=1`, with the bounded `motion:`, is pending a
+  local run.
 - **Not covered.** guacd's sessions, whose leaks would be guacd's, and
   native RDP and SSH sessions; `OCCAMY_SOAK_CONNECTIONS` takes any of
   `occamy-v1`'s connections, and the stack has none for RDP or SSH
