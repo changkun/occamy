@@ -128,6 +128,11 @@ For each scenario, the target is 10x better than the v0-through-occamyd
 baseline on its primary metric, under the same network condition, at the
 p95 for latencies.
 
+The targets gate the release (owner, 2026-10-31): v1.0 waits until the
+benchmark shows native at least 10x better than guacd. It does not ship
+with a guacd fallback for any protocol still short of 10x; release
+candidates may still carry one ([008](../008-native-architecture.md)).
+
 The baseline run may show that a metric is bound by something Occamy does
 not control: the RTT, the remote server, or the scene's own frame rate,
 for example. A delivered frame rate cannot exceed the scene's. Such a
@@ -390,10 +395,12 @@ and Encode cache and workers, in
 [graphics-pipeline](graphics-pipeline.md)) and native RDP
 ([native-rdp-backend](native-rdp-backend.md)) are in occamyd. So
 `docs/benchmarks.md` documents how to run the v1 series and publishes no
-v1 results, and no target is judged met or missed yet. One short pass
-per scenario family checked that the harness works and that its
-numbers are plausible; those numbers are a harness check, kept in the
-pull request, not a result.
+v1 results, and no target is judged met or missed yet. The full run is
+also the one that gates v1.0 (owner, 2026-10-31; see
+[Targets](#targets)). One local pass ran every scenario end to end on
+both series, under N0 and N1. It ran on a loaded shared host, so it
+checked the harness, not the numbers, and its numbers are not
+published.
 
 - **What was done:**
   - Two series, `v1-native` (SSH and VNC through occamyd's own
@@ -482,8 +489,9 @@ pull request, not a result.
     applies x11vnc's updates as they come, the harness counted several
     frames per frame of the scene, several times the scroll's and the
     motion's rates in the harness check. Through the guacd
-    bridge, whose frames follow guacd's, it stayed below the scene's
-    rate, as v0 does. The delivered frame rate, the share of the scene,
+    bridge, whose frames follow guacd's, it mostly stayed below the
+    scene's rate, as v0 does, but in one check the scroll exceeded it
+    there too. The delivered frame rate, the share of the scene,
     and bytes and CPU per frame, the measures of G3 to G5, therefore do
     not count scene frames in v1. The table notes a row whose frames
     come more than 10% faster than its scene.
