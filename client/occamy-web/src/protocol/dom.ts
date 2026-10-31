@@ -236,14 +236,16 @@ interface PointerEventLike extends Event {
 interface PointerTarget extends EventTarget {
   getBoundingClientRect(): Box
   setPointerCapture?(pointerId: number): void
+  focus?(options?: FocusOptions): void
 }
 
 /**
  * bindPointer sends the pointer's moves, buttons and scrolls over
  * element, which shows the screen of size() stretched across its box,
- * such as a canvas whose CSS size scales the screen. The element keeps
- * the pointer while a button is down, and the remote, not the page,
- * takes right clicks and scrolls.
+ * such as a canvas whose CSS size scales the screen. A press focuses
+ * the element, for a keyboard binding on it; the element keeps the
+ * pointer while a button is down; and the remote, not the page, takes
+ * right clicks and scrolls.
  */
 export function bindPointer(
   element: PointerTarget,
@@ -262,7 +264,11 @@ export function bindPointer(
     }
     if (ev.type === 'pointerdown') {
       element.setPointerCapture?.(ev.pointerId)
+      // Preventing the default keeps a drag from selecting the page, and
+      // may keep the click from focusing the element, which takes the
+      // keyboard: it focuses it itself.
       ev.preventDefault()
+      element.focus?.({ preventScroll: true })
     }
     last = remotePoint(ev.clientX, ev.clientY, element.getBoundingClientRect(), screen)
     try {

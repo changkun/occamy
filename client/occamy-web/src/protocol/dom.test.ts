@@ -153,6 +153,10 @@ describe('pointer', () => {
     const el = Object.assign(new EventTarget(), {
       getBoundingClientRect: (): Box => ({ left: 0, top: 0, width: 100, height: 50 }),
       captured: -1,
+      focused: 0,
+      focus() {
+        this.focused++
+      },
       setPointerCapture(id: number) {
         this.captured = id
       },
@@ -166,6 +170,7 @@ describe('pointer', () => {
     el.dispatchEvent(menu)
     expect(menu.defaultPrevented).toBe(true)
     expect(el.captured).toBe(1)
+    expect(el.focused).toBe(1)
     expect(r.calls).toEqual([
       ['pointer', 100, 50, 0],
       ['pointer', 100, 50, Buttons.Right],
