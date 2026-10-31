@@ -231,6 +231,10 @@ type encodeCache struct {
 	high   int // the most bytes it held
 	budget int
 
+	// hints holds, for each profile, the quality the last search by
+	// Still chose, where the next starts, whichever encoder made it.
+	hints map[profile]int
+
 	// For the measurement: lookups that found an encoding made or being
 	// made, those that made one, and those whose pixels were older than
 	// the cache's.
@@ -238,7 +242,26 @@ type encodeCache struct {
 }
 
 func newEncodeCache(budget int) *encodeCache {
-	return &encodeCache{tiles: map[tileKey]*entry{}, runs: map[runKey]*entry{}, budget: budget}
+	return &encodeCache{tiles: map[tileKey]*entry{}, runs: map[runKey]*entry{}, hints: map[profile]int{}, budget: budget}
+}
+
+// still encodes a run by enc.Still, starting its search where the last
+// search of p in the session ended, by enc or by any other encoder of
+// p, and records where it ended for the next. An encoder of a worker
+// that has not searched yet thus starts where the writers' searches
+// ended, not from nothing.
+func (c *encodeCache) still(p profile, enc *encoder.Encoder, dst, pix []byte, w, h, tile, lo, hi int) ([]byte, protocol.Codec, int, bool) {
+	c.mu.Lock()
+	hint := c.hints[p]
+	c.mu.Unlock()
+	if hint > 0 {
+		enc.SetHint(hint)
+	}
+	b, codec, q, reached := enc.Still(dst, pix, w, h, tile, lo, hi)
+	c.mu.Lock()
+	c.hints[p] = enc.Hint()
+	c.mu.Unlock()
+	return b, codec, q, reached
 }
 
 // tile returns the encoding of tile k at version: one made or being
@@ -420,9 +443,12 @@ func (w *writer) encodeRun(t, n int, pix []byte, rect image.Rectangle, still boo
 		}
 	}
 	enc := func() {
-		if still {
+		switch own, ok := w.enc.(*encoder.Encoder); {
+		case still && ok && w.sh != nil:
+			w.payload, codec, got, reached = w.sh.cache.still(w.prof, own, w.payload[:0], pix, rect.Dx(), rect.Dy(), w.g.tile, lo, q)
+		case still:
 			w.payload, codec, got, reached = w.enc.Still(w.payload[:0], pix, rect.Dx(), rect.Dy(), w.g.tile, lo, q)
-		} else {
+		default:
 			w.payload, codec = w.enc.Lossy(w.payload[:0], pix, rect.Dx(), rect.Dy(), q)
 		}
 	}
@@ -593,7 +619,7 @@ func (f *prefetch) run(wk *worker, enc *encoder.Encoder, t, n int, moving bool) 
 	wk.pix = assemble(wk.pix, wk.tiles[:n], wk.rects[:n], rect)
 	f.cache.make(e, func(e *entry) bool {
 		if still {
-			wk.payload, e.codec, e.quality, e.reached = enc.Still(wk.payload[:0], wk.pix, rect.Dx(), rect.Dy(), f.g.tile, lo, q)
+			wk.payload, e.codec, e.quality, e.reached = f.cache.still(f.p, enc, wk.payload[:0], wk.pix, rect.Dx(), rect.Dy(), f.g.tile, lo, q)
 		} else {
 			wk.payload, e.codec = enc.Lossy(wk.payload[:0], wk.pix, rect.Dx(), rect.Dy(), q)
 		}

@@ -618,3 +618,47 @@ func runShareSeed(t *testing.T, n int, m shareMode, seed uint64, patterns bool, 
 // shareMinSSIM is the least SSIM a refined photographic tile has: the
 // score refinement seeks, less what Still's estimate leaves.
 const shareMinSSIM = 0.85
+
+// A search by Still starts where the last of its profile in the session
+// ended, whichever encoder made it, or else where the encoder's own last
+// ended, and leaves where it ended for the next.
+func TestEncodeCacheHint(t *testing.T) {
+	codecs := []protocol.Codec{protocol.CodecWebP, protocol.CodecDeflate}
+	p := profile{protocol.CodecDeflate, protocol.CodecWebP}
+	photo := corpusFrame(t, "photo")
+	r := image.Rect(0, 128, 1024, 192)
+	pix := make([]byte, 0, 4*r.Dx()*r.Dy())
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		i := photo.PixOffset(r.Min.X, y)
+		pix = append(pix, photo.Pix[i:i+4*r.Dx()]...)
+	}
+	still := func(c *encodeCache, e *encoder.Encoder) (q, tries int) {
+		before := e.Tries()
+		_, _, q, _ = c.still(p, e, nil, pix, r.Dx(), r.Dy(), 64, 30, 90)
+		return q, e.Tries() - before
+	}
+
+	c := newEncodeCache(DefaultEncodeCacheBytes)
+	q, _ := still(c, encoder.New(codecs))
+	if c.hints[p] != q {
+		t.Fatalf("the session's hint is %d after a search for %d", c.hints[p], q)
+	}
+	fresh := encoder.New(codecs)
+	if start := fresh.Hint(); start > q-2*encoder.QualityStep && start < q+2*encoder.QualityStep {
+		t.Fatalf("a new encoder starts at %d, too near %d to tell", start, q)
+	}
+	// A new encoder starts where the other ended: a try, and one more
+	// below, unless at the top.
+	if got, tries := still(c, fresh); got != q || tries > 2 {
+		t.Errorf("a new encoder, after another's search: %d in %d tries, want %d in 2 at most", got, tries, q)
+	}
+
+	// With no search of the session yet, an encoder starts where its
+	// own last ended.
+	own := encoder.New(codecs)
+	own.SetHint(q)
+	c = newEncodeCache(DefaultEncodeCacheBytes)
+	if got, tries := still(c, own); got != q || tries > 2 {
+		t.Errorf("an encoder's own hint: %d in %d tries, want %d in 2 at most", got, tries, q)
+	}
+}
