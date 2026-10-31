@@ -487,3 +487,178 @@ and guacd leaves the default deployment.
     them): a sentence in [docs/protocol.md](../../docs/protocol.md)'s
     4005 row that RDP's deliberate ends (decision 5) are `remote-ended`,
     and a CHANGELOG line.
+
+## Implementation notes: phase 2
+
+- **Status.** Phase 2 ships in two pull requests. This one has the
+  static virtual channels, the clipboard (CLIPRDR) both ways, and the
+  CredSSP acceptor in `rdptest`, with NLA run end to end through the
+  backend. DRDYNVC and Display Control for `resize-request` follow in
+  a second pull request on top of this one; until it lands, `Resize`
+  is accepted and ignored, and viewers scale. The Heartbeat PDU and
+  the auto-detect answers are deferred (Deviations). NLA now runs end
+  to end against the acceptor, which registration waited for; the
+  backend is still not registered in `occamyd`, which follows the
+  parity gate (Task Breakdown).
+- **What was built.**
+  - Static channels (`internal/rdp/channel.go`). The client names the
+    channels its configuration asks for in its network data (today
+    only `cliprdr`, with the options INITIALIZED, ENCRYPT_RDP and
+    SHOW_PROTOCOL and no compression), and joins the MCS channels the
+    server gives them after the user and I/O channels. A server's list
+    is checked: at most 31 channels in its network data, no more than
+    the client asked for (fewer is fine, as FreeRDP takes it), none
+    twice and none on the I/O or message channel; a channel it gives
+    0 is not joined. Chunks are reassembled per channel up to the
+    channel's bound: the client keeps the first bytes of a longer
+    message and tells the handler it was cut. A first chunk starts a
+    message anew (the unfinished one is counted), a chunk without its
+    first is dropped and counted, and chunks that run past or stop
+    short of the length they declared, or that are compressed, end
+    the session. The client sends in chunks of 1,600 bytes, 32 chunks
+    a write, so that input written meanwhile waits for one write.
+  - The reader never writes channel PDUs: it records what is due and
+    wakes a goroutine of `Run` that writes it. `SetClipboard` writes
+    from its caller under the same lock, so the backend's writer can
+    order a Format List before the keys that paste it.
+  - The clipboard (`internal/rdp/cliprdr.go`, [MS-RDPECLIP]):
+    `Config.Clipboard` selects `ClipboardFromServer`,
+    `ClipboardToServer`, both, or neither, which asks for no channel.
+    After the server's Monitor Ready the client sends its general
+    capabilities (version 2, long format names) and a Format List of
+    its text, if any. Its text goes as CF_UNICODETEXT, or CF_TEXT where
+    the server asks for that, with CR LF line ends; the server's comes
+    from CF_UNICODETEXT, or CF_TEXT where the list has only that, with
+    LF line ends, invalid UTF-16 as U+FFFD, up to its NUL. Text is at
+    most `MaxClipboard` (4 MiB) of UTF-8 either way, as the VNC
+    backend's Extended Clipboard, and the channel keeps at most
+    8 + 2 × 4 MiB of a message. One request for the server's text is
+    outstanding at a time; an answer for an announcement the server
+    has since replaced is dropped and the newest is asked for, and
+    unasked and failed answers are dropped and counted. A server that
+    leaves more than 8 of its own requests unanswered ends the
+    session. The server's text is charged against the decoding rate
+    as a pointer shape is, a tile at least, so that announcing it again
+    and again makes the client wait. A Format List that does not parse
+    is refused with a failed response; a message whose length is wrong
+    is dropped; locks and file PDUs are ignored.
+  - The backend (`internal/backend/rdp`): `DisableCopy` and
+    `DisablePaste`, as guacd's `disable-copy` and `disable-paste`, map
+    onto the two modes; with both, no channel. `Input` queues a
+    `Clipboard` whose MIME type is `text/*` or empty, cut to
+    `MaxClipboard` at a character, against a byte budget of two
+    clipboards in the queue, as the VNC backend bounds its own; other
+    types are dropped. The writer sets the text after the input queued
+    before it and before the input after it. The server's text goes to
+    `Sink.Clipboard` as `text/plain`.
+  - Roles: a read-only viewer's input, its clipboard included, is
+    dropped by the session core (`internal/session/viewer.go`), before
+    any backend sees it; the backend needs no check of its own.
+    `TestReadOnlyInputDropped` now covers a clipboard too. The
+    server's clipboard goes to every viewer, as with VNC.
+  - `rdptest` gained the server's side of CredSSP with NTLMv2 for an
+    `Account` (`rdptest/credssp.go`): a challenge with both NetBIOS
+    names, the DNS name and a timestamp; the NTLMv2 response and the
+    MIC checked against the password; key exchange and sealing; the
+    public key binding of CredSSP 5 and later both ways; the
+    TSCredentials the client delegates recorded; STATUS_LOGON_FAILURE
+    for a wrong password; and the Early User Authorization Result for
+    HYBRID_EX. Options make it speak an older CredSSP version, drop
+    sealing from the challenge, prove another public key, or stall
+    after either of the client's first two messages. It also gives
+    channels their MCS channels, reassembles what the client sends on
+    them, refusing chunks over 1,600 bytes, sends its own in chunks,
+    and builds and parses CLIPRDR PDUs. It still imports nothing from
+    the client.
+- **Tests.** Against `rdptest` over loopback: the join, the server's
+  channel list (more than asked, the I/O channel, none, 0, 32 in its
+  network data, two on one MCS channel), reassembly at chunk sizes of
+  1, 7, 1,600 and 32 Ki bytes, a chunk straddling the bound, orphan,
+  over- and under-length and compressed chunks, writes of 32 chunks;
+  the clipboard's initialization before and after the owner's text,
+  both ways, CF_TEXT alone, short format names, the same text not
+  announced twice, no text, stale, unasked and failed answers, each
+  mode alone, the bounds either way, the requests' bound, pacing, the
+  conversions, format lists, and the order of capabilities and Format
+  List under a race. The backend: both ways through the sink with the
+  Format List before the paste's keys, non-text dropped, each of
+  `DisableCopy` and `DisablePaste` and both, the byte budget, the
+  writer's order against a fake client, and NLA end to end: prompted
+  credentials with `nla` and `nla-ext`, then input; a wrong password
+  (`ErrAuthFailed` with the server's status); CredSSP 4 refused before
+  the client answers the challenge; a challenge without sealing; a
+  wrong public key proof, each without credentials delegated; and
+  cancel while the server stalls at either step. The client also logs
+  on through the acceptor in `internal/rdp`. Coverage: `internal/rdp`
+  88.1% of statements, `channel.go` 90.5% and `cliprdr.go` 95.6%;
+  `internal/backend/rdp` 98.4%.
+- **Integration test.** `TestIntegrationClipboard`, under the
+  `rdp_integration` tag, pastes text and reads the session's X
+  CLIPBOARD selection, which xrdp-chansrv serves, and sets the
+  selection from an X client to see it reach the sink, with
+  `internal/rdp/testdata/xclipboard`, an xgb program the test copies
+  into the container as it does `querypointer`. On 2026-10-31 against
+  the bench desktop image's xrdp, it passed both ways, and the rest of
+  the backend's and the client's integration tests passed with the
+  channel joined. That the round trip works shows xrdp sends CLIPRDR
+  PDUs under TLS without a security header, as the client reads them.
+- **Mutation checks.** Each was broken in turn and a test failed, 26 in
+  all, none surviving:
+  - at most 31 channels in the server's network data, no more than
+    asked, none twice, not the I/O channel (`TestChannelAssigned`);
+  - the reassembly bound, both the cut and the whole check
+    (`TestChannelLimit`; the first version of that test let the cut
+    survive, since no chunk straddled the bound);
+  - compressed, over- and under-length and orphan chunks
+    (`TestChannelChunks`);
+  - `MaxClipboard` going out and coming in (`TestClipboardBounds`,
+    `TestClipboardText`); the data requests' bound
+    (`TestClipboardRequestsBounded`); pacing (`TestClipboardPaced`);
+  - each mode (`TestClipboardOneWay`), stale and failed answers
+    (`TestClipboardStale`), and no Format List before Monitor Ready
+    (`TestClipboardInit`, `TestClipboardOrder`);
+  - `DisableCopy` and `DisablePaste` (`TestRunClipboardDisabled`),
+    non-text dropped (`TestRunClipboard`), the backend's cut and its
+    byte budget (`TestRunClipboardBounded`, `TestInputErrors`);
+  - the read-only role (`TestReadOnlyInputDropped`), and CredSSP 5 at
+    least, through the acceptor (`TestRunNLARefused`).
+- **Fuzzing.** `FuzzChannel` feeds chunks to the reassembly and checks
+  the bound; `FuzzCliprdr` feeds a CLIPRDR message, then sets the
+  owner's text and writes what is due; `FuzzRun` now joins the
+  clipboard channel and has CLIPRDR seeds. 60 seconds each with
+  `-fuzzminimizetime 20x`, without a finding: `FuzzChannel` 15,172,432
+  executions (host load 3 before, 53 after), `FuzzCliprdr` 12,868,402
+  (48, 99), `FuzzRun` 8,956,571 (12, 35). Under that load the fuzzer
+  reported no executions for seconds at a time; every input of
+  `FuzzCliprdr`'s corpus ran in under 10 ms on its own.
+- **Decisions made during implementation.**
+  - The clipboard is on both ways by default, as guacd has it.
+  - Line ends are converted, CR LF to the server and LF to viewers, as
+    the VNC backend converts them, where guacd's `normalize-clipboard`
+    preserves them by default. CF_UNICODETEXT has CR LF on Windows;
+    xrdp passes them to X as they are, so X applications in an xrdp
+    session see CR LF in pasted text.
+  - CF_TEXT is taken as Latin-1, with `?` for characters beyond it,
+    since the client does not know the server's ANSI code page;
+    CF_UNICODETEXT is offered and asked for first.
+  - The newest announcement wins: one request at a time, a stale
+    answer dropped, as the VNC backend keeps only the latest value.
+  - Compressed channel PDUs end the session: the client offers no
+    compression.
+- **Deviations.** From the Task Breakdown: phase 2 is two pull
+  requests, the second with DRDYNVC and Display Control. The Heartbeat
+  PDU and the auto-detect answers are deferred to phase 4: the client
+  does not set their early capability flags, so a server does not send
+  them, xrdp has neither, and only Windows can check them. From guacd:
+  line ends (above).
+- **Surprises.**
+  - xrdp keeps CR LF in the X selection.
+  - Under load, the backend's writer set pasted text before or after
+    the server's Monitor Ready, and a test that took the first Format
+    List to have it failed once in five runs; both orders are right.
+- **Follow-ups.**
+  - DRDYNVC and Display Control (the second pull request).
+  - A `normalize-clipboard` option, if X sessions need LF.
+  - The Heartbeat PDU and auto-detect, with #32's Windows host.
+  - Formats beyond text (HTML, images) wait for protocol v1 to carry
+    them; files are out of v1.0.

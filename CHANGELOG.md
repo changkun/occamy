@@ -292,6 +292,17 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the virtual channels of its second phase. Nothing registers it in
   occamyd until NLA has run end to end. The VNC and RDP backends share
   one USB HID to scan code table, `internal/keymap`.
+- The native RDP backend's clipboard, the first part of its second
+  phase: `internal/rdp` joins static virtual channels and reassembles
+  their chunks within a bound per channel, and carries text both ways
+  on the clipboard channel (CLIPRDR), CF_UNICODETEXT or CF_TEXT, at
+  most 4 MiB of UTF-8, as `Config.Clipboard` allows. The backend copies
+  and pastes it, a paste set before the keys that follow it, unless
+  `DisableCopy` or `DisablePaste` stops a direction, as guacd's
+  `disable-copy` and `disable-paste` do. `rdptest` accepts NLA through
+  CredSSP with NTLMv2, so that the backend's NLA path, prompted
+  credentials included, runs end to end in tests. Resize waits for the
+  dynamic channels of the second part.
 
 ### Changed
 
