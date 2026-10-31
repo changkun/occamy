@@ -42,6 +42,16 @@ import (
 // parityTimeout bounds each wait of a check.
 const parityTimeout = 20 * time.Second
 
+// parityRetryPause is how long a cell waits before its second try: long
+// enough for the demo x11vnc's watchdog to start a hung x11vnc again
+// (docker/demo/vnc/start.sh).
+const parityRetryPause = 15 * time.Second
+
+// errUnavailable marks a check that could not reach the server's
+// desktop: the screen did not arrive, or the desktop's probe did not
+// answer. A server fault looks like this, not a backend's.
+var errUnavailable = errors.New("the desktop is unavailable")
+
 // A parityColumn of the matrix: a server and a backend.
 type parityColumn struct {
 	server  string // x11vnc or tigervnc
@@ -130,13 +140,17 @@ func TestVNCParity(t *testing.T) {
 					start := time.Now()
 					err := f.check(p, c)
 					known, isKnown := parityKnown[cell]
-					if err != nil && !isKnown && c.backend == "guacd" {
-						// guacd is the baseline, so a cell of its that
-						// fails once gets a second try, and counts as
-						// passed if that passes: libvncclient has failed
-						// to connect to TigerVNC now and then. The native
-						// backend gets none.
-						t.Logf("failed, trying again: %v", err)
+					if err != nil && !isKnown && (c.backend == "guacd" || errors.Is(err, errUnavailable)) {
+						// A cell that could not reach the desktop gets a
+						// second try, since x11vnc has hung now and then
+						// under these sessions, through either backend.
+						// guacd is the baseline, so a cell of its gets a
+						// second try for any failure: libvncclient has
+						// also failed to connect to TigerVNC now and
+						// then. A native cell whose check found a
+						// difference gets none.
+						t.Logf("failed, trying again in %v: %v", parityRetryPause, err)
+						time.Sleep(parityRetryPause)
 						err = f.check(p, c)
 					}
 					switch {
@@ -238,7 +252,7 @@ func (p *parity) open(conn string, opts client.Options, answers ...string) (*par
 	}
 	if err := s.screen(answers...); err != nil {
 		closeSession()
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: %w", errUnavailable, err)
 	}
 	return s, closeSession, nil
 }
@@ -458,7 +472,7 @@ func (s *paritySession) barrier() (int, error) {
 			return next, nil
 		}
 	}
-	return 0, err
+	return 0, fmt.Errorf("%w: %w", errUnavailable, err)
 }
 
 // A key is a key press as a client sends it: the keysym it produced, or
