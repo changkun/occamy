@@ -720,9 +720,9 @@ gets the source's pixels as they were before the copy. A copy moves the
 pixels the client has, which for a lossy tile are what its decoder
 produced, so a client applies every `tile` and `copy-rect` of every
 frame it receives, in order, and drops none, not even those of a frame
-it will not show. occamyd sends `copy-rect`, ahead of the frame's tiles,
-for changed content that a viewer's client already shows elsewhere,
-scrolled up or down.
+it will not show. occamyd sends `copy-rect`, ahead of the tiles of the
+order it was found in, for changed content that a viewer's client
+already shows elsewhere, scrolled up or down.
 
 | Field | Type | Meaning |
 |-------|------|---------|

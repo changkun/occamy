@@ -167,11 +167,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   text this is 5.0 KiB a frame against 58.5, in a seventh of the encode
   time ([docs/benchmarks/scroll.md](docs/benchmarks/scroll.md)). A
   viewer that skipped frames, was hidden or has a viewport gets copies
-  from what it has. A wheel's scroll counts as its input's effect.
-  `stream.Config.NoScroll` turns it off. The image's `licenses/` carries
-  the notices of zeebo/xxh3 and of klauspost/cpuid, which it links into
-  amd64 builds, and `scripts/third-party-licenses.sh` lists both
-  architectures of every release platform.
+  from what it has. A wheel's scroll counts as its input's effect. A
+  copy completes a tile only at the pacer's current quality or above, so
+  lossy pixels drawn at a lower quality are sent again as they would be
+  without it. A frame searches at most 2h+3 runs for h copies found, so
+  motion beside a scroll costs a few runs. The shadow costs about 4 bytes
+  a pixel a viewer: 3.3 MiB at 1024×768, 8.5 MiB at 1080p and 33.5 MiB at
+  4K. `stream.Config.NoScroll` turns it off. The image's `licenses/`
+  carries the notices of zeebo/xxh3 and of klauspost/cpuid, which it
+  links into amd64 builds, and `scripts/third-party-licenses.sh` lists
+  both architectures of every release platform.
 - `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
   (static users sign in with a password for an access token), TLS when
   `tls.cert` and `tls.key` are set, expvar and pprof on the debug
