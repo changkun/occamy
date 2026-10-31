@@ -5,10 +5,13 @@
 package rdp
 
 import (
+	"bytes"
 	"fmt"
 	"image"
 	"image/color"
+	"slices"
 	"sync"
+	"unicode/utf8"
 )
 
 // screen is an Output that keeps the desktop in an image, for tests.
@@ -20,6 +23,8 @@ type screen struct {
 	hot     image.Point
 	pos     image.Point
 	draws   int
+	// clipboard holds the clipboards the client reported.
+	clipboard []string
 }
 
 // Resize panics on a size the client should have refused, so that the
@@ -58,6 +63,24 @@ func (s *screen) CursorMove(p image.Point) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pos = p
+}
+
+// Clipboard panics on text the client should have bounded or converted,
+// so that the fuzzers notice, and keeps the latest.
+func (s *screen) Clipboard(mime string, data []byte) {
+	if mime != "text/plain" || len(data) > MaxClipboard || !utf8.Valid(data) || bytes.ContainsRune(data, '\r') {
+		panic(fmt.Sprintf("screen: Clipboard(%q) of %d bytes", mime, len(data)))
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clipboard = append(s.clipboard, string(data))
+}
+
+// clipboards returns the clipboards the client reported.
+func (s *screen) clipboards() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.clipboard)
 }
 
 // at returns the pixel at (x, y).

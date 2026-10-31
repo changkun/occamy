@@ -41,6 +41,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -372,6 +373,55 @@ func TestIntegrationSecurity(t *testing.T) {
 	}
 }
 
+// The clipboard crosses xrdp's clipboard channel both ways: text a
+// viewer pastes is the CLIPBOARD selection of the session's X display,
+// which xrdp-chansrv serves, and text an X client puts there reaches the
+// viewers. The test reads and sets the selection with internal/rdp's
+// testdata/xclipboard in the container.
+func TestIntegrationClipboard(t *testing.T) {
+	if rdpContainer == "" {
+		t.Skip("clipboard not checked: no container")
+	}
+	checkGoroutines(t)
+	b := newBackend(t, xrdpConfig(t))
+	b.Demand(backend.Demand{Visible: true})
+	sink := &backendtest.Sink{}
+	r := start(t, b, sink)
+	waitLong(t, 90*time.Second, "the wallpaper", func() bool {
+		bad, _ := matchesWallpaper(sink.Pixels(), 0)
+		return bad == 0
+	})
+
+	pasted := fmt.Sprintf("pasted at %d: héllo €\nsecond line", time.Now().UnixNano())
+	if err := b.Input(backend.Clipboard{MIME: "text/plain", Data: []byte(pasted)}); err != nil {
+		t.Fatal(err)
+	}
+	var got string
+	waitLong(t, 20*time.Second, "the pasted text in the X clipboard", func() bool {
+		got = xClipboard(t, "get")
+		return strings.Contains(got, strconv.Quote(pasted)) || strings.Contains(got, strconv.Quote(strings.ReplaceAll(pasted, "\n", "\r\n")))
+	})
+	t.Logf("X clipboard: %s", got)
+
+	copied := fmt.Sprintf("copied at %d: wörld ✓\nsecond line", time.Now().UnixNano())
+	set := exec.Command(engine, "exec", rdpContainer, xClipboardPath(t), "set", copied)
+	if err := set.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		set.Process.Kill()
+		set.Wait()
+	}()
+	waitLong(t, 20*time.Second, "the copied text from xrdp", func() bool {
+		mime, data := sink.ClipboardContent()
+		return mime == "text/plain" && string(data) == copied
+	})
+
+	if err := r.stop(t); !errors.Is(err, context.Canceled) {
+		t.Errorf("Run returned %v, want context.Canceled", err)
+	}
+}
+
 // waitLong polls cond until it holds or d passes.
 func waitLong(t *testing.T, d time.Duration, what string, cond func() bool) {
 	t.Helper()
@@ -382,51 +432,72 @@ func waitLong(t *testing.T, d time.Duration, what string, cond func() bool) {
 	}
 }
 
-var queryPointerBin struct {
-	once sync.Once
-	path string
-	err  error
+// containerTools are the programs of internal/rdp's testdata built for
+// the container and copied into it, by name.
+var containerTools struct {
+	mu    sync.Mutex
+	paths map[string]string
+}
+
+// containerTool builds internal/rdp's testdata/name for the container,
+// copies it in once, and returns its path there.
+func containerTool(t *testing.T, name string) string {
+	t.Helper()
+	containerTools.mu.Lock()
+	defer containerTools.mu.Unlock()
+	if p, ok := containerTools.paths[name]; ok {
+		return p
+	}
+	arch, err := exec.Command(engine, "exec", rdpContainer, "uname", "-m").Output()
+	if err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	goarch := map[string]string{"aarch64": "arm64", "x86_64": "amd64"}[strings.TrimSpace(string(arch))]
+	if goarch == "" {
+		goarch = runtime.GOARCH
+	}
+	bin := filepath.Join(t.TempDir(), name)
+	build := exec.Command("go", "build", "-o", bin, "../../rdp/testdata/"+name)
+	build.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+goarch, "CGO_ENABLED=0")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v: %s", name, err, out)
+	}
+	path := "/tmp/" + name
+	if out, err := exec.Command(engine, "cp", bin, rdpContainer+":"+path).CombinedOutput(); err != nil {
+		t.Fatalf("%s: %v: %s", name, err, out)
+	}
+	if containerTools.paths == nil {
+		containerTools.paths = map[string]string{}
+	}
+	containerTools.paths[name] = path
+	return path
 }
 
 // queryPointer runs internal/rdp's testdata/querypointer in the
 // container.
 func queryPointer(t *testing.T) string {
 	t.Helper()
-	q := &queryPointerBin
-	q.once.Do(func() {
-		arch, err := exec.Command(engine, "exec", rdpContainer, "uname", "-m").Output()
-		if err != nil {
-			q.err = err
-			return
-		}
-		goarch := map[string]string{"aarch64": "arm64", "x86_64": "amd64"}[strings.TrimSpace(string(arch))]
-		if goarch == "" {
-			goarch = runtime.GOARCH
-		}
-		dir, err := os.MkdirTemp("", "querypointer")
-		if err != nil {
-			q.err = err
-			return
-		}
-		bin := filepath.Join(dir, "querypointer")
-		build := exec.Command("go", "build", "-o", bin, "../../rdp/testdata/querypointer")
-		build.Env = append(os.Environ(), "GOOS=linux", "GOARCH="+goarch, "CGO_ENABLED=0")
-		if out, err := build.CombinedOutput(); err != nil {
-			q.err = fmt.Errorf("%w: %s", err, out)
-			return
-		}
-		if out, err := exec.Command(engine, "cp", bin, rdpContainer+":/tmp/querypointer").CombinedOutput(); err != nil {
-			q.err = fmt.Errorf("%w: %s", err, out)
-			return
-		}
-		q.path = "/tmp/querypointer"
-	})
-	if q.err != nil {
-		t.Fatalf("querypointer: %v", q.err)
-	}
-	out, err := exec.Command(engine, "exec", rdpContainer, q.path).Output()
+	out, err := exec.Command(engine, "exec", rdpContainer, containerTool(t, "querypointer")).Output()
 	if err != nil {
 		t.Fatalf("querypointer: %v", err)
+	}
+	return string(out)
+}
+
+// xClipboardPath returns the path of internal/rdp's testdata/xclipboard
+// in the container.
+func xClipboardPath(t *testing.T) string {
+	t.Helper()
+	return containerTool(t, "xclipboard")
+}
+
+// xClipboard runs internal/rdp's testdata/xclipboard in the container
+// with args, and returns what it prints.
+func xClipboard(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := exec.Command(engine, append([]string{"exec", rdpContainer, xClipboardPath(t)}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("xclipboard: %v: %s", err, out)
 	}
 	return string(out)
 }
