@@ -813,7 +813,7 @@ place for fixes that ship on v0 before beta.
     those that may type hold 510 and read-only ones none. `limits`
     bounds it, and docs/configuration.md says so.
     `TestStalledViewersRelease` holds eight stalled viewers at
-    10.8 MiB each and finds 0.7 MiB each once they are dropped, and
+    10.8 MiB each and finds 0.6 MiB each once they are dropped, and
     `TestHiddenViewersRelease` finds eight read-only viewers that
     acknowledged and hid holding about 1.0 MiB each while they stay,
     not a screen: 0.5 MiB is the writer's buffer of the last snapshot
@@ -1230,6 +1230,28 @@ place for fixes that ship on v0 before beta.
     the hidden viewers at 0.9 to 1.1 MiB each; with the hidden
     branch's `last = nil` removed from `runTerminal`, the test fails
     at 10.7 to 10.9 MiB a viewer.
+  - ~~`TestStalledViewersRelease` measured held within about 0.1 s of
+    its viewer timeout.~~ Fixed: each stalled viewer's 3 s ran from
+    its own first frame, and once `redraw` waited for the owner, the
+    eight joins and the measurement took 2.87 to 2.96 s under
+    `-race`, so a slower run could drop the first viewers before held,
+    which counts what all eight hold. The test now gives its viewers
+    10 s, draws between the joins without waiting for the owner,
+    which it does once before held, and fails if held came 10 s or
+    more after the first join, as it could then have missed a
+    viewer. The joins and the measurement took 1.15 to 1.37 s, and
+    the test with `TestHiddenViewersRelease` passed 30 runs of 30
+    with `-race` at a load average of 2.4 to 6.5. With the stall
+    timer off the test fails, the viewers staying; with each
+    terminal writer's last screen kept after it ends, it fails at
+    10.5 MiB a viewer once they are dropped. What still varies is
+    the base, after another test: in 7 runs of 30 both measurements
+    were up to 0.6 MiB a viewer lower, and a heap profile of such a
+    base held 4.7 MB more input cloned by a stream's reader, the
+    earlier test's fake backend and its record of every redraw's
+    input, still reachable. `TestHiddenViewersRelease` dips the same
+    way. What keeps it is not found; both tests stay within their
+    bounds.
   - [009](../009-react-web-client.md) and the Go client: send `hello` in
     the query and the token in the subprotocol; expect `close` before
     `welcome` for a refusal; reconnect as the owner with an access token
