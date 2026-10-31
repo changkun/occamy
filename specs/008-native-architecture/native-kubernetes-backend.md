@@ -209,13 +209,19 @@ protocol's default.
    - `target`: the API server, `host:port` or a host alone for port 443.
      Always HTTPS.
    - `kubernetes`: `namespace` (default `default`), `pod` (required),
-     `container` (default: the pod's default container), `command`
-     (default C), `attach` (default false; not with `command`), `tty`
-     (default true).
+     `container`, `command` (default C), `attach` (default false; not
+     with `command`), `tty` (default true). `container` may be left out
+     only for a pod with one container: the API server then picks it,
+     and refuses a pod with more with 400, since it does not read
+     kubectl's `kubectl.kubernetes.io/default-container` annotation.
+     (Corrected after review: this said the pod's default container, as
+     kubectl picks it.)
    - `credentials`: exactly one of `token_file`, `token_env`, the pair
      `client_cert_file` and `client_key_file`, or `prompt: true`, which
      asks the owner for a bearer token (an empty answer sends none). No
-     `username`, password or SSH key.
+     `username`, password or SSH key. A token file holds at most 64 KiB,
+     as every secret file does, and trailing line breaks are dropped
+     from a token in a file or a variable.
    - `tls`: a vnc connection's keys. `server_name`, `ca_file` and
      `pins` as there; `require` is implied, since the API server is
      always reached over TLS; `insecure_skip_verify` accepts any
@@ -248,8 +254,11 @@ protocol's default.
    - Output: a message is at most 1 MiB, and is streamed to the
      terminal in reads of at most 32 KiB, so no message is held whole.
    - The error channel keeps at most 16 KiB; more fails the session.
-     Messages from the server are quoted and cut to 256 bytes in
-     errors.
+     Whatever the server chose is cut to 256 bytes in errors, with its
+     control characters escaped or replaced: a `Status`'s reason and
+     message, a subprotocol, the headers of a failed upgrade that
+     `coder/websocket` or `net/http` quote, and a refused certificate's
+     subject and the names x509 lists.
 
 ## Affects
 
@@ -326,7 +335,8 @@ per-protocol table moves Kubernetes to native.
     prompt (and an empty answer's 401), a wrong pin with no request on
     the server, and a 403 as `backend-failed`.
 - **Coverage** (`go test -cover`): `internal/backend/kubernetes` 95.5%,
-  `internal/config` 94.7%, `server` 92.4%.
+  `internal/config` 94.7%, `server` 92.4%; after the review's fixes
+  97.0%, 94.6% and 92.4%.
 - **Fuzzing**, 60 seconds each with `-parallel 4` on a shared host
   (load about 13):
   - `FuzzDemux`: 3,016,408 executions, 22 new interesting inputs, no
@@ -375,10 +385,62 @@ per-protocol table moves Kubernetes to native.
   - The ServiceAccount with `get` and `create` on `pods/exec` is
     allowed; the one without them gets 403. Since v1.34 predates the
     1.35 `create` check, this run exercised the `get` path.
+- **Independent review** of the PR at a4db355. It found the security
+  design sound, and the certificate checked before any byte is sent.
+  Its findings, each fixed with a test that fails without the fix:
+  - The integration test's race on `ErrNotRunning`, fixed as above.
+  - A panic in the first `sink.Resize`, which serve makes on Run's own
+    goroutine, outside the recovering wrappers, left the stream open,
+    and the command running until the kubelet's idle timeout. serve
+    now closes the stream by `defer`, however it ends, which also
+    replaces the close after a failed write of the first size.
+    `TestGoroutinePanics/first_resize` and `TestCancelBeforeSize`.
+  - Errors of a failed upgrade quoted the server whole, up to the 64 KiB
+    of headers the transport reads: `coder/websocket`'s errors for
+    `Sec-WebSocket-Protocol`, `Sec-WebSocket-Accept`, `Upgrade`,
+    `Connection` and extensions, and `net/http`'s for a malformed status
+    line. They are cut to 256 bytes with control characters replaced,
+    and a refused certificate's subject and reason are cut the same
+    way. The cut applies to what failed, not to the request's URL that
+    a `url.Error` repeats, so that the URL, which is ours and long,
+    cannot push the reason out of it. `TestForgedUpgrade`,
+    `TestCertificateErrorCut`, `TestTLSVersion` and `TestCut`.
+  - The default container was documented wrong (decision 6).
+  - Tests for three surviving mutants: `TestCancelRace` reproduces the
+    race that e43ee00 fixed, with a hook that cancels, closes the stream
+    as `coder/websocket` does and waits for the reader to end before
+    serve waits; `TestCertificateChain` checks a leaf that an
+    intermediate signed, with and without the intermediate; and
+    `TestCancelBeforeSize` cancels between the dial and the first
+    write.
+  - Hardening: a secret file of more than 64 KiB is refused, for every
+    kind of secret (`TestSecretFileBound`, and `TestEndlessSecretFile`
+    with a FIFO kept open in place of `/dev/zero`). A token from
+    `token_env` loses its trailing line breaks, as one from
+    `token_file` does. docs/configuration.md says that an API server
+    behind a path prefix is not supported.
+  - The reviewer also ran the integration test over v4 alone, through
+    the kubelet's proxy path, against k3s v1.34.1: 8 of 8 passed.
+  - Mutation check of the fixes: 13 mutants, each killed. They undo
+    the close by `defer`, e43ee00's fix, the intermediates, the cut of
+    dial errors, the unwrapping of `url.Error`, the certificate error
+    returned on its own, the cut of its subject and of its reason,
+    `cut`'s length and its replacement of control characters, the
+    secret file's length check and its limited read, and `token_env`'s
+    trim. Three of the reviewer's mutants still survive, none of them
+    among the review's findings: the dial's own `ctx.Err()` (the error
+    it would return wraps `context.Canceled` anyway), input not copied
+    before it is queued, and compression allowed in the upgrade.
 - **Deviations.** None from the decisions. One addition: `tls.require`
   is accepted and means nothing for kubernetes, since TLS is always
   required.
-- **Follow-ups.** Run the integration test against a 1.35 or later
-  API server too, where the `create` check applies. Merge the three
-  copies of the certificate policy (VNC, RDP,
-  Kubernetes) into one package.
+- **Follow-ups.**
+  - Run the integration test against a 1.35 or later API server too,
+    where the `create` check applies.
+  - Merge the three copies of the certificate policy (VNC, RDP,
+    Kubernetes) into one package, and give the VNC copy a test of a
+    certificate chain, as the Kubernetes copy now has.
+  - Check the mode of secret and key files, as ssh does, and refuse
+    one that others can read.
+  - Bound the other files read at a session's start: an SSH private
+    key, a client certificate and its key, and CA files.
