@@ -140,7 +140,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   those, or Plain in the clear, is refused even if it offers VNC
   Authentication too. Cut text from the server allocates about
   three times the text kept, down from seven. An integration test runs
-  against TigerVNC (`docker/test/tigervnc`) in a container of its own.
+  against TigerVNC (`docker/demo/tigervnc`) in a container of its own.
 - Apple Remote Desktop authentication (security type 30) in the native
   VNC backend, so that it can log in to macOS Screen Sharing as a user
   of the Mac, but only when the backend's `vnc.Config.ARD` allows it:
@@ -458,6 +458,33 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   streams with the Go client. `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` move a
   second stack aside on a shared host, and `make e2e` follows the
   last two.
+- TigerVNC in the demo stack, beside x11vnc, and the guacd bridge's
+  parity matrix for VNC: `TestVNCParity` runs authentication, resize,
+  clipboard both ways, the cursor, keyboard layouts with AltGr and dead
+  keys, text input, sharing roles and reconnect on both servers,
+  through the native backend and through guacd, and fails on any cell
+  that differs from the matrix in the guacd bridge's spec. The demo
+  desktops report what reaches them, typed lines and clipboard text,
+  over the session's clipboard. The two TigerVNC test images became
+  one, `docker/demo/tigervnc`, which the integration tests build too.
+  x11vnc hangs now and then after an X error as a client connects; the
+  demo x11vnc runs under a watchdog that kills it when it reports an X
+  error or stops accepting connections, and starts it again. The matrix
+  tries a guacd cell up to three times, and a native cell that cannot
+  reach the desktop only while guacd cannot reach it either, and shows
+  the try at which a cell settled. A listed failure must fail with its
+  own error, and a unit test keeps the spec's matrix in step with the
+  suite. The screen row waits, after the frame that acknowledges its
+  input, for the desktop, two opaque colours: through guacd the first
+  such frame can still be black, and a screen of black and pixels not
+  drawn yet no longer passes for the desktop.
+- A soak, `make soak`: sessions through the demo stack's `occamy-v1`
+  for hours, while `TestSoak` samples `occamyd`'s goroutines, live heap
+  and open files from its debug listener and fails on growth.
+  `/debug/vars` publishes `goroutines` and `fds`. A v1 file's
+  `debug.address_env` takes the debug listener's address from an
+  environment variable, and leaves the listener off while it is unset
+  or empty, which `occamyd` logs at start with the variable's name.
 - The native RDP backend's clipboard, the first part of its second
   phase: `internal/rdp` joins static virtual channels and reassembles
   their chunks within a bound per channel, and carries text both ways
@@ -623,6 +650,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   terminal frame carries it in, so that a viewer got it cut there, with
   no regard for characters. Titles are now cut, between characters, at
   what that sequence carries.
+- The demo xrdp image restarts its channel server, which carries the
+  clipboard, when a connection reconnects to the session and the
+  channel server has exited. xrdp 0.10.1's channel server can exit when
+  a connection closes just after attaching to it, and xrdp starts it
+  only with the session. Until now every later connection then waited
+  10 seconds for it and got no clipboard, which once failed `make e2e`'s
+  clipboard check. `make e2e` now kills the channel server in the rdp
+  container and checks that the next connection has the clipboard. Give
+  it the `CONTAINER_ENGINE` that `make run` took, since it reaches the
+  container through that engine's compose.
 
 ### Security
 
@@ -644,6 +681,17 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the remote applies to the whole machine. The native VNC backend sent
   Power through QEMU's extended key events, and the VNC and guacd
   backends sent the keysyms.
+- The demo stack's debug routes, which have no authentication, are off
+  unless `make run OCCAMY_DEBUG=1` turns them on: `occamy-v1`'s debug
+  listener on the host's loopback interface, port 5638
+  (`OCCAMY_V1_DEBUG_PORT`), and the v0 service's pprof, from
+  `docker/occamy-debug.yaml`. `docker/occamy.yaml`, which served pprof
+  to anyone who could reach the v0 service, is now in release mode, and
+  the v0 service is published on the loopback interface only.
+  `make run` and `make bench` turn the routes off explicitly without
+  `OCCAMY_DEBUG=1`, so a variable left in the shell or in `docker/.env`
+  cannot turn them on. The pressure test and the soak need
+  `OCCAMY_DEBUG=1`.
 
 ## [0.6.0] - 2026-10-30
 

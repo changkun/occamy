@@ -728,6 +728,12 @@ name or group. A session token or a share is refused.
 | `occamyd` runs `limits.sessions` sessions | 4001 `forbidden`, "occamyd runs as many sessions as it takes" |
 | The session could not be opened for a cause of `occamyd`'s own | 1011 `internal-error` |
 
+A remote that fails at once, such as one whose certificate is not the
+pinned one, or a kubernetes API server that refuses the exec, can end
+the session before `welcome`. The stream then gets `close` 4006
+`backend-failed` without `welcome`, the same `close` it would have had
+after `welcome` ([protocol.md](protocol.md#the-response)).
+
 Once the stream has joined, the session is as one that
 `POST /api/v1/sessions` opened: its owner may leave and come back
 within the owner grace through
@@ -887,12 +893,14 @@ as the public listener's are. How to read the profiles is in
 
 ### `GET /debug/vars`
 
-Go's expvar: a JSON object with `cmdline`, `occamyd`'s command line, and
-`memstats`, the runtime's memory statistics. `occamyd` publishes no
-variables of its own. Abbreviated:
+Go's expvar: a JSON object with `cmdline`, `occamyd`'s command line,
+`memstats`, the runtime's memory statistics, and two variables of
+`occamyd`'s own: `goroutines`, the number of goroutines, and `fds`, the
+file descriptors it has open, counted in `/proc/self/fd` on Linux or
+`/dev/fd` on macOS, or -1 where it cannot count them. Abbreviated:
 
 ```json
-{"cmdline":["occamyd","-conf","/etc/occamy/conf.yaml"],"memstats":{"Alloc":4194304,"HeapInuse":6291456,"NumGC":12}}
+{"cmdline":["occamyd","-conf","/etc/occamy/conf.yaml"],"fds":14,"goroutines":23,"memstats":{"Alloc":4194304,"HeapInuse":6291456,"NumGC":12}}
 ```
 
 ### `GET /debug/pprof/`

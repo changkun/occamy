@@ -5,9 +5,10 @@
 # The v1 file of the demo stack's occamy-v1 service
 # (docker-compose.yaml), which serves API v1, protocol v1 and the web
 # client on port 5637 next to the v0 service: the demo SSH server, and
-# the demo VNC and RDP servers through occamyd's native backends, their
-# default, and through guacd, the explicit fallback and the benchmark's
-# baseline, side by side (specs/008-native-architecture/guacd-bridge.md,
+# the demo VNC servers, x11vnc and TigerVNC, and RDP server through
+# occamyd's native backends, their default, and through guacd, the
+# explicit fallback and the benchmark's baseline, side by side, for the
+# guacd bridge's parity gate (specs/008-native-architecture/guacd-bridge.md,
 # Parity gate). The user demo signs in with the password occamy, in the
 # web client at http://localhost:5637/static/ or with curl:
 #
@@ -19,6 +20,14 @@ version: 1
 listen: 0.0.0.0:5637
 # The image's build of the web client, served under /static/.
 web_client: client/occamy-web/dist
+# The debug listener, for the soak (tests/soak_test.go), which samples
+# occamyd's goroutines, heap and open files from it: off unless make run
+# OCCAMY_DEBUG=1 sets OCCAMY_V1_DEBUG_ADDRESS, which docker-compose.yaml
+# passes on, and then published on the host's loopback interface only.
+# occamyd warns at start that it is not on a loopback address, which
+# inside the container it cannot be and still be published.
+debug:
+  address_env: OCCAMY_V1_DEBUG_ADDRESS
 auth:
   # On a tmpfs (docker-compose.yaml): occamyd creates the key at start,
   # and tokens die with the container.
@@ -35,8 +44,16 @@ connections:
     insecure_ignore_host_key: true
     credentials: {username: occamy, password_env: OCCAMY_DEMO_SSH_PASSWORD}
     allow: {users: [demo]}
+  # Each VNC server and security type twice, through occamyd's native
+  # backend and through guacd, which tests/parity_test.go compares, and
+  # the RDP server twice. Each names its backend but vnc-native and
+  # rdp-native, which serve their protocols' defaults. The connections
+  # that prompt ask the owner for whatever the server wants, and for
+  # nothing where it wants nothing (None). The de and fr connections
+  # reach screens with the German and French keyboard layouts, for the
+  # matrix's keyboard rows.
   - id: vnc-native
-    name: VNC, native backend
+    name: x11vnc, native backend
     protocol: vnc
     # No backend: native is vnc's default, so this connection serves
     # the default end to end.
@@ -44,11 +61,141 @@ connections:
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
   - id: vnc-guacd
-    name: VNC, through guacd
+    name: x11vnc, through guacd
     protocol: vnc
     # guacd serves vnc only when a connection asks for it.
     backend: guacd
     target: vnc:5900
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: vnc-none-native
+    name: x11vnc without a password, native backend
+    protocol: vnc
+    backend: native
+    target: vnc:5901
+    credentials: {prompt: true}
+    allow: {users: [demo]}
+  - id: vnc-none-guacd
+    name: x11vnc without a password, through guacd
+    protocol: vnc
+    backend: guacd
+    target: vnc:5901
+    credentials: {prompt: true}
+    allow: {users: [demo]}
+  - id: tigervnc-native
+    name: TigerVNC, native backend
+    protocol: vnc
+    backend: native
+    target: tigervnc:5900
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: tigervnc-guacd
+    name: TigerVNC, through guacd
+    protocol: vnc
+    backend: guacd
+    target: tigervnc:5900
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: tigervnc-prompt-native
+    name: TigerVNC, asking for the password, native backend
+    protocol: vnc
+    backend: native
+    target: tigervnc:5900
+    credentials: {prompt: true}
+    allow: {users: [demo]}
+  - id: tigervnc-prompt-guacd
+    name: TigerVNC, asking for the password, through guacd
+    protocol: vnc
+    backend: guacd
+    target: tigervnc:5900
+    credentials: {prompt: true}
+    allow: {users: [demo]}
+  - id: tigervnc-plain-native
+    name: TigerVNC over VeNCrypt, native backend
+    protocol: vnc
+    backend: native
+    target: tigervnc:5901
+    # VeNCrypt's Plain, as the user occamy, over TLS with a certificate
+    # from the CA that the tigervnc service makes.
+    credentials: {username: occamy, password_env: OCCAMY_DEMO_PLAIN_PASSWORD}
+    tls: {ca_file: /run/occamy-vnc-ca/ca.pem}
+    allow: {users: [demo]}
+  - id: tigervnc-plain-guacd
+    name: TigerVNC over VeNCrypt, through guacd
+    protocol: vnc
+    backend: guacd
+    target: tigervnc:5901
+    # guacd checks no certificate, so no tls.
+    credentials: {username: occamy, password_env: OCCAMY_DEMO_PLAIN_PASSWORD}
+    allow: {users: [demo]}
+  - id: tigervnc-none-native
+    name: TigerVNC without a password, native backend
+    protocol: vnc
+    backend: native
+    target: tigervnc:5902
+    credentials: {prompt: true}
+    allow: {users: [demo]}
+  - id: tigervnc-none-guacd
+    name: TigerVNC without a password, through guacd
+    protocol: vnc
+    backend: guacd
+    target: tigervnc:5902
+    credentials: {prompt: true}
+    allow: {users: [demo]}
+  - id: vnc-de-native
+    name: x11vnc with the German layout, native backend
+    protocol: vnc
+    backend: native
+    target: vnc:5902
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: vnc-de-guacd
+    name: x11vnc with the German layout, through guacd
+    protocol: vnc
+    backend: guacd
+    target: vnc:5902
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: vnc-fr-native
+    name: x11vnc with the French layout, native backend
+    protocol: vnc
+    backend: native
+    target: vnc:5903
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: vnc-fr-guacd
+    name: x11vnc with the French layout, through guacd
+    protocol: vnc
+    backend: guacd
+    target: vnc:5903
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: tigervnc-de-native
+    name: TigerVNC with the German layout, native backend
+    protocol: vnc
+    backend: native
+    target: tigervnc:5903
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: tigervnc-de-guacd
+    name: TigerVNC with the German layout, through guacd
+    protocol: vnc
+    backend: guacd
+    target: tigervnc:5903
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: tigervnc-fr-native
+    name: TigerVNC with the French layout, native backend
+    protocol: vnc
+    backend: native
+    target: tigervnc:5904
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: tigervnc-fr-guacd
+    name: TigerVNC with the French layout, through guacd
+    protocol: vnc
+    backend: guacd
+    target: tigervnc:5904
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
   - id: rdp-native
