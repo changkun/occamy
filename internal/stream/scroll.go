@@ -312,7 +312,7 @@ func (sc *scroller) vote(rn run) int {
 	slot := func(k uint64) int {
 		// Fibonacci hashing spreads hashes that differ only in their high
 		// bits, as a test's weak hash may.
-		i := int((k * 0x9e3779b97f4a7c15) >> shift)
+		i := int((k * 0x9e3779b97f4a7c15) >> shift) // #nosec G115 -- shifted down to an index of the table
 		for sc.slots[i] != 0 && sc.keys[i] != k {
 			i = (i + 1) & (size - 1)
 		}
@@ -322,7 +322,7 @@ func (sc *scroller) vote(rn run) int {
 		if sc.row(rn.c, y) == nil {
 			continue
 		}
-		k := sc.shadow.rowHash(rn.c, y)
+		k := sc.rowHash(rn.c, y)
 		switch i := slot(k); sc.slots[i] {
 		case 0:
 			sc.keys[i], sc.slots[i] = k, int32(y+1) // #nosec G115 -- screens are at most 65535 pixels high
@@ -335,7 +335,7 @@ func (sc *scroller) vote(rn run) int {
 	for y := y0 + scrollStride/2; y < y1; y += scrollStride {
 		k := rowHash(sc.cur(rn, y))
 		sc.hashes++
-		if sc.row(rn.c, y) != nil && sc.shadow.rowHash(rn.c, y) == k {
+		if sc.row(rn.c, y) != nil && sc.rowHash(rn.c, y) == k {
 			continue // unchanged
 		}
 		if s := sc.slots[slot(k)]; s > 0 && int(s-1) != y {

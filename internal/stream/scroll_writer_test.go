@@ -276,7 +276,7 @@ func (b *wheeled) Input(ev backend.InputEvent) error {
 	if wh, ok := ev.(backend.Wheel); ok {
 		go func() {
 			b.mu <- struct{}{}
-			dy := 16 * int(wh.DY)
+			dy := 16 * wh.DY
 			r := b.Sink()
 			_ = r
 			scrollSink(b.tapped, image.Rect(0, 0, 320, 256), 6, b.top, dy, true)
