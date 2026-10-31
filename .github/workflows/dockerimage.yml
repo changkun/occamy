@@ -83,8 +83,21 @@ jobs:
     - uses: actions/setup-node@v7
       with:
         node-version: 24
+    # The protocol client's interop test runs it against occamyd's stream
+    # code, served by client/internal/webinterop.
+    - uses: actions/setup-go@v7
+      with:
+        go-version: stable
+    - name: Build the interop server
+      working-directory: .
+      run: go build -o "$RUNNER_TEMP/webinterop" ./client/internal/webinterop
     - run: npm ci --no-audit --no-fund
     - run: npm run lint
+    - run: npm run typecheck
+    - name: Test
+      env:
+        OCCAMY_INTEROP_SERVER: ${{ runner.temp }}/webinterop
+      run: npm test
     - run: npm run build
 
   image:
