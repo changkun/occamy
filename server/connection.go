@@ -95,7 +95,7 @@ func (p *proxy) serve(addr string) {
 func (p *proxy) routes() http.Handler {
 	mux := newRouteMux()
 	p.register(mux)
-	return logRequests(mux.ServeMux)
+	return logRequests(mux.serveMux())
 }
 
 // register adds the v0 routes to mux, each behind recoverV0, which

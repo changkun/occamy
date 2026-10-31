@@ -285,7 +285,7 @@ func newLegacyV0(g config.Guacd) (*proxy, error) {
 // response writer, which is the only one through which a body over the
 // limit can have net/http close the connection.
 func (s *server) routes() http.Handler {
-	return limitBodies(maxBodyBytes)(logRequests(recovery(apiFallback(s.mux().ServeMux))))
+	return limitBodies(maxBodyBytes)(logRequests(recovery(apiFallback(s.mux()))))
 }
 
 // mux returns the public listener's routes: API v1, /healthz and, with
@@ -305,24 +305,49 @@ func (s *server) mux() *routeMux {
 	return mux
 }
 
-// routeMux is a ServeMux that keeps the pattern of every route it
-// registers, so that a test can check that docs/api.md describes each.
+// routeMux collects routes, and builds the ServeMux that serves them,
+// so that a test can check that docs/api.md describes each route's
+// pattern. It holds no ServeMux that a route could be added to past the
+// list: the ServeMux that serves is built from it.
 type routeMux struct {
-	*http.ServeMux
-	patterns []string
+	routes []route
 }
 
-func newRouteMux() *routeMux { return &routeMux{ServeMux: http.NewServeMux()} }
+type route struct {
+	pattern string
+	h       http.Handler
+}
 
-// Handle registers h for pattern, as http.ServeMux.Handle does.
+func newRouteMux() *routeMux { return &routeMux{} }
+
+// Handle adds a route for pattern to h, as http.ServeMux.Handle does.
 func (m *routeMux) Handle(pattern string, h http.Handler) {
-	m.patterns = append(m.patterns, pattern)
-	m.ServeMux.Handle(pattern, h)
+	m.routes = append(m.routes, route{pattern, h})
 }
 
-// HandleFunc registers h for pattern, as http.ServeMux.HandleFunc does.
+// HandleFunc adds a route for pattern to h, as http.ServeMux.HandleFunc
+// does.
 func (m *routeMux) HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request)) {
 	m.Handle(pattern, http.HandlerFunc(h))
+}
+
+// patterns returns the routes' patterns, in the order they were added.
+func (m *routeMux) patterns() []string {
+	p := make([]string, len(m.routes))
+	for i, r := range m.routes {
+		p[i] = r.pattern
+	}
+	return p
+}
+
+// serveMux returns a ServeMux that serves the routes. Like
+// http.ServeMux.Handle, it panics if two patterns conflict.
+func (m *routeMux) serveMux() *http.ServeMux {
+	mux := http.NewServeMux()
+	for _, r := range m.routes {
+		mux.Handle(r.pattern, r.h)
+	}
+	return mux
 }
 
 // newPublicServer returns the public listener's server for h, which
@@ -353,7 +378,7 @@ func newPublicServer(h http.Handler, tlsConfig *tls.Config) *http.Server {
 // as long as asked.
 func newDebugServer() *http.Server {
 	return &http.Server{
-		Handler:           logRequests(recovery(debugMux().ServeMux)),
+		Handler:           logRequests(recovery(debugMux().serveMux())),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}

@@ -97,11 +97,12 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
 	return false
 }
 
-// apiFallback answers requests for /api/v1 and under it that no route of
-// mux takes with API v1's error, where the ServeMux would answer in plain
-// text: 404 for a path without a route, and 405 with Allow for a route
-// that takes other methods. Everything else goes to mux.
-func apiFallback(mux *http.ServeMux) http.Handler {
+// apiFallback serves routes, and answers requests for /api/v1 and under
+// it that no route takes with API v1's error, where the ServeMux would
+// answer in plain text: 404 for a path without a route, and 405 with
+// Allow for a route that takes other methods.
+func apiFallback(routes *routeMux) http.Handler {
+	mux := routes.serveMux()
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1" && !strings.HasPrefix(r.URL.Path, "/api/v1/") {
 			mux.ServeHTTP(w, r)

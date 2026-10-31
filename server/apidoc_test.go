@@ -87,7 +87,7 @@ func registeredRoutes(t *testing.T) []string {
 	if s.oidc == nil || s.v0 == nil {
 		t.Fatalf("a server without its optional routes: oidc %v, legacy_v0 %v", s.oidc != nil, s.v0 != nil)
 	}
-	routes := slices.Concat(s.mux().patterns, debugMux().patterns)
+	routes := slices.Concat(s.mux().patterns(), debugMux().patterns())
 	if len(routes) == 0 {
 		t.Fatal("no routes registered")
 	}
