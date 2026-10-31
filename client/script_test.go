@@ -474,7 +474,12 @@ func TestAgreed(t *testing.T) {
 			got.FrameWindow != want.FrameWindow || got.MaxMessageSize != want.MaxMessageSize || got.CacheSlots != want.CacheSlots {
 			t.Errorf("agreed %+v, want %+v", got, want)
 		}
-		// A client without a cache agrees to no slots.
+		// A client without a cache offers neither the cached codec nor
+		// slots, and agrees to neither, whatever the server states.
+		if h := (client.Options{NoCache: true}).Hello(); h.Capabilities.CacheSlots != 0 || slices.Contains(h.Capabilities.Codecs, protocol.CodecCached) {
+			t.Errorf("offered %+v without a cache", h.Capabilities)
+		}
+		w.Capabilities.Codecs = append(w.Capabilities.Codecs, protocol.CodecCached)
 		sc = newScripted(t, w, client.Options{NoCache: true})
 		if got := sc.cl.Capabilities(); got.CacheSlots != 0 || slices.Contains(got.Codecs, protocol.CodecCached) {
 			t.Errorf("agreed %+v without a cache", got)
