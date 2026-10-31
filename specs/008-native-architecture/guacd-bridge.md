@@ -643,7 +643,8 @@ that guacd was `vnc`'s default, they are corrected below.
     `guacd` for rdp and telnet, so a vnc connection without `backend`,
     and an ad-hoc vnc target without `adhoc_backends`, get the native
     backend. `backend: guacd` stays valid for vnc, and
-    `adhoc_backends: {vnc: guacd}` for ad-hoc targets.
+    `adhoc_backends: {vnc: guacd}` for ad-hoc targets. (rdp
+    followed: see RDP below.)
   - `tls` and `ard` still need the native backend; their refusals now
     name the backend that was set (`backend: guacd would not: leave
     backend out, or set native`), since a connection without `backend`
