@@ -15,7 +15,7 @@ affects:
   - go.mod
 effort: large
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -34,9 +34,11 @@ guacd. The owner set two targets:
   interactions.
 
 This spec defines the yardstick: the metrics, the scenarios, how they are
-measured, and how the targets are judged. The harness measures v0 first.
-Protocol v1 gets a driver in the same harness once
-[client-core](client-core.md) exists.
+measured, and how the targets are judged. The harness measured v0 first.
+Protocol v1 has a driver in the same harness, through
+[client-core](client-core.md), whose full run waits for the rest of the
+graphics pipeline and for native RDP
+([the v1 series](#implementation-notes-the-v1-series)).
 
 ## Metrics
 
@@ -85,7 +87,9 @@ refresh interval on top (16.7 ms at 60 Hz). Counted to photons, the
 
 Every scenario runs over v0 through occamyd, the shipped path. A second
 v0 series connects to guacd directly, to separate occamyd's proxying cost
-from guacd's own. A v1 series is added later.
+from guacd's own. Two v1 series run them over protocol v1: one with
+occamyd's native backends, and one through the guacd bridge for
+comparison within v1.
 
 | ID | Protocol | Scenario | Primary metric |
 |----|----------|----------|----------------|
@@ -159,10 +163,12 @@ conditions and series, and the endpoint. It writes a JSON result and a
 Markdown table.
 
 - **Drivers:** v0 through occamyd (log in, dial `/api/v0/connect`); v0
-  direct to guacd (the `internal/guacd` handshake); v1 later through the
-  `client` package. Each driver answers `sync` the way a browser does,
-  announces the image types a browser announces (PNG, JPEG, WebP), and
-  keeps a decoded framebuffer.
+  direct to guacd (the `internal/guacd` handshake); v1 through the
+  `client` package and API v1 (sign in, open a connection's stream). Each
+  v0 driver answers `sync` the way a browser does and announces the
+  image types a browser announces (PNG, JPEG, WebP); the v1 driver
+  offers the codecs occamy's web client offers and acknowledges each
+  frame once it has looked at it. Each keeps a decoded framebuffer.
 - **Guacamole interpreter** (`internal/guacamole`, next to the parser,
   so that [guacd-bridge](guacd-bridge.md) can reuse it):
   - It applies `size`, `img`/`blob`/`end`, `copy`, `transfer`,
@@ -301,8 +307,10 @@ from the v1 series, which waits for [client-core](client-core.md).
 
 ### Not implemented
 
-- **The v1 series**, which needs the Go client core
-  ([client-core](client-core.md)). This was planned as later work.
+- ~~**The v1 series**, which needs the Go client core
+  ([client-core](client-core.md)).~~ Its harness shipped on 2026-10-31;
+  see [the v1 series](#implementation-notes-the-v1-series). Its full run
+  has not been made, and waits for the items named there.
 
 ### Unspecified work
 
@@ -370,4 +378,133 @@ from the v1 series, which waits for [client-core](client-core.md).
 - The shell's echo over SSH on its own.
 - An image-quality score for G6, so that its bytes compare at equal
   quality. The scene's photograph can be regenerated from its seed.
-- The v1 series, once client-core exists.
+- ~~The v1 series, once client-core exists.~~ The harness is done (see
+  below); the full run is a follow-up of its own.
+
+## Implementation notes: the v1 series
+
+**Status:** the harness is done; the measurement is not. On 2026-10-31
+the owner decided that v1's numbers are not to be taken as its verdict
+before the graphics pipeline's remaining tasks (Refinement, Tile cache,
+and Encode cache and workers, in
+[graphics-pipeline](graphics-pipeline.md)) and native RDP
+([native-rdp-backend](native-rdp-backend.md)) are in occamyd. So
+`docs/benchmarks.md` documents how to run the v1 series and publishes no
+v1 results, and no target is judged met or missed yet. One short pass
+per scenario family checked that the harness works and that its
+numbers are plausible; those numbers are a harness check, kept in the
+pull request, not a result.
+
+- **What was done:**
+  - Two series, `v1-native` (SSH and VNC through occamyd's own
+    backends) and `v1-guacd` (VNC and RDP through the guacd bridge), on
+    the scenarios, metrics, proxy and bench desktop of the v0 series. A
+    series serves only the protocols it has a connection for and skips
+    the others: native RDP is not registered, and SSH has no guacd
+    backend in v1.
+  - `bench/v1.go` drives the Go client core through API v1: it signs in
+    at `POST /api/v1/auth/token`, opens
+    `GET /api/v1/connections/{id}/stream` with `client.Dial`, asking for
+    1024 × 768 pixels or 99 × 39 cells, and after each scenario closes
+    the client and ends the session with `DELETE /api/v1/sessions/{id}`.
+  - The session that the scenarios drive is no longer Guacamole's: it
+    takes keys and reports complete frames that drew, with a marker
+    checked on each, and a v0 or a v1 reader fills it. The scenarios did
+    not change, apart from the marker, which now has a pixel form and a
+    terminal-cell form.
+  - The stack's `occamy-v1` service serves `docker/bench/occamy-v1.yaml`
+    in the bench stack, which `docker-compose.bench.yaml` mounts over the
+    demo's v1 file: the four connections, the demo user, and 100
+    sessions per user. guacd's published port and `make bench`'s project
+    and ports follow `COMPOSE_PROJECT_NAME`, `OCCAMY_PORT`,
+    `OCCAMY_V1_PORT` and `GUACD_PORT`, for a second stack on a shared
+    host.
+  - CPU sampling reads the `occamy-v1` container as well, and a v1
+    series' server CPU is `occamy-v1`'s and guacd's.
+  - CI's bench job runs both v1 series with `-quick` under N1 after the
+    v0 smoke run, on the same stack.
+- **How the metrics map to v1:**
+  - *Decoding.* The client offers what the web client offers where the
+    browser decodes everything: deflate, WebP, JPEG, then raw. The
+    harness plugs decoders into the client core's pool: deflate from
+    `internal/codec` (one `Inflater` per goroutine, from a pool), WebP
+    from `gen2brain/vpx/webp` with `ToRGBA` after `DecodeConfig`, and
+    JPEG from `image/jpeg`. The client core applies a frame to its
+    framebuffer when `Next` delivers it, so the probe reads the same
+    framebuffer a client draws from.
+  - *Frames.* A graphical frame draws if its dirty rectangles are not
+    empty; the reader calls `Next` again at once, which acknowledges the
+    frame, as a client that draws without delay does.
+  - *Terminals.* The SSH backend ignores keys, so the harness sends the
+    bytes xterm.js sends for them as `term-input`. The client core
+    passes a terminal's bytes through, and the harness writes them to
+    `internal/terminal`, which stands in for xterm.js: a terminal frame
+    draws if it carried bytes, and T2's end is the first frame after
+    which a cell has the marker's background (SGR 48;5;201). This is the
+    client-side decoding of a terminal; the client core has none.
+  - *Decode time* is the decoders' time, summed over the pool's
+    goroutines, or the terminal emulator's; the copy of decoded tiles
+    into the framebuffer is not in it. v0's includes compositing, so the
+    column compares v1's two series, not v1 with v0.
+  - *G7* starts at the stream's upgrade. The sign-in, a bcrypt check
+    that a client makes once for many sessions, is recorded apart as
+    `sign_in_ms`. v0's G7 includes its login, which v0 makes for every
+    session.
+- **Decisions:**
+  - The terminal is 99 × 39 cells: what `stty size` reported in the
+    shell of a v0 session, whose terminal guacd sizes from 1024 × 768
+    pixels at 96 DPI. The same screens then cross both protocols.
+  - The v1 bridge's RDP keeps occamyd's default `disable-gfx`, which the
+    baseline's guacd did not have, rather than turning RDP's graphics
+    pipeline back on: the bridge as shipped is what native RDP will be
+    compared with within v1. Against the baseline, in which guacd 1.6
+    turned the pipeline on and xrdp encoded with RemoteFX Progressive
+    ([guacd-bridge](guacd-bridge.md)'s conformance notes), RDP through
+    the v1 bridge therefore differs in one guacd parameter.
+  - The v1 series are not in `make bench`'s default series, so that the
+    documented run of the v0 baseline keeps its duration; they are named
+    with `-series`.
+- **Tests:** `bench/v1_test.go`. The decoders against
+  `protocol/testdata/codecs.json` (lossless exactly, lossy at
+  `min_psnr`, a rectangle other than the header's refused, every invalid
+  vector refused). The bench stack's v1 file loads, and has every
+  connection the series name, with its protocol and backend, and the
+  user the harness signs in as. In process, through `session.Start` and
+  `stream.Serve` with fake backends: the readiness check and five probe
+  keys over a graphical session, and a terminal session whose echo draws
+  a frame and whose Return draws the marker's cells. `termBytes`' keys.
+  A v1 row's server CPU and the partial-frames note (`TestTableV1` in
+  `bench/bench_test.go`).
+- **Surprises:**
+  - A v1 frame is not a scene's frame. occamyd ends a frame whenever the
+    viewer's window allows and the screen changed, and the harness
+    acknowledges at once, so through the native VNC backend, which
+    applies x11vnc's updates as they come, the harness counted several
+    frames per frame of the scene, several times the scroll's and the
+    motion's rates in the harness check. Through the guacd
+    bridge, whose frames follow guacd's, it stayed below the scene's
+    rate, as v0 does. The delivered frame rate, the share of the scene,
+    and bytes and CPU per frame, the measures of G3 to G5, therefore do
+    not count scene frames in v1. The table notes a row whose frames
+    come more than 10% faster than its scene.
+- **Follow-ups:**
+  - Before the full run: the scene stamps each frame's number where the
+    harness can read it, in a form that survives lossy codecs, and the
+    harness counts the distinct scene frames it was shown, for both
+    protocols. The stamp changes the scene's pixels, so the baseline's
+    G3 to G5 are measured again with it. Whether the v1 harness should
+    acknowledge at a display's cadence, as a browser that acknowledges
+    per paint does, instead of at once, is open; the stamp makes the
+    count right either way.
+  - The full v1 run, with `-runs 3` under N0 to N2 on an idle host,
+    once Refinement, Tile cache, Encode cache and workers, and native
+    RDP are in occamyd; then `docs/benchmarks.md` gets the v1 results
+    and a table per scenario of the baseline, the v1 bridge, v1 native,
+    the target and whether it is met.
+  - A third v1 series, or `v1-native` gaining RDP, once native RDP is
+    registered.
+  - The client core's default decoders (a follow-up of
+    [client-core](client-core.md)): once `client` has them, the harness
+    uses them instead of its own.
+  - Whether the v1 bridge's RDP should be measured with RDP's graphics
+    pipeline on as well, to separate that parameter from occamyd's cost.

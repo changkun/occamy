@@ -12,6 +12,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - The desktop baseline and the per-scenario targets for protocol v1
   ([docs/benchmarks.md](docs/benchmarks.md)). `bench/vncprobe` measures
   the bench desktop's VNC server on its own.
+- The benchmark's v1 series, `v1-native` and `v1-guacd`: the same
+  scenarios over protocol v1, driven by the Go client core through API
+  v1 against native SSH and VNC and against VNC and RDP through guacd,
+  on the bench stack's `occamy-v1` service
+  ([docs/benchmarks.md](docs/benchmarks.md#the-v1-series)). CI runs them
+  quickly after the v0 smoke run. Their full results wait for the rest
+  of the graphics pipeline and for native RDP. `make bench` takes a
+  compose project and ports for a second stack on a shared host.
 - A public Go package for protocol v1, `changkun.de/x/occamy/protocol`,
   with its framing: the message header and its ignorable flag, the field
   encodings, a registry of message types, and the maximum message size.
