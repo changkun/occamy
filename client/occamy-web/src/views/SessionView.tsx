@@ -10,7 +10,7 @@ import { type ReactElement, Suspense, lazy, useEffect, useMemo, useRef, useState
 
 import { CanvasSurface, Role, SessionClass, cursorStyle } from '../protocol'
 import type { AccessToken, Api } from '../lib/api'
-import { type SessionController as Controller, SessionController, type SessionState } from '../lib/controller'
+import { type SessionController as Controller, SessionController, type SessionState, overlayOf } from '../lib/controller'
 import type { Ending } from '../lib/ending'
 import { type Size, cellGrid, deviceSize, fitSize, pixelRatio } from '../lib/layout'
 import { type Abilities, abilities, roleName } from '../lib/roles'
@@ -190,12 +190,12 @@ export function SessionView({ api, token, target, onLeave, onSignIn, onRejoin }:
           {state.bells > 0 ? `Bell ${state.bells}` : ''}
         </p>
         {panel === 'clipboard' && state.phase === 'open' && (
-          <ClipboardPanel key={state.clipboard ?? ''} controller={controller} remote={state.clipboard} can={can} onClose={() => setPanel(null)} />
+          <ClipboardPanel controller={controller} remote={state.clipboard} draft={state.draft} can={can} onClose={() => setPanel(null)} />
         )}
         {panel === 'share' && state.phase === 'open' && token !== null && (
           <SharePanel api={api} token={token} sessionId={state.sessionId} onClose={() => setPanel(null)} onSignIn={onSignIn} />
         )}
-        {(state.phase === 'connecting' || (state.phase === 'open' && !state.shown)) && (
+        {overlayOf(state) === 'connecting' && (
           <div className="overlay" role="status">
             <div className="card">
               <p>Connecting to {name}…</p>
@@ -205,7 +205,7 @@ export function SessionView({ api, token, target, onLeave, onSignIn, onRejoin }:
             </div>
           </div>
         )}
-        {state.phase === 'ended' && state.ending !== null && (
+        {overlayOf(state) === 'ended' && state.ending !== null && (
           <EndOverlay
             ending={state.ending}
             leaveLabel={signedIn ? 'Back to connections' : 'Close'}

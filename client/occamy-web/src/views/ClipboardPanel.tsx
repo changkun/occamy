@@ -4,7 +4,9 @@
 
 // The clipboard panel: the remote clipboard's text, to copy, and text to
 // put on the remote's clipboard, for the times the browser does not let
-// the page reach the local clipboard on its own.
+// the page reach the local clipboard on its own. The text being edited
+// is the controller's draft, so that a new remote clipboard does not
+// throw away what the user typed.
 
 import { type FormEvent, type ReactElement, useId, useState } from 'react'
 
@@ -16,12 +18,14 @@ export interface ClipboardPanelProps {
   controller: SessionController
   /** The remote clipboard's text, or null before any. */
   remote: string | null
+  /** The text in the panel: the remote's, or what the user made of it. */
+  draft: string
   can: Abilities
   onClose: () => void
 }
 
-export function ClipboardPanel({ controller, remote, can, onClose }: ClipboardPanelProps): ReactElement {
-  const [text, setText] = useState(remote ?? '')
+export function ClipboardPanel({ controller, remote, draft: text, can, onClose }: ClipboardPanelProps): ReactElement {
+  const setText = (t: string): void => controller.setDraft(t)
   const [status, setStatus] = useState('')
   const id = useId()
 
@@ -61,6 +65,14 @@ export function ClipboardPanel({ controller, remote, can, onClose }: ClipboardPa
         autoFocus
         onChange={(e) => setText(e.target.value)}
       />
+      {remote !== null && remote !== text && (
+        <p className="muted">
+          Edited: the remote clipboard holds other text.{' '}
+          <button type="button" onClick={() => setText(remote)}>
+            Show it
+          </button>
+        </p>
+      )}
       <div className="actions">
         {can.clipboard && (
           <>

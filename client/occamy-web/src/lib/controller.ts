@@ -59,6 +59,11 @@ export interface SessionState {
   prompts: readonly PromptEvent[]
   /** The remote clipboard's latest text, or null before any. */
   clipboard: string | null
+  /**
+   * The clipboard panel's text: the remote clipboard's, until the user
+   * edits it, after which a new remote clipboard leaves it alone.
+   */
+  draft: string
   /** How many times the bell rang. */
   bells: number
   /** The remote pointer's image, for cursorStyle. */
@@ -107,7 +112,12 @@ export interface ControllerOptions {
   document?: Document
   /** The page's window, for releasing keys on blur and closing on pagehide. */
   window?: EventTarget
-  /** Puts the remote's clipboard on the local one; it may refuse, as browsers do without focus. */
+  /**
+   * Puts the remote's clipboard on the local one, for a role that gives
+   * input; it may refuse, as browsers do without focus. A read-only
+   * viewer's local clipboard is left alone: what someone else copied
+   * there would replace what the viewer copied, unasked.
+   */
   writeClipboard?: (text: string) => Promise<void>
   /** connect, or a stand-in. */
   connect?: (url: string, token: string, options: ConnectOptions) => Promise<Session>
@@ -124,11 +134,27 @@ const initial: SessionState = {
   viewers: [],
   prompts: [],
   clipboard: null,
+  draft: '',
   bells: 0,
   cursor: null,
   size: { width: 0, height: 0 },
   shown: false,
   ending: null,
+}
+
+/**
+ * overlayOf says what covers the session's screen: the connecting
+ * notice until the first frame shows, why the session ended, or nothing,
+ * as for a session the user left, of which there is nothing to tell.
+ */
+export function overlayOf(state: SessionState): 'connecting' | 'ended' | null {
+  if (state.phase === 'connecting' || (state.phase === 'open' && !state.shown)) {
+    return 'connecting'
+  }
+  if (state.phase === 'ended' && state.ending !== null && !state.ending.quiet) {
+    return 'ended'
+  }
+  return null
 }
 
 const nothing: Abilities = abilities(Role.ReadOnly)
@@ -313,12 +339,17 @@ export class SessionController {
     }
   }
 
+  // run shows the session until it ends. If showing it fails here, as
+  // when the canvas or the terminal emulator throws, the stream is
+  // closed with unsupported, a session the client cannot show, so that
+  // occamyd does not keep streaming to a page that shows nothing.
   private run(s: Session, surface: Surface | null): void {
     this.running = true
     const signal = this.abort.signal
     new Display(s, surface, { onEvent: (ev) => this.onEvent(s, ev) }).run(signal).catch((err: unknown) => {
       if (!signal.aborted) {
         this.finish(describeFailure(err, this.context()))
+        void s.close(undefined, CloseCode.Unsupported, 'the client failed to show the session')
       }
     })
   }
@@ -350,8 +381,11 @@ export class SessionController {
         const text = clipboardText(ev.mime, ev.data)
         if (text !== null) {
           this.lastClipboard = text
-          this.update({ clipboard: text })
-          this.options.writeClipboard?.(text).catch(() => undefined)
+          const { draft, clipboard } = this.state
+          this.update({ clipboard: text, draft: draft === (clipboard ?? '') ? text : draft })
+          if (this.can.input) {
+            this.options.writeClipboard?.(text).catch(() => undefined)
+          }
         }
         return
       }
@@ -458,8 +492,10 @@ export class SessionController {
 
   /**
    * requestResize asks the remote for a screen of width × height, pixels
-   * or cells, if this client is the owner, and the screen is not that
-   * size already, nor was asked to be.
+   * or cells, if this client is the owner, unless that was the last size
+   * asked for, or the screen is that size and no other size is on its
+   * way: a window dragged back to the screen's size while the remote
+   * still applies another asks for it again.
    */
   requestResize(width: number, height: number): void {
     const s = this.session
@@ -470,11 +506,20 @@ export class SessionController {
     const w = Math.min(Math.round(width), graphical ? MAX_SIDE : MAX_COLS)
     const h = Math.min(Math.round(height), graphical ? MAX_SIDE : MAX_ROWS)
     const { size } = this.state
-    if ((w === size.width && h === size.height) || (w === this.lastResize.width && h === this.lastResize.height)) {
+    const asked = this.lastResize
+    const settled = (asked.width === 0 && asked.height === 0) || (asked.width === size.width && asked.height === size.height)
+    if ((settled && w === size.width && h === size.height) || (w === asked.width && h === asked.height)) {
       return
     }
     this.lastResize = { width: w, height: h }
     safely(() => s.resize(w, h))
+  }
+
+  /** setDraft keeps the clipboard panel's text as the user edits it. */
+  setDraft(text: string): void {
+    if (text !== this.state.draft) {
+      this.update({ draft: text })
+    }
   }
 
   /** answerPrompt answers the owner's prompt id, one answer per field. */
@@ -487,9 +532,13 @@ export class SessionController {
     this.update({ prompts: this.state.prompts.filter((p) => p.id !== id) })
   }
 
-  /** close leaves the session; for the owner, it runs on for the owner's grace, a minute. */
+  /**
+   * close leaves the session, and cancels an open still under way; for
+   * the owner, the session runs on for the owner's grace, a minute.
+   */
   async close(): Promise<void> {
     const s = this.session
+    this.abort.abort()
     this.finish(describeEnd(CloseCode.Normal, '', this.context()))
     await s?.close()
   }
