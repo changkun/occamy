@@ -38,8 +38,9 @@ services:
 
   occamy-v1:
     # The same image serving a v1 file (occamy-v1.yaml) on port 5637: the
-    # demo VNC servers, x11vnc and TigerVNC, through the native backend,
-    # vnc's default, and through guacd (backend: guacd), for API v1 and
+    # web client, the demo SSH server, and the demo VNC servers, x11vnc
+    # and TigerVNC, and the RDP server, through the native backends,
+    # their default, and through guacd (backend: guacd), for API v1 and
     # protocol v1 clients.
     image: ${OCCAMY_IMAGE:-occamy:latest}
     command: ["/occamy/occamyd", "-conf", "/occamy/v1.yaml"]
@@ -58,8 +59,10 @@ services:
       # The signing key, which the nonroot user creates at start.
       - /run/occamy:mode=1777
     environment:
+      OCCAMY_DEMO_SSH_PASSWORD: occamy
       OCCAMY_DEMO_VNC_PASSWORD: vncpassword
       OCCAMY_DEMO_PLAIN_PASSWORD: plainpassword
+      OCCAMY_DEMO_RDP_PASSWORD: occamy
       OCCAMY_V1_DEBUG_ADDRESS: ${OCCAMY_V1_DEBUG_ADDRESS:-}
     depends_on:
       guacd:
@@ -67,6 +70,10 @@ services:
       vnc:
         condition: service_healthy
       tigervnc:
+        condition: service_healthy
+      rdp:
+        condition: service_healthy
+      ssh:
         condition: service_healthy
 
   guacd:

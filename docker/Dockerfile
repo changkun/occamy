@@ -2,7 +2,7 @@
 # Use of this source code is governed by a MIT
 # license that can be found in the LICENSE file.
 
-# Stage 1: build the web client demo.
+# Stage 1: build the web client.
 FROM node:25-trixie-slim AS web
 WORKDIR /occamy/client/occamy-web
 COPY client/occamy-web/package.json client/occamy-web/package-lock.json ./
@@ -45,8 +45,6 @@ COPY --from=build /occamy/occamyd ./
 COPY conf.yaml ./
 COPY LICENSE ./licenses/
 COPY --from=build /occamy/THIRD_PARTY_LICENSES ./licenses/
-COPY client/occamy-web/LICENSE.guacamole ./licenses/guacamole/LICENSE
-COPY client/occamy-web/NOTICE.guacamole ./licenses/guacamole/NOTICE
 COPY --from=build /licenses/vpx ./licenses/vpx/
 COPY --from=build /licenses/jpegn ./licenses/jpegn/
 COPY --from=build /licenses/xxh3 ./licenses/xxh3/
@@ -55,6 +53,9 @@ COPY --from=build /licenses/cpuid ./licenses/cpuid/
 # jpegli, whose notice jpegn's own LICENSE does not carry.
 COPY third_party/jpegli/LICENSE ./licenses/jpegli/
 COPY --from=web /occamy/client/occamy-web/dist ./client/occamy-web/dist
+# The licenses of the packages the web client bundles, which its build
+# collects.
+COPY --from=web /occamy/client/occamy-web/dist/THIRD_PARTY_LICENSES.md ./licenses/web/
 
 EXPOSE 5636
 CMD ["/occamy/occamyd"]

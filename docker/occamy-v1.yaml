@@ -3,13 +3,14 @@
 # license that can be found in the LICENSE file.
 
 # The v1 file of the demo stack's occamy-v1 service
-# (docker-compose.yaml), which serves API v1 and protocol v1 on port 5637
-# next to the v0 service: the demo VNC servers, x11vnc and TigerVNC,
-# through occamyd's native backend, vnc's default, and through guacd, the
+# (docker-compose.yaml), which serves API v1, protocol v1 and the web
+# client on port 5637 next to the v0 service: the demo SSH server, and
+# the demo VNC servers, x11vnc and TigerVNC, and RDP server through
+# occamyd's native backends, their default, and through guacd, the
 # explicit fallback and the benchmark's baseline, side by side, for the
-# guacd bridge's parity gate
-# (specs/008-native-architecture/guacd-bridge.md, Parity gate). The user
-# demo signs in with the password occamy:
+# guacd bridge's parity gate (specs/008-native-architecture/guacd-bridge.md,
+# Parity gate). The user demo signs in with the password occamy, in the
+# web client at http://localhost:5637/static/ or with curl:
 #
 #	curl -s localhost:5637/api/v1/auth/token \
 #	  -H 'Content-Type: application/json' \
@@ -17,6 +18,8 @@
 
 version: 1
 listen: 0.0.0.0:5637
+# The image's build of the web client, served under /static/.
+web_client: client/occamy-web/dist
 # The debug listener, for the soak (tests/soak_test.go), which samples
 # occamyd's goroutines, heap and open files from it: off unless make run
 # OCCAMY_DEBUG=1 sets OCCAMY_V1_DEBUG_ADDRESS, which docker-compose.yaml
@@ -33,13 +36,22 @@ auth:
     - name: demo
       password_hash: "$2a$10$DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
 connections:
-  # Each server and security type twice, through occamyd's native backend
-  # and through guacd, which tests/parity_test.go compares. Each names its
-  # backend but vnc-native, which serves vnc's default. The
-  # connections that prompt ask the owner for whatever the server wants,
-  # and for nothing where it wants nothing (None). The de and fr
-  # connections reach screens with the German and French keyboard
-  # layouts, for the matrix's keyboard rows.
+  - id: ssh
+    name: SSH
+    protocol: ssh
+    target: ssh:22
+    # The demo server makes its host keys when it starts.
+    insecure_ignore_host_key: true
+    credentials: {username: occamy, password_env: OCCAMY_DEMO_SSH_PASSWORD}
+    allow: {users: [demo]}
+  # Each VNC server and security type twice, through occamyd's native
+  # backend and through guacd, which tests/parity_test.go compares, and
+  # the RDP server twice. Each names its backend but vnc-native and
+  # rdp-native, which serve their protocols' defaults. The connections
+  # that prompt ask the owner for whatever the server wants, and for
+  # nothing where it wants nothing (None). The de and fr connections
+  # reach screens with the German and French keyboard layouts, for the
+  # matrix's keyboard rows.
   - id: vnc-native
     name: x11vnc, native backend
     protocol: vnc
@@ -186,5 +198,28 @@ connections:
     target: tigervnc:5904
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
+  - id: rdp-native
+    name: RDP, native backend
+    protocol: rdp
+    # No backend: native is rdp's default, as for vnc-native.
+    target: rdp:3389
+    # xrdp speaks TLS without NLA, and signs its certificate itself when
+    # the image is built, so there is nothing to pin in advance: for the
+    # demo only, and occamyd warns of it when it starts.
+    security: tls
+    tls: {insecure_skip_verify: true}
+    credentials: {username: occamy, password_env: OCCAMY_DEMO_RDP_PASSWORD}
+    allow: {users: [demo]}
+  - id: rdp-guacd
+    name: RDP, through guacd
+    protocol: rdp
+    # guacd serves rdp only when a connection asks for it.
+    backend: guacd
+    target: rdp:3389
+    credentials: {username: occamy, password_env: OCCAMY_DEMO_RDP_PASSWORD}
+    allow: {users: [demo]}
 guacd:
   address: guacd:4822
+  params:
+    # For rdp-guacd: accept xrdp's self-signed certificate.
+    rdp: {ignore-cert: "true"}

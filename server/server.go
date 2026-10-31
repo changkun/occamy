@@ -18,6 +18,7 @@ import (
 	"net/netip"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -59,6 +60,9 @@ type server struct {
 	oidc     *oidcSignIn // nil unless auth.oidc
 	tls      *tls.Config // nil serves plain HTTP
 	v0       *proxy      // nil unless legacy_v0
+	// webClient is the directory of the web client served under
+	// /static/, or empty.
+	webClient string
 
 	// API v1's sessions and streams.
 	connections []config.Connection
@@ -177,7 +181,8 @@ func listen(f *config.File) (ln, dln net.Listener, err error) {
 
 // newServer prepares a v1 file's server: its signing key, created with a
 // warning if the file does not exist, the verifier of occamyd's and the
-// trusted issuers' tokens, the static users, TLS and the v0 routes.
+// trusted issuers' tokens, the static users, TLS, the v0 routes and the
+// web client, with a warning if it is not built.
 func newServer(f *config.File) (*server, error) {
 	key, created, err := auth.LoadOrCreateKey(f.Auth.SigningKeyFile)
 	if err != nil {
@@ -186,6 +191,10 @@ func newServer(f *config.File) (*server, error) {
 	if created {
 		// #nosec G706 -- the operator's configuration, not a client's input.
 		log.Printf("warning: created a new signing key in %s; tokens signed with any earlier key no longer verify", f.Auth.SigningKeyFile)
+	}
+	for _, w := range loadWarnings(f) {
+		// #nosec G706 -- the operator's configuration, not a client's input.
+		log.Printf("warning: %s", w)
 	}
 	pub, ok := key.Public().(ed25519.PublicKey)
 	if !ok {
@@ -226,6 +235,13 @@ func newServer(f *config.File) (*server, error) {
 		streamsCfg:    f.Streams.WithDefaults(),
 		sessions:      map[string]*sessionInfo{},
 		owned:         map[principal]int{},
+		webClient:     f.WebClient,
+	}
+	if f.WebClient != "" {
+		if _, err := os.Stat(filepath.Join(f.WebClient, "index.html")); err != nil { // #nosec G703 -- the path comes from the operator's configuration
+			// #nosec G706 -- the operator's configuration, not a client's input.
+			log.Printf("warning: web_client: %v; /static/ serves no web client until it is built there (make client)", err)
+		}
 	}
 	for _, o := range f.Origins {
 		s.origins[strings.ToLower(o)] = true
@@ -281,16 +297,17 @@ func newLegacyV0(g config.Guacd) (*proxy, error) {
 }
 
 // routes returns the public listener's handler: API v1, /healthz and,
-// with legacy_v0, the v0 routes, behind the body limit, the request log
-// and the recovery. The body limit comes first, on net/http's own
-// response writer, which is the only one through which a body over the
-// limit can have net/http close the connection.
+// with web_client and legacy_v0, the web client and the v0 routes,
+// behind the body limit, the request log and the recovery. The body
+// limit comes first, on net/http's own response writer, which is the
+// only one through which a body over the limit can have net/http close
+// the connection.
 func (s *server) routes() http.Handler {
 	return limitBodies(maxBodyBytes)(logRequests(recovery(apiFallback(s.mux()))))
 }
 
 // mux returns the public listener's routes: API v1, /healthz and, with
-// legacy_v0, the v0 routes.
+// web_client and legacy_v0, the web client and the v0 routes.
 func (s *server) mux() *routeMux {
 	mux := newRouteMux()
 	mux.HandleFunc("GET /healthz", healthz)
@@ -300,6 +317,9 @@ func (s *server) mux() *routeMux {
 	}
 	s.registerSessions(mux)
 	s.registerStreams(mux)
+	if s.webClient != "" {
+		mux.Handle("GET /static/", webClient(s.webClient))
+	}
 	if s.v0 != nil {
 		s.v0.register(mux)
 	}

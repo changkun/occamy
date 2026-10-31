@@ -190,8 +190,8 @@ Implementation notes: registration.)
 
 New `internal/backend/vnc`. Once the parity gate deletes VNC's guacd
 path ([guacd-bridge](guacd-bridge.md)), VNC no longer needs guacd, which
-leaves only RDP, until its native backend is registered, and telnet on
-the bridge. The HID-to-XT table derives from `internal/keymap`, the
+leaves RDP's fallback, until its own deletion gate, and telnet on the
+bridge. The HID-to-XT table derives from `internal/keymap`, the
 scan code table it shares with the RDP client
 since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
 
@@ -948,8 +948,12 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     api-and-server-stack.md. `ard` was added with the opt-in period;
     see Implementation notes: registration.
   - Protocol v1's web client must fill `Key.Code` from
-    `KeyboardEvent.code` for QEMU key events to be used; the current
-    Guacamole-protocol client sends keysyms only.
+    `KeyboardEvent.code` for QEMU key events to be used. Done: the
+    React web client ([009](../009-react-web-client.md)) binds keys
+    through the client core's `bindKeyboard`, which sends each key's
+    USB HID usage from `KeyboardEvent.code` with its keysym; the Vue
+    client and its Guacamole-protocol `occamy.js`, which sent keysyms
+    only, are gone.
   - session-core: any viewer whose input is accepted can send `Resize`,
     which now resizes the remote screen for everyone. Whether only the
     owner may resize is session-core's to decide.

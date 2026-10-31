@@ -1079,15 +1079,16 @@ export class Session {
   }
 
   /**
-   * close ends the session: it sends close (normal) after the input sent
-   * so far, and closes the connection. next() then delivers the end and
-   * nothing else. The promise resolves once the connection closed, or
-   * after timeout milliseconds.
+   * close ends the session: it sends close with code and reason, normal
+   * unless the client failed, such as with unsupported for a session it
+   * cannot show, after the input sent so far, and closes the connection.
+   * next() then delivers the end and nothing else. The promise resolves
+   * once the connection closed, or after timeout milliseconds.
    */
-  close(timeout = 5000): Promise<void> {
+  close(timeout = 5000, code: number = CloseCode.Normal, reason = ''): Promise<void> {
     this.discard = true
     this.dropQueue()
-    this.terminate({ type: 'end', code: CloseCode.Normal, reason: '' }, { code: CloseCode.Normal, reason: '' })
+    this.terminate({ type: 'end', code, reason }, { code, reason })
     if (this.ownsDecoder) {
       this.decoder.close()
     }

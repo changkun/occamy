@@ -145,8 +145,9 @@ single-node beta.
      them through configured subject and group claims.
 3. **Registry: configuration file only** for beta.
 4. **v0 routes: i.** They move to `/api/v0/login` and `/api/v0/connect`
-   behind `legacy_v0: true` and are removed at v1.0. The Vue client keeps
-   working until [009](../009-react-web-client.md) moves to protocol v1.
+   behind `legacy_v0: true` and are removed at v1.0. The Vue client kept
+   working on them until [009](../009-react-web-client.md) replaced it
+   with a React client on protocol v1 and API v1, which uses neither.
 5. **Configuration:** v1 files carry `version: 1` and reject unknown keys
    (`yaml.Decoder.KnownFields`). A file without `version` is read as v0
    configuration and served through the v0 routes.
@@ -298,12 +299,12 @@ place for fixes that ship on v0 before beta.
   - Sessions: matching rules for `adhoc_allowlist` (resolved addresses
     against ranges), and whether ad-hoc targets need a group (both
     decided; see Implementation notes: Sessions).
-  - Per-connection guacd params (an RDP domain per host), a per-protocol
-    backend choice (`backend: guacd` after a parity switch), and serving
-    the web client from a v1 file have no keys yet (the backend choice
-    is done: `backend` on each connection and `adhoc_backends`, with
-    `backend: guacd` as vnc's fallback; see Implementation notes:
-    backends and the API reference).
+  - Per-connection guacd params (an RDP domain per host) have no key
+    yet. A per-protocol backend choice is done (`backend` on each
+    connection and `adhoc_backends`, with `backend: guacd` as vnc's
+    fallback; see Implementation notes: backends and the API
+    reference), and so is serving the web client from a v1 file
+    (`web_client`, with 009's React client).
   - Document: a password hashing command (`occamyd hash-password`) and
     `conf.yaml` as a v1 example.
 
@@ -574,10 +575,13 @@ place for fixes that ship on v0 before beta.
     empty first document.
   - **v0 routes under a v1 file:** login and connect, signed with
     `rand.Text()` as the HS256 secret, made per process, and a warning
-    at start that the login signs any target for anyone. No `/static/`,
-    since a v1 file has no key for the web client, so the Vue client
-    reaches them through a reverse proxy that serves it on the same
-    origin. `proxy.login` is now separate from `proxy.client` for this.
+    at start that the login signs any target for anyone. No `/static/`
+    came with them, since a v1 file had no key for the web client then,
+    so the Vue client reached them through a reverse proxy that served
+    it on the same origin. `proxy.login` is now separate from
+    `proxy.client` for this. A v1 file now serves the web client with
+    `web_client`, and the web client, 009's React one, speaks API v1
+    alone.
 - **Deviations:**
   - The row's "graceful shutdown" also bounds the drain, and the row did
     not name `ConnContext`, which session-core's viewer writer notes
@@ -1870,17 +1874,18 @@ to the VNC backend.
 - **What was done.**
   - Configuration v1: `backend` on each connection (`guacd` or
     `native`, filled with the protocol's default: `native` for ssh and,
-    since 2026-10-31, vnc; `guacd` for rdp and telnet), `adhoc_backends`
+    since 2026-10-31, vnc and rdp; `guacd` for telnet), `adhoc_backends`
     for ad-hoc targets by protocol, and `ard` on vnc connections
     ([native-vnc-backend](native-vnc-backend.md), Implementation notes:
-    registration). ssh refuses `guacd`, rdp refuses `native` until NLA
-    has run end to end, telnet has no native backend, and `tls` and
-    `ard` need the native backend, so they are refused with
-    `backend: guacd`.
+    registration). ssh refuses `guacd`, rdp refused `native` until NLA
+    had run end to end ([native-rdp-backend](native-rdp-backend.md),
+    Implementation notes: registration), telnet has no native backend,
+    and `tls`, `ard` and rdp's `security` need the native backend, so
+    they are refused with `backend: guacd`.
   - The backend factory is keyed by protocol and backend; `POST
     /api/v1/sessions`, the connection stream and the ad-hoc path look
     up the connection's or `adhoc_backends`' backend. The session's
-    state keeps naming it `ssh`, `vnc` or `guacd`.
+    state keeps naming it `ssh`, `vnc`, `rdp` or `guacd`.
   - Routes are added to a list (`routeMux`), from which each listener's
     `http.ServeMux` is built, so that `TestAPIDoc` can check that
     [docs/api.md](../../docs/api.md), the reference of every route

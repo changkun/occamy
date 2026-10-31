@@ -60,12 +60,16 @@ In scope:
    sharing roles.
 5. Graphics pipeline: framebuffer, damage tracking, lossless and lossy
    tiles.
-6. Native SSH backend, with terminals rendered by the client.
+6. Native SSH backend, with terminals rendered by the client, and, for
+   v1.0, a native Kubernetes backend (pod exec) on the same terminal
+   path ([native-kubernetes-backend](008-native-architecture/native-kubernetes-backend.md)).
 7. Native VNC backend, vnc's default (the owner's decision of
    2026-10-31), with the guacd bridge as an explicit fallback.
-8. RDP through the guacd bridge until its native backend takes over by
-   rc.1, and telnet, which gets no native backend, through guacd until
-   guacd is removed. Where a native backend exists it is the default,
+8. Native RDP backend, rdp's default since 2026-10-31, ahead of rc.1,
+   with the guacd bridge as an explicit fallback; checked against xrdp,
+   not yet Windows, and without the graphics pipeline until its phase 3.
+   telnet, which gets no native backend, goes through guacd until guacd
+   is removed. Where a native backend exists it is the default,
    and guacd serves that protocol only with an explicit `backend: guacd`.
 9. Clients: the web client on protocol v1 ([009](009-react-web-client.md))
    and the Go client core, which the end-to-end tests and the Swift client
@@ -73,8 +77,8 @@ In scope:
    preview by rc.1 and does not gate beta.1.
 
 Out of scope for beta: video encoding (H.264 and similar), audio, file
-transfer and SFTP, a recording player, WebTransport, native RDP, and
-multi-node deployment.
+transfer and SFTP, a recording player, WebTransport, native RDP beyond
+its registration (GFX and Windows), and multi-node deployment.
 
 Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
 
@@ -113,16 +117,18 @@ scenario's primary metric and the parity matrix passes
 gate). RDP is native in v1.0, with no helper
 ([rdp-strategy](008-native-architecture/rdp-strategy.md) decision 5),
 and Windows is checked later, once a host is available. v1.0 also needs
-a native Kubernetes backend (pod exec), specified separately, and the
-React web client on protocol v1. Telnet gets no native backend: it
+a native Kubernetes backend (pod exec), specified in
+[native-kubernetes-backend](008-native-architecture/native-kubernetes-backend.md)
+and never served through guacd, and the React web client on protocol
+v1. Telnet gets no native backend: it
 stays on guacd and is dropped when guacd is removed.
 
 | Milestone | Delivers | guacd needed for |
 |-----------|----------|------------------|
 | v0.5.0 ([005](005-upstream-guacamole.md), released 2026-10-29) | `occamyd` without cgo; everything through guacd | VNC, SSH, RDP |
-| v1.0.0-beta.1 | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, native VNC as vnc's default, web client on v1 | RDP; VNC only with `backend: guacd` |
-| v1.0.0-beta.2 | Native VNC through the parity gate: VNC's guacd fallback deleted once the benchmark shows native at least 10x better | RDP |
-| v1.0.0-rc.1 | API and protocol frozen; native RDP as rdp's default; Swift client preview | nothing by default; any fallback still short of the gate |
+| v1.0.0-beta.1 | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, native VNC as vnc's default, native RDP as rdp's default (not yet checked against Windows), web client on v1 | VNC and RDP only with `backend: guacd` |
+| v1.0.0-beta.2 | Native VNC through the parity gate: VNC's guacd fallback deleted once the benchmark shows native at least 10x better | RDP only with `backend: guacd` |
+| v1.0.0-rc.1 | API and protocol frozen; native RDP with GFX; the Windows check runs once a host is available (#32), as [rdp-strategy](008-native-architecture/rdp-strategy.md) decision 5 says; Swift client preview | nothing by default; any fallback still short of the gate |
 | v1.0.0 | No guacd and no Guacamole protocol, so no telnet; the v0 routes are removed | nothing |
 | v1.x | Kerberos, audio and the rest of RDP's later scope per [rdp-strategy](008-native-architecture/rdp-strategy.md) | nothing |
 
@@ -143,7 +149,8 @@ server.
 - **Protocol.** Text instructions carry image data as base64 PNG, JPEG or
   WebP in `blob` instructions. That adds a third to the encoded size and
   forces text WebSocket frames. Clients must implement Guacamole's layers
-  and drawing model (the 9k-line `client/occamy-web/src/components/occamy.js`).
+  and drawing model (the 9k-line fork of guacamole-common-js that the Vue
+  client carried as `occamy.js`, until [009](009-react-web-client.md)).
 - **Terminals as pixels.** SSH output is emulated server-side and drawn
   with Pango and Cairo into PNG tiles. Traffic scales with pixels, not
   characters, and clients cannot select text or choose fonts.
@@ -158,8 +165,8 @@ flowchart LR
   W[Web client] -- protocol v1 --> GW
   SW[Swift client] --> CC[Go client core] -- protocol v1 --> GW
   GW[API v1: auth, registry, sessions] --> SE[Session owner]
-  SE --> TB[Terminal backends: SSH]
-  SE --> GB[Graphical backends: VNC, RDP later]
+  SE --> TB[Terminal backends: SSH, Kubernetes]
+  SE --> GB[Graphical backends: VNC, RDP]
   SE --> BR[guacd bridge]
   GB --> FB[Framebuffer and damage]
   BR --> FB
@@ -197,6 +204,9 @@ Each component is a sub-design (see Design Breakdown):
 - **guacd bridge:** runs guacd connections under protocol v1 and defines
   the parity criteria for replacing it per protocol.
 - **Native SSH, native VNC:** the first two native backends.
+- **Native Kubernetes backend:** a terminal in a pod through the API
+  server's exec stream, the second terminal backend, with no guacd
+  path.
 - **RDP strategy:** guacd, helper process, or pure Go, decided by
   evaluation (decided: pure Go).
 - **Native RDP backend:** the backend over the strategy's pure-Go
@@ -271,6 +281,7 @@ Each beta reruns the benchmark, which also covers #18.
 | 9 | [RDP strategy](008-native-architecture/rdp-strategy.md) | guacd, helper process, or pure-Go RDP | session-core | large | validated |
 | 10 | [Protocol benchmark](008-native-architecture/benchmark.md) | Yardstick: scenarios, metrics, the Guacamole baseline, the 10x and 50 ms targets | — | large | complete |
 | 11 | [Native RDP backend](008-native-architecture/native-rdp-backend.md) | The backend over the RDP spike's client; channels, GFX without AVC, the Windows check | session-core, graphics-pipeline, rdp-strategy | large | validated |
+| 12 | [Native Kubernetes backend](008-native-architecture/native-kubernetes-backend.md) | A pod's terminal over the API server's exec channel protocols; credentials, certificate, names | session-core, native-ssh-backend, api-and-server-stack | medium | validated |
 
 ```mermaid
 graph LR
@@ -288,11 +299,14 @@ graph LR
   RDP --> NRDP[11 native RDP]
   G --> NRDP
   BM[10 benchmark] --> G
-  A[1 API and server stack]
+  A[1 API and server stack] --> K8S[12 native Kubernetes]
+  S --> K8S
+  SSH --> K8S
 ```
 
 **Recommended iteration order:** #10 first, so that the Guacamole
 baseline exists before any encoding or pacing is built. Alongside it, #1,
 #2 and #3, the foundations; the protocol is the longest-lived contract.
 Then #4 and #5. Then #6, #7 and #8. The #9 evaluation spike can run at any
-time alongside; #11 follows it.
+time alongside; #11 follows it. #12 follows #5, whose terminal path it
+shares.

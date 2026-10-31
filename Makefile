@@ -38,10 +38,10 @@ stop:
 # e2e runs the end-to-end tests against a stack started with make run,
 # with OCCAMY_DEBUG=1 for the pressure test (OCCAMY_PRESSURE_N):
 # the v0 service's on OCCAMY_E2E_ENDPOINT and occamy-v1's, API v1 with
-# native VNC next to guacd's, on OCCAMY_E2E_V1_ENDPOINT. Both default to
-# the ports the stack publishes, OCCAMY_PORT and OCCAMY_V1_PORT as
-# docker-compose.yaml takes them. The VNC parity matrix takes minutes, so
-# the timeout is longer than go test's default.
+# native VNC and RDP next to guacd's, on OCCAMY_E2E_V1_ENDPOINT. Both
+# default to the ports the stack publishes, OCCAMY_PORT and
+# OCCAMY_V1_PORT as docker-compose.yaml takes them. The VNC parity matrix
+# takes minutes, so the timeout is longer than go test's default.
 e2e:
 	OCCAMY_E2E_ENDPOINT=$(or $(OCCAMY_E2E_ENDPOINT),localhost:$(or $(OCCAMY_PORT),5636)) \
 	OCCAMY_E2E_V1_ENDPOINT=$(or $(OCCAMY_E2E_V1_ENDPOINT),localhost:$(or $(OCCAMY_V1_PORT),5637)) \
@@ -49,9 +49,9 @@ e2e:
 .PHONY: e2e
 
 # soak runs TestSoak against a stack started with make run
-# OCCAMY_DEBUG=1: sessions
-# through occamy-v1 for a duration while it samples occamyd's
-# goroutines, heap and open files from occamy-v1's debug listener, on
+# OCCAMY_DEBUG=1: sessions through occamy-v1 for a duration while it
+# samples occamyd's goroutines, heap and open files from occamy-v1's
+# debug listener, on
 # OCCAMY_V1_DEBUG_PORT, and fails if one grows. OCCAMY_SOAK_SESSIONS
 # says how many sessions, 8 by default; tests/soak_test.go lists the
 # other variables. The full soak (specs/008-native-architecture/

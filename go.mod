@@ -19,6 +19,6 @@ require (
 )
 
 require (
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 )

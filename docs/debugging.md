@@ -135,6 +135,10 @@ sends that user something. Until then the user still counts, for up to
 - `make e2e` runs the end-to-end tests against the demo stack
   (`make build run` first). They open a session to each demo server and
   check that the remote desktop arrives at the first attempt.
+  `TestE2EV1RDP` also takes the demo xrdp server's `rdp-native` through
+  the clipboard both ways, which the image's clipboard echo answers, a
+  resize, a viewer joined by a share, and the owner leaving and coming
+  back.
   `TestVNCParity`, among them, runs the guacd bridge's parity matrix for
   VNC: each feature on x11vnc and TigerVNC, through the native backend
   and through guacd. The demo desktops report what reached the server
@@ -163,8 +167,8 @@ sends that user something. Until then the user still counts, for up to
   `OCCAMY_SOAK_SESSIONS` sessions, 8 by default, to TigerVNC through the
   native backend (`OCCAMY_SOAK_CONNECTIONS`, `tigervnc-native` by
   default, since x11vnc's watchdog restarts would end sessions) for
-  `OCCAMY_SOAK_DURATION`, 1 hour by default. Each session moves the pointer, below the typing probe, and
-  types every 2 s, asks its desktop for a terminal that scrolls for 2 s
+  `OCCAMY_SOAK_DURATION`, 1 hour by default. Each session moves the
+  pointer, below the typing probe, and types every 2 s, asks its desktop for a terminal that scrolls for 2 s
   once a minute, and closes after `OCCAMY_SOAK_LIFETIME`, 10 minutes by
   default, for another to open; every other session has a read-only
   viewer. Every 30 s the test samples `occamyd`'s goroutines, live heap
@@ -182,12 +186,12 @@ sends that user something. Until then the user still counts, for up to
   `make soak OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h`.
 - `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test, which counts
   `occamyd`'s goroutines from the v0 service's pprof routes, served
-  after `make run OCCAMY_DEBUG=1`. Each of its N
-  rounds opens two sessions to each demo server at once: one that waits
-  for the desktop and one that sends garbage. All sessions to one server
-  have the same claims, so they share a guacd connection, and the storm
-  mostly exercises joining and leaving. Sessions may fail under
-  the load. Afterwards, `occamyd`'s goroutines must return to their
+  after `make run OCCAMY_DEBUG=1`. Each of its N rounds opens two
+  sessions to each demo server at once: one that waits for the desktop
+  and one that sends garbage. All sessions to one server have the same
+  claims, so they share a guacd connection, and the storm mostly
+  exercises joining and leaving. Sessions may fail under the load.
+  Afterwards, `occamyd`'s goroutines must return to their
   number before the storm within a minute, or the test fails and prints
   the goroutine profile. Then a session with the storm's own claims and
   one with new claims must work.
