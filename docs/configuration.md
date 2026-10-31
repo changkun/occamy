@@ -11,7 +11,8 @@ another. The file comes in two versions:
   sign-in, the connection registry, TLS and the debug listener. It is
   not yet in a release. It serves `/healthz`, sign-in for static users
   and through OIDC, the connections and sessions of API v1 and their
-  streams and, with `legacy_v0`, the v0 routes (see
+  streams, with `web_client`, the web client, and with `legacy_v0`, the
+  v0 routes (see
   [Serving a v1 file](#serving-a-v1-file)).
 
 Any other `version` is an error, and so is `version: 0`: a v0 file has no
@@ -49,6 +50,13 @@ connections:
     target: nas.internal:5900
     credentials: {password_env: OCCAMY_NAS_VNC_PASSWORD}
     allow: {users: [alice]}
+  - id: web-shell
+    protocol: kubernetes
+    target: k8s.internal:6443 # the API server, always over HTTPS
+    kubernetes: {namespace: web, pod: web-0, container: app}
+    tls: {ca_file: /etc/occamy/k8s-ca.crt}
+    credentials: {token_file: /run/secrets/k8s-token}
+    allow: {groups: [ops]}
 ```
 
 Unknown keys are errors, so a misspelt key is reported instead of being
@@ -64,7 +72,8 @@ directory.
 | `tls.cert`, `tls.key` | unset | Certificate and key files, PEM. `occamyd` terminates TLS when both are set; set both or neither. Without them, put a reverse proxy that terminates TLS in front. Read at start, so a renewed certificate needs a restart |
 | `debug.address` | unset (off) | Address of the debug listener: expvar at `/debug/vars` and pprof under `/debug/pprof/`, without authentication. It needs a port of its own: not `listen`'s port on the same host, nor on `localhost` beside `127.0.0.1` or `::1`, nor beside a wildcard host (`:5636`, `0.0.0.0`, `::`), which takes every address. Keep it on the loopback interface; `occamyd` warns at start when it is not |
 | `origins` | none | Origins, `scheme://host[:port]`, whose web pages may open streams besides `occamyd`'s own. Written in lower case without a trailing slash, as browsers send them. `occamyd`'s own origin is any whose host and port are the request's `Host`, and whose scheme is `https` when `occamyd` terminates TLS. Behind a proxy that rewrites `Host`, list the origin of `occamyd`'s own pages here too. A stream request without `Origin`, which no browser sends, is accepted on its token alone |
-| `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for the Guacamole-based web client. Both are served, the login too, which a v0 file serves only with `client: true`. Their tokens are signed with a key made at each start, so they do not survive a restart. The web client itself (`/static/`) is not served from a v1 file. The login signs any target for anyone, as in v0, and `occamyd` warns at start; `allow_adhoc_targets`, `adhoc_allowlist` and the connection registry do not restrict these routes. They are removed at v1.0 |
+| `legacy_v0` | `false` | Serve the v0 routes, `/api/v0/login` and `/api/v0/connect`, for clients of the Guacamole protocol. Both are served, the login too, which a v0 file serves only with `client: true`. Their tokens are signed with a key made at each start, so they do not survive a restart. The login signs any target for anyone, as in v0, and `occamyd` warns at start; `allow_adhoc_targets`, `adhoc_allowlist` and the connection registry do not restrict these routes. They are removed at v1.0 |
+| `web_client` | unset (off) | A directory holding the built web client, which `occamyd` serves under `/static/` ([api.md](api.md#get-static)): `client/occamy-web/dist`, where `make client` builds it and where the image has it, or the `dist` directory of the web client's release archive. A relative path is resolved against `occamyd`'s working directory, as other paths are. A path that is not a directory, or a directory `occamyd` cannot read, is an error; a directory that does not exist yet, or holds no `index.html`, is a warning at start, and `occamyd` serves the client once it is built there. The client signs in through API v1 on `occamyd`'s origin; with OIDC, list its URL, such as `https://occamy.example/static/`, in `auth.oidc.return_urls` |
 
 ### Sign-in: `auth`
 
@@ -82,7 +91,7 @@ directory.
 | `auth.oidc` | unset (off) | Sign-in through an OpenID Connect identity provider; see [signing in through OIDC](#signing-in-through-oidc) |
 | `auth.oidc.issuer` | required | The provider's issuer URL, exactly as its discovery document names it (a trailing slash counts). https, or http on localhost |
 | `auth.oidc.client_id` | required | `occamyd`'s client ID at the provider |
-| `auth.oidc.client_secret_file`, `client_secret_env` | unset | The client secret, from a file or an environment variable; at most one. Neither means a public client |
+| `auth.oidc.client_secret_file`, `client_secret_env` | unset | The client secret, from a file of at most 64 KiB or an environment variable; at most one. Neither means a public client |
 | `auth.oidc.redirect_url` | required | `occamyd`'s callback URL as the browser and the provider know it, ending in `/api/v1/auth/oidc/callback` behind any proxy prefix. https, or http on localhost. Its path is also the sign-in cookie's, and with https the cookie is `Secure`, whoever terminates TLS |
 | `auth.oidc.return_urls` | the origin of `redirect_url`, with the path `/` | Where browsers are sent back after a sign-in, with a one-time code or an error in the fragment: your web client's sign-in page. A sign-in names one of them, matched exactly as written. https, or http on localhost, with no user name and no fragment |
 | `auth.oidc.scopes` | `[openid, profile, email]` | Scopes to request; must include `openid` |
@@ -175,8 +184,9 @@ The access token never appears in a URL, so it reaches no server log,
 it lasts a minute, works once, and only with the verifier of the client
 that started the sign-in, so a code planted in another browser signs no
 one in. Until `occamyd` answers CORS preflights, serve the web client
-from `occamyd`'s origin, such as through the reverse proxy in front of
-both.
+from `occamyd`'s origin: with `web_client`, or through the reverse proxy
+in front of both. The web client that `web_client` serves returns to
+its own URL, `/static/`, which `return_urls` must list.
 
 Errors in the fragment:
 
@@ -253,18 +263,25 @@ the groups of `groups_claim`, not the static user's.
 
 ### guacd: `guacd`
 
-guacd serves the `rdp` and `telnet` connections, and the `vnc`
-connections that set `backend: guacd`. `ssh` connections always use
-`occamyd`'s native backend, and `vnc` connections use it by default
-(see [backends](#backends)). For `rdp`,
-`occamyd` passes `disable-gfx: "true"` unless
+guacd serves the `telnet` connections, and the `vnc` and `rdp`
+connections that set `backend: guacd`. `ssh` and `kubernetes`
+connections always use `occamyd`'s native backends, and `vnc` and `rdp`
+connections use theirs by default (see [backends](#backends)), so
+`guacd.params.vnc` and `guacd.params.rdp` apply only to connections with
+`backend: guacd`.
+`occamyd` warns when it starts of each protocol's parameters that no
+session reads: those of a protocol none of whose connections goes
+through guacd, unless its ad-hoc targets do and the parameters are the
+display's, which they take. With `legacy_v0`, the v0 routes read them
+all.
+For `rdp` through guacd, `occamyd` passes `disable-gfx: "true"` unless
 `guacd.params.rdp` sets it: through RDP's graphics pipeline, xrdp's
 colours reached guacd shifted.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `guacd.address` | `localhost:4822` | guacd's address, `host:port` |
-| `guacd.params.<protocol>` | none | guacd connection parameters per protocol (`ssh`, `vnc`, `rdp`, `telnet`), such as `ignore-cert: "true"` for `rdp`. A connection's target and credentials override them. `hostname` and `port` come from the target, and secrets are not allowed here: any parameter whose name holds `password`, `passphrase`, `private-key` or `secret`, in any case, such as `sftp-password`, is refused. A name that ends in `-regex`, such as telnet's `password-regex`, is a prompt's pattern and is allowed. Set credentials on each connection instead. An ad-hoc target takes only the display's parameters (see [ad-hoc targets](#ad-hoc-targets)) |
+| `guacd.params.<protocol>` | none | guacd connection parameters per protocol (`ssh`, `vnc`, `rdp`, `telnet`; not `kubernetes`, which guacd does not serve), such as `ignore-cert: "true"` for `rdp`. A connection's target and credentials override them. `hostname` and `port` come from the target, and secrets are not allowed here: any parameter whose name holds `password`, `passphrase`, `private-key` or `secret`, in any case, such as `sftp-password`, is refused. A name that ends in `-regex`, such as telnet's `password-regex`, is a prompt's pattern and is allowed. Set credentials on each connection instead. An ad-hoc target takes only the display's parameters (see [ad-hoc targets](#ad-hoc-targets)) |
 
 ### The connection registry: `connections`
 
@@ -272,13 +289,15 @@ colours reached guacd shifted.
 |-----|---------|---------|
 | `connections[].id` | required | The connection's ID, used in URLs and tokens: 1 to 64 lowercase letters, digits, `.`, `_` and `-`, starting with a letter or digit. Unique |
 | `connections[].name` | the ID | Display name |
-| `connections[].protocol` | required | `ssh`, `vnc`, `rdp` or `telnet` |
-| `connections[].target` | required | `host:port`, or a host alone for the protocol's default port: 22 for ssh, 5900 for vnc, 3389 for rdp, 23 for telnet. IPv6 addresses go in brackets with a port, `[fd00::22]:22` |
-| `connections[].backend` | `native` for ssh and vnc, `guacd` for rdp and telnet | What serves the connection's sessions: `native`, `occamyd`'s own client, or `guacd`, through the guacd bridge. ssh is always `native`, rdp and telnet always `guacd` for now, and vnc takes either: `native` by default, and `guacd` as an opt-in fallback; see [backends](#backends) |
+| `connections[].protocol` | required | `ssh`, `vnc`, `rdp`, `telnet` or `kubernetes` |
+| `connections[].target` | required | `host:port`, or a host alone for the protocol's default port: 22 for ssh, 5900 for vnc, 3389 for rdp, 23 for telnet, 443 for kubernetes. IPv6 addresses go in brackets with a port, `[fd00::22]:22`. A kubernetes target is the API server's, which `occamyd` always reaches over HTTPS, so it has no `https://` |
+| `connections[].backend` | `native` for ssh, vnc, rdp and kubernetes, `guacd` for telnet | What serves the connection's sessions: `native`, `occamyd`'s own client, or `guacd`, through the guacd bridge. ssh and kubernetes are always `native`, telnet always `guacd`, and vnc and rdp take either: `native` by default, and `guacd` as an opt-in fallback; see [backends](#backends) |
 | `connections[].host_keys` | required for ssh | The host keys an ssh target may present: public keys in `authorized_keys` format, as `ssh-keyscan` prints them, or SHA-256 fingerprints, as `ssh-keygen -l` prints them (`SHA256:…`). `occamyd` refuses any other key. Not for other protocols |
 | `connections[].insecure_ignore_host_key` | `false` | Accept any host key from an ssh target instead, logging its fingerprint as a warning. For demos only; set this or `host_keys`, not both |
-| `connections[].tls` | system roots on the native backend, vnc's default; none with `backend: guacd` | How a vnc target's certificate is checked when the server offers VeNCrypt, which the native backend then always chooses. Without `tls`, the certificate must chain to the system's roots and name the target's host, as a browser checks it. Through guacd, no certificate is checked, so a connection with `tls` cannot set `backend: guacd`; not for other protocols. See below |
+| `connections[].tls` | system roots on the native backend, the default of vnc and rdp, and for kubernetes; none with `backend: guacd` | How the target's certificate is checked: a vnc target's when the server offers VeNCrypt, which the native backend then always chooses, an rdp target's always, since the native RDP backend always runs TLS, and a kubernetes target's API server's. Without `tls`, the certificate must chain to the system's roots and name the target's host, as a browser checks it. Through guacd, `tls` is not what checks the certificate, so a vnc or rdp connection with `tls` cannot set `backend: guacd`; not for ssh or telnet. See below |
+| `connections[].security` | `nla` | An rdp connection's security mode on the native backend, named as guacd names them: `nla`, NLA (CredSSP with NTLMv2) over TLS; `nla-ext`, the same with the early user authorization result only; `tls`, TLS without NLA, which sends the password to whichever server passed the certificate check; or `any`, which offers TLS and NLA and lets the server choose. xrdp speaks no NLA, so an xrdp target needs `tls` or `any`. Standard RDP security, without TLS, is never used. Not with `backend: guacd`, which takes its mode from `guacd.params.rdp`'s `security`, and only for rdp. See [backends](#backends) |
 | `connections[].ard` | `false` | Allow Apple Remote Desktop authentication, which macOS Screen Sharing needs to log in a user of the Mac. A vnc connection on the native backend only, not with `backend: guacd`, and never with a `tls` that requires TLS. Read [the risk](#apple-remote-desktop-ard) first |
+| `connections[].kubernetes` | required for kubernetes | The pod a kubernetes connection opens a terminal in, and what runs there; see [Kubernetes](#kubernetes-pods) |
 | `connections[].credentials` | required | How `occamyd` authenticates to the target; see below |
 | `connections[].allow.users`, `allow.groups` | required | Who may open the connection: users by name, and members of groups. At least one entry, since an empty list would let nobody in |
 
@@ -286,34 +305,147 @@ colours reached guacd shifted.
 
 | Key | Meaning |
 |-----|---------|
-| `password_file` | A file holding the password. Trailing line breaks are dropped |
+| `password_file` | A file holding the password, at most 64 KiB. Trailing line breaks are dropped |
 | `password_env` | An environment variable holding the password. It must be set and not empty |
 | `private_key_file` | An SSH private key file, ssh only. Keep it readable by the `occamyd` user only |
+| `token_file` | A file holding a bearer token, kubernetes only, such as a service account's, at most 64 KiB. Trailing line breaks are dropped |
+| `token_env` | An environment variable holding a bearer token, kubernetes only. Trailing line breaks are dropped |
+| `client_cert_file` and `client_key_file` | A client certificate and its key, PEM, kubernetes only: one source, so set both. Keep the key readable by the `occamyd` user only |
 | `prompt: true` | Nothing stored: the session's owner is asked for whatever the target requires, and the answers are not kept. Use it also for a target that needs no credentials |
 
 An ssh connection needs a `username` unless it prompts. A vnc
 connection's `username` is for VeNCrypt's Plain authentication, which
 is then chosen over the server's other types; without one, the owner is
-asked if the server wants it. A secret written
-inline (`password:` under `credentials`, `client_secret:` under `oidc`) is
+asked if the server wants it. An rdp connection on the native backend
+logs on with `username` and the password; a `username` of the form
+`DOMAIN\user`, with both parts, logs on to that domain, as does such a
+username the owner gives at the prompt with the domain left empty;
+`\user` logs on as the user alone. With NLA, the owner is asked for
+what `credentials` does not store: the username and the domain, if no
+`username` is stored, and the password. Without NLA
+(`security: tls`), nothing is asked, and a missing username or
+password leaves the server's logon screen to the owner. A kubernetes
+connection authenticates with a bearer token or a client certificate,
+never a `username` or a password; with `prompt: true` the owner is
+asked for a token, and an empty answer sends none. A secret written
+inline (`password:` or `token:` under `credentials`, `client_secret:`
+under `oidc`) is
 rejected with the keys to use instead.
 
 Secrets are read when they are used, not when the file is loaded:
 validation only checks that each file can be opened and each variable is
 set. A secret rotated on disk is therefore picked up by the next session.
 
-A vnc connection's `tls` takes:
+A vnc, rdp or kubernetes connection's `tls` takes:
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `require` | `false` | Refuse a server that does not offer VeNCrypt with a certificate, so that nobody on the way can strip VeNCrypt from what the server offers. `ca_file` and `pins` imply it |
+| `require` | `false` | Refuse a vnc server that does not offer VeNCrypt with a certificate, so that nobody on the way can strip VeNCrypt from what the server offers. `ca_file` and `pins` imply it. The native RDP backend and a kubernetes connection always require TLS, so for rdp and kubernetes it changes nothing |
 | `server_name` | the target's host | The name the certificate must carry |
 | `ca_file` | none | PEM certificates of the CAs that replace the system's roots, as for a private CA. Read when a session starts |
 | `pins` | none | Certificates accepted as they are, as an ssh connection's `host_keys` are: their chain, names and dates are not checked. Each is a certificate in PEM or its SHA-256 fingerprint, in hex as `openssl x509 -noout -fingerprint -sha256` prints it or in base64 after `SHA256:`. Set this or `ca_file`, not both |
 | `insecure_skip_verify` | `false` | Accept any certificate, logging its fingerprint as a warning. Set this or `ca_file` or `pins`, not both, as `host_keys` and `insecure_ignore_host_key` for ssh. For demos only |
 
 A refused certificate fails the session, and `occamyd`'s log names the
-certificate's fingerprint, ready for `pins`.
+certificate's fingerprint, ready for `pins`. A kubernetes connection's
+token is sent only once the certificate has been accepted.
+
+#### Kubernetes pods
+
+A kubernetes connection opens a terminal in a container through the API
+server's `pods/exec`, or `pods/attach`, as `kubectl exec -it` does. Its
+`kubernetes` takes:
+
+| Key | Default | Meaning |
+|-----|---------|---------|
+| `namespace` | `default` | The pod's namespace |
+| `pod` | required | The pod's name |
+| `container` | the pod's only container | The container's name. Required for a pod with more than one container: the API server refuses the stream with 400 without it, since it does not read kubectl's `kubectl.kubernetes.io/default-container` annotation |
+| `command` | a shell: `bash`, or `sh` where the image has no `bash` | What runs, one element per argument, such as `[/bin/ls, -l]`. Not with `attach` |
+| `attach` | `false` | Attach to the container's main process instead of running a command, as `kubectl attach -it` does. The container needs `stdin: true` in its spec, and `tty: true` unless `tty` is `false` |
+| `tty` | `true` | Run the command in a terminal. Without one, its output and errors are shown together, and resizes are not sent |
+
+The names must be Kubernetes's: lowercase letters, digits and `-`, and
+`.` in a pod's name, so that none can reach another path of the API
+server. Another protocol's connection cannot have `kubernetes`.
+
+```yaml
+  - id: web-shell
+    protocol: kubernetes
+    target: k8s.internal:6443
+    kubernetes: {namespace: web, pod: web-0, container: app}
+    tls: {ca_file: /etc/occamy/k8s-ca.crt}
+    credentials: {token_file: /run/secrets/k8s-token}
+    allow: {groups: [ops]}
+```
+
+**Authentication.** `occamyd` sends a bearer token or presents a client
+certificate, and checks the API server's certificate against the
+system's roots, `ca_file` or `pins`. A ServiceAccount token works on
+every cluster, managed ones included: `kubectl -n web create token
+occamy --duration=24h` makes one that expires, and a Secret of type
+`kubernetes.io/service-account-token` holds one that does not. The
+token file is read as each session starts, so a rotated token is picked
+up by the next session. `occamyd` does not support:
+
+- kubeconfig files: name the API server in `target`, its CA in `tls`
+  and the token or certificate in `credentials` instead;
+- exec credential plugins, such as EKS's `aws eks get-token` or GKE's
+  `gke-gcloud-auth-plugin`;
+- the legacy `auth-provider` entries of a kubeconfig;
+- an API server behind a path prefix, such as a cluster that Rancher
+  proxies at `https://rancher.example/k8s/clusters/c-m-abc12`: `target`
+  is a `host:port`, and `occamyd` asks for `/api/v1/...` at its root.
+
+`occamyd` deliberately runs no external credential binaries: a session
+never starts a process on the server, and a credential is one file or
+one variable that the configuration names.
+
+**RBAC.** The token's, or the certificate's, user needs `create` on
+`pods/exec` (or `pods/attach`) in the pod's namespace, and `get` too.
+The WebSocket upgrade is an HTTP `GET`, which API servers authorize as
+`get`; from Kubernetes 1.35 they also check `create`, as they always
+did for kubectl's SPDY `POST`. Granting both covers every version. A
+minimal Role and RoleBinding for a ServiceAccount:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: occamy, namespace: web}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: occamy-exec, namespace: web}
+rules:
+  - apiGroups: [""]
+    resources: [pods/exec]
+    verbs: [get, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: occamy-exec, namespace: web}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: occamy-exec}
+subjects:
+  - {kind: ServiceAccount, name: occamy, namespace: web}
+```
+
+`occamyd` needs no other permission: it does not list or read pods.
+
+**Protocol.** `occamyd` speaks the `v5.channel.k8s.io` WebSocket
+subprotocol of Kubernetes 1.30 and later, and falls back to
+`v4.channel.k8s.io`, which older API servers proxy to the kubelet. The
+command's exit ends the session with `remote-ended`, whatever its
+status; a refused request or an API server that cannot be reached ends
+it with `backend-failed`.
+
+**Why there is no Kubernetes SDK.** The backend makes one request: pod
+exec, upgraded to a WebSocket whose messages carry a one-byte channel
+prefix. `coder/websocket`, which `occamyd` already uses for its own
+streams, speaks it in a few hundred lines that the tests fuzz. client-go
+would bring in the API machinery and most of the API types for that one
+request, and its exec has gone over SPDY for most of its history. The
+cost of going without it is the list above: no kubeconfig and no
+credential plugins.
 
 #### Backends
 
@@ -322,18 +454,18 @@ A connection's `backend` picks what serves its sessions:
 | Protocol | `native` | `guacd` |
 |----------|----------|---------|
 | ssh | always: `occamyd`'s SSH client | refused |
+| kubernetes | always: `occamyd`'s client of the API server's exec stream ([native Kubernetes backend](../specs/008-native-architecture/native-kubernetes-backend.md)) | refused: guacd's Kubernetes support is not used |
 | vnc | the default: `occamyd`'s RFB client ([native VNC backend](../specs/008-native-architecture/native-vnc-backend.md)) | opt-in fallback |
-| rdp | refused: the native RDP backend is not registered until NLA has run end to end | always, for now |
+| rdp | the default: `occamyd`'s RDP client ([native RDP backend](../specs/008-native-architecture/native-rdp-backend.md)) | opt-in fallback |
 | telnet | refused: there is none | always, until guacd is removed |
 
 A protocol's default is `native` as soon as it has a native backend, so
-vnc connections use `occamyd`'s own client unless they set
+vnc and rdp connections use `occamyd`'s own client unless they set
 `backend: guacd`. That fallback through guacd is kept, as the
 benchmark's baseline too, only until the benchmark shows the native
 backend at least 10x better than guacd on every scenario
 ([guacd-bridge](../specs/008-native-architecture/guacd-bridge.md),
-[benchmarks](benchmarks.md)); v1.0 has no guacd. rdp defaults to
-`native` once the native RDP backend is registered. telnet has no native
+[benchmarks](benchmarks.md)); v1.0 has no guacd. telnet has no native
 backend and stays on guacd for now, so it goes when guacd is removed
 in v1.0. A native vnc session:
 
@@ -349,11 +481,81 @@ in v1.0. A native vnc session:
   `backend-failed` when it cannot connect or log in, or the server's
   certificate is refused.
 
+A native rdp session:
+
+- connects over TLS, checking the server's certificate as `tls` says,
+  and logs on with NLA (CredSSP with NTLMv2) unless `security` says
+  otherwise, asking the session's owner, and only the owner, for the
+  credentials NLA needs that `credentials` does not store;
+- asks for the owner's size from the stream's `hello`, from 200 to
+  8192 pixels a side and at most 2^25 pixels in all, and for a later
+  resize through the Display Control channel, where the server has it;
+  a server that keeps another size is scaled by the viewers;
+- draws the server's bitmap updates, in interleaved RLE and planar, and
+  its pointer; sends keys as scancodes by their physical key, text as
+  Unicode keyboard events, and the pointer and wheel as mouse events;
+  tells the server to suppress its output while no viewer can see the
+  session;
+- carries clipboard text both ways through the clipboard channel: the
+  server's to every viewer, and the owner's and interactive viewers'
+  to the server, as their other input;
+- ends with `remote-ended` when the server ends the session, as when
+  the user logs off, and with `backend-failed` when it cannot connect
+  or log on, or the server's certificate is refused.
+
+The native RDP backend has been tested against xrdp and against
+occamy's own test server, not yet against Windows: Windows servers are
+not yet verified, which the backend's fourth phase does
+([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)).
+Nor does it speak RDP's graphics pipeline (GFX) yet, so a server sends
+it plain bitmap updates, as it sends guacd with `disable-gfx`. Until
+Windows is verified, `backend: guacd` is the fallback for a Windows
+server that the native backend cannot serve.
+
+xrdp speaks no NLA: offered NLA alone, it selects standard RDP
+security, which the native backend refuses, so an xrdp connection
+needs `security: tls` (or `any`). The session's error in `occamyd`'s
+log then names the key to set, such as
+`security: tls on connection "lab-desktop"`. With `security: tls`, the
+password goes to the server inside TLS, so `tls` must check the
+certificate: pin a self-signed one by its fingerprint. A connection
+that sets `security: tls` or `any` with
+`tls: {insecure_skip_verify: true}`, as the demo does, may send the
+password to whoever is in between, and `occamyd` warns of it by name
+when it starts.
+
+An rdp connection that served sessions through guacd before
+`backend` defaulted to `native` now gets the native backend, which
+reads none of `guacd.params.rdp`. So:
+
+- its certificate is checked as `tls` says, against the system's roots
+  without `tls`, and guacd's `ignore-cert` and `cert-fingerprints` no
+  longer apply: pin a self-signed certificate with `tls.pins`, by the
+  fingerprint the refusal logs;
+- its security mode is `security`, NLA by default, and guacd's
+  `security` no longer applies: an xrdp target needs `security: tls`;
+- guacd's `disable-copy` and `disable-paste` no longer apply, and the
+  configuration has no key yet that restricts the clipboard: the
+  server's clipboard reaches every viewer, and the owner's and
+  interactive viewers' reach the server;
+- guacd's `recording-path` and the other recording parameters no
+  longer apply, and the native backend records no session yet;
+- `backend: guacd` restores the old path, with `guacd.params.rdp`.
+
+The clipboard and recording bullets hold for a vnc connection and
+`guacd.params.vnc` too; the certificate and `security` bullets are
+rdp's alone. A vnc or rdp connection whose clipboard must be
+restricted, or whose sessions must be recorded, needs `backend: guacd`
+until the native backends can do either. `occamyd` warns when it starts of the `guacd.params` that no
+session reads, so that a file written for guacd shows what the native
+default dropped.
+
 Through guacd, `tls`'s keys would be ignored, since guacd checks no VNC
-certificate as `tls` says, so a vnc connection with `tls` cannot set
-`backend: guacd`, and neither can one with `ard`; such a file fails to
-load, naming the key. Only a vnc connection with `backend: guacd` needs
-guacd, at `guacd.address`.
+certificate, and an RDP certificate only as `guacd.params.rdp` says, so
+a vnc or rdp connection with `tls` cannot set `backend: guacd`, and
+neither can a vnc connection with `ard`, nor an rdp connection with
+`security`; such a file fails to load, naming the key. Only a vnc or
+rdp connection with `backend: guacd` needs guacd, at `guacd.address`.
 
 #### Apple Remote Desktop: `ard`
 
@@ -395,13 +597,14 @@ Without `ard: true`, a Mac that offers only ARD fails the session, and
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `allow_adhoc_targets` | `false` | Let signed-in users connect to targets that are not in the registry, as v0 does |
-| `adhoc_backends` | each protocol's default: `native` for ssh and vnc, `guacd` for rdp and telnet | The backend of each protocol's ad-hoc targets, by protocol: `{vnc: guacd}` sends ad-hoc vnc targets through guacd, the fallback, instead of the native backend. The values are a connection's `backend`'s, with the same refusals |
+| `adhoc_backends` | each protocol's default: `native` for ssh, vnc and rdp, `guacd` for telnet | The backend of each protocol's ad-hoc targets, by protocol: `{vnc: guacd}` sends ad-hoc vnc targets through guacd, the fallback, instead of the native backend, and `{rdp: guacd}` does the same for rdp. The values are a connection's `backend`'s, with the same refusals. kubernetes has no ad-hoc targets, so it cannot be named here |
 | `adhoc_allowlist` | none | Where ad-hoc targets may point, and on which ports: CIDR ranges (`10.0.0.0/8`), IP addresses, host names, or `*.` and a domain (`*.lab.internal`), each optionally followed by `:port` or `:first-last` (`10.0.0.0/8:22`, `*.lab.internal:5900-5910`; an IPv6 range or address goes in brackets, `[fd00::/8]:22`). Required when `allow_adhoc_targets` is `true` |
 
 Any signed-in user may open an ad-hoc target, with
-`POST /api/v1/sessions`. Its credentials are always asked of the user,
-and an ssh target needs `host_keys` or `insecure_ignore_host_key: true`
-in the request, as a connection does. Ad-hoc targets use each
+`POST /api/v1/sessions`, of any protocol but kubernetes, whose pod and
+credentials only a connection names. Its credentials are always asked
+of the user, and an ssh target needs `host_keys` or
+`insecure_ignore_host_key: true` in the request, as a connection does. Ad-hoc targets use each
 protocol's default backend unless `adhoc_backends` picks another,
 as `backend` does for a connection. To send ad-hoc vnc targets
 through guacd, the fallback:
@@ -421,6 +624,16 @@ DES encryption of a random challenge with the password's first 8 bytes,
 from which an offline search can recover a weak password. Reach targets
 across networks you do not trust through a connection whose `tls`
 requires TLS (`require`, `ca_file` or `pins`).
+
+An rdp target served by the native backend always runs TLS, with the
+certificate checked against the system's roots and the name the target
+was given, or its address if it was given one, and logs on with NLA
+alone, its default `security`: the user is asked for the password, and,
+when the request carries no `username`, for the username and the
+domain too. A request's `username` of the form `DOMAIN\user`, with both
+parts, names the domain. A server whose certificate does not chain to
+the system's roots, as a self-signed one, or that speaks no NLA, as
+xrdp, needs a connection, whose `tls` and `security` can say so.
 
 An entry of `adhoc_allowlist` without ports allows the protocol's own:
 22 for ssh, 5900 to 5999 for vnc, 3389 for rdp and 23 for telnet. A
@@ -513,9 +726,15 @@ that:
 - connection IDs, user names and issuer names are unique, and no trusted
   issuer is named `occamy`;
 - each connection's `backend`, and each of `adhoc_backends`, serves its
-  protocol; `tls` and `ard` are set only on vnc connections on the
-  native backend, not with `backend: guacd`, and `ard` never with a
-  `tls` that requires TLS;
+  protocol; `tls` is set only on vnc and rdp connections on the native
+  backend, not with `backend: guacd`, and on kubernetes connections;
+  `ard` only on vnc connections and `security` only on rdp connections,
+  each on the native backend; `ard` never with a `tls` that requires
+  TLS, and `security` is `nla`, `nla-ext`, `tls` or `any`;
+- a kubernetes connection names a pod, with Kubernetes's names, and
+  either `attach` or a `command`; it authenticates with `token_file`,
+  `token_env`, `client_cert_file` with `client_key_file`, or
+  `prompt: true`, and other protocols use none of these;
 - user, group and issuer names are not empty and have no spaces;
 - with neither `auth.oidc` nor `auth.trusted_issuers` configured, every
   name in an `allow` list is a static user, and every group is a group of
@@ -548,12 +767,14 @@ WebSockets over HTTP/1.1. It serves:
 | `POST /api/v1/sessions/{id}/shares` | A share for `{"role":"viewer"}` or `"read-only"`, with `expires_in` in seconds (60 to 43200, an hour by default), owner only |
 | `GET /api/v1/connections/{id}/stream` | Open a session on the connection and stream it, as a protocol v1 WebSocket ([protocol.md](protocol.md)) |
 | `GET /api/v1/sessions/{id}/stream` | Join a session as a protocol v1 WebSocket: as its owner with the owner's access token or the stream token, with the role of a session token for the session, which a trusted issuer may mint too, or with a share |
+| `/static/` | With `web_client`, the web client ([api.md](api.md#get-static)) |
 | `/api/v0/login`, `/api/v0/connect` | With `legacy_v0: true`, the v0 routes; both always, where a v0 file serves the login only with `client: true` |
 
-`ssh` and `vnc` sessions use `occamyd`'s native backends, and `rdp`
-and `telnet` sessions go through guacd. A `vnc` session goes through
-guacd only when the connection, or `adhoc_backends` for an ad-hoc
-target, picks `guacd` ([backends](#backends)). [api.md](api.md) describes every
+`ssh`, `vnc`, `rdp` and `kubernetes` sessions use `occamyd`'s native
+backends, and `telnet` sessions go through guacd. A `vnc` or `rdp`
+session goes through guacd only when the connection, or
+`adhoc_backends` for an ad-hoc target, picks `guacd`
+([backends](#backends)). [api.md](api.md) describes every
 route in full. A connection the caller may not
 open, and another user's session, answer `404` as if they did not exist.
 
@@ -588,7 +809,7 @@ not know:
 | `mode` | `debug` | `debug`, `release` or `test`; any other value is refused. `debug` also serves `/debug/pprof` on the public listener, without a token |
 | `auth.jwt_secret` | required | The HMAC secret of v0 tokens; an empty one is refused |
 | `auth.jwt_alg` | `HS256` | The HMAC algorithm of v0 tokens: `HS256`, `HS384` or `HS512` |
-| `client` | `false` | Serve the demo web client under `/static/`, and `POST /api/v0/login`. Without it, a v0 file serves only `/api/v0/connect` of the v0 routes |
+| `client` | `false` | Serve `POST /api/v0/login`, and `client/occamy-web/dist` under `/static/`. The web client there speaks API v1 alone, so it needs a v1 file with `web_client`. Without `client`, a v0 file serves only `/api/v0/connect` of the v0 routes |
 | `guacd.address`, `guacd.params` | `localhost:4822`, none | As in v1; token values override the parameters |
 
 A v0 file used as a v1 file reports the v0 keys it finds, with their v1

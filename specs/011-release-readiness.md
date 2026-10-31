@@ -9,8 +9,6 @@ affects:
   - CODE_OF_CONDUCT.md
   - CONTRIBUTING.md
   - LICENSE
-  - client/occamy-web/LICENSE.guacamole
-  - client/occamy-web/NOTICE.guacamole
   - .goreleaser.yaml
   - scripts/third-party-licenses.sh
   - .github/
@@ -95,11 +93,15 @@ publishes checksummed, attested artifacts.
   report, `THIRD_PARTY_LICENSES`, written by
   `scripts/third-party-licenses.sh`. `go-licenses check` gates
   dependencies in CI.
-- Since [remove-libguac](005-upstream-guacamole/remove-libguac.md), the
-  Apache files live in `client/occamy-web/` as `LICENSE.guacamole` and
-  `NOTICE.guacamole`, for the web client's fork of guacamole-common-js
-  0.9.14. The image keeps them under `/occamy/licenses/guacamole/`, and the
-  web client archive carries them.
+- From [remove-libguac](005-upstream-guacamole/remove-libguac.md) until
+  [009](009-react-web-client.md), the Apache files lived in
+  `client/occamy-web/` as `LICENSE.guacamole` and `NOTICE.guacamole`, for
+  the web client's fork of guacamole-common-js 0.9.14. 009's React
+  client replaced the fork, and they went. The web client's build now
+  writes the licenses of the packages it bundles to
+  `dist/THIRD_PARTY_LICENSES.md` (Vite's `build.license`), which the
+  image keeps under `/occamy/licenses/web/` and the web client archive
+  carries in `dist/`.
 
 ### Versioning and changelog
 

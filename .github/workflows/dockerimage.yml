@@ -27,9 +27,8 @@ jobs:
       run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
     # Release archives carry dependency licenses
     # (scripts/third-party-licenses.sh); keep them redistributable. Every
-    # package, since occamyd does not link the protocol v1 packages,
-    # internal/rdp or internal/backend/rdp, or their dependencies, until
-    # it serves them.
+    # package, not only occamyd's, so that a dependency is checked before
+    # occamyd links it.
     - name: Licenses
       run: go run github.com/google/go-licenses/v2@v2.0.1 check ./... --disallowed_types=forbidden,restricted
     # bench/codecs is a module of its own (docs/benchmarks/codecs.md).

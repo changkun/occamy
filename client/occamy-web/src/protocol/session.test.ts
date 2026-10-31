@@ -832,6 +832,16 @@ describe('the end', () => {
     expect(() => s.key(true, 0x61, 4)).toThrow(ClosedError)
   })
 
+  it('closes with the code of a client that failed, as far as a browser lets it', async () => {
+    const { t, s } = await open()
+    await s.close(5000, 1003, 'cannot show it')
+    expect(t.sent.map((m) => m.type)).toEqual(['close'])
+    expect(t.sent[0]).toMatchObject({ type: 'close', code: 1003, reason: 'cannot show it' })
+    // Browsers refuse to close a WebSocket with 1003; close says it.
+    expect(t.closed).toEqual({ code: 1000, reason: 'cannot show it' })
+    expect(await s.next()).toEqual({ type: 'end', code: 1003, reason: 'cannot show it' })
+  })
+
   it('cancels a wait for an event, leaving the session as it was', async () => {
     const { t, s } = await open()
     const ac = new AbortController()

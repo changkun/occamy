@@ -122,6 +122,10 @@ sends that user something. Until then the user still counts, for up to
 - `make e2e` runs the end-to-end tests against the demo stack
   (`make build run` first). They open a session to each demo server and
   check that the remote desktop arrives at the first attempt.
+  `TestE2EV1RDP` also takes the demo xrdp server's `rdp-native` through
+  the clipboard both ways, which the image's clipboard echo answers, a
+  resize, a viewer joined by a share, and the owner leaving and coming
+  back.
   `TestVNCParity`, among them, runs the guacd bridge's parity matrix for
   VNC: each feature on x11vnc and TigerVNC, through the native backend
   and through guacd. The demo desktops report what reached the server
