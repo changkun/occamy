@@ -68,10 +68,17 @@ const (
 	// inputEvents bounds the RDP input events that the queued inputs
 	// make, counted when Input queues them by the most an input can make:
 	// four for a character of Text, so a Text of up to 65,536
-	// characters fits. Each event is at most 12 bytes on the wire.
+	// characters fits.
 	inputEvents = 1 << 18
-	// maxBatch is the most input events written at once.
+	// maxBatch is the most input events written at once. A Text is typed
+	// a part at a time, so that the writer holds no more events than
+	// this whatever the input.
 	maxBatch = 1024
+	// hangUpGrace is how long a writer whose write failed lets the reader
+	// go on before it closes the connection: long enough for the reader
+	// to read what the server sent before it hung up, the reason it
+	// ended the session among it.
+	hangUpGrace = time.Second
 )
 
 var (
@@ -122,6 +129,13 @@ type Config struct {
 	// ClientName is the client's name the server sees; "occamy" by
 	// default.
 	ClientName string
+	// RoutingCookie sends the first nine characters of the username as
+	// the routing cookie of the connection request, as mstsc does, for a
+	// load balancer that routes connections by user, such as an RD
+	// Connection Broker. The request goes before TLS, so the username
+	// goes in the clear; it is off by default, and then nothing about
+	// the user is sent before the certificate policy passes.
+	RoutingCookie bool
 	// DialTimeout bounds the TCP connection and defaults to 15 seconds.
 	// Only Run's context bounds the rest, since it may wait for the owner
 	// to answer a prompt.
@@ -139,6 +153,8 @@ type Backend struct {
 	log         *slog.Logger
 	// dial connects to the server; tests replace it.
 	dial func(ctx context.Context) (net.Conn, error)
+	// grace is hangUpGrace; tests shorten it.
+	grace time.Duration
 
 	// visible is the latest Demand. It outlives a Run, since the session
 	// reports only changes and may report one before Run starts.
@@ -195,6 +211,7 @@ func New(cfg Config) (*Backend, error) {
 			ColorDepth: cfg.ColorDepth,
 			Domain:     cfg.Domain, Username: cfg.Username, Password: cfg.Password,
 			ClientName:     cfg.ClientName,
+			RoutingCookie:  cfg.RoutingCookie,
 			KeyboardLayout: cfg.KeyboardLayout,
 			Protocols:      protocols,
 			TLS:            cfg.TLS,
@@ -202,6 +219,7 @@ func New(cfg Config) (*Backend, error) {
 		},
 		dialTimeout: cfg.DialTimeout,
 		log:         cfg.Logger,
+		grace:       hangUpGrace,
 	}
 	b.dial = func(ctx context.Context) (net.Conn, error) {
 		d := net.Dialer{Timeout: b.dialTimeout}
@@ -293,7 +311,8 @@ type run struct {
 	kick   chan struct{} // asks the writer to reconsider the demand
 
 	// Owned by the writer.
-	input inputState
+	input  inputState
+	typing string // the rest of a Text being typed
 }
 
 // queued is an input in the queue, with the events it may make.
@@ -385,8 +404,19 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 	var werr error
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		if werr = r.writeLoop(c, done, &b.visible); werr != nil {
-			c.Close() // stops Run too
+		if werr = r.writeLoop(c, done, &b.visible); werr == nil {
+			return
+		}
+		// A write fails when the server hangs up, often before the
+		// reader has read what the server sent first: the reader ends
+		// on its own then, with the server's reason. Otherwise the
+		// failure stops it.
+		t := time.NewTimer(b.grace)
+		defer t.Stop()
+		select {
+		case <-done:
+		case <-t.C:
+			c.Close()
 		}
 	})
 	err = c.Run(ctx, sink)
@@ -396,12 +426,13 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 	return b.end(ctx, err, werr)
 }
 
-// end returns Run's result for the client's, and the writer's error.
+// end returns Run's result for the client's, and the writer's error,
+// which is the result only when it stopped the client.
 func (b *Backend) end(ctx context.Context, err, werr error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	if err != nil && werr != nil {
+	if werr != nil && errors.Is(err, net.ErrClosed) {
 		// The failed write closed the connection under the reader.
 		return werr
 	}
@@ -485,51 +516,102 @@ func (b *Backend) credentials(ctx context.Context, sink backend.Sink) (rdp.Confi
 	return cfg, nil
 }
 
+// client is what the writer needs of an rdp.Client; the tests replace
+// it.
+type client interface {
+	SendInput(events ...rdp.InputEvent) error
+	SuppressOutput(suppress bool) error
+	UnicodeInput() bool
+	MouseXInput() bool
+}
+
 // writeLoop writes queued input and what the demand asks of the server,
 // until done is closed or a write fails. Input that is ready is written
-// at once: up to maxBatch events, in input PDUs of up to 255 events.
-func (r *run) writeLoop(c *rdp.Client, done <-chan struct{}, visible *atomic.Bool) error {
+// at once, in writes of up to maxBatch events, in input PDUs of up to 255
+// events.
+func (r *run) writeLoop(c client, done <-chan struct{}, visible *atomic.Bool) error {
 	shown := true // the server sends updates until told otherwise
 	batch := make([]rdp.InputEvent, 0, maxBatch)
 	r.poke() // Demand may have come before the connection was up
 	for {
-		select {
-		case <-done:
-			return nil
-		case q := <-r.queue:
-			batch = r.take(batch, c, q)
-		case <-r.kick:
-		}
-	more:
-		for len(batch) < maxBatch {
+		if r.typing == "" {
 			select {
+			case <-done:
+				return nil
 			case q := <-r.queue:
 				batch = r.take(batch, c, q)
 			case <-r.kick:
-			default:
-				break more
 			}
 		}
+		batch = r.fill(batch, c)
 		if len(batch) > 0 {
 			if err := c.SendInput(batch...); err != nil {
-				return fmt.Errorf("rdp: write: %w", err)
+				return writeFailed(done, err)
 			}
 			clear(batch)
 			batch = batch[:0]
 		}
 		if v := visible.Load(); v != shown {
 			if err := c.SuppressOutput(!v); err != nil {
-				return fmt.Errorf("rdp: write: %w", err)
+				return writeFailed(done, err)
 			}
 			shown = v
 		}
 	}
 }
 
-// take appends the events of a queued input, which then leaves the
-// queue's budget.
-func (r *run) take(batch []rdp.InputEvent, c *rdp.Client, q queued) []rdp.InputEvent {
-	batch = r.input.events(batch, capabilities{unicode: c.UnicodeInput(), mouseX: c.MouseXInput()}, q.ev)
+// fill adds to batch what is ready to write, up to maxBatch events: the
+// rest of a Text being typed, as much of it as fits, then queued inputs,
+// which go whole, while the batch has room for the most an input other
+// than Text makes.
+func (r *run) fill(batch []rdp.InputEvent, c client) []rdp.InputEvent {
+	for {
+		if r.typing != "" {
+			if batch, r.typing = text(batch, capabilitiesOf(c), r.typing, maxBatch); r.typing != "" {
+				return batch
+			}
+		}
+		if len(batch) > maxBatch-maxInputEvents {
+			return batch
+		}
+		select {
+		case q := <-r.queue:
+			batch = r.take(batch, c, q)
+		case <-r.kick:
+		default:
+			return batch
+		}
+	}
+}
+
+// take appends the events of a queued input, or for a Text makes it the
+// text being typed. The input then leaves the queue's budget.
+func (r *run) take(batch []rdp.InputEvent, c client, q queued) []rdp.InputEvent {
+	if t, ok := q.ev.(backend.Text); ok {
+		r.typing = t.Text
+	} else {
+		batch = r.input.events(batch, capabilitiesOf(c), q.ev)
+	}
 	r.queued.Add(-int64(q.n))
 	return batch
+}
+
+// capabilitiesOf returns what the server's input capability set allows.
+func capabilitiesOf(c client) capabilities {
+	return capabilities{unicode: c.UnicodeInput(), mouseX: c.MouseXInput()}
+}
+
+// writeFailed returns the writer's result for a write that failed: nil
+// if Run is done or the connection was closed under the writer, by Run
+// or by the reader, whose result is then Run's; the error otherwise.
+func writeFailed(done <-chan struct{}, err error) error {
+	select {
+	case <-done:
+		return nil
+	default:
+	}
+	if errors.Is(err, net.ErrClosed) {
+		return nil
+	}
+	return fmt.Errorf("rdp: write: %w", err)
 }

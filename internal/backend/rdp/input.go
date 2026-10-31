@@ -36,20 +36,47 @@ const (
 	keysymPause = 0xff13
 )
 
+// hidPower is the USB HID usage of the Power key, which the backend
+// drops: Windows applies its power button action to the machine, which
+// may shut it down or put it to sleep for every user, beyond what a
+// viewer's input to one session should reach. Sleep and Wake are
+// usages of the Generic Desktop page, which keys do not carry.
+const hidPower = 0x66
+
+// Scancodes of the Control keys, whose state decides what Pause sends.
+const (
+	scancodeLeftControl  = 0x1d
+	scancodeRightControl = 0xe01d
+)
+
+// The most RDP input events an input makes, for the queue's budget.
+const (
+	// keyEvents is Pause's sequence.
+	keyEvents = 4
+	// charEvents is a character of Text: two UTF-16 units pressed and
+	// released, or a key with Shift.
+	charEvents = 4
+	// pointerEvents is a button event for each button that changed.
+	pointerEvents = 5
+	// wheelEvents is maxNotches on each axis.
+	wheelEvents = 2 * maxNotches
+	// maxInputEvents is the most of any input but Text, which the
+	// writer types a part at a time.
+	maxInputEvents = max(keyEvents, pointerEvents, wheelEvents)
+)
+
 // cost returns the most RDP input events ev makes, for the queue's
 // budget, or 0 for input that makes none.
 func cost(ev backend.InputEvent) (int, error) {
 	switch ev := ev.(type) {
 	case backend.Key:
-		return 4, nil // Pause's sequence
+		return keyEvents, nil
 	case backend.Text:
-		// A character is two UTF-16 units pressed and released, or a
-		// key with Shift.
-		return 4 * utf8.RuneCountInString(ev.Text), nil
+		return charEvents * utf8.RuneCountInString(ev.Text), nil
 	case backend.Pointer:
-		return 5, nil // a button event for each button that changed
+		return pointerEvents, nil
 	case backend.Wheel:
-		return 2 * maxNotches, nil
+		return wheelEvents, nil
 	case backend.Clipboard, backend.Resize:
 		// The clipboard and display control channels come in a later
 		// phase (native-rdp-backend.md); until then viewers scale.
@@ -64,21 +91,23 @@ type capabilities struct {
 	mouseX  bool // the back and forward buttons
 }
 
-// inputState is the pointer as the writer last sent it.
+// inputState is the keyboard and the pointer as the writer last sent
+// them.
 type inputState struct {
+	ctrl    [2]bool // the left and right Control keys are down
+	brk     bool    // Pause went down as Break, which needs its release
 	buttons backend.Buttons
 	pos     image.Point
 	moved   bool        // a position was sent
 	scroll  image.Point // pixels scrolled toward the next notch
 }
 
-// events appends the events of ev.
+// events appends the events of a Key, Pointer or Wheel. The writer types
+// Text itself, a part at a time, with text.
 func (s *inputState) events(evs []rdp.InputEvent, caps capabilities, ev backend.InputEvent) []rdp.InputEvent {
 	switch ev := ev.(type) {
 	case backend.Key:
-		return key(evs, caps, ev)
-	case backend.Text:
-		return text(evs, caps, ev.Text)
+		return s.key(evs, caps, ev)
 	case backend.Pointer:
 		return s.pointer(evs, caps, ev)
 	case backend.Wheel:
@@ -93,16 +122,27 @@ func (s *inputState) events(evs []rdp.InputEvent, caps capabilities, ev backend.
 // modifier as its scancode on a US layout, and a character as a Unicode
 // keyboard event if the server takes them, or as its key on a US layout
 // if not. Pause, whose make code is a sequence, is sent whole on its
-// press.
-func key(evs []rdp.InputEvent, caps capabilities, k backend.Key) []rdp.InputEvent {
-	if k.Code == hidPause || k.Code == 0 && k.Keysym == keysymPause {
-		if k.Down {
-			evs = append(evs, rdp.PauseEvents()...)
+// press, except while Control is down: then it is Break, an ordinary
+// key, as FreeRDP sends it. Power is dropped (hidPower).
+func (s *inputState) key(evs []rdp.InputEvent, caps capabilities, k backend.Key) []rdp.InputEvent {
+	switch {
+	case k.Code == hidPower:
+		return evs
+	case k.Code == hidPause || k.Code == 0 && k.Keysym == keysymPause:
+		switch {
+		case k.Down && (s.ctrl[0] || s.ctrl[1]):
+			s.brk = true
+			return append(evs, rdp.KeyEvent(rdp.ScancodeBreak, true))
+		case k.Down:
+			return append(evs, rdp.PauseEvents()...)
+		case s.brk:
+			s.brk = false
+			return append(evs, rdp.KeyEvent(rdp.ScancodeBreak, false))
 		}
 		return evs
 	}
 	if sc, ok := rdp.ScancodeForHID(k.Code); ok {
-		return append(evs, rdp.KeyEvent(sc, k.Down))
+		return s.scancode(evs, sc, k.Down)
 	}
 	if r, ok := keysymRune(k.Keysym); ok && caps.unicode {
 		for _, u := range utf16.Encode([]rune{r}) {
@@ -111,9 +151,21 @@ func key(evs []rdp.InputEvent, caps capabilities, k backend.Key) []rdp.InputEven
 		return evs
 	}
 	if sc, ok := rdp.ScancodeForKeysym(k.Keysym); ok {
-		return append(evs, rdp.KeyEvent(sc, k.Down))
+		return s.scancode(evs, sc, k.Down)
 	}
 	return evs
+}
+
+// scancode appends a key's event by its scancode, and keeps the state of
+// the Control keys as sent.
+func (s *inputState) scancode(evs []rdp.InputEvent, sc uint16, down bool) []rdp.InputEvent {
+	switch sc {
+	case scancodeLeftControl:
+		s.ctrl[0] = down
+	case scancodeRightControl:
+		s.ctrl[1] = down
+	}
+	return append(evs, rdp.KeyEvent(sc, down))
 }
 
 // keysymRune returns the character a keysym types, for Latin-1 keysyms,
@@ -138,17 +190,22 @@ const (
 	scancodeReturn = 0x1c
 )
 
-// text appends the events that type s: a press and a release of each
-// character, as Unicode keyboard events if the server takes them, and
-// as its key on a US layout, with Shift where the character needs it, if
-// not. A line feed and the C0 controls with a key, carriage return, tab,
-// backspace and escape, type that key, as the VNC backend and the guacd
-// bridge send them. Other characters type nothing.
-func text(evs []rdp.InputEvent, caps capabilities, s string) []rdp.InputEvent {
+// text appends the events that type s, as many whole characters as keep
+// evs within limit events, and returns the rest of s. It types a press
+// and a release of each character, as Unicode keyboard events if the
+// server takes them, and as its key on a US layout, with Shift where the
+// character needs it, if not. A line feed and the C0 controls with a
+// key, carriage return, tab, backspace and escape, type that key, as the
+// VNC backend and the guacd bridge send them. Other characters type
+// nothing.
+func text(evs []rdp.InputEvent, caps capabilities, s string, limit int) ([]rdp.InputEvent, string) {
 	tap := func(sc uint16) {
 		evs = append(evs, rdp.KeyEvent(sc, true), rdp.KeyEvent(sc, false))
 	}
-	for _, r := range s {
+	for i, r := range s {
+		if len(evs)+charEvents > limit {
+			return evs, s[i:]
+		}
 		switch {
 		case r == '\n':
 			tap(scancodeReturn)
@@ -175,7 +232,7 @@ func text(evs []rdp.InputEvent, caps capabilities, s string) []rdp.InputEvent {
 			}
 		}
 	}
-	return evs
+	return evs, ""
 }
 
 // shifted reports whether a US layout types r with Shift.

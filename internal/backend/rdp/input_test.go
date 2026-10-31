@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"math"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/rdp"
@@ -69,10 +71,20 @@ func TestText(t *testing.T) {
 		{"US keys", false, "aA1!/?", cat(tap(0x1e), shift(0x1e), tap(0x02), shift(0x02), tap(0x35), shift(0x35))},
 		{"off the US layout", false, "é€", nil},
 	} {
-		got := text(nil, capabilities{unicode: tc.unicode}, tc.text)
-		if g, w := keys(t, got), keys(t, tc.want); strings.Join(g, " ") != strings.Join(w, " ") {
-			t.Errorf("%s: %v, want %v", tc.name, g, w)
+		got, rest := text(nil, capabilities{unicode: tc.unicode}, tc.text, math.MaxInt)
+		if g, w := keys(t, got), keys(t, tc.want); strings.Join(g, " ") != strings.Join(w, " ") || rest != "" {
+			t.Errorf("%s: %v, want %v; %q left", tc.name, g, w, rest)
 		}
+	}
+	// A Text is typed a part at a time: whole characters, as many as
+	// keep the events within the limit.
+	evs, rest := text(nil, capabilities{}, "aAb", 5)
+	if g, w := keys(t, evs), keys(t, tap(0x1e)); strings.Join(g, " ") != strings.Join(w, " ") || rest != "Ab" {
+		t.Errorf("limited to 5: %v, %q left, want %v, \"Ab\" left", g, rest, w)
+	}
+	evs, rest = text(evs, capabilities{}, rest, 6)
+	if g, w := keys(t, evs), keys(t, cat(tap(0x1e), shift(0x1e))); strings.Join(g, " ") != strings.Join(w, " ") || rest != "b" {
+		t.Errorf("then 6: %v, %q left, want %v, \"b\" left", g, rest, w)
 	}
 }
 
@@ -95,10 +107,44 @@ func TestKey(t *testing.T) {
 		{"function key", uni, backend.Key{Down: true, Keysym: 0xffbe}, []rdp.InputEvent{rdp.KeyEvent(0x3b, true)}},
 		{"unknown code, known keysym", uni, backend.Key{Down: true, Keysym: 0xff52, Code: 0x3ff}, []rdp.InputEvent{rdp.KeyEvent(0xe048, true)}},
 		{"nothing", capabilities{}, backend.Key{Down: true, Keysym: 0x20ac}, nil},
+		{"Power", uni, backend.Key{Down: true, Keysym: 0x1008ff2a, Code: hidPower}, nil},
+		{"Break", uni, backend.Key{Down: true, Keysym: 0xff6b}, []rdp.InputEvent{rdp.KeyEvent(0xe046, true)}},
 	} {
-		got := key(nil, tc.caps, tc.key)
+		var s inputState
+		got := s.key(nil, tc.caps, tc.key)
 		if g, w := keys(t, got), keys(t, tc.want); strings.Join(g, " ") != strings.Join(w, " ") {
 			t.Errorf("%s: %v, want %v", tc.name, g, w)
+		}
+	}
+}
+
+// Pause is Break while either Control key is down, by the scancodes
+// sent: E0 46 pressed and released, as FreeRDP sends it. A Break that
+// went down is released even if Control went up first.
+func TestKeyBreak(t *testing.T) {
+	var s inputState
+	key := func(sc uint16, down bool) rdp.InputEvent { return rdp.KeyEvent(sc, down) }
+	for i, step := range []struct {
+		key  backend.Key
+		want []rdp.InputEvent
+	}{
+		{backend.Key{Down: true, Code: hidPause}, rdp.PauseEvents()},
+		{backend.Key{Code: hidPause}, nil},
+		{backend.Key{Down: true, Code: 0xe0}, []rdp.InputEvent{key(0x1d, true)}}, // Left Control
+		{backend.Key{Down: true, Code: hidPause}, []rdp.InputEvent{key(0xe046, true)}},
+		{backend.Key{Code: hidPause}, []rdp.InputEvent{key(0xe046, false)}},
+		{backend.Key{Code: 0xe0}, []rdp.InputEvent{key(0x1d, false)}},
+		{backend.Key{Down: true, Keysym: keysymPause}, rdp.PauseEvents()},
+		{backend.Key{Keysym: keysymPause}, nil},
+		{backend.Key{Down: true, Keysym: 0xffe4}, []rdp.InputEvent{key(0xe01d, true)}}, // Right Control by keysym
+		{backend.Key{Down: true, Keysym: keysymPause}, []rdp.InputEvent{key(0xe046, true)}},
+		{backend.Key{Keysym: 0xffe4}, []rdp.InputEvent{key(0xe01d, false)}},
+		{backend.Key{Keysym: keysymPause}, []rdp.InputEvent{key(0xe046, false)}},
+		{backend.Key{Down: true, Code: hidPause}, rdp.PauseEvents()},
+	} {
+		got := s.key(nil, capabilities{unicode: true}, step.key)
+		if g, w := keys(t, got), keys(t, step.want); strings.Join(g, " ") != strings.Join(w, " ") {
+			t.Errorf("step %d (%+v): %v, want %v", i, step.key, g, w)
 		}
 	}
 }
@@ -128,6 +174,11 @@ func TestPointer(t *testing.T) {
 			t.Errorf("step %d: %v, want %v", i, g, w)
 		}
 	}
+	// The first pointer is sent wherever it is, the origin too.
+	var fresh inputState
+	if got := fresh.pointer(nil, both, backend.Pointer{}); len(got) != 1 || keys(t, got)[0] != keys(t, []rdp.InputEvent{rdp.MoveEvent(image.Point{})})[0] {
+		t.Errorf("the first pointer, at the origin: %v, want a move", keys(t, got))
+	}
 }
 
 func TestWheel(t *testing.T) {
@@ -151,9 +202,14 @@ func TestWheel(t *testing.T) {
 		{backend.Wheel{DY: 1}, rep(down, 1)},                          // 53 pixels carried
 		{backend.Wheel{DY: -2, Mode: backend.WheelLines}, nil},        // -36
 		{backend.Wheel{DY: -1, Mode: backend.WheelLines}, rep(up, 1)}, // -54: one notch, -1 left
+		{backend.Wheel{DY: -52}, rep(up, 1)},                          // -53 with what was left
 		{backend.Wheel{DY: 1 << 30}, rep(down, maxNotches)},           // capped, and the rest dropped
 		{backend.Wheel{DX: 106, DY: 0}, rep(right, 2)},                // the axes add apart
 		{backend.Wheel{DY: -1 << 30, Mode: backend.WheelLines}, rep(up, maxNotches)},
+		// Distances too large to scale do not wrap around.
+		{backend.Wheel{DY: math.MaxInt, Mode: backend.WheelLines}, rep(down, maxNotches)},
+		{backend.Wheel{DY: math.MinInt, Mode: backend.WheelLines}, rep(up, maxNotches)},
+		{backend.Wheel{DX: math.MinInt}, rep(rdp.WheelEvent(-notch, true, s.pos), maxNotches)},
 	} {
 		got := s.wheel(nil, step.w)
 		if g, w := keys(t, got), keys(t, step.want); strings.Join(g, " ") != strings.Join(w, " ") {
@@ -203,9 +259,28 @@ func FuzzInput(f *testing.F) {
 			t.Fatal(err)
 		}
 		for _, caps := range []capabilities{{}, {unicode: true, mouseX: true}} {
+			if ev, ok := ev.(backend.Text); ok {
+				// Typed a part at a time, as the writer types it, the
+				// same events in parts within the limit.
+				whole, _ := text(nil, caps, ev.Text, math.MaxInt)
+				var parts []rdp.InputEvent
+				for rest := ev.Text; rest != ""; {
+					var part []rdp.InputEvent
+					part, rest = text(nil, caps, rest, maxBatch)
+					if len(part) > maxBatch || len(part) == 0 && rest != "" {
+						t.Fatalf("a part of %d events, %d characters left", len(part), utf8.RuneCountInString(rest))
+					}
+					parts = append(parts, part...)
+				}
+				if len(whole) > n || strings.Join(keys(t, parts), " ") != strings.Join(keys(t, whole), " ") {
+					t.Fatalf("%q makes %d events, charged %d; in parts %d", ev.Text, len(whole), n, len(parts))
+				}
+				continue
+			}
 			var s inputState
 			s.buttons = backend.Buttons(^buttons)
-			if got := len(s.events(nil, caps, ev)); got > n {
+			s.ctrl = [2]bool{flag, flag}
+			if got := len(s.events(nil, caps, ev)); got > n || got > maxInputEvents {
 				t.Fatalf("%+v makes %d events, charged %d", ev, got, n)
 			}
 		}

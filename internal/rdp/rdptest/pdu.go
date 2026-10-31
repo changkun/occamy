@@ -13,10 +13,11 @@
 // Demand Active the general, bitmap and input capability sets, and
 // licensing is the STATUS_VALID_CLIENT shortcut. CredSSP is not
 // implemented: a Server that selects NLA stops at the client's first
-// TSRequest.
+// TSRequest, which a test may refuse with TSRequestError.
 package rdptest
 
 import (
+	"encoding/asn1"
 	"encoding/binary"
 	"image"
 	"image/color"
@@ -500,5 +501,19 @@ func PointerPosition(p image.Point) []byte {
 	var b w
 	b.u16(n16(p.X))
 	b.u16(n16(p.Y))
+	return b
+}
+
+// TSRequestError is a TSRequest, [MS-CSSP] 2.2.1, that reports an
+// NTSTATUS, as a server refuses a client's credentials with 0xc000006d
+// (STATUS_LOGON_FAILURE).
+func TSRequestError(status uint32) []byte {
+	b, err := asn1.Marshal(struct {
+		Version   int   `asn1:"explicit,tag:0"`
+		ErrorCode int64 `asn1:"explicit,tag:4"`
+	}{6, int64(status)})
+	if err != nil {
+		panic(err) // the struct always encodes
+	}
 	return b
 }

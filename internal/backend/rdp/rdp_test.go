@@ -7,12 +7,15 @@ package rdp
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"image"
 	"image/color"
+	"io"
 	"net"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,6 +54,17 @@ func TestNew(t *testing.T) {
 	}
 	if b, _ := New(Config{Addr: "[::1]:3390", TLS: rdp.TLS{ServerName: "rdp.test"}}); b == nil || b.addr != "[::1]:3390" || b.cfg.TLS.ServerName != "rdp.test" {
 		t.Errorf("an IPv6 address and a server name: %+v", b)
+	}
+	if b, _ := New(Config{Addr: "[::1]", TLS: rdp.TLS{InsecureSkipVerify: true}}); b == nil || b.addr != "[::1]:3389" || b.cfg.TLS.ServerName != "::1" {
+		t.Errorf("an IPv6 address without a port: %+v", b)
+	}
+	if b.cfg.RoutingCookie {
+		t.Error("the routing cookie is on by default")
+	}
+	cookie := ok
+	cookie.RoutingCookie = true
+	if b, err := New(cookie); err != nil || !b.cfg.RoutingCookie {
+		t.Errorf("the routing cookie asked for: %v, %+v", err, b)
 	}
 	for name, cfg := range map[string]Config{
 		"no address":       {},
@@ -414,13 +428,14 @@ func TestRunDemand(t *testing.T) {
 
 // NLA needs a username and a password: the owner is asked for those the
 // configuration lacks before the connection, and the answers go to the
-// server, the username in the routing cookie and the credentials to
-// CredSSP.
+// server, the username in the routing cookie when it is asked for and
+// the credentials to CredSSP.
 func TestRunPromptsForNLA(t *testing.T) {
 	checkGoroutines(t)
 	s := listen(t, rdptest.Server{Protocol: rdptest.ProtocolHybrid})
 	cfg := s.config(t)
 	cfg.Security, cfg.Username, cfg.Password = SecurityNLA, "", ""
+	cfg.RoutingCookie = true
 	var asked backend.Prompt
 	sink := &backendtest.Sink{Answer: func(p backend.Prompt) (backend.PromptReply, error) {
 		asked = p
@@ -444,6 +459,138 @@ func TestRunPromptsForNLA(t *testing.T) {
 	if err := r.wait(t); err == nil {
 		t.Error("Run returned nil after the server hung up in CredSSP")
 	}
+}
+
+// Without the routing cookie asked for, the connection request names
+// no user: nothing about the user goes before TLS.
+func TestRunNoRoutingCookie(t *testing.T) {
+	checkGoroutines(t)
+	s := listen(t, rdptest.Server{})
+	start(t, newBackend(t, s.config(t)), &backendtest.Sink{})
+	if c := s.accept(t); c.Cookie != "" || c.Info.Username != "occamy" {
+		t.Errorf("cookie %q, user %q: want no cookie, the user in the Client Info PDU", c.Cookie, c.Info.Username)
+	}
+}
+
+// A server that refuses the credentials in CredSSP fails Run with
+// ErrAuthFailed.
+func TestRunAuthFailed(t *testing.T) {
+	checkGoroutines(t)
+	s := listen(t, rdptest.Server{Protocol: rdptest.ProtocolHybrid})
+	cfg := s.config(t)
+	cfg.Security = SecurityNLA
+	r := start(t, newBackend(t, cfg), &backendtest.Sink{})
+	a := s.next(t)
+	if !errors.Is(a.err, rdptest.ErrCredSSP) {
+		t.Fatalf("the server got %v, want CredSSP", a.err)
+	}
+	defer a.c.Close()
+	if err := a.c.Write(rdptest.TSRequestError(0xc000006d)); err != nil {
+		t.Fatal(err)
+	}
+	err := r.wait(t)
+	var ce *rdp.CredSSPError
+	if !errors.Is(err, ErrAuthFailed) || !errors.As(err, &ce) || ce.Code != 0xc000006d {
+		t.Errorf("Run returned %v, want ErrAuthFailed with the server's status", err)
+	}
+}
+
+// Cancelling while the server stalls in CredSSP ends Run at once.
+func TestRunCancelDuringNLA(t *testing.T) {
+	checkGoroutines(t)
+	s := listen(t, rdptest.Server{Protocol: rdptest.ProtocolHybrid})
+	cfg := s.config(t)
+	cfg.Security = SecurityNLA
+	r := start(t, newBackend(t, cfg), &backendtest.Sink{})
+	a := s.next(t)
+	if !errors.Is(a.err, rdptest.ErrCredSSP) {
+		t.Fatalf("the server got %v, want CredSSP", a.err)
+	}
+	defer a.c.Close()
+	time.Sleep(silence)
+	begin := time.Now()
+	if err := r.stop(t); !errors.Is(err, context.Canceled) || time.Since(begin) > time.Second {
+		t.Errorf("Run returned %v after %v", err, time.Since(begin))
+	}
+}
+
+// With "any", a man in the middle who strips NLA from the offer gets a
+// server that selects TLS and repeats the stripped offer: the backend
+// refuses before the Client Info PDU, which carries the password.
+func TestRunAnyDowngraded(t *testing.T) {
+	checkGoroutines(t)
+	s := listen(t, rdptest.Server{})
+	cfg := s.config(t)
+	cfg.Security = SecurityAny
+	cfg.Addr = stripNLA(t, s.ln.Addr().String())
+	r := start(t, newBackend(t, cfg), &backendtest.Sink{})
+	a := s.next(t)
+	if a.err == nil {
+		t.Errorf("the server got the Client Info PDU: %+v", a.c.Info)
+	}
+	if err := r.wait(t); err == nil || !strings.Contains(err.Error(), "was offered security protocols") {
+		t.Errorf("Run returned %v, want the downgrade refused", err)
+	}
+}
+
+// By default, a server that selects TLS without NLA is refused before
+// anything but the connection request is sent.
+func TestRunDefaultRefusesTLS(t *testing.T) {
+	checkGoroutines(t)
+	s := listen(t, rdptest.Server{}) // selects TLS
+	cfg := s.config(t)
+	cfg.Security = ""
+	r := start(t, newBackend(t, cfg), &backendtest.Sink{})
+	a := s.next(t)
+	if err := r.wait(t); a.err == nil || err == nil || !strings.Contains(err.Error(), "did not offer") {
+		t.Errorf("the server got %v, Run returned %v, want TLS refused", a.err, err)
+	}
+}
+
+// stripNLA is a man in the middle in front of upstream: it rewrites the
+// protocols the client offers in its connection request to TLS alone,
+// and relays the rest untouched. It returns its address.
+func stripNLA(t *testing.T, upstream string) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	t.Cleanup(func() {
+		ln.Close()
+		wg.Wait()
+	})
+	wg.Go(func() {
+		c, err := ln.Accept()
+		if err != nil {
+			return
+		}
+		defer c.Close()
+		u, err := net.Dial("tcp", upstream)
+		if err != nil {
+			return
+		}
+		defer u.Close()
+		var h [4]byte
+		if _, err := io.ReadFull(c, h[:]); err != nil {
+			return
+		}
+		p := make([]byte, int(binary.BigEndian.Uint16(h[2:]))-4)
+		if _, err := io.ReadFull(c, p); err != nil {
+			return
+		}
+		binary.LittleEndian.PutUint32(p[len(p)-4:], uint32(rdp.ProtocolSSL)) // the RDP_NEG_REQ ends the request
+		if _, err := u.Write(append(h[:], p...)); err != nil {
+			return
+		}
+		wg.Go(func() {
+			io.Copy(u, c)
+			u.Close()
+		})
+		io.Copy(c, u)
+	})
+	return ln.Addr().String()
 }
 
 // Without NLA nothing is asked: the server shows its logon screen.
@@ -536,7 +683,9 @@ func TestRunEnd(t *testing.T) {
 		{"administrator disconnected", [][]byte{rdptest.SetErrorInfo(0x1), rdptest.DisconnectUltimatum()}, false, true, nil},
 		{"replaced", [][]byte{rdptest.SetErrorInfo(0x5), rdptest.DisconnectUltimatum()}, false, true, nil},
 		{"logged off, then hung up", [][]byte{rdptest.SetErrorInfo(0x2)}, false, true, nil},
+		{"out of memory", [][]byte{rdptest.SetErrorInfo(0x6), rdptest.DisconnectUltimatum()}, false, false, rdp.ErrorInfo(0x6)},
 		{"insufficient privileges", [][]byte{rdptest.SetErrorInfo(0x9), rdptest.DisconnectUltimatum()}, false, false, rdp.ErrorInfo(0x9)},
+		{"deactivated, then the ultimatum", [][]byte{rdptest.SetErrorInfo(0x9), rdptest.DeactivateAll(), rdptest.DisconnectUltimatum()}, false, false, rdp.ErrorInfo(0x9)},
 		{"insufficient privileges, then hung up", [][]byte{rdptest.SetErrorInfo(0x9)}, false, false, rdp.ErrorInfo(0x9)},
 		{"hung up", nil, false, false, ErrConnectionClosed},
 		{"reset", nil, true, false, ErrConnectionClosed},
@@ -564,6 +713,49 @@ func TestRunEnd(t *testing.T) {
 				t.Errorf("Run returned %v, want %v", err, tc.want)
 			}
 		})
+	}
+}
+
+// A reason followed by a reset is the end the reason gives: a server's
+// kernel resets the connection when the server closes with input
+// unread.
+func TestRunReasonThenReset(t *testing.T) {
+	checkGoroutines(t)
+	for i := range 10 {
+		s := listen(t, rdptest.Server{})
+		b := newBackend(t, s.config(t))
+		b.Demand(backend.Demand{Visible: true})
+		r := start(t, b, &backendtest.Sink{})
+		c := s.accept(t)
+		if err := c.Write(rdptest.SetErrorInfo(0x2)); err != nil {
+			t.Fatal(err)
+		}
+		c.Reset()
+		if err := r.wait(t); err != nil {
+			t.Errorf("run %d: Run returned %v, want nil for an administrator's logoff", i, err)
+		}
+	}
+}
+
+// A reason that the session went on after is not the end of a later
+// hang-up.
+func TestRunEndAfterStaleReason(t *testing.T) {
+	checkGoroutines(t)
+	s := listen(t, rdptest.Server{})
+	b := newBackend(t, s.config(t))
+	b.Demand(backend.Demand{Visible: true})
+	sink := &backendtest.Sink{}
+	r := start(t, b, sink)
+	c := s.accept(t)
+	red := color.RGBA{0xff, 0, 0, 0xff}
+	if err := c.Write(rdptest.SetErrorInfo(0x1),
+		rdptest.FastPath(rdptest.Update(rdptest.FPBitmap, rdptest.BitmapUpdate(rdptest.RawBitmap(image.Point{}, solid(64, 64, red)))))); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the bitmap after the reason", func() bool { return sinkAt(sink, image.Pt(1, 1)) == red })
+	c.Reset()
+	if err := r.wait(t); !errors.Is(err, ErrConnectionClosed) {
+		t.Errorf("Run returned %v, want ErrConnectionClosed", err)
 	}
 }
 
