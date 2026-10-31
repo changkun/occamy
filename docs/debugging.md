@@ -134,11 +134,11 @@ sends that user something. Until then the user still counts, for up to
   and writes it to the file `OCCAMY_PARITY_MATRIX` names. A cell
   expected to fail is listed in `parityKnown` with the reason; any other
   failure, or a listed cell that passes, fails the test. A cell that
-  cannot reach the desktop gets a second try after 15 s, and a guacd
-  cell gets one for any failure; a native cell whose check finds a
-  difference gets none. The demo x11vnc runs under a watchdog, which
-  logs each restart as `[<port>] watchdog: …` (`podman compose logs
-  vnc`).
+  cannot reach the desktop tries again, 15 s later, up to three times in
+  all, and a guacd cell gets a second try for any failure; a native cell
+  whose check finds a difference gets none. The demo x11vnc runs under a
+  watchdog, which logs each restart as `[<port>] watchdog: …`, after the
+  X error that caused it, if any (`podman compose logs vnc`).
 - `make soak` runs `TestSoak` against the demo stack's `occamy-v1`:
   `OCCAMY_SOAK_SESSIONS` sessions, 8 by default, to x11vnc and TigerVNC
   through the native backend for `OCCAMY_SOAK_DURATION`, 1 hour by

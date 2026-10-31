@@ -10,17 +10,20 @@
 # with fr on 5903, both with VNC Authentication, for its keyboard rows.
 # No port is published, as no service of the stack is but occamyd's.
 #
-# x11vnc 0.9.17 with MIT-SHM hung for good, now and then, after an X
-# error as a client connected under the parity matrix's sessions, in a
-# futex wait with connections waiting to be accepted; it right after
-# dropped its shared-memory polling images. Without MIT-SHM (-noshm), it
-# has not. Each x11vnc also runs under a watchdog: one that leaves a
-# connection unaccepted for ten seconds is killed, and one that exits is
-# started again, which the log says. Its log lines start with its port.
-# If an Xvfb or a desktop exits, so does the container.
+# x11vnc 0.9.17 hangs for good, now and then, after an X error as a
+# client connects under the parity matrix's sessions: it logs "caught X11
+# error:", drops its polling images on its way to exit, and stops in a
+# futex wait with connections waiting to be accepted. Without MIT-SHM
+# (-noshm) it did so less often on a Mac, but still did in CI.
+# X11VNC_PRINT_XERROR makes it log the failed request first. Each x11vnc
+# runs under a watchdog, which kills one that logs an X error or leaves a
+# connection unaccepted for ten seconds, and starts one that exits again,
+# and says so in the log. Its log lines start with its port. If an Xvfb
+# or a desktop exits, so does the container.
 
 set -euo pipefail
 trap 'exit 0' TERM INT
+export X11VNC_PRINT_XERROR=1
 
 x11vnc -storepasswd "$VNC_PASSWORD" /tmp/vncpasswd >/dev/null
 n=0
@@ -44,23 +47,42 @@ waiting() {
 		/proc/net/tcp | sort
 }
 
+# log port prints x11vnc's lines with its port in front, and creates the
+# file /tmp/x11vnc-$port.failed when x11vnc reports an X error.
+log() {
+	local line
+	while IFS= read -r line; do
+		printf '[%s] %s\n' "$1" "$line"
+		case $line in
+		"caught X11 error:"* | "caught XIO error:"*) : >"/tmp/x11vnc-$1.failed" ;;
+		esac
+	done
+}
+
 # serve port display args… runs x11vnc for display on port, and starts it
-# again whenever it exits or leaves a connection unaccepted for 10 s. A
-# live x11vnc accepts within a second, however often clients connect, so
-# the watchdog follows each waiting connection rather than the queue's
-# length.
+# again whenever it exits, reports an X error, or leaves a connection
+# unaccepted for 10 s. A live x11vnc accepts within a second, however
+# often clients connect, so the watchdog follows each waiting connection
+# rather than the queue's length.
 serve() {
 	local port=$1 display=$2 pid waited now looks
 	shift 2
 	while :; do
+		rm -f "/tmp/x11vnc-$port.failed"
 		x11vnc -display "$display" -rfbport "$port" -forever -shared -noshm "$@" \
-			> >(sed -u "s/^/[$port] /") 2>&1 &
+			> >(log "$port") 2>&1 &
 		pid=$!
 		# waited holds the connections that have waited at every look
 		# for looks looks.
 		waited= looks=0
 		while kill -0 "$pid" 2>/dev/null; do
 			sleep 2
+			if [ -e "/tmp/x11vnc-$port.failed" ]; then
+				# x11vnc exits after an X error, when it does not hang.
+				echo "[$port] watchdog: x11vnc caught an X error, killing it"
+				kill -9 "$pid" 2>/dev/null || true
+				break
+			fi
 			now=$(waiting "$port")
 			if [ -n "$waited" ]; then
 				waited=$(comm -12 <(printf '%s\n' "$waited") <(printf '%s\n' "$now"))
@@ -73,6 +95,7 @@ serve() {
 			if [ "$looks" -ge 5 ]; then
 				echo "[$port] watchdog: x11vnc has left a connection unaccepted for 10 s, killing it"
 				kill -9 "$pid" 2>/dev/null || true
+				break
 			fi
 		done
 		wait "$pid" || true

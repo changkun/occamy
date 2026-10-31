@@ -279,19 +279,21 @@ notes: VNC's parity matrix), after this spec was complete.
 - `docker/demo/vnc` serves three Xvfb screens through x11vnc: `vnc:5900`
   with VNC Authentication and `:5901` without, both on the us screen,
   and `:5902` and `:5903` with VNC Authentication and the de and fr
-  layouts. x11vnc runs without MIT-SHM (`-noshm`): with it, an x11vnc
-  hung for good now and then as a client connected, after an X error,
-  and every later check on its port failed (once in six runs of the
-  matrix, then four times in about two runs of its x11vnc columns);
-  without it, fifteen runs of the x11vnc columns had no X error. Each
-  x11vnc also runs under a watchdog in `start.sh`, which kills one that
-  leaves a connection unaccepted for ten seconds and starts one that
-  exits again, and logs that it did. It follows each waiting connection
-  in `/proc/net/tcp`: a first version that went by the length of the
-  accept queue killed a live x11vnc, which clients reached every second
-  or two. Its log lines start with its port. The restart is logged
-  rather than silent, so the reason this spec gives for having no
-  restart policy, that crashes stay visible, still holds.
+  layouts. x11vnc hangs for good now and then as a client connects,
+  after an X error, and every later check on its port then fails: with
+  MIT-SHM, once in six runs of the matrix and then four times in about
+  two runs of its x11vnc columns on a Mac; without it (`-noshm`, as it
+  now runs), in none of fifteen runs on the Mac, but three times in one
+  run in CI. `start.sh` sets `X11VNC_PRINT_XERROR`, so that x11vnc logs
+  the failed request, and runs each x11vnc under a watchdog, which kills
+  one that reports an X error or leaves a connection unaccepted for ten
+  seconds, starts one that exits again, and logs that it did. It
+  follows each waiting connection in `/proc/net/tcp`: a first version
+  that went by the length of the accept queue killed a live x11vnc,
+  which clients reached every second or two. Its log lines start with
+  its port. The restart is logged rather than silent, so the reason
+  this spec gives for having no restart policy, that crashes stay
+  visible, still holds.
 - `docker/demo/vnc/desktop.sh`, the desktop of both images, runs an
   xterm, a typing probe and a clipboard probe, and reports what reaches
   the server over the session's clipboard: a line typed into the probe
