@@ -46,7 +46,10 @@ type lookahead struct {
 // are in w.tiles from w.msgK on, and the quality the client gets them at
 // is w.msgQuality.
 //
-// A run ends before a tile that a copy-rect of the frame completed.
+// A run ends before a tile that a copy-rect of the frame completed, and
+// where the tiles' motion changes: tiles in motion go at the pacer's
+// lowest quality, the effect of an input at its quality now, and other
+// still tiles at the quality their SSIM calls for, up to the pacer's.
 func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send, ok bool) {
 	start := time.Now()
 	defer func() { w.encodeTime += time.Since(start) }()
@@ -59,7 +62,7 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 		if a.tile == t && a.version >= w.versions[t] {
 			w.payload = append(w.payload[:0], a.payload...)
 			w.runVersion = append(w.runVersion[:0], a.version)
-			w.msgK, w.msgQuality = a.k, lossless
+			w.msgK, w.msgQuality, w.msgGoal = a.k, lossless, lossless
 			w.message(id, a.r, a.codec)
 			return 1, true, true
 		}
@@ -69,16 +72,17 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 		return 0, false, false
 	}
 	w.runVersion = append(w.runVersion[:0], version)
-	payload, codec, lossy := w.enc.Tile(w.payload[:0], w.tiles[0], r.Dx(), r.Dy())
+	moving := w.moving(t, input)
+	payload, codec, lossy := w.enc.Tile(w.payload[:0], w.tiles[0], r.Dx(), r.Dy(), moving)
 	w.payload = payload
-	w.msgK, w.msgQuality = 0, lossless
+	w.msgK, w.msgQuality, w.msgGoal = 0, lossless, lossless
 	if !lossy {
 		w.message(id, r, codec)
 		return 1, true, true
 	}
 
 	// Gather the run: the tiles to the right, while they are next in
-	// order and lossy.
+	// order, lossy, and moving as the first is.
 	w.rects[0] = r
 	n = 1
 	width := r.Dx()
@@ -92,6 +96,9 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 		if u != order[i+n-1]+1 || u/w.g.cols != t/w.g.cols || width+ru.Dx() > maxWidth || w.sent[u] >= w.versions[u] {
 			break
 		}
+		if w.moving(u, input) != moving {
+			break // goes at another quality
+		}
 		got, v := w.fb.ReadTile(u, w.tile(n))
 		if got != ru || w.fb.Bounds() != w.g.bounds {
 			break // resized: the next message finds out
@@ -99,7 +106,7 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 		if input && v != w.runVersion[n-1] {
 			break // another drawing operation
 		}
-		b, c, lossy := w.enc.Tile(w.ahead.payload[:0], w.tiles[n], ru.Dx(), ru.Dy())
+		b, c, lossy := w.enc.Tile(w.ahead.payload[:0], w.tiles[n], ru.Dx(), ru.Dy(), moving)
 		if !lossy {
 			w.ahead = lookahead{ok: true, tile: u, version: v, r: ru, codec: c, payload: b, k: n}
 			break
@@ -112,12 +119,10 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 	}
 
 	// Encode it, halving it while the message is too large.
-	q := w.p.Quality()
-	w.msgQuality = lossyQuality(q)
 	for {
 		rect := w.rects[0].Union(w.rects[n-1])
 		w.assemble(n, rect)
-		w.payload, codec = w.enc.Lossy(w.payload[:0], w.runPix, rect.Dx(), rect.Dy(), q)
+		codec = w.lossy(rect, moving, input)
 		if codec != 0 {
 			w.message(id, rect, codec)
 			if w.limits.CheckSize(len(w.buf)) == nil {
@@ -133,6 +138,57 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 		n = (n + 1) / 2
 		w.runVersion = w.runVersion[:n]
 	}
+}
+
+// lossy encodes the run's pixels, assembled in w.runPix as rect, into
+// w.payload, and sets the message's quality and goal:
+//
+//   - tiles in motion at the pacer's lowest quality, since motion loses
+//     detail before input loses responsiveness, and refinement raises
+//     them once they stop;
+//   - an input's effect at the pacer's quality, without the search,
+//     which would delay it, and refined like tiles that moved;
+//   - other tiles at the lowest quality up to the pacer's whose SSIM
+//     reaches the encoder's score, recorded as final; if none does,
+//     their goal is above the pacer's quality, for refinement to reach
+//     once the link allows.
+//
+// It returns the codec, 0 if none encodes the pixels.
+func (w *writer) lossy(rect image.Rectangle, moving, input bool) protocol.Codec {
+	var codec protocol.Codec
+	q := w.p.Quality()
+	switch {
+	case moving || input:
+		if moving {
+			q = min(q, w.p.MinQuality())
+		}
+		w.payload, codec = w.enc.Lossy(w.payload[:0], w.runPix, rect.Dx(), rect.Dy(), q)
+		w.msgQuality, w.msgGoal = lossyQuality(q), 0
+	default:
+		var got int
+		var reached bool
+		w.payload, codec, got, reached = w.enc.Still(w.payload[:0], w.runPix, rect.Dx(), rect.Dy(), w.g.tile, w.p.MinQuality(), q)
+		w.msgQuality, w.msgGoal = stillGoal(got, q, reached)
+	}
+	if exact(codec) {
+		w.msgQuality, w.msgGoal = lossless, lossless
+	}
+	return codec
+}
+
+// stillGoal is the quality and goal of pixels that Still encoded at got,
+// searching up to hi: final once the score is reached, or else got with
+// a goal above hi.
+func stillGoal(got, hi int, reached bool) (quality, goal uint8) {
+	if reached {
+		return final, final
+	}
+	return lossyQuality(got), lossyQuality(hi + 1)
+}
+
+// exact reports whether a codec carries pixels exactly.
+func exact(c protocol.Codec) bool {
+	return c == protocol.CodecRaw || c == protocol.CodecDeflate || c == protocol.CodecPNG
 }
 
 // tile returns the buffer for the pixels of a run's k-th tile.

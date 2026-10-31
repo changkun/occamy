@@ -38,6 +38,26 @@ type Config struct {
 	// NoScroll turns scroll detection off: the writer then keeps no copy
 	// of the client's screen and sends no copy-rect.
 	NoScroll bool
+	// RefineDelay is how long a tile stays unchanged before the writer
+	// refines it, DefaultRefineDelay if zero: sends it again exact if it
+	// has up to 256 colours, or at the quality its SSIM calls for, when
+	// it went at a lower quality while it moved, or while the viewer's
+	// link held its quality down. Refinement is background work: it goes
+	// only while nothing else is to be sent and no other frame awaits an
+	// ack, a little at a time, and gives way to any input or change. It
+	// also bounds motion: a tile is in motion when it changes more often
+	// than the refine delay. Motion is told from snapshots at least 100
+	// ms apart, with a heat that halves each refine delay but no faster
+	// than each 150 ms, so the two ranges meet without overlap from
+	// about 150 ms. Below that, content that changes between the refine
+	// delay and about 100 ms apart is both in motion and refined between
+	// its changes; and a long refine delay keeps content that changes
+	// more often than it, such as a clock under a delay of 2 s, at the
+	// lowest quality for as long as it changes.
+	RefineDelay time.Duration
+	// NoRefine turns refinement off, and with it motion: nothing goes
+	// at a lower quality than the pacer's for refinement to raise.
+	NoRefine bool
 	// Logger receives the stream's log, slog.Default() if nil.
 	Logger *slog.Logger
 	// ViewerTimeout bounds how long a viewer, hidden or not, may leave
@@ -51,6 +71,12 @@ type Config struct {
 
 // DefaultViewerTimeout is Config.ViewerTimeout's default.
 const DefaultViewerTimeout = 30 * time.Second
+
+// DefaultRefineDelay is Config.RefineDelay's default. A tile in motion
+// changes more often than the refine delay, since heat halves each
+// refine delay (refine.go), so it is not refined between its changes;
+// one that changes less often goes at its final quality at once.
+const DefaultRefineDelay = 300 * time.Millisecond
 
 // ErrStalled ends the stream of a viewer that acknowledged no frame, or
 // took no message, for Config.ViewerTimeout. Serve tells it so with
@@ -82,13 +108,20 @@ type Encoder interface {
 	// row by row, to dst and returns it with its codec; or, if the tile
 	// goes lossy, returns dst unchanged and lossy set, so that the writer
 	// merges it with the lossy tiles beside it and encodes them with
-	// Lossy.
-	Tile(dst, pix []byte, w, h int) (b []byte, codec protocol.Codec, lossy bool)
+	// Lossy or Still. moving reports that the tile is in motion, which
+	// may send it lossy where it would go lossless still.
+	Tile(dst, pix []byte, w, h int, moving bool) (b []byte, codec protocol.Codec, lossy bool)
 	// Lossy appends the encoding of pix, w by h pixels in RGBA order row
 	// by row, opaque whatever their alpha, at quality from 1 to 100, and
 	// returns it with its codec, or with codec 0 if it cannot. pix is
 	// one tile that Tile reported lossy, or several side by side.
 	Lossy(dst, pix []byte, w, h, quality int) ([]byte, protocol.Codec)
+	// Still encodes pix as Lossy does, for pixels that are not moving,
+	// at the lowest quality from lo to hi at which each of its tiles,
+	// tile pixels wide side by side, looks like pix by the encoder's
+	// perceptual score, and returns the quality, and whether the score
+	// was reached; if not, the quality is hi.
+	Still(dst, pix []byte, w, h, tile, lo, hi int) (b []byte, codec protocol.Codec, quality int, reached bool)
 	// Cursor appends the encoding of a cursor's image, w by h pixels as
 	// an image.RGBA holds them, row by row with alpha premultiplied, to
 	// dst in a codec that keeps it exact, with straight alpha as the
@@ -181,6 +214,12 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	w := newWriter(c, v, pacer.New(pc), enc, limits, cfg.Logger)
 	if w.fb != nil && !cfg.NoScroll {
 		w.sc = &scroller{}
+	}
+	switch {
+	case cfg.NoRefine:
+		w.refineDelay = -1
+	case cfg.RefineDelay > 0:
+		w.refineDelay = cfg.RefineDelay
 	}
 	w.stallTimeout = cfg.ViewerTimeout
 	read := make(chan error, 1)
