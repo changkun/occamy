@@ -35,6 +35,9 @@ type Config struct {
 	// or nil if it sends none of them. If NewEncoder is nil, the viewer's
 	// encoder is internal/encoder's.
 	NewEncoder func(codecs []protocol.Codec) Encoder
+	// NoScroll turns scroll detection off: the writer then keeps no copy
+	// of the client's screen and sends no copy-rect.
+	NoScroll bool
 	// Logger receives the stream's log, slog.Default() if nil.
 	Logger *slog.Logger
 	// ViewerTimeout bounds how long a viewer, hidden or not, may leave
@@ -176,6 +179,9 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	pc := cfg.Pacer
 	pc.Window = int(agreed.FrameWindow)
 	w := newWriter(c, v, pacer.New(pc), enc, limits, cfg.Logger)
+	if w.fb != nil && !cfg.NoScroll {
+		w.sc = &scroller{}
+	}
 	w.stallTimeout = cfg.ViewerTimeout
 	read := make(chan error, 1)
 	go func() {
