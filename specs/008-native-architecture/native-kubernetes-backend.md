@@ -219,9 +219,10 @@ protocol's default.
    - `credentials`: exactly one of `token_file`, `token_env`, the pair
      `client_cert_file` and `client_key_file`, or `prompt: true`, which
      asks the owner for a bearer token (an empty answer sends none). No
-     `username`, password or SSH key. A token file holds at most 64 KiB,
-     as every secret file does, and trailing line breaks are dropped
-     from a token in a file or a variable.
+     `username`, password or SSH key. A `token_file` holds at most
+     64 KiB, as a `password_file` and an `auth.oidc.client_secret_file`
+     do, and trailing line breaks are dropped from a token in a file or
+     a variable.
    - `tls`: a vnc connection's keys. `server_name`, `ca_file` and
      `pins` as there; `require` is implied, since the API server is
      always reached over TLS; `insecure_skip_verify` accepts any
@@ -416,9 +417,12 @@ per-protocol table moves Kubernetes to native.
     intermediate signed, with and without the intermediate; and
     `TestCancelBeforeSize` cancels between the dial and the first
     write.
-  - Hardening: a secret file of more than 64 KiB is refused, for every
-    kind of secret (`TestSecretFileBound`, and `TestEndlessSecretFile`
-    with a FIFO kept open in place of `/dev/zero`). A token from
+  - Hardening: a secret file of more than 64 KiB is refused, for the
+    three keys that `readSecret` reads: `password_file`, `token_file`
+    and `auth.oidc.client_secret_file` (`TestSecretFileBound`, and
+    `TestEndlessSecretFile` with a FIFO kept open in place of
+    `/dev/zero`). `private_key_file`, the client certificate and its
+    key, and CA files are still read whole (see Follow-ups). A token from
     `token_env` loses its trailing line breaks, as one from
     `token_file` does. docs/configuration.md says that an API server
     behind a path prefix is not supported.
@@ -447,3 +451,8 @@ per-protocol table moves Kubernetes to native.
     one that others can read.
   - Bound the other files read at a session's start: an SSH private
     key, a client certificate and its key, and CA files.
+  - A secret file that blocks, such as a FIFO with no writer or another
+    slow special file, holds the goroutine of the session that reads it
+    forever, as it did before the bound with `os.ReadFile`. Open
+    secret files with `O_NONBLOCK` and refuse all but regular files
+    after `fstat`, or document that they must be regular files.
