@@ -89,6 +89,14 @@ type writer struct {
 	cbuf       []byte // a cursor's payload
 	ahead      lookahead
 	encodeTime time.Duration
+	msgK       int  // the buffer in tiles of the message's first tile
+	msgLossy   bool // the message's tiles went lossy
+
+	// sc finds scrolls against the screen as the client has it, nil if
+	// scroll detection is off; scrollTime is what it took in the frame
+	// being sent, part of encodeTime.
+	sc         *scroller
+	scrollTime time.Duration
 
 	// snap holds the versions at snapAt and prev those at least
 	// activeWindow before, to find the tiles in motion at an input. In a
@@ -311,8 +319,9 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 	carried := false // tiles showing the pending input's effect went out
 	inputBytes := 0  // bytes of the input's tiles in this frame
 	tileBytes := 0   // of the last message, a tile's share
-	sent, messages := 0, 0
-	w.encodeTime = 0
+	sent, messages, copies := 0, 0, 0
+	w.encodeTime, w.scrollTime = 0, 0
+	detect := w.sc != nil // the order has not been searched for scrolls
 	for i := 0; i < len(order); i++ {
 		if err := w.smallNow(ctx); err != nil {
 			return err
@@ -329,6 +338,7 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 				order, i, input = w.fresh[:n], 0, true
 				// The tile read ahead belongs to the order left behind.
 				w.ahead.ok = false
+				detect = w.sc != nil
 			}
 		}
 		if input && inputBytes > 0 && w.versions[order[i]] != w.versions[order[i-1]] &&
@@ -340,6 +350,23 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 		}
 		if visible, _ := w.v.Visibility(); !visible {
 			break
+		}
+		if detect {
+			// Copies go before the tiles of the order they were found in,
+			// since the client applies a frame's messages in order.
+			detect = false
+			n, done, b, err := w.scroll(ctx, id, order, input)
+			if err != nil {
+				return err
+			}
+			copies += n
+			if input && done > 0 {
+				carried = true
+				inputBytes += b
+			}
+		}
+		if w.sent[order[i]] >= w.versions[order[i]] {
+			continue // a copy completed it
 		}
 		n, send, ok := w.encode(id, order, i, input)
 		if !ok {
@@ -360,6 +387,13 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 			}
 			w.p.Wrote(time.Now(), len(w.buf))
 			messages++
+			if w.sc != nil {
+				// The client now has these pixels: the shadow takes the
+				// buffers they were read into, and gives back its old ones.
+				for k, t := range order[i : i+n] {
+					w.tiles[w.msgK+k] = w.sc.keep(t, w.tiles[w.msgK+k], w.msgLossy)
+				}
+			}
 		}
 		for k, t := range order[i : i+n] {
 			w.sent[t] = w.runVersion[k]
@@ -393,7 +427,7 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 		return err
 	}
 	w.p.EndFrame(time.Now(), id)
-	w.log.Debug("frame sent", "frame", id, "tiles", sent, "messages", messages, "encode", w.encodeTime)
+	w.log.Debug("frame sent", "frame", id, "tiles", sent, "messages", messages, "copies", copies, "encode", w.encodeTime, "scroll", w.scrollTime)
 	if carried {
 		w.resolve()
 	}
@@ -469,6 +503,11 @@ func (w *writer) syncSize(ctx context.Context) error {
 	n := w.g.cols * ((b.Dy() + tile - 1) / tile)
 	w.sent = append(w.sent[:0], make([]uint64, n)...)
 	w.effects = append(w.effects[:0], make([]uint64, n)...)
+	if w.sc != nil {
+		// The client's screen is undefined until tiles of the new size
+		// draw it.
+		w.sc.reset(w.g)
+	}
 	// The tiles of the old size say nothing about motion on the new.
 	w.prev, w.snap = w.prev[:0], w.snap[:0]
 	if b.Empty() {

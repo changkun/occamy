@@ -71,6 +71,10 @@ type frameRecord struct {
 	at      time.Duration
 	tiles   int
 	rects   []image.Rectangle // of its tiles, in the order they came
+	copies  []protocol.CopyRect
+	bytes   int // of its tiles and copies
+	// late counts copies that came after a tile of the frame.
+	late int
 }
 
 type timedTitle struct {
@@ -158,6 +162,8 @@ func decodeTile(dst *image.RGBA, c protocol.Codec, payload []byte) error {
 func (cl *client) run(ctx context.Context) {
 	reg := protocol.ServerMessages()
 	var rects []image.Rectangle
+	var copies []protocol.CopyRect
+	size, late := 0, 0
 	for {
 		b, err := cl.c.ReadMessage(ctx)
 		if err != nil {
@@ -212,15 +218,31 @@ func (cl *client) run(ctx context.Context) {
 				break
 			}
 			rects = append(rects, r)
+			size += len(b)
 			cl.tiles++
 			cl.codecs[m.Codec]++
+		case *protocol.CopyRect:
+			// As a client applies it: from the screen as the messages
+			// before it left it.
+			dst := image.Rect(int(m.DstX), int(m.DstY), int(m.DstX)+int(m.W), int(m.DstY)+int(m.H))
+			src := image.Pt(int(m.SrcX), int(m.SrcY))
+			if !dst.In(cl.img.Rect) || !dst.Sub(dst.Min).Add(src).In(cl.img.Rect) {
+				cl.outside = true
+				break
+			}
+			draw.Draw(cl.img, dst, cl.img, src, draw.Src)
+			copies = append(copies, *m)
+			size += len(b)
+			if len(rects) > 0 {
+				late++
+			}
 		case *protocol.FrameEnd:
-			f := frameRecord{id: m.FrameID, lastSeq: m.LastSeq, at: time.Since(cl.start), tiles: len(rects), rects: rects}
+			f := frameRecord{id: m.FrameID, lastSeq: m.LastSeq, at: time.Since(cl.start), tiles: len(rects), rects: rects, copies: copies, bytes: size, late: late}
 			cl.frames = append(cl.frames, f)
 			if cl.onFrame != nil {
 				cl.onFrame(f)
 			}
-			rects = nil
+			rects, copies, size, late = nil, nil, 0, 0
 			ackID = m.FrameID
 		case *protocol.Cursor:
 			c := *m
