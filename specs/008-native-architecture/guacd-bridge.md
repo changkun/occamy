@@ -689,9 +689,9 @@ that guacd was `vnc`'s default, they are corrected below.
   A cell that cannot reach the desktop, whose screen does not arrive or
   whose probe never answers, tries again 15 s later, up to three times
   in all, through either backend, since that is how a hung server
-  looks. A guacd cell gets a second try for any failure, which is
-  generous to the baseline; a native cell whose check found a
-  difference gets none.
+  looks. A guacd cell does the same for any failure, which is generous
+  to the baseline; a native cell whose check found a difference gets no
+  second try.
 - **The matrix.** x11vnc 0.9.17 (libvncserver 0.9.15) and TigerVNC
   1.15's Xvnc, Debian trixie; guacd 1.6. On the shared host, at a load
   average of 7 to 18, the whole matrix took 192 s on fresh servers and
@@ -785,6 +785,13 @@ that guacd was `vnc`'s default, they are corrected below.
     connected: libvncclient logged "Error handling message from VNC
     server", and guacd ended with status 515. The next check on the
     same port passed; hence the second try for guacd cells.
+  - In CI, x11vnc twice closed guacd's connection to it as guacd
+    connected for a viewer's check, logging "unknown message type 53",
+    then 48: it read bytes that guacd sent as the start of a message,
+    and guacd ended with status 515. The cell failed both its tries, so
+    a guacd cell now has three, as a cell that cannot reach the desktop
+    has. The cause, guacd's or libvncserver's, is not known; the native
+    backend's cells on the same server passed.
   - x11vnc hangs for good now and then as a client connects, through
     either backend: it logs "caught X11 error:" with no detail, drops
     its polling images on its way to exit and stops in a futex wait,
