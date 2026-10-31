@@ -281,8 +281,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   back instead of queueing frames, and input never waits for `Next`.
   The frame shown and not yet acknowledged counts against the frame
   window, and each queued message against the backlog at its size and
-  512 bytes more. Tiles of plugged codecs decode in parallel. No API
-  stability promise until the release candidate.
+  512 bytes more. Tiles of plugged codecs decode in parallel. A
+  `welcome` the client cannot show, with no codec or terminal level in
+  common, is refused with a `*RefusedError` that names the session the
+  server made, so that the caller can end it. No API stability promise
+  until the release candidate.
 - The browser's client of protocol v1, a TypeScript library in
   `client/occamy-web/src/protocol` that depends on no framework: the
   handshake over a WebSocket, deflate through `DecompressionStream`,
