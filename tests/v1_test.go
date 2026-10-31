@@ -263,6 +263,16 @@ func TestE2EV1RDP(t *testing.T) {
 		if err := cl.Close(); err != nil {
 			t.Fatal(err)
 		}
+		// Once the session lists no viewer, the owner has left, so it
+		// comes back through the grace rather than taking over from its
+		// older stream.
+		for len(sessionV1(t, addr, token, id).Viewers) > 0 {
+			select {
+			case <-ctx.Done():
+				t.Fatal("the session still lists the owner's closed stream")
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
 		back := openDesktopV1(t, ctx, addr, "/api/v1/sessions/"+url.PathEscape(id)+"/stream", token,
 			client.Options{Width: 1024, Height: 768})
 		if back.SessionID() != id || back.Role() != protocol.RoleOwner {
