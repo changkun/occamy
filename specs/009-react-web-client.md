@@ -370,14 +370,18 @@ Settled on 2026-10-31.
     (what the page starts with, read once from its fragment and removed
     from the address bar: a share link, `#join=…&token=…`, or OIDC's
     `#code=` or `#error=`; a code without this tab's verifier is spent
-    with a throwaway one), `controller.ts` (one stream: connect with the
-    page's size and visibility, run the core's `Display`, bind input by
-    role, keep what the page shows as an immutable state for
-    `useSyncExternalStore`), `ending.ts` (a close code and reason, or a
-    failure to connect, as a title, a sentence, the technical detail and
-    what to offer: join again, or sign in), `roles.ts`, `layout.ts` and
-    `text.ts` (clipping the server's strings, with control and bidi
-    characters dropped).
+    with a throwaway one; the verifier is forgotten on every start),
+    `app.ts` (the screens as a reducer, and what waits for the user to
+    sign in again: a stream to open, or an owner's End or share, kept in
+    `sessionStorage` across single sign-on), `owner.ts` (End: the
+    owner's stream, then `DELETE`), `controller.ts` (one stream:
+    connect with the page's size and visibility, run the core's
+    `Display`, bind input by role, keep what the page shows as an
+    immutable state for `useSyncExternalStore`), `ending.ts` (a close
+    code and reason, or a failure to connect, as a title, a sentence,
+    the technical detail and what to offer: join again, or sign in),
+    `roles.ts`, `layout.ts` and `text.ts` (clipping the server's
+    strings, with control and bidi characters dropped).
   - `src/views`: sign-in (a password, and single sign-on where
     `GET /api/v1/auth/oidc/login` without a challenge answers 400),
     the connection list, and the session view: a toolbar (title, role,
@@ -391,12 +395,14 @@ Settled on 2026-10-31.
   - The owner's window size goes to the remote 300 ms after it settles,
     in device pixels or cells; viewers and read-only clients see the
     owner's size, scaled. Read-only clients bind no input. The remote's
-    clipboard goes to the local one when the page has focus, and the
-    local one to the remote on focus where the browser already lets the
-    page read it (Chrome's `clipboard-read` permission); otherwise the
-    clipboard panel copies and pastes by hand. Control, Alt and Shift
-    together leave the canvas or the terminal for the toolbar, since the
-    remote takes every other key, Tab included.
+    clipboard goes to the local one when the page has focus, for a role
+    that gives input, and the local one to the remote on focus where the
+    browser already lets the page read it (Chrome's `clipboard-read`
+    permission); otherwise the clipboard panel copies and pastes by
+    hand, and keeps what the user typed there when the remote's
+    clipboard changes. Control, Alt and Shift together leave the canvas
+    or the terminal for the toolbar, since the remote takes every other
+    key, Tab included.
   - `vite build` writes the licenses of the packages it bundles to
     `dist/THIRD_PARTY_LICENSES.md` (React, React DOM, scheduler,
     xterm.js and its fit add-on, all MIT); the image ships it under
@@ -431,19 +437,27 @@ Settled on 2026-10-31.
   - New: terminal sessions, the clipboard, credential prompts, sharing,
     viewers, visibility, the remote's cursor and title, the bell, and
     why a session ended.
-- **Tests:** 96 in `src/lib`, in the `web` job. Unit tests for the API
-  calls against a scripted fetch (each request's method, path, headers
-  and exact body), PKCE against RFC 7636's vector, the fragment, the
-  start of the page, layout, roles, clipping, and the ending of every
-  close code. The controller runs against a stand-in `connect` (the
+- **Tests:** 131 in `src/lib` and `src/views`, in the `web` job. Unit
+  tests for the API calls against a scripted fetch (each request's
+  method, path, headers and exact body), PKCE against RFC 7636's vector
+  and drawn from `crypto.getRandomValues`, the fragment and its removal
+  from the history entry, the start of the page and the verifier it
+  forgets, the screens' reducer (an owner's End, share and Join again
+  after the token expired, a late leave of a view that is gone), End
+  (nothing sent or closed with an expired token, the owner told when it
+  fails), layout, roles, clipping, the ending of every close code and
+  of a takeover, and the prompt's markup, rendered without a DOM. The
+  controller runs against a stand-in `connect` and session (the
   hello's size and visibility, clamping, refusals, React's development
-  effects cancelling an open) and, in the interop test, against
-  `webinterop` built with the race detector: a graphical session's
-  frames, keys, pointer, wheel, clipboard both ways, bell, title,
-  resize and the end blocking input, the visibility log, and a terminal
-  session's snapshot, echo, resize, close, and acknowledgements while
-  hidden; a wrong share is "Link not valid". A lint test holds the shell
-  to the core's index.
+  effects cancelling an open, close cancelling one, the owner's resize
+  while another is on its way, the clipboard by role and the panel's
+  draft, a failure to show the session closing the stream) and, in the
+  interop test, against `webinterop` built with the race detector: a
+  graphical session's frames, keys, pointer, wheel, clipboard both
+  ways, bell, title, resize and the end blocking input, the visibility
+  log, and a terminal session's snapshot, echo, resize, close, and
+  acknowledgements while hidden; a wrong share is "Link not valid". A
+  lint test holds the shell to the core's index.
   - Checked by hand in Chrome 156 (headless shell 156.0.8078.4, driven
     over the DevTools protocol) against occamyd serving the build with
     `web_client` under `/static/`, with vnctest's fake RFB server through
@@ -457,9 +471,19 @@ Settled on 2026-10-31.
     session and the viewer told so; an SSH session in xterm.js with
     typed input echoed and resizes sent as window changes; a connection
     with `prompt: true` asking for the password in the dialog; and a
-    share link that is not valid. The console showed only the browser's
-    failed-resource lines for the OIDC probe's 404 and the wrong
-    password's 401. Firefox and Safari were not run.
+    share link that is not valid. With the page's clock set ahead to
+    expire its token, and occamyd configured for OIDC: Share, End (with
+    a viewer watching, cancelled once) and Join again each asking to
+    sign in over the session, which kept streaming, then going on; the
+    owner's stream taken over by a newer one, told "Opened elsewhere";
+    `#error=` and `#code=` forgetting the verifier and what waited; and
+    single sign-on leaving for occamyd, whose issuer was unreachable,
+    and coming back with its error. No page broke the
+    Content-Security-Policy. The console showed only the browser's
+    failed-resource lines for requests meant to fail: the OIDC probe's
+    404, or 400 where single sign-on is configured, the wrong password's
+    401 and the bogus code's 401.
+    Firefox and Safari were not run.
 - **Decisions:**
   - No router and no UI library: three screens in one component's
     state. The access token lives in memory only; a reload signs in
@@ -473,6 +497,34 @@ Settled on 2026-10-31.
   - The owner ends a session by closing its own stream, then ending the
     session through API v1, so viewers are told at once rather than
     after the owner's minute of grace.
+  - 2026-10-31: an owner's action that finds the access token expired
+    (End, Share, Join again) opens the sign-in form as a modal dialog
+    over the session view, which stays mounted and keeps streaming, and
+    resumes once the owner has signed in; the owner may cancel and
+    carry on. End with an expired token sends nothing and closes
+    nothing. When `DELETE` fails, the owner is told that the session
+    was not ended for everyone, with Try again; a `404` counts as ended.
+    Single sign-on leaves the page, so what waits is kept in
+    `sessionStorage` with the verifier and the page joins the session
+    again on its return, within the owner's grace, then ends or shares
+    it.
+  - 2026-10-31: the remote clipboard reaches the local clipboard on its
+    own only for a role that gives input (owner, viewer). A read-only
+    viewer sees it in the clipboard panel and copies it from there, so
+    that what someone else copies does not replace what the viewer
+    copied, unasked.
+  - 2026-10-31: an owner whose newer stream took over is told by the
+    reason of occamyd's normal close, "the owner connected again", which
+    `docs/api.md` documents and a test holds both to, rather than a new
+    close code: the page says the session was opened elsewhere and
+    offers to join it again.
+  - 2026-10-31: the remote's secret prompt fields are
+    `autocomplete="one-time-code"`, which keeps password managers from
+    filling them with, or saving them as, the Occamy password. A page
+    that fails to show a session (the canvas or the terminal emulator
+    throws) closes the stream with `close` 1003 `unsupported`, for
+    which the core's `Session.close` takes a code; browsers close the
+    WebSocket itself with 1000.
   - The shell imports the core through `src/protocol/index.ts` alone,
     which lint enforces, so the tile cache and other changes inside the
     core do not reach it.

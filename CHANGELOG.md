@@ -294,11 +294,15 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   to the window and a terminal one in xterm.js. The owner resizes the
   remote with the window, answers the remote's credential prompts,
   shares the session through a link as a viewer or read-only, and ends
-  it; the clipboard goes both ways as the role allows; a hidden page
-  tells occamyd so and keeps acknowledging frames; and the end of a
-  session says why it ended. Its build writes the licenses of the
-  packages it bundles to `dist/THIRD_PARTY_LICENSES.md`, which the image
-  ships in `licenses/web/` and the web client archive in `dist/`.
+  it, signing in again over the session when the sign-in has expired;
+  the clipboard goes both ways as the role allows, and reaches the local
+  clipboard on its own only for a role that gives input, so a read-only
+  viewer copies it from the clipboard panel; a hidden page tells occamyd
+  so and keeps acknowledging frames; and the end of a session says why
+  it ended, a takeover by the owner's newer stream too. Its build
+  writes the licenses of the packages it bundles to
+  `dist/THIRD_PARTY_LICENSES.md`, which the image ships in
+  `licenses/web/` and the web client archive in `dist/`.
 - `web_client` in a v1 file: the directory of the built web client,
   which occamyd serves under `/static/` with a Content-Security-Policy
   that keeps the page to its own origin, without directory listings or
