@@ -435,7 +435,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   `/debug/vars` publishes `goroutines` and `fds`. A v1 file's
   `debug.address_env` takes the debug listener's address from an
   environment variable, and leaves the listener off while it is unset
-  or empty.
+  or empty, which `occamyd` logs at start with the variable's name.
 - The native RDP backend's clipboard, the first part of its second
   phase: `internal/rdp` joins static virtual channels and reassembles
   their chunks within a bound per channel, and carries text both ways

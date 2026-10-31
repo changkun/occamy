@@ -153,12 +153,18 @@ func (s *server) publicServer() *http.Server {
 func (s *server) shutdown() { s.stop() }
 
 // listen opens the public listener and, only if debug.address is set,
-// the debug listener; dln is nil otherwise.
+// the debug listener; dln is nil otherwise. Where debug.address_env
+// left the address empty, it says so, so that a misspelt or unexported
+// variable does not pass for a listener that is off on purpose.
 func listen(f *config.File) (ln, dln net.Listener, err error) {
 	if ln, err = net.Listen("tcp", f.Listen); err != nil {
 		return nil, nil, err
 	}
 	if f.Debug.Address == "" {
+		if f.Debug.AddressFrom != "" {
+			// #nosec G706 -- the operator's configuration, not a client's input.
+			log.Printf("debug listener off: %s, which debug.address_env names, is unset or empty", f.Debug.AddressFrom)
+		}
 		return ln, nil, nil
 	}
 	// ParseV1 refuses a debug address that overlaps listen; this also

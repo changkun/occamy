@@ -185,10 +185,15 @@ type TLS struct {
 // empty. AddressEnv names an environment variable that holds the address
 // instead, so that a deployment can turn the listener on without
 // another file; ParseV1 reads it into Address, and the listener stays
-// off while the variable is unset or empty.
+// off while the variable is unset or empty. ParseV1 then moves the name
+// to AddressFrom, so that a parsed File holds Address alone and
+// validating it again reads nothing twice.
 type Debug struct {
 	Address    string `yaml:"address"`
 	AddressEnv string `yaml:"address_env"`
+	// AddressFrom is the variable that Address was read from, if any,
+	// for occamyd to say why the listener is off when it is empty.
+	AddressFrom string `yaml:"-"`
 }
 
 // Auth configures how callers sign in and how tokens are signed.

@@ -564,9 +564,12 @@ place for fixes that ship on v0 before beta.
     `debug.address_env` names an environment variable holding the
     address instead, read at parse time and checked as `debug.address`
     is; unset or empty, it leaves the listener off, so that one file,
-    such as the demo stack's, serves with the listener and without
-    (added with the soak, guacd-bridge's Implementation notes: VNC's
-    soak).
+    such as the demo stack's, serves with the listener and without,
+    and `listen` logs that the listener is off and which variable left
+    it so. Parsing moves the name to `Debug.AddressFrom`, so that a
+    parsed `File` holds one address and validating it again reads
+    nothing twice (added with the soak, guacd-bridge's Implementation
+    notes: VNC's soak).
   - **Version sniffing:** `config.Version` reads every YAML document. A
     `version` brought in by a merge key (`<<`) counts, as the decoder
     would take it; a key of the mapping wins over a merged one, and an

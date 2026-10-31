@@ -1082,6 +1082,19 @@ func TestParseV1DebugAddressEnv(t *testing.T) {
 			if f.Debug.Address != tt.address {
 				t.Errorf("the debug listener's address is %q, want %q", f.Debug.Address, tt.address)
 			}
+			// The parsed File holds the address alone, with where it
+			// came from, so that validating it again neither reads the
+			// variable again nor finds address_env beside address.
+			if f.Debug.AddressEnv != "" || f.Debug.AddressFrom != "OCCAMY_TEST_DEBUG" {
+				t.Errorf("debug is %+v, want address_env moved to AddressFrom", f.Debug)
+			}
+			t.Setenv("OCCAMY_TEST_DEBUG", "127.0.0.1:6061")
+			if problems := config.Revalidate(f); problems != nil {
+				t.Errorf("validating the parsed File again: %v", problems)
+			}
+			if f.Debug.Address != tt.address || f.Debug.AddressFrom != "OCCAMY_TEST_DEBUG" {
+				t.Errorf("after validating again, debug is %+v, want the address %q from OCCAMY_TEST_DEBUG", f.Debug, tt.address)
+			}
 		})
 	}
 	for _, tt := range []struct{ name, debug, problem string }{
