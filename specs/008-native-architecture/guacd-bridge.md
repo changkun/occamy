@@ -713,10 +713,15 @@ that guacd was `vnc`'s default, they are corrected below.
   logic with fake checks.
 - **The matrix.** x11vnc 0.9.17 (libvncserver 0.9.15) and TigerVNC
   1.15's Xvnc, Debian trixie; guacd 1.6. On the shared host, at a load
-  average of 7 to 18, the whole matrix took 192 s on fresh servers and
+  average of 7 to 18, the matrix as first written, with a barrier that
+  tried four times and no warm-up, took 192 s on fresh servers and
   124 to 128 s on warm ones. Every run gave the table below. The runs
   that failed cells did so on server faults (next items), or, once, on
   the first version of the x11vnc watchdog, which killed a live x11vnc.
+  A whole run with the warm-up, the single-shot barrier and the guacd
+  twin of a native cell (How a cell is judged) is pending a local run;
+  its time, and whether it gives this table at every cell's first try,
+  are not yet recorded. CI runs it in `make e2e`.
 
   | Feature | x11vnc/native | x11vnc/guacd | tigervnc/native | tigervnc/guacd |
   |---|---|---|---|---|
