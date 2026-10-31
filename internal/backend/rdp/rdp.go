@@ -121,6 +121,9 @@ type Config struct {
 	// password: if the configuration lacks them and the security mode
 	// offers NLA, the session's owner is asked before the connection.
 	// Without NLA, the server shows its logon screen if they are empty.
+	// Without a Domain, a Username of the form DOMAIN\user names both,
+	// as mstsc takes it, and so does a username the owner gives without
+	// a domain.
 	Domain, Username, Password string
 	// Width and Height are the desktop size to ask for at connect,
 	// 1024×768 by default; the server may choose another. Each is at
@@ -220,6 +223,7 @@ func New(cfg Config) (*Backend, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.Domain, cfg.Username = splitDomain(cfg.Domain, cfg.Username)
 	if cfg.TLS.ServerName == "" {
 		cfg.TLS.ServerName = host
 	}
@@ -580,7 +584,8 @@ func failure(ctx context.Context, err error) error {
 // credentials returns the client's configuration with the credentials
 // NLA needs, asking the owner for those the configuration lacks: the
 // username, the domain if neither it nor the username is configured,
-// and the password, as guacd asks for them. Without NLA in the security
+// and the password, as guacd asks for them. A username given without a
+// domain may name both (splitDomain). Without NLA in the security
 // mode nothing is asked, and empty credentials leave the server's logon
 // screen to the user.
 func (b *Backend) credentials(ctx context.Context, sink backend.Sink) (rdp.Config, error) {
@@ -622,7 +627,19 @@ func (b *Backend) credentials(ctx context.Context, sink backend.Sink) (rdp.Confi
 	for i, s := range into {
 		*s = reply.Answers[i]
 	}
+	cfg.Domain, cfg.Username = splitDomain(cfg.Domain, cfg.Username)
 	return cfg, nil
+}
+
+// splitDomain returns the domain and the username to log on with: a
+// username of the form DOMAIN\user, without a domain, names both, as
+// mstsc takes it. Both parts must be there, so that a stray backslash
+// neither empties the username nor stands for a domain.
+func splitDomain(domain, username string) (string, string) {
+	if d, u, ok := strings.Cut(username, `\`); ok && domain == "" && d != "" && u != "" {
+		return d, u
+	}
+	return domain, username
 }
 
 // client is what the writer needs of an rdp.Client; the tests replace
