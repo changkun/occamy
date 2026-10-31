@@ -197,7 +197,7 @@ func newOIDC(f *config.File, signer *auth.Signer, servesTLS bool) (*oidcSignIn, 
 }
 
 // register adds the OIDC routes to mux.
-func (o *oidcSignIn) register(mux *http.ServeMux) {
+func (o *oidcSignIn) register(mux *routeMux) {
 	mux.HandleFunc("GET /api/v1/auth/oidc/login", o.login)
 	mux.HandleFunc("GET /api/v1/auth/oidc/callback", o.callback)
 	mux.HandleFunc("POST /api/v1/auth/oidc/token", o.token)

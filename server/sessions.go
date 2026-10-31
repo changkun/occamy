@@ -68,7 +68,7 @@ type sessionInfo struct {
 
 // registerSessions registers the routes of connections and sessions,
 // each for callers with an access token.
-func (s *server) registerSessions(mux *http.ServeMux) {
+func (s *server) registerSessions(mux *routeMux) {
 	authed := authenticate(s.verifier, s.ids)
 	mux.Handle("GET /api/v1/connections", authed(http.HandlerFunc(s.listConnections)))
 	mux.Handle("POST /api/v1/sessions", authed(http.HandlerFunc(s.openSession)))

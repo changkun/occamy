@@ -69,7 +69,7 @@ const (
 // their own: a browser cannot set Authorization on a WebSocket, and a
 // refusal must come as close after the upgrade, since a browser cannot
 // read the status of a refused one.
-func (s *server) registerStreams(mux *http.ServeMux) {
+func (s *server) registerStreams(mux *routeMux) {
 	mux.HandleFunc("GET /api/v1/connections/{id}/stream", s.connectionStream)
 	mux.HandleFunc("GET /api/v1/sessions/{id}/stream", s.sessionStream)
 }

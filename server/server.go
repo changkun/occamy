@@ -281,7 +281,13 @@ func newLegacyV0(g config.Guacd) (*proxy, error) {
 // response writer, which is the only one through which a body over the
 // limit can have net/http close the connection.
 func (s *server) routes() http.Handler {
-	mux := http.NewServeMux()
+	return limitBodies(maxBodyBytes)(logRequests(recovery(apiFallback(s.mux().ServeMux))))
+}
+
+// mux returns the public listener's routes: API v1, /healthz and, with
+// legacy_v0, the v0 routes.
+func (s *server) mux() *routeMux {
+	mux := newRouteMux()
 	mux.HandleFunc("GET /healthz", healthz)
 	mux.HandleFunc("POST /api/v1/auth/token", s.signIn.token)
 	if s.oidc != nil {
@@ -292,7 +298,27 @@ func (s *server) routes() http.Handler {
 	if s.v0 != nil {
 		s.v0.register(mux)
 	}
-	return limitBodies(maxBodyBytes)(logRequests(recovery(apiFallback(mux))))
+	return mux
+}
+
+// routeMux is a ServeMux that keeps the pattern of every route it
+// registers, so that a test can check that docs/api.md describes each.
+type routeMux struct {
+	*http.ServeMux
+	patterns []string
+}
+
+func newRouteMux() *routeMux { return &routeMux{ServeMux: http.NewServeMux()} }
+
+// Handle registers h for pattern, as http.ServeMux.Handle does.
+func (m *routeMux) Handle(pattern string, h http.Handler) {
+	m.patterns = append(m.patterns, pattern)
+	m.ServeMux.Handle(pattern, h)
+}
+
+// HandleFunc registers h for pattern, as http.ServeMux.HandleFunc does.
+func (m *routeMux) HandleFunc(pattern string, h func(http.ResponseWriter, *http.Request)) {
+	m.Handle(pattern, http.HandlerFunc(h))
 }
 
 // newPublicServer returns the public listener's server for h, which
@@ -322,14 +348,19 @@ func newPublicServer(h http.Handler, tlsConfig *tls.Config) *http.Server {
 // listener. It has no write timeout, since a CPU profile or trace takes
 // as long as asked.
 func newDebugServer() *http.Server {
-	mux := http.NewServeMux()
-	mux.Handle("GET /debug/vars", expvar.Handler())
-	profile(func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, h) })
 	return &http.Server{
-		Handler:           logRequests(recovery(mux)),
+		Handler:           logRequests(recovery(debugMux().ServeMux)),
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}
+}
+
+// debugMux returns the debug listener's routes.
+func debugMux() *routeMux {
+	mux := newRouteMux()
+	mux.Handle("GET /debug/vars", expvar.Handler())
+	profile(func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, h) })
+	return mux
 }
 
 // serveUntil serves public on ln, with TLS if public has a TLSConfig, and
