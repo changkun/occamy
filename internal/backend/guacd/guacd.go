@@ -219,6 +219,10 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 		}
 		return err
 	}
+	// Cancelled by the writer's panic too, so that a reader waiting for
+	// the owner's answer to a prompt stops then rather than at the answer.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	// Closing the connection unblocks the reader and the writer.
 	stop := context.AfterFunc(ctx, func() { nc.Close() })
 	defer stop()
@@ -241,6 +245,7 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 		// reader and ends Run.
 		defer func() {
 			if wpanic = backend.Recovered(recover()); wpanic != nil {
+				cancel()
 				nc.Close()
 			}
 		}()

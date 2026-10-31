@@ -5,6 +5,7 @@
 package guacd_test
 
 import (
+	"context"
 	"errors"
 	"image"
 	"net"
@@ -100,6 +101,43 @@ func TestWriterPanics(t *testing.T) {
 		synctest.Wait()
 		if inStack("(*session).readLoop") {
 			t.Error("the reader outlived the writer's panic")
+		}
+	})
+}
+
+// unanswered is a sink whose owner never answers a prompt: Prompt
+// returns only when its context ends.
+type unanswered struct {
+	backend.Sink
+	prompted chan struct{}
+}
+
+func (s unanswered) Prompt(ctx context.Context, _ backend.Prompt) (backend.PromptReply, error) {
+	close(s.prompted)
+	<-ctx.Done()
+	return backend.PromptReply{}, ctx.Err()
+}
+
+// TestWriterPanicsDuringPrompt checks that a panic of the writer while
+// the reader waits for the owner's answer to a prompt ends Run at once
+// with the panic. Before, Run waited for the answer, which may never
+// come (from the review of #117).
+func TestWriterPanicsDuringPrompt(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var armed atomic.Bool
+		prompted := make(chan struct{})
+		h := startWith(t, &backendtest.Sink{},
+			func(s backend.Sink) backend.Sink { return unanswered{s, prompted} },
+			func(c net.Conn) net.Conn { return trapConn{c, &armed} })
+		h.send("required", "password")
+		<-prompted
+		armed.Store(true)
+		if err := h.b.Input(backend.Key{Down: true, Keysym: 'a'}); err != nil {
+			t.Fatal(err)
+		}
+		var p backend.PanicError
+		if err := h.wait(); !errors.As(err, &p) || p.Value != "the writer's bug" {
+			t.Fatalf("Run = %v, want the writer's panic", err)
 		}
 	})
 }
