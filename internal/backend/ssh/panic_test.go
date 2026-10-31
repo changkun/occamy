@@ -26,7 +26,7 @@ func (s panicSink) TermData(p []byte) {
 }
 
 func (s panicSink) Resize(cols, rows int) {
-	if s.Sink.Resizes() > 0 {
+	if s.Resizes() > 0 {
 		panic("the resize bug")
 	}
 	s.Sink.Resize(cols, rows)
