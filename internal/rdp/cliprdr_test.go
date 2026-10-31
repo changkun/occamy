@@ -341,10 +341,13 @@ func TestClipboardToServer(t *testing.T) {
 
 // The server's text: the client acknowledges its Format List, asks for
 // CF_UNICODETEXT, or CF_TEXT where the list has only that, and gives the
-// text to its Output with LF line ends.
+// text to its Output with LF line ends. The locks of the clipboard's
+// data, which xrdp sends, and other PDUs for files are ignored.
 func TestClipboardFromServer(t *testing.T) {
 	l := runLive(t, rdptest.Server{}, bothWays)
 	l.ready(t, true)
+	lock := []byte{1, 0, 0, 0} // clipDataId
+	l.send(t, rdptest.CliprdrPDU(10, 0, lock), rdptest.CliprdrPDU(11, 0, lock))
 	l.send(t, rdptest.FormatList(true, 49161, rdptest.CFText, rdptest.CFUnicodeText, 16))
 	want(t, l.next(t), rdptest.CBFormatListResponse, rdptest.CBResponseOK)
 	m := l.next(t)
@@ -355,6 +358,9 @@ func TestClipboardFromServer(t *testing.T) {
 	l.send(t, rdptest.FormatDataResponse(true, rdptest.UnicodeText("one\r\ntwo\rthree\n😀")))
 	if got := l.waitClipboard(t, 1); got[0] != "one\ntwo\nthree\n😀" {
 		t.Errorf("clipboard %q", got[0])
+	}
+	if n := l.c.Stats().Ignored["clipboard PDUs"]; n != 2 {
+		t.Errorf("%d clipboard PDUs ignored, want the 2 locks", n)
 	}
 
 	// Short format names, and CF_TEXT alone, as Latin-1.

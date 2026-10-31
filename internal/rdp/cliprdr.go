@@ -6,6 +6,7 @@ package rdp
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"unicode/utf16"
 	"unicode/utf8"
@@ -279,7 +280,7 @@ func clipboardText(text []byte) []byte {
 	}
 	if len(text) > MaxClipboard {
 		n := MaxClipboard
-		for n > 0 && !utf8.RuneStart(text[n]) {
+		for n > 0 && !utf8.RuneStart(text[n]) { // #nosec G602 -- text has more than MaxClipboard bytes
 			n--
 		}
 		text = text[:n]
@@ -443,12 +444,11 @@ func crlf(text []byte, f func(rune)) {
 // ends and a terminating NUL.
 func unicodeText(text []byte) []byte {
 	b := make([]byte, 0, 2*len(text)+2)
+	var units [2]uint16
 	crlf(text, func(r rune) {
-		if r1, r2 := utf16.EncodeRune(r); r1 != utf8.RuneError {
-			b = append(b, byte(r1), byte(r1>>8), byte(r2), byte(r2>>8))
-			return
+		for _, u := range utf16.AppendRune(units[:0], r) {
+			b = binary.LittleEndian.AppendUint16(b, u)
 		}
-		b = append(b, byte(r), byte(r>>8))
 	})
 	return append(b, 0, 0)
 }

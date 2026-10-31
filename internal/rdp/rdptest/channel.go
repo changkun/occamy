@@ -217,7 +217,7 @@ func ParseCliprdr(msg []byte) (Cliprdr, error) {
 		return Cliprdr{}, errors.New("rdptest: short CLIPRDR message")
 	}
 	n := binary.LittleEndian.Uint32(msg[4:])
-	if uint64(n) != uint64(len(msg)-8) {
+	if int64(n) != int64(len(msg)-8) {
 		return Cliprdr{}, fmt.Errorf("rdptest: CLIPRDR message of %d bytes says %d", len(msg)-8, n)
 	}
 	return Cliprdr{Type: binary.LittleEndian.Uint16(msg), Flags: binary.LittleEndian.Uint16(msg[2:]), Data: msg[8:]}, nil

@@ -192,7 +192,7 @@ func (s *Server) credSSP(c *Conn, cert *x509.Certificate) error {
 	}
 	var pw tsPasswordCreds
 	if _, err := asn1.Unmarshal(ts.Credentials, &pw); ts.CredType != 1 || err != nil {
-		return fmt.Errorf("rdptest: TSPasswordCreds of type %d: %v", ts.CredType, err)
+		return fmt.Errorf("rdptest: TSPasswordCreds of type %d: %w", ts.CredType, err)
 	}
 	c.Delegated = Credentials{
 		Domain:   fromUTF16(pw.DomainName),
