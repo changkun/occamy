@@ -475,3 +475,37 @@ func TestFrameWorkLimit(t *testing.T) {
 		})
 	}
 }
+
+// A slot keeps a copy of a raw tile's pixels, not the buffer of the
+// message they came in, which has room to spare, so that it holds 16
+// KiB at most.
+func TestCacheRawSlotSize(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		pix := make([]byte, 4*64*64)
+		tile := (&protocol.Tile{FrameID: 1, W: 64, H: 64, Codec: protocol.CodecRaw, Slot: 1, Payload: pix}).Append(nil)
+		msgs := encode(
+			&protocol.Welcome{ViewerID: 1, Role: protocol.RoleOwner, Class: protocol.ClassGraphical,
+				Capabilities: protocol.Capabilities{Codecs: []protocol.Codec{protocol.CodecRaw, protocol.CodecCached}, CacheSlots: 4}},
+			&protocol.Resize{Width: 64, Height: 64},
+		)
+		// The transport's buffer, larger than the message, as io.ReadAll
+		// leaves it. The payload ends the message.
+		buf := append(make([]byte, 0, 2*len(tile)), tile...)
+		msgs = append(msgs, buf)
+		msgs = append(msgs, encode(&protocol.FrameEnd{FrameID: 1})...)
+		s, err := New(context.Background(), &fuzzConn{msgs: msgs, eof: true}, Options{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		synctest.Wait()
+		endOf(t, s)
+		d := s.slots[0].data
+		if len(d) != len(pix) || cap(d) > len(pix) {
+			t.Fatalf("slot 1 holds %d bytes in %d of capacity, want %d", len(d), cap(d), len(pix))
+		}
+		if &d[0] == &buf[len(tile)-len(pix)] {
+			t.Errorf("slot 1 keeps the message's buffer, %d bytes of capacity for %d of pixels", cap(buf), len(pix))
+		}
+	})
+}

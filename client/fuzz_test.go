@@ -124,18 +124,34 @@ func FuzzSession(f *testing.F) {
 		&protocol.FrameEnd{FrameID: 2},
 		&protocol.Title{Title: "after"},
 	))
+	f.Add(byte(0), fuzzSeed( // the tile cache: stored, drawn again, replaced, and asked for wrongly
+		&protocol.Resize{Width: 16, Height: 16},
+		&protocol.Tile{FrameID: 1, W: 4, H: 4, Codec: protocol.CodecRaw, Slot: 1, Payload: pix},
+		&protocol.Tile{FrameID: 1, X: 4, W: 4, H: 4, Codec: protocol.CodecPNG, Slot: 2, Payload: []byte{7}},
+		&protocol.Tile{FrameID: 1, Y: 4, W: 4, H: 4, Codec: protocol.CodecCached, Slot: 1},
+		&protocol.Tile{FrameID: 1, X: 4, Y: 4, W: 4, H: 4, Codec: protocol.CodecCached, Slot: 2},
+		&protocol.Resize{Width: 8, Height: 8},
+		&protocol.Tile{FrameID: 1, W: 4, H: 4, Codec: protocol.CodecCached, Slot: 2},
+		&protocol.FrameEnd{FrameID: 1},
+		&protocol.Tile{FrameID: 2, W: 2, H: 2, Codec: protocol.CodecRaw, Slot: 1, Payload: pix[:16]},
+		&protocol.Tile{FrameID: 2, W: 4, H: 4, Codec: protocol.CodecCached, Slot: 1},
+		&protocol.FrameEnd{FrameID: 2},
+	))
 	f.Fuzz(func(t *testing.T, mode byte, data []byte) {
 		synctest.Test(t, func(t *testing.T) {
 			w := protocol.Welcome{
 				ViewerID: 1, Role: protocol.RoleOwner, Class: protocol.ClassGraphical,
-				Capabilities: protocol.Capabilities{Codecs: []protocol.Codec{protocol.CodecPNG, protocol.CodecRaw}, Terminal: 1},
+				Capabilities: protocol.Capabilities{
+					Codecs:   []protocol.Codec{protocol.CodecPNG, protocol.CodecRaw, protocol.CodecCached},
+					Terminal: 1, CacheSlots: 4,
+				},
 			}
 			if mode&1 != 0 {
 				w.Class = protocol.ClassTerminal
 			}
 			c := &fuzzConn{msgs: append([][]byte{w.Append(nil)}, fuzzMessages(data)...), eof: mode&2 != 0}
 			maxPixels := fuzzPixels[mode>>2&3]
-			s, err := New(context.Background(), c, Options{Decoders: []Decoder{fuzzDecoder{}}, MaxPixels: maxPixels, DecodeWorkers: 2})
+			s, err := New(context.Background(), c, Options{Decoders: []Decoder{fuzzDecoder{}}, MaxPixels: maxPixels, DecodeWorkers: 2, CacheSlots: 4})
 			if err != nil {
 				t.Fatal(err)
 			}
