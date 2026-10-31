@@ -1152,6 +1152,9 @@ place for fixes that ship on v0 before beta.
     The first frame of 80 by 24 is the server's behaviour, not only
     the test's: a client may see the blank default terminal for a
     moment before the backend's size, which `resize` then corrects.
+    Follow-up: start the session's terminal at the size the owner's
+    hello asks for, with a size in `session.Config`, since the
+    terminal's `Options.Reply` is the session's own.
   - [009](../009-react-web-client.md) and the Go client: send `hello` in
     the query and the token in the subprotocol; expect `close` before
     `welcome` for a refusal; reconnect as the owner with an access token
