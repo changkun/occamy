@@ -7,6 +7,7 @@ package rdp
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"net"
 	"runtime"
@@ -436,3 +437,43 @@ func TestClipboardChannelBound(t *testing.T) {
 	}
 }
 
+// brokenConn fails every write, counting them.
+type brokenConn struct {
+	net.Conn
+	writes int
+}
+
+var errBroken = errors.New("the connection is broken")
+
+func (b *brokenConn) Write([]byte) (int, error) {
+	b.writes++
+	return 0, errBroken
+}
+
+// After a write fails, writeDue writes nothing more and returns that
+// failure: whether the write was the last of what was due or one within
+// a message of more than chunksPerWrite chunks.
+func TestChannelWriteFailed(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		text int
+	}{
+		{"the last write", 0},
+		{"a write within a message", 60 << 10},
+	} {
+		conn := &brokenConn{}
+		c := clipClient(conn)
+		c.clip.ready, c.clip.listDue = true, true
+		if tc.text > 0 {
+			c.clip.text = bytes.Repeat([]byte("x"), tc.text)
+			c.clip.provide = []uint32{cfUnicodeText}
+		}
+		if err := c.writeDue(); !errors.Is(err, errBroken) || conn.writes != 1 {
+			t.Fatalf("%s: writeDue returned %v after %d writes, want the failure after 1", tc.name, err, conn.writes)
+		}
+		c.clip.listDue = true // more is due
+		if err := c.writeDue(); !errors.Is(err, errBroken) || conn.writes != 1 {
+			t.Errorf("%s: then writeDue returned %v after %d writes, want the failure and no more", tc.name, err, conn.writes)
+		}
+	}
+}
