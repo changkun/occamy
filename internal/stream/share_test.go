@@ -12,8 +12,10 @@ import (
 	"math/rand/v2"
 	"slices"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"changkun.de/x/occamy/internal/backend/backendtest"
 	"changkun.de/x/occamy/internal/encoder"
 	"changkun.de/x/occamy/protocol"
 )
@@ -302,20 +304,30 @@ func TestShareRunQuality(t *testing.T) {
 	}
 }
 
-// The workers encode a frame's rows as the writer then sends them: each
-// tile, and each run of lossy tiles between tiles that are clean or
-// exact, so that the writer finds every encoding they made.
+// The workers encode a frame's rows but the writer's first as the
+// writer then sends them: each tile, and each run of lossy tiles between
+// tiles that are clean, exact or in the client's tile cache, so that the
+// writer finds every encoding they made.
 func TestPrefetchMatchesWriter(t *testing.T) {
 	d := newDirect(t, false)
+	d.w.cache = newTileCache(DefaultCacheSlots)
 	photo := corpusFrame(t, "photo")
-	d.show(photo)
+	first := image.NewRGBA(photo.Rect)
+	copy(first.Pix, photo.Pix)
+	// The last row's patterns go to the tile cache.
+	for x := range 16 {
+		r := image.Rect(64*x, 64*11, 64*x+64, 64*12)
+		draw.Draw(first, r, pattern(x+11, r.Min), r.Min, draw.Src)
+	}
+	d.show(first)
 	d.frame()
 
-	// Every other run of tiles changes, some of them to a pattern.
+	// Every other run of tiles changes, some of them to a pattern, which
+	// from the eighth row on the tile cache holds.
 	next := image.NewRGBA(photo.Rect)
 	draw.Draw(next, next.Rect, photo, image.Pt(0, 32), draw.Src)
 	img := image.NewRGBA(photo.Rect)
-	copy(img.Pix, photo.Pix)
+	copy(img.Pix, first.Pix)
 	for y := range 12 {
 		for x := range 16 {
 			r := image.Rect(64*x, 64*y, 64*x+64, 64*y+64)
@@ -342,6 +354,11 @@ func TestPrefetchMatchesWriter(t *testing.T) {
 	for len(sh.jobs) > 0 {
 		(<-sh.jobs)(wk)
 	}
+	for k := range sh.cache.tiles {
+		if k.tile/16 == w.order[0]/16 {
+			t.Fatalf("a worker encoded tile %d, of the writer's row", k.tile)
+		}
+	}
 	// A worker asks again for an exact tile that ended a run, as the
 	// first of the next message.
 	before := sh.cache.stats()
@@ -355,6 +372,62 @@ func TestPrefetchMatchesWriter(t *testing.T) {
 	}
 	if s := sh.cache.stats(); made == 0 || s.hits-before.hits != made {
 		t.Errorf("the workers made %d encodings, and the writer found %d", made, s.hits-before.hits)
+	}
+}
+
+// Once its frame is sent, the workers leave the rest of its rows.
+func TestPrefetchStops(t *testing.T) {
+	d := newDirect(t, false)
+	d.show(corpusFrame(t, "desktop"))
+	d.frame()
+	d.show(corpusFrame(t, "photo"))
+	sh := sharedWriter(t, d)
+	sh.jobs = make(chan func(*worker), 64)
+	w := d.w
+	if _, ok := w.collect(image.Rectangle{}); !ok {
+		t.Fatal("resized")
+	}
+	if w.fetch = w.prefetch(w.order); w.fetch == nil {
+		t.Fatal("no rows for the workers")
+	}
+	w.stopFetch()
+	wk := &worker{encs: map[profile]*encoder.Encoder{}}
+	jobs := 0
+	for len(sh.jobs) > 0 {
+		(<-sh.jobs)(wk)
+		jobs++
+	}
+	if s := sh.cache.stats(); jobs == 0 || s.misses != 0 {
+		t.Errorf("the workers encoded %d tiles or runs of a frame already sent", s.misses)
+	}
+}
+
+// Serve shares a session's encodings among the viewers whose encoders
+// are internal/encoder's, with workers unless EncodeWorkers is negative,
+// and not at all with NoShare.
+func TestShareConfig(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		cfg             Config
+		shared, workers bool
+	}{
+		{"by default", Config{}, true, true},
+		{"without workers", Config{EncodeWorkers: -1}, true, false},
+		{"NoShare", Config{NoShare: true}, false, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				tc.cfg.SessionID = "s1"
+				r := newRigConfig(t, backendtest.NewScreen(320, 192, 0), 64, 50e6, time.Millisecond, webpDeflate, tc.cfg)
+				time.Sleep(time.Second)
+				sharedMu.Lock()
+				sh := sharedFor[r.s.Framebuffer()]
+				sharedMu.Unlock()
+				if (sh != nil) != tc.shared || sh != nil && (sh.jobs != nil) != tc.workers {
+					t.Errorf("shared %v, with workers %v; want %v, %v", sh != nil, sh != nil && sh.jobs != nil, tc.shared, tc.workers)
+				}
+			})
+		})
 	}
 }
 
