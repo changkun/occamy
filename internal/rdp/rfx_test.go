@@ -432,6 +432,14 @@ var (
 	}
 	fineQuant   = [3]rdptest.Quant{uniformQuant(6), uniformQuant(6), uniformQuant(6)}
 	coarseQuant = [3]rdptest.Quant{uniformQuant(12), uniformQuant(13), uniformQuant(15)}
+	// asymQuant sets each level's HL and LH bands apart, so that the
+	// order of the bands in a table matters, which xrdp's, equal at
+	// every level, leave untested. It is built by band, not parsed.
+	asymQuant = [3]rdptest.Quant{
+		{rdptest.HL1: 6, rdptest.LH1: 9, rdptest.HH1: 9, rdptest.HL2: 7, rdptest.LH2: 10, rdptest.HH2: 9, rdptest.HL3: 6, rdptest.LH3: 8, rdptest.HH3: 8, rdptest.LL3: 6},
+		{rdptest.HL1: 10, rdptest.LH1: 7, rdptest.HH1: 10, rdptest.HL2: 9, rdptest.LH2: 6, rdptest.HH2: 9, rdptest.HL3: 8, rdptest.LH3: 6, rdptest.HH3: 8, rdptest.LL3: 6},
+		{rdptest.HL1: 6, rdptest.LH1: 9, rdptest.HH1: 9, rdptest.HL2: 7, rdptest.LH2: 10, rdptest.HH2: 9, rdptest.HL3: 6, rdptest.LH3: 8, rdptest.HH3: 8, rdptest.LL3: 6},
+	}
 )
 
 func progQuantOf(b ...byte) rdptest.Quant {
@@ -536,13 +544,18 @@ func TestRFXRoundTrip(t *testing.T) {
 				}
 			}
 		}
-		quants := []rdptest.Quant{fineQuant[0], uniformQuant(9)}
+		// The first tile at fine quantization, the second at tables
+		// whose HL and LH bands differ, which pin the tables' band order.
+		quants := []rdptest.Quant{fineQuant[0], uniformQuant(9), asymQuant[0], asymQuant[1], asymQuant[2]}
 		var tiles []rdptest.RFXTile
 		var ref [2]*image.RGBA
-		for x := range 2 {
-			coef := rdptest.EncodeTile(img, image.Pt(64*x, 0), &fineQuant, false)
-			ref[x] = refDecode(coef, &[3]rfxQuant{rfxQuant(fineQuant[0]), rfxQuant(fineQuant[1]), rfxQuant(fineQuant[2])}, false)
+		for x, q := range []*[3]rdptest.Quant{&fineQuant, &asymQuant} {
+			coef := rdptest.EncodeTile(img, image.Pt(64*x, 0), q, false)
+			ref[x] = refDecode(coef, &[3]rfxQuant{rfxQuant(q[0]), rfxQuant(q[1]), rfxQuant(q[2])}, false)
 			tile := rdptest.RFXTile{X: x, Quant: [3]int{0, 0, 0}}
+			if x == 1 {
+				tile.Quant = [3]int{2, 3, 4}
+			}
 			for c := range 3 {
 				tile.Data[c] = rdptest.RLGR(mode, rdptest.Deltas(coef[c][:], rdptest.Layout(false)[rdptest.LL3]))
 			}
@@ -568,11 +581,13 @@ func TestRFXRoundTrip(t *testing.T) {
 				if w := ref[x/64].RGBAAt(x%64, y); !nearRGBA(got, w, 1) {
 					t.Fatalf("mode %d: pixel (%d, %d) is %v, want %v within 1", mode, x, y, got, w)
 				}
-				w := img.RGBAAt(x, y)
-				worst = max(worst, absInt(int(got.R)-int(w.R)), absInt(int(got.G)-int(w.G)), absInt(int(got.B)-int(w.B)))
+				if x < 64 {
+					w := img.RGBAAt(x, y)
+					worst = max(worst, absInt(int(got.R)-int(w.R)), absInt(int(got.G)-int(w.G)), absInt(int(got.B)-int(w.B)))
+				}
 			}
 		}
-		// What fine quantization loses on sharp strokes.
+		// What fine quantization loses, in the first tile.
 		if worst > 6 {
 			t.Errorf("mode %d: decoded within %d of the image, want 6", mode, worst)
 		}
@@ -711,7 +726,8 @@ var progImageTolerance = [3]int{8, 34, 40}
 // output, to which W2S2 PDUs of the codec context ctx go.
 type progSurface struct {
 	*gfxTest
-	frame uint32
+	frame  uint32
+	quants []rdptest.Quant // the regions' quantization tables, xrdp's if nil
 }
 
 func newProgSurface(t testing.TB, w, h int) *progSurface {
@@ -727,7 +743,11 @@ func (p *progSurface) send(ctx uint32, extra bool, rects []image.Rectangle, tile
 		rects = []image.Rectangle{p.c.gfx.surfaces[1].bounds()}
 	}
 	p.frame++
-	region := rdptest.ProgRegion{Rects: rects, Quants: xrdpQuant[:], ProgQuants: progQualities, Extrapolate: extra, Tiles: tiles}
+	quants := p.quants
+	if quants == nil {
+		quants = xrdpQuant[:]
+	}
+	region := rdptest.ProgRegion{Rects: rects, Quants: quants, ProgQuants: progQualities, Extrapolate: extra, Tiles: tiles}
 	stream := append(rdptest.ProgSyncContext(), rdptest.Progressive(p.frame, region)...)
 	return p.gfxTest.send(gfxFrame(p.frame, rdptest.WireToSurface2(1, rdptest.CodecProgressive, ctx, rdptest.PixelXRGB, stream)))
 }
@@ -739,14 +759,14 @@ func (p *progSurface) must(t testing.TB, ctx uint32, extra bool, rects []image.R
 	}
 }
 
-// tile is the client's state of the tile at x, y of ctx.
+// tile is the client's state of the tile at x, y of the surface.
 func (p *progSurface) tile(t testing.TB, x, y int) *progTile {
 	t.Helper()
-	ctx := p.c.gfx.surfaces[1].prog
-	if ctx == nil || ctx.tiles[y*ctx.cols+x] == nil {
+	st := p.c.gfx.surfaces[1].prog
+	if st == nil || st.tiles[y*st.cols+x] == nil {
 		t.Fatalf("no tile %d,%d", x, y)
 	}
-	return ctx.tiles[y*ctx.cols+x]
+	return st.tiles[y*st.cols+x]
 }
 
 // wantTile checks that the client's tile at x, y is what e says the
@@ -790,46 +810,61 @@ func screenTile(scr *image.RGBA, x, y int) *image.RGBA {
 // A tile sent in passes, as an original tile and then as a difference
 // tile, decodes after each pass to what the encoder says the client
 // has, with the signs of what it sent, and after the last to exactly
-// what the tile sent whole in one pass decodes to; in the original and
-// the reduce-extrapolate transforms.
+// what the tile sent whole in one pass decodes to, and to within a
+// level of the decoder in floating point; in the original and the
+// reduce-extrapolate transforms, at xrdp's quantization and at tables
+// whose HL and LH bands differ, which pin the tables' band order.
 func TestProgressivePasses(t *testing.T) {
-	for _, extra := range []bool{false, true} {
-		p := newProgSurface(t, 128, 64)
-		whole := newProgSurface(t, 128, 64)
-		e := newProgEnc(1, 0, extra)
-		for frame, kind := range []int{0, 1, 2} {
-			img := testImage(kind, 7)
-			coef := rdptest.EncodeTile(img, image.Point{}, &xrdpQuant, extra)
-			diff := frame > 0
-			p.must(t, 7, extra, nil, e.first(coef, diff, false, 0, progQualities[0].BitPos))
-			p.wantTile(t, e, true)
-			p.must(t, 7, extra, nil, e.upgrade(1, progQualities[1].BitPos))
-			p.wantTile(t, e, true)
-			p.must(t, 7, extra, nil, e.upgrade(2, progQualities[2].BitPos))
-			p.wantTile(t, e, true)
-			p.must(t, 7, extra, nil, e.upgrade(progFull, fullPass))
-			p.wantTile(t, e, false)
-			for c := range 3 {
-				if !slices.Equal(e.ref[c], coef[c][:]) {
-					t.Fatalf("the encoder's reference is not the tile after the full pass")
-				}
-			}
-			w := newProgEnc(1, 0, extra)
-			whole.must(t, 3, extra, nil, w.first(coef, false, true, progFull, fullPass))
-			got, want := screenTile(p.out.snapshot(), 1, 0), screenTile(whole.out.snapshot(), 1, 0)
-			if !bytes.Equal(got.Pix, want.Pix) {
-				t.Fatalf("extra %v, frame %d: the passes decode otherwise than the whole tile", extra, frame)
-			}
-			if d := maxDiff(got, img); d > progImageTolerance[kind] {
-				t.Fatalf("extra %v, frame %d: decoded within %d of the image, want %d", extra, frame, d, progImageTolerance[kind])
-			}
+	for qi, quant := range []*[3]rdptest.Quant{&xrdpQuant, &asymQuant} {
+		for _, extra := range []bool{false, true} {
+			progPasses(t, quant, qi == 0, extra)
 		}
-		st := p.c.Stats()
-		if st.Bitmaps["gfx progressive"] != 3 || st.Bitmaps["gfx progressive difference"] != 2 || st.Bitmaps["gfx progressive upgrade"] != 9 {
-			t.Errorf("stats %+v", st.Bitmaps)
-		}
-		wantRect(t, p.out.snapshot(), image.Rect(0, 0, 64, 64), black)
 	}
+}
+
+// progPasses is TestProgressivePasses at the tables quant, xrdp's if
+// xrdp, in the transform extra.
+func progPasses(t *testing.T, quant *[3]rdptest.Quant, xrdp, extra bool) {
+	p := newProgSurface(t, 128, 64)
+	whole := newProgSurface(t, 128, 64)
+	p.quants, whole.quants = quant[:], quant[:]
+	byBand := [3]rfxQuant{rfxQuant(quant[0]), rfxQuant(quant[1]), rfxQuant(quant[2])}
+	e := newProgEnc(1, 0, extra)
+	for frame, kind := range []int{0, 1, 2} {
+		img := testImage(kind, 7)
+		coef := rdptest.EncodeTile(img, image.Point{}, quant, extra)
+		diff := frame > 0
+		p.must(t, 7, extra, nil, e.first(coef, diff, false, 0, progQualities[0].BitPos))
+		p.wantTile(t, e, true)
+		p.must(t, 7, extra, nil, e.upgrade(1, progQualities[1].BitPos))
+		p.wantTile(t, e, true)
+		p.must(t, 7, extra, nil, e.upgrade(2, progQualities[2].BitPos))
+		p.wantTile(t, e, true)
+		p.must(t, 7, extra, nil, e.upgrade(progFull, fullPass))
+		p.wantTile(t, e, false)
+		for c := range 3 {
+			if !slices.Equal(e.ref[c], coef[c][:]) {
+				t.Fatalf("the encoder's reference is not the tile after the full pass")
+			}
+		}
+		w := newProgEnc(1, 0, extra)
+		whole.must(t, 3, extra, nil, w.first(coef, false, true, progFull, fullPass))
+		got, want := screenTile(p.out.snapshot(), 1, 0), screenTile(whole.out.snapshot(), 1, 0)
+		if !bytes.Equal(got.Pix, want.Pix) {
+			t.Fatalf("extra %v, frame %d: the passes decode otherwise than the whole tile", extra, frame)
+		}
+		if d := maxDiff(got, refDecode(coef, &byBand, extra)); d > 1 {
+			t.Fatalf("xrdp's tables %v, extra %v, frame %d: decoded within %d of the decoder in floating point, want 1", xrdp, extra, frame, d)
+		}
+		if d := maxDiff(got, img); xrdp && d > progImageTolerance[kind] {
+			t.Fatalf("extra %v, frame %d: decoded within %d of the image, want %d", extra, frame, d, progImageTolerance[kind])
+		}
+	}
+	st := p.c.Stats()
+	if st.Bitmaps["gfx progressive"] != 3 || st.Bitmaps["gfx progressive difference"] != 2 || st.Bitmaps["gfx progressive upgrade"] != 9 {
+		t.Errorf("stats %+v", st.Bitmaps)
+	}
+	wantRect(t, p.out.snapshot(), image.Rect(0, 0, 64, 64), black)
 }
 
 // A difference tile sent whole, as TILE_SIMPLE or TILE_FIRST of full
@@ -907,10 +942,18 @@ func TestProgressiveRegionClip(t *testing.T) {
 	}
 }
 
-// A codec context of another id replaces the surface's, its tiles gone;
-// one deleted goes; deleting one the surface does not have, a region
-// outside a frame, and a W2S2 of another codec are ignored and counted;
-// and deleting the surface lets its tiles go.
+// deleteContext is RDPGFX_DELETE_ENCODING_CONTEXT_PDU of surface 1's
+// codec context ctx.
+func deleteContext(ctx uint32) []byte {
+	return rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, binary.LittleEndian.AppendUint32([]byte{1, 0}, ctx))
+}
+
+// A codec context of another id ends the surface's, as deleting it
+// does: the tiles keep their coefficients and give their signs back,
+// and an upgrade of a tile whose first pass was in it has none.
+// Deleting a context the surface does not have, a region outside a
+// frame, and a W2S2 of another codec are ignored and counted; and
+// deleting the surface lets its tiles go.
 func TestProgressiveContexts(t *testing.T) {
 	p := newProgSurface(t, 128, 64)
 	coef := rdptest.EncodeTile(testImage(0, 0), image.Point{}, &fineQuant, false)
@@ -919,39 +962,99 @@ func TestProgressiveContexts(t *testing.T) {
 	if p.c.gfx.progTiles != 2 || len(p.c.gfx.signs) != 0 {
 		t.Fatalf("%d tiles, %d spare signs", p.c.gfx.progTiles, len(p.c.gfx.signs))
 	}
-	// Another context: its tiles start over, and an upgrade of a tile
-	// of the old one has no first pass.
+	// Another context: an upgrade of a tile of the old one has no first
+	// pass, and the tiles stay, without their signs.
+	kept := p.tile(t, 0, 0).coef
 	if err := p.send(2, false, nil, e.upgrade(1, progQualities[1].BitPos)); err == nil || !strings.Contains(err.Error(), "no first pass") {
 		t.Fatalf("upgrade in a new context: %v", err)
 	}
-	if p.c.gfx.progTiles != 0 || p.c.gfx.surfaces[1].prog.id != 2 {
-		t.Fatalf("%d tiles after the context was replaced", p.c.gfx.progTiles)
+	if st := p.c.gfx.surfaces[1].prog; p.c.gfx.progTiles != 2 || st.ctx != 2 || st.signed != 0 || len(p.c.gfx.signs) != 1 {
+		t.Fatalf("%d tiles, context %d, %d with signs and %d spare after the context was replaced", p.c.gfx.progTiles, st.ctx, st.signed, len(p.c.gfx.signs))
 	}
-	p.must(t, 2, false, nil, newProgEnc(0, 0, false).first(coef, false, true, progFull, fullPass))
-	p.gfxTest.must(t, rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, binary.LittleEndian.AppendUint32([]byte{1, 0}, 9)))
-	if p.c.gfx.surfaces[1].prog == nil {
-		t.Fatal("deleting another context let the surface's go")
+	if tile := p.tile(t, 0, 0); tile.coef != kept || tile.sign != nil {
+		t.Fatal("the tile lost its coefficients, or kept its signs, with its codec context")
 	}
-	p.gfxTest.must(t, rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, binary.LittleEndian.AppendUint32([]byte{1, 0}, 2)))
-	if p.c.gfx.surfaces[1].prog != nil || p.c.gfx.progTiles != 0 {
+	// A first pass in the new context has upgrades.
+	p.must(t, 2, false, nil, e.first(coef, false, false, 0, progQualities[0].BitPos))
+	p.must(t, 2, false, nil, e.upgrade(1, progQualities[1].BitPos))
+	p.wantTile(t, e, true)
+	p.gfxTest.must(t, deleteContext(9))
+	if st := p.c.gfx.surfaces[1].prog; !st.live || st.signed != 1 {
+		t.Fatal("deleting another context ended the surface's")
+	}
+	p.gfxTest.must(t, deleteContext(2))
+	if st := p.c.gfx.surfaces[1].prog; st.live || st.signed != 0 || p.c.gfx.progTiles != 2 {
 		t.Fatal("the deleted context stays")
 	}
-	// Regions outside a frame, before one and after one, and another
-	// codec.
+	// Deleted again, it is a context the surface does not have.
+	p.gfxTest.must(t, deleteContext(2))
+	if err := p.send(3, false, nil, e.upgrade(2, progQualities[2].BitPos)); err == nil || !strings.Contains(err.Error(), "no first pass") {
+		t.Fatalf("upgrade after its context was deleted: %v", err)
+	}
+	// Regions outside a frame, before one and after one, in a new
+	// context, which starts outside a frame, and another codec.
 	region := rdptest.ProgRegion{Quants: xrdpQuant[:], Tiles: [][]byte{newProgEnc(0, 0, false).first(coef, false, true, progFull, fullPass)}}
-	p.gfxTest.must(t, rdptest.WireToSurface2(1, rdptest.CodecProgressive, 3, rdptest.PixelXRGB, slices.Concat(region.Block(), rdptest.Progressive(1), region.Block())))
+	p.gfxTest.must(t, rdptest.WireToSurface2(1, rdptest.CodecProgressive, 4, rdptest.PixelXRGB, slices.Concat(region.Block(), rdptest.Progressive(1), region.Block())))
 	p.gfxTest.must(t, rdptest.WireToSurface2(1, rdptest.CodecRemoteFX, 3, rdptest.PixelXRGB, nil))
 	st := p.c.Stats()
-	if st.Ignored["GFX deletes of no codec context"] != 1 || st.Ignored["GFX progressive regions outside a frame"] != 2 || st.Ignored["GFX bitmaps of unknown codecs"] != 1 || p.c.gfx.progTiles != 0 {
+	if st.Ignored["GFX deletes of no codec context"] != 2 || st.Ignored["GFX progressive regions outside a frame"] != 2 || st.Ignored["GFX bitmaps of unknown codecs"] != 1 || p.c.gfx.progTiles != 2 {
 		t.Fatalf("ignored %+v, %d tiles", st.Ignored, p.c.gfx.progTiles)
 	}
-	p.must(t, 3, false, nil, newProgEnc(1, 0, false).first(coef, false, false, 0, progQualities[0].BitPos))
-	if p.c.gfx.progTiles != 1 {
-		t.Fatalf("%d tiles", p.c.gfx.progTiles)
-	}
 	p.gfxTest.must(t, rdptest.DeleteSurface(1))
-	if p.c.gfx.progTiles != 0 || len(p.c.gfx.signs) != 0 {
-		t.Fatalf("%d tiles, %d spare signs after the surface went", p.c.gfx.progTiles, len(p.c.gfx.signs))
+	if p.c.gfx.progTiles != 0 {
+		t.Fatalf("%d tiles after the surface went", p.c.gfx.progTiles)
+	}
+}
+
+// The tiles' coefficients outlast their codec context ([MS-RDPEGFX]
+// 3.3.1.3): after the context is deleted, or another replaces it, a
+// difference tile adds to them, and decodes as the tile sent whole.
+func TestProgressiveDifferenceAcrossContexts(t *testing.T) {
+	a := rdptest.EncodeTile(testImage(0, 1), image.Point{}, &xrdpQuant, false)
+	b := rdptest.EncodeTile(testImage(1, 1), image.Point{}, &xrdpQuant, false)
+	whole := newProgSurface(t, 64, 64)
+	whole.must(t, 1, false, nil, newProgEnc(0, 0, false).first(b, false, true, progFull, fullPass))
+	want := whole.out.snapshot()
+	for _, end := range []string{"delete", "switch"} {
+		p := newProgSurface(t, 64, 64)
+		e := newProgEnc(0, 0, false)
+		p.must(t, 1, false, nil, e.first(a, false, true, progFull, fullPass))
+		if end == "delete" {
+			p.gfxTest.must(t, deleteContext(1))
+		}
+		p.must(t, 2, false, nil, e.first(b, true, true, progFull, fullPass))
+		p.wantTile(t, e, false)
+		if got := p.out.snapshot(); !bytes.Equal(got.Pix, want.Pix) {
+			t.Fatalf("%s: the difference tile decodes %d off the tile sent whole", end, maxDiff(got, want))
+		}
+	}
+}
+
+// An upgrade, or a difference tile, in another transform than the
+// tile's coefficients ends the session: the bands lie elsewhere, and
+// the signs that a first pass set are another transform's.
+func TestProgressiveTransformChange(t *testing.T) {
+	var coef [2]*[3][4096]int16
+	for i, extra := range []bool{false, true} {
+		coef[i] = rdptest.EncodeTile(testImage(0, 0), image.Point{}, &fineQuant, extra)
+	}
+	for i, extra := range []bool{false, true} {
+		p := newProgSurface(t, 64, 64)
+		e := newProgEnc(0, 0, extra)
+		p.must(t, 1, extra, nil, e.first(coef[i], false, false, 0, progQualities[0].BitPos))
+		// The passes' bits are of the tile's transform; the regions say
+		// the other.
+		if err := p.send(1, !extra, nil, e.upgrade(1, progQualities[1].BitPos)); err == nil || !strings.Contains(err.Error(), "another transform") {
+			t.Fatalf("extra %v: upgrade in the other transform: %v", extra, err)
+		}
+		if err := p.send(1, !extra, nil, e.first(coef[i], true, true, progFull, fullPass)); err == nil || !strings.Contains(err.Error(), "another transform") {
+			t.Fatalf("extra %v: difference tile in the other transform: %v", extra, err)
+		}
+		// Sent whole, the tile may change its transform, and a new tile
+		// may come as a difference in either.
+		p.must(t, 1, !extra, nil, newProgEnc(0, 0, !extra).first(coef[1-i], false, true, progFull, fullPass))
+		q := newProgSurface(t, 64, 64)
+		q.must(t, 1, !extra, nil, newProgEnc(0, 0, !extra).first(coef[1-i], true, true, progFull, fullPass))
 	}
 }
 
@@ -1110,20 +1213,29 @@ func TestRFXPace(t *testing.T) {
 	twice := rdptest.ProgRegion{Rects: []image.Rectangle{image.Rect(0, 0, 100, 100)}, Quants: xrdpQuant[:], ProgQuants: progQualities,
 		Tiles: [][]byte{e2.first(coef, false, false, 0, progQualities[0].BitPos), e2.upgrade(1, progQualities[1].BitPos)}}
 	progTwice := rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, rdptest.Progressive(1, twice))
+	full := rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, rdptest.Progressive(1, rdptest.ProgRegion{Quants: xrdpQuant[:], Tiles: [][]byte{newProgEnc(0, 0, false).first(coef, false, true, progFull, fullPass)}}))
 	for _, tc := range []struct {
-		name string
-		pdu  []byte
-		want int
+		name  string
+		setup []byte // sent before the PDU, uncharged
+		pdu   []byte
+		want  int
 	}{
-		{"remotefx", rfx, 2*rfxTileCost + 2 + 64*30 + 64*24 + 2 + 36*30},
+		{"remotefx", nil, rfx, 2*rfxTileCost + 2 + 64*30 + 64*24 + 2 + 36*30},
 		// The first region's two tiles, and the second's upgrade of the
 		// first, drawn again.
-		{"progressive", prog, 3*rfxTileCost + 1 + 64*64 + 1 + 36*64 + 1 + 64*64},
+		{"progressive", nil, prog, 3*rfxTileCost + 1 + 64*64 + 1 + 36*64 + 1 + 64*64},
 		// A tile that a region changes twice is drawn once.
-		{"progressive twice", progTwice, 2*rfxTileCost + 1 + 64*64},
+		{"progressive twice", nil, progTwice, 2*rfxTileCost + 1 + 64*64},
+		// The end of a codec context whose tiles keep signs looks at the
+		// surface's 16 tiles; of one whose tiles keep none, at none.
+		{"context end, signs", progTwice, deleteContext(1), 16},
+		{"context end, no signs", full, deleteContext(1), 0},
 	} {
 		g := newGFXTest(t, 256, 256)
 		g.must(t, surfacePDUs(1, 256, 256, image.Point{})...)
+		if tc.setup != nil {
+			g.must(t, tc.setup)
+		}
 		// A second fills the bucket again, to twice the desktop.
 		if err := g.clock.sleep(time.Second); err != nil {
 			t.Fatal(err)
@@ -1170,6 +1282,49 @@ func TestProgressiveTileLimit(t *testing.T) {
 	}
 }
 
+// The tile limit is the largest desktop's that the pipeline has had: a
+// desktop that shrinks, by RDPGFX_RESET_GRAPHICS_PDU or a reactivation,
+// keeps the surfaces, and their tiles may grow, whether they were made
+// before the desktop shrank or after.
+func TestProgressiveTileLimitShrink(t *testing.T) {
+	coef := rdptest.EncodeTile(testImage(0, 0), image.Point{}, &coarseQuant, false)
+	tiles := func(from, n int) []byte {
+		var tiles [][]byte
+		for i := from; i < from+n; i++ {
+			tiles = append(tiles, newProgEnc(i%60, i/60, false).first(coef, false, true, progFull, fullPass))
+		}
+		region := rdptest.ProgRegion{Rects: []image.Rectangle{image.Rect(0, 0, 8, 8)}, Quants: coarseQuant[:], Tiles: tiles}
+		return gfxFrame(1, rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, rdptest.Progressive(1, region)))
+	}
+	if limit := progTileLimit(1920, 1080); limit != 1024 {
+		t.Fatalf("limit %d at 1920×1080", limit)
+	}
+	for _, tc := range []struct {
+		name   string
+		before int // the tiles made before the desktop shrinks
+	}{{"reset", 1100}, {"reset", 0}, {"reactivation", 1100}, {"reactivation", 0}} {
+		g := newGFXTest(t, 3840, 2160)
+		g.must(t, surfacePDUs(1, 3840, 2160, image.Point{})...)
+		if tc.before > 0 {
+			g.must(t, tiles(0, tc.before))
+		}
+		if tc.name == "reset" {
+			g.must(t, rdptest.ResetGraphics(1920, 1080))
+		} else if _, err := g.c.handleShareControl(g.out, demandActive(1920, 1080)); err != nil {
+			t.Fatal(err)
+		}
+		if w, h := g.c.Size(); w != 1920 || h != 1080 {
+			t.Fatalf("%s: desktop of %d×%d", tc.name, w, h)
+		}
+		if err := g.send(tiles(tc.before, 1101-tc.before)); err != nil {
+			t.Fatalf("%s, %d tiles before: a tile after the desktop shrank: %v", tc.name, tc.before, err)
+		}
+		if g.c.gfx.progTiles != 1101 {
+			t.Fatalf("%s: %d tiles", tc.name, g.c.gfx.progTiles)
+		}
+	}
+}
+
 // Decoding a tile allocates nothing, in RemoteFX and in RemoteFX
 // Progressive's passes.
 func TestRFXAllocs(t *testing.T) {
@@ -1193,7 +1348,7 @@ func TestRFXAllocs(t *testing.T) {
 	first := rdptest.Progressive(1, rdptest.ProgRegion{Quants: xrdpQuant[:], ProgQuants: progQualities, Tiles: [][]byte{e.first(coef, false, false, 0, progQualities[0].BitPos)}})
 	upgrade := rdptest.Progressive(1, rdptest.ProgRegion{Quants: xrdpQuant[:], ProgQuants: progQualities, Tiles: [][]byte{e.upgrade(1, progQualities[1].BitPos)}})
 	full := rdptest.Progressive(1, rdptest.ProgRegion{Quants: xrdpQuant[:], ProgQuants: progQualities, Tiles: [][]byte{e.upgrade(progFull, fullPass)}})
-	s.prog = &progContext{id: 1, cols: 1, tiles: make([]*progTile, 1)}
+	s.prog = &progState{ctx: 1, live: true, cols: 1, tiles: make([]*progTile, 1)}
 	if err := g.c.progStream(s, first); err != nil {
 		t.Fatal(err)
 	}
@@ -1384,7 +1539,7 @@ func BenchmarkProgressivePasses(b *testing.B) {
 		msgs = append(msgs, rdptest.Progressive(uint32(i), rdptest.ProgRegion{Quants: xrdpQuant[:], ProgQuants: progQualities, Tiles: [][]byte{tile}}))
 	}
 	s := g.c.gfx.surfaces[1]
-	s.prog = &progContext{id: 1, cols: 1, tiles: make([]*progTile, 1)}
+	s.prog = &progState{ctx: 1, live: true, cols: 1, tiles: make([]*progTile, 1)}
 	b.ReportAllocs()
 	for b.Loop() {
 		for _, m := range msgs {

@@ -15,14 +15,21 @@ import (
 // tile may come as the difference from what the client has, and in
 // passes, a first one of fewer bits and upgrades that add more.
 //
-// A context keeps each tile's coefficients as the specification's
+// A surface keeps each tile's coefficients as the specification's
 // DecDwtQ (3.3.8.2.1.1), quantized, before the shift of their
-// quantization factor, in 16 bits, and, while a tile has upgrades to
-// come, the sign of each, which decides how an upgrade codes it. The
-// first pass sums the LL3 band's differences even for a difference
-// tile, as 3.3.8.2.1.1 says and its example in 4.1.2.2.3 does. A
-// surface keeps one context; one of another id replaces it, as the
-// server deletes the old one.
+// quantization factor, in 16 bits: its sub-band diffing tile context,
+// which 3.3.1.3 says MUST be kept until the surface is deleted, so that
+// a difference tile adds to them whatever codec context it comes in.
+// The first pass sums the LL3 band's differences even for a difference
+// tile, as 3.3.8.2.1.1 says and its example in 4.1.2.2.3 does.
+//
+// While a tile has upgrades to come, it keeps its progressive tile
+// context too (3.3.1.2): the sign of each coefficient, which decides
+// how an upgrade codes it, and the bit positions of its last pass.
+// These go with the codec context of the tile's first pass. A surface
+// has one codec context at a time: one of another id ends it, as a
+// delete does, and an upgrade after that, of a tile whose first pass
+// was in it, has no first pass.
 //
 // At the end of each region, the tiles that it changed are drawn
 // where its rectangles cover them. The specification lets a region's
@@ -51,39 +58,79 @@ const (
 	progExtrapolate = 0x01
 )
 
-// progContext is a surface's codec context: its tiles, in rows of cols.
-type progContext struct {
-	id      uint32
-	cols    int
-	tiles   []*progTile
-	n       int  // the tiles made
-	inFrame bool // a RFX_PROGRESSIVE_FRAME_BEGIN without its end
-	region  uint32
+// progState is a surface's RemoteFX Progressive state: its codec
+// context, if it has one, and its tiles, in rows of cols.
+type progState struct {
+	ctx     uint32 // the codec context's id, if live
+	live    bool   // the surface has a codec context
+	inFrame bool   // a RFX_PROGRESSIVE_FRAME_BEGIN without its end, in the codec context
+	// gen counts the codec contexts that have ended: a tile whose
+	// first pass was in the live one has its gen.
+	gen    uint32
+	region uint32 // the regions applied
+	cols   int
+	tiles  []*progTile
+	n      int // the tiles made
+	signed int // the tiles that keep signs
 }
 
 // progTile is a tile's state ([MS-RDPEGFX] 3.3.8.2.1).
 type progTile struct {
 	coef   [3][4096]int16 // DecDwtQ of Y, Cb and Cr
-	sign   *[3][4096]int8 // the sign of each coefficient but LL3's, while upgrades are to come
-	bitPos [3]rfxQuant    // the bit positions of the last pass
 	quant  [3]rfxQuant    // the quantization factors of the last pass
-	extra  bool           // the reduce-extrapolate transform
+	extra  bool           // the reduce-extrapolate transform of the last pass
 	at     image.Point    // its origin on the surface
 	region uint32         // the last region that changed it
+	// The progressive tile context, of the codec context of the first
+	// pass, gen: the sign of each coefficient but LL3's while upgrades
+	// are to come, and the bit positions of the last pass.
+	gen    uint32
+	sign   *[3][4096]int8
+	bitPos [3]rfxQuant
 }
 
-// progTileLimit bounds the tiles that the contexts keep, 24 KiB each:
-// twice the desktop's tiles, at least 1024.
+// progTileLimit bounds the tiles that the surfaces keep, 24 KiB each
+// and 12 KiB more while they keep signs: twice the desktop's tiles, at
+// least 1024.
 func progTileLimit(w, h int) int {
 	return max(1024, 2*((w+rfxTile-1)/rfxTile)*((h+rfxTile-1)/rfxTile))
 }
 
-// progDrop lets the context of s go.
+// progHighWater returns the tile limit: progTileLimit of the largest
+// desktop that the pipeline has had, as the surfaces and their tiles
+// outlast a resize. It is raised before each resize, and here.
+func (c *Client) progHighWater() int {
+	g := &c.gfx
+	g.tileLimit = max(g.tileLimit, progTileLimit(c.Size()))
+	return g.tileLimit
+}
+
+// progDrop lets the tiles of s go, with the surface.
 func (c *Client) progDrop(s *surface) {
 	if s.prog != nil {
 		c.gfx.progTiles -= s.prog.n
 		s.prog = nil
 	}
+}
+
+// progEnd ends the codec context of st: its tiles keep their
+// coefficients, and give their signs back. Looking for them is charged
+// a pixel a tile.
+func (c *Client) progEnd(st *progState) error {
+	st.live, st.inFrame = false, false
+	st.gen++
+	if st.signed == 0 {
+		return nil
+	}
+	if err := c.pace(len(st.tiles)); err != nil {
+		return err
+	}
+	for _, t := range st.tiles {
+		if t != nil {
+			c.progRelease(st, t)
+		}
+	}
+	return nil
 }
 
 // gfxWireToSurface2 applies RDPGFX_WIRE_TO_SURFACE_PDU_2: a RemoteFX
@@ -107,22 +154,18 @@ func (c *Client) gfxWireToSurface2(r *reader) error {
 		c.count(func(s *Stats) { s.Ignored["GFX bitmaps of unknown codecs"]++ })
 		return nil
 	}
-	if s.prog == nil || s.prog.id != ctx {
-		// The new context takes the old one's slice of tiles, emptied,
-		// so that a server that switches contexts does not have the
-		// client make one a PDU.
-		var tiles []*progTile
-		if s.prog != nil {
-			tiles = s.prog.tiles
-			clear(tiles)
-		}
-		c.progDrop(s)
+	st := s.prog
+	if st == nil {
 		cols := (s.w + rfxTile - 1) / rfxTile
-		if tiles == nil {
-			tiles = make([]*progTile, cols*((s.h+rfxTile-1)/rfxTile))
-		}
-		s.prog = &progContext{id: ctx, cols: cols, tiles: tiles}
+		st = &progState{cols: cols, tiles: make([]*progTile, cols*((s.h+rfxTile-1)/rfxTile))}
+		s.prog = st
 	}
+	if st.live && st.ctx != ctx {
+		if err := c.progEnd(st); err != nil {
+			return err
+		}
+	}
+	st.ctx, st.live = ctx, true
 	return c.progStream(s, data)
 }
 
@@ -134,12 +177,11 @@ func (c *Client) gfxDeleteContext(r *reader) error {
 		return r.err
 	}
 	s := c.gfx.surfaces[id]
-	if s == nil || s.prog == nil || s.prog.id != ctx {
+	if s == nil || s.prog == nil || !s.prog.live || s.prog.ctx != ctx {
 		c.count(func(s *Stats) { s.Ignored["GFX deletes of no codec context"]++ })
 		return nil
 	}
-	c.progDrop(s)
-	return nil
+	return c.progEnd(s.prog)
 }
 
 // progStream applies an RFX_PROGRESSIVE_BITMAP_STREAM's blocks to s.
@@ -217,8 +259,8 @@ func (c *Client) progRegion(s *surface, b []byte) error {
 		return fmt.Errorf("progressive tiles of %d bytes in %d", size, r.len())
 	}
 	data := r.take(int(size))
-	ctx := s.prog
-	ctx.region++
+	st := s.prog
+	st.region++
 	changed := g.changed[:0]
 	defer func() {
 		clear(changed)
@@ -243,9 +285,9 @@ func (c *Client) progRegion(s *surface, b []byte) error {
 		var err error
 		switch typ {
 		case progTileSimple, progTileFirst:
-			tile, err = c.progFirst(ctx, &reg, block, typ == progTileFirst)
+			tile, err = c.progFirst(st, &reg, block, typ == progTileFirst)
 		case progTileUpgrade:
-			tile, err = c.progUpgrade(ctx, &reg, block)
+			tile, err = c.progUpgrade(st, &reg, block)
 		default:
 			c.count(func(s *Stats) { s.Ignored["GFX progressive blocks"]++ })
 			continue
@@ -253,8 +295,8 @@ func (c *Client) progRegion(s *surface, b []byte) error {
 		if err != nil {
 			return err
 		}
-		if tile.region != ctx.region {
-			tile.region = ctx.region
+		if tile.region != st.region {
+			tile.region = st.region
 			changed = append(changed, tile)
 		}
 	}
@@ -297,30 +339,31 @@ func (reg *progRegionData) bitPos(q int) ([3]rfxQuant, error) {
 	return reg.progs[q], nil
 }
 
-// progTileAt returns the context's tile at x, y, made if it is not yet
-// and create is set, the tiles within progTileLimit.
-func (c *Client) progTileAt(ctx *progContext, x, y int, create bool) (*progTile, error) {
-	if x >= ctx.cols || y*ctx.cols+x >= len(ctx.tiles) {
-		return nil, fmt.Errorf("progressive tile %d,%d outside its surface of %d×%d tiles", x, y, ctx.cols, len(ctx.tiles)/ctx.cols)
+// progTileAt returns the surface's tile at x, y, made if it is not yet
+// and create is set, the tiles within the limit, and whether it was
+// made.
+func (c *Client) progTileAt(st *progState, x, y int, create bool) (*progTile, bool, error) {
+	if x >= st.cols || y*st.cols+x >= len(st.tiles) {
+		return nil, false, fmt.Errorf("progressive tile %d,%d outside its surface of %d×%d tiles", x, y, st.cols, len(st.tiles)/st.cols)
 	}
-	t := ctx.tiles[y*ctx.cols+x]
+	t := st.tiles[y*st.cols+x]
 	if t != nil || !create {
-		return t, nil
+		return t, false, nil
 	}
-	if limit := progTileLimit(c.Size()); c.gfx.progTiles >= limit {
-		return nil, fmt.Errorf("more than %d progressive tiles", limit)
+	if limit := c.progHighWater(); c.gfx.progTiles >= limit {
+		return nil, false, fmt.Errorf("more than %d progressive tiles", limit)
 	}
 	t = &progTile{at: image.Pt(x*rfxTile, y*rfxTile)}
-	ctx.tiles[y*ctx.cols+x] = t
-	ctx.n++
+	st.tiles[y*st.cols+x] = t
+	st.n++
 	c.gfx.progTiles++
-	return t, nil
+	return t, true, nil
 }
 
 // progFirst applies RFX_PROGRESSIVE_TILE_SIMPLE or, with first,
 // RFX_PROGRESSIVE_TILE_FIRST: a tile's first pass ([MS-RDPEGFX]
 // 3.3.8.2.1.1), or its only one.
-func (c *Client) progFirst(ctx *progContext, reg *progRegionData, b []byte, first bool) (*progTile, error) {
+func (c *Client) progFirst(st *progState, reg *progRegionData, b []byte, first bool) (*progTile, error) {
 	header := progSimpleHeader
 	if first {
 		header = progFirstHeader
@@ -352,15 +395,20 @@ func (c *Client) progFirst(ctx *progContext, reg *progRegionData, b []byte, firs
 	if err != nil {
 		return nil, err
 	}
-	t, err := c.progTileAt(ctx, x, y, true)
+	t, made, err := c.progTileAt(st, x, y, true)
 	if err != nil {
 		return nil, err
 	}
 	diff := flags&progDifference != 0
+	if diff && !made && t.extra != reg.extra {
+		// Its coefficients lie in the other transform's bands.
+		return nil, fmt.Errorf("progressive difference tile %d,%d in another transform than the tile's", x, y)
+	}
+	t.gen = st.gen
 	if quality == progFull {
-		c.progRelease(t)
+		c.progRelease(st, t)
 	} else if t.sign == nil {
-		t.sign = c.progSign()
+		t.sign = c.progSign(st)
 	}
 	d := c.gfxDecoder()
 	layout := layoutOf(reg.extra)
@@ -412,7 +460,7 @@ func progFirstPass(coef *[4096]int16, v *[4096]int16, sign *[4096]int8, pos *rfx
 
 // progUpgrade applies RFX_PROGRESSIVE_TILE_UPGRADE ([MS-RDPEGFX]
 // 3.3.8.2.1.2) to a tile that a first pass made.
-func (c *Client) progUpgrade(ctx *progContext, reg *progRegionData, b []byte) (*progTile, error) {
+func (c *Client) progUpgrade(st *progState, reg *progRegionData, b []byte) (*progTile, error) {
 	if len(b) < progUpgradeHeader {
 		return nil, fmt.Errorf("progressive upgrade of %d bytes", len(b))
 	}
@@ -438,17 +486,21 @@ func (c *Client) progUpgrade(ctx *progContext, reg *progRegionData, b []byte) (*
 	if err != nil {
 		return nil, err
 	}
-	t, err := c.progTileAt(ctx, x, y, false)
+	t, _, err := c.progTileAt(st, x, y, false)
 	if err != nil {
 		return nil, err
 	}
-	if t == nil {
-		return nil, fmt.Errorf("progressive upgrade of tile %d,%d, which has had no first pass", x, y)
+	if t == nil || t.gen != st.gen {
+		return nil, fmt.Errorf("progressive upgrade of tile %d,%d, which has had no first pass in its codec context", x, y)
+	}
+	if t.extra != reg.extra {
+		// The first pass set the signs of the other transform's bands.
+		return nil, fmt.Errorf("progressive upgrade of tile %d,%d in another transform than its first pass", x, y)
 	}
 	if t.sign == nil {
 		// A tile whose last pass was full has no bits to upgrade, so its
 		// signs are not read; they are cleared all the same.
-		t.sign = c.progSign()
+		t.sign = c.progSign(st)
 		*t.sign = [3][4096]int8{}
 	}
 	layout := layoutOf(reg.extra)
@@ -462,7 +514,7 @@ func (c *Client) progUpgrade(ctx *progContext, reg *progRegionData, b []byte) (*
 	}
 	t.bitPos, t.quant, t.extra = pos, quant, reg.extra
 	if quality == progFull {
-		c.progRelease(t)
+		c.progRelease(st, t)
 	}
 	c.count(func(s *Stats) { s.Bitmaps["gfx progressive upgrade"]++ })
 	return t, nil
@@ -534,9 +586,11 @@ func signOf(s *[3][4096]int8, i int) *[4096]int8 {
 // maxSignPool bounds the sign arrays kept for tiles to come.
 const maxSignPool = 64
 
-// progSign returns a sign array, from those that tiles gave back if
-// there are any.
-func (c *Client) progSign() *[3][4096]int8 {
+// progSign returns a sign array for a tile of st, from those that tiles
+// gave back if there are any, as it was. A first pass sets each sign
+// that an upgrade in its transform reads.
+func (c *Client) progSign(st *progState) *[3][4096]int8 {
+	st.signed++
 	g := &c.gfx
 	if n := len(g.signs); n > 0 {
 		s := g.signs[n-1]
@@ -546,8 +600,9 @@ func (c *Client) progSign() *[3][4096]int8 {
 	return new([3][4096]int8)
 }
 
-// progRelease takes a tile's signs, which a full pass leaves unused.
-func (c *Client) progRelease(t *progTile) {
+// progRelease takes the signs of a tile of st, which a full pass or the
+// end of its codec context leaves unused.
+func (c *Client) progRelease(st *progState, t *progTile) {
 	if t.sign == nil {
 		return
 	}
@@ -555,4 +610,5 @@ func (c *Client) progRelease(t *progTile) {
 		c.gfx.signs = append(c.gfx.signs, t.sign)
 	}
 	t.sign = nil
+	st.signed--
 }

@@ -171,10 +171,12 @@ type gfx struct {
 	// decoded is totalFramesDecoded, the frames acknowledged since the
 	// connection began ([MS-RDPEGFX] 2.2.2.13), on every channel.
 	decoded uint32
-	// The RemoteFX tiles' decoder, kept across channels, and the tiles
-	// that the progressive contexts keep, with sign arrays given back.
+	// The RemoteFX tiles' decoder, kept across channels; the progressive
+	// tiles that the surfaces keep, and their limit (progHighWater); and
+	// sign arrays given back.
 	rfx       *rfxDecoder
 	progTiles int
+	tileLimit int
 	signs     []*[3][4096]int8
 	// Scratch space of the RemoteFX codecs, kept between PDUs.
 	clips      []image.Rectangle
@@ -189,8 +191,8 @@ type surface struct {
 	w, h   int
 	pix    []byte
 	mapped bool
-	at     image.Point  // its origin on the output, if mapped
-	prog   *progContext // its RemoteFX Progressive codec context, if any
+	at     image.Point // its origin on the output, if mapped
+	prog   *progState  // its RemoteFX Progressive codec context and tiles, if any
 	// The cells that changed since the surface last went to the output,
 	// cols across, and their bounds in cells.
 	cols  int
@@ -508,6 +510,7 @@ func (c *Client) gfxResize(out Output, w, h int) error {
 			return err
 		}
 	}
+	c.progHighWater()
 	c.setSize(w, h)
 	c.dec.drop()
 	if out != nil {

@@ -806,6 +806,7 @@ func (c *Client) activate(out Output, body []byte) error {
 	if err != nil {
 		return err
 	}
+	c.progHighWater() // before the desktop changes, as the surfaces outlast it
 	resized := c.activated(shareID, caps)
 	c.fastPathInput.Store(caps.inputFlags&(inputFlagFastPathInput|inputFlagFastPathInput2) != 0)
 	if err := c.sendIO(c.confirmActive()); err != nil {
