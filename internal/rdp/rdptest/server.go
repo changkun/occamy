@@ -31,6 +31,11 @@ import (
 // it read the client's first TSRequest: CredSSP is not implemented.
 var ErrCredSSP = errors.New("rdptest: the client started CredSSP, which the fake server does not implement")
 
+// ErrStandardSecurity is returned by Accept for a Server.Standard, after
+// it selected standard RDP security, which the fake server does not
+// implement either.
+var ErrStandardSecurity = errors.New("rdptest: the server selected standard RDP security")
+
 // Certificate returns the servers' certificate, a self-signed ECDSA
 // certificate for the name "rdp.test", and its SHA-256 fingerprint as
 // openssl prints it, which a client's TLS pins take.
@@ -101,6 +106,10 @@ type Server struct {
 	// TSRequest (1) or its second, with the NTLM authenticate (2), until
 	// the client hangs up.
 	StallNLA int
+	// Standard makes the server select standard RDP security, as xrdp
+	// does when offered CredSSP alone; Accept then returns
+	// ErrStandardSecurity.
+	Standard bool
 }
 
 // Credentials are the logon fields of a Client Info PDU.
@@ -156,8 +165,14 @@ func (s *Server) Accept(conn net.Conn) (*Conn, error) {
 	if protocol == 0 {
 		protocol = ProtocolSSL
 	}
+	if s.Standard {
+		protocol = 0
+	}
 	if _, err := conn.Write(ConnectionConfirm(protocol)); err != nil {
 		return nil, err
+	}
+	if s.Standard {
+		return nil, ErrStandardSecurity
 	}
 	cert, _, err := Certificate()
 	if err != nil {

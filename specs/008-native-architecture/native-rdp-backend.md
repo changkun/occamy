@@ -10,6 +10,8 @@ affects:
   - internal/backend/rdp/
   - internal/rdp/
   - internal/keymap/
+  - internal/config/
+  - server/
 effort: large
 created: 2026-10-31
 updated: 2026-10-31
@@ -74,7 +76,8 @@ without guacd, Guacamole or cgo:
   and, since the owner's decision of 2026-10-31, the benchmark showing
   native at least 10x better than the guacd baseline on each scenario's
   primary metric. It gates deleting RDP's guacd path; the native
-  backend becomes rdp's default as soon as it is registered. (It first
+  backend became rdp's default when it was registered (Implementation
+  notes: registration). (It first
   asked for traffic and CPU no worse than the bridge and a soak, before
   a switch of default.)
 - Protocol v1 carries keys, text, pointer, wheel, clipboard and
@@ -190,7 +193,7 @@ standing approval to resolve open items; open to the owner's review.
 | 1 | `internal/backend/rdp` over `internal/rdp`: configuration and its checks, the NLA prompt, connect, bitmap updates and the pointer into the session, input mapped and batched by a writer goroutine, `Demand` as Suppress Output, the session's end by the server's reason. Tests against a fake RDP server (`internal/rdp/rdptest`), the xrdp recordings replayed through the backend, fuzzing, an xrdp integration test | session-core, the rdp-strategy spike |
 | 2 | Static virtual channels (GCC channel definitions, joins, chunked channel PDUs reassembled within a bound); CLIPRDR with UTF-8 text both ways; DRDYNVC with a bounded number of channels; Display Control for `resize-request`; the Heartbeat PDU and auto-detect answers. Checked live against xrdp. A CredSSP acceptor in `rdptest` (NTLMv2 with a known password, the public key binding, TSCredentials), so that the backend's NLA path, prompted credentials included, runs end to end in tests | Phase 1 |
 | 3 | GFX without AVC over DRDYNVC: the capability exchange, ZGFX, surfaces mapped onto the framebuffer, solid fills, surface-to-surface copies as `Sink.CopyRect`, the bitmap cache within a bound, frame acknowledgements as the server's pacing, and the RemoteFX, RemoteFX Progressive, ClearCodec, planar and uncompressed codecs, each fuzzed. RemoteFX Progressive is checked against xrdp, ClearCodec and planar against Windows | Phase 2 |
-| 4 | Windows: the logon errors of the Save Session Info PDU, server layouts with AltGr and dead keys, a keyboard Synchronize event with the lock states at connect and on focus, and the 006 matrix entries for RDP against Windows and xrdp, toward the parity gate | Phases 1 to 3, a Windows host (#32) |
+| 4 | Windows: the logon errors of the Save Session Info PDU, server layouts with AltGr and dead keys, a keyboard Synchronize event with the lock states at connect and on focus, the orders and bounds that only xrdp has checked (Implementation notes: registration, Follow-ups), and the 006 matrix entries for RDP against Windows and xrdp, toward the parity gate | Phases 1 to 3, a Windows host (#32) |
 
 The phases are those [rdp-strategy](rdp-strategy.md)'s "What remains"
 lists, in this order because of decision 7. Two things do not wait for
@@ -201,39 +204,42 @@ them:
   and CredSSP, a refused logon, and the licensing exchange beyond the
   STATUS_VALID_CLIENT shortcut, against Windows. Phase 4 keeps the rest
   of the Windows work.
-- **Registration needs NLA end to end.** The backend is not registered
-  in `occamyd` until NLA has run end to end, live against Windows or
-  against the CredSSP acceptor of phase 2, since NLA is the default
-  security mode and nothing has run it against a server that accepts
-  it. Once it has, registration in the API's backend factory makes the
-  backend `rdp`'s default, by the owner's decision of 2026-10-31 that
-  native is the default wherever a native backend exists
+- **Registration needs NLA end to end** (done: Implementation notes:
+  registration). The backend was not registered in `occamyd` until NLA
+  had run end to end, live against Windows or against the CredSSP
+  acceptor of phase 2, since NLA is the default security mode and
+  nothing had run it against a server that accepts it. Once it had,
+  registration in the API's backend factory made the backend `rdp`'s
+  default, by the owner's decision of 2026-10-31 that native is the
+  default wherever a native backend exists
   ([guacd-bridge](guacd-bridge.md), Parity gate), with
   `backend: guacd` as an explicit fallback and the benchmark's
-  baseline. The parity gate, not these phases, then decides when
-  RDP's guacd path is deleted. (Since the Sessions task of
+  baseline. The parity gate, not these phases, decides when RDP's
+  guacd path is deleted. (Since the Sessions task of
   [api-and-server-stack](api-and-server-stack.md), `rdp` connections
-  run on the guacd bridge in that factory, `server/backends.go`;
-  registration adds the native backend beside that entry and makes
-  it the default.)
+  had run on the guacd bridge in that factory, `server/backends.go`;
+  registration added the native backend beside that entry and made it
+  the default.)
 
 ## Affects
 
 New `internal/backend/rdp` and `internal/keymap`; `internal/rdp` gains
 what the backend needs, and `internal/rdp/rdptest`, a fake server for
 tests. `internal/backend/vnc` takes its scan codes from
-`internal/keymap`. Once the backend is registered, RDP no longer needs
-guacd by default, which leaves telnet as guacd's only default use; once
-the parity gate deletes RDP's guacd path, RDP no longer needs guacd at
-all.
+`internal/keymap`. Registration touches `internal/config` (the default
+backend, `tls` and `security` for rdp) and `server` (the factory). Since
+the backend was registered, RDP no longer needs guacd by default, which
+leaves telnet as guacd's only default use; once the parity gate deletes
+RDP's guacd path, RDP no longer needs guacd at all.
 
 ## Implementation notes: phase 1
 
 - **Status.** Phase 1 is done: `internal/backend/rdp` implements
   `backend.Backend` with `Config`, `New` and `Backend`, in about 930
   lines of code and 2,030 of unit tests, at 99% statement coverage,
-  plus a 430-line integration test. Nothing wires it into `occamyd`,
-  and nothing will until NLA has run end to end (Task Breakdown).
+  plus a 430-line integration test. Nothing wired it into `occamyd`
+  until NLA had run end to end (Task Breakdown; Implementation notes:
+  registration).
 - **What was built.**
   - `New` checks the configuration before anything connects: the
     address (port 3389 by default), the desktop size (200 to 8192 a
@@ -519,12 +525,12 @@ all.
   `resize-request` are the second's, on top of it, with notes of their
   own below. The Heartbeat PDU and
   the auto-detect answers are deferred (Deviations). NLA now runs end
-  to end against the acceptor, which registration waited for; the
-  backend is still not registered in `occamyd`. Registration is
-  separate work, and makes the backend `rdp`'s default: since the
-  owner's decision of 2026-10-31 it no longer waits for the parity
-  gate, which decides only when RDP's guacd path is deleted
-  ([guacd-bridge](guacd-bridge.md), Parity gate; Task Breakdown).
+  to end against the acceptor, which registration waited for.
+  Registration, separate work, made the backend `rdp`'s default
+  (Implementation notes: registration): since the owner's decision of
+  2026-10-31 it no longer waited for the parity gate, which decides
+  only when RDP's guacd path is deleted ([guacd-bridge](guacd-bridge.md),
+  Parity gate; Task Breakdown).
 - **What was built.**
   - Static channels (`internal/rdp/channel.go`). The client names the
     channels its configuration asks for in its network data (today
@@ -756,12 +762,12 @@ all.
 - **Status.** The second pull request of phase 2: DRDYNVC and Display
   Control, through which a viewer's `Resize` asks the server for a
   desktop of its size. With it phase 2 is done but for the Heartbeat
-  PDU and the auto-detect answers (deferred above). The backend is
-  still not registered in `occamyd`. Registration, separate work,
-  makes it `rdp`'s default without waiting for the parity gate, which
-  since the owner's decision of 2026-10-31 decides only when RDP's
-  guacd path is deleted ([guacd-bridge](guacd-bridge.md), Parity
-  gate; Task Breakdown).
+  PDU and the auto-detect answers (deferred above). Registration,
+  separate work, made the backend `rdp`'s default without waiting for
+  the parity gate, which since the owner's decision of 2026-10-31
+  decides only when RDP's guacd path is deleted
+  ([guacd-bridge](guacd-bridge.md), Parity gate; Implementation notes:
+  registration).
 - **What was built.**
   - DRDYNVC (`internal/rdp/dynvc.go`, [MS-RDPEDYC]). With
     `Config.Resize` the client asks for the static channel `drdynvc`
@@ -1004,3 +1010,186 @@ all.
   - Resize for the session's owner alone, if the project owner decides
     so; any
     interactive viewer can resize now (above).
+
+## Implementation notes: registration
+
+- **Status.** Done on 2026-10-31, after phase 2, by the owner's
+  decisions (guacd-bridge, Parity gate): occamyd serves `rdp`
+  connections and ad-hoc `rdp` targets with this backend by default, and
+  `backend: guacd` (or `adhoc_backends: {rdp: guacd}`) keeps the bridge
+  as an explicit fallback and the benchmark's baseline. NLA had run end
+  to end against `rdptest`'s CredSSP acceptor, which registration waited
+  for (Task Breakdown). Not yet against Windows: the backend has run
+  against xrdp and `rdptest` only, and phase 4 waits for a host (#32).
+- **What was done.**
+  - `config.DefaultBackend` returns `native` for rdp, and
+    `backendProblem` no longer refuses `backend: native` on rdp. The
+    factory in `server/backends.go` registers rdp/native beside
+    rdp/guacd; the session's state names it `rdp`.
+  - `newRDP` builds the backend's `Config` from the target, as `newVNC`
+    does: the username and the stored password, `tls` as the client's
+    `TLS` (the CA file read when the session starts; an ad-hoc target's
+    certificate must name the name it was opened by, not the address it
+    resolved to), the connection's `security`, and the hello's size.
+  - A `security` key on rdp connections, the mode as guacd names it
+    (`nla`, `nla-ext`, `tls`, `any`), checked when the file loads.
+    `tls` now applies to rdp connections too, its pins parsed by
+    `rdp.CheckPin`; `require` is implied, since the backend always runs
+    TLS. Both need the native backend: with `backend: guacd` the file
+    fails to load, naming `guacd.params.rdp`, which the bridge reads
+    instead.
+  - A server that selects standard RDP security when offered NLA alone,
+    as xrdp does although it takes TLS, fails the session with
+    `rdp.ProtocolError` and a hint that names the key to set,
+    `security: tls on connection "…"`, from `Config.SecuritySetting`;
+    an ad-hoc target's hint says that ad-hoc rdp targets take NLA
+    alone. `rdptest.Server.Standard` selects standard RDP security.
+  - The hello's size is clamped into an RDP desktop's, 200 to 8192 a
+    side and 2^25 pixels in all, the height cut first, so that a large
+    hello does not fail `New`; without both sides the backend's
+    1024×768 applies. A later `Resize` goes through Display Control
+    (phase 2).
+  - A username of the form `DOMAIN\user` logs on to that domain, as
+    mstsc takes it; `user@domain` goes as it is, which NTLM takes with
+    an empty domain. The backend splits it only without a domain and
+    only when the user part is there: `\alice` logs on as `alice` with
+    no domain, as FreeRDP takes it, and `alice\` goes as it is, so that
+    the split never empties the username. A username the owner gives
+    at the prompt with the domain left empty is split the same way.
+  - `occamyd` warns when it loads the file, by protocol and for vnc as
+    for rdp, of the `guacd.params` that no session reads: those of a
+    protocol none of whose connections goes through guacd, except the
+    display's when its ad-hoc targets go through guacd, and none with
+    `legacy_v0`. It says why in the protocol's terms: ssh never goes
+    through guacd, no telnet connection is configured, or no vnc or rdp
+    connection sets `backend: guacd`. A file written for guacd, with
+    `disable-copy` or `recording-path`, would otherwise lose them
+    unnoticed when its connections moved to the native default. It
+    also names each connection whose `security: tls` or `any` comes
+    with `tls.insecure_skip_verify`, which may send the password to
+    whoever is in between. The example file's `guacd.params.rdp` has an rdp
+    connection on guacd to apply to.
+  - Prompts go to the owner alone and end reasons map as for VNC: a
+    deliberate end by the server (no reason, the user's logoff or
+    disconnect, or Set Error Info 1 to 5: an administrator's
+    disconnect or logoff, a time limit, another connection) is
+    `remote-ended`; a refused logon or certificate, or any other
+    failure, `backend-failed`. Viewers get only the reason, and the
+    error goes to occamyd's log.
+  - The demo stack serves its xrdp server as `rdp-native` (no
+    `backend`, `security: tls`, `tls: {insecure_skip_verify: true}`,
+    since the image signs its certificate when it is built) and as
+    `rdp-guacd`, and `make e2e` streams both (`tests/v1_test.go`; keys
+    carry their HID code, which the native backend sends as a
+    scancode). occamyd warns at start of `rdp-native`'s unchecked TLS,
+    as it should. `TestE2EV1RDP` takes `rdp-native` further, as the
+    owner would: text pasted into the session comes back from xrdp
+    through the image's clipboard echo (`clipboard-echo.sh`, with
+    xclip, beside the xterm), which carries the clipboard both ways in
+    one round trip; a resize to 800×600 and back reaches the screen and
+    the session's state; a viewer joined by a share sees the owner's
+    size and types, while the owner reads on so that it is not dropped
+    as too slow; and the owner closes the stream, waits until the
+    session lists no viewer, and comes back to the same session through
+    the owner grace. TestE2EV1's second run of each connection covers a
+    session opened again after one ended. Each owner's session is also
+    closed when its test ends, so that one that fails leaves no session
+    on xrdp for the next. All four passed 6 of 6 runs against the demo
+    image with a local occamyd, and 3 of 3 again after the delta
+    review's fixes.
+- **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
+  through occamyd's routes with the Go client against `rdptest`: NLA
+  with stored credentials, the hello's size, the screen, scancodes,
+  the pointer and Unicode text, a resize through Display Control, the
+  clipboard both ways with CR LF, and a logoff as `remote-ended`
+  (`TestRDPEndToEnd`); the owner's prompt, raised when the session
+  opens and held for the owner, which the viewer whose stream opened
+  first never gets, and a wrong password as `backend-failed`
+  (`TestRDPPrompt`; the backend prompts only before it connects, so a
+  prompt raised after a viewer has joined is session-core's
+  `TestPrompt`); pins, the system's roots and a wrong pin refused
+  before NLA (`TestRDPTLS`); an ad-hoc target, native by default
+  (`TestRDPAdhoc`); and the clipboard by role
+  (`TestRDPClipboardRoles`). `TestNewRDP` covers the configuration,
+  `TestParseV1Backends` and `TestParseV1Problems` the file,
+  `TestRunStandardSecurity` the hint, `TestRunSplitsDomain` the
+  domain, configured and prompted, and `TestLoadWarnings` and
+  `TestLoadWarningsLogged` the warnings at load; `TestParseV1Example`
+  checks that the example's `guacd.params` each have a connection on
+  guacd.
+- **Integration test.** Under the `rdp_integration` tag, against the
+  bench desktop image's xrdp, at 99fe233 on 2026-10-31, one run after
+  the other with the host's 1-minute load below 8 before each (6.5,
+  then 7.5): the backend's `TestIntegrationSecurity` passed, its
+  security `any` drawing the wallpaper and its NLA alone refused with
+  the hint that names `Config.Security`; and the client's suite
+  (`-run Integration`) passed, `TestIntegration` at 32, 24, 16 and 15
+  bpp with security protocol 0x1, and `TestIntegrationResize` with
+  DRDYNVC version 2 and Display Control's 33,554,432 pixels. The
+  client's suite had not run since phase 2's second review. The review
+  of c762d70 had run the backend's four tests against xrdp, which all
+  passed. `TestBytesAgainstGuacd`, the spike's measurement against
+  guacd, is not part of the suite and did not run.
+- **Mutation checks.** Each of these fails a test: rdp's default back to
+  `guacd`; the native refusal restored; the `tls` refusal with
+  `backend: guacd` dropped; each of `security`'s checks dropped, a mode
+  dropped or one added; rdp's pins parsed as no protocol's; rdp/native
+  not registered; the security mode, the setting, the username, the
+  password, each of the `TLS` fields, or the ad-hoc server name not
+  passed; the size not passed, not clamped, or taken from one side;
+  the domain not split, in `New` or after the prompt, or split with a
+  domain set, with the user part empty, or only with the domain part
+  there; the connection's `security` not carried to the target; the
+  hint given for any refused protocol, or without the setting; and of
+  the warnings at load, the protocol match, the `legacy_v0` skip, the
+  ad-hoc gate and its display parameters, the skip when nothing is
+  left, ssh's and telnet's own wording, `tls` or `any` dropped,
+  `insecure_skip_verify` not checked, and the warnings not logged.
+  Parsing rdp's pins with the VNC backend's parser, the same code, is
+  an equivalent mutant.
+- **Decisions.**
+  - `security` is a key of its own, not `guacd.params.rdp.security`:
+    the bridge's parameters do not apply to the native backend, and NLA
+    stays the default, since anything else sends the password to
+    whichever server passed the certificate check. xrdp needs
+    `security: tls`, and the error says so.
+  - `tls.require` is accepted on rdp and changes nothing, so that a
+    connection can say what it means.
+  - An ad-hoc rdp target takes NLA and the system's roots, as a
+    connection without `tls` or `security`; a target that needs less
+    needs a connection.
+- **Deviations.** From the Task Breakdown: registration came before
+  phases 3 and 4, by the owner's decision that native is the default
+  wherever a native backend exists; Windows is not verified, and the
+  docs say so. From guacd: no `ignore-cert`; `insecure_skip_verify`,
+  which logs the certificate's fingerprint, is the demo's equivalent.
+- **Follow-ups.**
+  - Phase 3, GFX without AVC; until then servers send plain bitmap
+    updates, as they send guacd with `disable-gfx`.
+  - Phase 4, against Windows, besides its row: two orders and bounds
+    that only xrdp, whose chansrv only logs Format List Responses, has
+    checked:
+    - the Format List Responses the client owes go out as counts, the
+      OK responses before the FAIL ones, not in the order the lists
+      arrived, and in a burst a Format Data Request for the newest list
+      can go before the responses to the lists before it. Check that
+      Windows' clipboard (rdpclip) takes this order;
+    - the answers the DRDYNVC reader owes wait for the channel writer
+      in a queue of at most 64, and a server that opens channels faster
+      than the client's answers are read ends the session. Windows
+      opens more dynamic channels at connect than xrdp; check that a
+      burst of creates stays within the queue.
+  - A `domain` key, if `DOMAIN\user` in `username` is not enough.
+  - A clipboard key on connections for every protocol and backend,
+    which v1 does not specify: guacd's `disable-copy` and
+    `disable-paste` restrict the clipboard through guacd only. The
+    native RDP backend's `Config` has `DisableCopy` and `DisablePaste`,
+    but no key of the file sets them, so a connection that needs a
+    restriction stays on guacd. It belongs to the API's connection schema
+    ([api-and-server-stack](api-and-server-stack.md)), not to RDP.
+  - Session recording on the native backends, which guacd's
+    `recording-path` gives through guacd alone; session-core leaves it
+    out of beta (its decision 6).
+  - The bridge's other RDP parameters that guacd users set
+    (`server-layout`, `console`, `initial-program`, the gateway, load
+    balancing info) have no native equivalent yet.

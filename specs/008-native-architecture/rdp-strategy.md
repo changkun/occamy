@@ -27,9 +27,10 @@ see Decisions.)
 
 ## Context
 
-- Until `occamyd` registers the native RDP backend, RDP runs on guacd
-  1.6 (FreeRDP 2 or 3 inside guacd) via the bridge
-  ([guacd-bridge](guacd-bridge.md)).
+- Until `occamyd` registered the native RDP backend on 2026-10-31, RDP
+  ran on guacd 1.6 (FreeRDP 2 or 3 inside guacd) via the bridge
+  ([guacd-bridge](guacd-bridge.md)), which now serves it only with
+  `backend: guacd`.
 - Since v0.5.0, RDP through guacd is tested end to end against xrdp only.
   That needs `security` left unset, so that TLS is negotiated, and
   `ignore-cert`. Nobody has checked a Windows host with NLA yet; that
@@ -103,7 +104,7 @@ Outcome:
 
 - If the spike passes, D becomes the v1.x plan, and RDP follows the
   bridge's parity gate. (Since the owner's decision of 2026-10-31, the
-  native backend is rdp's default once it is registered, and the gate
+  native backend is rdp's default since it was registered, and the gate
   decides when RDP's guacd fallback is deleted; see
   [guacd-bridge](guacd-bridge.md), Parity gate.)
 - If it fails, choose between B and C on NLA support, GFX coverage,
@@ -439,7 +440,9 @@ best effort, has none. The live run was repeated after the fixes.
   [native-rdp-backend](native-rdp-backend.md), by phase.
   - The backend in `internal/backend/rdp`: Run, input mapping, `Demand`
     to Suppress Output, credentials from the registry. Done in
-    native-rdp-backend's phase 1, but for the registry.
+    native-rdp-backend's phase 1, and the registry with its
+    registration (Implementation notes: registration), which made it
+    rdp's default, not yet checked against Windows.
   - Step 2 against Windows with NLA, and with it the parts xrdp cannot
     exercise. These are live NLA, the full licensing exchange (Windows
     Server with an RDS licensing server), server redirection, and the

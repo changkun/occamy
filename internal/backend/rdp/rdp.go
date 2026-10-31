@@ -26,6 +26,7 @@ package rdp
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -47,6 +48,14 @@ const (
 	DefaultDialTimeout = 15 * time.Second
 	DefaultWidth       = 1024
 	DefaultHeight      = 768
+)
+
+// The bounds of Config.Width and Config.Height: each side from MinSide
+// to MaxSide, and the area at most MaxPixels.
+const (
+	MinSide   = 200
+	MaxSide   = 8192
+	MaxPixels = 1 << 25
 )
 
 // The security modes of Config.Security, named as guacd names them.
@@ -112,6 +121,9 @@ type Config struct {
 	// password: if the configuration lacks them and the security mode
 	// offers NLA, the session's owner is asked before the connection.
 	// Without NLA, the server shows its logon screen if they are empty.
+	// Without a Domain, a Username of the form DOMAIN\user names both,
+	// as mstsc takes it, and so does a username the owner gives without
+	// a domain.
 	Domain, Username, Password string
 	// Width and Height are the desktop size to ask for at connect,
 	// 1024×768 by default; the server may choose another. Each is at
@@ -123,6 +135,11 @@ type Config struct {
 	// SecurityNLAExt, SecurityTLS or SecurityAny. Standard RDP security
 	// is not supported.
 	Security string
+	// SecuritySetting names what sets Security where the backend's user
+	// sets it, such as a configuration key, in the error for a server
+	// that selects standard RDP security when offered NLA alone, as
+	// xrdp does although it takes TLS; "Config.Security" if empty.
+	SecuritySetting string
 	// TLS is the policy for the server's certificate, shared in meaning
 	// with the VNC backend's. Its ServerName defaults to Addr's host.
 	TLS rdp.TLS
@@ -160,6 +177,8 @@ type Backend struct {
 	cfg         rdp.Config // without the logger's default
 	dialTimeout time.Duration
 	log         *slog.Logger
+	// securitySetting is Config.SecuritySetting, with its default.
+	securitySetting string
 	// dial connects to the server; tests replace it.
 	dial func(ctx context.Context) (net.Conn, error)
 	// grace is hangUpGrace; tests shorten it.
@@ -192,7 +211,7 @@ func New(cfg Config) (*Backend, error) {
 	if cfg.Width == 0 && cfg.Height == 0 {
 		cfg.Width, cfg.Height = DefaultWidth, DefaultHeight
 	}
-	if cfg.Width < 200 || cfg.Height < 200 || cfg.Width > 8192 || cfg.Height > 8192 || cfg.Width*cfg.Height > 1<<25 {
+	if cfg.Width < MinSide || cfg.Height < MinSide || cfg.Width > MaxSide || cfg.Height > MaxSide || cfg.Width*cfg.Height > MaxPixels {
 		return nil, fmt.Errorf("rdp: desktop size %d×%d out of range", cfg.Width, cfg.Height)
 	}
 	switch cfg.ColorDepth {
@@ -204,6 +223,7 @@ func New(cfg Config) (*Backend, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg.Domain, cfg.Username = splitDomain(cfg.Domain, cfg.Username)
 	if cfg.TLS.ServerName == "" {
 		cfg.TLS.ServerName = host
 	}
@@ -235,9 +255,10 @@ func New(cfg Config) (*Backend, error) {
 			Resize:         true,
 			Logger:         cfg.Logger,
 		},
-		dialTimeout: cfg.DialTimeout,
-		log:         cfg.Logger,
-		grace:       hangUpGrace,
+		dialTimeout:     cfg.DialTimeout,
+		log:             cfg.Logger,
+		securitySetting: cmp.Or(cfg.SecuritySetting, "Config.Security"),
+		grace:           hangUpGrace,
 	}
 	b.dial = func(ctx context.Context) (net.Conn, error) {
 		d := net.Dialer{Timeout: b.dialTimeout}
@@ -459,8 +480,12 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 	c, err := rdp.Connect(ctx, nc, cfg) // closes nc on an error
 	if err != nil {
 		var ce *rdp.CredSSPError
-		if errors.As(err, &ce) {
+		var pe *rdp.ProtocolError
+		switch {
+		case errors.As(err, &ce):
 			err = fmt.Errorf("%w: %w", ErrAuthFailed, err)
+		case errors.As(err, &pe) && pe.Selected == rdp.ProtocolRDP && pe.Offered&rdp.ProtocolSSL == 0:
+			err = fmt.Errorf("%w; a server that selects standard RDP security when offered NLA alone may still take TLS, as xrdp does: allow TLS with %s", err, b.securitySetting)
 		}
 		return failure(ctx, err)
 	}
@@ -559,7 +584,8 @@ func failure(ctx context.Context, err error) error {
 // credentials returns the client's configuration with the credentials
 // NLA needs, asking the owner for those the configuration lacks: the
 // username, the domain if neither it nor the username is configured,
-// and the password, as guacd asks for them. Without NLA in the security
+// and the password, as guacd asks for them. A username given without a
+// domain may name both (splitDomain). Without NLA in the security
 // mode nothing is asked, and empty credentials leave the server's logon
 // screen to the user.
 func (b *Backend) credentials(ctx context.Context, sink backend.Sink) (rdp.Config, error) {
@@ -601,7 +627,20 @@ func (b *Backend) credentials(ctx context.Context, sink backend.Sink) (rdp.Confi
 	for i, s := range into {
 		*s = reply.Answers[i]
 	}
+	cfg.Domain, cfg.Username = splitDomain(cfg.Domain, cfg.Username)
 	return cfg, nil
+}
+
+// splitDomain returns the domain and the username to log on with: a
+// username of the form DOMAIN\user, without a domain, names both, as
+// mstsc takes it, and \user names the user alone, as FreeRDP takes it.
+// A username that ends in the backslash goes as it is, so that the split
+// never empties the username.
+func splitDomain(domain, username string) (string, string) {
+	if d, u, ok := strings.Cut(username, `\`); ok && domain == "" && u != "" {
+		return d, u
+	}
+	return domain, username
 }
 
 // client is what the writer needs of an rdp.Client; the tests replace
