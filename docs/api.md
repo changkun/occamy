@@ -771,18 +771,41 @@ the directory that `web_client` names, as `make client` builds it in
 page signs in through API v1, on this origin, since `occamyd` answers no
 CORS preflight. `GET /static` redirects here.
 
-Response: the file under the directory, `index.html` for a directory,
-or `404`, with the type its extension names and these headers:
+Response: the file under the directory, with the type its extension
+names, or the `index.html` of a directory. Anything else is `404`: a
+directory without an `index.html`, which is never listed, and a
+symbolic link that leads out of the directory, which is not followed
+(one within it is). Every response has these headers:
 
 | Header | Value | Why |
 |--------|-------|-----|
-| `Cache-Control` | `no-cache` | A page of an earlier build never asks for scripts that a newer build replaced |
+| `Cache-Control` | `public, max-age=31536000, immutable` for a file served from `assets/`; `no-cache` for anything else, a missing asset too | Vite names the files in `assets/` by a hash of their content, so a new build names new files; a page of an earlier build never asks for scripts that a newer build replaced |
 | `X-Content-Type-Options` | `nosniff` | |
-| `Content-Security-Policy` | `frame-ancestors 'none'` | No other page may frame a remote desktop and take its clicks |
+| `Content-Security-Policy` | see below | |
 | `Referrer-Policy` | `no-referrer` | |
 
-`occamyd` warns at start when the directory has no `index.html`, and
-serves what it holds once it is built, without a restart.
+The Content-Security-Policy, for a request to `host`:
+
+```text
+default-src 'self'; script-src 'self'; worker-src 'self';
+connect-src 'self' ws://host wss://host; img-src 'self' data:;
+style-src 'self' 'unsafe-inline'; font-src 'self'; object-src 'none';
+base-uri 'none'; form-action 'self'; frame-ancestors 'none'
+```
+
+The page runs its own scripts and the Worker that decodes tiles; calls
+API v1 and opens streams on its own origin, which `ws://host` and
+`wss://host` name for browsers that do not count WebSockets as
+`'self'`; shows the remote's pointer as a `data:` image; and takes
+inline styles, which React's style attributes and the terminal
+emulator's stylesheet are. No other page may frame it, so none can lay
+itself over a remote desktop and take its clicks. A `Host` that is not
+a plain name or address with an optional port is left out of
+`connect-src`, so that a request cannot add to the policy.
+
+`occamyd` opens the directory for each request: it warns at start when
+the directory has no `index.html`, or does not exist, and serves the
+client once it is built, without a restart.
 
 ## v0 routes
 
@@ -793,8 +816,8 @@ not API v1's, and neither the connection registry nor
 `allow_adhoc_targets` and `adhoc_allowlist` restrict them: the login
 signs any target for anyone, and `occamyd` warns at start. A v0 file
 with `client: true` serves `/static/` from `client/occamy-web/dist` as
-well, but the web client there needs API v1, which only a v1 file
-serves. Protocol v0 is described in
+well, as [`GET /static/`](#get-static) describes, but the web client
+there needs API v1, which only a v1 file serves. Protocol v0 is described in
 [protocol-cn.md](protocol-cn.md), and v0 files in
 [configuration.md](configuration.md#v0-files).
 

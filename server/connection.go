@@ -20,7 +20,7 @@ import (
 )
 
 // clientDir holds the built web client, which occamyd serves under
-// /static with client: true.
+// /static with client: true, as a v1 file's web_client.
 const clientDir = "./client/occamy-web/dist"
 
 // RunV0 serves the v0 configuration that config.Init has read into
@@ -105,7 +105,7 @@ func (p *proxy) register(mux *routeMux) {
 		mux.Handle(pattern, recoverV0(h))
 	}
 	if p.client {
-		handle("GET /static/", http.StripPrefix("/static", http.FileServer(http.Dir(clientDir))).ServeHTTP)
+		handle("GET /static/", webClient(clientDir).ServeHTTP)
 	}
 	if p.legacyV0 {
 		if p.login {

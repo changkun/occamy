@@ -402,8 +402,17 @@ Settled on 2026-10-31.
     xterm.js and its fit add-on, all MIT); the image ships it under
     `licenses/web/`, and the release archive in `dist/`.
   - occamyd: `web_client` in a v1 file names the directory served under
-    `/static/`, with `no-cache`, `nosniff`, `frame-ancestors 'none'` and
-    `no-referrer`; occamyd warns at start when it holds no `index.html`.
+    `/static/`, through an `os.Root` opened per request: no directory
+    listings, no symbolic links out of it. The page is `no-cache`, the
+    hashed `assets/` are cached for a year as `immutable`, and every
+    response has `nosniff`, `no-referrer` and a Content-Security-Policy
+    of `'self'` for scripts, the Worker and connections (with the
+    request's `ws://` and `wss://` origin named), `data:` images for the
+    cursor, inline styles for React and xterm.js, and
+    `frame-ancestors 'none'`. The v0 `client: true` route serves through
+    the same handler. Validation refuses a `web_client` that is a file
+    or unreadable; occamyd warns at start when it holds no `index.html`
+    or does not exist.
     The demo stack's `occamy-v1` serves the image's build and opens the
     demo SSH server through the native backend.
 - **Parity with the Vue client:**
@@ -488,4 +497,3 @@ Settled on 2026-10-31.
     against `webinterop` or the demo stack.
   - An end-to-end test of the demo's `ssh` connection through
     `occamy-v1`; `tests/` streams only its VNC connections.
-  - A Content-Security-Policy for `/static/` beyond `frame-ancestors`.
