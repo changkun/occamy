@@ -54,7 +54,13 @@ cache and two workers.
 ## Where the workers lose
 
 At one viewer the workers trade CPU for time: the two cores together
-do the writer's work sooner, and some more besides.
+do the writer's work sooner, and some more besides. One viewer pays 9
+to 21 % more CPU on the scenes that encode, the repeated window
+switches among them; the drag pays 2 %, and the browser page shown
+once is the exception. occamyd always runs the cache and two workers, with no
+switch to turn them off yet, so this is the trade it makes. A
+saturated host was not measured: the load was 8 to 11 on 18 cores, and
+where every core is busy the workers' CPU comes from other sessions.
 
 | Scene, 1 viewer | before | cache alone | now | now against before | now against the cache |
 |---|---|---|---|---|---|
@@ -126,12 +132,17 @@ host's other sessions their cores.
 
 ## Memory
 
-- **The cache** held 438 KiB at most on any scene, the plasma's two
-  frames, and 173 KiB for the photograph, against a budget of 32 MiB a
-  session (`stream.DefaultEncodeCacheBytes`). The budget leaves room for
-  viewers at other qualities, whose runs are kept apart, and for a 4K
-  screen, ten times the corpus's pixels. Each encoding counts its
-  payload and 256 bytes, and the oldest go first.
+- **The cache** may hold up to 32 MiB a session
+  (`stream.DefaultEncodeCacheBytes`), times the sessions: no bound
+  covers them all. A run's encodings are kept one a quality, so as a
+  viewer's pacer moves, the runs at qualities it left stay until the
+  budget takes them. On the corpus it held 438 KiB at most, the
+  plasma's two frames, and 173 KiB for the photograph; those are the
+  peaks of short passes, a few frames of a scene in a new session, not
+  what a long session holds. The budget leaves room for viewers at
+  other qualities, whose runs are kept apart, and for a 4K screen, ten
+  times the corpus's pixels. Each encoding counts its payload and 256
+  bytes, and the oldest go first.
 - **A worker** keeps an encoder for each profile it has encoded for,
   and the tiles of a run of up to 16 and their pixels side by side,
   512 KiB.

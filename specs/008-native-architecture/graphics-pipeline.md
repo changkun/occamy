@@ -303,10 +303,7 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
 | Refinement (done 2026-10-31) | Motion heat per tile, and refinement after a still delay: exact for tiles of up to 256 colours, which go lossy while they move if they have more than 16, and a quality chosen by SSIM for photographic ones; gives `stream.Encoder` the tile's motion. Built with SSIM 0.91 on each tile and background frames paced by `pacer.Background`; the plasma takes 13.8 KiB a frame against 392.4 while it moves, and the photograph 121.8 KiB against 150.8, under G6's 139 ([notes](#implementation-notes-refinement)) | Codecs |
 | Scroll detection (done 2026-10-31) | Row hashes per tile column (xxh3-64), the offset search, and `copy-rect` with tiles for the exposed strip. Built per viewer against a shadow of what its client shows, vertical offsets only, verified pixel for pixel; the corpus's scroll takes 5.0 KiB a frame against 58.5 ([notes](#implementation-notes-scroll-detection)) | Framebuffer |
 | Tile cache (done 2026-10-31) | Content hashes (xxh3-128 from zeebo/xxh3, under a secret seed for each viewer), the server's mirror of each client's cache, and the `cached` codec. Built with 1024 slots by default in occamyd, the Go client and the web client's protocol core, storing tiles sent alone and exact; a window switched back and forth over the desktop takes 9.4 KiB a frame against 79.7, and the mirror 70 KiB a viewer ([notes](#implementation-notes-tile-cache)) | Codecs, protocol v1 Messages |
-| Encode cache and workers (done 2026-10-31) | Encoded tiles cached by tile, version, codec and quality and shared by viewers; a worker pool bounded per session. Built with a cache of 32 MiB a session, keyed by the viewers' codecs, the tile, its version and motion, and for runs of lossy tiles their versions, quality and lowest; two workers a session that a writer wakes once it has a tile to encode, and `encoder.Encoder.Still` galloping from where the session's last search ended. A photograph shown once reaches a viewer in 44 ms against 96,
-and four viewers take 163 ms of CPU for it against 374; one viewer
-takes up to a fifth more CPU for its first frames of text and
-photographs ([notes](#implementation-notes-encode-cache-and-workers)) | Codecs |
+| Encode cache and workers (done 2026-10-31) | Encoded tiles cached by tile, version, codec and quality and shared by viewers; a worker pool bounded per session. Built with a cache of 32 MiB a session, keyed by the viewers' codecs, the tile, its version and motion, and for runs of lossy tiles their versions, quality and lowest; two workers a session that a writer wakes once it has a tile to encode, and `encoder.Encoder.Still` galloping from where the session's last search ended. A photograph shown once reaches a viewer in 44 ms against 96, and four viewers take 163 ms of CPU for it against 374; one viewer pays 9 to 21 % more CPU on the scenes that encode, the browser page shown once excepted, and occamyd always runs the cache and two workers, with no switch yet ([notes](#implementation-notes-encode-cache-and-workers)) | Codecs |
 
 ## Affects
 
@@ -1636,7 +1633,10 @@ are, share the session's encode cache, of 32 MiB at most
 half the cores where there are fewer than four (`stream.DefaultEncodeWorkers`).
 `stream.Config.NoShare` turns both off, `EncodeWorkers` sets the
 workers, none if negative, and `EncodeCacheBytes` the budget. occamyd
-sets none of them. Nothing changes on the wire, and a viewer's messages
+sets none of them, so it always runs the cache and two workers, with no
+switch to turn them off yet: a trade of CPU for latency, which costs
+one viewer 9 to 21 % more CPU on the scenes that encode (Measurements).
+Nothing changes on the wire, and a viewer's messages
 are what they were, save that a shared run of photographic tiles is the
 encoding of whichever viewer or worker made it (see Choices).
 `encoder.Encoder.Still` now gallops: it takes fewer tries far from
@@ -1692,6 +1692,12 @@ chose, so that every scene sends the same bytes as before.
   worker has begun. Once the frame is sent, or an input's effect ends
   it, the workers drop what is left of it. An input's frame goes to no
   worker: its runs end at each drawing operation, and it is small.
+- **The workers' lifecycle.** The last viewer to leave closes the
+  session's queue of jobs and waits for the workers to finish theirs; a
+  job still running may yet ask for another worker, and gets none, since
+  queueing a job and closing the queue take one lock. A job that panics
+  is logged, the encoding it was making is published failed, so that
+  the next to ask makes it, and its worker goes on with new encoders.
 - **`encoder.Encoder.Still` gallops.** From where its search starts it
   walks three steps of the ladder one at a time, as before, then goes
   two steps, four and so on, and halves the gap it finds. On a
@@ -1760,10 +1766,15 @@ chose, so that every scene sends the same bytes as before.
 - **A copy of the mirror's keys a frame**, since the mirror changes as
   the writer writes and the workers run meanwhile: `maps.Clone` of at
   most 1024 keys, made only once the writer has a tile to encode.
-- **32 MiB a session.** The most any scene held was 438 KiB, the
-  plasma's two frames, and the photograph 173 KiB. The budget leaves
-  room for viewers at other qualities, whose runs are kept apart, and
-  for a 4K screen, ten times the corpus's pixels.
+- **32 MiB a session**, times the sessions: no bound covers them all.
+  A run's encodings are kept one a quality and lowest quality, so as a
+  viewer's pacer moves, its runs at the qualities it left stay until
+  the budget takes them. The 438 KiB that the plasma's two frames held,
+  and the photograph's 173 KiB, are the peaks of the measurement's
+  short passes, a few frames of a scene in a new session; a long
+  session at changing qualities fills more of the budget. The budget
+  leaves room for viewers at other qualities, whose runs are kept
+  apart, and for a 4K screen, ten times the corpus's pixels.
 
 **Measurements.** The corpus's scenes sent to 1, 2 and 4 viewers of
 a session, before this task and with the defaults, at a load of 8 to
@@ -1789,18 +1800,23 @@ a session, before this task and with the defaults, at a load of 8 to
 - **The plasma, the scroll and the switched terminal are unchanged**:
   their frames come from the tile cache or go as `copy-rect`, and wake
   no worker. The first version's 42 % on the plasma is gone.
-- **One viewer takes more CPU** for the time it saves: against before,
-  21 % on the antialiased terminal shown once (7.30 → 8.83 ms; the
-  rounds ranged 6.5 to 9.1 and 7.4 to 9.3), 11 % on the photograph
+- **One viewer pays 9 to 21 % more CPU** on the scenes that encode, for
+  the time it saves, the repeated window switches among them: against
+  before, 21 % on the antialiased terminal shown once (7.30 → 8.83 ms;
+  the rounds ranged 6.5 to 9.1 and 7.4 to 9.3), 11 % on the photograph
   shown once, 9 % on the switched browser page and photograph, and 2 %
-  on the drag. The browser page shown once takes 6 % less, since the
-  gallop saves more than the workers cost; against the cache alone,
-  the workers cost 27 % on it. `EncodeWorkers: -1` keeps the cache and
-  drops the workers, within the rounds' spread of before or below it
-  on every scene.
+  on the drag. The browser page shown once is the exception, at 6 %
+  less, since the gallop saves more than the workers cost; against the
+  cache alone, the workers cost 27 % on it. `EncodeWorkers: -1` keeps
+  the cache and drops the workers, within the rounds' spread of before
+  or below it on every scene.
 - **Refinement of the dragged window** takes 29.0 ms of CPU against
   40.5: the gallop, since its tiles settle far from where the search
   starts.
+- **A saturated host was not measured.** The load was 8 to 11 on 18
+  cores. Where every core is busy, the workers' CPU is taken from other
+  sessions, and the time they save may shrink while what they cost
+  does not.
 
 **Testing.**
 
@@ -1843,10 +1859,23 @@ a session, before this task and with the defaults, at a load of 8 to
 - `TestShareMoving` and `TestShareRunQuality`: a tile of 100 colours
   goes lossy moving and exact still, and a run at one quality, or
   searched from one lowest, is not another's.
+- `TestShareReleaseRecruit`, `TestShareReleaseRace` and
+  `TestShareWorkerPanics`: a job still running when the last viewer
+  leaves asks for another worker and gets none; workers asking while
+  the last viewer leaves, two hundred times over, never send on the
+  closed queue; and a job that panics leaves its worker running, with
+  new encoders, its encoding made again by the next to ask, and the
+  panic logged.
 - `TestPrefetchMatchesWriter` hands a frame's rows to a worker, then
   sends the frame with no workers: every encoding the worker made, of
   tiles and of runs that a pattern, a clean tile or a cached tile ends,
   is one the writer then finds, and none is of the writer's first row.
+  So it is where motion starts and stops inside runs, where the
+  client's widest texture is two tiles, and where a copy completed
+  tiles of the order. `TestFetchEndsWithFrame` goes through
+  `sendFrame`: the workers look nothing up once the frame is sent, nor
+  once it has turned to an input's effect, and a frame of an input's
+  effect hands them no rows.
   `TestPrefetchSkipsCached`: the one worker of a frame of tiles the
   client has encodes none and asks for no other. `TestPrefetchStops`:
   once the frame is sent, it encodes none of it. `TestPrefetchRecruits`:
@@ -1887,6 +1916,18 @@ fallback to lossless when an encode fails partway up the ladder, which
 the encoders never do, since they fail on size alone, as the
 Refinement notes found.
 
+The review found six mutants of the writer's side that survived:
+dropping the stop once a frame is sent, or once it turns to an input's
+effect; handing an input's frame to the workers; and a worker's prefetch
+taking tiles a copy completed, or its runs crossing motion or the
+client's widest texture. With the tests above, those six are killed, and
+so are seven mutants of the review's fixes, 13 of 13: `submit` sending
+on the closed queue, checking it outside the lock, or the close not
+marked; a job's panic not recovered, reported as no panic, not logged,
+or leaving its worker the encoders it broke. The check outside the lock
+is killed by `TestShareReleaseRace`, by its panic, or under `-race` by
+the race.
+
 **Surprises.**
 
 - **The workers' copy of the mirror needs its seed.** The tile cache
@@ -1915,6 +1956,12 @@ Refinement notes found.
   finds.
 - **Viewers' messages differ** in their session messages, such as who
   joined, so `TestShareConverges` compares the drawing messages only.
+- **A worker could end occamyd as the last viewer left** (found in
+  review). A job still running asked for another worker as it began an
+  encoding, and the send on the closed queue panicked, in a goroutine
+  that recovered nothing: a session of two viewers ending during a
+  photograph's frame could do it. Queueing and closing now take one
+  lock, and a worker recovers each job.
 
 **Follow-ups.**
 
@@ -1925,19 +1972,38 @@ Refinement notes found.
   alone (16.6 → 21.1 ms). Starting a worker's first search after the
   writer's first has ended, or seeding it from the session's last
   quality kept across frames that need none, would cut it.
-- **At one viewer, the workers cost CPU for their time**, up to a
-  fifth more than before on the first frames of text and photographs:
-  a worker reads and hashes each tile it takes, which the writer reads
-  and hashes again, and the efficiency cores take longer for the same
-  work.
+- **At one viewer, the workers cost CPU for their time**: 9 to 21 %
+  more than before on the scenes that encode, the repeated switches
+  among them, the browser page shown once excepted. A worker reads and
+  hashes each tile it takes, which the writer reads and hashes again,
+  and the efficiency cores take longer for the same work.
+- **A saturated host was not measured**, where the workers' CPU comes
+  from other sessions.
 - **Viewers at different qualities share tiles but not runs.** Each
   viewer's pacer sets its quality from its own acknowledgements, and a
   run's encoding is keyed by it. The measurement's viewers share one
   pacer's defaults.
 - **An input's frame has no workers**, though its writer still finds
   what the other viewers' writers made.
-- **occamyd has no switch** for `NoShare` or the workers; like the
-  tile cache's, it belongs in the v1 config schema.
+- **occamyd has no switch** for `NoShare` or the workers, so it always
+  runs the cache and two workers a session; like the tile cache's, the
+  switch belongs in the v1 config schema.
+- **No bound covers all sessions.** Each holds up to 32 MiB of
+  encodings, so a host's sessions hold up to that many times it. A
+  budget shared by the sessions, or one that shrinks as they grow,
+  would bound it.
+- **The search hint is one a profile, not a quality.** Viewers whose
+  pacers sit at different qualities share it, so a search may start
+  from another viewer's quality, clamped to its own ladder, and take
+  more tries than from its own.
+- **A failed encode after a step reached the score counts as falling
+  short.** The walk down and the halving keep the encoding that reached
+  it rather than falling back to lossless; the encoders fail on size
+  alone, so the first try fails first.
+- **The gallop and the halving take SSIM to rise with quality.** Where
+  it does not, a search still ends at a quality that reaches the score
+  with the step below short of it, but not always the lowest such, nor
+  the walk's; on the corpus, every scene chose what the walk chose.
 - **Each viewer still hashes its tiles and searches for scrolls
   itself**, and a worker reads and hashes the tiles it skips, as the
   writer does again: the tile cache's hashes are seeded for each
