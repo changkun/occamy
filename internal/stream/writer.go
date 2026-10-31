@@ -672,7 +672,7 @@ func (w *writer) small(ctx context.Context) error {
 	if p.End != nil {
 		ctx, cancel := context.WithTimeout(ctx, closeTimeout)
 		defer cancel()
-		if err := w.write(ctx, closeFor(*p.End)); err != nil {
+		if err := w.write(ctx, CloseFor(*p.End)); err != nil {
 			return err
 		}
 		return errEnded
