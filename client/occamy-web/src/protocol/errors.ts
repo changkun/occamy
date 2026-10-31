@@ -23,13 +23,14 @@ export const CloseCode = {
   RemoteEnded: 4005,
   BackendFailed: 4006,
   ViewerLimit: 4007,
+  TooSlow: 4008,
 } as const
 
 /**
  * Why a session ended, for a UI to act on:
  * - done: it did its work, as when the user, the owner or the remote ended it;
  * - auth: the token is missing, invalid or expired, or grants no access;
- * - limit: it waited too long, or has too many viewers;
+ * - limit: it waited too long for input or for the client, or has too many viewers;
  * - server: the server or the backend failed, or shuts down;
  * - protocol: a peer broke the protocol, or the client cannot show the session;
  * - connection: the connection failed without a code.
@@ -57,6 +58,7 @@ const closeInfo: Record<number, CloseInfo> = {
   [CloseCode.RemoteEnded]: { name: 'remote-ended', kind: 'done', description: 'The remote ended the session.' },
   [CloseCode.BackendFailed]: { name: 'backend-failed', kind: 'server', description: 'The connection to the remote failed.' },
   [CloseCode.ViewerLimit]: { name: 'viewer-limit', kind: 'limit', description: 'The session has as many viewers as it allows.' },
+  [CloseCode.TooSlow]: { name: 'too-slow', kind: 'limit', description: 'The client acknowledged no frame, or took no message, for the server’s viewer timeout.' },
 }
 
 /** closeCodeName returns a close code's name, such as "protocol-error", or "CloseCode(n)" for an unknown one. */

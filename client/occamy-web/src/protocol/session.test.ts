@@ -395,6 +395,34 @@ describe('terminal frames', () => {
     expect(await s.next()).toMatchObject({ type: 'frame', id: 1, lastSeq: 3, dirty: [] })
     expect(s.size).toEqual({ width: 80, height: 24 })
   })
+
+  it('takes a snapshot in a later frame, as after the client was hidden', async () => {
+    const { t, s } = await open({ welcome: { class: SessionClass.Terminal }, capabilities: { terminal: 1 } })
+    t.push({ type: 'resize', width: 80, height: 24 })
+    t.push({ type: 'term-snapshot', data: Uint8Array.of(1) })
+    t.push(frameEnd(1))
+    s.view(false)
+    t.push({ type: 'term-data', data: Uint8Array.of(2) })
+    t.push(frameEnd(2))
+    s.view(true)
+    t.push({ type: 'term-snapshot', data: Uint8Array.of(3) })
+    t.push({ type: 'term-data', data: Uint8Array.of(4) })
+    t.push(frameEnd(3))
+    const got: unknown[] = []
+    for (let i = 0; i < 7; i++) {
+      got.push(await s.next())
+    }
+    expect(got).toMatchObject([
+      { type: 'resize' },
+      { type: 'term-snapshot', data: Uint8Array.of(1) },
+      { type: 'frame', id: 1 },
+      { type: 'term-data', data: Uint8Array.of(2) },
+      { type: 'frame', id: 2 },
+      { type: 'term-snapshot', data: Uint8Array.of(3) },
+      { type: 'term-data', data: Uint8Array.of(4) },
+    ])
+    expect(await s.next()).toMatchObject({ type: 'frame', id: 3 })
+  })
 })
 
 describe('bounds', () => {

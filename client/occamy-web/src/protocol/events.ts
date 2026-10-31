@@ -4,6 +4,12 @@
 
 // What Session.next delivers, as the Go client's Next does
 // (client/events.go).
+//
+// The server's text and bytes come as it sent them: a title, a clipboard,
+// a prompt's strings, a viewer's name and a close reason are bounded only
+// by the agreed maximum message size, 4 MiB by default. The library keeps
+// them whole; a UI clips what it shows, such as document.title, and
+// decides how much clipboard it takes.
 
 import type { Pixels } from './codecs'
 import type { PromptField, Role } from './messages'
@@ -51,7 +57,11 @@ export interface ResizeEvent {
   height: number
 }
 
-/** TermSnapshotEvent replaces the terminal: reset the emulator and write data to it. */
+/**
+ * TermSnapshotEvent replaces the terminal: reset the emulator and write
+ * data to it. A terminal session's first frame carries one, and a later
+ * frame may, such as the first after the client was hidden.
+ */
 export interface TermSnapshotEvent {
   type: 'term-snapshot'
   data: Uint8Array
@@ -88,7 +98,7 @@ export interface CursorMoveEvent {
   y: number
 }
 
-/** ClipboardEvent is the remote clipboard's new content. */
+/** ClipboardEvent is the remote clipboard's new content, up to the maximum message size. */
 export interface ClipboardEvent {
   type: 'clipboard'
   mime: string
@@ -100,13 +110,17 @@ export interface BellEvent {
   type: 'bell'
 }
 
-/** TitleEvent is the remote's desktop or window title. */
+/** TitleEvent is the remote's desktop or window title, up to the maximum message size, for a UI to clip. */
 export interface TitleEvent {
   type: 'title'
   title: string
 }
 
-/** PromptEvent asks the owner for answers; promptReply answers it once, one answer per field. */
+/**
+ * PromptEvent asks the owner for answers; promptReply answers it once,
+ * one answer per field. Its strings are the server's, up to the maximum
+ * message size, for a UI to clip.
+ */
 export interface PromptEvent {
   type: 'prompt'
   id: number

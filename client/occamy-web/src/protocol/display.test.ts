@@ -132,6 +132,34 @@ describe('display', () => {
         restore()
       }
     })
+
+    it('acknowledges frames as they arrive in a hidden page', async () => {
+      // A server closes a viewer that leaves a frame unacknowledged for
+      // its viewer timeout, and a hidden page gets no animation frames.
+      const { frames, restore } = page(true)
+      try {
+        const { t, s } = await open()
+        const surface = new MemorySurface()
+        const run = new Display(s, surface).run()
+        t.push({ type: 'resize', width: 2, height: 2 })
+        const acks: number[] = []
+        for (let id = 1; id <= 3; id++) {
+          t.push(tile(id, 0, 0, 1, 1, id % 2 === 1 ? RED : GREEN))
+          t.push(frameEnd(id))
+          for (let i = 0; i < 100 && acks.length < id; i++) {
+            await new Promise((resolve) => setTimeout(resolve, 0))
+            acks.push(...t.take('frame-ack').map((m) => (m as { frameId: number }).frameId))
+          }
+        }
+        expect(acks).toEqual([1, 2, 3])
+        expect(frames).toHaveLength(0)
+        expect(surface.presents).toBe(3)
+        t.drop(4002, 'closed')
+        await run
+      } finally {
+        restore()
+      }
+    })
   })
 
   it('coalesces many rectangles into their bounding box', () => {
