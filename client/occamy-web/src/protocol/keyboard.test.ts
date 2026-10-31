@@ -8,14 +8,22 @@ import { describe, expect, it } from 'vitest'
 
 import { hidUsage, hidUsages, keyOf, keysym } from './keyboard'
 
-// The VNC backend's HID-to-XT table, read from its source: each entry is
-// `0xUU: 0xXX, // Name`, where Name is KeyboardEvent.code's name of the
-// key, or a description of it.
-const qemukeys = readFileSync(new URL('../../../../internal/backend/vnc/qemukeys.go', import.meta.url), 'utf8')
+// The HID-to-XT table that the VNC and RDP backends send keys by,
+// internal/keymap's set1, read from its source: each entry is
+// `0xUU: 0xXX, // Name` or `0xUU: 0xXXXX, // Name`, a set 1 make code
+// of a byte or two, where Name is KeyboardEvent.code's name of the key,
+// or a description of it.
+const keymap = readFileSync(new URL('../../../../internal/keymap/keymap.go', import.meta.url), 'utf8')
+const set1 = keymap.match(/^var set1 = \[0xe8\]uint16\{\n([^}]*)^\}/m)?.[1] ?? ''
 const hidToXT = new Map<number, { xt: number; name: string }>()
-for (const m of qemukeys.matchAll(/^\t0x([0-9a-f]{2}): 0x([0-9a-f]{2}), \/\/ (\w+)/gm)) {
+for (const m of set1.matchAll(/^\t0x([0-9a-f]{2}): 0x([0-9a-f]{2,4}), +\/\/ (\w+)/gm)) {
   hidToXT.set(parseInt(m[1], 16), { xt: parseInt(m[2], 16), name: m[3] })
 }
+
+// The keys of the table that the RDP backend drops, read from its
+// source: `const hidPower = 0xUU`.
+const rdpInput = readFileSync(new URL('../../../../internal/backend/rdp/input.go', import.meta.url), 'utf8')
+const rdpDrops = new Set([...rdpInput.matchAll(/^const hidPower = 0x([0-9a-f]{2})$/gm)].map((m) => parseInt(m[1], 16)))
 
 // Go's names that are not KeyboardEvent.code's.
 const goNames: Record<string, string | null> = {
@@ -30,7 +38,11 @@ describe('HID usages', () => {
     expect(hidToXT.size).toBeGreaterThanOrEqual(148)
   })
 
-  it('maps every key of the VNC backend’s table', () => {
+  it('reads what the RDP backend drops', () => {
+    expect(rdpDrops.size).toBe(1)
+  })
+
+  it('maps every key of the backends’ table', () => {
     for (const [usage, { name }] of hidToXT) {
       const code = name in goNames ? goNames[name] : name
       if (code === null) {
@@ -44,6 +56,20 @@ describe('HID usages', () => {
     for (const [code, usage] of Object.entries(hidUsages)) {
       expect([code, hidToXT.get(usage)?.xt ?? 0]).not.toEqual([code, 0])
     }
+  })
+
+  // The RDP backend sends the table's keys too, but Power, which it drops
+  // on purpose (specs/008-native-architecture/native-rdp-backend.md,
+  // decision 4). The client still maps Power, which the VNC backend sends.
+  it('maps only keys the RDP backend can send, and Power', () => {
+    const dropped: string[] = []
+    for (const [code, usage] of Object.entries(hidUsages)) {
+      expect([code, hidToXT.get(usage)?.xt ?? 0]).not.toEqual([code, 0])
+      if (rdpDrops.has(usage)) {
+        dropped.push(code)
+      }
+    }
+    expect(dropped).toEqual(['Power'])
   })
 
   it('maps the older names of keys', () => {

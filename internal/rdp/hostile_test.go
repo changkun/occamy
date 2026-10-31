@@ -28,8 +28,12 @@ type sizeRecorder struct {
 
 func (s *sizeRecorder) Resize(w, h int) { s.resizes = append(s.resizes, image.Pt(w, h)) }
 func (s *sizeRecorder) Lock(r image.Rectangle) *image.RGBA {
-	if s.img == nil || !r.In(s.img.Rect) {
+	if s.img == nil {
 		s.img = image.NewRGBA(r)
+	} else if !r.In(s.img.Rect) {
+		// Grown to all that was locked, so that strips of one bitmap
+		// allocate only the first time.
+		s.img = image.NewRGBA(r.Union(s.img.Rect))
 	}
 	return s.img
 }
@@ -296,9 +300,9 @@ func TestMaxBitmapPixels(t *testing.T) {
 	}
 }
 
-// pointerAttribute builds a 2×2 TS_POINTERATTRIBUTE at 24 bits per pixel
+// pointerAttributePDU builds a 2×2 TS_POINTERATTRIBUTE at 24 bits per pixel
 // for a cache index.
-func pointerAttribute(index int) []byte {
+func pointerAttributePDU(index int) []byte {
 	var w writer
 	w.u16(24)
 	w.u16(index)
@@ -315,11 +319,10 @@ func pointerAttribute(index int) []byte {
 // A pointer's cache index must lie in the cache, both when the server
 // sets it and when it uses it.
 func TestPointerCacheIndex(t *testing.T) {
-	var d decoder
-	if _, _, err := d.parsePointerAttribute(pointerAttribute(maxPointerCache-1), true, false); err != nil {
+	if _, err := parsePointerAttribute(pointerAttributePDU(maxPointerCache-1), true, false); err != nil {
 		t.Fatalf("index %d: %v", maxPointerCache-1, err)
 	}
-	if _, _, err := d.parsePointerAttribute(pointerAttribute(maxPointerCache), true, false); err == nil {
+	if _, err := parsePointerAttribute(pointerAttributePDU(maxPointerCache), true, false); err == nil {
 		t.Errorf("index %d accepted", maxPointerCache)
 	}
 	c := testClient(64, 64)

@@ -9,7 +9,7 @@ affects:
   - internal/backend/rdp/
 effort: large
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -135,7 +135,7 @@ follow the recommendations.
 ## Affects
 
 `internal/rdp`, the protocol client the spike built, and a backend in
-`internal/backend/rdp` on it; or, if the spike fails, a helper binary
+`internal/backend/rdp` on it ([native-rdp-backend](native-rdp-backend.md)); or, if the spike fails, a helper binary
 and an IPC definition in session-core. Decides when guacd leaves Occamy
 entirely.
 
@@ -396,9 +396,12 @@ best effort, has none. The live run was repeated after the fixes.
   TSRequest framing, the public key binding and the error path are
   checked only against this package's own acceptor. They are
   self-consistent, not interoperable, until a Windows host answers.
-- **What remains for a beta-quality backend.**
+- **What remains for a beta-quality backend.** The backend and the
+  layers below are planned in
+  [native-rdp-backend](native-rdp-backend.md), by phase.
   - The backend in `internal/backend/rdp`: Run, input mapping, `Demand`
-    to Suppress Output, credentials from the registry.
+    to Suppress Output, credentials from the registry. Done in
+    native-rdp-backend's phase 1, but for the registry.
   - Step 2 against Windows with NLA, and with it the parts xrdp cannot
     exercise. These are live NLA, the full licensing exchange (Windows
     Server with an RDS licensing server), server redirection, and the

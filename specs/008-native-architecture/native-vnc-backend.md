@@ -7,9 +7,10 @@ depends_on:
   - specs/008-native-architecture/graphics-pipeline.md
 affects:
   - internal/backend/vnc/
+  - internal/keymap/
 effort: large
 created: 2026-10-29
-updated: 2026-10-30
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -182,7 +183,9 @@ since no configuration key yet picks a backend; see its notes.)
 
 New `internal/backend/vnc`. After its parity gate
 ([guacd-bridge](guacd-bridge.md)), VNC no longer needs guacd, which
-leaves only RDP on the bridge.
+leaves only RDP on the bridge. The HID-to-XT table derives from
+`internal/keymap`, the scan code table it shares with the RDP client
+since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
 
 ## Implementation notes: phase 1
 

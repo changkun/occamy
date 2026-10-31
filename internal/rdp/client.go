@@ -20,6 +20,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"io"
 	"log/slog"
 	"net"
 	"sync"
@@ -44,6 +45,12 @@ type Config struct {
 	// ClientName is the client's name the server sees; "occamy" by
 	// default.
 	ClientName string
+	// RoutingCookie sends the first nine characters of Username as the
+	// routing cookie of the connection request ("Cookie: mstshash="), as
+	// mstsc and FreeRDP do, for a load balancer that routes by user. It
+	// goes in the clear, before TLS, so it is off by default: then the
+	// connection request carries only the protocols offered.
+	RoutingCookie bool
 	// KeyboardLayout is the input locale identifier of the layout; US
 	// English (0x409) by default.
 	KeyboardLayout uint32
@@ -126,6 +133,7 @@ type Client struct {
 	ctx        context.Context // ends a wait; Background if nil
 	dec        decoder
 	cursors    [maxPointerCache]cursor
+	shown      shownCursor
 	frag       []byte
 	fragging   bool // a first fragment came, and its last has not
 	lastResize time.Time
@@ -262,7 +270,11 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 
 func (c *Client) connect(ctx context.Context) error {
 	// Connection initiation, [MS-RDPBCGR] 1.3.1.1 phase 1.
-	if err := c.t.write(connectionRequest(c.cfg.Username, c.cfg.Protocols)); err != nil {
+	cookie := ""
+	if c.cfg.RoutingCookie {
+		cookie = c.cfg.Username
+	}
+	if err := c.t.write(connectionRequest(cookie, c.cfg.Protocols)); err != nil {
 		return err
 	}
 	f, err := c.read()
@@ -526,12 +538,18 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
+			if c.errInfo != 0 && HungUp(err) {
+				// The server said why in a Set Error Info PDU, and closed
+				// the connection without a Disconnect Provider Ultimatum.
+				return c.disconnected()
+			}
 			return err
 		}
 		c.mu.Lock()
 		c.stats.Bytes += int64(len(buf))
 		c.mu.Unlock()
 		if f.fastPath {
+			c.errInfo = 0 // the session went on after a reason
 			err = c.handleFastPath(out, f)
 		} else {
 			var ch uint16
@@ -555,6 +573,13 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 			return err
 		}
 	}
+}
+
+// HungUp reports whether err is the server closing the connection: the
+// end of the stream, or the reset a server's kernel sends instead when
+// the server closes with the client's input unread.
+func HungUp(err error) bool {
+	return errors.Is(err, io.EOF) || errors.Is(err, errReset)
 }
 
 // disconnected returns Run's result for a server that disconnected.
@@ -590,6 +615,7 @@ func (c *Client) handleShareControl(out Output, data []byte) (done bool, err err
 		data = data[total:]
 		switch typ {
 		case pduDemandActive:
+			c.errInfo = 0 // the session went on after a reason
 			if done {
 				return false, errors.New("rdp: a second Demand Active in one PDU")
 			}
@@ -718,8 +744,16 @@ func (c *Client) handleShareData(out Output, p []byte) error {
 		return errors.New("rdp: compressed PDU, though the client offered no compression")
 	}
 	body := r.b
-	if out == nil && typ2 != pdu2SetErrorInfo {
-		return nil
+	if typ2 != pdu2SetErrorInfo {
+		// A reason holds only for the end that follows it: a server ends
+		// a session with Set Error Info, then optionally Deactivate All
+		// and a Disconnect Provider Ultimatum, and closes ([MS-RDPBCGR]
+		// 1.3.1.4.2). A share data PDU after the reason means the session
+		// went on, so a later hang-up is not the end the reason gave.
+		c.errInfo = 0
+		if out == nil {
+			return nil
+		}
 	}
 	switch typ2 {
 	case pdu2Update:
@@ -874,16 +908,16 @@ func (c *Client) fastPathUpdate(out Output, code int, p []byte) error {
 	case fpSurfCmds:
 		c.count(func(s *Stats) { s.Ignored["surface commands"]++ })
 	case fpPtrNull:
-		out.Cursor(nil, image.Point{})
+		return c.setCursor(out, nil, image.Point{})
 	case fpPtrDefault:
-		out.Cursor(defaultCursor.img, defaultCursor.hot)
+		return c.setCursor(out, defaultCursor.img, defaultCursor.hot)
 	case fpPtrPosition:
 		r := reader{b: p}
 		pt := image.Pt(int(r.u16()), int(r.u16()))
 		if r.err != nil {
 			return r.err
 		}
-		out.CursorMove(pt)
+		return c.moveCursor(out, pt)
 	case fpColorPointer, fpPointer, fpLargePointer:
 		return c.pointer(out, p, code != fpColorPointer, code == fpLargePointer)
 	case fpCachedPtr:
@@ -906,12 +940,14 @@ func (c *Client) slowPathPointer(out Output, typ int, p []byte) error {
 	switch typ {
 	case ptrMsgSystem:
 		r := reader{b: p}
-		if r.u32() == 0 { // SYSPTR_NULL
-			out.Cursor(nil, image.Point{})
-		} else {
-			out.Cursor(defaultCursor.img, defaultCursor.hot)
+		sys := r.u32()
+		if r.err != nil {
+			return r.err
 		}
-		return r.err
+		if sys == 0 { // SYSPTR_NULL
+			return c.setCursor(out, nil, image.Point{})
+		}
+		return c.setCursor(out, defaultCursor.img, defaultCursor.hot)
 	case ptrMsgPosition:
 		return c.fastPathUpdate(out, fpPtrPosition, p)
 	case ptrMsgColor, ptrMsgPointer, ptrMsgLarge:
@@ -922,14 +958,23 @@ func (c *Client) slowPathPointer(out Output, typ int, p []byte) error {
 	return nil
 }
 
+// pointer decodes a new pointer shape, caches it and shows it. The shape
+// is charged by its size before it is decoded, as a bitmap is.
 func (c *Client) pointer(out Output, p []byte, withBpp, large bool) error {
-	i, cur, err := c.dec.parsePointerAttribute(p, withBpp, large)
+	a, err := parsePointerAttribute(p, withBpp, large)
 	if err != nil {
 		return err
 	}
-	c.cursors[i] = cur
+	if err := c.pace(cursorCost(a.w, a.h)); err != nil {
+		return err
+	}
+	img, err := c.dec.pointerImage(a.w, a.h, a.bpp, a.xorMask, a.andMask)
+	if err != nil {
+		return err
+	}
+	c.cursors[a.index] = cursor{img: img, hot: a.hot}
 	c.count(func(s *Stats) { s.Pointers++ })
-	out.Cursor(cur.img, cur.hot)
+	c.showCursor(out, img, a.hot)
 	return nil
 }
 
@@ -942,8 +987,7 @@ func (c *Client) cachedPointer(out Output, p []byte) error {
 	if i >= maxPointerCache || c.cursors[i].img == nil {
 		return fmt.Errorf("rdp: cached pointer %d not in the cache", i)
 	}
-	out.Cursor(c.cursors[i].img, c.cursors[i].hot)
-	return nil
+	return c.setCursor(out, c.cursors[i].img, c.cursors[i].hot)
 }
 
 // bitmapPad is how much wider and taller than its destination, or the
@@ -981,13 +1025,76 @@ func (c *Client) drawBitmap(out Output, b *bitmapData) error {
 		kind = fmt.Sprintf("rle%d", b.bpp)
 	}
 	c.count(func(s *Stats) { s.Bitmaps[kind]++ })
-	img := out.Lock(r)
+	// The bitmap is decoded whole before anything is locked, and drawn in
+	// strips of whole rows, so that the output's lock is held for at most
+	// drawStrip pixels at a time and never while the client reads.
+	rows := max(1, drawStrip/r.Dx())
 	sx := r.Min.X - b.dest.Min.X
-	for y := r.Min.Y; y < r.Max.Y; y++ {
-		o := 4 * ((y-b.dest.Min.Y)*b.width + sx)
-		copy(img.Pix[img.PixOffset(r.Min.X, y):], rgba[o:o+4*r.Dx()])
+	for y0 := r.Min.Y; y0 < r.Max.Y; y0 += rows {
+		s := image.Rect(r.Min.X, y0, r.Max.X, min(y0+rows, r.Max.Y))
+		img := out.Lock(s)
+		for y := s.Min.Y; y < s.Max.Y; y++ {
+			o := 4 * ((y-b.dest.Min.Y)*b.width + sx)
+			copy(img.Pix[img.PixOffset(s.Min.X, y):], rgba[o:o+4*s.Dx()])
+		}
+		out.Unlock(s)
 	}
-	out.Unlock(r)
+	return nil
+}
+
+// drawStrip bounds the pixels drawn under one Lock: 256 KiB of RGBA, the
+// VNC backend's strip.
+const drawStrip = 64 << 10
+
+// pointerCost is the least that a pointer update, a shape or a move, is
+// charged against decodeRate, in pixels: a tile of 64×64. A cached
+// pointer is 2 bytes of a PDU, and the output copies its shape, up to
+// 384×384 pixels, and shows it to every viewer; a move is 4 bytes. The
+// charge bounds them to 8,192 a second at most, and a shape to its
+// pixels' share of decodeRate. A new shape is charged by the size it
+// declares before it is decoded.
+const pointerCost = 64 * 64
+
+// shownCursor is the pointer shape the client last gave its output.
+type shownCursor struct {
+	img *image.RGBA
+	hot image.Point
+	set bool
+}
+
+// cursorCost is what showing a pointer shape of w×h pixels is charged.
+func cursorCost(w, h int) int { return max(pointerCost, w*h) }
+
+// setCursor gives out a pointer shape the client has, a cached, hidden
+// or default one, unless it is the one shown, at the pace of decodeRate.
+func (c *Client) setCursor(out Output, img *image.RGBA, hot image.Point) error {
+	if c.shown.set && c.shown.img == img && c.shown.hot == hot {
+		return nil
+	}
+	n := pointerCost
+	if img != nil {
+		n = cursorCost(img.Rect.Dx(), img.Rect.Dy())
+	}
+	if err := c.pace(n); err != nil {
+		return err
+	}
+	c.showCursor(out, img, hot)
+	return nil
+}
+
+// showCursor gives out a pointer shape that has been charged.
+func (c *Client) showCursor(out Output, img *image.RGBA, hot image.Point) {
+	c.shown = shownCursor{img: img, hot: hot, set: true}
+	out.Cursor(img, hot)
+}
+
+// moveCursor reports the server's move of the pointer to out, at the
+// pace of decodeRate.
+func (c *Client) moveCursor(out Output, p image.Point) error {
+	if err := c.pace(pointerCost); err != nil {
+		return err
+	}
+	out.CursorMove(p)
 	return nil
 }
 
