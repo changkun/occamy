@@ -161,6 +161,8 @@ type Backend struct {
 	dialTimeout time.Duration
 	log         *slog.Logger
 	limits      limits
+	// wrap, if set, wraps the connection, for tests.
+	wrap func(net.Conn) net.Conn
 
 	// visible is the latest Demand. It outlives a Run, since the session
 	// reports only changes and may report one before Run starts.
@@ -439,6 +441,9 @@ func (b *Backend) connect(ctx context.Context, sink backend.Sink, r *run) error 
 	if err != nil {
 		return failure(ctx, fmt.Errorf("vnc: %w", err))
 	}
+	if b.wrap != nil {
+		nc = b.wrap(nc)
+	}
 	// Closing the connection is the only way to abort a read or a write,
 	// including the handshake's.
 	closed := make(chan struct{})
@@ -483,14 +488,31 @@ func (b *Backend) connect(ctx context.Context, sink backend.Sink, r *run) error 
 	var wg sync.WaitGroup
 	wg.Go(func() {
 		defer close(r.wdone) // a reader that waits to answer a Fence stops waiting
+		// A panic here is beyond the session's recover: it stops the
+		// reader and ends Run.
+		defer func() {
+			if perr := backend.Recovered(recover()); perr != nil {
+				r.werr = perr
+				nc.Close()
+			}
+		}()
 		if r.werr = r.writeLoop(c.Writer, done, &b.visible); r.werr != nil {
 			nc.Close() // stops the reader too
 		}
 	})
-	err = r.readLoop(dec)
-	close(done)
-	nc.Close()
-	wg.Wait()
+	err = func() error {
+		// Deferred, so that a panic of the reader, which the session
+		// recovers from, stops the writer and closes the connection too.
+		defer func() {
+			close(done)
+			nc.Close()
+			wg.Wait()
+		}()
+		return r.readLoop(dec)
+	}()
+	if errors.As(r.werr, new(backend.PanicError)) {
+		return r.werr
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}

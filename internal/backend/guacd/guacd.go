@@ -235,12 +235,31 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 	}
 	quit := make(chan struct{})
 	var wg sync.WaitGroup
-	wg.Go(func() { s.writeLoop(quit) })
-	err = s.readLoop(ctx)
-	close(quit)
-	nc.Close()
-	wg.Wait()
+	var wpanic error // the writer's panic, read once it has ended
+	wg.Go(func() {
+		// A panic here is beyond the session's recover: it stops the
+		// reader and ends Run.
+		defer func() {
+			if wpanic = backend.Recovered(recover()); wpanic != nil {
+				nc.Close()
+			}
+		}()
+		s.writeLoop(quit)
+	})
+	err = func() error {
+		// Deferred, so that a panic of the reader, which the session
+		// recovers from, stops the writer and closes the connection too.
+		defer func() {
+			close(quit)
+			nc.Close()
+			wg.Wait()
+		}()
+		return s.readLoop(ctx)
+	}()
 	s.recordDrawing()
+	if wpanic != nil {
+		return wpanic
+	}
 	if err != nil && ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -676,9 +695,16 @@ func (s *session) flush() {
 		if r.Empty() {
 			continue
 		}
-		s.display.CopyTo(s.sink.Lock(r), r)
-		s.sink.Unlock(r)
+		s.copyOut(r)
 	}
+}
+
+// copyOut copies the display's pixels in r to the sink under one lock,
+// which a panic while it copies releases too (backend.Sink).
+func (s *session) copyOut(r image.Rectangle) {
+	dst := s.sink.Lock(r)
+	defer s.sink.Unlock(r)
+	s.display.CopyTo(dst, r)
 }
 
 // prompt asks the session's owner for the parameters guacd requires, and
