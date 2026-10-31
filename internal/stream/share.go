@@ -6,7 +6,6 @@ package stream
 
 import (
 	"image"
-	"maps"
 	"runtime"
 	"slices"
 	"sync"
@@ -466,9 +465,7 @@ func (w *writer) prefetch(order []int) *prefetch {
 		fb: w.fb, g: w.g, p: w.prof, cache: w.sh.cache,
 		q: w.p.Quality(), lo: w.p.MinQuality(), maxWidth: w.maxWidth(),
 	}
-	if w.cache != nil {
-		f.tc = &tileCache{keys: maps.Clone(w.cache.keys)}
-	}
+	f.tc = w.cache.contents()
 	ts := make([]int, 0, len(order))
 	for _, t := range order {
 		if t/w.g.cols != order[0]/w.g.cols && w.sent[t] < w.versions[t] {
