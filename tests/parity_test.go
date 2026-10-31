@@ -149,12 +149,14 @@ func TestVNCParity(t *testing.T) {
 					// again, up to parityTries times in all, since
 					// x11vnc has hung now and then under these
 					// sessions, through either backend. guacd is the
-					// baseline, so a cell of its gets a second try for
-					// any failure: libvncclient has also failed to
-					// connect to TigerVNC now and then. A native cell
-					// whose check found a difference gets none.
+					// baseline, so a cell of its tries again for any
+					// failure: libvncclient has also failed to connect
+					// to TigerVNC now and then, and x11vnc has closed
+					// guacd's connection on a message it could not
+					// parse. A native cell whose check found a
+					// difference gets no second try.
 					for try := 1; err != nil && !isKnown && try < parityTries &&
-						(errors.Is(err, errUnavailable) || (c.backend == "guacd" && try == 1)); try++ {
+						(errors.Is(err, errUnavailable) || c.backend == "guacd"); try++ {
 						t.Logf("failed, trying again in %v: %v", parityRetryPause, err)
 						time.Sleep(parityRetryPause)
 						err = f.check(p, c)

@@ -135,8 +135,8 @@ sends that user something. Until then the user still counts, for up to
   expected to fail is listed in `parityKnown` with the reason; any other
   failure, or a listed cell that passes, fails the test. A cell that
   cannot reach the desktop tries again, 15 s later, up to three times in
-  all, and a guacd cell gets a second try for any failure; a native cell
-  whose check finds a difference gets none. The demo x11vnc runs under a
+  all, and so does a guacd cell for any failure; a native cell whose
+  check finds a difference gets no second try. The demo x11vnc runs under a
   watchdog, which logs each restart as `[<port>] watchdog: …`, after the
   X error that caused it, if any (`podman compose logs vnc`).
 - `make soak` runs `TestSoak` against the demo stack's `occamy-v1`:
