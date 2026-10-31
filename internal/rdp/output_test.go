@@ -23,6 +23,7 @@ type screen struct {
 	hot     image.Point
 	pos     image.Point
 	draws   int
+	copies  int
 	// clipboard holds the clipboards the client reported.
 	clipboard []string
 }
@@ -51,6 +52,32 @@ func (s *screen) Lock(r image.Rectangle) *image.RGBA {
 func (s *screen) Unlock(image.Rectangle) {
 	s.draws++
 	s.mu.Unlock()
+}
+
+// CopyRect panics on rectangles off the desktop, so that the fuzzers
+// notice, and copies as the framebuffer does, overlaps and all.
+func (s *screen) CopyRect(dst image.Rectangle, src image.Point) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sr := image.Rectangle{Min: src, Max: src.Add(dst.Size())}
+	if s.img == nil || dst.Empty() || !dst.In(s.img.Rect) || !sr.In(s.img.Rect) {
+		panic(fmt.Sprintf("screen: CopyRect(%v, %v) outside %v", dst, src, s.img.Rect))
+	}
+	from := image.NewRGBA(sr)
+	for y := sr.Min.Y; y < sr.Max.Y; y++ {
+		copy(from.Pix[from.PixOffset(sr.Min.X, y):][:4*sr.Dx()], s.img.Pix[s.img.PixOffset(sr.Min.X, y):])
+	}
+	for y := 0; y < dst.Dy(); y++ {
+		copy(s.img.Pix[s.img.PixOffset(dst.Min.X, dst.Min.Y+y):][:4*dst.Dx()], from.Pix[from.PixOffset(sr.Min.X, sr.Min.Y+y):])
+	}
+	s.copies++
+}
+
+// copyCount returns the copies the client made on the screen.
+func (s *screen) copyCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.copies
 }
 
 func (s *screen) Cursor(img *image.RGBA, hot image.Point) {

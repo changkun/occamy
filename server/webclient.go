@@ -20,11 +20,13 @@ import (
 // API v1 and opens its streams on its own origin, named with the
 // WebSocket schemes too, which 'self' covers only in browsers that
 // follow CSP 3; the remote's cursor is a data: URL; and styles may be
-// inline, as React's style attributes and the terminal emulator's
-// stylesheet are. Nothing may frame the page, so that no other page can
-// lay itself over a remote desktop and take its clicks. A host that is
-// not a plain name or address with an optional port is left out, so
-// that a request cannot write the policy.
+// inline, since the terminal emulator, xterm.js, adds <style> elements
+// for its theme and its cell size. React sets the page's style
+// attributes through the CSSOM, which the policy does not govern.
+// Nothing may frame the page, so that no other page can lay itself over
+// a remote desktop and take its clicks. A host that is not a plain name
+// or address with an optional port is left out, so that a request
+// cannot write the policy.
 func webClientPolicy(host string) string {
 	connect := "'self'"
 	if hostPattern.MatchString(host) {

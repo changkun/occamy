@@ -9,9 +9,10 @@
 // the action resumes once the user has signed in. A sign-in through
 // OIDC leaves the page, so what waits is kept in sessionStorage next to
 // the PKCE verifier, and the page joins the session again on its
-// return, within the owner's minute of grace.
+// return, within the owner's minute of grace. Whoever signs in, the
+// action is taken, and occamyd decides whether the session is theirs.
 
-import type { AccessToken, ShareRole } from './api'
+import type { AccessToken, Identity, ShareRole } from './api'
 import type { Start, Target } from './targets'
 
 /** What a session view does for its owner once the user has signed in again. */
@@ -29,9 +30,15 @@ export interface Pending {
   view: number | null
   /** What that session view, or the one opened, does next. */
   then: SessionAction | null
+  /** Who opened the session, as the session view knew; null for none. A view opened for then takes it for the owner until its stream says. */
+  owner: Identity | null
 }
 
-export type Screen = { kind: 'start' } | { kind: 'connections' } | { kind: 'session'; target: Target; view: number }
+export type Screen =
+  | { kind: 'start' }
+  | { kind: 'connections' }
+  /** A session view, numbered; owner is who opened the session, as far as the page knows before the stream says. */
+  | { kind: 'session'; target: Target; view: number; owner: Identity | null }
 
 export interface SignInState {
   /** Why the user signs in, such as an expired sign-in. */
@@ -77,7 +84,7 @@ export function initialState(start: Start): AppState {
   const base: AppState = { token: null, screen: { kind: 'start' }, signIn: null, action: null, views: 0, seq: 0 }
   switch (start.kind) {
     case 'join':
-      return { ...base, screen: { kind: 'session', target: { kind: 'share', sessionId: start.sessionId, token: start.token }, view: 1 }, views: 1 }
+      return { ...base, screen: { kind: 'session', target: { kind: 'share', sessionId: start.sessionId, token: start.token }, view: 1, owner: null }, views: 1 }
     case 'oidc':
       return { ...base, signIn: { message: '', exchange: start.token, pending: start.resume } }
     case 'oidc-error':
@@ -97,10 +104,11 @@ function signedIn(s: AppState, token: AccessToken): AppState {
   if (view === null || s.screen.kind !== 'session' || s.screen.view !== view) {
     view = s.views + 1
     base.views = view
-    base.screen = { kind: 'session', target: pending.target, view }
+    base.screen = { kind: 'session', target: pending.target, view, owner: pending.owner }
     base.action = null
   }
   if (pending.then !== null) {
+    // Whoever signed in, occamyd decides whether the session is theirs.
     base.seq = s.seq + 1
     base.action = { view, seq: base.seq, action: pending.then }
   }
@@ -116,10 +124,10 @@ export function reduce(s: AppState, e: AppEvent): AppState {
       if (e.target.kind !== 'share' && (s.token === null || s.token.expires <= e.now)) {
         // Over a session view, the form opens as a dialog, and the view
         // stays until the user has signed in.
-        return { ...s, signIn: { message: s.token === null ? '' : EXPIRED, exchange: null, pending: { target: e.target, view: null, then: null } } }
+        return { ...s, signIn: { message: s.token === null ? '' : EXPIRED, exchange: null, pending: { target: e.target, view: null, then: null, owner: null } } }
       }
       const view = s.views + 1
-      return { ...s, views: view, screen: { kind: 'session', target: e.target, view }, signIn: null, action: null }
+      return { ...s, views: view, screen: { kind: 'session', target: e.target, view, owner: null }, signIn: null, action: null }
     }
     case 'sign-in-again':
       if (s.screen.kind !== 'session' || s.screen.view !== e.view) {
@@ -148,7 +156,7 @@ export const RESUME_KEY = 'occamy.oidc.resume'
 
 /**
  * saveResume keeps pending for the page's return from an OIDC sign-in:
- * its target and action, since the session view will be gone. It
+ * its target, action and owner, since the session view will be gone. It
  * returns false where storage is refused.
  */
 export function saveResume(storage: Storage | undefined, pending: Pending | null): boolean {
@@ -156,7 +164,7 @@ export function saveResume(storage: Storage | undefined, pending: Pending | null
     if (pending === null) {
       storage?.removeItem(RESUME_KEY)
     } else {
-      storage?.setItem(RESUME_KEY, JSON.stringify({ target: pending.target, then: pending.then }))
+      storage?.setItem(RESUME_KEY, JSON.stringify({ target: pending.target, then: pending.then, owner: pending.owner }))
     }
     return storage !== undefined
   } catch {
@@ -183,7 +191,11 @@ export function takeResume(storage: Storage | undefined): Pending | null {
     }
     const target = targetOf(v.target)
     const then = v.then === null ? null : actionOf(v.then)
-    return target === null || then === undefined ? null : { target, view: null, then }
+    const owner = v.owner === null ? null : identityFrom(v.owner)
+    if (target === null || then === undefined || owner === undefined) {
+      return null
+    }
+    return { target, view: null, then, owner }
   } catch {
     return null
   }
@@ -206,6 +218,14 @@ function targetOf(v: unknown): Target | null {
     return { kind: 'session', sessionId: v.sessionId, name: v.name }
   }
   return null
+}
+
+// identityFrom reads a kept identity, or returns undefined for none.
+function identityFrom(v: unknown): Identity | undefined {
+  if (!isObject(v) || typeof v.subject !== 'string' || v.subject === '' || typeof v.idp !== 'string' || v.idp === '') {
+    return undefined
+  }
+  return { subject: v.subject, idp: v.idp }
 }
 
 // actionOf reads a kept action, or returns undefined for one it does not know.
