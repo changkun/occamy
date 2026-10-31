@@ -235,6 +235,40 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   records a session for clients to replay. Protocol v1: a tile that
   names a slot covers at most 4096 pixels (`protocol.MaxCachedPixels`);
   no server had named one before.
+- An encode cache and workers in the graphics pipeline. The viewers of a
+  session whose encoders send in the same codecs share the session's
+  encodings, made once by whichever viewer or worker asks first: a
+  tile's, by its version and whether it moves, and a run of lossy
+  tiles', by its tiles' versions, its quality and its lowest quality,
+  refinement's searches among them; 32 MiB a session at most, the oldest
+  going first, with no bound across sessions, and a run's encodings at
+  each quality kept until the budget takes them. Once a writer has a
+  tile to encode itself, it hands the rows after its own to one of the
+  session's workers, which asks for another each time it begins an
+  encoding, up to two, or half the cores below four; a frame whose tiles
+  go cached wakes none, and the workers drop what is left once the frame
+  is sent. A worker's job that panics is logged, and the encoding it was
+  making is made again by the next to ask. A session's searches start
+  where its last ended, whichever encoder made it. On the recorded
+  scenes every scene that encodes reaches its viewers in 38 to 56 % less
+  time, a photograph shown once in 44 ms against 96, and four viewers
+  take 32 to 58 % less CPU. One viewer pays 9 to 21 % more CPU on the
+  scenes that encode, the repeated window switches among them; the drag
+  pays 2 %, and the browser page shown once is the exception, at 6 %
+  less. The scenes whose frames come from the tile cache are unchanged,
+  and a saturated host was not measured
+  ([docs/benchmarks/encode-cache.md](docs/benchmarks/encode-cache.md)).
+  `stream.Config.NoShare` turns both off, `EncodeWorkers` sets the
+  workers, none if negative, and `EncodeCacheBytes` the budget; occamyd
+  sets none of them, so it always runs the cache and two workers, with
+  no switch to turn them off yet: a trade of CPU for latency. Nothing
+  changes on the wire.
+- `encoder.Encoder.Still` gallops: past three steps from where its
+  search starts, it goes two steps, four and so on, and halves the gap
+  it finds, so that a search far from its start, as an encoder's first
+  on a page of text, takes 7 tries rather than 18. `Hint`, `SetHint` and
+  `Tries` expose where its next search starts and what its searches
+  cost.
 - `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
   (static users sign in with a password for an access token), TLS when
   `tls.cert` and `tls.key` are set, expvar and pprof on the debug
@@ -356,6 +390,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   remote with the window, answers the remote's credential prompts,
   shares the session through a link as a viewer or read-only, and ends
   it, signing in again over the session when the sign-in has expired;
+  a reload over the owner's session signs in again and joins it, within
+  occamyd's grace, or lists the connections if the user would rather;
   an End or share that waited for the sign-in is left to occamyd, which
   ends or shares only its owner's session: one who signs in as another
   user is told the session has ended or is not theirs. A call to occamyd
@@ -363,12 +399,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the connections, and takes no second press meanwhile;
   the clipboard goes both ways as the role allows, and reaches the local
   clipboard on its own only for a role that gives input, so a read-only
-  viewer copies it from the clipboard panel; a hidden page tells occamyd
-  so and keeps acknowledging frames; and the end of a session says why
-  it ended, a takeover by the owner's newer stream too. Its build
-  writes the licenses of the packages it bundles to
-  `dist/THIRD_PARTY_LICENSES.md`, which the image ships in
-  `licenses/web/` and the web client archive in `dist/`.
+  viewer copies it from the clipboard panel, which takes text sent for
+  the remote's and keeps only what was typed since, and says when text
+  is too large to send; a hidden page tells occamyd so and keeps
+  acknowledging frames; and the end of a session says why it ended, a
+  takeover by the owner's newer stream too. Its build writes the
+  licenses of the packages it bundles to `dist/THIRD_PARTY_LICENSES.md`,
+  which the image ships in `licenses/web/` and the web client archive in
+  `dist/`.
 - `web_client` in a v1 file: the directory of the built web client,
   which occamyd serves under `/static/` with a Content-Security-Policy
   that keeps the page to its own origin, without directory listings or

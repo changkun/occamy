@@ -140,8 +140,11 @@ the TypeScript client of protocol v1 in
 sign in with a password or through OIDC, open a connection from the
 registry, see a graphical session on a canvas scaled to the window and a
 terminal session in xterm.js, share a session as a viewer or read-only,
-and answer the remote's credential prompts. It speaks API v1 only, so it
-needs a v1 file. Building it needs Node.js 22.12+:
+and answer the remote's credential prompts. The sign-in lives in the
+page's memory only, so a reload signs in again, and then returns the
+owner to their session while `occamyd` keeps it for them, a minute. It
+speaks API v1 only, so it needs a v1 file. Building it needs Node.js
+22.12+:
 
 ```
 make client     # npm ci && npm run build, output in client/occamy-web/dist

@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"image"
 	"math"
+	"math/bits"
 	"math/rand/v2"
 	"slices"
 	"testing"
@@ -135,6 +136,56 @@ func FuzzSSIMScore(f *testing.F) {
 	})
 }
 
+// FuzzStill checks Still's search on any rectangle of the photograph,
+// ladder and start: the quality is on the ladder, the encoding is
+// Lossy's at it, the next search starts there, and it either reached the
+// score there and not a step below, or did not reach it at hi; in about
+// twice log2 of the steps past the walk.
+func FuzzStill(f *testing.F) {
+	photo := loadFrame(f, "photo")
+	f.Add(uint16(0), uint16(128), uint8(255), uint8(63), uint8(30), uint8(90), uint8(80))
+	f.Add(uint16(320), uint16(384), uint8(63), uint8(63), uint8(1), uint8(100), uint8(0))
+	f.Add(uint16(1000), uint16(700), uint8(20), uint8(9), uint8(60), uint8(61), uint8(100))
+	f.Fuzz(func(t *testing.T, x, y uint16, w, h, lo, hi, hint uint8) {
+		W, H := int(w)%256+8, int(h)%64+8
+		X, Y := int(x)%(photo.Rect.Dx()-W+1), int(y)%(photo.Rect.Dy()-H+1)
+		pix := pixels(photo, image.Rect(X, Y, X+W, Y+H))
+		Lo, Hi := int(lo)%100+1, int(hi)%100+1
+		if Lo > Hi {
+			Lo, Hi = Hi, Lo
+		}
+		e := New([]protocol.Codec{webpC, deflate})
+		e.SetHint(int(hint) % 101)
+		b, c, q, reached := e.Still(nil, pix, W, H, 64, Lo, Hi)
+		if c != webpC || q < Lo || q > Hi || q != Hi && (q-Lo)%QualityStep != 0 {
+			t.Fatalf("%v at %d, %d to %d", c, q, Lo, Hi)
+		}
+		if lb, _ := New([]protocol.Codec{webpC}).Lossy(nil, pix, W, H, q); !bytes.Equal(b, lb) {
+			t.Errorf("%d to %d: the encoding is not Lossy's at %d", Lo, Hi, q)
+		}
+		if e.Hint() != q {
+			t.Errorf("%d to %d: the next search starts at %d, not %d", Lo, Hi, e.Hint(), q)
+		}
+		steps := (Hi-Lo+QualityStep-1)/QualityStep + 1
+		if e.Tries() > 1+walkSteps+2*bits.Len(uint(steps-1)) {
+			t.Errorf("%d to %d from %d: %d tries on a ladder of %d", Lo, Hi, hint, e.Tries(), steps)
+		}
+		if got := scoreOf(t, c, b, pix, W, H, 64); reached != (got >= StillSSIM) || !reached && q != Hi {
+			t.Errorf("%d to %d: reached %v at %d, with SSIM %.3f", Lo, Hi, reached, q, got)
+		}
+		if reached && q > Lo {
+			below := q - QualityStep
+			if q == Hi {
+				below = Lo + (Hi-Lo-1)/QualityStep*QualityStep
+			}
+			lb, lc := New([]protocol.Codec{webpC}).Lossy(nil, pix, W, H, below)
+			if s := scoreOf(t, lc, lb, pix, W, H, 64); s >= StillSSIM {
+				t.Errorf("%d to %d: %d chosen, but %d scores %.3f", Lo, Hi, q, below, s)
+			}
+		}
+	})
+}
+
 // scoreOf decodes an encoding as a client does and scores it against
 // pix, tile by tile.
 func scoreOf(t *testing.T, c protocol.Codec, b, pix []byte, w, h, tile int) float64 {
@@ -163,7 +214,7 @@ func TestStill(t *testing.T) {
 		for _, r := range rects {
 			pix := pixels(photo, r)
 			w, h := r.Dx(), r.Dy()
-			for _, hint := range []int{1, 30, 50, 80, 90, 100} {
+			for _, hint := range []int{0, 1, 30, 50, 80, 90, 100} {
 				for _, lim := range [][2]int{{30, 90}, {30, 60}, {85, 85}, {70, 100}} {
 					lo, hi := lim[0], lim[1]
 					e := New([]protocol.Codec{lossy, deflate})
@@ -176,6 +227,9 @@ func TestStill(t *testing.T) {
 					if q < lo || q > hi || !onLadder {
 						t.Fatalf("%v at %v, %d to %d: quality %d is not on the ladder", lossy, r, lo, hi, q)
 					}
+					if lb, _ := New([]protocol.Codec{lossy}).Lossy(nil, pix, w, h, q); !bytes.Equal(b[len("prefix"):], lb) {
+						t.Errorf("%v at %v, %d to %d from %d: the encoding is not Lossy's at %d", lossy, r, lo, hi, hint, q)
+					}
 					if w < 8 || h < 8 {
 						// No score: at hi, and not reached, so that a
 						// writer raises it as hi rises.
@@ -183,6 +237,15 @@ func TestStill(t *testing.T) {
 							t.Errorf("%v at %v: a rectangle smaller than the window at %d, reached %v; want %d, not reached", lossy, r, q, reached, hi)
 						}
 						continue
+					}
+					if e.hint != q {
+						t.Errorf("%v at %v, %d to %d from %d: the next search starts at %d, not %d", lossy, r, lo, hi, hint, e.hint, q)
+					}
+					// However far from where it starts, it walks a few
+					// steps, gallops and halves the gap: about twice log2
+					// of the steps beyond the walk.
+					if steps := (hi-lo+QualityStep-1)/QualityStep + 1; e.tries > 1+walkSteps+2*bits.Len(uint(steps-1)) {
+						t.Errorf("%v at %v, %d to %d from %d: %d tries on a ladder of %d", lossy, r, lo, hi, hint, e.tries, steps)
 					}
 					got := scoreOf(t, c, b[len("prefix"):], pix, w, h, 64)
 					if !reached {
@@ -232,6 +295,68 @@ func TestStillFallbacks(t *testing.T) {
 	e = New([]protocol.Codec{webpC, raw})
 	if b, c, q, _ := e.Still(nil, wide, 16384, 8, 64, 30, 90); c != raw || q != 100 || len(b) != len(wide) {
 		t.Errorf("WebP of 16384×8: %d bytes of %v at %d, want raw", len(b), c, q)
+	}
+	// And the same wherever its search starts, whether it has steps or
+	// only its top.
+	for _, lim := range [][2]int{{30, 90}, {90, 90}} {
+		e = New([]protocol.Codec{deflate})
+		e.SetHint(0)
+		if b, c, q, reached := e.Still(nil, pix, 64, 64, 64, lim[0], lim[1]); c != deflate || q != 100 || !reached || len(b) == 0 {
+			t.Errorf("deflate only, %d to %d from the foot: %v at %d, reached %v", lim[0], lim[1], c, q, reached)
+		}
+		e = New([]protocol.Codec{webpC, raw})
+		e.SetHint(0)
+		if b, c, q, _ := e.Still(nil, wide, 16384, 8, 64, lim[0], lim[1]); c != raw || q != 100 || len(b) != len(wide) {
+			t.Errorf("WebP of 16384×8, %d to %d from the foot: %d bytes of %v at %d, want raw", lim[0], lim[1], len(b), c, q)
+		}
+	}
+}
+
+// Hint is where Still's next search starts: firstHint for a new
+// encoder, what SetHint set, and then what the search chose; Tries
+// counts what each search tried.
+func TestHint(t *testing.T) {
+	e := New([]protocol.Codec{webpC, deflate})
+	if e.Hint() != firstHint || e.Tries() != 0 {
+		t.Errorf("a new encoder: hint %d, %d tries; want %d, 0", e.Hint(), e.Tries(), firstHint)
+	}
+	if e.SetHint(42); e.Hint() != 42 {
+		t.Errorf("SetHint(42): hint %d", e.Hint())
+	}
+	pix := pixels(loadFrame(t, "photo"), image.Rect(0, 128, 256, 192))
+	e.SetHint(1)
+	_, _, q, _ := e.Still(nil, pix, 256, 64, 64, 30, 90)
+	first := e.Tries()
+	if e.Hint() != q || first == 0 {
+		t.Errorf("after a search for %d: hint %d, %d tries", q, e.Hint(), first)
+	}
+	// From where the last ended, the same pixels take a try, and one
+	// more below unless at the foot of the ladder.
+	if _, _, again, _ := e.Still(nil, pix, 256, 64, 64, 30, 90); again != q || e.Tries()-first > 2 {
+		t.Errorf("again from %d: %d in %d tries", q, again, e.Tries()-first)
+	}
+	// From up to three steps below, on a ladder that goes on above, it
+	// walks up a step at a time: a try a step, and the one that reaches
+	// the score.
+	if q-3*QualityStep < 30 || q+3*QualityStep > 100 {
+		t.Fatalf("%d is too near the foot or the top to walk up to", q)
+	}
+	for d := 1; d <= 3; d++ {
+		e.SetHint(q - d*QualityStep)
+		before := e.Tries()
+		if _, _, got, _ := e.Still(nil, pix, 256, 64, 64, 30, 100); got != q || e.Tries()-before != d+1 {
+			t.Errorf("from %d steps below: %d in %d tries, want %d in %d", d, got, e.Tries()-before, q, d+1)
+		}
+	}
+	// From ten steps below, at the foot of a ladder, it walks three,
+	// goes two and four, and eight or to the top, which reaches the
+	// score: seven tries short of it. It then halves the gap.
+	lo, hi := q-10*QualityStep, min(q+7*QualityStep, 100)
+	top := (hi - lo + QualityStep - 1) / QualityStep
+	e.SetHint(lo)
+	before := e.Tries()
+	if _, _, got, _ := e.Still(nil, pix, 256, 64, 64, lo, hi); got != q || e.Tries()-before > 7+bits.Len(uint(top-9)) {
+		t.Errorf("from %d, %d to %d: %d in %d tries, want %d in %d at most", lo, lo, hi, got, e.Tries()-before, q, 7+bits.Len(uint(top-9)))
 	}
 }
 

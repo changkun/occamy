@@ -375,11 +375,15 @@ Settled on 2026-10-31.
     (what the page starts with, read once from its fragment and removed
     from the address bar: a share link, `#join=…&token=…`, or OIDC's
     `#code=` or `#error=`; a code without this tab's verifier is spent
-    with a throwaway one; the verifier is forgotten on every start),
+    with a throwaway one; the verifier is forgotten on every start; a
+    load without a fragment over the owner's session signs in again and
+    joins it, and a share link or a failed OIDC sign-in forgets it),
     `app.ts` (the screens as a reducer, and what waits for the user to
     sign in again: a stream to open, or an owner's End or share, taken
     for whoever signs in, with who opened the session as the view knew,
-    kept in `sessionStorage` across single sign-on), `owner.ts` (End:
+    kept in `sessionStorage` across single sign-on; and the owner's
+    session on screen, kept in `sessionStorage` for a reload),
+    `owner.ts` (End:
     for the user who opened the session, its stream, then `DELETE`; for
     an End that resumed after a sign-in, or another user's token,
     `DELETE` with the stream open, as occamyd decides, the stream closed
@@ -414,9 +418,15 @@ Settled on 2026-10-31.
     browser already lets the page read it (Chrome's `clipboard-read`
     permission); otherwise the clipboard panel copies and pastes by
     hand, and keeps what the user typed there when the remote's
-    clipboard changes. Control, Alt and Shift together leave the canvas
-    or the terminal for the toolbar, since the remote takes every other
-    key, Tab included.
+    clipboard changes. Text sent there, or from the local clipboard,
+    counts as the remote's, so the next remote clipboard replaces it;
+    only text typed since is kept. Text the core refuses to send, such
+    as text over the agreed message size, stays the user's, and the
+    panel says it was not sent and why. What the panel last said, such
+    as that the text was sent, goes once the remote clipboard changes or
+    the user edits the text. Control, Alt and Shift together
+    leave the canvas or the terminal for the toolbar, since the remote
+    takes every other key, Tab included.
   - `vite build` writes the licenses of the packages it bundles to
     `dist/THIRD_PARTY_LICENSES.md` (React, React DOM, scheduler,
     xterm.js and its fit add-on, all MIT); the image ships it under
@@ -451,16 +461,22 @@ Settled on 2026-10-31.
   - New: terminal sessions, the clipboard, credential prompts, sharing,
     viewers, visibility, the remote's cursor and title, the bell, and
     why a session ended.
-- **Tests:** 189 in `src/lib` and `src/views`, in the `web` job. Unit
+- **Tests:** 217 in `src/lib` and `src/views`, in the `web` job. Unit
   tests for the API calls against a scripted fetch (each request's
   method, path, headers and exact body, and the time limit on the
   answer and its body), the identity a token names, PKCE against RFC
   7636's vector
   and drawn from `crypto.getRandomValues`, the fragment and its removal
   from the history entry, the start of the page and the verifier it
-  forgets, the screens' reducer (an owner's End, share and Join again
-  after the token expired, the action taken whoever signs in, the view
-  opened after single sign-on taking the owner kept for it, a late
+  forgets, the owner's session kept for a reload until it is forgotten,
+  read back only with a session ID as occamyd makes them and its name
+  clipped, and forgotten for a share link and a failed OIDC sign-in,
+  the screens' reducer (an owner's End,
+  share and Join again after the token expired, a reload signing in
+  again to join the owner's session, or for the connection list if the
+  user would rather, the action taken whoever signs in,
+  the view opened after single sign-on taking the owner kept for it, a
+  late
   leave of a view that is gone), End (nothing sent or closed with an
   expired token, the owner told when it fails, the stream left open and
   the session's owner named when occamyd refuses an End that resumed or
@@ -482,19 +498,35 @@ Settled on 2026-10-31.
   else, with the owner taken from the stream's welcome, and each close
   for the session's end, 4002 to 4006 and 1001, before or during a
   resumed End counts for the session ended and replaces what End said
-  before, while 1011 and 4001 do not. The
+  before, while 1011 and 4001 do not; the owner's session is kept for a
+  reload through a lost connection, a takeover, the page's own close
+  on `pagehide`, an End that failed and a join that cannot reach
+  occamyd, not for a share or a role other than the owner's, and
+  forgotten once it ends, once occamyd refuses the view's stream with
+  4001 or 4000, and once the user leaves it, as after End ended it; a
+  reload over it says so in a notice with `role="status"`, not an
+  error, signs in again and joins it, or, with Go to the connections
+  instead, forgets it and signs in to the connection list; signing out
+  forgets it;
+  and the clipboard panel shows the remote's next clipboard after text
+  was sent, keeping only what was typed since, drops what Send said
+  once the remote clipboard changes or the box is edited, and says
+  that text too large to send was not sent, keeping it as typed. The
   controller runs against a stand-in `connect` and session (the
   hello's size and visibility, clamping, refusals, React's development
   effects cancelling an open, close cancelling one, the owner's resize
   while another is on its way, the clipboard by role and the panel's
-  draft, a failure to show the session closing the stream, the close
-  code it ended with) and, in the
+  draft, text sent, from the panel or the local clipboard, taken for
+  the remote's, but not text the core refuses, a failure to show the
+  session closing the stream, the close code it ended with or was
+  refused with) and, in the
   interop test, against `webinterop` built with the race detector: a
   graphical session's frames, keys, pointer, wheel, clipboard both
   ways, bell, title, resize and the end blocking input, the visibility
   log, and a terminal session's snapshot, echo, resize, close, and
-  acknowledgements while hidden; a wrong share is "Link not valid". A
-  lint test holds the shell to the core's index.
+  acknowledgements while hidden; clipboard text over the maximum
+  message size is refused and left the user's; a wrong share is "Link
+  not valid". A lint test holds the shell to the core's index.
   - Checked by hand in Chrome 156 (headless shell 156.0.8078.4, driven
     over the DevTools protocol) against occamyd serving the build with
     `web_client` under `/static/`, with vnctest's fake RFB server through
@@ -526,7 +558,23 @@ Settled on 2026-10-31.
     on the page's return, whose stream occamyd refused, that the session
     had ended or was the owner's; signing in as the owner from there
     sent a `DELETE` that occamyd answered with 204, and the viewer was
-    told the session ended. No page broke the Content-Security-Policy.
+    told the session ended. Later, with a fake RFB server whose
+    clipboard changed on a key: text typed in the clipboard panel and
+    sent reached the server, the panel no longer called it edited, and
+    the server's next clipboard replaced it and what Send had said,
+    while text typed after a send stayed, with Show it, and took what
+    Send had said away; and, with a read-only viewer watching, a reload
+    of the owner's page asked to sign in again to return to the
+    connection, in a notice in the text's colour with `role="status"`
+    and no alert, and, signed in, joined the same session as its owner
+    about a second later, the viewer watching throughout; after End, a
+    reload signed in to the connection list. Then 5 MiB of text sent
+    from the panel was not sent, the server receiving nothing, and the
+    panel said it was too large, the text staying an edit, while a short
+    text after it was sent; and a reload's notice offered Go to the
+    connections instead, which forgot the session and signed in to the
+    connection list, a reload after it signing in with no notice. No
+    page broke the Content-Security-Policy.
     The console showed only the browser's failed-resource lines for
     requests meant to fail: the OIDC probe's 404, or 400 where single
     sign-on is configured, the wrong password's 401, the bogus code's
@@ -535,7 +583,8 @@ Settled on 2026-10-31.
 - **Decisions:**
   - No router and no UI library: three screens in one component's
     state. The access token lives in memory only; a reload signs in
-    again, as occamyd issues no refresh token.
+    again, as occamyd issues no refresh token, and then joins the
+    owner's session again (see below).
   - No `@vitejs/plugin-react`: Vite 8 compiles JSX with its own
     transformer (`oxc.jsx`), so the only new build dependency is
     `eslint-plugin-react-hooks` 7, with the React Compiler's checks.
@@ -611,6 +660,42 @@ Settled on 2026-10-31.
     viewer sees it in the clipboard panel and copies it from there, so
     that what someone else copies does not replace what the viewer
     copied, unasked.
+  - 2026-10-31: a reload over the owner's session joins it again once
+    the user has signed in. The access token stays in memory only, so a
+    reload signs in again, but the page also kept the session's ID
+    nowhere: the owner came back to the connection list, and the
+    session ran on without them until occamyd's grace ended it with
+    `owner-left` (docs/protocol.md takes a page's going away as the
+    client leaving, which the grace is for). The view keeps the owner's
+    session, its ID and name, in `sessionStorage`, which is the tab's,
+    as single sign-on already keeps a session to return to. A new tab
+    starts without it; a tab the browser duplicates starts with a copy,
+    and signing in there joins the session, which takes it over from
+    the first tab, as any newer stream of the owner's does: that tab
+    says it was opened elsewhere and offers Join again. The ID is no
+    credential, as occamyd joins a session only for its owner's access
+    token, and is read back only as occamyd makes IDs, unpadded
+    base64url (`internal/session/registry.go`) of at most 64
+    characters, so that it names no other path; the name is clipped as
+    the page clips the server's. A load without a fragment over it asks
+    the user to sign in again, in a notice beside the form's errors,
+    since nothing failed, with `role="status"` so that screen readers
+    announce it politely, and with Go to the connections instead, which
+    forgets it; then it joins it. occamyd decides, so a session past
+    its grace, or a user who is not its owner, is refused with 4001 and
+    the view says so. It stays kept through a lost connection, a
+    takeover and the page's own close on `pagehide`, as Join again
+    would join it, through an End whose `DELETE` failed, after which
+    the session runs on for the owner's grace, and through a join that
+    cannot reach occamyd, often why the page was reloaded. It is
+    forgotten once the session ends (4002 to 4006, 1001), once occamyd
+    refuses the view's stream with 4001 or 4000, once the user leaves
+    it, as after End ended it, and once the user signs out or an OIDC
+    sign-in fails, so that a stale one costs one refused join at most.
+    A share is never kept,
+    since its token must not outlive the page's load (fragment.ts), and
+    a share link's page forgets an owner's session kept before; a
+    viewer that reloads opens the link again.
   - 2026-10-31: an owner whose newer stream took over is told by the
     reason of occamyd's normal close, "the owner connected again", which
     `docs/api.md` documents and a test holds both to, rather than a new
