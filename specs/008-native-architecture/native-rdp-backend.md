@@ -1198,7 +1198,15 @@ RDP's guacd path, RDP no longer needs guacd at all.
     4. The log must gain one `starting xrdp-chansrv again`, and exactly
        one channel server must run.
 
-    Without the script, the subtest fails.
+    Without the script, the subtest fails. CI showed it on a throwaway
+    commit that left the script out of the image (run 41208460674):
+    the run's first clipboard check had cost the channel server, as in
+    the flake, so every later connection waited 10 seconds for it, and
+    the subtest's first clipboard check timed out. The first throwaway
+    run, and the run after its revert, failed sooner, on reading the
+    log: CI ran `make e2e` with the Makefile's default engine, podman,
+    whose compose reached no daemon on the runner. CI now gives
+    `make e2e` `CONTAINER_ENGINE=docker`, as it gives `make run`.
 - **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
   through occamyd's routes with the Go client against `rdptest`: NLA
   with stored credentials, the hello's size, the screen, scancodes,
