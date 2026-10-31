@@ -1,14 +1,21 @@
 ---
 title: React web client
-status: validated
+status: testing
 track: client
 depends_on: []
 affects:
   - client/occamy-web/
   - client/internal/webinterop/
-  - docker/Dockerfile
+  - server/
+  - internal/config/
+  - docker/
   - .github/workflows/dockerimage.yml
   - .github/workflows/release.yml
+  - conf.yaml
+  - README.md
+  - SECURITY.md
+  - CHANGELOG.md
+  - docs/
 effort: medium
 created: 2026-10-29
 updated: 2026-10-31
@@ -24,17 +31,21 @@ The demo web client was moved to Vue 3 during the revival. On 2026-10-31
 the owner decided to rebuild it with React (see Decisions), as the web
 client of protocol v1 and API v1: with it, the Vue app, `occamy.js` and
 the client's last use of the Guacamole protocol go. This spec captures
-the shape of that client.
+the shape of that client. It is built: the protocol core first, then
+the React shell on it (see the implementation notes below).
 
 ## Current State
 
-- `client/occamy-web/`: Vue 3, Vite, vue-router, element-plus. Two views:
-  `Login.vue` (protocol, host, username and password form posting to
-  `/api/v0/login`) and `Desktop.vue` (wires `occamy.Client`, `Display`,
-  `Mouse` and `Keyboard` to a WebSocket at `/api/v0/connect`).
-- `src/components/occamy.js` is a 9k-line fork of guacamole-common-js and
-  holds all protocol and rendering logic; the Vue code around it is under
-  200 lines.
+- `client/occamy-web/` is React 19 and TypeScript, built by Vite 8: the
+  protocol v1 client core in `src/protocol`, the shell's logic in
+  `src/lib` (no React), and its views in `src/views`. It speaks API v1
+  and protocol v1 alone. A v1 file serves its build under `/static/`
+  with `web_client`.
+- Before it, the client was Vue 3 with vue-router and element-plus: a
+  `Login.vue` form (protocol, host, username and password) posting to
+  `/api/v0/login`, and a `Desktop.vue` that wired the 9k-line fork of
+  guacamole-common-js, `occamy.js`, to `/api/v0/connect`. All of it is
+  gone.
 
 ## Architecture
 
@@ -80,7 +91,7 @@ Settled on 2026-10-31.
 
 - [x] Decision recorded (React or Vue): React, by the owner, on
       2026-10-31.
-- [ ] If React: shell at parity with the Vue client, with lint and build in
+- [x] If React: shell at parity with the Vue client, with lint and build in
       CI.
 
 ## Implementation notes: protocol client
@@ -254,12 +265,11 @@ Settled on 2026-10-31.
 
     The results are on the page and in `window.occamyChecks`. Firefox and
     Safari were not run.
-- **What was not done:** the shell and its wiring (login, the desktop
-  and terminal views, xterm.js for terminal sessions, prompts, the
-  clipboard through `navigator.clipboard`, resize requests from a
-  `ResizeObserver`); deleting `occamy.js` and the v0 routes; the tile
-  cache; applying frames and presenting them off the main thread with
-  an OffscreenCanvas; a browser job in CI.
+- **What was not done:** the shell and its wiring, and deleting
+  `occamy.js`, came next (Implementation notes: React shell). Not done:
+  removing the v0 routes; the tile cache; applying frames and
+  presenting them off the main thread with an OffscreenCanvas; a browser
+  job in CI.
 - **Decisions:**
   - The core lives in `src/protocol` of the existing app: one lockfile,
     one CI job, and lint and `tsc` on it now. It imports nothing outside
@@ -331,9 +341,9 @@ Settled on 2026-10-31.
     loading the demo page under the DevTools protocol; the headless
     shell of the same build loads and runs it.
 - **Follow-ups:**
-  - Build the React shell on this core and retire `occamy.js`; the v0
-    routes go at v1.0. The shell clips the server's text before it
-    shows it.
+  - Done: the React shell on this core, with `occamy.js` retired; it
+    clips the server's text before it shows it. The v0 routes go at
+    v1.0.
   - A browser job (Playwright with Chromium, Firefox and WebKit) that
     runs the demo's checks against `webinterop`.
   - The tile cache, in both clients.
@@ -342,3 +352,140 @@ Settled on 2026-10-31.
   - copy-rect is tested against scripted servers only, since
     `internal/stream` does not send it yet; add it to the interop test
     once it does.
+
+## Implementation notes: React shell
+
+- **Status:** built on the protocol core, at parity with the Vue client
+  and past it; the Vue app, `occamy.js`, element-plus, vue-router and
+  axios are deleted. The server's v0 routes stay until v1.0.
+- **What was built:** about 2,400 lines of TypeScript and 400 of CSS,
+  and 1,200 lines of tests.
+  - `src/lib`, the shell's logic, free of React so that vitest runs it
+    in Node: `api.ts` (API v1: sign-in, OIDC's token exchange, the
+    connections, ending a session, shares; strict JSON with API v1's
+    error codes, and nothing sent with an expired token, which counts as
+    expired 10 s early), `oidc.ts` (PKCE: a 64-character verifier drawn
+    without bias, its S256 challenge, the login URL, the verifier kept in
+    `sessionStorage` for the round trip), `fragment.ts` and `targets.ts`
+    (what the page starts with, read once from its fragment and removed
+    from the address bar: a share link, `#join=…&token=…`, or OIDC's
+    `#code=` or `#error=`; a code without this tab's verifier is spent
+    with a throwaway one), `controller.ts` (one stream: connect with the
+    page's size and visibility, run the core's `Display`, bind input by
+    role, keep what the page shows as an immutable state for
+    `useSyncExternalStore`), `ending.ts` (a close code and reason, or a
+    failure to connect, as a title, a sentence, the technical detail and
+    what to offer: join again, or sign in), `roles.ts`, `layout.ts` and
+    `text.ts` (clipping the server's strings, with control and bidi
+    characters dropped).
+  - `src/views`: sign-in (a password, and single sign-on where
+    `GET /api/v1/auth/oidc/login` without a challenge answers 400),
+    the connection list, and the session view: a toolbar (title, role,
+    the other viewers, Clipboard, Share for the owner, Full screen, End
+    session or Leave), a canvas scaled to fit with the remote's cursor,
+    or xterm.js for a terminal session, loaded only then, an overlay
+    while connecting and one for the end, the owner's credential prompt
+    in a modal `<dialog>` with secret fields as password inputs, a
+    clipboard panel, and a share panel that mints a viewer or read-only
+    link lasting 10 minutes to 12 hours.
+  - The owner's window size goes to the remote 300 ms after it settles,
+    in device pixels or cells; viewers and read-only clients see the
+    owner's size, scaled. Read-only clients bind no input. The remote's
+    clipboard goes to the local one when the page has focus, and the
+    local one to the remote on focus where the browser already lets the
+    page read it (Chrome's `clipboard-read` permission); otherwise the
+    clipboard panel copies and pastes by hand. Control, Alt and Shift
+    together leave the canvas or the terminal for the toolbar, since the
+    remote takes every other key, Tab included.
+  - `vite build` writes the licenses of the packages it bundles to
+    `dist/THIRD_PARTY_LICENSES.md` (React, React DOM, scheduler,
+    xterm.js and its fit add-on, all MIT); the image ships it under
+    `licenses/web/`, and the release archive in `dist/`.
+  - occamyd: `web_client` in a v1 file names the directory served under
+    `/static/`, with `no-cache`, `nosniff`, `frame-ancestors 'none'` and
+    `no-referrer`; occamyd warns at start when it holds no `index.html`.
+    The demo stack's `occamy-v1` serves the image's build and opens the
+    demo SSH server through the native backend.
+- **Parity with the Vue client:**
+  - Sign-in: the Vue client posted a protocol, host, user name and
+    password to `/api/v0/login`; the React client signs the user in
+    through API v1 and lists the registry's connections, so targets and
+    their credentials stay in occamyd's configuration.
+  - Display scaling: both fit the remote's screen to the window, up and
+    down; the React client also sizes the remote to the window for the
+    owner, and tells the hello the device pixel ratio.
+  - Mouse: buttons, motion and the wheel, through the core's
+    `bindPointer`.
+  - Keyboard: keysyms as before, now with each key's USB HID usage, and
+    AltGr, dead keys and composed text as the core handles them; keys
+    held are released when the canvas loses focus.
+  - New: terminal sessions, the clipboard, credential prompts, sharing,
+    viewers, visibility, the remote's cursor and title, the bell, and
+    why a session ended.
+- **Tests:** 96 in `src/lib`, in the `web` job. Unit tests for the API
+  calls against a scripted fetch (each request's method, path, headers
+  and exact body), PKCE against RFC 7636's vector, the fragment, the
+  start of the page, layout, roles, clipping, and the ending of every
+  close code. The controller runs against a stand-in `connect` (the
+  hello's size and visibility, clamping, refusals, React's development
+  effects cancelling an open) and, in the interop test, against
+  `webinterop` built with the race detector: a graphical session's
+  frames, keys, pointer, wheel, clipboard both ways, bell, title,
+  resize and the end blocking input, the visibility log, and a terminal
+  session's snapshot, echo, resize, close, and acknowledgements while
+  hidden; a wrong share is "Link not valid". A lint test holds the shell
+  to the core's index.
+  - Checked by hand in Chrome 156 (headless shell 156.0.8078.4, driven
+    over the DevTools protocol) against occamyd serving the build with
+    `web_client` under `/static/`, with vnctest's fake RFB server through
+    the native VNC backend and a fake SSH server through the native SSH
+    backend: a wrong password and a right one; the connection list; a
+    VNC session on a canvas at the window's size in device pixels with
+    the remote's cursor; a click and keys reaching the server; the
+    window's resizes reaching it as SetDesktopSize; the remote clipboard
+    shown, and text sent back; a read-only share joined from a second
+    page, both toolbars counting the other viewer; the owner ending the
+    session and the viewer told so; an SSH session in xterm.js with
+    typed input echoed and resizes sent as window changes; a connection
+    with `prompt: true` asking for the password in the dialog; and a
+    share link that is not valid. The console showed only the browser's
+    failed-resource lines for the OIDC probe's 404 and the wrong
+    password's 401. Firefox and Safari were not run.
+- **Decisions:**
+  - No router and no UI library: three screens in one component's
+    state. The access token lives in memory only; a reload signs in
+    again, as occamyd issues no refresh token.
+  - No `@vitejs/plugin-react`: Vite 8 compiles JSX with its own
+    transformer (`oxc.jsx`), so the only new build dependency is
+    `eslint-plugin-react-hooks` 7, with the React Compiler's checks.
+  - The controller is re-entrant, so React's development effects, which
+    mount, unmount and mount again, open one stream: an open waits a
+    microtask, which the first cleanup cancels.
+  - The owner ends a session by closing its own stream, then ending the
+    session through API v1, so viewers are told at once rather than
+    after the owner's minute of grace.
+  - The shell imports the core through `src/protocol/index.ts` alone,
+    which lint enforces, so the tile cache and other changes inside the
+    core do not reach it.
+  - Dependencies are pinned as the repository pins them: caret ranges
+    in `package.json`, exact versions in `package-lock.json`.
+- **Deviations:** Architecture's two steps collapsed into one (see
+  Decisions). Testing names component tests and a Playwright test
+  against the demo stack: the shell's logic is tested in Node without a
+  DOM, and the browser run above was by hand. The licenses come from
+  Vite's `build.license`, not `scripts/third-party-licenses.sh`, which
+  reads Go modules only.
+- **Surprises:**
+  - `gosec` flags `os.Stat` on `web_client`'s path as traversal by
+    taint (G703); it is the operator's configuration, as elsewhere.
+- **Follow-ups:**
+  - Remove the v0 routes, and with them `client: true`, at v1.0.
+  - Make `conf.yaml`, which the image and the archives ship, a v1 file,
+    and v1 the main path of the README. It needs a writable place for
+    the signing key in the distroless image and a first user, which are
+    the owner's to choose.
+  - A browser job in CI (Playwright with Chromium, Firefox and WebKit)
+    against `webinterop` or the demo stack.
+  - An end-to-end test of the demo's `ssh` connection through
+    `occamy-v1`; `tests/` streams only its VNC connections.
+  - A Content-Security-Policy for `/static/` beyond `frame-ancestors`.
