@@ -757,8 +757,11 @@ all.
   Control, through which a viewer's `Resize` asks the server for a
   desktop of its size. With it phase 2 is done but for the Heartbeat
   PDU and the auto-detect answers (deferred above). The backend is
-  still not registered in `occamyd`, which follows the parity gate
-  (Task Breakdown).
+  still not registered in `occamyd`. Registration, separate work,
+  makes it `rdp`'s default without waiting for the parity gate, which
+  since the owner's decision of 2026-10-31 decides only when RDP's
+  guacd path is deleted ([guacd-bridge](guacd-bridge.md), Parity
+  gate; Task Breakdown).
 - **What was built.**
   - DRDYNVC (`internal/rdp/dynvc.go`, [MS-RDPEDYC]). With
     `Config.Resize` the client asks for the static channel `drdynvc`
