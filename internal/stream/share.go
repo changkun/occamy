@@ -70,6 +70,12 @@ type shared struct {
 	workers int
 	wg      sync.WaitGroup
 	log     *slog.Logger
+
+	// closed is set, under mu, as jobs is closed: a job still running
+	// when the last viewer leaves may yet ask for another worker, and
+	// submit, under mu too, then sends nothing.
+	mu     sync.Mutex
+	closed bool
 }
 
 // jobsPerWorker is how many jobs may wait for each worker; a frame's
@@ -139,14 +145,22 @@ func (sh *shared) release(fb *framebuffer.Framebuffer) {
 	}
 	sharedMu.Unlock()
 	if last && sh.jobs != nil {
+		sh.mu.Lock()
+		sh.closed = true
 		close(sh.jobs)
+		sh.mu.Unlock()
 		sh.wg.Wait()
 	}
 }
 
 // submit queues job for a worker, and reports false if the queue is
-// full.
+// full, or closed since the last viewer left.
 func (sh *shared) submit(job func(*worker)) bool {
+	sh.mu.Lock()
+	defer sh.mu.Unlock()
+	if sh.closed {
+		return false
+	}
 	select {
 	case sh.jobs <- job:
 		return true

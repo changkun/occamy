@@ -14,6 +14,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -191,6 +192,82 @@ func TestShareRelease(t *testing.T) {
 		t.Error("a viewer after the last left found the old share")
 	} else {
 		s4.release(fa)
+	}
+}
+
+// A job still running when the last viewer leaves may yet ask for
+// another worker, as it begins an encoding: it gets none, and nothing is
+// sent on the closed queue.
+func TestShareReleaseRecruit(t *testing.T) {
+	fb := newDirect(t, false).w.fb
+	sh := share(fb, 1, 1<<20, nil)
+	f := &prefetch{sh: sh, most: 2, rows: []int{0, 1, 2}}
+	f.busy.Store(1)
+	running, recruit := make(chan struct{}), make(chan struct{})
+	recovered := make(chan any, 1)
+	if !sh.submit(func(*worker) {
+		close(running)
+		<-recruit
+		defer func() { recovered <- recover() }()
+		f.recruit()
+	}) {
+		t.Fatal("no worker took the job")
+	}
+	<-running
+	released := make(chan struct{})
+	go func() {
+		sh.release(fb)
+		close(released)
+	}()
+	// release closes the queue, then waits for the job.
+	for deadline := time.Now().Add(10 * time.Second); ; {
+		select {
+		case _, ok := <-sh.jobs:
+			if ok {
+				t.Fatal("a job in the queue")
+			}
+		default:
+			if time.Now().After(deadline) {
+				t.Fatal("the last viewer left, and the queue is open")
+			}
+			runtime.Gosched()
+			continue
+		}
+		break
+	}
+	close(recruit)
+	if r := <-recovered; r != nil {
+		t.Fatalf("a job asked for a worker once the last viewer left: %v", r)
+	}
+	<-released
+	if n := f.busy.Load(); n != 1 {
+		t.Errorf("%d workers on the frame, want the one it had", n)
+	}
+}
+
+// Workers that ask for more while the last viewer leaves get none once
+// it has, and send nothing on the closed queue.
+func TestShareReleaseRace(t *testing.T) {
+	fb := newDirect(t, false).w.fb
+	for range 200 {
+		sh := share(fb, 2, 1<<20, nil)
+		stop := make(chan struct{})
+		var wg sync.WaitGroup
+		for range 4 {
+			wg.Go(func() {
+				for {
+					select {
+					case <-stop:
+						return
+					default:
+						sh.submit(func(*worker) {})
+					}
+				}
+			})
+		}
+		sh.release(fb)
+		close(stop)
+		wg.Wait()
 	}
 }
 
