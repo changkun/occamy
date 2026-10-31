@@ -64,8 +64,8 @@ spec defines what has to change before the answer can be yes.
   headers time out after 10 seconds (`ReadHeaderTimeout`).
 - **guacd.** Since [005](005-upstream-guacamole.md), a v0 file hands
   every connection to guacd (`guacd.address`), which connects anywhere
-  it is asked to; a v1 file hands it every connection but ssh and vnc
-  with `backend: native`. Nothing in the docs yet says it must stay off
+  it is asked to; a v1 file hands it only rdp and telnet connections and
+  vnc ones with `backend: guacd`. Nothing in the docs yet says it must stay off
   untrusted networks.
 - **Dependencies.** The v0 routes run on golang-jwt v5, `net/http` and
   coder/websocket; gin, gin-jwt and gorilla/websocket are gone.

@@ -45,8 +45,7 @@ connections:
     credentials: {username: deploy, private_key_file: /etc/occamy/keys/deploy}
     allow: {groups: [ops]}
   - id: nas-desktop
-    protocol: vnc
-    backend: native # occamyd's own VNC client; guacd by default
+    protocol: vnc # occamyd's own VNC client by default
     target: nas.internal:5900
     credentials: {password_env: OCCAMY_NAS_VNC_PASSWORD}
     allow: {users: [alice]}
@@ -255,8 +254,9 @@ the groups of `groups_claim`, not the static user's.
 ### guacd: `guacd`
 
 guacd serves the `rdp` and `telnet` connections, and the `vnc`
-connections whose `backend` is not `native`. `ssh` connections always
-use `occamyd`'s native backend (see [backends](#backends)). For `rdp`,
+connections that set `backend: guacd`. `ssh` connections always use
+`occamyd`'s native backend, and `vnc` connections use it by default
+(see [backends](#backends)). For `rdp`,
 `occamyd` passes `disable-gfx: "true"` unless
 `guacd.params.rdp` sets it: through RDP's graphics pipeline, xrdp's
 colours reached guacd shifted.
@@ -274,11 +274,11 @@ colours reached guacd shifted.
 | `connections[].name` | the ID | Display name |
 | `connections[].protocol` | required | `ssh`, `vnc`, `rdp` or `telnet` |
 | `connections[].target` | required | `host:port`, or a host alone for the protocol's default port: 22 for ssh, 5900 for vnc, 3389 for rdp, 23 for telnet. IPv6 addresses go in brackets with a port, `[fd00::22]:22` |
-| `connections[].backend` | `native` for ssh, `guacd` for the others | What serves the connection's sessions: `guacd`, through the guacd bridge, or `native`, `occamyd`'s own client. ssh is always `native`, rdp and telnet always `guacd`, and vnc takes either; see [backends](#backends) |
+| `connections[].backend` | `native` for ssh and vnc, `guacd` for rdp and telnet | What serves the connection's sessions: `native`, `occamyd`'s own client, or `guacd`, through the guacd bridge. ssh is always `native`, rdp and telnet always `guacd` for now, and vnc takes either: `native` by default, and `guacd` as an opt-in fallback; see [backends](#backends) |
 | `connections[].host_keys` | required for ssh | The host keys an ssh target may present: public keys in `authorized_keys` format, as `ssh-keyscan` prints them, or SHA-256 fingerprints, as `ssh-keygen -l` prints them (`SHA256:…`). `occamyd` refuses any other key. Not for other protocols |
 | `connections[].insecure_ignore_host_key` | `false` | Accept any host key from an ssh target instead, logging its fingerprint as a warning. For demos only; set this or `host_keys`, not both |
-| `connections[].tls` | none through guacd, vnc's default backend; system roots with `backend: native` | How a vnc target's certificate is checked when the server offers VeNCrypt, which the native backend then always chooses. With `backend: native` and no `tls`, the certificate must chain to the system's roots and name the target's host, as a browser checks it. Through guacd, no certificate is checked, so `tls` is only for `backend: native`; not for other protocols. See below |
-| `connections[].ard` | `false` | Allow Apple Remote Desktop authentication, which macOS Screen Sharing needs to log in a user of the Mac. A vnc connection with `backend: native` only, and never with a `tls` that requires TLS. Read [the risk](#apple-remote-desktop-ard) first |
+| `connections[].tls` | system roots on the native backend, vnc's default; none with `backend: guacd` | How a vnc target's certificate is checked when the server offers VeNCrypt, which the native backend then always chooses. Without `tls`, the certificate must chain to the system's roots and name the target's host, as a browser checks it. Through guacd, no certificate is checked, so a connection with `tls` cannot set `backend: guacd`; not for other protocols. See below |
+| `connections[].ard` | `false` | Allow Apple Remote Desktop authentication, which macOS Screen Sharing needs to log in a user of the Mac. A vnc connection on the native backend only, not with `backend: guacd`, and never with a `tls` that requires TLS. Read [the risk](#apple-remote-desktop-ard) first |
 | `connections[].credentials` | required | How `occamyd` authenticates to the target; see below |
 | `connections[].allow.users`, `allow.groups` | required | Who may open the connection: users by name, and members of groups. At least one entry, since an empty list would let nobody in |
 
@@ -322,14 +322,20 @@ A connection's `backend` picks what serves its sessions:
 | Protocol | `native` | `guacd` |
 |----------|----------|---------|
 | ssh | always: `occamyd`'s SSH client | refused |
-| vnc | `occamyd`'s RFB client ([native VNC backend](../specs/008-native-architecture/native-vnc-backend.md)) | the default |
-| rdp | refused: the native RDP backend is not registered until NLA has run end to end | always |
-| telnet | refused: there is none | always |
+| vnc | the default: `occamyd`'s RFB client ([native VNC backend](../specs/008-native-architecture/native-vnc-backend.md)) | opt-in fallback |
+| rdp | refused: the native RDP backend is not registered until NLA has run end to end | always, for now |
+| telnet | refused: there is none | always, until guacd is removed |
 
-vnc goes through guacd by default for now. The native backend takes over
-once it has matched the guacd bridge in the conformance corpus and the
-benchmarks ([guacd-bridge](../specs/008-native-architecture/guacd-bridge.md));
-until then, `backend: native` opts a connection in. A native vnc session:
+A protocol's default is `native` as soon as it has a native backend, so
+vnc connections use `occamyd`'s own client unless they set
+`backend: guacd`. That fallback through guacd is kept, as the
+benchmark's baseline too, only until the benchmark shows the native
+backend at least 10x better than guacd on every scenario
+([guacd-bridge](../specs/008-native-architecture/guacd-bridge.md),
+[benchmarks](benchmarks.md)); v1.0 has no guacd. rdp defaults to
+`native` once the native RDP backend is registered. telnet has no native
+backend and stays on guacd for now, so it goes when guacd is removed
+in v1.0. A native vnc session:
 
 - logs in with None, VNC Authentication or VeNCrypt (X509None, X509Vnc or
   X509Plain), checking the server's certificate as `tls` says, and asks the
@@ -344,10 +350,10 @@ until then, `backend: native` opts a connection in. A native vnc session:
   certificate is refused.
 
 Through guacd, `tls`'s keys would be ignored, since guacd checks no VNC
-certificate as `tls` says, so a vnc connection with `tls` must set
-`backend: native`; a file without it fails to load, naming the key to
-add. A vnc connection without `backend` goes through guacd, which must
-then run at `guacd.address`.
+certificate as `tls` says, so a vnc connection with `tls` cannot set
+`backend: guacd`, and neither can one with `ard`; such a file fails to
+load, naming the key. Only a vnc connection with `backend: guacd` needs
+guacd, at `guacd.address`.
 
 #### Apple Remote Desktop: `ard`
 
@@ -361,7 +367,6 @@ prompt:
 ```yaml
   - id: studio-mac
     protocol: vnc
-    backend: native
     ard: true
     target: studio.internal:5900
     credentials: {username: studio, prompt: true}
@@ -390,7 +395,7 @@ Without `ard: true`, a Mac that offers only ARD fails the session, and
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `allow_adhoc_targets` | `false` | Let signed-in users connect to targets that are not in the registry, as v0 does |
-| `adhoc_backends` | each protocol's default | The backend of each protocol's ad-hoc targets, by protocol: `{vnc: native}` serves ad-hoc vnc targets natively. The values are a connection's `backend`'s, with the same refusals |
+| `adhoc_backends` | each protocol's default: `native` for ssh and vnc, `guacd` for rdp and telnet | The backend of each protocol's ad-hoc targets, by protocol: `{vnc: guacd}` sends ad-hoc vnc targets through guacd, the fallback, instead of the native backend. The values are a connection's `backend`'s, with the same refusals |
 | `adhoc_allowlist` | none | Where ad-hoc targets may point, and on which ports: CIDR ranges (`10.0.0.0/8`), IP addresses, host names, or `*.` and a domain (`*.lab.internal`), each optionally followed by `:port` or `:first-last` (`10.0.0.0/8:22`, `*.lab.internal:5900-5910`; an IPv6 range or address goes in brackets, `[fd00::/8]:22`). Required when `allow_adhoc_targets` is `true` |
 
 Any signed-in user may open an ad-hoc target, with
@@ -398,10 +403,11 @@ Any signed-in user may open an ad-hoc target, with
 and an ssh target needs `host_keys` or `insecure_ignore_host_key: true`
 in the request, as a connection does. Ad-hoc targets use each
 protocol's default backend unless `adhoc_backends` picks another,
-as `backend` does for a connection:
+as `backend` does for a connection. To send ad-hoc vnc targets
+through guacd, the fallback:
 
 ```yaml
-adhoc_backends: {vnc: native}
+adhoc_backends: {vnc: guacd}
 ```
 
 A vnc target served by the native backend checks the server's
@@ -507,8 +513,9 @@ that:
 - connection IDs, user names and issuer names are unique, and no trusted
   issuer is named `occamy`;
 - each connection's `backend`, and each of `adhoc_backends`, serves its
-  protocol; `tls` and `ard` are set only on vnc connections with
-  `backend: native`, and `ard` never with a `tls` that requires TLS;
+  protocol; `tls` and `ard` are set only on vnc connections on the
+  native backend, not with `backend: guacd`, and `ard` never with a
+  `tls` that requires TLS;
 - user, group and issuer names are not empty and have no spaces;
 - with neither `auth.oidc` nor `auth.trusted_issuers` configured, every
   name in an `allow` list is a static user, and every group is a group of
@@ -543,10 +550,10 @@ WebSockets over HTTP/1.1. It serves:
 | `GET /api/v1/sessions/{id}/stream` | Join a session as a protocol v1 WebSocket: as its owner with the owner's access token or the stream token, with the role of a session token for the session, which a trusted issuer may mint too, or with a share |
 | `/api/v0/login`, `/api/v0/connect` | With `legacy_v0: true`, the v0 routes; both always, where a v0 file serves the login only with `client: true` |
 
-`ssh` sessions use `occamyd`'s native backend, `rdp` and `telnet`
-sessions go through guacd, and `vnc` sessions go through guacd unless
-the connection, or `adhoc_backends` for an ad-hoc target, picks
-`native` ([backends](#backends)). [api.md](api.md) describes every
+`ssh` and `vnc` sessions use `occamyd`'s native backends, and `rdp`
+and `telnet` sessions go through guacd. A `vnc` session goes through
+guacd only when the connection, or `adhoc_backends` for an ad-hoc
+target, picks `guacd` ([backends](#backends)). [api.md](api.md) describes every
 route in full. A connection the caller may not
 open, and another user's session, answer `404` as if they did not exist.
 
