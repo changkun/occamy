@@ -21,25 +21,36 @@ type strictEmbedded struct {
 	Kind string `json:"kind"`
 }
 
+// strictCustom decodes itself, from members that are none of its fields.
+type strictCustom struct{ v string }
+
+func (c *strictCustom) UnmarshalJSON(b []byte) error {
+	c.v = string(b)
+	return nil
+}
+
 type strictRequest struct {
 	strictEmbedded
-	ID       string            `json:"id"`
-	Count    int               `json:"count,omitempty"`
-	Untagged string            // encoding/json names it Untagged
-	Skipped  string            `json:"-"`
-	Inner    strictInner       `json:"inner"`
-	Ptr      *strictInner      `json:"ptr"`
-	List     []strictInner     `json:"list"`
-	Matrix   [][]strictInner   `json:"matrix"`
-	Labels   map[string]string `json:"labels"`
-	Raw      json.RawMessage   `json:"raw"`
-	When     time.Time         `json:"when"`
-	Any      any               `json:"any"`
+	ID       string                 `json:"id"`
+	Count    int                    `json:"count,omitempty"`
+	Untagged string                 // encoding/json names it Untagged
+	Skipped  string                 `json:"-"`
+	Inner    strictInner            `json:"inner"`
+	Ptr      *strictInner           `json:"ptr"`
+	List     []strictInner          `json:"list"`
+	Matrix   [][]strictInner        `json:"matrix"`
+	Labels   map[string]string      `json:"labels"`
+	ByName   map[string]strictInner `json:"by_name"`
+	Raw      json.RawMessage        `json:"raw"`
+	When     time.Time              `json:"when"`
+	Custom   strictCustom           `json:"custom"`
+	Any      any                    `json:"any"`
 	hidden   string
 }
 
 func TestCheckMembers(t *testing.T) {
 	_ = strictRequest{}.hidden
+	_ = strictRequest{}.Custom.v
 	typ := reflect.TypeFor[*strictRequest]()
 	for _, tt := range []struct {
 		body string
@@ -49,12 +60,15 @@ func TestCheckMembers(t *testing.T) {
 		{`{"inner":{"name":"x"},"ptr":{"name":"y"},"list":[{"name":"z"}],"matrix":[[{"name":"w"}]]}`, ""},
 		{`{"labels":{"a":"1","A":"2"},"raw":{"x":1,"X":2},"when":"2026-10-31T00:00:00Z","any":{"q":1}}`, ""},
 		{`{"ptr":null,"list":null,"labels":null}`, ""},
+		{`{"by_name":{"a":{"name":"x"},"A":{"name":"y"}},"custom":{"Anything":1,"anything":2}}`, ""},
 		// Exact duplicates, at every level.
 		{`{"id":"a","id":"b"}`, `field "id" appears more than once`},
 		{`{"inner":{"name":"x","name":"y"}}`, `field "name" appears more than once`},
 		{`{"list":[{"name":"x"},{"name":"y","name":"z"}]}`, `field "name" appears more than once`},
 		{`{"matrix":[[{"name":"x","name":"y"}]]}`, `field "name" appears more than once`},
 		{`{"labels":{"a":"1","a":"2"}}`, `field "a" appears more than once`},
+		{`{"by_name":{"a":{"name":"x","name":"y"}}}`, `field "name" appears more than once`},
+		{`{"custom":{"x":1,"x":2}}`, `field "x" appears more than once`},
 		{`{"raw":{"x":1,"x":2}}`, `field "x" appears more than once`},
 		{`{"any":{"q":1,"q":2}}`, `field "q" appears more than once`},
 		{`{"kind":"a","kind":"b"}`, `field "kind" appears more than once`},
@@ -64,6 +78,7 @@ func TestCheckMembers(t *testing.T) {
 		{`{"inner":{"Name":"x"}}`, `unknown field "Name"`},
 		{`{"ptr":{"NAME":"x"}}`, `unknown field "NAME"`},
 		{`{"list":[{"name":"x","nAme":"y"}]}`, `unknown field "nAme"`},
+		{`{"by_name":{"a":{"Name":"x"}}}`, `unknown field "Name"`},
 		{`{"untagged":"u"}`, `unknown field "untagged"`},
 		{`{"Kind":"k"}`, `unknown field "Kind"`},
 		// encoding/json folds the Kelvin sign and the long s into k and s.
