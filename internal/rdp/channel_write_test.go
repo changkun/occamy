@@ -204,3 +204,54 @@ func TestClipboardChannelBound(t *testing.T) {
 		t.Errorf("channel 0 is %q", vc.name)
 	}
 }
+
+// failConn fails every write.
+type failConn struct{ net.Conn }
+
+var errWrite = errors.New("the write failed")
+
+func (failConn) Write([]byte) (int, error) { return 0, errWrite }
+
+// Once a write failed, what the client owes the server waits for nothing:
+// what it owes reaching a bound reports the failure, not the bound.
+func TestOwedAfterWriteFailed(t *testing.T) {
+	c, clock := testClock(1024, 768)
+	clock.err = errPaced
+	c.t = &transport{conn: failConn{}}
+	c.cfg.Clipboard = bothWays.Clipboard
+	c.cfg.Resize = true
+	c.chio.kick = make(chan struct{}, 1)
+	c.clipCh = &vchannel{name: "cliprdr", id: 1004, limit: maxCliprdrMessage}
+	c.dynCh = &vchannel{name: "drdynvc", id: 1005}
+	if err := c.drdynvcMessage(nil, rdptest.DVCCreateRequest(1, "nobody"), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.writeDue(); !errors.Is(err, errWrite) {
+		t.Fatalf("writeDue: %v, want the write's failure", err)
+	}
+	request := cliprdrPDU(cbFormatDataRequest, 0, binary.LittleEndian.AppendUint32(nil, cfUnicodeText))
+	for _, tc := range []struct {
+		name  string
+		bound int
+		msg   func(n int) error
+	}{
+		{"dynamic channel answers", maxDynvcAnswers, func(n int) error {
+			return c.drdynvcMessage(nil, rdptest.DVCCreateRequest(uint32(n), "nobody"), false)
+		}},
+		{"Format List Responses", maxListResponses, func(int) error {
+			return c.cliprdrMessage(nil, rdptest.FormatList(false), false)
+		}},
+		{"data requests", maxDataRequests, func(int) error {
+			return c.cliprdrMessage(nil, request, false)
+		}},
+	} {
+		var err error
+		n := 0
+		for ; n <= tc.bound && err == nil; n++ {
+			err = tc.msg(n)
+		}
+		if n != tc.bound+1 || !errors.Is(err, errWrite) {
+			t.Errorf("%s: after %d, %v, want the write's failure", tc.name, n, err)
+		}
+	}
+}

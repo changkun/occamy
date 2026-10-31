@@ -274,7 +274,7 @@ func (c *Client) dynData(out Output, id uint32, total int, data []byte) error {
 // dvcAnswer queues a PDU for the channel writer. chio.mu must be held.
 func (c *Client) dvcAnswer(p []byte) error {
 	if len(c.dvc.answers) == maxDynvcAnswers {
-		return fmt.Errorf("rdp: more than %d dynamic channel answers await writing", maxDynvcAnswers)
+		return c.owed(fmt.Errorf("rdp: more than %d dynamic channel answers await writing", maxDynvcAnswers))
 	}
 	c.dvc.answers = append(c.dvc.answers, p)
 	return nil

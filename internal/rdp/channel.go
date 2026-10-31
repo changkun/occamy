@@ -257,7 +257,28 @@ type channelIO struct {
 	mu   sync.Mutex // guards the state of the channels' protocols
 	wmu  sync.Mutex // held by writeDue
 	kick chan struct{}
-	err  error // the error of a failed write, under wmu
+	// err is the error of a failed write, set under both wmu and mu, so
+	// that either guards a read.
+	err error
+}
+
+// failWrite records err, the error of a failed write, and returns it.
+// wmu must be held.
+func (c *Client) failWrite(err error) error {
+	c.chio.mu.Lock()
+	defer c.chio.mu.Unlock()
+	c.chio.err = err
+	return err
+}
+
+// owed returns the error of a reader that owes the server more than a
+// bound allows, bound, unless a write failed: then that failure is why
+// what the client owes waits, and owed returns it. chio.mu must be held.
+func (c *Client) owed(bound error) error {
+	if c.chio.err != nil {
+		return c.chio.err
+	}
+	return bound
 }
 
 // due tells the channel writer that output is due.
@@ -285,13 +306,11 @@ func (c *Client) writeDue() error {
 	b := channelBatch{c: c}
 	for _, m := range msgs {
 		if err := b.add(m.vc, m.encode()); err != nil {
-			c.chio.err = err
-			return err
+			return c.failWrite(err)
 		}
 	}
 	if err := b.flush(); err != nil {
-		c.chio.err = err
-		return err
+		return c.failWrite(err)
 	}
 	return nil
 }
@@ -305,7 +324,8 @@ type dueMessage struct {
 
 // channelWriter writes channel output whenever it is due, until ctx is
 // done. A write that fails stops it; the reader then sees the connection
-// fail, or Run's caller sees the next write fail.
+// fail, or Run's caller sees the next write fail, or the reader reports
+// the failure once what the client owes the server reaches its bound.
 func (c *Client) channelWriter(ctx context.Context) {
 	for {
 		select {

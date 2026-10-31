@@ -156,8 +156,9 @@ func (c *Client) cliprdrMessage(out Output, msg []byte, truncated bool) error {
 		format, ok := textFormat(body, cl.longNames)
 		c.chio.mu.Lock()
 		if cl.listOK+cl.listFail == maxListResponses {
+			err := c.owed(fmt.Errorf("rdp: more than %d clipboard Format List Responses await writing", maxListResponses))
 			c.chio.mu.Unlock()
-			return fmt.Errorf("rdp: more than %d clipboard Format List Responses await writing", maxListResponses)
+			return err
 		}
 		cl.owned = false
 		if ok {
@@ -182,8 +183,9 @@ func (c *Client) cliprdrMessage(out Output, msg []byte, truncated bool) error {
 		}
 		c.chio.mu.Lock()
 		if len(cl.provide) == maxDataRequests {
+			err := c.owed(fmt.Errorf("rdp: more than %d clipboard data requests await their answers", maxDataRequests))
 			c.chio.mu.Unlock()
-			return fmt.Errorf("rdp: more than %d clipboard data requests await their answers", maxDataRequests)
+			return err
 		}
 		cl.provide = append(cl.provide, format)
 		c.chio.mu.Unlock()
