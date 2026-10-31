@@ -658,12 +658,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   session on it live through it. Against x11vnc processes just
   started, it failed in five of six runs without the variable and
   passed in five of five with it; it cannot fail every time, as the
-  error's escape is a race. The tests that reach into the stack read
-  only what compose prints to its standard output, so podman compose's
-  banner no longer reaches them. The parity row `resize: ignored
-  without ExtendedDesktopSize` is now `resize: the server keeps its
-  size`: x11vnc has ExtendedDesktopSize, and refuses SetDesktopSize as
-  prohibited.
+  error's escape is a race. The tests that reach into the stack run
+  compose with `PODMAN_COMPOSE_WARNING_LOGS=false`, so that podman
+  compose's banner no longer comes first in what they read. The parity
+  row `resize: ignored without ExtendedDesktopSize` is now `resize: the
+  server keeps its size`: x11vnc has ExtendedDesktopSize, and refuses
+  SetDesktopSize as prohibited.
 
 ### Security
 
