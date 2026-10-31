@@ -19,8 +19,9 @@ address, with no token, and says so in its log at start.
 Anyone who can reach `occamyd` can then read its profiles and its
 command line. Set `mode: release` wherever others can reach it: release
 mode does not register the routes.
-[004](../specs/004-security-hardening.md) plans to make release the
-default and move pprof to a separate listener.
+[004](../specs/004-security-hardening.md) asks for release mode by
+default and pprof on a separate listener. A v1 file has that listener
+(below); a v0 file still defaults to debug mode.
 
 ## The debug listener of a v1 file
 

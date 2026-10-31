@@ -17,8 +17,9 @@ You will be credited in the advisory unless you ask otherwise.
 
 ## Security notes
 
-Occamy is experimental. Its authentication model was built for a demo and
-has known gaps, tracked in
+Occamy is experimental. The authentication model of v0 files, such as
+the `conf.yaml` that the image and the release archives ship, was built
+for a demo and has known gaps, tracked in
 [specs/004-security-hardening.md](specs/004-security-hardening.md). Until
 those are closed, an operator should know the following:
 
@@ -39,4 +40,15 @@ those are closed, an operator should know the following:
   and `mode: release`.
 - **Demo credentials are public.** The servers in `docker/demo/` exist
   for local testing only.
-- **The image runs as root.**
+
+A v1 file (`version: 1`, [docs/configuration.md](docs/configuration.md)),
+not yet in a release, addresses the first five unless it sets
+`legacy_v0: true`, which serves the v0 routes and their gaps again. Its
+tokens name a user or a session and carry no remote credentials, and
+are signed with an Ed25519 key in `auth.signing_key_file`, created if
+missing, not a shared secret; requests and streams take their tokens in headers or
+a WebSocket subprotocol, never in the URL; `tls.cert` and `tls.key`
+turn on TLS; sessions open only on the registry's connections that
+allow the user, or on ad-hoc targets that `adhoc_allowlist` covers once
+`allow_adhoc_targets` is on; and pprof is served only on the debug
+listener, when `debug.address` is set.

@@ -268,7 +268,7 @@ Occamy 守护进程 `occamyd` 通过加载插件的方式来扩展自身功能�
 
 使用指定的传递函数将指定图层或缓冲区的指定矩形中的图像数据传输到另一个指定图层或缓冲区的不同位置。
 
-有关可用函数的列表，请参阅 libguac 附带的[`occamy/lib/protocol.go`](https://github.com/changkun/occamy/blob/master/lib/protocol.go)头文件中 `TransferFunc` 的定义。
+有关可用函数的列表，请参阅 libguac 附带的[`occamy/lib/protocol.go`](https://github.com/changkun/occamy/blob/4163e6f6bf165184ae9fb7a9b34d7fa9bd09cb9b/lib/protocol.go)头文件中 `TransferFunc` 的定义。
 
 | 参数      | 说明                                                         |
 | --------- | ------------------------------------------------------------ |
@@ -277,7 +277,7 @@ Occamy 守护进程 `occamyd` 通过加载插件的方式来扩展自身功能�
 | srcy      | 源图层 Y 轴坐标                                              |
 | srcwidth  | 源图层宽度                                                   |
 | srcheight | 源图层高度                                                   |
-| function  | 变换函数的索引，具体的函数由 `TransferFunc` 定义。请参考 libguac 头文件 [`occamy/lib/protocol.go`](https://github.com/changkun/occamy/blob/master/lib/protocol.go) |
+| function  | 变换函数的索引，具体的函数由 `TransferFunc` 定义。请参考 libguac 头文件 [`occamy/lib/protocol.go`](https://github.com/changkun/occamy/blob/4163e6f6bf165184ae9fb7a9b34d7fa9bd09cb9b/lib/protocol.go) |
 | dstlayer  | 目标图层索引                                                 |
 | dstx      | 目标图层 X 轴坐标                                            |
 | dsty      | 目标图层 Y 轴坐标                                            |

@@ -105,5 +105,6 @@ client and 010 on
 Path from [008](008-native-architecture.md): v0.5.0, released, runs
 everything through guacd with a cgo-free `occamyd` (005) →
 `v1.0.0-beta.1` with API and protocol v1, the guacd bridge and native SSH
-→ beta.2 with native VNC → rc.1 freezes the API and protocol → v1.0 with
-guacd optional (RDP only) → native RDP in v1.x.
+→ beta.2 with native VNC → rc.1 freezes the API and protocol, with
+native RDP → v1.0 with no guacd, no Guacamole protocol and no v0 routes.
+Telnet has no native backend and is dropped with guacd.
