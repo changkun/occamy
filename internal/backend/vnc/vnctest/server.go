@@ -112,10 +112,11 @@ type Server struct {
 	conns chan *Conn
 	wg    sync.WaitGroup
 
-	mu       sync.Mutex
-	open     []net.Conn
-	failures int
-	closed   bool
+	mu          sync.Mutex
+	open        []net.Conn
+	failures    int
+	credentials int
+	closed      bool
 }
 
 // NewServer starts a server on the loopback interface. Close stops it.
@@ -143,6 +144,22 @@ func (s *Server) Failures() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.failures
+}
+
+// Credentials is the number of credentials that clients have sent, right
+// or wrong: VNC Authentication's responses and X509Plain's usernames and
+// passwords. A client that refuses the server's certificate sends none.
+func (s *Server) Credentials() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.credentials
+}
+
+// sentCredentials counts credentials a client has sent.
+func (s *Server) sentCredentials() {
+	s.mu.Lock()
+	s.credentials++
+	s.mu.Unlock()
 }
 
 // Close stops the server: it closes the listener and every connection,
@@ -239,7 +256,7 @@ func (s *Server) handshake(nc net.Conn) (*Conn, error) {
 	var err error
 	switch b[0] {
 	case SecVNCAuth:
-		ok, err = vncAuth(nc, r, s.opts.Password)
+		ok, err = s.vncAuth(nc, r)
 	case SecVeNCrypt:
 		conn, r, ok, err = s.veNCrypt(nc, r)
 	}
@@ -288,9 +305,9 @@ func (s *Server) handshake(nc net.Conn) (*Conn, error) {
 	return c, nil
 }
 
-// vncAuth runs VNC Authentication with password, and reports whether
-// the client knew it.
-func vncAuth(w io.Writer, r io.Reader, password string) (bool, error) {
+// vncAuth runs VNC Authentication with the server's password, and
+// reports whether the client knew it.
+func (s *Server) vncAuth(w io.Writer, r io.Reader) (bool, error) {
 	var challenge, response [16]byte
 	if _, err := rand.Read(challenge[:]); err != nil {
 		return false, err
@@ -301,7 +318,8 @@ func vncAuth(w io.Writer, r io.Reader, password string) (bool, error) {
 	if _, err := io.ReadFull(r, response[:]); err != nil {
 		return false, err
 	}
-	return response == authResponse(password, challenge), nil
+	s.sentCredentials()
+	return response == authResponse(s.opts.Password, challenge), nil
 }
 
 // authResponse is the response to challenge with password: each half of
@@ -366,7 +384,7 @@ func (s *Server) veNCrypt(nc net.Conn, r *bufio.Reader) (net.Conn, *bufio.Reader
 	tr := bufio.NewReader(tc)
 	switch sub {
 	case SubX509Vnc:
-		ok, err := vncAuth(tc, tr, s.opts.Password)
+		ok, err := s.vncAuth(tc, tr)
 		return tc, tr, ok, err
 	case SubX509Plain:
 		if _, err := io.ReadFull(tr, b[:8]); err != nil {
@@ -380,6 +398,7 @@ func (s *Server) veNCrypt(nc net.Conn, r *bufio.Reader) (net.Conn, *bufio.Reader
 		if _, err := io.ReadFull(tr, creds); err != nil {
 			return nil, nil, false, err
 		}
+		s.sentCredentials()
 		return tc, tr, string(creds[:nu]) == s.opts.Username && string(creds[nu:]) == s.opts.Password, nil
 	}
 	return tc, tr, true, nil

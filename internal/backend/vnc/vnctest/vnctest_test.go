@@ -220,8 +220,8 @@ func TestAuthFailure(t *testing.T) {
 	case <-time.After(timeout):
 		t.Fatal("Run did not fail")
 	}
-	if n := srv.Failures(); n != 1 {
-		t.Errorf("%d failures, want 1", n)
+	if n, c := srv.Failures(), srv.Credentials(); n != 1 || c != 1 {
+		t.Errorf("%d failures of %d credentials, want 1 of 1", n, c)
 	}
 }
 
@@ -282,8 +282,9 @@ func TestVeNCrypt(t *testing.T) {
 		})
 	}
 
-	// The system's roots do not know the certificate.
-	srv := newServer(t, vnctest.Options{Certificate: &cert.TLS})
+	// The system's roots do not know the certificate, so no credential
+	// is sent.
+	srv := newServer(t, vnctest.Options{Certificate: &cert.TLS, Password: "secret"})
 	select {
 	case err := <-run(t, newBackend(t, vnc.Config{Addr: srv.Addr()}), &backendtest.Sink{}):
 		var ce *vnc.CertificateError
@@ -292,5 +293,8 @@ func TestVeNCrypt(t *testing.T) {
 		}
 	case <-time.After(timeout):
 		t.Fatal("Run did not fail")
+	}
+	if n := srv.Credentials(); n != 0 {
+		t.Errorf("%d credentials sent to a server whose certificate was refused", n)
 	}
 }

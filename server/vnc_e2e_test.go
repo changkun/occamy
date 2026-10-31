@@ -377,7 +377,9 @@ func TestVNCPrompt(t *testing.T) {
 // TestVNCTLS checks a connection's tls policy against a server whose
 // certificate signs itself: a pin accepts it, while the system's roots
 // and another pin refuse it, which ends the session with backend-failed
-// before any credential is sent.
+// before any credential is sent. The server counts credentials whether
+// they are right or not, and the refused connections store a wrong
+// password too, so a credential that reached it would also fail.
 func TestVNCTLS(t *testing.T) {
 	cert, err := vnctest.SelfSigned("127.0.0.1")
 	if err != nil {
@@ -390,11 +392,13 @@ func TestVNCTLS(t *testing.T) {
 	vs := newVNCServer(t, vnctest.Options{Certificate: &cert.TLS, Username: "alice", Password: "secret"})
 	creds := passwordFile(t, "secret")
 	creds.Username = "alice"
+	wrong := passwordFile(t, "not-the-password")
+	wrong.Username = "alice"
 	pinned := vncConnection("pinned", vs.Addr(), creds)
 	pinned.TLS = config.ConnectionTLS{Pins: []string{cert.Fingerprint}}
-	roots := vncConnection("roots", vs.Addr(), creds)
+	roots := vncConnection("roots", vs.Addr(), wrong)
 	roots.TLS = config.ConnectionTLS{Require: true}
-	wrongPin := vncConnection("wrong-pin", vs.Addr(), creds)
+	wrongPin := vncConnection("wrong-pin", vs.Addr(), wrong)
 	wrongPin.TLS = config.ConnectionTLS{Pins: []string{other.Fingerprint}}
 	ts, alice := vncTestServer(t, nil, pinned, roots, wrongPin)
 
@@ -405,12 +409,15 @@ func TestVNCTLS(t *testing.T) {
 	}
 	awaitPixel(t, cl, image.Pt(4, 4), green)
 	cl.Close()
+	if n := vs.Credentials(); n != 1 {
+		t.Fatalf("%d credentials sent for the pinned connection, want 1", n)
+	}
 
 	for _, id := range []string{"roots", "wrong-pin"} {
 		awaitEnd(t, ts.streamConnection(t, alice, id, client.Options{}), protocol.CloseBackendFailed)
 	}
-	if n := vs.Failures(); n != 0 {
-		t.Errorf("%d failed authentications: credentials went to a server the policy refused", n)
+	if n, f := vs.Credentials(), vs.Failures(); n != 1 || f != 0 {
+		t.Errorf("%d credentials sent and %d failed in all, want the pinned connection's 1 and none failed: credentials went to a server the policy refused", n, f)
 	}
 }
 
