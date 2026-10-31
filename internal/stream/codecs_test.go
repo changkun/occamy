@@ -194,7 +194,7 @@ type markEncoder struct {
 	lossy []image.Point // the sizes Lossy was asked for
 }
 
-func (e *markEncoder) Tile(dst, pix []byte, w, h int) ([]byte, protocol.Codec, bool) {
+func (e *markEncoder) Tile(dst, pix []byte, w, h int, _ bool) ([]byte, protocol.Codec, bool) {
 	if pix[0] == lossyMark {
 		return dst, 0, true
 	}
@@ -206,6 +206,11 @@ func (e *markEncoder) Lossy(dst, pix []byte, w, h, _ int) ([]byte, protocol.Code
 	e.lossy = append(e.lossy, image.Pt(w, h))
 	e.mu.Unlock()
 	return append(dst, pix[:4*w*h]...), protocol.CodecRaw
+}
+
+func (e *markEncoder) Still(dst, pix []byte, w, h, _, _, hi int) ([]byte, protocol.Codec, int, bool) {
+	b, c := e.Lossy(dst, pix, w, h, hi)
+	return b, c, hi, true
 }
 
 func (e *markEncoder) Cursor(dst, pix []byte, w, h int) ([]byte, protocol.Codec, bool) {
@@ -428,6 +433,11 @@ func (e *hookEncoder) Lossy(dst, pix []byte, w, h, q int) ([]byte, protocol.Code
 	return e.markEncoder.Lossy(dst, pix, w, h, q)
 }
 
+func (e *hookEncoder) Still(dst, pix []byte, w, h, tile, lo, hi int) ([]byte, protocol.Codec, int, bool) {
+	e.once.Do(e.hook)
+	return e.markEncoder.Still(dst, pix, w, h, tile, lo, hi)
+}
+
 // tileAt is the rectangle of a 64-pixel tile.
 func tileAt(row, col int) image.Rectangle {
 	return image.Rect(col*64, row*64, (col+1)*64, (row+1)*64)
@@ -637,11 +647,11 @@ type resizeEncoder struct {
 	hook func()
 }
 
-func (e *resizeEncoder) Tile(dst, pix []byte, w, h int) ([]byte, protocol.Codec, bool) {
+func (e *resizeEncoder) Tile(dst, pix []byte, w, h int, moving bool) ([]byte, protocol.Codec, bool) {
 	if pix[0] == lossyMark {
 		e.once.Do(e.hook)
 	}
-	return e.markEncoder.Tile(dst, pix, w, h)
+	return e.markEncoder.Tile(dst, pix, w, h, moving)
 }
 
 // A run ends where the screen was resized under it, rather than take a

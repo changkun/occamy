@@ -3,22 +3,28 @@
 // license that can be found in the LICENSE file.
 
 // Package encoder encodes a viewer's tiles and cursor in the codecs it
-// agreed to, as the graphics pipeline's Codecs task describes
-// (specs/008-native-architecture/graphics-pipeline.md): it classifies a
-// tile by its colours, sends tiles of up to 256 colours lossless as the
-// deflate container (internal/codec) or raw pixels, and photographic
-// tiles lossy as WebP from github.com/gen2brain/vpx at method 0, or as
-// JPEG from github.com/gen2brain/jpegn for a viewer that lists JPEG but
-// not WebP. The stream writer merges adjacent lossy tiles of a frame into
-// one rectangle before it asks for their encoding, so that their headers
-// are paid once.
+// agreed to, as the graphics pipeline's Codecs and Refinement tasks
+// describe (specs/008-native-architecture/graphics-pipeline.md): it
+// classifies a tile by its colours, sends tiles of up to 16 colours
+// lossless as the deflate container (internal/codec) or raw pixels, tiles
+// of 17 to 256 colours the same way unless they move, and the rest lossy
+// as WebP from github.com/gen2brain/vpx at method 0, or as JPEG from
+// github.com/gen2brain/jpegn for a viewer that lists JPEG but not WebP.
+// The stream writer merges adjacent lossy tiles of a frame into one
+// rectangle before it asks for their encoding, so that their headers are
+// paid once. A still lossy rectangle goes at the lowest quality whose
+// SSIM against its pixels reaches StillSSIM.
 //
 // Every encoder in this package is pure Go and codes on the calling
 // goroutine alone, so a viewer's encoding takes at most one core.
 package encoder
 
 import (
+	"bytes"
+	"errors"
 	"image"
+	"image/draw"
+	"image/jpeg"
 	"slices"
 
 	"github.com/gen2brain/jpegn"
@@ -43,9 +49,8 @@ const (
 	// always lossless, since lossy is 5 to 10 times larger on them.
 	Few Class = iota
 	// Many is 17 to 256 colours: antialiased text and smooth gradients,
-	// lossless while still and lossy while they move. Until the
-	// pipeline's Refinement task tells the encoder a tile's motion,
-	// they are lossless.
+	// lossless while still and lossy while they move, since lossless
+	// costs 15 times lossy on the motion scene's plasma.
 	Many
 	// Photo is over 256 colours, which is lossy.
 	Photo
@@ -53,6 +58,22 @@ const (
 
 // FewColours is the most colours of a tile in class Few.
 const FewColours = 16
+
+// StillSSIM is the SSIM, on luma as the codec measurement scores it,
+// that Still's quality reaches on each tile of a still rectangle. On the
+// corpus's photograph, rows of WebP reach it at quality 87 (median) in
+// 121.5 KiB, under G6's 139 (docs/benchmarks/refinement.md); 0.92 takes
+// 141.9 KiB, 0.95 is beyond quality 90, the pacer's highest, on two
+// fifths of its tiles, and the guacd baseline's JPEG at quality 70
+// scores 0.871 over the whole photograph.
+const StillSSIM = 0.91
+
+// QualityStep is the distance between the qualities Still tries: WebP's
+// bytes on the photograph grow by about a tenth a quality point near 87.
+const QualityStep = 3
+
+// firstHint is where an encoder's first search starts.
+const firstHint = 80
 
 // MaxRun is the most adjacent lossy tiles a writer merges into one
 // rectangle: a row of the 1024-pixel frames that the codec measurement
@@ -102,6 +123,14 @@ type Encoder struct {
 	// pix holds pixels converted before they are encoded: a cursor's to
 	// straight alpha, a lossy rectangle's to opaque.
 	pix []byte
+
+	// What Still works in: the encoding tried last and the best that
+	// reached StillSSIM, a JPEG decoded to RGBA, the scorer, and the
+	// quality the last search chose, where the next starts.
+	cand, best []byte
+	dec        *image.RGBA
+	ssim       ssimer
+	hint       int
 }
 
 // New returns an encoder for a viewer that agreed to codecs, in any
@@ -119,6 +148,7 @@ func New(codecs []protocol.Codec) *Encoder {
 	e := &Encoder{
 		webp: slices.Contains(codecs, protocol.CodecWebP),
 		jo:   jpegn.EncodeOptions{Subsampling: jpegn.Subsample420},
+		hint: firstHint,
 	}
 	switch {
 	case slices.Contains(codecs, protocol.CodecDeflate):
@@ -141,13 +171,16 @@ func New(codecs []protocol.Codec) *Encoder {
 // Tile appends the encoding of a tile's pixels, w by h in RGBA order row
 // by row, to dst and returns it with its codec; or, if the tile goes
 // lossy, returns dst unchanged and lossy set, so that the caller can
-// merge it with adjacent lossy tiles and encode them with Lossy.
-func (e *Encoder) Tile(dst, pix []byte, w, h int) (b []byte, c protocol.Codec, lossy bool) {
+// merge it with adjacent lossy tiles and encode them with Lossy or Still.
+// A tile goes lossy if it has more than 256 colours, or more than 16 and
+// moving is set: content picks the codec, and motion too for tiles of 17
+// to 256 colours, which are lossless only while still.
+func (e *Encoder) Tile(dst, pix []byte, w, h int, moving bool) (b []byte, c protocol.Codec, lossy bool) {
 	if e.lossless == 0 {
 		return dst, 0, true
 	}
 	n := codec.Colours(pix, w, h, &e.pal)
-	if Classify(n) == Photo && e.lossy != 0 {
+	if class := Classify(n); e.lossy != 0 && (class == Photo || class == Many && moving) {
 		return dst, 0, true
 	}
 	var p *codec.Palette
@@ -176,8 +209,17 @@ func (e *Encoder) appendLossless(dst, pix []byte, w, h int, p *codec.Palette) []
 // wider or higher than WebP allows (16383 pixels), the encoding is
 // lossless; it returns codec 0 only if there is none.
 func (e *Encoder) Lossy(dst, pix []byte, w, h, quality int) ([]byte, protocol.Codec) {
-	quality = min(max(quality, 1), 100)
 	pix = e.opaque(pix[:4*w*h])
+	if b, ok := e.lossyAt(dst, pix, w, h, quality); ok {
+		return b, e.lossy
+	}
+	return e.fallback(dst, pix, w, h)
+}
+
+// lossyAt appends the lossy encoding of pix, opaque, at quality, and
+// reports false if the viewer has no lossy codec or the encoder failed.
+func (e *Encoder) lossyAt(dst, pix []byte, w, h, quality int) ([]byte, bool) {
+	quality = min(max(quality, 1), 100)
 	e.out.b = dst
 	var err error
 	switch e.lossy {
@@ -193,9 +235,13 @@ func (e *Encoder) Lossy(dst, pix []byte, w, h, quality int) ([]byte, protocol.Co
 	}
 	b := e.out.b
 	e.out.b = nil
-	if e.lossy != 0 && err == nil {
-		return b, e.lossy
-	}
+	return b, e.lossy != 0 && err == nil
+}
+
+// fallback appends pix, opaque, in the lossless codec, for a viewer with
+// no lossy codec or a rectangle the lossy encoder refused; it returns
+// codec 0 if the viewer has no lossless codec either.
+func (e *Encoder) fallback(dst, pix []byte, w, h int) ([]byte, protocol.Codec) {
 	if e.lossless == 0 {
 		return dst, 0
 	}
@@ -204,6 +250,113 @@ func (e *Encoder) Lossy(dst, pix []byte, w, h, quality int) ([]byte, protocol.Co
 		p = &e.pal
 	}
 	return e.appendLossless(dst, pix, w, h, p), e.lossless
+}
+
+// Still appends the lossy encoding of pix, as Lossy does, at the lowest
+// quality from lo to hi at which the SSIM of each of its tiles, tile
+// pixels wide side by side, the last maybe narrower, reaches StillSSIM,
+// and returns it with its codec and quality: in a rectangle of tiles a
+// writer merged, each tile reaches the score, not only their mean. If no
+// quality up to hi reaches it, the encoding is at hi and reached is
+// false. It tries qualities QualityStep apart, and hi, starting where its
+// last search ended, since a screen's photographic tiles tend to need
+// alike: on most rectangles it encodes and decodes twice. A rectangle
+// smaller than SSIM's 8×8 window goes at hi. For a viewer with no lossy
+// codec, or a rectangle the lossy encoder refuses, the encoding is
+// lossless, at quality 100.
+func (e *Encoder) Still(dst, pix []byte, w, h, tile, lo, hi int) (b []byte, c protocol.Codec, quality int, reached bool) {
+	hi = min(max(hi, 1), 100)
+	lo = min(max(lo, 1), hi)
+	pix = e.opaque(pix[:4*w*h])
+	if w < ssimWindow || h < ssimWindow {
+		if b, ok := e.lossyAt(dst, pix, w, h, hi); ok {
+			return b, e.lossy, hi, true
+		}
+		b, c := e.fallback(dst, pix, w, h)
+		return b, c, 100, true
+	}
+	// The ladder is lo, lo+QualityStep, ... below hi, then hi.
+	steps := (hi-lo+QualityStep-1)/QualityStep + 1
+	at := func(i int) int { return min(lo+i*QualityStep, hi) }
+	pass := func(i int) (ok, failed bool) {
+		var enc bool
+		e.cand, enc = e.lossyAt(e.cand[:0], pix, w, h, at(i))
+		if !enc {
+			return false, true
+		}
+		got, err := e.decode(e.cand, w, h)
+		if err != nil {
+			return false, true
+		}
+		return e.ssim.score(pix, got, w, h, tile) >= StillSSIM, false
+	}
+	i := min(max((e.hint-lo+QualityStep/2)/QualityStep, 0), steps-1)
+	ok, failed := pass(i)
+	switch {
+	case failed:
+		b, c := e.fallback(dst, pix, w, h)
+		return b, c, 100, true
+	case ok:
+		// Down while the next lower quality still reaches the score.
+		e.best = append(e.best[:0], e.cand...)
+		for i > 0 {
+			if ok, _ := pass(i - 1); !ok {
+				break
+			}
+			i--
+			e.best = append(e.best[:0], e.cand...)
+		}
+		reached = true
+	default:
+		// Up until one reaches it, or hi.
+		for i+1 < steps {
+			i++
+			ok, failed := pass(i)
+			if failed {
+				b, c := e.fallback(dst, pix, w, h)
+				return b, c, 100, true
+			}
+			if ok {
+				reached = true
+				break
+			}
+		}
+		e.best = append(e.best[:0], e.cand...)
+	}
+	e.hint = at(i)
+	return append(dst, e.best...), e.lossy, at(i), reached
+}
+
+// errDecoded reports an encoding that decodes to something other than
+// what was encoded.
+var errDecoded = errors.New("encoder: a lossy encoding decodes to another size")
+
+// decode decodes a lossy encoding of w by h pixels to RGBA, as a client
+// shows it: WebP as libwebp decodes it, JPEG as image/jpeg does.
+func (e *Encoder) decode(b []byte, w, h int) ([]byte, error) {
+	if e.lossy == protocol.CodecWebP {
+		m, err := webp.Decode(bytes.NewReader(b), webp.Options{ToRGBA: true, Threads: 1, FrameSizeLimit: w * h})
+		if err != nil {
+			return nil, err
+		}
+		img, ok := m.(*image.RGBA)
+		if !ok || img.Rect.Dx() != w || img.Rect.Dy() != h {
+			return nil, errDecoded
+		}
+		return img.Pix, nil
+	}
+	m, err := jpeg.Decode(bytes.NewReader(b))
+	if err != nil {
+		return nil, err
+	}
+	if m.Bounds().Dx() != w || m.Bounds().Dy() != h {
+		return nil, errDecoded
+	}
+	if e.dec == nil || e.dec.Rect.Dx() != w || e.dec.Rect.Dy() != h {
+		e.dec = image.NewRGBA(image.Rect(0, 0, w, h))
+	}
+	draw.Draw(e.dec, e.dec.Rect, m, m.Bounds().Min, draw.Src)
+	return e.dec.Pix, nil
 }
 
 // Cursor appends the encoding of a cursor's image to dst, in a codec

@@ -98,8 +98,24 @@ type writer struct {
 	encodeTime time.Duration
 	msgK       int // the buffer in tiles of the message's first tile
 	// msgQuality is the quality of the message's pixels on the client:
-	// lossless, or the lossy quality they were encoded at.
-	msgQuality uint8
+	// lossless, or the lossy quality they were encoded at. msgGoal is
+	// the quality they are to reach, for refinement (refine.go).
+	msgQuality, msgGoal uint8
+
+	// Refinement (refine.go). heat is each tile's motion as of heatAt;
+	// changed is when each tile last went out changed, since start; goal
+	// is the quality each tile's pixels are to reach on the client, 0
+	// while not known; qual is the quality the client has each tile at
+	// when there is no shadow to say; refineDelay is how long a tile
+	// stays unchanged before it is refined, negative for never; refine
+	// holds the tiles to refine.
+	heat        []float32
+	heatAt      time.Time
+	changed     []time.Duration
+	goal        []uint8
+	qual        []uint8
+	refineDelay time.Duration
+	refine      []int
 
 	// sc finds scrolls against the screen as the client has it, nil if
 	// scroll detection is off; scrollTime is what it took in the frame
@@ -191,6 +207,8 @@ func newWriter(c Conn, v *session.Viewer, p *pacer.Pacer, enc Encoder, l protoco
 		start:  time.Now(),
 		acks:   newAcks(),
 		poke:   make(chan struct{}, 1),
+
+		refineDelay: DefaultRefineDelay,
 	}
 	return w
 }
@@ -246,7 +264,16 @@ func (w *writer) run(ctx context.Context) error {
 			continue // resized meanwhile
 		}
 		if len(w.order) == 0 {
-			if err := w.wait(ctx, changed, 0); err != nil {
+			// Nothing changed: time for refinement, now or once a tile
+			// has been still long enough.
+			d, err := w.refinement(ctx, viewport)
+			if err != nil {
+				return err
+			}
+			if d < 0 {
+				continue // a frame of it went
+			}
+			if err := w.wait(ctx, changed, d); err != nil {
 				return err
 			}
 			continue
@@ -296,6 +323,7 @@ func (w *writer) collect(viewport image.Rectangle) (fresh int, ok bool) {
 		w.prev = w.prev[:0]
 		w.snap, w.snapAt = append(w.snap[:0], w.versions...), now
 	case now.Sub(w.snapAt) >= activeWindow:
+		w.warm(now)
 		w.prev, w.snap = w.snap, w.prev
 		w.snap, w.snapAt = append(w.snap[:0], w.versions...), now
 	}
@@ -396,18 +424,22 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 			}
 			w.p.Wrote(time.Now(), len(w.buf))
 			messages++
-			if w.sc != nil {
-				// The client now has these pixels: the shadow takes the
-				// buffers they were read into, and gives back its old ones.
-				for k, t := range order[i : i+n] {
-					w.tiles[w.msgK+k] = w.sc.keep(t, w.tiles[w.msgK+k], w.msgQuality)
-				}
+			w.drawn(order[i:i+n], w.msgQuality, w.msgGoal)
+		} else {
+			// No message the client takes holds it: it is not refined
+			// either.
+			for _, t := range order[i : i+n] {
+				w.goal[t] = w.quality(t)
 			}
 		}
+		at := time.Since(w.start)
 		for k, t := range order[i : i+n] {
 			w.sent[t] = w.runVersion[k]
+			w.changed[t] = at
 			if input {
+				// An input's effect is not motion.
 				w.effects[t] = w.runVersion[k]
+				w.heat[t] = 0
 			}
 		}
 		if send {
@@ -512,6 +544,12 @@ func (w *writer) syncSize(ctx context.Context) error {
 	n := w.g.cols * ((b.Dy() + tile - 1) / tile)
 	w.sent = append(w.sent[:0], make([]uint64, n)...)
 	w.effects = append(w.effects[:0], make([]uint64, n)...)
+	w.heat = append(w.heat[:0], make([]float32, n)...)
+	w.changed = append(w.changed[:0], make([]time.Duration, n)...)
+	w.goal = append(w.goal[:0], make([]uint8, n)...)
+	if w.sc == nil {
+		w.qual = append(w.qual[:0], make([]uint8, n)...)
+	}
 	if w.sc != nil {
 		// The client's screen is undefined until tiles of the new size
 		// draw it.

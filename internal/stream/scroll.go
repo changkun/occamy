@@ -64,9 +64,15 @@ const (
 // quality is below it.
 const lossless = math.MaxUint8
 
+// final is the quality of lossy pixels whose SSIM reached the encoder's
+// score (refine.go): they need no raising whatever the pacer allows, so
+// it is above every lossy quality, and a copy of them completes a tile
+// as a copy of exact pixels does.
+const final = lossless - 1
+
 // lossyQuality is the shadow's record of the lossy quality q.
 func lossyQuality(q int) uint8 {
-	return uint8(min(max(q, 0), lossless-1)) // #nosec G115 -- clamped below lossless
+	return uint8(min(max(q, 0), final-1)) // #nosec G115 -- clamped below final
 }
 
 // shadow is the screen as a viewer's client has it, tile by tile.
@@ -588,10 +594,16 @@ func (w *writer) scroll(ctx context.Context, id uint32, order []int, input bool)
 			return copies, done, size, err
 		}
 		w.sc.apply(cp)
+		at := time.Since(w.start)
 		for k, t := range cp.done {
 			w.sent[t] = cp.vers[k]
+			// Pixels moved in from elsewhere: refinement finds out what
+			// they are to reach.
+			w.goal[t] = 0
+			w.changed[t] = at
 			if input {
 				w.effects[t] = cp.vers[k]
+				w.heat[t] = 0
 			}
 		}
 		copies++
