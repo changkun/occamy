@@ -216,14 +216,19 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - `internal/backend/rdp`, the native RDP backend's first phase
   ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)),
   on `internal/rdp`: NLA by default, or TLS, with the owner asked for
-  the credentials NLA needs and the configuration lacks; bitmap updates
-  and the pointer drawn into the session, pointer updates paced like
-  bitmaps; keys by physical code, text as Unicode keyboard events, and
-  the pointer and wheels, batched into input PDUs from a bounded queue;
-  Suppress Output while nobody can see. Clipboard and resize wait for
+  the credentials NLA needs and the configuration lacks; no routing
+  cookie, which names the user before TLS, unless `RoutingCookie` asks
+  for one for a load balancer; bitmap updates and the pointer drawn
+  into the session, pointer updates paced like bitmaps, a shape before
+  it is decoded; keys by physical code, with Control and Pause sent as
+  Break and the Power key dropped, text as Unicode keyboard events, and
+  the pointer and wheels, batched into input PDUs from a bounded queue
+  in writes of at most 1,024 events; Suppress Output while nobody can
+  see. A server's reason for ending the session decides how it ended,
+  even when a write fails as it hangs up. Clipboard and resize wait for
   the virtual channels of its second phase. Nothing registers it in
-  occamyd yet. The VNC and RDP backends share one USB HID to scan code
-  table, `internal/keymap`.
+  occamyd until NLA has run end to end. The VNC and RDP backends share
+  one USB HID to scan code table, `internal/keymap`.
 
 ### Changed
 
