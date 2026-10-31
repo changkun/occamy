@@ -53,9 +53,15 @@ func newRefineDirect(tb testing.TB, before bool) *direct {
 
 // age makes the next frame take a snapshot of the versions, as frames at
 // least activeWindow apart do: motion at 30 frames a second changes a
-// tile in every snapshot.
+// tile in every snapshot. The snapshot is activeWindow after the last
+// whatever the frames took to encode, so that a slow machine, or the
+// race detector, cools no tile below motion.
 func (d *direct) age() {
-	d.w.snapAt = d.w.snapAt.Add(-activeWindow)
+	at := time.Now().Add(-activeWindow)
+	d.w.snapAt = at
+	if !d.w.heatAt.IsZero() {
+		d.w.heatAt = at
+	}
 }
 
 // refineAll refines what the writer would once the screen has been still
