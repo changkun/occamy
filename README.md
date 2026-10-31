@@ -22,9 +22,9 @@ Guacamole protocol and no v0 routes
 
 | Protocol | v0 (released) | v1 (`master`) |
 |----------|---------------|---------------|
-| VNC | Through guacd, verified end to end | Through guacd, or native with `backend: native` |
+| VNC | Through guacd, verified end to end | Native by default, or through guacd with `backend: guacd` |
 | SSH | Through guacd, verified end to end, including repeated sessions | Native |
-| RDP | Through guacd, verified against xrdp | Through guacd; the native backend is built but not yet served |
+| RDP | Through guacd, verified against xrdp | Native by default, verified against xrdp but not yet Windows, or through guacd with `backend: guacd` |
 
 v1 also serves telnet, through guacd only: it gets no native backend and
 goes when guacd does.
@@ -189,7 +189,10 @@ API v1 from the v1 file [docker/occamy-v1.yaml](./docker/occamy-v1.yaml),
 with the user `demo` and the password `occamy`: the VNC server as the
 connection `vnc-native`, through `occamyd`'s own VNC client, vnc's
 default, and as `vnc-guacd`, through guacd (`backend: guacd`), the
-fallback that the benchmark compares against.
+fallback that the benchmark compares against; and the RDP server as
+`rdp-native`, through `occamyd`'s own RDP client, rdp's default, with
+`security: tls` since xrdp speaks no NLA, and as `rdp-guacd`, through
+guacd.
 
 Here is a working video demo:
 
@@ -206,7 +209,8 @@ go test ./...
 [tests/](./tests) holds end-to-end and pressure tests that open real
 sessions to the demo servers. They are skipped unless
 `OCCAMY_E2E_ENDPOINT` is set, and those of `occamy-v1`, which stream
-both VNC connections with the Go client of protocol v1, unless
+its VNC and RDP connections, native and through guacd, with the Go
+client of protocol v1, unless
 `OCCAMY_E2E_V1_ENDPOINT` is; `make e2e` sets them to `localhost:5636`
 and `localhost:5637`:
 

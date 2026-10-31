@@ -200,8 +200,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   joins a running one, both as protocol v1 WebSockets with the token in
   a subprotocol, never in the URL, and `Origin` checked against
   `origins`. Graphical streams offer `webp`, `jpeg`, `deflate` and
-  `raw`. ssh and vnc connections use the native backends, rdp and
-  telnet the guacd bridge, and vnc connections the guacd bridge only
+  `raw`. ssh, vnc and rdp connections use the native backends, telnet
+  the guacd bridge, and vnc and rdp connections the guacd bridge only
   when they set `backend: guacd` (below). ssh connections need `host_keys` or
   `insecure_ignore_host_key: true`. vnc connections take a `username`
   for VeNCrypt's Plain, and a `tls` block for the server's certificate:
@@ -307,25 +307,24 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the pointer and wheels, batched into input PDUs from a bounded queue
   in writes of at most 1,024 events; Suppress Output while nobody can
   see. A server's reason for ending the session decides how it ended,
-  even when a write fails as it hangs up. Nothing registers it in
-  occamyd yet. The VNC and RDP backends share
-  one USB HID to scan code table, `internal/keymap`.
+  even when a write fails as it hangs up. occamyd serves rdp with it
+  by default (below). The VNC and RDP backends share one USB HID to
+  scan code table, `internal/keymap`.
 - A `backend` key on each v1 connection, `native` or `guacd`, and
   `adhoc_backends`, which picks the backend of ad-hoc targets by
   protocol. A protocol defaults to `native` wherever a native backend
-  exists, so vnc connections and ad-hoc vnc targets default to
-  occamyd's own VNC client, and `backend: guacd` (or
-  `adhoc_backends: {vnc: guacd}`) is an opt-in fallback through guacd,
-  kept as the benchmark's baseline until the benchmark shows native at
-  least 10x better. ssh is always native, and rdp and telnet always go
-  through guacd: `backend: native` on rdp is refused until the native
-  RDP backend has run NLA end to end, and the session's state names
-  the backend that serves it. guacd would not check a VeNCrypt
+  exists, so vnc and rdp connections and ad-hoc vnc and rdp targets
+  default to occamyd's own VNC and RDP clients, and `backend: guacd`
+  (or `adhoc_backends: {vnc: guacd}`) is an opt-in fallback through
+  guacd, kept as the benchmark's baseline until the benchmark shows
+  native at least 10x better. ssh is always native, and telnet always
+  goes through guacd, and the session's state names the backend that
+  serves it. guacd would not check a VeNCrypt
   certificate as `tls` says, so a vnc connection with `tls` cannot set
   `backend: guacd`, and a file that does fails to load, naming the
   key. Without `tls`, the native backend checks a VeNCrypt server's
-  certificate against the system's roots. No release served v1 vnc
-  connections. A native vnc session asks the
+  certificate against the system's roots. No release served v1 vnc or
+  rdp connections. A native vnc session asks the
   server for the owner's size from the stream's `hello`, on a
   connection's stream as on a session's, and a resize that reaches the
   backend before it runs is no longer dropped. A size beyond the
@@ -362,9 +361,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   ad-hoc targets by address and by name, dialled at the address that
   was checked.
 - The demo stack runs `occamy-v1` next to `occamy`, on port 5637, with
-  the v1 file `docker/occamy-v1.yaml`: the demo VNC server through the
-  native backend and through guacd, which `make e2e` streams with the
-  Go client. `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` move a
+  the v1 file `docker/occamy-v1.yaml`: the demo VNC and RDP servers
+  through the native backends and through guacd, which `make e2e`
+  streams with the Go client. `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` move a
   second stack aside on a shared host, and `make e2e` follows the
   last two.
 - The native RDP backend's clipboard, the first part of its second
@@ -398,6 +397,30 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   size code 3 ends the session, and once the channel writer fails, a
   server that the client then owes too many answers ends it with the
   write's error.
+- occamyd serves rdp connections and ad-hoc rdp targets with the native
+  RDP backend by default, with `backend: guacd` (or
+  `adhoc_backends: {rdp: guacd}`) as the fallback through guacd. A
+  native rdp connection takes `tls`, the certificate policy of vnc's,
+  checked on every connection since the backend always runs TLS, with
+  pins of RDP certificates, and `security`, the mode as guacd names it:
+  `nla` by default, `nla-ext`, `tls` or `any`. Both are refused with
+  `backend: guacd`, which reads `guacd.params.rdp` instead. xrdp speaks
+  no NLA, and a server that selects standard RDP security when offered
+  NLA alone fails the session with an error that names the key to set,
+  `security: tls on connection "…"`. A `username` of the form
+  `DOMAIN\user` logs on to the domain. The owner, and only the owner,
+  is asked for the credentials NLA needs that the connection does not
+  store; the hello's size is asked for within an RDP desktop's, 200 to
+  8192 pixels a side and 2^25 in all; clipboard text reaches the server
+  from the owner and interactive viewers and every viewer from the
+  server; a logoff ends the session with `remote-ended`, and a refused
+  logon or certificate with `backend-failed`. Tests drive native RDP
+  sessions through occamyd's routes against `rdptest`, and the demo
+  stack serves its xrdp server as `rdp-native` (`security: tls`) and
+  `rdp-guacd`, both streamed by `make e2e`. The native RDP backend is
+  not yet verified against Windows, and does not speak RDP's graphics
+  pipeline yet
+  ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)).
 
 ### Changed
 
