@@ -408,14 +408,21 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   no NLA, and a server that selects standard RDP security when offered
   NLA alone fails the session with an error that names the key to set,
   `security: tls on connection "…"`. A `username` of the form
-  `DOMAIN\user` logs on to the domain. The owner, and only the owner,
-  is asked for the credentials NLA needs that the connection does not
-  store; the hello's size is asked for within an RDP desktop's, 200 to
-  8192 pixels a side and 2^25 in all; clipboard text reaches the server
-  from the owner and interactive viewers and every viewer from the
-  server; a logoff ends the session with `remote-ended`, and a refused
-  logon or certificate with `backend-failed`. Tests drive native RDP
-  sessions through occamyd's routes against `rdptest`, and the demo
+  `DOMAIN\user`, with both parts, logs on to the domain, as does one the
+  owner gives at the prompt with the domain left empty. The owner, and
+  only the owner, is asked for the credentials NLA needs that the
+  connection does not store; the hello's size is asked for within an
+  RDP desktop's, 200 to 8192 pixels a side and 2^25 in all; clipboard
+  text reaches the server from the owner and interactive viewers and
+  every viewer from the server; a logoff ends the session with
+  `remote-ended`, and a refused logon or certificate with
+  `backend-failed`. occamyd warns when it loads the file of the
+  `guacd.params` that no session reads, for every protocol, and of each
+  connection whose `security: tls` or `any` comes with
+  `tls.insecure_skip_verify`. guacd's `disable-copy`, `disable-paste`
+  and recording parameters have no native equivalent yet, so a
+  connection that needs them keeps `backend: guacd`. Tests drive native
+  RDP sessions through occamyd's routes against `rdptest`, and the demo
   stack serves its xrdp server as `rdp-native` (`security: tls`) and
   `rdp-guacd`, both streamed by `make e2e`. The native RDP backend is
   not yet verified against Windows, and does not speak RDP's graphics

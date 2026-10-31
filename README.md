@@ -24,7 +24,7 @@ Guacamole protocol and no v0 routes
 |----------|---------------|---------------|
 | VNC | Through guacd, verified end to end | Native by default, or through guacd with `backend: guacd` |
 | SSH | Through guacd, verified end to end, including repeated sessions | Native |
-| RDP | Through guacd, verified against xrdp | Native by default, verified against xrdp but not yet Windows, or through guacd with `backend: guacd` |
+| RDP | Through guacd, verified against xrdp | Native by default, verified against xrdp but not yet Windows, and without GFX (phase 3), or through guacd with `backend: guacd` |
 
 v1 also serves telnet, through guacd only: it gets no native backend and
 goes when guacd does.
