@@ -54,7 +54,12 @@ export class CanvasSurface implements Surface {
 
   constructor(canvas: HTMLCanvasElement | OffscreenCanvas) {
     this.canvas = canvas
-    const ctx = canvas.getContext('2d', { alpha: false }) as Context2D | null
+    // Called on each type alone: on the union, TypeScript resolves
+    // getContext('2d') to any rendering context.
+    const ctx: Context2D | null =
+      'transferControlToOffscreen' in canvas
+        ? canvas.getContext('2d', { alpha: false })
+        : canvas.getContext('2d', { alpha: false })
     if (ctx === null) {
       throw new Error('occamy: the canvas has no 2D context')
     }
