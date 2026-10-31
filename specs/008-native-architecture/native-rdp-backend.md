@@ -1110,6 +1110,19 @@ RDP's guacd path, RDP no longer needs guacd at all.
   `TestLoadWarningsLogged` the warnings at load; `TestParseV1Example`
   checks that the example's `guacd.params` each have a connection on
   guacd.
+- **Integration test.** Under the `rdp_integration` tag, against the
+  bench desktop image's xrdp, at 99fe233 on 2026-10-31, one run after
+  the other with the host's 1-minute load below 8 before each (6.5,
+  then 7.5): the backend's `TestIntegrationSecurity` passed, its
+  security `any` drawing the wallpaper and its NLA alone refused with
+  the hint that names `Config.Security`; and the client's suite
+  (`-run Integration`) passed, `TestIntegration` at 32, 24, 16 and 15
+  bpp with security protocol 0x1, and `TestIntegrationResize` with
+  DRDYNVC version 2 and Display Control's 33,554,432 pixels. The
+  client's suite had not run since phase 2's second review. The review
+  of c762d70 had run the backend's four tests against xrdp, which all
+  passed. `TestBytesAgainstGuacd`, the spike's measurement against
+  guacd, is not part of the suite and did not run.
 - **Mutation checks.** Each of these fails a test: rdp's default back to
   `guacd`; the native refusal restored; the `tls` refusal with
   `backend: guacd` dropped; each of `security`'s checks dropped, a mode
