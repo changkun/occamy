@@ -59,10 +59,11 @@ func profileOf(enc Encoder) (profile, bool) {
 // shared is what the viewers of a session share: the encode cache and
 // the workers.
 type shared struct {
-	refs  int // under sharedMu
-	cache *encodeCache
-	jobs  chan func(*worker) // nil without workers
-	wg    sync.WaitGroup
+	refs    int // under sharedMu
+	cache   *encodeCache
+	jobs    chan func(*worker) // nil without workers
+	workers int
+	wg      sync.WaitGroup
 }
 
 // jobsPerWorker is how many jobs may wait for each worker; a frame's
@@ -81,7 +82,7 @@ func share(fb *framebuffer.Framebuffer, workers, budget int) *shared {
 	defer sharedMu.Unlock()
 	sh := sharedFor[fb]
 	if sh == nil {
-		sh = &shared{cache: newEncodeCache(budget)}
+		sh = &shared{cache: newEncodeCache(budget), workers: max(workers, 0)}
 		if workers > 0 {
 			sh.jobs = make(chan func(*worker), jobsPerWorker*workers)
 			for range workers {
@@ -412,6 +413,7 @@ func (w *writer) encodeTile(dst []byte, t, k int, version uint64, r image.Rectan
 			e = nil
 		}
 	}
+	w.startFetch()
 	if e == nil {
 		return w.enc.Tile(dst, w.tiles[k], r.Dx(), r.Dy(), moving)
 	}
@@ -452,6 +454,7 @@ func (w *writer) encodeRun(t, n int, pix []byte, rect image.Rectangle, still boo
 			w.payload, codec = w.enc.Lossy(w.payload[:0], pix, rect.Dx(), rect.Dy(), q)
 		}
 	}
+	w.startFetch()
 	if e == nil {
 		enc()
 		return codec, got, reached
@@ -465,7 +468,8 @@ func (w *writer) encodeRun(t, n int, pix []byte, rect image.Rectangle, still boo
 }
 
 // prefetch is a frame's work for the workers: what of the writer's
-// state they need, as of when the writer handed the rows over.
+// state they need, as of when the writer handed the rows over, and the
+// rows they take in turn.
 type prefetch struct {
 	fb       *framebuffer.Framebuffer
 	g        grid
@@ -474,14 +478,35 @@ type prefetch struct {
 	tc       *tileCache // a copy of the client's tile cache, nil without one
 	q, lo    int        // the pacer's quality and lowest
 	maxWidth int
+
+	// ts are the tiles the workers may encode, in the frame's order, of
+	// which the k-th row starts at rows[k], and moving their motion.
+	ts     []int
+	moving []bool
+	rows   []int
+	sh     *shared
+	most   int          // the most workers on the frame
+	next   atomic.Int32 // the next row a worker takes
+	busy   atomic.Int32 // the workers on the frame
+
+	// mu guards seen: the content of each tile the workers found going
+	// exact, at the first place in ts they found it, which the writer
+	// stores in the client's tile cache as it sends it, so that the same
+	// content later in the frame goes cached.
+	mu   sync.Mutex
+	seen map[cacheKey]int
+
 	// over is set once the frame is sent: what is left is not wanted.
 	over atomic.Bool
 }
 
 // prefetch hands the rows of order but the first, which the writer
-// encodes meanwhile, to the workers, a job a row, and returns the
-// frame's work, nil if none. The tiles go to the cache in the messages
-// encode makes of them, so that the writer finds them there.
+// encodes meanwhile, to a worker, and returns the frame's work, nil if
+// none. The worker takes them a row at a time, and asks for another
+// whenever it begins an encoding, up to the session's workers: a frame
+// whose tiles go cached wakes one, which only reads them, and one with
+// much to encode wakes them all. The tiles go to the cache in the
+// messages encode makes of them, so that the writer finds them there.
 func (w *writer) prefetch(order []int) *prefetch {
 	if w.sh == nil || w.sh.jobs == nil || len(order) < 2 ||
 		order[0]/w.g.cols == order[len(order)-1]/w.g.cols {
@@ -490,30 +515,53 @@ func (w *writer) prefetch(order []int) *prefetch {
 	f := &prefetch{
 		fb: w.fb, g: w.g, p: w.prof, cache: w.sh.cache,
 		q: w.p.Quality(), lo: w.p.MinQuality(), maxWidth: w.maxWidth(),
+		sh: w.sh, most: max(1, w.sh.workers),
 	}
-	f.tc = w.cache.contents()
-	ts := make([]int, 0, len(order))
+	if f.tc = w.cache.contents(); f.tc != nil {
+		f.seen = map[cacheKey]int{}
+	}
 	for _, t := range order {
 		if t/w.g.cols != order[0]/w.g.cols && w.sent[t] < w.versions[t] {
-			ts = append(ts, t)
+			if len(f.ts) == 0 || t/w.g.cols != f.ts[len(f.ts)-1]/w.g.cols {
+				f.rows = append(f.rows, len(f.ts))
+			}
+			f.ts = append(f.ts, t)
+			f.moving = append(f.moving, w.moving(t, false))
 		}
 	}
-	moving := make([]bool, len(ts))
-	for i, t := range ts {
-		moving[i] = w.moving(t, false)
+	if len(f.ts) == 0 {
+		return nil
 	}
-	for i := 0; i < len(ts); {
-		j := i + 1
-		for j < len(ts) && ts[j]/w.g.cols == ts[i]/w.g.cols {
-			j++
-		}
-		row, mv := ts[i:j], moving[i:j]
-		if !w.sh.submit(func(wk *worker) { f.row(wk, row, mv) }) {
-			break
-		}
-		i = j
+	f.rows = append(f.rows, len(f.ts))
+	f.busy.Store(1)
+	if !w.sh.submit(f.work) {
+		return nil
 	}
 	return f
+}
+
+// work encodes the frame's rows that no other worker took, one at a
+// time, until there are none or the frame is sent.
+func (f *prefetch) work(wk *worker) {
+	enc := wk.encoder(f.p)
+	for !f.over.Load() {
+		k := int(f.next.Add(1)) - 1
+		if k >= len(f.rows)-1 {
+			return
+		}
+		f.row(wk, enc, f.rows[k], f.rows[k+1])
+	}
+}
+
+// recruit asks for one more worker on the frame, if it has rows left
+// and fewer workers than it may.
+func (f *prefetch) recruit() {
+	if int(f.next.Load()) >= len(f.rows)-1 {
+		return
+	}
+	if n := f.busy.Add(1); int(n) > f.most || !f.sh.submit(f.work) {
+		f.busy.Add(-1)
+	}
 }
 
 // maxWidth is the widest a run may be: the client's maximum texture
@@ -525,12 +573,11 @@ func (w *writer) maxWidth() int {
 	return protocol.DefaultMaxTextureSize
 }
 
-// row encodes tiles ts of one row, whose motion is moving, into the
-// cache as encode would: each tile, and each run of lossy tiles.
-func (f *prefetch) row(wk *worker, ts []int, moving []bool) {
-	enc := wk.encoder(f.p)
-	for i := 0; i < len(ts) && !f.over.Load(); {
-		n := f.message(wk, enc, ts[i:], moving[i:])
+// row encodes the tiles of ts from i to end, one row, into the cache as
+// encode would: each tile, and each run of lossy tiles.
+func (f *prefetch) row(wk *worker, enc *encoder.Encoder, i, end int) {
+	for i < end && !f.over.Load() {
+		n := f.message(wk, enc, i, end)
 		if n == 0 {
 			return
 		}
@@ -538,34 +585,39 @@ func (f *prefetch) row(wk *worker, ts []int, moving []bool) {
 	}
 }
 
-// message encodes the message from ts[0] on as encode would, and
-// reports how many tiles it holds: 0 if the screen was resized.
-func (f *prefetch) message(wk *worker, enc *encoder.Encoder, ts []int, moving []bool) int {
-	t := ts[0]
+// message encodes the message from ts[i] on, up to end, as encode would,
+// and reports how many tiles it holds: 0 if the screen was resized.
+func (f *prefetch) message(wk *worker, enc *encoder.Encoder, i, end int) int {
+	t, moving := f.ts[i], f.moving[i]
 	r, v := f.fb.ReadTile(t, wk.tile(0, f.g.tile))
 	if r != f.g.rect(t) || f.fb.Bounds() != f.g.bounds {
 		return 0
 	}
-	if f.cached(wk.tiles[0], r) {
+	key, keyed := f.tc.key(wk.tiles[0], r)
+	if f.cached(key, keyed, i) {
 		return 1
 	}
-	if lossy, ok := f.tile(wk, enc, t, v, 0, r, moving[0]); !ok || !lossy {
+	if lossy, ok := f.tile(wk, enc, t, v, 0, r, moving, key, keyed, i); !ok || !lossy {
 		return 1
 	}
 	wk.rects[0] = r
 	wk.versions = append(wk.versions[:0], v)
 	n, width := 1, r.Dx()
-	for n < len(ts) && n < encoder.MaxRun {
-		u := ts[n]
+	for i+n < end && n < encoder.MaxRun {
+		u := f.ts[i+n]
 		ru := f.g.rect(u)
-		if u != ts[n-1]+1 || width+ru.Dx() > f.maxWidth || moving[n] != moving[0] {
+		if u != f.ts[i+n-1]+1 || width+ru.Dx() > f.maxWidth || f.moving[i+n] != moving {
 			break
 		}
 		got, vu := f.fb.ReadTile(u, wk.tile(n, f.g.tile))
-		if got != ru || f.fb.Bounds() != f.g.bounds || f.cached(wk.tiles[n], ru) {
+		if got != ru || f.fb.Bounds() != f.g.bounds {
 			break
 		}
-		if lossy, ok := f.tile(wk, enc, u, vu, n, ru, moving[0]); !ok || !lossy {
+		ku, kuOK := f.tc.key(wk.tiles[n], ru)
+		if f.cached(ku, kuOK, i+n) {
+			break
+		}
+		if lossy, ok := f.tile(wk, enc, u, vu, n, ru, moving, ku, kuOK, i+n); !ok || !lossy {
 			break
 		}
 		wk.rects[n] = ru
@@ -573,38 +625,60 @@ func (f *prefetch) message(wk *worker, enc *encoder.Encoder, ts []int, moving []
 		width += ru.Dx()
 		n++
 	}
-	f.run(wk, enc, t, n, moving[0])
+	f.run(wk, enc, t, n, moving)
 	return n
 }
 
-// cached reports whether the client's tile cache holds pix, the pixels
-// of r, which encode then sends as a cached tile.
-func (f *prefetch) cached(pix []byte, r image.Rectangle) bool {
-	if f.tc == nil {
+// cached reports whether the writer sends the tile at ts[i], whose
+// content is key, as a cached tile: if the client's tile cache held it
+// when the frame began, or the workers found it going exact before i.
+func (f *prefetch) cached(key cacheKey, keyed bool, i int) bool {
+	if !keyed {
 		return false
 	}
-	k, ok := f.tc.key(pix, r)
-	return ok && f.tc.has(k)
+	if f.tc.has(key) {
+		return true
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	at, ok := f.seen[key]
+	return ok && at < i
 }
 
-// tile encodes the k-th tile of a run, t at version v, into the cache,
-// or waits for whoever does, and reports whether it goes lossy; ok is
-// false if the cache has a newer version.
-func (f *prefetch) tile(wk *worker, enc *encoder.Encoder, t int, v uint64, k int, r image.Rectangle, moving bool) (lossy, ok bool) {
+// tile encodes the k-th tile of a run, ts[i] at version v, whose content
+// is key, into the cache, or waits for whoever does, and reports whether
+// it goes lossy; ok is false if the cache has a newer version.
+func (f *prefetch) tile(wk *worker, enc *encoder.Encoder, t int, v uint64, k int, r image.Rectangle, moving bool, key cacheKey, keyed bool, i int) (lossy, ok bool) {
 	e, mine := f.cache.tile(tileKey{f.p, t, moving}, v)
 	switch {
 	case e == nil:
 		return false, false
-	case !mine:
-		<-e.done
-		return e.lossy, e.ok
+	case mine:
+		f.recruit()
+		f.cache.make(e, func(e *entry) bool {
+			wk.payload, e.codec, e.lossy = enc.Tile(wk.payload[:0], wk.tiles[k], r.Dx(), r.Dy(), moving)
+			e.payload = slices.Clone(wk.payload)
+			return true
+		})
+	default:
+		if <-e.done; !e.ok {
+			return false, false
+		}
 	}
-	f.cache.make(e, func(e *entry) bool {
-		wk.payload, e.codec, e.lossy = enc.Tile(wk.payload[:0], wk.tiles[k], r.Dx(), r.Dy(), moving)
-		e.payload = slices.Clone(wk.payload)
-		return true
-	})
+	if keyed && !e.lossy && exact(e.codec) {
+		f.see(key, i)
+	}
 	return e.lossy, true
+}
+
+// see notes that the content key goes exact at ts[i], unless a worker
+// found it earlier in the order: the writer stores it at the first.
+func (f *prefetch) see(key cacheKey, i int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if at, ok := f.seen[key]; !ok || i < at {
+		f.seen[key] = i
+	}
 }
 
 // run encodes the run of n tiles from t, whose pixels and versions the
@@ -615,6 +689,7 @@ func (f *prefetch) run(wk *worker, enc *encoder.Encoder, t, n int, moving bool) 
 	if !mine {
 		return
 	}
+	f.recruit()
 	rect := wk.rects[0].Union(wk.rects[n-1])
 	wk.pix = assemble(wk.pix, wk.tiles[:n], wk.rects[:n], rect)
 	f.cache.make(e, func(e *entry) bool {
@@ -645,6 +720,16 @@ func assemble(pix []byte, tiles [][]byte, rects []image.Rectangle, rect image.Re
 		}
 	}
 	return pix
+}
+
+// startFetch hands the rows after the writer's to the workers, if the
+// frame's have not been yet: the writer calls it as it begins an
+// encoding of its own.
+func (w *writer) startFetch() {
+	if w.pending != nil {
+		w.fetch = w.prefetch(w.pending)
+		w.pending = nil
+	}
 }
 
 // stopFetch tells the workers that the rows of the frame's work are no

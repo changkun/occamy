@@ -115,10 +115,12 @@ type writer struct {
 	// sh is the session's encode cache and workers (share.go), shared
 	// with the other viewers whose encoders are of profile prof; nil if
 	// the writer encodes alone. fetch is the frame's work for the
-	// workers, nil if none.
-	sh    *shared
-	prof  profile
-	fetch *prefetch
+	// workers, nil if none, and pending the order from the writer's tile
+	// on, which goes to the workers once the writer has one to encode.
+	sh      *shared
+	prof    profile
+	fetch   *prefetch
+	pending []int
 
 	// Refinement (refine.go). heat is each tile's motion as of the last
 	// snapshot; heatAt is that snapshot, or the end of the last frame
@@ -446,16 +448,21 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 				inputBytes += b
 			}
 		}
-		if fetch {
-			// Once the copies are known, the workers encode the rows
-			// after the writer's.
-			fetch = false
-			w.fetch = w.prefetch(order[i:])
-		}
 		if w.sent[order[i]] >= w.versions[order[i]] {
 			continue // a copy completed it
 		}
+		if fetch {
+			// Once the copies are known, the workers encode the rows
+			// after the writer's, from the first tile the writer has to
+			// encode (startFetch): a frame whose tiles go cached, or
+			// whose encodings another viewer made, wakes none.
+			w.pending = order[i:]
+		}
 		n, send, ok := w.encode(id, order, i, input)
+		if fetch && w.pending == nil {
+			fetch = false
+		}
+		w.pending = nil
 		if !ok {
 			break // resized since the tiles were chosen
 		}

@@ -209,6 +209,7 @@ func TestProfile(t *testing.T) {
 
 // The workers skip the tiles that the client's tile cache holds, as the
 // writer sends them cached: they look tiles up under the mirror's seed.
+// The one worker that reads them asks for no other.
 func TestPrefetchSkipsCached(t *testing.T) {
 	d := newDirect(t, false)
 	d.w.cache = newTileCache(16)
@@ -228,7 +229,7 @@ func TestPrefetchSkipsCached(t *testing.T) {
 		}
 	}
 	d.show(s.shot())
-	sh := &shared{cache: newEncodeCache(DefaultEncodeCacheBytes), jobs: make(chan func(*worker), 64)}
+	sh := &shared{cache: newEncodeCache(DefaultEncodeCacheBytes), jobs: make(chan func(*worker), 64), workers: 4}
 	p, _ := profileOf(d.w.enc)
 	d.w.sh, d.w.prof = sh, p
 	if _, ok := d.w.collect(image.Rectangle{}); !ok {
@@ -243,8 +244,8 @@ func TestPrefetchSkipsCached(t *testing.T) {
 		(<-sh.jobs)(wk)
 		jobs++
 	}
-	if s := sh.cache.stats(); jobs == 0 || s.misses != 0 {
-		t.Errorf("the workers encoded %d tiles or runs in %d rows of tiles the client has", s.misses, jobs)
+	if s := sh.cache.stats(); jobs != 1 || s.misses != 0 {
+		t.Errorf("%d workers encoded %d tiles or runs of tiles the client has", jobs, s.misses)
 	}
 }
 
@@ -296,6 +297,9 @@ func TestShareRunQuality(t *testing.T) {
 	high, _ := encode(false, 90, 0)
 	if bytes.Equal(low, high) {
 		t.Error("a run at 90 got the encoding at 30")
+	}
+	if again, _ := encode(false, 30, 0); !bytes.Equal(again, low) {
+		t.Error("the encoding at 30 changed in the cache as the writer encoded at 90")
 	}
 	_, from30 := encode(true, 90, 30)
 	_, from85 := encode(true, 90, 85)
@@ -387,7 +391,8 @@ func TestPrefetchStops(t *testing.T) {
 	if _, ok := w.collect(image.Rectangle{}); !ok {
 		t.Fatal("resized")
 	}
-	if w.fetch = w.prefetch(w.order); w.fetch == nil {
+	f := w.prefetch(w.order)
+	if w.fetch = f; f == nil {
 		t.Fatal("no rows for the workers")
 	}
 	w.stopFetch()
@@ -397,23 +402,241 @@ func TestPrefetchStops(t *testing.T) {
 		(<-sh.jobs)(wk)
 		jobs++
 	}
-	if s := sh.cache.stats(); jobs == 0 || s.misses != 0 {
-		t.Errorf("the workers encoded %d tiles or runs of a frame already sent", s.misses)
+	// And a worker on a row when the frame is sent leaves the rest of it.
+	f.row(wk, wk.encoder(f.p), f.rows[0], f.rows[1])
+	if s := sh.cache.stats(); jobs != 1 || s.misses != 0 {
+		t.Errorf("%d workers encoded %d tiles or runs of a frame already sent", jobs, s.misses)
+	}
+}
+
+// A frame's rows go to one worker, which asks for one more as it begins
+// an encoding, of a tile or of a run, while rows are left for it, up to
+// the session's workers.
+func TestPrefetchRecruits(t *testing.T) {
+	desktop, photo := corpusFrame(t, "desktop"), corpusFrame(t, "photo")
+	patterns := image.NewRGBA(photo.Rect)
+	for y := range 12 {
+		for x := range 16 {
+			r := image.Rect(64*x, 64*y, 64*x+64, 64*y+64)
+			draw.Draw(patterns, r, pattern(x+16*y, r.Min), r.Min, draw.Src)
+		}
+	}
+	twoRows := image.NewRGBA(photo.Rect)
+	copy(twoRows.Pix, desktop.Pix)
+	draw.Draw(twoRows, image.Rect(0, 0, 1024, 128), photo, image.Point{}, draw.Src)
+	for _, c := range []struct {
+		name    string
+		next    *image.RGBA
+		workers int
+		runs    bool // the cache has the frame's tiles, not its runs
+		want    int
+	}{
+		{"a photograph", photo, 1, false, 1},
+		{"a photograph", photo, 3, false, 3},
+		{"exact tiles", patterns, 3, false, 3},
+		{"runs alone", photo, 3, true, 3},
+		{"one row after the writer's", twoRows, 3, false, 1},
+	} {
+		d := newDirect(t, false)
+		d.show(desktop)
+		d.frame()
+		d.show(c.next)
+		sh := sharedWriter(t, d)
+		sh.jobs, sh.workers = make(chan func(*worker), 64), 1
+		w := d.w
+		if _, ok := w.collect(image.Rectangle{}); !ok {
+			t.Fatal("resized")
+		}
+		wk := &worker{encs: map[profile]*encoder.Encoder{}}
+		if c.runs {
+			// A worker encodes the frame at the pacer's quality; the
+			// next wants its runs at another.
+			if w.prefetch(w.order) == nil {
+				t.Fatal("no rows for the workers")
+			}
+			(<-sh.jobs)(wk)
+		}
+		sh.workers = c.workers
+		f := w.prefetch(w.order)
+		if f == nil {
+			t.Fatal("no rows for the workers")
+		}
+		if c.runs {
+			f.q--
+		}
+		before := sh.cache.stats().misses
+		jobs := 0
+		for len(sh.jobs) > 0 {
+			(<-sh.jobs)(wk)
+			jobs++
+		}
+		if made := sh.cache.stats().misses - before; jobs != c.want || made == 0 {
+			t.Errorf("%s, %d workers at most: %d took the frame, and made %d encodings; want %d", c.name, c.workers, jobs, made, c.want)
+		}
+	}
+}
+
+// The writer stores a content that goes exact at the first place in the
+// frame's order a worker found it, whichever found it first, and draws
+// it cached after.
+func TestPrefetchSeen(t *testing.T) {
+	f := &prefetch{tc: newTileCache(16).contents(), seen: map[cacheKey]int{}}
+	k := cacheKey{w: 64, h: 64}
+	f.see(k, 10)
+	f.see(k, 5)
+	f.see(k, 8)
+	for i, want := range map[int]bool{0: false, 5: false, 6: true, 9: true, 11: true} {
+		if got := f.cached(k, true, i); got != want {
+			t.Errorf("seen at 10, 5 and 8: cached at %d %v, want %v", i, got, want)
+		}
+	}
+	if f.cached(k, false, 11) {
+		t.Error("a tile too large for a slot is cached")
+	}
+}
+
+// The workers encode a content that repeats exact in a frame once, at
+// its first place in the frame's order, which the writer stores in the
+// client's tile cache and then draws again cached; and every place of a
+// content that repeats lossy, which the writer never stores. Whichever
+// rows the workers take first, the writer finds every encoding of the
+// rows after its own.
+func TestPrefetchRepeats(t *testing.T) {
+	photo := corpusFrame(t, "photo")
+	for _, reversed := range []bool{false, true} {
+		d := newDirect(t, false)
+		d.w.cache = newTileCache(DefaultCacheSlots)
+		s := newTileScreen(1024, 768, func(r image.Rectangle) *image.RGBA { return pattern(0, r.Min) })
+		d.show(s.shot())
+		d.frame()
+
+		// The writer's row of patterns of its own; below it, four
+		// patterns that repeat, and one tile of the photograph, the same
+		// in every row.
+		lossy := photo.SubImage(image.Rect(320, 384, 384, 448)).(*image.RGBA)
+		for y := range 12 {
+			for x := range 16 {
+				r := image.Rect(64*x, 64*y, 64*x+64, 64*y+64)
+				switch {
+				case y == 0:
+					s.set(x, y, pattern(8+x, r.Min))
+				case x == 15:
+					tile := image.NewRGBA(r)
+					draw.Draw(tile, r, lossy, lossy.Rect.Min, draw.Src)
+					s.set(x, y, tile)
+				default:
+					s.set(x, y, pattern(1+(x+y)%4, r.Min))
+				}
+			}
+		}
+		d.show(s.shot())
+		sh := sharedWriter(t, d)
+		sh.jobs = make(chan func(*worker), 64)
+		w := d.w
+		if _, ok := w.collect(image.Rectangle{}); !ok {
+			t.Fatal("resized")
+		}
+		if w.order[0]/w.g.cols != 0 {
+			t.Fatalf("the writer's row is %d", w.order[0]/w.g.cols)
+		}
+		f := w.prefetch(w.order)
+		if f == nil {
+			t.Fatal("no rows for the workers")
+		}
+		<-sh.jobs // the rows go by hand instead, in the order of the case
+		wk := &worker{encs: map[profile]*encoder.Encoder{}}
+		enc := wk.encoder(f.p)
+		rows := len(f.rows) - 1
+		for k := range rows {
+			if reversed {
+				k = rows - 1 - k
+			}
+			f.row(wk, enc, f.rows[k], f.rows[k+1])
+		}
+		made := sh.cache.stats().misses
+		if !reversed && made != 4+2*rows {
+			// Each pattern once, and the photograph's tile in each row,
+			// as a tile and as a run of one.
+			t.Errorf("in order: %d encodings, want %d", made, 4+2*rows)
+		}
+
+		sh.jobs = nil // the writer encodes the rest alone
+		if ok, _ := w.p.StartFrame(time.Now()); !ok {
+			t.Fatal("the pacer holds the frame")
+		}
+		if err := w.sendFrame(d.ctx, w.order, false); err != nil {
+			t.Fatal(err)
+		}
+		if got := sh.cache.stats().misses - made; got != 16 {
+			t.Errorf("reversed %v: the writer made %d encodings, want the 16 of its row", reversed, got)
+		}
+	}
+}
+
+// The writer hands a frame's rows to the workers once it has a tile to
+// encode itself: not for a frame whose tiles all go cached, nor for one
+// whose encodings another viewer made; and to one worker.
+func TestFetchStartsWithWork(t *testing.T) {
+	vs := newViewers(t, 2, shareModes[1])
+	a, b := vs.ds[0], vs.ds[1]
+	sh := vs.sh
+	sh.jobs, sh.workers = make(chan func(*worker), 64), 2
+	s := newTileScreen(1024, 768, func(r image.Rectangle) *image.RGBA { return pattern(0, r.Min) })
+	for y := range 12 {
+		for x := range 16 {
+			s.set(x, y, pattern((x+y)%4, image.Pt(64*x, 64*y)))
+		}
+	}
+	jobs := func() int {
+		n := len(sh.jobs)
+		for len(sh.jobs) > 0 {
+			<-sh.jobs
+		}
+		return n
+	}
+	a.show(s.shot())
+	if err := a.send(); err != nil {
+		t.Fatal(err)
+	}
+	if n := jobs(); n != 1 {
+		t.Fatalf("a frame to encode: %d jobs for the workers, want 1", n)
+	}
+	if err := b.send(); err != nil {
+		t.Fatal(err)
+	}
+	if n := jobs(); n != 0 {
+		t.Errorf("a frame another viewer encoded: %d jobs for the workers", n)
+	}
+
+	// The same tiles, elsewhere: every one is in a slot.
+	for y := range 12 {
+		for x := range 16 {
+			s.set(x, y, pattern((x+y+1)%4, image.Pt(64*x, 64*y)))
+		}
+	}
+	a.show(s.shot())
+	if err := a.send(); err != nil {
+		t.Fatal(err)
+	}
+	if n := jobs(); n != 0 {
+		t.Errorf("a frame of cached tiles: %d jobs for the workers", n)
 	}
 }
 
 // Serve shares a session's encodings among the viewers whose encoders
-// are internal/encoder's, with workers unless EncodeWorkers is negative,
-// and not at all with NoShare.
+// are internal/encoder's, with DefaultEncodeWorkers unless EncodeWorkers
+// says otherwise, none if negative, and not at all with NoShare.
 func TestShareConfig(t *testing.T) {
 	for _, tc := range []struct {
-		name            string
-		cfg             Config
-		shared, workers bool
+		name    string
+		cfg     Config
+		shared  bool
+		workers int
 	}{
-		{"by default", Config{}, true, true},
-		{"without workers", Config{EncodeWorkers: -1}, true, false},
-		{"NoShare", Config{NoShare: true}, false, false},
+		{"by default", Config{}, true, DefaultEncodeWorkers()},
+		{"with three workers", Config{EncodeWorkers: 3}, true, 3},
+		{"without workers", Config{EncodeWorkers: -1}, true, 0},
+		{"NoShare", Config{NoShare: true}, false, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
@@ -423,8 +646,12 @@ func TestShareConfig(t *testing.T) {
 				sharedMu.Lock()
 				sh := sharedFor[r.s.Framebuffer()]
 				sharedMu.Unlock()
-				if (sh != nil) != tc.shared || sh != nil && (sh.jobs != nil) != tc.workers {
-					t.Errorf("shared %v, with workers %v; want %v, %v", sh != nil, sh != nil && sh.jobs != nil, tc.shared, tc.workers)
+				workers := 0
+				if sh != nil && sh.jobs != nil {
+					workers = sh.workers
+				}
+				if (sh != nil) != tc.shared || workers != tc.workers {
+					t.Errorf("shared %v, with %d workers; want %v, %d", sh != nil, workers, tc.shared, tc.workers)
 				}
 			})
 		})
