@@ -834,7 +834,8 @@ that guacd was `vnc`'s default, they are corrected below.
     and starts it again, backing off up to 16 s while it keeps exiting
     ([006](../006-demo-stack-refresh.md), Addendum: TigerVNC and the
     VNC parity matrix). x11vnc serves its clients in one thread, and
-    waits up to its `-rfbwait`, 20 s by default, for a client that does
+    waits up to its `-readtimeout` (LibVNCServer's `rfbMaxClientWait`,
+    which `-rfbwait` also sets), 20 s by default, for a client that does
     not take what it sends, accepting nobody meanwhile; a first
     watchdog that waited 10 s could have killed a live x11vnc so. In
     that CI run, a cell's second try met the hung x11vnc that its first

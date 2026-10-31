@@ -65,8 +65,9 @@ log() {
 # unaccepted for 26 s. A live x11vnc accepts within a second, however
 # often clients connect, so the watchdog follows each waiting connection
 # rather than the queue's length; but it serves its clients in one
-# thread, and waits up to -rfbwait, 20 s by default, for a client that
-# does not take what it sends, accepting nobody meanwhile. It starts
+# thread, and waits up to -readtimeout (LibVNCServer's rfbMaxClientWait,
+# which -rfbwait also sets), 20 s by default, for a client that does not
+# take what it sends, accepting nobody meanwhile. It starts
 # x11vnc again a second after it exits, or, while x11vnc lives less than
 # 30 s, after twice the last delay, up to 16 s.
 serve() {
