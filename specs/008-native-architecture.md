@@ -32,7 +32,9 @@ The recommendation not to reimplement libguac stands. libguac is shaped
 around Guacamole's drawing-instruction protocol, and a port would carry
 over that protocol's costs (below) without its ecosystem. v1 is a smaller
 core built around two content classes, terminals and pixels. Guacamole is
-kept only as a bridge for protocols that have no native backend yet.
+kept only as a bridge for protocols that have no native backend yet, as
+an explicit fallback and as the benchmark's baseline, until v1.0 removes
+it.
 
 ## Versioning
 
@@ -60,8 +62,10 @@ In scope:
    tiles.
 6. Native SSH backend, with terminals rendered by the client.
 7. Native VNC backend.
-8. RDP through the guacd bridge. guacd becomes optional and is needed only
-   for RDP.
+8. RDP through the guacd bridge until its native backend takes over by
+   rc.1, and telnet, which gets no native backend, through guacd until
+   guacd is removed. Where a native backend exists it is the default,
+   and guacd serves that protocol only with an explicit `backend: guacd`.
 9. Clients: the web client on protocol v1 ([009](009-react-web-client.md))
    and the Go client core, which the end-to-end tests and the Swift client
    ([010](010-native-swift-client.md)) build on. The Swift client is a
@@ -97,14 +101,28 @@ guacd nor the Guacamole protocol. RDP is native if its spike passes; if
 not, an isolated helper process takes its place, the one exception to
 "no external process", and still free of Guacamole.
 
+The owner's calls on 2026-10-31 sharpen this. Native is the default
+wherever a native backend exists. guacd stays only as an explicit
+`backend: guacd` fallback and as the benchmark's baseline, and is
+deleted per protocol once the benchmark shows the native backend at
+least 10x better. RDP is native in v1.0, with no helper
+([rdp-strategy](008-native-architecture/rdp-strategy.md) decision 5),
+and Windows is checked later, once a host is available. v1.0 also needs
+a native Kubernetes backend (pod exec), specified separately, and the
+React web client on protocol v1. Telnet gets no native backend: it
+stays on guacd and is dropped when guacd is removed.
+
 | Milestone | Delivers | guacd needed for |
 |-----------|----------|------------------|
 | v0.5.0 ([005](005-upstream-guacamole.md), released 2026-10-29) | `occamyd` without cgo; everything through guacd | VNC, SSH, RDP |
 | v1.0.0-beta.1 | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, web client on v1 | VNC, RDP |
 | v1.0.0-beta.2 | Native VNC | RDP |
-| v1.0.0-rc.1 | API and protocol frozen; native RDP (or its helper fallback); Swift client preview | nothing |
+| v1.0.0-rc.1 | API and protocol frozen; native RDP; Swift client preview | nothing |
 | v1.0.0 | No guacd and no Guacamole protocol; the v0 routes are removed | nothing |
 | v1.x | Kerberos, audio and the rest of RDP's later scope per [rdp-strategy](008-native-architecture/rdp-strategy.md) | nothing |
+
+The last column leaves out telnet, which needs guacd for as long as
+guacd is there.
 
 The client side is a separate matter. The Swift app links the Go client
 core through cgo's `c-archive` export ([010](010-native-swift-client.md)).
@@ -175,7 +193,7 @@ Each component is a sub-design (see Design Breakdown):
   the parity criteria for replacing it per protocol.
 - **Native SSH, native VNC:** the first two native backends.
 - **RDP strategy:** guacd, helper process, or pure Go, decided by
-  evaluation.
+  evaluation (decided: pure Go).
 - **Native RDP backend:** the backend over the strategy's pure-Go
   client, then virtual channels, GFX without AVC, and the Windows check.
 - **Go client core:** a pure-Go protocol v1 client library for tests,
@@ -221,11 +239,16 @@ Each beta reruns the benchmark, which also covers #18.
 
 - [ ] v1 beta scope and milestones agreed.
 - [ ] Every sub-design validated and broken into tasks.
-- [ ] Guacamole baseline recorded on v0.5.0 with the
-  [benchmark](008-native-architecture/benchmark.md).
+- [x] Guacamole baseline recorded with the
+  [benchmark](008-native-architecture/benchmark.md): terminals on master
+  after v0.5.0, desktops on v0.6.0
+  ([docs/benchmarks.md](../docs/benchmarks.md)).
 - [ ] v1 meets the benchmark's 10x and 50 ms targets, or each miss is
   justified there by a bound Occamy does not control.
-- [ ] RDP strategy decided after evaluation.
+- [x] RDP strategy decided after evaluation: pure Go, after the spike's
+  steps 1 and 3 against xrdp
+  ([rdp-strategy](008-native-architecture/rdp-strategy.md) decisions 1
+  and 5).
 
 ## Design Breakdown
 

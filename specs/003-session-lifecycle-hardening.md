@@ -15,12 +15,18 @@ affects:
   - docs/
 effort: medium
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
 
 # Session lifecycle hardening
+
+> **Note.** The Overview and Current State describe the session table
+> before this spec was built. The Outcome records what changed and what
+> was not: the pressure test runs in CI, the table has a stress test,
+> debugging is documented, one way a join races the last user remains,
+> and #18 and #20 are closed.
 
 ## Overview
 
@@ -258,8 +264,8 @@ Answered in the Outcome.
 - [x] The pressure test runs in the e2e job, and `occamyd`'s goroutines
   return to their baseline afterwards.
 - [x] Debugging and measurement are documented with baseline numbers.
-- [ ] #20 and #18 are closed, with a comment on what fixed each. #79 closes
-  both when it merges; the comments follow the merge.
+- [x] #20 and #18 are closed, with a comment on what fixed each. #79
+  closed both when it merged, and each has a comment on its fix.
 
 ## Outcome
 
@@ -376,7 +382,7 @@ RSS. The body above is corrected for the fallback.
   which guacd does not report. `checkSession` failing on any retry is the
   test that would show it; no CI run has.
 - #20 and #18 are closed by the merge, and the comments on them follow
-  it.
+  it. (Done: #79 closed both, and each has a comment on its fix.)
 
 **Unspecified work.**
 

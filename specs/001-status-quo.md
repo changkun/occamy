@@ -24,7 +24,7 @@ affects:
   - guacamole/README.md
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -108,6 +108,9 @@ reversible.
 - `gioui.org` and `tfriedel6/canvas` dropped from master.
 - gin-jwt kept on v2 for now: v3 changes the API. The move to v3 is planned
   with the new token model in [004](004-security-hardening.md).
+  (Superseded: the v0 routes moved to the standard library and
+  golang-jwt v5 instead, and gin-jwt is gone; see
+  [api-and-server-stack](008-native-architecture/api-and-server-stack.md).)
 - `internal/config/config.go`: `ioutil.ReadFile` → `os.ReadFile`, yaml v3.
 - `internal/lib/user_test.go` updated to the current `NewUser` and
   `HandleConnection` signatures; `FailNow` no longer called from a goroutine.
@@ -172,7 +175,7 @@ reversible.
 |-------|---------------------|
 | Any token whose `host` lacked a port left the proxy mutex locked (fixed after the revival) | [003](003-session-lifecycle-hardening.md) |
 | Second SSH session in one process gets no output (#22). Resolved by 005: guacd runs each connection in its own process | [002](002-ssh-session-rejoin.md) (archived) |
-| Panics under high pressure (#20), unsynchronized session teardown. The crashes went with libguac (005), and the pressure test passes locally but is not in CI yet | [003](003-session-lifecycle-hardening.md) |
+| Panics under high pressure (#20), unsynchronized session teardown. The crashes went with libguac (005), and CI runs the pressure test since 003 | [003](003-session-lifecycle-hardening.md) |
 | JWT carries plaintext remote credentials, tokens appear in request logs, `/login` is an open proxy, debug mode (with pprof) is the default | [004](004-security-hardening.md) |
 | RDP not built (FreeRDP 1.x only); Windows RDP failures (#32); macOS native segfault (#25). Resolved by 005, except #32, which awaits a check against a Windows host: RDP runs through guacd, and `occamyd` builds without cgo | [005](005-upstream-guacamole.md) |
 | Compose demo images from 2019, amd64 only; no automated end-to-end test. Resolved by 006 | [006](006-demo-stack-refresh.md) |
@@ -210,7 +213,7 @@ Not verified at the time, and what happened since:
   session. It was on 2026-10-29: the v0.5.0 image logs in and renders the
   VNC and RDP sessions from the demo stack.
 - The `docker/docker-compose.yaml` demo and `tests/pressure_test.go`. Both
-  are covered since 006, and the pressure test is still opt-in.
+  are covered since 006, and CI runs the pressure test since 003.
 - RDP and native macOS builds. Both are covered since 005.
 
 ## Acceptance Criteria
