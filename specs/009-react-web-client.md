@@ -456,7 +456,7 @@ Settled on 2026-10-31.
   - New: terminal sessions, the clipboard, credential prompts, sharing,
     viewers, visibility, the remote's cursor and title, the bell, and
     why a session ended.
-- **Tests:** 205 in `src/lib` and `src/views`, in the `web` job. Unit
+- **Tests:** 206 in `src/lib` and `src/views`, in the `web` job. Unit
   tests for the API calls against a scripted fetch (each request's
   method, path, headers and exact body, and the time limit on the
   answer and its body), the identity a token names, PKCE against RFC
@@ -491,10 +491,11 @@ Settled on 2026-10-31.
   for the session's end, 4002 to 4006 and 1001, before or during a
   resumed End counts for the session ended and replaces what End said
   before, while 1011 and 4001 do not; the owner's session is kept for a
-  reload through a lost connection, a takeover and the page's own close
-  on `pagehide`, not for a share or a role other than the owner's, and
-  forgotten once it ends, once occamyd refuses to join it, and once the
-  user leaves or ends it; a reload over it signs in again and joins it;
+  reload through a lost connection, a takeover, the page's own close
+  on `pagehide` and an End that failed, not for a share or a role other
+  than the owner's, and forgotten once it ends, once occamyd refuses to
+  join it, and once the user leaves it, as after End ended it; a reload
+  over it signs in again and joins it;
   and the clipboard panel shows the remote's next clipboard after text
   was sent, keeping only what was typed since. The
   controller runs against a stand-in `connect` and session (the
@@ -651,10 +652,12 @@ Settled on 2026-10-31.
     joins it; occamyd decides, so a session past its grace, or a user
     who is not its owner, is refused with 4001 and the view says so.
     It stays kept through a lost connection, a takeover and the page's
-    own close on `pagehide`, as Join again would join it, and is
-    forgotten once the session ends (4002 to 4006, 1001), once occamyd
-    refuses to join it, and once the user leaves or ends it, so that a
-    stale one costs one refused join at most. A share is never kept,
+    own close on `pagehide`, as Join again would join it, and through
+    an End whose `DELETE` failed, after which the session runs on for
+    the owner's grace. It is forgotten once the session ends (4002 to
+    4006, 1001), once occamyd refuses to join it, and once the user
+    leaves it, as after End ended it, so that a stale one costs one
+    refused join at most. A share is never kept,
     since its token must not outlive the page's load (fragment.ts), and
     a share link's page forgets an owner's session kept before; a
     viewer that reloads opens the link again.
