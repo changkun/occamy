@@ -55,6 +55,19 @@ type Config struct {
 	// Capabilities, DefaultCacheSlots if zero, and keeps a mirror of the
 	// slots of each client that agrees to both.
 	NoCache bool
+	// NoShare turns the encode cache and its workers off: each viewer of
+	// a session encodes its tiles alone, on its writer. Otherwise the
+	// viewers whose encoders are internal/encoder's share the session's
+	// encodings of tiles and runs, and its workers, which encode a
+	// frame's rows ahead of the writer.
+	NoShare bool
+	// EncodeWorkers is how many workers a session has,
+	// DefaultEncodeWorkers() if zero, none if negative: the viewers then
+	// share the encode cache only.
+	EncodeWorkers int
+	// EncodeCacheBytes bounds the encodings a session keeps,
+	// DefaultEncodeCacheBytes if zero or less.
+	EncodeCacheBytes int
 	// Logger receives the stream's log, slog.Default() if nil.
 	Logger *slog.Logger
 	// ViewerTimeout bounds how long a viewer, hidden or not, may leave
@@ -229,6 +242,18 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 		w.refineDelay = cfg.RefineDelay
 	}
 	w.stallTimeout = cfg.ViewerTimeout
+	if p, ok := profileOf(enc); ok && w.fb != nil && !cfg.NoShare {
+		workers := cfg.EncodeWorkers
+		if workers == 0 {
+			workers = DefaultEncodeWorkers()
+		}
+		budget := cfg.EncodeCacheBytes
+		if budget <= 0 {
+			budget = DefaultEncodeCacheBytes
+		}
+		w.sh, w.prof = share(w.fb, workers, budget), p
+		defer w.sh.release(w.fb)
+	}
 	read := make(chan error, 1)
 	go func() {
 		err := w.safeRead(ctx, limits)

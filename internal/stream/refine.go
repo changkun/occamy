@@ -235,17 +235,19 @@ func (w *writer) refineTile(id uint32, t int) (send, ok bool) {
 	if w.cached(id, r, key, keyed) {
 		return true, true
 	}
-	b, codec, lossy := w.enc.Tile(w.payload[:0], w.tiles[0], r.Dx(), r.Dy(), false)
+	var codec protocol.Codec
+	var lossy bool
+	w.payload, codec, lossy = w.encodeTile(w.payload[:0], t, 0, version, r, false)
 	if lossy {
+		// As a run of one still tile.
 		q := w.p.Quality()
 		var got int
 		var reached bool
-		b, codec, got, reached = w.enc.Still(w.payload[:0], w.tiles[0], r.Dx(), r.Dy(), r.Dx(), w.p.MinQuality(), q)
+		codec, got, reached = w.encodeRun(t, 1, w.tiles[0], r, true, q, w.p.MinQuality())
 		if !exact(codec) {
 			w.msgQuality, w.msgGoal = stillGoal(got, q, reached)
 		}
 	}
-	w.payload = b
 	have := w.quality(t)
 	if codec == 0 || w.msgQuality <= have {
 		// Nothing better to send: the goal is what the client has, or

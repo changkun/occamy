@@ -110,6 +110,14 @@ type writer struct {
 	msgSlot uint16
 	msgKey  cacheKey
 
+	// sh is the session's encode cache and workers (share.go), shared
+	// with the other viewers whose encoders are of profile prof; nil if
+	// the writer encodes alone. fetch is the frame's work for the
+	// workers, nil if none.
+	sh    *shared
+	prof  profile
+	fetch *prefetch
+
 	// Refinement (refine.go). heat is each tile's motion as of heatAt;
 	// changed is when each tile last went out changed, since start; goal
 	// is the quality each tile's pixels are to reach on the client, 0
@@ -367,6 +375,8 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 	sent, messages, copies := 0, 0, 0
 	w.encodeTime, w.scrollTime = 0, 0
 	detect := w.sc != nil // the order has not been searched for scrolls
+	fetch := !input       // the order's rows have not been handed to the workers
+	defer w.stopFetch()
 	for i := 0; i < len(order); i++ {
 		if err := w.smallNow(ctx); err != nil {
 			return err
@@ -381,9 +391,11 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 			}
 			if n > 0 {
 				order, i, input = w.fresh[:n], 0, true
-				// The tile read ahead belongs to the order left behind.
+				// The tile read ahead belongs to the order left behind,
+				// and so do the rows the workers have.
 				w.ahead.ok = false
-				detect = w.sc != nil
+				w.stopFetch()
+				detect, fetch = w.sc != nil, false
 			}
 		}
 		if input && inputBytes > 0 && w.versions[order[i]] != w.versions[order[i-1]] &&
@@ -409,6 +421,12 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 				carried = true
 				inputBytes += b
 			}
+		}
+		if fetch {
+			// Once the copies are known, the workers encode the rows
+			// after the writer's.
+			fetch = false
+			w.fetch = w.prefetch(order[i:])
 		}
 		if w.sent[order[i]] >= w.versions[order[i]] {
 			continue // a copy completed it
