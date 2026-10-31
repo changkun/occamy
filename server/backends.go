@@ -95,9 +95,8 @@ func (b backends) serves(protocol string) bool {
 }
 
 // newBackends returns the factory: the native SSH backend for ssh, the
-// native RDP backend for rdp, the native VNC backend for vnc with
-// backend: native, and the guacd bridge at g for vnc, telnet, and rdp
-// with backend: guacd.
+// native VNC and RDP backends for vnc and rdp, their default, and the
+// guacd bridge at g for telnet, and for vnc and rdp with backend: guacd.
 func newBackends(g config.Guacd) backends {
 	b := backends{}
 	b.register("ssh", config.BackendNative, "ssh", newSSH)

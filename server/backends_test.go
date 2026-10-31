@@ -46,10 +46,10 @@ func TestBackendDefaults(t *testing.T) {
 	if !maps.Equal(got, want) {
 		t.Errorf("backends %v, want %v", got, want)
 	}
-	// An empty backend is the protocol's default: native for rdp, and
-	// guacd for vnc until its native backend becomes the default.
+	// An empty backend is the protocol's default: native for vnc and
+	// rdp, with guacd as their explicit fallback.
 	for _, tt := range []struct{ protocol, backend, want string }{
-		{"ssh", "", "ssh"}, {"vnc", "", "guacd"}, {"vnc", "native", "vnc"}, {"vnc", "guacd", "guacd"},
+		{"ssh", "", "ssh"}, {"vnc", "", "vnc"}, {"vnc", "native", "vnc"}, {"vnc", "guacd", "guacd"},
 		{"rdp", "", "rdp"}, {"rdp", "native", "rdp"}, {"rdp", "guacd", "guacd"}, {"telnet", "", "guacd"},
 	} {
 		if m, ok := b.lookup(tt.protocol, tt.backend); !ok || m.name != tt.want {

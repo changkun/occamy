@@ -59,9 +59,10 @@ In scope:
 5. Graphics pipeline: framebuffer, damage tracking, lossless and lossy
    tiles.
 6. Native SSH backend, with terminals rendered by the client.
-7. Native VNC backend.
+7. Native VNC backend, vnc's default (the owner's decision of
+   2026-10-31), with the guacd bridge as an explicit fallback.
 8. RDP through the guacd bridge. guacd becomes optional and is needed only
-   for RDP.
+   for RDP, telnet, and connections that opt into the guacd fallback.
 9. Clients: the web client on protocol v1 ([009](009-react-web-client.md))
    and the Go client core, which the end-to-end tests and the Swift client
    ([010](010-native-swift-client.md)) build on. The Swift client is a
@@ -90,20 +91,26 @@ Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
 "Pure Go" means `occamyd` builds with `CGO_ENABLED=0` **and** no protocol
 needs an external process. 005 delivered the first half in v0.5.0: C left
 `occamyd`'s process, and guacd became a sidecar. The second half replaces
-guacd one protocol at a time. Each switch is gated by the parity criteria
-in [guacd-bridge](008-native-architecture/guacd-bridge.md). The goal, the
-owner's call on 2026-10-30, is a v1.0 with no Guacamole anywhere: neither
-guacd nor the Guacamole protocol. RDP is native if its spike passes; if
-not, an isolated helper process takes its place, the one exception to
-"no external process", and still free of Guacamole.
+guacd one protocol at a time. The goal, the owner's call on 2026-10-30, is
+a v1.0 with no Guacamole anywhere: neither guacd nor the Guacamole
+protocol. On 2026-10-31 the owner settled how
+([guacd-bridge](008-native-architecture/guacd-bridge.md), Parity gate):
+a protocol defaults to its native backend as soon as it has one; guacd
+stays only as an explicit fallback (`backend: guacd`) and the benchmark's
+baseline; and a protocol's guacd path is deleted once the benchmark shows
+native at least 10x better than the guacd baseline on each scenario's
+primary metric and the parity matrix passes. telnet gets no native
+backend: v1.0 doesn't need it, so it is dropped with guacd. RDP is native
+if its spike passes; if not, an isolated helper process takes its place,
+the one exception to "no external process", and still free of Guacamole.
 
 | Milestone | Delivers | guacd needed for |
 |-----------|----------|------------------|
 | v0.5.0 ([005](005-upstream-guacamole.md), released 2026-10-29) | `occamyd` without cgo; everything through guacd | VNC, SSH, RDP |
-| v1.0.0-beta.1 | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, web client on v1 | VNC, RDP |
-| v1.0.0-beta.2 | Native VNC | RDP |
-| v1.0.0-rc.1 | API and protocol frozen; native RDP (or its helper fallback); Swift client preview | nothing |
-| v1.0.0 | No guacd and no Guacamole protocol; the v0 routes are removed | nothing |
+| v1.0.0-beta.1 | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, native VNC as vnc's default, web client on v1 | RDP, telnet; VNC only with `backend: guacd` |
+| v1.0.0-beta.2 | Native VNC through the parity gate: VNC's guacd fallback deleted once the benchmark shows native at least 10x better | RDP, telnet |
+| v1.0.0-rc.1 | API and protocol frozen; native RDP (or its helper fallback) as rdp's default; Swift client preview | telnet, and any fallback still short of the gate |
+| v1.0.0 | No guacd and no Guacamole protocol, so no telnet; the v0 routes are removed | nothing |
 | v1.x | Kerberos, audio and the rest of RDP's later scope per [rdp-strategy](008-native-architecture/rdp-strategy.md) | nothing |
 
 The client side is a separate matter. The Swift app links the Go client

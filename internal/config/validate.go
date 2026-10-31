@@ -529,23 +529,20 @@ func (f *File) validateAdhocBackends(c *checker) {
 // the certificate as the file says.
 func (c *checker) connectionTLS(path string, cn *Connection) {
 	t := cn.TLS
-	checkPin := vnc.CheckPin
+	checkPin, name, hint := vnc.CheckPin, "VNC", ""
 	switch cn.Protocol {
 	case "vnc":
-		if t.set() && cn.Backend != BackendNative {
-			c.add(path, "only the native VNC backend checks the certificate as tls says: set backend: native, since guacd, which serves vnc connections by default, would not")
-			return
-		}
 	case "rdp":
-		if t.set() && cn.Backend != BackendNative {
-			c.add(path, "only the native RDP backend checks the certificate as tls says: leave backend out, or set native, since guacd would not; through guacd, guacd.params.rdp.ignore-cert and cert-fingerprints decide")
-			return
-		}
-		checkPin = rdp.CheckPin
+		checkPin, name = rdp.CheckPin, "RDP"
+		hint = "; through guacd, guacd.params.rdp's ignore-cert and cert-fingerprints decide"
 	default:
 		if t.set() {
 			c.add(path, "only vnc and rdp connections have tls")
 		}
+		return
+	}
+	if t.set() && cn.Backend != BackendNative {
+		c.add(path, "only the native %s backend checks the certificate as tls says, and backend: %s would not: leave backend out, or set native%s", name, cn.Backend, hint)
 		return
 	}
 	if t.CAFile != "" && len(t.Pins) > 0 {
@@ -575,7 +572,7 @@ func (c *checker) ard(path string, cn *Connection) {
 	case cn.Protocol != "vnc":
 		c.add(path, "only vnc connections have ard")
 	case cn.Backend != BackendNative:
-		c.add(path, "only the native VNC backend speaks Apple Remote Desktop authentication: set backend: native")
+		c.add(path, "only the native VNC backend speaks Apple Remote Desktop authentication, and backend: %s does not: leave backend out, or set native", cn.Backend)
 	case cn.TLS.required():
 		c.add(path, "Apple Remote Desktop authentication runs without TLS, so it cannot be allowed while tls requires TLS (require, ca_file or pins)")
 	}
@@ -590,7 +587,7 @@ func (c *checker) security(path string, cn *Connection) {
 	case cn.Protocol != "rdp":
 		c.add(path, "only rdp connections have security")
 	case cn.Backend != BackendNative:
-		c.add(path, "only the native RDP backend reads security: leave backend out, or set native; through guacd, set guacd.params.rdp.security")
+		c.add(path, "only the native RDP backend reads security, and backend: %s does not: leave backend out, or set native; through guacd, guacd.params.rdp.security sets it", cn.Backend)
 	default:
 		switch cn.Security {
 		case rdpb.SecurityNLA, rdpb.SecurityNLAExt, rdpb.SecurityTLS, rdpb.SecurityAny:

@@ -5,10 +5,10 @@
 # The v1 file of the demo stack's occamy-v1 service
 # (docker-compose.yaml), which serves API v1 and protocol v1 on port 5637
 # next to the v0 service: the demo VNC and RDP servers through occamyd's
-# native backends and through guacd, side by side, guacd as the fallback
-# and the baseline the native backends are measured against
-# (specs/008-native-architecture/guacd-bridge.md). The user demo signs in
-# with the password occamy:
+# native backends, their default, and through guacd, the explicit
+# fallback and the benchmark's baseline, side by side
+# (specs/008-native-architecture/guacd-bridge.md, Parity gate). The user
+# demo signs in with the password occamy:
 #
 #	curl -s localhost:5637/api/v1/auth/token \
 #	  -H 'Content-Type: application/json' \
@@ -27,21 +27,23 @@ connections:
   - id: vnc-native
     name: VNC, native backend
     protocol: vnc
-    backend: native
+    # No backend: native is vnc's default, so this connection serves
+    # the default end to end.
     target: vnc:5900
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
   - id: vnc-guacd
     name: VNC, through guacd
     protocol: vnc
-    # backend: guacd is vnc's default.
+    # guacd serves vnc only when a connection asks for it.
+    backend: guacd
     target: vnc:5900
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
   - id: rdp-native
     name: RDP, native backend
     protocol: rdp
-    # backend: native is rdp's default.
+    # No backend: native is rdp's default, as for vnc-native.
     target: rdp:3389
     # xrdp speaks TLS without NLA, and signs its certificate itself when
     # the image is built, so there is nothing to pin in advance: for the
@@ -53,6 +55,7 @@ connections:
   - id: rdp-guacd
     name: RDP, through guacd
     protocol: rdp
+    # guacd serves rdp only when a connection asks for it.
     backend: guacd
     target: rdp:3389
     credentials: {username: occamy, password_env: OCCAMY_DEMO_RDP_PASSWORD}

@@ -73,8 +73,8 @@ auth:
     # user. Off, such a sign-in is refused.
     link_static_users: false
 
-# guacd serves the telnet connections, the vnc connections that do not
-# set backend: native, and the rdp connections that set backend: guacd.
+# guacd serves the telnet connections, and the vnc and rdp connections
+# that set backend: guacd.
 guacd:
   address: localhost:4822
   # guacd parameters per protocol. Connection targets and credentials
@@ -106,10 +106,9 @@ connections:
     name: NAS desktop
     protocol: vnc
     target: nas.internal # the protocol's default port, 5900
-    # occamyd's own VNC client rather than guacd, the default for vnc
-    # until the native backend passes its parity gate. tls and ard need
-    # it.
-    backend: native
+    # No backend: vnc's default is native, occamyd's own VNC client.
+    # backend: guacd would go through guacd instead, a fallback that
+    # checks no certificate, so tls and ard need native.
     # The NAS's self-signed certificate, by the fingerprint that
     # openssl x509 -noout -fingerprint -sha256 prints.
     tls:
@@ -178,8 +177,9 @@ adhoc_allowlist:
   - 10.0.0.0/8
   - "*.lab.internal:22"
 # The backend of ad-hoc targets by protocol, as a connection's backend:
-# ssh and rdp are native, and vnc and telnet go through guacd unless
-# set. An ad-hoc rdp target on the native backend takes NLA, and a
+# native for ssh, vnc and rdp, and guacd for telnet, unless set.
+# vnc: guacd would send ad-hoc vnc targets through guacd, the fallback.
+# An ad-hoc rdp target on the native backend takes NLA, and a
 # certificate that chains to the system's roots.
 adhoc_backends:
   vnc: native

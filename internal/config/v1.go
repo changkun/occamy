@@ -70,22 +70,24 @@ type File struct {
 
 // The backends that serve a connection's sessions.
 const (
-	// BackendNative is occamyd's own client of the protocol: ssh, rdp,
-	// and vnc with backend: native.
+	// BackendNative is occamyd's own client of the protocol, for ssh,
+	// vnc and rdp.
 	BackendNative = "native"
-	// BackendGuacd is the guacd bridge, for every protocol but ssh.
+	// BackendGuacd is the guacd bridge, for every protocol but ssh: the
+	// only backend of telnet, and the opt-in fallback of vnc and rdp.
 	BackendGuacd = "guacd"
 )
 
 // DefaultBackend returns the backend that serves protocol's sessions
-// when the configuration does not pick one: native for ssh, which has
-// no other, and for rdp, which backend: guacd keeps on the bridge; guacd
-// for the others. vnc stays on guacd until its native backend becomes
-// the default (specs/008-native-architecture/guacd-bridge.md):
-// backend: native opts a connection in.
+// when the configuration does not pick one: native wherever a native
+// backend exists, which is ssh, vnc and rdp, and guacd for telnet,
+// which has none. For vnc and rdp, backend: guacd is an explicit
+// fallback and the benchmark's baseline, kept until the benchmark shows
+// native at least 10x better
+// (specs/008-native-architecture/guacd-bridge.md, Parity gate).
 func DefaultBackend(protocol string) string {
 	switch protocol {
-	case "ssh", "rdp":
+	case "ssh", "vnc", "rdp":
 		return BackendNative
 	}
 	return BackendGuacd

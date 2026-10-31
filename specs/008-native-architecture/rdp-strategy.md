@@ -100,7 +100,10 @@ after session-core settles:
 Outcome:
 
 - If the spike passes, D becomes the v1.x plan, and RDP follows the
-  bridge's parity gate.
+  bridge's parity gate. (Since the owner's decision of 2026-10-31, the
+  native backend is rdp's default once it is registered, and the gate
+  decides when RDP's guacd fallback is deleted; see
+  [guacd-bridge](guacd-bridge.md), Parity gate.)
 - If it fails, choose between B and C on NLA support, GFX coverage,
   licence compatibility with MIT, maintenance activity and build
   complexity. guacd then leaves the default deployment while `occamyd`
