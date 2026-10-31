@@ -110,9 +110,12 @@ func paint(img *image.RGBA, r image.Rectangle, v byte) {
 // before it marks the framebuffer closed, or if CopyRect draws after
 // Close (from the review of #117).
 func TestCloseWhileDrawing(t *testing.T) {
-	f := framebuffer.New(64)
-	f.Resize(256, 256)
-	r := image.Rect(0, 64, 256, 128)
+	// A Lock of a thousand rows of tiles, which Close releases one by
+	// one: the writer waits for the first, and gets it while Close still
+	// releases the rest.
+	f := framebuffer.New(4)
+	f.Resize(16, 4096)
+	r := f.Bounds()
 	locked, draw := make(chan struct{}), make(chan struct{})
 	var wg sync.WaitGroup
 	wg.Go(func() {
@@ -120,7 +123,7 @@ func TestCloseWhileDrawing(t *testing.T) {
 		close(locked)
 		<-draw
 		// Nothing orders this drawing with Close and what follows it.
-		for v := range byte(8) {
+		for v := range byte(4) {
 			paint(img, r, v)
 		}
 		f.Unlock(r)
@@ -128,7 +131,7 @@ func TestCloseWhileDrawing(t *testing.T) {
 	<-locked
 	read := make(chan image.Rectangle, 1)
 	go func() {
-		got, _ := f.ReadTile(5, make([]byte, 4*64*64))
+		got, _ := f.ReadTile(0, make([]byte, 4*4*4))
 		read <- got
 	}()
 	waitIn(t, "(*Framebuffer).ReadTile", "(*RWMutex).RLock")
@@ -138,7 +141,7 @@ func TestCloseWhileDrawing(t *testing.T) {
 		t.Errorf("ReadTile read %v that a Lock still draws", got)
 	}
 	clock := f.Clock()
-	f.CopyRect(image.Rect(0, 64, 64, 128), image.Pt(64, 128))
+	f.CopyRect(image.Rect(0, 0, 4, 4), image.Pt(0, 8))
 	if f.Clock() != clock {
 		t.Error("CopyRect after Close changed the screen")
 	}
