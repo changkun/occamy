@@ -153,16 +153,17 @@ func checkSessionV1(t *testing.T, addr, connection, backend string) {
 		t.Errorf("the session's backend is %q, want %q", state.Backend, backend)
 	}
 
-	// Input reaches the remote: the frame that shows its effect, or
-	// a later one, reports it.
-	seq, err := cl.Pointer(ctx, 100, 100, 0)
-	if err != nil {
+	// Input reaches the remote: the frame that shows its effect, the
+	// xterm's echo of the key under the pointer, or a later one, reports
+	// it.
+	if _, err := cl.Pointer(ctx, 100, 100, 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := cl.Key(ctx, true, 'a', 0); err != nil {
 		t.Fatal(err)
 	}
-	if seq, err = cl.Key(ctx, false, 'a', 0); err != nil {
+	seq, err := cl.Key(ctx, false, 'a', 0)
+	if err != nil {
 		t.Fatal(err)
 	}
 	for {
