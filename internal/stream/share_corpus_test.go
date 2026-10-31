@@ -91,6 +91,7 @@ func (d *direct) send() error {
 	if err := w.syncSize(d.ctx); err != nil {
 		return err
 	}
+	d.aging()
 	if _, ok := w.collect(image.Rectangle{}); !ok {
 		return errors.New("resized")
 	}
