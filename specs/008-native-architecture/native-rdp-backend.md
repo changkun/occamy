@@ -837,7 +837,7 @@ and guacd leaves the default deployment.
   (`TestSuppressOutputReaderFirst`, through the seam). The backend's
   `TestRunResize`: sizes of zero or less ask for nothing, a `Resize`
   goes as a layout, the server's reactivation resizes the sink, and
-  Suppress Output is repeated after it. Coverage: `internal/rdp` 89.9%
+  Suppress Output is repeated after it. Coverage: `internal/rdp` 90.0%
   of statements, `dynvc.go` 95.1%; `internal/backend/rdp` 98.5%.
 - **Integration test.** Under the `rdp_integration` tag, on 2026-10-31
   against the bench desktop image's xrdp 0.10.1 with xorgxrdp 0.10.2:
