@@ -6,7 +6,13 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"net/http"
+	"net/netip"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -89,8 +95,11 @@ func TestCheckMembers(t *testing.T) {
 		{`{"-":"s"}`, `unknown field "-"`},
 		{`{"hidden":"h"}`, `unknown field "hidden"`},
 		{`{"strictEmbedded":{}}`, `unknown field "strictEmbedded"`},
-		// Too deep.
-		{`{"list":` + strings.Repeat("[", 40) + strings.Repeat("]", 40) + `}`, "nests deeper than"},
+		// Too deep: the object is the first level, so 31 arrays in it
+		// are the most it takes.
+		{`{"any":` + strings.Repeat("[", 31) + strings.Repeat("]", 31) + `}`, ""},
+		{`{"any":` + strings.Repeat("[", 32) + strings.Repeat("]", 32) + `}`, "the body nests deeper than 32"},
+		{`{"list":` + strings.Repeat("[", 40) + strings.Repeat("]", 40) + `}`, "the body nests deeper than 32"},
 		// Syntax errors are the decoder's to report.
 		{`{"id":`, ""},
 		{`{"id" "a"}`, ""},
@@ -110,6 +119,142 @@ func TestCheckMembers(t *testing.T) {
 			t.Errorf("%s: %v, want an error with %q", tt.body, err, tt.want)
 		}
 	}
+}
+
+// requestTypes are the types that the routes decode request bodies
+// into, by name. TestRequestTypesFlat fails for a decodeJSON call whose
+// type is not listed.
+var requestTypes = map[string]reflect.Type{
+	"tokenRequest": reflect.TypeFor[tokenRequest](),
+	"openRequest":  reflect.TypeFor[openRequest](),
+	"shareRequest": reflect.TypeFor[shareRequest](),
+	"codeRequest":  reflect.TypeFor[codeRequest](),
+}
+
+// TestRequestTypesFlat checks checkMembers' preconditions for every type
+// that the package's code passes to decodeJSON: no embedded struct, and
+// no map whose keys are not plain strings. It finds the calls in the
+// source, each with a variable declared as var name T in its function.
+func TestRequestTypesFlat(t *testing.T) {
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	called := map[string]bool{}
+	for _, name := range files {
+		if strings.HasSuffix(name, "_test.go") {
+			continue
+		}
+		f, err := parser.ParseFile(fset, name, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, d := range f.Decls {
+			fn, ok := d.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			for _, call := range decodeCalls(fn.Body) {
+				typ := declaredType(fn.Body, call)
+				switch {
+				case typ == "":
+					t.Errorf("%s: decodeJSON's value is not &name, with name declared as var name T", fset.Position(call.Pos()))
+				case requestTypes[typ] == nil:
+					t.Errorf("%s: decodeJSON decodes into %s, which requestTypes does not list", fset.Position(call.Pos()), typ)
+				}
+				called[typ] = true
+			}
+		}
+	}
+	for name, typ := range requestTypes {
+		if !called[name] {
+			t.Errorf("requestTypes lists %s, which no decodeJSON call decodes into", name)
+		}
+		if p := notFlat(typ, map[reflect.Type]bool{}); p != "" {
+			t.Errorf("%s is not flat, which checkMembers assumes: %s", name, p)
+		}
+	}
+	// The check itself finds what it is for.
+	for _, typ := range []reflect.Type{reflect.TypeFor[strictRequest](), reflect.TypeFor[struct{ M map[int]string }](), reflect.TypeFor[struct{ L []map[netip.Addr]int }]()} {
+		if notFlat(typ, map[reflect.Type]bool{}) == "" {
+			t.Errorf("notFlat(%v) found nothing", typ)
+		}
+	}
+}
+
+// decodeCalls returns the calls of decodeJSON in body.
+func decodeCalls(body *ast.BlockStmt) []*ast.CallExpr {
+	var calls []*ast.CallExpr
+	ast.Inspect(body, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok {
+			if id, ok := call.Fun.(*ast.Ident); ok && id.Name == "decodeJSON" && len(call.Args) == 3 {
+				calls = append(calls, call)
+			}
+		}
+		return true
+	})
+	return calls
+}
+
+// declaredType returns the name of T for a call of decodeJSON whose value
+// is &name, where body declares var name T; or "" otherwise.
+func declaredType(body *ast.BlockStmt, call *ast.CallExpr) string {
+	u, ok := call.Args[2].(*ast.UnaryExpr)
+	if !ok || u.Op != token.AND {
+		return ""
+	}
+	v, ok := u.X.(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	typ := ""
+	ast.Inspect(body, func(n ast.Node) bool {
+		spec, ok := n.(*ast.ValueSpec)
+		if !ok {
+			return true
+		}
+		for _, name := range spec.Names {
+			if id, ok := spec.Type.(*ast.Ident); ok && name.Name == v.Name {
+				typ = id.Name
+			}
+		}
+		return true
+	})
+	return typ
+}
+
+// notFlat describes what in t, a type that a body decodes into, breaks
+// checkMembers' preconditions, or returns "".
+func notFlat(t reflect.Type, seen map[reflect.Type]bool) string {
+	t = memberType(t)
+	if t == nil || seen[t] {
+		return ""
+	}
+	seen[t] = true
+	switch t.Kind() {
+	case reflect.Struct:
+		for i := range t.NumField() {
+			f := t.Field(i)
+			if f.Anonymous {
+				return fmt.Sprintf("%v embeds %v", t, f.Type)
+			}
+			if !f.IsExported() || f.Tag.Get("json") == "-" {
+				continue
+			}
+			if p := notFlat(f.Type, seen); p != "" {
+				return p
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		return notFlat(t.Elem(), seen)
+	case reflect.Map:
+		if k := t.Key(); k.Kind() != reflect.String || memberType(k) == nil {
+			return fmt.Sprintf("%v has keys of %v, not plain strings", t, k)
+		}
+		return notFlat(t.Elem(), seen)
+	}
+	return ""
 }
 
 // TestStrictRequestBodies sends API v1's routes bodies with a field twice,

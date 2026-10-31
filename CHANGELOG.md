@@ -320,10 +320,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   default during the guacd bridge's opt-in period, so a vnc connection
   with `tls` must set `backend: native`: guacd would not check the
   certificate as `tls` says, and a file without it fails to load,
-  naming the key. A vnc connection without `tls`, which master served
-  natively, checking a VeNCrypt server's certificate against the
-  system's roots, now goes through guacd, which checks no certificate;
-  `backend: native` keeps the check. A native vnc session asks the
+  naming the key. A vnc connection without `tls` goes through guacd,
+  which checks no certificate; `backend: native` checks a VeNCrypt
+  server's certificate against the system's roots. No release served
+  v1 vnc connections. A native vnc session asks the
   server for the owner's size from the stream's `hello`, on a
   connection's stream as on a session's, and a resize that reaches the
   backend before it runs is no longer dropped. A size beyond the
