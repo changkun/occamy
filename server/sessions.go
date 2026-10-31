@@ -63,6 +63,10 @@ type sessionInfo struct {
 	backend    string
 	opened     time.Time
 
+	// gone is closed once the server has forgotten the session and
+	// released its count toward the limits, after its end.
+	gone chan struct{}
+
 	mu          sync.Mutex
 	ownerStream *ownerStream // the stream the owner is connected through, if any
 }
@@ -371,6 +375,7 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 		protocol:   t.protocol,
 		backend:    maker.name,
 		opened:     time.Now(),
+		gone:       make(chan struct{}),
 	}
 	s.mu.Lock()
 	s.sessions[id] = info
@@ -384,6 +389,7 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 		s.ended.add(id, owner, c, time.Now())
 		s.mu.Unlock()
 		release()
+		close(info.gone)
 	}()
 	// #nosec G706 -- the user name and the target are quoted, so they cannot break the line.
 	log.Printf("session %s: user %q opened %s through %s", id, owner.String(), what, maker.name)
@@ -467,6 +473,11 @@ func (s *server) closeSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	info.s.Close()
+	// The session has ended. It is forgotten a moment later, and
+	// DELETE answers only then, so that a request after it, such as a
+	// GET, another DELETE, a share or a new session at the owner's
+	// limit, finds the session gone.
+	<-info.gone
 	log.Printf("session %s: closed by its owner", info.id)
 	w.WriteHeader(http.StatusNoContent)
 }
