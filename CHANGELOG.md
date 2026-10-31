@@ -16,10 +16,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   scenarios over protocol v1, driven by the Go client core through API
   v1 against native SSH and VNC and against VNC and RDP through guacd,
   on the bench stack's `occamy-v1` service
-  ([docs/benchmarks.md](docs/benchmarks.md#the-v1-series)). CI runs them
-  quickly after the v0 smoke run. Their full results wait for the rest
-  of the graphics pipeline and for native RDP. `make bench` takes a
-  compose project and ports for a second stack on a shared host.
+  ([docs/benchmarks.md](docs/benchmarks.md#the-v1-series)). The harness
+  shows and acknowledges v1 frames on a 60 Hz screen's ticks, as the web
+  client does, or at once with `-ack-hz 0`. CI runs them quickly after
+  the v0 smoke run, and stops the bench job at 30 minutes. Their full
+  results wait for the rest of the graphics pipeline and for native RDP.
+  `make bench` takes a compose project and ports for a second stack on a
+  shared host.
 - A public Go package for protocol v1, `changkun.de/x/occamy/protocol`,
   with its framing: the message header and its ignorable flag, the field
   encodings, a registry of message types, and the maximum message size.
@@ -409,6 +412,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Changed
 
+- The plan for v1.0 (owner, 2026-10-31): it waits until the benchmark
+  shows native at least 10x better than guacd, and ships no guacd
+  fallback for a protocol still short of it; release candidates may
+  carry one
+  ([specs/008-native-architecture/benchmark.md](specs/008-native-architecture/benchmark.md#targets)).
 - Building occamyd needs Go 1.26.4 or later, which gen2brain/vpx and
   gen2brain/jpegn require.
 - `make bench` builds occamyd's image from the working tree before

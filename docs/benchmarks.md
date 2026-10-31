@@ -47,6 +47,7 @@ make bench BENCH_FLAGS="-scenarios T1 -net N1 -series occamy"
 | `-series` | `occamy,guacd` | `occamy` goes through occamyd; `guacd` connects to guacd directly; `v1-native` and `v1-guacd` speak protocol v1 to occamy-v1, with native backends or through guacd |
 | `-runs` | `1` | How many times to run everything; the table shows medians |
 | `-quick` | off | A tenth of the samples and a sixth of the durations, to check the setup |
+| `-ack-hz` | `60` | v1: the screen refresh on whose ticks the harness shows and acknowledges frames, as a browser does; `0` acknowledges each at once ([The v1 series](#the-v1-series)) |
 | `-engine` | `podman` | Container engine for CPU time, or `none` |
 | `-project` | `docker` | The stack's compose project, whose containers CPU time is read from |
 | `-addr`, `-v1`, `-guacd` | `localhost:5636`, `localhost:5637`, `localhost:4822` | occamyd for v0, occamy-v1 for v1, and guacd for the direct series |
@@ -79,8 +80,8 @@ answers each `sync` once the frame is applied, and sends a `nop` every
   | N2 | 50 ms | 20 Mbit/s |
 
 - **Bytes** are the TCP payload through the proxy. In the `occamy` series
-  they include the WebSocket frame headers, which the `guacd` series does
-  not have.
+  and the v1 series they include the WebSocket frame headers, which the
+  `guacd` series does not have.
 - **Server CPU** is the CPU time of the occamyd and guacd containers
   during the measured part of a scenario. guacd forks a process per
   connection, and the container's CPU time includes it.
@@ -163,25 +164,48 @@ SSH has no guacd backend in v1. A v1 session runs as follows:
   It signs in at `POST /api/v1/auth/token`, opens
   `GET /api/v1/connections/{id}/stream`, and afterwards ends the session
   with `DELETE /api/v1/sessions/{id}`, since an owner who leaves keeps
-  the session for the 60 s owner grace.
+  the session for the 60 s owner grace. A session whose welcome the
+  client refuses is ended the same way.
 - **Codecs.** It offers what occamy's web client offers when the browser
   decodes them all: deflate, WebP, JPEG and raw, in that order. The
   client core decodes tiles in parallel as they arrive, with deflate
   from `internal/codec`, WebP from `github.com/gen2brain/vpx/webp` and
   JPEG from `image/jpeg` plugged in, and applies a frame to its
   framebuffer when `Next` delivers it.
-- **Frames.** A frame draws if it changed a rectangle. The harness asks
-  `Next` for the next event as soon as it has looked at a frame, which
-  acknowledges the frame, as a client that draws without delay does.
-  **A v1 frame is the server's, not the scene's:** occamyd ends a frame
-  whenever its window allows and the screen has changed, and through the
-  native VNC backend it ends several for each frame of the scene, as
-  x11vnc's updates come in: in a check of the harness, several times the
-  scene's rate for the scroll and for the motion. Frames a second,
-  the share of the scene, and bytes and CPU per frame therefore do not
-  count the scene's frames in v1, and do not compare with v0, until the
-  scene stamps each frame's number for the harness to count; the table
-  notes a row whose frames come faster than its scene.
+- **Frames.** A frame draws if it changed a rectangle. **A v1 frame is
+  the server's, not the scene's:** occamyd ends a frame whenever its
+  window allows and the screen has changed, and through the native VNC
+  backend it ends several for each frame of the scene, as x11vnc's
+  updates come in: in a check of the harness, several times the scene's
+  rate for the scroll and for the motion, and in another, fewer. Frames
+  a second, the share of the scene, and bytes and CPU per frame
+  therefore do not count the scene's frames in v1, and do not compare
+  with v0, until the scene stamps each frame's number for the harness to
+  count. Until then, the table leaves a v1 scene's frame rate out, with
+  the note "server frames, not comparable until the scene frame stamp
+  lands", and the JSON keeps those frames as `server_frames`.
+- **Acknowledgement.** occamy's web client shows a frame at the
+  browser's next animation frame and acknowledges it then, by asking
+  for the next event (`client/occamy-web/src/protocol/display.ts`), and
+  occamyd paces its frames by those acknowledgements, with two frames
+  in flight. The harness does the same on the ticks of a 60 Hz screen,
+  `-ack-hz`, for every frame, drawing or not: a frame counts from the
+  tick that shows it, and the reader asks for the next event after it.
+  `-ack-hz 0` acknowledges each frame as soon as the client core
+  applied it. How the cadence moves each metric:
+  - *Latency (T1, G2, G5), completion (T2, G6) and G7* end on a tick,
+    so 60 Hz adds 0 to 16.7 ms, 8.3 on average, to what `-ack-hz 0`
+    measures, which is earlier than any browser could show the frame.
+    The v0 series answer each `sync` at once, as the baseline did, so
+    against the baseline the default counts that tick against v1;
+    `-ack-hz 0` compares like with like.
+  - *Frame rates* reach at most 60 a second at 60 Hz, as in a browser
+    on a 60 Hz screen; at once, they count every frame the server can
+    end.
+  - *Bytes, server CPU and decode time* in moving scenes (G3 to G5)
+    should be lower at 60 Hz than at once: when acknowledgements come
+    slower, occamyd coalesces more of the scene into each frame. Acking
+    at once models a client faster than a browser.
 - **The probe** is the baseline's: a key's latency ends when the client
   core's framebuffer, after the frame is applied, shows the key's colour
   at the swatch's centre.
@@ -194,15 +218,30 @@ SSH has no guacd backend in v1. A v1 session runs as follows:
   cell with the magenta background. The terminal is 99 × 39 cells, the
   size of guacd's at 1024 × 768 pixels and 96 DPI, so that the shell
   prints the same screens in both protocols.
-- **Decode** is the decoders' CPU time, or the terminal emulator's;
-  copying decoded tiles into the framebuffer is not in it. The v0
-  series' includes compositing, so the column compares v1's two series,
-  not v1 with v0.
-- **Server CPU** is the `occamy-v1` container's and guacd's.
-- **G7** starts at the stream's upgrade. The sign-in before it checks a
-  bcrypt hash and is done once for many sessions, so the JSON records
-  it apart, as `sign_in_ms`. The v0 series' G7 includes its login,
-  which v0 needs for every session.
+- **Decode** is the wall time of each tile's decode, summed over the
+  client core's decoding goroutines, which run in parallel, or the
+  terminal emulator's time; copying decoded tiles into the framebuffer
+  is not in it. The v0 series' includes compositing, so the column
+  compares v1's two series, not v1 with v0, and a table with v1 rows
+  says so under it.
+- **Server CPU** is the `occamy-v1` container's, and guacd's for
+  `v1-guacd`. guacd serves nothing of `v1-native`, so its CPU there is
+  left out and given in a note.
+- **G7** starts at the stream's upgrade and ends at the first frame that
+  shows the remote. For a terminal, that is the first frame with bytes:
+  the session core serves a blank terminal before the backend has
+  connected, whose empty snapshot shows nothing. For a desktop, it is
+  the first frame that drew, as in v0, which may be the backend sizing
+  the screen before its first image; see the benchmark spec's
+  follow-ups. The sign-in before the upgrade checks a bcrypt hash and is
+  done once for many sessions, so G7 leaves it out: the JSON records it
+  as `sign_in_ms`, and the table notes it on the row. The v0 series' G7
+  includes its login, which v0 needs for every session.
+- **Bounds.** A sample that the stack does not answer fails rather than
+  holding the run: 30 s to sign in and open the stream and, in G7, for
+  the first frame; 10 s for a key's update and for an input to be
+  queued; 30 s for T2's end marker. CI's bench job stops at 30 minutes,
+  and the harness exits non-zero when a chosen series ran no scenario.
 - **RDP through guacd** differs from the baseline in one parameter:
   occamyd gives guacd `disable-gfx`, because xrdp's colours shifted
   through RDP's graphics pipeline. The baseline did not set it, and
@@ -473,6 +512,13 @@ baseline shows a bound that Occamy cannot beat, the target is that bound
 plus a margin instead. The tables below apply this to the medians above:
 the number before each arrow is the baseline, and the bold one the
 target.
+
+The targets gate the release (owner, 2026-10-31): v1.0 waits until the
+benchmark shows native at least 10x better than guacd. It does not ship
+with a guacd fallback for any protocol still short of 10x; release
+candidates may still carry one. Whether that means a flat 10x or each
+target as defined here, such as T1 at N1 capped by a network bound, is
+an open question for the owner.
 
 - **Latency and completion.** At N0 a target is no lower than the remote
   server's own time, where `bench/vncprobe` measured it, plus 2 ms. A
