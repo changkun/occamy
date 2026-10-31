@@ -667,6 +667,42 @@ func FuzzChannel(f *testing.F) {
 	})
 }
 
+// A channel keeps the first limit bytes of a message and tells its
+// handler the rest was cut, whatever the message declares; a first chunk
+// starts the message anew.
+func TestChannelLimit(t *testing.T) {
+	c := testClient(64, 64)
+	var got []byte
+	var cut bool
+	vc := &vchannel{name: "test", id: 1004, limit: 10, handle: func(_ *Client, _ Output, msg []byte, truncated bool) error {
+		got, cut = bytes.Clone(msg), truncated
+		return nil
+	}}
+	c.channels = []*vchannel{vc}
+	chunk := func(total, flags uint32, data string) {
+		t.Helper()
+		p := binary.LittleEndian.AppendUint32(nil, total)
+		p = binary.LittleEndian.AppendUint32(p, flags)
+		if err := c.channelChunk(nil, vc, append(p, data...)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	chunk(30, chanFlagFirst, "0123456789")
+	chunk(30, 0, "abcdefghij")
+	if len(vc.buf) > vc.limit || got != nil {
+		t.Fatalf("kept %d bytes of a message not finished; handled %q", len(vc.buf), got)
+	}
+	chunk(30, chanFlagLast, "ABCDEFGHIJ")
+	if string(got) != "0123456789" || !cut {
+		t.Errorf("handled %q, cut %v; want the first 10 bytes, cut", got, cut)
+	}
+	chunk(4, chanFlagFirst, "xy")
+	chunk(3, chanFlagFirst|chanFlagLast, "new")
+	if string(got) != "new" || cut || c.Stats().Ignored["unfinished channel messages"] != 1 {
+		t.Errorf("handled %q, cut %v, ignored %v", got, cut, c.Stats().Ignored)
+	}
+}
+
 // A big clipboard goes in writes of chunksPerWrite chunks, so that input
 // waits for one of them, not for all.
 func TestChannelWrites(t *testing.T) {
