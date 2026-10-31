@@ -369,6 +369,12 @@ web client ([009](../009-react-web-client.md)) and the client core
     WebSocket library that closes on its own read limit uses 1009, which
     is already ours. The session core's end reasons map one to one onto
     the codes from 4002 and onto 1001.
+  - Since that review, too: a viewer that leaves a frame
+    unacknowledged for the server's viewer timeout gets `too-slow`,
+    hidden or not, so a hidden client acknowledges the frames it was
+    sent as they arrive; and a `term-snapshot` may come in any frame,
+    as occamyd sends one in a client's first frame after it was
+    hidden (docs/protocol.md, The frame window and term-snapshot).
   - The hello query carries the whole message, header included, so the
     server decodes it as any message. It is at most 2048 bytes, 2731
     characters, well within the 8 KiB request lines that common proxies
