@@ -1309,13 +1309,25 @@ RDP's guacd path, RDP no longer needs guacd at all.
     the decompressed message, rather than `retainFrag`'s 1 MiB, since
     xrdp's 3 MiB messages come every frame.
   - Pacing: creating and mapping a surface, a fill's clipped
-    rectangles, each point of a copy (at least `pointerCost`, a tile
-    of 64×64, however small its rectangle), each bitmap, and the
-    mapped surfaces drawn again after a resize are charged against the
-    decoding rate as bitmaps of their pixels; and what decompression
-    adds to a message, in pixels of 4 bytes, since 2,840 bytes may
-    decompress to 16 MiB of a PDU the client ignores. Stored messages,
-    xrdp's, add nothing, so that what they draw is not charged twice.
+    rectangles, each point of a copy, each bitmap, and every cell
+    that the next flush draws again because a surface left the output
+    or a bitmap update drew under the surfaces, or a resize cleared it,
+    are charged against the decoding rate as bitmaps of their pixels;
+    and what decompression adds to a message, in pixels of 4 bytes,
+    since 2,840 bytes may decompress to 16 MiB of a PDU the client
+    ignores. Stored messages, xrdp's, add nothing, so that what they
+    draw is not charged twice. A point of a copy within a mapped
+    surface, which looks at the other mapped surfaces and may go to
+    the output as a copy, costs at least `pointerCost`, a tile of
+    64×64, however small its rectangle; a copy between surfaces, or
+    within one unmapped, costs its pixels, so that composing offscreen
+    is not throttled. What is drawn again is charged by the cells it
+    marks that were not marked yet, each clipped to its surface, so
+    that a cell is charged once a flush however many PDUs uncover it:
+    a second independent review found that one message mapping a 1×1
+    surface to each of the 64 cells of 63 surfaces of 512×512 made
+    the flush draw 16.5 million pixels charged as 64, and that a 1×1
+    bitmap update under them drew 258,000 charged as 1.
   - Malformed PDUs end the session: an unknown surface, a rectangle
     inverted or outside its surface, a pixel format other than XRGB
     and ARGB, a count past the PDU, a PDU length past the message, and
@@ -1446,8 +1458,13 @@ RDP's guacd path, RDP no longer needs guacd at all.
     update, not drawn again, or found without the surface's origin
     (`TestGFXCopyRectExposed`); the redraw after a reactivation's
     resize dropped (`TestFuzzGFXSeed`); the charges for decompression's
-    growth, the floor of a copied point, its area above the floor, or
-    the redraw after a reset dropped or changed (`TestGFXPace`); the
+    growth, the floor of a copied point, its area above the floor, the
+    floor applied to a copy that cannot reach the output, or the
+    redraw after a reset dropped or changed (`TestGFXPace`); the
+    charge for what a deleted, replaced or moved surface or a bitmap
+    update uncovers dropped, a cell to be drawn already charged again,
+    or a cell at a surface's edge charged whole
+    (`TestGFXExposeCharged`); the
     planar bound doubled or made strict (`TestGFXPlanarBound`); the
     mapped bound one higher, or applied to a surface mapped again
     (`TestGFXMappedBound`); the ZGFX ring or the count of frames
@@ -1499,7 +1516,10 @@ RDP's guacd path, RDP no longer needs guacd at all.
     growth, copied points and redraws, the planar bound, the bound on
     mapped surfaces, the ZGFX ring kept across channels and
     totalFramesDecoded across them, each with the test above that
-    fails without it.
+    fails without it. A second review of those fixes found the
+    exposure's redraw uncharged, now charged by the cells it marks
+    (`TestGFXExposeCharged`), and the copy's floor applied offscreen,
+    now applied only within a mapped surface.
 - **Surprises.**
   - xrdp opens the GFX channel only for a client with
     RNS_UD_CS_SUPPORT_DYNVC_GFX_PROTOCOL in its core data, which

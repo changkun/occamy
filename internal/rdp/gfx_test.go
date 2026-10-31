@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -1055,6 +1056,11 @@ func TestGFXPace(t *testing.T) {
 		{"fill", rdptest.SolidFill(1, red, image.Rect(0, 0, 8, 8), image.Rect(32, 32, 100, 100)), 8*8 + 68*32, false},
 		{"small copy", rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 8, 4), image.Pt(16, 16), image.Pt(32, 0)), 2 * pointerCost, false},
 		{"large copy", rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 128, 40), image.Pt(0, 8)), 128 * 40, false},
+		// Copies that cannot reach the output cost their pixels alone.
+		{"offscreen", rdptest.CreateSurface(2, 16, 16, rdptest.PixelXRGB), 16 * 16, false},
+		{"offscreen copy", rdptest.SurfaceToSurface(2, 2, image.Rect(0, 0, 8, 4), image.Pt(8, 8), image.Pt(0, 8)), 2 * 8 * 4, false},
+		{"copy to offscreen", rdptest.SurfaceToSurface(1, 2, image.Rect(0, 0, 8, 4), image.Pt(4, 4)), 8 * 4, false},
+		{"copy from offscreen", rdptest.SurfaceToSurface(2, 1, image.Rect(0, 0, 8, 4), image.Pt(64, 0)), 8 * 4, false},
 		{"uncompressed", rdptest.WireToSurface1(1, rdptest.CodecUncompressed, rdptest.PixelXRGB, image.Rect(0, 0, 8, 8), rdptest.Uncompressed(img)), 8 * 8, false},
 		{"planar", rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(8, 8, 16, 16), rdptest.Planar(img)), 8 * 8, false},
 		{"stored", ignored, 0, false},
@@ -1077,6 +1083,75 @@ func TestGFXPace(t *testing.T) {
 		if got := before - g.c.tokens; got != float64(want) {
 			t.Errorf("%s: charged %v pixels, want %d", tc.name, got, want)
 		}
+	}
+}
+
+// Where a surface leaves the output, or a bitmap update draws, the
+// mapped surfaces under it draw again in whole cells, which may be far
+// more than its own pixels: each is charged for the cells it has drawn
+// again that were not to be drawn already, within its surface.
+func TestGFXExposeCharged(t *testing.T) {
+	const stack = 63 // surfaces of the whole desktop, under the others
+	cell := gfxCell * gfxCell
+	var mapEach [][]byte // the 1×1 surface mapped to each cell in turn
+	for cy := range 8 {
+		for cx := range 8 {
+			mapEach = append(mapEach, rdptest.MapSurface(100, image.Pt(cx*gfxCell+1, cy*gfxCell+1)))
+		}
+	}
+	tiny := surfacePDUs(100, 1, 1, image.Point{})
+	for _, tc := range []struct {
+		name  string
+		setup [][]byte
+		msg   [][]byte // one message
+		bmp   bool     // a bitmap update of 1×1 at 0,0 in place of msg
+		want  int
+	}{
+		// The first mapping uncovers the cell at 0,0, the second the same
+		// cell, which waits to be drawn already, and the others one cell
+		// each.
+		{"mapped over each cell", tiny, mapEach, false, 64 + 63*stack*cell},
+		{"created, mapped and deleted", nil, append(slices.Clone(tiny), rdptest.DeleteSurface(100)), false, 1 + 1 + stack*cell},
+		{"replaced", tiny, [][]byte{rdptest.CreateSurface(100, 1, 1, rdptest.PixelXRGB)}, false, 1 + stack*cell},
+		{"bitmap update", nil, nil, true, 1 + stack*cell},
+		// The bottom surface's cell is to be drawn already for its fill.
+		{"cells to be drawn already", tiny, [][]byte{rdptest.SolidFill(0, red, image.Rect(0, 0, 8, 8)), rdptest.DeleteSurface(100)}, false, 8*8 + (stack-1)*cell},
+		// The top of the stack replaced by a surface of 70×70, which has
+		// 6×6 pixels in its cell at 64,64.
+		{"cell at a surface's edge", append(surfacePDUs(stack-1, 70, 70, image.Point{}), surfacePDUs(100, 1, 1, image.Pt(65, 65))...), [][]byte{rdptest.DeleteSurface(100)}, false, (stack-1)*cell + 6*6},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newGFXTest(t, 512, 512)
+			var setup [][]byte
+			for id := range stack {
+				setup = append(setup, surfacePDUs(id, 512, 512, image.Point{})...)
+			}
+			g.must(t, append(setup, tc.setup...)...)
+			// Settle what the setup owes, then count what the message
+			// takes from the bucket and the time it waits for it.
+			settle := func() (float64, time.Duration) {
+				if err := g.c.pace(0); err != nil {
+					t.Fatal(err)
+				}
+				g.clock.mu.Lock()
+				defer g.clock.mu.Unlock()
+				return g.c.tokens, g.clock.slept
+			}
+			tokens, slept := settle()
+			if tc.bmp {
+				b := &bitmapData{dest: image.Rect(0, 0, 1, 1), width: 1, height: 1, bpp: 32, data: []byte{0, 0, 0xff, 0xff}}
+				if err := g.c.drawBitmap(g.out, b); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				g.must(t, tc.msg...)
+			}
+			tokens2, slept2 := settle()
+			got := tokens - tokens2 + (slept2-slept).Seconds()*decodeRate
+			if math.Abs(got-float64(tc.want)) > 8 {
+				t.Errorf("charged %.0f pixels, want %d", got, tc.want)
+			}
+		})
 	}
 }
 

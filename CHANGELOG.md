@@ -469,8 +469,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   again to keep), uncompressed and planar bitmaps (AYCoCg, colour loss
   and chroma subsampling included, planar within a bitmap update's
   bound), and frame acknowledgements, bounded, which the server waits
-  for. Decompression's growth, each copied point and each redraw are
-  charged to the decoding rate. A server that does not open the
+  for. Decompression's growth, each copied point, each redraw after a
+  resize, and every cell that the surfaces draw again where a surface
+  left the output or a bitmap update drew under them are charged to
+  the decoding rate. A server that does not open the
   channel, or closes it, draws with bitmap updates. RemoteFX
   Progressive, RemoteFX, ClearCodec and the cache come next, and with
   them GFX by default and a key that turns it off. Against xrdp 0.10.1

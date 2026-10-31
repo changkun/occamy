@@ -194,19 +194,27 @@ func (s *surface) bounds() image.Rectangle { return image.Rect(0, 0, s.w, s.h) }
 func (s *surface) offset(x, y int) int { return 4 * (y*s.w + x) }
 
 // touch records that r, within the surface, changed, if the surface is
-// mapped: an unmapped surface goes to the output whole once mapped.
-func (s *surface) touch(r image.Rectangle) {
+// mapped: an unmapped surface goes to the output whole once mapped. It
+// returns the pixels of the cells it marked that were not marked yet,
+// within the surface: what the next flush draws more for it.
+func (s *surface) touch(r image.Rectangle) int {
 	if !s.mapped || r.Empty() {
-		return
+		return 0
 	}
 	c := image.Rect(r.Min.X/gfxCell, r.Min.Y/gfxCell, (r.Max.X+gfxCell-1)/gfxCell, (r.Max.Y+gfxCell-1)/gfxCell)
+	n := 0
 	for y := c.Min.Y; y < c.Max.Y; y++ {
 		row := s.dirty[y*s.cols:]
+		h := min(gfxCell, s.h-y*gfxCell)
 		for x := c.Min.X; x < c.Max.X; x++ {
-			row[x] = true
+			if !row[x] {
+				row[x] = true
+				n += h * min(gfxCell, s.w-x*gfxCell)
+			}
 		}
 	}
 	s.drect = s.drect.Union(c)
+	return n
 }
 
 // newSurface returns a surface of w×h, opaque black.
@@ -508,22 +516,17 @@ func (c *Client) setSize(w, h int) {
 }
 
 // gfxRedraw has the mapped surfaces go to the output whole, as after a
-// resize, which clears it, charged as bitmaps of their pixels.
+// resize, which clears it, charged as bitmaps of the pixels that were
+// not to be drawn already.
 func (c *Client) gfxRedraw() error {
 	n := 0
 	for _, s := range c.gfx.mapped {
-		n += s.w * s.h
+		n += s.touch(s.bounds())
 	}
 	if n == 0 {
 		return nil
 	}
-	if err := c.pace(n); err != nil {
-		return err
-	}
-	for _, s := range c.gfx.mapped {
-		s.touch(s.bounds())
-	}
-	return nil
+	return c.pace(n)
 }
 
 // gfxExpose has the mapped surfaces other than skip draw again where
@@ -532,13 +535,17 @@ func (c *Client) gfxRedraw() error {
 // drew over them. So the output under a mapped surface comes back to
 // its pixels at the next flush, which a copy within the surface sent as
 // CopyRect relies on. Where no surface is mapped, the output keeps what
-// was drawn.
-func (c *Client) gfxExpose(r image.Rectangle, skip *surface) {
+// was drawn. It returns the pixels that the next flush draws more,
+// whole cells of each surface, for the caller to charge: a small r over
+// many surfaces may cost far more than its own pixels.
+func (c *Client) gfxExpose(r image.Rectangle, skip *surface) int {
+	n := 0
 	for _, m := range c.gfx.mapped {
 		if m != skip {
-			m.touch(r.Sub(m.at).Intersect(m.bounds()))
+			n += m.touch(r.Sub(m.at).Intersect(m.bounds()))
 		}
 	}
+	return n
 }
 
 // surface returns the surface id, or an error if there is none: a PDU
@@ -577,7 +584,9 @@ func (c *Client) gfxCreate(r *reader) error {
 		return err
 	}
 	if old != nil {
-		c.gfxRemove(old)
+		if err := c.pace(c.gfxRemove(old)); err != nil {
+			return err
+		}
 	}
 	if g.surfaces == nil {
 		g.surfaces = map[uint16]*surface{}
@@ -588,14 +597,17 @@ func (c *Client) gfxCreate(r *reader) error {
 }
 
 // gfxRemove deletes the surface s; the surfaces it covered show again.
-func (c *Client) gfxRemove(s *surface) {
+// It returns the pixels that costs, as gfxExpose does.
+func (c *Client) gfxRemove(s *surface) int {
 	g := &c.gfx
 	delete(g.surfaces, s.id)
 	g.pixels -= s.w * s.h
-	if s.mapped {
-		c.gfxExpose(s.bounds().Add(s.at), s)
-		g.mapped = slices.DeleteFunc(g.mapped, func(m *surface) bool { return m == s })
+	if !s.mapped {
+		return 0
 	}
+	n := c.gfxExpose(s.bounds().Add(s.at), s)
+	g.mapped = slices.DeleteFunc(g.mapped, func(m *surface) bool { return m == s })
+	return n
 }
 
 // gfxDelete applies RDPGFX_DELETE_SURFACE_PDU. What the surface drew
@@ -610,12 +622,12 @@ func (c *Client) gfxDelete(r *reader) error {
 		c.count(func(s *Stats) { s.Ignored["GFX deletes of no surface"]++ })
 		return nil
 	}
-	c.gfxRemove(s)
-	return nil
+	return c.pace(c.gfxRemove(s))
 }
 
 // gfxMap applies RDPGFX_MAP_SURFACE_TO_OUTPUT_PDU: the surface goes to
-// the output whole, charged as a bitmap of its size.
+// the output whole, charged as a bitmap of its size, and what it covered
+// where it was mapped before shows again, charged as gfxExpose says.
 func (c *Client) gfxMap(r *reader) error {
 	id := r.u16()
 	r.u16() // reserved
@@ -637,15 +649,16 @@ func (c *Client) gfxMap(r *reader) error {
 	if err := c.pace(s.w * s.h); err != nil {
 		return err
 	}
+	exposed := 0
 	if s.mapped {
 		// Mapped again, maybe elsewhere: what it covered shows again.
-		c.gfxExpose(s.bounds().Add(s.at), s)
+		exposed = c.gfxExpose(s.bounds().Add(s.at), s)
 		g.mapped = slices.DeleteFunc(g.mapped, func(m *surface) bool { return m == s })
 	}
 	g.mapped = append(g.mapped, s)
 	s.mapped, s.at = true, image.Pt(int(x), int(y))
 	s.touch(s.bounds())
-	return nil
+	return c.pace(exposed)
 }
 
 // gfxEndFrame ends the frame id: what it changed goes to the output, and
@@ -752,9 +765,15 @@ func (c *Client) gfxSurfaceToSurface(out Output, r *reader) error {
 	if r.len() < 4*n {
 		return fmt.Errorf("%d points in %d bytes", n, r.len())
 	}
-	// Each point at least as a pointer update, since each costs a look
-	// at the mapped surfaces however small its rectangle.
-	if err := c.pace(n * max(sr.Dx()*sr.Dy(), pointerCost)); err != nil {
+	// A copy within a mapped surface, which gfxCopy may send to the
+	// output as a copy, at least as a pointer update, since each costs a
+	// look at the mapped surfaces however small its rectangle; another,
+	// which no more than copies its pixels, as their count.
+	per := sr.Dx() * sr.Dy()
+	if src == dst && dst.mapped {
+		per = max(per, pointerCost)
+	}
+	if err := c.pace(n * per); err != nil {
 		return err
 	}
 	for range n {

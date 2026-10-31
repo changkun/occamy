@@ -1203,8 +1203,11 @@ func (c *Client) drawBitmap(out Output, b *bitmapData) error {
 		drawRows(out, image.Rect(r.Min.X, y0, r.Max.X, min(y0+rows, r.Max.Y)), b, sx, rgba)
 	}
 	// Under a mapped surface the output is the surface's: it draws
-	// there again at the pipeline's next flush.
-	c.gfxExpose(r, nil)
+	// there again at the pipeline's next flush, charged for the cells of
+	// every surface there.
+	if n := c.gfxExpose(r, nil); n > 0 {
+		return c.pace(n)
+	}
 	return nil
 }
 
