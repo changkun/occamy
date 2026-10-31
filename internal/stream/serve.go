@@ -46,7 +46,14 @@ type Config struct {
 	// only while nothing else is to be sent and no other frame awaits an
 	// ack, a little at a time, and gives way to any input or change. It
 	// also bounds motion: a tile is in motion when it changes more often
-	// than the refine delay.
+	// than the refine delay. Motion is told from snapshots at least 100
+	// ms apart, with a heat that halves each refine delay but no faster
+	// than each 150 ms, so the two ranges meet without overlap from
+	// about 150 ms. Below that, content that changes between the refine
+	// delay and about 100 ms apart is both in motion and refined between
+	// its changes; and a long refine delay keeps content that changes
+	// more often than it, such as a clock under a delay of 2 s, at the
+	// lowest quality for as long as it changes.
 	RefineDelay time.Duration
 	// NoRefine turns refinement off, and with it motion: nothing goes
 	// at a lower quality than the pacer's for refinement to raise.

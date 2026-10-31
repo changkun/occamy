@@ -1033,18 +1033,42 @@ refinement is a frame of `tile` messages, which any v1 client takes.
   snapshot of the versions at most once per `activeWindow` (100 ms).
   At each one, a tile that changed since the last gains one unless the
   change went out as an input's effect, and every heat halves each
-  refine delay. A tile at 2 or more is in motion: one that changes more
-  often than the refine delay, after three snapshots in a row while
-  they are less than about 0.7 refine delays apart. A tile that changes
-  less often is not in motion and goes at its final quality: refinement
-  would raise it between its changes anyway, so the two ranges do not
-  overlap. The heat cools only while the writer is between frames: it
-  takes no snapshot while it sends one, so content that changes in
-  every snapshot is in motion however long the frames take. The time a
-  writer waits for acks counts as time between frames; it takes a
-  snapshot every `activeWindow` meanwhile. An input's effect is never in
-  motion, so typing and what a click redraws go at the pacer's quality,
-  as before.
+  refine delay, or each 150 ms if the refine delay is shorter
+  (`minHalfLife`). A tile at 2 or more is in motion: one that changes
+  more often than the refine delay, after three snapshots in a row
+  while they are less than about 0.7 refine delays apart. A tile that
+  changes less often is not in motion and goes at its final quality:
+  refinement would raise it between its changes anyway, so the two
+  ranges do not overlap. The heat cools only while the writer is
+  between frames: it takes no snapshot while it sends one, so content
+  that changes in every snapshot is in motion however long the frames
+  take. The writer adds up the time between frames since the last
+  snapshot, before each frame of tiles or of refinement, and the next
+  snapshot cools the heat by all of it, however many frames went
+  meanwhile. The time a writer waits for acks counts as time between
+  frames; it takes a snapshot every `activeWindow` meanwhile. An
+  input's effect is never in motion, so typing and what a click redraws
+  go at the pacer's quality, as before.
+
+  The refine delay sets both ranges, and the snapshots, 100 ms apart at
+  the least, bound how finely motion is told. At the default 300 ms the
+  ranges meet without overlap. A refine delay under the 150 ms half-life
+  makes content that changes between the refine delay and about 100 ms
+  apart both in motion and refined between its changes; a long one
+  keeps content that changes more often than it at the lowest quality
+  for as long as it changes, a clock included. From the review's probe
+  and `TestBlink`, a 64-pixel tile of a gradient changing for 8
+  seconds:
+
+  | RefineDelay | Change period | Changes | WebP (in motion) | Deflate (exact) |
+  |---|---|---|---|---|
+  | 50 ms | 33 ms | 241 | 230 | 11 |
+  | 50 ms | 100 ms | 80 | 78 | 80 |
+  | 50 ms | 150 ms | 54 | 30 | 54 |
+  | 300 ms (default) | 100 ms | 80 | 78 | 2 |
+  | 300 ms (default) | 530 ms | 16 | 0 | 16 |
+  | 2 s | 1 s | 8 | 6 | 2 |
+  | 2 s | 1.5 s | 6 | 3 | 3 |
 - **Motion picks the quality, and content still picks the codec.**
   `stream.Encoder.Tile` takes the tile's motion, and a tile of 17 to 256
   colours goes lossy while it moves (`encoder.Many`). A run of lossy
@@ -1231,6 +1255,38 @@ the fixes, all killed):
 - The message `pacer.Background` turned away was searched again in the
   next frame; it is kept (`TestRefineKeepsTurnedAway`: 192 searches for
   192 tiles, against 203).
+
+**Second review fixes.** A review of the fixes found the following,
+each fixed with a test that fails without it (10 mutants of the fixes,
+all killed, one only after `TestHeatCountsIdle` was added for it):
+
+- Each frame's end restarted the heat's cooling, and the idle time
+  before it was lost, so while anything else on the screen animated, a
+  tile changing every 530 ms barely cooled and went lossy in 13 of 16
+  changes at 30 and at 60 frames a second, and a 1 s clock in 3 and 5 of
+  8. The writer now adds up the idle time before each frame, and the
+  next snapshot cools by all of it: 0 of 16, and the clock 0 of 8 at
+  30 frames a second (`TestBlink`,
+  beside an animation at 30 and at 60 frames a second;
+  `TestHeatCountsIdle`). Counted in full, idle time made a half-life of
+  the 100 ms between snapshots too short for anything to reach motion,
+  so a 50 ms refine delay found none; the half-life is now 150 ms at
+  the least (`TestBlink` at 50 ms).
+- A tile searched while congestion held the pacer below the quality the
+  client had, as an input's effect at 72 searched at 46, took the
+  client's quality as its goal, and was never refined once the link
+  recovered. Its goal is now one above what the client has
+  (`TestRefineAfterCongestion`).
+- An input whose effect showed, but whose frame was cut short before
+  any of it went, as when the viewer hid, and whose effect a new
+  viewport left out, kept refinement waiting with no timer. The writer
+  now gives such an input up `inputTimeout` after it came, and wakes
+  then (`TestRefineAfterEffectLeftView`).
+- The refine delay's range and the motion it finds were coupled without
+  a word; the heat's description above now says how, with a table.
+- A stream of inputs that show nothing, such as pointer moves at 20 Hz
+  over an idle window, holds refinement back while it lasts and for
+  `inputTimeout` after. That is bounded, and stays as it is.
 
 **Surprises.**
 
