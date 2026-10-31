@@ -36,12 +36,13 @@ import (
 // window of the first; the second comes within 0.2 s, unchecked. The
 // first xclip must get the text, the same x11vnc must serve the port,
 // and the session must still carry the clipboard both ways. With the
-// variable, nothing can kill x11vnc here. Without it, the test does not
-// fail reliably: whether the error comes before x11vnc stops trapping
-// is a race, and once a check of x11vnc's has found a window gone, it
-// waits for the X server for good, until it is started again. In
-// eight runs by hand, of three to eight stops each, x11vnc died in
-// three.
+// variable, nothing can kill x11vnc here. Without it, whether the error
+// comes before x11vnc stops trapping is a race, and once a check of
+// x11vnc's has found a window gone, it waits for the X server for good,
+// until it is started again; so the test cannot fail every time. On a
+// Mac, against x11vnc processes just started, it failed in five of six
+// runs without the variable, each time as x11vnc first owned the
+// clipboard, before the stop, and passed in five of five with it.
 func TestX11vncClipboardRequestorGone(t *testing.T) {
 	addr := endpointV1(t)
 	compose := composeE2E(t)
@@ -49,7 +50,7 @@ func TestX11vncClipboardRequestorGone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	cl := openDesktopV1(t, ctx, addr, "/api/v1/connections/vnc-none-native/stream", token,
 		client.Options{Width: 1024, Height: 768})
@@ -65,22 +66,44 @@ func TestX11vncClipboardRequestorGone(t *testing.T) {
 	watchdog := func() int {
 		return strings.Count(compose.run(t, "logs", "vnc"), "[5901] watchdog:")
 	}
+	// read takes the session's events for d, which acknowledges its
+	// frames, as occamyd drops a viewer that acknowledges none for 30 s.
+	// The session's end fails the test.
+	read := func(d time.Duration) {
+		t.Helper()
+		rctx, cancel := context.WithTimeout(ctx, d)
+		defer cancel()
+		for {
+			ev, err := cl.Next(rctx)
+			if err != nil {
+				if rctx.Err() != nil && ctx.Err() == nil {
+					return
+				}
+				t.Fatalf("reading the session: %v", err)
+			}
+			if e, ok := ev.(client.End); ok {
+				t.Fatalf("the session ended: %v %q (%v)", e.Code, e.Reason, e.Err)
+			}
+		}
+	}
 
 	// Text that the probe leaves alone, so that x11vnc keeps the
 	// clipboard. x11vnc drops cut text until it has made its selection
-	// window, some seconds after its first client, so the session sends
-	// it until the clipboard holds it.
+	// window, which it does only once its latest client has been
+	// connected for some seconds (guess_dm_gone in xevents.c; about 13 s
+	// on the demo desktop, 45 s at most), and keeps from then on; so the
+	// session sends the text until the clipboard holds it.
 	text := fmt.Sprintf("x11vnc requestor %d", time.Now().UnixNano())
-	for deadline := time.Now().Add(45 * time.Second); ; {
+	for deadline := time.Now().Add(90 * time.Second); ; {
 		if _, err := cl.Clipboard(ctx, "text/plain", []byte(text)); err != nil {
 			t.Fatal(err)
 		}
-		time.Sleep(time.Second)
+		read(time.Second)
 		if inVNC(readClipboard) == text {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("the clipboard does not hold %q after 45 s", text)
+			t.Fatalf("the clipboard does not hold %q after 90 s", text)
 		}
 	}
 	before, pid := watchdog(), inVNC(x11vncPID)
@@ -92,7 +115,7 @@ func TestX11vncClipboardRequestorGone(t *testing.T) {
 	if got != text {
 		t.Errorf("the xclip that waited got %q, want %q", got, text)
 	}
-	time.Sleep(3 * time.Second) // the watchdog looks every 2 s
+	read(3 * time.Second) // the watchdog looks every 2 s
 	if now := inVNC(x11vncPID); now != pid {
 		t.Errorf("x11vnc on port 5901 was process %s and is %q now", pid, now)
 	}
