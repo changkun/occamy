@@ -58,7 +58,7 @@ Build, dependencies, CI, demo environment, and documentation.
 | Spec | Status | Deliverable |
 |------|--------|-------------|
 | [001-status-quo.md](001-status-quo.md) | Complete | Buildable baseline on current toolchains, verified and documented |
-| [006-demo-stack-refresh.md](006-demo-stack-refresh.md) | Complete | Multi-arch VNC and SSH demo servers; VNC and SSH end-to-end tests in CI (pressure test in CI since 003); native VNC next to guacd's on `occamy-v1`, API v1 |
+| [006-demo-stack-refresh.md](006-demo-stack-refresh.md) | Complete | Multi-arch VNC and SSH demo servers; VNC and SSH end-to-end tests in CI (pressure test in CI since 003); native VNC next to guacd's on `occamy-v1`, API v1; TigerVNC beside x11vnc for the VNC parity matrix |
 | [011-release-readiness.md](011-release-readiness.md) | Complete (v0.5.0) | Licensing, changelog, security policy, CI gates, attested multi-arch releases and binaries |
 
 ### server

@@ -681,6 +681,30 @@ RDP's guacd path, RDP no longer needs guacd at all.
   new test in 10 of 10 runs:
   - keeping 4 bytes per list grows the heap by 419 to 435 KB;
   - keeping 1 byte per list grows it by 111 to 133 KB.
+- **The orphan chunk's count, waited for (2026-10-31).**
+  `TestChannelChunks` failed once under `go test -race ./...` at a
+  load of 53, with `orphan: ignored map[]`. The test wrote a chunk
+  without its first, waited 100 ms for the client to send nothing, and
+  then read the count of dropped chunks. Under that load the client had
+  not read the chunk yet: the map was empty, not counting something
+  else. The code drops an orphan chunk and counts it under the same
+  lock that `Stats` reads.
+
+  The test now waits up to 10 seconds for the count, and fails at once
+  if `Run` returns meanwhile. It then checks that the client sends
+  nothing and that the count is exactly 1.
+
+  Results under `-race`:
+  - A 200 ms sleep before the client counts the chunk, standing in for
+    a starved reader, failed the old test in 10 of 10 runs with CI's
+    message.
+  - With the same sleep, the new test passes 10 of 10.
+  - With the count removed, the new test fails 3 of 3.
+  - When `Run` fails on an orphan, the new test fails 3 of 3, naming
+    the error.
+  - Unchanged, the old test passed 50 of 50 at a load of 41 to 46, and
+    the new one 50 of 50 at 53: the flake did not reproduce without the
+    sleep.
 - **Integration test.** `TestIntegrationClipboard`, under the
   `rdp_integration` tag, pastes text and reads the session's X
   CLIPBOARD selection, which xrdp-chansrv serves, and sets the
@@ -1127,6 +1151,75 @@ RDP's guacd path, RDP no longer needs guacd at all.
     on xrdp for the next. All four passed 6 of 6 runs against the demo
     image with a local occamyd, and 3 of 3 again after the delta
     review's fixes.
+  - The clipboard check timed out once in CI (2026-10-31, run
+    41202661218, first attempt). The cause was in xrdp, not the
+    backend. xrdp's log shows the sequence:
+    - `TestConnectionPressure`'s guacd connection was still attached
+      to the X session when `TestE2EV1/rdp-native` connected and
+      displaced it.
+    - The channel server, `xrdp-chansrv`, which carries the
+      clipboard, accepted the new connection only 2 seconds later.
+    - The test's session ended 17 ms after that, and the channel
+      server exited 16 ms after the connection closed. It logged
+      nothing itself; sesexec only logged that it had finished.
+    - xrdp 0.10.1 starts the channel server only with the session.
+      Every later connection to the same session waited 10 seconds
+      for it (`error in trans_connect chan`), which is why the next
+      subtests took 10 s each, and none had a clipboard.
+
+    The backend did not drop the paste. A client sends its Format List
+    after the server's Monitor Ready, which comes from the channel
+    server, so with none there was no channel to send on. Passing runs
+    show the same 2-second wait now and then. In the passing rerun, the
+    channel server exited after the clipboard check instead, and the
+    next two subtests took 10 s. This is not x11vnc's dropped first cut
+    text: here nothing reaches the X session at all.
+
+    The image's `reconnectwm.sh` now starts the channel server again
+    whenever a connection reconnects to a session that has none, and
+    logs that it did. xrdp retries for 10 seconds, so it then connects
+    to the new one. A lock keeps two reconnections from starting two
+    channel servers.
+
+    The script decides by whether a channel server process exists, not
+    by whether it is listening. A channel server that is resetting, as
+    pid 123 was for the 2 seconds before it accepted, is still that
+    process, so the script leaves it alone.
+
+    `TestE2EV1RDP/clipboard-after-chansrv-exit` runs the restart in
+    every `make e2e`, through the stack's compose command
+    (`OCCAMY_E2E_COMPOSE`):
+    1. It checks the clipboard while the channel server runs. That
+       connection must not restart it, and exactly one must run
+       afterwards.
+    2. It kills `xrdp-chansrv` in the rdp container.
+    3. It checks the clipboard again. A connection that gets no channel
+       server within xrdp's 10 seconds of retries never has a clipboard.
+    4. The log must gain one `starting xrdp-chansrv again`, and exactly
+       one channel server must run.
+
+    Without the script, the subtest fails. CI showed it with a throwaway
+    commit that left the script out of the image, and the head that
+    reverted it:
+    - Without the script (run 41223126227), the subtest logged 0
+      channel servers before its first clipboard check, and that check
+      timed out after 60 s. The rdp log has `error in trans_connect
+      chan` for `resize`'s connection and for the subtest's, and no
+      restart line.
+    - With it (run 41223169024), the subtest also began with 0 channel
+      servers. Both of its clipboard checks passed, and it took 6.00 s.
+
+    In both runs the `clipboard` subtest's connection cost the channel
+    server. `resize` then took 10.62 s without the script, waiting out
+    xrdp's retries, and 2.58 s with it. The clipboard check fails only
+    when the channel server dies before it, which is why the flake
+    showed itself seldom.
+
+    An earlier throwaway run and its revert failed sooner, on reading
+    the log, and so proved nothing. CI ran `make e2e` with the
+    Makefile's default engine, podman, whose compose reached no daemon
+    on the runner. CI now gives `make e2e` `CONTAINER_ENGINE=docker`,
+    as it gives `make run`.
 - **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
   through occamyd's routes with the Go client against `rdptest`: NLA
   with stored credentials, the hello's size, the screen, scancodes,

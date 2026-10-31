@@ -12,8 +12,12 @@ file serves the same routes on a listener of its own (see
 
 `mode` in [conf.yaml](../conf.yaml) is `debug`, `release` or `test`;
 a file without `mode` runs in debug mode, and any other value stops
-`occamyd` at start. `conf.yaml` and the demo stack's
-[docker/occamy.yaml](../docker/occamy.yaml) set `debug`. In debug mode,
+`occamyd` at start. `conf.yaml` sets `debug`. The demo stack's
+[docker/occamy.yaml](../docker/occamy.yaml) sets `release`, and
+`make run OCCAMY_DEBUG=1` mounts
+[docker/occamy-debug.yaml](../docker/occamy-debug.yaml), the same file
+in debug mode, in its place; the stack publishes the v0 service on the
+host's loopback interface only. In debug mode,
 `occamyd` serves Go's profiling routes under `/debug/pprof/` on its own
 address, with no token, and says so in its log at start.
 Anyone who can reach `occamyd` can then read its profiles and its
@@ -37,12 +41,25 @@ not. It needs a port of its own: `occamyd` refuses a `debug.address` on
 A CPU profile or a trace still running when `occamyd` stops is cut after
 the 5 second drain; a second SIGINT or SIGTERM stops `occamyd` at once.
 The examples below work against it with that address in place of
-`localhost:5636`. `/debug/vars` shows the command line and the runtime's
-memory statistics as JSON.
+`localhost:5636`. `/debug/vars` shows the command line, the runtime's
+memory statistics, the number of goroutines and the open file
+descriptors as JSON. `debug.address_env` names an environment variable
+that holds the address instead, and leaves the listener off while it is
+unset or empty. The demo stack's `occamy-v1` takes its address from
+`OCCAMY_V1_DEBUG_ADDRESS`, which `make run OCCAMY_DEBUG=1` sets, and then
+serves its debug listener on the host's `localhost:5638`
+(`OCCAMY_V1_DEBUG_PORT`), for the soak. The stack's other services can
+reach both debug routes while they are on; `make run` without
+`OCCAMY_DEBUG=1` turns them off again. `make run` and `make bench` set
+`OCCAMY_V0_CONF` and `OCCAMY_V1_DEBUG_ADDRESS` either way, so that the
+same variables left in the shell or in `docker/.env` do not turn the
+routes on; `compose up` run by hand reads them from there, and with
+neither set leaves the routes off.
 
 ## Profiling occamyd
 
-The examples use the demo stack's address, `localhost:5636`.
+The examples use the demo stack's address, `localhost:5636`, which
+serves them after `make run OCCAMY_DEBUG=1`.
 
 | Route | What it shows |
 |-------|---------------|
@@ -125,13 +142,69 @@ sends that user something. Until then the user still counts, for up to
   `TestE2EV1RDP` also takes the demo xrdp server's `rdp-native` through
   the clipboard both ways, which the image's clipboard echo answers, a
   resize, a viewer joined by a share, and the owner leaving and coming
-  back.
-- `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test. Each of its N
-  rounds opens two sessions to each demo server at once: one that waits
-  for the desktop and one that sends garbage. All sessions to one server
-  have the same claims, so they share a guacd connection, and the storm
-  mostly exercises joining and leaving. Sessions may fail under
-  the load. Afterwards, `occamyd`'s goroutines must return to their
+  back. If the clipboard check times out, look in the rdp server's log
+  for `error in trans_connect chan`. That line means xrdp found no
+  channel server, the process that carries the clipboard. The image's
+  `reconnectwm.sh` starts one again on the next connection, and logs
+  `starting xrdp-chansrv again` when it does. `make e2e` checks that
+  restart too: it kills the channel server in the rdp container, through
+  the stack's compose command in `OCCAMY_E2E_COMPOSE`, then checks the
+  clipboard again. That command runs `CONTAINER_ENGINE`, `podman` by
+  default, so give `make e2e` the `CONTAINER_ENGINE` that `make run`
+  took, as CI gives both `docker`.
+  `TestVNCParity`, among them, runs the guacd bridge's parity matrix for
+  VNC: each feature on x11vnc and TigerVNC, through the native backend
+  and through guacd. The demo desktops report what reached the server
+  over the session itself: a probe puts each line typed at the top left
+  on the clipboard in hex, and another echoes clipboard text that starts
+  `owner: ` as `echo: `. The test first warms each server port, since a
+  freshly started x11vnc drops the first clipboard text on its port, and
+  logs how many tries each port took. It logs the matrix as a Markdown
+  table, and writes it to the file `OCCAMY_PARITY_MATRIX` names. A cell
+  expected to fail is listed in `parityKnown`, with the reason and a
+  part of the error that only that failure gives. Any other failure
+  fails the test, and so does a listed cell that fails differently or
+  passes. A cell tries up to three times. A guacd cell tries again
+  after any failure other than its listed one. A native cell that
+  cannot reach the desktop runs the same check through guacd at once,
+  and tries again, 15 s later, only if guacd cannot reach the desktop
+  either. If guacd reaches it, the native failure stands, and so does
+  any other native failure. A cell that settles at a later try shows
+  the try, as in `pass (try 2)`. `TestParityMatrixDoc`, which needs no
+  stack, checks that the matrix in the guacd bridge's spec is the one
+  `parityFeatures` and `parityKnown` give. The demo x11vnc runs under a
+  watchdog, which logs each restart as `[<port>] watchdog: …`, after
+  the X error that caused it, if any (`podman compose logs vnc`).
+- `make soak` runs `TestSoak` against the demo stack's `occamy-v1`,
+  which `make run OCCAMY_DEBUG=1` started with its debug listener:
+  `OCCAMY_SOAK_SESSIONS` sessions, 8 by default, to TigerVNC through the
+  native backend (`OCCAMY_SOAK_CONNECTIONS`, `tigervnc-native` by
+  default, since x11vnc's watchdog restarts would end sessions) for
+  `OCCAMY_SOAK_DURATION`, 1 hour by default. Each session moves the
+  pointer, below the typing probe, and types every 2 s, asks its desktop for a terminal that scrolls for 2 s
+  once a minute, and closes after `OCCAMY_SOAK_LIFETIME`, 10 minutes by
+  default, for another to open; every other session has a read-only
+  viewer. Every 30 s the test samples `occamyd`'s goroutines, live heap
+  (after a collection) and open files from the debug listener, trying a
+  failed sample twice more, with the host's load average, and logs
+  them, and writes them as CSV to the file `OCCAMY_SOAK_OUT` names.
+  After a warm-up of a tenth of the run, it fails if the median of a
+  metric's last quarter of samples exceeds the first quarter's by more
+  than its bound, whatever the quarters between do
+  (`OCCAMY_SOAK_BOUNDS`, `goroutines=50,heap=32,fds=25` by default, the
+  heap in MiB), if a metric stays above its start by more than the
+  bound a minute after the last session closed, if fewer than twelve
+  samples follow the warm-up, or if a session fails. `tests/soak_test.go` lists the
+  variables. The full soak is
+  `make soak OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h`.
+- `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test, which counts
+  `occamyd`'s goroutines from the v0 service's pprof routes, served
+  after `make run OCCAMY_DEBUG=1`. Each of its N rounds opens two
+  sessions to each demo server at once: one that waits for the desktop
+  and one that sends garbage. All sessions to one server have the same
+  claims, so they share a guacd connection, and the storm mostly
+  exercises joining and leaving. Sessions may fail under the load.
+  Afterwards, `occamyd`'s goroutines must return to their
   number before the storm within a minute, or the test fails and prints
   the goroutine profile. Then a session with the storm's own claims and
   one with new claims must work.

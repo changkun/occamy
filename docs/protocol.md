@@ -135,6 +135,15 @@ upgrade. A client that does not answer the WebSocket's close at once
 may find the connection dropped. Until the server has let a client in,
 it reads no message larger than the smallest maximum message size.
 
+A session can end before the server sends `welcome`, as when its
+backend fails at once: a remote that cannot be reached, whose
+certificate the server refuses, or that refuses the credentials. The
+server then sends `close` with the session's end, such as
+`backend-failed`, instead of `welcome`: the `close` the client would
+otherwise have had just after `welcome`, with the same code and
+reason. Which of the two a client gets is a race, so a client takes
+`close` before `welcome` as the end of the session it asked for.
+
 `hello` sent as a WebSocket message, or a second `welcome`, is a
 protocol error.
 
