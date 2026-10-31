@@ -1118,6 +1118,19 @@ place for fixes that ship on v0 before beta.
     stream has. `TestFinishAfterTooLarge` writes before it reads the
     close; with the old `finish` it failed every time. Both tests then
     passed 200 runs with `-race`.
+  - ~~`TestStreamWelcome` failed under load (delta review).~~ Fixed:
+    it took the first `term-snapshot` for a frame of the hello's
+    size, then read the session's size. The fake backend sizes its
+    terminal when it runs, on a goroutine of its own, so the first
+    frame may show the session's 80 by 24 terminal before that, and
+    the session sets its size just after resizing its terminal and
+    waking the writers. 300 runs with `-race` at `-cpu 1,4` and a load
+    average of 157 failed 13 times with "session size (0,0)"; the test
+    now waits for a frame of the hello's size and then for the
+    session's, and passed the same 600 runs at a load average of 132.
+    The first frame of 80 by 24 is the server's behaviour, not only
+    the test's: a client may see the blank default terminal for a
+    moment before the backend's size, which `resize` then corrects.
   - [009](../009-react-web-client.md) and the Go client: send `hello` in
     the query and the token in the subprotocol; expect `close` before
     `welcome` for a refusal; reconnect as the owner with an access token

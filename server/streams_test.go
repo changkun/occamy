@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"image"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -206,10 +207,24 @@ func TestStreamWelcome(t *testing.T) {
 	if _, sz, _ := fb.last(); sz.cols != 100 || sz.rows != 30 {
 		t.Errorf("the backend was made at %+v, want the hello's 100x30", sz)
 	}
-	c.until(t, "the first frame", func(m protocol.Message) bool { _, ok := m.(*protocol.TermSnapshot); return ok })
-	if got := info.s.Size(); got.X != 100 || got.Y != 30 {
-		t.Errorf("session size %v", got)
-	}
+	// The backend runs on a goroutine of its own, so the first frame, a
+	// snapshot, may show the session's terminal before the backend sized
+	// it, and the session takes the size just after its terminal: wait
+	// for a frame of the hello's size, then for the session's.
+	var size *protocol.Resize
+	snapshot := false
+	c.until(t, "a frame of the hello's size", func(m protocol.Message) bool {
+		switch m := m.(type) {
+		case *protocol.Resize:
+			size = m
+		case *protocol.TermSnapshot:
+			snapshot = true
+		case *protocol.FrameEnd:
+			return snapshot && size != nil && size.Width == 100 && size.Height == 30
+		}
+		return false
+	})
+	waitFor(t, "the session's size", func() bool { return info.s.Size() == image.Pt(100, 30) })
 }
 
 // TestStreamRefused checks what a stream request must carry, and that a
