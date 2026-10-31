@@ -404,6 +404,14 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 	var werr error
 	var wg sync.WaitGroup
 	wg.Go(func() {
+		// The writer turns viewers' input into RDP's, beyond the
+		// session's recover: a panic stops the client and ends Run.
+		defer func() {
+			if perr := backend.Recovered(recover()); perr != nil {
+				werr = perr
+				c.Close()
+			}
+		}()
 		if werr = r.writeLoop(c, done, &b.visible); werr == nil {
 			return
 		}
@@ -419,10 +427,16 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 			c.Close()
 		}
 	})
-	err = c.Run(ctx, sink)
-	close(done)
-	c.Close()
-	wg.Wait()
+	err = func() error {
+		// Deferred, so that a panic of the client, which the session
+		// recovers from, stops the writer and closes the connection too.
+		defer func() {
+			close(done)
+			c.Close()
+			wg.Wait()
+		}()
+		return c.Run(ctx, sink)
+	}()
 	return b.end(ctx, err, werr)
 }
 
@@ -433,7 +447,8 @@ func (b *Backend) end(ctx context.Context, err, werr error) error {
 		return ctx.Err()
 	}
 	if werr != nil && errors.Is(err, net.ErrClosed) {
-		// The failed write closed the connection under the reader.
+		// The failed write, or the writer's panic, closed the connection
+		// under the reader.
 		return werr
 	}
 	var info rdp.ErrorInfo

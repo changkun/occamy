@@ -1031,15 +1031,22 @@ func (c *Client) drawBitmap(out Output, b *bitmapData) error {
 	rows := max(1, drawStrip/r.Dx())
 	sx := r.Min.X - b.dest.Min.X
 	for y0 := r.Min.Y; y0 < r.Max.Y; y0 += rows {
-		s := image.Rect(r.Min.X, y0, r.Max.X, min(y0+rows, r.Max.Y))
-		img := out.Lock(s)
-		for y := s.Min.Y; y < s.Max.Y; y++ {
-			o := 4 * ((y-b.dest.Min.Y)*b.width + sx)
-			copy(img.Pix[img.PixOffset(s.Min.X, y):], rgba[o:o+4*s.Dx()])
-		}
-		out.Unlock(s)
+		drawRows(out, image.Rect(r.Min.X, y0, r.Max.X, min(y0+rows, r.Max.Y)), b, sx, rgba)
 	}
 	return nil
+}
+
+// drawRows copies the strip s of the decoded bitmap b, whose pixels are
+// rgba and whose column sx is the strip's first, to out under one lock.
+// The Unlock is deferred, so that a panic while drawing, which the
+// session recovers from, releases the pixels that viewers wait for.
+func drawRows(out Output, s image.Rectangle, b *bitmapData, sx int, rgba []byte) {
+	img := out.Lock(s)
+	defer out.Unlock(s)
+	for y := s.Min.Y; y < s.Max.Y; y++ {
+		o := 4 * ((y-b.dest.Min.Y)*b.width + sx)
+		copy(img.Pix[img.PixOffset(s.Min.X, y):], rgba[o:o+4*s.Dx()])
+	}
 }
 
 // drawStrip bounds the pixels drawn under one Lock: 256 KiB of RGBA, the
