@@ -44,7 +44,7 @@ const (
 	dvcVersion = 2
 	// maxDrdynvcMessage bounds a message on the static channel: one
 	// DRDYNVC PDU, which servers keep within a chunk of 1,600 bytes
-	// ([MS-RDPEDYC] 3.1.5.1.4). One longer than this is dropped.
+	// ([MS-RDPEDYC] 2.2.3 and 3.1.5). One longer than this is dropped.
 	maxDrdynvcMessage = 8 << 10
 	// maxDynvcAnswers bounds the answers the reader owes the server that
 	// wait for the channel writer: a server that opens channels faster
@@ -102,6 +102,15 @@ func (c *Client) drdynvcMessage(out Output, msg []byte, truncated bool) error {
 		return fmt.Errorf("rdp: dynamic channel PDU: %w", r.err)
 	}
 	cmd, sp, cbID := int(hdr>>4), int(hdr>>2&3), int(hdr&3)
+	switch cmd {
+	case dvcCreate, dvcDataFirst, dvcData, dvcClose:
+		if cbID == 3 {
+			// [MS-RDPEDYC] 2.2 gives an id 1, 2 or 4 bytes, size codes 0 to
+			// 2, and the client answers in the size the server used; it
+			// takes no id of size code 3, as it takes no length of it.
+			return fmt.Errorf("rdp: dynamic channel id of size code 3")
+		}
+	}
 	switch cmd {
 	case dvcCaps:
 		r.skip(1) // Pad
@@ -303,7 +312,7 @@ func dvcPDU(cmd, sp, cbID int, id uint32, body []byte) []byte {
 }
 
 // varUint reads an unsigned integer of 1, 2 or 4 bytes as size, a cbId
-// or Len field, gives: 0, 1, or 2 or 3.
+// or Len field, gives: 0, 1 or 2.
 func varUint(r *reader, size int) uint32 {
 	switch size {
 	case 0:

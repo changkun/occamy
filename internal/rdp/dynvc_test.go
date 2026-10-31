@@ -429,7 +429,11 @@ func TestDynvcData(t *testing.T) {
 		{"a name without its NUL", [][]byte{rdptest.DVCPDU(rdptest.DVCCreate, 0, 3, []byte("abc"))}, "without its NUL"},
 		{"a name too long", [][]byte{rdptest.DVCCreateRequest(3, strings.Repeat("x", maxDynChannelName))}, "without its NUL"},
 		{"version 0", [][]byte{{rdptest.DVCCaps << 4, 0, 0, 0}}, "version 0"},
-		{"a length of size code 3", [][]byte{rdptest.DVCPDU(rdptest.DVCDataFirst, 3, id, []byte{1, 0, 0, 0, 0})}, "size code 3"},
+		{"a length of size code 3", [][]byte{rdptest.DVCPDU(rdptest.DVCDataFirst, 3, id, []byte{1, 0, 0, 0, 0})}, "length of size code 3"},
+		{"a create with an id of size code 3", [][]byte{append([]byte{rdptest.DVCCreate<<4 | 3, 7, 0, 0, 0}, "x\x00"...)}, "id of size code 3"},
+		{"data first with an id of size code 3", [][]byte{{rdptest.DVCDataFirst<<4 | 3, id, 0, 0, 0, 1, 'x'}}, "id of size code 3"},
+		{"data with an id of size code 3", [][]byte{{rdptest.DVCData<<4 | 3, id, 0, 0, 0, 1}}, "id of size code 3"},
+		{"a close with an id of size code 3", [][]byte{{rdptest.DVCClose<<4 | 3, id, 0, 0, 0}}, "id of size code 3"},
 	} {
 		l := runLive(t, rdptest.Server{}, withResize)
 		l.sendDVC(t, rdptest.DVCCapsPDU(2))
