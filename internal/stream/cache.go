@@ -97,12 +97,10 @@ func (c *tileCache) has(k cacheKey) bool {
 	return ok
 }
 
-// lookup returns the slot that holds k, and marks it used.
+// lookup returns the slot that holds k. The slot counts as used once a
+// message drawing from it is written (touch).
 func (c *tileCache) lookup(k cacheKey) (uint16, bool) {
 	s, ok := c.keys[k]
-	if ok {
-		c.touch(s)
-	}
 	return s, ok
 }
 

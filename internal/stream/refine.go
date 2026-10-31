@@ -93,11 +93,15 @@ func (w *writer) quality(t int) uint8 {
 
 // drawn records that the message in w.buf, of tiles whose pixels are in
 // w.tiles from w.msgK on, was written: the client has them at quality q,
-// to be refined to goal, and has stored the tile in w.msgSlot, if any.
+// to be refined to goal, and has stored the tile in w.msgSlot, or drawn
+// it from w.msgFrom, if any.
 func (w *writer) drawn(tiles []int, q, goal uint8) {
 	if w.msgSlot != 0 {
 		w.cache.store(w.msgSlot, w.msgKey)
 		w.msgSlot = 0
+	}
+	if w.msgFrom != 0 {
+		w.cache.touch(w.msgFrom)
 	}
 	for k, t := range tiles {
 		if w.sc != nil {

@@ -105,10 +105,12 @@ type writer struct {
 	// cache mirrors the client's tile cache (cache.go), nil without one.
 	// msgSlot is the slot the message in buf stores its tile in, 0 for
 	// none, and msgKey the tile's content: the mirror takes it once the
-	// message is written.
+	// message is written. msgFrom is the slot a cached tile in buf draws
+	// from, 0 for none, which counts as used once the message is written.
 	cache   *tileCache
 	msgSlot uint16
 	msgKey  cacheKey
+	msgFrom uint16
 
 	// Refinement (refine.go). heat is each tile's motion as of heatAt;
 	// changed is when each tile last went out changed, since start; goal

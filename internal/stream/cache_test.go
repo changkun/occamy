@@ -139,6 +139,9 @@ func TestTileCacheModel(t *testing.T) {
 			for step := range 2000 {
 				k := testKey(rng.IntN(universe))
 				got, ok := c.lookup(k)
+				if ok {
+					c.touch(got) // its message written
+				}
 				want, wok := m.lookup(k)
 				if got != want || ok != wok {
 					t.Fatalf("n %d seed %d step %d: lookup %v = %d, %v; want %d, %v", n, seed, step, k.sum, got, ok, want, wok)
@@ -206,8 +209,12 @@ func TestTileCache(t *testing.T) {
 	if s, ok := c.lookup(testKey(0)); !ok || s != 1 {
 		t.Errorf("lookup = %d, %v", s, ok)
 	}
+	if s := c.victim(); s != 1 {
+		t.Errorf("victim %d after a lookup of slot 1, want 1: a lookup alone uses no slot", s)
+	}
+	c.touch(1)
 	if s := c.victim(); s != 2 {
-		t.Errorf("victim %d after a lookup of slot 1, want 2", s)
+		t.Errorf("victim %d after a cached tile of slot 1, want 2", s)
 	}
 	c.store(2, testKey(3))
 	if c.has(testKey(1)) {
