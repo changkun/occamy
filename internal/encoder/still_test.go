@@ -157,6 +157,7 @@ func TestStill(t *testing.T) {
 		image.Rect(0, 128, 256, 192),    // a run of four
 		image.Rect(960, 704, 1024, 768), // the corner
 		image.Rect(0, 0, 61, 9),         // an edge tile
+		image.Rect(0, 0, 64, 4),         // the bottom row of 900 lines, smaller than the window
 	}
 	for _, lossy := range []protocol.Codec{webpC, jpegC} {
 		for _, r := range rects {
@@ -175,6 +176,14 @@ func TestStill(t *testing.T) {
 					if q < lo || q > hi || !onLadder {
 						t.Fatalf("%v at %v, %d to %d: quality %d is not on the ladder", lossy, r, lo, hi, q)
 					}
+					if w < 8 || h < 8 {
+						// No score: at hi, and not reached, so that a
+						// writer raises it as hi rises.
+						if q != hi || reached {
+							t.Errorf("%v at %v: a rectangle smaller than the window at %d, reached %v; want %d, not reached", lossy, r, q, reached, hi)
+						}
+						continue
+					}
 					got := scoreOf(t, c, b[len("prefix"):], pix, w, h, 64)
 					if !reached {
 						if q != hi || got >= StillSSIM {
@@ -191,13 +200,8 @@ func TestStill(t *testing.T) {
 							below = lo + (hi-lo-1)/QualityStep*QualityStep
 						}
 						lb, lc := New([]protocol.Codec{lossy}).Lossy(nil, pix, w, h, below)
-						if s := scoreOf(t, lc, lb, pix, w, h, 64); s >= StillSSIM && w >= 8 && h >= 8 {
+						if s := scoreOf(t, lc, lb, pix, w, h, 64); s >= StillSSIM {
 							t.Errorf("%v at %v, %d to %d from %d: %d chosen, but %d scores %.3f", lossy, r, lo, hi, hint, q, below, s)
-						}
-					}
-					if w < 8 || h < 8 {
-						if q != hi {
-							t.Errorf("%v at %v: a rectangle smaller than the window at %d, want %d", lossy, r, q, hi)
 						}
 					}
 				}
