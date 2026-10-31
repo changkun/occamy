@@ -316,6 +316,8 @@ and guacd leaves the default deployment.
   - cancel returns at once, with no goroutine left;
   - with `any`, xrdp selects TLS; with `nla`, it selects standard RDP
     security rather than failing, which the backend refuses at once.
+
+  It passed again after the review's fixes, on the same day.
 - **Mutation checks.** Each bound was broken in turn and a test failed:
   - the queue's length, and its event budget (`TestInputErrors`);
   - the writer returning the budget (`TestRunInputBudgetReturned`);
