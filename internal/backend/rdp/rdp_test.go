@@ -580,7 +580,7 @@ func stripNLA(t *testing.T, upstream string) string {
 		if _, err := io.ReadFull(c, p); err != nil {
 			return
 		}
-		binary.LittleEndian.PutUint32(p[len(p)-4:], uint32(rdp.ProtocolSSL)) // the RDP_NEG_REQ ends the request
+		binary.LittleEndian.PutUint32(p[len(p)-4:], rdp.ProtocolSSL) // the RDP_NEG_REQ ends the request
 		if _, err := u.Write(append(h[:], p...)); err != nil {
 			return
 		}
