@@ -131,6 +131,22 @@ func (l *live) setLayoutEvery(every, retry time.Duration) {
 	l.c.due()
 }
 
+// wantNone waits for the client to want no size.
+func (l *live) wantNone(t *testing.T) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		l.c.chio.mu.Lock()
+		want := l.c.disp.want
+		l.c.chio.mu.Unlock()
+		if want == (image.Point{}) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the client still wants %v", want)
+		}
+	}
+}
+
 // The client asks for DRDYNVC only with Resize, answers the server's
 // capabilities with version 2 at most, accepts Display Control and
 // refuses other channels and a second Display Control channel. (An id
@@ -235,7 +251,8 @@ func TestDisplayControl(t *testing.T) {
 		t.Errorf("%d sizes given up, want 1", n)
 	}
 	// Asked for anew, the size goes again; the desktop's own size, no
-	// more.
+	// more, and once the layout before it is past its retry, the client
+	// gives that size up.
 	l.setLayoutEvery(0, time.Second)
 	l.c.RequestSize(1001, 9000)
 	if got := l.layout(t, id); got != image.Pt(1000, 8192) {
@@ -243,6 +260,7 @@ func TestDisplayControl(t *testing.T) {
 	}
 	l.c.RequestSize(1024, 768)
 	l.quietDVC(t)
+	l.wantNone(t)
 	l.reactivate(t, image.Pt(800, 600))
 	l.c.RequestSize(800, 600)
 	l.quietDVC(t)
@@ -272,6 +290,81 @@ func TestDisplayControl(t *testing.T) {
 	// Without the channel, RequestSize does nothing.
 	plain := runLive(t, rdptest.Server{}, Config{})
 	plain.c.RequestSize(800, 600)
+}
+
+// A viewer who asks for the desktop's own size back before the server
+// applied a layout of another keeps it, as the server may yet apply that
+// layout: once it does, the client asks for the size back. The retry is
+// an hour away, so the reactivation is what has the client look again.
+// Once the desktop has the size, or once the retry of the layout before
+// would be due, the client wants the size no more, and a later
+// reactivation goes unanswered.
+func TestDisplayResizeBack(t *testing.T) {
+	l := runLive(t, rdptest.Server{}, withResize)
+	l.setLayoutEvery(0, time.Hour)
+	const id = 9
+	l.display(t, id, 16, 8192, 8192)
+	w, h := l.c.Size()
+	l.c.RequestSize(1280, 720)
+	if got := l.layout(t, id); got != image.Pt(1280, 720) {
+		t.Fatalf("layout %v, want 1280×720", got)
+	}
+	l.c.RequestSize(w, h)
+	l.quietDVC(t)
+	l.reactivate(t, image.Pt(1280, 720))
+	if got := l.layout(t, id); got != image.Pt(w, h) {
+		t.Fatalf("layout %v, want %d×%d back", got, w, h)
+	}
+	// The desktop has the size: the retry is not due, but another resize
+	// goes unanswered.
+	l.reactivate(t, image.Pt(w, h))
+	l.wantNone(t)
+	l.reactivate(t, image.Pt(1280, 720))
+	l.quietDVC(t)
+
+	// The retry of the layout before is due.
+	l.c.RequestSize(1280, 720)
+	l.quietDVC(t)
+	l.setLayoutEvery(0, 50*time.Millisecond)
+	l.wantNone(t)
+	l.reactivate(t, image.Pt(w, h))
+	l.quietDVC(t)
+}
+
+// The client looks again at the desktop's own size, which it keeps for
+// the layout before, when the retry of that layout is due, though a size
+// asked for in between had it look sooner and took the retry's wake.
+func TestLayoutWindow(t *testing.T) {
+	c := testClient(1024, 768)
+	c.cfg.Resize = true
+	c.chio.kick = make(chan struct{}, 1)
+	c.layoutEvery, c.layoutRetry = 300*time.Millisecond, time.Hour
+	c.disp = display{ch: &dynChannel{id: 9}, caps: true, maxArea: maxPixels}
+	defer func() {
+		if c.disp.timer != nil {
+			c.disp.timer.Stop()
+		}
+	}()
+	c.chio.mu.Lock()
+	defer c.chio.mu.Unlock()
+	t0 := time.Now()
+	c.disp.want = image.Pt(1280, 720)
+	if p := c.layoutDue(t0); p == nil || !c.disp.wake.Equal(t0.Add(time.Hour)) {
+		t.Fatalf("layout %x, wake %v after %v", p, c.disp.wake, t0)
+	}
+	c.disp.want = image.Pt(1000, 700) // waits for its pace
+	if p := c.layoutDue(t0.Add(time.Millisecond)); p != nil || !c.disp.wake.Equal(t0.Add(300*time.Millisecond)) {
+		t.Fatalf("layout %x, wake %v after %v", p, c.disp.wake, t0)
+	}
+	c.disp.want = image.Pt(1024, 768) // and the desktop's before it went
+	c.disp.wake = time.Time{}         // the timer fired
+	if p := c.layoutDue(t0.Add(300 * time.Millisecond)); p != nil || c.disp.want != image.Pt(1024, 768) || !c.disp.wake.Equal(t0.Add(time.Hour)) {
+		t.Fatalf("layout %x, want %v, wake %v after %v", p, c.disp.want, c.disp.wake, t0)
+	}
+	c.disp.wake = time.Time{}
+	if p := c.layoutDue(t0.Add(time.Hour)); p != nil || c.disp.want != (image.Point{}) {
+		t.Fatalf("layout %x, want %v", p, c.disp.want)
+	}
 }
 
 // A message on a dynamic channel comes in one Data PDU or in a Data

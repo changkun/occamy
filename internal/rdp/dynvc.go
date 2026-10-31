@@ -345,7 +345,10 @@ func sizeCode(v uint32) int {
 // desktop has it. It sends a layout of a new size at most every
 // layoutEvery, as guacd does, and the same size again every layoutRetry
 // while the desktop differs, at most maxLayoutTries times in all, where
-// guacd sends it every half second without end.
+// guacd sends it every half second without end. A size the desktop has
+// already needs no layout, but the server may yet apply the last layout,
+// of another size, until its retry is due: until then the client keeps
+// the size, and asks for it should the desktop change.
 
 // displayControl is the Display Control channel's name.
 const displayControl = "Microsoft::Windows::RDS::DisplayControl"
@@ -451,7 +454,14 @@ func (c *Client) layoutDue(now time.Time) []byte {
 		return nil
 	}
 	w, h := c.Size()
-	if d.want == image.Pt(w, h) {
+	if desktop := image.Pt(w, h); d.want == desktop {
+		// The desktop has the size, but the server may yet apply the last
+		// layout, of another, until its retry is due: the client keeps
+		// the size until then, and asks for it if the desktop changes.
+		if wait := d.last.Add(c.layoutRetry).Sub(now); d.sent != desktop && wait > 0 {
+			c.layoutAfter(now, wait)
+			return nil
+		}
 		d.want = image.Point{}
 		return nil
 	}
