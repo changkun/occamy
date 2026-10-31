@@ -481,7 +481,7 @@ size; `resize` reports what it did. `occamyd` asks for at most 8192
 pixels a side, or 1000 columns and 500 rows, and takes a larger request,
 or a hello's larger size, as that bound. A backend may have tighter
 limits: the native VNC backend asks for no screen of more than 2^25
-pixels, so a request for 8192×8192 leaves the server's size.
+pixels, so a request for 8192×8192 is ignored.
 
 | Field | Type | Meaning |
 |-------|------|---------|
