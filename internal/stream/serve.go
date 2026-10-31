@@ -261,7 +261,7 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 		if budget <= 0 {
 			budget = DefaultEncodeCacheBytes
 		}
-		w.sh, w.prof = share(w.fb, workers, budget), p
+		w.sh, w.prof = share(w.fb, workers, budget, w.log), p
 		defer w.sh.release(w.fb)
 	}
 	read := make(chan error, 1)

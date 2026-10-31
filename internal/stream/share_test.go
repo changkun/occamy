@@ -9,9 +9,11 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
+	"log/slog"
 	"math/rand/v2"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -164,12 +166,12 @@ func TestEncodeCacheBudget(t *testing.T) {
 func TestShareRelease(t *testing.T) {
 	a, b := newDirect(t, false), newDirect(t, false)
 	fa, fb := a.w.fb, b.w.fb
-	s1 := share(fa, 2, 1<<20)
-	s2 := share(fa, 2, 1<<20)
+	s1 := share(fa, 2, 1<<20, nil)
+	s2 := share(fa, 2, 1<<20, nil)
 	if s1 != s2 {
 		t.Fatal("two viewers of a session do not share")
 	}
-	if s3 := share(fb, 2, 1<<20); s3 == s1 {
+	if s3 := share(fb, 2, 1<<20, nil); s3 == s1 {
 		t.Fatal("viewers of two sessions share")
 	} else {
 		s3.release(fb)
@@ -185,10 +187,55 @@ func TestShareRelease(t *testing.T) {
 	if left {
 		t.Error("the session's share outlives its viewers")
 	}
-	if s4 := share(fa, 2, 1<<20); s4 == s1 {
+	if s4 := share(fa, 2, 1<<20, nil); s4 == s1 {
 		t.Error("a viewer after the last left found the old share")
 	} else {
 		s4.release(fa)
+	}
+}
+
+// A job that panics ends neither occamyd nor its worker. The worker logs
+// the panic and drops its encoders, which may be broken; the encoding
+// the job was making is published failed, and the next to ask makes it.
+func TestShareWorkerPanics(t *testing.T) {
+	var logged bytes.Buffer
+	fb := newDirect(t, false).w.fb
+	sh := share(fb, 1, 1<<20, slog.New(slog.NewTextHandler(&logged, nil)))
+	p := profile{protocol.CodecDeflate, protocol.CodecWebP}
+	k := tileKey{p, 3, false}
+	e, mine := sh.cache.tile(k, 1)
+	if !mine {
+		t.Fatal("a new tile's encoding is not the asker's to make")
+	}
+	encs := make(chan *encoder.Encoder, 2)
+	done := make(chan struct{})
+	for i, job := range []func(*worker){
+		func(wk *worker) {
+			encs <- wk.encoder(p)
+			sh.cache.make(e, func(*entry) bool { panic("an encoder broke") })
+		},
+		func(wk *worker) {
+			encs <- wk.encoder(p)
+			close(done)
+		},
+	} {
+		if !sh.submit(job) {
+			t.Fatalf("no worker took job %d", i)
+		}
+	}
+	<-done
+	sh.release(fb)
+	if a, b := <-encs, <-encs; a == b {
+		t.Error("the worker kept the encoders of a job that panicked")
+	}
+	if <-e.done; e.ok {
+		t.Error("the encoding whose maker panicked is published made")
+	}
+	if again, mine := sh.cache.tile(k, 1); !mine || again == e {
+		t.Error("the next to ask does not make the encoding again")
+	}
+	if !strings.Contains(logged.String(), "an encoder broke") {
+		t.Errorf("the panic is not logged: %q", logged.String())
 	}
 }
 
@@ -239,7 +286,7 @@ func TestPrefetchSkipsCached(t *testing.T) {
 	if f := d.w.prefetch(d.w.order); f == nil {
 		t.Fatal("no rows for the workers")
 	}
-	wk := &worker{encs: map[profile]*encoder.Encoder{}}
+	wk := newWorker()
 	jobs := 0
 	for len(sh.jobs) > 0 {
 		(<-sh.jobs)(wk)
@@ -355,7 +402,7 @@ func TestPrefetchMatchesWriter(t *testing.T) {
 	if f := w.prefetch(w.order); f == nil {
 		t.Fatal("no rows for the workers")
 	}
-	wk := &worker{encs: map[profile]*encoder.Encoder{}}
+	wk := newWorker()
 	for len(sh.jobs) > 0 {
 		(<-sh.jobs)(wk)
 	}
@@ -397,7 +444,7 @@ func TestPrefetchStops(t *testing.T) {
 		t.Fatal("no rows for the workers")
 	}
 	w.stopFetch()
-	wk := &worker{encs: map[profile]*encoder.Encoder{}}
+	wk := newWorker()
 	jobs := 0
 	for len(sh.jobs) > 0 {
 		(<-sh.jobs)(wk)
@@ -448,7 +495,7 @@ func TestPrefetchRecruits(t *testing.T) {
 		if _, ok := w.collect(image.Rectangle{}); !ok {
 			t.Fatal("resized")
 		}
-		wk := &worker{encs: map[profile]*encoder.Encoder{}}
+		wk := newWorker()
 		if c.runs {
 			// A worker encodes the frame at the pacer's quality; the
 			// next wants its runs at another.
@@ -545,7 +592,7 @@ func TestPrefetchRepeats(t *testing.T) {
 			t.Fatal("no rows for the workers")
 		}
 		<-sh.jobs // the rows go by hand instead, in the order of the case
-		wk := &worker{encs: map[profile]*encoder.Encoder{}}
+		wk := newWorker()
 		enc := wk.encoder(f.p)
 		rows := len(f.rows) - 1
 		for k := range rows {

@@ -6,7 +6,9 @@ package stream
 
 import (
 	"image"
+	"log/slog"
 	"runtime"
+	"runtime/debug"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -67,6 +69,7 @@ type shared struct {
 	jobs    chan func(*worker) // nil without workers
 	workers int
 	wg      sync.WaitGroup
+	log     *slog.Logger
 }
 
 // jobsPerWorker is how many jobs may wait for each worker; a frame's
@@ -79,20 +82,26 @@ var (
 )
 
 // share returns what the viewers of fb share, which the first makes with
-// the given workers and cache budget. Each call is paired with release.
-func share(fb *framebuffer.Framebuffer, workers, budget int) *shared {
+// the given workers and cache budget, logging to log. Each call is
+// paired with release.
+func share(fb *framebuffer.Framebuffer, workers, budget int, log *slog.Logger) *shared {
 	sharedMu.Lock()
 	defer sharedMu.Unlock()
 	sh := sharedFor[fb]
 	if sh == nil {
-		sh = &shared{cache: newEncodeCache(budget), workers: max(workers, 0)}
+		if log == nil {
+			log = slog.Default()
+		}
+		sh = &shared{cache: newEncodeCache(budget), workers: max(workers, 0), log: log}
 		if workers > 0 {
 			sh.jobs = make(chan func(*worker), jobsPerWorker*workers)
 			for range workers {
 				sh.wg.Go(func() {
-					wk := &worker{encs: map[profile]*encoder.Encoder{}}
+					wk := newWorker()
 					for job := range sh.jobs {
-						job(wk)
+						if !sh.run(wk, job) {
+							wk = newWorker()
+						}
 					}
 				})
 			}
@@ -101,6 +110,22 @@ func share(fb *framebuffer.Framebuffer, workers, budget int) *shared {
 	}
 	sh.refs++
 	return sh
+}
+
+// run runs job on wk, and reports false if it panicked, which it logs.
+// The worker's encoders may be left broken, so the worker drops them;
+// an encoding the job was making is published failed (make), and the
+// next to ask for it makes it again. A panic in one session's encoder
+// thus ends neither occamyd nor the session.
+func (sh *shared) run(wk *worker, job func(*worker)) (ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			sh.log.Error("stream: an encode worker's job panicked", "panic", r, "stack", string(debug.Stack()))
+			ok = false
+		}
+	}()
+	job(wk)
+	return true
 }
 
 // release lets go of what share returned for fb. The last to let go
@@ -140,6 +165,9 @@ type worker struct {
 	pix      []byte
 	payload  []byte
 }
+
+// newWorker returns a worker with no encoders yet.
+func newWorker() *worker { return &worker{encs: map[profile]*encoder.Encoder{}} }
 
 // encoder returns the worker's encoder of profile p.
 func (wk *worker) encoder(p profile) *encoder.Encoder {

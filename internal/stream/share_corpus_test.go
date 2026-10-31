@@ -52,7 +52,7 @@ func newViewers(tb testing.TB, n int, m shareMode) *viewers {
 	vs := &viewers{ds: []*direct{d}}
 	if m.share {
 		fb := d.w.fb
-		vs.sh = share(fb, m.workers, DefaultEncodeCacheBytes)
+		vs.sh = share(fb, m.workers, DefaultEncodeCacheBytes, slog.New(slog.DiscardHandler))
 		tb.Cleanup(func() { vs.sh.release(fb) })
 	}
 	for range n - 1 {
