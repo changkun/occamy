@@ -157,7 +157,13 @@ func (w *writer) candidates(viewport image.Rectangle, now time.Time) (wake time.
 // input ends the wait too.
 func (w *writer) refinement(ctx context.Context, viewport image.Rectangle) (time.Duration, error) {
 	if w.in != nil {
-		return 0, nil // its effect may come yet
+		// Its effect may come yet. An input that shows nothing is given
+		// up after inputTimeout, which collect finds once the writer
+		// wakes; one whose effect showed goes with its frame.
+		if w.in.boosted {
+			return 0, nil
+		}
+		return max(time.Until(w.in.at.Add(inputTimeout))+time.Millisecond, time.Millisecond), nil
 	}
 	now := time.Now()
 	wake := w.candidates(viewport, now)
@@ -175,9 +181,11 @@ func (w *writer) refinement(ctx context.Context, viewport image.Rectangle) (time
 }
 
 // refineFrame sends a frame of the tiles in w.refine, one tile a message,
-// for as long as pacer.Background allows. It ends before a message once
-// an input is pending, and once the screen changed after it sent one, so
-// that the input's frame, or the change's, goes next.
+// for as long as pacer.Background allows. It ends before a tile once an
+// input is pending, and once the screen changed after it tried one,
+// whether or not that one went, so that the input's frame, or the
+// change's, goes next. The message Background turned away is kept for
+// the next frame of refinement.
 func (w *writer) refineFrame(ctx context.Context) error {
 	defer w.rested()
 	w.frame++
@@ -190,7 +198,7 @@ func (w *writer) refineFrame(ctx context.Context) error {
 		if err := w.smallNow(ctx); err != nil {
 			return err
 		}
-		if w.in != nil || messages > 0 && w.fb.Clock() != clock {
+		if w.in != nil || i > 0 && w.fb.Clock() != clock {
 			break
 		}
 		if visible, _ := w.v.Visibility(); !visible || w.fb.Bounds() != w.g.bounds {
@@ -204,6 +212,9 @@ func (w *writer) refineFrame(ctx context.Context) error {
 			continue
 		}
 		if !w.p.Background(time.Now(), len(w.buf)) {
+			w.held.ok = true
+			w.held.payload = append(w.held.payload[:0], w.payload...)
+			w.held.quality, w.held.goal = w.msgQuality, w.msgGoal
 			break
 		}
 		if err := w.c.WriteMessage(ctx, w.buf); err != nil {
@@ -246,19 +257,37 @@ func (w *writer) refineTile(id uint32, t int) (send, ok bool) {
 	}
 	w.runVersion = append(w.runVersion[:0], version)
 	w.msgK = 0
+	q, lo := w.p.Quality(), w.p.MinQuality()
+	if h := &w.held; h.ok {
+		// Turned away last time, as encoded then.
+		h.ok = false
+		if h.tile == t && h.version == version && h.q == q && h.lo == lo {
+			w.payload = append(w.payload[:0], h.payload...)
+			w.msgQuality, w.msgGoal = h.quality, h.goal
+			w.message(id, r, h.codec)
+			return true, true
+		}
+	}
 	b, codec, lossy := w.enc.Tile(w.payload[:0], w.tiles[0], r.Dx(), r.Dy(), false)
 	w.msgQuality, w.msgGoal = lossless, lossless
+	have := w.quality(t)
 	if lossy {
-		q := w.p.Quality()
 		var got int
 		var reached bool
-		b, codec, got, reached = w.enc.Still(w.payload[:0], w.tiles[0], r.Dx(), r.Dy(), r.Dx(), w.p.MinQuality(), q)
+		b, codec, got, reached = w.enc.Still(w.payload[:0], w.tiles[0], r.Dx(), r.Dy(), r.Dx(), lo, q)
 		if !exact(codec) {
 			w.msgQuality, w.msgGoal = stillGoal(got, q, reached)
+			if reached && have >= lossyQuality(got) {
+				// The client has the pixels at a quality no lower than
+				// the score needs, as an input's effect goes: they are
+				// final as they are.
+				w.setQuality(t, final)
+				w.goal[t] = final
+				return false, true
+			}
 		}
 	}
 	w.payload = b
-	have := w.quality(t)
 	if codec == 0 || w.msgQuality <= have {
 		// Nothing better to send: the goal is what the client has, or
 		// above the pacer's quality now.
@@ -273,5 +302,30 @@ func (w *writer) refineTile(id uint32, t int) (send, ok bool) {
 		w.goal[t] = have
 		return false, true
 	}
+	w.held = heldTile{tile: t, version: version, q: q, lo: lo, codec: codec, payload: w.held.payload}
 	return true, true
+}
+
+// heldTile is the refinement of a tile that pacer.Background turned
+// away, which the next frame of refinement sends unless the tile or the
+// pacer's quality changed since: the tile, its version, the qualities it
+// was searched between, and the message's codec, payload, quality and
+// goal. ok says it holds one.
+type heldTile struct {
+	ok            bool
+	tile          int
+	version       uint64
+	q, lo         int
+	codec         protocol.Codec
+	payload       []byte
+	quality, goal uint8
+}
+
+// setQuality records that the client has tile t at quality q.
+func (w *writer) setQuality(t int, q uint8) {
+	if w.sc != nil {
+		w.sc.qual[t] = q
+	} else {
+		w.qual[t] = q
+	}
 }
