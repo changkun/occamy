@@ -139,7 +139,7 @@ func TestConvergesCodecs(t *testing.T) {
 				defer r.cl.mu.Unlock()
 				var agreed []protocol.Codec
 				for _, k := range c.codecs {
-					if k != protocol.CodecCached && k != protocol.CodecPNG {
+					if k != protocol.CodecPNG {
 						agreed = append(agreed, k)
 					}
 				}

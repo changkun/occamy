@@ -23,7 +23,7 @@ import { connect } from './connect'
 import { CloseError } from './errors'
 import type { SessionEvent } from './events'
 import { Codec, Role, SessionClass } from './messages'
-import type { Session } from './session'
+import { DEFAULT_CACHE_SLOTS, type Session } from './session'
 
 const server = process.env.OCCAMY_INTEROP_SERVER ?? ''
 
@@ -128,8 +128,10 @@ describe.skipIf(server === '')('interop with occamyd’s stream', { timeout: 30_
       expect(s.sessionClass).toBe(SessionClass.Graphical)
       expect(s.role).toBe(Role.Owner)
       expect(s.sessionId).toBe('interop')
-      // Node decodes deflate and raw; occamyd's encoder sends more.
-      expect(s.capabilities.codecs).toEqual([Codec.Deflate, Codec.Raw])
+      // Node decodes deflate and raw; occamyd's encoder sends more. The
+      // tile cache is agreed too.
+      expect(s.capabilities.codecs).toEqual([Codec.Deflate, Codec.Raw, Codec.Cached])
+      expect(s.capabilities.cacheSlots).toBe(DEFAULT_CACHE_SLOTS)
 
       // The first frames show the screen, the pointer and the title. A
       // viewer is first sent the session's state as it is, which may be
@@ -167,6 +169,16 @@ describe.skipIf(server === '')('interop with occamyd’s stream', { timeout: 30_
         { type: 'wheel', dy: -3, mode: 1 },
         { type: 'text', text: '日本' },
       ])
+
+      // Another key, then the first again: the swatch's tile comes back
+      // from the tile cache, and the screen is still the desktop's.
+      for (const keysym of [0x79, 0x78]) {
+        const k = s.key(true, keysym, 0x1b)
+        s.key(false, keysym, 0x1b)
+        await until(s, (ev) => (ev.type === 'frame' && ev.lastSeq >= k ? true : undefined))
+        await shows(s)
+      }
+      expect(await get<number>('/cached')).toBeGreaterThan(0)
 
       // The clipboard comes back, the bell rings, the title changes.
       s.clipboard('text/plain', 'from the browser')
