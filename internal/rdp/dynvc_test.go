@@ -237,7 +237,7 @@ func TestDisplayControl(t *testing.T) {
 	if got := l.layout(t, id); got != image.Pt(200, 200) {
 		t.Errorf("layout %v, want the least, 200×200", got)
 	}
-	l.setLayoutEvery(0, time.Second)
+	l.setLayoutEvery(0, time.Hour) // no retry while the server reactivates
 	l.reactivate(t, image.Pt(200, 200))
 	l.setLayoutEvery(0, 0)
 	l.quietDVC(t)
@@ -273,8 +273,10 @@ func TestDynvcData(t *testing.T) {
 	l.sendDVC(t, rdptest.DVCCreateRequest(id, rdptest.DisplayControl))
 	l.dvc(t)
 	l.setLayoutEvery(0, layoutRetry)
-	// Over the bound: dropped, so no capabilities yet.
+	// Over the bound, in one PDU or in several: dropped, so no
+	// capabilities yet.
 	big := append(rdptest.DisplayCaps(16, 8192, 8192), make([]byte, maxDisplayMessage)...)
+	l.sendDVC(t, rdptest.DVCDataPDU(id, big))
 	l.sendDVC(t, rdptest.DVCMessage(id, big, 1000)...)
 	l.sendDVC(t, rdptest.DVCDataPDU(77, rdptest.DisplayCaps(16, 8192, 8192)))
 	l.c.RequestSize(1280, 720)
@@ -285,7 +287,7 @@ func TestDynvcData(t *testing.T) {
 		t.Errorf("layout %v, want 1280×720", got)
 	}
 	st := l.c.Stats().Ignored
-	if st["dynamic channel messages over their bound"] != 1 || st["dynamic channel PDUs"] != 1 {
+	if st["dynamic channel messages over their bound"] != 2 || st["dynamic channel PDUs"] != 1 {
 		t.Errorf("ignored %v", st)
 	}
 
