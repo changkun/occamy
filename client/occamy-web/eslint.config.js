@@ -38,7 +38,7 @@ export default [
     // The library runs in browsers and Workers and depends on nothing:
     // no Node module, no UI framework.
     files: ['src/protocol/**/*.ts'],
-    ignores: ['src/protocol/**/*.test.ts', 'src/protocol/testing/**'],
+    ignores: ['src/protocol/**/*.test.ts', 'src/protocol/testing/**', 'src/protocol/demo/vite.config.ts'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
