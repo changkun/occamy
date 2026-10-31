@@ -24,8 +24,10 @@ make e2e        # end-to-end tests against the running stack
 make stop
 ```
 
-`go test ./...` runs the unit tests; the end-to-end tests in `tests/` skip
-unless `make e2e` points them at a running stack. No C toolchain is needed.
+`go test -race ./...` runs the unit tests, as CI does; the end-to-end
+tests in `tests/` skip unless `make e2e` points them at a running stack.
+[docs/try-it.md](./docs/try-it.md) walks through the demo stack and
+every test suite, with the command of each. No C toolchain is needed.
 See the README for a native build. `bench/codecs`, the codec measurement,
 is a module of its own; run its tests from that directory. The guacd
 bridge's conformance corpus, recorded guacd sessions that `go test`

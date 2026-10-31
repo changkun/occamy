@@ -9,6 +9,19 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- [docs/try-it.md](docs/try-it.md), a guide to running Occamy v1 for
+  the first time, from a fresh checkout. It covers:
+  - the prerequisites and the build;
+  - the demo stack, with where its configuration and signing key live,
+    and how to run it next to another stack on one host;
+  - a connection of each protocol and what it shows, with a k3s
+    cluster for Kubernetes;
+  - sharing, the clipboard, resizing, reconnecting and the guacd
+    fallback;
+  - every test suite: unit, lint, the web client's, end-to-end,
+    pressure, soak, integration and fuzz;
+  - the debug routes' gating;
+  - tearing it all down.
 - The desktop baseline and the per-scenario targets for protocol v1
   ([docs/benchmarks.md](docs/benchmarks.md)). `bench/vncprobe` measures
   the bench desktop's VNC server on its own.
@@ -569,6 +582,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Changed
 
+- The README starts with v1: the demo stack and the web client first,
+  then a native build that serves a v1 file. The run instructions for
+  guacd and a v0 file, and the v0 token's connection parameters, move
+  to a short section on the released v0. The README's test command is
+  `go test -race ./...`, as CI runs it.
 - The plan for v1.0 (owner, 2026-10-31): it waits until the benchmark
   shows native at least 10x better than guacd, and ships no guacd
   fallback for a protocol still short of it; release candidates may
