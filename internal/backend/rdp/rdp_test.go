@@ -817,7 +817,7 @@ func TestInputErrors(t *testing.T) {
 	if err := b.Input(backend.TermInput{Data: []byte("ls")}); !errors.Is(err, ErrUnsupportedInput) {
 		t.Errorf("TermInput: %v", err)
 	}
-	for _, ev := range []backend.InputEvent{backend.Clipboard{MIME: "text/plain", Data: []byte("x")}, backend.Resize{Width: 800, Height: 600}, backend.Text{}} {
+	for _, ev := range []backend.InputEvent{backend.Clipboard{MIME: "image/png", Data: []byte("x")}, backend.Resize{Width: 800, Height: 600}, backend.Text{}} {
 		if err := b.Input(ev); err != nil {
 			t.Errorf("%T: %v", ev, err)
 		}
@@ -825,7 +825,16 @@ func TestInputErrors(t *testing.T) {
 	if err := b.Input(backend.Text{Text: strings.Repeat("x", inputEvents/4+1)}); !errors.Is(err, ErrInputFull) {
 		t.Errorf("a Text over the budget: %v", err)
 	}
-	n := 0
+	// A Resize is queued. Clipboard text is too, charged by its bytes, of
+	// which the queue holds two clipboards of the most text; beyond the
+	// most, text is cut.
+	big := backend.Clipboard{MIME: "text/plain", Data: bytes.Repeat([]byte("x"), rdp.MaxClipboard+1)}
+	for i := range 3 {
+		if err := b.Input(big); (err == nil) != (i < 2) || err != nil && !errors.Is(err, ErrInputFull) {
+			t.Errorf("clipboard %d of %d bytes: %v", i, len(big.Data), err)
+		}
+	}
+	n := 3 // the Resize and two clipboards
 	for ; n < 1000; n++ {
 		if err := b.Input(backend.Key{Down: true, Keysym: 'a'}); err != nil {
 			if !errors.Is(err, ErrInputFull) {
