@@ -88,6 +88,14 @@ describe('start', () => {
     expect(body.code_verifier).toMatch(/^[A-Za-z0-9._~-]{43,128}$/)
   })
 
+  it('forgets the verifier of a sign-in that failed or was abandoned', () => {
+    for (const fragment of [{ kind: 'none' }, { kind: 'oidc-error', error: 'access_denied' }, { kind: 'join', sessionId: 's', token: 't' }] as const) {
+      const s = storage('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')
+      start(fragment, api().api, s)
+      expect(s.getItem(VERIFIER_KEY)).toBeNull()
+    }
+  })
+
   it('says why an OIDC sign-in failed', () => {
     expect(start({ kind: 'oidc-error', error: 'access_denied' }, api().api, storage())).toEqual({
       kind: 'oidc-error',

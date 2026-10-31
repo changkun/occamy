@@ -46,22 +46,23 @@ export type Start =
  * spent exactly once. A code without a verifier in this tab was not this
  * tab's sign-in: someone may have sent the browser there with a
  * challenge of their own, so the code is spent with a throwaway
- * verifier and nobody is signed in.
+ * verifier and nobody is signed in. The verifier is forgotten on every
+ * start: a sign-in that failed or was abandoned leaves none for a later
+ * one to find.
  */
 export function start(fragment: Fragment, api: Api, storage: Storage | undefined): Start {
+  const verifier = takeVerifier(storage)
   switch (fragment.kind) {
     case 'join':
       return { kind: 'join', sessionId: fragment.sessionId, token: fragment.token }
     case 'oidc-error':
       return { kind: 'oidc-error', message: oidcErrorMessage(fragment.error) }
-    case 'oidc-code': {
-      const verifier = takeVerifier(storage)
+    case 'oidc-code':
       if (verifier === null) {
         api.oidcToken(fragment.code, newVerifier()).catch(() => undefined)
         return { kind: 'oidc-error', message: 'That sign-in was not started in this tab, so it was not used. Sign in here.' }
       }
       return { kind: 'oidc', token: api.oidcToken(fragment.code, verifier) }
-    }
     default:
       return { kind: 'signed-out' }
   }
