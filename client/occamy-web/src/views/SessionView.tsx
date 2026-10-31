@@ -8,9 +8,9 @@
 
 import { type ReactElement, Suspense, lazy, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
-import { CanvasSurface, Role, SessionClass, cursorStyle } from '../protocol'
+import { CanvasSurface, CloseCode, Role, SessionClass, cursorStyle } from '../protocol'
 import type { AccessToken, Api, Identity } from '../lib/api'
-import type { SessionAction } from '../lib/app'
+import { type SessionAction, forgetSession, keepSession } from '../lib/app'
 import { type SessionController as Controller, SessionController, type SessionState, overlayOf } from '../lib/controller'
 import { type Ending, endsSession } from '../lib/ending'
 import { type Size, cellGrid, deviceSize, fitSize, pixelRatio } from '../lib/layout'
@@ -48,6 +48,8 @@ export interface SessionViewProps {
   owner: Identity | null
   /** An owner's action that waited for the user to sign in again, numbered so that it is taken once. */
   action: { seq: number; action: SessionAction } | null
+  /** The tab's storage, which keeps the owner's session for a reload of the page. */
+  storage: Storage | undefined
   /** Back to where the user came from. */
   onLeave: () => void
   /** Asks the user to sign in again, over this view. */
@@ -67,7 +69,7 @@ function cellSize(): Size {
   return { width: ctx.measureText('W').width, height: Math.ceil(TERMINAL_FONT_SIZE * 1.2) }
 }
 
-export function SessionView({ api, token, target, owner: seed, action, onLeave, onSignIn, onRejoin }: SessionViewProps): ReactElement {
+export function SessionView({ api, token, target, owner: seed, action, storage, onLeave: left, onSignIn, onRejoin }: SessionViewProps): ReactElement {
   const [controller] = useState(
     () =>
       new SessionController({
@@ -103,6 +105,29 @@ export function SessionView({ api, token, target, owner: seed, action, onLeave, 
   const signedIn = target.kind !== 'share'
   // The session's ID: from welcome, or the one this view joins again.
   const sessionId = state.sessionId !== '' ? state.sessionId : target.kind === 'session' ? target.sessionId : ''
+
+  // The owner's session is kept in the tab's storage, so that a reload of
+  // the page, which signs in again, joins it again after: the page going
+  // away closes the stream, and occamyd keeps the session for the owner's
+  // grace. It is forgotten once the session has ended, once occamyd
+  // refuses this view's stream to it, or once the user leaves it; not
+  // when occamyd cannot be reached, often why the page was reloaded.
+  useEffect(() => {
+    if (target.kind === 'share' || sessionId === '') {
+      return
+    }
+    if (state.phase === 'open' && state.role === Role.Owner) {
+      keepSession(storage, { kind: 'session', sessionId, name })
+    } else if (state.phase === 'ended' && (endsSession(state.code) || state.code === CloseCode.Forbidden || state.code === CloseCode.Unauthorized)) {
+      forgetSession(storage, sessionId)
+    }
+  }, [storage, target.kind, sessionId, name, state.phase, state.role, state.code])
+
+  // onLeave leaves the session, which a reload then no longer joins.
+  const onLeave = (): void => {
+    forgetSession(storage, sessionId)
+    left()
+  }
 
   useEffect(() => {
     const r = stageRef.current?.getBoundingClientRect() ?? { width: 0, height: 0 }

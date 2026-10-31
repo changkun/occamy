@@ -390,6 +390,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   remote with the window, answers the remote's credential prompts,
   shares the session through a link as a viewer or read-only, and ends
   it, signing in again over the session when the sign-in has expired;
+  a reload over the owner's session signs in again and joins it, within
+  occamyd's grace, or lists the connections if the user would rather;
   an End or share that waited for the sign-in is left to occamyd, which
   ends or shares only its owner's session: one who signs in as another
   user is told the session has ended or is not theirs. A call to occamyd
@@ -397,12 +399,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the connections, and takes no second press meanwhile;
   the clipboard goes both ways as the role allows, and reaches the local
   clipboard on its own only for a role that gives input, so a read-only
-  viewer copies it from the clipboard panel; a hidden page tells occamyd
-  so and keeps acknowledging frames; and the end of a session says why
-  it ended, a takeover by the owner's newer stream too. Its build
-  writes the licenses of the packages it bundles to
-  `dist/THIRD_PARTY_LICENSES.md`, which the image ships in
-  `licenses/web/` and the web client archive in `dist/`.
+  viewer copies it from the clipboard panel, which takes text sent for
+  the remote's and keeps only what was typed since, and says when text
+  is too large to send; a hidden page tells occamyd so and keeps
+  acknowledging frames; and the end of a session says why it ended, a
+  takeover by the owner's newer stream too. Its build writes the
+  licenses of the packages it bundles to `dist/THIRD_PARTY_LICENSES.md`,
+  which the image ships in `licenses/web/` and the web client archive in
+  `dist/`.
 - `web_client` in a v1 file: the directory of the built web client,
   which occamyd serves under `/static/` with a Content-Security-Policy
   that keeps the page to its own origin, without directory listings or
