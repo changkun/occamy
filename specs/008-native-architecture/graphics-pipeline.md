@@ -95,6 +95,8 @@ quickly, in pure Go. That means choosing:
   to 256 colours, so text and UI always end up exact, and a high lossy quality
   for photographic tiles, set by a perceptual score (SSIM against the
   framebuffer) rather than bit-exactness, which would cost PNG's size.
+  (Built 2026-10-31, after 300 ms still by default, in background frames
+  that give way to input: see Implementation notes: Refinement.)
 - **Scroll and move detection:** the framebuffer keeps a hash per row of
   each tile column. When a large region changes, the encoder looks for a
   vertical or horizontal offset at which most row hashes match the
@@ -205,7 +207,10 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
    has at most 256 colours in every tile, and sent lossless it costs 388
    KiB a frame against 26 KiB as lossy WebP at an SSIM of 0.989. Tiles
    of up to 16 colours are always lossless, where lossy is 5 to 10 times
-   larger.)
+   larger.) (Built 2026-10-31: a tile in motion goes at the pacer's
+   lowest quality, a still photographic one at the lowest quality whose
+   SSIM reaches 0.91 on each tile, and refinement raises what motion
+   lowered; see Implementation notes: Refinement.)
 4. **Scroll and move detection and the client tile cache are in beta,**
    since G3 and G4's targets need them.
 5. **No server-side downscaling in beta.** Encoding only the visible
@@ -282,7 +287,7 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
 | Framebuffer | `internal/framebuffer`: RGBA pixels in square tiles, versions from one counter, a lock per row of tiles, drawing and CopyRect for backends, tile reads and a change signal for writers; the tile size is a parameter | — |
 | Measurement (done 2026-10-30) | A corpus of frames recorded from the bench desktop's scenes (desktop, two terminals, browser, photograph, drag, scroll, motion), and benchmarks on Go 1.27 that settle questions 1 to 3 and the lossy codec: palette or raw pixels with deflate, PNG, QOI, lossless WebP, JPEG (standard library and gen2brain/jpegn) and lossy WebP, scored for size, encode and decode time and SSIM; results in [docs/benchmarks/codecs.md](../../docs/benchmarks/codecs.md) | — |
 | Codecs (done 2026-10-30) | `internal/encoder`, an implementation of `stream.Encoder`: classification by colour count (up to 16, 17 to 256, above 256); the palette or raw container with `compress/flate` at level 1 as `deflate` (2); raw RGBA (1); lossy WebP from gen2brain/vpx/webp at method 0 (5), and JPEG from gen2brain/jpegn (4) for viewers that list JPEG but not WebP; adjacent lossy tiles of a frame encoded as one rectangle. Fixes the deflate container, including alpha for cursors, in [docs/protocol.md](../../docs/protocol.md), which marked it provisional. Adds vpx and jpegn to occamyd's `go.mod`, with the Go 1.26.4 they need, and their licence and PATENTS notices to the image's `licenses/` | Measurement |
-| Refinement | Motion heat per tile, and refinement after a still delay: exact for tiles of up to 256 colours, which go lossy while they move if they have more than 16, and a quality chosen by SSIM for photographic ones; gives `stream.Encoder` the tile's motion | Codecs |
+| Refinement (done 2026-10-31) | Motion heat per tile, and refinement after a still delay: exact for tiles of up to 256 colours, which go lossy while they move if they have more than 16, and a quality chosen by SSIM for photographic ones; gives `stream.Encoder` the tile's motion. Built with SSIM 0.91 on each tile and background frames paced by `pacer.Background`; the plasma takes 13.8 KiB a frame against 392.4 while it moves, and the photograph 121.8 KiB against 150.8, under G6's 139 ([notes](#implementation-notes-refinement)) | Codecs |
 | Scroll detection (done 2026-10-31) | Row hashes per tile column (xxh3-64), the offset search, and `copy-rect` with tiles for the exposed strip. Built per viewer against a shadow of what its client shows, vertical offsets only, verified pixel for pixel; the corpus's scroll takes 5.0 KiB a frame against 58.5 ([notes](#implementation-notes-scroll-detection)) | Framebuffer |
 | Tile cache | Content hashes (xxh3-128 from zeebo/xxh3, so collisions are out of reach), the server's mirror of each client's cache, and the `cached` codec | Codecs, protocol v1 Messages |
 | Encode cache and workers | Encoded tiles cached by tile, version, codec and quality and shared by viewers; a worker pool bounded per session | Codecs |
@@ -366,7 +371,8 @@ tiles of 17 to 256 colours.
 
 - `stream.Encoder` takes pixels, size and quality only. Decision 3's
   amendment needs the tile's motion as well, or a quality that already
-  encodes it; the Refinement task adds it.
+  encodes it; the Refinement task adds it. (Done 2026-10-31: `Tile`
+  takes `moving`.)
 - The measured container stores palette entries and raw pixels as RGB
   without alpha, while cursors use the same codecs with straight alpha.
   The Codecs task fixes the container in docs/protocol.md with a form
@@ -522,7 +528,8 @@ Done on 2026-10-30.
   cursor and draws its own pointer.
 - **Tiles of 17 to 256 colours are lossless** until the Refinement task
   gives the encoder a tile's motion, so the motion scene costs 388 KiB
-  a frame for now, as the measurement found.
+  a frame for now, as the measurement found. (Done 2026-10-31: they go
+  lossy while they move, and the plasma takes 13.8 KiB a frame.)
 - **Classification is per viewer**: each writer counts its tiles'
   colours. Sharing it, and the encoded tiles, is the Encode cache's.
 - **`internal/codec` is a package of its own** rather than part of
@@ -640,7 +647,8 @@ times.
   antialiased text needs its measurement first. G6: the photograph at
   quality 90, where the pacer starts, takes 151 KiB a frame as rows of
   WebP against G6's 139; picking the quality by SSIM is how Refinement
-  meets it.
+  meets it. (Done 2026-10-31: 121.8 KiB at SSIM 0.91 on each tile.
+  Lossless WebP is still unmeasured.)
 - jpegn's repository does not carry the notice of jpegli, from which its
   adaptive quantisation (`adaptive.go`) and progressive scans are ported;
   occamy ships jpegli's notice itself, and asking jpegn to add it is the
@@ -990,7 +998,10 @@ of 2.9 to 4.5:
   the search.
 - **Refinement can read each tile's quality from the shadow.** A tile a
   copy completes may hold lossy pixels moved from elsewhere; the shadow
-  records their quality, which a refinement pass can raise.
+  records their quality, which a refinement pass can raise. (Done
+  2026-10-31: refinement reads it, and pixels that reached the SSIM
+  score are recorded as `final`, so that copies of them complete
+  tiles.)
 - **Share the shadow, or its hashes,** between viewers that are caught
   up, and with the Encode cache. Today each viewer keeps its own: 8.5
   MiB at 1080p and 33.5 MiB at 4K, above.
@@ -1007,3 +1018,185 @@ of 2.9 to 4.5:
   the exposed strip's tiles. Tiles that a copy only partly covers show
   shifted rows above stale ones until the next frame. A frame without
   copies that is cut shows tearing of the same kind.
+
+## Implementation notes: Refinement
+
+**Status.** Built and measured on 2026-10-31. Every graphical viewer's
+writer has it. `stream.Config.RefineDelay` sets the delay (300 ms by
+default), and `stream.Config.NoRefine` turns refinement off, and motion
+with it; occamyd sets neither. Nothing changes on the wire: a frame of
+refinement is a frame of `tile` messages, which any v1 client takes.
+
+**What was built.**
+
+- **Heat per tile** (`internal/stream/refine.go`). The writer takes a
+  snapshot of the versions at most once per `activeWindow` (100 ms).
+  At each one, a tile that changed since the last gains one unless the
+  change went out as an input's effect, and every heat halves each
+  second. A tile at 2 or more is in motion: one that changed in three
+  snapshots in a row, or more than once a second for a while. An
+  input's effect is never in motion, so typing and what a click redraws
+  go at the pacer's quality, as before.
+- **Motion picks the quality, and content still picks the codec.**
+  `stream.Encoder.Tile` takes the tile's motion, and a tile of 17 to 256
+  colours goes lossy while it moves (`encoder.Many`). A run of lossy
+  tiles ends where motion changes. Moving tiles go at the pacer's lowest
+  quality (30), an input's effect at its quality now, and other still
+  tiles through `Encoder.Still`.
+- **`Encoder.Still`** encodes at the lowest quality, from the pacer's
+  lowest to its current one, at which each tile of the run, decoded as a
+  client decodes it, scores `encoder.StillSSIM` (0.91) or more. WebP is
+  decoded with vpx and `ToRGBA`, JPEG with `image/jpeg`. The score is
+  SSIM on BT.601 luma over 8×8 windows, as the codec measurement scored,
+  computed with sliding column sums that allocate nothing once warm. It
+  tries qualities 3 apart and the highest, starting where its last
+  search ended, so most rows cost two encodes and two decodes. A run is
+  scored tile by tile and must pass on its worst tile, not on the mean.
+- **What the client has.** The writer records each tile's quality as the
+  client drew it: the scroll shadow's `qual` when there is a shadow, its
+  own record otherwise. It also records the tile's goal:
+  - lossless for a tile of up to 256 colours;
+  - `final` (254, just under lossless) for pixels whose SSIM reached the
+    score, so that a copy of them completes a tile, as lossless pixels
+    do;
+  - a lossy quality above the pacer's, when the search ran out, for when
+    the link allows;
+  - unknown for a moving tile, an input's effect, or a tile that a copy
+    completed, which refinement looks at again.
+- **Refinement frames** (`writer.refinement`). A frame of refinement
+  goes only when nothing is dirty, no input awaits its effect and no
+  frame awaits an ack. It takes the tiles the client has, unchanged
+  since, in its viewport, still for the delay and below their goal, and
+  sends them one tile a message: exact if the tile has up to 256
+  colours, through `Still` otherwise. Before each message it gives way
+  to a pending input, and after the first, to any change on the screen.
+  `pacer.Background` admits the frame's bytes: the first message always,
+  then up to what the link carries in the pacer's target delay (5 ms),
+  or 16 KiB before a rate is known, while pacing allows. A frame of
+  refinement is acked like any other, so the next waits for its ack, and
+  a hidden viewer is refined nothing.
+
+**Measured.** On the codec measurement's frames, against the encoder as
+it was before, from `go test ./internal/stream -run TestRefineCorpus`
+(bytes, checked) and `-run TestRefineTimes -refine.runs 15` (one core,
+the median of three runs under a load average of 8 to 13 on 18 cores).
+The full tables and the method are in
+[docs/benchmarks/refinement.md](../../docs/benchmarks/refinement.md).
+
+| Scene | KiB a frame: before · after | encode ms a frame: before · after | refinement once still: KiB · messages |
+|---|---|---|---|
+| motion (G5) | 392.4 · 13.8 | 9.53 · 11.65 | 391.0 · 192, then exact |
+| drag (G4) | 30.6 · 5.2 | 4.25 · 2.13 | 18.9 · 35 |
+| scroll (G3) | 5.0 · 5.0 | 0.62 · 0.66 | none |
+| photo, once (G6) | 150.8 · 121.8 | 21.99 · 66.68 | none |
+| browser, once | 147.3 · 140.1 | 7.93 · 15.99 | none |
+| terminal-aa, once | 103.5 · 103.5 | 4.62 · 5.12 | none |
+
+- G6's photograph goes under its 139 KiB. G5's plasma takes 13.8 KiB a
+  frame against a target of about 5, which decision 1 expected to miss
+  without a video tier. The dragged window takes a sixth of what it did;
+  moving it by copies, which needs horizontal moves, is scroll
+  detection's follow-up.
+- No tile ends under SSIM 0.91, or under what it scored before where
+  that was lower: the photograph's and the dragged window's worst tiles
+  score 0.910, against 0.939 and 0.956 at quality 90.
+- The search costs three times an encode on the photograph, 66.7 ms of
+  one core for the screen against 22.0. `BenchmarkStill -cpu 1` gives
+  5.39 ms a row of 16 tiles against 1.75 at quality 90. vpx allocates
+  each decode, 713 KB a row in garbage.
+- Input: `TestRefineYieldsToInput` presses 40 keys while a screen of
+  photograph is refined, in fake time. On N1 every key shows in 20.0 ms,
+  as without refinement, with 56 tiles refined meanwhile. On N2 the
+  median is 50.0 ms, as without, and the worst 50.9 against 50.0, with
+  158 tiles refined. On a real writer a key can also wait for the encode
+  of the one message under way: at most 2.6 ms of one core on the
+  corpus.
+- Memory: 13 bytes a tile in the writer, 14 without a scroll shadow (26
+  KiB at 4K); a searching encoder holds 62 KiB more than one that only
+  encodes for WebP, and 339 KiB more for JPEG.
+
+**Decisions.**
+
+- **SSIM 0.91 on each tile.** The photograph's rows reach it at quality
+  87 (the median) in 121.5 KiB, under G6's 139. 0.92 takes 141.9, 0.90
+  takes 110.9, and 0.95 is beyond quality 90 on 78 of the 192 tiles.
+  Scored on a run's mean, 0.92 cost the bytes that 0.91 costs on each
+  tile but left a tile at 0.909.
+- **Quality steps of 3**, starting where the last search ended. Steps of
+  10 took 150.6 KiB for the photograph, and the hint makes most searches
+  two encodes.
+- **Moving tiles at the pacer's lowest quality, and an input's effect at
+  its current one.** Motion loses detail before input loses
+  responsiveness (decision 2). An input's effect also skips the search,
+  which would delay it, and is refined like motion.
+- **One tile a message.** An input waits on the writer for one message
+  of refinement at most, 2.6 ms of encoding on the corpus. A merged run
+  would make it wait for 16.
+- **A frame of refinement waits for the previous frame's ack** and for
+  `pacer.Background`, so it never adds more to the link's queue than
+  the pacer's target delay allows.
+
+**Testing.** Unit tests of the heat, the candidates, the qualities and
+the waiting (`refine_test.go`, `refine_corpus_test.go`); synctest rigs
+for exact refinement with scroll detection on and off, a photograph
+refined to the SSIM's quality, a photograph shown once, the viewport,
+resizes, and input while refining on N1 and N2; the corpus against the
+encoder as it was; in internal/encoder, `Still` from every starting
+point and limit with WebP and JPEG, its fallbacks, and the scorer
+against the measurement's summed-area SSIM, whole and in blocks, with a
+fuzzer (`FuzzSSIMScore`, 30 seconds and 3.5 million inputs without a
+failure). The scroll property test ran 120 seconds, 717 seeds and
+70,878 frames, without a failure.
+
+**Mutation check.** 36 mutants of the new code. The tests kill 31,
+nine of them only after tests were added for them: motion from exactly
+the threshold; a lossless tile with an unknown goal; refinement while an
+input awaits its effect, or after a change mid-frame, or of a tile that
+changed after it was chosen, or one message a frame; runs that mix
+moving and still tiles; a lossy quality clamped to `final`; and the
+scorer's empty blocks, whose NaN the comparison let through. Two
+survivors were code that did nothing, now removed: a check that a tile
+was ever sent, which its version already implies, and a reset of the
+heat on an input's effect, which `warm` already does not count. Three
+survive:
+
+- the goal reset of a tile a copy completes, which differs only when the
+  copied pixels need more than the goal of the pixels they replace;
+- `Still`'s fallback to lossless when an encode fails after one at
+  another quality succeeded, which the encoders never do, since they
+  fail on size alone;
+- a frame of refinement ending at a change before its first message
+  rather than after it, microseconds apart.
+
+**Surprises.**
+
+- The first SSIM-chosen quality, 87 for the photograph, sat below the
+  pacer's 90. The scroll shadow, which completes a tile only with pixels
+  at the pacer's quality or above, then stopped completing tiles from
+  copies of a still photograph. Pixels that reached the score are now
+  recorded as `final`, above every quality the pacer sets.
+- Motion at quality 30 would never be raised without refinement, so
+  `NoRefine` now turns motion off too. The before-and-after harness
+  found it: the dragged window cost the same with refinement off as on.
+- Scored on a run's mean, the photograph shown once ended with a tile at
+  0.909 under a score of 0.92. The search now scores each tile.
+- The scroll property test's viewers take longer to settle on its
+  slowest links, up to 15 seconds of its fake time, while their random
+  screens are refined. It waits up to 60.
+
+**Follow-ups.**
+
+- **A pointer drag is an input's effect**, never motion, so a window the
+  viewer drags goes at the pacer's quality, not its lowest. Telling a
+  drag's motion from a click's effect needs the pointer's history.
+- **Refinement waits while anything moves** anywhere on the screen,
+  since it goes only when nothing is dirty: a clock or a spinner keeps
+  the rest of the screen at its moving quality. Refining still tiles
+  between the moving tiles' frames would fix that, paced as now.
+- **The search costs CPU and garbage**: three times an encode for a
+  still photographic run, on the writer's goroutine, and vpx's decodes.
+  The Encode cache and workers task can share searched payloads between
+  viewers and run them on its pool; decoding into a kept buffer needs
+  vpx's decoder to take one.
+- **Lossless WebP for still antialiased text**, the refinement of
+  exact tiles, still needs its measurement.
