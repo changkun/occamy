@@ -39,6 +39,10 @@ export function App({ api, start, storage }: AppProps): ReactElement {
         resume={signIn.pending}
         onSignedIn={(t) => dispatch({ type: 'signed-in', token: t })}
         onCancel={signInOver(state) ? () => dispatch({ type: 'cancel-sign-in' }) : undefined}
+        onSkip={() => {
+          dropSession(storage)
+          dispatch({ type: 'skip-return' })
+        }}
       />
     )
 

@@ -53,6 +53,20 @@ describe('the shell’s screens', () => {
     expect(s).toMatchObject({ token: fresh, signIn: null, action: null, screen: { kind: 'session', target: mine, view: 1, owner: null } })
   })
 
+  it('signs in for the connection list instead, once the user turns from the session a reload left', () => {
+    let s = initialState({ kind: 'return', target: { kind: 'session', sessionId: 'mZ3k', name: 'Lab' } })
+    s = reduce(s, { type: 'skip-return' })
+    expect(s.signIn).toEqual({ message: '', notice: '', exchange: null, pending: null })
+    s = reduce(s, { type: 'signed-in', token: fresh })
+    expect(s).toMatchObject({ token: fresh, signIn: null, screen: { kind: 'connections' } })
+    // There is no return to turn from once signed in, nor over a session
+    // view whose owner signs in again.
+    expect(reduce(s, { type: 'skip-return' })).toBe(s)
+    const over = reduce(onSession(expired), { type: 'sign-in-again', view: 1, message: EXPIRED, pending: { target: lab, view: 1, then: { kind: 'end' }, owner: demo } })
+    expect(signInOver(over)).toBe(true)
+    expect(reduce(over, { type: 'skip-return' })).toBe(over)
+  })
+
   it('opens a share link without signing in', () => {
     const s = initialState({ kind: 'join', sessionId: 'mZ3k', token: 'q8Gf' })
     expect(s).toMatchObject({ token: null, signIn: null, screen: { kind: 'session', target: { kind: 'share', sessionId: 'mZ3k', token: 'q8Gf' } } })

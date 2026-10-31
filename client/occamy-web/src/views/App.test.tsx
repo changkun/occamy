@@ -8,7 +8,8 @@
 // owner's single sign-on, which came back signed in as someone else, is
 // ended as occamyd decides, once the owner signs in over the session;
 // and a reload over the owner's session joins it again once the user has
-// signed in; and signing out forgets the session kept for a reload.
+// signed in, or lists the connections if the user would rather; and
+// signing out forgets the session kept for a reload.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
@@ -191,12 +192,32 @@ describe('App', () => {
     expect(items.has(SESSION_KEY)).toBe(false)
   })
 
+  it('lists the connections after a reload over the owner’s session, if the user would rather, and forgets the session', async () => {
+    const items = new Map([[SESSION_KEY, lab]])
+    const storage = tab(items)
+    const log: string[] = []
+    const api = occamyd('demo', log)
+    await show(api, start({ kind: 'none' }, api, storage), storage)
+    act(() => button('Go to the connections instead')?.click())
+    await settle()
+    expect(container.querySelector('[role=status]')).toBeNull()
+    expect(button('Go to the connections instead')).toBeUndefined()
+    expect(items.has(SESSION_KEY)).toBe(false)
+    await signIn('demo')
+    expect(log).toContain('GET /api/v1/connections')
+    expect(NeverOpens.urls).toEqual([])
+    // A reload now starts signed out.
+    expect(start({ kind: 'none' }, api, storage)).toEqual({ kind: 'signed-out' })
+  })
+
   it('forgets the session kept for a reload on signing out', async () => {
     const items = new Map([[SESSION_KEY, lab]])
     const storage = tab(items)
     const log: string[] = []
     const api = occamyd('demo', log)
     await show(api, { kind: 'signed-out' }, storage)
+    // A sign-in that does not return to the session offers nothing else.
+    expect(button('Go to the connections instead')).toBeUndefined()
     await signIn('demo')
     expect(log).toContain('GET /api/v1/connections')
     expect(items.has(SESSION_KEY)).toBe(true)

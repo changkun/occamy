@@ -73,6 +73,8 @@ export type AppEvent =
   /** The session view numbered view needs a new access token for pending. */
   | { type: 'sign-in-again'; view: number; message: string; pending: Pending }
   | { type: 'cancel-sign-in' }
+  /** The user signs in for the connection list, rather than for the session a reload left. */
+  | { type: 'skip-return' }
   /** The session view numbered view is done. */
   | { type: 'leave'; view: number }
   | { type: 'sign-out'; message: string }
@@ -143,6 +145,11 @@ export function reduce(s: AppState, e: AppEvent): AppState {
       return { ...s, signIn: { message: e.message, notice: '', exchange: null, pending: e.pending } }
     case 'cancel-sign-in':
       return signInOver(s) ? { ...s, signIn: null } : s
+    case 'skip-return':
+      if (s.signIn === null || signInOver(s)) {
+        return s
+      }
+      return { ...s, signIn: { ...s.signIn, notice: '', pending: null } }
     case 'leave':
       // A view that is gone, such as one whose End came back after the
       // user moved on, leaves nothing.
