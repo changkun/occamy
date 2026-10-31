@@ -68,10 +68,6 @@ type shadow struct {
 	// valid marks the tiles whose pixels the client has: drawn whole
 	// since the last resize, after which the screen is undefined.
 	valid []bool
-	// lossy marks the tiles holding pixels sent lossy, or copied from
-	// such a tile: the shadow holds the pixels that were encoded and the
-	// client an approximation of them.
-	lossy []bool
 	// hash holds the row hashes of each tile, g.tile of them, which
 	// hashed says are current.
 	hash   []uint64
@@ -90,18 +86,19 @@ func (s *shadow) reset(g grid) {
 	n := g.cols * s.rows
 	s.pix = make([][]byte, n)
 	s.valid = make([]bool, n)
-	s.lossy = make([]bool, n)
 	s.hash = make([]uint64, n*g.tile)
 	s.hashed = make([]bool, n)
 }
 
 // keep makes buf, tile t's pixels as just sent, the shadow's, and
-// returns the buffer it held, which may be nil.
-func (s *shadow) keep(t int, buf []byte, lossy bool) []byte {
+// returns the buffer it held, which may be nil. For a tile sent lossy
+// the shadow holds the pixels that were encoded, and the client an
+// approximation of them: a copy of them moves the approximation, as
+// sending them lossy again would have.
+func (s *shadow) keep(t int, buf []byte) []byte {
 	old := s.pix[t]
 	s.pix[t] = buf
 	s.valid[t] = true
-	s.lossy[t] = lossy
 	s.hashed[t] = false
 	return old
 }
@@ -189,8 +186,8 @@ type scroller struct {
 
 // find returns the copies that bring the client's screen, as the shadow
 // holds it, closer to fb's in the tiles of order, with the tiles each
-// completes. The copies' sources and destinations lie in tile columns of
-// their own, so they may be sent in any order. It returns nil if the
+// completes, to be sent and applied in the order returned. Each copy
+// moves rows within the tile columns it spans. It returns nil if the
 // screen no longer matches the shadow's grid.
 func (sc *scroller) find(fb *framebuffer.Framebuffer, order []int) []scrollCopy {
 	g := sc.g
@@ -297,9 +294,11 @@ func (sc *scroller) span(rn run) (y0, y1 int) {
 	return rn.r0 * sc.g.tile, min(rn.r1*sc.g.tile, sc.g.bounds.Max.Y)
 }
 
-// vote returns the offset that most of run rn's sampled rows moved by,
-// or 0 if none won: each changed row found once among the shadow's rows
-// of the column votes for the distance to it.
+// vote returns the offset that more of run rn's sampled rows moved by
+// than any other, or 0 if none got scrollMinVotes: each changed row
+// found once among the shadow's rows of the column votes for the
+// distance to it. A plurality is enough, since try checks the offset
+// pixel by pixel: two panes in one column may scroll by two offsets.
 func (sc *scroller) vote(rn run) int {
 	h := sc.g.bounds.Dy()
 	size := 1 << bits.Len(uint(2*h))
@@ -357,7 +356,7 @@ func (sc *scroller) vote(rn run) int {
 		}
 		i = j
 	}
-	if votes < scrollMinVotes || 2*votes < len(sc.dys) {
+	if votes < scrollMinVotes {
 		return 0
 	}
 	return best
@@ -418,13 +417,22 @@ func (sc *scroller) moved(rn run, y, dy, h int) bool {
 	return src != nil && bytes.Equal(sc.cur(rn, y), src)
 }
 
-// conflicts reports whether cp reads or writes rows of its column that
-// a copy already found writes or reads: copies are applied one after
-// another, and each was checked against the shadow before any.
+// conflicts reports whether cp would read rows of its column that a copy
+// found before writes, or write rows such a copy reads, in the order
+// merge sends them: the client applies copies one after another, while
+// each was checked against the shadow before any. Within a column that
+// order is by the first row written.
 func (sc *scroller) conflicts(cp scrollCopy) bool {
-	lo, hi := min(cp.a, cp.a+cp.dy), max(cp.b, cp.b+cp.dy)
+	overlap := func(a0, a1, b0, b1 int) bool { return a0 < b1 && b0 < a1 }
 	for _, o := range sc.copies {
-		if o.c0 == cp.c0 && lo < max(o.b, o.b+o.dy) && min(o.a, o.a+o.dy) < hi {
+		if o.c0 != cp.c0 {
+			continue
+		}
+		first, then := o, cp
+		if cp.a < o.a {
+			first, then = cp, o
+		}
+		if overlap(then.a+then.dy, then.b+then.dy, first.a, first.b) {
 			return true
 		}
 	}
@@ -432,16 +440,17 @@ func (sc *scroller) conflicts(cp scrollCopy) bool {
 }
 
 // merge joins copies of adjacent columns that move the same rows by the
-// same offset into one, and orders the copies by column and row.
+// same offset into one, and orders the copies by first row, then
+// column, which within a column is the order conflicts expects.
 func (sc *scroller) merge() {
 	if len(sc.copies) < 2 {
 		return
 	}
 	slices.SortFunc(sc.copies, func(x, y scrollCopy) int {
-		if x.c0 != y.c0 {
-			return x.c0 - y.c0
+		if x.a != y.a {
+			return x.a - y.a
 		}
-		return x.a - y.a
+		return x.c0 - y.c0
 	})
 	out := sc.copies[:1]
 	for _, cp := range sc.copies[1:] {
@@ -459,7 +468,7 @@ func (sc *scroller) merge() {
 
 // apply makes the shadow show cp as the client does once it applies it:
 // the rows a to b of its columns become those dy below, with their
-// hashes, and a tile that takes any lossy row becomes lossy.
+// hashes.
 func (sc *scroller) apply(cp scrollCopy) {
 	g, tile := sc.g, sc.g.tile
 	for c := cp.c0; c < cp.c1; c++ {
@@ -483,7 +492,6 @@ func (sc *scroller) apply(cp scrollCopy) {
 			} else {
 				sc.hashed[t] = false
 			}
-			sc.lossy[t] = sc.lossy[t] || sc.lossy[st]
 		}
 		for r := cp.a / tile; r <= (cp.b-1)/tile; r++ {
 			if t := r*g.cols + c; cp.a <= r*tile && min((r+1)*tile, g.bounds.Max.Y) <= cp.b {

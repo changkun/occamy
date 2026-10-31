@@ -120,7 +120,7 @@ func (r *scrollRig) frame() (copies []scrollCopy, tiles int) {
 		tr, v := r.fb.ReadTile(t, buf)
 		src := &image.RGBA{Pix: buf, Stride: 4 * tr.Dx(), Rect: tr}
 		draw.Draw(r.client, tr, src, tr.Min, draw.Src)
-		r.sc.keep(t, buf, false)
+		r.sc.keep(t, buf)
 		r.sent[t] = v
 		tiles++
 	}
@@ -440,6 +440,33 @@ func TestScrollBounds(t *testing.T) {
 	if r.sc.searched != w/tile || r.sc.hashes > h/scrollStride || r.sc.rehashed > h {
 		t.Errorf("a scroll: %d runs searched, %d rows of it hashed and %d of the shadow; want %d runs, at most %d and %d",
 			r.sc.searched, r.sc.hashes, r.sc.rehashed, w/tile, h/scrollStride, h)
+	}
+}
+
+// Two runs of one column whose copies would read what the other wrote
+// get one copy: the client applies copies in turn, and each was checked
+// against the screen before any.
+func TestScrollConflict(t *testing.T) {
+	const w, h = 64, 512
+	r := newScrollRig(t, w, h, 64)
+	drawPage(r.fb, r.fb.Bounds(), 1, 0)
+	r.frame()
+	// Rows 0 to 128 show the page's rows 256 to 384, and rows 192 to 320
+	// its rows 0 to 128; row of tiles 2 stays as it was.
+	drawPage(r.fb, image.Rect(0, 0, w, 128), 1, 256)
+	drawPage(r.fb, image.Rect(0, 192, w, 320), 1, 0)
+	copies, _ := r.frame()
+	if len(copies) != 1 {
+		t.Errorf("%d copies, want 1: %+v", len(copies), copies)
+	}
+	// Two that do not: rows 0 to 128 from 256 below, rows 320 to 448 from
+	// 128 above.
+	drawPage(r.fb, r.fb.Bounds(), 1, 0)
+	r.frame()
+	drawPage(r.fb, image.Rect(0, 0, w, 128), 1, 256)
+	drawPage(r.fb, image.Rect(0, 320, w, 448), 1, 192)
+	if copies, _ := r.frame(); len(copies) != 2 {
+		t.Errorf("%d copies, want 2: %+v", len(copies), copies)
 	}
 }
 

@@ -89,8 +89,7 @@ type writer struct {
 	cbuf       []byte // a cursor's payload
 	ahead      lookahead
 	encodeTime time.Duration
-	msgK       int  // the buffer in tiles of the message's first tile
-	msgLossy   bool // the message's tiles went lossy
+	msgK       int // the buffer in tiles of the message's first tile
 
 	// sc finds scrolls against the screen as the client has it, nil if
 	// scroll detection is off; scrollTime is what it took in the frame
@@ -391,7 +390,7 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 				// The client now has these pixels: the shadow takes the
 				// buffers they were read into, and gives back its old ones.
 				for k, t := range order[i : i+n] {
-					w.tiles[w.msgK+k] = w.sc.keep(t, w.tiles[w.msgK+k], w.msgLossy)
+					w.tiles[w.msgK+k] = w.sc.keep(t, w.tiles[w.msgK+k])
 				}
 			}
 		}
