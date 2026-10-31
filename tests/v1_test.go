@@ -249,7 +249,8 @@ func TestE2EV1RDP(t *testing.T) {
 
 // openDesktopV1 opens the stream at path with token and waits for the
 // desktop: a frame of a screen that is not empty. The stream closes
-// when the test ends.
+// when the test ends, and so does the session if the stream joined as
+// its owner.
 func openDesktopV1(t *testing.T, ctx context.Context, addr, path, token string, opts client.Options) *client.Session {
 	t.Helper()
 	opts.Name = "occamy-e2e/1"
@@ -258,6 +259,17 @@ func openDesktopV1(t *testing.T, ctx context.Context, addr, path, token string, 
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { cl.Close() })
+	if cl.Role() == protocol.RoleOwner {
+		// A test that fails before it closes the session would leave it
+		// for the owner grace, connected to the remote, which the next
+		// test reaches as the same user, and counted against the user's
+		// sessions. Its error, such as the 404 after the test closed
+		// the session, is of no interest.
+		id := cl.SessionID()
+		t.Cleanup(func() {
+			_ = apiV1(addr, http.MethodDelete, "/api/v1/sessions/"+url.PathEscape(id), token, nil, nil)
+		})
+	}
 	awaitV1(t, ctx, cl, "the desktop", func(ev client.Event) bool {
 		_, ok := ev.(client.Frame)
 		return ok && !cl.Size().Eq(image.Point{})
