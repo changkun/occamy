@@ -1084,3 +1084,36 @@ func TestStreamBackendFails(t *testing.T) {
 		}
 	}
 }
+
+// panicsOnInput is a terminal whose input handling panics, as a
+// backend's bug that a client's message triggers would.
+type panicsOnInput struct{ *backendtest.Terminal }
+
+func (panicsOnInput) Input(backend.InputEvent) error { panic("the backend's input bug") }
+
+// TestBackendPanicEndsSession checks that a client's message that makes
+// the backend panic ends the session with internal-error for every
+// viewer, and that occamyd goes on serving.
+func TestBackendPanicEndsSession(t *testing.T) {
+	ts, _ := sessionServer(t, nil)
+	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
+		return panicsOnInput{backendtest.NewTerminal(80, 24, 0)}, nil
+	})
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	path := "/api/v1/sessions/" + o.ID + "/stream"
+	owner := ts.stream(t, path, o.StreamToken, termHello)
+	r := ts.api(t, http.MethodPost, "/api/v1/sessions/"+o.ID+"/shares", alice, `{"role":"read-only"}`)
+	var sh shareResponse
+	if err := json.Unmarshal(r.body, &sh); err != nil {
+		t.Fatal(err)
+	}
+	viewer := ts.stream(t, path, sh.Token, termHello)
+	owner.send(t, protocol.TermInput{Seq: 1, Data: []byte("x")})
+	if cl := owner.closed(t, protocol.CloseInternalError); cl.Reason != "internal error" {
+		t.Errorf("owner's close %q", cl.Reason)
+	}
+	viewer.closed(t, protocol.CloseInternalError)
+	waitFor(t, "the session to go", func() bool { return ts.s.session(o.ID) == nil })
+	ts.openSession(t, alice, "ops-shell")
+}

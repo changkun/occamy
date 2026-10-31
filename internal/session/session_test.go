@@ -247,6 +247,43 @@ func TestIdleTimeout(t *testing.T) {
 	})
 }
 
+// panicsInRun is a backend whose Run panics, as a backend's bug would.
+type panicsInRun struct{ echoing }
+
+func (*panicsInRun) Run(context.Context, backend.Sink) error { panic("the backend's bug") }
+
+// A backend's panic, in Run or on an input a client sent, ends the
+// session with Internal and the panic, rather than crashing occamyd, and
+// the input's caller learns that the session ended.
+func TestBackendPanics(t *testing.T) {
+	internal := func(t *testing.T, s *session.Session, value any) {
+		t.Helper()
+		got := ended(t, s)
+		var p session.PanicError
+		if got.Reason != session.Internal || !errors.As(got.Err, &p) || p.Value != value || len(p.Stack) == 0 {
+			t.Errorf("ended with %+v, want Internal with the panic %q", got, value)
+		}
+	}
+	synctest.Test(t, func(t *testing.T) {
+		s, owner := start(t, session.Config{Backend: &panicsInRun{}})
+		synctest.Wait()
+		internal(t, s, "the backend's bug")
+		if p := owner.Take(); p.End == nil || p.End.Reason != session.Internal {
+			t.Errorf("owner told %+v", p.End)
+		}
+	})
+	synctest.Test(t, func(t *testing.T) {
+		s, owner := start(t, session.Config{Backend: &echoing{seen: func() { panic("an input's bug") }}})
+		synctest.Wait()
+		owner.Take()
+		if err := owner.Input(1, backend.Key{Down: true}); !errors.Is(err, session.ErrEnded) {
+			t.Errorf("Input that panicked: %v, want ErrEnded", err)
+		}
+		synctest.Wait()
+		internal(t, s, "an input's bug")
+	})
+}
+
 func TestBackendEnds(t *testing.T) {
 	failure := errors.New("connection reset")
 	for _, tc := range []struct {

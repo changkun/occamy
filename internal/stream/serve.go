@@ -140,7 +140,7 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	w := newWriter(c, v, pacer.New(pc), enc, limits, cfg.Logger)
 	read := make(chan error, 1)
 	go func() {
-		err := w.read(ctx, limits)
+		err := w.safeRead(ctx, limits)
 		// When the session ends, the writer still sends close.
 		if !errors.Is(err, session.ErrEnded) {
 			cancel()
@@ -150,6 +150,7 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	err := w.run(ctx)
 	cancel()
 	rerr := <-read
+	var p session.PanicError
 	switch {
 	case errors.Is(err, errEnded),
 		errors.Is(rerr, errClientClosed), errors.Is(rerr, io.EOF),
@@ -159,6 +160,14 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 		return err // the writer ended first
 	case errors.As(rerr, new(connError)):
 		return rerr // the connection failed, and nobody is left to tell
+	case errors.As(rerr, &p):
+		// occamyd failed on its own: the client learns that much, and
+		// the log the rest.
+		w.log.Error("stream reader panicked", "panic", p.Value, "stack", string(p.Stack))
+		if cerr := closeWith(parent, c, protocol.Close{Code: protocol.CloseInternalError, Reason: "internal error"}); cerr != nil {
+			w.log.Debug("close not sent", "err", cerr)
+		}
+		return rerr
 	}
 	// The client broke the protocol; tell it why, if it still listens.
 	if cerr := closeWith(parent, c, protocol.Close{Code: protocol.CloseCodeFor(rerr), Reason: "protocol error"}); cerr != nil {
@@ -206,6 +215,7 @@ func closeFor(e session.End) protocol.Close {
 		session.RemoteEnded: protocol.CloseRemoteEnded,
 		session.Failed:      protocol.CloseBackendFailed,
 		session.Shutdown:    protocol.CloseServerShutdown,
+		session.Internal:    protocol.CloseInternalError,
 	}[e.Reason]
 	if code == 0 {
 		code = protocol.CloseInternalError

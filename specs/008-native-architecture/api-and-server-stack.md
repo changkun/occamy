@@ -764,6 +764,19 @@ place for fixes that ship on v0 before beta.
     others from the claims, so every route that reads groups sees only
     the allowed ones. `TestIssuerGroups` and `TestListConnections`
     cover the REST and stream routes.
+  - **Panics end a stream or a session, not occamyd (delta review):**
+    `serve` recovered a panic of `stream.Serve`, but the reader runs on
+    a goroutine of its own, and the session's backend on others, where
+    net/http's recover does not reach, so a client's message that made
+    either panic would crash occamyd. The reader now returns a
+    `session.PanicError`, and `Serve` closes the stream with 1011. The
+    session recovers a panic of the backend's `Run` and of every step
+    of its owner goroutine, where commands such as an input reach the
+    backend, and ends with the new reason `session.Internal`, which
+    viewers get as `close` 1011 "internal error"; a command whose call
+    panicked returns `ErrEnded` to its caller. Both log the stack.
+    `TestReaderPanics`, `TestBackendPanics` and
+    `TestBackendPanicEndsSession` inject the panics.
   - **A limit for the whole server (delta review):**
     `limits.sessions`, 1000 by default, bounds the sessions occamyd
     runs whoever owns them, since `sessions_per_user` bounds each user

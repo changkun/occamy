@@ -177,7 +177,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   would refuse. Every token names its user, and a trusted issuer's
   session token, of any role, joins only its own users' sessions, or
   a static user's when it is linked. A trusted issuer's `groups` count
-  only for the groups in its `allowed_groups`. A static user's name follows the
+  only for the groups in its `allowed_groups`. A panic while handling
+  a client's message, in a stream's reader or a session's backend, ends
+  that stream or session with `internal-error` and is logged, rather
+  than ending occamyd. A static user's name follows the
   same rule as an OIDC subject. An OIDC user
   linked to a static user owns the static user's sessions, and occamyd's
   own stream tokens carry `idp`. `limits` bounds the sessions occamyd

@@ -26,6 +26,7 @@ import (
 	"image"
 	"image/draw"
 	"log/slog"
+	"runtime/debug"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -77,6 +78,9 @@ const (
 	Failed
 	// Shutdown: occamyd is shutting down.
 	Shutdown
+	// Internal: occamyd failed on its own, as when the backend panicked;
+	// End.Err is a PanicError.
+	Internal
 )
 
 func (r Reason) String() string {
@@ -93,6 +97,8 @@ func (r Reason) String() string {
 		return "failed"
 	case Shutdown:
 		return "shutdown"
+	case Internal:
+		return "internal error"
 	}
 	return fmt.Sprintf("Reason(%d)", int(r))
 }
@@ -100,7 +106,26 @@ func (r Reason) String() string {
 // End is how a session ended.
 type End struct {
 	Reason Reason
-	Err    error // the backend's error, for Failed
+	Err    error // the backend's error, for Failed, or a PanicError
+}
+
+// PanicError is a panic that a session or a stream recovered from, with
+// the stack where it happened. A client's message must not crash
+// occamyd, whatever it makes a backend do.
+type PanicError struct {
+	Value any
+	Stack []byte
+}
+
+func (p PanicError) Error() string { return fmt.Sprintf("panic: %v", p.Value) }
+
+// Recovered returns the PanicError of r, the value of recover, or nil
+// if r is nil.
+func Recovered(r any) error {
+	if r == nil {
+		return nil
+	}
+	return PanicError{Value: r, Stack: debug.Stack()}
 }
 
 // Errors from sessions and viewers.
@@ -389,10 +414,19 @@ func (s *Session) Close() {
 }
 
 // do runs f on the owner goroutine and returns its error, or ErrEnded.
+// If f panics, the session ends, and so does the call.
 func (s *Session) do(f func() error) error {
 	errc := make(chan error, 1)
 	select {
-	case s.cmds <- func() { errc <- f() }:
+	case s.cmds <- func() {
+		defer func() {
+			if r := recover(); r != nil {
+				errc <- ErrEnded
+				panic(r) // for step, which ends the session
+			}
+		}()
+		errc <- f()
+	}:
 		return <-errc
 	case <-s.ending:
 		return ErrEnded
@@ -404,35 +438,21 @@ func (s *Session) run(ctx context.Context) {
 	bctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	runDone := make(chan error, 1)
-	go func() { runDone <- s.backend.Run(bctx, sink{s}) }()
+	go func() {
+		defer func() {
+			if err := Recovered(recover()); err != nil {
+				runDone <- err
+			}
+		}()
+		runDone <- s.backend.Run(bctx, sink{s})
+	}()
 
 	s.idle = time.NewTimer(s.cfg.IdleTimeout)
 	defer s.idle.Stop()
 	defer s.ownerAway(false)
 
 	for s.end.Reason == 0 {
-		select {
-		case f := <-s.cmds:
-			f()
-		case <-s.replyWake:
-			s.sendReplies()
-		case err := <-runDone:
-			runDone = nil
-			switch {
-			case err == nil:
-				s.finish(End{Reason: RemoteEnded})
-			case ctx.Err() != nil:
-				s.finish(End{Reason: Shutdown})
-			default:
-				s.finish(End{Reason: Failed, Err: err})
-			}
-		case <-s.idle.C:
-			s.finish(End{Reason: Idle})
-		case <-s.graceC:
-			s.finish(End{Reason: OwnerLeft})
-		case <-ctx.Done():
-			s.finish(End{Reason: Shutdown})
-		}
+		s.step(ctx, &runDone)
 	}
 
 	// Prompts and commands waiting on the session give up first, then
@@ -454,6 +474,51 @@ func (s *Session) run(ctx context.Context) {
 	}
 	s.log.Info("session ended", "reason", s.end.Reason.String(), "err", s.end.Err)
 	close(s.done)
+}
+
+// step waits for what happens next on the owner goroutine and handles
+// it. A panic, of a command or of the backend's Run, ends the session
+// with Internal: what a client sent must not crash occamyd.
+func (s *Session) step(ctx context.Context, runDone *chan error) {
+	defer func() {
+		if err := Recovered(recover()); err != nil {
+			s.panicked(err)
+		}
+	}()
+	select {
+	case f := <-s.cmds:
+		f()
+	case <-s.replyWake:
+		s.sendReplies()
+	case err := <-*runDone:
+		*runDone = nil
+		var p PanicError
+		switch {
+		case errors.As(err, &p):
+			s.panicked(err)
+		case err == nil:
+			s.finish(End{Reason: RemoteEnded})
+		case ctx.Err() != nil:
+			s.finish(End{Reason: Shutdown})
+		default:
+			s.finish(End{Reason: Failed, Err: err})
+		}
+	case <-s.idle.C:
+		s.finish(End{Reason: Idle})
+	case <-s.graceC:
+		s.finish(End{Reason: OwnerLeft})
+	case <-ctx.Done():
+		s.finish(End{Reason: Shutdown})
+	}
+}
+
+// panicked ends the session for err, a PanicError, and logs its stack.
+func (s *Session) panicked(err error) {
+	var p PanicError
+	if errors.As(err, &p) {
+		s.log.Error("session panicked", "panic", p.Value, "stack", string(p.Stack))
+	}
+	s.finish(End{Reason: Internal, Err: err})
 }
 
 // ownerAway starts the grace period for an owner who left, or stops it.

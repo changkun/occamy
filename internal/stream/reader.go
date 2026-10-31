@@ -28,6 +28,18 @@ type connError struct{ err error }
 func (e connError) Error() string { return e.err.Error() }
 func (e connError) Unwrap() error { return e.err }
 
+// safeRead is read, which returns a session.PanicError if it panics: the
+// reader runs on its own goroutine, where net/http's recover does not
+// reach, and a client's message must not crash occamyd.
+func (w *writer) safeRead(ctx context.Context, l protocol.Limits) (err error) {
+	defer func() {
+		if perr := session.Recovered(recover()); perr != nil {
+			err = perr
+		}
+	}()
+	return w.read(ctx, l)
+}
+
 // read applies the client's messages until it closes, breaks the
 // protocol, or ctx is done.
 func (w *writer) read(ctx context.Context, l protocol.Limits) error {

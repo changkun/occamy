@@ -13,6 +13,7 @@ import (
 	"image/color"
 	"image/draw"
 	"image/jpeg"
+	"log/slog"
 	"slices"
 	"sync"
 	"testing"
@@ -824,6 +825,49 @@ func (c *stuck) ReadMessage(ctx context.Context) ([]byte, error) {
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// panicky is a connection whose reads panic, as a bug in handling a
+// client's message would on the reader's goroutine, and which keeps what
+// was written last.
+type panicky struct {
+	mu   sync.Mutex
+	last []byte
+}
+
+func (c *panicky) WriteMessage(_ context.Context, p []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.last = slices.Clone(p)
+	return nil
+}
+
+func (*panicky) ReadMessage(context.Context) ([]byte, error) { panic("the reader's bug") }
+
+// A panic on the reader's goroutine, which net/http's recover does not
+// reach, ends the stream with internal-error rather than occamyd.
+func TestReaderPanics(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		s, owner, err := session.Start(ctx, session.Config{Backend: backendtest.NewScreen(200, 150, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		c := &panicky{}
+		err = Serve(ctx, c, owner, visible, Config{Logger: slog.New(slog.DiscardHandler)})
+		var p session.PanicError
+		if !errors.As(err, &p) || p.Value != "the reader's bug" {
+			t.Errorf("Serve returned %v, want the reader's panic", err)
+		}
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		m, err := protocol.Decode(c.last, protocol.ServerMessages(), protocol.Limits{})
+		if cl, ok := m.(*protocol.Close); !ok || cl.Code != protocol.CloseInternalError {
+			t.Errorf("last message %#v %v, want close internal-error", m, err)
+		}
+	})
 }
 
 // Serve returns after a protocol error even if the client stopped
