@@ -10,7 +10,9 @@ import (
 	"image"
 	"image/draw"
 	"math/rand/v2"
+	"slices"
 	"testing"
+	"time"
 
 	"changkun.de/x/occamy/internal/encoder"
 	"changkun.de/x/occamy/protocol"
@@ -241,6 +243,118 @@ func TestPrefetchSkipsCached(t *testing.T) {
 	}
 	if s := sh.cache.stats(); jobs == 0 || s.misses != 0 {
 		t.Errorf("the workers encoded %d tiles or runs in %d rows of tiles the client has", s.misses, jobs)
+	}
+}
+
+// sharedWriter is a writer of d that shares a cache with no workers.
+func sharedWriter(t *testing.T, d *direct) *shared {
+	t.Helper()
+	sh := &shared{cache: newEncodeCache(DefaultEncodeCacheBytes)}
+	p, ok := profileOf(d.w.enc)
+	if !ok {
+		t.Fatal("the encoder is not internal/encoder's")
+	}
+	d.w.sh, d.w.prof = sh, p
+	return sh
+}
+
+// A tile's encoding while it moves is not its encoding still: a tile of
+// 17 to 256 colours goes lossy while it moves, and exact otherwise.
+func TestShareMoving(t *testing.T) {
+	d := newDirect(t, false)
+	sharedWriter(t, d)
+	w := d.w
+	r := image.Rect(0, 0, 64, 64)
+	pix := w.tile(0)
+	for i := range 64 * 64 {
+		pix[4*i], pix[4*i+1], pix[4*i+2], pix[4*i+3] = uint8(i%100), uint8(2*(i%100)), 0x40, 0xff // #nosec G115 -- small
+	}
+	_, _, moving := w.encodeTile(nil, 0, 0, 1, r, true)
+	_, codec, still := w.encodeTile(nil, 0, 0, 1, r, false)
+	if !moving || still || codec != protocol.CodecDeflate {
+		t.Errorf("a tile of 100 colours: lossy %v moving, lossy %v still in %v", moving, still, codec)
+	}
+}
+
+// A run's encoding at one quality, or searched from one lowest, is not
+// one at another.
+func TestShareRunQuality(t *testing.T) {
+	d := newDirect(t, false)
+	sharedWriter(t, d)
+	w := d.w
+	photo := corpusFrame(t, "photo")
+	r := image.Rect(0, 0, 64, 64)
+	pix := pixels(photo, r.Add(image.Pt(256, 192)))
+	w.runVersion = append(w.runVersion[:0], 1)
+	encode := func(still bool, q, lo int) ([]byte, int) {
+		_, got, _ := w.encodeRun(0, 1, pix, r, still, q, lo)
+		return slices.Clone(w.payload), got
+	}
+	low, _ := encode(false, 30, 0)
+	high, _ := encode(false, 90, 0)
+	if bytes.Equal(low, high) {
+		t.Error("a run at 90 got the encoding at 30")
+	}
+	_, from30 := encode(true, 90, 30)
+	_, from85 := encode(true, 90, 85)
+	if from30 >= 85 || from85 < 85 {
+		t.Errorf("Still from 30 chose %d, from 85 chose %d", from30, from85)
+	}
+}
+
+// The workers encode a frame's rows as the writer then sends them: each
+// tile, and each run of lossy tiles between tiles that are clean or
+// exact, so that the writer finds every encoding they made.
+func TestPrefetchMatchesWriter(t *testing.T) {
+	d := newDirect(t, false)
+	photo := corpusFrame(t, "photo")
+	d.show(photo)
+	d.frame()
+
+	// Every other run of tiles changes, some of them to a pattern.
+	next := image.NewRGBA(photo.Rect)
+	draw.Draw(next, next.Rect, photo, image.Pt(0, 32), draw.Src)
+	img := image.NewRGBA(photo.Rect)
+	copy(img.Pix, photo.Pix)
+	for y := range 12 {
+		for x := range 16 {
+			r := image.Rect(64*x, 64*y, 64*x+64, 64*y+64)
+			switch {
+			case (x/3+y)%2 == 1:
+			case x%5 == 4:
+				draw.Draw(img, r, pattern(x+y, r.Min), r.Min, draw.Src)
+			default:
+				draw.Draw(img, r, next, r.Min, draw.Src)
+			}
+		}
+	}
+	d.show(img)
+	sh := sharedWriter(t, d)
+	sh.jobs = make(chan func(*worker), 64)
+	w := d.w
+	if _, ok := w.collect(image.Rectangle{}); !ok {
+		t.Fatal("resized")
+	}
+	if f := w.prefetch(w.order); f == nil {
+		t.Fatal("no rows for the workers")
+	}
+	wk := &worker{encs: map[profile]*encoder.Encoder{}}
+	for len(sh.jobs) > 0 {
+		(<-sh.jobs)(wk)
+	}
+	// A worker asks again for an exact tile that ended a run, as the
+	// first of the next message.
+	before := sh.cache.stats()
+	made := before.misses
+	sh.jobs = nil // the writer encodes the rest alone
+	if ok, _ := w.p.StartFrame(time.Now()); !ok {
+		t.Fatal("the pacer holds the frame")
+	}
+	if err := w.sendFrame(d.ctx, w.order, false); err != nil {
+		t.Fatal(err)
+	}
+	if s := sh.cache.stats(); made == 0 || s.hits-before.hits != made {
+		t.Errorf("the workers made %d encodings, and the writer found %d", made, s.hits-before.hits)
 	}
 }
 
