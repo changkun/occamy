@@ -636,6 +636,11 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 			cancel()
 			c.conn.Close() // ends a write that waits on the server
 			wg.Wait()
+			c.chio.mu.Lock()
+			if c.disp.timer != nil {
+				c.disp.timer.Stop() // no layout is due any more
+			}
+			c.chio.mu.Unlock()
 		}()
 	}
 	w, h := c.Size()

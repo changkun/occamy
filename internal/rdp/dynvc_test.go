@@ -333,6 +333,24 @@ func TestDisplayResizeBack(t *testing.T) {
 	l.quietDVC(t)
 }
 
+// Run stops the timer of the next layout as it returns.
+func TestDisplayTimerStops(t *testing.T) {
+	l := runLive(t, rdptest.Server{}, withResize)
+	l.setLayoutEvery(0, time.Hour)
+	const id = 9
+	l.display(t, id, 16, 8192, 8192)
+	l.c.RequestSize(1280, 720)
+	l.layout(t, id)
+	l.conn.Close()
+	err := <-l.done
+	l.done <- err
+	l.c.chio.mu.Lock()
+	defer l.c.chio.mu.Unlock()
+	if l.c.disp.timer == nil || l.c.disp.timer.Stop() {
+		t.Error("the timer of the retry runs after Run returned")
+	}
+}
+
 // The client looks again at the desktop's own size, which it keeps for
 // the layout before, when the retry of that layout is due, though a size
 // asked for in between had it look sooner and took the retry's wake.
