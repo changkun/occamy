@@ -315,6 +315,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   remote with the window, answers the remote's credential prompts,
   shares the session through a link as a viewer or read-only, and ends
   it, signing in again over the session when the sign-in has expired;
+  an End or share that waited for the sign-in is left to occamyd, which
+  ends or shares only its owner's session: one who signs in as another
+  user is told the session has ended or is not theirs. A call to occamyd
+  gives up after 30 s, and End shows that it waits, with a way back to
+  the connections, and takes no second press meanwhile;
   the clipboard goes both ways as the role allows, and reaches the local
   clipboard on its own only for a role that gives input, so a read-only
   viewer copies it from the clipboard panel; a hidden page tells occamyd

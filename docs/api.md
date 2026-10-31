@@ -803,9 +803,11 @@ The page runs its own scripts and the Worker that decodes tiles; calls
 API v1 and opens streams on its own origin, which `ws://host` and
 `wss://host` name for browsers that do not count WebSockets as
 `'self'`; shows the remote's pointer as a `data:` image; and takes
-inline styles, which React's style attributes and the terminal
-emulator's stylesheet are. No other page may frame it, so none can lay
-itself over a remote desktop and take its clicks. A `Host` that is not
+inline styles, since the terminal emulator, xterm.js, adds `<style>`
+elements for its theme and its cell size. React sets the page's style
+attributes through the CSSOM, which the policy does not govern. No
+other page may frame it, so none can lay itself over a remote desktop
+and take its clicks. A `Host` that is not
 a plain name or address with an optional port is left out of
 `connect-src`, so that a request cannot add to the policy.
 

@@ -7,7 +7,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 import { CloseCode, CloseError, ConnectionError, ProtocolError } from '../protocol'
-import { type EndContext, TAKEOVER_REASON, describeEnd, describeFailure } from './ending'
+import { type EndContext, TAKEOVER_REASON, describeEnd, describeFailure, endsSession } from './ending'
 
 const owner: EndContext = { shared: false, sessionId: 'mZ3k1tYb0Q2fJw8aXr5LsA' }
 const viewer: EndContext = { shared: true, sessionId: 'mZ3k1tYb0Q2fJw8aXr5LsA' }
@@ -69,6 +69,29 @@ describe('describeEnd', () => {
     const e = describeEnd(4999, 'something new', owner)
     expect(e.title).toBe('Session ended')
     expect(e.technical).toBe('CloseCode(4999) (4999): something new')
+  })
+})
+
+describe('endsSession', () => {
+  it('takes the codes occamyd closes streams with once their session ended for everyone', () => {
+    const ends: number[] = [CloseCode.ServerShutdown, CloseCode.SessionClosed, CloseCode.OwnerLeft, CloseCode.Idle, CloseCode.RemoteEnded, CloseCode.BackendFailed]
+    for (const code of Object.values(CloseCode)) {
+      expect(endsSession(code), String(code)).toBe(ends.includes(code))
+    }
+    // Nor the user's own close, or a connection that failed without a code.
+    expect(endsSession(0)).toBe(false)
+    expect(endsSession(1006)).toBe(false)
+  })
+
+  it('matches the session ends of occamyd’s closeFor', () => {
+    const src = readFileSync(new URL('../../../../internal/stream/serve.go', import.meta.url), 'utf8')
+    const body = src.slice(src.indexOf('func closeFor('), src.indexOf('\n}\n', src.indexOf('func closeFor(')))
+    const names = [...body.matchAll(/session\.\w+:\s+protocol\.Close(\w+),/g)].map((m) => m[1])
+    expect(names).toEqual(['SessionClosed', 'OwnerLeft', 'Idle', 'RemoteEnded', 'BackendFailed', 'ServerShutdown', 'InternalError'])
+    // InternalError is left out: occamyd also closes one failed stream with it.
+    for (const name of names.filter((n) => n !== 'InternalError')) {
+      expect(endsSession(CloseCode[name as keyof typeof CloseCode]), name).toBe(true)
+    }
   })
 })
 
