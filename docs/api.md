@@ -59,8 +59,14 @@ API v1's conventions:
   charset=utf-8` and `X-Content-Type-Options: nosniff`. A request body
   must be `Content-Type: application/json` (parameters such as
   `charset` are ignored), hold exactly one JSON value, and name no field
-  that the route does not take; otherwise the route answers `415
-  unsupported_media_type` or `400 bad_request`. Requiring the JSON type
+  that the route does not take. Field names are case-sensitive, and no
+  object, at any depth, may name a field twice: `{"Connection":"x"}` and
+  `{"username":"a","username":"b"}` are refused, where a JSON decoder
+  alone would match the first in any case and keep the last of the
+  second, so that a proxy reading the body otherwise could see another
+  request than `occamyd`. Objects and arrays nest at most 32 deep.
+  Otherwise the route answers `415 unsupported_media_type` or
+  `400 bad_request`. Requiring the JSON type
   also keeps a cross-site HTML form from posting to the API, since a
   form cannot send it without a CORS preflight.
 - **No caching of secrets.** Successful responses that carry a token or
@@ -172,7 +178,7 @@ change, and never holds a secret.
 
 | `code` | Status | When |
 |--------|--------|------|
-| `bad_request` | 400 | The body does not decode: not JSON, a second JSON value, a field the route does not take, a field of the wrong type. Or the request is refused for what it says, as each route lists. Or a stream request offers no `occamy.v1` subprotocol |
+| `bad_request` | 400 | The body does not decode: not JSON, a second JSON value, a field the route does not take, a field named twice or in another case, a field of the wrong type. Or the request is refused for what it says, as each route lists. Or a stream request offers no `occamy.v1` subprotocol |
 | `invalid_state` | 400 | `GET /api/v1/auth/oidc/callback` matches no sign-in this browser started in the last 10 minutes |
 | `unauthorized` | 401 | No access token, or wrong credentials: a sign-in with a wrong password or an unknown user, or an OIDC code exchange that fails |
 | `invalid_token` | 401 | A token that fails verification, or whose user `occamyd` refuses |
