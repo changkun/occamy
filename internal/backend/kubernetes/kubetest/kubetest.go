@@ -283,7 +283,7 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		e.Abort()
 		return
 	}
-	go e.read()
+	go e.read() //nolint:gosec // G118: the stream outlives the upgrade's request; Abort and Close end it
 	select {
 	case s.execs <- e:
 	case <-s.quit:

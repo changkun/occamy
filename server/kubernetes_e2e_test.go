@@ -199,7 +199,7 @@ func TestKubernetesPrompt(t *testing.T) {
 			break
 		}
 		e := acceptKube(t, ks)
-		if got := e.Request.Header.Get("Authorization"); got != "Bearer "+kubeToken {
+		if got := e.Header.Get("Authorization"); got != "Bearer "+kubeToken {
 			t.Errorf("Authorization %q", got)
 		}
 		_ = e.Stdout([]byte("ok"))

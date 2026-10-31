@@ -438,7 +438,7 @@ func (b *Backend) dial(ctx context.Context, token Token) (*websocket.Conn, error
 	if token != "" {
 		header.Set("Authorization", "Bearer "+string(token))
 	}
-	conn, resp, err := websocket.Dial(hctx, b.url, &websocket.DialOptions{
+	conn, resp, err := websocket.Dial(hctx, b.url, &websocket.DialOptions{ //nolint:bodyclose // coder/websocket: the response body need not be closed
 		HTTPClient:      b.client,
 		HTTPHeader:      header,
 		Subprotocols:    []string{ProtocolV5, ProtocolV4},
