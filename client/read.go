@@ -217,8 +217,15 @@ func (s *Session) tile(m *protocol.Tile, n int) error {
 	}
 	if m.Slot != 0 {
 		// The slot holds the tile from now on, whatever becomes of its
-		// frame: a cached tile later in the frame draws it.
-		s.slots[m.Slot-1] = slot{w: r.Dx(), h: r.Dy(), data: o.data, job: o.job}
+		// frame: a cached tile later in the frame draws it. A raw tile's
+		// pixels share their message's buffer, which the slot would keep
+		// whole, so it keeps a copy of their size: a slot holds 16 KiB at
+		// most, as docs/protocol.md bounds it.
+		data := o.data
+		if data != nil {
+			data = slices.Clone(data)
+		}
+		s.slots[m.Slot-1] = slot{w: r.Dx(), h: r.Dy(), data: data, job: o.job}
 	}
 	if o.job != nil {
 		s.pool.submit(o.job)
