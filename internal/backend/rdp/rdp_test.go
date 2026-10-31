@@ -534,7 +534,8 @@ func TestRunAnyDowngraded(t *testing.T) {
 }
 
 // By default, a server that selects TLS without NLA is refused before
-// anything but the connection request is sent.
+// anything but the connection request is sent, without the hint for a
+// server that selects standard RDP security: it chose TLS already.
 func TestRunDefaultRefusesTLS(t *testing.T) {
 	checkGoroutines(t)
 	s := listen(t, rdptest.Server{}) // selects TLS
@@ -542,8 +543,8 @@ func TestRunDefaultRefusesTLS(t *testing.T) {
 	cfg.Security = ""
 	r := start(t, newBackend(t, cfg), &backendtest.Sink{})
 	a := s.next(t)
-	if err := r.wait(t); a.err == nil || err == nil || !strings.Contains(err.Error(), "did not offer") {
-		t.Errorf("the server got %v, Run returned %v, want TLS refused", a.err, err)
+	if err := r.wait(t); a.err == nil || err == nil || !strings.Contains(err.Error(), "did not offer") || strings.Contains(err.Error(), "allow TLS with") {
+		t.Errorf("the server got %v, Run returned %v, want TLS refused without a hint", a.err, err)
 	}
 }
 
