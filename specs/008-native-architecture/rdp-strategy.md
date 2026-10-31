@@ -362,6 +362,16 @@ best effort, has none. The live run was repeated after the fixes.
     - the NetBIOS name rule;
     - the decoder's bitmap size bound;
     - the pointer cache index check.
+
+    `TestDecoderKeepsScratch`, which checks the scratch kept, counts
+    allocations without the race detector only. Under `-race`,
+    `sync.Pool` drops one item in four put back, and each bitmap's two
+    `fmt.Sprintf` calls for its statistics then allocate a printer and
+    its buffer again: 3, 5 or 7 allocations a bitmap instead of 3, and
+    over the bound of 4 in 5 runs of 300, 2 of 300 with the collector
+    off. Under `-race` the test still checks that the decoder's buffers
+    stay, which a decoder that reallocates them fails; CI runs the
+    tests with `-race` only, so the count is checked locally.
   - Seven fuzzers: fast-path, slow-path, RLE, planar and pointer
     updates, the NTLM challenge and the connection sequence's parsers.
     The pointer fuzzer's seed is synthetic; the others are seeded from
