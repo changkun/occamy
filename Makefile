@@ -32,14 +32,28 @@ build:
 DEMO_DEBUG = OCCAMY_V0_CONF=$(if $(filter 1,$(OCCAMY_DEBUG)),occamy-debug.yaml,occamy.yaml) \
 	OCCAMY_V1_DEBUG_ADDRESS=$(if $(filter 1,$(OCCAMY_DEBUG)),0.0.0.0:5638)
 
-# run starts the demo stack. OCCAMY_DEBUG=1 turns on its debug routes,
+# DEMO_BIND sets OCCAMY_BIND, the address on which docker-compose.yaml
+# publishes the ports of both occamyd services: the loopback interface,
+# 127.0.0.1, unless OCCAMY_BIND names another, such as 0.0.0.0 for
+# every interface. It is set either way, so that docker/.env cannot
+# widen it unseen. In debug mode the v0 service serves pprof, which has
+# no authentication, on its own port, so OCCAMY_DEBUG=1 refuses any
+# address but the loopback one. occamy-v1's debug port stays on the
+# loopback interface whatever OCCAMY_BIND says.
+DEMO_BIND = $(if $(and $(filter 1,$(OCCAMY_DEBUG)),$(filter-out 127.0.0.1,$(OCCAMY_BIND))),$(error \
+	OCCAMY_DEBUG=1 serves pprof without authentication on the v0 service's port, \
+	so OCCAMY_BIND must be 127.0.0.1 or unset, not $(OCCAMY_BIND))) \
+	OCCAMY_BIND=$(or $(OCCAMY_BIND),127.0.0.1)
+
+# run starts the demo stack, published on the loopback interface unless
+# OCCAMY_BIND says otherwise (DEMO_BIND). OCCAMY_DEBUG=1 turns on its debug routes,
 # which have no authentication, on the host's loopback interface: the v0
 # service's pprof on OCCAMY_PORT, in debug mode (docker/occamy-debug.yaml),
 # for the pressure test, and occamy-v1's debug listener on
 # OCCAMY_V1_DEBUG_PORT, for make soak. make run without it turns them off
 # again.
 run:
-	cd docker && $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose up -d --build --wait
+	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose up -d --build --wait
 .PHONY: run
 
 stop:
@@ -83,7 +97,7 @@ soak:
 # OCCAMY_V1_PORT and GUACD_PORT, which the harness follows. Its debug
 # routes are off unless OCCAMY_DEBUG=1, as run's are.
 bench: build
-	cd docker && $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml up -d --build --wait
+	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml up -d --build --wait
 	go run ./bench -engine $(CONTAINER_ENGINE) -project $(or $(COMPOSE_PROJECT_NAME),docker) \
 		-addr localhost:$(or $(OCCAMY_PORT),5636) -v1 localhost:$(or $(OCCAMY_V1_PORT),5637) \
 		-guacd localhost:$(or $(GUACD_PORT),4822) $(BENCH_FLAGS)

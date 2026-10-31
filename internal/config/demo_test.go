@@ -228,6 +228,75 @@ func TestDemoDebugGating(t *testing.T) {
 	}
 }
 
+// TestDemoBind checks where the demo stack publishes occamyd: on the
+// loopback interface with compose up and with make run, since the demo
+// user's password is public; on the address that OCCAMY_BIND names, such
+// as every interface, when the shell asks for it; and never with the
+// debug routes beyond the loopback interface: occamy-v1's debug port
+// stays there, and make run OCCAMY_DEBUG=1 refuses another OCCAMY_BIND,
+// since the v0 service then serves pprof on its own port.
+func TestDemoBind(t *testing.T) {
+	raw, err := os.ReadFile("../../docker/docker-compose.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var compose struct {
+		Services map[string]struct {
+			Ports []string `yaml:"ports"`
+		} `yaml:"services"`
+	}
+	if err := yaml.Unmarshal(raw, &compose); err != nil {
+		t.Fatal(err)
+	}
+	// published returns the host address of each container port that
+	// occamy and occamy-v1 publish, with env.
+	published := func(t *testing.T, env map[string]string) map[string]string {
+		t.Helper()
+		got := map[string]string{}
+		for _, name := range []string{"occamy", "occamy-v1"} {
+			for _, p := range compose.Services[name].Ports {
+				p := composeInterpolate(t, p, env)
+				parts := strings.Split(p, ":")
+				if len(parts) != 3 {
+					t.Fatalf("%s publishes %q, not host:port:port", name, p)
+				}
+				got[name+":"+parts[2]] = parts[0]
+			}
+		}
+		return got
+	}
+	loopback := map[string]string{"occamy:5636": "127.0.0.1", "occamy-v1:5637": "127.0.0.1", "occamy-v1:5638": "127.0.0.1"}
+	everywhere := map[string]string{"occamy:5636": "0.0.0.0", "occamy-v1:5637": "0.0.0.0", "occamy-v1:5638": "127.0.0.1"}
+	for _, tt := range []struct {
+		name string
+		env  func(t *testing.T) map[string]string
+		want map[string]string
+	}{
+		{"compose up", func(*testing.T) map[string]string { return nil }, loopback},
+		{"make run", func(t *testing.T) map[string]string { return makeRunEnv(t, "", nil) }, loopback},
+		{"make run OCCAMY_DEBUG=1", func(t *testing.T) map[string]string { return makeRunEnv(t, "1", nil) }, loopback},
+		{"make run with OCCAMY_BIND=0.0.0.0", func(t *testing.T) map[string]string {
+			return makeRunEnv(t, "", map[string]string{"OCCAMY_BIND": "0.0.0.0"})
+		}, everywhere},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := published(t, tt.env(t)); !maps.Equal(got, tt.want) {
+				t.Errorf("published on %v, want %v", got, tt.want)
+			}
+		})
+	}
+	t.Run("make run OCCAMY_DEBUG=1 with OCCAMY_BIND=0.0.0.0", func(t *testing.T) {
+		if _, err := exec.LookPath("make"); err != nil {
+			t.Skip("no make")
+		}
+		cmd := exec.Command("make", "-s", "-n", "-C", "../..", "run", "OCCAMY_DEBUG=1", "OCCAMY_BIND=0.0.0.0", "CONTAINER_ENGINE=engine")
+		out, err := cmd.CombinedOutput()
+		if err == nil || !strings.Contains(string(out), "OCCAMY_BIND must be 127.0.0.1") {
+			t.Errorf("make -n run OCCAMY_DEBUG=1 OCCAMY_BIND=0.0.0.0 printed %q (%v), want it refused", out, err)
+		}
+	})
+}
+
 // TestMakeClean checks that make clean removes Occamy's own containers
 // and images and no other of the engine's, which other projects on the
 // host may share: the demo stack through compose, and only the images
@@ -300,7 +369,12 @@ func makeRunEnv(t *testing.T, debug string, shell map[string]string) map[string]
 		t.Skip("no make")
 	}
 	cmd := exec.Command("make", "-s", "-n", "-C", "../..", "run", "OCCAMY_DEBUG="+debug, "CONTAINER_ENGINE=engine")
-	cmd.Env = os.Environ()
+	// The shell is shell's, not the test's, which may hold OCCAMY_BIND.
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "OCCAMY_BIND=") {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
 	for k, v := range shell {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
