@@ -198,6 +198,23 @@ func TestEndedSessionsSized(t *testing.T) {
 	}
 }
 
+// TestEndedSessionsExpireOutOfOrder checks that an ended session is not
+// given past its grace when one kept longer came before it, as when the
+// owner grace changed between them.
+func TestEndedSessionsExpireOutOfOrder(t *testing.T) {
+	e := newEndedSessions(0)
+	now := time.Now()
+	e.add("long", principal{subject: "alice"}, failedClose, now, time.Hour)
+	e.add("short", principal{subject: "alice"}, failedClose, now, time.Millisecond)
+	later := now.Add(time.Second)
+	if _, ok := e.get("short", later); ok {
+		t.Error("a session was given past its grace")
+	}
+	if _, ok := e.get("long", later); !ok {
+		t.Error("a session was not given within its grace")
+	}
+}
+
 // TestEndedSessionOwnerGrace checks that a session waits for its owner,
 // and keeps its end for them, for one owner grace: a session whose owner
 // never comes ends with owner-left once it has passed, and its owner's

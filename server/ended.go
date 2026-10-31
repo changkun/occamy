@@ -58,11 +58,13 @@ func (e *endedSessions) add(id string, owner principal, c protocol.Close, now ti
 	e.prune(now)
 }
 
-// get returns how session id ended, if it is still kept at now.
+// get returns how session id ended, if it is still kept at now. prune
+// stops at the first session kept beyond now, so get checks the time
+// too, should one kept longer come before one that has expired.
 func (e *endedSessions) get(id string, now time.Time) (endedSession, bool) {
 	e.prune(now)
 	es, ok := e.byID[id]
-	if !ok {
+	if !ok || !now.Before(es.until) {
 		return endedSession{}, false
 	}
 	return *es, true
