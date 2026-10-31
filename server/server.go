@@ -78,12 +78,16 @@ type server struct {
 	limits        config.Limits
 	streamsCfg    config.Streams
 
-	mu       sync.Mutex
-	sessions map[string]*sessionInfo // by ID, while they run
-	ended    endedSessions           // how sessions ended, for their owners' streams (ended.go)
-	owned    map[principal]int       // the sessions each user owns, while they run
-	running  int                     // the sessions that count toward limits.sessions
-	streams  tracker                 // the streams being served
+	mu sync.Mutex
+	// ownerGrace is how long a session waits for its owner's stream,
+	// and how long its end is kept for the owner after it ends
+	// (ended.go): session.DefaultOwnerGrace, shorter in tests.
+	ownerGrace time.Duration
+	sessions   map[string]*sessionInfo // by ID, while they run
+	ended      endedSessions           // how sessions ended, for their owners' streams (ended.go)
+	owned      map[principal]int       // the sessions each user owns, while they run
+	running    int                     // the sessions that count toward limits.sessions
+	streams    tracker                 // the streams being served
 }
 
 // Run serves a v1 file until SIGINT or SIGTERM, then drains requests in
@@ -240,7 +244,9 @@ func newServer(f *config.File) (*server, error) {
 		streamTTL:     streamTokenLifetime,
 		limits:        limits,
 		streamsCfg:    f.Streams.WithDefaults(),
+		ownerGrace:    session.DefaultOwnerGrace,
 		sessions:      map[string]*sessionInfo{},
+		ended:         newEndedSessions(limits.Sessions),
 		owned:         map[principal]int{},
 		webClient:     f.WebClient,
 	}

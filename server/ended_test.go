@@ -126,10 +126,18 @@ func TestEndedSessionOthers(t *testing.T) {
 	}
 }
 
-// TestEndedSessionsBounded checks that an ended session is kept for
-// endedFor and no longer, and that at most maxEnded are kept, the
-// oldest going first, so that a client cannot grow them by opening
-// sessions whose remotes fail.
+// setOwnerGrace gives the sessions ts opens from now on grace as their
+// owner grace.
+func setOwnerGrace(ts *testServer, grace time.Duration) {
+	ts.s.mu.Lock()
+	ts.s.ownerGrace = grace
+	ts.s.mu.Unlock()
+}
+
+// TestEndedSessionsBounded checks that an ended session is kept for its
+// owner grace and no longer, and that no more are kept than the server
+// keeps, the oldest going first, so that a client cannot grow them by
+// opening sessions whose remotes fail.
 func TestEndedSessionsBounded(t *testing.T) {
 	kept := func(ts *testServer) int {
 		ts.s.mu.Lock()
@@ -137,34 +145,36 @@ func TestEndedSessionsBounded(t *testing.T) {
 		return ts.s.ended.len()
 	}
 	t.Run("time", func(t *testing.T) {
-		defer func(d time.Duration) { endedFor = d }(endedFor)
-		endedFor = 300 * time.Millisecond
+		const grace = 300 * time.Millisecond
 		ts := failingServer(t)
+		setOwnerGrace(ts, grace)
 		alice := ts.token(t, "alice", "ops")
 		o := openEnded(t, ts, alice)
-		time.Sleep(endedFor)
+		time.Sleep(grace)
 		if c := refused(t, ts, o.ID, alice); c != noSuchSession {
-			t.Errorf("after endedFor: close %v %q, want no such session", c.Code, c.Reason)
+			t.Errorf("after the owner grace: close %v %q, want no such session", c.Code, c.Reason)
 		}
 		if n := kept(ts); n != 0 {
-			t.Errorf("%d ended sessions kept after endedFor, want 0", n)
+			t.Errorf("%d ended sessions kept after the owner grace, want 0", n)
 		}
 	})
 	t.Run("count", func(t *testing.T) {
-		defer func(n int) { maxEnded = n }(maxEnded)
-		maxEnded = 2
+		const most = 2
 		ts := failingServer(t)
+		ts.s.mu.Lock()
+		ts.s.ended.most = most
+		ts.s.mu.Unlock()
 		alice := ts.token(t, "alice", "ops")
 		var ids []string
 		for range 4 {
 			ids = append(ids, openEnded(t, ts, alice).ID)
-			if n := kept(ts); n > maxEnded {
-				t.Fatalf("%d ended sessions kept, want at most %d", n, maxEnded)
+			if n := kept(ts); n > most {
+				t.Fatalf("%d ended sessions kept, want at most %d", n, most)
 			}
 		}
 		for i, id := range ids {
 			want := failedClose
-			if i < len(ids)-maxEnded {
+			if i < len(ids)-most {
 				want = noSuchSession
 			}
 			if c := refused(t, ts, id, alice); c != want {
@@ -172,6 +182,38 @@ func TestEndedSessionsBounded(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestEndedSessionsSized checks that occamyd keeps as many ended
+// sessions as it runs at once, and 1024 at the least, so that every
+// owner of sessions that all end at once still learns how theirs ended.
+func TestEndedSessionsSized(t *testing.T) {
+	for _, tt := range []struct{ sessions, want int }{{0, 1024}, {100, 1024}, {5000, 5000}} {
+		ts, _ := sessionServer(t, func(f *config.File) { f.Limits.Sessions = tt.sessions })
+		if got := ts.s.ended.most; got != tt.want {
+			t.Errorf("limits.sessions %d: %d ended sessions kept, want %d", tt.sessions, got, tt.want)
+		}
+	}
+}
+
+// TestEndedSessionOwnerGrace checks that a session waits for its owner,
+// and keeps its end for them, for one owner grace: a session whose owner
+// never comes ends with owner-left once it has passed, and its owner's
+// stream gets owner-left until it has passed again.
+func TestEndedSessionOwnerGrace(t *testing.T) {
+	const grace = time.Second
+	ts, _ := sessionServer(t, nil)
+	setOwnerGrace(ts, grace)
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	waitFor(t, "the session to end without its owner", func() bool { return ts.s.session(o.ID) == nil })
+	if c := refused(t, ts, o.ID, alice); c.Code != protocol.CloseOwnerLeft {
+		t.Errorf("within the owner grace: close %v %q, want owner-left", c.Code, c.Reason)
+	}
+	time.Sleep(grace)
+	if c := refused(t, ts, o.ID, alice); c != noSuchSession {
+		t.Errorf("after the owner grace: close %v %q, want no such session", c.Code, c.Reason)
+	}
 }
 
 // TestJoinEndingSession joins a session that has ended but is still

@@ -18,18 +18,8 @@ import (
 // session for the owner grace after it ends: the owner, and the close.
 // Nobody else learns from it whether a session existed or how it ended.
 
-// Bounds of the ended sessions kept, variables for tests.
-var (
-	// endedFor is how long an ended session is kept: the owner grace,
-	// session.Config.OwnerGrace's default, within which an owner who
-	// left may come back.
-	endedFor = 60 * time.Second
-	// maxEnded is the most ended sessions kept. A client that opens
-	// sessions whose remotes fail at once pushes the oldest out sooner,
-	// which leaves their owners with no such session, as once they
-	// expire.
-	maxEnded = 1024
-)
+// minEnded is the fewest ended sessions kept, however few run at once.
+const minEnded = 1024
 
 // endedSession is what is kept of an ended session.
 type endedSession struct {
@@ -39,19 +29,30 @@ type endedSession struct {
 	until time.Time      // when it is forgotten
 }
 
-// endedSessions holds the sessions that ended within endedFor, at most
-// maxEnded, oldest first. The server's mu guards it.
+// endedSessions holds the sessions that ended within their owner grace,
+// at most most, oldest first. The server's mu guards it.
 type endedSessions struct {
+	// most is the most ended sessions kept: limits.sessions, or minEnded
+	// if that is fewer, so that every owner of the most sessions that
+	// can end at once, as when a remote they share goes down, still
+	// learns how theirs ended. A client that opens sessions whose
+	// remotes fail at once pushes the oldest out sooner, which leaves
+	// their owners with no such session, as once they expire.
+	most  int
 	byID  map[string]*endedSession
-	order []*endedSession // by until, since endedFor is the same for each
+	order []*endedSession // by until, since every session has the same grace
 }
 
-// add keeps how session id of owner ended, at now.
-func (e *endedSessions) add(id string, owner principal, c protocol.Close, now time.Time) {
-	if e.byID == nil {
-		e.byID = map[string]*endedSession{}
-	}
-	es := &endedSession{id: id, owner: owner, close: c, until: now.Add(endedFor)}
+// newEndedSessions keeps up to minEnded ended sessions, or sessions if
+// that is more.
+func newEndedSessions(sessions int) endedSessions {
+	return endedSessions{most: max(minEnded, sessions), byID: map[string]*endedSession{}}
+}
+
+// add keeps how session id of owner ended, at now, for grace: the
+// session's owner grace, within which an owner who left may come back.
+func (e *endedSessions) add(id string, owner principal, c protocol.Close, now time.Time, grace time.Duration) {
+	es := &endedSession{id: id, owner: owner, close: c, until: now.Add(grace)}
 	e.byID[id] = es
 	e.order = append(e.order, es)
 	e.prune(now)
@@ -68,10 +69,10 @@ func (e *endedSessions) get(id string, now time.Time) (endedSession, bool) {
 }
 
 // prune forgets the sessions that expired by now, and the oldest beyond
-// maxEnded.
+// most.
 func (e *endedSessions) prune(now time.Time) {
 	n := 0
-	for n < len(e.order) && (len(e.order)-n > maxEnded || !now.Before(e.order[n].until)) {
+	for n < len(e.order) && (len(e.order)-n > e.most || !now.Before(e.order[n].until)) {
 		delete(e.byID, e.order[n].id)
 		e.order[n] = nil
 		n++

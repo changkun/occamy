@@ -348,6 +348,7 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 	}
 	s.owned[owner]++
 	s.running++
+	grace := s.ownerGrace
 	s.mu.Unlock()
 	release := func() {
 		s.mu.Lock()
@@ -362,7 +363,7 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 		release()
 		return fail(err)
 	}
-	id, sess, v, err := s.registry.Open(session.Config{Backend: b, MaxViewers: s.limits.ViewersPerSession})
+	id, sess, v, err := s.registry.Open(session.Config{Backend: b, OwnerGrace: grace, MaxViewers: s.limits.ViewersPerSession})
 	if err != nil {
 		release()
 		return fail(err)
@@ -386,7 +387,7 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 		s.mu.Lock()
 		// Removed and kept at once, so that no stream finds neither.
 		delete(s.sessions, id)
-		s.ended.add(id, owner, c, time.Now())
+		s.ended.add(id, owner, c, time.Now(), grace)
 		s.mu.Unlock()
 		release()
 		close(info.gone)
