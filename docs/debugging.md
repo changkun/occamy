@@ -130,7 +130,12 @@ sends that user something. Until then the user still counts, for up to
   `owner: ` as `echo: `. The test logs the matrix as a Markdown table,
   and writes it to the file `OCCAMY_PARITY_MATRIX` names. A cell
   expected to fail is listed in `parityKnown` with the reason; any other
-  failure, or a listed cell that passes, fails the test.
+  failure, or a listed cell that passes, fails the test. A cell that
+  cannot reach the desktop gets a second try after 15 s, and a guacd
+  cell gets one for any failure; a native cell whose check finds a
+  difference gets none. The demo x11vnc runs under a watchdog, which
+  logs each restart as `[<port>] watchdog: …` (`podman compose logs
+  vnc`).
 - `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test. Each of its N
   rounds opens two sessions to each demo server at once: one that waits
   for the desktop and one that sends garbage. All sessions to one server

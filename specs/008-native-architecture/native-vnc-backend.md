@@ -1258,6 +1258,16 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     the likely cause, unconfirmed.
   - `TestTigerVNC` passed under the race detector in 28 s. It found no
     earlier run's containers or images to remove, and removed its own.
+  - Run again on 2026-10-31, at a load average of 7 to 15: on master
+    (`1ee3a84`) with the old images, and then with the TigerVNC images
+    merged into `docker/demo/tigervnc` (started with `scene`), each
+    `TestEncodings` session from TigerVNC had the same size to the byte
+    (Hextile 3,248,971, ZRLE 1,457,473, Tight 1,487,014 and Tight JPEG
+    972,071 bytes, the last with 52 JPEG and 24 zlib rectangles), and
+    x11vnc's Tight JPEG session 120,644 bytes. `TestEncodings` also
+    passed against x11vnc at 64×48 from the bench desktop with
+    `GEOMETRY`, and `TestTigerVNC` under the race detector in 30 s
+    against the merged image, removing its own image and container.
 - **The clean-up matcher.** `expired` took a run's name after any
   registry and path, so that a run would remove an image pulled as
   `docker.io/someone/occamy-vnc-it-until1-2`. It now takes a bare name,
