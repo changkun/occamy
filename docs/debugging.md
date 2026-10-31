@@ -125,7 +125,11 @@ sends that user something. Until then the user still counts, for up to
   `TestE2EV1RDP` also takes the demo xrdp server's `rdp-native` through
   the clipboard both ways, which the image's clipboard echo answers, a
   resize, a viewer joined by a share, and the owner leaving and coming
-  back.
+  back. If the clipboard check times out, look in the rdp server's log
+  for `error in trans_connect chan`. That line means xrdp found no
+  channel server, the process that carries the clipboard. The image's
+  `reconnectwm.sh` starts one again on the next connection, and logs
+  `starting xrdp-chansrv again` when it does.
 - `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test. Each of its N
   rounds opens two sessions to each demo server at once: one that waits
   for the desktop and one that sends garbage. All sessions to one server

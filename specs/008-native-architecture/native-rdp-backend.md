@@ -1151,6 +1151,44 @@ RDP's guacd path, RDP no longer needs guacd at all.
     on xrdp for the next. All four passed 6 of 6 runs against the demo
     image with a local occamyd, and 3 of 3 again after the delta
     review's fixes.
+  - The clipboard check timed out once in CI (2026-10-31, run
+    41202661218, first attempt). The cause was in xrdp, not the
+    backend. xrdp's log shows the sequence:
+    - `TestConnectionPressure`'s guacd connection was still attached
+      to the X session when `TestE2EV1/rdp-native` connected and
+      displaced it.
+    - The channel server, `xrdp-chansrv`, which carries the
+      clipboard, accepted the new connection only 2 seconds later.
+    - The test's session ended 17 ms after that, and the channel
+      server exited 16 ms after the connection closed. It logged
+      nothing itself; sesexec only logged that it had finished.
+    - xrdp 0.10.1 starts the channel server only with the session.
+      Every later connection to the same session waited 10 seconds
+      for it (`error in trans_connect chan`), which is why the next
+      subtests took 10 s each, and none had a clipboard.
+
+    The backend did not drop the paste. A client sends its Format List
+    after the server's Monitor Ready, which comes from the channel
+    server, so with none there was no channel to send on. Passing runs
+    show the same 2-second wait now and then. In the passing rerun, the
+    channel server exited after the clipboard check instead, and the
+    next two subtests took 10 s. This is not x11vnc's dropped first cut
+    text: here nothing reaches the X session at all.
+
+    The image's `reconnectwm.sh` now starts the channel server again
+    whenever a connection reconnects to a session that has none, and
+    logs that it did. xrdp retries for 10 seconds, so it then connects
+    to the new one. A lock keeps two reconnections from starting two
+    channel servers.
+
+    The restart has not run yet: the shared host's load stayed above 8,
+    which ruled out the local stack. A green CI run shows only that the
+    script changes nothing while the channel server runs. The restart
+    happens only in a run where the channel server dies, and CI prints
+    the stack's logs only when a test fails. A direct check: run the
+    rdp image alone, kill `xrdp-chansrv` in it, and connect twice
+    through a local occamyd. The second connection should have the
+    clipboard, and the log should show the restart.
 - **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
   through occamyd's routes with the Go client against `rdptest`: NLA
   with stored credentials, the hello's size, the screen, scancodes,
