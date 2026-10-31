@@ -363,32 +363,37 @@ Settled on 2026-10-31.
   - `src/lib`, the shell's logic, free of React so that vitest runs it
     in Node: `api.ts` (API v1: sign-in, OIDC's token exchange, the
     connections, ending a session, shares; strict JSON with API v1's
-    error codes, and nothing sent with an expired token, which counts as
-    expired 10 s early), `oidc.ts` (PKCE: a 64-character verifier drawn
-    without bias, its S256 challenge, the login URL, the verifier kept in
-    `sessionStorage` for the round trip), `fragment.ts` and `targets.ts`
+    error codes, nothing sent with an expired token, which counts as
+    expired 10 s early, and no call waiting longer than occamyd's 30 s
+    write timeout; the identity a token names, its `sub` and its `idp`,
+    `local` where it has none), `oidc.ts` (PKCE: a 64-character
+    verifier drawn without bias, its S256 challenge, the login URL, the
+    verifier kept in `sessionStorage` for the round trip), `fragment.ts`
+    and `targets.ts`
     (what the page starts with, read once from its fragment and removed
     from the address bar: a share link, `#join=…&token=…`, or OIDC's
     `#code=` or `#error=`; a code without this tab's verifier is spent
     with a throwaway one; the verifier is forgotten on every start),
     `app.ts` (the screens as a reducer, and what waits for the user to
-    sign in again: a stream to open, or an owner's End or share, kept in
-    `sessionStorage` across single sign-on), `owner.ts` (End: the
-    owner's stream, then `DELETE`), `controller.ts` (one stream:
-    connect with the page's size and visibility, run the core's
-    `Display`, bind input by role, keep what the page shows as an
-    immutable state for `useSyncExternalStore`), `ending.ts` (a close
-    code and reason, or a failure to connect, as a title, a sentence,
-    the technical detail and what to offer: join again, or sign in),
-    `roles.ts`, `layout.ts` and `text.ts` (clipping the server's
-    strings, with control and bidi characters dropped).
+    sign in again: a stream to open, or an owner's End or share with
+    the identity of the user it is for, kept in `sessionStorage` across
+    single sign-on), `owner.ts` (End: the owner's stream, then
+    `DELETE`; for another user's token, `DELETE` first),
+    `controller.ts` (one stream: connect with the page's size and
+    visibility, run the core's `Display`, bind input by role, keep what
+    the page shows as an immutable state for `useSyncExternalStore`),
+    `ending.ts` (a close code and reason, or a failure to connect, as a
+    title, a sentence, the technical detail and what to offer: join
+    again, or sign in), `roles.ts`, `layout.ts` and `text.ts` (clipping
+    the server's strings, with control and bidi characters dropped).
   - `src/views`: sign-in (a password, and single sign-on where
     `GET /api/v1/auth/oidc/login` without a challenge answers 400),
     the connection list, and the session view: a toolbar (title, role,
     the other viewers, Clipboard, Share for the owner, Full screen, End
     session or Leave), a canvas scaled to fit with the remote's cursor,
     or xterm.js for a terminal session, loaded only then, an overlay
-    while connecting and one for the end, the owner's credential prompt
+    while connecting, one while End waits for occamyd, one for the end
+    and one for an owner's action not done, the owner's credential prompt
     in a modal `<dialog>` with secret fields as password inputs, a
     clipboard panel, and a share panel that mints a viewer or read-only
     link lasting 10 minutes to 12 hours.
@@ -414,7 +419,7 @@ Settled on 2026-10-31.
     response has `nosniff`, `no-referrer` and a Content-Security-Policy
     of `'self'` for scripts, the Worker and connections (with the
     request's `ws://` and `wss://` origin named), `data:` images for the
-    cursor, inline styles for React and xterm.js, and
+    cursor, inline styles for the `<style>` elements xterm.js adds, and
     `frame-ancestors 'none'`. The v0 `client: true` route serves through
     the same handler. Validation refuses a `web_client` that is a file
     or unreadable; occamyd warns at start when it holds no `index.html`
@@ -437,16 +442,24 @@ Settled on 2026-10-31.
   - New: terminal sessions, the clipboard, credential prompts, sharing,
     viewers, visibility, the remote's cursor and title, the bell, and
     why a session ended.
-- **Tests:** 131 in `src/lib` and `src/views`, in the `web` job. Unit
+- **Tests:** 156 in `src/lib` and `src/views`, in the `web` job. Unit
   tests for the API calls against a scripted fetch (each request's
-  method, path, headers and exact body), PKCE against RFC 7636's vector
+  method, path, headers and exact body, and the time limit on the
+  answer and its body), the identity a token names, PKCE against RFC
+  7636's vector
   and drawn from `crypto.getRandomValues`, the fragment and its removal
   from the history entry, the start of the page and the verifier it
   forgets, the screens' reducer (an owner's End, share and Join again
-  after the token expired, a late leave of a view that is gone), End
-  (nothing sent or closed with an expired token, the owner told when it
-  fails), layout, roles, clipping, the ending of every close code and
-  of a takeover, and the prompt's markup, rendered without a DOM. The
+  after the token expired, the action dropped for another user, a late
+  leave of a view that is gone), End (nothing sent or closed with an
+  expired token, the owner told when it fails, the stream left open and
+  the session's owner named for another user's token), layout, roles,
+  clipping, the ending of every close code and of a takeover, and the
+  prompt's markup, rendered without a DOM. The session view and the
+  share panel run in happy-dom under StrictMode: an owner's action and
+  a share that waited for a sign-in are taken once, End shows that it
+  waits for occamyd and says when occamyd did not answer, and an action
+  dropped for another user says whose the session is. The
   controller runs against a stand-in `connect` and session (the
   hello's size and visibility, clamping, refusals, React's development
   effects cancelling an open, close cancelling one, the owner's resize
@@ -476,9 +489,15 @@ Settled on 2026-10-31.
     a viewer watching, cancelled once) and Join again each asking to
     sign in over the session, which kept streaming, then going on; the
     owner's stream taken over by a newer one, told "Opened elsewhere";
-    `#error=` and `#code=` forgetting the verifier and what waited; and
+    `#error=` and `#code=` forgetting the verifier and what waited;
     single sign-on leaving for occamyd, whose issuer was unreachable,
-    and coming back with its error. No page broke the
+    and coming back with its error; and, with a second static user, the
+    owner whose token expired ending the session and signing in as that
+    user: the dialog closed over the session, which streamed on to the
+    viewer, said who signed in and whose the session is, and sent no
+    `DELETE`; End as that user sent a `DELETE` that occamyd answered
+    with 404, said so, and left the session running; and signing in as
+    the owner from there ended it for the viewer. No page broke the
     Content-Security-Policy. The console showed only the browser's
     failed-resource lines for requests meant to fail: the OIDC probe's
     404, or 400 where single sign-on is configured, the wrong password's
@@ -503,11 +522,32 @@ Settled on 2026-10-31.
     resumes once the owner has signed in; the owner may cancel and
     carry on. End with an expired token sends nothing and closes
     nothing. When `DELETE` fails, the owner is told that the session
-    was not ended for everyone, with Try again; a `404` counts as ended.
+    was not ended for everyone, with Try again; a `404` counts as ended
+    only for the token of the user who opened the session (see below).
     Single sign-on leaves the page, so what waits is kept in
     `sessionStorage` with the verifier and the page joins the session
     again on its return, within the owner's grace, then ends or shares
     it.
+  - 2026-10-31: an owner's action waits for the user who opened the
+    session, by the identity of the access token: its `sub`, and its
+    `idp`, `local` without one, since occamyd's sessions belong to
+    where their owner signed in. One who signs in as someone else is
+    told who signed in and who opened the session, and the action is
+    dropped, with Sign in to try as the owner. End with another user's
+    token, as when that user presses End, sends `DELETE` with the
+    stream still open, closes it once occamyd has ended the session,
+    and takes a `404` as not this user's session rather than as ended:
+    occamyd answers 404 for a session that is not the caller's, so the
+    owner would otherwise be told it ended while it ran on for the
+    minute of grace. occamyd takes an OIDC user linked to the static
+    user of the same name (`link_static_users`) for that user, which
+    the page cannot tell; such a user's resumed action is dropped, and
+    End pressed again succeeds.
+  - 2026-10-31: every API call gives up after 30 s, occamyd's own write
+    timeout, so that a stall in a proxy or the network becomes "Not
+    ended for everyone" with Try again rather than a frozen frame; while
+    End waits, the page says it is ending the session and offers Back
+    to connections.
   - 2026-10-31: the remote clipboard reaches the local clipboard on its
     own only for a role that gives input (owner, viewer). A read-only
     viewer sees it in the clipboard panel and copies it from there, so
