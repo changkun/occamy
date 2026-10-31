@@ -5,6 +5,7 @@
 package config_test
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -1132,6 +1133,39 @@ func TestSecrets(t *testing.T) {
 	}
 	if _, err := (config.Credentials{ClientCertFile: key, ClientKeyFile: key}).Token(); !errors.Is(err, config.ErrNoSecret) {
 		t.Errorf("Token() with a client certificate = %v, want ErrNoSecret", err)
+	}
+	// A token from the environment loses its trailing line breaks too,
+	// as one from a file does.
+	t.Setenv("OCCAMY_TEST_TOKEN", "t0ken\r\n")
+	if got, err := (config.Credentials{TokenEnv: "OCCAMY_TEST_TOKEN"}).Token(); err != nil || got != "t0ken" {
+		t.Errorf("Token() from the environment = %q, %v; want t0ken", got, err)
+	}
+}
+
+// TestSecretFileBound checks that a secret file is read up to 64 KiB
+// and refused beyond, for every kind of secret. TestEndlessSecretFile
+// checks that reading stops at the bound.
+func TestSecretFileBound(t *testing.T) {
+	dir := t.TempDir()
+	atBound := filepath.Join(dir, "at")
+	if err := os.WriteFile(atBound, bytes.Repeat([]byte("s"), config.MaxSecretFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	over := filepath.Join(dir, "over")
+	if err := os.WriteFile(over, bytes.Repeat([]byte("s"), config.MaxSecretFile+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := (config.Credentials{TokenFile: atBound}).Token(); err != nil || len(got) != config.MaxSecretFile {
+		t.Errorf("Token() of %d bytes = %d bytes, %v", config.MaxSecretFile, len(got), err)
+	}
+	for name, read := range map[string]func() (string, error){
+		"Token":        config.Credentials{TokenFile: over}.Token,
+		"Password":     config.Credentials{PasswordFile: over}.Password,
+		"ClientSecret": config.OIDC{ClientSecretFile: over}.ClientSecret,
+	} {
+		if _, err := read(); err == nil || !strings.Contains(err.Error(), "too many for a secret") {
+			t.Errorf("%s() of %d bytes = %v, want a refusal", name, config.MaxSecretFile+1, err)
+		}
 	}
 }
 

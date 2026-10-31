@@ -459,6 +459,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 - occamyd's request log no longer records query strings, which carry the
   v0 token and with it the remote credentials.
+- A secret file, `password_file`, `token_file` or
+  `auth.oidc.client_secret_file`, of more than 64 KiB is refused, so
+  that a path such as `/dev/zero` cannot fill occamyd's memory.
 - A panic on a goroutine a backend starts, such as the SSH backend's
   readers of the remote's output and the VNC, RDP and guacd backends'
   writers, ends its session with close 1011 instead of crashing occamyd

@@ -402,9 +402,10 @@ func (c Credentials) Password() (string, error) {
 }
 
 // Token reads the bearer token from TokenFile or TokenEnv. Trailing line
-// breaks in a file are dropped.
+// breaks are dropped from both, since a token never ends in one.
 func (c Credentials) Token() (string, error) {
-	return readSecret(c.TokenFile, c.TokenEnv)
+	t, err := readSecret(c.TokenFile, c.TokenEnv)
+	return strings.TrimRight(t, "\r\n"), err
 }
 
 // PrivateKey reads PrivateKeyFile.
@@ -421,12 +422,25 @@ func (o OIDC) ClientSecret() (string, error) {
 	return readSecret(o.ClientSecretFile, o.ClientSecretEnv)
 }
 
+// maxSecretFile is the most a secret file may hold: a password, a token
+// or a client secret is far smaller, and a path such as /dev/zero must
+// not fill occamyd's memory.
+const maxSecretFile = 64 << 10
+
 func readSecret(file, env string) (string, error) {
 	switch {
 	case file != "":
-		b, err := os.ReadFile(file) // #nosec G304 -- the path comes from the operator's configuration
+		f, err := os.Open(file) // #nosec G304 -- the path comes from the operator's configuration
 		if err != nil {
 			return "", err
+		}
+		defer f.Close()
+		b, err := io.ReadAll(io.LimitReader(f, maxSecretFile+1))
+		if err != nil {
+			return "", err
+		}
+		if len(b) > maxSecretFile {
+			return "", fmt.Errorf("config: %s holds more than %d bytes, too many for a secret", file, maxSecretFile)
 		}
 		return strings.TrimRight(string(b), "\r\n"), nil
 	case env != "":

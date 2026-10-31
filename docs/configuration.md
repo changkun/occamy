@@ -89,7 +89,7 @@ directory.
 | `auth.oidc` | unset (off) | Sign-in through an OpenID Connect identity provider; see [signing in through OIDC](#signing-in-through-oidc) |
 | `auth.oidc.issuer` | required | The provider's issuer URL, exactly as its discovery document names it (a trailing slash counts). https, or http on localhost |
 | `auth.oidc.client_id` | required | `occamyd`'s client ID at the provider |
-| `auth.oidc.client_secret_file`, `client_secret_env` | unset | The client secret, from a file or an environment variable; at most one. Neither means a public client |
+| `auth.oidc.client_secret_file`, `client_secret_env` | unset | The client secret, from a file of at most 64 KiB or an environment variable; at most one. Neither means a public client |
 | `auth.oidc.redirect_url` | required | `occamyd`'s callback URL as the browser and the provider know it, ending in `/api/v1/auth/oidc/callback` behind any proxy prefix. https, or http on localhost. Its path is also the sign-in cookie's, and with https the cookie is `Secure`, whoever terminates TLS |
 | `auth.oidc.return_urls` | the origin of `redirect_url`, with the path `/` | Where browsers are sent back after a sign-in, with a one-time code or an error in the fragment: your web client's sign-in page. A sign-in names one of them, matched exactly as written. https, or http on localhost, with no user name and no fragment |
 | `auth.oidc.scopes` | `[openid, profile, email]` | Scopes to request; must include `openid` |
@@ -294,11 +294,11 @@ colours reached guacd shifted.
 
 | Key | Meaning |
 |-----|---------|
-| `password_file` | A file holding the password. Trailing line breaks are dropped |
+| `password_file` | A file holding the password, at most 64 KiB. Trailing line breaks are dropped |
 | `password_env` | An environment variable holding the password. It must be set and not empty |
 | `private_key_file` | An SSH private key file, ssh only. Keep it readable by the `occamyd` user only |
-| `token_file` | A file holding a bearer token, kubernetes only, such as a service account's. Trailing line breaks are dropped |
-| `token_env` | An environment variable holding a bearer token, kubernetes only |
+| `token_file` | A file holding a bearer token, kubernetes only, such as a service account's, at most 64 KiB. Trailing line breaks are dropped |
+| `token_env` | An environment variable holding a bearer token, kubernetes only. Trailing line breaks are dropped |
 | `client_cert_file` and `client_key_file` | A client certificate and its key, PEM, kubernetes only: one source, so set both. Keep the key readable by the `occamyd` user only |
 | `prompt: true` | Nothing stored: the session's owner is asked for whatever the target requires, and the answers are not kept. Use it also for a target that needs no credentials |
 
