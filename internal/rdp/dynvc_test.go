@@ -168,6 +168,13 @@ func TestDynvcChannels(t *testing.T) {
 	if n := l.c.Stats().Ignored["refused dynamic channels"]; n != 3 {
 		t.Errorf("%d channels refused, want 3", n)
 	}
+	// A layout goes on the channel's id, in the size the id needs.
+	l.setLayoutEvery(0, time.Hour)
+	l.sendDVC(t, rdptest.DVCDataPDU(300, rdptest.DisplayCaps(16, 8192, 8192)))
+	l.c.RequestSize(1280, 720)
+	if got := l.layout(t, 300); got != image.Pt(1280, 720) {
+		t.Errorf("layout %v, want 1280×720", got)
+	}
 	// A close is answered with a close, and the channel may open again.
 	l.sendDVC(t, rdptest.DVCClosePDU(300))
 	if d := l.dvc(t); d.Cmd != rdptest.DVCClose || d.Channel != 300 {
@@ -177,6 +184,12 @@ func TestDynvcChannels(t *testing.T) {
 	l.sendDVC(t, rdptest.DVCCreateRequest(70000, rdptest.DisplayControl))
 	if d := l.dvc(t); d.Cmd != rdptest.DVCCreate || d.Channel != 70000 || d.Status != 0 {
 		t.Errorf("%+v, want Display Control open again", d)
+	}
+	// The size the desktop does not have yet goes on the new channel once
+	// it has the server's capabilities.
+	l.sendDVC(t, rdptest.DVCDataPDU(70000, rdptest.DisplayCaps(16, 8192, 8192)))
+	if got := l.layout(t, 70000); got != image.Pt(1280, 720) {
+		t.Errorf("layout %v, want 1280×720 again", got)
 	}
 }
 
