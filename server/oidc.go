@@ -324,6 +324,9 @@ func (o *oidcSignIn) oauth2Config(p *oidcProvider, secret string) *oauth2.Config
 // v1's error, before any cookie is set; a provider that cannot be
 // reached sends the browser back with #error=unavailable.
 func (o *oidcSignIn) login(w http.ResponseWriter, r *http.Request) {
+	// Every answer, the refusals included, is for this request alone, as
+	// every other answer of the OIDC routes is.
+	w.Header().Set("Cache-Control", "no-store")
 	q := r.URL.Query()
 	returnURL, ok := o.returnURL(q["return_url"])
 	if !ok {

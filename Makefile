@@ -31,10 +31,12 @@ stop:
 
 # e2e runs the end-to-end tests against a stack started with make run:
 # the v0 service's on OCCAMY_E2E_ENDPOINT and occamy-v1's, API v1 with
-# native VNC next to guacd's, on OCCAMY_E2E_V1_ENDPOINT.
+# native VNC next to guacd's, on OCCAMY_E2E_V1_ENDPOINT. Both default to
+# the ports the stack publishes, OCCAMY_PORT and OCCAMY_V1_PORT as
+# docker-compose.yaml takes them.
 e2e:
-	OCCAMY_E2E_ENDPOINT=$(or $(OCCAMY_E2E_ENDPOINT),localhost:5636) \
-	OCCAMY_E2E_V1_ENDPOINT=$(or $(OCCAMY_E2E_V1_ENDPOINT),localhost:5637) \
+	OCCAMY_E2E_ENDPOINT=$(or $(OCCAMY_E2E_ENDPOINT),localhost:$(or $(OCCAMY_PORT),5636)) \
+	OCCAMY_E2E_V1_ENDPOINT=$(or $(OCCAMY_E2E_V1_ENDPOINT),localhost:$(or $(OCCAMY_V1_PORT),5637)) \
 	go test -v -count=1 ./tests/
 .PHONY: e2e
 

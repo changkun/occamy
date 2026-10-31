@@ -68,8 +68,8 @@ API v1's conventions:
   endpoints, `GET /api/v1/connections`, `POST /api/v1/sessions`,
   `GET /api/v1/sessions/{id}` and `POST /api/v1/sessions/{id}/shares`.
   So do `/healthz`, every redirect of the OIDC browser routes, which also
-  has `Referrer-Policy: no-referrer`, and the callback's
-  `invalid_state`.
+  has `Referrer-Policy: no-referrer`, the refusals of
+  `GET /api/v1/auth/oidc/login`, and the callback's `invalid_state`.
 - **Tokens never in a URL.** Routes read a token from one
   `Authorization: Bearer` header, and the stream routes from a WebSocket
   subprotocol too; never from the query string or a cookie, which
@@ -330,7 +330,7 @@ the return URL with `#error=unavailable`, and no cookie is set.
 
 | Status | `code` | When |
 |--------|--------|------|
-| 400 | `bad_request` | `return_url` is not one of `auth.oidc.return_urls`, is given twice, or is left out while several are configured; or `code_challenge` is missing, given twice or not an S256 challenge; or `code_challenge_method` is given twice or is not `S256`. Nothing is set |
+| 400 | `bad_request` | `return_url` is not one of `auth.oidc.return_urls`, is given twice, or is left out while several are configured; or `code_challenge` is missing, given twice or not an S256 challenge; or `code_challenge_method` is given twice or is not `S256`. Nothing is set, and the answer has `Cache-Control: no-store` |
 | 500 | `internal` | The cookie could not be sealed |
 
 ### `GET /api/v1/auth/oidc/callback`
