@@ -982,10 +982,13 @@ that guacd was `vnc`'s default, they are corrected below.
   `make run OCCAMY_DEBUG=1`, with the bounded `motion:`, is pending a
   local run.
 - **Not covered.** guacd's sessions, whose leaks would be guacd's, and
-  native RDP and SSH sessions; `OCCAMY_SOAK_CONNECTIONS` takes any of
-  `occamy-v1`'s connections, and the stack has none for RDP or SSH
-  through API v1 yet. Clipboard text larger than a line, and the
-  reconnects that the parity matrix covers. Each session ends by its
+  native RDP and SSH sessions, which no soak has run.
+  `OCCAMY_SOAK_CONNECTIONS` takes any of `occamy-v1`'s connections,
+  among them the stack's `rdp-native` and `ssh`, but the screen motion
+  that a session asks for comes from the VNC desktops (desktop.sh), so
+  on them the soak would type without the motion. Clipboard text larger
+  than a line, and the reconnects that the parity matrix covers. Each
+  session ends by its
   owner deleting it, so the path on which the owner leaves and the
   owner grace runs out, which ends a session from a timer, is not
   exercised.
