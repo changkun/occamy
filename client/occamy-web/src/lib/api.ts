@@ -203,19 +203,61 @@ function badResponse(): ApiError {
 }
 
 /**
- * subjectOf returns the user an access token names in sub, clipped, for
- * the page to show, or empty. The token is occamyd's to verify; this
- * only reads it.
+ * Identity is the user an access token of occamyd's speaks for: the
+ * subject, and where the user signed in, "local" with a password or
+ * "oidc" through single sign-on. occamyd's sessions belong to such a
+ * user (server/identity.go), so that alice with a password and alice
+ * through single sign-on may be two owners.
  */
-export function subjectOf(token: AccessToken): string {
+export interface Identity {
+  subject: string
+  idp: string
+}
+
+/**
+ * identityOf reads the identity an access token names in its sub and idp
+ * claims, or returns null for a token it cannot read. A token without
+ * idp predates single sign-on, and is a static user's, as occamyd takes
+ * it. The token is occamyd's to verify; this only reads it.
+ */
+export function identityOf(token: AccessToken): Identity | null {
   const payload = token.token.split('.')[1] ?? ''
   try {
     const bytes = Uint8Array.from(atob(payload.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0))
     const claims: unknown = JSON.parse(new TextDecoder().decode(bytes))
-    return isObject(claims) && typeof claims.sub === 'string' ? clip(claims.sub, MAX_LABEL) : ''
+    if (!isObject(claims) || typeof claims.sub !== 'string' || claims.sub === '') {
+      return null
+    }
+    const idp = claims.idp === undefined ? 'local' : claims.idp
+    return typeof idp === 'string' && idp !== '' ? { subject: claims.sub, idp } : null
   } catch {
-    return ''
+    return null
   }
+}
+
+/**
+ * sameIdentity reports whether a and b are the same user by their tokens.
+ * occamyd may take two of them for one owner, an OIDC user linked to the
+ * static user of the same name, which only occamyd knows; the page never
+ * takes two for one where occamyd would not.
+ */
+export function sameIdentity(a: Identity, b: Identity): boolean {
+  return a.subject === b.subject && a.idp === b.idp
+}
+
+/** describeIdentity names a user and where they signed in, clipped, for the page: "alice (password)". */
+export function describeIdentity(i: Identity): string {
+  const how = i.idp === 'local' ? 'password' : i.idp === 'oidc' ? 'single sign-on' : clip(i.idp, MAX_LABEL)
+  return `${clip(i.subject, MAX_LABEL)} (${how})`
+}
+
+/**
+ * subjectOf returns the user an access token names in sub, clipped, for
+ * the page to show, or empty.
+ */
+export function subjectOf(token: AccessToken): string {
+  const i = identityOf(token)
+  return i === null ? '' : clip(i.subject, MAX_LABEL)
 }
 
 /**

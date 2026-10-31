@@ -8,7 +8,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { API_TIMEOUT, Api, ApiError, errorMessage, subjectOf } from './api'
+import { API_TIMEOUT, Api, ApiError, describeIdentity, errorMessage, identityOf, sameIdentity, subjectOf } from './api'
 
 interface Sent {
   path: string
@@ -213,11 +213,42 @@ describe('the time limit', () => {
   })
 })
 
+const jwt = (claims: unknown): string => {
+  const b64 = (s: string): string => Buffer.from(s).toString('base64url')
+  return `${b64('{"alg":"EdDSA"}')}.${b64(JSON.stringify(claims))}.c2ln`
+}
+
+describe('identityOf', () => {
+  it('reads the user and where they signed in', () => {
+    expect(identityOf({ token: jwt({ sub: 'alice', idp: 'oidc', kind: 'access' }), expires: 0 })).toEqual({ subject: 'alice', idp: 'oidc' })
+    expect(identityOf({ token: jwt({ sub: 'alice', idp: 'local' }), expires: 0 })).toEqual({ subject: 'alice', idp: 'local' })
+  })
+
+  it('takes a token without idp for a static user’s, as occamyd does', () => {
+    expect(identityOf({ token: jwt({ sub: 'alice' }), expires: 0 })).toEqual({ subject: 'alice', idp: 'local' })
+  })
+
+  it('reads no identity from a token it cannot read', () => {
+    for (const token of ['', 'opaque', 'a.!!!.c', jwt({ sub: 7 }), jwt({ sub: '' }), jwt({ sub: 'alice', idp: '' }), jwt({ sub: 'alice', idp: 1 }), jwt(['alice'])]) {
+      expect(identityOf({ token, expires: 0 })).toBeNull()
+    }
+  })
+
+  it('tells users apart by name and by where they signed in', () => {
+    const alice = { subject: 'alice', idp: 'local' }
+    expect(sameIdentity(alice, { subject: 'alice', idp: 'local' })).toBe(true)
+    expect(sameIdentity(alice, { subject: 'Alice', idp: 'local' })).toBe(false)
+    expect(sameIdentity(alice, { subject: 'alice', idp: 'oidc' })).toBe(false)
+  })
+
+  it('names the user and where they signed in', () => {
+    expect(describeIdentity({ subject: 'alice', idp: 'local' })).toBe('alice (password)')
+    expect(describeIdentity({ subject: 'alice', idp: 'oidc' })).toBe('alice (single sign-on)')
+    expect(describeIdentity({ subject: 'x'.repeat(300), idp: 'y'.repeat(300) })).toBe(`${'x'.repeat(199)}… (${'y'.repeat(199)}…)`)
+  })
+})
+
 describe('subjectOf', () => {
-  const jwt = (claims: unknown): string => {
-    const b64 = (s: string): string => Buffer.from(s).toString('base64url')
-    return `${b64('{"alg":"EdDSA"}')}.${b64(JSON.stringify(claims))}.c2ln`
-  }
 
   it('reads the user the token names', () => {
     expect(subjectOf({ token: jwt({ sub: 'alice', kind: 'access' }), expires: 0 })).toBe('alice')

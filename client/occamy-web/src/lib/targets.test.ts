@@ -91,7 +91,7 @@ describe('start', () => {
 
   it('brings back what waited for the sign-in, with the code', async () => {
     const s = storage('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')
-    const pending = { target: { kind: 'session', sessionId: 'mZ3k', name: 'Build box' }, view: 4, then: { kind: 'end' } } as const
+    const pending = { target: { kind: 'session', sessionId: 'mZ3k', name: 'Build box' }, view: 4, then: { kind: 'end' }, owner: { subject: 'demo', idp: 'oidc' } } as const
     expect(saveResume(s, pending)).toBe(true)
     const got = start({ kind: 'oidc-code', code: 'JX2E7' }, api().api, s)
     expect(got).toMatchObject({ kind: 'oidc', resume: { ...pending, view: null } })
@@ -104,7 +104,7 @@ describe('start', () => {
   it('forgets the verifier, and what waited, of a sign-in that failed or was abandoned', () => {
     for (const fragment of [{ kind: 'none' }, { kind: 'oidc-error', error: 'access_denied' }, { kind: 'join', sessionId: 's', token: 't' }] as const) {
       const s = storage('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')
-      saveResume(s, { target: { kind: 'connection', id: 'lab', name: 'Lab' }, view: null, then: null })
+      saveResume(s, { target: { kind: 'connection', id: 'lab', name: 'Lab' }, view: null, then: null, owner: null })
       start(fragment, api().api, s)
       expect(s.getItem(VERIFIER_KEY)).toBeNull()
       expect(s.getItem(RESUME_KEY)).toBeNull()

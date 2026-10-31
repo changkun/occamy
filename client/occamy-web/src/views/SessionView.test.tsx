@@ -6,15 +6,17 @@
 
 // The session view in a DOM, under StrictMode, whose development effects
 // run twice, with a WebSocket that never opens: an owner's action that
-// waited for a sign-in is taken once, and End shows that it waits for
-// occamyd and that it failed.
+// waited for a sign-in is taken once, End shows that it waits for
+// occamyd and that it failed, and an action dropped for another user
+// says why.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { type AccessToken, Api } from '../lib/api'
-import type { SessionAction } from '../lib/app'
+import type { ViewAction } from '../lib/app'
+import { notOwner } from '../lib/owner'
 import type { Target } from '../lib/targets'
 import { SessionView, type SignInNext } from './SessionView'
 
@@ -57,6 +59,7 @@ function accessToken(sub: string, expires = Date.now() + 600_000): AccessToken {
 }
 
 const target: Target = { kind: 'session', sessionId: 'mZ3k', name: 'Lab' }
+const demo = { subject: 'demo', idp: 'local' }
 
 interface Rendered {
   deletes: string[]
@@ -69,7 +72,7 @@ const settle = (ms = 0): Promise<void> => act(() => new Promise<void>((resolve) 
 // render shows the session view of target to demo, with action, and an
 // Api whose DELETE answers with answer.
 async function render(
-  action: { seq: number; action: SessionAction } | null,
+  action: { seq: number; action: ViewAction } | null,
   answer: (signal: AbortSignal) => Promise<Response>,
   timeout?: number,
   token = accessToken('demo'),
@@ -108,7 +111,7 @@ async function render(
     })
   return r
 }
-let rerender: (a: { seq: number; action: SessionAction } | null) => Promise<void> = () => Promise.resolve()
+let rerender: (a: { seq: number; action: ViewAction } | null) => Promise<void> = () => Promise.resolve()
 
 const ended = (): Promise<Response> => Promise.resolve(new Response(null, { status: 204 }))
 const text = (): string => container.textContent ?? ''
@@ -139,7 +142,7 @@ describe('SessionView', () => {
   it('asks an owner whose sign-in expired to sign in over the session, rather than wait', async () => {
     const r = await render({ seq: 1, action: { kind: 'end' } }, ended, undefined, accessToken('demo', Date.now() - 1))
     expect(r.deletes).toEqual([])
-    expect(r.signIns).toEqual([['Your sign-in has expired. Sign in again to end the session for everyone.', { target, then: { kind: 'end' }, here: true }]])
+    expect(r.signIns).toEqual([['Your sign-in has expired. Sign in again to end the session for everyone.', { target, then: { kind: 'end' }, here: true, owner: demo }]])
     expect(text()).not.toContain('Ending the session for everyone…')
   })
 
@@ -154,5 +157,16 @@ describe('SessionView', () => {
     await settle()
     expect(r.deletes).toEqual(['DELETE /api/v1/sessions/mZ3k', 'DELETE /api/v1/sessions/mZ3k'])
     expect(text()).toContain('Ending the session for everyone…')
+  })
+
+  it('says why an action was dropped for another user, and offers to sign in as the owner', async () => {
+    const message = notOwner({ kind: 'end' }, demo, { subject: 'mallory', idp: 'local' })
+    const r = await render({ seq: 1, action: { kind: 'refused', then: { kind: 'end' }, message } }, ended)
+    expect(r.deletes).toEqual([])
+    expect(text()).toContain('Not ended for everyone')
+    expect(text()).toContain(message)
+    expect(button('Try again')).toBeUndefined()
+    act(() => button('Sign in')?.click())
+    expect(r.signIns).toEqual([[message, { target, then: { kind: 'end' }, here: true, owner: demo }]])
   })
 })

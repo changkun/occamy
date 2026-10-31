@@ -51,7 +51,7 @@ export function App({ api, start, storage }: AppProps): ReactElement {
           target={screen.target}
           action={state.action?.view === view ? state.action : null}
           onLeave={() => dispatch({ type: 'leave', view })}
-          onSignIn={(message, next) => dispatch({ type: 'sign-in-again', view, message, pending: { target: next.target, view: next.here ? view : null, then: next.then } })}
+          onSignIn={(message, next) => dispatch({ type: 'sign-in-again', view, message, pending: { target: next.target, view: next.here ? view : null, then: next.then, owner: next.owner } })}
           onRejoin={(target) => dispatch({ type: 'open', target, now: Date.now() })}
         />
         {form}
