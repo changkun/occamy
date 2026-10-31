@@ -461,7 +461,9 @@ func TestVNCAdhoc(t *testing.T) {
 // under .invalid, which resolves nowhere, and the test's resolver
 // answers each name once. An ad-hoc target has no tls policy, so a
 // certificate must chain to the system's roots: a server whose
-// certificate signs itself is refused before any credential reaches it.
+// certificate signs itself is refused before its owner is asked for the
+// password. (Its credentials are prompted for, so none could reach the
+// server unasked; TestVNCTLS counts stored ones.)
 func TestVNCAdhocName(t *testing.T) {
 	const plainName, tlsName = "plain.occamy-test.invalid", "tls.occamy-test.invalid"
 	plain := newVNCServer(t, vnctest.Options{Password: "secret"})
@@ -522,9 +524,6 @@ func TestVNCAdhocName(t *testing.T) {
 	})
 	if e, ok := ev.(client.End); !ok || e.Code != protocol.CloseBackendFailed {
 		t.Errorf("%T %+v, want the end with backend-failed: a certificate that signs itself passed", ev, ev)
-	}
-	if n := withTLS.Credentials(); n != 0 {
-		t.Errorf("%d credentials sent to a server whose certificate the system's roots refuse", n)
 	}
 
 	mu.Lock()
