@@ -1330,7 +1330,9 @@ to the VNC backend.
   that did not clamp the saved cursor's column failed in 6 s with
   "saved cursor 0 (1, 0) off the screen of 1x1". After the title fix,
   `FuzzWrite` ran 6 minutes more with 4 workers at a load average of 6
-  to 7: 2.55 million inputs, 1296 in the corpus, no failure.
+  to 7: 2.55 million inputs, 1296 in the corpus, no failure; and on
+  the final code 5 minutes more at a load average of 4 to 6: 1.90
+  million inputs, 1355 in the corpus, no failure.
 - **Tests:** `TestPanicWhileDrawing` in `server` (adopted from the
   review: a backend that panics holding a `Lock` closes the stream with
   1011, the session goes, and no writer is left in `ReadTile`),
