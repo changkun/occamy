@@ -176,6 +176,9 @@ func (f *Framebuffer) Lock(r image.Rectangle) *image.RGBA {
 		panic(fmt.Sprintf("framebuffer: Lock(%v) outside the screen %v", r, f.img.Rect))
 	}
 	f.lockRows(r)
+	// Taken before the Lock is recorded: from then on Close may release
+	// f.mu on this Lock's behalf, and a Resize replace f.img.
+	img := f.img.SubImage(r).(*image.RGBA)
 	f.wmu.Lock()
 	if f.closed.Load() {
 		f.wmu.Unlock()
@@ -185,17 +188,23 @@ func (f *Framebuffer) Lock(r image.Rectangle) *image.RGBA {
 	}
 	f.held = append(f.held, r)
 	f.wmu.Unlock()
-	return f.img.SubImage(r).(*image.RGBA)
+	return img
 }
 
 // Unlock releases the pixels that Lock(r) returned and records r as
-// changed. It does nothing once Close has released them.
+// changed. It does nothing once Close has released them, and panics for
+// an r that no Lock holds: unlocking its rows would be a fatal error, and
+// leaving the Lock that was meant held would block the next one forever.
 func (f *Framebuffer) Unlock(r image.Rectangle) {
 	f.wmu.Lock()
 	i := slices.Index(f.held, r)
 	if i < 0 {
+		closed := f.closed.Load()
 		f.wmu.Unlock()
-		return
+		if closed {
+			return
+		}
+		panic(fmt.Sprintf("framebuffer: Unlock(%v) without its Lock", r))
 	}
 	last := len(f.held) - 1
 	f.held[i] = f.held[last]
@@ -211,14 +220,11 @@ func (f *Framebuffer) Unlock(r image.Rectangle) {
 // stopped. It releases every Lock not yet unlocked, as a backend that
 // panicked while it drew leaves one, so that writers waiting in ReadTile
 // for those rows return. From then on, ReadTile reads nothing, Lock
-// returns pixels that are not on the screen, and Unlock of a released
-// Lock does nothing.
+// returns pixels that are not on the screen, CopyRect copies nothing,
+// and Unlock of a released Lock does nothing. Closing it again does
+// nothing either, since the first Close has taken every Lock.
 func (f *Framebuffer) Close() {
 	f.wmu.Lock()
-	if f.closed.Load() {
-		f.wmu.Unlock()
-		return
-	}
 	// Set before the rows are released, so that a writer that gets one
 	// sees it and does not read pixels a straggler may still draw.
 	f.closed.Store(true)
@@ -246,6 +252,13 @@ func (f *Framebuffer) CopyRect(dst image.Rectangle, src image.Point) {
 	}
 	both := dst.Union(from)
 	f.lockRows(both)
+	if f.closed.Load() {
+		// The rows may be a released Lock's, which a straggler still
+		// draws.
+		f.unlockRows(both)
+		f.mu.RUnlock()
+		return
+	}
 	// draw.Draw copies overlapping rectangles of one image correctly.
 	draw.Draw(f.img, dst, f.img, src, draw.Src)
 	f.touch(dst)

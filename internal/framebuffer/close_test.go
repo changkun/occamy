@@ -9,6 +9,7 @@ import (
 	"image/color"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -90,23 +91,58 @@ func TestCloseReleasesLocks(t *testing.T) {
 	f.Close() // twice is fine
 }
 
+// paint writes every pixel of r in img, which Lock(r) returned, and no
+// other: img's Pix runs on to the end of the screen.
+func paint(img *image.RGBA, r image.Rectangle, v byte) {
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		row := img.Pix[img.PixOffset(r.Min.X, y):][:4*r.Dx()]
+		for i := range row {
+			row[i] = v
+		}
+	}
+}
+
 // TestCloseWhileDrawing checks that a Lock held when Close comes, by a
-// backend's goroutine that has not stopped, is released once: writers
-// read nothing, so they do not race with its drawing, and its Unlock
-// after Close does nothing.
+// backend's goroutine that has not stopped and goes on drawing, is
+// released once, and that nothing reads or writes its pixels meanwhile:
+// a writer that waited for its rows reads nothing, and a CopyRect onto
+// them copies nothing. With -race, it fails if Close lets the writer in
+// before it marks the framebuffer closed, or if CopyRect draws after
+// Close (from the review of #117).
 func TestCloseWhileDrawing(t *testing.T) {
 	f := framebuffer.New(64)
 	f.Resize(256, 256)
 	r := image.Rect(0, 64, 256, 128)
-	img := f.Lock(r)
+	locked, draw := make(chan struct{}), make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		img := f.Lock(r)
+		close(locked)
+		<-draw
+		// Nothing orders this drawing with Close and what follows it.
+		for v := range byte(8) {
+			paint(img, r, v)
+		}
+		f.Unlock(r)
+	})
+	<-locked
+	read := make(chan image.Rectangle, 1)
+	go func() {
+		got, _ := f.ReadTile(5, make([]byte, 4*64*64))
+		read <- got
+	}()
+	waitIn(t, "(*Framebuffer).ReadTile", "(*RWMutex).RLock")
+	close(draw)
 	f.Close()
-	if got, _ := f.ReadTile(5, make([]byte, 4*64*64)); !got.Empty() {
+	if got := <-read; !got.Empty() {
 		t.Errorf("ReadTile read %v that a Lock still draws", got)
 	}
-	for i := range img.Pix {
-		img.Pix[i] = 0xff
+	clock := f.Clock()
+	f.CopyRect(image.Rect(0, 64, 64, 128), image.Pt(64, 128))
+	if f.Clock() != clock {
+		t.Error("CopyRect after Close changed the screen")
 	}
-	f.Unlock(r)
+	wg.Wait()
 	// The rows are free: a Lock of them returns at once.
 	done := make(chan struct{})
 	go func() {
@@ -117,5 +153,78 @@ func TestCloseWhileDrawing(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("Lock after Close waits for rows")
+	}
+}
+
+// TestCloseStraggler checks Close against a goroutine that locks, draws,
+// resizes and unlocks with no handoff to the goroutine that closes,
+// which learns of the Lock only from the framebuffer's record of it: a
+// backend's goroutine that has not stopped. The straggler's Resize waits
+// for Close to release its Lock's hold on the screen, and its Unlock
+// after Close does nothing. With -race, it fails if Lock reads the
+// screen after it has recorded the Lock, which Close may release and a
+// Resize replace (from the review of #117).
+func TestCloseStraggler(t *testing.T) {
+	for range 20 {
+		f := framebuffer.New(64)
+		f.Resize(256, 256)
+		r := image.Rect(0, 0, 256, 64)
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			img := f.Lock(r)
+			paint(img, r, 0xff)
+			f.Resize(128, 128)
+			paint(img, r, 0x80)
+			f.Unlock(r)
+		})
+		for framebuffer.Held(f) == 0 {
+			runtime.Gosched()
+		}
+		f.Close()
+		f.Resize(256, 256)
+		wg.Wait()
+		if n := framebuffer.Held(f); n != 0 {
+			t.Fatalf("%d Locks held after Close", n)
+		}
+	}
+}
+
+// TestUnlockWithoutLock checks that Unlock of a rectangle that no Lock
+// holds panics, which a session recovers from, rather than unlocking
+// rows that are not locked, a fatal error, or doing nothing, which would
+// leave the Lock meant held and the next Lock of its rows waiting
+// forever. Once the framebuffer is closed, it does nothing.
+func TestUnlockWithoutLock(t *testing.T) {
+	f := framebuffer.New(64)
+	f.Resize(256, 256)
+	unlock := func(r image.Rectangle) (v any) {
+		defer func() { v = recover() }()
+		f.Unlock(r)
+		return nil
+	}
+	r := image.Rect(0, 0, 64, 64)
+	if v := unlock(r); v == nil {
+		t.Error("Unlock without a Lock did not panic")
+	}
+	f.Lock(r)
+	if v := unlock(image.Rect(0, 0, 32, 32)); v == nil {
+		t.Error("Unlock of another rectangle than the Lock's did not panic")
+	}
+	if v := unlock(r); v != nil {
+		t.Errorf("Unlock of the Lock panicked: %v", v)
+	}
+	done := make(chan struct{})
+	go func() {
+		f.Unlock(f.Lock(r).Rect)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a Lock waits after the Unlocks")
+	}
+	f.Close()
+	if v := unlock(r); v != nil {
+		t.Errorf("Unlock after Close panicked: %v", v)
 	}
 }

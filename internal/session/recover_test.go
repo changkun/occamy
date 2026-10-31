@@ -96,6 +96,53 @@ func TestEndReleasesRows(t *testing.T) {
 	}
 }
 
+// slowStop draws once more as it stops, after its context is done, when
+// the test lets it.
+type slowStop struct {
+	stopping chan struct{}
+	release  chan struct{}
+}
+
+func (*slowStop) Class() backend.Class           { return backend.Graphical }
+func (*slowStop) Input(backend.InputEvent) error { return nil }
+func (*slowStop) Demand(backend.Demand)          {}
+
+func (b *slowStop) Run(ctx context.Context, sink backend.Sink) error {
+	sink.Resize(256, 256)
+	<-ctx.Done()
+	close(b.stopping)
+	<-b.release
+	r := image.Rect(0, 0, 64, 64)
+	img := sink.Lock(r)
+	img.Pix[0] = 0xff
+	sink.Unlock(r)
+	return ctx.Err()
+}
+
+// TestScreenUntilRunReturns checks that the session closes its
+// framebuffer only once Run has returned: until then the backend may
+// still draw, as it stops, on the screen, whose pixels and rows are its
+// own, and only then are the Locks it left released.
+func TestScreenUntilRunReturns(t *testing.T) {
+	b := &slowStop{stopping: make(chan struct{}), release: make(chan struct{})}
+	s, _ := start(t, session.Config{Backend: b, TileSize: 64})
+	go s.Close()
+	<-b.stopping
+	fb := s.Framebuffer()
+	if r, _ := fb.ReadTile(0, make([]byte, 4*64*64)); r.Empty() {
+		t.Error("the framebuffer was closed before Run returned")
+	}
+	clock := fb.Clock()
+	close(b.release)
+	waitEnded(t, s)
+	if fb.Clock() == clock {
+		t.Error("the backend's last drawing did not reach the screen")
+	}
+	if r, _ := fb.ReadTile(0, make([]byte, 4*64*64)); !r.Empty() {
+		t.Errorf("ReadTile read %v after the session ended", r)
+	}
+}
+
 // panicky is a terminal emulator with a bug that output can trigger.
 type panicky struct{ *terminal.Terminal }
 
