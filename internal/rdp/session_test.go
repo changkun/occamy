@@ -230,22 +230,53 @@ func TestPointerPaced(t *testing.T) {
 // does, so that a server cannot make the client decode one shape ahead
 // of the budget.
 func TestPointerPacedBeforeDecoding(t *testing.T) {
-	c, clock := testClock(64, 64) // a budget of two 80×80 shapes and a bit
-	var decoded []int
+	c, clock := testClock(64, 64) // a budget of one 80×80 shape and a bit
+	red := color.RGBA{0xff, 0, 0, 0xff}
 	c.sleep = func(d time.Duration) error {
-		decoded = append(decoded, c.Stats().Pointers)
+		// A palette that changes during the wait shows in a shape only
+		// if the shape is decoded after the wait.
+		c.dec.palette[1] = [3]byte{red.R, red.G, red.B}
 		return clock.sleep(d)
 	}
-	var frames [][]byte
-	for i := range 3 {
-		frames = append(frames, rdptest.FastPath(rdptest.Update(rdptest.FPPointer, rdptest.Pointer(i, image.Point{}, solid(80, 80, color.RGBA{A: 0xff})))))
+	out := &cursorCount{}
+	frames := [][]byte{
+		rdptest.FastPath(rdptest.Update(rdptest.FPPointer, pointer8(0, 80, 80))),
+		rdptest.FastPath(rdptest.Update(rdptest.FPPointer, pointer8(1, 80, 80))),
 	}
-	if err := runFrames(c, &cursorCount{}, frames...); !errors.Is(err, io.EOF) {
-		t.Fatal(err)
+	if err := runFrames(c, out, frames...); !errors.Is(err, io.EOF) || out.shapes != 2 || clock.slept == 0 {
+		t.Fatalf("Run returned %v after %d shapes and a wait of %v", err, out.shapes, clock.slept)
 	}
-	if !slices.Equal(decoded, []int{1, 2}) {
-		t.Errorf("the client waited with %v shapes decoded, want 1 and 2: the second and the third shapes wait before they are decoded", decoded)
+	if got := out.cursor.RGBAAt(0, 0); got != red {
+		t.Errorf("the second shape is %v, want %v: it was decoded before its wait", got, red)
 	}
+
+	// The size is checked before the shape is charged, so that a size
+	// it cannot have does not make the client wait for it.
+	var huge writer
+	for _, v := range []int{8, 0, 0, 0, 1000, 1000, 0, 0} { // 1000×1000, without masks
+		huge.u16(v)
+	}
+	c, clock = testClock(64, 64)
+	if err := runFrames(c, &cursorCount{}, rdptest.FastPath(rdptest.Update(rdptest.FPPointer, huge.b))); err == nil || clock.slept != 0 {
+		t.Errorf("a 1000×1000 shape: Run returned %v after a wait of %v, want an error at once", err, clock.slept)
+	}
+}
+
+// pointer8 is a TS_POINTERATTRIBUTE of a w×h shape at 8 bits per pixel,
+// each pixel palette entry 1, without an AND mask.
+func pointer8(index, w, h int) []byte {
+	stride := (w*8 + 15) / 16 * 2
+	var b writer
+	b.u16(8) // xorBpp
+	b.u16(index)
+	b.u16(0) // hot spot
+	b.u16(0)
+	b.u16(w)
+	b.u16(h)
+	b.u16(0)          // lengthAndMask
+	b.u16(stride * h) // lengthXorMask
+	b.bytes(bytes.Repeat([]byte{1}, stride*h))
+	return b.b
 }
 
 // A shape that is shown already is not shown again: the cached pointer
