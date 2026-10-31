@@ -188,6 +188,9 @@ size against the maximum message size (set the WebSocket's read limit to
 it), each length against the bytes left, each list count times its
 smallest element against the bytes left, and a tile's width and height
 against the maximum texture size before its payload is decoded. A
+browser's WebSocket has no read limit: a browser client checks each
+message's size as it arrives, before it decodes anything, which bounds
+what it decodes but not what the browser buffers. A
 receiver can keep byte fields as views into the message instead of
 copying them.
 
@@ -278,8 +281,11 @@ is the sender's clock minus `time`.
 
 Type 0x0003. Ends the connection. The sender then closes the WebSocket
 with the same code as its status and sends nothing more; the receiver
-closes too. A receiver that does not know a code treats it as an error
-described by the reason.
+closes too. A browser may close a WebSocket only with 1000 or a code
+from 3000 to 4999, so a browser client that sends another code, such as
+`protocol-error`, closes the WebSocket with 1000: the server takes the
+code from this message, not from the close frame. A receiver that does
+not know a code treats it as an error described by the reason.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -367,7 +373,7 @@ Type 0x0102. A key press or release.
 |-------|------|---------|
 | seq | u32 | The input's sequence number. |
 | down | bool | True for a press, false for a release. |
-| keysym | u32 | The X11 keysym the key produced. |
+| keysym | u32 | The X11 keysym the key produced, or 0 if it produced none the client can name, such as a dead key in a browser. A key of keysym 0 reaches the remote only through `code`, so a backend that takes keysyms alone drops it. A release carries the keysym of its press. |
 | code | u16 | The physical key as a USB HID usage from the keyboard page (0x07), or 0 if the client does not know it. Clients translate from `KeyboardEvent.code` or `NSEvent.keyCode` with a table. |
 
 ```hex
@@ -1069,7 +1075,14 @@ an index beyond the palette. The longest container of a rectangle is
 with alpha and a byte an index, which is the longer for a rectangle of
 up to 341 pixels. A receiver that inflates as it reads stops one byte
 past that, the byte that shows the container is longer; it never needs
-to hold more, whatever the payload inflates to. The golden file's
+to hold more, whatever the payload inflates to. An inflater that yields
+its output in chunks, such as a browser's `DecompressionStream`, whose
+chunks are 16 KiB in Chrome and Node, may have inflated the rest of the
+chunk that crosses the cap before the receiver stops it; the receiver
+still keeps no more than the cap. Such an inflater reports trailing
+bytes and a stream without its final block only at the end of its
+output, so a receiver reads it to the end before it takes the
+container. The golden file's
 payloads include a bomb, 1 MiB of zeros, but a receiver that
 inflates it whole and then refuses it passes that vector too: what
 shows the cap is a harness that counts the bytes inflated, as
@@ -1108,7 +1121,9 @@ ff 00 00 ff              # 1: red, opaque
 
 Close codes are WebSocket close status codes, so a peer that sends
 `close` closes the WebSocket with the same code, and a client that sees
-only the close frame still knows why. Where WebSocket defines a fitting
+only the close frame still knows why. A browser client is the
+exception: it closes with 1000 for the codes below 3000 other than 1000,
+which browsers refuse ([close](#close)). Where WebSocket defines a fitting
 status, the code is that status; a WebSocket library that closes on its
 own, such as on its read limit, then uses the right code.
 
