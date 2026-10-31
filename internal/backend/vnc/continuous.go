@@ -84,9 +84,7 @@ func (d *decoder) serverFence() error {
 // the reader waits for the writer, so that a server that sends Fences
 // without reading the answers stops being read too.
 func (r *run) fence(flags uint32, payload []byte) error {
-	r.mu.Lock()
-	r.cont.fence = true
-	r.mu.Unlock()
+	r.locked(func() { r.cont.fence = true })
 	r.poke()
 	if flags&fenceRequest == 0 {
 		return nil // an answer, though the backend asks nothing
@@ -102,9 +100,7 @@ func (r *run) fence(flags uint32, payload []byte) error {
 
 // continuousUpdates implements peer.
 func (r *run) continuousUpdates() {
-	r.mu.Lock()
-	r.cont.supported = true
-	r.mu.Unlock()
+	r.locked(func() { r.cont.supported = true })
 	r.poke()
 }
 

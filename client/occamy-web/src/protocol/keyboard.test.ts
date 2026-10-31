@@ -20,10 +20,10 @@ for (const m of set1.matchAll(/^\t0x([0-9a-f]{2}): 0x([0-9a-f]{2,4}), +\/\/ (\w+
   hidToXT.set(parseInt(m[1], 16), { xt: parseInt(m[2], 16), name: m[3] })
 }
 
-// The keys of the table that the RDP backend drops, read from its
-// source: `const hidPower = 0xUU`.
-const rdpInput = readFileSync(new URL('../../../../internal/backend/rdp/input.go', import.meta.url), 'utf8')
-const rdpDrops = new Set([...rdpInput.matchAll(/^const hidPower = 0x([0-9a-f]{2})$/gm)].map((m) => parseInt(m[1], 16)))
+// The keys of the table that every backend drops, read from the source
+// of internal/backend's PowerKey, which they share: `const HIDPower = 0xUU`.
+const power = readFileSync(new URL('../../../../internal/backend/power.go', import.meta.url), 'utf8')
+const drops = new Set([...power.matchAll(/^const HIDPower = 0x([0-9a-f]{2})$/gm)].map((m) => parseInt(m[1], 16)))
 
 // Go's names that are not KeyboardEvent.code's.
 const goNames: Record<string, string | null> = {
@@ -38,8 +38,8 @@ describe('HID usages', () => {
     expect(hidToXT.size).toBeGreaterThanOrEqual(148)
   })
 
-  it('reads what the RDP backend drops', () => {
-    expect(rdpDrops.size).toBe(1)
+  it('reads what the backends drop', () => {
+    expect(drops.size).toBe(1)
   })
 
   it('maps every key of the backends’ table', () => {
@@ -52,20 +52,16 @@ describe('HID usages', () => {
     }
   })
 
-  it('maps only keys the VNC backend can send', () => {
-    for (const [code, usage] of Object.entries(hidUsages)) {
-      expect([code, hidToXT.get(usage)?.xt ?? 0]).not.toEqual([code, 0])
-    }
-  })
-
-  // The RDP backend sends the table's keys too, but Power, which it drops
-  // on purpose (specs/008-native-architecture/native-rdp-backend.md,
-  // decision 4). The client still maps Power, which the VNC backend sends.
-  it('maps only keys the RDP backend can send, and Power', () => {
+  // The VNC and RDP backends send the table's keys, but Power, which
+  // every backend drops on purpose: the remote would give it the whole
+  // machine (specs/008-native-architecture/native-rdp-backend.md,
+  // decision 4). The client still maps Power, as it maps every key the
+  // table has, but no backend sends it.
+  it('maps only keys the backends can send, and Power', () => {
     const dropped: string[] = []
     for (const [code, usage] of Object.entries(hidUsages)) {
       expect([code, hidToXT.get(usage)?.xt ?? 0]).not.toEqual([code, 0])
-      if (rdpDrops.has(usage)) {
+      if (drops.has(usage)) {
         dropped.push(code)
       }
     }

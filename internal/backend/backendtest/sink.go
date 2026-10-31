@@ -229,6 +229,14 @@ func (s *Sink) Locks() int {
 	return s.lockCount
 }
 
+// Locked returns the rectangle a backend holds locked, empty if none, as
+// after a panic that left it locked.
+func (s *Sink) Locked() image.Rectangle {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.locked
+}
+
 // Copies returns the recorded CopyRect calls.
 func (s *Sink) Copies() []Copy {
 	s.mu.Lock()

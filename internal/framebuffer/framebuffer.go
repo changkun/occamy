@@ -14,12 +14,18 @@
 //
 // Each row of tiles has its own lock, so that a backend drawing one part
 // of the screen and writers reading another do not wait for each other.
+//
+// A session closes its framebuffer when it ends, once its backend has
+// stopped: pixels that a backend locked and never unlocked, as one that
+// panicked while it drew leaves them, are released then, so that no
+// writer waits for them forever.
 package framebuffer
 
 import (
 	"fmt"
 	"image"
 	"image/draw"
+	"slices"
 	"sync"
 	"sync/atomic"
 )
@@ -27,6 +33,10 @@ import (
 // Framebuffer is a session's screen. Its methods are safe for concurrent
 // use, but a goroutine that holds a Lock calls no other method until it
 // unlocks.
+//
+// Each Lock is recorded until its Unlock, so that Close can release the
+// rows of a Lock that will never be unlocked: unlocking a row that is not
+// locked is a fatal error, which no recover catches.
 type Framebuffer struct {
 	tile int
 
@@ -39,7 +49,9 @@ type Framebuffer struct {
 	clock    atomic.Uint64
 
 	wmu     sync.Mutex
-	changed chan struct{} // closed at the next change, nil if nobody waits
+	changed chan struct{}     // closed at the next change, nil if nobody waits
+	held    []image.Rectangle // what Lock returned and Unlock has not released
+	closed  atomic.Bool       // set by Close, under wmu
 }
 
 // New returns an empty framebuffer with square tiles of the given side
@@ -155,7 +167,8 @@ func (f *Framebuffer) notify() {
 // Lock returns the pixels in r, locked for drawing. r must be non-empty
 // and lie within the screen; backends check rectangles from the remote
 // server before they draw. Unlock with the same r releases the pixels and
-// gives the tiles that r touches a new version.
+// gives the tiles that r touches a new version. Once the framebuffer is
+// closed, Lock returns pixels that are not on the screen.
 func (f *Framebuffer) Lock(r image.Rectangle) *image.RGBA {
 	f.mu.RLock()
 	if r.Empty() || !r.In(f.img.Rect) {
@@ -163,15 +176,67 @@ func (f *Framebuffer) Lock(r image.Rectangle) *image.RGBA {
 		panic(fmt.Sprintf("framebuffer: Lock(%v) outside the screen %v", r, f.img.Rect))
 	}
 	f.lockRows(r)
-	return f.img.SubImage(r).(*image.RGBA)
+	// Taken before the Lock is recorded: from then on Close may release
+	// f.mu on this Lock's behalf, and a Resize replace f.img.
+	img := f.img.SubImage(r).(*image.RGBA)
+	f.wmu.Lock()
+	if f.closed.Load() {
+		f.wmu.Unlock()
+		f.unlockRows(r)
+		f.mu.RUnlock()
+		return image.NewRGBA(r)
+	}
+	f.held = append(f.held, r)
+	f.wmu.Unlock()
+	return img
 }
 
 // Unlock releases the pixels that Lock(r) returned and records r as
-// changed.
+// changed. It does nothing once Close has released them, and panics for
+// an r that no Lock holds: unlocking its rows would be a fatal error, and
+// leaving the Lock that was meant held would block the next one forever.
 func (f *Framebuffer) Unlock(r image.Rectangle) {
+	f.wmu.Lock()
+	i := slices.Index(f.held, r)
+	if i < 0 {
+		closed := f.closed.Load()
+		f.wmu.Unlock()
+		if closed {
+			return
+		}
+		panic(fmt.Sprintf("framebuffer: Unlock(%v) without its Lock", r))
+	}
+	last := len(f.held) - 1
+	f.held[i] = f.held[last]
+	f.held = f.held[:last]
+	f.wmu.Unlock()
 	f.touch(r)
 	f.unlockRows(r)
 	f.mu.RUnlock()
+	f.notify()
+}
+
+// Close ends the framebuffer when its session ends and its backend has
+// stopped. It releases every Lock not yet unlocked, as a backend that
+// panicked while it drew leaves one, so that writers waiting in ReadTile
+// for those rows return. From then on, ReadTile reads nothing, Lock
+// returns pixels that are not on the screen, CopyRect copies nothing,
+// and Unlock of a released Lock does nothing. Closing it again does
+// nothing either, since the first Close has taken every Lock.
+func (f *Framebuffer) Close() {
+	f.wmu.Lock()
+	// Set before the rows are released, so that a writer that gets one
+	// sees it and does not read pixels a straggler may still draw.
+	f.closed.Store(true)
+	held := f.held
+	f.held = nil
+	f.wmu.Unlock()
+	for _, r := range held {
+		// Each Lock holds f.mu for reading, which keeps the rows from
+		// being replaced, until this releases it.
+		f.unlockRows(r)
+		f.mu.RUnlock()
+	}
 	f.notify()
 }
 
@@ -187,6 +252,13 @@ func (f *Framebuffer) CopyRect(dst image.Rectangle, src image.Point) {
 	}
 	both := dst.Union(from)
 	f.lockRows(both)
+	if f.closed.Load() {
+		// The rows may be a released Lock's, which a straggler still
+		// draws.
+		f.unlockRows(both)
+		f.mu.RUnlock()
+		return
+	}
 	// draw.Draw copies overlapping rectangles of one image correctly.
 	draw.Draw(f.img, dst, f.img, src, draw.Src)
 	f.touch(dst)
@@ -198,7 +270,8 @@ func (f *Framebuffer) CopyRect(dst image.Rectangle, src image.Point) {
 // ReadTile copies tile i's pixels into dst, row by row at the tile's
 // width, and returns its rectangle and the version the pixels belong to.
 // dst must hold the tile: 4 bytes per pixel. If i is outside the grid,
-// as after a Resize, it returns an empty rectangle and copies nothing.
+// as after a Resize, or the framebuffer is closed, it returns an empty
+// rectangle and copies nothing.
 func (f *Framebuffer) ReadTile(i int, dst []byte) (r image.Rectangle, version uint64) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
@@ -209,6 +282,9 @@ func (f *Framebuffer) ReadTile(i int, dst []byte) (r image.Rectangle, version ui
 	row := &f.rowLocks[i/f.cols]
 	row.RLock()
 	defer row.RUnlock()
+	if f.closed.Load() {
+		return image.Rectangle{}, 0
+	}
 	w := 4 * r.Dx()
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		o := f.img.PixOffset(r.Min.X, y)

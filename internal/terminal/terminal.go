@@ -182,13 +182,23 @@ func (t *Terminal) resetTabs() {
 
 // Write feeds output of the application to the terminal.
 func (t *Terminal) Write(p []byte) {
+	if replies := t.feed(p); replies != nil {
+		t.reply(replies)
+	}
+}
+
+// feed applies p under the terminal's lock and returns the replies to
+// send once it is released. A panic releases the lock too, so that
+// Snapshot, which viewers' writers and the session's owner goroutine
+// call, does not wait forever after the session recovers from it.
+func (t *Terminal) feed(p []byte) (replies []byte) {
 	t.mu.Lock()
+	defer t.mu.Unlock()
 	t.write(p)
 	if t.dirty {
 		t.version++
 		t.dirty = false
 	}
-	var replies []byte
 	if len(t.replies) > 0 {
 		if t.reply != nil {
 			replies, t.replies = t.replies, nil
@@ -196,10 +206,7 @@ func (t *Terminal) Write(p []byte) {
 			t.replies = t.replies[:0]
 		}
 	}
-	t.mu.Unlock()
-	if replies != nil {
-		t.reply(replies)
-	}
+	return replies
 }
 
 // Resize changes the terminal's size to cols columns and rows rows, at

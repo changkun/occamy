@@ -9,7 +9,8 @@
 // the physical key, which backends that want scancodes translate: the
 // VNC backend's QEMU extended key events and the RDP backend's keyboard
 // events through their HID-to-XT table (internal/keymap/keymap.go),
-// whose keys this table covers. The RDP backend drops Power.
+// whose keys this table covers. Every backend drops Power
+// (internal/backend/power.go).
 
 /** hidUsages maps KeyboardEvent.code to the key's USB HID usage on the keyboard page. */
 export const hidUsages: Readonly<Record<string, number>> = (() => {

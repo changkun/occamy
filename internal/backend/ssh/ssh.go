@@ -388,12 +388,28 @@ func (b *Backend) serve(ctx context.Context, sink backend.Sink, r *run, client *
 
 	done := make(chan struct{})
 	exited := make(chan error, 1)
+	// The goroutines run the terminal emulator on what the remote
+	// prints, which anyone with a shell can make anything, beyond the
+	// session's recover: each recovers its own panic, the first of
+	// which stops the others and ends the session.
+	const goroutines = 5
+	panicked := make(chan error, goroutines)
+	safe := func(f func()) func() {
+		return func() {
+			defer func() {
+				if perr := backend.Recovered(recover()); perr != nil {
+					panicked <- perr
+				}
+			}()
+			f()
+		}
+	}
 	var readers, others sync.WaitGroup
-	readers.Go(func() { pump(stdout, sink) })
-	readers.Go(func() { pump(stderr, sink) })
-	others.Go(func() { r.writeInput(stdin, done) })
-	others.Go(func() { r.applySizes(sess, sink, done) })
-	others.Go(func() { exited <- sess.Wait() })
+	readers.Go(safe(func() { pump(stdout, sink) }))
+	readers.Go(safe(func() { pump(stderr, sink) }))
+	others.Go(safe(func() { r.writeInput(stdin, done) }))
+	others.Go(safe(func() { r.applySizes(sess, sink, done) }))
+	others.Go(safe(func() { exited <- sess.Wait() }))
 
 	select {
 	case <-ctx.Done():
@@ -403,11 +419,18 @@ func (b *Backend) serve(ctx context.Context, sink backend.Sink, r *run, client *
 		// The channel has closed, so the readers stop once they have
 		// passed on the shell's last output.
 		readers.Wait()
+	case err = <-panicked:
 	}
 	close(done)
 	client.Close()
 	readers.Wait()
 	others.Wait()
+	if !errors.As(err, new(backend.PanicError)) {
+		select {
+		case err = <-panicked:
+		default:
+		}
+	}
 	return err
 }
 
