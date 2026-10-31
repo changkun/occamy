@@ -127,11 +127,13 @@ type Encoder struct {
 
 	// What Still works in: the encoding tried last and the best that
 	// reached StillSSIM, a JPEG decoded to RGBA, the scorer, and the
-	// quality the last search chose, where the next starts.
+	// quality the last search chose, where the next starts; and the
+	// qualities tried so far.
 	cand, best []byte
 	dec        *image.RGBA
 	ssim       ssimer
 	hint       int
+	tries      int
 }
 
 // New returns an encoder for a viewer that agreed to codecs, in any
@@ -174,6 +176,21 @@ func New(codecs []protocol.Codec) *Encoder {
 // far as Tile and Lossy go; Still's choice of quality also depends on the
 // encoder's last.
 func (e *Encoder) Kinds() (lossless, lossy protocol.Codec) { return e.lossless, e.lossy }
+
+// Hint returns the quality Still's last search chose, where its next
+// starts, or 0 before the first.
+func (e *Encoder) Hint() int { return e.hint }
+
+// Tries returns how many qualities Still has tried so far, each an
+// encode and a decode: what its searches cost.
+func (e *Encoder) Tries() int { return e.tries }
+
+// SetHint makes Still's next search start at quality q, as if the last
+// had chosen it. Encoders that share a screen's searches start each
+// where the last of any ended, rather than each where its own did; the
+// quality a search chooses reaches the score with the next lower failing
+// wherever it starts.
+func (e *Encoder) SetHint(q int) { e.hint = q }
 
 // Tile appends the encoding of a tile's pixels, w by h in RGBA order row
 // by row, to dst and returns it with its codec; or, if the tile goes
@@ -267,12 +284,14 @@ func (e *Encoder) fallback(dst, pix []byte, w, h int) ([]byte, protocol.Codec) {
 // quality up to hi reaches it, the encoding is at hi and reached is
 // false. It tries qualities QualityStep apart, and hi, starting where its
 // last search ended, since a screen's photographic tiles tend to need
-// alike: on most rectangles it encodes and decodes twice. A rectangle
-// smaller than SSIM's 8×8 window has no score: it goes at hi, and
-// reached is false, so that a writer raises it as hi rises. For a
-// viewer with no lossy
-// codec, or a rectangle the lossy encoder refuses, the encoding is
-// lossless, at quality 100.
+// alike: on most rectangles it encodes and decodes twice. Past a few
+// steps it gallops, two steps, four and so on, and then halves the gap
+// it found, so that a search far from where the last ended, as an
+// encoder's first on a page of text, takes about twice log2 of the steps
+// rather than a try a step. A rectangle smaller than SSIM's 8×8 window has no score: it
+// goes at hi, and reached is false, so that a writer raises it as hi
+// rises. For a viewer with no lossy codec, or a rectangle the lossy
+// encoder refuses, the encoding is lossless, at quality 100.
 func (e *Encoder) Still(dst, pix []byte, w, h, tile, lo, hi int) (b []byte, c protocol.Codec, quality int, reached bool) {
 	hi = min(max(hi, 1), 100)
 	lo = min(max(lo, 1), hi)
@@ -288,6 +307,7 @@ func (e *Encoder) Still(dst, pix []byte, w, h, tile, lo, hi int) (b []byte, c pr
 	steps := (hi-lo+QualityStep-1)/QualityStep + 1
 	at := func(i int) int { return min(lo+i*QualityStep, hi) }
 	pass := func(i int) (ok, failed bool) {
+		e.tries++
 		var enc bool
 		e.cand, enc = e.lossyAt(e.cand[:0], pix, w, h, at(i))
 		if !enc {
@@ -299,41 +319,77 @@ func (e *Encoder) Still(dst, pix []byte, w, h, tile, lo, hi int) (b []byte, c pr
 		}
 		return e.ssim.score(pix, got, w, h, tile) >= StillSSIM, false
 	}
+	// good is the lowest step tried that reaches the score, whose
+	// encoding e.best holds, and bad the highest below it that does not,
+	// -1 for none.
 	i := min(max((e.hint-lo+QualityStep/2)/QualityStep, 0), steps-1)
 	ok, failed := pass(i)
-	switch {
-	case failed:
+	if failed {
 		b, c := e.fallback(dst, pix, w, h)
 		return b, c, 100, true
-	case ok:
-		// Down while the next lower quality still reaches the score.
+	}
+	good, bad := i, -1
+	if ok {
+		// Down while the steps below reach it.
 		e.best = append(e.best[:0], e.cand...)
-		for i > 0 {
-			if ok, _ := pass(i - 1); !ok {
+		for k := 0; good > 0; k++ {
+			j := max(good-stride(k), 0)
+			if ok, _ := pass(j); !ok {
+				bad = j
 				break
 			}
-			i--
+			good = j
 			e.best = append(e.best[:0], e.cand...)
 		}
-		reached = true
-	default:
+	} else {
 		// Up until one reaches it, or hi.
-		for i+1 < steps {
-			i++
-			ok, failed := pass(i)
+		bad = i
+		for k := 0; ; k++ {
+			if bad == steps-1 {
+				e.best = append(e.best[:0], e.cand...)
+				e.hint = hi
+				return append(dst, e.best...), e.lossy, hi, false
+			}
+			j := min(bad+stride(k), steps-1)
+			ok, failed := pass(j)
 			if failed {
 				b, c := e.fallback(dst, pix, w, h)
 				return b, c, 100, true
 			}
 			if ok {
-				reached = true
+				good = j
+				e.best = append(e.best[:0], e.cand...)
 				break
 			}
+			bad = j
 		}
-		e.best = append(e.best[:0], e.cand...)
 	}
-	e.hint = at(i)
-	return append(dst, e.best...), e.lossy, at(i), reached
+	// Halve the gap between them.
+	for bad >= 0 && good-bad > 1 {
+		mid := (bad + good) / 2
+		if ok, _ := pass(mid); ok {
+			good = mid
+			e.best = append(e.best[:0], e.cand...)
+		} else {
+			bad = mid
+		}
+	}
+	e.hint = at(good)
+	return append(dst, e.best...), e.lossy, at(good), true
+}
+
+// walkSteps is how many steps of the ladder Still takes one at a time
+// before it gallops: the quality a search finds is mostly within a few
+// of where the last ended, where a walk tries fewest.
+const walkSteps = 3
+
+// stride is how far Still's k-th step from where it started goes, from
+// 0: one step for the first walkSteps, then two, four and so on.
+func stride(k int) int {
+	if k < walkSteps {
+		return 1
+	}
+	return 1 << (k - walkSteps + 1)
 }
 
 // errDecoded reports an encoding that decodes to something other than
