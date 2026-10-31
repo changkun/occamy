@@ -191,6 +191,15 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   back instead of queueing frames, and input never waits for `Next`.
   Tiles of plugged codecs decode in parallel. No API stability promise
   until the release candidate.
+- The browser's client of protocol v1, a TypeScript library in
+  `client/occamy-web/src/protocol` that depends on no framework: the
+  handshake over a WebSocket, deflate through `DecompressionStream`,
+  WebP and JPEG through `createImageBitmap`, decoding in Workers, whole
+  frames presented to a canvas, keyboard input as keysyms with USB HID
+  usages, pointer, wheel, clipboard and close codes. It runs every golden
+  vector of `protocol/testdata` under vitest, and an interop test against
+  occamyd's stream code in the `web` job. The Vue app does not use it
+  yet (specs/009).
 - `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS with the
   VNC backend's certificate policy, NLA through CredSSP 5 or later with
   NTLMv2 of its own, offered by default, the connection sequence, bitmap
