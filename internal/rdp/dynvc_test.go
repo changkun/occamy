@@ -203,7 +203,9 @@ func TestDynvcChannels(t *testing.T) {
 		t.Errorf("%+v, want Display Control open again", d)
 	}
 	// The size the desktop does not have yet goes on the new channel once
-	// it has the server's capabilities.
+	// it has the server's capabilities, not before: the close dropped the
+	// old channel's.
+	l.quietDVC(t)
 	l.sendDVC(t, rdptest.DVCDataPDU(70000, rdptest.DisplayCaps(16, 8192, 8192)))
 	if got := l.layout(t, 70000); got != image.Pt(1280, 720) {
 		t.Errorf("layout %v, want 1280×720 again", got)
@@ -404,6 +406,7 @@ func TestDynvcData(t *testing.T) {
 		err  string
 	}{
 		{"longer than declared", [][]byte{rdptest.DVCDataFirstPDU(id, 4, []byte("12345"))}, "longer than the 4 bytes"},
+		{"longer than an empty one", [][]byte{rdptest.DVCDataFirstPDU(id, 0, []byte("x"))}, "longer than the 0 bytes"},
 		{"compressed", [][]byte{rdptest.DVCPDU(rdptest.DVCDataZ, 0, id, []byte{0xe0, 0})}, "compressed"},
 		{"a name without its NUL", [][]byte{rdptest.DVCPDU(rdptest.DVCCreate, 0, 3, []byte("abc"))}, "without its NUL"},
 		{"a name too long", [][]byte{rdptest.DVCCreateRequest(3, strings.Repeat("x", maxDynChannelName))}, "without its NUL"},
@@ -424,6 +427,35 @@ func TestDynvcData(t *testing.T) {
 			l.done <- err
 		case <-time.After(10 * time.Second):
 			t.Fatalf("%s: Run did not return", tc.name)
+		}
+	}
+}
+
+// A message as long as its channel's bound is whole, and one a byte
+// longer is dropped, in one Data PDU or in a Data First and Data PDUs.
+func TestDynvcBound(t *testing.T) {
+	const id = 5
+	caps := func(n int) []byte {
+		p := append(rdptest.DisplayCaps(16, 8192, 8192), make([]byte, n-20)...)
+		binary.LittleEndian.PutUint32(p[4:], uint32(n)) // #nosec G115 -- about 1 KiB
+		return p
+	}
+	for _, size := range []int{2 * maxDisplayMessage, 1000} {
+		l := runLive(t, rdptest.Server{}, withResize)
+		l.sendDVC(t, rdptest.DVCCapsPDU(2))
+		l.dvc(t)
+		l.sendDVC(t, rdptest.DVCCreateRequest(id, rdptest.DisplayControl))
+		l.dvc(t)
+		l.setLayoutEvery(0, layoutRetry)
+		l.c.RequestSize(1280, 720)
+		l.sendDVC(t, rdptest.DVCMessage(id, caps(maxDisplayMessage+1), size)...)
+		l.quietDVC(t)
+		l.sendDVC(t, rdptest.DVCMessage(id, caps(maxDisplayMessage), size)...)
+		if got := l.layout(t, id); got != image.Pt(1280, 720) {
+			t.Errorf("in PDUs of %d bytes: layout %v, want 1280×720", size, got)
+		}
+		if n := l.c.Stats().Ignored["dynamic channel messages over their bound"]; n != 1 {
+			t.Errorf("in PDUs of %d bytes: %d messages dropped, want 1", size, n)
 		}
 	}
 }
