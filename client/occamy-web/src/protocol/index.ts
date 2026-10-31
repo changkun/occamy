@@ -18,10 +18,10 @@ export { Session, DEFAULT_NAME, DEFAULT_MAX_PIXELS, helloFor, checkOptions } fro
 export type { Options, Transport, Framebuffer } from './session'
 export { Display, CanvasSurface, MemorySurface, nextAnimationFrame, coalesce } from './display'
 export type { Surface, DisplayOptions } from './display'
-export { LocalDecoder, WorkerDecoder, serveDecoder, browserPlatform, streamInflate, canvasDecodeImage } from './decode'
-export type { TileDecoder, DecodeJob, DecodeImage, Platform, Port } from './decode'
+export { LocalDecoder, WorkerDecoder, serveDecoder, browserPlatform, streamInflate, slicedInflate, canvasDecodeImage, INFLATE_SLICE } from './decode'
+export type { TileDecoder, DecodeJob, DecodeImage, Platform, Port, WorkerPort, WorkerDecoderOptions } from './decode'
 export { workerDecoder, defaultDecoder, defaultWorkers } from './worker'
-export { bindKeyboard, bindPointer, bindVisibility, cursorStyle, pointerButtons, remotePoint, WheelAccumulator } from './dom'
+export { bindKeyboard, bindPointer, bindVisibility, cursorStyle, pointerButtons, remotePoint, WheelAccumulator, MAX_CURSOR_SIDE } from './dom'
 export type { Unbind, ErrorHandler, Box } from './dom'
 export { hidUsage, hidUsages, keysym, keyOf } from './keyboard'
 export {

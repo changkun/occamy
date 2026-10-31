@@ -10,7 +10,7 @@ import { MessageChannel } from 'node:worker_threads'
 
 import { describe, expect, it } from 'vitest'
 
-import { LocalDecoder, type Port, WorkerDecoder, serveDecoder, streamInflate } from './decode'
+import { LocalDecoder, type Port, type TileDecoder, WorkerDecoder, type WorkerPort, serveDecoder, streamInflate } from './decode'
 import { Display, MemorySurface, coalesce, nextAnimationFrame } from './display'
 import type { Rect, SessionEvent } from './events'
 import { Codec, SessionClass } from './messages'
@@ -205,6 +205,102 @@ describe('Worker decoder', () => {
     decoder.close()
     await expect(p).rejects.toThrow(/closed/)
     await expect(decoder.decode({ codec: Codec.Raw, payload: new Uint8Array(4), width: 1, height: 1 })).rejects.toThrow(/closed/)
+  })
+
+  // A Worker that takes requests and answers only as the test says.
+  function silent(): { port: WorkerPort; posted: { id: number; op: string }[]; answer: (id: number) => void } {
+    const posted: { id: number; op: string }[] = []
+    const port: WorkerPort = {
+      postMessage: (m) => posted.push(m as { id: number; op: string }),
+      onmessage: null,
+      onmessageerror: null,
+    }
+    const answer = (id: number): void => {
+      port.onmessage?.(new MessageEvent('message', { data: { id, pixels: new Uint8ClampedArray(4) } }))
+    }
+    return { port, posted, answer }
+  }
+  const job = { codec: Codec.Raw, payload: new Uint8Array(4), width: 1, height: 1 }
+
+  it('keeps at most inFlight requests in Workers, the rest waiting', async () => {
+    const w = silent()
+    const decoder = new WorkerDecoder(() => w.port, { inFlight: 3, liveness: 0 })
+    try {
+      const all = Array.from({ length: 5 }, () => decoder.decode(job))
+      expect(w.posted).toHaveLength(3)
+      w.answer(w.posted[0].id)
+      expect(w.posted).toHaveLength(4)
+      for (const p of w.posted.slice(1)) {
+        w.answer(p.id)
+      }
+      w.answer(w.posted[4].id)
+      expect(await Promise.all(all)).toHaveLength(5)
+    } finally {
+      decoder.close()
+    }
+  })
+
+  it('fails the requests of a Worker that stops answering', async () => {
+    const w = silent()
+    const decoder = new WorkerDecoder(() => w.port, { liveness: 10 })
+    try {
+      await expect(decoder.decode(job)).rejects.toThrow(/stopped answering/)
+      // It was asked whether it is alive first.
+      expect(w.posted.map((m) => m.op)).toEqual(['decode', 'ping'])
+      // And gets no more.
+      await expect(decoder.decode(job)).rejects.toThrow(/stopped answering/)
+      expect(w.posted).toHaveLength(2)
+    } finally {
+      decoder.close()
+    }
+  })
+
+  it('fails the requests of a Worker whose message does not deserialize', async () => {
+    const w = silent()
+    const decoder = new WorkerDecoder(() => w.port, { liveness: 0 })
+    try {
+      const p = decoder.decode(job)
+      w.port.onmessageerror?.(new MessageEvent('messageerror'))
+      await expect(p).rejects.toThrow(/does not deserialize/)
+    } finally {
+      decoder.close()
+    }
+  })
+
+  it('keeps a Worker that answers whether it is alive while it decodes', async () => {
+    const slow: TileDecoder = {
+      codecs: () => Promise.resolve([Codec.Raw]),
+      decode: (j) => new Promise((resolve) => setTimeout(() => resolve(new Uint8ClampedArray(4 * j.width * j.height)), 100)),
+      close: () => undefined,
+    }
+    const { port1, port2 } = new MessageChannel()
+    serveDecoder(port1 as unknown as Port, slow)
+    const decoder = new WorkerDecoder(() => port2 as unknown as Port, { liveness: 10 })
+    try {
+      expect(await decoder.decode(job)).toHaveLength(4)
+    } finally {
+      decoder.close()
+      port1.close()
+      port2.close()
+    }
+  })
+
+  it('ends a session whose Worker stopped answering, rather than wait', async () => {
+    const w = silent()
+    const decoder = new WorkerDecoder(() => w.port, { liveness: 10 })
+    try {
+      const { t, s } = await open({ decoder, codecs: [Codec.Deflate, Codec.Raw] })
+      t.push({ type: 'resize', width: 1, height: 1 })
+      t.push({ type: 'tile', frameId: 1, x: 0, y: 0, w: 1, h: 1, codec: Codec.Deflate, slot: 0, payload: Uint8Array.of(1) })
+      t.push(frameEnd(1))
+      let ev = await s.next()
+      while (ev.type !== 'end') {
+        ev = await s.next()
+      }
+      expect(ev.error?.message).toMatch(/stopped answering/)
+    } finally {
+      decoder.close()
+    }
   })
 
   it('runs a session', async () => {

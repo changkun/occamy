@@ -284,12 +284,24 @@ export interface Port {
   onmessage: ((ev: MessageEvent) => unknown) | null
 }
 
+/**
+ * WorkerPort is a Port to a Worker: a Worker, or a stand-in, which may
+ * report that it failed and be terminated.
+ */
+export type WorkerPort = Port & {
+  terminate?: () => void
+  onerror?: ((ev: ErrorEvent) => unknown) | null
+  onmessageerror?: ((ev: MessageEvent) => unknown) | null
+}
+
 type Request =
   | { id: number; op: 'codecs' }
+  | { id: number; op: 'ping' }
   | { id: number; op: 'decode'; codec: number; payload: Uint8Array; width: number; height: number }
 
 type Response =
   | { id: number; codecs: number[] }
+  | { id: number; pong: true }
   | { id: number; pixels: Pixels }
   | { id: number; error: { kind?: ErrorKind; message: string } }
 
@@ -300,6 +312,10 @@ export function serveDecoder(port: Port, decoder: TileDecoder): void {
     const fail = (err: unknown): void => {
       const error = err instanceof ProtocolError ? { kind: err.kind, message: err.message } : { message: String(err) }
       port.postMessage({ id: req.id, error } satisfies Response, [])
+    }
+    if (req.op === 'ping') {
+      port.postMessage({ id: req.id, pong: true } satisfies Response, [])
+      return
     }
     if (req.op === 'codecs') {
       decoder.codecs().then((codecs) => port.postMessage({ id: req.id, codecs } satisfies Response, []), fail)
@@ -312,80 +328,178 @@ export function serveDecoder(port: Port, decoder: TileDecoder): void {
   }
 }
 
+/** WorkerDecoderOptions tune a WorkerDecoder. */
+export interface WorkerDecoderOptions {
+  /** Workers to start; one by default. */
+  count?: number
+  /**
+   * The most requests in Workers at once; the rest wait their turn, and
+   * their payloads are copied only when they go. The cores the platform
+   * has by default, as the Go client's pool decodes on as many.
+   */
+  inFlight?: number
+  /**
+   * How long a Worker with requests in hand may stay silent, in
+   * milliseconds, before it is asked whether it is alive; one that does
+   * not answer by the next check is taken for dead, and its requests
+   * fail. A Worker that dies, such as of memory, may say nothing at all.
+   * 5000 by default.
+   */
+  liveness?: number
+}
+
 interface Pending {
   resolve: (v: Response) => void
   reject: (err: Error) => void
   worker: number
 }
 
+interface Waiting {
+  req: Request
+  transfer: () => Transferable[] // what goes with req, made when it goes
+  resolve: (v: Response) => void
+  reject: (err: Error) => void
+}
+
+// A Worker as the WorkerDecoder sees it.
+interface Worker_ {
+  port: WorkerPort
+  load: number // requests in hand
+  heard: boolean // it sent something since the last check
+  pinged: boolean // it was asked whether it is alive, and has not answered
+  dead: Error | null
+}
+
 /** WorkerDecoder decodes in Workers, each running serveDecoder with a LocalDecoder. */
 export class WorkerDecoder implements TileDecoder {
-  private readonly ports: Port[] = []
-  private readonly load: number[] = []
+  private readonly workers: Worker_[] = []
   private readonly pending = new Map<number, Pending>()
-  private readonly terminate: (() => void)[] = []
+  private readonly waiting: Waiting[] = []
+  private readonly inFlight: number
+  private readonly timer: ReturnType<typeof setInterval> | null = null
   private nextID = 1
   private closed = false
 
   /**
    * spawn starts a Worker, or returns another port that serveDecoder
-   * answers, and count is the number of them, one by default.
+   * answers; options, or the number of Workers, tune the decoder.
    */
-  constructor(spawn: () => Port & { terminate?: () => void; onerror?: ((ev: ErrorEvent) => unknown) | null }, count = 1) {
-    for (let i = 0; i < Math.max(1, count); i++) {
+  constructor(spawn: () => WorkerPort, options: WorkerDecoderOptions | number = {}) {
+    const o = typeof options === 'number' ? { count: options } : options
+    const cores = typeof navigator !== 'undefined' && navigator.hardwareConcurrency > 0 ? navigator.hardwareConcurrency : 4
+    this.inFlight = Math.max(1, o.inFlight ?? cores)
+    for (let i = 0; i < Math.max(1, o.count ?? 1); i++) {
       const port = spawn()
-      port.onmessage = (ev: MessageEvent) => this.answer(ev.data as Response)
+      const w: Worker_ = { port, load: 0, heard: false, pinged: false, dead: null }
+      port.onmessage = (ev: MessageEvent) => {
+        w.heard = true
+        w.pinged = false
+        this.answer(ev.data as Response)
+      }
       if ('onerror' in port) {
         port.onerror = (ev: ErrorEvent) => this.failWorker(i, new Error(`decoder worker failed: ${ev.message}`))
       }
-      this.ports.push(port)
-      this.load.push(0)
-      if (port.terminate !== undefined) {
-        this.terminate.push(port.terminate.bind(port))
+      if ('onmessageerror' in port) {
+        port.onmessageerror = () => this.failWorker(i, new Error('decoder worker sent a message that does not deserialize'))
       }
+      this.workers.push(w)
+    }
+    const liveness = o.liveness ?? 5000
+    if (liveness > 0) {
+      this.timer = setInterval(() => this.check(), liveness)
+      // A Node test runner need not wait for it.
+      ;(this.timer as { unref?: () => void }).unref?.()
     }
   }
 
-  private request(req: Request, transfer: Transferable[]): Promise<Response> {
+  private request(req: Request, transfer: () => Transferable[]): Promise<Response> {
     if (this.closed) {
       return Promise.reject(new Error('decoder closed'))
     }
-    // The worker with the fewest decodes in hand.
-    let w = 0
-    for (let i = 1; i < this.load.length; i++) {
-      if (this.load[i] < this.load[w]) {
-        w = i
-      }
-    }
-    this.load[w]++
     return new Promise<Response>((resolve, reject) => {
-      this.pending.set(req.id, { resolve, reject, worker: w })
-      this.ports[w].postMessage(req, transfer)
+      this.waiting.push({ req, transfer, resolve, reject })
+      this.dispatch()
     })
   }
 
+  // dispatch sends waiting requests while fewer than inFlight are in
+  // Workers, each to the live Worker with the fewest in hand.
+  private dispatch(): void {
+    while (this.waiting.length > 0 && this.pending.size < this.inFlight) {
+      let w = -1
+      for (let i = 0; i < this.workers.length; i++) {
+        if (this.workers[i].dead === null && (w < 0 || this.workers[i].load < this.workers[w].load)) {
+          w = i
+        }
+      }
+      const next = this.waiting.shift() as Waiting
+      if (w < 0) {
+        next.reject(this.workers[0].dead ?? new Error('no decoder worker'))
+        continue
+      }
+      const worker = this.workers[w]
+      if (worker.load === 0) {
+        // Silence before its first request in hand says nothing.
+        worker.heard = true
+      }
+      worker.load++
+      this.pending.set(next.req.id, { resolve: next.resolve, reject: next.reject, worker: w })
+      const transfer = next.transfer()
+      worker.port.postMessage(next.req, transfer)
+    }
+  }
+
   private answer(res: Response): void {
+    if ('pong' in res) {
+      return
+    }
     const p = this.pending.get(res.id)
     if (p === undefined) {
       return
     }
     this.pending.delete(res.id)
-    this.load[p.worker]--
+    this.workers[p.worker].load--
     p.resolve(res)
+    this.dispatch()
   }
 
-  private failWorker(worker: number, err: Error): void {
-    for (const [id, p] of this.pending) {
-      if (p.worker === worker) {
-        this.pending.delete(id)
-        this.load[worker]--
-        p.reject(err)
+  // check asks each Worker with requests in hand that was silent since
+  // the last check whether it is alive, and takes one that did not
+  // answer the last time it was asked for dead.
+  private check(): void {
+    for (const [i, w] of this.workers.entries()) {
+      if (w.dead !== null || w.load === 0) {
+        continue
       }
+      if (w.heard) {
+        w.heard = false
+        continue
+      }
+      if (w.pinged) {
+        this.failWorker(i, new Error('decoder worker stopped answering'))
+        continue
+      }
+      w.pinged = true
+      w.port.postMessage({ id: this.nextID++, op: 'ping' } satisfies Request, [])
     }
   }
 
+  // failWorker fails a Worker's requests in hand, and sends no more to it.
+  private failWorker(worker: number, err: Error): void {
+    const w = this.workers[worker]
+    w.dead ??= err
+    for (const [id, p] of this.pending) {
+      if (p.worker === worker) {
+        this.pending.delete(id)
+        w.load--
+        p.reject(err)
+      }
+    }
+    this.dispatch()
+  }
+
   async codecs(): Promise<number[]> {
-    const res = await this.request({ id: this.nextID++, op: 'codecs' }, [])
+    const res = await this.request({ id: this.nextID++, op: 'codecs' }, () => [])
     if ('error' in res) {
       throw new Error(res.error.message)
     }
@@ -393,13 +507,14 @@ export class WorkerDecoder implements TileDecoder {
   }
 
   async decode(job: DecodeJob): Promise<Pixels> {
-    // The payload is a view into its message; the worker gets a copy of
-    // its bytes only.
-    const payload = job.payload.slice()
-    const res = await this.request(
-      { id: this.nextID++, op: 'decode', codec: job.codec, payload, width: job.width, height: job.height },
-      [payload.buffer],
-    )
+    const req: Request = { id: this.nextID++, op: 'decode', codec: job.codec, payload: job.payload, width: job.width, height: job.height }
+    // The payload is a view into its message; the Worker gets a copy of
+    // its bytes only, made when the request goes, not while it waits.
+    const res = await this.request(req, () => {
+      const payload = job.payload.slice()
+      req.payload = payload
+      return [payload.buffer]
+    })
     if ('error' in res) {
       const { kind, message } = res.error
       throw kind === undefined ? new Error(message) : Object.assign(new ProtocolError(kind), { message })
@@ -415,12 +530,20 @@ export class WorkerDecoder implements TileDecoder {
       return
     }
     this.closed = true
-    for (const t of this.terminate) {
-      t()
+    if (this.timer !== null) {
+      clearInterval(this.timer)
     }
+    for (const w of this.workers) {
+      w.port.terminate?.()
+    }
+    const err = new Error('decoder closed')
     for (const p of this.pending.values()) {
-      p.reject(new Error('decoder closed'))
+      p.reject(err)
+    }
+    for (const q of this.waiting) {
+      q.reject(err)
     }
     this.pending.clear()
+    this.waiting.length = 0
   }
 }
