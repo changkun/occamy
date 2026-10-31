@@ -388,10 +388,15 @@ The native RDP backend has been tested against xrdp and against
 occamy's own test server, not yet against Windows: Windows servers are
 not yet verified, which the backend's fourth phase does
 ([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)).
-Nor does it speak RDP's graphics pipeline (GFX) yet, so a server sends
-it plain bitmap updates, as it sends guacd with `disable-gfx`. Until
-Windows is verified, `backend: guacd` is the fallback for a Windows
-server that the native backend cannot serve.
+Nor does it ask for RDP's graphics pipeline (GFX) yet, so a server
+sends it plain bitmap updates, as it sends guacd with `disable-gfx`:
+the client under it speaks GFX's surfaces, fills and copies and its
+planar and uncompressed codecs, but not yet RemoteFX Progressive,
+which xrdp sends, nor RemoteFX, ClearCodec or the cache, which the
+backend's third phase adds. There is no key that turns GFX on or off
+yet; the key that turns it off comes with the phase that turns it on.
+Until Windows is verified, `backend: guacd` is the fallback for a
+Windows server that the native backend cannot serve.
 
 xrdp speaks no NLA: offered NLA alone, it selects standard RDP
 security, which the native backend refuses, so an xrdp connection
