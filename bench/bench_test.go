@@ -6,6 +6,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"math"
@@ -213,6 +214,46 @@ func TestMarkdownDecodeNote(t *testing.T) {
 		rep.markdown(&b)
 		if got := strings.Contains(b.String(), decodeNote); got != want {
 			t.Errorf("%s: decode note %v, want %v:\n%s", series, got, want, b.String())
+		}
+	}
+}
+
+// The report states when frames count and how v1 acknowledges them: in
+// the JSON, and above a table with v1 rows.
+func TestReportDisplay(t *testing.T) {
+	for _, c := range []struct {
+		series string
+		hz     float64
+		want   string
+	}{
+		{"v1-native", 60, "acknowledges a graphical frame at the next refresh of a 60 Hz screen (-ack-hz), and a terminal's at once"},
+		{"v1-guacd", 0, "acknowledges a graphical frame at once (-ack-hz 0, a diagnostic"},
+		{"occamy", 60, ""},
+	} {
+		rep := report{AckHz: c.hz, FrameStamp: frameStamp, Results: []result{{Scenario: "T3", Protocol: "vnc", Series: c.series, Net: "N0", Seconds: 1}}}
+		raw, err := json.Marshal(rep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got struct {
+			AckHz      *float64 `json:"ack_hz"`
+			FrameStamp string   `json:"frame_stamp"`
+		}
+		if err := json.Unmarshal(raw, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.AckHz == nil || *got.AckHz != c.hz || got.FrameStamp != frameStamp {
+			t.Errorf("%s: the JSON has ack_hz %v and frame_stamp %q", c.series, got.AckHz, got.FrameStamp)
+		}
+		var b strings.Builder
+		rep.markdown(&b)
+		header, _, _ := strings.Cut(b.String(), "| Scenario")
+		if c.want == "" {
+			if strings.Contains(header, "acknowledges") {
+				t.Errorf("%s: a v0 table states v1's acknowledgements:\n%s", c.series, header)
+			}
+		} else if !strings.Contains(header, c.want) || !strings.Contains(header, "v1 frames count from when Next delivers them applied") {
+			t.Errorf("%s at %g Hz: the header does not state %q:\n%s", c.series, c.hz, c.want, header)
 		}
 	}
 }

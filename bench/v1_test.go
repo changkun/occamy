@@ -14,6 +14,7 @@ import (
 	"image/color"
 	"image/draw"
 	"io"
+	"maps"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -420,37 +421,58 @@ func TestShowsCells(t *testing.T) {
 	}
 }
 
-// At a refresh rate, frames are shown on its ticks, at most one a tick;
-// at 0, as they come.
+// At a refresh rate, a graphical frame counts from when Next delivered
+// it, and is acknowledged at the screen's next tick, as the web client
+// acknowledges it after the next animation frame; at 0, at once.
 func TestV1Display(t *testing.T) {
-	frames := func(t *testing.T, d display) []frame {
+	// run shows a backend that repaints at an interval that is not a
+	// multiple of the refresh's, so that frames arrive at every phase of
+	// it, while the client waits for them.
+	run := func(t *testing.T, d display) ([]frame, *frameLog) {
 		t.Helper()
-		s := v1RigWith(t, &flicker{every: 2 * time.Millisecond}, rig{display: d})
+		var fl *frameLog
+		s := v1RigWith(t, &flicker{every: 23 * time.Millisecond}, rig{display: d, wrap: func(e pipeEnd) client.Conn {
+			fl = newFrameLog(e)
+			return fl
+		}})
 		var fs []frame
-		end := time.After(500 * time.Millisecond)
+		end := time.After(700 * time.Millisecond)
 		for {
 			select {
 			case f := <-s.frames:
 				fs = append(fs, f)
 			case <-end:
-				if len(fs) < 5 {
+				if len(fs) < 15 {
 					t.Fatalf("%d frames", len(fs))
 				}
-				return fs
+				return fs, fl
 			}
 		}
 	}
-	onTick := func(d display, at time.Time) bool { return at.Sub(displayOrigin)%d.period == 0 }
 	t.Run("60 Hz", func(t *testing.T) {
 		d := newDisplay(60)
-		fs := frames(t, d)
-		for i, f := range fs {
-			if !onTick(d, f.at) {
-				t.Fatalf("frame %d shown %v after a tick", i, f.at.Sub(displayOrigin)%d.period)
+		fs, fl := run(t, d)
+		phase := func(at time.Time) time.Duration { return at.Sub(displayOrigin) % d.period }
+		var acks, stamps []time.Duration
+		for _, at := range fl.acked() {
+			acks = append(acks, phase(at))
+		}
+		for _, f := range fs {
+			stamps = append(stamps, phase(f.at))
+		}
+		if p := medianDuration(acks); p > d.period/4 {
+			t.Errorf("frames acknowledged a median %v after a tick, want on ticks", p)
+		}
+		off := 0
+		for _, p := range stamps {
+			if p > d.period/4 {
+				off++
 			}
-			if i > 0 && f.at.Sub(fs[i-1].at) < d.period {
-				t.Fatalf("frames %d and %d shown %v apart", i-1, i, f.at.Sub(fs[i-1].at))
-			}
+		}
+		t.Logf("%d acknowledgements a median %v after a tick; %d of %d frames counted more than %v after one",
+			len(acks), medianDuration(acks), off, len(stamps), d.period/4)
+		if !slices.ContainsFunc(stamps, func(p time.Duration) bool { return p != 0 }) || off < len(stamps)/4 {
+			t.Errorf("%d of %d frames counted more than %v after a tick, want them counted when Next delivered them", off, len(stamps), d.period/4)
 		}
 	})
 	t.Run("at once", func(t *testing.T) {
@@ -458,12 +480,115 @@ func TestV1Display(t *testing.T) {
 		if d != (display{}) {
 			t.Fatalf("newDisplay(0) = %+v", d)
 		}
-		fs := frames(t, d)
-		tick := newDisplay(60)
-		if !slices.ContainsFunc(fs, func(f frame) bool { return !onTick(tick, f.at) }) {
-			t.Error("every frame shown on a tick of 60 Hz")
+		_, fl := run(t, d)
+		if m := medianDuration(fl.delays()); m > 4*time.Millisecond {
+			t.Errorf("frames acknowledged a median %v after their end, want at once", m)
 		}
 	})
+}
+
+// A terminal's frames are acknowledged at once, whatever the refresh,
+// as the web client's terminal acknowledges them once its emulator
+// took their bytes.
+func TestV1TerminalAck(t *testing.T) {
+	var fl *frameLog
+	s := v1RigWith(t, newShell(0), rig{display: newDisplay(60), wrap: func(e pipeEnd) client.Conn {
+		fl = newFrameLog(e)
+		return fl
+	}})
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := s.settle(ctx, 200*time.Millisecond); err != nil {
+		t.Fatal(err)
+	}
+	for i := range 30 {
+		t0 := time.Now()
+		if err := s.key('a' + i%26); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.wait(ctx, t0, func(frame) bool { return true }); err != nil {
+			t.Fatal(err)
+		}
+		// Keys at every phase of the refresh.
+		time.Sleep(time.Duration(3+i*7%13) * time.Millisecond)
+	}
+	d := fl.delays()
+	if len(d) < 20 {
+		t.Fatalf("%d frames acknowledged", len(d))
+	}
+	t.Logf("%d frames acknowledged a median %v after their end", len(d), medianDuration(d))
+	if m := medianDuration(d); m > 4*time.Millisecond {
+		t.Errorf("a terminal's frames acknowledged a median %v after their end, want at once", m)
+	}
+}
+
+// frameLog records when the client read each frame's end, and when it
+// sent each acknowledgement, by frame ID.
+type frameLog struct {
+	pipeEnd
+	mu         sync.Mutex
+	ends, acks map[uint32]time.Time
+}
+
+func newFrameLog(e pipeEnd) *frameLog {
+	return &frameLog{pipeEnd: e, ends: map[uint32]time.Time{}, acks: map[uint32]time.Time{}}
+}
+
+func (l *frameLog) ReadMessage(ctx context.Context) ([]byte, error) {
+	b, err := l.pipeEnd.ReadMessage(ctx)
+	if err == nil {
+		if m, _ := protocol.Decode(b, protocol.ServerMessages(), protocol.Limits{}); m != nil {
+			if e, ok := m.(*protocol.FrameEnd); ok {
+				l.note(l.ends, e.FrameID)
+			}
+		}
+	}
+	return b, err
+}
+
+func (l *frameLog) WriteMessage(ctx context.Context, b []byte) error {
+	if m, _ := protocol.Decode(b, protocol.ClientMessages(), protocol.Limits{}); m != nil {
+		if a, ok := m.(*protocol.FrameAck); ok {
+			l.note(l.acks, a.FrameID)
+		}
+	}
+	return l.pipeEnd.WriteMessage(ctx, b)
+}
+
+func (l *frameLog) note(m map[uint32]time.Time, id uint32) {
+	now := time.Now()
+	l.mu.Lock()
+	m[id] = now
+	l.mu.Unlock()
+}
+
+// acked returns when each acknowledgement was sent.
+func (l *frameLog) acked() []time.Time {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return slices.Collect(maps.Values(l.acks))
+}
+
+// delays returns how long after its end each acknowledged frame was
+// acknowledged.
+func (l *frameLog) delays() []time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	var d []time.Duration
+	for id, at := range l.acks {
+		if end, ok := l.ends[id]; ok {
+			d = append(d, at.Sub(end))
+		}
+	}
+	return d
+}
+
+func medianDuration(d []time.Duration) time.Duration {
+	if len(d) == 0 {
+		return 0
+	}
+	s := slices.Sorted(slices.Values(d))
+	return s[len(s)/2]
 }
 
 func TestDisplayNext(t *testing.T) {

@@ -70,7 +70,7 @@ func main() {
 		nets      = flag.String("net", "N0,N1,N2", "comma-separated network conditions")
 		seriesF   = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd, v1-native, v1-guacd")
 		quick     = flag.Bool("quick", false, "fewer samples and shorter scenarios, to check the setup")
-		ackHz     = flag.Float64("ack-hz", 60, "v1: the screen refresh at which frames are shown and acknowledged, or 0 for at once")
+		ackHz     = flag.Float64("ack-hz", 60, "v1: the screen refresh at which a graphical frame is acknowledged, or 0 for at once, a diagnostic; the gate's numbers use 60")
 		runs      = flag.Int("runs", 1, "how many times to run everything; the table shows medians")
 		engine    = flag.String("engine", "podman", "container engine for CPU statistics, or none")
 		project   = flag.String("project", "docker", "compose project of the stack")
@@ -117,10 +117,12 @@ func main() {
 	}
 
 	report := report{
-		Started: time.Now().UTC(),
-		Quick:   *quick,
-		Runs:    max(*runs, 1),
-		Host:    hostInfo(*engine, *project),
+		Started:    time.Now().UTC(),
+		Quick:      *quick,
+		Runs:       max(*runs, 1),
+		AckHz:      *ackHz,
+		FrameStamp: frameStamp,
+		Host:       hostInfo(*engine, *project),
 	}
 	ctx := context.Background()
 	// Each run measures everything once, so that a disturbance on the host
@@ -407,11 +409,27 @@ func (r *result) serverFrames() {
 }
 
 type report struct {
-	Started time.Time         `json:"started"`
-	Quick   bool              `json:"quick"`
-	Runs    int               `json:"runs"`
-	Host    map[string]string `json:"host"`
-	Results []result          `json:"results"`
+	Started time.Time `json:"started"`
+	Quick   bool      `json:"quick"`
+	Runs    int       `json:"runs"`
+	// AckHz is the refresh at which the v1 series acknowledge a
+	// graphical frame (-ack-hz), or 0 for at once.
+	AckHz float64 `json:"ack_hz"`
+	// FrameStamp is when a frame counts as drawn, per protocol.
+	FrameStamp string            `json:"frame_stamp"`
+	Host       map[string]string `json:"host"`
+	Results    []result          `json:"results"`
+}
+
+// frameStamp is when the series count a frame as drawn.
+const frameStamp = "v1: when Next delivers the frame applied, before its acknowledgement; v0: when the client applied it, before it answers sync"
+
+// ackText says when the v1 series acknowledge a graphical frame.
+func (rep *report) ackText() string {
+	if rep.AckHz <= 0 {
+		return "at once (-ack-hz 0, a diagnostic; the gate's numbers are measured at 60 Hz)"
+	}
+	return fmt.Sprintf("at the next refresh of a %g Hz screen (-ack-hz)", rep.AckHz)
 }
 
 func (rep *report) markdown(w io.Writer) {
@@ -423,6 +441,9 @@ func (rep *report) markdown(w io.Writer) {
 		fmt.Fprintf(w, ". Each number is the median of %d runs.", rep.Runs)
 	}
 	fmt.Fprintln(w)
+	if slices.ContainsFunc(rep.Results, func(r result) bool { return r.v1() }) {
+		fmt.Fprintf(w, displayHeader, rep.ackText())
+	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w, "| Scenario | Series | Net | Latency p50/p95/p99 ms | First frame p50 ms | Completion ms | Down KiB | Down KiB/s | Frames/s | Server CPU ms | Remote CPU ms | Decode ms | Notes |")
 	fmt.Fprintln(w, "|---|---|---|---|---|---|---|---|---|---|---|---|---|")
@@ -535,6 +556,9 @@ const (
 	// idleGuacdNote gives guacd's CPU during a v1-native scenario, which
 	// guacd serves nothing of, so its server CPU leaves it out.
 	idleGuacdNote = "guacd %.0f ms CPU, not in server CPU"
+	// displayHeader states, above a table with v1 rows, when its frames
+	// count and how they are acknowledged.
+	displayHeader = "v1 frames count from when Next delivers them applied, as v0's from when the client applied them. v1 acknowledges a graphical frame %s, and a terminal's at once.\n"
 	// decodeNote follows a table with v1 rows.
 	decodeNote = "Decode ms: v0's includes compositing each frame. v1's is the wall time of each tile's decode, summed over the client core's decoding goroutines, or the terminal emulator's time, without compositing, so it compares v1's series with each other, not with v0."
 )

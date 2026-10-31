@@ -190,11 +190,13 @@ func (s *session) startV1(cl *client.Session, d display, end func()) {
 	go s.readV1(c, d)
 }
 
-// display is when a client shows a frame that Next delivered, and so
-// acknowledges it by asking for the next event: at once without a
-// period, or at the next tick of a screen that refreshes every period,
-// as occamy's web client presents a frame at the next animation frame
-// and acknowledges it then (client/occamy-web/src/protocol/display.ts).
+// display is the screen on which a client presents a graphical frame
+// that Next delivered, and so acknowledges it by asking for the next
+// event: at the next tick of a screen that refreshes every period, as
+// occamy's web client presents a frame at the next animation frame and
+// acknowledges it then (client/occamy-web/src/protocol/display.ts,
+// Display.run), or at once without a period. Acknowledgements pace the
+// server's frames, by the frame window.
 type display struct{ period time.Duration }
 
 // displayOrigin is the phase of every display's ticks: a session starts
@@ -210,8 +212,8 @@ func newDisplay(hz float64) display {
 	return display{period: time.Duration(float64(time.Second) / hz)}
 }
 
-// next returns when a frame that Next delivered at now is shown: the
-// first tick after now, or now without a period.
+// next returns when a frame that Next delivered at now is presented:
+// the first tick after now, or now without a period.
 func (d display) next(now time.Time) time.Time {
 	if d.period <= 0 {
 		return now
@@ -220,12 +222,9 @@ func (d display) next(now time.Time) time.Time {
 	return displayOrigin.Add(n * d.period)
 }
 
-// present waits until a frame that Next delivered at now is shown, and
-// returns that time.
-func (d display) present(now time.Time) time.Time {
-	at := d.next(now)
-	time.Sleep(time.Until(at))
-	return at
+// present waits until a frame that Next delivered at now is presented.
+func (d display) present(now time.Time) {
+	time.Sleep(time.Until(d.next(now)))
 }
 
 // signIn returns an access token for the bench user. A v1 client signs
@@ -331,9 +330,10 @@ func (c *v1Conn) close() {
 }
 
 // readV1 delivers the session's events. Frames are applied to the
-// client core's framebuffer as Next delivers them, shown on d, and
-// acknowledged by the next call, so a frame counts from when d shows it.
-// A terminal's bytes go to a terminal emulator, as a viewer's xterm.js
+// client core's framebuffer as Next delivers them, and count from then.
+// The next call acknowledges a frame: a graphical one's at d's next
+// refresh, a terminal's at once, as occamy's web client does. A
+// terminal's bytes go to a terminal emulator, as a viewer's xterm.js
 // takes them; that is the client's decoding of a terminal, and marks
 // look at its cells.
 func (s *session) readV1(c *v1Conn, d display) {
@@ -375,6 +375,10 @@ func (s *session) readV1(c *v1Conn, d display) {
 			s.decode.Add(int64(time.Since(t)))
 			drew = drew || len(ev.Data) > 0
 		case client.Frame:
+			// A frame counts from when Next delivers it applied, as v0's
+			// from when the client applied it: each client's canvas then
+			// reaches the screen at its next refresh.
+			now := time.Now()
 			m := s.marker.Load()
 			var (
 				draws, marked, content bool
@@ -401,11 +405,14 @@ func (s *session) readV1(c *v1Conn, d display) {
 					c.cl.Framebuffer(func(img *image.RGBA) { marked = m.pixels(img, damage) })
 				}
 			}
-			// The web client waits for the screen's next refresh for
-			// every frame, drawing or not, before it acknowledges it.
-			at := d.present(time.Now())
 			if draws {
-				s.emit(frame{at: at, damage: damage, marked: marked, content: content})
+				s.emit(frame{at: now, damage: damage, marked: marked, content: content})
+			}
+			// The web client presents a graphical frame, drawing or
+			// not, at the screen's next refresh, and acknowledges it by
+			// asking for the next event then; a terminal's at once.
+			if c.cl.Class() != protocol.ClassTerminal {
+				d.present(now)
 			}
 		case client.End:
 			if !c.closing.Load() {
