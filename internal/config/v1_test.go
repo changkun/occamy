@@ -404,7 +404,10 @@ func TestOverlap(t *testing.T) {
 
 // TestParseV1Backends checks that every connection and every protocol of
 // adhoc_backends ends up with a backend: its own, or the protocol's
-// default, which is native for ssh and guacd for the others.
+// default, which is native where a native backend exists (ssh and vnc)
+// and guacd for rdp and telnet. For vnc, backend: guacd is an explicit
+// fallback, and tls and ard need no backend key, since native is the
+// default.
 func TestParseV1Backends(t *testing.T) {
 	f, err := parse(t, head+`connections:
   - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
@@ -415,7 +418,9 @@ func TestParseV1Backends(t *testing.T) {
   - {id: f, protocol: vnc, backend: native, ard: true, target: f, tls: {insecure_skip_verify: true}, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
   - {id: g, protocol: rdp, target: g, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: h, protocol: telnet, backend: guacd, target: h, credentials: {prompt: true}, allow: {users: [alice]}}
-adhoc_backends: {vnc: native}
+  - {id: i, protocol: vnc, target: i, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: j, protocol: vnc, ard: true, target: j, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
+  - {id: k, protocol: telnet, target: k, credentials: {prompt: true}, allow: {users: [alice]}}
 `)
 	if err != nil {
 		t.Fatal(err)
@@ -424,16 +429,26 @@ adhoc_backends: {vnc: native}
 	for _, c := range f.Connections {
 		got = append(got, c.ID+":"+c.Backend)
 	}
-	want := []string{"a:native", "b:native", "c:guacd", "d:native", "e:guacd", "f:native", "g:guacd", "h:guacd"}
+	want := []string{"a:native", "b:native", "c:native", "d:native", "e:guacd", "f:native", "g:guacd", "h:guacd", "i:native", "j:native", "k:guacd"}
 	if !slices.Equal(got, want) {
 		t.Errorf("backends %v, want %v", got, want)
 	}
+	// Without adhoc_backends, ad-hoc vnc targets are native too.
 	if want := map[string]string{"ssh": "native", "vnc": "native", "rdp": "guacd", "telnet": "guacd"}; !maps.Equal(f.AdhocBackends, want) {
 		t.Errorf("adhoc_backends %v, want %v", f.AdhocBackends, want)
 	}
+	// adhoc_backends opts ad-hoc vnc targets into guacd, and leaves the
+	// other protocols at their defaults.
+	f, err = parse(t, head+"adhoc_backends: {vnc: guacd}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]string{"ssh": "native", "vnc": "guacd", "rdp": "guacd", "telnet": "guacd"}; !maps.Equal(f.AdhocBackends, want) {
+		t.Errorf("adhoc_backends with vnc: guacd %v, want %v", f.AdhocBackends, want)
+	}
 	for _, tt := range []struct{ protocol, backend, want string }{
-		{"ssh", "", "native"}, {"vnc", "", "guacd"}, {"rdp", "", "guacd"}, {"telnet", "", "guacd"},
-		{"vnc", "native", "native"}, {"rdp", "guacd", "guacd"},
+		{"ssh", "", "native"}, {"vnc", "", "native"}, {"rdp", "", "guacd"}, {"telnet", "", "guacd"},
+		{"vnc", "native", "native"}, {"vnc", "guacd", "guacd"}, {"rdp", "guacd", "guacd"},
 	} {
 		if got := config.BackendOf(tt.protocol, tt.backend); got != tt.want {
 			t.Errorf("BackendOf(%q, %q) = %q, want %q", tt.protocol, tt.backend, got, tt.want)
@@ -780,26 +795,29 @@ connections:
   - {id: b, protocol: rdp, backend: native, target: b, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: c, protocol: telnet, backend: native, target: c, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: d, protocol: vnc, backend: nativ, target: d, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: e, protocol: vnc, target: e, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: e, protocol: vnc, backend: guacd, target: e, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: f, protocol: vnc, backend: guacd, target: f, tls: {insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: g, protocol: vnc, backend: nativ, target: g, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
 			{"connections[0].backend", "ssh connections always use occamyd's native SSH backend"},
 			{"connections[1].backend", "the native RDP backend is not available yet"},
 			{"connections[2].backend", "telnet has no native backend"},
 			{"connections[3].backend", `unknown backend "nativ": use guacd or native`},
-			{"connections[4].tls", "set backend: native"},
-			{"connections[5].tls", "set backend: native"},
+			{"connections[4].tls", "backend: guacd would not: leave backend out, or set native"},
+			{"connections[5].tls", "backend: guacd would not: leave backend out, or set native"},
+			{"connections[6].backend", `unknown backend "nativ": use guacd or native`},
+			{"connections[6].tls", "backend: nativ would not: leave backend out, or set native"},
 		}},
 		{"ard", head + `connections:
   - {id: a, protocol: ssh, ard: true, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: b, protocol: vnc, ard: true, target: b, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: c, protocol: vnc, backend: native, ard: true, tls: {require: true}, target: c, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: vnc, backend: guacd, ard: true, target: b, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: vnc, ard: true, tls: {require: true}, target: c, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: d, protocol: vnc, backend: native, ard: true, tls: {pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, target: d, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: e, protocol: vnc, backend: native, ard: true, tls: {ca_file: DIR/ca.pem}, target: e, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: f, protocol: vnc, backend: native, ard: true, tls: {insecure_skip_verify: true, server_name: mac}, target: f, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
 `, []want{
 			{"connections[0].ard", "only vnc connections have ard"},
-			{"connections[1].ard", "set backend: native"},
+			{"connections[1].ard", "backend: guacd does not: leave backend out, or set native"},
 			{"connections[2].ard", "cannot be allowed while tls requires TLS"},
 			{"connections[3].ard", "cannot be allowed while tls requires TLS"},
 			{"connections[4].ard", "cannot be allowed while tls requires TLS"},

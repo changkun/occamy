@@ -301,8 +301,10 @@ place for fixes that ship on v0 before beta.
     decided; see Implementation notes: Sessions).
   - Per-connection guacd params (an RDP domain per host) have no key
     yet. A per-protocol backend choice is done (`backend` on each
-    connection and `adhoc_backends`), and so is serving the web client
-    from a v1 file (`web_client`, with 009's React client).
+    connection and `adhoc_backends`, with `backend: guacd` as vnc's
+    fallback; see Implementation notes: backends and the API
+    reference), and so is serving the web client from a v1 file
+    (`web_client`, with 009's React client).
   - Document: a password hashing command (`occamyd hash-password`) and
     `conf.yaml` as a v1 example.
 
@@ -700,8 +702,10 @@ place for fixes that ship on v0 before beta.
     bridge for RDP and telnet. No configuration key picked another
     backend then, since `backend:` was new configuration that no spec
     had settled beyond guacd-bridge's parity gate. (Superseded: `backend:`
-    now picks it, and VNC defaults to the bridge; see Implementation
-    notes: backends and the API reference.) RDP gets
+    now picks it; VNC defaulted to the bridge for a while, and since the
+    owner's decision of 2026-10-31 defaults to native again, with
+    `backend: guacd` as a fallback; see Implementation notes: backends
+    and the API reference.) RDP gets
     `disable-gfx: "true"` unless `guacd.params.rdp` sets it, trading the
     graphics pipeline's bandwidth, saved between guacd and the remote
     rather than on the viewers' links, for exact colours (guacd-bridge's
@@ -928,8 +932,11 @@ place for fixes that ship on v0 before beta.
   - VNC defaults to the native backend, where guacd-bridge's parity gate
     keeps the bridge until beta.2 with the native backend behind
     `backend: native`; with no `backend:` key, a v1 file cannot send VNC
-    through the bridge. (Resolved: VNC now defaults to the bridge, and
-    `backend: native` opts in.) telnet goes through the bridge for any configured
+    through the bridge. (Resolved: `backend:` picks the bridge. VNC
+    defaulted to it for a while, with `backend: native` opting in; since
+    the owner's decision of 2026-10-31, under which the parity gate no
+    longer holds a native default back, VNC defaults to native again and
+    `backend: guacd` opts into the bridge.) telnet goes through the bridge for any configured
     connection: the connection is the opt-in that guacd-bridge's
     Registration row asks for.
   - The row named the native SSH backend and the bridge; native VNC
@@ -981,8 +988,9 @@ place for fixes that ship on v0 before beta.
 - **Follow-ups:**
   - A per-connection `backend:` key (guacd-bridge's parity gate), `term`
     for ssh (the backend's `xterm-256color` until then) and per-connection
-    guacd parameters. The `backend:` key is done, with `adhoc_backends`;
-    the other two are not.
+    guacd parameters. The `backend:` key is done, with `adhoc_backends`
+    (Implementation notes: backends and the API reference); the other
+    two are not.
   - VNC phase 3's user name and TLS policy (done in review, once #106
     merged): `credentials.username` reaches `vnc.Config.Username`, and a
     vnc connection's `tls` block (`config.ConnectionTLS`: `require`,
@@ -1854,16 +1862,19 @@ to the VNC backend.
 
 - **Status.** Done in the change that started VNC's opt-in period
   ([guacd-bridge](guacd-bridge.md), Implementation notes: the opt-in
-  period).
+  period). The owner's decision of 2026-10-31 ended that period: native
+  is vnc's default again, and `backend: guacd` is an explicit fallback
+  (guacd-bridge, Implementation notes: native by default).
 - **What was done.**
   - Configuration v1: `backend` on each connection (`guacd` or
-    `native`, filled with the protocol's default: `native` for ssh,
-    `guacd` for the others), `adhoc_backends` for ad-hoc targets by
-    protocol, and `ard` on vnc connections
+    `native`, filled with the protocol's default: `native` for ssh and,
+    since 2026-10-31, vnc; `guacd` for rdp and telnet), `adhoc_backends`
+    for ad-hoc targets by protocol, and `ard` on vnc connections
     ([native-vnc-backend](native-vnc-backend.md), Implementation notes:
     registration). ssh refuses `guacd`, rdp refuses `native` until NLA
     has run end to end, telnet has no native backend, and `tls` and
-    `ard` need `backend: native`.
+    `ard` need the native backend, so they are refused with
+    `backend: guacd`.
   - The backend factory is keyed by protocol and backend; `POST
     /api/v1/sessions`, the connection stream and the ad-hoc path look
     up the connection's or `adhoc_backends`' backend. The session's
@@ -1907,6 +1918,10 @@ to the VNC backend.
   the native backend served checking a VeNCrypt certificate against
   the system's roots, now goes through guacd, which checks none. No
   release served v1 files' vnc connections, so no release changes.
+  (Reverted on 2026-10-31 by the owner's decision: vnc connections
+  without `backend` go native again, checking VeNCrypt certificates as
+  before, and only one with `backend: guacd` goes through guacd, which
+  cannot be combined with `tls` or `ard`.)
 - **Review.** An independent review with mutation testing found no
   bug in the production code; the tests it asked for were added:
   `TestConnectionTarget` sets every field of a connection and wants

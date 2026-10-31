@@ -61,7 +61,8 @@ In scope:
 5. Graphics pipeline: framebuffer, damage tracking, lossless and lossy
    tiles.
 6. Native SSH backend, with terminals rendered by the client.
-7. Native VNC backend.
+7. Native VNC backend, vnc's default (the owner's decision of
+   2026-10-31), with the guacd bridge as an explicit fallback.
 8. RDP through the guacd bridge until its native backend takes over by
    rc.1, and telnet, which gets no native backend, through guacd until
    guacd is removed. Where a native backend exists it is the default,
@@ -102,10 +103,14 @@ not, an isolated helper process takes its place, the one exception to
 "no external process", and still free of Guacamole.
 
 The owner's calls on 2026-10-31 sharpen this. Native is the default
-wherever a native backend exists. guacd stays only as an explicit
-`backend: guacd` fallback and as the benchmark's baseline, and is
-deleted per protocol once the benchmark shows the native backend at
-least 10x better. RDP is native in v1.0, with no helper
+wherever a native backend exists, so VNC is native by default now, and
+the parity criteria no longer gate a switch of default. guacd stays only
+as an explicit `backend: guacd` fallback and as the benchmark's
+baseline, and is deleted per protocol once the benchmark shows the
+native backend at least 10x better than the guacd baseline on each
+scenario's primary metric and the parity matrix passes
+([guacd-bridge](008-native-architecture/guacd-bridge.md), Parity
+gate). RDP is native in v1.0, with no helper
 ([rdp-strategy](008-native-architecture/rdp-strategy.md) decision 5),
 and Windows is checked later, once a host is available. v1.0 also needs
 a native Kubernetes backend (pod exec), specified separately, and the
@@ -115,10 +120,10 @@ stays on guacd and is dropped when guacd is removed.
 | Milestone | Delivers | guacd needed for |
 |-----------|----------|------------------|
 | v0.5.0 ([005](005-upstream-guacamole.md), released 2026-10-29) | `occamyd` without cgo; everything through guacd | VNC, SSH, RDP |
-| v1.0.0-beta.1 | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, web client on v1 | VNC, RDP |
-| v1.0.0-beta.2 | Native VNC | RDP |
-| v1.0.0-rc.1 | API and protocol frozen; native RDP; Swift client preview | nothing |
-| v1.0.0 | No guacd and no Guacamole protocol; the v0 routes are removed | nothing |
+| v1.0.0-beta.1 | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, native VNC as vnc's default, web client on v1 | RDP; VNC only with `backend: guacd` |
+| v1.0.0-beta.2 | Native VNC through the parity gate: VNC's guacd fallback deleted once the benchmark shows native at least 10x better | RDP |
+| v1.0.0-rc.1 | API and protocol frozen; native RDP as rdp's default; Swift client preview | nothing by default; any fallback still short of the gate |
+| v1.0.0 | No guacd and no Guacamole protocol, so no telnet; the v0 routes are removed | nothing |
 | v1.x | Kerberos, audio and the rest of RDP's later scope per [rdp-strategy](008-native-architecture/rdp-strategy.md) | nothing |
 
 The last column leaves out telnet, which needs guacd for as long as

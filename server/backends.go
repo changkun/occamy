@@ -90,9 +90,9 @@ func (b backends) serves(protocol string) bool {
 }
 
 // newBackends returns the factory: the native SSH backend for ssh, the
-// native VNC backend for vnc with backend: native, and the guacd bridge
-// at g for vnc, rdp and telnet. The native RDP backend is not
-// registered until NLA has run end to end
+// native VNC backend for vnc, its default, and the guacd bridge at g for
+// rdp and telnet, and for vnc with backend: guacd. The native RDP
+// backend is not registered until NLA has run end to end
 // (specs/008-native-architecture/native-rdp-backend.md), and the
 // configuration refuses backend: native for rdp.
 func newBackends(g config.Guacd) backends {

@@ -15,8 +15,10 @@ import (
 )
 
 // TestDemoV1File checks that the demo stack's v1 file loads, with the
-// backends of its connections and the image's web client, and that its
-// user's password is the one docker/occamy-v1.yaml and tests/ give.
+// backends that its connections compare: ssh on the native SSH backend,
+// vnc-native on vnc's default, native, and vnc-guacd on the guacd
+// fallback it asks for. It also checks the image's web client, and that
+// its user's password is the one docker/occamy-v1.yaml and tests/ give.
 func TestDemoV1File(t *testing.T) {
 	raw, err := os.ReadFile("../../docker/occamy-v1.yaml")
 	if err != nil {

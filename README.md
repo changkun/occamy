@@ -22,7 +22,7 @@ Guacamole protocol and no v0 routes
 
 | Protocol | v0 (released) | v1 (`master`) |
 |----------|---------------|---------------|
-| VNC | Through guacd, verified end to end | Through guacd, or native with `backend: native` |
+| VNC | Through guacd, verified end to end | Native by default, or through guacd with `backend: guacd` |
 | SSH | Through guacd, verified end to end, including repeated sessions | Native |
 | RDP | Through guacd, verified against xrdp | Through guacd; the native backend is built but not yet served |
 
@@ -201,8 +201,9 @@ API v1 and the web client, at http://localhost:5637/static/, from the v1
 file [docker/occamy-v1.yaml](./docker/occamy-v1.yaml), with the user
 `demo` and the password `occamy`: the SSH server as the connection `ssh`,
 through `occamyd`'s own SSH client, and the VNC server as `vnc-native`,
-through `occamyd`'s own VNC client (`backend: native`), and as
-`vnc-guacd`, through guacd.
+through `occamyd`'s own VNC client, vnc's default, and as `vnc-guacd`,
+through guacd (`backend: guacd`), the fallback that the benchmark
+compares against.
 
 Here is a working video demo:
 
