@@ -89,6 +89,14 @@ func (c *Client) newChannels() []*vchannel {
 			handle:  (*Client).cliprdrMessage,
 		})
 	}
+	if c.cfg.Resize {
+		chans = append(chans, &vchannel{
+			name:    "drdynvc",
+			options: chanOptionInitialized | chanOptionEncryptRDP,
+			limit:   maxDrdynvcMessage,
+			handle:  (*Client).drdynvcMessage,
+		})
+	}
 	return chans
 }
 
@@ -243,8 +251,10 @@ func (c *Client) writeDue() error {
 	if c.chio.err != nil {
 		return c.chio.err
 	}
+	now := c.clock()
 	c.chio.mu.Lock()
 	msgs := c.cliprdrDue(nil)
+	msgs = c.dynvcDue(msgs, now)
 	c.chio.mu.Unlock()
 	for _, m := range msgs {
 		if err := c.sendChannel(m.vc, m.encode()); err != nil {

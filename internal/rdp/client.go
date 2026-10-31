@@ -72,6 +72,10 @@ type Config struct {
 	// ClipboardToServer, the default, the client does not ask for the
 	// channel.
 	Clipboard ClipboardMode
+	// Resize asks for the dynamic virtual channels (DRDYNVC) and accepts
+	// the server's Display Control channel, through which RequestSize
+	// asks the server to resize the desktop (dynvc.go).
+	Resize bool
 	// Logger receives warnings; nil means slog.Default().
 	Logger *slog.Logger
 
@@ -130,11 +134,16 @@ type Client struct {
 	caps       serverCaps
 
 	// channels are the static virtual channels the client asked for;
-	// clipCh is the clipboard's among them, or nil.
+	// clipCh is the clipboard's among them and dynCh DRDYNVC's, or nil.
 	channels []*vchannel
 	clipCh   *vchannel
+	dynCh    *vchannel
 	chio     channelIO
 	clip     cliprdr // under chio.mu
+	dvc      dynvc   // under chio.mu
+	disp     display // under chio.mu
+	// layoutEvery and layoutRetry pace monitor layouts (dynvc.go).
+	layoutEvery, layoutRetry time.Duration
 
 	fastPathInput atomic.Bool
 
@@ -143,6 +152,9 @@ type Client struct {
 	height    int
 	stats     Stats
 	finalized bool
+	// suppressed is the last Suppress Output's: the client repeats it
+	// after a reactivation.
+	suppressed bool
 
 	// Owned by Connect, then Run.
 	ctx        context.Context // ends a wait; Background if nil
@@ -270,11 +282,17 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 		stats:  Stats{Bitmaps: map[string]int{}, Ignored: map[string]int{}},
 		ctx:    ctx,
 		chio:   channelIO{kick: make(chan struct{}, 1)},
+
+		layoutEvery: layoutEvery,
+		layoutRetry: layoutRetry,
 	}
 	c.channels = c.newChannels()
 	for _, vc := range c.channels {
-		if vc.name == "cliprdr" {
+		switch vc.name {
+		case "cliprdr":
 			c.clipCh = vc
+		case "drdynvc":
+			c.dynCh = vc
 		}
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Unix(1, 0)) })
@@ -545,9 +563,11 @@ func (c *Client) Finalized() bool {
 
 // SuppressOutput tells the server to stop or resume sending screen
 // updates, [MS-RDPBCGR] 2.2.11.3. On resuming, the server redraws the
-// desktop.
+// desktop. The client tells a server that reactivates the session, as
+// on a resize, to stop again.
 func (c *Client) SuppressOutput(suppress bool) error {
 	c.mu.Lock()
+	c.suppressed = suppress
 	body := c.suppressOutput(!suppress)
 	c.mu.Unlock()
 	return c.sendData(pdu2SuppressOutput, body)
@@ -705,6 +725,7 @@ func (c *Client) activate(out Output, body []byte) error {
 	resized := c.width != caps.width || c.height != caps.height
 	c.width, c.height = caps.width, caps.height
 	c.finalized = false
+	suppressed := c.suppressed
 	c.mu.Unlock()
 	c.fastPathInput.Store(caps.inputFlags&(inputFlagFastPathInput|inputFlagFastPathInput2) != 0)
 	if err := c.sendIO(c.confirmActive()); err != nil {
@@ -712,6 +733,16 @@ func (c *Client) activate(out Output, body []byte) error {
 	}
 	if err := c.finalize(); err != nil {
 		return err
+	}
+	if suppressed {
+		// The server's output state after a reactivation is its own; tell
+		// it again that nobody can see.
+		if err := c.sendData(pdu2SuppressOutput, c.suppressOutput(false)); err != nil {
+			return err
+		}
+	}
+	if c.dynCh != nil {
+		c.due() // a size asked for may now be due, or no longer
 	}
 	if out != nil && resized {
 		if err := c.waitResize(); err != nil {
