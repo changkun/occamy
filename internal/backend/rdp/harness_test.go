@@ -271,7 +271,8 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 }
 
-// next returns the next message from the backend that is not empty.
+// next returns the next message from the backend that is not empty: a
+// share data PDU, input, or a message on a static channel.
 func next(t *testing.T, c *rdptest.Conn) rdptest.Message {
 	t.Helper()
 	c.SetReadDeadline(time.Now().Add(timeout))
@@ -280,7 +281,7 @@ func next(t *testing.T, c *rdptest.Conn) rdptest.Message {
 		if err != nil {
 			t.Fatalf("reading from the backend: %v", err)
 		}
-		if len(m.Events) > 0 || m.Type2 != 0 {
+		if !m.Empty() {
 			return m
 		}
 	}
@@ -296,8 +297,8 @@ func events(t *testing.T, c *rdptest.Conn, n int) []rdptest.Event {
 		if m.Type2 == rdptest.PDU2SuppressOutput {
 			continue
 		}
-		if m.Type2 != 0 && m.Type2 != rdptest.PDU2Input {
-			t.Fatalf("share data PDU %#x, want input", m.Type2)
+		if m.Channel != "" || m.Type2 != 0 && m.Type2 != rdptest.PDU2Input {
+			t.Fatalf("share data PDU %#x, channel %q; want input", m.Type2, m.Channel)
 		}
 		evs = append(evs, m.Events...)
 	}
@@ -308,7 +309,7 @@ func events(t *testing.T, c *rdptest.Conn, n int) []rdptest.Event {
 }
 
 // quietFor checks that the backend sends nothing but Suppress Output
-// PDUs for silence.
+// PDUs for silence: no input and no message on a channel.
 func quietFor(t *testing.T, c *rdptest.Conn) {
 	t.Helper()
 	c.SetReadDeadline(time.Now().Add(silence))
@@ -321,8 +322,8 @@ func quietFor(t *testing.T, c *rdptest.Conn) {
 		if err != nil {
 			t.Fatalf("reading from the backend: %v", err)
 		}
-		if len(m.Events) > 0 {
-			t.Fatalf("the backend sent %+v", m.Events)
+		if len(m.Events) > 0 || m.Channel != "" {
+			t.Fatalf("the backend sent %+v", m)
 		}
 	}
 }

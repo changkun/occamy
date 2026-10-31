@@ -9,8 +9,6 @@ affects:
   - CODE_OF_CONDUCT.md
   - CONTRIBUTING.md
   - LICENSE
-  - client/occamy-web/LICENSE.guacamole
-  - client/occamy-web/NOTICE.guacamole
   - .goreleaser.yaml
   - scripts/third-party-licenses.sh
   - .github/
@@ -19,7 +17,7 @@ affects:
   - Makefile
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -95,11 +93,15 @@ publishes checksummed, attested artifacts.
   report, `THIRD_PARTY_LICENSES`, written by
   `scripts/third-party-licenses.sh`. `go-licenses check` gates
   dependencies in CI.
-- Since [remove-libguac](005-upstream-guacamole/remove-libguac.md), the
-  Apache files live in `client/occamy-web/` as `LICENSE.guacamole` and
-  `NOTICE.guacamole`, for the web client's fork of guacamole-common-js
-  0.9.14. The image keeps them under `/occamy/licenses/guacamole/`, and the
-  web client archive carries them.
+- From [remove-libguac](005-upstream-guacamole/remove-libguac.md) until
+  [009](009-react-web-client.md), the Apache files lived in
+  `client/occamy-web/` as `LICENSE.guacamole` and `NOTICE.guacamole`, for
+  the web client's fork of guacamole-common-js 0.9.14. 009's React
+  client replaced the fork, and they went. The web client's build now
+  writes the licenses of the packages it bundles to
+  `dist/THIRD_PARTY_LICENSES.md` (Vite's `build.license`), which the
+  image keeps under `/occamy/licenses/web/` and the web client archive
+  carries in `dist/`.
 
 ### Versioning and changelog
 
@@ -155,37 +157,38 @@ publishes checksummed, attested artifacts.
 
 Added to "Builds":
 
-- `go test -race` in the `go` job, which has libguac installed;
+- `go test -race` in the `go` job, which had libguac installed until
+  [remove-libguac](005-upstream-guacamole/remove-libguac.md);
 - `on: push` limited to `master`, plus `pull_request`, so a PR branch no
   longer runs every job twice;
-- a `govulncheck` job;
+- `govulncheck`, as the `Vulnerabilities` step of the `go` job;
 - `.github/dependabot.yml` for `gomod`, `npm` (`client/occamy-web`),
   `github-actions` and `docker` (`docker/`, `docker/demo/*`). It runs
   weekly with grouped minor and patch updates.
 
 ### Release pipeline
 
-`.github/workflows/release.yml` runs on `v*` tags, and on
-`workflow_dispatch` as a dry run that builds everything and publishes
-nothing. It has four jobs:
+`.github/workflows/release.yml` runs on `v*` tags, and as a dry run
+that builds everything and publishes nothing on `workflow_dispatch` and
+on pull requests that change the release build. It has five jobs:
 
-1. **image**:
-   - builds `docker/Dockerfile` natively on `ubuntu-latest` (amd64) and
-     `ubuntu-24.04-arm` (arm64), which is faster than QEMU;
-   - pushes by digest to `ghcr.io/changkun/occamy`, then merges a
-     multi-arch manifest tagged with the version, plus `latest` for
-     non-prereleases;
+1. **image**: builds `docker/Dockerfile` natively on `ubuntu-latest`
+   (amd64) and `ubuntu-24.04-arm` (arm64), which is faster than QEMU,
+   and pushes each by digest to `ghcr.io/changkun/occamy`.
+2. **manifest**, on tags only:
+   - merges the digests into a multi-arch manifest tagged with the
+     version, plus `latest` for non-prereleases;
    - attests build provenance with `actions/attest-build-provenance`
      (`push-to-registry: true`).
-2. **web**: builds `client/occamy-web` into
+3. **web**: builds `client/occamy-web` into
    `occamy-web-<version>.tar.gz`.
-3. **binaries**, after
+4. **binaries**, after
    [remove-libguac](005-upstream-guacamole/remove-libguac.md):
    - GoReleaser builds `occamyd` with `CGO_ENABLED=0` for
      linux/darwin/windows × amd64/arm64;
    - archives include `LICENSE`, `README.md`, `conf.yaml` and the
      third-party license report.
-4. **release**:
+5. **release**:
    - writes `SHA256SUMS` over all files;
    - attests provenance for every file;
    - runs `gh release create` with the changelog section as notes, marked
@@ -329,7 +332,7 @@ report comes from a script rather than `go-licenses report`, with
   - **Community.** `CHANGELOG.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`,
     `CONTRIBUTING.md`, issue forms and a PR template.
   - **CI.** `go test -race`, govulncheck and the `master`-only push
-    trigger, plus Dependabot for gomod, npm, actions and the five Docker
+    trigger, plus Dependabot for gomod, npm, actions and the four Docker
     directories. Since #65, also a build-only macOS and Windows job. Since
     #66, `go-licenses check`.
   - **Release.** `release.yml` has image (native amd64 and arm64), manifest,

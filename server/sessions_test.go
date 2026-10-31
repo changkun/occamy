@@ -641,6 +641,8 @@ func TestConnectionTarget(t *testing.T) {
 		HostKeys: []string{fakeHostKey}, InsecureIgnoreHostKey: true,
 		TLS:         config.ConnectionTLS{Require: true, ServerName: "mac", CAFile: "/ca.pem", Pins: []string{"SHA256:pin"}, InsecureSkipVerify: true},
 		ARD:         true,
+		Security:    "tls",
+		Kubernetes:  config.Kubernetes{Namespace: "web", Pod: "web-0", Container: "app", Command: []string{"sh"}},
 		Credentials: config.Credentials{Username: "studio", PasswordFile: "/password", Prompt: true},
 		Allow:       config.Allow{Users: []string{"alice"}},
 	}
@@ -654,6 +656,8 @@ func TestConnectionTarget(t *testing.T) {
 		insecureIgnoreHostKey: true,
 		tls:                   c.TLS,
 		ard:                   true,
+		security:              "tls",
+		kubernetes:            c.Kubernetes,
 	}
 	if got := connectionTarget(&c); !reflect.DeepEqual(got, want) {
 		t.Errorf("connectionTarget = %+v, want %+v", got, want)
@@ -740,5 +744,9 @@ func TestAdhocTargets(t *testing.T) {
 		if info := ts.s.session(o.ID); info == nil || info.owner != (principal{issuer: auth.Issuer, idp: auth.IdPLocal, subject: "carol"}) || info.connection != "" {
 			t.Errorf("%s: session %+v", tt.body, info)
 		}
+	}
+	// occamyd serves kubernetes, but only to the registry's connections.
+	if r := ts.api(t, http.MethodPost, "/api/v1/sessions", carol, `{"protocol":"kubernetes","target":"10.0.0.9:443"}`); r.code != http.StatusBadRequest || !strings.Contains(string(r.body), "kubernetes has no ad-hoc targets") {
+		t.Errorf("an ad-hoc kubernetes target: %d %s", r.code, r.body)
 	}
 }

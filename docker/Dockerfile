@@ -2,7 +2,7 @@
 # Use of this source code is governed by a MIT
 # license that can be found in the LICENSE file.
 
-# Stage 1: build the web client demo.
+# Stage 1: build the web client.
 FROM node:25-trixie-slim AS web
 WORKDIR /occamy/client/occamy-web
 COPY client/occamy-web/package.json client/occamy-web/package-lock.json ./
@@ -34,15 +34,17 @@ RUN mkdir -p /licenses/xxh3 /licenses/cpuid \
 	&& cp "$(go list -m -f '{{.Dir}}' github.com/klauspost/cpuid/v2)/LICENSE" /licenses/cpuid/
 
 # Stage 3: runtime image, without a shell or C libraries, running as the
-# unprivileged user nonroot. occamyd writes no files.
+# unprivileged user nonroot. occamyd writes one file, and only for a v1
+# file: if auth.signing_key_file does not exist, it creates the signing
+# key there at start, through a temporary file in the same directory, so
+# that directory must exist and be writable by nonroot, such as a volume
+# or a tmpfs (docker-compose.yaml mounts one at /run/occamy).
 FROM gcr.io/distroless/static-debian13:nonroot
 WORKDIR /occamy
 COPY --from=build /occamy/occamyd ./
 COPY conf.yaml ./
 COPY LICENSE ./licenses/
 COPY --from=build /occamy/THIRD_PARTY_LICENSES ./licenses/
-COPY client/occamy-web/LICENSE.guacamole ./licenses/guacamole/LICENSE
-COPY client/occamy-web/NOTICE.guacamole ./licenses/guacamole/NOTICE
 COPY --from=build /licenses/vpx ./licenses/vpx/
 COPY --from=build /licenses/jpegn ./licenses/jpegn/
 COPY --from=build /licenses/xxh3 ./licenses/xxh3/
@@ -51,6 +53,9 @@ COPY --from=build /licenses/cpuid ./licenses/cpuid/
 # jpegli, whose notice jpegn's own LICENSE does not carry.
 COPY third_party/jpegli/LICENSE ./licenses/jpegli/
 COPY --from=web /occamy/client/occamy-web/dist ./client/occamy-web/dist
+# The licenses of the packages the web client bundles, which its build
+# collects.
+COPY --from=web /occamy/client/occamy-web/dist/THIRD_PARTY_LICENSES.md ./licenses/web/
 
 EXPOSE 5636
 CMD ["/occamy/occamyd"]

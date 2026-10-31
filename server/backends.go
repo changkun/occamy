@@ -10,14 +10,19 @@ import (
 	"fmt"
 	"maps"
 	"net"
+	"slices"
+	"strings"
 	"sync"
 
 	"changkun.de/x/occamy/internal/backend"
 	bridge "changkun.de/x/occamy/internal/backend/guacd"
+	"changkun.de/x/occamy/internal/backend/kubernetes"
+	"changkun.de/x/occamy/internal/backend/rdp"
 	"changkun.de/x/occamy/internal/backend/ssh"
 	"changkun.de/x/occamy/internal/backend/vnc"
 	"changkun.de/x/occamy/internal/config"
 	"changkun.de/x/occamy/internal/guacd"
+	rdpproto "changkun.de/x/occamy/internal/rdp"
 )
 
 // target is what a session connects to: a connection of the registry, or
@@ -36,10 +41,17 @@ type target struct {
 	// The host key policy of an ssh target.
 	hostKeys              []string
 	insecureIgnoreHostKey bool
-	// tls is the certificate policy of a vnc target, and ard allows its
-	// Apple Remote Desktop authentication.
+	// tls is the certificate policy of a vnc or rdp target or of a
+	// kubernetes target's API server, and ard allows a vnc target's Apple
+	// Remote Desktop authentication.
 	tls config.ConnectionTLS
 	ard bool
+	// security is the security mode of an rdp target on the native
+	// backend, empty for its default.
+	security string
+	// kubernetes is the pod of a kubernetes target, whose addr is the
+	// API server's.
+	kubernetes config.Kubernetes
 }
 
 // screen is the size that the owner's hello asks for: pixels for a
@@ -52,8 +64,8 @@ type screen struct {
 
 // backendMaker makes the backend of one session.
 type backendMaker struct {
-	// name is the backend as the session's state reports it: ssh, vnc or
-	// guacd.
+	// name is the backend as the session's state reports it: ssh, vnc,
+	// rdp, kubernetes or guacd.
 	name string
 	make func(t target, s screen) (backend.Backend, error)
 }
@@ -90,15 +102,17 @@ func (b backends) serves(protocol string) bool {
 }
 
 // newBackends returns the factory: the native SSH backend for ssh, the
-// native VNC backend for vnc with backend: native, and the guacd bridge
-// at g for vnc, rdp and telnet. The native RDP backend is not
-// registered until NLA has run end to end
-// (specs/008-native-architecture/native-rdp-backend.md), and the
-// configuration refuses backend: native for rdp.
+// native VNC and RDP backends for vnc and rdp, their default, the
+// native Kubernetes backend for kubernetes, and the guacd bridge at g
+// for telnet, and for vnc and rdp with backend: guacd. kubernetes has
+// no guacd backend
+// (specs/008-native-architecture/native-kubernetes-backend.md).
 func newBackends(g config.Guacd) backends {
 	b := backends{}
 	b.register("ssh", config.BackendNative, "ssh", newSSH)
 	b.register("vnc", config.BackendNative, "vnc", newVNC)
+	b.register("rdp", config.BackendNative, "rdp", newRDP)
+	b.register("kubernetes", config.BackendNative, "kubernetes", newKubernetes)
 	for _, p := range []string{"vnc", "rdp", "telnet"} {
 		b.register(p, config.BackendGuacd, "guacd", newBridge(g, p))
 	}
@@ -195,6 +209,54 @@ func vncConfig(t target) (vnc.Config, error) {
 	return cfg, nil
 }
 
+// newKubernetes makes a native Kubernetes backend, which runs the
+// connection's command in its pod, or attaches to the container, through
+// the API server at t.addr, in a terminal of the hello's size.
+func newKubernetes(t target, s screen) (backend.Backend, error) {
+	cfg, err := kubernetesConfig(t)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Cols, cfg.Rows = s.cols, s.rows
+	return kubernetes.New(cfg)
+}
+
+// kubernetesConfig is the native Kubernetes backend's configuration for
+// t, with the token and the CA file read.
+func kubernetesConfig(t target) (kubernetes.Config, error) {
+	roots, err := t.tls.RootCAs()
+	if err != nil {
+		return kubernetes.Config{}, fmt.Errorf("reading the CA file: %w", err)
+	}
+	k := t.kubernetes
+	cfg := kubernetes.Config{
+		Addr:        t.addr,
+		Namespace:   k.Namespace,
+		Pod:         k.Pod,
+		Container:   k.Container,
+		Command:     k.Command,
+		Attach:      k.Attach,
+		NoTTY:       k.TTY != nil && !*k.TTY,
+		PromptToken: t.creds.Prompt,
+		CertFile:    t.creds.ClientCertFile,
+		KeyFile:     t.creds.ClientKeyFile,
+		TLS: kubernetes.TLS{
+			ServerName:         t.tls.ServerName,
+			RootCAs:            roots,
+			Pins:               t.tls.Pins,
+			InsecureSkipVerify: t.tls.InsecureSkipVerify,
+		},
+	}
+	if t.creds.TokenFile != "" || t.creds.TokenEnv != "" {
+		token, err := t.creds.Token()
+		if err != nil {
+			return kubernetes.Config{}, fmt.Errorf("reading the token: %w", err)
+		}
+		cfg.Token = kubernetes.Token(token)
+	}
+	return cfg, nil
+}
+
 // ardSetting names, for the error of a server that offers only Apple
 // Remote Desktop authentication, the configuration key that allows it.
 func ardSetting(t target) string {
@@ -202,6 +264,73 @@ func ardSetting(t target) string {
 		return "ard: true on a connection for this target (ad-hoc targets have no ard)"
 	}
 	return fmt.Sprintf("ard: true on connection %q", t.connection)
+}
+
+// newRDP makes a native RDP backend, which connects with the desktop size
+// of the owner's hello, within the sizes an RDP desktop may have.
+func newRDP(t target, s screen) (backend.Backend, error) {
+	cfg, err := rdpConfig(t)
+	if err != nil {
+		return nil, err
+	}
+	cfg.Width, cfg.Height = rdpSize(s)
+	return rdp.New(cfg)
+}
+
+// rdpSize is the desktop size to connect with for the hello's size:
+// zero, for the backend's default, without both sides; otherwise each
+// side within rdp.MinSide and rdp.MaxSide, and the height cut until the
+// area is within rdp.MaxPixels. Viewers scale what does not fit.
+func rdpSize(s screen) (width, height int) {
+	if s.width <= 0 || s.height <= 0 {
+		return 0, 0
+	}
+	width = min(max(s.width, rdp.MinSide), rdp.MaxSide)
+	height = min(max(s.height, rdp.MinSide), rdp.MaxSide, rdp.MaxPixels/width)
+	return width, height
+}
+
+// rdpConfig is the native RDP backend's configuration for t, with the
+// password and the CA file read. The backend splits a username of the
+// form DOMAIN\user.
+func rdpConfig(t target) (rdp.Config, error) {
+	pw, err := password(t.creds)
+	if err != nil {
+		return rdp.Config{}, err
+	}
+	roots, err := t.tls.RootCAs()
+	if err != nil {
+		return rdp.Config{}, fmt.Errorf("reading the CA file: %w", err)
+	}
+	cfg := rdp.Config{
+		Addr:     t.addr,
+		Username: t.creds.Username,
+		Password: pw,
+		Security: t.security,
+		TLS: rdpproto.TLS{
+			ServerName:         t.tls.ServerName,
+			RootCAs:            roots,
+			Pins:               t.tls.Pins,
+			InsecureSkipVerify: t.tls.InsecureSkipVerify,
+		},
+		SecuritySetting: securitySetting(t),
+	}
+	// An ad-hoc target's address is the one its name resolved to, and
+	// the certificate names the name.
+	if cfg.TLS.ServerName == "" {
+		cfg.TLS.ServerName = t.name
+	}
+	return cfg, nil
+}
+
+// securitySetting names, for the error of a server that selects
+// standard RDP security when offered NLA alone, the configuration key
+// that lets it take TLS.
+func securitySetting(t target) string {
+	if t.connection == "" {
+		return "security: tls on a connection for this target (ad-hoc rdp targets take NLA alone)"
+	}
+	return fmt.Sprintf("security: tls on connection %q", t.connection)
 }
 
 // newBridge returns the maker of protocol's sessions through guacd at g.
@@ -219,6 +348,64 @@ func newBridge(g config.Guacd, protocol string) func(target, screen) (backend.Ba
 		}
 		return bridge.New(g.Address, cfg, bridge.Options{}), nil
 	}
+}
+
+// loadWarnings returns what occamyd warns of when it loads f.
+//
+// One warning names, per protocol, the guacd.params that no session
+// reads, since the native backends read none of them, and says why in
+// the protocol's terms. That happens when no connection of that
+// protocol goes through guacd, and ad-hoc targets of that protocol
+// either do not go through guacd or take only the display's
+// parameters. A file written for guacd, with disable-copy or
+// recording-path, would otherwise lose them unnoticed when its
+// connections moved to a native default. With legacy_v0, the v0 routes
+// pass every parameter to their sessions, so nothing is unused.
+//
+// Another names each rdp connection that sends the password inside TLS
+// without checking the certificate: security tls or any, which may
+// skip NLA, with tls.insecure_skip_verify.
+func loadWarnings(f *config.File) []string {
+	var warnings []string
+	for _, p := range slices.Sorted(maps.Keys(f.Guacd.Params)) {
+		if f.LegacyV0 || slices.ContainsFunc(f.Connections, func(c config.Connection) bool {
+			return c.Protocol == p && config.BackendOf(p, c.Backend) == config.BackendGuacd
+		}) {
+			continue
+		}
+		adhoc := f.AllowAdhocTargets && config.BackendOf(p, f.AdhocBackends[p]) == config.BackendGuacd
+		var unused []string
+		for _, name := range slices.Sorted(maps.Keys(f.Guacd.Params[p])) {
+			if !adhoc || !adhocParams[name] {
+				unused = append(unused, name)
+			}
+		}
+		if len(unused) == 0 {
+			continue
+		}
+		var why string
+		switch {
+		case p == "ssh":
+			why = "ssh never goes through guacd"
+		case config.DefaultBackend(p) == config.BackendGuacd:
+			why = fmt.Sprintf("no %s connection is configured", p)
+		default:
+			why = fmt.Sprintf("no %s connection sets backend: guacd", p)
+		}
+		if adhoc {
+			why += fmt.Sprintf(", and ad-hoc %s targets take only the display's parameters", p)
+		}
+		warnings = append(warnings, fmt.Sprintf("guacd.params.%s sets %s, which no session reads: %s",
+			p, strings.Join(unused, ", "), why))
+	}
+	// The file allows security on native rdp connections alone.
+	for _, c := range f.Connections {
+		if (c.Security == rdp.SecurityTLS || c.Security == rdp.SecurityAny) && c.TLS.InsecureSkipVerify {
+			warnings = append(warnings, fmt.Sprintf("connection %q: security: %s may send the password inside TLS whose certificate tls.insecure_skip_verify accepts unchecked, so anyone in between can read it; for demos only",
+				c.ID, c.Security))
+		}
+	}
+	return warnings
 }
 
 // adhocParams are the guacd parameters that an ad-hoc target takes from

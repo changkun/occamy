@@ -5,6 +5,7 @@
 package config_test
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -22,6 +23,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"changkun.de/x/occamy/internal/backend/kubernetes"
 	"changkun.de/x/occamy/internal/config"
 )
 
@@ -163,6 +165,7 @@ func TestParseV1Example(t *testing.T) {
 		"etc/occamy/keys/deploy",
 		"run/secrets/oidc-client-secret",
 		"run/secrets/windows-password",
+		"run/secrets/k8s-token",
 	} {
 		p := filepath.Join(dir, name)
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
@@ -173,6 +176,7 @@ func TestParseV1Example(t *testing.T) {
 		}
 	}
 	writePublicKey(t, filepath.Join(dir, "etc/occamy/gateway.pub"))
+	writeCertificate(t, filepath.Join(dir, "etc/occamy/k8s-ca.crt"))
 	// The signing key is created on first start, so only its directory
 	// exists.
 	if err := os.MkdirAll(filepath.Join(dir, "var/lib/occamy"), 0o700); err != nil {
@@ -185,6 +189,7 @@ func TestParseV1Example(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := func(name string) string { return filepath.Join(dir, name) }
+	yes := true
 	want := &config.File{
 		Version: 1,
 		Listen:  "0.0.0.0:5636",
@@ -234,8 +239,14 @@ func TestParseV1Example(t *testing.T) {
 				Allow:       config.Allow{Users: []string{"alice"}},
 			},
 			{
-				ID: "windows", Name: "Windows workstation", Protocol: "rdp", Target: "10.0.4.20:3389", Backend: "guacd",
+				ID: "windows", Name: "Windows workstation", Protocol: "rdp", Target: "10.0.4.20:3389", Backend: "native",
+				TLS:         config.ConnectionTLS{Pins: []string{"3F:A1:07:5C:92:E4:6B:D8:21:0A:F3:8E:57:C6:19:B4:E2:7D:40:95:A8:1C:6F:D3:0B:72:E9:58:34:AC:66:1F"}},
 				Credentials: config.Credentials{Username: "Administrator", PasswordFile: path("run/secrets/windows-password")},
+				Allow:       config.Allow{Groups: []string{"ops"}},
+			},
+			{
+				ID: "old-terminal-server", Name: "Old terminal server", Protocol: "rdp", Target: "10.0.4.21:3389", Backend: "guacd",
+				Credentials: config.Credentials{Username: "Administrator", Prompt: true},
 				Allow:       config.Allow{Groups: []string{"ops"}},
 			},
 			{
@@ -244,14 +255,34 @@ func TestParseV1Example(t *testing.T) {
 				Credentials:           config.Credentials{Prompt: true},
 				Allow:                 config.Allow{Groups: []string{"dev"}},
 			},
+			{
+				ID: "web-shell", Name: "Web pod shell", Protocol: "kubernetes", Target: "k8s.internal:6443", Backend: "native",
+				Kubernetes: config.Kubernetes{
+					Namespace: "web", Pod: "web-0", Container: "app",
+					Command: kubernetes.DefaultCommand, TTY: &yes,
+				},
+				TLS:         config.ConnectionTLS{CAFile: path("etc/occamy/k8s-ca.crt")},
+				Credentials: config.Credentials{TokenFile: path("run/secrets/k8s-token")},
+				Allow:       config.Allow{Groups: []string{"ops"}},
+			},
 		},
 		AdhocAllowlist: []string{"10.0.0.0/8", "*.lab.internal:22"},
-		AdhocBackends:  map[string]string{"ssh": "native", "vnc": "native", "rdp": "guacd", "telnet": "guacd"},
+		AdhocBackends:  map[string]string{"ssh": "native", "vnc": "native", "rdp": "native", "telnet": "guacd"},
 		Limits:         config.Limits{Sessions: 500, SessionsPerUser: 20, ViewersPerSession: 50, SharesPerSession: 100},
 		Streams:        config.Streams{ViewerTimeout: 45 * time.Second},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ParseV1(testdata/v1.yaml) =\n%+v\nwant\n%+v", got, want)
+	}
+	// Each protocol the example gives guacd parameters for has a
+	// connection on guacd to read them; occamyd warns at start of those
+	// no session reads.
+	for p := range got.Guacd.Params {
+		if !slices.ContainsFunc(got.Connections, func(c config.Connection) bool {
+			return c.Protocol == p && config.BackendOf(p, c.Backend) == config.BackendGuacd
+		}) {
+			t.Errorf("guacd.params.%s: no %s connection in the example is on guacd", p, p)
+		}
 	}
 }
 
@@ -296,8 +327,32 @@ func TestParseV1Defaults(t *testing.T) {
 	if c.Name != "box" || c.Target != "box.internal:22" {
 		t.Errorf("connection name %q, target %q; want box, box.internal:22", c.Name, c.Target)
 	}
-	if f.LegacyV0 || f.AllowAdhocTargets || f.TLS != (config.TLS{}) || f.Debug.Address != "" {
+	if f.LegacyV0 || f.AllowAdhocTargets || f.TLS != (config.TLS{}) || f.Debug.Address != "" || f.WebClient != "" {
 		t.Errorf("optional features on by default: %+v", f)
+	}
+
+	f, err = parse(t, head+`connections:
+  - {id: pod, protocol: kubernetes, target: k8s.internal, kubernetes: {pod: web-0}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: attach, protocol: kubernetes, target: k8s.internal, kubernetes: {pod: web-0, attach: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	k := f.Connections[0]
+	if k.Target != "k8s.internal:443" || k.Backend != config.BackendNative {
+		t.Errorf("kubernetes target %q, backend %q; want k8s.internal:443, native", k.Target, k.Backend)
+	}
+	if k.Kubernetes.Namespace != "default" || !reflect.DeepEqual(k.Kubernetes.Command, kubernetes.DefaultCommand) || k.Kubernetes.TTY == nil || !*k.Kubernetes.TTY {
+		t.Errorf("kubernetes defaults %+v: want namespace default, the default command, a tty", k.Kubernetes)
+	}
+	if &k.Kubernetes.Command[0] == &kubernetes.DefaultCommand[0] {
+		t.Error("the connection shares the default command's array")
+	}
+	if a := f.Connections[1].Kubernetes; a.Command != nil {
+		t.Errorf("attach filled in the command %q", a.Command)
+	}
+	if _, ok := f.AdhocBackends["kubernetes"]; ok {
+		t.Errorf("adhoc_backends has kubernetes: %v", f.AdhocBackends)
 	}
 
 	f, err = parse(t, head+"  oidc: {issuer: https://id.example.com, client_id: occamy, redirect_url: https://occamy.example.com:8443/occamy/cb}\n")
@@ -404,7 +459,10 @@ func TestOverlap(t *testing.T) {
 
 // TestParseV1Backends checks that every connection and every protocol of
 // adhoc_backends ends up with a backend: its own, or the protocol's
-// default, which is native for ssh and guacd for the others.
+// default, which is native where a native backend exists (ssh, vnc,
+// rdp and kubernetes) and guacd for telnet. For vnc and rdp, backend:
+// guacd is an explicit fallback, and tls, ard and security need no
+// backend key, since native is the default.
 func TestParseV1Backends(t *testing.T) {
 	f, err := parse(t, head+`connections:
   - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
@@ -415,7 +473,14 @@ func TestParseV1Backends(t *testing.T) {
   - {id: f, protocol: vnc, backend: native, ard: true, target: f, tls: {insecure_skip_verify: true}, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
   - {id: g, protocol: rdp, target: g, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: h, protocol: telnet, backend: guacd, target: h, credentials: {prompt: true}, allow: {users: [alice]}}
-adhoc_backends: {vnc: native}
+  - {id: i, protocol: vnc, target: i, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: j, protocol: vnc, ard: true, target: j, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
+  - {id: k, protocol: telnet, target: k, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: l, protocol: rdp, backend: guacd, target: l, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: m, protocol: rdp, backend: native, security: tls, target: m, tls: {require: true, insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: n, protocol: rdp, security: any, target: n, tls: {pins: ["SHA256:47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: o, protocol: kubernetes, target: o, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: p, protocol: kubernetes, backend: native, target: p, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}
 `)
 	if err != nil {
 		t.Fatal(err)
@@ -424,16 +489,26 @@ adhoc_backends: {vnc: native}
 	for _, c := range f.Connections {
 		got = append(got, c.ID+":"+c.Backend)
 	}
-	want := []string{"a:native", "b:native", "c:guacd", "d:native", "e:guacd", "f:native", "g:guacd", "h:guacd"}
+	want := []string{"a:native", "b:native", "c:native", "d:native", "e:guacd", "f:native", "g:native", "h:guacd", "i:native", "j:native", "k:guacd", "l:guacd", "m:native", "n:native", "o:native", "p:native"}
 	if !slices.Equal(got, want) {
 		t.Errorf("backends %v, want %v", got, want)
 	}
-	if want := map[string]string{"ssh": "native", "vnc": "native", "rdp": "guacd", "telnet": "guacd"}; !maps.Equal(f.AdhocBackends, want) {
+	// Without adhoc_backends, ad-hoc vnc and rdp targets are native too.
+	if want := map[string]string{"ssh": "native", "vnc": "native", "rdp": "native", "telnet": "guacd"}; !maps.Equal(f.AdhocBackends, want) {
 		t.Errorf("adhoc_backends %v, want %v", f.AdhocBackends, want)
 	}
+	// adhoc_backends opts ad-hoc vnc targets into guacd, and leaves the
+	// other protocols at their defaults.
+	f, err = parse(t, head+"adhoc_backends: {vnc: guacd}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]string{"ssh": "native", "vnc": "guacd", "rdp": "native", "telnet": "guacd"}; !maps.Equal(f.AdhocBackends, want) {
+		t.Errorf("adhoc_backends with vnc: guacd %v, want %v", f.AdhocBackends, want)
+	}
 	for _, tt := range []struct{ protocol, backend, want string }{
-		{"ssh", "", "native"}, {"vnc", "", "guacd"}, {"rdp", "", "guacd"}, {"telnet", "", "guacd"},
-		{"vnc", "native", "native"}, {"rdp", "guacd", "guacd"},
+		{"ssh", "", "native"}, {"vnc", "", "native"}, {"rdp", "", "native"}, {"telnet", "", "guacd"}, {"kubernetes", "", "native"},
+		{"vnc", "native", "native"}, {"vnc", "guacd", "guacd"}, {"rdp", "native", "native"}, {"rdp", "guacd", "guacd"},
 	} {
 		if got := config.BackendOf(tt.protocol, tt.backend); got != tt.want {
 			t.Errorf("BackendOf(%q, %q) = %q, want %q", tt.protocol, tt.backend, got, tt.want)
@@ -451,6 +526,12 @@ func TestParseV1Valid(t *testing.T) {
   - {id: b, protocol: vnc, target: "::1", credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: c, protocol: rdp, target: 192.0.2.1, credentials: {password_env: OCCAMY_TEST_PASSWORD}, allow: {users: [alice]}}
   - {id: d.e_f-1, protocol: telnet, target: host_1.example.com., credentials: {password_file: DIR/password}, allow: {users: [alice]}}
+`},
+		{"kubernetes", head + `connections:
+  - {id: a, protocol: kubernetes, target: "[fd00::6443]:6443", kubernetes: {pod: p}, credentials: {token_env: OCCAMY_TEST_PASSWORD}, allow: {users: [alice]}}
+  - {id: b, protocol: kubernetes, target: k8s.example.com, kubernetes: {namespace: kube-system, pod: coredns-7db6d8ff4d-x2v9k.a, container: coredns, command: [/bin/ls, -l]}, tls: {pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, credentials: {client_cert_file: DIR/tls.crt, client_key_file: DIR/tls.key}, allow: {users: [alice]}}
+  - {id: c, protocol: kubernetes, target: c, kubernetes: {pod: p, attach: true, tty: false}, tls: {insecure_skip_verify: true, server_name: kubernetes.default.svc}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: d, protocol: kubernetes, backend: native, target: d, kubernetes: {pod: p}, tls: {ca_file: DIR/ca.pem}, credentials: {token_file: DIR/secret}, allow: {users: [alice]}}
 `},
 		{"merged version", "<<: {version: 1}\n" + strings.TrimPrefix(head, "version: 1\n")},
 		{"debug on its own port", head + "listen: ':5636'\ndebug: {address: 'localhost:6060'}\n"},
@@ -476,7 +557,10 @@ debug: {address: "localhost:6060"}
 origins: ["HTTPS://Occamy.Example.com:8443/", "http://localhost:5173"]
 listen: "[::]:443"
 legacy_v0: true
+web_client: client/occamy-web/dist
 `},
+		{"web client", head + "web_client: DIR\n"},
+		{"web client not built yet", head + "web_client: DIR/dist\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -548,6 +632,7 @@ func TestParseV1Problems(t *testing.T) {
 		{"tls key alone", head + "tls: {key: DIR/tls.key}\n", []want{{"tls.cert", "required when tls.key is set"}}},
 		{"tls missing file", head + "tls: {cert: DIR/missing.crt, key: DIR/tls.key}\n", []want{{"tls.cert", "missing.crt does not exist"}}},
 		{"tls directory", head + "tls: {cert: DIR, key: DIR/tls.key}\n", []want{{"tls.cert", "is a directory"}}},
+		{"web client a file", head + "web_client: DIR/key\n", []want{{"web_client", "key is not a directory"}}},
 		{"debug on listen", head + "debug: {address: ':5636'}\n", []want{{"debug.address", `":5636" shares a port with listen ":5636"`}}},
 		{"debug beside a wildcard", head + "listen: ':5636'\ndebug: {address: 127.0.0.1:5636}\n", []want{{"debug.address", "shares a port with listen"}}},
 		{"debug on localhost", head + "listen: 127.0.0.1:5636\ndebug: {address: localhost:5636}\n", []want{{"debug.address", "shares a port with listen"}}},
@@ -664,11 +749,12 @@ connections:
 		{"guacd params", head + `guacd:
   params:
     kubernetes: {namespace: default}
+    spice: {port: "5930"}
     rdp: {password: hunter2, ignore-cert: "true", sftp-password: hunter2, gateway-password: hunter2, sftp-passphrase: hunter2, sftp-private-key: hunter2, client-secret: hunter2, Password: hunter2, SFTP-PASSWORD: hunter2}
     vnc: {hostname: x, port: "5901", Hostname: x}
     telnet: {password-regex: '[Pp]assword:', username-regex: 'login:'}
 `, []want{
-			{"guacd.params.kubernetes", `unknown protocol "kubernetes"`},
+			{"guacd.params.kubernetes", "guacd does not serve kubernetes"},
 			{"guacd.params.rdp.Password", "inline secrets are not allowed"},
 			{"guacd.params.rdp.SFTP-PASSWORD", "inline secrets are not allowed"},
 			{"guacd.params.rdp.client-secret", "inline secrets are not allowed"},
@@ -677,6 +763,8 @@ connections:
 			{"guacd.params.rdp.sftp-passphrase", "inline secrets are not allowed"},
 			{"guacd.params.rdp.sftp-password", "inline secrets are not allowed"},
 			{"guacd.params.rdp.sftp-private-key", "inline secrets are not allowed"},
+			{"guacd.params.spice", `unknown protocol "spice"`},
+			{"guacd.params.spice.port", "set from each connection's target"},
 			{"guacd.params.vnc.Hostname", "set from each connection's target"},
 			{"guacd.params.vnc.hostname", "set from each connection's target"},
 			{"guacd.params.vnc.port", "set from each connection's target"},
@@ -698,10 +786,10 @@ connections:
 			{"connections[5].id", "required"},
 		}},
 		{"protocols", head + `connections:
-  - {id: a, protocol: kubernetes, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: a, protocol: spice, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: b, target: b, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
-			{"connections[0].protocol", `unknown protocol "kubernetes": use ssh, vnc, rdp or telnet`},
+			{"connections[0].protocol", `unknown protocol "spice": use ssh, vnc, rdp, telnet or kubernetes`},
 			{"connections[1].protocol", "required"},
 		}},
 		{"targets", head + `connections:
@@ -765,7 +853,7 @@ connections:
   - {id: h, protocol: vnc, backend: native, target: h, tls: {ca_file: DIR/ca.pem, insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: i, protocol: vnc, backend: native, target: i, tls: {insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
-			{"connections[0].tls", "only vnc connections have tls"},
+			{"connections[0].tls", "only vnc, rdp and kubernetes connections have tls"},
 			{"connections[1].tls.pins", "set ca_file or pins, not both"},
 			{"connections[2].tls.ca_file", "holds no PEM certificate"},
 			{"connections[3].tls.ca_file", "missing.pem does not exist"},
@@ -774,39 +862,125 @@ connections:
 			{"connections[6].tls.insecure_skip_verify", "set ca_file or pins, or insecure_skip_verify, not both"},
 			{"connections[7].tls.insecure_skip_verify", "set ca_file or pins, or insecure_skip_verify, not both"},
 		}},
+		{"rdp tls and security", head + `connections:
+  - {id: a, protocol: rdp, target: a, tls: {pins: ["SHA256:short"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: rdp, backend: guacd, target: b, tls: {insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: rdp, target: c, tls: {ca_file: DIR/ca.pem, pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: d, protocol: rdp, target: d, security: tls, tls: {require: true, server_name: desk, ca_file: DIR/ca.pem}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: e, protocol: rdp, backend: guacd, security: tls, target: e, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: f, protocol: vnc, backend: native, security: tls, target: f, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: g, protocol: rdp, security: rdp, target: g, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: h, protocol: rdp, security: NLA, target: h, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: i, protocol: rdp, security: nla-ext, target: i, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: j, protocol: rdp, backend: native, security: any, target: j, tls: {pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+`, []want{
+			{"connections[0].tls.pins[0]", "not a certificate or a SHA-256 fingerprint"},
+			{"connections[1].tls", "only the native RDP backend checks the certificate as tls says, and backend: guacd would not: leave backend out, or set native; through guacd, guacd.params.rdp's ignore-cert"},
+			{"connections[2].tls.pins", "set ca_file or pins, not both"},
+			{"connections[4].security", "backend: guacd does not: leave backend out, or set native; through guacd, guacd.params.rdp.security sets it"},
+			{"connections[5].security", "only rdp connections have security"},
+			{"connections[6].security", `unknown security mode "rdp"`},
+			{"connections[7].security", `unknown security mode "NLA"`},
+		}},
+		{"kubernetes", head + `connections:
+  - {id: a, protocol: kubernetes, backend: guacd, target: a, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: kubernetes, target: b, kubernetes: {namespace: web}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: kubernetes, target: c, kubernetes: {namespace: Web, pod: "../../nodes/x/proxy", container: "a/b"}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: d, protocol: kubernetes, target: d, kubernetes: {pod: p, attach: true, command: [sh]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: e, protocol: kubernetes, target: e, kubernetes: {pod: p, command: ["", "-c", "id"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: f, protocol: ssh, insecure_ignore_host_key: true, target: f, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: g, protocol: kubernetes, target: "https://k8s.example.com:6443", kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: h, protocol: kubernetes, target: h, kubernetes: {pod: "web-0.", namespace: "-web", container: "x123456789x123456789x123456789x123456789x123456789x123456789xxxx"}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: i, protocol: kubernetes, target: i, host_keys: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"], ard: true, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}
+`, []want{
+			{"connections[0].backend", "kubernetes connections always use occamyd's native Kubernetes backend"},
+			{"connections[1].kubernetes.pod", "required"},
+			{"connections[2].kubernetes.namespace", `"Web" is not a namespace`},
+			{"connections[2].kubernetes.pod", `"../../nodes/x/proxy" is not a pod name`},
+			{"connections[2].kubernetes.container", `"a/b" is not a container name`},
+			{"connections[3].kubernetes.command", "set attach or command, not both"},
+			{"connections[4].kubernetes.command[0]", "must not be empty"},
+			{"connections[5].kubernetes", "only kubernetes connections have kubernetes"},
+			{"connections[6].target", "write the API server as host:port"},
+			{"connections[7].kubernetes.namespace", `"-web" is not a namespace`},
+			{"connections[7].kubernetes.pod", `"web-0." is not a pod name`},
+			{"connections[7].kubernetes.container", "is longer than 63 characters"},
+			{"connections[8].host_keys", "only ssh connections have host keys"},
+			{"connections[8].ard", "only vnc connections have ard"},
+		}},
+		{"kubernetes credentials", head + `connections:
+  - {id: a, protocol: kubernetes, target: a, kubernetes: {pod: p}, allow: {users: [alice]}}
+  - {id: b, protocol: kubernetes, target: b, kubernetes: {pod: p}, credentials: {username: u, password_file: DIR/password}, allow: {users: [alice]}}
+  - {id: c, protocol: kubernetes, target: c, kubernetes: {pod: p}, credentials: {client_cert_file: DIR/tls.crt}, allow: {users: [alice]}}
+  - {id: d, protocol: kubernetes, target: d, kubernetes: {pod: p}, credentials: {client_key_file: DIR/tls.key}, allow: {users: [alice]}}
+  - {id: e, protocol: kubernetes, target: e, kubernetes: {pod: p}, credentials: {token_file: DIR/secret, prompt: true}, allow: {users: [alice]}}
+  - {id: f, protocol: kubernetes, target: f, kubernetes: {pod: p}, credentials: {token_env: OCCAMY_TEST_MISSING}, allow: {users: [alice]}}
+  - {id: g, protocol: kubernetes, target: g, kubernetes: {pod: p}, credentials: {token_file: DIR/missing}, allow: {users: [alice]}}
+  - {id: h, protocol: kubernetes, target: h, kubernetes: {pod: p}, credentials: {private_key_file: DIR/key}, allow: {users: [alice]}}
+  - {id: i, protocol: vnc, target: i, credentials: {token_env: OCCAMY_TEST_PASSWORD}, allow: {users: [alice]}}
+  - {id: j, protocol: ssh, insecure_ignore_host_key: true, target: j, credentials: {username: u, client_cert_file: DIR/tls.crt, client_key_file: DIR/tls.key}, allow: {users: [alice]}}
+  - {id: k, protocol: kubernetes, target: k, kubernetes: {pod: p}, credentials: {token: hunter2}, allow: {users: [alice]}}
+`, []want{
+			{"connections[10].credentials.token", "inline secrets are not allowed, so that the file can be committed: use token_file, token_env or prompt: true"},
+			{"connections[0].credentials", "no credential source: set one of token_file, token_env, client_cert_file with client_key_file, or prompt: true"},
+			{"connections[1].credentials.username", "kubernetes connections authenticate with a bearer token"},
+			{"connections[1].credentials.password_file", "kubernetes connections authenticate with a bearer token"},
+			{"connections[2].credentials.client_key_file", "required with client_cert_file"},
+			{"connections[3].credentials.client_cert_file", "required with client_key_file"},
+			{"connections[4].credentials", "more than one credential source (token_file, prompt)"},
+			{"connections[5].credentials.token_env", "OCCAMY_TEST_MISSING"},
+			{"connections[6].credentials.token_file", "does not exist"},
+			{"connections[7].credentials.private_key_file", "only ssh connections use a private key"},
+			{"connections[8].credentials.token_env", "only kubernetes connections use a bearer token or a client certificate"},
+			{"connections[9].credentials.client_cert_file", "only kubernetes connections use a bearer token or a client certificate"},
+			{"connections[9].credentials.client_key_file", "only kubernetes connections use a bearer token or a client certificate"},
+			{"connections[10].credentials", "no credential source"},
+		}},
+		{"kubernetes tls", head + `connections:
+  - {id: a, protocol: kubernetes, target: a, kubernetes: {pod: p}, tls: {ca_file: DIR/ca.pem, pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: kubernetes, target: b, kubernetes: {pod: p}, tls: {pins: ["SHA256:short"]}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: kubernetes, target: c, kubernetes: {pod: p}, tls: {pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"], insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: d, protocol: kubernetes, target: d, kubernetes: {pod: p}, tls: {ca_file: DIR/password}, credentials: {prompt: true}, allow: {users: [alice]}}
+`, []want{
+			{"connections[0].tls.pins", "set ca_file or pins, not both"},
+			{"connections[1].tls.pins[0]", "not a certificate or a SHA-256 fingerprint"},
+			{"connections[2].tls.insecure_skip_verify", "set ca_file or pins, or insecure_skip_verify, not both"},
+			{"connections[3].tls.ca_file", "holds no PEM certificate"},
+		}},
 		{"backend", head + `connections:
   - {id: a, protocol: ssh, backend: guacd, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: b, protocol: rdp, backend: native, target: b, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: c, protocol: telnet, backend: native, target: c, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: d, protocol: vnc, backend: nativ, target: d, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: e, protocol: vnc, target: e, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: e, protocol: vnc, backend: guacd, target: e, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: f, protocol: vnc, backend: guacd, target: f, tls: {insecure_skip_verify: true}, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: g, protocol: vnc, backend: nativ, target: g, tls: {require: true}, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
 			{"connections[0].backend", "ssh connections always use occamyd's native SSH backend"},
-			{"connections[1].backend", "the native RDP backend is not available yet"},
 			{"connections[2].backend", "telnet has no native backend"},
 			{"connections[3].backend", `unknown backend "nativ": use guacd or native`},
-			{"connections[4].tls", "set backend: native"},
-			{"connections[5].tls", "set backend: native"},
+			{"connections[4].tls", "backend: guacd would not: leave backend out, or set native"},
+			{"connections[5].tls", "backend: guacd would not: leave backend out, or set native"},
+			{"connections[6].backend", `unknown backend "nativ": use guacd or native`},
+			{"connections[6].tls", "backend: nativ would not: leave backend out, or set native"},
 		}},
 		{"ard", head + `connections:
   - {id: a, protocol: ssh, ard: true, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: b, protocol: vnc, ard: true, target: b, credentials: {prompt: true}, allow: {users: [alice]}}
-  - {id: c, protocol: vnc, backend: native, ard: true, tls: {require: true}, target: c, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: b, protocol: vnc, backend: guacd, ard: true, target: b, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: c, protocol: vnc, ard: true, tls: {require: true}, target: c, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: d, protocol: vnc, backend: native, ard: true, tls: {pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, target: d, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: e, protocol: vnc, backend: native, ard: true, tls: {ca_file: DIR/ca.pem}, target: e, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: f, protocol: vnc, backend: native, ard: true, tls: {insecure_skip_verify: true, server_name: mac}, target: f, credentials: {username: alice, prompt: true}, allow: {users: [alice]}}
 `, []want{
 			{"connections[0].ard", "only vnc connections have ard"},
-			{"connections[1].ard", "set backend: native"},
+			{"connections[1].ard", "backend: guacd does not: leave backend out, or set native"},
 			{"connections[2].ard", "cannot be allowed while tls requires TLS"},
 			{"connections[3].ard", "cannot be allowed while tls requires TLS"},
 			{"connections[4].ard", "cannot be allowed while tls requires TLS"},
 		}},
 		{"adhoc backends", head + `adhoc_backends: {ssh: guacd, vnc: native, rdp: native, telnet: guacd, kubernetes: guacd, x: y}
 `, []want{
-			{"adhoc_backends.kubernetes", `unknown protocol "kubernetes"`},
-			{"adhoc_backends.rdp", "the native RDP backend is not available yet"},
+			{"adhoc_backends.kubernetes", "kubernetes has no ad-hoc targets"},
 			{"adhoc_backends.ssh", "ssh connections always use occamyd's native SSH backend"},
 			{"adhoc_backends.x", `unknown protocol "x"`},
 		}},
@@ -942,6 +1116,47 @@ func TestParseV1Unreadable(t *testing.T) {
 	}
 }
 
+// TestParseV1WebClient checks web_client as the other paths are
+// checked: relative to occamyd's working directory, and refused when it
+// cannot be read, but for a directory that does not exist yet, which
+// occamyd warns of at start.
+func TestParseV1WebClient(t *testing.T) {
+	dir := fixture(t)
+	t.Chdir(dir)
+	if err := os.Mkdir("dist", 0o750); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct{ path, problem string }{
+		{"dist", ""},
+		{"./dist/", ""},
+		{"missing", ""},
+		{"key", "key is not a directory"},
+		{"../" + filepath.Base(dir) + "/password", "password is not a directory"},
+	} {
+		_, err := config.ParseV1([]byte(strings.ReplaceAll(head, "DIR", dir) + "web_client: " + tt.path + "\n"))
+		var problems config.Problems
+		switch {
+		case tt.problem == "" && err != nil:
+			t.Errorf("web_client: %s: %v", tt.path, err)
+		case tt.problem != "" && (!errors.As(err, &problems) || len(problems) != 1 || problems[0].Path != "web_client" || !strings.Contains(problems[0].Message, tt.problem)):
+			t.Errorf("web_client: %s: %v, want %q", tt.path, err, tt.problem)
+		}
+	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any directory")
+	}
+	if err := os.Chmod("dist", 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(dir, "dist"), 0o750) })
+	_, err := config.ParseV1([]byte(strings.ReplaceAll(head, "DIR", dir) + "web_client: dist\n"))
+	var problems config.Problems
+	if !errors.As(err, &problems) || len(problems) != 1 || !strings.Contains(problems[0].Message, "dist is not readable") {
+		t.Errorf("web_client of an unreadable directory: %v, want it not readable", err)
+	}
+}
+
 func TestNormalizeTarget(t *testing.T) {
 	for _, tt := range []struct{ protocol, target, want, err string }{
 		{"ssh", "box.internal", "box.internal:22", ""},
@@ -950,7 +1165,9 @@ func TestNormalizeTarget(t *testing.T) {
 		{"telnet", "host:2323", "host:2323", ""},
 		{"ssh", "user@box", "", "is not host:port"},
 		{"ssh", "box:0", "", "invalid port"},
-		{"kubernetes", "box", "", `unknown protocol "kubernetes"`},
+		{"kubernetes", "k8s.internal", "k8s.internal:443", ""},
+		{"kubernetes", "https://k8s.internal", "", "is not host:port"},
+		{"spice", "box", "", `unknown protocol "spice"`},
 	} {
 		got, err := config.NormalizeTarget(tt.protocol, tt.target)
 		if got != tt.want || (err == nil) != (tt.err == "") || err != nil && !strings.Contains(err.Error(), tt.err) {
@@ -989,5 +1206,61 @@ func TestSecrets(t *testing.T) {
 	}
 	if _, err := (config.OIDC{}).ClientSecret(); !errors.Is(err, config.ErrNoSecret) {
 		t.Errorf("ClientSecret() for a public client = %v, want ErrNoSecret", err)
+	}
+	if got, err := (config.Credentials{TokenFile: key}).Token(); err != nil || got != "s3cret" {
+		t.Errorf("Token() from a file = %q, %v; want s3cret", got, err)
+	}
+	if got, err := (config.Credentials{TokenEnv: "OCCAMY_TEST_PASSWORD"}).Token(); err != nil || got != "s3cret" {
+		t.Errorf("Token() from the environment = %q, %v; want s3cret", got, err)
+	}
+	if _, err := (config.Credentials{ClientCertFile: key, ClientKeyFile: key}).Token(); !errors.Is(err, config.ErrNoSecret) {
+		t.Errorf("Token() with a client certificate = %v, want ErrNoSecret", err)
+	}
+	// A token from the environment loses its trailing line breaks too,
+	// as one from a file does.
+	t.Setenv("OCCAMY_TEST_TOKEN", "t0ken\r\n")
+	if got, err := (config.Credentials{TokenEnv: "OCCAMY_TEST_TOKEN"}).Token(); err != nil || got != "t0ken" {
+		t.Errorf("Token() from the environment = %q, %v; want t0ken", got, err)
+	}
+}
+
+// TestSecretFileBound checks that a secret file is read up to 64 KiB
+// and refused beyond, for every kind of secret. TestEndlessSecretFile
+// checks that reading stops at the bound.
+func TestSecretFileBound(t *testing.T) {
+	dir := t.TempDir()
+	atBound := filepath.Join(dir, "at")
+	if err := os.WriteFile(atBound, bytes.Repeat([]byte("s"), config.MaxSecretFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	over := filepath.Join(dir, "over")
+	if err := os.WriteFile(over, bytes.Repeat([]byte("s"), config.MaxSecretFile+1), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := (config.Credentials{TokenFile: atBound}).Token(); err != nil || len(got) != config.MaxSecretFile {
+		t.Errorf("Token() of %d bytes = %d bytes, %v", config.MaxSecretFile, len(got), err)
+	}
+	for name, read := range map[string]func() (string, error){
+		"Token":        config.Credentials{TokenFile: over}.Token,
+		"Password":     config.Credentials{PasswordFile: over}.Password,
+		"ClientSecret": config.OIDC{ClientSecretFile: over}.ClientSecret,
+	} {
+		if _, err := read(); err == nil || !strings.Contains(err.Error(), "too many for a secret") {
+			t.Errorf("%s() of %d bytes = %v, want a refusal", name, config.MaxSecretFile+1, err)
+		}
+	}
+}
+
+func TestAdhocProtocol(t *testing.T) {
+	for _, tt := range []struct {
+		protocol string
+		want     bool
+	}{
+		{"ssh", true}, {"vnc", true}, {"rdp", true}, {"telnet", true},
+		{"kubernetes", false}, {"spice", false}, {"", false},
+	} {
+		if got := config.AdhocProtocol(tt.protocol); got != tt.want {
+			t.Errorf("AdhocProtocol(%q) = %v, want %v", tt.protocol, got, tt.want)
+		}
 	}
 }

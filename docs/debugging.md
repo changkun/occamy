@@ -19,8 +19,9 @@ address, with no token, and says so in its log at start.
 Anyone who can reach `occamyd` can then read its profiles and its
 command line. Set `mode: release` wherever others can reach it: release
 mode does not register the routes.
-[004](../specs/004-security-hardening.md) plans to make release the
-default and move pprof to a separate listener.
+[004](../specs/004-security-hardening.md) asks for release mode by
+default and pprof on a separate listener. A v1 file has that listener
+(below); a v0 file still defaults to debug mode.
 
 ## The debug listener of a v1 file
 
@@ -121,6 +122,10 @@ sends that user something. Until then the user still counts, for up to
 - `make e2e` runs the end-to-end tests against the demo stack
   (`make build run` first). They open a session to each demo server and
   check that the remote desktop arrives at the first attempt.
+  `TestE2EV1RDP` also takes the demo xrdp server's `rdp-native` through
+  the clipboard both ways, which the image's clipboard echo answers, a
+  resize, a viewer joined by a share, and the owner leaving and coming
+  back.
 - `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test. Each of its N
   rounds opens two sessions to each demo server at once: one that waits
   for the desktop and one that sends garbage. All sessions to one server

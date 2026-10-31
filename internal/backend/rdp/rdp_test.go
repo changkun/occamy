@@ -534,7 +534,8 @@ func TestRunAnyDowngraded(t *testing.T) {
 }
 
 // By default, a server that selects TLS without NLA is refused before
-// anything but the connection request is sent.
+// anything but the connection request is sent, without the hint for a
+// server that selects standard RDP security: it chose TLS already.
 func TestRunDefaultRefusesTLS(t *testing.T) {
 	checkGoroutines(t)
 	s := listen(t, rdptest.Server{}) // selects TLS
@@ -542,8 +543,40 @@ func TestRunDefaultRefusesTLS(t *testing.T) {
 	cfg.Security = ""
 	r := start(t, newBackend(t, cfg), &backendtest.Sink{})
 	a := s.next(t)
-	if err := r.wait(t); a.err == nil || err == nil || !strings.Contains(err.Error(), "did not offer") {
-		t.Errorf("the server got %v, Run returned %v, want TLS refused", a.err, err)
+	if err := r.wait(t); a.err == nil || err == nil || !strings.Contains(err.Error(), "did not offer") || strings.Contains(err.Error(), "allow TLS with") {
+		t.Errorf("the server got %v, Run returned %v, want TLS refused without a hint", a.err, err)
+	}
+}
+
+// A server that selects standard RDP security when offered NLA alone,
+// as xrdp does, is refused with an error that names the setting that
+// would let it take TLS; offered TLS too, it is refused without one.
+func TestRunStandardSecurity(t *testing.T) {
+	for _, tt := range []struct {
+		security, setting, want string
+	}{
+		{"", "", "allow TLS with Config.Security"},
+		{SecurityNLAExt, `security: tls on connection "desk"`, `allow TLS with security: tls on connection "desk"`},
+		{SecurityAny, "", ""},
+	} {
+		t.Run(tt.security, func(t *testing.T) {
+			checkGoroutines(t)
+			s := listen(t, rdptest.Server{Standard: true})
+			cfg := s.config(t)
+			cfg.Security, cfg.SecuritySetting = tt.security, tt.setting
+			r := start(t, newBackend(t, cfg), &backendtest.Sink{})
+			if a := s.next(t); !errors.Is(a.err, rdptest.ErrStandardSecurity) {
+				t.Fatalf("the server's Accept returned %v", a.err)
+			}
+			err := r.wait(t)
+			var pe *rdp.ProtocolError
+			if !errors.As(err, &pe) || pe.Selected != rdp.ProtocolRDP {
+				t.Fatalf("Run returned %v, want the server's protocol refused", err)
+			}
+			if hint := strings.Contains(err.Error(), "allow TLS with"); tt.want == "" && hint || tt.want != "" && !strings.Contains(err.Error(), tt.want) {
+				t.Errorf("Run returned %q, want %q", err, tt.want)
+			}
+		})
 	}
 }
 
@@ -618,6 +651,54 @@ func TestRunPromptsOnlyForNLA(t *testing.T) {
 	}
 	if c.Info != (rdptest.Credentials{Domain: "CORP", Username: "bob", Password: "pw", AutoLogon: true}) {
 		t.Errorf("any: info %+v", c.Info)
+	}
+}
+
+// Without a domain, a username of the form DOMAIN\user, configured or
+// given at the prompt, names both; one that lacks either part, or comes
+// with a domain, goes as it is.
+func TestRunSplitsDomain(t *testing.T) {
+	checkGoroutines(t)
+	s := listen(t, rdptest.Server{})
+	for _, tt := range []struct {
+		domain, username, wantDomain, wantUsername string
+	}{
+		{"", `LAB\alice`, "LAB", "alice"},
+		{"", `LAB\ops\alice`, "LAB", `ops\alice`},
+		{"", `alice\`, "", `alice\`},
+		{"", `\alice`, "", "alice"},
+		{"CORP", `LAB\alice`, "CORP", `LAB\alice`},
+		{"", "alice@lab.internal", "", "alice@lab.internal"},
+	} {
+		cfg := s.config(t)
+		cfg.Domain, cfg.Username = tt.domain, tt.username
+		start(t, newBackend(t, cfg), &backendtest.Sink{})
+		if c := s.accept(t); c.Info.Domain != tt.wantDomain || c.Info.Username != tt.wantUsername {
+			t.Errorf("domain %q, username %q: the server got %q, %q; want %q, %q",
+				tt.domain, tt.username, c.Info.Domain, c.Info.Username, tt.wantDomain, tt.wantUsername)
+		}
+	}
+
+	// The owner's answers: a username with an empty domain names both;
+	// with a domain, it goes as it is.
+	for _, tt := range []struct {
+		answers                  []string
+		wantDomain, wantUsername string
+	}{
+		{[]string{`LAB\bob`, "", "pw"}, "LAB", "bob"},
+		{[]string{`LAB\bob`, "CORP", "pw"}, "CORP", `LAB\bob`},
+		{[]string{`bob\`, "", "pw"}, "", `bob\`},
+		{[]string{`\bob`, "", "pw"}, "", "bob"},
+	} {
+		cfg := s.config(t)
+		cfg.Security, cfg.Username, cfg.Password = SecurityAny, "", ""
+		sink := &backendtest.Sink{Answer: func(backend.Prompt) (backend.PromptReply, error) {
+			return backend.PromptReply{Answers: tt.answers}, nil
+		}}
+		start(t, newBackend(t, cfg), sink)
+		if c := s.accept(t); c.Info.Domain != tt.wantDomain || c.Info.Username != tt.wantUsername || c.Info.Password != "pw" {
+			t.Errorf("answers %q: the server got %+v; want %q, %q", tt.answers, c.Info, tt.wantDomain, tt.wantUsername)
+		}
 	}
 }
 
@@ -817,7 +898,7 @@ func TestInputErrors(t *testing.T) {
 	if err := b.Input(backend.TermInput{Data: []byte("ls")}); !errors.Is(err, ErrUnsupportedInput) {
 		t.Errorf("TermInput: %v", err)
 	}
-	for _, ev := range []backend.InputEvent{backend.Clipboard{MIME: "text/plain", Data: []byte("x")}, backend.Resize{Width: 800, Height: 600}, backend.Text{}} {
+	for _, ev := range []backend.InputEvent{backend.Clipboard{MIME: "image/png", Data: []byte("x")}, backend.Resize{Width: 800, Height: 600}, backend.Text{}} {
 		if err := b.Input(ev); err != nil {
 			t.Errorf("%T: %v", ev, err)
 		}
@@ -825,7 +906,16 @@ func TestInputErrors(t *testing.T) {
 	if err := b.Input(backend.Text{Text: strings.Repeat("x", inputEvents/4+1)}); !errors.Is(err, ErrInputFull) {
 		t.Errorf("a Text over the budget: %v", err)
 	}
-	n := 0
+	// A Resize is queued. Clipboard text is too, charged by its bytes, of
+	// which the queue holds two clipboards of the most text; beyond the
+	// most, text is cut.
+	big := backend.Clipboard{MIME: "text/plain", Data: bytes.Repeat([]byte("x"), rdp.MaxClipboard+1)}
+	for i := range 3 {
+		if err := b.Input(big); (err == nil) != (i < 2) || err != nil && !errors.Is(err, ErrInputFull) {
+			t.Errorf("clipboard %d of %d bytes: %v", i, len(big.Data), err)
+		}
+	}
+	n := 3 // the Resize and two clipboards
 	for ; n < 1000; n++ {
 		if err := b.Input(backend.Key{Down: true, Keysym: 'a'}); err != nil {
 			if !errors.Is(err, ErrInputFull) {

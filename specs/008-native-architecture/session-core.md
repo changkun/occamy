@@ -20,8 +20,8 @@ dispatched_task_id: null
 
 Define how a backend connection becomes a shared session:
 
-- the Go interface every backend implements (native SSH, native VNC, the
-  guacd bridge, and possibly out-of-process RDP);
+- the Go interface every backend implements (native SSH, native VNC,
+  native RDP and the guacd bridge);
 - the goroutine that owns it;
 - how any number of viewers attach with different roles and speeds;
 - how a late joiner gets a consistent picture;
@@ -244,10 +244,19 @@ follow the recommendations above.
    - A session with no input from anyone for `session.idle_timeout`
      (default 30 min) ends the same way.
    - Share tokens die with the session.
+
+   (2026-10-31: `session.owner_grace` and `session.idle_timeout` were
+   never added to the configuration. `session.Config` has `OwnerGrace`
+   and `IdleTimeout`, but occamyd sets neither, so the 60 s and 30 min
+   defaults always apply. What the configuration has instead is
+   `streams.viewer_timeout` and the `limits` keys: `sessions`,
+   `sessions_per_user`, `viewers_per_session` and
+   `shares_per_session`.)
 6. **Recording is out of scope for beta.** The `Sink` interface leaves
    room for a tap later.
 7. **IPC for out-of-process backends waits** until
-   [rdp-strategy](rdp-strategy.md) picks a helper.
+   [rdp-strategy](rdp-strategy.md) picks a helper. (2026-10-31: it picks
+   none; RDP is native in v1.0, its decision 5.)
 8. **The scheduling objective is input to display, for what is seen**
    (owner's call, 2026-10-30). A keypress matters more than a frame only
    through the frame that shows its effect, and only while the user can

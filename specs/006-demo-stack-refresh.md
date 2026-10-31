@@ -71,7 +71,9 @@ name, so no fixed subnet is needed.
 - `ssh/Dockerfile`: Debian stable, openssh-server, password login for a
   demo user.
 - `rdp/` (xrdp) added by [005](005-upstream-guacamole.md), together with a
-  `guacd` service if that spec adopts upstream guacd.
+  `guacd` service if that spec adopts upstream guacd. (Both added:
+  [rdp-xrdp](005-upstream-guacamole/rdp-xrdp.md) and
+  [guacd-compose-service](005-upstream-guacamole/guacd-compose-service.md).)
 
 ### Compose (`docker/docker-compose.yaml`)
 
@@ -94,9 +96,10 @@ unless `OCCAMY_E2E_ENDPOINT` is set, so `go test ./...` stays hermetic.
 
 A job that runs `make build`, `make run` (`compose up -d --build --wait`)
 and the end-to-end test, then dumps the stack's logs on failure. The
-pressure test is skipped unless `OCCAMY_PRESSURE_N` is set, and CI does not
-set it yet: it still crashes `occamyd` (#20), and
-[003](003-session-lifecycle-hardening.md) turns it on once fixed.
+pressure test is skipped unless `OCCAMY_PRESSURE_N` is set. CI did not
+set it at first, since it crashed `occamyd` (#20); since
+[003](003-session-lifecycle-hardening.md) the e2e job runs
+`make e2e OCCAMY_PRESSURE_N=10`.
 
 ## Testing Strategy
 
@@ -212,7 +215,7 @@ match.
     healthcheck, no restart policy;
   - [rdp-xrdp](005-upstream-guacamole/rdp-xrdp.md): where the tests and
     defaults now live.
-- Follow-up: 003 enables the pressure test in CI.
+- Follow-up: 003 enables the pressure test in CI (done).
 
 ## Addendum: native VNC in the matrix
 
@@ -224,7 +227,14 @@ notes: the opt-in period), after this spec was complete.
   from the same image with `-conf /occamy/v1.yaml`, published on 5637.
   Its v1 file, `docker/occamy-v1.yaml`, has the static user `demo`
   (password `occamy`) and two connections to `vnc:5900`: `vnc-native`
-  with `backend: native` and `vnc-guacd` through guacd. The VNC password
+  and `vnc-guacd`. When the opt-in period started, `vnc-native` set
+  `backend: native` and `vnc-guacd` took guacd as vnc's default. Since
+  the owner's decision of 2026-10-31 that native is the default
+  wherever a native backend exists
+  ([guacd-bridge](008-native-architecture/guacd-bridge.md), Parity
+  gate), `vnc-native` leaves `backend` out and gets that default, and
+  `vnc-guacd` sets `backend: guacd`, the fallback that stays as the
+  benchmark's baseline. The VNC password
   comes from `OCCAMY_DEMO_VNC_PASSWORD`, and the signing key goes to a
   tmpfs at `/run/occamy`, since the distroless image's `nonroot` user
   cannot write `/occamy`. `occamy-v1` waits for `guacd` and `vnc` only.

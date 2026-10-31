@@ -347,6 +347,29 @@ func TestBitmapCompressionHeader(t *testing.T) {
 	}
 }
 
+// TestBitmapKind checks the names that the statistics count bitmaps
+// under, which the integration and replay tests look up by codec.
+func TestBitmapKind(t *testing.T) {
+	for _, tc := range []struct {
+		bpp        int
+		compressed bool
+		want       string
+	}{
+		{8, false, "raw8"}, {15, false, "raw15"}, {16, false, "raw16"}, {24, false, "raw24"}, {32, false, "raw32"},
+		{8, true, "rle8"}, {15, true, "rle15"}, {16, true, "rle16"}, {24, true, "rle24"}, {32, true, "planar"},
+		// Depths that decode does not take, which never reach the count.
+		{0, false, "raw0"}, {12, true, "rle12"}, {33, false, "raw33"}, {-1, true, "rle-1"},
+	} {
+		if got := bitmapKind(&bitmapData{bpp: tc.bpp, compressed: tc.compressed}); got != tc.want {
+			t.Errorf("bitmapKind(%d, compressed %t) = %q, want %q", tc.bpp, tc.compressed, got, tc.want)
+		}
+	}
+	b := &bitmapData{bpp: 16, compressed: true}
+	if a := testing.AllocsPerRun(10, func() { _ = bitmapKind(b) }); a != 0 {
+		t.Errorf("naming a bitmap allocated %v times, want 0", a)
+	}
+}
+
 func TestPointerShapes(t *testing.T) {
 	var d decoder
 	// 2×2 at 24 bits: XOR rows padded to 2 bytes (6 → 6), AND rows to 2.

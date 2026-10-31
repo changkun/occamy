@@ -31,6 +31,11 @@ import (
 // it read the client's first TSRequest: CredSSP is not implemented.
 var ErrCredSSP = errors.New("rdptest: the client started CredSSP, which the fake server does not implement")
 
+// ErrStandardSecurity is returned by Accept for a Server.Standard, after
+// it selected standard RDP security, which the fake server does not
+// implement either.
+var ErrStandardSecurity = errors.New("rdptest: the server selected standard RDP security")
+
 // Certificate returns the servers' certificate, a self-signed ECDSA
 // certificate for the name "rdp.test", and its SHA-256 fingerprint as
 // openssl prints it, which a client's TLS pins take.
@@ -78,6 +83,33 @@ type Server struct {
 	// InputFlags are the server's input capabilities; DefaultInputFlags
 	// if zero.
 	InputFlags uint16
+	// ChannelIDs, if not nil, are the MCS channels the server lists for
+	// the client's static channels, instead of one for each.
+	ChannelIDs []uint16
+
+	// Account, if set, makes a server that selects NLA run CredSSP
+	// (credssp.go): it takes this account's NTLMv2 logon, binds its
+	// certificate's public key, takes the credentials the client
+	// delegates, and goes on with the connection sequence. Without it,
+	// a server that selects NLA stops at the client's first TSRequest.
+	Account *Account
+	// CredSSPVersion is the TSRequest version the server speaks; 6 if
+	// zero.
+	CredSSPVersion int
+	// NTLMFlags, if not zero, are the flags of the server's NTLM
+	// challenge instead of those the client asked for.
+	NTLMFlags uint32
+	// WrongProof makes the server prove a public key other than its
+	// certificate's, as a man in the middle would.
+	WrongProof bool
+	// StallNLA makes the server stop answering after the client's first
+	// TSRequest (1) or its second, with the NTLM authenticate (2), until
+	// the client hangs up.
+	StallNLA int
+	// Standard makes the server select standard RDP security, as xrdp
+	// does when offered CredSSP alone; Accept then returns
+	// ErrStandardSecurity.
+	Standard bool
 }
 
 // Credentials are the logon fields of a Client Info PDU.
@@ -98,13 +130,23 @@ type Conn struct {
 	// TSRequest is the client's first TSRequest, when the server
 	// selected NLA.
 	TSRequest []byte
+	// Authenticates counts the NTLM AUTHENTICATE_MESSAGEs the client
+	// sent in CredSSP, and Delegated are the credentials it delegated.
+	Authenticates int
+	Delegated     Credentials
 	// Info is what the client's Client Info PDU carried.
 	Info Credentials
+	// Channels are the static channels the client named, with the MCS
+	// channels the server gave them.
+	Channels map[string]uint16
+	// Joined are the MCS channels the client joined, in order.
+	Joined []uint16
 
-	conn net.Conn
-	tls  *tls.Conn
-	r    *bufio.Reader
-	wmu  sync.Mutex
+	conn   net.Conn
+	tls    *tls.Conn
+	r      *bufio.Reader
+	wmu    sync.Mutex
+	chunks map[string]*reassembly // owned by Next
 }
 
 // Accept runs the server's side of the connection sequence over conn,
@@ -123,8 +165,14 @@ func (s *Server) Accept(conn net.Conn) (*Conn, error) {
 	if protocol == 0 {
 		protocol = ProtocolSSL
 	}
+	if s.Standard {
+		protocol = 0
+	}
 	if _, err := conn.Write(ConnectionConfirm(protocol)); err != nil {
 		return nil, err
+	}
+	if s.Standard {
+		return nil, ErrStandardSecurity
 	}
 	cert, _, err := Certificate()
 	if err != nil {
@@ -139,11 +187,25 @@ func (s *Server) Accept(conn net.Conn) (*Conn, error) {
 	}
 	c.r = bufio.NewReader(c.tls)
 	if protocol&(ProtocolHybrid|ProtocolHybridEx) != 0 {
-		c.TSRequest, err = readTSRequest(c.r)
+		if s.Account == nil {
+			c.TSRequest, err = readTSRequest(c.r)
+			if err != nil {
+				return c, err
+			}
+			return c, ErrCredSSP
+		}
+		leaf, err := x509.ParseCertificate(cert.Certificate[0])
 		if err != nil {
+			return nil, err
+		}
+		if err := s.credSSP(c, leaf); err != nil {
 			return c, err
 		}
-		return c, ErrCredSSP
+		if protocol&ProtocolHybridEx != 0 {
+			if err := c.Write(earlyUserAuthResult()); err != nil {
+				return nil, err
+			}
+		}
 	}
 
 	// Basic settings exchange and channel connection.
@@ -151,7 +213,11 @@ func (s *Server) Accept(conn net.Conn) (*Conn, error) {
 		return nil, fmt.Errorf("connect initial: %w", err)
 	}
 	c.Size = clientDesktop(f.data)
-	if err := c.Write(ConnectResponse(c.Requested)); err != nil {
+	ids, err := c.channels(f.data, s.ChannelIDs)
+	if err != nil {
+		return nil, err
+	}
+	if err := c.Write(ConnectResponseChannels(c.Requested, ids)); err != nil {
 		return nil, err
 	}
 	for range 2 { // Erect Domain Request, Attach User Request
@@ -162,23 +228,26 @@ func (s *Server) Accept(conn net.Conn) (*Conn, error) {
 	if err := c.Write(AttachUserConfirm()); err != nil {
 		return nil, err
 	}
-	for range 2 { // the user channel and the I/O channel
-		f, err := readFrame(c.r)
-		if err != nil {
+	// Channel Join Requests, as many as the client sends, until the
+	// Client Info PDU.
+	for {
+		if f, err = readFrame(c.r); err != nil {
 			return nil, err
 		}
-		if len(f.data) < 5 || f.data[0]&0xfc != 14<<2 {
-			return nil, errors.New("rdptest: no channel join request")
+		if len(f.data) < 1 || f.data[0]&0xfc != 14<<2 {
+			break
 		}
-		if err := c.Write(ChannelJoinConfirm(binary.BigEndian.Uint16(f.data[3:]))); err != nil {
+		if len(f.data) < 5 {
+			return nil, errors.New("rdptest: short channel join request")
+		}
+		ch := binary.BigEndian.Uint16(f.data[3:])
+		c.Joined = append(c.Joined, ch)
+		if err := c.Write(ChannelJoinConfirm(ch)); err != nil {
 			return nil, err
 		}
 	}
 
 	// Client Info, licensing and capabilities.
-	if f, err = readFrame(c.r); err != nil {
-		return nil, err
-	}
 	_, data, err := parseRequest(f.data)
 	if err != nil {
 		return nil, err
@@ -232,6 +301,38 @@ func (c *Conn) parseConnectionRequest(p []byte) error {
 	}
 	c.Requested = binary.LittleEndian.Uint32(rest[4:])
 	return nil
+}
+
+// channels records the static channels the client names in its MCS
+// Connect Initial p, with the MCS channels the server gives them: ids if
+// not nil, else one for each, from the one after the I/O channel on,
+// around User.
+func (c *Conn) channels(p []byte, ids []uint16) ([]uint16, error) {
+	blocks, err := clientBlocks(p)
+	if err != nil {
+		return nil, err
+	}
+	names, err := channelNames(blocks[0xc003])
+	if err != nil {
+		return nil, err
+	}
+	if ids == nil {
+		ch := firstChannel
+		for range names {
+			if ch == User {
+				ch++
+			}
+			ids = append(ids, ch)
+			ch++
+		}
+	}
+	c.Channels = map[string]uint16{}
+	for i, name := range names {
+		if i < len(ids) && ids[i] != 0 {
+			c.Channels[name] = ids[i]
+		}
+	}
+	return ids, nil
 }
 
 // clientDesktop returns the desktop size in the client core data of an
@@ -317,9 +418,21 @@ type Message struct {
 	// PDUs, and Body its data after the share data header.
 	Type2 uint8
 	Body  []byte
+	// Channel is the name of the static channel of a message on one,
+	// Data the message reassembled, and Chunks the number of its chunks.
+	Channel string
+	Data    []byte
+	Chunks  int
 }
 
-// Next reads what the client sends next.
+// Empty reports whether m holds nothing a client sent whole: neither
+// input, a share data PDU, nor a channel message.
+func (m Message) Empty() bool {
+	return len(m.Events) == 0 && m.Type2 == 0 && m.Channel == ""
+}
+
+// Next reads what the client sends next. A chunk of a message on a
+// static channel other than its last is an empty Message.
 func (c *Conn) Next() (Message, error) {
 	f, err := readFrame(c.r)
 	if err != nil {
@@ -332,6 +445,9 @@ func (c *Conn) Next() (Message, error) {
 	ch, data, err := parseRequest(f.data)
 	if err != nil {
 		return Message{}, err
+	}
+	if name := c.channelName(ch); name != "" {
+		return c.channelChunk(name, data)
 	}
 	if ch != IOChannel || len(data) < 6 {
 		return Message{}, nil

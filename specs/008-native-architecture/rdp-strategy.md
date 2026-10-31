@@ -18,16 +18,19 @@ dispatched_task_id: null
 
 ## Design Problem
 
-RDP is the last protocol tying Occamy to guacd. Decide how Occamy reaches
-RDP hosts after v1.0: keep the bridge, run a helper process around an
-existing RDP stack, or implement RDP in Go. Only the last option makes
-Occamy pure Go in the strict sense. This spec plans the evaluation that
-decides.
+RDP is the last graphical protocol tying Occamy to guacd, and v1.0 has
+no guacd. Decide how Occamy reaches RDP hosts: keep the bridge, run a
+helper process around an existing RDP stack, or implement RDP in Go.
+Only the last option makes Occamy pure Go in the strict sense. This spec
+plans the evaluation that decides. (Decided: D, pure-Go RDP, in v1.0;
+see Decisions.)
 
 ## Context
 
-- Through v1.0, RDP runs on guacd 1.6 (FreeRDP 2 or 3 inside guacd) via
-  the bridge ([guacd-bridge](guacd-bridge.md)).
+- Until `occamyd` registered the native RDP backend on 2026-10-31, RDP
+  ran on guacd 1.6 (FreeRDP 2 or 3 inside guacd) via the bridge
+  ([guacd-bridge](guacd-bridge.md)), which now serves it only with
+  `backend: guacd`.
 - Since v0.5.0, RDP through guacd is tested end to end against xrdp only.
   That needs `security` left unset, so that TLS is negotiated, and
   `ignore-cert`. Nobody has checked a Windows host with NLA yet; that
@@ -70,7 +73,7 @@ decides.
   that need RDP, so "pure Go" is never reached for RDP.
 - **B. Helper process around FreeRDP 3.** A small C program per connection
   that speaks the backend interface over a Unix socket, with pixels in
-  shared memory (see [session-core](session-core.md) question 7). Mature
+  shared memory (see [session-core](session-core.md) decision 7). Mature
   protocol coverage, including AVC. C, its build and FreeRDP's security
   record come back, though isolated per connection.
 - **C. Helper process around IronRDP (Rust).** Same isolation as B on a
@@ -100,16 +103,21 @@ after session-core settles:
 Outcome:
 
 - If the spike passes, D becomes the v1.x plan, and RDP follows the
-  bridge's parity gate.
+  bridge's parity gate. (Since the owner's decision of 2026-10-31, the
+  native backend is rdp's default since it was registered, and the gate
+  decides when RDP's guacd fallback is deleted; see
+  [guacd-bridge](guacd-bridge.md), Parity gate.)
 - If it fails, choose between B and C on NLA support, GFX coverage,
   licence compatibility with MIT, maintenance activity and build
   complexity. guacd then leaves the default deployment while `occamyd`
   stays pure Go, with RDP in an isolated helper.
 
+(2026-10-31: D is the plan for v1.0, with no helper; see decision 5.)
+
 ## Decisions
 
 Settled on 2026-10-30. Items 1 and 2 were the owner's calls; 3 and 4
-follow the recommendations.
+follow the recommendations. Item 5 was the owner's call on 2026-10-31.
 
 1. **D, pure-Go RDP, decided by the spike first.** The end state is an
    `occamyd` with no Guacamole and no cgo for every protocol. If the
@@ -124,20 +132,27 @@ follow the recommendations.
 4. **No Kerberos in the first native RDP release.** NTLMv2 through
    CredSSP covers local and most domain accounts; Kerberos follows when a
    deployment needs it.
+5. **Native RDP in v1.0, with no helper.** v1.0 has no guacd and no
+   cgo, and needs the native RDP backend
+   ([native-rdp-backend](native-rdp-backend.md)), so decision 1's helper
+   fallback is dropped. Step 2, the check against Windows, runs later,
+   when a Windows host is available; it no longer decides between D and
+   a helper.
 
 ## Open Questions
 
 1. Where does the Windows check run: a manual host, a self-hosted
    runner, or a cloud VM in CI? The spike's second step needs Windows
    Server or Windows 11 with NLA, and so does
-   [#32](https://github.com/changkun/occamy/issues/32).
+   [#32](https://github.com/changkun/occamy/issues/32). (2026-10-31: it
+   runs later, once a Windows host is available; where is still open.)
 
 ## Affects
 
 `internal/rdp`, the protocol client the spike built, and a backend in
-`internal/backend/rdp` on it ([native-rdp-backend](native-rdp-backend.md)); or, if the spike fails, a helper binary
-and an IPC definition in session-core. Decides when guacd leaves Occamy
-entirely.
+`internal/backend/rdp` on it
+([native-rdp-backend](native-rdp-backend.md)). Decides when guacd leaves
+Occamy entirely.
 
 ## Spike results
 
@@ -187,7 +202,7 @@ best effort, has none. The live run was repeated after the fixes.
   `Output`, a subset of `backend.Sink`, so a session's sink plugs in as
   it is. The backend in `internal/backend/rdp` is not built yet: it maps
   `backend.InputEvent` to the client's input methods and `Demand` to
-  Suppress Output.
+  Suppress Output. (Built since, in native-rdp-backend's phase 1.)
 - **Decisions.**
   - The client asks for bitmap updates only. It advertises no drawing
     orders, no bitmap, glyph or brush caches, no bulk compression, no
@@ -363,15 +378,29 @@ best effort, has none. The live run was repeated after the fixes.
     - the decoder's bitmap size bound;
     - the pointer cache index check.
 
-    `TestDecoderKeepsScratch`, which checks the scratch kept, counts
-    allocations without the race detector only. Under `-race`,
-    `sync.Pool` drops one item in four put back, and each bitmap's two
-    `fmt.Sprintf` calls for its statistics then allocate a printer and
-    its buffer again: 3, 5 or 7 allocations a bitmap instead of 3, and
-    over the bound of 4 in 5 runs of 300, 2 of 300 with the collector
-    off. Under `-race` the test still checks that the decoder's buffers
-    stay, which a decoder that reallocates them fails; CI runs the
-    tests with `-race` only, so the count is checked locally.
+    `TestDecoderKeepsScratch` checks the scratch kept, and also counts
+    a PDU's allocations, with or without the race detector. The bound
+    is 1: the PDU's `bitmapData`, which its rectangles share.
+    - Each bitmap used to name itself for its statistics with two
+      `fmt.Sprintf` calls, and each call takes a printer from a
+      `sync.Pool`.
+    - Under `-race`, `sync.Pool` drops one item in four put back. The
+      printer and its buffer were then allocated again, so a bitmap
+      allocated 3, 5 or 7 times instead of 3. That went over the old
+      bound of 4 in 5 runs of 300, and in 2 of 300 with the collector
+      off.
+    - So the count was checked without `-race` only. CI runs the tests
+      with `-race` only, so CI never checked the count.
+    - The names now come from a table of constants by depth,
+      `bitmapKinds`, so a bitmap allocates nothing.
+    - The count is now 1 in 200 runs with `-race` and in 200 without.
+    - One more allocation a bitmap, a copy of its name, fails the test
+      under `-race` in 20 runs of 20, and without `-race` as well.
+    - `BenchmarkTileBitmaps` decodes a PDU of 64 bitmaps of 64×64. It
+      went from 129 allocations (804 bytes) to 1 (120 bytes). Its time
+      did not change: 418.7 µs before and 419.6 µs after, the medians
+      of ten interleaved runs each at a host load of 3.5 to 3.7.
+      Decoding dominates that time.
   - Seven fuzzers: fast-path, slow-path, RLE, planar and pointer
     updates, the NTLM challenge and the connection sequence's parsers.
     The pointer fuzzer's seed is synthetic; the others are seeded from
@@ -411,7 +440,9 @@ best effort, has none. The live run was repeated after the fixes.
   [native-rdp-backend](native-rdp-backend.md), by phase.
   - The backend in `internal/backend/rdp`: Run, input mapping, `Demand`
     to Suppress Output, credentials from the registry. Done in
-    native-rdp-backend's phase 1, but for the registry.
+    native-rdp-backend's phase 1, and the registry with its
+    registration (Implementation notes: registration), which made it
+    rdp's default, not yet checked against Windows.
   - Step 2 against Windows with NLA, and with it the parts xrdp cannot
     exercise. These are live NLA, the full licensing exchange (Windows
     Server with an RDS licensing server), server redirection, and the
@@ -449,8 +480,8 @@ best effort, has none. The live run was repeated after the fixes.
     AltGr.
   - Auto-reconnect cookies and the Save Session Info PDU.
   - Once `occamyd` imports the client, its licences go into
-    THIRD_PARTY_LICENSES; until then CI checks `./internal/rdp` on its
-    own.
+    THIRD_PARTY_LICENSES; until then CI's licence check covers it with
+    every other package (`./...`).
 - **Step 3: bytes on the RDP link.** `TestBytesAgainstGuacd` (under the
   `rdp_integration` tag) drives the bench scenes through this client and
   through guacd 1.6's FreeRDP against the same xrdp. It reads the bytes
@@ -490,4 +521,5 @@ best effort, has none. The live run was repeated after the fixes.
   a later optimization. Every remaining protocol risk is on the Windows
   path: live NLA, licensing, the message channel and the step 2 risks
   above. More xrdp work cannot retire those, so the decision between D
-  and a helper waits on step 2.
+  and a helper waits on step 2. (2026-10-31: the owner chose D for v1.0
+  without it; the Windows risks wait on step 2. See decision 5.)

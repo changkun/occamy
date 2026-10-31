@@ -10,6 +10,8 @@ affects:
   - internal/backend/rdp/
   - internal/rdp/
   - internal/keymap/
+  - internal/config/
+  - server/
 effort: large
 created: 2026-10-31
 updated: 2026-10-31
@@ -25,7 +27,9 @@ dispatched_task_id: null
 and its spike built the protocol client in `internal/rdp`. What is left
 is the backend that runs it in a session, and the protocol features a
 backend needs to pass the bridge's parity gate
-([guacd-bridge](guacd-bridge.md)) without guacd, Guacamole or cgo:
+([guacd-bridge](guacd-bridge.md)), which since 2026-10-31 decides when
+RDP's guacd path is deleted, not when native becomes the default,
+without guacd, Guacamole or cgo:
 
 - how the backend maps credentials, input, demand and the session's end
   onto RDP, and what it bounds;
@@ -68,8 +72,14 @@ backend needs to pass the bridge's parity gate
     an initial program, Wake-on-LAN, and session recording.
 - The parity gate requires the [006](../006-demo-stack-refresh.md)
   matrix for authentication modes, resize, clipboard both ways, cursor,
-  sharing roles, reconnect, and keyboard input with AltGr and dead keys;
-  traffic and CPU no worse than the bridge; and a soak.
+  sharing roles, reconnect, and keyboard input with AltGr and dead keys,
+  and, since the owner's decision of 2026-10-31, the benchmark showing
+  native at least 10x better than the guacd baseline on each scenario's
+  primary metric. It gates deleting RDP's guacd path; the native
+  backend became rdp's default when it was registered (Implementation
+  notes: registration). (It first
+  asked for traffic and CPU no worse than the bridge and a soak, before
+  a switch of default.)
 - Protocol v1 carries keys, text, pointer, wheel, clipboard and
   `resize-request`, but no audio and no files. The session core
   ([session-core](session-core.md)) expects RDP to pace the server with
@@ -183,7 +193,7 @@ standing approval to resolve open items; open to the owner's review.
 | 1 | `internal/backend/rdp` over `internal/rdp`: configuration and its checks, the NLA prompt, connect, bitmap updates and the pointer into the session, input mapped and batched by a writer goroutine, `Demand` as Suppress Output, the session's end by the server's reason. Tests against a fake RDP server (`internal/rdp/rdptest`), the xrdp recordings replayed through the backend, fuzzing, an xrdp integration test | session-core, the rdp-strategy spike |
 | 2 | Static virtual channels (GCC channel definitions, joins, chunked channel PDUs reassembled within a bound); CLIPRDR with UTF-8 text both ways; DRDYNVC with a bounded number of channels; Display Control for `resize-request`; the Heartbeat PDU and auto-detect answers. Checked live against xrdp. A CredSSP acceptor in `rdptest` (NTLMv2 with a known password, the public key binding, TSCredentials), so that the backend's NLA path, prompted credentials included, runs end to end in tests | Phase 1 |
 | 3 | GFX without AVC over DRDYNVC: the capability exchange, ZGFX, surfaces mapped onto the framebuffer, solid fills, surface-to-surface copies as `Sink.CopyRect`, the bitmap cache within a bound, frame acknowledgements as the server's pacing, and the RemoteFX, RemoteFX Progressive, ClearCodec, planar and uncompressed codecs, each fuzzed. RemoteFX Progressive is checked against xrdp, ClearCodec and planar against Windows | Phase 2 |
-| 4 | Windows: the logon errors of the Save Session Info PDU, server layouts with AltGr and dead keys, a keyboard Synchronize event with the lock states at connect and on focus, and the 006 matrix entries for RDP against Windows and xrdp, toward the parity gate | Phases 1 to 3, a Windows host (#32) |
+| 4 | Windows: the logon errors of the Save Session Info PDU, server layouts with AltGr and dead keys, a keyboard Synchronize event with the lock states at connect and on focus, the orders and bounds that only xrdp has checked (Implementation notes: registration, Follow-ups), and the 006 matrix entries for RDP against Windows and xrdp, toward the parity gate | Phases 1 to 3, a Windows host (#32) |
 
 The phases are those [rdp-strategy](rdp-strategy.md)'s "What remains"
 lists, in this order because of decision 7. Two things do not wait for
@@ -194,32 +204,42 @@ them:
   and CredSSP, a refused logon, and the licensing exchange beyond the
   STATUS_VALID_CLIENT shortcut, against Windows. Phase 4 keeps the rest
   of the Windows work.
-- **Registration needs NLA end to end.** The backend is not registered
-  in `occamyd` until NLA has run end to end, live against Windows or
-  against the CredSSP acceptor of phase 2, since NLA is the default
-  security mode and nothing has run it against a server that accepts
-  it. Registration in the API's backend factory and the switch from
-  the bridge then follow the parity gate in
-  [guacd-bridge](guacd-bridge.md), not these phases. (Since the
-  Sessions task of [api-and-server-stack](api-and-server-stack.md),
-  `rdp` connections run on the guacd bridge in that factory,
-  `server/backends.go`; registration replaces that entry.)
+- **Registration needs NLA end to end** (done: Implementation notes:
+  registration). The backend was not registered in `occamyd` until NLA
+  had run end to end, live against Windows or against the CredSSP
+  acceptor of phase 2, since NLA is the default security mode and
+  nothing had run it against a server that accepts it. Once it had,
+  registration in the API's backend factory made the backend `rdp`'s
+  default, by the owner's decision of 2026-10-31 that native is the
+  default wherever a native backend exists
+  ([guacd-bridge](guacd-bridge.md), Parity gate), with
+  `backend: guacd` as an explicit fallback and the benchmark's
+  baseline. The parity gate, not these phases, decides when RDP's
+  guacd path is deleted. (Since the Sessions task of
+  [api-and-server-stack](api-and-server-stack.md), `rdp` connections
+  had run on the guacd bridge in that factory, `server/backends.go`;
+  registration added the native backend beside that entry and made it
+  the default.)
 
 ## Affects
 
 New `internal/backend/rdp` and `internal/keymap`; `internal/rdp` gains
 what the backend needs, and `internal/rdp/rdptest`, a fake server for
 tests. `internal/backend/vnc` takes its scan codes from
-`internal/keymap`. After the parity gate, RDP no longer needs guacd,
-and guacd leaves the default deployment.
+`internal/keymap`. Registration touches `internal/config` (the default
+backend, `tls` and `security` for rdp) and `server` (the factory). Since
+the backend was registered, RDP no longer needs guacd by default, which
+leaves telnet as guacd's only default use; once the parity gate deletes
+RDP's guacd path, RDP no longer needs guacd at all.
 
 ## Implementation notes: phase 1
 
 - **Status.** Phase 1 is done: `internal/backend/rdp` implements
   `backend.Backend` with `Config`, `New` and `Backend`, in about 930
   lines of code and 2,030 of unit tests, at 99% statement coverage,
-  plus a 430-line integration test. Nothing wires it into `occamyd`,
-  and nothing will until NLA has run end to end (Task Breakdown).
+  plus a 430-line integration test. Nothing wired it into `occamyd`
+  until NLA had run end to end (Task Breakdown; Implementation notes:
+  registration).
 - **What was built.**
   - `New` checks the configuration before anything connects: the
     address (port 3389 by default), the desktop size (200 to 8192 a
@@ -473,7 +493,8 @@ and guacd leaves the default deployment.
     their own state rather than the viewer's.
   - The writer's `shown` is not reset when the server reactivates the
     session; a server that resumes output on reactivation while nobody
-    can see keeps sending until the next change of demand.
+    can see keeps sending until the next change of demand. Done in
+    phase 2: the client repeats Suppress Output after a reactivation.
   - Session-level dedupe of identical cursor shapes before they are
     encoded for each viewer, for the encode-cache task: each new shape
     is copied by the session and encoded losslessly per viewer, and a
@@ -494,3 +515,681 @@ and guacd leaves the default deployment.
     them): a sentence in [docs/protocol.md](../../docs/protocol.md)'s
     4005 row that RDP's deliberate ends (decision 5) are `remote-ended`,
     and a CHANGELOG line.
+
+## Implementation notes: phase 2
+
+- **Status.** Phase 2 ships in two pull requests. The first has the
+  static virtual channels, the clipboard (CLIPRDR) both ways, and the
+  CredSSP acceptor in `rdptest`, with NLA run end to end through the
+  backend; these notes are its. DRDYNVC and Display Control for
+  `resize-request` are the second's, on top of it, with notes of their
+  own below. The Heartbeat PDU and
+  the auto-detect answers are deferred (Deviations). NLA now runs end
+  to end against the acceptor, which registration waited for.
+  Registration, separate work, made the backend `rdp`'s default
+  (Implementation notes: registration): since the owner's decision of
+  2026-10-31 it no longer waited for the parity gate, which decides
+  only when RDP's guacd path is deleted ([guacd-bridge](guacd-bridge.md),
+  Parity gate; Task Breakdown).
+- **What was built.**
+  - Static channels (`internal/rdp/channel.go`). The client names the
+    channels its configuration asks for in its network data (today
+    only `cliprdr`, with the options INITIALIZED, ENCRYPT_RDP and
+    SHOW_PROTOCOL and no compression), and joins the MCS channels the
+    server gives them after the user and I/O channels. A server's list
+    is checked: at most 31 channels in its network data, no more than
+    the client asked for (fewer is fine, as FreeRDP takes it), none
+    twice and none on the I/O or message channel; a channel it gives
+    0 is not joined. Chunks are reassembled per channel up to the
+    channel's bound: the client keeps the first bytes of a longer
+    message and tells the handler it was cut. A first chunk starts a
+    message anew (the unfinished one is counted), a chunk without its
+    first is dropped and counted, and chunks that run past or stop
+    short of the length they declared, or that are compressed, end
+    the session. The client sends in chunks of 1,600 bytes, 32 chunks
+    a write, so that input written meanwhile waits for one write; the
+    small messages that are due at once share a write.
+  - The reader never writes channel PDUs: it records what is due and
+    wakes a goroutine of `Run` that writes it. `SetClipboard` writes
+    from its caller under the same lock, so the backend's writer can
+    order a Format List before the keys that paste it.
+  - The clipboard (`internal/rdp/cliprdr.go`, [MS-RDPECLIP]):
+    `Config.Clipboard` selects `ClipboardFromServer`,
+    `ClipboardToServer`, both, or neither, which asks for no channel.
+    After the server's Monitor Ready the client sends its general
+    capabilities (version 2, long format names) and a Format List of
+    its text, if any. Its text goes as CF_UNICODETEXT, or CF_TEXT where
+    the server asks for that, with CR LF line ends; the server's comes
+    from CF_UNICODETEXT, or CF_TEXT where the list has only that, with
+    LF line ends, invalid UTF-16 as U+FFFD, up to its NUL. Text is at
+    most `MaxClipboard` (4 MiB) of UTF-8 either way, as the VNC
+    backend's Extended Clipboard, and the channel keeps at most
+    8 + 2 × 4 MiB of a message. One request for the server's text is
+    outstanding at a time; an answer for an announcement the server
+    has since replaced is dropped and the newest is asked for, and
+    unasked and failed answers are dropped and counted. A server that
+    leaves more than 8 of its own requests unanswered ends the
+    session. The Format List Responses the client owes are a count of
+    64 bits, not a queue, and no number of them ends the session: the
+    writer sends 64 a pass, in two writes, and looks again for the rest
+    once a pass is written, so that what it builds stays bounded
+    however much is owed, and a server that sends lists faster than it
+    reads gets the responses as fast as it reads. A first version ended
+    the session past 64 owed, for a server that floods lists without
+    reading; the review found that this ended sessions with servers
+    that read too: a burst of 65 lists in one write, or a server's user
+    copying while a long paste held the writer up (xrdp does not wait
+    for the responses). In a burst, a Format Data Request for the
+    newest list can now go before the responses to the lists before
+    it. By its source, xrdp should not mind, as xrdp-chansrv 0.10.1
+    takes a response without acting on it
+    (`clipboard_process_format_ack` only logs); the integration test
+    has not run since this change, and Windows is to be checked in
+    phase 4. The server's text is charged against the decoding rate as
+    a pointer shape is, a tile at least, so that
+    announcing it again and again makes the client wait. A Format List
+    that does not parse is refused with a failed response; a message
+    whose length is wrong is dropped; locks and file PDUs are ignored.
+  - The backend (`internal/backend/rdp`): `DisableCopy` and
+    `DisablePaste`, as guacd's `disable-copy` and `disable-paste`, map
+    onto the two modes; with both, no channel. `Input` queues a
+    `Clipboard` whose MIME type is `text/*` or empty, cut to
+    `MaxClipboard` at a character, against a byte budget of two
+    clipboards in the queue, as the VNC backend bounds its own; other
+    types are dropped. The writer sets the text after the input queued
+    before it and before the input after it. The server's text goes to
+    `Sink.Clipboard` as `text/plain`.
+  - Roles: a read-only viewer's input, its clipboard included, is
+    dropped by the session core (`internal/session/viewer.go`), before
+    any backend sees it; the backend needs no check of its own.
+    `TestReadOnlyInputDropped` now covers a clipboard too. The
+    server's clipboard goes to every viewer, as with VNC.
+  - `rdptest` gained the server's side of CredSSP with NTLMv2 for an
+    `Account` (`rdptest/credssp.go`): a challenge with both NetBIOS
+    names, the DNS name and a timestamp; the NTLMv2 response and the
+    MIC checked against the password; key exchange and sealing; the
+    public key binding of CredSSP 5 and later both ways; the
+    TSCredentials the client delegates recorded; STATUS_LOGON_FAILURE
+    for a wrong password; and the Early User Authorization Result for
+    HYBRID_EX. Options make it speak an older CredSSP version, drop
+    sealing from the challenge, prove another public key, or stall
+    after either of the client's first two messages. It also gives
+    channels their MCS channels, reassembles what the client sends on
+    them, refusing chunks over 1,600 bytes, sends its own in chunks,
+    and builds and parses CLIPRDR PDUs. It still imports nothing from
+    the client.
+- **Tests.** Against `rdptest` over loopback: the join, the server's
+  channel list (more than asked, the I/O channel, none, 0, 32 in its
+  network data, two on one MCS channel), reassembly at chunk sizes of
+  1, 7, 1,600 and 32 Ki bytes, a chunk straddling the bound, orphan,
+  over- and under-length and compressed chunks, writes of 32 chunks;
+  the clipboard's initialization before and after the owner's text,
+  both ways, CF_TEXT alone, short format names, the same text not
+  announced twice, no text, stale, unasked and failed answers, each
+  mode alone, the bounds either way, the requests' bound, pacing, the
+  conversions, format lists, and the order of capabilities and Format
+  List under a race; the Format List Responses owed, a pass of 64 at a
+  time with the writer looking again for the rest
+  (`TestClipboardListResponsesPaced`), its allocations the same with
+  65 owed as with a million (`TestClipboardListResponsesAllocs`), a
+  flood of 100,000 lists the server does not read with the session
+  kept and the heap not grown (`TestClipboardListFlood`), bursts of
+  65 and 1,000 lists in one write each answered
+  (`TestClipboardListBurst`), and a paste held up while the server's
+  user copies 1,000 times (`TestClipboardPasteHeldUp`) or read slowly
+  while it copies every 2 ms (`TestClipboardSlowPaste`); a write that
+  fails, the last or one within a message, stopping the writer
+  (`TestChannelWriteFailed`). The backend: both ways through the sink with the
+  Format List before the paste's keys, non-text dropped, each of
+  `DisableCopy` and `DisablePaste` and both, the byte budget, the
+  writer's order against a fake client, and NLA end to end: prompted
+  credentials with `nla` and `nla-ext`, then input; a wrong password
+  (`ErrAuthFailed` with the server's status); CredSSP 4 refused before
+  the client answers the challenge; a challenge without sealing; a
+  wrong public key proof, each without credentials delegated; and
+  cancel while the server stalls at either step. The client also logs
+  on through the acceptor in `internal/rdp`. Coverage, with the
+  reviews' tests: `internal/rdp` 88.7% of statements, `channel.go`
+  98.0% and `cliprdr.go` 96.9%; `internal/backend/rdp` 98.5%.
+- **Integration test.** `TestIntegrationClipboard`, under the
+  `rdp_integration` tag, pastes text and reads the session's X
+  CLIPBOARD selection, which xrdp-chansrv serves, and sets the
+  selection from an X client to see it reach the sink, with
+  `internal/rdp/testdata/xclipboard`, an xgb program the test copies
+  into the container as it does `querypointer`. On 2026-10-31 against
+  the bench desktop image's xrdp, it passed both ways, and the rest of
+  the backend's and the client's integration tests passed with the
+  channel joined. That the round trip works shows xrdp sends CLIPRDR
+  PDUs under TLS without a security header, as the client reads them.
+  It has not run again since the second review made the Format List
+  Responses a count, as the shared host's load stayed above 8.
+- **Mutation checks.** Each was broken in turn and a test failed, 26 in
+  all, none surviving:
+  - at most 31 channels in the server's network data, no more than
+    asked, none twice, not the I/O channel (`TestChannelAssigned`);
+  - the reassembly bound, both the cut and the whole check
+    (`TestChannelLimit`; the first version of that test let the cut
+    survive, since no chunk straddled the bound);
+  - compressed, over- and under-length and orphan chunks
+    (`TestChannelChunks`);
+  - `MaxClipboard` going out and coming in (`TestClipboardBounds`,
+    `TestClipboardText`); the data requests' bound
+    (`TestClipboardRequestsBounded`); pacing (`TestClipboardPaced`);
+  - each mode (`TestClipboardOneWay`), stale and failed answers
+    (`TestClipboardStale`), and no Format List before Monitor Ready
+    (`TestClipboardInit`, `TestClipboardOrder`);
+  - `DisableCopy` and `DisablePaste` (`TestRunClipboardDisabled`),
+    non-text dropped (`TestRunClipboard`), the backend's cut and its
+    byte budget (`TestRunClipboardBounded`, `TestInputErrors`);
+  - the read-only role (`TestReadOnlyInputDropped`), and CredSSP 5 at
+    least, through the acceptor (`TestRunNLARefused`).
+
+  A later check found that one of them, the failed answer's, had not
+  compiled, which the script took for a failed test; rewritten so that
+  it compiles, it is caught. The review of the pull request ran its own
+  and found five more that survived, now caught: the clipboard
+  channel's bound (`TestClipboardChannelBound`), writeDue's lock, so
+  that one message's chunks interleave with another's
+  (`TestChannelMessagesWhole`), the surrogate guard on an odd length
+  (`TestClipboardText`), the drop of a CLIPRDR message whose length is
+  wrong, text included (`TestClipboardLength`), and channel 0 in the
+  lookup (`TestClipboardChannelBound`). A second review ran 9 more on
+  the fixes and found two survivors: a failed write not recorded,
+  either the last of a pass or one within a message, so that the
+  writer would go on writing; `TestChannelWriteFailed` now catches
+  both. The responses owed, sent a pass at a time, were broken in
+  turn too, 6 mutants, all caught: no bound on a pass, a pass of 65,
+  no look again for the rest, refusals sent as acceptances, an
+  acceptance kept back, and the first version's bound
+  (`TestClipboardListResponsesPaced`, `TestClipboardListResponsesAllocs`,
+  `TestClipboardListBurst`, `TestClipboardPasteHeldUp`).
+- **Fuzzing.** `FuzzChannel` feeds chunks to the reassembly and checks
+  the bound; `FuzzCliprdr` feeds a CLIPRDR message, then sets the
+  owner's text and writes what is due; `FuzzRun` now joins the
+  clipboard channel and has CLIPRDR seeds. 60 seconds each with
+  `-fuzzminimizetime 20x`, without a finding: `FuzzChannel` 15,172,432
+  executions (host load 3 before, 53 after), `FuzzCliprdr` 12,868,402
+  (48, 99), `FuzzRun` 8,956,571 (12, 35). Under that load the fuzzer
+  reported no executions for seconds at a time; every input of
+  `FuzzCliprdr`'s corpus ran in under 10 ms on its own.
+- **Decisions made during implementation.**
+  - The clipboard is on both ways by default, as guacd has it.
+  - Line ends are converted, CR LF to the server and LF to viewers, as
+    the VNC backend converts them, where guacd's `normalize-clipboard`
+    preserves them by default. CF_UNICODETEXT has CR LF on Windows;
+    xrdp passes them to X as they are, so X applications in an xrdp
+    session see CR LF in pasted text.
+  - CF_TEXT is taken as Latin-1, with `?` for characters beyond it,
+    since the client does not know the server's ANSI code page;
+    CF_UNICODETEXT is offered and asked for first.
+  - The newest announcement wins: one request at a time, a stale
+    answer dropped, as the VNC backend keeps only the latest value.
+  - Compressed channel PDUs end the session: the client offers no
+    compression.
+- **Deviations.** From the Task Breakdown: phase 2 is two pull
+  requests, the second with DRDYNVC and Display Control. The Heartbeat
+  PDU and the auto-detect answers are deferred to phase 4: the client
+  does not set their early capability flags, so a server does not send
+  them, xrdp has neither, and only Windows can check them. From guacd:
+  line ends (above).
+- **Surprises.**
+  - xrdp keeps CR LF in the X selection.
+  - Under load, the backend's writer set pasted text before or after
+    the server's Monitor Ready, and a test that took the first Format
+    List to have it failed once in five runs; both orders are right.
+- **Follow-ups.**
+  - DRDYNVC and Display Control: done in the second pull request
+    (below).
+  - A `normalize-clipboard` option, if X sessions need LF.
+  - The Heartbeat PDU and auto-detect, with #32's Windows host.
+  - Formats beyond text (HTML, images) wait for protocol v1 to carry
+    them; files are out of v1.0.
+  - The owner's text goes to the server unpaced: up to 8 requests may
+    wait, each answered with up to 16 MiB of UTF-16 (4 MiB of line
+    ends, each a CR LF of four bytes).
+  - `MaxClipboard` (4 MiB) equals `protocol.DefaultMaxMessageSize`,
+    which counts the message's header, so a server's clipboard near
+    4 MiB is decoded and then dropped by every viewer's writer. The VNC
+    backend does the same.
+  - NTLM sends neither `MsvAvChannelBindings` nor `MsvAvTargetName`,
+    which a Windows server that enforces Extended Protection for
+    Authentication may require; check in phase 4.
+  - Nothing keeps `rdptest` out of the client's non-test imports: a
+    depguard rule or an import test could.
+
+## Implementation notes: phase 2, DRDYNVC and Display Control
+
+- **Status.** The second pull request of phase 2: DRDYNVC and Display
+  Control, through which a viewer's `Resize` asks the server for a
+  desktop of its size. With it phase 2 is done but for the Heartbeat
+  PDU and the auto-detect answers (deferred above). Registration,
+  separate work, made the backend `rdp`'s default without waiting for
+  the parity gate, which since the owner's decision of 2026-10-31
+  decides only when RDP's guacd path is deleted
+  ([guacd-bridge](guacd-bridge.md), Parity gate; Implementation notes:
+  registration).
+- **What was built.**
+  - DRDYNVC (`internal/rdp/dynvc.go`, [MS-RDPEDYC]). With
+    `Config.Resize` the client asks for the static channel `drdynvc`
+    (INITIALIZED and ENCRYPT_RDP), whose messages it keeps up to
+    8 KiB. It answers the server's capabilities with version 2 at
+    most, so a server that speaks 3 falls back and sends neither
+    compressed data nor soft-sync. It accepts the Display Control
+    channel, one at a time, and refuses other names, an id that is
+    open, and a second Display Control with STATUS_UNSUCCESSFUL, as
+    FreeRDP does; so at most one dynamic channel is open. A close is
+    answered with a close. A message comes in one Data PDU or in a Data
+    First that declares its length and Data PDUs after it, reassembled
+    up to the channel's own bound (1 KiB for Display Control): a longer
+    message is dropped and counted, one that runs past the length it
+    declared ends the session, as do compressed data, a Data First
+    whose length has size code 3, a create, data or close whose channel
+    id has size code 3, and a channel name without its NUL within 256
+    bytes. Data for a channel that is not open, a static message cut at
+    its bound, and soft-sync are dropped and counted. The answers the
+    reader owes wait for the channel writer in a queue of at most 64; a
+    server that opens channels faster than it reads the answers ends
+    the session. Once a write of the channel writer has failed, this
+    bound and the clipboard's bound on data requests report that
+    write's error rather than the bound, since the failure is why the
+    answers wait (found in review).
+  - Display Control ([MS-RDPEDISP]). The server's capabilities give the
+    most monitors and the area of each; the client takes their product,
+    saturated at the 32 Mi pixels a desktop may have, as the area it
+    may ask for. `rdp.Client.RequestSize` clamps a size to 200 to 8,192
+    pixels a side, the width even, and keeps the newest. Once the
+    channel is open and its capabilities have come, the channel writer
+    sends it as a monitor layout of one primary monitor at the origin,
+    its physical size unknown (0) and its scale 100%: a new size at
+    most every half second, as guacd's `GUAC_RDP_DISP_UPDATE_INTERVAL`,
+    and the same size again every two seconds while the desktop
+    differs, at most eight times; a size asked for anew starts its
+    eight again. The desktop's own size and a size beyond the area are
+    not sent. There is no acknowledgement: the server reactivates the
+    session at the new size, which `Run` reports to `Output.Resize` as
+    any reactivation. As the server may apply a layout late, a size
+    asked for back to the desktop's own while the last layout, of
+    another size, is within its two seconds is kept until then, and
+    sent should the desktop change (found in review: a viewer who
+    resized and resized back before the server applied the first size
+    was left with it). A server that applies the earlier layout after
+    its two seconds still leaves the viewer at that size, as the client
+    no longer wants the size asked for back by then, until the viewer
+    resizes again. Closing the channel forgets the capabilities and
+    keeps the size, which goes again when a channel opens. `Run` stops
+    the layout timer as it returns.
+  - After a reactivation, the client tells a server it had asked to
+    suppress its output to suppress it again, since the server's output
+    state after Demand Active is its own (phase 1's follow-up). It reads
+    the state as it sends, under a lock that `SuppressOutput` holds as
+    it sends, so that a viewer's request for output while the server
+    reactivates is not undone by a repeat of the state before it (found
+    in review). A seam between the read and the send lets a test hold
+    the repeat there.
+  - The backend asks for DRDYNVC, and `Input` queues a `Resize` with
+    both sides above zero, in order with the other input; the writer
+    hands it to `RequestSize`, which keeps the newest and paces it.
+  - `rdptest` speaks DRDYNVC as a server (`rdptest/dynvc.go`): it sends
+    the capabilities of any version, opens and closes channels with
+    ids of one, two and four bytes, sends a message in one Data PDU or
+    in a Data First and Data PDUs, sends Display Control's
+    capabilities, and parses the client's PDUs and monitor layouts.
+- **Tests.** Against `rdptest` over loopback (`internal/rdp/dynvc_test.go`):
+  no `drdynvc` without `Resize`; the version answered for servers of 1
+  to 4; Display Control accepted, and other names and a second Display
+  Control refused; a close answered and Display Control
+  opened again under another id, the size not yet had sent on it;
+  layouts on ids of one, two and four bytes; the first layout waiting
+  for the capabilities, pacing with the newest of three winning, the
+  clamping and the even width, the retries up to eight and then
+  nothing, a size asked for anew sent again, nothing for the desktop's
+  own size or beyond the server's area; reassembly in three PDUs, a
+  message over its bound in one PDU or in several, data for a channel
+  not open, a message longer than declared or than an empty one,
+  compressed data, names without their NUL or too long, version 0, a
+  length of size code 3 and ids of it in each command; a message of
+  exactly the channel's bound whole and one a byte longer dropped, in
+  one PDU and in several (`TestDynvcBound`); the answers' bound
+  (`TestDynvcAnswersBounded`), and the bounds reporting the writer's
+  failure (`TestOwedAfterWriteFailed`) and a write failing within a
+  message stopping it (`TestChannelWriteFailed`); the area's saturation
+  (`TestDisplayCapsArea`); a size asked for back kept until the server
+  applies the size before, or until that size's retry is due, and given
+  up once the desktop has it (`TestDisplayResizeBack`), the retry's
+  wake kept when a size asked for in between took it
+  (`TestLayoutWindow`), and the timer stopped with `Run`
+  (`TestDisplayTimerStops`); and Suppress Output repeated after a
+  reactivation (`TestSuppressOutputAfterReactivation`), not over a
+  viewer's request for output during it (`TestSuppressOutputRace`,
+  which holds the client's writes so that the request waits behind the
+  reactivation's; it failed 3 runs of 3 on the client before the fix
+  and passes whichever of the two goes first), nor when the request
+  comes between the repeat's read and its send
+  (`TestSuppressOutputReaderFirst`, through the seam). The backend's
+  `TestRunResize`: sizes of zero or less ask for nothing, a `Resize`
+  goes as a layout, the server's reactivation resizes the sink, and
+  Suppress Output is repeated after it. Coverage: `internal/rdp` 90.0%
+  of statements, `dynvc.go` 95.1%; `internal/backend/rdp` 98.5%.
+- **Integration test.** Under the `rdp_integration` tag, on 2026-10-31
+  against the bench desktop image's xrdp 0.10.1 with xorgxrdp 0.10.2:
+  the client's `TestIntegrationResize` saw DRDYNVC version 2 and
+  Display Control's capabilities (33,554,432 pixels) and resized the
+  desktop to 1280×720, 800×600 and back to 1024×768, each drawn to its
+  new edges; on a fresh session the first layout met xrdp's login and
+  the retry two seconds later applied it. The backend's
+  `TestIntegrationResize` resized the sink to 1280×720, 800×600 and
+  back to 1024×768, a key painting the probe's swatch at each size.
+  The rest of both packages' integration tests passed with the channel
+  joined. After the review's fixes both packages' integration tests
+  passed again (host load 3 before, 7 after). They have not run again
+  since the second review, as the shared host's load stayed above 8;
+  its changes here are a test seam, which is nil outside tests, and
+  the clipboard's count merged in.
+- **Mutation checks.** Each was broken in turn, 34 in all, and a test
+  failed for 32; a mutant that no longer compiled was rewritten until
+  it did. Caught:
+  - the answers' bound (`TestDynvcAnswersBounded`; changing the
+    constant survived, since the test uses it, so the check itself was
+    broken instead);
+  - one Display Control at a time, the version answered, the close
+    answered, the layouts' state reset on close (`TestDynvcChannels`;
+    the capabilities kept on close survived, which the review found,
+    below);
+  - the channel's bound in several PDUs and in one, the length
+    declared, compressed data, the name's bound, size code 3, a
+    truncated static message (`TestDynvcData`,
+    `TestDynvcAnswersBounded`; the bound in one PDU survived until
+    `TestDynvcData` sent such a message);
+  - the area with no monitors (`TestDisplayCapsArea`), the area check,
+    waiting for the capabilities, the desktop's own size, the least
+    width and height, the even width, the greatest height, pacing, the
+    tries' bound, the retry, the earlier of two wake-ups, a size asked
+    for anew (`TestDisplayControl`);
+  - Suppress Output after a reactivation, and the state it is repeated
+    from (`TestSuppressOutputAfterReactivation`);
+  - the backend's width and height, `Resize` asked for, and sizes of
+    zero or less, either side (`TestRunResize`; the width's check
+    survived until a `Resize` of height alone was sent).
+
+  Two survive, both equivalent: refusing an id that is open, which only
+  Display Control could be and which a second Display Control is
+  refused for anyway, kept so that a second handler cannot replace an
+  open channel; and an id from 256 to 65,535 sent in four bytes rather
+  than two, which DRDYNVC allows.
+
+  The review ran 28 mutants of its own and found five more that
+  survived, now caught: the bound of a Data First and of a single Data
+  PDU one byte off (`TestDynvcBound` sends 1 KiB and 1 KiB and a byte);
+  a Data First that declares 0 bytes taken as a whole message
+  (`TestDynvcData`); the look at the layout after a reactivation
+  removed (`TestDisplayResizeBack`, whose retry is an hour away, so
+  that the reactivation alone has the client look); and the
+  capabilities kept on close (`TestDynvcChannels` now checks that
+  nothing goes on the reopened channel before its capabilities). Its
+  sixth, refusing an id that is open, is the first equivalent one
+  above. The review's fixes were broken in turn too, 15 mutants, which
+  the tests caught: each condition of keeping a size asked for back
+  and the look again when its window ends (`TestDisplayResizeBack`,
+  `TestLayoutWindow`); size code 3 for each command and the check
+  itself (`TestDynvcData`); the writer's failure recorded, read at the
+  bounds, and reported at each (`TestOwedAfterWriteFailed`); and the
+  timer stopped with `Run` (`TestDisplayTimerStops`). The Suppress
+  Output fix was checked by running `TestSuppressOutputRace` on the
+  client before it.
+
+  Those 15 did not cover the fixes, though: a second review ran 19
+  mutants on them, and 6 survived. Three are now caught: the Suppress
+  Output repeat releasing its lock before it sends, or taking none
+  (`TestSuppressOutputReaderFirst`; `TestSuppressOutputRace` holds the
+  client's writes, so its reader blocks before it reads the state, and
+  both mutants passed it); and a write failing within a message not
+  recorded (`TestChannelWriteFailed`). Three still survive:
+  - `SuppressOutput` releasing its lock before it sends is equivalent:
+    the backend's writer is its only caller, so two never race, and
+    the repeat, which would read the new state, sends what
+    `SuppressOutput` sends;
+  - the writer's failure set under its own lock alone, not under the
+    channels' too, is a data race that no deterministic test sees, as
+    is `Run` stopping the layout timer before the writer has ended,
+    which a last pass of the writer may set again: both are timing.
+- **Fuzzing.** `FuzzDynvc` feeds DRDYNVC PDUs and writes what is due
+  after each, checking the answers' and the channels' bounds;
+  `FuzzRun` now joins `drdynvc` beside the clipboard's channel, asks
+  for a size, and has DRDYNVC and reactivation seeds. 60 seconds each
+  with `-fuzzminimizetime 20x`, without a finding: `FuzzDynvc`
+  14,576,219 executions (host load 3 before, 60 after), `FuzzRun`
+  8,299,215 (57, 45).
+- **Decisions made during implementation.**
+  - One layout of one monitor, the primary, at the size asked for:
+    viewers have one canvas.
+  - The size is retried, where guacd sends a layout only when the size
+    changes and keeps no state of the server's answer: xrdp drops a
+    layout while its login is in progress ("Not allowing resize. Login
+    in progress."), which a viewer's first `Resize` usually meets, and
+    then the desktop would keep its size until the viewer resizes
+    again. Eight tries two seconds apart bound it for a server that
+    never applies a size.
+  - At most one dynamic channel is open, so the bound on channels is
+    the one Display Control rather than a count.
+  - A channel id of size code 3, which [MS-RDPEDYC] 2.2.2.1 and 2.2.3.1
+    call an invalid value, ends the session, as a length of it does:
+    the client answers a create or a close in the size the server used,
+    and has no valid one to answer this in. FreeRDP reads it as four
+    bytes; no server is known to send it.
+  - A second capabilities PDU is answered again, and a create before
+    the capabilities is answered as any other, rather than ending the
+    session: FreeRDP takes both, and what the client holds stays within
+    the answers' bound either way (the review asked whether to end the
+    session on them).
+  - Any interactive viewer's `Resize` asks for a size, not only the
+    owner's, and a viewer that resizes without end is bounded by the
+    pacing: one layout every half second at most, the newest size
+    winning, and eight tries of a size. Whether only the session's
+    owner may resize waits on the project owner's decision (follow-up).
+- **Deviations.** From the Task Breakdown: "DRDYNVC with a bounded
+  number of channels" is one channel, Display Control; GFX in phase 3
+  will be the second. From guacd: the retries (above).
+- **Surprises.**
+  - xrdp refuses a layout during its login and says so only in its
+    log; nothing comes back on the channel.
+  - xrdp logs "Physical desktop dimensions (835586x0) are invalid" for
+    each connection: it reads the core data's physical size past the
+    end of the client's block, from the header of the block after it
+    (0x000CC002, the security data's type and length). It then ignores
+    them, so nothing changes; the client's block is as long as its
+    header says.
+  - xrdp logs that a physical size of 0 is out of range for each
+    layout, and uses none, as [MS-RDPEDISP] allows.
+- **Follow-ups.**
+  - The Heartbeat PDU and auto-detect, with #32's Windows host
+    (above).
+  - Display Control against Windows (phase 4), whose sizes and pacing
+    may differ.
+  - GFX over DRDYNVC (phase 3): a handler and a bound of its own, and
+    the version 3 features it may need.
+  - Resize for the session's owner alone, if the project owner decides
+    so; any
+    interactive viewer can resize now (above).
+
+## Implementation notes: registration
+
+- **Status.** Done on 2026-10-31, after phase 2, by the owner's
+  decisions (guacd-bridge, Parity gate): occamyd serves `rdp`
+  connections and ad-hoc `rdp` targets with this backend by default, and
+  `backend: guacd` (or `adhoc_backends: {rdp: guacd}`) keeps the bridge
+  as an explicit fallback and the benchmark's baseline. NLA had run end
+  to end against `rdptest`'s CredSSP acceptor, which registration waited
+  for (Task Breakdown). Not yet against Windows: the backend has run
+  against xrdp and `rdptest` only, and phase 4 waits for a host (#32).
+- **What was done.**
+  - `config.DefaultBackend` returns `native` for rdp, and
+    `backendProblem` no longer refuses `backend: native` on rdp. The
+    factory in `server/backends.go` registers rdp/native beside
+    rdp/guacd; the session's state names it `rdp`.
+  - `newRDP` builds the backend's `Config` from the target, as `newVNC`
+    does: the username and the stored password, `tls` as the client's
+    `TLS` (the CA file read when the session starts; an ad-hoc target's
+    certificate must name the name it was opened by, not the address it
+    resolved to), the connection's `security`, and the hello's size.
+  - A `security` key on rdp connections, the mode as guacd names it
+    (`nla`, `nla-ext`, `tls`, `any`), checked when the file loads.
+    `tls` now applies to rdp connections too, its pins parsed by
+    `rdp.CheckPin`; `require` is implied, since the backend always runs
+    TLS. Both need the native backend: with `backend: guacd` the file
+    fails to load, naming `guacd.params.rdp`, which the bridge reads
+    instead.
+  - A server that selects standard RDP security when offered NLA alone,
+    as xrdp does although it takes TLS, fails the session with
+    `rdp.ProtocolError` and a hint that names the key to set,
+    `security: tls on connection "…"`, from `Config.SecuritySetting`;
+    an ad-hoc target's hint says that ad-hoc rdp targets take NLA
+    alone. `rdptest.Server.Standard` selects standard RDP security.
+  - The hello's size is clamped into an RDP desktop's, 200 to 8192 a
+    side and 2^25 pixels in all, the height cut first, so that a large
+    hello does not fail `New`; without both sides the backend's
+    1024×768 applies. A later `Resize` goes through Display Control
+    (phase 2).
+  - A username of the form `DOMAIN\user` logs on to that domain, as
+    mstsc takes it; `user@domain` goes as it is, which NTLM takes with
+    an empty domain. The backend splits it only without a domain and
+    only when the user part is there: `\alice` logs on as `alice` with
+    no domain, as FreeRDP takes it, and `alice\` goes as it is, so that
+    the split never empties the username. A username the owner gives
+    at the prompt with the domain left empty is split the same way.
+  - `occamyd` warns when it loads the file, by protocol and for vnc as
+    for rdp, of the `guacd.params` that no session reads: those of a
+    protocol none of whose connections goes through guacd, except the
+    display's when its ad-hoc targets go through guacd, and none with
+    `legacy_v0`. It says why in the protocol's terms: ssh never goes
+    through guacd, no telnet connection is configured, or no vnc or rdp
+    connection sets `backend: guacd`. A file written for guacd, with
+    `disable-copy` or `recording-path`, would otherwise lose them
+    unnoticed when its connections moved to the native default. It
+    also names each connection whose `security: tls` or `any` comes
+    with `tls.insecure_skip_verify`, which may send the password to
+    whoever is in between. The example file's `guacd.params.rdp` has an rdp
+    connection on guacd to apply to.
+  - Prompts go to the owner alone and end reasons map as for VNC: a
+    deliberate end by the server (no reason, the user's logoff or
+    disconnect, or Set Error Info 1 to 5: an administrator's
+    disconnect or logoff, a time limit, another connection) is
+    `remote-ended`; a refused logon or certificate, or any other
+    failure, `backend-failed`. Viewers get only the reason, and the
+    error goes to occamyd's log.
+  - The demo stack serves its xrdp server as `rdp-native` (no
+    `backend`, `security: tls`, `tls: {insecure_skip_verify: true}`,
+    since the image signs its certificate when it is built) and as
+    `rdp-guacd`, and `make e2e` streams both (`tests/v1_test.go`; keys
+    carry their HID code, which the native backend sends as a
+    scancode). occamyd warns at start of `rdp-native`'s unchecked TLS,
+    as it should. `TestE2EV1RDP` takes `rdp-native` further, as the
+    owner would: text pasted into the session comes back from xrdp
+    through the image's clipboard echo (`clipboard-echo.sh`, with
+    xclip, beside the xterm), which carries the clipboard both ways in
+    one round trip; a resize to 800×600 and back reaches the screen and
+    the session's state; a viewer joined by a share sees the owner's
+    size and types, while the owner reads on so that it is not dropped
+    as too slow; and the owner closes the stream, waits until the
+    session lists no viewer, and comes back to the same session through
+    the owner grace. TestE2EV1's second run of each connection covers a
+    session opened again after one ended. Each owner's session is also
+    closed when its test ends, so that one that fails leaves no session
+    on xrdp for the next. All four passed 6 of 6 runs against the demo
+    image with a local occamyd, and 3 of 3 again after the delta
+    review's fixes.
+- **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
+  through occamyd's routes with the Go client against `rdptest`: NLA
+  with stored credentials, the hello's size, the screen, scancodes,
+  the pointer and Unicode text, a resize through Display Control, the
+  clipboard both ways with CR LF, and a logoff as `remote-ended`
+  (`TestRDPEndToEnd`); the owner's prompt, raised when the session
+  opens and held for the owner, which the viewer whose stream opened
+  first never gets, and a wrong password as `backend-failed`
+  (`TestRDPPrompt`; the backend prompts only before it connects, so a
+  prompt raised after a viewer has joined is session-core's
+  `TestPrompt`); pins, the system's roots and a wrong pin refused
+  before NLA (`TestRDPTLS`); an ad-hoc target, native by default
+  (`TestRDPAdhoc`); and the clipboard by role
+  (`TestRDPClipboardRoles`). `TestNewRDP` covers the configuration,
+  `TestParseV1Backends` and `TestParseV1Problems` the file,
+  `TestRunStandardSecurity` the hint, `TestRunSplitsDomain` the
+  domain, configured and prompted, and `TestLoadWarnings` and
+  `TestLoadWarningsLogged` the warnings at load; `TestParseV1Example`
+  checks that the example's `guacd.params` each have a connection on
+  guacd.
+- **Integration test.** Under the `rdp_integration` tag, against the
+  bench desktop image's xrdp, at 99fe233 on 2026-10-31, one run after
+  the other with the host's 1-minute load below 8 before each (6.5,
+  then 7.5): the backend's `TestIntegrationSecurity` passed, its
+  security `any` drawing the wallpaper and its NLA alone refused with
+  the hint that names `Config.Security`; and the client's suite
+  (`-run Integration`) passed, `TestIntegration` at 32, 24, 16 and 15
+  bpp with security protocol 0x1, and `TestIntegrationResize` with
+  DRDYNVC version 2 and Display Control's 33,554,432 pixels. The
+  client's suite had not run since phase 2's second review. The review
+  of c762d70 had run the backend's four tests against xrdp, which all
+  passed. `TestBytesAgainstGuacd`, the spike's measurement against
+  guacd, is not part of the suite and did not run.
+- **Mutation checks.** Each of these fails a test: rdp's default back to
+  `guacd`; the native refusal restored; the `tls` refusal with
+  `backend: guacd` dropped; each of `security`'s checks dropped, a mode
+  dropped or one added; rdp's pins parsed as no protocol's; rdp/native
+  not registered; the security mode, the setting, the username, the
+  password, each of the `TLS` fields, or the ad-hoc server name not
+  passed; the size not passed, not clamped, or taken from one side;
+  the domain not split, in `New` or after the prompt, or split with a
+  domain set, with the user part empty, or only with the domain part
+  there; the connection's `security` not carried to the target; the
+  hint given for any refused protocol, or without the setting; and of
+  the warnings at load, the protocol match, the `legacy_v0` skip, the
+  ad-hoc gate and its display parameters, the skip when nothing is
+  left, ssh's and telnet's own wording, `tls` or `any` dropped,
+  `insecure_skip_verify` not checked, and the warnings not logged.
+  Parsing rdp's pins with the VNC backend's parser, the same code, is
+  an equivalent mutant.
+- **Decisions.**
+  - `security` is a key of its own, not `guacd.params.rdp.security`:
+    the bridge's parameters do not apply to the native backend, and NLA
+    stays the default, since anything else sends the password to
+    whichever server passed the certificate check. xrdp needs
+    `security: tls`, and the error says so.
+  - `tls.require` is accepted on rdp and changes nothing, so that a
+    connection can say what it means.
+  - An ad-hoc rdp target takes NLA and the system's roots, as a
+    connection without `tls` or `security`; a target that needs less
+    needs a connection.
+- **Deviations.** From the Task Breakdown: registration came before
+  phases 3 and 4, by the owner's decision that native is the default
+  wherever a native backend exists; Windows is not verified, and the
+  docs say so. From guacd: no `ignore-cert`; `insecure_skip_verify`,
+  which logs the certificate's fingerprint, is the demo's equivalent.
+- **Follow-ups.**
+  - Phase 3, GFX without AVC; until then servers send plain bitmap
+    updates, as they send guacd with `disable-gfx`.
+  - Phase 4, against Windows, besides its row: two orders and bounds
+    that only xrdp, whose chansrv only logs Format List Responses, has
+    checked:
+    - the Format List Responses the client owes go out as counts, the
+      OK responses before the FAIL ones, not in the order the lists
+      arrived, and in a burst a Format Data Request for the newest list
+      can go before the responses to the lists before it. Check that
+      Windows' clipboard (rdpclip) takes this order;
+    - the answers the DRDYNVC reader owes wait for the channel writer
+      in a queue of at most 64, and a server that opens channels faster
+      than the client's answers are read ends the session. Windows
+      opens more dynamic channels at connect than xrdp; check that a
+      burst of creates stays within the queue.
+  - A `domain` key, if `DOMAIN\user` in `username` is not enough.
+  - A clipboard key on connections for every protocol and backend,
+    which v1 does not specify: guacd's `disable-copy` and
+    `disable-paste` restrict the clipboard through guacd only. The
+    native RDP backend's `Config` has `DisableCopy` and `DisablePaste`,
+    but no key of the file sets them, so a connection that needs a
+    restriction stays on guacd. It belongs to the API's connection schema
+    ([api-and-server-stack](api-and-server-stack.md)), not to RDP.
+  - Session recording on the native backends, which guacd's
+    `recording-path` gives through guacd alone; session-core leaves it
+    out of beta (its decision 6).
+  - The bridge's other RDP parameters that guacd users set
+    (`server-layout`, `console`, `initial-program`, the gateway, load
+    balancing info) have no native equivalent yet.
