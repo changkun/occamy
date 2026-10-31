@@ -47,7 +47,7 @@ connections:
     target: rdp:3389
     # xrdp speaks TLS without NLA, and signs its certificate itself when
     # the image is built, so there is nothing to pin in advance: for the
-    # demo only.
+    # demo only, and occamyd warns of it when it starts.
     security: tls
     tls: {insecure_skip_verify: true}
     credentials: {username: occamy, password_env: OCCAMY_DEMO_RDP_PASSWORD}
