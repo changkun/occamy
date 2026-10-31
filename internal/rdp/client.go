@@ -9,9 +9,10 @@
 // of a native RDP backend (specs/008-native-architecture/rdp-strategy.md).
 //
 // The client asks for bitmap updates only: it advertises no drawing
-// orders, caches, bulk compression, bitmap codecs or virtual channels.
-// Standard RDP security, the licensing exchange, Kerberos and the GFX
-// pipeline are not implemented.
+// orders, caches, bulk compression or bitmap codecs. Of the virtual
+// channels it speaks the clipboard's, CLIPRDR, for text, when Config
+// asks for it. Standard RDP security, the licensing exchange, Kerberos
+// and the GFX pipeline are not implemented.
 package rdp
 
 import (
@@ -66,6 +67,11 @@ type Config struct {
 	// strips NLA from the offer is noticed by the protocols the server
 	// repeats under TLS.
 	TLS TLS
+	// Clipboard selects the ways clipboard text goes through the
+	// clipboard channel (cliprdr.go). Without ClipboardFromServer or
+	// ClipboardToServer, the default, the client does not ask for the
+	// channel.
+	Clipboard ClipboardMode
 	// Logger receives warnings; nil means slog.Default().
 	Logger *slog.Logger
 
@@ -87,6 +93,8 @@ type Output interface {
 	Cursor(img *image.RGBA, hot image.Point)
 	// CursorMove reports that the server moved the pointer.
 	CursorMove(p image.Point)
+	// Clipboard reports the server's clipboard: text/plain in UTF-8.
+	Clipboard(mime string, data []byte)
 }
 
 // Stats counts what a client received, by kind.
@@ -120,6 +128,13 @@ type Client struct {
 	msgChannel uint16
 	shareID    uint32
 	caps       serverCaps
+
+	// channels are the static virtual channels the client asked for;
+	// clipCh is the clipboard's among them, or nil.
+	channels []*vchannel
+	clipCh   *vchannel
+	chio     channelIO
+	clip     cliprdr // under chio.mu
 
 	fastPathInput atomic.Bool
 
@@ -254,6 +269,13 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 		height: cfg.Height,
 		stats:  Stats{Bitmaps: map[string]int{}, Ignored: map[string]int{}},
 		ctx:    ctx,
+		chio:   channelIO{kick: make(chan struct{}, 1)},
+	}
+	c.channels = c.newChannels()
+	for _, vc := range c.channels {
+		if vc.name == "cliprdr" {
+			c.clipCh = vc
+		}
 	}
 	stop := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Unix(1, 0)) })
 	err = c.connect(ctx)
@@ -339,6 +361,9 @@ func (c *Client) connect(ctx context.Context) error {
 		return fmt.Errorf("rdp: the server was offered security protocols %#x, not the %#x the client sent", sd.requestedProtocols, c.cfg.Protocols)
 	}
 	c.ioChannel, c.msgChannel = sd.ioChannel, sd.msgChannel
+	if err := c.assignChannels(sd.channels); err != nil {
+		return err
+	}
 
 	// Channel connection, phase 3.
 	if err := c.t.write(tpkt(erectDomainRequest())); err != nil {
@@ -357,7 +382,11 @@ func (c *Client) connect(ctx context.Context) error {
 	if c.msgChannel != 0 {
 		join = append(join, c.msgChannel)
 	}
-	join = append(join, sd.channels...)
+	for _, vc := range c.channels {
+		if vc.id != 0 {
+			join = append(join, vc.id)
+		}
+	}
 	for _, ch := range join {
 		if err := c.t.write(tpkt(channelJoinRequest(c.userID, ch))); err != nil {
 			return err
@@ -443,15 +472,29 @@ func (c *Client) readChannel() (uint16, []byte, error) {
 }
 
 // readIOData reads the data of the next Send Data Indication on the I/O
-// channel, skipping the other channels'.
+// channel. It applies what comes on the static virtual channels before
+// it, and skips the other channels'.
 func (c *Client) readIOData() ([]byte, error) {
 	for {
 		ch, data, err := c.readChannel()
 		if err != nil || ch == c.ioChannel {
 			return data, err
 		}
-		c.ignoreChannel(ch)
+		if err := c.otherChannel(nil, ch, data); err != nil {
+			return nil, err
+		}
 	}
+}
+
+// otherChannel applies the data of a Send Data Indication on a channel
+// other than the I/O channel: a chunk on a static virtual channel, or
+// something the client ignores.
+func (c *Client) otherChannel(out Output, ch uint16, data []byte) error {
+	if vc := c.channelByID(ch); vc != nil {
+		return c.channelChunk(out, vc, data)
+	}
+	c.ignoreChannel(ch)
+	return nil
 }
 
 // ignoreChannel counts a PDU on a channel other than the I/O channel: the
@@ -523,11 +566,24 @@ func (c *Client) Close() error { return c.conn.Close() }
 // nil when the server ends the session normally, ctx.Err() when ctx is
 // done first, and another error otherwise. It closes the connection
 // before it returns.
+//
+// With virtual channels, Run writes what they answer the server from a
+// goroutine of its own, which has ended when Run returns.
 func (c *Client) Run(ctx context.Context, out Output) error {
 	defer c.conn.Close()
 	stop := context.AfterFunc(ctx, func() { c.conn.Close() })
 	defer stop()
 	c.ctx = ctx
+	if len(c.channels) > 0 {
+		wctx, cancel := context.WithCancel(ctx)
+		var wg sync.WaitGroup
+		wg.Go(func() { c.channelWriter(wctx) })
+		defer func() {
+			cancel()
+			c.conn.Close() // ends a write that waits on the server
+			wg.Wait()
+		}()
+	}
 	w, h := c.Size()
 	out.Resize(w, h)
 	c.lastResize = c.clock()
@@ -562,7 +618,7 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 				if ch == c.ioChannel {
 					_, err = c.handleShareControl(out, data)
 				} else {
-					c.ignoreChannel(ch)
+					err = c.otherChannel(out, ch, data)
 				}
 			}
 		}

@@ -420,10 +420,26 @@ func FuzzRun(f *testing.F) {
 			),
 		},
 		{rdptest.SetErrorInfo(0x9), rdptest.DisconnectUltimatum()},
+		slices.Concat(
+			rdptest.ChannelChunks(fuzzClipboard, rdptest.ClipCaps(true), rdptest.ChunkSize),
+			rdptest.ChannelChunks(fuzzClipboard, rdptest.MonitorReady(), rdptest.ChunkSize),
+			rdptest.ChannelChunks(fuzzClipboard, rdptest.FormatList(true, rdptest.CFUnicodeText), rdptest.ChunkSize),
+			rdptest.ChannelChunks(fuzzClipboard, rdptest.FormatDataResponse(true, rdptest.UnicodeText("a\r\nb")), 3),
+			rdptest.ChannelChunks(fuzzClipboard, rdptest.FormatDataRequest(rdptest.CFText), rdptest.ChunkSize),
+		),
 	} {
 		f.Add(slices.Concat(seed...))
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		runFrames(testClient(fuzzWidth, fuzzHeight), &backendtest.Sink{}, data)
+		c := testClient(fuzzWidth, fuzzHeight)
+		c.cfg.Clipboard = ClipboardFromServer | ClipboardToServer
+		c.chio.kick = make(chan struct{}, 1)
+		c.channels = c.newChannels()
+		c.clipCh = c.channels[0]
+		c.clipCh.id = fuzzClipboard
+		runFrames(c, &backendtest.Sink{}, data)
 	})
 }
+
+// fuzzClipboard is the MCS channel of the clipboard in FuzzRun.
+const fuzzClipboard = rdptest.IOChannel + 1
