@@ -69,10 +69,15 @@ func TestRunResize(t *testing.T) {
 	c := s.accept(t)
 	const id = 3
 	openDisplay(t, c, id)
-	for _, ev := range []backend.InputEvent{backend.Resize{}, backend.Resize{Width: 1280, Height: 720}} {
+	// A side of zero or less asks for nothing.
+	for _, ev := range []backend.InputEvent{backend.Resize{}, backend.Resize{Width: 1280}, backend.Resize{Height: 720}, backend.Resize{Width: -1, Height: 720}} {
 		if err := b.Input(ev); err != nil {
 			t.Fatal(err)
 		}
+	}
+	quietFor(t, c)
+	if err := b.Input(backend.Resize{Width: 1280, Height: 720}); err != nil {
+		t.Fatal(err)
 	}
 	d := dvc(t, c)
 	ms, err := rdptest.ParseMonitorLayout(d.Data)
