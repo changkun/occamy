@@ -31,10 +31,29 @@ import (
 
 // motionHeat is the heat at which a tile is in motion. A tile's heat
 // rises by one for each snapshot of the versions, at least activeWindow
-// apart, in which it changed, and halves every second: a tile that
-// changes more than once a second keeps above it, and one that changes
-// in three snapshots in a row reaches it.
+// apart, in which it changed, and halves every refine delay the writer
+// spends between frames: a tile that changes more often than the refine
+// delay keeps above it, and one that changes in three snapshots in a row
+// reaches it while they are less than about 0.7 refine delays apart. A
+// tile that changes less often is not in motion and goes at its final
+// quality, since refinement would raise it between its changes anyway.
+// The time the writer spends sending a frame does not count: it takes no
+// snapshot meanwhile, so a tile that changes in every snapshot is in
+// motion however long the frames take.
 const motionHeat = 2
+
+// halfLife is the time in which heat halves: the refine delay, so that
+// what is in motion and what is refined between its changes do not
+// overlap, but no shorter than the time between snapshots.
+func (w *writer) halfLife() time.Duration { return max(w.refineDelay, activeWindow) }
+
+// rested marks the end of a frame: the heat cools only from now, since
+// the writer took no snapshot while it sent the frame.
+func (w *writer) rested() {
+	if !w.heatAt.IsZero() {
+		w.heatAt = time.Now()
+	}
+}
 
 // warm updates every tile's heat at now, from the versions of the last
 // snapshot, w.snap, to the current ones, w.versions. A change that went
@@ -45,7 +64,7 @@ func (w *writer) warm(now time.Time) {
 	}
 	f := float32(1)
 	if !w.heatAt.IsZero() {
-		f = float32(math.Exp2(-now.Sub(w.heatAt).Seconds()))
+		f = float32(math.Exp2(-now.Sub(w.heatAt).Seconds() / w.halfLife().Seconds()))
 	}
 	w.heatAt = now
 	for t, v := range w.versions {
@@ -160,6 +179,7 @@ func (w *writer) refinement(ctx context.Context, viewport image.Rectangle) (time
 // an input is pending, and once the screen changed after it sent one, so
 // that the input's frame, or the change's, goes next.
 func (w *writer) refineFrame(ctx context.Context) error {
+	defer w.rested()
 	w.frame++
 	id := w.frame
 	readAt := time.Now()

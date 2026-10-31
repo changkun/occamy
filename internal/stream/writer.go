@@ -350,6 +350,7 @@ func (w *writer) collect(viewport image.Rectangle) (fresh int, ok bool) {
 // in flight, when the screen is resized or hidden, or after the tiles of
 // an input whose effect appears meanwhile.
 func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
+	defer w.rested()
 	w.frame++
 	id := w.frame
 	readAt := time.Now()
