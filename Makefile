@@ -29,9 +29,13 @@ stop:
 	cd docker && $(CONTAINER_ENGINE) compose down --remove-orphans
 .PHONY: stop
 
-# e2e runs the end-to-end tests against a stack started with make run.
+# e2e runs the end-to-end tests against a stack started with make run:
+# the v0 service's on OCCAMY_E2E_ENDPOINT and occamy-v1's, API v1 with
+# native VNC next to guacd's, on OCCAMY_E2E_V1_ENDPOINT.
 e2e:
-	OCCAMY_E2E_ENDPOINT=$(or $(OCCAMY_E2E_ENDPOINT),localhost:5636) go test -v -count=1 ./tests/
+	OCCAMY_E2E_ENDPOINT=$(or $(OCCAMY_E2E_ENDPOINT),localhost:5636) \
+	OCCAMY_E2E_V1_ENDPOINT=$(or $(OCCAMY_E2E_V1_ENDPOINT),localhost:5637) \
+	go test -v -count=1 ./tests/
 .PHONY: e2e
 
 # bench builds occamyd's image, starts the benchmark stack and measures
