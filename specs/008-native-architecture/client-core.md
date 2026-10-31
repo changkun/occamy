@@ -193,13 +193,17 @@ layer, and any tools.
     (Follow-ups).
   - The slow-consumer policy is one ordered queue of small events and
     complete frames, each frame at its `frame-end`. Frames are bounded by
-    the protocol: more than `frame_window` + 1 undelivered is a
-    `protocol-error`. Title, clipboard, cursor and pointer position hold
-    their latest value and replace an undelivered event of their kind in
-    place; at most 3 bells wait; a viewer that leaves cancels its
-    undelivered join. More than 1024 undelivered events, or more bytes
-    than max(64 MiB, min((window + 2) × 3 screens, 1 GiB)), is taken for
-    a broken server and closed with `protocol-error`. The screen is the
+    the protocol: more than `frame_window` + 1 undelivered, counting the
+    frame `Next` delivered and the caller has not yet acknowledged by
+    calling again, is a `protocol-error`. Title, clipboard, cursor and
+    pointer position hold their latest value and replace an undelivered
+    event of their kind in place; at most 3 bells wait; a viewer that
+    leaves cancels its undelivered join. More than 1024 undelivered
+    events, or more bytes than max(64 MiB, min((window + 2) × 3 screens,
+    1 GiB)), is taken for a broken server and closed with
+    `protocol-error`; each queued message counts its size and 512 bytes
+    more, above the 110 to 334 measured for holding it, so that small
+    messages cannot hold far more than they count. The screen is the
     largest that a frame held or being read was drawn for, so a queued
     frame of a large screen does not count against the small one the
     next frame resizes to; a tile of a plugged codec counts its decoded

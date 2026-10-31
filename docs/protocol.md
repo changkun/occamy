@@ -283,9 +283,15 @@ Type 0x0003. Ends the connection. The sender then closes the WebSocket
 with the same code as its status and sends nothing more; the receiver
 closes too. A browser may close a WebSocket only with 1000 or a code
 from 3000 to 4999, so a browser client that sends another code, such as
-`protocol-error`, closes the WebSocket with 1000: the server takes the
-code from this message, not from the close frame. A receiver that does
-not know a code treats it as an error described by the reason.
+`protocol-error`, closes the WebSocket with 1000; a native client still
+closes with the code itself. The server takes the code from this
+message, and a close frame of 1000 after it as part of the same close,
+not as a normal one. A browser whose page goes away, as on navigating
+or reloading, closes the WebSocket with 1001 without sending `close`
+first; the server takes that close frame as the client leaving, as it
+does any close frame without `close` before it, not as
+`server-shutdown`. A receiver that does not know a code treats it as an
+error described by the reason.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1076,10 +1082,14 @@ with alpha and a byte an index, which is the longer for a rectangle of
 up to 341 pixels. A receiver that inflates as it reads stops one byte
 past that, the byte that shows the container is longer; it never needs
 to hold more, whatever the payload inflates to. An inflater that yields
-its output in chunks, such as a browser's `DecompressionStream`, whose
-chunks are 16 KiB in Chrome and Node, may have inflated the rest of the
-chunk that crosses the cap before the receiver stops it; the receiver
-still keeps no more than the cap. Such an inflater reports trailing
+its output in chunks, such as a browser's `DecompressionStream`, may
+have inflated more than it yielded before the receiver stops it: the
+rest of the chunk that crosses the cap, 64 KiB in Chrome and 16 KiB in
+Node, and whatever it inflated ahead of the receiver. Chrome inflates
+all the input it was given at once, so a receiver gives it the payload
+a slice at a time, 1 KiB in occamy's browser client, when it asks for
+more; it then inflates at most a slice's worth, about 1 MiB, past the
+chunk it stopped in, and keeps no more than the cap. Such an inflater reports trailing
 bytes and a stream without its final block only at the end of its
 output, so a receiver reads it to the end before it takes the
 container. The golden file's
@@ -1130,7 +1140,7 @@ own, such as on its read limit, then uses the right code.
 | Code | Name | Meaning |
 |------|------|---------|
 | 1000 | `normal` | The connection did its work, such as a viewer that leaves. |
-| 1001 | `server-shutdown` | The server is shutting down (WebSocket's going away). |
+| 1001 | `server-shutdown` | The server is shutting down (WebSocket's going away). A browser's close frame of 1001 without `close` is its page going away ([close](#close)). |
 | 1002 | `protocol-error` | The peer broke the protocol: a truncated message, trailing bytes, invalid UTF-8, an invalid value, or a message that does not fit the session. |
 | 1003 | `unsupported` | An unknown type that is not ignorable, a text message, a `hello` of another version, or a session the client cannot show. |
 | 1009 | `too-large` | A message over the maximum message size, or a tile or cursor over the maximum texture size. |
