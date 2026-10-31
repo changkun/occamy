@@ -22,7 +22,7 @@ Guacamole protocol and no v0 routes
 
 | Protocol | v0 (released) | v1 (`master`) |
 |----------|---------------|---------------|
-| VNC | Through guacd, verified end to end | Through guacd, or native with `backend: native` |
+| VNC | Through guacd, verified end to end | Native by default, or through guacd with `backend: guacd` |
 | SSH | Through guacd, verified end to end, including repeated sessions | Native |
 | RDP | Through guacd, verified against xrdp | Through guacd; the native backend is built but not yet served |
 
