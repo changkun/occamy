@@ -228,6 +228,30 @@ func TestDemoDebugGating(t *testing.T) {
 	}
 }
 
+// TestCompiledBinaryIgnored checks that git ignores the occamyd that
+// make compile leaves at the repository's root.
+func TestCompiledBinaryIgnored(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("no git")
+	}
+	out, err := exec.Command("make", "-s", "-n", "-C", "../..", "compile").Output()
+	if err != nil {
+		t.Fatalf("make -n compile: %v", err)
+	}
+	if !strings.Contains(string(out), "-o occamyd") {
+		t.Fatalf("make compile builds %q, not ./occamyd", out)
+	}
+	cmd := exec.Command("git", "check-ignore", "-q", "--no-index", "occamyd")
+	cmd.Dir = "../.."
+	switch err := cmd.Run(); {
+	case err == nil:
+	case cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == 1:
+		t.Error("git does not ignore the occamyd that make compile builds")
+	default:
+		t.Skipf("git check-ignore: %v, not in a git checkout?", err)
+	}
+}
+
 // makeRunEnv returns the variables that make run passes to compose with
 // OCCAMY_DEBUG set to debug, from a shell with shell's variables, over
 // them: the assignments before the compose command that make -n prints.
