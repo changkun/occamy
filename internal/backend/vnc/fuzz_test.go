@@ -13,6 +13,8 @@ import (
 	"image/color"
 	"io"
 	"maps"
+	"math/big"
+	mrand "math/rand/v2"
 	"os"
 	"path/filepath"
 	"slices"
@@ -99,6 +101,12 @@ func handshakeSeeds() map[string][]byte {
 		"3.8-failed":  script{}.version("003.008").u8(1, secVNCAuth).u8(challenge...).u32(1).str("Authentication failed"),
 		"3.8-refused": script{}.version("003.008").u8(0).str("Too many security failures"),
 		"3.889":       script{}.version("003.889").u8(2, 30, secVNCAuth).u8(challenge...).u32(0).init(16, 12, ""),
+
+		"ard":             script{}.version("003.889").u8(4, 30, 33, 36, 35).u8(ardScriptKey()...).u32(0).init(16, 12, "Mac"),
+		"ard-failed":      script{}.version("003.008").u8(1, secARD).u8(ardScriptKey()...).u32(1).str("Authentication failed"),
+		"ard-macos-fails": script{}.version("003.889").u8(1, secARD).u8(ardScriptKey()...).u8(1, 0, 0, 0).str("Authentication failed"),
+		"ard-3.3":         script{}.version("003.003").u32(secARD).u8(ardScriptKey()...).u32(0).init(16, 12, ""),
+		"ard-small-prime": script{}.version("003.008").u8(1, secARD).ardKey(3, minARDKey, big.NewInt(7), big.NewInt(2)).u32(0).init(16, 12, ""),
 	}
 }
 
@@ -154,13 +162,17 @@ func FuzzHandshake(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, data []byte, preferAuth bool) {
 		// TLS is pretended: the handshake goes on in the clear, so that
-		// the fuzzer reaches VeNCrypt's inner authentication.
+		// the fuzzer reaches VeNCrypt's inner authentication. Apple Remote
+		// Desktop is allowed, with keys from a fixed seed, so that each
+		// input runs the same way again.
 		a := auth{
 			password:    func() (string, error) { return "hunter2", nil },
 			plain:       func() (string, string, error) { return "alice", "hunter2", nil },
 			hasUser:     preferAuth,
 			hasPassword: preferAuth,
 			startTLS:    func() error { return nil },
+			ard:         true,
+			rand:        mrand.NewChaCha8([32]byte{}),
 		}
 		init, err := handshake(bytes.NewReader(data), io.Discard, a, fuzzLimits)
 		if err != nil {

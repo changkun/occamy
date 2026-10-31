@@ -11,10 +11,10 @@ import (
 	"image/color"
 	"image/draw"
 	"image/jpeg"
+	"io"
 	"slices"
 	"strings"
 	"testing"
-	"time"
 
 	"changkun.de/x/occamy/internal/backend/backendtest"
 )
@@ -312,38 +312,52 @@ func TestTightJPEGErrors(t *testing.T) {
 func TestTightJPEGScanBombs(t *testing.T) {
 	// image/jpeg decodes every scan of an image, each a pass over its
 	// blocks, so that thousands of scans of a few bytes each cost seconds.
-	// Such images are refused before they are decoded.
+	// Such images are refused before image/jpeg sees them, which the test
+	// counts rather than times: a time bound would also time the sink's
+	// screen, and fail on a busy machine.
+	decodes := 0
+	t.Cleanup(func() { decodeJPEG = jpeg.Decode })
+	decodeJPEG = func(r io.Reader) (image.Image, error) {
+		decodes++
+		return jpeg.Decode(r)
+	}
 	for _, tt := range []struct {
 		name string
 		r    image.Rectangle
 		data []byte
 		want string
 	}{
-		// 13 s without the bounds.
-		{"progressive, 2048×2048, 16000 scans", image.Rect(0, 0, 2048, 2048), progressiveJPEG(2048, 2048, 16000), "or 65536 in all"},
-		// 190 ms without them, 0.6 µs a byte.
+		// 13 s without the bounds. The pixel bound refuses it before its
+		// markers are read.
+		{"progressive, 2048×2048, past the pixel bound", image.Rect(0, 0, 2048, 2048), progressiveJPEG(2048, 2048, 16000), "or 65536 in all"},
+		// Within the pixel bound, the scans are what is refused. 190 ms
+		// without the check, 0.6 µs a byte.
 		{"progressive, 256×256, 16000 scans", image.Rect(0, 0, 256, 256), progressiveJPEG(256, 256, 16000), "SOF2"},
-		// 140 ms without them, 0.5 µs a byte.
+		// 140 ms without it, 0.5 µs a byte.
 		{"baseline, 256×256, 1000 scans", image.Rect(0, 0, 256, 256), baselineJPEG(256, 256, 1000), "more scans than components: the frame has 1"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			decodes = 0
 			msg := putUpdate(tightRect(tt.r, tightJPEG<<4, appendCompact(nil, len(tt.data)), tt.data))
-			start := time.Now()
 			_, err := decode(t, tt.r.Max, defaultLimits, msg)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Errorf("decode = %v, want an error with %q", err, tt.want)
 			}
-			if d := time.Since(start); d > 100*time.Millisecond {
-				t.Errorf("took %v", d)
+			if decodes != 0 {
+				t.Errorf("image/jpeg decoded %d images, want none", decodes)
 			}
 		})
 	}
 	// The same images of one scan decode.
+	decodes = 0
 	r := image.Rect(0, 0, 256, 256)
 	data := baselineJPEG(256, 256, 1)
 	sink, err := decode(t, r.Max, defaultLimits, putUpdate(tightRect(r, tightJPEG<<4, appendCompact(nil, len(data)), data)))
 	if err != nil {
 		t.Fatalf("a baseline JPEG of one scan: %v", err)
+	}
+	if decodes != 1 {
+		t.Errorf("image/jpeg decoded %d images, want 1", decodes)
 	}
 	if c := sink.Pixels().RGBAAt(100, 100); c.R != c.G || c.G != c.B || c.A != 0xff {
 		t.Errorf("a grey JPEG drew %v", c)
