@@ -8,10 +8,10 @@ another. The file comes in two versions:
   `occamyd` serves it as before (see [v0 files](#v0-files)).
 - **v1** starts with `version: 1`. It configures the API v1 server of
   [api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md):
-  sign-in, the connection registry, TLS and the debug listener. The
-  server is being built: so far it serves `/healthz`, sign-in for static
-  users and through OIDC, the connections and sessions of API v1 and their streams and,
-  with `legacy_v0`, the v0 routes (see
+  sign-in, the connection registry, TLS and the debug listener. It is
+  not yet in a release. It serves `/healthz`, sign-in for static users
+  and through OIDC, the connections and sessions of API v1 and their
+  streams and, with `legacy_v0`, the v0 routes (see
   [Serving a v1 file](#serving-a-v1-file)).
 
 Any other `version` is an error, and so is `version: 0`: a v0 file has no
@@ -526,7 +526,7 @@ that:
 
 `occamyd` serves a v1 file on `listen`, over TLS when `tls.cert` and
 `tls.key` are set, and speaks HTTP/1.1 only, since the streams are
-WebSockets over HTTP/1.1. So far it serves:
+WebSockets over HTTP/1.1. It serves:
 
 | Route | Meaning |
 |-------|---------|
@@ -578,9 +578,10 @@ not know:
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `address` | unset | Listen address |
-| `mode` | `debug` | gin mode: `debug`, `release` or `test`. `debug` also serves `/debug/pprof` on the public listener |
-| `auth.jwt_secret`, `auth.jwt_alg` | unset | The HMAC secret and algorithm of v0 tokens |
-| `client` | `false` | Serve the demo web client |
+| `mode` | `debug` | `debug`, `release` or `test`; any other value is refused. `debug` also serves `/debug/pprof` on the public listener, without a token |
+| `auth.jwt_secret` | required | The HMAC secret of v0 tokens; an empty one is refused |
+| `auth.jwt_alg` | `HS256` | The HMAC algorithm of v0 tokens: `HS256`, `HS384` or `HS512` |
+| `client` | `false` | Serve the demo web client under `/static/`, and `POST /api/v0/login`. Without it, a v0 file serves only `/api/v0/connect` of the v0 routes |
 | `guacd.address`, `guacd.params` | `localhost:4822`, none | As in v1; token values override the parameters |
 
 A v0 file used as a v1 file reports the v0 keys it finds, with their v1
