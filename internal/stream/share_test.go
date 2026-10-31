@@ -6,6 +6,7 @@ package stream
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"image"
 	"image/draw"
@@ -436,10 +437,10 @@ func TestShareRunQuality(t *testing.T) {
 // The workers encode a frame's rows but the writer's first as the
 // writer then sends them: each tile, and each run of lossy tiles between
 // tiles that are clean, exact or in the client's tile cache, so that the
-// writer finds every encoding they made.
+// writer finds every encoding they made. A run also ends where motion
+// starts or stops, at the client's widest texture, and at a tile a copy
+// completed, which neither encodes.
 func TestPrefetchMatchesWriter(t *testing.T) {
-	d := newDirect(t, false)
-	d.w.cache = newTileCache(DefaultCacheSlots)
 	photo := corpusFrame(t, "photo")
 	first := image.NewRGBA(photo.Rect)
 	copy(first.Pix, photo.Pix)
@@ -448,9 +449,6 @@ func TestPrefetchMatchesWriter(t *testing.T) {
 		r := image.Rect(64*x, 64*11, 64*x+64, 64*12)
 		draw.Draw(first, r, pattern(x+11, r.Min), r.Min, draw.Src)
 	}
-	d.show(first)
-	d.frame()
-
 	// Every other run of tiles changes, some of them to a pattern, which
 	// from the eighth row on the tile cache holds.
 	next := image.NewRGBA(photo.Rect)
@@ -469,39 +467,180 @@ func TestPrefetchMatchesWriter(t *testing.T) {
 			}
 		}
 	}
-	d.show(img)
-	sh := sharedWriter(t, d)
-	sh.jobs = make(chan func(*worker), 64)
-	w := d.w
-	if _, ok := w.collect(image.Rectangle{}); !ok {
-		t.Fatal("resized")
+	for _, c := range []struct {
+		name string
+		// set changes the writer once it has the frame's tiles.
+		set func(t *testing.T, w *writer)
+	}{
+		{"tiles, runs and cached tiles", func(*testing.T, *writer) {}},
+		{"motion inside runs", func(t *testing.T, w *writer) {
+			// The changed tiles of each even row come in runs of three,
+			// from columns 0, 6 and 12; one tile of each run moves.
+			for y := 0; y < 12; y += 2 {
+				for _, x := range []int{1, 7, 12} {
+					w.heat[16*y+x] = motionHeat
+				}
+			}
+			if !w.moving(16*2+7, false) {
+				t.Fatal("no tile moves")
+			}
+		}},
+		{"a texture two tiles wide", func(_ *testing.T, w *writer) {
+			w.limits.MaxTextureSize = 2 * 64
+		}},
+		{"tiles a copy completed", func(_ *testing.T, w *writer) {
+			for _, u := range w.order {
+				if x := u % 16; u/16%3 == 1 && x >= 1 && x < 7 {
+					w.sent[u] = w.versions[u]
+				}
+			}
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := newDirect(t, false)
+			d.w.cache = newTileCache(DefaultCacheSlots)
+			d.show(first)
+			d.frame()
+			d.show(img)
+			sh := sharedWriter(t, d)
+			sh.jobs = make(chan func(*worker), 64)
+			w := d.w
+			if _, ok := w.collect(image.Rectangle{}); !ok {
+				t.Fatal("resized")
+			}
+			c.set(t, w)
+			if f := w.prefetch(w.order); f == nil {
+				t.Fatal("no rows for the workers")
+			}
+			wk := newWorker()
+			for len(sh.jobs) > 0 {
+				(<-sh.jobs)(wk)
+			}
+			for k := range sh.cache.tiles {
+				if k.tile/16 == w.order[0]/16 {
+					t.Fatalf("a worker encoded tile %d, of the writer's row", k.tile)
+				}
+			}
+			// A worker asks again for an exact tile that ended a run, as
+			// the first of the next message.
+			before := sh.cache.stats()
+			made := before.misses
+			sh.jobs = nil // the writer encodes the rest alone
+			if ok, _ := w.p.StartFrame(time.Now()); !ok {
+				t.Fatal("the pacer holds the frame")
+			}
+			if err := w.sendFrame(d.ctx, w.order, false); err != nil {
+				t.Fatal(err)
+			}
+			if s := sh.cache.stats(); made == 0 || s.hits-before.hits != made {
+				t.Errorf("the workers made %d encodings, and the writer found %d", made, s.hits-before.hits)
+			}
+		})
 	}
-	if f := w.prefetch(w.order); f == nil {
-		t.Fatal("no rows for the workers")
-	}
-	wk := newWorker()
-	for len(sh.jobs) > 0 {
-		(<-sh.jobs)(wk)
-	}
-	for k := range sh.cache.tiles {
-		if k.tile/16 == w.order[0]/16 {
-			t.Fatalf("a worker encoded tile %d, of the writer's row", k.tile)
+}
+
+// hooked is a connection that calls hook after each write, with the
+// number of writes before it.
+type hooked struct {
+	Conn
+	writes int
+	hook   func(n int)
+}
+
+func (c *hooked) WriteMessage(ctx context.Context, p []byte) error {
+	err := c.Conn.WriteMessage(ctx, p)
+	c.hook(c.writes)
+	c.writes++
+	return err
+}
+
+// A frame's workers leave its rows once it is sent, and once it turns to
+// an input's effect, which goes first; a frame of an input's effect wakes
+// none, as its tiles are few and wanted at once.
+func TestFetchEndsWithFrame(t *testing.T) {
+	desktop, photo := corpusFrame(t, "desktop"), corpusFrame(t, "photo")
+	start := func(t *testing.T) (*direct, *shared) {
+		d := newDirect(t, false)
+		d.show(desktop)
+		d.frame()
+		sh := sharedWriter(t, d)
+		sh.jobs, sh.workers = make(chan func(*worker), 64), 2
+		d.show(photo)
+		if _, ok := d.w.collect(image.Rectangle{}); !ok {
+			t.Fatal("resized")
 		}
+		if ok, _ := d.w.p.StartFrame(time.Now()); !ok {
+			t.Fatal("the pacer holds the frame")
+		}
+		return d, sh
 	}
-	// A worker asks again for an exact tile that ended a run, as the
-	// first of the next message.
-	before := sh.cache.stats()
-	made := before.misses
-	sh.jobs = nil // the writer encodes the rest alone
-	if ok, _ := w.p.StartFrame(time.Now()); !ok {
-		t.Fatal("the pacer holds the frame")
+	// lookups runs the queued jobs and reports the lookups they made.
+	lookups := func(sh *shared) int {
+		before := sh.cache.stats()
+		wk := newWorker()
+		for len(sh.jobs) > 0 {
+			(<-sh.jobs)(wk)
+		}
+		s := sh.cache.stats()
+		return s.hits + s.misses + s.stale - before.hits - before.misses - before.stale
 	}
-	if err := w.sendFrame(d.ctx, w.order, false); err != nil {
-		t.Fatal(err)
-	}
-	if s := sh.cache.stats(); made == 0 || s.hits-before.hits != made {
-		t.Errorf("the workers made %d encodings, and the writer found %d", made, s.hits-before.hits)
-	}
+	t.Run("sent", func(t *testing.T) {
+		d, sh := start(t)
+		if err := d.w.sendFrame(d.ctx, d.w.order, false); err != nil {
+			t.Fatal(err)
+		}
+		if n := len(sh.jobs); n != 1 {
+			t.Fatalf("%d jobs for the workers, want 1", n)
+		}
+		if d.w.fetch != nil {
+			t.Error("the writer holds the work of a frame it sent")
+		}
+		if n := lookups(sh); n != 0 {
+			t.Errorf("the workers looked up %d encodings of a frame already sent", n)
+		}
+	})
+	t.Run("of an input's effect", func(t *testing.T) {
+		d, sh := start(t)
+		if err := d.w.sendFrame(d.ctx, d.w.order, true); err != nil {
+			t.Fatal(err)
+		}
+		if n := len(sh.jobs); n != 0 {
+			t.Errorf("a frame of an input's effect: %d jobs for the workers", n)
+		}
+	})
+	t.Run("turned to an input's effect", func(t *testing.T) {
+		d, sh := start(t)
+		w := d.w
+		// An input whose effect is any change from now on.
+		w.in = &pending{first: 1, seq: 1, clock: w.fb.Clock(), at: time.Now()}
+		r := image.Rect(0, 704, 64, 768)
+		during := -1
+		w.c = &hooked{Conn: w.c, hook: func(n int) {
+			switch n {
+			case 0:
+				// The input's effect shows as the frame's first message
+				// goes.
+				sink := d.b.Sink()
+				draw.Draw(sink.Lock(r), r, image.White, image.Point{}, draw.Src)
+				sink.Unlock(r)
+			case 1:
+				if len(sh.jobs) != 1 {
+					t.Errorf("%d jobs for the workers, want 1", len(sh.jobs))
+				}
+				during = lookups(sh)
+			}
+		}}
+		d.c.rects = nil
+		if err := w.sendFrame(d.ctx, w.order, false); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case len(d.c.rects) < 2 || d.c.rects[1] != r:
+			t.Fatalf("the frame's second tile message is not the input's effect: %v", d.c.rects[:min(2, len(d.c.rects))])
+		case during > 0:
+			t.Errorf("the workers looked up %d encodings of rows the frame left for an input's effect", during)
+		}
+	})
 }
 
 // Once its frame is sent, the workers leave the rest of its rows.
