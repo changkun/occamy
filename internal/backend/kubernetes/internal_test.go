@@ -216,6 +216,11 @@ func TestDemux(t *testing.T) {
 	if _, err := demuxAll([]byte{chanError, 'c'}, false, &st); !errors.Is(err, errStatusTooLarge) || st.Len() > maxStatus+1 {
 		t.Errorf("status of %d bytes: %v, want errStatusTooLarge", st.Len(), err)
 	}
+	// One message as large as the read limit is not kept whole either.
+	st.Reset()
+	if _, err := demuxAll(append([]byte{chanError}, bytes.Repeat([]byte("d"), maxMessage-1)...), false, &st); !errors.Is(err, errStatusTooLarge) || st.Len() > maxStatus+1 {
+		t.Errorf("status of %d bytes from one message: %v, want errStatusTooLarge with at most %d kept", st.Len(), err, maxStatus+1)
+	}
 }
 
 // FuzzDemux feeds any message to demux: it never panics, passes stdout

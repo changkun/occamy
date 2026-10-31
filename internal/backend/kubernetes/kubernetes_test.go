@@ -987,6 +987,7 @@ func TestNew(t *testing.T) {
 		{"pod in upper case", func(c *kubernetes.Config) { c.Pod = "Web" }},
 		{"pod escaped", func(c *kubernetes.Config) { c.Pod = "web%2F0" }},
 		{"pod too long", func(c *kubernetes.Config) { c.Pod = strings.Repeat("a.", 127) + "a" }},
+		{"pod with a label too long", func(c *kubernetes.Config) { c.Pod = strings.Repeat("a", 64) + ".b" }},
 		{"namespace with a slash", func(c *kubernetes.Config) { c.Namespace = "kube-system/pods/x" }},
 		{"namespace with a dot", func(c *kubernetes.Config) { c.Namespace = "a.b" }},
 		{"namespace too long", func(c *kubernetes.Config) { c.Namespace = strings.Repeat("a", 64) }},
