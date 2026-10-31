@@ -643,8 +643,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   container through that engine's compose.
 - The demo x11vnc no longer dies of an X error (`Xerror: major_opcode:
   18 … error_code: 3`) when it answers a request for the clipboard from
-  a window that has gone, which ended the sessions on it as
-  `backend-failed` until its watchdog had started it again. x11vnc
+  a window that has gone, which ended the sessions on it, as
+  `backend-failed` or `remote-ended`, and refused new ones until its
+  watchdog had started it again. x11vnc
   0.9.17 owns the clipboard after a client's cut text and traps errors
   as it answers, but stops trapping before the X server reports one
   unless it syncs; the desktop's clipboard probe kills its xclip after
@@ -654,9 +655,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   refused resize once, but has nothing to do with it, nor with either
   VNC backend. `make e2e` makes such a request
   (`TestX11vncClipboardRequestorGone`) and checks that x11vnc and the
-  session on it live through it, which shows that the variable reaches
-  x11vnc; without the variable, x11vnc dies of it only now and then,
-  as the error's escape is a race. The parity row `resize: ignored
+  session on it live through it. Against x11vnc processes just
+  started, it failed in five of six runs without the variable and
+  passed in five of five with it; it cannot fail every time, as the
+  error's escape is a race. The tests that reach into the stack read
+  only what compose prints to its standard output, so podman compose's
+  banner no longer reaches them. The parity row `resize: ignored
   without ExtendedDesktopSize` is now `resize: the server keeps its
   size`: x11vnc has ExtendedDesktopSize, and refuses SetDesktopSize as
   prohibited.

@@ -1434,11 +1434,14 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
   ExtendedDesktopSize, which x11vnc sends on connecting; for the
   parity row's session that asks once, x11vnc's statistics count one
   SetDesktopSize of 24 bytes, a header and one screen; and after the
-  refusal it sends no more (`desktopsize.go`). guacd sends x11vnc no SetDesktopSize, but
-  sends cut text, so its sessions make x11vnc own the clipboard too:
-  the CI run that first saw `caught X11 error:` saw it three times, all
-  as guacd connected ([guacd-bridge](guacd-bridge.md), Implementation
-  notes: VNC's parity matrix). A raw RFB client does as well.
+  refusal it sends no more (`desktopsize.go`). guacd sends x11vnc no
+  SetDesktopSize: run on a stack of this branch, the row's native cell
+  made x11vnc log one `Client requested resolution change`, and its
+  guacd cell none. But guacd sends cut text, so its sessions make
+  x11vnc own the clipboard too: the CI run that first saw `caught X11
+  error:` saw it three times, all as guacd connected
+  ([guacd-bridge](guacd-bridge.md), Implementation notes: VNC's parity
+  matrix). A raw RFB client does as well.
 - **What changed.** `docker/demo/vnc/start.sh` sets
   `X11VNC_SENDEVENT_SYNC=1`. `TestX11vncClipboardRequestorGone`
   (`tests/x11vnc_test.go`, in `make e2e` through the stack's compose)
@@ -1446,14 +1449,24 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
   runs the short stop with the two xclips, and checks that the xclip
   that waited got the text, that the same x11vnc process serves the
   port, that its watchdog logged nothing, and that the session carries
-  the clipboard both ways after it. It shows that the variable reaches
-  the x11vnc of the image CI builds and that the stack lives through the
-  request; without the variable it does not fail reliably, for the
-  race above. The watchdog stays, for x11vnc's waits on clients that
-  do not read and for any other error. The parity
-  row `resize: ignored without ExtendedDesktopSize` is now `resize:
-  the server keeps its size`, since x11vnc has ExtendedDesktopSize and
-  refuses SetDesktopSize as prohibited.
+  the clipboard both ways after it. On a Mac, against x11vnc processes
+  just started (by the watchdog, or by restarting the container), it
+  failed in five of six runs with `origin/master`'s `start.sh`, each
+  time with `Xerror: major_opcode: 18 … error_code: 3` about 13 s after
+  the session connected, as x11vnc first owned the clipboard and before
+  the stop, with the session ending as `remote-ended`; and it passed in
+  five of five with this one. It cannot fail every time, for the race
+  above. x11vnc drops cut text until it has made its selection window,
+  which it does only once its latest client has been connected for
+  some seconds (`guess_dm_gone`, `xevents.c`), so the test sends the
+  text until the clipboard holds it. The tests that reach into the
+  stack now read only what compose prints to its standard output:
+  podman compose prints a banner to its standard error, which made
+  every comparison fail with podman. The watchdog stays, for x11vnc's
+  waits on clients that do not read and for any other error. The
+  parity row `resize: ignored without ExtendedDesktopSize` is now
+  `resize: the server keeps its size`, since x11vnc has
+  ExtendedDesktopSize and refuses SetDesktopSize as prohibited.
 - **The session's end is right.** Run ends a session as `remote-ended`
   when the server closes the connection between messages, which is how
   RFB ends one, and as `backend-failed` for any other end. x11vnc,
