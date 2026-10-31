@@ -34,8 +34,9 @@ import (
 // docs/api.md does: sign in, open a connection's stream, and end the
 // session with DELETE. The connections are those of the bench stack's
 // occamy-v1 service (docker/bench/occamy-v1.yaml), per series and
-// protocol. Native RDP is not registered in occamyd yet, and SSH has no
-// guacd backend in v1, so neither series serves every protocol.
+// protocol. v1-native has no RDP connection yet, though occamyd now
+// serves RDP natively by default, and SSH has no guacd backend in v1, so
+// neither series serves every protocol.
 var v1Connections = map[string]map[string]string{
 	"v1-native": {"ssh": "ssh", "vnc": "vnc-native"},
 	"v1-guacd":  {"vnc": "vnc-guacd", "rdp": "rdp-guacd"},

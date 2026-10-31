@@ -148,7 +148,8 @@ make bench BENCH_FLAGS="-series v1-native,v1-guacd -runs 3"
 the [graphics pipeline](../specs/008-native-architecture/graphics-pipeline.md)
 (refinement, the tile cache, and the encode cache and its workers) and
 for [native RDP](../specs/008-native-architecture/native-rdp-backend.md),
-which occamyd does not register yet. Numbers taken before then would not
+which occamyd now serves by default but the `v1-native` series does not
+take yet. Numbers taken before then would not
 be v1's verdict, so this page publishes none; the harness and the CI
 smoke run only keep the v1 path working until then.
 
@@ -157,8 +158,8 @@ smoke run only keep the v1 path working until then.
 | `v1-native` | occamyd's own | SSH, VNC | `ssh`, `vnc-native` |
 | `v1-guacd` | the guacd bridge | VNC, RDP | `vnc-guacd`, `rdp-guacd` |
 
-Neither series runs every scenario: native RDP is not registered, and
-SSH has no guacd backend in v1. A v1 session runs as follows:
+Neither series runs every scenario: `v1-native` has no RDP connection
+yet, and SSH has no guacd backend in v1. A v1 session runs as follows:
 
 - **Client.** The harness drives the Go client core (`client/`) through
   the stack's `occamy-v1` service, whose file

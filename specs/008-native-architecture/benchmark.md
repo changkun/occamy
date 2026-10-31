@@ -414,8 +414,9 @@ published.
     backends) and `v1-guacd` (VNC and RDP through the guacd bridge), on
     the scenarios, metrics, proxy and bench desktop of the v0 series. A
     series serves only the protocols it has a connection for and skips
-    the others: native RDP is not registered, and SSH has no guacd
-    backend in v1.
+    the others: `v1-native` has no RDP connection yet (occamyd
+    registered native RDP as rdp's default after the harness was
+    written, in #132), and SSH has no guacd backend in v1.
   - `bench/v1.go` drives the Go client core through API v1: it signs in
     at `POST /api/v1/auth/token`, opens
     `GET /api/v1/connections/{id}/stream`, asking for 1024 × 768 pixels
@@ -616,8 +617,10 @@ published.
     RDP are in occamyd; then `docs/benchmarks.md` gets the v1 results
     and a table per scenario of the baseline, the v1 bridge, v1 native,
     the target and whether it is met.
-  - A third v1 series, or `v1-native` gaining RDP, once native RDP is
-    registered.
+  - `v1-native` gaining RDP, now that occamyd registers native RDP as
+    rdp's default (#132): an `rdp-native` connection in
+    `docker/bench/occamy-v1.yaml`, checked against the bench desktop's
+    xrdp.
   - The client core's default decoders (a follow-up of
     [client-core](client-core.md)): once `client` has them, the harness
     uses them instead of its own.

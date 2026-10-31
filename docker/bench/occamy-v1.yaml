@@ -5,8 +5,9 @@
 # The v1 file of the benchmark stack's occamy-v1 service
 # (docker-compose.bench.yaml), which replaces the demo's: the bench
 # desktop and the demo shell through every backend that API v1 serves
-# them with, for the harness's v1 series (bench/v1.go). Native RDP is
-# not registered yet, and SSH has no guacd backend. Every connection
+# them with, for the harness's v1 series (bench/v1.go). There is no
+# native RDP connection yet, though occamyd now serves RDP natively by
+# default, and SSH has no guacd backend. Every connection
 # names its backend, so that a change of a protocol's default does not
 # move a series to another backend.
 
