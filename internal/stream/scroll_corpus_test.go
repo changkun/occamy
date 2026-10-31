@@ -51,7 +51,8 @@ func corpusFrame(tb testing.TB, name string) *image.RGBA {
 type recorder struct {
 	img                  *image.RGBA
 	bytes, tiles, copies int
-	lossy                bool // a tile went lossy, so the screen is not exact
+	lossy                bool              // a tile went lossy, so the screen is not exact
+	rects                []image.Rectangle // of the tile messages, in order
 	errs                 []error
 	reg                  *protocol.Registry
 }
@@ -73,6 +74,7 @@ func (c *recorder) WriteMessage(_ context.Context, p []byte) error {
 		c.lossy = c.lossy || m.Codec == protocol.CodecWebP || m.Codec == protocol.CodecJPEG
 		c.bytes += len(p)
 		c.tiles++
+		c.rects = append(c.rects, r)
 	case *protocol.CopyRect:
 		dst := image.Rect(int(m.DstX), int(m.DstY), int(m.DstX)+int(m.W), int(m.DstY)+int(m.H))
 		draw.Draw(c.img, dst, c.img, image.Pt(int(m.SrcX), int(m.SrcY)), draw.Src)
@@ -165,7 +167,8 @@ func (d *direct) show(img *image.RGBA) {
 
 // frame sends what changed as one frame and reports its bytes, tiles and
 // copies, its encode time, and the part of it the scroll search took. It
-// fails if the frame left any of the screen's changes unsent.
+// fails if the frame left any of the screen's changes unsent, or if the
+// writer's shadow is not what the client shows.
 func (d *direct) frame() (bytes, tiles, copies int, encode, search time.Duration) {
 	d.tb.Helper()
 	w := d.w
@@ -178,7 +181,7 @@ func (d *direct) frame() (bytes, tiles, copies int, encode, search time.Duration
 	if ok, _ := w.p.StartFrame(time.Now()); !ok {
 		d.tb.Fatal("the pacer holds the frame")
 	}
-	d.c.bytes, d.c.tiles, d.c.copies = 0, 0, 0
+	d.c.bytes, d.c.tiles, d.c.copies, d.c.rects = 0, 0, 0, nil
 	if err := w.sendFrame(d.ctx, w.order, false); err != nil {
 		d.tb.Fatal(err)
 	}
@@ -190,7 +193,32 @@ func (d *direct) frame() (bytes, tiles, copies int, encode, search time.Duration
 			d.tb.Fatalf("tile %d left unsent by the frame", t)
 		}
 	}
+	d.shadowed()
 	return d.c.bytes, d.c.tiles, d.c.copies, w.encodeTime, w.scrollTime
+}
+
+// shadowed fails unless every tile the writer's shadow holds lossless is,
+// pixel for pixel, what the client shows. Lossy tiles the client decoded
+// for itself.
+func (d *direct) shadowed() {
+	d.tb.Helper()
+	sc := d.w.sc
+	if sc == nil {
+		return
+	}
+	for t, ok := range sc.valid {
+		if !ok || sc.qual[t] != lossless {
+			continue
+		}
+		r := sc.g.rect(t)
+		w := 4 * r.Dx()
+		for y := range r.Dy() {
+			o := d.c.img.PixOffset(r.Min.X, r.Min.Y+y)
+			if !bytes.Equal(sc.pix[t][y*w:(y+1)*w], d.c.img.Pix[o:o+w]) {
+				d.tb.Fatalf("tile %d at %v: the shadow's row %d is not the client's", t, r, y)
+			}
+		}
+	}
 }
 
 // exact fails unless the client shows the server's screen.

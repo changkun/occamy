@@ -54,6 +54,9 @@ type scrollRig struct {
 	sc     *scroller
 	client *image.RGBA
 	sent   []uint64
+	// target is the quality a copy must leave a tile at to complete it;
+	// the rig's tiles are lossless.
+	target int
 }
 
 func newScrollRig(t testing.TB, w, h, tile int) *scrollRig {
@@ -94,7 +97,7 @@ func (r *scrollRig) dirty() []int {
 func (r *scrollRig) frame() (copies []scrollCopy, tiles int) {
 	r.t.Helper()
 	order := r.dirty()
-	for _, cp := range r.sc.find(r.fb, order) {
+	for _, cp := range r.sc.find(r.fb, order, r.target) {
 		dst := cp.rect(r.sc.g)
 		draw.Draw(r.client, dst, r.client, dst.Min.Add(image.Pt(0, cp.dy)), draw.Src)
 		r.sc.apply(cp)
@@ -121,7 +124,7 @@ func (r *scrollRig) frame() (copies []scrollCopy, tiles int) {
 		tr, v := r.fb.ReadTile(t, buf)
 		src := &image.RGBA{Pix: buf, Stride: 4 * tr.Dx(), Rect: tr}
 		draw.Draw(r.client, tr, src, tr.Min, draw.Src)
-		r.sc.keep(t, buf)
+		r.sc.keep(t, buf, lossless)
 		r.sent[t] = v
 		tiles++
 	}
@@ -390,7 +393,7 @@ func TestScrollResize(t *testing.T) {
 	r.frame()
 	r.fb.Resize(256, 320)
 	// The search of a grid that no longer matches finds nothing.
-	if copies := r.sc.find(r.fb, []int{0, 4, 8}); len(copies) != 0 {
+	if copies := r.sc.find(r.fb, []int{0, 4, 8}, 0); len(copies) != 0 {
 		t.Fatalf("%d copies across a resize", len(copies))
 	}
 	r.resized()
@@ -446,11 +449,35 @@ func TestScrollUndefinedDestination(t *testing.T) {
 	}
 }
 
+// A copy that draws part of a tile the client has not drawn leaves the
+// tile undefined in the shadow until the tile itself is sent: the rest of
+// its rows are whatever the client shows.
+func TestScrollPartlyDrawn(t *testing.T) {
+	r := newScrollRig(t, 128, 256, 64)
+	drawPage(r.fb, r.fb.Bounds(), 9, 0)
+	r.frame()
+	for c := range 2 {
+		r.sc.valid[1*2+c] = false
+	}
+	drawPage(r.fb, r.fb.Bounds(), 9, 40)
+	copies := r.sc.find(r.fb, r.dirty(), 0)
+	if len(copies) != 1 || copies[0].a != 88 {
+		t.Fatalf("copies %+v, want one from row 88", copies)
+	}
+	r.sc.apply(copies[0])
+	for tt, want := range []bool{true, true, false, false, true, true, true, true} {
+		if r.sc.valid[tt] != want {
+			t.Errorf("tile %d valid %v after the copy, want %v", tt, r.sc.valid[tt], want)
+		}
+	}
+}
+
 // The search's cost is bounded: a change of one tile is not searched; a
 // change of the whole screen that is no scroll gives up after
 // scrollMaxMisses runs, each hashing its column once and an eighth of its
-// own rows; and a scroll of the whole screen votes once, the other
-// columns trying the offset found.
+// own rows; a scroll of the whole screen votes once, the other columns
+// trying the offset found; and a scroll beside new content gives up
+// after scrollMaxMisses runs more than it found copies in.
 func TestScrollBounds(t *testing.T) {
 	const w, h, tile = 1024, 768, 64
 	r := newScrollRig(t, w, h, tile)
@@ -491,17 +518,133 @@ func TestScrollBounds(t *testing.T) {
 	if copies, _ := r.frame(); len(copies) != 0 {
 		t.Fatalf("%d copies of a new page", len(copies))
 	}
-	if r.sc.searched != scrollMaxMisses || r.sc.hashes > scrollMaxMisses*h/scrollStride || r.sc.rehashed > scrollMaxMisses*h {
-		t.Errorf("a new page: %d runs searched, %d rows of it hashed and %d of the shadow; want %d runs, at most %d and %d",
-			r.sc.searched, r.sc.hashes, r.sc.rehashed, scrollMaxMisses, scrollMaxMisses*h/scrollStride, scrollMaxMisses*h)
+	// The bounds are written out, not taken from the constants they test:
+	// three runs, an eighth of each run's rows.
+	if r.sc.searched != 3 || r.sc.hashes > 3*h/8 || r.sc.rehashed > 3*h {
+		t.Errorf("a new page: %d runs searched, %d rows of it hashed and %d of the shadow; want 3 runs, at most %d and %d",
+			r.sc.searched, r.sc.hashes, r.sc.rehashed, 3*h/8, 3*h)
 	}
 	drawPage(r.fb, r.fb.Bounds(), 2, 10)
 	if copies, _ := r.frame(); len(copies) != 1 {
 		t.Fatalf("%d copies of a scroll", len(copies))
 	}
-	if r.sc.searched != w/tile || r.sc.hashes > h/scrollStride || r.sc.rehashed > h {
+	if r.sc.searched != w/tile || r.sc.hashes > h/8 || r.sc.rehashed > h {
 		t.Errorf("a scroll: %d runs searched, %d rows of it hashed and %d of the shadow; want %d runs, at most %d and %d",
-			r.sc.searched, r.sc.hashes, r.sc.rehashed, w/tile, h/scrollStride, h)
+			r.sc.searched, r.sc.hashes, r.sc.rehashed, w/tile, h/8, h)
+	}
+	// A sidebar that scrolls beside a new page: the copy found, the
+	// search gives up after three runs more that miss.
+	drawPage(r.fb, image.Rect(0, 0, tile, h), 2, 30)
+	drawPage(r.fb, image.Rect(tile, 0, w, h), 4, 0)
+	if copies, _ := r.frame(); len(copies) != 1 {
+		t.Fatalf("%d copies of the sidebar", len(copies))
+	}
+	if r.sc.searched != 1+4 || r.sc.hashes > 5*h/8 || r.sc.rehashed > 5*h {
+		t.Errorf("a sidebar beside a new page: %d runs searched, %d rows of them hashed and %d of the shadow; want 5 runs, at most %d and %d",
+			r.sc.searched, r.sc.hashes, r.sc.rehashed, 5*h/8, 5*h)
+	}
+}
+
+// Columns side by side whose copies move the same rows by different
+// offsets stay two copies: merged, one would take the other's offset.
+func TestScrollMergeOffsets(t *testing.T) {
+	r := newScrollRig(t, 128, 256, 64)
+	drawPage(r.fb, image.Rect(0, 0, 64, 256), 1, 0)
+	drawPage(r.fb, image.Rect(64, 0, 128, 256), 2, 0)
+	r.frame()
+	// Above row 172 the left column scrolls by 10 and the right by 20;
+	// below it both show new rows.
+	drawPage(r.fb, image.Rect(0, 0, 64, 172), 1, 10)
+	drawPage(r.fb, image.Rect(64, 0, 128, 172), 2, 20)
+	drawPage(r.fb, image.Rect(0, 172, 128, 256), 3, 0)
+	copies, _ := r.frame()
+	if len(copies) != 2 || copies[0].a != copies[1].a || copies[0].b != copies[1].b || copies[0].dy == copies[1].dy {
+		t.Fatalf("copies %+v, want two of the same rows, by 10 and by 20", copies)
+	}
+}
+
+// A copy completes a tile only at a quality of at least the target: a
+// copy from pixels the client has at a lower quality is still sent, and
+// the tiles it draws go as tiles too, as they would without it.
+func TestScrollQuality(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		source, want int // the source's quality on the client, the target
+		done         bool
+	}{
+		{"lossless source", lossless, 90, true},
+		{"higher source", 90, 70, true},
+		{"equal source", 70, 70, true},
+		{"lower source", 30, 70, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newScrollRig(t, 128, 256, 64)
+			drawPage(r.fb, r.fb.Bounds(), 5, 0)
+			r.frame()
+			for i := range r.sc.qual {
+				r.sc.qual[i] = uint8(tc.source) // #nosec G115 -- test qualities
+			}
+			r.target = tc.want
+			drawPage(r.fb, r.fb.Bounds(), 5, 20)
+			copies, tiles := r.frame()
+			if len(copies) != 1 {
+				t.Fatalf("%d copies, want 1", len(copies))
+			}
+			if done := len(copies[0].done) > 0; done != tc.done {
+				t.Fatalf("copy completes %v, want tiles completed %v", copies[0].done, tc.done)
+			}
+			if !tc.done && tiles != 8 {
+				t.Errorf("%d tiles sent, want all 8", tiles)
+			}
+			// The tiles the copy completed keep the source's quality;
+			// those sent again are lossless in the rig.
+			for _, tt := range copies[0].done {
+				if int(r.sc.qual[tt]) != tc.source {
+					t.Errorf("tile %d at quality %d after the copy, want %d", tt, r.sc.qual[tt], tc.source)
+				}
+			}
+		})
+	}
+}
+
+// The quality a copy leaves is the lowest of the tiles its rows come
+// from and, if the tile keeps rows of its own, its own.
+func TestScrollCopiedQuality(t *testing.T) {
+	r := newScrollRig(t, 64, 256, 64)
+	drawPage(r.fb, r.fb.Bounds(), 5, 0)
+	r.frame()
+	copy(r.sc.qual, []uint8{lossless, 80, 40, lossless})
+	for _, tc := range []struct {
+		r, a, b, dy int
+		want        uint8
+	}{
+		{0, 0, 64, 10, 80},            // from rows 10 to 73: tiles 0 and 1
+		{0, 0, 54, 10, lossless},      // from rows 10 to 63, and its own 54 to 63
+		{1, 64, 128, 64, 40},          // from tile 2 whole
+		{1, 64, 100, -64, 80},         // from tile 0, and its own 100 to 127
+		{2, 150, 192, -150, 40},       // from tile 0, and its own 128 to 149
+		{3, 192, 224, -100, 80},       // from rows 92 to 123, and its own below
+		{3, 192, 256, -192, lossless}, // from tile 0 whole
+		{1, 64, 128, 128, lossless},   // from tile 3 whole
+	} {
+		if got := r.sc.copied(0, tc.r, tc.a, tc.b, tc.dy); got != tc.want {
+			t.Errorf("tile row %d, rows %d to %d from %d below: quality %d, want %d", tc.r, tc.a, tc.b, tc.dy, got, tc.want)
+		}
+	}
+	// Applied, a copy gives each tile the quality its rows had before
+	// it, in either direction, not that of tiles it already moved.
+	for _, tc := range []struct {
+		cp   scrollCopy
+		want []uint8
+	}{
+		{scrollCopy{c0: 0, c1: 1, a: 0, b: 192, dy: 64}, []uint8{80, 40, lossless, lossless}},
+		{scrollCopy{c0: 0, c1: 1, a: 64, b: 256, dy: -64}, []uint8{lossless, lossless, 80, 40}},
+	} {
+		copy(r.sc.qual, []uint8{lossless, 80, 40, lossless})
+		r.sc.apply(tc.cp)
+		if !slices.Equal(r.sc.qual, tc.want) {
+			t.Errorf("rows %d to %d from %d below: qualities %v after the copy, want %v", tc.cp.a, tc.cp.b, tc.cp.dy, r.sc.qual, tc.want)
+		}
 	}
 }
 
@@ -588,33 +731,53 @@ func TestScrollRandom(t *testing.T) {
 	}
 }
 
-// BenchmarkScrollFind times one frame's search of a 1024×768 screen
-// whose shadow's row hashes are stale, as after a frame of tiles: a
-// change of one tile and one across a row of tiles, which no column
-// searches; a new page, given up after scrollMaxMisses runs; and a
-// scroll of the whole screen.
+// BenchmarkScrollFind times one frame's search of a screen whose
+// shadow's row hashes are stale, as after a frame of tiles, at 1024×768,
+// 1080p and 4K: a change of one tile and one across a row of tiles, which
+// no column searches; a new page, and flat motion over the whole screen,
+// given up after scrollMaxMisses runs; a scroll of the whole screen; and
+// a sidebar that scrolls beside a new page or beside flat motion, where
+// the sidebar's copy raises the bound by its scrollMaxMisses+1 runs only.
+// It reports the runs searched, the rows hashed and the copies found.
 func BenchmarkScrollFind(b *testing.B) {
-	const w, h = 1024, 768
 	red := color.RGBA{0xff, 0, 0, 0xff}
-	for _, bc := range []struct {
-		name   string
-		change func(*framebuffer.Framebuffer)
-	}{
-		{"one tile", func(fb *framebuffer.Framebuffer) { fillFB(fb, image.Rect(100, 100, 110, 110), red) }},
-		{"a row of tiles", func(fb *framebuffer.Framebuffer) { fillFB(fb, image.Rect(0, 300, w, 310), red) }},
-		{"new page", func(fb *framebuffer.Framebuffer) { drawPage(fb, fb.Bounds(), 2, 0) }},
-		{"scroll", func(fb *framebuffer.Framebuffer) { drawPage(fb, fb.Bounds(), 1, 16) }},
-	} {
-		b.Run(bc.name, func(b *testing.B) {
-			r := newScrollRig(b, w, h, 64)
-			drawPage(r.fb, r.fb.Bounds(), 1, 0)
-			r.frame()
-			bc.change(r.fb)
-			order := r.dirty()
-			for b.Loop() {
-				clear(r.sc.hashed)
-				r.sc.find(r.fb, order)
-			}
-		})
+	for _, sz := range []struct{ w, h int }{{1024, 768}, {1920, 1080}, {3840, 2160}} {
+		w, h := sz.w, sz.h
+		for _, bc := range []struct {
+			name   string
+			change func(*framebuffer.Framebuffer)
+		}{
+			{"one tile", func(fb *framebuffer.Framebuffer) { fillFB(fb, image.Rect(100, 100, 110, 110), red) }},
+			{"a row of tiles", func(fb *framebuffer.Framebuffer) { fillFB(fb, image.Rect(0, 300, w, 310), red) }},
+			{"new page", func(fb *framebuffer.Framebuffer) { drawPage(fb, fb.Bounds(), 2, 0) }},
+			{"flat motion", func(fb *framebuffer.Framebuffer) {
+				fillFB(fb, fb.Bounds(), color.RGBA{1, 0x40, 0x80, 0xff})
+			}},
+			{"scroll", func(fb *framebuffer.Framebuffer) { drawPage(fb, fb.Bounds(), 1, 16) }},
+			{"sidebar scroll, new page", func(fb *framebuffer.Framebuffer) {
+				drawPage(fb, image.Rect(0, 0, 64, h), 1, 16)
+				drawPage(fb, image.Rect(64, 0, w, h), 4, 0)
+			}},
+			{"sidebar scroll, flat motion", func(fb *framebuffer.Framebuffer) {
+				drawPage(fb, image.Rect(0, 0, 64, h), 1, 16)
+				fillFB(fb, image.Rect(64, 0, w, h), color.RGBA{1, 0x40, 0x80, 0xff})
+			}},
+		} {
+			b.Run(fmt.Sprintf("%dx%d/%s", w, h, bc.name), func(b *testing.B) {
+				r := newScrollRig(b, w, h, 64)
+				drawPage(r.fb, r.fb.Bounds(), 1, 0)
+				r.frame()
+				bc.change(r.fb)
+				order := r.dirty()
+				var copies int
+				for b.Loop() {
+					clear(r.sc.hashed)
+					copies = len(r.sc.find(r.fb, order, 0))
+				}
+				b.ReportMetric(float64(r.sc.searched), "runs")
+				b.ReportMetric(float64(r.sc.rehashed), "rows-hashed")
+				b.ReportMetric(float64(copies), "copies")
+			})
+		}
 	}
 }

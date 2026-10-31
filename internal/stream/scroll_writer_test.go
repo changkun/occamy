@@ -17,6 +17,7 @@ import (
 
 	"changkun.de/x/occamy/internal/backend"
 	"changkun.de/x/occamy/internal/backend/backendtest"
+	"changkun.de/x/occamy/internal/pacer"
 	"changkun.de/x/occamy/internal/session"
 	"changkun.de/x/occamy/protocol"
 )
@@ -574,7 +575,7 @@ func TestScrollMovedSinceCollected(t *testing.T) {
 	if ok, _ := d.w.p.StartFrame(time.Now()); !ok {
 		t.Fatal("the pacer holds the frame")
 	}
-	d.c.bytes, d.c.tiles, d.c.copies = 0, 0, 0
+	d.c.bytes, d.c.tiles, d.c.copies, d.c.rects = 0, 0, 0, nil
 	if err := d.w.sendFrame(d.ctx, d.w.order, false); err != nil {
 		t.Fatal(err)
 	}
@@ -616,7 +617,7 @@ func TestScrollCopyAloneResolves(t *testing.T) {
 	if ok, _ := d.w.p.StartFrame(time.Now()); !ok {
 		t.Fatal("the pacer holds the input's frame")
 	}
-	d.c.bytes, d.c.tiles, d.c.copies = 0, 0, 0
+	d.c.bytes, d.c.tiles, d.c.copies, d.c.rects = 0, 0, 0, nil
 	order := d.w.order[:fresh]
 	byDamage(order, d.w.versions)
 	if err := d.w.sendFrame(d.ctx, order, true); err != nil {
@@ -628,5 +629,144 @@ func TestScrollCopyAloneResolves(t *testing.T) {
 	d.exact()
 	if d.w.in != nil {
 		t.Error("the wheel is still pending after its effect was sent")
+	}
+}
+
+// The lossless tile that ends a lossy run is read ahead and sent as the
+// next message: the shadow takes its pixels from the buffer they were
+// read into, so the shadow is what the client shows (direct.frame checks
+// it), and a copy from that tile's rows draws what the client has.
+func TestScrollLookahead(t *testing.T) {
+	d := newDirect(t, true)
+	ph := photo(t)
+	screen := func(top int) *image.RGBA {
+		img := document(top)
+		draw.Draw(img, image.Rect(0, 0, 256, 64), ph, image.Point{}, draw.Src)
+		return img
+	}
+	d.show(screen(0))
+	d.frame()
+	if len(d.c.rects) < 2 || d.c.rects[0] != image.Rect(0, 0, 256, 64) || d.c.rects[1] != image.Rect(256, 0, 320, 64) {
+		t.Fatalf("tile messages begin %v: want the photograph's run, then the tile read ahead after it", d.c.rects[:min(2, len(d.c.rects))])
+	}
+	// The document scrolls under the photograph, the tile read ahead
+	// among the rows copied.
+	d.show(screen(16))
+	if _, _, copies, _, _ := d.frame(); copies == 0 {
+		t.Fatal("no copy")
+	}
+	want := serverScreen(d.s)
+	for _, r := range []image.Rectangle{image.Rect(256, 0, 1024, 768), image.Rect(0, 64, 256, 768)} {
+		if !sameRect(d.c.img, want, r) {
+			t.Errorf("the client differs from the server in %v", r)
+		}
+	}
+}
+
+// A copy keeps the quality the client has its pixels at. A photograph
+// sent at quality 30 and scrolled once the pacer is back at 90 is sent
+// again at 90, as it would be without scroll detection, after a copy that
+// completes none of its tiles; one sent at 90 and scrolled at 30 is
+// copied.
+func TestScrollLossyQuality(t *testing.T) {
+	ph := corpusFrame(t, "photo")
+	shifted := func(dy int) *image.RGBA {
+		img := image.NewRGBA(ph.Rect)
+		draw.Draw(img, img.Rect, ph, image.Pt(0, dy), draw.Src)
+		return img
+	}
+	at := func(q int) *pacer.Pacer {
+		return pacer.New(pacer.Config{Window: 1 << 20, MinQuality: q, MaxQuality: q, InitialCap: 1 << 30})
+	}
+	type result struct {
+		psnr                 float64
+		bytes, tiles, copies int
+	}
+	send := func(scroll bool, q0, q1 int) result {
+		d := newDirect(t, scroll)
+		d.w.p = at(q0)
+		d.show(shifted(0))
+		d.frame()
+		d.w.p = at(q1)
+		d.show(shifted(16))
+		b, tiles, copies, _, _ := d.frame()
+		return result{psnr(serverScreen(d.s), d.c.img), b, tiles, copies}
+	}
+	for _, tc := range []struct {
+		q0, q1 int
+		copied bool
+	}{{30, 90, false}, {90, 30, true}} {
+		off, on := send(false, tc.q0, tc.q1), send(true, tc.q0, tc.q1)
+		t.Logf("quality %d, then scrolled at %d: without detection %.1f dB, %d tiles, %.1f KiB; with it %.1f dB, %d copies, %d tiles, %.1f KiB",
+			tc.q0, tc.q1, off.psnr, off.tiles, float64(off.bytes)/1024, on.psnr, on.copies, on.tiles, float64(on.bytes)/1024)
+		if on.copies != 1 {
+			t.Errorf("quality %d then %d: %d copies, want 1", tc.q0, tc.q1, on.copies)
+		}
+		if tc.copied {
+			if 4*on.tiles > off.tiles || on.psnr < off.psnr {
+				t.Errorf("quality %d then %d: %d tiles at %.1f dB, want the copy to keep most of the %d tiles at the higher quality, above %.1f dB",
+					tc.q0, tc.q1, on.tiles, on.psnr, off.tiles, off.psnr)
+			}
+		} else if on.tiles != off.tiles || on.psnr < off.psnr-0.05 {
+			t.Errorf("quality %d then %d: %d tiles at %.1f dB, want the %d tiles sent again as without detection, at %.1f dB",
+				tc.q0, tc.q1, on.tiles, on.psnr, off.tiles, off.psnr)
+		}
+	}
+}
+
+// A copy the client would not take is neither sent nor applied to the
+// shadow, which stays what the client shows, and completes no tile: the
+// frame's tiles, which every client takes, draw the scroll.
+func TestScrollCopyNotTaken(t *testing.T) {
+	d := newDirect(t, true)
+	d.show(document(0))
+	d.frame()
+	// Below a copy-rect's size, which no client may ask for. Tiles of
+	// up to 256 colours are not checked against it, being smaller than
+	// the least a client may ask for.
+	d.w.limits.MaxMessageSize = 16
+	d.show(document(16))
+	if _, ok := d.w.collect(image.Rectangle{}); !ok {
+		t.Fatal("resized")
+	}
+	d.c.copies = 0
+	copies, done, _, err := d.w.scroll(d.ctx, d.w.frame+1, d.w.order, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if copies != 0 || done != 0 || d.c.copies != 0 {
+		t.Errorf("%d copies sent, %d of them taken, completing %d tiles; want none", copies, d.c.copies, done)
+	}
+	// Before any tile goes, the shadow still shows the client's screen.
+	d.shadowed()
+	if ok, _ := d.w.p.StartFrame(time.Now()); !ok {
+		t.Fatal("the pacer holds the frame")
+	}
+	if err := d.w.sendFrame(d.ctx, d.w.order, false); err != nil {
+		t.Fatal(err)
+	}
+	if d.c.copies != 0 {
+		t.Errorf("%d copies the client would not take", d.c.copies)
+	}
+	d.shadowed()
+	d.exact()
+}
+
+// A copy in a frame of no input is motion, not an input's effect: the
+// tiles it completes are not marked as one, so that an input that comes
+// while a page scrolls on its own does not take the scroll for its
+// effect.
+func TestScrollNotAnEffect(t *testing.T) {
+	d := newDirect(t, true)
+	d.show(document(0))
+	d.frame()
+	d.show(document(16))
+	if _, _, copies, _, _ := d.frame(); copies == 0 {
+		t.Fatal("no copy")
+	}
+	for tt, e := range d.w.effects {
+		if e != 0 {
+			t.Errorf("tile %d marked as an input's effect at version %d", tt, e)
+		}
 	}
 }

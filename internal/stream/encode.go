@@ -43,7 +43,8 @@ type lookahead struct {
 // client takes: the tile is then taken as sent, so that the writer does
 // not try it again until it changes. It reports false for ok if the
 // screen was resized since order was made. The message's tiles' pixels
-// are in w.tiles from w.msgK on.
+// are in w.tiles from w.msgK on, and the quality the client gets them at
+// is w.msgQuality.
 //
 // A run ends before a tile that a copy-rect of the frame completed.
 func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send, ok bool) {
@@ -58,7 +59,7 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 		if a.tile == t && a.version >= w.versions[t] {
 			w.payload = append(w.payload[:0], a.payload...)
 			w.runVersion = append(w.runVersion[:0], a.version)
-			w.msgK = a.k
+			w.msgK, w.msgQuality = a.k, lossless
 			w.message(id, a.r, a.codec)
 			return 1, true, true
 		}
@@ -70,7 +71,7 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 	w.runVersion = append(w.runVersion[:0], version)
 	payload, codec, lossy := w.enc.Tile(w.payload[:0], w.tiles[0], r.Dx(), r.Dy())
 	w.payload = payload
-	w.msgK = 0
+	w.msgK, w.msgQuality = 0, lossless
 	if !lossy {
 		w.message(id, r, codec)
 		return 1, true, true
@@ -111,10 +112,12 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 	}
 
 	// Encode it, halving it while the message is too large.
+	q := w.p.Quality()
+	w.msgQuality = lossyQuality(q)
 	for {
 		rect := w.rects[0].Union(w.rects[n-1])
 		w.assemble(n, rect)
-		w.payload, codec = w.enc.Lossy(w.payload[:0], w.runPix, rect.Dx(), rect.Dy(), w.p.Quality())
+		w.payload, codec = w.enc.Lossy(w.payload[:0], w.runPix, rect.Dx(), rect.Dy(), q)
 		if codec != 0 {
 			w.message(id, rect, codec)
 			if w.limits.CheckSize(len(w.buf)) == nil {

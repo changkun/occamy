@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"image"
+	"math"
 	"math/bits"
 	"slices"
 	"time"
@@ -52,11 +53,21 @@ const (
 	scrollStride = 8
 	// scrollMinVotes is the fewest votes an offset needs.
 	scrollMinVotes = 2
-	// scrollMaxMisses is how many runs a frame searches without finding
-	// an offset before it stops: motion repaints every tile and scrolls
-	// none.
+	// scrollMaxMisses is how many more runs than it found copies in a
+	// frame searches without finding one before it stops: motion repaints
+	// every tile and scrolls none, and a scroll beside motion is found
+	// in a few runs.
 	scrollMaxMisses = 3
 )
+
+// lossless is the quality of pixels the client has exactly; a lossy
+// quality is below it.
+const lossless = math.MaxUint8
+
+// lossyQuality is the shadow's record of the lossy quality q.
+func lossyQuality(q int) uint8 {
+	return uint8(min(max(q, 0), lossless-1)) // #nosec G115 -- clamped below lossless
+}
 
 // shadow is the screen as a viewer's client has it, tile by tile.
 type shadow struct {
@@ -68,6 +79,9 @@ type shadow struct {
 	// valid marks the tiles whose pixels the client has: drawn whole
 	// since the last resize, after which the screen is undefined.
 	valid []bool
+	// qual is the quality of each valid tile's pixels on the client:
+	// lossless, or the lowest lossy quality any of its rows was sent at.
+	qual []uint8
 	// hash holds the row hashes of each tile, g.tile of them, which
 	// hashed says are current.
 	hash   []uint64
@@ -86,19 +100,22 @@ func (s *shadow) reset(g grid) {
 	n := g.cols * s.rows
 	s.pix = make([][]byte, n)
 	s.valid = make([]bool, n)
+	s.qual = make([]uint8, n)
 	s.hash = make([]uint64, n*g.tile)
 	s.hashed = make([]bool, n)
 }
 
-// keep makes buf, tile t's pixels as just sent, the shadow's, and
-// returns the buffer it held, which may be nil. For a tile sent lossy
-// the shadow holds the pixels that were encoded, and the client an
-// approximation of them: a copy of them moves the approximation, as
-// sending them lossy again would have.
-func (s *shadow) keep(t int, buf []byte) []byte {
+// keep makes buf, tile t's pixels as just sent at quality q, the
+// shadow's, and returns the buffer it held, which may be nil. For a tile
+// sent lossy the shadow holds the pixels that were encoded, and the
+// client an approximation of them at q: a copy of them moves the
+// approximation, and completes a tile only where q is no lower than the
+// quality the tile would be sent at.
+func (s *shadow) keep(t int, buf []byte, q uint8) []byte {
 	old := s.pix[t]
 	s.pix[t] = buf
 	s.valid[t] = true
+	s.qual[t] = q
 	s.hashed[t] = false
 	return old
 }
@@ -177,6 +194,7 @@ type scroller struct {
 	keys   []uint64 // the shadow's row hashes by slot, for the vote
 	slots  []int32  // the row of each slot plus one; 0 empty, -1 repeated
 	dys    []int
+	quals  []uint8 // apply's qualities of a column's tiles
 	copies []scrollCopy
 
 	// What the last search cost: the runs it read, the rows of them it
@@ -186,10 +204,15 @@ type scroller struct {
 
 // find returns the copies that bring the client's screen, as the shadow
 // holds it, closer to fb's in the tiles of order, with the tiles each
-// completes, to be sent and applied in the order returned. Each copy
-// moves rows within the tile columns it spans. It returns nil if the
-// screen no longer matches the shadow's grid.
-func (sc *scroller) find(fb *framebuffer.Framebuffer, order []int) []scrollCopy {
+// completes at a quality of at least target, to be sent and applied in
+// the order returned. Each copy moves rows within the tile columns it
+// spans. It returns nil if the screen no longer matches the shadow's
+// grid.
+//
+// It searches the longest runs first, and stops once it has searched
+// scrollMaxMisses runs more without a copy than it found copies in: at
+// most 2h+3 runs for h copies.
+func (sc *scroller) find(fb *framebuffer.Framebuffer, order []int, target int) []scrollCopy {
 	g := sc.g
 	sc.copies = sc.copies[:0]
 	sc.searched, sc.hashes, sc.tried, sc.rehashed = 0, 0, 0, 0
@@ -232,7 +255,7 @@ func (sc *scroller) find(fb *framebuffer.Framebuffer, order []int) []scrollCopy 
 
 	hint, misses := 0, 0
 	for _, rn := range sc.runs {
-		if len(sc.copies) == 0 && misses >= scrollMaxMisses {
+		if misses >= scrollMaxMisses+len(sc.copies) {
 			break
 		}
 		if !sc.read(fb, rn) {
@@ -241,12 +264,12 @@ func (sc *scroller) find(fb *framebuffer.Framebuffer, order []int) []scrollCopy 
 		}
 		cp, ok := scrollCopy{}, false
 		if hint != 0 {
-			cp, ok = sc.try(rn, hint)
+			cp, ok = sc.try(rn, hint, target)
 		}
 		if !ok {
 			if dy := sc.vote(rn); dy != 0 {
 				sc.tried++
-				cp, ok = sc.try(rn, dy)
+				cp, ok = sc.try(rn, dy, target)
 			}
 		}
 		if !ok || sc.conflicts(cp) {
@@ -364,9 +387,14 @@ func (sc *scroller) vote(rn run) int {
 }
 
 // try finds the longest span of run rn's rows that are, pixel for pixel,
-// the shadow's rows dy below, and the tiles a copy of it completes. It
-// reports false if the copy would complete none.
-func (sc *scroller) try(rn run, dy int) (scrollCopy, bool) {
+// the shadow's rows dy below, and the tiles a copy of it completes: those
+// whose rows outside the span the client already has, in a tile it has
+// drawn, and whose pixels end up at a quality of at least target. It
+// reports false if the copy would draw no tile right, at any quality. A
+// copy whose tiles are right but of a lower quality is still sent, since
+// it costs a few bytes, and they go as tiles after it, as they would
+// without it.
+func (sc *scroller) try(rn run, dy, target int) (scrollCopy, bool) {
 	y0, y1 := sc.span(rn)
 	h := sc.g.bounds.Dy()
 	a, b := 0, 0
@@ -387,6 +415,7 @@ func (sc *scroller) try(rn run, dy int) (scrollCopy, bool) {
 	}
 	cp := scrollCopy{c0: rn.c, c1: rn.c + 1, a: a, b: b, dy: dy}
 	tile := sc.g.tile
+	right := 0
 	for r := a / tile; r <= (b-1)/tile; r++ {
 		t := r*sc.g.cols + rn.c
 		ty0, ty1 := r*tile, min((r+1)*tile, h)
@@ -399,12 +428,36 @@ func (sc *scroller) try(rn run, dy int) (scrollCopy, bool) {
 				complete = own != nil && bytes.Equal(sc.cur(rn, y), own)
 			}
 		}
-		if complete {
+		if !complete {
+			continue
+		}
+		right++
+		if int(sc.copied(rn.c, r, a, b, dy)) >= target {
 			cp.done = append(cp.done, t)
 			cp.vers = append(cp.vers, sc.vers[r-rn.r0])
 		}
 	}
-	return cp, len(cp.done) > 0
+	return cp, right > 0
+}
+
+// copied returns the quality of the pixels of tile row r of column c once
+// rows a to b of the column take those dy below: the lowest quality of
+// the tiles its copied rows come from, and of its own if it keeps any of
+// its rows.
+func (s *shadow) copied(c, r, a, b, dy int) uint8 {
+	tile := s.g.tile
+	ty0, ty1 := r*tile, min((r+1)*tile, s.g.bounds.Dy())
+	y0, y1 := max(a, ty0), min(b, ty1)
+	q := uint8(lossless)
+	if y0 < y1 {
+		for sr := (y0 + dy) / tile; sr <= (y1-1+dy)/tile; sr++ {
+			q = min(q, s.qual[sr*s.g.cols+c])
+		}
+	}
+	if y0 > ty0 || y1 < ty1 {
+		q = min(q, s.qual[r*s.g.cols+c])
+	}
+	return q
 }
 
 // moved reports whether row y of run rn is the shadow's row y+dy of the
@@ -469,10 +522,16 @@ func (sc *scroller) merge() {
 
 // apply makes the shadow show cp as the client does once it applies it:
 // the rows a to b of its columns become those dy below, with their
-// hashes.
+// hashes, and the tiles they land in take their quality.
 func (sc *scroller) apply(cp scrollCopy) {
 	g, tile := sc.g, sc.g.tile
+	r0, r1 := cp.a/tile, (cp.b-1)/tile
 	for c := cp.c0; c < cp.c1; c++ {
+		// The qualities as the rows had them before the copy.
+		sc.quals = sc.quals[:0]
+		for r := r0; r <= r1; r++ {
+			sc.quals = append(sc.quals, sc.copied(c, r, cp.a, cp.b, cp.dy))
+		}
 		w := 4 * g.rect(c).Dx()
 		// Sources below are read before they are written, top to bottom;
 		// sources above, bottom to top.
@@ -494,8 +553,10 @@ func (sc *scroller) apply(cp scrollCopy) {
 				sc.hashed[t] = false
 			}
 		}
-		for r := cp.a / tile; r <= (cp.b-1)/tile; r++ {
-			if t := r*g.cols + c; cp.a <= r*tile && min((r+1)*tile, g.bounds.Max.Y) <= cp.b {
+		for r := r0; r <= r1; r++ {
+			t := r*g.cols + c
+			sc.qual[t] = sc.quals[r-r0]
+			if cp.a <= r*tile && min((r+1)*tile, g.bounds.Max.Y) <= cp.b {
 				sc.valid[t] = true
 			}
 		}
@@ -504,18 +565,26 @@ func (sc *scroller) apply(cp scrollCopy) {
 
 // scroll searches order, the tiles the frame is about to send, for
 // scrolls, sends a copy-rect for each, and takes the tiles they complete
-// as sent. Copies go out unpaced, as frame-end does: they are a few
-// bytes. It reports the copies sent, the tiles they completed and their
-// bytes.
+// at the pacer's quality as sent. Copies go out unpaced, as frame-end
+// does: they are a few bytes. It reports the copies sent, the tiles they
+// completed and their bytes.
+//
+// A copy is applied to the shadow only once it is written: one the
+// client would not take, which no client allowed to connect refuses, is
+// neither sent nor applied, and nor are the copies after it.
 func (w *writer) scroll(ctx context.Context, id uint32, order []int, input bool) (copies, done, size int, err error) {
 	start := time.Now()
-	found := w.sc.find(w.fb, order)
+	found := w.sc.find(w.fb, order, w.p.Quality())
 	took := time.Since(start)
 	w.scrollTime += took
 	w.encodeTime += took
 	for _, cp := range found {
-		m := cp.message(w.g, id)
-		if err := w.write(ctx, m); err != nil {
+		w.sbuf = cp.message(w.g, id).Append(w.sbuf[:0])
+		if err := w.limits.CheckSize(len(w.sbuf)); err != nil {
+			w.log.Warn("copy-rect not sent", "err", err)
+			break
+		}
+		if err := w.c.WriteMessage(ctx, w.sbuf); err != nil {
 			return copies, done, size, err
 		}
 		w.sc.apply(cp)
