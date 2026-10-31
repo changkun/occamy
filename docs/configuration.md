@@ -10,7 +10,7 @@ another. The file comes in two versions:
   [api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md):
   sign-in, the connection registry, TLS and the debug listener. The
   server is being built: so far it serves `/healthz`, sign-in for static
-  users and, with `legacy_v0`, the v0 routes (see
+  users and through OIDC, and, with `legacy_v0`, the v0 routes (see
   [Serving a v1 file](#serving-a-v1-file)).
 
 Any other `version` is an error, and so is `version: 0`: a v0 file has no
@@ -75,14 +75,17 @@ directory.
 | `auth.users[].name` | required | A static user, who signs in with a password. Unique |
 | `auth.users[].password_hash` | required | bcrypt hash of the password, cost 10 or more. `htpasswd -nbBC 12 "" 'the password' \| cut -d: -f2` makes one. Give every user the same cost: a sign-in as an unknown user is checked against a hash of the highest cost, so a user at a lower cost signs in measurably faster, and `occamyd` warns at start when the costs differ |
 | `auth.users[].groups` | none | Groups the user belongs to |
-| `auth.oidc` | unset (off) | Sign-in through an OpenID Connect identity provider |
-| `auth.oidc.issuer` | required | The provider's issuer URL. https, or http on localhost |
+| `auth.oidc` | unset (off) | Sign-in through an OpenID Connect identity provider; see [signing in through OIDC](#signing-in-through-oidc) |
+| `auth.oidc.issuer` | required | The provider's issuer URL, exactly as its discovery document names it (a trailing slash counts). https, or http on localhost |
 | `auth.oidc.client_id` | required | `occamyd`'s client ID at the provider |
 | `auth.oidc.client_secret_file`, `client_secret_env` | unset | The client secret, from a file or an environment variable; at most one. Neither means a public client |
-| `auth.oidc.redirect_url` | required | `occamyd`'s callback URL as the provider knows it, ending in `/api/v1/auth/oidc/callback` behind any proxy prefix. https, or http on localhost |
+| `auth.oidc.redirect_url` | required | `occamyd`'s callback URL as the browser and the provider know it, ending in `/api/v1/auth/oidc/callback` behind any proxy prefix. https, or http on localhost. Its path is also the sign-in cookie's, and with https the cookie is `Secure`, whoever terminates TLS |
+| `auth.oidc.return_urls` | the origin of `redirect_url`, with the path `/` | Where browsers are sent back after a sign-in, with a one-time code or an error in the fragment: your web client's sign-in page. A sign-in names one of them, matched exactly as written. https, or http on localhost, with no user name and no fragment |
 | `auth.oidc.scopes` | `[openid, profile, email]` | Scopes to request; must include `openid` |
-| `auth.oidc.subject_claim` | `sub` | The ID token claim that names the user in allow lists |
-| `auth.oidc.groups_claim` | unset | The claim that lists the user's groups. Unset, OIDC users have no groups |
+| `auth.oidc.subject_claim` | `sub` | The ID token claim that names the user in allow lists: a top-level string claim of up to 255 bytes, of printable characters that show, with no space but U+0020: no control or format characters (zero-width spaces, bidirectional overrides), no other characters that render as nothing (variation selectors, the combining grapheme joiner, Hangul fillers, the blank Braille pattern U+2800). See [user names](#user-names). Pick one that users cannot set themselves, such as `sub` or `email`, never a display name or `preferred_username` where users can edit it, since allow lists grant by this name. With `email`, the token must also say `email_verified: true` |
+| `auth.oidc.groups_claim` | unset | The top-level claim that lists the user's groups, as a list of strings or one string. Only the groups the file names, in `auth.users[].groups` or an `allow.groups`, are kept. Unset, OIDC users have no groups |
+| `auth.oidc.require_known_users` | `false` | Admit only the users whom an allow list names: in a connection's `allow.users`, exactly, or in one of its `allow.groups` by `groups_claim`. Static users, and names in `allow.users` that are a static user's, count only with `link_static_users`, since OIDC refuses those names without it. Off, anyone the provider signs in gets an access token, and allow lists still decide what they may open |
+| `auth.oidc.link_static_users` | `false` | Let an OIDC user whose subject names a static user sign in under that name, so that the allow lists naming the static user name the OIDC user too. The OIDC user's groups still come from `groups_claim`, not from the static user's `groups`. Off, a subject that is a static user's name, in any case or Unicode normal form (`Alice` for `alice`), is refused with `access_denied` and logged: a name belongs to one source unless the file links them. Turn it on only with a `subject_claim` that users cannot choose, such as `sub` or a verified `email`: whoever the provider names `alice` then has static user `alice`'s place in every allow list |
 
 #### Tokens from a trusted issuer
 
@@ -96,7 +99,113 @@ A trusted issuer mints JWTs that `occamyd` accepts as its own:
   list of group names; or `session`, with `sid` (a session ID) and
   `role` (`owner`, `viewer` or `read-only`).
 
-`occamyd`'s own tokens have the same shape with `iss: occamy`.
+`occamyd`'s own tokens have the same shape with `iss: occamy`. An access
+token may also carry `idp`, where the user signed in: `occamyd` puts
+`local` on a static user's and `oidc` on one from
+[OIDC](#signing-in-through-oidc), and logs it at each sign-in. A session
+token carries no `idp`.
+
+#### User names
+
+Allow lists and `require_known_users` compare user names exactly, byte
+for byte: `allow.users: [alice]` admits neither `Alice` nor an `alice`
+with a decomposed character, so write names as the provider sends them.
+Telling OIDC users from static users casts a wider net: without
+`link_static_users`, an OIDC subject is refused when it equals a static
+user's name under Unicode case folding, once both are in NFC, so that
+`Alice` cannot pass for static `alice` in a log or to a person. Names
+that only look alike, such as one with a Cyrillic `а` or a fullwidth
+`ａ`, are neither refused nor the same user; pick a `subject_claim` that
+users cannot choose.
+
+#### Signing in through OIDC
+
+Register `occamyd` at the provider as a client of the authorization code
+flow with PKCE, with `redirect_url` as its redirect URI. `occamyd`
+discovers the provider in the background at start, or at the first
+sign-in, so a provider that is down does not keep `occamyd` from
+starting: OIDC sign-ins fail until it answers, a failed discovery is
+tried again after 10 seconds, and static users sign in as ever. Each
+request to the provider times out after 10 seconds.
+
+A web client signs a user in in four steps:
+
+1. Make a random verifier of 43 to 128 characters (`A-Z`, `a-z`, `0-9`,
+   `-`, `.`, `_`, `~`), keep it in `sessionStorage`, and compute its
+   challenge: the SHA-256 of the verifier in base64url without padding
+   (PKCE's S256, RFC 7636).
+2. Send the browser to
+   `GET /api/v1/auth/oidc/login?return_url=<one of return_urls>&code_challenge=<challenge>`.
+   `return_url` may be left out when only one is configured. `occamyd`
+   sets a cookie for its callback and redirects to the provider.
+3. Once the user has signed in, the provider sends the browser to the
+   callback, which sends it on to the return URL with
+   `#code=<one-time code>`, or `#error=<code>`.
+4. On the return URL, read the fragment, remove it with
+   `history.replaceState`, and post
+   `{"code":"…","code_verifier":"<the verifier>"}` as `application/json`
+   to `POST /api/v1/auth/oidc/token`. The answer is that of
+   `POST /api/v1/auth/token`:
+   `{"access_token":"…","token_type":"Bearer","expires_in":900}`. Then
+   forget the verifier.
+
+A client that finds a `#code` but holds no verifier did not start that
+sign-in: someone may have sent the browser to `login` with a challenge
+of their own. It must not sign in with the code. It should spend it, by
+posting it with a throwaway verifier, since a code works once, or else
+remove it from the URL and ignore it.
+
+The access token never appears in a URL, so it reaches no server log,
+`Referer` or browser history. The one-time code sits in the history, but
+it lasts a minute, works once, and only with the verifier of the client
+that started the sign-in, so a code planted in another browser signs no
+one in. Until `occamyd` answers CORS preflights, serve the web client
+from `occamyd`'s origin, such as through the reverse proxy in front of
+both.
+
+Errors in the fragment:
+
+| `error` | Meaning |
+|---------|---------|
+| `access_denied` | The provider refused, or `occamyd` refused the user: a `subject_claim` that is missing or not a usable name, an email the provider has not verified, a static user's name, in any case or normal form, without `link_static_users`, or with `require_known_users`, a user whom no allow list names |
+| `sign_in_failed` | The provider answered with another error, or its answer did not verify: the ID token's issuer, audience, authorized party (`azp`), expiry, signature, algorithm or nonce, the answer's `iss` (RFC 9207), also on an error answer, or a `sub` that is not a string, which the ID token's parser refuses before `subject_claim` is read |
+| `unavailable` | The provider cannot be reached, or too many sign-ins wait for their clients |
+
+`login` answers `400` with API v1's error for a return URL that is not
+listed, or a challenge that is missing, given twice or not an S256
+challenge (43 characters of unpadded base64url), or a
+`code_challenge_method` other than `S256`. The callback answers `400`
+with `invalid_state` when the browser has no sign-in cookie that matches
+the provider's answer: the sign-in started in another browser, took
+longer than 10 minutes, or outlived a restart of `occamyd`. It leaves a
+sign-in that is under way alone, so a link to the callback from another
+site cannot end it. Starting a sign-in can: `login` replaces the
+browser's sign-in cookie, so a second `login`, including a top-level
+navigation to it from another site, ends the sign-in under way, whose
+callback then answers `invalid_state`. That is a nuisance, not a way
+in, since the second sign-in's code needs a verifier the client does
+not hold, and the user can start again. The exchange answers `401` for
+a code that is unknown, used or expired, or a verifier that does not
+match. A user has
+at most three codes waiting for exchange; a fourth sign-in drops the
+oldest.
+
+ID tokens must be signed with RS, ES or PS at 256, 384 or 512 bits, or
+EdDSA; `none` and HMAC are refused whatever the provider advertises.
+`occamyd` follows no redirect from the provider, and talks only to the
+endpoints its discovery document names, which must be https, or http on
+localhost when the issuer is too. Their hosts are the discovery
+document's to choose, since it comes from the issuer you configure:
+`occamyd` checks only the scheme. It reads
+`authorization_response_iss_parameter_supported` as a JSON bool; any
+other value fails discovery. When the provider names itself in its
+answer to the callback (`iss`, RFC 9207), `occamyd` compares it with the
+issuer exactly, also in an error answer, before it takes the error as
+the provider's. The sign-in cookie is
+`__Secure-occamy_oidc` when it is `Secure`, and `occamy_oidc` on plain
+http.
+Several `occamyd` instances behind one name need sticky sessions, since
+the sign-in cookie's key and the one-time codes live in each process.
 
 ### guacd: `guacd`
 
@@ -172,6 +281,12 @@ that:
   name in an `allow` list is a static user, and every group is a group of
   some static user. With either one configured, users and groups also come
   from token claims, so names the file does not list are accepted;
+- `auth.oidc.return_urls` are https, or http on localhost, with no user
+  name and no fragment, and `auth.oidc.require_known_users` has someone
+  to admit: a user in an `allow.users`, a group in an `allow.groups`
+  with `groups_claim` set, or, with `link_static_users`, a static user.
+  Without `link_static_users`, a static user's name in an `allow.users`
+  does not count, since OIDC refuses it;
 - a file holds one YAML document.
 
 ## Serving a v1 file
@@ -184,6 +299,8 @@ WebSockets over HTTP/1.1. So far it serves:
 |-------|---------|
 | `GET /healthz` | `200 {"status":"ok"}` while `occamyd` runs |
 | `POST /api/v1/auth/token` | Sign-in for static users: `{"username":"alice","password":"…"}` as `application/json` in, `{"access_token":"…","token_type":"Bearer","expires_in":900}` out. A wrong password and an unknown user get the same `401` |
+| `GET /api/v1/auth/oidc/login`, `GET /api/v1/auth/oidc/callback` | With `auth.oidc`, sign-in through the provider, from a client's `return_url` and `code_challenge` to the return URL with a one-time code in the fragment; see [signing in through OIDC](#signing-in-through-oidc) |
+| `POST /api/v1/auth/oidc/token` | With `auth.oidc`: `{"code":"…","code_verifier":"…"}` as `application/json` in, the access token out, as from `POST /api/v1/auth/token` |
 | `/api/v0/login`, `/api/v0/connect` | With `legacy_v0: true`, the v0 routes as a v0 file serves them |
 
 API v1 answers every error with `{"error":{"code":"…","message":"…"}}`,
