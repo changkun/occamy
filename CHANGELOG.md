@@ -300,10 +300,15 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   packages it bundles to `dist/THIRD_PARTY_LICENSES.md`, which the image
   ships in `licenses/web/` and the web client archive in `dist/`.
 - `web_client` in a v1 file: the directory of the built web client,
-  which occamyd serves under `/static/`. The demo stack's `occamy-v1`
-  serves the image's at http://localhost:5637/static/, and opens the
-  demo SSH server as the connection `ssh` through the native SSH
-  backend.
+  which occamyd serves under `/static/` with a Content-Security-Policy
+  that keeps the page to its own origin, without directory listings or
+  symbolic links out of the directory, and with its hashed `assets/`
+  cached for a year; a v0 file's `client: true` serves `/static/` the
+  same way. Validation refuses a `web_client` that is a file or that
+  occamyd cannot read; one not built yet is a warning. The demo stack's
+  `occamy-v1` serves the image's at http://localhost:5637/static/, and
+  opens the demo SSH server as the connection `ssh` through the native
+  SSH backend.
 - `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS with the
   VNC backend's certificate policy, NLA through CredSSP 5 or later with
   NTLMv2 of its own, offered by default, the connection sequence, bitmap
