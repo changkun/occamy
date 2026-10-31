@@ -36,6 +36,8 @@ export interface EndOptions {
   close: () => Promise<void>
   /** Whether occamyd closed the stream as it does once the session has ended for everyone, for whatever reason (endsSession). */
   endedForEveryone: () => boolean
+  /** Whether the stream is open, which says that the session runs on: without it, occamyd's 404 may mean that it ended. */
+  streaming: () => boolean
 }
 
 /**
@@ -62,7 +64,8 @@ export function sessionOwner(role: Role | null, token: AccessToken | null, seed:
  * signed in since, occamyd decides: the session is ended with the stream
  * open, and the stream closed after. A 404 then means the session is not
  * this user's, unless occamyd closed the stream meanwhile for the
- * session's end, as after an earlier End whose answer was lost.
+ * session's end, as after an earlier End whose answer was lost, or the
+ * session may have ended, with no stream open to say otherwise.
  */
 export async function endSession(o: EndOptions): Promise<EndOutcome> {
   if (o.sessionId === '') {
@@ -88,7 +91,7 @@ export async function endSession(o: EndOptions): Promise<EndOutcome> {
       return { kind: 'ended' }
     }
     if (err instanceof ApiError && err.code === 'not_found') {
-      return opener ? { kind: 'ended' } : { kind: 'not-owner', message: notOwner(o.owner, user) }
+      return opener ? { kind: 'ended' } : { kind: 'not-owner', message: notOwner(o.owner, user, o.streaming()) }
     }
     if (err instanceof ApiError && err.signedOut) {
       // A stream closed already: the owner is told so, in case the
@@ -109,13 +112,18 @@ export async function endSession(o: EndOptions): Promise<EndOutcome> {
 }
 
 // notOwner says why occamyd found no session to end for user, now signed
-// in: owner, who opened it, is someone else, or the session has ended.
-// Either is null for one not known.
-function notOwner(owner: Identity | null, user: Identity | null): string {
+// in: owner, who opened it, is someone else, or the session has ended,
+// which only a stream still open, streaming, rules out. Either is null
+// for one not known.
+function notOwner(owner: Identity | null, user: Identity | null, streaming: boolean): string {
   if (owner === null || user === null || sameIdentity(owner, user)) {
     const who = user === null ? '' : `, signed in as ${clip(user.subject, MAX_LABEL)}`
     return `occamyd has no session of yours to end${who}: it has ended, or someone else opened it.`
   }
   const name = clip(owner.subject, MAX_LABEL)
-  return `You are signed in as ${clip(user.subject, MAX_LABEL)}, but ${name} opened this session, so it was not ended for everyone. Sign in as ${name} to end it.`
+  const you = clip(user.subject, MAX_LABEL)
+  if (!streaming) {
+    return `You are signed in as ${you}, and occamyd did not end this session: it has ended already, or ${name} opened it. Sign in as ${name} to end it if it runs on.`
+  }
+  return `You are signed in as ${you}, but ${name} opened this session, so it was not ended for everyone. Sign in as ${name} to end it.`
 }

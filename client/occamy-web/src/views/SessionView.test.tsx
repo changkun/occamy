@@ -272,9 +272,10 @@ describe('SessionView', () => {
   })
 
   it('ends alice’s session once alice signs in, after bob, signed in through single sign-on, was told it is not his', async () => {
-    // The view opened for alice's End, after bob signed in.
+    // The view opened for alice's End, after bob signed in. Its stream is
+    // not open, so the session may have ended.
     const r = await render({ token: accessToken('bob', 'oidc'), owner: alice }, occamyd('alice'))
-    const message = 'You are signed in as bob, but alice opened this session, so it was not ended for everyone. Sign in as alice to end it.'
+    const message = 'You are signed in as bob, and occamyd did not end this session: it has ended already, or alice opened it. Sign in as alice to end it if it runs on.'
     expect(text()).toContain(message)
     expect(r.left).toBe(0)
     expect(button('Try again')).toBeUndefined()
@@ -393,7 +394,8 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
     await r.rerender({ token: accessToken('bob'), action: end(1) })
     await settle(20)
     expect(r.left).toBe(0)
-    expect(text()).toContain('You are signed in as bob, but alice opened this session, so it was not ended for everyone.')
+    // With no stream open, the session may have ended too.
+    expect(text()).toContain('You are signed in as bob, and occamyd did not end this session: it has ended already, or alice opened it.')
   })
 
   it('takes no second End while one waits for occamyd', async () => {

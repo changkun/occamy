@@ -180,6 +180,7 @@ export function SessionView({ api, token, target, owner: seed, action, onLeave, 
       now: Date.now(),
       close: () => controller.close(),
       endedForEveryone: () => endsSession(controller.getState().code),
+      streaming: () => controller.getState().phase === 'open',
     }).finally(() => setEnding(false))
     switch (outcome.kind) {
       case 'ended':

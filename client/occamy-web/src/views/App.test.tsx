@@ -100,9 +100,10 @@ describe('App', () => {
       await Promise.resolve()
     })
     await settle(10)
-    // The view opened for alice's End, signed in as bob: occamyd refuses him.
+    // The view opened for alice's End, signed in as bob: occamyd refuses
+    // him, and with no stream open the session may have ended.
     expect(log.filter((l) => l.startsWith('DELETE'))).toEqual(['DELETE /api/v1/sessions/mZ3k'])
-    expect(text()).toContain('You are signed in as bob, but alice opened this session, so it was not ended for everyone. Sign in as alice to end it.')
+    expect(text()).toContain('You are signed in as bob, and occamyd did not end this session: it has ended already, or alice opened it. Sign in as alice to end it if it runs on.')
     act(() => button('Sign in')?.click())
     await settle()
     const form = container.querySelector<HTMLFormElement>('dialog form.sign-in')

@@ -36,7 +36,7 @@ function options(answer: Answer, o: Partial<EndOptions> = {}, timeout?: number):
   )
   return {
     log,
-    options: { api, token: fresh, owner: demo, resumed: false, sessionId: 'mZ3k', now, close: () => Promise.resolve(void log.push('close')), endedForEveryone: () => false, ...o },
+    options: { api, token: fresh, owner: demo, resumed: false, sessionId: 'mZ3k', now, close: () => Promise.resolve(void log.push('close')), endedForEveryone: () => false, streaming: () => true, ...o },
   }
 }
 
@@ -195,6 +195,17 @@ describe('an End that resumed after a sign-in', () => {
     const asAlice = options(occamyd('alice'), { owner: alice, token: token('alice', 'local', now + 600_000), resumed: true })
     expect(await endSession(asAlice.options)).toEqual({ kind: 'ended' })
     expect(asAlice.log).toEqual(['DELETE /api/v1/sessions/mZ3k', 'close'])
+  })
+
+  it('does not say whose the session is without a stream open, as it may have ended', async () => {
+    // As when single sign-on came back as bob after alice's grace ran
+    // out, and occamyd refused bob's stream to the session.
+    const { log, options: o } = options(error(404, 'not_found'), { owner: alice, token: token('bob', 'oidc', now + 600_000), resumed: true, streaming: () => false })
+    expect(await endSession(o)).toEqual({
+      kind: 'not-owner',
+      message: 'You are signed in as bob, and occamyd did not end this session: it has ended already, or alice opened it. Sign in as alice to end it if it runs on.',
+    })
+    expect(log).toEqual(['DELETE /api/v1/sessions/mZ3k'])
   })
 
   it('ends the session of a user linked to their single sign-on', async () => {
