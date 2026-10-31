@@ -7,11 +7,12 @@ package rdp
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
+	"fmt"
 	"net"
+	"runtime"
 	"slices"
-	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,44 +22,139 @@ import (
 // The tests of what the client owes on the clipboard channel and how it
 // writes it.
 
-// The Format List Responses the client owes are bounded: one list past
-// maxListResponses ends the session. What is due goes in writes of
-// chunksPerWrite chunks, the small messages together, not a write each.
-func TestClipboardListResponsesBounded(t *testing.T) {
-	conn := &countConn{}
+// clipClient returns a client whose clipboard channel is open, writing
+// to conn, for tests that call its reader's and writer's steps in turn.
+func clipClient(conn net.Conn) *Client {
 	c, clock := testClock(1024, 768)
 	clock.err = errPaced
 	c.t = &transport{conn: conn}
 	c.cfg.Clipboard = bothWays.Clipboard
 	c.chio.kick = make(chan struct{}, 1)
 	c.clipCh = &vchannel{name: "cliprdr", id: 1004, limit: maxCliprdrMessage}
+	return c
+}
+
+// listResponses counts the Format List Responses that accept and that
+// refuse in b, frames of one-chunk channel messages.
+func listResponses(t *testing.T, b []byte) (ok, fail int) {
+	t.Helper()
+	for len(b) > 0 {
+		frame := b[:binary.BigEndian.Uint16(b[2:])]
+		b = b[len(frame):]
+		p := frame[7+6:] // the TPKT, X.224 and MCS headers, then a PER length
+		if p[0]&0x80 != 0 {
+			p = p[2:]
+		} else {
+			p = p[1:]
+		}
+		m, err := rdptest.ParseCliprdr(p[8:]) // after the channel PDU header
+		if err != nil || m.Type != rdptest.CBFormatListResponse {
+			t.Fatalf("a message of type %d, %v; want Format List Responses", m.Type, err)
+		}
+		if m.Flags == rdptest.CBResponseOK {
+			ok++
+		} else {
+			fail++
+		}
+	}
+	return ok, fail
+}
+
+// owed waits until the client owes the server n Format List Responses.
+func (l *live) owed(t *testing.T, n int64) {
+	t.Helper()
+	for deadline := time.Now().Add(30 * time.Second); ; time.Sleep(5 * time.Millisecond) {
+		l.c.chio.mu.Lock()
+		owed := l.c.clip.listOK + l.c.clip.listFail
+		l.c.chio.mu.Unlock()
+		if owed == n {
+			return
+		}
+		select {
+		case err := <-l.done:
+			l.done <- err
+			t.Fatalf("Run returned %v with %d responses owed", err, owed)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d responses owed, want %d", owed, n)
+		}
+	}
+}
+
+// formatLists returns n Format Lists from the server on l's clipboard
+// channel, each a frame of its own.
+func (l *live) formatLists(n int) [][]byte {
+	one := rdptest.ChannelChunks(l.conn.Channels["cliprdr"], rdptest.FormatList(true), rdptest.ChunkSize)[0]
+	return slices.Repeat([][]byte{one}, n)
+}
+
+// The Format List Responses the client owes are a count, which no number
+// of lists ends the session for: each pass of the writer sends
+// listResponsesPerPass of them, in writes of chunksPerWrite chunks, and
+// has the writer look again for the rest.
+func TestClipboardListResponsesPaced(t *testing.T) {
+	conn := &countConn{}
+	c := clipClient(conn)
 	bad := cliprdrPDU(cbFormatList, 0, []byte{1, 2, 3}) // refused: not a list of short names
-	var err error
-	n := 0
-	for ; n <= maxListResponses && err == nil; n++ {
+	const lists = 1000
+	for n := range lists {
 		list := rdptest.FormatList(false)
 		if n%2 == 1 {
 			list = bad
 		}
-		err = c.cliprdrMessage(nil, list, false)
+		if err := c.cliprdrMessage(nil, list, false); err != nil {
+			t.Fatalf("list %d: %v", n, err)
+		}
 	}
-	if err == nil || !strings.Contains(err.Error(), "Format List Responses") || c.clip.listOK+c.clip.listFail != maxListResponses {
-		t.Fatalf("after %d lists, %d and %d responses owed, %v", n, c.clip.listOK, c.clip.listFail, err)
+	if c.clip.listOK != lists/2 || c.clip.listFail != lists/2 {
+		t.Fatalf("%d and %d responses owed, want %d of each", c.clip.listOK, c.clip.listFail, lists/2)
 	}
+	<-c.chio.kick // the reader's
 	if err := c.writeDue(); err != nil {
 		t.Fatal(err)
 	}
-	if want := maxListResponses / chunksPerWrite; conn.writes != want {
-		t.Errorf("%d responses in %d writes, want %d", maxListResponses, conn.writes, want)
+	if owed := c.clip.listOK + c.clip.listFail; owed != lists-listResponsesPerPass || conn.writes != listResponsesPerPass/chunksPerWrite || len(c.chio.kick) != 1 {
+		t.Fatalf("after a pass, %d owed, %d writes, %d wake-ups; want %d, %d and 1", owed, conn.writes, len(c.chio.kick), lists-listResponsesPerPass, listResponsesPerPass/chunksPerWrite)
 	}
-	// Written, they make room.
-	if err := c.cliprdrMessage(nil, rdptest.FormatList(false), false); err != nil {
-		t.Errorf("a list after the responses went: %v", err)
+	passes := 1
+	for ; len(c.chio.kick) == 1; passes++ {
+		<-c.chio.kick
+		if err := c.writeDue(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ok, fail := listResponses(t, conn.buf.Bytes())
+	if want := (lists + listResponsesPerPass - 1) / listResponsesPerPass; passes != want || ok != lists/2 || fail != lists/2 {
+		t.Errorf("%d passes, %d responses that accept and %d that refuse; want %d passes, %d of each", passes, ok, fail, want, lists/2)
 	}
 }
 
-// A server that floods Format Lists while the client cannot write ends
-// the session, rather than having the client owe an answer to each.
+// What a pass of the writer allocates does not grow with the responses
+// owed.
+func TestClipboardListResponsesAllocs(t *testing.T) {
+	c := clipClient(discardConn{})
+	pass := func(owed int64) func() {
+		return func() {
+			c.clip.listOK = owed
+			if err := c.writeDue(); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case <-c.chio.kick:
+			default:
+			}
+		}
+	}
+	few := testing.AllocsPerRun(5, pass(listResponsesPerPass+1))
+	if many := testing.AllocsPerRun(5, pass(1_000_000)); many != few {
+		t.Errorf("a pass allocates %v times with a million responses owed, %v with %d", many, few, listResponsesPerPass+1)
+	}
+}
+
+// A server that floods Format Lists and does not read keeps its session:
+// the client owes it a count, which takes no memory for each list, and
+// the writer waits for the server to read.
 func TestClipboardListFlood(t *testing.T) {
 	l := runLive(t, rdptest.Server{}, bothWays)
 	l.ready(t, true)
@@ -69,32 +165,167 @@ func TestClipboardListFlood(t *testing.T) {
 			l.c.chio.wmu.Unlock()
 		}
 	}()
-	for range maxListResponses + 1 {
-		l.send(t, rdptest.FormatList(true))
+	const lists = 100_000
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	batch := l.formatLists(1000)
+	for range lists / len(batch) {
+		if err := l.conn.Write(batch...); err != nil {
+			t.Fatal(err)
+		}
 	}
-	// Ending the session, the client closes its side of the connection.
-	l.conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-	for {
-		_, err := l.conn.Next()
-		var ne net.Error
-		if errors.As(err, &ne) && ne.Timeout() {
-			t.Fatal("the client did not end the session")
-		}
-		if err != nil {
-			break
-		}
+	l.owed(t, lists)
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	if grew := int64(after.HeapAlloc) - int64(before.HeapAlloc); grew > lists {
+		t.Errorf("the heap grew by %d bytes with %d responses owed", grew, lists)
 	}
 	l.c.chio.wmu.Unlock()
 	held = false
 	select {
 	case err := <-l.done:
-		if err == nil || !strings.Contains(err.Error(), "Format List Responses") {
-			t.Errorf("Run returned %v, want the responses' bound", err)
-		}
 		l.done <- err
-	case <-time.After(10 * time.Second):
-		t.Fatal("Run did not return")
+		t.Fatalf("Run returned %v", err)
+	case <-time.After(200 * time.Millisecond):
 	}
+}
+
+// A server that reads gets a response to each list of a burst in one
+// write, however long the burst: the writer sends them a pass at a time.
+// The writer is held while the burst comes, so that the reader's
+// wake-ups come to one, and only the writer's own have it look again.
+func TestClipboardListBurst(t *testing.T) {
+	for _, lists := range []int{listResponsesPerPass + 1, 1000} {
+		t.Run(fmt.Sprint(lists), func(t *testing.T) {
+			l := runLive(t, rdptest.Server{}, bothWays)
+			l.ready(t, true)
+			l.c.chio.wmu.Lock()
+			held := true
+			defer func() {
+				if held {
+					l.c.chio.wmu.Unlock()
+				}
+			}()
+			if err := l.conn.Write(l.formatLists(lists)...); err != nil {
+				t.Fatal(err)
+			}
+			l.owed(t, int64(lists))
+			l.c.chio.wmu.Unlock()
+			held = false
+			for range lists {
+				want(t, l.next(t), rdptest.CBFormatListResponse, rdptest.CBResponseOK)
+			}
+			select {
+			case err := <-l.done:
+				l.done <- err
+				t.Fatalf("Run returned %v", err)
+			default:
+			}
+		})
+	}
+}
+
+// A paste held up as the server reads it slowly, while the server's user
+// copies, has the client owe a response to each copy, which go once the
+// paste is written, a pass at a time.
+func TestClipboardPasteHeldUp(t *testing.T) {
+	g := &gateConn{held: make(chan struct{}), gate: make(chan struct{})}
+	c := clipClient(g)
+	c.clip.ready = true
+	c.clip.text = bytes.Repeat([]byte("x"), 60<<10) // 77 chunks of UTF-16: three writes
+	c.clip.provide = []uint32{cfUnicodeText}
+	paste := make(chan error, 1)
+	go func() { paste <- c.writeDue() }()
+	<-g.held
+	const copies = 1000
+	for range copies {
+		if err := c.cliprdrMessage(nil, rdptest.FormatList(false), false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(g.gate)
+	if err := <-paste; err != nil {
+		t.Fatal(err)
+	}
+	passes := 0
+	for ; len(c.chio.kick) == 1; passes++ {
+		<-c.chio.kick
+		if err := c.writeDue(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	// Each pass of 64 responses takes two writes, as does the last of 40.
+	if want := (copies + listResponsesPerPass - 1) / listResponsesPerPass; passes != want || len(g.sizes) != 3+2*want || c.clip.listOK != 0 {
+		t.Errorf("%d passes, %d writes, %d owed; want %d passes and %d writes", passes, len(g.sizes), c.clip.listOK, want, 3+2*want)
+	}
+}
+
+// A server that reads a paste slowly while its user copies keeps its
+// session, and gets the paste and a response to each copy.
+func TestClipboardSlowPaste(t *testing.T) {
+	l := runLive(t, rdptest.Server{}, bothWays)
+	l.ready(t, true)
+	if err := l.c.SetClipboard(bytes.Repeat([]byte("x"), 1<<20)); err != nil {
+		t.Fatal(err)
+	}
+	want(t, l.next(t), rdptest.CBFormatList, 0)
+	l.send(t, rdptest.FormatDataRequest(cfUnicodeText))
+	var pasted atomic.Bool
+	var responses atomic.Int64
+	readErr := make(chan error, 1)
+	go func() {
+		l.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		for {
+			m, err := l.conn.Next()
+			if err == nil && m.Channel == "cliprdr" {
+				var c rdptest.Cliprdr
+				if c, err = rdptest.ParseCliprdr(m.Data); c.Type == rdptest.CBFormatDataResponse {
+					pasted.Store(true)
+				} else if c.Type == rdptest.CBFormatListResponse {
+					responses.Add(1)
+				}
+			}
+			if err != nil {
+				readErr <- err
+				return
+			}
+			time.Sleep(100 * time.Microsecond) // a chunk at a time, slowly
+		}
+	}()
+	copies, most := 0, int64(0)
+	for !pasted.Load() {
+		select {
+		case err := <-readErr:
+			t.Fatalf("reading the paste: %v", err)
+		default:
+		}
+		l.send(t, rdptest.FormatList(true))
+		copies++
+		time.Sleep(2 * time.Millisecond)
+		l.c.chio.mu.Lock()
+		most = max(most, l.c.clip.listOK+l.c.clip.listFail)
+		l.c.chio.mu.Unlock()
+	}
+	for deadline := time.Now().Add(30 * time.Second); responses.Load() < int64(copies); time.Sleep(5 * time.Millisecond) {
+		select {
+		case err := <-readErr:
+			t.Fatalf("reading the responses: %v", err)
+		default:
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%d responses to %d copies", responses.Load(), copies)
+		}
+	}
+	select {
+	case err := <-l.done:
+		l.done <- err
+		t.Fatalf("Run returned %v", err)
+	default:
+	}
+	t.Logf("%d copies during the paste, at most %d responses owed at once", copies, most)
 }
 
 // gateConn records the size of each write, and holds the second until
@@ -204,3 +435,4 @@ func TestClipboardChannelBound(t *testing.T) {
 		t.Errorf("channel 0 is %q", vc.name)
 	}
 }
+
