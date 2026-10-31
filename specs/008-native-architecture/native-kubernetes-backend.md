@@ -105,6 +105,34 @@ registration). Four things need deciding:
   bearer token, a client certificate, or a prompt; its `tls` is a vnc
   connection's.
 
+## No Kubernetes SDK, and what that leaves out
+
+The owner asked why there is no client-go. The backend makes one
+request: pod exec (or attach), upgraded to a WebSocket whose messages
+carry a one-byte channel prefix. `coder/websocket` is already a
+dependency, and the framing is small enough to fuzz whole. client-go
+would bring in the API machinery and most of the API types for that
+one request, and its exec went over SPDY for most of its history
+(transport option B below).
+
+The limits that follow, which docs/configuration.md states too:
+
+- **No kubeconfig files.** The connection names the API server in
+  `target`, its CA or pins in `tls`, and the credential in
+  `credentials`.
+- **No exec credential plugins**, such as EKS's `aws eks get-token` or
+  GKE's `gke-gcloud-auth-plugin`, and **no legacy `auth-provider`
+  entries.** `occamyd` deliberately runs no external credential
+  binaries: a session never starts a process on the server.
+- **What works:** a bearer token, such as a ServiceAccount token, which
+  managed clusters accept too, or a client certificate, with the API
+  server checked against the system's roots, a CA or pins.
+- **RBAC:** `create` on `pods/exec` (or `pods/attach`) in the
+  namespace, with `get`. API servers before 1.35 authorize the
+  WebSocket upgrade, a GET, as `get` alone; from 1.35 they also check
+  `create`. Granting both covers every version. docs/configuration.md
+  gives a minimal ServiceAccount, Role and RoleBinding.
+
 ## Options
 
 ### Transport

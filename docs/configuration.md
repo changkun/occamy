@@ -360,11 +360,37 @@ server. Another protocol's connection cannot have `kubernetes`.
     allow: {groups: [ops]}
 ```
 
-The token, or the client certificate, needs `get` and `create` on
-`pods/exec` (or `pods/attach`) in the namespace: Kubernetes 1.35 and
-later check `create` on the WebSocket upgrade. For example:
+**Authentication.** `occamyd` sends a bearer token or presents a client
+certificate, and checks the API server's certificate against the
+system's roots, `ca_file` or `pins`. A ServiceAccount token works on
+every cluster, managed ones included: `kubectl -n web create token
+occamy --duration=24h` makes one that expires, and a Secret of type
+`kubernetes.io/service-account-token` holds one that does not. The
+token file is read as each session starts, so a rotated token is picked
+up by the next session. `occamyd` does not support:
+
+- kubeconfig files: name the API server in `target`, its CA in `tls`
+  and the token or certificate in `credentials` instead;
+- exec credential plugins, such as EKS's `aws eks get-token` or GKE's
+  `gke-gcloud-auth-plugin`;
+- the legacy `auth-provider` entries of a kubeconfig.
+
+`occamyd` deliberately runs no external credential binaries: a session
+never starts a process on the server, and a credential is one file or
+one variable that the configuration names.
+
+**RBAC.** The token's, or the certificate's, user needs `create` on
+`pods/exec` (or `pods/attach`) in the pod's namespace, and `get` too.
+The WebSocket upgrade is an HTTP `GET`, which API servers authorize as
+`get`; from Kubernetes 1.35 they also check `create`, as they always
+did for kubectl's SPDY `POST`. Granting both covers every version. A
+minimal Role and RoleBinding for a ServiceAccount:
 
 ```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata: {name: occamy, namespace: web}
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata: {name: occamy-exec, namespace: web}
@@ -372,13 +398,32 @@ rules:
   - apiGroups: [""]
     resources: [pods/exec]
     verbs: [get, create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata: {name: occamy-exec, namespace: web}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: occamy-exec}
+subjects:
+  - {kind: ServiceAccount, name: occamy, namespace: web}
 ```
 
-`occamyd` speaks the `v5.channel.k8s.io` WebSocket subprotocol of
-Kubernetes 1.30 and later, and falls back to `v4.channel.k8s.io`, which
-older API servers proxy to the kubelet. The command's exit ends the
-session with `remote-ended`, whatever its status; a refused request or
-an API server that cannot be reached ends it with `backend-failed`.
+`occamyd` needs no other permission: it does not list or read pods.
+
+**Protocol.** `occamyd` speaks the `v5.channel.k8s.io` WebSocket
+subprotocol of Kubernetes 1.30 and later, and falls back to
+`v4.channel.k8s.io`, which older API servers proxy to the kubelet. The
+command's exit ends the session with `remote-ended`, whatever its
+status; a refused request or an API server that cannot be reached ends
+it with `backend-failed`.
+
+**Why there is no Kubernetes SDK.** The backend makes one request: pod
+exec, upgraded to a WebSocket whose messages carry a one-byte channel
+prefix. `coder/websocket`, which `occamyd` already uses for its own
+streams, speaks it in a few hundred lines that the tests fuzz. client-go
+would bring in the API machinery and most of the API types for that one
+request, and its exec has gone over SPDY for most of its history. The
+cost of going without it is the list above: no kubeconfig and no
+credential plugins.
 
 #### Backends
 
