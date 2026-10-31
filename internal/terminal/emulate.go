@@ -894,10 +894,17 @@ func (t *Terminal) oscDispatch() {
 	t.dirty = true
 }
 
+// maxTitle is the longest title, in bytes, that an OSC 2 of at most
+// maxOSC bytes carries whole, as Diff sends it.
+const maxTitle = maxOSC - len("2;")
+
 // sanitizeTitle makes a title safe to send in OSC 2: valid UTF-8 without
-// C0 or C1 controls, which would end the sequence early.
+// C0 or C1 controls, which would end the sequence early, and at most
+// maxTitle bytes, cut between characters, which the parser would cut
+// anywhere. An invalid byte becomes U+FFFD, three bytes, so a title that
+// came in whole may need the cut.
 func sanitizeTitle(s string) string {
-	ok := utf8.ValidString(s)
+	ok := len(s) <= maxTitle && utf8.ValidString(s)
 	if ok {
 		for _, r := range s {
 			if r < 0x20 || (r >= 0x7f && r < 0xa0) {
@@ -913,6 +920,9 @@ func sanitizeTitle(s string) string {
 	for _, r := range s {
 		if r < 0x20 || (r >= 0x7f && r < 0xa0) {
 			continue
+		}
+		if b.Len()+utf8.RuneLen(r) > maxTitle {
+			break
 		}
 		b.WriteRune(r)
 	}
