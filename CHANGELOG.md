@@ -584,7 +584,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   only with the session. Until now every later connection then waited
   10 seconds for it and got no clipboard, which once failed `make e2e`'s
   clipboard check. `make e2e` now kills the channel server in the rdp
-  container and checks that the next connection has the clipboard.
+  container and checks that the next connection has the clipboard. Give
+  it the `CONTAINER_ENGINE` that `make run` took, since it reaches the
+  container through that engine's compose.
 
 ### Security
 
