@@ -85,9 +85,10 @@ reach v1 clients through protocol v1. Two things need deciding:
 
 ### Bridged terminals
 
-guacd's SSH renders terminals as pixels, so a bridged SSH session is
-graphical. That is acceptable until the native SSH backend passes its
-gate, which is planned for beta.1 anyway.
+guacd's SSH renders terminals as pixels, so a bridged SSH session would
+be graphical. In v1 there is none: ssh is native from the start, the
+configuration refuses `backend: guacd` for it, and the bridge never
+serves it.
 
 ## Parity gate (bridge to native, per protocol)
 
@@ -126,8 +127,10 @@ Superseded by these decisions: the gate as first written, which moved a
 protocol's default to `native` only after an opt-in period of at least
 one beta behind `backend: native`, end-to-end parity, traffic and CPU
 no worse than the bridge's and a soak, and then kept `backend: guacd`
-for one minor release. The soak (Decision 4) is not one of the owner's
-conditions.
+for one minor release. Instead of that minor release, `backend: guacd`
+now stays until the benchmark shows native at least 10x better, and
+the protocol's guacd path is then deleted. The soak (Decision 4) is not
+one of the owner's conditions.
 
 | Protocol | Native backend | Default | guacd path |
 |----------|----------------|---------|------------|
@@ -621,8 +624,10 @@ that guacd was `vnc`'s default, they are corrected below.
   reasons, the `tls` policy and an ad-hoc target. Not yet: sharing
   roles, reconnect, AltGr and dead keys.
 - **Follow-ups.** Moved to Implementation notes: native by default. The
-  first gate's steps 3 and 4, and the minor release that would have kept
-  `backend: guacd` after a switch, are superseded.
+  first gate's steps 3 and 4 are superseded, and so is the minor release
+  that would have kept `backend: guacd` after a switch: `backend: guacd`
+  stays until the benchmark shows native at least 10x better, and VNC's
+  guacd path is then deleted.
 
 ## Implementation notes: native by default
 
