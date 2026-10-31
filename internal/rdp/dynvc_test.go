@@ -133,8 +133,9 @@ func (l *live) setLayoutEvery(every, retry time.Duration) {
 
 // The client asks for DRDYNVC only with Resize, answers the server's
 // capabilities with version 2 at most, accepts Display Control and
-// refuses other channels, a channel id that is open, and a second
-// Display Control channel.
+// refuses other channels and a second Display Control channel. (An id
+// that is open is refused too, but only Display Control could have it,
+// so no request tells that check apart.)
 func TestDynvcChannels(t *testing.T) {
 	if l := runLive(t, rdptest.Server{}, Config{}); len(l.conn.Channels) != 0 {
 		t.Errorf("channels %v without Resize", l.conn.Channels)
@@ -157,7 +158,7 @@ func TestDynvcChannels(t *testing.T) {
 	}{
 		{1, "Microsoft::Windows::RDS::Graphics", 0xc0000001},
 		{300, rdptest.DisplayControl, 0},
-		{300, "rdpsnd", 0xc0000001},                 // the id is open
+		{300, "rdpsnd", 0xc0000001},                 // no handler, and the id is open
 		{70000, rdptest.DisplayControl, 0xc0000001}, // one at a time
 	} {
 		l.sendDVC(t, rdptest.DVCCreateRequest(tc.id, tc.name))
