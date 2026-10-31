@@ -172,22 +172,27 @@ items with the recommended options, checked against the code and RFC
 | 3 | VeNCrypt (X.509, with Plain, None and VNC inner authentication); ExtendedDesktopSize with `SetDesktopSize`; ContinuousUpdates with Fence; QEMU Extended Key Event with the HID-to-XT table; Extended Clipboard (UTF-8); LastRect | Phase 1 |
 | 4 | Apple Remote Desktop (type 30), only where the configuration allows it, checked by hand against macOS Screen Sharing (the procedure is in phase 4's notes; no Mac has run it yet) | Phase 1 |
 
-Registration in the API's backend factory for `vnc`, and the switch from
-the guacd bridge, follow the parity gate in
-[guacd-bridge](guacd-bridge.md), not these phases. (2026-10-30: the
+Registration in the API's backend factory for `vnc` is done, as `vnc`'s
+default, and the deletion of `vnc`'s guacd path follows the parity
+gate in [guacd-bridge](guacd-bridge.md), not these phases. (2026-10-30: the
 Sessions task of [api-and-server-stack](api-and-server-stack.md)
 registered the native backend as `vnc`'s default ahead of the gate,
 since no configuration key picked a backend then. 2026-10-31: the gate's
-opt-in period started; the guacd bridge is `vnc`'s default and
-`backend: native` registers this backend for a connection. See
+opt-in period started, with the guacd bridge as `vnc`'s default and
+`backend: native` registering this backend for a connection. Later on
+2026-10-31, the owner decided that native is the default wherever a
+native backend exists: this backend is `vnc`'s default again, and
+`backend: guacd` is an explicit fallback and the benchmark's baseline,
+kept until the benchmark shows native at least 10x better. See
 Implementation notes: registration.)
 
 ## Affects
 
-New `internal/backend/vnc`. After its parity gate
-([guacd-bridge](guacd-bridge.md)), VNC no longer needs guacd, which
-leaves only RDP on the bridge. The HID-to-XT table derives from
-`internal/keymap`, the scan code table it shares with the RDP client
+New `internal/backend/vnc`. Once the parity gate deletes VNC's guacd
+path ([guacd-bridge](guacd-bridge.md)), VNC no longer needs guacd, which
+leaves only RDP, until its native backend is registered, and telnet on
+the bridge. The HID-to-XT table derives from `internal/keymap`, the
+scan code table it shares with the RDP client
 since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
 
 ## Implementation notes: phase 1
@@ -196,7 +201,8 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
   `backend.Backend` with `Config`, `New` and `Backend`, in about 1,400
   lines of code and 2,500 of tests. Nothing wires it into `occamyd`: the
   sessions task registers backends (done: `vnc` connections and ad-hoc
-  targets use it).
+  targets use it by default, and `backend: guacd` picks the bridge
+  instead).
 - **What was built.**
   - Run dials with the context, runs the handshake, sends
     `SetPixelFormat` and `SetEncodings` (CopyRect, Raw, Cursor,
@@ -355,7 +361,9 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     with the screen's size would bound the work better: at the largest
     screen, ten resizes a second still reallocate 1.25 GiB a second.
   - Registration for `vnc` in the API's backend factory (done, as the
-    default), and the parity gate against the guacd bridge.
+    default, which it is again since 2026-10-31), and the parity gate
+    against the guacd bridge, which now decides when `vnc`'s guacd
+    fallback is deleted.
 
 ## Implementation notes: phase 2
 
@@ -610,7 +618,8 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
   - TigerVNC in the [006](../006-demo-stack-refresh.md) stack, so that
     the end-to-end matrix covers a server other than x11vnc.
   - Phase 3's LastRect ends a Tight server's updates of unknown length
-    (`0xFFFF` rectangles); the decoders need nothing for it.
+    (`0xFFFF` rectangles); the decoders need nothing for it. Done in
+    phase 3.
   - Closing the zlib tail's gap: keep the last 32 KiB of output in a
     ring, and whenever compressed bytes are left after the pixels, read
     them through the inflater, failing at the first byte it hands out,
@@ -630,7 +639,8 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
   `extensions.go`), in about 1,500 lines of code and 2,000 of tests.
   Statement coverage stays at 98%. Nothing wires the backend into
   `occamyd` yet, and `internal/config` has no keys for the new options
-  (follow-ups).
+  (follow-ups; both done since, see Implementation notes:
+  registration).
 - **What was built.**
   - `SetEncodings` lists the pseudo-encodings ExtendedDesktopSize,
     LastRect, ContinuousUpdates, Fence, QEMU Extended Key Event and
@@ -763,10 +773,10 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     them, or the next run once that time has passed. A later run removes
     only names that are a run's whole, after any registry and path and
     before any tag: review found that matching the prefix anywhere in a
-    name, as the RDP spike still does, would remove other people's
-    containers and images on a shared host. Phase 4 narrows this to a
-    bare name or one after `localhost/`. `TestExpired`, outside the
-    tag, pins the matcher. It skips without an engine;
+    name, as the RDP spike's test did (it now matches as narrowly),
+    would remove other people's containers and images on a shared host.
+    Phase 4 narrows this to a bare name or one after `localhost/`.
+    `TestExpired`, outside the tag, pins the matcher. It skips without an engine;
     `OCCAMY_VNC_TLS_ADDR` points it at a running server instead.
     It connects with a private CA by address and by name, a pinned
     fingerprint, insecure mode with its warning, Plain with a configured
@@ -968,7 +978,8 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
   by default. No Mac with Screen Sharing on was at hand, so the check by
   hand below is still to be run. Statement coverage of the package is
   97%. Nothing wires the backend into `occamyd` yet, and
-  `internal/config` has no key for `ARD` (follow-ups).
+  `internal/config` has no key for `ARD` (follow-ups; both done since,
+  see Implementation notes: registration).
 - **What was built.**
   - **The exchange**, as libvncclient (`HandleARDAuth`), noVNC
     (`_negotiateARDAuth`) and TigerVNC's viewer (`CSecurityDH`)
@@ -1095,7 +1106,8 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     macOS offers no VeNCrypt; and VeNCrypt has no subtype for it. So the
     backend does not choose 30 among VeNCrypt's subtypes, and the only
     path to type 30 is `ARD`.
-  - The `internal/config` key (follow-ups).
+  - The `internal/config` key (follow-ups; done since, see
+    Implementation notes: registration).
 - **Decisions made during implementation.**
   - **Off by default, and a plain switch.** `Config.ARD` is a bool, as
     phase 3's options are flat, rather than a list of allowed types:
@@ -1266,11 +1278,9 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
      Screen Sharing off again.
 - **Follow-ups.**
   - The check by hand above, on current macOS.
-  - ~~Configuration v1's `ard` key for VNC connections (phase 3's list),
-    documented with its risk in `docs/configuration.md` once it exists.
-    When it lands, the error for a server that offers only type 30
-    should name that key rather than `Config.ARD`, which an operator
-    cannot set.~~ Done; see Implementation notes: registration.
+  - Configuration v1's `ard` key for VNC connections, with its risk
+    documented and named by the error for a server that offers only
+    type 30: done; see Implementation notes: registration.
   - Apple's types 33, 35 and 36, with SRP and Kerberos, would log in to
     a Mac without type 30's exposure; each needs a Mac to be built
     against.
@@ -1283,14 +1293,19 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
 
 ## Implementation notes: registration
 
-- **Status.** The backend serves vnc connections and ad-hoc targets
-  that opt in with `backend: native` (or `adhoc_backends: {vnc:
-  native}`), during the parity gate's opt-in period
-  ([guacd-bridge](guacd-bridge.md)); the guacd bridge serves vnc by
-  default. Before, it served every vnc session, with no key.
+- **Status.** The backend is `vnc`'s default: it serves every vnc
+  connection and ad-hoc target that does not set `backend: guacd` (or
+  `adhoc_backends: {vnc: guacd}`), which goes through the guacd bridge
+  as an explicit fallback and the benchmark's baseline
+  ([guacd-bridge](guacd-bridge.md), Parity gate and Implementation
+  notes: native by default). That is the owner's decision of
+  2026-10-31: native is the default wherever a native backend exists.
+  Before it, during the parity gate's opt-in period, the bridge served
+  vnc by default and `backend: native` opted in; and before that, this
+  backend served every vnc session, with no key.
 - **What was done.**
   - `ard: true` on a vnc connection sets `Config.ARD`. Configuration
-    v1 refuses it on other protocols, without `backend: native`, and
+    v1 refuses it on other protocols, with `backend: guacd`, and
     with a `tls` that requires TLS (`require`, `ca_file` or `pins`),
     since type 30 runs without TLS. `docs/configuration.md` describes
     the risk. Ad-hoc targets cannot have it.

@@ -10,7 +10,7 @@ affects:
   - .github/workflows/dockerimage.yml
 effort: large
 created: 2026-10-29
-updated: 2026-10-29
+updated: 2026-10-31
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -23,17 +23,17 @@ The native client is a SwiftUI app, starting on macOS, that links Occamy's
 Go client core as a static library. Go does the protocol, decoding and
 session logic, shared with the server and the tests. Swift does the UI,
 input, rendering and platform integration. It replaces the Gio client
-([007](007-native-gio-client.md), archived), and it is a preview in the
-v1 beta ([008](008-native-architecture.md)).
+([007](007-native-gio-client.md), archived), and it is a preview by
+`v1.0.0-rc.1`, not a gate for beta.1 ([008](008-native-architecture.md)).
 
 ## Current State
 
 - No Swift code exists. The Gio attempt lives on branches `gio` and
-  `gio-client` (PR #51), which are not merged.
-- The Go client core is designed in
-  [client-core](008-native-architecture/client-core.md): a pure-Go
-  `client` package with a pull-style event API, chosen with this C ABI in
-  mind.
+  `gio-client` (PR #51, closed unmerged).
+- The Go client core exists: `changkun.de/x/occamy/client`, designed in
+  [client-core](008-native-architecture/client-core.md), a pure-Go
+  package with a pull-style event API (`Dial`, then `Session.Next`),
+  chosen with this C ABI in mind.
 
 ## Architecture
 
@@ -75,6 +75,24 @@ int  occamy_clipboard(occamy_session s, const char *mime, const uint8_t *p, size
 void occamy_close(occamy_session s);
 void occamy_free(void *p);                 // strings and buffers returned by the core
 ```
+
+(2026-10-31: the sketch predates the `client` package, and differs
+from it. The Swift work settles the ABI; these are the differences to
+weigh then.
+
+- No counterpart for `Session.View` (visibility and viewport) or
+  `Session.PromptReply`, which answers the `Prompt` event; connections
+  with `prompt: true` and ad-hoc targets need it.
+- `occamy_resize` takes a scale, but `Session.Resize` takes a width and
+  a height only; the pixel ratio is `Options.PixelRatio`, set at dial.
+- `occamy_next` is `occamy_session_next` in
+  [client-core](008-native-architecture/client-core.md).
+- Types: `Pointer` takes `uint16` coordinates and `protocol.Buttons`,
+  `Wheel` takes `int32` deltas and a `protocol.WheelMode`, and every
+  input method returns the input's sequence number (`uint32`), which
+  client-core says the export layer returns for latency measurement.
+- Terminal sessions deliver `TermSnapshot` as well as `TermData`, so
+  `TerminalView` below renders both.)
 
 Rules:
 
@@ -170,7 +188,8 @@ Open:
   decided before the first preview build.
 - **Gio:** the `gio` and `gio-client` branches stay.
   [guacd-bridge](008-native-architecture/guacd-bridge.md) may reuse their
-  `internal/guac`.
+  `internal/guac`. (Answered: the bridge reuses `internal/guacamole`,
+  written fresh, instead.)
 
 ## Acceptance Criteria
 

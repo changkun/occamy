@@ -7,20 +7,27 @@
 [![Release](https://img.shields.io/github/v/release/changkun/occamy?sort=semver)](https://github.com/changkun/occamy/releases)
 [![Go version](https://img.shields.io/github/go-mod/go-version/changkun/occamy)](./go.mod)
 [![License](https://img.shields.io/github/license/changkun/occamy)](./LICENSE)
-Occamy is an open source protocol and proxy for modern remote desktop control that written in Go.
+Occamy is an open source protocol and proxy for modern remote desktop control, written in Go.
 
 ## Project status
 
 Occamy is experimental. Development paused at the end of 2021 and resumed in
-2026 with a toolchain and dependency refresh, and `occamyd` now serves
-sessions through upstream [guacd](https://hub.docker.com/r/guacamole/guacd)
-1.6. What works today:
+2026 with a toolchain and dependency refresh. The released v0.x servers
+serve sessions through upstream
+[guacd](https://hub.docker.com/r/guacamole/guacd) 1.6. Occamy v1, built on
+`master` and not yet released, has its own API and protocol and native
+backends in pure Go, and v1.0 removes Guacamole entirely: no guacd, no
+Guacamole protocol and no v0 routes
+([specs/008](./specs/008-native-architecture.md)). What works today:
 
-| Protocol | Status |
-|----------|--------|
-| VNC | Through guacd, verified end to end |
-| SSH | Through guacd, verified end to end, including repeated sessions |
-| RDP | Through guacd, verified against xrdp |
+| Protocol | v0 (released) | v1 (`master`) |
+|----------|---------------|---------------|
+| VNC | Through guacd, verified end to end | Native by default, or through guacd with `backend: guacd` |
+| SSH | Through guacd, verified end to end, including repeated sessions | Native |
+| RDP | Through guacd, verified against xrdp | Through guacd; the native backend is built but not yet served |
+
+v1 also serves telnet, through guacd only: it gets no native backend and
+goes when guacd does.
 
 Known gaps and planned work are tracked as design specs in [specs/](./specs/README.md).
 
@@ -52,6 +59,10 @@ podman run -d --network occamy -p 5636:5636 \
 [docker/occamy.yaml](./docker/occamy.yaml) points occamy at `guacd:4822`. guacd
 opens the connections to the remote desktops, so their hosts must be
 reachable from the guacd container.
+
+`conf.yaml` and `docker/occamy.yaml` are v0 files. To serve API v1, give
+`occamyd` a v1 file with `-conf` ([docs/configuration.md](./docs/configuration.md)),
+as the demo stack's `occamy-v1` service does (see [Demo](#demo)).
 
 ### Releases
 
@@ -133,20 +144,22 @@ For development, run `npm run dev` in `client/occamy-web`; it proxies `/api` to 
 
 ### APIs
 
-Occamy offers two APIs, the v0 routes:
+Occamy serves one of two APIs, picked by the configuration file
+([docs/configuration.md](./docs/configuration.md)):
 
-- `POST /api/v0/login` distributes JWT tokens for authentication (with
-  `client: true` only) and
-- `GET /api/v0/connect` is used for WebSocket based Occamy connection.
+- A v0 file, such as [conf.yaml](./conf.yaml), serves the v0 routes:
+  `POST /api/v0/login` distributes JWT tokens for authentication (with
+  `client: true` only), and `GET /api/v0/connect` opens the WebSocket
+  that carries the Guacamole protocol. They were `/api/v1/login` and
+  `/api/v1/connect` through 0.6.0.
+- A v1 file (`version: 1`) serves API v1, not yet released: sign-in,
+  the connection registry, sessions, shares and protocol v1 streams
+  ([specs/008](./specs/008-native-architecture/api-and-server-stack.md)),
+  and the v0 routes too with `legacy_v0: true`.
+  [docs/api.md](./docs/api.md) is its reference: every route, its
+  tokens, requests, replies and errors.
 
-They were `/api/v1/login` and `/api/v1/connect` through 0.6.0; `/api/v1`
-now belongs to API v1, which is in progress
-([specs/008](./specs/008-native-architecture/api-and-server-stack.md))
-and which a v1 configuration file serves. [docs/api.md](./docs/api.md)
-is its reference: every route, its tokens, requests, replies and errors.
 The v0 routes are removed at v1.0.
-
-If you build Occamy with web client, you can also access `/static` for web client demo.
 
 ### Demo
 
@@ -174,8 +187,9 @@ Occamy connects to them through upstream guacd 1.6, which also runs in
 the stack. A second `occamyd`, `occamy-v1` on `localhost:5637`, serves
 API v1 from the v1 file [docker/occamy-v1.yaml](./docker/occamy-v1.yaml),
 with the user `demo` and the password `occamy`: the VNC server as the
-connection `vnc-native`, through `occamyd`'s own VNC client
-(`backend: native`), and as `vnc-guacd`, through guacd.
+connection `vnc-native`, through `occamyd`'s own VNC client, vnc's
+default, and as `vnc-guacd`, through guacd (`backend: guacd`), the
+fallback that the benchmark compares against.
 
 Here is a working video demo:
 
@@ -220,9 +234,9 @@ lists the current security caveats. Changes are recorded in
 
 ## Why Occamy and how it works?
 
-Occamy implements a generic remote desktop protocol with modern approaches. 
-It currently performs [Guacamole](https://guacamole.apache.org/) protocol 
-and eventually intends to redesign and propose Occamy protocol.
+Occamy implements a generic remote desktop protocol with modern approaches.
+v0 speaks the [Guacamole](https://guacamole.apache.org/) protocol; v1
+speaks Occamy's own protocol ([docs/protocol.md](./docs/protocol.md)).
 
 The benefits of Occamy that differ from Guacamole are:
 
@@ -231,13 +245,14 @@ The benefits of Occamy that differ from Guacamole are:
 - Streaming compression and optimization
 - Modern with Go
 
-Occamy takes the place of the Guacamole web application: a single Go
+Occamy v0 takes the place of the Guacamole web application: a single Go
 binary issues JWTs and tunnels the Guacamole protocol over WebSocket.
 Any client that speaks the Guacamole protocol over WebSocket can switch
-to Occamy without changes. For now the remote desktop protocols
-themselves run in upstream guacd. [specs/008](./specs/008-native-architecture.md)
-describes the path back to a single binary, with native SSH and VNC and
-guacd kept only for RDP.
+to Occamy without changes. The remote desktop protocols themselves run
+in upstream guacd. [specs/008](./specs/008-native-architecture.md)
+describes the path back to a single binary: native backends replace
+guacd one protocol at a time, and v1.0 has no guacd and no Guacamole
+protocol.
 
 Read more details in [docs](./docs/README.md).
 

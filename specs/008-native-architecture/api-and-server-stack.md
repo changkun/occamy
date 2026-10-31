@@ -300,7 +300,10 @@ place for fixes that ship on v0 before beta.
     decided; see Implementation notes: Sessions).
   - Per-connection guacd params (an RDP domain per host), a per-protocol
     backend choice (`backend: guacd` after a parity switch), and serving
-    the web client from a v1 file have no keys yet.
+    the web client from a v1 file have no keys yet (the backend choice
+    is done: `backend` on each connection and `adhoc_backends`, with
+    `backend: guacd` as vnc's fallback; see Implementation notes:
+    backends and the API reference).
   - Document: a password hashing command (`occamyd hash-password`) and
     `conf.yaml` as a v1 example.
 
@@ -647,7 +650,8 @@ place for fixes that ship on v0 before beta.
     `server.publicServer` registers the hook).
   - Document: `docs/api.md` for `/healthz`, the token endpoint and the
     error shape above; certificate reload (today a restart) and the
-    HTTP/1.1 decision in the TLS section.
+    HTTP/1.1 decision in the TLS section (done: docs/api.md, and the
+    `tls.cert` row of docs/configuration.md).
 
 ## Implementation notes: Sessions
 
@@ -694,8 +698,10 @@ place for fixes that ship on v0 before beta.
     bridge for RDP and telnet. No configuration key picked another
     backend then, since `backend:` was new configuration that no spec
     had settled beyond guacd-bridge's parity gate. (Superseded: `backend:`
-    now picks it, and VNC defaults to the bridge; see Implementation
-    notes: backends and the API reference.) RDP gets
+    now picks it; VNC defaulted to the bridge for a while, and since the
+    owner's decision of 2026-10-31 defaults to native again, with
+    `backend: guacd` as a fallback; see Implementation notes: backends
+    and the API reference.) RDP gets
     `disable-gfx: "true"` unless `guacd.params.rdp` sets it, trading the
     graphics pipeline's bandwidth, saved between guacd and the remote
     rather than on the viewers' links, for exact colours (guacd-bridge's
@@ -922,8 +928,11 @@ place for fixes that ship on v0 before beta.
   - VNC defaults to the native backend, where guacd-bridge's parity gate
     keeps the bridge until beta.2 with the native backend behind
     `backend: native`; with no `backend:` key, a v1 file cannot send VNC
-    through the bridge. (Resolved: VNC now defaults to the bridge, and
-    `backend: native` opts in.) telnet goes through the bridge for any configured
+    through the bridge. (Resolved: `backend:` picks the bridge. VNC
+    defaulted to it for a while, with `backend: native` opting in; since
+    the owner's decision of 2026-10-31, under which the parity gate no
+    longer holds a native default back, VNC defaults to native again and
+    `backend: guacd` opts into the bridge.) telnet goes through the bridge for any configured
     connection: the connection is the opt-in that guacd-bridge's
     Registration row asks for.
   - The row named the native SSH backend and the bridge; native VNC
@@ -975,7 +984,9 @@ place for fixes that ship on v0 before beta.
 - **Follow-ups:**
   - A per-connection `backend:` key (guacd-bridge's parity gate), `term`
     for ssh (the backend's `xterm-256color` until then) and per-connection
-    guacd parameters.
+    guacd parameters. The `backend:` key is done, with `adhoc_backends`
+    (Implementation notes: backends and the API reference); the other
+    two are not.
   - VNC phase 3's user name and TLS policy (done in review, once #106
     merged): `credentials.username` reaches `vnc.Config.Username`, and a
     vnc connection's `tls` block (`config.ConnectionTLS`: `require`,
@@ -1143,22 +1154,9 @@ place for fixes that ship on v0 before beta.
   shared benchmark host's load average was 46 at the time. The tests run
   the routes against fake backends only.
 - **Follow-ups:**
-  - ~~Recover gaps the final review found, for a PR of their own. A
-    panic leaves the session's state locked where a lock is not
-    released by `defer`:~~ Done: see "Implementation notes: panic
+  - Recover gaps the final review found, where a panic left the
+    session's state locked: done, see "Implementation notes: panic
     safety".
-    - ~~The VNC and guacd decoders hold rows between `sink.Lock` and
-      `sink.Unlock` without `defer` (vnc's `drawBand`, `fillRect`,
-      `raw`, `drawCompact`, `drawPalette` and `tightJPEG`, guacd's
-      `flush`), so a panic there, which the session's recover turns
-      into its end, leaves rows locked, and the viewers' writers wait
-      in `ReadTile` forever.~~
-    - ~~SSH's `pump` goroutines run outside the session's recover, and
-      `sink.TermData` and `Terminal.Write` hold their locks without
-      `defer`; the terminal's parser has no fuzzer.~~
-    - ~~VNC's cleanup after `readLoop` (`close(done)`, `nc.Close()`) is
-      not deferred, so a panic in `readLoop` leaves the writer loop
-      and the connection behind.~~
   - The viewer timeout bounds each message's write, so a link too slow
     to carry one message in 30 s, such as a terminal's snapshot of a
     few megabytes at under 100 kB/s, drops its viewer. Tiles are small;
@@ -1166,12 +1164,9 @@ place for fixes that ship on v0 before beta.
     frame cut into messages the writer can pace, would serve such
     links.
   - Document: `docs/api.md` for the five session routes and the two
-    stream routes, with the replies above.
+    stream routes, with the replies above (done).
   - CORS is still not served, so a page on another origin in `origins`
     can open streams but not call the JSON routes.
-  - ~~A terminal's hello may ask for up to 65535 columns or rows, which
-    reach the backend unbounded.~~ Fixed in review: see "Sizes (added
-    in review)".
   - ~~`TestStreamProtocolErrors` failed twice in the review's
     full-suite runs at a load average of 112 to 150.~~ Fixed once it
     failed again, with `broken pipe` in its oversized message: the
@@ -1863,16 +1858,19 @@ to the VNC backend.
 
 - **Status.** Done in the change that started VNC's opt-in period
   ([guacd-bridge](guacd-bridge.md), Implementation notes: the opt-in
-  period).
+  period). The owner's decision of 2026-10-31 ended that period: native
+  is vnc's default again, and `backend: guacd` is an explicit fallback
+  (guacd-bridge, Implementation notes: native by default).
 - **What was done.**
   - Configuration v1: `backend` on each connection (`guacd` or
-    `native`, filled with the protocol's default: `native` for ssh,
-    `guacd` for the others), `adhoc_backends` for ad-hoc targets by
-    protocol, and `ard` on vnc connections
+    `native`, filled with the protocol's default: `native` for ssh and,
+    since 2026-10-31, vnc; `guacd` for rdp and telnet), `adhoc_backends`
+    for ad-hoc targets by protocol, and `ard` on vnc connections
     ([native-vnc-backend](native-vnc-backend.md), Implementation notes:
     registration). ssh refuses `guacd`, rdp refuses `native` until NLA
     has run end to end, telnet has no native backend, and `tls` and
-    `ard` need `backend: native`.
+    `ard` need the native backend, so they are refused with
+    `backend: guacd`.
   - The backend factory is keyed by protocol and backend; `POST
     /api/v1/sessions`, the connection stream and the ad-hoc path look
     up the connection's or `adhoc_backends`' backend. The session's
@@ -1916,6 +1914,10 @@ to the VNC backend.
   the native backend served checking a VeNCrypt certificate against
   the system's roots, now goes through guacd, which checks none. No
   release served v1 files' vnc connections, so no release changes.
+  (Reverted on 2026-10-31 by the owner's decision: vnc connections
+  without `backend` go native again, checking VeNCrypt certificates as
+  before, and only one with `backend: guacd` goes through guacd, which
+  cannot be combined with `tls` or `ard`.)
 - **Review.** An independent review with mutation testing found no
   bug in the production code; the tests it asked for were added:
   `TestConnectionTarget` sets every field of a connection and wants

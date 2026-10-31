@@ -509,7 +509,7 @@ Response: `200`, with `Cache-Control: no-store`.
 | `id` | The session's ID |
 | `connection` | The connection's ID; absent for an ad-hoc target |
 | `protocol` | `ssh`, `vnc`, `rdp` or `telnet` |
-| `backend` | What serves the session: `ssh`, `occamyd`'s native SSH backend; `vnc`, its native VNC backend; or `guacd`, the guacd bridge. ssh is always native, and rdp and telnet always go through guacd. vnc goes through guacd unless the connection's `backend` key, or `adhoc_backends` for an ad-hoc target, says `native` ([configuration.md](configuration.md#backends)) |
+| `backend` | What serves the session: `ssh`, `occamyd`'s native SSH backend; `vnc`, its native VNC backend; or `guacd`, the guacd bridge. ssh is always native, and rdp and telnet always go through guacd. vnc is native by default, and goes through guacd only when the connection's `backend` key, or `adhoc_backends` for an ad-hoc target, says `guacd` ([configuration.md](configuration.md#backends)) |
 | `class` | `terminal` (ssh) or `graphical` (the others, telnet through guacd included): whether the stream carries a terminal or tiles of pixels |
 | `size` | `width` and `height`, in character cells for a terminal and in pixels for a graphical session; absent until the remote reports a size |
 | `viewers` | The viewers connected now, the owner first if connected, then the others in the order they joined: each one's `id`, as in `viewer-joined`, and `role`, `owner`, `viewer` or `read-only`. Empty, `[]`, while nobody is connected |
@@ -588,9 +588,9 @@ link-local, unspecified and multicast addresses, the clouds' metadata
 services, guacd's address and `occamyd`'s own listeners are refused
 unless an entry is that very address.
 
-ssh targets use the native SSH backend, and rdp and telnet targets go
-through guacd. vnc targets go through guacd unless `adhoc_backends`
-says `vnc: native`. A vnc target served by the native backend checks the
+ssh and vnc targets use the native SSH and VNC backends, and rdp and
+telnet targets go through guacd. vnc targets go through guacd only when
+`adhoc_backends` says `vnc: guacd`. A vnc target served by the native backend checks the
 server's certificate, if the server offers VeNCrypt, against the
 system's roots and the host name the request gave, or its address if
 it gave an address. Through guacd, an ad-hoc target gets none of
@@ -717,7 +717,8 @@ name or group. A session token or a share is refused.
 |---------|---------|
 | A session token, a share, or any token that is not a valid access token | 4000 `unauthorized` |
 | No connection `{id}` that the caller may open | 4001 `forbidden`, "no such connection" |
-| The caller owns `limits.sessions_per_user` sessions, or `occamyd` runs `limits.sessions` | 4001 `forbidden`, with the limit in the reason |
+| The caller owns `limits.sessions_per_user` sessions | 4001 `forbidden`, "too many sessions open" |
+| `occamyd` runs `limits.sessions` sessions | 4001 `forbidden`, "occamyd runs as many sessions as it takes" |
 | The session could not be opened for a cause of `occamyd`'s own | 1011 `internal-error` |
 
 Once the stream has joined, the session is as one that
@@ -759,8 +760,9 @@ viewer's resizes nothing.
 ## v0 routes
 
 With `legacy_v0: true`, a v1 file also serves the v0 routes that the
-Guacamole-based web client uses, as a v0 file serves them, under
-`/api/v0`. They are removed at v1.0. Their bodies and errors are v0's,
+Guacamole-based web client uses, under `/api/v0`. It always serves both:
+`POST /api/v0/login` as well as `GET /api/v0/connect`, where a v0 file
+serves the login only with `client: true`. They are removed at v1.0. Their bodies and errors are v0's,
 not API v1's, and neither the connection registry nor
 `allow_adhoc_targets` and `adhoc_allowlist` restrict them: the login
 signs any target for anyone, and `occamyd` warns at start. The web
