@@ -36,14 +36,28 @@ export default [
   },
   {
     // The library runs in browsers and Workers and depends on nothing:
-    // no Node module, no UI framework.
-    files: ['src/protocol/**/*.ts'],
-    ignores: ['src/protocol/**/*.test.ts', 'src/protocol/testing/**', 'src/protocol/demo/vite.config.ts'],
+    // it imports its own modules in src/protocol alone, and uses only
+    // what browsers have. src/protocol/lint.test.ts checks this rule.
+    files: ['src/protocol/*.ts'],
+    ignores: ['src/protocol/**/*.test.ts'],
     rules: {
       'no-restricted-imports': ['error', {
         patterns: [
-          { group: ['node:*'], message: 'The client core runs in browsers.' },
-          { group: ['vue', 'vue-*', 'react', 'react-*', 'element-plus', 'axios'], message: 'The client core depends on no framework.' },
+          { regex: '^[^.]', message: 'The client core imports no package and no Node module, only its own modules.' },
+          { regex: '(^|/)\\.\\.(/|$)', message: 'The client core imports only its own modules, in src/protocol.' },
+        ],
+      }],
+    },
+  },
+  {
+    // The demo page is the library's, one directory down.
+    files: ['src/protocol/demo/*.ts'],
+    ignores: ['src/protocol/demo/vite.config.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        patterns: [
+          { regex: '^[^.]', message: 'The demo imports no package and no Node module, only the client core.' },
+          { regex: '(^|/)\\.\\.(/.*)?/\\.\\.(/|$)', message: 'The demo imports only the client core, in src/protocol.' },
         ],
       }],
     },
