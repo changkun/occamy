@@ -21,7 +21,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/coder/websocket"
 	"github.com/gen2brain/vpx/webp"
 
 	"changkun.de/x/occamy/client"
@@ -71,7 +70,7 @@ func openV1(conns map[string]string, d display) func(context.Context, string, st
 		start := time.Now()
 		s := newSession(start)
 		s.signIn = start.Sub(t0)
-		cl, sid, err := dialV1(ctx, "ws://"+addr+"/api/v1/connections/"+url.PathEscape(id)+"/stream", token, client.Options{
+		cl, err := client.Dial(ctx, "ws://"+addr+"/api/v1/connections/"+url.PathEscape(id)+"/stream", token, client.Options{
 			Name:     "occamy-bench/1",
 			Width:    width,
 			Height:   height,
@@ -80,8 +79,10 @@ func openV1(conns map[string]string, d display) func(context.Context, string, st
 			Decoders: decoders(&s.decode),
 		})
 		if err != nil {
-			if sid != "" { // the server welcomed the client, which then refused
-				endSession(addr, token, sid)
+			// The server made the session before it welcomed the client,
+			// which then refused it, as when they have no codec in common.
+			if re := (*client.RefusedError)(nil); errors.As(err, &re) && re.SessionID != "" {
+				endSession(addr, token, re.SessionID)
 			}
 			return nil, err
 		}
@@ -101,86 +102,6 @@ func endSession(addr, token, sid string) {
 		log.Printf("  ending session %s: %v", sid, err)
 	}
 }
-
-// dialV1 is client.Dial, but it also returns the ID of the session that
-// the server's welcome named, even when the client then refuses the
-// session, as when it has no codec in common with the server: the
-// server has made the session by then, and the harness ends it.
-func dialV1(ctx context.Context, rawURL, token string, opts client.Options) (*client.Session, string, error) {
-	q, err := protocol.EncodeHelloQuery(opts.Hello())
-	if err != nil {
-		return nil, "", err
-	}
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return nil, "", err
-	}
-	v := u.Query()
-	v.Set(protocol.HelloParameter, q)
-	u.RawQuery = v.Encode()
-	// ctx bounds the handshake only. coder/websocket closes the
-	// response's body itself.
-	ws, _, err := websocket.Dial(ctx, u.String(), &websocket.DialOptions{ //nolint:bodyclose
-		Subprotocols: []string{protocol.Subprotocol, protocol.TokenSubprotocol(token)},
-	})
-	if err != nil {
-		return nil, "", fmt.Errorf("dial: %w", err)
-	}
-	if p := ws.Subprotocol(); p != protocol.Subprotocol {
-		_ = ws.CloseNow()
-		return nil, "", fmt.Errorf("the server answered subprotocol %q, want %s", p, protocol.Subprotocol)
-	}
-	c := &v1WS{ws: ws}
-	cl, err := client.New(ctx, c, opts)
-	return cl, c.session, err
-}
-
-// v1WS carries one protocol v1 message per binary WebSocket message, as
-// the client core's own connection does, and notes the session that the
-// first message, the welcome, names.
-type v1WS struct {
-	ws      *websocket.Conn
-	read    bool   // the first message was read
-	session string // the welcome's, set with read
-}
-
-func (c *v1WS) ReadMessage(ctx context.Context) ([]byte, error) {
-	typ, b, err := c.ws.Read(ctx)
-	if err != nil {
-		var ce websocket.CloseError
-		switch {
-		case errors.As(err, &ce):
-			return nil, &client.CloseError{Code: protocol.CloseCode(ce.Code), Reason: ce.Reason} // #nosec G115 -- a close status is a u16 on the wire
-		case errors.Is(err, websocket.ErrMessageTooBig):
-			return nil, fmt.Errorf("%w: %w", protocol.ErrTooLarge, err)
-		}
-		return nil, err
-	}
-	if typ != websocket.MessageBinary {
-		return nil, fmt.Errorf("%w: a text message", protocol.ErrUnsupported)
-	}
-	// client.New reads the welcome before it starts the session's
-	// reader, so only it writes these.
-	if !c.read {
-		c.read = true
-		if m, err := protocol.Decode(b, protocol.ServerMessages(), protocol.Limits{}); err == nil {
-			if w, ok := m.(*protocol.Welcome); ok {
-				c.session = w.SessionID
-			}
-		}
-	}
-	return b, nil
-}
-
-func (c *v1WS) WriteMessage(ctx context.Context, p []byte) error {
-	return c.ws.Write(ctx, websocket.MessageBinary, p)
-}
-
-func (c *v1WS) Close(code protocol.CloseCode, reason string) error {
-	return c.ws.Close(websocket.StatusCode(code), reason)
-}
-
-func (c *v1WS) SetReadLimit(n int64) { c.ws.SetReadLimit(n) }
 
 // startV1 runs s on cl, showing its frames on d. end, if set, ends the
 // session on the server once the client left it.
