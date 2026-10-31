@@ -31,20 +31,44 @@ import (
 	"changkun.de/x/occamy/internal/config"
 )
 
-// series is a way of reaching guacd.
+// series is a way of reaching a remote: protocol v0 through occamyd or
+// straight to guacd, or protocol v1 through occamyd with one backend
+// (v1.go).
 type series struct {
 	Name   string
 	target string
-	dial   func(ctx context.Context, addr string, cred config.JWT) (rawConn, error)
+	// open opens a session on proto through the proxy at addr. The
+	// session's start is when the client began to connect.
+	open func(ctx context.Context, addr, proto string) (*session, error)
+	// protocols are the protocols the series serves; nil serves every
+	// one.
+	protocols []string
+}
+
+func (s series) serves(proto string) bool {
+	return s.protocols == nil || slices.Contains(s.protocols, proto)
+}
+
+// openV0 opens v0 sessions with dial.
+func openV0(dial func(ctx context.Context, addr string, cred config.JWT) (rawConn, error)) func(context.Context, string, string) (*session, error) {
+	return func(ctx context.Context, addr, proto string) (*session, error) {
+		start := time.Now()
+		c, err := dial(ctx, addr, credentials[proto])
+		if err != nil {
+			return nil, err
+		}
+		return newV0Session(c, start), nil
+	}
 }
 
 func main() {
 	var (
 		addr      = flag.String("addr", "localhost:5636", "occamyd address")
 		guacdAddr = flag.String("guacd", "localhost:4822", "guacd address for the direct series")
+		v1Addr    = flag.String("v1", "localhost:5637", "occamy-v1 address for the v1 series")
 		scen      = flag.String("scenarios", "all", "comma-separated scenario IDs, or all")
 		nets      = flag.String("net", "N0,N1,N2", "comma-separated network conditions")
-		seriesF   = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd")
+		seriesF   = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd, v1-native, v1-guacd")
 		quick     = flag.Bool("quick", false, "fewer samples and shorter scenarios, to check the setup")
 		runs      = flag.Int("runs", 1, "how many times to run everything; the table shows medians")
 		engine    = flag.String("engine", "podman", "container engine for CPU statistics, or none")
@@ -55,8 +79,15 @@ func main() {
 	log.SetFlags(log.Ltime)
 
 	all := []series{
-		{Name: "occamy", target: *addr, dial: dialOccamy},
-		{Name: "guacd", target: *guacdAddr, dial: dialGuacd},
+		{Name: "occamy", target: *addr, open: openV0(dialOccamy)},
+		{Name: "guacd", target: *guacdAddr, open: openV0(dialGuacd)},
+	}
+	for _, name := range []string{"v1-native", "v1-guacd"} {
+		conns := v1Connections[name]
+		all = append(all, series{
+			Name: name, target: *v1Addr, open: openV1(conns),
+			protocols: slices.Sorted(maps.Keys(conns)),
+		})
 	}
 	var chosenSeries []series
 	for _, name := range strings.Split(*seriesF, ",") {
@@ -106,10 +137,14 @@ func main() {
 					cpu: newCPUSampler(*engine, *project),
 				}
 				for _, sc := range chosen {
-					report.Results = append(report.Results, r.run(ctx, sc))
+					if sr.serves(sc.Protocol) {
+						report.Results = append(report.Results, r.run(ctx, sc))
+					}
 				}
 				for _, proto := range protocolsOf(chosen) {
-					report.Results = append(report.Results, r.connect(ctx, proto))
+					if sr.serves(proto) {
+						report.Results = append(report.Results, r.connect(ctx, proto))
+					}
 				}
 				p.close()
 			}
@@ -182,13 +217,12 @@ func (r *runner) run(ctx context.Context, sc scenario) result {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
 
-	start := time.Now()
-	conn, err := r.series.dial(ctx, r.proxy.addr(), credentials[sc.Protocol])
+	s, err := r.series.open(ctx, r.proxy.addr(), sc.Protocol)
 	if err != nil {
 		res.Error = err.Error()
+		log.Printf("  %v", err)
 		return *res
 	}
-	s := newSession(conn, start)
 	err = sc.run(ctx, r, s, res)
 	if cerr := s.close(); err == nil && cerr != nil {
 		err = cerr
@@ -197,35 +231,40 @@ func (r *runner) run(ctx context.Context, sc scenario) result {
 		res.Error = err.Error()
 		log.Printf("  %v", err)
 	}
-	if len(s.display.Unsupported) > 0 {
-		res.Unsupported = s.display.Unsupported
-	}
+	res.Unsupported = s.unsupported
 	return *res
 }
 
 // connect (G7) measures the time to the first frame of new sessions.
+// For v1 it starts at the stream's upgrade, after the sign-in, which it
+// records apart (v1.go).
 func (r *runner) connect(ctx context.Context, proto string) result {
 	res := r.newResult("G7", proto)
 	log.Printf("%s %s %s %s", res.Series, res.Net, res.Scenario, proto)
-	var times []time.Duration
+	var times, signIns []time.Duration
 	for range r.samples(20) {
-		start := time.Now()
-		conn, err := r.series.dial(ctx, r.proxy.addr(), credentials[proto])
+		s, err := r.series.open(ctx, r.proxy.addr(), proto)
 		if err != nil {
 			res.Error = err.Error()
 			break
 		}
-		s := newSession(conn, start)
-		_, err = s.wait(ctx, start, func(frame) bool { return true })
+		_, err = s.wait(ctx, s.start, func(frame) bool { return true })
 		s.close()
 		if err != nil {
 			res.Error = err.Error()
 			break
 		}
 		times = append(times, time.Duration(s.firstFrame.Load()))
+		if s.signIn > 0 {
+			signIns = append(signIns, s.signIn)
+		}
 		time.Sleep(gap)
 	}
+	if res.Error != "" {
+		log.Printf("  %s", res.Error)
+	}
 	res.FirstFrame = summarize(times)
+	res.SignIn = summarize(signIns)
 	return *res
 }
 
@@ -299,6 +338,10 @@ type result struct {
 
 	Latency    *percentiles `json:"latency_ms,omitempty"`
 	FirstFrame *percentiles `json:"first_frame_ms,omitempty"`
+	// SignIn is G7's sign-in to API v1, which a v1 client does once per
+	// access token rather than once per session, so FirstFrame leaves it
+	// out.
+	SignIn     *percentiles `json:"sign_in_ms,omitempty"`
 	Completion float64      `json:"completion_ms,omitempty"`
 
 	Seconds   float64 `json:"seconds,omitempty"`
@@ -333,7 +376,7 @@ func (rep *report) markdown(w io.Writer) {
 	}
 	fmt.Fprintln(w)
 	fmt.Fprintln(w)
-	fmt.Fprintln(w, "| Scenario | Series | Net | Latency p50/p95/p99 ms | First frame p50 ms | Completion ms | Down KiB | Down KiB/s | Frames/s | occamy+guacd CPU ms | Remote CPU ms | Decode ms | Notes |")
+	fmt.Fprintln(w, "| Scenario | Series | Net | Latency p50/p95/p99 ms | First frame p50 ms | Completion ms | Down KiB | Down KiB/s | Frames/s | occamyd+guacd CPU ms | Remote CPU ms | Decode ms | Notes |")
 	fmt.Fprintln(w, "|---|---|---|---|---|---|---|---|---|---|---|---|---|")
 	for _, row := range table(rep.Results) {
 		r, c := row.first, row.cells
@@ -397,7 +440,11 @@ func cells(r *result) [numCols]float64 {
 		c[colFPS] = float64(r.Frames) / r.Seconds
 	}
 	if r.CPUMS != nil {
-		c[colServerCPU] = r.CPUMS["occamy"] + r.CPUMS["guacd"]
+		occamyd := "occamy"
+		if strings.HasPrefix(r.Series, "v1-") {
+			occamyd = "occamy-v1"
+		}
+		c[colServerCPU] = r.CPUMS[occamyd] + r.CPUMS["guacd"]
 		c[colRemoteCPU] = r.CPUMS[r.Protocol]
 	}
 	if r.DecodeMS > 0 {
@@ -405,6 +452,16 @@ func cells(r *result) [numCols]float64 {
 	}
 	return c
 }
+
+// A row whose frames come faster than the scene animates, by more than
+// partialMargin, gets partialNote. The harness counts the frames the
+// server ends, which in v1 may each carry part of a scene's frame, so
+// that frames a second and anything per frame do not count the scene's
+// frames (docs/benchmarks.md, The v1 series).
+const (
+	partialMargin = 1.1
+	partialNote   = "frames above the scene's rate: partial frames, not scene frames"
+)
 
 // row is a line of the table: one measurement over all runs.
 type row struct {
@@ -442,6 +499,9 @@ func table(results []result) []row {
 		}
 		if fps := rs[0].SceneFPS; fps > 0 {
 			row.notes = append(row.notes, fmt.Sprintf("scene %g fps", fps))
+			if row.cells[colFPS] > fps*partialMargin {
+				row.notes = append(row.notes, partialNote)
+			}
 		}
 		unsupported := map[string]int{}
 		for _, r := range rs {
@@ -487,7 +547,7 @@ func newCPUSampler(engine, project string) *cpuSampler {
 	return &cpuSampler{engine: engine, project: project}
 }
 
-var services = []string{"occamy", "guacd", "ssh", "vnc", "rdp"}
+var services = []string{"occamy", "occamy-v1", "guacd", "ssh", "vnc", "rdp"}
 
 // sample returns the cumulative CPU time per compose service, or nil if
 // the engine does not report it. Only podman reports cumulative CPU time
@@ -545,6 +605,7 @@ func hostInfo(engine, project string) map[string]string {
 	if engine != "" && engine != "none" {
 		run("engine", engine, "--version")
 		run("occamy_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-1")
+		run("occamy_v1_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-v1-1")
 		run("guacd_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-guacd-1")
 	}
 	return info

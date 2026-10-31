@@ -32,10 +32,10 @@ const (
 
 // probeMarker reports frames that show the colour key k paints the
 // swatch.
-func probeMarker(k rune) func(img *image.RGBA, r image.Rectangle) bool {
-	return func(img *image.RGBA, r image.Rectangle) bool {
+func probeMarker(k rune) marker {
+	return marker{pixels: func(img *image.RGBA, r image.Rectangle) bool {
 		return probe.Centre.In(r) && probe.Match(img.RGBAAt(probe.Centre.X, probe.Centre.Y), k)
-	}
+	}}
 }
 
 // ready waits until the scene program answers, which takes a while on

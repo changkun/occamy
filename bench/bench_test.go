@@ -135,3 +135,29 @@ func TestTableMedians(t *testing.T) {
 		t.Errorf("T3 notes = %q, want %q", rows[1].notes, want)
 	}
 }
+
+// A v1 series' server CPU is occamy-v1's and guacd's, and a scene whose
+// frames come faster than it animates is noted as partial frames.
+func TestTableV1(t *testing.T) {
+	g3 := func(series string, frames int64) result {
+		return result{Scenario: "G3", Protocol: "vnc", Series: series, Net: "N0",
+			Seconds: 10, Frames: frames, SceneFPS: scrollFPS,
+			CPUMS: map[string]float64{"occamy": 1, "occamy-v1": 20, "guacd": 300, "vnc": 4000}}
+	}
+	rows := table([]result{g3("occamy", 414), g3("v1-native", 3800)})
+	if len(rows) != 2 {
+		t.Fatalf("%d rows", len(rows))
+	}
+	if got := rows[0].cells[colServerCPU]; got != 301 {
+		t.Errorf("v0 server CPU = %v, want occamy's and guacd's, 301", got)
+	}
+	if got := rows[1].cells[colServerCPU]; got != 320 {
+		t.Errorf("v1 server CPU = %v, want occamy-v1's and guacd's, 320", got)
+	}
+	if slices.Contains(rows[0].notes, partialNote) {
+		t.Errorf("41.4 frames a second of a 62.5 fps scene noted as partial: %q", rows[0].notes)
+	}
+	if !slices.Contains(rows[1].notes, partialNote) {
+		t.Errorf("380 frames a second of a 62.5 fps scene not noted as partial: %q", rows[1].notes)
+	}
+}

@@ -10,6 +10,8 @@ import (
 	"image"
 	"slices"
 	"time"
+
+	"changkun.de/x/occamy/internal/terminal"
 )
 
 // scenario is one of the measurements in specs/008-native-architecture/
@@ -72,14 +74,35 @@ func runTypeEcho(ctx context.Context, r *runner, s *session, res *result) error 
 	return nil
 }
 
-// magenta is colour 201 of the xterm palette, which guacd's terminal
-// uses. Nothing else on the demo shell is this colour.
+// magenta marks T2's end: a line in colour 201 of the xterm palette.
+// Nothing else on the demo shell is this colour. A v0 client sees it as
+// pixels, which guacd's terminal draws, and a v1 client as cells of the
+// terminal it emulates.
+var magenta = marker{pixels: isMagenta, cells: hasMagenta}
+
+// isMagenta reports magenta pixels in r.
 func isMagenta(img *image.RGBA, r image.Rectangle) bool {
 	r = r.Intersect(img.Bounds())
 	for y := r.Min.Y; y < r.Max.Y; y++ {
 		for x := r.Min.X; x < r.Max.X; x++ {
 			c := img.RGBAAt(x, y)
 			if c.R > 0xf0 && c.G < 0x10 && c.B > 0xf0 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// magentaCell is the background of the marker's cells, as the shell's
+// printf sets it (SGR 48;5;201).
+var magentaCell = terminal.IndexedColor(201)
+
+// hasMagenta reports cells with a magenta background on scr.
+func hasMagenta(scr *terminal.Screen) bool {
+	for y := range scr.Rows {
+		for x := range scr.Cols {
+			if scr.Cell(x, y).Style.Bg == magentaCell {
 				return true
 			}
 		}
@@ -94,7 +117,7 @@ func runBulkOutput(ctx context.Context, r *runner, s *session, res *result) erro
 		return err
 	}
 	lines := r.samples(100000)
-	s.setMarker(isMagenta)
+	s.setMarker(magenta)
 	cmd := fmt.Sprintf(`seq 1 %d; printf '\033[48;5;201m%%40s\033[0m\n' ''`, lines)
 	if err := s.typeText(cmd); err != nil {
 		return err
