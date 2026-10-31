@@ -240,7 +240,7 @@ func TestJoinEndingSession(t *testing.T) {
 	v.Leave()
 	<-sess.Done()
 	ts.s.mu.Lock()
-	ts.s.sessions[id] = &sessionInfo{id: id, s: sess, owner: p, protocol: "fake", opened: time.Now()}
+	ts.s.sessions[id] = &sessionInfo{id: id, s: sess, owner: p, protocol: "fake", opened: time.Now(), gone: make(chan struct{})}
 	ts.s.mu.Unlock()
 	if c := refused(t, ts, id, alice); c != failedClose {
 		t.Errorf("the owner: close %v %q, want %v %q", c.Code, c.Reason, failedClose.Code, failedClose.Reason)
