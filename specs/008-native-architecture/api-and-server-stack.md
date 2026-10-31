@@ -691,10 +691,11 @@ place for fixes that ship on v0 before beta.
     `ssh.CheckHostKey`.
 - **Decisions:**
   - **Backend per protocol:** native SSH and native VNC; the guacd
-    bridge for RDP and telnet (superseded by `backend:`; see
-    Implementation notes: backends and the API reference). No
-    configuration key picks another backend: `backend:` would be new configuration that no spec has
-    settled beyond guacd-bridge's parity gate. RDP gets
+    bridge for RDP and telnet. No configuration key picked another
+    backend then, since `backend:` was new configuration that no spec
+    had settled beyond guacd-bridge's parity gate. (Superseded: `backend:`
+    now picks it, and VNC defaults to the bridge; see Implementation
+    notes: backends and the API reference.) RDP gets
     `disable-gfx: "true"` unless `guacd.params.rdp` sets it, trading the
     graphics pipeline's bandwidth, saved between guacd and the remote
     rather than on the viewers' links, for exact colours (guacd-bridge's

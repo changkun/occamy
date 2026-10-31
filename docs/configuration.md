@@ -277,7 +277,7 @@ colours reached guacd shifted.
 | `connections[].backend` | `native` for ssh, `guacd` for the others | What serves the connection's sessions: `guacd`, through the guacd bridge, or `native`, `occamyd`'s own client. ssh is always `native`, rdp and telnet always `guacd`, and vnc takes either; see [backends](#backends) |
 | `connections[].host_keys` | required for ssh | The host keys an ssh target may present: public keys in `authorized_keys` format, as `ssh-keyscan` prints them, or SHA-256 fingerprints, as `ssh-keygen -l` prints them (`SHA256:…`). `occamyd` refuses any other key. Not for other protocols |
 | `connections[].insecure_ignore_host_key` | `false` | Accept any host key from an ssh target instead, logging its fingerprint as a warning. For demos only; set this or `host_keys`, not both |
-| `connections[].tls` | system roots | How a vnc target's certificate is checked when the server offers VeNCrypt, which `occamyd` then always chooses. By default the certificate must chain to the system's roots and name the target's host, as a browser checks it. Only with `backend: native`, since guacd does not check it as `tls` says; not for other protocols. See below |
+| `connections[].tls` | none through guacd, vnc's default backend; system roots with `backend: native` | How a vnc target's certificate is checked when the server offers VeNCrypt, which the native backend then always chooses. With `backend: native` and no `tls`, the certificate must chain to the system's roots and name the target's host, as a browser checks it. Through guacd, no certificate is checked, so `tls` is only for `backend: native`; not for other protocols. See below |
 | `connections[].ard` | `false` | Allow Apple Remote Desktop authentication, which macOS Screen Sharing needs to log in a user of the Mac. A vnc connection with `backend: native` only, and never with a `tls` that requires TLS. Read [the risk](#apple-remote-desktop-ard) first |
 | `connections[].credentials` | required | How `occamyd` authenticates to the target; see below |
 | `connections[].allow.users`, `allow.groups` | required | Who may open the connection: users by name, and members of groups. At least one entry, since an empty list would let nobody in |
@@ -407,7 +407,14 @@ adhoc_backends: {vnc: native}
 A vnc target served by the native backend checks the server's
 certificate, if the server offers VeNCrypt, against the system's roots
 and the name the target was given, or its address if it was given one;
-through guacd, it is not checked. An entry without ports allows the
+through guacd, it is not checked. An ad-hoc target cannot require TLS,
+though: a server that offers no VeNCrypt is used without it, so an
+active attacker between `occamyd` and the target can strip VeNCrypt
+from the server's offer and capture the VNC Authentication response, a
+DES encryption of a random challenge with the password's first 8 bytes,
+from which an offline search can recover a weak password. Reach targets
+across networks you do not trust through a connection whose `tls`
+requires TLS (`require`, `ca_file` or `pins`). An entry without ports allows the
 protocol's own: 22 for ssh, 5900 to 5999 for vnc, 3389 for rdp and 23
 for telnet. A target is allowed on a port that an entry allows when:
 

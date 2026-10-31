@@ -176,8 +176,11 @@ Registration in the API's backend factory for `vnc`, and the switch from
 the guacd bridge, follow the parity gate in
 [guacd-bridge](guacd-bridge.md), not these phases. (2026-10-30: the
 Sessions task of [api-and-server-stack](api-and-server-stack.md)
-registers the native backend as `vnc`'s default ahead of the gate,
-since no configuration key yet picks a backend; see its notes.)
+registered the native backend as `vnc`'s default ahead of the gate,
+since no configuration key picked a backend then. 2026-10-31: the gate's
+opt-in period started; the guacd bridge is `vnc`'s default and
+`backend: native` registers this backend for a connection. See
+Implementation notes: registration.)
 
 ## Affects
 
