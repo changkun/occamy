@@ -451,10 +451,10 @@ func TestIntegrationResize(t *testing.T) {
 // Progressive: the wallpaper decodes within gfxWallpaperTolerance of
 // what the scene draws, everywhere but the swatch's tile, and the swatch
 // within gfxSwatchTolerance of each key's colour, at points across its
-// inside, as xrdp sends its tile again for each key. A wrong
-// dequantization, LL3 or colour conversion is off by tens of levels.
-// xrdp went on sending a frame a key; a run without the
-// acknowledgements, to show that they pace it, was not made.
+// inside at least 8 pixels from its edges, as xrdp sends its tile again
+// for each key. A wrong dequantization, LL3 or colour conversion is off
+// by tens of levels. xrdp went on sending a frame a key; a run without
+// the acknowledgements, to show that they pace it, was not made.
 func TestIntegrationGFX(t *testing.T) {
 	s := dial(t, Config{GFX: true})
 	frames := func() int { return s.c.Stats().GFX["end frame"] }
@@ -535,8 +535,14 @@ func TestIntegrationGFX(t *testing.T) {
 
 // The tolerances of TestIntegrationGFX, per channel. rdptest's encoder,
 // at xrdp's quantization, decodes the wallpaper within 2 and the
-// swatch's inside within 4; xrdp's encoder converts colours in its own
-// integers, which the margin allows.
+// swatch, 8 pixels or more from its edges, within 3, whether its
+// quantization rounds, truncates or floors; xrdp's encoder converts
+// colours in its own integers, which the margin allows. Nearer the
+// edges the quantization's ringing is the codec's loss, not the
+// decoder's: 4 pixels from the swatch's corners, rdptest's encoder
+// loses up to 9 levels when it rounds and 14 when it truncates, and
+// xrdp's tile, which it encodes with zeros in its planes outside the
+// swatch, decoded 9 off there, as a float decoder of it did.
 const (
 	gfxWallpaperTolerance = 4
 	gfxSwatchTolerance    = 6
@@ -569,13 +575,13 @@ func gfxWallpaper(img *image.RGBA) (bad int, first image.Point) {
 }
 
 // gfxSwatch returns the first of the points inside the swatch, (16, 16)
-// to (48, 48), at least 4 pixels from its edges, that is not want within
+// to (48, 48), at least 8 pixels from its edges, that is not want within
 // gfxSwatchTolerance, or the zero point.
 func gfxSwatch(img *image.RGBA, want color.RGBA) image.Point {
 	if img == nil {
 		return image.Pt(32, 32)
 	}
-	for _, p := range []image.Point{{32, 32}, {20, 20}, {44, 20}, {20, 44}, {44, 44}, {32, 20}, {20, 32}, {44, 32}, {32, 44}} {
+	for _, p := range []image.Point{{32, 32}, {24, 24}, {39, 24}, {24, 39}, {39, 39}, {32, 24}, {24, 32}, {39, 32}, {32, 39}} {
 		got := img.RGBAAt(p.X, p.Y)
 		if !near(got.R, want.R, gfxSwatchTolerance) || !near(got.G, want.G, gfxSwatchTolerance) || !near(got.B, want.B, gfxSwatchTolerance) {
 			return p
