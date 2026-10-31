@@ -8,10 +8,14 @@ package tests
 // need no demo stack.
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -88,12 +92,20 @@ func TestParityCell(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			var checks, twins, pauses int
+			// What the cell logs, shown only if the test fails, since its
+			// fake failures read as the matrix's own in go test -v.
+			var logged []string
+			defer func() {
+				if t.Failed() {
+					t.Logf("the cell logged:\n%s", strings.Join(logged, "\n"))
+				}
+			}()
 			r := parityCell{
 				known: tt.known,
 				guacd: tt.guacd,
 				check: func() error { checks++; return tt.checks[checks-1] },
 				pause: func() { pauses++ },
-				logf:  t.Logf,
+				logf:  func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
 			}
 			if !tt.guacd {
 				r.twin = func() error { twins++; return tt.twins[twins-1] }
@@ -222,3 +234,137 @@ func TestParitySend(t *testing.T) {
 		t.Errorf("send after the stream broke returned %v, want client.ErrClosed with why", err)
 	}
 }
+
+// TestParityReady checks when a session is ready: once its screen
+// arrives, and, where the row answers a password, only after the server
+// asked for it.
+func TestParityReady(t *testing.T) {
+	tests := []struct {
+		name        string
+		prompt      bool // whether the server asks for a password
+		answers     []string
+		want        string // a part of the error, or empty for none
+		unavailable bool
+	}{
+		{name: "nothing asked, nothing given"},
+		{name: "asked and answered", prompt: true, answers: []string{"vncpassword"}},
+		{name: "answers, but nothing asked", answers: []string{"vncpassword"}, want: "without a prompt"},
+		{name: "asked, but nothing to answer", prompt: true, want: "where nothing should be asked", unavailable: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, replied := parityServer(t, tt.prompt)
+			err := s.ready(tt.answers...)
+			switch {
+			case tt.want == "" && err != nil:
+				t.Fatalf("ready: %v", err)
+			case tt.want != "" && (err == nil || !strings.Contains(err.Error(), tt.want)):
+				t.Fatalf("ready returned %v, want an error with %q", err, tt.want)
+			case errors.Is(err, errUnavailable) != tt.unavailable:
+				t.Fatalf("ready returned %v, want errUnavailable: %v", err, tt.unavailable)
+			}
+			if tt.prompt && len(tt.answers) > 0 {
+				select {
+				case got := <-replied:
+					if !slices.Equal(got, tt.answers) {
+						t.Errorf("the server was answered %q, want %q", got, tt.answers)
+					}
+				default:
+					t.Error("the server was not answered")
+				}
+			}
+		})
+	}
+}
+
+// parityServer joins a paritySession to a server in process that plays
+// occamy-v1's side of a stream: welcome, then a prompt for a password
+// if prompt, and once the client answers it, a frame of the screen. It
+// returns the session and the answers that the server is given.
+func parityServer(t *testing.T, prompt bool) (*paritySession, <-chan []string) {
+	t.Helper()
+	c := &parityPipe{toClient: make(chan []byte, 8), fromClient: make(chan []byte, 8), done: make(chan struct{})}
+	replied := make(chan []string, 1)
+	send := func(m protocol.Message) { c.toClient <- m.Append(nil) }
+	// fromClient returns the client's next message, or nil once the
+	// pipe is closed.
+	fromClient := func() protocol.Message {
+		for {
+			select {
+			case b := <-c.fromClient:
+				if m, err := protocol.Decode(b, protocol.ClientMessages(), protocol.Limits{}); err == nil {
+					return m
+				}
+			case <-c.done:
+				return nil
+			}
+		}
+	}
+	send(&protocol.Welcome{
+		ViewerID: 1, Role: protocol.RoleOwner, Class: protocol.ClassGraphical, SessionID: "s",
+		Capabilities: protocol.Capabilities{Codecs: []protocol.Codec{protocol.CodecRaw}, FrameWindow: 2, MaxMessageSize: protocol.DefaultMaxMessageSize},
+	})
+	go func() {
+		if prompt {
+			send(&protocol.Prompt{ID: 1, Name: "VNC", Fields: []protocol.PromptField{{Label: "Password", Secret: true}}})
+			for {
+				m := fromClient()
+				if m == nil {
+					return
+				}
+				if r, ok := m.(*protocol.PromptReply); ok {
+					replied <- r.Answers
+					break
+				}
+			}
+		}
+		send(&protocol.Resize{Width: 1024, Height: 768})
+		send(&protocol.FrameEnd{FrameID: 1, ServerTime: 1000})
+		for fromClient() != nil {
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cl, err := client.New(ctx, c, client.Options{Name: "occamy-parity-test/1", Width: 1024, Height: 768})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &paritySession{cl: cl, more: make(chan struct{})}
+	go s.pump()
+	t.Cleanup(func() {
+		s.close()
+		c.close()
+	})
+	return s, replied
+}
+
+// parityPipe is the client's end of parityServer's connection.
+type parityPipe struct {
+	toClient, fromClient chan []byte
+	done                 chan struct{}
+	once                 sync.Once
+}
+
+func (c *parityPipe) ReadMessage(ctx context.Context) ([]byte, error) {
+	select {
+	case b := <-c.toClient:
+		return b, nil
+	case <-c.done:
+		return nil, io.EOF
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+func (c *parityPipe) WriteMessage(ctx context.Context, p []byte) error {
+	select {
+	case c.fromClient <- slices.Clone(p):
+		return nil
+	case <-c.done:
+		return io.ErrClosedPipe
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *parityPipe) close() { c.once.Do(func() { close(c.done) }) }

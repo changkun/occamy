@@ -130,6 +130,13 @@ var tigerOnly = []string{"tigervnc"}
 // gives and no other does.
 type parityKnownFailure struct{ why, want string }
 
+// The errors of the rows beyond Latin-1 where the server has only
+// Latin-1: the text that clipboardIn and clipboardEcho give, whole.
+const (
+	parityLatin1In   = `the server took "? ? ??", want "€ ✓ 日本"`
+	parityLatin1Echo = `the client got "? ? ??" back, want "€ ✓ 日本"`
+)
+
 // parityKnown holds the cells expected to fail, by "row|column". A cell
 // that fails without an entry fails the test, and so does one that
 // fails without its entry's want, or passes with an entry, so that the
@@ -137,13 +144,14 @@ type parityKnownFailure struct{ why, want string }
 // (TestParityMatrixDoc).
 var parityKnown = map[string]parityKnownFailure{
 	// RFB's cut text is Latin-1. x11vnc has no Extended Clipboard, and
-	// takes and gives "? ? ??", and guacd 1.6 does not ask for it.
-	"clipboard to the server, beyond Latin-1|x11vnc/native":  {"x11vnc: Latin-1 only", `"? ? ??"`},
-	"clipboard to the server, beyond Latin-1|x11vnc/guacd":   {"x11vnc: Latin-1 only", `"? ? ??"`},
-	"clipboard to the server, beyond Latin-1|tigervnc/guacd": {"guacd: Latin-1 only", `want "€ ✓ 日本"`},
-	"clipboard both ways, beyond Latin-1|x11vnc/native":      {"x11vnc: Latin-1 only", `"? ? ??"`},
-	"clipboard both ways, beyond Latin-1|x11vnc/guacd":       {"x11vnc: Latin-1 only", `"? ? ??"`},
-	"clipboard both ways, beyond Latin-1|tigervnc/guacd":     {"guacd: Latin-1 only", `want "€ ✓ 日本"`},
+	// guacd 1.6 does not ask for TigerVNC's, so either way the server
+	// takes and gives "? ? ??".
+	"clipboard to the server, beyond Latin-1|x11vnc/native":  {"x11vnc: Latin-1 only", parityLatin1In},
+	"clipboard to the server, beyond Latin-1|x11vnc/guacd":   {"x11vnc: Latin-1 only", parityLatin1In},
+	"clipboard to the server, beyond Latin-1|tigervnc/guacd": {"guacd: Latin-1 only", parityLatin1In},
+	"clipboard both ways, beyond Latin-1|x11vnc/native":      {"x11vnc: Latin-1 only", parityLatin1Echo},
+	"clipboard both ways, beyond Latin-1|x11vnc/guacd":       {"x11vnc: Latin-1 only", parityLatin1Echo},
+	"clipboard both ways, beyond Latin-1|tigervnc/guacd":     {"guacd: Latin-1 only", parityLatin1Echo},
 	// libvncclient asks for X509 credentials, which guacd 1.6 does not
 	// give ("Unsupported credential type requested"), and guacd ends
 	// the session.
@@ -462,16 +470,26 @@ func (p *parity) open(conn string, opts client.Options, answers ...string) (*par
 		_ = p.api(http.MethodDelete, "/api/v1/sessions/"+url.PathEscape(s.cl.SessionID()), nil, nil)
 		s.close()
 	}
-	asked, err := s.screen(answers...)
-	if err != nil {
+	if err := s.ready(answers...); err != nil {
 		closeSession()
-		return nil, nil, fmt.Errorf("%w: %w", errUnavailable, err)
-	}
-	if len(answers) > 0 && !asked {
-		closeSession()
-		return nil, nil, errors.New("the screen arrived without a prompt, where the server asks for a password")
+		return nil, nil, err
 	}
 	return s, closeSession, nil
+}
+
+// ready waits for the screen, answering a prompt with answers, which a
+// prompt must then ask for: answers given but not asked for mean that
+// the connection did not ask the owner, as the row says it does. A
+// screen that does not arrive is errUnavailable.
+func (s *paritySession) ready(answers ...string) error {
+	asked, err := s.screen(answers...)
+	if err != nil {
+		return fmt.Errorf("%w: %w", errUnavailable, err)
+	}
+	if len(answers) > 0 && !asked {
+		return errors.New("the screen arrived without a prompt, where the server asks for a password")
+	}
+	return nil
 }
 
 // dial opens a stream at path with token. It dials the WebSocket itself
