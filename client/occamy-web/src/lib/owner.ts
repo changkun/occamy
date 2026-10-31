@@ -34,6 +34,8 @@ export interface EndOptions {
   now: number
   /** Closes the owner's own stream. */
   close: () => Promise<void>
+  /** Whether occamyd closed the stream with 4002, as it does once the session is ended for everyone. */
+  endedForEveryone: () => boolean
 }
 
 /**
@@ -59,7 +61,8 @@ export function sessionOwner(role: Role | null, token: AccessToken | null, seed:
  * Otherwise, as for an End that waited for a sign-in, or another user
  * signed in since, occamyd decides: the session is ended with the stream
  * open, and the stream closed after. A 404 then means the session is not
- * this user's.
+ * this user's, unless occamyd closed the stream with 4002 meanwhile, as
+ * after an earlier End whose answer was lost.
  */
 export async function endSession(o: EndOptions): Promise<EndOutcome> {
   if (o.sessionId === '') {
@@ -73,10 +76,17 @@ export async function endSession(o: EndOptions): Promise<EndOutcome> {
   const opener = !o.resumed && o.owner !== null && user !== null && sameIdentity(o.owner, user)
   if (opener) {
     await o.close()
+  } else if (o.endedForEveryone()) {
+    await o.close()
+    return { kind: 'ended' }
   }
   try {
     await o.api.endSession(o.token, o.sessionId)
   } catch (err) {
+    if (!opener && o.endedForEveryone()) {
+      await o.close()
+      return { kind: 'ended' }
+    }
     if (err instanceof ApiError && err.code === 'not_found') {
       return opener ? { kind: 'ended' } : { kind: 'not-owner', message: notOwner(o.owner, user) }
     }
@@ -87,7 +97,9 @@ export async function endSession(o: EndOptions): Promise<EndOutcome> {
     }
     return {
       kind: 'failed',
-      message: `The session was not ended for everyone: ${errorMessage(err)} Its viewers stay until your minute of grace runs out.`,
+      message: opener
+        ? `The session was not ended for everyone: ${errorMessage(err)} Its viewers stay until your minute of grace runs out.`
+        : `The session was not ended for everyone: ${errorMessage(err)} It runs on, with its viewers.`,
     }
   }
   if (!opener) {

@@ -6,15 +6,16 @@
 
 // The session view in a DOM, under StrictMode, whose development effects
 // run twice: an owner's action that waited for a sign-in is taken once,
-// End shows that it waits for occamyd and that it failed, and an End
-// that resumed is ended or refused as occamyd decides, for the user who
-// opened the session as the stream's welcome says.
+// End shows that it waits for occamyd and that it failed, an End that
+// resumed is ended or refused as occamyd decides, for the user who
+// opened the session as the stream's welcome says, and the stream's 4002
+// counts for the session ended.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { Role, type Session, SessionClass, type SessionEvent } from '../protocol'
+import { CloseCode, Role, type Session, SessionClass, type SessionEvent } from '../protocol'
 import { type AccessToken, Api, type Identity } from '../lib/api'
 import type { SessionAction } from '../lib/app'
 import type * as controller from '../lib/controller'
@@ -255,7 +256,7 @@ describe('SessionView', () => {
     const r = await render({}, hung, 20)
     await settle(60)
     expect(text()).toContain('Not ended for everyone')
-    expect(text()).toContain('occamyd did not answer in time.')
+    expect(text()).toContain('occamyd did not answer in time. It runs on, with its viewers.')
     expect(text()).not.toContain('Ending the session for everyone…')
     act(() => button('Try again')?.click())
     await settle()
@@ -313,7 +314,7 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
   it('tries an End that resumed again as occamyd decides on, as it was', async () => {
     let answer: Answer = failed
     const r = await render({ token: accessToken('alice'), owner: null }, (signal, init) => answer(signal, init))
-    expect(text()).toContain('Not ended for everyone')
+    expect(text()).toContain('It runs on, with its viewers.')
     // A 404 now says the session is not alice's, rather than ended.
     answer = notFound
     act(() => button('Try again')?.click())
@@ -321,5 +322,29 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
     expect(text()).toContain('occamyd has no session of yours to end, signed in as alice')
     expect(r.left).toBe(0)
     expect(Welcomed.last?.closed).toBe(false)
+  })
+
+  it('takes the stream’s 4002 for the session ended, rather than what End said before', async () => {
+    const r = await render({ token: accessToken('alice'), owner: null }, hung, 20)
+    await settle(60)
+    expect(text()).toContain('Not ended for everyone')
+    // The End that did not answer in time ended the session after all.
+    act(() => Welcomed.last?.end(CloseCode.SessionClosed))
+    await settle()
+    expect(text()).not.toContain('Not ended for everyone')
+    expect(text()).toContain('Session ended')
+    expect(r.deletes).toHaveLength(1)
+  })
+
+  it('takes the stream’s 4002 meanwhile for the session ended, ahead of a 404', async () => {
+    const r = await render({ token: accessToken('alice'), owner: null, action: null }, () => {
+      Welcomed.last?.end(CloseCode.SessionClosed)
+      return new Promise((resolve) => setTimeout(() => resolve(notFound()), 10))
+    })
+    // A user who did not open the session ends it as occamyd decides.
+    await r.rerender({ token: accessToken('bob'), action: end(1) })
+    await settle(20)
+    expect(r.left).toBe(1)
+    expect(text()).not.toContain('Not ended for everyone')
   })
 })

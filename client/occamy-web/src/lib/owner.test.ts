@@ -36,7 +36,7 @@ function options(answer: Answer, o: Partial<EndOptions> = {}, timeout?: number):
   )
   return {
     log,
-    options: { api, token: fresh, owner: demo, resumed: false, sessionId: 'mZ3k', now, close: () => Promise.resolve(void log.push('close')), ...o },
+    options: { api, token: fresh, owner: demo, resumed: false, sessionId: 'mZ3k', now, close: () => Promise.resolve(void log.push('close')), endedForEveryone: () => false, ...o },
   }
 }
 
@@ -145,7 +145,7 @@ describe('endSession that occamyd decides on', () => {
     }
   })
 
-  it('leaves the stream open when occamyd no longer takes the token, or fails', async () => {
+  it('leaves the stream open when occamyd no longer takes the token, or fails, and says the session runs on', async () => {
     const { log, options: o } = options(error(401, 'invalid_token'), { token: mallory })
     expect(await endSession(o)).toMatchObject({ kind: 'sign-in', closed: false })
     expect(log).toEqual(['DELETE /api/v1/sessions/mZ3k'])
@@ -154,8 +154,32 @@ describe('endSession that occamyd decides on', () => {
       [hung, 20],
     ] as const) {
       const failed = options(answer, { resumed: true }, timeout)
-      expect(await endSession(failed.options)).toMatchObject({ kind: 'failed' })
+      const got = await endSession(failed.options)
+      expect(got.kind).toBe('failed')
+      expect(got.kind === 'failed' && got.message).toMatch(/^The session was not ended for everyone: .* It runs on, with its viewers\.$/)
       expect(failed.log).toEqual(['DELETE /api/v1/sessions/mZ3k'])
+    }
+  })
+
+  it('takes the stream’s 4002 for the session ended, ahead of a 404', async () => {
+    // Ended already, as by an End whose answer did not come in time: End
+    // only closes the stream.
+    const before = options(error(404, 'not_found'), { resumed: true, endedForEveryone: () => true })
+    expect(await endSession(before.options)).toEqual({ kind: 'ended' })
+    expect(before.log).toEqual(['close'])
+    // Ended meanwhile, as when another End came first.
+    for (const answer of [error(404, 'not_found'), error(500, 'internal'), hung]) {
+      let closed = false
+      const meanwhile = options(
+        (signal) => {
+          closed = true
+          return answer(signal)
+        },
+        { resumed: true, endedForEveryone: () => closed },
+        20,
+      )
+      expect(await endSession(meanwhile.options)).toEqual({ kind: 'ended' })
+      expect(meanwhile.log).toEqual(['DELETE /api/v1/sessions/mZ3k', 'close'])
     }
   })
 })

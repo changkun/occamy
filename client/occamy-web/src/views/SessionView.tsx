@@ -8,7 +8,7 @@
 
 import { type ReactElement, Suspense, lazy, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
-import { CanvasSurface, Role, SessionClass, cursorStyle } from '../protocol'
+import { CanvasSurface, CloseCode, Role, SessionClass, cursorStyle } from '../protocol'
 import type { AccessToken, Api, Identity } from '../lib/api'
 import type { SessionAction } from '../lib/app'
 import { type SessionController as Controller, SessionController, type SessionState, overlayOf } from '../lib/controller'
@@ -94,6 +94,10 @@ export function SessionView({ api, token, target, owner: seed, action, onLeave, 
   const [problem, setProblem] = useState<Problem | null>(null)
   // Whether End waits for occamyd.
   const [ending, setEnding] = useState(false)
+  // Whether occamyd ended the session for everyone, as it says by closing
+  // the stream with 4002: what an End said before is then out of date.
+  const endedForEveryone = state.code === CloseCode.SessionClosed
+  const shown = endedForEveryone ? null : problem
   const handled = useRef(0)
   const name = target.kind === 'share' ? 'Shared session' : target.name
   const signedIn = target.kind !== 'share'
@@ -175,6 +179,7 @@ export function SessionView({ api, token, target, owner: seed, action, onLeave, 
       sessionId,
       now: Date.now(),
       close: () => controller.close(),
+      endedForEveryone: () => controller.getState().code === CloseCode.SessionClosed,
     }).finally(() => setEnding(false))
     switch (outcome.kind) {
       case 'ended':
@@ -299,7 +304,7 @@ export function SessionView({ api, token, target, owner: seed, action, onLeave, 
             onSignIn={signInFor}
           />
         )}
-        {problem === null && !ending && overlayOf(state) === 'connecting' && (
+        {shown === null && !ending && overlayOf(state) === 'connecting' && (
           <div className="overlay" role="status">
             <div className="card">
               <p>Connecting to {name}…</p>
@@ -309,7 +314,7 @@ export function SessionView({ api, token, target, owner: seed, action, onLeave, 
             </div>
           </div>
         )}
-        {problem === null && !ending && overlayOf(state) === 'ended' && state.ending !== null && (
+        {shown === null && !ending && overlayOf(state) === 'ended' && state.ending !== null && (
           <EndOverlay
             ending={state.ending}
             leaveLabel={signedIn ? 'Back to connections' : 'Close'}
@@ -318,7 +323,7 @@ export function SessionView({ api, token, target, owner: seed, action, onLeave, 
             onRejoin={() => onRejoin(again())}
           />
         )}
-        {problem === null && ending && (
+        {shown === null && ending && (
           // End waits for occamyd: the user may leave rather than wait.
           <div className="overlay" role="status">
             <div className="card">
@@ -329,14 +334,14 @@ export function SessionView({ api, token, target, owner: seed, action, onLeave, 
             </div>
           </div>
         )}
-        {problem !== null && (
+        {shown !== null && (
           <EndOverlay
-            ending={{ title: problem.title, detail: problem.detail, technical: '', signIn: problem.signIn, rejoin: false, quiet: false }}
+            ending={{ title: shown.title, detail: shown.detail, technical: '', signIn: shown.signIn, rejoin: false, quiet: false }}
             leaveLabel="Back to connections"
             onLeave={onLeave}
-            onSignIn={() => signInFor(problem.detail, { kind: 'end' })}
+            onSignIn={() => signInFor(shown.detail, { kind: 'end' })}
             onRejoin={() => undefined}
-            onRetry={problem.signIn ? undefined : () => void end(problem.resumed)}
+            onRetry={shown.signIn ? undefined : () => void end(shown.resumed)}
             onBack={state.phase === 'open' ? () => setProblem(null) : undefined}
           />
         )}
