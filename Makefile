@@ -42,10 +42,14 @@ e2e:
 
 # bench builds occamyd's image, starts the benchmark stack and measures
 # it, as described in docs/benchmarks.md. BENCH_FLAGS passes flags to the
-# harness, for example BENCH_FLAGS="-quick -scenarios T1".
+# harness, for example BENCH_FLAGS="-quick -scenarios T1". A second stack
+# on a shared host takes COMPOSE_PROJECT_NAME, OCCAMY_PORT,
+# OCCAMY_V1_PORT and GUACD_PORT, which the harness follows.
 bench: build
 	cd docker && $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml up -d --build --wait
-	go run ./bench -engine $(CONTAINER_ENGINE) $(BENCH_FLAGS)
+	go run ./bench -engine $(CONTAINER_ENGINE) -project $(or $(COMPOSE_PROJECT_NAME),docker) \
+		-addr localhost:$(or $(OCCAMY_PORT),5636) -v1 localhost:$(or $(OCCAMY_V1_PORT),5637) \
+		-guacd localhost:$(or $(GUACD_PORT),4822) $(BENCH_FLAGS)
 .PHONY: bench
 
 # corpus records the frames the codec measurement works on
