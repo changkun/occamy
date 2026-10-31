@@ -136,7 +136,7 @@ jobs:
         epoch=$(git log -1 --format=%ct)
         tar --sort=name --owner=0 --group=0 --numeric-owner --mtime="@$epoch" \
           --transform "s,^,occamy-web-$VERSION/," \
-          -cf - -C client/occamy-web dist LICENSE.guacamole NOTICE.guacamole \
+          -cf - -C client/occamy-web dist \
           -C "$GITHUB_WORKSPACE" LICENSE \
           | gzip -n > "release/occamy-web-$VERSION.tar.gz"
         tar -tzf "release/occamy-web-$VERSION.tar.gz" | head

@@ -1,10 +1,12 @@
 {
-  // The tests of src/protocol, which run in Node under vitest, and the
-  // configs that run them.
+  // Everything lint reads with type information: the shell, the core,
+  // their tests, which run in Node under vitest, and the configs that
+  // build and run them.
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["node"]
+    "jsx": "react-jsx",
+    "types": ["node", "vite/client"]
   },
-  "include": ["src/protocol/**/*.ts", "vitest.config.ts"],
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "vitest.config.ts"],
   "exclude": []
 }
