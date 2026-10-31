@@ -729,8 +729,10 @@ that guacd was `vnc`'s default, they are corrected below.
   and nonces each port took.
 - **How a cell is judged.** A cell expected to fail is listed in
   `parityKnown` with the reason and a part of the error that only that
-  failure gives: `"? ? ??"` for x11vnc's Latin-1, `want "€ ✓ 日本"` for
-  guacd's, and `backend-failed` for guacd's X509. Any other failure
+  failure gives: for the rows beyond Latin-1, the whole error, as in
+  `the server took "? ? ??", want "€ ✓ 日本"`, the same for x11vnc's
+  Latin-1 and for guacd's on TigerVNC; and `backend-failed` for guacd's
+  X509. Any other failure
   fails the test, and so does a listed cell that fails without that
   part, or passes, so the table below is what the suite finds;
   `TestParityMatrixDoc` checks that it is the table that
@@ -751,16 +753,19 @@ that guacd was `vnc`'s default, they are corrected below.
   cell tries again whenever it cannot. `TestParityCell` drives this
   logic with fake checks.
 - **The matrix.** x11vnc 0.9.17 (libvncserver 0.9.15) and TigerVNC
-  1.15's Xvnc, Debian trixie; guacd 1.6. On the shared host, at a load
-  average of 7 to 18, the matrix as first written, with a barrier that
-  tried four times and no warm-up, took 192 s on fresh servers and
-  124 to 128 s on warm ones. Every run gave the table below. The runs
-  that failed cells did so on server faults (next items), or, once, on
-  the first version of the x11vnc watchdog, which killed a live x11vnc.
-  A whole run with the warm-up, the single-shot barrier and the guacd
-  twin of a native cell (How a cell is judged) is pending a local run;
-  its time, and whether it gives this table at every cell's first try,
-  are not yet recorded. CI runs it in `make e2e`.
+  1.15's Xvnc, Debian trixie; guacd 1.6. CI's `e2e` job runs the
+  matrix in `make e2e`, on fresh containers. As it is now, with the
+  warm-up, the single-shot barrier and the guacd twin of a native cell
+  (How a cell is judged), it gave the table below at every cell's first
+  try in all four attempts of CI run 41202105852 (of 0f4d9c0: the push
+  and three reruns), taking 184 to 188 s each; every x11vnc port
+  answered the warm-up's second barrier, and every TigerVNC port its
+  first. Before, on the shared host, at a load average of 7 to 18, the
+  matrix as first written, with a barrier that tried four times and no
+  warm-up, took 192 s on fresh servers and 124 to 128 s on warm ones,
+  and gave the same table. The runs that failed cells did so on server
+  faults (next items), or, once, on the first version of the x11vnc
+  watchdog, which killed a live x11vnc.
 
   | Feature | x11vnc/native | x11vnc/guacd | tigervnc/native | tigervnc/guacd |
   |---|---|---|---|---|
@@ -901,3 +906,15 @@ that guacd was `vnc`'s default, they are corrected below.
   its own and the `tls` policy against a real server, which
   `TestTigerVNC` covers; Apple Remote Desktop, checked by hand against
   macOS; QEMU's VNC server.
+- **Follow-ups.**
+  - The native X509Plain cell has no real twin: guacd never reaches
+    that desktop (How a cell is judged), so the cell tries again
+    whenever it cannot reach the desktop, as if the server were at
+    fault. A twin that can reach it, such as the native backend on
+    TigerVNC's VNC Authentication port, would judge it as the other
+    native cells are judged.
+  - The warm-up cannot tell a cold port from one whose x11vnc the
+    watchdog has just restarted. desktop.sh could answer a `status:`
+    clipboard line with the restart count of the port's x11vnc, so that
+    the warm-up, and the pause before a retry, log restarts directly
+    rather than through the barriers a port took.
