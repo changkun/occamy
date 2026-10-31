@@ -158,6 +158,19 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   `protocol/testdata/codecs.json` holds a payload of each codec occamyd
   sends and deflate payloads a client must refuse. The image's
   `licenses/` carries vpx's, jpegn's and jpegli's notices.
+- Scroll detection in the graphics pipeline. Each viewer's writer keeps
+  a shadow of the screen its client shows. It finds the changed regions
+  that client already shows elsewhere, moved up or down, by xxh3-64 row
+  hashes and a pixel-for-pixel check, and sends a `copy-rect` for them
+  with tiles only for what the copy leaves. On the recorded scrolling
+  text this is 5.0 KiB a frame against 58.5, in a seventh of the encode
+  time ([docs/benchmarks/scroll.md](docs/benchmarks/scroll.md)). A
+  viewer that skipped frames, was hidden or has a viewport gets copies
+  from what it has. A wheel's scroll counts as its input's effect.
+  `stream.Config.NoScroll` turns it off. The image's `licenses/` carries
+  the notices of zeebo/xxh3 and of klauspost/cpuid, which it links into
+  amd64 builds, and `scripts/third-party-licenses.sh` lists both
+  architectures of every release platform.
 - `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
   (static users sign in with a password for an access token), TLS when
   `tls.cert` and `tls.key` are set, expvar and pprof on the debug
