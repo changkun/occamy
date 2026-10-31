@@ -66,12 +66,11 @@ type File struct {
 
 // Streams bounds what occamyd keeps for one viewer.
 type Streams struct {
-	// ViewerTimeout is how long a viewer may leave the frames it was
-	// sent unacknowledged while it is visible, or one write to it
-	// blocked, before occamyd drops it with close too-slow. Each viewer
-	// holds the screen it was last sent, which a viewer that stalls
-	// would keep for as long as it stayed connected. Zero is the
-	// default.
+	// ViewerTimeout is how long a viewer, hidden or not, may leave the
+	// frames it was sent unacknowledged, or one write to it blocked,
+	// before occamyd drops it with close too-slow. Each viewer holds the
+	// screen it was last sent, which a viewer that stalls would keep for
+	// as long as it stayed connected. Zero is the default.
 	ViewerTimeout time.Duration `yaml:"viewer_timeout"`
 }
 

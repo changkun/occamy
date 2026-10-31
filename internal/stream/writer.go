@@ -71,8 +71,6 @@ type writer struct {
 	// of them ended.
 	stallTimeout time.Duration
 	lastAck      time.Time
-	hidden       bool      // the viewer was hidden when stallLeft last looked
-	shown        time.Time // when stallLeft saw the viewer visible again
 
 	g        grid
 	sent     []uint64 // the version of each tile the viewer has
@@ -638,26 +636,15 @@ func (w *writer) takeAcks() {
 
 // stallLeft reports how long the viewer has left to acknowledge the
 // frames it was sent before it counts as stalled, and false if no frame
-// awaits an ack or the viewer is hidden. A hidden client, such as a
-// browser tab in the background, may show nothing, and so acknowledge
-// nothing, until it is visible again; it gets no frames meanwhile, and
-// its time starts over once it is.
+// awaits an ack. A hidden viewer counts as any other: it gets no new
+// frames, and acknowledges those it was sent as they arrive.
 func (w *writer) stallLeft() (time.Duration, bool) {
 	oldest, ok := w.p.Oldest()
 	if !ok || w.stallTimeout <= 0 {
 		return 0, false
 	}
-	if visible, _ := w.v.Visibility(); !visible {
-		w.hidden = true
-		return 0, false
-	}
-	if w.hidden {
-		w.hidden, w.shown = false, time.Now()
-	}
-	for _, t := range [...]time.Time{w.lastAck, w.shown} {
-		if t.After(oldest) {
-			oldest = t
-		}
+	if w.lastAck.After(oldest) {
+		oldest = w.lastAck
 	}
 	return w.stallTimeout - time.Since(oldest), true
 }

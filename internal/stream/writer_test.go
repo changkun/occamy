@@ -999,35 +999,36 @@ func TestStalledAckRestarts(t *testing.T) {
 	})
 }
 
-// A hidden viewer's time stops, since a client may show nothing, and so
-// acknowledge nothing, while it is hidden; once it is visible again its
-// time starts over.
+// A hidden viewer's time runs as a visible one's: hidden, it gets no
+// new frames, but must acknowledge those it was sent; and one that does
+// stays, hidden, for as long as it likes.
 func TestStalledHidden(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		r := newRigConfig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 64, 50e6, time.Millisecond, visible, stallConfig)
-		r.cl.mu.Lock()
-		r.cl.noAcks = true
-		r.cl.mu.Unlock()
-		time.Sleep(stallConfig.ViewerTimeout / 2)
-		r.cl.send(t, protocol.View{Visible: false})
-		time.Sleep(10 * time.Second)
-		synctest.Wait()
-		if err, done := r.servedErr(); done {
-			t.Fatalf("Serve returned %v for a hidden viewer", err)
-		}
-		shown := time.Now()
-		r.cl.send(t, protocol.View{Visible: true})
-		time.Sleep(stallConfig.ViewerTimeout - 100*time.Millisecond)
-		synctest.Wait()
-		if err, done := r.servedErr(); done {
-			t.Fatalf("Serve returned %v %v after the viewer was visible again, want the whole timeout", err, time.Since(shown))
-		}
-		time.Sleep(200 * time.Millisecond)
-		synctest.Wait()
-		if err, _ := r.servedErr(); !errors.Is(err, ErrStalled) {
-			t.Fatalf("Serve returned %v, want ErrStalled once the timeout passed", err)
-		}
-	})
+	for _, acks := range []bool{false, true} {
+		t.Run(fmt.Sprintf("acks=%v", acks), func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				r := newRigConfig(t, backendtest.NewScreen(200, 150, 10*time.Millisecond), 64, 50e6, time.Millisecond, visible, stallConfig)
+				r.cl.mu.Lock()
+				r.cl.noAcks = !acks
+				r.cl.mu.Unlock()
+				time.Sleep(stallConfig.ViewerTimeout / 4)
+				r.cl.send(t, protocol.View{Visible: false})
+				time.Sleep(stallConfig.ViewerTimeout / 2)
+				synctest.Wait()
+				if err, done := r.servedErr(); done {
+					t.Fatalf("Serve returned %v before the viewer timeout", err)
+				}
+				time.Sleep(10 * time.Second)
+				synctest.Wait()
+				err, done := r.servedErr()
+				if acks && done {
+					t.Fatalf("Serve returned %v for a hidden viewer that acknowledged its frames", err)
+				}
+				if !acks && !errors.Is(err, ErrStalled) {
+					t.Fatalf("Serve returned %v, %v for a hidden viewer that acknowledged nothing; want ErrStalled", err, done)
+				}
+			})
+		})
+	}
 }
 
 // A write that blocks for the viewer timeout drops the viewer, though no

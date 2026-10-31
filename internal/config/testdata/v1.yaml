@@ -160,7 +160,7 @@ limits:
 
 # What occamyd keeps for one viewer.
 streams:
-  # How long a visible viewer may leave frames unacknowledged, or one
-  # write to it block, before it is dropped with close too-slow.
+  # How long a viewer may leave frames unacknowledged, or one write to
+  # it block, before it is dropped with close too-slow.
   # Default 30s.
   viewer_timeout: 45s

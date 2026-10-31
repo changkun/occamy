@@ -37,11 +37,12 @@ type Config struct {
 	NewEncoder func(codecs []protocol.Codec) Encoder
 	// Logger receives the stream's log, slog.Default() if nil.
 	Logger *slog.Logger
-	// ViewerTimeout bounds how long a viewer may leave the frames it was
-	// sent unacknowledged, and how long one write to it may block,
-	// DefaultViewerTimeout if zero. A viewer that stops reading or
-	// acknowledging otherwise keeps the screen it was last sent, a
-	// terminal's whole screen, for as long as it stays connected.
+	// ViewerTimeout bounds how long a viewer, hidden or not, may leave
+	// the frames it was sent unacknowledged, and how long one write to
+	// it may block, DefaultViewerTimeout if zero. A viewer that stops
+	// reading or acknowledging otherwise keeps the screen it was last
+	// sent, a terminal's whole screen, for as long as it stays
+	// connected.
 	ViewerTimeout time.Duration
 }
 

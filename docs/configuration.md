@@ -369,11 +369,11 @@ issuer's users count apart from `occamyd`'s own.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `streams.viewer_timeout` | `30s` | How long a visible viewer may leave the frames it was sent unacknowledged, or one write to it block, before it gets `close` `too-slow`. At least `1s`. The time stops while the viewer is hidden, and starts over once it is visible |
+| `streams.viewer_timeout` | `30s` | How long a viewer, hidden or not, may leave the frames it was sent unacknowledged, or one write to it block, before it gets `close` `too-slow`. At least `1s` |
 
-Each viewer holds the screen it was last sent until it acknowledges a
-newer one, and a viewer that may type also holds the screen of its
-last input. A terminal of 1000 by 500 cells, the largest, takes about
+Each visible viewer holds the screen it was last sent until it
+acknowledges a newer one, and a viewer that may type also holds the
+screen of its last input; a hidden viewer holds no screen. A terminal of 1000 by 500 cells, the largest, takes about
 11 MiB a screen. `viewer_timeout` drops a viewer that stops reading or
 acknowledging, but a viewer that acknowledges within it keeps its
 screens for as long as it stays: at the defaults one user's 10

@@ -511,7 +511,9 @@ func (s *Session) Screenshot() *image.RGBA {
 // or ctx is done. A Frame of a graphical session is applied to the
 // framebuffer as Next delivers it (a Resize first, if the frame resized
 // the screen). Calling Next again says the caller has shown the frame,
-// and acknowledges it to the server.
+// and acknowledges it to the server. A caller that does not come back
+// for the server's viewer timeout, 30 s for occamyd by default, hidden
+// or not, is closed with too-slow.
 //
 // Next returns ctx's error while it waits for an event or for a frame's
 // tiles to decode; once it applies a frame, it finishes it, which the

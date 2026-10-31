@@ -18,7 +18,8 @@ import (
 // or ctx is done. A frame is the diff from the screen the viewer last got
 // to the current one, so screens that changed while the pacer held a
 // frame back are skipped, and bulk output costs what changed on the
-// screen. The viewer's first frame is a term-snapshot.
+// screen. The viewer's first frame is a term-snapshot, and so is its
+// first once visible again.
 func (w *writer) runTerminal(ctx context.Context) error {
 	var last *terminal.Screen // what the viewer has; nil before the first frame
 	for {
@@ -27,6 +28,11 @@ func (w *writer) runTerminal(ctx context.Context) error {
 		}
 		w.takeAcks()
 		if visible, _ := w.v.Visibility(); !visible {
+			// No frame goes out while the viewer is hidden, so the
+			// screen it has is not kept to diff against, which would
+			// let any number of hidden viewers each keep a screen the
+			// session has since left: it gets a snapshot once visible.
+			last = nil
 			if err := w.wait(ctx, nil, 0); err != nil {
 				return err
 			}

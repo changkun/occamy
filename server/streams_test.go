@@ -1204,71 +1204,144 @@ func heapInUse() uint64 {
 	return m.HeapInuse
 }
 
-// TestStalledViewersRelease checks that viewers that stop reading, each
-// holding another 1000x500 screen of an owner who redraws it between
-// their joins, are dropped and hold nothing once the viewer timeout has
-// passed.
-func TestStalledViewersRelease(t *testing.T) {
-	if testing.Short() {
-		t.Skip("takes seconds")
-	}
-	ts, _ := sessionServer(t, func(f *config.File) { f.Streams.ViewerTimeout = 3 * time.Second })
-	alice := ts.token(t, "alice", "ops")
-	hello := termHello
-	hello.Cols, hello.Rows = 1000, 500
-	o := ts.openSession(t, alice, "ops-shell")
-	path := "/api/v1/sessions/" + o.ID + "/stream"
-	owner := ts.stream(t, path, o.StreamToken, hello)
-	go func() { // the owner keeps reading and acknowledging
-		for {
-			if _, err := owner.next(); err != nil {
+// keepReading reads c and acknowledges its frames until the stream ends,
+// with no deadline, as an owner who keeps up does.
+func keepReading(c *streamClient) {
+	ctx := context.Background()
+	for {
+		_, p, err := c.ws.Read(ctx)
+		if err != nil {
+			return
+		}
+		m, err := protocol.Decode(p, protocol.ServerMessages(), protocol.Limits{})
+		if f, ok := m.(*protocol.FrameEnd); ok && err == nil {
+			if c.ws.Write(ctx, websocket.MessageBinary, protocol.FrameAck{FrameID: f.FrameID, DecodeTime: 1}.Append(nil)) != nil {
 				return
 			}
 		}
-	}()
-	info := ts.s.session(o.ID)
-	waitFor(t, "the size", func() bool { return info.s.Size().X == 1000 })
-	seq := uint32(0)
-	redraw := func(c byte) {
-		// Home, then 500 rows of 1000 cells, in messages under 64 KiB.
-		body := "\x1b[H" + strings.Repeat(string(c), 1000*500-1)
-		for len(body) > 0 {
-			n := min(len(body), 60000)
-			seq++
-			owner.send(t, protocol.TermInput{Seq: seq, Data: []byte(body[:n])})
-			body = body[n:]
-		}
-		time.Sleep(150 * time.Millisecond)
 	}
-	redraw('a')
+}
+
+// screenful is a session of alice's terminal at 1000x500 cells, the
+// largest, whose owner keeps up, and a read-only share of it, for tests
+// of what its viewers hold.
+type screenful struct {
+	ts    *testServer
+	info  *sessionInfo
+	path  string // of its stream
+	share string // a read-only share token
+	hello protocol.Hello
+	owner *streamClient
+	seq   uint32
+}
+
+func newScreenful(t *testing.T, viewerTimeout time.Duration) *screenful {
+	t.Helper()
+	ts, _ := sessionServer(t, func(f *config.File) { f.Streams.ViewerTimeout = viewerTimeout })
+	alice := ts.token(t, "alice", "ops")
+	sf := &screenful{ts: ts, hello: termHello}
+	sf.hello.Cols, sf.hello.Rows = 1000, 500
+	o := ts.openSession(t, alice, "ops-shell")
+	sf.path = "/api/v1/sessions/" + o.ID + "/stream"
+	sf.owner = ts.stream(t, sf.path, o.StreamToken, sf.hello)
+	go keepReading(sf.owner)
+	sf.info = ts.s.session(o.ID)
+	waitFor(t, "the size", func() bool { return sf.info.s.Size().X == 1000 })
+	sf.redraw(t, 'a')
 	r := ts.api(t, http.MethodPost, "/api/v1/sessions/"+o.ID+"/shares", alice, `{"role":"read-only"}`)
 	var sh shareResponse
 	if err := json.Unmarshal(r.body, &sh); err != nil {
 		t.Fatal(err)
 	}
+	sf.share = sh.Token
+	return sf
+}
+
+// redraw fills the screen with c, so that a viewer that has the screen
+// from before holds a screen the session no longer does.
+func (sf *screenful) redraw(t *testing.T, c byte) {
+	t.Helper()
+	// Home, then 500 rows of 1000 cells, in messages under 64 KiB.
+	body := "\x1b[H" + strings.Repeat(string(c), 1000*500-1)
+	for len(body) > 0 {
+		n := min(len(body), 60000)
+		sf.seq++
+		sf.owner.send(t, protocol.TermInput{Seq: sf.seq, Data: []byte(body[:n])})
+		body = body[n:]
+	}
+	time.Sleep(150 * time.Millisecond)
+}
+
+// ownerAlone fails t unless the owner is the session's only viewer.
+func (sf *screenful) ownerAlone(t *testing.T) {
+	t.Helper()
+	if vs := sf.info.s.Viewers(); len(vs) != 1 || vs[0].Role != session.RoleOwner {
+		t.Errorf("viewers %+v, want the owner alone", vs)
+	}
+}
+
+// perViewer is the heap in use above base for each of n viewers, in MiB.
+func perViewer(now, base uint64, n int) float64 {
+	return (float64(now) - float64(base)) / float64(n) / (1 << 20)
+}
+
+// TestStalledViewersRelease checks that viewers that stop reading, each
+// holding another 1000x500 screen of an owner who redraws it between
+// their joins, are dropped and hold nothing once the viewer timeout has
+// passed, while the owner, who keeps up, stays.
+func TestStalledViewersRelease(t *testing.T) {
+	if testing.Short() {
+		t.Skip("takes seconds")
+	}
+	sf := newScreenful(t, 3*time.Second)
 	base := heapInUse()
 	const n = 8
 	for i := range n {
-		ts.stream(t, path, sh.Token, hello) // reads its welcome, then stops
-		redraw(byte('b' + i))
+		sf.ts.stream(t, sf.path, sf.share, sf.hello) // reads its welcome, then stops
+		sf.redraw(t, byte('b'+i))
 	}
 	held := heapInUse()
 	deadline := time.Now().Add(20 * time.Second)
-	for len(info.s.Viewers()) > 1 {
+	for len(sf.info.s.Viewers()) > 1 {
 		if time.Now().After(deadline) {
-			t.Fatalf("%d stalled viewers still in the session", len(info.s.Viewers())-1)
+			t.Fatalf("viewers %+v, want the stalled ones gone", sf.info.s.Viewers())
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	sf.ownerAlone(t)
 	after := heapInUse()
-	perHeld := (float64(held) - float64(base)) / n / (1 << 20)
-	perAfter := (float64(after) - float64(base)) / n / (1 << 20)
-	t.Logf("heap in use per stalled viewer: %.1f MiB while they stayed, %.1f MiB once dropped", perHeld, perAfter)
+	t.Logf("heap in use per stalled viewer: %.1f MiB while they stayed, %.1f MiB once dropped", perViewer(held, base, n), perViewer(after, base, n))
 	// A screen of 1000x500 cells takes about 11 MiB.
-	if perHeld < 4 {
-		t.Errorf("%.1f MiB held per stalled viewer: the test does not show viewers holding screens", perHeld)
+	if p := perViewer(held, base, n); p < 4 {
+		t.Errorf("%.1f MiB held per stalled viewer: the test does not show viewers holding screens", p)
 	}
-	if perAfter > 2 {
-		t.Errorf("%.1f MiB still held per stalled viewer once they were dropped, want at most 2 MiB", perAfter)
+	if p := perViewer(after, base, n); p > 2 {
+		t.Errorf("%.1f MiB still held per stalled viewer once they were dropped, want at most 2 MiB", p)
+	}
+}
+
+// TestHiddenViewersRelease checks that viewers that acknowledge their
+// first frame and then hide hold no screen while they stay, though the
+// owner redraws between their joins.
+func TestHiddenViewersRelease(t *testing.T) {
+	if testing.Short() {
+		t.Skip("takes seconds")
+	}
+	sf := newScreenful(t, time.Minute)
+	base := heapInUse()
+	const n = 8
+	for i := range n {
+		v := sf.ts.stream(t, sf.path, sf.share, sf.hello)
+		v.until(t, "the first frame", func(m protocol.Message) bool { _, ok := m.(*protocol.FrameEnd); return ok })
+		v.send(t, protocol.View{Visible: false}) // then reads nothing more
+		sf.redraw(t, byte('b'+i))
+	}
+	held := heapInUse()
+	if vs := sf.info.s.Viewers(); len(vs) != n+1 {
+		t.Fatalf("%d viewers, want the owner and %d hidden ones", len(vs), n)
+	}
+	t.Logf("heap in use per hidden viewer: %.1f MiB", perViewer(held, base, n))
+	if p := perViewer(held, base, n); p > 2 {
+		t.Errorf("%.1f MiB held per hidden viewer, want at most 2 MiB", p)
 	}
 }

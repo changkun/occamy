@@ -830,7 +830,8 @@ client's scrollback fills.
 Type 0x0209. Replaces the client's terminal, as part of a frame: the
 client resets its terminal and feeds it the data, which reproduces the
 server's screen, cursor, attributes, modes and alternate screen. A
-client gets one in its first frame.
+client gets one in its first frame, and may get another at any frame,
+as occamyd sends one in a client's first frame after it was hidden.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1176,13 +1177,14 @@ holds the server back instead of queueing stale frames.
 
 A client that stops acknowledging altogether is closed instead: the
 server keeps what it last sent each viewer, a terminal's whole screen,
-until the viewer acknowledges something newer. A visible viewer that
-leaves a frame unacknowledged and sends no `frame-ack` for the server's
-viewer timeout, or that takes no message for that long, gets `close`
-`too-slow`. The time stops while the viewer is hidden, since a hidden
-client may show, and so acknowledge, nothing; it starts over once the
-viewer is visible again. occamyd's viewer timeout is 30 s unless
-configured otherwise.
+until the viewer acknowledges something newer. A viewer that leaves a
+frame unacknowledged and sends no `frame-ack` for the server's viewer
+timeout, or that takes no message for that long, gets `close`
+`too-slow`, hidden or not. A hidden client gets no new frames, but
+acknowledges the frames it was sent as they arrive, since it shows
+none of them: a browser tab in the background, for one, still gets
+its messages though it no longer draws. occamyd's viewer timeout is
+30 s unless configured otherwise.
 
 ### Bytes in flight
 

@@ -357,7 +357,8 @@ func TestTerminalUnsupported(t *testing.T) {
 }
 
 // A hidden terminal client gets no frames, and the screen as it is now
-// when it shows again.
+// when it shows again, as a snapshot, since the screen it had is not
+// kept while it is hidden.
 func TestTerminalHidden(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		b := &tapped{Backend: backendtest.NewTerminal(80, 24, 0)}
@@ -385,6 +386,9 @@ func TestTerminalHidden(t *testing.T) {
 		defer r.cl.mu.Unlock()
 		if n := len(r.cl.frames) - before; n != 1 {
 			t.Errorf("%d frames after showing, want 1", n)
+		}
+		if r.cl.snapshots != 2 {
+			t.Errorf("%d term-snapshots, want a second after showing", r.cl.snapshots)
 		}
 		if !r.cl.term.Snapshot().Equal(r.s.Screen()) {
 			t.Errorf("client screen differs after showing")
