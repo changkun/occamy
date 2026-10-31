@@ -60,9 +60,7 @@ func xtKeycode(code uint16) uint32 {
 
 // qemuKeys implements peer.
 func (r *run) qemuKeys() {
-	r.mu.Lock()
-	r.keys.on = true
-	r.mu.Unlock()
+	r.locked(func() { r.keys.on = true })
 }
 
 // key returns the message for a key: an extended key event if the
@@ -79,16 +77,16 @@ func (r *run) key(ev backend.Key) []byte {
 	ext := false
 	if xt != 0 {
 		i, bit := ev.Code/64, uint64(1)<<(ev.Code%64)
-		r.mu.Lock()
-		if ev.Down {
-			if ext = r.keys.on; ext {
-				r.keys.down[i] |= bit
+		r.locked(func() {
+			if ev.Down {
+				if ext = r.keys.on; ext {
+					r.keys.down[i] |= bit
+				}
+			} else {
+				ext = r.keys.down[i]&bit != 0
+				r.keys.down[i] &^= bit
 			}
-		} else {
-			ext = r.keys.down[i]&bit != 0
-			r.keys.down[i] &^= bit
-		}
-		r.mu.Unlock()
+		})
 	}
 	if ext {
 		return appendQEMUKey(nil, ev.Keysym, xt, ev.Down)

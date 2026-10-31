@@ -123,37 +123,38 @@ func (d *decoder) extendedDesktopSize(r image.Rectangle) error {
 
 // extendedDesktopSize implements peer.
 func (r *run) extendedDesktopSize(size image.Point, first *screen, answer bool) {
-	r.mu.Lock()
-	r.size = size
-	r.desk.supported = true
-	if first != nil {
-		r.desk.first = *first
-	}
-	if answer {
-		r.desk.asked = false
-		r.desk.refused = r.desk.refused[:0]
-	}
-	r.mu.Unlock()
+	r.locked(func() {
+		r.size = size
+		r.desk.supported = true
+		if first != nil {
+			r.desk.first = *first
+		}
+		if answer {
+			r.desk.asked = false
+			r.desk.refused = r.desk.refused[:0]
+		}
+	})
 	r.poke()
 }
 
 // desktopSizeRefused implements peer: the size asked for is not asked
 // for again, unless the resize was forwarded; after status 1 no size is.
 func (r *run) desktopSizeRefused(status int) image.Point {
-	r.mu.Lock()
-	d := &r.desk
-	d.asked = false
-	switch {
-	case status == statusProhibited:
-		d.prohibited = true
-	case status != statusForward && !slices.Contains(d.refused, d.sent):
-		if len(d.refused) == maxRefused {
-			d.refused = slices.Delete(d.refused, 0, 1)
+	var sent image.Point
+	r.locked(func() {
+		d := &r.desk
+		d.asked = false
+		switch {
+		case status == statusProhibited:
+			d.prohibited = true
+		case status != statusForward && !slices.Contains(d.refused, d.sent):
+			if len(d.refused) == maxRefused {
+				d.refused = slices.Delete(d.refused, 0, 1)
+			}
+			d.refused = append(d.refused, d.sent)
 		}
-		d.refused = append(d.refused, d.sent)
-	}
-	sent := d.sent
-	r.mu.Unlock()
+		sent = d.sent
+	})
 	r.poke()
 	return sent
 }
@@ -164,9 +165,7 @@ func (r *run) resize(w, h int, lim limits) {
 	if lim.check(w, h) != nil {
 		return
 	}
-	r.mu.Lock()
-	r.desk.want = image.Pt(w, h)
-	r.mu.Unlock()
+	r.locked(func() { r.desk.want = image.Pt(w, h) })
 	r.poke()
 }
 

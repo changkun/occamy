@@ -137,6 +137,66 @@ func TestWriterPanics(t *testing.T) {
 	}
 }
 
+// TestWriterPanicsLocked checks that a panic of the writer while it holds
+// the run's state, as a bug in building a message from the server's
+// state would make, leaves the state unlocked: Input, which the session
+// calls on its owner goroutine and which waited for the state, returns,
+// and Run ends with the panic. Before, Input waited forever, and the
+// session with it (from the review of #117).
+func TestWriterPanicsLocked(t *testing.T) {
+	checkGoroutines(t)
+	srv := newServer(t, serverOptions{})
+	b := newBackend(t, Config{Addr: srv.addr})
+	b.Demand(backend.Demand{Visible: true})
+	var armed atomic.Bool
+	inDue, proceed := make(chan struct{}), make(chan struct{})
+	b.dueHook = func() {
+		if armed.CompareAndSwap(true, false) {
+			close(inDue)
+			<-proceed
+			panic("the writer's bug")
+		}
+	}
+	run := start(t, b, &backendtest.Sink{})
+	c := srv.accept(t)
+	expect[requestMsg](t, c)
+	armed.Store(true)
+	// A resize wakes the writer, which takes the state in due.
+	if err := b.Input(backend.Resize{Width: 32, Height: 32}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-inDue:
+	case <-time.After(timeout):
+		t.Fatal("the writer did not run due")
+	}
+	input := make(chan error, 1)
+	go func() { input <- b.Input(backend.Pointer{X: 1, Y: 1}) }()
+	for deadline := time.Now().Add(timeout); !bytes.Contains(stacks(), []byte("(*run).pointer")); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("Input did not wait for the state")
+		}
+	}
+	close(proceed)
+	var p backend.PanicError
+	if err := run.wait(t); !errors.As(err, &p) || p.Value != "the writer's bug" {
+		t.Errorf("Run = %v, want the writer's panic", err)
+	}
+	select {
+	case <-input:
+	case <-time.After(timeout):
+		t.Fatal("Input still waits for the state the writer panicked with")
+	}
+}
+
+// TestStateUnlockDeferred checks that every section under the run's
+// state lock releases it by defer, directly or through run.locked, so
+// that no panic leaves it locked: the reader, the writer and Input all
+// wait for it.
+func TestStateUnlockDeferred(t *testing.T) {
+	backendtest.UnlocksDeferred(t, ".", "r.mu")
+}
+
 // TestEndPrefersPanic checks that the writer's panic is Run's result
 // whatever the reader returned meanwhile, so that the session logs it
 // and ends with its internal reason (from the review of #117).

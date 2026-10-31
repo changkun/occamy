@@ -107,6 +107,14 @@ func TestWriterPanics(t *testing.T) {
 	}
 }
 
+// TestClientUnlockDeferred checks that every section under the RDP
+// client's lock releases it by defer, so that no panic leaves it locked:
+// the reader, the writer's SendInput and SuppressOutput, and Size all
+// wait for it (from the review of #117).
+func TestClientUnlockDeferred(t *testing.T) {
+	backendtest.UnlocksDeferred(t, "../../rdp", "c.mu")
+}
+
 // TestEndPrefersPanic checks that the writer's panic is Run's result
 // whatever the client returned meanwhile, so that the session logs it
 // and ends with its internal reason (from the review of #117).

@@ -163,6 +163,9 @@ type Backend struct {
 	limits      limits
 	// wrap, if set, wraps the connection, for tests.
 	wrap func(net.Conn) net.Conn
+	// dueHook, if set, runs in the writer's due with the run's state
+	// locked, for tests.
+	dueHook func()
 
 	// visible is the latest Demand. It outlives a Run, since the session
 	// reports only changes and may report one before Run starts.
@@ -315,6 +318,7 @@ type run struct {
 	control chan []byte   // answers to the server's Fences, for the writer
 	wdone   chan struct{} // closed when the writer has ended
 	werr    error         // the writer's error; read after it has ended
+	dueHook func()        // Backend.dueHook
 
 	mu      sync.Mutex
 	size    image.Point // the screen, zero until the handshake ends
@@ -369,16 +373,31 @@ func (r *run) poke() {
 	}
 }
 
+// locked runs f with r.mu held, which a panic in f releases too: the
+// reader, the writer and Input, on the session's owner goroutine, all
+// wait for r.mu, and a lock left held would keep them waiting forever,
+// and the session with them. Every section under r.mu runs in it, or
+// releases r.mu by defer.
+func (r *run) locked(f func()) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	f()
+}
+
 // due writes to w the messages that are due: continuous updates enabled
 // or disabled, SetDesktopSize, an update request, and the clipboard's.
 // A clipboard's text is compressed after r.mu is released.
 func (r *run) due(w io.Writer, visible bool) {
-	r.mu.Lock()
-	p := r.continuousDue(nil, visible)
-	p = r.desktopSizeDue(p)
-	p = r.request(p, visible)
-	p, text := r.clipboardDue(p)
-	r.mu.Unlock()
+	var p, text []byte
+	r.locked(func() {
+		if r.dueHook != nil {
+			r.dueHook()
+		}
+		p = r.continuousDue(nil, visible)
+		p = r.desktopSizeDue(p)
+		p = r.request(p, visible)
+		p, text = r.clipboardDue(p)
+	})
 	if text != nil {
 		p = appendClipboardProvide(p, text)
 	}
@@ -403,11 +422,11 @@ func (r *run) request(p []byte, visible bool) []byte {
 // updated records that an update has been applied, and that it resized
 // the screen to size if resized.
 func (r *run) updated(size image.Point, resized bool) {
-	r.mu.Lock()
-	r.size = size
-	r.pending = false
-	r.full = r.full || resized
-	r.mu.Unlock()
+	r.locked(func() {
+		r.size = size
+		r.pending = false
+		r.full = r.full || resized
+	})
 	r.poke()
 }
 
@@ -419,6 +438,7 @@ func (r *run) updated(size image.Point, resized bool) {
 // goroutine that Run starts has ended when it returns.
 func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 	r := newRun()
+	r.dueHook = b.dueHook
 	b.mu.Lock()
 	if b.run != nil {
 		b.mu.Unlock()
@@ -478,9 +498,7 @@ func (b *Backend) connect(ctx context.Context, sink backend.Sink, r *run) error 
 	if init.name != "" {
 		sink.Title(init.name)
 	}
-	r.mu.Lock()
-	r.size = init.size
-	r.mu.Unlock()
+	r.locked(func() { r.size = init.size })
 
 	dec := newDecoder(ctx, c.Reader, sink, init.size, b.limits, b.log)
 	dec.peer = r
