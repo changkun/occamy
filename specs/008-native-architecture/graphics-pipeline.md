@@ -981,6 +981,19 @@ of 2.9 to 4.5:
   - a span that starts inside a tile the client has never drawn;
   - two coincidental rows that vote for two offsets;
   - a screen that moved between collection and search.
+- **Two writer tests counted a scroll the writer read half drawn**
+  (found on CI, 2026-10-31). Their test backend scrolled as VNC does,
+  by a CopyRect and then a paint of the exposed rows, and the writer
+  could read the screen between the two, or between two tiles of the
+  paint. Its frame then showed the copy with some of the exposed rows'
+  tiles, and the next the rest: `TestScrollWheel` found 3 of 5 tiles in
+  the input's frame, and `TestScrollSkippedFrames` two copies where the
+  client's last row of tiles was half updated. The copies were right
+  for the screen the client had, and the client ended with the server's
+  screen. Both tests now scroll in one paint, and `TestScrollTorn` reads
+  scrolls half drawn on purpose, both ways, and checks that the client
+  ends with the server's screen and copies go only by the scroll's
+  offset.
 
 **Follow-ups.**
 
@@ -1003,6 +1016,13 @@ of 2.9 to 4.5:
   columns merge only when their rows and offset are equal. A scroll
   whose span ends at a different row in each column, because content
   differs, sends a copy per column.
+- **A remote's update can reach a frame half drawn.** A backend draws
+  an update in several calls, such as a VNC CopyRect and the rectangles
+  it exposes, and the writer reads tiles as it goes, so a frame can
+  carry part of an update and the next the rest: an input's frame then
+  shows only part of its effect. A sink call that ends a remote's
+  update, such as VNC's FramebufferUpdate or RDP's frame marker, would
+  let the writer wait for the whole of it.
 - **A frame the pacer cuts after a copy** shows the copied rows before
   the exposed strip's tiles. Tiles that a copy only partly covers show
   shifted rows above stale ones until the next frame. A frame without
