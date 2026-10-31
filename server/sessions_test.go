@@ -305,10 +305,21 @@ func TestOpenSession(t *testing.T) {
 	}
 }
 
+// slowForgetting makes ts wait 100 ms after a session ends before it
+// forgets the session, and again before it releases the session's
+// count, as a busy host may, so that a request answered before then
+// finds the session still there.
+func slowForgetting(ts *testServer) {
+	ts.s.mu.Lock()
+	ts.s.forgetting = func() { time.Sleep(100 * time.Millisecond) }
+	ts.s.mu.Unlock()
+}
+
 // TestSessionOwnerOnly checks that only a session's owner reads, closes
 // and shares it, and that another user's session is as absent as none.
 func TestSessionOwnerOnly(t *testing.T) {
 	ts, _ := sessionServer(t, nil)
+	slowForgetting(ts)
 	alice := ts.token(t, "alice", "ops")
 	o := ts.openSession(t, alice, "both")
 	for name, token := range map[string]string{
@@ -369,9 +380,10 @@ func TestSessionOwnerOnly(t *testing.T) {
 // TestDeleteForgetsSession checks that DELETE answers once occamyd has
 // forgotten the session, not only once it has ended: a request right
 // after it finds no session, and its owner, at a limit of one, opens
-// another at once.
+// another at once, however long forgetting takes.
 func TestDeleteForgetsSession(t *testing.T) {
 	ts, _ := sessionServer(t, func(f *config.File) { f.Limits.SessionsPerUser = 1 })
+	slowForgetting(ts)
 	alice := ts.token(t, "alice", "ops")
 	o := ts.openSession(t, alice, "ops-shell")
 	for range 3 {

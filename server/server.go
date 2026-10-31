@@ -83,6 +83,10 @@ type server struct {
 	// and how long its end is kept for the owner after it ends
 	// (ended.go): session.DefaultOwnerGrace, shorter in tests.
 	ownerGrace time.Duration
+	// forgetting, nil but in tests, runs before the server forgets an
+	// ended session and before it releases a session's count toward
+	// the limits, so that tests can widen the moment after the end.
+	forgetting func()
 	sessions   map[string]*sessionInfo // by ID, while they run
 	ended      endedSessions           // how sessions ended, for their owners' streams (ended.go)
 	owned      map[principal]int       // the sessions each user owns, while they run

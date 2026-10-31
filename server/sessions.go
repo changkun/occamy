@@ -348,9 +348,12 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 	}
 	s.owned[owner]++
 	s.running++
-	grace := s.ownerGrace
+	grace, forgetting := s.ownerGrace, s.forgetting
 	s.mu.Unlock()
 	release := func() {
+		if forgetting != nil {
+			forgetting()
+		}
 		s.mu.Lock()
 		if s.owned[owner]--; s.owned[owner] <= 0 {
 			delete(s.owned, owner)
@@ -384,6 +387,9 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 	go func() {
 		<-sess.Done()
 		c := stream.CloseFor(sess.End())
+		if forgetting != nil {
+			forgetting()
+		}
 		s.mu.Lock()
 		// Removed and kept at once, so that no stream finds neither.
 		delete(s.sessions, id)
