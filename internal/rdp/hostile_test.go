@@ -15,8 +15,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"changkun.de/x/occamy/internal/race"
 )
 
 // What a hostile server could send, from the review of the spike: each
@@ -238,11 +236,10 @@ func TestDecoderKeepsScratch(t *testing.T) {
 	if &c.dec.raw[0] != raw || &c.dec.rgba[0] != rgba {
 		t.Error("the decoder's buffers moved between desktop-sized bitmaps")
 	}
-	// Under -race, sync.Pool drops a quarter of what is put back, and the
-	// statistics' fmt.Sprintf takes its printer from one, so the count
-	// is checked without it.
-	if a > 4 && !race.Enabled {
-		t.Errorf("a desktop-sized bitmap allocated %v times, want at most 4", a)
+	// The one allocation is the PDU's bitmapData, which its rectangles
+	// share: the bitmap itself allocates nothing, with or without -race.
+	if a > 1 {
+		t.Errorf("a PDU of a desktop-sized bitmap allocated %v times, want at most 1", a)
 	}
 	if _, err := c.handleShareControl(out, demandActive(800, 600)); err != nil {
 		t.Fatal(err)
