@@ -17,6 +17,13 @@
 
 version: 1
 listen: 0.0.0.0:5637
+# The debug listener, for the soak (tests/soak_test.go), which samples
+# occamyd's goroutines, heap and open files from it. docker-compose.yaml
+# publishes it on the host's loopback interface only; occamyd warns at
+# start that it is not on a loopback address, which inside the container
+# it cannot be and still be published.
+debug:
+  address: 0.0.0.0:5638
 auth:
   # On a tmpfs (docker-compose.yaml): occamyd creates the key at start,
   # and tokens die with the container.

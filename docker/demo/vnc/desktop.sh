@@ -19,7 +19,10 @@
 #   desktop.sh clipboard answers the clipboard: text that starts
 #   "owner: " comes back as "echo: " and the rest, and text that starts
 #   "hex: " as "hexed: " and the rest's UTF-8 bytes in hex, which shows
-#   what the server took whatever it sends back.
+#   what the server took whatever it sends back. Text "motion: " and a
+#   number of seconds, at most 60, opens a terminal that scrolls for that
+#   long and answers "moving: " and the number, which gives the soak
+#   (tests/soak_test.go) screen updates to carry.
 #
 # The layout stays as it starts: x11vnc adds a keysym missing from the
 # layout to an unused key when a client sends one, remembers where, and
@@ -85,6 +88,22 @@ clipboard)
 			"hex: "*)
 				last="hexed: $(hex "${t#hex: }")"
 				put "$last"
+				;;
+			"motion: "*)
+				# Screen motion for the soak (tests/soak_test.go): a
+				# terminal that scrolls for the seconds asked, at most a
+				# minute.
+				n=${t#motion: }
+				case "$n" in
+				"" | *[!0-9]*) ;;
+				*)
+					[ "$n" -le 60 ] || n=60
+					last="moving: $n"
+					put "$last"
+					timeout "$n" xterm -geometry 100x30+200+150 -T motion \
+						-e sh -c 'while :; do ls -l /usr/bin; done' >/dev/null 2>&1 &
+					;;
+				esac
 				;;
 			esac
 		fi
