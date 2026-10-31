@@ -12,7 +12,7 @@ import type { DecodeJob, TileDecoder } from './decode'
 import { ClosedError, CloseError, ConnectionError, NotOwnerError, ReadOnlyError } from './errors'
 import type { EndEvent, FrameEvent, SessionEvent } from './events'
 import { Codec, type Message, MessageType, Role, SessionClass, encode } from './messages'
-import { Session, helloFor } from './session'
+import { DEFAULT_CACHE_SLOTS, Session, helloFor } from './session'
 import { FakeTransport, frameEnd, open, pixel, solid, testDecoder, tile, welcome } from './testing/server'
 import { codecs, fromHex } from './testing/vectors'
 import { ProtocolError } from './wire'
@@ -63,12 +63,19 @@ async function failsWith(t: FakeTransport, s: Session, code: number, pattern?: R
 }
 
 describe('hello', () => {
-  it('offers the codecs once, raw last and never cached', () => {
+  it('offers the codecs once, raw after them and cached last, with the cache slots', () => {
     const h = helloFor({ width: 800, height: 600 }, [Codec.Raw, Codec.WebP, Codec.Cached, Codec.Deflate, Codec.WebP])
-    expect(h.capabilities.codecs).toEqual([Codec.WebP, Codec.Deflate, Codec.Raw])
-    expect(h.capabilities.cacheSlots).toBe(0)
+    expect(h.capabilities.codecs).toEqual([Codec.WebP, Codec.Deflate, Codec.Raw, Codec.Cached])
+    expect(h.capabilities.cacheSlots).toBe(DEFAULT_CACHE_SLOTS)
     expect(h.capabilities.terminal).toBe(1)
     expect(h).toMatchObject({ width: 800, height: 600, visible: true, name: 'occamy-web' })
+  })
+
+  it('offers neither cached nor slots without a cache', () => {
+    const h = helloFor({ cacheSlots: 0 }, [Codec.Cached, Codec.Deflate])
+    expect(h.capabilities.codecs).toEqual([Codec.Deflate, Codec.Raw])
+    expect(h.capabilities.cacheSlots).toBe(0)
+    expect(helloFor({ cacheSlots: 7 }, []).capabilities.cacheSlots).toBe(7)
   })
 
   it('refuses options outside the protocol', () => {
@@ -76,6 +83,8 @@ describe('hello', () => {
     expect(() => Session.start(t, { width: 70000 }, testDecoder(), [])).toThrow(RangeError)
     expect(() => Session.start(t, { maxMessageSize: 1000 }, testDecoder(), [])).toThrow(RangeError)
     expect(() => Session.start(t, { frameWindow: 256 }, testDecoder(), [])).toThrow(RangeError)
+    expect(() => Session.start(t, { cacheSlots: 65536 }, testDecoder(), [])).toThrow(RangeError)
+    expect(() => Session.start(t, { cacheSlots: 1.5 }, testDecoder(), [])).toThrow(RangeError)
   })
 })
 
