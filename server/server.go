@@ -233,7 +233,7 @@ func newServer(f *config.File) (*server, error) {
 		webClient:     f.WebClient,
 	}
 	if f.WebClient != "" {
-		if _, err := os.Stat(filepath.Join(f.WebClient, "index.html")); err != nil {
+		if _, err := os.Stat(filepath.Join(f.WebClient, "index.html")); err != nil { // #nosec G703 -- the path comes from the operator's configuration
 			// #nosec G706 -- the operator's configuration, not a client's input.
 			log.Printf("warning: web_client: %v; /static/ serves no web client until it is built there (make client)", err)
 		}
