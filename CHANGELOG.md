@@ -631,6 +631,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   terminal frame carries it in, so that a viewer got it cut there, with
   no regard for characters. Titles are now cut, between characters, at
   what that sequence carries.
+- The demo xrdp image restarts its channel server, which carries the
+  clipboard, when a connection reconnects to the session and the
+  channel server has exited. xrdp 0.10.1's channel server can exit when
+  a connection closes just after attaching to it, and xrdp starts it
+  only with the session. Until now every later connection then waited
+  10 seconds for it and got no clipboard, which once failed `make e2e`'s
+  clipboard check. `make e2e` now kills the channel server in the rdp
+  container and checks that the next connection has the clipboard. Give
+  it the `CONTAINER_ENGINE` that `make run` took, since it reaches the
+  container through that engine's compose.
 
 ### Security
 
