@@ -141,8 +141,10 @@ Open questions:
     acknowledged as they arrive: occamyd closes a viewer that leaves a
     frame unacknowledged for its viewer timeout, 30 s, with `too-slow`.
   - `keyboard.ts` maps `KeyboardEvent.code` to USB HID usages, the keys
-    of the VNC backend's HID-to-XT table, which a test reads from
-    `qemukeys.go`, and `KeyboardEvent.key` to X11 keysyms: Latin-1 as
+    of the HID-to-XT table that the VNC and RDP backends send by, which
+    a test reads from `internal/keymap/keymap.go` (the RDP backend drops
+    Power, which the test reads from its source too), and
+    `KeyboardEvent.key` to X11 keysyms: Latin-1 as
     it is, other text 0x01000000 above its code point, named keys,
     keypad keys by location, left and right modifiers.
   - `dom.ts` binds the DOM: keys (a release and an auto-repeat carry
