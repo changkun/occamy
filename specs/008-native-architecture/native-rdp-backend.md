@@ -1715,7 +1715,8 @@ RDP's guacd path, RDP no longer needs guacd at all.
     - The session's wallpaper, within 4 levels per channel everywhere
       but the swatch's tile.
     - The swatch, within 6 of each of eight keys' colours, at nine
-      points 8 pixels or more inside it. They came within 2.
+      points 8 pixels or more inside it. They passed; at the centre and at
+      (24, 24), which the diagnostic run below measured, within 2.
     - That no region, block or bitmap was skipped.
     - PR1's assertions on the reset and the planar bitmaps, which ran
       live for the first time here.
