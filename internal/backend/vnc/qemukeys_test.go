@@ -136,9 +136,10 @@ func TestHIDToXT(t *testing.T) {
 	}
 	// No two usages share a keycode, but for Backslash and Non-US #,
 	// which are one key on a PC keyboard, of US and ISO layouts.
-	seen := map[uint8]int{}
-	for code, xt := range hidToXT {
-		if xt == 0 || code == 0x32 && xt == hidToXT[0x31] {
+	seen := map[uint32]uint16{}
+	for code := range uint16(0x100) {
+		xt := xtKeycode(code)
+		if xt == 0 || code == 0x32 && xt == xtKeycode(0x31) {
 			continue
 		}
 		if prev, ok := seen[xt]; ok {

@@ -20,57 +20,72 @@ type cursor struct {
 // asks for 25 in its pointer capability set.
 const maxPointerCache = 32
 
-// parsePointerAttribute decodes TS_POINTERATTRIBUTE ([MS-RDPBCGR]
-// 2.2.9.1.1.4.5) when xorBpp is set, TS_COLORPOINTERATTRIBUTE (2.2.9.1.1.4.4,
-// 24 bits per pixel) when xorBpp is 0, and TS_LARGEPOINTERATTRIBUTE
-// (2.2.9.1.1.4.6) when large is set. It returns the cache index and the
-// shape.
-func (d *decoder) parsePointerAttribute(p []byte, withBpp, large bool) (int, cursor, error) {
+// pointerAttribute is a pointer shape as a server sends it, before it is
+// decoded.
+type pointerAttribute struct {
+	index            int
+	hot              image.Point
+	w, h, bpp        int
+	xorMask, andMask []byte
+}
+
+// parsePointerAttribute reads TS_POINTERATTRIBUTE ([MS-RDPBCGR]
+// 2.2.9.1.1.4.5) when withBpp is set, TS_COLORPOINTERATTRIBUTE
+// (2.2.9.1.1.4.4, 24 bits per pixel) when it is not, and
+// TS_LARGEPOINTERATTRIBUTE (2.2.9.1.1.4.6) when large is set. It checks
+// the cache index, the size, the depth and the XOR mask's length, so
+// that the shape can be charged by its size before it is decoded.
+func parsePointerAttribute(p []byte, withBpp, large bool) (pointerAttribute, error) {
 	r := reader{b: p}
-	bpp := 24
+	a := pointerAttribute{bpp: 24}
 	if withBpp || large {
-		bpp = int(r.u16())
+		a.bpp = int(r.u16())
 	}
-	index := int(r.u16())
-	hot := image.Pt(int(r.u16()), int(r.u16()))
-	w, h := int(r.u16()), int(r.u16())
+	a.index = int(r.u16())
+	a.hot = image.Pt(int(r.u16()), int(r.u16()))
+	a.w, a.h = int(r.u16()), int(r.u16())
 	var andLen, xorLen int
 	if large {
 		andLen, xorLen = int(r.u32()), int(r.u32())
 	} else {
 		andLen, xorLen = int(r.u16()), int(r.u16())
 	}
-	xorMask := r.take(xorLen)
-	andMask := r.take(andLen)
+	a.xorMask = r.take(xorLen)
+	a.andMask = r.take(andLen)
 	if r.err != nil {
-		return 0, cursor{}, fmt.Errorf("rdp: pointer update: %w", r.err)
+		return a, fmt.Errorf("rdp: pointer update: %w", r.err)
 	}
-	if index >= maxPointerCache {
-		return 0, cursor{}, fmt.Errorf("rdp: pointer cache index %d", index)
+	if a.index >= maxPointerCache {
+		return a, fmt.Errorf("rdp: pointer cache index %d", a.index)
 	}
-	img, err := d.pointerImage(w, h, bpp, xorMask, andMask)
-	if err != nil {
-		return 0, cursor{}, err
+	return a, checkPointer(a.w, a.h, a.bpp, a.xorMask)
+}
+
+// checkPointer checks a pointer's size and depth, and that its XOR mask
+// covers it.
+func checkPointer(w, h, bpp int, xorMask []byte) error {
+	if w <= 0 || h <= 0 || w > 384 || h > 384 {
+		return fmt.Errorf("rdp: pointer of %d×%d pixels", w, h)
 	}
-	return index, cursor{img: img, hot: hot}, nil
+	switch bpp {
+	case 1, 8, 16, 24, 32:
+	default:
+		return fmt.Errorf("rdp: pointer of %d bits per pixel", bpp)
+	}
+	if xorStride := (w*bpp + 15) / 16 * 2; len(xorMask) < xorStride*h {
+		return fmt.Errorf("rdp: pointer XOR mask of %d bytes for %d×%d at %d bits", len(xorMask), w, h, bpp)
+	}
+	return nil
 }
 
 // pointerImage combines a pointer's XOR and AND masks, both stored
 // bottom-up with rows padded to two bytes, into an RGBA image.
 func (d *decoder) pointerImage(w, h, bpp int, xorMask, andMask []byte) (*image.RGBA, error) {
-	if w <= 0 || h <= 0 || w > 384 || h > 384 {
-		return nil, fmt.Errorf("rdp: pointer of %d×%d pixels", w, h)
-	}
-	switch bpp {
-	case 1, 8, 16, 24, 32:
-	default:
-		return nil, fmt.Errorf("rdp: pointer of %d bits per pixel", bpp)
+	if err := checkPointer(w, h, bpp, xorMask); err != nil {
+		return nil, err
 	}
 	xorStride := (w*bpp + 15) / 16 * 2
 	andStride := (w + 15) / 16 * 2
-	if len(xorMask) < xorStride*h {
-		return nil, fmt.Errorf("rdp: pointer XOR mask of %d bytes for %d×%d at %d bits", len(xorMask), w, h, bpp)
-	}
 	hasAnd := len(andMask) >= andStride*h
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := range h {
