@@ -1078,7 +1078,18 @@ RDP's guacd path, RDP no longer needs guacd at all.
     since the image signs its certificate when it is built) and as
     `rdp-guacd`, and `make e2e` streams both (`tests/v1_test.go`; keys
     carry their HID code, which the native backend sends as a
-    scancode).
+    scancode). occamyd warns at start of `rdp-native`'s unchecked TLS,
+    as it should. `TestE2EV1RDP` takes `rdp-native` further, as the
+    owner would: text pasted into the session comes back from xrdp
+    through the image's clipboard echo (`clipboard-echo.sh`, with
+    xclip, beside the xterm), which carries the clipboard both ways in
+    one round trip; a resize to 800×600 and back reaches the screen and
+    the session's state; a viewer joined by a share sees the owner's
+    size and types; and the owner closes the stream and comes back to
+    the same session within the owner grace. TestE2EV1's second run of
+    each connection covers a session opened again after one ended. All
+    four passed 6 of 6 runs against the demo image with a local
+    occamyd.
 - **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
   through occamyd's routes with the Go client against `rdptest`: NLA
   with stored credentials, the hello's size, the screen, scancodes,

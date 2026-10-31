@@ -424,7 +424,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   connection that needs them keeps `backend: guacd`. Tests drive native
   RDP sessions through occamyd's routes against `rdptest`, and the demo
   stack serves its xrdp server as `rdp-native` (`security: tls`) and
-  `rdp-guacd`, both streamed by `make e2e`. The native RDP backend is
+  `rdp-guacd`, both streamed by `make e2e`, which also takes
+  `rdp-native` through the clipboard both ways, answered by a clipboard
+  echo in the demo image, a resize, a viewer joined by a share, and the
+  owner leaving and coming back. The native RDP backend is
   not yet verified against Windows, and does not speak RDP's graphics
   pipeline yet
   ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)).

@@ -210,9 +210,10 @@ go test ./...
 sessions to the demo servers. They are skipped unless
 `OCCAMY_E2E_ENDPOINT` is set, and those of `occamy-v1`, which stream
 its VNC and RDP connections, native and through guacd, with the Go
-client of protocol v1, unless
-`OCCAMY_E2E_V1_ENDPOINT` is; `make e2e` sets them to `localhost:5636`
-and `localhost:5637`:
+client of protocol v1, and check native RDP's clipboard both ways, a
+resize, a viewer joined by a share and the owner's return to a session,
+unless `OCCAMY_E2E_V1_ENDPOINT` is; `make e2e` sets them to
+`localhost:5636` and `localhost:5637`:
 
 ```
 make build
