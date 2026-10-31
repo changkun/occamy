@@ -104,6 +104,9 @@ they differ:
   is never the default for a protocol that has one.
 - Telnet gets no native backend: v1.0 doesn't need telnet. It stays
   guacd-only for now, and is dropped when guacd is removed in v1.0.
+- Kubernetes gets a native backend
+  ([native-kubernetes-backend](native-kubernetes-backend.md)) and never
+  goes through guacd.
 
 The gate therefore no longer decides when a protocol's default moves to
 `native`; it decides when the protocol's guacd path is deleted:
@@ -138,7 +141,7 @@ one of the owner's conditions.
 | VNC | [native-vnc-backend](native-vnc-backend.md) | `native`, since 2026-10-31 | `backend: guacd`, an explicit fallback and the benchmark's baseline, until the deletion gate passes |
 | RDP | [native-rdp-backend](native-rdp-backend.md), per [rdp-strategy](rdp-strategy.md) | `guacd` until the native RDP backend is registered, once NLA has run end to end; `native` from then on | the only path until then; afterwards an explicit fallback until the deletion gate passes |
 | telnet | none: v1.0 doesn't need telnet (owner, 2026-10-31) | `guacd`, for now | the only path; telnet is dropped when guacd is removed in v1.0 |
-| Kubernetes | none planned | not registered (Implementation notes: registration) | none |
+| Kubernetes | [native-kubernetes-backend](native-kubernetes-backend.md) (owner, 2026-10-31) | `native`, the only backend | none: never bridged, and `backend: guacd` is refused |
 
 Once native RDP is registered, guacd is the default for telnet alone,
 and it runs otherwise only for connections that opt into the fallback
@@ -212,7 +215,7 @@ Settled on 2026-10-30, following the recommendations above.
 | Interpreter additions | `internal/guacamole`: the `cursor` instruction (hotspot and image from a layer region) exposed as a cursor change, and access to the composited display by rectangle for copying out | — |
 | Bridge backend | `internal/backend/guacd`: a `Backend` of class graphical over `internal/guacd`. Instructions apply to the display; at each `sync` the damage is copied into the sink (`Lock` and `Unlock` per damaged rectangle) and the `sync` is answered, so guacd paces against the bridge alone. `size` of the default layer becomes `Resize`, `cursor` becomes `Cursor`, `name` becomes `Title`, clipboard streams become `Clipboard`, `required` becomes a `Prompt` whose answers go back as `argv` streams, `error` ends `Run` with the status, and `disconnect` ends it cleanly. Input translates to `key`, `mouse` (button mask, and wheel as buttons 4 and 5 pressed and released), keysyms for `Text`, a `clipboard` stream, and `size`. Writes to guacd are serialised. Tests against a scripted guacd on `net.Pipe` | Interpreter additions; session-core Backend interface |
 | Conformance corpus | Instruction streams recorded from guacd 1.6's VNC, RDP and SSH plugins on the bench stack (the bench desktop over VNC and RDP, the demo SSH server; logging in, typing, scrolling, moving a window, resizing), replayed through the bridge in tests: no unsupported operation, no error, the idle screen at checkpoints, and the final frame's hash pinned | Bridge backend |
-| Registration | The bridge registered in the API's backend factory for `vnc` and `rdp`, and for `telnet` and `kubernetes` behind an opt-in, with guacd parameters from the configuration under the connection's (built for `rdp` and `telnet`; see Implementation notes: registration) | Bridge backend; API Sessions |
+| Registration | The bridge registered in the API's backend factory for `vnc` and `rdp`, and for `telnet` and `kubernetes` behind an opt-in, with guacd parameters from the configuration under the connection's (built for `vnc`, `rdp` and `telnet`; `kubernetes` went native instead, see Implementation notes: registration) | Bridge backend; API Sessions |
 
 The parity gate runs per protocol, when a protocol's guacd path is to
 be deleted, not as a task here.
@@ -551,13 +554,16 @@ do not).
     default is to be checked. A recording with WebP not announced would
     give the images to compare.
   - The corpus has no clipboard, audio, telnet or Kubernetes sessions.
+    Kubernetes never goes through the bridge
+    ([native-kubernetes-backend](native-kubernetes-backend.md)).
 
 ## Implementation notes: registration
 
 - **Status.** Done by the Sessions task of
   [api-and-server-stack](api-and-server-stack.md), except the bridge for
-  VNC and for Kubernetes, below. Every task of the breakdown is built;
-  the parity gate runs per protocol, not as a task.
+  VNC, below, and Kubernetes, which went native instead. Every task of
+  the breakdown is built; the parity gate runs per protocol, not as a
+  task.
 - **What was done.** The API's backend factory makes the bridge for
   `rdp` and `telnet` connections and ad-hoc targets, at guacd's
   `guacd.address`, with `guacd.params.<protocol>` under the target's
@@ -576,10 +582,16 @@ do not).
   - telnet needs no opt-in beyond a configured connection, or an ad-hoc
     target where those are allowed. It stays on the bridge alone and is
     dropped when guacd is removed in v1.0.
-  - Kubernetes is not registered: connections have `host:port` targets
-    only, and Kubernetes needs a cluster, a namespace and a pod.
+  - Kubernetes is never registered on the bridge. The owner's call of
+    2026-10-31 gave it a native backend instead
+    ([native-kubernetes-backend](native-kubernetes-backend.md)), so that
+    v1.0 needs no guacd for it: `kubernetes` connections are served by
+    occamyd's own client of the API server's exec stream, the
+    configuration refuses `backend: guacd` and `guacd.params.kubernetes`
+    for them, and they have no ad-hoc targets.
 - **Follow-ups.** ~~The `backend:` key of the parity gate, so that VNC
-  can go through the bridge and back~~ (done, below); Kubernetes targets.
+  can go through the bridge and back~~ (done, below); ~~Kubernetes
+  targets~~ (native, above).
 
 ## Implementation notes: the opt-in period
 
@@ -602,11 +614,14 @@ that guacd was `vnc`'s default, they are corrected below.
     `adhoc_backends` does the same for ad-hoc targets, by protocol. ssh
     refuses `guacd`; rdp refuses `native` until the native RDP backend
     has run NLA end to end ([rdp-strategy](rdp-strategy.md)); telnet has
-    no native backend.
+    no native backend. kubernetes, added later, is native only, as ssh
+    is, and refuses `guacd`
+    ([native-kubernetes-backend](native-kubernetes-backend.md)).
   - The backend factory in `server/backends.go` is keyed by protocol and
-    backend: ssh/native, vnc/native, and vnc, rdp and telnet on guacd.
-    The session's state names the backend as before (`ssh`, `vnc`,
-    `guacd`).
+    backend: ssh/native, vnc/native, kubernetes/native, and vnc, rdp
+    and telnet on guacd. The session's state names the backend as
+    before (`ssh`, `vnc`, `guacd`), and `kubernetes` for the native
+    Kubernetes backend.
   - A vnc connection's `tls` needs the native backend, since the bridge
     would not check the certificate as `tls` says; `ard` too
     ([native-vnc-backend](native-vnc-backend.md), phase 4). Both are
@@ -641,6 +656,9 @@ that guacd was `vnc`'s default, they are corrected below.
     and an ad-hoc vnc target without `adhoc_backends`, get the native
     backend. `backend: guacd` stays valid for vnc, and
     `adhoc_backends: {vnc: guacd}` for ad-hoc targets.
+  - Note, 2026-10-31, later the same day: `config.DefaultBackend` now
+    also returns `native` for kubernetes, its only backend
+    ([native-kubernetes-backend](native-kubernetes-backend.md)).
   - `tls` and `ard` still need the native backend; their refusals now
     name the backend that was set (`backend: guacd would not: leave
     backend out, or set native`), since a connection without `backend`
