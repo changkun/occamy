@@ -78,8 +78,11 @@ auth:
 guacd:
   address: localhost:4822
   # guacd parameters per protocol. Connection targets and credentials
-  # override them. rdp's apply only to connections on guacd.
+  # override them. They apply only to connections on guacd, and occamyd
+  # warns at start of those that no session reads.
   params:
+    # For the rdp connection old-terminal-server, the only one on guacd:
+    # its certificate is not checked.
     rdp:
       ignore-cert: "true"
 
@@ -151,6 +154,20 @@ connections:
     credentials:
       username: Administrator
       password_file: /run/secrets/windows-password
+    allow:
+      groups: [ops]
+
+  - id: old-terminal-server
+    name: Old terminal server
+    protocol: rdp
+    target: 10.0.4.21
+    # Through guacd, the fallback, kept until the benchmark shows native
+    # 10x better. guacd.params.rdp applies to it; tls and security do
+    # not, and the file refuses them here.
+    backend: guacd
+    credentials:
+      username: Administrator
+      prompt: true
     allow:
       groups: [ops]
 

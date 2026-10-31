@@ -240,6 +240,11 @@ func TestParseV1Example(t *testing.T) {
 				Allow:       config.Allow{Groups: []string{"ops"}},
 			},
 			{
+				ID: "old-terminal-server", Name: "Old terminal server", Protocol: "rdp", Target: "10.0.4.21:3389", Backend: "guacd",
+				Credentials: config.Credentials{Username: "Administrator", Prompt: true},
+				Allow:       config.Allow{Groups: []string{"ops"}},
+			},
+			{
 				ID: "lab-shell", Name: "Lab shell", Protocol: "ssh", Target: "[fd00::22]:22", Backend: "native",
 				InsecureIgnoreHostKey: true,
 				Credentials:           config.Credentials{Prompt: true},
@@ -253,6 +258,16 @@ func TestParseV1Example(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("ParseV1(testdata/v1.yaml) =\n%+v\nwant\n%+v", got, want)
+	}
+	// Each protocol the example gives guacd parameters for has a
+	// connection on guacd to read them; occamyd warns at start of those
+	// no session reads.
+	for p := range got.Guacd.Params {
+		if !slices.ContainsFunc(got.Connections, func(c config.Connection) bool {
+			return c.Protocol == p && config.BackendOf(p, c.Backend) == config.BackendGuacd
+		}) {
+			t.Errorf("guacd.params.%s: no %s connection in the example is on guacd", p, p)
+		}
 	}
 }
 
