@@ -21,19 +21,40 @@ import (
 	"changkun.de/x/occamy/protocol"
 )
 
+// shareMode is how the viewers of a session encode: each alone, or
+// sharing the session's encode cache, and its workers if any.
+type shareMode struct {
+	name    string
+	share   bool
+	workers int
+}
+
+var shareModes = []shareMode{
+	{"alone", false, 0},
+	{"cache", true, 0},
+	{"workers", true, DefaultEncodeWorkers()},
+}
+
 // viewers are n viewers of one session, each with a writer as
 // newRefineDirect makes it and a tile cache of the default slots, which
 // the test drives frame by frame: each viewer's frame on its own
-// goroutine, as each viewer's writer runs.
+// goroutine, as each viewer's writer runs. sh is what they share, nil
+// if nothing.
 type viewers struct {
 	ds []*direct
+	sh *shared
 }
 
-func newViewers(tb testing.TB, n int) *viewers {
+func newViewers(tb testing.TB, n int, m shareMode) *viewers {
 	tb.Helper()
 	d := newRefineDirect(tb, false)
 	d.w.cache = newTileCache(DefaultCacheSlots)
 	vs := &viewers{ds: []*direct{d}}
+	if m.share {
+		fb := d.w.fb
+		vs.sh = share(fb, m.workers, DefaultEncodeCacheBytes)
+		tb.Cleanup(func() { vs.sh.release(fb) })
+	}
 	for range n - 1 {
 		v, err := d.s.Join(session.RoleViewer)
 		if err != nil {
@@ -49,6 +70,15 @@ func newViewers(tb testing.TB, n int) *viewers {
 		w.sc = &scroller{}
 		w.cache = newTileCache(DefaultCacheSlots)
 		vs.ds = append(vs.ds, &direct{tb: tb, ctx: d.ctx, b: d.b, s: d.s, w: w, c: c})
+	}
+	if vs.sh != nil {
+		for _, d := range vs.ds {
+			p, ok := profileOf(d.w.enc)
+			if !ok {
+				tb.Fatal("the encoder is not internal/encoder's")
+			}
+			d.w.sh, d.w.prof = vs.sh, p
+		}
 	}
 	return vs
 }
@@ -122,18 +152,19 @@ func (vs *viewers) each(f func(d *direct) error) (wall, cpu time.Duration, err e
 // shareRun is a scene sent to n viewers: the first viewer's bytes a
 // frame, and for each measured frame the time until every viewer sent
 // it and the CPU time they took, then the same of refinement once the
-// scene is still.
+// scene is still, and what the encode cache held and found, if shared.
 type shareRun struct {
 	bytes           []int
 	walls, cpus     []time.Duration
 	refBytes        int
 	refWall, refCPU time.Duration
+	stats           cacheStats
 }
 
-func runShareScene(tb testing.TB, n int, first string, frames []string, warm int, moving bool) shareRun {
+func runShareScene(tb testing.TB, n int, m shareMode, first string, frames []string, warm int, moving bool) shareRun {
 	tb.Helper()
 	var out shareRun
-	vs := newViewers(tb, n)
+	vs := newViewers(tb, n, m)
 	d0 := vs.ds[0]
 	d0.show(corpusFrame(tb, first))
 	if _, _, err := vs.each((*direct).send); err != nil {
@@ -168,6 +199,9 @@ func runShareScene(tb testing.TB, n int, first string, frames []string, warm int
 	if err != nil {
 		tb.Fatal(err)
 	}
+	if vs.sh != nil {
+		out.stats = vs.sh.cache.stats()
+	}
 	return out
 }
 
@@ -190,33 +224,50 @@ func ms(d time.Duration) float64 { return float64(d.Microseconds()) / 1000 }
 var shareRuns = flag.Int("share.runs", 0, "time each corpus scene this many times for 1, 2 and 4 viewers of one session and print the medians")
 
 // TestShareTimes prints, for each corpus scene sent to 1, 2 and 4 viewers
-// of one session, the bytes a frame, the time until every viewer has sent
-// a frame and the process's CPU time for it, and the same of refinement
-// once the scene is still: the median over -share.runs passes.
+// of one session, each encoding alone, sharing the encode cache, and
+// sharing it and the workers: the bytes a frame, the time until every
+// viewer has sent a frame and the process's CPU time for it, the same of
+// refinement once the scene is still, and the most the encode cache held
+// and the share of lookups it answered; the median over -share.runs
+// passes, which go through the modes in turn so that the load falls on
+// each alike.
 func TestShareTimes(t *testing.T) {
 	if *shareRuns == 0 {
 		t.Skip("set -share.runs to time the corpus")
 	}
 	t.Logf("load average at the start: %s", loadAverage())
 	var out strings.Builder
-	fmt.Fprintf(&out, "| Scene | Viewers | KiB a frame | ms a frame: wall · CPU | refinement: KiB · wall ms · CPU ms |\n|---|---|---|---|---|\n")
+	fmt.Fprintf(&out, "| Scene | Viewers | Mode | KiB a frame | ms a frame: wall · CPU | refinement: KiB · wall ms · CPU ms | cache: KiB held at most · hits |\n|---|---|---|---|---|---|---|\n")
 	for _, sc := range cacheScenes {
 		for _, n := range []int{1, 2, 4} {
-			var walls, cpus, refWalls, refCPUs []time.Duration
-			var r0 shareRun
-			for pass := range *shareRuns {
-				r := runShareScene(t, n, sc.first, sc.frames, sc.warm, sc.moving)
-				if pass == 0 {
-					r0 = r
-				}
-				walls = append(walls, mean(r.walls))
-				cpus = append(cpus, mean(r.cpus))
-				refWalls = append(refWalls, r.refWall)
-				refCPUs = append(refCPUs, r.refCPU)
+			type acc struct {
+				walls, cpus, refWalls, refCPUs []time.Duration
+				r0                             shareRun
 			}
-			fmt.Fprintf(&out, "| %s | %d | %.1f | %.2f · %.2f | %.1f · %.2f · %.2f |\n", sc.name, n,
-				float64(sum(r0.bytes))/1024/float64(len(r0.bytes)), ms(median(walls)), ms(median(cpus)),
-				float64(r0.refBytes)/1024, ms(median(refWalls)), ms(median(refCPUs)))
+			accs := make([]acc, len(shareModes))
+			for pass := range *shareRuns {
+				for k, m := range shareModes {
+					r := runShareScene(t, n, m, sc.first, sc.frames, sc.warm, sc.moving)
+					a := &accs[k]
+					if pass == 0 {
+						a.r0 = r
+					}
+					a.walls = append(a.walls, mean(r.walls))
+					a.cpus = append(a.cpus, mean(r.cpus))
+					a.refWalls = append(a.refWalls, r.refWall)
+					a.refCPUs = append(a.refCPUs, r.refCPU)
+				}
+			}
+			for k, m := range shareModes {
+				a := &accs[k]
+				cache := "–"
+				if st := a.r0.stats; m.share {
+					cache = fmt.Sprintf("%.0f · %.0f%%", float64(st.high)/1024, 100*float64(st.hits)/float64(max(1, st.hits+st.misses+st.stale)))
+				}
+				fmt.Fprintf(&out, "| %s | %d | %s | %.1f | %.2f · %.2f | %.1f · %.2f · %.2f | %s |\n", sc.name, n, m.name,
+					float64(sum(a.r0.bytes))/1024/float64(len(a.r0.bytes)), ms(median(a.walls)), ms(median(a.cpus)),
+					float64(a.r0.refBytes)/1024, ms(median(a.refWalls)), ms(median(a.refCPUs)), cache)
+			}
 		}
 	}
 	t.Logf("load average at the end: %s", loadAverage())
