@@ -85,6 +85,16 @@ func TestBenchV1File(t *testing.T) {
 			}
 		}
 	}
+	for _, proto := range []string{"ssh", "vnc", "rdp"} {
+		if _, ok := v1Connections["v1-native"][proto]; !ok {
+			t.Errorf("v1-native serves no %s", proto)
+		}
+	}
+	// The bench desktop's xrdp speaks TLS without NLA, with a certificate
+	// it made itself.
+	if c := conns[v1Connections["v1-native"]["rdp"]]; c.Security != "tls" || !c.TLS.InsecureSkipVerify {
+		t.Errorf("native rdp has security %q and tls %+v, want tls without a certificate check", c.Security, c.TLS)
+	}
 	if len(f.Auth.Users) != 1 || f.Auth.Users[0].Name != v1Account.name ||
 		bcrypt.CompareHashAndPassword([]byte(f.Auth.Users[0].PasswordHash), []byte(v1Account.secret)) != nil {
 		t.Errorf("users %+v, want %s with the harness's password", f.Auth.Users, v1Account.name)
@@ -197,6 +207,61 @@ func psnr(a, b []byte) float64 {
 		return math.Inf(1)
 	}
 	return 10 * math.Log10(255*255/(sum/float64(n)))
+}
+
+// A desktop key carries the HID usage of its key on a US layout, as the
+// web client's KeyboardEvent.code gives it.
+func TestHIDUsage(t *testing.T) {
+	for keysym, want := range map[int]uint16{
+		'a': 0x04, 'z': 0x1d, '1': 0x1e, '9': 0x26, '0': 0x27, ' ': 0x2c,
+		keyReturn: 0x28, keyEscape: 0x29, keyF1: 0x3a, keyF2: 0x3b, keyF6: 0x3f, keyF1 + 11: 0x45,
+		'A': 0, keyF1 + 12: 0, 0x20ac: 0,
+	} {
+		if got := hidUsage(keysym); got != want {
+			t.Errorf("hidUsage(%#x) = %#x, want %#x", keysym, got, want)
+		}
+	}
+}
+
+// Over v1, a desktop's keys reach the backend with their physical key.
+func TestV1KeyCodes(t *testing.T) {
+	b := &keyLog{painter: newSwatch()}
+	s := v1Rig(t, b)
+	for _, k := range []int{'a', keyF2} {
+		if err := s.key(k); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []backend.Key{{Down: true, Keysym: 'a', Code: 0x04}, {Keysym: 'a', Code: 0x04}, {Down: true, Keysym: keyF2, Code: 0x3b}, {Keysym: keyF2, Code: 0x3b}}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(b.got()) < len(want) && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if got := b.got(); !slices.Equal(got, want) {
+		t.Errorf("the backend got %+v, want %+v", got, want)
+	}
+}
+
+// keyLog is a painter that records the keys it gets.
+type keyLog struct {
+	*painter
+	mu   sync.Mutex
+	keys []backend.Key
+}
+
+func (b *keyLog) Input(ev backend.InputEvent) error {
+	if k, ok := ev.(backend.Key); ok {
+		b.mu.Lock()
+		b.keys = append(b.keys, k)
+		b.mu.Unlock()
+	}
+	return b.painter.Input(ev)
+}
+
+func (b *keyLog) got() []backend.Key {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return slices.Clone(b.keys)
 }
 
 func TestTermBytes(t *testing.T) {

@@ -34,11 +34,10 @@ import (
 // docs/api.md does: sign in, open a connection's stream, and end the
 // session with DELETE. The connections are those of the bench stack's
 // occamy-v1 service (docker/bench/occamy-v1.yaml), per series and
-// protocol. v1-native has no RDP connection yet, though occamyd now
-// serves RDP natively by default, and SSH has no guacd backend in v1, so
-// neither series serves every protocol.
+// protocol. SSH has no guacd backend in v1, so v1-guacd serves only the
+// desktop.
 var v1Connections = map[string]map[string]string{
-	"v1-native": {"ssh": "ssh", "vnc": "vnc-native"},
+	"v1-native": {"ssh": "ssh", "vnc": "vnc-native", "rdp": "rdp-native"},
 	"v1-guacd":  {"vnc": "vnc-guacd", "rdp": "rdp-guacd"},
 }
 
@@ -206,6 +205,8 @@ type v1Conn struct {
 
 // key presses and releases a key. The SSH backend takes no keys, only
 // the bytes a terminal emulator makes of them, so a terminal gets those.
+// A desktop's key carries its physical key, as the web client's does,
+// which the native RDP backend sends as a scancode.
 func (c *v1Conn) key(keysym int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), inputTimeout)
 	defer cancel()
@@ -220,12 +221,36 @@ func (c *v1Conn) key(keysym int) error {
 	if keysym < 0 || keysym > 0x1fffffff { // X11 keysyms have 29 bits
 		return fmt.Errorf("keysym %d", keysym)
 	}
-	ks := uint32(keysym) // #nosec G115 -- checked above
-	if _, err := c.cl.Key(ctx, true, ks, 0); err != nil {
+	ks, code := uint32(keysym), hidUsage(keysym) // #nosec G115 -- checked above
+	if _, err := c.cl.Key(ctx, true, ks, code); err != nil {
 		return err
 	}
-	_, err := c.cl.Key(ctx, false, ks, 0)
+	_, err := c.cl.Key(ctx, false, ks, code)
 	return err
+}
+
+// hidUsage returns the USB HID usage on the keyboard page of the key on
+// a US layout that types keysym, as the web client takes it from
+// KeyboardEvent.code (client/occamy-web/src/protocol/keyboard.ts), for
+// the keys the scenarios press on a desktop, or 0 for another.
+func hidUsage(keysym int) uint16 {
+	switch {
+	case keysym >= 'a' && keysym <= 'z':
+		return uint16(0x04 + keysym - 'a') // #nosec G115 -- at most 0x1d
+	case keysym >= '1' && keysym <= '9':
+		return uint16(0x1e + keysym - '1') // #nosec G115 -- at most 0x26
+	case keysym == '0':
+		return 0x27
+	case keysym == ' ':
+		return 0x2c
+	case keysym == keyReturn:
+		return 0x28
+	case keysym == keyEscape:
+		return 0x29
+	case keysym >= keyF1 && keysym < keyF1+12:
+		return uint16(0x3a + keysym - keyF1) // #nosec G115 -- at most 0x45
+	}
+	return 0
 }
 
 // termBytes returns what xterm.js sends for the keys the scenarios press
