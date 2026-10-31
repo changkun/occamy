@@ -49,14 +49,14 @@ func fillFB(fb *framebuffer.Framebuffer, r image.Rectangle, c color.RGBA) {
 // scrollRig runs a scroller as a writer does, without a connection: it
 // sends every dirty tile raw to a model client, after the copies found.
 type scrollRig struct {
-	t      *testing.T
+	t      testing.TB
 	fb     *framebuffer.Framebuffer
 	sc     *scroller
 	client *image.RGBA
 	sent   []uint64
 }
 
-func newScrollRig(t *testing.T, w, h, tile int) *scrollRig {
+func newScrollRig(t testing.TB, w, h, tile int) *scrollRig {
 	t.Helper()
 	fb := framebuffer.New(tile)
 	fb.Resize(w, h)
@@ -585,5 +585,36 @@ func TestScrollRandom(t *testing.T) {
 		if copies == 0 {
 			t.Errorf("seed %d: no copy in 30 steps", seed)
 		}
+	}
+}
+
+// BenchmarkScrollFind times one frame's search of a 1024×768 screen
+// whose shadow's row hashes are stale, as after a frame of tiles: a
+// change of one tile and one across a row of tiles, which no column
+// searches; a new page, given up after scrollMaxMisses runs; and a
+// scroll of the whole screen.
+func BenchmarkScrollFind(b *testing.B) {
+	const w, h = 1024, 768
+	red := color.RGBA{0xff, 0, 0, 0xff}
+	for _, bc := range []struct {
+		name   string
+		change func(*framebuffer.Framebuffer)
+	}{
+		{"one tile", func(fb *framebuffer.Framebuffer) { fillFB(fb, image.Rect(100, 100, 110, 110), red) }},
+		{"a row of tiles", func(fb *framebuffer.Framebuffer) { fillFB(fb, image.Rect(0, 300, w, 310), red) }},
+		{"new page", func(fb *framebuffer.Framebuffer) { drawPage(fb, fb.Bounds(), 2, 0) }},
+		{"scroll", func(fb *framebuffer.Framebuffer) { drawPage(fb, fb.Bounds(), 1, 16) }},
+	} {
+		b.Run(bc.name, func(b *testing.B) {
+			r := newScrollRig(b, w, h, 64)
+			drawPage(r.fb, r.fb.Bounds(), 1, 0)
+			r.frame()
+			bc.change(r.fb)
+			order := r.dirty()
+			for b.Loop() {
+				clear(r.sc.hashed)
+				r.sc.find(r.fb, order)
+			}
+		})
 	}
 }
