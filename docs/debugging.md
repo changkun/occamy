@@ -17,8 +17,7 @@ a file without `mode` runs in debug mode, and any other value stops
 `make run OCCAMY_DEBUG=1` mounts
 [docker/occamy-debug.yaml](../docker/occamy-debug.yaml), the same file
 in debug mode, in its place; the stack publishes the v0 service on the
-host's loopback interface, and `make run OCCAMY_DEBUG=1` refuses an
-`OCCAMY_BIND` that would publish it on another address. In debug mode,
+host's loopback interface only, whatever `OCCAMY_BIND` says. In debug mode,
 `occamyd` serves Go's profiling routes under `/debug/pprof/` on its own
 address, with no token, and says so in its log at start.
 Anyone who can reach `occamyd` can then read its profiles and its
@@ -109,11 +108,11 @@ runtime seldom ends. The current number is the `PIDS` column of
 
 guacd forks a process for each connection, and the process exits after
 the connection's last user has left. With no sessions, guacd runs a
-single process. The stack's containers are named `docker-<service>-1`:
+single process. The stack's containers are named `occamy-<service>-1`:
 
 ```sh
 podman stats --no-stream        # CPU, memory and PIDs of each container
-podman top docker-guacd-1       # guacd's processes
+podman top occamy-guacd-1       # guacd's processes
 cd docker && podman compose logs -f guacd occamy
 ```
 

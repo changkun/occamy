@@ -590,6 +590,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   based remote desktop proxy", and lists its flag on a line of its own
   instead of after "Usage:". `.gitignore` ignores the `occamyd` that
   `make compile` builds.
+- The demo stack's compose project is named `occamy` in
+  `docker/docker-compose.yaml`, so its containers are `occamy-<service>-1`.
+  It was named after the file's directory, `docker`, which every
+  other checkout and any other compose file in a `docker` directory
+  share. `make bench` and the harness's `-project` default to `occamy`
+  too. `COMPOSE_PROJECT_NAME` still names another project. A stack
+  started before this change runs under the project `docker`; stop it
+  once with `(cd docker && podman compose -p docker down)`, or `docker
+  compose` for Docker, before `make run` starts the new one, since both
+  publish the same ports.
 - The README starts with v1: the demo stack and the web client first,
   then a native build that serves a v1 file. The run instructions for
   guacd and a v0 file, and the v0 token's connection parameters, move
@@ -698,15 +708,18 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   `OCCAMY_DEBUG=1`.
 - The demo stack publishes `occamy-v1`, whose demo user's password is
   public, on the host's loopback interface. It was published on every
-  interface. `OCCAMY_BIND` names another address for both `occamyd`
-  services, such as `0.0.0.0` for every interface. `make run` and
-  `make bench` refuse it with `OCCAMY_DEBUG=1`, since the v0 service
-  then serves pprof on its port.
+  interface. `OCCAMY_BIND` names another address for it, such as
+  `0.0.0.0` for every interface; `make run` and `make bench` pass
+  `127.0.0.1` unless it is set, so `docker/.env` cannot widen it. The
+  v0 service and `occamy-v1`'s debug port stay on the loopback
+  interface whatever `OCCAMY_BIND` says: the v0 login signs a token for
+  any host with the demo's public secret, and guacd would connect
+  wherever such a token points.
 - `make clean` removes only Occamy's own: the demo stack's containers,
-  volume and demo images through `compose down`, and the untagged images
-  of earlier `make build` runs, which `make build` now labels
-  `de.changkun.occamy.make=build`. It pruned every dangling image of the
-  engine, whoever built it.
+  volume and demo images through `compose down` in its own project,
+  `occamy`, and the untagged images of earlier `make build` runs, which
+  `make build` now labels `de.changkun.occamy.make=build`. It pruned
+  every dangling image of the engine, whoever built it.
 
 ## [0.6.0] - 2026-10-30
 

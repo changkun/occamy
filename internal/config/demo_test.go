@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -228,13 +229,14 @@ func TestDemoDebugGating(t *testing.T) {
 	}
 }
 
-// TestDemoBind checks where the demo stack publishes occamyd: on the
-// loopback interface with compose up and with make run, since the demo
-// user's password is public; on the address that OCCAMY_BIND names, such
-// as every interface, when the shell asks for it; and never with the
-// debug routes beyond the loopback interface: occamy-v1's debug port
-// stays there, and make run OCCAMY_DEBUG=1 refuses another OCCAMY_BIND,
-// since the v0 service then serves pprof on its own port.
+// TestDemoBind checks where the demo stack publishes occamyd. occamy-v1
+// is on the loopback interface, since the demo user's password is
+// public, unless OCCAMY_BIND names another address, from the shell or
+// make's command line. docker/.env cannot widen it under make run or
+// make bench, which pass OCCAMY_BIND either way. The v0 service, whose
+// login signs a token for any host with a public secret, and occamy-v1's
+// debug port, with no authentication, stay on the loopback interface
+// whatever OCCAMY_BIND and OCCAMY_DEBUG say.
 func TestDemoBind(t *testing.T) {
 	raw, err := os.ReadFile("../../docker/docker-compose.yaml")
 	if err != nil {
@@ -249,13 +251,19 @@ func TestDemoBind(t *testing.T) {
 		t.Fatal(err)
 	}
 	// published returns the host address of each container port that
-	// occamy and occamy-v1 publish, with env.
-	published := func(t *testing.T, env map[string]string) map[string]string {
+	// occamy and occamy-v1 publish when compose reads env, over dotenv
+	// as docker/.env: the process's variables win over the file's.
+	published := func(t *testing.T, dotenv, env map[string]string) map[string]string {
 		t.Helper()
+		vars := maps.Clone(dotenv)
+		if vars == nil {
+			vars = map[string]string{}
+		}
+		maps.Copy(vars, env)
 		got := map[string]string{}
 		for _, name := range []string{"occamy", "occamy-v1"} {
 			for _, p := range compose.Services[name].Ports {
-				p := composeInterpolate(t, p, env)
+				p := composeInterpolate(t, p, vars)
 				parts := strings.Split(p, ":")
 				if len(parts) != 3 {
 					t.Fatalf("%s publishes %q, not host:port:port", name, p)
@@ -265,74 +273,115 @@ func TestDemoBind(t *testing.T) {
 		}
 		return got
 	}
-	loopback := map[string]string{"occamy:5636": "127.0.0.1", "occamy-v1:5637": "127.0.0.1", "occamy-v1:5638": "127.0.0.1"}
-	everywhere := map[string]string{"occamy:5636": "0.0.0.0", "occamy-v1:5637": "0.0.0.0", "occamy-v1:5638": "127.0.0.1"}
-	for _, tt := range []struct {
-		name string
-		env  func(t *testing.T) map[string]string
-		want map[string]string
-	}{
-		{"compose up", func(*testing.T) map[string]string { return nil }, loopback},
-		{"make run", func(t *testing.T) map[string]string { return makeRunEnv(t, "", nil) }, loopback},
-		{"make run OCCAMY_DEBUG=1", func(t *testing.T) map[string]string { return makeRunEnv(t, "1", nil) }, loopback},
-		{"make run with OCCAMY_BIND=0.0.0.0", func(t *testing.T) map[string]string {
-			return makeRunEnv(t, "", map[string]string{"OCCAMY_BIND": "0.0.0.0"})
-		}, everywhere},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := published(t, tt.env(t)); !maps.Equal(got, tt.want) {
-				t.Errorf("published on %v, want %v", got, tt.want)
-			}
-		})
+	// want is where the ports are published with occamy-v1 on v1.
+	want := func(v1 string) map[string]string {
+		return map[string]string{"occamy:5636": "127.0.0.1", "occamy-v1:5637": v1, "occamy-v1:5638": "127.0.0.1"}
 	}
-	t.Run("make run OCCAMY_DEBUG=1 with OCCAMY_BIND=0.0.0.0", func(t *testing.T) {
-		if _, err := exec.LookPath("make"); err != nil {
-			t.Skip("no make")
+	check := func(t *testing.T, dotenv, env map[string]string, v1 string) {
+		t.Helper()
+		if got := published(t, dotenv, env); !maps.Equal(got, want(v1)) {
+			t.Errorf("published on %v, want %v", got, want(v1))
 		}
-		cmd := exec.Command("make", "-s", "-n", "-C", "../..", "run", "OCCAMY_DEBUG=1", "OCCAMY_BIND=0.0.0.0", "CONTAINER_ENGINE=engine")
-		out, err := cmd.CombinedOutput()
-		if err == nil || !strings.Contains(string(out), "OCCAMY_BIND must be 127.0.0.1") {
-			t.Errorf("make -n run OCCAMY_DEBUG=1 OCCAMY_BIND=0.0.0.0 printed %q (%v), want it refused", out, err)
-		}
+	}
+
+	t.Run("compose up", func(t *testing.T) {
+		check(t, nil, nil, "127.0.0.1")
+		// By hand, compose takes OCCAMY_BIND from docker/.env, and still
+		// keeps the v0 service and the debug port on the loopback
+		// interface.
+		check(t, map[string]string{"OCCAMY_BIND": "0.0.0.0"}, nil, "0.0.0.0")
 	})
+	for _, target := range []string{"run", "bench"} {
+		for _, debug := range []string{"", "1"} {
+			name := "make " + target
+			if debug != "" {
+				name += " OCCAMY_DEBUG=" + debug
+			}
+			t.Run(name, func(t *testing.T) {
+				args := []string{"OCCAMY_DEBUG=" + debug}
+				check(t, nil, makeEnv(t, target, args, nil), "127.0.0.1")
+				for _, addr := range []string{"0.0.0.0", "192.0.2.10"} {
+					// docker/.env cannot widen it.
+					check(t, map[string]string{"OCCAMY_BIND": addr}, makeEnv(t, target, args, nil), "127.0.0.1")
+					// The shell and the command line can, for occamy-v1.
+					check(t, nil, makeEnv(t, target, args, map[string]string{"OCCAMY_BIND": addr}), addr)
+					check(t, nil, makeEnv(t, target, append(args, "OCCAMY_BIND="+addr), nil), addr)
+				}
+			})
+		}
+	}
+}
+
+// TestDemoProject checks that the demo stack's compose project is
+// occamy, not the compose file's directory, docker, which other
+// checkouts and other compose files share, and so make clean's compose
+// down: the project that docker-compose.yaml names, which the bench
+// stack keeps, and the one that make bench and the harness read CPU
+// time from. COMPOSE_PROJECT_NAME still names another.
+func TestDemoProject(t *testing.T) {
+	for _, file := range []string{"docker-compose.yaml", "docker-compose.bench.yaml"} {
+		raw, err := os.ReadFile("../../docker/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var compose struct {
+			Name *string `yaml:"name"`
+		}
+		if err := yaml.Unmarshal(raw, &compose); err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case file == "docker-compose.yaml" && (compose.Name == nil || *compose.Name != "occamy"):
+			t.Errorf("%s names the project %v, want occamy", file, compose.Name)
+		case file != "docker-compose.yaml" && compose.Name != nil && *compose.Name != "occamy":
+			t.Errorf("%s names the project %q, want occamy or none", file, *compose.Name)
+		}
+	}
+	src, err := os.ReadFile("../../bench/main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), `flag.String("project", "occamy",`) {
+		t.Error(`bench's -project does not default to occamy`)
+	}
+	for _, tt := range []struct{ shell, want string }{{"", "occamy"}, {"occamy-try", "occamy-try"}} {
+		lines := makeDryRun(t, "bench", nil, map[string]string{"COMPOSE_PROJECT_NAME": tt.shell})
+		found := false
+		for _, line := range lines {
+			if strings.HasPrefix(line, "go run ./bench ") {
+				found = true
+				if !strings.Contains(line, " -project "+tt.want+" ") {
+					t.Errorf("with COMPOSE_PROJECT_NAME=%q, make bench runs %q, want -project %s", tt.shell, line, tt.want)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("make -n bench runs no harness: %q", lines)
+		}
+	}
 }
 
 // TestMakeClean checks that make clean removes Occamy's own containers
 // and images and no other of the engine's, which other projects on the
-// host may share: the demo stack through compose, and only the images
-// that make build labels, which it labels.
+// host may share: the demo stack's project through compose, and the
+// untagged images that make build labels. It compares whole commands,
+// so that a wider removal anywhere in them fails it.
 func TestMakeClean(t *testing.T) {
-	if _, err := exec.LookPath("make"); err != nil {
-		t.Skip("no make")
-	}
-	dryRun := func(target string) []string {
-		out, err := exec.Command("make", "-s", "-n", "-C", "../..", target, "CONTAINER_ENGINE=engine").Output()
-		if err != nil {
-			t.Fatalf("make -n %s: %v", target, err)
-		}
-		return strings.Split(strings.TrimSpace(string(out)), "\n")
-	}
 	var label string
-	for _, line := range dryRun("build") {
+	for _, line := range makeDryRun(t, "build", nil, nil) {
 		if _, rest, ok := strings.Cut(line, " --label "); ok {
 			label, _, _ = strings.Cut(rest, " ")
 		}
 	}
 	if label == "" {
-		t.Fatalf("make build labels no image: %q", dryRun("build"))
+		t.Fatalf("make build labels no image: %q", makeDryRun(t, "build", nil, nil))
 	}
-	for _, line := range dryRun("clean") {
-		fields := strings.Fields(line)
-		switch {
-		case strings.HasPrefix(line, "cd docker && engine compose down"):
-			// The stack's own project.
-		case len(fields) > 2 && fields[0] == "engine" && fields[1] == "image" && fields[2] == "prune":
-			if !strings.Contains(line, "--filter label="+label) {
-				t.Errorf("make clean prunes beyond the images that make build labels %s: %q", label, line)
-			}
-		default:
-			t.Errorf("make clean runs %q, which this test does not know to remove only Occamy's own", line)
-		}
+	want := []string{
+		"cd docker && engine compose down --remove-orphans --volumes --rmi local",
+		"engine image prune -f --filter label=" + label,
+	}
+	if got := makeDryRun(t, "clean", nil, nil); !slices.Equal(got, want) {
+		t.Errorf("make clean runs\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 
@@ -342,11 +391,8 @@ func TestCompiledBinaryIgnored(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("no git")
 	}
-	out, err := exec.Command("make", "-s", "-n", "-C", "../..", "compile").Output()
-	if err != nil {
-		t.Fatalf("make -n compile: %v", err)
-	}
-	if !strings.Contains(string(out), "-o occamyd") {
+	out := strings.Join(makeDryRun(t, "compile", nil, nil), "\n")
+	if !strings.Contains(out, "-o occamyd") {
 		t.Fatalf("make compile builds %q, not ./occamyd", out)
 	}
 	cmd := exec.Command("git", "check-ignore", "-q", "--no-index", "occamyd")
@@ -360,18 +406,20 @@ func TestCompiledBinaryIgnored(t *testing.T) {
 	}
 }
 
-// makeRunEnv returns the variables that make run passes to compose with
-// OCCAMY_DEBUG set to debug, from a shell with shell's variables, over
-// them: the assignments before the compose command that make -n prints.
-func makeRunEnv(t *testing.T, debug string, shell map[string]string) map[string]string {
+// makeDryRun returns the commands that make -n target prints, with
+// CONTAINER_ENGINE=engine and args on make's command line, from a shell
+// with shell's variables. It skips the test without make.
+func makeDryRun(t *testing.T, target string, args []string, shell map[string]string) []string {
 	t.Helper()
 	if _, err := exec.LookPath("make"); err != nil {
 		t.Skip("no make")
 	}
-	cmd := exec.Command("make", "-s", "-n", "-C", "../..", "run", "OCCAMY_DEBUG="+debug, "CONTAINER_ENGINE=engine")
-	// The shell is shell's, not the test's, which may hold OCCAMY_BIND.
+	cmd := exec.Command("make", append([]string{"-s", "-n", "-C", "../..", target, "CONTAINER_ENGINE=engine"}, args...)...)
+	// The shell is shell's, not the test's, which may hold the variables
+	// that the tests set.
 	for _, kv := range os.Environ() {
-		if !strings.HasPrefix(kv, "OCCAMY_BIND=") {
+		k, _, _ := strings.Cut(kv, "=")
+		if k != "OCCAMY_BIND" && k != "OCCAMY_DEBUG" && k != "COMPOSE_PROJECT_NAME" {
 			cmd.Env = append(cmd.Env, kv)
 		}
 	}
@@ -380,27 +428,49 @@ func makeRunEnv(t *testing.T, debug string, shell map[string]string) map[string]
 	}
 	out, err := cmd.Output()
 	if err != nil {
-		t.Fatalf("make -n run: %v", err)
+		t.Fatalf("make -n %s %s: %v", target, strings.Join(args, " "), err)
 	}
+	return strings.Split(strings.TrimSpace(string(out)), "\n")
+}
+
+// makeEnv returns the variables that make target, with args on its
+// command line, passes to compose from a shell with shell's variables,
+// over them: the assignments before the compose command that make -n
+// prints.
+func makeEnv(t *testing.T, target string, args []string, shell map[string]string) map[string]string {
+	t.Helper()
+	lines := makeDryRun(t, target, args, shell)
 	env := maps.Clone(shell)
 	if env == nil {
 		env = map[string]string{}
 	}
-	_, line, ok := strings.Cut(string(out), "&& ")
-	if !ok {
-		t.Fatalf("make -n run printed %q, not cd docker && ... compose up", out)
-	}
-	for _, word := range strings.Fields(line) {
-		k, v, ok := strings.Cut(word, "=")
+	for _, line := range lines {
+		rest, ok := strings.CutPrefix(line, "cd docker && ")
 		if !ok {
-			if word != "engine" {
-				t.Fatalf("make -n run printed %q, where the compose command should follow the variables", out)
-			}
-			break
+			continue
 		}
-		env[k] = v
+		for _, word := range strings.Fields(rest) {
+			k, v, ok := strings.Cut(word, "=")
+			if !ok {
+				if word != "engine" {
+					t.Fatalf("make -n %s printed %q, where the compose command should follow the variables", target, line)
+				}
+				break
+			}
+			env[k] = v
+		}
+		return env
 	}
-	return env
+	t.Fatalf("make -n %s printed %q, no cd docker && ... compose", target, lines)
+	return nil
+}
+
+// makeRunEnv returns the variables that make run passes to compose with
+// OCCAMY_DEBUG set to debug, from a shell with shell's variables, over
+// them.
+func makeRunEnv(t *testing.T, debug string, shell map[string]string) map[string]string {
+	t.Helper()
+	return makeEnv(t, "run", []string{"OCCAMY_DEBUG=" + debug}, shell)
 }
 
 // composeInterpolate replaces ${NAME} and ${NAME:-default} in s as

@@ -33,20 +33,16 @@ DEMO_DEBUG = OCCAMY_V0_CONF=$(if $(filter 1,$(OCCAMY_DEBUG)),occamy-debug.yaml,o
 	OCCAMY_V1_DEBUG_ADDRESS=$(if $(filter 1,$(OCCAMY_DEBUG)),0.0.0.0:5638)
 
 # DEMO_BIND sets OCCAMY_BIND, the address on which docker-compose.yaml
-# publishes the ports of both occamyd services: the loopback interface,
-# 127.0.0.1, unless OCCAMY_BIND names another, such as 0.0.0.0 for
-# every interface. It is set either way, so that docker/.env cannot
-# widen it unseen. In debug mode the v0 service serves pprof, which has
-# no authentication, on its own port, so OCCAMY_DEBUG=1 refuses any
-# address but the loopback one. occamy-v1's debug port stays on the
-# loopback interface whatever OCCAMY_BIND says.
-DEMO_BIND = $(if $(and $(filter 1,$(OCCAMY_DEBUG)),$(filter-out 127.0.0.1,$(OCCAMY_BIND))),$(error \
-	OCCAMY_DEBUG=1 serves pprof without authentication on the v0 service's port, \
-	so OCCAMY_BIND must be 127.0.0.1 or unset, not $(OCCAMY_BIND))) \
-	OCCAMY_BIND=$(or $(OCCAMY_BIND),127.0.0.1)
+# publishes occamy-v1's port: the loopback interface, 127.0.0.1, unless
+# OCCAMY_BIND names another, such as 0.0.0.0 for every interface. It is
+# set either way, so that docker/.env cannot widen it unseen. The v0
+# service's port and occamy-v1's debug port stay on the loopback
+# interface whatever OCCAMY_BIND says.
+DEMO_BIND = OCCAMY_BIND=$(or $(OCCAMY_BIND),127.0.0.1)
 
-# run starts the demo stack, published on the loopback interface unless
-# OCCAMY_BIND says otherwise (DEMO_BIND). OCCAMY_DEBUG=1 turns on its debug routes,
+# run starts the demo stack, with occamy-v1 published on the loopback
+# interface unless OCCAMY_BIND says otherwise (DEMO_BIND), and the rest
+# on it always. OCCAMY_DEBUG=1 turns on its debug routes,
 # which have no authentication, on the host's loopback interface: the v0
 # service's pprof on OCCAMY_PORT, in debug mode (docker/occamy-debug.yaml),
 # for the pressure test, and occamy-v1's debug listener on
@@ -102,7 +98,7 @@ soak:
 # routes are off unless OCCAMY_DEBUG=1, as run's are.
 bench: build
 	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml up -d --build --wait
-	go run ./bench -engine $(CONTAINER_ENGINE) -project $(or $(COMPOSE_PROJECT_NAME),docker) \
+	go run ./bench -engine $(CONTAINER_ENGINE) -project $(or $(COMPOSE_PROJECT_NAME),occamy) \
 		-addr localhost:$(or $(OCCAMY_PORT),5636) -v1 localhost:$(or $(OCCAMY_V1_PORT),5637) \
 		-guacd localhost:$(or $(GUACD_PORT),4822) $(BENCH_FLAGS)
 .PHONY: bench
@@ -137,10 +133,10 @@ test:
 # clean removes what make build and make run leave behind, and nothing
 # else of the engine's, which other projects may share: the demo
 # stack's containers, network and volume and the images that compose
-# built for it (compose down, in COMPOSE_PROJECT_NAME's project), and
-# the images of make build that a later build untagged, which carry
-# BUILD_LABEL. The tagged images stay; podman rmi or docker rmi removes
-# them.
+# built for it (compose down, in the project occamy that
+# docker-compose.yaml names, or COMPOSE_PROJECT_NAME's), and the images
+# of make build that a later build untagged, which carry BUILD_LABEL.
+# The tagged images stay; podman rmi or docker rmi removes them.
 clean:
 	cd docker && $(CONTAINER_ENGINE) compose down --remove-orphans --volumes --rmi local
 	$(CONTAINER_ENGINE) image prune -f --filter label=$(BUILD_LABEL)
