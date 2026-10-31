@@ -22,6 +22,7 @@ type lookahead struct {
 	r       image.Rectangle
 	codec   protocol.Codec
 	payload []byte
+	k       int // the buffer in w.tiles holding its pixels
 }
 
 // encode reads the tiles of the next message from order[i] on, encodes
@@ -41,7 +42,11 @@ type lookahead struct {
 // rare case that the encoder could not fit even one tile in a message the
 // client takes: the tile is then taken as sent, so that the writer does
 // not try it again until it changes. It reports false for ok if the
-// screen was resized since order was made.
+// screen was resized since order was made. The message's tiles' pixels
+// are in w.tiles from w.msgK on, and the quality the client gets them at
+// is w.msgQuality.
+//
+// A run ends before a tile that a copy-rect of the frame completed.
 func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send, ok bool) {
 	start := time.Now()
 	defer func() { w.encodeTime += time.Since(start) }()
@@ -54,6 +59,7 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 		if a.tile == t && a.version >= w.versions[t] {
 			w.payload = append(w.payload[:0], a.payload...)
 			w.runVersion = append(w.runVersion[:0], a.version)
+			w.msgK, w.msgQuality = a.k, lossless
 			w.message(id, a.r, a.codec)
 			return 1, true, true
 		}
@@ -65,6 +71,7 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 	w.runVersion = append(w.runVersion[:0], version)
 	payload, codec, lossy := w.enc.Tile(w.payload[:0], w.tiles[0], r.Dx(), r.Dy())
 	w.payload = payload
+	w.msgK, w.msgQuality = 0, lossless
 	if !lossy {
 		w.message(id, r, codec)
 		return 1, true, true
@@ -82,7 +89,7 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 	for i+n < len(order) && n < encoder.MaxRun {
 		u := order[i+n]
 		ru := w.g.rect(u)
-		if u != order[i+n-1]+1 || u/w.g.cols != t/w.g.cols || width+ru.Dx() > maxWidth {
+		if u != order[i+n-1]+1 || u/w.g.cols != t/w.g.cols || width+ru.Dx() > maxWidth || w.sent[u] >= w.versions[u] {
 			break
 		}
 		got, v := w.fb.ReadTile(u, w.tile(n))
@@ -94,7 +101,7 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 		}
 		b, c, lossy := w.enc.Tile(w.ahead.payload[:0], w.tiles[n], ru.Dx(), ru.Dy())
 		if !lossy {
-			w.ahead = lookahead{ok: true, tile: u, version: v, r: ru, codec: c, payload: b}
+			w.ahead = lookahead{ok: true, tile: u, version: v, r: ru, codec: c, payload: b, k: n}
 			break
 		}
 		w.ahead.payload = b
@@ -105,10 +112,12 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 	}
 
 	// Encode it, halving it while the message is too large.
+	q := w.p.Quality()
+	w.msgQuality = lossyQuality(q)
 	for {
 		rect := w.rects[0].Union(w.rects[n-1])
 		w.assemble(n, rect)
-		w.payload, codec = w.enc.Lossy(w.payload[:0], w.runPix, rect.Dx(), rect.Dy(), w.p.Quality())
+		w.payload, codec = w.enc.Lossy(w.payload[:0], w.runPix, rect.Dx(), rect.Dy(), q)
 		if codec != 0 {
 			w.message(id, rect, codec)
 			if w.limits.CheckSize(len(w.buf)) == nil {
