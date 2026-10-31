@@ -241,12 +241,14 @@ func (s *Session) term(kind opKind, data []byte, n int) error {
 	return s.add(op{kind: kind, data: data, bytes: n})
 }
 
-// add adds o to the open frame.
+// add adds o to the open frame. o holds its message's bytes and, as
+// the Session counts it, opCost.
 func (s *Session) add(o op) error {
 	if s.open == nil {
 		s.open = &frame{}
 	}
 	f := s.open
+	o.bytes += opCost
 	f.ops = append(f.ops, o)
 	f.bytes += o.bytes
 	f.work += o.work
@@ -281,7 +283,10 @@ func (s *Session) frameEnd(m *protocol.FrameEnd) error {
 	case s.end != nil:
 		s.backlog -= f.bytes // nothing is delivered after End
 		return nil
-	case s.frames > s.window:
+	case s.frames+s.taken > s.window:
+		// With this one, the frames the server sent that the client has
+		// not acknowledged: those queued, and the one Next took and
+		// acknowledges at its next call.
 		return fmt.Errorf("%w: more than %d frames unacknowledged", protocol.ErrInvalid, s.window+1)
 	}
 	s.queue = append(s.queue, item{f: f})

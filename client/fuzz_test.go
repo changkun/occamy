@@ -141,12 +141,12 @@ func FuzzSession(f *testing.F) {
 			}
 			// Every screen is at most maxPixels, which bounds maxBacklog,
 			// and the backlog passes it by one message at most: its
-			// bytes, and a tile's decoded pixels.
+			// bytes, its op, and a tile's decoded pixels.
 			limit := minBacklog
 			if w.Class == protocol.ClassGraphical {
 				limit = max(min((s.window+2)*3*4*maxPixels, 1<<30), minBacklog)
 			}
-			limit += s.limits.MaxMessageSize + 4*maxPixels
+			limit += s.limits.MaxMessageSize + opCost + 4*maxPixels
 			check := func() {
 				s.mu.Lock()
 				backlog := s.backlog
