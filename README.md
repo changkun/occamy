@@ -43,9 +43,12 @@ each protocol. It needs Podman (or Docker) with a compose provider, and
 ```
 git clone https://github.com/changkun/occamy.git
 cd occamy
-make build      # the occamy image; make build CONTAINER_ENGINE=docker for Docker
+make build      # the occamy image
 make run        # the demo stack
 ```
+
+With Docker, give both, and every other `make` command,
+`CONTAINER_ENGINE=docker`, or export it.
 
 Open http://localhost:5637/static/ and sign in as `demo` with the
 password `occamy`. `make stop` stops the stack.
@@ -119,7 +122,7 @@ v0 from an image:
 ```
 podman network create occamy
 podman run -d --name guacd --network occamy docker.io/guacamole/guacd:1.6.0
-podman run -d --network occamy -p 5636:5636 \
+podman run -d --network occamy -p 127.0.0.1:5636:5636 \
     -v ./docker/occamy.yaml:/occamy/conf.yaml:ro occamy:latest
 ```
 
@@ -199,9 +202,11 @@ make stop
 [docs/try-it.md](./docs/try-it.md) walks through the demo connection by
 connection, and shows how to run the stack next to another one on the
 same host. The stack publishes `occamy` and `occamy-v1` on the host's
-loopback interface only. `make run OCCAMY_BIND=0.0.0.0` publishes them
-on every interface, with a demo password anyone can read here, so do
-that only on a network you trust.
+loopback interface only. `make run OCCAMY_BIND=0.0.0.0` publishes
+`occamy-v1` on every interface, with a demo password anyone can read
+here, so do that only on a network you trust. The v0 service stays on
+the loopback interface: its login signs a token for any host, with a
+secret anyone can read here too.
 
 [docker/docker-compose.yaml](./docker/docker-compose.yaml) builds small
 Debian demo servers from [docker/demo](./docker/demo) for amd64 and arm64.
@@ -243,6 +248,8 @@ Here is a working video demo:
 go test -race ./...
 ```
 
+On Linux and Windows the race detector needs a C compiler, such as gcc;
+without one, run `go test ./...`.
 [docs/try-it.md](./docs/try-it.md#6-unit-tests-lint-and-the-web-clients-tests)
 lists every suite with its command: the unit tests, lint, the web
 client's tests, the end-to-end, pressure and soak tests, the

@@ -18,7 +18,8 @@ described in the [README](../README.md#v0-released).
 
 | What | Version | For |
 |------|---------|-----|
-| [Go](https://go.dev/dl/) | 1.26.4 or later, as `go.mod` says | `occamyd` and the Go tests. No C toolchain: `occamyd` builds with `CGO_ENABLED=0` |
+| [Go](https://go.dev/dl/) | 1.26.4 or later, as `go.mod` says | `occamyd` and the Go tests. `occamyd` builds with `CGO_ENABLED=0`, without a C toolchain |
+| A C compiler, such as gcc | | Linux and Windows only: Go's race detector, `-race`, which [section 6](#6-unit-tests-lint-and-the-web-clients-tests) uses. macOS needs none |
 | [Podman](https://podman.io) with a compose provider, or Docker with Compose v2 | | the image, the demo stack and the integration tests |
 | [Node.js](https://nodejs.org) with npm | 22.12 or later | the web client and its tests |
 | `make`, `git`, `curl` | | |
@@ -78,7 +79,11 @@ make run
 minutes the first time. It then starts the stack in
 [docker/docker-compose.yaml](../docker/docker-compose.yaml) and returns
 once every service is healthy. Run `make build` before it: the stack
-runs the image that `make build` makes.
+runs the image that `make build` makes. Its compose project is
+`occamy`, so its containers are named `occamy-<service>-1`. A stack
+that an older checkout started runs under the project `docker`
+instead, on the same ports. If that stack is yours, stop it once with
+`(cd docker && podman compose -p docker down)`.
 
 | Service | On the host | What it is |
 |---------|-------------|------------|
@@ -89,12 +94,16 @@ runs the image that `make build` makes.
 
 The stack publishes both `occamyd` services on the host's loopback
 interface only, since anyone who has read this guide knows the demo
-password. To reach it from another machine, publish them on every
-interface with `make run OCCAMY_BIND=0.0.0.0`, or on one address of
-the host's, and only on a network you trust. Set `OCCAMY_BIND` on
-`make`'s command line or export it, since `make run` does not read it
-from `docker/.env`. `make run OCCAMY_DEBUG=1` refuses any address but
-`127.0.0.1`, since the debug routes have no authentication.
+password. To reach the web client from another machine, publish
+`occamy-v1` on every interface with `make run OCCAMY_BIND=0.0.0.0`, or
+on one address of the host's, and only on a network you trust. Set
+`OCCAMY_BIND` on `make`'s command line or export it, since `make run`
+does not read it from `docker/.env`. The v0 service stays on the
+loopback interface whatever `OCCAMY_BIND` says. Its login signs a
+token for any host, with a secret anyone can read in
+[docker/occamy.yaml](../docker/occamy.yaml), so guacd would connect
+wherever a stranger's token pointed. The debug routes, which have no
+authentication, stay on the loopback interface too.
 
 Open <http://localhost:5637/static/> and sign in as `demo` with the
 password `occamy`. **Connections** lists 23 connections, and the bar
@@ -130,7 +139,7 @@ on a shared machine, give this stack its own:
 
 | Variable | Default | What it sets |
 |----------|---------|--------------|
-| `COMPOSE_PROJECT_NAME` | `docker`, the compose file's directory | the compose project: the names of the containers, the network, the volume and the demo images |
+| `COMPOSE_PROJECT_NAME` | `occamy`, which `docker-compose.yaml` names | the compose project: the names of the containers, the network, the volume and the demo images |
 | `OCCAMY_PORT` | `5636` | the v0 service's port |
 | `OCCAMY_V1_PORT` | `5637` | `occamy-v1`'s port |
 | `OCCAMY_V1_DEBUG_PORT` | `5638` | `occamy-v1`'s debug listener, when it is on |
@@ -148,7 +157,8 @@ make run
 ```
 
 The web client is then at <http://localhost:15637/static/>. Replace the
-ports in this guide's URLs and `curl` commands to match.
+ports in this guide's URLs, its `curl` commands and the
+`OCCAMY_E2E_V1_ENDPOINT` of its reconnect test to match.
 
 ## 4. One connection per protocol
 
@@ -192,16 +202,17 @@ K8S=$(mktemp -d)
 podman run -d --name occamy-k3s --privileged -p 127.0.0.1:16443:6443 \
   docker.io/rancher/k3s:v1.34.1-k3s1 server \
   --disable=traefik --disable=metrics-server --disable=servicelb --tls-san=127.0.0.1
-until podman exec occamy-k3s kubectl get --raw /readyz; do sleep 2; done
+for i in $(seq 60); do podman exec occamy-k3s kubectl get --raw /readyz && break; sleep 2; done
 ```
 
 The loop prints errors while k3s starts, and `ok` once its API server
-is ready, usually within half a minute. Then add the pod,
+is ready, usually within half a minute. It gives up after about two
+minutes; `podman logs occamy-k3s` then says why. Then add the pod,
 the ServiceAccount `occamy`, and a Role that lets it exec into pods of
 the namespace and nothing else. `pods/exec` and `pods/attach` take
 `get` and `create`, as [configuration.md](configuration.md#kubernetes-pods)
 says. The first `apply` may fail while the cluster starts, so the loop
-tries again:
+tries again, for up to a minute:
 
 ```
 cat > "$K8S/manifest.yaml" <<'EOF'
@@ -237,7 +248,7 @@ spec:
       image: docker.io/library/busybox:1.37
       command: [sleep, "86400"]
 EOF
-until podman exec -i occamy-k3s kubectl apply -f - < "$K8S/manifest.yaml"; do sleep 2; done
+for i in $(seq 30); do podman exec -i occamy-k3s kubectl apply -f - < "$K8S/manifest.yaml" && break; sleep 2; done
 podman exec occamy-k3s kubectl -n occamy-try wait --for=condition=Ready pod/shell --timeout=300s
 ```
 
@@ -415,7 +426,11 @@ go test -race ./...
 ```
 
 The unit tests need no stack and no container engine. They take a few
-minutes with the race detector.
+minutes with the race detector. On Linux and Windows the race detector
+needs cgo and a C compiler, as in [section 1](#1-what-you-need);
+without one, `go test -race` stops with `-race requires cgo` or `C
+compiler "gcc" not found`, and `go test ./...` runs the same tests
+without it.
 
 ```
 golangci-lint version    # must say version 2
@@ -431,7 +446,8 @@ The web client's tests run in `client/occamy-web`, as CI's web job
 runs them. The interop test runs the TypeScript client against
 `occamyd`'s stream code, served by `client/internal/webinterop` and
 built with the race detector. It is skipped unless
-`OCCAMY_INTEROP_SERVER` names the server:
+`OCCAMY_INTEROP_SERVER` names the server. Without a C compiler on Linux
+or Windows, leave `-race` out of the `go build`:
 
 ```
 go build -race -o "${TMPDIR:-/tmp}/occamy-webinterop" ./client/internal/webinterop
@@ -561,6 +577,11 @@ you start:
   podman rm -f occamy-vnc-test
   ```
 
+  On a shared host, give the image, the container and the port names
+  of your own in place of `occamy-bench-desktop`, `occamy-vnc-test` and
+  15900, as for [the Kubernetes step](#kubernetes): another session
+  may have built an `occamy-bench-desktop` of its own.
+
 - **`TestEncodings`** takes the same `OCCAMY_VNC_ADDR` and asks for one
   encoding at a time.
 - **`TestMacOS`** needs a Mac with Screen Sharing on; its doc comment,
@@ -615,8 +636,9 @@ podman rmi occamy:latest "occamy:$(git describe --always --tags)"
 ```
 
 `make clean` removes nothing that is not Occamy's. It runs `compose
-down` with `--volumes --rmi local` for the stack's project, which
-removes the demo servers' images and the volume of TigerVNC's CA. It
+down` with `--volumes --rmi local` for the stack's project, `occamy`
+unless `COMPOSE_PROJECT_NAME` names another, which removes the demo
+servers' images and the volume of TigerVNC's CA. It
 then prunes the images of earlier `make build` runs that a later build
 left untagged, which `make build` labels. The tagged image of `make
 build` stays, so `podman rmi` removes it.
@@ -645,8 +667,8 @@ The images that were pulled stay for the next run:
 `docker.io/guacamole/guacd:1.6.0`, `docker.io/rancher/k3s:v1.34.1-k3s1`,
 the base images `debian:trixie-slim`, `golang:1.27-trixie`,
 `node:25-trixie-slim` and `gcr.io/distroless/static-debian13:nonroot`.
-So does `occamy-bench-desktop`, if you built it for `TestBenchDesktop`.
-`podman rmi` removes them.
+So does `occamy-bench-desktop`, or the name you gave it, if you built
+it for `TestBenchDesktop`. `podman rmi` removes them.
 
 Podman also keeps the build stages of every image it built, as
 untagged images that it uses as its build cache: those of `make
@@ -655,5 +677,6 @@ images, a gigabyte or so each. `make clean` leaves them, since nothing
 marks them as Occamy's. `podman images -f dangling=true` lists them,
 and `podman image prune` removes them, with every other untagged image
 of the engine, so run it only if no one else's images are on it.
-Docker keeps its build cache apart from its images; `docker builder
-prune` removes it.
+Docker keeps its build cache apart from its images. `docker builder
+prune` removes it, everyone's on that engine, so run it only if no one
+else builds on it.
