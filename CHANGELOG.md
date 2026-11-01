@@ -764,6 +764,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   so that CI catches it
   ([guacd-bridge.md](specs/008-native-architecture/guacd-bridge.md),
   Implementation notes: input before the remote is up).
+- The demo desktop's clipboard probe no longer kills an `xclip` running
+  in the remote xterm. The probe gave up on the clipboard after 2 s, so
+  on a loaded host that `xclip`, the clipboard's owner, could answer a
+  window that had gone: it died of `BadWindow`, printed in the xterm,
+  and the remote clipboard went with it. The probe now gives up after
+  30 s.
 - `internal/guacamole`'s display, which the benchmark and the guacd
   bridge draw with, decodes lossy WebP as libwebp, and so a browser,
   does. `golang.org/x/image/webp` alone read VP8's limited-range colours
@@ -804,7 +810,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   watchdog had started it again. x11vnc 0.9.17 owns the clipboard after
   a client's cut text and traps errors as it answers, but stops trapping
   before the X server reports one unless it syncs; the desktop's
-  clipboard probe kills its xclip after 2 s, and an x11vnc that stalled
+  clipboard probe killed its xclip after 2 s, and an x11vnc that stalled
   for longer, as clients connected on a loaded host, answered such
   requests. `start.sh` sets `X11VNC_SENDEVENT_SYNC`, which makes it
   sync. The error came after a refused resize once, but has nothing to

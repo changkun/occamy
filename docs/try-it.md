@@ -390,11 +390,17 @@ The demo x11vnc used to die now and then of an X error, `BadWindow`,
 which ended its sessions with "Remote unreachable", sometimes right
 after it refused a resize. The resize was not the cause. It was
 x11vnc's own clipboard bug: it answered a request for the clipboard
-from a window that had gone, which the desktop's clipboard probe
-leaves behind when x11vnc stalls for more than 2 seconds. The demo
-sets `X11VNC_SENDEVENT_SYNC=1`, which makes x11vnc catch that error. A
+from a window that had gone, which the desktop's clipboard probe left
+behind when x11vnc stalled for more than 2 seconds. The demo sets
+`X11VNC_SENDEVENT_SYNC=1`, which makes x11vnc catch that error. A
 watchdog still starts x11vnc again should it die of anything else; the
 sessions on it end, and you open them again.
+
+The same request used to kill an `xclip` that you ran in the remote
+xterm, which printed `X Error of failed request: BadWindow` there and
+took the remote clipboard with it. The probe now waits 30 seconds
+rather than 2, so only an `xclip` that stalls for that long can meet
+it. If it does, run the `xclip` again.
 
 A freshly started x11vnc ignores clipboard text from the browser until
 its latest client has been connected for 45 seconds, and takes it from

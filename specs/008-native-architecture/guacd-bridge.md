@@ -988,7 +988,7 @@ that guacd was `vnc`'s default, they are corrected below.
     tries. It is a fault of the server, not of either backend. The
     cause, found later, is x11vnc's answer to a request for the
     clipboard, which it owns after a client's cut text, from a window
-    that has gone: the desktop's clipboard probe kills its xclip after
+    that has gone: the desktop's clipboard probe killed its xclip after
     2 s, and x11vnc stalled for longer as clients connected. start.sh
     now sets `X11VNC_SENDEVENT_SYNC`, with which x11vnc traps that
     error ([native VNC backend](native-vnc-backend.md), Implementation

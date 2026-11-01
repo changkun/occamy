@@ -18,9 +18,9 @@
 # gone (request 18, error 3) reaches its fatal handler, and it logs
 # "caught X11 error:", drops its polling images on its way to exit, and
 # at times stops in a futex wait with connections waiting to be
-# accepted. The clipboard probe (desktop.sh) asks with an xclip that it
-# kills after 2 s, so an x11vnc that stalled for longer met such
-# requests; it did as clients connected, on loaded hosts.
+# accepted. The clipboard probe (desktop.sh) used to kill its xclip after
+# 2 s, so an x11vnc that stalled for longer met such requests; it did as
+# clients connected, on loaded hosts. The probe now waits 30 s.
 # X11VNC_SENDEVENT_SYNC makes it wait for the X server (XSync) before it
 # stops trapping, as it does by itself once its check has found a gone
 # window, so that the error is trapped (tests/x11vnc_test.go).
