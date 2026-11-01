@@ -1220,6 +1220,17 @@ RDP's guacd path, RDP no longer needs guacd at all.
     Makefile's default engine, podman, whose compose reached no daemon
     on the runner. CI now gives `make e2e` `CONTAINER_ENGINE=docker`,
     as it gives `make run`.
+
+    With podman, which CI does not run, the subtest failed at once
+    while counting the channel servers. `podman compose` prints a
+    notice of its compose provider on standard error, and the subtest
+    read standard error with standard output. It now reads standard
+    output only, and runs compose with
+    `PODMAN_COMPOSE_WARNING_LOGS=false` as well, which the x11vnc test
+    of [native-vnc-backend.md](native-vnc-backend.md) brought;
+    `TestComposeRun` checks both. The line it counts,
+    `reconnectwm.sh`'s, reaches the rdp container's standard output.
+    The run of the run-and-test guide (`docs/try-it.md`) found it.
 - **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
   through occamyd's routes with the Go client against `rdptest`: NLA
   with stored credentials, the hello's size, the screen, scancodes,

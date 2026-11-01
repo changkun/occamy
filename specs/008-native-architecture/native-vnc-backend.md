@@ -1490,12 +1490,15 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
   window, which it does only once its latest client has been connected
   for 45 s, or for 8 s once it has seen a window manager
   (`guess_dm_gone`, `xevents.c`), so the test sends the text until the
-  clipboard holds it, for up to 90 s. The tests that reach into the
-  stack now run compose with `PODMAN_COMPOSE_WARNING_LOGS=false`: podman
-  compose prints a banner to its standard error, which came first in
-  what they read and made every comparison fail with podman. They still
-  read both streams, since compose may print what a container wrote to
-  its standard error on its own. The watchdog stays, for x11vnc's waits
+  clipboard holds it, for up to 90 s. podman compose prints a banner to
+  its standard error, which came first in what the tests that reach
+  into the stack read and made every comparison fail with podman. They
+  now run compose with `PODMAN_COMPOSE_WARNING_LOGS=false` and read
+  only its standard output (`composeCmd.run`, checked by
+  `TestComposeRun`). Compose may print a container's standard error on
+  its own, so the demo images log what the tests count to their
+  standard output: `start.sh` prints x11vnc's lines, its standard error
+  among them, and the watchdog's there. The watchdog stays, for x11vnc's waits
   on clients that do not read and for any other error. The parity row
   `resize: ignored without ExtendedDesktopSize` is now `resize: the
   server keeps its size`, since x11vnc has ExtendedDesktopSize and
