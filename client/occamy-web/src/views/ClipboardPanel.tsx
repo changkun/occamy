@@ -13,7 +13,7 @@
 import { type FormEvent, type ReactElement, useId, useState } from 'react'
 
 import { ProtocolError } from '../protocol'
-import { CLIPBOARD_UNSENT, type ClipboardSend, type SessionController } from '../lib/controller'
+import { CLIPBOARD_WAITING, type ClipboardSend, type SessionController } from '../lib/controller'
 import { MAX_LABEL, clip } from '../lib/text'
 import type { Abilities } from '../lib/roles'
 import { copyText, pasteLocalClipboard } from './dom'
@@ -24,19 +24,19 @@ export interface ClipboardPanelProps {
   remote: string | null
   /** The text in the panel: the remote's, or what the user made of it. */
   draft: string
-  /** Whether text sent did not reach the remote clipboard, which does not answer. */
-  unsent: boolean
+  /** Whether text sent waits for the remote, which has not taken it. */
+  waiting: boolean
   can: Abilities
   onClose: () => void
 }
 
-export function ClipboardPanel({ controller, remote, draft: text, unsent, can, onClose }: ClipboardPanelProps): ReactElement {
+export function ClipboardPanel({ controller, remote, draft: text, waiting, can, onClose }: ClipboardPanelProps): ReactElement {
   // What the last action said, with the remote clipboard it was said
   // over: it shows while the remote clipboard stays that.
   const [status, setStatus] = useState<{ text: string; remote: string | null } | null>(null)
   const say = (s: string): void => setStatus({ text: s, remote: controller.getState().clipboard })
   const said = status !== null && status.remote === remote ? status.text : ''
-  const shown = unsent ? CLIPBOARD_UNSENT : said
+  const shown = waiting ? CLIPBOARD_WAITING : said
   // edit puts t in the box, which makes what was said out of date.
   const edit = (t: string): void => {
     controller.setDraft(t)

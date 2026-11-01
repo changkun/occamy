@@ -627,7 +627,7 @@ function readCodecList(v: Uint8Array): number[] {
   return Array.from(v)
 }
 
-/** encode encodes m, header included, with flags 0. */
+/** encode encodes m, header included, with flags 0, or ignorable for clipboard-status. */
 export function encode(m: Message): Uint8Array {
   const w = new Writer().header(messageType(m), m.type === 'clipboard-status' ? FLAG_IGNORABLE : 0)
   switch (m.type) {
