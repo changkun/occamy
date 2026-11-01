@@ -137,7 +137,7 @@ var (
 	// ErrNoFirstFrame is returned by Run when guacd draws nothing that
 	// viewers can see for firstFrameLimit. Its text is what they are told.
 	ErrNoFirstFrame = backend.Failure("guacd drew nothing within " + firstFrameLimit.String() +
-		" of accepting the connection: it or the remote may have hung. Try opening it again.")
+		": it or the remote may have hung. Try opening it again.")
 )
 
 var nop = []byte("3.nop;")
