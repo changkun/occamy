@@ -6,4 +6,4 @@
 # An XFCE session on $DISPLAY, until it ends. xrdp-sesman runs this as the
 # user when it starts an X session, and start.sh for the VNC session.
 export LANG=C.UTF-8 NO_AT_BRIDGE=1
-exec dbus-launch --exit-with-session xfce4-session
+exec dbus-run-session -- xfce4-session

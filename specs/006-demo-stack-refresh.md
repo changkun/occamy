@@ -407,7 +407,9 @@ first as `desktop-vnc` and `desktop-rdp`.
   checks that the two connections come first and are native.
 - `occamy-v1` does not `depends_on` it: the bench overlay leaves the
   service out with an inactive profile, and a dependency would pull it
-  back in. `make run`'s `--wait` still waits for its healthcheck.
+  back in. `make run`'s `--wait` still waits for its healthcheck. A
+  profile does not stop a running container, so `make bench` removes one
+  that `make run` left, which would idle next to the measurements.
 - One X session for each protocol: Xvnc's, from the start, and xrdp's,
   from the first connection. Firefox refuses a profile that another
   session has open, and XFCE keeps each session's settings in its home,
@@ -422,7 +424,11 @@ first as `desktop-vnc` and `desktop-rdp`.
   which Firefox is 282 MB and libllvm, for Mesa, 120 MB.
 - `TestDemoDesktop` reads the panel's second row: it holds no text, and
   a panel that stayed behind a growing screen leaves its right end
-  dark, which `TestPanelShown` checks without a stack.
+  dark, which `TestPanelShown` checks without a stack. Colours alone do
+  not show a wallpaper: with no xfdesktop the panel and dock give 1,349
+  over VNC and 6,706 over RDP, on a screen 94% black. So no dark colour
+  may cover over half the screen; the commonest covers 21-34% on the
+  desktop. A light one may, since Firefox left open makes it 76% white.
 
 ## Appendix: revival verification harness
 

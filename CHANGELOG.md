@@ -17,7 +17,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   connections. The screen follows the window, and the panel the screen.
   `TestDemoDesktop` opens both. The other demo servers stay bare X
   servers, which the tests' probes need. The image is about 1 GB, built
-  with `--no-install-recommends`, and the bench overlay leaves it out.
+  with `--no-install-recommends`. The bench stack leaves it out, and
+  `make bench` removes one that `make run` started.
 - [docs/try-it.md](docs/try-it.md), a guide to running Occamy v1 for
   the first time, from a fresh checkout. It covers:
   - the prerequisites and the build;

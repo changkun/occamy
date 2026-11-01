@@ -72,12 +72,25 @@ func TestPanelShown(t *testing.T) {
 		}
 		return img
 	}
+	// band repaints rows from and to of img, by what colour gives a point.
+	band := func(img *image.RGBA, from, to int, colour func(x, y int) color.RGBA) *image.RGBA {
+		for y := from; y < to; y++ {
+			for x := range w {
+				img.SetRGBA(x, y, colour(x, y))
+			}
+		}
+		return img
+	}
+	icons := func(x, y int) color.RGBA { return color.RGBA{byte(x), byte(y), 0x80, 0xff} }
+	white := func(int, int) color.RGBA { return color.RGBA{0xff, 0xff, 0xff, 0xff} }
 	for _, tt := range []struct {
 		name string
 		img  *image.RGBA
 		want bool
 	}{
 		{"the desktop", fill(true, w), true},
+		{"a white window left open", band(fill(true, w), 26, 90, white), true},
+		{"many-coloured icons on black", band(fill(false, w), 80, h, icons), false},
 		{"nothing drawn", image.NewRGBA(image.Rect(0, 0, w, h)), false},
 		{"a black screen", fill(false, 0), false},
 		{"a panel with no wallpaper", fill(false, w), false},
@@ -98,11 +111,7 @@ func TestPanelShown(t *testing.T) {
 func awaitPanelV1(t *testing.T, ctx context.Context, cl *client.Session, size image.Point) {
 	t.Helper()
 	var shown string
-	defer func() {
-		if t.Failed() {
-			t.Logf("the screen is %v and shows %s", cl.Size(), shown)
-		}
-	}()
+	defer func() { t.Logf("the screen is %v and shows %s", cl.Size(), shown) }()
 	awaitV1(t, ctx, cl, fmt.Sprintf("XFCE's panel across %v", size), func(ev client.Event) bool {
 		if _, ok := ev.(client.Frame); !ok || !cl.Size().Eq(size) {
 			return false
@@ -116,14 +125,17 @@ func awaitPanelV1(t *testing.T, ctx context.Context, cl *client.Session, size im
 // panelShown says whether img shows XFCE's default session, and what it
 // shows if not. The panel is a light bar along the top, whose second row
 // is free of its text and reaches the right edge: a panel that stayed
-// behind a growing screen leaves the end of that row dark. Thousands of
-// colours, in the wallpaper's gradient, tell a desktop from a bar on a
-// plain screen.
+// behind a growing screen leaves the end of that row dark. The wallpaper
+// gives the screen at least minColours colours, but the panel and the
+// dock's icons can too on a black screen, so no dark colour may cover
+// more than maxShare of it. A light one may: a window left open in the
+// session, such as Firefox on a white page, covers most of the screen.
 func panelShown(img *image.RGBA) (string, bool) {
 	const (
 		row        = 1
 		minColours = 256
 		minBright  = 0.9 // the workspace switcher's cells are darker
+		maxShare   = 0.5 // of the screen, in one dark colour
 	)
 	w, h := img.Rect.Dx(), img.Rect.Dy()
 	if w == 0 || h <= row {
@@ -138,16 +150,24 @@ func panelShown(img *image.RGBA) (string, bool) {
 			lit++
 		}
 	}
-	colours := map[[3]byte]bool{}
+	colours := map[[3]byte]int{}
+	var common [3]byte
 	for y := range h {
 		line := img.Pix[y*img.Stride : y*img.Stride+4*w]
 		for x := 0; x < len(line); x += 4 {
 			if line[x+3] == 0xff {
-				colours[[3]byte(line[x:x+3])] = true
+				c := [3]byte(line[x : x+3])
+				colours[c]++
+				if colours[c] > colours[common] {
+					common = c
+				}
 			}
 		}
 	}
+	share := float64(colours[common]) / float64(w*h)
 	end := bright(img.Pix[row*img.Stride+4*(w-1):])
-	shown := fmt.Sprintf("%d colours, with %d of %d pixels of the panel's row bright, its end bright: %t", len(colours), lit, w, end)
-	return shown, len(colours) >= minColours && end && float64(lit)/float64(w) >= minBright
+	shown := fmt.Sprintf("%d colours, %.1f%% of the screen in %v, with %d of %d pixels of the panel's row bright, its end bright: %t",
+		len(colours), 100*share, common, lit, w, end)
+	empty := share > maxShare && !bright(append(common[:], 0xff))
+	return shown, len(colours) >= minColours && !empty && end && float64(lit)/float64(w) >= minBright
 }

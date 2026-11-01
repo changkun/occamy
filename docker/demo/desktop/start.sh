@@ -19,8 +19,12 @@ echo "occamy:$RDP_PASSWORD" | chpasswd
 # home, so one home for both sessions would tie them together.
 home=/home/occamy/vnc
 install -d -o occamy -g occamy "$home"
+install -o occamy -g occamy -m 644 /etc/skel/.bashrc /etc/skel/.profile "$home/"
 printf '%s\n' "$VNC_PASSWORD" | vncpasswd -f | install -o occamy -g occamy -m 600 /dev/stdin "$home/.vncpasswd"
 cd "$home"
+
+# runuser keeps the environment, and no session needs the passwords.
+unset VNC_PASSWORD RDP_PASSWORD
 
 # occamy runs commands as the user of the VNC session.
 occamy() {
@@ -35,7 +39,11 @@ rm -f /tmp/.X*-lock /tmp/.X11-unix/X*
 occamy Xvnc :1 -rfbport 5900 -geometry 1280x800 -depth 24 -AlwaysShared \
 	-desktop "Desktop (XFCE)" -SecurityTypes VncAuth -PasswordFile "$home/.vncpasswd" \
 	-nolisten tcp &
-while [ ! -e /tmp/.X11-unix/X1 ]; do sleep 0.1; done
+xvnc=$!
+while [ ! -e /tmp/.X11-unix/X1 ]; do
+	kill -0 "$xvnc" # set -e ends the script if Xvnc could not start
+	sleep 0.1
+done
 (while :; do
 	occamy /etc/xrdp/startwm.sh || true
 	sleep 1

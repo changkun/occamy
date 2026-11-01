@@ -238,9 +238,10 @@ the small servers that the tests probe.
 | RDP | **RDP, through guacd** (`rdp-guacd`) | The same X session through guacd. It keeps the size it opened at, and the page scales it |
 | Kubernetes | none in the demo stack | A terminal in a pod. See [Kubernetes](#kubernetes) below for a cluster to try it with |
 
-The two desktops do not share a session or its files. The RDP session's
-home is `/home/occamy` and the VNC session's is `/home/occamy/vnc`,
-since Firefox refuses a profile that another session has open. The
+The two desktops are separate sessions of one user, each with its own
+settings and Firefox profile. The RDP session's home is `/home/occamy`
+and the VNC session's is `/home/occamy/vnc`, inside it, since Firefox
+refuses a profile that another session has open. The
 `desktop` service has no guacd connection: to see a desktop through
 guacd, use the connections below.
 
