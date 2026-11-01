@@ -372,12 +372,18 @@ func composeE2E(t *testing.T) composeCmd {
 	return c
 }
 
-// run runs the compose command with args and returns what it printed.
+// run runs the compose command with args and returns what it printed,
+// on both streams, since compose may print what a container wrote to
+// its standard error on its own. podman compose prints a banner to its
+// standard error before it runs docker-compose, which would come first
+// in every output, unless PODMAN_COMPOSE_WARNING_LOGS is false.
 func (c composeCmd) run(t *testing.T, args ...string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, c[0], append(slices.Clone(c[1:]), args...)...).CombinedOutput()
+	cmd := exec.CommandContext(ctx, c[0], append(slices.Clone(c[1:]), args...)...)
+	cmd.Env = append(os.Environ(), "PODMAN_COMPOSE_WARNING_LOGS=false")
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s %s: %v\n%s", strings.Join(c, " "), strings.Join(args, " "), err, out)
 	}
