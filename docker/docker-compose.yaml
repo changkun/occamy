@@ -12,9 +12,9 @@
 # The project is named occamy, not after the file's directory, docker,
 # which any other checkout or compose file in a directory of that name
 # shares; make clean removes the project's containers, volume and
-# images. OCCAMY_IMAGE, OCCAMY_PORT and OCCAMY_V1_PORT run a second
-# stack next to the first, under another project name
-# (COMPOSE_PROJECT_NAME or -p), on a shared host.
+# images. OCCAMY_IMAGE, which make build tags too, OCCAMY_PORT and
+# OCCAMY_V1_PORT run a second stack next to the first, under another
+# project name (COMPOSE_PROJECT_NAME or -p), on a shared host.
 #
 # occamy-v1 is published on the host's loopback interface unless
 # OCCAMY_BIND names another address, such as 0.0.0.0 for every

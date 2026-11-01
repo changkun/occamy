@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -108,6 +109,18 @@ func (c *cluster) run(t *testing.T, stdin string, args ...string) (string, error
 	return out.String(), nil
 }
 
+// remove removes the container, and with -v the volumes its image
+// declares, which would stay behind. Docker's rm has no -t, so it is
+// the kill that spares podman's rm -f its 10 s stop timeout. The kill
+// fails on a container that has already stopped, and rm removes that
+// one all the same.
+func (c *cluster) remove(t *testing.T) error {
+	t.Helper()
+	_, _ = c.run(t, "", "kill", c.name)
+	_, err := c.run(t, "", "rm", "-f", "-v", c.name)
+	return err
+}
+
 func (c *cluster) kubectl(t *testing.T, stdin string, args ...string) string {
 	t.Helper()
 	out, err := c.run(t, stdin, append([]string{"exec", "-i", c.name, "kubectl"}, args...)...)
@@ -132,7 +145,7 @@ func startCluster(t *testing.T) *cluster {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if _, err := c.run(t, "", "rm", "-f", "-t", "0", c.name); err != nil {
+		if err := c.remove(t); err != nil {
 			t.Logf("removing the container: %v", err)
 		}
 	})
@@ -220,6 +233,29 @@ func firstInput(t *testing.T, b *kubernetes.Backend, ev backend.InputEvent) {
 			t.Fatal("Run did not start")
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// TestIntegrationRemove checks the commands that remove the container
+// on an engine that records them, whose kill fails as on a container
+// that has stopped. They have to be ones that Docker documents too:
+// podman would take more, and so no run on podman can show this.
+func TestIntegrationRemove(t *testing.T) {
+	engine := filepath.Join(t.TempDir(), "engine")
+	script := "#!/bin/sh\necho \"$*\" >> \"$0.calls\"\n[ \"$1\" != kill ]\n"
+	if err := os.WriteFile(engine, []byte(script), 0o700); err != nil { // #nosec G306 -- it has to run
+		t.Fatal(err)
+	}
+	c := &cluster{engine: engine, name: "k3s"}
+	if err := c.remove(t); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(engine + ".calls")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "kill k3s\nrm -f -v k3s\n"; string(got) != want {
+		t.Errorf("the engine got\n%swant\n%s", got, want)
 	}
 }
 
