@@ -171,7 +171,7 @@ best effort, has none. The live run was repeated after the fixes.
 | Criterion | Result |
 |-----------|--------|
 | TLS security negotiation with xrdp | Pass, live. |
-| NLA (CredSSP with NTLMv2) | Unverified live. Passes the [MS-NLMP] 4.2.4 vectors byte for byte, NTProofStr included, and a round trip against the package's own test acceptor. |
+| NLA (CredSSP with NTLMv2) | Unverified live at the time; see "What Windows Server 2025 refused" below. Passes the [MS-NLMP] 4.2.4 vectors byte for byte, NTProofStr included, and a round trip against the package's own test acceptor. |
 | Connection sequence through capabilities and licensing | Pass, live, at 32, 24, 16 and 15 bits per pixel. Licensing is the STATUS_VALID_CLIENT shortcut only. |
 | Bitmap updates decoded to the scene's pixels | Pass, live: every pixel of the 1024×768 wallpaper outside the probe swatch, exact at 32 and 24 bits per pixel, within 8 per channel at 16 and 15. |
 | Keyboard and mouse input reach the session | Pass, live: keys paint the probe swatch; the pointer lands where it was sent, on the session's X display. |
@@ -465,9 +465,47 @@ best effort, has none. The live run was repeated after the fixes.
   NTOWFv2, the LMv2 and NTLMv2 responses (NTProofStr byte for byte),
   the session base key, the encrypted session key, the sealing and
   signing keys, and the sealed message and its signature. The MIC, the
-  TSRequest framing, the public key binding and the error path are
-  checked only against this package's own acceptor. They are
-  self-consistent, not interoperable, until a Windows host answers.
+  TSRequest framing, the public key binding and the error path were
+  checked only against this package's own acceptor until Windows
+  Server 2025 answered them, except the error path (below).
+- **What Windows Server 2025 refused.** On 2026-11-01 a GitHub-hosted
+  runner gave the client its first real Windows: Windows Server 2025
+  Datacenter, 10.0.26100, over loopback with NLA on. Every logon failed
+  with `rdp: CredSSP: remote error: tls: internal error`. A replay of
+  the connection with the client's own messages, under one change at a
+  time, showed why.
+  - Proven: over TLS 1.3 this server refuses the ClientHello that Go
+    sends without a session cache, which has neither `session_ticket`
+    (35) nor `psk_key_exchange_modes` (45). Schannel logs the handshake
+    as complete (event 36880), and the server then sends an
+    `internal_error` alert without waiting for the client to write
+    anything, and logs events 139 (`0x80090308`) and 226. Adding a
+    cache adds both extensions, and nothing else changed between the
+    attempts that fail and those that pass.
+  - With the cache, NTLMv2, the TSRequest framing, the MIC and the
+    public key binding all pass: both rounds are answered, the server's
+    proof matches, the Early User Authorization Result allows the user,
+    and the server logs a 4624 at that moment. TLS 1.2 without a cache
+    passes the same way.
+  - Not the cause: the post-quantum groups, HelloRetryRequest, the
+    ML-DSA signature algorithms, HYBRID against HYBRID_EX, the TSRequest
+    version, or a 500 ms wait before NEGOTIATE.
+  - Not known: which of 35 or 45 the server needs, since Go offers them
+    together. Nor what impacket's `rdp_check` offers: it logged on at
+    the same TLS 1.3, cipher and group, a 4624 confirms it, but its
+    ClientHello was not captured.
+  - Not known either: how any other Windows version behaves. This is
+    one server on one runner, not step 2.
+
+  The client now gives each connection a one-entry session cache of its
+  own (`tlsPolicy.config`), so TLS 1.3 stays and Go offers both
+  extensions. A cache that outlived its connection would let a later
+  one resume, and a resumed connection does not check the server's
+  certificate, so nothing shares it: `TestConnectionsDoNotResume` shows
+  a second connection stays a full handshake against a fake server on
+  which a kept ticket does resume. rdptest refuses a TLS 1.3 ClientHello
+  without both extensions, so `TestSessionTicketsOffered` and every
+  other test that connects fail without the cache.
 - **What remains for a beta-quality backend.** The backend and the
   layers below are planned in
   [native-rdp-backend](native-rdp-backend.md), by phase.

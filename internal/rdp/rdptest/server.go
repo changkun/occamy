@@ -21,6 +21,7 @@ import (
 	"io"
 	"math/big"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -35,6 +36,38 @@ var ErrCredSSP = errors.New("rdptest: the client started CredSSP, which the fake
 // it selected standard RDP security, which the fake server does not
 // implement either.
 var ErrStandardSecurity = errors.New("rdptest: the server selected standard RDP security")
+
+// ErrNoSessionTickets is the TLS error of a client that offers TLS 1.3
+// without session_ticket and psk_key_exchange_modes.
+var ErrNoSessionTickets = errors.New("rdptest: a TLS 1.3 ClientHello without session_ticket and psk_key_exchange_modes")
+
+// The extensions that a ClientHello for TLS 1.3 must have.
+const (
+	extensionSessionTicket = 35
+	extensionPSKModes      = 45
+)
+
+// refuseWithoutTickets does what Windows Server 2025 does to a client
+// that offers TLS 1.3 without session tickets, as far as the fake server
+// can: Windows ends the connection just after the handshake, with an
+// internal_error alert, and this ends it in the handshake with the same
+// alert. Whether Windows looks at one extension or both is not known, so
+// this asks for both, the ClientHello that Windows has been seen to take.
+// A client that offers TLS 1.2 alone needs neither.
+func refuseWithoutTickets(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+	if !slices.Contains(hello.SupportedVersions, tls.VersionTLS13) {
+		return nil, nil
+	}
+	if !slices.Contains(hello.Extensions, extensionSessionTicket) || !slices.Contains(hello.Extensions, extensionPSKModes) {
+		return nil, ErrNoSessionTickets
+	}
+	return nil, nil
+}
+
+// ticketKey is the session ticket key of every connection, so that a
+// ticket from one would resume another, as on one real server, and a
+// test sees a client that kept one.
+var ticketKey = sha256.Sum256([]byte("rdptest"))
 
 // Certificate returns the servers' certificate, a self-signed ECDSA
 // certificate for the name "rdp.test", and its SHA-256 fingerprint as
@@ -110,6 +143,9 @@ type Server struct {
 	// does when offered CredSSP alone; Accept then returns
 	// ErrStandardSecurity.
 	Standard bool
+	// OnHandshake, if set, has the TLS state of each connection after
+	// its handshake, whatever comes of the connection.
+	OnHandshake func(tls.ConnectionState)
 }
 
 // Credentials are the logon fields of a Client Info PDU.
@@ -183,9 +219,18 @@ func (s *Server) Accept(conn net.Conn) (*Conn, error) {
 	if c.r.Buffered() > 0 {
 		return nil, errors.New("rdptest: the client sent data before the TLS handshake")
 	}
-	c.tls = tls.Server(conn, &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12})
+	cfg := &tls.Config{
+		Certificates:       []tls.Certificate{cert},
+		MinVersion:         tls.VersionTLS12,
+		GetConfigForClient: refuseWithoutTickets,
+	}
+	cfg.SetSessionTicketKeys([][32]byte{ticketKey})
+	c.tls = tls.Server(conn, cfg)
 	if err := c.tls.Handshake(); err != nil {
 		return nil, fmt.Errorf("rdptest: TLS: %w", err)
+	}
+	if s.OnHandshake != nil {
+		s.OnHandshake(c.tls.ConnectionState())
 	}
 	c.r = bufio.NewReader(c.tls)
 	if protocol&(ProtocolHybrid|ProtocolHybridEx) != 0 {
