@@ -278,8 +278,8 @@ make stop
 ```
 
 With Docker, give each of them `CONTAINER_ENGINE=docker`: `make e2e`
-reaches the stack's `rdp` container through the engine that started
-it.
+reaches into the stack's `rdp` and `vnc` containers through the engine
+that started them.
 
 The pressure test also needs `OCCAMY_PRESSURE_N`, the number of rounds
 (`make e2e OCCAMY_PRESSURE_N=10`), and the stack's debug routes, which

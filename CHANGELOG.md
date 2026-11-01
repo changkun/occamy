@@ -652,11 +652,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   It was named after the file's directory, `docker`, which every
   other checkout and any other compose file in a `docker` directory
   share. `make bench` and the harness's `-project` default to `occamy`
-  too. `COMPOSE_PROJECT_NAME` still names another project. A stack
-  started before this change runs under the project `docker`; stop it
-  once with `(cd docker && podman compose -p docker down)`, or `docker
-  compose` for Docker, before `make run` starts the new one, since both
-  publish the same ports.
+  too. `COMPOSE_PROJECT_NAME` still names another project, with Docker
+  Compose and with podman-compose 1.4.0 or later: podman-compose 1.0.6
+  to 1.3.0 prefer the file's name to it, and 1.0.3 and older read
+  neither and keep `docker`. A stack started before this change runs
+  under the project `docker`. If it is yours, remove it once, with its
+  `docker_tigervnc-ca` volume and the `docker-*` images it built,
+  before `make run` starts the new one, since both publish the same
+  ports: `(cd docker && podman compose -p docker down --remove-orphans
+  --volumes --rmi local)`, or `docker compose` for Docker. Only if it
+  is yours: other checkouts share the project `docker`.
 - The README starts with v1: the demo stack and the web client first,
   then a native build that serves a v1 file. The run instructions for
   guacd and a v0 file, and the v0 token's connection parameters, move

@@ -356,14 +356,20 @@ was complete.
   checkout, and any other compose file in a directory of that name,
   shares, so that `make stop` and `make clean` could act on another
   stack. `make bench` and the harness's `-project` default to `occamy`.
-  `COMPOSE_PROJECT_NAME` and `-p` still override it.
+  `COMPOSE_PROJECT_NAME` and `-p` still override it, except that
+  podman-compose, the Python provider, honours `COMPOSE_PROJECT_NAME`
+  over the file's name only from 1.4.0: 1.0.6 to 1.3.0 read the name
+  first, and 1.0.3 and older read neither and keep the directory's
+  (`podman_compose.py` of each release).
   `TestDemoProject` checks the three.
 - `make build` labels its image `de.changkun.occamy.make=build`.
   `make clean` runs `compose down --remove-orphans --volumes --rmi
   local` for the stack's project and prunes only the dangling images
   with that label. It had pruned every dangling image of the engine.
   `TestMakeClean` compares the two commands that `make -n clean`
-  prints with these, whole.
+  prints with these, whole, and `TestMakeStop` the one of `make -n
+  stop`, `compose down --remove-orphans`, which keeps the volume and
+  the images.
 
 ## Appendix: revival verification harness
 

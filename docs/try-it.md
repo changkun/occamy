@@ -34,16 +34,21 @@ export CONTAINER_ENGINE=docker        # for every make command in this shell
 ```
 
 Give every `make` command the same engine, which exporting it does.
-`make e2e` in particular reaches the demo stack's `rdp` container
-through the compose of the engine that `make run` started it with.
+`make e2e` in particular reaches into the demo stack's `rdp` and `vnc`
+containers through the compose of the engine that `make run` started
+them with.
 
 The integration tests in [section 7](#integration-tests) read
 `OCCAMY_CONTAINER_ENGINE` instead. The commands in this guide say
-`podman`; with Docker, write `docker` in its place. `podman compose` hands its work to a
-compose provider, docker-compose or podman-compose, which must be
-installed; `podman compose version` names the one it found. On macOS
-and Windows, the engine runs in a virtual machine, which needs a few GiB
-of memory for the stack's seven containers.
+`podman`; with Docker, write `docker` in its place. `podman compose`
+hands its work to a compose provider, docker-compose or podman-compose,
+which must be installed; `podman compose version` names the one it
+found. podman-compose, the Python one, must be 1.4.0 or later to name
+the project as this guide says: 1.0.6 to 1.3.0 take the name `occamy`
+from the compose file over `COMPOSE_PROJECT_NAME`, and 1.0.3 and older
+ignore both and name the project `docker`, after the directory. On
+macOS and Windows, the engine runs in a virtual machine, which needs a
+few GiB of memory for the stack's seven containers.
 
 Check what you have:
 
@@ -82,8 +87,17 @@ once every service is healthy. Run `make build` before it: the stack
 runs the image that `make build` makes. Its compose project is
 `occamy`, so its containers are named `occamy-<service>-1`. A stack
 that an older checkout started runs under the project `docker`
-instead, on the same ports. If that stack is yours, stop it once with
-`(cd docker && podman compose -p docker down)`.
+instead, on the same ports. If that stack is yours, remove it once,
+with its `docker_tigervnc-ca` volume and the `docker-*` images it
+built:
+
+```
+(cd docker && podman compose -p docker down --remove-orphans --volumes --rmi local)
+```
+
+With Docker, use `docker compose` in place of `podman compose`. Do this
+only if that stack is yours: any other checkout's stack, or another
+compose file in a `docker` directory, runs under the same project.
 
 | Service | On the host | What it is |
 |---------|-------------|------------|
@@ -204,17 +218,21 @@ K8S=$(mktemp -d)
 podman run -d --name occamy-k3s --privileged -p 127.0.0.1:16443:6443 \
   docker.io/rancher/k3s:v1.34.1-k3s1 server \
   --disable=traefik --disable=metrics-server --disable=servicelb --tls-san=127.0.0.1
-for i in $(seq 60); do podman exec occamy-k3s kubectl get --raw /readyz && break; sleep 2; done
+for i in $(seq 60); do podman exec occamy-k3s kubectl get --raw /readyz && break; sleep 2; false; done ||
+  echo 'k3s is not ready: stop here'
 ```
 
 The loop prints errors while k3s starts, and `ok` once its API server
 is ready, usually within half a minute. It gives up after about two
-minutes; `podman logs occamy-k3s` then says why. Then add the pod,
+minutes and prints `k3s is not ready: stop here`; the steps below need
+the cluster, and `podman logs occamy-k3s` says why it did not start.
+Then add the pod,
 the ServiceAccount `occamy`, and a Role that lets it exec into pods of
 the namespace and nothing else. `pods/exec` and `pods/attach` take
 `get` and `create`, as [configuration.md](configuration.md#kubernetes-pods)
 says. The first `apply` may fail while the cluster starts, so the loop
-tries again, for up to a minute:
+tries again, for up to a minute, and the `wait` runs only once it has
+applied:
 
 ```
 cat > "$K8S/manifest.yaml" <<'EOF'
@@ -250,8 +268,8 @@ spec:
       image: docker.io/library/busybox:1.37
       command: [sleep, "86400"]
 EOF
-for i in $(seq 30); do podman exec -i occamy-k3s kubectl apply -f - < "$K8S/manifest.yaml" && break; sleep 2; done
-podman exec occamy-k3s kubectl -n occamy-try wait --for=condition=Ready pod/shell --timeout=300s
+for i in $(seq 30); do podman exec -i occamy-k3s kubectl apply -f - < "$K8S/manifest.yaml" && break; sleep 2; false; done &&
+  podman exec occamy-k3s kubectl -n occamy-try wait --for=condition=Ready pod/shell --timeout=300s
 ```
 
 `occamyd` takes no kubeconfig. Give it the cluster's CA, a token of the
@@ -356,9 +374,20 @@ a connection closes within moments of opening. The demo image starts
 it again when the next connection opens, and the `rdp` service's log
 says `starting xrdp-chansrv again`. End the session and open it again.
 
-The demo x11vnc runs under a watchdog, which restarts it when it hits
-an X error. A freshly started x11vnc drops the first clipboard text it
-gets, so if nothing arrives on a VNC desktop, send it again.
+The demo x11vnc used to die now and then of an X error, `BadWindow`,
+which ended its sessions with "Remote unreachable", sometimes right
+after it refused a resize. The resize was not the cause. It was
+x11vnc's own clipboard bug: it answered a request for the clipboard
+from a window that had gone, which the desktop's clipboard probe
+leaves behind when x11vnc stalls for more than 2 seconds. The demo
+sets `X11VNC_SENDEVENT_SYNC=1`, which makes x11vnc catch that error. A
+watchdog still starts x11vnc again should it die of anything else; the
+sessions on it end, and you open them again.
+
+A freshly started x11vnc ignores clipboard text from the browser until
+its latest client has been connected for 45 seconds, and takes it from
+then on. If nothing arrives on an x11vnc desktop soon after the stack
+started, wait that long and send it again.
 
 ### Resize and reconnect
 
@@ -370,10 +399,7 @@ gets, so if nothing arrives on a VNC desktop, send it again.
   `stty size` before and after.
 - **x11vnc, native backend** keeps 1024×768, and the page scales it.
   x11vnc refuses to resize, and `occamyd` logs `the server prohibits
-  resizing the screen` once and stops asking. The demo x11vnc runs
-  under a watchdog that restarts it after an X error, which can come
-  right after the refusal. A session that x11vnc drops ends with
-  "Remote unreachable"; open it again.
+  resizing the screen` once and stops asking; the session goes on.
 - The connections through guacd keep the size they opened at.
 
 Only the owner's window sets the size. A viewer sees the owner's
@@ -426,8 +452,9 @@ To compare the two, open **x11vnc, through guacd** (`vnc-guacd`) and
 **RDP, through guacd** (`rdp-guacd`) next to their native twins. Each
 shows the same desktop. Through guacd, the desktop keeps the size it
 opened at, and RDP's first frame takes about two seconds instead of a
-few hundredths of one. VNC's takes about as long either way: a third
-to half a second on x11vnc, and a hundredth or two on TigerVNC. The
+few hundredths of one. VNC's is short either way: a third to half a
+second on x11vnc, and on TigerVNC under a hundredth natively and about
+two hundredths through guacd. The
 log names the backend of each session:
 
 ```
@@ -497,7 +524,8 @@ make e2e
 Run it with the engine that `make run` used, as in [section
 1](#1-what-you-need): with Docker, `make e2e CONTAINER_ENGINE=docker`,
 unless you exported it. One test kills the clipboard process in the
-`rdp` container through that engine's compose, so it fails with
+`rdp` container through that engine's compose, and another stops
+x11vnc in the `vnc` container for a moment, so they fail with
 another engine.
 
 The tests open real sessions to every demo server:
@@ -508,10 +536,17 @@ The tests open real sessions to every demo server:
 - on `rdp-native`: the clipboard both ways, a resize, a viewer joined
   by a share, the owner's return, and the clipboard again once its
   process in the `rdp` container has been killed;
+- on `vnc-none-native`: x11vnc lives through a request for the
+  clipboard from a window that has gone, the bug that used to kill it
+  (`TestX11vncClipboardRequestorGone`);
 - the VNC parity matrix, each feature on x11vnc and TigerVNC through
   both backends, logged as a table.
 
-A run takes about four minutes, most of it the parity matrix. The
+A run takes about four minutes, most of it the parity matrix: 257
+seconds in CI after the x11vnc test came, the pressure test's 15
+included. The x11vnc test takes about 10 seconds, or up to a minute
+and a half on an x11vnc just started, which ignores clipboard text at
+first ([Clipboard](#clipboard)). The
 pressure test and the soak are skipped unless their variables are set
 (below).
 
