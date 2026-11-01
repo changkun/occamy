@@ -11,9 +11,12 @@
 // the PKCE verifier, and the page joins the session again on its
 // return, within the owner's minute of grace. Whoever signs in, the
 // action is taken, and occamyd decides whether the session is theirs.
+// The owner's session on screen is kept in sessionStorage too, so that
+// a reload, which signs in again, joins it again after.
 
 import type { AccessToken, Identity, ShareRole } from './api'
-import type { Start, Target } from './targets'
+import type { SessionTarget, Start, Target } from './targets'
+import { MAX_LABEL, clip } from './text'
 
 /** What a session view does for its owner once the user has signed in again. */
 export type SessionAction =
@@ -43,6 +46,8 @@ export type Screen =
 export interface SignInState {
   /** Why the user signs in, such as an expired sign-in. */
   message: string
+  /** What signing in leads to, which is no error, such as the session a reload left; empty for none. */
+  notice: string
   /** An OIDC sign-in coming back: the exchange of its one-time code. */
   exchange: Promise<AccessToken> | null
   pending: Pending | null
@@ -68,6 +73,8 @@ export type AppEvent =
   /** The session view numbered view needs a new access token for pending. */
   | { type: 'sign-in-again'; view: number; message: string; pending: Pending }
   | { type: 'cancel-sign-in' }
+  /** The user signs in for the connection list, rather than for the session a reload left. */
+  | { type: 'skip-return' }
   /** The session view numbered view is done. */
   | { type: 'leave'; view: number }
   | { type: 'sign-out'; message: string }
@@ -86,11 +93,13 @@ export function initialState(start: Start): AppState {
     case 'join':
       return { ...base, screen: { kind: 'session', target: { kind: 'share', sessionId: start.sessionId, token: start.token }, view: 1, owner: null }, views: 1 }
     case 'oidc':
-      return { ...base, signIn: { message: '', exchange: start.token, pending: start.resume } }
+      return { ...base, signIn: { message: '', notice: '', exchange: start.token, pending: start.resume } }
     case 'oidc-error':
-      return { ...base, signIn: { message: start.message, exchange: null, pending: null } }
+      return { ...base, signIn: { message: start.message, notice: '', exchange: null, pending: null } }
+    case 'return':
+      return { ...base, signIn: { message: '', notice: `Sign in again to return to ${start.target.name}.`, exchange: null, pending: { target: start.target, view: null, then: null, owner: null } } }
     default:
-      return { ...base, signIn: { message: '', exchange: null, pending: null } }
+      return { ...base, signIn: { message: '', notice: '', exchange: null, pending: null } }
   }
 }
 
@@ -124,7 +133,7 @@ export function reduce(s: AppState, e: AppEvent): AppState {
       if (e.target.kind !== 'share' && (s.token === null || s.token.expires <= e.now)) {
         // Over a session view, the form opens as a dialog, and the view
         // stays until the user has signed in.
-        return { ...s, signIn: { message: s.token === null ? '' : EXPIRED, exchange: null, pending: { target: e.target, view: null, then: null, owner: null } } }
+        return { ...s, signIn: { message: s.token === null ? '' : EXPIRED, notice: '', exchange: null, pending: { target: e.target, view: null, then: null, owner: null } } }
       }
       const view = s.views + 1
       return { ...s, views: view, screen: { kind: 'session', target: e.target, view, owner: null }, signIn: null, action: null }
@@ -133,9 +142,14 @@ export function reduce(s: AppState, e: AppEvent): AppState {
       if (s.screen.kind !== 'session' || s.screen.view !== e.view) {
         return s
       }
-      return { ...s, signIn: { message: e.message, exchange: null, pending: e.pending } }
+      return { ...s, signIn: { message: e.message, notice: '', exchange: null, pending: e.pending } }
     case 'cancel-sign-in':
       return signInOver(s) ? { ...s, signIn: null } : s
+    case 'skip-return':
+      if (s.signIn === null || signInOver(s)) {
+        return s
+      }
+      return { ...s, signIn: { ...s.signIn, notice: '', pending: null } }
     case 'leave':
       // A view that is gone, such as one whose End came back after the
       // user moved on, leaves nothing.
@@ -143,11 +157,11 @@ export function reduce(s: AppState, e: AppEvent): AppState {
         return s
       }
       if (s.token === null) {
-        return { ...s, screen: { kind: 'start' }, signIn: { message: '', exchange: null, pending: null }, action: null }
+        return { ...s, screen: { kind: 'start' }, signIn: { message: '', notice: '', exchange: null, pending: null }, action: null }
       }
       return { ...s, screen: { kind: 'connections' }, signIn: null, action: null }
     case 'sign-out':
-      return { ...s, token: null, screen: { kind: 'start' }, signIn: { message: e.message, exchange: null, pending: null }, action: null }
+      return { ...s, token: null, screen: { kind: 'start' }, signIn: { message: e.message, notice: '', exchange: null, pending: null }, action: null }
   }
 }
 
@@ -169,6 +183,55 @@ export function saveResume(storage: Storage | undefined, pending: Pending | null
     return storage !== undefined
   } catch {
     return false
+  }
+}
+
+/** Where the owner's session on screen is kept, for a reload of the page to join it again. */
+export const SESSION_KEY = 'occamy.session'
+
+/**
+ * keepSession keeps target, the session of the owner's view on screen,
+ * in the tab's storage, so that a reload of the page, after which the
+ * user signs in again, joins it again: occamyd keeps it for its owner's
+ * minute of grace. A share is not kept: its token must not outlive the
+ * page.
+ */
+export function keepSession(storage: Storage | undefined, target: SessionTarget): void {
+  try {
+    storage?.setItem(SESSION_KEY, JSON.stringify({ kind: target.kind, sessionId: target.sessionId, name: target.name }))
+  } catch {
+    // Without storage, a reload returns to the connection list.
+  }
+}
+
+/** dropSession forgets the kept session, whichever it is, as on signing out. */
+export function dropSession(storage: Storage | undefined): void {
+  try {
+    storage?.removeItem(SESSION_KEY)
+  } catch {
+    // Nothing kept, nothing to forget.
+  }
+}
+
+/** forgetSession forgets the kept session if it is sessionId: it has ended, occamyd refused to join it, or the user left it. */
+export function forgetSession(storage: Storage | undefined, sessionId: string): void {
+  try {
+    if (sessionId !== '' && keptSession(storage)?.sessionId === sessionId) {
+      storage?.removeItem(SESSION_KEY)
+    }
+  } catch {
+    // Nothing kept, nothing to forget.
+  }
+}
+
+/** keptSession returns the session keepSession kept, which stays kept, or null. */
+export function keptSession(storage: Storage | undefined): SessionTarget | null {
+  try {
+    const raw = storage?.getItem(SESSION_KEY) ?? null
+    const target = raw === null ? null : targetOf(JSON.parse(raw))
+    return target?.kind === 'session' ? target : null
+  } catch {
+    return null
   }
 }
 
@@ -205,17 +268,24 @@ function isObject(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
 
-// targetOf reads a kept target: a connection, or the user's session. A
-// share never waits for a sign-in.
+// SESSION_ID is what occamyd's session IDs are, unpadded base64url
+// (internal/session/registry.go), bounded: a kept one joins a path under
+// /api/v1/sessions/, which no other text may name.
+const SESSION_ID = /^[A-Za-z0-9_-]{1,64}$/
+
+// targetOf reads a kept target: a connection, or the user's session,
+// with its name clipped as the page shows names. A share never waits for
+// a sign-in.
 function targetOf(v: unknown): Target | null {
   if (!isObject(v) || typeof v.name !== 'string') {
     return null
   }
+  const name = clip(v.name, MAX_LABEL)
   if (v.kind === 'connection' && typeof v.id === 'string' && v.id !== '') {
-    return { kind: 'connection', id: v.id, name: v.name }
+    return { kind: 'connection', id: v.id, name }
   }
-  if (v.kind === 'session' && typeof v.sessionId === 'string' && v.sessionId !== '') {
-    return { kind: 'session', sessionId: v.sessionId, name: v.name }
+  if (v.kind === 'session' && typeof v.sessionId === 'string' && SESSION_ID.test(v.sessionId)) {
+    return { kind: 'session', sessionId: v.sessionId, name }
   }
   return null
 }

@@ -20,7 +20,7 @@ import { createInterface } from 'node:readline'
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { MemorySurface, Role, SessionClass } from '../protocol'
+import { MemorySurface, ProtocolError, Role, SessionClass } from '../protocol'
 import { type ControllerOptions, SessionController, type SessionState, type TerminalSink } from './controller'
 
 const server = process.env.OCCAMY_INTEROP_SERVER ?? ''
@@ -200,13 +200,20 @@ describe.skipIf(server === '')('the shell’s controller with occamyd’s stream
       ])
       expect(canvas.focused).toBe(1)
 
-      // The clipboard goes to the remote, which echoes it back: the page
-      // shows it and puts it on the local clipboard, and does not send
-      // the same text back.
-      expect(c.sendClipboard('from the shell')).toBe(true)
-      await until(c, (s) => s.clipboard === 'from the shell')
+      // The clipboard goes to the remote, whose clipboard the page takes
+      // it for at once; the remote echoes it back, and the page puts it
+      // on the local clipboard and does not send the same text back.
+      expect(c.sendClipboard('from the shell')).toEqual({ kind: 'sent' })
+      expect(c.getState()).toMatchObject({ clipboard: 'from the shell', draft: 'from the shell' })
+      await waitFor(() => written.length > 0)
       expect(written).toEqual(['from the shell'])
+      expect(c.getState().clipboard).toBe('from the shell')
       expect(c.syncClipboard('from the shell')).toBe(false)
+      // Text over the largest message, 4 MiB by default, is refused, and
+      // the remote clipboard stays what it was.
+      const big = c.sendClipboard('x'.repeat(4 << 20))
+      expect(big.kind === 'failed' && big.error instanceof ProtocolError && big.error.kind).toBe('too-large')
+      expect(c.getState().clipboard).toBe('from the shell')
 
       // Text an input method composed goes as text; the desktop takes
       // some as commands.

@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"image"
+	"maps"
 
 	"github.com/zeebo/xxh3"
 
@@ -89,6 +90,17 @@ func (c *tileCache) key(pix []byte, r image.Rectangle) (cacheKey, bool) {
 		return cacheKey{}, false
 	}
 	return cacheKey{sum: xxh3.Hash128Seed(pix[:4*w*h], c.seed), w: uint16(w), h: uint16(h)}, true // #nosec G115 -- at most MaxCachedPixels
+}
+
+// contents returns a copy of what c's slots hold, for a worker to look
+// tiles up in while the writer goes on: the keys, under c's seed, which
+// key alike only what c keys alike, and no order of use. It returns nil
+// for nil.
+func (c *tileCache) contents() *tileCache {
+	if c == nil {
+		return nil
+	}
+	return &tileCache{seed: c.seed, keys: maps.Clone(c.keys)}
 }
 
 // has reports whether a slot holds k.

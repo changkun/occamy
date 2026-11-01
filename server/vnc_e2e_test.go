@@ -542,7 +542,7 @@ func TestVNCAdhocName(t *testing.T) {
 		}
 		return []netip.Addr{netip.MustParseAddr("127.0.0.1")}, nil
 	}
-	open := func(name string, vs *vnctest.Server) *client.Session {
+	open := func(name string, vs *vnctest.Server) (*client.Session, error) {
 		t.Helper()
 		_, port, _ := net.SplitHostPort(vs.Addr())
 		r := ts.api(t, http.MethodPost, "/api/v1/sessions", alice, `{"protocol":"vnc","target":"`+net.JoinHostPort(name, port)+`"}`)
@@ -550,12 +550,15 @@ func TestVNCAdhocName(t *testing.T) {
 		if err := json.Unmarshal(r.body, &o); err != nil || r.code != http.StatusCreated {
 			t.Fatalf("POST /api/v1/sessions for %s: %d %s", name, r.code, r.body)
 		}
-		return ts.dialStream(t, "/api/v1/sessions/"+url.PathEscape(o.ID)+"/stream", o.StreamToken, client.Options{})
+		return ts.tryStream(t, "/api/v1/sessions/"+url.PathEscape(o.ID)+"/stream", o.StreamToken, client.Options{})
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), vncTimeout)
 	defer cancel()
 
-	cl := open(plainName, plain)
+	cl, err := open(plainName, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ev := awaitEvent(t, cl, "the prompt", func(ev client.Event) bool { _, ok := ev.(client.Prompt); return ok })
 	if err := cl.PromptReply(ctx, ev.(client.Prompt).ID, []string{"secret"}); err != nil {
 		t.Fatal(err)
@@ -568,17 +571,29 @@ func TestVNCAdhocName(t *testing.T) {
 	cl.Close()
 
 	// The password is asked for after the certificate is checked, so a
-	// prompt means that the certificate passed.
-	cl = open(tlsName, withTLS)
-	ev = awaitEvent(t, cl, "the end", func(ev client.Event) bool {
-		switch ev.(type) {
-		case client.Prompt, client.End:
-			return true
+	// prompt means that the certificate passed. The refusal can end the
+	// session before its stream joins, and then the owner's stream gets
+	// backend-failed instead of welcome.
+	cl, err = open(tlsName, withTLS)
+	var ce *client.CloseError
+	switch {
+	case errors.As(err, &ce):
+		if ce.Code != protocol.CloseBackendFailed {
+			t.Errorf("the stream was refused with %v %q, want backend-failed", ce.Code, ce.Reason)
 		}
-		return false
-	})
-	if e, ok := ev.(client.End); !ok || e.Code != protocol.CloseBackendFailed {
-		t.Errorf("%T %+v, want the end with backend-failed: a certificate that signs itself passed", ev, ev)
+	case err != nil:
+		t.Fatal(err)
+	default:
+		ev = awaitEvent(t, cl, "the end", func(ev client.Event) bool {
+			switch ev.(type) {
+			case client.Prompt, client.End:
+				return true
+			}
+			return false
+		})
+		if e, ok := ev.(client.End); !ok || e.Code != protocol.CloseBackendFailed {
+			t.Errorf("%T %+v, want the end with backend-failed: a certificate that signs itself passed", ev, ev)
+		}
 	}
 
 	mu.Lock()
