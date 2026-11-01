@@ -400,7 +400,8 @@ so the bridge holds what comes early.
   but holds up nothing either: `Input` returns at once, the session
   waits only for the owner, and the frames after the answer end the
   hold. A session that is never answered sends no size, and has no use
-  for one.
+  for one. (Without a prompt, a first frame that does not come ends the
+  session: Implementation notes: a bounded connect.)
 - **Tests.** `TestInputHeld` and `TestInputHeldLimit` play guacd's side,
   and fail if the bridge lets a size or a pointer through early, at the
   first sync, or never. Three rows of the matrix do the same against
@@ -411,11 +412,89 @@ so the bridge holds what comes early.
   futex wait and 2,233 unread bytes on its TigerVNC socket, and used no
   CPU for 30 minutes. The session had sent no input, and 16 of 16 opened
   on a re-run, 10 of them on the same connection. The cause inside guacd
-  is not known, nor whether this happened before the hold. Cancel works,
-  and the process stays until the container restarts. A deadline on the
-  first frame would name the state, but it must start after any prompt
-  is answered. It is not done: the bridge goes with guacd, and
-  docs/try-it.md says what to do.
+  is not known, nor whether this happened before the hold, and since
+  the bridge goes with guacd it is not looked into. Cancel works, and
+  the process stays until the container restarts. The session now
+  fails rather than wait (Implementation notes: a bounded connect).
+
+## Implementation notes: a bounded connect
+
+A session through guacd that shows nothing fails 90 s after guacd
+accepted it, with an error that says so, rather than stay at
+"Connecting…".
+
+- **The gap.** `guacd.Handshake` gives guacd 15 s up to `ready`, which
+  guacd sends before it connects to the remote, and then clears its
+  deadline. `holdLimit` starts at the first sync. Between the two only
+  the session's idle timer ran: 30 minutes, since `server` sets no
+  other, restarted by any input, and ending in "Ended for inactivity",
+  which is not what happened. The bridge's `nop`s go out whether guacd
+  reads them or not, so they notice nothing either, and guacd's own
+  clients do not bound this stretch: libvncclient's
+  `DEFAULT_READ_TIMEOUT` is 0, so a remote that accepts and then says
+  nothing holds guacd's process as long as it likes.
+- **What counts.** The first frame that viewers can see, which is what
+  ends "Connecting…": the first sync at which the display has a size,
+  when `session.flush` calls `sink.Resize`. guacd's first sync does not
+  count. On RDP it came 8 ms after the connect, more than 2 s before
+  the default layer had a size, and a limit that stopped there would
+  not cover the login at all. A bare sync reaches viewers as nothing.
+- **How it works.** A read deadline on guacd's connection, set when
+  the reader starts and cleared by that frame. It is absolute, so
+  nothing else guacd sends extends it, not a `nop`, a `name` or a sync
+  with no size, and input does not either. It adds no goroutine or
+  timer. A prompt stops it without further code, since the reader does
+  not read while it waits for the owner, and the answer sets it again,
+  so that the owner's time does not count and guacd has the whole limit
+  after the answer. A prompt after the first frame sets nothing.
+- **The limit, 90 s** (`firstFrameLimit`). It has to lie above what a
+  real connect takes and above what guacd gives up after by itself,
+  whose error says more ("Remote unreachable"), and well below the idle
+  timer. libvncclient's `DEFAULT_CONNECT_TIMEOUT` is 60 s. The benchmark
+  allows a first frame 30 s and the parity matrix a step 20 s. Through
+  the real guacd at a load of 135 on the shared host, 9 of 9 opened
+  well inside it: RDP in 1.4 to 2.6 s, x11vnc in 1.5 to 2.4 s and
+  TigerVNC in 0.09 to 0.16 s. A slow Windows login is what the margin
+  is for, and it is judged, not measured, since there is no Windows
+  host here: by guacd's sources, the sized frame on RDP needs
+  `freerdp_connect` to return and the server's first paint.
+  There is no setting, since the bridge goes with guacd. An operator
+  who gives guacd `autoretry`, or `wol-wait-time` for a host that has to
+  wake, gets the same 90 s, and `docs/configuration.md` says so.
+- **What viewers are told.** The session's end used to reach them as
+  the word `failed`, since a backend's error may hold what a viewer
+  must not see, and the page read "Remote unreachable", which names
+  neither the cause nor what to do. `backend.Failure` is an error whose
+  text is written for them; `stream.CloseFor` sends it as the close's
+  reason, with the same code, 4006, and the web client shows a reason
+  that says more than `failed` under "Could not connect". This is the
+  one change outside the bridge. It is no dependence on guacd: neither
+  the session core, the stream nor the web client knows who failed.
+- **What the bridge cannot do.** It closes its connection, and that is
+  all. Against the real guacd, with a target that accepts and says
+  nothing, sessions over VNC and RDP failed at 90.1 to 91.1 s. guacd's
+  child, which only waited for its remote, then went by itself, within
+  20 s on RDP and 74 s on VNC. One standing for the hang, stopped with
+  SIGSTOP, did not: it was still there 60 s after the close. So
+  `occamyd` logs an error, with the protocol, guacd's connection ID and
+  the limit, that says the child may still be running, that nothing
+  outside the `guacd` container can stop it, and that only restarting
+  guacd clears it.
+- **Tests.** `TestNoFirstFrame` plays a guacd that accepts, sends a
+  `nop`, a `name` and a sync with no size, and draws nothing: `Run`
+  returns `ErrNoFirstFrame` at the limit to the nanosecond, the log says
+  what it must, and the `synctest` bubble fails on any goroutine left
+  behind. Without the fix it fails. `TestFirstFrameInTime` draws a
+  nanosecond inside the limit and the session goes on past it.
+  `TestFirstFrameAfterPrompt` answers a prompt ten limits later, and
+  either draws just inside a new limit or fails at it.
+  `TestFirstFrameLater` has a prompt after the first frame.
+  `TestCloseForFailure` keeps other errors from viewers, and the web
+  client's tests check that the page leaves "Connecting…" for the
+  reason. Of 17 mutants, 17 are killed: among them no deadline, a limit
+  of 60 s or 120 s, the first sync ending it, any instruction extending
+  it, a prompt's answer not restarting it or restarting it too early,
+  the log at a lower level, and `CloseFor` telling viewers any error.
 
 ## Implementation notes: conformance corpus
 

@@ -278,6 +278,12 @@ all.
 For `rdp` through guacd, `occamyd` passes `disable-gfx: "true"` unless
 `guacd.params.rdp` sets it: through RDP's graphics pipeline, xrdp's
 colours reached guacd shifted.
+A session through guacd fails if guacd has drawn nothing 90 seconds
+after it accepted the connection, or after the owner's last answer to
+a prompt. That has no setting, and it holds however long the parameters
+let guacd try, as with `autoretry`, or `wol-wait-time` for a host that
+has to wake first
+([try-it.md](try-it.md#the-guacd-fallback)).
 
 | Key | Default | Meaning |
 |-----|---------|---------|
