@@ -1736,8 +1736,9 @@ RDP's guacd path, RDP no longer needs guacd at all.
     rectangles, from the same origin, and the PDU's rectangle cover
     them. A tile set before any region takes the PDU's rectangle, as a
     region of no rectangles does. RemoteFX keeps no state between
-    messages, and the sync, version, channel and context blocks are
-    skipped.
+    messages: its sync, version, channel, context and frame blocks are
+    passed over, and a block of a type that the client does not know is
+    counted and skipped.
   - RemoteFX Progressive in wire-to-surface 2 (`progressive.go`,
     [MS-RDPEGFX] 2.2.4.2 and 3.3.8.2), its state as 3.3.1 divides it:
     - Each surface keeps its tiles' sub-band diffing tile context
@@ -1792,7 +1793,8 @@ RDP's guacd path, RDP no longer needs guacd at all.
       starts each stream outside a frame. (After the second review, a
       codec context's frame spanned its streams.)
     - Regions outside a frame, blocks of an unknown type, in a stream
-      or a region, a delete on a surface without RemoteFX Progressive,
+      or a region, as in a RemoteFX message, a delete on a surface
+      without RemoteFX Progressive,
       and a progressive bitmap in wire-to-surface 1 are counted and
       skipped.
   - The quantization tables are read in the band order each
@@ -1841,40 +1843,59 @@ RDP's guacd path, RDP no longer needs guacd at all.
       copied or decompressed a unit a pixel. A pointer update, the
       server's clipboard text and a copy within a mapped surface are
       charged at least `pointerCost`, a 8,192th of the rate.
-    - **Headers** (found in the third review). Each block of a
-      progressive stream is charged `blockCost`, 8 units, and each
-      W2S2's stream, which may be of no blocks, and each GFX PDU or
-      bitmap that the client skips, `pduCost`, 24 units. Their message
-      pays the sum once, at its end, and counts then what it applied
-      and skipped, a tally a name, so that a flood of headers takes
-      neither the clock nor `c.mu` for each. Before, the review
-      measured a region outside a frame, charged only its bytes'
-      expansion, 1.5 units for 6 bytes compressed and none stored, at
-      10.6 to 11.8 ns, and an unknown GFX PDU of 8 bytes, charged 2
-      units, at 20 to 25 ns; a block of an unknown type was not even
-      counted. The floods, in stored messages, whose expansion is not
-      charged, 4,096 blocks or PDUs a message, 5 runs each, the host's
-      1-minute load 9.1 when they started and 10.5 when they ended,
-      medians:
+    - **Headers** (found in the third review, and widened in the
+      final one). Each block of a RemoteFX or RemoteFX Progressive
+      message, and each rectangle and quantization table of their
+      regions and tile sets, a progressive quality three tables, is
+      charged `blockCost`, 8 units; each W2S2's stream, which may be
+      of no blocks, and each GFX PDU or bitmap that the client skips,
+      `pduCost`, 24 units. Their message pays the sum once, at its
+      end, and counts then what it applied and skipped, a tally a
+      name, and the RemoteFX tiles it decoded, so that a flood of
+      headers takes neither the clock nor `c.mu` for each. Before, the
+      third review measured a region outside a frame, charged only its
+      bytes' expansion, 1.5 units for 6 bytes compressed and none
+      stored, at 10.6 to 11.8 ns, and an unknown GFX PDU of 8 bytes,
+      charged 2 units, at 20 to 25 ns; a block of an unknown type was
+      not even counted. The final review found three such paths still
+      charged nothing stored, and compressed at least twice their
+      expansion's charge: RemoteFX blocks of an unknown type, at 3.6 to
+      5.9 ns, a RemoteFX region's rectangles with no tile set, at 8.1 to
+      8.6, and a progressive region's with no tiles, at about 7.5; and
+      a RemoteFX wire-to-surface 1 counted its tiles under `c.mu`, even
+      none. A region's or tile set's quantization tables, up to 255 and
+      a progressive region's 255 qualities with them, were as cheap to
+      send: at a load of 26, before `parseQuant` read a byte a step, a
+      table cost 14 to 21 ns and a quality 43. The floods, in stored
+      messages, whose expansion is not charged, 4,096 blocks, PDUs or
+      rectangles a message, or 16 regions or tile sets of 255 tables or
+      qualities, 5 runs each, the host's 1-minute load 10.3, medians:
 
       | Flood (`BenchmarkSkipped`) | ns each | Units | Share of a core |
       |---|---|---|---|
-      | Progressive regions outside a frame, 6 bytes | 5.0 | 8 | 0.34 |
-      | Progressive blocks of an unknown type, 6 bytes | 4.5 | 8 | 0.30 |
-      | Progressive frame begins, 12 bytes | 3.9 | 8 | 0.26 |
-      | W2S2 PDUs of no blocks, 21 bytes | 23.4 | 24 | 0.52 |
-      | GFX PDUs of an unknown type, 8 bytes | 8.6 | 24 | 0.19 |
-      | The same, after one PDU of each other name | 12.2 | 24 | 0.27 |
-      | Frames begun again, 16 bytes | 8.8 | 24 | 0.20 |
-      | Empty bitmaps in wire-to-surface 1, 25 bytes | 31.3 | 24 | 0.70 |
+      | Progressive regions outside a frame, 6 bytes | 4.5 | 8 | 0.30 |
+      | Progressive blocks of an unknown type, 6 bytes | 4.0 | 8 | 0.27 |
+      | Progressive frame begins, 12 bytes | 3.3 | 8 | 0.22 |
+      | Progressive region rectangles, 8 bytes | 7.0 | 8 | 0.47 |
+      | Progressive quantization tables, 5 bytes | 3.9 | 8 | 0.26 |
+      | Progressive qualities, 16 bytes | 12.5 | 24 | 0.28 |
+      | RemoteFX blocks of an unknown type, 6 bytes | 4.2 | 8 | 0.28 |
+      | RemoteFX region rectangles, 8 bytes | 7.4 | 8 | 0.50 |
+      | RemoteFX quantization tables, 5 bytes | 4.1 | 8 | 0.27 |
+      | W2S2 PDUs of no blocks, 21 bytes | 21.1 | 24 | 0.47 |
+      | GFX PDUs of an unknown type, 8 bytes | 7.5 | 24 | 0.17 |
+      | The same, after one PDU of each other name | 11.1 | 24 | 0.25 |
+      | Frames begun again, 16 bytes | 8.3 | 24 | 0.19 |
+      | Empty bitmaps in wire-to-surface 1, 25 bytes | 29.3 | 24 | 0.65 |
 
       An empty bitmap costs the most, as it parses its rectangle and
-      looks its surface up; at 16 units a PDU it got a core, hence 24.
-      After one PDU of each other name that the client counts skips
-      under but the tiles', an unknown PDU costs half as much again, as
-      the tally is looked through for each; the names are the client's
-      own and few, so the tally is bounded by them. A run before, at a
-      load of 6.2 to 7.1, measured 5 to 15% less a block.
+      looks its surface up, 0.64 to 0.71 of a core in the five runs; at
+      16 units a PDU it got a core, hence 24. After one PDU of each
+      other name that the client counts skips under but the tiles', an
+      unknown PDU costs half as much again, as the tally is looked
+      through for each; the names are the client's own and few, so the
+      tally is bounded by them. The third review's run, at a load of
+      9.1 to 10.5, measured the floods it had 6 to 18% dearer.
     - **The rate** is 512 Mi units a second (`decodeRate`, 2^29). The
       dearest unit of real content, progressive tiles', costs 1.88 ns,
       so the rate holds a session's decoding of real content to about
@@ -1998,7 +2019,15 @@ RDP's guacd path, RDP no longer needs guacd at all.
   they passed again, with no progressive upgrade or tile skipped.
   After the third review's, at 7.6 rising to 8.3, they passed again,
   with no region outside its stream's frame and no block skipped:
-  xrdp frames each wire-to-surface 2's stream by itself.
+  xrdp frames each wire-to-surface 2's stream by itself. After the
+  final review's, at 7.97 and 7.0, they passed again, with nothing of
+  GFX skipped. Five connections each way, alternating, after one that
+  made the X session, gave the backend its desktop's size, from which
+  occamyd sends a session's first frame, after a median of 14.0 ms
+  with GFX and 13.8 without, and the scene drawn whole after 114 and
+  91 ms: GFX leaves the first frame where `docs/try-it.md` puts it, a
+  few hundredths of a second, as the client sizes its output before
+  GFX opens.
   - **What xrdp sends.** The session's first screen arrives as 192
     progressive tiles in one wire-to-surface 2. Each key's swatch
     arrives as a tile of its own, 5 of 16 of them as difference tiles.
@@ -2074,7 +2103,10 @@ RDP's guacd path, RDP no longer needs guacd at all.
   region outside its stream's own frame ignored and counted, after a
   stream that left its frame open, and before, between and after
   frames in one stream; a block of an unknown type counted, the sync
-  and context blocks not), `TestProgressiveDifferenceAcrossContexts`
+  and context blocks not; a frame begun again after its end applying
+  its region), `TestRFXUnknownBlocks` (a RemoteFX block of an unknown
+  type counted and skipped, the blocks after it applied, and the
+  tiles counted by message), `TestProgressiveDifferenceAcrossContexts`
   (a difference tile after a context's delete, and in another context,
   adds to the tile's coefficients), `TestProgressiveTransformChange`
   (a difference tile and an upgrade in the other transform skipped
@@ -2085,10 +2117,13 @@ RDP's guacd path, RDP no longer needs guacd at all.
   `TestRFXMalformed` (13 RemoteFX and 15 progressive cases, each with
   its reason), `TestRFXPace` (each charge, an empty RemoteFX rectangle
   charged as a skipped PDU; a progressive stream's and its blocks',
-  skipped ones too; an upgrade of no first pass and one in the other
-  transform each charged `rfxTileCost`; a context's delete charging
-  nothing, and one on a surface without RemoteFX Progressive charged
-  as a skipped PDU), `TestGFXSkipCharged` (each PDU or bitmap that the
+  skipped ones too, a RemoteFX message's blocks, and the rectangles and
+  quantization tables of both, in the units measured, 8 and 24, rather
+  than `blockCost` and `pduCost` by name, so that lowering either fails
+  it; an upgrade of no first pass and one in the other transform each
+  charged `rfxTileCost`; a context's delete charging nothing, and one
+  on a surface without RemoteFX Progressive charged as a skipped PDU),
+  `TestGFXSkipCharged` (each PDU or bitmap that the
   client skips charged `pduCost` and counted once, and 100 of one name
   in a message tallied under it once),
   `TestDecodeBudget` (with the flood's 18,744 tiles a second checked
@@ -2143,6 +2178,10 @@ RDP's guacd path, RDP no longer needs guacd at all.
     each new input found, 50 to 80 a run, was minimized for up to 5 s,
     while a whole stream sent twice decodes several tiles, about 2 ms
     an execution.
+  - After the final review, each run alone, 70 s with 4 workers and
+    `-fuzzminimizetime 5s`: `FuzzRemoteFX` 1,147,000 executions (load
+    9.4), `FuzzProgressive` 39,000 (load 15.3) and `FuzzGFX` 217,000
+    (load 11.4). None failed.
 - **Benchmarks** (3 runs each, the host's 1-minute load 6.9 when they
   started and 12.3 when they ended): a frame of 1024 × 768 in tiles of
   64 × 64, a PDU each, decoded and drawn: `BenchmarkGFXRemoteFX` 11.1
@@ -2259,6 +2298,26 @@ RDP's guacd path, RDP no longer needs guacd at all.
       not checked, given for what the client does not miss, or not
       given for a wire-to-surface 2 of an unknown codec
       (`TestGFXSkipWarning`).
+  - **After the final review**, 20 more, each failing a test; the
+    third round's 28 that still apply fail as before, and its two on
+    the message's debt moved with it:
+    - RemoteFX's charges: a block's, a region's rectangles' or one for
+      them all, or a tile set's quantization tables' (`TestRFXPace`).
+    - RemoteFX's blocks: one of an unknown type not counted, the known
+      ones counted, or one of an unknown type ending the message
+      (`TestRFXUnknownBlocks`, `TestRFXPace`).
+    - A progressive region's charge: none, or none for its rectangles,
+      its quantization tables, or two of a quality's three tables
+      (`TestRFXPace`).
+    - The RemoteFX tiles counted by message: not added, not counted at
+      its end, or not cleared after (`TestRFXUnknownBlocks`,
+      `TestRFXSpecTile`, `TestRFXRoundTrip`).
+    - The message's debt not paid, or not dropped with its tally
+      (`TestRFXPace`, `TestGFXPace`, `TestGFXSkipCharged`).
+    - `blockCost` 4 or `pduCost` 16 (`TestRFXPace`).
+    - `parseQuant`'s nibbles swapped, or the high one not masked off
+      (`TestRFXSpecTile`, `TestRFXRoundTrip`, `TestProgressivePasses`
+      and others).
 - **Decisions** (left open by the specification and the task).
   - GFX is on by default. With it, xrdp draws its sessions in
     RemoteFX Progressive; a server whose ClearCodec or cache the
@@ -2321,6 +2380,14 @@ RDP's guacd path, RDP no longer needs guacd at all.
     first pass sent whole may change a tile's transform, and a
     difference tile may make a new tile, its coefficients added to
     zeros.
+  - A frame is of its stream, and a stream that breaks 2.2.4.2.1.2's
+    one FRAME_BEGIN is not refused: a FRAME_BEGIN within a frame or
+    after its FRAME_END opens it again, and a FRAME_END outside one
+    closes nothing, so that a region after either applies. FreeRDP
+    fails the whole stream (-1008) at a second FRAME_BEGIN, a
+    FRAME_BEGIN after FRAME_END, or a FRAME_END before FRAME_BEGIN;
+    the client keeps what it can draw, as it does for a region outside
+    a frame, which both ignore (`TestProgressiveFrames`).
   - An upgrade whose bit positions rise above its tile context's still
     ends the session, as FreeRDP's `progressive_rfx_quant_sub` fails
     it; it can only come from a server that has lost track of its own
@@ -2368,18 +2435,29 @@ RDP's guacd path, RDP no longer needs guacd at all.
     10 sessions (`limits.sessions_per_user`) to hostile servers, such
     as ad-hoc targets they chose, take about 10 cores;
     `docs/configuration.md`'s limits say so.
-  - **PDUs applied that do little** (found in the third round, for the
-    coordinator to decide). The headers' charge covers what the client
-    skips; what it applies is charged by what it draws, so a PDU that
-    draws little costs more than its charge. In the runs above, a
-    capability confirm of a known version costs 11.7 ns and a codec
-    context's delete 13.4 ns, each charged nothing, and an uncompressed
-    bitmap of a pixel 57 ns, charged a unit, 31 times what the rate
-    allows a unit. A session's one reader holds such a flood to a core,
-    as it does any; charging
-    every GFX PDU `pduCost` would bound them as the headers are, but
-    moves every exact charge of `TestGFXPace` and
-    `TestGFXExposeCharged`, so it is left to a decision.
+  - **PDUs applied that do little**, with the process's budget, before
+    the release (found in the third round; the final review measured
+    it again). The headers' charge covers what the client skips; what
+    it applies is charged by what it draws, so a PDU that draws little
+    costs more than its charge. A session's one reader holds such a
+    flood to a core, as it does any. In stored messages of 4,096 PDUs:
+
+    | Applied PDU | Cost, final review | Cost, `BenchmarkSkipped` after it | Charge |
+    |---|---|---|---|
+    | Capability confirm of a known version | 11 ns | 11.0 ns | 0 |
+    | Codec context's delete | 13 ns | 13.9 ns | 0 |
+    | Uncompressed bitmap of a pixel | 56 ns | 53.1 ns | 1 unit |
+    | Solid fill of a pixel | 61 ns | 58.3 ns | 1 unit |
+    | RemoteFX wire-to-surface 1 of no blocks | 40 to 44 ns, `c.mu` taken for each | 30.7 ns, its count in the message's tally | 0 |
+
+    A flat `pduCost` on every PDU would not close it: what a bitmap or
+    fill costs is mostly its own `pace` and `c.count`
+    (`gfxWireToSurface1`), which a charge does not remove. The review's
+    remedy is either a charge of about 32 units an applied PDU,
+    measured again, or the bitmaps' counts and charges added to the
+    message's tally, as the skips' are. Either moves the exact charges
+    of `TestGFXPace` and `TestGFXExposeCharged`. It waits for the
+    process's decoding budget, a gate of beta.1 (above).
   - `rdp-native` in the benchmark's `v1-native` series now speaks GFX
     and `rdp-guacd` keeps `disable-gfx`; the comparison says which
     each measures ([benchmark](benchmark.md)).

@@ -652,10 +652,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   measured cost, a RemoteFX tile's pixel 7 units and a planar one 2,
   at 512 Mi units a second: about one core of an Apple M5 Pro for a
   session's real content, and a session's one reader holds it to a
-  core whatever the server sends. Each block of a progressive stream
-  is charged 8 units, and each W2S2 stream and each GFX PDU that the
-  client skips 24, and a message counts what it applies and skips at
-  its end, so that a flood of headers gets at most 0.7 of a core. No
+  core whatever the server sends. Each block of a RemoteFX or
+  progressive message, and each rectangle and quantization table of
+  their regions and tile sets, is charged 8 units, and each W2S2
+  stream and each GFX PDU that the client skips 24, and a message
+  counts what it applies, skips and decodes at its end, so that a
+  flood of headers gets at most 0.7 of a core. No
   budget bounds sessions together yet, which is to come before the
   release.
   A session's first screen does not wait, and full-screen RemoteFX

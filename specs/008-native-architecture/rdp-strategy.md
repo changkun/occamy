@@ -293,16 +293,21 @@ best effort, has none. The live run was repeated after the fixes.
       holds it to a core. The cheapest floods to send, tiles of a header
       alone and 3-byte RLE runs, cost 1.1 to 1.5 ns a unit (medians) and
       are held to 0.6 to 0.8 of a core. Headers that the client parses
-      and does little with, a progressive stream's blocks and the GFX
-      PDUs it skips, are charged 8 and 24 units each, paid and counted
-      once a message, which holds a flood of them, in stored messages,
-      to 0.2 to 0.7 of a core (`BenchmarkSkipped`, load 9.1 to 10.5):
-      progressive regions outside a frame 0.34, blocks of an unknown
-      type 0.30 and frame begins 0.26; W2S2 PDUs of no blocks 0.52;
-      unknown GFX PDUs 0.19, or 0.27 after one of each other name that
-      skips are counted under; frames begun again 0.20; and empty
-      bitmaps 0.70, the most. PDUs applied that draw little are left to
-      a decision. The rate is
+      and does little with are charged 8 units each, a block of a
+      RemoteFX or progressive message and a rectangle or quantization
+      table of their regions and tile sets, and 24 each, a W2S2's
+      stream and a GFX PDU that the client skips, paid and counted once
+      a message, which holds a flood of them, in stored messages, to
+      0.2 to 0.7 of a core (`BenchmarkSkipped`, load 10.3, medians):
+      progressive regions outside a frame 0.30, blocks of an unknown
+      type 0.27 and frame begins 0.22; progressive regions' rectangles
+      0.47, quantization tables 0.26 and qualities, three tables each,
+      0.28; RemoteFX blocks of an unknown type 0.28, region rectangles
+      0.50 and quantization tables 0.27; W2S2 PDUs of no blocks 0.47;
+      unknown GFX PDUs 0.17, or 0.25 after one of each other name that
+      skips are counted under; frames begun again 0.19; and empty
+      bitmaps 0.65, the most. PDUs applied that draw little wait for
+      the process's budget. The rate is
       a session's, so a user with ten sessions to hostile servers can
       take ten cores; a budget for the whole process is a release item
       ([native-rdp-backend](native-rdp-backend.md)).

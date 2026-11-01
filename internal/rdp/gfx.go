@@ -160,9 +160,9 @@ const (
 // PDU that the client skips, of 8 bytes at the least, or W2S2 PDU,
 // whose stream may be of no blocks; a PDU may look its surface up too.
 // Their message pays what it owes at its end (gfxMessage). On the
-// benchmarks' host a block, rectangle or table costs 3.5 to 9 ns, and
-// a PDU 8 to 30, an empty bitmap the most, so that a flood of them gets
-// at most 0.7 of a core (BenchmarkSkipped).
+// benchmarks' host a block, rectangle or table costs 3 to 7.5 ns, and
+// a PDU 7.5 to 30, an empty bitmap the most, so that a flood of them
+// gets at most 0.7 of a core (BenchmarkSkipped).
 const (
 	blockCost = 8
 	pduCost   = 24
