@@ -37,9 +37,10 @@
 // Tiles of codecs other than raw are decoded as they arrive, in
 // parallel, by decoders the caller plugs in through Options.Decoders;
 // raw tiles need no decoding and are copied when applied. Small state
-// that only ever holds its latest value (the title, clipboard, cursor
-// and pointer position) replaces an undelivered event of its kind, so a
-// caller that does not call Next for a while gets the newest value once.
+// that only ever holds its latest value (the title, clipboard and its
+// status, cursor and pointer position) replaces an undelivered event of
+// its kind, so a caller that does not call Next for a while gets the
+// newest value once.
 //
 // Input never waits for Next: input methods queue their message for a
 // writer goroutine and return, waiting only while the queue holds more

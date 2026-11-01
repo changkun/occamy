@@ -62,6 +62,7 @@ const (
 	TypePrompt          Type = 0x020d
 	TypeViewerJoined    Type = 0x020e
 	TypeViewerLeft      Type = 0x020f
+	TypeClipboardStatus Type = 0x0210
 )
 
 // sender is the peer that sends a message type.
@@ -112,6 +113,7 @@ var catalogue = [...]struct {
 	{TypePrompt, "prompt", serverPeer, func() Message { return new(Prompt) }},
 	{TypeViewerJoined, "viewer-joined", serverPeer, func() Message { return new(ViewerJoined) }},
 	{TypeViewerLeft, "viewer-left", serverPeer, func() Message { return new(ViewerLeft) }},
+	{TypeClipboardStatus, "clipboard-status", serverPeer, func() Message { return new(ClipboardStatus) }},
 }
 
 // catalogueIndex maps a message type to its index in catalogue.

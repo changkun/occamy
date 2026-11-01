@@ -49,7 +49,9 @@ type client struct {
 	cache   testSlots
 	cursors []protocol.Cursor
 	clips   int // server clipboards received
-	pongs   []uint32
+	// clipStatus holds the clipboard-status messages received.
+	clipStatus []bool
+	pongs      []uint32
 	// errs holds messages the client could not decode, which a client
 	// answers by closing the connection.
 	errs []error
@@ -253,6 +255,8 @@ func (cl *client) run(ctx context.Context) {
 			cl.cursors = append(cl.cursors, c)
 		case *protocol.ServerClipboard:
 			cl.clips++
+		case *protocol.ClipboardStatus:
+			cl.clipStatus = append(cl.clipStatus, m.Answering)
 		case *protocol.Pong:
 			cl.pongs = append(cl.pongs, m.Nonce)
 		case *protocol.Title:
@@ -438,6 +442,24 @@ func TestSmallStateAhead(t *testing.T) {
 		// 1024x768 in 64-pixel tiles is 16x12.
 		if last.tiles >= 16*12 || r.cl.tiles < 16*12 {
 			t.Errorf("%d of %d tiles arrived before the title; the test does not show the title overtaking tiles", last.tiles, r.cl.tiles)
+		}
+	})
+}
+
+// What the backend says of the remote's clipboard reaches the client.
+func TestClipboardStatus(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &tapped{Backend: backendtest.NewScreen(64, 64, 0)}
+		r := newRig(t, b, 50e6, 5*time.Millisecond, visible)
+		time.Sleep(100 * time.Millisecond)
+		b.Sink().ClipboardStatus(false)
+		time.Sleep(100 * time.Millisecond)
+		b.Sink().ClipboardStatus(true)
+		time.Sleep(100 * time.Millisecond)
+		r.cl.mu.Lock()
+		defer r.cl.mu.Unlock()
+		if !slices.Equal(r.cl.clipStatus, []bool{false, true}) {
+			t.Errorf("clipboard status %v, want false, then true", r.cl.clipStatus)
 		}
 	})
 }

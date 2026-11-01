@@ -747,6 +747,13 @@ describe('events', () => {
     await nextOf(s, 'title')
   })
 
+  it('keeps the latest clipboard status until delivered', async () => {
+    const { t, s } = await open()
+    t.push({ type: 'clipboard-status', answering: false })
+    t.push({ type: 'clipboard-status', answering: true })
+    expect(await s.next()).toEqual({ type: 'clipboard-status', answering: true })
+  })
+
   it('forgets a viewer that left before its join was delivered', async () => {
     const { t, s } = await open()
     t.push({ type: 'viewer-joined', viewerId: 3, role: Role.ReadOnly, name: 'ann' })

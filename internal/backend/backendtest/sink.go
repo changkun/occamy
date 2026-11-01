@@ -49,6 +49,7 @@ type Sink struct {
 	term      []byte
 	clipMIME  string
 	clipData  []byte
+	clipState []bool
 	bells     int
 	title     string
 	prompts   []backend.Prompt
@@ -146,6 +147,13 @@ func (s *Sink) Clipboard(mime string, data []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.clipMIME, s.clipData = mime, slices.Clone(data)
+}
+
+// ClipboardStatus implements backend.Sink.
+func (s *Sink) ClipboardStatus(answering bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clipState = append(s.clipState, answering)
 }
 
 // Bell implements backend.Sink.
@@ -271,6 +279,13 @@ func (s *Sink) ClipboardContent() (mime string, data []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.clipMIME, slices.Clone(s.clipData)
+}
+
+// ClipboardStatuses returns the ClipboardStatus calls so far, in order.
+func (s *Sink) ClipboardStatuses() []bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.clipState)
 }
 
 // Bells is the number of Bell calls.

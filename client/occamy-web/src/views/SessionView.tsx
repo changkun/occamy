@@ -11,7 +11,7 @@ import { type ReactElement, Suspense, lazy, useEffect, useEffectEvent, useMemo, 
 import { CanvasSurface, CloseCode, Role, SessionClass, cursorStyle } from '../protocol'
 import type { AccessToken, Api, Identity } from '../lib/api'
 import { type SessionAction, forgetSession, keepSession } from '../lib/app'
-import { type SessionController as Controller, SessionController, type SessionState, overlayOf } from '../lib/controller'
+import { CLIPBOARD_WAITING, type SessionController as Controller, SessionController, type SessionState, overlayOf } from '../lib/controller'
 import { type Ending, endsSession } from '../lib/ending'
 import { type Size, cellGrid, fitSize, pixelRatio, screenSize } from '../lib/layout'
 import { endSession, sessionOwner } from '../lib/owner'
@@ -270,6 +270,14 @@ export function SessionView({ api, token, target, owner: seed, action, storage, 
     setShareRequest(null)
     setPanel(null)
   }
+  // The notice's button takes the focus with it, so the keys go back to
+  // the remote, unless a panel is open for them.
+  const dismissNotice = (): void => {
+    controller.dismissClipboardWaiting()
+    if (panel === null) {
+      stageRef.current?.querySelector('canvas')?.focus({ preventScroll: true })
+    }
+  }
 
   const fullScreen = (): void => {
     if (document.fullscreenElement !== null) {
@@ -326,8 +334,16 @@ export function SessionView({ api, token, target, owner: seed, action, storage, 
           terminal ? (
             <TerminalClipboardPanel can={can} onClose={closePanel} />
           ) : (
-            <ClipboardPanel controller={controller} remote={state.clipboard} draft={state.draft} can={can} onClose={closePanel} />
+            <ClipboardPanel controller={controller} remote={state.clipboard} draft={state.draft} waiting={state.clipboardWaiting} can={can} onClose={closePanel} />
           )
+        )}
+        {state.clipboardWaiting && state.phase === 'open' && (
+          <div className="notice" role="alert">
+            <p>{CLIPBOARD_WAITING}</p>
+            <button type="button" onClick={dismissNotice}>
+              Dismiss
+            </button>
+          </div>
         )}
         {panel === 'share' && state.phase === 'open' && token !== null && (
           <SharePanel

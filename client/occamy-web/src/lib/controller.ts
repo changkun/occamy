@@ -66,6 +66,12 @@ export interface SessionState {
    * sent is the remote clipboard's.
    */
   draft: string
+  /**
+   * Whether the remote has not taken clipboard text this client sent,
+   * which waits for it, unless the user dismissed that. A remote still
+   * at its logon screen looks the same as one whose clipboard has gone.
+   */
+  clipboardWaiting: boolean
   /** How many times the bell rang. */
   bells: number
   /** The remote pointer's image, for cursorStyle. */
@@ -88,6 +94,9 @@ export interface SessionState {
 
 /** What became of clipboard text sent: sent, not open to the role or the stream, or refused, with why. */
 export type ClipboardSend = { kind: 'sent' } | { kind: 'not-open' } | { kind: 'failed'; error: Error }
+
+/** What the page says while clipboardWaiting holds. */
+export const CLIPBOARD_WAITING = "The remote hasn't taken the clipboard yet. Your text will go when it does."
 
 /** What a stream asks the remote for in its hello. */
 export interface HelloSize {
@@ -148,6 +157,7 @@ const initial: SessionState = {
   prompts: [],
   clipboard: null,
   draft: '',
+  clipboardWaiting: false,
   bells: 0,
   cursor: null,
   size: { width: 0, height: 0 },
@@ -205,6 +215,9 @@ export class SessionController {
   // The clipboard text the remote and this client last agreed on, so
   // that a local clipboard that only echoes the remote's is not sent back.
   private lastClipboard: string | null = null
+  // Whether this client sent clipboard text: only it can have text
+  // waiting for the remote.
+  private sentClipboard = false
   // The last size asked of the remote, by the hello or a resize request;
   // zero for none.
   private lastResize: Size = { width: 0, height: 0 }
@@ -405,6 +418,11 @@ export class SessionController {
         }
         return
       }
+      case 'clipboard-status':
+        // Only the word changes: text that waits is on its way, so it
+        // stays the clipboard's here, in the panel and for lastClipboard.
+        this.update({ clipboardWaiting: !ev.answering && this.sentClipboard })
+        return
       case 'bell':
         this.update({ bells: this.state.bells + 1 })
         return
@@ -486,9 +504,11 @@ export class SessionController {
 
   /**
    * sendClipboard puts text on the remote's clipboard, and says whether
-   * it did: not for a role that may not, nor for a stream not open, nor
+   * it went: not for a role that may not, nor for a stream not open, nor
    * for text the core refuses, such as one too large for a message, which
-   * then stays the user's, to send again.
+   * then stays the user's, to send again. A remote that has not taken
+   * what went says so later, as clipboardWaiting, and it goes when the
+   * remote does.
    */
   sendClipboard(text: string): ClipboardSend {
     const s = this.session
@@ -500,8 +520,14 @@ export class SessionController {
     } catch (err) {
       return { kind: 'failed', error: err instanceof Error ? err : new Error(String(err)) }
     }
+    this.sentClipboard = true
     this.agree(text)
     return { kind: 'sent' }
+  }
+
+  /** dismissClipboardWaiting takes clipboardWaiting away, until text has waited too long again. */
+  dismissClipboardWaiting(): void {
+    this.update({ clipboardWaiting: false })
   }
 
   // agree takes text for the remote clipboard's, as the remote said or as

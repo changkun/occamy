@@ -574,6 +574,8 @@ export class Session {
         return this.event({ type: 'cursor-move', x: m.x, y: m.y }, n)
       case 'server-clipboard':
         return this.event({ type: 'clipboard', mime: m.mime, data: m.data }, n)
+      case 'clipboard-status':
+        return this.event({ type: 'clipboard-status', answering: m.answering }, n)
       case 'bell':
         return this.event({ type: 'bell' }, n)
       case 'title':
@@ -871,7 +873,7 @@ export class Session {
   // its undelivered join, and bells beyond a few are dropped.
   private enqueue(item: Exclude<Item, { kind: 'frame' }>): void {
     const type = item.kind === 'cursor' ? 'cursor' : item.ev.type
-    if (type === 'title' || type === 'clipboard' || type === 'cursor' || type === 'cursor-move') {
+    if (type === 'title' || type === 'clipboard' || type === 'clipboard-status' || type === 'cursor' || type === 'cursor-move') {
       for (let i = this.queue.length - 1; i >= 0; i--) {
         const it = this.queue[i]
         const itType = it.kind === 'cursor' ? 'cursor' : it.kind === 'event' ? it.ev.type : null

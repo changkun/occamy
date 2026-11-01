@@ -620,6 +620,26 @@
         "viewer_id": "2"
       },
       "hex": "0f02000002000000"
+    },
+    {
+      "name": "clipboard-status silent",
+      "message": "clipboard-status",
+      "type": 528,
+      "from": "server",
+      "fields": {
+        "answering": false
+      },
+      "hex": "1002010000"
+    },
+    {
+      "name": "clipboard-status answering",
+      "message": "clipboard-status",
+      "type": 528,
+      "from": "server",
+      "fields": {
+        "answering": true
+      },
+      "hex": "1002010001"
     }
   ],
   "invalid": [
@@ -796,6 +816,24 @@
       "from": "server",
       "hex": "0d02000001000000000000000000000002000000000000",
       "error": "truncated"
+    },
+    {
+      "name": "clipboard-status with an empty body",
+      "from": "server",
+      "hex": "10020100",
+      "error": "truncated"
+    },
+    {
+      "name": "clipboard-status with answering 2",
+      "from": "server",
+      "hex": "1002010002",
+      "error": "invalid"
+    },
+    {
+      "name": "clipboard-status with a byte after the last field",
+      "from": "server",
+      "hex": "100201000100",
+      "error": "trailing-data"
     },
     {
       "name": "tile of width 0",

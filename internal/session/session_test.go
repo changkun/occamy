@@ -376,6 +376,47 @@ func TestSmallStateBroadcast(t *testing.T) {
 	})
 }
 
+// What the backend says of the remote's clipboard reaches the viewers,
+// and a viewer that joins while the clipboard is silent learns it too.
+func TestClipboardStatus(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &scripted{class: backend.Graphical}
+		s, owner := start(t, session.Config{Backend: b})
+		synctest.Wait()
+		sink := b.sink()
+
+		join := func() *bool {
+			t.Helper()
+			v, err := s.Join(session.RoleViewer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return v.Take().ClipboardStatus
+		}
+		if got := join(); got != nil {
+			t.Errorf("a viewer joined before any status with %v", *got)
+		}
+		owner.Take()
+
+		sink.ClipboardStatus(false)
+		if p := owner.Take(); p.ClipboardStatus == nil || *p.ClipboardStatus {
+			t.Errorf("the owner's status %v, want false", p.ClipboardStatus)
+		}
+		if got := join(); got == nil || *got {
+			t.Errorf("a viewer joined a silent clipboard with %v, want false", got)
+		}
+		owner.Take()
+
+		sink.ClipboardStatus(true)
+		if p := owner.Take(); p.ClipboardStatus == nil || !*p.ClipboardStatus {
+			t.Errorf("the owner's status %v, want true", p.ClipboardStatus)
+		}
+		if got := join(); got != nil {
+			t.Errorf("a viewer joined a clipboard that answers with %v", *got)
+		}
+	})
+}
+
 func TestPrompt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		b := &scripted{class: backend.Graphical}

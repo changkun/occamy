@@ -49,6 +49,7 @@ const typeNames: Record<number, Message['type']> = {
   0x020d: 'prompt',
   0x020e: 'viewer-joined',
   0x020f: 'viewer-left',
+  0x0210: 'clipboard-status',
 }
 
 // The vectors' field names are docs/protocol.md's; this package's are

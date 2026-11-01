@@ -455,11 +455,24 @@ it. On **SSH**, the **Clipboard** panel says so, and points to the
 browser's paste: click the terminal and press ⌘V, or Ctrl+Shift+V, and
 the text goes to the shell.
 
-If the RDP desktop's **Clipboard** panel never changes, xrdp's
-clipboard process, `xrdp-chansrv`, may have exited, which it can when
-a connection closes within moments of opening. The demo image starts
-it again when the next connection opens, and the `rdp` service's log
-says `starting xrdp-chansrv again`. End the session and open it again.
+On RDP, a server's clipboard is a process of its own, xrdp's
+`xrdp-chansrv`, which starts only after you log on, and may exit while
+the session goes on. xrdp's does that when a connection closes within
+moments of opening. If the server has not taken text you sent after a
+minute, the page says "The remote hasn't taken the clipboard yet. Your
+text will go when it does." over the desktop and in the **Clipboard**
+panel. Nothing is lost: the text waits, and goes when the server
+answers. At a slow logon screen nothing is wrong, and the word goes once
+you are in. It also goes when you dismiss it.
+
+If that stays, or the RDP desktop's **Clipboard** panel never changes,
+the process has probably gone. The demo image starts it again when the
+next connection opens, and the `rdp` service's log says
+`starting xrdp-chansrv again`, so end the session, open it again and
+send the text again, as text still waiting ends with its session. xrdp
+itself starts that process only with an X session, so a server without
+the demo's `reconnectwm.sh` keeps the clipboard silent until you log out
+of that session.
 
 The demo x11vnc used to die now and then of an X error, `BadWindow`,
 which ended its sessions with "Remote unreachable", sometimes right
@@ -682,7 +695,7 @@ make e2e
 
 Run it with the engine that `make run` used, as in [section
 1](#1-what-you-need): with Docker, `make e2e CONTAINER_ENGINE=docker`,
-unless you exported it. One test kills the clipboard process in the
+unless you exported it. Two tests kill the clipboard process in the
 `rdp` container through that engine's compose, and another stops
 x11vnc in the `vnc` container for a moment, so they fail with
 another engine.

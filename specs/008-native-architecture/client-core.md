@@ -10,7 +10,7 @@ affects:
   - tests/
 effort: medium
 created: 2026-10-29
-updated: 2026-10-31
+updated: 2026-11-01
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -144,9 +144,9 @@ layer, and any tools.
     agreed `Capabilities`, and `Size` as of the last `Resize` delivered.
   - `Next(ctx)` delivers `Frame` (ID, `LastSeq`, server time, dirty
     rectangles), `Resize`, `TermSnapshot`, `TermData`, `Cursor`,
-    `CursorMove`, `Clipboard`, `Bell`, `Title`, `Prompt`,
-    `ViewerJoined`, `ViewerLeft`, and last `End` with the close code,
-    reason and error. Then it returns `ErrClosed`.
+    `CursorMove`, `Clipboard`, `ClipboardStatus`, `Bell`, `Title`,
+    `Prompt`, `ViewerJoined`, `ViewerLeft`, and last `End` with the
+    close code, reason and error. Then it returns `ErrClosed`.
   - Graphical sessions keep an `*image.RGBA` framebuffer, read under a
     lock with `Framebuffer(func)` or copied with `Screenshot`. Raw tiles
     are copied in. Other codecs go through the `Decoder`s of
@@ -201,11 +201,11 @@ layer, and any tools.
     complete frames, each frame at its `frame-end`. Frames are bounded by
     the protocol: more than `frame_window` + 1 undelivered, counting the
     frame `Next` delivered and the caller has not yet acknowledged by
-    calling again, is a `protocol-error`. Title, clipboard, cursor and
-    pointer position hold their latest value and replace an undelivered
-    event of their kind in place; at most 3 bells wait; a viewer that
-    leaves cancels its undelivered join. More than 1024 undelivered
-    events, or more bytes than max(64 MiB, min((window + 2) × 3 screens,
+    calling again, is a `protocol-error`. Title, clipboard, its status,
+    cursor and pointer position hold their latest value and replace an
+    undelivered event of their kind in place; at most 3 bells wait; a
+    viewer that leaves cancels its undelivered join. More than 1024
+    undelivered events, or more bytes than max(64 MiB, min((window + 2) × 3 screens,
     1 GiB)), is taken for a broken server and closed with
     `protocol-error`; each queued message counts its size and 512 bytes
     more, above the 110 to 334 measured for holding it, so that small

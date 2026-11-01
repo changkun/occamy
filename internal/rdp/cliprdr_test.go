@@ -318,12 +318,12 @@ func TestClipboardToServer(t *testing.T) {
 	l.send(t, rdptest.FormatDataRequest(99))
 	want(t, l.next(t), rdptest.CBFormatDataResponse, rdptest.CBResponseFail)
 
-	// The same text again is not announced again while the server's
-	// clipboard is the client's; after the server's own, it is.
+	// The same text again is announced again, as only an answer shows
+	// that the server still has it, and so it is after the server's own.
 	if err := l.c.SetClipboard([]byte(text)); err != nil {
 		t.Fatal(err)
 	}
-	l.quiet(t)
+	formats(t, l.next(t), true, rdptest.CFUnicodeText, rdptest.CFText)
 	l.send(t, rdptest.FormatList(true))
 	want(t, l.next(t), rdptest.CBFormatListResponse, rdptest.CBResponseOK)
 	if err := l.c.SetClipboard([]byte(text)); err != nil {
@@ -411,6 +411,43 @@ func TestClipboardStale(t *testing.T) {
 	}
 	if n := l.c.Stats().Ignored["clipboard answers"]; n != 3 {
 		t.Errorf("%d answers dropped, want 3", n)
+	}
+}
+
+// A clipboard process that goes with a request of the client's
+// unanswered does not answer it when it starts again, and the client
+// asks for no more until it has an answer: Monitor Ready has it forget
+// that, or the viewers would see no clipboard of the server's again.
+func TestClipboardRestartForgetsRequest(t *testing.T) {
+	l := runLive(t, rdptest.Server{}, bothWays)
+	l.ready(t, true)
+	l.send(t, rdptest.FormatList(true, rdptest.CFUnicodeText))
+	want(t, l.next(t), rdptest.CBFormatListResponse, rdptest.CBResponseOK)
+	want(t, l.next(t), rdptest.CBFormatDataRequest, 0)
+
+	l.ready(t, true)
+	l.send(t, rdptest.FormatList(true, rdptest.CFUnicodeText))
+	want(t, l.next(t), rdptest.CBFormatListResponse, rdptest.CBResponseOK)
+	want(t, l.next(t), rdptest.CBFormatDataRequest, 0)
+	l.send(t, rdptest.FormatDataResponse(true, rdptest.UnicodeText("new")))
+	if got := l.waitClipboard(t, 1); !slices.Equal(got, []string{"new"}) {
+		t.Errorf("clipboards %q, want the new process's", got)
+	}
+}
+
+// A request that was due when the process went, and an answer taken for
+// stale, are for what that process offered, so they go with it.
+func TestClipboardRestartForgetsDue(t *testing.T) {
+	c, _ := testClock(64, 64)
+	c.cfg.Clipboard = bothWays.Clipboard
+	c.chio.kick = make(chan struct{}, 1)
+	c.clipCh = &vchannel{name: "cliprdr", id: 1004, limit: maxCliprdrMessage}
+	c.clip.request, c.clip.stale = rdptest.CFUnicodeText, true
+	if err := c.cliprdrMessage(&screen{}, rdptest.MonitorReady(), false); err != nil {
+		t.Fatal(err)
+	}
+	if c.clip.request != 0 || c.clip.stale {
+		t.Errorf("request %d, stale %v after Monitor Ready", c.clip.request, c.clip.stale)
 	}
 }
 
