@@ -132,7 +132,8 @@ func startCluster(t *testing.T) *cluster {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		if _, err := c.run(t, "", "rm", "-f", "-t", "0", c.name); err != nil {
+		// -v: the image declares volumes, which would stay behind.
+		if _, err := c.run(t, "", "rm", "-f", "-v", "-t", "0", c.name); err != nil {
 			t.Logf("removing the container: %v", err)
 		}
 	})
