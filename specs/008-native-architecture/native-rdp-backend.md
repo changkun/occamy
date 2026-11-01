@@ -1739,41 +1739,51 @@ RDP's guacd path, RDP no longer needs guacd at all.
       to them. (Before review, both dropped them, and such a tile was
       added to zeros, up to 130 levels off in the review's
       reproduction.)
-    - A surface may have several codec contexts at once (3.3.1.1), and
-      a W2S2 of one context ends no other. Each tile records the codec
-      context of its last first pass, and has a progressive tile context
-      (3.3.1.2), the bit positions of its last pass and, while it has
-      upgrades to come, each coefficient's sign but LL3's, one sign
-      array a tile, as in FreeRDP. An upgrade applies in any codec
-      context, as 3.3.1.2 lets a tile context belong to "one or more
-      codec contexts". RDPGFX_DELETE_ENCODING_CONTEXT_PDU of context X
-      ends the tile contexts of X's tiles alone: they give their signs
-      back to the pool and keep their coefficients. Looking for them
-      scans the surface's tiles, charged a unit a tile.
+    - Each tile has a progressive tile context (3.3.1.2): the bit
+      positions of its last pass and, while it has upgrades to come,
+      each coefficient's sign but LL3's, one sign array a tile, as in
+      FreeRDP. A surface may have several codec contexts at once
+      (3.3.1.1), and a tile context may belong to "one or more codec
+      contexts" (3.3.1.2), so the client keeps no state of a codec
+      context, as FreeRDP keeps none: a W2S2 of any context id applies
+      to the surface's tiles, and RDPGFX_DELETE_ENCODING_CONTEXT_PDU
+      ends nothing, as FreeRDP's `gdi_DeleteEncodingContext` does
+      nothing. A tile context ends at a full pass, which gives the
+      tile's signs back to the pool, at the tile's next first pass, at
+      a skip (below), and with its surface. (After the second review, a
+      delete ended the tile contexts of the tiles whose last first pass
+      was in its context, after a scan of the surface's tiles. That
+      skipped the upgrades, in a second context, of a tile first sent
+      in a deleted one, which 3.3.1.2 allows; the third review returned
+      to FreeRDP's behaviour.)
     - An upgrade that the client cannot apply is skipped and counted,
-      and does not end the session: of a tile with no first pass, or
-      whose codec context was deleted, or in the other transform than
-      the tile's (whose signs are of the other transform's bands). So is
-      a difference tile in the other transform, whose coefficients lie
-      in the other bands. A skip ends the tile's tile context, so that
-      its later upgrades are skipped too until its next first pass:
-      their bit positions follow the skipped one's, and applied, they
-      would decode garbage. (Before this round of review, each of these
-      ended the session, and so did an upgrade after a context's
-      switch, which interleaved contexts make legitimate.)
+      and does not end the session: of a tile with no first pass, after
+      a skipped pass, or in the other transform than the tile's (whose
+      signs are of the other transform's bands). So is a difference tile
+      in the other transform, whose coefficients lie in the other bands.
+      A skip ends the tile's tile context, so that its later upgrades
+      are skipped too until its next first pass: their bit positions
+      follow the skipped one's, and applied, they would decode garbage.
+      (Before the second review, each of these ended the session, and
+      so did an upgrade after a context's switch, which interleaved
+      contexts make legitimate.)
     - TILE_SIMPLE and TILE_FIRST as first passes, difference tiles
       added to what the tile has, and TILE_UPGRADE with LL3's bits and
       those of coefficients with a sign raw and the others' from SRL,
       which sets their signs. At each region's end, the tiles it
       changed are dequantized, inverted and drawn where its rectangles,
       clipped to the surface, cover them.
-    - A surface has one open frame, of the codec context whose
-      FRAME_BEGIN opened it: a region of another context is outside a
-      frame, another context's FRAME_END closes nothing, and deleting
-      the context closes it.
-    - Regions outside a frame, unknown blocks, a delete of a context no
-      tile has or on a surface without RemoteFX Progressive, and a
-      progressive bitmap in wire-to-surface 1 are counted and skipped.
+    - A frame is of its bitmap stream alone: FRAME_BEGIN comes once a
+      stream (2.2.4.2.1.2), so each W2S2's stream starts outside a
+      frame, and a region outside its stream's own FRAME_BEGIN and
+      FRAME_END is ignored and counted (2.2.4.2.1.5), whatever an
+      earlier stream left open, as FreeRDP's `progressive_decompress`
+      starts each stream outside a frame. (After the second review, a
+      codec context's frame spanned its streams.)
+    - Regions outside a frame, blocks of an unknown type, in a stream
+      or a region, a delete on a surface without RemoteFX Progressive,
+      and a progressive bitmap in wire-to-surface 1 are counted and
+      skipped.
   - The quantization tables are read in the band order each
     specification gives: TS_RFX_CODEC_QUANT ([MS-RDPRFX] 2.2.2.1.5)
     puts each level's LH before its HL, and RFX_COMPONENT_CODEC_QUANT
@@ -1820,6 +1830,40 @@ RDP's guacd path, RDP no longer needs guacd at all.
       copied or decompressed a unit a pixel. A pointer update, the
       server's clipboard text and a copy within a mapped surface are
       charged at least `pointerCost`, a 8,192th of the rate.
+    - **Headers** (found in the third review). Each block of a
+      progressive stream is charged `blockCost`, 8 units, and each
+      W2S2's stream, which may be of no blocks, and each GFX PDU or
+      bitmap that the client skips, `pduCost`, 24 units. Their message
+      pays the sum once, at its end, and counts then what it applied
+      and skipped, a tally a name, so that a flood of headers takes
+      neither the clock nor `c.mu` for each. Before, the review
+      measured a region outside a frame, charged only its bytes'
+      expansion, 1.5 units for 6 bytes compressed and none stored, at
+      10.6 to 11.8 ns, and an unknown GFX PDU of 8 bytes, charged 2
+      units, at 20 to 25 ns; a block of an unknown type was not even
+      counted. The floods, in stored messages, whose expansion is not
+      charged, 4,096 blocks or PDUs a message, 5 runs each, the host's
+      1-minute load 9.1 when they started and 10.5 when they ended,
+      medians:
+
+      | Flood (`BenchmarkSkipped`) | ns each | Units | Share of a core |
+      |---|---|---|---|
+      | Progressive regions outside a frame, 6 bytes | 5.0 | 8 | 0.34 |
+      | Progressive blocks of an unknown type, 6 bytes | 4.5 | 8 | 0.30 |
+      | Progressive frame begins, 12 bytes | 3.9 | 8 | 0.26 |
+      | W2S2 PDUs of no blocks, 21 bytes | 23.4 | 24 | 0.52 |
+      | GFX PDUs of an unknown type, 8 bytes | 8.6 | 24 | 0.19 |
+      | The same, after one PDU of each other name | 12.2 | 24 | 0.27 |
+      | Frames begun again, 16 bytes | 8.8 | 24 | 0.20 |
+      | Empty bitmaps in wire-to-surface 1, 25 bytes | 31.3 | 24 | 0.70 |
+
+      An empty bitmap costs the most, as it parses its rectangle and
+      looks its surface up; at 16 units a PDU it got a core, hence 24.
+      After one PDU of each other name that the client counts skips
+      under but the tiles', an unknown PDU costs half as much again, as
+      the tally is looked through for each; the names are the client's
+      own and few, so the tally is bounded by them. A run before, at a
+      load of 6.2 to 7.1, measured 5 to 15% less a block.
     - **The rate** is 512 Mi units a second (`decodeRate`, 2^29). The
       dearest unit of real content, progressive tiles', costs 1.88 ns,
       so the rate holds a session's decoding of real content to about
@@ -1831,8 +1875,9 @@ RDP's guacd path, RDP no longer needs guacd at all.
       floods to send are held to less: tiles of a header and no
       coefficients, a few bytes each, to 0.6 of a core (RemoteFX) and
       0.79 (progressive), 18,744 tiles a second, which
-      `TestDecodeBudget` checks against the clock, and RLE runs to 0.74
-      to 0.78 (the medians, 1.38 to 1.46 ns a unit). Every session has
+      `TestDecodeBudget` checks against the clock, RLE runs to 0.74 to
+      0.78 (the medians, 1.38 to 1.46 ns a unit), and headers to 0.2
+      to 0.7 (above). Every session has
       its own rate, so n hostile sessions take up to n cores; a budget
       for the whole process must come before the release (Follow-ups).
     - **The bucket** (`paceBurst`) holds two desktops of tiles, 14
@@ -1865,9 +1910,10 @@ RDP's guacd path, RDP no longer needs guacd at all.
     24 KiB of coefficients, and 12 KiB more of signs while upgrades are
     to come, 36 KiB in all, so the tiles take at most 36 MiB at
     1920 × 1080 (1,024 tiles) and 576 MiB at the largest desktop, 2^25
-    pixels (16,384 tiles). A full pass, or the end of its codec
-    context, gives a tile's signs back to a pool of at most 64; its
-    coefficients stay until its surface is deleted.
+    pixels (16,384 tiles). A full pass, or a skip, gives a tile's
+    signs back to a pool of at most 64; its coefficients stay until its
+    surface is deleted. The bound already takes every tile to keep its
+    signs, so no codec context's delete need end any.
   - **A session's memory**, at worst: about 1 GiB, the tiles' 576 MiB,
     the surfaces' 256 MiB and the framebuffer's 128 MiB at the largest
     desktop, beside phase 1's bitmap buffers (96 MiB) and ZGFX's 2.5 MB
@@ -2003,27 +2049,34 @@ RDP's guacd path, RDP no longer needs guacd at all.
   tile, at xrdp's tables and `asymQuant`), `TestProgressiveDifferenceSimple`,
   `TestProgressiveRegionClip` (rectangles, regions of a frame, and a
   surface of 100 × 50 against one of 128 × 64), `TestProgressiveContexts`
-  (an upgrade in another context applies; deleting another context
-  leaves the tile's tile context, and deleting the tile's ends it, the
-  coefficients kept and the signs given back; the tile's upgrades then
-  skipped and counted, in any context, until a first pass; an upgrade
-  of no tile skipped; a delete of a context no tile has counted;
-  regions before and after a frame, the surface deleted),
-  `TestProgressiveInterleavedContexts` (first passes of two tiles in
-  contexts 1 and 2, upgrades of each in its own context in turn, and
-  deleting context 1 ending tile 0's tile context alone),
-  `TestProgressiveFrameContext` (a surface's open frame is its codec
-  context's), `TestProgressiveDifferenceAcrossContexts` (a difference
-  tile after a context's delete, and in another context, adds to the
-  tile's coefficients), `TestProgressiveTransformChange` (a difference
-  tile and an upgrade in the other transform skipped and counted, the
-  tile unchanged, and its next upgrade in its own transform skipped
-  too; a tile sent whole may change its transform, and a new tile may
-  come as a difference in either), `TestProgressiveSignPool`,
+  (an upgrade in another context applies; deleting either context
+  leaves the tile's tile context, and its upgrades go on, in the
+  deleted context and another; an upgrade of no tile skipped; a delete
+  on a surface without RemoteFX Progressive counted; the surface
+  deleted), `TestProgressiveInterleavedContexts` (first passes of two
+  tiles in contexts 1 and 2, upgrades of each in its own context in
+  turn, and deleting context 1 ending neither tile's tile context, so
+  that tile 0's upgrade after it applies), `TestProgressiveFrames` (a
+  region outside its stream's own frame ignored and counted, after a
+  stream that left its frame open, and before, between and after
+  frames in one stream; a block of an unknown type counted, the sync
+  and context blocks not), `TestProgressiveDifferenceAcrossContexts`
+  (a difference tile after a context's delete, and in another context,
+  adds to the tile's coefficients), `TestProgressiveTransformChange`
+  (a difference tile and an upgrade in the other transform skipped
+  and counted, the tile unchanged, and its next upgrade in its own
+  transform skipped too; a tile sent whole may change its transform,
+  and a new tile may come as a difference in either),
+  `TestProgressiveSignPool`,
   `TestRFXMalformed` (13 RemoteFX and 15 progressive cases, each with
   its reason), `TestRFXPace` (each charge, an empty RemoteFX rectangle
-  charging nothing, a context's delete charging its scan whether or
-  not a tile keeps signs, and a switch charging nothing),
+  charged as a skipped PDU; a progressive stream's and its blocks',
+  skipped ones too; an upgrade of no first pass and one in the other
+  transform each charged `rfxTileCost`; a context's delete charging
+  nothing, and one on a surface without RemoteFX Progressive charged
+  as a skipped PDU), `TestGFXSkipCharged` (each PDU or bitmap that the
+  client skips charged `pduCost` and counted once, and 100 of one name
+  in a message tallied under it once),
   `TestDecodeBudget` (with the flood's 18,744 tiles a second checked
   against the clock, so that a higher `decodeRate` fails it),
   `TestBitmapCost`,
@@ -2074,8 +2127,9 @@ RDP's guacd path, RDP no longer needs guacd at all.
   allocations a frame and none a tile; progressive's tiles, made in
   the first frame, add 1 to 2 a frame averaged over the run.
   `BenchmarkProgressivePasses` takes 0.20 to 0.21 ms for a tile's four
-  passes, with no allocations, and `BenchmarkRLGR` 19.5 to 19.8 µs
-  (RLGR1) and 15.2 to 16.5 (RLGR3) a component of 4,096 coefficients.
+  passes, with no allocations, `BenchmarkSkipped` is in Bounds, and
+  `BenchmarkRLGR` 19.5 to 19.8 µs (RLGR1) and 15.2 to 16.5 (RLGR3) a
+  component of 4,096 coefficients.
   This pull request's first numbers, at a load of 33 to 46, were about
   3.5 times these (41 to 43 ns a pixel for RemoteFX), and wrongly gave
   the frame as 1920 × 1080. Inverting the columns a row at a time took
@@ -2091,8 +2145,9 @@ RDP's guacd path, RDP no longer needs guacd at all.
   charge to the pacing dropped, RemoteFX's tile cost, its clip cost,
   the progressive tile's and the progressive draw's, or a tile that a
   region changes twice drawn twice (`TestRFXPace`); the context kept
-  when its surface is deleted, or a region after a frame's end or
-  before its beginning applied (`TestProgressiveContexts`);
+  when its surface is deleted (`TestProgressiveContexts`), or a region
+  after a frame's end or before its beginning applied
+  (`TestProgressiveFrames`);
   LL3's differences not summed in RemoteFX (`TestRFXSpecTile`) or in
   a first pass (`TestProgressivePasses`), or summed without
   saturating (`TestRLGRSaturates`); the shift q − 1 made q − 2 or q
@@ -2136,33 +2191,48 @@ RDP's guacd path, RDP no longer needs guacd at all.
       checked or not set; given for what the client does not miss
       (AVC); or not given for a wire-to-surface 2 of an unknown codec
       (`TestGFXSkipWarning`).
-  - **After the second review**, 18 more, each failing a test:
-    - A delete: ending every context's tiles, not only its own
-      (`TestProgressiveContexts`, `TestProgressiveInterleavedContexts`);
-      ending none; dropping the coefficients
-      (`TestProgressiveContexts`,
-      `TestProgressiveDifferenceAcrossContexts`); its scan uncharged
-      (`TestRFXPace`); leaving its frame open
-      (`TestProgressiveFrameContext`).
-    - The frame: closed by another context's FRAME_END, or a region of
-      another context applied in it (`TestProgressiveFrameContext`).
-    - A first pass not recording its codec context
-      (`TestProgressiveContexts`, `TestProgressiveInterleavedContexts`)
-      or not giving the tile a tile context (`TestProgressivePasses` and
-      others).
+  - **After the second review**, 18 more, each failing a test then.
+    The third review removed the code of eight: a delete ending every
+    context's tiles or none, dropping the coefficients, its scan
+    uncharged, and leaving its frame open; the frame closed by another
+    context's FRAME_END, or a region of another context applied in it;
+    and a first pass not recording its codec context. The other ten
+    still fail a test:
+    - A first pass not giving the tile a tile context
+      (`TestProgressivePasses` and others).
     - An upgrade applied without a tile context
-      (`TestProgressiveContexts`, `TestProgressiveInterleavedContexts`,
-      `TestProgressiveTransformChange`).
+      (`TestProgressiveTransformChange`).
     - The skip latch: an upgrade or a difference tile in the other
       transform skipped without ending the tile context, so that the
-      next upgrade applies (`TestProgressiveTransformChange`); ending a
-      tile context keeping its flag or its signs
-      (`TestProgressiveContexts`, `TestProgressiveInterleavedContexts`,
-      `TestProgressiveTransformChange`).
+      next upgrade applies; ending a tile context keeping its flag or
+      its signs (`TestProgressiveTransformChange`).
     - The transform: an upgrade or a difference tile in the other
       transform applied, or a new tile's difference in either refused
       (`TestProgressiveTransformChange`).
     - `decodeRate` doubled (`TestDecodeBudget`, against the clock).
+  - **After the third review**, 30 more, each failing a test:
+    - A delete: ending every tile's tile context
+      (`TestProgressiveContexts`, `TestProgressiveInterleavedContexts`,
+      and `FuzzProgressive`'s seeds), or one on a surface without
+      RemoteFX Progressive not counted (`TestGFXIgnored`,
+      `TestGFXSkipCharged`).
+    - The frame: spanning streams, not ended by FRAME_END, or a region
+      outside it applied (`TestProgressiveFrames`); a block of an
+      unknown type not counted, or the sync and context blocks counted
+      (`TestProgressiveFrames`).
+    - The charges: a block's, a skipped block's, a stream's, a skipped
+      PDU's in `gfxSkipPDU` or at seven of its callers, and the
+      message's debt not paid or not cleared (`TestRFXPace`,
+      `TestGFXSkipCharged`, `TestGFXPace`); a skipped tile's charge
+      moved after the skip (`TestRFXPace`'s two skipped upgrades).
+    - The counts: not counted at the message's end, the applied PDUs
+      not counted or not cleared, the skips not cleared, or each skip a
+      tally of its own (`TestGFXSkipCharged`, `TestGFXFrame`,
+      `TestProgressiveContexts` and others).
+    - The warning, now given at the message's end: its flag not set or
+      not checked, given for what the client does not miss, or not
+      given for a wire-to-surface 2 of an unknown codec
+      (`TestGFXSkipWarning`).
 - **Decisions** (left open by the specification and the task).
   - GFX is on by default. With it, xrdp draws its sessions in
     RemoteFX Progressive; a server whose ClearCodec or cache the
@@ -2176,37 +2246,37 @@ RDP's guacd path, RDP no longer needs guacd at all.
     `adhoc_backends: {rdp: guacd}`; AVC, which the client does not
     offer, does not. Ad-hoc rdp targets have no `disable_gfx`, so on
     the native backend they always ask for GFX.
-  - The tiles' coefficients live as long as their surface, and the
-    signs and bit positions as long as their codec context, which the
-    specification requires of the first ([MS-RDPEGFX] 3.3.1.3, MUST)
-    and allows of the second (3.3.1.2: a progressive tile context "can
-    be discarded once all of the codec contexts with which it is
-    associated have been deleted"). A surface keeps a list of codec
-    contexts (3.3.1.1), so contexts may interleave, and a W2S2 of one
-    ends no other. A tile's context is that of its last first pass;
-    deleting it ends the tile contexts of its tiles alone, and an
-    upgrade applies in whichever context it comes, since a tile
-    context may belong to "one or more codec contexts" (3.3.1.2). One
-    sign array a tile suffices, as in FreeRDP, so the memory bound is
-    as before. An upgrade the client cannot apply, of a tile without a
-    tile context or in the other transform, is skipped and counted, and
-    ends the tile context so that the tile's later upgrades are
-    skipped too until its next first pass. 3.3.5.2's "MUST be known"
-    is about a codec context the server never deleted, so a server
-    that sends such an upgrade is not malformed, and the session goes
-    on, as FreeRDP's does; what does not parse still ends it. The
-    coordinator decided this after the second review, which withdrew
-    the first review's advice that an upgrade after a context's switch
-    still error.
-    FreeRDP, read for its behaviour alone, is laxer: its
-    `gdi_DeleteEncodingContext` does nothing, its progressive state is
-    keyed by surface id, made at a surface's first wire-to-surface 2
-    whatever the context id (`progressive_create_surface_context`) and
-    freed only by `gdi_DeleteSurface`, so it keeps coefficients, signs
-    and passes across a context's delete or switch, and accepts an
-    upgrade after either. The decision before review, to drop the
-    tiles with their context, claimed FreeRDP's support wrongly: its
-    state is per surface, but outlives contexts.
+  - The tiles' coefficients live as long as their surface, which the
+    specification requires ([MS-RDPEGFX] 3.3.1.3, MUST), and their
+    signs and bit positions until a full pass, the tile's next first
+    pass, a skip, or the surface's delete. 3.3.1.2 says a progressive
+    tile context "can be discarded once all of the codec contexts with
+    which it is associated have been deleted", which allows and does
+    not require it, and lets it belong to "one or more codec
+    contexts"; a surface keeps a list of codec contexts (3.3.1.1), so
+    contexts may interleave. The client therefore keeps no state of a
+    codec context, and a delete ends nothing, as FreeRDP's does
+    nothing: its progressive state is keyed by surface id, made at a
+    surface's first wire-to-surface 2 whatever the context id
+    (`progressive_create_surface_context`) and freed only by
+    `gdi_DeleteSurface`. One sign array a tile suffices, as in FreeRDP,
+    and the memory bound already takes every tile to keep one.
+    A server that sends an upgrade in a codec context it deleted
+    breaks 3.3.5.2, under which a W2S2's codec context MUST be known;
+    the client applies the upgrade to the tile all the same, as
+    FreeRDP does, rather than ending the session or skipping it, since
+    the tile's state is the surface's. (After the second review, the
+    client ended a tile's tile context at its context's delete and
+    skipped and counted such an upgrade; the third review returned to
+    FreeRDP's behaviour, as that also skipped an upgrade in a second
+    context of a tile first sent in a deleted one.) An upgrade the
+    client cannot apply, of a tile with no first pass, after a skipped
+    pass, or in the other transform, is skipped and counted, and ends
+    the tile context, so that the tile's later upgrades are skipped too
+    until its next first pass; what does not parse still ends the
+    session. The decision before review, to drop the tiles with their
+    context, claimed FreeRDP's support wrongly: its state is per
+    surface, and outlives contexts.
   - The decoding rate is priced by measurement (Bounds, above) so that
     full-motion RemoteFX at 1920 × 1080 never waits and a flood is
     held to about a core of the benchmarks' host. Phase 2's ceiling, 2.3
@@ -2242,10 +2312,6 @@ RDP's guacd path, RDP no longer needs guacd at all.
   - A first pass on a tile that already has one starts it over; an
     upgrade of a tile whose last pass was full is allowed when it adds
     no bits.
-  - A context's frame state spans its messages: a FRAME_BEGIN in one
-    wire-to-surface 2 and its region in the next are applied. A
-    surface has one open frame, its context's: FreeRDP starts each
-    message outside a frame.
   - Past the end of a component's data, RLGR and SRL read zeros, so a
     short stream decodes to its coefficients and zeros after, as a
     stream whose trailing zeros were cut would; only RLGR3's first
@@ -2276,6 +2342,18 @@ RDP's guacd path, RDP no longer needs guacd at all.
     10 sessions (`limits.sessions_per_user`) to hostile servers, such
     as ad-hoc targets they chose, take about 10 cores;
     `docs/configuration.md`'s limits say so.
+  - **PDUs applied that do little** (found in the third round, for the
+    coordinator to decide). The headers' charge covers what the client
+    skips; what it applies is charged by what it draws, so a PDU that
+    draws little costs more than its charge. In the runs above, a
+    capability confirm of a known version costs 11.7 ns and a codec
+    context's delete 13.4 ns, each charged nothing, and an uncompressed
+    bitmap of a pixel 57 ns, charged a unit, 31 times what the rate
+    allows a unit. A session's one reader holds such a flood to a core,
+    as it does any; charging
+    every GFX PDU `pduCost` would bound them as the headers are, but
+    moves every exact charge of `TestGFXPace` and
+    `TestGFXExposeCharged`, so it is left to a decision.
   - `rdp-native` in the benchmark's `v1-native` series now speaks GFX
     and `rdp-guacd` keeps `disable-gfx`; the comparison says which
     each measures ([benchmark](benchmark.md)).

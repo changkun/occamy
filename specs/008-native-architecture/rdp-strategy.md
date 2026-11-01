@@ -292,9 +292,14 @@ best effort, has none. The live run was repeated after the fixes.
       about 377 MB/s of input, and the session's one reader goroutine
       holds it to a core. The cheapest floods to send, tiles of a header
       alone and 3-byte RLE runs, cost 1.1 to 1.5 ns a unit (medians) and
-      are held to 0.6 to 0.8 of a core. The rate is a session's, so a
-      user with ten sessions to hostile servers can take ten cores; a
-      budget for the whole process is a release item
+      are held to 0.6 to 0.8 of a core. Headers that the client parses
+      and does little with, a progressive stream's blocks and the GFX
+      PDUs it skips, are charged 8 and 24 units each, paid and counted
+      once a message, which holds a flood of them, in stored messages,
+      to 0.2 to 0.7 of a core (`BenchmarkSkipped`, load 9.1 to 10.5);
+      PDUs applied that draw little are left to a decision. The rate is
+      a session's, so a user with ten sessions to hostile servers can
+      take ten cores; a budget for the whole process is a release item
       ([native-rdp-backend](native-rdp-backend.md)).
     - The bucket holds two desktops of tiles and a pointer update, so a
       session's first screen, in any codec, never waits. Full-screen

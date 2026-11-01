@@ -586,21 +586,27 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   transform, first passes, difference tiles and upgrades with SRL and
   raw bits, and tiles drawn within their region's rectangles at its
   end. A surface's tiles keep their coefficients until the surface is
-  deleted, as [MS-RDPEGFX] 3.3.1.3 requires, and their signs while
-  the codec context of their last first pass lives (3.3.1.2). Codec
-  contexts may interleave: a W2S2 of one ends no other, and deleting
-  one ends its own tiles' tile contexts alone. A difference tile after
-  a context's delete adds to the tile, and an upgrade the client
-  cannot apply, after its context's delete or in the other transform,
-  is skipped and counted, with the tile's later upgrades until its
-  next first pass, rather than ending the session. The tiles are at
-  most twice those of the largest desktop the session had (at least
-  1,024), 576 MiB at worst, and malformed input ends the session. The
-  decoding rate is priced by measured cost, a RemoteFX tile's pixel 7
-  units and a planar one 2, at 512 Mi units a second: about one core
-  of an Apple M5 Pro for a session's real content, and a session's
-  one reader holds it to a core whatever the server sends. No budget
-  bounds sessions together yet, which is to come before the release.
+  deleted, as [MS-RDPEGFX] 3.3.1.3 requires, and their signs until a
+  full pass (3.3.1.2). The client keeps no state of a codec context,
+  as FreeRDP keeps none: contexts may interleave, a W2S2 of any
+  context applies to the surface's tiles, and a context's delete ends
+  nothing, so a difference tile or an upgrade after it applies. An
+  upgrade the client cannot apply, of a tile with no first pass or in
+  the other transform, is skipped and counted, with the tile's later
+  upgrades until its next first pass, rather than ending the session.
+  A frame is of its W2S2's stream alone, and a region outside it is
+  ignored and counted. The tiles are at most twice those of the
+  largest desktop the session had (at least 1,024), 576 MiB at worst,
+  and malformed input ends the session. The decoding rate is priced by
+  measured cost, a RemoteFX tile's pixel 7 units and a planar one 2,
+  at 512 Mi units a second: about one core of an Apple M5 Pro for a
+  session's real content, and a session's one reader holds it to a
+  core whatever the server sends. Each block of a progressive stream
+  is charged 8 units, and each W2S2 stream and each GFX PDU that the
+  client skips 24, and a message counts what it applies and skips at
+  its end, so that a flood of headers gets at most 0.7 of a core. No
+  budget bounds sessions together yet, which is to come before the
+  release.
   A session's first screen does not wait, and full-screen RemoteFX
   Progressive at 1920 × 1080 and 30 frames a second takes 82% of the
   rate; before, the rate held it to 2.3 frames a second. At the first
