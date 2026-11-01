@@ -16,13 +16,16 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 
+	"changkun.de/x/occamy/internal/auth"
 	"changkun.de/x/occamy/internal/backend/kubernetes"
 	"changkun.de/x/occamy/internal/config"
 )
@@ -298,6 +301,10 @@ auth:
     - {name: bob, password_hash: "` + hash + `", groups: [dev]}
 `
 
+// user is a static user in flow style, for the tests of the keys beside
+// auth.users.
+const user = "users: [{name: alice, password_hash: '" + hash + "'}]"
+
 // conn is a valid connection list.
 const conn = `connections:
   - {id: box, protocol: ssh, insecure_ignore_host_key: true, target: box.internal, credentials: {username: deploy, private_key_file: DIR/key}, allow: {users: [alice]}}
@@ -547,6 +554,8 @@ connections:
 connections:
   - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {groups: [admins]}}
 `},
+		{"oidc alone signs users in", "version: 1\nauth:\n  signing_key_file: DIR/signing.key\n  oidc: {issuer: 'https://id.example.com', client_id: occamy, redirect_url: 'https://o.example.com/cb'}\n"},
+		{"a trusted issuer alone signs users in", "version: 1\nauth:\n  signing_key_file: DIR/signing.key\n  trusted_issuers: [{issuer: gateway, public_key_file: DIR/gateway.pub}]\n"},
 		{"anchors", head + `connections:
   - &base {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {groups: [ops]}}
   - <<: *base
@@ -586,6 +595,83 @@ func TestParseV1Origins(t *testing.T) {
 
 type want struct{ path, msg string }
 
+// TestParseV1SigningKeyAccess checks each way that a key can belong to
+// another user. Validation runs before occamyd touches the key, so it
+// has to give LoadOrCreateKey's words: "is not readable" or a bare
+// "permission denied" would say nothing about what to do. A directory
+// that occamyd may read but not write validates, and LoadOrCreateKey
+// then says the same.
+func TestParseV1SigningKeyAccess(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs a user that file modes can stop")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.DefaultCost)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seal := func(t *testing.T, dir string, mode os.FileMode) {
+		t.Helper()
+		if err := os.Chmod(dir, mode); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+	}
+	for _, tt := range []struct {
+		name    string
+		prepare func(t *testing.T, path string)
+		refused bool // by validation, rather than by LoadOrCreateKey
+	}{
+		{
+			name: "a key another user made",
+			prepare: func(t *testing.T, path string) {
+				if err := os.WriteFile(path, nil, 0o000); err != nil {
+					t.Fatal(err)
+				}
+			},
+			refused: true,
+		},
+		{
+			name: "a directory of another user's with files in it",
+			prepare: func(t *testing.T, path string) {
+				if err := os.WriteFile(path, nil, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				seal(t, filepath.Dir(path), 0o000)
+			},
+			refused: true,
+		},
+		{
+			name: "an empty directory of another user's",
+			prepare: func(t *testing.T, path string) {
+				seal(t, filepath.Dir(path), 0o555)
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "signing.key")
+			tt.prepare(t, path)
+			raw := "version: 1\nauth:\n  signing_key_file: " + path + "\n  users: [{name: alice, password_hash: \"" + string(hash) + "\"}]\n"
+			_, err := config.ParseV1([]byte(raw))
+			if tt.refused != (err != nil) {
+				t.Fatalf("ParseV1: %v, want refused %v", err, tt.refused)
+			}
+			if !tt.refused {
+				_, _, err = auth.LoadOrCreateKey(path)
+			}
+			if err == nil {
+				t.Fatal("LoadOrCreateKey: no error")
+			}
+			uid := strconv.Itoa(os.Getuid())
+			for _, want := range []string{path, "uid " + uid, "may not use " + dir, "must belong to uid " + uid, "docs/configuration.md"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err %q does not say %q", err, want)
+				}
+			}
+		})
+	}
+}
+
 func TestParseV1Problems(t *testing.T) {
 	lowCost, err := bcrypt.GenerateFromPassword([]byte("pw"), bcrypt.MinCost)
 	if err != nil {
@@ -605,7 +691,7 @@ func TestParseV1Problems(t *testing.T) {
 			{"connections[0].credentials", "no credential source"},
 		}},
 		{"v0 key", head + "address: 0.0.0.0:5636\n", []want{{"address", "v1 calls the listen address listen"}}},
-		{"signing key without _file", "version: 1\nauth: {signing_key: DIR/signing.key}\n", []want{
+		{"signing key without _file", "version: 1\nauth: {signing_key: DIR/signing.key, " + user + "}\n", []want{
 			{"auth.signing_key", "did you mean signing_key_file?"},
 			{"auth.signing_key_file", "required"},
 		}},
@@ -625,7 +711,7 @@ func TestParseV1Problems(t *testing.T) {
 		{"wrong type", head + "origins: https://o.example.com\n", []want{{"origins", "cannot unmarshal"}}},
 		{"two documents", head + "---\nlisten: :1\n", []want{{"", "one YAML document"}}},
 		{"duplicate key", head + "listen: :1\nlisten: :2\n", []want{{"listen", "already defined"}}},
-		{"no version", "auth: {signing_key_file: DIR/signing.key}\n", []want{{"version", "must be 1"}}},
+		{"no version", "auth: {signing_key_file: DIR/signing.key, " + user + "}\n", []want{{"version", "must be 1"}}},
 
 		// Listeners and TLS.
 		{"listen", head + "listen: nope\n", []want{{"listen", `"nope" is not host:port`}}},
@@ -652,13 +738,16 @@ func TestParseV1Problems(t *testing.T) {
 		{"origin host", head + "origins: ['https://']\n", []want{{"origins[0]", "has no host"}}},
 
 		// Auth.
-		{"no signing key", "version: 1\n", []want{{"auth.signing_key_file", "required"}}},
-		{"signing key directory missing", "version: 1\nauth: {signing_key_file: DIR/none/signing.key}\n", []want{{"auth.signing_key_file", "nor its directory"}}},
-		{"signing key is a directory", "version: 1\nauth: {signing_key_file: DIR}\n", []want{{"auth.signing_key_file", "is a directory"}}},
-		{"lifetime short", "version: 1\nauth: {signing_key_file: DIR/signing.key, access_token_lifetime: 30s}\n", []want{{"auth.access_token_lifetime", "30s is not between 1m and 12h"}}},
-		{"lifetime long", "version: 1\nauth: {signing_key_file: DIR/signing.key, access_token_lifetime: 12h1m}\n", []want{{"auth.access_token_lifetime", "12h1m is not between"}}},
-		{"lifetime negative", "version: 1\nauth: {signing_key_file: DIR/signing.key, access_token_lifetime: -5m}\n", []want{{"auth.access_token_lifetime", "not between"}}},
-		{"lifetime without unit", "version: 1\nauth: {signing_key_file: DIR/signing.key, access_token_lifetime: 900}\n", []want{{"auth.access_token_lifetime", "not a duration"}}},
+		{"no signing key", "version: 1\nauth: {" + user + "}\n", []want{{"auth.signing_key_file", "required"}}},
+		{"nobody can sign in", "version: 1\nauth: {signing_key_file: DIR/signing.key}\n", []want{{"auth", "nobody could sign in to API v1, and occamyd has no default user"}}},
+		{"the v0 routes sign nobody in", "version: 1\nlegacy_v0: true\nauth: {signing_key_file: DIR/signing.key}\n", []want{{"auth", "v0 clients of legacy_v0 do not count"}}},
+		{"an empty list of users", "version: 1\nauth: {signing_key_file: DIR/signing.key, users: []}\n", []want{{"auth", "nobody could sign in to API v1"}}},
+		{"signing key directory missing", "version: 1\nauth: {signing_key_file: DIR/none/signing.key, " + user + "}\n", []want{{"auth.signing_key_file", "nor its directory"}}},
+		{"signing key is a directory", "version: 1\nauth: {signing_key_file: DIR, " + user + "}\n", []want{{"auth.signing_key_file", "is a directory"}}},
+		{"lifetime short", "version: 1\nauth: {signing_key_file: DIR/signing.key, access_token_lifetime: 30s, " + user + "}\n", []want{{"auth.access_token_lifetime", "30s is not between 1m and 12h"}}},
+		{"lifetime long", "version: 1\nauth: {signing_key_file: DIR/signing.key, access_token_lifetime: 12h1m, " + user + "}\n", []want{{"auth.access_token_lifetime", "12h1m is not between"}}},
+		{"lifetime negative", "version: 1\nauth: {signing_key_file: DIR/signing.key, access_token_lifetime: -5m, " + user + "}\n", []want{{"auth.access_token_lifetime", "not between"}}},
+		{"lifetime without unit", "version: 1\nauth:\n  signing_key_file: DIR/signing.key\n  access_token_lifetime: 900\n  " + user + "\n", []want{{"auth.access_token_lifetime", "not a duration"}}},
 		{"trusted issuers", head + `  trusted_issuers:
     - {issuer: gateway, public_key_file: DIR/gateway.pub}
     - {issuer: gateway, public_key_file: DIR/missing.pub}

@@ -11,9 +11,13 @@ import (
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -69,6 +73,78 @@ func TestLoadOrCreateKeyConcurrent(t *testing.T) {
 		if !k.Equal(keys[0]) {
 			t.Fatal("concurrent loads returned different keys")
 		}
+	}
+}
+
+// A key that occamyd cannot reach stops it from starting, so the error
+// is all the operator sees: it names the key, the directory and the user
+// and says where the step is, for each way that a directory can be wrong.
+// It names no command, since occamyd cannot tell which would work: a
+// chown fails again on rootless podman, and a podman command is no use on
+// Docker. Nor can it call the path the host's, as it may be a container's.
+func TestLoadOrCreateKeyAccess(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs a user that file modes can stop")
+	}
+	uid := strconv.Itoa(os.Getuid())
+	for _, tt := range []struct {
+		name    string
+		prepare func(t *testing.T, dir string) string // returns the key's path
+	}{
+		{
+			name: "a directory it cannot write",
+			prepare: func(t *testing.T, dir string) string {
+				if err := os.Chmod(dir, 0o555); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+				return filepath.Join(dir, "signing.key")
+			},
+		},
+		{
+			name: "a key it cannot read",
+			prepare: func(t *testing.T, dir string) string {
+				path := filepath.Join(dir, "signing.key")
+				if err := os.WriteFile(path, nil, 0o000); err != nil {
+					t.Fatal(err)
+				}
+				return path
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := tt.prepare(t, dir)
+			_, created, err := LoadOrCreateKey(path)
+			if err == nil || created {
+				t.Fatalf("created %v, err %v", created, err)
+			}
+			if !errors.Is(err, fs.ErrPermission) {
+				t.Errorf("err %v does not wrap %v", err, fs.ErrPermission)
+			}
+			for _, want := range []string{path, "uid " + uid, "may not use " + dir, "must belong to uid " + uid, "docs/configuration.md"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("err %q does not say %q", err, want)
+				}
+			}
+			for _, no := range []string{"chown", "podman run", "docker run", "on the host"} {
+				if strings.Contains(err.Error(), no) {
+					t.Errorf("err %q says %q", err, no)
+				}
+			}
+		})
+	}
+}
+
+// An error that is not about permissions has no step to give, and keeps
+// what it wraps.
+func TestKeyAccessErrorOther(t *testing.T) {
+	err := KeyAccessError("/k/signing.key", fs.ErrNotExist)
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("err %v does not wrap %v", err, fs.ErrNotExist)
+	}
+	if strings.Contains(err.Error(), "must belong") {
+		t.Errorf("err %q gives the step for a wrong owner", err)
 	}
 }
 

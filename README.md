@@ -80,7 +80,14 @@ make client                  # the web client, into client/occamy-web/dist
 `occamyd` serves API v1, protocol v1 and the web client from a v1
 configuration file ([docs/configuration.md](./docs/configuration.md)),
 such as the demo's [docker/occamy-v1.yaml](./docker/occamy-v1.yaml). Its
-native backends connect to the remote desktops themselves.
+native backends connect to the remote desktops themselves. `occamyd` has
+no default user or password: your file lists your own users, with the
+`htpasswd` recipe in
+[docs/configuration.md](./docs/configuration.md#sign-in-auth), or sets
+OIDC, and `occamyd` refuses a file that lets nobody in. `demo` and
+`occamy` below are the demo stack's alone. Keep the signing key at
+`/var/lib/occamy/signing.key` on a persistent volume, so that tokens
+survive a restart.
 [The Kubernetes step of docs/try-it.md](./docs/try-it.md#kubernetes)
 runs `./occamyd` with a complete v1 file of its own.
 

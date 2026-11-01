@@ -32,14 +32,19 @@ RUN mkdir -p /licenses/vpx /licenses/jpegn \
 RUN mkdir -p /licenses/xxh3 /licenses/cpuid \
 	&& cp "$(go list -m -f '{{.Dir}}' github.com/zeebo/xxh3)/LICENSE" /licenses/xxh3/ \
 	&& cp "$(go list -m -f '{{.Dir}}' github.com/klauspost/cpuid/v2)/LICENSE" /licenses/cpuid/
+# The directory of occamyd's signing key, for the runtime image.
+RUN mkdir -p /var/lib/occamy
 
 # Stage 3: runtime image, without a shell or C libraries, running as the
-# unprivileged user nonroot. occamyd writes one file, and only for a v1
-# file: if auth.signing_key_file does not exist, it creates the signing
-# key there at start, through a temporary file in the same directory, so
-# that directory must exist and be writable by nonroot, such as a volume
-# or a tmpfs (docker-compose.yaml mounts one at /run/occamy).
+# unprivileged user nonroot, 65532. occamyd writes one file, and only for
+# a v1 file: if auth.signing_key_file does not exist, it creates the
+# signing key there at start, through a temporary file in the same
+# directory, so that directory must exist and be writable by nonroot.
+# /var/lib/occamy is, and an empty named volume mounted there takes its
+# owner from the image, so a real install's key outlives the container
+# (docs/configuration.md, Sign-in).
 FROM gcr.io/distroless/static-debian13:nonroot
+COPY --from=build --chown=65532:65532 /var/lib/occamy /var/lib/occamy
 WORKDIR /occamy
 COPY --from=build /occamy/occamyd ./
 COPY conf.yaml ./

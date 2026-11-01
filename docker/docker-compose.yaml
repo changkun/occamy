@@ -72,9 +72,11 @@ services:
       # The CA of TigerVNC's VeNCrypt certificate, for the tls of the
       # connection that checks it.
       - tigervnc-ca:/run/occamy-vnc-ca:ro
-    tmpfs:
-      # The signing key, which the nonroot user creates at start.
-      - /run/occamy:mode=1777
+      # The signing key, on a volume, as a real install keeps it: occamyd
+      # creates it at start, and tokens survive a restart. The image's
+      # /var/lib/occamy gives the volume to the nonroot user. make stop
+      # keeps it, and make clean removes it.
+      - occamy-v1-data:/var/lib/occamy
     environment:
       OCCAMY_DEMO_SSH_PASSWORD: occamy
       OCCAMY_DEMO_VNC_PASSWORD: vncpassword
@@ -187,6 +189,8 @@ services:
       retries: 30
 
 volumes:
+  # occamy-v1's signing key.
+  occamy-v1-data:
   # TigerVNC's CA certificate (tigervnc's CA_DIR), which it writes at
   # start and occamy-v1 reads.
   tigervnc-ca:

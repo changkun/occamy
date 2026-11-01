@@ -118,6 +118,7 @@ Outcome:
 
 Settled on 2026-10-30. Items 1 and 2 were the owner's calls; 3 and 4
 follow the recommendations. Item 5 was the owner's call on 2026-10-31.
+The owner delegated items 6 to 9 on 2026-11-01.
 
 1. **D, pure-Go RDP, decided by the spike first.** The end state is an
    `occamyd` with no Guacamole and no cgo for every protocol. If the
@@ -138,6 +139,25 @@ follow the recommendations. Item 5 was the owner's call on 2026-10-31.
    fallback is dropped. Step 2, the check against Windows, runs later,
    when a Windows host is available; it no longer decides between D and
    a helper.
+6. **GFX is measured both ways, on both sides.** `rdp-native` and
+   `rdp-guacd` each run with and without GFX, so that rows compare like
+   with like, and the shipped default, GFX on for native, is the
+   verdict. A G5 that misses on that row is not a justified miss, since
+   the decode cost is Occamy's own bound: decoder work then comes before
+   v1.0, where the measurement shows. The decoder is not made faster
+   before that measurement
+   ([benchmark](benchmark.md), decisions 1 and 2).
+7. **32 bits per pixel on both sides of the benchmark.** That is
+   native's default and what the table in step 3 below measured, and
+   matching depths keep xrdp from a second X session
+   ([benchmark](benchmark.md), decision 4).
+8. **A decoding budget for the whole process gates `v1.0.0-beta.1`,** as
+   [008](../008-native-architecture.md)'s release gate says. The GFX PDUs
+   that do little work and are charged nothing today are dealt with
+   then.
+9. **A paste with no channel server tells the user.** The notice is
+   native RDP's to add, and comes with that work
+   ([native-rdp-backend](native-rdp-backend.md), follow-ups).
 
 ## Open Questions
 

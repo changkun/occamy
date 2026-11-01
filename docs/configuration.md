@@ -35,7 +35,7 @@ auth:
   signing_key_file: /var/lib/occamy/signing.key
   users:
     - name: alice
-      password_hash: "$2a$12$R6bvkO3lC3JV/OaHnySvquk.wobMPB3XleIdoBgEwlhjbcfaZi0km"
+      password_hash: "<the htpasswd recipe's output>"
       groups: [ops]
 connections:
   - id: build-box
@@ -63,6 +63,12 @@ Unknown keys are errors, so a misspelt key is reported instead of being
 ignored. Relative paths are resolved against `occamyd`'s working
 directory.
 
+`occamyd` has no default user and no default password, so this file has
+to say who signs in, and `occamyd` refuses one that does not: see
+[Sign-in](#sign-in-auth). The only user with a known password is the
+demo stack's `demo`, in [docker/occamy-v1.yaml](../docker/occamy-v1.yaml),
+for that stack alone.
+
 ### Server
 
 | Key | Default | Meaning |
@@ -78,16 +84,76 @@ directory.
 
 ### Sign-in: `auth`
 
+A v1 file names how people sign in: static users in `auth.users`,
+`auth.oidc`, or `auth.trusted_issuers`. With none of them, nobody could
+sign in to API v1, so `occamyd` refuses to start. `legacy_v0` does not
+count, since its login signs a target for anyone and nobody in to API
+v1, so a file that serves only v0 clients has to name one of them too.
+
+To add a static user, make the hash of the password they chose and put
+it in the file:
+
+```sh
+htpasswd -nbBC 12 "" 'the password' | cut -d: -f2
+```
+
+The signing key belongs at `/var/lib/occamy/signing.key`, on a
+persistent volume. `occamyd` creates it on first start, readable by its
+owner only (`0600`), and tokens survive a restart for as long as the
+file does. If the file is lost, `occamyd` makes a new one and warns, and
+everyone signs in again. Sessions end at a restart either way.
+
+The image runs as the unprivileged user `nonroot` (65532), and its
+`/var/lib/occamy` belongs to that user, so an empty named volume takes
+that owner:
+
+```sh
+podman run -d --name occamy -p 5636:5636 \
+  -v occamy-data:/var/lib/occamy \
+  -v ./occamy.yaml:/occamy/v1.yaml:ro \
+  occamy:latest /occamy/occamyd -conf /occamy/v1.yaml
+```
+
+Nothing refuses a container without that volume. The image's directory
+is writable, so `occamyd` starts quietly and keeps the key in the
+container's own layer, which a restart keeps and a recreate loses. A
+new image or `--force-recreate` then replaces the key, everyone signs
+in again, and the only sign is the warning that a first start gives,
+`created a new signing key`. On a server that has run before, that
+warning means the volume is missing.
+
+If `occamyd` may not use the key or its directory, it stops at start and
+says so. The directory, or whatever is mounted on it, has to belong to
+the user that the error names, and how to give it depends on what it
+is. The error's path is the one `occamyd` sees, which in a container is
+not a path on the host:
+
+| What holds the key | The step, with the error's uid: 65532 in the image |
+|---|---|
+| A directory, with no container | `chown -R <uid> <the directory>`, as root |
+| A directory mounted from the host, on Docker or rootful podman | `chown -R 65532 <the directory on the host>`, as root |
+| A directory mounted from the host, on rootless podman | `podman unshare chown -R 65532 <the directory on the host>`. A plain `chown` is wrong here: uid 65532 of a rootless container is another number on the host, such as 165531 |
+| A named volume, on Docker | `docker run --rm -v <the volume>:/data busybox chown -R 65532 /data` |
+| A named volume, on podman | `podman run --rm -v <the volume>:/data busybox chown -R 65532 /data` |
+
+A named volume keeps its owner once it has files in it, such as those
+of another image or a root container that used it first. An empty one
+that a root container used first keeps that owner on Docker, while on
+podman it takes the owner of the next container to use it.
+
+The demo stack keeps its key at the same path on the volume
+`occamy-v1-data`, which `make stop` keeps and `make clean` removes.
+
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `auth.signing_key_file` | required | The Ed25519 key, PKCS #8 PEM, that signs `occamyd`'s tokens. If the file does not exist, `occamyd` creates it on first start, so its directory must exist |
+| `auth.signing_key_file` | required | The Ed25519 key, PKCS #8 PEM, that signs `occamyd`'s tokens: `/var/lib/occamy/signing.key` on a persistent volume, as above. If the file does not exist, `occamyd` creates it on first start, `0600`, so its directory must exist and be writable by `occamyd`'s user |
 | `auth.access_token_lifetime` | `15m` | How long an access token lasts, a duration with a unit (`15m`, `1h30m`) between `1m` and `12h` |
 | `auth.trusted_issuers[].issuer` | required | Name of a third party, such as a gateway, whose tokens `occamyd` accepts. Unique, and not `occamy`, which is `occamyd`'s own. See [tokens from a trusted issuer](#tokens-from-a-trusted-issuer) |
 | `auth.trusted_issuers[].public_key_file` | required | That issuer's Ed25519 public key, PKIX PEM |
 | `auth.trusted_issuers[].link_static_users` | `false` | Lets the issuer's tokens act for a static user by naming them in `sub`. Off, such tokens are refused: see [tokens from a trusted issuer](#tokens-from-a-trusted-issuer) |
 | `auth.trusted_issuers[].allowed_groups` | none | The groups the issuer's tokens may claim in `groups`. Others are dropped, so that an issuer cannot claim `ops` and open every connection that allows `ops`, stored credentials and all, unless the file lets it. A linked issuer acting as a static user gets these groups from its token too, not the static user's |
 | `auth.users[].name` | required | A static user, who signs in with a password. Unique |
-| `auth.users[].password_hash` | required | bcrypt hash of the password, cost 10 or more. `htpasswd -nbBC 12 "" 'the password' \| cut -d: -f2` makes one. Give every user the same cost: a sign-in as an unknown user is checked against a hash of the highest cost, so a user at a lower cost signs in measurably faster, and `occamyd` warns at start when the costs differ |
+| `auth.users[].password_hash` | required | bcrypt hash of the password, cost 10 or more, which the `htpasswd` line above makes. Give every user the same cost: a sign-in as an unknown user is checked against a hash of the highest cost, so a user at a lower cost signs in measurably faster, and `occamyd` warns at start when the costs differ |
 | `auth.users[].groups` | none | Groups the user belongs to |
 | `auth.oidc` | unset (off) | Sign-in through an OpenID Connect identity provider; see [signing in through OIDC](#signing-in-through-oidc) |
 | `auth.oidc.issuer` | required | The provider's issuer URL, exactly as its discovery document names it (a trailing slash counts). https, or http on localhost |
@@ -791,6 +857,8 @@ that:
   `token_env`, `client_cert_file` with `client_key_file`, or
   `prompt: true`, and other protocols use none of these;
 - user, group and issuer names are not empty and have no spaces;
+- `auth.users`, `auth.oidc` or `auth.trusted_issuers` lets someone sign
+  in;
 - with neither `auth.oidc` nor `auth.trusted_issuers` configured, every
   name in an `allow` list is a static user, and every group is a group of
   some static user. With either one configured, users and groups also come
