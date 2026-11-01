@@ -127,6 +127,25 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+// TestAuthMethods checks that GET /api/v1/auth/methods answers 200,
+// with no token and without caching, and says OIDC is off without
+// auth.oidc; TestOIDCAuthMethods checks it with auth.oidc.
+func TestAuthMethods(t *testing.T) {
+	ts := newTestServer(t, nil)
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		r := do(t, method, ts.srv.URL+"/api/v1/auth/methods", nil, "")
+		if r.code != http.StatusOK || r.header.Get("Cache-Control") != "no-store" {
+			t.Errorf("%s /api/v1/auth/methods: %d %v", method, r.code, r.header)
+		}
+		if method == http.MethodGet && string(r.body) != `{"oidc":false}` {
+			t.Errorf("GET /api/v1/auth/methods: %q", r.body)
+		}
+	}
+	if r := do(t, http.MethodPost, ts.srv.URL+"/api/v1/auth/methods", nil, ""); r.code != http.StatusMethodNotAllowed {
+		t.Errorf("POST /api/v1/auth/methods: %d", r.code)
+	}
+}
+
 // TestAPIFallback checks that API v1 answers a path or method without a
 // route with its JSON error, and leaves other paths to the ServeMux.
 func TestAPIFallback(t *testing.T) {

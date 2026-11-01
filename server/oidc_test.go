@@ -1694,6 +1694,17 @@ auth:
 	wantError(t, r, codeUnavailable)
 }
 
+// TestOIDCAuthMethods checks that GET /api/v1/auth/methods says OIDC is
+// on with auth.oidc, without contacting the provider.
+func TestOIDCAuthMethods(t *testing.T) {
+	ot := newOIDCTest(t, nil)
+	ot.idp.srv.Close()
+	r := do(t, http.MethodGet, ot.url+"/api/v1/auth/methods", nil, "")
+	if r.code != http.StatusOK || string(r.body) != `{"oidc":true}` {
+		t.Errorf("GET /api/v1/auth/methods: %d %s", r.code, r.body)
+	}
+}
+
 // TestOIDCRoutesOff checks that without auth.oidc there are no OIDC
 // routes.
 func TestOIDCRoutesOff(t *testing.T) {
