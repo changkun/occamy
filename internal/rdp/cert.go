@@ -146,13 +146,21 @@ func parsePin(s string) ([sha256.Size]byte, error) {
 	return [sha256.Size]byte(b), nil
 }
 
-// config returns the TLS configuration for a connection to addr. The
-// certificate is checked by verify, not by crypto/tls, so that pins and
-// insecure mode share one path and a rejection carries the fingerprint.
+// config returns the TLS configuration for one connection to addr: its
+// session cache must end with that connection. The certificate is
+// checked by verify, not by crypto/tls, so that pins and insecure mode
+// share one path and a rejection carries the fingerprint.
 func (p *tlsPolicy) config(addr string, log *slog.Logger) *tls.Config {
 	return &tls.Config{
 		ServerName: p.serverName,
 		MinVersion: tls.VersionTLS12,
+		// Only with a cache does Go offer session_ticket and
+		// psk_key_exchange_modes, and Windows Server 2025 ends a TLS 1.3
+		// connection after the handshake if a ClientHello offers neither.
+		// Each connection has a cache of its own, which nothing ever
+		// reads back: a connection that resumed would not check the
+		// server's certificate.
+		ClientSessionCache: tls.NewLRUClientSessionCache(1),
 		// #nosec G402 -- VerifyConnection checks the certificate by the policy
 		InsecureSkipVerify: true,
 		VerifyConnection: func(cs tls.ConnectionState) error {

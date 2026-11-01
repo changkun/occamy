@@ -109,6 +109,14 @@ type fakeServer struct {
 	creds tsPasswordCreds
 }
 
+// pipeTLS configures a TLS server on a net.Pipe. Go's TLS 1.3 server writes
+// session tickets straight after its Finished, to any client that offers
+// psk_key_exchange_modes. A pipe holds no bytes, so the tickets would wait
+// for the client to read while the client's Finished waits for the server.
+func pipeTLS(cert tls.Certificate) *tls.Config {
+	return &tls.Config{Certificates: []tls.Certificate{cert}, SessionTicketsDisabled: true}
+}
+
 // serve runs the server's side of conn. After the last frame it waits for
 // the client's Font List PDU and closes the connection.
 func (s *fakeServer) serve(conn net.Conn) error {
@@ -134,7 +142,7 @@ func (s *fakeServer) serve(conn net.Conn) error {
 	if err != nil {
 		return err
 	}
-	tc := tls.Server(conn, &tls.Config{Certificates: []tls.Certificate{cert}})
+	tc := tls.Server(conn, pipeTLS(cert))
 	if err := tc.Handshake(); err != nil {
 		return fmt.Errorf("TLS: %w", err)
 	}
@@ -409,7 +417,7 @@ func TestConnectHostileChallenge(t *testing.T) {
 			return
 		}
 		cert, _ := testCert()
-		tc := tls.Server(sconn, &tls.Config{Certificates: []tls.Certificate{cert}})
+		tc := tls.Server(sconn, pipeTLS(cert))
 		if tc.Handshake() != nil {
 			return
 		}

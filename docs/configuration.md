@@ -581,26 +581,34 @@ A native rdp session:
   the user logs off, and with `backend-failed` when it cannot connect
   or log on, or the server's certificate is refused.
 
-The native RDP backend has been tested against xrdp and against
-occamy's own test server, not yet against Windows: Windows servers are
-not yet verified, which the backend's fourth phase does
-([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)).
+The native RDP backend has been tested against xrdp, against occamy's
+own test server, and on a Windows Server 2025 CI runner connecting to
+itself over loopback. That is not a real deployment: Windows servers
+are not verified until the backend's fourth phase runs against one
+([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)),
+and [#32](https://github.com/changkun/occamy/issues/32) stays open. On
+that runner it logs on with NLA, and the keyboard and resize work. The
+clipboard fails both ways; the suspected cause, that the client does
+not set `CHANNEL_FLAG_SHOW_PROTOCOL` on the channel's chunks, is
+unproven.
+
 It asks for RDP's graphics pipeline (GFX) by default, through which
 xrdp draws its sessions in RemoteFX Progressive. Of GFX it does not
-yet take ClearCodec, which Windows servers draw text and small
-regions in, nor the bitmap cache, which the backend's third phase
-adds next, nor AVC (H.264), which it does not ask for: until then, a
-bitmap in ClearCodec, or from the cache, is skipped, and leaves its
-region as it was, so a Windows server's screen may show gaps or stale
-regions under GFX. At the first such PDU of a session, `occamyd` logs
-a warning that names the two ways around it. `disable_gfx: true` on
-the connection turns GFX off, so that the server sends plain bitmap
-updates, as it sends guacd with `disable-gfx`. An ad-hoc rdp target on
-the native backend always asks for GFX, since `disable_gfx` is a
-connection's key; `adhoc_backends: {rdp: guacd}` sends ad-hoc rdp
-targets through guacd instead. Until Windows is verified,
-`backend: guacd` is the fallback for a Windows server that the native
-backend cannot serve.
+yet take ClearCodec, which that Windows server drew nearly all of its
+screen in, nor the bitmap cache, which the backend's third phase adds
+next and which, with ClearCodec, blocks v1.0, nor AVC (H.264), which
+it does not ask for: until then, a bitmap in ClearCodec, or from the
+cache, is skipped, and leaves its region as it was, so a Windows
+server's screen stays nearly black under GFX. At the first such PDU of
+a session, `occamyd` logs a warning that names the two ways around it.
+**Set `disable_gfx: true` for Windows hosts**: on the connection, it
+turns GFX off, so that the server sends plain bitmap updates, as it
+sends guacd with `disable-gfx`, and on the runner the whole desktop
+then drew correctly. An ad-hoc rdp target on the native backend always
+asks for GFX, since `disable_gfx` is a connection's key;
+`adhoc_backends: {rdp: guacd}` sends ad-hoc rdp targets through guacd
+instead. `backend: guacd` is the other fallback for a Windows server,
+and has not been checked against Windows.
 
 xrdp speaks no NLA: offered NLA alone, it selects standard RDP
 security, which the native backend refuses, so an xrdp connection
@@ -727,11 +735,11 @@ parts, names the domain. A server whose certificate does not chain to
 the system's roots, as a self-signed one, or that speaks no NLA, as
 xrdp, needs a connection, whose `tls` and `security` can say so. It
 also always asks for RDP's graphics pipeline (GFX), since only a
-connection can set `disable_gfx`. A Windows server draws parts of its
-screen under GFX in ClearCodec and from its bitmap cache, which the
-native backend does not take until its third phase adds them, so those parts
-stay missing or stale; `occamyd` logs a warning when that happens. To
-reach such servers ad hoc meanwhile, send ad-hoc rdp targets through
+connection can set `disable_gfx`. A Windows server draws nearly all of
+its screen under GFX in ClearCodec and from its bitmap cache, which the
+native backend does not take until its third phase adds them, so the
+screen stays nearly black; `occamyd` logs a warning when that happens.
+To reach such servers ad hoc meanwhile, send ad-hoc rdp targets through
 guacd:
 
 ```yaml
