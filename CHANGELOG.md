@@ -770,6 +770,15 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Fixed
 
+- Remote desktops are no longer tiny on a HiDPI display. The web client
+  asked a remote for the window's size in device pixels, which TigerVNC
+  and xrdp honour and X11 programs do not scale to, so at a device
+  pixel ratio of 2 they showed at half their size, at the top left of a
+  huge black screen. It now asks for the window's size in CSS pixels, so
+  that a remote pixel is a CSS pixel at any ratio; such a desktop is a
+  little soft on a HiDPI display. `pixel_ratio` stays in the hello, and
+  no server acts on it. No test ran at a ratio of 2 before: `TestWebScreen`
+  opens both desktops in Chrome at ratios of 2 and 1 in `make e2e`
 - VNC through guacd no longer fails with "Remote unreachable" when a
   client resizes or moves the pointer right after opening. A `size` or
   a `mouse` that reaches guacd 1.6's VNC process before its RFB

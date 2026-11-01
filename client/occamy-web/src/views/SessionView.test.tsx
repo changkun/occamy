@@ -487,6 +487,36 @@ describe('The window of a stream welcomed as the owner’s', () => {
     await until(() => (Welcomed.last?.resizes.length ?? 0) > 0)
     expect(Welcomed.last?.resizes).toEqual([[900, 700]])
   })
+
+  it.each([1, 2, 1.5])('asks for the window in CSS pixels at a device pixel ratio of %d, and only states the ratio', async (ratio) => {
+    let observed: (entries: { contentRect: { width: number; height: number } }[]) => void = () => undefined
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: typeof observed) {
+          observed = callback
+        }
+        observe(): void {}
+        disconnect(): void {}
+      },
+    )
+    vi.stubGlobal('devicePixelRatio', ratio)
+    const hellos: Parameters<NonNullable<typeof stream.connect>>[2][] = []
+    stream.connect = (_url, _token, options) => {
+      hellos.push(options)
+      return Promise.resolve(new Welcomed() as unknown as Session)
+    }
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 800, height: 600 } as DOMRect)
+    await render({ token: accessToken('demo'), action: null }, ended)
+    expect(hellos.at(-1)).toMatchObject({ width: 800, height: 600, pixelRatio: ratio * 100 })
+    await settle(350)
+    // The window is the size the hello asked for.
+    expect(Welcomed.last?.resizes).toEqual([])
+
+    act(() => observed([{ contentRect: { width: 900, height: 700 } }]))
+    await until(() => (Welcomed.last?.resizes.length ?? 0) > 0)
+    expect(Welcomed.last?.resizes).toEqual([[900, 700]])
+  })
 })
 
 describe('The clipboard panel of a stream welcomed as the owner’s', () => {
