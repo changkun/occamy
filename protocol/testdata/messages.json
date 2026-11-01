@@ -818,6 +818,24 @@
       "error": "truncated"
     },
     {
+      "name": "clipboard-status with an empty body",
+      "from": "server",
+      "hex": "10020100",
+      "error": "truncated"
+    },
+    {
+      "name": "clipboard-status with answering 2",
+      "from": "server",
+      "hex": "1002010002",
+      "error": "invalid"
+    },
+    {
+      "name": "clipboard-status with a byte after the last field",
+      "from": "server",
+      "hex": "100201000100",
+      "error": "trailing-data"
+    },
+    {
       "name": "tile of width 0",
       "from": "server",
       "hex": "030200000100000000000000000001000300000100000001",
