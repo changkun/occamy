@@ -29,11 +29,13 @@ import (
 const webStep = time.Minute
 
 // TestWebScreen opens the demo desktops that take any size in the web
-// client, in Chrome, at device pixel ratios of 2 and 1. The remote must
-// take the window's size in CSS pixels at both, when the session opens
-// and when the window changes: its programs draw in its pixels and do
-// not scale, so a screen of device pixels shows them at half their size
-// at a ratio of 2. The hello still states the ratio.
+// client, in Chrome, at device pixel ratios of 2, 1 and 1.5. The remote
+// must take the window's size in CSS pixels at each, when the session
+// opens and when the window changes: its programs draw in its pixels and
+// do not scale, so a screen of device pixels shows them at half their
+// size at a ratio of 2. The hello still states the ratio. A window of an
+// odd width opens at that width at a ratio of 2, where a size in device
+// pixels could only be even.
 func TestWebScreen(t *testing.T) {
 	addr := endpointV1(t)
 	browser := startChrome(t)
@@ -41,25 +43,30 @@ func TestWebScreen(t *testing.T) {
 		{"tigervnc-native", "TigerVNC, native backend"},
 		{"rdp-native", "RDP, native backend"},
 	} {
-		for _, ratio := range []float64{2, 1} {
-			t.Run(fmt.Sprintf("%s-ratio-%g", c.id, ratio), func(t *testing.T) {
-				p := browser.open(t, addr, ratio, 1280, 800)
+		for _, w := range []struct{ ratio, width, height float64 }{
+			{2, 1280, 800},
+			{1, 1280, 800},
+			{1.5, 1280, 800},
+			{2, 1281, 801},
+		} {
+			t.Run(fmt.Sprintf("%s-ratio-%g-%gx%g", c.id, w.ratio, w.width, w.height), func(t *testing.T) {
+				p := browser.open(t, addr, w.ratio, w.width, w.height)
 				p.until(t, "the sign-in form", fmt.Sprintf(webSignIn, v1User, v1Password))
 				p.until(t, "the connection in the list", fmt.Sprintf(webOpen, c.name))
 
-				opened := p.awaitScreen(t, 1280)
-				if opened.Ratio != ratio {
-					t.Fatalf("the page runs at a device pixel ratio of %g, want %g", opened.Ratio, ratio)
+				opened := p.awaitScreen(t, w.width)
+				if opened.Ratio != w.ratio {
+					t.Fatalf("the page runs at a device pixel ratio of %g, want %g", opened.Ratio, w.ratio)
 				}
 				hello := p.hello(t)
 				if int(hello.Width) != opened.Width || int(hello.Height) != opened.Height {
 					t.Errorf("the hello asks for %d×%d, want the %d×%d of the window", hello.Width, hello.Height, opened.Width, opened.Height)
 				}
-				if want := uint16(ratio * 100); hello.Capabilities.PixelRatio != want {
+				if want := uint16(w.ratio * 100); hello.Capabilities.PixelRatio != want {
 					t.Errorf("the hello states a pixel ratio of %d, want %d", hello.Capabilities.PixelRatio, want)
 				}
 
-				p.resize(t, ratio, 1100, 700)
+				p.resize(t, w.ratio, 1100, 700)
 				p.awaitScreen(t, 1100)
 
 				p.until(t, "the End button", webEnd)

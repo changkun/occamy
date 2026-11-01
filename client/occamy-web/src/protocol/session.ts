@@ -268,9 +268,12 @@ function reasonFor(code: number): string {
 
 // failedCode reports whether a WebSocket close code says the connection
 // closed without a code of its peer's: 1005 no status, 1006 abnormal,
-// 1015 TLS.
+// 1015 TLS, and 1001, going away. occamyd says server-shutdown with a
+// close message first, so a 1001 that arrives on its own is this page
+// going away, which Firefox reports before pagehide, or a proxy going
+// away. Neither means that the session ended.
 function failedCode(code: number): boolean {
-  return code === 0 || code === 1005 || code === 1006 || code === 1015
+  return code === 0 || code === 1001 || code === 1005 || code === 1006 || code === 1015
 }
 
 // A tile of a codec that decodes, settled once pixels or error is set.

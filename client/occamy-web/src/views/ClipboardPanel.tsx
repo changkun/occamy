@@ -8,7 +8,8 @@
 // is the controller's draft, so that a new remote clipboard does not
 // throw away what the user typed. What the last action said goes once
 // the remote clipboard changes or the user edits the text, and gives way
-// to word that the remote clipboard did not take the text.
+// to word that text waits for the remote. A terminal session has its own
+// panel, as it has no remote clipboard.
 
 import { type FormEvent, type ReactElement, useId, useState } from 'react'
 
@@ -109,6 +110,34 @@ export function ClipboardPanel({ controller, remote, draft: text, waiting, can, 
         {shown}
       </p>
     </form>
+  )
+}
+
+export interface TerminalClipboardPanelProps {
+  can: Abilities
+  onClose: () => void
+}
+
+// A terminal session has no remote clipboard: its backends ignore the
+// clipboard message and send none, so this says so rather than offer a
+// box that nothing reads. Text goes in by the browser's paste, which the
+// emulator types into the shell.
+export function TerminalClipboardPanel({ can, onClose }: TerminalClipboardPanelProps): ReactElement {
+  const id = useId()
+  return (
+    <section className="panel" aria-labelledby={`${id}-title`} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+      <h2 id={`${id}-title`}>Clipboard</h2>
+      <p className="muted">
+        {can.input
+          ? 'A terminal session has no remote clipboard. To put text into it, click the terminal and use your browser’s paste: ⌘V, or Ctrl+Shift+V.'
+          : 'A terminal session has no remote clipboard, and your role cannot type into it.'}
+      </p>
+      <div className="actions">
+        <button type="button" autoFocus onClick={onClose}>
+          Close
+        </button>
+      </div>
+    </section>
   )
 }
 

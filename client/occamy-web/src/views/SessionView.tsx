@@ -17,7 +17,7 @@ import { type Size, cellGrid, fitSize, pixelRatio, screenSize } from '../lib/lay
 import { endSession, sessionOwner } from '../lib/owner'
 import { type Abilities, abilities, roleName } from '../lib/roles'
 import { type Target, streamToken, streamURL } from '../lib/targets'
-import { ClipboardPanel } from './ClipboardPanel'
+import { ClipboardPanel, TerminalClipboardPanel } from './ClipboardPanel'
 import { PromptDialog } from './PromptDialog'
 import { SharePanel, type ShareRequest } from './SharePanel'
 import { TERMINAL_FONT, TERMINAL_FONT_SIZE, readLocalClipboard, useBoxSize, writeLocalClipboard } from './dom'
@@ -83,6 +83,7 @@ export function SessionView({ api, token, target, owner: seed, action, storage, 
   )
   const state = useSyncExternalStore(controller.subscribe, controller.getState)
   const can = abilities(state.role ?? Role.ReadOnly)
+  const terminal = state.sessionClass === SessionClass.Terminal
   const stageRef = useRef<HTMLDivElement>(null)
   const toolbarRef = useRef<HTMLElement>(null)
   const box = useBoxSize(stageRef)
@@ -143,9 +144,10 @@ export function SessionView({ api, token, target, owner: seed, action, storage, 
   }, [state.title, name])
 
   // The local clipboard goes to the remote when the page gets focus, where
-  // the browser lets the page read it without asking.
+  // the browser lets the page read it without asking. A terminal session
+  // has no remote clipboard, so it is not read for one.
   useEffect(() => {
-    if (state.phase !== 'open' || !can.clipboard) {
+    if (state.phase !== 'open' || !can.clipboard || terminal) {
       return
     }
     const onFocus = (): void => {
@@ -157,7 +159,7 @@ export function SessionView({ api, token, target, owner: seed, action, storage, 
     }
     window.addEventListener('focus', onFocus)
     return () => window.removeEventListener('focus', onFocus)
-  }, [controller, state.phase, can.clipboard])
+  }, [controller, state.phase, can.clipboard, terminal])
 
   // Ctrl+Alt+Shift leaves the remote's screen for the toolbar: the screen
   // takes every other key, Tab included.
@@ -285,7 +287,6 @@ export function SessionView({ api, token, target, owner: seed, action, storage, 
     }
   }
 
-  const terminal = state.sessionClass === SessionClass.Terminal
   return (
     <div className="session">
       <header className="bar" ref={toolbarRef} aria-label="Session">
@@ -330,7 +331,11 @@ export function SessionView({ api, token, target, owner: seed, action, storage, 
           {state.bells > 0 ? `Bell ${state.bells}` : ''}
         </p>
         {panel === 'clipboard' && state.phase === 'open' && (
-          <ClipboardPanel controller={controller} remote={state.clipboard} draft={state.draft} waiting={state.clipboardWaiting} can={can} onClose={closePanel} />
+          terminal ? (
+            <TerminalClipboardPanel can={can} onClose={closePanel} />
+          ) : (
+            <ClipboardPanel controller={controller} remote={state.clipboard} draft={state.draft} waiting={state.clipboardWaiting} can={can} onClose={closePanel} />
+          )
         )}
         {state.clipboardWaiting && state.phase === 'open' && (
           <div className="notice" role="alert">
