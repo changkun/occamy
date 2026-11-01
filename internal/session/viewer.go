@@ -41,7 +41,7 @@ type Pending struct {
 	Cursor    *Cursor
 	CursorPos *image.Point
 	Clipboard *Clipboard
-	// ClipboardStatus is whether the remote's clipboard answers.
+	// ClipboardStatus is whether the remote's clipboard is taking text.
 	ClipboardStatus *bool
 	Title           *string
 	Bells           int

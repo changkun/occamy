@@ -318,12 +318,12 @@ func TestClipboardToServer(t *testing.T) {
 	l.send(t, rdptest.FormatDataRequest(99))
 	want(t, l.next(t), rdptest.CBFormatDataResponse, rdptest.CBResponseFail)
 
-	// The same text again is not announced again while the server's
-	// clipboard is the client's; after the server's own, it is.
+	// The same text again is announced again, as only an answer shows
+	// that the server still has it, and so it is after the server's own.
 	if err := l.c.SetClipboard([]byte(text)); err != nil {
 		t.Fatal(err)
 	}
-	l.quiet(t)
+	formats(t, l.next(t), true, rdptest.CFUnicodeText, rdptest.CFText)
 	l.send(t, rdptest.FormatList(true))
 	want(t, l.next(t), rdptest.CBFormatListResponse, rdptest.CBResponseOK)
 	if err := l.c.SetClipboard([]byte(text)); err != nil {

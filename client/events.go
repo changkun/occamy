@@ -85,9 +85,9 @@ type Clipboard struct {
 	Data []byte
 }
 
-// ClipboardStatus says whether the remote's clipboard answers: false
-// when text sent for it was dropped because it did not, each time, and
-// true once it answers again.
+// ClipboardStatus says whether the remote's clipboard is taking text:
+// false when text sent for it has waited too long, each time, with the
+// text still waiting, and true once it answers again.
 type ClipboardStatus struct {
 	Answering bool
 }

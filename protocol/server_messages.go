@@ -325,10 +325,11 @@ func (m *TermSnapshot) Decode(body []byte, _ Limits) error {
 	return d.Finish()
 }
 
-// ClipboardStatus says whether the remote's clipboard answers. With
-// Answering false, text sent for it was dropped because it did not, as
-// the server says each time; with true, it answers again. A message that
-// clients of the first v1 do not know, so it is ignorable.
+// ClipboardStatus says whether the remote's clipboard is taking text.
+// With Answering false, it has not taken text sent for it, which is
+// still waiting, as the server says each time; with true, it answers
+// again. A message that clients of the first v1 do not know, so it is
+// ignorable.
 type ClipboardStatus struct {
 	Answering bool
 }

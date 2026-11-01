@@ -34,14 +34,16 @@ func (l *live) open(t *testing.T) {
 }
 
 // waitStatus waits until the client has told its Output of the clipboard
-// as many things as want has, and checks them.
+// as many things as want has, and checks them. More may follow, as text
+// that goes after the server answers waits again; the exact order is
+// TestClipboardWaitBounds's.
 func (l *live) waitStatus(t *testing.T, want ...bool) {
 	t.Helper()
 	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(time.Millisecond) {
 		got := l.out.clipboardStatus()
 		if len(got) >= len(want) {
-			if !slices.Equal(got, want) {
-				t.Fatalf("clipboard status %v, want %v", got, want)
+			if !slices.Equal(got[:len(want)], want) {
+				t.Fatalf("clipboard status %v, want %v first", got, want)
 			}
 			return
 		}
@@ -72,35 +74,30 @@ func (l *live) gives(t *testing.T, text string) {
 }
 
 // A server that goes silent, as xrdp does once its clipboard process has
-// gone, leaves a Format List unanswered: the text is dropped and the
-// Output told, each time. When the server's process comes back, what was
-// dropped stays dropped, the Output hears, and the same text then goes.
+// gone, leaves a Format List unanswered: the Output is told, each time,
+// and the text goes on waiting. When the server's process comes back the
+// Output hears, and the server is offered the owner's latest text.
 func TestClipboardUnanswered(t *testing.T) {
 	cfg := bothWays
 	cfg.ClipboardWait = 50 * time.Millisecond
 	l := runLive(t, rdptest.Server{}, cfg)
 	l.open(t)
 
-	l.paste(t, "lost")
+	l.paste(t, "first")
 	l.waitStatus(t, false)
-	l.paste(t, "lost too")
+	l.paste(t, "newer")
 	l.waitStatus(t, false, false)
 
 	l.send(t, rdptest.ClipCaps(true), rdptest.MonitorReady())
 	want(t, l.next(t), rdptest.CBClipCaps, 0)
-	formats(t, l.next(t), true)
+	formats(t, l.next(t), true, rdptest.CFUnicodeText, rdptest.CFText)
 	l.waitStatus(t, false, false, true)
-
-	l.paste(t, "lost")
-	l.send(t, listOK())
-	l.gives(t, "lost")
-	time.Sleep(2 * cfg.ClipboardWait)
-	l.waitStatus(t, false, false, true)
+	l.gives(t, "newer")
 }
 
-// An answer after the wait says that the server is there again, but the
-// text it answers for is gone, as the Output was told.
-func TestClipboardAnswerTooLate(t *testing.T) {
+// An answer after the wait says that the server is there, and the text
+// it answers for goes, as if the server had never been slow.
+func TestClipboardLateAnswer(t *testing.T) {
 	cfg := bothWays
 	cfg.ClipboardWait = 50 * time.Millisecond
 	l := runLive(t, rdptest.Server{}, cfg)
@@ -109,14 +106,14 @@ func TestClipboardAnswerTooLate(t *testing.T) {
 	l.waitStatus(t, false)
 	l.send(t, listOK())
 	l.waitStatus(t, false, true)
-	l.send(t, rdptest.FormatDataRequest(rdptest.CFUnicodeText))
-	want(t, l.next(t), rdptest.CBFormatDataResponse, rdptest.CBResponseFail)
+	l.gives(t, "late")
 }
 
-// Without the server's process, Monitor Ready never comes either: text
-// that waits for it is dropped, and a Monitor Ready that comes after
-// does not bring it back.
-func TestClipboardNeverReady(t *testing.T) {
+// A logon longer than the wait is a healthy server: Monitor Ready comes
+// only once the user has logged on, and a process that has gone never
+// sends it, so the wait cannot tell the two apart. Text from before
+// waits through it, the Output hears, and the first list offers it.
+func TestClipboardSlowLogon(t *testing.T) {
 	cfg := bothWays
 	cfg.ClipboardWait = 50 * time.Millisecond
 	l := runLive(t, rdptest.Server{}, cfg)
@@ -124,13 +121,31 @@ func TestClipboardNeverReady(t *testing.T) {
 		t.Fatal(err)
 	}
 	l.waitStatus(t, false)
-	formats(t, l.ready(t, true), true)
+	formats(t, l.ready(t, true), true, rdptest.CFUnicodeText, rdptest.CFText)
 	l.waitStatus(t, false, true)
+	l.gives(t, "early")
+}
+
+// The same text again, after a server took it and then lost its
+// clipboard process: only an answer shows that the process is there, so
+// it is announced and waited for as new text is. A server that is there
+// answers, and has lost nothing.
+func TestClipboardSameTextAgain(t *testing.T) {
+	cfg := bothWays
+	cfg.ClipboardWait = 500 * time.Millisecond
+	l := runLive(t, rdptest.Server{}, cfg)
+	l.open(t)
+	l.paste(t, "same")
+	l.send(t, listOK())
+	l.gives(t, "same")
+	l.paste(t, "same")
+	l.waitStatus(t, false)
 }
 
 // A slow server that does answer is not a silent one, whichever of its
 // two answers comes first: xrdp asks for the text before it answers the
-// Format List.
+// Format List. The answer comes a sixth of the way through, which leaves
+// a test on a loaded host 5 s before it could raise the word by mistake.
 func TestClipboardSlowAnswer(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -142,11 +157,11 @@ func TestClipboardSlowAnswer(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			cfg := bothWays
-			cfg.ClipboardWait = 3 * time.Second
+			cfg.ClipboardWait = 6 * time.Second
 			l := runLive(t, rdptest.Server{}, cfg)
 			l.open(t)
 			l.paste(t, "slow")
-			time.Sleep(cfg.ClipboardWait / 3)
+			time.Sleep(cfg.ClipboardWait / 6)
 			tc.answer(t, l)
 			time.Sleep(cfg.ClipboardWait)
 			if got := l.out.clipboardStatus(); len(got) != 0 {
@@ -157,7 +172,8 @@ func TestClipboardSlowAnswer(t *testing.T) {
 	}
 }
 
-// The wait's bounds, by a clock of the test's.
+// The wait's bounds, by a clock of the test's. The client's wait is the
+// default, so this pins that as well as what the spec argues for it.
 func TestClipboardWaitBounds(t *testing.T) {
 	const wait = time.Minute
 	type fixture struct {
@@ -186,6 +202,15 @@ func TestClipboardWaitBounds(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// wrote checks that do put something on the wire, or nothing.
+	wrote := func(t *testing.T, f fixture, want bool, do func()) {
+		t.Helper()
+		before := f.conn.buf.Len()
+		do()
+		if got := f.conn.buf.Len() != before; got != want {
+			t.Errorf("wrote %d bytes, want some: %v", f.conn.buf.Len()-before, want)
+		}
+	}
 	for _, tc := range []struct {
 		name string
 		run  func(t *testing.T, f fixture)
@@ -208,22 +233,40 @@ func TestClipboardWaitBounds(t *testing.T) {
 			f.clock.advance(10 * wait)
 			pass(t, f)
 		}},
-		{name: "no answer by the end", want: []bool{false}, run: func(t *testing.T, f fixture) {
+		{name: "no answer by the end", text: "text", want: []bool{false}, run: func(t *testing.T, f fixture) {
 			paste(t, f, "text")
 			f.clock.advance(wait)
 			pass(t, f)
 		}},
-		{name: "the server's own Format List is no answer", want: []bool{false}, run: func(t *testing.T, f fixture) {
+		{name: "a wait that ended writes nothing", text: "text", want: []bool{false}, run: func(t *testing.T, f fixture) {
+			paste(t, f, "text")
+			f.clock.advance(wait)
+			wrote(t, f, false, func() { pass(t, f) })
+		}},
+		{name: "the server's own Format List is no answer", text: "text", want: []bool{false}, run: func(t *testing.T, f fixture) {
 			paste(t, f, "text")
 			message(t, f, rdptest.FormatList(true, rdptest.CFUnicodeText))
 			f.clock.advance(wait)
 			pass(t, f)
 		}},
-		{name: "newer text does not put off the end", want: []bool{false}, run: func(t *testing.T, f fixture) {
+		{name: "newer text does not put off the end", text: "newer", want: []bool{false}, run: func(t *testing.T, f fixture) {
 			paste(t, f, "text")
 			f.clock.advance(wait - 1)
 			paste(t, f, "newer")
 			f.clock.advance(1)
+			pass(t, f)
+		}},
+		{name: "text as the wait ends goes, and the writer tells", text: "newer", want: []bool{false}, run: func(t *testing.T, f fixture) {
+			paste(t, f, "text")
+			f.clock.advance(wait)
+			// Its own look at what is due ends the wait and starts another,
+			// which puts off the timer that would have woken the writer.
+			wrote(t, f, true, func() { paste(t, f, "newer") })
+			select {
+			case <-f.c.chio.kick:
+			default:
+				t.Error("the writer was not woken to tell the Output")
+			}
 			pass(t, f)
 		}},
 		{name: "no text leaves nothing to wait for", run: func(t *testing.T, f fixture) {
@@ -232,28 +275,14 @@ func TestClipboardWaitBounds(t *testing.T) {
 			f.clock.advance(wait)
 			pass(t, f)
 		}},
-		{name: "text as the wait ends goes with it", want: []bool{false}, run: func(t *testing.T, f fixture) {
-			paste(t, f, "text")
-			f.clock.advance(wait)
-			before := f.conn.buf.Len()
-			paste(t, f, "newer") // its own look at what is due ends the wait
-			if f.conn.buf.Len() != before {
-				t.Error("a Format List went out with the text dropped")
-			}
-			pass(t, f)
-		}},
-		{name: "no text after a loss still clears the server's", want: []bool{false}, run: func(t *testing.T, f fixture) {
+		{name: "no text after a wait still clears the server's", want: []bool{false}, run: func(t *testing.T, f fixture) {
 			paste(t, f, "text")
 			f.clock.advance(wait)
 			pass(t, f)
-			before := f.conn.buf.Len()
-			paste(t, f, "")
-			if f.conn.buf.Len() == before {
-				t.Error("no Format List went out for no text")
-			}
+			wrote(t, f, true, func() { paste(t, f, "") })
 			pass(t, f)
 		}},
-		{name: "text told of is told of again", want: []bool{false, false}, run: func(t *testing.T, f fixture) {
+		{name: "text told of is told of again", text: "again", want: []bool{false, false}, run: func(t *testing.T, f fixture) {
 			paste(t, f, "text")
 			f.clock.advance(wait)
 			pass(t, f)
@@ -261,7 +290,29 @@ func TestClipboardWaitBounds(t *testing.T) {
 			f.clock.advance(wait)
 			pass(t, f)
 		}},
-		{name: "Monitor Ready starts the wait again", want: []bool{false}, run: func(t *testing.T, f fixture) {
+		{name: "the same text again runs the wait", text: "text", want: []bool{false}, run: func(t *testing.T, f fixture) {
+			paste(t, f, "text")
+			message(t, f, listOK())
+			f.clock.advance(10 * wait)
+			pass(t, f)
+			wrote(t, f, true, func() { paste(t, f, "text") })
+			f.clock.advance(wait - 1)
+			pass(t, f)
+			if got := f.out.clipboardStatus(); len(got) != 0 {
+				t.Fatalf("clipboard status %v before the wait ended", got)
+			}
+			f.clock.advance(1)
+			pass(t, f)
+		}},
+		{name: "the same text again goes after a wait", text: "text", want: []bool{false, false}, run: func(t *testing.T, f fixture) {
+			paste(t, f, "text")
+			f.clock.advance(wait)
+			pass(t, f)
+			wrote(t, f, true, func() { paste(t, f, "text") })
+			f.clock.advance(wait)
+			pass(t, f)
+		}},
+		{name: "Monitor Ready starts the wait again", text: "text", want: []bool{false}, run: func(t *testing.T, f fixture) {
 			f.c.clip.ready = false
 			paste(t, f, "text")
 			f.clock.advance(wait - 1)
@@ -276,13 +327,22 @@ func TestClipboardWaitBounds(t *testing.T) {
 			f.clock.advance(1)
 			pass(t, f)
 		}},
+		{name: "text outlasts a logon", text: "text", want: []bool{false, true}, run: func(t *testing.T, f fixture) {
+			f.c.clip.ready = false
+			paste(t, f, "text")
+			f.clock.advance(100 * wait)
+			wrote(t, f, false, func() { pass(t, f) })
+			message(t, f, rdptest.MonitorReady())
+			wrote(t, f, true, func() { pass(t, f) })
+			message(t, f, rdptest.FormatDataRequest(rdptest.CFUnicodeText))
+			pass(t, f)
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, clock := testClock(64, 64)
 			conn := &recordConn{}
 			c.t = &transport{conn: conn}
 			c.cfg.Clipboard = bothWays.Clipboard
-			c.cfg.ClipboardWait = wait
 			c.chio.kick = make(chan struct{}, 1)
 			c.clipCh = &vchannel{name: "cliprdr", id: 1004, limit: maxCliprdrMessage}
 			c.clip.ready = true
@@ -300,5 +360,13 @@ func TestClipboardWaitBounds(t *testing.T) {
 				t.Errorf("the owner's text is %q, want %q", c.clip.text, tc.text)
 			}
 		})
+	}
+}
+
+// DefaultClipboardWait is what the spec argues for: the reasoning there
+// has to change with it.
+func TestClipboardDefaultWait(t *testing.T) {
+	if DefaultClipboardWait != time.Minute {
+		t.Errorf("DefaultClipboardWait is %v, want a minute", DefaultClipboardWait)
 	}
 }

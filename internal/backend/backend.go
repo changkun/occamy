@@ -107,11 +107,11 @@ type Sink interface {
 	TermData(p []byte)
 	// Clipboard reports the remote clipboard's new content.
 	Clipboard(mime string, data []byte)
-	// ClipboardStatus reports whether the remote's clipboard answers:
-	// false each time text sent for it was dropped because it did not,
-	// and true once it answers again. Backends whose clipboard can go
-	// quiet only; a backend that never calls it says nothing of its
-	// clipboard.
+	// ClipboardStatus reports whether the remote's clipboard is taking
+	// text: false each time text for it has waited too long, which goes
+	// on waiting, and true once it answers again. Backends whose
+	// clipboard can go quiet only; a backend that never calls it says
+	// nothing of its clipboard.
 	ClipboardStatus(answering bool)
 	// Bell rings the bell.
 	Bell()

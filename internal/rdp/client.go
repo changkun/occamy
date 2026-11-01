@@ -78,8 +78,8 @@ type Config struct {
 	// channel.
 	Clipboard ClipboardMode
 	// ClipboardWait bounds how long the text of SetClipboard waits for
-	// the server to take it; it is then dropped, and the Output told.
-	// DefaultClipboardWait by default.
+	// the server to take it before the Output is told. The text goes on
+	// waiting. DefaultClipboardWait by default.
 	ClipboardWait time.Duration
 	// Resize asks for the dynamic virtual channels (DRDYNVC) and accepts
 	// the server's Display Control channel, through which RequestSize
@@ -120,10 +120,11 @@ type Output interface {
 	CursorMove(p image.Point)
 	// Clipboard reports the server's clipboard: text/plain in UTF-8.
 	Clipboard(mime string, data []byte)
-	// ClipboardStatus reports whether the server's clipboard answers:
-	// false each time the owner's text was dropped because it did not,
-	// and true once it speaks again. The goroutine that writes the
-	// channels calls it, unlike the methods above.
+	// ClipboardStatus reports whether the server's clipboard is taking
+	// the owner's text: false each time a wait for it ended, with the
+	// text still waiting, and true once the server speaks again. The
+	// goroutine that writes the channels calls it, unlike the methods
+	// above.
 	ClipboardStatus(answering bool)
 }
 

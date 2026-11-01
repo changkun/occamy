@@ -314,7 +314,8 @@ func TestRunInput(t *testing.T) {
 
 // Text a server's clipboard does not take within the wait, as when its
 // clipboard process has gone, gets the sink told, and it hears again
-// when the server speaks.
+// when the server speaks. The text's list then waits as well, so a
+// further false may follow.
 func TestRunClipboardUnanswered(t *testing.T) {
 	checkGoroutines(t)
 	s := listen(t, rdptest.Server{})
@@ -323,7 +324,7 @@ func TestRunClipboardUnanswered(t *testing.T) {
 	sink := &backendtest.Sink{}
 	r := start(t, b, sink)
 	c := s.accept(t)
-	if err := b.Input(backend.Clipboard{MIME: "text/plain", Data: []byte("lost")}); err != nil {
+	if err := b.Input(backend.Clipboard{MIME: "text/plain", Data: []byte("waits")}); err != nil {
 		t.Fatal(err)
 	}
 	waitFor(t, "the status of a clipboard that does not answer", func() bool {
@@ -333,7 +334,8 @@ func TestRunClipboardUnanswered(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, "the status of a clipboard that answers again", func() bool {
-		return slices.Equal(sink.ClipboardStatuses(), []bool{false, true})
+		got := sink.ClipboardStatuses()
+		return len(got) >= 2 && slices.Equal(got[:2], []bool{false, true})
 	})
 	if err := r.stop(t); !errors.Is(err, context.Canceled) {
 		t.Errorf("Run returned %v, want context.Canceled", err)
