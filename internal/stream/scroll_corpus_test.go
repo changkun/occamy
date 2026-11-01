@@ -55,10 +55,11 @@ type recorder struct {
 	rects                []image.Rectangle // of the tile messages, in order
 	errs                 []error
 	reg                  *protocol.Registry
+	cache                testSlots
 }
 
 func (c *recorder) WriteMessage(_ context.Context, p []byte) error {
-	m, err := protocol.Decode(p, c.reg, protocol.Limits{MaxMessageSize: 1 << 30})
+	m, err := protocol.Decode(p, c.reg, testLimits)
 	if err != nil {
 		c.errs = append(c.errs, err)
 		return nil
@@ -68,7 +69,7 @@ func (c *recorder) WriteMessage(_ context.Context, p []byte) error {
 		c.img = image.NewRGBA(image.Rect(0, 0, int(m.Width), int(m.Height)))
 	case *protocol.Tile:
 		r := image.Rect(int(m.X), int(m.Y), int(m.X)+int(m.W), int(m.Y)+int(m.H))
-		if err := decodeTile(c.img.SubImage(r).(*image.RGBA), m.Codec, m.Payload); err != nil {
+		if err := c.cache.draw(c.img, m); err != nil {
 			c.errs = append(c.errs, err)
 		}
 		c.lossy = c.lossy || m.Codec == protocol.CodecWebP || m.Codec == protocol.CodecJPEG
@@ -100,6 +101,7 @@ type direct struct {
 	w    *writer
 	c    *recorder
 	prev *image.RGBA
+	aged bool // the next frame dates the last snapshot (age)
 }
 
 // newDirect returns a writer of a 1024×768 session for a viewer of WebP
@@ -175,6 +177,7 @@ func (d *direct) frame() (bytes, tiles, copies int, encode, search time.Duration
 	if err := w.syncSize(d.ctx); err != nil {
 		d.tb.Fatal(err)
 	}
+	d.aging()
 	if _, ok := w.collect(image.Rectangle{}); !ok {
 		d.tb.Fatal("resized")
 	}

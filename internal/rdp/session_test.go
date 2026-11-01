@@ -435,6 +435,7 @@ func FuzzRun(f *testing.F) {
 			rdptest.Finalization(),
 			rdptest.ChannelChunks(fuzzDynvc, rdptest.DVCClosePDU(7), rdptest.ChunkSize),
 		),
+		fuzzGFXSeed(),
 	} {
 		f.Add(slices.Concat(seed...))
 	}
@@ -442,6 +443,7 @@ func FuzzRun(f *testing.F) {
 		c := testClient(fuzzWidth, fuzzHeight)
 		c.cfg.Clipboard = ClipboardFromServer | ClipboardToServer
 		c.cfg.Resize = true
+		c.cfg.GFX = true
 		c.chio.kick = make(chan struct{}, 1)
 		c.layoutEvery = layoutEvery
 		c.channels = c.newChannels()

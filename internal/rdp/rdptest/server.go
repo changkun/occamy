@@ -127,6 +127,8 @@ type Conn struct {
 	Requested uint32
 	// Size is the desktop size the client asked for.
 	Size image.Point
+	// EarlyFlags is the earlyCapabilityFlags of the client's core data.
+	EarlyFlags uint16
 	// TSRequest is the client's first TSRequest, when the server
 	// selected NLA.
 	TSRequest []byte
@@ -315,6 +317,10 @@ func (c *Conn) channels(p []byte, ids []uint16) ([]uint16, error) {
 	names, err := channelNames(blocks[0xc003])
 	if err != nil {
 		return nil, err
+	}
+	// TS_UD_CS_CORE's earlyCapabilityFlags, 140 bytes after its header.
+	if core := blocks[0xc001]; len(core) >= 142 {
+		c.EarlyFlags = binary.LittleEndian.Uint16(core[140:])
 	}
 	if ids == nil {
 		ch := firstChannel

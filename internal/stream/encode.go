@@ -23,6 +23,9 @@ type lookahead struct {
 	codec   protocol.Codec
 	payload []byte
 	k       int // the buffer in w.tiles holding its pixels
+	// key is its content, if keyed: a tile the cache can hold.
+	key   cacheKey
+	keyed bool
 }
 
 // encode reads the tiles of the next message from order[i] on, encodes
@@ -46,21 +49,37 @@ type lookahead struct {
 // are in w.tiles from w.msgK on, and the quality the client gets them at
 // is w.msgQuality.
 //
-// A run ends before a tile that a copy-rect of the frame completed.
+// A run ends before a tile that a copy-rect of the frame completed, and
+// where the tiles' motion changes: tiles in motion go at the pacer's
+// lowest quality, the effect of an input at its quality now, and other
+// still tiles at the quality their SSIM calls for, up to the pacer's.
+//
+// With a tile cache, a tile whose content a slot holds goes as a cached
+// tile of that slot, and ends a run before it; a tile that goes alone
+// and exact is stored in the slot used least recently.
+//
+// With the session's encode cache (share.go), a tile's encoding and a
+// run's are made once for the viewers that share it, by whichever writer
+// or worker comes first.
 func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send, ok bool) {
 	start := time.Now()
 	defer func() { w.encodeTime += time.Since(start) }()
 
 	t := order[i]
+	w.msgSlot = 0
 	if a := &w.ahead; a.ok {
 		a.ok = false
 		// The tile it holds, read no earlier than the versions order
 		// was made from; else the tile changed since, and is read again.
 		if a.tile == t && a.version >= w.versions[t] {
-			w.payload = append(w.payload[:0], a.payload...)
 			w.runVersion = append(w.runVersion[:0], a.version)
-			w.msgK, w.msgQuality = a.k, lossless
-			w.message(id, a.r, a.codec)
+			w.msgK, w.msgQuality, w.msgGoal = a.k, lossless, lossless
+			if w.cached(id, a.r, a.key, a.keyed) {
+				return 1, true, true
+			}
+			w.payload = append(w.payload[:0], a.payload...)
+			w.storeIn(a.key, a.keyed, a.codec)
+			w.message(id, a.r, a.codec, w.msgSlot)
 			return 1, true, true
 		}
 	}
@@ -69,28 +88,34 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 		return 0, false, false
 	}
 	w.runVersion = append(w.runVersion[:0], version)
-	payload, codec, lossy := w.enc.Tile(w.payload[:0], w.tiles[0], r.Dx(), r.Dy())
+	w.msgK, w.msgQuality, w.msgGoal = 0, lossless, lossless
+	key, keyed := w.cache.key(w.tiles[0], r)
+	if w.cached(id, r, key, keyed) {
+		return 1, true, true
+	}
+	moving := w.moving(t, input)
+	payload, codec, lossy := w.encodeTile(w.payload[:0], t, 0, version, r, moving)
 	w.payload = payload
-	w.msgK, w.msgQuality = 0, lossless
 	if !lossy {
-		w.message(id, r, codec)
+		w.storeIn(key, keyed, codec)
+		w.message(id, r, codec, w.msgSlot)
 		return 1, true, true
 	}
 
 	// Gather the run: the tiles to the right, while they are next in
-	// order and lossy.
+	// order, lossy, and moving as the first is.
 	w.rects[0] = r
 	n = 1
 	width := r.Dx()
-	maxWidth := w.limits.MaxTextureSize
-	if maxWidth <= 0 {
-		maxWidth = protocol.DefaultMaxTextureSize
-	}
+	maxWidth := w.maxWidth()
 	for i+n < len(order) && n < encoder.MaxRun {
 		u := order[i+n]
 		ru := w.g.rect(u)
 		if u != order[i+n-1]+1 || u/w.g.cols != t/w.g.cols || width+ru.Dx() > maxWidth || w.sent[u] >= w.versions[u] {
 			break
+		}
+		if w.moving(u, input) != moving {
+			break // goes at another quality
 		}
 		got, v := w.fb.ReadTile(u, w.tile(n))
 		if got != ru || w.fb.Bounds() != w.g.bounds {
@@ -99,9 +124,13 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 		if input && v != w.runVersion[n-1] {
 			break // another drawing operation
 		}
-		b, c, lossy := w.enc.Tile(w.ahead.payload[:0], w.tiles[n], ru.Dx(), ru.Dy())
+		ku, kuOK := w.cache.key(w.tiles[n], ru)
+		if kuOK && w.cache.has(ku) {
+			break // goes cached
+		}
+		b, c, lossy := w.encodeTile(w.ahead.payload[:0], u, n, v, ru, moving)
 		if !lossy {
-			w.ahead = lookahead{ok: true, tile: u, version: v, r: ru, codec: c, payload: b, k: n}
+			w.ahead = lookahead{ok: true, tile: u, version: v, r: ru, codec: c, payload: b, k: n, key: ku, keyed: kuOK}
 			break
 		}
 		w.ahead.payload = b
@@ -112,14 +141,16 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 	}
 
 	// Encode it, halving it while the message is too large.
-	q := w.p.Quality()
-	w.msgQuality = lossyQuality(q)
 	for {
 		rect := w.rects[0].Union(w.rects[n-1])
-		w.assemble(n, rect)
-		w.payload, codec = w.enc.Lossy(w.payload[:0], w.runPix, rect.Dx(), rect.Dy(), q)
+		w.runPix = assemble(w.runPix, w.tiles[:n], w.rects[:n], rect)
+		codec = w.lossy(t, n, rect, moving, input)
 		if codec != 0 {
-			w.message(id, rect, codec)
+			w.msgSlot = 0
+			if n == 1 {
+				w.storeIn(key, keyed, codec)
+			}
+			w.message(id, rect, codec, w.msgSlot)
 			if w.limits.CheckSize(len(w.buf)) == nil {
 				return n, true, true
 			}
@@ -135,6 +166,49 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 	}
 }
 
+// lossy encodes the run of n tiles from t, assembled in w.runPix as
+// rect, into w.payload, and sets the message's quality and goal:
+//
+//   - tiles in motion at the pacer's lowest quality, since motion loses
+//     detail before input loses responsiveness, and refinement raises
+//     them once they stop;
+//   - an input's effect at the pacer's quality, without the search,
+//     which would delay it, and refined like tiles that moved;
+//   - other tiles at the lowest quality up to the pacer's whose SSIM
+//     reaches the encoder's score, recorded as final; if none does,
+//     their goal is above the pacer's quality, for refinement to reach
+//     once the link allows.
+//
+// It returns the codec, 0 if none encodes the pixels.
+func (w *writer) lossy(t, n int, rect image.Rectangle, moving, input bool) protocol.Codec {
+	still, q, lo := runMode(w.p.Quality(), w.p.MinQuality(), moving, input)
+	codec, got, reached := w.encodeRun(t, n, w.runPix, rect, still, q, lo)
+	if still {
+		w.msgQuality, w.msgGoal = stillGoal(got, q, reached)
+	} else {
+		w.msgQuality, w.msgGoal = lossyQuality(q), 0
+	}
+	if exact(codec) {
+		w.msgQuality, w.msgGoal = lossless, lossless
+	}
+	return codec
+}
+
+// stillGoal is the quality and goal of pixels that Still encoded at got,
+// searching up to hi: final once the score is reached, or else got with
+// a goal above hi.
+func stillGoal(got, hi int, reached bool) (quality, goal uint8) {
+	if reached {
+		return final, final
+	}
+	return lossyQuality(got), lossyQuality(hi + 1)
+}
+
+// exact reports whether a codec carries pixels exactly.
+func exact(c protocol.Codec) bool {
+	return c == protocol.CodecRaw || c == protocol.CodecDeflate || c == protocol.CodecPNG
+}
+
 // tile returns the buffer for the pixels of a run's k-th tile.
 func (w *writer) tile(k int) []byte {
 	if w.tiles[k] == nil {
@@ -143,27 +217,40 @@ func (w *writer) tile(k int) []byte {
 	return w.tiles[k]
 }
 
-// assemble puts the pixels of the run's first n tiles, which make up
-// rect, side by side in w.runPix, row by row.
-func (w *writer) assemble(n int, rect image.Rectangle) {
-	stride := 4 * rect.Dx()
-	size := stride * rect.Dy()
-	if cap(w.runPix) < size {
-		w.runPix = make([]byte, size)
+// cached puts in w.buf a cached tile of the slot that holds key, the
+// content of tile r, and reports whether one does.
+func (w *writer) cached(id uint32, r image.Rectangle, key cacheKey, keyed bool) bool {
+	if !keyed {
+		return false
 	}
-	w.runPix = w.runPix[:size]
-	for k := range n {
-		r := w.rects[k]
-		tw := 4 * r.Dx()
-		x := 4 * (r.Min.X - rect.Min.X)
-		for y := range r.Dy() {
-			copy(w.runPix[y*stride+x:y*stride+x+tw], w.tiles[k][y*tw:(y+1)*tw])
-		}
+	s, ok := w.cache.lookup(key)
+	if !ok {
+		return false
+	}
+	w.payload = w.payload[:0]
+	w.message(id, r, protocol.CodecCached, s)
+	return true
+}
+
+// storeIn makes the next message store its tile, whose content is key,
+// in the slot used least recently, if the tile is keyed and its codec
+// carries it exactly: a slot holds what the server's screen held.
+func (w *writer) storeIn(key cacheKey, keyed bool, codec protocol.Codec) {
+	w.msgSlot = 0
+	if keyed && exact(codec) {
+		w.msgSlot, w.msgKey = w.cache.victim(), key
 	}
 }
 
-// message puts a tile message of w.payload in w.buf.
-func (w *writer) message(id uint32, r image.Rectangle, codec protocol.Codec) {
+// message puts a tile message of w.payload in w.buf, naming slot: the
+// slot the tile is stored in or, cached, drawn from. It sets w.msgFrom
+// to the slot drawn from, which drawn marks used once the message is
+// written; a message held back leaves nothing for the next one.
+func (w *writer) message(id uint32, r image.Rectangle, codec protocol.Codec, slot uint16) {
+	w.msgFrom = 0
+	if codec == protocol.CodecCached {
+		w.msgFrom = slot
+	}
 	w.buf = protocol.Tile{
 		FrameID: id,
 		X:       uint16(r.Min.X), // #nosec G115 -- screens are at most 65535 pixels wide
@@ -171,6 +258,7 @@ func (w *writer) message(id uint32, r image.Rectangle, codec protocol.Codec) {
 		W:       uint16(r.Dx()),  // #nosec G115 -- a run is at most the texture size wide
 		H:       uint16(r.Dy()),  // #nosec G115 -- a tile is smaller than the screen
 		Codec:   codec,
+		Slot:    slot,
 		Payload: w.payload,
 	}.Append(w.buf[:0])
 }

@@ -168,15 +168,26 @@ func FuzzPlanar(f *testing.F) {
 	_, _, bitmaps := traceData(f)
 	for _, b := range bitmaps {
 		if b.compressed && b.bpp == 32 {
-			f.Add(b.data, uint8(b.width), uint8(b.height))
+			f.Add(b.data, uint8(b.width), uint8(b.height), false)
 		}
 	}
-	f.Fuzz(func(t *testing.T, data []byte, w, h uint8) {
+	// The graphics pipeline's, in AYCoCg with colour loss and chroma
+	// subsampling.
+	img := gradient(13, 7)
+	for _, hdr := range []byte{planarNA | 3, planarNA | planarCS | 2, planarRLE | planarCS | 7, planarRLE | 1} {
+		f.Add(planarYCoCg(img, hdr), uint8(13), uint8(7), true)
+	}
+	f.Fuzz(func(t *testing.T, data []byte, w, h uint8, gfx bool) {
 		if w == 0 || h == 0 {
 			return
 		}
 		var d decoder
-		d.planarDecode(data, int(w), int(h), make([]byte, 4*int(w)*int(h)), true)
+		kind, stride := planarBitmap, 4*int(w)
+		if gfx {
+			// Into a surface wider than the bitmap.
+			kind, stride = planarGFX, stride+4*int(h)
+		}
+		d.planarDecode(data, int(w), int(h), make([]byte, stride*int(h)), stride, kind)
 	})
 }
 

@@ -212,7 +212,9 @@ func TestKubernetesPrompt(t *testing.T) {
 // certificate that is not the pinned one ends the session with
 // backend-failed before any request, and so the token, reaches the
 // server; the API server's 403 ends it with backend-failed too, and
-// neither tells the client the token.
+// neither tells the client the token. Either can end the session before
+// the stream's welcome or after it, as the race goes; the second round
+// makes it before.
 func TestKubernetesRefused(t *testing.T) {
 	ks := newKubeServer(t, kubetest.Options{Refuse: http.StatusForbidden, RefuseMessage: `pods "web-0" is forbidden: User "system:serviceaccount:occamy:occamy" cannot create resource "pods/exec"`})
 	wrongPin := kubeConnection("wrong-pin", ks, tokenFile(t, kubeToken))
@@ -230,21 +232,27 @@ func TestKubernetesRefused(t *testing.T) {
 		kubeConnection("forbidden", ks, tokenFile(t, kubeToken)),
 	)
 
-	cl := ts.streamConnection(t, alice, "wrong-pin", client.Options{})
-	end := awaitEnd(t, cl, protocol.CloseBackendFailed)
-	if n := len(ks.Requests()); n != 0 {
-		t.Errorf("%d requests reached a server whose certificate is not pinned", n)
-	}
-	if strings.Contains(end.Reason, kubeToken) {
-		t.Errorf("the reason %q holds the token", end.Reason)
-	}
-
-	cl = ts.streamConnection(t, alice, "forbidden", client.Options{})
-	end = awaitEnd(t, cl, protocol.CloseBackendFailed)
-	if strings.Contains(end.Reason, kubeToken) {
-		t.Errorf("the reason %q holds the token", end.Reason)
-	}
-	if reqs := ks.Requests(); len(reqs) != 1 || reqs[0].Header.Get("Authorization") != "Bearer "+kubeToken {
-		t.Errorf("requests %+v, want one with the token", reqs)
+	for _, early := range []bool{false, true} {
+		if early {
+			endBeforeWelcome(t)
+		}
+		check := func(id string, end client.End) {
+			t.Helper()
+			if strings.Contains(end.Reason, kubeToken) {
+				t.Errorf("%s: the reason %q holds the token", id, end.Reason)
+			}
+			if early && !beforeWelcome(end) {
+				t.Errorf("%s: the session ended after the welcome, want before", id)
+			}
+		}
+		n := len(ks.Requests())
+		check("wrong-pin", ts.failedStream(t, alice, "wrong-pin", protocol.CloseBackendFailed))
+		if reqs := ks.Requests(); len(reqs) != n {
+			t.Errorf("%d requests reached a server whose certificate is not pinned", len(reqs)-n)
+		}
+		check("forbidden", ts.failedStream(t, alice, "forbidden", protocol.CloseBackendFailed))
+		if reqs := ks.Requests(); len(reqs) != n+1 || reqs[n].Header.Get("Authorization") != "Bearer "+kubeToken {
+			t.Errorf("requests %+v, want one more, with the token", reqs[n:])
+		}
 	}
 }

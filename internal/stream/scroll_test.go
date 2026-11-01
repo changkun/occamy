@@ -100,7 +100,7 @@ func (r *scrollRig) frame() (copies []scrollCopy, tiles int) {
 	for _, cp := range r.sc.find(r.fb, order, r.target) {
 		dst := cp.rect(r.sc.g)
 		draw.Draw(r.client, dst, r.client, dst.Min.Add(image.Pt(0, cp.dy)), draw.Src)
-		r.sc.apply(cp)
+		r.sc.apply(cp, nil)
 		for k, t := range cp.done {
 			r.sent[t] = cp.vers[k]
 		}
@@ -464,7 +464,7 @@ func TestScrollPartlyDrawn(t *testing.T) {
 	if len(copies) != 1 || copies[0].a != 88 {
 		t.Fatalf("copies %+v, want one from row 88", copies)
 	}
-	r.sc.apply(copies[0])
+	r.sc.apply(copies[0], nil)
 	for tt, want := range []bool{true, true, false, false, true, true, true, true} {
 		if r.sc.valid[tt] != want {
 			t.Errorf("tile %d valid %v after the copy, want %v", tt, r.sc.valid[tt], want)
@@ -641,7 +641,7 @@ func TestScrollCopiedQuality(t *testing.T) {
 		{scrollCopy{c0: 0, c1: 1, a: 64, b: 256, dy: -64}, []uint8{lossless, lossless, 80, 40}},
 	} {
 		copy(r.sc.qual, []uint8{lossless, 80, 40, lossless})
-		r.sc.apply(tc.cp)
+		r.sc.apply(tc.cp, nil)
 		if !slices.Equal(r.sc.qual, tc.want) {
 			t.Errorf("rows %d to %d from %d below: qualities %v after the copy, want %v", tc.cp.a, tc.cp.b, tc.cp.dy, r.sc.qual, tc.want)
 		}

@@ -88,7 +88,7 @@ func (d *decoder) decode(b *bitmapData) ([]byte, error) {
 	}
 	out := d.rgba[:4*n]
 	if b.compressed && b.bpp == 32 {
-		return out, d.planarDecode(b.data, w, h, out, true)
+		return out, d.planarDecode(b.data, w, h, out, 4*w, planarBitmap)
 	}
 	bytesPP := (b.bpp + 7) / 8
 	switch b.bpp {

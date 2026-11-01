@@ -23,6 +23,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -627,6 +628,28 @@ func TestDebugListener(t *testing.T) {
 	r := do(t, http.MethodGet, "http://"+dln.Addr().String()+"/debug/vars", nil, "")
 	if !strings.Contains(string(r.body), `"memstats"`) {
 		t.Errorf("/debug/vars: %.200s", r.body)
+	}
+	// occamyd's own: goroutines, and open files where it can count them.
+	var vars struct {
+		Goroutines *int `json:"goroutines"`
+		FDs        *int `json:"fds"`
+	}
+	if err := json.Unmarshal(r.body, &vars); err != nil || vars.Goroutines == nil || vars.FDs == nil {
+		t.Fatalf("/debug/vars without goroutines and fds (%v): %.200s", err, r.body)
+	}
+	if *vars.Goroutines < 1 {
+		t.Errorf("goroutines = %d", *vars.Goroutines)
+	}
+	switch runtime.GOOS {
+	case "linux", "darwin":
+		// Standard input, output and error, and the two listeners.
+		if *vars.FDs < 5 {
+			t.Errorf("fds = %d, want at least 5", *vars.FDs)
+		}
+	default:
+		if *vars.FDs != -1 && *vars.FDs < 5 {
+			t.Errorf("fds = %d, want -1 or at least 5", *vars.FDs)
+		}
 	}
 }
 

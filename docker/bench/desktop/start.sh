@@ -3,13 +3,15 @@
 # Use of this source code is governed by a MIT
 # license that can be found in the LICENSE file.
 
-# start.sh vnc|rdp serves the scene program over one protocol.
+# start.sh vnc|rdp serves the scene program over one protocol. vnc's
+# screen is GEOMETRY, 1024x768 by default; the VNC backend's TestEncodings
+# records sessions at 64x48 (internal/backend/vnc).
 
 set -e
 
 case "$1" in
 vnc)
-	Xvfb :0 -screen 0 1024x768x24 -nolisten tcp &
+	Xvfb :0 -screen 0 "${GEOMETRY:-1024x768}x24" -nolisten tcp &
 	while [ ! -e /tmp/.X11-unix/X0 ]; do sleep 0.1; done
 	# If the scene exits, stop the container, so that the benchmark fails
 	# instead of measuring an empty screen. x11vnc replaces this shell

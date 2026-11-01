@@ -54,7 +54,7 @@ func encodeFrame(e *Encoder, img *image.RGBA, quality int, merge bool) ([]messag
 			}
 			pix := pixels(img, t)
 			start := time.Now()
-			payload, codec, lossy := e.Tile(nil, pix, t.Dx(), t.Dy())
+			payload, codec, lossy := e.Tile(nil, pix, t.Dx(), t.Dy(), false)
 			took += time.Since(start)
 			if !lossy {
 				msgs = append(msgs, message{t, 1, codec, payload})
@@ -66,7 +66,7 @@ func encodeFrame(e *Encoder, img *image.RGBA, quality int, merge bool) ([]messag
 			for merge && c+n < cols && n < MaxRun {
 				u := tile(c+n, r)
 				start := time.Now()
-				payload, codec, lossy := e.Tile(nil, pixels(img, u), u.Dx(), u.Dy())
+				payload, codec, lossy := e.Tile(nil, pixels(img, u), u.Dx(), u.Dy(), false)
 				took += time.Since(start)
 				if !lossy {
 					ahead = &message{u, 1, codec, payload}
@@ -115,7 +115,7 @@ func TestCorpus(t *testing.T) {
 						lossyTiles += m.tiles
 						// The grain of the photograph scores lowest:
 						// 0.843 at q70 in the measurement's rows.
-						if score := SSIM(src, out); score < 0.8 {
+						if score := refSSIM(src, out); score < 0.8 {
 							t.Errorf("%s: the lossy rectangle at %v has SSIM %.3f", name, m.r, score)
 						}
 					}

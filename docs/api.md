@@ -482,10 +482,12 @@ seconds, to open
 the stream token or the owner's access token; otherwise the session
 ends with `owner-left`. The remote is dialled after this answer, so a
 target that cannot be reached ends the session, and its stream gets
-`close` 4006 `backend-failed`. Credentials that the connection prompts
-for, and every ad-hoc target's, are asked of the owner on that stream,
-as `prompt` messages ([protocol.md](protocol.md#prompt)). The owner's
-`hello` sizes the session when the stream joins.
+`close` 4006 `backend-failed`, even when the session ended before the
+stream came ([below](#get-apiv1sessionsidstream)). Credentials that
+the connection prompts for, and every ad-hoc target's, are asked of
+the owner on that stream, as `prompt` messages
+([protocol.md](protocol.md#prompt)). The owner's `hello` sizes the
+session when the stream joins.
 
 | Status | `code` | When |
 |--------|--------|------|
@@ -525,9 +527,12 @@ Response: `200`, with `Cache-Control: no-store`.
 
 ### `DELETE /api/v1/sessions/{id}`
 
-Closes a session, for its owner. It answers once the session has ended,
-and every stream of the session gets `close` 4002 `session-closed`,
-whatever tokens and shares are still valid.
+Closes a session, for its owner. It answers once the session has ended
+and `occamyd` has let it go: a `GET`, `DELETE` or share of it after the
+answer gets 404, and the session no longer counts toward
+`limits.sessions_per_user` or `limits.sessions`, so its owner may open
+another at once. Every stream of the session gets `close` 4002
+`session-closed`, whatever tokens and shares are still valid.
 
 Response: `204 No Content`, with no body.
 
@@ -728,6 +733,12 @@ name or group. A session token or a share is refused.
 | `occamyd` runs `limits.sessions` sessions | 4001 `forbidden`, "occamyd runs as many sessions as it takes" |
 | The session could not be opened for a cause of `occamyd`'s own | 1011 `internal-error` |
 
+A remote that fails at once, such as one whose certificate is not the
+pinned one, or a kubernetes API server that refuses the exec, can end
+the session before `welcome`. The stream then gets `close` 4006
+`backend-failed` without `welcome`, the same `close` it would have had
+after `welcome` ([protocol.md](protocol.md#the-response)).
+
 Once the stream has joined, the session is as one that
 `POST /api/v1/sessions` opened: its owner may leave and come back
 within the owner grace through
@@ -737,7 +748,8 @@ routes. The session's ID is in `welcome`.
 
 ### `GET /api/v1/sessions/{id}/stream`
 
-Joins running session `{id}`.
+Joins running session `{id}`, or tells its owner how it ended if it
+ended within the owner grace.
 
 Token, and the role it joins with:
 
@@ -754,9 +766,24 @@ access token or else a session token.
 |---------|---------|
 | A share that is unknown, expired, of another session, or whose session has ended | 4000 `unauthorized`, "invalid token" |
 | A JWT that fails verification | 4000 `unauthorized` |
-| No running session `{id}`, a session token for another session or from an issuer that may not join it, or an access token or `owner` session token of anyone but the owner | 4001 `forbidden`, "no such session" |
+| No running session `{id}`, and no ended one whose owner this is (below); a session token for another session or from an issuer that may not join it; an access token or `owner` session token of anyone but the owner; or a `viewer` or `read-only` session token of a session that has ended | 4001 `forbidden`, "no such session" |
 | The owner's older stream did not leave within 5 seconds of a newer one | 4001 `forbidden`, "the owner is connected already" |
 | A viewer beyond `limits.viewers_per_session` | 4007 `viewer-limit` |
+
+For the owner grace, 60 seconds, after a session ends, its owner's
+stream, with an access token or an `owner` session token, gets the
+`close` the session ended with instead of `welcome`: 4006
+`backend-failed` for a remote that failed before the stream came, as
+after [`POST /api/v1/sessions`](#post-apiv1sessions), or 4002
+`session-closed` after
+[`DELETE /api/v1/sessions/{id}`](#delete-apiv1sessionsid). Everyone
+else gets 4001 "no such session", as for a session that never existed,
+so the answer tells nobody else whether a session existed or how it
+ended. `occamyd` keeps as many ended sessions as `limits.sessions`, and
+1024 at the least, the owner and the `close` of each and no more, and
+forgets the oldest first, so a client that opens sessions whose remotes
+fail cannot grow them; an owner whose session was forgotten gets "no
+such session" too.
 
 A newer stream of the owner takes over from an older one, which gets
 `close` 1000 `normal` with "the owner connected again"; a connection
@@ -803,9 +830,11 @@ The page runs its own scripts and the Worker that decodes tiles; calls
 API v1 and opens streams on its own origin, which `ws://host` and
 `wss://host` name for browsers that do not count WebSockets as
 `'self'`; shows the remote's pointer as a `data:` image; and takes
-inline styles, which React's style attributes and the terminal
-emulator's stylesheet are. No other page may frame it, so none can lay
-itself over a remote desktop and take its clicks. A `Host` that is not
+inline styles, since the terminal emulator, xterm.js, adds `<style>`
+elements for its theme and its cell size. React sets the page's style
+attributes through the CSSOM, which the policy does not govern. No
+other page may frame it, so none can lay itself over a remote desktop
+and take its clicks. A `Host` that is not
 a plain name or address with an optional port is left out of
 `connect-src`, so that a request cannot add to the policy.
 
@@ -885,12 +914,14 @@ as the public listener's are. How to read the profiles is in
 
 ### `GET /debug/vars`
 
-Go's expvar: a JSON object with `cmdline`, `occamyd`'s command line, and
-`memstats`, the runtime's memory statistics. `occamyd` publishes no
-variables of its own. Abbreviated:
+Go's expvar: a JSON object with `cmdline`, `occamyd`'s command line,
+`memstats`, the runtime's memory statistics, and two variables of
+`occamyd`'s own: `goroutines`, the number of goroutines, and `fds`, the
+file descriptors it has open, counted in `/proc/self/fd` on Linux or
+`/dev/fd` on macOS, or -1 where it cannot count them. Abbreviated:
 
 ```json
-{"cmdline":["occamyd","-conf","/etc/occamy/conf.yaml"],"memstats":{"Alloc":4194304,"HeapInuse":6291456,"NumGC":12}}
+{"cmdline":["occamyd","-conf","/etc/occamy/conf.yaml"],"fds":14,"goroutines":23,"memstats":{"Alloc":4194304,"HeapInuse":6291456,"NumGC":12}}
 ```
 
 ### `GET /debug/pprof/`

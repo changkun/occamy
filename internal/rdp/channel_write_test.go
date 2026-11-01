@@ -153,9 +153,25 @@ func TestClipboardListResponsesAllocs(t *testing.T) {
 	}
 }
 
+// liveHeap returns the bytes of the heap in use after a full collection.
+// The second collection frees what the first left in sync.Pool's victim
+// caches, such as crypto/tls's record buffers.
+func liveHeap() int64 {
+	runtime.GC()
+	runtime.GC()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return int64(m.HeapAlloc)
+}
+
 // A server that floods Format Lists and does not read keeps its session:
 // the client owes it a count, which takes no memory for each list, and
 // the writer waits for the server to read.
+//
+// The heap is measured from after a first batch of lists, so that what
+// the connection allocates once is not counted: the TLS read buffer,
+// which grows to a full record's size the first time one arrives, and
+// the batch itself.
 func TestClipboardListFlood(t *testing.T) {
 	l := runLive(t, rdptest.Server{}, bothWays)
 	l.ready(t, true)
@@ -166,21 +182,22 @@ func TestClipboardListFlood(t *testing.T) {
 			l.c.chio.wmu.Unlock()
 		}
 	}()
-	const lists = 100_000
-	runtime.GC()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
 	batch := l.formatLists(1000)
-	for range lists / len(batch) {
-		if err := l.conn.Write(batch...); err != nil {
-			t.Fatal(err)
+	flood := func(n int) {
+		for range n / len(batch) {
+			if err := l.conn.Write(batch...); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
-	l.owed(t, lists)
-	runtime.GC()
-	runtime.ReadMemStats(&after)
-	if grew := int64(after.HeapAlloc) - int64(before.HeapAlloc); grew > lists {
-		t.Errorf("the heap grew by %d bytes with %d responses owed", grew, lists)
+	flood(len(batch))
+	l.owed(t, int64(len(batch)))
+	before := liveHeap()
+	const lists = 100_000
+	flood(lists)
+	l.owed(t, int64(len(batch)+lists))
+	if grew := liveHeap() - before; grew > lists {
+		t.Errorf("the heap grew by %d bytes with %d more responses owed", grew, lists)
 	}
 	l.c.chio.wmu.Unlock()
 	held = false

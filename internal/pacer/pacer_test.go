@@ -438,3 +438,61 @@ func TestUnpacedBaseline(t *testing.T) {
 		t.Logf("unpaced p95 %v, paced %v", u, p)
 	}
 }
+
+// Background bytes go only while no other frame awaits an ack, about the
+// target delay's worth of the path a frame, never ahead of pacing, and
+// count against no quality.
+func TestBackground(t *testing.T) {
+	p := New(Config{})
+	if p.Background(t0, 100) {
+		t.Error("background bytes outside a frame")
+	}
+	if ok, _ := p.StartFrame(t0); !ok {
+		t.Fatal("frame 1 could not start")
+	}
+	if !p.Background(t0, 20000) {
+		t.Error("a frame's first background write was refused")
+	}
+	p.Wrote(t0, 20000)
+	if p.Background(t0, 1) {
+		t.Error("background bytes past minBurst while the rate is unknown")
+	}
+	p.EndFrame(t0, 1)
+	if ok, _ := p.StartFrame(t0); !ok {
+		t.Fatal("frame 2 could not start")
+	}
+	if p.Background(t0, 1) {
+		t.Error("background bytes while frame 1 awaits its ack")
+	}
+	p.EndFrame(t0, 2)
+	p.Ack(t0.Add(ms(20)), 2, 0)
+
+	// With a rate measured, the budget is the target delay's worth.
+	p.rate = 10e6 // bytes a second: 50 KB in 5 ms
+	p.phase, p.cycle = probe, 2
+	now := t0.Add(time.Second)
+	if ok, _ := p.StartFrame(now); !ok {
+		t.Fatal("frame 3 could not start")
+	}
+	p.tokens, p.tokensAt = 50000, now // a full bucket
+	p.Wrote(now, 10000)
+	if !p.Background(now, 39000) {
+		t.Error("background bytes within the budget refused")
+	}
+	if p.Background(now, 41000) {
+		t.Error("background bytes past the budget allowed")
+	}
+	// Pacing holds them back once the tokens are spent, without
+	// counting a wait.
+	p.tokens = -1
+	p.tokensAt = now
+	if p.Background(now, 100) {
+		t.Error("background bytes ahead of pacing")
+	}
+	if p.blocked != 0 {
+		t.Errorf("background bytes counted %v of waiting", p.blocked)
+	}
+	if p.MinQuality() != defaultMinQuality {
+		t.Errorf("MinQuality %d, want %d", p.MinQuality(), defaultMinQuality)
+	}
+}

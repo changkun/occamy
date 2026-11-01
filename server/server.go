@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -77,11 +78,20 @@ type server struct {
 	limits        config.Limits
 	streamsCfg    config.Streams
 
-	mu       sync.Mutex
-	sessions map[string]*sessionInfo // by ID, while they run
-	owned    map[principal]int       // the sessions each user owns, while they run
-	running  int                     // the sessions that count toward limits.sessions
-	streams  tracker                 // the streams being served
+	mu sync.Mutex
+	// ownerGrace is how long a session waits for its owner's stream,
+	// and how long its end is kept for the owner after it ends
+	// (ended.go): session.DefaultOwnerGrace, shorter in tests.
+	ownerGrace time.Duration
+	// forgetting, nil but in tests, runs before the server forgets an
+	// ended session and before it releases a session's count toward
+	// the limits, so that tests can widen the moment after the end.
+	forgetting func()
+	sessions   map[string]*sessionInfo // by ID, while they run
+	ended      endedSessions           // how sessions ended, for their owners' streams (ended.go)
+	owned      map[principal]int       // the sessions each user owns, while they run
+	running    int                     // the sessions that count toward limits.sessions
+	streams    tracker                 // the streams being served
 }
 
 // Run serves a v1 file until SIGINT or SIGTERM, then drains requests in
@@ -152,12 +162,18 @@ func (s *server) publicServer() *http.Server {
 func (s *server) shutdown() { s.stop() }
 
 // listen opens the public listener and, only if debug.address is set,
-// the debug listener; dln is nil otherwise.
+// the debug listener; dln is nil otherwise. Where debug.address_env
+// left the address empty, it says so, so that a misspelt or unexported
+// variable does not pass for a listener that is off on purpose.
 func listen(f *config.File) (ln, dln net.Listener, err error) {
 	if ln, err = net.Listen("tcp", f.Listen); err != nil {
 		return nil, nil, err
 	}
 	if f.Debug.Address == "" {
+		if f.Debug.AddressFrom != "" {
+			// #nosec G706 -- the operator's configuration, not a client's input.
+			log.Printf("debug listener off: %s, which debug.address_env names, is unset or empty", f.Debug.AddressFrom)
+		}
 		return ln, nil, nil
 	}
 	// ParseV1 refuses a debug address that overlaps listen; this also
@@ -232,7 +248,9 @@ func newServer(f *config.File) (*server, error) {
 		streamTTL:     streamTokenLifetime,
 		limits:        limits,
 		streamsCfg:    f.Streams.WithDefaults(),
+		ownerGrace:    session.DefaultOwnerGrace,
 		sessions:      map[string]*sessionInfo{},
+		ended:         newEndedSessions(limits.Sessions),
 		owned:         map[principal]int{},
 		webClient:     f.WebClient,
 	}
@@ -414,10 +432,32 @@ func newDebugServer() *http.Server {
 
 // debugMux returns the debug listener's routes.
 func debugMux() *routeMux {
+	publishVars()
 	mux := newRouteMux()
 	mux.Handle("GET /debug/vars", expvar.Handler())
 	profile(func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, h) })
 	return mux
+}
+
+// publishVars adds occamyd's own variables to expvar's, once:
+// goroutines, the number of goroutines, and fds, the open file
+// descriptors, or -1 where occamyd cannot count them. The soak test
+// watches them for growth (tests/soak_test.go).
+var publishVars = sync.OnceFunc(func() {
+	expvar.Publish("goroutines", expvar.Func(func() any { return runtime.NumGoroutine() }))
+	expvar.Publish("fds", expvar.Func(func() any { return openFiles() }))
+})
+
+// openFiles counts the process's open file descriptors in /proc/self/fd
+// on Linux or /dev/fd on macOS, less the one that reading the directory
+// takes, or returns -1 elsewhere.
+func openFiles() int {
+	for _, dir := range []string{"/proc/self/fd", "/dev/fd"} {
+		if entries, err := os.ReadDir(dir); err == nil {
+			return len(entries) - 1
+		}
+	}
+	return -1
 }
 
 // serveUntil serves public on ln, with TLS if public has a TLSConfig, and

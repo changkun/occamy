@@ -58,6 +58,11 @@ const MinMessageSize = 64 << 10
 // limit in its hello.
 const DefaultMaxTextureSize = 4096
 
+// MaxCachedPixels is the most pixels of a tile stored in a cache slot: a
+// tile with a slot is at most 64 by 64 pixels in area, so that a client
+// bounds its cache at 16 KiB a slot.
+const MaxCachedPixels = 4096
+
 // Errors while decoding a message.
 var (
 	// ErrTruncated reports a message that ends inside its header or inside

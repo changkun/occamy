@@ -4,7 +4,19 @@
 
 package config
 
-var Parse = parse
+var (
+	Parse = parse
+	Flags = flags
+	Usage = usage
+)
+
+// Revalidate validates a File again, as ParseV1 does, and returns the
+// problems found.
+func Revalidate(f *File) Problems {
+	c := &checker{lines: map[string]int{}}
+	f.validate(c)
+	return c.problems
+}
 
 // MaxSecretFile is the most a secret file may hold, for the test.
 const MaxSecretFile = maxSecretFile

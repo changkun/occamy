@@ -14,7 +14,7 @@
 
 export { connect, webSocketTransport } from './connect'
 export type { ConnectOptions, WebSocketConstructor } from './connect'
-export { Session, DEFAULT_NAME, DEFAULT_MAX_PIXELS, helloFor, checkOptions } from './session'
+export { Session, DEFAULT_NAME, DEFAULT_MAX_PIXELS, DEFAULT_CACHE_SLOTS, helloFor, checkOptions } from './session'
 export type { Options, Transport, Framebuffer } from './session'
 export { Display, CanvasSurface, MemorySurface, nextAnimationFrame, coalesce } from './display'
 export type { Surface, DisplayOptions } from './display'

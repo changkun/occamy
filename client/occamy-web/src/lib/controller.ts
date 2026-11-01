@@ -11,6 +11,7 @@
 
 import {
   CloseCode,
+  CloseError,
   ClosedError,
   type ConnectOptions,
   type CursorEvent,
@@ -57,11 +58,12 @@ export interface SessionState {
   viewers: readonly Viewer[]
   /** The owner's open credential prompts, oldest first. */
   prompts: readonly PromptEvent[]
-  /** The remote clipboard's latest text, or null before any. */
+  /** The remote clipboard's latest text, as the remote said or this client sent, or null before any. */
   clipboard: string | null
   /**
    * The clipboard panel's text: the remote clipboard's, until the user
-   * edits it, after which a new remote clipboard leaves it alone.
+   * edits it, after which a new remote clipboard leaves it alone. Text
+   * sent is the remote clipboard's.
    */
   draft: string
   /** How many times the bell rang. */
@@ -74,7 +76,18 @@ export interface SessionState {
   shown: boolean
   /** Why it ended, once ended; null for an open the user cancelled. */
   ending: Ending | null
+  /**
+   * The close code the stream ended with, as its end event gives it,
+   * such as 4002 once occamyd ended the session for everyone, or that
+   * refused it, such as 4001; 0 until then, for a stream the page
+   * closed, and for one that failed to open without a code, as when
+   * occamyd could not be reached.
+   */
+  code: number
 }
+
+/** What became of clipboard text sent: sent, not open to the role or the stream, or refused, with why. */
+export type ClipboardSend = { kind: 'sent' } | { kind: 'not-open' } | { kind: 'failed'; error: Error }
 
 /** What a stream asks the remote for in its hello. */
 export interface HelloSize {
@@ -140,6 +153,7 @@ const initial: SessionState = {
   size: { width: 0, height: 0 },
   shown: false,
   ending: null,
+  code: 0,
 }
 
 /**
@@ -259,7 +273,7 @@ export class SessionController {
       })
     } catch (err) {
       if (!signal.aborted) {
-        this.finish(describeFailure(err, this.context()))
+        this.finish(describeFailure(err, this.context()), err instanceof CloseError ? err.code : 0)
       }
       return
     }
@@ -380,9 +394,7 @@ export class SessionController {
       case 'clipboard': {
         const text = clipboardText(ev.mime, ev.data)
         if (text !== null) {
-          this.lastClipboard = text
-          const { draft, clipboard } = this.state
-          this.update({ clipboard: text, draft: draft === (clipboard ?? '') ? text : draft })
+          this.agree(text)
           if (this.can.input) {
             this.options.writeClipboard?.(text).catch(() => undefined)
           }
@@ -410,7 +422,7 @@ export class SessionController {
         this.update({ viewers: this.state.viewers.filter((v) => v.id !== ev.viewerId) })
         return
       case 'end':
-        this.finish(describeEnd(ev.code, ev.reason, this.context()))
+        this.finish(describeEnd(ev.code, ev.reason, this.context()), ev.code)
         return
     }
   }
@@ -450,14 +462,14 @@ export class SessionController {
     })
   }
 
-  private finish(ending: Ending | null): void {
+  private finish(ending: Ending | null, code = 0): void {
     if (this.state.phase === 'ended') {
       return
     }
     for (const u of this.unbinds.splice(0)) {
       u()
     }
-    this.update({ phase: 'ended', ending, prompts: [] })
+    this.update({ phase: 'ended', ending, prompts: [], code })
   }
 
   /** sendTerminalInput sends what the terminal emulator produced, if the role gives input. */
@@ -468,15 +480,33 @@ export class SessionController {
     }
   }
 
-  /** sendClipboard puts text on the remote's clipboard; false if the role may not. */
-  sendClipboard(text: string): boolean {
+  /**
+   * sendClipboard puts text on the remote's clipboard, and says whether
+   * it did: not for a role that may not, nor for a stream not open, nor
+   * for text the core refuses, such as one too large for a message, which
+   * then stays the user's, to send again.
+   */
+  sendClipboard(text: string): ClipboardSend {
     const s = this.session
     if (s === null || !this.can.clipboard || this.state.phase !== 'open') {
-      return false
+      return { kind: 'not-open' }
     }
+    try {
+      s.clipboard(TEXT_MIME, text)
+    } catch (err) {
+      return { kind: 'failed', error: err instanceof Error ? err : new Error(String(err)) }
+    }
+    this.agree(text)
+    return { kind: 'sent' }
+  }
+
+  // agree takes text for the remote clipboard's, as the remote said or as
+  // this client sent it: the panel's text follows, unless the user has
+  // edited it since the two last agreed.
+  private agree(text: string): void {
     this.lastClipboard = text
-    safely(() => s.clipboard(TEXT_MIME, text))
-    return true
+    const { draft, clipboard } = this.state
+    this.update({ clipboard: text, draft: draft === (clipboard ?? '') ? text : draft })
   }
 
   /**
@@ -487,7 +517,7 @@ export class SessionController {
     if (text === this.lastClipboard) {
       return false
     }
-    return this.sendClipboard(text)
+    return this.sendClipboard(text).kind === 'sent'
   }
 
   /**

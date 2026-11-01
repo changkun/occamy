@@ -246,8 +246,9 @@ Each beta reruns the benchmark, which also covers #18.
 ## Testing Strategy
 
 - Backend conformance against real servers in the
-  [006](006-demo-stack-refresh.md) stack (x11vnc, OpenSSH, xrdp), plus a
-  TigerVNC server, which the stack does not have yet.
+  [006](006-demo-stack-refresh.md) stack (x11vnc, TigerVNC, OpenSSH,
+  xrdp). The guacd bridge's parity matrix runs there for VNC
+  ([guacd-bridge](008-native-architecture/guacd-bridge.md)).
 - Protocol: golden encode/decode tests, and `go test -fuzz` on every
   decoder.
 - Encoder: lossless tiles must round-trip exactly; lossy tiles meet a

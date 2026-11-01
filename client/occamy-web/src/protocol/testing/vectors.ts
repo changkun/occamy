@@ -5,6 +5,7 @@
 // The golden vectors of protocol/testdata, which the Go protocol and
 // encoder packages generate, and helpers for the tests that run them.
 
+import cacheJSON from '../../../../../protocol/testdata/cache.json'
 import codecsJSON from '../../../../../protocol/testdata/codecs.json'
 import framingJSON from '../../../../../protocol/testdata/framing.json'
 import messagesJSON from '../../../../../protocol/testdata/messages.json'
@@ -68,6 +69,17 @@ export interface CodecsFile {
   invalid: { name: string; codec: number; width: number; height: number; payload: string }[]
 }
 
+/**
+ * CacheFile is what occamyd sends a client whose tile cache has 4 slots,
+ * frame by frame, with the SHA-256 of the screen after each frame.
+ */
+export interface CacheFile {
+  description: string
+  welcome: string
+  frames: { name: string; messages: string[]; notes: string[]; width: number; height: number; screen: string }[]
+}
+
+export const cache: CacheFile = cacheJSON
 export const messages = messagesJSON as unknown as MessagesFile
 export const framing = framingJSON as unknown as FramingFile
 export const codecs = codecsJSON as unknown as CodecsFile

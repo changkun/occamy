@@ -21,10 +21,12 @@ import (
 //
 // The client speaks version 2 at most: version 3 adds compressed data
 // and soft-sync, which the client does not take, so a server that speaks
-// it falls back. The only dynamic channel it accepts is Display Control
-// (displayControl), and each channel reassembles its messages up to a
-// bound of its own. The answers the reader owes wait in a bounded queue
-// for the channel writer, as the clipboard's do.
+// it falls back. The dynamic channels it accepts are Display Control
+// (displayControl), with Config.Resize, and the graphics pipeline
+// (gfxChannel, gfx.go), with Config.GFX, one of each at a time. Each
+// channel reassembles its messages up to a bound of its own. The answers
+// the reader owes, and the graphics pipeline's frame acknowledgements,
+// wait in bounded queues for the channel writer, as the clipboard's do.
 
 // DRDYNVC commands, the high nibble of a PDU's first byte ([MS-RDPEDYC]
 // 2.2).
@@ -62,6 +64,11 @@ const (
 type dynChannel struct {
 	id    uint32
 	limit int // the most bytes of a message the channel takes
+	// strict ends the session on a message over limit, which the channel
+	// cannot drop: the graphics pipeline's next would depend on it.
+	strict bool
+	// retain bounds the reassembly buffer kept between messages.
+	retain int
 	// handle applies a whole message. It runs on the reader, without
 	// chio.mu held.
 	handle func(c *Client, out Output, msg []byte) error
@@ -79,13 +86,17 @@ type dynvc struct {
 	version int // the version the client answered, 0 before the caps
 	open    map[uint32]*dynChannel
 	answers [][]byte // PDUs owed to the server, for the channel writer
+	acks    [][]byte // the graphics pipeline's frame acknowledgements
 }
 
 // dynHandler returns the handler and the bound of the dynamic channel
 // name, and whether the client accepts it.
 func (c *Client) dynHandler(name string) (func(*Client, Output, []byte) error, int, bool) {
-	if name == displayControl && c.cfg.Resize {
+	switch {
+	case name == displayControl && c.cfg.Resize:
 		return (*Client).displayMessage, maxDisplayMessage, true
+	case name == gfxChannel && c.cfg.GFX:
+		return (*Client).gfxMessage, maxGFXMessage, true
 	}
 	return nil, 0, false
 }
@@ -172,6 +183,9 @@ func (c *Client) drdynvcMessage(out Output, msg []byte, truncated bool) error {
 		if c.disp.ch == dc {
 			c.disp = display{want: c.disp.want, timer: c.disp.timer, wake: c.disp.wake}
 		}
+		if c.gfx.ch == dc {
+			c.gfxClosed()
+		}
 		// [MS-RDPEDYC] 3.2.5.2: the client answers with a close of its
 		// own, as FreeRDP does.
 		if err := c.dvcAnswer(dvcPDU(dvcClose, 0, cbID, id, nil)); err != nil {
@@ -195,9 +209,11 @@ func (c *Client) countLocked(kind string) {
 }
 
 // dynCreate answers a request to open the channel id named name: the
-// client accepts it if it has a handler and the channel is not open. As
-// Display Control is the only handler, and one is open at a time, at
-// most one dynamic channel is.
+// client accepts it if it has a handler and the channel is not open, and
+// no other of the name is: one Display Control channel and one graphics
+// pipeline at a time, so at most two dynamic channels are open. A
+// graphics pipeline that opens starts anew and advertises its
+// capabilities after the answer.
 func (c *Client) dynCreate(id uint32, cbID int, name string) error {
 	handle, limit, ok := c.dynHandler(name)
 	c.chio.mu.Lock()
@@ -207,12 +223,19 @@ func (c *Client) dynCreate(id uint32, cbID int, name string) error {
 	}
 	_, taken := c.dvc.open[id]
 	ok = ok && !taken
-	if ok && name == displayControl && c.disp.ch != nil {
+	switch {
+	case ok && name == displayControl && c.disp.ch != nil:
 		ok = false // one Display Control channel at a time
+	case ok && name == gfxChannel && c.gfx.ch != nil:
+		ok = false // one graphics pipeline at a time
 	}
 	var status uint32
+	var dc *dynChannel
 	if ok {
-		dc := &dynChannel{id: id, limit: limit, handle: handle}
+		dc = &dynChannel{id: id, limit: limit, handle: handle, retain: retainFrag}
+		if name == gfxChannel {
+			dc.strict, dc.retain = true, retainGFX
+		}
 		c.dvc.open[id] = dc
 		if name == displayControl {
 			c.disp.ch = dc
@@ -224,6 +247,11 @@ func (c *Client) dynCreate(id uint32, cbID int, name string) error {
 	body := binary.LittleEndian.AppendUint32(nil, status)
 	if err := c.dvcAnswer(dvcPDU(dvcCreate, 0, cbID, id, body)); err != nil {
 		return err
+	}
+	if dc != nil && name == gfxChannel {
+		if err := c.gfxOpened(dc); err != nil {
+			return err
+		}
 	}
 	c.due()
 	return nil
@@ -242,11 +270,19 @@ func (c *Client) dynData(out Output, id uint32, total int, data []byte) error {
 	switch {
 	case total >= 0:
 		if dc.partial {
+			if dc.strict {
+				return fmt.Errorf("rdp: dynamic channel %d: a message without its end", dc.id)
+			}
 			c.count(func(s *Stats) { s.Ignored["unfinished dynamic channel messages"]++ })
+		}
+		if dc.strict && total > dc.limit {
+			return fmt.Errorf("rdp: dynamic channel %d: a message of %d bytes, over the bound of %d", dc.id, total, dc.limit)
 		}
 		dc.buf, dc.total, dc.got, dc.partial, dc.drop = dc.buf[:0], total, 0, true, total > dc.limit
 	case !dc.partial:
-		// A message in one Data PDU.
+		// A message in one Data PDU, no longer than the static channel's
+		// bound, which is below every dynamic channel's but Display
+		// Control's.
 		if len(data) > dc.limit {
 			c.count(func(s *Stats) { s.Ignored["dynamic channel messages over their bound"]++ })
 			return nil
@@ -269,7 +305,11 @@ func (c *Client) dynData(out Output, id uint32, total int, data []byte) error {
 		c.count(func(s *Stats) { s.Ignored["dynamic channel messages over their bound"]++ })
 		return nil
 	}
-	return dc.handle(c, out, dc.buf)
+	err := dc.handle(c, out, dc.buf)
+	if cap(dc.buf) > dc.retain {
+		dc.buf = nil
+	}
+	return err
 }
 
 // dvcAnswer queues a PDU for the channel writer. chio.mu must be held.
@@ -282,7 +322,8 @@ func (c *Client) dvcAnswer(p []byte) error {
 }
 
 // dynvcDue appends the DRDYNVC PDUs that are due: the answers the
-// reader owes, then a monitor layout. chio.mu must be held.
+// reader owes, the frame acknowledgements, then a monitor layout.
+// chio.mu must be held.
 func (c *Client) dynvcDue(msgs []dueMessage, now time.Time) []dueMessage {
 	vc := c.dynCh
 	if vc == nil {
@@ -293,6 +334,11 @@ func (c *Client) dynvcDue(msgs []dueMessage, now time.Time) []dueMessage {
 	}
 	clear(c.dvc.answers)
 	c.dvc.answers = c.dvc.answers[:0]
+	for _, p := range c.dvc.acks {
+		msgs = append(msgs, dueMessage{vc, func() []byte { return p }})
+	}
+	clear(c.dvc.acks)
+	c.dvc.acks = c.dvc.acks[:0]
 	if p := c.layoutDue(now); p != nil {
 		msgs = append(msgs, dueMessage{vc, func() []byte { return p }})
 	}

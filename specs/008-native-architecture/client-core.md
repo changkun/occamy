@@ -260,7 +260,9 @@ layer, and any tools.
     `welcome` states, and its frame window is the smaller of its offer
     and the server's.
   - No tile cache: the cached codec is not offered and `cache_slots` is
-    0, until the Codecs task adds one.
+    0, until the Codecs task adds one. (The graphics pipeline's Tile
+    cache task added it on 2026-10-31: the client offers `cached` and
+    1024 slots by default, `Options.CacheSlots` and `NoCache`.)
 - **Deviations from the proposed shape:**
   - Input methods take a context and return the sequence number and an
     error. `View` is added: the export layer needs visibility and
@@ -337,7 +339,7 @@ layer, and any tools.
     `protocol/testdata/codecs.json`: lossless vectors exact, lossy ones
     at `min_psnr`, invalid ones refused. The tile cache (`cached` and
     slots) is not part of it: #109 merged without one, and it is the
-    graphics pipeline's Tile cache task. #109 also turns `stream.Encoder` into
+    graphics pipeline's Tile cache task (built 2026-10-31). #109 also turns `stream.Encoder` into
     per-viewer encoders made by `Config.NewEncoder`, which this
     package's tests that build a `stream.Config` follow: their PNG codec
     is a `stream.Encoder` with `Tile`, `Lossy` and `Cursor`. Until then the

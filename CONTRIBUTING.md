@@ -18,14 +18,18 @@ You need Go 1.26.4 or later, Node.js 22.12+ for the web client, and
 Podman or Docker with a compose provider.
 
 ```
-make build      # build the image (CONTAINER_ENGINE=docker for Docker)
+make build      # build the image (CONTAINER_ENGINE=docker on each for Docker)
 make run        # start occamy and the demo servers on localhost:5636 and :5637
 make e2e        # end-to-end tests against the running stack
 make stop
 ```
 
-`go test ./...` runs the unit tests; the end-to-end tests in `tests/` skip
-unless `make e2e` points them at a running stack. No C toolchain is needed.
+`go test -race ./...` runs the unit tests, as CI does; the end-to-end
+tests in `tests/` skip unless `make e2e` points them at a running stack.
+[docs/try-it.md](./docs/try-it.md) walks through the demo stack and
+every test suite, with the command of each. Building needs no C
+toolchain; on Linux and Windows, `-race` needs a C compiler, such as
+gcc, and `go test ./...` runs the tests without it.
 See the README for a native build. `bench/codecs`, the codec measurement,
 is a module of its own; run its tests from that directory. The guacd
 bridge's conformance corpus, recorded guacd sessions that `go test`

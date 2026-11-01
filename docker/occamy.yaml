@@ -3,11 +3,13 @@
 # license that can be found in the LICENSE file.
 
 # occamy's config in the demo stack (docker-compose.yaml): conf.yaml with
-# guacd reached by service name.
+# guacd reached by service name, in release mode. occamy-debug.yaml is the
+# same in debug mode, which serves /debug/pprof without a token; make run
+# OCCAMY_DEBUG=1 mounts it instead.
 
 ---
 address: 0.0.0.0:5636
-mode: debug # options: debug/release/test
+mode: release # options: debug/release/test
 auth:
   jwt_secret: occamy
   jwt_alg: HS256

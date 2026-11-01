@@ -135,6 +135,18 @@ upgrade. A client that does not answer the WebSocket's close at once
 may find the connection dropped. Until the server has let a client in,
 it reads no message larger than the smallest maximum message size.
 
+A session can end before the server sends `welcome`, as when its
+backend fails at once: a remote that cannot be reached, whose
+certificate the server refuses, or that refuses the credentials. The
+server then sends `close` with the session's end, such as
+`backend-failed`, instead of `welcome`: the `close` the client would
+otherwise have had just after `welcome`, with the same code and
+reason. Which of the two a client gets is a race, so a client takes
+`close` before `welcome` as the end of the session it asked for.
+A session's owner whose stream comes after the session has ended,
+within the owner grace, gets that `close` too, and anyone else a
+refusal ([api.md](api.md#get-apiv1sessionsidstream)).
+
 `hello` sent as a WebSocket message, or a second `welcome`, is a
 protocol error.
 
@@ -673,14 +685,34 @@ message waits behind at most one tile.
 | slot | u16 | The client cache slot to store the decoded tile in, from 1 to the agreed cache slots, or 0 to store nothing. For `cached`, the slot to draw. |
 | payload | bytes | The encoded pixels; empty for `cached`. |
 
-Rules between fields: a `cached` tile has a slot other than 0 and an
+Rules between fields: a tile with a slot other than 0 covers at most
+4096 pixels (`w × h`), a `cached` tile has a slot other than 0 and an
 empty payload, and a `raw` tile's payload is exactly `w × h × 4` bytes.
 Against the session: the rectangle lies within the screen, and a
 `cached` tile names a slot that holds a tile of size `w × h`.
 
-A tile stored in a slot replaces what the slot held. The server mirrors
-each client's slots, so it sends `cached` only for a slot that holds the
-tile's content.
+The tile cache works as follows:
+
+- A tile that names a slot is stored in it as the client reads the
+  message, as the tile's pixels once decoded. It replaces what the slot
+  held.
+- The slot holds the tile from then on, whatever becomes of its frame.
+  A `cached` tile later in the same frame draws it, and so does one
+  after a `resize` that dropped the frame. Slots are kept across
+  resizes, and while the client is hidden.
+- The server mirrors each client's slots, and sends `cached` only for a
+  slot that holds the tile's content. occamyd stores a tile only when it
+  sends it alone and exactly (`raw`, `deflate` or `png`), so a slot
+  holds pixels that the server's screen held. It replaces the slot used
+  least recently. It keys its mirror by a 128-bit hash of the pixels
+  under a secret seed it draws for each client, so that content made to
+  collide cannot choose the slot a tile is drawn from.
+- A client bounds its cache at the agreed `cache_slots` times 16 KiB of
+  pixels: 16 MiB for occamyd's 1024.
+
+The 4096-pixel rule came in with occamyd's tile cache (2026-10-31). No
+server had sent a slot other than 0 before it, so no traffic that was
+valid becomes invalid.
 
 ```hex
 # vector: tile raw
@@ -1023,12 +1055,12 @@ A codec ID is a u8. Codec 0 is not a codec: it appears only in a hidden
 
 | ID | Name | Payload | What occamyd sends it for |
 |----|------|---------|---------------------------|
-| 1 | `raw` | `w × h × 4` bytes, rows from top to bottom without padding, in RGBA order with straight alpha | Tiles of up to 256 colours and cursors, to a client that lists `raw` but not `deflate` |
-| 2 | `deflate` | A raw DEFLATE stream ([RFC 1951](https://www.rfc-editor.org/rfc/rfc1951)) of a [deflate container](#the-deflate-container); browsers inflate it with `DecompressionStream('deflate-raw')` | Tiles of up to 256 colours, and cursors |
+| 1 | `raw` | `w × h × 4` bytes, rows from top to bottom without padding, in RGBA order with straight alpha | Tiles of up to 256 colours, those of 17 or more only while still if the client lists a lossy codec, and cursors, to a client that lists `raw` but not `deflate` |
+| 2 | `deflate` | A raw DEFLATE stream ([RFC 1951](https://www.rfc-editor.org/rfc/rfc1951)) of a [deflate container](#the-deflate-container); browsers inflate it with `DecompressionStream('deflate-raw')` | Tiles of up to 256 colours, those of 17 or more only while still if the client lists a lossy codec, and cursors |
 | 3 | `png` | A PNG file | Nothing |
-| 4 | `jpeg` | A JFIF file, opaque | Tiles of more than 256 colours, to a client that lists `jpeg` but not `webp` |
-| 5 | `webp` | A WebP file, lossy or lossless, with straight alpha | Tiles of more than 256 colours, lossy and opaque; cursors, lossless, to a client that lists neither `deflate` nor `raw` |
-| 6 | `cached` | Empty: the tile is drawn from its cache slot | Tiles only, once the server has a tile cache |
+| 4 | `jpeg` | A JFIF file, opaque | Tiles of more than 256 colours, and of 17 to 256 in motion, to a client that lists `jpeg` but not `webp` |
+| 5 | `webp` | A WebP file, lossy or lossless, with straight alpha | Tiles of more than 256 colours, and of 17 to 256 in motion, lossy and opaque; cursors, lossless, to a client that lists neither `deflate` nor `raw` |
+| 6 | `cached` | Empty: the tile is drawn from its cache slot | Tiles whose content a cache slot of the client holds, to a client that lists `cached` and agrees to `cache_slots` |
 | 7 to 0x7F | | Unassigned | |
 | 0x80 to 0xFF | | Reserved for a video tier after 1.0 | |
 
@@ -1058,10 +1090,21 @@ the best codec of each kind that the client lists, whatever its order. A
 client that lists no lossy codec gets every tile lossless, and one that
 lists no lossless codec gets every tile lossy. A lossy tile message may
 cover several tiles side by side, so that the lossy format's headers are
-paid once. The screen is opaque, and occamyd encodes a lossy tile
-without alpha. A cursor's alpha is straight in every codec, as it is in
-`raw`. JPEG has no alpha, so a client that lists only `jpeg` gets no
-`cursor` and draws its own pointer.
+paid once. A tile in motion, one that changed in each of the last few
+snapshots of the screen occamyd takes, at most ten a second, other than
+as an input's effect, goes at a low quality, and lossy
+if it has 17 to 256 colours; once it has been still for a moment
+(300 ms by default), occamyd sends it again, exact if it has up to 256
+colours and at a higher quality if it has more. Such a frame of
+refinement is an ordinary frame of `tile` messages, so the client needs
+nothing to take it: a client sees the same tile drawn twice, the second
+time sharper. A tile whose content a slot of the client's
+[tile cache](#tile) holds goes as `cached` instead, whatever its codec
+would be, motion or not, and is then exact. The screen is opaque, and
+occamyd encodes a lossy tile without alpha. A cursor's alpha is
+straight in every codec, as it is in `raw`. JPEG has no alpha, so a
+client that lists only `jpeg` gets no `cursor` and draws its own
+pointer.
 
 ### The deflate container
 

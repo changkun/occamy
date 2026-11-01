@@ -85,7 +85,7 @@ describe('connect', () => {
     expect(ws.url.searchParams.get('x')).toBe('1')
     const hello = decodeHelloQuery(ws.url.searchParams.get('hello') ?? '')
     expect(hello).toMatchObject({ width: 1280, height: 720, visible: true, name: 'occamy-web' })
-    expect(hello.capabilities.codecs).toEqual([Codec.Deflate, Codec.Raw])
+    expect(hello.capabilities.codecs).toEqual([Codec.Deflate, Codec.Raw, Codec.Cached])
     expect(hello.capabilities.pixelRatio).toBe(200)
     expect(ws.protocols).toHaveLength(2)
     expect(ws.protocols[0]).toBe('occamy.v1')

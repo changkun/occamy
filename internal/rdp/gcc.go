@@ -32,6 +32,7 @@ const (
 
 	rnsUDCSSupportErrInfoPDU = 0x0001
 	rnsUDCSWant32BPPSession  = 0x0002
+	rnsUDCSSupportDynvcGFX   = 0x0100 // RNS_UD_CS_SUPPORT_DYNVC_GFX_PROTOCOL
 )
 
 // clientData encodes the client data blocks of the Connect Initial.
@@ -60,6 +61,11 @@ func (c *Client) clientData() []byte {
 	high, early := c.cfg.ColorDepth, rnsUDCSSupportErrInfoPDU
 	if high == 32 {
 		high, early = 24, early|rnsUDCSWant32BPPSession
+	}
+	if c.cfg.GFX {
+		// Without it a server sends no graphics pipeline: xrdp and
+		// Windows look for it before they open the channel.
+		early |= rnsUDCSSupportDynvcGFX
 	}
 	w.u16(high)
 	w.u16(rnsUD24BPPSupport | rnsUD16BPPSupport | rnsUD15BPPSupport | rnsUD32BPPSupport)

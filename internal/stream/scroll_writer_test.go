@@ -126,10 +126,13 @@ func TestScrollSkippedFrames(t *testing.T) {
 		r.cl.mu.Lock()
 		r.cl.noAcks = true
 		r.cl.mu.Unlock()
-		// The window takes two frames; the next three scrolls wait.
+		// The window takes two frames; the next three scrolls wait. Each
+		// scroll lands at once: one the writer reads half drawn leaves the
+		// client a screen that is not the page at any row, as
+		// TestScrollTorn shows.
 		top := 0
 		for range 5 {
-			scrollSink(b, screen, 2, top, 7, true)
+			scrollSink(b, screen, 2, top, 7, false)
 			top += 7
 			time.Sleep(50 * time.Millisecond)
 		}
@@ -146,6 +149,70 @@ func TestScrollSkippedFrames(t *testing.T) {
 			t.Errorf("caught up in %d frames, %d copies (%+v), %d tiles; want one frame, one copy by 21 rows, %d tiles", frames, copies, copied, tiles, w/64)
 		}
 	})
+}
+
+// A remote's scroll is a CopyRect, then a paint of the rows it exposes,
+// and the writer may read the screen between the two, or while it
+// paints: a frame then shows the scroll half drawn, and the next the
+// rest. Each copy is checked against the screen the client has, so the
+// client ends with the server's screen, and a copy goes only by the
+// scroll's offset.
+func TestScrollTorn(t *testing.T) {
+	const w, h = 320, 256
+	screen := image.Rect(0, 0, w, h)
+	for _, tc := range []struct {
+		name string
+		// scroll moves page 9 up by dy rows from top, pausing where the
+		// writer reads.
+		scroll func(b *tapped, top, dy int)
+	}{
+		{"between the copy and the paint", func(b *tapped, top, dy int) {
+			b.Sink().CopyRect(image.Rect(0, 0, w, h-dy), image.Pt(0, dy))
+			time.Sleep(time.Millisecond)
+			pageSink(b, image.Rect(0, h-dy, w, h), 9, top+h)
+		}},
+		{"while the exposed rows are painted", func(b *tapped, top, dy int) {
+			b.Sink().CopyRect(image.Rect(0, 0, w, h-dy), image.Pt(0, dy))
+			pageSink(b, image.Rect(w-64, h-dy, w, h), 9, top+h)
+			time.Sleep(time.Millisecond)
+			pageSink(b, image.Rect(0, h-dy, w-64, h), 9, top+h)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				b := &tapped{Backend: backendtest.NewScreen(w, h, 0)}
+				r := newRig(t, b, 50e6, time.Millisecond, visible)
+				time.Sleep(100 * time.Millisecond)
+				pageSink(b, screen, 9, 0)
+				time.Sleep(100 * time.Millisecond)
+				n := r.cl.frameCount()
+				top := 0
+				for _, dy := range []int{7, 7, 16} {
+					tc.scroll(b, top, dy)
+					top += dy
+					time.Sleep(100 * time.Millisecond)
+					matches(t, r.s, r.cl, "after a scroll read half drawn")
+				}
+				r.cl.mu.Lock()
+				defer r.cl.mu.Unlock()
+				copies, torn := 0, false
+				for _, f := range r.cl.frames[n:] {
+					// A frame with the copy but not every tile of the
+					// exposed rows shows the scroll half drawn.
+					torn = torn || len(f.copies) > 0 && f.tiles < w/64
+					for _, c := range f.copies {
+						copies++
+						if dy := int(c.SrcY) - int(c.DstY); c.SrcX != c.DstX || dy != 7 && dy != 16 {
+							t.Errorf("a copy by %d rows (%+v)", dy, c)
+						}
+					}
+				}
+				if copies == 0 || !torn {
+					t.Errorf("%d copies, and no frame showed a scroll half drawn", copies)
+				}
+			})
+		})
+	}
 }
 
 // A client that was hidden while the page scrolled gets the scrolls as
@@ -266,7 +333,9 @@ func TestScrollTwoViewers(t *testing.T) {
 }
 
 // wheeled scrolls its page by 16 rows a wheel notch, as a remote does
-// once the input reaches it.
+// once the input reaches it, in one paint: the frame of a scroll that
+// the writer reads half drawn carries only part of it, as
+// TestScrollTorn shows.
 type wheeled struct {
 	*tapped
 	mu  chan struct{}
@@ -278,9 +347,7 @@ func (b *wheeled) Input(ev backend.InputEvent) error {
 		go func() {
 			b.mu <- struct{}{}
 			dy := 16 * wh.DY
-			r := b.Sink()
-			_ = r
-			scrollSink(b.tapped, image.Rect(0, 0, 320, 256), 6, b.top, dy, true)
+			scrollSink(b.tapped, image.Rect(0, 0, 320, 256), 6, b.top, dy, false)
 			b.top += dy
 			<-b.mu
 		}()

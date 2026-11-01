@@ -109,8 +109,9 @@ type propTee struct {
 	reg   *protocol.Registry
 	lossy bool
 
-	mu  sync.Mutex
-	img *image.RGBA
+	mu    sync.Mutex
+	img   *image.RGBA
+	cache testSlots
 
 	fails                   []string
 	stats                   propStats
@@ -132,7 +133,7 @@ func (c *propTee) WriteMessage(ctx context.Context, p []byte) error {
 }
 
 func (c *propTee) observe(p []byte) {
-	m, err := protocol.Decode(p, c.reg, protocol.Limits{MaxMessageSize: 1 << 30})
+	m, err := protocol.Decode(p, c.reg, testLimits)
 	if err != nil {
 		c.fail("decode: %v", err)
 		return
@@ -146,7 +147,7 @@ func (c *propTee) observe(p []byte) {
 			c.fail("tile %v outside %v", r, c.img.Rect)
 			return
 		}
-		if err := decodeTile(c.img.SubImage(r).(*image.RGBA), m.Codec, m.Payload); err != nil {
+		if err := c.cache.draw(c.img, m); err != nil {
 			c.fail("tile: %v", err)
 		}
 		if m.Codec == protocol.CodecWebP || m.Codec == protocol.CodecJPEG {

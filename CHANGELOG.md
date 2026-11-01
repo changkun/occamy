@@ -9,6 +9,19 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- [docs/try-it.md](docs/try-it.md), a guide to running Occamy v1 for
+  the first time, from a fresh checkout. It covers:
+  - the prerequisites and the build;
+  - the demo stack, with where its configuration and signing key live,
+    and how to run it next to another stack on one host;
+  - a connection of each protocol and what it shows, with a k3s
+    cluster for Kubernetes;
+  - sharing, the clipboard, resizing, reconnecting and the guacd
+    fallback;
+  - every test suite: unit, lint, the web client's, end-to-end,
+    pressure, soak, integration and fuzz;
+  - the debug routes' gating;
+  - tearing it all down.
 - The desktop baseline and the per-scenario targets for protocol v1
   ([docs/benchmarks.md](docs/benchmarks.md)). `bench/vncprobe` measures
   the bench desktop's VNC server on its own.
@@ -140,7 +153,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   those, or Plain in the clear, is refused even if it offers VNC
   Authentication too. Cut text from the server allocates about
   three times the text kept, down from seven. An integration test runs
-  against TigerVNC (`docker/test/tigervnc`) in a container of its own.
+  against TigerVNC (`docker/demo/tigervnc`) in a container of its own.
 - Apple Remote Desktop authentication (security type 30) in the native
   VNC backend, so that it can log in to macOS Screen Sharing as a user
   of the Mac, but only when the backend's `vnc.Config.ARD` allows it:
@@ -194,6 +207,81 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   carries the notices of zeebo/xxh3 and of klauspost/cpuid, which it
   links into amd64 builds, and `scripts/third-party-licenses.sh` lists
   both architectures of every release platform.
+- Refinement in the graphics pipeline. Each viewer's writer keeps a heat
+  per tile, which halves each refine delay, 150 ms at the least, of the
+  writer's time between frames: a tile that changes more often than the
+  refine delay is in
+  motion, and goes at the pacer's lowest quality, and lossy if it has 17
+  to 256 colours; one that changes less often goes at its final quality.
+  An input's effect is never in motion, and one the search finds at the
+  quality it needs is not sent again. A still lossy tile goes at the
+  lowest quality, up to the pacer's, at which each tile's SSIM reaches
+  0.91 (`encoder.StillSSIM`). Once a tile has been still for 300 ms
+  (`stream.Config.RefineDelay`), background frames send it again: exact
+  if it has up to 256 colours, at the SSIM's quality if it has more.
+  Refinement goes only while nothing else is to be sent and no frame
+  awaits an ack, a tile a message within the pacer's 5 ms of bytes, and
+  gives way to an input before each message, and to a change after the
+  first tile it tries. A copy carries the goal of the pixels it moves,
+  and a tile searched while the link held the quality below what the
+  client has is raised once it recovers. On the recorded scenes the plasma takes 13.8 KiB a frame against
+  392.4, the dragged window 5.2 against 30.6 and 17.9 KiB of refinement
+  once still, and the photograph shown once 121.8 against 150.8, under
+  G6's 139 ([docs/benchmarks/refinement.md](docs/benchmarks/refinement.md)).
+  `stream.Config.NoRefine` turns refinement off, and motion with it.
+- A tile cache in the graphics pipeline. The Go client and the web
+  client's protocol core offer the `cached` codec and 1024 cache slots
+  by default (`client.Options.CacheSlots` and `NoCache`, the web core's
+  `cacheSlots`), and keep in each slot the tile the server stores there,
+  16 KiB at most. occamyd offers 1024 slots (`stream.Config.NoCache`
+  turns the cache off), mirrors each client's slots by the xxh3-128 hash
+  of the tile each holds, under a secret seed drawn for each client so
+  that a remote host cannot draw two tiles that hash alike, stores a
+  tile it sends alone and exactly in the slot used least recently once
+  the message is written, and sends a tile whose content a slot holds as
+  a 23-byte `cached` tile of that slot. Neither client starts a
+  graphical session whose only codec in common is `cached`. On the recorded scenes
+  a window switched back and forth over the desktop takes 9.4 KiB a
+  frame against 79.7, and an eighth of the encode time; no scene takes
+  more ([docs/benchmarks/tile-cache.md](docs/benchmarks/tile-cache.md)).
+  The mirror costs 70 KiB a viewer. `protocol/testdata/cache.json`
+  records a session for clients to replay. Protocol v1: a tile that
+  names a slot covers at most 4096 pixels (`protocol.MaxCachedPixels`);
+  no server had named one before.
+- An encode cache and workers in the graphics pipeline. The viewers of a
+  session whose encoders send in the same codecs share the session's
+  encodings, made once by whichever viewer or worker asks first: a
+  tile's, by its version and whether it moves, and a run of lossy
+  tiles', by its tiles' versions, its quality and its lowest quality,
+  refinement's searches among them; 32 MiB a session at most, the oldest
+  going first, with no bound across sessions, and a run's encodings at
+  each quality kept until the budget takes them. Once a writer has a
+  tile to encode itself, it hands the rows after its own to one of the
+  session's workers, which asks for another each time it begins an
+  encoding, up to two, or half the cores below four; a frame whose tiles
+  go cached wakes none, and the workers drop what is left once the frame
+  is sent. A worker's job that panics is logged, and the encoding it was
+  making is made again by the next to ask. A session's searches start
+  where its last ended, whichever encoder made it. On the recorded
+  scenes every scene that encodes reaches its viewers in 38 to 56 % less
+  time, a photograph shown once in 44 ms against 96, and four viewers
+  take 32 to 58 % less CPU. One viewer pays 9 to 21 % more CPU on the
+  scenes that encode, the repeated window switches among them; the drag
+  pays 2 %, and the browser page shown once is the exception, at 6 %
+  less. The scenes whose frames come from the tile cache are unchanged,
+  and a saturated host was not measured
+  ([docs/benchmarks/encode-cache.md](docs/benchmarks/encode-cache.md)).
+  `stream.Config.NoShare` turns both off, `EncodeWorkers` sets the
+  workers, none if negative, and `EncodeCacheBytes` the budget; occamyd
+  sets none of them, so it always runs the cache and two workers, with
+  no switch to turn them off yet: a trade of CPU for latency. Nothing
+  changes on the wire.
+- `encoder.Encoder.Still` gallops: past three steps from where its
+  search starts, it goes two steps, four and so on, and halves the gap
+  it finds, so that a search far from its start, as an encoder's first
+  on a page of text, takes 7 tries rather than 18. `Hint`, `SetHint` and
+  `Tries` expose where its next search starts and what its searches
+  cost.
 - `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
   (static users sign in with a password for an access token), TLS when
   `tls.cert` and `tls.key` are set, expvar and pprof on the debug
@@ -315,14 +403,23 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   remote with the window, answers the remote's credential prompts,
   shares the session through a link as a viewer or read-only, and ends
   it, signing in again over the session when the sign-in has expired;
+  a reload over the owner's session signs in again and joins it, within
+  occamyd's grace, or lists the connections if the user would rather;
+  an End or share that waited for the sign-in is left to occamyd, which
+  ends or shares only its owner's session: one who signs in as another
+  user is told the session has ended or is not theirs. A call to occamyd
+  gives up after 30 s, and End shows that it waits, with a way back to
+  the connections, and takes no second press meanwhile;
   the clipboard goes both ways as the role allows, and reaches the local
   clipboard on its own only for a role that gives input, so a read-only
-  viewer copies it from the clipboard panel; a hidden page tells occamyd
-  so and keeps acknowledging frames; and the end of a session says why
-  it ended, a takeover by the owner's newer stream too. Its build
-  writes the licenses of the packages it bundles to
-  `dist/THIRD_PARTY_LICENSES.md`, which the image ships in
-  `licenses/web/` and the web client archive in `dist/`.
+  viewer copies it from the clipboard panel, which takes text sent for
+  the remote's and keeps only what was typed since, and says when text
+  is too large to send; a hidden page tells occamyd so and keeps
+  acknowledging frames; and the end of a session says why it ended, a
+  takeover by the owner's newer stream too. Its build writes the
+  licenses of the packages it bundles to `dist/THIRD_PARTY_LICENSES.md`,
+  which the image ships in `licenses/web/` and the web client archive in
+  `dist/`.
 - `web_client` in a v1 file: the directory of the built web client,
   which occamyd serves under `/static/` with a Content-Security-Policy
   that keeps the page to its own origin, without directory listings or
@@ -412,6 +509,33 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   streams with the Go client. `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` move a
   second stack aside on a shared host, and `make e2e` follows the
   last two.
+- TigerVNC in the demo stack, beside x11vnc, and the guacd bridge's
+  parity matrix for VNC: `TestVNCParity` runs authentication, resize,
+  clipboard both ways, the cursor, keyboard layouts with AltGr and dead
+  keys, text input, sharing roles and reconnect on both servers,
+  through the native backend and through guacd, and fails on any cell
+  that differs from the matrix in the guacd bridge's spec. The demo
+  desktops report what reaches them, typed lines and clipboard text,
+  over the session's clipboard. The two TigerVNC test images became
+  one, `docker/demo/tigervnc`, which the integration tests build too.
+  x11vnc hangs now and then after an X error as a client connects; the
+  demo x11vnc runs under a watchdog that kills it when it reports an X
+  error or stops accepting connections, and starts it again. The matrix
+  tries a guacd cell up to three times, and a native cell that cannot
+  reach the desktop only while guacd cannot reach it either, and shows
+  the try at which a cell settled. A listed failure must fail with its
+  own error, and a unit test keeps the spec's matrix in step with the
+  suite. The screen row waits, after the frame that acknowledges its
+  input, for the desktop, two opaque colours: through guacd the first
+  such frame can still be black, and a screen of black and pixels not
+  drawn yet no longer passes for the desktop.
+- A soak, `make soak`: sessions through the demo stack's `occamy-v1`
+  for hours, while `TestSoak` samples `occamyd`'s goroutines, live heap
+  and open files from its debug listener and fails on growth.
+  `/debug/vars` publishes `goroutines` and `fds`. A v1 file's
+  `debug.address_env` takes the debug listener's address from an
+  environment variable, and leaves the listener off while it is unset
+  or empty, which `occamyd` logs at start with the variable's name.
 - The native RDP backend's clipboard, the first part of its second
   phase: `internal/rdp` joins static virtual channels and reassembles
   their chunks within a bound per channel, and carries text both ways
@@ -477,6 +601,34 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   not yet verified against Windows, and does not speak RDP's graphics
   pipeline yet
   ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)).
+- The graphics pipeline (GFX) in `internal/rdp`, the first part of the
+  native RDP backend's third phase, behind `Config.GFX`, which the
+  backend does not set yet: the capability exchange over DRDYNVC, ZGFX
+  decompression with its 2.5 MB history, surfaces within a bound on
+  their pixels composed onto the desktop, at most 64 of them mapped,
+  solid fills, copies within and between surfaces (a copy within a
+  surface goes to viewers as a copy where no other surface covers it
+  and the output shows the surface's own pixels, which the surfaces
+  under one deleted, replaced or moved, or under a bitmap update, draw
+  again to keep), uncompressed and planar bitmaps (AYCoCg, colour loss
+  and chroma subsampling included, planar within a bitmap update's
+  bound), and frame acknowledgements, bounded, which the server waits
+  for. Decompression's growth, each copied point, each redraw after a
+  resize, and every cell that the surfaces draw again where a surface
+  left the output or a bitmap update drew under them are charged to
+  the decoding rate. A server that does not open the
+  channel, or closes it, draws with bitmap updates. RemoteFX
+  Progressive, RemoteFX, ClearCodec and the cache come next, and with
+  them GFX by default and a key that turns it off. Against xrdp 0.10.1
+  the channel, the capabilities, a reset to the size the desktop has,
+  ZGFX's stored segments, a surface, planar bitmaps of xrdp's first,
+  black screen, and frame acknowledgements (a frame a key) ran live;
+  that the acknowledgements pace xrdp was not checked against a run
+  without them. Compressed ZGFX, planar's
+  AYCoCg, solid fills, surface-to-surface copies and uncompressed
+  bitmaps, which xrdp did not send, are checked against the
+  specification's examples, the tests' own compressor and encoder, and
+  `rdptest` only, until a Windows host checks them.
 - A native Kubernetes backend, `internal/backend/kubernetes`, in pure
   Go and without client-go: a `kubernetes` connection opens a terminal
   in a pod's container through the API server's `pods/exec` (or
@@ -490,6 +642,33 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Changed
 
+- `occamyd -h` says what occamyd serves now, a v1 file through API v1
+  and a v0 file through the v0 routes, not "a modern guacamole protocol
+  based remote desktop proxy", and lists its flag on a line of its own
+  instead of after "Usage:". `.gitignore` ignores the `occamyd` that
+  `make compile` builds.
+- The demo stack's compose project is named `occamy` in
+  `docker/docker-compose.yaml`, so its containers are `occamy-<service>-1`.
+  It was named after the file's directory, `docker`, which every
+  other checkout and any other compose file in a `docker` directory
+  share. `make bench` and the harness's `-project` default to `occamy`
+  too. `COMPOSE_PROJECT_NAME` still names another project, with Docker
+  Compose and with podman-compose 1.4.0 or later. podman-compose 1.0.6
+  to 1.3.0 ignore it for the file's name, so under them `make stop` and
+  `make clean` act on the project `occamy` whatever it says, which on a
+  shared host may be someone else's stack; 1.0.3 and older read
+  neither and keep `docker`. A stack started before this change runs
+  under the project `docker`. If it is yours, remove it once, with its
+  `docker_tigervnc-ca` volume and the `docker-*` images it built,
+  before `make run` starts the new one, since both publish the same
+  ports: `(cd docker && podman compose -p docker down --remove-orphans
+  --volumes --rmi local)`, or `docker compose` for Docker. Only if it
+  is yours: other checkouts share the project `docker`.
+- The README starts with v1: the demo stack and the web client first,
+  then a native build that serves a v1 file. The run instructions for
+  guacd and a v0 file, and the v0 token's connection parameters, move
+  to a short section on the released v0. The README's test command is
+  `go test -race ./...`, as CI runs it.
 - The plan for v1.0 (owner, 2026-10-31): it waits until the benchmark
   shows native at least 10x better than guacd, and ships no guacd
   fallback for a protocol still short of it; release candidates may
@@ -549,6 +728,56 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   terminal frame carries it in, so that a viewer got it cut there, with
   no regard for characters. Titles are now cut, between characters, at
   what that sequence carries.
+- The demo xrdp image restarts its channel server, which carries the
+  clipboard, when a connection reconnects to the session and the
+  channel server has exited. xrdp 0.10.1's channel server can exit when
+  a connection closes just after attaching to it, and xrdp starts it
+  only with the session. Until now every later connection then waited
+  10 seconds for it and got no clipboard, which once failed `make e2e`'s
+  clipboard check. `make e2e` now kills the channel server in the rdp
+  container and checks that the next connection has the clipboard. Give
+  it the `CONTAINER_ENGINE` that `make run` took, since it reaches the
+  container through that engine's compose.
+- The demo x11vnc no longer dies of an X error (`Xerror: major_opcode:
+  18 … error_code: 3`) when it answers a request for the clipboard from
+  a window that has gone, which ended the sessions on it, as
+  `backend-failed` or `remote-ended`, and refused new ones until its
+  watchdog had started it again. x11vnc 0.9.17 owns the clipboard after
+  a client's cut text and traps errors as it answers, but stops trapping
+  before the X server reports one unless it syncs; the desktop's
+  clipboard probe kills its xclip after 2 s, and an x11vnc that stalled
+  for longer, as clients connected on a loaded host, answered such
+  requests. `start.sh` sets `X11VNC_SENDEVENT_SYNC`, which makes it
+  sync. The error came after a refused resize once, but has nothing to
+  do with it, nor with either VNC backend. `make e2e` makes such a
+  request (`TestX11vncClipboardRequestorGone`) and checks that x11vnc
+  and the session on it live through it; it fails if x11vnc died, and
+  skips, saying so, if only the clipboard went missing, twice, with
+  x11vnc alive. Against x11vnc processes just started, it failed in five
+  of six runs without the variable and passed in five of five with it;
+  it cannot fail every time, as the error's escape is a race. The tests
+  that reach into the stack run compose with
+  `PODMAN_COMPOSE_WARNING_LOGS=false` and read only its standard output,
+  so that podman compose's banner on its standard error no longer comes
+  first in what they read; the demo images log what the tests count to
+  their standard output. The parity row `resize:
+  ignored without ExtendedDesktopSize` is now `resize: the server keeps
+  its size`: x11vnc has ExtendedDesktopSize, and refuses SetDesktopSize
+  as prohibited.
+- After `POST /api/v1/sessions`, the owner's stream gets `close` 4006
+  `backend-failed`, as docs/api.md says, even when the remote failed
+  before the stream came. Before, the session was gone by the time the
+  stream came, and the stream got 4001 "no such session". For the owner
+  grace after a session ends, occamyd keeps its owner and its close, for
+  as many sessions as `limits.sessions` and 1024 at the least, and gives
+  the close to the owner's stream alone; anyone else still gets "no
+  such session". An owner who reconnects after closing a session gets
+  4002 `session-closed`.
+- `DELETE /api/v1/sessions/{id}` answers once occamyd has let the
+  session go, not only once it has ended. Before, a `GET` or a second
+  `DELETE` right after it could still find the session, a share of it
+  could still be made, and its owner, at `limits.sessions_per_user`,
+  could be refused a new session with 429.
 
 ### Security
 
@@ -570,6 +799,31 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the remote applies to the whole machine. The native VNC backend sent
   Power through QEMU's extended key events, and the VNC and guacd
   backends sent the keysyms.
+- The demo stack's debug routes, which have no authentication, are off
+  unless `make run OCCAMY_DEBUG=1` turns them on: `occamy-v1`'s debug
+  listener on the host's loopback interface, port 5638
+  (`OCCAMY_V1_DEBUG_PORT`), and the v0 service's pprof, from
+  `docker/occamy-debug.yaml`. `docker/occamy.yaml`, which served pprof
+  to anyone who could reach the v0 service, is now in release mode, and
+  the v0 service is published on the loopback interface only.
+  `make run` and `make bench` turn the routes off explicitly without
+  `OCCAMY_DEBUG=1`, so a variable left in the shell or in `docker/.env`
+  cannot turn them on. The pressure test and the soak need
+  `OCCAMY_DEBUG=1`.
+- The demo stack publishes `occamy-v1`, whose demo user's password is
+  public, on the host's loopback interface. It was published on every
+  interface. `OCCAMY_BIND` names another address for it, such as
+  `0.0.0.0` for every interface; `make run` and `make bench` pass
+  `127.0.0.1` unless it is set, so `docker/.env` cannot widen it. The
+  v0 service and `occamy-v1`'s debug port stay on the loopback
+  interface whatever `OCCAMY_BIND` says: the v0 login signs a token for
+  any host with the demo's public secret, and guacd would connect
+  wherever such a token points.
+- `make clean` removes only Occamy's own: the demo stack's containers,
+  volume and demo images through `compose down` in its own project,
+  `occamy`, and the untagged images of earlier `make build` runs, which
+  `make build` now labels `de.changkun.occamy.make=build`. It pruned
+  every dangling image of the engine, whoever built it.
 
 ## [0.6.0] - 2026-10-30
 

@@ -323,7 +323,7 @@ type pngCodec struct {
 func (*pngCodec) Codec() protocol.Codec { return protocol.CodecPNG }
 
 // Tile encodes every tile as PNG, none lossy.
-func (*pngCodec) Tile(dst, pix []byte, w, h int) ([]byte, protocol.Codec, bool) {
+func (*pngCodec) Tile(dst, pix []byte, w, h int, _ bool) ([]byte, protocol.Codec, bool) {
 	var b bytes.Buffer
 	img := &image.RGBA{Pix: pix[:4*w*h], Stride: 4 * w, Rect: image.Rect(0, 0, w, h)}
 	if err := png.Encode(&b, img); err != nil {
@@ -334,6 +334,11 @@ func (*pngCodec) Tile(dst, pix []byte, w, h int) ([]byte, protocol.Codec, bool) 
 
 // Lossy is never asked for, since Tile sends no tile lossy.
 func (*pngCodec) Lossy(dst, _ []byte, _, _, _ int) ([]byte, protocol.Codec) { return dst, 0 }
+
+// Still is never asked for either.
+func (*pngCodec) Still(dst, _ []byte, _, _, _, _, _ int) ([]byte, protocol.Codec, int, bool) {
+	return dst, 0, 0, false
+}
 
 // Cursor sends the cursor raw.
 func (*pngCodec) Cursor(dst, pix []byte, w, h int) ([]byte, protocol.Codec, bool) {

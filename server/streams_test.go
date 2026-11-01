@@ -477,7 +477,8 @@ func TestOwnerHelloResizes(t *testing.T) {
 }
 
 // TestDeleteEndsStreams checks that closing a session ends its streams,
-// whatever tokens are still valid, and that none joins it after.
+// whatever tokens are still valid, and that none joins it after: the
+// owner's tokens are told that it was closed, and a share is invalid.
 func TestDeleteEndsStreams(t *testing.T) {
 	ts, _ := sessionServer(t, nil)
 	alice := ts.token(t, "alice", "ops")
@@ -498,7 +499,7 @@ func TestDeleteEndsStreams(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if cl := c.closed(t, map[bool]protocol.CloseCode{true: protocol.CloseUnauthorized, false: protocol.CloseForbidden}[token == sh.Token]); cl.Code == 0 {
+		if cl := c.closed(t, map[bool]protocol.CloseCode{true: protocol.CloseUnauthorized, false: protocol.CloseSessionClosed}[token == sh.Token]); cl.Code == 0 {
 			t.Error("joined a closed session")
 		}
 	}
@@ -1048,7 +1049,7 @@ func TestStreamCodecs(t *testing.T) {
 		tile          protocol.Codec // of the fake's few colours
 	}{
 		{[]protocol.Codec{raw}, []protocol.Codec{raw}, raw},
-		{[]protocol.Codec{png, raw, cached, deflate, webp}, []protocol.Codec{raw, deflate, webp}, deflate},
+		{[]protocol.Codec{png, raw, cached, deflate, webp}, []protocol.Codec{raw, cached, deflate, webp}, deflate},
 		{[]protocol.Codec{webp, jpeg}, []protocol.Codec{webp, jpeg}, webp},
 		{[]protocol.Codec{jpeg}, []protocol.Codec{jpeg}, jpeg},
 	} {

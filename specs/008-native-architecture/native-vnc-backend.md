@@ -43,13 +43,13 @@ session framebuffer. Three choices:
   authentication, `crypto/tls` for VeNCrypt, `compress/zlib` for ZRLE and
   Tight, `image/jpeg` for Tight JPEG, and `crypto/aes` plus `math/big` for
   Apple Remote Desktop authentication.
-- Test servers: x11vnc in the [006](../006-demo-stack-refresh.md)
-  stack and on the bench desktop (`docker/bench/desktop`), which the
-  integration tests use; TigerVNC's Xvnc, in an image on top of the bench
-  desktop (`internal/backend/vnc/testdata/servers`) that phase 2's
-  integration test uses, and with VeNCrypt only
-  (`docker/test/tigervnc`), which phase 3's integration test uses, both
-  still to be added to the stack; QEMU's VNC server; macOS Screen
+- Test servers: x11vnc and TigerVNC's Xvnc in the
+  [006](../006-demo-stack-refresh.md) stack, where the guacd bridge's
+  parity matrix runs ([guacd-bridge](guacd-bridge.md)); x11vnc on the
+  bench desktop (`docker/bench/desktop`), which the integration tests
+  use; the stack's TigerVNC image (`docker/demo/tigervnc`), which the
+  integration tests build, with VeNCrypt only for phase 3's and with
+  the bench scene for phase 2's; QEMU's VNC server; macOS Screen
   Sharing, checked by hand.
 
 ## Proposed scope for beta
@@ -403,8 +403,9 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     It then decodes the recording again and checks that it holds the
     encoding's rectangles, and no JPEG unless asked for. It passed
     against x11vnc 0.9.17 and TigerVNC 1.15's Xvnc (Debian trixie), at
-    1024×768 and at 64×48. `testdata/servers` builds TigerVNC on the
-    bench desktop's image.
+    1024×768 and at 64×48. `testdata/servers` built TigerVNC on the
+    bench desktop's image; it is now the stack's TigerVNC image,
+    `docker/demo/tigervnc`, started with `scene`.
   - The fuzz corpus gained a seed for each subencoding and filter, with
     zlib data in stored blocks so that the seeds do not change with Go's
     compressor, and eight recorded sessions, `recorded-<server>-<encoding>`:
@@ -615,8 +616,10 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
   - QEMU's VNC server, for recorded traffic and the integration test.
   - A per-connection JPEG quality for slow upstream links, which the
     graphics pipeline would have to treat as lossy pixels.
-  - TigerVNC in the [006](../006-demo-stack-refresh.md) stack, so that
-    the end-to-end matrix covers a server other than x11vnc.
+  - ~~TigerVNC in the [006](../006-demo-stack-refresh.md) stack, so that
+    the end-to-end matrix covers a server other than x11vnc.~~ Done with
+    the parity matrix ([guacd-bridge](guacd-bridge.md), Implementation
+    notes: VNC's parity matrix).
   - Phase 3's LastRect ends a Tight server's updates of unknown length
     (`0xFFFF` rectangles); the decoders need nothing for it. Done in
     phase 3.
@@ -764,8 +767,9 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     message, so the extensions' state is fuzzed too. 60 s of it and 45 s
     of `FuzzHandshake` found nothing.
   - Integration: `TestTigerVNC`, behind the `integration` tag, runs
-    against TigerVNC's Xvnc (`docker/test/tigervnc`, Debian trixie's
-    TigerVNC 1.15) offering only X509Vnc and X509Plain. It builds the
+    against TigerVNC's Xvnc (`docker/test/tigervnc`, now the stack's
+    `docker/demo/tigervnc`; Debian trixie's TigerVNC 1.15) on a screen
+    offering only X509Vnc and X509Plain. It builds the
     image and starts the container itself, with podman or
     `OCCAMY_CONTAINER_ENGINE`, as the RDP spike's test does: both are
     named `occamy-vnc-it-until<time>-<pid>` after the time the run ends
@@ -955,9 +959,12 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     owner may resize is session-core's to decide.
   - Send TLS's close_notify on a clean disconnect, without letting a
     server that does not read delay Run's return.
-  - TigerVNC in the demo stack, and QEMU's VNC server, which would
-    exercise QEMU key events end to end; the integration test checks
-    only that TigerVNC enables them.
+  - QEMU's VNC server, which would exercise QEMU key events end to end
+    where the code decides. ~~TigerVNC in the demo stack~~: done; the
+    parity matrix types with and without codes on its German and French
+    layouts. Without its `RawKeyboard` option, which is off by default,
+    TigerVNC maps keysyms to its own layout: a German client's keys,
+    codes included, type the German text on its us screen too.
   - Clipboard amplification: an Extended Clipboard provide of about
     8 KB of zlib decompresses to the 4 MiB kept, which goes to every
     viewer, and nothing limits how often a server sends one. A broken or
@@ -1239,7 +1246,8 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
 - **Phase 2's and 3's integration tests, run once.** Phase 2's
   `TestEncodings` had been compiled but not run since phase 3 merged.
   With images built from master's `docker/bench/desktop` and
-  `testdata/servers` under names of this run's own, on ports the engine
+  `testdata/servers` (since merged into `docker/demo/tigervnc`) under
+  names of this run's own, on ports the engine
   chose, and removed afterwards, on the shared host at a load average
   of 4 to 9:
   - `TestEncodings` passed against TigerVNC 1.15's Xvnc and against
@@ -1254,6 +1262,16 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     the likely cause, unconfirmed.
   - `TestTigerVNC` passed under the race detector in 28 s. It found no
     earlier run's containers or images to remove, and removed its own.
+  - Run again on 2026-10-31, at a load average of 7 to 15: on master
+    (`1ee3a84`) with the old images, and then with the TigerVNC images
+    merged into `docker/demo/tigervnc` (started with `scene`), each
+    `TestEncodings` session from TigerVNC had the same size to the byte
+    (Hextile 3,248,971, ZRLE 1,457,473, Tight 1,487,014 and Tight JPEG
+    972,071 bytes, the last with 52 JPEG and 24 zlib rectangles), and
+    x11vnc's Tight JPEG session 120,644 bytes. `TestEncodings` also
+    passed against x11vnc at 64×48 from the bench desktop with
+    `GEOMETRY`, and `TestTigerVNC` under the race detector in 30 s
+    against the merged image, removing its own image and container.
 - **The clean-up matcher.** `expired` took a run's name after any
   registry and path, so that a run would remove an image pulled as
   `docker.io/someone/occamy-vnc-it-until1-2`. It now takes a bare name,
@@ -1351,3 +1369,155 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     need no scripting.
   - `vnctest` sends Raw only; the encodings stay tested inside the
     package and against TigerVNC.
+
+## Implementation notes: x11vnc's X error when a clipboard requestor is gone
+
+- **What was seen.** On 2026-10-31 a walk through the v1 demo stack,
+  built from master at fb58a6b on a host with a 1-minute load of 14,
+  opened `vnc-native` at 1024×768 and asked for 1280×720. At 16:40:03
+  the backend logged `the server prohibits resizing the screen; it is
+  asked no more`, as x11vnc logged `resize prohibited`. x11vnc then
+  logged `Xerror: major_opcode: 18 minor_opcode: 0 error_code: 3` and
+  `caught X11 error:`. Its watchdog killed it and started it again, and
+  the session ended at 16:40:07 as `backend-failed`, with `read:
+  connection reset by peer`, before the walk's second request, for
+  1024×768. Walked again, the session made both requests; x11vnc
+  logged one refusal, since the backend asks no more after it, and
+  lived.
+- **The resize did not cause it.** Request 18 is ChangeProperty, and
+  error 3 is BadWindow. LibVNCServer refuses SetDesktopSize itself and
+  makes no X request for it. x11vnc 0.9.17 calls ChangeProperty on the
+  root window, on its own windows, and, in `selection_request`
+  (`src/selection.c`), on the window of a client that asks for a
+  selection x11vnc owns; with the demo's options only the last can
+  meet a window that has gone. The same error killed the x11vnc on
+  port 5901 of that stack at 19:12:27, with no resize, as the parity
+  matrix's warm-up moved from port 5900 to 5901 (`warming
+  vnc-none-native: try 1: … backend-failed`).
+- **The cause is x11vnc's.** x11vnc owns PRIMARY and CLIPBOARD after a
+  client's cut text, and keeps them until another X client takes them.
+  It answers a request with ChangeProperty and SendEvent on the
+  requestor's window, and installs an error trap meanwhile. It checks
+  the window, a round trip that collects the error inside the trap,
+  only when 0.2 s have passed since its last check; otherwise it
+  flushes and takes the trap away before the X server's BadWindow
+  arrives, which then reaches its fatal handler. Once a check has found
+  a window gone, it syncs before taking the trap away, for good, as
+  `X11VNC_SENDEVENT_SYNC` makes it do from the start. The demo desktop's
+  clipboard probe (`desktop.sh`) asks for the clipboard every 0.3 s,
+  every 2 s after a quiet minute, with an xclip that it kills after
+  2 s. An x11vnc that stalls for longer while it owns the clipboard,
+  as one did as clients connected on loaded hosts, answers requests
+  from xclips that are gone, back to back, and dies at the first that
+  falls inside the 0.2 s and whose error comes late, unless a check
+  found one first.
+- **Reproduced without Occamy.** In containers of the demo image, a
+  client written in bash with `/dev/tcp` sent cut text to an x11vnc on
+  `:0` with the demo's options, which then owned the clipboard, and
+  x11vnc was stopped (SIGSTOP) and continued while xclips asked for the
+  clipboard. In eight runs of three to eight stops each, x11vnc died in
+  three, every time of BadWindow for the window of an xclip killed while
+  it was stopped: in one, with `-debug_sel`, after answering requestor
+  0x2400001, `Xerror: major_opcode: 18 … error_code: 3`, then BadWindow
+  for SendEvent (request 25) on 0x2400001; in another, after a 1 s stop
+  in which an xclip that waited asked first and a killed one second,
+  ChangeProperty and SendEvent on the killed one's window, 0x2800001.
+  Of the five that lived, those traced or counted had a check of
+  x11vnc's find a gone window before an unchecked answer's error
+  escaped, after which it syncs for good; a process the watchdog starts
+  again begins without that. Whether the error comes before x11vnc
+  stops trapping is a race, so no form of the test kills it every
+  time. The Debian binary reads `X11VNC_SENDEVENT_SYNC`, and with it the
+  error cannot escape the trap: XSync collects it inside.
+- **Neither backend is at fault, and both meet it.** The native backend
+  sends SetDesktopSize only after the server's first
+  ExtendedDesktopSize, which x11vnc sends on connecting; for the
+  parity row's session that asks once, x11vnc's statistics count one
+  SetDesktopSize of 24 bytes, a header and one screen; and after the
+  refusal it sends no more (`desktopsize.go`). guacd sends x11vnc no
+  SetDesktopSize: run on a stack of this branch, the row's native cell
+  made x11vnc log one `Client requested resolution change`, and its
+  guacd cell none. But guacd sends cut text, so its sessions make
+  x11vnc own the clipboard too: the CI run that first saw `caught X11
+  error:` saw it three times, all as guacd connected
+  ([guacd-bridge](guacd-bridge.md), Implementation notes: VNC's parity
+  matrix). A raw RFB client does as well.
+- **What changed.** `docker/demo/vnc/start.sh` sets
+  `X11VNC_SENDEVENT_SYNC=1`. `TestX11vncClipboardRequestorGone`
+  (`tests/x11vnc_test.go`, in `make e2e` through the stack's compose)
+  makes the x11vnc on port 5901 own the clipboard through a session, and
+  stops it for about 0.7 s: an xclip that waits asks for the clipboard,
+  another asks 0.3 s later and is killed 0.3 s after that, and x11vnc
+  continues and answers both, checking the first. Then the session sends
+  text that the probe echoes. The test fails if x11vnc died: the session
+  ended, another process serves the port, or the vnc container's log
+  tells, since the test began, of an X error that x11vnc did not trap or
+  of its watchdog. If x11vnc lived, the same process, but the xclip that
+  waited did not get the text or the echo did not come, which is no sign
+  of the error, the test runs the whole sequence once more, and skips if
+  it misses again, with what it missed and how long each step took; both
+  say `the clipboard went missing with x11vnc alive`, so that CI's logs
+  show how often. The stop stays well under the 2 s that the probe's
+  xclips wait, so that none of theirs dies, is answered first and
+  checked, and makes x11vnc sync for good. After a stop of 1.3 s, with
+  0.6 s for each step, the session got no echo in two of sixteen runs
+  back to back, for reasons not found. The x11vnc that CI tests has
+  served the parity matrix first; if a check of its found a gone window
+  there, after a stall of more than 2 s, the test cannot tell the
+  variable's absence. The text of the test's last step starts with its
+  nonce: x11vnc sends the clipboard to its clients only if its length or
+  its first 32 bytes differ from those it read last (`CHKSZ`,
+  `selection.c`), and with the nonce after them, three of sixteen runs
+  made back to back, less than 10 s apart, got no echo. The parity
+  matrix's barrier, `echo: barrier <ns>`, has all but the nonce's last
+  digit in them. On a Mac, against x11vnc processes just started (by the
+  watchdog, or by restarting the container), the test failed in five of
+  six runs with `origin/master`'s `start.sh`, each time with `Xerror:
+  major_opcode: 18 … error_code: 3` about 13 s after the session
+  connected, as x11vnc first owned the clipboard and before the stop,
+  with the session ending as `remote-ended`; and it passed in five of
+  five with this one. Those runs had a first form of the stop, whose
+  second xclip a `timeout` killed 0.4 s after it started; with this
+  form, which kills it itself, the test passed in sixteen of sixteen
+  runs back to back, and in four more after restarting the container.
+  With the variable missing, against vnc containers just restarted, the
+  form that fails only on x11vnc's death failed in seven of seven runs,
+  each as the session ended when x11vnc died before the stop, and
+  skipped in none; with the variable it passed in three of three such
+  runs and in six more back to back, and with an echo it could not match
+  it tried once more and skipped. It cannot fail every time, for the
+  race above. x11vnc drops cut text until it has made its selection
+  window, which it does only once its latest client has been connected
+  for 45 s, or for 8 s once it has seen a window manager
+  (`guess_dm_gone`, `xevents.c`), so the test sends the text until the
+  clipboard holds it, for up to 90 s. podman compose prints a banner to
+  its standard error, which came first in what the tests that reach
+  into the stack read and made every comparison fail with podman. They
+  now run compose with `PODMAN_COMPOSE_WARNING_LOGS=false` and read
+  only its standard output (`composeCmd.run`, checked by
+  `TestComposeRun`). Compose may print a container's standard error on
+  its own, so the demo images log what the tests count to their
+  standard output: `start.sh` prints x11vnc's lines, its standard error
+  among them, and the watchdog's there. The watchdog stays, for x11vnc's waits
+  on clients that do not read and for any other error. The parity row
+  `resize: ignored without ExtendedDesktopSize` is now `resize: the
+  server keeps its size`, since x11vnc has ExtendedDesktopSize and
+  refuses SetDesktopSize as prohibited.
+- **The session's end is right.** Run ends a session as `remote-ended`
+  when the server closes the connection between messages, which is how
+  RFB ends one, and as `backend-failed` for any other end. x11vnc,
+  killed with the backend's requests unread, reset the connection, and
+  `backend-failed` says that the server failed; a server that dies
+  with nothing unread closes it instead, and its session ends as
+  `remote-ended`, since RFB cannot tell that from a deliberate end. The
+  backend does not connect again, and should not for this: RFB cannot
+  resume a session, so a new connection would authenticate again, with
+  a prompt the owner may have answered, and start a new screen; the
+  server back a second later is the demo's watchdog at work; and
+  connecting again would hide a server that keeps failing behind a
+  session that seems to go on. The owner opens the connection again,
+  as with guacd, whose sessions end too.
+- **Follow-ups.**
+  - With the error gone, the parity matrix's third try of a guacd cell,
+    the watchdog's backoff, and `vnc-native`'s absence from the soak's
+    default could go, once CI runs of the matrix show no X error.

@@ -220,7 +220,7 @@ func encodeCase(t testing.TB, c codecCase) []byte {
 		b, got = New([]protocol.Codec{c.codec}).Lossy(nil, c.pix, c.w, c.h, c.quality)
 	default:
 		var lossy bool
-		b, got, lossy = New([]protocol.Codec{c.codec}).Tile(nil, c.pix, c.w, c.h)
+		b, got, lossy = New([]protocol.Codec{c.codec}).Tile(nil, c.pix, c.w, c.h, false)
 		if lossy {
 			t.Fatalf("%s: the tile goes lossy", c.name)
 		}

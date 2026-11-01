@@ -64,6 +64,8 @@ func TestRoundTrip(t *testing.T) {
 		{"prompt without fields", &protocol.Prompt{ID: math.MaxUint32, Name: "n", Instruction: "i"}},
 		{"prompt with fields", &protocol.Prompt{ID: 1, Fields: []protocol.PromptField{{Label: "a"}, {Label: "b", Secret: true}, {}}}},
 		{"tile largest", &protocol.Tile{FrameID: math.MaxUint32, X: math.MaxUint16, Y: math.MaxUint16, W: 4096, H: 4096,
+			Codec: protocol.CodecJPEG, Payload: big}},
+		{"tile largest in a slot", &protocol.Tile{FrameID: 1, W: 1, H: protocol.MaxCachedPixels,
 			Codec: protocol.CodecJPEG, Slot: 1024, Payload: big}},
 		{"tile webp", &protocol.Tile{FrameID: 1, W: 1, H: 1, Codec: protocol.CodecWebP, Payload: []byte("RIFF")}},
 		{"tile deflate empty payload", &protocol.Tile{FrameID: 1, W: 1, H: 1, Codec: protocol.CodecDeflate}},

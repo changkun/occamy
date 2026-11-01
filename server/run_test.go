@@ -79,6 +79,42 @@ func TestListenRefusesOverlap(t *testing.T) {
 	ln.Close()
 }
 
+// TestListenDebugOff checks that listen says when debug.address_env left
+// the debug listener off, and only then.
+func TestListenDebugOff(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		address, from string
+		says          bool
+	}{
+		{name: "no debug listener configured"},
+		{name: "the variable unset or empty", from: "OCCAMY_DEBUG_ADDRESS", says: true},
+		{name: "the variable set", address: "127.0.0.1:0", from: "OCCAMY_DEBUG_ADDRESS"},
+		{name: "debug.address set", address: "127.0.0.1:0"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := captureLog(t)
+			f := testFile(t)
+			f.Debug.Address, f.Debug.AddressFrom = tt.address, tt.from
+			ln, dln, err := listen(f)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ln.Close()
+			if dln != nil {
+				dln.Close()
+			}
+			const off = "debug listener off: OCCAMY_DEBUG_ADDRESS, which debug.address_env names, is unset or empty"
+			if says := strings.Contains(logs(), off); says != tt.says {
+				t.Errorf("the log %q; says the listener is off: %v, want %v", logs(), says, tt.says)
+			}
+			if strings.Contains(logs(), "debug listener off") && !tt.says {
+				t.Errorf("the log says the listener is off: %q", logs())
+			}
+		})
+	}
+}
+
 // The environment of TestRunChild: the v1 file to serve, and the drain.
 const (
 	childFileEnv  = "OCCAMY_TEST_RUN_FILE"

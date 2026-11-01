@@ -9,15 +9,18 @@ package vnc
 // TestEncodings runs the backend against a real server, asking for one
 // encoding at a time, through a proxy that records what the server
 // sends. Point it at x11vnc as TestBenchDesktop, or at TigerVNC's Xvnc
-// from the image in testdata/servers, which serves the same scene:
+// from the demo stack's image started with scene, which serves the same
+// scene. From the repository's root:
 //
+//	podman build -t occamy-demo-tigervnc -f docker/demo/tigervnc/Dockerfile .
+//	podman run -d --rm --name occamy-vnc-tigervnc -p 127.0.0.1:15900:5900 occamy-demo-tigervnc scene
 //	OCCAMY_VNC_ADDR=127.0.0.1:15900 go test -tags integration -run TestEncodings ./internal/backend/vnc
 //
 // OCCAMY_VNC_ENCODINGS picks the encodings, from hextile, zrle, tight and
 // tight-jpeg; all of them by default. With OCCAMY_VNC_RECORD=<server>,
 // each session is written to the fuzz corpus as
 // recorded-<server>-<encoding>, which needs a screen within the fuzzed
-// decoder's limits: start the server with GEOMETRY=64x48.
+// decoder's limits: start either container with -e GEOMETRY=64x48.
 
 import (
 	"bytes"

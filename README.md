@@ -34,37 +34,55 @@ Known gaps and planned work are tracked as design specs in [specs/](./specs/READ
 
 ## To start using Occamy
 
-### Build
+### Try it
 
-Occamy is deployed as a container image. To build it you need Podman (or Docker)
-and `make`:
+The demo stack runs Occamy v1 with the web client and a demo server of
+each protocol. It needs Podman (or Docker) with a compose provider, and
+`make`:
 
 ```
 git clone https://github.com/changkun/occamy.git
 cd occamy
-make build                          # or: make build CONTAINER_ENGINE=docker
+make build      # the occamy image
+make run        # the demo stack
 ```
 
-The image builds the web client and a static `occamyd` in separate stages, on a
-distroless base (see [docker/Dockerfile](./docker/Dockerfile)).
-Occamy serves sessions through [guacd](https://hub.docker.com/r/guacamole/guacd),
-which it expects at `guacd.address` in [conf.yaml](./conf.yaml). To run both:
+With Docker, give both, and every other `make` command,
+`CONTAINER_ENGINE=docker`, or export it.
+
+Open http://localhost:5637/static/ and sign in as `demo` with the
+password `occamy`. `make stop` stops the stack.
+[docs/try-it.md](./docs/try-it.md) walks through the rest:
+
+- the prerequisites;
+- a connection of each protocol, Kubernetes included, and what you
+  should see;
+- sharing, the clipboard, resizing and reconnecting;
+- the guacd fallback;
+- every test suite;
+- tearing it all down.
+
+### Build
+
+Occamy is deployed as a container image, which `make build` builds. It
+builds the web client and a static `occamyd` in separate stages, on a
+distroless base ([docker/Dockerfile](./docker/Dockerfile)).
+
+A native build needs Go 1.26.4+ and no C toolchain. It works on Linux,
+macOS and Windows. The web client needs Node.js 22.12+:
 
 ```
-podman network create occamy
-podman run -d --name guacd --network occamy docker.io/guacamole/guacd:1.6.0
-podman run -d --network occamy -p 5636:5636 \
-    -v ./docker/occamy.yaml:/occamy/conf.yaml:ro occamy:latest
+make compile                 # CGO_ENABLED=0, produces ./occamyd
+make client                  # the web client, into client/occamy-web/dist
+./occamyd -conf=<your v1 file>
 ```
 
-[docker/occamy.yaml](./docker/occamy.yaml) points occamy at `guacd:4822`. guacd
-opens the connections to the remote desktops, so their hosts must be
-reachable from the guacd container.
-
-`conf.yaml` and `docker/occamy.yaml` are v0 files, for clients of the
-Guacamole protocol. To serve API v1 and the web client, give `occamyd` a
-v1 file with `-conf` ([docs/configuration.md](./docs/configuration.md)),
-as the demo stack's `occamy-v1` service does (see [Demo](#demo)).
+`occamyd` serves API v1, protocol v1 and the web client from a v1
+configuration file ([docs/configuration.md](./docs/configuration.md)),
+such as the demo's [docker/occamy-v1.yaml](./docker/occamy-v1.yaml). Its
+native backends connect to the remote desktops themselves.
+[The Kubernetes step of docs/try-it.md](./docs/try-it.md#kubernetes)
+runs `./occamyd` with a complete v1 file of its own.
 
 ### Releases
 
@@ -89,48 +107,43 @@ gh attestation verify occamyd-<version>-linux-amd64.tar.gz --repo changkun/occam
 gh attestation verify oci://ghcr.io/changkun/occamy:<version> --repo changkun/occamy
 ```
 
-### Build from source
+The releases so far are v0.x.
 
-A native build needs Go 1.26.4+ and no C toolchain. It works on Linux, macOS
-and Windows. `occamyd` needs a guacd at `guacd.address` in
-[conf.yaml](./conf.yaml) (default `localhost:4822`):
+### v0 (released)
+
+The released v0.x servers read a v0 file, such as
+[conf.yaml](./conf.yaml) or [docker/occamy.yaml](./docker/occamy.yaml),
+and serve the v0 routes to clients of the Guacamole protocol. They
+proxy every session to [guacd](https://hub.docker.com/r/guacamole/guacd),
+which they expect at `guacd.address`. guacd opens the connections to
+the remote desktops, so their hosts must be reachable from guacd. To run
+v0 from an image:
 
 ```
-podman run -d -p 4822:4822 docker.io/guacamole/guacd:1.6.0
-make compile                 # CGO_ENABLED=0, produces ./occamyd
-./occamyd -conf=./conf.yaml
+podman network create occamy
+podman run -d --name guacd --network occamy docker.io/guacamole/guacd:1.6.0
+podman run -d --network occamy -p 127.0.0.1:5636:5636 \
+    -v ./docker/occamy.yaml:/occamy/conf.yaml:ro occamy:latest
 ```
 
-### Connection parameters
-
-A token carries `protocol`, `host`, `username` and `password`. guacd takes
-many more parameters per protocol, listed in the
+A v0 token carries `protocol`, `host`, `username` and `password`. guacd
+takes many more parameters per protocol, listed in the
 [Guacamole manual](https://guacamole.apache.org/doc/1.6.0/gug/configuring-guacamole.html#connection-configuration).
-Set them as strings under `guacd.params.<protocol>` in
-[conf.yaml](./conf.yaml). They apply to every connection of that protocol,
-and token values win over them.
+Set them as strings under `guacd.params.<protocol>` in the v0 file.
+They apply to every connection of that protocol, and token values win
+over them. For RDP to a Windows host:
 
-For RDP to a Windows host:
+- `conf.yaml` sets `ignore-cert`, which skips the certificate check for
+  every RDP host. `cert-fingerprints` accepts only the certificates you
+  list.
+- guacd negotiates the security mode, NLA included, unless `security`
+  sets one, such as `nla`. NLA needs the username and password in the
+  token, since the v0 routes pass on no prompt of guacd's.
+- `domain` is for domain accounts.
 
-```yaml
-guacd:
-  params:
-    rdp:
-      ignore-cert: "true" # already in conf.yaml
-      domain: EXAMPLE     # only for domain accounts
-```
-
-- guacd negotiates the security mode when `security` is unset. The
-  negotiation includes NLA, which current Windows requires by default.
-  Set `security: nla` to force it.
-- NLA needs the username and password in the token: the v0 routes pass
-  on no prompt of guacd's for missing credentials.
-- Windows uses a self-signed RDP certificate by default, so conf.yaml sets
-  `ignore-cert`. This skips the certificate check for every RDP host.
-  `cert-fingerprints` accepts only the certificates you list.
-
-RDP is tested against xrdp in CI. We have not tested a Windows host yet
-([#32](https://github.com/changkun/occamy/issues/32)).
+We have not tested v0 against a Windows host
+([#32](https://github.com/changkun/occamy/issues/32)). v1.0 removes the
+v0 routes and guacd.
 
 ### Web client
 
@@ -140,8 +153,12 @@ the TypeScript client of protocol v1 in
 sign in with a password or through OIDC, open a connection from the
 registry, see a graphical session on a canvas scaled to the window and a
 terminal session in xterm.js, share a session as a viewer or read-only,
-and answer the remote's credential prompts. It speaks API v1 only, so it
-needs a v1 file. Building it needs Node.js 22.12+:
+and answer the remote's credential prompts. The sign-in lives in the
+page's memory only, so a reload signs in again, and then returns the
+owner to their session while `occamyd` keeps it for them, a minute, or,
+for a minute after it ends, tells them how it ended. It speaks API v1
+only, so it needs a v1 file. Building it needs Node.js
+22.12+:
 
 ```
 make client     # npm ci && npm run build, output in client/occamy-web/dist
@@ -186,27 +203,42 @@ make run        # occamy plus the demo servers, on localhost:5636 and :5637
 make stop
 ```
 
+[docs/try-it.md](./docs/try-it.md) walks through the demo connection by
+connection, and shows how to run the stack next to another one on the
+same host. The stack publishes `occamy` and `occamy-v1` on the host's
+loopback interface only. `make run OCCAMY_BIND=0.0.0.0` publishes
+`occamy-v1` on every interface, with a demo password anyone can read
+here, so do that only on a network you trust. The v0 service stays on
+the loopback interface: its login signs a token for any host, with a
+secret anyone can read here too.
+
 [docker/docker-compose.yaml](./docker/docker-compose.yaml) builds small
 Debian demo servers from [docker/demo](./docker/demo) for amd64 and arm64.
 Occamy reaches them by compose service name:
 
 | Protocol | Host | Username | Password |
 |----------|------|----------|----------|
-| VNC | `vnc:5900` | | `vncpassword` |
+| VNC (x11vnc) | `vnc:5900` | | `vncpassword` |
+| VNC (TigerVNC) | `tigervnc:5900` | | `vncpassword` |
 | SSH | `ssh:22` | `occamy` | `occamy` |
 | RDP | `rdp:3389` | `occamy` | `occamy` |
 
-Occamy connects to them through upstream guacd 1.6, which also runs in
-the stack. A second `occamyd`, `occamy-v1` on `localhost:5637`, serves
-API v1 and the web client, at http://localhost:5637/static/, from the v1
-file [docker/occamy-v1.yaml](./docker/occamy-v1.yaml), with the user
-`demo` and the password `occamy`: the SSH server as the connection `ssh`,
-through `occamyd`'s own SSH client; the VNC server as `vnc-native`,
-through `occamyd`'s own VNC client, vnc's default, and as `vnc-guacd`,
-through guacd (`backend: guacd`), the fallback that the benchmark
-compares against; and the RDP server as `rdp-native`, through
-`occamyd`'s own RDP client, rdp's default, with `security: tls` since
-xrdp speaks no NLA, and as `rdp-guacd`, through guacd.
+The v0 service on `localhost:5636` connects to them through upstream
+guacd 1.6, which also runs in the stack. A second `occamyd`, `occamy-v1`
+on `localhost:5637`, serves API v1 and the web client, at
+http://localhost:5637/static/, from the v1 file
+[docker/occamy-v1.yaml](./docker/occamy-v1.yaml), with the user `demo`
+and the password `occamy`: the SSH server as the connection `ssh`,
+through `occamyd`'s own SSH client; each VNC server twice, through
+`occamyd`'s own VNC client, vnc's default, and through guacd
+(`backend: guacd`), the fallback that the benchmark compares against,
+for example `vnc-native` and `vnc-guacd` for x11vnc, and
+`tigervnc-native` and `tigervnc-guacd` for TigerVNC; and the RDP server
+as `rdp-native`, through `occamyd`'s own RDP client, rdp's default, with
+`security: tls` since xrdp speaks no NLA, and as `rdp-guacd`, through
+guacd. The other VNC connections reach the servers' other screens, with
+no password, with VeNCrypt, and with German and French keyboard
+layouts, for the parity matrix in [tests/](./tests).
 
 Here is a working video demo:
 
@@ -217,8 +249,15 @@ Here is a working video demo:
 ### Tests
 
 ```
-go test ./...
+go test -race ./...
 ```
+
+On Linux and Windows the race detector needs a C compiler, such as gcc;
+without one, run `go test ./...`.
+[docs/try-it.md](./docs/try-it.md#6-unit-tests-lint-and-the-web-clients-tests)
+lists every suite with its command: the unit tests, lint, the web
+client's tests, the end-to-end, pressure and soak tests, the
+integration tests and the fuzz targets.
 
 [tests/](./tests) holds end-to-end and pressure tests that open real
 sessions to the demo servers. They are skipped unless
@@ -227,7 +266,9 @@ its VNC and RDP connections, native and through guacd, with the Go
 client of protocol v1, and check native RDP's clipboard both ways, a
 resize, a viewer joined by a share and the owner's return to a session,
 unless `OCCAMY_E2E_V1_ENDPOINT` is; `make e2e` sets them to
-`localhost:5636` and `localhost:5637`:
+`localhost:5636` and `localhost:5637`. The VNC parity matrix
+(`TestVNCParity`) runs each feature on x11vnc and TigerVNC through both
+backends, and logs the matrix as a table:
 
 ```
 make build
@@ -236,11 +277,21 @@ make e2e
 make stop
 ```
 
+With Docker, give each of them `CONTAINER_ENGINE=docker`: `make e2e`
+reaches into the stack's `rdp` and `vnc` containers through the engine
+that started them.
+
 The pressure test also needs `OCCAMY_PRESSURE_N`, the number of rounds
-(`make e2e OCCAMY_PRESSURE_N=10`). CI runs it with 10 rounds. After the
-storm it checks that new sessions work and that `occamyd`'s goroutines
-return to their number before it. [docs/debugging.md](./docs/debugging.md)
-covers profiling and measuring `occamyd`.
+(`make e2e OCCAMY_PRESSURE_N=10`), and the stack's debug routes, which
+`make run OCCAMY_DEBUG=1` turns on, on the loopback interface only. CI
+runs it with 10 rounds. After the storm it checks that new sessions
+work and that `occamyd`'s goroutines return to their number before it.
+The soak (`make soak`), against a stack started the same way, runs 8
+sessions at a time through `occamy-v1` for an hour by default, and fails if
+`occamyd`'s goroutines, heap or open files keep growing, which it reads
+from `occamy-v1`'s debug listener on `localhost:5638`.
+[docs/debugging.md](./docs/debugging.md) covers profiling and measuring
+`occamyd`, and the soak's settings.
 
 ## Contributing
 

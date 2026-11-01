@@ -378,7 +378,7 @@ func TestRDPTLS(t *testing.T) {
 	cl.Close()
 
 	for _, id := range []string{"roots", "wrong-pin"} {
-		awaitEnd(t, ts.streamConnection(t, alice, id, client.Options{}), protocol.CloseBackendFailed)
+		ts.failedStream(t, alice, id, protocol.CloseBackendFailed)
 		a := rs.next(t)
 		if a.err == nil || !strings.Contains(a.err.Error(), "TLS") || a.c != nil && (a.c.Authenticates != 0 || a.c.TSRequest != nil) {
 			t.Errorf("%s: the server's Accept returned %v, want the TLS handshake refused before NLA", id, a.err)

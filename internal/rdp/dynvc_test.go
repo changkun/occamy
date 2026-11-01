@@ -694,9 +694,15 @@ func FuzzDynvc(f *testing.F) {
 		rdptest.DVCDataPDU(7, rdptest.DisplayCaps(16, 8192, 8192))))
 	f.Add(seed(append(rdptest.DVCMessage(7, rdptest.DisplayCaps(1, 640, 480), 5),
 		rdptest.DVCCreateRequest(7, rdptest.DisplayControl), rdptest.DVCClosePDU(7))...))
+	var enc rdptest.ZGFX
+	f.Add(seed(append([][]byte{rdptest.DVCCapsPDU(2), rdptest.DVCCreateRequest(9, rdptest.Graphics)},
+		rdptest.DVCMessage(9, enc.Single(slices.Concat(rdptest.CapsConfirm(rdptest.CapVersion8, 0),
+			rdptest.CreateSurface(1, 64, 64, rdptest.PixelXRGB), rdptest.MapSurface(1, image.Point{}),
+			rdptest.StartFrame(1), rdptest.SolidFill(1, red, image.Rect(0, 0, 9, 9)), rdptest.EndFrame(1)), rdptest.SegCompressed), 7)...)...))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		c := testClient(1024, 768)
 		c.cfg.Resize = true
+		c.cfg.GFX = true
 		c.chio.kick = make(chan struct{}, 1)
 		c.dynCh = &vchannel{name: "drdynvc", id: 1005}
 		c.RequestSize(1280, 720)
@@ -707,8 +713,8 @@ func FuzzDynvc(f *testing.F) {
 			if err := c.drdynvcMessage(nil, p, false); err != nil {
 				return
 			}
-			if len(c.dvc.answers) > maxDynvcAnswers || len(c.dvc.open) > 1 {
-				t.Fatalf("%d answers, %d channels", len(c.dvc.answers), len(c.dvc.open))
+			if len(c.dvc.answers) > maxDynvcAnswers || len(c.dvc.acks) > maxGFXAcks || len(c.dvc.open) > 2 {
+				t.Fatalf("%d answers, %d acknowledgements, %d channels", len(c.dvc.answers), len(c.dvc.acks), len(c.dvc.open))
 			}
 			for _, dc := range c.dvc.open {
 				if len(dc.buf) > dc.limit {

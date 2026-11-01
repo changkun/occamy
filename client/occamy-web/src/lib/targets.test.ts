@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { Api } from './api'
-import { RESUME_KEY, saveResume } from './app'
+import { RESUME_KEY, SESSION_KEY, keepSession, saveResume } from './app'
 import { VERIFIER_KEY } from './oidc'
 import { start, streamToken, streamURL } from './targets'
 
@@ -66,6 +66,26 @@ describe('start', () => {
     expect(start({ kind: 'join', sessionId: 's', token: 't' }, api().api, storage())).toEqual({ kind: 'join', sessionId: 's', token: 't' })
   })
 
+  it('returns to the owner’s session kept in the tab after a reload, and forgets it for a share link', () => {
+    const s = storage()
+    const lab = { kind: 'session', sessionId: 'mZ3k', name: 'Lab' } as const
+    keepSession(s, lab)
+    expect(start({ kind: 'none' }, api().api, s)).toEqual({ kind: 'return', target: lab })
+    // It stays kept, for a reload before the user signs in.
+    expect(start({ kind: 'none' }, api().api, s)).toEqual({ kind: 'return', target: lab })
+    expect(start({ kind: 'join', sessionId: 's', token: 't' }, api().api, s)).toEqual({ kind: 'join', sessionId: 's', token: 't' })
+    expect(s.getItem(SESSION_KEY)).toBeNull()
+    expect(start({ kind: 'none' }, api().api, s)).toEqual({ kind: 'signed-out' })
+  })
+
+  it('forgets the owner’s session kept in the tab once an OIDC sign-in fails', () => {
+    const s = storage()
+    keepSession(s, { kind: 'session', sessionId: 'mZ3k', name: 'Lab' })
+    expect(start({ kind: 'oidc-error', error: 'access_denied' }, api().api, s)).toMatchObject({ kind: 'oidc-error' })
+    expect(s.getItem(SESSION_KEY)).toBeNull()
+    expect(start({ kind: 'none' }, api().api, s)).toEqual({ kind: 'signed-out' })
+  })
+
   it('exchanges the one-time code with this tab’s verifier, and spends the verifier', async () => {
     const { api: a, exchanges } = api()
     const s = storage('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')
@@ -91,7 +111,7 @@ describe('start', () => {
 
   it('brings back what waited for the sign-in, with the code', async () => {
     const s = storage('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')
-    const pending = { target: { kind: 'session', sessionId: 'mZ3k', name: 'Build box' }, view: 4, then: { kind: 'end' } } as const
+    const pending = { target: { kind: 'session', sessionId: 'mZ3k', name: 'Build box' }, view: 4, then: { kind: 'end' }, owner: { subject: 'demo', idp: 'oidc' } } as const
     expect(saveResume(s, pending)).toBe(true)
     const got = start({ kind: 'oidc-code', code: 'JX2E7' }, api().api, s)
     expect(got).toMatchObject({ kind: 'oidc', resume: { ...pending, view: null } })
@@ -104,7 +124,7 @@ describe('start', () => {
   it('forgets the verifier, and what waited, of a sign-in that failed or was abandoned', () => {
     for (const fragment of [{ kind: 'none' }, { kind: 'oidc-error', error: 'access_denied' }, { kind: 'join', sessionId: 's', token: 't' }] as const) {
       const s = storage('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk')
-      saveResume(s, { target: { kind: 'connection', id: 'lab', name: 'Lab' }, view: null, then: null })
+      saveResume(s, { target: { kind: 'connection', id: 'lab', name: 'Lab' }, view: null, then: null, owner: null })
       start(fragment, api().api, s)
       expect(s.getItem(VERIFIER_KEY)).toBeNull()
       expect(s.getItem(RESUME_KEY)).toBeNull()
