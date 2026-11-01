@@ -141,7 +141,11 @@ white cells of 24×32 pixels, big enough to survive lossy encoding, that
 hold the frame's number and a check of it. The wallpaper's margin never
 animates, so nothing else draws there. A frame of a server's that drew
 part of a stamp reads as none, and the next one that completes it
-counts.
+counts. So the count is of scene frames that reached the viewer whole at
+the stamp, not of what the server sent: in a 6 s scroll on a loaded host,
+4 to 44% of the v1 frames that touched the stamp showed no whole one, on
+every path. The ones looked at were real screens, torn between two scene
+frames or still partly drawn, rather than misread stamps.
 
 The VNC server is x11vnc on Xvfb. With its defaults, x11vnc alone takes
 27 ms at the median and 125 ms at p95 from a key to the update that
@@ -297,6 +301,23 @@ in v1. A v1 session runs as follows:
   JSON records it as `sign_in_ms`, and the table notes it on the row.
   The v0 series' G7 includes its login, which v0 needs for every
   session.
+- **G7 over RDP does not yet compare, because of a fault it found.**
+  When a native RDP session ends, xrdp's channel server, `xrdp-chansrv`,
+  exits, and nothing starts it again while the X session lasts. Every
+  later connection to that X session, native or through guacd, then
+  stays black for the 10 s that xrdp spends trying to reach it. On one X
+  session of a loaded host, `rdp-guacd` showed the wallpaper in 2627 and
+  3230 ms, `rdp-native-nogfx` in 2149 ms, and `rdp-guacd` then in
+  11152 ms. v0's `occamy` and `guacd` took 3070 and 3302 ms before any
+  native session, and 12345 and 12997 ms after one. So a native row
+  includes the wait from its second sample on, and any other row
+  includes it if a native session ran before it on the stack, which
+  makes those rows depend on the order of the series: with `-runs 3`,
+  v0's second and third runs come after native's first. G7's end is not
+  the cause: no frame arrives during the wait, and the baselines' end,
+  the first frame that drew, stopped at the black screen before it. Why
+  `xrdp-chansrv` exits is not known yet
+  ([the follow-up](../specs/008-native-architecture/benchmark.md#implementation-notes-the-harness-for-the-v1-run)).
 - **Bounds.** A sample that the stack does not answer fails rather than
   holding the run: 30 s to sign in and open the stream and, in G7, for
   the first frame; 10 s for a key's update and for an input to be

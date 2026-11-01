@@ -549,6 +549,42 @@ are out of date until then.
     always did, so that G4 sends what it sent: on RDP that may be more
     than the moved window, and whether to stop is a question for G4's
     measurement, not one this work settled.
+  - The smoke's G7 over RDP took about 10 s on every v1 path and about
+    3 s on v0, with the two native paths 3 ms apart, which looked like a
+    timer rather than load. It is one: xrdp logs `Connecting to chansrv`
+    and, exactly 10 s later, `xrdp_mm_chansrv_connect: error in
+    trans_connect chan`, and the screen stays black until then. The
+    wallpaper marker is not late, since no frame arrives during the
+    wait. `xrdp-chansrv` was gone: sesman logs it finishing as the first
+    native session of an X session ends, 96 ms after xrdp's end of that
+    session, and it does not come back for that X session. All three of
+    its exits on the bench stack happened so. On one fresh X session,
+    two `rdp-guacd` sessions showed the wallpaper in 2627 and 3230 ms and
+    left it running, one `rdp-native-nogfx` session took 2149 ms and it
+    exited, so GFX is not why, and `rdp-guacd` then took 11152 ms. v0
+    was only faster for running first: `occamy` and `guacd` took 3070
+    and 3302 ms before any native session, and 12345 and 12997 ms after
+    one, at a lower load. The first smoke's 11310 ms for `occamy` is
+    not this, since v0 ran first there and xrdp logged no failure until
+    native had run; that was a host load of 93 to 185. Why it exits is
+    not known.
+    Native offers only `cliprdr` and `drdynvc`, and guacd also `rdpsnd`,
+    whose setup is what `xrdp-chansrv`'s log stops short of, which is a
+    lead and no more. The old end of G7 stopped at the black frame,
+    which is why the baselines' 2.2 s never showed this. No change to
+    the harness helps, since a native session ends between any two
+    samples.
+  - The first smoke's low v1 counts in G3, such as 2 stamps of 16 frames
+    over native VNC, were not misread stamps. Tallied over 6 s of the
+    scroll, native VNC and guacd's VNC each read 107 stamps, so that was
+    a short run on a loaded host. Of the frames that touched the stamp,
+    4 to 44% read as no whole stamp, on every path, and those that were
+    looked at showed why: scrolled text that jumps partway down, a
+    screen torn between two scene frames, or a screen still partly
+    drawn. So `frames` counts what reached the viewer whole, and the
+    stamp refuses the rest as it should. Native RDP with GFX is the one
+    real shortfall: 34 frames in those 6 s, against 169 with GFX off,
+    which is what decision 1's rows are there to show.
 
 ## Implementation notes: the v1 series
 
@@ -809,6 +845,15 @@ say what the harness does now.
     RDP are in occamyd; then `docs/benchmarks.md` gets the v1 results
     and a table per scenario of the baseline, the v1 bridge, v1 native,
     the target and whether it is met.
+  - **`xrdp-chansrv` exits when a native RDP session ends**
+    ([the harness's notes](#implementation-notes-the-harness-for-the-v1-run)),
+    which adds 10 s of black screen to every later RDP connection to
+    that X session. Find why and settle it before the full run: until
+    then G7 over RDP measures the wait, and its v0 and guacd rows depend
+    on the order of the series, which `-runs 3` puts after native from
+    the second run on. xrdp's clipboard goes through that
+    server too, so check what a later session loses; that is not
+    measured yet, and neither is the demo's `docker/demo/rdp`.
   - ~~**G5 v1 p95 phase lock.** The probe's keys, every 100 ms, were
     exactly 6 ticks of 60 Hz, so one run's p95 did not cover the spread
     of phases, and could understate it by up to about 7.5 ms, in
