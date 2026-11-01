@@ -16,10 +16,6 @@ name: Windows RDP
 # runner.
 on:
   workflow_dispatch:
-  # While the workflow is tried out on its branch: one that master does
-  # not have cannot be dispatched. This goes before it lands.
-  push:
-    branches: [rdp-windows-runner]
 
 permissions:
   contents: read
