@@ -156,14 +156,14 @@ const (
 // which costs more than what its bytes' expansion is charged: each
 // block of a RemoteFX Progressive stream, which may be a header of 6
 // bytes alone, and each GFX PDU that the client skips, of 8 bytes at
-// the least, or W2S2 PDU, whose stream may be of no blocks; a PDU looks
-// its surface up too. Their message pays what it owes at its end
-// (gfxMessage). Each costs 4 to 5 ns a block and 8 to 23 a PDU on the
-// benchmarks' host, so that a flood of them gets at most 0.8 of a core
-// (BenchmarkSkipped).
+// the least, or W2S2 PDU, whose stream may be of no blocks; a PDU may
+// look its surface up too. Their message pays what it owes at its end
+// (gfxMessage). On the benchmarks' host a block costs 3.5 to 4.5 ns,
+// and a PDU 8 to 30, an empty bitmap the most, so that a flood of them
+// gets at most 0.7 of a core (BenchmarkSkipped).
 const (
 	blockCost = 8
-	pduCost   = 16
+	pduCost   = 24
 )
 
 // surfaceLimit is the most pixels the surfaces may hold in all on a
