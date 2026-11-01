@@ -24,9 +24,9 @@ v1 series run on the same stack when `-series` names them; see
 [The v1 series](#the-v1-series).
 
 On a host shared with another stack, `COMPOSE_PROJECT_NAME`,
-`OCCAMY_PORT`, `OCCAMY_V1_PORT` and `GUACD_PORT` start this one under
-its own project name and ports, and `make bench` points the harness at
-them.
+`OCCAMY_PORT`, `OCCAMY_V1_PORT`, `OCCAMY_V1_GFX_PORT` and `GUACD_PORT`
+start this one under its own project name and ports, and `make bench`
+points the harness at them.
 
 The harness and the stack share the host, so anything else that uses the
 CPU shows up in the numbers. A compile during a run more than doubled
@@ -44,14 +44,14 @@ make bench BENCH_FLAGS="-scenarios T1 -net N1 -series occamy"
 |------|---------|---------|
 | `-scenarios` | `all` | Comma-separated scenario IDs |
 | `-net` | `N0,N1,N2` | Network conditions |
-| `-series` | `occamy,guacd` | `occamy` goes through occamyd; `guacd` connects to guacd directly; `v1-native` and `v1-guacd` speak protocol v1 to occamy-v1, with native backends or through guacd |
+| `-series` | `occamy,guacd` | `occamy` goes through occamyd; `guacd` connects to guacd directly; `v1-native`, `v1-native-nogfx`, `v1-guacd` and `v1-guacd-gfx` speak protocol v1 ([The v1 series](#the-v1-series)) |
 | `-runs` | `1` | How many times to run everything; the table shows medians |
 | `-failfast` | off | Stop at the first measurement with an error, and exit non-zero; CI's runs set it |
 | `-quick` | off | A tenth of the samples and a sixth of the durations, to check the setup |
 | `-ack-hz` | `60` | v1: the screen refresh on whose ticks the harness acknowledges a graphical frame, as a browser does; the gate's numbers use 60, and `0`, which acknowledges at once, is a diagnostic ([The v1 series](#the-v1-series)) |
 | `-engine` | `podman` | Container engine for CPU time, or `none` |
 | `-project` | `occamy` | The stack's compose project, whose containers CPU time is read from |
-| `-addr`, `-v1`, `-guacd` | `localhost:5636`, `localhost:5637`, `localhost:4822` | occamyd for v0, occamy-v1 for v1, and guacd for the direct series |
+| `-addr`, `-v1`, `-v1-gfx`, `-guacd` | `localhost:5636`, `localhost:5637`, `localhost:5640`, `localhost:4822` | occamyd for v0, occamy-v1 for v1, occamy-v1-gfx for `v1-guacd-gfx`, and guacd for the direct series |
 | `-out` | `bench-results.json` | JSON output |
 
 Server CPU needs podman: its container statistics report cumulative CPU
@@ -84,6 +84,13 @@ answers each `sync` once the frame is applied, and sends a `nop` every
 - **Bytes** are the TCP payload through the proxy. In the `occamy` series
   and the v1 series they include the WebSocket frame headers, which the
   `guacd` series does not have.
+- **Frames.** In an animated scene (G3 to G5), frames are the scene's
+  frames that reached the client, in either protocol: each carries a
+  numbered stamp (below), and the harness counts the distinct stamps it
+  was shown, whole. A server may cut a frame of the scene into several
+  of its own, or put several into one, so the JSON keeps its own count
+  apart, as `server_frames`. In any other scenario, frames are the
+  complete frames that drew.
 - **Server CPU** is the CPU time of the occamyd and guacd containers
   during the measured part of a scenario. guacd forks a process per
   connection, and the container's CPU time includes it.
@@ -99,12 +106,12 @@ The scenarios:
 | T2 | SSH | `seq 1 100000`, then a magenta end marker; completion is from Return until the marker is visible | bytes, completion, server CPU |
 | T3 | SSH | `top -d 0.5` for 30 s | bytes per second |
 | G1 | VNC, RDP | A still desktop for 30 s | bytes per second, server CPU |
-| G2 | VNC, RDP | Probe keys, 10 per second, on a still desktop | latency |
+| G2 | VNC, RDP | Probe keys, 10 per second on average, on a still desktop | latency |
 | G3 | VNC, RDP | A page of text scrolling one line every 16 ms, for 10 s | bytes, server CPU, frame rate |
 | G4 | VNC, RDP | A 400×300 textured window dragged at 60 Hz, for 10 s | bytes, server CPU, frame rate |
 | G5 | VNC, RDP | Full-screen motion at 30 fps, with probe keys during it | frame rate, bytes, latency under load |
 | G6 | VNC, RDP | One photographic full-screen image; completion is from the key until the last update | bytes, completion |
-| G7 | all | Connect | time to the first frame |
+| G7 | all | Connect; the first frame is the first that shows known content of the remote: the wallpaper, or the shell's prompt | time to the first frame |
 
 ### The bench desktop
 
@@ -121,7 +128,20 @@ of its own (`bench/internal/probe`). Latency is from writing the key
 until the harness's framebuffer shows that colour at the swatch's
 centre, within a tolerance for lossy encoding and 16-bit colour. Every
 scene starts with a grey swatch, so the first probe key always changes
-it.
+it. The keys are 100 ms apart on average, each up to one period of a
+60 Hz screen either way from its slot, with offsets drawn from the run's
+index, so that every series of a run presses its keys at the same times.
+Keys exactly 100 ms apart would be 6 periods of a 60 Hz screen and 3 of
+the motion scene, and every key of a run would meet both at one phase.
+T1's keys stay 100 ms apart, since a terminal's frames wait for no tick.
+
+Every frame of the scroll, the drag and the motion carries a stamp in
+the left margin, below the swatch (`probe.StampArea`): 24 black and
+white cells of 24×32 pixels, big enough to survive lossy encoding, that
+hold the frame's number and a check of it. The wallpaper's margin never
+animates, so nothing else draws there. A frame of a server's that drew
+part of a stamp reads as none, and the next one that completes it
+counts.
 
 The VNC server is x11vnc on Xvfb. With its defaults, x11vnc alone takes
 27 ms at the median and 125 ms at p95 from a key to the update that
@@ -137,11 +157,11 @@ it. The RDP server is xrdp with xorgxrdp, as configured by Debian.
 
 ## The v1 series
 
-Two series measure protocol v1 with the same scenarios, metrics, network
-conditions and bench desktop as the baseline:
+Four series measure protocol v1 with the same scenarios, metrics,
+network conditions and bench desktop as the baseline:
 
 ```sh
-make bench BENCH_FLAGS="-series v1-native,v1-guacd -runs 3"
+make bench BENCH_FLAGS="-series v1-native,v1-native-nogfx,v1-guacd,v1-guacd-gfx -runs 3"
 ```
 
 **There are no v1 results yet.** v1's full run waits for the rest of
@@ -155,10 +175,21 @@ Numbers taken before then would not be v1's verdict, so this page
 publishes none; the harness and the CI smoke run only keep the v1 path
 working until then.
 
-| Series | Backend | Protocols | Connections in `docker/bench/occamy-v1.yaml` |
-|---|---|---|---|
-| `v1-native` | occamyd's own | SSH, VNC, RDP | `ssh`, `vnc-native`, `rdp-native` |
-| `v1-guacd` | the guacd bridge | VNC, RDP | `vnc-guacd`, `rdp-guacd` |
+| Series | Backend | Protocols | RDP's GFX | Connections |
+|---|---|---|---|---|
+| `v1-native` | occamyd's own | SSH, VNC, RDP | on, as shipped | `ssh`, `vnc-native`, `rdp-native` |
+| `v1-native-nogfx` | occamyd's own | RDP | off | `rdp-native-nogfx` |
+| `v1-guacd` | the guacd bridge | VNC, RDP | off, as shipped | `vnc-guacd`, `rdp-guacd` |
+| `v1-guacd-gfx` | the guacd bridge | RDP | on | `rdp-guacd-gfx` |
+
+The row of what a side ships is the verdict, and the other sits beside
+it, so that rows compare like with like: the table notes which each RDP
+row is, and the JSON gives `gfx` on every RDP row of a v1 series and
+`verdict` on those that count for the targets. `rdp-guacd-gfx` is in
+`docker/bench/occamy-v1-gfx.yaml`, on a service of its own,
+`occamy-v1-gfx`, since guacd's parameters are global to a v1 file and a
+benchmark is no reason for a setting per connection. The others are in
+`docker/bench/occamy-v1.yaml`.
 
 `v1-guacd` runs no terminal scenario, since SSH has no guacd backend
 in v1. A v1 session runs as follows:
@@ -181,18 +212,13 @@ in v1. A v1 session runs as follows:
   from `internal/codec`, WebP from `github.com/gen2brain/vpx/webp` and
   JPEG from `image/jpeg` plugged in, and applies a frame to its
   framebuffer when `Next` delivers it.
-- **Frames.** A frame draws if it changed a rectangle. **A v1 frame is
-  the server's, not the scene's:** occamyd ends a frame whenever its
-  window allows and the screen has changed, and through the native VNC
-  backend it ends several for each frame of the scene, as x11vnc's
-  updates come in: in a check of the harness, several times the scene's
-  rate for the scroll and for the motion, and in another, fewer. Frames
-  a second, the share of the scene, and bytes and CPU per frame
-  therefore do not count the scene's frames in v1, and do not compare
-  with v0, until the scene stamps each frame's number for the harness to
-  count. Until then, the table leaves a v1 scene's frame rate out, with
-  the note "server frames, not comparable until the scene frame stamp
-  lands", and the JSON keeps those frames as `server_frames`.
+- **Frames.** A frame draws if it changed a rectangle. A v1 frame is the
+  server's, not the scene's: occamyd ends a frame whenever its window
+  allows and the screen has changed, and through the native VNC backend
+  it ends several for each frame of the scene, as x11vnc's updates come
+  in. The stamps count the scene's frames instead, in v1 as in v0, so
+  frames a second, the share of the scene, and bytes and CPU per frame
+  compare across protocols.
 - **When a frame counts.** A v1 frame counts from when the client
   core's `Next` delivers it applied, as a v0 frame counts from when the
   harness applied it, before it answers `sync`. Neither is on the
@@ -219,14 +245,8 @@ in v1. A v1 session runs as follows:
     16.7 ms later than at once. That happens in moving scenes, and when
     a change reaches the client in several frames, as the native VNC
     backend's updates do. The ticks keep one phase for the whole
-    process, and the probe's keys, 100 ms apart, are 6 periods of 60 Hz,
-    so every key of a scenario's run meets the ticks at the phase that
-    the run started at: what the cadence adds is one offset per run, and
-    runs differ by it, which `-runs 3` takes the median of. So one
-    run's p95 does not cover the spread of phases, and may understate
-    it by up to about 7.5 ms, in native's favour; jittering the keys is
-    a follow-up, "G5 v1 p95 phase lock", in the
-    [benchmark spec](../specs/008-native-architecture/benchmark.md#implementation-notes-the-v1-series).
+    process, and the probe's jittered keys meet them at every phase, so
+    what the cadence adds is in each run's percentiles.
     Terminals (T1, T2, an SSH G7) do not wait for ticks.
   - *Frame rates* reach at most 60 a second at 60 Hz, as in a browser
     on a 60 Hz screen; at once, they count every frame the server can
@@ -252,23 +272,27 @@ in v1. A v1 session runs as follows:
   client core's decoding goroutines, which run in parallel, or the
   terminal emulator's time; copying decoded tiles into the framebuffer
   is not in it. The v0 series' includes compositing, so the column
-  compares v1's two series, not v1 with v0, and a table with v1 rows
-  says so under it.
-- **Server CPU** is the `occamy-v1` container's, and guacd's for
-  `v1-guacd`. guacd serves nothing of `v1-native`, so its CPU there is
-  left out and given in a note.
+  compares v1's series with each other, not v1 with v0, and a table with
+  v1 rows says so under it.
+- **Server CPU** is that of the `occamy-v1` container or, for
+  `v1-guacd-gfx`, of `occamy-v1-gfx`, and guacd's for the two guacd
+  series. guacd serves nothing of the two native series, so its CPU
+  there is left out and given in a note.
 - **G7** starts at the stream's upgrade and ends at the first frame that
-  shows the remote. For a terminal, that is the first frame after which
-  a cell holds a character or a coloured background: the session core
-  serves a blank terminal before the backend has connected, and the SSH
-  backend resizes that terminal once the shell's channel opens, which
-  reaches the client as a clear screen, and neither shows the remote.
-  The v0 series' SSH G7 ends at guacd's first drawing instead, and
-  guacd makes its terminal before the SSH session. For a desktop, it is
-  the first frame that drew, as in v0, which may be the backend sizing
-  the screen before its first image. Ending G7 on known content in both
-  series, with a baseline measured again, is one of the benchmark
-  spec's follow-ups. The sign-in before the upgrade checks a bcrypt
+  shows known content of the remote, which is what the remote shows
+  anyway, so that G7 changes nothing that T1 to T3 or the scenes
+  measure. For a desktop, that is the wallpaper, at the middle of the
+  screen, where nothing else of the idle scene draws: every scenario
+  leaves the wallpaper showing, and a frame that sizes the screen
+  before the first image does not show it. For a terminal, it is the
+  shell's prompt, which comes after everything the shell prints at
+  login: a line of the emulated terminal that starts with `occamy@` and
+  ends in `$`, and in v0, whose terminal guacd draws in pixels, guacd's
+  solid cursor waiting after the prompt's `$ `. Neither the blank
+  terminal that the session core serves before the backend has
+  connected, nor the clear screen that the SSH backend's resize of it
+  sends, nor the screen that guacd clears, nor the message of the day
+  ends G7. The sign-in before the upgrade checks a bcrypt
   hash and is done once for many sessions, so G7 leaves it out: the
   JSON records it as `sign_in_ms`, and the table notes it on the row.
   The v0 series' G7 includes its login, which v0 needs for every
@@ -278,22 +302,25 @@ in v1. A v1 session runs as follows:
   the first frame; 10 s for a key's update and for an input to be
   queued; 30 s for T2's end marker. CI's bench job stops at 30 minutes,
   and the harness exits non-zero when a chosen series ran no scenario.
-- **RDP through guacd** differs from the baseline in one parameter:
-  occamyd gives guacd `disable-gfx`, because xrdp's colours shifted
-  through RDP's graphics pipeline. The baseline did not set it, and
-  guacd 1.6 then turns the pipeline on, through which xrdp encodes with
-  RemoteFX Progressive
+- **RDP through guacd** (`rdp-guacd`) differs from the baseline in one
+  parameter: occamyd gives guacd `disable-gfx`, because xrdp's colours
+  shifted through RDP's graphics pipeline. The baseline did not set it,
+  and guacd 1.6 then turns the pipeline on, through which xrdp encodes
+  with RemoteFX Progressive
   ([guacd-bridge](../specs/008-native-architecture/guacd-bridge.md)'s
-  conformance notes).
+  conformance notes). `rdp-guacd-gfx` turns it on again, which the
+  shipped file does not.
 - **Native RDP** (`rdp-native`) reaches the same xrdp with the same
   credentials and size. It sets `security: tls`, since xrdp speaks no
   NLA, and checks no certificate, since xrdp signs its own when the
   image is built; occamyd warns of that at start. It asks for GFX by
-  default, so xrdp draws its sessions in RemoteFX Progressive, while
-  guacd gets `disable-gfx` and plain bitmaps: the two RDP paths differ
-  there. It asks for 32 bits per pixel, and the bridge leaves
-  guacd's default colour depth; whether xrdp then keeps a second X
-  session is to be checked before the full run.
+  default, so xrdp draws its sessions in RemoteFX Progressive;
+  `rdp-native-nogfx` sets `disable_gfx`, and gets plain bitmaps.
+- **Colour depth** is 32 bits per pixel on every path to RDP. That is
+  native RDP's default, and what the baseline's guacd used, since it
+  asks for 32 with GFX on. With GFX off guacd asks for 16 unless told
+  otherwise, and xrdp may keep an X session, and a scene program, for
+  each depth, so the bench files set `color-depth`.
 - **Native RDP's decoding rate** holds a session's decoding to about a
   core of the benchmarks' host (an Apple M5 Pro), whatever the server
   sends
@@ -316,13 +343,36 @@ in v1. A v1 session runs as follows:
   viewer. With `disable_gfx`, xrdp sends bitmap updates instead, which
   cost about 1 to 2.4 ms a frame to decode (the review's 1 to 1.6;
   here 1.8 to 2.4 for planar, which xrdp sends at 32 bits per pixel,
-  `BenchmarkGFXPlanar`). The owner is to choose before the v1
-  run: measure `rdp-native` in G5 with GFX, without it, or both; or
-  make the decoder faster first. Until then G5's RDP row is not
-  expected to meet its target with GFX.
+  `BenchmarkGFXPlanar`). So `v1-native` measures G5 with GFX, which is
+  the verdict, and `v1-native-nogfx` without it, and the decoder is not
+  made faster first. The decode cost is Occamy's own, so a miss in the
+  verdict's row is not a justified one: decoder work then comes before
+  v1.0, and the measurement shows where.
 
-CI runs both v1 series quickly under N1, after the v0 smoke run, on the
-same stack.
+CI runs all four v1 series quickly under N1, after the v0 smoke run, on
+the same stack.
+
+### What to measure again
+
+The stamp, the jitter and G7's end change what some scenarios measure,
+so those baselines below are out of date until they run again, and only
+new numbers compare with v1's. The rule: anything that changes what the
+remote shows, or how a scenario measures it, measures that baseline
+again.
+
+| Scenarios | Measured again | Why |
+|---|---|---|
+| G2 | VNC and RDP, all networks | The probe's keys are jittered |
+| G3, G4 | VNC and RDP, all networks | The scene stamps its frames, and frames are counted by stamp |
+| G5 | VNC and RDP, all networks | The stamp and the jitter |
+| G7 | SSH, VNC and RDP, all networks | It ends on known content |
+| G1, G6 | No | The idle scene and the photo change no pixel, and the wallpaper's code moved without changing one |
+| T1, T2, T3 | No | The shell shows what it showed: G7 ends on the prompt that was already there, so the stack needs no banner, and T1's keys are not jittered |
+
+The colour depth changes no baseline, since the baseline's guacd already
+drew RDP at 32 bits per pixel. It changes `v1-guacd`, which has no
+published numbers. The [targets](#targets) that come from a baseline in
+this list move with its new numbers.
 
 ## Terminal baseline
 
