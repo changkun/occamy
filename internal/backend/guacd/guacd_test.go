@@ -716,9 +716,9 @@ func TestInputHeld(t *testing.T) {
 			backend.Pointer{X: 3, Y: 4, Buttons: backend.ButtonLeft},
 			backend.Key{Down: true, Keysym: 'a'},
 		)
-		// The hold has no limit before a frame: the owner may take any
-		// time to answer a prompt.
-		time.Sleep(time.Hour)
+		// The hold has no limit of its own before a frame: the owner may
+		// take any time to answer a prompt (TestFirstFrameAfterPrompt).
+		time.Sleep(time.Minute)
 		h.expect("key", "97", "1")
 
 		// guacd's first frame is blank, and comes before the server's.
@@ -773,6 +773,164 @@ func TestInputHeldLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 		h.expect("size", "640", "480")
+		h.end()
+	})
+}
+
+// firstFrameLimit is how long guacd has to draw a first frame.
+const firstFrameLimit = 90 * time.Second
+
+// sizedFrame ends a frame that gives the screen a size, the first that
+// viewers can see.
+func (h *harness) sizedFrame(ts int) {
+	h.t.Helper()
+	h.send("size", "0", "4", "4")
+	h.frame(ts)
+}
+
+// running fails the test if Run has returned.
+func (h *harness) running() {
+	h.t.Helper()
+	synctest.Wait()
+	select {
+	case err := <-h.done:
+		h.t.Fatalf("Run returned %v, want it still running", err)
+	default:
+	}
+}
+
+// TestNoFirstFrame plays a guacd that accepts a connection and draws
+// nothing, whose child process has hung: Run fails at the limit, and
+// says so in the log. Leaving a goroutine behind fails the bubble.
+func TestNoFirstFrame(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sink := &backendtest.Sink{}
+		from := time.Now()
+		h := start(t, sink)
+
+		// Nothing but a frame that viewers can see counts: neither a
+		// keep-alive, nor a notice, nor a sync with no size, which is
+		// what RDP's first is, nor input.
+		time.Sleep(firstFrameLimit - time.Second)
+		h.send("nop")
+		h.send("name", "desktop")
+		h.frame(1)
+		if err := h.b.Input(backend.Key{Down: true, Keysym: 'a'}); err != nil {
+			t.Fatal(err)
+		}
+		h.expect("key", "97", "1")
+		h.running()
+
+		err := h.wait()
+		if !errors.Is(err, bridge.ErrNoFirstFrame) {
+			t.Fatalf("Run = %v, want %v", err, bridge.ErrNoFirstFrame)
+		}
+		if d := time.Since(from); d != firstFrameLimit {
+			t.Errorf("Run returned after %v, want %v", d, firstFrameLimit)
+		}
+		var f backend.Failure
+		if !errors.As(err, &f) || len(f) > 123 {
+			t.Errorf("Run = %v, want a backend.Failure that fits a close reason", err)
+		}
+		if got := sink.Size(); got != (image.Point{}) {
+			t.Errorf("size = %v, want none", got)
+		}
+		if err := h.b.Input(backend.Key{Keysym: 'a'}); !errors.Is(err, bridge.ErrClosed) {
+			t.Errorf("Input after Run = %v, want %v", err, bridge.ErrClosed)
+		}
+		logs := h.logs.String()
+		for _, want := range []string{"level=ERROR", "protocol=vnc", "connection=$conn", "limit=1m30s", "may still be running", "restarting guacd"} {
+			if !strings.Contains(logs, want) {
+				t.Errorf("log has no %q:\n%s", want, logs)
+			}
+		}
+	})
+}
+
+// TestFirstFrameInTime plays a slow but healthy guacd, which draws just
+// inside the limit: the session goes on, and the limit is over.
+func TestFirstFrameInTime(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sink := &backendtest.Sink{}
+		h := start(t, sink)
+		time.Sleep(firstFrameLimit - time.Nanosecond)
+		h.sizedFrame(1)
+		if got := sink.Size(); got != image.Pt(4, 4) {
+			t.Fatalf("size = %v, want 4x4", got)
+		}
+		time.Sleep(10 * firstFrameLimit)
+		h.running()
+		h.frame(2)
+		h.end()
+		if logs := h.logs.String(); strings.Contains(logs, "first frame") {
+			t.Errorf("the limit was logged:\n%s", logs)
+		}
+	})
+}
+
+// TestFirstFrameAfterPrompt checks that the owner's time to answer a
+// prompt does not count, however long it takes, and that guacd has the
+// limit in full after the answer.
+func TestFirstFrameAfterPrompt(t *testing.T) {
+	answer := func(p backend.Prompt) (backend.PromptReply, error) {
+		time.Sleep(10 * firstFrameLimit)
+		return backend.PromptReply{Answers: []string{"s3cret"}}, nil
+	}
+	prompt := func(t *testing.T) (h *harness, answered time.Time) {
+		t.Helper()
+		h = start(t, &backendtest.Sink{Answer: answer})
+		// Held input waits as long as the owner does: the next that guacd
+		// reads is the answer, however late.
+		if err := h.b.Input(backend.Resize{Width: 800, Height: 600}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(firstFrameLimit - time.Second)
+		h.send("required", "password")
+		time.Sleep(10 * firstFrameLimit)
+		answered = time.Now()
+		h.expect("argv", "1", "text/plain", "password")
+		h.expect("blob", "1", base64.StdEncoding.EncodeToString([]byte("s3cret")))
+		h.expect("end", "1")
+		return h, answered
+	}
+	t.Run("drawn in time", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			h, _ := prompt(t)
+			time.Sleep(firstFrameLimit - time.Nanosecond)
+			h.sizedFrame(1)
+			h.end()
+		})
+	})
+	t.Run("never drawn", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			h, answered := prompt(t)
+			time.Sleep(firstFrameLimit - time.Second)
+			h.running()
+			if err := h.wait(); !errors.Is(err, bridge.ErrNoFirstFrame) {
+				t.Fatalf("Run = %v, want %v", err, bridge.ErrNoFirstFrame)
+			}
+			if d := time.Since(answered); d != firstFrameLimit {
+				t.Errorf("Run returned %v after the answer, want %v", d, firstFrameLimit)
+			}
+		})
+	})
+}
+
+// TestFirstFrameLater checks that a prompt after the first frame, which
+// has ended the limit, does not start it again.
+func TestFirstFrameLater(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		sink := &backendtest.Sink{Answer: func(p backend.Prompt) (backend.PromptReply, error) {
+			return backend.PromptReply{Answers: []string{"s3cret"}}, nil
+		}}
+		h := start(t, sink)
+		h.sizedFrame(1)
+		h.send("required", "password")
+		h.expect("argv", "1", "text/plain", "password")
+		h.expect("blob", "1", base64.StdEncoding.EncodeToString([]byte("s3cret")))
+		h.expect("end", "1")
+		time.Sleep(10 * firstFrameLimit)
+		h.running()
 		h.end()
 	})
 }
