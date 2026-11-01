@@ -36,8 +36,8 @@ import (
 // The owner's text can wait for an answer that never comes. On the
 // server only the process that holds the clipboard, xrdp's xrdp-chansrv,
 // speaks on the channel, so without it Monitor Ready never comes and a
-// Format List goes unanswered. Text therefore waits for at most
-// Config.ClipboardWait, and is then dropped and the Output told.
+// Format List goes unanswered. The Output is therefore told once text
+// has waited for Config.ClipboardWait, and the text goes on waiting.
 
 // MaxClipboard bounds clipboard text, in bytes of UTF-8, in either
 // direction: the largest message protocol v1 carries by default, as in
