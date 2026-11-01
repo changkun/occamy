@@ -27,6 +27,7 @@ updates:
       - /docker/demo/vnc
       - /docker/demo/ssh
       - /docker/demo/rdp
+      - /docker/demo/desktop
     schedule:
       interval: weekly
     groups:

@@ -222,13 +222,18 @@ Occamy reaches them by compose service name:
 | VNC (TigerVNC) | `tigervnc:5900` | | `vncpassword` |
 | SSH | `ssh:22` | `occamy` | `occamy` |
 | RDP | `rdp:3389` | `occamy` | `occamy` |
+| VNC (desktop) | `desktop:5900` | | `vncpassword` |
+| RDP (desktop) | `desktop:3389` | `occamy` | `occamy` |
 
 The v0 service on `localhost:5636` connects to them through upstream
 guacd 1.6, which also runs in the stack. A second `occamyd`, `occamy-v1`
 on `localhost:5637`, serves API v1 and the web client, at
 http://localhost:5637/static/, from the v1 file
 [docker/occamy-v1.yaml](./docker/occamy-v1.yaml), with the user `demo`
-and the password `occamy`: the SSH server as the connection `ssh`,
+and the password `occamy`. It lists a real desktop first, XFCE with
+Firefox, through `occamyd`'s own clients only, over VNC as
+`desktop-vnc` and over RDP as `desktop-rdp`. Then come
+the SSH server as the connection `ssh`,
 through `occamyd`'s own SSH client; each VNC server twice, through
 `occamyd`'s own VNC client, vnc's default, and through guacd
 (`backend: guacd`), the fallback that the benchmark compares against,
