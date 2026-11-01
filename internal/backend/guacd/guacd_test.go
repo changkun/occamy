@@ -879,6 +879,11 @@ func TestFirstFrameAfterPrompt(t *testing.T) {
 	prompt := func(t *testing.T) (h *harness, answered time.Time) {
 		t.Helper()
 		h = start(t, &backendtest.Sink{Answer: answer})
+		// Held input waits as long as the owner does: the next that guacd
+		// reads is the answer, however late.
+		if err := h.b.Input(backend.Resize{Width: 800, Height: 600}); err != nil {
+			t.Fatal(err)
+		}
 		time.Sleep(firstFrameLimit - time.Second)
 		h.send("required", "password")
 		time.Sleep(10 * firstFrameLimit)
