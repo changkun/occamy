@@ -50,9 +50,27 @@ the project as this guide says. Releases 1.0.6 to 1.3.0 ignore
 file: under them, `make stop` and `make clean` act on the project
 `occamy` whatever you set, and on a shared host that may be someone
 else's stack. Releases 1.0.3 and older ignore both and name the project
-`docker`, after the directory. On macOS and Windows, the engine runs in
-a virtual machine, which needs a few GiB of memory for the stack's
-seven containers.
+`docker`, after the directory.
+
+On macOS and Windows, the engine runs in a virtual machine. The stack's
+seven containers fit in a few GiB of memory, but give the machine 8 GiB
+if anything else runs in it: a machine of 3.7 GiB, filled by another
+project's builds, stopped answering, with `podman ps` hanging for
+minutes and then `ssh: handshake failed: EOF`. `podman machine list`
+shows its memory. Raising it restarts the machine, which ends every
+container in it, so on a shared host ask first:
+
+```
+podman machine stop
+podman machine set --memory 8192
+podman machine start
+```
+
+`podman machine stop` can return while the machine still shuts down;
+if `podman machine set` waits, wait for it. The machine's disk fills
+with images, and a build and the stack need several GiB free. `podman
+system df` shows what images and volumes take, and [Tear
+down](#8-tear-down) says what removes them.
 
 Check what you have:
 
@@ -516,6 +534,12 @@ The native ones say `through vnc` or `through rdp`, and the others say
 `occamy-v1`. A connection with `tls` cannot do so, since guacd does not
 check certificates as `tls` asks.
 
+Rarely, a connection through guacd stays at "Connecting…", because
+guacd's process for it hangs before the first frame. That happened once
+in 128 connections on a very busy host, and why is not known. Click
+**Cancel** and open it again. The hung process stays in the `guacd`
+container until that restarts.
+
 ## 6. Unit tests, lint and the web client's tests
 
 ```
@@ -760,6 +784,15 @@ With the variables of [Next to another stack](#next-to-another-stack),
 keep them exported for `make stop` and `make clean`, and name your
 image instead: `podman rmi occamy-try:latest "occamy-try:$(git describe
 --always --tags)"`.
+
+To leave other stacks' images alone on a shared host, skip `make clean`
+and remove yours by name once `make stop` has run:
+
+```
+podman rmi occamy-try:latest "occamy-try:$(git describe --always --tags)"
+podman rmi occamy-try-vnc occamy-try-tigervnc occamy-try-ssh occamy-try-rdp
+podman volume rm occamy-try_tigervnc-ca
+```
 
 If you followed the Kubernetes step, stop `occamyd` with Ctrl-C, then
 remove the cluster and its files:
