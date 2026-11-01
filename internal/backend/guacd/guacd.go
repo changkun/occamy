@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"maps"
 	"net"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -59,6 +60,18 @@ const (
 	// remote's first update changes nothing, or for a user who joins a
 	// connection that is idle.
 	holdLimit = 2 * time.Second
+
+	// firstFrameLimit is how long guacd has after ready, or after the
+	// answer to its last prompt, to draw a frame that viewers can see
+	// (session.flush). Nothing else bounds that stretch but the session's
+	// idle timer, and guacd's VNC client never gives up on a remote that
+	// stops answering: libvncclient's DEFAULT_READ_TIMEOUT is 0. A real
+	// connect must not meet this limit, and where guacd fails by itself
+	// its error says more, so the limit lies above the 60 s of
+	// libvncclient's DEFAULT_CONNECT_TIMEOUT, at three times the 30 s the
+	// benchmark allows a first frame, for a loaded host or a slow RDP
+	// login.
+	firstFrameLimit = 90 * time.Second
 
 	// maxClipboard bounds the clipboard content kept from guacd, the
 	// largest message protocol v1 carries by default.
@@ -121,6 +134,10 @@ var (
 	// ErrUnsupportedInput is returned by Input for input a graphical
 	// backend does not take, such as backend.TermInput.
 	ErrUnsupportedInput = errors.New("backend/guacd: unsupported input")
+	// ErrNoFirstFrame is returned by Run when guacd draws nothing that
+	// viewers can see for firstFrameLimit. Its text is what they are told.
+	ErrNoFirstFrame = backend.Failure("guacd drew nothing within " + firstFrameLimit.String() +
+		": it or the remote may have hung. Try opening it again.")
 )
 
 var nop = []byte("3.nop;")
@@ -208,7 +225,8 @@ func (b *Backend) Unsupported() map[string]int {
 }
 
 // Run implements backend.Backend. It returns a *guacd.Error when guacd
-// ends the session with an error instruction.
+// ends the session with an error instruction, and ErrNoFirstFrame when
+// guacd draws no first frame.
 func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 	if !b.started.CompareAndSwap(false, true) {
 		return errors.New("backend/guacd: Run called more than once")
@@ -567,6 +585,7 @@ func (s *session) writeLoop(quit <-chan struct{}) {
 }
 
 func (s *session) readLoop(ctx context.Context) error {
+	s.awaitFirstFrame()
 	for {
 		raw, err := s.conn.ReadRaw()
 		if err != nil {
@@ -580,6 +599,12 @@ func (s *session) readLoop(ctx context.Context) error {
 				// guacd sends disconnect before it closes
 				// (libguac's user-handshake.c).
 				return fmt.Errorf("backend/guacd: guacd closed the connection without disconnect: %w", io.ErrUnexpectedEOF)
+			case errors.Is(err, os.ErrDeadlineExceeded):
+				s.b.log.Error("backend/guacd: guacd drew no first frame, so the session failed. "+
+					"guacd's child process for this connection may still be running: "+
+					"nothing outside the guacd container can stop it, and only restarting guacd clears it",
+					"protocol", s.b.cfg.Protocol, "connection", s.conn.ID, "limit", firstFrameLimit)
+				return ErrNoFirstFrame
 			}
 			return fmt.Errorf("backend/guacd: read: %w", err)
 		}
@@ -590,6 +615,19 @@ func (s *session) readLoop(ctx context.Context) error {
 		if done, err := s.handle(ctx, ins); done || err != nil {
 			return err
 		}
+	}
+}
+
+// awaitFirstFrame gives guacd firstFrameLimit from now to draw a frame
+// that viewers can see, unless it has. It is a read deadline, so that
+// nothing guacd sends but that frame extends it, not even the keep-alive
+// of a process that has otherwise hung, and so that it does not run out
+// while the reader waits for the owner's answer to a prompt.
+func (s *session) awaitFirstFrame() {
+	if s.size == (image.Point{}) {
+		// This fails only on a closed connection, which the next read
+		// reports.
+		_ = s.nc.SetReadDeadline(time.Now().Add(firstFrameLimit))
 	}
 }
 
@@ -759,9 +797,16 @@ func (s *session) sync(args []string) error {
 
 // flush copies the display's damage into the sink, after a Resize if the
 // default layer's size changed.
+//
+// The first frame that sizes the screen is the first that viewers get,
+// and it ends firstFrameLimit. guacd's first sync may not: on RDP it
+// comes at once with no size, and viewers see nothing of it.
 func (s *session) flush() {
 	damage := s.display.TakeDamageRects()
 	if size := s.display.Bounds().Size(); size != s.size && size.X > 0 && size.Y > 0 {
+		if s.size == (image.Point{}) {
+			_ = s.nc.SetReadDeadline(time.Time{}) // as in awaitFirstFrame
+		}
 		s.size = size
 		s.sink.Resize(size.X, size.Y)
 		damage = []image.Rectangle{{Max: size}}
@@ -796,6 +841,7 @@ func (s *session) prompt(ctx context.Context, names []string) error {
 	if err != nil {
 		return fmt.Errorf("backend/guacd: prompt: %w", err)
 	}
+	s.awaitFirstFrame() // the owner's time to answer is not guacd's
 	var b []byte
 	for i, name := range names {
 		var answer string

@@ -24,7 +24,7 @@ Guacamole protocol and no v0 routes
 |----------|---------------|---------------|
 | VNC | Through guacd, verified end to end | Native by default, or through guacd with `backend: guacd` |
 | SSH | Through guacd, verified end to end, including repeated sessions | Native |
-| RDP | Through guacd, verified against xrdp | Native by default, verified against xrdp but not yet Windows, or through guacd with `backend: guacd`. Native asks for GFX by default: its RemoteFX Progressive is verified against xrdp and the specification's vectors, its RemoteFX against the vectors, and its ClearCodec and cache come next: until then a Windows server under GFX may leave parts of its screen missing, which occamyd warns of (`disable_gfx` turns GFX off) |
+| RDP | Through guacd, verified against xrdp | Native by default, verified against xrdp and tried on a Windows Server 2025 CI runner, not a real Windows deployment, or through guacd with `backend: guacd`. Native asks for GFX by default: its RemoteFX Progressive is verified against xrdp and the specification's vectors, its RemoteFX against the vectors, and its ClearCodec and cache come next: until then a Windows server under GFX stays nearly black, which occamyd warns of, so set `disable_gfx: true` for Windows hosts. On that runner the keyboard and resize work, and the clipboard fails both ways ([configuration](docs/configuration.md#backends)) |
 | Kubernetes | Untested | Native: a terminal in a pod, through the API server's exec stream |
 
 v1 also serves telnet, through guacd only: it gets no native backend and
@@ -229,13 +229,18 @@ Occamy reaches them by compose service name:
 | VNC (TigerVNC) | `tigervnc:5900` | | `vncpassword` |
 | SSH | `ssh:22` | `occamy` | `occamy` |
 | RDP | `rdp:3389` | `occamy` | `occamy` |
+| VNC (desktop) | `desktop:5900` | | `vncpassword` |
+| RDP (desktop) | `desktop:3389` | `occamy` | `occamy` |
 
 The v0 service on `localhost:5636` connects to them through upstream
 guacd 1.6, which also runs in the stack. A second `occamyd`, `occamy-v1`
 on `localhost:5637`, serves API v1 and the web client, at
 http://localhost:5637/static/, from the v1 file
 [docker/occamy-v1.yaml](./docker/occamy-v1.yaml), with the user `demo`
-and the password `occamy`: the SSH server as the connection `ssh`,
+and the password `occamy`. It lists a real desktop first, XFCE with
+Firefox, through `occamyd`'s own clients only, over VNC as
+`desktop-vnc` and over RDP as `desktop-rdp`. Then come
+the SSH server as the connection `ssh`,
 through `occamyd`'s own SSH client; each VNC server twice, through
 `occamyd`'s own VNC client, vnc's default, and through guacd
 (`backend: guacd`), the fallback that the benchmark compares against,

@@ -11,6 +11,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -20,9 +21,13 @@ import (
 	"log/slog"
 	"math/big"
 	"net"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
+
+	"changkun.de/x/occamy/internal/rdp/rdptest"
 )
 
 // connectTo runs Connect against the recorded xrdp session, offering TLS
@@ -265,5 +270,120 @@ func TestProtocolDowngrade(t *testing.T) {
 	s.noEcho = true
 	if err := connectTo(t, s, Config{Protocols: offer, TLS: insecure}); err == nil || !strings.Contains(err.Error(), "did not say which security protocols") {
 		t.Errorf("a server without clientRequestedProtocols: %v", err)
+	}
+}
+
+// handshakeOnly runs the connection request and a TLS handshake with
+// cfg against srv, and takes in what the server sends after it. It
+// returns the handshake's error and Accept's.
+func handshakeOnly(t *testing.T, srv rdptest.Server, cfg *tls.Config) (handshake, accept error) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	accepted := make(chan error, 1)
+	go func() {
+		nc, err := ln.Accept()
+		if err != nil {
+			accepted <- err
+			return
+		}
+		defer nc.Close()
+		_, err = srv.Accept(nc)
+		accepted <- err
+	}()
+	nc, err := net.Dial("tcp", ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+	if err := nc.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	tr := newTransport(nc, nil)
+	if err := tr.write(connectionRequest("", ProtocolSSL)); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := tr.readFrame(nil); err != nil {
+		t.Fatal(err)
+	}
+	tc := tls.Client(nc, cfg)
+	handshake = tc.Handshake()
+	if handshake == nil {
+		// A TLS 1.3 session ticket comes after the handshake.
+		if err := tc.SetReadDeadline(time.Now().Add(200 * time.Millisecond)); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = tc.Read(make([]byte, 1))
+	}
+	nc.Close()
+	return handshake, <-accepted
+}
+
+// Windows Server 2025 ends a TLS 1.3 connection after the handshake if
+// the ClientHello offers no session tickets, and the fake server refuses
+// that ClientHello, which Go sends unless the configuration has a cache.
+func TestSessionTicketsOffered(t *testing.T) {
+	c, _, err := connectLive(t, rdptest.Server{}, Config{})
+	if err != nil {
+		t.Fatalf("the client's ClientHello: %v", err)
+	}
+	c.Close()
+
+	if _, err := handshakeOnly(t, rdptest.Server{}, &tls.Config{InsecureSkipVerify: true}); !errors.Is(err, rdptest.ErrNoSessionTickets) {
+		t.Errorf("a ClientHello without a cache: %v, want it refused", err)
+	}
+	if err, _ := handshakeOnly(t, rdptest.Server{}, &tls.Config{InsecureSkipVerify: true, MaxVersion: tls.VersionTLS12}); err != nil {
+		t.Errorf("TLS 1.2 without a cache, which Windows takes: %v", err)
+	}
+}
+
+// A connection that resumed would not check the server's certificate,
+// so no connection may find the ticket of another.
+func TestConnectionsDoNotResume(t *testing.T) {
+	var mu sync.Mutex
+	var resumed []bool
+	srv := rdptest.Server{OnHandshake: func(cs tls.ConnectionState) {
+		mu.Lock()
+		defer mu.Unlock()
+		resumed = append(resumed, cs.DidResume)
+	}}
+	check := func(what string, want []bool) {
+		t.Helper()
+		mu.Lock()
+		defer mu.Unlock()
+		if !slices.Equal(resumed, want) {
+			t.Errorf("%s: resumed %v, want %v", what, resumed, want)
+		}
+		resumed = nil
+	}
+
+	// A kept ticket would resume here, so what follows shows something.
+	shared := &tls.Config{InsecureSkipVerify: true, ServerName: "rdp.test", ClientSessionCache: tls.NewLRUClientSessionCache(1)}
+	for range 2 {
+		if err, _ := handshakeOnly(t, srv, shared); err != nil {
+			t.Fatal(err)
+		}
+	}
+	check("a shared cache", []bool{false, true})
+
+	for range 2 {
+		c, _, err := connectLive(t, srv, Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.Close()
+	}
+	check("the client", []bool{false, false})
+
+	p, err := newTLSPolicy(TLS{InsecureSkipVerify: true}, "rdp.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, b := p.config("rdp.test:3389", quiet), p.config("rdp.test:3389", quiet)
+	if a.ClientSessionCache == nil || a.ClientSessionCache == b.ClientSessionCache {
+		t.Error("two connections of a policy share a session cache")
 	}
 }

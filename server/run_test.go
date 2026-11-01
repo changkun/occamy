@@ -124,7 +124,9 @@ const (
 )
 
 // TestRunChild is TestRunSignals's occamyd: run with childFileEnv set, it
-// serves that file with Run and exits as occamyd's main does.
+// serves that file with Run. Where occamyd's main exits 1 for any error,
+// through log.Fatal, this exits 3 for a file that it could not read or
+// that ParseV1 refused, so that a test can tell that from Run failing.
 func TestRunChild(t *testing.T) {
 	path := os.Getenv(childFileEnv)
 	if path == "" {
@@ -169,10 +171,11 @@ func TestRunRefusesNoSignIn(t *testing.T) {
 	cmd.Env = append(os.Environ(), childFileEnv+"="+file)
 	out, err := cmd.CombinedOutput()
 	var exit *exec.ExitError
+	// 3 is TestRunChild's own status for a refused file: occamyd exits 1.
 	if !errors.As(err, &exit) || exit.ExitCode() != 3 {
-		t.Fatalf("exit %v, want the status of a file refused, 3\n%s", err, out)
+		t.Fatalf("exit %v, want TestRunChild's status for a file refused, 3\n%s", err, out)
 	}
-	if !strings.Contains(string(out), "nobody could sign in, and occamyd has no default user") {
+	if !strings.Contains(string(out), "nobody could sign in to API v1, and occamyd has no default user") {
 		t.Errorf("output does not say why:\n%s", out)
 	}
 	if _, err := os.Stat(key); !errors.Is(err, fs.ErrNotExist) {

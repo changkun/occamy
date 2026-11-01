@@ -7,6 +7,7 @@ package config_test
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io/fs"
 	"maps"
 	"os"
@@ -65,6 +66,11 @@ func TestDemoV1File(t *testing.T) {
 			t.Errorf("connection %s is named %q", c.ID, c.Name)
 		}
 	}
+	// The real desktop comes first, for a first-time viewer, and through
+	// the native backends: it must not depend on guacd.
+	if len(f.Connections) < 2 || f.Connections[0].ID != "desktop-vnc" || f.Connections[1].ID != "desktop-rdp" {
+		t.Errorf("the connections do not start with desktop-vnc and desktop-rdp: %+v", f.Connections[:min(2, len(f.Connections))])
+	}
 	// Every connection but ssh, vnc-native and rdp-native names its
 	// backend, so that the comparison does not change with a protocol's
 	// default; vnc-native and rdp-native check the defaults, and ssh has
@@ -72,6 +78,7 @@ func TestDemoV1File(t *testing.T) {
 	want := map[string]string{
 		"ssh":        config.BackendNative,
 		"rdp-native": config.BackendNative, "rdp-guacd": config.BackendGuacd,
+		"desktop-vnc": config.BackendNative, "desktop-rdp": config.BackendNative,
 	}
 	for _, id := range []string{"vnc", "vnc-none", "vnc-de", "vnc-fr", "tigervnc", "tigervnc-prompt", "tigervnc-plain", "tigervnc-none", "tigervnc-de", "tigervnc-fr"} {
 		want[id+"-native"] = config.BackendNative
@@ -475,10 +482,12 @@ func nodeTakes(versions string, major int) bool {
 // TestSigningKeyHome checks that the signing key lives where a real
 // install keeps it, at one path everywhere: the image gives that
 // directory to its nonroot user, or occamyd could not create the key on
-// the volume, the demo stack mounts a named volume there, and the files
-// name the key in it. The image's own run is make e2e's.
+// the volume, the demo stack mounts a named volume there on the service
+// that uses it, and the files name the key in it. The image's own run is
+// make e2e's.
 func TestSigningKeyHome(t *testing.T) {
 	const dir, key = "/var/lib/occamy", "/var/lib/occamy/signing.key"
+	const volume = "occamy-v1-data"
 	read := func(name string) string {
 		t.Helper()
 		raw, err := os.ReadFile("../../" + name)
@@ -491,16 +500,56 @@ func TestSigningKeyHome(t *testing.T) {
 	if !ok {
 		t.Fatal("docker/Dockerfile has no distroless stage")
 	}
-	if !strings.Contains(final, "--chown=65532:65532 "+dir+" "+dir) {
+	// A whole line, so that a comment that quotes it does not count.
+	if !slices.Contains(strings.Split(final, "\n"), "COPY --from=build --chown=65532:65532 "+dir+" "+dir) {
 		t.Errorf("the runtime image does not give %s to nonroot", dir)
 	}
-	if !strings.Contains(read("docker/docker-compose.yaml"), "- occamy-v1-data:"+dir+"\n") {
-		t.Errorf("docker-compose.yaml mounts no named volume at %s", dir)
+	var compose struct {
+		Services map[string]struct {
+			Volumes []string `yaml:"volumes"`
+		} `yaml:"services"`
+		Volumes map[string]any `yaml:"volumes"`
+	}
+	if err := yaml.Unmarshal([]byte(read("docker/docker-compose.yaml")), &compose); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(compose.Services["occamy-v1"].Volumes, volume+":"+dir) {
+		t.Errorf("occamy-v1 mounts no volume %s at %s: %v", volume, dir, compose.Services["occamy-v1"].Volumes)
+	}
+	if _, ok := compose.Volumes[volume]; !ok {
+		t.Errorf("docker-compose.yaml does not declare the volume %s", volume)
 	}
 	for _, name := range []string{"docker/occamy-v1.yaml", "docker/bench/occamy-v1.yaml", "docs/configuration.md"} {
 		if !strings.Contains(read(name), "signing_key_file: "+key+"\n") {
 			t.Errorf("%s does not keep the signing key at %s", name, key)
 		}
+	}
+}
+
+// TestConfigurationExampleRefused checks that the first example of
+// docs/configuration.md cannot be served as it stands: its password hash
+// is a placeholder, so that nobody starts a server with a hash out of
+// the documentation.
+func TestConfigurationExampleRefused(t *testing.T) {
+	raw, err := os.ReadFile("../../docs/configuration.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, ok := strings.Cut(string(raw), "```yaml\n")
+	if !ok {
+		t.Fatal("docs/configuration.md has no YAML example")
+	}
+	example, _, ok := strings.Cut(rest, "\n```")
+	if !ok {
+		t.Fatal("docs/configuration.md's first example does not end")
+	}
+	_, err = config.ParseV1([]byte(example))
+	var problems config.Problems
+	if !errors.As(err, &problems) {
+		t.Fatalf("ParseV1: %v, want its problems", err)
+	}
+	if !slices.ContainsFunc(problems, func(p config.Problem) bool { return p.Path == "auth.users[0].password_hash" }) {
+		t.Errorf("the example's password hash was accepted: %v", err)
 	}
 }
 

@@ -18,6 +18,12 @@ services:
     ports:
       - "127.0.0.1:${GUACD_PORT:-4822}:4822"
 
+  desktop:
+    # Left out: nothing here connects to it, and no idle desktop should
+    # run during measurements. A profile that no command names keeps it
+    # from being built or started.
+    profiles: [demo-only]
+
   occamy-v1:
     volumes:
       # Replaces the demo's v1 file, which is mounted at the same path.

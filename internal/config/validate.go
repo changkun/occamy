@@ -235,9 +235,10 @@ func (a *Auth) validate(c *checker) {
 
 	// occamyd has no default user, so a file that names no way in would
 	// serve a server nobody can use. legacy_v0 does not count: its login
-	// signs a target for anyone, and signs nobody in to API v1.
+	// signs a target for anyone, and signs nobody in to API v1, so a file
+	// for v0 clients alone is refused too and has to name a way in.
 	if len(a.Users) == 0 && a.OIDC == nil && len(a.TrustedIssuers) == 0 {
-		c.add("auth", "nobody could sign in, and occamyd has no default user: list users in auth.users, whose hashes docs/configuration.md says how to make, or set auth.oidc or auth.trusted_issuers")
+		c.add("auth", "nobody could sign in to API v1, and occamyd has no default user: list users in auth.users, whose hashes docs/configuration.md says how to make, or set auth.oidc or auth.trusted_issuers; v0 clients of legacy_v0 do not count, as the v0 login signs nobody in to API v1")
 	}
 
 	users := map[string]int{}
@@ -1040,16 +1041,26 @@ func (c *checker) webClient(path, name string) {
 }
 
 // signingKey checks the signing key file, which may be missing because
-// occamyd creates it on first start, as long as its directory exists.
+// occamyd creates it on first start, as long as its directory exists. A
+// key that occamyd may not reach is the usual mistake of a first start,
+// on a volume of another user's, so it gets the words that LoadOrCreateKey
+// has for one in a directory it may not write.
 func (c *checker) signingKey(path, name string) {
-	if _, err := os.Stat(name); errors.Is(err, fs.ErrNotExist) {
+	fh, err := os.Open(name) // #nosec G304 -- the path comes from the operator's configuration
+	if err == nil {
+		fh.Close()
+	}
+	switch {
+	case errors.Is(err, fs.ErrNotExist):
 		dir := filepath.Dir(name)
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			c.add(path, "neither %s nor its directory %s exists", name, dir)
 		}
-		return
+	case errors.Is(err, fs.ErrPermission):
+		c.add(path, "%v", auth.KeyAccessError(name, err))
+	default:
+		c.file(path, name)
 	}
-	c.file(path, name)
 }
 
 // env checks that the environment variable name, if set, has a value.

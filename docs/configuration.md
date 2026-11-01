@@ -86,8 +86,9 @@ for that stack alone.
 
 A v1 file names how people sign in: static users in `auth.users`,
 `auth.oidc`, or `auth.trusted_issuers`. With none of them, nobody could
-sign in, so `occamyd` refuses to start. `legacy_v0` does not count,
-since its login signs a target for anyone and nobody in to API v1.
+sign in to API v1, so `occamyd` refuses to start. `legacy_v0` does not
+count, since its login signs a target for anyone and nobody in to API
+v1, so a file that serves only v0 clients has to name one of them too.
 
 To add a static user, make the hash of the password they chose and put
 it in the file:
@@ -113,14 +114,32 @@ podman run -d --name occamy -p 5636:5636 \
   occamy:latest /occamy/occamyd -conf /occamy/v1.yaml
 ```
 
-A directory mounted from the host keeps its own owner, so give it to
-that user: `chown 65532 <the directory>`. A named volume that another
-image or a root container used first keeps its owner too, and
-`occamyd` then stops at start and says so:
+Nothing refuses a container without that volume. The image's directory
+is writable, so `occamyd` starts quietly and keeps the key in the
+container's own layer, which a restart keeps and a recreate loses. A
+new image or `--force-recreate` then replaces the key, everyone signs
+in again, and the only sign is the warning that a first start gives,
+`created a new signing key`. On a server that has run before, that
+warning means the volume is missing.
 
-```sh
-podman run --rm -v occamy-data:/data busybox chown -R 65532 /data
-```
+If `occamyd` may not use the key or its directory, it stops at start and
+says so. The directory, or whatever is mounted on it, has to belong to
+the user that the error names, and how to give it depends on what it
+is. The error's path is the one `occamyd` sees, which in a container is
+not a path on the host:
+
+| What holds the key | The step, with the error's uid: 65532 in the image |
+|---|---|
+| A directory, with no container | `chown -R <uid> <the directory>`, as root |
+| A directory mounted from the host, on Docker or rootful podman | `chown -R 65532 <the directory on the host>`, as root |
+| A directory mounted from the host, on rootless podman | `podman unshare chown -R 65532 <the directory on the host>`. A plain `chown` is wrong here: uid 65532 of a rootless container is another number on the host, such as 165531 |
+| A named volume, on Docker | `docker run --rm -v <the volume>:/data busybox chown -R 65532 /data` |
+| A named volume, on podman | `podman run --rm -v <the volume>:/data busybox chown -R 65532 /data` |
+
+A named volume keeps its owner once it has files in it, such as those
+of another image or a root container that used it first. An empty one
+that a root container used first keeps that owner on Docker, while on
+podman it takes the owner of the next container to use it.
 
 The demo stack keeps its key at the same path on the volume
 `occamy-v1-data`, which `make stop` keeps and `make clean` removes.
@@ -325,6 +344,13 @@ all.
 For `rdp` through guacd, `occamyd` passes `disable-gfx: "true"` unless
 `guacd.params.rdp` sets it: through RDP's graphics pipeline, xrdp's
 colours reached guacd shifted.
+A session through guacd fails if guacd has drawn nothing 90 seconds
+after it accepted the connection, or after the owner's last answer to
+a prompt. That has no setting, and it holds however long the parameters
+let guacd wait: `autoretry`, `wol-wait-time` for a host that has to wake
+first, VNC's `reverse-connect` with a long `listen-timeout`, or telnet's
+`login-success-regex`, which holds back the first frame until the login
+has ended ([try-it.md](try-it.md#the-guacd-fallback)).
 
 | Key | Default | Meaning |
 |-----|---------|---------|
@@ -555,26 +581,34 @@ A native rdp session:
   the user logs off, and with `backend-failed` when it cannot connect
   or log on, or the server's certificate is refused.
 
-The native RDP backend has been tested against xrdp and against
-occamy's own test server, not yet against Windows: Windows servers are
-not yet verified, which the backend's fourth phase does
-([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)).
+The native RDP backend has been tested against xrdp, against occamy's
+own test server, and on a Windows Server 2025 CI runner connecting to
+itself over loopback. That is not a real deployment: Windows servers
+are not verified until the backend's fourth phase runs against one
+([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)),
+and [#32](https://github.com/changkun/occamy/issues/32) stays open. On
+that runner it logs on with NLA, and the keyboard and resize work. The
+clipboard fails both ways; the suspected cause, that the client does
+not set `CHANNEL_FLAG_SHOW_PROTOCOL` on the channel's chunks, is
+unproven.
+
 It asks for RDP's graphics pipeline (GFX) by default, through which
 xrdp draws its sessions in RemoteFX Progressive. Of GFX it does not
-yet take ClearCodec, which Windows servers draw text and small
-regions in, nor the bitmap cache, which the backend's third phase
-adds next, nor AVC (H.264), which it does not ask for: until then, a
-bitmap in ClearCodec, or from the cache, is skipped, and leaves its
-region as it was, so a Windows server's screen may show gaps or stale
-regions under GFX. At the first such PDU of a session, `occamyd` logs
-a warning that names the two ways around it. `disable_gfx: true` on
-the connection turns GFX off, so that the server sends plain bitmap
-updates, as it sends guacd with `disable-gfx`. An ad-hoc rdp target on
-the native backend always asks for GFX, since `disable_gfx` is a
-connection's key; `adhoc_backends: {rdp: guacd}` sends ad-hoc rdp
-targets through guacd instead. Until Windows is verified,
-`backend: guacd` is the fallback for a Windows server that the native
-backend cannot serve.
+yet take ClearCodec, which that Windows server drew nearly all of its
+screen in, nor the bitmap cache, which the backend's third phase adds
+next and which, with ClearCodec, blocks v1.0, nor AVC (H.264), which
+it does not ask for: until then, a bitmap in ClearCodec, or from the
+cache, is skipped, and leaves its region as it was, so a Windows
+server's screen stays nearly black under GFX. At the first such PDU of
+a session, `occamyd` logs a warning that names the two ways around it.
+**Set `disable_gfx: true` for Windows hosts**: on the connection, it
+turns GFX off, so that the server sends plain bitmap updates, as it
+sends guacd with `disable-gfx`, and on the runner the whole desktop
+then drew correctly. An ad-hoc rdp target on the native backend always
+asks for GFX, since `disable_gfx` is a connection's key;
+`adhoc_backends: {rdp: guacd}` sends ad-hoc rdp targets through guacd
+instead. `backend: guacd` is the other fallback for a Windows server,
+and has not been checked against Windows.
 
 xrdp speaks no NLA: offered NLA alone, it selects standard RDP
 security, which the native backend refuses, so an xrdp connection
@@ -701,11 +735,11 @@ parts, names the domain. A server whose certificate does not chain to
 the system's roots, as a self-signed one, or that speaks no NLA, as
 xrdp, needs a connection, whose `tls` and `security` can say so. It
 also always asks for RDP's graphics pipeline (GFX), since only a
-connection can set `disable_gfx`. A Windows server draws parts of its
-screen under GFX in ClearCodec and from its bitmap cache, which the
-native backend does not take until its third phase adds them, so those parts
-stay missing or stale; `occamyd` logs a warning when that happens. To
-reach such servers ad hoc meanwhile, send ad-hoc rdp targets through
+connection can set `disable_gfx`. A Windows server draws nearly all of
+its screen under GFX in ClearCodec and from its bitmap cache, which the
+native backend does not take until its third phase adds them, so the
+screen stays nearly black; `occamyd` logs a warning when that happens.
+To reach such servers ad hoc meanwhile, send ad-hoc rdp targets through
 guacd:
 
 ```yaml

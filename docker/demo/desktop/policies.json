@@ -1,0 +1,21 @@
+{
+  "policies": {
+    "DisableAppUpdate": true,
+    "DisableFirefoxStudies": true,
+    "DisableTelemetry": true,
+    "DontCheckDefaultBrowser": true,
+    "Homepage": {
+      "URL": "file:///usr/local/share/occamy-demo/index.html",
+      "StartPage": "homepage"
+    },
+    "OverrideFirstRunPage": "",
+    "OverridePostUpdatePage": "",
+    "UserMessaging": {
+      "ExtensionRecommendations": false,
+      "FeatureRecommendations": false,
+      "MoreFromMozilla": false,
+      "SkipOnboarding": true,
+      "UrlbarInterventions": false
+    }
+  }
+}

@@ -89,8 +89,8 @@ class Welcomed {
   }
 
   /** end closes the stream from occamyd's end, as with 4002 once the session has ended for everyone. */
-  end(code: number): void {
-    this.push({ type: 'end', code, reason: '' })
+  end(code: number, reason = ''): void {
+    this.push({ type: 'end', code, reason })
   }
 
   async next(signal?: AbortSignal): Promise<SessionEvent> {
@@ -393,6 +393,16 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
     expect(r.deletes).toHaveLength(1)
   })
 
+  it('leaves “Connecting…” for what occamyd says went wrong, before the first frame', async () => {
+    await render({ action: null }, notFound)
+    await until(() => text().includes('Connecting to'))
+    act(() => Welcomed.last?.end(CloseCode.BackendFailed, 'guacd drew nothing'))
+    await settle()
+    expect(text()).not.toContain('Connecting to')
+    expect(container.querySelector('#end-title')?.textContent).toBe('Could not connect')
+    expect(text()).toContain('guacd drew nothing')
+  })
+
   // The codes occamyd closes a session's streams with once the session
   // ended for everyone (CloseFor, internal/stream/serve.go), but 1011.
   const sessionEnds = [CloseCode.ServerShutdown, CloseCode.SessionClosed, CloseCode.OwnerLeft, CloseCode.Idle, CloseCode.RemoteEnded, CloseCode.BackendFailed]
@@ -481,6 +491,36 @@ describe('The window of a stream welcomed as the owner’s', () => {
     await render({ token: accessToken('demo'), action: null }, ended)
     // Past the delay after which the view sizes the remote to the window.
     await settle(350)
+    expect(Welcomed.last?.resizes).toEqual([])
+
+    act(() => observed([{ contentRect: { width: 900, height: 700 } }]))
+    await until(() => (Welcomed.last?.resizes.length ?? 0) > 0)
+    expect(Welcomed.last?.resizes).toEqual([[900, 700]])
+  })
+
+  it.each([1, 2, 1.5])('asks for the window in CSS pixels at a device pixel ratio of %d, and only states the ratio', async (ratio) => {
+    let observed: (entries: { contentRect: { width: number; height: number } }[]) => void = () => undefined
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: typeof observed) {
+          observed = callback
+        }
+        observe(): void {}
+        disconnect(): void {}
+      },
+    )
+    vi.stubGlobal('devicePixelRatio', ratio)
+    const hellos: Parameters<NonNullable<typeof stream.connect>>[2][] = []
+    stream.connect = (_url, _token, options) => {
+      hellos.push(options)
+      return Promise.resolve(new Welcomed() as unknown as Session)
+    }
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 800, height: 600 } as DOMRect)
+    await render({ token: accessToken('demo'), action: null }, ended)
+    expect(hellos.at(-1)).toMatchObject({ width: 800, height: 600, pixelRatio: ratio * 100 })
+    await settle(350)
+    // The window is the size the hello asked for.
     expect(Welcomed.last?.resizes).toEqual([])
 
     act(() => observed([{ contentRect: { width: 900, height: 700 } }]))
