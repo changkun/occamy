@@ -209,6 +209,7 @@ type Session struct {
 	cursor    *Cursor
 	cursorPos image.Point
 	title     string
+	clipQuiet bool // the remote's clipboard failed to answer, and has not since
 	visible   bool // the demand last sent to the backend
 	prompts   map[uint32]*promptRequest
 	nextPrmt  uint32
@@ -571,6 +572,10 @@ func (s *Session) addViewer(role Role) *Viewer {
 	if s.cursor != nil {
 		v.pending.Cursor = s.cursor
 	}
+	if s.clipQuiet {
+		answering := false
+		v.pending.ClipboardStatus = &answering
+	}
 	for _, o := range s.viewers {
 		o.update(func(p *Pending) { p.Joined = append(p.Joined, ViewerInfo{ID: v.id, Role: role}) })
 		v.pending.Joined = append(v.pending.Joined, ViewerInfo{ID: o.id, Role: o.role})
@@ -720,6 +725,14 @@ func (s *Session) termWrite(data []byte) {
 func (k sink) Clipboard(mime string, data []byte) {
 	c := &Clipboard{MIME: mime, Data: slices.Clone(data)}
 	k.s.broadcast(func(p *Pending) { p.Clipboard = c })
+}
+
+func (k sink) ClipboardStatus(answering bool) {
+	s := k.s
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clipQuiet = !answering
+	s.broadcastLocked(func(p *Pending) { p.ClipboardStatus = &answering })
 }
 
 func (k sink) Bell() { k.s.broadcast(func(p *Pending) { p.Bells++ }) }

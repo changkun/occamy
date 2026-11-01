@@ -6,8 +6,10 @@ package rdp
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/binary"
 	"fmt"
+	"time"
 	"unicode/utf16"
 	"unicode/utf8"
 )
@@ -30,6 +32,12 @@ import (
 // of the decoding rate, like a pointer shape, so that a server that
 // announces text again and again cannot hand every viewer a clipboard
 // at the rate of the link.
+//
+// The owner's text can wait for an answer that never comes. On the
+// server only the process that holds the clipboard, xrdp's xrdp-chansrv,
+// speaks on the channel, so without it Monitor Ready never comes and a
+// Format List goes unanswered. The Output is therefore told once text
+// has waited for Config.ClipboardWait, and the text goes on waiting.
 
 // MaxClipboard bounds clipboard text, in bytes of UTF-8, in either
 // direction: the largest message protocol v1 carries by default, as in
@@ -56,6 +64,16 @@ const maxDataRequests = 8
 // owed, and a server that sends lists faster than it reads the
 // responses gets them as fast as it reads.
 const listResponsesPerPass = 64
+
+// DefaultClipboardWait is how long the owner's text waits for the server
+// before the Output hears that the server has not taken it, by default.
+// The text goes on waiting. A server that answers does so in moments
+// once its channel is up, but text can come as a session opens, and wait
+// for that. On a host at load 40 to 66, xrdp started its channel server
+// 12 to 20 seconds after a session opened with a new X session, and it
+// can try to reach that server for 10 seconds more. A minute is twice
+// the worst of those.
+const DefaultClipboardWait = time.Minute
 
 // ClipboardMode selects which ways clipboard text goes. With neither
 // direction the client does not ask for the clipboard channel.
@@ -116,8 +134,13 @@ type cliprdr struct {
 	requested uint32 // the format asked for and not answered, 0 if none
 	provide   []uint32
 	text      []byte // the owner's text, nil if none
-	owned     bool   // the server's latest Format List is the client's
 	stale     bool   // the answer awaited is for an older announcement
+
+	// The wait for the server to take the owner's text.
+	answerBy time.Time   // when the Output hears of it; zero if no wait runs
+	timer    *time.Timer // has the writer look at answerBy
+	silent   bool        // a wait ended, and the server has said nothing since
+	tell     bool        // the Output has not heard of silent's latest change
 }
 
 // cliprdrMessage applies a CLIPRDR message from the server, of which
@@ -140,6 +163,7 @@ func (c *Client) cliprdrMessage(out Output, msg []byte, truncated bool) error {
 		c.count(func(s *Stats) { s.Ignored["clipboard PDUs"]++ })
 		return nil
 	}
+	c.clipboardHeard(typ)
 	cl := &c.clip
 	switch typ {
 	case cbClipCaps:
@@ -153,13 +177,15 @@ func (c *Client) cliprdrMessage(out Output, msg []byte, truncated bool) error {
 	case cbMonitorReady:
 		c.chio.mu.Lock()
 		cl.ready, cl.initDue = true, true
+		// A clipboard process that started again does not answer what the
+		// last was asked, and has offered nothing to ask for.
+		cl.request, cl.requested, cl.stale = 0, 0, false
 		c.chio.mu.Unlock()
 		c.due()
 	case cbFormatList:
 		// The reader alone changes longNames, so it reads it unlocked.
 		format, ok := textFormat(body, cl.longNames)
 		c.chio.mu.Lock()
-		cl.owned = false
 		// One more response owed, a count of 64 bits that a server cannot
 		// send lists enough to overflow.
 		if ok {
@@ -222,16 +248,84 @@ func (c *Client) cliprdrMessage(out Output, msg []byte, truncated bool) error {
 	return nil
 }
 
+// clipboardHeard notes a CLIPRDR message of type typ from the server.
+// Any message shows that the process behind the channel is there, which
+// clears what the Output was told. Three end the wait for the server to
+// take the owner's text: after Monitor Ready a list goes, with a wait of
+// its own, and a Format List Response or a Format Data Request, which
+// xrdp sends first, shows that the server read a list. Neither says
+// which, so the answer to an older list ends the wait for a newer.
+func (c *Client) clipboardHeard(typ uint16) {
+	cl := &c.clip
+	c.chio.mu.Lock()
+	switch typ {
+	case cbMonitorReady, cbFormatListResponse, cbFormatDataRequest:
+		cl.answerBy = time.Time{}
+	}
+	back := cl.silent
+	if back {
+		cl.silent, cl.tell = false, true
+	}
+	c.chio.mu.Unlock()
+	if back {
+		c.due()
+	}
+}
+
+// awaitClipboard starts the wait for the server to take the owner's
+// text, as of now, unless one has begun: newer text does not put off the
+// end of a wait, or text sent every so often would keep it from ending.
+// If it ends first, cliprdrDue has the Output told, and the text goes on
+// waiting. chio.mu must be held.
+func (c *Client) awaitClipboard(now time.Time) {
+	cl := &c.clip
+	if !cl.answerBy.IsZero() {
+		return
+	}
+	wait := cmp.Or(c.cfg.ClipboardWait, DefaultClipboardWait)
+	cl.answerBy = now.Add(wait)
+	if cl.timer == nil {
+		cl.timer = time.AfterFunc(wait, c.due)
+		return
+	}
+	cl.timer.Reset(wait)
+}
+
+// tellClipboard tells out what it has not heard of the server's
+// clipboard. Only the channel writer calls it, so that out hears of each
+// change in the order it came.
+func (c *Client) tellClipboard(out Output) {
+	cl := &c.clip
+	c.chio.mu.Lock()
+	tell, silent := cl.tell, cl.silent
+	cl.tell = false
+	c.chio.mu.Unlock()
+	if !tell {
+		return
+	}
+	if silent {
+		c.log.Warn("rdp: the server's clipboard has not taken the owner's text, which waits for it", "addr", c.addr)
+	}
+	out.ClipboardStatus(!silent)
+}
+
 // cliprdrDue appends the clipboard messages that are due, in the order
 // [MS-RDPECLIP] 1.3.2 has them, but at most listResponsesPerPass of the
 // Format List Responses owed, and has the writer look again for the
-// rest. chio.mu must be held.
-func (c *Client) cliprdrDue(msgs []dueMessage) []dueMessage {
+// rest. A wait that is over by now has the writer tell the Output, even
+// from a pass of SetClipboard's, whose new wait puts the timer off.
+// chio.mu must be held.
+func (c *Client) cliprdrDue(msgs []dueMessage, now time.Time) []dueMessage {
 	vc, cl := c.clipCh, &c.clip
 	if vc == nil {
 		return msgs
 	}
 	add := func(encode func() []byte) { msgs = append(msgs, dueMessage{vc, encode}) }
+	if !cl.answerBy.IsZero() && !now.Before(cl.answerBy) {
+		cl.answerBy = time.Time{}
+		cl.silent, cl.tell = true, true
+		c.due()
+	}
 	if cl.initDue {
 		cl.initDue = false
 		add(clipCaps)
@@ -240,7 +334,9 @@ func (c *Client) cliprdrDue(msgs []dueMessage) []dueMessage {
 	if cl.listDue && cl.ready {
 		cl.listDue = false
 		long, text := cl.longNames, cl.text != nil
-		cl.owned = text
+		if text {
+			c.awaitClipboard(now)
+		}
 		add(func() []byte { return formatList(long, text) })
 	}
 	for room := listResponsesPerPass; room > 0 && cl.listOK+cl.listFail > 0; room-- {
@@ -275,8 +371,12 @@ func (c *Client) cliprdrDue(msgs []dueMessage) []dueMessage {
 // SetClipboard returns pastes it, and the text when the server asks for
 // it. Text beyond MaxClipboard bytes is dropped, and invalid UTF-8
 // becomes U+FFFD. Before the server's clipboard channel is ready, the
-// text waits for it. Without ClipboardToServer, or without the channel,
-// SetClipboard does nothing.
+// text waits for it, and it waits as long as the server does not ask for
+// it; the Output is told once that passes Config.ClipboardWait. The same
+// text again is announced again, which a server may ignore: the owner
+// sent it, so it may be that the server has lost it, and only an answer
+// shows that it has not. Without ClipboardToServer, or without the
+// channel, SetClipboard does nothing.
 func (c *Client) SetClipboard(text []byte) error {
 	if c.cfg.Clipboard&ClipboardToServer == 0 || c.clipCh == nil {
 		return nil
@@ -284,12 +384,14 @@ func (c *Client) SetClipboard(text []byte) error {
 	text = clipboardText(text)
 	c.chio.mu.Lock()
 	cl := &c.clip
-	if cl.owned && bytes.Equal(cl.text, text) {
-		c.chio.mu.Unlock()
-		return nil
-	}
 	cl.text = text
 	cl.listDue = true
+	switch {
+	case text == nil:
+		cl.answerBy = time.Time{} // nothing is left to wait
+	case !cl.ready:
+		c.awaitClipboard(c.clock()) // no list goes until the server is ready
+	}
 	c.chio.mu.Unlock()
 	return c.writeDue()
 }

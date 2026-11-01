@@ -410,8 +410,18 @@ Settled on 2026-10-31.
     while connecting, one while End waits for occamyd, one for the end
     and one for an owner's action not done, the owner's credential prompt
     in a modal `<dialog>` with secret fields as password inputs, a
-    clipboard panel, and a share panel that mints a viewer or read-only
-    link lasting 10 minutes to 12 hours.
+    clipboard panel, a share panel that mints a viewer or read-only
+    link lasting 10 minutes to 12 hours, and a notice over the screen
+    that blocks nothing when the remote has not taken text this client
+    sent. `clipboard-status` raises it, for a client that sent text, and
+    changes nothing else: the text waits for the remote, so the clipboard
+    and the panel keep it, and the local clipboard does not send it again
+    on each focus. The notice says "The remote hasn't taken the clipboard
+    yet. Your text will go when it does.", which holds for a remote still
+    at its logon screen and for one whose clipboard process has gone,
+    since the two look the same. It goes when the remote answers or the
+    user dismisses it, which returns the keys to the canvas unless a panel
+    is open, and text that waits too long again brings it back.
   - The owner's window size goes to the remote 300 ms after it settles,
     in CSS pixels or cells, unless the hello already asked for it, so
     that a remote pixel is a CSS pixel at any device pixel ratio: the
@@ -478,7 +488,7 @@ Settled on 2026-10-31.
   - New: terminal sessions, the clipboard, credential prompts, sharing,
     viewers, visibility, the remote's cursor and title, the bell, and
     why a session ended.
-- **Tests:** 235 in `src/lib` and `src/views`, in the `web` job. Unit
+- **Tests:** 240 in `src/lib` and `src/views`, in the `web` job. Unit
   tests for the API calls against a scripted fetch (each request's
   method, path, headers and exact body, and the time limit on the
   answer and its body), the identity a token names, PKCE against RFC

@@ -218,12 +218,14 @@ func TestSmallState(t *testing.T) {
 			&protocol.ViewerJoined{ViewerID: 7, Role: protocol.RoleReadOnly, Name: "ann"},
 			&protocol.Cursor{HotX: 1, HotY: 0, W: 2, H: 2, Codec: protocol.CodecRaw, Payload: cur},
 			&protocol.ServerClipboard{MIME: "text/plain", Data: []byte("a")},
+			&protocol.ClipboardStatus{},
 			&protocol.Bell{}, &protocol.Bell{}, &protocol.Bell{}, &protocol.Bell{}, &protocol.Bell{},
 			&protocol.ViewerLeft{ViewerID: 7},
 			&protocol.ViewerJoined{ViewerID: 8, Role: protocol.RoleReadOnly},
 			&protocol.Title{Title: "two"},
 			&protocol.CursorMove{X: 3, Y: 4},
 			&protocol.ServerClipboard{MIME: "text/plain", Data: []byte("b")},
+			&protocol.ClipboardStatus{Answering: true},
 			&protocol.Prompt{ID: 5, Name: "ssh", Fields: []protocol.PromptField{{Label: "Password:", Secret: true}}},
 		)
 		sc.sync()
@@ -232,7 +234,7 @@ func TestSmallState(t *testing.T) {
 		for _, ev := range evs {
 			kinds = append(kinds, typeName(ev))
 		}
-		want := []string{"Cursor", "CursorMove", "Title", "Clipboard", "Bell", "Bell", "Bell", "ViewerJoined", "Prompt"}
+		want := []string{"Cursor", "CursorMove", "Title", "Clipboard", "ClipboardStatus", "Bell", "Bell", "Bell", "ViewerJoined", "Prompt"}
 		if !slices.Equal(kinds, want) {
 			t.Fatalf("events %v, want %v", kinds, want)
 		}
@@ -252,10 +254,13 @@ func TestSmallState(t *testing.T) {
 		if cb := evs[3].(client.Clipboard); string(cb.Data) != "b" || cb.MIME != "text/plain" {
 			t.Errorf("clipboard %+v", cb)
 		}
-		if j := evs[7].(client.ViewerJoined); j.ViewerID != 8 {
+		if s := evs[4].(client.ClipboardStatus); !s.Answering {
+			t.Errorf("clipboard status %+v, want the latest", s)
+		}
+		if j := evs[8].(client.ViewerJoined); j.ViewerID != 8 {
 			t.Errorf("joined %+v, want viewer 8 alone", j)
 		}
-		if p := evs[8].(client.Prompt); p.ID != 5 || p.Name != "ssh" || len(p.Fields) != 1 || !p.Fields[0].Secret {
+		if p := evs[9].(client.Prompt); p.ID != 5 || p.Name != "ssh" || len(p.Fields) != 1 || !p.Fields[0].Secret {
 			t.Errorf("prompt %+v", p)
 		}
 
@@ -286,6 +291,8 @@ func typeName(ev client.Event) string {
 		return "Title"
 	case client.Clipboard:
 		return "Clipboard"
+	case client.ClipboardStatus:
+		return "ClipboardStatus"
 	case client.Bell:
 		return "Bell"
 	case client.ViewerJoined:

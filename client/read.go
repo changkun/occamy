@@ -102,6 +102,8 @@ func (s *Session) handle(b []byte) error {
 		return s.event(CursorMove{X: int(m.X), Y: int(m.Y)}, len(b))
 	case *protocol.ServerClipboard:
 		return s.event(Clipboard{MIME: m.MIME, Data: m.Data}, len(b))
+	case *protocol.ClipboardStatus:
+		return s.event(ClipboardStatus{Answering: m.Answering}, len(b))
 	case *protocol.Bell:
 		return s.event(Bell{}, len(b))
 	case *protocol.Title:
@@ -420,7 +422,7 @@ func (s *Session) event(ev Event, n int) error {
 		return nil // nothing is delivered after End
 	}
 	switch ev := ev.(type) {
-	case Title, Clipboard, Cursor, CursorMove:
+	case Title, Clipboard, ClipboardStatus, Cursor, CursorMove:
 		for i := len(s.queue) - 1; i >= 0; i-- {
 			if it := &s.queue[i]; it.f == nil && sameKind(it.ev, ev) {
 				s.backlog += n - it.bytes
@@ -463,6 +465,9 @@ func sameKind(a, b Event) bool {
 		return ok
 	case Clipboard:
 		_, ok := b.(Clipboard)
+		return ok
+	case ClipboardStatus:
+		_, ok := b.(ClipboardStatus)
 		return ok
 	case Cursor:
 		_, ok := b.(Cursor)

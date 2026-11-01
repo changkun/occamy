@@ -26,6 +26,8 @@ type screen struct {
 	copies  int
 	// clipboard holds the clipboards the client reported.
 	clipboard []string
+	// clipStatus holds what the client reported of the clipboard.
+	clipStatus []bool
 }
 
 // Resize panics on a size the client should have refused, so that the
@@ -101,6 +103,19 @@ func (s *screen) Clipboard(mime string, data []byte) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.clipboard = append(s.clipboard, string(data))
+}
+
+func (s *screen) ClipboardStatus(answering bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.clipStatus = append(s.clipStatus, answering)
+}
+
+// clipboardStatus returns what the client reported of the clipboard.
+func (s *screen) clipboardStatus() []bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.clipStatus)
 }
 
 // clipboards returns the clipboards the client reported.

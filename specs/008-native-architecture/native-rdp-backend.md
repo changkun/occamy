@@ -615,6 +615,63 @@ RDP's guacd path, RDP no longer needs guacd at all.
     announcing it again and again makes the client wait. A Format List
     that does not parse is refused with a failed response; a message
     whose length is wrong is dropped; locks and file PDUs are ignored.
+  - The bound on the owner's text (`Config.ClipboardWait`, a minute by
+    default), which reports and changes nothing about the text. On a
+    server only the clipboard process speaks on the channel, so until it
+    does Monitor Ready does not come and a Format List goes unanswered:
+    xrdp behind a logon screen, or without `xrdp-chansrv`, which keeps
+    the session going. The client cannot tell those apart. Text waits
+    from `SetClipboard` for Monitor Ready, or from its Format List for a
+    Format List Response or a Format Data Request, which xrdp sends
+    first. When that passes the bound, `cliprdrDue` has the channel writer
+    call `Output.ClipboardStatus(false)`, which reaches the viewers as
+    `clipboard-status`
+    ([protocol](../../docs/protocol.md#clipboard-status)). The text stays,
+    and goes when the server asks for it. That happens for each wait that
+    ends, as a viewer may have dismissed the last. Any message from the
+    server after that calls `ClipboardStatus(true)`. Monitor Ready starts
+    a new wait, for the list that follows; newer text does not, or text
+    sent every so often would keep the wait from ending. A timer wakes
+    the writer, as for a layout, so nothing here touches the Format List
+    Responses the client owes or the Suppress Output lock. Neither of the
+    server's answers names a list, so the answer to an older list ends
+    the wait for a newer: the viewers then hear nothing if the process
+    dies within that round trip, though the text still waits. Counting
+    lists would close that, but would raise the notice over a server that
+    answers two lists with one, which is the worse failure. A Format
+    List Response that fails is an answer too, and tells nobody.
+
+    The same text again is announced again, which a server may ignore.
+    It used to be left out while the server's latest list was the
+    client's, but then a user who sends again to a server that has lost
+    its process gets no list, no wait and no word: only an answer shows
+    that the process is there. The web client's focus sync does not send
+    text it sent already, so this takes the user's own Send.
+
+    Monitor Ready also forgets a request of the client's that was due or
+    unanswered. A process that started again does not answer what the
+    last was asked, and the client asks for nothing while an answer is
+    awaited, so the server's clipboard would never reach the viewers
+    again.
+
+    The first version dropped the text when the wait ended, so that a
+    server that woke later would not get what the viewers were told it
+    did not. A review found four faults that all came from that: a logon
+    longer than a minute cost a healthy server the text, the same text
+    sent to a dead server raised nothing, a false and a true that
+    collapsed left lost text looking delivered, and a client's revert
+    could show text the remote no longer held. The issue was only ever
+    that nobody was told, and telling them has none of those faults. A
+    client that does not know the message behaves as it always did and
+    loses nothing.
+
+    A minute is twice the longest a working server was seen to need, on
+    a host that other work was loading. The demo's channel server
+    started 20 s after the session opened at load 40 and 12 s after at
+    load 66, each for a new X session, and xrdp may retry it for 10 s
+    more, so text pasted at once may wait 30 s. The first echo of a
+    paste took 7.2 s at load 66. A shorter bound would raise the notice
+    over a paste that was about to work.
   - The backend (`internal/backend/rdp`): `DisableCopy` and
     `DisablePaste`, as guacd's `disable-copy` and `disable-paste`, map
     onto the two modes; with both, no channel. `Input` queues a
@@ -649,8 +706,8 @@ RDP's guacd path, RDP no longer needs guacd at all.
   1, 7, 1,600 and 32 Ki bytes, a chunk straddling the bound, orphan,
   over- and under-length and compressed chunks, writes of 32 chunks;
   the clipboard's initialization before and after the owner's text,
-  both ways, CF_TEXT alone, short format names, the same text not
-  announced twice, no text, stale, unasked and failed answers, each
+  both ways, CF_TEXT alone, short format names, the same text
+  announced again, no text, stale, unasked and failed answers, each
   mode alone, the bounds either way, the requests' bound, pacing, the
   conversions, format lists, and the order of capabilities and Format
   List under a race; the Format List Responses owed, a pass of 64 at a
@@ -782,6 +839,27 @@ RDP's guacd path, RDP no longer needs guacd at all.
   acceptance kept back, and the first version's bound
   (`TestClipboardListResponsesPaced`, `TestClipboardListResponsesAllocs`,
   `TestClipboardListBurst`, `TestClipboardPasteHeldUp`).
+
+  The bound on the owner's text was broken in the same way, 23 mutants,
+  all caught: the text or a list due dropped at the end of the wait,
+  which is what the first version did, the same text left out, no wait
+  for a list or for text held before Monitor Ready, a wait for a list of
+  no text, either answer or Monitor Ready not ending the wait, any
+  message ending it, newer text putting it off, empty text leaving it,
+  an end one tick late, the word not cleared when the server speaks, the
+  Output told once, the writer not woken at the end, Monitor Ready
+  keeping each of the three things it forgets, and a default that is not
+  a minute or goes unused (`TestClipboardUnanswered`,
+  `TestClipboardLateAnswer`, `TestClipboardSlowLogon`,
+  `TestClipboardSameTextAgain`, `TestClipboardSlowAnswer`,
+  `TestClipboardRestartForgetsRequest`, `TestClipboardRestartForgetsDue`,
+  `TestClipboardDefaultWait`, and `TestClipboardWaitBounds`, whose wait
+  is the default). `TestClipboardSlowAnswer` answers a sixth of the way
+  through a wait of 6 s, and must raise nothing. The rest of the path is
+  tested hop by hop (`TestRunClipboardUnanswered`, `TestClipboardStatus`
+  in `session` and `stream`, the client's and the web client's own
+  tests), and whole on xrdp only, as the wait is not a setting of the
+  server.
 - **Fuzzing.** `FuzzChannel` feeds chunks to the reassembly and checks
   the bound; `FuzzCliprdr` feeds a CLIPRDR message, then sets the
   owner's text and writes what is due; `FuzzRun` now joins the
@@ -1309,8 +1387,20 @@ RDP's guacd path, RDP no longer needs guacd at all.
     `TestConnectionPressure`, `TestE2EV1` and `TestE2EV1RDP` in CI's
     order at load 58 to 69. The backend cannot do this for a server:
     Monitor Ready comes from the channel server, so without one nothing
-    answers on the channel. A paste then waits, unsent, until the
-    session ends, and the viewer is told nothing.
+    answers on the channel. A paste then waits, and after a minute the
+    viewers are told (the bound on the owner's text, above).
+
+    `TestE2EV1RDP/clipboard-unanswered` shows that on xrdp. It needs no
+    change to `reconnectwm.sh`: a channel server killed during a
+    connection is not started again before the next one, and until then
+    the session goes on with typing still drawn and no echo of a paste.
+    The subtest kills the channel server, sends again the text that
+    process took, as a user pressing Send does, waits for
+    `clipboard-status` with `answering` false, types, and checks the
+    clipboard on a new connection. On the demo stack at load 27 to 37,
+    with the restart on, the owner heard 1m0s after the paste, the
+    subtest took 64.16 s, and `clipboard` beside it 1.80 s with no false
+    word.
 - **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
   through occamyd's routes with the Go client against `rdptest`: NLA
   with stored credentials, the hello's size, the screen, scancodes,
@@ -2530,12 +2620,6 @@ RDP's guacd path, RDP no longer needs guacd at all.
     10 sessions (`limits.sessions_per_user`) to hostile servers, such
     as ad-hoc targets they chose, take about 10 cores;
     `docs/configuration.md`'s limits say so.
-  - **A paste with no channel server**, for the owner to decide. On an
-    xrdp server whose `xrdp-chansrv` has exited, no Monitor Ready comes,
-    so a paste waits unsent until the session ends, and the viewer is
-    told nothing. Telling the viewer would be a change in occamyd. The
-    demo starts its channel server again (`reconnectwm.sh`), so it does
-    not show this.
   - **PDUs applied that do little**, with the process's budget, before
     the release (found in the third round; the final review measured
     it again). The headers' charge covers what the client skips; what

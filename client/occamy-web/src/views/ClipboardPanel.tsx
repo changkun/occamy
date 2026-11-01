@@ -7,13 +7,14 @@
 // the page reach the local clipboard on its own. The text being edited
 // is the controller's draft, so that a new remote clipboard does not
 // throw away what the user typed. What the last action said goes once
-// the remote clipboard changes or the user edits the text. A terminal
-// session has its own panel, as it has no remote clipboard.
+// the remote clipboard changes or the user edits the text, and gives way
+// to word that text waits for the remote. A terminal session has its own
+// panel, as it has no remote clipboard.
 
 import { type FormEvent, type ReactElement, useId, useState } from 'react'
 
 import { ProtocolError } from '../protocol'
-import type { ClipboardSend, SessionController } from '../lib/controller'
+import { CLIPBOARD_WAITING, type ClipboardSend, type SessionController } from '../lib/controller'
 import { MAX_LABEL, clip } from '../lib/text'
 import type { Abilities } from '../lib/roles'
 import { copyText, pasteLocalClipboard } from './dom'
@@ -24,16 +25,19 @@ export interface ClipboardPanelProps {
   remote: string | null
   /** The text in the panel: the remote's, or what the user made of it. */
   draft: string
+  /** Whether text sent waits for the remote, which has not taken it. */
+  waiting: boolean
   can: Abilities
   onClose: () => void
 }
 
-export function ClipboardPanel({ controller, remote, draft: text, can, onClose }: ClipboardPanelProps): ReactElement {
+export function ClipboardPanel({ controller, remote, draft: text, waiting, can, onClose }: ClipboardPanelProps): ReactElement {
   // What the last action said, with the remote clipboard it was said
   // over: it shows while the remote clipboard stays that.
   const [status, setStatus] = useState<{ text: string; remote: string | null } | null>(null)
   const say = (s: string): void => setStatus({ text: s, remote: controller.getState().clipboard })
-  const shown = status !== null && status.remote === remote ? status.text : ''
+  const said = status !== null && status.remote === remote ? status.text : ''
+  const shown = waiting ? CLIPBOARD_WAITING : said
   // edit puts t in the box, which makes what was said out of date.
   const edit = (t: string): void => {
     controller.setDraft(t)

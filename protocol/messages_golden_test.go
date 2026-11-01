@@ -187,6 +187,8 @@ func messageValues() []namedMessage {
 		{"prompt", &protocol.Prompt{ID: 1, Name: "SSH", Fields: []protocol.PromptField{{Label: "Password: ", Secret: true}}}},
 		{"viewer-joined", &protocol.ViewerJoined{ViewerID: 2, Role: protocol.RoleViewer, Name: "alice"}},
 		{"viewer-left", &protocol.ViewerLeft{ViewerID: 2}},
+		{"clipboard-status silent", &protocol.ClipboardStatus{}},
+		{"clipboard-status answering", &protocol.ClipboardStatus{Answering: true}},
 	}
 }
 
@@ -256,6 +258,7 @@ func invalidMessages() []invalidMessageVector {
 		return invalidMessageVector{Name: name, From: from, Limits: l, Hex: hex.EncodeToString(b)}
 	}
 	key := build(protocol.TypeKey).u32(1).u8(1).u32(0x61).u16(4)
+	status := msgBuilder(protocol.AppendHeader(nil, protocol.Header{Type: protocol.TypeClipboardStatus, Flags: protocol.FlagIgnorable}))
 	return []invalidMessageVector{
 		v("key with an empty body", "client", nil, build(protocol.TypeKey)),
 		v("key cut short", "client", nil, key[:len(key)-1]),
@@ -287,6 +290,9 @@ func invalidMessages() []invalidMessageVector {
 		v("viewer-joined with role 4", "server", nil, build(protocol.TypeViewerJoined).u32(2).u8(4).str("")),
 		v("prompt with secret 2", "server", nil, build(protocol.TypePrompt).u32(1).str("").str("").u16(1).str("Password: ").u8(2)),
 		v("prompt with more fields than bytes", "server", nil, build(protocol.TypePrompt).u32(1).str("").str("").u16(2).str("").u8(0)),
+		v("clipboard-status with an empty body", "server", nil, status),
+		v("clipboard-status with answering 2", "server", nil, status.u8(2)),
+		v("clipboard-status with a byte after the last field", "server", nil, status.u8(1).raw(0)),
 		v("tile of width 0", "server", nil, tile(0, 1, 3, 0, []byte{1})),
 		v("tile of height 0", "server", nil, tile(1, 0, 3, 0, []byte{1})),
 		v("tile wider than the texture size", "server", small, tile(65, 1, 3, 0, []byte{1})),

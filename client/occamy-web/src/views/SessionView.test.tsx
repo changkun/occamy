@@ -588,6 +588,54 @@ describe('The clipboard panel of a stream welcomed as the owner’s', () => {
     expect(box()?.value).toBe('third')
   })
 
+  it('says text waits for the remote, until the remote answers', async () => {
+    const notice = (): Element | null => container.querySelector('.notice[role=alert]')
+    const waiting = "The remote hasn't taken the clipboard yet. Your text will go when it does."
+    await render({ token: accessToken('demo'), action: null }, ended)
+    act(() => remote('first'))
+    await settle()
+    act(() => button('Clipboard')?.click())
+    act(() => type('mine'))
+    act(() => button('Send')?.click())
+    expect(status()).toBe('Sent to the remote clipboard.')
+    expect(notice()).toBeNull()
+
+    act(() => Welcomed.last?.push({ type: 'clipboard-status', answering: false }))
+    await settle()
+    expect(notice()?.textContent).toContain(waiting)
+    expect(status()).toBe(waiting)
+    // The text is on its way: it stays in the box, as the clipboard's.
+    expect(box()?.value).toBe('mine')
+    expect(text()).not.toContain(edited)
+    act(() => button('Send')?.click())
+    expect(Welcomed.last?.clipboards).toEqual(['mine', 'mine'])
+    expect(notice()).not.toBeNull()
+
+    act(() => Welcomed.last?.push({ type: 'clipboard-status', answering: true }))
+    await settle()
+    expect(notice()).toBeNull()
+    expect(status()).toBe('Sent to the remote clipboard.')
+
+    // The user may put the word away, and text that waits again brings
+    // it back. With a panel open, the focus is the panel's business.
+    act(() => Welcomed.last?.push({ type: 'clipboard-status', answering: false }))
+    await settle()
+    act(() => button('Dismiss')?.click())
+    expect(notice()).toBeNull()
+    expect(document.activeElement).not.toBe(container.querySelector('canvas'))
+    act(() => Welcomed.last?.push({ type: 'clipboard-status', answering: false }))
+    await settle()
+    expect(notice()).not.toBeNull()
+
+    // With none, the keys go back to the remote.
+    act(() => button('Close')?.click())
+    expect(notice()).not.toBeNull()
+    act(() => button('Dismiss')?.click())
+    expect(notice()).toBeNull()
+    expect(container.querySelector('canvas')).not.toBeNull()
+    expect(document.activeElement).toBe(container.querySelector('canvas'))
+  })
+
   it('says text too large to send was not sent, and keeps it the user’s to send again', async () => {
     await render({ token: accessToken('demo'), action: null }, ended)
     act(() => remote('first'))

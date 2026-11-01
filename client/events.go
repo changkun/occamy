@@ -12,8 +12,8 @@ import (
 )
 
 // An Event is what Next delivers: one of Frame, Resize, TermSnapshot,
-// TermData, Cursor, CursorMove, Clipboard, Bell, Title, Prompt,
-// ViewerJoined, ViewerLeft and End.
+// TermData, Cursor, CursorMove, Clipboard, ClipboardStatus, Bell, Title,
+// Prompt, ViewerJoined, ViewerLeft and End.
 type Event interface{ event() }
 
 // Frame closes a frame. For a graphical session, the framebuffer holds
@@ -85,6 +85,13 @@ type Clipboard struct {
 	Data []byte
 }
 
+// ClipboardStatus says whether the remote's clipboard is taking text:
+// false when text sent for it has waited too long, each time, with the
+// text still waiting, and true once it answers again.
+type ClipboardStatus struct {
+	Answering bool
+}
+
 // Bell rings the bell.
 type Bell struct{}
 
@@ -128,16 +135,17 @@ type End struct {
 	Err error
 }
 
-func (Frame) event()        {}
-func (Resize) event()       {}
-func (TermSnapshot) event() {}
-func (TermData) event()     {}
-func (Cursor) event()       {}
-func (CursorMove) event()   {}
-func (Clipboard) event()    {}
-func (Bell) event()         {}
-func (Title) event()        {}
-func (Prompt) event()       {}
-func (ViewerJoined) event() {}
-func (ViewerLeft) event()   {}
-func (End) event()          {}
+func (Frame) event()           {}
+func (Resize) event()          {}
+func (TermSnapshot) event()    {}
+func (TermData) event()        {}
+func (Cursor) event()          {}
+func (CursorMove) event()      {}
+func (Clipboard) event()       {}
+func (ClipboardStatus) event() {}
+func (Bell) event()            {}
+func (Title) event()           {}
+func (Prompt) event()          {}
+func (ViewerJoined) event()    {}
+func (ViewerLeft) event()      {}
+func (End) event()             {}

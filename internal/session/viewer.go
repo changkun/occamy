@@ -41,11 +41,13 @@ type Pending struct {
 	Cursor    *Cursor
 	CursorPos *image.Point
 	Clipboard *Clipboard
-	Title     *string
-	Bells     int
-	Joined    []ViewerInfo
-	Left      []int
-	Prompts   []PromptRequest
+	// ClipboardStatus is whether the remote's clipboard is taking text.
+	ClipboardStatus *bool
+	Title           *string
+	Bells           int
+	Joined          []ViewerInfo
+	Left            []int
+	Prompts         []PromptRequest
 	// Input reports that the session applied an input from this viewer,
 	// so the frame that carries its effect should go out first.
 	Input bool

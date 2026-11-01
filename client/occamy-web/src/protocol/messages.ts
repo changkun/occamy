@@ -8,6 +8,7 @@
 // that every golden vector is checked both ways.
 
 import {
+  FLAG_IGNORABLE,
   type Header,
   type Limits,
   MAX_CACHED_PIXELS,
@@ -53,6 +54,7 @@ export const MessageType = {
   Prompt: 0x020d,
   ViewerJoined: 0x020e,
   ViewerLeft: 0x020f,
+  ClipboardStatus: 0x0210,
 } as const
 
 /** The protocol's major version, the first field of hello. */
@@ -213,6 +215,7 @@ export interface Title { type: 'title'; title: string }
 export interface Prompt { type: 'prompt'; id: number; name: string; instruction: string; fields: PromptField[] }
 export interface ViewerJoined { type: 'viewer-joined'; viewerId: number; role: Role; name: string }
 export interface ViewerLeft { type: 'viewer-left'; viewerId: number }
+export interface ClipboardStatus { type: 'clipboard-status'; answering: boolean }
 
 export type ClientMessage =
   | Hello | Key | Text | TermInput | Pointer | Wheel | ResizeRequest
@@ -220,7 +223,7 @@ export type ClientMessage =
 export type ServerMessage =
   | Welcome | Resize | Tile | CopyRect | FrameEnd | Cursor | CursorMove
   | TermData | TermSnapshot | ServerClipboard | Bell | Title | Prompt
-  | ViewerJoined | ViewerLeft
+  | ViewerJoined | ViewerLeft | ClipboardStatus
 export type Message = Ping | Pong | Close | ClientMessage | ServerMessage
 
 /** The peer that sends a message. */
@@ -256,6 +259,7 @@ const typeOf: Record<Message['type'], number> = {
   'prompt': MessageType.Prompt,
   'viewer-joined': MessageType.ViewerJoined,
   'viewer-left': MessageType.ViewerLeft,
+  'clipboard-status': MessageType.ClipboardStatus,
 }
 
 /** messageType returns the type number of a message. */
@@ -274,7 +278,7 @@ export function knownType(t: number, from: Peer): boolean {
   if (from === 'client') {
     return t >= MessageType.Hello && t <= MessageType.PromptReply
   }
-  return t >= MessageType.Welcome && t <= MessageType.ViewerLeft
+  return t >= MessageType.Welcome && t <= MessageType.ClipboardStatus
 }
 
 /**
@@ -434,6 +438,9 @@ function decodeBody(t: number, body: Uint8Array, l: Limits): Message {
       break
     case MessageType.ViewerLeft:
       m = { type: 'viewer-left', viewerId: r.u32() }
+      break
+    case MessageType.ClipboardStatus:
+      m = { type: 'clipboard-status', answering: r.bool() }
       break
     default:
       throw new ProtocolError('unsupported', `type 0x${t.toString(16).padStart(4, '0')} is not a v1 message`)
@@ -620,9 +627,9 @@ function readCodecList(v: Uint8Array): number[] {
   return Array.from(v)
 }
 
-/** encode encodes m, header included, with flags 0. */
+/** encode encodes m, header included, with flags 0, or ignorable for clipboard-status. */
 export function encode(m: Message): Uint8Array {
-  const w = new Writer().header(messageType(m))
+  const w = new Writer().header(messageType(m), m.type === 'clipboard-status' ? FLAG_IGNORABLE : 0)
   switch (m.type) {
     case 'ping':
     case 'pong':
@@ -713,6 +720,9 @@ export function encode(m: Message): Uint8Array {
       break
     case 'viewer-left':
       w.u32(m.viewerId)
+      break
+    case 'clipboard-status':
+      w.bool(m.answering)
       break
   }
   return w.finish()

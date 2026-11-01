@@ -227,6 +227,9 @@ func TestRunClipboardBounded(t *testing.T) {
 	isList(t, m, rdptest.CFUnicodeText, rdptest.CFText)
 	sendClip(t, c, rdptest.FormatDataRequest(rdptest.CFUnicodeText))
 	m = clip(t, c)
+	for m.Type == rdptest.CBFormatList { // the queue's other clipboard, announced too
+		m = clip(t, c)
+	}
 	if got, err := rdptest.FromUnicodeText(m.Data); err != nil || len(got) != rdp.MaxClipboard {
 		t.Errorf("the server got %d bytes, %v; want %d", len(got), err, rdp.MaxClipboard)
 	}

@@ -245,6 +245,8 @@ func TestGoldenServerMessages(t *testing.T) {
 				return ev == client.ViewerJoined{ViewerID: 2, Role: protocol.RoleViewer, Name: "alice"}
 			}},
 			{"viewer-left", func(ev client.Event) bool { return ev == client.ViewerLeft{ViewerID: 2} }},
+			{"clipboard-status silent", func(ev client.Event) bool { return ev == client.ClipboardStatus{} }},
+			{"clipboard-status answering", func(ev client.Event) bool { return ev == client.ClipboardStatus{Answering: true} }},
 			{"pong", nil},
 		} {
 			evs := take(c.name)
