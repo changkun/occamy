@@ -535,11 +535,12 @@ The native ones say `through vnc` or `through rdp`, and the others say
 check certificates as `tls` asks.
 
 A connection through guacd that has shown nothing 90 seconds after guacd
-accepted it fails: the page leaves "Connecting…" for **Could not
-connect** and says why. Either the remote never answered, or guacd's
-process for the connection hung, which happened once in 128 connections
-on a very busy host, for reasons not known. Open it again. `occamyd`
-logs an error with guacd's ID for the connection:
+accepted it, or after the last answer to a prompt, fails: the page
+leaves "Connecting…" for **Could not connect** and says why. Either the
+remote never answered, or guacd's process for the connection hung, which
+happened once in 128 connections on a very busy host, for reasons not
+known. Open it again. `occamyd` logs an error with guacd's ID for the
+connection:
 
 ```
 (cd docker && podman compose logs occamy-v1) | grep 'no first frame'
@@ -552,6 +553,11 @@ there until guacd restarts. That ends every session through guacd:
 ```
 (cd docker && podman compose restart guacd)
 ```
+
+A black screen is not nothing here: guacd's first frame on VNC is sized
+and blank, so a server that finishes ServerInit and then never sends an
+update leaves the page on a black screen, and only the session's idle
+timer ends it.
 
 ## 6. Unit tests, lint and the web client's tests
 

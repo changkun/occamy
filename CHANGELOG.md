@@ -771,7 +771,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   connect" and why, in the reason of the `backend-failed` close, which
   until now said only `failed`. `occamyd` logs an error that says the
   process may still be running and that only restarting guacd clears
-  it: nothing outside the `guacd` container can stop it
+  it: nothing outside the `guacd` container can stop it. A black screen
+  is not covered: guacd's first frame on VNC is sized and blank, so a
+  server that finishes ServerInit and then never sends an update leaves
+  the page black until the idle timer
   ([guacd-bridge.md](specs/008-native-architecture/guacd-bridge.md),
   Implementation notes: a bounded connect).
 - VNC through guacd no longer fails with "Remote unreachable" when a

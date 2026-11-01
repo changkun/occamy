@@ -420,8 +420,8 @@ so the bridge holds what comes early.
 ## Implementation notes: a bounded connect
 
 A session through guacd that shows nothing fails 90 s after guacd
-accepted it, with an error that says so, rather than stay at
-"Connecting…".
+accepted it, or after the owner's last answer to a prompt, with an
+error that says so, rather than stay at "Connecting…".
 
 - **The gap.** `guacd.Handshake` gives guacd 15 s up to `ready`, which
   guacd sends before it connects to the remote, and then clears its
@@ -435,10 +435,17 @@ accepted it, with an error that says so, rather than stay at
   nothing holds guacd's process as long as it likes.
 - **What counts.** The first frame that viewers can see, which is what
   ends "Connecting…": the first sync at which the display has a size,
-  when `session.flush` calls `sink.Resize`. guacd's first sync does not
-  count. On RDP it came 8 ms after the connect, more than 2 s before
-  the default layer had a size, and a limit that stopped there would
-  not cover the login at all. A bare sync reaches viewers as nothing.
+  when `session.flush` calls `sink.Resize`. A sync with no size does
+  not count, and that is guacd's first on RDP: it came 8 ms after the
+  connect, more than 2 s before the default layer had a size, and a
+  limit that stopped there would not cover the login at all. A bare
+  sync reaches viewers as nothing. guacd's first frame on VNC is sized
+  and blank, so it ends the limit, and a server that finishes ServerInit
+  and then never sends an update leaves the page on a black screen,
+  which only the idle timer ends. The limit stops there on purpose:
+  "Connecting…" is over, and the bridge cannot tell that server from a
+  healthy black screen, whose first update changes nothing and so ends
+  no frame.
 - **How it works.** A read deadline on guacd's connection, set when
   the reader starts and cleared by that frame. It is absolute, so
   nothing else guacd sends extends it, not a `nop`, a `name` or a sync
@@ -459,8 +466,11 @@ accepted it, with an error that says so, rather than stay at
   host here: by guacd's sources, the sized frame on RDP needs
   `freerdp_connect` to return and the server's first paint.
   There is no setting, since the bridge goes with guacd. An operator
-  who gives guacd `autoretry`, or `wol-wait-time` for a host that has to
-  wake, gets the same 90 s, and `docs/configuration.md` says so.
+  who gives guacd `autoretry`, `wol-wait-time` for a host that has to
+  wake, VNC's `reverse-connect` with a long `listen-timeout`, or
+  telnet's `login-success-regex`, which holds back the first frame
+  until the login has ended, gets the same 90 s, and
+  `docs/configuration.md` says so.
 - **What viewers are told.** The session's end used to reach them as
   the word `failed`, since a backend's error may hold what a viewer
   must not see, and the page read "Remote unreachable", which names
@@ -487,14 +497,16 @@ accepted it, with an error that says so, rather than stay at
   behind. Without the fix it fails. `TestFirstFrameInTime` draws a
   nanosecond inside the limit and the session goes on past it.
   `TestFirstFrameAfterPrompt` answers a prompt ten limits later, and
-  either draws just inside a new limit or fails at it.
-  `TestFirstFrameLater` has a prompt after the first frame.
+  either draws just inside a new limit or fails at it, with a `size`
+  held from the start, so that it also checks that the hold outlasts
+  the wait. `TestFirstFrameLater` has a prompt after the first frame.
   `TestCloseForFailure` keeps other errors from viewers, and the web
   client's tests check that the page leaves "Connecting…" for the
-  reason. Of 17 mutants, 17 are killed: among them no deadline, a limit
+  reason. Of 18 mutants, 18 are killed: among them no deadline, a limit
   of 60 s or 120 s, the first sync ending it, any instruction extending
   it, a prompt's answer not restarting it or restarting it too early,
-  the log at a lower level, and `CloseFor` telling viewers any error.
+  a timer that ends the hold after two minutes, the log at a lower
+  level, and `CloseFor` telling viewers any error.
 
 ## Implementation notes: conformance corpus
 
