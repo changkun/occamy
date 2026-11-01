@@ -192,7 +192,11 @@ type sessionLimit struct {
 	name      string // "" if it needs no limit
 	protocols uint32 // to offer, if not the client's default
 	godebug   string // the process's GODEBUG setting, if any
-	why       string // why the stages cannot run, if they cannot
+	// pause is how long the connection under the client holds back each
+	// of its first two writes of application data, the second of which
+	// is NEGOTIATE when the server asked for a retry.
+	pause time.Duration
+	why   string // why the stages cannot run, if they cannot
 }
 
 func TestWindows(t *testing.T) {
@@ -400,31 +404,17 @@ func (h windowsHost) open(t *testing.T, stage, item string, cfg Config) *winSess
 			s.trace = append(s.trace, p...)
 		}
 	}
-	if cfg.Protocols == 0 {
-		cfg.Protocols = h.lim.protocols
-	}
-	host, _, err := net.SplitHostPort(h.addr)
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg.TLS.ServerName = host // as Dial does
 	begin := time.Now()
 	cctx, ccancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer ccancel()
-	var d net.Dialer
-	conn, err := d.DialContext(cctx, "tcp", h.addr)
-	if err != nil {
-		cancel()
-		h.f.failed(t, item, "dialing: %v", err)
-		t.FailNow()
+	c, rec, err := h.connect(cctx, cfg)
+	if rec != nil {
+		rec.log(func(format string, args ...any) {
+			t.Helper()
+			t.Logf("the client's TLS: "+format, args...)
+		})
+		h.limitHeld(t, rec)
 	}
-	rec := &wireRecorder{Conn: conn}
-	c, err := Connect(cctx, rec, cfg)
-	rec.log(func(format string, args ...any) {
-		t.Helper()
-		t.Logf("the client's TLS: "+format, args...)
-	})
-	h.limitHeld(t, rec)
 	if err != nil {
 		cancel()
 		var ce *CredSSPError
@@ -455,6 +445,27 @@ func (h windowsHost) open(t *testing.T, stage, item string, cfg Config) *winSess
 	}()
 	t.Cleanup(s.stop)
 	return s
+}
+
+// connect is Dial under the session's limit, over a connection that
+// records the hellos.
+func (h windowsHost) connect(ctx context.Context, cfg Config) (*Client, *wireRecorder, error) {
+	host, _, err := net.SplitHostPort(h.addr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("rdp: %w", err)
+	}
+	cfg.TLS.ServerName = host
+	if cfg.Protocols == 0 {
+		cfg.Protocols = h.lim.protocols
+	}
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", h.addr)
+	if err != nil {
+		return nil, nil, fmt.Errorf("rdp: %w", err)
+	}
+	rec := &wireRecorder{Conn: conn, pause: h.lim.pause}
+	c, err := Connect(ctx, rec, cfg)
+	return c, rec, err
 }
 
 // limitHeld checks, from what the client sent, that a limit that a
@@ -826,6 +837,7 @@ type replayAttempt struct {
 	protocols uint32            // to offer, if not the client's default
 	limit     func(*tls.Config) // what it changes of the client's TLS
 	version   int               // of the first TSRequest, if not the client's
+	pause     time.Duration     // between the TLS handshake and NEGOTIATE
 	// client is how the client itself takes the same limit, as it is;
 	// nil if that needs a change to it.
 	client *sessionLimit
@@ -842,6 +854,12 @@ var replayAttempts = []replayAttempt{
 		},
 		client: &sessionLimit{name: "tls13-classic (GODEBUG=tlsmlkem=0)", godebug: "tlsmlkem=0"},
 	},
+	{label: "tls13-pause-500ms", pause: 500 * time.Millisecond, client: &sessionLimit{
+		name:  "tls13-pause-500ms (the test's connection holds back the client's first application data)",
+		pause: 500 * time.Millisecond,
+	}},
+	{label: "tls13-pause-10ms", pause: 10 * time.Millisecond},
+	{label: "tls13-pause-1ms", pause: time.Millisecond},
 	{label: "tls13-p384", limit: func(c *tls.Config) { c.CurvePreferences = []tls.CurveID{tls.CurveP384} }},
 	{label: "tls12", limit: func(c *tls.Config) { c.MaxVersion = tls.VersionTLS12 }},
 	{label: "credssp-v2", version: 2},
@@ -973,6 +991,7 @@ func (h windowsHost) replay(t *testing.T, a replayAttempt) (reached int, note st
 	if a.version != 0 {
 		version = a.version
 	}
+	time.Sleep(a.pause)
 	nc := &ntlmClient{user: h.user, password: h.password}
 	negotiate := nc.negotiateMessage()
 	logf("round 1: TSRequest version %d, NEGOTIATE % x", version, negotiate)
@@ -1070,17 +1089,27 @@ type wireRecorder struct {
 	mu             sync.Mutex
 	sent, received []byte
 	done           bool
+	pause          time.Duration // see sessionLimit
+	paused         int
 }
 
 func (r *wireRecorder) Write(p []byte) (int, error) {
+	application := len(p) > 0 && p[0] == recordApplicationData
 	r.mu.Lock()
-	if len(p) > 0 && p[0] == recordApplicationData {
+	if application {
 		r.done = true
 	}
 	if !r.done {
 		r.sent = append(r.sent, p...)
 	}
+	hold := application && r.paused < 2
+	if hold {
+		r.paused++
+	}
 	r.mu.Unlock()
+	if hold {
+		time.Sleep(r.pause)
+	}
 	return r.Conn.Write(p)
 }
 
@@ -1442,7 +1471,7 @@ func (h windowsHost) wrongPassword(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	begin := time.Now()
-	c, err := Dial(ctx, h.addr, Config{Username: h.user, Password: h.password + "x", Protocols: h.lim.protocols, TLS: TLS{InsecureSkipVerify: true},
+	c, _, err := h.connect(ctx, Config{Username: h.user, Password: h.password + "x", TLS: TLS{InsecureSkipVerify: true},
 		Logger: slog.New(slog.NewTextHandler(testWriter{t}, nil))})
 	if err == nil {
 		c.Close()
