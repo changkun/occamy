@@ -271,7 +271,7 @@ func TestParseV1Example(t *testing.T) {
 		},
 		AdhocAllowlist: []string{"10.0.0.0/8", "*.lab.internal:22"},
 		AdhocBackends:  map[string]string{"ssh": "native", "vnc": "native", "rdp": "native", "telnet": "guacd"},
-		Limits:         config.Limits{Sessions: 500, SessionsPerUser: 20, ViewersPerSession: 50, SharesPerSession: 100},
+		Limits:         config.Limits{Sessions: 500, SessionsPerUser: 20, ViewersPerSession: 50, SharesPerSession: 100, DecodeCores: 4},
 		Streams:        config.Streams{ViewerTimeout: 45 * time.Second},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -1093,11 +1093,12 @@ connections:
 		}},
 
 		// Limits.
-		{"negative limits", head + "limits: {sessions: -4, sessions_per_user: -1, viewers_per_session: -2, shares_per_session: -3}\n", []want{
+		{"negative limits", head + "limits: {sessions: -4, sessions_per_user: -1, viewers_per_session: -2, shares_per_session: -3, decode_cores: -5}\n", []want{
 			{"limits.sessions", "must be at least 1"},
 			{"limits.sessions_per_user", "must be at least 1"},
 			{"limits.viewers_per_session", "must be at least 1"},
 			{"limits.shares_per_session", "must be at least 1"},
+			{"limits.decode_cores", "must be at least 1"},
 		}},
 		{"short viewer timeout", head + "streams: {viewer_timeout: 500ms}\n", []want{{"streams.viewer_timeout", "500ms is less than 1s"}}},
 		{"negative viewer timeout", head + "streams: {viewer_timeout: -1s}\n", []want{{"streams.viewer_timeout", "-1s is less than 1s"}}},

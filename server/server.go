@@ -27,6 +27,7 @@ import (
 
 	"changkun.de/x/occamy/internal/auth"
 	"changkun.de/x/occamy/internal/config"
+	rdpproto "changkun.de/x/occamy/internal/rdp"
 	"changkun.de/x/occamy/internal/session"
 )
 
@@ -241,7 +242,7 @@ func newServer(f *config.File) (*server, error) {
 		signIn:        signIn,
 		connections:   f.Connections,
 		origins:       map[string]bool{},
-		backends:      newBackends(f.Guacd),
+		backends:      newBackends(f.Guacd, rdpproto.NewBudget(limits.DecodeCores)),
 		adhocBackends: f.AdhocBackends,
 		registry:      registry,
 		stop:          stop,

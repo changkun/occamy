@@ -155,6 +155,10 @@ type Limits struct {
 	ViewersPerSession int `yaml:"viewers_per_session"`
 	// SharesPerSession is the most unexpired shares a session has.
 	SharesPerSession int `yaml:"shares_per_session"`
+	// DecodeCores is the cores of decoding that occamyd's native RDP
+	// sessions share. Zero, which WithDefaults keeps, is half of
+	// GOMAXPROCS, at least 1, as occamyd starts (rdp.NewBudget).
+	DecodeCores int `yaml:"decode_cores"`
 }
 
 // WithDefaults returns l with the defaults in place of zero.

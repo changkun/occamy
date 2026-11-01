@@ -94,6 +94,10 @@ type Config struct {
 	// skipped, and so are the cache's PDUs. A server that does not open
 	// the channel draws with bitmap updates as without it.
 	GFX bool
+	// Budget is the decoding that the client shares with others, on top
+	// of its own decodeRate; nil means a Budget of the default size, one
+	// for all the process's clients that have none.
+	Budget *Budget
 	// Logger receives warnings; nil means slog.Default().
 	Logger *slog.Logger
 
@@ -208,6 +212,8 @@ type Client struct {
 	gfxWarned  bool      // the session warned of GFX that the client skips
 	tokens     float64   // the pixels the client may decode; below 0, its debt
 	paced      time.Time // when tokens was last brought up to date
+	credit     int       // what is left of the slices of cfg.Budget it took
+	sliced     time.Time // when its last slice was paid for
 	rbuf       []byte
 	errInfo    ErrorInfo
 
@@ -253,7 +259,8 @@ const (
 	// that core. A token bucket holds two desktops of tiles and a tile
 	// (paceBurst), so that the first screen, or a resize's, never waits;
 	// while it is empty, the client waits, and the server's updates
-	// queue behind it.
+	// queue behind it. The rate is a session's: a Budget bounds sessions
+	// together.
 	decodeRate = 1 << 29
 )
 
@@ -315,6 +322,9 @@ func Connect(ctx context.Context, conn net.Conn, cfg Config) (*Client, error) {
 	}
 	if cfg.Protocols == 0 {
 		cfg.Protocols = ProtocolHybrid | ProtocolHybridEx
+	}
+	if cfg.Budget == nil {
+		cfg.Budget = processBudget()
 	}
 	var addr, host string
 	if ra := conn.RemoteAddr(); ra != nil {
@@ -924,10 +934,26 @@ func paceBurst(w, h int) float64 {
 	return 2*rfxPixelCost*float64(w)*float64(h) + pointerCost
 }
 
-// pace charges n decoded pixels to the token bucket of decodeRate, and
-// waits while the bucket is in debt. The wait follows from the debt, so
-// a bitmap larger than the bucket waits its share too.
+// pace charges n decoded pixels to the token bucket of decodeRate and to
+// the Budget, and waits while the Budget's slices are not paid for or
+// the bucket is in debt. The wait follows from the debt, so a bitmap
+// larger than the bucket waits its share too. The bucket is charged
+// first, so that the time a client waits for the Budget also pays what
+// it owes the bucket: a session alone is held to decodeRate, not less.
 func (c *Client) pace(n int) error {
+	c.refill()
+	c.tokens -= float64(n)
+	if err := c.spend(n); err != nil {
+		return err
+	}
+	if c.tokens >= 0 {
+		return nil
+	}
+	return c.wait(time.Duration(-c.tokens / decodeRate * float64(time.Second)))
+}
+
+// refill brings the token bucket up to date.
+func (c *Client) refill() {
 	now := c.clock()
 	burst := paceBurst(c.Size())
 	if c.paced.IsZero() {
@@ -936,11 +962,38 @@ func (c *Client) pace(n int) error {
 		c.tokens = min(burst, c.tokens+now.Sub(c.paced).Seconds()*decodeRate)
 	}
 	c.paced = now
-	c.tokens -= float64(n)
-	if c.tokens >= 0 {
+}
+
+// spend takes n units of the Budget, if any, from what is left of the
+// client's slices and a slice at a time beyond them: a charge of any
+// size waits for its slices one by one, behind the other clients', so
+// that it delays none of them by more than a slice each. What it leaves
+// of the last slice goes to the next charges, so that small charges
+// take no more turns than a large one of their sum. The time since the
+// last slice was paid for counts towards the wait for the next, as the
+// client spent it decoding or had nothing to decode: a turn of the
+// clients then takes it no longer than it takes the others, who leave
+// the queue for no time at all.
+func (c *Client) spend(n int) error {
+	if c.cfg.Budget == nil {
 		return nil
 	}
-	return c.wait(time.Duration(-c.tokens / decodeRate * float64(time.Second)))
+	for c.credit -= n; c.credit < 0; c.credit += budgetSlice {
+		now := c.clock()
+		d := c.cfg.Budget.take(now)
+		if !c.sliced.IsZero() {
+			d -= now.Sub(c.sliced)
+		}
+		if d > 0 {
+			if err := c.wait(d); err != nil {
+				return err
+			}
+			c.refill()
+			now = now.Add(d)
+		}
+		c.sliced = now
+	}
+	return nil
 }
 
 // handleShareData handles a share data PDU after its share control

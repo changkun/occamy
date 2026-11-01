@@ -139,7 +139,7 @@ func (c *Client) gfxWireToSurface2(r *reader) error {
 		return err
 	}
 	if codec != gfxCodecProgressive {
-		c.gfxSkipPDU("GFX bitmaps of unknown codecs")
+		c.gfxSkipped("GFX bitmaps of unknown codecs")
 		return nil
 	}
 	if s.prog == nil {
@@ -160,7 +160,7 @@ func (c *Client) gfxDeleteContext(r *reader) error {
 		return r.err
 	}
 	if s := c.gfx.surfaces[id]; s == nil || s.prog == nil {
-		c.gfxSkipPDU("GFX deletes of no codec context")
+		c.gfxSkipped("GFX deletes of no codec context")
 	}
 	return nil
 }
@@ -168,11 +168,9 @@ func (c *Client) gfxDeleteContext(r *reader) error {
 // progStream applies an RFX_PROGRESSIVE_BITMAP_STREAM to s. Its frame
 // is its own: a region outside the stream's FRAME_BEGIN and FRAME_END
 // is ignored ([MS-RDPEGFX] 2.2.4.2.1.5), as is a block of a type that
-// the client does not know, each counted. The stream, which may be of
-// no blocks, is charged pduCost, and each of its blocks blockCost,
-// which their message pays at its end (gfxMessage).
+// the client does not know, each counted. Each of its blocks is charged
+// blockCost, which their message pays at its end (gfxMessage).
 func (c *Client) progStream(s *surface, data []byte) error {
-	c.gfx.owed += pduCost
 	inFrame := false
 	for len(data) > 0 {
 		r := reader{b: data}

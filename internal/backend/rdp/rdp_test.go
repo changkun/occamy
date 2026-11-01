@@ -26,6 +26,18 @@ import (
 	"changkun.de/x/occamy/internal/rdp/rdptest"
 )
 
+// The Budget of a Config reaches the client's.
+func TestBudget(t *testing.T) {
+	budget := rdp.NewBudget(3)
+	b, err := New(Config{Addr: "127.0.0.1", Budget: budget})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Budget() != budget {
+		t.Errorf("the client's budget: %p, want %p", b.Budget(), budget)
+	}
+}
+
 func TestNew(t *testing.T) {
 	ok := Config{Addr: "host", TLS: rdp.TLS{InsecureSkipVerify: true}}
 	b, err := New(ok)

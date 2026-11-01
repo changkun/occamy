@@ -1307,8 +1307,8 @@ func TestRFXMalformed(t *testing.T) {
 
 // Each tile is charged rfxTileCost, as is each tile block of a
 // progressive region, skipped or not, and the pixels it draws within
-// the rectangles, and a pixel for each rectangle. A progressive stream
-// is charged pduCost, and each of its blocks blockCost.
+// the rectangles, and a pixel for each rectangle. Each PDU is charged
+// pduCost, and each block of a message or stream blockCost.
 func TestRFXPace(t *testing.T) {
 	coef := rdptest.EncodeTile(testImage(0, 0), image.Point{}, &fineQuant, false)
 	var tile rdptest.RFXTile
@@ -1341,13 +1341,13 @@ func TestRFXPace(t *testing.T) {
 		return rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, rdptest.Progressive(1, rdptest.ProgRegion{Quants: xrdpQuant[:], ProgQuants: progQualities,
 			Extrapolate: extra, Tiles: [][]byte{e3.upgrade(1, progQualities[1].BitPos)}}))
 	}
-	// stream is what a progressive stream of blocks costs beyond its
-	// tiles: a frame of n regions is n+2 blocks. head is what a region's
-	// or tile set's rectangles and quantization tables cost, a quality
-	// three tables: these regions' are pq. Their units are pduCost's and
+	// stream is what a W2S1 or W2S2 PDU of blocks costs beyond its tiles:
+	// a frame of n regions is n+2 blocks. head is what a region's or tile
+	// set's rectangles and quantization tables cost, a quality three
+	// tables: these regions' are pq. Their units are pduCost's and
 	// blockCost's as measured (BenchmarkSkipped), so that lowering
 	// either takes measuring again.
-	const blockUnits, pduUnits = 8, 24
+	const blockUnits, pduUnits = 8, 32
 	stream := func(blocks int) int { return pduUnits + blocks*blockUnits }
 	head := func(rects, tables int) int { return (rects + tables) * blockUnits }
 	pq := len(xrdpQuant) + 3*len(progQualities)
@@ -1358,10 +1358,10 @@ func TestRFXPace(t *testing.T) {
 		want  int
 	}{
 		// FRAME_BEGIN, the region, the tile set and FRAME_END.
-		{"remotefx", nil, rfx, 4*blockUnits + head(2, 1) + 2*rfxTileCost + 2 + 64*30 + 64*24 + 2 + 36*30},
+		{"remotefx", nil, rfx, stream(4) + head(2, 1) + 2*rfxTileCost + 2 + 64*30 + 64*24 + 2 + 36*30},
 		// A block of a type that the client does not know is skipped.
 		{"remotefx, unknown blocks", nil, rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, image.Rect(16, 16, 144, 80),
-			[]byte{0xcf, 0xcc, 6, 0, 0, 0, 0xcf, 0xcc, 7, 0, 0, 0, 0}), 2 * blockUnits},
+			[]byte{0xcf, 0xcc, 6, 0, 0, 0, 0xcf, 0xcc, 7, 0, 0, 0, 0}), stream(2)},
 		// An empty rectangle, which clips the tiles away, is not decoded,
 		// and is skipped.
 		{"remotefx, empty", nil, rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, image.Rect(16, 16, 16, 80),
@@ -1380,7 +1380,7 @@ func TestRFXPace(t *testing.T) {
 		// A codec context's delete, and a W2S2 of another context, end
 		// nothing; a delete on a surface without RemoteFX Progressive is
 		// skipped.
-		{"context delete", progTwice, deleteContext(1), 0},
+		{"context delete", progTwice, deleteContext(1), pduUnits},
 		{"context delete, no codec context", nil, deleteContext(1), pduUnits},
 		{"context switch", progTwice, rdptest.WireToSurface2(1, rdptest.CodecProgressive, 2, rdptest.PixelXRGB, nil), stream(0)},
 	} {

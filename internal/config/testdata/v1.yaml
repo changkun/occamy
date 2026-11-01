@@ -236,6 +236,9 @@ limits:
   viewers_per_session: 50
   # Unexpired shares a session has. Default 100.
   shares_per_session: 100
+  # Cores of decoding that native RDP sessions share. Default half of
+  # GOMAXPROCS, at least 1.
+  decode_cores: 4
 
 # What occamyd keeps for one viewer.
 streams:

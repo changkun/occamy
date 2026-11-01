@@ -108,12 +108,13 @@ func (b backends) serves(protocol string) bool {
 // native Kubernetes backend for kubernetes, and the guacd bridge at g
 // for telnet, and for vnc and rdp with backend: guacd. kubernetes has
 // no guacd backend
-// (specs/008-native-architecture/native-kubernetes-backend.md).
-func newBackends(g config.Guacd) backends {
+// (specs/008-native-architecture/native-kubernetes-backend.md). The
+// native RDP sessions share budget, the decoding of the process.
+func newBackends(g config.Guacd, budget *rdpproto.Budget) backends {
 	b := backends{}
 	b.register("ssh", config.BackendNative, "ssh", newSSH)
 	b.register("vnc", config.BackendNative, "vnc", newVNC)
-	b.register("rdp", config.BackendNative, "rdp", newRDP)
+	b.register("rdp", config.BackendNative, "rdp", func(t target, s screen) (backend.Backend, error) { return newRDP(t, s, budget) })
 	b.register("kubernetes", config.BackendNative, "kubernetes", newKubernetes)
 	for _, p := range []string{"vnc", "rdp", "telnet"} {
 		b.register(p, config.BackendGuacd, "guacd", newBridge(g, p))
@@ -269,13 +270,15 @@ func ardSetting(t target) string {
 }
 
 // newRDP makes a native RDP backend, which connects with the desktop size
-// of the owner's hello, within the sizes an RDP desktop may have.
-func newRDP(t target, s screen) (backend.Backend, error) {
+// of the owner's hello, within the sizes an RDP desktop may have, and
+// decodes within budget.
+func newRDP(t target, s screen, budget *rdpproto.Budget) (backend.Backend, error) {
 	cfg, err := rdpConfig(t)
 	if err != nil {
 		return nil, err
 	}
 	cfg.Width, cfg.Height = rdpSize(s)
+	cfg.Budget = budget
 	return rdp.New(cfg)
 }
 
