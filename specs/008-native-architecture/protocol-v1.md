@@ -374,7 +374,12 @@ web client ([009](../009-react-web-client.md)) and the client core
     end reasons: the server sends `unauthorized`, `forbidden` and
     `viewer-limit` when it refuses a stream, and `too-slow` when it
     drops a viewer. (Corrected 2026-10-31: this said the end reasons
-    map onto the codes from 4002 and onto 1001.)
+    map onto the codes from 4002 and onto 1001.) A close's reason is the
+    end reason's name, since a backend's error may name what a viewer
+    must not see, unless the error is a `backend.Failure`, whose text
+    is written for viewers; the guacd bridge's first-frame limit is the
+    only one so far. A client takes the reason as text either way, so
+    this changed nothing on the wire but the text (2026-11-01).
   - Since that review, too: a viewer that leaves a frame
     unacknowledged for the server's viewer timeout gets `too-slow`,
     hidden or not, so a hidden client acknowledges the frames it was
