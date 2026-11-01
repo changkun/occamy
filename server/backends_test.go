@@ -27,13 +27,14 @@ import (
 	"changkun.de/x/occamy/internal/backend/ssh"
 	"changkun.de/x/occamy/internal/backend/vnc"
 	"changkun.de/x/occamy/internal/config"
+	rdpproto "changkun.de/x/occamy/internal/rdp"
 )
 
 // fakeHostKey is a host key fingerprint in the form ssh-keygen -l prints.
 const fakeHostKey = "SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"
 
 func TestBackendDefaults(t *testing.T) {
-	b := newBackends(config.Guacd{Address: config.DefaultGuacdAddress})
+	b := newBackends(config.Guacd{Address: config.DefaultGuacdAddress}, nil)
 	got := map[string]string{}
 	for k, m := range b {
 		got[k.protocol+"/"+k.backend] = m.name
@@ -310,19 +311,49 @@ func TestLoadWarnings(t *testing.T) {
 	}
 }
 
+// The native RDP sessions of a server share one budget, of
+// limits.decode_cores.
+func TestRDPBudget(t *testing.T) {
+	f := testFile(t)
+	f.Limits.DecodeCores = 3
+	s, err := newServer(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(s.shutdown)
+	m, ok := s.backends.lookup("rdp", "")
+	if !ok {
+		t.Fatal("no native RDP backend")
+	}
+	budget := func() *rdpproto.Budget {
+		b, err := m.make(target{addr: "127.0.0.1:3389", creds: config.Credentials{Prompt: true}}, screen{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b.(*rdp.Backend).Budget()
+	}
+	first := budget()
+	if first == nil || first.Cores() != 3 {
+		t.Fatalf("a session's budget: %+v, want 3 cores", first)
+	}
+	if budget() != first {
+		t.Error("two sessions have budgets of their own")
+	}
+}
+
 func TestNewRDP(t *testing.T) {
 	t.Setenv("OCCAMY_TEST_RDP_PASSWORD", "pw")
-	b, err := newRDP(target{addr: "127.0.0.1:3389", creds: config.Credentials{PasswordEnv: "OCCAMY_TEST_RDP_PASSWORD"}}, screen{})
+	b, err := newRDP(target{addr: "127.0.0.1:3389", creds: config.Credentials{PasswordEnv: "OCCAMY_TEST_RDP_PASSWORD"}}, screen{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := b.(*rdp.Backend); !ok {
 		t.Errorf("%T, want *rdp.Backend", b)
 	}
-	if _, err := newRDP(target{addr: "127.0.0.1:3389", creds: config.Credentials{PasswordEnv: "OCCAMY_TEST_UNSET"}}, screen{}); err == nil {
+	if _, err := newRDP(target{addr: "127.0.0.1:3389", creds: config.Credentials{PasswordEnv: "OCCAMY_TEST_UNSET"}}, screen{}, nil); err == nil {
 		t.Error("an unset password variable made a backend")
 	}
-	if _, err := newRDP(target{addr: "127.0.0.1:3389", security: "rdp", creds: config.Credentials{Prompt: true}}, screen{}); err == nil {
+	if _, err := newRDP(target{addr: "127.0.0.1:3389", security: "rdp", creds: config.Credentials{Prompt: true}}, screen{}, nil); err == nil {
 		t.Error("an unknown security mode made a backend")
 	}
 
@@ -344,7 +375,7 @@ func TestNewRDP(t *testing.T) {
 		if w, h := rdpSize(tt.s); w != tt.w || h != tt.h {
 			t.Errorf("rdpSize(%+v) = %d×%d, want %d×%d", tt.s, w, h, tt.w, tt.h)
 		}
-		if _, err := newRDP(target{addr: "127.0.0.1:3389", creds: config.Credentials{Prompt: true}}, tt.s); err != nil {
+		if _, err := newRDP(target{addr: "127.0.0.1:3389", creds: config.Credentials{Prompt: true}}, tt.s, nil); err != nil {
 			t.Errorf("screen %+v: %v", tt.s, err)
 		}
 	}
@@ -387,7 +418,7 @@ func TestNewRDP(t *testing.T) {
 		"missing CA file":    {CAFile: filepath.Join(t.TempDir(), "nope")},
 		"pins and a CA file": {CAFile: ca, Pins: pins},
 	} {
-		if _, err := newRDP(target{addr: "10.0.0.5:3389", creds: config.Credentials{Prompt: true}, tls: tls}, screen{}); err == nil {
+		if _, err := newRDP(target{addr: "10.0.0.5:3389", creds: config.Credentials{Prompt: true}, tls: tls}, screen{}, nil); err == nil {
 			t.Errorf("%s: made a backend", name)
 		}
 	}

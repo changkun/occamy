@@ -552,9 +552,9 @@ func TestGFXIgnored(t *testing.T) {
 	}
 }
 
-// Each PDU or bitmap that the client skips is charged pduCost, and
-// counted at its message's end, once a name: a flood of one name is
-// tallied under it, not a tally each.
+// Each PDU that the client skips, or whose bitmap it skips, is charged
+// pduCost as one it applies is, and counted at its message's end, once
+// a name: a flood of one name is tallied under it, not a tally each.
 func TestGFXSkipCharged(t *testing.T) {
 	r := image.Rect(0, 0, 8, 8)
 	for _, tc := range []struct {
@@ -583,8 +583,8 @@ func TestGFXSkipCharged(t *testing.T) {
 		}
 		before := g.c.tokens
 		g.must(t, tc.msg...)
-		if got := before - g.c.tokens; got != pduCost {
-			t.Errorf("%s: charged %v, want %d", tc.name, got, pduCost)
+		if got, want := before-g.c.tokens, float64(len(tc.msg)*pduCost); got != want {
+			t.Errorf("%s: charged %v, want %v", tc.name, got, want)
 		}
 		if n := g.c.Stats().Ignored[tc.name]; n != 1 {
 			t.Errorf("%s: counted %d, want 1", tc.name, n)
@@ -1123,8 +1123,8 @@ func TestGFXReopen(t *testing.T) {
 	}
 }
 
-// Each PDU that changes pixels is charged as bitmaps of the pixels it
-// changes, after its clipping.
+// Each PDU is charged pduCost, applied or skipped, and one that changes
+// pixels as bitmaps of the pixels it changes as well, after its clipping.
 func TestGFXPace(t *testing.T) {
 	g := newGFXTest(t, 256, 256)
 	if err := g.c.pace(0); err != nil {
@@ -1153,15 +1153,21 @@ func TestGFXPace(t *testing.T) {
 		{"copy from offscreen", rdptest.SurfaceToSurface(2, 1, image.Rect(0, 0, 8, 4), image.Pt(64, 0)), 8 * 4, false},
 		{"uncompressed", rdptest.WireToSurface1(1, rdptest.CodecUncompressed, rdptest.PixelXRGB, image.Rect(0, 0, 8, 8), rdptest.Uncompressed(img)), 8 * 8, false},
 		{"planar", rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(8, 8, 16, 16), rdptest.Planar(img)), planarCost * 8 * 8, false},
-		// A PDU that the client skips costs its header.
-		{"stored", ignored, pduCost, false},
-		{"compressed", ignored, pduCost, true},
+		// PDUs that do little cost their header alone: applied, ...
+		{"capability confirm", rdptest.CapsConfirm(rdptest.CapVersion107, 0), 0, false},
+		{"start frame", rdptest.StartFrame(1), 0, false},
+		{"end frame", rdptest.EndFrame(1), 0, false},
+		{"context delete", rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, []byte{1, 0, 1, 0, 0, 0}), 0, false},
+		{"RemoteFX of no blocks", rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, image.Rect(0, 0, 8, 8), nil), 0, false},
+		// ... or skipped.
+		{"stored", ignored, 0, false},
+		{"compressed", ignored, 0, true},
 		// The mapped surface drawn again; a larger desktop, so that its
 		// larger bucket does not clamp what is left.
 		{"reset", rdptest.ResetGraphics(300, 300), 128 * 64, false},
 	} {
 		before := g.c.tokens
-		want := tc.n
+		want := tc.n + pduCost
 		if tc.zip {
 			msg := g.enc.Single(tc.pdu, rdptest.SegCompressed)
 			want += (len(tc.pdu) - len(msg)) / 4
@@ -1194,7 +1200,7 @@ func TestGFXExposeCharged(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
 		setup [][]byte
-		msg   [][]byte // one message
+		msg   [][]byte // one message, charged pduCost a PDU on top of want
 		bmp   bool     // a bitmap update of 1×1 at 0,0 in place of msg
 		want  int
 	}{
@@ -1211,6 +1217,7 @@ func TestGFXExposeCharged(t *testing.T) {
 		// 6×6 pixels in its cell at 64,64.
 		{"cell at a surface's edge", append(surfacePDUs(stack-1, 70, 70, image.Point{}), surfacePDUs(100, 1, 1, image.Pt(65, 65))...), [][]byte{rdptest.DeleteSurface(100)}, false, (stack-1)*cell + 6*6},
 	} {
+		want := tc.want + len(tc.msg)*pduCost
 		t.Run(tc.name, func(t *testing.T) {
 			g := newGFXTest(t, 512, 512)
 			var setup [][]byte
@@ -1239,8 +1246,8 @@ func TestGFXExposeCharged(t *testing.T) {
 			}
 			tokens2, slept2 := settle()
 			got := tokens - tokens2 + (slept2-slept).Seconds()*decodeRate
-			if math.Abs(got-float64(tc.want)) > 8 {
-				t.Errorf("charged %.0f pixels, want %d", got, tc.want)
+			if math.Abs(got-float64(want)) > 8 {
+				t.Errorf("charged %.0f pixels, want %d", got, want)
 			}
 		})
 	}
@@ -1568,8 +1575,8 @@ func benchFrame(b *testing.B, tile func(image.Rectangle, *image.RGBA) []byte) {
 // again, and empty bitmaps. Its core metric is the share of a core
 // that the flood gets: what it costs over what it is charged at
 // decodeRate. The last are PDUs applied that do little: capability
-// confirms, codec contexts' deletes, bitmaps and fills of a pixel,
-// charged that pixel alone, and RemoteFX PDUs of no blocks.
+// confirms, codec contexts' deletes, bitmaps and fills of a pixel, and
+// RemoteFX PDUs of no blocks, charged pduCost and that pixel, if any.
 func BenchmarkSkipped(b *testing.B) {
 	const n = 4096
 	block := func(typ int) []byte { return []byte{byte(typ), byte(typ >> 8), 6, 0, 0, 0} }

@@ -179,6 +179,7 @@ func (f *File) validate(c *checker) {
 		{"limits.sessions_per_user", f.Limits.SessionsPerUser},
 		{"limits.viewers_per_session", f.Limits.ViewersPerSession},
 		{"limits.shares_per_session", f.Limits.SharesPerSession},
+		{"limits.decode_cores", f.Limits.DecodeCores},
 	} {
 		if l.n < 0 {
 			c.add(l.path, "must be at least 1, or 0 for the default")

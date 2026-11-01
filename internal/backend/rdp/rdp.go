@@ -21,7 +21,8 @@
 //
 // Every length the server sends is bounded by the client before it is
 // read or allocated, and the client decodes bitmaps and pointer updates
-// at a bounded rate of pixels (internal/rdp).
+// at a bounded rate of pixels (internal/rdp), a rate that Config.Budget
+// bounds for sessions together.
 package rdp
 
 import (
@@ -166,6 +167,9 @@ type Config struct {
 	// ([MS-RDPEGFX]), which it asks for by default, so that the server
 	// draws with bitmap updates, as guacd's disable-gfx does.
 	DisableGFX bool
+	// Budget is the decoding that the backend shares with others; nil
+	// means the budget of all the process's clients that name none.
+	Budget *rdp.Budget
 	// DialTimeout bounds the TCP connection and defaults to 15 seconds.
 	// Only Run's context bounds the rest, since it may wait for the owner
 	// to answer a prompt.
@@ -197,6 +201,9 @@ type Backend struct {
 }
 
 var _ backend.Backend = (*Backend)(nil)
+
+// Budget returns the Config's Budget.
+func (b *Backend) Budget() *rdp.Budget { return b.cfg.Budget }
 
 // New returns a backend for cfg. It checks the configuration, but does
 // not connect.
@@ -258,6 +265,7 @@ func New(cfg Config) (*Backend, error) {
 			Clipboard:      clip,
 			Resize:         true,
 			GFX:            !cfg.DisableGFX,
+			Budget:         cfg.Budget,
 			Logger:         cfg.Logger,
 		},
 		dialTimeout:     cfg.DialTimeout,

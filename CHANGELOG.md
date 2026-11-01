@@ -9,6 +9,22 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- `limits.decode_cores`, a decoding budget for the whole process. Each
+  native RDP session may take about a core, so one user's
+  `limits.sessions_per_user` sessions to hostile servers would take
+  that many; together they now take about `decode_cores`, half of
+  `GOMAXPROCS` by default and at least 1. A session over its share
+  waits, with its server's updates queued behind it: nothing is
+  dropped, and a wait ends with the session. Of n sessions that want
+  more than the budget has, each gets at least an nth of it, or a
+  session's core if that is less; a session that wants less gets all
+  it wants, and what it leaves goes to the others. Shares are
+  sessions', not users'. Every frame the client reads now counts,
+  whatever it does with it, so what a server has it read and ignore
+  takes from the budget too. Every GFX PDU is now charged 32 units,
+  whether the client applies or skips it: those applied that do little,
+  such as a fill of a pixel, were charged little or nothing, and each
+  skipped PDU 24.
 - The fuzz targets run in CI: `.github/workflows/fuzz.yml` gives each of
   them 30 seconds, one at a time, every night, and keeps what a failure
   found as an artifact.
@@ -673,12 +689,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   session's real content, and a session's one reader holds it to a
   core whatever the server sends. Each block of a RemoteFX or
   progressive message, and each rectangle and quantization table of
-  their regions and tile sets, is charged 8 units, and each W2S2
-  stream and each GFX PDU that the client skips 24, and a message
-  counts what it applies, skips and decodes at its end, so that a
-  flood of headers gets at most 0.7 of a core. No
-  budget bounds sessions together yet, which is to come before the
-  release.
+  their regions and tile sets, is charged 8 units, and each GFX PDU
+  32, and a message counts what it applies, skips and decodes at its
+  end, so that a flood of headers gets at most about a core.
   A session's first screen does not wait, and full-screen RemoteFX
   Progressive at 1920 × 1080 and 30 frames a second takes 82% of the
   rate; before, the rate held it to 2.3 frames a second. At the first

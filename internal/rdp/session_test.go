@@ -170,7 +170,12 @@ func (s *cursorCount) CursorMove(p image.Point) {
 func TestPointerPaced(t *testing.T) {
 	const w, h = 1024, 768
 	burst := paceBurst(w, h)
-	wait := func(pixels int) time.Duration {
+	// wait is how long frames of the given pixels wait, with what reading
+	// them costs.
+	wait := func(pixels int, frames [][]byte) time.Duration {
+		for _, f := range frames {
+			pixels += frameCost + updateCost + len(f)/2
+		}
 		return time.Duration((float64(pixels) - burst) / decodeRate * float64(time.Second))
 	}
 	near := func(got, want time.Duration) bool { return got > want-time.Millisecond && got < want+time.Millisecond }
@@ -185,7 +190,7 @@ func TestPointerPaced(t *testing.T) {
 	if err := runFrames(c, out, frames...); !errors.Is(err, io.EOF) || out.moves != moves {
 		t.Fatalf("moves: Run returned %v after %d moves", err, out.moves)
 	}
-	if want := wait(moves * pointerCost); !near(clock.slept, want) {
+	if want := wait(moves*pointerCost, frames); !near(clock.slept, want) {
 		t.Errorf("%d moves waited %v, want %v", moves, clock.slept, want)
 	}
 
@@ -202,7 +207,7 @@ func TestPointerPaced(t *testing.T) {
 	if err := runFrames(c, out, frames...); !errors.Is(err, io.EOF) || out.shapes != 2*shapes {
 		t.Fatalf("shapes: Run returned %v after %d shapes", err, out.shapes)
 	}
-	if want := wait(shapes * (cursorCost(16, 16) + cursorCost(80, 80))); !near(clock.slept, want) {
+	if want := wait(shapes*(cursorCost(16, 16)+cursorCost(80, 80)), frames); !near(clock.slept, want) {
 		t.Errorf("%d shapes waited %v, want %v", 2*shapes, clock.slept, want)
 	}
 
@@ -221,7 +226,7 @@ func TestPointerPaced(t *testing.T) {
 	if err := runFrames(c, out, frames...); !errors.Is(err, io.EOF) || out.shapes != moves {
 		t.Fatalf("hidden and default: Run returned %v after %d shapes", err, out.shapes)
 	}
-	if want := wait(moves * pointerCost); !near(clock.slept, want) {
+	if want := wait(moves*pointerCost, frames); !near(clock.slept, want) {
 		t.Errorf("%d hidden and default pointers waited %v, want %v", moves, clock.slept, want)
 	}
 }
