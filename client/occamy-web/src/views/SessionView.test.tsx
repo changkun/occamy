@@ -544,6 +544,44 @@ describe('The clipboard panel of a stream welcomed as the owner’s', () => {
     expect(box()?.value).toBe('third')
   })
 
+  it('says text the remote clipboard did not take was not sent, until the clipboard answers', async () => {
+    const notice = (): Element | null => container.querySelector('.notice[role=alert]')
+    const unsent = 'The remote clipboard is not responding, so the text was not sent.'
+    await render({ token: accessToken('demo'), action: null }, ended)
+    act(() => remote('first'))
+    await settle()
+    act(() => button('Clipboard')?.click())
+    act(() => type('mine'))
+    act(() => button('Send')?.click())
+    expect(status()).toBe('Sent to the remote clipboard.')
+    expect(notice()).toBeNull()
+
+    act(() => Welcomed.last?.push({ type: 'clipboard-status', answering: false }))
+    await settle()
+    expect(notice()?.textContent).toContain(unsent)
+    expect(status()).toBe(unsent)
+    // The text stays in the box, to go again, over what the remote holds.
+    expect(box()?.value).toBe('mine')
+    expect(text()).toContain(edited)
+    act(() => button('Send')?.click())
+    expect(Welcomed.last?.clipboards).toEqual(['mine', 'mine'])
+    expect(notice()).not.toBeNull()
+
+    act(() => Welcomed.last?.push({ type: 'clipboard-status', answering: true }))
+    await settle()
+    expect(notice()).toBeNull()
+    expect(status()).toBe('Sent to the remote clipboard.')
+
+    // The user may put the word away, and the next loss brings it back.
+    act(() => Welcomed.last?.push({ type: 'clipboard-status', answering: false }))
+    await settle()
+    act(() => button('Dismiss')?.click())
+    expect(notice()).toBeNull()
+    act(() => Welcomed.last?.push({ type: 'clipboard-status', answering: false }))
+    await settle()
+    expect(notice()).not.toBeNull()
+  })
+
   it('says text too large to send was not sent, and keeps it the user’s to send again', async () => {
     await render({ token: accessToken('demo'), action: null }, ended)
     act(() => remote('first'))

@@ -409,8 +409,15 @@ Settled on 2026-10-31.
     while connecting, one while End waits for occamyd, one for the end
     and one for an owner's action not done, the owner's credential prompt
     in a modal `<dialog>` with secret fields as password inputs, a
-    clipboard panel, and a share panel that mints a viewer or read-only
-    link lasting 10 minutes to 12 hours.
+    clipboard panel, a share panel that mints a viewer or read-only
+    link lasting 10 minutes to 12 hours, and a notice over the screen
+    that blocks nothing when text this client sent did not reach the
+    remote clipboard. `clipboard-status` raises it, for a client that
+    sent text, and takes back what `sendClipboard` took for the remote's.
+    The panel's text stays, to send again, and the local clipboard does
+    not send the same text on its own until the clipboard answers, or
+    each focus would lose it again. The notice goes when the clipboard
+    answers or the user dismisses it, and the next loss brings it back.
   - The owner's window size goes to the remote 300 ms after it settles,
     in device pixels or cells, unless the hello already asked for it;
     viewers and read-only clients see the owner's size, scaled. Read-only clients bind no input. The remote's

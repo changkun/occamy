@@ -66,6 +66,11 @@ export interface SessionState {
    * sent is the remote clipboard's.
    */
   draft: string
+  /**
+   * Whether this client's text did not reach the remote clipboard, which
+   * has not answered since, unless the user dismissed that.
+   */
+  clipboardUnsent: boolean
   /** How many times the bell rang. */
   bells: number
   /** The remote pointer's image, for cursorStyle. */
@@ -88,6 +93,9 @@ export interface SessionState {
 
 /** What became of clipboard text sent: sent, not open to the role or the stream, or refused, with why. */
 export type ClipboardSend = { kind: 'sent' } | { kind: 'not-open' } | { kind: 'failed'; error: Error }
+
+/** What the page says while clipboardUnsent holds. */
+export const CLIPBOARD_UNSENT = 'The remote clipboard is not responding, so the text was not sent.'
 
 /** What a stream asks the remote for in its hello. */
 export interface HelloSize {
@@ -148,6 +156,7 @@ const initial: SessionState = {
   prompts: [],
   clipboard: null,
   draft: '',
+  clipboardUnsent: false,
   bells: 0,
   cursor: null,
   size: { width: 0, height: 0 },
@@ -205,6 +214,12 @@ export class SessionController {
   // The clipboard text the remote and this client last agreed on, so
   // that a local clipboard that only echoes the remote's is not sent back.
   private lastClipboard: string | null = null
+  // The clipboard text the remote itself last said, for when text this
+  // client took for the remote's turns out not to have reached it.
+  private remoteClipboard: string | null = null
+  // Whether this client sent clipboard text: a clipboard's failure to
+  // answer is told only to those it may have cost something.
+  private sentClipboard = false
   // The last size asked of the remote, by the hello or a resize request;
   // zero for none.
   private lastResize: Size = { width: 0, height: 0 }
@@ -398,6 +413,7 @@ export class SessionController {
       case 'clipboard': {
         const text = clipboardText(ev.mime, ev.data)
         if (text !== null) {
+          this.remoteClipboard = text
           this.agree(text)
           if (this.can.input) {
             this.options.writeClipboard?.(text).catch(() => undefined)
@@ -405,6 +421,18 @@ export class SessionController {
         }
         return
       }
+      case 'clipboard-status':
+        if (ev.answering) {
+          // Text lost is the local clipboard's to send again.
+          this.lastClipboard = this.state.clipboard
+          this.update({ clipboardUnsent: false })
+        } else if (this.sentClipboard) {
+          // The remote has what it last said, and the text stays the
+          // user's in the panel. The local clipboard does not send it
+          // again on its own: on each focus, it would be lost each time.
+          this.update({ clipboard: this.remoteClipboard, clipboardUnsent: true })
+        }
+        return
       case 'bell':
         this.update({ bells: this.state.bells + 1 })
         return
@@ -486,9 +514,10 @@ export class SessionController {
 
   /**
    * sendClipboard puts text on the remote's clipboard, and says whether
-   * it did: not for a role that may not, nor for a stream not open, nor
+   * it went: not for a role that may not, nor for a stream not open, nor
    * for text the core refuses, such as one too large for a message, which
-   * then stays the user's, to send again.
+   * then stays the user's, to send again. A remote that does not take
+   * what went says so later, as clipboardUnsent.
    */
   sendClipboard(text: string): ClipboardSend {
     const s = this.session
@@ -500,8 +529,14 @@ export class SessionController {
     } catch (err) {
       return { kind: 'failed', error: err instanceof Error ? err : new Error(String(err)) }
     }
+    this.sentClipboard = true
     this.agree(text)
     return { kind: 'sent' }
+  }
+
+  /** dismissClipboardUnsent takes clipboardUnsent away, until text is lost again. */
+  dismissClipboardUnsent(): void {
+    this.update({ clipboardUnsent: false })
   }
 
   // agree takes text for the remote clipboard's, as the remote said or as

@@ -11,7 +11,7 @@ import { type ReactElement, Suspense, lazy, useEffect, useEffectEvent, useMemo, 
 import { CanvasSurface, CloseCode, Role, SessionClass, cursorStyle } from '../protocol'
 import type { AccessToken, Api, Identity } from '../lib/api'
 import { type SessionAction, forgetSession, keepSession } from '../lib/app'
-import { type SessionController as Controller, SessionController, type SessionState, overlayOf } from '../lib/controller'
+import { CLIPBOARD_UNSENT, type SessionController as Controller, SessionController, type SessionState, overlayOf } from '../lib/controller'
 import { type Ending, endsSession } from '../lib/ending'
 import { type Size, cellGrid, deviceSize, fitSize, pixelRatio } from '../lib/layout'
 import { endSession, sessionOwner } from '../lib/owner'
@@ -323,7 +323,15 @@ export function SessionView({ api, token, target, owner: seed, action, storage, 
           {state.bells > 0 ? `Bell ${state.bells}` : ''}
         </p>
         {panel === 'clipboard' && state.phase === 'open' && (
-          <ClipboardPanel controller={controller} remote={state.clipboard} draft={state.draft} can={can} onClose={closePanel} />
+          <ClipboardPanel controller={controller} remote={state.clipboard} draft={state.draft} unsent={state.clipboardUnsent} can={can} onClose={closePanel} />
+        )}
+        {state.clipboardUnsent && state.phase === 'open' && (
+          <div className="notice" role="alert">
+            <p>{CLIPBOARD_UNSENT}</p>
+            <button type="button" onClick={() => controller.dismissClipboardUnsent()}>
+              Dismiss
+            </button>
+          </div>
         )}
         {panel === 'share' && state.phase === 'open' && token !== null && (
           <SharePanel

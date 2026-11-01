@@ -365,6 +365,59 @@ describe('SessionController', () => {
     expect(c.getState()).toMatchObject({ clipboard: 'too long for a message', draft: 'too long for a message' })
   })
 
+  it('takes back text the remote clipboard did not take, for it to go again', async () => {
+    const s = new FakeSession(Role.Owner)
+    const c = await opened(s)
+    s.push(clipboardEvent('first'))
+    await settle()
+    expect(c.syncClipboard('mine')).toBe(true)
+    expect(c.syncClipboard('mine')).toBe(false)
+
+    // The remote holds what it said, and the text stays the user's.
+    s.push({ type: 'clipboard-status', answering: false })
+    await settle()
+    expect(c.getState()).toMatchObject({ clipboard: 'first', draft: 'mine', clipboardUnsent: true })
+
+    // While the clipboard is silent, only the user sends it again; other
+    // text from the local clipboard goes, and the word stays up.
+    expect(c.syncClipboard('mine')).toBe(false)
+    expect(s.clipboards).toEqual(['mine'])
+    expect(c.sendClipboard('mine')).toEqual({ kind: 'sent' })
+    expect(c.syncClipboard('other')).toBe(true)
+    expect(s.clipboards).toEqual(['mine', 'mine', 'other'])
+    expect(c.getState().clipboardUnsent).toBe(true)
+    s.push({ type: 'clipboard-status', answering: false })
+    await settle()
+    expect(c.getState()).toMatchObject({ clipboard: 'first', clipboardUnsent: true })
+
+    // Once the clipboard answers, the word goes, and the same text goes.
+    s.push({ type: 'clipboard-status', answering: true })
+    await settle()
+    expect(c.getState()).toMatchObject({ clipboard: 'first', clipboardUnsent: false })
+    expect(c.syncClipboard('other')).toBe(true)
+    expect(s.clipboards).toEqual(['mine', 'mine', 'other', 'other'])
+
+    // Word the user dismissed comes back with the next loss.
+    s.push({ type: 'clipboard-status', answering: false })
+    await settle()
+    expect(c.getState().clipboardUnsent).toBe(true)
+    c.dismissClipboardUnsent()
+    expect(c.getState().clipboardUnsent).toBe(false)
+    s.push({ type: 'clipboard-status', answering: false })
+    await settle()
+    expect(c.getState().clipboardUnsent).toBe(true)
+  })
+
+  it('tells only a client that sent text of a clipboard that does not answer', async () => {
+    const s = new FakeSession(Role.Viewer)
+    const c = await opened(s)
+    s.push(clipboardEvent('first'))
+    await settle()
+    s.push({ type: 'clipboard-status', answering: false })
+    await settle()
+    expect(c.getState()).toMatchObject({ clipboard: 'first', clipboardUnsent: false })
+  })
+
   it('keeps an edit when the local clipboard goes to the remote, and follows it otherwise', async () => {
     const s = new FakeSession(Role.Owner)
     const c = await opened(s)
