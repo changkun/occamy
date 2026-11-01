@@ -639,6 +639,44 @@ func TestRFXRegionBounds(t *testing.T) {
 	}
 }
 
+// A RemoteFX block of a type that the client does not know is counted
+// and skipped, and the message's blocks after it apply. The tiles that
+// RemoteFX decodes are counted by message.
+func TestRFXUnknownBlocks(t *testing.T) {
+	img := testImage(0, 0)
+	coef := rdptest.EncodeTile(img, image.Point{}, &fineQuant, false)
+	var tile rdptest.RFXTile
+	for c := range 3 {
+		tile.Data[c] = rdptest.RLGR(rdptest.RLGR1, rdptest.Deltas(coef[c][:], rdptest.Layout(false)[rdptest.LL3]))
+	}
+	unknown := []byte{0xcf, 0xcc, 6, 0, 0, 0}
+	pdu := rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, image.Rect(0, 0, 64, 64),
+		slices.Concat(unknown, rdptest.RemoteFX(rdptest.RLGR1, nil, []rdptest.Quant{fineQuant[0]}, []rdptest.RFXTile{tile}), unknown))
+	g := newGFXTest(t, 64, 64)
+	g.must(t, surfacePDUs(1, 64, 64, image.Point{})...)
+	for i := range 2 {
+		g.must(t, rdptest.SolidFill(1, red, image.Rect(0, 0, 64, 64)), pdu, pdu)
+		scr := g.out.snapshot()
+		for p := range 64 * 64 {
+			if x, y := p%64, p/64; !nearRGBA(scr.RGBAAt(x, y), img.RGBAAt(x, y), 3) {
+				t.Fatalf("message %d: pixel (%d, %d) is %v, want %v", i, x, y, scr.RGBAAt(x, y), img.RGBAAt(x, y))
+			}
+		}
+		st := g.c.Stats()
+		if n := st.Bitmaps["gfx remotefx"]; n != 2*(i+1) {
+			t.Errorf("message %d: %d RemoteFX tiles counted, want %d", i, n, 2*(i+1))
+		}
+		if n := st.Ignored["GFX RemoteFX blocks"]; n != 4*(i+1) {
+			t.Errorf("message %d: %d RemoteFX blocks skipped, want %d", i, n, 4*(i+1))
+		}
+	}
+	// A message of RemoteFX PDUs of no tiles counts none.
+	g.must(t, rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, image.Rect(0, 0, 64, 64), nil))
+	if n := g.c.Stats().Bitmaps["gfx remotefx"]; n != 4 {
+		t.Errorf("%d RemoteFX tiles counted, want 4", n)
+	}
+}
+
 // progEnc encodes a tile progressively, as a server does, keeping what
 // the client has of it ([MS-RDPEGFX] 3.2.8.1.5.3), what the passes
 // since the first sent, and what remains.
@@ -1104,7 +1142,9 @@ func TestProgressiveTransformChange(t *testing.T) {
 // region outside the stream's own FRAME_BEGIN and FRAME_END is ignored
 // and counted (2.2.4.2.1.5), even after a stream that left its frame
 // open, in the same codec context; and a block of an unknown type is
-// counted, as the sync and context blocks are not.
+// counted, as the sync and context blocks are not. A FRAME_BEGIN after
+// a frame ended opens another, whose region applies, where FreeRDP
+// fails the stream.
 func TestProgressiveFrames(t *testing.T) {
 	p := newProgSurface(t, 64, 64)
 	coef := rdptest.EncodeTile(testImage(0, 0), image.Point{}, &fineQuant, false)
@@ -1124,6 +1164,7 @@ func TestProgressiveFrames(t *testing.T) {
 		{"a frame", [][]byte{begin, region.Block(), end}, 2, 1},
 		{"regions around a frame", [][]byte{region.Block(), begin, region.Block(), end, region.Block()}, 4, 2},
 		{"an unknown block", [][]byte{begin, unknown, region.Block(), end}, 4, 3},
+		{"a frame begun again", [][]byte{begin, end, begin, region.Block(), end}, 4, 4},
 	} {
 		p.gfxTest.must(t, rdptest.WireToSurface2(1, rdptest.CodecProgressive, 5, rdptest.PixelXRGB, slices.Concat(tc.blocks...)))
 		st := p.c.Stats()
@@ -1301,35 +1342,46 @@ func TestRFXPace(t *testing.T) {
 			Extrapolate: extra, Tiles: [][]byte{e3.upgrade(1, progQualities[1].BitPos)}}))
 	}
 	// stream is what a progressive stream of blocks costs beyond its
-	// tiles: a frame of n regions is n+2 blocks.
-	stream := func(blocks int) int { return pduCost + blocks*blockCost }
+	// tiles: a frame of n regions is n+2 blocks. head is what a region's
+	// or tile set's rectangles and quantization tables cost, a quality
+	// three tables: these regions' are pq. Their units are pduCost's and
+	// blockCost's as measured (BenchmarkSkipped), so that lowering
+	// either takes measuring again.
+	const blockUnits, pduUnits = 8, 24
+	stream := func(blocks int) int { return pduUnits + blocks*blockUnits }
+	head := func(rects, tables int) int { return (rects + tables) * blockUnits }
+	pq := len(xrdpQuant) + 3*len(progQualities)
 	for _, tc := range []struct {
 		name  string
 		setup []byte // sent before the PDU, uncharged
 		pdu   []byte
 		want  int
 	}{
-		{"remotefx", nil, rfx, 2*rfxTileCost + 2 + 64*30 + 64*24 + 2 + 36*30},
+		// FRAME_BEGIN, the region, the tile set and FRAME_END.
+		{"remotefx", nil, rfx, 4*blockUnits + head(2, 1) + 2*rfxTileCost + 2 + 64*30 + 64*24 + 2 + 36*30},
+		// A block of a type that the client does not know is skipped.
+		{"remotefx, unknown blocks", nil, rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, image.Rect(16, 16, 144, 80),
+			[]byte{0xcf, 0xcc, 6, 0, 0, 0, 0xcf, 0xcc, 7, 0, 0, 0, 0}), 2 * blockUnits},
 		// An empty rectangle, which clips the tiles away, is not decoded,
 		// and is skipped.
 		{"remotefx, empty", nil, rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, image.Rect(16, 16, 16, 80),
-			rdptest.RemoteFX(rdptest.RLGR1, nil, fineQuant[:1], []rdptest.RFXTile{tile, t2})), pduCost},
+			rdptest.RemoteFX(rdptest.RLGR1, nil, fineQuant[:1], []rdptest.RFXTile{tile, t2})), pduUnits},
 		// The first region's two tiles, and the second's upgrade of the
 		// first, drawn again.
-		{"progressive", nil, prog, stream(4) + 3*rfxTileCost + 1 + 64*64 + 1 + 36*64 + 1 + 64*64},
+		{"progressive", nil, prog, stream(4) + 2*head(1, pq) + 3*rfxTileCost + 1 + 64*64 + 1 + 36*64 + 1 + 64*64},
 		// A tile that a region changes twice is drawn once.
-		{"progressive twice", nil, progTwice, stream(3) + 2*rfxTileCost + 1 + 64*64},
+		{"progressive twice", nil, progTwice, stream(3) + head(1, pq) + 2*rfxTileCost + 1 + 64*64},
 		// A region outside a frame, and a block of an unknown type, are
 		// skipped, and charged as blocks.
 		{"blocks skipped", nil, rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, slices.Concat(region.Block(), []byte{0xcf, 0xcc, 6, 0, 0, 0})), stream(2)},
 		// A skipped tile is charged as one decoded, and draws nothing.
-		{"upgrade of no first pass", nil, upgradeOnly(false), stream(3) + rfxTileCost},
-		{"upgrade in the other transform", firstPass, upgradeOnly(true), stream(3) + rfxTileCost},
+		{"upgrade of no first pass", nil, upgradeOnly(false), stream(3) + head(0, pq) + rfxTileCost},
+		{"upgrade in the other transform", firstPass, upgradeOnly(true), stream(3) + head(0, pq) + rfxTileCost},
 		// A codec context's delete, and a W2S2 of another context, end
 		// nothing; a delete on a surface without RemoteFX Progressive is
 		// skipped.
 		{"context delete", progTwice, deleteContext(1), 0},
-		{"context delete, no codec context", nil, deleteContext(1), pduCost},
+		{"context delete, no codec context", nil, deleteContext(1), pduUnits},
 		{"context switch", progTwice, rdptest.WireToSurface2(1, rdptest.CodecProgressive, 2, rdptest.PixelXRGB, nil), stream(0)},
 	} {
 		g := newGFXTest(t, 256, 256)

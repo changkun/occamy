@@ -154,13 +154,15 @@ const (
 // blockCost and pduCost are what the client is charged against
 // decodeRate for a header that it parses and does little more with,
 // which costs more than what its bytes' expansion is charged: each
-// block of a RemoteFX Progressive stream, which may be a header of 6
-// bytes alone, and each GFX PDU that the client skips, of 8 bytes at
-// the least, or W2S2 PDU, whose stream may be of no blocks; a PDU may
-// look its surface up too. Their message pays what it owes at its end
-// (gfxMessage). On the benchmarks' host a block costs 3.5 to 4.5 ns,
-// and a PDU 8 to 30, an empty bitmap the most, so that a flood of them
-// gets at most 0.7 of a core (BenchmarkSkipped).
+// block of a RemoteFX or RemoteFX Progressive message, which may be a
+// header of 6 bytes alone, and each rectangle and quantization table
+// of their regions and tile sets, which may have no tiles; and each GFX
+// PDU that the client skips, of 8 bytes at the least, or W2S2 PDU,
+// whose stream may be of no blocks; a PDU may look its surface up too.
+// Their message pays what it owes at its end (gfxMessage). On the
+// benchmarks' host a block, rectangle or table costs 3.5 to 9 ns, and
+// a PDU 8 to 30, an empty bitmap the most, so that a flood of them gets
+// at most 0.7 of a core (BenchmarkSkipped).
 const (
 	blockCost = 8
 	pduCost   = 24
@@ -198,12 +200,13 @@ type gfx struct {
 	quants     []rfxQuant
 	progQuants [][3]rfxQuant
 	changed    []*progTile
-	// What the message applies, by RDPGFX_CMDID, and skips, by name,
-	// and the units it owes, which it counts and pays at its end
-	// (gfxMessage).
-	applied [gfxCapsConfirm + 1]int
-	skips   []gfxSkip
-	owed    int
+	// What the message applies, by RDPGFX_CMDID, and skips, by name, the
+	// RemoteFX tiles it decodes, and the units it owes, which it counts
+	// and pays at its end (gfxMessage).
+	applied  [gfxCapsConfirm + 1]int
+	skips    []gfxSkip
+	rfxTiles int
+	owed     int
 }
 
 // gfxSkip is a name that a message counts what it skips under, and how
@@ -360,10 +363,11 @@ func (c *Client) gfxSkipPDU(name string) {
 	c.gfxSkipped(name)
 }
 
-// gfxCount counts the PDUs that the message applied and what it
-// skipped, and warns at the first PDU or bitmap of a session skipped
-// that leaves the screen without what the server draws: until the
-// client takes them, GFX off has the server draw in what it does take.
+// gfxCount counts the PDUs that the message applied, the RemoteFX
+// tiles it decoded and what it skipped, drops what it owes, paid or
+// not, and warns at the first PDU or bitmap of a session skipped that
+// leaves the screen without what the server draws: until the client
+// takes them, GFX off has the server draw in what it does take.
 func (c *Client) gfxCount() {
 	g := &c.gfx
 	c.count(func(s *Stats) {
@@ -372,11 +376,15 @@ func (c *Client) gfxCount() {
 				s.GFX[gfxNames[cmd]] += n
 			}
 		}
+		if g.rfxTiles > 0 {
+			s.Bitmaps["gfx remotefx"] += g.rfxTiles
+		}
 		for _, k := range g.skips {
 			s.Ignored[k.name] += k.n
 		}
 	})
 	clear(g.applied[:])
+	g.rfxTiles, g.owed = 0, 0
 	for _, k := range g.skips {
 		if c.gfxWarned || !gfxMissing[k.name] {
 			continue
@@ -477,9 +485,8 @@ func (c *Client) gfxMessage(out Output, msg []byte) error {
 		}
 		data = data[n:]
 	}
-	if owed := g.owed; owed > 0 {
-		g.owed = 0
-		if err := c.pace(owed); err != nil {
+	if g.owed > 0 {
+		if err := c.pace(g.owed); err != nil {
 			return err
 		}
 	}

@@ -81,8 +81,8 @@ var (
 // nibble first, in the band order order.
 func parseQuant(b []byte, order *[rfxBands]int) rfxQuant {
 	var q rfxQuant
-	for i, band := range order {
-		q[band] = b[i/2] >> (4 * (i % 2)) & 0xf
+	for i, v := range b[:rfxBands/2] {
+		q[order[2*i]], q[order[2*i+1]] = v&0xf, v>>4
 	}
 	return q
 }
@@ -344,11 +344,13 @@ const (
 // origin, where its region's rectangles, also from dr's origin, and dr
 // cover them. RemoteFX keeps no state between messages. Its rectangles
 // apply to the tile set after them; a tile set before any has dr for
-// its region, as a region of no rectangles has.
+// its region, as a region of no rectangles has. Each block is charged
+// blockCost, as are each rectangle and quantization table, which the
+// message pays at its end (gfxMessage); a block of a type that the
+// client does not know is counted and ignored.
 func (c *Client) gfxRemoteFX(s *surface, dr image.Rectangle, data []byte) error {
 	clips := c.gfx.clips[:0]
 	clips = append(clips, dr)
-	tiles := 0
 	for len(data) > 0 {
 		r := reader{b: data}
 		typ, n := r.u16(), r.u32()
@@ -357,27 +359,30 @@ func (c *Client) gfxRemoteFX(s *surface, dr image.Rectangle, data []byte) error 
 		}
 		body := data[6:n]
 		data = data[n:]
+		c.gfx.owed += blockCost
 		var err error
 		switch typ {
+		case rfxSync, rfxCodecVersions, rfxChannels, rfxContext, rfxFrameBegin, rfxFrameEnd:
 		case rfxRegion:
-			clips, err = rfxRegionRects(body, dr, clips[:0])
+			clips, err = c.rfxRegionRects(body, dr, clips[:0])
 		case rfxTileset:
 			var k int
 			k, err = c.rfxTileset(s, dr, body, clips)
-			tiles += k
+			c.gfx.rfxTiles += k
+		default:
+			c.gfxSkipped("GFX RemoteFX blocks")
 		}
 		if err != nil {
 			return err
 		}
 	}
 	c.gfx.clips = clips
-	c.count(func(st *Stats) { st.Bitmaps["gfx remotefx"] += tiles })
 	return nil
 }
 
 // rfxRegionRects reads TS_RFX_REGION's rectangles, after its channel's
 // header, as rectangles of the surface within dr, into clips.
-func rfxRegionRects(b []byte, dr image.Rectangle, clips []image.Rectangle) ([]image.Rectangle, error) {
+func (c *Client) rfxRegionRects(b []byte, dr image.Rectangle, clips []image.Rectangle) ([]image.Rectangle, error) {
 	r := reader{b: b}
 	r.u8() // codecId
 	r.u8() // channelId
@@ -386,6 +391,7 @@ func rfxRegionRects(b []byte, dr image.Rectangle, clips []image.Rectangle) ([]im
 	if r.err != nil || r.len() < 8*n {
 		return nil, fmt.Errorf("RemoteFX region of %d rectangles in %d bytes", n, r.len())
 	}
+	c.gfx.owed += n * blockCost
 	if n == 0 {
 		return append(clips, dr), nil
 	}
@@ -423,6 +429,7 @@ func (c *Client) rfxTileset(s *surface, dr image.Rectangle, b []byte, clips []im
 	case r.len() < 5*numQuant:
 		return 0, fmt.Errorf("%d quantization tables in %d bytes", numQuant, r.len())
 	}
+	c.gfx.owed += numQuant * blockCost
 	quants := c.gfx.quants[:0]
 	for range numQuant {
 		quants = append(quants, parseQuant(r.take(5), &rfxQuantOrder))

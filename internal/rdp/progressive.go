@@ -205,7 +205,9 @@ func (c *Client) progStream(s *surface, data []byte) error {
 }
 
 // progRegion applies RFX_PROGRESSIVE_REGION: its tiles, then each tile
-// it changed drawn where its rectangles cover it.
+// it changed drawn where its rectangles cover it. Each of its
+// rectangles and quantization tables, three a quality, is charged
+// blockCost, which the message pays at its end (gfxMessage).
 func (c *Client) progRegion(s *surface, b []byte) error {
 	r := reader{b: b}
 	tileSize, numRects := r.u8(), int(r.u16())
@@ -221,6 +223,7 @@ func (c *Client) progRegion(s *surface, b []byte) error {
 		return fmt.Errorf("progressive region of %d rectangles and %d and %d quantization tables in %d bytes", numRects, numQuant, numProg, r.len())
 	}
 	g := &c.gfx
+	g.owed += (numRects + numQuant + 3*numProg) * blockCost
 	clips := g.clips[:0]
 	for range numRects {
 		x, y, w, h := int(r.u16()), int(r.u16()), int(r.u16()), int(r.u16())

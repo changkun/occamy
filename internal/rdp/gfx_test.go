@@ -6,6 +6,7 @@ package rdp
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"image"
 	"image/color"
@@ -1556,15 +1557,19 @@ func benchFrame(b *testing.B, tile func(image.Rectangle, *image.RGBA) []byte) {
 // cheapest to send for the most parsing, in stored messages, whose
 // expansion is not charged: RemoteFX Progressive regions outside a
 // frame, blocks of an unknown type and frame begins, of a header alone,
-// 4,096 to a W2S2 PDU; and, 4,096 to a message, W2S2 PDUs of no
-// blocks, GFX PDUs of an unknown type, of an 8-byte header alone, also
-// after one of each other name that the client counts what it skips
-// under but the tiles', which gfxSkipped looks through for each,
-// frames that begin again, and empty bitmaps. Its core metric is the
-// share of a core that the flood gets: what it costs over what it is
-// charged at decodeRate. The last are PDUs applied that do little:
-// capability confirms, codec contexts' deletes, and bitmaps of a pixel,
-// charged that pixel alone.
+// 4,096 to a W2S2 PDU; a region's rectangles of a pixel, 4,096, and in
+// 16 regions the most quantization tables or qualities each takes;
+// RemoteFX's blocks of an unknown type, a region's rectangles, and tile
+// sets' quantization tables, likewise, in a wire-to-surface 1 PDU;
+// and, 4,096 to a message, W2S2 PDUs of no blocks, GFX PDUs of an
+// unknown type, of an 8-byte header alone, also after one of each
+// other name that the client counts what it skips under but the
+// tiles', which gfxSkipped looks through for each, frames that begin
+// again, and empty bitmaps. Its core metric is the share of a core
+// that the flood gets: what it costs over what it is charged at
+// decodeRate. The last are PDUs applied that do little: capability
+// confirms, codec contexts' deletes, bitmaps and fills of a pixel,
+// charged that pixel alone, and RemoteFX PDUs of no blocks.
 func BenchmarkSkipped(b *testing.B) {
 	const n = 4096
 	block := func(typ int) []byte { return []byte{byte(typ), byte(typ >> 8), 6, 0, 0, 0} }
@@ -1585,22 +1590,45 @@ func BenchmarkSkipped(b *testing.B) {
 		rdptest.CapsConfirm(0x77, 0),
 		w2s2(slices.Concat(block(progRegion), block(0xcccf))),
 		rdptest.GFXPDU(0x77, nil))
+	// Headers within a region or tile set, which draw nothing: n
+	// rectangles of a pixel within the surface, and, in 16 regions or
+	// tile sets, the most quantization tables and qualities each takes.
+	rfx := func(data []byte) []byte {
+		return rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, image.Rect(0, 0, 64, 64), data)
+	}
+	var rects []image.Rectangle
+	for i := range n {
+		rects = append(rects, image.Rect(i%64, i/64, i%64+1, i/64+1))
+	}
+	quants := slices.Repeat(xrdpQuant[:1], 255)
+	quals := slices.Repeat(progQualities[:1], 255)
+	const tables = 16 * 255
 	for _, tc := range []struct {
-		name string
-		msg  []byte
+		name  string
+		msg   []byte
+		items int // the blocks, PDUs, rectangles or tables; n if 0
 	}{
-		{"progressive regions outside a frame", w2s2(bytes.Repeat(block(progRegion), n))},
-		{"progressive blocks of an unknown type", w2s2(bytes.Repeat(block(0xcccf), n))},
-		{"progressive frame begins", w2s2(bytes.Repeat(rdptest.Progressive(1)[:12], n))},
-		{"W2S2 PDUs of no blocks", bytes.Repeat(w2s2(nil), n)},
-		{"GFX PDUs of an unknown type", bytes.Repeat(rdptest.GFXPDU(0x77, nil), n)},
-		{"GFX PDUs of an unknown type after every name", slices.Concat(slices.Concat(names...), bytes.Repeat(rdptest.GFXPDU(0x77, nil), n))},
-		{"GFX frames without their end", bytes.Repeat(rdptest.StartFrame(1), n)},
-		{"GFX empty bitmaps", bytes.Repeat(rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(4, 4, 4, 8), nil), n)},
-		{"applied caps confirms", bytes.Repeat(rdptest.CapsConfirm(rdptest.CapVersion107, 0), n)},
-		{"applied codec context deletes", bytes.Repeat(rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, []byte{1, 0, 1, 0, 0, 0}), n)},
-		{"applied bitmaps of a pixel", bytes.Repeat(rdptest.WireToSurface1(1, rdptest.CodecUncompressed, rdptest.PixelXRGB, image.Rect(0, 0, 1, 1), rdptest.Uncompressed(gradient(1, 1))), n)},
+		{"progressive regions outside a frame", w2s2(bytes.Repeat(block(progRegion), n)), 0},
+		{"progressive blocks of an unknown type", w2s2(bytes.Repeat(block(0xcccf), n)), 0},
+		{"progressive frame begins", w2s2(bytes.Repeat(rdptest.Progressive(1)[:12], n)), 0},
+		{"progressive region rectangles", w2s2(rdptest.Progressive(1, rdptest.ProgRegion{Rects: rects})), 0},
+		{"progressive quantization tables", w2s2(rdptest.Progressive(1, slices.Repeat([]rdptest.ProgRegion{{Quants: quants}}, 16)...)), tables},
+		{"progressive qualities", w2s2(rdptest.Progressive(1, slices.Repeat([]rdptest.ProgRegion{{ProgQuants: quals}}, 16)...)), tables},
+		{"RemoteFX blocks of an unknown type", rfx(bytes.Repeat(block(0xcccf), n)), 0},
+		{"RemoteFX region rectangles", rfx(rdptest.RemoteFX(rdptest.RLGR1, rects, nil, nil)), 0},
+		{"RemoteFX quantization tables", rfx(bytes.Repeat(rdptest.RemoteFX(rdptest.RLGR1, nil, quants, nil), 16)), tables},
+		{"W2S2 PDUs of no blocks", bytes.Repeat(w2s2(nil), n), 0},
+		{"GFX PDUs of an unknown type", bytes.Repeat(rdptest.GFXPDU(0x77, nil), n), 0},
+		{"GFX PDUs of an unknown type after every name", slices.Concat(slices.Concat(names...), bytes.Repeat(rdptest.GFXPDU(0x77, nil), n)), 0},
+		{"GFX frames without their end", bytes.Repeat(rdptest.StartFrame(1), n), 0},
+		{"GFX empty bitmaps", bytes.Repeat(rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(4, 4, 4, 8), nil), n), 0},
+		{"applied caps confirms", bytes.Repeat(rdptest.CapsConfirm(rdptest.CapVersion107, 0), n), 0},
+		{"applied codec context deletes", bytes.Repeat(rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, []byte{1, 0, 1, 0, 0, 0}), n), 0},
+		{"applied bitmaps of a pixel", bytes.Repeat(rdptest.WireToSurface1(1, rdptest.CodecUncompressed, rdptest.PixelXRGB, image.Rect(0, 0, 1, 1), rdptest.Uncompressed(gradient(1, 1))), n), 0},
+		{"applied fills of a pixel", bytes.Repeat(rdptest.SolidFill(1, color.RGBA{A: 0xff}, image.Rect(0, 0, 1, 1)), n), 0},
+		{"applied RemoteFX W2S1 PDUs of no blocks", bytes.Repeat(rfx(nil), n), 0},
 	} {
+		items := cmp.Or(tc.items, n)
 		b.Run(tc.name, func(b *testing.B) {
 			g := newGFXTest(b, 1920, 1080)
 			g.must(b, append(surfacePDUs(1, 64, 64, image.Point{}), w2s2(nil))...)
@@ -1623,8 +1651,8 @@ func BenchmarkSkipped(b *testing.B) {
 			}
 			units := tokens - g.c.tokens + (g.clock.waited()-slept).Seconds()*decodeRate
 			ns := float64(b.Elapsed().Nanoseconds())
-			b.ReportMetric(ns/float64(b.N)/n, "ns/block")
-			b.ReportMetric(units/float64(b.N)/n, "units/block")
+			b.ReportMetric(ns/float64(b.N)/float64(items), "ns/block")
+			b.ReportMetric(units/float64(b.N)/float64(items), "units/block")
 			if units > 0 {
 				b.ReportMetric(ns/units*decodeRate/1e9, "core")
 			}
