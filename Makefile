@@ -71,8 +71,10 @@ stop:
 # OCCAMY_V1_PORT as docker-compose.yaml takes them. OCCAMY_E2E_COMPOSE
 # is the stack's compose command, with which a test kills a process in
 # the rdp container and reads its log: CONTAINER_ENGINE's by default, so
-# e2e takes the CONTAINER_ENGINE that run took. The VNC parity matrix
-# takes minutes, so the timeout is longer than go test's default.
+# e2e takes the CONTAINER_ENGINE that run took. OCCAMY_E2E_CHROME names
+# the Chrome that opens the web client, if tests/web_test.go does not
+# find one. The VNC parity matrix takes minutes, so the timeout is longer
+# than go test's default.
 e2e:
 	OCCAMY_E2E_ENDPOINT=$(or $(OCCAMY_E2E_ENDPOINT),localhost:$(or $(OCCAMY_PORT),5636)) \
 	OCCAMY_E2E_V1_ENDPOINT=$(or $(OCCAMY_E2E_V1_ENDPOINT),localhost:$(or $(OCCAMY_V1_PORT),5637)) \
@@ -102,8 +104,12 @@ soak:
 # harness, for example BENCH_FLAGS="-quick -scenarios T1". A second stack
 # on a shared host takes COMPOSE_PROJECT_NAME, OCCAMY_PORT,
 # OCCAMY_V1_PORT and GUACD_PORT, which the harness follows. Its debug
-# routes are off unless OCCAMY_DEBUG=1, as run's are.
+# routes are off unless OCCAMY_DEBUG=1, as run's are. The bench stack
+# leaves out the demo's desktop service, but compose does not stop one
+# that make run started, which would idle next to the measurements, so
+# bench removes it; make run brings it back.
 bench: build
+	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml rm -f -s desktop
 	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml up -d --build --wait
 	go run ./bench -engine $(CONTAINER_ENGINE) -project $(or $(COMPOSE_PROJECT_NAME),occamy) \
 		-addr localhost:$(or $(OCCAMY_PORT),5636) -v1 localhost:$(or $(OCCAMY_V1_PORT),5637) \

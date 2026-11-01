@@ -334,7 +334,7 @@ read it before the rest, whose layout may change.
 | Field | Type | Meaning |
 |-------|------|---------|
 | version | u16 | The protocol's major version, 1. A server refuses another version with `unsupported` without reading further. |
-| width | u16 | The screen width the client asks for, in device pixels, if the session is graphical. |
+| width | u16 | The screen width the client asks for, in the remote's pixels, if the session is graphical. The web client asks for its window's size in CSS pixels, so that a remote pixel is a CSS pixel at any device pixel ratio. |
 | height | u16 | The screen height, likewise. |
 | cols | u16 | The terminal width the client asks for, in character cells, if the session is a terminal; 0 for the server's default. |
 | rows | u16 | The terminal height, likewise. |
@@ -1038,7 +1038,7 @@ ignores entries whose IDs it does not know.
 | 1 | `codecs` | One byte per [codec](#codecs) the client decodes, in order of preference: at least one, none twice, none 0. Unknown codecs are allowed. | none | The client's codecs that the server also has, in the client's order |
 | 2 | `max_texture_size` | u16: the largest tile or cursor width or height, in pixels | 4096 | The client's, lowered to the server's if it states one |
 | 3 | `terminal` | u8: the terminal level the client renders; 1 is an xterm-compatible emulator | 0, no terminal | The lower of the two |
-| 4 | `pixel_ratio` | u16: device pixels per CSS pixel in hundredths, such as 200 | 100 | The client's |
+| 4 | `pixel_ratio` | u16: device pixels per CSS pixel in hundredths, such as 200. Reserved: it informs, and no server acts on it | 100 | The client's |
 | 5 | `cache_slots` | u16: the number of tile cache slots the client keeps | 0, no cache | The fewer of the two |
 | 6 | `frame_window` | u8: unacknowledged frames per viewer | 2 | The smaller of the two, an unstated one counting as the default |
 | 7 | `max_message_size` | u32: the largest message in bytes, header included, for both directions; at least 65536, and a receiver refuses less | 4194304 (4 MiB) | The smaller of the two, an unstated one counting as the default |
@@ -1211,7 +1211,7 @@ own, such as on its read limit, then uses the right code.
 | 4003 | `owner-left` | The owner left and did not return within the grace period. |
 | 4004 | `idle` | Nobody gave input for the idle timeout. |
 | 4005 | `remote-ended` | The remote ended the session, such as a shell that exits. |
-| 4006 | `backend-failed` | The connection to the remote failed. |
+| 4006 | `backend-failed` | The connection to the remote failed. The reason is `failed`, unless the server can say why. |
 | 4007 | `viewer-limit` | The session has as many viewers as it allows. |
 | 4008 | `too-slow` | The viewer acknowledged no frame, or took no message, for the server's viewer timeout. |
 

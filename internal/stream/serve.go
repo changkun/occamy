@@ -355,5 +355,10 @@ func CloseFor(e session.End) protocol.Close {
 	if code == 0 {
 		code = protocol.CloseInternalError
 	}
-	return protocol.Close{Code: code, Reason: e.Reason.String()}
+	reason := e.Reason.String()
+	var f backend.Failure
+	if errors.As(e.Err, &f) {
+		reason = string(f)
+	}
+	return protocol.Close{Code: code, Reason: reason}
 }

@@ -395,6 +395,45 @@ was complete.
   `TestDockerfileNode` checks the Dockerfile's major against every
   package in the lock file.
 
+## Addendum: a real desktop
+
+A first-time viewer saw only bare X servers with xterms, and sshd.
+`docker/demo/desktop` adds a desktop, which `docker/occamy-v1.yaml` lists
+first as `desktop-vnc` and `desktop-rdp`.
+
+- The `vnc`, `tigervnc` and `rdp` images stay bare:
+  `tests/parity_test.go` and the clipboard echoes need the probe xterm
+  at +0+0 and no window manager. The desktop is a new image, not a
+  change to theirs.
+- Only `occamy-v1` reaches it, through the native backends, which both
+  connections name explicitly. It has no guacd connection and nothing
+  in the v0 file, so it adds no dependence on guacd, and `TestDemoV1File`
+  checks that the two connections come first and are native.
+- `occamy-v1` does not `depends_on` it: the bench overlay leaves the
+  service out with an inactive profile, and a dependency would pull it
+  back in. `make run`'s `--wait` still waits for its healthcheck. A
+  profile does not stop a running container, so `make bench` removes one
+  that `make run` left, which would idle next to the measurements.
+- One X session for each protocol: Xvnc's, from the start, and xrdp's,
+  from the first connection. Firefox refuses a profile that another
+  session has open, and XFCE keeps each session's settings in its home,
+  so the VNC session's home is `/home/occamy/vnc`. Both survive their
+  connections, and xrdp's `Policy=Default`, user and bits per pixel,
+  rejoins an X session at any size.
+- `--no-install-recommends` drops what XFCE needs to look right, so the
+  image names `librsvg2-common` (its wallpaper), `sensible-utils` (the
+  panel's way to the browser; without it the dock's browser opens "Choose
+  Preferred Application") and `tango-icon-theme` (the icon theme it
+  asks for), and hides the menu's Mail Reader. The image is 966 MB, of
+  which Firefox is 282 MB and libllvm, for Mesa, 120 MB.
+- `TestDemoDesktop` reads the panel's second row: it holds no text, and
+  a panel that stayed behind a growing screen leaves its right end
+  dark, which `TestPanelShown` checks without a stack. Colours alone do
+  not show a wallpaper: with no xfdesktop the panel and dock give 1,349
+  over VNC and 6,706 over RDP, on a screen 94% black. So no dark colour
+  may cover over half the screen; the commonest covers 21-34% on the
+  desktop. A light one may, since Firefox left open makes it 76% white.
+
 ## Appendix: revival verification harness
 
 The throwaway harness used to verify [001](001-status-quo.md), kept here as a

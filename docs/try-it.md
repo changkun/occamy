@@ -53,7 +53,7 @@ else's stack. Releases 1.0.3 and older ignore both and name the project
 `docker`, after the directory.
 
 On macOS and Windows, the engine runs in a virtual machine. The stack's
-seven containers fit in a few GiB of memory, but give the machine 8 GiB
+eight containers fit in a few GiB of memory, but give the machine 8 GiB
 if anything else runs in it: a machine of 3.7 GiB, filled by another
 project's builds, stopped answering, with `podman ps` hanging for
 minutes and then `ssh: handshake failed: EOF`. `podman machine list`
@@ -68,9 +68,16 @@ podman machine start
 
 `podman machine stop` can return while the machine still shuts down;
 if `podman machine set` waits, wait for it. The machine's disk fills
-with images, and a build and the stack need several GiB free. `podman
-system df` shows what images and volumes take, and [Tear
-down](#8-tear-down) says what removes them.
+with images, and a build and the stack need several GiB free: the
+`desktop` image alone is about 1 GB. `podman system df` shows what
+images and volumes take, and [Tear down](#8-tear-down) says what
+removes them.
+
+Of the demo servers, `desktop` takes the most memory. It uses about
+130 MB with its VNC session idle, and about 300 MB once an RDP
+connection has started a second session. Firefox, the file manager, a
+text editor and a terminal add about 0.7 GB to a session, so with both
+sessions in use it reached 1.5 GB.
 
 Check what you have:
 
@@ -131,7 +138,8 @@ compose file in a `docker` directory, runs under the same project.
 | `occamy-v1` | `127.0.0.1:5637` | `occamyd` with the v1 file [docker/occamy-v1.yaml](../docker/occamy-v1.yaml): API v1, protocol v1 and the web client |
 | `occamy` | `127.0.0.1:5636` | `occamyd` with the v0 file [docker/occamy.yaml](../docker/occamy.yaml), for clients of the Guacamole protocol. The web client does not use it, and v1.0 removes it |
 | `guacd` | not published | guacd 1.6, for the v0 service and for the v1 connections that set `backend: guacd` |
-| `vnc`, `tigervnc`, `ssh`, `rdp` | not published | the demo servers: x11vnc, TigerVNC, OpenSSH and xrdp, on Debian |
+| `desktop` | not published | a real desktop, XFCE with Firefox, as the user `occamy`, over TigerVNC and over xrdp, on Debian |
+| `vnc`, `tigervnc`, `ssh`, `rdp` | not published | the demo servers that the tests probe: x11vnc, TigerVNC, OpenSSH and xrdp, on Debian |
 
 The stack publishes both `occamyd` services on the host's loopback
 interface only, since anyone who has read this guide knows the demo
@@ -147,9 +155,9 @@ wherever a stranger's token pointed. The debug routes, which have no
 authentication, stay on the loopback interface too.
 
 Open <http://localhost:5637/static/> and sign in as `demo` with the
-password `occamy`. **Connections** lists 23 connections, and the bar
-says you are signed in as demo. The same sign-in from the command line
-returns an access token:
+password `occamy`. **Connections** lists 25 connections, the two real
+desktops first, and the bar says you are signed in as demo. The same
+sign-in from the command line returns an access token:
 
 ```
 curl -s localhost:5637/api/v1/auth/token \
@@ -217,14 +225,27 @@ connection's name if the remote gives none, and your role, `owner`.
 by then, so the next one opens at once, even when you have as many as
 `occamyd` allows, 10 by default.
 
+Start with the first two: they are real desktops, which `occamyd`
+reaches with its own VNC and RDP clients, without guacd. The rest are
+the small servers that the tests probe.
+
 | Protocol | Connection | What you should see |
 |----------|------------|---------------------|
+| VNC | **Desktop (XFCE) over VNC** (`desktop-vnc`) | A real desktop: XFCE's panel along the top, with **Applications** at its left, and a dock along the bottom with a terminal, the file manager and Firefox, which opens on a page stored on the desktop. It resizes to the window, and the panel and the dock follow. The session runs from the moment the `desktop` service starts, so it shows at once |
+| RDP | **Desktop (XFCE) over RDP** (`desktop-rdp`) | The same desktop, in a session of its own, from xrdp. It resizes the same way. The first connection after the `desktop` service starts creates the X session, so the desktop takes a few seconds to appear, and took 15 seconds at a load of about 35 to 90 |
 | VNC | **x11vnc, native backend** (`vnc-native`) | A black desktop with two xterms and no window manager. The small one at the top left says "Lines typed here reach the clipboard as hex"; it is a probe of the end-to-end tests. The large one has a root shell, `root@…:/#`. x11vnc does not resize its screen, so the page scales the 1024×768 desktop to the window. Keys go to the window under the pointer, as there is no window manager |
-| VNC | **TigerVNC, native backend** (`tigervnc-native`) | The same desktop, served by TigerVNC, which resizes its screen to the window |
+| VNC | **TigerVNC, native backend** (`tigervnc-native`) | The same desktop, served by TigerVNC, which resizes its screen to the window. The page asks for the window's size in CSS pixels, so on a HiDPI display the xterms are as large as on any other, and a little soft, with a remote pixel across two device pixels at a ratio of 2 |
 | SSH | **SSH** (`ssh`) | A terminal with Debian's login banner and the prompt `occamy@…:~$`. It fills the window, and its rows and columns follow the window (`stty size` shows them) |
-| RDP | **RDP, native backend** (`rdp-native`) | xrdp's X session: a black desktop with one xterm at the top left and the prompt `occamy@…:~$`. The desktop resizes to the window. The first connection after the stack or the `rdp` service starts creates the X session, so the xterm takes a few seconds to appear on an idle host, and took 17 seconds at a load of 306; wait for it before you type. Later connections return to the same X session |
+| RDP | **RDP, native backend** (`rdp-native`) | xrdp's X session: a black desktop with one xterm at the top left and the prompt `occamy@…:~$`. The desktop resizes to the window, in CSS pixels as on TigerVNC. The first connection after the stack or the `rdp` service starts creates the X session, so the xterm takes a few seconds to appear on an idle host, and took 17 seconds at a load of 306; wait for it before you type. Later connections return to the same X session |
 | RDP | **RDP, through guacd** (`rdp-guacd`) | The same X session through guacd. It keeps the size it opened at, and the page scales it |
 | Kubernetes | none in the demo stack | A terminal in a pod. See [Kubernetes](#kubernetes) below for a cluster to try it with |
+
+The two desktops are separate sessions of one user, each with its own
+settings and Firefox profile. The RDP session's home is `/home/occamy`
+and the VNC session's is `/home/occamy/vnc`, inside it, since Firefox
+refuses a profile that another session has open. The
+`desktop` service has no guacd connection: to see a desktop through
+guacd, use the connections below.
 
 The other VNC connections reach the servers' other screens: no
 password, VeNCrypt, and the German and French keyboard layouts.
@@ -408,6 +429,12 @@ On **x11vnc, native backend**, **TigerVNC, native backend** or
    sends your clipboard to the remote, if the browser lets it read the
    clipboard without asking.
 
+**Desktop (XFCE) over VNC** and **over RDP** have the clipboard too, but
+no `xclip`. In the terminal, select text and press Ctrl+Shift+C, and
+the **Clipboard** box shows it. Send text from the box, and Ctrl+Shift+V
+pastes it into the terminal. They do not answer the clipboard by
+themselves as the desktops below do.
+
 The VNC desktops also answer the clipboard by themselves: send
 `owner: hi`, and a moment later the box shows `echo: hi`, the remote's
 clipboard. The RDP desktop does the same with `occamy-e2e:hi`, which
@@ -455,6 +482,10 @@ started, wait that long and send it again.
 - On **TigerVNC, native backend**, **TigerVNC, through guacd** and
   **RDP, native backend**, the remote desktop changes size to fill the
   window.
+- On **Desktop (XFCE) over VNC** and **over RDP**, it does too, and
+  XFCE's panel and dock follow the new size. Over RDP, the screen turns
+  black while xrdp redraws it: for 0.1 to 1 second at a load of 25 to
+  60, and for several seconds at a load of 85.
 - On **SSH**, the terminal gains or loses rows and columns: run
   `stty size` before and after.
 - **x11vnc, native backend** keeps 1024×768, and the page scales it.
@@ -478,6 +509,13 @@ the owner comes back, and it ended less than a minute before, the page
 says how, as its viewers saw it: for example "The owner ended the
 session.", "The owner left and did not come back in time." or "Remote
 unreachable". Later than that, it says "Access refused".
+
+The real desktops outlive Occamy's sessions as well. **End session**
+ends the session in `occamyd`, but open **Desktop (XFCE) over VNC** or
+**over RDP** again, and the windows you left are still there, at the
+size of your window. **Log Out** in the desktop's menu does end it: the
+VNC session starts afresh by itself, and the next RDP connection
+creates a new one.
 
 **Reload.** The page keeps its sign-in in memory only, so reloading the
 owner's page asks for a sign-in again, with the notice "Sign in again
@@ -537,11 +575,30 @@ The native ones say `through vnc` or `through rdp`, and the others say
 `occamy-v1`. A connection with `tls` cannot do so, since guacd does not
 check certificates as `tls` asks.
 
-Rarely, a connection through guacd stays at "Connecting…", because
-guacd's process for it hangs before the first frame. That happened once
-in 128 connections on a very busy host, and why is not known. Click
-**Cancel** and open it again. The hung process stays in the `guacd`
-container until that restarts.
+A connection through guacd that has shown nothing 90 seconds after guacd
+accepted it, or after the last answer to a prompt, fails: the page
+leaves "Connecting…" for **Could not connect** and says why. Either the
+remote never answered, or guacd's process for the connection hung, which
+happened once in 128 connections on a very busy host, for reasons not
+known. Open it again. `occamyd` logs an error with guacd's ID for the
+connection:
+
+```
+(cd docker && podman compose logs occamy-v1) | grep 'no first frame'
+```
+
+guacd's process for the connection may still be running. Nothing
+outside the `guacd` container can stop it, and if it has hung, it stays
+there until guacd restarts. That ends every session through guacd:
+
+```
+(cd docker && podman compose restart guacd)
+```
+
+A black screen is not nothing here: guacd's first frame on VNC is sized
+and blank, so a server that finishes ServerInit and then never sends an
+update leaves the page on a black screen, and only the session's idle
+timer ends it.
 
 ## 6. Unit tests, lint and the web client's tests
 
@@ -615,6 +672,9 @@ The tests open real sessions to every demo server:
 - through the v0 service and guacd;
 - through `occamy-v1`, natively and through guacd, with the Go client
   of protocol v1;
+- on `desktop-vnc` and `desktop-rdp`: XFCE draws its panel and
+  wallpaper, and the panel follows the screen when it grows
+  (`TestDemoDesktop`);
 - on `rdp-native`: the clipboard both ways, a resize, a viewer joined
   by a share, the owner's return, and the clipboard again once its
   process in the `rdp` container has been killed;
@@ -622,7 +682,12 @@ The tests open real sessions to every demo server:
   clipboard from a window that has gone, the bug that used to kill it
   (`TestX11vncClipboardRequestorGone`);
 - the VNC parity matrix, each feature on x11vnc and TigerVNC through
-  both backends, logged as a table.
+  both backends, logged as a table;
+- in Chrome, on `tigervnc-native` and `rdp-native`: the web client at
+  device pixel ratios of 2 and 1 sizes the remote to the window in CSS
+  pixels, when the session opens and when the window changes
+  (`TestWebScreen`). It looks for Chrome on the host, or takes its path
+  from `OCCAMY_E2E_CHROME`, and is skipped without one, except in CI.
 
 On an idle host, a run takes about four minutes, most of it the parity
 matrix: 257 seconds in CI after the x11vnc test came, the pressure
@@ -794,7 +859,7 @@ and remove yours by name once `make stop` has run:
 
 ```
 podman rmi occamy-try:latest "occamy-try:$(git describe --always --tags)"
-podman rmi occamy-try-vnc occamy-try-tigervnc occamy-try-ssh occamy-try-rdp
+podman rmi occamy-try-vnc occamy-try-tigervnc occamy-try-ssh occamy-try-rdp occamy-try-desktop
 podman volume rm occamy-try_tigervnc-ca occamy-try_occamy-v1-data
 ```
 

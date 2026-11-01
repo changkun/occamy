@@ -9,6 +9,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- A real desktop in the demo stack: `docker/demo/desktop`, XFCE with a
+  terminal, file manager, text editor and Firefox as the user `occamy`,
+  which `docker/occamy-v1.yaml` lists first as **Desktop (XFCE) over
+  VNC** and **Desktop (XFCE) over RDP**, through the native backends
+  only. Each protocol has a session of its own that outlives its
+  connections. The screen follows the window, and the panel the screen.
+  `TestDemoDesktop` opens both. The other demo servers stay bare X
+  servers, which the tests' probes need. The image is about 1 GB, built
+  with `--no-install-recommends`. The bench stack leaves it out, and
+  `make bench` removes one that `make run` started.
 - [docs/try-it.md](docs/try-it.md), a guide to running Occamy v1 for
   the first time, from a fresh checkout. It covers:
   - the prerequisites and the build;
@@ -773,6 +783,31 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Fixed
 
+- A session through guacd that shows nothing now fails, rather than
+  staying at "Connecting…". guacd's process for a connection hung once
+  in 128 connections on a very busy host, and only the session's idle
+  timer ended that, half an hour after the last input and with the
+  wrong reason. The guacd bridge now gives guacd 90 s from accepting
+  the connection, or from the owner's last answer to a prompt, for the
+  first frame that viewers can see. The page then says "Could not
+  connect" and why, in the reason of the `backend-failed` close, which
+  until now said only `failed`. `occamyd` logs an error that says the
+  process may still be running and that only restarting guacd clears
+  it: nothing outside the `guacd` container can stop it. A black screen
+  is not covered: guacd's first frame on VNC is sized and blank, so a
+  server that finishes ServerInit and then never sends an update leaves
+  the page black until the idle timer
+  ([guacd-bridge.md](specs/008-native-architecture/guacd-bridge.md),
+  Implementation notes: a bounded connect).
+- Remote desktops are no longer tiny on a HiDPI display. The web client
+  asked a remote for the window's size in device pixels, which TigerVNC
+  and xrdp honour and X11 programs do not scale to, so at a device
+  pixel ratio of 2 they showed at half their size, at the top left of a
+  huge black screen. It now asks for the window's size in CSS pixels, so
+  that a remote pixel is a CSS pixel at any ratio; such a desktop is a
+  little soft on a HiDPI display. `pixel_ratio` stays in the hello, and
+  no server acts on it. No test ran at a ratio of 2 before: `TestWebScreen`
+  opens both desktops in Chrome at ratios of 2 and 1 in `make e2e`
 - VNC through guacd no longer fails with "Remote unreachable" when a
   client resizes or moves the pointer right after opening. A `size` or
   a `mouse` that reaches guacd 1.6's VNC process before its RFB

@@ -65,6 +65,11 @@ func TestDemoV1File(t *testing.T) {
 			t.Errorf("connection %s is named %q", c.ID, c.Name)
 		}
 	}
+	// The real desktop comes first, for a first-time viewer, and through
+	// the native backends: it must not depend on guacd.
+	if len(f.Connections) < 2 || f.Connections[0].ID != "desktop-vnc" || f.Connections[1].ID != "desktop-rdp" {
+		t.Errorf("the connections do not start with desktop-vnc and desktop-rdp: %+v", f.Connections[:min(2, len(f.Connections))])
+	}
 	// Every connection but ssh, vnc-native and rdp-native names its
 	// backend, so that the comparison does not change with a protocol's
 	// default; vnc-native and rdp-native check the defaults, and ssh has
@@ -72,6 +77,7 @@ func TestDemoV1File(t *testing.T) {
 	want := map[string]string{
 		"ssh":        config.BackendNative,
 		"rdp-native": config.BackendNative, "rdp-guacd": config.BackendGuacd,
+		"desktop-vnc": config.BackendNative, "desktop-rdp": config.BackendNative,
 	}
 	for _, id := range []string{"vnc", "vnc-none", "vnc-de", "vnc-fr", "tigervnc", "tigervnc-prompt", "tigervnc-plain", "tigervnc-none", "tigervnc-de", "tigervnc-fr"} {
 		want[id+"-native"] = config.BackendNative
