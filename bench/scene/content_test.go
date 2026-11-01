@@ -35,6 +35,57 @@ func TestContentIsDeterministic(t *testing.T) {
 	}
 }
 
+// A stamp repaints only the cells that change, and all of them after a
+// redraw cleared it: the scene's stamp must end up showing the frame,
+// whatever cells it skipped.
+func TestStampChanges(t *testing.T) {
+	var shown [24]bool
+	apply := func(was, now uint32) int {
+		bits := stampChanges(was, now)
+		for _, i := range bits {
+			shown[i] = now&(1<<(23-i)) != 0
+		}
+		return len(bits)
+	}
+	if n := apply(noStamp, probe.StampValue(0)); n != 24 {
+		t.Errorf("a first stamp repaints %d cells, want all 24", n)
+	}
+	most := 0
+	for f := range 1000 {
+		was, now := probe.StampValue(uint16(f)), probe.StampValue(uint16(f+1))
+		most = max(most, apply(was, now))
+		for i, on := range shown {
+			if on != (now&(1<<(23-i)) != 0) {
+				t.Fatalf("after frame %d, cell %d shows %v", f+1, i, on)
+			}
+		}
+	}
+	if most == 24 {
+		t.Error("every frame repaints the whole stamp")
+	}
+}
+
+// A stamp's colours read back as its bits, and frame numbers in a screen
+// drawn by withStamp read back as the harness reads them.
+func TestWithStamp(t *testing.T) {
+	d := &display{stamps: true, stamped: noStamp, frame: 12345}
+	img := d.withStamp(newPlasma(1024, 768).frame(3))
+	if n, ok := probe.ReadStamp(img); !ok || n != 12345 {
+		t.Errorf("read frame %d, %v, want 12345", n, ok)
+	}
+	if d.stamped != probe.StampValue(12345) {
+		t.Errorf("the display records %#x as drawn", d.stamped)
+	}
+	// A screen too small for a stamp, as TestEncodings' 64×48, shows none
+	// and keeps its pixels.
+	small := newPlasma(64, 48).frame(3)
+	want := bytes.Clone(small.Pix)
+	d = &display{stamps: probe.StampArea.In(small.Bounds()), stamped: noStamp}
+	if !bytes.Equal(d.withStamp(small).Pix, want) {
+		t.Error("a screen too small for the stamp was drawn on")
+	}
+}
+
 // The dragged window stays on the screen and off the swatch.
 func TestDragStaysClear(t *testing.T) {
 	const w, h = 1024, 768
@@ -45,7 +96,7 @@ func TestDragStaysClear(t *testing.T) {
 		if !r.In(screen) {
 			t.Fatalf("at %d ms the window is at %v, off the screen", ms, r)
 		}
-		if r.Overlaps(probe.Swatch) || p.X < margin {
+		if r.Overlaps(probe.Swatch) || r.Overlaps(probe.StampArea) || p.X < margin {
 			t.Fatalf("at %d ms the window at %v enters the margin", ms, r)
 		}
 	}

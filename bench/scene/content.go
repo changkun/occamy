@@ -16,14 +16,15 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
+
+	"changkun.de/x/occamy/bench/internal/probe"
 )
 
 // newWallpaper is a vertical gradient, as plain as a desktop background.
 func newWallpaper(w, h int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	top, bottom := color.RGBA{0x1f, 0x3b, 0x5a, 0xff}, color.RGBA{0x3c, 0x6e, 0x8f, 0xff}
 	for y := range h {
-		c := lerp(top, bottom, float64(y)/float64(max(1, h-1)))
+		c := probe.Wallpaper(y, h)
 		for x := range w {
 			img.SetRGBA(x, y, c)
 		}
