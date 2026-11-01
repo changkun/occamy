@@ -1,0 +1,41 @@
+name: Fuzz
+
+# go test replays the seeds and the corpus on every change. This looks
+# for new inputs: every target for 30 seconds, one at a time, four
+# workers each. A pull request that changes this file runs it too.
+on:
+  schedule:
+  - cron: '23 2 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+    - .github/workflows/fuzz.yml
+
+jobs:
+
+  fuzz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version: stable
+    # One target's failure does not stop the others.
+    - name: Fuzz
+      run: |
+        status=0
+        for pkg in $(go list ./...); do
+          for target in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz' || true); do
+            go test -run '^$' -fuzz "^$target\$" -fuzztime 30s -parallel 4 "$pkg" || status=1
+          done
+        done
+        exit $status
+    # go test writes a failing input under testdata/fuzz/, where a plain
+    # go test replays it once it is committed.
+    - name: Keep the failing inputs
+      if: failure()
+      uses: actions/upload-artifact@v7
+      with:
+        name: fuzz-failures
+        path: '**/testdata/fuzz/**'
