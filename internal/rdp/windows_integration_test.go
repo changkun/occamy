@@ -25,15 +25,21 @@ package rdp
 //
 // It is a probe rather than a gate: what it logs is its purpose. Every
 // item starts as not run and stays so unless a stage reaches it, and a
-// summary ends the log. A stage that fails or panics ends alone.
+// summary ends the log. A stage that fails or panics ends alone. It
+// first replays the connection's security stages under several limits,
+// and runs the session under the first that passes and that the client
+// can take as it is, naming that limit in every verdict.
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/tls"
+	"encoding/asn1"
 	"encoding/binary"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"image"
@@ -76,7 +82,7 @@ const (
 )
 
 // The stages, each of which is also an item.
-var windowsStages = []string{"CredSSPRounds", "GFX", "Bitmaps", "TLSOnly", "WrongPassword"}
+var windowsStages = []string{"CredSSPRounds", "TLSOnly", "GFX", "Bitmaps", "WrongPassword"}
 
 var windowsItems = []string{
 	itemNLA, itemRounds, itemDrawing, itemGFX, itemClearCodec, itemCaches, itemKeyboard,
@@ -91,12 +97,36 @@ func stageItem(name string) string { return "stage " + name }
 type findings struct {
 	mu       sync.Mutex
 	verdicts map[string]string
+	attempts []string // how each replay went
+	limit    string   // what the verdicts come under, if anything
 }
 
 func (f *findings) set(item, verdict string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.verdicts[item] = verdict
+}
+
+func (f *findings) attempt(line string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.attempts = append(f.attempts, line)
+}
+
+func (f *findings) setLimit(limit string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.limit = limit
+}
+
+// verdict words a verdict, with the limit it came under.
+func (f *findings) verdict(word, format string, args ...any) string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.limit != "" {
+		word += " under " + f.limit
+	}
+	return word + ": " + fmt.Sprintf(format, args...)
 }
 
 func (f *findings) has(item string) bool {
@@ -107,21 +137,21 @@ func (f *findings) has(item string) bool {
 
 func (f *findings) seen(t *testing.T, item, format string, args ...any) {
 	t.Helper()
-	v := "seen: " + fmt.Sprintf(format, args...)
+	v := f.verdict("seen", format, args...)
 	t.Logf("finding: %s: %s", item, v)
 	f.set(item, v)
 }
 
 func (f *findings) failed(t *testing.T, item, format string, args ...any) {
 	t.Helper()
-	v := "failed: " + fmt.Sprintf(format, args...)
+	v := f.verdict("failed", format, args...)
 	t.Errorf("finding: %s: %s", item, v)
 	f.set(item, v)
 }
 
 func (f *findings) notRun(t *testing.T, item, format string, args ...any) {
 	t.Helper()
-	v := "not run: " + fmt.Sprintf(format, args...)
+	v := f.verdict("not run", format, args...)
 	t.Logf("finding: %s: %s", item, v)
 	f.set(item, v)
 }
@@ -137,6 +167,9 @@ func (f *findings) report(t *testing.T) {
 		}
 		t.Logf("summary: %s: %s", item, v)
 	}
+	for _, line := range f.attempts {
+		t.Logf("summary: attempt %s", line)
+	}
 	for _, name := range windowsStages {
 		row(stageItem(name))
 	}
@@ -150,6 +183,16 @@ type windowsHost struct {
 	addr, user, password string
 	share                string
 	f                    *findings
+	lim                  *sessionLimit
+}
+
+// sessionLimit is what the replays leave for the session stages: how the
+// client, as it is, gets past round 1.
+type sessionLimit struct {
+	name      string // "" if it needs no limit
+	protocols uint32 // to offer, if not the client's default
+	godebug   string // the process's GODEBUG setting, if any
+	why       string // why the stages cannot run, if they cannot
 }
 
 func TestWindows(t *testing.T) {
@@ -159,6 +202,7 @@ func TestWindows(t *testing.T) {
 		password: os.Getenv("OCCAMY_RDP_WINDOWS_PASSWORD"),
 		share:    os.Getenv("OCCAMY_RDP_WINDOWS_SHARE"),
 		f:        &findings{verdicts: map[string]string{}},
+		lim:      &sessionLimit{why: "the attempts did not finish"},
 	}
 	if h.addr == "" || h.user == "" || h.password == "" {
 		t.Skip("OCCAMY_RDP_WINDOWS_ADDR, _USER and _PASSWORD name no server")
@@ -168,9 +212,27 @@ func TestWindows(t *testing.T) {
 	}
 	defer h.f.report(t)
 	h.stage(t, "CredSSPRounds", h.credSSPRounds)
+	h.stage(t, "TLSOnly", h.tlsOnly)
+	if why := h.lim.why; why != "" {
+		h.f.failed(t, itemNLA, "%s", why)
+		for _, item := range []string{
+			itemDrawing, itemGFX, itemClearCodec, itemCaches, itemKeyboard, itemClipFrom, itemClipTo,
+			itemResize, itemBitmaps, itemBitmapsResize, itemWrongPassword,
+		} {
+			h.f.notRun(t, item, "%s", why)
+		}
+		for _, name := range []string{"GFX", "Bitmaps", "WrongPassword"} {
+			h.f.notRun(t, stageItem(name), "%s", why)
+		}
+		return
+	}
+	if h.lim.godebug != "" {
+		t.Setenv("GODEBUG", h.lim.godebug)
+	}
+	h.f.setLimit(h.lim.name)
+	t.Logf("finding: the session stages run under %q", h.lim.name)
 	h.stage(t, "GFX", h.gfx)
 	h.stage(t, "Bitmaps", h.bitmaps)
-	h.stage(t, "TLSOnly", h.tlsOnly)
 	h.stage(t, "WrongPassword", h.wrongPassword)
 }
 
@@ -189,9 +251,9 @@ func (h windowsHost) stage(t *testing.T, name string, run func(*testing.T)) {
 	switch {
 	case h.f.has(item):
 	case passed:
-		h.f.set(item, "seen: ran to its end")
+		h.f.set(item, h.f.verdict("seen", "ran to its end"))
 	default:
-		h.f.set(item, "failed: see its findings")
+		h.f.set(item, h.f.verdict("failed", "see its findings"))
 	}
 }
 
@@ -338,10 +400,31 @@ func (h windowsHost) open(t *testing.T, stage, item string, cfg Config) *winSess
 			s.trace = append(s.trace, p...)
 		}
 	}
+	if cfg.Protocols == 0 {
+		cfg.Protocols = h.lim.protocols
+	}
+	host, _, err := net.SplitHostPort(h.addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.TLS.ServerName = host // as Dial does
 	begin := time.Now()
 	cctx, ccancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer ccancel()
-	c, err := Dial(cctx, h.addr, cfg)
+	var d net.Dialer
+	conn, err := d.DialContext(cctx, "tcp", h.addr)
+	if err != nil {
+		cancel()
+		h.f.failed(t, item, "dialing: %v", err)
+		t.FailNow()
+	}
+	rec := &wireRecorder{Conn: conn}
+	c, err := Connect(cctx, rec, cfg)
+	rec.log(func(format string, args ...any) {
+		t.Helper()
+		t.Logf("the client's TLS: "+format, args...)
+	})
+	h.limitHeld(t, rec)
 	if err != nil {
 		cancel()
 		var ce *CredSSPError
@@ -372,6 +455,31 @@ func (h windowsHost) open(t *testing.T, stage, item string, cfg Config) *winSess
 	}()
 	t.Cleanup(s.stop)
 	return s
+}
+
+// limitHeld checks, from what the client sent, that a limit that a
+// GODEBUG setting makes is in force.
+func (h windowsHost) limitHeld(t *testing.T, rec *wireRecorder) {
+	t.Helper()
+	if h.lim.godebug == "" {
+		return
+	}
+	offered := 0
+	for _, m := range rec.hellos() {
+		if !m.client {
+			continue
+		}
+		offered++
+		if m.postQuantum() {
+			t.Errorf("finding: %s is not in force: %v", h.lim.godebug, m)
+			return
+		}
+	}
+	if offered == 0 {
+		t.Errorf("finding: no ClientHello was recorded, so %s is unproven", h.lim.godebug)
+		return
+	}
+	t.Logf("finding: %s is in force: the client offered no post-quantum group", h.lim.godebug)
 }
 
 // ended reports once how Run ended.
@@ -709,109 +817,196 @@ func (s *winSession) resize(item string, sizes ...image.Point) {
 	s.h.f.seen(s.t, item, "%s", strings.Join(notes, ", "))
 }
 
-// credSSPRounds repeats the client's connection as far as CredSSP's
-// first two rounds, with the client's own messages, and reports each,
-// so that a failure there has a place: Connect's error is the same for
-// either. It stops short of delegating the credentials. It logs what the
-// server sends, and of what the client sends only the structure: an
-// AUTHENTICATE_MESSAGE holds proofs of the password.
+// replayAttempt is an attempt at the connection's security stages, on a
+// connection of its own, that differs from the client in one thing, so
+// that a failure has a place and a cause: Connect's error is the same
+// for all of them.
+type replayAttempt struct {
+	label     string
+	protocols uint32            // to offer, if not the client's default
+	limit     func(*tls.Config) // what it changes of the client's TLS
+	version   int               // of the first TSRequest, if not the client's
+	// client is how the client itself takes the same limit, as it is;
+	// nil if that needs a change to it.
+	client *sessionLimit
+}
+
+var replayAttempts = []replayAttempt{
+	{label: "default", client: &sessionLimit{}},
+	{label: "hybrid", protocols: ProtocolHybrid, client: &sessionLimit{name: "hybrid (PROTOCOL_HYBRID alone)", protocols: ProtocolHybrid}},
+	{
+		label: "tls13-classic",
+		limit: func(c *tls.Config) {
+			// What GODEBUG=tlsmlkem=0 leaves of the default groups.
+			c.CurvePreferences = []tls.CurveID{tls.X25519, tls.CurveP256, tls.CurveP384, tls.CurveP521}
+		},
+		client: &sessionLimit{name: "tls13-classic (GODEBUG=tlsmlkem=0)", godebug: "tlsmlkem=0"},
+	},
+	{label: "tls13-p384", limit: func(c *tls.Config) { c.CurvePreferences = []tls.CurveID{tls.CurveP384} }},
+	{label: "tls12", limit: func(c *tls.Config) { c.MaxVersion = tls.VersionTLS12 }},
+	{label: "credssp-v2", version: 2},
+}
+
+// How far a replay came.
+const (
+	reachedNothing = iota
+	reachedTLS
+	reachedChallenge // past round 1
+	reachedProof     // the server proved its key in round 2
+	reachedCredentials
+)
+
+// credSSPRounds runs the replays and leaves for the session stages the
+// first way past round 1 that the client can take as it is.
 func (h windowsHost) credSSPRounds(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	var chosen *sessionLimit
+	var others []string
+	for i, a := range replayAttempts {
+		if i > 0 {
+			// So that the server's events tell the attempts apart.
+			time.Sleep(3 * time.Second)
+		}
+		began := time.Now()
+		reached, note := h.replay(t, a)
+		line := fmt.Sprintf("%s: began %s, took %v: %s", a.label, began.UTC().Format("15:04:05.000"), time.Since(began).Round(time.Millisecond), note)
+		t.Logf("attempt %s", line)
+		h.f.attempt(line)
+		if a.label == "default" {
+			if reached >= reachedProof {
+				h.f.seen(t, itemRounds, "%s", note)
+			} else {
+				h.f.failed(t, itemRounds, "%s", note)
+			}
+		}
+		if reached < reachedChallenge {
+			continue
+		}
+		switch {
+		case a.client == nil:
+			others = append(others, a.label)
+		case chosen == nil:
+			chosen = a.client
+		}
+	}
+	switch {
+	case chosen != nil:
+		*h.lim = *chosen
+	case len(others) > 0:
+		h.lim.why = fmt.Sprintf("only %s passed round 1, and the client cannot take that without a change", strings.Join(others, ", "))
+	default:
+		h.lim.why = "no attempt passed round 1"
+	}
+}
+
+// replay repeats the client's connection as far as the server's answer
+// to the credentials, with the client's own messages, and returns how
+// far it came. It logs what the server sends, and of what the client
+// sends only the structure: an AUTHENTICATE_MESSAGE holds proofs of the
+// password, and the TSCredentials hold the password.
+func (h windowsHost) replay(t *testing.T, a replayAttempt) (reached int, note string) {
+	logf := func(format string, args ...any) {
+		t.Helper()
+		t.Logf("replay %s: "+format, append([]any{a.label}, args...)...)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var d net.Dialer
 	conn, err := d.DialContext(ctx, "tcp", h.addr)
 	if err != nil {
-		h.f.failed(t, itemRounds, "dialing: %v", err)
-		return
+		return reachedNothing, fmt.Sprintf("dialing: %v", err)
 	}
 	defer conn.Close()
-	if err := conn.SetDeadline(time.Now().Add(time.Minute)); err != nil {
+	if err := conn.SetDeadline(time.Now().Add(30 * time.Second)); err != nil {
 		t.Log(err)
 	}
+	rec := &wireRecorder{Conn: conn}
+	defer rec.log(logf)
 
-	tr := newTransport(conn, nil)
-	if err := tr.write(connectionRequest("", ProtocolHybrid|ProtocolHybridEx)); err != nil {
-		h.f.failed(t, itemRounds, "the connection request: %v", err)
-		return
+	protocols := a.protocols
+	if protocols == 0 {
+		protocols = ProtocolHybrid | ProtocolHybridEx
+	}
+	tr := newTransport(rec, nil)
+	if err := tr.write(connectionRequest("", protocols)); err != nil {
+		return reachedNothing, fmt.Sprintf("the connection request: %v", err)
 	}
 	f, _, err := tr.readFrame(nil)
 	if err != nil {
-		h.f.failed(t, itemRounds, "the connection confirm: %v", err)
-		return
+		return reachedNothing, fmt.Sprintf("the connection confirm: %v", err)
 	}
 	protocol, err := parseConnectionConfirm(f.data)
-	t.Logf("round: connection confirm % x: protocol %#x, %v", f.data, protocol, err)
+	logf("connection confirm % x: protocol %#x, %v", f.data, protocol, err)
 	if err != nil {
-		h.f.failed(t, itemRounds, "the connection confirm: %v", err)
-		return
+		return reachedNothing, fmt.Sprintf("the connection confirm: %v", err)
 	}
 
 	host, _, err := net.SplitHostPort(h.addr)
 	if err != nil {
-		h.f.failed(t, itemRounds, "%v", err)
-		return
+		return reachedNothing, err.Error()
 	}
 	policy, err := newTLSPolicy(TLS{ServerName: host, InsecureSkipVerify: true}, host)
 	if err != nil {
-		h.f.failed(t, itemRounds, "%v", err)
-		return
+		return reachedNothing, err.Error()
 	}
-	tc := tls.Client(conn, policy.config(conn.RemoteAddr().String(), slog.New(slog.NewTextHandler(testWriter{t}, nil))))
+	cfg := policy.config(conn.RemoteAddr().String(), slog.New(slog.NewTextHandler(testWriter{t}, nil)))
+	if a.limit != nil {
+		a.limit(cfg)
+	}
+	tc := tls.Client(rec, cfg)
 	if err := tc.HandshakeContext(ctx); err != nil {
-		h.f.failed(t, itemRounds, "the TLS handshake: %v", err)
-		return
+		return reachedNothing, fmt.Sprintf("protocol %#x; the TLS handshake: %v", protocol, err)
 	}
 	tr.upgrade(tc)
 	st := tc.ConnectionState()
 	if len(st.PeerCertificates) == 0 {
-		h.f.failed(t, itemRounds, "TLS without a certificate")
-		return
+		return reachedNothing, "TLS without a certificate"
 	}
 	cert := st.PeerCertificates[0]
-	t.Logf("round: TLS %s, %s, group %v; certificate %v, %v bytes of public key info",
-		tls.VersionName(st.Version), tls.CipherSuiteName(st.CipherSuite), st.CurveID, cert.PublicKeyAlgorithm, len(cert.RawSubjectPublicKeyInfo))
+	negotiated := fmt.Sprintf("protocol %#x, %s, %s, group %v", protocol, tls.VersionName(st.Version), tls.CipherSuiteName(st.CipherSuite), st.CurveID)
+	logf("%s; certificate %v, %v bytes of public key info", negotiated, cert.PublicKeyAlgorithm, len(cert.RawSubjectPublicKeyInfo))
 	pub, err := subjectPublicKey(cert)
 	if err != nil {
-		h.f.failed(t, itemRounds, "%v", err)
-		return
+		return reachedTLS, fmt.Sprintf("%s; %v", negotiated, err)
 	}
 
+	version := credSSPVersion
+	if a.version != 0 {
+		version = a.version
+	}
 	nc := &ntlmClient{user: h.user, password: h.password}
 	negotiate := nc.negotiateMessage()
-	t.Logf("round 1: TSRequest version %d, NEGOTIATE % x", credSSPVersion, negotiate)
-	if err := writeTSRequest(tc, &tsRequest{Version: credSSPVersion, NegoTokens: []negoToken{{negotiate}}}); err != nil {
-		h.f.failed(t, itemRounds, "round 1: writing: %v", err)
-		return
+	logf("round 1: TSRequest version %d, NEGOTIATE % x", version, negotiate)
+	if err := writeTSRequest(tc, &tsRequest{Version: version, NegoTokens: []negoToken{{negotiate}}}); err != nil {
+		return reachedTLS, fmt.Sprintf("%s; round 1: writing: %v", negotiated, err)
 	}
 	resp, err := readTSRequest(tr.r)
 	if err != nil {
-		h.f.failed(t, itemRounds, "round 1: no answer to NEGOTIATE: %v", err)
-		return
+		return reachedTLS, fmt.Sprintf("%s; round 1: no answer to NEGOTIATE: %v", negotiated, err)
 	}
 	if len(resp.NegoTokens) == 0 {
-		h.f.failed(t, itemRounds, "round 1: TSRequest version %d without a token", resp.Version)
-		return
+		return reachedTLS, fmt.Sprintf("%s; round 1: TSRequest version %d without a token", negotiated, resp.Version)
 	}
 	challenge := resp.NegoTokens[0].Token
-	t.Logf("round 1: TSRequest version %d, CHALLENGE % x", resp.Version, challenge)
+	logf("round 1: TSRequest version %d, CHALLENGE % x", resp.Version, challenge)
 	ch, err := parseChallenge(challenge)
 	if err != nil {
-		h.f.failed(t, itemRounds, "round 1: the CHALLENGE: %v", err)
-		return
+		return reachedChallenge, fmt.Sprintf("%s; round 1: the CHALLENGE: %v", negotiated, err)
 	}
-	t.Logf("round 1: CHALLENGE flags %#08x, target info %v, version field %v", ch.flags, pairShapes(ch.targetInfo), ch.flags&ntlmVersion != 0)
+	logf("round 1: CHALLENGE flags %#08x, target info %v, version field %v", ch.flags, pairShapes(ch.targetInfo), ch.flags&ntlmVersion != 0)
+	if a.version != 0 {
+		return reachedChallenge, fmt.Sprintf("%s; round 1 answered with TSRequest version %d; it stops there, for the replay proves a key at version 5 and later alone", negotiated, resp.Version)
+	}
 
 	authenticate, sess, err := nc.authenticate(challenge)
 	if err != nil {
-		h.f.failed(t, itemRounds, "round 2: the client's answer: %v", err)
-		return
+		return reachedChallenge, fmt.Sprintf("%s; round 2: the client's answer: %v", negotiated, err)
 	}
-	t.Logf("round 2: AUTHENTICATE %s", authenticateShape(authenticate))
+	logf("round 2: AUTHENTICATE %s", authenticateShape(authenticate))
 	nonce := make([]byte, 32)
 	if _, err := rand.Read(nonce); err != nil {
 		t.Fatal(err)
 	}
-	version := min(resp.Version, credSSPVersion)
+	version = min(resp.Version, credSSPVersion)
 	err = writeTSRequest(tc, &tsRequest{
 		Version:     version,
 		NegoTokens:  []negoToken{{authenticate}},
@@ -819,20 +1014,260 @@ func (h windowsHost) credSSPRounds(t *testing.T) {
 		ClientNonce: nonce,
 	})
 	if err != nil {
-		h.f.failed(t, itemRounds, "round 2: writing: %v", err)
-		return
+		return reachedChallenge, fmt.Sprintf("%s; round 2: writing: %v", negotiated, err)
 	}
 	resp, err = readTSRequest(tr.r)
 	if err != nil {
-		h.f.failed(t, itemRounds, "round 2: no answer to AUTHENTICATE: %v", err)
-		return
+		return reachedChallenge, fmt.Sprintf("%s; round 2: no answer to AUTHENTICATE: %v", negotiated, err)
 	}
 	got, err := sess.unseal(resp.PubKeyAuth)
 	if err != nil {
-		h.f.failed(t, itemRounds, "round 2: the server's proof: %v", err)
-		return
+		return reachedChallenge, fmt.Sprintf("%s; round 2: the server's proof: %v", negotiated, err)
 	}
-	h.f.seen(t, itemRounds, "both rounds answered: TSRequest version %d, the server's proof matches %v", resp.Version, hmac.Equal(got, bindingHash(serverClientHashMagic, nonce, pub)))
+	if !hmac.Equal(got, bindingHash(serverClientHashMagic, nonce, pub)) {
+		return reachedChallenge, fmt.Sprintf("%s; round 2: the server proved another key", negotiated)
+	}
+
+	// The credentials go only to the server that has proved its key.
+	pw := utf16le(h.password)
+	defer clear(pw)
+	creds, err := asn1.Marshal(tsPasswordCreds{utf16le(""), utf16le(h.user), pw})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(creds)
+	ts, err := asn1.Marshal(tsCredentials{CredType: 1, Credentials: creds})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(ts)
+	if err := writeTSRequest(tc, &tsRequest{Version: version, AuthInfo: sess.seal(ts)}); err != nil {
+		return reachedProof, fmt.Sprintf("%s; both rounds answered; the credentials: writing: %v", negotiated, err)
+	}
+	if protocol&ProtocolHybridEx == 0 {
+		time.Sleep(time.Second) // for the server to log on, with no answer to wait for
+		return reachedCredentials, fmt.Sprintf("%s; both rounds answered, the server's proof matches; the credentials are written, and PROTOCOL_HYBRID has no answer to them", negotiated)
+	}
+	if err := readEarlyUserAuth(tr.r); err != nil {
+		return reachedProof, fmt.Sprintf("%s; both rounds answered; the Early User Authorization Result: %v", negotiated, err)
+	}
+	return reachedCredentials, fmt.Sprintf("%s; both rounds answered, the server's proof matches, and the server authorizes the user", negotiated)
+}
+
+// The TLS record types that wireRecorder and parseHellos look at.
+const (
+	recordChangeCipherSpec = 20
+	recordHandshake        = 22
+	recordApplicationData  = 23
+)
+
+// wireRecorder keeps in memory what crosses a connection until the
+// client's first application data, which comes after its part of the
+// handshake and before anything of CredSSP. It logs the fields of the
+// hellos alone.
+type wireRecorder struct {
+	net.Conn
+	mu             sync.Mutex
+	sent, received []byte
+	done           bool
+}
+
+func (r *wireRecorder) Write(p []byte) (int, error) {
+	r.mu.Lock()
+	if len(p) > 0 && p[0] == recordApplicationData {
+		r.done = true
+	}
+	if !r.done {
+		r.sent = append(r.sent, p...)
+	}
+	r.mu.Unlock()
+	return r.Conn.Write(p)
+}
+
+func (r *wireRecorder) Read(p []byte) (int, error) {
+	n, err := r.Conn.Read(p)
+	r.mu.Lock()
+	if !r.done {
+		r.received = append(r.received, p[:n]...)
+	}
+	r.mu.Unlock()
+	return n, err
+}
+
+// hellos returns what each side said in its hellos, the client's first.
+func (r *wireRecorder) hellos() []tlsHello {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append(parseHellos(r.sent), parseHellos(r.received)...)
+}
+
+func (r *wireRecorder) log(logf func(string, ...any)) {
+	for _, m := range r.hellos() {
+		logf("%v", m)
+	}
+}
+
+// helloRetryRandom is the random of a ServerHello that is a
+// HelloRetryRequest, RFC 8446 section 4.1.3.
+var helloRetryRandom, _ = hex.DecodeString("cf21ad74e59a6111be1d8c021e65b891c2a211167abb8c5e079e09e2c8a8339c")
+
+// tlsHello is what a ClientHello or a ServerHello offers or selects.
+type tlsHello struct {
+	client     bool
+	retry      bool // a HelloRetryRequest
+	legacy     uint16
+	versions   []uint16
+	suites     []uint16
+	groups     []tls.CurveID
+	shares     []tls.CurveID
+	signatures []tls.SignatureScheme
+	extensions []uint16
+}
+
+// mapped returns the elements of s through f.
+func mapped[T, U any](s []T, f func(T) U) []U {
+	out := make([]U, len(s))
+	for i, v := range s {
+		out[i] = f(v)
+	}
+	return out
+}
+
+func (m tlsHello) String() string {
+	versions, suites := mapped(m.versions, tls.VersionName), mapped(m.suites, tls.CipherSuiteName)
+	switch {
+	case m.client:
+		return fmt.Sprintf("ClientHello: legacy version %s, versions %q, groups %v, key shares %v, signature algorithms %v, ciphers %q, extensions %d",
+			tls.VersionName(m.legacy), versions, m.groups, m.shares, m.signatures, suites, m.extensions)
+	case m.retry:
+		return fmt.Sprintf("HelloRetryRequest: version %q, cipher %q, group wanted %v, extensions %d", versions, suites, m.shares, m.extensions)
+	}
+	return fmt.Sprintf("ServerHello: legacy version %s, version %q, cipher %q, key share %v, extensions %d",
+		tls.VersionName(m.legacy), versions, suites, m.shares, m.extensions)
+}
+
+// postQuantum reports whether the hello offers a post-quantum group.
+func (m tlsHello) postQuantum() bool {
+	return slices.ContainsFunc(m.groups, func(g tls.CurveID) bool { return strings.Contains(g.String(), "MLKEM") })
+}
+
+// helloReader reads the big-endian fields of a hello; past its end it
+// gives zeros and says so in bad.
+type helloReader struct {
+	b   []byte
+	bad bool
+}
+
+func (c *helloReader) more() bool { return len(c.b) > 0 && !c.bad }
+
+func (c *helloReader) bytes(n int) []byte {
+	if c.bad || n > len(c.b) {
+		c.bad = true
+		return nil
+	}
+	p := c.b[:n]
+	c.b = c.b[n:]
+	return p
+}
+
+func (c *helloReader) u8() int {
+	if p := c.bytes(1); p != nil {
+		return int(p[0])
+	}
+	return 0
+}
+
+func (c *helloReader) u16() uint16 {
+	if p := c.bytes(2); p != nil {
+		return binary.BigEndian.Uint16(p)
+	}
+	return 0
+}
+
+func (c *helloReader) sub8() *helloReader  { return &helloReader{b: c.bytes(c.u8())} }
+func (c *helloReader) sub16() *helloReader { return &helloReader{b: c.bytes(int(c.u16()))} }
+
+// parseHellos returns the hellos in one direction of a connection, which
+// may start with X.224 frames. It stops at the first record that is
+// neither those nor in the clear.
+func parseHellos(stream []byte) []tlsHello {
+	var handshake []byte
+	for len(stream) >= 5 {
+		n := 0
+		switch stream[0] {
+		case 3: // TPKT
+			n = int(binary.BigEndian.Uint16(stream[2:]))
+		case recordChangeCipherSpec, recordHandshake:
+			n = 5 + int(binary.BigEndian.Uint16(stream[3:]))
+		}
+		if n < 4 || n > len(stream) {
+			break
+		}
+		if stream[0] == recordHandshake {
+			handshake = append(handshake, stream[5:n]...)
+		}
+		stream = stream[n:]
+	}
+	var out []tlsHello
+	c := helloReader{b: handshake}
+	for c.more() {
+		typ := c.u8()
+		size := c.u8()<<16 | int(c.u16())
+		body := helloReader{b: c.bytes(size)}
+		if !c.bad && (typ == 1 || typ == 2) {
+			out = append(out, parseHello(&body, typ == 1))
+		}
+	}
+	return out
+}
+
+func parseHello(c *helloReader, client bool) tlsHello {
+	m := tlsHello{client: client, legacy: c.u16()}
+	random := c.bytes(32)
+	m.retry = !client && bytes.Equal(random, helloRetryRandom)
+	c.sub8() // the session ID
+	if client {
+		for s := c.sub16(); s.more(); {
+			m.suites = append(m.suites, s.u16())
+		}
+		c.sub8() // the compression methods
+	} else {
+		m.suites = []uint16{c.u16()}
+		c.u8() // the compression method
+	}
+	for e := c.sub16(); e.more(); {
+		id := e.u16()
+		data := e.sub16()
+		m.extensions = append(m.extensions, id)
+		switch id {
+		case 43: // supported_versions
+			if !client {
+				m.versions = append(m.versions, data.u16())
+				break
+			}
+			for v := data.sub8(); v.more(); {
+				m.versions = append(m.versions, v.u16())
+			}
+		case 10: // supported_groups
+			for g := data.sub16(); g.more(); {
+				m.groups = append(m.groups, tls.CurveID(g.u16()))
+			}
+		case 13: // signature_algorithms
+			for s := data.sub16(); s.more(); {
+				m.signatures = append(m.signatures, tls.SignatureScheme(s.u16()))
+			}
+		case 51: // key_share
+			if !client {
+				m.shares = append(m.shares, tls.CurveID(data.u16()))
+				break
+			}
+			for s := data.sub16(); s.more(); {
+				m.shares = append(m.shares, tls.CurveID(s.u16()))
+				s.sub16() // the key
+			}
+		}
+	}
+	return m
 }
 
 // pairShapes prints AV pairs by ID and length.
@@ -1007,7 +1442,7 @@ func (h windowsHost) wrongPassword(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	begin := time.Now()
-	c, err := Dial(ctx, h.addr, Config{Username: h.user, Password: h.password + "x", TLS: TLS{InsecureSkipVerify: true},
+	c, err := Dial(ctx, h.addr, Config{Username: h.user, Password: h.password + "x", Protocols: h.lim.protocols, TLS: TLS{InsecureSkipVerify: true},
 		Logger: slog.New(slog.NewTextHandler(testWriter{t}, nil))})
 	if err == nil {
 		c.Close()

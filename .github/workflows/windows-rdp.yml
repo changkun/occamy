@@ -42,6 +42,21 @@ jobs:
     - uses: actions/setup-go@v7
       with:
         go-version: stable
+    # A client that shares no code with ours, in its pinned versions and
+    # from wheels alone. It comes before the password exists, and if it
+    # cannot be had, the Go client still runs.
+    - uses: actions/setup-python@v7
+      id: python
+      continue-on-error: true
+      with:
+        python-version: '3.12'
+    - name: Install the independent client
+      id: impacket
+      if: steps.python.outcome == 'success'
+      continue-on-error: true
+      run: |
+        python -m venv "$env:RUNNER_TEMP\rdp-check"
+        & "$env:RUNNER_TEMP\rdp-check\Scripts\python.exe" -m pip install --quiet --disable-pip-version-check --require-hashes --only-binary ':all:' -r .github/windows-rdp-requirements.txt
     - name: The machine
       run: |
         $ErrorActionPreference = 'Continue'
@@ -207,6 +222,7 @@ jobs:
         Add-LocalGroupMember -Group 'Remote Desktop Users' -Member $env:OCCAMY_RDP_WINDOWS_USER
         "OCCAMY_RDP_WINDOWS_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
     - name: Make sure Remote Desktop is on, with NLA
+      id: listener
       run: |
         $server = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
         Set-ItemProperty $server -Name fDenyTSConnections -Value 0
@@ -227,6 +243,17 @@ jobs:
           if (-not (Wait-Listener 90)) { throw 'nothing listens on port 3389' }
         }
         Get-NetTCPConnection -LocalPort 3389 -State Listen | Format-Table LocalAddress, LocalPort, State
+    - name: Have Windows log what it refuses
+      run: |
+        $ErrorActionPreference = 'Continue'
+        # Whether Schannel takes this without a reboot, which would end the
+        # job, the System log shows at the end.
+        $schannel = 'HKLM:\SYSTEM\CurrentControlSet\Control\SecurityProviders\SCHANNEL'
+        Set-ItemProperty $schannel -Name EventLogging -Value 7 -Type DWord
+        Get-ItemProperty $schannel | Format-List EventLogging
+        auditpol /set /subcategory:Logon /success:enable /failure:enable
+        Get-WinEvent -ListLog Security | Format-List IsEnabled, LogMode, MaximumSizeInBytes, RecordCount, LastWriteTime
+        exit 0
     - name: Run the client against this machine
       env:
         OCCAMY_RDP_DUMP: ${{ runner.temp }}\rdp-dump
@@ -236,6 +263,19 @@ jobs:
         $ErrorActionPreference = 'Continue'
         New-Item -ItemType Directory -Force -Path $env:OCCAMY_RDP_DUMP | Out-Null
         go test -tags rdp_windows -run '^TestWindows$' -v -count=1 -timeout 20m ./internal/rdp/ | Tee-Object -FilePath "$env:RUNNER_TEMP\rdp-test.log"
+    - name: Run an independent client against this machine
+      if: always() && steps.listener.outcome == 'success' && steps.impacket.outcome == 'success'
+      env:
+        OCCAMY_RDP_CHECK_LOG: ${{ runner.temp }}\rdp-check.log
+      run: |
+        # What it reports is for reading against the server's logon events
+        # below, at the times it logs. The password reaches it from the
+        # environment, not from a command line.
+        $ErrorActionPreference = 'Continue'
+        & "$env:RUNNER_TEMP\rdp-check\Scripts\python.exe" .github/windows-rdp-check.py
+        Write-Output "the driver exited with $LASTEXITCODE"
+        Get-Content -LiteralPath $env:OCCAMY_RDP_CHECK_LOG
+        exit 0
     - name: What the server recorded
       if: always()
       run: |
@@ -249,6 +289,10 @@ jobs:
           Get-WinEvent -LogName $log -MaxEvents 120 -ErrorAction SilentlyContinue | Sort-Object TimeCreated |
             Format-Table -AutoSize -Wrap TimeCreated, Id, Message
         }
+        Write-Output '== Schannel, in the System log'
+        $schannel = @(Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Schannel' } -MaxEvents 80 -ErrorAction SilentlyContinue | Sort-Object TimeCreated)
+        Write-Output "$($schannel.Count) events"
+        $schannel | Format-Table -AutoSize -Wrap TimeCreated, Id, Message
         Write-Output '== the session user, apart from Remote Desktop'
         if ($env:OCCAMY_RDP_WINDOWS_PASSWORD) {
           Add-Type -AssemblyName System.DirectoryServices.AccountManagement
@@ -256,12 +300,30 @@ jobs:
           Write-Output "the password checks out on this machine: $($machine.ValidateCredentials($env:OCCAMY_RDP_WINDOWS_USER, $env:OCCAMY_RDP_WINDOWS_PASSWORD))"
           net user $env:OCCAMY_RDP_WINDOWS_USER
         }
-        Write-Output '== logons of the session user in the last 30 minutes, and whether they are audited'
+        Write-Output '== logons in the last 30 minutes, and whether they are audited'
         auditpol /get /subcategory:Logon
-        $logons = @(Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = 4624, 4625; StartTime = (Get-Date).AddMinutes(-30) } -ErrorAction SilentlyContinue |
-          Where-Object { $_.Message -match $env:OCCAMY_RDP_WINDOWS_USER })
-        Write-Output "$($logons.Count) events"
-        $logons | Format-List TimeCreated, Id, Message
+        Get-WinEvent -ListLog Security | Format-List IsEnabled, LogMode, RecordCount, LastWriteTime
+        # The check of the password above is a control: it logs on too.
+        Start-Sleep -Seconds 5
+        $events = @()
+        try {
+          $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = 4624, 4625; StartTime = (Get-Date).AddMinutes(-30) } -ErrorAction Stop)
+        } catch {
+          Write-Output "reading them failed: $_"
+        }
+        Write-Output "$($events.Count) events of 4624 and 4625, by the user they name:"
+        $events | Group-Object { "$($_.Id) $($_.Properties[5].Value)" } | Format-Table Count, Name
+        $logons = @($events | Where-Object { "$($_.Properties[5].Value)" -eq $env:OCCAMY_RDP_WINDOWS_USER } | Sort-Object TimeCreated)
+        Write-Output "$($logons.Count) of them name the session user, in UTC:"
+        foreach ($record in $logons) {
+          $when = $record.TimeCreated.ToUniversalTime().ToString('HH:mm:ss.fff')
+          $p = $record.Properties
+          if ($record.Id -eq 4624) {
+            Write-Output "$when 4624 logon type $($p[8].Value), process $($p[9].Value), package $($p[10].Value), NTLM $($p[14].Value), address $($p[18].Value)"
+          } else {
+            Write-Output ("$when 4625 status {0:x8}, sub status {1:x8}, logon type $($p[10].Value), process $($p[11].Value), package $($p[12].Value), address $($p[19].Value)" -f $p[7].Value, $p[9].Value)
+          }
+        }
 
         # What takes in the port now: a first logon may add rules.
         function Test-Covers3389($filter) {
@@ -307,8 +369,10 @@ jobs:
         $files = @()
         $dump = Join-Path $env:RUNNER_TEMP 'rdp-dump'
         if (Test-Path -LiteralPath $dump) { $files += @(Get-ChildItem -LiteralPath $dump -File -Recurse) }
-        $log = Join-Path $env:RUNNER_TEMP 'rdp-test.log'
-        if (Test-Path -LiteralPath $log) { $files += @(Get-Item -LiteralPath $log) }
+        foreach ($name in 'rdp-test.log', 'rdp-check.log') {
+          $log = Join-Path $env:RUNNER_TEMP $name
+          if (Test-Path -LiteralPath $log) { $files += @(Get-Item -LiteralPath $log) }
+        }
         $hits = 0
         foreach ($file in $files) {
           $stream = [System.IO.File]::OpenRead($file.FullName)
