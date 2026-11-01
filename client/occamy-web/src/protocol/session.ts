@@ -109,7 +109,7 @@ const OP_COST = 512
 export interface Options {
   /** Names the client and its version in hello; DEFAULT_NAME if empty. */
   name?: string
-  /** The screen size the client asks for, in device pixels, if the session is graphical. */
+  /** The screen size the client asks for, in the remote's pixels, if the session is graphical. */
   width?: number
   height?: number
   /** The terminal size the client asks for, in cells, if the session is a terminal; 0 for the server's default. */
@@ -132,7 +132,7 @@ export interface Options {
   cacheSlots?: number
   /** The largest tile or cursor side the client decodes; 4096 by default. */
   maxTextureSize?: number
-  /** Device pixels per CSS pixel in hundredths, such as 200; 0 states none (100). */
+  /** Device pixels per CSS pixel in hundredths, such as 200; 0 states none (100). It only informs: occamyd does not act on it. */
   pixelRatio?: number
   /** Unacknowledged frames the client allows; the server's default if 0. */
   frameWindow?: number

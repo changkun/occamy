@@ -180,8 +180,8 @@ type Options struct {
 	// Name names the client and its version in hello, such as
 	// "occamy-cli/1.0"; DefaultName if empty.
 	Name string
-	// Width and Height are the screen size the client asks for, in
-	// device pixels, if the session is graphical; zero leaves it to the
+	// Width and Height are the screen size the client asks for, in the
+	// remote's pixels, if the session is graphical; zero leaves it to the
 	// remote.
 	Width, Height uint16
 	// Cols and Rows are the terminal size the client asks for, in
@@ -198,7 +198,7 @@ type Options struct {
 	// decodes; zero means protocol.DefaultMaxTextureSize.
 	MaxTextureSize uint16
 	// PixelRatio is the display's device pixels per CSS pixel in
-	// hundredths; zero means 100.
+	// hundredths; zero means 100. It only informs: no server acts on it.
 	PixelRatio uint16
 	// FrameWindow is the number of unacknowledged frames the client
 	// allows; zero means the server's default.

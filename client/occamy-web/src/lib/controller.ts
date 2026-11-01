@@ -99,7 +99,7 @@ export const CLIPBOARD_UNSENT = 'The remote clipboard is not responding, so the 
 
 /** What a stream asks the remote for in its hello. */
 export interface HelloSize {
-  /** Device pixels, for a graphical session. */
+  /** In the remote's pixels, for a graphical session. */
   width: number
   height: number
   /** Cells, for a terminal; 0 for the server's default. */

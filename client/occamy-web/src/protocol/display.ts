@@ -44,8 +44,8 @@ type Context2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D
 /**
  * CanvasSurface presents frames to a canvas, or to an OffscreenCanvas,
  * such as one a Worker drew into after transferControlToOffscreen. The
- * canvas takes the screen's size in device pixels; scaling it for the
- * page is the caller's, through CSS.
+ * canvas takes the screen's size, one canvas pixel to a remote pixel;
+ * scaling it for the page is the caller's, through CSS.
  */
 export class CanvasSurface implements Surface {
   readonly canvas: HTMLCanvasElement | OffscreenCanvas

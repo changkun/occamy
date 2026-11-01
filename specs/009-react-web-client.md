@@ -419,7 +419,10 @@ Settled on 2026-10-31.
     each focus would lose it again. The notice goes when the clipboard
     answers or the user dismisses it, and the next loss brings it back.
   - The owner's window size goes to the remote 300 ms after it settles,
-    in device pixels or cells, unless the hello already asked for it;
+    in CSS pixels or cells, unless the hello already asked for it, so
+    that a remote pixel is a CSS pixel at any device pixel ratio: the
+    programs on a remote desktop do not scale, so a screen of device
+    pixels showed them at half their size on a HiDPI display;
     viewers and read-only clients see the owner's size, scaled. Read-only clients bind no input. The remote's
     clipboard goes to the local one when the page has focus, for a role
     that gives input, and the local one to the remote on focus where the
@@ -460,7 +463,10 @@ Settled on 2026-10-31.
     their credentials stay in occamyd's configuration.
   - Display scaling: both fit the remote's screen to the window, up and
     down; the React client also sizes the remote to the window for the
-    owner, and tells the hello the device pixel ratio.
+    owner, in CSS pixels, and tells the hello the device pixel ratio,
+    which only informs: neither the shell's sizes nor occamyd depend on
+    it, and RDP's scale factors stay at 100, as a factor of 2 on a
+    screen in CSS pixels would double what the size already gives.
   - Mouse: buttons, motion and the wheel, through the core's
     `bindPointer`.
   - Keyboard: keysyms as before, now with each key's USB HID usage, and
@@ -542,7 +548,7 @@ Settled on 2026-10-31.
     `web_client` under `/static/`, with vnctest's fake RFB server through
     the native VNC backend and a fake SSH server through the native SSH
     backend: a wrong password and a right one; the connection list; a
-    VNC session on a canvas at the window's size in device pixels with
+    VNC session on a canvas at the window's size with
     the remote's cursor; a click and keys reaching the server; the
     window's resizes reaching it as SetDesktopSize; the remote clipboard
     shown, and text sent back; a read-only share joined from a second
@@ -755,7 +761,12 @@ Settled on 2026-10-31.
 - **Deviations:** Architecture's two steps collapsed into one (see
   Decisions). Testing names component tests and a Playwright test
   against the demo stack: the shell's logic is tested in Node without a
-  DOM, and the browser run above was by hand. The licenses come from
+  DOM, and the browser run above was by hand. No test ran at a device
+  pixel ratio of 2, which is how a screen in device pixels shipped.
+  `TestWebScreen`
+  (tests/web_test.go) now opens the desktops that resize in Chrome, over
+  the DevTools protocol, at ratios of 2 and 1 in `make e2e`; it is the
+  only test in a browser. The licenses come from
   Vite's `build.license`, not `scripts/third-party-licenses.sh`, which
   reads Go modules only.
 - **Surprises:**
@@ -769,5 +780,10 @@ Settled on 2026-10-31.
     the owner's to choose.
   - A browser job in CI (Playwright with Chromium, Firefox and WebKit)
     against `webinterop` or the demo stack.
+  - A choice of sharpness on a HiDPI display, where a remote pixel
+    across two device pixels is soft: a screen in device pixels with
+    the remote's programs scaling too, which X11 programs do not do
+    alone. `pixel_ratio` is there for it, and RDP's scale factors
+    (internal/rdp/dynvc.go) would have to follow.
   - An end-to-end test of the demo's `ssh` connection through
     `occamy-v1`; `tests/` streams only its VNC connections.

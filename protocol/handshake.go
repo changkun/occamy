@@ -152,6 +152,7 @@ const (
 	// emulator.
 	CapTerminal CapabilityID = 3
 	// CapPixelRatio is a u16, device pixels per CSS pixel in hundredths.
+	// It only informs: no server acts on it.
 	CapPixelRatio CapabilityID = 4
 	// CapCacheSlots is a u16, the number of tile cache slots.
 	CapCacheSlots CapabilityID = 5
@@ -193,7 +194,7 @@ type Capabilities struct {
 	Terminal uint8
 	// PixelRatio is the client's device pixels per CSS pixel in
 	// hundredths, such as 200 for a display at twice the density. Zero
-	// means 100.
+	// means 100. It only informs: no server acts on it.
 	PixelRatio uint16
 	// CacheSlots is the number of tile cache slots the client keeps.
 	// Zero means none.
@@ -422,8 +423,8 @@ func (d *Decoder) readCodecList(v []byte) []Codec {
 // query (see EncodeHelloQuery), never as a WebSocket message. Its body
 // starts with Version, which Append writes and Decode checks.
 type Hello struct {
-	// Width and Height are the screen size the client asks for, in device
-	// pixels, if the session is graphical.
+	// Width and Height are the screen size the client asks for, in the
+	// remote's pixels, if the session is graphical.
 	Width, Height uint16
 	// Cols and Rows are the terminal size the client asks for, in
 	// character cells, if the session is a terminal. Zero means the
