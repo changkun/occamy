@@ -163,8 +163,9 @@ func TestE2EV1RDP(t *testing.T) {
 	open := func(t *testing.T) (context.Context, string, *client.Session) { return openFor(t, time.Minute) }
 
 	// paste pastes text and waits for the demo's echo of it, which a
-	// slow server must not take for a clipboard that does not answer.
-	paste := func(t *testing.T, ctx context.Context, cl *client.Session) {
+	// slow server must not take for a clipboard that does not answer, and
+	// returns the text.
+	paste := func(t *testing.T, ctx context.Context, cl *client.Session) string {
 		t.Helper()
 		pasted := fmt.Sprintf("occamy-e2e:%d", time.Now().UnixNano())
 		if _, err := cl.Clipboard(ctx, "text/plain", []byte(pasted)); err != nil {
@@ -177,6 +178,7 @@ func TestE2EV1RDP(t *testing.T) {
 			c, ok := ev.(client.Clipboard)
 			return ok && strings.HasPrefix(c.MIME, "text/plain") && string(c.Data) == "echo:"+pasted
 		})
+		return pasted
 	}
 
 	// Text the owner pastes reaches the X session's CLIPBOARD through
@@ -300,26 +302,26 @@ func TestE2EV1RDP(t *testing.T) {
 
 	// A channel server that goes during a connection leaves the channel
 	// silent while the session goes on: nothing restarts it before the
-	// next connection, so this needs no change to the demo's restart. The
-	// owner is told that the text did not arrive, once the wait for an
-	// answer ends. The next connection has the clipboard again.
+	// next connection, so this needs no change to the demo's restart. Text
+	// sent then waits, even the text the last process took, and the owner
+	// is told once the wait for an answer ends. The next connection has
+	// the clipboard again.
 	t.Run("clipboard-unanswered", func(t *testing.T) {
 		compose := composeE2E(t)
 		ctx, token, cl := openFor(t, 3*time.Minute)
-		paste(t, ctx, cl)
+		again := paste(t, ctx, cl)
 		compose.run(t, "exec", "-T", "rdp", "sh", "-c", killChansrv)
 		for deadline := time.Now().Add(10 * time.Second); compose.run(t, "exec", "-T", "-u", "occamy", "rdp", "sh", "-c", chansrvDisplays) != ""; time.Sleep(100 * time.Millisecond) {
 			if time.Now().After(deadline) {
 				t.Fatal("a channel server still runs after it was killed")
 			}
 		}
-		const lost = "occamy-e2e:lost"
-		if _, err := cl.Clipboard(ctx, "text/plain", []byte(lost)); err != nil {
+		if _, err := cl.Clipboard(ctx, "text/plain", []byte(again)); err != nil {
 			t.Fatal(err)
 		}
 		pasted := time.Now()
-		awaitV1(t, ctx, cl, "word that the clipboard does not answer", func(ev client.Event) bool {
-			if c, ok := ev.(client.Clipboard); ok && string(c.Data) == "echo:"+lost {
+		awaitV1(t, ctx, cl, "word that the clipboard has not taken the text", func(ev client.Event) bool {
+			if c, ok := ev.(client.Clipboard); ok && string(c.Data) == "echo:"+again {
 				t.Error("the pasted text came back with no channel server")
 			}
 			s, ok := ev.(client.ClipboardStatus)
