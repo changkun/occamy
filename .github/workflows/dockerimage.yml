@@ -164,7 +164,7 @@ jobs:
   bench:
     # A short run of the benchmark harness, to keep it working. Numbers
     # from shared runners mean nothing, so nothing is compared. It takes
-    # about 15 minutes; a stack that stopped answering fails it at 30
+    # 20 to 25 minutes; a stack that stopped answering fails it at 30
     # rather than at GitHub's default of 6 hours. Each run stops at its
     # first error, and the stack's logs follow a failure or a timeout.
     runs-on: ubuntu-latest

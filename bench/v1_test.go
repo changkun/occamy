@@ -169,6 +169,23 @@ func TestBenchGFXService(t *testing.T) {
 	}
 }
 
+// The bench desktop has the demo's reconnection script. Every RDP path of
+// a series shares one X session, and xrdp 0.10.1's channel server can
+// exit as a connection closes, so without the script every later
+// connection stays black for the 10 s that xrdp spends trying to reach
+// it, and G7 measures that wait instead of the path, for a row that
+// depends on which path ran before it.
+func TestBenchDesktopReconnectScript(t *testing.T) {
+	raw, err := os.ReadFile("../docker/bench/desktop/Dockerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const line = "COPY docker/demo/rdp/reconnectwm.sh /etc/xrdp/reconnectwm.sh"
+	if !slices.Contains(strings.Split(string(raw), "\n"), line) {
+		t.Errorf("docker/bench/desktop/Dockerfile has no line %q", line)
+	}
+}
+
 // The decoders read the codec vectors as the protocol says: lossless
 // ones exactly, lossy ones at their min_psnr, and invalid ones refused.
 func TestDecoders(t *testing.T) {

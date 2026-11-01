@@ -32,6 +32,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     printf '#!/bin/sh\nexec /usr/local/bin/scene\n' > /etc/xrdp/startwm.sh
 COPY --from=build /scene /usr/local/bin/scene
 COPY docker/bench/desktop/start.sh /usr/local/bin/start.sh
+# xrdp 0.10.1's channel server can exit as a connection closes, and every
+# later connection to that X session would stay black for the 10 seconds
+# xrdp spends trying to reach it, which G7 would measure. The demo's
+# script starts it again, as for a demo session.
+COPY docker/demo/rdp/reconnectwm.sh /etc/xrdp/reconnectwm.sh
 ENV VNC_PASSWORD=vncpassword RDP_PASSWORD=occamy
 EXPOSE 3389 5900
 ENTRYPOINT ["/usr/local/bin/start.sh"]
