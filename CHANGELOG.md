@@ -694,6 +694,18 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Changed
 
+- The signing key's home is `/var/lib/occamy/signing.key` on a
+  persistent volume, so that tokens survive a restart. The runtime image
+  gives that directory to its `nonroot` user, the demo and bench stacks
+  keep the key there on the volume `occamy-v1-data` instead of a tmpfs
+  at `/run/occamy`, and
+  [docs/configuration.md](docs/configuration.md#sign-in-auth) says how to
+  set it up. `make stop` keeps the volume and `make clean` removes it.
+  On the first start after this change the demo stack makes a new key,
+  so sign in again once.
+- `occamyd` says what is wrong with a signing key it cannot reach, the
+  key, the directory and the user it runs as, and what to run about it,
+  instead of a bare `permission denied`.
 - `occamyd -h` says what occamyd serves now, a v1 file through API v1
   and a v0 file through the v0 routes, not "a modern guacamole protocol
   based remote desktop proxy", and lists its flag on a line of its own
@@ -889,6 +901,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Security
 
+- A v1 file that names no way to sign in is refused: `occamyd` has no
+  default user, so it needs `auth.users`, `auth.oidc` or
+  `auth.trusted_issuers`, and `legacy_v0` does not count. The hash in
+  [docs/configuration.md](docs/configuration.md)'s example was the demo
+  user's; it is now a placeholder that fails validation, with the
+  `htpasswd` line that makes a real one. `TestDemoUserStaysInTheDemo`
+  keeps that hash out of everything but the demo and bench stacks'
+  files.
 - occamyd's request log no longer records query strings, which carry the
   v0 token and with it the remote credentials.
 - A secret file, `password_file`, `token_file` or

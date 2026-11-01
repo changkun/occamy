@@ -64,7 +64,7 @@ func TestBenchV1File(t *testing.T) {
 		}
 	}
 	// What docker-compose.yaml and docker-compose.bench.yaml give it.
-	raw = []byte(strings.ReplaceAll(string(raw), "/run/occamy/", t.TempDir()+"/"))
+	raw = []byte(strings.ReplaceAll(string(raw), "/var/lib/occamy/", t.TempDir()+"/"))
 	for _, env := range []string{"OCCAMY_DEMO_VNC_PASSWORD", "OCCAMY_BENCH_SSH_PASSWORD", "OCCAMY_BENCH_RDP_PASSWORD"} {
 		t.Setenv(env, "secret")
 	}
