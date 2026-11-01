@@ -843,8 +843,9 @@ go test -run '^$' -fuzz '^FuzzSession$' -fuzztime 30s -parallel 4 ./client
 ```
 
 `-parallel 4` keeps the fuzzer to four workers, which leaves the
-machine usable. To fuzz them all, 30 seconds each, which takes about
-20 minutes:
+machine usable. CI fuzzes them all every night
+([fuzz.yml](../.github/workflows/fuzz.yml)). To do the same here, 30
+seconds each, which takes about 20 minutes:
 
 ```
 for pkg in $(go list ./...); do

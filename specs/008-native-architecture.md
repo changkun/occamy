@@ -90,7 +90,7 @@ Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
 - The end-to-end suite passes for every beta.1 backend, covering
   authentication, resize, clipboard, sharing (owner, viewer, read-only)
   and reconnect.
-- Protocol decoders are fuzzed in CI.
+- Protocol decoders are fuzzed in CI (`.github/workflows/fuzz.yml`).
 - A throttled viewer does not lower another viewer's frame rate on the
   same session (`TestSlowViewer` in `internal/stream`, on a fake clock:
   nothing waits for the viewer behind; what encoding for it costs in CPU

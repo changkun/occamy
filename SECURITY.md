@@ -37,9 +37,11 @@ those are closed, an operator should know the following:
   without authenticating the caller, which makes `occamyd` a bridge into
   every network it can reach. Restrict access to it, or run it only on
   trusted networks.
-- **Change the defaults.** `conf.yaml` ships `jwt_secret: occamy` and
-  `mode: debug`, and debug mode serves `/debug/pprof`. Set a random secret
-  and `mode: release`.
+- **Change the default secret.** `conf.yaml` ships `jwt_secret: occamy`.
+  Set a random one.
+- **Keep `mode: release`.** `conf.yaml` ships it. A v0 file with no
+  `mode`, or with `mode: debug`, serves `/debug/pprof` on its public
+  listener without a token.
 - **Demo credentials are public.** The servers in `docker/demo/` exist
   for local testing only.
 
