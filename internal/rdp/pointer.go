@@ -87,6 +87,7 @@ func (d *decoder) pointerImage(w, h, bpp int, xorMask, andMask []byte) (*image.R
 	xorStride := (w*bpp + 15) / 16 * 2
 	andStride := (w + 15) / 16 * 2
 	hasAnd := len(andMask) >= andStride*h
+	alpha := bpp == 32 && carriesAlpha(xorMask[:xorStride*h])
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
 	for y := range h {
 		xrow := xorMask[(h-1-y)*xorStride:]
@@ -114,8 +115,10 @@ func (d *decoder) pointerImage(w, h, bpp int, xorMask, andMask []byte) (*image.R
 			}
 			transparent := arow != nil && arow[x/8]&(0x80>>(x%8)) != 0
 			switch {
-			case bpp == 32 && c.A != 0:
-				// Alpha cursors carry their own transparency.
+			case alpha:
+				// Alpha is all of such a cursor's transparency. xorgxrdp
+				// sends an empty AND mask with it, so a clear pixel has
+				// neither alpha nor an AND bit.
 			case !transparent:
 				c.A = 0xff
 			case c.R|c.G|c.B != 0:
@@ -128,6 +131,18 @@ func (d *decoder) pointerImage(w, h, bpp int, xorMask, andMask []byte) (*image.R
 		}
 	}
 	return img, nil
+}
+
+// carriesAlpha reports whether a 32-bit XOR mask uses its fourth byte.
+// Where every pixel has it zero it is padding, and the pointer is opaque
+// but for its AND mask.
+func carriesAlpha(xorMask []byte) bool {
+	for i := 3; i < len(xorMask); i += 4 {
+		if xorMask[i] != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // premultiply turns straight alpha into the premultiplied alpha of

@@ -410,6 +410,30 @@ func TestPointerShapes(t *testing.T) {
 	if got, want := img.RGBAAt(0, 0), (color.RGBA{0x80, 0, 0, 0x80}); got != want {
 		t.Errorf("alpha pointer %v, want %v", got, want)
 	}
+	// 32 bits with an empty AND mask, as xorgxrdp sends a theme's cursor:
+	// alpha alone says what is clear, so the block around the arrow does
+	// not show as opaque black.
+	img, err = d.pointerImage(3, 1, 32, []byte{
+		0xff, 0xff, 0xff, 0xff, 0, 0, 0, 0x80, 0, 0, 0, 0, 0, 0,
+	}, []byte{0, 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for x, want := range []color.RGBA{{0xff, 0xff, 0xff, 0xff}, {0, 0, 0, 0x80}, {}} {
+		if got := img.RGBAAt(x, 0); got != want {
+			t.Errorf("empty AND mask: (%d, 0) is %v, want %v", x, got, want)
+		}
+	}
+	// 32 bits whose fourth byte is unused, all zero: the AND mask decides.
+	img, err = d.pointerImage(2, 1, 32, []byte{0, 0, 0xff, 0, 0, 0, 0, 0}, []byte{0x40, 0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for x, want := range []color.RGBA{{0xff, 0, 0, 0xff}, {}} {
+		if got := img.RGBAAt(x, 0); got != want {
+			t.Errorf("no alpha: (%d, 0) is %v, want %v", x, got, want)
+		}
+	}
 	if _, err := d.pointerImage(4, 4, 24, xor, and); err == nil {
 		t.Error("short XOR mask: no error")
 	}
