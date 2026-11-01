@@ -374,7 +374,11 @@ client's own guard is a separate fix.
   quickly; the sources give the first no such promise, and on RDP the
   first sync came 8 ms after the connect, more than 2 s before the
   default layer had a size. The second sync is the first frame with
-  the remote's pixels.
+  the remote's pixels. guacd sends its initial size from another
+  thread than that sync, so by the sources a held size could still
+  land first and be replaced. It was not seen: of 32 sizes sent right
+  after opening on the four TigerVNC screens through guacd, at load 20
+  to 37, 32 had taken 4 s later, and guacd logged no drop.
 - **The rule.** The latest `Resize` and the latest `Pointer` wait, each
   replacing the one before, and a `Wheel` is dropped, until the second
   sync, or 2 s after the first (`holdLimit`). `key`, `Text` and
