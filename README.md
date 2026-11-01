@@ -69,7 +69,7 @@ builds the web client and a static `occamyd` in separate stages, on a
 distroless base ([docker/Dockerfile](./docker/Dockerfile)).
 
 A native build needs Go 1.26.4+ and no C toolchain. It works on Linux,
-macOS and Windows. The web client needs Node.js 22.12+:
+macOS and Windows. The web client needs Node.js 22.13+, 24 or 26+:
 
 ```
 make compile                 # CGO_ENABLED=0, produces ./occamyd
@@ -158,7 +158,7 @@ page's memory only, so a reload signs in again, and then returns the
 owner to their session while `occamyd` keeps it for them, a minute, or,
 for a minute after it ends, tells them how it ended. It speaks API v1
 only, so it needs a v1 file. Building it needs Node.js
-22.12+:
+22.13+, 24 or 26+:
 
 ```
 make client     # npm ci && npm run build, output in client/occamy-web/dist

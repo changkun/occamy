@@ -5,12 +5,14 @@
 package config_test
 
 import (
+	"encoding/json"
 	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -393,6 +395,73 @@ func TestMakeBuildImage(t *testing.T) {
 			t.Errorf("OCCAMY_IMAGE=%q, %v: make build tags %q, want %q", tc.image, tc.args, tags, want)
 		}
 	}
+}
+
+// TestDockerfileNode checks that every package of the web client, and
+// the client itself, takes the Node that the image builds it with: npm
+// only warns of one that does not (EBADENGINE), and vitest leaves out
+// Node's odd majors.
+func TestDockerfileNode(t *testing.T) {
+	dockerfile, err := os.ReadFile("../../docker/Dockerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^FROM node:(\d+)-`).FindSubmatch(dockerfile)
+	if m == nil {
+		t.Fatal("no node image in docker/Dockerfile")
+	}
+	major, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile("../../client/occamy-web/package-lock.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lock struct {
+		Packages map[string]struct {
+			Engines json.RawMessage `json:"engines"`
+		} `json:"packages"`
+	}
+	if err := json.Unmarshal(raw, &lock); err != nil {
+		t.Fatal(err)
+	}
+	for name, pkg := range lock.Packages {
+		var engines struct {
+			Node string `json:"node"`
+		}
+		// Old packages may give engines as a list, which says nothing here.
+		if json.Unmarshal(pkg.Engines, &engines) != nil || engines.Node == "" {
+			continue
+		}
+		if !nodeTakes(engines.Node, major) {
+			t.Errorf("%q needs Node %s, and docker/Dockerfile has %d", name, engines.Node, major)
+		}
+	}
+	if lock.Packages["node_modules/vitest"].Engines == nil {
+		t.Error("no vitest in the lock file: this test has lost what it checks")
+	}
+}
+
+// nodeTakes reports whether a package's range of Node versions has a
+// version of major, for the forms ^22.13.0, >=24 and 20. A range with
+// any other form counts as taking it.
+func nodeTakes(versions string, major int) bool {
+	for alt := range strings.SplitSeq(versions, "||") {
+		alt = strings.TrimSpace(alt)
+		m := regexp.MustCompile(`^(\^|>=\s*)?(\d+)(\.\d+)*$`).FindStringSubmatch(alt)
+		if m == nil {
+			return true
+		}
+		n, err := strconv.Atoi(m[2])
+		if err != nil {
+			return true
+		}
+		if strings.HasPrefix(m[1], ">=") && major >= n || !strings.HasPrefix(m[1], ">=") && major == n {
+			return true
+		}
+	}
+	return false
 }
 
 // TestMakeStop checks that make stop removes the demo stack's containers
