@@ -551,6 +551,51 @@ func TestGFXIgnored(t *testing.T) {
 	}
 }
 
+// Each PDU or bitmap that the client skips is charged pduCost, and
+// counted at its message's end, once a name: a flood of one name is
+// tallied under it, not a tally each.
+func TestGFXSkipCharged(t *testing.T) {
+	r := image.Rect(0, 0, 8, 8)
+	for _, tc := range []struct {
+		name string
+		msg  [][]byte
+	}{
+		{"GFX PDUs before the capabilities", [][]byte{rdptest.StartFrame(1)}},
+		{"GFX PDUs", [][]byte{rdptest.GFXPDU(0x77, nil)}},
+		{"GFX cache PDUs", [][]byte{rdptest.GFXPDU(rdptest.GFXCacheToSurface, make([]byte, 6))}},
+		{"GFX frames without their end", [][]byte{rdptest.StartFrame(1), rdptest.StartFrame(2)}},
+		{"GFX capability sets", [][]byte{rdptest.CapsConfirm(0x77, 0)}},
+		{"GFX deletes of no surface", [][]byte{rdptest.DeleteSurface(99)}},
+		{"GFX deletes of no codec context", [][]byte{deleteContext(1)}},
+		{"GFX ClearCodec bitmaps", [][]byte{rdptest.WireToSurface1(1, rdptest.CodecClearCodec, rdptest.PixelXRGB, r, []byte{1})}},
+		{"GFX bitmaps of unknown codecs", [][]byte{rdptest.WireToSurface1(1, 0x77, rdptest.PixelXRGB, r, []byte{1})}},
+		{"GFX bitmaps of unknown codecs", [][]byte{rdptest.WireToSurface2(1, rdptest.CodecRemoteFX, 1, rdptest.PixelXRGB, nil)}},
+		{"empty bitmaps", [][]byte{rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(4, 4, 4, 8), nil)}},
+	} {
+		g := newGFXTest(t, 64, 64)
+		g.must(t, surfacePDUs(1, 64, 64, image.Point{})...)
+		if tc.name == "GFX PDUs before the capabilities" {
+			g.c.gfx.confirmed = false
+		}
+		if err := g.c.pace(0); err != nil {
+			t.Fatal(err)
+		}
+		before := g.c.tokens
+		g.must(t, tc.msg...)
+		if got := before - g.c.tokens; got != pduCost {
+			t.Errorf("%s: charged %v, want %d", tc.name, got, pduCost)
+		}
+		if n := g.c.Stats().Ignored[tc.name]; n != 1 {
+			t.Errorf("%s: counted %d, want 1", tc.name, n)
+		}
+	}
+	g := newGFXTest(t, 64, 64)
+	g.must(t, slices.Repeat([][]byte{rdptest.GFXPDU(0x77, nil)}, 100)...)
+	if n, c := g.c.Stats().Ignored["GFX PDUs"], cap(g.c.gfx.skips); n != 100 || c > 4 {
+		t.Errorf("100 skipped PDUs of a name counted %d, in a tally of %d names", n, c)
+	}
+}
+
 // The first PDU or bitmap of a session that the client skips and that
 // leaves the screen without what it draws, as Windows' ClearCodec and
 // bitmap cache, logs a warning that names the ways to turn GFX off, and

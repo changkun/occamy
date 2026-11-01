@@ -1319,6 +1319,9 @@ func TestRFXPace(t *testing.T) {
 		{"progressive", nil, prog, stream(4) + 3*rfxTileCost + 1 + 64*64 + 1 + 36*64 + 1 + 64*64},
 		// A tile that a region changes twice is drawn once.
 		{"progressive twice", nil, progTwice, stream(3) + 2*rfxTileCost + 1 + 64*64},
+		// A region outside a frame, and a block of an unknown type, are
+		// skipped, and charged as blocks.
+		{"blocks skipped", nil, rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, slices.Concat(region.Block(), []byte{0xcf, 0xcc, 6, 0, 0, 0})), stream(2)},
 		// A skipped tile is charged as one decoded, and draws nothing.
 		{"upgrade of no first pass", nil, upgradeOnly(false), stream(3) + rfxTileCost},
 		{"upgrade in the other transform", firstPass, upgradeOnly(true), stream(3) + rfxTileCost},
