@@ -1085,9 +1085,10 @@ func (s *paritySession) keepsSize() error {
 }
 
 // resizeEarly asks for another size as soon as the session is open, as
-// the web client's first fit does, before the remote is up or the
-// owner has answered a prompt. Through guacd that killed the
-// connection, so that the screen never came (guacd-bridge.md,
+// the web client does for a window that changed before the first
+// frame: before the remote is up or the owner has answered a prompt.
+// Through guacd that killed the connection, so that the screen never
+// came (guacd-bridge.md,
 // Implementation notes: Input before the remote is up). The session
 // reaches its screen, and then a size as it would after a frame:
 // TigerVNC's as asked, x11vnc's as it was.

@@ -764,7 +764,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   client resizes or moves the pointer right after opening. A `size` or
   a `mouse` that reaches guacd 1.6's VNC process before its RFB
   connection is up ends the connection, and the web client's first fit
-  does just that: 4 of 28 tries opened. The guacd bridge now holds the
+  did just that: 4 of 28 tries opened. The guacd bridge now holds the
   latest size and pointer until guacd's second frame, or 2 s after its
   first, for every guacd protocol, which also keeps the size that
   guacd's terminals used to lose. The parity matrix has rows for this,

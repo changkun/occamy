@@ -341,13 +341,15 @@ do not).
 
 ## Implementation notes: input before the remote is up
 
-The web client asks for its first fit about 300 ms after a session
-opens, before the first frame. The bridge used to pass that on as
-`size` at once, and VNC through guacd mostly failed from the web
-client with "Remote unreachable": VeNCrypt aside, 4 of 28 tries opened,
-and `vnc-guacd` none of 10, at loads from 16 to 128. With only that
-request dropped, 12 of 12 opened. The bridge now holds it; the web
-client's own guard is a separate fix.
+The web client asked for its first fit about 300 ms after a session
+opened, before the first frame, even at the size its hello had asked
+for. The bridge used to pass that on as `size` at once, and VNC through
+guacd mostly failed from the web client with "Remote unreachable":
+VeNCrypt aside, 4 of 28 tries opened, and `vnc-guacd` none of 10, at
+loads from 16 to 128. With only that request dropped, 12 of 12 opened.
+The web client no longer repeats the hello's size, but it still asks
+for a window that changed before the first frame, and any client may,
+so the bridge holds what comes early.
 
 - **What guacd 1.6.0 does with what comes early,** from its sources and
   from a raw Guacamole client that sent a size or a mouse right after
