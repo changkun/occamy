@@ -11,7 +11,7 @@ affects:
   - docs/
 effort: xlarge
 created: 2026-10-29
-updated: 2026-10-31
+updated: 2026-11-01
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -99,7 +99,9 @@ Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
   RDP session may take about a core, so one user's
   `limits.sessions_per_user` sessions to hostile servers take that many
   cores ([native-rdp-backend](008-native-architecture/native-rdp-backend.md),
-  phase 3's follow-ups).
+  phase 3's follow-ups). The owner confirmed this gate on 2026-11-01;
+  the GFX PDUs that do little work and are charged nothing today are
+  dealt with then.
 - `docs/protocol.md` and the API reference are complete.
 
 ## Path to pure Go
@@ -274,6 +276,11 @@ Each beta reruns the benchmark, which also covers #18.
   ([docs/benchmarks.md](../docs/benchmarks.md)).
 - [ ] v1 meets the benchmark's 10x and 50 ms targets, or each miss is
   justified there by a bound Occamy does not control.
+- [ ] The 8-hour soak passes before v1.0: a stability gate, run once
+  with 20 sessions, and not a row in the benchmark's series (the owner's
+  decision of 2026-11-01;
+  [guacd-bridge](008-native-architecture/guacd-bridge.md),
+  Implementation notes: VNC's soak).
 - [x] RDP strategy decided after evaluation: pure Go, after the spike's
   steps 1 and 3 against xrdp
   ([rdp-strategy](008-native-architecture/rdp-strategy.md) decisions 1
