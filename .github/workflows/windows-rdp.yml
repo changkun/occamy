@@ -1,0 +1,237 @@
+name: Windows RDP
+
+# Runs the native RDP client against the Remote Desktop server of the
+# runner itself: a look at a real Windows server, by hand, and no gate.
+# It may not pass, and nothing waits for it.
+#
+# The port stays on the runner. The firewall is on, blocks by default
+# and blocks the port from every other address, on both address
+# families, and the job stops before Remote Desktop is turned on unless
+# it can confirm that and that no broad rule allows the port. There is
+# no tunnel. The session's user is made here, with a password made at
+# run time, which the log masks and which ends with the runner.
+on:
+  workflow_dispatch:
+  # While the workflow is tried out on its branch: one that master does
+  # not have cannot be dispatched. This goes before it lands.
+  push:
+    branches: [rdp-windows-runner]
+
+permissions:
+  contents: read
+
+jobs:
+
+  windows-rdp:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: powershell
+    env:
+      OCCAMY_RDP_WINDOWS_ADDR: 127.0.0.2:3389
+      OCCAMY_RDP_WINDOWS_USER: occamyrdp
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        persist-credentials: false
+    - uses: actions/setup-go@v7
+      with:
+        go-version: stable
+    - name: The machine
+      run: |
+        $ErrorActionPreference = 'Continue'
+        Get-CimInstance Win32_OperatingSystem | Format-List Caption, Version, BuildNumber, OSArchitecture
+        Get-Service TermService, SessionEnv, UmRdpService | Format-Table Name, Status, StartType
+        Get-NetFirewallProfile | Format-Table Name, Enabled, DefaultInboundAction
+        Get-NetConnectionProfile | Format-Table InterfaceAlias, NetworkCategory, IPv4Connectivity, IPv6Connectivity
+        reg query "HKLM\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services" /s
+        query session
+        exit 0
+    - name: Keep port 3389 on this machine
+      run: |
+        Set-NetFirewallProfile -All -Enabled True -DefaultInboundAction Block
+        Get-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue | Disable-NetFirewallRule
+        $others = '0.0.0.0-126.255.255.255', '128.0.0.0-255.255.255.255', '::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff'
+        foreach ($protocol in 'TCP', 'UDP') {
+          New-NetFirewallRule -DisplayName "occamy: RDP on this machine alone ($protocol)" -Direction Inbound -Action Block `
+            -Protocol $protocol -LocalPort 3389 -RemoteAddress $others | Out-Null
+        }
+    - name: Confirm that nothing else admits port 3389
+      run: |
+        # What is in force, from the active store. Anything this cannot
+        # read stops the job, and with it Remote Desktop.
+        Write-Output "active profile: $((Get-NetFirewallSetting -PolicyStore ActiveStore).ActiveProfile)"
+        $profiles = @(Get-NetFirewallProfile -All -PolicyStore ActiveStore)
+        if ($profiles.Count -ne 3) { throw "read $($profiles.Count) firewall profiles" }
+        foreach ($p in $profiles) {
+          Write-Output "profile $($p.Name): enabled $($p.Enabled), default inbound $($p.DefaultInboundAction)"
+          if ("$($p.Enabled)" -ne 'True' -or "$($p.DefaultInboundAction)" -ne 'Block') {
+            throw "profile $($p.Name) does not block inbound traffic by default"
+          }
+        }
+
+        $ports = @{}
+        Get-NetFirewallPortFilter -All -PolicyStore ActiveStore | ForEach-Object { $ports[$_.InstanceID] = $_ }
+        $addresses = @{}
+        Get-NetFirewallAddressFilter -All -PolicyStore ActiveStore | ForEach-Object { $addresses[$_.InstanceID] = $_ }
+        $applications = @{}
+        Get-NetFirewallApplicationFilter -All -PolicyStore ActiveStore | ForEach-Object { $applications[$_.InstanceID] = $_ }
+        $services = @{}
+        Get-NetFirewallServiceFilter -All -PolicyStore ActiveStore | ForEach-Object { $services[$_.InstanceID] = $_ }
+        $rules = @(Get-NetFirewallRule -PolicyStore ActiveStore)
+        if ($rules.Count -eq 0) { throw 'read no firewall rules' }
+
+        # Our block rules, on both address families.
+        $blocks = @($rules | Where-Object { $_.DisplayName -like 'occamy: RDP on this machine alone*' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Block' -and $_.Enabled -eq 'True' })
+        if ($blocks.Count -ne 2) { throw "$($blocks.Count) of our 2 block rules are in force" }
+        foreach ($rule in $blocks) {
+          $remote = @($addresses[$rule.InstanceID].RemoteAddress)
+          Write-Output "$($rule.DisplayName): remote $($remote -join ', ')"
+          if (-not ($remote -match '\.') -or -not ($remote -match ':')) { throw "$($rule.DisplayName) does not cover both address families" }
+        }
+
+        function Test-Covers3389($filter) {
+          if ("$($filter.Protocol)" -notin 'Any', 'TCP', 'UDP', '6', '17') { return $false }
+          foreach ($port in @($filter.LocalPort)) {
+            if ("$port" -eq 'Any') { return $true }
+            if ("$port" -match '^\d+$' -and [int]"$port" -eq 3389) { return $true }
+            if ("$port" -match '^(\d+)-(\d+)$' -and [int]$Matches[1] -le 3389 -and [int]$Matches[2] -ge 3389) { return $true }
+          }
+          return $false
+        }
+
+        # Every inbound allow rule whose ports take in 3389, whatever its
+        # addresses and profiles. A rule held to a program, a package or
+        # a service other than what serves RDP cannot admit RDP, so it is
+        # listed rather than counted; anything else stops the job.
+        $allows = @($rules | Where-Object { $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' -and $_.Enabled -eq 'True' })
+        Write-Output "$($rules.Count) rules in force, $($allows.Count) of them allow inbound traffic"
+        $unread = 0
+        $broad = @()
+        $scoped = @()
+        foreach ($rule in $allows) {
+          $port = $ports[$rule.InstanceID]
+          $application = $applications[$rule.InstanceID]
+          $service = $services[$rule.InstanceID]
+          if ($null -eq $port -or $null -eq $application -or $null -eq $service) { $unread++; continue }
+          if (-not (Test-Covers3389 $port)) { continue }
+          $program = "$($application.Program)"
+          $package = "$($application.Package)"
+          $name = "$($service.Service)"
+          $line = "$($rule.DisplayName) [$($rule.Profile)] program '$program' package '$package' service '$name' protocol $($port.Protocol) ports $(@($port.LocalPort) -join ',') remote $(@($addresses[$rule.InstanceID].RemoteAddress) -join ',')"
+          $rdpProgram = $program -eq 'Any' -or $program -eq 'System' -or $program -match 'svchost\.exe$'
+          $rdpService = $name -eq 'Any' -or $name -eq 'TermService'
+          $noPackage = $package -eq '' -or $package -eq 'Any'
+          if ($rdpProgram -and $rdpService -and $noPackage) { $broad += $line } else { $scoped += $line }
+        }
+        Write-Output "held to other programs, not counted ($($scoped.Count)):"
+        $scoped | ForEach-Object { Write-Output "  $_" }
+        Write-Output "broad enough to admit RDP ($($broad.Count)):"
+        $broad | ForEach-Object { Write-Output "  $_" }
+        if ($unread -gt 0) { throw "could not read the filters of $unread allow rules" }
+        if ($broad.Count -gt 0) { throw "$($broad.Count) allow rules could admit port 3389" }
+    - name: Make the session's user
+      run: |
+        $bytes = New-Object byte[] 24
+        [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+        $password = 'Aa1-' + ([System.BitConverter]::ToString($bytes) -replace '-', '').ToLower()
+        Write-Output "::add-mask::$password"
+        New-LocalUser -Name $env:OCCAMY_RDP_WINDOWS_USER -Password (ConvertTo-SecureString $password -AsPlainText -Force) `
+          -PasswordNeverExpires -AccountNeverExpires | Out-Null
+        Add-LocalGroupMember -Group 'Remote Desktop Users' -Member $env:OCCAMY_RDP_WINDOWS_USER
+        "OCCAMY_RDP_WINDOWS_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+    - name: Turn Remote Desktop on, with NLA
+      run: |
+        $server = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
+        Set-ItemProperty $server -Name fDenyTSConnections -Value 0
+        Set-ItemProperty "$server\WinStations\RDP-Tcp" -Name UserAuthentication -Value 1
+        Set-Service TermService -StartupType Manual
+        Start-Service TermService
+        function Wait-Listener($seconds) {
+          $deadline = (Get-Date).AddSeconds($seconds)
+          while ((Get-Date) -lt $deadline) {
+            if (Get-NetTCPConnection -LocalPort 3389 -State Listen -ErrorAction SilentlyContinue) { return $true }
+            Start-Sleep -Seconds 2
+          }
+          return $false
+        }
+        if (-not (Wait-Listener 30)) {
+          Write-Output 'nothing listens after 30 s: restarting TermService'
+          Restart-Service TermService -Force
+          if (-not (Wait-Listener 90)) { throw 'nothing listens on port 3389' }
+        }
+        Get-NetTCPConnection -LocalPort 3389 -State Listen | Format-Table LocalAddress, LocalPort, State
+    - name: Run the client against this machine
+      env:
+        OCCAMY_RDP_DUMP: ${{ runner.temp }}\rdp-dump
+        OCCAMY_RDP_WINDOWS_TRACE: "1"
+      run: |
+        # Go's progress goes to stderr, and the exit code says how it ended.
+        $ErrorActionPreference = 'Continue'
+        New-Item -ItemType Directory -Force -Path $env:OCCAMY_RDP_DUMP | Out-Null
+        go test -tags rdp_windows -run '^TestWindows$' -v -count=1 -timeout 20m ./internal/rdp/ | Tee-Object -FilePath "$env:RUNNER_TEMP\rdp-test.log"
+    - name: What the server recorded
+      if: always()
+      run: |
+        $ErrorActionPreference = 'Continue'
+        query session
+        Get-NetTCPConnection -LocalPort 3389 -ErrorAction SilentlyContinue | Format-Table LocalAddress, RemoteAddress, State
+        foreach ($log in 'Microsoft-Windows-TerminalServices-LocalSessionManager/Operational',
+                         'Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational',
+                         'Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operational') {
+          Write-Output "== $log"
+          Get-WinEvent -LogName $log -MaxEvents 40 -ErrorAction SilentlyContinue | Sort-Object TimeCreated |
+            Format-Table -AutoSize -Wrap TimeCreated, Id, Message
+        }
+        exit 0
+    - name: Look for the password in what the run leaves
+      id: scan
+      if: always()
+      run: |
+        $password = $env:OCCAMY_RDP_WINDOWS_PASSWORD
+        if (-not $password) {
+          Write-Output 'no password was made'
+          exit 0
+        }
+        # As text and as UTF-16, the way Windows and Tee-Object write it.
+        $latin1 = [System.Text.Encoding]::GetEncoding(28591)
+        $forms = @($password, $latin1.GetString([System.Text.Encoding]::Unicode.GetBytes($password)))
+        function Test-Password([byte[]] $bytes) {
+          $text = $latin1.GetString($bytes)
+          foreach ($form in $forms) {
+            if ($text.Contains($form)) { return $true }
+          }
+          return $false
+        }
+        # A scan that cannot find it proves nothing.
+        if (-not (Test-Password ([System.Text.Encoding]::UTF8.GetBytes("<$password>")))) { throw 'the scan misses text' }
+        if (-not (Test-Password ([System.Text.Encoding]::Unicode.GetBytes("<$password>")))) { throw 'the scan misses UTF-16' }
+
+        $files = @()
+        $dump = Join-Path $env:RUNNER_TEMP 'rdp-dump'
+        if (Test-Path -LiteralPath $dump) { $files += @(Get-ChildItem -LiteralPath $dump -File -Recurse) }
+        $log = Join-Path $env:RUNNER_TEMP 'rdp-test.log'
+        if (Test-Path -LiteralPath $log) { $files += @(Get-Item -LiteralPath $log) }
+        $hits = 0
+        foreach ($file in $files) {
+          $stream = [System.IO.File]::OpenRead($file.FullName)
+          if ($file.Extension -eq '.gz') {
+            $stream = New-Object System.IO.Compression.GZipStream($stream, [System.IO.Compression.CompressionMode]::Decompress)
+          }
+          $buffer = New-Object System.IO.MemoryStream
+          $stream.CopyTo($buffer)
+          $stream.Dispose()
+          $hit = Test-Password ($buffer.ToArray())
+          Write-Output "$($file.Name): $($buffer.Length) bytes, password found $hit"
+          if ($hit) { $hits++ }
+        }
+        if ($hits -gt 0) { throw "the password is in $hits files, so they stay on the runner" }
+    - name: Keep the screenshots
+      if: always() && steps.scan.outcome == 'success'
+      uses: actions/upload-artifact@v7
+      with:
+        name: windows-rdp
+        path: ${{ runner.temp }}\rdp-dump
+        retention-days: 1
+        if-no-files-found: warn
