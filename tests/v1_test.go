@@ -149,16 +149,34 @@ func checkSessionV1(t *testing.T, addr, connection, backend string) {
 // and the owner leaving the session and coming back to it.
 func TestE2EV1RDP(t *testing.T) {
 	addr := endpointV1(t)
-	open := func(t *testing.T) (context.Context, string, *client.Session) {
+	openFor := func(t *testing.T, d time.Duration) (context.Context, string, *client.Session) {
 		token, err := signIn(addr)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		ctx, cancel := context.WithTimeout(context.Background(), d)
 		t.Cleanup(cancel)
 		cl := openDesktopV1(t, ctx, addr, "/api/v1/connections/rdp-native/stream", token,
 			client.Options{Width: 1024, Height: 768})
 		return ctx, token, cl
+	}
+	open := func(t *testing.T) (context.Context, string, *client.Session) { return openFor(t, time.Minute) }
+
+	// paste pastes text and waits for the demo's echo of it, which a
+	// slow server must not take for a clipboard that does not answer.
+	paste := func(t *testing.T, ctx context.Context, cl *client.Session) {
+		t.Helper()
+		pasted := fmt.Sprintf("occamy-e2e:%d", time.Now().UnixNano())
+		if _, err := cl.Clipboard(ctx, "text/plain", []byte(pasted)); err != nil {
+			t.Fatal(err)
+		}
+		awaitV1(t, ctx, cl, "the echo of the pasted text", func(ev client.Event) bool {
+			if s, ok := ev.(client.ClipboardStatus); ok && !s.Answering {
+				t.Error("a clipboard that answers was reported as one that does not")
+			}
+			c, ok := ev.(client.Clipboard)
+			return ok && strings.HasPrefix(c.MIME, "text/plain") && string(c.Data) == "echo:"+pasted
+		})
 	}
 
 	// Text the owner pastes reaches the X session's CLIPBOARD through
@@ -168,14 +186,7 @@ func TestE2EV1RDP(t *testing.T) {
 	clipboard := func(t *testing.T) {
 		t.Helper()
 		ctx, token, cl := open(t)
-		pasted := fmt.Sprintf("occamy-e2e:%d", time.Now().UnixNano())
-		if _, err := cl.Clipboard(ctx, "text/plain", []byte(pasted)); err != nil {
-			t.Fatal(err)
-		}
-		awaitV1(t, ctx, cl, "the echo of the pasted text", func(ev client.Event) bool {
-			c, ok := ev.(client.Clipboard)
-			return ok && strings.HasPrefix(c.MIME, "text/plain") && string(c.Data) == "echo:"+pasted
-		})
+		paste(t, ctx, cl)
 		closeSessionV1(t, addr, token, cl.SessionID())
 	}
 	t.Run("clipboard", clipboard)
@@ -285,6 +296,39 @@ func TestE2EV1RDP(t *testing.T) {
 		}
 		typeV1(t, ctx, back)
 		closeSessionV1(t, addr, token, id)
+	})
+
+	// A channel server that goes during a connection leaves the channel
+	// silent while the session goes on: nothing restarts it before the
+	// next connection, so this needs no change to the demo's restart. The
+	// owner is told that the text did not arrive, once the wait for an
+	// answer ends. The next connection has the clipboard again.
+	t.Run("clipboard-unanswered", func(t *testing.T) {
+		compose := composeE2E(t)
+		ctx, token, cl := openFor(t, 3*time.Minute)
+		paste(t, ctx, cl)
+		compose.run(t, "exec", "-T", "rdp", "sh", "-c", killChansrv)
+		for deadline := time.Now().Add(10 * time.Second); compose.run(t, "exec", "-T", "-u", "occamy", "rdp", "sh", "-c", chansrvDisplays) != ""; time.Sleep(100 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatal("a channel server still runs after it was killed")
+			}
+		}
+		const lost = "occamy-e2e:lost"
+		if _, err := cl.Clipboard(ctx, "text/plain", []byte(lost)); err != nil {
+			t.Fatal(err)
+		}
+		pasted := time.Now()
+		awaitV1(t, ctx, cl, "word that the clipboard does not answer", func(ev client.Event) bool {
+			if c, ok := ev.(client.Clipboard); ok && string(c.Data) == "echo:"+lost {
+				t.Error("the pasted text came back with no channel server")
+			}
+			s, ok := ev.(client.ClipboardStatus)
+			return ok && !s.Answering
+		})
+		t.Logf("the owner heard %v after the paste", time.Since(pasted).Round(time.Second))
+		typeV1(t, ctx, cl) // the session goes on
+		closeSessionV1(t, addr, token, cl.SessionID())
+		clipboard(t)
 	})
 
 	// xrdp's channel server, xrdp-chansrv, carries the clipboard. xrdp
