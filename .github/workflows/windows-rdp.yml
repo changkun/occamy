@@ -4,12 +4,16 @@ name: Windows RDP
 # runner itself: a look at a real Windows server, by hand, and no gate.
 # It may not pass, and nothing waits for it.
 #
-# The port stays on the runner. The firewall is on, blocks by default
-# and blocks the port from every other address, on both address
-# families, and the job stops before Remote Desktop is turned on unless
-# it can confirm that and that no broad rule allows the port. There is
-# no tunnel. The session's user is made here, with a password made at
-# run time, which the log masks and which ends with the runner.
+# The image starts with Remote Desktop's listener on port 3389, before
+# any step of this job: the listener is the image's, not this workflow's.
+# What this job guards is logging on to it. It disables every inbound
+# allow rule that takes in the port, blocks the port from every other
+# address on both address families, and confirms from what is in force
+# that the firewall blocks by default and that no broad rule allows the
+# port. Only then does it make the session's user, so that if that
+# fails no user or password ever exists. There is no tunnel. The
+# password is made at run time, the log masks it, and it ends with the
+# runner.
 on:
   workflow_dispatch:
   # While the workflow is tried out on its branch: one that master does
@@ -50,6 +54,50 @@ jobs:
         exit 0
     - name: Keep port 3389 on this machine
       run: |
+        # First what the image came with, before anything here changes
+        # it. A fault in this part stops nothing.
+        $ErrorActionPreference = 'Continue'
+        $server = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
+        Write-Output "fDenyTSConnections: $((Get-ItemProperty $server).fDenyTSConnections)"
+        $tcp = Get-ItemProperty "$server\WinStations\RDP-Tcp"
+        Write-Output "RDP-Tcp: UserAuthentication $($tcp.UserAuthentication), SecurityLayer $($tcp.SecurityLayer), PortNumber $($tcp.PortNumber)"
+        $owners = @(Get-NetTCPConnection -LocalPort 3389 -State Listen -ErrorAction SilentlyContinue) + @(Get-NetUDPEndpoint -LocalPort 3389 -ErrorAction SilentlyContinue)
+        Write-Output "$($owners.Count) endpoints on port 3389:"
+        foreach ($owner in $owners) {
+          $process = Get-Process -Id $owner.OwningProcess -ErrorAction SilentlyContinue
+          $hosted = @(Get-CimInstance Win32_Service -Filter "ProcessId = $($owner.OwningProcess)" | ForEach-Object { $_.Name }) -join ', '
+          Write-Output "  $($owner.CimClass.CimClassName) $($owner.LocalAddress): process $($owner.OwningProcess) ($($process.ProcessName)), services: $hosted"
+        }
+        Get-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue | Format-Table DisplayName, Enabled, Profile -AutoSize | Out-String -Width 160 | Write-Output
+
+        function Test-Covers3389($filter) {
+          if ("$($filter.Protocol)" -notin 'Any', 'TCP', 'UDP', '6', '17') { return $false }
+          foreach ($port in @($filter.LocalPort)) {
+            if ("$port" -eq 'Any') { return $true }
+            if ("$port" -match '^\d+$' -and [int]"$port" -eq 3389) { return $true }
+            if ("$port" -match '^(\d+)-(\d+)$' -and [int]$Matches[1] -le 3389 -and [int]$Matches[2] -ge 3389) { return $true }
+          }
+          return $false
+        }
+        $ports = @{}
+        Get-NetFirewallPortFilter -All -PolicyStore ActiveStore | ForEach-Object { $ports[$_.InstanceID] = $_ }
+        $applications = @{}
+        Get-NetFirewallApplicationFilter -All -PolicyStore ActiveStore | ForEach-Object { $applications[$_.InstanceID] = $_ }
+        $covering = @(Get-NetFirewallRule -PolicyStore ActiveStore | Where-Object {
+          $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' -and $_.Enabled -eq 'True' -and $null -ne $ports[$_.InstanceID] -and (Test-Covers3389 $ports[$_.InstanceID])
+        })
+        Write-Output "$($covering.Count) inbound allow rules take in port 3389:"
+        foreach ($rule in $covering) {
+          Write-Output "== $($rule.DisplayName) [$($rule.Profile)] id $($rule.InstanceID), source $($rule.PolicyStoreSource) ($($rule.PolicyStoreSourceType)), owner '$($rule.Owner)'"
+          $applications[$rule.InstanceID] | Format-List * | Out-String -Width 200 | Write-Output
+        }
+
+        # Then tighten. The runner needs no inbound traffic, so every
+        # rule that takes in the port goes, whatever it is held to. What
+        # the active store shows cannot be changed there, so each is
+        # disabled where it comes from. One that resists is not an error
+        # here: the next step reads what is in force.
+        $ErrorActionPreference = 'Stop'
         Set-NetFirewallProfile -All -Enabled True -DefaultInboundAction Block
         Get-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction SilentlyContinue | Disable-NetFirewallRule
         $others = '0.0.0.0-126.255.255.255', '128.0.0.0-255.255.255.255', '::2-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff'
@@ -57,6 +105,23 @@ jobs:
           New-NetFirewallRule -DisplayName "occamy: RDP on this machine alone ($protocol)" -Direction Inbound -Action Block `
             -Protocol $protocol -LocalPort 3389 -RemoteAddress $others | Out-Null
         }
+        $disabled = 0
+        foreach ($rule in $covering) {
+          $stores = @("$($rule.PolicyStoreSource)", 'PersistentStore', 'ConfigurableServiceStore') | Where-Object { $_ } | Select-Object -Unique
+          $done = $false
+          foreach ($store in $stores) {
+            try {
+              Disable-NetFirewallRule -Name $rule.InstanceID -PolicyStore $store -ErrorAction Stop
+              Write-Output "disabled in ${store}: $($rule.DisplayName)"
+              $done = $true
+              break
+            } catch {
+              Write-Output "not in ${store}: $($rule.DisplayName): $($_.Exception.Message)"
+            }
+          }
+          if ($done) { $disabled++ }
+        }
+        Write-Output "disabled $disabled of $($covering.Count) rules"
     - name: Confirm that nothing else admits port 3389
       run: |
         # What is in force, from the active store. Anything this cannot
@@ -141,7 +206,7 @@ jobs:
           -PasswordNeverExpires -AccountNeverExpires | Out-Null
         Add-LocalGroupMember -Group 'Remote Desktop Users' -Member $env:OCCAMY_RDP_WINDOWS_USER
         "OCCAMY_RDP_WINDOWS_PASSWORD=$password" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-    - name: Turn Remote Desktop on, with NLA
+    - name: Make sure Remote Desktop is on, with NLA
       run: |
         $server = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
         Set-ItemProperty $server -Name fDenyTSConnections -Value 0
@@ -181,9 +246,30 @@ jobs:
                          'Microsoft-Windows-TerminalServices-RemoteConnectionManager/Operational',
                          'Microsoft-Windows-RemoteDesktopServices-RdpCoreTS/Operational') {
           Write-Output "== $log"
-          Get-WinEvent -LogName $log -MaxEvents 40 -ErrorAction SilentlyContinue | Sort-Object TimeCreated |
+          Get-WinEvent -LogName $log -MaxEvents 120 -ErrorAction SilentlyContinue | Sort-Object TimeCreated |
             Format-Table -AutoSize -Wrap TimeCreated, Id, Message
         }
+        Write-Output '== failed logons'
+        Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = 4625 } -MaxEvents 10 -ErrorAction SilentlyContinue |
+          Format-List TimeCreated, Message
+
+        # What takes in the port now: a first logon may add rules.
+        function Test-Covers3389($filter) {
+          if ("$($filter.Protocol)" -notin 'Any', 'TCP', 'UDP', '6', '17') { return $false }
+          foreach ($port in @($filter.LocalPort)) {
+            if ("$port" -eq 'Any') { return $true }
+            if ("$port" -match '^\d+$' -and [int]"$port" -eq 3389) { return $true }
+            if ("$port" -match '^(\d+)-(\d+)$' -and [int]$Matches[1] -le 3389 -and [int]$Matches[2] -ge 3389) { return $true }
+          }
+          return $false
+        }
+        $ports = @{}
+        Get-NetFirewallPortFilter -All -PolicyStore ActiveStore | ForEach-Object { $ports[$_.InstanceID] = $_ }
+        $covering = @(Get-NetFirewallRule -PolicyStore ActiveStore | Where-Object {
+          $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' -and $_.Enabled -eq 'True' -and $null -ne $ports[$_.InstanceID] -and (Test-Covers3389 $ports[$_.InstanceID])
+        })
+        Write-Output "== inbound allow rules that take in port 3389 at the end: $($covering.Count)"
+        $covering | ForEach-Object { Write-Output "  $($_.DisplayName) [$($_.Profile)] owner '$($_.Owner)'" }
         exit 0
     - name: Look for the password in what the run leaves
       id: scan
