@@ -19,11 +19,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   more than the budget has, each gets at least an nth of it, or a
   session's core if that is less; a session that wants less gets all
   it wants, and what it leaves goes to the others. Shares are
-  sessions', not users'. What a client reads and ignores is not charged,
-  and stays bounded by each session's one reader. Every GFX PDU is
-  now charged 32 units, whether the client applies or skips it: those
-  applied that do little, such as a fill of a pixel, were charged
-  little or nothing, and each skipped PDU 24.
+  sessions', not users'. Every frame the client reads now counts,
+  whatever it does with it, so what a server has it read and ignore
+  takes from the budget too. Every GFX PDU is now charged 32 units,
+  whether the client applies or skips it: those applied that do little,
+  such as a fill of a pixel, were charged little or nothing, and each
+  skipped PDU 24.
 - A real desktop in the demo stack: `docker/demo/desktop`, XFCE with a
   terminal, file manager, text editor and Firefox as the user `occamy`,
   which `docker/occamy-v1.yaml` lists first as **Desktop (XFCE) over

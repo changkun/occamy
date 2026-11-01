@@ -2687,19 +2687,18 @@ RDP's guacd path, RDP no longer needs guacd at all.
         out of its cores' worth, and a client may spend what it waited
         for at once, so sessions that all saved up for large PDUs may
         decode them together, for as long as those take.
-      - **What the client reads and ignores** is not charged: a fast-path
-        update of an unknown kind or that the client ignores, of 3
-        bytes, a flow control PDU, an empty bitmap update, or a chunk
-        on a channel the client does not use. A server that sends those
-        keeps a session's one reader busy, which holds it to a core
-        but outside the budget, so ten sessions may still take ten
-        cores that way for as long as the servers send. Closing that
-        takes charges on `handleFastPath`, `handleShareControl`, the
-        bitmap rectangles and `Run`'s frames, priced by measurement like
-        the others, which this change had no go-ahead to run
-        (`BenchmarkSkipped` covers none of them). It needs doing
-        before a release that counts on the bound against a server
-        that means it.
+      - **What the client reads and ignores** is charged where it is
+        read, in `Run`: `frameCost`, 64 units, a frame, a unit for every
+        two bytes, and `updateCost`, 16, a fast-path update. One place
+        sees all of it: a fast-path update of an unknown kind or that
+        the client ignores, of 3 bytes, a flow control PDU, an empty
+        bitmap update, a chunk on a channel the client does not use.
+        Before this those took a core outside the budget, and ten
+        sessions ten cores. `BenchmarkIgnored` puts every kind at 0.90
+        of a core or less at those prices, without TLS or the socket.
+        The unit for two bytes stands for those, about 0.9 ns a byte
+        where the largest frames cost 0.02 ns without them. An honest
+        server's 30 MB/s costs about 3% of a session's rate.
     - `internal/rdp/budget_test.go` runs in `testing/synctest`'s virtual
       time, so that the timings hold at any load, with real goroutines
       and waits and under the race detector.

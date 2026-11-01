@@ -104,9 +104,8 @@ Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
   phase 3's follow-ups). The owner confirmed this gate on 2026-11-01.
   **Done** on 2026-11-01: `limits.decode_cores`, half of `GOMAXPROCS` by
   default, shared evenly by the sessions that want more than it has, and
-  every GFX PDU charged, including those applied that do little. What
-  the client reads and ignores is not charged, and stays bounded by a
-  session's one reader (native-rdp-backend's follow-ups).
+  every GFX PDU charged, including those applied that do little, and
+  every frame the client reads, whatever it does with it.
 - `docs/protocol.md` and the API reference are complete.
 
 ## Path to pure Go

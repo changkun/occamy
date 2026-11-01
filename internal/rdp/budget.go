@@ -40,12 +40,11 @@ const budgetSlice = decodeRate / 1024
 // each client, or twice that as clients start. Shares are the clients',
 // not their users': one user's ten sessions have ten of them.
 //
-// The units a Budget holds to are those of the charges, so what a
-// client reads and ignores, as a fast-path update of a kind it does not
-// ask for, it does not count. It bounds the rate of decoding, not how
-// many clients decode at a time: a client may spend what it waited for
-// at once, and over any time clients take at most its rate and burst
-// and a slice each.
+// The units a Budget holds to are those of the charges, which cover what
+// a client reads and ignores as well as what it decodes (Client.Run). It
+// bounds the rate of decoding, not how many clients decode at a time: a
+// client may spend what it waited for at once, and over any time
+// clients take at most its rate and burst and a slice each.
 //
 // Nothing is held across a wait, whose end depends on the clock alone:
 // no client's stall can hold up another, and the debt of a client that

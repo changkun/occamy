@@ -214,6 +214,7 @@ type Client struct {
 	paced      time.Time // when tokens was last brought up to date
 	credit     int       // what is left of the slices of cfg.Budget it took
 	sliced     time.Time // when its last slice was paid for
+	readCost   int       // what the frame in hand costs, whatever it draws
 	rbuf       []byte
 	errInfo    ErrorInfo
 
@@ -750,6 +751,7 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 			return err
 		}
 		c.count(func(s *Stats) { s.Bytes += int64(len(buf)) })
+		c.readCost = frameCost + len(buf)/2
 		if f.fastPath {
 			c.errInfo = 0 // the session went on after a reason
 			err = c.handleFastPath(out, f)
@@ -767,6 +769,9 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 					err = c.otherChannel(out, ch, data)
 				}
 			}
+		}
+		if err == nil {
+			err = c.pace(c.readCost)
 		}
 		if err != nil {
 			if ctx.Err() != nil {
@@ -924,6 +929,16 @@ func (c *Client) wait(d time.Duration) error {
 		return nil
 	}
 }
+
+// What the read loop charges against decodeRate for reading what may
+// draw nothing: a frame, a fast-path update in one, and a unit for every
+// two bytes, which is about what TLS costs. What a server has a client
+// read and ignore then counts as decoding does (BenchmarkIgnored), and
+// a frame that an honest server sends costs a few bytes' pixels.
+const (
+	frameCost  = 64
+	updateCost = 16
+)
 
 // paceBurst is what the token bucket holds on a desktop of w×h: two
 // desktops of RemoteFX tiles, the work that costs most a pixel, 7 units
@@ -1121,6 +1136,7 @@ func (c *Client) handleFastPath(out Output, f frame) error {
 			return fmt.Errorf("rdp: fast-path update: %w", r.err)
 		}
 		c.count(func(s *Stats) { s.FastPath++ })
+		c.readCost += updateCost
 		switch frag {
 		case fragSingle:
 		case fragFirst:
