@@ -816,6 +816,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Fixed
 
+- The pointer over RDP showed as an arrow in a black square, on XFCE as
+  soon as it reached the panel. xorgxrdp sends a theme's cursor at
+  32 bits with an empty AND mask, so a clear pixel had neither alpha nor
+  an AND bit and decoded as opaque black. A 32-bit pointer that uses
+  alpha now takes its transparency from alpha alone. `TestDemoDesktop`
+  checks every shape that comes as the pointer crosses the panel.
 - Reloading in Firefox no longer loses the session. Firefox fires the
   WebSocket's close, 1001 with no reason, before `pagehide`, and the web
   client took that for occamyd shutting down: it forgot the session, so

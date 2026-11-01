@@ -19,9 +19,10 @@ import (
 // TestDemoDesktop opens the demo stack's real desktop through the native
 // backends, the connections a first-time viewer sees first
 // (docker/demo/desktop): XFCE must draw its panel and its wallpaper, and
-// when the screen grows the panel must grow with it. The first RDP
-// connection starts its X session, so the deadline leaves XFCE time to
-// come up on a slow machine.
+// when the screen grows the panel must grow with it, and every pointer
+// shape must leave the screen showing around it. The first RDP connection
+// starts its X session, so the deadline leaves XFCE time to come up on a
+// slow machine.
 func TestDemoDesktop(t *testing.T) {
 	addr := endpointV1(t)
 	for _, c := range []struct{ id, backend string }{
@@ -40,13 +41,100 @@ func TestDemoDesktop(t *testing.T) {
 			if state := sessionV1(t, addr, token, cl.SessionID()); state.Backend != c.backend {
 				t.Errorf("the session's backend is %q, want %q", state.Backend, c.backend)
 			}
-			awaitPanelV1(t, ctx, cl, image.Pt(1024, 768))
+			var cursors []*image.NRGBA
+			awaitPanelV1(t, ctx, cl, image.Pt(1024, 768), &cursors)
 			if _, err := cl.Resize(ctx, 1280, 800); err != nil {
 				t.Fatal(err)
 			}
-			awaitPanelV1(t, ctx, cl, image.Pt(1280, 800))
+			awaitPanelV1(t, ctx, cl, image.Pt(1280, 800), &cursors)
+			crossPanelV1(t, ctx, cl, &cursors)
+			if len(cursors) == 0 {
+				t.Fatal("no pointer shape came with the desktop")
+			}
+			for _, cursor := range cursors {
+				if problem := cursorProblem(cursor); problem != "" {
+					t.Errorf("the pointer, %v: %s", cursor.Rect.Size(), problem)
+				}
+			}
 			closeSessionV1(t, addr, token, cl.SessionID())
 		})
+	}
+}
+
+// crossPanelV1 moves the pointer on to the panel and back over the
+// wallpaper, and adds the shapes that come to cursors. The X server's
+// plain arrow gives way to the theme's on the panel, and over VNC no
+// shape comes until the pointer moves.
+func crossPanelV1(t *testing.T, ctx context.Context, cl *client.Session, cursors *[]*image.NRGBA) {
+	t.Helper()
+	for _, at := range []image.Point{{64, 8}, {128, 80}, {64, 8}, {640, 400}} {
+		if _, err := cl.Pointer(ctx, uint16(at.X), uint16(at.Y), 0); err != nil {
+			t.Fatal(err)
+		}
+		wait, cancel := context.WithTimeout(ctx, time.Second)
+		for {
+			ev, err := cl.Next(wait)
+			if err != nil {
+				break
+			}
+			if c, ok := ev.(client.Cursor); ok && c.Image != nil {
+				*cursors = append(*cursors, c.Image)
+			}
+		}
+		cancel()
+	}
+}
+
+// cursorProblem says what is wrong with a desktop's pointer shape, if
+// anything: an arrow leaves most of its image clear, so that the screen
+// shows around it.
+func cursorProblem(img *image.NRGBA) string {
+	b := img.Rect
+	clear, shown := 0, 0
+	for y := b.Min.Y; y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			switch img.NRGBAAt(x, y).A {
+			case 0:
+				clear++
+			default:
+				shown++
+			}
+		}
+	}
+	switch {
+	case shown == 0:
+		return "nothing shows"
+	case 2*clear < b.Dx()*b.Dy():
+		return fmt.Sprintf("only %d of its %d pixels are clear: a block around the arrow", clear, b.Dx()*b.Dy())
+	}
+	return ""
+}
+
+// TestCursorProblem checks cursorProblem, which needs no stack.
+func TestCursorProblem(t *testing.T) {
+	shape := func(opaque func(x, y int) bool) *image.NRGBA {
+		img := image.NewNRGBA(image.Rect(0, 0, 24, 24))
+		for y := range 24 {
+			for x := range 24 {
+				if opaque(x, y) {
+					img.SetNRGBA(x, y, color.NRGBA{A: 0xff})
+				}
+			}
+		}
+		return img
+	}
+	for _, tt := range []struct {
+		name string
+		img  *image.NRGBA
+		bad  bool
+	}{
+		{"an arrow", shape(func(x, y int) bool { return x <= y && y < 16 && x < 8 }), false},
+		{"a black block", shape(func(int, int) bool { return true }), true},
+		{"nothing", shape(func(int, int) bool { return false }), true},
+	} {
+		if got := cursorProblem(tt.img); (got != "") != tt.bad {
+			t.Errorf("%s: %q", tt.name, got)
+		}
 	}
 }
 
@@ -107,12 +195,16 @@ func TestPanelShown(t *testing.T) {
 }
 
 // awaitPanelV1 reads cl's frames, which also acknowledges them, until the
-// screen has the size and shows the desktop with its panel across it.
-func awaitPanelV1(t *testing.T, ctx context.Context, cl *client.Session, size image.Point) {
+// screen has the size and shows the desktop with its panel across it. It
+// adds the pointer shapes it sees to cursors.
+func awaitPanelV1(t *testing.T, ctx context.Context, cl *client.Session, size image.Point, cursors *[]*image.NRGBA) {
 	t.Helper()
 	var shown string
 	defer func() { t.Logf("the screen is %v and shows %s", cl.Size(), shown) }()
 	awaitV1(t, ctx, cl, fmt.Sprintf("XFCE's panel across %v", size), func(ev client.Event) bool {
+		if c, ok := ev.(client.Cursor); ok && c.Image != nil {
+			*cursors = append(*cursors, c.Image)
+		}
 		if _, ok := ev.(client.Frame); !ok || !cl.Size().Eq(size) {
 			return false
 		}

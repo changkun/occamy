@@ -358,6 +358,12 @@ RDP's guacd path, RDP no longer needs guacd at all.
   bitmap is, where it used to be decoded first; Power dropped
   (decision 4); and tests for the guards its mutations showed
   untested.
+
+  A 32-bit pointer that uses alpha takes its transparency from alpha
+  alone. xorgxrdp sends a theme's cursor with an empty AND mask, which
+  the fake server never did (`rdptest.Pointer` sets the bit of every
+  clear pixel), so a block of opaque black around the arrow showed only
+  on a real desktop, once the theme's cursor replaced the X server's.
 - **Integration test.** Under the `rdp_integration` tag, as the spike's,
   it builds the bench desktop image and starts xrdp, with names of its
   own (`occamy-rdpbackend-it-until…`) and the spike's whole-name cleanup.
