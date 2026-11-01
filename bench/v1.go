@@ -298,9 +298,10 @@ func (c *v1Conn) close() {
 }
 
 // readV1 delivers the session's events. Frames are applied to the
-// client core's framebuffer as Next delivers them, and count from then.
-// The next call acknowledges a frame: a graphical one's at d's next
-// refresh, a terminal's at once, as occamy's web client does. A
+// client core's framebuffer as Next delivers them, and count from then,
+// less any time they waited for the reader at d's refresh. The next
+// call acknowledges a frame: a graphical one's at d's next refresh, a
+// terminal's at once, as occamy's web client does. A
 // terminal's bytes go to a terminal emulator, as a viewer's xterm.js
 // takes them; that is the client's decoding of a terminal, and marks
 // look at its cells.
@@ -313,6 +314,7 @@ func (s *session) readV1(c *v1Conn, d display) {
 		drew bool // the terminal frame being read carried bytes
 	)
 	for {
+		called := time.Now()
 		ev, err := c.cl.Next(context.Background())
 		if err != nil { // after End
 			return
@@ -344,8 +346,13 @@ func (s *session) readV1(c *v1Conn, d display) {
 		case client.Frame:
 			// A frame counts from when Next delivers it applied, as v0's
 			// from when the client applied it: each client's canvas then
-			// reaches the screen at its next refresh.
+			// reaches the screen at its next refresh. One that came while
+			// the reader waited for that refresh, as in a moving scene,
+			// did not have to wait to be applied: v0's reader was there
+			// for it, and the web client's decoder is. It counts as if
+			// the reader had been there too.
 			now := time.Now()
+			at := counted(called, now, ev.Ready)
 			m := s.marker.Load()
 			var (
 				draws, marked bool
@@ -371,7 +378,7 @@ func (s *session) readV1(c *v1Conn, d display) {
 				})
 			}
 			if draws {
-				s.emit(frame{at: now, damage: damage, marked: marked}, m)
+				s.emit(frame{at: at, damage: damage, marked: marked}, m)
 			}
 			// The web client presents a graphical frame, drawing or
 			// not, at the screen's next refresh, and acknowledges it by
@@ -389,6 +396,16 @@ func (s *session) readV1(c *v1Conn, d display) {
 			return
 		}
 	}
+}
+
+// counted returns when a frame counts from, given when the reader called
+// Next, when Next returned it, and when it was ready: a frame ready
+// before the call waited for the reader, by that much too long.
+func counted(called, now, ready time.Time) time.Time {
+	if early := called.Sub(ready); early > 0 {
+		return now.Add(-early)
+	}
+	return now
 }
 
 // decoders are the codecs that occamy's web client offers where the

@@ -143,7 +143,8 @@ layer, and any tools.
   - The session reports `ViewerID`, `Role`, `Class`, `SessionID`, the
     agreed `Capabilities`, and `Size` as of the last `Resize` delivered.
   - `Next(ctx)` delivers `Frame` (ID, `LastSeq`, server time, dirty
-    rectangles), `Resize`, `TermSnapshot`, `TermData`, `Cursor`,
+    rectangles, and `Ready`, when it could first be applied, which the
+    benchmark's stamp uses), `Resize`, `TermSnapshot`, `TermData`, `Cursor`,
     `CursorMove`, `Clipboard`, `ClipboardStatus`, `Bell`, `Title`,
     `Prompt`, `ViewerJoined`, `ViewerLeft`, and last `End` with the
     close code, reason and error. Then it returns `ErrClosed`.

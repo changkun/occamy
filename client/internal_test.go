@@ -509,3 +509,62 @@ func TestCacheRawSlotSize(t *testing.T) {
 		}
 	})
 }
+
+// A frame's Ready is when its frame-end had arrived and its tiles were
+// decoded, however long the caller stayed away from Next after that.
+func TestFrameReady(t *testing.T) {
+	msgs := func(codec protocol.Codec, payload []byte) [][]byte {
+		return encode(
+			pngWelcome(2),
+			&protocol.Resize{Width: 8, Height: 8},
+			&protocol.Tile{FrameID: 1, W: 8, H: 8, Codec: codec, Payload: payload},
+			&protocol.FrameEnd{FrameID: 1},
+		)
+	}
+	frame := func(t *testing.T, s *Session) Frame {
+		t.Helper()
+		for {
+			ev, err := s.Next(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if f, ok := ev.(Frame); ok {
+				return f
+			}
+		}
+	}
+	t.Run("raw", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			s, err := New(context.Background(), &fuzzConn{msgs: msgs(protocol.CodecRaw, make([]byte, 4*8*8))}, Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			synctest.Wait()
+			want := time.Now()
+			time.Sleep(50 * time.Millisecond)
+			if f := frame(t, s); !f.Ready.Equal(want) {
+				t.Errorf("Ready %v after its frame-end, want at once", f.Ready.Sub(want))
+			}
+		})
+	})
+	t.Run("decoded after its end", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			d := newBlockDecoder()
+			s, err := New(context.Background(), &fuzzConn{msgs: msgs(protocol.CodecPNG, []byte{1})}, Options{Decoders: []Decoder{d}, DecodeWorkers: 1})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer s.Close()
+			synctest.Wait()
+			time.Sleep(20 * time.Millisecond)
+			close(d.release)
+			synctest.Wait()
+			want := time.Now()
+			time.Sleep(50 * time.Millisecond)
+			if f := frame(t, s); !f.Ready.Equal(want) {
+				t.Errorf("Ready %v after its tile decoded, want then", f.Ready.Sub(want))
+			}
+		})
+	})
+}

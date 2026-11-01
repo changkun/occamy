@@ -434,6 +434,26 @@ func TestV1Probe(t *testing.T) {
 	}
 }
 
+// A frame that was ready before the reader came back for it counts from
+// then, plus what applying it took; one that the reader waited for counts
+// from when Next delivered it.
+func TestCounted(t *testing.T) {
+	at := func(ms int) time.Time { return time.Unix(1000, 0).Add(time.Duration(ms) * time.Millisecond) }
+	for _, c := range []struct {
+		name               string
+		ready, called, now int
+		want               int
+	}{
+		{"came during the tick", 10, 50, 51, 11},
+		{"came as the reader returned", 50, 50, 51, 51},
+		{"the reader waited for it", 60, 50, 61, 61},
+	} {
+		if got := counted(at(c.called), at(c.now), at(c.ready)); !got.Equal(at(c.want)) {
+			t.Errorf("%s: %v after the start, want %d ms", c.name, got.Sub(at(0)), c.want)
+		}
+	}
+}
+
 // A probe key's latency ends at the frame that shows its colour where
 // the probe looks, not at an earlier frame: one in another colour, or
 // one that changed only pixels elsewhere while the swatch's centre
@@ -1214,4 +1234,29 @@ func (e pipeEnd) WriteMessage(ctx context.Context, b []byte) error {
 func (e pipeEnd) Close(protocol.CloseCode, string) error {
 	e.p.close()
 	return nil
+}
+
+// A scene ends once the screen shows the wallpaper, not once its key is
+// on its way: a client that closes at once can lose the key.
+func TestEndScene(t *testing.T) {
+	defer func(d time.Duration) { keyWait = d }(keyWait)
+	keyWait = 2 * time.Second
+	t.Run("shown", func(t *testing.T) {
+		p := newSwatch()
+		p.script[keyEscape] = func(sink backend.Sink) {
+			all := image.Rect(0, 0, width, height)
+			img := sink.Lock(all)
+			paintWallpaper(img)
+			sink.Unlock(all)
+		}
+		if err := endScene(context.Background(), v1Rig(t, p)); err != nil {
+			t.Error(err)
+		}
+	})
+	t.Run("never shown", func(t *testing.T) {
+		keyWait = 100 * time.Millisecond
+		if err := endScene(context.Background(), v1Rig(t, newSwatch())); !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("%v, want the deadline", err)
+		}
+	})
 }

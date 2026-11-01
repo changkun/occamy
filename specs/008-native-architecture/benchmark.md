@@ -704,7 +704,8 @@ say what the harness does now.
     framebuffer a client draws from.
   - *Frames.* A graphical frame draws if its dirty rectangles are not
     empty. A frame counts from when `Next` delivers it applied, as a v0
-    frame from when the harness applied it, before it answers `sync`.
+    frame from when the harness applied it, before it answers `sync`,
+    less any time it waited for the reader at a tick (`Frame.Ready`).
     The reader then waits for the next tick of a 60 Hz screen
     (`-ack-hz`) before it calls `Next` again, which acknowledges a
     graphical frame, drawing or not, as the web client's `Display.run`
@@ -773,6 +774,31 @@ say what the harness does now.
     keys, 100 ms apart, are 6 periods, so where the cadence holds a
     frame back it adds one offset per run. `docs/benchmarks.md` gives
     the direction of the cadence's bias for each metric.
+  - That design left one tick in, found by the review of #162. A frame
+    that came while the reader waited for a tick waited for the next
+    `Next`, so in a moving scene its latency ended on a tick after all.
+    With a backend that answers at once and repaints elsewhere every
+    10 ms, the probe read a p95 of 16.6 ms at 60 Hz and 0.1 ms at once,
+    a floor above G5's targets of 8.4 and 8.8 ms that would have read
+    as a miss of Occamy's, with no cause in Occamy. Such a frame now
+    counts as if the reader had been there: from `Frame.Ready`, when
+    its frame-end had arrived and its tiles were decoded, and the time
+    `Next` took to apply it. It is not the frame's time on the screen,
+    which comes at the next refresh for both clients. A frame that
+    occamyd holds for an acknowledgement still pays for that, since it
+    arrives later. Its other two findings: a scene with no readable
+    stamp reported 0 fps as a measurement, and `-scenarios G7` silently
+    ran no G7, as G7 follows a protocol's chosen scenarios. Both are
+    errors now.
+  - Unexplained, found while testing that fix: in an in-process rig
+    with a 10 Hz display, pressing two keys 5 ms apart every 210 ms, the
+    second key took 70 to 110 ms for a whole run in about one process in
+    five, against 0.1 ms otherwise, though a key's frame should start at
+    once. The delay follows no tick and looks like `pacer.Interval`, the
+    smoothed time a client takes to acknowledge, but that is not proven.
+    The harness reports it as it is. At 60 Hz it could add up to 16.7 ms
+    to every key of such a run, so a run with bimodal latencies should
+    look here first.
 - **Tests:** `bench/v1_test.go` and `bench/bench_test.go`.
   - The decoders against `protocol/testdata/codecs.json` (lossless
     exactly, lossy at `min_psnr`, a rectangle other than the header's

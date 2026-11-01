@@ -487,7 +487,13 @@ func (s *Session) apply(f *frame) ([]Event, error) {
 		ID:         f.end.FrameID,
 		LastSeq:    f.end.LastSeq,
 		ServerTime: time.Duration(min(f.end.ServerTime, uint64(1<<63-1)/1000)) * time.Microsecond, // #nosec G115 -- clamped
+		Ready:      f.arrived,
 		arrived:    f.arrived,
+	}
+	for _, o := range f.ops {
+		if o.job != nil && o.job.ended.After(end.Ready) {
+			end.Ready = o.job.ended
+		}
 	}
 	var evs []Event
 	if !s.graphical() {
