@@ -9,6 +9,15 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- A real desktop in the demo stack: `docker/demo/desktop`, XFCE with a
+  terminal, file manager, text editor and Firefox as the user `occamy`,
+  which `docker/occamy-v1.yaml` lists first as **Desktop (XFCE) over
+  VNC** and **Desktop (XFCE) over RDP**, through the native backends
+  only. Each protocol has a session of its own that outlives its
+  connections. The screen follows the window, and the panel the screen.
+  `TestDemoDesktop` opens both. The other demo servers stay bare X
+  servers, which the tests' probes need. The image is about 1 GB, built
+  with `--no-install-recommends`, and the bench overlay leaves it out.
 - [docs/try-it.md](docs/try-it.md), a guide to running Occamy v1 for
   the first time, from a fresh checkout. It covers:
   - the prerequisites and the build;
