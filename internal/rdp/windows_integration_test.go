@@ -30,6 +30,9 @@ package rdp
 import (
 	"compress/gzip"
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -37,6 +40,7 @@ import (
 	"image/png"
 	"log/slog"
 	"maps"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -56,6 +60,7 @@ const scancodeLeftWindows = 0xe05b
 // The items of the report.
 const (
 	itemNLA           = "NLA/CredSSP"
+	itemRounds        = "CredSSP rounds"
 	itemDrawing       = "drawing"
 	itemGFX           = "GFX negotiation"
 	itemClearCodec    = "ClearCodec"
@@ -71,10 +76,10 @@ const (
 )
 
 // The stages, each of which is also an item.
-var windowsStages = []string{"GFX", "Bitmaps", "TLSOnly", "WrongPassword"}
+var windowsStages = []string{"CredSSPRounds", "GFX", "Bitmaps", "TLSOnly", "WrongPassword"}
 
 var windowsItems = []string{
-	itemNLA, itemDrawing, itemGFX, itemClearCodec, itemCaches, itemKeyboard,
+	itemNLA, itemRounds, itemDrawing, itemGFX, itemClearCodec, itemCaches, itemKeyboard,
 	itemClipFrom, itemClipTo, itemResize, itemBitmaps, itemBitmapsResize,
 	itemTLS, itemWrongPassword,
 }
@@ -162,6 +167,7 @@ func TestWindows(t *testing.T) {
 		h.share = `C:\Users\Public`
 	}
 	defer h.f.report(t)
+	h.stage(t, "CredSSPRounds", h.credSSPRounds)
 	h.stage(t, "GFX", h.gfx)
 	h.stage(t, "Bitmaps", h.bitmaps)
 	h.stage(t, "TLSOnly", h.tlsOnly)
@@ -701,6 +707,161 @@ func (s *winSession) resize(item string, sizes ...image.Point) {
 		notes = append(notes, fmt.Sprintf("%v after %v", want, took))
 	}
 	s.h.f.seen(s.t, item, "%s", strings.Join(notes, ", "))
+}
+
+// credSSPRounds repeats the client's connection as far as CredSSP's
+// first two rounds, with the client's own messages, and reports each,
+// so that a failure there has a place: Connect's error is the same for
+// either. It stops short of delegating the credentials. It logs what the
+// server sends, and of what the client sends only the structure: an
+// AUTHENTICATE_MESSAGE holds proofs of the password.
+func (h windowsHost) credSSPRounds(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	var d net.Dialer
+	conn, err := d.DialContext(ctx, "tcp", h.addr)
+	if err != nil {
+		h.f.failed(t, itemRounds, "dialing: %v", err)
+		return
+	}
+	defer conn.Close()
+	if err := conn.SetDeadline(time.Now().Add(time.Minute)); err != nil {
+		t.Log(err)
+	}
+
+	tr := newTransport(conn, nil)
+	if err := tr.write(connectionRequest("", ProtocolHybrid|ProtocolHybridEx)); err != nil {
+		h.f.failed(t, itemRounds, "the connection request: %v", err)
+		return
+	}
+	f, _, err := tr.readFrame(nil)
+	if err != nil {
+		h.f.failed(t, itemRounds, "the connection confirm: %v", err)
+		return
+	}
+	protocol, err := parseConnectionConfirm(f.data)
+	t.Logf("round: connection confirm % x: protocol %#x, %v", f.data, protocol, err)
+	if err != nil {
+		h.f.failed(t, itemRounds, "the connection confirm: %v", err)
+		return
+	}
+
+	host, _, err := net.SplitHostPort(h.addr)
+	if err != nil {
+		h.f.failed(t, itemRounds, "%v", err)
+		return
+	}
+	policy, err := newTLSPolicy(TLS{ServerName: host, InsecureSkipVerify: true}, host)
+	if err != nil {
+		h.f.failed(t, itemRounds, "%v", err)
+		return
+	}
+	tc := tls.Client(conn, policy.config(conn.RemoteAddr().String(), slog.New(slog.NewTextHandler(testWriter{t}, nil))))
+	if err := tc.HandshakeContext(ctx); err != nil {
+		h.f.failed(t, itemRounds, "the TLS handshake: %v", err)
+		return
+	}
+	tr.upgrade(tc)
+	st := tc.ConnectionState()
+	if len(st.PeerCertificates) == 0 {
+		h.f.failed(t, itemRounds, "TLS without a certificate")
+		return
+	}
+	cert := st.PeerCertificates[0]
+	t.Logf("round: TLS %s, %s, group %v; certificate %v, %v bytes of public key info",
+		tls.VersionName(st.Version), tls.CipherSuiteName(st.CipherSuite), st.CurveID, cert.PublicKeyAlgorithm, len(cert.RawSubjectPublicKeyInfo))
+	pub, err := subjectPublicKey(cert)
+	if err != nil {
+		h.f.failed(t, itemRounds, "%v", err)
+		return
+	}
+
+	nc := &ntlmClient{user: h.user, password: h.password}
+	negotiate := nc.negotiateMessage()
+	t.Logf("round 1: TSRequest version %d, NEGOTIATE % x", credSSPVersion, negotiate)
+	if err := writeTSRequest(tc, &tsRequest{Version: credSSPVersion, NegoTokens: []negoToken{{negotiate}}}); err != nil {
+		h.f.failed(t, itemRounds, "round 1: writing: %v", err)
+		return
+	}
+	resp, err := readTSRequest(tr.r)
+	if err != nil {
+		h.f.failed(t, itemRounds, "round 1: no answer to NEGOTIATE: %v", err)
+		return
+	}
+	if len(resp.NegoTokens) == 0 {
+		h.f.failed(t, itemRounds, "round 1: TSRequest version %d without a token", resp.Version)
+		return
+	}
+	challenge := resp.NegoTokens[0].Token
+	t.Logf("round 1: TSRequest version %d, CHALLENGE % x", resp.Version, challenge)
+	ch, err := parseChallenge(challenge)
+	if err != nil {
+		h.f.failed(t, itemRounds, "round 1: the CHALLENGE: %v", err)
+		return
+	}
+	t.Logf("round 1: CHALLENGE flags %#08x, target info %v, version field %v", ch.flags, pairShapes(ch.targetInfo), ch.flags&ntlmVersion != 0)
+
+	authenticate, sess, err := nc.authenticate(challenge)
+	if err != nil {
+		h.f.failed(t, itemRounds, "round 2: the client's answer: %v", err)
+		return
+	}
+	t.Logf("round 2: AUTHENTICATE %s", authenticateShape(authenticate))
+	nonce := make([]byte, 32)
+	if _, err := rand.Read(nonce); err != nil {
+		t.Fatal(err)
+	}
+	version := min(resp.Version, credSSPVersion)
+	err = writeTSRequest(tc, &tsRequest{
+		Version:     version,
+		NegoTokens:  []negoToken{{authenticate}},
+		PubKeyAuth:  sess.seal(bindingHash(clientServerHashMagic, nonce, pub)),
+		ClientNonce: nonce,
+	})
+	if err != nil {
+		h.f.failed(t, itemRounds, "round 2: writing: %v", err)
+		return
+	}
+	resp, err = readTSRequest(tr.r)
+	if err != nil {
+		h.f.failed(t, itemRounds, "round 2: no answer to AUTHENTICATE: %v", err)
+		return
+	}
+	got, err := sess.unseal(resp.PubKeyAuth)
+	if err != nil {
+		h.f.failed(t, itemRounds, "round 2: the server's proof: %v", err)
+		return
+	}
+	h.f.seen(t, itemRounds, "both rounds answered: TSRequest version %d, the server's proof matches %v", resp.Version, hmac.Equal(got, bindingHash(serverClientHashMagic, nonce, pub)))
+}
+
+// pairShapes prints AV pairs by ID and length.
+func pairShapes(pairs []avPair) string {
+	var b strings.Builder
+	for _, p := range pairs {
+		fmt.Fprintf(&b, "%#x:%d ", p.id, len(p.value))
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// authenticateShape prints the structure of an AUTHENTICATE_MESSAGE and
+// nothing of its responses or keys.
+func authenticateShape(m []byte) string {
+	if len(m) < ntlmAuthenticateLen {
+		return fmt.Sprintf("%d bytes", len(m))
+	}
+	field := func(off int) string {
+		return fmt.Sprintf("%d@%d", binary.LittleEndian.Uint16(m[off:]), binary.LittleEndian.Uint32(m[off+4:]))
+	}
+	pairs := "unreadable"
+	if nt, err := ntlmField(m, 20); err == nil && len(nt) >= 44 {
+		if p, err := parseAVPairs(nt[44:]); err == nil {
+			pairs = pairShapes(p)
+		}
+	}
+	return fmt.Sprintf("%d bytes: LM %s, NT %s, domain %s, user %s, workstation %s, session key %s; flags %#08x, version % x, MIC set %v; NT target info %s",
+		len(m), field(12), field(20), field(28), field(36), field(44), field(52),
+		binary.LittleEndian.Uint32(m[60:]), m[64:72], !slices.Equal(m[ntlmMICOffset:ntlmMICOffset+16], make([]byte, 16)), pairs)
 }
 
 // gfx is the main stage: NLA, a session under GFX, the keyboard, the

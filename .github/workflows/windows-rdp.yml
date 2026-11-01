@@ -249,9 +249,19 @@ jobs:
           Get-WinEvent -LogName $log -MaxEvents 120 -ErrorAction SilentlyContinue | Sort-Object TimeCreated |
             Format-Table -AutoSize -Wrap TimeCreated, Id, Message
         }
-        Write-Output '== failed logons'
-        Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = 4625 } -MaxEvents 10 -ErrorAction SilentlyContinue |
-          Format-List TimeCreated, Message
+        Write-Output '== the session user, apart from Remote Desktop'
+        if ($env:OCCAMY_RDP_WINDOWS_PASSWORD) {
+          Add-Type -AssemblyName System.DirectoryServices.AccountManagement
+          $machine = New-Object System.DirectoryServices.AccountManagement.PrincipalContext('Machine')
+          Write-Output "the password checks out on this machine: $($machine.ValidateCredentials($env:OCCAMY_RDP_WINDOWS_USER, $env:OCCAMY_RDP_WINDOWS_PASSWORD))"
+          net user $env:OCCAMY_RDP_WINDOWS_USER
+        }
+        Write-Output '== logons of the session user in the last 30 minutes, and whether they are audited'
+        auditpol /get /subcategory:Logon
+        $logons = @(Get-WinEvent -FilterHashtable @{ LogName = 'Security'; Id = 4624, 4625; StartTime = (Get-Date).AddMinutes(-30) } -ErrorAction SilentlyContinue |
+          Where-Object { $_.Message -match $env:OCCAMY_RDP_WINDOWS_USER })
+        Write-Output "$($logons.Count) events"
+        $logons | Format-List TimeCreated, Id, Message
 
         # What takes in the port now: a first logon may add rules.
         function Test-Covers3389($filter) {
