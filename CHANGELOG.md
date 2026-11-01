@@ -830,14 +830,22 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   another display.
 - A paste an RDP server's clipboard does not answer no longer waits in
   silence. On a server whose clipboard process, `xrdp-chansrv`, had
-  exited, nothing answered on the channel, so text waited unsent until
-  the session ended, and the viewer heard nothing. Text now waits for a
-  minute, and is then dropped, not sent later, and the viewers told by
-  a new ignorable protocol message, `clipboard-status`
+  exited, nothing answered on the channel, so text waited unsent and the
+  viewer heard nothing. The text still waits, and goes when the server
+  answers, but after a minute the viewers are told, by a new ignorable
+  protocol message, `clipboard-status`
   ([docs/protocol.md](docs/protocol.md#clipboard-status)). The web
-  client says so over the desktop, leaves the text in the clipboard
-  panel to send again, and takes the word away once the clipboard
-  answers. A client that does not know the message skips it.
+  client says "The remote hasn't taken the clipboard yet. Your text will
+  go when it does." over the desktop and in the clipboard panel, which
+  also holds for a slow logon screen, and takes the word away once the
+  server answers. A client that does not know the message skips it, and
+  loses nothing.
+- The same clipboard text sent again over native RDP now goes out again,
+  so a user who sends it to a server that has lost its clipboard process
+  hears so. It used to be left out.
+- A clipboard process that restarts while the native RDP client's request
+  to it is unanswered no longer stops the server's clipboard reaching the
+  viewers for the rest of the session.
 - The demo x11vnc no longer dies of an X error (`Xerror: major_opcode:
   18 … error_code: 3`) when it answers a request for the clipboard from
   a window that has gone, which ended the sessions on it, as

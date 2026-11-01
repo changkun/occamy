@@ -81,7 +81,7 @@ type Sink interface {
     CursorMove(p image.Point)
     TermData(p []byte)                 // terminal
     Clipboard(mime string, data []byte)
-    ClipboardStatus(answering bool)    // whether the remote's clipboard answers
+    ClipboardStatus(answering bool)    // whether the remote's clipboard is taking text
     Bell()
     Title(title string)
     Prompt(ctx context.Context, p Prompt) (PromptReply, error)

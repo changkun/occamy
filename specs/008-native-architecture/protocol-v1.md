@@ -428,9 +428,12 @@ web client ([009](../009-react-web-client.md)) and the client core
     ([native-rdp-backend](native-rdp-backend.md)). No message could say
     so: `frame-end`'s `last_seq` counts input the server applied, and
     only up, and the server's `clipboard` is the remote's content. It
-    goes out ignorable, so a client of the first v1 skips it, and it
-    names the state of the session's clipboard, not a sequence number:
-    the backend replaces queued text, so it cannot say whose was lost.
+    goes out ignorable, so a client of the first v1 skips it and loses
+    nothing, and it names the state of the session's clipboard, not a
+    sequence number: the backend replaces queued text, so it cannot say
+    whose is waiting. It reports and changes nothing: an earlier version
+    dropped the text, which cost a logon screen that outlasted the wait
+    its text (native-rdp-backend, the bound on the owner's text).
   - `Decode` takes `Limits` on every message, so one interface serves
     all of them; tile and cursor use it.
   - The Go `Hello` has no version field: `Append` writes 1 and `Decode`

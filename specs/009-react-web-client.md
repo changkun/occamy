@@ -411,13 +411,16 @@ Settled on 2026-10-31.
     in a modal `<dialog>` with secret fields as password inputs, a
     clipboard panel, a share panel that mints a viewer or read-only
     link lasting 10 minutes to 12 hours, and a notice over the screen
-    that blocks nothing when text this client sent did not reach the
-    remote clipboard. `clipboard-status` raises it, for a client that
-    sent text, and takes back what `sendClipboard` took for the remote's.
-    The panel's text stays, to send again, and the local clipboard does
-    not send the same text on its own until the clipboard answers, or
-    each focus would lose it again. The notice goes when the clipboard
-    answers or the user dismisses it, and the next loss brings it back.
+    that blocks nothing when the remote has not taken text this client
+    sent. `clipboard-status` raises it, for a client that sent text, and
+    changes nothing else: the text waits for the remote, so the clipboard
+    and the panel keep it, and the local clipboard does not send it again
+    on each focus. The notice says "The remote hasn't taken the clipboard
+    yet. Your text will go when it does.", which holds for a remote still
+    at its logon screen and for one whose clipboard process has gone,
+    since the two look the same. It goes when the remote answers or the
+    user dismisses it, which returns the keys to the canvas unless a panel
+    is open, and text that waits too long again brings it back.
   - The owner's window size goes to the remote 300 ms after it settles,
     in CSS pixels or cells, unless the hello already asked for it, so
     that a remote pixel is a CSS pixel at any device pixel ratio: the
