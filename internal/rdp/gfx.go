@@ -151,6 +151,21 @@ const (
 	retainGFX = 4 << 20
 )
 
+// blockCost and pduCost are what the client is charged against
+// decodeRate for a header that it parses and does little more with,
+// which costs more than what its bytes' expansion is charged: each
+// block of a RemoteFX Progressive stream, which may be a header of 6
+// bytes alone, and each GFX PDU that the client skips, of 8 bytes at
+// the least, or W2S2 PDU, whose stream may be of no blocks; a PDU looks
+// its surface up too. Their message pays what it owes at its end
+// (gfxMessage). Each costs 4 to 5 ns a block and 8 to 23 a PDU on the
+// benchmarks' host, so that a flood of them gets at most 0.8 of a core
+// (BenchmarkSkipped).
+const (
+	blockCost = 8
+	pduCost   = 16
+)
+
 // surfaceLimit is the most pixels the surfaces may hold in all on a
 // desktop of w×h: four desktops, at least minSurfacePixels.
 func surfaceLimit(w, h int) int {
@@ -183,6 +198,19 @@ type gfx struct {
 	quants     []rfxQuant
 	progQuants [][3]rfxQuant
 	changed    []*progTile
+	// What the message applies, by RDPGFX_CMDID, and skips, by name,
+	// and the units it owes, which it counts and pays at its end
+	// (gfxMessage).
+	applied [gfxCapsConfirm + 1]int
+	skips   []gfxSkip
+	owed    int
+}
+
+// gfxSkip is a name that a message counts what it skips under, and how
+// many it skipped.
+type gfxSkip struct {
+	name string
+	n    int
 }
 
 // surface is an offscreen surface: opaque RGBA rows, 4*w bytes each.
@@ -311,19 +339,54 @@ var gfxMissing = map[string]bool{
 	"GFX bitmaps of unknown codecs":                true,
 }
 
-// gfxSkipped counts a GFX PDU or bitmap that the client skips, by name,
-// and warns at the first of a session that leaves the screen without
-// what it draws: until the client takes them, GFX off has the server
-// draw in what it does take.
+// gfxSkipped counts a GFX PDU, bitmap or block that the client skips,
+// by name, when its message ends (gfxCount). The names are the
+// client's, so there are few of them to look through.
 func (c *Client) gfxSkipped(name string) {
-	c.count(func(s *Stats) { s.Ignored[name]++ })
-	if c.gfxWarned || !gfxMissing[name] {
-		return
+	g := &c.gfx
+	for i := range g.skips {
+		if g.skips[i].name == name {
+			g.skips[i].n++
+			return
+		}
 	}
-	c.gfxWarned = true
-	c.log.Warn("rdp: the server draws with GFX that the client does not decode yet, so parts of the screen may stay missing or stale; "+
-		"to turn GFX off, set disable_gfx: true on the target's connection, or, for an ad-hoc target, adhoc_backends: {rdp: guacd}",
-		"addr", c.addr, "skipped", name)
+	g.skips = append(g.skips, gfxSkip{name, 1})
+}
+
+// gfxSkipPDU skips a GFX PDU, or its bitmap, counted by name and
+// charged pduCost.
+func (c *Client) gfxSkipPDU(name string) {
+	c.gfx.owed += pduCost
+	c.gfxSkipped(name)
+}
+
+// gfxCount counts the PDUs that the message applied and what it
+// skipped, and warns at the first PDU or bitmap of a session skipped
+// that leaves the screen without what the server draws: until the
+// client takes them, GFX off has the server draw in what it does take.
+func (c *Client) gfxCount() {
+	g := &c.gfx
+	c.count(func(s *Stats) {
+		for cmd, n := range g.applied {
+			if n > 0 {
+				s.GFX[gfxNames[cmd]] += n
+			}
+		}
+		for _, k := range g.skips {
+			s.Ignored[k.name] += k.n
+		}
+	})
+	clear(g.applied[:])
+	for _, k := range g.skips {
+		if c.gfxWarned || !gfxMissing[k.name] {
+			continue
+		}
+		c.gfxWarned = true
+		c.log.Warn("rdp: the server draws with GFX that the client does not decode yet, so parts of the screen may stay missing or stale; "+
+			"to turn GFX off, set disable_gfx: true on the target's connection, or, for an ad-hoc target, adhoc_backends: {rdp: guacd}",
+			"addr", c.addr, "skipped", k.name)
+	}
+	g.skips = g.skips[:0]
 }
 
 var gfxCodecNames = map[int]string{
@@ -383,13 +446,16 @@ func capsAdvertise() []byte {
 
 // gfxMessage applies a message from the server on the channel: one or
 // more GFX PDUs, segmented and maybe compressed. Outside a frame, what
-// they changed goes to the output at once.
+// they changed goes to the output at once. What the message applies and
+// skips is counted, and the headers it owes are charged, at its end, so
+// that a flood of PDUs takes neither c.mu nor the clock for each.
 func (c *Client) gfxMessage(out Output, msg []byte) error {
 	g := &c.gfx
 	data, err := g.z.decompress(msg, maxGFXData)
 	if err != nil {
 		return err
 	}
+	defer c.gfxCount()
 	// What compression added is charged as pixels of 4 bytes, since a
 	// few bytes may expand to 16 MiB: stored messages, xrdp's, are not
 	// charged twice for what their PDUs draw.
@@ -411,6 +477,12 @@ func (c *Client) gfxMessage(out Output, msg []byte) error {
 		}
 		data = data[n:]
 	}
+	if owed := g.owed; owed > 0 {
+		g.owed = 0
+		if err := c.pace(owed); err != nil {
+			return err
+		}
+	}
 	if cap(g.z.out) > retainGFX {
 		g.z.out = nil
 	}
@@ -425,7 +497,7 @@ func (c *Client) gfxPDU(out Output, cmd int, body []byte) error {
 	g := &c.gfx
 	if !g.confirmed && cmd != gfxCapsConfirm {
 		// [MS-RDPEGFX] 3.3.5.19: until the server confirms, it is ignored.
-		c.count(func(s *Stats) { s.Ignored["GFX PDUs before the capabilities"]++ })
+		c.gfxSkipPDU("GFX PDUs before the capabilities")
 		return nil
 	}
 	r := reader{b: body}
@@ -446,7 +518,7 @@ func (c *Client) gfxPDU(out Output, cmd int, body []byte) error {
 		r.u32() // frameId
 		if r.err == nil && g.inFrame {
 			// A frame without its end: what it drew goes with the next.
-			c.count(func(s *Stats) { s.Ignored["GFX frames without their end"]++ })
+			c.gfxSkipPDU("GFX frames without their end")
 		}
 		g.inFrame = true
 	case gfxEndFrame:
@@ -469,7 +541,7 @@ func (c *Client) gfxPDU(out Output, cmd int, body []byte) error {
 		if !ok {
 			name = "GFX PDUs"
 		}
-		c.gfxSkipped(name)
+		c.gfxSkipPDU(name)
 		return nil
 	}
 	if err == nil && r.err != nil {
@@ -478,8 +550,7 @@ func (c *Client) gfxPDU(out Output, cmd int, body []byte) error {
 	if err != nil {
 		return fmt.Errorf("rdp: GFX PDU %#x: %w", cmd, err)
 	}
-	name := gfxNames[cmd]
-	c.count(func(s *Stats) { s.GFX[name]++ })
+	c.gfx.applied[cmd]++
 	return nil
 }
 
@@ -498,7 +569,7 @@ func (c *Client) gfxCapsConfirm(r *reader) error {
 	case gfxCapVersion8, gfxCapVersion81, gfxCapVersion10, gfxCapVersion101, gfxCapVersion102,
 		gfxCapVersion103, gfxCapVersion104, gfxCapVersion105, gfxCapVersion106, gfxCapVersion107:
 	default:
-		c.count(func(s *Stats) { s.Ignored["GFX capability sets"]++ })
+		c.gfxSkipPDU("GFX capability sets")
 		return nil
 	}
 	g := &c.gfx
@@ -665,7 +736,7 @@ func (c *Client) gfxDelete(r *reader) error {
 	}
 	s := c.gfx.surfaces[id]
 	if s == nil {
-		c.count(func(s *Stats) { s.Ignored["GFX deletes of no surface"]++ })
+		c.gfxSkipPDU("GFX deletes of no surface")
 		return nil
 	}
 	return c.pace(c.gfxRemove(s))
@@ -898,13 +969,13 @@ func (c *Client) gfxWireToSurface1(r *reader) error {
 		if !ok {
 			name = "GFX bitmaps of unknown codecs"
 		}
-		c.gfxSkipped(name)
+		c.gfxSkipPDU(name)
 		return nil
 	}
 	if dr.Empty() {
 		// Nothing of it would show: a RemoteFX message's tiles are
 		// clipped to the rectangle.
-		c.count(func(s *Stats) { s.Ignored["empty bitmaps"]++ })
+		c.gfxSkipPDU("empty bitmaps")
 		return nil
 	}
 	if codec == gfxCodecRemoteFX {

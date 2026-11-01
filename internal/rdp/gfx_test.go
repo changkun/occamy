@@ -1089,7 +1089,7 @@ func TestGFXPace(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		pdu  []byte
-		n    int // -1: what compression added, in pixels of 4 bytes
+		n    int // and, compressed, what compression added, in pixels of 4 bytes
 		zip  bool
 	}{
 		{"create", rdptest.CreateSurface(1, 64, 32, rdptest.PixelXRGB), 64 * 32, false},
@@ -1107,8 +1107,9 @@ func TestGFXPace(t *testing.T) {
 		{"copy from offscreen", rdptest.SurfaceToSurface(2, 1, image.Rect(0, 0, 8, 4), image.Pt(64, 0)), 8 * 4, false},
 		{"uncompressed", rdptest.WireToSurface1(1, rdptest.CodecUncompressed, rdptest.PixelXRGB, image.Rect(0, 0, 8, 8), rdptest.Uncompressed(img)), 8 * 8, false},
 		{"planar", rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(8, 8, 16, 16), rdptest.Planar(img)), planarCost * 8 * 8, false},
-		{"stored", ignored, 0, false},
-		{"compressed", ignored, -1, true},
+		// A PDU that the client skips costs its header.
+		{"stored", ignored, pduCost, false},
+		{"compressed", ignored, pduCost, true},
 		// The mapped surface drawn again; a larger desktop, so that its
 		// larger bucket does not clamp what is left.
 		{"reset", rdptest.ResetGraphics(300, 300), 128 * 64, false},
@@ -1117,7 +1118,7 @@ func TestGFXPace(t *testing.T) {
 		want := tc.n
 		if tc.zip {
 			msg := g.enc.Single(tc.pdu, rdptest.SegCompressed)
-			want = (len(tc.pdu) - len(msg)) / 4
+			want += (len(tc.pdu) - len(msg)) / 4
 			if err := g.c.gfxMessage(g.out, msg); err != nil {
 				t.Fatal(err)
 			}
@@ -1504,6 +1505,86 @@ func benchFrame(b *testing.B, tile func(image.Rectangle, *image.RGBA) []byte) {
 		g.c.chio.mu.Unlock()
 	}
 	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/float64(1024*768), "ns/pixel")
+}
+
+// BenchmarkSkipped is a flood of what the client parses and skips, the
+// cheapest to send for the most parsing, in stored messages, whose
+// expansion is not charged: RemoteFX Progressive regions outside a
+// frame, blocks of an unknown type and frame begins, of a header alone,
+// 4,096 to a W2S2 PDU; and, 4,096 to a message, W2S2 PDUs of no
+// blocks, GFX PDUs of an unknown type, of an 8-byte header alone, also
+// after one of each other name that the client counts what it skips
+// under but the tiles', which gfxSkipped looks through for each,
+// frames that begin again, and empty bitmaps. Its core metric is the
+// share of a core that the flood gets: what it costs over what it is
+// charged at decodeRate. The last are PDUs applied that do little:
+// capability confirms, codec contexts' deletes, and bitmaps of a pixel,
+// charged that pixel alone.
+func BenchmarkSkipped(b *testing.B) {
+	const n = 4096
+	block := func(typ int) []byte { return []byte{byte(typ), byte(typ >> 8), 6, 0, 0, 0} }
+	w2s2 := func(blocks []byte) []byte {
+		return rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, blocks)
+	}
+	r := image.Rect(0, 0, 8, 8)
+	var names [][]byte // a PDU of each name, the unknown PDUs' last
+	for _, codec := range []int{rdptest.CodecClearCodec, rdptest.CodecAVC420, rdptest.CodecAlpha, rdptest.CodecProgressive, rdptest.CodecAVC444, 0x77} {
+		names = append(names, rdptest.WireToSurface1(1, codec, rdptest.PixelXRGB, r, []byte{1}))
+	}
+	names = append(names,
+		rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(4, 4, 4, 8), nil),
+		rdptest.GFXPDU(rdptest.GFXCacheToSurface, make([]byte, 6)),
+		rdptest.StartFrame(1), rdptest.StartFrame(1),
+		rdptest.DeleteSurface(99),
+		rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, []byte{99, 0, 0, 0, 0, 0}),
+		rdptest.CapsConfirm(0x77, 0),
+		w2s2(slices.Concat(block(progRegion), block(0xcccf))),
+		rdptest.GFXPDU(0x77, nil))
+	for _, tc := range []struct {
+		name string
+		msg  []byte
+	}{
+		{"progressive regions outside a frame", w2s2(bytes.Repeat(block(progRegion), n))},
+		{"progressive blocks of an unknown type", w2s2(bytes.Repeat(block(0xcccf), n))},
+		{"progressive frame begins", w2s2(bytes.Repeat(rdptest.Progressive(1)[:12], n))},
+		{"W2S2 PDUs of no blocks", bytes.Repeat(w2s2(nil), n)},
+		{"GFX PDUs of an unknown type", bytes.Repeat(rdptest.GFXPDU(0x77, nil), n)},
+		{"GFX PDUs of an unknown type after every name", slices.Concat(slices.Concat(names...), bytes.Repeat(rdptest.GFXPDU(0x77, nil), n))},
+		{"GFX frames without their end", bytes.Repeat(rdptest.StartFrame(1), n)},
+		{"GFX empty bitmaps", bytes.Repeat(rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(4, 4, 4, 8), nil), n)},
+		{"applied caps confirms", bytes.Repeat(rdptest.CapsConfirm(rdptest.CapVersion107, 0), n)},
+		{"applied codec context deletes", bytes.Repeat(rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, []byte{1, 0, 1, 0, 0, 0}), n)},
+		{"applied bitmaps of a pixel", bytes.Repeat(rdptest.WireToSurface1(1, rdptest.CodecUncompressed, rdptest.PixelXRGB, image.Rect(0, 0, 1, 1), rdptest.Uncompressed(gradient(1, 1))), n)},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			g := newGFXTest(b, 1920, 1080)
+			g.must(b, append(surfacePDUs(1, 64, 64, image.Point{}), w2s2(nil))...)
+			if strings.HasSuffix(tc.name, "after every name") {
+				g.must(b, names...)
+				if ign := g.c.Stats().Ignored; len(ign) != 15 {
+					b.Fatalf("%d names, want 15: %v", len(ign), ign)
+				}
+			}
+			wire := g.enc.Multipart(tc.msg, zgfxSegment, rdptest.SegStored)
+			if err := g.c.pace(0); err != nil {
+				b.Fatal(err)
+			}
+			tokens, slept := g.c.tokens, g.clock.waited()
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := g.c.gfxMessage(g.out, wire); err != nil {
+					b.Fatal(err)
+				}
+			}
+			units := tokens - g.c.tokens + (g.clock.waited()-slept).Seconds()*decodeRate
+			ns := float64(b.Elapsed().Nanoseconds())
+			b.ReportMetric(ns/float64(b.N)/n, "ns/block")
+			b.ReportMetric(units/float64(b.N)/n, "units/block")
+			if units > 0 {
+				b.ReportMetric(ns/units*decodeRate/1e9, "core")
+			}
+		})
+	}
 }
 
 // planarEncodeImage is img in the planar codec, run-length encoded, no

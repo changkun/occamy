@@ -27,13 +27,23 @@ import (
 // (3.3.1.2): the bit positions of its last pass and, while it has
 // upgrades to come, the sign of each coefficient, which decides how an
 // upgrade codes it. A surface may have several codec contexts at once
-// (3.3.1.1), and a tile context belongs to the codec context of the
-// tile's last first pass: deleting that codec context ends it, and
-// gives its signs back. An upgrade that the client cannot apply, of a
-// tile without a tile context or in the other transform, is skipped
-// and counted rather than ending the session, and so are the tile's
-// later upgrades until its next first pass, as their bit positions
-// follow the skipped one's.
+// (3.3.1.1), and a tile context may belong to "one or more" of them,
+// so the client keeps no state of a codec context: a W2S2 of any
+// context applies to the surface's tiles, and its
+// RDPGFX_DELETE_ENCODING_CONTEXT_PDU ends no tile context, as 3.3.1.2
+// says a tile context "can be", not must be, discarded once all of its
+// codec contexts are deleted, and as FreeRDP's delete does nothing. A
+// tile context ends at a full pass, which gives its signs back, at the
+// tile's next first pass, and with the surface. An upgrade that the
+// client cannot apply, of a tile without a first pass or in the other
+// transform, is skipped and counted rather than ending the session,
+// and so are the tile's later upgrades until its next first pass, as
+// their bit positions follow the skipped one's.
+//
+// A frame is of a bitmap stream alone ([MS-RDPEGFX] 2.2.4.2.1.2): a
+// region outside its stream's own FRAME_BEGIN and FRAME_END is ignored
+// (2.2.4.2.1.5), as FreeRDP's decoder, which starts each stream
+// outside a frame, ignores it.
 //
 // At the end of each region, the tiles that it changed are drawn
 // where its rectangles cover them. The specification lets a region's
@@ -62,17 +72,13 @@ const (
 	progExtrapolate = 0x01
 )
 
-// progState is a surface's RemoteFX Progressive state: its open frame
-// and its tiles, in rows of cols.
+// progState is a surface's RemoteFX Progressive state: its tiles, in
+// rows of cols.
 type progState struct {
-	// inFrame is a RFX_PROGRESSIVE_FRAME_BEGIN without its end, in codec
-	// context frameCtx: a surface has one open frame at a time.
-	inFrame  bool
-	frameCtx uint32
-	region   uint32 // the regions applied
-	cols     int
-	tiles    []*progTile
-	n        int // the tiles made
+	region uint32 // the regions applied
+	cols   int
+	tiles  []*progTile
+	n      int // the tiles made
 }
 
 // progTile is a tile's state ([MS-RDPEGFX] 3.3.8.2.1).
@@ -82,11 +88,10 @@ type progTile struct {
 	extra  bool           // the reduce-extrapolate transform of the last pass
 	at     image.Point    // its origin on the surface
 	region uint32         // the last region that changed it
-	// The progressive tile context, if tc: of codec context ctx, that of
-	// the last first pass, the sign of each coefficient but LL3's while
-	// upgrades are to come, and the bit positions of the last pass.
+	// The progressive tile context, if tc: the sign of each coefficient
+	// but LL3's while upgrades are to come, and the bit positions of the
+	// last pass.
 	tc     bool
-	ctx    uint32
 	sign   *[3][4096]int8
 	bitPos [3]rfxQuant
 }
@@ -115,35 +120,12 @@ func (c *Client) progDrop(s *surface) {
 	}
 }
 
-// progDeleteContext deletes codec context ctx of st: its open frame,
-// and the tile contexts of the tiles whose last first pass was in it,
-// which give their signs back and keep their coefficients. Looking for
-// them is charged a unit a tile. A context that no tile has is counted.
-func (c *Client) progDeleteContext(st *progState, ctx uint32) error {
-	if st.frameCtx == ctx {
-		st.inFrame = false
-	}
-	if err := c.pace(len(st.tiles)); err != nil {
-		return err
-	}
-	found := false
-	for _, t := range st.tiles {
-		if t != nil && t.tc && t.ctx == ctx {
-			c.progForget(t)
-			found = true
-		}
-	}
-	if !found {
-		c.count(func(s *Stats) { s.Ignored["GFX deletes of no codec context"]++ })
-	}
-	return nil
-}
-
 // gfxWireToSurface2 applies RDPGFX_WIRE_TO_SURFACE_PDU_2: a RemoteFX
-// Progressive bitmap stream in the surface's codec context.
+// Progressive bitmap stream, whatever its codec context.
 func (c *Client) gfxWireToSurface2(r *reader) error {
-	id, codec, ctx := r.u16(), int(r.u16()), r.u32()
-	r.u8() // pixelFormat
+	id, codec := r.u16(), int(r.u16())
+	r.u32() // codecContextId
+	r.u8()  // pixelFormat
 	n := r.u32()
 	if r.err != nil {
 		return r.err
@@ -157,40 +139,41 @@ func (c *Client) gfxWireToSurface2(r *reader) error {
 		return err
 	}
 	if codec != gfxCodecProgressive {
-		c.gfxSkipped("GFX bitmaps of unknown codecs")
+		c.gfxSkipPDU("GFX bitmaps of unknown codecs")
 		return nil
 	}
-	st := s.prog
-	if st == nil {
+	if s.prog == nil {
 		cols := (s.w + rfxTile - 1) / rfxTile
-		st = &progState{cols: cols, tiles: make([]*progTile, cols*((s.h+rfxTile-1)/rfxTile))}
-		s.prog = st
+		s.prog = &progState{cols: cols, tiles: make([]*progTile, cols*((s.h+rfxTile-1)/rfxTile))}
 	}
-	return c.progStream(s, ctx, data)
+	return c.progStream(s, data)
 }
 
-// gfxDeleteContext applies RDPGFX_DELETE_ENCODING_CONTEXT_PDU. A
-// surface that the client does not have, or that has had no RemoteFX
-// Progressive, is ignored.
+// gfxDeleteContext applies RDPGFX_DELETE_ENCODING_CONTEXT_PDU, which
+// ends nothing, as the client keeps no state of a codec context. One of
+// a surface that the client does not have, or that has had no RemoteFX
+// Progressive, is skipped.
 func (c *Client) gfxDeleteContext(r *reader) error {
-	id, ctx := r.u16(), r.u32()
+	id := r.u16()
+	r.u32() // codecContextId
 	if r.err != nil {
 		return r.err
 	}
-	s := c.gfx.surfaces[id]
-	if s == nil || s.prog == nil {
-		c.count(func(s *Stats) { s.Ignored["GFX deletes of no codec context"]++ })
-		return nil
+	if s := c.gfx.surfaces[id]; s == nil || s.prog == nil {
+		c.gfxSkipPDU("GFX deletes of no codec context")
 	}
-	return c.progDeleteContext(s.prog, ctx)
+	return nil
 }
 
-// progStream applies an RFX_PROGRESSIVE_BITMAP_STREAM of codec context
-// ctx to s. Blocks of types the client does not use are skipped; a
-// region outside a frame of its codec context is ignored ([MS-RDPEGFX]
-// 2.2.4.2.1.5).
-func (c *Client) progStream(s *surface, ctx uint32, data []byte) error {
-	st := s.prog
+// progStream applies an RFX_PROGRESSIVE_BITMAP_STREAM to s. Its frame
+// is its own: a region outside the stream's FRAME_BEGIN and FRAME_END
+// is ignored ([MS-RDPEGFX] 2.2.4.2.1.5), as is a block of a type that
+// the client does not know, each counted. The stream, which may be of
+// no blocks, is charged pduCost, and each of its blocks blockCost,
+// which their message pays at its end (gfxMessage).
+func (c *Client) progStream(s *surface, data []byte) error {
+	c.gfx.owed += pduCost
+	inFrame := false
 	for len(data) > 0 {
 		r := reader{b: data}
 		typ, n := r.u16(), r.u32()
@@ -199,29 +182,31 @@ func (c *Client) progStream(s *surface, ctx uint32, data []byte) error {
 		}
 		body := data[6:n]
 		data = data[n:]
+		c.gfx.owed += blockCost
 		switch typ {
+		case progSync, progContextType:
 		case progFrameBegin:
-			st.inFrame, st.frameCtx = true, ctx
+			inFrame = true
 		case progFrameEnd:
-			if st.frameCtx == ctx {
-				st.inFrame = false
-			}
+			inFrame = false
 		case progRegion:
-			if !st.inFrame || st.frameCtx != ctx {
-				c.count(func(s *Stats) { s.Ignored["GFX progressive regions outside a frame"]++ })
+			if !inFrame {
+				c.gfxSkipped("GFX progressive regions outside a frame")
 				continue
 			}
-			if err := c.progRegion(s, ctx, body); err != nil {
+			if err := c.progRegion(s, body); err != nil {
 				return err
 			}
+		default:
+			c.gfxSkipped("GFX progressive blocks")
 		}
 	}
 	return nil
 }
 
-// progRegion applies RFX_PROGRESSIVE_REGION of codec context ctx: its
-// tiles, then each tile it changed drawn where its rectangles cover it.
-func (c *Client) progRegion(s *surface, ctx uint32, b []byte) error {
+// progRegion applies RFX_PROGRESSIVE_REGION: its tiles, then each tile
+// it changed drawn where its rectangles cover it.
+func (c *Client) progRegion(s *surface, b []byte) error {
 	r := reader{b: b}
 	tileSize, numRects := r.u8(), int(r.u16())
 	numQuant, numProg, flags := int(r.u8()), int(r.u8()), r.u8()
@@ -289,11 +274,11 @@ func (c *Client) progRegion(s *surface, ctx uint32, b []byte) error {
 		var err error
 		switch typ {
 		case progTileSimple, progTileFirst:
-			tile, err = c.progFirst(st, ctx, &reg, block, typ == progTileFirst)
+			tile, err = c.progFirst(st, &reg, block, typ == progTileFirst)
 		case progTileUpgrade:
 			tile, err = c.progUpgrade(st, &reg, block)
 		default:
-			c.count(func(s *Stats) { s.Ignored["GFX progressive blocks"]++ })
+			c.gfxSkipped("GFX progressive blocks")
 			continue
 		}
 		if err != nil {
@@ -369,9 +354,9 @@ func (c *Client) progTileAt(st *progState, x, y int, create bool) (*progTile, bo
 
 // progFirst applies RFX_PROGRESSIVE_TILE_SIMPLE or, with first,
 // RFX_PROGRESSIVE_TILE_FIRST: a tile's first pass ([MS-RDPEGFX]
-// 3.3.8.2.1.1), or its only one, in codec context ctx. It returns the
-// tile, or nil if it skipped the pass.
-func (c *Client) progFirst(st *progState, ctx uint32, reg *progRegionData, b []byte, first bool) (*progTile, error) {
+// 3.3.8.2.1.1), or its only one. It returns the tile, or nil if it
+// skipped the pass.
+func (c *Client) progFirst(st *progState, reg *progRegionData, b []byte, first bool) (*progTile, error) {
 	header := progSimpleHeader
 	if first {
 		header = progFirstHeader
@@ -413,10 +398,10 @@ func (c *Client) progFirst(st *progState, ctx uint32, reg *progRegionData, b []b
 		// the difference cannot be added: the tile stays as it is, and
 		// its upgrades are skipped until its next first pass.
 		c.progForget(t)
-		c.count(func(s *Stats) { s.Ignored["GFX progressive tiles in another transform"]++ })
+		c.gfxSkipped("GFX progressive tiles in another transform")
 		return nil, nil
 	}
-	t.tc, t.ctx = true, ctx
+	t.tc = true
 	if quality == progFull {
 		c.progRelease(t)
 	} else if t.sign == nil {
@@ -504,17 +489,16 @@ func (c *Client) progUpgrade(st *progState, reg *progRegionData, b []byte) (*pro
 		return nil, err
 	}
 	if t == nil || !t.tc {
-		// No first pass, its codec context deleted, or an upgrade
-		// skipped since: the bits it adds are of a state the client has
-		// not got.
+		// No first pass, or an upgrade skipped since: the bits it adds
+		// are of a state the client has not got.
 		c.progForget(t)
-		c.count(func(s *Stats) { s.Ignored["GFX progressive upgrades without a tile context"]++ })
+		c.gfxSkipped("GFX progressive upgrades without a tile context")
 		return nil, nil
 	}
 	if t.extra != reg.extra {
 		// The first pass set the signs of the other transform's bands.
 		c.progForget(t)
-		c.count(func(s *Stats) { s.Ignored["GFX progressive tiles in another transform"]++ })
+		c.gfxSkipped("GFX progressive tiles in another transform")
 		return nil, nil
 	}
 	if t.sign == nil {
@@ -619,8 +603,8 @@ func (c *Client) progSign() *[3][4096]int8 {
 	return new([3][4096]int8)
 }
 
-// progRelease takes the signs of t, which a full pass or the end of its
-// tile context leaves unused.
+// progRelease takes the signs of t, which a full pass or a skip leaves
+// unused.
 func (c *Client) progRelease(t *progTile) {
 	if t.sign == nil {
 		return
@@ -631,8 +615,9 @@ func (c *Client) progRelease(t *progTile) {
 	t.sign = nil
 }
 
-// progForget ends t's tile context, if t is not nil: its signs go back,
-// and its upgrades are skipped until its next first pass.
+// progForget ends t's tile context at a skip, if t is not nil: its
+// signs go back, and its upgrades are skipped until its next first
+// pass.
 func (c *Client) progForget(t *progTile) {
 	if t == nil {
 		return
