@@ -412,7 +412,8 @@ started, wait that long and send it again.
 - **x11vnc, native backend** keeps 1024×768, and the page scales it.
   x11vnc refuses to resize, and `occamyd` logs `the server prohibits
   resizing the screen` once and stops asking; the session goes on.
-- The connections through guacd keep the size they opened at.
+- **TigerVNC, through guacd** changes size too. x11vnc and RDP through
+  guacd keep the size they opened at.
 
 Only the owner's window sets the size. A viewer sees the owner's
 screen scaled to its own window.

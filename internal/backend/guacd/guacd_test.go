@@ -614,6 +614,8 @@ func TestDialFails(t *testing.T) {
 func TestInput(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		h := start(t, &backendtest.Sink{})
+		h.frame(1)
+		h.frame(2)
 		for _, tc := range []struct {
 			ev   backend.InputEvent
 			want [][]string
@@ -687,6 +689,90 @@ func TestInput(t *testing.T) {
 		if err := h.b.Input(backend.TermInput{}); !errors.Is(err, bridge.ErrUnsupportedInput) {
 			t.Errorf("Input(TermInput) = %v, want ErrUnsupportedInput", err)
 		}
+		h.end()
+	})
+}
+
+// TestInputHeld checks that nothing that crashes guacd's VNC support
+// before its RFB connection is up reaches it before its second frame:
+// the latest size and pointer wait for that frame, a wheel is dropped,
+// and what guacd takes early does not wait.
+func TestInputHeld(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := start(t, &backendtest.Sink{})
+		input := func(evs ...backend.InputEvent) {
+			t.Helper()
+			for _, ev := range evs {
+				if err := h.b.Input(ev); err != nil {
+					t.Fatalf("Input(%#v) = %v", ev, err)
+				}
+			}
+		}
+		input(
+			backend.Resize{Width: 800, Height: 600},
+			backend.Pointer{X: 1, Y: 2},
+			backend.Wheel{DY: 100},
+			backend.Resize{Width: 1000, Height: 700},
+			backend.Pointer{X: 3, Y: 4, Buttons: backend.ButtonLeft},
+			backend.Key{Down: true, Keysym: 'a'},
+		)
+		// The hold has no limit before a frame: the owner may take any
+		// time to answer a prompt.
+		time.Sleep(time.Hour)
+		h.expect("key", "97", "1")
+
+		// guacd's first frame is blank, and comes before the server's.
+		h.frame(1)
+		input(backend.Key{Keysym: 'a'})
+		h.expect("key", "97", "0")
+
+		// Another sync of the same timestamp is not another frame.
+		h.send("sync", "1")
+		synctest.Wait()
+		input(backend.Key{Down: true, Keysym: 'b'})
+		h.expect("key", "98", "1")
+
+		h.frame(2)
+		h.expect("size", "1000", "700")
+		h.expect("mouse", "3", "4", "1")
+
+		// From then on they go as they come.
+		input(
+			backend.Resize{Width: 640, Height: 480},
+			backend.Pointer{X: 5, Y: 6},
+			backend.Wheel{DY: 100},
+			backend.Resize{Width: 800, Height: 600},
+		)
+		h.expect("size", "640", "480")
+		h.expect("mouse", "5", "6", "0")
+		h.expect("mouse", "5", "6", "16")
+		h.expect("mouse", "5", "6", "0")
+		h.expect("size", "800", "600")
+		h.end()
+	})
+}
+
+// TestInputHeldLimit checks that the hold ends without a second frame,
+// which a remote whose first update changes nothing does not cause.
+func TestInputHeldLimit(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		h := start(t, &backendtest.Sink{})
+		h.frame(1)
+		from := time.Now()
+		if err := h.b.Input(backend.Resize{Width: 800, Height: 600}); err != nil {
+			t.Fatal(err)
+		}
+		h.expect("size", "800", "600")
+		if d := time.Since(from); d != 2*time.Second {
+			t.Errorf("held for %v, want 2s", d)
+		}
+
+		// A frame after the limit changes nothing.
+		h.frame(2)
+		if err := h.b.Input(backend.Resize{Width: 640, Height: 480}); err != nil {
+			t.Fatal(err)
+		}
+		h.expect("size", "640", "480")
 		h.end()
 	})
 }

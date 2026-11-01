@@ -340,6 +340,9 @@ var parityFeatures = []parityFeature{
 	{name: "resize: by the owner's hello", servers: tigerOnly, check: checkResizeHello},
 	{name: "resize: by a request", servers: tigerOnly, check: checkResizeRequest},
 	{name: "resize: the server keeps its size", servers: []string{"x11vnc"}, check: checkResizeIgnored},
+	{name: "resize: right after opening", check: resizeEarly("")},
+	{name: "resize: right after opening, before a prompt", servers: tigerOnly, check: resizeEarly("prompt", "vncpassword")},
+	{name: "pointer: right after opening", check: checkPointerEarly},
 	{name: "clipboard to the server, Latin-1", check: clipboardIn("naïve café, ½ °C")},
 	{name: "clipboard to the server, beyond Latin-1", check: clipboardIn("€ ✓ 日本")},
 	{name: "clipboard both ways, Latin-1", check: clipboardEcho("naïve café\nzweite Zeile")},
@@ -462,6 +465,12 @@ type paritySession struct {
 // answering a prompt with answers, which a prompt must then ask for. It
 // returns the stream and a function that closes the session.
 func (p *parity) open(conn string, opts client.Options, answers ...string) (*paritySession, func(), error) {
+	return p.openWith(conn, opts, func(*paritySession) error { return nil }, answers...)
+}
+
+// openWith is open that calls first as soon as the stream is open,
+// before the server's first frame or the prompt.
+func (p *parity) openWith(conn string, opts client.Options, first func(*paritySession) error, answers ...string) (*paritySession, func(), error) {
 	s, err := p.stream("/api/v1/connections/"+url.PathEscape(conn)+"/stream", opts)
 	if err != nil {
 		return nil, nil, err
@@ -469,6 +478,10 @@ func (p *parity) open(conn string, opts client.Options, answers ...string) (*par
 	closeSession := func() {
 		_ = p.api(http.MethodDelete, "/api/v1/sessions/"+url.PathEscape(s.cl.SessionID()), nil, nil)
 		s.close()
+	}
+	if err := first(s); err != nil {
+		closeSession()
+		return nil, nil, err
 	}
 	if err := s.ready(answers...); err != nil {
 		closeSession()
@@ -1058,11 +1071,54 @@ func checkResizeIgnored(p *parity, c parityColumn) error {
 	if err := s.send(s.cl.Resize(context.Background(), 800, 600)); err != nil {
 		return err
 	}
+	return s.keepsSize()
+}
+
+// keepsSize checks that a server that refuses a resize keeps 1024×768,
+// and that the session goes on.
+func (s *paritySession) keepsSize() error {
 	time.Sleep(2 * time.Second)
 	if got := s.cl.Size(); got != image.Pt(1024, 768) {
 		return fmt.Errorf("the screen is %v, want 1024×768", got)
 	}
 	return s.expectLine(lowercase("resize"), "resize")
+}
+
+// resizeEarly asks for another size as soon as the session is open, as
+// the web client's first fit does, before the remote is up or the
+// owner has answered a prompt. Through guacd that killed the
+// connection, so that the screen never came (guacd-bridge.md,
+// Implementation notes: Input before the remote is up). The session
+// reaches its screen, and then a size as it would after a frame:
+// TigerVNC's as asked, x11vnc's as it was.
+func resizeEarly(kind string, answers ...string) func(p *parity, c parityColumn) error {
+	return func(p *parity, c parityColumn) error {
+		s, closeSession, err := p.openWith(c.conn(kind), client.Options{}, func(s *paritySession) error {
+			return s.send(s.cl.Resize(context.Background(), 800, 600))
+		}, answers...)
+		if err != nil {
+			return err
+		}
+		defer closeSession()
+		if c.server == "x11vnc" {
+			return s.keepsSize()
+		}
+		defer s.restoreSize()
+		return s.size(0, image.Pt(800, 600))
+	}
+}
+
+// checkPointerEarly moves the pointer as soon as the session is open.
+// guacd's VNC support crashes on that as it does on an early resize.
+func checkPointerEarly(p *parity, c parityColumn) error {
+	s, closeSession, err := p.openWith(c.conn(""), client.Options{}, func(s *paritySession) error {
+		return s.send(s.cl.Pointer(context.Background(), 100, 100, 0))
+	})
+	if err != nil {
+		return err
+	}
+	defer closeSession()
+	return s.showsInput(parityTimeout)
 }
 
 // clipboardIn sends text to the server's clipboard and checks what the

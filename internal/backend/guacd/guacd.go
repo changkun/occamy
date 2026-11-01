@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"maps"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,6 +51,14 @@ const (
 	// guacamole-common-js's ArrayBufferWriter.DEFAULT_BLOB_LENGTH. Its
 	// base64 is 8064 characters, within guacd's 8192 per element.
 	blobSize = 6048
+
+	// holdLimit is how long after guacd's first frame the bridge waits
+	// for its second before it ends the hold (Backend.release) anyway.
+	// guacd sends no frame that changes nothing (libguac's
+	// display-flush.c), so a second frame may never come: when the
+	// remote's first update changes nothing, or for a user who joins a
+	// connection that is idle.
+	holdLimit = 2 * time.Second
 
 	// maxClipboard bounds the clipboard content kept from guacd, the
 	// largest message protocol v1 carries by default.
@@ -144,8 +153,10 @@ type Backend struct {
 
 	in struct {
 		sync.Mutex
-		x, y, buttons int // the pointer, as last sent
-		scroll        int // pixels scrolled toward the next press
+		x, y, buttons int    // the pointer, as last sent
+		scroll        int    // pixels scrolled toward the next press
+		up            bool   // the hold has ended (Backend.release)
+		size, mouse   []byte // the latest of each, held until up
 	}
 
 	mu          sync.Mutex
@@ -272,7 +283,8 @@ func (b *Backend) Run(ctx context.Context, sink backend.Sink) error {
 }
 
 // Input implements backend.Backend. Inputs before the handshake ends wait
-// for it.
+// for it. A Resize and a Pointer wait until the remote is up too, only
+// the latest of each, and a Wheel before then is dropped (Backend.release).
 func (b *Backend) Input(ev backend.InputEvent) error {
 	select {
 	case <-b.done:
@@ -294,7 +306,14 @@ func (b *Backend) Input(ev backend.InputEvent) error {
 	case backend.Pointer:
 		b.in.x, b.in.y, b.in.buttons = max(ev.X, 0), max(ev.Y, 0), buttonMask(ev.Buttons)
 		p = b.appendMouse(nil, b.in.buttons)
+		if !b.in.up {
+			b.in.mouse = p
+			return nil
+		}
 	case backend.Wheel:
+		if !b.in.up {
+			return nil
+		}
 		p = b.wheel(ev)
 	case backend.Text:
 		for _, r := range ev.Text {
@@ -313,6 +332,10 @@ func (b *Backend) Input(ev backend.InputEvent) error {
 			return fmt.Errorf("backend/guacd: resize to %dx%d", ev.Width, ev.Height)
 		}
 		p = appendInstruction(nil, "size", strconv.Itoa(ev.Width), strconv.Itoa(ev.Height))
+		if !b.in.up {
+			b.in.size = p
+			return nil
+		}
 	default:
 		return fmt.Errorf("%w: %T", ErrUnsupportedInput, ev)
 	}
@@ -324,6 +347,43 @@ func (b *Backend) Input(ev backend.InputEvent) error {
 		return nil
 	default:
 		return ErrQueueFull
+	}
+}
+
+// release ends the hold: what Input held goes to the writer, and later
+// sizes and pointers go as they come. The reader calls it at guacd's
+// second frame, and a timer holdLimit after the first.
+//
+// A size or a mouse that reaches guacd 1.6's VNC support before the RFB
+// connection is up crashes the connection's process:
+// guac_vnc_user_size_handler and guac_vnc_user_mouse_handler use the RFB
+// client and the render thread without a check
+// (src/protocols/vnc/input.c). guacd's terminals skip both until the
+// terminal is ready, so a size is lost there, and its RDP support keeps a
+// size for later. The hold serves them all alike.
+//
+// The first frame is not enough for VNC. guacd sends it, blank, before it
+// starts the render thread and before the server's first update, and
+// until that update it drops a size (guac_vnc_send_desktop_size) and then
+// sends the handshake's (guac_vnc_handle_messages). The second frame is
+// the first with the remote's pixels. The time limit can only send them
+// after the first frame, when the RFB client exists.
+func (b *Backend) release() {
+	b.in.Lock()
+	defer b.in.Unlock()
+	if b.in.up {
+		return
+	}
+	b.in.up = true
+	p := slices.Concat(b.in.size, b.in.mouse)
+	b.in.size, b.in.mouse = nil, nil
+	if len(p) == 0 {
+		return
+	}
+	select {
+	case b.queue <- p:
+	default:
+		b.log.Warn("backend/guacd: input queue full, dropped the held size and pointer")
 	}
 }
 
@@ -443,6 +503,7 @@ type session struct {
 	size        image.Point // as last passed to sink.Resize
 	clips       map[int]*clipStream
 	lastSync    string
+	frames      int             // syncs answered
 	logged      map[string]bool // opcodes logged as unsupported
 	drawingKeys int             // len(display.Unsupported) when last logged
 
@@ -683,7 +744,17 @@ func (s *session) sync(args []string) error {
 		return nil
 	}
 	s.lastSync = args[0]
-	return s.write(appendInstruction(nil, "sync", args[0]))
+	if err := s.write(appendInstruction(nil, "sync", args[0])); err != nil {
+		return err
+	}
+	s.frames++
+	switch s.frames {
+	case 1:
+		time.AfterFunc(holdLimit, s.b.release)
+	case 2:
+		s.b.release()
+	}
+	return nil
 }
 
 // flush copies the display's damage into the sink, after a Resize if the

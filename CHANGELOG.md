@@ -753,6 +753,17 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Fixed
 
+- VNC through guacd no longer fails with "Remote unreachable" when a
+  client resizes or moves the pointer right after opening. A `size` or
+  a `mouse` that reaches guacd 1.6's VNC process before its RFB
+  connection is up ends the connection, and the web client's first fit
+  does just that: 4 of 28 tries opened. The guacd bridge now holds the
+  latest size and pointer until guacd's second frame, or 2 s after its
+  first, for every guacd protocol, which also keeps the size that
+  guacd's terminals used to lose. The parity matrix has rows for this,
+  so that CI catches it
+  ([guacd-bridge.md](specs/008-native-architecture/guacd-bridge.md),
+  Implementation notes: input before the remote is up).
 - `internal/guacamole`'s display, which the benchmark and the guacd
   bridge draw with, decodes lossy WebP as libwebp, and so a browser,
   does. `golang.org/x/image/webp` alone read VP8's limited-range colours
