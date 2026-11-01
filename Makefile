@@ -6,7 +6,14 @@ VERSION = $(shell git describe --always --tags)
 BUILD = $(shell date +%F)
 GOPATH=$(shell go env GOPATH)
 
-IMAGE = occamy
+# IMAGE is the name that make build tags, without a tag, and IMAGE_TAG the
+# tag it gives next to the version. OCCAMY_IMAGE, the image that the demo
+# stack runs, sets both, so that a build for a stack of its own leaves
+# occamy:latest alone on a shared host. A colon in its last path element
+# starts its tag; any before that ends a registry's host and port.
+OCCAMY_IMAGE_TAG = $(word 2,$(subst :, ,$(lastword $(subst /, ,$(OCCAMY_IMAGE)))))
+IMAGE = $(or $(patsubst %:$(OCCAMY_IMAGE_TAG),%,$(OCCAMY_IMAGE)),occamy)
+IMAGE_TAG = $(or $(OCCAMY_IMAGE_TAG),latest)
 CONTAINER_ENGINE ?= podman
 # BUILD_LABEL marks the images that make build makes, so that make clean
 # removes those, once a later build has untagged them, and no other
@@ -22,7 +29,7 @@ client:
 .PHONY: client
 
 build:
-	$(CONTAINER_ENGINE) build --label $(BUILD_LABEL) -t $(IMAGE):$(VERSION) -t $(IMAGE):latest -f docker/Dockerfile .
+	$(CONTAINER_ENGINE) build --label $(BUILD_LABEL) -t $(IMAGE):$(VERSION) -t $(IMAGE):$(IMAGE_TAG) -f docker/Dockerfile .
 .PHONY: build
 
 # DEMO_DEBUG sets the variables of docker-compose.yaml that turn the demo
