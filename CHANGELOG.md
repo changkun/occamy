@@ -9,6 +9,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- The fuzz targets run in CI: `.github/workflows/fuzz.yml` gives each of
+  them 30 seconds, one at a time, every night, and keeps what a failure
+  found as an artifact.
 - A real desktop in the demo stack: `docker/demo/desktop`, XFCE with a
   terminal, file manager, text editor and Firefox as the user `occamy`,
   which `docker/occamy-v1.yaml` lists first as **Desktop (XFCE) over
@@ -1026,6 +1029,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Security
 
+- `conf.yaml` ships `mode: release`, in the image and the release
+  archives as in the repository, so a v0 file taken as it is no longer
+  serves `/debug/pprof` on its public listener. `mode: debug` still does,
+  for a local run that needs it.
 - A v1 file that names no way to sign in is refused: `occamyd` has no
   default user, so it needs `auth.users`, `auth.oidc` or
   `auth.trusted_issuers`, and `legacy_v0` does not count. The hash in

@@ -4,7 +4,7 @@
 
 ---
 address: 0.0.0.0:5636
-mode: debug # options: debug/release/test
+mode: release # options: debug/release/test
 auth:
   jwt_secret: occamy
   jwt_alg: HS256
