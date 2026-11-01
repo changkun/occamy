@@ -52,8 +52,8 @@ clocks need synchronizing.
 | Bytes | TCP payload bytes through the emulated link in each direction, which include WebSocket frame headers where there is a WebSocket: totals for bounded scenarios, per second for continuous ones. |
 | Server CPU | CPU time of the occamyd and guacd containers during the scenario, read from the container engine's stats before and after, and reported separately. The remote server's container is reported as well, but it is not Occamy's. |
 | Client CPU | The harness's own time spent decoding and applying drawing. It stands in for a client's cost; browsers decode natively, so only ratios between series are meaningful. |
-| Delivered frame rate | Complete frames received per second (`sync` in v0, `frame-end` in v1), and for scenes animated at a known rate, the share of scene frames that reached the client. |
-| Time to first frame | From dialing the WebSocket until the first complete frame. |
+| Delivered frame rate | For scenes animated at a known rate, the scene's frames that reached the client per second, counted by the scene's frame stamps, and their share of the scene's frames. The complete frames a server sent (`sync` in v0, `frame-end` in v1) are reported apart: one may carry part of a frame of the scene, or several. |
+| Time to first frame | From dialing the WebSocket until the first complete frame that shows known content of the remote: the wallpaper, or the shell's prompt. |
 | Completion time | For bounded output, from the command until its end marker is visible. |
 
 ### The latency probe
@@ -61,7 +61,9 @@ clocks need synchronizing.
 - **Desktop:** the scene program (below) fills a 32×32 swatch at a fixed
   position with a colour derived from each key it receives. The probe
   completes when the swatch's centre pixel in the harness's decoded
-  framebuffer has that colour.
+  framebuffer has that colour. Keys come 10 a second on average, each up
+  to one period of a 60 Hz screen either way from its slot, so that a
+  run's percentiles cover every phase of the screen and of the scene.
 - **Terminal:** the harness types into an idle shell, and the probe
   completes on the first frame containing drawing after the key. The
   harness ignores frames without drawing: guacd sends `sync` and `nop` on
@@ -87,9 +89,10 @@ refresh interval on top (16.7 ms at 60 Hz). Counted to photons, the
 
 Every scenario runs over v0 through occamyd, the shipped path. A second
 v0 series connects to guacd directly, to separate occamyd's proxying cost
-from guacd's own. Two v1 series run them over protocol v1: one with
-occamyd's native backends, and one through the guacd bridge for
-comparison within v1.
+from guacd's own. Four v1 series run them over protocol v1: one with
+occamyd's native backends and one through the guacd bridge for comparison
+within v1, as each ships, and each of the two with RDP's graphics
+pipeline the other way, for RDP alone.
 
 | ID | Protocol | Scenario | Primary metric |
 |----|----------|----------|----------------|
@@ -281,6 +284,13 @@ the scene, so the same control works over every protocol and series:
 The photo and the texture are generated procedurally from a fixed seed,
 so the repository carries no image files.
 
+Each frame of the scroll, the drag and the motion carries a stamp in the
+margin that no scene animates: a column of black and white cells that
+hold a 16-bit frame number and a check of it, big enough to survive
+lossy encoding (`bench/internal/probe`). The harness counts the distinct
+stamps it was shown, whole, so that one count holds in every protocol
+and however a server cuts the scene into frames of its own.
+
 ## Testing Strategy
 
 - Unit tests for the interpreter (each operation against expected pixels),
@@ -441,6 +451,161 @@ from the v1 series, which waits for [client-core](client-core.md).
 - ~~The v1 series, once client-core exists.~~ The harness is done (see
   below); the full run is a follow-up of its own.
 
+## Implementation notes: the harness for the v1 run
+
+**Status:** the harness does what the decisions of 2026-11-01 settled
+for the run, and no series has run with it: a `-quick` smoke proved that
+it works and nothing else. The owner's go-ahead starts the series.
+`docs/benchmarks.md`, What to measure again, lists the baselines that
+are out of date until then.
+
+- **What was done:**
+  - *The frame stamp.* The scene stamps each frame of the scroll, the
+    drag and the motion in the left margin, in cells big enough to
+    survive lossy encoding, with a check that a half-drawn stamp or a
+    plain area fails. The harness reads the stamp from the framebuffer
+    of any frame that damaged it, in both protocols, and counts the
+    distinct ones it was shown. In a scene, `frames` is that count, and
+    `server_frames` the frames as the server cut them, in both
+    protocols, so the table shows every scene's frame rate again.
+  - *G7 on known content.* A session looks at its first frames for what
+    its protocol shows (`shows`) until one does, and G7 ends there.
+    A desktop shows the wallpaper in the middle of the screen, and a
+    terminal the shell's prompt. The first frames' marker goes once it
+    matched, so that it costs later frames nothing, and a marker that a
+    scenario set meanwhile stays.
+  - *Key jitter.* `probeLatency` puts each key up to one period of a
+    60 Hz screen either way from its slot, with offsets drawn from the
+    run's index, so that every series of a run presses its keys at the
+    same times. G2 shares the function, so its baselines run again too.
+    T1's keys are not jittered: a terminal's frames wait for no tick.
+  - *GFX both ways.* `v1-native-nogfx` is `rdp-native` with
+    `disable_gfx`, and `v1-guacd-gfx` is `rdp-guacd` with guacd's
+    `disable-gfx` off. Each serves RDP alone. RDP's rows of a v1 series
+    carry `gfx`, and those of what the side ships `verdict`, and the
+    table notes which each row is.
+  - *Colour depth.* guacd gets `color-depth: 32` in both bench files, as
+    native RDP asks without being told.
+- **Decisions:**
+  - G7 ends on what the remote shows anyway, so the stack needs no
+    banner. A banner for the shell would have changed what T1 to T3 see,
+    and with it their baselines, by the rule of decision 3. The demo
+    shell's prompt is there already, after everything it prints at
+    login.
+  - v0's terminal arrives as pixels, so v0 reads the prompt from guacd's
+    cursor: a solid cell of guacd's grey, on guacd's grid of 10 × 19
+    pixels from (7, 7), with a blank cell before it and a drawn one
+    before that, the prompt's `$ `. The cursor stands on the first
+    column or straight after text on the screens before the prompt, and
+    a frame that clears the screen draws none. If guacd's terminal
+    changes, G7 over v0's SSH fails rather than ending early.
+  - `v1-guacd-gfx` runs on a bench-only service, `occamy-v1-gfx`, with a
+    file of its own: guacd's parameters are global to a v1 file, and a
+    benchmark is no reason for a setting per connection in the product.
+    It keeps its signing key on a tmpfs, since nothing of it outlives a
+    run, and `OCCAMY_V1_GFX_PORT` publishes it on another port for a
+    second stack on a shared host.
+  - The wallpaper's colours moved to `probe.Wallpaper`, which both the
+    scene and the harness use. It truncates as the scene's code did, and
+    a test pins a row of it, so that G1 and G6 keep their pixels.
+- **Tests:** `bench/shows_test.go`, `bench/bench_test.go`,
+  `bench/v1_test.go`, `bench/internal/probe/probe_test.go` and
+  `bench/scene/content_test.go`.
+  - The stamp's round trip, that it changes every frame of a scene,
+    that a plain area, a half-drawn stamp and a wrong check read as
+    none, and where it sits.
+  - A stamp counts once, a half-drawn one not at all, and a number that
+    comes back as a new frame, over v0 and v1 sessions and on the
+    session alone. In a scene `frames` is the stamps' count in every
+    series, and without one it stays the frames that drew.
+  - G7 over a v0 session of each protocol, played from a script of
+    Guacamole instructions, ends on the frame that shows the content,
+    not one that sizes the screen, clears it or shows a banner. Over a
+    v1 session, in process, it does not end on the blank terminal, the
+    clear screen of its resize, a banner, or a black screen. `openV1`
+    and `openV0` look for what their protocol shows.
+  - `showsPromptPixels` against a cleared screen, a cursor at the start
+    of a line, after text and on a blank line, a screen of its colour,
+    and damage elsewhere; `showsPromptCells` against a banner, the
+    prompt in colour, half of it, and a line that follows it.
+  - The first marker goes once a frame matched, and a marker that a
+    scenario set meanwhile stays.
+  - Key offsets stay within the jitter, are the same for a run, differ
+    between runs and centre on the slot, and the probe's keys fall on
+    them, which holds however late a loaded host wakes the harness.
+  - The bench files give every series its backend, GFX and colour depth,
+    `occamy-v1-gfx` serves its own file on the loopback interface, and
+    CI runs every v1 series. RDP's rows carry `gfx`, `verdict`, their
+    note and the CPU of what served them, and no other row does.
+  - What each step of the drag clears covers everywhere its window goes,
+    and neither the swatch nor the stamp.
+- **Surprises:**
+  - The first smoke read no stamps in G4: 0 of 12 frames over VNC, and
+    1 of 34 over RDP, where G3 and G5 read nearly every frame. Every
+    step of the drag exposes the window behind the one it moved, and
+    the scene answered each Expose event with a full redraw, which
+    cleared the stamp right after the frame had drawn it. No unit test
+    could see that, since it takes an X server; the frame rate read as a
+    slow server rather than as a broken count. The drag now clears only
+    right of the margin. It still clears there on every step, as it
+    always did, so that G4 sends what it sent: on RDP that may be more
+    than the moved window, and whether to stop is a question for G4's
+    measurement, not one this work settled.
+  - The smoke's G7 over RDP took about 10 s on every v1 path and about
+    3 s on v0, with the two native paths 3 ms apart, which looked like a
+    timer rather than load. It was one, and a known one: xrdp 0.10.1's
+    channel server can exit as a connection closes, and sesman starts it
+    only with the session
+    ([native-rdp-backend](native-rdp-backend.md#implementation-notes-registration)).
+    The demo images start it again from `reconnectwm.sh`, and the bench
+    desktop did not have that script. xrdp logs `Connecting to chansrv`
+    and, exactly 10 s later, `xrdp_mm_chansrv_connect: error in
+    trans_connect chan`, and the screen stays black until then. The
+    wallpaper marker is not late, since no frame arrives during the
+    wait. Sesman logs `xrdp-chansrv` finishing as the first native
+    session of an X session ends, 96 ms after xrdp's end of that session,
+    and without the script it does not come back for that X session. All
+    three of its exits on the bench stack happened so. On one fresh X
+    session, two `rdp-guacd` sessions showed the wallpaper in 2627 and 3230 ms and
+    left it running, one `rdp-native-nogfx` session took 2149 ms and it
+    exited, so GFX is not why, and `rdp-guacd` then took 11152 ms. v0
+    was only faster for running first: `occamy` and `guacd` took 3070
+    and 3302 ms before any native session, and 12345 and 12997 ms after
+    one, at a lower load. The first smoke's 11310 ms for `occamy` is
+    not this, since v0 ran first there and xrdp logged no failure until
+    native had run; that was a host load of 93 to 185. The old end of G7
+    stopped at the black frame, which is why the baselines' 2.2 s never
+    showed this: CI's run on the old end read 44.7 ms for `v1-native`.
+    The bench desktop now has the script, and
+    `TestBenchDesktopReconnectScript` keeps it there. In the same order, in `-quick` runs at a load of 21
+    to 33, `rdp-guacd` took 1317 ms, `rdp-native-nogfx` 143 ms, `rdp-guacd`
+    1134 ms, and v0's `occamy` and `guacd` 4353 and 4486 ms straight after
+    a native session. The script restarted the channel server after each
+    of the three native runs, and xrdp logged no `error in trans_connect
+    chan` in seven runs. Those numbers show that the wait is gone and
+    compare nothing else.
+    The notes on the channel server describe a connection that closes
+    just after attaching. Here a native session's end set it off 3 to 5 s
+    after attaching, every time, and none through guacd did. That is not
+    explained, and a server without the script still pays the wait. There
+    are two leads, and neither is shown to be it. Native offers only
+    `cliprdr` and `drdynvc`, and guacd also `rdpsnd`, whose setup is what
+    `xrdp-chansrv`'s log stops short of. And `Client.Close` drops the
+    connection with no Disconnect Provider Ultimatum, which native only
+    ever receives: xrdp logs an SSL `unexpected eof` after 32 of 38 native
+    connections and none of 74 through guacd.
+  - The first smoke's low v1 counts in G3, such as 2 stamps of 16 frames
+    over native VNC, were not misread stamps. Tallied over 6 s of the
+    scroll, native VNC and guacd's VNC each read 107 stamps, so that was
+    a short run on a loaded host. Of the frames that touched the stamp,
+    4 to 44% read as no whole stamp, on every path, and those that were
+    looked at showed why: scrolled text that jumps partway down, a
+    screen torn between two scene frames, or a screen still partly
+    drawn. So `frames` counts what reached the viewer whole, and the
+    stamp refuses the rest as it should. Native RDP with GFX ended far
+    fewer frames in that tally, 34 against 169 with GFX off, on a loaded
+    host: a thing for decision 1's rows to measure, not a result.
+
 ## Implementation notes: the v1 series
 
 **Status:** the harness is done; the measurement is not. On 2026-10-31
@@ -458,7 +623,10 @@ also the one that gates v1.0 (owner, 2026-10-31; see
 [Targets](#targets)). One local pass ran every scenario end to end on
 both series, under N0 and N1. It ran on a loaded shared host, so it
 checked the harness, not the numbers, and its numbers are not
-published.
+published. These notes describe the two series as they were first
+written; where they differ, such as in how a scene's frames count and
+where G7 ends, [the notes above](#implementation-notes-the-harness-for-the-v1-run)
+say what the harness does now.
 
 - **What was done:**
   - Two series, `v1-native` (SSH, VNC and RDP through occamyd's own
@@ -542,9 +710,9 @@ published.
     graphical frame, drawing or not, as the web client's `Display.run`
     acknowledges it after the next animation frame; it calls `Next` at
     once after a terminal's frame. `-ack-hz 0`, a diagnostic, also
-    acknowledges a graphical frame at once. A v1 scene's frames are the
-    server's (see Surprises): the table leaves their rate out, with a
-    note, and the JSON keeps them as `server_frames`.
+    acknowledges a graphical frame at once. A v1 frame is the server's
+    (see Surprises), so a scene's frame rate comes from its stamps, and
+    the JSON keeps the server's frames as `server_frames`.
   - *Keys.* A desktop's key carries its physical key as a USB HID usage
     on a US layout, as the web client's carries `KeyboardEvent.code`,
     and native RDP sends it as a scancode; without it, native RDP would
@@ -562,11 +730,11 @@ published.
     compositing, so the column compares v1's two series, not v1 with
     v0, and the table says so under it.
   - *G7* starts at the stream's upgrade and ends at the first frame
-    that shows the remote: for a terminal, the first after which a cell
-    holds a character or a coloured background, since the session core
-    serves an empty snapshot of a blank terminal before the backend
+    that shows known content of the remote (`shows`): since the session
+    core serves an empty snapshot of a blank terminal before the backend
     connected, and the SSH backend then resizes that blank terminal,
-    which reaches the client as a clear screen. The sign-in, a bcrypt check that a client
+    which reaches the client as a clear screen, a frame that draws does
+    not yet show the remote. The sign-in, a bcrypt check that a client
     makes once for many sessions, is recorded apart as `sign_in_ms` and
     noted on the row. v0's G7 includes its login, which v0 makes for
     every session.
@@ -663,7 +831,8 @@ published.
     not count scene frames in v1. A first version of the table noted
     only rows whose frames came faster than the scene; review found a
     native row at 59 fps of a 62.5 fps scroll that read as meeting its
-    target, so the table now leaves every v1 scene's frame rate out.
+    target, so the table left every v1 scene's frame rate out, until the
+    scene's stamps gave a count that holds in both protocols.
   - The session core serves a blank 80 × 24 terminal before the backend
     has connected: its first frame carries an empty snapshot. The first
     version of the harness counted any snapshot as drawing, so G7 over
@@ -672,24 +841,21 @@ published.
     it; a snapshot now draws only if it carries bytes. The review of
     the fix found that the SSH backend then resizes the blank terminal
     to 99 × 39, which reaches the client as a seven-byte clear screen
-    and ended G7 there just the same; a terminal now shows the remote
-    from its first cell that is not blank.
+    and ended G7 there just the same; a terminal then showed the remote
+    from its first cell that was not blank, and since the decisions of
+    2026-11-01 from its prompt.
 - **Follow-ups:**
-  - Before the full run: the scene stamps each frame's number where the
-    harness can read it, in a form that survives lossy codecs, and the
-    harness counts the distinct scene frames it was shown, for both
-    protocols. The stamp changes the scene's pixels, so the baseline's
-    G3 to G5 are measured again with it
+  - ~~The scene stamps each frame's number where the harness can read
+    it, and the harness counts the distinct scene frames it was shown,
+    for both protocols.~~ Done
+    ([the harness for the v1 run](#implementation-notes-the-harness-for-the-v1-run)).
+    The baselines of G3 to G5 are measured again with it
     ([decision 3](#decisions-of-2026-11-01)).
-  - Before the full run, also decision 3: end G7 on known content in
-    both series, a known pixel of the scene or a known line of the
-    shell, rather than on the first frame that drew, with the baseline
-    measured again. Today a desktop's G7 counts a frame that follows a
-    resize, in v0 and v1 alike, so the two agree; but a native RDP
-    backend that sizes the screen before its first bitmap would end G7
-    early. Over SSH they already differ: v1 ends at the first cell that
-    is not blank, while v0 ends at guacd's first drawing, and guacd
-    makes its terminal before the SSH session.
+  - ~~End G7 on known content in both series, rather than on the first
+    frame that drew.~~ Done
+    ([the harness for the v1 run](#implementation-notes-the-harness-for-the-v1-run)),
+    with the prompt that the shell shows anyway as its known line. G7's
+    baselines are measured again.
   - ~~Owner question: whether the v1.0 gate of 10x over guacd is a flat
     10x or each target as defined.~~ Answered on 2026-10-31: each
     target as defined, a miss of 10x only where a documented bound
@@ -699,26 +865,30 @@ published.
     RDP are in occamyd; then `docs/benchmarks.md` gets the v1 results
     and a table per scenario of the baseline, the v1 bridge, v1 native,
     the target and whether it is met.
-  - **G5 v1 p95 phase lock.** The probe's keys, every 100 ms, are
-    exactly 6 ticks of 60 Hz, so each key meets the acknowledgement's
-    tick at one phase for a whole run. One run's p95 therefore never
-    covers the spread of phases, 0 to 16.7 ms, and may understate it by
-    up to about 7.5 ms, in native's favour. The scene's 30 fps ticker is
-    locked to the keys the same way, for both series. The fix, decision
-    3: jitter each key by up to one tick either way, keeping 10 keys a
-    second on average, for every series, together with measuring the G3
-    to G5 baselines again, so that old and new numbers stay comparable.
-  - Native RDP asks for 32 bits per pixel, and the bridge leaves guacd's
-    default colour depth, so xrdp's session manager may keep an X
-    session, and a scene program, for each, and RDP scenarios run beside
-    a second scene. The bridge is set to 32 for the run
-    ([decision 4](#decisions-of-2026-11-01)); check xrdp's sessions on
-    the bench desktop afterwards.
-  - Native RDP now speaks RDP's graphics pipeline by default (its third
-    phase's second part), so `rdp-native` and `rdp-guacd` differ there,
-    since the bridge keeps `disable-gfx`. Both run both ways, and each
-    row says which it measures
-    ([decision 2](#decisions-of-2026-11-01)).
+  - ~~**`xrdp-chansrv` exits when a native RDP session ends,** which adds
+    10 s of black screen to every later RDP connection to that X session,
+    so that G7 over RDP measures the wait in rows that depend on the
+    order of the series.~~ Done for the bench: the bench desktop has the
+    demo's `reconnectwm.sh`
+    ([the harness's notes](#implementation-notes-the-harness-for-the-v1-run)).
+    Why a native session's end sets it off is still to find, since a
+    server without the script waits and loses its clipboard.
+  - ~~**G5 v1 p95 phase lock.** The probe's keys, every 100 ms, were
+    exactly 6 ticks of 60 Hz, so one run's p95 did not cover the spread
+    of phases, and could understate it by up to about 7.5 ms, in
+    native's favour.~~ Done: each key is jittered by up to one tick
+    either way, at 10 keys a second on average, for every series
+    ([the harness for the v1 run](#implementation-notes-the-harness-for-the-v1-run)),
+    and the baselines of G2 and G5, which press them, are measured
+    again.
+  - ~~Native RDP asks for 32 bits per pixel, and the bridge leaves
+    guacd's default colour depth, so xrdp may keep an X session for
+    each.~~ Done: every path asks for 32
+    ([decision 4](#decisions-of-2026-11-01)).
+  - ~~Native RDP speaks RDP's graphics pipeline by default, and the
+    bridge keeps `disable-gfx`, so `rdp-native` and `rdp-guacd` differ
+    there.~~ Done: both run both ways, and each row says which it
+    measures ([decision 2](#decisions-of-2026-11-01)).
   - The client core's default decoders (a follow-up of
     [client-core](client-core.md)): once `client` has them, the harness
     uses them instead of its own.

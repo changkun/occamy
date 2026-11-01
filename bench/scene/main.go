@@ -17,7 +17,9 @@
 //	Escape  back to idle
 //
 // Everything it draws is generated from fixed seeds, so every run shows
-// the same pixels.
+// the same pixels. The animated scenes number their frames in a stamp
+// in the margin, which the harness reads to count the frames that reached
+// it (bench/internal/probe).
 package main
 
 import (
@@ -66,6 +68,9 @@ const margin = 64
 // starts with it, so that the first probe key always changes the swatch.
 var noProbe = color.RGBA{0x40, 0x40, 0x40, 0xff}
 
+// noStamp is no frame's stamp, which has 24 bits.
+const noStamp = 1 << 24
+
 func main() {
 	log.SetFlags(0)
 	log.SetPrefix("scene: ")
@@ -100,6 +105,10 @@ type display struct {
 	swatch color.RGBA
 	frame  int // frames drawn in the current scene
 	start  time.Time
+	// stamps says whether the screen has room for the stamp, and stamped
+	// is what it shows, or noStamp if a redraw cleared it.
+	stamps  bool
+	stamped uint32
 
 	text   *textPage
 	motion *plasma
@@ -112,9 +121,11 @@ func newDisplay(x *xgb.Conn) (*display, error) {
 	d := &display{
 		x: x, screen: screen,
 		w: int(screen.WidthInPixels), h: int(screen.HeightInPixels),
-		scene:  sceneIdle,
-		swatch: noProbe,
+		scene:   sceneIdle,
+		swatch:  noProbe,
+		stamped: noStamp,
 	}
+	d.stamps = probe.StampArea.In(image.Rect(0, 0, d.w, d.h))
 	// The request length is in units of four bytes, and PutImage has a
 	// 24-byte header.
 	d.maxRows = max(1, (int(setup.MaximumRequestLength)*4-24)/(d.w*4))
@@ -266,7 +277,7 @@ func (d *display) run() {
 				xproto.SetInputFocus(d.x, xproto.InputFocusPointerRoot, d.win, xproto.TimeCurrentTime)
 			case xproto.ExposeEvent:
 				if ev.Count == 0 {
-					d.redraw()
+					d.exposed()
 				}
 			case xproto.MappingNotifyEvent:
 				if err := d.loadKeymap(); err != nil {
@@ -320,12 +331,13 @@ func (d *display) setScene(s int) time.Duration {
 
 // redraw draws the current scene in full.
 func (d *display) redraw() {
+	d.stamped = noStamp
 	switch d.scene {
 	case sceneScroll:
 		xproto.ClearArea(d.x, false, d.win, 0, 0, margin, u16(d.h))
 		d.putImage(xproto.Drawable(d.win), d.gc, d.text.page(), image.Pt(margin, 0))
 	case sceneMotion:
-		d.putImage(xproto.Drawable(d.win), d.gc, d.withSwatch(d.motion.frame(d.frame)), image.Point{})
+		d.putImage(xproto.Drawable(d.win), d.gc, d.withStamp(d.withSwatch(d.motion.frame(d.frame))), image.Point{})
 		return
 	case scenePhoto:
 		d.putImage(xproto.Drawable(d.win), d.gc, d.withSwatch(d.photo), image.Point{})
@@ -336,10 +348,73 @@ func (d *display) redraw() {
 	d.fill(probe.Swatch, d.swatch)
 }
 
+// exposed answers an Expose event. Every step of the drag exposes the
+// window behind the one it moved, so a full redraw there would clear the
+// stamp right after each frame drew it, and no client would see it: the
+// drag clears only what its window can leave behind (dragArea).
+func (d *display) exposed() {
+	if d.scene != sceneDrag {
+		d.redraw()
+		return
+	}
+	r := dragArea(d.w, d.h)
+	xproto.ClearArea(d.x, false, d.win, i16(r.Min.X), i16(r.Min.Y), u16(r.Dx()), u16(r.Dy()))
+}
+
 // withSwatch draws the swatch into img, so that a full-screen image does
 // not cover it.
 func (d *display) withSwatch(img *image.RGBA) *image.RGBA {
 	draw.Draw(img, probe.Swatch, image.NewUniform(d.swatch), image.Point{}, draw.Src)
+	return img
+}
+
+// stampColour is the colour of a cell of the stamp, one bit of it.
+func stampColour(bit uint32) color.RGBA {
+	if bit != 0 {
+		return color.RGBA{0xff, 0xff, 0xff, 0xff}
+	}
+	return color.RGBA{0x00, 0x00, 0x00, 0xff}
+}
+
+// stampChanges returns the bits, counted from the stamp's first cell,
+// that going from the stamp was to the stamp now changes: every one from
+// noStamp.
+func stampChanges(was, now uint32) []int {
+	var bits []int
+	for i := range 24 {
+		bit := uint32(1) << (23 - i)
+		if was == noStamp || was&bit != now&bit {
+			bits = append(bits, i)
+		}
+	}
+	return bits
+}
+
+// stamp numbers a frame that draws on the screen itself, repainting only
+// the cells that change, so that the stamp adds little to what the scene
+// sends. A scene that redraws the screen has withStamp instead.
+func (d *display) stamp() {
+	if !d.stamps {
+		return
+	}
+	now := probe.StampValue(uint16(d.frame)) // #nosec G115 -- a frame's number wraps, and a scene is shorter
+	for _, i := range stampChanges(d.stamped, now) {
+		d.fill(probe.StampCell(i), stampColour(now&(1<<(23-i))))
+	}
+	d.stamped = now
+}
+
+// withStamp numbers a frame that redraws the screen, drawing the stamp
+// into img.
+func (d *display) withStamp(img *image.RGBA) *image.RGBA {
+	if !d.stamps {
+		return img
+	}
+	now := probe.StampValue(uint16(d.frame)) // #nosec G115 -- as in stamp
+	for i := range 24 {
+		draw.Draw(img, probe.StampCell(i), image.NewUniform(stampColour(now&(1<<(23-i)))), image.Point{}, draw.Src)
+	}
+	d.stamped = now
 	return img
 }
 
@@ -352,12 +427,14 @@ func (d *display) animate() {
 		xproto.CopyArea(d.x, xproto.Drawable(d.win), xproto.Drawable(d.win), d.gc,
 			margin, i16(lh), margin, 0, u16(d.w-margin), u16(d.h-lh))
 		d.putImage(xproto.Drawable(d.win), d.gc, d.text.next(), image.Pt(margin, d.h-lh))
+		d.stamp()
 	case sceneDrag:
 		p := dragPosition(time.Since(d.start), d.w, d.h)
 		xproto.ConfigureWindow(d.x, d.drag, xproto.ConfigWindowX|xproto.ConfigWindowY,
 			[]uint32{uint32(int32(p.X)), uint32(int32(p.Y))}) // #nosec G115 -- X takes signed positions as 32-bit values
+		d.stamp()
 	case sceneMotion:
-		d.putImage(xproto.Drawable(d.win), d.gc, d.withSwatch(d.motion.frame(d.frame)), image.Point{})
+		d.putImage(xproto.Drawable(d.win), d.gc, d.withStamp(d.withSwatch(d.motion.frame(d.frame))), image.Point{})
 	}
 }
 

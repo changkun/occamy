@@ -44,9 +44,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   counts a v1 frame when the client core delivers it, and acknowledges a
   graphical frame on a 60 Hz screen's next tick, as the web client
   does, and a terminal's at once; the report records both, and
-  `-ack-hz 0` is a diagnostic. A terminal's G7 ends at its first cell
-  that is not blank. A desktop's key carries its HID usage, as the web
-  client's does. CI runs them quickly after the v0 smoke run, every
+  `-ack-hz 0` is a diagnostic. A desktop's key carries its HID usage, as
+  the web client's does. CI runs them quickly after the v0 smoke run, every
   run with `-failfast`, which stops at the first error, stops the bench
   job at 30 minutes, and prints the stack's logs unless the job
   succeeded. Their full results wait for the rest of the graphics
@@ -704,6 +703,23 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Changed
 
+- The benchmark harness measures what the decisions of 2026-11-01
+  settled ([docs/benchmarks.md](docs/benchmarks.md#what-to-measure-again)
+  lists the baselines to measure again; no series has run yet):
+  - the scene stamps every frame of G3 to G5, and the harness counts the
+    distinct stamps it was shown, in both protocols, so a scene's frame
+    rate compares across them; a server's own frames stay in
+    `server_frames`;
+  - G7 ends on known content in both protocols, the wallpaper or the
+    shell's prompt, not on the first frame that drew;
+  - the probe's keys are jittered by up to one period of a 60 Hz screen,
+    so that no run sits at one phase of it;
+  - `v1-native-nogfx` and `v1-guacd-gfx` run RDP the other way from what
+    each side ships, beside the verdict's `v1-native` and `v1-guacd`,
+    with `gfx` and `verdict` in the results;
+  - every path to RDP asks for 32 bits per pixel;
+  - the bench desktop has the demo's `reconnectwm.sh`, so that xrdp's
+    channel server exiting does not add 10 s to G7 over RDP.
 - The signing key's home is `/var/lib/occamy/signing.key` on a
   persistent volume, so that tokens survive a restart. The runtime image
   gives that directory to its `nonroot` user, the demo and bench stacks

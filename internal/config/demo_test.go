@@ -560,7 +560,11 @@ func TestConfigurationExampleRefused(t *testing.T) {
 func TestDemoUserStaysInTheDemo(t *testing.T) {
 	// Past the $ signs, which a shell's heredoc would escape.
 	const hash = "DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
-	allowed := map[string]bool{"docker/occamy-v1.yaml": true, "docker/bench/occamy-v1.yaml": true}
+	allowed := map[string]bool{
+		"docker/occamy-v1.yaml":           true,
+		"docker/bench/occamy-v1.yaml":     true,
+		"docker/bench/occamy-v1-gfx.yaml": true,
+	}
 	found := map[string]bool{}
 	err := filepath.WalkDir("../..", func(path string, d fs.DirEntry, err error) error {
 		if err != nil {

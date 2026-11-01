@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"image"
+	"math/rand/v2"
 	"time"
 
 	"changkun.de/x/occamy/bench/internal/probe"
@@ -29,6 +30,16 @@ const (
 	dragFPS   = 60
 	motionFPS = 30
 )
+
+// wallpaper reports a frame whose screen shows the wallpaper, which every
+// scenario leaves showing when it ends, in the middle of the screen, where
+// nothing else of the idle scene draws: not a frame that sizes the screen
+// before the desktop's first image.
+var wallpaper = marker{pixels: func(img *image.RGBA, _ image.Rectangle) bool {
+	b := img.Bounds()
+	y := b.Dy() / 2
+	return probe.Near(img.RGBAAt(b.Dx()/2, y), probe.Wallpaper(y, b.Dy()))
+}}
 
 // probeMarker reports frames that show the colour key k paints the
 // swatch.
@@ -104,13 +115,36 @@ func runIdle(ctx context.Context, r *runner, s *session, res *result) error {
 	return nil
 }
 
-// probeLatency presses n probe keys, ten per second, and returns the time
-// from each key until the swatch shows its colour.
-func probeLatency(ctx context.Context, s *session, n int) ([]time.Duration, error) {
+// The probe's keys: ten a second on average, each up to keyJitter either
+// way from its slot. Keys 100 ms apart are 6 periods of a 60 Hz screen and
+// 3 of the 30 fps scene, so without the jitter every key of a run would
+// meet both at the phase the run started at, and one run's percentiles
+// would not cover the spread of phases.
+const (
+	keyPeriod = 100 * time.Millisecond
+	keyJitter = time.Second / 60
+)
+
+// keyOffsets returns the offsets of n probe keys from their slots, in
+// (-keyJitter, keyJitter). They depend only on the run, so that every
+// series of a run presses its keys at the same times.
+func keyOffsets(run, n int) []time.Duration {
+	rng := rand.New(rand.NewPCG(uint64(run), 0x6f63616d79)) // #nosec G115,G404 -- a run's index, for a fair spread of phases
+	offsets := make([]time.Duration, n)
+	for i := range offsets {
+		offsets[i] = time.Duration(rng.Int64N(int64(2*keyJitter)-1)) - keyJitter + 1
+	}
+	return offsets
+}
+
+// probeLatency presses n probe keys, ten per second, jittered by run, and
+// returns the time from each key until the swatch shows its colour.
+func probeLatency(ctx context.Context, s *session, run, n int) ([]time.Duration, error) {
 	var lat []time.Duration
-	next := time.Now()
-	for i := range n {
-		next = next.Add(100 * time.Millisecond)
+	// The first slot is far enough off for a key to come before it.
+	start := time.Now().Add(keyJitter)
+	for i, offset := range keyOffsets(run, n) {
+		time.Sleep(time.Until(start.Add(time.Duration(i)*keyPeriod + offset)))
 		k := 'a' + rune(i%26)
 		s.setMarker(probeMarker(k))
 		t0 := time.Now()
@@ -124,7 +158,6 @@ func probeLatency(ctx context.Context, s *session, n int) ([]time.Duration, erro
 			return nil, fmt.Errorf("probe key %d: %w", i, err)
 		}
 		lat = append(lat, f.at.Sub(t0))
-		time.Sleep(time.Until(next))
 	}
 	return lat, nil
 }
@@ -134,7 +167,7 @@ func runProbe(ctx context.Context, r *runner, s *session, res *result) error {
 	if err := ready(ctx, s); err != nil {
 		return err
 	}
-	lat, err := probeLatency(ctx, s, r.samples(200))
+	lat, err := probeLatency(ctx, s, r.runIndex, r.samples(200))
 	if err != nil {
 		return err
 	}
@@ -171,7 +204,7 @@ func runMotion(ctx context.Context, r *runner, s *session, res *result) error {
 		return err
 	}
 	m := r.measure(s)
-	lat, err := probeLatency(ctx, s, r.samples(200))
+	lat, err := probeLatency(ctx, s, r.runIndex, r.samples(200))
 	if err != nil {
 		return err
 	}

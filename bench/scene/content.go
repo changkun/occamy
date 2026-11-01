@@ -16,14 +16,15 @@ import (
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/basicfont"
 	"golang.org/x/image/math/fixed"
+
+	"changkun.de/x/occamy/bench/internal/probe"
 )
 
 // newWallpaper is a vertical gradient, as plain as a desktop background.
 func newWallpaper(w, h int) *image.RGBA {
 	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	top, bottom := color.RGBA{0x1f, 0x3b, 0x5a, 0xff}, color.RGBA{0x3c, 0x6e, 0x8f, 0xff}
 	for y := range h {
-		c := lerp(top, bottom, float64(y)/float64(max(1, h-1)))
+		c := probe.Wallpaper(y, h)
 		for x := range w {
 			img.SetRGBA(x, y, c)
 		}
@@ -222,4 +223,10 @@ func dragPosition(t time.Duration, w, h int) image.Point {
 	x := margin + int(float64(w-margin-400)*(1-sweep))
 	y := (h-300)/2 + int(0.8*float64(h-300)/2*math.Sin(2*math.Pi*s/3))
 	return image.Pt(x, y)
+}
+
+// dragArea is the part of a w×h screen that the dragged window can leave
+// behind it: right of the margin, which holds the swatch and the stamp.
+func dragArea(w, h int) image.Rectangle {
+	return image.Rect(margin, 0, w, h)
 }

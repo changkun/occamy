@@ -9,8 +9,9 @@
 #
 #   make bench
 #
-# GUACD_PORT publishes guacd on another port, for a second stack on a
-# shared host, as OCCAMY_PORT and OCCAMY_V1_PORT do for occamyd.
+# GUACD_PORT and OCCAMY_V1_GFX_PORT publish guacd and occamy-v1-gfx on
+# other ports, for a second stack on a shared host, as OCCAMY_PORT and
+# OCCAMY_V1_PORT do for occamyd.
 
 services:
   guacd:
@@ -32,6 +33,28 @@ services:
       OCCAMY_BENCH_RDP_PASSWORD: occamy
     depends_on:
       ssh:
+        condition: service_healthy
+      rdp:
+        condition: service_healthy
+
+  occamy-v1-gfx:
+    # occamy-v1 with guacd's RDP graphics pipeline on, for v1-guacd-gfx
+    # (bench/occamy-v1-gfx.yaml). A service of its own, since guacd's
+    # parameters are global to a v1 file. On the loopback interface only:
+    # the demo user's password is public.
+    image: ${OCCAMY_IMAGE:-occamy:latest}
+    command: ["/occamy/occamyd", "-conf", "/occamy/v1.yaml"]
+    ports:
+      - "127.0.0.1:${OCCAMY_V1_GFX_PORT:-5640}:5637"
+    volumes:
+      - ./bench/occamy-v1-gfx.yaml:/occamy/v1.yaml:ro
+    tmpfs:
+      # The signing key, which the nonroot user creates at start.
+      - /run/occamy:mode=1777
+    environment:
+      OCCAMY_BENCH_RDP_PASSWORD: occamy
+    depends_on:
+      guacd:
         condition: service_healthy
       rdp:
         condition: service_healthy
