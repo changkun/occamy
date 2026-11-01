@@ -164,7 +164,9 @@ ports in this guide's URLs, its `curl` commands and the
 
 Open each connection from **Connections**. The session's bar shows the
 connection's name and your role, `owner`. **End session** closes it
-and returns to the list.
+and returns to the list. The session is gone by then, so the next one
+opens at once, even when you have as many as `occamyd` allows, 10 by
+default.
 
 | Protocol | Connection | What you should see |
 |----------|------------|---------------------|
@@ -383,15 +385,20 @@ When the page loses its connection while the session runs on, it says
 seconds to come back to the same session, with the remote's state as
 it was. A newer connection of the owner takes the session over from
 an older one. The older page then says "Opened elsewhere" and offers
-**Join again** to take it back.
+**Join again** to take it back. If the session has ended by the time
+the owner comes back, and it ended less than a minute before, the page
+says how, as its viewers saw it: for example "The owner ended the
+session.", "The owner left and did not come back in time." or "Remote
+unreachable". Later than that, it says "Access refused".
 
 **Reload.** The page keeps its sign-in in memory only, so reloading the
 owner's page asks for a sign-in again, with the notice "Sign in again
 to return to <the connection's name>." and a **Go to the connections
 instead** button. Sign in within the 60 seconds, and the page rejoins
-the same session. Signing out forgets the session, so the next sign-in
-goes to the connections. A viewer who joined through a share link
-loses the share on a reload and needs the link again.
+the same session, or says how it ended, as above. Signing out forgets
+the session, so the next sign-in goes to the connections. A viewer who
+joined through a share link loses the share on a reload and needs the
+link again.
 
 To watch an owner leave and come back without breaking a network, run
 the end-to-end test that does it against the running stack:
