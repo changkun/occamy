@@ -179,7 +179,11 @@ sends that user something. Until then the user still counts, for up to
   used to meet most, `Xerror: major_opcode: 18 … error_code: 3`, a
   clipboard request from a window that had gone
   (`TestX11vncClipboardRequestorGone` makes one, through the stack's
-  compose, as `make e2e` runs it).
+  compose, as `make e2e` runs it). That test fails if x11vnc died: the
+  session ended, another process serves port 5901, or the log tells of
+  an X error x11vnc did not trap or of its watchdog. If only the
+  clipboard went missing, twice, with x11vnc alive, it skips, and logs
+  `the clipboard went missing with x11vnc alive` with what it missed.
 - `make soak` runs `TestSoak` against the demo stack's `occamy-v1`,
   which `make run OCCAMY_DEBUG=1` started with its debug listener:
   `OCCAMY_SOAK_SESSIONS` sessions, 8 by default, to TigerVNC through the

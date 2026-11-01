@@ -711,10 +711,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   sync. The error came after a refused resize once, but has nothing to
   do with it, nor with either VNC backend. `make e2e` makes such a
   request (`TestX11vncClipboardRequestorGone`) and checks that x11vnc
-  and the session on it live through it. Against x11vnc processes just
-  started, it failed in five of six runs without the variable and passed
-  in five of five with it; it cannot fail every time, as the error's
-  escape is a race. The tests that reach into the stack run compose with
+  and the session on it live through it; it fails if x11vnc died, and
+  skips, saying so, if only the clipboard went missing, twice, with
+  x11vnc alive. Against x11vnc processes just started, it failed in five
+  of six runs without the variable and passed in five of five with it;
+  it cannot fail every time, as the error's escape is a race. The tests
+  that reach into the stack run compose with
   `PODMAN_COMPOSE_WARNING_LOGS=false`, so that podman compose's banner
   no longer comes first in what they read. The parity row `resize:
   ignored without ExtendedDesktopSize` is now `resize: the server keeps
