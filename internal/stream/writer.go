@@ -665,6 +665,11 @@ func (w *writer) small(ctx context.Context) error {
 			return err
 		}
 	}
+	if p.ClipboardStatus != nil {
+		if err := w.write(ctx, protocol.ClipboardStatus{Answering: *p.ClipboardStatus}); err != nil {
+			return err
+		}
+	}
 	if p.Title != nil {
 		if err := w.write(ctx, protocol.Title{Title: *p.Title}); err != nil {
 			return err

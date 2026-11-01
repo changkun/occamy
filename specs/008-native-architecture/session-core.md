@@ -81,6 +81,7 @@ type Sink interface {
     CursorMove(p image.Point)
     TermData(p []byte)                 // terminal
     Clipboard(mime string, data []byte)
+    ClipboardStatus(answering bool)    // whether the remote's clipboard answers
     Bell()
     Title(title string)
     Prompt(ctx context.Context, p Prompt) (PromptReply, error)
@@ -308,9 +309,10 @@ arise, rather than inheriting those fixes.
     goroutine, so ending a session cannot deadlock on a backend blocked
     in the sink.
   - Each viewer's small state is a `Pending` of latest values (resize,
-    cursor, clipboard, title, bells, joins, leaves, prompts, input, end),
-    taken whole by its writer, so a slow writer skips stale values
-    instead of queueing them.
+    cursor, clipboard and its status, title, bells, joins, leaves,
+    prompts, input, end), taken whole by its writer, so a slow writer
+    skips stale values instead of queueing them. A viewer that joins
+    while the remote's clipboard does not answer starts with that.
   - An input records the framebuffer's clock read before the backend
     sees the input, so every tile it changes is above that clock even
     when a backend draws before `Input` returns. An input the backend
