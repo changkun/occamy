@@ -771,6 +771,22 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Fixed
 
+- A session through guacd that shows nothing now fails, rather than
+  staying at "Connecting…". guacd's process for a connection hung once
+  in 128 connections on a very busy host, and only the session's idle
+  timer ended that, half an hour after the last input and with the
+  wrong reason. The guacd bridge now gives guacd 90 s from accepting
+  the connection, or from the owner's last answer to a prompt, for the
+  first frame that viewers can see. The page then says "Could not
+  connect" and why, in the reason of the `backend-failed` close, which
+  until now said only `failed`. `occamyd` logs an error that says the
+  process may still be running and that only restarting guacd clears
+  it: nothing outside the `guacd` container can stop it. A black screen
+  is not covered: guacd's first frame on VNC is sized and blank, so a
+  server that finishes ServerInit and then never sends an update leaves
+  the page black until the idle timer
+  ([guacd-bridge.md](specs/008-native-architecture/guacd-bridge.md),
+  Implementation notes: a bounded connect).
 - Remote desktops are no longer tiny on a HiDPI display. The web client
   asked a remote for the window's size in device pixels, which TigerVNC
   and xrdp honour and X11 programs do not scale to, so at a device
