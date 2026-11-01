@@ -2021,9 +2021,10 @@ RDP's guacd path, RDP no longer needs guacd at all.
       final one). Each block of a RemoteFX or RemoteFX Progressive
       message, and each rectangle and quantization table of their
       regions and tile sets, a progressive quality three tables, is
-      charged `blockCost`, 8 units; each W2S2's stream, which may be
-      of no blocks, and each GFX PDU or bitmap that the client skips,
-      `pduCost`, 24 units. Their message pays the sum once, at its
+      charged `blockCost`, 8 units; each GFX PDU, applied or skipped,
+      `pduCost`, 32 units (24, on what it skipped and each W2S2's
+      stream alone, until the process's budget; follow-ups). Their
+      message pays the sum once, at its
       end, and counts then what it applied and skipped, a tally a
       name, and the RemoteFX tiles it decoded, so that a flood of
       headers takes neither the clock nor `c.mu` for each. Before, the
@@ -2083,9 +2084,9 @@ RDP's guacd path, RDP no longer needs guacd at all.
       0.79 (progressive), 18,744 tiles a second, which
       `TestDecodeBudget` checks against the clock, RLE runs to 0.74 to
       0.78 (the medians, 1.38 to 1.46 ns a unit), and headers to 0.2
-      to 0.7 (above). Every session has
-      its own rate, so n hostile sessions take up to n cores; a budget
-      for the whole process must come before the release (Follow-ups).
+      to 0.7 (above). Every session has its own rate, and
+      `limits.decode_cores` bounds n hostile sessions together
+      (Follow-ups).
     - **The bucket** (`paceBurst`) holds two desktops of tiles, 14
       units a pixel, and a pointer update. A session's first screen at
       1920 × 1080, a surface created and mapped and every tile of it
@@ -2292,11 +2293,11 @@ RDP's guacd path, RDP no longer needs guacd at all.
   its reason), `TestRFXPace` (each charge, an empty RemoteFX rectangle
   charged as a skipped PDU; a progressive stream's and its blocks',
   skipped ones too, a RemoteFX message's blocks, and the rectangles and
-  quantization tables of both, in the units measured, 8 and 24, rather
+  quantization tables of both, in the units measured, 8 and 32, rather
   than `blockCost` and `pduCost` by name, so that lowering either fails
   it; an upgrade of no first pass and one in the other transform each
-  charged `rfxTileCost`; a context's delete charging nothing, and one
-  on a surface without RemoteFX Progressive charged as a skipped PDU),
+  charged `rfxTileCost`; a context's delete charged a PDU, on a surface
+  without RemoteFX Progressive as well),
   `TestGFXSkipCharged` (each PDU or bitmap that the
   client skips charged `pduCost` and counted once, and 100 of one name
   in a message tallied under it once),
@@ -2541,8 +2542,8 @@ RDP's guacd path, RDP no longer needs guacd at all.
     full-motion RemoteFX at 1920 × 1080 never waits and a flood is
     held to about a core of the benchmarks' host. Phase 2's ceiling, 2.3
     full-screen frames a second at 1920 × 1080, was not kept. The rate
-    remains a session's, so n hostile sessions take up to n cores; a
-    budget for the whole process is a release item (Follow-ups).
+    remains a session's; `limits.decode_cores` bounds sessions together
+    (Follow-ups).
   - The tile limit is a high-water mark of the session's desktops,
     not the current desktop's, so that a desktop that shrinks keeps
     the tiles made before; the bound is that of the largest desktop
@@ -2614,35 +2615,138 @@ RDP's guacd path, RDP no longer needs guacd at all.
     `internal/backend/vnc/vencrypt.go:298` and
     `internal/backend/kubernetes/cert.go:141` have no session cache
     either. No server has been seen refusing them.
-  - **Before the release** (a gate in [008](../008-native-architecture.md)'s
-    beta.1 list): a decoding budget for the whole process as well as
-    the session's. Each session may take about a core, so one user's
-    10 sessions (`limits.sessions_per_user`) to hostile servers, such
-    as ad-hoc targets they chose, take about 10 cores;
-    `docs/configuration.md`'s limits say so.
-  - **PDUs applied that do little**, with the process's budget, before
-    the release (found in the third round; the final review measured
-    it again). The headers' charge covers what the client skips; what
-    it applies is charged by what it draws, so a PDU that draws little
-    costs more than its charge. A session's one reader holds such a
-    flood to a core, as it does any. In stored messages of 4,096 PDUs:
+  - **The process's decoding budget** (a gate in
+    [008](../008-native-architecture.md)'s beta.1 list; done on
+    2026-11-01). Each session may take about a core, so one user's 10
+    sessions (`limits.sessions_per_user`) to hostile servers, such as
+    ad-hoc targets they chose, would take about 10 cores.
+    `rdp.Budget` (`internal/rdp/budget.go`) is that many cores times
+    `decodeRate`, in the same units as a session's own bucket, which
+    every session of a process shares on top of it.
+    - **The size** is `limits.decode_cores`, half of `GOMAXPROCS` as
+      `occamyd` starts by default, at least 1, as
+      `stream.DefaultEncodeWorkers` takes half: decoding is what a
+      hostile server drives, and the other half is what encoding for
+      viewers and the API need. It is a key because every bound that
+      the `limits` section documents is one, and because the default
+      is wrong both ways for some hosts: a gateway for many honest
+      sessions needs more than half, and a host that does other work
+      less. A session alone never waits for it, even at one core: a
+      `Budget` of the session's own rate lets it through at that rate.
+    - **The design** is a token bucket like the session's, shared, with
+      no queue, no slots and no goroutine. A semaphore of decoding
+      slots would bound cores directly, whatever a unit costs, but a
+      reader holds a slot through `Output` and `c.chio.mu`, so a stalled
+      session would stall others, and holding a slot in a wait needs a
+      way to give it back. With a bucket, nothing is held across a
+      wait, whose end depends on the clock alone, so a session cannot
+      hold another up, a wait ends with its context as a session's
+      always did (`c.wait`), and what a session that ended owed is paid
+      by time. A session over the budget waits, as for its own rate,
+      with the server's updates behind it, so nothing is dropped.
+    - **Slices.** A charge is not taken from the bucket as it stands:
+      `pace` may be charged 2^41 units by one PDU, a copy of 65,535
+      points, whose wait would stop every session for over an hour.
+      Nor are small charges taken one by one, each behind the others'
+      debt: a tile would wait a turn of the sessions, and an honest
+      session would get a tile a turn. A client takes `budgetSlice`,
+      512 Ki units, about a millisecond of a core, and spends it on
+      its charges, so that a large charge waits for its slices one by
+      one and small ones share one (`Client.spend`).
+    - **Fair shares.** As a client takes no slice while it waits for
+      one, the slices go round. That alone gave an honest session 77%
+      of its share on 4 cores in `TestBudgetShare`: it leaves the
+      queue to decode what it got, so a turn takes it the turn and its
+      decoding, while hostile sessions that spend nothing go straight
+      back. So the time since a client's last slice was paid for
+      counts towards its wait for the next. Of n clients that want
+      more than the budget has, each gets at least a nth of it, or
+      `decodeRate` if that is less, within 2% in the tests; a client
+      that wants less gets all it wants and, after its first slice,
+      does not wait; and what clients leave goes to those that want
+      it. The wait for a slice is about n milliseconds over the
+      budget's cores, twice that as clients start. Every unit a client
+      takes still comes off the bucket, so over any time clients take
+      at most the rate, a second of burst and a slice each.
+    - **What it does not guarantee.**
+      - Shares are sessions', not users'. A user's 10 sessions have 10
+        of them, so on 8 cores' default of 4 an eleventh session gets
+        4/11 of a core if the 10 want all they can get: less than
+        full-screen motion at 1920 × 1080 and 30 frames a second, which
+        takes 0.8. The client does not know users, and a session is
+        what `limits.sessions_per_user` already counts.
+      - It bounds the rate of what is charged, on the units' prices of
+        the benchmarks' host. A host that costs more a unit gets more
+        out of its cores' worth, and a client may spend what it waited
+        for at once, so sessions that all saved up for large PDUs may
+        decode them together, for as long as those take.
+      - **What the client reads and ignores** is not charged: a fast-path
+        update of an unknown kind or that the client ignores, of 3
+        bytes, a flow control PDU, an empty bitmap update, or a chunk
+        on a channel the client does not use. A server that sends those
+        keeps a session's one reader busy, which holds it to a core
+        but outside the budget, so ten sessions may still take ten
+        cores that way for as long as the servers send. Closing that
+        takes charges on `handleFastPath`, `handleShareControl`, the
+        bitmap rectangles and `Run`'s frames, priced by measurement like
+        the others, which this change had no go-ahead to run
+        (`BenchmarkSkipped` covers none of them). It needs doing
+        before a release that counts on the bound against a server
+        that means it.
+    - `internal/rdp/budget_test.go` runs in `testing/synctest`'s virtual
+      time, so that the timings hold at any load, with real goroutines
+      and waits and under the race detector.
+      `TestBudgetBound` (10 sessions on 2 cores take the 2 cores'
+      worth, none more), `TestBudgetShare` (an honest session keeps
+      its share within 2%, against 10 sessions that charge a little, a
+      tile, a slice, two slices or minutes at a time, on 1 and 4 cores),
+      `TestBudgetUnderShare` (one that wants half of its share gets
+      all of it, with one wait of a turn at the most), `TestBudgetAlone`
+      and `TestBudgetKeepsDecodeRate` (a session alone is held to
+      `decodeRate`, neither less nor more), `TestBudgetContext` (a wait
+      ends with its context at once, and the debt left is paid by time),
+      `TestBudgetRun` (4 sessions through `Run` draw every rectangle,
+      ending on the last, in the budget's time; `Run` stops when its
+      context ends in a wait), `TestBudgetFirstScreen`,
+      `TestBudgetSlices`, `TestBudgetTake`, `TestDecodeCores`,
+      `TestConnectBudget`, and the wiring in `TestRDPBudget` and the
+      backend's `TestBudget`. All 30 mutants were caught, 29 by what
+      they broke and one, the bucket starting empty, only by its state,
+      since its first take fills it: the rate, burst, clamp of a clock
+      that lies behind, slice and wait of `take`; the default's half and
+      floor; `pace`'s order; `spend`'s refill, its wait's error, the
+      time since the last slice, a first slice free, the credit dropped,
+      one slice for a charge of any size; `Connect`'s default; no
+      budget at all; `pduCost` removed, 24, or on what is skipped alone;
+      and the backend's, server's and config's wiring.
+  - **PDUs applied that do little** (done with the process's budget; found in
+    the third round; the final review measured it again). The headers'
+    charge covered what the client skips; what it applied was charged
+    by what it drew, so a PDU that drew little cost more than its
+    charge. Every GFX PDU now owes `pduCost`, 32 units, once, charged
+    as `gfxPDU` starts, whether it applies or skips it; the skips had 24
+    each, a W2S2's stream 24, and what they counted under stayed apart.
+    That is the review's first remedy. Its second, the bitmaps' counts
+    and charges in the message's tally, would have let a message decode
+    bitmaps ahead of what they owe, which `pace` before the decoding
+    exists to stop. In stored messages of 4,096 PDUs, the last columns
+    from the costs below:
 
-    | Applied PDU | Cost, final review | Cost, `BenchmarkSkipped` after it | Charge |
-    |---|---|---|---|
-    | Capability confirm of a known version | 11 ns | 11.0 ns | 0 |
-    | Codec context's delete | 13 ns | 13.9 ns | 0 |
-    | Uncompressed bitmap of a pixel | 56 ns | 53.1 ns | 1 unit |
-    | Solid fill of a pixel | 61 ns | 58.3 ns | 1 unit |
-    | RemoteFX wire-to-surface 1 of no blocks | 40 to 44 ns, `c.mu` taken for each | 30.7 ns, its count in the message's tally | 0 |
+    | Applied PDU | Cost, final review | Cost, `BenchmarkSkipped` after it | Charge before | Charge | Core, at the final review's cost |
+    |---|---|---|---|---|---|
+    | Capability confirm of a known version | 11 ns | 11.0 ns | 0 | 32 units | 0.18 |
+    | Codec context's delete | 13 ns | 13.9 ns | 0 | 32 units | 0.22 |
+    | Uncompressed bitmap of a pixel | 56 ns | 53.1 ns | 1 unit | 33 units | 0.91 |
+    | Solid fill of a pixel | 61 ns | 58.3 ns | 1 unit | 33 units | 0.99 |
+    | RemoteFX wire-to-surface 1 of no blocks | 40 to 44 ns, `c.mu` taken for each | 30.7 ns, its count in the message's tally | 0 | 32 units | 0.74 |
 
-    A flat `pduCost` on every PDU would not close it: what a bitmap or
-    fill costs is mostly its own `pace` and `c.count`
-    (`gfxWireToSurface1`), which a charge does not remove. The review's
-    remedy is either a charge of about 32 units an applied PDU,
-    measured again, or the bitmaps' counts and charges added to the
-    message's tally, as the skips' are. Either moves the exact charges
-    of `TestGFXPace` and `TestGFXExposeCharged`. It waits for the
-    process's decoding budget, a gate of beta.1 (above).
+    A flat `pduCost` of 24 did not close it, since what a bitmap or fill
+    costs is mostly its own `pace` and `c.count`
+    (`gfxWireToSurface1`), which a charge does not remove; 32 does.
+    **Not measured again:** the review asked for that, and the costs
+    above are from before this change, which adds a subtraction and a
+    comparison to `pace`. `BenchmarkSkipped` reports it once a run of it
+    has the go-ahead.
   - `rdp-native` in the benchmark's `v1-native` series now speaks GFX
     and `rdp-guacd` keeps `disable-gfx`; the comparison says which
     each measures ([benchmark](benchmark.md)).

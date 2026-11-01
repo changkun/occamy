@@ -152,9 +152,11 @@ The owner delegated items 6 to 9 on 2026-11-01.
    matching depths keep xrdp from a second X session
    ([benchmark](benchmark.md), decision 4).
 8. **A decoding budget for the whole process gates `v1.0.0-beta.1`,** as
-   [008](../008-native-architecture.md)'s release gate says. The GFX PDUs
-   that do little work and are charged nothing today are dealt with
-   then.
+   [008](../008-native-architecture.md)'s release gate says. Done on
+   2026-11-01: `limits.decode_cores`, half of `GOMAXPROCS` by default,
+   and a charge of 32 units on every GFX PDU, so that those applied that
+   do little are charged too
+   ([native-rdp-backend](native-rdp-backend.md), follow-ups).
 9. **A paste with no channel server tells the user.** The notice is
    native RDP's to add, and comes with that work
    ([native-rdp-backend](native-rdp-backend.md), follow-ups).
@@ -315,9 +317,10 @@ best effort, has none. The live run was repeated after the fixes.
       are held to 0.6 to 0.8 of a core. Headers that the client parses
       and does little with are charged 8 units each, a block of a
       RemoteFX or progressive message and a rectangle or quantization
-      table of their regions and tile sets, and 24 each, a W2S2's
-      stream and a GFX PDU that the client skips, paid and counted once
-      a message, which holds a flood of them, in stored messages, to
+      table of their regions and tile sets, and 32 each, a GFX PDU,
+      applied or skipped, paid and counted once a message. With 24
+      each for a W2S2's stream and a PDU skipped, as the PDUs' charge
+      was then, that held a flood of them, in stored messages, to
       0.2 to 0.7 of a core (`BenchmarkSkipped`, load 10.3, medians):
       progressive regions outside a frame 0.30, blocks of an unknown
       type 0.27 and frame begins 0.22; progressive regions' rectangles
@@ -326,10 +329,13 @@ best effort, has none. The live run was repeated after the fixes.
       0.50 and quantization tables 0.27; W2S2 PDUs of no blocks 0.47;
       unknown GFX PDUs 0.17, or 0.25 after one of each other name that
       skips are counted under; frames begun again 0.19; and empty
-      bitmaps 0.65, the most. PDUs applied that draw little wait for
-      the process's budget. The rate is
-      a session's, so a user with ten sessions to hostile servers can
-      take ten cores; a budget for the whole process is a release item
+      bitmaps 0.65, the most. A charge of 32 takes the last five, which
+      are PDUs alone, to three quarters of that, and holds PDUs applied
+      that draw little to at most about a core; neither was measured
+      again ([native-rdp-backend](native-rdp-backend.md), follow-ups).
+      The rate is a session's: `limits.decode_cores` bounds sessions
+      together, so that a user with ten sessions to hostile servers
+      takes no more than that many cores
       ([native-rdp-backend](native-rdp-backend.md)).
     - The bucket holds two desktops of tiles and a pointer update, so a
       session's first screen, in any codec, never waits. Full-screen

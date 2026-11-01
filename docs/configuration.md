@@ -788,19 +788,37 @@ do not reach a target that a user chose.
 | `limits.sessions_per_user` | `10` | Sessions one user owns at once. One more is refused with `429 limit_exceeded`, or on a connection's stream with `close` `forbidden` |
 | `limits.viewers_per_session` | `50` | Viewers a session takes besides its owner, who can always join. One more gets `close` `viewer-limit` |
 | `limits.shares_per_session` | `100` | Shares of a session that have not expired. One more is refused with `429 limit_exceeded` |
+| `limits.decode_cores` | half of `GOMAXPROCS`, at least `1` | Cores of decoding that all of `occamyd`'s native RDP sessions share. A session over its share waits, with its server's updates queued behind it, and nothing is dropped |
 
 A user is a subject of an issuer, as for owning sessions: a trusted
 issuer's users count apart from `occamyd`'s own.
 
-No limit yet bounds the CPU that decoding takes across sessions. A
-native RDP session may take about one core decoding what its server
-sends, whatever that is, so one user with the default 10 sessions to
-hostile servers, such as ad-hoc targets they chose, can take about 10
-cores, and `limits.sessions` sessions that many. A budget for the whole
-process is to come before the release
-([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)).
-Until then, lower `limits.sessions_per_user` where users are not
-trusted with that much, or keep `allow_adhoc_targets` off.
+A native RDP session may take about one core decoding what its server
+sends, whatever that is, so one user's 10 sessions to hostile servers,
+such as ad-hoc targets they chose, would take about 10 cores, and
+`limits.sessions` sessions that many. `limits.decode_cores` holds them
+together to about that many cores, measured on the benchmarks' host,
+and by default leaves half of them to encoding for viewers and to the
+rest of `occamyd`. Raise it where many sessions show full-screen motion,
+which at 1920 × 1080 and 30 frames a second takes about 0.8 of a core
+each, and lower it on a host that does other work.
+
+Sessions that want more than it has share it evenly. Of n such
+sessions, each gets at least an nth of it, or a session's core if that
+is less. A session that wants less than its share gets all it wants,
+without waiting for the others once it has started, and what it leaves
+goes to those that want it. The share is a session's, not a user's, so
+a user's 10 sessions have 10 shares: lower `limits.sessions_per_user`
+where users are not trusted with that much, or keep
+`allow_adhoc_targets` off.
+
+The limit counts what sessions decode and draw, and what they hand to
+viewers, not what they read and ignore: a server that floods a session
+with what the client does not ask for, such as a fast-path update of
+an unknown kind, can keep that session's one reader busy outside it,
+for as long as it sends them. It bounds the rate of decoding, so
+sessions may still decode at once what they each waited for. Sessions
+on `backend: guacd` decode in guacd, outside it too.
 
 ### Streams: `streams`
 

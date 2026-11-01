@@ -99,11 +99,14 @@ Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
   no debug endpoints on the public listener.
 - Decoding is bounded for the process, not only per session: a native
   RDP session may take about a core, so one user's
-  `limits.sessions_per_user` sessions to hostile servers take that many
-  cores ([native-rdp-backend](008-native-architecture/native-rdp-backend.md),
-  phase 3's follow-ups). The owner confirmed this gate on 2026-11-01;
-  the GFX PDUs that do little work and are charged nothing today are
-  dealt with then.
+  `limits.sessions_per_user` sessions to hostile servers would take that
+  many cores ([native-rdp-backend](008-native-architecture/native-rdp-backend.md),
+  phase 3's follow-ups). The owner confirmed this gate on 2026-11-01.
+  **Done** on 2026-11-01: `limits.decode_cores`, half of `GOMAXPROCS` by
+  default, shared evenly by the sessions that want more than it has, and
+  every GFX PDU charged, including those applied that do little. What
+  the client reads and ignores is not charged, and stays bounded by a
+  session's one reader (native-rdp-backend's follow-ups).
 - `docs/protocol.md` and the API reference are complete.
 
 ## Path to pure Go

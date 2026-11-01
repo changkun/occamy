@@ -970,10 +970,10 @@ func (c *Client) refill() {
 // that it delays none of them by more than a slice each. What it leaves
 // of the last slice goes to the next charges, so that small charges
 // take no more turns than a large one of their sum. The time since the
-// last slice was paid for counts towards the wait for the next, as the
-// client spent it decoding or had nothing to decode: a turn of the
-// clients then takes it no longer than it takes the others, who leave
-// the queue for no time at all.
+// last slice was paid for counts towards the wait for the next: the
+// client spent it decoding, or had nothing to decode, and a client that
+// spends no time on what it takes gets no more turns than one that
+// decodes it.
 func (c *Client) spend(n int) error {
 	if c.cfg.Budget == nil {
 		return nil

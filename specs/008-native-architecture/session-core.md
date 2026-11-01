@@ -251,8 +251,8 @@ follow the recommendations above.
    and `IdleTimeout`, but occamyd sets neither, so the 60 s and 30 min
    defaults always apply. What the configuration has instead is
    `streams.viewer_timeout` and the `limits` keys: `sessions`,
-   `sessions_per_user`, `viewers_per_session` and
-   `shares_per_session`.)
+   `sessions_per_user`, `viewers_per_session`, `shares_per_session` and,
+   since 2026-11-01, `decode_cores`.)
 6. **Recording is out of scope for beta.** The `Sink` interface leaves
    room for a tap later.
 7. **IPC for out-of-process backends waits** until
