@@ -164,6 +164,7 @@ func TestClipboardWaitBounds(t *testing.T) {
 		c     *Client
 		clock *fakeClock
 		out   *screen
+		conn  *recordConn
 	}
 	// pass has the channel writer take a look, as the timer has it do.
 	pass := func(t *testing.T, f fixture) {
@@ -231,6 +232,27 @@ func TestClipboardWaitBounds(t *testing.T) {
 			f.clock.advance(wait)
 			pass(t, f)
 		}},
+		{name: "text as the wait ends goes with it", want: []bool{false}, run: func(t *testing.T, f fixture) {
+			paste(t, f, "text")
+			f.clock.advance(wait)
+			before := f.conn.buf.Len()
+			paste(t, f, "newer") // its own look at what is due ends the wait
+			if f.conn.buf.Len() != before {
+				t.Error("a Format List went out with the text dropped")
+			}
+			pass(t, f)
+		}},
+		{name: "no text after a loss still clears the server's", want: []bool{false}, run: func(t *testing.T, f fixture) {
+			paste(t, f, "text")
+			f.clock.advance(wait)
+			pass(t, f)
+			before := f.conn.buf.Len()
+			paste(t, f, "")
+			if f.conn.buf.Len() == before {
+				t.Error("no Format List went out for no text")
+			}
+			pass(t, f)
+		}},
 		{name: "text told of is told of again", want: []bool{false, false}, run: func(t *testing.T, f fixture) {
 			paste(t, f, "text")
 			f.clock.advance(wait)
@@ -257,6 +279,8 @@ func TestClipboardWaitBounds(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c, clock := testClock(64, 64)
+			conn := &recordConn{}
+			c.t = &transport{conn: conn}
 			c.cfg.Clipboard = bothWays.Clipboard
 			c.cfg.ClipboardWait = wait
 			c.chio.kick = make(chan struct{}, 1)
@@ -267,7 +291,7 @@ func TestClipboardWaitBounds(t *testing.T) {
 					c.clip.timer.Stop()
 				}
 			})
-			f := fixture{c, clock, &screen{}}
+			f := fixture{c, clock, &screen{}, conn}
 			tc.run(t, f)
 			if got := f.out.clipboardStatus(); !slices.Equal(got, tc.want) {
 				t.Errorf("clipboard status %v, want %v", got, tc.want)
