@@ -15,7 +15,6 @@ interface Sent {
   method: string
   headers: Record<string, string>
   body: string | undefined
-  redirect: RequestRedirect | undefined
 }
 
 const json = (status: number, body: unknown): Response =>
@@ -31,7 +30,6 @@ function scripted(answer: (s: Sent) => Response | Promise<Response>, now = 1_000
         method: init?.method ?? 'GET',
         headers: { ...(init?.headers as Record<string, string> | undefined) },
         body: init?.body as string | undefined,
-        redirect: init?.redirect,
       }
       sent.push(s)
       return answer(s)
@@ -53,7 +51,6 @@ describe('signIn', () => {
         method: 'POST',
         headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
         body: '{"username":"alice","password":"correct horse"}',
-        redirect: undefined,
       },
     ])
     // Ten seconds early, so that no request races the expiry.
@@ -89,15 +86,20 @@ describe('signIn', () => {
 })
 
 describe('OIDC', () => {
-  it('finds OIDC by the login route’s 400 without a challenge, and none by its 404', async () => {
-    for (const [status, want] of [
-      [400, true],
-      [404, false],
-      [500, false],
+  it('asks occamyd whether it has OIDC, and takes anything but yes for no', async () => {
+    for (const [status, body, want] of [
+      [200, { oidc: true }, true],
+      [200, { oidc: false }, false],
+      [200, { oidc: 'yes' }, false],
+      [200, {}, false],
+      [200, [], false],
+      [404, { error: { code: 'not_found', message: 'x' } }, false],
+      [500, { error: { code: 'internal', message: 'x' } }, false],
     ] as const) {
-      const { api, sent } = scripted(() => json(status, { error: { code: 'x', message: 'x' } }))
+      const { api, sent } = scripted(() => json(status, body))
       expect(await api.oidcAvailable()).toBe(want)
-      expect(sent[0]).toMatchObject({ path: '/api/v1/auth/oidc/login', method: 'GET', redirect: 'manual' })
+      expect(sent).toHaveLength(1)
+      expect(sent[0]).toMatchObject({ path: '/api/v1/auth/methods', method: 'GET' })
     }
     const { api } = scripted(() => Promise.reject(new TypeError('offline')))
     expect(await api.oidcAvailable()).toBe(false)
@@ -120,7 +122,6 @@ describe('the routes that take an access token', () => {
       method: 'GET',
       headers: { Accept: 'application/json', Authorization: 'Bearer eyJ.access.token' },
       body: undefined,
-      redirect: undefined,
     })
   })
 

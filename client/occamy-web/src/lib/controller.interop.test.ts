@@ -222,8 +222,9 @@ describe.skipIf(server === '')('the shell’s controller with occamyd’s stream
       canvas.dispatchEvent(event('compositionend', { data: 'title another' }))
       await until(c, (s) => s.title === 'another')
 
-      // The owner resizes the remote; asking again for the same size
-      // sends nothing.
+      // The owner resizes the remote; asking for the hello's size, or
+      // again for the same size, sends nothing.
+      c.requestResize(320, 200)
       c.requestResize(160, 96)
       await until(c, (s) => s.size.width === 160 && s.size.height === 96)
       await waitFor(shows)

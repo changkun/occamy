@@ -14,7 +14,8 @@
 // for a reload until it ends, occamyd refuses the view's stream to it or
 // the user leaves it, though not while occamyd cannot be reached; and
 // the clipboard panel takes text sent for the remote's, and says when
-// the core refused to send it.
+// the core refused to send it; and a window that stays the size the
+// hello said asks the remote for nothing.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
@@ -70,6 +71,8 @@ class Welcomed {
   closed = false
   /** The clipboard texts the client sent. */
   readonly clipboards: string[] = []
+  /** The sizes the client asked for. */
+  readonly resizes: [number, number][] = []
   /** The longest clipboard text the core sends, as for occamyd's maximum message size. */
   clipboardLimit = Infinity
   private readonly events: SessionEvent[] = []
@@ -108,7 +111,8 @@ class Welcomed {
     return Promise.resolve()
   }
 
-  resize(): number {
+  resize(width: number, height: number): number {
+    this.resizes.push([width, height])
     return 1
   }
 
@@ -260,6 +264,19 @@ const notFound = (): Promise<Response> => Promise.resolve(new Response(JSON.stri
 const failed = (): Promise<Response> => Promise.resolve(new Response(JSON.stringify({ error: { code: 'internal', message: 'internal' } }), { status: 500 }))
 const hung = (signal: AbortSignal): Promise<Response> => new Promise((_, reject) => signal.addEventListener('abort', () => reject(signal.reason as Error)))
 const text = (): string => container.textContent ?? ''
+
+// until waits for what a real timer brings about. A fixed wait need not
+// be long enough, nor a state that lasts as long as a timer of 20 ms
+// still there at the next line, on a machine at a load of hundreds.
+async function until(done: () => boolean, ms = 30_000): Promise<void> {
+  const deadline = Date.now() + ms
+  while (!done()) {
+    if (Date.now() > deadline) {
+      throw new Error(`not so within ${ms} ms, with the view saying: ${text()}`)
+    }
+    await settle(1)
+  }
+}
 const button = (label: string): HTMLButtonElement | undefined => [...container.querySelectorAll('button')].find((b) => b.textContent === label)
 const end = (seq: number): Props['action'] => ({ seq, action: { kind: 'end' } })
 
@@ -291,15 +308,17 @@ describe('SessionView', () => {
   })
 
   it('tells the owner when occamyd did not answer in time, and tries again', async () => {
-    const r = await render({}, hung, 20)
-    await settle(60)
-    expect(text()).toContain('Not ended for everyone')
+    let answer: Answer = hung
+    const r = await render({}, (signal) => answer(signal), 20)
+    await until(() => text().includes('Not ended for everyone'))
     expect(text()).toContain('occamyd did not answer in time. It runs on, with its viewers.')
     expect(text()).not.toContain('Ending the session for everyone…')
+    // The next End takes no notice of the timeout, so it still waits
+    // however late this looks.
+    answer = () => new Promise(() => undefined)
     act(() => button('Try again')?.click())
-    await settle()
+    await until(() => text().includes('Ending the session for everyone…'))
     expect(r.deletes).toEqual(['DELETE /api/v1/sessions/mZ3k', 'DELETE /api/v1/sessions/mZ3k'])
-    expect(text()).toContain('Ending the session for everyone…')
   })
 
   it('ends alice’s session once alice signs in, after bob, signed in through single sign-on, was told it is not his', async () => {
@@ -365,8 +384,7 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
 
   it('takes the stream’s 4002 for the session ended, rather than what End said before', async () => {
     const r = await render({ token: accessToken('alice'), owner: null }, hung, 20)
-    await settle(60)
-    expect(text()).toContain('Not ended for everyone')
+    await until(() => text().includes('Not ended for everyone'))
     // The End that did not answer in time ended the session after all.
     act(() => Welcomed.last?.end(CloseCode.SessionClosed))
     await settle()
@@ -401,9 +419,8 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
     })
     // A user who did not open the session ends it as occamyd decides.
     await r.rerender({ token: accessToken('bob'), action: end(1) })
-    await settle(20)
+    await until(() => r.left === 1)
     expect(r.deletes).toHaveLength(1)
-    expect(r.left).toBe(1)
     expect(text()).not.toContain('Not ended for everyone')
   })
 
@@ -423,10 +440,9 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
       return new Promise((resolve) => setTimeout(() => resolve(notFound()), 10))
     })
     await r.rerender({ token: accessToken('bob'), action: end(1) })
-    await settle(20)
-    expect(r.left).toBe(0)
     // With no stream open, the session may have ended too.
-    expect(text()).toContain('You are signed in as bob, and occamyd did not end this session: it has ended already, or alice opened it.')
+    await until(() => text().includes('You are signed in as bob, and occamyd did not end this session: it has ended already, or alice opened it.'))
+    expect(r.left).toBe(0)
   })
 
   it('takes no second End while one waits for occamyd', async () => {
@@ -443,6 +459,33 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
     expect(r.deletes).toEqual(['DELETE /api/v1/sessions/mZ3k'])
     expect(Welcomed.last?.closed).toBe(false)
     expect(text()).toContain('Ending the session for everyone…')
+  })
+})
+
+describe('The window of a stream welcomed as the owner’s', () => {
+  beforeEach(welcomed)
+
+  it('asks for nothing while it stays the size the hello said, before the first frame, and for a window that changes', async () => {
+    let observed: (entries: { contentRect: { width: number; height: number } }[]) => void = () => undefined
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: typeof observed) {
+          observed = callback
+        }
+        observe(): void {}
+        disconnect(): void {}
+      },
+    )
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 800, height: 600 } as DOMRect)
+    await render({ token: accessToken('demo'), action: null }, ended)
+    // Past the delay after which the view sizes the remote to the window.
+    await settle(350)
+    expect(Welcomed.last?.resizes).toEqual([])
+
+    act(() => observed([{ contentRect: { width: 900, height: 700 } }]))
+    await until(() => (Welcomed.last?.resizes.length ?? 0) > 0)
+    expect(Welcomed.last?.resizes).toEqual([[900, 700]])
   })
 })
 

@@ -67,12 +67,16 @@ function encoded(sub: string, idp: string): string {
 
 const json = (v: unknown, status = 200): Promise<Response> => Promise.resolve(new Response(JSON.stringify(v), { status, headers: { 'Content-Type': 'application/json' } }))
 
-// occamyd answers the shell as occamyd does with OIDC off: a password
-// signs anyone in, and only owner, whose session mZ3k is, ends it.
-function occamyd(owner: string, log: string[]): Api {
+// occamyd answers the shell as occamyd does, with OIDC off unless oidc
+// says so: a password signs anyone in, and only owner, whose session
+// mZ3k is, ends it.
+function occamyd(owner: string, log: string[], oidc = false): Api {
   return new Api(
     (path, init) => {
       log.push(`${init?.method} ${path}`)
+      if (path === '/api/v1/auth/methods' && init?.method === 'GET') {
+        return json({ oidc })
+      }
       if (path === '/api/v1/auth/token' && init?.method === 'POST') {
         const { username } = JSON.parse(init.body as string) as { username: string }
         return json({ access_token: encoded(username, 'local'), token_type: 'Bearer', expires_in: 600 })
@@ -166,6 +170,13 @@ describe('App', () => {
     expect(log.filter((l) => l.startsWith('DELETE'))).toEqual(['DELETE /api/v1/sessions/mZ3k', 'DELETE /api/v1/sessions/mZ3k'])
     expect(log).toContain('GET /api/v1/connections')
     expect(container.querySelector('dialog')).toBeNull()
+  })
+
+  it.each([true, false])('offers single sign-on only if occamyd says so (%s), touching no OIDC route to find out', async (oidc) => {
+    const log: string[] = []
+    await show(occamyd('demo', log, oidc), { kind: 'signed-out' }, tab(new Map()))
+    expect(new Set(log)).toEqual(new Set(['GET /api/v1/auth/methods']))
+    expect(button('Sign in with single sign-on') !== undefined).toBe(oidc)
   })
 
   it('joins the owner’s session again after a reload, once the user has signed in', async () => {
