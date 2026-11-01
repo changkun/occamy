@@ -43,7 +43,8 @@ auth:
       allowed_groups: [ops]
   # Static users sign in with a password, stored as a bcrypt hash of cost
   # 10 or more. htpasswd -nbBC 12 "" 'the password' | cut -d: -f2 makes
-  # one.
+  # one. This one is the test's: make your own. occamyd has no default
+  # user, and refuses a file with no users, oidc or trusted issuers.
   users:
     - name: alice
       password_hash: "$2a$12$R6bvkO3lC3JV/OaHnySvquk.wobMPB3XleIdoBgEwlhjbcfaZi0km"
