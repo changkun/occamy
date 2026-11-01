@@ -567,7 +567,10 @@ also the one that gates v1.0 (owner, 2026-10-31; see
 [Targets](#targets)). One local pass ran every scenario end to end on
 both series, under N0 and N1. It ran on a loaded shared host, so it
 checked the harness, not the numbers, and its numbers are not
-published.
+published. These notes describe the two series as they were first
+written; where they differ, such as in how a scene's frames count and
+where G7 ends, [the notes above](#implementation-notes-the-harness-for-the-v1-run)
+say what the harness does now.
 
 - **What was done:**
   - Two series, `v1-native` (SSH, VNC and RDP through occamyd's own
@@ -651,9 +654,9 @@ published.
     graphical frame, drawing or not, as the web client's `Display.run`
     acknowledges it after the next animation frame; it calls `Next` at
     once after a terminal's frame. `-ack-hz 0`, a diagnostic, also
-    acknowledges a graphical frame at once. A v1 scene's frames are the
-    server's (see Surprises): the table leaves their rate out, with a
-    note, and the JSON keeps them as `server_frames`.
+    acknowledges a graphical frame at once. A v1 frame is the server's
+    (see Surprises), so a scene's frame rate comes from its stamps, and
+    the JSON keeps the server's frames as `server_frames`.
   - *Keys.* A desktop's key carries its physical key as a USB HID usage
     on a US layout, as the web client's carries `KeyboardEvent.code`,
     and native RDP sends it as a scancode; without it, native RDP would
@@ -671,11 +674,11 @@ published.
     compositing, so the column compares v1's two series, not v1 with
     v0, and the table says so under it.
   - *G7* starts at the stream's upgrade and ends at the first frame
-    that shows the remote: for a terminal, the first after which a cell
-    holds a character or a coloured background, since the session core
-    serves an empty snapshot of a blank terminal before the backend
+    that shows known content of the remote (`shows`): since the session
+    core serves an empty snapshot of a blank terminal before the backend
     connected, and the SSH backend then resizes that blank terminal,
-    which reaches the client as a clear screen. The sign-in, a bcrypt check that a client
+    which reaches the client as a clear screen, a frame that draws does
+    not yet show the remote. The sign-in, a bcrypt check that a client
     makes once for many sessions, is recorded apart as `sign_in_ms` and
     noted on the row. v0's G7 includes its login, which v0 makes for
     every session.
@@ -772,7 +775,8 @@ published.
     not count scene frames in v1. A first version of the table noted
     only rows whose frames came faster than the scene; review found a
     native row at 59 fps of a 62.5 fps scroll that read as meeting its
-    target, so the table now leaves every v1 scene's frame rate out.
+    target, so the table left every v1 scene's frame rate out, until the
+    scene's stamps gave a count that holds in both protocols.
   - The session core serves a blank 80 × 24 terminal before the backend
     has connected: its first frame carries an empty snapshot. The first
     version of the harness counted any snapshot as drawing, so G7 over
@@ -781,24 +785,21 @@ published.
     it; a snapshot now draws only if it carries bytes. The review of
     the fix found that the SSH backend then resizes the blank terminal
     to 99 × 39, which reaches the client as a seven-byte clear screen
-    and ended G7 there just the same; a terminal now shows the remote
-    from its first cell that is not blank.
+    and ended G7 there just the same; a terminal then showed the remote
+    from its first cell that was not blank, and since the decisions of
+    2026-11-01 from its prompt.
 - **Follow-ups:**
-  - Before the full run: the scene stamps each frame's number where the
-    harness can read it, in a form that survives lossy codecs, and the
-    harness counts the distinct scene frames it was shown, for both
-    protocols. The stamp changes the scene's pixels, so the baseline's
-    G3 to G5 are measured again with it
+  - ~~The scene stamps each frame's number where the harness can read
+    it, and the harness counts the distinct scene frames it was shown,
+    for both protocols.~~ Done
+    ([the harness for the v1 run](#implementation-notes-the-harness-for-the-v1-run)).
+    The baselines of G3 to G5 are measured again with it
     ([decision 3](#decisions-of-2026-11-01)).
-  - Before the full run, also decision 3: end G7 on known content in
-    both series, a known pixel of the scene or a known line of the
-    shell, rather than on the first frame that drew, with the baseline
-    measured again. Today a desktop's G7 counts a frame that follows a
-    resize, in v0 and v1 alike, so the two agree; but a native RDP
-    backend that sizes the screen before its first bitmap would end G7
-    early. Over SSH they already differ: v1 ends at the first cell that
-    is not blank, while v0 ends at guacd's first drawing, and guacd
-    makes its terminal before the SSH session.
+  - ~~End G7 on known content in both series, rather than on the first
+    frame that drew.~~ Done
+    ([the harness for the v1 run](#implementation-notes-the-harness-for-the-v1-run)),
+    with the prompt that the shell shows anyway as its known line. G7's
+    baselines are measured again.
   - ~~Owner question: whether the v1.0 gate of 10x over guacd is a flat
     10x or each target as defined.~~ Answered on 2026-10-31: each
     target as defined, a miss of 10x only where a documented bound
@@ -808,26 +809,22 @@ published.
     RDP are in occamyd; then `docs/benchmarks.md` gets the v1 results
     and a table per scenario of the baseline, the v1 bridge, v1 native,
     the target and whether it is met.
-  - **G5 v1 p95 phase lock.** The probe's keys, every 100 ms, are
-    exactly 6 ticks of 60 Hz, so each key meets the acknowledgement's
-    tick at one phase for a whole run. One run's p95 therefore never
-    covers the spread of phases, 0 to 16.7 ms, and may understate it by
-    up to about 7.5 ms, in native's favour. The scene's 30 fps ticker is
-    locked to the keys the same way, for both series. The fix, decision
-    3: jitter each key by up to one tick either way, keeping 10 keys a
-    second on average, for every series, together with measuring the G3
-    to G5 baselines again, so that old and new numbers stay comparable.
-  - Native RDP asks for 32 bits per pixel, and the bridge leaves guacd's
-    default colour depth, so xrdp's session manager may keep an X
-    session, and a scene program, for each, and RDP scenarios run beside
-    a second scene. The bridge is set to 32 for the run
-    ([decision 4](#decisions-of-2026-11-01)); check xrdp's sessions on
-    the bench desktop afterwards.
-  - Native RDP now speaks RDP's graphics pipeline by default (its third
-    phase's second part), so `rdp-native` and `rdp-guacd` differ there,
-    since the bridge keeps `disable-gfx`. Both run both ways, and each
-    row says which it measures
-    ([decision 2](#decisions-of-2026-11-01)).
+  - ~~**G5 v1 p95 phase lock.** The probe's keys, every 100 ms, were
+    exactly 6 ticks of 60 Hz, so one run's p95 did not cover the spread
+    of phases, and could understate it by up to about 7.5 ms, in
+    native's favour.~~ Done: each key is jittered by up to one tick
+    either way, at 10 keys a second on average, for every series
+    ([the harness for the v1 run](#implementation-notes-the-harness-for-the-v1-run)),
+    and the baselines of G2 and G5, which press them, are measured
+    again.
+  - ~~Native RDP asks for 32 bits per pixel, and the bridge leaves
+    guacd's default colour depth, so xrdp may keep an X session for
+    each.~~ Done: every path asks for 32
+    ([decision 4](#decisions-of-2026-11-01)).
+  - ~~Native RDP speaks RDP's graphics pipeline by default, and the
+    bridge keeps `disable-gfx`, so `rdp-native` and `rdp-guacd` differ
+    there.~~ Done: both run both ways, and each row says which it
+    measures ([decision 2](#decisions-of-2026-11-01)).
   - The client core's default decoders (a follow-up of
     [client-core](client-core.md)): once `client` has them, the harness
     uses them instead of its own.
