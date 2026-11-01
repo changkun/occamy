@@ -372,15 +372,23 @@ func composeE2E(t *testing.T) composeCmd {
 	return c
 }
 
-// run runs the compose command with args and returns what it printed on
-// its standard output. podman compose prints a notice of its compose
-// provider on standard error, which a failure reports with the rest.
+// run runs the compose command with args and returns what it printed
+// to its standard output: for exec, what the command printed to its
+// own, and for logs, the containers' logs. Compose prints its own notes
+// to its standard error: podman compose, for one, a banner before it
+// runs its provider, unless PODMAN_COMPOSE_WARNING_LOGS is false. As
+// compose logs may print a container's standard error there too, the
+// demo images must log what the tests count to their standard output,
+// as vnc/start.sh does for x11vnc and its watchdog, and rdp's
+// reconnectwm.sh for its restarts of xrdp-chansrv. A failure reports
+// both streams.
 func (c composeCmd) run(t *testing.T, args ...string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, c[0], append(slices.Clone(c[1:]), args...)...)
+	cmd.Env = append(os.Environ(), "PODMAN_COMPOSE_WARNING_LOGS=false")
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("%s %s: %v\n%s%s", strings.Join(c, " "), strings.Join(args, " "), err, stdout.Bytes(), stderr.Bytes())
