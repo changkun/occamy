@@ -86,8 +86,9 @@ for that stack alone.
 
 A v1 file names how people sign in: static users in `auth.users`,
 `auth.oidc`, or `auth.trusted_issuers`. With none of them, nobody could
-sign in, so `occamyd` refuses to start. `legacy_v0` does not count,
-since its login signs a target for anyone and nobody in to API v1.
+sign in to API v1, so `occamyd` refuses to start. `legacy_v0` does not
+count, since its login signs a target for anyone and nobody in to API
+v1, so a file that serves only v0 clients has to name one of them too.
 
 To add a static user, make the hash of the password they chose and put
 it in the file:
@@ -113,14 +114,32 @@ podman run -d --name occamy -p 5636:5636 \
   occamy:latest /occamy/occamyd -conf /occamy/v1.yaml
 ```
 
-A directory mounted from the host keeps its own owner, so give it to
-that user: `chown 65532 <the directory>`. A named volume that another
-image or a root container used first keeps its owner too, and
-`occamyd` then stops at start and says so:
+Nothing refuses a container without that volume. The image's directory
+is writable, so `occamyd` starts quietly and keeps the key in the
+container's own layer, which a restart keeps and a recreate loses. A
+new image or `--force-recreate` then replaces the key, everyone signs
+in again, and the only sign is the warning that a first start gives,
+`created a new signing key`. On a server that has run before, that
+warning means the volume is missing.
 
-```sh
-podman run --rm -v occamy-data:/data busybox chown -R 65532 /data
-```
+If `occamyd` may not use the key or its directory, it stops at start and
+says so. The directory, or whatever is mounted on it, has to belong to
+the user that the error names, and how to give it depends on what it
+is. The error's path is the one `occamyd` sees, which in a container is
+not a path on the host:
+
+| What holds the key | The step, with the error's uid: 65532 in the image |
+|---|---|
+| A directory, with no container | `chown -R <uid> <the directory>`, as root |
+| A directory mounted from the host, on Docker or rootful podman | `chown -R 65532 <the directory on the host>`, as root |
+| A directory mounted from the host, on rootless podman | `podman unshare chown -R 65532 <the directory on the host>`. A plain `chown` is wrong here: uid 65532 of a rootless container is another number on the host, such as 165531 |
+| A named volume, on Docker | `docker run --rm -v <the volume>:/data busybox chown -R 65532 /data` |
+| A named volume, on podman | `podman run --rm -v <the volume>:/data busybox chown -R 65532 /data` |
+
+A named volume keeps its owner once it has files in it, such as those
+of another image or a root container that used it first. An empty one
+that a root container used first keeps that owner on Docker, while on
+podman it takes the owner of the next container to use it.
 
 The demo stack keeps its key at the same path on the volume
 `occamy-v1-data`, which `make stop` keeps and `make clean` removes.

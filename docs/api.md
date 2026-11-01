@@ -238,11 +238,12 @@ Lifetimes:
 | The owner grace: how long a session waits for its owner's stream, after `POST /api/v1/sessions` or after the owner leaves | 60 seconds, then the session ends with `owner-left` (4003) |
 | A session without input | 30 minutes, then the session ends with `idle` (4004); no key sets it |
 
-`occamyd` allows 30 seconds of clock skew on every token it checks, its
-own as well as a trusted issuer's, so a token still works for up to 30
-seconds after its `exp`. A client should not rely on that time: a token
-that has passed its `exp` is due for renewal, and `401 token_expired`
-follows within 30 seconds.
+`occamyd` allows 30 seconds of clock skew on the tokens of API v1, its
+own access and stream tokens as well as a trusted issuer's, so such a
+token still works for up to 30 seconds after its `exp`. A client should
+not rely on that time: a token that has passed its `exp` is due for
+renewal, and `401 token_expired` follows within 30 seconds. v0 tokens
+and the OIDC ID tokens that `occamyd` receives get no such allowance.
 
 What one user, one session or `occamyd` may hold, set in
 [`limits`](configuration.md#limits-limits):

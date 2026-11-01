@@ -189,10 +189,12 @@ not start it: the owner's go-ahead still does that.
    harness counts the distinct ones it was shown, in both protocols.
    G7 ends on known content in both series, SSH included. The probe's
    keys are jittered, so that no run sits at one phase of a 60 Hz tick.
-   The baselines of G3 to G5 are measured again with these changes.
+   The baselines that these change are measured again with them: G2 for
+   the jitter, G3 and G4 for the stamp, G5 for both, and G7 for its end.
    The rule behind that: anything that changes what the remote shows,
    or how a scenario measures it, measures that baseline again.
-   `docs/benchmarks.md` states the full list.
+   `docs/benchmarks.md`, What to measure again, states the full list
+   and why, along with what is not measured again.
 4. **Colour depth: 32 bits per pixel on both sides.** That is native's
    default and what rdp-strategy's table measured, and mismatched
    depths may make xrdp keep a second X session, with a second scene

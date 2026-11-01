@@ -176,13 +176,17 @@ single-node beta.
       that owner. The demo and bench stacks keep it at the same path;
       nothing called for keeping `/run` for them, and a shared path has
       `make e2e` run a real install's.
-    - Nothing shipped has a default user or a default password. The
+    - `occamyd` has no default user or default password for API v1. The
       operator supplies `auth.users`, whose hashes the `htpasswd` recipe
       in `docs/configuration.md` makes, or OIDC or a trusted issuer. A
       v1 file with none of these fails validation, so `occamyd` refuses
       to start: `legacy_v0` does not count, since its login signs nobody
       in to API v1. `demo` and its password stay in the demo stack's
       file, with a copy in the bench stack's, which is not shipped.
+    - This does not reach the v0 file. `conf.yaml`, which the image and
+      the release archives carry, has no users, and still sets
+      `jwt_secret: occamy` and `mode: debug`. That is left for a
+      decision of its own.
 
 ## Task Breakdown
 

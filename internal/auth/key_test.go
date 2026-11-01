@@ -78,7 +78,10 @@ func TestLoadOrCreateKeyConcurrent(t *testing.T) {
 
 // A key that occamyd cannot reach stops it from starting, so the error
 // is all the operator sees: it names the key, the directory and the user
-// and says what to do, for each way that a directory can be wrong.
+// and says where the step is, for each way that a directory can be wrong.
+// It names no command, since occamyd cannot tell which would work: a
+// chown fails again on rootless podman, and a podman command is no use on
+// Docker. Nor can it call the path the host's, as it may be a container's.
 func TestLoadOrCreateKeyAccess(t *testing.T) {
 	if runtime.GOOS == "windows" || os.Getuid() == 0 {
 		t.Skip("needs a user that file modes can stop")
@@ -87,8 +90,6 @@ func TestLoadOrCreateKeyAccess(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		prepare func(t *testing.T, dir string) string // returns the key's path
-		is      error
-		want    func(dir string) []string
 	}{
 		{
 			name: "a directory it cannot write",
@@ -98,10 +99,6 @@ func TestLoadOrCreateKeyAccess(t *testing.T) {
 				}
 				t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 				return filepath.Join(dir, "signing.key")
-			},
-			is: fs.ErrPermission,
-			want: func(dir string) []string {
-				return []string{"uid " + uid, "may not use " + dir, "chown -R " + uid + " " + dir, "chown -R " + uid + " /data", "docs/configuration.md"}
 			},
 		},
 		{
@@ -113,20 +110,6 @@ func TestLoadOrCreateKeyAccess(t *testing.T) {
 				}
 				return path
 			},
-			is: fs.ErrPermission,
-			want: func(dir string) []string {
-				return []string{"uid " + uid, "may not use " + dir, "chown -R " + uid + " " + dir}
-			},
-		},
-		{
-			name: "a directory that does not exist",
-			prepare: func(t *testing.T, dir string) string {
-				return filepath.Join(dir, "missing", "signing.key")
-			},
-			is: fs.ErrNotExist,
-			want: func(dir string) []string {
-				return []string{filepath.Join(dir, "missing") + " does not exist", "writable by uid " + uid, "auth.signing_key_file"}
-			},
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
@@ -136,18 +119,32 @@ func TestLoadOrCreateKeyAccess(t *testing.T) {
 			if err == nil || created {
 				t.Fatalf("created %v, err %v", created, err)
 			}
-			if !errors.Is(err, tt.is) {
-				t.Errorf("err %v does not wrap %v", err, tt.is)
+			if !errors.Is(err, fs.ErrPermission) {
+				t.Errorf("err %v does not wrap %v", err, fs.ErrPermission)
 			}
-			if !strings.Contains(err.Error(), path) {
-				t.Errorf("err %q does not name the key", err)
-			}
-			for _, want := range tt.want(dir) {
+			for _, want := range []string{path, "uid " + uid, "may not use " + dir, "must belong to uid " + uid, "docs/configuration.md"} {
 				if !strings.Contains(err.Error(), want) {
 					t.Errorf("err %q does not say %q", err, want)
 				}
 			}
+			for _, no := range []string{"chown", "podman run", "docker run", "on the host"} {
+				if strings.Contains(err.Error(), no) {
+					t.Errorf("err %q says %q", err, no)
+				}
+			}
 		})
+	}
+}
+
+// An error that is not about permissions has no step to give, and keeps
+// what it wraps.
+func TestKeyAccessErrorOther(t *testing.T) {
+	err := KeyAccessError("/k/signing.key", fs.ErrNotExist)
+	if !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("err %v does not wrap %v", err, fs.ErrNotExist)
+	}
+	if strings.Contains(err.Error(), "must belong") {
+		t.Errorf("err %q gives the step for a wrong owner", err)
 	}
 }
 

@@ -27,7 +27,7 @@ func LoadOrCreateKey(path string) (key ed25519.PrivateKey, created bool, err err
 		return key, err == nil, err
 	}
 	if err != nil {
-		return nil, false, keyAccessError(path, err)
+		return nil, false, KeyAccessError(path, err)
 	}
 	key, err = parsePrivateKey(raw)
 	if err != nil {
@@ -50,7 +50,7 @@ func createKey(path string) (ed25519.PrivateKey, error) {
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".signing-key-*")
 	if err != nil {
-		return nil, keyAccessError(path, err)
+		return nil, KeyAccessError(path, err)
 	}
 	defer os.Remove(f.Name()) // fails harmlessly once renamed
 	if err := f.Chmod(0o600); err != nil {
@@ -80,25 +80,25 @@ func createKey(path string) (ed25519.PrivateKey, error) {
 	return key, nil
 }
 
-// keyAccessError says why occamyd cannot reach its key and what to do
+// KeyAccessError says why occamyd cannot reach its key and what to do
 // about it. It is all an operator sees of a start that fails, and the
 // usual cause is a directory or volume that belongs to another user.
-func keyAccessError(path string, err error) error {
-	dir, uid := filepath.Dir(path), os.Getuid()
-	switch {
-	case uid < 0: // Windows has no user id to name.
+//
+// It names no command. occamyd cannot tell a host's directory from a
+// container's, and the right step differs: path may be a path inside a
+// container, and a rootless container's uids are other numbers on the
+// host, so a plain chown there would fail again. The documentation has
+// the step for each.
+func KeyAccessError(path string, err error) error {
+	uid := os.Getuid()
+	if uid < 0 || !errors.Is(err, fs.ErrPermission) { // Windows has no user id to name.
 		return fmt.Errorf("auth: signing key %s: %w", path, err)
-	case errors.Is(err, fs.ErrPermission):
-		return fmt.Errorf("auth: signing key %s: occamyd runs as uid %d, which may not use %s: %w; "+
-			"give it that directory with chown -R %d %s on the host or, on a named volume, "+
-			"podman run --rm -v <volume>:/data busybox chown -R %d /data (docs/configuration.md)",
-			path, uid, dir, err, uid, dir, uid)
-	case errors.Is(err, fs.ErrNotExist):
-		return fmt.Errorf("auth: signing key %s: the directory %s does not exist, so occamyd cannot create the key: %w; "+
-			"make it, writable by uid %d, or set auth.signing_key_file to one that is",
-			path, dir, err, uid)
 	}
-	return fmt.Errorf("auth: signing key %s: %w", path, err)
+	dir := filepath.Dir(path)
+	return fmt.Errorf("auth: signing key %s: occamyd runs as uid %d, which may not use %s: %w; "+
+		"that directory, or in a container what is mounted on it, must belong to uid %d: "+
+		"docs/configuration.md has the step for a host, Docker and podman, under Sign-in",
+		path, uid, dir, err, uid)
 }
 
 func parsePrivateKey(raw []byte) (ed25519.PrivateKey, error) {

@@ -713,9 +713,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   set it up. `make stop` keeps the volume and `make clean` removes it.
   On the first start after this change the demo stack makes a new key,
   so sign in again once.
-- `occamyd` says what is wrong with a signing key it cannot reach, the
-  key, the directory and the user it runs as, and what to run about it,
-  instead of a bare `permission denied`.
+- When `occamyd` cannot reach its signing key, it names the key, the
+  directory and the user it runs as, instead of a bare
+  `permission denied` or `is not readable`. It points to
+  [docs/configuration.md](docs/configuration.md#sign-in-auth), which has
+  the step for a host, Docker and podman, since a plain `chown` fails
+  again on rootless podman.
+- A v1 file that serves only v0 clients, with `legacy_v0: true` and no
+  `auth.users`, `auth.oidc` or `auth.trusted_issuers`, no longer starts,
+  since the v0 login signs nobody in to API v1. Add one of the three
+  (see Security below).
 - `occamyd -h` says what occamyd serves now, a v1 file through API v1
   and a v0 file through the v0 routes, not "a modern guacamole protocol
   based remote desktop proxy", and lists its flag on a line of its own
@@ -939,11 +946,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - A v1 file that names no way to sign in is refused: `occamyd` has no
   default user, so it needs `auth.users`, `auth.oidc` or
   `auth.trusted_issuers`, and `legacy_v0` does not count. The hash in
-  [docs/configuration.md](docs/configuration.md)'s example was the demo
-  user's; it is now a placeholder that fails validation, with the
-  `htpasswd` line that makes a real one. `TestDemoUserStaysInTheDemo`
-  keeps that hash out of everything but the demo and bench stacks'
-  files.
+  [docs/configuration.md](docs/configuration.md)'s example was a real
+  one, the test fixture's `alice`; it is now a placeholder that fails
+  validation, which `TestConfigurationExampleRefused` holds it to, with
+  the `htpasswd` line that makes a real one.
+  `TestDemoUserStaysInTheDemo` keeps the demo user's hash out of
+  everything but the demo and bench stacks' files.
 - occamyd's request log no longer records query strings, which carry the
   v0 token and with it the remote credentials.
 - A secret file, `password_file`, `token_file` or

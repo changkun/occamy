@@ -11,11 +11,13 @@ import (
 )
 
 // TestE2ETokenSurvivesRestart checks what keeping the signing key on a
-// volume is for: a token signed before occamy-v1 restarts still works
-// after it, so that nobody signs in again. On a tmpfs, where the demo
-// used to keep the key, the restart would make a new key and this token
-// would stop verifying. It must be the token from before the restart:
-// a new sign-in would pass with any key.
+// volume is for: a token signed before occamy-v1 is replaced still works
+// after it, so that nobody signs in again. It recreates the container
+// rather than restarting it: a restart keeps the container's own layer,
+// so it could not tell a volume from no mount at all. On a tmpfs, where
+// the demo used to keep the key, or with no volume, the new container
+// would make a new key and this token would stop verifying. It must be
+// the token from before: a new sign-in would pass with any key.
 func TestE2ETokenSurvivesRestart(t *testing.T) {
 	addr := endpointV1(t)
 	c := composeE2E(t)
@@ -24,9 +26,9 @@ func TestE2ETokenSurvivesRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := apiV1(addr, http.MethodGet, "/api/v1/connections", token, nil, nil); err != nil {
-		t.Fatalf("before the restart: %v", err)
+		t.Fatalf("before the recreate: %v", err)
 	}
-	c.run(t, "restart", "occamy-v1")
+	c.run(t, "up", "-d", "--force-recreate", "--no-deps", "occamy-v1")
 
 	// occamyd takes a moment to serve again. It rejects a token for good
 	// with a 401, and that is the failure this test looks for, so wait
@@ -38,11 +40,11 @@ func TestE2ETokenSurvivesRestart(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("occamy-v1 is not back after the restart: %v", err)
+			t.Fatalf("occamy-v1 is not back after the recreate: %v", err)
 		}
 		time.Sleep(500 * time.Millisecond)
 	}
 	if err := apiV1(addr, http.MethodGet, "/api/v1/connections", token, nil, nil); err != nil {
-		t.Errorf("the token from before the restart: %v", err)
+		t.Errorf("the token from before the recreate: %v", err)
 	}
 }
