@@ -455,7 +455,9 @@ from the v1 series, which waits for [client-core](client-core.md).
 for the run, and no series has run with it: a `-quick` smoke proved that
 it works and nothing else. The owner's go-ahead starts the series.
 `docs/benchmarks.md`, What to measure again, lists the baselines that
-are out of date until then.
+are out of date until then. G7 over RDP will not compare until
+`xrdp-chansrv`'s exit is settled (Surprises, and the v1 series'
+follow-ups).
 
 - **What was done:**
   - *The frame stamp.* The scene stamps each frame of the scroll, the
@@ -567,13 +569,16 @@ are out of date until then.
     one, at a lower load. The first smoke's 11310 ms for `occamy` is
     not this, since v0 ran first there and xrdp logged no failure until
     native had run; that was a host load of 93 to 185. Why it exits is
-    not known.
+    not known, but there are two leads, and neither is shown to be it.
     Native offers only `cliprdr` and `drdynvc`, and guacd also `rdpsnd`,
-    whose setup is what `xrdp-chansrv`'s log stops short of, which is a
-    lead and no more. The old end of G7 stopped at the black frame,
-    which is why the baselines' 2.2 s never showed this. No change to
-    the harness helps, since a native session ends between any two
-    samples.
+    whose setup is what `xrdp-chansrv`'s log stops short of. And
+    `Client.Close` drops the connection with no Disconnect Provider
+    Ultimatum, which native only ever receives: xrdp logs an SSL
+    `unexpected eof` after 32 of 38 native connections and none of 74
+    through guacd. The old end of G7 stopped at the black frame, which
+    is why the baselines' 2.2 s never showed this: CI's run on the old
+    end read 44.7 ms for `v1-native`. No change to the harness helps,
+    since a native session ends between any two samples.
   - The first smoke's low v1 counts in G3, such as 2 stamps of 16 frames
     over native VNC, were not misread stamps. Tallied over 6 s of the
     scroll, native VNC and guacd's VNC each read 107 stamps, so that was
@@ -582,9 +587,9 @@ are out of date until then.
     looked at showed why: scrolled text that jumps partway down, a
     screen torn between two scene frames, or a screen still partly
     drawn. So `frames` counts what reached the viewer whole, and the
-    stamp refuses the rest as it should. Native RDP with GFX is the one
-    real shortfall: 34 frames in those 6 s, against 169 with GFX off,
-    which is what decision 1's rows are there to show.
+    stamp refuses the rest as it should. Native RDP with GFX ended far
+    fewer frames in that tally, 34 against 169 with GFX off, on a loaded
+    host: a thing for decision 1's rows to measure, not a result.
 
 ## Implementation notes: the v1 series
 

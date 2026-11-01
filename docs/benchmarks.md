@@ -386,7 +386,7 @@ again.
 | G2 | VNC and RDP, all networks | The probe's keys are jittered |
 | G3, G4 | VNC and RDP, all networks | The scene stamps its frames, and frames are counted by stamp |
 | G5 | VNC and RDP, all networks | The stamp and the jitter |
-| G7 | SSH, VNC and RDP, all networks | It ends on known content |
+| G7 | SSH, VNC and RDP, all networks | It ends on known content. RDP's rows do not compare until the fault in [G7 over RDP](#the-v1-series) is settled |
 | G1, G6 | No | The idle scene and the photo change no pixel, and the wallpaper's code moved without changing one |
 | T1, T2, T3 | No | The shell shows what it showed: G7 ends on the prompt that was already there, so the stack needs no banner, and T1's keys are not jittered |
 
