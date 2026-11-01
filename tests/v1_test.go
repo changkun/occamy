@@ -384,7 +384,8 @@ func composeE2E(t *testing.T) composeCmd {
 // both streams.
 func (c composeCmd) run(t *testing.T, args ...string) string {
 	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// podman took 21 s for podman ps alone at a load of 250.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	var stdout, stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, c[0], append(slices.Clone(c[1:]), args...)...)
