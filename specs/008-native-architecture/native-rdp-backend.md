@@ -203,7 +203,17 @@ them:
   as soon as #32 has a Windows host: NLA with the backend's own NTLMv2
   and CredSSP, a refused logon, and the licensing exchange beyond the
   STATUS_VALID_CLIENT shortcut, against Windows. Phase 4 keeps the rest
-  of the Windows work.
+  of the Windows work. A first try, on a GitHub-hosted Windows Server
+  2025 runner rather than #32's host, found that server refusing the
+  ClientHello Go sends without a session cache, which has neither
+  `session_ticket` nor `psk_key_exchange_modes`. With a cache, a replay
+  of the client's messages passes NLA there. So `tlsPolicy.config`
+  gives each connection a one-entry cache of its own, which keeps TLS
+  1.3, and no connection resumes another's session, which would skip
+  the certificate check; rdptest refuses such a ClientHello too.
+  [rdp-strategy](rdp-strategy.md)'s "What Windows Server 2025 refused"
+  has what was proven and what was not, including that which of the two
+  extensions Windows needs is unknown.
 - **Registration needs NLA end to end** (done: Implementation notes:
   registration). The backend was not registered in `occamyd` until NLA
   had run end to end, live against Windows or against the CredSSP

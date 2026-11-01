@@ -761,6 +761,20 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Fixed
 
+- Native RDP's ClientHello is no longer refused by Windows Server 2025,
+  which failed every NLA logon with
+  `rdp: CredSSP: remote error: tls: internal error`. Go's TLS client
+  offers neither `session_ticket` nor `psk_key_exchange_modes` without
+  a session cache, and over TLS 1.3 that server ends such a connection
+  just after the handshake. Each connection now has a cache of its own,
+  so TLS 1.3 stays and no connection can resume another's session,
+  which would skip the check of the server's certificate. A replay of
+  the client's messages with a cache passes NLA on that server. Which
+  of the two extensions it needs is not known, nor what any other
+  Windows version does
+  ([rdp-strategy](specs/008-native-architecture/rdp-strategy.md) has
+  what was proven, and how). The fake server now refuses such a
+  ClientHello too.
 - VNC through guacd no longer fails with "Remote unreachable" when a
   client resizes or moves the pointer right after opening. A `size` or
   a `mouse` that reaches guacd 1.6's VNC process before its RFB
