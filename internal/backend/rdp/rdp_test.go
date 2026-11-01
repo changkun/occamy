@@ -61,6 +61,14 @@ func TestNew(t *testing.T) {
 	if b.cfg.RoutingCookie {
 		t.Error("the routing cookie is on by default")
 	}
+	if !b.cfg.GFX || !b.cfg.Resize {
+		t.Errorf("GFX %v and Display Control %v by default, want both", b.cfg.GFX, b.cfg.Resize)
+	}
+	noGFX := ok
+	noGFX.DisableGFX = true
+	if b, err := New(noGFX); err != nil || b.cfg.GFX || !b.cfg.Resize {
+		t.Errorf("GFX disabled: %v, %+v", err, b)
+	}
 	cookie := ok
 	cookie.RoutingCookie = true
 	if b, err := New(cookie); err != nil || !b.cfg.RoutingCookie {

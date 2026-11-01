@@ -258,6 +258,7 @@ func connectionTarget(c *config.Connection) target {
 		tls:                   c.TLS,
 		ard:                   c.ARD,
 		security:              c.Security,
+		disableGFX:            c.DisableGFX,
 		kubernetes:            c.Kubernetes,
 	}
 }

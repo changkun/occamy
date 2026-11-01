@@ -199,9 +199,18 @@ password, VeNCrypt, and the German and French keyboard layouts.
 **TigerVNC, asking for the password** opens a form for the password
 first, which is `vncpassword`.
 
-The native RDP backend asks xrdp for plain bitmap updates, not the
-graphics pipeline (GFX), and has been tested against xrdp, not yet
-against Windows.
+The native RDP backend asks for RDP's graphics pipeline (GFX) by
+default, through which xrdp draws its sessions in RemoteFX
+Progressive. Of GFX, the backend decodes RemoteFX Progressive,
+RemoteFX, planar and uncompressed bitmaps, solid fills and copies;
+from a server that does not open GFX, it decodes plain bitmap updates.
+`disable_gfx: true` on a connection turns GFX off, so that the server
+sends plain bitmap updates
+([configuration.md](configuration.md#backends)). **RDP, through
+guacd** does not use GFX: `occamyd` gives guacd `disable-gfx`, so the
+two RDP connections reach the same xrdp differently, the native one
+through GFX and the other with plain bitmaps. The native RDP backend
+has been tested against xrdp, not yet against Windows.
 
 ### Kubernetes
 
@@ -450,6 +459,14 @@ the native RDP backend is verified against one. It is also the
 baseline that the benchmark compares the native backends against. The
 fallback goes away in v1.0, with guacd
 ([configuration.md](configuration.md#backends)).
+
+A Windows server under GFX draws parts of its screen with ClearCodec
+and its bitmap cache, which the native backend does not decode yet. It
+skips those PDUs, so the parts they draw may stay missing or stale,
+and at the first of them in a session `occamyd` logs a warning that
+names `disable_gfx: true`. With that key on the connection, the server
+sends plain bitmap updates instead, which the native backend decodes;
+`backend: guacd` is the other way around it.
 
 To compare the two, open **x11vnc, through guacd** (`vnc-guacd`) and
 **RDP, through guacd** (`rdp-guacd`) next to their native twins. Each

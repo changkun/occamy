@@ -6,9 +6,11 @@ package rdp
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"image"
 	"image/color"
+	"log/slog"
 	"math"
 	"slices"
 	"strings"
@@ -518,14 +520,13 @@ func TestGFXIgnored(t *testing.T) {
 	g.must(t, surfacePDUs(1, 64, 64, image.Point{})...)
 	r := image.Rect(0, 0, 8, 8)
 	g.must(t, gfxFrame(3,
-		rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, rdptest.CodecClearCodec, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, rdptest.CodecAVC420, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, rdptest.CodecAlpha, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, rdptest.CodecProgressive, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, 0x77, rdptest.PixelXRGB, r, []byte{1}),
 		rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(4, 4, 4, 8), nil),
-		rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, []byte{1}),
+		rdptest.WireToSurface2(1, rdptest.CodecRemoteFX, 1, rdptest.PixelXRGB, []byte{1}),
 		rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, make([]byte, 6)),
 		rdptest.GFXPDU(rdptest.GFXCacheToSurface, make([]byte, 6)),
 		rdptest.GFXPDU(rdptest.GFXMapSurfaceToScaled, make([]byte, 20)),
@@ -535,18 +536,105 @@ func TestGFXIgnored(t *testing.T) {
 		t.Fatalf("acknowledgements %+v", a)
 	}
 	ign := g.c.Stats().Ignored
-	for _, k := range []string{"GFX RemoteFX bitmaps", "GFX ClearCodec bitmaps", "GFX AVC420 bitmaps", "GFX alpha bitmaps",
-		"GFX bitmaps of unknown codecs", "empty bitmaps", "GFX codec contexts", "GFX cache PDUs"} {
+	for _, k := range []string{"GFX ClearCodec bitmaps", "GFX AVC420 bitmaps", "GFX alpha bitmaps",
+		"empty bitmaps", "GFX deletes of no codec context", "GFX cache PDUs", "GFX progressive bitmaps in wire to surface 1"} {
 		if ign[k] != 1 {
 			t.Errorf("Ignored[%q] = %d", k, ign[k])
 		}
 	}
-	// One in wire-to-surface 2, as servers send it, and one in 1.
-	if ign["GFX progressive bitmaps"] != 2 {
-		t.Errorf("%d progressive bitmaps ignored, want 2", ign["GFX progressive bitmaps"])
+	// One of an unknown codec in wire-to-surface 1, and one of RemoteFX
+	// in 2, which takes only RemoteFX Progressive.
+	if ign["GFX bitmaps of unknown codecs"] != 2 {
+		t.Errorf("%d bitmaps of unknown codecs ignored, want 2", ign["GFX bitmaps of unknown codecs"])
 	}
 	if ign["GFX PDUs"] != 2 {
 		t.Errorf("%d unknown PDUs ignored, want 2", ign["GFX PDUs"])
+	}
+}
+
+// Each PDU or bitmap that the client skips is charged pduCost, and
+// counted at its message's end, once a name: a flood of one name is
+// tallied under it, not a tally each.
+func TestGFXSkipCharged(t *testing.T) {
+	r := image.Rect(0, 0, 8, 8)
+	for _, tc := range []struct {
+		name string
+		msg  [][]byte
+	}{
+		{"GFX PDUs before the capabilities", [][]byte{rdptest.StartFrame(1)}},
+		{"GFX PDUs", [][]byte{rdptest.GFXPDU(0x77, nil)}},
+		{"GFX cache PDUs", [][]byte{rdptest.GFXPDU(rdptest.GFXCacheToSurface, make([]byte, 6))}},
+		{"GFX frames without their end", [][]byte{rdptest.StartFrame(1), rdptest.StartFrame(2)}},
+		{"GFX capability sets", [][]byte{rdptest.CapsConfirm(0x77, 0)}},
+		{"GFX deletes of no surface", [][]byte{rdptest.DeleteSurface(99)}},
+		{"GFX deletes of no codec context", [][]byte{deleteContext(1)}},
+		{"GFX ClearCodec bitmaps", [][]byte{rdptest.WireToSurface1(1, rdptest.CodecClearCodec, rdptest.PixelXRGB, r, []byte{1})}},
+		{"GFX bitmaps of unknown codecs", [][]byte{rdptest.WireToSurface1(1, 0x77, rdptest.PixelXRGB, r, []byte{1})}},
+		{"GFX bitmaps of unknown codecs", [][]byte{rdptest.WireToSurface2(1, rdptest.CodecRemoteFX, 1, rdptest.PixelXRGB, nil)}},
+		{"empty bitmaps", [][]byte{rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(4, 4, 4, 8), nil)}},
+	} {
+		g := newGFXTest(t, 64, 64)
+		g.must(t, surfacePDUs(1, 64, 64, image.Point{})...)
+		if tc.name == "GFX PDUs before the capabilities" {
+			g.c.gfx.confirmed = false
+		}
+		if err := g.c.pace(0); err != nil {
+			t.Fatal(err)
+		}
+		before := g.c.tokens
+		g.must(t, tc.msg...)
+		if got := before - g.c.tokens; got != pduCost {
+			t.Errorf("%s: charged %v, want %d", tc.name, got, pduCost)
+		}
+		if n := g.c.Stats().Ignored[tc.name]; n != 1 {
+			t.Errorf("%s: counted %d, want 1", tc.name, n)
+		}
+	}
+	g := newGFXTest(t, 64, 64)
+	g.must(t, slices.Repeat([][]byte{rdptest.GFXPDU(0x77, nil)}, 100)...)
+	if n, c := g.c.Stats().Ignored["GFX PDUs"], cap(g.c.gfx.skips); n != 100 || c > 4 {
+		t.Errorf("100 skipped PDUs of a name counted %d, in a tally of %d names", n, c)
+	}
+}
+
+// The first PDU or bitmap of a session that the client skips and that
+// leaves the screen without what it draws, as Windows' ClearCodec and
+// bitmap cache, logs a warning that names the ways to turn GFX off, and
+// the session warns once; AVC, which the client does not offer, and an
+// empty bitmap do not warn.
+func TestGFXSkipWarning(t *testing.T) {
+	r := image.Rect(0, 0, 8, 8)
+	for _, tc := range []struct {
+		name string
+		pdu  []byte
+	}{
+		{"GFX ClearCodec bitmaps", rdptest.WireToSurface1(1, rdptest.CodecClearCodec, rdptest.PixelXRGB, r, []byte{1})},
+		{"GFX cache PDUs", rdptest.GFXPDU(rdptest.GFXCacheToSurface, make([]byte, 6))},
+		{"GFX cache PDUs", rdptest.GFXPDU(rdptest.GFXSurfaceToCache, make([]byte, 20))},
+		{"GFX alpha bitmaps", rdptest.WireToSurface1(1, rdptest.CodecAlpha, rdptest.PixelXRGB, r, []byte{1})},
+		{"GFX bitmaps of unknown codecs", rdptest.WireToSurface2(1, rdptest.CodecRemoteFX, 1, rdptest.PixelXRGB, []byte{1})},
+	} {
+		var log bytes.Buffer
+		g := newGFXTest(t, 64, 64)
+		g.c.log = slog.New(slog.NewTextHandler(&log, nil))
+		g.must(t, surfacePDUs(1, 64, 64, image.Point{})...)
+		g.must(t, gfxFrame(1,
+			rdptest.WireToSurface1(1, rdptest.CodecAVC420, rdptest.PixelXRGB, r, []byte{1}),
+			rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(4, 4, 4, 8), nil)))
+		if log.Len() != 0 {
+			t.Fatalf("%s: warned before the skip: %s", tc.name, log.String())
+		}
+		g.must(t, gfxFrame(2, tc.pdu, tc.pdu))
+		g.must(t, gfxFrame(3, rdptest.WireToSurface1(1, rdptest.CodecClearCodec, rdptest.PixelXRGB, r, []byte{1})))
+		got := log.String()
+		if n := strings.Count(got, "level=WARN"); n != 1 {
+			t.Errorf("%s: %d warnings, want 1: %s", tc.name, n, got)
+		}
+		for _, want := range []string{"disable_gfx: true", "adhoc_backends: {rdp: guacd}", fmt.Sprintf("skipped=%q", tc.name)} {
+			if !strings.Contains(got, want) {
+				t.Errorf("%s: the warning %q does not say %q", tc.name, got, want)
+			}
+		}
 	}
 }
 
@@ -1047,7 +1135,7 @@ func TestGFXPace(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		pdu  []byte
-		n    int // -1: what compression added, in pixels of 4 bytes
+		n    int // and, compressed, what compression added, in pixels of 4 bytes
 		zip  bool
 	}{
 		{"create", rdptest.CreateSurface(1, 64, 32, rdptest.PixelXRGB), 64 * 32, false},
@@ -1055,16 +1143,19 @@ func TestGFXPace(t *testing.T) {
 		{"map", rdptest.MapSurface(1, image.Point{}), 128 * 64, false},
 		{"fill", rdptest.SolidFill(1, red, image.Rect(0, 0, 8, 8), image.Rect(32, 32, 100, 100)), 8*8 + 68*32, false},
 		{"small copy", rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 8, 4), image.Pt(16, 16), image.Pt(32, 0)), 2 * pointerCost, false},
-		{"large copy", rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 128, 40), image.Pt(0, 8)), 128 * 40, false},
+		// A copy within a mapped surface costs at least a pointer
+		// update.
+		{"large copy", rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 128, 40), image.Pt(0, 8)), max(128*40, pointerCost), false},
 		// Copies that cannot reach the output cost their pixels alone.
 		{"offscreen", rdptest.CreateSurface(2, 16, 16, rdptest.PixelXRGB), 16 * 16, false},
 		{"offscreen copy", rdptest.SurfaceToSurface(2, 2, image.Rect(0, 0, 8, 4), image.Pt(8, 8), image.Pt(0, 8)), 2 * 8 * 4, false},
 		{"copy to offscreen", rdptest.SurfaceToSurface(1, 2, image.Rect(0, 0, 8, 4), image.Pt(4, 4)), 8 * 4, false},
 		{"copy from offscreen", rdptest.SurfaceToSurface(2, 1, image.Rect(0, 0, 8, 4), image.Pt(64, 0)), 8 * 4, false},
 		{"uncompressed", rdptest.WireToSurface1(1, rdptest.CodecUncompressed, rdptest.PixelXRGB, image.Rect(0, 0, 8, 8), rdptest.Uncompressed(img)), 8 * 8, false},
-		{"planar", rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(8, 8, 16, 16), rdptest.Planar(img)), 8 * 8, false},
-		{"stored", ignored, 0, false},
-		{"compressed", ignored, -1, true},
+		{"planar", rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(8, 8, 16, 16), rdptest.Planar(img)), planarCost * 8 * 8, false},
+		// A PDU that the client skips costs its header.
+		{"stored", ignored, pduCost, false},
+		{"compressed", ignored, pduCost, true},
 		// The mapped surface drawn again; a larger desktop, so that its
 		// larger bucket does not clamp what is left.
 		{"reset", rdptest.ResetGraphics(300, 300), 128 * 64, false},
@@ -1073,7 +1164,7 @@ func TestGFXPace(t *testing.T) {
 		want := tc.n
 		if tc.zip {
 			msg := g.enc.Single(tc.pdu, rdptest.SegCompressed)
-			want = (len(tc.pdu) - len(msg)) / 4
+			want += (len(tc.pdu) - len(msg)) / 4
 			if err := g.c.gfxMessage(g.out, msg); err != nil {
 				t.Fatal(err)
 			}
@@ -1296,6 +1387,12 @@ func FuzzGFX(f *testing.F) {
 		rdptest.SurfaceToSurface(1, 1, image.Rect(0, 0, 32, 32), image.Pt(40, 20), image.Pt(4, 4)))))
 	f.Add(seed(setup, slices.Concat(rdptest.ResetGraphics(200, 100), rdptest.CreateSurface(2, 50, 50, rdptest.PixelARGB),
 		rdptest.MapSurface(2, image.Pt(180, 90)), rdptest.SurfaceToSurface(1, 2, image.Rect(0, 0, 50, 50), image.Point{}), rdptest.DeleteSurface(1))))
+	// RemoteFX and a progressive context, deleted and then its surface.
+	rfx, prog := fuzzRFXSeeds()
+	f.Add(seed(slices.Concat(surfacePDUs(1, 128, 128, image.Point{})...), gfxFrame(2,
+		rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, image.Rect(0, 0, 128, 128), rfx[1]),
+		rdptest.WireToSurface2(1, rdptest.CodecProgressive, 7, rdptest.PixelXRGB, prog[1])),
+		slices.Concat(rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, []byte{1, 0, 7, 0, 0, 0}), rdptest.DeleteSurface(1))))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		g := newGFXTest(t, 128, 64)
 		for len(data) >= 2 {
@@ -1454,6 +1551,113 @@ func benchFrame(b *testing.B, tile func(image.Rectangle, *image.RGBA) []byte) {
 		g.c.chio.mu.Unlock()
 	}
 	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N)/float64(1024*768), "ns/pixel")
+}
+
+// BenchmarkSkipped is a flood of what the client parses and skips, the
+// cheapest to send for the most parsing, in stored messages, whose
+// expansion is not charged: RemoteFX Progressive regions outside a
+// frame, blocks of an unknown type and frame begins, of a header alone,
+// 4,096 to a W2S2 PDU; a region's rectangles of a pixel, 4,096, and in
+// 16 regions the most quantization tables or qualities each takes;
+// RemoteFX's blocks of an unknown type, a region's rectangles, and tile
+// sets' quantization tables, likewise, in a wire-to-surface 1 PDU;
+// and, 4,096 to a message, W2S2 PDUs of no blocks, GFX PDUs of an
+// unknown type, of an 8-byte header alone, also after one of each
+// other name that the client counts what it skips under but the
+// tiles', which gfxSkipped looks through for each, frames that begin
+// again, and empty bitmaps. Its core metric is the share of a core
+// that the flood gets: what it costs over what it is charged at
+// decodeRate. The last are PDUs applied that do little: capability
+// confirms, codec contexts' deletes, bitmaps and fills of a pixel,
+// charged that pixel alone, and RemoteFX PDUs of no blocks.
+func BenchmarkSkipped(b *testing.B) {
+	const n = 4096
+	block := func(typ int) []byte { return []byte{byte(typ), byte(typ >> 8), 6, 0, 0, 0} }
+	w2s2 := func(blocks []byte) []byte {
+		return rdptest.WireToSurface2(1, rdptest.CodecProgressive, 1, rdptest.PixelXRGB, blocks)
+	}
+	r := image.Rect(0, 0, 8, 8)
+	var names [][]byte // a PDU of each name, the unknown PDUs' last
+	for _, codec := range []int{rdptest.CodecClearCodec, rdptest.CodecAVC420, rdptest.CodecAlpha, rdptest.CodecProgressive, rdptest.CodecAVC444, 0x77} {
+		names = append(names, rdptest.WireToSurface1(1, codec, rdptest.PixelXRGB, r, []byte{1}))
+	}
+	names = append(names,
+		rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(4, 4, 4, 8), nil),
+		rdptest.GFXPDU(rdptest.GFXCacheToSurface, make([]byte, 6)),
+		rdptest.StartFrame(1), rdptest.StartFrame(1),
+		rdptest.DeleteSurface(99),
+		rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, []byte{99, 0, 0, 0, 0, 0}),
+		rdptest.CapsConfirm(0x77, 0),
+		w2s2(slices.Concat(block(progRegion), block(0xcccf))),
+		rdptest.GFXPDU(0x77, nil))
+	// Headers within a region or tile set, which draw nothing: n
+	// rectangles of a pixel within the surface, and, in 16 regions or
+	// tile sets, the most quantization tables and qualities each takes.
+	rfx := func(data []byte) []byte {
+		return rdptest.WireToSurface1(1, rdptest.CodecRemoteFX, rdptest.PixelXRGB, image.Rect(0, 0, 64, 64), data)
+	}
+	var rects []image.Rectangle
+	for i := range n {
+		rects = append(rects, image.Rect(i%64, i/64, i%64+1, i/64+1))
+	}
+	quants := slices.Repeat(xrdpQuant[:1], 255)
+	quals := slices.Repeat(progQualities[:1], 255)
+	const tables = 16 * 255
+	for _, tc := range []struct {
+		name  string
+		msg   []byte
+		items int // the blocks, PDUs, rectangles or tables; n if 0
+	}{
+		{"progressive regions outside a frame", w2s2(bytes.Repeat(block(progRegion), n)), 0},
+		{"progressive blocks of an unknown type", w2s2(bytes.Repeat(block(0xcccf), n)), 0},
+		{"progressive frame begins", w2s2(bytes.Repeat(rdptest.Progressive(1)[:12], n)), 0},
+		{"progressive region rectangles", w2s2(rdptest.Progressive(1, rdptest.ProgRegion{Rects: rects})), 0},
+		{"progressive quantization tables", w2s2(rdptest.Progressive(1, slices.Repeat([]rdptest.ProgRegion{{Quants: quants}}, 16)...)), tables},
+		{"progressive qualities", w2s2(rdptest.Progressive(1, slices.Repeat([]rdptest.ProgRegion{{ProgQuants: quals}}, 16)...)), tables},
+		{"RemoteFX blocks of an unknown type", rfx(bytes.Repeat(block(0xcccf), n)), 0},
+		{"RemoteFX region rectangles", rfx(rdptest.RemoteFX(rdptest.RLGR1, rects, nil, nil)), 0},
+		{"RemoteFX quantization tables", rfx(bytes.Repeat(rdptest.RemoteFX(rdptest.RLGR1, nil, quants, nil), 16)), tables},
+		{"W2S2 PDUs of no blocks", bytes.Repeat(w2s2(nil), n), 0},
+		{"GFX PDUs of an unknown type", bytes.Repeat(rdptest.GFXPDU(0x77, nil), n), 0},
+		{"GFX PDUs of an unknown type after every name", slices.Concat(slices.Concat(names...), bytes.Repeat(rdptest.GFXPDU(0x77, nil), n)), 0},
+		{"GFX frames without their end", bytes.Repeat(rdptest.StartFrame(1), n), 0},
+		{"GFX empty bitmaps", bytes.Repeat(rdptest.WireToSurface1(1, rdptest.CodecPlanar, rdptest.PixelXRGB, image.Rect(4, 4, 4, 8), nil), n), 0},
+		{"applied caps confirms", bytes.Repeat(rdptest.CapsConfirm(rdptest.CapVersion107, 0), n), 0},
+		{"applied codec context deletes", bytes.Repeat(rdptest.GFXPDU(rdptest.GFXDeleteEncodingCtx, []byte{1, 0, 1, 0, 0, 0}), n), 0},
+		{"applied bitmaps of a pixel", bytes.Repeat(rdptest.WireToSurface1(1, rdptest.CodecUncompressed, rdptest.PixelXRGB, image.Rect(0, 0, 1, 1), rdptest.Uncompressed(gradient(1, 1))), n), 0},
+		{"applied fills of a pixel", bytes.Repeat(rdptest.SolidFill(1, color.RGBA{A: 0xff}, image.Rect(0, 0, 1, 1)), n), 0},
+		{"applied RemoteFX W2S1 PDUs of no blocks", bytes.Repeat(rfx(nil), n), 0},
+	} {
+		items := cmp.Or(tc.items, n)
+		b.Run(tc.name, func(b *testing.B) {
+			g := newGFXTest(b, 1920, 1080)
+			g.must(b, append(surfacePDUs(1, 64, 64, image.Point{}), w2s2(nil))...)
+			if strings.HasSuffix(tc.name, "after every name") {
+				g.must(b, names...)
+				if ign := g.c.Stats().Ignored; len(ign) != 15 {
+					b.Fatalf("%d names, want 15: %v", len(ign), ign)
+				}
+			}
+			wire := g.enc.Multipart(tc.msg, zgfxSegment, rdptest.SegStored)
+			if err := g.c.pace(0); err != nil {
+				b.Fatal(err)
+			}
+			tokens, slept := g.c.tokens, g.clock.waited()
+			b.ReportAllocs()
+			for b.Loop() {
+				if err := g.c.gfxMessage(g.out, wire); err != nil {
+					b.Fatal(err)
+				}
+			}
+			units := tokens - g.c.tokens + (g.clock.waited()-slept).Seconds()*decodeRate
+			ns := float64(b.Elapsed().Nanoseconds())
+			b.ReportMetric(ns/float64(b.N)/float64(items), "ns/block")
+			b.ReportMetric(units/float64(b.N)/float64(items), "units/block")
+			if units > 0 {
+				b.ReportMetric(ns/units*decodeRate/1e9, "core")
+			}
+		})
+	}
 }
 
 // planarEncodeImage is img in the planar codec, run-length encoded, no

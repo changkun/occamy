@@ -13,8 +13,9 @@
 // codecs. Of the virtual channels it speaks the clipboard's, CLIPRDR,
 // for text, and DRDYNVC's Display Control, when Config asks for them.
 // With Config.GFX it speaks the graphics pipeline ([MS-RDPEGFX]) with
-// ZGFX, surfaces, fills, copies and the uncompressed and planar codecs;
-// its other codecs and its cache are not implemented yet. Standard RDP
+// ZGFX, surfaces, fills, copies and the uncompressed, planar, RemoteFX
+// and RemoteFX Progressive codecs; ClearCodec, AVC and the cache are not
+// implemented yet. Standard RDP
 // security, the licensing exchange, Kerberos and H.264 are not
 // implemented.
 package rdp
@@ -83,10 +84,11 @@ type Config struct {
 	// GFX asks for the graphics pipeline ([MS-RDPEGFX]) on a dynamic
 	// channel: surfaces that the client composes onto the desktop, solid
 	// fills, copies, and bitmaps in the uncompressed and planar codecs
-	// (gfx.go). Bitmaps in the codecs the client does not take yet,
-	// RemoteFX Progressive among them, which xrdp sends, are skipped, so
-	// it is off by default. A server that does not open the channel draws with bitmap
-	// updates as without it.
+	// (gfx.go), RemoteFX (rfx.go) and RemoteFX Progressive
+	// (progressive.go), which xrdp draws its sessions in. Bitmaps in the
+	// codecs the client does not take yet, ClearCodec and AVC, are
+	// skipped, and so are the cache's PDUs. A server that does not open
+	// the channel draws with bitmap updates as without it.
 	GFX bool
 	// Logger receives warnings; nil means slog.Default().
 	Logger *slog.Logger
@@ -193,6 +195,7 @@ type Client struct {
 	frag       []byte
 	fragging   bool // a first fragment came, and its last has not
 	lastResize time.Time
+	gfxWarned  bool      // the session warned of GFX that the client skips
 	tokens     float64   // the pixels the client may decode; below 0, its debt
 	paced      time.Time // when tokens was last brought up to date
 	rbuf       []byte
@@ -218,14 +221,30 @@ const (
 	// that resizes the desktop sooner waits, so that a server cannot make
 	// the session reallocate its screen faster than ten times a second.
 	resizeEvery = 100 * time.Millisecond
-	// decodeRate bounds the pixels of bitmaps the client decodes, a few
-	// bytes of which can describe a whole desktop: 32 Mi pixels a second,
-	// 42 desktops of 1024×768, 16 of 1920×1080, 4 of 3840×2160 or 1 of
-	// the largest. Real content costs about two bytes a pixel as bitmap
-	// updates, so a server needs over 500 Mbit/s to reach it. A token
-	// bucket holds two desktops and a tile; while it is empty, the client
-	// waits, and the server's updates queue behind it.
-	decodeRate = 1 << 25
+	// decodeRate bounds the work the server has the client do, a few
+	// bytes of which can describe a whole desktop, in units of a pixel
+	// of a bitmap: 512 Mi units a second. A planar bitmap's pixel costs
+	// 2 units and a RemoteFX tile's 7 (rfxTileCost), as they take the
+	// longest to decode; other work is charged a unit a pixel it draws
+	// or copies. On the host of the benchmarks (an Apple M5 Pro), a unit
+	// of real content costs up to 1.9 ns, a RemoteFX Progressive tile's,
+	// so the rate holds a session to about one core, as its one reader
+	// goroutine does anyway; the cheapest floods to send, tiles of a
+	// header and no coefficients and 3-byte RLE runs, cost 1.1 to 1.5 ns
+	// a unit, so 0.6 to 0.8 of a core (BenchmarkHostileTiles,
+	// BenchmarkHostileBitmap). Crafted work can cost more a unit, as a
+	// RemoteFX tile of 4,096 rectangles of a pixel, measured at 2.65 ns
+	// in review, but needs about 377 MB/s of input to keep up, and the
+	// reader holds it to a core. It cannot be lower without holding back
+	// full-motion RemoteFX: full-screen tiles at 1920×1080 and 30 frames
+	// a second take 418 Mi units a second, 82% of it, and about 0.8 of a
+	// core. They come through without a wait; at 3840×2160, the rate
+	// holds them to 9 frames a second, about what the decoder manages in
+	// that core. A token bucket holds two desktops of tiles and a tile
+	// (paceBurst), so that the first screen, or a resize's, never waits;
+	// while it is empty, the client waits, and the server's updates
+	// queue behind it.
+	decodeRate = 1 << 29
 )
 
 // checkDesktop returns an error if a desktop of w×h is empty or exceeds
@@ -804,6 +823,7 @@ func (c *Client) activate(out Output, body []byte) error {
 	if err != nil {
 		return err
 	}
+	c.progHighWater() // before the desktop changes, as the surfaces outlast it
 	resized := c.activated(shareID, caps)
 	c.fastPathInput.Store(caps.inputFlags&(inputFlagFastPathInput|inputFlagFastPathInput2) != 0)
 	if err := c.sendIO(c.confirmActive()); err != nil {
@@ -882,13 +902,21 @@ func (c *Client) wait(d time.Duration) error {
 	}
 }
 
+// paceBurst is what the token bucket holds on a desktop of w×h: two
+// desktops of RemoteFX tiles, the work that costs most a pixel, 7 units
+// each, and a pointer update, more than a tile's padding of a bitmap.
+// A session's first screen, a surface created and mapped and its tiles
+// decoded and drawn, takes 9 of the 14 desktops.
+func paceBurst(w, h int) float64 {
+	return 2*rfxPixelCost*float64(w)*float64(h) + pointerCost
+}
+
 // pace charges n decoded pixels to the token bucket of decodeRate, and
 // waits while the bucket is in debt. The wait follows from the debt, so
 // a bitmap larger than the bucket waits its share too.
 func (c *Client) pace(n int) error {
 	now := c.clock()
-	w, h := c.Size()
-	burst := float64(2*w*h + (bitmapPad+1)*(bitmapPad+1))
+	burst := paceBurst(c.Size())
 	if c.paced.IsZero() {
 		c.tokens = burst
 	} else {
@@ -1185,7 +1213,7 @@ func (c *Client) drawBitmap(out Output, b *bitmapData) error {
 		c.count(func(s *Stats) { s.Ignored["empty bitmaps"]++ })
 		return nil
 	}
-	if err := c.pace(b.width * b.height); err != nil {
+	if err := c.pace(bitmapCost(b)); err != nil {
 		return err
 	}
 	rgba, err := c.dec.decode(b)
@@ -1253,13 +1281,29 @@ func drawRows(out Output, s image.Rectangle, b *bitmapData, sx int, rgba []byte)
 const drawStrip = 64 << 10
 
 // pointerCost is the least that a pointer update, a shape or a move, is
-// charged against decodeRate, in pixels: a tile of 64×64. A cached
+// charged against decodeRate, in pixels: a 8,192th of it. A cached
 // pointer is 2 bytes of a PDU, and the output copies its shape, up to
 // 384×384 pixels, and shows it to every viewer; a move is 4 bytes. The
 // charge bounds them to 8,192 a second at most, and a shape to its
 // pixels' share of decodeRate. A new shape is charged by the size it
-// declares before it is decoded.
-const pointerCost = 64 * 64
+// declares before it is decoded. What else goes to every viewer as a
+// message of its own, a clipboard's text and a copy within a mapped
+// surface, is charged at least as much.
+const pointerCost = decodeRate / 8192
+
+// planarCost is what a planar bitmap is charged a pixel against
+// decodeRate: decoded and drawn, it takes 2.1 to 2.6 ns a pixel, twice
+// what an RLE or uncompressed one takes (BenchmarkGFXPlanar,
+// BenchmarkGFXUncompressed, BenchmarkHostileBitmap).
+const planarCost = 2
+
+// bitmapCost is what decoding b is charged against decodeRate.
+func bitmapCost(b *bitmapData) int {
+	if b.compressed && b.bpp == 32 {
+		return planarCost * b.width * b.height
+	}
+	return b.width * b.height
+}
 
 // shownCursor is the pointer shape the client last gave its output.
 type shownCursor struct {

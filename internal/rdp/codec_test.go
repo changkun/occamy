@@ -10,6 +10,7 @@ import (
 	"errors"
 	"image"
 	"image/color"
+	"log/slog"
 	"math/rand/v2"
 	"slices"
 	"sync"
@@ -435,6 +436,7 @@ func testClock(w, h int) (*Client, *fakeClock) {
 		width: w, height: h,
 		stats: newStats(),
 		t:     &transport{conn: discardConn{}},
+		log:   slog.New(slog.DiscardHandler),
 		now:   clock.now,
 		sleep: clock.sleep,
 	}
@@ -456,6 +458,20 @@ func (f *fakeClock) now() time.Time {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.t
+}
+
+// advance moves the clock on by d, as time that passes between
+// messages, not waited.
+func (f *fakeClock) advance(d time.Duration) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.t = f.t.Add(d)
+}
+
+func (f *fakeClock) waited() time.Duration {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.slept
 }
 
 func (f *fakeClock) sleep(d time.Duration) error {

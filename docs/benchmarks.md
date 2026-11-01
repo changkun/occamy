@@ -149,7 +149,8 @@ the [graphics pipeline](../specs/008-native-architecture/graphics-pipeline.md)
 (refinement, the tile cache, and the encode cache and its workers) and
 for [native RDP](../specs/008-native-architecture/native-rdp-backend.md)
 (owner, 2026-10-31). Native RDP has been rdp's default since #132,
-without RDP's graphics pipeline (GFX) yet, and `v1-native` measures it.
+and asks for RDP's graphics pipeline (GFX) by default, without its
+ClearCodec and cache yet; `v1-native` measures it.
 Numbers taken before then would not be v1's verdict, so this page
 publishes none; the harness and the CI smoke run only keep the v1 path
 working until then.
@@ -287,11 +288,38 @@ in v1. A v1 session runs as follows:
 - **Native RDP** (`rdp-native`) reaches the same xrdp with the same
   credentials and size. It sets `security: tls`, since xrdp speaks no
   NLA, and checks no certificate, since xrdp signs its own when the
-  image is built; occamyd warns of that at start. It speaks no GFX yet,
-  so xrdp sends it plain bitmaps, as it sends guacd with
-  `disable-gfx`. It asks for 32 bits per pixel, and the bridge leaves
+  image is built; occamyd warns of that at start. It asks for GFX by
+  default, so xrdp draws its sessions in RemoteFX Progressive, while
+  guacd gets `disable-gfx` and plain bitmaps: the two RDP paths differ
+  there. It asks for 32 bits per pixel, and the bridge leaves
   guacd's default colour depth; whether xrdp then keeps a second X
   session is to be checked before the full run.
+- **Native RDP's decoding rate** holds a session's decoding to about a
+  core of the benchmarks' host (an Apple M5 Pro), whatever the server
+  sends
+  ([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)'s
+  phase 3 notes). It caps full-screen RemoteFX and RemoteFX
+  Progressive at about 97 frames a second at the harness's 1024 × 768,
+  37 at 1920 × 1080 and 9 at 3840 × 2160, about what the decoder
+  manages on one core of that host anyway. No scene reaches it: the
+  fastest, G3's 62.5 frames a second, would take 64% of the rate if
+  every frame were a full screen of tiles. The rate and the decoder
+  are both Occamy's, so neither justifies a miss.
+- **G5 over native RDP with GFX is an expected miss.** G5's scene
+  redraws every pixel in every frame (`bench/scene/content.go`'s
+  plasma), so with GFX on, `rdp-native` decodes a full screen of
+  RemoteFX Progressive tiles for each delivered frame: 10.3 ms of CPU
+  at 1024 × 768 on the benchmarks' host (`BenchmarkGFXProgressive`,
+  13.1 ns a pixel), and 10.4 to 11.9 ms as the review measured it,
+  against G5's RDP target of 5.5 ms a frame for occamyd in all.
+  Decoding alone misses the target, before anything is encoded for the
+  viewer. With `disable_gfx`, xrdp sends bitmap updates instead, which
+  cost about 1 to 2.4 ms a frame to decode (the review's 1 to 1.6;
+  here 1.8 to 2.4 for planar, which xrdp sends at 32 bits per pixel,
+  `BenchmarkGFXPlanar`). The owner is to choose before the v1
+  run: measure `rdp-native` in G5 with GFX, without it, or both; or
+  make the decoder faster first. Until then G5's RDP row is not
+  expected to meet its target with GFX.
 
 CI runs both v1 series quickly under N1, after the v0 smoke run, on the
 same stack.

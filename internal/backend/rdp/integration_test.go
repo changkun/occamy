@@ -189,6 +189,29 @@ func probeX224(addr string) error {
 	return nil
 }
 
+// gfxWallpaper reports whether img shows the scene's wallpaper as the
+// graphics pipeline, which the backend asks for by default, draws it:
+// within 4 levels a channel of RemoteFX Progressive, outside the
+// swatch's tile, whose wavelets the swatch's edges ring through
+// (internal/rdp's TestIntegrationGFX).
+func gfxWallpaper(img *image.RGBA) bool {
+	if img == nil {
+		return false
+	}
+	w, h := img.Rect.Dx(), img.Rect.Dy()
+	near := func(a, b uint8) bool { d := int(a) - int(b); return -4 <= d && d <= 4 }
+	for y := range h {
+		want := wallpaper(y, h)
+		for x := range w {
+			got := img.RGBAAt(x, y)
+			if (x >= 64 || y >= 64) && (!near(got.R, want.R) || !near(got.G, want.G) || !near(got.B, want.B)) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // xrdpConfig is the backend's configuration for the server: xrdp signs
 // its certificate itself and has no NLA. The backend's log goes to the
 // test's.
@@ -239,10 +262,11 @@ func swatchShows(sink *backendtest.Sink, k rune, d time.Duration) bool {
 // hidLetter is the USB HID usage of a lowercase letter's key.
 func hidLetter(k rune) uint16 { return uint16(0x04 + k - 'a') }
 
-// The backend draws xrdp's desktop, types keys by their physical code
-// and text, moves the pointer on the session's X display, scrolls, has
-// the server suppress its output while nobody can see, and ends at
-// once on cancel with nothing left running.
+// The backend draws xrdp's desktop, through the graphics pipeline, types
+// keys by their physical code and text, moves the pointer on the
+// session's X display, scrolls, has the server suppress its output
+// while nobody can see, and ends at once on cancel with nothing left
+// running.
 func TestIntegration(t *testing.T) {
 	checkGoroutines(t)
 	b := newBackend(t, xrdpConfig(t))
@@ -251,10 +275,7 @@ func TestIntegration(t *testing.T) {
 	r := start(t, b, sink)
 
 	// xrdp shows its own screens while sesman starts the session.
-	waitLong(t, 90*time.Second, "the wallpaper", func() bool {
-		bad, _ := matchesWallpaper(sink.Pixels(), 0)
-		return bad == 0
-	})
+	waitLong(t, 90*time.Second, "the wallpaper", func() bool { return gfxWallpaper(sink.Pixels()) })
 	input := func(evs ...backend.InputEvent) {
 		t.Helper()
 		for _, ev := range evs {
@@ -350,10 +371,13 @@ func TestIntegration(t *testing.T) {
 // protocols it offers. Offered only NLA, xrdp selects standard RDP
 // security rather than failing the negotiation, which the client
 // refuses at once with the hint that names the setting allowing TLS.
+// With the graphics pipeline disabled, xrdp draws with bitmap updates,
+// which arrive exactly.
 func TestIntegrationSecurity(t *testing.T) {
 	checkGoroutines(t)
 	cfg := xrdpConfig(t)
 	cfg.Security = SecurityAny
+	cfg.DisableGFX = true
 	sink := &backendtest.Sink{}
 	r := start(t, newBackend(t, cfg), sink)
 	waitLong(t, 90*time.Second, "the wallpaper with security any", func() bool {
@@ -387,10 +411,7 @@ func TestIntegrationClipboard(t *testing.T) {
 	b.Demand(backend.Demand{Visible: true})
 	sink := &backendtest.Sink{}
 	r := start(t, b, sink)
-	waitLong(t, 90*time.Second, "the wallpaper", func() bool {
-		bad, _ := matchesWallpaper(sink.Pixels(), 0)
-		return bad == 0
-	})
+	waitLong(t, 90*time.Second, "the wallpaper", func() bool { return gfxWallpaper(sink.Pixels()) })
 
 	pasted := fmt.Sprintf("pasted at %d: héllo €\nsecond line", time.Now().UnixNano())
 	if err := b.Input(backend.Clipboard{MIME: "text/plain", Data: []byte(pasted)}); err != nil {
@@ -433,10 +454,7 @@ func TestIntegrationResize(t *testing.T) {
 	b.Demand(backend.Demand{Visible: true})
 	sink := &backendtest.Sink{}
 	r := start(t, b, sink)
-	waitLong(t, 90*time.Second, "the wallpaper", func() bool {
-		bad, _ := matchesWallpaper(sink.Pixels(), 0)
-		return bad == 0
-	})
+	waitLong(t, 90*time.Second, "the wallpaper", func() bool { return gfxWallpaper(sink.Pixels()) })
 	first := sink.Size()
 	for i, size := range []image.Point{image.Pt(1280, 720), image.Pt(800, 600), first} {
 		begin := time.Now()

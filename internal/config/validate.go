@@ -391,6 +391,7 @@ func (f *File) validateConnections(c *checker) {
 			c.connectionTLS(p+".tls", cn)
 			c.ard(p+".ard", cn)
 			c.security(p+".security", cn)
+			c.disableGFX(p+".disable_gfx", cn)
 			c.kubernetes(p+".kubernetes", cn)
 		}
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
@@ -677,6 +678,19 @@ func (c *checker) security(path string, cn *Connection) {
 		default:
 			c.add(path, "unknown security mode %q: use %s (the default), %s, %s or %s", cn.Security, rdpb.SecurityNLA, rdpb.SecurityNLAExt, rdpb.SecurityTLS, rdpb.SecurityAny)
 		}
+	}
+}
+
+// disableGFX checks a connection's disable_gfx: only the native RDP
+// backend reads it, since guacd takes it from
+// guacd.params.rdp.disable-gfx.
+func (c *checker) disableGFX(path string, cn *Connection) {
+	switch {
+	case !cn.DisableGFX:
+	case cn.Protocol != "rdp":
+		c.add(path, "only rdp connections have disable_gfx")
+	case cn.Backend != BackendNative:
+		c.add(path, "only the native RDP backend reads disable_gfx, and backend: %s does not: leave backend out, or set native; through guacd, guacd.params.rdp.disable-gfx sets it", cn.Backend)
 	}
 }
 

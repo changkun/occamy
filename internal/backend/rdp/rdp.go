@@ -162,6 +162,10 @@ type Config struct {
 	// disable-copy and disable-paste do. With both, the backend does not
 	// ask for the clipboard channel.
 	DisableCopy, DisablePaste bool
+	// DisableGFX keeps the backend from asking for the graphics pipeline
+	// ([MS-RDPEGFX]), which it asks for by default, so that the server
+	// draws with bitmap updates, as guacd's disable-gfx does.
+	DisableGFX bool
 	// DialTimeout bounds the TCP connection and defaults to 15 seconds.
 	// Only Run's context bounds the rest, since it may wait for the owner
 	// to answer a prompt.
@@ -253,6 +257,7 @@ func New(cfg Config) (*Backend, error) {
 			TLS:            cfg.TLS,
 			Clipboard:      clip,
 			Resize:         true,
+			GFX:            !cfg.DisableGFX,
 			Logger:         cfg.Logger,
 		},
 		dialTimeout:     cfg.DialTimeout,
