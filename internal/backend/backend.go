@@ -69,6 +69,14 @@ type Backend interface {
 	Demand(d Demand)
 }
 
+// Failure is an error from Run that may tell the session's viewers why:
+// occamyd sends its text as the reason of their close, which otherwise
+// says only "failed", since other errors may name what a viewer must not
+// see. Its text holds no secret and fits a close reason (protocol.Close).
+type Failure string
+
+func (f Failure) Error() string { return string(f) }
+
 // Demand is what the session's viewers ask of the remote server.
 type Demand struct {
 	// Visible is whether at least one viewer can see the screen.

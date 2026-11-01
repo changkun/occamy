@@ -1262,7 +1262,7 @@ own, such as on its read limit, then uses the right code.
 | 4003 | `owner-left` | The owner left and did not return within the grace period. |
 | 4004 | `idle` | Nobody gave input for the idle timeout. |
 | 4005 | `remote-ended` | The remote ended the session, such as a shell that exits. |
-| 4006 | `backend-failed` | The connection to the remote failed. |
+| 4006 | `backend-failed` | The connection to the remote failed. The reason is `failed`, unless the server can say why. |
 | 4007 | `viewer-limit` | The session has as many viewers as it allows. |
 | 4008 | `too-slow` | The viewer acknowledged no frame, or took no message, for the server's viewer timeout. |
 
