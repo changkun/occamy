@@ -708,6 +708,25 @@ describe('The owner’s session kept for a reload', () => {
     expect(kept(r)).toEqual(lab)
   })
 
+  it('stays kept when the WebSocket reports the page going away before pagehide, as Firefox does on a reload', async () => {
+    const r = await render({ token: accessToken('demo'), action: null }, ended)
+    expect(kept(r)).toEqual(lab)
+    // What the core makes of a 1001 that no close message came before.
+    act(() => Welcomed.last?.push({ type: 'end', code: 0, reason: '', error: new ConnectionError('connection closed (1001)') }))
+    await settle()
+    expect(button('Join again')).toBeDefined()
+    expect(kept(r)).toEqual(lab)
+  })
+
+  it('is forgotten when occamyd says it is shutting down', async () => {
+    const r = await render({ token: accessToken('demo'), action: null }, ended)
+    expect(kept(r)).toEqual(lab)
+    act(() => Welcomed.last?.push({ type: 'end', code: CloseCode.ServerShutdown, reason: 'shutdown' }))
+    await settle()
+    expect(text()).toContain('Server shut down')
+    expect(kept(r)).toBeNull()
+  })
+
   it('stays kept when another of the owner’s streams takes the session over, as Join again takes it back', async () => {
     const r = await render({ token: accessToken('demo'), action: null }, ended)
     act(() => Welcomed.last?.push({ type: 'end', code: CloseCode.Normal, reason: 'the owner connected again' }))

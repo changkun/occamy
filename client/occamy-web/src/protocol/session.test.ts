@@ -9,7 +9,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { DecodeJob, TileDecoder } from './decode'
-import { ClosedError, CloseError, ConnectionError, NotOwnerError, ReadOnlyError } from './errors'
+import { ClosedError, CloseCode, CloseError, ConnectionError, NotOwnerError, ReadOnlyError } from './errors'
 import type { EndEvent, FrameEvent, SessionEvent } from './events'
 import { Codec, type Message, MessageType, Role, SessionClass, encode } from './messages'
 import { DEFAULT_CACHE_SLOTS, Session, helloFor } from './session'
@@ -142,6 +142,21 @@ describe('handshake', () => {
     const p = Session.start(t, {}, testDecoder(), [])
     t.drop(1006)
     await expect(p).rejects.toBeInstanceOf(ConnectionError)
+  })
+
+  it('rejects with ConnectionError for a WebSocket going away before welcome, which close did not say', async () => {
+    const t = new FakeTransport()
+    const p = Session.start(t, {}, testDecoder(), [])
+    t.drop(CloseCode.ServerShutdown)
+    await expect(p).rejects.toBeInstanceOf(ConnectionError)
+  })
+
+  it('rejects with the code of a shutdown that close says before welcome', async () => {
+    const t = new FakeTransport()
+    const p = Session.start(t, {}, testDecoder(), [])
+    t.push({ type: 'close', code: CloseCode.ServerShutdown, reason: 'shutdown' })
+    t.drop(CloseCode.ServerShutdown, 'shutdown')
+    await expect(p).rejects.toMatchObject({ code: CloseCode.ServerShutdown, reason: 'shutdown' })
   })
 
   it('closes with protocol-error over a message before welcome', async () => {
@@ -815,6 +830,23 @@ describe('the end', () => {
       expect(end.code).toBe(0)
       expect(end.error).toBeInstanceOf(ConnectionError)
     }
+  })
+
+  // Firefox fires the WebSocket's close, 1001 with no reason, before
+  // pagehide on a reload, so the page's own close comes too late.
+  it('reports a WebSocket going away without close as failed, not as a shutdown', async () => {
+    const { t, s } = await open()
+    t.drop(CloseCode.ServerShutdown)
+    const end = await nextOf(s, 'end')
+    expect(end.code).toBe(0)
+    expect(end.error).toBeInstanceOf(ConnectionError)
+  })
+
+  it('reports a shutdown that close says, ahead of the WebSocket’s own 1001', async () => {
+    const { t, s } = await open()
+    t.push({ type: 'close', code: CloseCode.ServerShutdown, reason: 'shutdown' })
+    t.drop(CloseCode.ServerShutdown, 'shutdown')
+    expect(await s.next()).toEqual({ type: 'end', code: CloseCode.ServerShutdown, reason: 'shutdown' })
   })
 
   it('echoes a server’s close without a reason too long for a close frame', async () => {
