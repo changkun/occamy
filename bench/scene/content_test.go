@@ -86,10 +86,17 @@ func TestWithStamp(t *testing.T) {
 	}
 }
 
-// The dragged window stays on the screen and off the swatch.
+// The dragged window stays on the screen and off the swatch and the
+// stamp, and what each of its steps clears behind it (dragArea) covers
+// everywhere it goes and neither of them: clearing the stamp on every
+// step would hide it from every frame.
 func TestDragStaysClear(t *testing.T) {
 	const w, h = 1024, 768
 	screen := image.Rect(0, 0, w, h)
+	area := dragArea(w, h)
+	if area.Overlaps(probe.Swatch) || area.Overlaps(probe.StampArea) {
+		t.Fatalf("a step of the drag clears %v, over the swatch or the stamp", area)
+	}
 	for ms := 0; ms < 16000; ms += 17 {
 		p := dragPosition(time.Duration(ms)*time.Millisecond, w, h)
 		r := image.Rect(p.X, p.Y, p.X+400, p.Y+300)
@@ -98,6 +105,9 @@ func TestDragStaysClear(t *testing.T) {
 		}
 		if r.Overlaps(probe.Swatch) || r.Overlaps(probe.StampArea) || p.X < margin {
 			t.Fatalf("at %d ms the window at %v enters the margin", ms, r)
+		}
+		if !r.In(area) {
+			t.Fatalf("at %d ms the window at %v leaves what a step clears, %v", ms, r, area)
 		}
 	}
 }

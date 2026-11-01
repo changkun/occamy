@@ -277,7 +277,7 @@ func (d *display) run() {
 				xproto.SetInputFocus(d.x, xproto.InputFocusPointerRoot, d.win, xproto.TimeCurrentTime)
 			case xproto.ExposeEvent:
 				if ev.Count == 0 {
-					d.redraw()
+					d.exposed()
 				}
 			case xproto.MappingNotifyEvent:
 				if err := d.loadKeymap(); err != nil {
@@ -346,6 +346,19 @@ func (d *display) redraw() {
 		xproto.ClearArea(d.x, false, d.win, 0, 0, 0, 0)
 	}
 	d.fill(probe.Swatch, d.swatch)
+}
+
+// exposed answers an Expose event. Every step of the drag exposes the
+// window behind the one it moved, so a full redraw there would clear the
+// stamp right after each frame drew it, and no client would see it: the
+// drag clears only what its window can leave behind (dragArea).
+func (d *display) exposed() {
+	if d.scene != sceneDrag {
+		d.redraw()
+		return
+	}
+	r := dragArea(d.w, d.h)
+	xproto.ClearArea(d.x, false, d.win, i16(r.Min.X), i16(r.Min.Y), u16(r.Dx()), u16(r.Dy()))
 }
 
 // withSwatch draws the swatch into img, so that a full-screen image does

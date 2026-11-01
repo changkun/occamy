@@ -224,3 +224,9 @@ func dragPosition(t time.Duration, w, h int) image.Point {
 	y := (h-300)/2 + int(0.8*float64(h-300)/2*math.Sin(2*math.Pi*s/3))
 	return image.Pt(x, y)
 }
+
+// dragArea is the part of a w×h screen that the dragged window can leave
+// behind it: right of the margin, which holds the swatch and the stamp.
+func dragArea(w, h int) image.Rectangle {
+	return image.Rect(margin, 0, w, h)
+}
