@@ -418,6 +418,11 @@ for one message to occamyd. Send less of it.", and the text stays in
 the box as your edit. A read-only viewer sees the remote clipboard but
 cannot send to it.
 
+A terminal session has no remote clipboard: `ssh` and Kubernetes ignore
+it. On **SSH**, the **Clipboard** panel says so, and points to the
+browser's paste: click the terminal and press ⌘V, or Ctrl+Shift+V, and
+the text goes to the shell.
+
 If the RDP desktop's **Clipboard** panel never changes, xrdp's
 clipboard process, `xrdp-chansrv`, may have exited, which it can when
 a connection closes within moments of opening. The demo image starts
@@ -460,6 +465,11 @@ started, wait that long and send it again.
   **x11vnc, through guacd** keeps that size too.
 - **RDP, through guacd** keeps the size it opened at, and the page
   scales it.
+
+A browser zoom changes the window's size in CSS pixels, so the owner's
+zoom resizes a remote that takes any size, for everyone in the session:
+at 25%, a 1280×800 window asks for 5120×3152, and the remote's programs
+look a quarter of their size. A viewer's zoom only scales the view.
 
 Only the owner's window sets the size. A viewer sees the owner's
 screen scaled to its own window.
@@ -621,8 +631,9 @@ The tests open real sessions to every demo server:
 - the VNC parity matrix, each feature on x11vnc and TigerVNC through
   both backends, logged as a table;
 - in Chrome, on `tigervnc-native` and `rdp-native`: the web client at
-  device pixel ratios of 2 and 1 sizes the remote to the window in CSS
-  pixels, when the session opens and when the window changes
+  device pixel ratios of 2, 1 and 1.5, and in a window of an odd width,
+  sizes the remote to the window in CSS pixels, when the session opens
+  and when the window changes
   (`TestWebScreen`). It looks for Chrome on the host, or takes its path
   from `OCCAMY_E2E_CHROME`, and is skipped without one, except in CI.
 
