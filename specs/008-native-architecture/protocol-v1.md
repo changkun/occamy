@@ -78,7 +78,9 @@ evolve without breaking old clients.
   [graphics-pipeline](graphics-pipeline.md)), `copy-rect`, `frame-end`
   (frame ID, timestamp and the last input it reflects), `cursor` (image
   and hotspot) and `cursor-move`, `term-data` (bytes),
-  `term-snapshot`, `clipboard` (MIME type and data), `bell`, `title`,
+  `term-snapshot`, `clipboard` (MIME type and data), `clipboard-status`
+  (whether the remote's clipboard answers; ignorable, as it came after
+  the first v1), `bell`, `title`,
   `prompt` (keyboard-interactive or credential request), `viewer-joined`
   (viewer ID, role and name) and `viewer-left`, and `ping`, `pong` and
   `close` (code and reason), which go either way.
@@ -117,8 +119,8 @@ evolve without breaking old clients.
   - A viewer that reports itself hidden with `view` gets no frames, and
     tiles outside its viewport wait until they are in view.
   - Messages the user sees directly or that end the session (`cursor`,
-    `cursor-move`, `clipboard`, `bell`, `close`) are never queued behind
-    tiles.
+    `cursor-move`, `clipboard`, `clipboard-status`, `bell`, `close`) are
+    never queued behind tiles.
   - A tile message has a size cap, so anything waits behind at most one
     tile.
   - Besides the frame window, the bytes in flight per viewer are capped
@@ -316,8 +318,8 @@ web client ([009](../009-react-web-client.md)) and the client core
   `frame-end` 0x0205, `cursor` 0x0206, `cursor-move` 0x0207,
   `term-data` 0x0208, `term-snapshot` 0x0209, `clipboard` 0x020a,
   `bell` 0x020b, `title` 0x020c, `prompt` 0x020d, `viewer-joined`
-  0x020e, `viewer-left` 0x020f. A message sent the wrong way is an
-  unknown type to its receiver.
+  0x020e, `viewer-left` 0x020f, `clipboard-status` 0x0210. A message
+  sent the wrong way is an unknown type to its receiver.
 - **Decisions the spec left open.**
   - A list is a u16 count, and the count times the element's smallest
     size must fit in the bytes left, or the read is `truncated` before
@@ -419,6 +421,14 @@ web client ([009](../009-react-web-client.md)) and the client core
     `internal-error` (1011) is added for the server's own failures.
   - The two clipboards are two types (0x0108 and 0x020a), since the
     client's is input and carries a sequence number.
+  - `clipboard-status` (0x0210) came after the first v1, when a paste
+    could reach an RDP server's channel but not its clipboard process
+    ([native-rdp-backend](native-rdp-backend.md)). No message could say
+    so: `frame-end`'s `last_seq` counts input the server applied, and
+    only up, and the server's `clipboard` is the remote's content. It
+    goes out ignorable, so a client of the first v1 skips it, and it
+    names the state of the session's clipboard, not a sequence number:
+    the backend replaces queued text, so it cannot say whose was lost.
   - `Decode` takes `Limits` on every message, so one interface serves
     all of them; tile and cursor use it.
   - The Go `Hello` has no version field: `Append` writes 1 and `Decode`

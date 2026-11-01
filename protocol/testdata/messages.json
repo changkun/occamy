@@ -620,6 +620,26 @@
         "viewer_id": "2"
       },
       "hex": "0f02000002000000"
+    },
+    {
+      "name": "clipboard-status silent",
+      "message": "clipboard-status",
+      "type": 528,
+      "from": "server",
+      "fields": {
+        "answering": false
+      },
+      "hex": "1002010000"
+    },
+    {
+      "name": "clipboard-status answering",
+      "message": "clipboard-status",
+      "type": 528,
+      "from": "server",
+      "fields": {
+        "answering": true
+      },
+      "hex": "1002010001"
     }
   ],
   "invalid": [

@@ -325,6 +325,30 @@ func (m *TermSnapshot) Decode(body []byte, _ Limits) error {
 	return d.Finish()
 }
 
+// ClipboardStatus says whether the remote's clipboard answers. With
+// Answering false, text sent for it was dropped because it did not, as
+// the server says each time; with true, it answers again. A message that
+// clients of the first v1 do not know, so it is ignorable.
+type ClipboardStatus struct {
+	Answering bool
+}
+
+// Type returns TypeClipboardStatus.
+func (ClipboardStatus) Type() Type { return TypeClipboardStatus }
+
+// Append appends the message to b.
+func (m ClipboardStatus) Append(b []byte) []byte {
+	b = AppendHeader(b, Header{Type: TypeClipboardStatus, Flags: FlagIgnorable})
+	return AppendBool(b, m.Answering)
+}
+
+// Decode decodes body into m.
+func (m *ClipboardStatus) Decode(body []byte, _ Limits) error {
+	d := NewDecoder(body)
+	m.Answering = d.ReadBool()
+	return d.Finish()
+}
+
 // ServerClipboard is the remote clipboard's new content.
 type ServerClipboard struct {
 	MIME string

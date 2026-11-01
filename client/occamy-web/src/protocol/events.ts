@@ -105,6 +105,16 @@ export interface ClipboardEvent {
   data: Uint8Array
 }
 
+/**
+ * ClipboardStatusEvent says whether the remote's clipboard answers:
+ * false when text sent for it was dropped because it did not, each time,
+ * and true once it answers again.
+ */
+export interface ClipboardStatusEvent {
+  type: 'clipboard-status'
+  answering: boolean
+}
+
 /** BellEvent rings the bell. */
 export interface BellEvent {
   type: 'bell'
@@ -167,6 +177,7 @@ export type SessionEvent =
   | CursorEvent
   | CursorMoveEvent
   | ClipboardEvent
+  | ClipboardStatusEvent
   | BellEvent
   | TitleEvent
   | PromptEvent

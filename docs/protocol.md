@@ -163,7 +163,8 @@ Every message starts with a 4-byte header, two little-endian u16:
 
 A receiver that does not know a type skips the message if it is
 ignorable, and otherwise closes the connection with `unsupported`. Every
-v1 message is sent with flags 0.
+v1 message is sent with flags 0, but for `clipboard-status`, which came
+later and is ignorable.
 
 ### Fields
 
@@ -254,6 +255,7 @@ is never given to another message, and 0x0300 to 0xFFFF are unassigned.
 | 0x020d | `prompt` | server | Asks the owner for answers |
 | 0x020e | `viewer-joined` | server | A viewer in the session |
 | 0x020f | `viewer-left` | server | A viewer that left |
+| 0x0210 | `clipboard-status` | server | Whether the remote's clipboard answers |
 
 ## Messages in both directions
 
@@ -512,7 +514,8 @@ d0 02                    # height: 720
 ### clipboard (from the client)
 
 Type 0x0108. The client's clipboard content, for the remote's
-clipboard.
+clipboard. Nothing confirms that it arrived; `clipboard-status` says
+when it did not.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1016,6 +1019,51 @@ session waits for it to return for a grace period, and ends with
 02 00 00 00              # viewer_id: 2
 ```
 
+### clipboard-status
+
+Type 0x0210, ignorable. Says whether the remote's clipboard answers.
+The native RDP backend sends it, whose server has a process of its own
+for the clipboard, which can go while the session goes on. The other
+backends never do.
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| answering | bool | False if text for the remote's clipboard was dropped because it did not answer. True if it answers again. |
+
+The server sends false to every client each time it drops text, once
+the remote has not answered for the backend's wait, a minute for RDP.
+Dropped text never arrives later, so a client can say that it was not
+sent, and leave it to the user to send it again. A client that joins
+while the clipboard has not answered since gets false too, for a loss
+it had no part in: a client that sent no text has nothing to tell its
+user. The server sends true once it hears from the remote's clipboard
+again. It tries text sent in between, so a client need not hold it
+back.
+
+There is no message for text that arrived: no message means only that
+nothing went wrong yet. Only the latest value matters, so a client may
+keep the newest undelivered one, and a false followed at once by a true
+may reach a client as the true alone.
+
+It is a message of its own because nothing else in v1 can say this.
+`frame-end`'s `last_seq` counts input the server applied, which for
+`clipboard` means handing it to the backend, well before the remote
+answers, and it only counts up, so it cannot say that an input failed.
+The server's `clipboard` is the remote's content, and `close` ends the
+stream.
+
+```hex
+# vector: clipboard-status silent
+10 02 01 00              # header: type 0x0210 (clipboard-status), flags 1 (ignorable)
+00                       # answering: false
+```
+
+```hex
+# vector: clipboard-status answering
+10 02 01 00              # header: type 0x0210 (clipboard-status), flags 1 (ignorable)
+01                       # answering: true
+```
+
 ## Capabilities
 
 Capabilities are what a client offers in `hello` and what the server
@@ -1226,10 +1274,10 @@ A frame is the server's `resize`, `tile`, `copy-rect`, `term-data` and
 `term-snapshot` messages up to and including the `frame-end` that closes
 them. The client applies them in order and shows the result at
 `frame-end`, so it never shows half a frame. Every other message from
-the server (`cursor`, `cursor-move`, `clipboard`, `bell`, `title`,
-`prompt`, `viewer-joined`, `viewer-left`, `ping`, `pong`, `close`) is
-outside frames and may come between any two messages, between the
-tiles of a frame too.
+the server (`cursor`, `cursor-move`, `clipboard`, `clipboard-status`,
+`bell`, `title`, `prompt`, `viewer-joined`, `viewer-left`, `ping`,
+`pong`, `close`) is outside frames and may come between any two
+messages, between the tiles of a frame too.
 
 A frame carries the current content of what changed, not a history of
 changes, so a client that gets fewer frames loses nothing: the newest
@@ -1291,8 +1339,8 @@ Input to display). Its rules, in brief:
 - A hidden viewer gets no frames, and tiles outside a viewport wait
   until they are in view (`view`).
 - Messages the user sees directly or that end the session (`cursor`,
-  `cursor-move`, `clipboard`, `bell`, `close`) are never queued behind
-  tiles.
+  `cursor-move`, `clipboard`, `clipboard-status`, `bell`, `close`) are
+  never queued behind tiles.
 - A tile message is small, so anything waits behind at most one tile.
 - The server caps each viewer's bytes in flight near the link's
   bandwidth-delay product, measured from `frame-ack`s.

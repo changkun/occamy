@@ -105,8 +105,8 @@ func TestTruncatedAndTrailing(t *testing.T) {
 func TestMessageTypes(t *testing.T) {
 	client, server := protocol.ClientMessages(), protocol.ServerMessages()
 	types := allTypes()
-	if len(types) != 29 {
-		t.Errorf("%d message types, want 29", len(types))
+	if len(types) != 30 {
+		t.Errorf("%d message types, want 30", len(types))
 	}
 	for _, typ := range types {
 		m := protocol.New(typ)
@@ -134,8 +134,13 @@ func TestMessageTypes(t *testing.T) {
 		if name, _ := receiver(typ).Lookup(typ); name != typ.String() {
 			t.Errorf("%#04x is registered as %q and named %q", uint16(typ), name, typ.String())
 		}
-		// The header is the type with no flags.
-		if h := m.Append(nil); h[0] != byte(typ) || h[1] != byte(typ>>8) || h[2] != 0 || h[3] != 0 {
+		// The header is the type with no flags, but for the message that
+		// clients of the first v1 do not know, which they may skip.
+		var flags byte
+		if typ == protocol.TypeClipboardStatus {
+			flags = byte(protocol.FlagIgnorable)
+		}
+		if h := m.Append(nil); h[0] != byte(typ) || h[1] != byte(typ>>8) || h[2] != flags || h[3] != 0 {
 			t.Errorf("%s starts with %x", typ, h[:4])
 		}
 	}

@@ -187,6 +187,8 @@ func messageValues() []namedMessage {
 		{"prompt", &protocol.Prompt{ID: 1, Name: "SSH", Fields: []protocol.PromptField{{Label: "Password: ", Secret: true}}}},
 		{"viewer-joined", &protocol.ViewerJoined{ViewerID: 2, Role: protocol.RoleViewer, Name: "alice"}},
 		{"viewer-left", &protocol.ViewerLeft{ViewerID: 2}},
+		{"clipboard-status silent", &protocol.ClipboardStatus{}},
+		{"clipboard-status answering", &protocol.ClipboardStatus{Answering: true}},
 	}
 }
 

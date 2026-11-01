@@ -99,6 +99,7 @@ func FuzzSession(f *testing.F) {
 		&protocol.Cursor{W: 2, H: 2, Codec: protocol.CodecPNG, Payload: []byte{1}},
 		&protocol.Title{Title: "t"}, &protocol.Bell{}, &protocol.Bell{}, &protocol.Bell{}, &protocol.Bell{},
 		&protocol.ViewerJoined{ViewerID: 2, Role: protocol.RoleViewer}, &protocol.ViewerLeft{ViewerID: 2},
+		&protocol.ClipboardStatus{}, &protocol.ClipboardStatus{Answering: true},
 		&protocol.Ping{Nonce: 1}, &protocol.FrameEnd{FrameID: 2}, &protocol.FrameEnd{FrameID: 3},
 		&protocol.Tile{FrameID: 4, W: 4, H: 4, Codec: protocol.CodecPNG},
 		&protocol.FrameEnd{FrameID: 4},
