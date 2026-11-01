@@ -416,14 +416,21 @@ Settled on 2026-10-31.
     in CSS pixels or cells, unless the hello already asked for it, so
     that a remote pixel is a CSS pixel at any device pixel ratio: the
     programs on a remote desktop do not scale, so a screen of device
-    pixels showed them at half their size on a HiDPI display;
-    viewers and read-only clients see the owner's size, scaled. Read-only clients bind no input. The remote's
+    pixels showed them at half their size on a HiDPI display. A browser
+    zoom changes the size in CSS pixels, so the owner's zoom resizes the
+    remote, for everyone in the session: at 25%, a 1280×800 window asks
+    for 5120×3152;
+    viewers and read-only clients see the owner's size, scaled, and
+    their zoom only scales the view. Read-only clients bind no input. The remote's
     clipboard goes to the local one when the page has focus, for a role
     that gives input, and the local one to the remote on focus where the
     browser already lets the page read it (Chrome's `clipboard-read`
     permission); otherwise the clipboard panel copies and pastes by
     hand, and keeps what the user typed there when the remote's
-    clipboard changes. Text sent there, or from the local clipboard,
+    clipboard changes. A terminal session has no remote clipboard: SSH
+    and Kubernetes ignore `clipboard` and send none, so its panel says
+    so and points to the browser's paste, and the page does not read
+    the local clipboard for it. Text sent there, or from the local clipboard,
     counts as the remote's, so the next remote clipboard replaces it;
     only text typed since is kept. Text the core refuses to send, such
     as text over the agreed message size, stays the user's, and the
@@ -465,11 +472,13 @@ Settled on 2026-10-31.
     `bindPointer`.
   - Keyboard: keysyms as before, now with each key's USB HID usage, and
     AltGr, dead keys and composed text as the core handles them; keys
-    held are released when the canvas loses focus.
+    held are released when the canvas loses focus. The canvas fills the
+    stage, so its keyboard focus shows on the toolbar's lower edge: a
+    ring around it would cover the remote's pixels.
   - New: terminal sessions, the clipboard, credential prompts, sharing,
     viewers, visibility, the remote's cursor and title, the bell, and
     why a session ended.
-- **Tests:** 224 in `src/lib` and `src/views`, in the `web` job. Unit
+- **Tests:** 235 in `src/lib` and `src/views`, in the `web` job. Unit
   tests for the API calls against a scripted fetch (each request's
   method, path, headers and exact body, and the time limit on the
   answer and its body), the identity a token names, PKCE against RFC
@@ -508,7 +517,8 @@ Settled on 2026-10-31.
   resumed End counts for the session ended and replaces what End said
   before, while 1011 and 4001 do not; the owner's session is kept for a
   reload through a lost connection, a takeover, the page's own close
-  on `pagehide`, an End that failed and a join that cannot reach
+  on `pagehide`, a 1001 with no `close` before it, an End that failed
+  and a join that cannot reach
   occamyd, not for a share or a role other than the owner's, and
   forgotten once it ends, once occamyd refuses the view's stream with
   4001 or 4000, and once the user leaves it, as after End ended it; a
@@ -519,7 +529,9 @@ Settled on 2026-10-31.
   and the clipboard panel shows the remote's next clipboard after text
   was sent, keeping only what was typed since, drops what Send said
   once the remote clipboard changes or the box is edited, and says
-  that text too large to send was not sent, keeping it as typed. The
+  that text too large to send was not sent, keeping it as typed, while
+  a terminal session's says that it has no remote clipboard, offers no
+  Send, and points to paste only for a role that can type. The
   controller runs against a stand-in `connect` and session (the
   hello's size and visibility, clamping, refusals, React's development
   effects cancelling an open, close cancelling one, the owner's resize
@@ -705,7 +717,8 @@ Settled on 2026-10-31.
     occamyd, it keeps it for one more reload, which gets 1011 again, or
     4001 once the grace has passed. A session that ended longer ago, or
     a user who is not its owner, is refused with 4001 and the view says
-    so. It stays kept through a lost connection, a takeover and the
+    so. It stays kept through a lost connection, a takeover, a 1001
+    with no `close` before it and the
     page's own close on `pagehide`, as Join again
     would join it, through an End whose `DELETE` failed, after which
     the session runs on for the owner's grace, and through a join that
@@ -718,6 +731,14 @@ Settled on 2026-10-31.
     since its token must not outlive the page's load (fragment.ts), and
     a share link's page forgets an owner's session kept before; a
     viewer that reloads opens the link again.
+  - 2026-11-01: a 1001 with no `close` before it is a lost connection,
+    not a shutdown. Firefox fires the WebSocket's close, 1001 with no
+    reason, before `pagehide`, so on a reload the core reported occamyd
+    shutting down, the view forgot the session, and the page's own close
+    came too late: the page signed in to the connection list, on all
+    four protocols, while Chromium and WebKit joined the session again.
+    occamyd always sends `close` first (`CloseFor`, and `finish` in
+    server/streams.go), so a shutdown still reads as one.
   - 2026-11-01: the hello counts as the first size asked for. occamyd
     takes an owner's hello for a resize, at open and on a join, but the
     controller did not know that, and its check against the screen's
@@ -759,8 +780,8 @@ Settled on 2026-10-31.
   pixel ratio of 2, which is how a screen in device pixels shipped.
   `TestWebScreen`
   (tests/web_test.go) now opens the desktops that resize in Chrome, over
-  the DevTools protocol, at ratios of 2 and 1 in `make e2e`; it is the
-  only test in a browser. The licenses come from
+  the DevTools protocol, at ratios of 2, 1 and 1.5 and at an odd width
+  in `make e2e`; it is the only test in a browser. The licenses come from
   Vite's `build.license`, not `scripts/third-party-licenses.sh`, which
   reads Go modules only.
 - **Surprises:**

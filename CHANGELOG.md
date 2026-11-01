@@ -771,6 +771,21 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Fixed
 
+- Reloading in Firefox no longer loses the session. Firefox fires the
+  WebSocket's close, 1001 with no reason, before `pagehide`, and the web
+  client took that for occamyd shutting down: it forgot the session, so
+  the page signed in to the connection list, and occamyd ended the
+  session as `owner-left` 60 seconds later. occamyd says `server-shutdown`
+  with a `close` message first, so the client now takes a 1001 with no
+  `close` before it for a lost connection, whose session it keeps.
+- The web client's **Clipboard** panel no longer says "Sent to the
+  remote clipboard." for a terminal session, whose backends ignore the
+  text. The panel says that a terminal session has no remote clipboard
+  and points to the browser's paste, and the page no longer reads the
+  local clipboard for such a session when it gets focus.
+- The focus ring no longer covers the remote's first pixels. It sat on
+  the edge of a screen that fills the stage, 2 CSS pixels deep; the
+  focus now shows on the toolbar's lower edge.
 - Native RDP's ClientHello is no longer refused by Windows Server 2025,
   which failed every NLA logon with
   `rdp: CredSSP: remote error: tls: internal error`. Go's TLS client
@@ -814,8 +829,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   huge black screen. It now asks for the window's size in CSS pixels, so
   that a remote pixel is a CSS pixel at any ratio; such a desktop is a
   little soft on a HiDPI display. `pixel_ratio` stays in the hello, and
-  no server acts on it. No test ran at a ratio of 2 before: `TestWebScreen`
-  opens both desktops in Chrome at ratios of 2 and 1 in `make e2e`
+  no server acts on it. A browser zoom changes the size in CSS pixels,
+  so the owner's zoom now resizes the remote, for everyone in the
+  session: at 25%, a 1280×800 window asks for 5120×3152. No test ran at
+  a ratio of 2 before: `TestWebScreen` opens both desktops in Chrome at
+  ratios of 2, 1 and 1.5, and in a window of an odd width, in
+  `make e2e`.
 - VNC through guacd no longer fails with "Remote unreachable" when a
   client resizes or moves the pointer right after opening. A `size` or
   a `mouse` that reaches guacd 1.6's VNC process before its RFB
