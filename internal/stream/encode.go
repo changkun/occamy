@@ -57,6 +57,10 @@ type lookahead struct {
 // With a tile cache, a tile whose content a slot holds goes as a cached
 // tile of that slot, and ends a run before it; a tile that goes alone
 // and exact is stored in the slot used least recently.
+//
+// With the session's encode cache (share.go), a tile's encoding and a
+// run's are made once for the viewers that share it, by whichever writer
+// or worker comes first.
 func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send, ok bool) {
 	start := time.Now()
 	defer func() { w.encodeTime += time.Since(start) }()
@@ -90,7 +94,7 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 		return 1, true, true
 	}
 	moving := w.moving(t, input)
-	payload, codec, lossy := w.enc.Tile(w.payload[:0], w.tiles[0], r.Dx(), r.Dy(), moving)
+	payload, codec, lossy := w.encodeTile(w.payload[:0], t, 0, version, r, moving)
 	w.payload = payload
 	if !lossy {
 		w.storeIn(key, keyed, codec)
@@ -103,10 +107,7 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 	w.rects[0] = r
 	n = 1
 	width := r.Dx()
-	maxWidth := w.limits.MaxTextureSize
-	if maxWidth <= 0 {
-		maxWidth = protocol.DefaultMaxTextureSize
-	}
+	maxWidth := w.maxWidth()
 	for i+n < len(order) && n < encoder.MaxRun {
 		u := order[i+n]
 		ru := w.g.rect(u)
@@ -127,7 +128,7 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 		if kuOK && w.cache.has(ku) {
 			break // goes cached
 		}
-		b, c, lossy := w.enc.Tile(w.ahead.payload[:0], w.tiles[n], ru.Dx(), ru.Dy(), moving)
+		b, c, lossy := w.encodeTile(w.ahead.payload[:0], u, n, v, ru, moving)
 		if !lossy {
 			w.ahead = lookahead{ok: true, tile: u, version: v, r: ru, codec: c, payload: b, k: n, key: ku, keyed: kuOK}
 			break
@@ -142,8 +143,8 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 	// Encode it, halving it while the message is too large.
 	for {
 		rect := w.rects[0].Union(w.rects[n-1])
-		w.assemble(n, rect)
-		codec = w.lossy(rect, moving, input)
+		w.runPix = assemble(w.runPix, w.tiles[:n], w.rects[:n], rect)
+		codec = w.lossy(t, n, rect, moving, input)
 		if codec != 0 {
 			w.msgSlot = 0
 			if n == 1 {
@@ -165,8 +166,8 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 	}
 }
 
-// lossy encodes the run's pixels, assembled in w.runPix as rect, into
-// w.payload, and sets the message's quality and goal:
+// lossy encodes the run of n tiles from t, assembled in w.runPix as
+// rect, into w.payload, and sets the message's quality and goal:
 //
 //   - tiles in motion at the pacer's lowest quality, since motion loses
 //     detail before input loses responsiveness, and refinement raises
@@ -179,21 +180,13 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 //     once the link allows.
 //
 // It returns the codec, 0 if none encodes the pixels.
-func (w *writer) lossy(rect image.Rectangle, moving, input bool) protocol.Codec {
-	var codec protocol.Codec
-	q := w.p.Quality()
-	switch {
-	case moving || input:
-		if moving {
-			q = min(q, w.p.MinQuality())
-		}
-		w.payload, codec = w.enc.Lossy(w.payload[:0], w.runPix, rect.Dx(), rect.Dy(), q)
-		w.msgQuality, w.msgGoal = lossyQuality(q), 0
-	default:
-		var got int
-		var reached bool
-		w.payload, codec, got, reached = w.enc.Still(w.payload[:0], w.runPix, rect.Dx(), rect.Dy(), w.g.tile, w.p.MinQuality(), q)
+func (w *writer) lossy(t, n int, rect image.Rectangle, moving, input bool) protocol.Codec {
+	still, q, lo := runMode(w.p.Quality(), w.p.MinQuality(), moving, input)
+	codec, got, reached := w.encodeRun(t, n, w.runPix, rect, still, q, lo)
+	if still {
 		w.msgQuality, w.msgGoal = stillGoal(got, q, reached)
+	} else {
+		w.msgQuality, w.msgGoal = lossyQuality(q), 0
 	}
 	if exact(codec) {
 		w.msgQuality, w.msgGoal = lossless, lossless
@@ -222,25 +215,6 @@ func (w *writer) tile(k int) []byte {
 		w.tiles[k] = make([]byte, 4*w.fb.TileSize()*w.fb.TileSize())
 	}
 	return w.tiles[k]
-}
-
-// assemble puts the pixels of the run's first n tiles, which make up
-// rect, side by side in w.runPix, row by row.
-func (w *writer) assemble(n int, rect image.Rectangle) {
-	stride := 4 * rect.Dx()
-	size := stride * rect.Dy()
-	if cap(w.runPix) < size {
-		w.runPix = make([]byte, size)
-	}
-	w.runPix = w.runPix[:size]
-	for k := range n {
-		r := w.rects[k]
-		tw := 4 * r.Dx()
-		x := 4 * (r.Min.X - rect.Min.X)
-		for y := range r.Dy() {
-			copy(w.runPix[y*stride+x:y*stride+x+tw], w.tiles[k][y*tw:(y+1)*tw])
-		}
-	}
 }
 
 // cached puts in w.buf a cached tile of the slot that holds key, the

@@ -112,6 +112,16 @@ type writer struct {
 	msgKey  cacheKey
 	msgFrom uint16
 
+	// sh is the session's encode cache and workers (share.go), shared
+	// with the other viewers whose encoders are of profile prof; nil if
+	// the writer encodes alone. fetch is the frame's work for the
+	// workers, nil if none, and pending the order from the writer's tile
+	// on, which goes to the workers once the writer has one to encode.
+	sh      *shared
+	prof    profile
+	fetch   *prefetch
+	pending []int
+
 	// Refinement (refine.go). heat is each tile's motion as of the last
 	// snapshot; heatAt is that snapshot, or the end of the last frame
 	// since, and heatIdle the time between frames from the snapshot to
@@ -391,6 +401,8 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 	sent, messages, copies := 0, 0, 0
 	w.encodeTime, w.scrollTime = 0, 0
 	detect := w.sc != nil // the order has not been searched for scrolls
+	fetch := !input       // the order's rows have not been handed to the workers
+	defer w.stopFetch()
 	for i := 0; i < len(order); i++ {
 		if err := w.smallNow(ctx); err != nil {
 			return err
@@ -405,9 +417,11 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 			}
 			if n > 0 {
 				order, i, input = w.fresh[:n], 0, true
-				// The tile read ahead belongs to the order left behind.
+				// The tile read ahead belongs to the order left behind,
+				// and so do the rows the workers have.
 				w.ahead.ok = false
-				detect = w.sc != nil
+				w.stopFetch()
+				detect, fetch = w.sc != nil, false
 			}
 		}
 		if input && inputBytes > 0 && w.versions[order[i]] != w.versions[order[i-1]] &&
@@ -437,7 +451,18 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 		if w.sent[order[i]] >= w.versions[order[i]] {
 			continue // a copy completed it
 		}
+		if fetch {
+			// Once the copies are known, the workers encode the rows
+			// after the writer's, from the first tile the writer has to
+			// encode (startFetch): a frame whose tiles go cached, or
+			// whose encodings another viewer made, wakes none.
+			w.pending = order[i:]
+		}
 		n, send, ok := w.encode(id, order, i, input)
+		if fetch && w.pending == nil {
+			fetch = false
+		}
+		w.pending = nil
 		if !ok {
 			break // resized since the tiles were chosen
 		}
