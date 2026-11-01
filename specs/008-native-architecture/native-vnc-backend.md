@@ -1405,12 +1405,27 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
   a window gone, it syncs before taking the trap away, for good, as
   `X11VNC_SENDEVENT_SYNC` makes it do from the start. The demo desktop's
   clipboard probe (`desktop.sh`) asks for the clipboard every 0.3 s,
-  every 2 s after a quiet minute, with an xclip that it kills after
-  2 s. An x11vnc that stalls for longer while it owns the clipboard,
-  as one did as clients connected on loaded hosts, answers requests
-  from xclips that are gone, back to back, and dies at the first that
-  falls inside the 0.2 s and whose error comes late, unless a check
-  found one first.
+  every 2 s after a quiet minute, with an xclip that it killed after
+  2 s when this was found, and after 30 s since (next item). An x11vnc
+  that stalls for longer while it owns the clipboard, as one did as
+  clients connected on loaded hosts, answers requests from xclips that
+  are gone, back to back, and dies at the first that falls inside the
+  0.2 s and whose error comes late, unless a check found one first.
+- **The same request kills an xclip that owns the clipboard.** An xclip
+  has no error handler, so one that answers a window that has gone
+  dies of `BadWindow` on `X_ChangeProperty`, printed in the xterm that
+  started it, and the clipboard goes with it. A fresh check on a loaded
+  host saw this on the TigerVNC demo, resource id `0x600001`. Against
+  the demo's probe, an xclip that stalled for 3.5 s died so, with that
+  id, in 2 of 17 runs: each `xclip -o` of the probe takes the same
+  client slot, so that id usually exists again, as the next poll's
+  window, and only an answer between two polls fails. On an Xvnc with
+  no probe, an owner stopped for 3.5 s died in 5 of 5 runs with a
+  reader that a 2 s `timeout` killed, and lived in 5 of 5 with a 30 s
+  `timeout`, whose reader got the text. So the probe now waits 30 s.
+  That is a longer wait, not a cure: an owner that stalls for 30 s
+  meets the same request. It costs a poll up to 30 s when the owner has
+  hung, and the watchdog kills a hung x11vnc at 26 s.
 - **Reproduced without Occamy.** In containers of the demo image, a
   client written in bash with `/dev/tcp` sent cut text to an x11vnc on
   `:0` with the demo's options, which then owned the clipboard, and
@@ -1457,13 +1472,13 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
   of the error, the test runs the whole sequence once more, and skips if
   it misses again, with what it missed and how long each step took; both
   say `the clipboard went missing with x11vnc alive`, so that CI's logs
-  show how often. The stop stays well under the 2 s that the probe's
+  show how often. The stop stays well under the 30 s that the probe's
   xclips wait, so that none of theirs dies, is answered first and
   checked, and makes x11vnc sync for good. After a stop of 1.3 s, with
   0.6 s for each step, the session got no echo in two of sixteen runs
   back to back, for reasons not found. The x11vnc that CI tests has
   served the parity matrix first; if a check of its found a gone window
-  there, after a stall of more than 2 s, the test cannot tell the
+  there, after a stall of more than 30 s, the test cannot tell the
   variable's absence. The text of the test's last step starts with its
   nonce: x11vnc sends the clipboard to its clients only if its length or
   its first 32 bytes differ from those it read last (`CHKSZ`,

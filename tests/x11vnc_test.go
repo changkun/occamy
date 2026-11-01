@@ -26,9 +26,10 @@ import (
 // later reaches its fatal handler, and its watchdog
 // (docker/demo/vnc/start.sh) kills it and starts it again, which ends
 // the sessions on it as backend-failed. The desktop's clipboard probe
-// asks with an xclip that it kills after 2 s, so an x11vnc that stalled
-// for longer met such requests. X11VNC_SENDEVENT_SYNC, which start.sh
-// sets, makes x11vnc wait for the X server before it stops trapping.
+// used to kill its xclip after 2 s, and now does after 30 s, so an
+// x11vnc that stalled for longer met such requests.
+// X11VNC_SENDEVENT_SYNC, which start.sh sets, makes x11vnc wait for the
+// X server before it stops trapping.
 //
 // The test makes the x11vnc on port 5901 own the clipboard through a
 // session and stops it. While it is stopped, an xclip that waits asks
@@ -56,7 +57,7 @@ import (
 // the two answers has x11vnc check the second; and once a check of
 // x11vnc's has found a window gone, it waits for the X server for good,
 // until it is started again. The x11vnc that CI tests has served the
-// parity matrix first, and if it stalled for more than 2 s there while
+// parity matrix first, and if it stalled for more than 30 s there while
 // it owned the clipboard, a check may have found one of the probe's
 // xclips gone, and the test cannot tell the variable's absence. On a
 // Mac, against x11vnc processes just started, it failed in five of six
@@ -268,7 +269,7 @@ done`
 // which as a rule leaves each time to ask, in that order; the kill
 // fails if the second has exited. It then continues x11vnc, and prints
 // what the first got. x11vnc stays stopped for about 0.7 s, much less
-// than the 2 s the probe's own xclips wait, so the first request x11vnc
+// than the 30 s the probe's own xclips wait, so the first request x11vnc
 // answers, which it checks, comes from a window that is there; had one
 // of the probe's died first, x11vnc's check of it would make it wait
 // for the X server for good.

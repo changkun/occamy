@@ -36,12 +36,20 @@
 
 export LANG=C.UTF-8
 
+# ask prints the clipboard as the target $1. It gives up only on an owner
+# that has hung: an xclip killed sooner leaves a stalled owner a request
+# from a window that has gone, and an owner that is an xclip, such as one
+# typed in the shell, dies of that BadWindow, and the clipboard with it.
+ask() {
+	timeout 30 xclip -o -selection clipboard -t "$1" 2>/dev/null
+}
+
 # get prints the clipboard, in UTF-8.
 get() {
-	if timeout 2 xclip -o -selection clipboard -t TARGETS 2>/dev/null | grep -qx UTF8_STRING; then
-		timeout 2 xclip -o -selection clipboard -t UTF8_STRING 2>/dev/null
+	if ask TARGETS | grep -qx UTF8_STRING; then
+		ask UTF8_STRING
 	else
-		timeout 2 xclip -o -selection clipboard -t STRING 2>/dev/null | iconv -f LATIN1 -t UTF-8
+		ask STRING | iconv -f LATIN1 -t UTF-8
 	fi
 }
 

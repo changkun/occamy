@@ -290,6 +290,8 @@ do not).
   `Resize` is `size`; `TermInput` returns `ErrUnsupportedInput`. Back and
   Forward are dropped: guacd's RDP support reads only bits 0x01 to 0x10
   (`input-queue.c`), and its VNC support passes the mask on as it is.
+  A `Resize` and a `Pointer` wait until the remote is up (Implementation
+  notes: input before the remote is up).
 - **Decisions the spec left open.**
   - The wheel follows `Mouse.js`: a line is 18 pixels, each 53 pixels
     press and release button 4 (up, 8) or 5 (down, 16) at the last
@@ -336,6 +338,73 @@ do not).
     does, so guacd logs a clean leave.
   - The conformance corpus decides whether `Unsupported` stays empty on
     real VNC, RDP and SSH sessions: it does on all three recordings.
+
+## Implementation notes: input before the remote is up
+
+The web client asked for its first fit about 300 ms after a session
+opened, before the first frame, even at the size its hello had asked
+for. The bridge used to pass that on as `size` at once, and VNC through
+guacd mostly failed from the web client with "Remote unreachable":
+VeNCrypt aside, 4 of 28 tries opened, and `vnc-guacd` none of 10, at
+loads from 16 to 128. With only that request dropped, 12 of 12 opened.
+The web client no longer repeats the hello's size, but it still asks
+for a window that changed before the first frame, and any client may,
+so the bridge holds what comes early.
+
+- **What guacd 1.6.0 does with what comes early,** from its sources and
+  from a raw Guacamole client that sent a size or a mouse right after
+  `connect`.
+
+  | Protocol | Early `size` | Early `mouse` | Why |
+  |---|---|---|---|
+  | VNC, x11vnc and TigerVNC | no frame, the connection ends | the same | `guac_vnc_user_size_handler` uses the RFB client and `guac_vnc_user_mouse_handler` the render thread, both still NULL, without a check. `key` and the clipboard do check, and an early key was harmless |
+  | SSH | lost, with no sign | no effect | the handlers skip both until the terminal is ready |
+  | telnet, Kubernetes | as SSH, by the sources; not probed | | the same check |
+  | RDP | no effect on the session | no effect | `guac_rdp_disp_set_size` stores the size for later, and input goes through a queue |
+
+  That guacd's process dies is inferred: its sources show the NULL
+  dereference and the connection ends, but no core dump was taken.
+- **Why the first frame is not enough.** guacd sends the first sync
+  itself, blank, as soon as the RFB client is connected, before it
+  starts the render thread, so an early `mouse` still has that window.
+  A `size` no longer crashes from then on, but it may not take: until
+  the server's first update `guac_vnc_send_desktop_size` drops it
+  ("Screen data has not been initialized, yet."), and at that update
+  `guac_vnc_handle_messages` sends the handshake's size. On TigerVNC a
+  size sent at the first, second or third sync took in 9 of 9 runs,
+  in some of them after guacd's own size, because the update followed
+  quickly; the sources give the first no such promise, and on RDP the
+  first sync came 8 ms after the connect, more than 2 s before the
+  default layer had a size. The second sync is the first frame with
+  the remote's pixels. guacd sends its initial size from another
+  thread than that sync, so by the sources a held size could still
+  land first and be replaced. It was not seen: of 32 sizes sent right
+  after opening on the four TigerVNC screens through guacd, at load 20
+  to 37, 32 had taken 4 s later, and guacd logged no drop.
+- **The rule.** The latest `Resize` and the latest `Pointer` wait, each
+  replacing the one before, and a `Wheel` is dropped, until the second
+  sync, or 2 s after the first (`holdLimit`). `key`, `Text` and
+  `Clipboard` do not wait. There is one rule for all protocols: VNC
+  needs it, the terminals gain the size they used to lose, and RDP
+  does not mind.
+- **Why the time limit.** guacd sends no frame that changes nothing
+  (`guac_display_end_multiple_frames`), so a remote whose first update
+  changes nothing has no second sync, nor has a user who joins a
+  connection that is idle. By the first sync the RFB client exists, so
+  what the limit lets through cannot crash guacd for want of it, and
+  guacd starts the render thread right after that sync.
+- **A prompt.** guacd asks for a missing password (`required`) during
+  the RFB handshake, so before the first sync, and an early `size`
+  killed these connections too, password dialog and all. The hold has no
+  limit before the first sync, since nothing can safely go before it,
+  but holds up nothing either: `Input` returns at once, the session
+  waits only for the owner, and the frames after the answer end the
+  hold. A session that is never answered sends no size, and has no use
+  for one.
+- **Tests.** `TestInputHeld` and `TestInputHeldLimit` play guacd's side,
+  and fail if the bridge lets a size or a pointer through early, at the
+  first sync, or never. Three rows of the matrix do the same against
+  the real guacd.
 
 ## Implementation notes: conformance corpus
 
@@ -781,6 +850,9 @@ that guacd was `vnc`'s default, they are corrected below.
   | resize: by the owner's hello | — | — | pass | pass |
   | resize: by a request | — | — | pass | pass |
   | resize: the server keeps its size | pass | pass | — | — |
+  | resize: right after opening | pass | pass | pass | pass |
+  | resize: right after opening, before a prompt | — | — | pass | pass |
+  | pointer: right after opening | pass | pass | pass | pass |
   | clipboard to the server, Latin-1 | pass | pass | pass | pass |
   | clipboard to the server, beyond Latin-1 | fail: x11vnc: Latin-1 only | fail: x11vnc: Latin-1 only | pass | fail: guacd: Latin-1 only |
   | clipboard both ways, Latin-1 | pass | pass | pass | pass |
@@ -823,6 +895,13 @@ that guacd was `vnc`'s default, they are corrected below.
     800×600 and back from a request; x11vnc keeps 1024×768: it has
     ExtendedDesktopSize but refuses SetDesktopSize as prohibited, which
     the native backend then sends no more, and guacd sends none.
+    `resize: right after opening` sends the request as soon as the
+    stream is open, before the first frame and before a prompt, and
+    `pointer: right after opening` a pointer move: the session must
+    reach its screen, and then the size as it would after a frame. The
+    other rows only resize after a frame, so CI did not see guacd die
+    of an early `size` (Implementation notes: input before the remote
+    is up).
   - clipboard: "naïve café, ½ °C" and "€ ✓ 日本" reach the server's
     clipboard byte for byte, and "naïve café\nzweite Zeile" and
     "€ ✓ 日本" come back to the client.
@@ -915,7 +994,7 @@ that guacd was `vnc`'s default, they are corrected below.
     tries. It is a fault of the server, not of either backend. The
     cause, found later, is x11vnc's answer to a request for the
     clipboard, which it owns after a client's cut text, from a window
-    that has gone: the desktop's clipboard probe kills its xclip after
+    that has gone: the desktop's clipboard probe killed its xclip after
     2 s, and x11vnc stalled for longer as clients connected. start.sh
     now sets `X11VNC_SENDEVENT_SYNC`, with which x11vnc traps that
     error ([native VNC backend](native-vnc-backend.md), Implementation
