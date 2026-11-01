@@ -2,8 +2,8 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-// Sizes: what the shell asks the remote for, in device pixels or
-// character cells, and how it scales the remote's screen to the page.
+// Sizes: what the shell asks the remote for, in CSS pixels or character
+// cells, and how it scales the remote's screen to the page.
 
 export interface Size {
   width: number
@@ -20,22 +20,28 @@ export const MAX_ROWS = 500
 const clamp = (v: number, lo: number, hi: number): number => Math.min(Math.max(v, lo), hi)
 
 /**
- * deviceSize returns the screen to ask for to fill a box of css pixels at
- * a device pixel ratio: whole device pixels, from 1 to MAX_SIDE a side,
- * or zero for an empty box, which asks for nothing.
+ * screenSize returns the screen to ask for to fill a box of css pixels:
+ * whole CSS pixels, from 1 to MAX_SIDE a side, or zero for an empty box,
+ * which asks for nothing. A remote pixel is a CSS pixel at any device
+ * pixel ratio: the programs on a remote desktop draw in the remote's
+ * pixels and do not scale, so a screen of device pixels would show them
+ * at half their size at a ratio of 2.
  */
-export function deviceSize(css: Size, ratio: number): Size {
-  const r = Number.isFinite(ratio) && ratio > 0 ? ratio : 1
+export function screenSize(css: Size): Size {
   if (!(css.width > 0) || !(css.height > 0)) {
     return { width: 0, height: 0 }
   }
   return {
-    width: clamp(Math.round(css.width * r), 1, MAX_SIDE),
-    height: clamp(Math.round(css.height * r), 1, MAX_SIDE),
+    width: clamp(Math.round(css.width), 1, MAX_SIDE),
+    height: clamp(Math.round(css.height), 1, MAX_SIDE),
   }
 }
 
-/** pixelRatio is hello's pixel_ratio: device pixels per CSS pixel in hundredths, or 0 for none. */
+/**
+ * pixelRatio is hello's pixel_ratio: device pixels per CSS pixel in
+ * hundredths, or 0 for none. It only informs: neither the shell's sizes
+ * nor occamyd depend on it.
+ */
 export function pixelRatio(ratio: number): number {
   if (!Number.isFinite(ratio) || ratio <= 0) {
     return 0
