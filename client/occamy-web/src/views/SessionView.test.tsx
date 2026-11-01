@@ -14,8 +14,9 @@
 // for a reload until it ends, occamyd refuses the view's stream to it or
 // the user leaves it, though not while occamyd cannot be reached; and
 // the clipboard panel takes text sent for the remote's, and says when
-// the core refused to send it; and a window that stays the size the
-// hello said asks the remote for nothing.
+// the core refused to send it, while a terminal session's says it has no
+// remote clipboard; and a window that stays the size the hello said asks
+// the remote for nothing.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
@@ -45,6 +46,9 @@ vi.mock('../lib/controller', async (importOriginal) => {
   return { ...m, SessionController }
 })
 
+// xterm.js needs a real browser; these tests read what is around it.
+vi.mock('./TerminalView', () => ({ default: () => null }))
+
 // NeverOpens is a WebSocket that stays connecting, so that the stream's
 // open waits until the view closes it.
 class NeverOpens extends EventTarget {
@@ -65,7 +69,7 @@ class Welcomed {
   readonly sessionId = 'mZ3k'
   readonly viewerId = 1
   role: Role = Role.Owner
-  readonly sessionClass = SessionClass.Graphical
+  sessionClass: SessionClass = SessionClass.Graphical
   readonly framebuffer = { width: 0, height: 0, data: new Uint8ClampedArray(0) }
   /** Whether the client closed the stream. */
   closed = false
@@ -603,6 +607,74 @@ describe('The clipboard panel of a stream welcomed as the owner’s', () => {
     expect(s.clipboards).toEqual(['less'])
     expect(status()).toBe('Sent to the remote clipboard.')
     expect(text()).not.toContain(edited)
+  })
+})
+
+describe('The local clipboard, when the window gets focus', () => {
+  beforeEach(welcomed)
+
+  const readable = (): ReturnType<typeof vi.fn> => {
+    const readText = vi.fn(() => Promise.resolve('local text'))
+    vi.stubGlobal('navigator', { permissions: { query: () => Promise.resolve({ state: 'granted' }) }, clipboard: { readText } })
+    return readText
+  }
+
+  it('goes to a desktop’s remote clipboard', async () => {
+    readable()
+    await render({ token: accessToken('demo'), action: null }, ended)
+    act(() => void window.dispatchEvent(new Event('focus')))
+    await until(() => (Welcomed.last?.clipboards.length ?? 0) > 0)
+    expect(Welcomed.last?.clipboards).toEqual(['local text'])
+  })
+
+  it('is not read for a terminal session, which has no remote clipboard', async () => {
+    stream.connect = () => {
+      const s = new Welcomed()
+      s.sessionClass = SessionClass.Terminal
+      return Promise.resolve(s as unknown as Session)
+    }
+    const readText = readable()
+    await render({ token: accessToken('demo'), action: null }, ended)
+    act(() => void window.dispatchEvent(new Event('focus')))
+    await settle(20)
+    expect(readText).not.toHaveBeenCalled()
+    expect(Welcomed.last?.clipboards).toEqual([])
+  })
+})
+
+describe('The clipboard panel of a terminal session', () => {
+  beforeEach(welcomed)
+
+  const opened = async (role: Role): Promise<void> => {
+    stream.connect = () => {
+      const s = new Welcomed()
+      s.role = role
+      s.sessionClass = SessionClass.Terminal
+      return Promise.resolve(s as unknown as Session)
+    }
+    await render({ token: accessToken('demo'), action: null }, ended)
+    act(() => button('Clipboard')?.click())
+  }
+
+  it('says there is no remote clipboard, points to the browser’s paste and offers no Send', async () => {
+    await opened(Role.Owner)
+    expect(text()).toContain('A terminal session has no remote clipboard.')
+    expect(text()).toContain('use your browser’s paste')
+    expect(container.querySelector('textarea')).toBeNull()
+    expect(button('Send')).toBeUndefined()
+    expect(button('Paste local')).toBeUndefined()
+  })
+
+  it('does not point a role that cannot type to paste', async () => {
+    await opened(Role.ReadOnly)
+    expect(text()).toContain('A terminal session has no remote clipboard, and your role cannot type into it.')
+    expect(text()).not.toContain('paste')
+  })
+
+  it('closes on Close', async () => {
+    await opened(Role.Owner)
+    act(() => button('Close')?.click())
+    expect(text()).not.toContain('no remote clipboard')
   })
 })
 
