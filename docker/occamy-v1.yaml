@@ -121,11 +121,14 @@ connections:
     tls: {ca_file: /run/occamy-vnc-ca/ca.pem}
     allow: {users: [demo]}
   - id: tigervnc-plain-guacd
-    name: TigerVNC over VeNCrypt, through guacd
+    name: TigerVNC over VeNCrypt, through guacd (does not work)
     protocol: vnc
     backend: guacd
     target: tigervnc:5901
-    # guacd checks no certificate, so no tls.
+    # It never opens: libvncclient asks for X509 credentials, which guacd
+    # 1.6 does not give, and guacd ends the session. The parity matrix
+    # keeps it to show that (parityKnown, tests/parity_test.go). guacd
+    # checks no certificate, so no tls.
     credentials: {username: occamy, password_env: OCCAMY_DEMO_PLAIN_PASSWORD}
     allow: {users: [demo]}
   - id: tigervnc-none-native

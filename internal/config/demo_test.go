@@ -27,8 +27,9 @@ import (
 // backends that its connections compare (tests/parity_test.go): ssh
 // on the native SSH backend, vnc-native and rdp-native on their
 // protocols' default, native, and every other connection on the backend
-// it names. It also checks the image's web client, and that its user's
-// password is the one docker/occamy-v1.yaml and tests/ give.
+// it names. It also checks the image's web client, that its user's
+// password is the one docker/occamy-v1.yaml and tests/ give, and that
+// the one connection that cannot work says so in the list.
 func TestDemoV1File(t *testing.T) {
 	raw, err := os.ReadFile("../../docker/occamy-v1.yaml")
 	if err != nil {
@@ -56,6 +57,11 @@ func TestDemoV1File(t *testing.T) {
 	backends := map[string]string{}
 	for _, c := range f.Connections {
 		backends[c.ID] = c.Backend
+		// guacd has no X509 credentials to give (parityKnown,
+		// tests/parity_test.go).
+		if strings.HasSuffix(c.Name, " (does not work)") != (c.ID == "tigervnc-plain-guacd") {
+			t.Errorf("connection %s is named %q", c.ID, c.Name)
+		}
 	}
 	// Every connection but ssh, vnc-native and rdp-native names its
 	// backend, so that the comparison does not change with a protocol's
