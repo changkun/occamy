@@ -9,6 +9,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- `TestSlowViewer` shows that a viewer that falls behind leaves another's
+  frames on the same session as they were, on a link a thousandth as fast
+  or with no acknowledgements, for raw tiles and for every codec.
 - A real desktop in the demo stack: `docker/demo/desktop`, XFCE with a
   terminal, file manager, text editor and Firefox as the user `occamy`,
   which `docker/occamy-v1.yaml` lists first as **Desktop (XFCE) over
