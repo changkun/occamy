@@ -165,6 +165,27 @@ services:
       interval: 1s
       retries: 30
 
+  desktop:
+    # A real desktop, XFCE with Firefox, for a first look, through the
+    # native backends: host desktop:5900, password vncpassword, and host
+    # desktop:3389, user occamy, password occamy. Each port has a session
+    # of its own. occamy-v1 does not depend on it, since the bench stack
+    # leaves it out; make run's --wait waits for it all the same.
+    build:
+      context: ..
+      dockerfile: docker/demo/desktop/Dockerfile
+    environment:
+      VNC_PASSWORD: vncpassword
+      RDP_PASSWORD: occamy
+    # Firefox keeps its tabs' memory here, more than the default 64 MB.
+    shm_size: 512m
+    healthcheck:
+      # Look for the listening sockets (5900 is 170C, 3389 is 0D3D) rather
+      # than connect, as for the vnc and rdp services.
+      test: ["CMD", "sh", "-c", "for p in 170C 0D3D; do grep -q \":$$p [0-9A-F]*:0000 0A\" /proc/net/tcp /proc/net/tcp6 || exit 1; done"]
+      interval: 1s
+      retries: 30
+
 volumes:
   # TigerVNC's CA certificate (tigervnc's CA_DIR), which it writes at
   # start and occamy-v1 reads.
