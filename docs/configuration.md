@@ -797,6 +797,7 @@ WebSockets over HTTP/1.1. It serves:
 | Route | Meaning |
 |-------|---------|
 | `GET /healthz` | `200 {"status":"ok"}` while `occamyd` runs |
+| `GET /api/v1/auth/methods` | How a user can sign in, for a sign-in page: `{"oidc":true}` with `auth.oidc`, `{"oidc":false}` without |
 | `POST /api/v1/auth/token` | Sign-in for static users: `{"username":"alice","password":"…"}` as `application/json` in, `{"access_token":"…","token_type":"Bearer","expires_in":900}` out. A wrong password and an unknown user get the same `401` |
 | `GET /api/v1/auth/oidc/login`, `GET /api/v1/auth/oidc/callback` | With `auth.oidc`, sign-in through the provider, from a client's `return_url` and `code_challenge` to the return URL with a one-time code in the fragment; see [signing in through OIDC](#signing-in-through-oidc) |
 | `POST /api/v1/auth/oidc/token` | With `auth.oidc`: `{"code":"…","code_verifier":"…"}` as `application/json` in, the access token out, as from `POST /api/v1/auth/token` |

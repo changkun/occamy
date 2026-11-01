@@ -328,6 +328,7 @@ func (s *server) routes() http.Handler {
 func (s *server) mux() *routeMux {
 	mux := newRouteMux()
 	mux.HandleFunc("GET /healthz", healthz)
+	mux.HandleFunc("GET /api/v1/auth/methods", s.authMethods)
 	mux.HandleFunc("POST /api/v1/auth/token", s.signIn.token)
 	if s.oidc != nil {
 		s.oidc.register(mux)

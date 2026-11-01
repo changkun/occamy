@@ -18,7 +18,7 @@ affects:
   - docs/
 effort: medium
 created: 2026-10-29
-updated: 2026-10-31
+updated: 2026-11-01
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -363,7 +363,8 @@ Settled on 2026-10-31.
   and 1,200 lines of tests.
   - `src/lib`, the shell's logic, free of React so that vitest runs it
     in Node: `api.ts` (API v1: sign-in, OIDC's token exchange, the
-    connections, ending a session, shares; strict JSON with API v1's
+    connections, ending a session, shares, and whether occamyd has
+    OIDC; strict JSON with API v1's
     error codes, nothing sent with an expired token, which counts as
     expired 10 s early, and no call waiting longer than occamyd's 30 s
     write timeout; the identity a token names, its `sub` and its `idp`,
@@ -400,7 +401,7 @@ Settled on 2026-10-31.
     for everyone), `roles.ts`, `layout.ts` and `text.ts` (clipping
     the server's strings, with control and bidi characters dropped).
   - `src/views`: sign-in (a password, and single sign-on where
-    `GET /api/v1/auth/oidc/login` without a challenge answers 400),
+    `GET /api/v1/auth/methods` says occamyd has OIDC),
     the connection list, and the session view: a toolbar (title, role,
     the other viewers, Clipboard, Share for the owner, Full screen, End
     session or Leave), a canvas scaled to fit with the remote's cursor,
@@ -411,8 +412,8 @@ Settled on 2026-10-31.
     clipboard panel, and a share panel that mints a viewer or read-only
     link lasting 10 minutes to 12 hours.
   - The owner's window size goes to the remote 300 ms after it settles,
-    in device pixels or cells; viewers and read-only clients see the
-    owner's size, scaled. Read-only clients bind no input. The remote's
+    in device pixels or cells, unless the hello already asked for it;
+    viewers and read-only clients see the owner's size, scaled. Read-only clients bind no input. The remote's
     clipboard goes to the local one when the page has focus, for a role
     that gives input, and the local one to the remote on focus where the
     browser already lets the page read it (Chrome's `clipboard-read`
@@ -461,7 +462,7 @@ Settled on 2026-10-31.
   - New: terminal sessions, the clipboard, credential prompts, sharing,
     viewers, visibility, the remote's cursor and title, the bell, and
     why a session ended.
-- **Tests:** 217 in `src/lib` and `src/views`, in the `web` job. Unit
+- **Tests:** 224 in `src/lib` and `src/views`, in the `web` job. Unit
   tests for the API calls against a scripted fetch (each request's
   method, path, headers and exact body, and the time limit on the
   answer and its body), the identity a token names, PKCE against RFC
@@ -515,7 +516,9 @@ Settled on 2026-10-31.
   controller runs against a stand-in `connect` and session (the
   hello's size and visibility, clamping, refusals, React's development
   effects cancelling an open, close cancelling one, the owner's resize
-  while another is on its way, the clipboard by role and the panel's
+  while another is on its way, none for the size the hello asked for,
+  before the first frame or after it, and one for a window that changed
+  before the first frame, the clipboard by role and the panel's
   draft, text sent, from the panel or the local clipboard, taken for
   the remote's, but not text the core refuses, a failure to show the
   session closing the stream, the close code it ended with or was
@@ -576,9 +579,13 @@ Settled on 2026-10-31.
     connection list, a reload after it signing in with no notice. No
     page broke the Content-Security-Policy.
     The console showed only the browser's failed-resource lines for
-    requests meant to fail: the OIDC probe's 404, or 400 where single
-    sign-on is configured, the wrong password's 401, the bogus code's
-    401 and the refused `DELETE`'s 404.
+    requests meant to fail: the wrong password's 401, the bogus code's
+    401 and the refused `DELETE`'s 404. On 2026-11-01, a sign-in page
+    logged nothing with OIDC off or on, offering single sign-on only
+    with it on, and no stream sent a resize request until the window
+    changed: at 1200 × 752 CSS pixels and a ratio of 2, the build before
+    the change sent 2400 × 1504 once the stream opened, and this one
+    sent only 1000 × 592 once the window shrank.
     Firefox and Safari were not run.
 - **Decisions:**
   - No router and no UI library: three screens in one component's
@@ -704,6 +711,23 @@ Settled on 2026-10-31.
     since its token must not outlive the page's load (fragment.ts), and
     a share link's page forgets an owner's session kept before; a
     viewer that reloads opens the link again.
+  - 2026-11-01: the hello counts as the first size asked for. occamyd
+    takes an owner's hello for a resize, at open and on a join, but the
+    controller did not know that, and its check against the screen's
+    size cannot match before the first frame, when the size is 0 × 0. So
+    the view's first resize, 300 ms after the stream opened, repeated
+    the hello, which on VNC through guacd kills guacd's child (occamyd
+    is fixed for that separately). The controller now keeps the hello's
+    size, in pixels or cells by the session's class, as it keeps a
+    request's, so that only a window that has changed is sent.
+  - 2026-11-01: the sign-in page asks `GET /api/v1/auth/methods` whether
+    occamyd has OIDC. It used to send `GET /api/v1/auth/oidc/login`
+    without a challenge and read the 400 or the 404, which a browser
+    logs as a failure on every sign-in page, and occamyd in its request
+    log. No route that answers 200 said so, and `/healthz` is the
+    liveness check, so the smallest honest fix is a small route. It
+    tells nothing the 404 did not, and a client that gets no answer
+    offers the password alone, as before.
   - 2026-10-31: an owner whose newer stream took over is told by the
     reason of occamyd's normal close, "the owner connected again", which
     `docs/api.md` documents and a test holds both to, rather than a new

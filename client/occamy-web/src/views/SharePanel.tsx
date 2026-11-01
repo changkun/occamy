@@ -93,7 +93,7 @@ export function SharePanel({ api, token, sessionId, request, onClose, onSignIn }
   }
 
   return (
-    <form className="panel" aria-labelledby={`${id}-title`} aria-busy={busy} onSubmit={submit}onKeyDown={(e) => e.key === 'Escape' && onClose()}>
+    <form className="panel" aria-labelledby={`${id}-title`} aria-busy={busy} onSubmit={submit} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
       <h2 id={`${id}-title`}>Share this session</h2>
       <fieldset>
         <legend>Others join</legend>

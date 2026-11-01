@@ -11,6 +11,7 @@ import { describe, expect, it } from 'vitest'
 import { CloseCode, CloseError, ConnectionError, type ConnectOptions, ProtocolError, Role, type Session, SessionClass, type SessionEvent } from '../protocol'
 import { type ControllerOptions, SessionController, type SessionState, type TerminalSink, overlayOf } from './controller'
 import { describeEnd } from './ending'
+import { MAX_SIDE } from './layout'
 
 const size = { width: 1280, height: 720, cols: 100, rows: 30, pixelRatio: 200 }
 
@@ -216,12 +217,14 @@ describe('SessionController', () => {
 
   it('asks for the screen’s size again when the window returns to it while another is on its way', async () => {
     const s = new FakeSession(Role.Owner)
-    const c = await opened(s)
+    const c = controller(() => Promise.resolve(s as unknown as Session))
+    await c.open({ ...size, cols: 80, rows: 24 })
+    c.showTerminal(sink)
     s.push({ type: 'resize', width: 80, height: 24 })
     await settle()
     expect(c.getState().size).toEqual({ width: 80, height: 24 })
 
-    c.requestResize(80, 24) // the screen's size, nothing asked: nothing to do
+    c.requestResize(80, 24) // the screen's size, as asked: nothing to do
     c.requestResize(100, 30)
     c.requestResize(100, 30) // asked already
     c.requestResize(80, 24) // dragged back before the remote applied 100 × 30
@@ -235,6 +238,50 @@ describe('SessionController', () => {
     await settle()
     c.requestResize(80, 24) // settled at the size asked for
     expect(s.resizes).toHaveLength(2)
+  })
+
+  it('asks for no size the hello asked for, before the first frame and after it', async () => {
+    const graphical = new FakeSession(Role.Owner, SessionClass.Graphical)
+    const g = await opened(graphical)
+    expect(g.getState().size).toEqual({ width: 0, height: 0 })
+    g.requestResize(size.width, size.height)
+    graphical.push({ type: 'resize', width: size.width, height: size.height })
+    await settle()
+    g.requestResize(size.width, size.height)
+    expect(graphical.resizes).toEqual([])
+
+    // A terminal's hello asks for cells.
+    const terminal = new FakeSession(Role.Owner)
+    const t = await opened(terminal)
+    t.requestResize(size.cols, size.rows)
+    expect(terminal.resizes).toEqual([])
+  })
+
+  it('takes the hello’s size within the bounds a request has', async () => {
+    const s = new FakeSession(Role.Owner, SessionClass.Graphical)
+    const c = controller(() => Promise.resolve(s as unknown as Session))
+    await c.open({ ...size, width: MAX_SIDE + 1, height: MAX_SIDE + 1 })
+    c.requestResize(MAX_SIDE + 1, MAX_SIDE + 1)
+    expect(s.resizes).toEqual([])
+  })
+
+  it('asks for a window that changed before the first frame, and for the hello’s size once it did', async () => {
+    const s = new FakeSession(Role.Owner, SessionClass.Graphical)
+    const c = await opened(s)
+    c.requestResize(1000, 600)
+    c.requestResize(size.width, size.height)
+    expect(s.resizes).toEqual([
+      [1000, 600],
+      [size.width, size.height],
+    ])
+  })
+
+  it('asks for the window of a hello that asked for nothing', async () => {
+    const s = new FakeSession(Role.Owner, SessionClass.Graphical)
+    const c = controller(() => Promise.resolve(s as unknown as Session))
+    await c.open({ ...size, width: 0, height: 0 })
+    c.requestResize(size.width, size.height)
+    expect(s.resizes).toEqual([[size.width, size.height]])
   })
 
   it('puts the remote clipboard on the local one only for a role that gives input', async () => {

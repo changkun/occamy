@@ -39,6 +39,7 @@ HTTP/1.1 only, with or without TLS: the streams are WebSockets, which
 | Route | Caller | Served |
 |-------|--------|--------|
 | [`GET /healthz`](#get-healthz) | anyone | always |
+| [`GET /api/v1/auth/methods`](#get-apiv1authmethods) | anyone | always |
 | [`POST /api/v1/auth/token`](#post-apiv1authtoken) | anyone | always |
 | [`GET /api/v1/auth/oidc/login`](#get-apiv1authoidclogin) | a browser | with `auth.oidc` |
 | [`GET /api/v1/auth/oidc/callback`](#get-apiv1authoidccallback) | the provider, through the browser | with `auth.oidc` |
@@ -76,9 +77,10 @@ API v1's conventions:
   a session's state have `Cache-Control: no-store`: those of both token
   endpoints, `GET /api/v1/connections`, `POST /api/v1/sessions`,
   `GET /api/v1/sessions/{id}` and `POST /api/v1/sessions/{id}/shares`.
-  So do `/healthz`, every redirect of the OIDC browser routes, which also
-  has `Referrer-Policy: no-referrer`, the refusals of
-  `GET /api/v1/auth/oidc/login`, and the callback's `invalid_state`.
+  So do `/healthz`, `GET /api/v1/auth/methods`, every redirect of the
+  OIDC browser routes, which also has `Referrer-Policy: no-referrer`, the
+  refusals of `GET /api/v1/auth/oidc/login`, and the callback's
+  `invalid_state`.
 - **Tokens never in a URL.** Routes read a token from one
   `Authorization: Bearer` header, and the stream routes from a WebSocket
   subprotocol too; never from the query string or a cookie, which
@@ -271,6 +273,22 @@ users sign in at an OpenID Connect provider through the three OIDC
 routes. Both answer with the same token response, in the shape of
 OAuth 2.0's (RFC 6749, section 5.1). A trusted issuer's access tokens
 need no sign-in.
+
+### `GET /api/v1/auth/methods`
+
+Says how a user can sign in, for a sign-in page to show. It takes no
+token and is always served; it asks nothing of the OIDC provider.
+Password sign-in has no field here, since its route is always served.
+
+Response: `200`, with `Cache-Control: no-store`.
+
+```json
+{"oidc":true}
+```
+
+| Field | Meaning |
+|-------|---------|
+| `oidc` | Whether `occamyd` has `auth.oidc`, and so serves the three OIDC routes |
 
 ### `POST /api/v1/auth/token`
 

@@ -400,9 +400,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   password or through OIDC with PKCE, the connections the user may
   open, and a session on protocol v1, a graphical one on a canvas scaled
   to the window and a terminal one in xterm.js. The owner resizes the
-  remote with the window, answers the remote's credential prompts,
-  shares the session through a link as a viewer or read-only, and ends
-  it, signing in again over the session when the sign-in has expired;
+  remote with the window, asking for no size its hello asked for,
+  answers the remote's credential prompts, shares the session through a
+  link as a viewer or read-only, and ends it, signing in again over the
+  session when the sign-in has expired;
   a reload over the owner's session signs in again and joins it, within
   occamyd's grace, or lists the connections if the user would rather;
   an End or share that waited for the sign-in is left to occamyd, which
@@ -481,6 +482,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   [docs/configuration.md](docs/configuration.md#apple-remote-desktop-ard)
   describes the risk: anyone in between can read the Mac account's
   whole password.
+- `GET /api/v1/auth/methods` says whether occamyd has OIDC, for a
+  sign-in page, with no token and a 200 either way.
 - [docs/api.md](docs/api.md), the reference of API v1: every route with
   its tokens, requests, replies, errors and limits, ad-hoc targets,
   shares, the stream upgrades and the OIDC routes. A test fails when a
