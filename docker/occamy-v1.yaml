@@ -10,7 +10,9 @@
 # explicit fallback and the benchmark's baseline, side by side, for the
 # guacd bridge's parity gate (specs/008-native-architecture/guacd-bridge.md,
 # Parity gate). The user demo signs in with the password occamy, in the
-# web client at http://localhost:5637/static/ or with curl:
+# web client at http://localhost:5637/static/ or with curl. That user is
+# this demo's alone: occamyd has no default user, and a real install
+# lists its own users or sets auth.oidc (docs/configuration.md).
 #
 #	curl -s localhost:5637/api/v1/auth/token \
 #	  -H 'Content-Type: application/json' \
@@ -29,9 +31,9 @@ web_client: client/occamy-web/dist
 debug:
   address_env: OCCAMY_V1_DEBUG_ADDRESS
 auth:
-  # On a tmpfs (docker-compose.yaml): occamyd creates the key at start,
-  # and tokens die with the container.
-  signing_key_file: /run/occamy/signing.key
+  # Where a real install keeps it, on a volume (docker-compose.yaml):
+  # occamyd creates the key at start, and tokens survive a restart.
+  signing_key_file: /var/lib/occamy/signing.key
   users:
     - name: demo
       password_hash: "$2a$10$DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"

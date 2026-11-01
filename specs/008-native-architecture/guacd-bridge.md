@@ -207,7 +207,8 @@ Settled on 2026-10-30, following the recommendations above.
    so the 10x target is now the gate and the 10% tolerance decides
    nothing. The soak values are not one of the owner's conditions; the
    soak runs as a check for leaks in `occamyd` (Implementation notes:
-   VNC's soak).
+   VNC's soak). Since 2026-11-01 that check is a stability gate before
+   v1.0, run once, and not a row in the benchmark's series.
 5. **The bridge is removed at v1.0** (open question 5, answered above).
 
 ## Task Breakdown
@@ -1039,7 +1040,8 @@ that guacd was `vnc`'s default, they are corrected below.
   the conditions for deleting a guacd path (Parity gate), so it decides
   nothing there; it looks for leaks in `occamyd`. Decision 4's values
   make the full run, 20 sessions (N) for 8 hours (H), which has not
-  been done.
+  been done. By the decision of 2026-11-01 it is a stability gate before
+  v1.0: it runs once, and it is not a row in the benchmark's series.
 - **How it runs.** `tests/soak_test.go` (`TestSoak`), through
   `make soak` against the [006](../006-demo-stack-refresh.md) stack
   started with `make run OCCAMY_DEBUG=1`: sessions to `tigervnc-native`

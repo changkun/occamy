@@ -233,6 +233,13 @@ func (a *Auth) validate(c *checker) {
 		}
 	}
 
+	// occamyd has no default user, so a file that names no way in would
+	// serve a server nobody can use. legacy_v0 does not count: its login
+	// signs a target for anyone, and signs nobody in to API v1.
+	if len(a.Users) == 0 && a.OIDC == nil && len(a.TrustedIssuers) == 0 {
+		c.add("auth", "nobody could sign in, and occamyd has no default user: list users in auth.users, whose hashes docs/configuration.md says how to make, or set auth.oidc or auth.trusted_issuers")
+	}
+
 	users := map[string]int{}
 	for i, u := range a.Users {
 		p := fmt.Sprintf("auth.users[%d]", i)

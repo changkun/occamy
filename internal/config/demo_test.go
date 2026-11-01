@@ -5,7 +5,9 @@
 package config_test
 
 import (
+	"bytes"
 	"encoding/json"
+	"io/fs"
 	"maps"
 	"os"
 	"os/exec"
@@ -35,7 +37,7 @@ func TestDemoV1File(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// What the compose service gives it: a tmpfs for the signing key,
+	// What the compose service gives it: a volume for the signing key,
 	// the tigervnc service's CA, and the SSH, VNC and RDP passwords.
 	ca, err := vnctest.SelfSigned("tigervnc")
 	if err != nil {
@@ -45,7 +47,7 @@ func TestDemoV1File(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(caDir, "ca.pem"), ca.PEM, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	raw = []byte(strings.NewReplacer("/run/occamy/", t.TempDir()+"/", "/run/occamy-vnc-ca/", caDir+"/").Replace(string(raw)))
+	raw = []byte(strings.NewReplacer("/var/lib/occamy/", t.TempDir()+"/", "/run/occamy-vnc-ca/", caDir+"/").Replace(string(raw)))
 	t.Setenv("OCCAMY_DEMO_SSH_PASSWORD", "occamy")
 	t.Setenv("OCCAMY_DEMO_VNC_PASSWORD", "vncpassword")
 	t.Setenv("OCCAMY_DEMO_PLAIN_PASSWORD", "plainpassword")
@@ -468,6 +470,101 @@ func nodeTakes(versions string, major int) bool {
 		}
 	}
 	return false
+}
+
+// TestSigningKeyHome checks that the signing key lives where a real
+// install keeps it, at one path everywhere: the image gives that
+// directory to its nonroot user, or occamyd could not create the key on
+// the volume, the demo stack mounts a named volume there, and the files
+// name the key in it. The image's own run is make e2e's.
+func TestSigningKeyHome(t *testing.T) {
+	const dir, key = "/var/lib/occamy", "/var/lib/occamy/signing.key"
+	read := func(name string) string {
+		t.Helper()
+		raw, err := os.ReadFile("../../" + name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	_, final, ok := strings.Cut(read("docker/Dockerfile"), "FROM gcr.io/distroless/static-debian13:nonroot")
+	if !ok {
+		t.Fatal("docker/Dockerfile has no distroless stage")
+	}
+	if !strings.Contains(final, "--chown=65532:65532 "+dir+" "+dir) {
+		t.Errorf("the runtime image does not give %s to nonroot", dir)
+	}
+	if !strings.Contains(read("docker/docker-compose.yaml"), "- occamy-v1-data:"+dir+"\n") {
+		t.Errorf("docker-compose.yaml mounts no named volume at %s", dir)
+	}
+	for _, name := range []string{"docker/occamy-v1.yaml", "docker/bench/occamy-v1.yaml", "docs/configuration.md"} {
+		if !strings.Contains(read(name), "signing_key_file: "+key+"\n") {
+			t.Errorf("%s does not keep the signing key at %s", name, key)
+		}
+	}
+}
+
+// TestDemoUserStaysInTheDemo checks that nothing but the demo stack's
+// and the benchmark stack's v1 files holds the demo user's password
+// hash, and that the v0 file in the image and the release archives has
+// no users to sign in with: occamyd has no default user or password.
+func TestDemoUserStaysInTheDemo(t *testing.T) {
+	// Past the $ signs, which a shell's heredoc would escape.
+	const hash = "DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
+	allowed := map[string]bool{
+		"docker/occamy-v1.yaml":           true,
+		"docker/bench/occamy-v1.yaml":     true,
+		"docker/bench/occamy-v1-gfx.yaml": true,
+	}
+	found := map[string]bool{}
+	err := filepath.WalkDir("../..", func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			switch d.Name() {
+			case ".git", ".claude", "node_modules", "dist":
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		// This test is the one other file that has to say the hash.
+		if !d.Type().IsRegular() || d.Name() == "demo_test.go" {
+			return nil
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if bytes.Contains(raw, []byte(hash)) {
+			name, err := filepath.Rel("../..", path)
+			if err != nil {
+				return err
+			}
+			found[filepath.ToSlash(name)] = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name := range found {
+		if !allowed[name] {
+			t.Errorf("%s holds the demo user's password hash", name)
+		}
+	}
+	for name := range allowed {
+		if !found[name] {
+			t.Errorf("%s no longer holds the demo user's password hash, so this test checks nothing", name)
+		}
+	}
+	raw, err := os.ReadFile("../../conf.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("users:")) || bytes.Contains(raw, []byte("password")) {
+		t.Errorf("conf.yaml, which the image and the archives ship, names users or passwords:\n%s", raw)
+	}
 }
 
 // TestMakeStop checks that make stop removes the demo stack's containers
