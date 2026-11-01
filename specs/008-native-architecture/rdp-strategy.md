@@ -296,8 +296,13 @@ best effort, has none. The live run was repeated after the fixes.
       and does little with, a progressive stream's blocks and the GFX
       PDUs it skips, are charged 8 and 24 units each, paid and counted
       once a message, which holds a flood of them, in stored messages,
-      to 0.2 to 0.7 of a core (`BenchmarkSkipped`, load 9.1 to 10.5);
-      PDUs applied that draw little are left to a decision. The rate is
+      to 0.2 to 0.7 of a core (`BenchmarkSkipped`, load 9.1 to 10.5):
+      progressive regions outside a frame 0.34, blocks of an unknown
+      type 0.30 and frame begins 0.26; W2S2 PDUs of no blocks 0.52;
+      unknown GFX PDUs 0.19, or 0.27 after one of each other name that
+      skips are counted under; frames begun again 0.20; and empty
+      bitmaps 0.70, the most. PDUs applied that draw little are left to
+      a decision. The rate is
       a session's, so a user with ten sessions to hostile servers can
       take ten cores; a budget for the whole process is a release item
       ([native-rdp-backend](native-rdp-backend.md)).
