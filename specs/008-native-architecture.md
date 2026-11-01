@@ -66,11 +66,13 @@ In scope:
 7. Native VNC backend, vnc's default (the owner's decision of
    2026-10-31), with the guacd bridge as an explicit fallback.
 8. Native RDP backend, rdp's default since 2026-10-31, ahead of rc.1,
-   with the guacd bridge as an explicit fallback; checked against xrdp,
-   not yet Windows. Its graphics pipeline is on by default since phase
-   3's second part, with RemoteFX Progressive verified against xrdp
-   and RemoteFX against the specification's vectors, and ClearCodec and
-   the cache to come.
+   with the guacd bridge as an explicit fallback; checked against xrdp
+   and on a Windows Server 2025 CI runner, not yet on a real Windows
+   host. Its graphics pipeline is on by default since phase 3's second
+   part, with RemoteFX Progressive verified against xrdp and RemoteFX
+   against the specification's vectors, and ClearCodec and the cache to
+   come, which block v1.0: without them that Windows server's screen
+   stays nearly black under GFX.
    telnet, which gets no native backend, goes through guacd until guacd
    is removed. Where a native backend exists it is the default,
    and guacd serves that protocol only with an explicit `backend: guacd`.
