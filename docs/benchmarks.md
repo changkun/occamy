@@ -301,23 +301,25 @@ in v1. A v1 session runs as follows:
   JSON records it as `sign_in_ms`, and the table notes it on the row.
   The v0 series' G7 includes its login, which v0 needs for every
   session.
-- **G7 over RDP does not yet compare, because of a fault it found.**
-  When a native RDP session ends, xrdp's channel server, `xrdp-chansrv`,
-  exits, and nothing starts it again while the X session lasts. Every
-  later connection to that X session, native or through guacd, then
-  stays black for the 10 s that xrdp spends trying to reach it. On one X
-  session of a loaded host, `rdp-guacd` showed the wallpaper in 2627 and
-  3230 ms, `rdp-native-nogfx` in 2149 ms, and `rdp-guacd` then in
-  11152 ms. v0's `occamy` and `guacd` took 3070 and 3302 ms before any
-  native session, and 12345 and 12997 ms after one. So a native row
-  includes the wait from its second sample on, and any other row
-  includes it if a native session ran before it on the stack, which
-  makes those rows depend on the order of the series: with `-runs 3`,
-  v0's second and third runs come after native's first. G7's end is not
-  the cause: no frame arrives during the wait, and the baselines' end,
-  the first frame that drew, stopped at the black screen before it. Why
-  `xrdp-chansrv` exits is not known yet
-  ([the follow-up](../specs/008-native-architecture/benchmark.md#implementation-notes-the-harness-for-the-v1-run)).
+- **The bench desktop restarts xrdp's channel server,** because every
+  RDP path of a series shares one X session. xrdp 0.10.1's
+  `xrdp-chansrv` can exit as a connection closes, and sesman starts it
+  only with the X session
+  ([the backend's notes](../specs/008-native-architecture/native-rdp-backend.md#implementation-notes-registration)).
+  Every later connection to that X session, native or through guacd,
+  would then stay black for the 10 s that xrdp spends trying to reach
+  it, so G7 would measure the wait, in a row that depends on which path
+  ran before it: with `-runs 3`, v0's second and third runs come after
+  native's first. The bench desktop now has the demo's `reconnectwm.sh`,
+  which starts the channel server again when a connection finds none.
+  Without it, on one X session of a loaded host, `rdp-guacd` showed the
+  wallpaper in 2627 and 3230 ms, `rdp-native-nogfx` in 2149 ms and
+  `rdp-guacd` then in 11152 ms, and v0's `occamy` and `guacd` took 3070
+  and 3302 ms before any native session and 12345 and 12997 ms after one.
+  With it, `-quick` runs in that order took 1317, 143 and 1134 ms, and
+  4353 and 4486 ms for v0 straight after native, and xrdp logged no
+  failure to reach the channel server. Those are smokes on a loaded host,
+  so they show that the wait is gone and compare nothing else.
 - **Bounds.** A sample that the stack does not answer fails rather than
   holding the run: 30 s to sign in and open the stream and, in G7, for
   the first frame; 10 s for a key's update and for an input to be
@@ -386,7 +388,7 @@ again.
 | G2 | VNC and RDP, all networks | The probe's keys are jittered |
 | G3, G4 | VNC and RDP, all networks | The scene stamps its frames, and frames are counted by stamp |
 | G5 | VNC and RDP, all networks | The stamp and the jitter |
-| G7 | SSH, VNC and RDP, all networks | It ends on known content. RDP's rows do not compare until the fault in [G7 over RDP](#the-v1-series) is settled |
+| G7 | SSH, VNC and RDP, all networks | It ends on known content, and RDP's rows no longer carry [the channel server's 10 s wait](#the-v1-series) |
 | G1, G6 | No | The idle scene and the photo change no pixel, and the wallpaper's code moved without changing one |
 | T1, T2, T3 | No | The shell shows what it showed: G7 ends on the prompt that was already there, so the stack needs no banner, and T1's keys are not jittered |
 

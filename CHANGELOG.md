@@ -717,7 +717,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   - `v1-native-nogfx` and `v1-guacd-gfx` run RDP the other way from what
     each side ships, beside the verdict's `v1-native` and `v1-guacd`,
     with `gfx` and `verdict` in the results;
-  - every path to RDP asks for 32 bits per pixel.
+  - every path to RDP asks for 32 bits per pixel;
+  - the bench desktop has the demo's `reconnectwm.sh`, so that xrdp's
+    channel server exiting does not add 10 s to G7 over RDP.
 - The signing key's home is `/var/lib/occamy/signing.key` on a
   persistent volume, so that tokens survive a restart. The runtime image
   gives that directory to its `nonroot` user, the demo and bench stacks

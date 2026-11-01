@@ -457,9 +457,7 @@ from the v1 series, which waits for [client-core](client-core.md).
 for the run, and no series has run with it: a `-quick` smoke proved that
 it works and nothing else. The owner's go-ahead starts the series.
 `docs/benchmarks.md`, What to measure again, lists the baselines that
-are out of date until then. G7 over RDP will not compare until
-`xrdp-chansrv`'s exit is settled (Surprises, and the v1 series'
-follow-ups).
+are out of date until then.
 
 - **What was done:**
   - *The frame stamp.* The scene stamps each frame of the scroll, the
@@ -555,32 +553,47 @@ follow-ups).
     measurement, not one this work settled.
   - The smoke's G7 over RDP took about 10 s on every v1 path and about
     3 s on v0, with the two native paths 3 ms apart, which looked like a
-    timer rather than load. It is one: xrdp logs `Connecting to chansrv`
+    timer rather than load. It was one, and a known one: xrdp 0.10.1's
+    channel server can exit as a connection closes, and sesman starts it
+    only with the session
+    ([native-rdp-backend](native-rdp-backend.md#implementation-notes-registration)).
+    The demo images start it again from `reconnectwm.sh`, and the bench
+    desktop did not have that script. xrdp logs `Connecting to chansrv`
     and, exactly 10 s later, `xrdp_mm_chansrv_connect: error in
     trans_connect chan`, and the screen stays black until then. The
     wallpaper marker is not late, since no frame arrives during the
-    wait. `xrdp-chansrv` was gone: sesman logs it finishing as the first
-    native session of an X session ends, 96 ms after xrdp's end of that
-    session, and it does not come back for that X session. All three of
-    its exits on the bench stack happened so. On one fresh X session,
-    two `rdp-guacd` sessions showed the wallpaper in 2627 and 3230 ms and
+    wait. Sesman logs `xrdp-chansrv` finishing as the first native
+    session of an X session ends, 96 ms after xrdp's end of that session,
+    and without the script it does not come back for that X session. All
+    three of its exits on the bench stack happened so. On one fresh X
+    session, two `rdp-guacd` sessions showed the wallpaper in 2627 and 3230 ms and
     left it running, one `rdp-native-nogfx` session took 2149 ms and it
     exited, so GFX is not why, and `rdp-guacd` then took 11152 ms. v0
     was only faster for running first: `occamy` and `guacd` took 3070
     and 3302 ms before any native session, and 12345 and 12997 ms after
     one, at a lower load. The first smoke's 11310 ms for `occamy` is
     not this, since v0 ran first there and xrdp logged no failure until
-    native had run; that was a host load of 93 to 185. Why it exits is
-    not known, but there are two leads, and neither is shown to be it.
-    Native offers only `cliprdr` and `drdynvc`, and guacd also `rdpsnd`,
-    whose setup is what `xrdp-chansrv`'s log stops short of. And
-    `Client.Close` drops the connection with no Disconnect Provider
-    Ultimatum, which native only ever receives: xrdp logs an SSL
-    `unexpected eof` after 32 of 38 native connections and none of 74
-    through guacd. The old end of G7 stopped at the black frame, which
-    is why the baselines' 2.2 s never showed this: CI's run on the old
-    end read 44.7 ms for `v1-native`. No change to the harness helps,
-    since a native session ends between any two samples.
+    native had run; that was a host load of 93 to 185. The old end of G7
+    stopped at the black frame, which is why the baselines' 2.2 s never
+    showed this: CI's run on the old end read 44.7 ms for `v1-native`.
+    The bench desktop now has the script, and
+    `TestBenchDesktopReconnectScript` keeps it there. In the same order, in `-quick` runs at a load of 21
+    to 33, `rdp-guacd` took 1317 ms, `rdp-native-nogfx` 143 ms, `rdp-guacd`
+    1134 ms, and v0's `occamy` and `guacd` 4353 and 4486 ms straight after
+    a native session. The script restarted the channel server after each
+    of the three native runs, and xrdp logged no `error in trans_connect
+    chan` in seven runs. Those numbers show that the wait is gone and
+    compare nothing else.
+    The notes on the channel server describe a connection that closes
+    just after attaching. Here a native session's end set it off 3 to 5 s
+    after attaching, every time, and none through guacd did. That is not
+    explained, and a server without the script still pays the wait. There
+    are two leads, and neither is shown to be it. Native offers only
+    `cliprdr` and `drdynvc`, and guacd also `rdpsnd`, whose setup is what
+    `xrdp-chansrv`'s log stops short of. And `Client.Close` drops the
+    connection with no Disconnect Provider Ultimatum, which native only
+    ever receives: xrdp logs an SSL `unexpected eof` after 32 of 38 native
+    connections and none of 74 through guacd.
   - The first smoke's low v1 counts in G3, such as 2 stamps of 16 frames
     over native VNC, were not misread stamps. Tallied over 6 s of the
     scroll, native VNC and guacd's VNC each read 107 stamps, so that was
@@ -852,15 +865,14 @@ say what the harness does now.
     RDP are in occamyd; then `docs/benchmarks.md` gets the v1 results
     and a table per scenario of the baseline, the v1 bridge, v1 native,
     the target and whether it is met.
-  - **`xrdp-chansrv` exits when a native RDP session ends**
-    ([the harness's notes](#implementation-notes-the-harness-for-the-v1-run)),
-    which adds 10 s of black screen to every later RDP connection to
-    that X session. Find why and settle it before the full run: until
-    then G7 over RDP measures the wait, and its v0 and guacd rows depend
-    on the order of the series, which `-runs 3` puts after native from
-    the second run on. xrdp's clipboard goes through that
-    server too, so check what a later session loses; that is not
-    measured yet, and neither is the demo's `docker/demo/rdp`.
+  - ~~**`xrdp-chansrv` exits when a native RDP session ends,** which adds
+    10 s of black screen to every later RDP connection to that X session,
+    so that G7 over RDP measures the wait in rows that depend on the
+    order of the series.~~ Done for the bench: the bench desktop has the
+    demo's `reconnectwm.sh`
+    ([the harness's notes](#implementation-notes-the-harness-for-the-v1-run)).
+    Why a native session's end sets it off is still to find, since a
+    server without the script waits and loses its clipboard.
   - ~~**G5 v1 p95 phase lock.** The probe's keys, every 100 ms, were
     exactly 6 ticks of 60 Hz, so one run's p95 did not cover the spread
     of phases, and could understate it by up to about 7.5 ms, in
