@@ -268,7 +268,9 @@ sends plain bitmap updates
 guacd** does not use GFX: `occamyd` gives guacd `disable-gfx`, so the
 two RDP connections reach the same xrdp differently, the native one
 through GFX and the other with plain bitmaps. The native RDP backend
-has been tested against xrdp, not yet against Windows.
+has been tested against xrdp and on a Windows Server 2025 CI runner,
+not on a real Windows deployment; [the guacd
+fallback](#the-guacd-fallback) has what that run showed.
 
 ### Kubernetes
 
@@ -539,19 +541,27 @@ again. It passes when it returns to the same session as its owner.
 vnc and rdp connections get `occamyd`'s own clients, its native
 backends, by default. A connection that sets `backend: guacd` goes
 through guacd instead. That is the fallback for a server that the
-native backend cannot serve yet, such as a Windows RDP server until
-the native RDP backend is verified against one. It is also the
-baseline that the benchmark compares the native backends against. The
-fallback goes away in v1.0, with guacd
-([configuration.md](configuration.md#backends)).
+native backend cannot serve yet. It is also the baseline that the
+benchmark compares the native backends against. The fallback goes away
+in v1.0, with guacd ([configuration.md](configuration.md#backends)).
 
-A Windows server under GFX draws parts of its screen with ClearCodec
-and its bitmap cache, which the native backend does not decode yet. It
-skips those PDUs, so the parts they draw may stay missing or stale,
-and at the first of them in a session `occamyd` logs a warning that
-names `disable_gfx: true`. With that key on the connection, the server
-sends plain bitmap updates instead, which the native backend decodes;
-`backend: guacd` is the other way around it.
+**Set `disable_gfx: true` for Windows hosts.** Native RDP has met
+Windows only on a Windows Server 2025 CI runner connecting to itself
+over loopback, not in a real deployment, and
+[#32](https://github.com/changkun/occamy/issues/32) stays open for
+that. There, it logs on with NLA, and the keyboard and resize work:
+
+- With GFX on, the default, the screen stays nearly black. That server
+  drew nearly all of it with ClearCodec and its bitmap cache, which the
+  native backend skips until the third pull request of its GFX phase,
+  a v1.0 blocker. At the first such PDU in a session, `occamyd` logs a
+  warning that names `disable_gfx: true`. With that key on the
+  connection, the server sent plain bitmap updates, and the whole
+  desktop drew correctly. `backend: guacd` is the other way around it,
+  and has not been checked against Windows.
+- The clipboard fails both ways. The suspected cause, that the client
+  does not set `CHANNEL_FLAG_SHOW_PROTOCOL` on the channel's chunks, is
+  unproven.
 
 To compare the two, open **x11vnc, through guacd** (`vnc-guacd`) and
 **RDP, through guacd** (`rdp-guacd`) next to their native twins. Each

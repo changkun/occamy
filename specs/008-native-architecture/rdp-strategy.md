@@ -506,6 +506,46 @@ best effort, has none. The live run was repeated after the fixes.
   which a kept ticket does resume. rdptest refuses a TLS 1.3 ClientHello
   without both extensions, so `TestSessionTicketsOffered` and every
   other test that connects fail without the cache.
+
+  Follow-up, not done here: two other TLS clients send the same
+  ClientHello, for neither has a session cache. They are VeNCrypt's
+  (`internal/backend/vnc/vencrypt.go:298`) and the Kubernetes API
+  client's (`internal/backend/kubernetes/cert.go:141`). No server has
+  been seen refusing them.
+- **What a Windows Server 2025 session showed.** With that cache in, a
+  further run on 2026-11-01 gave the client its first Windows session.
+  This is a CI runner connecting to itself over loopback, in one run,
+  not a real deployment: it is not step 2, and
+  [#32](https://github.com/changkun/occamy/issues/32) stays open. Its
+  test and workflow are on the `rdp-windows-runner` branch, not on
+  master.
+  - It logs on with NLA, and the server's events agree: a 4624 for each
+    logon, and for a wrong password a 4625 with `0xc000006d`, which the
+    client reports. With TLS alone the server refuses: it requires
+    hybrid.
+  - The keyboard works, with GFX on and off: a command typed into the
+    Run dialog ran in the session, and its output came back.
+  - Resize works: the session took 1280×800 and 1024×768 within 50 ms
+    with GFX on, and 1280×800 with it off.
+  - With GFX on, the default, the screen stays nearly black, 93.7% to
+    99.8% black after logon. GFX negotiates, at capability version
+    0xa0701 with flags 0xa2. All 1396 Wire-To-Surface-1 bitmaps were
+    ClearCodec, and 3669 PDUs were the cache's, all skipped with the
+    warning, so only 20 RemoteFX Progressive bitmaps and the solid
+    fills drew. Windows hosts need `disable_gfx: true` until the third
+    pull request of [native-rdp-backend](native-rdp-backend.md)'s
+    phase 3, which is a v1.0 blocker.
+  - With GFX off the server sends plain bitmap updates, and the whole
+    desktop drew correctly, in RLE, at both sizes.
+  - The clipboard fails both ways. Windows sends Clipboard Capabilities
+    and Monitor Ready, then nothing more on the channel: no Format List
+    Response, no Format List after text is copied in the session, and
+    the client's text does not reach the session.
+  - The suspected cause of that is unproven. `chunk` in
+    `internal/rdp/channel.go` sets only the first and last flags and
+    never `CHANNEL_FLAG_SHOW_PROTOCOL`, which IronRDP calls a must for
+    clipboard messages. The run kept only the server's frames, so what
+    the client sent was not seen, and no run has tried the flag.
 - **What remains for a beta-quality backend.** The backend and the
   layers below are planned in
   [native-rdp-backend](native-rdp-backend.md), by phase.
@@ -513,7 +553,7 @@ best effort, has none. The live run was repeated after the fixes.
     to Suppress Output, credentials from the registry. Done in
     native-rdp-backend's phase 1, and the registry with its
     registration (Implementation notes: registration), which made it
-    rdp's default, not yet checked against Windows.
+    rdp's default, before any check against Windows.
   - Step 2 against Windows with NLA, and with it the parts xrdp cannot
     exercise. These are live NLA, the full licensing exchange (Windows
     Server with an RDS licensing server), server redirection, and the
