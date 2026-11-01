@@ -93,8 +93,8 @@ class Welcomed {
   }
 
   /** end closes the stream from occamyd's end, as with 4002 once the session has ended for everyone. */
-  end(code: number): void {
-    this.push({ type: 'end', code, reason: '' })
+  end(code: number, reason = ''): void {
+    this.push({ type: 'end', code, reason })
   }
 
   async next(signal?: AbortSignal): Promise<SessionEvent> {
@@ -395,6 +395,16 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
     expect(text()).not.toContain('Not ended for everyone')
     expect(text()).toContain('Session ended')
     expect(r.deletes).toHaveLength(1)
+  })
+
+  it('leaves “Connecting…” for what occamyd says went wrong, before the first frame', async () => {
+    await render({ action: null }, notFound)
+    await until(() => text().includes('Connecting to'))
+    act(() => Welcomed.last?.end(CloseCode.BackendFailed, 'guacd drew nothing'))
+    await settle()
+    expect(text()).not.toContain('Connecting to')
+    expect(container.querySelector('#end-title')?.textContent).toBe('Could not connect')
+    expect(text()).toContain('guacd drew nothing')
   })
 
   // The codes occamyd closes a session's streams with once the session

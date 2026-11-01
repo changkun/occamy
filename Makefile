@@ -104,8 +104,12 @@ soak:
 # harness, for example BENCH_FLAGS="-quick -scenarios T1". A second stack
 # on a shared host takes COMPOSE_PROJECT_NAME, OCCAMY_PORT,
 # OCCAMY_V1_PORT and GUACD_PORT, which the harness follows. Its debug
-# routes are off unless OCCAMY_DEBUG=1, as run's are.
+# routes are off unless OCCAMY_DEBUG=1, as run's are. The bench stack
+# leaves out the demo's desktop service, but compose does not stop one
+# that make run started, which would idle next to the measurements, so
+# bench removes it; make run brings it back.
 bench: build
+	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml rm -f -s desktop
 	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml up -d --build --wait
 	go run ./bench -engine $(CONTAINER_ENGINE) -project $(or $(COMPOSE_PROJECT_NAME),occamy) \
 		-addr localhost:$(or $(OCCAMY_PORT),5636) -v1 localhost:$(or $(OCCAMY_V1_PORT),5637) \

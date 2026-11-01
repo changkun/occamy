@@ -397,8 +397,9 @@ Settled on 2026-10-31.
     stream ended with),
     `ending.ts` (a close code and reason, or a failure to connect, as a
     title, a sentence, the technical detail and what to offer: join
-    again, or sign in; and the close codes that say a session has ended
-    for everyone), `roles.ts`, `layout.ts` and `text.ts` (clipping
+    again, or sign in; a failed backend's reason as the sentence where
+    occamyd says more than `failed`; and the close codes that say a
+    session has ended for everyone), `roles.ts`, `layout.ts` and `text.ts` (clipping
     the server's strings, with control and bidi characters dropped).
   - `src/views`: sign-in (a password, and single sign-on where
     `GET /api/v1/auth/methods` says occamyd has OIDC),

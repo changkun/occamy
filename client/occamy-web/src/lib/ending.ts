@@ -104,6 +104,11 @@ export function describeEnd(code: number, reason: string, ctx: EndContext): Endi
         rejoin: ctx.sessionId !== '',
       }
     case CloseCode.BackendFailed:
+      // occamyd's reason is the word "failed" unless it knows the cause
+      // (CloseFor, internal/stream/serve.go).
+      if (reason !== '' && reason !== 'failed') {
+        return { ...e, title: 'Could not connect', detail: clip(reason, MAX_LABEL) }
+      }
       return { ...e, title: 'Remote unreachable', detail: 'occamyd could not connect to the remote computer, or lost the connection to it.' }
     case CloseCode.ServerShutdown:
       return { ...e, title: 'Server shut down', detail: 'occamyd is shutting down, which ends its sessions. Try again once it is back.' }

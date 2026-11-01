@@ -4,12 +4,14 @@
 
 # The v1 file of the demo stack's occamy-v1 service
 # (docker-compose.yaml), which serves API v1, protocol v1 and the web
-# client on port 5637 next to the v0 service: the demo SSH server, and
-# the demo VNC servers, x11vnc and TigerVNC, and RDP server through
-# occamyd's native backends, their default, and through guacd, the
-# explicit fallback and the benchmark's baseline, side by side, for the
-# guacd bridge's parity gate (specs/008-native-architecture/guacd-bridge.md,
-# Parity gate). The user demo signs in with the password occamy, in the
+# client on port 5637 next to the v0 service: a real desktop first, over
+# VNC and RDP through occamyd's native backends only, then the demo SSH
+# server, and the demo VNC servers, x11vnc and TigerVNC, and RDP server
+# through occamyd's native backends, their default, and through guacd,
+# the explicit fallback and the benchmark's baseline, side by side, for
+# the guacd bridge's parity gate
+# (specs/008-native-architecture/guacd-bridge.md, Parity gate). The user
+# demo signs in with the password occamy, in the
 # web client at http://localhost:5637/static/ or with curl:
 #
 #	curl -s localhost:5637/api/v1/auth/token \
@@ -36,6 +38,25 @@ auth:
     - name: demo
       password_hash: "$2a$10$DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
 connections:
+  # A real desktop, first, for a first look: XFCE with Firefox, a session
+  # of its own for each protocol. Native only, as nothing compares them.
+  - id: desktop-vnc
+    name: Desktop (XFCE) over VNC
+    protocol: vnc
+    backend: native
+    target: desktop:5900
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: desktop-rdp
+    name: Desktop (XFCE) over RDP
+    protocol: rdp
+    backend: native
+    target: desktop:3389
+    # As for rdp-native: xrdp signs its certificate itself.
+    security: tls
+    tls: {insecure_skip_verify: true}
+    credentials: {username: occamy, password_env: OCCAMY_DEMO_RDP_PASSWORD}
+    allow: {users: [demo]}
   - id: ssh
     name: SSH
     protocol: ssh
