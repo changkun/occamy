@@ -11,7 +11,7 @@ affects:
   - internal/guacd/
 effort: large
 created: 2026-10-29
-updated: 2026-10-31
+updated: 2026-11-01
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -405,6 +405,17 @@ so the bridge holds what comes early.
   and fail if the bridge lets a size or a pointer through early, at the
   first sync, or never. Three rows of the matrix do the same against
   the real guacd.
+- **A hang inside guacd**, which the hold does not explain. Testing
+  9e7e869, one connection in 128 (`tigervnc-de-guacd`, at a load of 233)
+  stayed at "Connecting…". guacd's child had 12 of its 14 threads in a
+  futex wait and 2,233 unread bytes on its TigerVNC socket, and used no
+  CPU for 30 minutes. The session had sent no input, and 16 of 16 opened
+  on a re-run, 10 of them on the same connection. The cause inside guacd
+  is not known, nor whether this happened before the hold. Cancel works,
+  and the process stays until the container restarts. A deadline on the
+  first frame would name the state, but it must start after any prompt
+  is answered. It is not done: the bridge goes with guacd, and
+  docs/try-it.md says what to do.
 
 ## Implementation notes: conformance corpus
 

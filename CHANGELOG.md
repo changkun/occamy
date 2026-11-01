@@ -12,6 +12,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - [docs/try-it.md](docs/try-it.md), a guide to running Occamy v1 for
   the first time, from a fresh checkout. It covers:
   - the prerequisites and the build;
+  - the memory and disk that the engine's virtual machine needs;
   - the demo stack, with where its configuration and signing key live,
     and how to run it next to another stack on one host;
   - a connection of each protocol and what it shows, with a k3s

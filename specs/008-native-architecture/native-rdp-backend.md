@@ -2490,6 +2490,12 @@ RDP's guacd path, RDP no longer needs guacd at all.
     10 sessions (`limits.sessions_per_user`) to hostile servers, such
     as ad-hoc targets they chose, take about 10 cores;
     `docs/configuration.md`'s limits say so.
+  - **A paste with no channel server**, for the owner to decide. On an
+    xrdp server whose `xrdp-chansrv` has exited, no Monitor Ready comes,
+    so a paste waits unsent until the session ends, and the viewer is
+    told nothing. Telling the viewer would be a change in occamyd. The
+    demo starts its channel server again (`reconnectwm.sh`), so it does
+    not show this.
   - **PDUs applied that do little**, with the process's budget, before
     the release (found in the third round; the final review measured
     it again). The headers' charge covers what the client skips; what
