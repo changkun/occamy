@@ -851,7 +851,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - The Kubernetes step of the run-and-test guide and the
   `kubernetes_integration` test remove k3s's container with `-v`, so
   that the four anonymous volumes of its image no longer stay behind on
-  each run.
+  each run. The test also kills the container before it removes it, in
+  place of `rm -t 0`: Docker's `rm` has no `-t`, so on Docker the
+  clean-up failed and left the container and its volumes behind.
 - `make e2e` gives each compose command 2 minutes, not 30 s, and
   `TestX11vncClipboardRequestorGone` 10 minutes, not 5, and the test
   reads its session throughout: a busy host killed its compose commands
