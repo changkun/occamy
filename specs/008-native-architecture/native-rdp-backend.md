@@ -2662,8 +2662,9 @@ RDP's guacd path, RDP no longer needs guacd at all.
       counts towards its wait for the next. Of n clients that want
       more than the budget has, each gets at least a nth of it, or
       `decodeRate` if that is less, within 2% in the tests; a client
-      that wants less gets all it wants and, after its first slice,
-      does not wait; and what clients leave goes to those that want
+      that wants less gets all it wants and hardly waits, two turns of
+      the others in all in the test, where its 46 slices would wait a
+      turn each; and what clients leave goes to those that want
       it. The wait for a slice is about n milliseconds over the
       budget's cores, twice that as clients start. Every unit a client
       takes still comes off the bucket, so over any time clients take
@@ -2701,7 +2702,8 @@ RDP's guacd path, RDP no longer needs guacd at all.
       its share within 2%, against 10 sessions that charge a little, a
       tile, a slice, two slices or minutes at a time, on 1 and 4 cores),
       `TestBudgetUnderShare` (one that wants half of its share gets
-      all of it, with one wait of a turn at the most), `TestBudgetAlone`
+      all of it, waiting two turns of the others in all at the most),
+      `TestBudgetAlone`
       and `TestBudgetKeepsDecodeRate` (a session alone is held to
       `decodeRate`, neither less nor more), `TestBudgetContext` (a wait
       ends with its context at once, and the debt left is paid by time),

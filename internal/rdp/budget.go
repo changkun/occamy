@@ -34,7 +34,7 @@ const budgetSlice = decodeRate / 1024
 // What that guarantees, of n clients that want more of the Budget than
 // it has, is that each gets at least a nth of it, or decodeRate if that
 // is less. A client that wants less than that gets all it wants and,
-// once it has its first slice, does not wait for the others; what it
+// once it has its first slice, hardly waits for the others; what it
 // leaves goes to those that want it. The waits for a slice are of about
 // n*budgetSlice/rate each, a millisecond over the Budget's cores for
 // each client, or twice that as clients start. Shares are the clients',

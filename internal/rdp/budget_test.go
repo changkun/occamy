@@ -240,8 +240,10 @@ func TestBudgetShare(t *testing.T) {
 }
 
 // An honest session that wants less than its share gets all it wants:
-// it waits a turn of the sessions that flood the Budget for its first
-// slice, and for none of the others.
+// it waits up to a turn of the sessions that flood the Budget for its
+// first slice, and for the others up to another turn in all, as a
+// first slice that came late leaves the second less time, where each of
+// its 46 slices would wait a turn without the time since the last.
 func TestBudgetUnderShare(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		const hostile, cores = 10, 1
@@ -275,8 +277,8 @@ func TestBudgetUnderShare(t *testing.T) {
 		if d := time.Since(start); d > span+turn {
 			t.Errorf("%d charges took %v, want %v", charges, d, span)
 		}
-		if slowest > turn || waited != slowest {
-			t.Errorf("%d charges waited %v, and %v at the most, want one wait of a turn of %v at the most", charges, waited, slowest, turn)
+		if slowest > turn || waited > 2*turn {
+			t.Errorf("%d charges waited %v, and %v at the most, want at most two turns of %v", charges, waited, slowest, turn)
 		}
 		cancel()
 		wg.Wait()

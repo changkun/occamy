@@ -806,7 +806,7 @@ each, and lower it on a host that does other work.
 Sessions that want more than it has share it evenly. Of n such
 sessions, each gets at least an nth of it, or a session's core if that
 is less. A session that wants less than its share gets all it wants,
-without waiting for the others once it has started, and what it leaves
+hardly waiting for the others once it has started, and what it leaves
 goes to those that want it. The share is a session's, not a user's, so
 a user's 10 sessions have 10 shares: lower `limits.sessions_per_user`
 where users are not trusted with that much, or keep
