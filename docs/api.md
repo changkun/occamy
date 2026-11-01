@@ -162,7 +162,7 @@ never repeats the token:
 | Request | Status | `code` | `WWW-Authenticate` |
 |---------|--------|--------|--------------------|
 | No `Authorization`, more than one, another scheme, or an empty token | 401 | `unauthorized` | `Bearer realm="occamy"` |
-| An access token past its `exp` | 401 | `token_expired` | `Bearer realm="occamy", error="invalid_token"` |
+| An access token past its `exp` and the [clock skew allowed](#limits) | 401 | `token_expired` | `Bearer realm="occamy", error="invalid_token"` |
 | Anything else that fails: malformed, a bad signature, an unknown issuer, another audience, an algorithm other than EdDSA, no `iat`, a lifetime over 12 hours, a session token, a `sub` that is no usable name, or a `sub` that names a static user from a source not linked to the static users | 401 | `invalid_token` | `Bearer realm="occamy", error="invalid_token"` |
 
 The routes check the token first, so a request with no valid token
@@ -188,7 +188,7 @@ change, and never holds a secret.
 | `invalid_state` | 400 | `GET /api/v1/auth/oidc/callback` matches no sign-in this browser started in the last 10 minutes |
 | `unauthorized` | 401 | No access token, or wrong credentials: a sign-in with a wrong password or an unknown user, or an OIDC code exchange that fails |
 | `invalid_token` | 401 | A token that fails verification, or whose user `occamyd` refuses |
-| `token_expired` | 401 | An access token past its expiry |
+| `token_expired` | 401 | An access token past its expiry and the clock skew allowed |
 | `forbidden` | 403 | An ad-hoc target while ad-hoc targets are off, or one outside `adhoc_allowlist` |
 | `not_found` | 404 | No such route, connection or session, or one the caller may not see ([absent rather than forbidden](#connections-and-sessions)) |
 | `method_not_allowed` | 405 | The route does not take the method; `Allow` lists those it takes |
@@ -230,13 +230,19 @@ Lifetimes:
 | What | Lifetime |
 |------|----------|
 | An access token from `occamyd` | `auth.access_token_lifetime`: 15 minutes by default, between 1 minute and 12 hours |
-| A trusted issuer's token | Up to 12 hours from its `iat`; 30 seconds of clock skew are allowed |
+| A trusted issuer's token | Up to 12 hours from its `iat` |
 | The stream token of `POST /api/v1/sessions` | 300 seconds |
 | A share | `expires_in`: 60 to 43200 seconds (12 hours), 3600 by default; it dies with its session |
 | An OIDC sign-in, from `login` to the callback | 10 minutes |
 | An OIDC one-time code, from the callback to the exchange | 1 minute, and one try |
 | The owner grace: how long a session waits for its owner's stream, after `POST /api/v1/sessions` or after the owner leaves | 60 seconds, then the session ends with `owner-left` (4003) |
 | A session without input | 30 minutes, then the session ends with `idle` (4004); no key sets it |
+
+`occamyd` allows 30 seconds of clock skew on every token it checks, its
+own as well as a trusted issuer's, so a token still works for up to 30
+seconds after its `exp`. A client should not rely on that time: a token
+that has passed its `exp` is due for renewal, and `401 token_expired`
+follows within 30 seconds.
 
 What one user, one session or `occamyd` may hold, set in
 [`limits`](configuration.md#limits-limits):
