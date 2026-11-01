@@ -13,7 +13,7 @@ import type { AccessToken, Api, Identity } from '../lib/api'
 import { type SessionAction, forgetSession, keepSession } from '../lib/app'
 import { type SessionController as Controller, SessionController, type SessionState, overlayOf } from '../lib/controller'
 import { type Ending, endsSession } from '../lib/ending'
-import { type Size, cellGrid, deviceSize, fitSize, pixelRatio } from '../lib/layout'
+import { type Size, cellGrid, fitSize, pixelRatio, screenSize } from '../lib/layout'
 import { endSession, sessionOwner } from '../lib/owner'
 import { type Abilities, abilities, roleName } from '../lib/roles'
 import { type Target, streamToken, streamURL } from '../lib/targets'
@@ -131,8 +131,7 @@ export function SessionView({ api, token, target, owner: seed, action, storage, 
 
   useEffect(() => {
     const r = stageRef.current?.getBoundingClientRect() ?? { width: 0, height: 0 }
-    const ratio = window.devicePixelRatio
-    void controller.open({ ...deviceSize(r, ratio), ...cellGrid(r, cellSize()), pixelRatio: pixelRatio(ratio) })
+    void controller.open({ ...screenSize(r), ...cellGrid(r, cellSize()), pixelRatio: pixelRatio(window.devicePixelRatio) })
     return () => controller.dispose()
   }, [controller])
 
@@ -425,8 +424,9 @@ interface DesktopProps {
   label: string
 }
 
-// Desktop shows a graphical session on a canvas at the remote's size in
-// device pixels, scaled by CSS to fit the stage.
+// Desktop shows a graphical session on a canvas at the remote's size,
+// scaled by CSS to fit the stage: a remote that takes the window's size
+// has one pixel to a CSS pixel.
 function Desktop({ controller, state, can, box, label }: DesktopProps): ReactElement {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const open = state.phase === 'open'
@@ -446,7 +446,7 @@ function Desktop({ controller, state, can, box, label }: DesktopProps): ReactEle
       return
     }
     const timer = setTimeout(() => {
-      const d = deviceSize(box, window.devicePixelRatio)
+      const d = screenSize(box)
       controller.requestResize(d.width, d.height)
     }, RESIZE_DELAY)
     return () => clearTimeout(timer)

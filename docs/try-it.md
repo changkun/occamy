@@ -218,9 +218,9 @@ by then, so the next one opens at once, even when you have as many as
 | Protocol | Connection | What you should see |
 |----------|------------|---------------------|
 | VNC | **x11vnc, native backend** (`vnc-native`) | A black desktop with two xterms and no window manager. The small one at the top left says "Lines typed here reach the clipboard as hex"; it is a probe of the end-to-end tests. The large one has a root shell, `root@…:/#`. x11vnc does not resize its screen, so the page scales the 1024×768 desktop to the window. Keys go to the window under the pointer, as there is no window manager |
-| VNC | **TigerVNC, native backend** (`tigervnc-native`) | The same desktop, served by TigerVNC, which resizes its screen to the window |
+| VNC | **TigerVNC, native backend** (`tigervnc-native`) | The same desktop, served by TigerVNC, which resizes its screen to the window. The page asks for the window's size in CSS pixels, so on a HiDPI display the xterms are as large as on any other, and a little soft, with a remote pixel across two device pixels at a ratio of 2 |
 | SSH | **SSH** (`ssh`) | A terminal with Debian's login banner and the prompt `occamy@…:~$`. It fills the window, and its rows and columns follow the window (`stty size` shows them) |
-| RDP | **RDP, native backend** (`rdp-native`) | xrdp's X session: a black desktop with one xterm at the top left and the prompt `occamy@…:~$`. The desktop resizes to the window. The first connection after the stack or the `rdp` service starts creates the X session, so the xterm takes a few seconds to appear on an idle host, and took 17 seconds at a load of 306; wait for it before you type. Later connections return to the same X session |
+| RDP | **RDP, native backend** (`rdp-native`) | xrdp's X session: a black desktop with one xterm at the top left and the prompt `occamy@…:~$`. The desktop resizes to the window, in CSS pixels as on TigerVNC. The first connection after the stack or the `rdp` service starts creates the X session, so the xterm takes a few seconds to appear on an idle host, and took 17 seconds at a load of 306; wait for it before you type. Later connections return to the same X session |
 | RDP | **RDP, through guacd** (`rdp-guacd`) | The same X session through guacd. It keeps the size it opened at, and the page scales it |
 | Kubernetes | none in the demo stack | A terminal in a pod. See [Kubernetes](#kubernetes) below for a cluster to try it with |
 
@@ -619,7 +619,12 @@ The tests open real sessions to every demo server:
   clipboard from a window that has gone, the bug that used to kill it
   (`TestX11vncClipboardRequestorGone`);
 - the VNC parity matrix, each feature on x11vnc and TigerVNC through
-  both backends, logged as a table.
+  both backends, logged as a table;
+- in Chrome, on `tigervnc-native` and `rdp-native`: the web client at
+  device pixel ratios of 2 and 1 sizes the remote to the window in CSS
+  pixels, when the session opens and when the window changes
+  (`TestWebScreen`). It looks for Chrome on the host, or takes its path
+  from `OCCAMY_E2E_CHROME`, and is skipped without one, except in CI.
 
 On an idle host, a run takes about four minutes, most of it the parity
 matrix: 257 seconds in CI after the x11vnc test came, the pressure

@@ -4,28 +4,23 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { MAX_COLS, MAX_ROWS, MAX_SIDE, cellGrid, deviceSize, fitSize, pixelRatio } from './layout'
+import { MAX_COLS, MAX_ROWS, MAX_SIDE, cellGrid, fitSize, pixelRatio, screenSize } from './layout'
 
-describe('deviceSize', () => {
-  it('asks for the box in device pixels', () => {
-    expect(deviceSize({ width: 1280, height: 720 }, 1)).toEqual({ width: 1280, height: 720 })
-    expect(deviceSize({ width: 1280, height: 720 }, 2)).toEqual({ width: 2560, height: 1440 })
-    expect(deviceSize({ width: 1000.4, height: 600.6 }, 1.5)).toEqual({ width: 1501, height: 901 })
+describe('screenSize', () => {
+  it('asks for the box in whole CSS pixels', () => {
+    expect(screenSize({ width: 1280, height: 720 })).toEqual({ width: 1280, height: 720 })
+    expect(screenSize({ width: 1000.4, height: 600.6 })).toEqual({ width: 1000, height: 601 })
   })
 
   it('stays within what occamyd asks a remote for', () => {
-    expect(deviceSize({ width: 5000, height: 100 }, 2)).toEqual({ width: MAX_SIDE, height: 200 })
-    expect(deviceSize({ width: 0.2, height: 0.2 }, 1)).toEqual({ width: 1, height: 1 })
+    expect(screenSize({ width: MAX_SIDE + 1, height: 100 })).toEqual({ width: MAX_SIDE, height: 100 })
+    expect(screenSize({ width: 100, height: Infinity })).toEqual({ width: 100, height: MAX_SIDE })
+    expect(screenSize({ width: 0.2, height: 0.2 })).toEqual({ width: 1, height: 1 })
   })
 
   it('asks for nothing for an empty box', () => {
-    expect(deviceSize({ width: 0, height: 720 }, 1)).toEqual({ width: 0, height: 0 })
-    expect(deviceSize({ width: NaN, height: 720 }, 1)).toEqual({ width: 0, height: 0 })
-  })
-
-  it('takes a ratio that is not a number for 1', () => {
-    expect(deviceSize({ width: 800, height: 600 }, NaN)).toEqual({ width: 800, height: 600 })
-    expect(deviceSize({ width: 800, height: 600 }, 0)).toEqual({ width: 800, height: 600 })
+    expect(screenSize({ width: 0, height: 720 })).toEqual({ width: 0, height: 0 })
+    expect(screenSize({ width: NaN, height: 720 })).toEqual({ width: 0, height: 0 })
   })
 })
 

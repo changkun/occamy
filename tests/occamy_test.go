@@ -16,7 +16,9 @@
 // channel server and read its log, also needs OCCAMY_E2E_COMPOSE, the
 // stack's compose command, such as
 // "docker compose -f docker/docker-compose.yaml" with an absolute path.
-// make e2e sets all three.
+// make e2e sets all three. The test of the web client needs Chrome, which
+// it looks for on the host unless OCCAMY_E2E_CHROME names one; without
+// one it is skipped, and fails in CI.
 package tests
 
 import (
