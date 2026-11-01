@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"go.yaml.in/yaml/v3"
+
+	"changkun.de/x/occamy/internal/terminal"
 )
 
 // echoServer echoes every connection until it closes.
@@ -144,17 +146,17 @@ func TestTableMedians(t *testing.T) {
 	}
 }
 
-// In a table with v1 rows: a v1 scene's frames are the server's, so
-// its frame rate is left out, below the scene's rate as well as above
-// it; the server CPU of a series is that of what serves it, with
-// guacd's apart for v1-native; and a v1 G7 gives its sign-in, which
-// v0's first frame includes.
+// In a table with v1 rows: a scene's frame rate is what its stamps
+// counted, in either protocol, not the server's own frames; the server
+// CPU of a series is that of what serves it, with guacd's apart for
+// v1-native; and a v1 G7 gives its sign-in, which v0's first frame
+// includes.
 func TestTableV1(t *testing.T) {
 	cpu := map[string]float64{"occamy": 1, "occamy-v1": 20, "guacd": 300, "vnc": 4000}
-	g3 := func(series string, frames int64) result {
+	g3 := func(series string, scene int64) result {
 		r := result{Scenario: "G3", Protocol: "vnc", Series: series, Net: "N1",
-			Seconds: 10, Frames: frames, SceneFPS: scrollFPS, CPUMS: cpu}
-		r.serverFrames()
+			Seconds: 10, Frames: 3800, sceneFrames: scene, SceneFPS: scrollFPS, CPUMS: cpu}
+		r.sceneCount()
 		return r
 	}
 	g7 := func(series string, signIn *percentiles) result {
@@ -162,25 +164,16 @@ func TestTableV1(t *testing.T) {
 			FirstFrame: &percentiles{P50: 120}, SignIn: signIn}
 	}
 	rows := table([]result{
-		g3("occamy", 414), g3("v1-native", 594), g3("v1-guacd", 3800),
+		g3("occamy", 414), g3("v1-native", 594), g3("v1-guacd", 380),
 		g7("occamy", nil), g7("v1-native", &percentiles{P50: 61.5}),
 	})
 	if len(rows) != 5 {
 		t.Fatalf("%d rows", len(rows))
 	}
 	v0, native, bridge := rows[0], rows[1], rows[2]
-	if got := v0.cells[colFPS]; got != 41.4 {
-		t.Errorf("v0 frames a second = %v, want 41.4", got)
-	}
-	if slices.Contains(v0.notes, serverFramesNote) {
-		t.Errorf("v0's frames noted as the server's: %q", v0.notes)
-	}
-	for _, r := range []row{native, bridge} {
-		if got := r.cells[colFPS]; !math.IsNaN(got) {
-			t.Errorf("%s frames a second = %v, want none", r.first.Series, got)
-		}
-		if !slices.Contains(r.notes, serverFramesNote) {
-			t.Errorf("%s's frames not noted as the server's: %q", r.first.Series, r.notes)
+	for i, want := range []float64{41.4, 59.4, 38} {
+		if got := rows[i].cells[colFPS]; got != want {
+			t.Errorf("%s frames a second = %v, want %v", rows[i].first.Series, got, want)
 		}
 	}
 	if got := v0.cells[colServerCPU]; got != 301 {
@@ -203,6 +196,69 @@ func TestTableV1(t *testing.T) {
 	}
 	if !slices.ContainsFunc(rows[4].notes, func(n string) bool { return strings.HasPrefix(n, "sign-in p50 61.5 ms") }) {
 		t.Errorf("v1 G7 notes %q, want its sign-in", rows[4].notes)
+	}
+}
+
+// An RDP row of a v1 series says whether GFX was on and whether that is
+// what its side ships, in the table and in the JSON, and its server CPU
+// is that of what served it.
+func TestGFXRows(t *testing.T) {
+	cpu := map[string]float64{"occamy-v1": 20, "occamy-v1-gfx": 50, "guacd": 300, "rdp": 4000}
+	for name, want := range map[string]struct {
+		note    string
+		json    string
+		cpu     float64
+		apart   bool // guacd's CPU is noted apart
+		verdict bool
+	}{
+		"v1-native":       {"GFX on, as shipped: the verdict", `"gfx":true,"verdict":true`, 20, true, true},
+		"v1-native-nogfx": {"GFX off, like for like beside the verdict", `"gfx":false`, 20, true, false},
+		"v1-guacd":        {"GFX off, as shipped: the verdict", `"gfx":false,"verdict":true`, 320, false, true},
+		"v1-guacd-gfx":    {"GFX on, like for like beside the verdict", `"gfx":true`, 350, false, false},
+	} {
+		r := &runner{series: series{Name: name}, net: netConditions[0]}
+		res := r.newResult("G5", "rdp")
+		res.CPUMS = cpu
+		rows := table([]result{*res})
+		if !slices.Contains(rows[0].notes, want.note) {
+			t.Errorf("%s notes %q, want %q", name, rows[0].notes, want.note)
+		}
+		if got := rows[0].cells[colServerCPU]; got != want.cpu {
+			t.Errorf("%s server CPU = %v, want %v", name, got, want.cpu)
+		}
+		if got := !math.IsNaN(rows[0].cells[colIdleGuacdCPU]); got != want.apart {
+			t.Errorf("%s notes guacd's CPU apart: %v, want %v", name, got, want.apart)
+		}
+		raw, err := json.Marshal(res)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(raw), want.json) {
+			t.Errorf("%s JSON %s, want %s", name, raw, want.json)
+		}
+		if got := strings.Contains(string(raw), `"verdict"`); got != want.verdict {
+			t.Errorf("%s JSON %s: verdict %v, want %v", name, raw, got, want.verdict)
+		}
+	}
+}
+
+// GFX is RDP's and v1's: no other row says anything of it.
+func TestNoGFXRows(t *testing.T) {
+	for _, c := range []struct{ series, proto string }{
+		{"v1-native", "vnc"}, {"v1-native", "ssh"}, {"v1-guacd", "vnc"}, {"occamy", "rdp"}, {"guacd", "rdp"},
+	} {
+		r := &runner{series: series{Name: c.series}, net: netConditions[0]}
+		res := r.newResult("G5", c.proto)
+		raw, err := json.Marshal(res)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(raw), `"gfx"`) || strings.Contains(string(raw), `"verdict"`) {
+			t.Errorf("%s over %s: JSON %s", c.series, c.proto, raw)
+		}
+		if notes := table([]result{*res})[0].notes; len(notes) != 0 {
+			t.Errorf("%s over %s: notes %q", c.series, c.proto, notes)
+		}
 	}
 }
 
@@ -365,35 +421,149 @@ func TestMeasureDeltas(t *testing.T) {
 	}
 	echo(1000)
 	s.drawn.Store(5)
+	s.sceneFrames.Store(11)
 	s.decode.Store(int64(7 * time.Millisecond))
 	m := r.measure(s)
 	echo(40)
 	s.drawn.Add(3)
+	s.sceneFrames.Add(2)
 	s.decode.Add(int64(2 * time.Millisecond))
 	var res result
 	m.finish(&res, m.at.Add(2*time.Second))
-	want := result{Seconds: 2, BytesUp: 40, BytesDown: 40, Frames: 3, DecodeMS: 2}
+	want := result{Seconds: 2, BytesUp: 40, BytesDown: 40, Frames: 3, sceneFrames: 2, DecodeMS: 2}
 	if res.Seconds != want.Seconds || res.BytesUp != want.BytesUp || res.BytesDown != want.BytesDown ||
-		res.Frames != want.Frames || res.DecodeMS != want.DecodeMS {
+		res.Frames != want.Frames || res.sceneFrames != want.sceneFrames || res.DecodeMS != want.DecodeMS {
 		t.Errorf("measured %+v, want %+v", res, want)
 	}
 }
 
-// A v1 scene's frames go to the JSON as server_frames, and v0's stay
-// frames.
-func TestRunServerFrames(t *testing.T) {
+// In a scene, in either protocol, frames are what the stamps counted, and
+// the server's own go to the JSON as server_frames. A scenario without a
+// scene keeps the frames that drew.
+func TestRunSceneFrames(t *testing.T) {
 	defer func(d time.Duration) { gap = d }(gap)
 	gap = 0
-	sc := scenario{ID: "G3", Protocol: "vnc", run: func(_ context.Context, _ *runner, _ *session, res *result) error {
-		res.Seconds, res.Frames, res.SceneFPS = 10, 594, scrollFPS
-		return nil
-	}}
-	open := func(context.Context, string, string) (*session, error) { return silent(), nil }
-	for name, want := range map[string][2]int64{"occamy": {594, 0}, "v1-native": {0, 594}} {
-		res := testRunner(t, series{Name: name, open: open}).run(context.Background(), sc)
-		if res.Frames != want[0] || res.ServerFrames != want[1] {
-			t.Errorf("%s: frames %d, server frames %d, want %d and %d", name, res.Frames, res.ServerFrames, want[0], want[1])
+	run := func(fps float64) func(context.Context, *runner, *session, *result) error {
+		return func(_ context.Context, _ *runner, _ *session, res *result) error {
+			res.Seconds, res.Frames, res.sceneFrames, res.SceneFPS = 10, 3800, 594, fps
+			return nil
 		}
+	}
+	open := func(context.Context, string, string) (*session, error) { return silent(), nil }
+	for _, name := range []string{"occamy", "guacd", "v1-native", "v1-guacd"} {
+		r := testRunner(t, series{Name: name, open: open})
+		res := r.run(context.Background(), scenario{ID: "G3", Protocol: "vnc", run: run(scrollFPS)})
+		if res.Frames != 594 || res.ServerFrames != 3800 {
+			t.Errorf("%s, a scene: frames %d, server frames %d, want 594 and 3800", name, res.Frames, res.ServerFrames)
+		}
+		res = r.run(context.Background(), scenario{ID: "G1", Protocol: "vnc", run: run(0)})
+		if res.Frames != 3800 || res.ServerFrames != 0 {
+			t.Errorf("%s, no scene: frames %d, server frames %d, want 3800 and 0", name, res.Frames, res.ServerFrames)
+		}
+	}
+}
+
+// The first marker is looked at until a frame matches it, and no longer.
+// A scenario's own marker outlives it, even when set while the frame
+// that matched was on its way.
+func TestFirstMarker(t *testing.T) {
+	first := marker{cells: func(*terminal.Screen) bool { return true }}
+	s := newSession(time.Now())
+	s.expect(first)
+	m := s.marker.Load()
+	s.emit(frame{}, m)
+	if s.marker.Load() != m {
+		t.Error("a frame that did not match retired the first marker")
+	}
+	s.emit(frame{marked: true}, m)
+	if s.marker.Load() != nil {
+		t.Error("the first marker stays after a frame matched it")
+	}
+
+	s = newSession(time.Now())
+	s.expect(first)
+	m = s.marker.Load()
+	s.setMarker(magenta)
+	own := s.marker.Load()
+	s.emit(frame{marked: true}, m)
+	if s.marker.Load() != own {
+		t.Error("a frame that matched the first marker retired the scenario's")
+	}
+	s.emit(frame{marked: true}, own)
+	if s.marker.Load() != own {
+		t.Error("a frame that matched the scenario's marker retired it")
+	}
+}
+
+// A run's key offsets are its own, the same for every series, within the
+// jitter either way, and spread around their slots.
+func TestKeyOffsets(t *testing.T) {
+	const n = 2000
+	a := keyOffsets(0, n)
+	if len(a) != n {
+		t.Fatalf("%d offsets, want %d", len(a), n)
+	}
+	if !slices.Equal(a, keyOffsets(0, n)) {
+		t.Error("two series of a run press their keys at different times")
+	}
+	if slices.Equal(a, keyOffsets(1, n)) {
+		t.Error("two runs press their keys at the same times")
+	}
+	var sum, spread time.Duration
+	for _, d := range a {
+		if d <= -keyJitter || d >= keyJitter {
+			t.Fatalf("offset %v, want within %v either way", d, keyJitter)
+		}
+		sum += d
+		spread = max(spread, d-a[0], a[0]-d)
+	}
+	if mean := sum / n; mean < -keyJitter/8 || mean > keyJitter/8 {
+		t.Errorf("mean offset %v, want about 0", mean)
+	}
+	if spread < keyJitter {
+		t.Errorf("offsets spread over %v, want at least %v", spread, keyJitter)
+	}
+}
+
+// answerConn is a session whose server answers each key at once, with a
+// frame that any marker takes.
+type answerConn struct {
+	s    *session
+	mu   sync.Mutex
+	keys []time.Time
+}
+
+func (c *answerConn) key(int) error {
+	now := time.Now()
+	c.mu.Lock()
+	c.keys = append(c.keys, now)
+	c.mu.Unlock()
+	c.s.frames <- frame{at: now.Add(time.Millisecond), marked: true}
+	return nil
+}
+
+func (c *answerConn) close() { close(c.s.done); close(c.s.frames) }
+
+// The probe's keys fall on the run's offsets from their slots, which a
+// fixed period would not, however late the host wakes the harness.
+func TestProbeLatencyJitter(t *testing.T) {
+	const run, n = 3, 12
+	s := newSession(time.Now())
+	c := &answerConn{s: s}
+	s.conn = c
+	if _, err := probeLatency(context.Background(), s, run, n); err != nil {
+		t.Fatal(err)
+	}
+	offsets := keyOffsets(run, n)
+	var jittered, fixed time.Duration
+	for i := 1; i < n; i++ {
+		got := c.keys[i].Sub(c.keys[0])
+		slot := time.Duration(i) * keyPeriod
+		jittered += (got - slot - (offsets[i] - offsets[0])).Abs()
+		fixed += (got - slot).Abs()
+	}
+	if jittered >= fixed {
+		t.Errorf("the keys stray %v from the jittered times and %v from a fixed period", jittered/(n-1), fixed/(n-1))
 	}
 }
 
@@ -440,6 +610,13 @@ func TestCIBench(t *testing.T) {
 				t.Errorf("step %q runs the bench without -failfast", s.Name)
 			}
 		}
+		if strings.Contains(s.Run, "go run ./bench") {
+			for name := range v1Connections {
+				if !slices.Contains(strings.Split(flagValue(s.Run, "-series"), ","), name) {
+					t.Errorf("step %q does not run the series %s", s.Name, name)
+				}
+			}
+		}
 		if s.Name == "Stack logs" {
 			logs = true
 			if s.If != "${{ !success() }}" {
@@ -450,6 +627,15 @@ func TestCIBench(t *testing.T) {
 	if runs != 2 || !logs {
 		t.Errorf("%d bench runs and the stack's logs %v, want 2 and true", runs, logs)
 	}
+}
+
+// flagValue returns what follows flag in a command line.
+func flagValue(cmd, flag string) string {
+	f := strings.Fields(cmd)
+	if i := slices.Index(f, flag); i >= 0 && i+1 < len(f) {
+		return f[i+1]
+	}
+	return ""
 }
 
 // measure stops at the first result with an error with failfast, and

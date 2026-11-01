@@ -1,0 +1,38 @@
+# Copyright 2026 Changkun Ou. All rights reserved.
+# Use of this source code is governed by a MIT
+# license that can be found in the LICENSE file.
+
+# The v1 file of the benchmark stack's occamy-v1-gfx service
+# (docker-compose.bench.yaml): the bench desktop's RDP through guacd with
+# RDP's graphics pipeline on, for the harness's v1-guacd-gfx series, which
+# compares with rdp-native like for like. guacd's parameters are global to
+# a v1 file, so this is a file of its own, and a benchmark is no reason
+# for a setting per connection in the product.
+
+version: 1
+listen: 0.0.0.0:5637
+auth:
+  # On a tmpfs (docker-compose.bench.yaml): nothing outlives a run here,
+  # so this file does not depend on where the demo keeps its key.
+  signing_key_file: /run/occamy/signing.key
+  users:
+    # Password occamy, as the demo's.
+    - name: demo
+      password_hash: "$2a$10$DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
+connections:
+  - id: rdp-guacd-gfx
+    protocol: rdp
+    backend: guacd
+    target: rdp:3389
+    credentials: {username: occamy, password_env: OCCAMY_BENCH_RDP_PASSWORD}
+    allow: {users: [demo]}
+guacd:
+  address: guacd:4822
+  params:
+    rdp:
+      ignore-cert: "true"
+      # occamyd adds disable-gfx unless the file sets it.
+      disable-gfx: "false"
+      color-depth: "32"
+limits:
+  sessions_per_user: 100

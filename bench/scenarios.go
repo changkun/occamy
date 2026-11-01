@@ -8,7 +8,9 @@ import (
 	"context"
 	"fmt"
 	"image"
+	"image/color"
 	"slices"
+	"strings"
 	"time"
 
 	"changkun.de/x/occamy/internal/terminal"
@@ -54,6 +56,93 @@ var (
 	keyWait    = 10 * time.Second
 	markerWait = 30 * time.Second
 )
+
+// shows is what a session of proto shows once the remote has reached it,
+// which ends G7: content the remote has anyway, so that neither the scene
+// nor the shell changes for G7's sake. A frame before it, of a backend
+// that sizes the screen or of a terminal that clears, shows nothing of the
+// remote.
+func shows(proto string) marker {
+	if proto == "ssh" {
+		return prompt
+	}
+	return wallpaper
+}
+
+// promptStart begins the demo shell's prompt, occamy@host:~$, which comes
+// after everything the shell prints at login.
+const promptStart = "occamy@"
+
+// prompt reports a frame that shows the shell's prompt: cells of the
+// terminal a v1 client emulates, and pixels of the one guacd draws for v0.
+var prompt = marker{pixels: showsPromptPixels, cells: showsPromptCells}
+
+// showsPromptCells reports a line of scr that is the prompt.
+func showsPromptCells(scr *terminal.Screen) bool {
+	for y := range scr.Rows {
+		var line strings.Builder
+		for x := range scr.Cols {
+			line.WriteString(scr.Cell(x, y).Content)
+		}
+		text := strings.TrimRight(line.String(), " ")
+		if strings.HasPrefix(text, promptStart) && strings.HasSuffix(text, "$") {
+			return true
+		}
+	}
+	return false
+}
+
+// The terminal guacd draws for v0: cells of 10 by 19 pixels from (7, 7),
+// grey on black, with the cursor a solid cell of the grey.
+const (
+	gridOrigin            = 7
+	gridCellW, gridCellH  = 10, 19
+	gridColumnsBeforeText = 2 // "$ ": the prompt's last cells
+)
+
+var (
+	gridBlank  = color.RGBA{0x00, 0x00, 0x00, 0xff}
+	gridCursor = color.RGBA{0x99, 0x99, 0x99, 0xff}
+)
+
+// gridCell is the rectangle of a cell of guacd's terminal.
+func gridCell(col, row int) image.Rectangle {
+	x, y := gridOrigin+col*gridCellW, gridOrigin+row*gridCellH
+	return image.Rect(x, y, x+gridCellW, y+gridCellH)
+}
+
+// solid reports that every pixel of r is c.
+func solid(img *image.RGBA, r image.Rectangle, c color.RGBA) bool {
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			if img.RGBAAt(x, y) != c {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// showsPromptPixels reports the cursor in r waiting after a prompt: a
+// solid cursor cell with a blank cell before it and a drawn one before
+// that, the "$ " that ends the prompt. Guacd's terminal draws pixels, so
+// a v0 client cannot read the prompt's text as a v1 client can, but the
+// cursor stands on column 0 or straight after text until the shell has
+// printed it, and a frame that only clears the screen draws no cursor.
+func showsPromptPixels(img *image.RGBA, r image.Rectangle) bool {
+	b := img.Bounds()
+	for row := 0; gridCell(0, row).In(b); row++ {
+		for col := gridColumnsBeforeText; gridCell(col, row).In(b); col++ {
+			c := gridCell(col, row)
+			if c.Overlaps(r) && solid(img, c, gridCursor) &&
+				solid(img, gridCell(col-1, row), gridBlank) &&
+				!solid(img, gridCell(col-2, row), gridBlank) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // runTypeEcho (T1) types into an idle shell and measures the time from
 // each key until the first frame that draws after it.

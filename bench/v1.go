@@ -23,6 +23,7 @@ import (
 
 	"github.com/gen2brain/vpx/webp"
 
+	"changkun.de/x/occamy/bench/internal/probe"
 	"changkun.de/x/occamy/client"
 	"changkun.de/x/occamy/internal/codec"
 	"changkun.de/x/occamy/internal/terminal"
@@ -35,10 +36,29 @@ import (
 // session with DELETE. The connections are those of the bench stack's
 // occamy-v1 service (docker/bench/occamy-v1.yaml), per series and
 // protocol. SSH has no guacd backend in v1, so v1-guacd serves only the
-// desktop.
+// desktop. RDP runs with its graphics pipeline, GFX, and without it on
+// both sides: v1-native-nogfx and v1-guacd-gfx are the other way from
+// what each side ships, and serve only RDP. v1-guacd-gfx is on a service
+// of its own, occamy-v1-gfx, since guacd's parameters are global to a v1
+// file (docker/bench/occamy-v1-gfx.yaml).
 var v1Connections = map[string]map[string]string{
-	"v1-native": {"ssh": "ssh", "vnc": "vnc-native", "rdp": "rdp-native"},
-	"v1-guacd":  {"vnc": "vnc-guacd", "rdp": "rdp-guacd"},
+	"v1-native":       {"ssh": "ssh", "vnc": "vnc-native", "rdp": "rdp-native"},
+	"v1-native-nogfx": {"rdp": "rdp-native-nogfx"},
+	"v1-guacd":        {"vnc": "vnc-guacd", "rdp": "rdp-guacd"},
+	"v1-guacd-gfx":    {"rdp": "rdp-guacd-gfx"},
+}
+
+// rdpPath says how a v1 series reaches RDP: with GFX or not, and whether
+// that is what its side ships. The row of what ships is the verdict
+// (specs/008-native-architecture/benchmark.md, Decisions of 2026-11-01),
+// and the other sits beside it, to compare like with like.
+type rdpPath struct{ gfx, verdict bool }
+
+var rdpPaths = map[string]rdpPath{
+	"v1-native":       {gfx: true, verdict: true},
+	"v1-native-nogfx": {gfx: false, verdict: false},
+	"v1-guacd":        {gfx: false, verdict: true},
+	"v1-guacd-gfx":    {gfx: true, verdict: false},
 }
 
 // v1Account is the bench stack's API v1 user.
@@ -69,6 +89,7 @@ func openV1(conns map[string]string, d display) func(context.Context, string, st
 		}
 		start := time.Now()
 		s := newSession(start)
+		s.expect(shows(proto))
 		s.signIn = start.Sub(t0)
 		cl, err := client.Dial(ctx, "ws://"+addr+"/api/v1/connections/"+url.PathEscape(id)+"/stream", token, client.Options{
 			Name:     "occamy-bench/1",
@@ -287,10 +308,9 @@ func (s *session) readV1(c *v1Conn, d display) {
 	defer close(s.done)
 	defer close(s.frames)
 	var (
-		term  *terminal.Terminal
-		size  image.Point
-		drew  bool // the terminal frame being read carried bytes
-		shown bool // the terminal showed a cell that is not blank
+		term *terminal.Terminal
+		size image.Point
+		drew bool // the terminal frame being read carried bytes
 	)
 	for {
 		ev, err := c.cl.Next(context.Background())
@@ -328,32 +348,30 @@ func (s *session) readV1(c *v1Conn, d display) {
 			now := time.Now()
 			m := s.marker.Load()
 			var (
-				draws, marked, content bool
-				damage                 image.Rectangle
+				draws, marked bool
+				damage        image.Rectangle
 			)
 			if c.cl.Class() == protocol.ClassTerminal {
-				// A terminal shows the remote from its first cell that is
-				// not blank: the SSH backend resizes the blank terminal
-				// before the shell prints, which sends a clear screen.
 				draws, drew = drew, false
-				cells := m != nil && m.cells != nil
-				if draws && (!shown || cells) {
-					scr := term.Snapshot()
-					shown = shown || showsCells(scr)
-					marked = cells && m.cells(scr)
+				if draws && m != nil && m.cells != nil {
+					marked = m.cells(term.Snapshot())
 				}
-				content = shown
 			} else if len(ev.Dirty) > 0 {
-				draws, content = true, true
+				draws = true
 				for _, r := range ev.Dirty {
 					damage = damage.Union(r)
 				}
-				if m != nil && m.pixels != nil {
-					c.cl.Framebuffer(func(img *image.RGBA) { marked = m.pixels(img, damage) })
-				}
+				c.cl.Framebuffer(func(img *image.RGBA) {
+					if m != nil && m.pixels != nil {
+						marked = m.pixels(img, damage)
+					}
+					if damage.Overlaps(probe.StampArea) {
+						s.countStamp(img)
+					}
+				})
 			}
 			if draws {
-				s.emit(frame{at: now, damage: damage, marked: marked, content: content})
+				s.emit(frame{at: now, damage: damage, marked: marked}, m)
 			}
 			// The web client presents a graphical frame, drawing or
 			// not, at the screen's next refresh, and acknowledges it by
@@ -371,20 +389,6 @@ func (s *session) readV1(c *v1Conn, d display) {
 			return
 		}
 	}
-}
-
-// showsCells reports a cell of scr that is not blank: one with a
-// character, or a background other than the default.
-func showsCells(scr *terminal.Screen) bool {
-	for y := range scr.Rows {
-		for x := range scr.Cols {
-			c := scr.Cell(x, y)
-			if c.Content != " " && c.Content != "" || c.Style.Bg != terminal.DefaultColor {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // decoders are the codecs that occamy's web client offers where the

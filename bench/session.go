@@ -21,6 +21,7 @@ import (
 
 	"github.com/coder/websocket"
 
+	"changkun.de/x/occamy/bench/internal/probe"
 	"changkun.de/x/occamy/internal/config"
 	"changkun.de/x/occamy/internal/guacamole"
 	"changkun.de/x/occamy/internal/guacd"
@@ -162,10 +163,6 @@ type frame struct {
 	at     time.Time
 	damage image.Rectangle // empty for a v1 terminal
 	marked bool            // the session's marker matched the frame
-	// content is set once the screen shows something of the remote: for
-	// a v1 terminal, from the first frame with a cell that is not blank,
-	// and for any other session from its first frame.
-	content bool
 }
 
 // marker reports whether a frame shows what a scenario waits for. pixels
@@ -194,16 +191,25 @@ type session struct {
 	frames chan frame
 
 	// marker, if set, reports whether a frame shows what the scenario
-	// waits for.
+	// waits for. Until a scenario sets one it is the session's protocol's
+	// known content (shows), which G7 waits for; first is that marker,
+	// which goes once a frame has matched it, since a marker costs a look
+	// at every frame.
 	marker atomic.Pointer[marker]
+	first  *marker
 
-	start      time.Time
-	signIn     time.Duration // v1: the sign-in just before start
-	firstFrame atomic.Int64  // nanoseconds after start
-	drawn      atomic.Int64  // frames that drew
-	decode     atomic.Int64  // nanoseconds spent decoding and applying drawing
-	done       chan struct{}
-	err        error // set before done closes
+	start  time.Time
+	signIn time.Duration // v1: the sign-in just before start
+	drawn  atomic.Int64  // frames that drew
+	decode atomic.Int64  // nanoseconds spent decoding and applying drawing
+	// sceneFrames counts the frames of the scene that the session showed,
+	// by their stamps. The reader alone uses stamp and stamped, the last
+	// stamp it read.
+	sceneFrames atomic.Int64
+	stamp       uint16
+	stamped     bool
+	done        chan struct{}
+	err         error // set before done closes
 	// unsupported counts the drawing operations the client could not
 	// apply. It is set before done closes.
 	unsupported map[string]int
@@ -217,14 +223,35 @@ func newSession(start time.Time) *session {
 	}
 }
 
-// emit reports a complete frame that drew. The first with content is
-// the session's first frame.
-func (s *session) emit(f frame) {
+// expect has the session's first frames looked at for what m shows. It
+// comes before the session's reader starts, so that no frame goes
+// unchecked.
+func (s *session) expect(m marker) {
+	s.first = &m
+	s.marker.Store(&m)
+}
+
+// emit reports a complete frame that drew, which m, the marker it was
+// looked at with, did or did not match.
+func (s *session) emit(f frame, m *marker) {
 	s.drawn.Add(1)
-	if f.content {
-		s.firstFrame.CompareAndSwap(0, int64(f.at.Sub(s.start)))
+	if f.marked && m == s.first {
+		// A scenario's own marker stays, if it has set one meanwhile.
+		s.marker.CompareAndSwap(m, nil)
 	}
 	s.frames <- f
+}
+
+// countStamp counts the frame of the scene that img shows, if it is new.
+// A frame of the server's that drew part of a stamp reads as none, and
+// the next one that completes it counts. It is called from the reader.
+func (s *session) countStamp(img *image.RGBA) {
+	n, ok := probe.ReadStamp(img)
+	if !ok || s.stamped && n == s.stamp {
+		return
+	}
+	s.stamp, s.stamped = n, true
+	s.sceneFrames.Add(1)
 }
 
 // v0Conn sends a v0 session's input as Guacamole instructions.
@@ -243,9 +270,10 @@ func (c v0Conn) close() { c.raw.close() }
 // newV0Session starts a v0 session on raw, which applies drawing as a
 // browser does: it decodes every image, answers every sync once the
 // frame is applied, and sends a nop every five seconds, as
-// guacamole-common-js does.
-func newV0Session(raw rawConn, start time.Time) *session {
+// guacamole-common-js does. first is what its first frames should show.
+func newV0Session(raw rawConn, start time.Time, first marker) *session {
 	s := newSession(start)
+	s.expect(first)
 	s.conn = v0Conn{raw}
 	go s.readV0(raw, guacamole.NewDisplay())
 	go s.keepAlive(raw)
@@ -293,10 +321,14 @@ func (s *session) readV0(conn rawConn, display *guacamole.Display) {
 				continue
 			}
 			marked := false
-			if m := s.marker.Load(); m != nil && m.pixels != nil {
+			m := s.marker.Load()
+			if m != nil && m.pixels != nil {
 				marked = m.pixels(img, damage)
 			}
-			s.emit(frame{at: now, damage: damage, marked: marked, content: true})
+			if damage.Overlaps(probe.StampArea) {
+				s.countStamp(img)
+			}
+			s.emit(frame{at: now, damage: damage, marked: marked}, m)
 		case "error":
 			args := ins.Args()
 			s.err = fmt.Errorf("guacd error: %v", args)
