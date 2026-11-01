@@ -838,6 +838,7 @@ type replayAttempt struct {
 	limit     func(*tls.Config) // what it changes of the client's TLS
 	version   int               // of the first TSRequest, if not the client's
 	pause     time.Duration     // between the TLS handshake and NEGOTIATE
+	listen    time.Duration     // reading there, for what comes unasked
 	// client is how the client itself takes the same limit, as it is;
 	// nil if that needs a change to it.
 	client *sessionLimit
@@ -858,8 +859,15 @@ var replayAttempts = []replayAttempt{
 		name:  "tls13-pause-500ms (the test's connection holds back the client's first application data)",
 		pause: 500 * time.Millisecond,
 	}},
-	{label: "tls13-pause-10ms", pause: 10 * time.Millisecond},
-	{label: "tls13-pause-1ms", pause: time.Millisecond},
+	{label: "tls13-listen", listen: time.Second},
+	// A session cache is what makes Go offer psk_key_exchange_modes and
+	// session_ticket, as OpenSSL does by default.
+	{label: "tls13-tickets", limit: func(c *tls.Config) { c.ClientSessionCache = tls.NewLRUClientSessionCache(1) }},
+	{label: "tls13-tickets-listen", listen: time.Second, limit: func(c *tls.Config) { c.ClientSessionCache = tls.NewLRUClientSessionCache(1) }},
+	{label: "tls13-p384-tickets", limit: func(c *tls.Config) {
+		c.CurvePreferences = []tls.CurveID{tls.CurveP384}
+		c.ClientSessionCache = tls.NewLRUClientSessionCache(1)
+	}},
 	{label: "tls13-p384", limit: func(c *tls.Config) { c.CurvePreferences = []tls.CurveID{tls.CurveP384} }},
 	{label: "tls12", limit: func(c *tls.Config) { c.MaxVersion = tls.VersionTLS12 }},
 	{label: "credssp-v2", version: 2},
@@ -992,6 +1000,22 @@ func (h windowsHost) replay(t *testing.T, a replayAttempt) (reached int, note st
 		version = a.version
 	}
 	time.Sleep(a.pause)
+	if a.listen > 0 {
+		// Whether the server speaks, or objects, before NEGOTIATE.
+		if err := tc.SetReadDeadline(time.Now().Add(a.listen)); err != nil {
+			t.Log(err)
+		}
+		var b [1]byte
+		n, err := tc.Read(b[:])
+		logf("listening for %v before NEGOTIATE: %d bytes of data, %d bytes on the wire since the client's Finished, %v", a.listen, n, rec.afterFinished(), err)
+		var timeout net.Error
+		if !errors.As(err, &timeout) || !timeout.Timeout() {
+			return reachedTLS, fmt.Sprintf("%s; before NEGOTIATE: %v", negotiated, err)
+		}
+		if err := tc.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+			t.Log(err)
+		}
+	}
 	nc := &ntlmClient{user: h.user, password: h.password}
 	negotiate := nc.negotiateMessage()
 	logf("round 1: TSRequest version %d, NEGOTIATE % x", version, negotiate)
@@ -1063,6 +1087,7 @@ func (h windowsHost) replay(t *testing.T, a replayAttempt) (reached int, note st
 	if err := writeTSRequest(tc, &tsRequest{Version: version, AuthInfo: sess.seal(ts)}); err != nil {
 		return reachedProof, fmt.Sprintf("%s; both rounds answered; the credentials: writing: %v", negotiated, err)
 	}
+	logf("%d bytes on the wire since the client's Finished", rec.afterFinished())
 	if protocol&ProtocolHybridEx == 0 {
 		time.Sleep(time.Second) // for the server to log on, with no answer to wait for
 		return reachedCredentials, fmt.Sprintf("%s; both rounds answered, the server's proof matches; the credentials are written, and PROTOCOL_HYBRID has no answer to them", negotiated)
@@ -1091,6 +1116,13 @@ type wireRecorder struct {
 	done           bool
 	pause          time.Duration // see sessionLimit
 	paused         int
+	after          int // bytes read since recording stopped
+}
+
+func (r *wireRecorder) afterFinished() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.after
 }
 
 func (r *wireRecorder) Write(p []byte) (int, error) {
@@ -1118,6 +1150,8 @@ func (r *wireRecorder) Read(p []byte) (int, error) {
 	r.mu.Lock()
 	if !r.done {
 		r.received = append(r.received, p[:n]...)
+	} else {
+		r.after += n
 	}
 	r.mu.Unlock()
 	return n, err
