@@ -177,6 +177,9 @@ func (c *Client) cliprdrMessage(out Output, msg []byte, truncated bool) error {
 	case cbMonitorReady:
 		c.chio.mu.Lock()
 		cl.ready, cl.initDue = true, true
+		// A clipboard process that started again does not answer what the
+		// last was asked, and has offered nothing to ask for.
+		cl.request, cl.requested, cl.stale = 0, 0, false
 		c.chio.mu.Unlock()
 		c.due()
 	case cbFormatList:
