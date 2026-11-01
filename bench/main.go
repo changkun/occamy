@@ -74,7 +74,7 @@ func main() {
 		runs      = flag.Int("runs", 1, "how many times to run everything; the table shows medians")
 		failfast  = flag.Bool("failfast", false, "stop at the first measurement with an error")
 		engine    = flag.String("engine", "podman", "container engine for CPU statistics, or none")
-		project   = flag.String("project", "docker", "compose project of the stack")
+		project   = flag.String("project", "occamy", "compose project of the stack")
 		out       = flag.String("out", "bench-results.json", "JSON output file")
 	)
 	flag.Parse()

@@ -50,7 +50,7 @@ make bench BENCH_FLAGS="-scenarios T1 -net N1 -series occamy"
 | `-quick` | off | A tenth of the samples and a sixth of the durations, to check the setup |
 | `-ack-hz` | `60` | v1: the screen refresh on whose ticks the harness acknowledges a graphical frame, as a browser does; the gate's numbers use 60, and `0`, which acknowledges at once, is a diagnostic ([The v1 series](#the-v1-series)) |
 | `-engine` | `podman` | Container engine for CPU time, or `none` |
-| `-project` | `docker` | The stack's compose project, whose containers CPU time is read from |
+| `-project` | `occamy` | The stack's compose project, whose containers CPU time is read from |
 | `-addr`, `-v1`, `-guacd` | `localhost:5636`, `localhost:5637`, `localhost:4822` | occamyd for v0, occamy-v1 for v1, and guacd for the direct series |
 | `-out` | `bench-results.json` | JSON output |
 

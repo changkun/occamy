@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -100,18 +101,38 @@ func Load() []byte {
 	log.SetPrefix("occamy: ")
 	log.SetFlags(log.LstdFlags | log.Lshortfile | log.Lmsgprefix)
 
-	loc := flag.String("conf", "./conf.yaml", "path to the runtime config file")
-	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, `a modern guacamole protocol based remote desktop proxy written in Go.
-Usage:`)
-		flag.PrintDefaults()
-	}
+	loc := flags(flag.CommandLine)
+	flag.Usage = func() { usage(flag.CommandLine.Output(), flag.CommandLine) }
 	flag.Parse()
 	raw, err := os.ReadFile(*loc)
 	if err != nil {
 		log.Fatalf("cannot open given config file, error: %v", err)
 	}
 	return raw
+}
+
+// flags defines occamyd's flags on fs and returns -conf's value.
+func flags(fs *flag.FlagSet) *string {
+	return fs.String("conf", "./conf.yaml", "the configuration `file`: a v1 file, or a v0 file")
+}
+
+// usage writes occamyd's help to w: what it does, how to run it, and
+// the flags of fs.
+func usage(w io.Writer, fs *flag.FlagSet) {
+	fmt.Fprint(w, `occamyd is Occamy's remote desktop server. It serves the connections
+that its configuration file lists: through API v1, protocol v1 and the
+web client for a v1 file (version: 1), and through the v0 routes for a
+v0 file.
+
+Usage:
+
+	occamyd [-conf file]
+
+Flags:
+
+`)
+	fs.SetOutput(w)
+	fs.PrintDefaults()
 }
 
 // Init parses a v0 configuration file into Runtime. It refuses a v1
