@@ -14,7 +14,8 @@
 // for a reload until it ends, occamyd refuses the view's stream to it or
 // the user leaves it, though not while occamyd cannot be reached; and
 // the clipboard panel takes text sent for the remote's, and says when
-// the core refused to send it.
+// the core refused to send it; and a window that stays the size the
+// hello said asks the remote for nothing.
 
 import { StrictMode, act } from 'react'
 import { type Root, createRoot } from 'react-dom/client'
@@ -70,6 +71,8 @@ class Welcomed {
   closed = false
   /** The clipboard texts the client sent. */
   readonly clipboards: string[] = []
+  /** The sizes the client asked for. */
+  readonly resizes: [number, number][] = []
   /** The longest clipboard text the core sends, as for occamyd's maximum message size. */
   clipboardLimit = Infinity
   private readonly events: SessionEvent[] = []
@@ -108,7 +111,8 @@ class Welcomed {
     return Promise.resolve()
   }
 
-  resize(): number {
+  resize(width: number, height: number): number {
+    this.resizes.push([width, height])
     return 1
   }
 
@@ -443,6 +447,33 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
     expect(r.deletes).toEqual(['DELETE /api/v1/sessions/mZ3k'])
     expect(Welcomed.last?.closed).toBe(false)
     expect(text()).toContain('Ending the session for everyone…')
+  })
+})
+
+describe('The window of a stream welcomed as the owner’s', () => {
+  beforeEach(welcomed)
+
+  it('asks for nothing while it stays the size the hello said, before the first frame, and for a window that changes', async () => {
+    let observed: (entries: { contentRect: { width: number; height: number } }[]) => void = () => undefined
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        constructor(callback: typeof observed) {
+          observed = callback
+        }
+        observe(): void {}
+        disconnect(): void {}
+      },
+    )
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ width: 800, height: 600 } as DOMRect)
+    await render({ token: accessToken('demo'), action: null }, ended)
+    // Past the delay after which the view sizes the remote to the window.
+    await settle(350)
+    expect(Welcomed.last?.resizes).toEqual([])
+
+    act(() => observed([{ contentRect: { width: 900, height: 700 } }]))
+    await settle(350)
+    expect(Welcomed.last?.resizes).toEqual([[900, 700]])
   })
 })
 

@@ -205,6 +205,8 @@ export class SessionController {
   // The clipboard text the remote and this client last agreed on, so
   // that a local clipboard that only echoes the remote's is not sent back.
   private lastClipboard: string | null = null
+  // The last size asked of the remote, by the hello or a resize request;
+  // zero for none.
   private lastResize: Size = { width: 0, height: 0 }
 
   constructor(options: ControllerOptions) {
@@ -258,13 +260,13 @@ export class SessionController {
       return
     }
     const hidden = this.hidden()
+    const screen = { width: Math.min(size.width, MAX_SIDE), height: Math.min(size.height, MAX_SIDE) }
+    const grid = { cols: Math.min(size.cols, MAX_COLS), rows: Math.min(size.rows, MAX_ROWS) }
     let s: Session
     try {
       s = await (this.options.connect ?? connect)(this.options.url, this.options.token, {
-        width: Math.min(size.width, MAX_SIDE),
-        height: Math.min(size.height, MAX_SIDE),
-        cols: Math.min(size.cols, MAX_COLS),
-        rows: Math.min(size.rows, MAX_ROWS),
+        ...screen,
+        ...grid,
         pixelRatio: size.pixelRatio,
         hidden,
         signal,
@@ -283,7 +285,9 @@ export class SessionController {
     }
     this.session = s
     this.can = abilities(s.role)
-    this.lastResize = { width: 0, height: 0 }
+    // occamyd takes an owner's hello for a resize, so a request for the
+    // same size would ask the remote for what it was just asked for.
+    this.lastResize = s.sessionClass === SessionClass.Graphical ? screen : { width: grid.cols, height: grid.rows }
     const doc = this.options.document
     if (doc !== undefined) {
       this.unbinds.push(bindVisibility(doc, s))
@@ -523,9 +527,10 @@ export class SessionController {
   /**
    * requestResize asks the remote for a screen of width × height, pixels
    * or cells, if this client is the owner, unless that was the last size
-   * asked for, or the screen is that size and no other size is on its
-   * way: a window dragged back to the screen's size while the remote
-   * still applies another asks for it again.
+   * asked for, by the hello too, or the screen is that size and no other
+   * size is on its way: a window dragged back to the screen's size while
+   * the remote still applies another asks for it again, and so does one
+   * that changed before the first frame.
    */
   requestResize(width: number, height: number): void {
     const s = this.session
