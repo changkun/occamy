@@ -12,8 +12,8 @@
 version: 1
 listen: 0.0.0.0:5637
 auth:
-  # On a tmpfs (docker-compose.yaml): occamyd creates the key at start.
-  signing_key_file: /run/occamy/signing.key
+  # As the demo's, on its volume (docker-compose.yaml).
+  signing_key_file: /var/lib/occamy/signing.key
   users:
     # Password occamy, as the demo's.
     - name: demo

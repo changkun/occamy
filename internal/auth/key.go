@@ -27,7 +27,7 @@ func LoadOrCreateKey(path string) (key ed25519.PrivateKey, created bool, err err
 		return key, err == nil, err
 	}
 	if err != nil {
-		return nil, false, err
+		return nil, false, KeyAccessError(path, err)
 	}
 	key, err = parsePrivateKey(raw)
 	if err != nil {
@@ -50,7 +50,7 @@ func createKey(path string) (ed25519.PrivateKey, error) {
 	}
 	f, err := os.CreateTemp(filepath.Dir(path), ".signing-key-*")
 	if err != nil {
-		return nil, err
+		return nil, KeyAccessError(path, err)
 	}
 	defer os.Remove(f.Name()) // fails harmlessly once renamed
 	if err := f.Chmod(0o600); err != nil {
@@ -78,6 +78,27 @@ func createKey(path string) (ed25519.PrivateKey, error) {
 		return nil, err
 	}
 	return key, nil
+}
+
+// KeyAccessError says why occamyd cannot reach its key and what to do
+// about it. It is all an operator sees of a start that fails, and the
+// usual cause is a directory or volume that belongs to another user.
+//
+// It names no command. occamyd cannot tell a host's directory from a
+// container's, and the right step differs: path may be a path inside a
+// container, and a rootless container's uids are other numbers on the
+// host, so a plain chown there would fail again. The documentation has
+// the step for each.
+func KeyAccessError(path string, err error) error {
+	uid := os.Getuid()
+	if uid < 0 || !errors.Is(err, fs.ErrPermission) { // Windows has no user id to name.
+		return fmt.Errorf("auth: signing key %s: %w", path, err)
+	}
+	dir := filepath.Dir(path)
+	return fmt.Errorf("auth: signing key %s: occamyd runs as uid %d, which may not use %s: %w; "+
+		"that directory, or in a container what is mounted on it, must belong to uid %d: "+
+		"docs/configuration.md has the step for a host, Docker and podman, under Sign-in",
+		path, uid, dir, err, uid)
 }
 
 func parsePrivateKey(raw []byte) (ed25519.PrivateKey, error) {

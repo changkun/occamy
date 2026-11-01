@@ -237,7 +237,11 @@ notes: the opt-in period), after this spec was complete.
   benchmark's baseline. The VNC password
   comes from `OCCAMY_DEMO_VNC_PASSWORD`, and the signing key goes to a
   tmpfs at `/run/occamy`, since the distroless image's `nonroot` user
-  cannot write `/occamy`. `occamy-v1` waits for `guacd` and `vnc` only.
+  cannot write `/occamy`. (Since 2026-11-01 it goes to
+  `/var/lib/occamy` on the volume `occamy-v1-data`, where a real
+  install keeps it: nothing called for keeping the demo apart, and the
+  demo now exercises that path.) `occamy-v1` waits for `guacd` and
+  `vnc` only.
 - `tests/v1_test.go` (`TestE2EV1`) signs in through API v1, streams
   each connection twice with the Go client of protocol v1, waits for a
   frame of the desktop, checks that the session's state names the

@@ -171,9 +171,11 @@ Where things live:
   The container mounts it read-only at `/occamy/v1.yaml`.
   [configuration.md](configuration.md) describes every key. To apply an
   edit, restart the service: `(cd docker && podman compose restart occamy-v1)`.
-- **The signing key** is `/run/occamy/signing.key` in the container,
-  on a tmpfs. `occamyd` creates it when it starts, so a restart of
-  `occamy-v1` signs everyone out and ends every session.
+- **The signing key** is `/var/lib/occamy/signing.key` in the
+  container, on the volume `occamy-v1-data`, where a real install keeps
+  it too. `occamyd` creates it on first start, so tokens survive a
+  restart of `occamy-v1`, which still ends every session. `make stop`
+  keeps the volume, and `make clean` removes it.
 - **The demo servers' passwords** are in the environment that
   `docker-compose.yaml` gives `occamy-v1` (`OCCAMY_DEMO_*`). The v1 file
   names the variables in `password_env`, so it holds no password.
@@ -188,7 +190,7 @@ on a shared machine, give this stack its own:
 
 | Variable | Default | What it sets |
 |----------|---------|--------------|
-| `COMPOSE_PROJECT_NAME` | `occamy`, which `docker-compose.yaml` names | the compose project: the names of the containers, the network, the volume and the demo images |
+| `COMPOSE_PROJECT_NAME` | `occamy`, which `docker-compose.yaml` names | the compose project: the names of the containers, the network, the volumes and the demo images |
 | `OCCAMY_PORT` | `5636` | the v0 service's port |
 | `OCCAMY_V1_PORT` | `5637` | `occamy-v1`'s port |
 | `OCCAMY_V1_DEBUG_PORT` | `5638` | `occamy-v1`'s debug listener, when it is on |
@@ -351,6 +353,7 @@ ServiceAccount, and a v1 file:
 podman exec occamy-k3s kubectl config view --raw \
   -o 'jsonpath={.clusters[0].cluster.certificate-authority-data}' | base64 -d > "$K8S/ca.pem"
 podman exec occamy-k3s kubectl -n occamy-try create token occamy --duration=1h > "$K8S/token"
+DEMO_HASH=$(sed -n 's/.*password_hash: "\(.*\)"/\1/p' docker/occamy-v1.yaml)
 cat > "$K8S/occamy.yaml" <<EOF
 version: 1
 listen: 127.0.0.1:5639
@@ -359,7 +362,7 @@ auth:
   signing_key_file: $K8S/signing.key
   users:
     - name: demo
-      password_hash: "\$2a\$10\$DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
+      password_hash: "$DEMO_HASH"
 connections:
   - id: k3s-shell
     name: busybox in k3s
@@ -861,8 +864,9 @@ on.
 make stop
 ```
 
-`make stop` stops and removes the stack's containers and its network.
-To also remove what `make build` and `make run` built and made:
+`make stop` stops and removes the stack's containers and its network,
+and keeps its volumes. To also remove what `make build` and `make run`
+built and made:
 
 ```
 make clean
@@ -872,7 +876,7 @@ podman rmi occamy:latest "occamy:$(git describe --always --tags)"
 `make clean` removes nothing that is not Occamy's. It runs `compose
 down` with `--volumes --rmi local` for the stack's project, `occamy`
 unless `COMPOSE_PROJECT_NAME` names another, which removes the demo
-servers' images and the volume of TigerVNC's CA. It
+servers' images and the volumes of TigerVNC's CA and the signing key. It
 then prunes the images of earlier `make build` runs that a later build
 left untagged, which `make build` labels. Every checkout's build has
 that label, so the prune takes the untagged images of any Occamy stack
@@ -890,7 +894,7 @@ and remove yours by name once `make stop` has run:
 ```
 podman rmi occamy-try:latest "occamy-try:$(git describe --always --tags)"
 podman rmi occamy-try-vnc occamy-try-tigervnc occamy-try-ssh occamy-try-rdp occamy-try-desktop
-podman volume rm occamy-try_tigervnc-ca
+podman volume rm occamy-try_tigervnc-ca occamy-try_occamy-v1-data
 ```
 
 If you followed the Kubernetes step, stop `occamyd` with Ctrl-C, then

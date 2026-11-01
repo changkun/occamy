@@ -15,7 +15,7 @@ affects:
   - go.mod
 effort: large
 created: 2026-10-29
-updated: 2026-10-31
+updated: 2026-11-01
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -165,6 +165,54 @@ The bounds are applied as follows:
 
 The 50 ms budget applies separately: `L` p95 for G2 and T1 under N1, and
 for G5 under N1, must be at most 50 ms with v1.
+
+## Decisions of 2026-11-01
+
+The owner delegated the questions this spec had left open, so these are
+decided, each with its reason. They say how the v1 series runs. They do
+not start it: the owner's go-ahead still does that.
+
+1. **G5 with GFX: both are measured, and GFX on is the verdict.**
+   `rdp-native` runs G5 with GFX and with `disable_gfx`. The shipped
+   default, GFX on, is the verdict row. The decode cost is Occamy's own
+   bound, so it cannot be a justified miss ([Targets](#targets)). If
+   that row misses, decoder work comes before v1.0, and the measurement
+   shows where. The decoder is not made faster first, since that would
+   spend the work before the measurement says where it belongs.
+2. **GFX on one side only: both sides run both ways.** `rdp-native` and
+   `rdp-guacd` each run with and without GFX, so that rows compare like
+   with like. guacd's GFX is reachable through `guacd.params.rdp`, and
+   [rdp-strategy](rdp-strategy.md)'s table has measured it. The row of
+   the shipped default is the verdict, and the like-for-like rows sit
+   beside it.
+3. **Method: all three changes.** The scene stamps its frames and the
+   harness counts the distinct ones it was shown, in both protocols.
+   G7 ends on known content in both series, SSH included. The probe's
+   keys are jittered, so that no run sits at one phase of a 60 Hz tick.
+   The baselines that these change are measured again with them: G2 for
+   the jitter, G3 and G4 for the stamp, G5 for both, and G7 for its end.
+   The rule behind that: anything that changes what the remote shows,
+   or how a scenario measures it, measures that baseline again.
+   `docs/benchmarks.md`, What to measure again, states the full list
+   and why, along with what is not measured again.
+4. **Colour depth: 32 bits per pixel on both sides.** That is native's
+   default and what rdp-strategy's table measured, and mismatched
+   depths may make xrdp keep a second X session, with a second scene
+   program, beside the measured one. The bridge's recordings used 24
+   for a reason of their own: guacd asks for 16 with GFX off, which
+   loses colour, and those recordings had to be exact
+   ([guacd-bridge](guacd-bridge.md)'s conformance notes). That is no
+   reason to measure at 24.
+5. **The 8-hour soak is a stability gate before v1.0.** It runs once
+   and is not a row in the series: it answers whether `occamyd` leaks
+   over hours, which the series does not ask
+   ([008](../008-native-architecture.md),
+   [guacd-bridge](guacd-bridge.md), Implementation notes: VNC's soak).
+
+The harness work for decisions 1 to 4 comes with its own notes. The
+other decisions of that day, which are not the benchmark's, are in
+[rdp-strategy](rdp-strategy.md), [008](../008-native-architecture.md)
+and [api-and-server-stack](api-and-server-stack.md).
 
 ## Components
 
@@ -440,10 +488,9 @@ published.
     screen of RemoteFX Progressive tiles a frame: about 10.3 ms of CPU
     at 1024 × 768 on the benchmarks' host, 10.4 to 11.9 as the review
     measured, against G5's RDP target of 5.5 ms a frame. With
-    `disable_gfx`, bitmap updates cost about 1 to 2.4 ms a frame. The
-    owner decides before the v1 run whether `rdp-native` runs G5 with
-    GFX, without it, or both, or whether the decoder gets faster first
-    (`docs/benchmarks.md`).
+    `disable_gfx`, bitmap updates cost about 1 to 2.4 ms a frame. It
+    runs both ways, GFX on being the verdict, and the decoder is not
+    made faster first ([decision 1](#decisions-of-2026-11-01)).
   - `bench/v1.go` drives the Go client core through API v1: it signs in
     at `POST /api/v1/auth/token`, opens
     `GET /api/v1/connections/{id}/stream`, asking for 1024 × 768 pixels
@@ -533,7 +580,9 @@ published.
     compared with within v1. Against the baseline, in which guacd 1.6
     turned the pipeline on and xrdp encoded with RemoteFX Progressive
     ([guacd-bridge](guacd-bridge.md)'s conformance notes), RDP through
-    the v1 bridge therefore differs in one guacd parameter.
+    the v1 bridge therefore differs in one guacd parameter. (2026-11-01:
+    the bridge as shipped stays the verdict's side, and it also runs
+    with the pipeline on, [decision 2](#decisions-of-2026-11-01).)
   - The v1 series are not in `make bench`'s default series, so that the
     documented run of the v0 baseline keeps its duration; they are named
     with `-series`.
@@ -630,18 +679,17 @@ published.
     harness can read it, in a form that survives lossy codecs, and the
     harness counts the distinct scene frames it was shown, for both
     protocols. The stamp changes the scene's pixels, so the baseline's
-    G3 to G5 are measured again with it, which is the owner's decision.
-  - Open, for the owner with the frame stamp: end G7 on known content
-    in both series, a known pixel of the scene or a known line of the
+    G3 to G5 are measured again with it
+    ([decision 3](#decisions-of-2026-11-01)).
+  - Before the full run, also decision 3: end G7 on known content in
+    both series, a known pixel of the scene or a known line of the
     shell, rather than on the first frame that drew, with the baseline
     measured again. Today a desktop's G7 counts a frame that follows a
     resize, in v0 and v1 alike, so the two agree; but a native RDP
     backend that sizes the screen before its first bitmap would end G7
     early. Over SSH they already differ: v1 ends at the first cell that
     is not blank, while v0 ends at guacd's first drawing, and guacd
-    makes its terminal before the SSH session. Changing it changes v0's
-    measurement, so it waits for the same decision to measure the
-    baseline again.
+    makes its terminal before the SSH session.
   - ~~Owner question: whether the v1.0 gate of 10x over guacd is a flat
     10x or each target as defined.~~ Answered on 2026-10-31: each
     target as defined, a miss of 10x only where a documented bound
@@ -656,22 +704,21 @@ published.
     tick at one phase for a whole run. One run's p95 therefore never
     covers the spread of phases, 0 to 16.7 ms, and may understate it by
     up to about 7.5 ms, in native's favour. The scene's 30 fps ticker is
-    locked to the keys the same way, for both series. Planned fix:
-    jitter each key by up to one tick either way, keeping 10 keys a
+    locked to the keys the same way, for both series. The fix, decision
+    3: jitter each key by up to one tick either way, keeping 10 keys a
     second on average, for every series, together with measuring the G3
     to G5 baselines again, so that old and new numbers stay comparable.
-  - Before the full run, check xrdp's sessions on the bench desktop:
-    native RDP asks for 32 bits per pixel, and the bridge leaves guacd's
-    default colour depth. If they differ, xrdp's session manager may
-    keep an X session, and a scene program, for each, so that RDP
-    scenarios run beside a second scene.
+  - Native RDP asks for 32 bits per pixel, and the bridge leaves guacd's
+    default colour depth, so xrdp's session manager may keep an X
+    session, and a scene program, for each, and RDP scenarios run beside
+    a second scene. The bridge is set to 32 for the run
+    ([decision 4](#decisions-of-2026-11-01)); check xrdp's sessions on
+    the bench desktop afterwards.
   - Native RDP now speaks RDP's graphics pipeline by default (its third
     phase's second part), so `rdp-native` and `rdp-guacd` differ there,
-    since the bridge keeps `disable-gfx`; the comparison within v1
-    should say which it measures, and `disable_gfx: true` on
-    `rdp-native` measures native RDP without it.
+    since the bridge keeps `disable-gfx`. Both run both ways, and each
+    row says which it measures
+    ([decision 2](#decisions-of-2026-11-01)).
   - The client core's default decoders (a follow-up of
     [client-core](client-core.md)): once `client` has them, the harness
     uses them instead of its own.
-  - Whether the v1 bridge's RDP should be measured with RDP's graphics
-    pipeline on as well, to separate that parameter from occamyd's cost.

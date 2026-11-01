@@ -6,9 +6,11 @@ package server
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -122,7 +124,9 @@ const (
 )
 
 // TestRunChild is TestRunSignals's occamyd: run with childFileEnv set, it
-// serves that file with Run and exits as occamyd's main does.
+// serves that file with Run. Where occamyd's main exits 1 for any error,
+// through log.Fatal, this exits 3 for a file that it could not read or
+// that ParseV1 refused, so that a test can tell that from Run failing.
 func TestRunChild(t *testing.T) {
 	path := os.Getenv(childFileEnv)
 	if path == "" {
@@ -148,6 +152,37 @@ func TestRunChild(t *testing.T) {
 	os.Exit(0)
 }
 
+// TestRunRefusesNoSignIn runs occamyd on a file that names no way to
+// sign in: it exits without creating the key or listening, and says what
+// to set. occamyd has no default user to fall back on.
+func TestRunRefusesNoSignIn(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "v1.yaml")
+	key := filepath.Join(dir, "signing.key")
+	raw := "version: 1\nlisten: 127.0.0.1:0\nauth:\n  signing_key_file: " + key + "\n"
+	if err := os.WriteFile(file, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A child that does not refuse the file serves it, and would hold the
+	// test until the suite's timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestRunChild$")
+	cmd.Env = append(os.Environ(), childFileEnv+"="+file)
+	out, err := cmd.CombinedOutput()
+	var exit *exec.ExitError
+	// 3 is TestRunChild's own status for a refused file: occamyd exits 1.
+	if !errors.As(err, &exit) || exit.ExitCode() != 3 {
+		t.Fatalf("exit %v, want TestRunChild's status for a file refused, 3\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "nobody could sign in to API v1, and occamyd has no default user") {
+		t.Errorf("output does not say why:\n%s", out)
+	}
+	if _, err := os.Stat(key); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("signing key after the refusal: %v, want none", err)
+	}
+}
+
 // TestRunSignals runs Run in a child process with a request in flight
 // that outlasts the drain: one SIGTERM ends it normally once the drain
 // runs out, and a second SIGTERM during the drain ends it at once.
@@ -157,7 +192,8 @@ func TestRunSignals(t *testing.T) {
 	}
 	dir := t.TempDir()
 	file := filepath.Join(dir, "v1.yaml")
-	raw := "version: 1\nlisten: 127.0.0.1:0\ndebug: {address: 127.0.0.1:0}\nauth:\n  signing_key_file: " + filepath.Join(dir, "signing.key") + "\n"
+	raw := "version: 1\nlisten: 127.0.0.1:0\ndebug: {address: 127.0.0.1:0}\nauth:\n  signing_key_file: " + filepath.Join(dir, "signing.key") +
+		"\n  users: [{name: alice, password_hash: \"" + hashPassword(t, alicePassword, config.MinBcryptCost) + "\"}]\n"
 	if err := os.WriteFile(file, []byte(raw), 0o600); err != nil {
 		t.Fatal(err)
 	}
