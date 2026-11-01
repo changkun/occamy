@@ -203,7 +203,27 @@ them:
   as soon as #32 has a Windows host: NLA with the backend's own NTLMv2
   and CredSSP, a refused logon, and the licensing exchange beyond the
   STATUS_VALID_CLIENT shortcut, against Windows. Phase 4 keeps the rest
-  of the Windows work.
+  of the Windows work. A first try, on a GitHub-hosted Windows Server
+  2025 runner rather than #32's host, found that server refusing the
+  ClientHello Go sends without a session cache, which has neither
+  `session_ticket` nor `psk_key_exchange_modes`. With a cache, a replay
+  of the client's messages passes NLA there. So `tlsPolicy.config`
+  gives each connection a one-entry cache of its own, which keeps TLS
+  1.3, and no connection resumes another's session, which would skip
+  the certificate check; rdptest refuses such a ClientHello too.
+  [rdp-strategy](rdp-strategy.md)'s "What Windows Server 2025 refused"
+  has what was proven and what was not, including that which of the two
+  extensions Windows needs is unknown.
+  With the cache in, a second run on that runner got a session. It logs
+  on with NLA, and the keyboard and resize work. With GFX on, the
+  default, the screen stays nearly black until ClearCodec and the cache
+  land (phase 3's third pull request, a v1.0 blocker), so Windows hosts
+  need `disable_gfx: true`, with which the whole desktop drew correctly.
+  The clipboard fails both ways; the suspected cause,
+  `CHANNEL_FLAG_SHOW_PROTOCOL`, is unproven. This is a CI runner on
+  loopback, not a real deployment, and neither the smoke test above nor
+  phase 4 is done: #32 stays open. rdp-strategy's "What a Windows
+  Server 2025 session showed" has the evidence.
 - **Registration needs NLA end to end** (done: Implementation notes:
   registration). The backend was not registered in `occamyd` until NLA
   had run end to end, live against Windows or against the CredSSP
@@ -1360,6 +1380,14 @@ RDP's guacd path, RDP no longer needs guacd at all.
 - **Follow-ups.**
   - Phase 3, GFX without AVC; until then servers send plain bitmap
     updates, as they send guacd with `disable-gfx`.
+  - The clipboard against Windows, which fails both ways on a Windows
+    Server 2025 CI runner: Windows sends Clipboard Capabilities and
+    Monitor Ready, then nothing more on the channel. The suspected
+    cause is that `chunk` never sets `CHANNEL_FLAG_SHOW_PROTOCOL`, which
+    is unproven: what the client sent was not recorded, and no run has
+    tried the flag. rdp-strategy's "What a Windows Server 2025 session
+    showed" has the evidence. Until it is fixed, the orders below
+    cannot be checked.
   - Phase 4, against Windows, besides its row: two orders and bounds
     that only xrdp, whose chansrv only logs Format List Responses, has
     checked:
@@ -1756,8 +1784,9 @@ RDP's guacd path, RDP no longer needs guacd at all.
   wire-to-surface 1, RemoteFX Progressive in wire-to-surface 2, GFX on
   by default in the backend, and `disable_gfx` to turn it off. The
   third adds the bitmap cache and ClearCodec. Until then a server that
-  sends those, as Windows does, draws nothing where it sends them: the
-  client counts and skips them, and at the first it skips in a session
+  sends those, as Windows does, draws nothing where it sends them, which
+  on Windows Server 2025 left the screen nearly black: the client
+  counts and skips them, and at the first it skips in a session
   logs a warning that names the two ways around it, `disable_gfx: true`
   on the target's connection, which falls back to bitmap updates, and
   `adhoc_backends: {rdp: guacd}` for an ad-hoc target, which cannot
@@ -2377,7 +2406,8 @@ RDP's guacd path, RDP no longer needs guacd at all.
   - GFX is on by default. With it, xrdp draws its sessions in
     RemoteFX Progressive; a server whose ClearCodec or cache the
     client does not take yet, such as Windows, leaves gaps where it
-    sends them until the third pull request, and `disable_gfx: true`
+    sends them until the third pull request, which on Windows Server
+    2025 is nearly the whole screen, and `disable_gfx: true`
     is the fallback. The key is refused on guacd connections, which
     take `disable-gfx` from `guacd.params.rdp`. Since such a server's
     sessions would degrade silently, the first PDU skipped for want of
@@ -2483,7 +2513,17 @@ RDP's guacd path, RDP no longer needs guacd at all.
   - xrdp uses the reduce-extrapolate transform and difference tiles,
     but sent no upgrades in these runs.
 - **Follow-ups.**
-  - The third pull request: the bitmap cache and ClearCodec.
+  - The third pull request: the bitmap cache and ClearCodec. **It blocks
+    v1.0**: on a Windows Server 2025 CI runner, every Wire-To-Surface-1
+    bitmap was ClearCodec, and with GFX on, the default, the screen
+    stayed nearly black. Windows hosts need `disable_gfx: true` until
+    it lands.
+  - The same ClientHello in other TLS clients, which
+    [rdp-strategy](rdp-strategy.md)'s "What Windows Server 2025
+    refused" fixed for RDP alone:
+    `internal/backend/vnc/vencrypt.go:298` and
+    `internal/backend/kubernetes/cert.go:141` have no session cache
+    either. No server has been seen refusing them.
   - **Before the release** (a gate in [008](../008-native-architecture.md)'s
     beta.1 list): a decoding budget for the whole process as well as
     the session's. Each session may take about a core, so one user's
@@ -2527,5 +2567,7 @@ RDP's guacd path, RDP no longer needs guacd at all.
     factors differ;
   - upgrades, which xrdp did not send, and whether Windows deletes or
     switches a codec context with upgrades to come;
-  - that the warning names what Windows sends that the client skips;
+  - that the warning names what Windows sends that the client skips,
+    which a Windows Server 2025 CI runner showed for ClearCodec and the
+    cache;
   - plain RemoteFX, which xrdp does not send under GFX.

@@ -786,6 +786,26 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - The focus ring no longer covers the remote's first pixels. It sat on
   the edge of a screen that fills the stage, 2 CSS pixels deep; the
   focus now shows on the toolbar's lower edge.
+- Native RDP's ClientHello is no longer refused by Windows Server 2025,
+  which failed every NLA logon with
+  `rdp: CredSSP: remote error: tls: internal error`. Go's TLS client
+  offers neither `session_ticket` nor `psk_key_exchange_modes` without
+  a session cache, and over TLS 1.3 that server ends such a connection
+  just after the handshake. Each connection now has a cache of its own,
+  so TLS 1.3 stays and no connection can resume another's session,
+  which would skip the check of the server's certificate. Which of the
+  two extensions it needs is not known, nor what any other Windows
+  version does
+  ([rdp-strategy](specs/008-native-architecture/rdp-strategy.md) has
+  what was proven, and how). The fake server now refuses such a
+  ClientHello too. With this, native RDP logs on to a Windows Server
+  2025 CI runner over loopback, not a real deployment (#32 stays open),
+  and the keyboard and resize work. With GFX on, the default, the
+  screen stays nearly black until ClearCodec and the cache land, a
+  v1.0 blocker, so set `disable_gfx: true` for Windows hosts, with
+  which the desktop drew correctly. The clipboard fails both ways on
+  that server; the suspected cause, `CHANNEL_FLAG_SHOW_PROTOCOL`, is
+  unproven.
 - A session through guacd that shows nothing now fails, rather than
   staying at "Connecting…". guacd's process for a connection hung once
   in 128 connections on a very busy host, and only the session's idle

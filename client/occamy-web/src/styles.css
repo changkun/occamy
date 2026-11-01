@@ -366,9 +366,11 @@ legend {
 }
 
 /* The screen fills the stage, so a ring around it would cover the remote's
-   pixels. The toolbar's lower edge shows the focus instead. */
+   pixels. The toolbar's lower edge shows the focus instead. The outline stays
+   transparent because forced colours drop that shadow and paint the outline. */
 .screen:focus-visible {
-  outline: none;
+  outline: 2px solid transparent;
+  outline-offset: -2px;
 }
 
 .session:has(.screen:focus-visible) .bar {
