@@ -359,8 +359,12 @@ was complete.
   `COMPOSE_PROJECT_NAME` and `-p` still override it, except that
   podman-compose, the Python provider, honours `COMPOSE_PROJECT_NAME`
   over the file's name only from 1.4.0: 1.0.6 to 1.3.0 read the name
-  first, and 1.0.3 and older read neither and keep the directory's
-  (`podman_compose.py` of each release).
+  first, so that under them `make stop` and `make clean` act on the
+  project `occamy` whatever `COMPOSE_PROJECT_NAME` says, which on a
+  shared host may be someone else's stack, and 1.0.3 and older read
+  neither and keep the directory's (`podman_compose.py` of each
+  release). docs/try-it.md says so, and to check `podman-compose
+  --version` first.
   `TestDemoProject` checks the three.
 - `make build` labels its image `de.changkun.occamy.make=build`.
   `make clean` runs `compose down --remove-orphans --volumes --rmi

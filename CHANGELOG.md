@@ -653,8 +653,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   other checkout and any other compose file in a `docker` directory
   share. `make bench` and the harness's `-project` default to `occamy`
   too. `COMPOSE_PROJECT_NAME` still names another project, with Docker
-  Compose and with podman-compose 1.4.0 or later: podman-compose 1.0.6
-  to 1.3.0 prefer the file's name to it, and 1.0.3 and older read
+  Compose and with podman-compose 1.4.0 or later. podman-compose 1.0.6
+  to 1.3.0 ignore it for the file's name, so under them `make stop` and
+  `make clean` act on the project `occamy` whatever it says, which on a
+  shared host may be someone else's stack; 1.0.3 and older read
   neither and keep `docker`. A stack started before this change runs
   under the project `docker`. If it is yours, remove it once, with its
   `docker_tigervnc-ca` volume and the `docker-*` images it built,

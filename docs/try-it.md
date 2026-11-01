@@ -44,8 +44,11 @@ The integration tests in [section 7](#integration-tests) read
 hands its work to a compose provider, docker-compose or podman-compose,
 which must be installed; `podman compose version` names the one it
 found. podman-compose, the Python one, must be 1.4.0 or later to name
-the project as this guide says: 1.0.6 to 1.3.0 take the name `occamy`
-from the compose file over `COMPOSE_PROJECT_NAME`, and 1.0.3 and older
+the project as this guide says, so check `podman-compose --version`
+first. Releases 1.0.6 to 1.3.0 ignore `COMPOSE_PROJECT_NAME` and take
+the name `occamy` from the compose file: under them, `make stop` and
+`make clean` act on the project `occamy` whatever you set, and on a
+shared host that may be someone else's stack. Releases 1.0.3 and older
 ignore both and name the project `docker`, after the directory. On
 macOS and Windows, the engine runs in a virtual machine, which needs a
 few GiB of memory for the stack's seven containers.
