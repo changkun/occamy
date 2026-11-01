@@ -77,6 +77,10 @@ type Config struct {
 	// ClipboardToServer, the default, the client does not ask for the
 	// channel.
 	Clipboard ClipboardMode
+	// ClipboardWait bounds how long the text of SetClipboard waits for
+	// the server to take it; it is then dropped, and the Output told.
+	// DefaultClipboardWait by default.
+	ClipboardWait time.Duration
 	// Resize asks for the dynamic virtual channels (DRDYNVC) and accepts
 	// the server's Display Control channel, through which RequestSize
 	// asks the server to resize the desktop (dynvc.go).
@@ -116,6 +120,11 @@ type Output interface {
 	CursorMove(p image.Point)
 	// Clipboard reports the server's clipboard: text/plain in UTF-8.
 	Clipboard(mime string, data []byte)
+	// ClipboardStatus reports whether the server's clipboard answers:
+	// false each time the owner's text was dropped because it did not,
+	// and true once it speaks again. The goroutine that writes the
+	// channels calls it, unlike the methods above.
+	ClipboardStatus(answering bool)
 }
 
 // Stats counts what a client received, by kind.
@@ -697,7 +706,7 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 	if len(c.channels) > 0 {
 		wctx, cancel := context.WithCancel(ctx)
 		var wg sync.WaitGroup
-		wg.Go(func() { c.channelWriter(wctx) })
+		wg.Go(func() { c.channelWriter(wctx, out) })
 		defer func() {
 			cancel()
 			c.conn.Close() // ends a write that waits on the server
@@ -705,6 +714,9 @@ func (c *Client) Run(ctx context.Context, out Output) error {
 			c.chio.mu.Lock()
 			if c.disp.timer != nil {
 				c.disp.timer.Stop() // no layout is due any more
+			}
+			if c.clip.timer != nil {
+				c.clip.timer.Stop() // no text waits any more
 			}
 			c.chio.mu.Unlock()
 		}()

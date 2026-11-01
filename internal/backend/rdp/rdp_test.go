@@ -14,6 +14,7 @@ import (
 	"image/color"
 	"io"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -308,6 +309,34 @@ func TestRunInput(t *testing.T) {
 			}
 			quietFor(t, c)
 		})
+	}
+}
+
+// Text a server's clipboard does not take within the wait, as when its
+// clipboard process has gone, gets the sink told, and it hears again
+// when the server speaks.
+func TestRunClipboardUnanswered(t *testing.T) {
+	checkGoroutines(t)
+	s := listen(t, rdptest.Server{})
+	b := newBackend(t, s.config(t))
+	b.cfg.ClipboardWait = 50 * time.Millisecond
+	sink := &backendtest.Sink{}
+	r := start(t, b, sink)
+	c := s.accept(t)
+	if err := b.Input(backend.Clipboard{MIME: "text/plain", Data: []byte("lost")}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the status of a clipboard that does not answer", func() bool {
+		return slices.Equal(sink.ClipboardStatuses(), []bool{false})
+	})
+	if err := c.SendChannel("cliprdr", rdptest.MonitorReady()); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the status of a clipboard that answers again", func() bool {
+		return slices.Equal(sink.ClipboardStatuses(), []bool{false, true})
+	})
+	if err := r.stop(t); !errors.Is(err, context.Canceled) {
+		t.Errorf("Run returned %v, want context.Canceled", err)
 	}
 }
 

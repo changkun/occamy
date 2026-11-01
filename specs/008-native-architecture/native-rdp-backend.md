@@ -595,6 +595,29 @@ RDP's guacd path, RDP no longer needs guacd at all.
     announcing it again and again makes the client wait. A Format List
     that does not parse is refused with a failed response; a message
     whose length is wrong is dropped; locks and file PDUs are ignored.
+  - The bound on the owner's text (`Config.ClipboardWait`, a minute by
+    default). On a server only the clipboard process speaks on the
+    channel, so without it Monitor Ready never comes and a Format List
+    goes unanswered: xrdp without `xrdp-chansrv`, which keeps the session
+    going. Text waits from `SetClipboard` for Monitor Ready, or from its
+    Format List for a Format List Response or a Format Data Request,
+    which xrdp sends first. Then `cliprdrDue` drops the text, so a server
+    that wakes later does not get what the viewers were told it did not,
+    and the channel writer calls `Output.ClipboardStatus(false)`, which
+    reaches the viewers as `clipboard-status`
+    ([protocol](../../docs/protocol.md#clipboard-status)). That happens
+    for each loss, as a viewer may have dismissed the last. Any message
+    from the server after that calls `ClipboardStatus(true)`. Monitor
+    Ready starts a new wait, for the list that follows; newer text does
+    not, or text sent every so often would keep the wait from ending. A
+    timer wakes the writer, as for a layout, so nothing here touches the
+    Format List Responses the client owes or the Suppress Output lock.
+    Neither of the server's answers names a list, so the answer to an
+    older list ends the wait for a newer: the text is then lost in
+    silence if the process dies within that round trip. Counting lists
+    would close that, but would raise the notice over a server that
+    answers two lists with one, which is the worse failure. A Format
+    List Response that fails is an answer too, and tells nobody.
   - The backend (`internal/backend/rdp`): `DisableCopy` and
     `DisablePaste`, as guacd's `disable-copy` and `disable-paste`, map
     onto the two modes; with both, no channel. `Input` queues a
@@ -1289,8 +1312,8 @@ RDP's guacd path, RDP no longer needs guacd at all.
     `TestConnectionPressure`, `TestE2EV1` and `TestE2EV1RDP` in CI's
     order at load 58 to 69. The backend cannot do this for a server:
     Monitor Ready comes from the channel server, so without one nothing
-    answers on the channel. A paste then waits, unsent, until the
-    session ends, and the viewer is told nothing.
+    answers on the channel. A paste then waits for a minute, and the
+    viewers are told (the bound on the owner's text, above).
 - **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
   through occamyd's routes with the Go client against `rdptest`: NLA
   with stored credentials, the hello's size, the screen, scancodes,
@@ -2490,12 +2513,6 @@ RDP's guacd path, RDP no longer needs guacd at all.
     10 sessions (`limits.sessions_per_user`) to hostile servers, such
     as ad-hoc targets they chose, take about 10 cores;
     `docs/configuration.md`'s limits say so.
-  - **A paste with no channel server**, for the owner to decide. On an
-    xrdp server whose `xrdp-chansrv` has exited, no Monitor Ready comes,
-    so a paste waits unsent until the session ends, and the viewer is
-    told nothing. Telling the viewer would be a change in occamyd. The
-    demo starts its channel server again (`reconnectwm.sh`), so it does
-    not show this.
   - **PDUs applied that do little**, with the process's budget, before
     the release (found in the third round; the final review measured
     it again). The headers' charge covers what the client skips; what

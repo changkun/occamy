@@ -290,7 +290,7 @@ func (c *Client) writeDue() error {
 	}
 	now := c.clock()
 	c.chio.mu.Lock()
-	msgs := c.cliprdrDue(nil)
+	msgs := c.cliprdrDue(nil, now)
 	msgs = c.dynvcDue(msgs, now)
 	c.chio.mu.Unlock()
 	b := channelBatch{c: c}
@@ -316,14 +316,17 @@ type dueMessage struct {
 // done. A write that fails stops it; the reader then sees the connection
 // fail, or Run's caller sees the next write fail, or the reader reports
 // the failure once what the client owes the server reaches its bound.
-func (c *Client) channelWriter(ctx context.Context) {
+// It tells out what became of the owner's clipboard.
+func (c *Client) channelWriter(ctx context.Context, out Output) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-c.chio.kick:
 		}
-		if err := c.writeDue(); err != nil {
+		err := c.writeDue()
+		c.tellClipboard(out)
+		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				c.log.Debug("rdp: channel write failed", "err", err)
 			}
