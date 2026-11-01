@@ -68,6 +68,19 @@ func newStaticUsers(users []config.User, signer *auth.Signer, ttl time.Duration)
 	return s, nil
 }
 
+// signInMethods is the reply of GET /api/v1/auth/methods.
+type signInMethods struct {
+	OIDC bool `json:"oidc"` // the OIDC routes are served
+}
+
+// authMethods implements GET /api/v1/auth/methods: what a sign-in page
+// offers besides a password. It tells nothing that the OIDC routes' 404
+// does not, and answers 200 either way, as a browser logs any 4xx.
+func (s *server) authMethods(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	respond(w, http.StatusOK, signInMethods{OIDC: s.oidc != nil})
+}
+
 // tokenRequest is the body of POST /api/v1/auth/token.
 type tokenRequest struct {
 	Username string `json:"username"`

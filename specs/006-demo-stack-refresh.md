@@ -248,7 +248,10 @@ notes: the opt-in period), after this spec was complete.
   `TestMain` also checks that `occamy-v1` still signs in afterwards.
 - `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` let a second stack
   run beside the first under another project name (`-p`), on a shared
-  host; the defaults are unchanged.
+  host; the defaults are unchanged. `make build` tags `OCCAMY_IMAGE`'s
+  name and tag too, so that it leaves `occamy:latest` alone: it had
+  ignored the variable unless given `IMAGE=` as well, which a build on
+  a shared host could overlook (`TestMakeBuildImage`).
 - `internal/config`'s `TestDemoV1File` loads `docker/occamy-v1.yaml`, so
   that a configuration change that breaks it fails `go test` rather
   than the `e2e` job.
@@ -322,6 +325,9 @@ notes: VNC's parity matrix), after this spec was complete.
   `vnc-native`, which serves vnc's default:
   `vnc`, `vnc-none`, `vnc-de`, `vnc-fr`, `tigervnc`, `tigervnc-prompt`,
   `tigervnc-plain`, `tigervnc-none`, `tigervnc-de` and `tigervnc-fr`.
+  `tigervnc-plain-guacd` cannot open, as guacd has no X509 credentials
+  to give, and says so in its name; the matrix keeps it as the proof of
+  that row.
   `occamy-v1` waits for `tigervnc` too, whose healthcheck waits for its
   five sockets and the CA.
 - `tests/parity_test.go` (`TestVNCParity`) runs the matrix through
@@ -370,10 +376,20 @@ was complete.
   `make clean` runs `compose down --remove-orphans --volumes --rmi
   local` for the stack's project and prunes only the dangling images
   with that label. It had pruned every dangling image of the engine.
+  Every checkout's build has that label, so on a shared host the prune
+  may take another Occamy stack's untagged images; docs/try-it.md says
+  so.
   `TestMakeClean` compares the two commands that `make -n clean`
   prints with these, whole, and `TestMakeStop` the one of `make -n
   stop`, `compose down --remove-orphans`, which keeps the volume and
   the images.
+- The image builds the web client on `node:24-trixie-slim`, an LTS, as
+  CI does: vitest 5 takes `^22.12.0 || ^24.0.0 || >=26.0.0` and ESLint
+  `^20.19.0 || ^22.13.0 || >=24`, so `engines` in
+  `client/occamy-web/package.json` is `^22.13.0 || ^24.0.0 || >=26.0.0`.
+  The `node:25` of the Dockerfile made `npm ci` warn of `EBADENGINE`.
+  `TestDockerfileNode` checks the Dockerfile's major against every
+  package in the lock file.
 
 ## Appendix: revival verification harness
 

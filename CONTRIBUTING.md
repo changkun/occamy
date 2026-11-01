@@ -14,8 +14,8 @@ remote credentials.
 
 ## Development
 
-You need Go 1.26.4 or later, Node.js 22.12+ for the web client, and
-Podman or Docker with a compose provider.
+You need Go 1.26.4 or later, Node.js 22.13+, 24 or 26+ for the web
+client, and Podman or Docker with a compose provider.
 
 ```
 make build      # build the image (CONTAINER_ENGINE=docker on each for Docker)

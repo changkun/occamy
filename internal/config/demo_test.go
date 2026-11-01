@@ -5,12 +5,14 @@
 package config_test
 
 import (
+	"encoding/json"
 	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -25,8 +27,9 @@ import (
 // backends that its connections compare (tests/parity_test.go): ssh
 // on the native SSH backend, vnc-native and rdp-native on their
 // protocols' default, native, and every other connection on the backend
-// it names. It also checks the image's web client, and that its user's
-// password is the one docker/occamy-v1.yaml and tests/ give.
+// it names. It also checks the image's web client, that its user's
+// password is the one docker/occamy-v1.yaml and tests/ give, and that
+// the one connection that cannot work says so in the list.
 func TestDemoV1File(t *testing.T) {
 	raw, err := os.ReadFile("../../docker/occamy-v1.yaml")
 	if err != nil {
@@ -54,6 +57,11 @@ func TestDemoV1File(t *testing.T) {
 	backends := map[string]string{}
 	for _, c := range f.Connections {
 		backends[c.ID] = c.Backend
+		// guacd has no X509 credentials to give (parityKnown,
+		// tests/parity_test.go).
+		if strings.HasSuffix(c.Name, " (does not work)") != (c.ID == "tigervnc-plain-guacd") {
+			t.Errorf("connection %s is named %q", c.ID, c.Name)
+		}
 	}
 	// Every connection but ssh, vnc-native and rdp-native names its
 	// backend, so that the comparison does not change with a protocol's
@@ -361,6 +369,107 @@ func TestDemoProject(t *testing.T) {
 	}
 }
 
+// TestMakeBuildImage checks the tags that make build gives: occamy's by
+// default, and OCCAMY_IMAGE's name and tag, the image that the demo stack
+// runs, so that a build for a stack of its own leaves occamy:latest
+// alone on a shared host. IMAGE on the command line names another.
+func TestMakeBuildImage(t *testing.T) {
+	for _, tc := range []struct {
+		image     string
+		args      []string
+		name, tag string
+	}{
+		{name: "occamy", tag: "latest"},
+		{image: "occamy-try:latest", name: "occamy-try", tag: "latest"},
+		{image: "occamy-try", name: "occamy-try", tag: "latest"},
+		{image: "occamy-try:v2", name: "occamy-try", tag: "v2"},
+		{image: "localhost:5000/team/occamy", name: "localhost:5000/team/occamy", tag: "latest"},
+		{image: "localhost:5000/team/occamy:v2", name: "localhost:5000/team/occamy", tag: "v2"},
+		{args: []string{"IMAGE=mine"}, name: "mine", tag: "latest"},
+		{image: "occamy-try:latest", args: []string{"IMAGE=mine"}, name: "mine", tag: "latest"},
+	} {
+		shell := map[string]string{}
+		if tc.image != "" {
+			shell["OCCAMY_IMAGE"] = tc.image
+		}
+		lines := makeDryRun(t, "build", append([]string{"VERSION=v9"}, tc.args...), shell)
+		var tags []string
+		for _, m := range regexp.MustCompile(` -t (\S+)`).FindAllStringSubmatch(strings.Join(lines, "\n"), -1) {
+			tags = append(tags, m[1])
+		}
+		if want := []string{tc.name + ":v9", tc.name + ":" + tc.tag}; !slices.Equal(tags, want) {
+			t.Errorf("OCCAMY_IMAGE=%q, %v: make build tags %q, want %q", tc.image, tc.args, tags, want)
+		}
+	}
+}
+
+// TestDockerfileNode checks that every package of the web client, and
+// the client itself, takes the Node that the image builds it with: npm
+// only warns of one that does not (EBADENGINE), and vitest leaves out
+// Node's odd majors.
+func TestDockerfileNode(t *testing.T) {
+	dockerfile, err := os.ReadFile("../../docker/Dockerfile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := regexp.MustCompile(`(?m)^FROM node:(\d+)-`).FindSubmatch(dockerfile)
+	if m == nil {
+		t.Fatal("no node image in docker/Dockerfile")
+	}
+	major, err := strconv.Atoi(string(m[1]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile("../../client/occamy-web/package-lock.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var lock struct {
+		Packages map[string]struct {
+			Engines json.RawMessage `json:"engines"`
+		} `json:"packages"`
+	}
+	if err := json.Unmarshal(raw, &lock); err != nil {
+		t.Fatal(err)
+	}
+	for name, pkg := range lock.Packages {
+		var engines struct {
+			Node string `json:"node"`
+		}
+		// Old packages may give engines as a list, which says nothing here.
+		if json.Unmarshal(pkg.Engines, &engines) != nil || engines.Node == "" {
+			continue
+		}
+		if !nodeTakes(engines.Node, major) {
+			t.Errorf("%q needs Node %s, and docker/Dockerfile has %d", name, engines.Node, major)
+		}
+	}
+	if lock.Packages["node_modules/vitest"].Engines == nil {
+		t.Error("no vitest in the lock file: this test has lost what it checks")
+	}
+}
+
+// nodeTakes reports whether a package's range of Node versions has a
+// version of major, for the forms ^22.13.0, >=24 and 20. A range with
+// any other form counts as taking it.
+func nodeTakes(versions string, major int) bool {
+	for alt := range strings.SplitSeq(versions, "||") {
+		alt = strings.TrimSpace(alt)
+		m := regexp.MustCompile(`^(\^|>=\s*)?(\d+)(\.\d+)*$`).FindStringSubmatch(alt)
+		if m == nil {
+			return true
+		}
+		n, err := strconv.Atoi(m[2])
+		if err != nil {
+			return true
+		}
+		if strings.HasPrefix(m[1], ">=") && major >= n || !strings.HasPrefix(m[1], ">=") && major == n {
+			return true
+		}
+	}
+	return false
+}
+
 // TestMakeStop checks that make stop removes the demo stack's containers
 // and network through compose, for the stack's project only, and keeps
 // its volume and images, as docs/try-it.md says. It compares the whole
@@ -430,7 +539,7 @@ func makeDryRun(t *testing.T, target string, args []string, shell map[string]str
 	// that the tests set.
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
-		if k != "OCCAMY_BIND" && k != "OCCAMY_DEBUG" && k != "COMPOSE_PROJECT_NAME" {
+		if k != "OCCAMY_BIND" && k != "OCCAMY_DEBUG" && k != "OCCAMY_IMAGE" && k != "COMPOSE_PROJECT_NAME" {
 			cmd.Env = append(cmd.Env, kv)
 		}
 	}

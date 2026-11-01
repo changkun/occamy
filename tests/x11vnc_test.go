@@ -70,11 +70,37 @@ func TestX11vncClipboardRequestorGone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// Time for both attempts with each of their compose commands taking
+	// 30 s, as on a busy host.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	began := time.Now()
 	cl := openDesktopV1(t, ctx, addr, "/api/v1/connections/vnc-none-native/stream", token,
 		client.Options{Width: 1024, Height: 768})
+
+	// A goroutine takes the session's events, which acknowledges its
+	// frames: occamyd drops a viewer that leaves them unacknowledged for
+	// 30 s, which two compose commands in a row may take on a busy host.
+	// It keeps the events that next looks at.
+	events := make(chan client.Event, 64)
+	var readErr error // set before events closes
+	go func() {
+		defer close(events)
+		for {
+			ev, err := cl.Next(ctx)
+			if err != nil {
+				readErr = err
+				return
+			}
+			switch ev.(type) {
+			case client.End, client.Clipboard:
+				select {
+				case events <- ev:
+				case <-ctx.Done():
+				}
+			}
+		}
+	}()
 
 	inVNC := func(script string, env ...string) string {
 		t.Helper()
@@ -126,27 +152,25 @@ func TestX11vncClipboardRequestorGone(t *testing.T) {
 		}
 	}
 
-	// next takes the session's events until done or d, which
-	// acknowledges its frames, as occamyd drops a viewer that
-	// acknowledges none for 30 s, and reports whether done came. The
-	// session's end fails the test.
+	// next takes the events until done or d, and reports whether done
+	// came. The session's end fails the test.
 	next := func(d time.Duration, done func(client.Event) bool) bool {
 		t.Helper()
-		rctx, cancel := context.WithTimeout(ctx, d)
-		defer cancel()
+		timeout := time.After(d)
 		for {
-			ev, err := cl.Next(rctx)
-			if err != nil {
-				if rctx.Err() != nil && ctx.Err() == nil {
-					return false
+			select {
+			case <-timeout:
+				return false
+			case ev, ok := <-events:
+				if !ok {
+					dead("reading the session: %v", readErr)
 				}
-				dead("reading the session: %v", err)
-			}
-			if e, ok := ev.(client.End); ok {
-				dead("the session ended: %v %q (%v)", e.Code, e.Reason, e.Err)
-			}
-			if done != nil && done(ev) {
-				return true
+				if e, ok := ev.(client.End); ok {
+					dead("the session ended: %v %q (%v)", e.Code, e.Reason, e.Err)
+				}
+				if done != nil && done(ev) {
+					return true
+				}
 			}
 		}
 	}

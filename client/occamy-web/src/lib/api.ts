@@ -86,16 +86,11 @@ export class Api {
     return this.token(await this.call('POST', '/api/v1/auth/token', { body: { username, password } }))
   }
 
-  /**
-   * oidcAvailable reports whether occamyd signs users in through OIDC.
-   * API v1 has no route that says so, but GET /api/v1/auth/oidc/login
-   * without a challenge answers 400 with OIDC on, and 404 off, setting
-   * nothing either way.
-   */
+  /** oidcAvailable reports whether occamyd signs users in through OIDC (GET /api/v1/auth/methods); false if it does not say. */
   async oidcAvailable(): Promise<boolean> {
     try {
-      const res = await this.fetch('/api/v1/auth/oidc/login', { method: 'GET', redirect: 'manual', cache: 'no-store', signal: AbortSignal.timeout(this.timeout) })
-      return res.status === 400
+      const v = await this.call('GET', '/api/v1/auth/methods', {})
+      return isObject(v) && v.oidc === true
     } catch {
       return false
     }

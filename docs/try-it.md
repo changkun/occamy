@@ -21,9 +21,9 @@ described in the [README](../README.md#v0-released).
 | [Go](https://go.dev/dl/) | 1.26.4 or later, as `go.mod` says | `occamyd` and the Go tests. `occamyd` builds with `CGO_ENABLED=0`, without a C toolchain |
 | A C compiler, such as gcc | | Linux and Windows only: Go's race detector, `-race`, which [section 6](#6-unit-tests-lint-and-the-web-clients-tests) uses. macOS needs none |
 | [Podman](https://podman.io) with a compose provider, or Docker with Compose v2 | | the image, the demo stack and the integration tests |
-| [Node.js](https://nodejs.org) with npm | 22.12 or later | the web client and its tests |
+| [Node.js](https://nodejs.org) with npm | 22.13 or later on 22, 24, or 26 and later: not 23 or 25, which vitest leaves out | the web client and its tests |
 | `make`, `git`, `curl` | | |
-| [golangci-lint](https://golangci-lint.run) | v2 | `make lint` only |
+| [golangci-lint](https://golangci-lint.run) | v2; CI runs v2.15.0 | `make lint` only |
 | A browser | | the web client |
 
 `make` runs `podman` unless `CONTAINER_ENGINE` names another engine:
@@ -43,15 +43,16 @@ The integration tests in [section 7](#integration-tests) read
 `podman`; with Docker, write `docker` in its place. `podman compose`
 hands its work to a compose provider, docker-compose or podman-compose,
 which must be installed; `podman compose version` names the one it
-found. podman-compose, the Python one, must be 1.4.0 or later to name
-the project as this guide says, so check `podman-compose --version`
-first. Releases 1.0.6 to 1.3.0 ignore `COMPOSE_PROJECT_NAME` and take
-the name `occamy` from the compose file: under them, `make stop` and
-`make clean` act on the project `occamy` whatever you set, and on a
-shared host that may be someone else's stack. Releases 1.0.3 and older
-ignore both and name the project `docker`, after the directory. On
-macOS and Windows, the engine runs in a virtual machine, which needs a
-few GiB of memory for the stack's seven containers.
+found. If it names podman-compose, the Python one, check
+`podman-compose --version` first: it must be 1.4.0 or later to name
+the project as this guide says. Releases 1.0.6 to 1.3.0 ignore
+`COMPOSE_PROJECT_NAME` and take the name `occamy` from the compose
+file: under them, `make stop` and `make clean` act on the project
+`occamy` whatever you set, and on a shared host that may be someone
+else's stack. Releases 1.0.3 and older ignore both and name the project
+`docker`, after the directory. On macOS and Windows, the engine runs in
+a virtual machine, which needs a few GiB of memory for the stack's
+seven containers.
 
 Check what you have:
 
@@ -63,6 +64,11 @@ node --version
 ```
 
 ## 2. Build
+
+On a host that others share, read [Next to another
+stack](#next-to-another-stack) first: unless `OCCAMY_IMAGE` names
+another image, `make build` overwrites `occamy:latest`, which another
+stack may be running.
 
 ```
 make compile    # ./occamyd: CGO_ENABLED=0 go build -trimpath
@@ -160,7 +166,7 @@ on a shared machine, give this stack its own:
 | `OCCAMY_PORT` | `5636` | the v0 service's port |
 | `OCCAMY_V1_PORT` | `5637` | `occamy-v1`'s port |
 | `OCCAMY_V1_DEBUG_PORT` | `5638` | `occamy-v1`'s debug listener, when it is on |
-| `OCCAMY_IMAGE` | `occamy:latest` | the image both `occamyd` services run |
+| `OCCAMY_IMAGE` | `occamy:latest` | the image both `occamyd` services run, which `make build` tags |
 
 Export them in the shell. Every `make` target and `podman compose`
 command in this guide then uses them, `make e2e` and `make soak`
@@ -169,9 +175,14 @@ included:
 ```
 export COMPOSE_PROJECT_NAME=occamy-try OCCAMY_PORT=15636 OCCAMY_V1_PORT=15637 \
   OCCAMY_V1_DEBUG_PORT=15638 OCCAMY_IMAGE=occamy-try:latest
-make build IMAGE=occamy-try
+make build
 make run
 ```
+
+`make build` then tags `occamy-try:latest` and `occamy-try:<version>`,
+and leaves `occamy:latest` alone. It reads the shell, not `docker/.env`,
+so export `OCCAMY_IMAGE`; `IMAGE=` on its command line names another
+image.
 
 The web client is then at <http://localhost:15637/static/>. Replace the
 ports in this guide's URLs, its `curl` commands and the
@@ -180,17 +191,18 @@ ports in this guide's URLs, its `curl` commands and the
 ## 4. One connection per protocol
 
 Open each connection from **Connections**. The session's bar shows the
-connection's name and your role, `owner`. **End session** closes it
-and returns to the list. The session is gone by then, so the next one
-opens at once, even when you have as many as `occamyd` allows, 10 by
-default.
+remote's title, such as a terminal's or a desktop's name, or the
+connection's name if the remote gives none, and your role, `owner`.
+**End session** closes it and returns to the list. The session is gone
+by then, so the next one opens at once, even when you have as many as
+`occamyd` allows, 10 by default.
 
 | Protocol | Connection | What you should see |
 |----------|------------|---------------------|
 | VNC | **x11vnc, native backend** (`vnc-native`) | A black desktop with two xterms and no window manager. The small one at the top left says "Lines typed here reach the clipboard as hex"; it is a probe of the end-to-end tests. The large one has a root shell, `root@…:/#`. x11vnc does not resize its screen, so the page scales the 1024×768 desktop to the window. Keys go to the window under the pointer, as there is no window manager |
 | VNC | **TigerVNC, native backend** (`tigervnc-native`) | The same desktop, served by TigerVNC, which resizes its screen to the window |
 | SSH | **SSH** (`ssh`) | A terminal with Debian's login banner and the prompt `occamy@…:~$`. It fills the window, and its rows and columns follow the window (`stty size` shows them) |
-| RDP | **RDP, native backend** (`rdp-native`) | xrdp's X session: a black desktop with one xterm at the top left and the prompt `occamy@…:~$`. The desktop resizes to the window. The first connection after the stack or the `rdp` service starts creates the X session, so the xterm takes a few seconds to appear; wait for it before you type. Later connections return to the same X session |
+| RDP | **RDP, native backend** (`rdp-native`) | xrdp's X session: a black desktop with one xterm at the top left and the prompt `occamy@…:~$`. The desktop resizes to the window. The first connection after the stack or the `rdp` service starts creates the X session, so the xterm takes a few seconds to appear on an idle host, and took 17 seconds at a load of 306; wait for it before you type. Later connections return to the same X session |
 | RDP | **RDP, through guacd** (`rdp-guacd`) | The same X session through guacd. It keeps the size it opened at, and the page scales it |
 | Kubernetes | none in the demo stack | A terminal in a pod. See [Kubernetes](#kubernetes) below for a cluster to try it with |
 
@@ -198,6 +210,13 @@ The other VNC connections reach the servers' other screens: no
 password, VeNCrypt, and the German and French keyboard layouts.
 **TigerVNC, asking for the password** opens a form for the password
 first, which is `vncpassword`.
+
+**TigerVNC over VeNCrypt, through guacd (does not work)** always ends
+with "Remote unreachable": guacd 1.6 does not give the X509 credentials
+that its VNC client asks for here. The list keeps it for the parity
+matrix in [section 7](#7-tests-against-the-demo-stack-and-real-servers),
+which shows that. **TigerVNC over VeNCrypt, native backend** is the one
+to open.
 
 The native RDP backend asks for RDP's graphics pipeline (GFX) by
 default, through which xrdp draws its sessions in RemoteFX
@@ -357,7 +376,8 @@ On **x11vnc, native backend**, **TigerVNC, native backend** or
 1. **From the remote to the browser.** With the pointer over the
    remote xterm, type `echo hello from the remote | xclip -selection
    clipboard` there. Click **Clipboard**: the box shows `hello from the
-   remote`. **Copy** puts it on your own clipboard.
+   remote`, with the newline that `echo` wrote after it. **Copy** puts
+   it on your own clipboard.
 2. **From the browser to the remote.** Replace the box's text with
    `hello from the browser` and click **Send**. The panel says "Sent to
    the remote clipboard." In the remote xterm, type `xclip -o
@@ -411,15 +431,17 @@ started, wait that long and send it again.
 
 **Resize.** Resize the browser window, or click **Full screen**:
 
-- On **TigerVNC, native backend** and **RDP, native backend**, the
-  remote desktop changes size to fill the window.
+- On **TigerVNC, native backend**, **TigerVNC, through guacd** and
+  **RDP, native backend**, the remote desktop changes size to fill the
+  window.
 - On **SSH**, the terminal gains or loses rows and columns: run
   `stty size` before and after.
 - **x11vnc, native backend** keeps 1024×768, and the page scales it.
   x11vnc refuses to resize, and `occamyd` logs `the server prohibits
   resizing the screen` once and stops asking; the session goes on.
-- **TigerVNC, through guacd** changes size too. x11vnc and RDP through
-  guacd keep the size they opened at.
+  **x11vnc, through guacd** keeps that size too.
+- **RDP, through guacd** keeps the size it opened at, and the page
+  scales it.
 
 Only the owner's window sets the size. A viewer sees the owner's
 screen scaled to its own window.
@@ -477,12 +499,12 @@ sends plain bitmap updates instead, which the native backend decodes;
 
 To compare the two, open **x11vnc, through guacd** (`vnc-guacd`) and
 **RDP, through guacd** (`rdp-guacd`) next to their native twins. Each
-shows the same desktop. Through guacd, the desktop keeps the size it
-opened at, and RDP's first frame takes about two seconds instead of a
-few hundredths of one. VNC's is short either way: a third to half a
-second on x11vnc, and on TigerVNC under a hundredth natively and about
-two hundredths through guacd. The
-log names the backend of each session:
+shows the same desktop. Through guacd, RDP keeps the size it opened
+at. On an idle host, RDP's first frame takes about two seconds through
+guacd instead of a few hundredths of one. VNC's is short either way: a
+third to half a second on x11vnc, and on TigerVNC under a hundredth
+natively and about two hundredths through guacd. A busy host takes
+longer. The log names the backend of each session:
 
 ```
 (cd docker && podman compose logs occamy-v1) | grep 'opened connection'
@@ -513,9 +535,15 @@ make lint
 ```
 
 `make lint` runs golangci-lint with [.golangci.yml](../.golangci.yml),
-as CI does, and again on the codec measurement in `bench/codecs` with
-its `measure` build tag. golangci-lint v1 cannot read the
-configuration.
+and again on the codec measurement in `bench/codecs` with its `measure`
+build tag. golangci-lint v1 cannot read the configuration. CI runs
+v2.15.0 ([dockerimage.yml](../.github/workflows/dockerimage.yml)), and
+has a pass that `make lint` leaves out, on the RDP integration tests,
+which build only under their tag:
+
+```
+golangci-lint run --build-tags=rdp_integration ./internal/rdp/... ./internal/backend/rdp/...
+```
 
 The web client's tests run in `client/occamy-web`, as CI's web job
 runs them. The interop test runs the TypeScript client against
@@ -569,13 +597,13 @@ The tests open real sessions to every demo server:
 - the VNC parity matrix, each feature on x11vnc and TigerVNC through
   both backends, logged as a table.
 
-A run takes about four minutes, most of it the parity matrix: 257
-seconds in CI after the x11vnc test came, the pressure test's 15
-included. The x11vnc test takes about 10 seconds, or up to a minute
-and a half on an x11vnc just started, which ignores clipboard text at
-first ([Clipboard](#clipboard)). The
-pressure test and the soak are skipped unless their variables are set
-(below).
+On an idle host, a run takes about four minutes, most of it the parity
+matrix: 257 seconds in CI after the x11vnc test came, the pressure
+test's 15 included. A busy host takes longer. The x11vnc test takes
+about 10 seconds, or up to a minute and a half on an x11vnc just
+started, which ignores clipboard text at first
+([Clipboard](#clipboard)). The pressure test and the soak are skipped
+unless their variables are set (below).
 
 ### Debug routes
 
@@ -635,10 +663,11 @@ soak OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h`.
 ### Integration tests
 
 These run the backends against real servers in containers of their
-own. Build tags keep them out of `go test ./...`. Each container, and
-each image a run builds, is the run's own, and the run removes it when
-it ends. They need no demo stack. Building an image can take longer
-than `go test`'s default 10 minutes, hence `-timeout`.
+own. Build tags keep them out of `go test ./...`. Each container, with
+its anonymous volumes, and each image a run builds are the run's own,
+and the run removes them when it ends. They need no demo stack.
+Building an image can take longer than `go test`'s default 10 minutes,
+hence `-timeout`.
 
 | Tag | Command | Against |
 |-----|---------|---------|
@@ -680,9 +709,8 @@ integration tests take `OCCAMY_CONTAINER_ENGINE=docker` for Docker.
 ### Fuzz tests
 
 The parsers of everything that comes over a network have fuzz
-targets, 35 of them. `go test -list '^Fuzz' ./...` lists them by
-package. `go test` runs one target at a time, so fuzz each for a while
-like this:
+targets. `go test -list '^Fuzz' ./...` lists them by package. `go
+test` runs one target at a time, so fuzz each for a while like this:
 
 ```
 go test -run '^$' -fuzz '^FuzzSession$' -fuzztime 30s -parallel 4 ./client
@@ -723,8 +751,10 @@ down` with `--volumes --rmi local` for the stack's project, `occamy`
 unless `COMPOSE_PROJECT_NAME` names another, which removes the demo
 servers' images and the volume of TigerVNC's CA. It
 then prunes the images of earlier `make build` runs that a later build
-left untagged, which `make build` labels. The tagged image of `make
-build` stays, so `podman rmi` removes it.
+left untagged, which `make build` labels. Every checkout's build has
+that label, so the prune takes the untagged images of any Occamy stack
+on this engine: Occamy's, but on a shared host not always yours. The
+tagged image of `make build` stays, so `podman rmi` removes it.
 
 With the variables of [Next to another stack](#next-to-another-stack),
 keep them exported for `make stop` and `make clean`, and name your
@@ -735,21 +765,27 @@ If you followed the Kubernetes step, stop `occamyd` with Ctrl-C, then
 remove the cluster and its files:
 
 ```
-podman rm -f occamy-k3s
+podman rm -f -v occamy-k3s
 rm -r "$K8S"
 ```
 
-Remove what the build left in the checkout:
+`-v` also removes the four anonymous volumes that the k3s image
+declares, which `podman rm` would leave behind.
+
+Remove what the build left in the checkout, and the interop server of
+[section 6](#6-unit-tests-lint-and-the-web-clients-tests) in the
+temporary directory:
 
 ```
 rm occamyd
 rm -r client/occamy-web/dist client/occamy-web/node_modules
+rm -f "${TMPDIR:-/tmp}/occamy-webinterop"
 ```
 
 The images that were pulled stay for the next run:
 `docker.io/guacamole/guacd:1.6.0`, `docker.io/rancher/k3s:v1.34.1-k3s1`,
 the base images `debian:trixie-slim`, `golang:1.27-trixie`,
-`node:25-trixie-slim` and `gcr.io/distroless/static-debian13:nonroot`.
+`node:24-trixie-slim` and `gcr.io/distroless/static-debian13:nonroot`.
 So does `occamy-bench-desktop`, or the name you gave it, if you built
 it for `TestBenchDesktop`. `podman rmi` removes them.
 

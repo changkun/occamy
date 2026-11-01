@@ -400,9 +400,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   password or through OIDC with PKCE, the connections the user may
   open, and a session on protocol v1, a graphical one on a canvas scaled
   to the window and a terminal one in xterm.js. The owner resizes the
-  remote with the window, answers the remote's credential prompts,
-  shares the session through a link as a viewer or read-only, and ends
-  it, signing in again over the session when the sign-in has expired;
+  remote with the window, asking for no size its hello asked for,
+  answers the remote's credential prompts, shares the session through a
+  link as a viewer or read-only, and ends it, signing in again over the
+  session when the sign-in has expired;
   a reload over the owner's session signs in again and joins it, within
   occamyd's grace, or lists the connections if the user would rather;
   an End or share that waited for the sign-in is left to occamyd, which
@@ -481,6 +482,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   [docs/configuration.md](docs/configuration.md#apple-remote-desktop-ard)
   describes the risk: anyone in between can read the Mac account's
   whole password.
+- `GET /api/v1/auth/methods` says whether occamyd has OIDC, for a
+  sign-in page, with no token and a 200 either way.
 - [docs/api.md](docs/api.md), the reference of API v1: every route with
   its tokens, requests, replies, errors and limits, ad-hoc targets,
   shares, the stream upgrades and the OIDC routes. A test fails when a
@@ -712,6 +715,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   ports: `(cd docker && podman compose -p docker down --remove-orphans
   --volumes --rmi local)`, or `docker compose` for Docker. Only if it
   is yours: other checkouts share the project `docker`.
+- `make build` tags the name and the tag of `OCCAMY_IMAGE`, the image
+  that the demo stack runs, when it is set, instead of overwriting
+  `occamy:latest`, which on a shared host another stack may run.
+  `IMAGE=` on its command line still names another image.
 - The README starts with v1: the demo stack and the web client first,
   then a native build that serves a v1 file. The run instructions for
   guacd and a v0 file, and the v0 token's connection parameters, move
@@ -852,6 +859,33 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   could still be made, and its owner, at `limits.sessions_per_user`,
   could be refused a new session with 429.
 
+- The image builds the web client on Node 24, an LTS. `node:25` made
+  `make build` warn of `EBADENGINE`, since vitest 5 leaves out Node 23
+  and 25. `engines` in `client/occamy-web/package.json` and the docs now
+  give the range that every package takes, `^22.13.0 || ^24.0.0 ||
+  >=26.0.0`, not `>=22.12.0`, and `TestDockerfileNode` checks the
+  Dockerfile's Node against the lock file.
+- The demo connection `tigervnc-plain-guacd`, which guacd can never open
+  for want of X509 credentials, says so in its name. The parity matrix
+  keeps it, as the proof of that row.
+- The Kubernetes step of the run-and-test guide and the
+  `kubernetes_integration` test remove k3s's container with `-v`, so
+  that the four anonymous volumes of its image no longer stay behind on
+  each run. The test also kills the container before it removes it, in
+  place of `rm -t 0`: Docker's `rm` has no `-t`, so on Docker the
+  clean-up failed and left the container and its volumes behind.
+- `make e2e` gives each compose command 2 minutes, not 30 s, and
+  `TestX11vncClipboardRequestorGone` 10 minutes, not 5, and the test
+  reads its session throughout: a busy host killed its compose commands
+  (`signal: killed`), and slow ones left its frames unacknowledged for
+  occamyd's 30 s, with no fault in the stack.
+- `docs/try-it.md`, after a fresh run of it from end to end: TigerVNC
+  through guacd resizes, and only RDP through guacd keeps its size; the
+  session's bar shows the remote's title if it has one;
+  `podman-compose --version` is for those whose provider it is; the
+  tear-down removes the interop server; `make lint` lacks CI's pass on
+  the RDP integration tests; timings hold on an idle host.
+
 ### Security
 
 - occamyd's request log no longer records query strings, which carry the
@@ -896,7 +930,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   volume and demo images through `compose down` in its own project,
   `occamy`, and the untagged images of earlier `make build` runs, which
   `make build` now labels `de.changkun.occamy.make=build`. It pruned
-  every dangling image of the engine, whoever built it.
+  every dangling image of the engine, whoever built it. Every checkout's
+  build has that label, so on a shared host the untagged images it
+  prunes may be another Occamy stack's.
 
 ## [0.6.0] - 2026-10-30
 

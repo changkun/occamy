@@ -1513,7 +1513,15 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
   `TestComposeRun`). Compose may print a container's standard error on
   its own, so the demo images log what the tests count to their
   standard output: `start.sh` prints x11vnc's lines, its standard error
-  among them, and the watchdog's there. The watchdog stays, for x11vnc's waits
+  among them, and the watchdog's there. On a busy host, at a load of
+  250, `podman ps` alone took 21 s, and the test failed twice with
+  `signal: killed` from `composeCmd.run`'s limit of 30 s, so that limit
+  is 2 minutes. That alone was not enough: with every compose command
+  delayed by 21 s, the test failed with `client: session ended`, since
+  two commands in a row left its frames unacknowledged for occamyd's
+  30 s. A goroutine now reads the session throughout, and the test's
+  deadline, 10 minutes, fits both attempts at 30 s a command. The
+  watchdog stays, for x11vnc's waits
   on clients that do not read and for any other error. The parity row
   `resize: ignored without ExtendedDesktopSize` is now `resize: the
   server keeps its size`, since x11vnc has ExtendedDesktopSize and

@@ -11,7 +11,7 @@ affects:
   - docs/
 effort: large
 created: 2026-10-29
-updated: 2026-10-31
+updated: 2026-11-01
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -54,6 +54,7 @@ can only patch on v0.
 
 | Method and path | Purpose |
 |-----------------|---------|
+| `GET /api/v1/auth/methods` | How a user can sign in, for a sign-in page: whether OIDC is on |
 | `POST /api/v1/auth/token` | Exchange caller credentials (per auth provider) for a short-lived access token |
 | `GET /api/v1/auth/oidc/login` | Start OIDC sign-in: redirect to the identity provider (authorization code with PKCE) |
 | `GET /api/v1/auth/oidc/callback` | Finish OIDC sign-in: send the browser back to a configured return URL with a one-time code in the fragment |
@@ -1861,6 +1862,13 @@ to the VNC backend.
     `client_secret_post`. oauth2's auto-detection would try both and
     send the code twice. The secret is read at each exchange, so a
     rotated secret takes effect at once.
+  - **2026-11-01: `GET /api/v1/auth/methods` says whether OIDC is on.**
+    A sign-in page had to find out from `login`, whose 404 without
+    `auth.oidc` and 400 without a challenge a browser logs as failures.
+    The route answers 200 either way, with no token, and tells nothing
+    the 404 did not; it asks nothing of the provider. `/healthz` stays
+    the liveness check, and `login` and the other OIDC routes are as
+    they were.
 - **Deviations:**
   - The row's "signed cookie" is sealed: encrypted as well as
     authenticated.
