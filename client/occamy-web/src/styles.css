@@ -365,8 +365,14 @@ legend {
   touch-action: none;
 }
 
+/* The screen fills the stage, so a ring around it would cover the remote's
+   pixels. The toolbar's lower edge shows the focus instead. */
 .screen:focus-visible {
-  outline-offset: -2px;
+  outline: none;
+}
+
+.session:has(.screen:focus-visible) .bar {
+  box-shadow: inset 0 -2px 0 var(--focus);
 }
 
 .terminal {
