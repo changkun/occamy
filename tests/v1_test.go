@@ -296,38 +296,57 @@ func TestE2EV1RDP(t *testing.T) {
 	// clipboard: xrdp retries the channel server for 10 seconds, and a
 	// connection that gets none in that time never has a clipboard. The
 	// log then names the restart.
+	//
+	// The user may have more than one X session, as when two of
+	// TestConnectionPressure's connections opened at once, each with a
+	// channel server for its own display. Another display's channel
+	// server must not stand in for the session's, so one runs on display
+	// :99 while the session's is gone.
 	t.Run("clipboard-after-chansrv-exit", func(t *testing.T) {
 		compose := composeE2E(t)
 		restarts := func() int {
 			return strings.Count(compose.run(t, "logs", "rdp"), "starting xrdp-chansrv again")
 		}
-		running := func() int {
-			out := strings.TrimSpace(compose.run(t, "exec", "-T", "rdp", "sh", "-c", countChansrv))
-			n, err := strconv.Atoi(out)
-			if err != nil {
-				t.Fatalf("counting the channel servers: %q", out)
+		// running counts the channel servers that run, by display.
+		running := func() map[string]int {
+			n := map[string]int{}
+			for d := range strings.FieldsSeq(compose.run(t, "exec", "-T", "-u", "occamy", "rdp", "sh", "-c", chansrvDisplays)) {
+				n[d]++
 			}
 			return n
 		}
 		before, alive := restarts(), running()
-		t.Logf("%d channel servers run before the first clipboard check", alive)
+		t.Logf("channel servers by display before the first clipboard check: %v", alive)
 		clipboard(t)
+		display := sessionDisplay(t, compose)
 		want := before
-		if alive == 0 { // an earlier connection's left none
+		if alive[display] == 0 { // an earlier connection's left none
 			want++
 		}
 		if n := restarts(); n != want {
-			t.Errorf("a connection with %d channel servers running restarted it %d times, want %d", alive, n-before, want-before)
+			t.Errorf("a connection with %d channel servers running on its display :%s restarted it %d times, want %d",
+				alive[display], display, n-before, want-before)
 		}
-		if n := running(); n != 1 {
-			t.Fatalf("%d channel servers run, want 1", n)
+		// xrdp's channel server may exit as the check's connection closes,
+		// so none is as good as one here: only a second is a fault.
+		if n := running()[display]; n > 1 {
+			t.Fatalf("%d channel servers run on the session's display :%s, want at most 1", n, display)
 		}
 
-		t.Log("killing the channel server")
+		t.Logf("killing the channel servers, and starting one on display :%s", otherDisplay)
 		compose.run(t, "exec", "-T", "rdp", "sh", "-c", killChansrv)
-		for deadline := time.Now().Add(10 * time.Second); running() > 0; time.Sleep(100 * time.Millisecond) {
+		for deadline := time.Now().Add(10 * time.Second); len(running()) > 0; time.Sleep(100 * time.Millisecond) {
 			if time.Now().After(deadline) {
-				t.Fatal("the channel server still runs after it was killed")
+				t.Fatal("a channel server still runs after it was killed")
+			}
+		}
+		other := strings.TrimSpace(compose.run(t, "exec", "-T", "-u", "occamy", "-e", "DISPLAY=:"+otherDisplay, "rdp", "sh", "-c", startChansrv))
+		t.Cleanup(func() {
+			compose.run(t, "exec", "-T", "-u", "occamy", "rdp", "sh", "-c", "kill "+other+" 2>/dev/null; true")
+		})
+		for deadline := time.Now().Add(10 * time.Second); running()[otherDisplay] == 0; time.Sleep(100 * time.Millisecond) {
+			if time.Now().After(deadline) {
+				t.Fatalf("no channel server runs on display :%s", otherDisplay)
 			}
 		}
 		t.Log("checking the clipboard again")
@@ -335,28 +354,62 @@ func TestE2EV1RDP(t *testing.T) {
 		if n := restarts(); n != want+1 {
 			t.Errorf("the channel server was restarted %d times after it was killed, want 1", n-want)
 		}
-		if n := running(); n != 1 {
-			t.Errorf("%d channel servers run after the restart, want 1", n)
+		if n := running(); n[display] > 1 || n[otherDisplay] != 1 {
+			t.Errorf("channel servers by display after the restart: %v, want at most 1 on :%s and 1 on :%s", n, display, otherDisplay)
 		}
 	})
 }
 
-// countChansrv prints how many xrdp-chansrv processes run in the rdp
-// container, leaving out those that have exited but are not yet
-// reaped. The image has no procps, so it reads /proc.
-const countChansrv = `n=0
-for p in /proc/[0-9]*; do
+// otherDisplay is the display that clipboard-after-chansrv-exit runs a
+// channel server for, which no X session of the demo's has.
+const otherDisplay = "99"
+
+// sessionDisplay returns the number of the X display that xrdp's latest
+// connection attached to, by its log.
+func sessionDisplay(t *testing.T, compose composeCmd) string {
+	t.Helper()
+	const prefix = "session is available on display "
+	log := compose.run(t, "logs", "rdp")
+	i := strings.LastIndex(log, prefix)
+	if i < 0 {
+		t.Fatal("the rdp log names no display a connection attached to")
+	}
+	display, _, _ := strings.Cut(log[i+len(prefix):], " ")
+	if _, err := strconv.Atoi(display); err != nil {
+		t.Fatalf("the rdp log names display %q", display)
+	}
+	return display
+}
+
+// chansrvDisplays prints the display number of each xrdp-chansrv process
+// of the user it runs as that runs in the rdp container, by the DISPLAY
+// it was started with, leaving out those that have exited but are not
+// yet reaped. The image has no procps, so it reads /proc. Only the user
+// may read a process's environment: the container's root may not.
+const chansrvDisplays = `for p in /proc/[0-9]*; do
 	[ "$(cat "$p/comm" 2>/dev/null)" = xrdp-chansrv ] || continue
 	read -r _ _ state _ 2>/dev/null < "$p/stat" || continue
-	[ "$state" = Z ] || n=$((n+1))
+	[ "$state" = Z ] && continue
+	d=$(tr '\0' '\n' < "$p/environ" 2>/dev/null | sed -n 's/^DISPLAY=//p')
+	d=${d#*:}
+	d=${d%%.*}
+	echo "${d:-none}"
 done
-echo "$n"`
+true`
 
 // killChansrv kills every xrdp-chansrv process in the rdp container.
 const killChansrv = `for p in /proc/[0-9]*; do
 	[ "$(cat "$p/comm" 2>/dev/null)" = xrdp-chansrv ] && kill "${p#/proc/}"
 done
 true`
+
+// startChansrv starts a channel server in the rdp container for the
+// DISPLAY it runs with, as the user it runs as, detached from the
+// command that starts it, and prints its process ID. It listens in the
+// user's socket directory, as sesman has the channel servers it starts
+// do.
+const startChansrv = `XRDP_SOCKET_PATH=/run/xrdp/sockdir/$(id -u) setsid /usr/sbin/xrdp-chansrv </dev/null >/dev/null 2>&1 &
+echo "$!"`
 
 // composeCmd runs the demo stack's compose commands.
 type composeCmd []string

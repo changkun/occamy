@@ -790,6 +790,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   container and checks that the next connection has the clipboard. Give
   it the `CONTAINER_ENGINE` that `make run` took, since it reaches the
   container through that engine's compose.
+- The demo xrdp image restarts a session's channel server even when
+  another X session of the user still has one. `reconnectwm.sh` looked
+  for any channel server of the user, so with two X sessions, which two
+  connections opening at once can start, a session whose channel server
+  had exited kept none, and every later connection to it waited 10
+  seconds and got no clipboard. It now looks for the session's display
+  alone, and `make e2e` checks that with a channel server running for
+  another display.
 - The demo x11vnc no longer dies of an X error (`Xerror: major_opcode:
   18 … error_code: 3`) when it answers a request for the clipboard from
   a window that has gone, which ended the sessions on it, as
