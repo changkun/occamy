@@ -14,7 +14,7 @@ affects:
   - server/
 effort: large
 created: 2026-10-31
-updated: 2026-10-31
+updated: 2026-11-01
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -1195,13 +1195,19 @@ RDP's guacd path, RDP no longer needs guacd at all.
     every `make e2e`, through the stack's compose command
     (`OCCAMY_E2E_COMPOSE`):
     1. It checks the clipboard while the channel server runs. That
-       connection must not restart it, and exactly one must run
-       afterwards.
-    2. It kills `xrdp-chansrv` in the rdp container.
+       connection must not restart it, and no second one may run on the
+       session's display afterwards.
+    2. It kills `xrdp-chansrv` in the rdp container, and starts one for
+       display :99, which has no X session, for the reason below.
     3. It checks the clipboard again. A connection that gets no channel
        server within xrdp's 10 seconds of retries never has a clipboard.
-    4. The log must gain one `starting xrdp-chansrv again`, and exactly
-       one channel server must run.
+    4. The log must gain one `starting xrdp-chansrv again`, and no
+       second channel server may run on the session's display.
+
+    Steps 1 and 4 used to want exactly one. That was not sound: the
+    channel server may exit as the check's own connection closes, which
+    a run on the demo stack showed within the second of its `DELETE`,
+    and then none runs until the next connection.
 
     Without the script, the subtest fails. CI showed it with a throwaway
     commit that left the script out of the image, and the head that
@@ -1236,6 +1242,55 @@ RDP's guacd path, RDP no longer needs guacd at all.
     `TestComposeRun` checks both. The line it counts,
     `reconnectwm.sh`'s, reaches the rdp container's standard output.
     The run of the run-and-test guide (`docs/try-it.md`) found it.
+  - The clipboard check timed out again on master with `reconnectwm.sh`
+    in the image (2026-10-31, run 41241856246, 6a1925e), in `clipboard`
+    and in `clipboard-after-chansrv-exit`, whose log said "1 channel
+    servers run". The script asked whether any channel server of the
+    user ran, and the user had two X sessions:
+    - `TestConnectionPressure` was running when xrdp started X sessions
+      on displays :10 and :11, 112 ms apart. Each came from an xrdp
+      process and an Xorg of its own, and both from guacd's address.
+      The log shows no more than that. Two logins racing past sesman
+      is what it suggests, and 15 rounds of the pressure test on a
+      fresh rdp container (loads 31 to 55) started one X session each,
+      so a second session was not reproduced.
+    - Every later connection attached to :10. Its channel server
+      finished at 21:10:15, as the note above describes, and :11's ran
+      on.
+    - The script ran on 9 reconnections and restarted nothing: it found
+      :11's channel server, which carries no clipboard for :10. The
+      subtest's count was :11's too. 8 connections logged `error in
+      trans_connect chan`, both clipboard checks among them.
+    - The two failures before it (runs 41209863106 and 41218650332) are
+      not this. Their commits have no `reconnectwm.sh`, and each had
+      one X session whose channel server had exited: the note above.
+
+    `reconnectwm.sh` now looks for a channel server of the session's
+    display, by the `DISPLAY` in its environment, and locks per display.
+    `clipboard-after-chansrv-exit` counts channel servers by display,
+    which it reads as the user, since the container's root may not read
+    their environment. A channel server for display :99 stands in for
+    the other session's.
+
+    On the demo stack at b019058, with GFX on and master's script, the
+    subtest failed where CI did, at load 40 to 48, with the check's
+    connection traced:
+    - In the first check, with no channel server at all, the script
+      restarted one and the check passed. The paste came with
+      `ready=false`, then Clipboard Capabilities, Monitor Ready, the
+      Format List and the rest in order, so the backend holds a paste
+      until Monitor Ready, as it should.
+    - In the second, with the one for :99 alive, the script restarted
+      nothing and xrdp logged `error in trans_connect chan`. The paste
+      came with `ready=false`, and no CLIPRDR message came in the next
+      60 s, not even Monitor Ready.
+
+    With the script fixed, `TestE2EV1RDP` passed at load 70 to 78, and
+    `TestConnectionPressure`, `TestE2EV1` and `TestE2EV1RDP` in CI's
+    order at load 58 to 69. The backend cannot do this for a server:
+    Monitor Ready comes from the channel server, so without one nothing
+    answers on the channel. A paste then waits, unsent, until the
+    session ends, and the viewer is told nothing.
 - **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
   through occamyd's routes with the Go client against `rdptest`: NLA
   with stored credentials, the hello's size, the screen, scancodes,

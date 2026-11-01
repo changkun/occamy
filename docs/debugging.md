@@ -144,9 +144,13 @@ sends that user something. Until then the user still counts, for up to
   resize, a viewer joined by a share, and the owner leaving and coming
   back. If the clipboard check times out, look in the rdp server's log
   for `error in trans_connect chan`. That line means xrdp found no
-  channel server, the process that carries the clipboard. The image's
-  `reconnectwm.sh` starts one again on the next connection, and logs
-  `starting xrdp-chansrv again` when it does. `make e2e` checks that
+  channel server for the session's display, the process that carries
+  the clipboard. The image's `reconnectwm.sh` starts one again on the
+  next connection, and logs `starting xrdp-chansrv again` when it does.
+  The user may have more than one X session, each with a channel server
+  of its own, so a channel server that runs does not mean that the
+  session has one: `session is available on display` in the log says
+  which display a connection attached to. `make e2e` checks that
   restart too: it kills the channel server in the rdp container, through
   the stack's compose command in `OCCAMY_E2E_COMPOSE`, then checks the
   clipboard again. That command runs `CONTAINER_ENGINE`, `podman` by
