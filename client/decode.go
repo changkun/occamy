@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"time"
 
 	"changkun.de/x/occamy/protocol"
 )
@@ -59,6 +60,7 @@ type job struct {
 	w, h    int
 	pix     []byte
 	err     error
+	ended   time.Time // when it decoded; read once done is closed
 	done    chan struct{}
 }
 
@@ -147,4 +149,5 @@ func (j *job) run(abort <-chan struct{}) {
 		j.err = fmt.Errorf("%w: %v tile: %w", errDecode, j.dec.Codec(), err)
 	}
 	j.payload = nil
+	j.ended = time.Now()
 }

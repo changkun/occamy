@@ -659,3 +659,49 @@ func TestMeasure(t *testing.T) {
 		}
 	}
 }
+
+// -scenarios gives what it names, in the order they run, and refuses what
+// it does not know rather than leave it out.
+func TestChooseScenarios(t *testing.T) {
+	all, err := chooseScenarios("all")
+	if err != nil || len(all) != len(scenarios) {
+		t.Errorf("all: %d scenarios, %v", len(all), err)
+	}
+	got, err := chooseScenarios("G2,T1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].ID != "T1" || got[1].ID != "G2" || got[2].ID != "G2" {
+		t.Errorf("G2,T1: %+v, want T1, then G2 of VNC and RDP", got)
+	}
+	for _, spec := range []string{"G7", "G2,G7", "T4", "G2,", ""} {
+		if got, err := chooseScenarios(spec); err == nil {
+			t.Errorf("%q: %d scenarios, want an error", spec, len(got))
+		}
+	}
+}
+
+// A scene with no stamp to count is an error, which -failfast and the
+// exit code see, not a frame rate of 0.
+func TestSceneWithoutStamps(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		r    result
+		bad  bool
+	}{
+		{"stamps", result{SceneFPS: scrollFPS, Frames: 12, sceneFrames: 3}, false},
+		{"none read", result{SceneFPS: scrollFPS, Frames: 12}, true},
+		{"nothing drawn", result{SceneFPS: scrollFPS}, true},
+		{"no scene", result{Frames: 12}, false},
+		{"an error of its own", result{SceneFPS: scrollFPS, Frames: 12, Error: "lost"}, false},
+	} {
+		want := c.r.Error
+		c.r.sceneCount()
+		if c.bad && c.r.Error == "" {
+			t.Errorf("%s: no error", c.name)
+		}
+		if !c.bad && c.r.Error != want {
+			t.Errorf("%s: error %q, want %q", c.name, c.r.Error, want)
+		}
+	}
+}

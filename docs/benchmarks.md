@@ -244,13 +244,16 @@ in v1. A v1 session runs as follows:
   diagnostic of what the cadence costs, not a setting for the gate. How
   the cadence moves each metric:
   - *Latency (G2, G5), completion (G6) and a desktop's G7* do not end
-    on a tick, but a frame that occamyd holds while two are
-    unacknowledged goes out at the tick that acknowledges one, up to
-    16.7 ms later than at once. That happens in moving scenes, and when
-    a change reaches the client in several frames, as the native VNC
-    backend's updates do. The ticks keep one phase for the whole
-    process, and the probe's jittered keys meet them at every phase, so
-    what the cadence adds is in each run's percentiles.
+    on a tick. A frame that comes while the reader waits for a tick
+    counts as if the reader had been there, from `Frame.Ready` and the
+    time `Next` took to apply it, as v0's reader and the web client's
+    decoder take a frame as it comes. But a frame that occamyd holds
+    while two are unacknowledged goes out at the tick that acknowledges
+    one, up to 16.7 ms later than at once. That happens in moving
+    scenes, and when a change reaches the client in several frames, as
+    the native VNC backend's updates do. The ticks keep one phase for
+    the whole process, and the probe's jittered keys meet them at every
+    phase, so what the cadence adds is in each run's percentiles.
     Terminals (T1, T2, an SSH G7) do not wait for ticks.
   - *Frame rates* reach at most 60 a second at 60 Hz, as in a browser
     on a 60 Hz screen; at once, they count every frame the server can
@@ -396,6 +399,11 @@ The colour depth changes no baseline, since the baseline's guacd already
 drew RDP at 32 bits per pixel. It changes `v1-guacd`, which has no
 published numbers. The [targets](#targets) that come from a baseline in
 this list move with its new numbers.
+
+G7 is no scenario of its own: it follows a protocol's chosen scenarios,
+so that the list above runs as `-scenarios T1,G2,G3,G4,G5`, where T1 is
+there for SSH's G7. `bench` refuses an ID it does not know, `G7`
+included, rather than leave it out of the run.
 
 ## Terminal baseline
 

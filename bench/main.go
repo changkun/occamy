@@ -15,6 +15,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -113,14 +114,9 @@ func main() {
 		}
 		chosenNets = append(chosenNets, netConditions[i])
 	}
-	var chosen []scenario
-	for _, sc := range scenarios {
-		if *scen == "all" || slices.Contains(strings.Split(*scen, ","), sc.ID) {
-			chosen = append(chosen, sc)
-		}
-	}
-	if len(chosen) == 0 {
-		log.Fatalf("no scenarios match %q", *scen)
+	chosen, err := chooseScenarios(*scen)
+	if err != nil {
+		log.Fatal(err)
 	}
 
 	p := plan{
@@ -216,6 +212,31 @@ func (p plan) measureOn(ctx context.Context, rep *report, run int, sr series, nc
 		}
 	}
 	return false
+}
+
+// chooseScenarios returns the scenarios that spec names: comma-separated
+// IDs, or all. An ID it does not know is an error, so that a run does
+// not silently leave out what it was asked for.
+func chooseScenarios(spec string) ([]scenario, error) {
+	if spec == "all" {
+		return scenarios, nil
+	}
+	ids := strings.Split(spec, ",")
+	for _, id := range ids {
+		switch {
+		case id == "G7":
+			return nil, errors.New("G7 is no scenario: it follows a protocol's chosen scenarios, so any T scenario brings SSH's and any G scenario a desktop's")
+		case !slices.ContainsFunc(scenarios, func(sc scenario) bool { return sc.ID == id }):
+			return nil, fmt.Errorf("unknown scenario %q", id)
+		}
+	}
+	var chosen []scenario
+	for _, sc := range scenarios {
+		if slices.Contains(ids, sc.ID) {
+			chosen = append(chosen, sc)
+		}
+	}
+	return chosen, nil
 }
 
 // idle returns the series that ran nothing, such as one that serves
@@ -461,10 +482,17 @@ type result struct {
 func (r *result) v1() bool { return strings.HasPrefix(r.Series, "v1-") }
 
 // sceneCount makes a scene's frames the count of its stamps, in both
-// protocols, and keeps the server's own count in ServerFrames.
+// protocols, and keeps the server's own count in ServerFrames. A scene
+// with no stamp to count measured nothing, which is an error, not a
+// frame rate of 0.
 func (r *result) sceneCount() {
-	if r.SceneFPS > 0 {
-		r.ServerFrames, r.Frames = r.Frames, r.sceneFrames
+	if r.SceneFPS == 0 {
+		return
+	}
+	r.ServerFrames, r.Frames = r.Frames, r.sceneFrames
+	if r.Frames == 0 && r.Error == "" {
+		r.Error = fmt.Sprintf("none of the scene's %d frames showed a stamp", r.ServerFrames)
+		log.Printf("  %s", r.Error)
 	}
 }
 
@@ -482,7 +510,7 @@ type report struct {
 }
 
 // frameStamp is when the series count a frame as drawn.
-const frameStamp = "v1: when Next delivers the frame applied, before its acknowledgement; v0: when the client applied it, before it answers sync"
+const frameStamp = "v1: when Next delivers the frame applied, less any wait for the reader at a refresh; v0: when the client applied it, before it answers sync"
 
 // ackText says when the v1 series acknowledge a graphical frame.
 func (rep *report) ackText() string {
@@ -620,7 +648,7 @@ const (
 	idleGuacdNote = "guacd %.0f ms CPU, not in server CPU"
 	// displayHeader states, above a table with v1 rows, when its frames
 	// count and how they are acknowledged.
-	displayHeader = "v1 frames count from when Next delivers them applied, as v0's from when the client applied them. v1 acknowledges a graphical frame %s, and a terminal's at once.\n"
+	displayHeader = "v1 frames count from when Next delivers them applied, less any wait for the reader at a refresh, as v0's from when the client applied them. v1 acknowledges a graphical frame %s, and a terminal's at once.\n"
 	// decodeNote follows a table with v1 rows.
 	decodeNote = "Decode ms: v0's includes compositing each frame. v1's is the wall time of each tile's decode, summed over the client core's decoding goroutines, or the terminal emulator's time, without compositing, so it compares v1's series with each other, not with v0."
 )

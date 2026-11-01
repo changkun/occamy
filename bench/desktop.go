@@ -99,6 +99,22 @@ func startScene(ctx context.Context, s *session, key int) error {
 	return s.key(key)
 }
 
+// endScene ends the scene and waits until the screen shows the wallpaper.
+// The session must outlive the key: a client that closes at once, while
+// the scene draws, loses it on a slow network, as the proxy closes the
+// connection on the write that fails and the key is still in its delay.
+func endScene(ctx context.Context, s *session) error {
+	s.setMarker(wallpaper)
+	t0 := time.Now()
+	if err := s.key(keyEscape); err != nil {
+		return err
+	}
+	wctx, cancel := context.WithTimeout(ctx, keyWait)
+	defer cancel()
+	_, err := s.wait(wctx, t0, func(f frame) bool { return f.marked })
+	return err
+}
+
 // runIdle (G1) measures a still desktop.
 func runIdle(ctx context.Context, r *runner, s *session, res *result) error {
 	if err := startScene(ctx, s, keyF1); err != nil {
@@ -190,7 +206,7 @@ func animated(key int, fps float64, d time.Duration) func(context.Context, *runn
 		}
 		m.finish(res, time.Now())
 		res.SceneFPS = fps
-		return s.key(keyEscape)
+		return endScene(ctx, s)
 	}
 }
 
@@ -211,7 +227,7 @@ func runMotion(ctx context.Context, r *runner, s *session, res *result) error {
 	m.finish(res, time.Now())
 	res.Latency = summarize(lat)
 	res.SceneFPS = motionFPS
-	return s.key(keyEscape)
+	return endScene(ctx, s)
 }
 
 // runPhoto (G6) shows a photograph and measures the time until the last
@@ -236,5 +252,5 @@ func runPhoto(ctx context.Context, r *runner, s *session, res *result) error {
 	}
 	res.Completion = ms(last.Sub(t0))
 	m.finish(res, last)
-	return s.key(keyEscape)
+	return endScene(ctx, s)
 }

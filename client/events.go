@@ -38,6 +38,10 @@ type Frame struct {
 	ServerTime time.Duration
 	// Dirty are the rectangles a graphical frame changed.
 	Dirty []image.Rectangle
+	// Ready is when the frame could first be applied: its frame-end had
+	// arrived and its tiles were decoded. A caller away from Next got it
+	// later, by as long as it stayed away past Ready.
+	Ready time.Time
 
 	arrived time.Time // when frame-end arrived
 }
