@@ -361,6 +361,17 @@ func TestDemoProject(t *testing.T) {
 	}
 }
 
+// TestMakeStop checks that make stop removes the demo stack's containers
+// and network through compose, for the stack's project only, and keeps
+// its volume and images, as docs/try-it.md says. It compares the whole
+// command, so that a wider removal anywhere in it fails it.
+func TestMakeStop(t *testing.T) {
+	want := []string{"cd docker && engine compose down --remove-orphans"}
+	if got := makeDryRun(t, "stop", nil, nil); !slices.Equal(got, want) {
+		t.Errorf("make stop runs\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
 // TestMakeClean checks that make clean removes Occamy's own containers
 // and images and no other of the engine's, which other projects on the
 // host may share: the demo stack's project through compose, and the
