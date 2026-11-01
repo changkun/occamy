@@ -1985,6 +1985,9 @@ RDP's guacd path, RDP no longer needs guacd at all.
   ran again, at a load of 5.7 rising to 7.1, and passed, with no GFX
   skipped and so no warning. After the second review's, at 5.1 to 5.8,
   they passed again, with no progressive upgrade or tile skipped.
+  After the third review's, at 7.6 rising to 8.3, they passed again,
+  with no region outside its stream's frame and no block skipped:
+  xrdp frames each wire-to-surface 2's stream by itself.
   - **What xrdp sends.** The session's first screen arrives as 192
     progressive tiles in one wire-to-surface 2. Each key's swatch
     arrives as a tile of its own, 5 of 16 of them as difference tiles.
@@ -2117,6 +2120,18 @@ RDP's guacd path, RDP no longer needs guacd at all.
     only a tile with a tile context keeps signs. It ran again for 70 s,
     459,000 executions (load 5.8), and `FuzzGFX` 129,000 (load 7.4),
     each alone with 4 workers and `-fuzzminimizetime 5s`. None failed.
+  - After the third review, `FuzzProgressive` takes a flag byte: a
+    codec context's delete between its two streams, which must change
+    no tile's tile context or signs, and the second stream in another
+    context; its seeds are whole streams sent twice under each flag.
+    Each run alone, with 4 workers and `-fuzzminimizetime 5s`:
+    `FuzzProgressive` 70 s, 694 executions (load 10.0), then 120 s,
+    5,402 (load 15.2), then 70 s, 53,000 (load 8.1); `FuzzGFX` 70 s,
+    150,000 (load 14.0). None failed. `FuzzProgressive`'s first runs
+    were slow: its new signature left the cached corpus behind, and
+    each new input found, 50 to 80 a run, was minimized for up to 5 s,
+    while a whole stream sent twice decodes several tiles, about 2 ms
+    an execution.
 - **Benchmarks** (3 runs each, the host's 1-minute load 6.9 when they
   started and 12.3 when they ended): a frame of 1024 × 768 in tiles of
   64 × 64, a PDU each, decoded and drawn: `BenchmarkGFXRemoteFX` 11.1
