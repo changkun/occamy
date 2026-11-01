@@ -618,6 +618,15 @@ RDP's guacd path, RDP no longer needs guacd at all.
     would close that, but would raise the notice over a server that
     answers two lists with one, which is the worse failure. A Format
     List Response that fails is an answer too, and tells nobody.
+
+    A minute is twice the longest a working server was seen to need, on
+    a host that other work was loading. The demo's channel server
+    started 20 s after the session opened at load 40 and 12 s after at
+    load 66, each for a new X session, and xrdp may retry it for 10 s
+    more, so text pasted at once may wait 30 s. The first echo of a
+    paste took 7.2 s at load 66. A shorter bound would tell the viewers
+    that text on its way was lost, and drop it, which is worse than
+    telling them late.
   - The backend (`internal/backend/rdp`): `DisableCopy` and
     `DisablePaste`, as guacd's `disable-copy` and `disable-paste`, map
     onto the two modes; with both, no channel. `Input` queues a
@@ -785,6 +794,25 @@ RDP's guacd path, RDP no longer needs guacd at all.
   acceptance kept back, and the first version's bound
   (`TestClipboardListResponsesPaced`, `TestClipboardListResponsesAllocs`,
   `TestClipboardListBurst`, `TestClipboardPasteHeldUp`).
+
+  The bound on the owner's text was broken in the same way, 14 mutants,
+  all caught: no wait for a list or for text held before Monitor Ready,
+  the text, `owned` or `listDue` kept past the end, either answer or
+  Monitor Ready not ending the wait, any message ending it, newer text
+  or empty text not leaving it as it should, an end one tick late, the
+  word not cleared when the server speaks, and the Output told once
+  (`TestClipboardUnanswered`, `TestClipboardAnswerTooLate`,
+  `TestClipboardNeverReady`, `TestClipboardSlowAnswer`,
+  `TestClipboardWaitBounds`). `owned` and `listDue` survived the first
+  run, so the table now reads the wire: text that arrives between the
+  end and the writer's look must send no empty Format List, which would
+  clear the server's clipboard, and empty text after a loss must still
+  send one. `TestClipboardSlowAnswer` answers a third of the way through
+  the wait, under `-race` at load 72 to 100 as well, and must raise
+  nothing. The rest of the path is tested hop by hop
+  (`TestRunClipboardUnanswered`, `TestClipboardStatus` in `session` and
+  `stream`, the client's and the web client's own tests), and whole on
+  xrdp only, as the wait is not a setting of the server.
 - **Fuzzing.** `FuzzChannel` feeds chunks to the reassembly and checks
   the bound; `FuzzCliprdr` feeds a CLIPRDR message, then sets the
   owner's text and writes what is due; `FuzzRun` now joins the
@@ -1314,6 +1342,17 @@ RDP's guacd path, RDP no longer needs guacd at all.
     Monitor Ready comes from the channel server, so without one nothing
     answers on the channel. A paste then waits for a minute, and the
     viewers are told (the bound on the owner's text, above).
+
+    `TestE2EV1RDP/clipboard-unanswered` shows that on xrdp. It needs no
+    change to `reconnectwm.sh`: a channel server killed during a
+    connection is not started again before the next one, and until then
+    the session goes on with typing still drawn and no echo of a paste.
+    The subtest kills the channel server, pastes, waits for
+    `clipboard-status` with `answering` false, types, and checks the
+    clipboard on a new connection. On the demo stack at load 164 falling
+    to 53, with the restart on, the owner heard 1m0s after the paste,
+    the subtest took 66.31 s, and `clipboard` beside it 2.85 s with no
+    false word.
 - **Tests.** `server/rdp_e2e_test.go` drives native RDP sessions
   through occamyd's routes with the Go client against `rdptest`: NLA
   with stored credentials, the hello's size, the screen, scancodes,

@@ -819,6 +819,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   seconds and got no clipboard. It now looks for the session's display
   alone, and `make e2e` checks that with a channel server running for
   another display.
+- A paste an RDP server's clipboard does not answer no longer waits in
+  silence. On a server whose clipboard process, `xrdp-chansrv`, had
+  exited, nothing answered on the channel, so text waited unsent until
+  the session ended, and the viewer heard nothing. Text now waits for a
+  minute, and is then dropped, not sent later, and the viewers told by
+  a new ignorable protocol message, `clipboard-status`
+  ([docs/protocol.md](docs/protocol.md#clipboard-status)). The web
+  client says so over the desktop, leaves the text in the clipboard
+  panel to send again, and takes the word away once the clipboard
+  answers. A client that does not know the message skips it.
 - The demo x11vnc no longer dies of an X error (`Xerror: major_opcode:
   18 … error_code: 3`) when it answers a request for the clipboard from
   a window that has gone, which ended the sessions on it, as

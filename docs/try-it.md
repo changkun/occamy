@@ -418,11 +418,20 @@ for one message to occamyd. Send less of it.", and the text stays in
 the box as your edit. A read-only viewer sees the remote clipboard but
 cannot send to it.
 
-If the RDP desktop's **Clipboard** panel never changes, xrdp's
-clipboard process, `xrdp-chansrv`, may have exited, which it can when
-a connection closes within moments of opening. The demo image starts
-it again when the next connection opens, and the `rdp` service's log
-says `starting xrdp-chansrv again`. End the session and open it again.
+On RDP, a server's clipboard is a process of its own, xrdp's
+`xrdp-chansrv`, which may exit while the session goes on. xrdp's does
+that when a connection closes within moments of opening. Text you send
+then gets no answer: after a minute the page says "The remote clipboard
+is not responding, so the text was not sent." over the desktop and in
+the **Clipboard** panel. The text stays in the box, and nothing is sent
+later on its own. The word goes once the clipboard answers again, or
+when you dismiss it.
+
+The demo image starts that process again when the next connection
+opens, and the `rdp` service's log says `starting xrdp-chansrv again`,
+so end the session and open it again. xrdp itself starts it only with
+an X session, so a server without the demo's `reconnectwm.sh` keeps the
+clipboard silent until you log out of that session.
 
 The demo x11vnc used to die now and then of an X error, `BadWindow`,
 which ended its sessions with "Remote unreachable", sometimes right
@@ -602,7 +611,7 @@ make e2e
 
 Run it with the engine that `make run` used, as in [section
 1](#1-what-you-need): with Docker, `make e2e CONTAINER_ENGINE=docker`,
-unless you exported it. One test kills the clipboard process in the
+unless you exported it. Two tests kill the clipboard process in the
 `rdp` container through that engine's compose, and another stops
 x11vnc in the `vnc` container for a moment, so they fail with
 another engine.
