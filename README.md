@@ -142,7 +142,8 @@ limits and TLS.
 - [Try Occamy](./docs/try-it.md): the demo stack, step by step.
 - [Configuration](./docs/configuration.md): every key of the
   configuration file.
-- [HTTP API](./docs/api.md): sign-in, connections, sessions and shares.
+- [HTTP API](./docs/api.md): sign-in, connections, sessions and shares,
+  also as [OpenAPI](./docs/openapi.yaml).
 - [Protocol](./docs/protocol.md): the wire protocol between `occamyd`
   and its clients.
 - [Architecture](./docs/architecture.md): how the pieces fit together.

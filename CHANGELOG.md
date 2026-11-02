@@ -55,6 +55,9 @@ before 1.0.0, which removes guacd and the v0 routes.
   `demo` with the password `occamy`, with an XFCE desktop and test
   servers natively and through guacd ([docs/try-it.md](docs/try-it.md)).
   CI fuzzes every fuzz target nightly.
+- An OpenAPI 3.1 description of the HTTP API,
+  [docs/openapi.yaml](docs/openapi.yaml), which `go test ./server` checks
+  against the routes, the Go types of the bodies and the error codes.
 
 ### Changed
 

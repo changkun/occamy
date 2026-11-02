@@ -12,7 +12,8 @@ The documents, for using and for working on Occamy:
 - [HTTP API (v1)](./api.md)
   + TL;DR: Every route a v1 configuration file serves: sign-in, the
     connections and sessions, shares, the stream upgrades, their tokens,
-    replies, errors and limits.
+    replies, errors and limits. [openapi.yaml](./openapi.yaml) describes
+    the same routes in OpenAPI 3.1, for tools.
 - [Occamy Protocol (v1)](./protocol.md)
   + TL;DR: The wire protocol of Occamy v1: binary messages over one
     WebSocket, a handshake in one round trip, and frames acknowledged
