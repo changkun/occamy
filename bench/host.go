@@ -16,7 +16,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -175,15 +174,6 @@ func readRuntime(ctx context.Context, addr string) (runtimeVars, error) {
 		return v, fmt.Errorf("%s: %s", req.URL, resp.Status)
 	}
 	return v, json.NewDecoder(resp.Body).Decode(&v)
-}
-
-// processCPU returns the harness's own user and system CPU time.
-func processCPU() time.Duration {
-	var ru syscall.Rusage
-	if err := syscall.Getrusage(syscall.RUSAGE_SELF, &ru); err != nil {
-		return 0
-	}
-	return time.Duration(ru.Utime.Nano() + ru.Stime.Nano())
 }
 
 // memoryStat is a container's memory over a result, in MiB.
