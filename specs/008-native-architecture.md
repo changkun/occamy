@@ -311,6 +311,7 @@ Each beta reruns the benchmark, which also covers #18.
 | 10 | [Protocol benchmark](008-native-architecture/benchmark.md) | Yardstick: scenarios, metrics, the Guacamole baseline, the 10x and 50 ms targets | — | large | complete |
 | 11 | [Native RDP backend](008-native-architecture/native-rdp-backend.md) | The backend over the RDP spike's client; channels, GFX without AVC, the Windows check | session-core, graphics-pipeline, rdp-strategy | large | validated |
 | 12 | [Native Kubernetes backend](008-native-architecture/native-kubernetes-backend.md) | A pod's terminal over the API server's exec channel protocols; credentials, certificate, names | session-core, native-ssh-backend, api-and-server-stack | medium | validated |
+| 13 | [Comparison benchmark](008-native-architecture/comparison-benchmark.md) | Guacamole against Occamy across workloads, networks, viewers and server load, collected in one go and analysed with tests and intervals | benchmark | xlarge | validated |
 
 ```mermaid
 graph LR
@@ -331,6 +332,7 @@ graph LR
   A[1 API and server stack] --> K8S[12 native Kubernetes]
   S --> K8S
   SSH --> K8S
+  BM --> CMP[13 comparison benchmark]
 ```
 
 **Recommended iteration order:** #10 first, so that the Guacamole

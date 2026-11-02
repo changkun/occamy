@@ -1,0 +1,26 @@
+# The comparison benchmark of
+# specs/008-native-architecture/comparison-benchmark.md, which
+# make bench-compare collects and make bench-report analyses.
+#
+# Every run measures every block (a series under a network condition, in
+# a study) once, in an order drawn from the seed and the run. Before each
+# block the harness waits until the host's 1-minute load is below
+# max_load, for up to load_wait; then it saves and exits, and the same
+# command resumes.
+
+runs: 7
+seed: 20261102
+max_load: 8
+load_wait: 2h
+
+studies:
+  # Every workload, single user, on all six paths under N0 to N2.
+  - study: matrix
+    series: [occamy, guacd, v1-native, v1-native-nogfx, v1-guacd, v1-guacd-gfx]
+    nets: [N0, N1, N2]
+    scenarios: all
+  # The slow links on the three main paths.
+  - study: matrix
+    series: [occamy, guacd, v1-native]
+    nets: [N3, N4]
+    scenarios: all

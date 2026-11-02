@@ -143,7 +143,8 @@ func TestBenchV1File(t *testing.T) {
 
 // occamy-v1-gfx serves its own file, on the port the harness and make
 // bench take by default, and only on the loopback interface, since the
-// demo user's password is public.
+// demo user's password is public; so is its debug listener, which has no
+// authentication, on the port make bench-compare reads it from.
 func TestBenchGFXService(t *testing.T) {
 	raw, err := os.ReadFile("../docker/docker-compose.bench.yaml")
 	if err != nil {
@@ -158,7 +159,7 @@ func TestBenchGFXService(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := compose.Services["occamy-v1-gfx"]
-	if want := []string{"127.0.0.1:${OCCAMY_V1_GFX_PORT:-5640}:5637"}; !slices.Equal(svc.Ports, want) {
+	if want := []string{"127.0.0.1:${OCCAMY_V1_GFX_PORT:-5640}:5637", "127.0.0.1:${OCCAMY_V1_GFX_DEBUG_PORT:-5641}:5638"}; !slices.Equal(svc.Ports, want) {
 		t.Errorf("ports %q, want %q", svc.Ports, want)
 	}
 	if want := []string{"./bench/occamy-v1-gfx.yaml:/occamy/v1.yaml:ro"}; !slices.Equal(svc.Volumes, want) {

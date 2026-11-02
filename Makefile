@@ -103,19 +103,59 @@ soak:
 # it, as described in docs/benchmarks.md. BENCH_FLAGS passes flags to the
 # harness, for example BENCH_FLAGS="-quick -scenarios T1". A second stack
 # on a shared host takes COMPOSE_PROJECT_NAME, OCCAMY_PORT,
-# OCCAMY_V1_PORT, OCCAMY_V1_GFX_PORT and GUACD_PORT, which the harness
-# follows. Its debug routes are off unless OCCAMY_DEBUG=1, as run's are.
+# OCCAMY_V1_PORT, OCCAMY_V1_GFX_PORT, GUACD_PORT, OCCAMY_V1_DEBUG_PORT and
+# OCCAMY_V1_GFX_DEBUG_PORT, which the harness follows. Its debug routes
+# are off unless OCCAMY_DEBUG=1, as run's are, or BENCH_RUNTIME=1, which
+# turns on the v1 services' debug listeners alone (BENCH_DEBUG), on the
+# loopback interface, and has the harness read occamyd's runtime there.
 # The bench stack leaves out the demo's desktop service, but compose does
 # not stop one that make run started, which would idle next to the
 # measurements, so bench removes it; make run brings it back.
+comma := ,
+BENCH_DEBUG = $(if $(filter 1,$(BENCH_RUNTIME)),OCCAMY_V1_DEBUG_ADDRESS=0.0.0.0:5638)
+BENCH_RUNTIME_FLAGS = $(if $(filter 1,$(BENCH_RUNTIME)),-runtime \
+	occamy-v1=localhost:$(or $(OCCAMY_V1_DEBUG_PORT),5638)$(comma)occamy-v1-gfx=localhost:$(or $(OCCAMY_V1_GFX_DEBUG_PORT),5641))
 bench: build
-	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml rm -f -s desktop
-	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml up -d --build --wait
+	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(BENCH_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml rm -f -s desktop
+	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(BENCH_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml up -d --build --wait
 	go run ./bench -engine $(CONTAINER_ENGINE) -project $(or $(COMPOSE_PROJECT_NAME),occamy) \
 		-addr localhost:$(or $(OCCAMY_PORT),5636) -v1 localhost:$(or $(OCCAMY_V1_PORT),5637) \
 		-v1-gfx localhost:$(or $(OCCAMY_V1_GFX_PORT),5640) \
-		-guacd localhost:$(or $(GUACD_PORT),4822) $(BENCH_FLAGS)
+		-guacd localhost:$(or $(GUACD_PORT),4822) $(BENCH_RUNTIME_FLAGS) $(BENCH_FLAGS)
 .PHONY: bench
+
+# bench-compare collects the comparison benchmark of
+# specs/008-native-architecture/comparison-benchmark.md in one go: the
+# plan in bench/plans/compare.yaml, with occamyd's runtime, into
+# BENCH_OUT, saved after each block. Before each block it waits for a
+# quiet host; if the host stays busy, it saves and exits, and running it
+# again resumes. It takes the variables of bench.
+BENCH_OUT ?= bench-compare.json
+BENCH_PLAN ?= bench/plans/compare.yaml
+bench-compare:
+	$(MAKE) bench BENCH_RUNTIME=1 BENCH_FLAGS="-plan $(BENCH_PLAN) -resume -out $(BENCH_OUT) $(BENCH_FLAGS)"
+.PHONY: bench-compare
+
+# bench-essential collects the essential comparison, about an hour of
+# measuring (bench/plans/essential.yaml), as bench-compare does, into
+# bench-essential.json.
+bench-essential:
+	$(MAKE) bench-compare BENCH_PLAN=bench/plans/essential.yaml BENCH_OUT=bench-essential.json
+.PHONY: bench-essential
+
+# bench-report analyses the comparison's results (BENCH_OUT) into tables,
+# tests and figures in BENCH_REPORT with bench/report.py, which uv runs
+# with its own numpy, scipy and matplotlib.
+BENCH_REPORT ?= docs/benchmarks/comparison
+bench-report:
+	uv run bench/report.py $(BENCH_OUT) -o $(BENCH_REPORT)
+.PHONY: bench-report
+
+# bench-essential-report analyses the essential comparison into
+# docs/benchmarks/essential.
+bench-essential-report:
+	$(MAKE) bench-report BENCH_OUT=bench-essential.json BENCH_REPORT=docs/benchmarks/essential
+.PHONY: bench-essential-report
 
 # corpus records the frames the codec measurement works on
 # (bench/testdata/corpus/README.md) from the bench desktop with a terminal

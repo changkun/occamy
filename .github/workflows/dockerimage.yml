@@ -55,6 +55,10 @@ jobs:
       with:
         version: v2.15.0
         args: --build-tags=rdp_integration ./internal/rdp/... ./internal/backend/rdp/...
+    # The comparison benchmark's analysis, on synthetic results with known
+    # answers. pipx is on the runner; uv brings the script's own packages.
+    - name: Benchmark analysis tests
+      run: pipx run uv run bench/report_test.py
 
   # occamyd needs no C toolchain, so it builds wherever Go does.
   cross:

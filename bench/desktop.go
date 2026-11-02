@@ -109,7 +109,7 @@ func endScene(ctx context.Context, s *session) error {
 	if err := s.key(keyEscape); err != nil {
 		return err
 	}
-	wctx, cancel := context.WithTimeout(ctx, keyWait)
+	wctx, cancel := context.WithTimeout(ctx, s.patient(keyWait))
 	defer cancel()
 	_, err := s.wait(wctx, t0, func(f frame) bool { return f.marked })
 	return err
@@ -167,7 +167,7 @@ func probeLatency(ctx context.Context, s *session, run, n int) ([]time.Duration,
 		if err := s.key(int(k)); err != nil {
 			return nil, err
 		}
-		wctx, cancel := context.WithTimeout(ctx, keyWait)
+		wctx, cancel := context.WithTimeout(ctx, s.patient(keyWait))
 		f, err := s.wait(wctx, t0, func(f frame) bool { return f.marked })
 		cancel()
 		if err != nil {
@@ -183,7 +183,7 @@ func runProbe(ctx context.Context, r *runner, s *session, res *result) error {
 	if err := ready(ctx, s); err != nil {
 		return err
 	}
-	lat, err := probeLatency(ctx, s, r.runIndex, r.samples(200))
+	lat, err := probeLatency(ctx, s, r.runIndex, r.probeKeys())
 	if err != nil {
 		return err
 	}
@@ -220,7 +220,7 @@ func runMotion(ctx context.Context, r *runner, s *session, res *result) error {
 		return err
 	}
 	m := r.measure(s)
-	lat, err := probeLatency(ctx, s, r.runIndex, r.samples(200))
+	lat, err := probeLatency(ctx, s, r.runIndex, r.probeKeys())
 	if err != nil {
 		return err
 	}

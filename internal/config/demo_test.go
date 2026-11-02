@@ -329,6 +329,38 @@ func TestDemoBind(t *testing.T) {
 	}
 }
 
+// TestBenchRuntime checks that make bench keeps the v1 debug listeners
+// off, and that make bench-compare turns them on, the v0 service's debug
+// mode still off, and has the harness read occamyd's runtime from their
+// ports while it collects the comparison's plan, resuming its results.
+func TestBenchRuntime(t *testing.T) {
+	if env := makeEnv(t, "bench", nil, nil); env["OCCAMY_V1_DEBUG_ADDRESS"] != "" {
+		t.Errorf("make bench: OCCAMY_V1_DEBUG_ADDRESS=%q, want it off", env["OCCAMY_V1_DEBUG_ADDRESS"])
+	}
+	env := makeEnv(t, "bench-compare", nil, nil)
+	if env["OCCAMY_V1_DEBUG_ADDRESS"] != "0.0.0.0:5638" || env["OCCAMY_V0_CONF"] != "occamy.yaml" {
+		t.Errorf("make bench-compare: OCCAMY_V1_DEBUG_ADDRESS=%q and OCCAMY_V0_CONF=%q, want 0.0.0.0:5638 and occamy.yaml",
+			env["OCCAMY_V1_DEBUG_ADDRESS"], env["OCCAMY_V0_CONF"])
+	}
+	lines := makeDryRun(t, "bench-compare", []string{"OCCAMY_V1_DEBUG_PORT=6638", "OCCAMY_V1_GFX_DEBUG_PORT=6641"}, nil)
+	// make -n prints the harness's command as the Makefile breaks it.
+	joined := strings.ReplaceAll(strings.Join(lines, "\n"), "\\\n", " ")
+	var harness string
+	for _, line := range strings.Split(joined, "\n") {
+		if strings.HasPrefix(line, "go run ./bench ") {
+			harness = strings.Join(strings.Fields(line), " ")
+		}
+	}
+	for _, want := range []string{
+		"-runtime occamy-v1=localhost:6638,occamy-v1-gfx=localhost:6641",
+		"-plan bench/plans/compare.yaml -resume -out bench-compare.json",
+	} {
+		if !strings.Contains(harness, want) {
+			t.Errorf("make bench-compare runs %q, without %q", harness, want)
+		}
+	}
+}
+
 // TestDemoProject checks that the demo stack's compose project is
 // occamy, not the compose file's directory, docker, which other
 // checkouts and other compose files share, and so make clean's compose

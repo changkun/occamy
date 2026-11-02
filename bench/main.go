@@ -8,13 +8,15 @@
 //
 //	make bench
 //	go run ./bench -scenarios T1,T2 -net N0,N1 -quick
+//	go run ./bench -plan bench/plans/compare.yaml -resume -out bench-compare.json
 //
-// It writes the results as JSON and prints them as a Markdown table.
+// It writes the results as JSON and prints them as a Markdown table. A
+// plan file (-plan) measures the studies of
+// specs/008-native-architecture/comparison-benchmark.md in one go.
 package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -77,7 +79,12 @@ func main() {
 		failfast  = flag.Bool("failfast", false, "stop at the first measurement with an error")
 		engine    = flag.String("engine", "podman", "container engine for CPU statistics, or none")
 		project   = flag.String("project", "occamy", "compose project of the stack")
-		out       = flag.String("out", "bench-results.json", "JSON output file")
+		out       = flag.String("out", "bench-results.json", "JSON output file, saved after each series and network condition")
+		planName  = flag.String("plan", "", "a plan file, such as bench/plans/compare.yaml, instead of -series, -net, -scenarios and -runs")
+		resume    = flag.Bool("resume", false, "continue -out if it exists, a file of the same plan, keeping its complete blocks")
+		maxLoad   = flag.Float64("max-load", 0, "before each series and network condition, wait until the host's 1-minute load is below this; 0 does not wait; set, it overrides the plan file's")
+		loadWait  = flag.Duration("load-wait", 2*time.Hour, "how long -max-load waits before the harness saves and exits; set, it overrides the plan file's")
+		debugF    = flag.String("runtime", "", "occamyd debug listeners to read the runtime from, as service=address pairs, such as occamy-v1=localhost:5638")
 	)
 	flag.Parse()
 	log.SetFlags(log.Ltime)
@@ -98,72 +105,118 @@ func main() {
 			protocols: slices.Sorted(maps.Keys(conns)),
 		})
 	}
-	var chosenSeries []series
-	for _, name := range strings.Split(*seriesF, ",") {
-		i := slices.IndexFunc(all, func(s series) bool { return s.Name == name })
-		if i < 0 {
-			log.Fatalf("unknown series %q", name)
-		}
-		chosenSeries = append(chosenSeries, all[i])
-	}
-	var chosenNets []netCondition
-	for _, name := range strings.Split(*nets, ",") {
-		i := slices.IndexFunc(netConditions, func(n netCondition) bool { return n.Name == name })
-		if i < 0 {
-			log.Fatalf("unknown network condition %q", name)
-		}
-		chosenNets = append(chosenNets, netConditions[i])
-	}
-	chosen, err := chooseScenarios(*scen)
+	debug, err := parseDebug(*debugF)
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	p := plan{
-		series: chosenSeries, nets: chosenNets, scenarios: chosen,
 		quick: *quick, runs: *runs, ackHz: *ackHz, failfast: *failfast,
-		engine: *engine, project: *project,
+		engine: *engine, project: *project, debug: debug,
+		maxLoad: *maxLoad, loadWait: *loadWait,
+		save: func(rep *report) error { return writeReport(*out, rep) },
 	}
-	report := p.measure(context.Background())
+	if *planName != "" {
+		set := map[string]bool{}
+		flag.Visit(func(f *flag.Flag) {
+			set[f.Name] = true
+			switch f.Name {
+			case "series", "net", "scenarios", "runs":
+				log.Fatalf("-%s comes from the plan file, not a flag", f.Name)
+			}
+		})
+		f, err := readPlanFile(*planName)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if p.blocks, err = studyBlocks(f, all); err != nil {
+			log.Fatalf("%s: %v", *planName, err)
+		}
+		p.runs, p.seed, p.keys = f.Runs, f.Seed, f.Keys
+		if f.Connects != nil {
+			p.connects = *f.Connects
+		}
+		if !set["max-load"] {
+			p.maxLoad = f.MaxLoad
+		}
+		if !set["load-wait"] {
+			p.loadWait = f.LoadWait
+		}
+	} else {
+		chosenSeries, err := chooseSeries(all, strings.Split(*seriesF, ","))
+		if err != nil {
+			log.Fatal(err)
+		}
+		chosenNets, err := chooseNets(strings.Split(*nets, ","))
+		if err != nil {
+			log.Fatal(err)
+		}
+		chosen, err := chooseScenarios(*scen)
+		if err != nil {
+			log.Fatal(err)
+		}
+		if p.blocks, err = matrixBlocks("matrix", chosenSeries, chosenNets, chosen); err != nil {
+			log.Fatal(err)
+		}
+	}
 
-	b, err := json.MarshalIndent(report, "", "  ")
-	if err != nil {
-		log.Fatal(err)
+	var prev *report
+	if *resume {
+		if prev, err = resumable(*out); err != nil {
+			log.Fatal(err)
+		}
+		if prev != nil {
+			if err := p.continues(prev); err != nil {
+				log.Fatalf("%s is not of this plan: %v; move it away or choose another -out", *out, err)
+			}
+		}
 	}
-	if err := os.WriteFile(*out, append(b, '\n'), 0o600); err != nil {
-		log.Fatal(err)
+	report, err := p.measure(context.Background(), prev)
+	if werr := writeReport(*out, &report); werr != nil {
+		log.Fatal(werr)
 	}
 	report.markdown(os.Stdout)
-	failed := slices.ContainsFunc(report.Results, func(r result) bool { return r.Error != "" })
-	if failed && p.failfast {
-		log.Print("stopped at the first error (-failfast)")
-	} else if names := idle(chosenSeries, report.Results); len(names) > 0 {
-		log.Printf("no scenario chosen runs on %s", strings.Join(names, ", "))
-		failed = true
+	if err != nil {
+		log.Printf("%v; what was measured is in %s, and the same command with -resume continues it", err, *out)
+		os.Exit(2)
 	}
-	if failed {
+	if slices.ContainsFunc(report.Results, func(r result) bool { return r.Error != "" }) {
+		if p.failfast {
+			log.Print("stopped at the first error (-failfast)")
+		}
 		os.Exit(1)
 	}
 }
 
-// plan is what a bench run measures, as its flags chose.
+// plan is what a bench run measures, as its flags or plan file chose.
 type plan struct {
-	series    []series
-	nets      []netCondition
-	scenarios []scenario
-	quick     bool
-	runs      int
-	ackHz     float64
+	blocks []block
+	runs   int
+	// seed draws each run's order of blocks; 0 keeps the order of blocks.
+	seed  uint64
+	quick bool
+	ackHz float64
 	// failfast ends the run at the first result with an error, rather
 	// than measure the rest of a stack that stopped working.
 	failfast        bool
 	engine, project string
+	debug           map[string]string // occamyd service: its debug listener
+	// maxLoad and loadWait are the load gate (waitLoad).
+	maxLoad  float64
+	loadWait time.Duration
+	// keys and connects are a plan file's: how many probe keys a latency
+	// scenario presses, and how many sessions G7 opens; 0 is the default.
+	keys, connects int
+	// save, if set, keeps what was measured after each block.
+	save func(*report) error
 }
 
-// measure runs p. Each run measures everything once, so that a
-// disturbance on the host affects one run of a measurement rather than
-// all of them.
-func (p plan) measure(ctx context.Context) report {
+// measure runs p, continuing prev, the results of the same plan, if it
+// is not nil. Each run measures every block once, so that a disturbance
+// on the host affects one run of a measurement rather than all of them,
+// in an order of its own (order). Before each block it waits for a quiet
+// host (waitLoad), and after it, it saves. It returns an error, with
+// what it measured, when the host stayed busy or a save failed.
+func (p plan) measure(ctx context.Context, prev *report) (report, error) {
 	rep := report{
 		Started:    time.Now().UTC(),
 		Quick:      p.quick,
@@ -171,43 +224,66 @@ func (p plan) measure(ctx context.Context) report {
 		AckHz:      p.ackHz,
 		FrameStamp: frameStamp,
 		Host:       hostInfo(p.engine, p.project),
+		Plan:       p.record(),
+	}
+	p.runs = rep.Runs
+	done := map[blockKey]bool{}
+	if prev != nil {
+		rep.Started, rep.Host = prev.Started, prev.Host
+		rep.Resumed = append(slices.Clone(prev.Resumed), time.Now().UTC())
+		rep.Results, done = p.kept(prev.Results)
+		log.Printf("resuming: %d of %d blocks measured", len(done), rep.Runs*len(p.blocks))
 	}
 	for run := range rep.Runs {
-		log.Printf("run %d of %d", run+1, rep.Runs)
-		for _, sr := range p.series {
-			for _, nc := range p.nets {
-				if p.measureOn(ctx, &rep, run, sr, nc) {
-					return rep
+		for i, b := range p.order(run) {
+			if done[b.key(run)] {
+				continue
+			}
+			if err := p.waitLoad(ctx); err != nil {
+				return rep, err
+			}
+			log.Printf("run %d of %d, block %d of %d: %s %s %s", run+1, rep.Runs, i+1, len(p.blocks), b.study, b.series.Name, b.net.Name)
+			stopped := p.measureBlock(ctx, &rep, run, b)
+			if p.save != nil {
+				if err := p.save(&rep); err != nil {
+					return rep, err
 				}
+			}
+			if stopped {
+				return rep, nil
 			}
 		}
 	}
-	return rep
+	return rep, nil
 }
 
-// measureOn adds to rep each chosen scenario and first frame that sr
-// serves, measured on nc, and reports whether failfast stopped there.
-func (p plan) measureOn(ctx context.Context, rep *report, run int, sr series, nc netCondition) (stopped bool) {
-	px, err := startProxy(sr.target, nc)
+// measureBlock adds to rep each scenario of b and the first frame of each
+// of their protocols, and reports whether failfast stopped there.
+func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (stopped bool) {
+	px, err := startProxy(b.series.target, b.net)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer px.close()
 	r := &runner{
-		series: sr, net: nc, proxy: px, quick: p.quick, runIndex: run,
-		cpu: newCPUSampler(p.engine, p.project),
+		series: b.series, net: b.net, proxy: px, quick: p.quick, runIndex: run,
+		study: b.study, factor: b.factor, keys: p.keys, connects: p.connects,
+		cpu: newCPUSampler(p.engine, p.project), debug: p.debug,
 	}
 	stop := func(res result) bool {
 		rep.Results = append(rep.Results, res)
 		return p.failfast && res.Error != ""
 	}
-	for _, sc := range p.scenarios {
-		if sr.serves(sc.Protocol) && stop(r.run(ctx, sc)) {
+	for _, sc := range b.scenarios {
+		if stop(r.run(ctx, sc)) {
 			return true
 		}
 	}
-	for _, proto := range protocolsOf(p.scenarios) {
-		if sr.serves(proto) && stop(r.connect(ctx, proto)) {
+	if !b.connect {
+		return false
+	}
+	for _, proto := range protocolsOf(b.scenarios) {
+		if stop(r.connect(ctx, proto)) {
 			return true
 		}
 	}
@@ -239,18 +315,6 @@ func chooseScenarios(spec string) ([]scenario, error) {
 	return chosen, nil
 }
 
-// idle returns the series that ran nothing, such as one that serves
-// none of the chosen scenarios' protocols.
-func idle(chosen []series, results []result) []string {
-	var names []string
-	for _, sr := range chosen {
-		if !slices.ContainsFunc(results, func(r result) bool { return r.Series == sr.Name }) {
-			names = append(names, sr.Name)
-		}
-	}
-	return names
-}
-
 func protocolsOf(scs []scenario) []string {
 	var protos []string
 	for _, sc := range scs {
@@ -268,7 +332,12 @@ type runner struct {
 	proxy    *proxy
 	quick    bool
 	runIndex int // which of the runs this is
-	cpu      *cpuSampler
+	// study and factor are those of the block the runner measures.
+	study, factor string
+	// keys and connects are the plan's (plan); 0 is the default.
+	keys, connects int
+	cpu            *cpuSampler
+	debug          map[string]string // occamyd service: its debug listener
 }
 
 // gap separates sessions, so that a session with the same claims does
@@ -293,6 +362,24 @@ func (r *runner) samples(n int) int {
 	return n
 }
 
+// probeKeys is how many probe keys a latency scenario presses: 200, or
+// the plan's keys.
+func (r *runner) probeKeys() int {
+	if r.keys > 0 {
+		return r.samples(r.keys)
+	}
+	return r.samples(200)
+}
+
+// connectSamples is how many sessions G7 opens: 20, or the plan's
+// connects.
+func (r *runner) connectSamples() int {
+	if r.connects > 0 {
+		return r.samples(r.connects)
+	}
+	return r.samples(20)
+}
+
 func (r *runner) duration(d time.Duration) time.Duration {
 	if r.quick {
 		return d / 6
@@ -301,27 +388,42 @@ func (r *runner) duration(d time.Duration) time.Duration {
 }
 
 func (r *runner) newResult(id, proto string) *result {
-	res := &result{Scenario: id, Protocol: proto, Series: r.series.Name, Net: r.net.Name, Run: r.runIndex}
+	res := &result{
+		Scenario: id, Protocol: proto, Series: r.series.Name, Net: r.net.Name, Run: r.runIndex,
+		Study: r.study, Factor: r.factor, At: time.Now().UTC(),
+	}
+	if l, err := loadAverage(); err == nil {
+		res.Load = l
+	}
 	if path, ok := rdpPaths[res.Series]; ok && proto == "rdp" {
 		res.GFX, res.Verdict = &path.gfx, path.verdict
 	}
 	return res
 }
 
-// run runs one scenario on a fresh session.
+// run runs one scenario on a fresh session, observing what the stack and
+// the harness spend on it. A scenario may take longer on a slow link
+// (slowness), up to three times as long.
 func (r *runner) run(ctx context.Context, sc scenario) result {
 	res := r.newResult(sc.ID, sc.Protocol)
 	log.Printf("%s %s %s", res.Series, res.Net, res.Scenario)
 	defer time.Sleep(gap)
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute*time.Duration(min(r.net.slowness(), 3)))
 	defer cancel()
+	o := r.observe(ctx)
+	r.runOn(ctx, sc, res)
+	o.finish(ctx, res)
+	return *res
+}
 
+func (r *runner) runOn(ctx context.Context, sc scenario, res *result) {
 	s, err := r.series.open(ctx, r.proxy.addr(), sc.Protocol)
 	if err != nil {
 		res.Error = err.Error()
 		log.Printf("  %v", err)
-		return *res
+		return
 	}
+	s.slowness = r.net.slowness()
 	err = sc.run(ctx, r, s, res)
 	if cerr := s.close(); err == nil && cerr != nil {
 		err = cerr
@@ -332,7 +434,6 @@ func (r *runner) run(ctx context.Context, sc scenario) result {
 	}
 	res.Unsupported = s.unsupported
 	res.sceneCount()
-	return *res
 }
 
 // connect (G7) measures the time to the first frame of new sessions
@@ -342,9 +443,10 @@ func (r *runner) run(ctx context.Context, sc scenario) result {
 func (r *runner) connect(ctx context.Context, proto string) result {
 	res := r.newResult("G7", proto)
 	log.Printf("%s %s %s %s", res.Series, res.Net, res.Scenario, proto)
+	o := r.observe(ctx)
 	var times, signIns []time.Duration
-	for range r.samples(20) {
-		sctx, cancel := context.WithTimeout(ctx, openTimeout)
+	for range r.connectSamples() {
+		sctx, cancel := context.WithTimeout(ctx, openTimeout*time.Duration(r.net.slowness()))
 		s, err := r.series.open(sctx, r.proxy.addr(), proto)
 		if err != nil {
 			cancel()
@@ -369,6 +471,7 @@ func (r *runner) connect(ctx context.Context, proto string) result {
 	}
 	res.FirstFrame = summarize(times)
 	res.SignIn = summarize(signIns)
+	o.finish(ctx, res)
 	return *res
 }
 
@@ -441,6 +544,14 @@ type result struct {
 	Series   string `json:"series"`
 	Net      string `json:"net"`
 	Run      int    `json:"run"`
+	// Study and Factor are the block's study and its setting, such as
+	// viewers=4, which the matrix leaves empty.
+	Study  string `json:"study,omitempty"`
+	Factor string `json:"factor,omitempty"`
+	// At is when the result started, and Load the host's 1-minute load
+	// average then.
+	At   time.Time `json:"at,omitzero"`
+	Load float64   `json:"load_1m,omitempty"`
 	// GFX says whether a v1 series reached RDP through its graphics
 	// pipeline, and Verdict that this is what the series' side ships, so
 	// that the row counts for the targets. Neither is set for another
@@ -471,11 +582,32 @@ type result struct {
 	// Frames/Seconds.
 	SceneFPS float64            `json:"scene_fps,omitempty"`
 	CPUMS    map[string]float64 `json:"cpu_ms,omitempty"`
+	// Memory, PIDs, Runtime and ClientCPUMS cover the whole scenario,
+	// with its session's start and end: each container's memory and
+	// processes, occamyd's runtime from its debug listener (-runtime),
+	// and the harness's own CPU time, network emulation included.
+	Memory      map[string]memoryStat  `json:"mem_mib,omitempty"`
+	PIDs        map[string]int         `json:"pids,omitempty"`
+	Runtime     map[string]runtimeStat `json:"runtime,omitempty"`
+	ClientCPUMS float64                `json:"client_cpu_ms,omitempty"`
 
 	Unsupported map[string]int `json:"unsupported,omitempty"`
 	Error       string         `json:"error,omitempty"`
 
 	sceneFrames int64 // the stamps counted, until sceneCount moves them
+}
+
+// seriesLabel names r's series in a table, with its study and factor
+// outside the matrix.
+func (r *result) seriesLabel() string {
+	label := r.Series
+	if r.Study != "" && r.Study != "matrix" {
+		label += " " + r.Study
+	}
+	if r.Factor != "" {
+		label += " " + r.Factor
+	}
+	return label
 }
 
 // v1 reports a result of a v1 series.
@@ -506,7 +638,11 @@ type report struct {
 	// FrameStamp is when a frame counts as drawn, per protocol.
 	FrameStamp string            `json:"frame_stamp"`
 	Host       map[string]string `json:"host"`
-	Results    []result          `json:"results"`
+	// Plan is what the results measure, which -resume checks, and
+	// Resumed when they were continued.
+	Plan    *planRecord `json:"plan,omitempty"`
+	Resumed []time.Time `json:"resumed,omitempty"`
+	Results []result    `json:"results"`
 }
 
 // frameStamp is when the series count a frame as drawn.
@@ -559,7 +695,7 @@ func (rep *report) markdown(w io.Writer) {
 			scen += " " + r.Protocol
 		}
 		fmt.Fprintf(w, "| %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s | %s |\n",
-			scen, r.Series, r.Net, lat, f(colFirst, "%.1f"), f(colCompletion, "%.0f"),
+			scen, r.seriesLabel(), r.Net, lat, f(colFirst, "%.1f"), f(colCompletion, "%.0f"),
 			f(colDown, "%.1f"), f(colRate, "%.1f"), f(colFPS, "%.1f"),
 			f(colServerCPU, "%.0f"), f(colRemoteCPU, "%.0f"), f(colDecode, "%.0f"),
 			strings.ReplaceAll(strings.Join(row.notes, "; "), "|", "/"))
@@ -663,12 +799,12 @@ type row struct {
 // table groups the results of every run by measurement, in the order
 // they were first measured, and takes the median of each number.
 func table(results []result) []row {
-	type key struct{ scenario, protocol, series, net string }
+	type key struct{ study, factor, scenario, protocol, series, net string }
 	var keys []key
 	runs := map[key][]*result{}
 	for i := range results {
 		r := &results[i]
-		k := key{r.Scenario, r.Protocol, r.Series, r.Net}
+		k := key{r.Study, r.Factor, r.Scenario, r.Protocol, r.Series, r.Net}
 		if _, ok := runs[k]; !ok {
 			keys = append(keys, k)
 		}
@@ -756,6 +892,15 @@ var services = []string{"occamy", "occamy-v1", "occamy-v1-gfx", "guacd", "ssh", 
 // the engine does not report it. Only podman reports cumulative CPU time
 // in its statistics.
 func (c *cpuSampler) sample() map[string]time.Duration {
+	if cs := c.stats(); cs != nil {
+		return cs.cpu
+	}
+	return nil
+}
+
+// stats returns what the engine reports of each compose service, or nil
+// if it reports nothing.
+func (c *cpuSampler) stats() *containerStats {
 	if c == nil {
 		return nil
 	}
@@ -765,26 +910,14 @@ func (c *cpuSampler) sample() map[string]time.Duration {
 	}
 	out, err := exec.Command(c.engine, args...).Output() // #nosec G204 -- engine and project come from flags
 	if err != nil {
-		log.Printf("cpu statistics: %v", err)
+		log.Printf("container statistics: %v", err)
 		return nil
 	}
-	var stats []struct {
-		Name    string `json:"name"`
-		CPUTime string `json:"cpu_time"`
-	}
-	if err := json.Unmarshal(out, &stats); err != nil {
+	cs, err := parseStats(out, c.project)
+	if err != nil {
 		return nil
 	}
-	m := map[string]time.Duration{}
-	for _, st := range stats {
-		d, err := time.ParseDuration(st.CPUTime)
-		if err != nil {
-			return nil
-		}
-		svc := strings.TrimSuffix(strings.TrimPrefix(st.Name, c.project+"-"), "-1")
-		m[svc] = d
-	}
-	return m
+	return &cs
 }
 
 // hostInfo records what the numbers were measured on, as far as it can

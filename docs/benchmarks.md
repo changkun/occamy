@@ -24,9 +24,11 @@ v1 series run on the same stack when `-series` names them; see
 [The v1 series](#the-v1-series).
 
 On a host shared with another stack, `COMPOSE_PROJECT_NAME`,
-`OCCAMY_PORT`, `OCCAMY_V1_PORT`, `OCCAMY_V1_GFX_PORT` and `GUACD_PORT`
-start this one under its own project name and ports, and `make bench`
-points the harness at them.
+`OCCAMY_PORT`, `OCCAMY_V1_PORT`, `OCCAMY_V1_GFX_PORT`, `GUACD_PORT`,
+`OCCAMY_V1_DEBUG_PORT` and `OCCAMY_V1_GFX_DEBUG_PORT` start this one
+under its own project name and ports, and `make bench` points the harness
+at them. `OCCAMY_IMAGE` tags occamyd's image under another name, so that
+the build does not retag the image another stack runs.
 
 The harness and the stack share the host, so anything else that uses the
 CPU shows up in the numbers. A compile during a run more than doubled
@@ -52,13 +54,95 @@ make bench BENCH_FLAGS="-scenarios T1 -net N1 -series occamy"
 | `-engine` | `podman` | Container engine for CPU time, or `none` |
 | `-project` | `occamy` | The stack's compose project, whose containers CPU time is read from |
 | `-addr`, `-v1`, `-v1-gfx`, `-guacd` | `localhost:5636`, `localhost:5637`, `localhost:5640`, `localhost:4822` | occamyd for v0, occamy-v1 for v1, occamy-v1-gfx for `v1-guacd-gfx`, and guacd for the direct series |
-| `-out` | `bench-results.json` | JSON output |
+| `-out` | `bench-results.json` | JSON output, saved after each series and network condition |
+| `-plan` | none | A plan file, such as `bench/plans/compare.yaml`, in place of `-series`, `-net`, `-scenarios` and `-runs` ([The comparison](#the-comparison)) |
+| `-resume` | off | Continue `-out`, if it exists and measures the same plan: keep its blocks that are complete and without errors, and measure the rest |
+| `-max-load`, `-load-wait` | `0`, `2h` | Before each series and network condition, wait until the host's 1-minute load is below `-max-load`, for up to `-load-wait`; then save and exit with status 2. Set, they override a plan file's |
+| `-runtime` | none | occamyd debug listeners, as `service=address` pairs, to read occamyd's runtime from; `make bench BENCH_RUNTIME=1` turns on the v1 services' listeners and passes them |
 
 Server CPU needs podman: its container statistics report cumulative CPU
 time, and docker's do not. With docker, pass `-engine none`. CI runs a
 quick smoke variant on every push, with `-failfast`, and does not
 compare numbers, because shared runners are too noisy. When the job
 fails or times out, it prints the stack's logs.
+
+## The comparison
+
+```sh
+make bench-compare
+```
+
+collects the comparison of Guacamole and Occamy that
+[comparison-benchmark](../specs/008-native-architecture/comparison-benchmark.md)
+designs, in one go: the plan in `bench/plans/compare.yaml`, into
+`bench-compare.json` (`BENCH_OUT`), with occamyd's runtime. It measures in
+**blocks**, a series under a network condition in a study, and every run
+measures every block once, in an order drawn from the plan's seed and the
+run, so that drift on the host favours no series. Before each block it
+waits until the host's 1-minute load is below 8; if the load stays above
+for 2 hours, it saves and exits, and the same command resumes. It saves
+after every block, so an interrupted collection loses one block at most.
+
+Every result records, besides what a single run does:
+
+- `study` and `factor`: its block's study and the study's setting;
+- `at` and `load_1m`: when it started, and the host's load then;
+- `mem_mib` and `pids`: each container's memory, at its peak over samples
+  every 2 s and at the end, and its processes;
+- `runtime`: occamyd's goroutines, open files and heap in use at the end,
+  and the GC cycles, GC pause time and bytes allocated during it, from
+  the v1 services' debug listeners;
+- `client_cpu_ms`: the harness's own CPU time, network emulation
+  included, which every series pays alike.
+
+The network ladder adds two conditions to the three of the baseline:
+
+| ID | RTT | Bandwidth |
+|----|-----|-----------|
+| N3 | 100 ms | 5 Mbit/s |
+| N4 | 250 ms | 1 Mbit/s |
+
+On them a sample may take longer before it fails: 4 times as long at N3
+and 20 times at N4, and a scenario up to three times as long.
+
+```sh
+make bench-essential
+```
+
+collects the essential comparison, about an hour of measuring, into
+`bench-essential.json`: `guacd` against `v1-native` under N0 and N2, on
+T1, T2, and G2, G5 and G6 over VNC and RDP, 6 runs of 100 probe keys,
+without G7 (`bench/plans/essential.yaml`). A plan file's `keys` sets how
+many probe keys a latency scenario presses (200 by default), and
+`connects` how many sessions G7 opens (20), or none at 0. `BENCH_PLAN`
+runs `make bench-compare` with another plan file.
+
+### Analysis
+
+```sh
+make bench-report            # bench-compare.json into docs/benchmarks/comparison/
+make bench-essential-report  # bench-essential.json into docs/benchmarks/essential/
+```
+
+analyses the results with `bench/report.py`, which
+[uv](https://docs.astral.sh/uv/) runs with its own numpy, scipy and
+matplotlib, as the spec's Analysis fixed it before any data. It writes:
+
+- `results.csv`: one row per run, cell and metric;
+- `summary.csv`: per series, cell and metric, the median of the runs with
+  an exact 95% interval from order statistics;
+- `comparisons.csv`: per pair of series, cell and metric, the factor by
+  which the second is better (the Hodges–Lehmann estimate of their ratio,
+  with its exact 95% interval), the exact permutation p-value of the rank
+  sum, and on primary metrics the p-value corrected over the family;
+- `report.md`: the tables, the 10x and 50 ms targets, occamyd's runtime,
+  the conclusions that change without the results measured above the
+  load gate, and the figures: each metric's medians as bars with their
+  intervals, and the factors on a log axis, as SVG in light and dark.
+
+`uv run bench/report.py results.json -o dir` analyses any results file,
+and `uv run bench/report_test.py` tests the analysis on synthetic results
+with known answers.
 
 ## What is measured
 
