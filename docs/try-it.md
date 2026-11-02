@@ -11,8 +11,8 @@ It covers these steps:
 6. tear it all down.
 
 Run each command from the repository's root unless a step says
-otherwise. v1 is not released yet. The released v0.x servers are
-described in the [README](../README.md#v0-released).
+otherwise. A v0 file, which the 0.x servers read, is described in
+[configuration.md](configuration.md#v0-files).
 
 ## 1. What you need
 

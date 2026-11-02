@@ -45,8 +45,8 @@ those are closed, an operator should know the following:
 - **Demo credentials are public.** The servers in `docker/demo/` exist
   for local testing only.
 
-A v1 file (`version: 1`, [docs/configuration.md](docs/configuration.md)),
-not yet in a release, addresses the first five unless it sets
+A v1 file (`version: 1`, [docs/configuration.md](docs/configuration.md))
+addresses the first five unless it sets
 `legacy_v0: true`, which serves the v0 routes and their gaps again. Its
 tokens name a user or a session and carry no remote credentials, and
 are signed with an Ed25519 key in `auth.signing_key_file`, created if

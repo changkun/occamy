@@ -1,14 +1,14 @@
 # Occamy Manual
 
-You may interested in the following document:
+The documents, for using and for working on Occamy:
 
 - [Try Occamy](./try-it.md)
   + TL;DR: From a fresh checkout to the demo stack in a browser: one
     connection of each protocol, sharing, the clipboard, resizing,
     reconnecting, every test suite, and tearing it down.
 - [Occamy Architecture](./architecture.md)
-  + TL;DR: Occamy v0 authenticates with JWT and proxies each connection to
-    guacd; v1, in progress, has its own protocol and backends.
+  + TL;DR: How `occamyd`, its native backends, the guacd bridge and the
+    clients fit together, package by package.
 - [HTTP API (v1)](./api.md)
   + TL;DR: Every route a v1 configuration file serves: sign-in, the
     connections and sessions, shares, the stream upgrades, their tokens,
@@ -18,11 +18,11 @@ You may interested in the following document:
     WebSocket, a handshake in one round trip, and frames acknowledged
     under a small window. Normative, with golden vectors.
 - [Occamy Protocol (v0)](./protocol-cn.md)
-  + TL;DR: The Guacamole protocol that occamyd v0.x speaks, in Chinese.
-    v1.0 drops it with the v0 routes.
+  + TL;DR: The Guacamole protocol of the v0 routes, in Chinese. v1.0
+    drops it with them.
 - [Configuration](./configuration.md)
-  + TL;DR: Every key of a v1 configuration file, its default and how it is
-    validated; a file without `version` is read as v0.
+  + TL;DR: Every key of the configuration file, its default and how it is
+    validated, and the v0 files of the 0.x servers.
 - [Benchmarks](./benchmarks.md)
   + TL;DR: How Occamy is measured, and the numbers protocol v1 must beat.
 - [Codec measurement](./benchmarks/codecs.md)
@@ -32,8 +32,8 @@ You may interested in the following document:
   + TL;DR: Profiling `occamyd` in debug mode, guacd's processes, and the
     pressure test.
 - [Design specs](../specs/README.md)
-  + TL;DR: Current status of the project and planned work.
+  + TL;DR: The design of each part, and the work planned.
 
 ## License
 
-[Occamy](https://github.com/changkun/occamy) | [MIT](../LICENSE) &copy; 2019 [Ou Changkun](https://changkun.de)
+[Occamy](https://github.com/changkun/occamy) | [MIT](../LICENSE) &copy; 2019-2026 [Ou Changkun](https://changkun.de)
