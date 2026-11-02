@@ -7,6 +7,7 @@ package main
 import (
 	"errors"
 	"io"
+	"math"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -21,10 +22,24 @@ type netCondition struct {
 	Mbps float64 // 0 is unlimited
 }
 
+// netConditions are the ladder of specs/008-native-architecture/
+// comparison-benchmark.md: local, fast, medium, slow and very slow.
 var netConditions = []netCondition{
 	{Name: "N0"},
 	{Name: "N1", RTT: 20 * time.Millisecond, Mbps: 100},
 	{Name: "N2", RTT: 50 * time.Millisecond, Mbps: 20},
+	{Name: "N3", RTT: 100 * time.Millisecond, Mbps: 5},
+	{Name: "N4", RTT: 250 * time.Millisecond, Mbps: 1},
+}
+
+// slowness is how many times longer than on a fast link a sample may take
+// on n before it fails: 1 down to 20 Mbit/s, and in proportion below, so
+// that a slow link measures how slow it is rather than fail.
+func (n netCondition) slowness() int64 {
+	if n.Mbps <= 0 || n.Mbps >= 20 {
+		return 1
+	}
+	return int64(math.Ceil(20 / n.Mbps))
 }
 
 // proxy forwards TCP connections to a target through an emulated link. It

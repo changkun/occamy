@@ -159,7 +159,7 @@ func runTypeEcho(ctx context.Context, r *runner, s *session, res *result) error 
 		if err := s.key('a' + i%26); err != nil {
 			return err
 		}
-		wctx, cancel := context.WithTimeout(ctx, keyWait)
+		wctx, cancel := context.WithTimeout(ctx, s.patient(keyWait))
 		f, err := s.wait(wctx, t0, func(frame) bool { return true })
 		cancel()
 		if err != nil {
@@ -228,7 +228,7 @@ func runBulkOutput(ctx context.Context, r *runner, s *session, res *result) erro
 	if err := s.key(keyReturn); err != nil {
 		return err
 	}
-	wctx, cancel := context.WithTimeout(ctx, markerWait)
+	wctx, cancel := context.WithTimeout(ctx, s.patient(markerWait))
 	defer cancel()
 	f, err := s.wait(wctx, t0, func(f frame) bool { return f.marked })
 	if err != nil {

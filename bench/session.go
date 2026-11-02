@@ -200,8 +200,10 @@ type session struct {
 
 	start  time.Time
 	signIn time.Duration // v1: the sign-in just before start
-	drawn  atomic.Int64  // frames that drew
-	decode atomic.Int64  // nanoseconds spent decoding and applying drawing
+	// slowness stretches the session's waits on a slow link (patient).
+	slowness int64
+	drawn    atomic.Int64 // frames that drew
+	decode   atomic.Int64 // nanoseconds spent decoding and applying drawing
 	// sceneFrames counts the frames of the scene that the session showed,
 	// by their stamps. The reader alone uses stamp and stamped, the last
 	// stamp it read.
@@ -221,6 +223,12 @@ func newSession(start time.Time) *session {
 		start:  start,
 		done:   make(chan struct{}),
 	}
+}
+
+// patient returns how long the session waits for what takes d on a fast
+// link: longer on a slow one (netCondition.slowness).
+func (s *session) patient(d time.Duration) time.Duration {
+	return d * time.Duration(max(s.slowness, 1))
 }
 
 // expect has the session's first frames looked at for what m shows. It

@@ -11,6 +11,11 @@
 
 version: 1
 listen: 0.0.0.0:5637
+# The debug listener, from which make bench-compare reads occamyd's
+# runtime: off unless OCCAMY_V1_DEBUG_ADDRESS is set (Makefile,
+# BENCH_DEBUG), and published on the host's loopback interface only.
+debug:
+  address_env: OCCAMY_V1_DEBUG_ADDRESS
 auth:
   # On a tmpfs (docker-compose.bench.yaml): nothing outlives a run here,
   # so this file does not depend on where the demo keeps its key.

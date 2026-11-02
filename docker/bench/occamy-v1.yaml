@@ -11,6 +11,11 @@
 
 version: 1
 listen: 0.0.0.0:5637
+# The debug listener, from which make bench-compare reads occamyd's
+# runtime: off unless OCCAMY_V1_DEBUG_ADDRESS is set (Makefile,
+# BENCH_DEBUG), and published on the host's loopback interface only.
+debug:
+  address_env: OCCAMY_V1_DEBUG_ADDRESS
 auth:
   # As the demo's, on its volume (docker-compose.yaml).
   signing_key_file: /var/lib/occamy/signing.key

@@ -7,6 +7,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ## [Unreleased]
 
+### Added
+
+- `make bench-compare` collects the comparison of the Guacamole protocol
+  with Occamy's in one resumable command: a plan file
+  (`bench/plans/compare.yaml`) measured in blocks, in a random order per
+  run, behind a load gate, with each container's memory, occamyd's
+  runtime and the harness's own CPU, and two slower networks, N3 (100 ms,
+  5 Mbit/s) and N4 (250 ms, 1 Mbit/s)
+  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)).
+
 ## [1.0.0-beta.1] - 2026-11-02
 
 Occamy 1.0 no longer puts guacd and the Guacamole protocol between the

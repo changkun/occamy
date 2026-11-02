@@ -11,7 +11,8 @@
 #
 # GUACD_PORT and OCCAMY_V1_GFX_PORT publish guacd and occamy-v1-gfx on
 # other ports, for a second stack on a shared host, as OCCAMY_PORT and
-# OCCAMY_V1_PORT do for occamyd.
+# OCCAMY_V1_PORT do for occamyd, and OCCAMY_V1_GFX_DEBUG_PORT the debug
+# listener of occamy-v1-gfx, as OCCAMY_V1_DEBUG_PORT does occamy-v1's.
 
 services:
   guacd:
@@ -46,6 +47,10 @@ services:
     command: ["/occamy/occamyd", "-conf", "/occamy/v1.yaml"]
     ports:
       - "127.0.0.1:${OCCAMY_V1_GFX_PORT:-5640}:5637"
+      # The debug listener, as occamy-v1's (docker-compose.yaml): nothing
+      # listens there unless OCCAMY_V1_DEBUG_ADDRESS is set, as
+      # make bench-compare does for occamyd's runtime.
+      - "127.0.0.1:${OCCAMY_V1_GFX_DEBUG_PORT:-5641}:5638"
     volumes:
       - ./bench/occamy-v1-gfx.yaml:/occamy/v1.yaml:ro
     tmpfs:
@@ -53,6 +58,7 @@ services:
       - /run/occamy:mode=1777
     environment:
       OCCAMY_BENCH_RDP_PASSWORD: occamy
+      OCCAMY_V1_DEBUG_ADDRESS: ${OCCAMY_V1_DEBUG_ADDRESS:-}
     depends_on:
       guacd:
         condition: service_healthy

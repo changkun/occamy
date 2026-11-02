@@ -567,15 +567,17 @@ func TestProbeLatencyJitter(t *testing.T) {
 	}
 }
 
-// A chosen series that ran nothing is reported.
-func TestIdle(t *testing.T) {
-	chosen := []series{{Name: "v1-native"}, {Name: "v1-guacd"}}
-	got := idle(chosen, []result{{Series: "v1-native"}})
-	if !slices.Equal(got, []string{"v1-guacd"}) {
-		t.Errorf("idle = %q, want v1-guacd", got)
+// A chosen series that serves none of the chosen scenarios is refused,
+// rather than measure nothing.
+func TestMatrixBlocksIdle(t *testing.T) {
+	ssh := []scenario{{ID: "T1", Protocol: "ssh"}}
+	guacd := series{Name: "v1-guacd", protocols: []string{"rdp", "vnc"}}
+	if _, err := matrixBlocks("matrix", []series{{Name: "v1-native"}, guacd}, netConditions[:1], ssh); err == nil {
+		t.Error("a series without a scenario to run: no error")
 	}
-	if got := idle(chosen, []result{{Series: "v1-native"}, {Series: "v1-guacd"}}); len(got) != 0 {
-		t.Errorf("idle = %q, want none", got)
+	blocks, err := matrixBlocks("matrix", []series{{Name: "v1-native"}}, netConditions[:2], ssh)
+	if err != nil || len(blocks) != 2 {
+		t.Fatalf("%d blocks, %v; want 2", len(blocks), err)
 	}
 }
 
@@ -649,8 +651,18 @@ func TestMeasure(t *testing.T) {
 	nop := func(context.Context, *runner, *session, *result) error { return nil }
 	scs := []scenario{{ID: "T1", Protocol: "ssh", run: nop}, {ID: "T2", Protocol: "ssh", run: nop}}
 	for failfast, want := range map[bool]int{true: 1, false: 3} { // T1, T2 and G7
-		p := plan{series: []series{refused}, nets: netConditions[:1], scenarios: scs, quick: true, ackHz: 30, failfast: failfast, engine: "none"}
-		rep := within(t, 10*time.Second, func() report { return p.measure(context.Background()) })
+		blocks, err := matrixBlocks("matrix", []series{refused}, netConditions[:1], scs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := plan{blocks: blocks, quick: true, ackHz: 30, failfast: failfast, engine: "none"}
+		rep := within(t, 10*time.Second, func() report {
+			rep, err := p.measure(context.Background(), nil)
+			if err != nil {
+				t.Error(err)
+			}
+			return rep
+		})
 		if len(rep.Results) != want {
 			t.Errorf("failfast %v: %d results, want %d", failfast, len(rep.Results), want)
 		}
