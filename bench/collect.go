@@ -32,7 +32,7 @@ type planFile struct {
 	Runs int `yaml:"runs"`
 	// Seed draws each run's order of blocks; 0 keeps the file's order.
 	Seed uint64 `yaml:"seed"`
-	// MaxLoad is the load gate: before each block, the host's 1-minute
+	// MaxLoad is the load gate: before each result, the host's 1-minute
 	// load must be below it, for up to LoadWait. 0 measures at any load.
 	MaxLoad  float64       `yaml:"max_load"`
 	LoadWait time.Duration `yaml:"load_wait"`

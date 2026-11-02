@@ -111,7 +111,7 @@ func main() {
 		out       = flag.String("out", "bench-results.json", "JSON output file, saved after each series and network condition")
 		planName  = flag.String("plan", "", "a plan file, such as bench/plans/compare.yaml, instead of -series, -net, -scenarios and -runs")
 		resume    = flag.Bool("resume", false, "continue -out if it exists, a file of the same plan, keeping its complete blocks")
-		maxLoad   = flag.Float64("max-load", 0, "before each series and network condition, wait until the host's 1-minute load is below this; 0 does not wait; set, it overrides the plan file's")
+		maxLoad   = flag.Float64("max-load", 0, "before each result, wait until the host's 1-minute load is below this; 0 does not wait; set, it overrides the plan file's")
 		loadWait  = flag.Duration("load-wait", 2*time.Hour, "how long -max-load waits before the harness saves and exits; set, it overrides the plan file's")
 		debugF    = flag.String("runtime", "", "occamyd debug listeners to read the runtime from, as service=address pairs, such as occamy-v1=localhost:5638")
 	)
@@ -227,9 +227,11 @@ type plan struct {
 // measure runs p, continuing prev, the results of the same plan, if it
 // is not nil. Each run measures every block once, so that a disturbance
 // on the host affects one run of a measurement rather than all of them,
-// in an order of its own (order). Before each block it waits for a quiet
-// host (waitLoad), and after it, it saves. It returns an error, with
-// what it measured, when the host stayed busy or a save failed.
+// in an order of its own (order). Before each result it waits for a
+// quiet host (waitLoad), and after each block, it saves. It returns an
+// error, with what it measured, when the host stayed busy or a save
+// failed; a block that the busy host stopped part-way is measured again
+// whole when the collection resumes (kept).
 func (p plan) measure(ctx context.Context, prev *report) (report, error) {
 	rep := report{
 		Started:    time.Now().UTC(),
@@ -253,18 +255,15 @@ func (p plan) measure(ctx context.Context, prev *report) (report, error) {
 			if done[b.key(run)] {
 				continue
 			}
-			if err := p.waitLoad(ctx); err != nil {
-				return rep, err
-			}
 			log.Printf("run %d of %d, block %d of %d: %s %s %s", run+1, rep.Runs, i+1, len(p.blocks), b.study, b.series.Name, b.net.Name)
-			stopped := p.measureBlock(ctx, &rep, run, b)
+			stopped, err := p.measureBlock(ctx, &rep, run, b)
 			if p.save != nil {
 				if err := p.save(&rep); err != nil {
 					return rep, err
 				}
 			}
-			if stopped {
-				return rep, nil
+			if err != nil || stopped {
+				return rep, err
 			}
 		}
 	}
@@ -272,8 +271,15 @@ func (p plan) measure(ctx context.Context, prev *report) (report, error) {
 }
 
 // measureBlock adds to rep each scenario of b and the first frame of each
-// of their protocols, and reports whether failfast stopped there.
-func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (stopped bool) {
+// of their protocols, each once the host is quiet (waitLoad), and reports
+// whether failfast stopped there. It returns the load gate's error if the
+// host stayed busy before one of them, with those before it in rep.
+//
+// The gate holds each result rather than each block: a block takes
+// minutes, and a scene such as G5 keeps several cores busy, so the load
+// that a block's own results raise would otherwise carry into the
+// results after them unchecked.
+func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (stopped bool, err error) {
 	px, err := startProxy(b.series.target, b.net)
 	if err != nil {
 		log.Fatal(err)
@@ -284,24 +290,30 @@ func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (
 		study: b.study, factor: b.factor, keys: p.keys, connects: p.connects,
 		cpu: newCPUSampler(p.engine, p.project), debug: p.debug,
 	}
-	stop := func(res result) bool {
+	// add adds the result that m measures once the host is quiet, and
+	// reports whether failfast stops the block there.
+	add := func(m func() result) (bool, error) {
+		if err := p.waitLoad(ctx); err != nil {
+			return false, err
+		}
+		res := m()
 		rep.Results = append(rep.Results, res)
-		return p.failfast && res.Error != ""
+		return p.failfast && res.Error != "", nil
 	}
 	for _, sc := range b.scenarios {
-		if stop(r.run(ctx, sc)) {
-			return true
+		if stop, err := add(func() result { return r.run(ctx, sc) }); stop || err != nil {
+			return stop, err
 		}
 	}
 	if !b.connect {
-		return false
+		return false, nil
 	}
 	for _, proto := range protocolsOf(b.scenarios) {
-		if stop(r.connect(ctx, proto)) {
-			return true
+		if stop, err := add(func() result { return r.connect(ctx, proto) }); stop || err != nil {
+			return stop, err
 		}
 	}
-	return false
+	return false, nil
 }
 
 // chooseScenarios returns the scenarios that spec names: comma-separated

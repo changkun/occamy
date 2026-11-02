@@ -127,7 +127,7 @@ bench: build
 # bench-compare collects the comparison benchmark of
 # specs/008-native-architecture/comparison-benchmark.md in one go: the
 # plan in bench/plans/compare.yaml, with occamyd's runtime, into
-# BENCH_OUT, saved after each block. Before each block it waits for a
+# BENCH_OUT, saved after each block. Before each result it waits for a
 # quiet host; if the host stays busy, it saves and exits, and running it
 # again resumes. It takes the variables of bench.
 BENCH_OUT ?= bench-compare.json

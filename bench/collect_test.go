@@ -274,6 +274,51 @@ func TestWaitLoad(t *testing.T) {
 	}
 }
 
+// The load gate holds each result, not only each block: a result that
+// leaves the host busy holds the next one of its block, and the
+// collection stops there, with what it measured saved.
+func TestLoadGateEachResult(t *testing.T) {
+	defer func(f func() (float64, error), poll, d time.Duration) {
+		loadAverage, loadPoll, gap = f, poll, d
+	}(loadAverage, loadPoll, gap)
+	loadPoll, gap = time.Millisecond, 0
+	var busy atomic.Bool
+	loadAverage = func() (float64, error) {
+		if busy.Load() {
+			return 30, nil
+		}
+		return 1, nil
+	}
+	busying := series{Name: "guacd", target: echoServer(t), open: func(context.Context, string, string) (*session, error) {
+		busy.Store(true)
+		return nil, errors.New("refused")
+	}}
+	blocks, err := matrixBlocks("matrix", []series{busying}, netConditions[:1], []scenario{{ID: "T1", Protocol: "ssh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := blocks[0].results(); n != 2 { // T1, and SSH's G7
+		t.Fatalf("a block of %d results, want 2", n)
+	}
+	saved := -1
+	p := plan{blocks: blocks, runs: 1, quick: true, engine: "none", maxLoad: 8, loadWait: 20 * time.Millisecond,
+		save: func(rep *report) error { saved = len(rep.Results); return nil }}
+	type measured struct {
+		rep report
+		err error
+	}
+	got := within(t, 10*time.Second, func() measured {
+		rep, err := p.measure(context.Background(), nil)
+		return measured{rep, err}
+	})
+	if !errors.Is(got.err, errBusy) {
+		t.Errorf("measure = %v, want errBusy before the block's second result", got.err)
+	}
+	if len(got.rep.Results) != 1 || got.rep.Results[0].Scenario != "T1" || saved != 1 {
+		t.Errorf("%d results, %d saved; want T1's alone, saved", len(got.rep.Results), saved)
+	}
+}
+
 // A results file is written whole, and reads back.
 func TestWriteReport(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "results.json")
