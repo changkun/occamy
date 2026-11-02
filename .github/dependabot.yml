@@ -11,6 +11,11 @@ updates:
     directory: /client/occamy-web
     schedule:
       interval: weekly
+    # typescript-eslint 8.72.1 takes typescript below 6.1. Drop this once
+    # a release of it takes 7.
+    ignore:
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
     groups:
       web:
         update-types: [minor, patch]
