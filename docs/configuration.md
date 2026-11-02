@@ -8,8 +8,8 @@ another. The file comes in two versions:
   `occamyd` serves it as before (see [v0 files](#v0-files)).
 - **v1** starts with `version: 1`. It configures the API v1 server of
   [api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md):
-  sign-in, the connection registry, TLS and the debug listener. It is
-  not yet in a release. It serves `/healthz`, sign-in for static users
+  sign-in, the connection registry, TLS and the debug listener, from
+  v1.0.0-beta.1 on. It serves `/healthz`, sign-in for static users
   and through OIDC, the connections and sessions of API v1 and their
   streams, with `web_client`, the web client, and with `legacy_v0`, the
   v0 routes (see
@@ -956,3 +956,26 @@ not know:
 
 A v0 file used as a v1 file reports the v0 keys it finds, with their v1
 equivalents where there are any.
+
+A v0 file proxies every session to guacd, so the remote hosts must be
+reachable from guacd. To run one from the image, with guacd beside it:
+
+```sh
+podman network create occamy
+podman run -d --name guacd --network occamy docker.io/guacamole/guacd:1.6.0
+podman run -d --network occamy -p 127.0.0.1:5636:5636 \
+    -v ./docker/occamy.yaml:/occamy/conf.yaml:ro occamy:latest
+```
+
+A v0 token carries `protocol`, `host`, `username` and `password`. Other
+connection parameters go under `guacd.params.<protocol>`
+([guacd](#guacd-guacd)), and token values win over them. For RDP to a
+Windows host:
+
+- `conf.yaml` sets `ignore-cert`, which skips the certificate check for
+  every RDP host. `cert-fingerprints` accepts only the certificates you
+  list.
+- guacd negotiates the security mode, NLA included, unless `security`
+  sets one, such as `nla`. NLA needs the username and password in the
+  token, since the v0 routes pass on no prompt of guacd's.
+- `domain` is for domain accounts.

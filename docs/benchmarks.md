@@ -168,16 +168,14 @@ network conditions and bench desktop as the baseline:
 make bench BENCH_FLAGS="-series v1-native,v1-native-nogfx,v1-guacd,v1-guacd-gfx -runs 3"
 ```
 
-**There are no v1 results yet.** v1's full run waits for the rest of
-the [graphics pipeline](../specs/008-native-architecture/graphics-pipeline.md)
-(refinement, the tile cache, and the encode cache and its workers) and
-for [native RDP](../specs/008-native-architecture/native-rdp-backend.md)
-(owner, 2026-10-31). Native RDP has been rdp's default since #132,
-and asks for RDP's graphics pipeline (GFX) by default, without its
-ClearCodec and cache yet; `v1-native` measures it.
-Numbers taken before then would not be v1's verdict, so this page
-publishes none; the harness and the CI smoke run only keep the v1 path
-working until then.
+**There are no v1 results yet.** What v1's full run waited for is in:
+the [graphics pipeline](../specs/008-native-architecture/graphics-pipeline.md)'s
+refinement, tile cache, encode cache and workers, and
+[native RDP](../specs/008-native-architecture/native-rdp-backend.md),
+rdp's default, which asks for RDP's graphics pipeline (GFX) without its
+ClearCodec and cache yet; `v1-native` measures it. No series has run in
+full yet, so this page publishes no v1 numbers; the harness and the CI
+smoke run keep the v1 path working until the first full run.
 
 | Series | Backend | Protocols | RDP's GFX | Connections |
 |---|---|---|---|---|

@@ -96,6 +96,9 @@ Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
   nothing waits for the viewer behind; what encoding for it costs in CPU
   is for the benchmark).
 - Traffic and CPU are measured against the v0 baselines (see Performance).
+  **Waived for beta.1** by the owner on 2026-11-02: beta.1 ships before
+  the benchmark's first full run. v1.0 still waits for it (Path to pure
+  Go).
 - The [004](004-security-hardening.md) properties hold by design: no
   credentials in tokens or logs, an allowlisted connection registry, and
   no debug endpoints on the public listener.

@@ -12,8 +12,8 @@ file serves the same routes on a listener of its own (see
 
 `mode` in [conf.yaml](../conf.yaml) is `debug`, `release` or `test`;
 a file without `mode` runs in debug mode, and any other value stops
-`occamyd` at start. `conf.yaml` sets `debug`. The demo stack's
-[docker/occamy.yaml](../docker/occamy.yaml) sets `release`, and
+`occamyd` at start. `conf.yaml` and the demo stack's
+[docker/occamy.yaml](../docker/occamy.yaml) set `release`, and
 `make run OCCAMY_DEBUG=1` mounts
 [docker/occamy-debug.yaml](../docker/occamy-debug.yaml), the same file
 in debug mode, in its place; the stack publishes the v0 service on the

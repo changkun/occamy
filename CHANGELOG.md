@@ -7,1108 +7,117 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ## [Unreleased]
 
+## [1.0.0-beta.1] - 2026-11-02
+
+Occamy v1 has its own API, its own protocol, and native VNC, RDP, SSH
+and Kubernetes backends in pure Go, so `occamyd` connects to remote
+desktops itself. guacd is now optional: v1 uses it only for telnet and
+for a vnc or rdp connection that sets `backend: guacd`. A v0 file is
+served as before, under new paths. This is a beta: the API and the
+protocol may change before 1.0.0, which removes guacd and the v0 routes.
+
 ### Added
 
-- `limits.decode_cores`, a decoding budget for the whole process. Each
-  native RDP session may take about a core, so one user's
-  `limits.sessions_per_user` sessions to hostile servers would take
-  that many; together they now take about `decode_cores`, half of
-  `GOMAXPROCS` by default and at least 1. A session over its share
-  waits, with its server's updates queued behind it: nothing is
-  dropped, and a wait ends with the session. Of n sessions that want
-  more than the budget has, each gets at least an nth of it, or a
-  session's core if that is less; a session that wants less gets all
-  it wants, and what it leaves goes to the others. Shares are
-  sessions', not users'. Every frame the client reads now counts,
-  whatever it does with it, so what a server has it read and ignore
-  takes from the budget too. Every GFX PDU is now charged 32 units,
-  whether the client applies or skips it: those applied that do little,
-  such as a fill of a pixel, were charged little or nothing, and each
-  skipped PDU 24.
-- The fuzz targets run in CI: `.github/workflows/fuzz.yml` gives each of
-  them 30 seconds, one at a time, every night, and keeps what a failure
-  found as an artifact.
-- `TestSlowViewer` shows that a viewer that falls behind leaves another's
-  frames on the same session as they were, on a link a thousandth as fast
-  or with no acknowledgements, for raw tiles and for every codec.
-- A real desktop in the demo stack: `docker/demo/desktop`, XFCE with a
-  terminal, file manager, text editor and Firefox as the user `occamy`,
-  which `docker/occamy-v1.yaml` lists first as **Desktop (XFCE) over
-  VNC** and **Desktop (XFCE) over RDP**, through the native backends
-  only. Each protocol has a session of its own that outlives its
-  connections. The screen follows the window, and the panel the screen.
-  `TestDemoDesktop` opens both. The other demo servers stay bare X
-  servers, which the tests' probes need. The image is about 1 GB, built
-  with `--no-install-recommends`. The bench stack leaves it out, and
-  `make bench` removes one that `make run` started.
-- [docs/try-it.md](docs/try-it.md), a guide to running Occamy v1 for
-  the first time, from a fresh checkout. It covers:
-  - the prerequisites and the build;
-  - the memory and disk that the engine's virtual machine needs;
-  - the demo stack, with where its configuration and signing key live,
-    and how to run it next to another stack on one host;
-  - a connection of each protocol and what it shows, with a k3s
-    cluster for Kubernetes;
-  - sharing, the clipboard, resizing, reconnecting and the guacd
-    fallback;
-  - every test suite: unit, lint, the web client's, end-to-end,
-    pressure, soak, integration and fuzz;
-  - the debug routes' gating;
-  - tearing it all down.
-- The desktop baseline and the per-scenario targets for protocol v1
-  ([docs/benchmarks.md](docs/benchmarks.md)). `bench/vncprobe` measures
-  the bench desktop's VNC server on its own.
-- The benchmark's v1 series, `v1-native` and `v1-guacd`: the same
-  scenarios over protocol v1, driven by the Go client core through API
-  v1 against native SSH, VNC and RDP and against VNC and RDP through
-  guacd, on the bench stack's `occamy-v1` service
-  ([docs/benchmarks.md](docs/benchmarks.md#the-v1-series)). The harness
-  counts a v1 frame when the client core delivers it, and acknowledges a
-  graphical frame on a 60 Hz screen's next tick, as the web client
-  does, and a terminal's at once; the report records both, and
-  `-ack-hz 0` is a diagnostic. A desktop's key carries its HID usage, as
-  the web client's does. CI runs them quickly after the v0 smoke run, every
-  run with `-failfast`, which stops at the first error, stops the bench
-  job at 30 minutes, and prints the stack's logs unless the job
-  succeeded. Their full results wait for the rest of the graphics
-  pipeline and for native RDP.
-  `make bench` takes a compose project and ports for a second stack on a
-  shared host.
-- A public Go package for protocol v1, `changkun.de/x/occamy/protocol`,
-  with its framing: the message header and its ignorable flag, the field
-  encodings, a registry of message types, and the maximum message size.
-  Golden vectors in `protocol/testdata/framing.json` let other
-  implementations check their codecs against it.
-- Every message of protocol v1 in the `protocol` package, with the
-  handshake (`hello` in the upgrade query, the token in a subprotocol,
-  capabilities agreed in `welcome`), codecs and close codes, golden
-  vectors in `protocol/testdata/messages.json`, and
-  [docs/protocol.md](docs/protocol.md), the protocol's normative
-  description. `docs/protocol-cn.md` is now marked as the v0 protocol.
-  A `max_message_size` below 64 KiB is refused.
-- `internal/auth`, the tokens of API v1: Ed25519 JWTs for access
-  (a user and groups) and for sessions (a session and a role), signed by
-  occamyd or by a configured trusted issuer, with no other algorithm
-  accepted. occamyd's own tokens name `occamy` as issuer and audience,
-  so a trusted issuer may not be named `occamy`.
-- `internal/session`, the session core of v1: one goroutine per session
-  that runs a backend, draws into the framebuffer or the terminal, applies
-  input by role (owner, viewer, read-only), keeps each viewer's small
-  state as latest values, ends the session when the owner stays away or
-  it idles, and a registry of sessions with share tokens that die with
-  them.
-- `internal/backend/guacd`, the guacd bridge of v1: a graphical backend
-  that applies guacd's drawing and copies each frame into the session's
-  framebuffer before it answers the frame's `sync`, so that guacd paces
-  against the bridge alone. It turns guacd's pointer, title, clipboard
-  and credential requests into session events, and viewers' keys
-  (but for those without a keysym, which guacd cannot take), pointer,
-  wheel, text, clipboard and resizes into Guacamole instructions.
-  `internal/guacamole`'s display now applies `cursor`,
-  reports damage as rectangles, and copies areas out.
-- A conformance corpus for the guacd bridge: guacd 1.6's VNC, RDP and
-  SSH sessions on the bench stack, recorded with `go test -tags record`
-  and replayed by `go test` without containers, which fails on any
-  error, unsupported operation or log line, on a checkpoint that does
-  not show the scene's idle screen, on a changed pixel where a `copy`
-  moved content, on prompts, handshake, credential answers or sync
-  answers that differ from the recording's, and on a changed final
-  frame. `OCCAMY_CONFORMANCE_DUMP` names a directory for the frames of
-  failed checks. RDP is recorded with `disable-gfx`, since through the
-  graphics pipeline xrdp's RemoteFX Progressive codec shifted the
-  desktop's colours by up to 22 levels before guacd saw them.
-- A native SSH backend for protocol v1, `internal/backend/ssh`, in pure
-  Go. It accepts only pinned host keys, by key or SHA-256 fingerprint,
-  unless told to ignore them, which it logs as a warning. It
-  authenticates with key files or a password, which also answers a
-  keyboard-interactive password challenge, and asks the session's owner
-  for anything else. It feeds the shell's terminal output to the
-  session.
-- Version 1 configuration files (`version: 1`): sign-in through static
-  users, OIDC and trusted issuers, a connection registry whose
-  credentials name files or environment variables instead of holding
-  secrets, TLS, the debug listener, origins and ad-hoc targets. Unknown
-  keys are errors, and validation reports every problem with its line and
-  key path ([docs/configuration.md](docs/configuration.md)). A file
-  without `version` is read as v0, as before.
-- `internal/terminal`, the headless terminal emulator of a terminal
-  session: immutable, versioned screen snapshots that share unchanged
-  rows, and the diffs that bring a viewer's terminal from the screen it
-  last received to the current one, sending scrolled lines as line feeds
-  so the client's scrollback fills.
-- `internal/stream`, a viewer's connection in protocol v1: `welcome`,
-  then the client's input and views applied as they come, and frames at
-  the pace of the viewer's link. Small state never waits behind tiles,
-  and an input's effect goes ahead of motion already on the screen.
-  Graphical sessions get tiles in the codecs the viewer agreed to;
-  terminal sessions get the diff between the screens a viewer was sent,
-  so bulk output coalesces, an echo goes ahead of a status line or other
-  output already on the screen, and the terminal's answers to the
-  shell's queries reach the shell. A client's `close` with a code other
-  than `normal` is logged at info, since a browser's close frame
-  carries 1000 for most codes.
-- A native VNC backend for protocol v1, `internal/backend/vnc`, in pure
-  Go: RFB 3.3, 3.7 and 3.8 with the security types None and VNC
-  Authentication, asking the session's owner for a password the
-  configuration lacks, and the Raw, CopyRect, DesktopSize and Cursor
-  encodings in the framebuffer's own pixel layout. It asks for screen
-  updates only while a viewer can see the screen, sends keys, pointer,
-  wheel and Latin-1 clipboard text, and reads the server's clipboard as
-  UTF-8 when it is valid UTF-8. It checks every length the server sends
-  before it reads or allocates, resizes the screen at most once an
-  update and ten times a second, and bounds its queued input by bytes.
-- The native VNC backend decodes Tight, ZRLE and Hextile, and asks for
-  them in that order before Raw. Tight stays lossless, since the backend
-  asks for no JPEG quality, but JPEG and the gradient filter are decoded
-  when a server sends them. JPEG must be sequential (baseline or
-  extended), with a scan for each component and at most 65536 pixels, as
-  TigerVNC, libvncserver and QEMU send it. Compressed lengths, palettes
-  and runs are checked before anything is read or allocated, a
-  rectangle's zlib data is inflated only as far as its pixels need, and
-  an update may draw at most four times the screen's pixels. The fuzz
-  corpus holds sessions recorded from x11vnc and TigerVNC.
-- RFB extensions in the native VNC backend: VeNCrypt with an X.509
-  certificate and Plain, None or VNC Authentication inside TLS, asking
-  the owner for a username or password the configuration lacks;
-  ExtendedDesktopSize, so that a `Resize` resizes the remote screen,
-  except to a size the server refused, or at all once it prohibits
-  resizing; continuous updates with Fence, paused while nobody can
-  see; QEMU extended key events with physical key codes; Extended
-  Clipboard in UTF-8 both ways; and LastRect. The server's certificate
-  must chain to the system's roots or a configured CA and name the
-  server, or be pinned by its SHA-256 fingerprint; an insecure mode
-  accepts any with a warning. The backend prefers VeNCrypt whenever a
-  server offers it and fails closed, so a server with a self-signed
-  certificate that VNC Authentication reached before is refused, with
-  the fingerprint to pin in the error. VeNCrypt's anonymous TLS
-  subtypes are not supported, so a server whose VeNCrypt offers only
-  those, or Plain in the clear, is refused even if it offers VNC
-  Authentication too. Cut text from the server allocates about
-  three times the text kept, down from seven. An integration test runs
-  against TigerVNC (`docker/demo/tigervnc`) in a container of its own.
-- Apple Remote Desktop authentication (security type 30) in the native
-  VNC backend, so that it can log in to macOS Screen Sharing as a user
-  of the Mac, but only when the backend's `vnc.Config.ARD` allows it:
-  its key exchange authenticates no server, so anyone between Occamy and
-  the Mac can read the account's password, or, with `ARD` set, strip
-  VeNCrypt from any server's offer to get it. A connection's `ard: true`
-  sets it (below). A server that offers only type 30
-  otherwise fails with an error that names the setting. The
-  server's key length, prime, generator and public key are checked
-  before anything else, a username or password longer than 63 bytes is
-  refused rather than cut short, and the owner is asked for what the
-  configuration lacks. It has not yet been checked against a Mac. The
-  VNC integration tests remove only images and containers named for a
-  run bare or under `localhost/`, never one pulled from a registry.
-- The codec measurement of the graphics pipeline
-  ([docs/benchmarks/codecs.md](docs/benchmarks/codecs.md)): a corpus of
-  13 frames recorded from the bench desktop by `make corpus`, and
-  `bench/codecs`, a module of its own that `make codecs` runs, which
-  compares palette or raw pixels with deflate, PNG, QOI, lossless and
-  lossy WebP and JPEG on them for size, time and SSIM. It picks deflate
-  for lossless tiles, 64-pixel tiles, RGBA pixels, and WebP for lossy
-  tiles with JPEG as the fallback.
-- The codecs of the graphics pipeline. `internal/encoder` encodes a tile
-  of up to 256 colours losslessly, in deflate over a palette, and one of
-  more in lossy WebP, or in JPEG for a client that lists JPEG but not
-  WebP, in pure Go with gen2brain/vpx and gen2brain/jpegn; adjacent
-  lossy tiles share one message. `internal/stream` sends each viewer's
-  tiles and cursor in the codecs it agreed to, cursors with straight
-  alpha. `internal/codec` holds the deflate container and raw pixels
-  both ways, with the standard library only, for clients to decode with.
-  [docs/protocol.md](docs/protocol.md) fixes the deflate container's
-  layout, with alpha for cursors, and the most a receiver inflates, and
-  `protocol/testdata/codecs.json` holds a payload of each codec occamyd
-  sends and deflate payloads a client must refuse. The image's
-  `licenses/` carries vpx's, jpegn's and jpegli's notices.
-- Scroll detection in the graphics pipeline. Each viewer's writer keeps
-  a shadow of the screen its client shows. It finds the changed regions
-  that client already shows elsewhere, moved up or down, by xxh3-64 row
-  hashes and a pixel-for-pixel check, and sends a `copy-rect` for them
-  with tiles only for what the copy leaves. On the recorded scrolling
-  text this is 5.0 KiB a frame against 58.5, in a seventh of the encode
-  time ([docs/benchmarks/scroll.md](docs/benchmarks/scroll.md)). A
-  viewer that skipped frames, was hidden or has a viewport gets copies
-  from what it has. A wheel's scroll counts as its input's effect. A
-  copy completes a tile only at the pacer's current quality or above, so
-  lossy pixels drawn at a lower quality are sent again as they would be
-  without it. A frame searches at most 2h+3 runs for h copies found, so
-  motion beside a scroll costs a few runs. The shadow costs about 4 bytes
-  a pixel a viewer: 3.3 MiB at 1024×768, 8.5 MiB at 1080p and 33.5 MiB at
-  4K. `stream.Config.NoScroll` turns it off. The image's `licenses/`
-  carries the notices of zeebo/xxh3 and of klauspost/cpuid, which it
-  links into amd64 builds, and `scripts/third-party-licenses.sh` lists
-  both architectures of every release platform.
-- Refinement in the graphics pipeline. Each viewer's writer keeps a heat
-  per tile, which halves each refine delay, 150 ms at the least, of the
-  writer's time between frames: a tile that changes more often than the
-  refine delay is in
-  motion, and goes at the pacer's lowest quality, and lossy if it has 17
-  to 256 colours; one that changes less often goes at its final quality.
-  An input's effect is never in motion, and one the search finds at the
-  quality it needs is not sent again. A still lossy tile goes at the
-  lowest quality, up to the pacer's, at which each tile's SSIM reaches
-  0.91 (`encoder.StillSSIM`). Once a tile has been still for 300 ms
-  (`stream.Config.RefineDelay`), background frames send it again: exact
-  if it has up to 256 colours, at the SSIM's quality if it has more.
-  Refinement goes only while nothing else is to be sent and no frame
-  awaits an ack, a tile a message within the pacer's 5 ms of bytes, and
-  gives way to an input before each message, and to a change after the
-  first tile it tries. A copy carries the goal of the pixels it moves,
-  and a tile searched while the link held the quality below what the
-  client has is raised once it recovers. On the recorded scenes the plasma takes 13.8 KiB a frame against
-  392.4, the dragged window 5.2 against 30.6 and 17.9 KiB of refinement
-  once still, and the photograph shown once 121.8 against 150.8, under
-  G6's 139 ([docs/benchmarks/refinement.md](docs/benchmarks/refinement.md)).
-  `stream.Config.NoRefine` turns refinement off, and motion with it.
-- A tile cache in the graphics pipeline. The Go client and the web
-  client's protocol core offer the `cached` codec and 1024 cache slots
-  by default (`client.Options.CacheSlots` and `NoCache`, the web core's
-  `cacheSlots`), and keep in each slot the tile the server stores there,
-  16 KiB at most. occamyd offers 1024 slots (`stream.Config.NoCache`
-  turns the cache off), mirrors each client's slots by the xxh3-128 hash
-  of the tile each holds, under a secret seed drawn for each client so
-  that a remote host cannot draw two tiles that hash alike, stores a
-  tile it sends alone and exactly in the slot used least recently once
-  the message is written, and sends a tile whose content a slot holds as
-  a 23-byte `cached` tile of that slot. Neither client starts a
-  graphical session whose only codec in common is `cached`. On the recorded scenes
-  a window switched back and forth over the desktop takes 9.4 KiB a
-  frame against 79.7, and an eighth of the encode time; no scene takes
-  more ([docs/benchmarks/tile-cache.md](docs/benchmarks/tile-cache.md)).
-  The mirror costs 70 KiB a viewer. `protocol/testdata/cache.json`
-  records a session for clients to replay. Protocol v1: a tile that
-  names a slot covers at most 4096 pixels (`protocol.MaxCachedPixels`);
-  no server had named one before.
-- An encode cache and workers in the graphics pipeline. The viewers of a
-  session whose encoders send in the same codecs share the session's
-  encodings, made once by whichever viewer or worker asks first: a
-  tile's, by its version and whether it moves, and a run of lossy
-  tiles', by its tiles' versions, its quality and its lowest quality,
-  refinement's searches among them; 32 MiB a session at most, the oldest
-  going first, with no bound across sessions, and a run's encodings at
-  each quality kept until the budget takes them. Once a writer has a
-  tile to encode itself, it hands the rows after its own to one of the
-  session's workers, which asks for another each time it begins an
-  encoding, up to two, or half the cores below four; a frame whose tiles
-  go cached wakes none, and the workers drop what is left once the frame
-  is sent. A worker's job that panics is logged, and the encoding it was
-  making is made again by the next to ask. A session's searches start
-  where its last ended, whichever encoder made it. On the recorded
-  scenes every scene that encodes reaches its viewers in 38 to 56 % less
-  time, a photograph shown once in 44 ms against 96, and four viewers
-  take 32 to 58 % less CPU. One viewer pays 9 to 21 % more CPU on the
-  scenes that encode, the repeated window switches among them; the drag
-  pays 2 %, and the browser page shown once is the exception, at 6 %
-  less. The scenes whose frames come from the tile cache are unchanged,
-  and a saturated host was not measured
-  ([docs/benchmarks/encode-cache.md](docs/benchmarks/encode-cache.md)).
-  `stream.Config.NoShare` turns both off, `EncodeWorkers` sets the
-  workers, none if negative, and `EncodeCacheBytes` the budget; occamyd
-  sets none of them, so it always runs the cache and two workers, with
-  no switch to turn them off yet: a trade of CPU for latency. Nothing
-  changes on the wire.
-- `encoder.Encoder.Still` gallops: past three steps from where its
-  search starts, it goes two steps, four and so on, and halves the gap
-  it finds, so that a search far from its start, as an encoder's first
-  on a page of text, takes 7 tries rather than 18. `Hint`, `SetHint` and
-  `Tries` expose where its next search starts and what its searches
-  cost.
-- `occamyd` serves a v1 file: `GET /healthz`, `POST /api/v1/auth/token`
-  (static users sign in with a password for an access token), TLS when
-  `tls.cert` and `tls.key` are set, expvar and pprof on the debug
-  listener when `debug.address` is set, and the v0 routes with
-  `legacy_v0: true`. API v1 errors share one JSON shape,
-  `{"error":{"code":"…","message":"…"}}`. SIGINT and SIGTERM drain
-  requests in flight for up to 5 s, then cut what is left with a
-  warning and exit with status 0; a second signal stops occamyd at once.
-  `debug.address` must not share a port with `listen`, counting a
-  wildcard host and `localhost`. A `version` merged in with `<<` counts,
-  and one outside the file's first YAML document is an error. A v0 file
-  is served as before.
-- `occamyd` serves sessions and streams from a v1 file.
-  `GET /api/v1/connections` lists the connections the caller may open.
-  `POST /api/v1/sessions` opens a session on one, or on an ad-hoc target
-  that `adhoc_allowlist` covers when `allow_adhoc_targets` is on, and
-  `GET` and `DELETE /api/v1/sessions/{id}` and
-  `POST /api/v1/sessions/{id}/shares` read, close and share it for its
-  owner. `GET /api/v1/connections/{id}/stream` opens a session and
-  streams it in one request, and `GET /api/v1/sessions/{id}/stream`
-  joins a running one, both as protocol v1 WebSockets with the token in
-  a subprotocol, never in the URL, and `Origin` checked against
-  `origins`. Graphical streams offer `webp`, `jpeg`, `deflate` and
-  `raw`. ssh, vnc and rdp connections use the native backends, telnet
-  the guacd bridge, and vnc and rdp connections the guacd bridge only
-  when they set `backend: guacd` (below). ssh connections need `host_keys` or
-  `insecure_ignore_host_key: true`. vnc connections take a `username`
-  for VeNCrypt's Plain, and a `tls` block for the server's certificate:
-  a CA file, pins by fingerprint, or, alone, an insecure mode for demos. A
-  session belongs to a subject of the issuer that signed its owner's
-  token, and of where the user signed in, and a trusted issuer may not
-  name a static user, in any case or normal form, unless its
-  `link_static_users` is on, nor use a subject that OIDC sign-in
-  would refuse. Every token names its user, and a trusted issuer's
-  session token, of any role, joins only its own users' sessions, or
-  a static user's when it is linked. A trusted issuer's `groups` count
-  only for the groups in its `allowed_groups`. A panic while handling
-  a client's message, in a stream's reader or a session's backend, ends
-  that stream or session with `internal-error` and is logged, rather
-  than ending occamyd. A viewer that acknowledges no frame, or takes
-  no message, for `streams.viewer_timeout` (30 s) gets the new
-  `close` `too-slow` 4008, and a hidden viewer of a terminal no
-  longer keeps the screen it was last sent, though one that may type
-  still keeps the screen of its last input. A static user's name follows the
-  same rule as an OIDC subject. An OIDC user
-  linked to a static user owns the static user's sessions, and occamyd's
-  own stream tokens carry `idp`. `limits` bounds the sessions occamyd
-  runs (1000) and a user owns (10), and the viewers (50) and unexpired
-  shares (100) of a session.
-  An ad-hoc target is allowed only on its protocol's port or the ports
-  its allowlist entry names, never on a loopback, link-local,
-  unspecified or multicast address, a cloud's metadata service, guacd,
-  or occamyd's own listeners unless an entry is that address,
-  and it takes only the display's `guacd.params`. `guacd.params`
-  refuses any parameter whose name holds `password`, `passphrase`,
-  `private-key` or `secret` in any case, but for a prompt's pattern
-  such as telnet's `password-regex`. A terminal is at most 1000 by 500 cells,
-  and a screen 8192 pixels a side.
-- Sign-in through an OpenID Connect provider, with `auth.oidc`: the
-  authorization code flow with PKCE, the ID token's issuer, audience,
-  expiry and signature checked by go-oidc with asymmetric algorithms
-  only, and its nonce and `azp` by occamyd, and the user and groups
-  taken from `subject_claim` and `groups_claim`. The browser goes back
-  to one of `auth.oidc.return_urls` with a one-time code in the
-  fragment, which the client exchanges at
-  `POST /api/v1/auth/oidc/token`, with its own PKCE verifier, for an
-  access token, so the token never appears in a URL. An OIDC subject
-  that names a static user, in any case or Unicode normal form, is
-  refused unless `link_static_users` links the two, and one with
-  characters that render as nothing is refused always.
-  `require_known_users` admits only the users whom an allow list names,
-  exactly, or by group. occamyd follows no redirect from the provider,
-  checks RFC 9207's `iss` on every answer to the callback, and a
-  provider that is down fails OIDC sign-ins, not occamyd's start
-  ([docs/configuration.md](docs/configuration.md#signing-in-through-oidc)).
-- Access tokens name where the user signed in, in `idp`: `local` for a
-  static user, `oidc` through OIDC. The sign-in's log line names it too.
-- The image carries the license, notice and patent files of the Go
-  code compiled into occamyd, in `/occamy/licenses/THIRD_PARTY_LICENSES`,
-  as release archives do. `scripts/third-party-licenses.sh` also takes
-  those of compiled packages that have their own, such as go-jose's
-  fork of `encoding/json`, and fails, writing nothing, when `go list`
-  fails, instead of writing the standard library's license alone.
-- `changkun.de/x/occamy/client`, a public Go client of protocol v1 in
-  pure Go, for tests, tools and the Swift client's export layer. `Dial`
-  performs the handshake over a WebSocket, and `Next` delivers frames
-  decoded into a client framebuffer with their dirty rectangles,
-  terminal bytes untouched, and the small state, ending with the close
-  code. A frame is applied as `Next` delivers it and acknowledged when
-  the caller asks for the next event, so a slow caller holds the server
-  back instead of queueing frames, and input never waits for `Next`.
-  The frame shown and not yet acknowledged counts against the frame
-  window, and each queued message against the backlog at its size and
-  512 bytes more. Tiles of plugged codecs decode in parallel. A
-  `welcome` the client cannot show, with no codec or terminal level in
-  common, is refused with a `*RefusedError` that names the session the
-  server made, so that the caller can end it. No API stability promise
-  until the release candidate.
-- The browser's client of protocol v1, a TypeScript library in
-  `client/occamy-web/src/protocol` that depends on no framework: the
-  handshake over a WebSocket, deflate through `DecompressionStream`,
-  WebP and JPEG through `createImageBitmap`, decoding in Workers, whole
-  frames presented to a canvas, keyboard input as keysyms with USB HID
-  usages, pointer, wheel, clipboard and close codes. It bounds what a
-  server can make it hold as the Go client does, feeds the inflater a
-  slice at a time so that Chrome cannot inflate a bomb ahead of the
-  cap, decodes images without their EXIF, which browsers apply
-  whatever they are told, fails a session whose decoding Worker dies or
-  falls silent, and in a hidden page acknowledges frames as they
-  arrive. It runs every golden vector of `protocol/testdata` under
-  vitest, and an interop test against occamyd's stream code, built with
-  the race detector, in the `web` job. The web client runs on it
-  (specs/009).
-- The web client, rebuilt in React on the browser's client of protocol
-  v1 (specs/009). It speaks API v1 alone: sign-in with a static user's
-  password or through OIDC with PKCE, the connections the user may
-  open, and a session on protocol v1, a graphical one on a canvas scaled
-  to the window and a terminal one in xterm.js. The owner resizes the
-  remote with the window, asking for no size its hello asked for,
-  answers the remote's credential prompts, shares the session through a
-  link as a viewer or read-only, and ends it, signing in again over the
-  session when the sign-in has expired;
-  a reload over the owner's session signs in again and joins it, within
-  occamyd's grace, or lists the connections if the user would rather;
-  an End or share that waited for the sign-in is left to occamyd, which
-  ends or shares only its owner's session: one who signs in as another
-  user is told the session has ended or is not theirs. A call to occamyd
-  gives up after 30 s, and End shows that it waits, with a way back to
-  the connections, and takes no second press meanwhile;
-  the clipboard goes both ways as the role allows, and reaches the local
-  clipboard on its own only for a role that gives input, so a read-only
-  viewer copies it from the clipboard panel, which takes text sent for
-  the remote's and keeps only what was typed since, and says when text
-  is too large to send; a hidden page tells occamyd so and keeps
-  acknowledging frames; and the end of a session says why it ended, a
-  takeover by the owner's newer stream too. Its build writes the
-  licenses of the packages it bundles to `dist/THIRD_PARTY_LICENSES.md`,
-  which the image ships in `licenses/web/` and the web client archive in
-  `dist/`.
-- `web_client` in a v1 file: the directory of the built web client,
-  which occamyd serves under `/static/` with a Content-Security-Policy
-  that keeps the page to its own origin, without directory listings or
-  symbolic links out of the directory, and with its hashed `assets/`
-  cached for a year; a v0 file's `client: true` serves `/static/` the
-  same way. Validation refuses a `web_client` that is a file or that
-  occamyd cannot read; one not built yet is a warning. The demo stack's
-  `occamy-v1` serves the image's at http://localhost:5637/static/, and
-  opens the demo SSH server as the connection `ssh` through the native
-  SSH backend.
-- `internal/rdp`, the pure-Go RDP client of the RDP spike: TLS with the
-  VNC backend's certificate policy, NLA through CredSSP 5 or later with
-  NTLMv2 of its own, offered by default, the connection sequence, bitmap
-  updates in interleaved RLE and planar, pointer updates, and keyboard
-  and mouse input. It bounds the desktop, resizes and the rate of
-  decoding a server can ask for. It is tested live against xrdp under
-  the `rdp_integration` build tag, which starts a container, and by
-  replaying xrdp's recorded PDUs; NLA is not yet tested against Windows.
-- `internal/backend/rdp`, the native RDP backend's first phase
-  ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)),
-  on `internal/rdp`: NLA by default, or TLS, with the owner asked for
-  the credentials NLA needs and the configuration lacks; no routing
-  cookie, which names the user before TLS, unless `RoutingCookie` asks
-  for one for a load balancer; bitmap updates and the pointer drawn
-  into the session, pointer updates paced like bitmaps, a shape before
-  it is decoded; keys by physical code, with Control and Pause sent as
-  Break and the Power key dropped, text as Unicode keyboard events, and
-  the pointer and wheels, batched into input PDUs from a bounded queue
-  in writes of at most 1,024 events; Suppress Output while nobody can
-  see. A server's reason for ending the session decides how it ended,
-  even when a write fails as it hangs up. occamyd serves rdp with it
-  by default (below). The VNC and RDP backends share one USB HID to
-  scan code table, `internal/keymap`.
-- A `backend` key on each v1 connection, `native` or `guacd`, and
-  `adhoc_backends`, which picks the backend of ad-hoc targets by
-  protocol. A protocol defaults to `native` wherever a native backend
-  exists, so vnc and rdp connections and ad-hoc vnc and rdp targets
-  default to occamyd's own VNC and RDP clients, and `backend: guacd`
-  (or `adhoc_backends: {vnc: guacd}`) is an opt-in fallback through
-  guacd, kept as the benchmark's baseline until the benchmark shows
-  native at least 10x better. ssh is always native, and telnet always
-  goes through guacd, and the session's state names the backend that
-  serves it. guacd would not check a VeNCrypt
-  certificate as `tls` says, so a vnc connection with `tls` cannot set
-  `backend: guacd`, and a file that does fails to load, naming the
-  key. Without `tls`, the native backend checks a VeNCrypt server's
-  certificate against the system's roots. No release served v1 vnc or
-  rdp connections. A native vnc session asks the
-  server for the owner's size from the stream's `hello`, on a
-  connection's stream as on a session's, and a resize that reaches the
-  backend before it runs is no longer dropped. A size beyond the
-  backend's limits, such as a hello's 8192×8192, which is more than
-  2^25 pixels, is not asked for: the server keeps its size.
-- `ard: true` on a vnc connection on the native backend allows Apple
-  Remote Desktop authentication, for macOS Screen Sharing. It is
-  refused with `backend: guacd` and with a `tls` that requires TLS,
-  and the error for a Mac that offers only ARD names the key on the
-  connection.
-  [docs/configuration.md](docs/configuration.md#apple-remote-desktop-ard)
-  describes the risk: anyone in between can read the Mac account's
-  whole password.
-- `GET /api/v1/auth/methods` says whether occamyd has OIDC, for a
-  sign-in page, with no token and a 200 either way.
-- [docs/api.md](docs/api.md), the reference of API v1: every route with
-  its tokens, requests, replies, errors and limits, ad-hoc targets,
-  shares, the stream upgrades and the OIDC routes. A test fails when a
-  route has no section in it, or a section names no route; routes are
-  added only through the list that test reads, from which each
-  listener's mux is built.
-- API v1 refuses, with 400 `bad_request`, a JSON body that names a
-  field twice, at any depth, or names one in a case other than its
-  own, such as `Connection` for `connection`. encoding/json takes the
-  last of two and matches names in any case, so a proxy in front of
-  occamyd that reads the first, or matches names exactly, would have
-  seen a different request. A body nests at most 32 deep. The
-  refusals of `GET /api/v1/auth/oidc/login` carry
-  `Cache-Control: no-store`, as its redirects do.
-- `internal/backend/vnc/vnctest`, a fake RFB server for tests outside
-  the backend, which counts the credentials clients send, and tests
-  that drive native VNC sessions through occamyd's routes with the Go
-  client: credentials stored and prompted, the screen, input, resizes,
-  clipboard both ways, the cursor, visibility, the end reasons, the
-  `tls` policy, which sends no credential to a server it refuses, and
-  ad-hoc targets by address and by name, dialled at the address that
-  was checked.
-- The demo stack runs `occamy-v1` next to `occamy`, on port 5637, with
-  the v1 file `docker/occamy-v1.yaml`: the demo VNC and RDP servers
-  through the native backends and through guacd, which `make e2e`
-  streams with the Go client. `OCCAMY_IMAGE`, `OCCAMY_PORT` and `OCCAMY_V1_PORT` move a
-  second stack aside on a shared host, and `make e2e` follows the
-  last two.
-- TigerVNC in the demo stack, beside x11vnc, and the guacd bridge's
-  parity matrix for VNC: `TestVNCParity` runs authentication, resize,
-  clipboard both ways, the cursor, keyboard layouts with AltGr and dead
-  keys, text input, sharing roles and reconnect on both servers,
-  through the native backend and through guacd, and fails on any cell
-  that differs from the matrix in the guacd bridge's spec. The demo
-  desktops report what reaches them, typed lines and clipboard text,
-  over the session's clipboard. The two TigerVNC test images became
-  one, `docker/demo/tigervnc`, which the integration tests build too.
-  x11vnc hangs now and then after an X error as a client connects; the
-  demo x11vnc runs under a watchdog that kills it when it reports an X
-  error or stops accepting connections, and starts it again. The matrix
-  tries a guacd cell up to three times, and a native cell that cannot
-  reach the desktop only while guacd cannot reach it either, and shows
-  the try at which a cell settled. A listed failure must fail with its
-  own error, and a unit test keeps the spec's matrix in step with the
-  suite. The screen row waits, after the frame that acknowledges its
-  input, for the desktop, two opaque colours: through guacd the first
-  such frame can still be black, and a screen of black and pixels not
-  drawn yet no longer passes for the desktop.
-- A soak, `make soak`: sessions through the demo stack's `occamy-v1`
-  for hours, while `TestSoak` samples `occamyd`'s goroutines, live heap
-  and open files from its debug listener and fails on growth.
-  `/debug/vars` publishes `goroutines` and `fds`. A v1 file's
-  `debug.address_env` takes the debug listener's address from an
-  environment variable, and leaves the listener off while it is unset
-  or empty, which `occamyd` logs at start with the variable's name.
-- The native RDP backend's clipboard, the first part of its second
-  phase: `internal/rdp` joins static virtual channels and reassembles
-  their chunks within a bound per channel, and carries text both ways
-  on the clipboard channel (CLIPRDR), CF_UNICODETEXT or CF_TEXT, at
-  most 4 MiB of UTF-8, as `Config.Clipboard` allows. The backend copies
-  and pastes it, a paste set before the keys that follow it, unless
-  `DisableCopy` or `DisablePaste` stops a direction, as guacd's
-  `disable-copy` and `disable-paste` do. The Format List Responses the
-  client owes are a count, written 64 at a time as fast as the server
-  reads, so that neither a burst of lists nor copies during a long
-  paste end the session, and a flood costs no memory; a server that
-  leaves more than 8 of its data requests unanswered ends it.
-  `rdptest` accepts NLA through CredSSP with NTLMv2, so that the
-  backend's NLA path, prompted credentials included, runs end to end in
-  tests.
-- The native RDP backend's resize, the second part of its second
-  phase: `internal/rdp` speaks DRDYNVC, version 2 at most, and accepts
-  the Display Control channel, through which `RequestSize` asks the
-  server for a desktop size within the area it takes: the newest size,
-  at most one every half second, and again every two seconds, up to
-  eight times, until the desktop has it, since xrdp ignores a size
-  while its login is in progress. A size asked for back to the
-  desktop's own before the server applied the one before it is kept
-  while the server may yet apply that one. The backend asks for any
-  interactive viewer's `Resize`; a server without Display Control keeps
-  its size, which viewers scale. After a reactivation the client tells
-  a server it had asked to suppress its output to suppress it again,
-  unless a viewer has asked for output since. A dynamic channel id of
-  size code 3 ends the session, and once the channel writer fails, a
-  server that the client then owes too many answers ends it with the
-  write's error.
-- occamyd serves rdp connections and ad-hoc rdp targets with the native
-  RDP backend by default, with `backend: guacd` (or
-  `adhoc_backends: {rdp: guacd}`) as the fallback through guacd. A
-  native rdp connection takes `tls`, the certificate policy of vnc's,
-  checked on every connection since the backend always runs TLS, with
-  pins of RDP certificates, and `security`, the mode as guacd names it:
-  `nla` by default, `nla-ext`, `tls` or `any`. Both are refused with
-  `backend: guacd`, which reads `guacd.params.rdp` instead. xrdp speaks
-  no NLA, and a server that selects standard RDP security when offered
-  NLA alone fails the session with an error that names the key to set,
-  `security: tls on connection "…"`. A `username` of the form
-  `DOMAIN\user`, with both parts, logs on to the domain, as does one the
-  owner gives at the prompt with the domain left empty, and `\user` logs
-  on as the user alone. The owner, and only the owner, is asked for the
-  credentials NLA needs that the connection does not store; the hello's
-  size is asked for within an RDP desktop's, 200 to 8192 pixels a side
-  and 2^25 in all; clipboard text reaches the server from the owner and
-  interactive viewers and every viewer from the server; a logoff ends
-  the session with `remote-ended`, and a refused logon or certificate
-  with `backend-failed`. occamyd warns when it loads the file of the
-  `guacd.params` that no session reads, for every protocol, and of each
-  connection whose `security: tls` or `any` comes with
-  `tls.insecure_skip_verify`. guacd's `disable-copy`, `disable-paste`
-  and recording parameters have no native equivalent yet, so a
-  connection that needs them keeps `backend: guacd`. Tests drive native
-  RDP sessions through occamyd's routes against `rdptest`, and the demo
-  stack serves its xrdp server as `rdp-native` (`security: tls`) and
-  `rdp-guacd`, both streamed by `make e2e`, which also takes
-  `rdp-native` through the clipboard both ways, answered by a clipboard
-  echo in the demo image, a resize, a viewer joined by a share, and the
-  owner leaving and coming back. The native RDP backend is
-  not yet verified against Windows; it speaks RDP's graphics pipeline
-  as the entries below describe
-  ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)).
-- The graphics pipeline (GFX) in `internal/rdp`, the first part of the
-  native RDP backend's third phase, behind `Config.GFX`, which the
-  backend sets since the RemoteFX entry below: the capability exchange
-  over DRDYNVC, ZGFX decompression with its 2.5 MB history, surfaces
-  within a bound on their pixels composed onto the desktop, at most 64
-  of them mapped, solid fills, copies within and between surfaces (a
-  copy within a surface goes to viewers as a copy where no other surface
-  covers it and the output shows the surface's own pixels, which the
-  surfaces under one deleted, replaced or moved, or under a bitmap
-  update, draw again to keep), uncompressed and planar bitmaps (AYCoCg,
-  colour loss and chroma subsampling included, planar within a bitmap
-  update's bound), and frame acknowledgements, bounded, which the server
-  waits for. Decompression's growth, each copied point, each redraw
-  after a resize, and every cell that the surfaces draw again where a
-  surface left the output or a bitmap update drew under them are charged
-  to the decoding rate. A server that does not open the channel, or
-  closes it, draws with bitmap updates. RemoteFX and RemoteFX
-  Progressive, with GFX on by default, came next (below); ClearCodec and
-  the cache come after. Against xrdp 0.10.1 the channel, the
-  capabilities, a reset to the size the desktop has, ZGFX's stored
-  segments, a surface, planar bitmaps of xrdp's first, black screen, and
-  frame acknowledgements (a frame a key) ran live; that the
-  acknowledgements pace xrdp was not checked against a run without them.
-  Compressed ZGFX, planar's AYCoCg, solid fills, surface-to-surface
-  copies and uncompressed bitmaps, which xrdp did not send, are checked
-  against the specification's examples, the tests' own compressor and
-  encoder, and `rdptest` only, until a Windows host checks them.
-- RemoteFX and RemoteFX Progressive in `internal/rdp`'s graphics
-  pipeline, and GFX on by default in the native RDP backend, with
-  `connections[].disable_gfx` to turn it off (refused with
-  `backend: guacd`, which takes `guacd.params.rdp.disable-gfx`). The
-  decoder is pure Go in integer arithmetic: RLGR1 and RLGR3, the 11.5
-  fixed point of [MS-RDPRFX] 4.2.4.3, the reduce-extrapolate
-  transform, first passes, difference tiles and upgrades with SRL and
-  raw bits, and tiles drawn within their region's rectangles at its
-  end. A surface's tiles keep their coefficients until the surface is
-  deleted, as [MS-RDPEGFX] 3.3.1.3 requires, and their signs until a
-  full pass (3.3.1.2). The client keeps no state of a codec context,
-  as FreeRDP keeps none: contexts may interleave, a W2S2 of any
-  context applies to the surface's tiles, and a context's delete ends
-  nothing, so a difference tile or an upgrade after it applies. An
-  upgrade the client cannot apply, of a tile with no first pass or in
-  the other transform, is skipped and counted, with the tile's later
-  upgrades until its next first pass, rather than ending the session.
-  A frame is of its W2S2's stream alone, and a region outside it is
-  ignored and counted. The tiles are at most twice those of the
-  largest desktop the session had (at least 1,024), 576 MiB at worst,
-  and malformed input ends the session. The decoding rate is priced by
-  measured cost, a RemoteFX tile's pixel 7 units and a planar one 2,
-  at 512 Mi units a second: about one core of an Apple M5 Pro for a
-  session's real content, and a session's one reader holds it to a
-  core whatever the server sends. Each block of a RemoteFX or
-  progressive message, and each rectangle and quantization table of
-  their regions and tile sets, is charged 8 units, and each GFX PDU
-  32, and a message counts what it applies, skips and decodes at its
-  end, so that a flood of headers gets at most about a core.
-  A session's first screen does not wait, and full-screen RemoteFX
-  Progressive at 1920 × 1080 and 30 frames a second takes 82% of the
-  rate; before, the rate held it to 2.3 frames a second. At the first
-  ClearCodec, cache or other GFX PDU that it skips, a session logs a
-  warning naming `disable_gfx: true` and `adhoc_backends: {rdp: guacd}`.
-  The decoder matches [MS-RDPRFX] 4.2.4's tile exactly through the
-  third level's inverse, its components within 2/32 of a level and its
-  pixels within 1, and [MS-RDPEGFX] 4.1.2's progressive example
-  exactly, whose SRL bytes in 4.1.2.1.4 leave out a value its own
-  decode has. Against
-  xrdp 0.10.1, which sends RemoteFX Progressive with the
-  reduce-extrapolate transform and difference tiles, the session's
-  wallpaper decodes within 4 levels per channel and the probe's swatch
-  within 6. ClearCodec and the bitmap cache, which Windows
-  servers send, are still counted and skipped; `disable_gfx: true`
-  falls back to bitmap updates
-  ([native-rdp-backend](specs/008-native-architecture/native-rdp-backend.md)).
-- A native Kubernetes backend, `internal/backend/kubernetes`, in pure
-  Go and without client-go: a `kubernetes` connection opens a terminal
-  in a pod's container through the API server's `pods/exec` (or
-  `pods/attach`), over the `v5.channel.k8s.io` WebSocket subprotocol
-  with `v4.channel.k8s.io` as fallback. It authenticates with a bearer
-  token (`token_file`, `token_env` or a prompt) or a client
-  certificate, sends the token only after the API server's certificate
-  is checked against `tls` (the system's roots, `ca_file` or `pins`),
-  never logs it, and refuses names that are not Kubernetes's. It has no
-  guacd backend and no ad-hoc targets.
+- Version 1 configuration files (`version: 1`): sign-in for static
+  users, through OIDC and from trusted issuers; a registry of
+  connections with allow lists and credentials from files, environment
+  variables or the session's owner; TLS; limits; and a debug listener
+  ([docs/configuration.md](docs/configuration.md)). They serve API v1
+  ([docs/api.md](docs/api.md)) and protocol v1, a binary protocol over
+  WebSocket ([docs/protocol.md](docs/protocol.md)), with the public Go
+  packages `changkun.de/x/occamy/protocol` and
+  `changkun.de/x/occamy/client`.
+- Sessions with one owner and viewers who may type or only watch, by
+  share link. The owner can come back within 60 seconds. Each viewer is
+  paced to its own link, so a slow one does not hold back the others.
+  Tiles of few colours go lossless and others in WebP or JPEG,
+  scrolls go as copies, still tiles are refined, and clients cache tiles.
+- Native backends. VNC: RFB 3.3, 3.7 and 3.8, VNC Authentication, VeNCrypt
+  with X.509, Tight, ZRLE and Hextile, remote resizing, and Apple Remote
+  Desktop for macOS with `ard: true`. RDP: TLS and NLA, bitmaps and the
+  graphics pipeline (GFX) with RemoteFX and RemoteFX Progressive,
+  resizing, with `limits.decode_cores` bounding the decoding of all RDP
+  sessions. SSH: pinned host keys, a key file or a password. Kubernetes:
+  a terminal in a pod through `pods/exec` or `pods/attach`. VNC and RDP
+  carry clipboard text both ways.
+- A bridge to guacd 1.6 for telnet, and for vnc and rdp with `backend:
+  guacd` or, for ad-hoc targets, `adhoc_backends`.
+- The web client, rebuilt in React on protocol v1: sign-in with a
+  password or OIDC, a desktop on a canvas or a terminal in xterm.js,
+  resizing with the window, share links and a clipboard panel.
+- `occamy-v1` in the demo stack, at http://localhost:5637/static/ as
+  `demo` with the password `occamy`, with an XFCE desktop and test
+  servers natively and through guacd ([docs/try-it.md](docs/try-it.md)).
+  CI fuzzes every fuzz target nightly.
 
 ### Changed
 
-- The benchmark harness measures what the decisions of 2026-11-01
-  settled ([docs/benchmarks.md](docs/benchmarks.md#what-to-measure-again)
-  lists the baselines to measure again; no series has run yet):
-  - the scene stamps every frame of G3 to G5, and the harness counts the
-    distinct stamps it was shown, in both protocols, so a scene's frame
-    rate compares across them; a server's own frames stay in
-    `server_frames`;
-  - G7 ends on known content in both protocols, the wallpaper or the
-    shell's prompt, not on the first frame that drew;
-  - the probe's keys are jittered by up to one period of a 60 Hz screen,
-    so that no run sits at one phase of it;
-  - `v1-native-nogfx` and `v1-guacd-gfx` run RDP the other way from what
-    each side ships, beside the verdict's `v1-native` and `v1-guacd`,
-    with `gfx` and `verdict` in the results;
-  - every path to RDP asks for 32 bits per pixel;
-  - the bench desktop has the demo's `reconnectwm.sh`, so that xrdp's
-    channel server exiting does not add 10 s to G7 over RDP;
-  - a v1 frame that came while the reader waited for a 60 Hz tick counts
-    from when it was ready, `client.Frame.Ready`, which is new: such a
-    frame used to count from the tick, which put a floor of about
-    16.6 ms under G5's p95 that v0 did not pay;
-  - a scene with no readable stamp is an error, not a frame rate of 0;
-  - `-scenarios` refuses an ID it does not know, `G7` included, rather
-    than leave it out of the run;
-  - a scene ends once the screen shows the wallpaper: at N1 and N2 a v0
-    client that closed at once lost its Escape, and left the scene
-    running into G7.
-- The signing key's home is `/var/lib/occamy/signing.key` on a
-  persistent volume, so that tokens survive a restart. The runtime image
-  gives that directory to its `nonroot` user, the demo and bench stacks
-  keep the key there on the volume `occamy-v1-data` instead of a tmpfs
-  at `/run/occamy`, and
-  [docs/configuration.md](docs/configuration.md#sign-in-auth) says how to
-  set it up. `make stop` keeps the volume and `make clean` removes it.
-  On the first start after this change the demo stack makes a new key,
-  so sign in again once.
-- When `occamyd` cannot reach its signing key, it names the key, the
-  directory and the user it runs as, instead of a bare
-  `permission denied` or `is not readable`. It points to
-  [docs/configuration.md](docs/configuration.md#sign-in-auth), which has
-  the step for a host, Docker and podman, since a plain `chown` fails
-  again on rootless podman.
-- A v1 file that serves only v0 clients, with `legacy_v0: true` and no
-  `auth.users`, `auth.oidc` or `auth.trusted_issuers`, no longer starts,
-  since the v0 login signs nobody in to API v1. Add one of the three
-  (see Security below).
-- `occamyd -h` says what occamyd serves now, a v1 file through API v1
-  and a v0 file through the v0 routes, not "a modern guacamole protocol
-  based remote desktop proxy", and lists its flag on a line of its own
-  instead of after "Usage:". `.gitignore` ignores the `occamyd` that
-  `make compile` builds.
-- The demo stack's compose project is named `occamy` in
-  `docker/docker-compose.yaml`, so its containers are `occamy-<service>-1`.
-  It was named after the file's directory, `docker`, which every
-  other checkout and any other compose file in a `docker` directory
-  share. `make bench` and the harness's `-project` default to `occamy`
-  too. `COMPOSE_PROJECT_NAME` still names another project, with Docker
-  Compose and with podman-compose 1.4.0 or later. podman-compose 1.0.6
-  to 1.3.0 ignore it for the file's name, so under them `make stop` and
-  `make clean` act on the project `occamy` whatever it says, which on a
-  shared host may be someone else's stack; 1.0.3 and older read
-  neither and keep `docker`. A stack started before this change runs
-  under the project `docker`. If it is yours, remove it once, with its
-  `docker_tigervnc-ca` volume and the `docker-*` images it built,
-  before `make run` starts the new one, since both publish the same
-  ports: `(cd docker && podman compose -p docker down --remove-orphans
-  --volumes --rmi local)`, or `docker compose` for Docker. Only if it
-  is yours: other checkouts share the project `docker`.
-- `make build` tags the name and the tag of `OCCAMY_IMAGE`, the image
-  that the demo stack runs, when it is set, instead of overwriting
-  `occamy:latest`, which on a shared host another stack may run.
-  `IMAGE=` on its command line still names another image.
-- The README starts with v1: the demo stack and the web client first,
-  then a native build that serves a v1 file. The run instructions for
-  guacd and a v0 file, and the v0 token's connection parameters, move
-  to a short section on the released v0. The README's test command is
-  `go test -race ./...`, as CI runs it.
-- The plan for v1.0 (owner, 2026-10-31): it waits until the benchmark
-  shows native at least 10x better than guacd, and ships no guacd
-  fallback for a protocol still short of it; release candidates may
-  carry one. The gate is each scenario's target as defined, which may
-  fall short of 10x only where a documented bound outside Occamy makes
-  10x impossible, justified in `docs/benchmarks.md`
-  ([specs/008-native-architecture/benchmark.md](specs/008-native-architecture/benchmark.md#targets)).
-- Building occamyd needs Go 1.26.4 or later, which gen2brain/vpx and
-  gen2brain/jpegn require.
-- `make bench` builds occamyd's image from the working tree before
-  measuring it, instead of measuring whatever `occamy:latest` was.
 - The v0 routes moved from `/api/v1/login` and `/api/v1/connect` to
-  `/api/v0/login` and `/api/v0/connect`, leaving `/api/v1` to API v1.
-  The web client, the end-to-end tests and the benchmark use the new
-  paths; tokens, responses and close statuses are unchanged. occamyd
-  serves them with the standard library's `net/http`, golang-jwt v5 and
-  coder/websocket, so gin, gin-jwt and gorilla/websocket and their
-  indirect dependencies are gone from `go.mod`. `auth.jwt_alg` must be
-  HS256, HS384 or HS512, and `auth.jwt_secret` must not be empty.
-- Performance: `internal/rdp` takes the names it counts bitmaps under
-  from a table of constants instead of formatting them, so a bitmap no
-  longer allocates. A PDU of 64 bitmaps of 64×64 now makes 1 allocation
-  of 120 bytes instead of 129 allocations of 804 bytes. Its time is
-  unchanged within noise, because decoding dominates it.
+  `/api/v0/login` and `/api/v0/connect`, which a v0 file serves (the
+  login with `client: true`) and a v1 file with `legacy_v0: true`.
+  Tokens, responses and close statuses are unchanged. `auth.jwt_alg`
+  must be HS256, HS384 or HS512, and `auth.jwt_secret` must be set.
+- `conf.yaml`, in the image and the release archives too, ships
+  `mode: release`. It shipped `mode: debug`, which served `/debug/pprof`
+  without a token. A v0 file without `mode` still runs in debug mode.
+- `occamyd` serves a file with `version: 1` as v1, and one without as
+  v0. The image still starts with `conf.yaml`, a v0 file, so pass
+  `-conf` with a v1 file. A v1 file needs `auth.signing_key_file`: keep
+  it at `/var/lib/occamy/signing.key` on a volume, or everyone signs in
+  again after a new container
+  ([docs/configuration.md](docs/configuration.md#sign-in-auth)).
+- The web client needs a v1 file with `web_client`. A v0 file's
+  `client: true` still serves `/static/`, but the client cannot sign in.
+- In a v1 file, vnc and rdp use the native backends unless `backend:
+  guacd`. They read no `guacd.params`, check certificates against the
+  system's roots, `tls.ca_file` or `tls.pins`, and RDP asks for NLA
+  ([docs/configuration.md](docs/configuration.md#backends)).
+- The demo stack's compose project is `occamy`, not `docker`. Remove a
+  0.6.0 stack once, before `make run`: `(cd docker && podman compose -p
+  docker down --remove-orphans --volumes --rmi local)`, or `docker
+  compose` with Docker. It publishes on
+  the loopback interface, its debug routes are off unless `OCCAMY_DEBUG=1`,
+  and `make clean` removes only Occamy's own.
+- Building needs Go 1.26.4 or later, and the web client Node.js 22.13
+  or later on 22, 24, or 26 and later.
 
 ### Removed
 
-- The Vue web client, with its fork of guacamole-common-js
-  (`occamy.js`) and the fork's Apache LICENSE and NOTICE, element-plus,
-  vue-router and axios. The web client no longer speaks the v0 routes
-  or the Guacamole protocol, which occamyd still serves to other
-  clients until v1.0. A v0 file's `client: true` still serves
-  `/static/`, but the web client there needs a v1 file.
-
-### Fixed
-
-- The pointer over RDP showed as an arrow in a black square, on XFCE as
-  soon as it reached the panel. xorgxrdp sends a theme's cursor at
-  32 bits with an empty AND mask, so a clear pixel had neither alpha nor
-  an AND bit and decoded as opaque black. A 32-bit pointer that uses
-  alpha now takes its transparency from alpha alone. `TestDemoDesktop`
-  checks every shape that comes as the pointer crosses the panel.
-- Reloading in Firefox no longer loses the session. Firefox fires the
-  WebSocket's close, 1001 with no reason, before `pagehide`, and the web
-  client took that for occamyd shutting down: it forgot the session, so
-  the page signed in to the connection list, and occamyd ended the
-  session as `owner-left` 60 seconds later. occamyd says `server-shutdown`
-  with a `close` message first, so the client now takes a 1001 with no
-  `close` before it for a lost connection, whose session it keeps.
-- The web client's **Clipboard** panel no longer says "Sent to the
-  remote clipboard." for a terminal session, whose backends ignore the
-  text. The panel says that a terminal session has no remote clipboard
-  and points to the browser's paste, and the page no longer reads the
-  local clipboard for such a session when it gets focus.
-- The focus ring no longer covers the remote's first pixels. It sat on
-  the edge of a screen that fills the stage, 2 CSS pixels deep; the
-  focus now shows on the toolbar's lower edge.
-- Native RDP's ClientHello is no longer refused by Windows Server 2025,
-  which failed every NLA logon with
-  `rdp: CredSSP: remote error: tls: internal error`. Go's TLS client
-  offers neither `session_ticket` nor `psk_key_exchange_modes` without
-  a session cache, and over TLS 1.3 that server ends such a connection
-  just after the handshake. Each connection now has a cache of its own,
-  so TLS 1.3 stays and no connection can resume another's session,
-  which would skip the check of the server's certificate. Which of the
-  two extensions it needs is not known, nor what any other Windows
-  version does
-  ([rdp-strategy](specs/008-native-architecture/rdp-strategy.md) has
-  what was proven, and how). The fake server now refuses such a
-  ClientHello too. With this, native RDP logs on to a Windows Server
-  2025 CI runner over loopback, not a real deployment (#32 stays open),
-  and the keyboard and resize work. With GFX on, the default, the
-  screen stays nearly black until ClearCodec and the cache land, a
-  v1.0 blocker, so set `disable_gfx: true` for Windows hosts, with
-  which the desktop drew correctly. The clipboard fails both ways on
-  that server; the suspected cause, `CHANNEL_FLAG_SHOW_PROTOCOL`, is
-  unproven.
-- A session through guacd that shows nothing now fails, rather than
-  staying at "Connecting…". guacd's process for a connection hung once
-  in 128 connections on a very busy host, and only the session's idle
-  timer ended that, half an hour after the last input and with the
-  wrong reason. The guacd bridge now gives guacd 90 s from accepting
-  the connection, or from the owner's last answer to a prompt, for the
-  first frame that viewers can see. The page then says "Could not
-  connect" and why, in the reason of the `backend-failed` close, which
-  until now said only `failed`. `occamyd` logs an error that says the
-  process may still be running and that only restarting guacd clears
-  it: nothing outside the `guacd` container can stop it. A black screen
-  is not covered: guacd's first frame on VNC is sized and blank, so a
-  server that finishes ServerInit and then never sends an update leaves
-  the page black until the idle timer
-  ([guacd-bridge.md](specs/008-native-architecture/guacd-bridge.md),
-  Implementation notes: a bounded connect).
-- Remote desktops are no longer tiny on a HiDPI display. The web client
-  asked a remote for the window's size in device pixels, which TigerVNC
-  and xrdp honour and X11 programs do not scale to, so at a device
-  pixel ratio of 2 they showed at half their size, at the top left of a
-  huge black screen. It now asks for the window's size in CSS pixels, so
-  that a remote pixel is a CSS pixel at any ratio; such a desktop is a
-  little soft on a HiDPI display. `pixel_ratio` stays in the hello, and
-  no server acts on it. A browser zoom changes the size in CSS pixels,
-  so the owner's zoom now resizes the remote, for everyone in the
-  session: at 25%, a 1280×800 window asks for 5120×3152. No test ran at
-  a ratio of 2 before: `TestWebScreen` opens both desktops in Chrome at
-  ratios of 2, 1 and 1.5, and in a window of an odd width, in
-  `make e2e`.
-- VNC through guacd no longer fails with "Remote unreachable" when a
-  client resizes or moves the pointer right after opening. A `size` or
-  a `mouse` that reaches guacd 1.6's VNC process before its RFB
-  connection is up ends the connection, and the web client's first fit
-  did just that: 4 of 28 tries opened. The guacd bridge now holds the
-  latest size and pointer until guacd's second frame, or 2 s after its
-  first, for every guacd protocol, which also keeps the size that
-  guacd's terminals used to lose. The parity matrix has rows for this,
-  so that CI catches it
-  ([guacd-bridge.md](specs/008-native-architecture/guacd-bridge.md),
-  Implementation notes: input before the remote is up).
-- The demo desktop's clipboard probe no longer kills an `xclip` running
-  in the remote xterm. The probe gave up on the clipboard after 2 s, so
-  on a loaded host that `xclip`, the clipboard's owner, could answer a
-  window that had gone: it died of `BadWindow`, printed in the xterm,
-  and the remote clipboard went with it. The probe now gives up after
-  30 s.
-- `internal/guacamole`'s display, which the benchmark and the guacd
-  bridge draw with, decodes lossy WebP as libwebp, and so a browser,
-  does. `golang.org/x/image/webp` alone read VP8's limited-range colours
-  as full-range and did not interpolate chroma, which put guacd's WebP
-  images up to 38 levels a channel off libwebp's on a first recording
-  (320 images), and up to 34 on the 36 of the committed conformance
-  corpus.
-- The same display reads an image's size before decoding it and refuses
-  one wider or taller than 16,384 pixels or larger than 8192×8192 in
-  all, so that an `img` stream cannot make the guacd bridge allocate
-  gigabytes.
-- A panic while a backend draws, which a decoder's bug and a remote
-  server's data can cause, no longer leaves the session's screen locked
-  with every viewer's stream waiting for it: the VNC, RDP and guacd
-  backends release the pixels they lock by `defer`, and a session closes
-  its framebuffer when it ends, which releases any pixels still locked.
-  The streams close with 1011, as for any panic the session recovers.
-- Viewers get a terminal's title as the session holds it, even when the
-  title has invalid UTF-8: each invalid byte becomes U+FFFD, three
-  bytes, which could make the title too long for the escape sequence a
-  terminal frame carries it in, so that a viewer got it cut there, with
-  no regard for characters. Titles are now cut, between characters, at
-  what that sequence carries.
-- The demo xrdp image restarts its channel server, which carries the
-  clipboard, when a connection reconnects to the session and the
-  channel server has exited. xrdp 0.10.1's channel server can exit when
-  a connection closes just after attaching to it, and xrdp starts it
-  only with the session. Until now every later connection then waited
-  10 seconds for it and got no clipboard, which once failed `make e2e`'s
-  clipboard check. `make e2e` now kills the channel server in the rdp
-  container and checks that the next connection has the clipboard. Give
-  it the `CONTAINER_ENGINE` that `make run` took, since it reaches the
-  container through that engine's compose.
-- The demo xrdp image restarts a session's channel server even when
-  another X session of the user still has one. `reconnectwm.sh` looked
-  for any channel server of the user, so with two X sessions, which two
-  connections opening at once can start, a session whose channel server
-  had exited kept none, and every later connection to it waited 10
-  seconds and got no clipboard. It now looks for the session's display
-  alone, and `make e2e` checks that with a channel server running for
-  another display.
-- A paste an RDP server's clipboard does not answer no longer waits in
-  silence. On a server whose clipboard process, `xrdp-chansrv`, had
-  exited, nothing answered on the channel, so text waited unsent and the
-  viewer heard nothing. The text still waits, and goes when the server
-  answers, but after a minute the viewers are told, by a new ignorable
-  protocol message, `clipboard-status`
-  ([docs/protocol.md](docs/protocol.md#clipboard-status)). The web
-  client says "The remote hasn't taken the clipboard yet. Your text will
-  go when it does." over the desktop and in the clipboard panel, which
-  also holds for a slow logon screen, and takes the word away once the
-  server answers. A client that does not know the message skips it, and
-  loses nothing.
-- The same clipboard text sent again over native RDP now goes out again,
-  so a user who sends it to a server that has lost its clipboard process
-  hears so. It used to be left out.
-- A clipboard process that restarts while the native RDP client's request
-  to it is unanswered no longer stops the server's clipboard reaching the
-  viewers for the rest of the session.
-- The demo x11vnc no longer dies of an X error (`Xerror: major_opcode:
-  18 … error_code: 3`) when it answers a request for the clipboard from
-  a window that has gone, which ended the sessions on it, as
-  `backend-failed` or `remote-ended`, and refused new ones until its
-  watchdog had started it again. x11vnc 0.9.17 owns the clipboard after
-  a client's cut text and traps errors as it answers, but stops trapping
-  before the X server reports one unless it syncs; the desktop's
-  clipboard probe killed its xclip after 2 s, and an x11vnc that stalled
-  for longer, as clients connected on a loaded host, answered such
-  requests. `start.sh` sets `X11VNC_SENDEVENT_SYNC`, which makes it
-  sync. The error came after a refused resize once, but has nothing to
-  do with it, nor with either VNC backend. `make e2e` makes such a
-  request (`TestX11vncClipboardRequestorGone`) and checks that x11vnc
-  and the session on it live through it; it fails if x11vnc died, and
-  skips, saying so, if only the clipboard went missing, twice, with
-  x11vnc alive. Against x11vnc processes just started, it failed in five
-  of six runs without the variable and passed in five of five with it;
-  it cannot fail every time, as the error's escape is a race. The tests
-  that reach into the stack run compose with
-  `PODMAN_COMPOSE_WARNING_LOGS=false` and read only its standard output,
-  so that podman compose's banner on its standard error no longer comes
-  first in what they read; the demo images log what the tests count to
-  their standard output. The parity row `resize:
-  ignored without ExtendedDesktopSize` is now `resize: the server keeps
-  its size`: x11vnc has ExtendedDesktopSize, and refuses SetDesktopSize
-  as prohibited.
-- After `POST /api/v1/sessions`, the owner's stream gets `close` 4006
-  `backend-failed`, as docs/api.md says, even when the remote failed
-  before the stream came. Before, the session was gone by the time the
-  stream came, and the stream got 4001 "no such session". For the owner
-  grace after a session ends, occamyd keeps its owner and its close, for
-  as many sessions as `limits.sessions` and 1024 at the least, and gives
-  the close to the owner's stream alone; anyone else still gets "no
-  such session". An owner who reconnects after closing a session gets
-  4002 `session-closed`.
-- `DELETE /api/v1/sessions/{id}` answers once occamyd has let the
-  session go, not only once it has ended. Before, a `GET` or a second
-  `DELETE` right after it could still find the session, a share of it
-  could still be made, and its owner, at `limits.sessions_per_user`,
-  could be refused a new session with 429.
-
-- The image builds the web client on Node 24, an LTS. `node:25` made
-  `make build` warn of `EBADENGINE`, since vitest 5 leaves out Node 23
-  and 25. `engines` in `client/occamy-web/package.json` and the docs now
-  give the range that every package takes, `^22.13.0 || ^24.0.0 ||
-  >=26.0.0`, not `>=22.12.0`, and `TestDockerfileNode` checks the
-  Dockerfile's Node against the lock file.
-- The demo connection `tigervnc-plain-guacd`, which guacd can never open
-  for want of X509 credentials, says so in its name. The parity matrix
-  keeps it, as the proof of that row.
-- The Kubernetes step of the run-and-test guide and the
-  `kubernetes_integration` test remove k3s's container with `-v`, so
-  that the four anonymous volumes of its image no longer stay behind on
-  each run. The test also kills the container before it removes it, in
-  place of `rm -t 0`: Docker's `rm` has no `-t`, so on Docker the
-  clean-up failed and left the container and its volumes behind.
-- `make e2e` gives each compose command 2 minutes, not 30 s, and
-  `TestX11vncClipboardRequestorGone` 10 minutes, not 5, and the test
-  reads its session throughout: a busy host killed its compose commands
-  (`signal: killed`), and slow ones left its frames unacknowledged for
-  occamyd's 30 s, with no fault in the stack.
-- `docs/try-it.md`, after a fresh run of it from end to end: TigerVNC
-  through guacd resizes, and only RDP through guacd keeps its size; the
-  session's bar shows the remote's title if it has one;
-  `podman-compose --version` is for those whose provider it is; the
-  tear-down removes the interop server; `make lint` lacks CI's pass on
-  the RDP integration tests; timings hold on an idle host.
+- The Vue web client, with its fork of guacamole-common-js and the
+  fork's Apache LICENSE and NOTICE. Other Guacamole protocol clients
+  still work through the v0 routes.
 
 ### Security
 
-- `conf.yaml` ships `mode: release`, in the image and the release
-  archives as in the repository, so a v0 file taken as it is no longer
-  serves `/debug/pprof` on its public listener. `mode: debug` still does,
-  for a local run that needs it.
-- A v1 file that names no way to sign in is refused: `occamyd` has no
-  default user, so it needs `auth.users`, `auth.oidc` or
-  `auth.trusted_issuers`, and `legacy_v0` does not count. The hash in
-  [docs/configuration.md](docs/configuration.md)'s example was a real
-  one, the test fixture's `alice`; it is now a placeholder that fails
-  validation, which `TestConfigurationExampleRefused` holds it to, with
-  the `htpasswd` line that makes a real one.
-  `TestDemoUserStaysInTheDemo` keeps the demo user's hash out of
-  everything but the demo and bench stacks' files.
-- occamyd's request log no longer records query strings, which carry the
-  v0 token and with it the remote credentials.
-- A secret file, `password_file`, `token_file` or
-  `auth.oidc.client_secret_file`, of more than 64 KiB is refused, so
-  that a path such as `/dev/zero` cannot fill occamyd's memory.
-- A panic on a goroutine a backend starts, such as the SSH backend's
-  readers of the remote's output and the VNC, RDP and guacd backends'
-  writers, ends its session with close 1011 instead of crashing occamyd
-  and every other session with it. A panic in the terminal emulator,
-  and one under the state the VNC and RDP backends share between their
-  reader, their writer and the session's input, releases its locks, so
-  that the session cannot hang on them, and a guacd writer's panic ends
-  a prompt's wait for the owner's answer.
-- No backend sends the Power key or the X11 power keysyms
-  (XF86PowerOff, PowerDown, Sleep, Suspend, Hibernate, Standby), which
-  the remote applies to the whole machine. The native VNC backend sent
-  Power through QEMU's extended key events, and the VNC and guacd
-  backends sent the keysyms.
-- The demo stack's debug routes, which have no authentication, are off
-  unless `make run OCCAMY_DEBUG=1` turns them on: `occamy-v1`'s debug
-  listener on the host's loopback interface, port 5638
-  (`OCCAMY_V1_DEBUG_PORT`), and the v0 service's pprof, from
-  `docker/occamy-debug.yaml`. `docker/occamy.yaml`, which served pprof
-  to anyone who could reach the v0 service, is now in release mode, and
-  the v0 service is published on the loopback interface only.
-  `make run` and `make bench` turn the routes off explicitly without
-  `OCCAMY_DEBUG=1`, so a variable left in the shell or in `docker/.env`
-  cannot turn them on. The pressure test and the soak need
-  `OCCAMY_DEBUG=1`.
-- The demo stack publishes `occamy-v1`, whose demo user's password is
-  public, on the host's loopback interface. It was published on every
-  interface. `OCCAMY_BIND` names another address for it, such as
-  `0.0.0.0` for every interface; `make run` and `make bench` pass
-  `127.0.0.1` unless it is set, so `docker/.env` cannot widen it. The
-  v0 service and `occamy-v1`'s debug port stay on the loopback
-  interface whatever `OCCAMY_BIND` says: the v0 login signs a token for
-  any host with the demo's public secret, and guacd would connect
-  wherever such a token points.
-- `make clean` removes only Occamy's own: the demo stack's containers,
-  volume and demo images through `compose down` in its own project,
-  `occamy`, and the untagged images of earlier `make build` runs, which
-  `make build` now labels `de.changkun.occamy.make=build`. It pruned
-  every dangling image of the engine, whoever built it. Every checkout's
-  build has that label, so on a shared host the untagged images it
-  prunes may be another Occamy stack's.
+- The request log no longer records query strings, which carry the v0
+  token and the remote credentials in it.
+- A v1 file closes most of the v0 gaps that [SECURITY.md](SECURITY.md)
+  lists: tokens carry no remote credentials and never travel in a URL,
+  there is no default user, ad-hoc targets need an allowlist, and pprof
+  is only on the debug listener. `legacy_v0` brings those gaps back.
+- No v1 backend sends the Power key or power keysyms, and a panic in a
+  backend ends its session, not `occamyd`.
+
+### Known issues
+
+- Native RDP has met Windows only on a Windows Server 2025 CI runner, not
+  a real deployment ([#32](https://github.com/changkun/occamy/issues/32)).
+  NLA, the keyboard and resizing worked there. With GFX, the default, the
+  screen stays nearly black, since ClearCodec and the bitmap cache are
+  not supported yet: set `disable_gfx: true` on Windows connections, and
+  `adhoc_backends: {rdp: guacd}` for ad-hoc ones. The clipboard did not
+  work in either direction.
+- xrdp speaks no NLA, so an xrdp connection needs `security: tls`.
+- The native backends cannot restrict the clipboard or record sessions.
+  A connection that needs guacd's `disable-copy`, `disable-paste` or
+  recording keeps `backend: guacd`.
+- Apple Remote Desktop has not been checked against a Mac, and anyone in
+  between can read the Mac account's password
+  ([docs/configuration.md](docs/configuration.md#apple-remote-desktop-ard)).
+- guacd's process for a connection can hang: it did once in 128
+  connections on a very busy host. The session fails after 90 seconds
+  and says why, but the process keeps running until guacd restarts.
+- No benchmark of v1 has run yet ([docs/benchmarks.md](docs/benchmarks.md)).
 
 ## [0.6.0] - 2026-10-30
 
@@ -1270,7 +279,8 @@ Development resumed in 2026 after a pause from the end of 2021.
 - First release: a Go proxy that drives libguac through cgo and serves the
   Guacamole protocol over WebSocket with JWT authentication.
 
-[Unreleased]: https://github.com/changkun/occamy/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/changkun/occamy/compare/v1.0.0-beta.1...HEAD
+[1.0.0-beta.1]: https://github.com/changkun/occamy/compare/v0.6.0...v1.0.0-beta.1
 [0.6.0]: https://github.com/changkun/occamy/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/changkun/occamy/compare/0.4.0...v0.5.0
 [0.4.0]: https://github.com/changkun/occamy/compare/0.3.0...0.4.0
