@@ -30,7 +30,9 @@ tests in `tests/` skip unless `make e2e` points them at a running stack.
 every test suite, with the command of each. Building needs no C
 toolchain; on Linux and Windows, `-race` needs a C compiler, such as
 gcc, and `go test ./...` runs the tests without it.
-See the README for a native build. `bench/codecs`, the codec measurement,
+See the README for a native build. For the web client, `npm run dev` in
+`client/occamy-web` serves it with Vite and proxies `/api` to an
+`occamyd` on `localhost:5637`, or at `OCCAMY_DEV_SERVER`. `bench/codecs`, the codec measurement,
 is a module of its own; run its tests from that directory. The guacd
 bridge's conformance corpus, recorded guacd sessions that `go test`
 replays, is recorded again with `go test -tags record` against the bench
@@ -70,8 +72,8 @@ the spec first, and update it when the change makes it inaccurate.
 - Add tests for new behaviour, and a regression test for every bug fix.
 - Add a line under `Unreleased` in [CHANGELOG.md](CHANGELOG.md) for any
   user-visible change.
-- CI (`go`, `lint`, `build` on macOS and Windows, `web`, `image` and
-  `e2e`) must pass before a PR merges. PRs
+- CI (`go`, `lint`, `build` on macOS and Windows, `web`, `image`,
+  `e2e` and `bench`) must pass before a PR merges. PRs
   merge with a merge commit, so that the commit hashes cited in specs stay
   valid.
 
