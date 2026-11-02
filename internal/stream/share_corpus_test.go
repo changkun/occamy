@@ -64,7 +64,7 @@ func newViewers(tb testing.TB, n int, m shareMode) *viewers {
 			tb.Fatal(err)
 		}
 		c := &recorder{reg: protocol.ServerMessages()}
-		p := pacer.New(pacer.Config{Window: 1 << 20, InitialCap: 1 << 30})
+		p := pacer.New(pacer.Config{Window: 1 << 20, FixedWindow: true, InitialCap: 1 << 30})
 		enc := newEncoder([]protocol.Codec{protocol.CodecWebP, protocol.CodecDeflate})
 		w := newWriter(c, v, p, enc, protocol.Limits{}, slog.New(slog.DiscardHandler))
 		w.sc = &scroller{}

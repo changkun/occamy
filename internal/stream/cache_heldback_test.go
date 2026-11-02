@@ -45,7 +45,7 @@ func TestCacheHeldBack(t *testing.T) {
 	held := func(name string, want ...string) {
 		t.Helper()
 		w := d.w
-		w.p = pacer.New(pacer.Config{Window: 1 << 20, InitialCap: 1})
+		w.p = pacer.New(pacer.Config{Window: 1 << 20, FixedWindow: true, InitialCap: 1})
 		d.show(s.shot())
 		if _, ok := w.collect(image.Rectangle{}); !ok {
 			t.Fatal("resized")

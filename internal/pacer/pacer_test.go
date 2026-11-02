@@ -14,6 +14,13 @@ var t0 = time.Date(2026, 10, 30, 0, 0, 0, 0, time.UTC)
 
 func ms(n float64) time.Duration { return time.Duration(n * float64(time.Millisecond)) }
 
+// longPath returns p as if its acks took 100 ms, so that the window
+// does not limit it below its configured size.
+func longPath(p *Pacer) *Pacer {
+	p.srtt = ms(100)
+	return p
+}
+
 // send starts a frame, writes n bytes and ends it as id.
 func send(t *testing.T, p *Pacer, now time.Time, id uint32, n int) {
 	t.Helper()
@@ -36,6 +43,59 @@ func TestWindow(t *testing.T) {
 	}
 	if ok, _ := p.StartFrame(t0.Add(ms(10))); !ok {
 		t.Fatal("frame could not start after an ack")
+	}
+}
+
+// TestWindowFollowsThePath checks that the frames that may await an ack
+// cover the time an ack takes, within 2 and the configured window.
+func TestWindowFollowsThePath(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		window      int
+		rtt, decode time.Duration
+		want        int
+	}{
+		{"unmeasured", 16, 0, 0, 2},
+		{"no delay", 16, ms(1), ms(8), 2},
+		{"20 ms", 16, ms(20), ms(8), 3},
+		{"50 ms", 16, ms(50), ms(8), 5},
+		{"250 ms", 16, ms(250), ms(8), 16},
+		{"agreed 2", 2, ms(50), ms(8), 2},
+		// A slow decoder spaces the frames: fewer cover the same path.
+		{"slow decode", 16, ms(50), ms(40), 4},
+	} {
+		p := New(Config{Window: tc.window})
+		p.srtt, p.decode = tc.rtt, tc.decode
+		if got := p.Window(); got != tc.want {
+			t.Errorf("%s: window %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestWindowWaitIsNotPathWait checks that time spent waiting for the
+// window lowers no quality: on a fast path, a full window of small frames
+// says nothing of the bandwidth.
+func TestWindowWaitIsNotPathWait(t *testing.T) {
+	p := New(Config{})
+	now := t0
+	var id uint32
+	for range 50 {
+		for {
+			ok, _ := p.StartFrame(now)
+			if !ok {
+				break
+			}
+			id++
+			p.Wrote(now, 1000)
+			p.EndFrame(now, id)
+		}
+		// The acks come a round trip later; the writer waited for the
+		// window all along.
+		now = now.Add(ms(50))
+		p.Ack(now, id, 0)
+	}
+	if got := p.Quality(); got != defaultMaxQuality {
+		t.Errorf("quality %d after waiting only for the window, want %d", got, defaultMaxQuality)
 	}
 }
 
@@ -101,7 +161,7 @@ func TestInputBypassesTheInterval(t *testing.T) {
 // TestOldest checks that Oldest is when the oldest frame awaiting an ack
 // ended, the open frame aside.
 func TestOldest(t *testing.T) {
-	p := New(Config{Window: 4})
+	p := longPath(New(Config{Window: 4}))
 	if _, ok := p.Oldest(); ok {
 		t.Error("Oldest with no frame in flight")
 	}
@@ -125,7 +185,7 @@ func TestOldest(t *testing.T) {
 }
 
 func TestCumulativeAck(t *testing.T) {
-	p := New(Config{Window: 4})
+	p := longPath(New(Config{Window: 4}))
 	for id := uint32(1); id <= 3; id++ {
 		send(t, p, t0, id, 1000)
 	}
@@ -376,6 +436,36 @@ func TestFullScreenMotion(t *testing.T) {
 				p95(s.latencies, 20), 100*use, s.qualities[len(s.qualities)-5:], s.p.Rate()/1e6, s.p.MinRTT())
 		})
 	}
+}
+
+// TestWindowDoesNotSetTheFrameRate checks that on a long path with
+// bandwidth to spare, the frames follow the scene rather than the acks: a
+// window of 2 allows two frames a round trip, the path's window as many
+// as the scene changes, and the frame after an input waits no longer.
+func TestWindowDoesNotSetTheFrameRate(t *testing.T) {
+	// Small changes 60 times a second, as a VNC server sends a 30 fps
+	// animation in two updates a frame.
+	small := scene{period: ms(1000.0 / 60), bytes: func(int) int { return 6 << 10 }}
+	run := func(window int) (fps float64, lat time.Duration) {
+		l := n2
+		s := newSim(New(Config{Window: window}), &l, small)
+		s.run(10*time.Second, nil)
+		return float64(s.id) / 10, p95(s.latencies, 20)
+	}
+	fixed, fixedLat := run(2)
+	path, pathLat := run(16)
+	// Window 2 allows two frames a round trip, and the frame of each
+	// input, one every 97 ms, beyond it.
+	if limit := 2/(n2.rtt+n2.decode).Seconds() + 1000.0/97; fixed > limit {
+		t.Errorf("window 2: %.1f frames a second, more than its %.1f", fixed, limit)
+	}
+	if path < 55 {
+		t.Errorf("path window: %.1f frames a second of a scene that changes 60 times", path)
+	}
+	if pathLat > fixedLat+defaultTarget {
+		t.Errorf("path window: p95 input to display %v, window 2 %v", pathLat, fixedLat)
+	}
+	t.Logf("window 2: %.1f fps, p95 %v; path window: %.1f fps, p95 %v", fixed, fixedLat, path, pathLat)
 }
 
 func TestQualityAdapts(t *testing.T) {

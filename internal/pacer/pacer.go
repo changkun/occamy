@@ -12,12 +12,16 @@
 // propagation delay the windowed minimum of round trips. Writes are paced
 // at about the delivery rate, so that data does not queue in the network,
 // and the bytes in flight are capped at about twice the bandwidth-delay
-// product. The frame that carries an input's effect goes out first: an
-// open frame takes the input's tiles next and ends, or a new frame starts
-// even one beyond the frame window, and their bytes go out unpaced. The
-// quality steps down while the writer spends most of its time waiting for
-// the path and back up while it does not, so that motion loses detail
-// before input loses responsiveness.
+// product. Acks are measurements, not a barrier: the frames that may
+// await an ack are as many as cover the time from a frame's end to its
+// ack, so that on a long path the window does not set the frame rate, and
+// the cap on bytes keeps the network's queue short. The frame that
+// carries an input's effect goes out first: an open frame takes the
+// input's tiles next and ends, or a new frame starts even one beyond the
+// window, and their bytes go out unpaced. The quality steps down while
+// the writer spends most of its time waiting for the path and back up
+// while it does not, so that motion loses detail before input loses
+// responsiveness (specs/008-native-architecture/realtime-transport.md).
 //
 // A Pacer does no I/O and reads no clock: every method takes the current
 // time, so that tests can drive it on a simulated link. It is not safe for
@@ -31,8 +35,13 @@ import (
 
 // Config holds a Pacer's settings. Zero fields take the defaults.
 type Config struct {
-	// Window is the number of frames that may await an ack, 2 if zero.
+	// Window is the most frames that may await an ack, the frame window
+	// agreed with the viewer, 2 if zero. The pacer lets fewer await one
+	// while fewer cover the time an ack takes, but never fewer than 2.
 	Window int
+	// FixedWindow lets Window frames await an ack from the start,
+	// whatever the path: for a writer driven without acks, as in tests.
+	FixedWindow bool
 	// MinInterval is the shortest time between the starts of two frames.
 	// Zero leaves the rate of frames to the window and the pacing.
 	MinInterval time.Duration
@@ -62,6 +71,10 @@ const (
 	// minSample is the fewest bytes an ack must acknowledge to give a
 	// rate sample: fewer arrive too quickly to time.
 	minSample = 4 << 10
+	// minSpacing is the shortest time between frames that the window is
+	// sized for: no screen shows more frames than its refresh, 60 Hz on
+	// most.
+	minSpacing = time.Second / 60
 	// capGain multiplies the bandwidth-delay product into the cap.
 	capGain = 2
 	// startupGain is the pacing gain while the delivery rate is unknown
@@ -145,7 +158,7 @@ type Pacer struct {
 	cycle        int
 	blocked      time.Duration // time the writer waited for the path this round
 	blockedUntil time.Time     // end of the last pacing wait
-	waitingSince time.Time     // when StartFrame began refusing, or zero
+	waitingSince time.Time     // when StartFrame began refusing at the cap, or zero
 
 	quality     int
 	lastBackoff time.Time
@@ -193,16 +206,23 @@ func (p *Pacer) StartFrame(now time.Time) (ok bool, retry time.Duration) {
 		return true, 0
 	}
 	regular := len(p.inflight) - p.extras
+	window := p.Window()
 	extra := false
 	switch {
-	case p.pendingInput && (regular < p.cfg.Window || p.extras == 0):
-		extra = regular >= p.cfg.Window
+	case p.pendingInput && (regular < window || p.extras == 0):
+		extra = regular >= window
 		p.pendingInput = false
 		p.burst = p.inputBurst()
-	case regular >= p.cfg.Window || p.inflightBytes >= p.cap():
+	case p.inflightBytes >= p.cap():
 		if p.waitingSince.IsZero() {
 			p.waitingSince = now
 		}
+		return false, 0
+	case regular >= window:
+		// Waiting for the window is not waiting for the path: a window
+		// full of small frames on a long, fast path says nothing of its
+		// bandwidth, so it counts against no quality.
+		p.stopWaiting(now)
 		return false, 0
 	default:
 		if wait := p.Interval() - now.Sub(p.lastStart); !p.lastStart.IsZero() && wait > 0 {
@@ -210,10 +230,7 @@ func (p *Pacer) StartFrame(now time.Time) (ok bool, retry time.Duration) {
 		}
 		p.burst = 0
 	}
-	if !p.waitingSince.IsZero() {
-		p.blocked += now.Sub(p.waitingSince)
-		p.waitingSince = time.Time{}
-	}
+	p.stopWaiting(now)
 	if extra {
 		p.extras++
 	}
@@ -428,6 +445,30 @@ func (p *Pacer) endRound(now time.Time) {
 	case busy < busyLow:
 		p.quality = min(p.cfg.MaxQuality, p.quality+qualityStep)
 	}
+}
+
+// stopWaiting counts the time StartFrame has refused at the cap until
+// now as time the writer waited for the path.
+func (p *Pacer) stopWaiting(now time.Time) {
+	if !p.waitingSince.IsZero() {
+		p.blocked += now.Sub(p.waitingSince)
+		p.waitingSince = time.Time{}
+	}
+}
+
+// Window is how many frames may await an ack now, the frame after an
+// input aside: enough to cover the time from a frame's end to its ack at
+// one frame per minSpacing, or per the interval if that is longer, and
+// one more for the frame being written; at least 2 and at most the
+// configured window. Without delay that is 2; across 50 ms, about 5.
+func (p *Pacer) Window() int {
+	if p.cfg.FixedWindow {
+		return p.cfg.Window
+	}
+	spacing := max(p.Interval(), minSpacing)
+	ack := p.srtt + p.decode
+	n := int((ack+spacing-1)/spacing) + 1
+	return min(max(n, defaultWindow), p.cfg.Window)
 }
 
 // Quality is the lossy quality for the viewer's next tiles.

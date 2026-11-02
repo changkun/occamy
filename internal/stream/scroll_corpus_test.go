@@ -136,7 +136,7 @@ func newDirect(tb testing.TB, scroll bool) *direct {
 		tb.Fatal(err)
 	}
 	c := &recorder{reg: protocol.ServerMessages()}
-	p := pacer.New(pacer.Config{Window: 1 << 20, MinQuality: 70, MaxQuality: 70, InitialCap: 1 << 30})
+	p := pacer.New(pacer.Config{Window: 1 << 20, FixedWindow: true, MinQuality: 70, MaxQuality: 70, InitialCap: 1 << 30})
 	enc := newEncoder([]protocol.Codec{protocol.CodecWebP, protocol.CodecDeflate})
 	w := newWriter(c, owner, p, enc, protocol.Limits{}, slog.New(slog.DiscardHandler))
 	if scroll {
