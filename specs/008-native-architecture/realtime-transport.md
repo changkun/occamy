@@ -305,8 +305,9 @@ interval, and Guacamole's beside it.
 
 ## Implementation notes: step 1
 
-- **Status.** The pacer, the offers and the docs are built (#180), and
-  the harness (#181); the measurement follows.
+- **Status.** Kept. The pacer, the offers and the docs are built
+  (#180), and the harness (#181), and measured on 2026-11-02
+  (docs/benchmarks.md, Step 1: the frame window from the path).
 - **Pacer.** `Pacer.Window` is `clamp(ceil((srtt + decode) / spacing) +
   1, 2, Config.Window)` with `spacing = max(Interval(), 1/60 s)`. Before
   the first ack `srtt` and `decode` are zero, so a viewer starts at 2
@@ -341,8 +342,37 @@ interval, and Guacamole's beside it.
   `TestViewerPacerWindow`.
 - **Cost seen in simulation.** More frames in flight means the frame
   after an input can queue behind more bytes at the bottleneck: 3.5 ms
-  more at the 95th percentile in the N2 simulation. The measurement
-  checks it on the real stack.
+  more at the 95th percentile in the N2 simulation. On the real stack
+  the frame after a key gained 23 ms instead (below).
+- **Measured** (`make bench-realtime-1`, 168 results, one image built
+  from `447525c`, `v1-native` against `v1-native-w2`). G5 over VNC
+  under N2, the one cell where the window was the limit: the server
+  cuts 56 frames a second instead of 30; the viewer sees 29.6 scene
+  frames a second instead of 18.8, 1.57x [1.06, 1.84], and misses 1.5%
+  of them instead of 37%; shown frames are 49 ms apart at the 95th
+  percentile instead of 77; a key shows in 95.7 ms instead of 119 at
+  the 95th percentile, 1.25x [1.21, 1.34], significant after Holm's
+  correction (p 0.002, adjusted 0.03). The cost is CPU: 601 ms a second
+  instead of 493, for nearly twice the frames. Over RDP under N2 shown
+  frames come 48 ms apart instead of 63, 1.33x [1.18, 1.45], at xrdp's
+  unchanged 24 a second. No other primary metric, and no guard (T1, T2,
+  G2 under N0 and N2), changed significantly.
+- **Why the key gained, a hypothesis not yet measured.** With a window
+  of two, the VNC update that carries a key's effect often arrives after
+  the input's own frame has gone (that frame carries what had changed
+  by then), and it then waits for the window like any frame: up to a
+  round trip and a refresh. With the window from the path it goes at
+  once. Per-frame send and ack times in the harness would show it.
+- **Where it leaves G5 over VNC under N2.** 95.7 ms [92.9, 99.4]
+  against the target of 63.4 (docs/benchmarks.md, Targets): 50 ms of
+  it is the round trip, and the rest is mostly occamyd's encoding of
+  full-screen motion, 14 KiB and about 20 ms of CPU a shown frame, which
+  is Occamy's own cost (benchmark.md, decision 1) and step 5's subject.
+- **Load.** Two results started below the load gate and ran while the
+  host's load rose far above it (G5 over VNC: window 2 under N0, 16.8
+  frames a second and 213 ms; the path's window under N1, 8.9 and
+  466 ms). They widen those cells' intervals; neither cell differs
+  otherwise. The gate checks the load before a result, not during one.
 
 ## Affects
 

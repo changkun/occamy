@@ -1012,7 +1012,9 @@ and guacd stays:
   series, as it was under every network in the baseline, which points
   at xrdp's own rate; an RDP counterpart of `bench/vncprobe` would show
   it. Over VNC at N2, `v1-native` delivers fewer frames than the link
-  allows.
+  allows: the frame window of two frames was the limit, which
+  [step 1](#step-1-the-frame-window-from-the-path) of the real-time
+  steps removes.
 - **G6's completion** includes x11vnc's and xrdp's time to send the
   photograph, which is not measured on its own.
 
@@ -1029,3 +1031,83 @@ busy. Without them, 2–4 runs remain on a side, too few for an exact
 test to reach 5% after the correction, so 11 of the 14 significant
 differences lose significance; their factors move by at most 6%. The
 harness now holds each result instead.
+
+## The real-time steps
+
+[Real-time pacing and transport](../specs/008-native-architecture/realtime-transport.md)
+changes how frames are paced, acknowledged and carried, one step at a
+time, and each step is measured against the one before under the same
+conditions, with Guacamole's number beside it from the
+[essential comparison](#the-essential-comparison).
+
+### Step 1: the frame window from the path
+
+Measured on 2026-11-02 with `make bench-realtime-1`: `v1-native`, whose
+client offers a window of 16 within which the server keeps as many
+frames unacknowledged as cover the time an acknowledgement takes, beside
+`v1-native-w2`, whose client offers 2, the window before this step. Both
+ran on one image, built from `447525c`, in one run: G5 under N0, N1 and
+N2, and T1, T2 and G2 under N0 and N2 as guards, 6 runs of 100 probe
+keys, on the essential comparison's host. All 168 results succeeded.
+The collection took 1 h 50 min, about 75 of them waiting at the load
+gate while other work ran on the host.
+[realtime/1/report.md](./benchmarks/realtime/1/report.md) holds every
+table and figure, and
+[realtime/1/bench-realtime-1.json](./benchmarks/realtime/1/bench-realtime-1.json)
+each run;
+
+```sh
+uv run bench/report.py docs/benchmarks/realtime/1/bench-realtime-1.json -o docs/benchmarks/realtime/1
+```
+
+analyses it again.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/realtime/1/factors-frame-window-dark.svg">
+  <img alt="The factor by which v1-native, with the window from the path, is better than v1-native-w2, with a window of two frames, on each cell's primary metric, with 95% intervals" src="benchmarks/realtime/1/factors-frame-window.svg">
+</picture>
+
+The window met the round trip over VNC under N2, where the desktop
+changes about 59 times a second. A key during full-screen motion (G5),
+medians with 95% intervals, guacd's from the essential comparison:
+
+| G5 over VNC, N2 | guacd | window of 2 | step 1 |
+|---|---:|---:|---:|
+| Scene frames shown a second (of 30) | 23.4 [20.6, 24.3] | 18.8 [15.9, 28.3] | 29.6 [29.2, 29.9] |
+| Scene frames never shown | 22% | 37% [6, 47] | 1.5% [0.4, 2.8] |
+| Time between shown frames, p95 | | 76.7 ms [64.0, 98.9] | 49.1 ms [47.8, 52.8] |
+| Key to screen, p95 | 207 ms [203, 255] | 119 ms [116, 133] | 95.7 ms [92.9, 99.4] |
+
+- **Over VNC under N2** the server sends 56 frames a second instead of
+  30, as many as the desktop changes, and the viewer sees every frame of
+  the scene: 1.57x [1.06, 1.84] as many as with a window of two, which
+  missed 37% of them. A key's effect shows 1.25x [1.21, 1.34] sooner at
+  the 95th percentile, 96 ms instead of 119; it is the one primary
+  difference that is significant after Holm's correction, and the only
+  cell where the window was the limit. Shown frames come at an even
+  pace: 49 ms apart at the 95th percentile instead of 77. A shown frame
+  costs 14 KiB instead of 15.5, so the link carries 419 KiB a second
+  instead of 290, and occamyd spends about a fifth more CPU, 601 ms a
+  second instead of 493, on nearly twice the frames.
+- **Over RDP** xrdp's own rate of about 24 frames a second holds under
+  every network, so the frame rate and a key's latency do not change,
+  but under N2 the frames come more evenly: 48 ms apart at the 95th
+  percentile instead of 63, 1.33x [1.18, 1.45].
+- **Under N0 and N1** the window of two already covered the round trip,
+  and no primary metric changes significantly.
+- **The guards**, typing, bulk output and a key on a still desktop under
+  N0 and N2, are unchanged: factors from 0.93 to 1.04, none
+  significant. Terminals keep the window of two.
+- The simulation in `internal/pacer` predicted that more frames in
+  flight would cost the frame after an input about 3.5 ms; on the real
+  stack it gained 23. A likely reason, not measured: with a window of
+  two, the VNC update that carried a key's effect often arrived after
+  the input's own frame had gone, and then waited for the window like
+  any other frame.
+
+**The load gate** held each result until the host's 1-minute load was
+below 8. Two results started below it and ran while the load rose far
+above it: G5 over VNC with the window of two under N0 (16.8 frames a
+second, 213 ms) and with step 1 under N1 (8.9 frames a second, 466 ms).
+They widen the intervals of those two cells, where neither series
+differs otherwise.
