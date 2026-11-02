@@ -36,7 +36,12 @@ type planFile struct {
 	// load must be below it, for up to LoadWait. 0 measures at any load.
 	MaxLoad  float64       `yaml:"max_load"`
 	LoadWait time.Duration `yaml:"load_wait"`
-	Studies  []studyFile   `yaml:"studies"`
+	// Keys is how many probe keys a latency scenario presses, 200 if
+	// unset; Connects how many sessions G7 opens per protocol, 20 if
+	// unset, and none at 0, which leaves G7 out.
+	Keys     int         `yaml:"keys"`
+	Connects *int        `yaml:"connects"`
+	Studies  []studyFile `yaml:"studies"`
 }
 
 // studyFile is a study of a plan file: its series under its network
@@ -66,6 +71,9 @@ func readPlanFile(name string) (planFile, error) {
 	if len(f.Studies) == 0 {
 		return f, fmt.Errorf("%s: no studies", name)
 	}
+	if f.Keys < 0 || f.Connects != nil && *f.Connects < 0 {
+		return f, fmt.Errorf("%s: keys and connects cannot be negative", name)
+	}
 	return f, nil
 }
 
@@ -79,6 +87,8 @@ type block struct {
 	series    series
 	net       netCondition
 	scenarios []scenario // those the series serves
+	// connect says whether the block measures G7 for its protocols.
+	connect bool
 }
 
 // blockKey identifies a block of a run, as its results record it.
@@ -106,12 +116,22 @@ func (b block) String() string {
 	for _, sc := range b.scenarios {
 		ids = append(ids, sc.ID+" "+sc.Protocol)
 	}
+	if b.connect {
+		for _, proto := range protocolsOf(b.scenarios) {
+			ids = append(ids, "G7 "+proto)
+		}
+	}
 	return s + ": " + strings.Join(ids, ", ")
 }
 
 // results is how many results b adds to a run: one per scenario, and G7
-// once per protocol.
-func (b block) results() int { return len(b.scenarios) + len(protocolsOf(b.scenarios)) }
+// once per protocol unless the plan leaves it out.
+func (b block) results() int {
+	if !b.connect {
+		return len(b.scenarios)
+	}
+	return len(b.scenarios) + len(protocolsOf(b.scenarios))
+}
 
 // matrixBlocks returns a block for each of chosen under each of nets,
 // with the scenarios of scs that it serves. A series that serves none of
@@ -129,7 +149,7 @@ func matrixBlocks(study string, chosen []series, nets []netCondition, scs []scen
 			return nil, fmt.Errorf("%s: no scenario chosen runs on %s", study, sr.Name)
 		}
 		for _, nc := range nets {
-			blocks = append(blocks, block{study: study, series: sr, net: nc, scenarios: served})
+			blocks = append(blocks, block{study: study, series: sr, net: nc, scenarios: served, connect: true})
 		}
 	}
 	return blocks, nil
@@ -167,6 +187,11 @@ func studyBlocks(f planFile, all []series) ([]block, error) {
 			seen[b.key(0)] = true
 		}
 		blocks = append(blocks, bs...)
+	}
+	if f.Connects != nil && *f.Connects == 0 {
+		for i := range blocks {
+			blocks[i].connect = false
+		}
 	}
 	return blocks, nil
 }
@@ -219,13 +244,15 @@ func (p plan) order(run int) []block {
 // planRecord is what a results file measures, so that -resume continues
 // the same plan and no other.
 type planRecord struct {
-	Seed    uint64   `json:"seed,omitempty"`
-	MaxLoad float64  `json:"max_load,omitempty"`
-	Blocks  []string `json:"blocks"`
+	Seed     uint64   `json:"seed,omitempty"`
+	MaxLoad  float64  `json:"max_load,omitempty"`
+	Keys     int      `json:"keys,omitempty"`
+	Connects int      `json:"connects,omitempty"`
+	Blocks   []string `json:"blocks"`
 }
 
 func (p plan) record() *planRecord {
-	rec := &planRecord{Seed: p.seed, MaxLoad: p.maxLoad}
+	rec := &planRecord{Seed: p.seed, MaxLoad: p.maxLoad, Keys: p.keys, Connects: p.connects}
 	for _, b := range p.blocks {
 		rec.Blocks = append(rec.Blocks, b.String())
 	}
@@ -244,6 +271,8 @@ func (p plan) continues(prev *report) error {
 		return fmt.Errorf("it acknowledges at %g Hz, not %g", prev.AckHz, p.ackHz)
 	case prev.Plan.Seed != rec.Seed:
 		return fmt.Errorf("its seed is %d, not %d", prev.Plan.Seed, rec.Seed)
+	case prev.Plan.Keys != rec.Keys || prev.Plan.Connects != rec.Connects:
+		return fmt.Errorf("it presses %d keys and connects %d times, not %d and %d", prev.Plan.Keys, prev.Plan.Connects, rec.Keys, rec.Connects)
 	case !slices.Equal(prev.Plan.Blocks, rec.Blocks):
 		return errors.New("it measures other blocks")
 	}

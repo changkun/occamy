@@ -1,0 +1,25 @@
+# The essential comparison of the Guacamole protocol with Occamy's,
+# about an hour of measuring (owner, 2026-11-02): Guacamole straight from
+# guacd 1.6 against Occamy as shipped, with no network shaping (N0) and
+# on a constrained link (N2: 50 ms, 20 Mbit/s), on typing, bulk terminal
+# output, key latency on a still desktop and during full-screen motion,
+# and a photograph, over VNC and RDP. make bench-essential collects it
+# and make bench-report analyses it.
+#
+# 6 runs is the fewest at which an exact two-sided rank test can pass
+# Holm's correction over the 16 primary comparisons (2/924 < 0.05/16);
+# 100 probe keys a scenario per run keep a run to about 9 minutes. G7,
+# the time to the first frame, is left out (connects: 0).
+
+runs: 6
+seed: 20261102
+max_load: 8
+load_wait: 2h
+keys: 100
+connects: 0
+
+studies:
+  - study: matrix
+    series: [guacd, v1-native]
+    nets: [N0, N2]
+    scenarios: T1,T2,G2,G5,G6

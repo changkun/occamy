@@ -150,7 +150,7 @@ func runTypeEcho(ctx context.Context, r *runner, s *session, res *result) error 
 	if err := s.settle(ctx, promptQuiet); err != nil {
 		return err
 	}
-	n := r.samples(200)
+	n := r.probeKeys()
 	var lat []time.Duration
 	next := time.Now()
 	for i := range n {

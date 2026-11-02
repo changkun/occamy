@@ -183,7 +183,7 @@ func runProbe(ctx context.Context, r *runner, s *session, res *result) error {
 	if err := ready(ctx, s); err != nil {
 		return err
 	}
-	lat, err := probeLatency(ctx, s, r.runIndex, r.samples(200))
+	lat, err := probeLatency(ctx, s, r.runIndex, r.probeKeys())
 	if err != nil {
 		return err
 	}
@@ -220,7 +220,7 @@ func runMotion(ctx context.Context, r *runner, s *session, res *result) error {
 		return err
 	}
 	m := r.measure(s)
-	lat, err := probeLatency(ctx, s, r.runIndex, r.samples(200))
+	lat, err := probeLatency(ctx, s, r.runIndex, r.probeKeys())
 	if err != nil {
 		return err
 	}

@@ -105,6 +105,18 @@ The network ladder adds two conditions to the three of the baseline:
 On them a sample may take longer before it fails: 4 times as long at N3
 and 20 times at N4, and a scenario up to three times as long.
 
+```sh
+make bench-essential
+```
+
+collects the essential comparison, about an hour of measuring, into
+`bench-essential.json`: `guacd` against `v1-native` under N0 and N2, on
+T1, T2, and G2, G5 and G6 over VNC and RDP, 6 runs of 100 probe keys,
+without G7 (`bench/plans/essential.yaml`). A plan file's `keys` sets how
+many probe keys a latency scenario presses (200 by default), and
+`connects` how many sessions G7 opens (20), or none at 0. `BENCH_PLAN`
+runs `make bench-compare` with another plan file.
+
 ## What is measured
 
 The harness is a client. It decodes every image into a framebuffer,

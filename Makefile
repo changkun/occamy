@@ -131,9 +131,17 @@ bench: build
 # quiet host; if the host stays busy, it saves and exits, and running it
 # again resumes. It takes the variables of bench.
 BENCH_OUT ?= bench-compare.json
+BENCH_PLAN ?= bench/plans/compare.yaml
 bench-compare:
-	$(MAKE) bench BENCH_RUNTIME=1 BENCH_FLAGS="-plan bench/plans/compare.yaml -resume -out $(BENCH_OUT) $(BENCH_FLAGS)"
+	$(MAKE) bench BENCH_RUNTIME=1 BENCH_FLAGS="-plan $(BENCH_PLAN) -resume -out $(BENCH_OUT) $(BENCH_FLAGS)"
 .PHONY: bench-compare
+
+# bench-essential collects the essential comparison, about an hour of
+# measuring (bench/plans/essential.yaml), as bench-compare does, into
+# bench-essential.json.
+bench-essential:
+	$(MAKE) bench-compare BENCH_PLAN=bench/plans/essential.yaml BENCH_OUT=bench-essential.json
+.PHONY: bench-essential
 
 # corpus records the frames the codec measurement works on
 # (bench/testdata/corpus/README.md) from the bench desktop with a terminal

@@ -57,6 +57,54 @@ func TestComparePlan(t *testing.T) {
 	}
 }
 
+// The essential plan measures guacd and v1-native under N0 and N2, on T1,
+// T2, and G2, G5 and G6 over VNC and RDP, 6 times with 100 keys, and
+// leaves G7 out.
+func TestEssentialPlan(t *testing.T) {
+	f, err := readPlanFile("plans/essential.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Runs != 6 || f.Keys != 100 || f.Connects == nil || *f.Connects != 0 || f.MaxLoad != 8 {
+		t.Errorf("runs %d, keys %d, connects %v, max_load %g; want 6, 100, 0 and 8", f.Runs, f.Keys, f.Connects, f.MaxLoad)
+	}
+	blocks, err := studyBlocks(f, testSeries())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 4 {
+		t.Fatalf("%d blocks, want 4", len(blocks))
+	}
+	for _, b := range blocks {
+		if b.connect || b.results() != 8 || strings.Contains(b.String(), "G7") {
+			t.Errorf("%s: connect %v, %d results; want no G7 and 8", b, b.connect, b.results())
+		}
+	}
+	p := plan{blocks: blocks, keys: f.Keys, connects: *f.Connects}
+	other := p
+	other.keys = 200
+	if err := p.continues(&report{Plan: other.record()}); err == nil {
+		t.Error("results with 200 keys continue a plan of 100")
+	}
+}
+
+// A plan's keys and connects set how many samples a scenario takes, a
+// tenth of them in a quick run; unset, they are 200 and 20.
+func TestPlanSamples(t *testing.T) {
+	for _, c := range []struct {
+		r              runner
+		keys, connects int
+	}{
+		{runner{}, 200, 20},
+		{runner{keys: 100, connects: 5}, 100, 5},
+		{runner{keys: 100, quick: true}, 10, 3},
+	} {
+		if k, n := c.r.probeKeys(), c.r.connectSamples(); k != c.keys || n != c.connects {
+			t.Errorf("keys %d, connects %d: %d keys and %d connects, want %d and %d", c.r.keys, c.r.connects, k, n, c.keys, c.connects)
+		}
+	}
+}
+
 // A plan file with a field the harness does not know, an unknown study,
 // series or network, or a block twice, is refused.
 func TestPlanFileRefused(t *testing.T) {

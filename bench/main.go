@@ -131,7 +131,10 @@ func main() {
 		if p.blocks, err = studyBlocks(f, all); err != nil {
 			log.Fatalf("%s: %v", *planName, err)
 		}
-		p.runs, p.seed = f.Runs, f.Seed
+		p.runs, p.seed, p.keys = f.Runs, f.Seed, f.Keys
+		if f.Connects != nil {
+			p.connects = *f.Connects
+		}
 		if !set["max-load"] {
 			p.maxLoad = f.MaxLoad
 		}
@@ -200,6 +203,9 @@ type plan struct {
 	// maxLoad and loadWait are the load gate (waitLoad).
 	maxLoad  float64
 	loadWait time.Duration
+	// keys and connects are a plan file's: how many probe keys a latency
+	// scenario presses, and how many sessions G7 opens; 0 is the default.
+	keys, connects int
 	// save, if set, keeps what was measured after each block.
 	save func(*report) error
 }
@@ -261,7 +267,7 @@ func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (
 	defer px.close()
 	r := &runner{
 		series: b.series, net: b.net, proxy: px, quick: p.quick, runIndex: run,
-		study: b.study, factor: b.factor,
+		study: b.study, factor: b.factor, keys: p.keys, connects: p.connects,
 		cpu: newCPUSampler(p.engine, p.project), debug: p.debug,
 	}
 	stop := func(res result) bool {
@@ -272,6 +278,9 @@ func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (
 		if stop(r.run(ctx, sc)) {
 			return true
 		}
+	}
+	if !b.connect {
+		return false
 	}
 	for _, proto := range protocolsOf(b.scenarios) {
 		if stop(r.connect(ctx, proto)) {
@@ -325,8 +334,10 @@ type runner struct {
 	runIndex int // which of the runs this is
 	// study and factor are those of the block the runner measures.
 	study, factor string
-	cpu           *cpuSampler
-	debug         map[string]string // occamyd service: its debug listener
+	// keys and connects are the plan's (plan); 0 is the default.
+	keys, connects int
+	cpu            *cpuSampler
+	debug          map[string]string // occamyd service: its debug listener
 }
 
 // gap separates sessions, so that a session with the same claims does
@@ -349,6 +360,24 @@ func (r *runner) samples(n int) int {
 		return max(n/10, 3)
 	}
 	return n
+}
+
+// probeKeys is how many probe keys a latency scenario presses: 200, or
+// the plan's keys.
+func (r *runner) probeKeys() int {
+	if r.keys > 0 {
+		return r.samples(r.keys)
+	}
+	return r.samples(200)
+}
+
+// connectSamples is how many sessions G7 opens: 20, or the plan's
+// connects.
+func (r *runner) connectSamples() int {
+	if r.connects > 0 {
+		return r.samples(r.connects)
+	}
+	return r.samples(20)
 }
 
 func (r *runner) duration(d time.Duration) time.Duration {
@@ -416,7 +445,7 @@ func (r *runner) connect(ctx context.Context, proto string) result {
 	log.Printf("%s %s %s %s", res.Series, res.Net, res.Scenario, proto)
 	o := r.observe(ctx)
 	var times, signIns []time.Duration
-	for range r.samples(20) {
+	for range r.connectSamples() {
 		sctx, cancel := context.WithTimeout(ctx, openTimeout*time.Duration(r.net.slowness()))
 		s, err := r.series.open(sctx, r.proxy.addr(), proto)
 		if err != nil {

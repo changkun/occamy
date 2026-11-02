@@ -308,6 +308,27 @@ In this order, one pull request each, each leaving `make bench` working:
 The collection takes about 32 hours of a quiet host: about 21 for the
 matrix, 5 for sharing, 5 for scale and 1 for the breakdown.
 
+## Essential plan
+
+The full collection takes about 32 hours, so the owner chose on
+2026-11-02 to measure an essential subset first, about an hour, and the
+full plan after it: `bench/plans/essential.yaml`, `make bench-essential`.
+
+- `guacd` against `v1-native`: Guacamole's protocol straight from guacd
+  1.6, against Occamy as shipped.
+- N0, where each side's own processing shows, and N2, a constrained link,
+  where bandwidth and queueing behind frames show.
+- T1 and T2; G2, G5 and G6 over VNC and RDP: 8 cells, 16 primary
+  comparisons with the two networks.
+- 6 runs, the fewest at which an exact two-sided rank test passes Holm's
+  correction over 16 comparisons (2/924 < 0.05/16), with 100 probe keys a
+  scenario per run, 600 a cell in all. G7 is left out.
+
+Its single family, `guacd` to `v1-native` on each cell's primary metric,
+is confirmatory and Holm-corrected; secondary metrics get intervals and
+unadjusted p-values. The analysis is a Python script over the results
+(`bench/report.py`), with numpy, scipy and matplotlib.
+
 ## Not measured
 
 - Packet loss, which a userspace proxy over TCP cannot emulate.
