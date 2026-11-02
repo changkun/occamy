@@ -134,7 +134,9 @@ and 113 ms at N1, behind frames it had already queued.
   frame's tiles were read ([protocol-v1](protocol-v1.md)), so the client
   measures input to display exactly, and the benchmark uses the same
   number.
-- **Little is in flight.** Besides the frame window, a viewer's writes
+- **Little is in flight.** Besides the frame window, which holds as
+  many frames as cover the time an ack takes
+  ([realtime-transport](realtime-transport.md), step 1), a viewer's writes
   are paced at its delivery rate, which `frame-ack`s measure as BBR
   does: the windowed maximum delivery rate and minimum round trip. Data
   then does not queue in the network. Bytes in flight are capped at
@@ -153,7 +155,8 @@ and 113 ms at N1, behind frames it had already queued.
   current screen, never a backlog. Tiles outside the viewport stay dirty until they come into
   view.
 - **Motion degrades smoothly.** While a viewer's writer spends most of a
-  round waiting for the path, its lossy quality steps down, and it steps
+  round waiting for the path, at the cap on bytes in flight or for
+  pacing but not for the frame window, its lossy quality steps down, and it steps
   back up while the writer waits little; the frame interval follows the
   viewer's decode time ([graphics-pipeline](graphics-pipeline.md)).
   Input stays responsive while motion loses detail or rate, never the

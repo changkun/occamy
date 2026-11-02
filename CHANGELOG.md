@@ -25,6 +25,17 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   and a key on a still desktop shows in 4.7–7.3 ms instead of 16–19 at
   p95 ([docs/benchmarks.md](docs/benchmarks.md#the-essential-comparison)).
 
+### Changed
+
+- On a long path, frames follow the screen's changes instead of two a
+  round trip. The server and clients offer a frame window of 16, and the
+  server keeps as many frames unacknowledged as cover the time an
+  acknowledgement takes: 2 on a local link, about 5 across 50 ms. Waiting
+  for that window no longer lowers the image quality, which now drops only
+  when the link's bandwidth runs short. Terminals keep a window of 2, so
+  bulk output still coalesces, and older clients, which offer no window,
+  get 2 as before ([docs/protocol.md](docs/protocol.md#the-frame-window)).
+
 ## [1.0.0-beta.1] - 2026-11-02
 
 Occamy 1.0 no longer puts guacd and the Guacamole protocol between the
