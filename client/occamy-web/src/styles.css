@@ -10,10 +10,10 @@
   --text: #1b1f24;
   --muted: #5b6470;
   --border: #d0d5dc;
-  --accent: #2357c6;
+  --accent: #6d28d9;
   --accent-text: #ffffff;
   --danger: #b42318;
-  --focus: #2357c6;
+  --focus: #6d28d9;
   --screen: #000000;
   --shadow: 0 8px 28px rgb(0 0 0 / 0.16);
   --radius: 8px;
@@ -28,10 +28,10 @@
     --text: #e7e9ec;
     --muted: #9aa3ae;
     --border: #353a43;
-    --accent: #7aa2f7;
-    --accent-text: #0b1020;
+    --accent: #a78bfa;
+    --accent-text: #1e1033;
     --danger: #f97066;
-    --focus: #7aa2f7;
+    --focus: #a78bfa;
     --shadow: 0 8px 28px rgb(0 0 0 / 0.5);
   }
 }
@@ -203,13 +203,109 @@ legend {
   white-space: nowrap;
 }
 
-/* Sign-in */
+/* Sign-in: the brand beside the form, or above it on a narrow screen.
+   The brand's panel is dark in either scheme, in the logo's colours, over
+   a grid of tiles. */
 
-.center {
+.welcome {
   display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
   min-height: 100%;
+}
+
+.hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 3rem clamp(2rem, 7vw, 6rem);
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 20% 25%, rgb(45 212 191 / 0.3), transparent 45%),
+    radial-gradient(circle at 85% 80%, rgb(217 70 239 / 0.32), transparent 50%),
+    linear-gradient(150deg, #1e1b4b, #3b0764 60%, #4c1d95);
+  color: #f5f3ff;
+}
+
+.hero::before {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgb(255 255 255 / 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(255 255 255 / 0.07) 1px, transparent 1px);
+  background-size: 32px 32px;
+  content: "";
+  mask-image: radial-gradient(ellipse at 30% 45%, #000 25%, transparent 75%);
+  pointer-events: none;
+}
+
+.hero > * {
+  position: relative;
+  margin: 0;
+}
+
+.hero .logo {
+  width: 208px;
+  height: auto;
+  margin-bottom: 0.75rem;
+  filter: drop-shadow(0 14px 28px rgb(0 0 0 / 0.4));
+}
+
+.hero h1 {
+  font-size: clamp(2.5rem, 5vw, 3.75rem);
+  letter-spacing: -0.02em;
+}
+
+.hero p {
+  max-width: 24rem;
+  color: rgb(245 243 255 / 0.8);
+  font-size: 1.2rem;
+}
+
+.entry {
+  display: grid;
   place-items: center;
-  padding: 1rem;
+  padding: 2.5rem 1.5rem;
+  background: var(--surface);
+}
+
+.entry .sign-in {
+  width: min(100%, 22rem);
+}
+
+.entry .sign-in h2 {
+  font-size: 1.5rem;
+}
+
+@media (max-width: 52rem) {
+  .welcome {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .hero {
+    align-items: center;
+    padding: 2rem 1.5rem;
+    text-align: center;
+  }
+
+  .hero .logo {
+    width: 104px;
+    margin-bottom: 0.25rem;
+  }
+
+  .hero h1 {
+    font-size: 2.25rem;
+  }
+
+  .hero p {
+    font-size: 1.05rem;
+  }
+
+  .entry {
+    align-items: start;
+  }
 }
 
 .sign-in .lead {
@@ -266,6 +362,13 @@ legend {
   white-space: nowrap;
 }
 
+.bar .mark {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 1.05rem;
+}
+
 .spacer {
   flex: 1;
 }
@@ -299,8 +402,24 @@ legend {
   align-items: center;
   gap: 0.75rem;
   width: 100%;
-  min-height: 3.25rem;
+  min-height: 3.5rem;
+  background: var(--surface);
   text-align: left;
+}
+
+.connections button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.connections .glyph {
+  display: grid;
+  flex: none;
+  width: 2.1rem;
+  height: 2.1rem;
+  place-items: center;
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
 }
 
 .connections .name {
