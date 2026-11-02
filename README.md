@@ -14,16 +14,36 @@ in your web browser.
 
 ![Signing in, opening a Linux desktop over RDP, running top in a terminal, and sharing the session with a read-only viewer, shown in the corner](./docs/demo.webp)
 
+## Why Occamy
+
+Apache Guacamole, the best-known gateway of this kind, reaches remote
+desktops through guacd, a daemon written in C, and talks to the browser
+in a text protocol of drawing instructions. Occamy has its own clients
+for each remote and its own protocol, and differs in four ways:
+
+- **A terminal travels as text.** guacd runs the terminal on the server
+  and sends pictures of the rendered text. Occamy sends the terminal's
+  output, and the browser draws it with xterm.js: traffic follows the
+  characters rather than the pixels, and you can select the text.
+- **A desktop travels as binary tiles.** Guacamole's text instructions
+  carry each image as base64, a third larger than the image itself.
+  Occamy's binary protocol sends only the tiles that changed, each
+  lossless or as WebP or JPEG, sends scrolls as copies, and lets the
+  browser reuse tiles it has seen.
+- **Input comes first.** Small messages never queue behind tiles, and
+  each viewer has a short queue paced to its own connection, so a
+  keystroke's update is not stuck behind a large frame, and a slow
+  viewer does not hold up the others. The goal is under 50 ms from
+  input to update.
+- **One process.** The VNC, RDP, SSH and Kubernetes clients run inside
+  `occamyd`, a static Go binary without C, for Linux, macOS and
+  Windows. There is no daemon to run beside it.
+
+The benchmark against Guacamole has not run yet, and 1.0.0 waits for it
+([benchmarks](./docs/benchmarks.md)).
+
 ## Features
 
-- **Desktops and terminals in the browser.** Occamy's own VNC, RDP and
-  SSH clients connect to your servers, and a shell in a Kubernetes pod
-  opens through the API server. Nothing to install on the viewer's side.
-- **One binary.** `occamyd` is a static Go binary with no C
-  dependencies, for Linux, macOS and Windows, or a container image.
-- **Built for interaction.** Occamy's own protocol carries the screen
-  as tiles over one WebSocket and paces frames to each viewer, so a slow
-  viewer never holds up the others ([protocol](./docs/protocol.md)).
 - **Sharing.** Send a link that lets someone watch a session or take
   part in it. Links expire after an hour unless you choose otherwise.
 - **Clipboard and resizing.** Copy and paste both ways, and the remote
