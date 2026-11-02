@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,14 +19,27 @@ import (
 	"time"
 )
 
-// testSeries are series by the names of the harness's, serving what they
-// serve, for plans that do not measure.
+// testSeries are the harness's series, serving what they serve, for plans
+// that do not measure.
 func testSeries() []series {
-	return []series{
-		{Name: "occamy"}, {Name: "guacd"}, {Name: "v1-native"},
-		{Name: "v1-native-nogfx", protocols: []string{"rdp"}},
-		{Name: "v1-guacd", protocols: []string{"rdp", "vnc"}},
-		{Name: "v1-guacd-gfx", protocols: []string{"rdp"}},
+	return allSeries(endpoints{}, display{})
+}
+
+// The harness knows every series, each serving its protocols.
+func TestAllSeries(t *testing.T) {
+	want := map[string][]string{
+		"occamy": nil, "guacd": nil,
+		"v1-native": {"rdp", "ssh", "vnc"}, "v1-native-w2": {"rdp", "ssh", "vnc"},
+		"v1-native-nogfx": {"rdp"}, "v1-guacd": {"rdp", "vnc"}, "v1-guacd-gfx": {"rdp"},
+	}
+	all := testSeries()
+	if len(all) != len(want) {
+		t.Errorf("%d series, want %d", len(all), len(want))
+	}
+	for _, s := range all {
+		if protos, ok := want[s.Name]; !ok || !slices.Equal(s.protocols, protos) {
+			t.Errorf("series %s serves %v, want %v", s.Name, s.protocols, protos)
+		}
 	}
 }
 
@@ -85,6 +99,54 @@ func TestEssentialPlan(t *testing.T) {
 	other.keys = 200
 	if err := p.continues(&report{Plan: other.record()}); err == nil {
 		t.Error("results with 200 keys continue a plan of 100")
+	}
+}
+
+// The plan of the real-time transport's step 1 measures v1-native and
+// v1-native-w2 on G5 over VNC and RDP under N0, N1 and N2, and on T1, T2
+// and G2 under N0 and N2: 168 results in 6 runs of 100 keys, without G7.
+func TestRealtime1Plan(t *testing.T) {
+	f, err := readPlanFile("plans/realtime-1.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Runs != 6 || f.Keys != 100 || f.Connects == nil || *f.Connects != 0 || f.MaxLoad != 8 || f.LoadWait != 2*time.Hour {
+		t.Errorf("runs %d, keys %d, connects %v, max_load %g, load_wait %v; want 6, 100, 0, 8 and 2h",
+			f.Runs, f.Keys, f.Connects, f.MaxLoad, f.LoadWait)
+	}
+	blocks, err := studyBlocks(f, testSeries())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells := map[string]bool{}
+	results := 0
+	for _, b := range blocks {
+		if b.connect {
+			t.Errorf("%s measures G7", b)
+		}
+		results += b.results()
+		for _, sc := range b.scenarios {
+			cells[fmt.Sprintf("%s %s %s %s", b.series.Name, sc.ID, sc.Protocol, b.net.Name)] = true
+		}
+	}
+	if results*f.Runs != 168 || len(cells) != 28 {
+		t.Errorf("%d results a run in %d cells, want 28 and 168 in all", results, len(cells))
+	}
+	for _, s := range []string{"v1-native", "v1-native-w2"} {
+		for _, net := range []string{"N0", "N1", "N2"} {
+			for _, proto := range []string{"vnc", "rdp"} {
+				if !cells[fmt.Sprintf("%s G5 %s %s", s, proto, net)] {
+					t.Errorf("no G5 over %s for %s under %s", proto, s, net)
+				}
+			}
+		}
+		for _, net := range []string{"N0", "N2"} {
+			for _, cell := range []string{"T1 ssh", "T2 ssh", "G2 vnc", "G2 rdp"} {
+				if !cells[fmt.Sprintf("%s %s %s", s, cell, net)] {
+					t.Errorf("no %s for %s under %s", cell, s, net)
+				}
+			}
+		}
 	}
 }
 
@@ -258,6 +320,51 @@ func TestWaitLoad(t *testing.T) {
 	p.maxLoad = 0
 	if err := p.waitLoad(context.Background()); err != nil {
 		t.Errorf("without a bound: %v", err)
+	}
+}
+
+// The load gate holds each result, not only each block: a result that
+// leaves the host busy holds the next one of its block, and the
+// collection stops there, with what it measured saved.
+func TestLoadGateEachResult(t *testing.T) {
+	defer func(f func() (float64, error), poll, d time.Duration) {
+		loadAverage, loadPoll, gap = f, poll, d
+	}(loadAverage, loadPoll, gap)
+	loadPoll, gap = time.Millisecond, 0
+	var busy atomic.Bool
+	loadAverage = func() (float64, error) {
+		if busy.Load() {
+			return 30, nil
+		}
+		return 1, nil
+	}
+	busying := series{Name: "guacd", target: echoServer(t), open: func(context.Context, string, string) (*session, error) {
+		busy.Store(true)
+		return nil, errors.New("refused")
+	}}
+	blocks, err := matrixBlocks("matrix", []series{busying}, netConditions[:1], []scenario{{ID: "T1", Protocol: "ssh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := blocks[0].results(); n != 2 { // T1, and SSH's G7
+		t.Fatalf("a block of %d results, want 2", n)
+	}
+	saved := -1
+	p := plan{blocks: blocks, runs: 1, quick: true, engine: "none", maxLoad: 8, loadWait: 20 * time.Millisecond,
+		save: func(rep *report) error { saved = len(rep.Results); return nil }}
+	type measured struct {
+		rep report
+		err error
+	}
+	got := within(t, 10*time.Second, func() measured {
+		rep, err := p.measure(context.Background(), nil)
+		return measured{rep, err}
+	})
+	if !errors.Is(got.err, errBusy) {
+		t.Errorf("measure = %v, want errBusy before the block's second result", got.err)
+	}
+	if len(got.rep.Results) != 1 || got.rep.Results[0].Scenario != "T1" || saved != 1 {
+		t.Errorf("%d results, %d saved; want T1's alone, saved", len(got.rep.Results), saved)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 	"image/color"
 	"image/draw"
 	"io"
+	"slices"
 	"strconv"
 	"testing"
 	"time"
@@ -59,29 +60,41 @@ func paintWallpaper(img *image.RGBA) {
 // A stamp counts once, however many frames carry it, and only when
 // whole: a frame that drew part of one reads as none, and the next one
 // that completes it counts. A frame number that comes back is a new
-// frame of the scene.
+// frame of the scene. Each is shown when the frame that completed it
+// counts from, and never before the one before it.
 func TestCountStamp(t *testing.T) {
 	img := image.NewRGBA(wholeScreen)
-	s := newSession(time.Now())
-	check := func(when string, want int64) {
+	t0 := time.Now()
+	s := newSession(t0)
+	check := func(when string, atMS int, want int64) {
 		t.Helper()
-		s.countStamp(img)
+		s.countStamp(img, t0.Add(time.Duration(atMS)*time.Millisecond))
 		if got := s.sceneFrames.Load(); got != want {
 			t.Errorf("%s: %d frames of the scene, want %d", when, got, want)
 		}
 	}
-	check("no stamp", 0)
+	check("no stamp", 0, 0)
 	paintStamp(img, 0)
-	check("frame 0", 1)
-	check("frame 0 again", 1)
+	check("frame 0", 10, 1)
+	check("frame 0 again", 20, 1)
 	eachStampCell(1, 0, 12, func(r image.Rectangle, c color.RGBA) {
 		draw.Draw(img, r, image.NewUniform(c), image.Point{}, draw.Src)
 	})
-	check("half of frame 1", 1)
+	check("half of frame 1", 30, 1)
 	paintStamp(img, 1)
-	check("frame 1", 2)
+	check("frame 1", 40, 2)
 	paintStamp(img, 0)
-	check("frame 0 once more", 3)
+	check("frame 0 once more, counted from before frame 1", 35, 3)
+	var shown []time.Duration
+	for _, at := range s.shownSince(0) {
+		shown = append(shown, at.Sub(t0))
+	}
+	if want := []time.Duration{10 * time.Millisecond, 40 * time.Millisecond, 40 * time.Millisecond}; !slices.Equal(shown, want) {
+		t.Errorf("shown at %v, want %v", shown, want)
+	}
+	if n, since := s.shown(), s.shownSince(2); n != 3 || len(since) != 1 || len(s.shownSince(5)) != 0 {
+		t.Errorf("%d shown, %d since the second; want 3 and 1, and none since the fifth", n, len(since))
+	}
 }
 
 // grid is a screen of guacd's terminal, black until painted.
@@ -331,5 +344,8 @@ func TestV0Stamps(t *testing.T) {
 	}
 	if got := s.sceneFrames.Load(); got != 2 {
 		t.Errorf("%d frames of the scene, want 2", got)
+	}
+	if shown := s.shownSince(0); len(shown) != 2 || shown[1].Before(shown[0]) {
+		t.Errorf("the scene's frames shown at %v, want two in order", shown)
 	}
 }

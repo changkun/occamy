@@ -40,13 +40,24 @@ import (
 // both sides: v1-native-nogfx and v1-guacd-gfx are the other way from
 // what each side ships, and serve only RDP. v1-guacd-gfx is on a service
 // of its own, occamy-v1-gfx, since guacd's parameters are global to a v1
-// file (docker/bench/occamy-v1-gfx.yaml).
+// file (docker/bench/occamy-v1-gfx.yaml). v1-native-w2 opens
+// v1-native's connections with another frame window (v1Windows).
 var v1Connections = map[string]map[string]string{
 	"v1-native":       {"ssh": "ssh", "vnc": "vnc-native", "rdp": "rdp-native"},
+	"v1-native-w2":    {"ssh": "ssh", "vnc": "vnc-native", "rdp": "rdp-native"},
 	"v1-native-nogfx": {"rdp": "rdp-native-nogfx"},
 	"v1-guacd":        {"vnc": "vnc-guacd", "rdp": "rdp-guacd"},
 	"v1-guacd-gfx":    {"rdp": "rdp-guacd-gfx"},
 }
+
+// v1Windows is the frame window that a v1 series' client offers where it
+// is not the client core's default, protocol.MaxFrameWindow, which a
+// zero in client.Options.FrameWindow offers. v1-native-w2 offers 2,
+// the window every client agreed on before the server sized it from the
+// path (specs/008-native-architecture/realtime-transport.md, step 1), so
+// that one image and one run measure the window before that step beside
+// the window after it.
+var v1Windows = map[string]uint8{"v1-native-w2": 2}
 
 // rdpPath says how a v1 series reaches RDP: with GFX or not, and whether
 // that is what its side ships. The row of what ships is the verdict
@@ -56,6 +67,7 @@ type rdpPath struct{ gfx, verdict bool }
 
 var rdpPaths = map[string]rdpPath{
 	"v1-native":       {gfx: true, verdict: true},
+	"v1-native-w2":    {gfx: true, verdict: false},
 	"v1-native-nogfx": {gfx: false, verdict: false},
 	"v1-guacd":        {gfx: false, verdict: true},
 	"v1-guacd-gfx":    {gfx: true, verdict: false},
@@ -73,8 +85,9 @@ const (
 )
 
 // openV1 opens v1 sessions on the connections conns names per protocol,
-// which show their frames on d.
-func openV1(conns map[string]string, d display) func(context.Context, string, string) (*session, error) {
+// which show their frames on d, with a client that offers a frame window
+// of window, or the client core's default at 0.
+func openV1(conns map[string]string, d display, window uint8) func(context.Context, string, string) (*session, error) {
 	return func(ctx context.Context, addr, proto string) (*session, error) {
 		id, ok := conns[proto]
 		if !ok {
@@ -92,12 +105,13 @@ func openV1(conns map[string]string, d display) func(context.Context, string, st
 		s.expect(shows(proto))
 		s.signIn = start.Sub(t0)
 		cl, err := client.Dial(ctx, "ws://"+addr+"/api/v1/connections/"+url.PathEscape(id)+"/stream", token, client.Options{
-			Name:     "occamy-bench/1",
-			Width:    width,
-			Height:   height,
-			Cols:     termCols,
-			Rows:     termRows,
-			Decoders: decoders(&s.decode),
+			Name:        "occamy-bench/1",
+			Width:       width,
+			Height:      height,
+			Cols:        termCols,
+			Rows:        termRows,
+			Decoders:    decoders(&s.decode),
+			FrameWindow: window,
 		})
 		if err != nil {
 			// The server made the session before it welcomed the client,
@@ -373,7 +387,7 @@ func (s *session) readV1(c *v1Conn, d display) {
 						marked = m.pixels(img, damage)
 					}
 					if damage.Overlaps(probe.StampArea) {
-						s.countStamp(img)
+						s.countStamp(img, at)
 					}
 				})
 			}

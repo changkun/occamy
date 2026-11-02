@@ -61,6 +61,8 @@ METRICS = {
     "bytes_down": Metric("Bytes down", "KiB", True),
     "rate": Metric("Bytes down per second", "KiB/s", True),
     "fps": Metric("Delivered frames per second", "frames/s", False),
+    "scene_missed": Metric("Scene frames never shown", "%", True),
+    "frame_interval_p95": Metric("Scene frame interval p95", "ms", True),
     "bytes_per_frame": Metric("Bytes per frame", "KiB", True),
     "cpu_per_frame": Metric("Server CPU per frame", "ms", True),
     "server_cpu": Metric("Server CPU", "ms", True),
@@ -74,7 +76,11 @@ METRICS = {
 
 # Per workload, its primary metric and its secondary ones, as the spec's
 # Workloads table has them. What every result costs (COSTS) is secondary
-# everywhere.
+# everywhere. A scene that stamps its frames also has the share of them
+# never shown and its cadence (CADENCE), which
+# specs/008-native-architecture/realtime-transport.md, step 1, adds
+# beside the frame rate.
+CADENCE = ["scene_missed", "frame_interval_p95"]
 SCENARIOS = {
     "T1": ("latency_p95", ["latency_p50"]),
     "T2": ("completion", ["bytes_down", "server_cpu"]),
@@ -83,15 +89,15 @@ SCENARIOS = {
     "T5": ("rate", ["server_cpu"]),
     "G1": ("rate", ["server_cpu"]),
     "G2": ("latency_p95", ["latency_p50"]),
-    "G3": ("bytes_per_frame", ["cpu_per_frame", "fps"]),
-    "G4": ("bytes_per_frame", ["cpu_per_frame", "fps"]),
-    "G5": ("latency_p95", ["fps", "bytes_per_frame", "cpu_per_frame"]),
+    "G3": ("bytes_per_frame", ["cpu_per_frame", "fps", *CADENCE]),
+    "G4": ("bytes_per_frame", ["cpu_per_frame", "fps", *CADENCE]),
+    "G5": ("latency_p95", ["fps", *CADENCE, "bytes_per_frame", "cpu_per_frame"]),
     "G6": ("bytes_down", ["completion"]),
     "G7": ("first_frame_p95", ["first_frame_p50"]),
     "G8": ("latency_p95", ["latency_p50"]),
     "G9": ("latency_p95", ["bytes_down", "latency_p50"]),
-    "G10": ("fps", ["latency_p95", "bytes_per_frame", "cpu_per_frame"]),
-    "G11": ("fps", ["latency_p95", "bytes_per_frame", "cpu_per_frame"]),
+    "G10": ("fps", ["latency_p95", *CADENCE, "bytes_per_frame", "cpu_per_frame"]),
+    "G11": ("fps", ["latency_p95", *CADENCE, "bytes_per_frame", "cpu_per_frame"]),
 }
 COSTS = ["server_cpu", "server_mem", "client_cpu"]
 RUNTIME = ["occamyd_alloc", "occamyd_gc", "occamyd_heap", "occamyd_goroutines"]
@@ -103,6 +109,7 @@ SERVERS = {
     "guacd": ["guacd"],
     "occamy": ["occamy", "guacd"],
     "v1-native": ["occamy-v1"],
+    "v1-native-w2": ["occamy-v1"],
     "v1-native-nogfx": ["occamy-v1"],
     "v1-guacd": ["occamy-v1", "guacd"],
     "v1-guacd-gfx": ["occamy-v1-gfx", "guacd"],
@@ -124,11 +131,22 @@ class Family:
     baseline: str
     candidate: str
     correction: str  # "holm" or "bh", over the family's primary metrics
+    # targets says whether the 10x and 50 ms targets judge the family: they
+    # set Occamy against Guacamole, not one of Occamy's settings against
+    # another.
+    targets: bool = True
 
 
-# The comparisons. The essential plan has one family, confirmatory; the
-# full plan's (the spec's Analysis, Families) join it when it runs.
-FAMILIES = [Family("Guacamole to Occamy", "guacd", "v1-native", "holm")]
+# The comparisons, each made where both of its series are in the results.
+# The essential plan has one family, confirmatory; the full plan's (the
+# spec's Analysis, Families) join it when it runs. The frame window
+# compares the window of two frames before step 1 of
+# specs/008-native-architecture/realtime-transport.md with the window
+# from the path after it, on the same image in the same run.
+FAMILIES = [
+    Family("Guacamole to Occamy", "guacd", "v1-native", "holm"),
+    Family("Frame window", "v1-native-w2", "v1-native", "holm", targets=False),
+]
 
 ALPHA = 0.05
 TARGET_FACTOR = 10
@@ -143,6 +161,7 @@ COLORS = {
     "v1-guacd": ("#eda100", "#c98500"),
     "v1-guacd-gfx": ("#e87ba4", "#d55181"),
     "v1-native-nogfx": ("#008300", "#008300"),
+    "v1-native-w2": ("#6250d6", "#9085e9"),
 }
 THEMES = {
     "light": dict(surface="#fcfcfb", text="#0b0b0b", text2="#52514e", muted="#898781", grid="#e1e0d9", axis="#c3c2b7"),
@@ -174,6 +193,13 @@ def metrics_of(r):
         if frames > 0:
             m["fps"] = frames / secs
             m["bytes_per_frame"] = m["bytes_down"] / frames
+    # A scene's frames are those it showed, each counted once by its stamp,
+    # so the share it never showed is what the scene drew in the time less
+    # that; its cadence is the time between the frames it showed.
+    if (scene_fps := r.get("scene_fps", 0)) > 0 and secs > 0:
+        m["scene_missed"] = 100 * (1 - frames / (scene_fps * secs))
+    if fi := r.get("frame_interval_ms"):
+        m["frame_interval_p95"] = fi["p95"]
     services = server_services(r["series"])
     if cpu := r.get("cpu_ms"):
         m["server_cpu"] = sum(cpu.get(s, 0) for s in services)
@@ -361,7 +387,8 @@ def compare(values, families=FAMILIES):
                 p = rank_sum_p(a, b) if len(a) > 1 and len(b) > 1 else np.nan
                 rows.append(dict(family=fam.name, baseline=fam.baseline, candidate=fam.candidate, cell=cell,
                                  metric=metric, primary=metric == primary, n_baseline=len(a), n_candidate=len(b),
-                                 factor=est, lo=lo, hi=hi, coverage=cov, p=p, p_adjusted=np.nan))
+                                 factor=est, lo=lo, hi=hi, coverage=cov, p=p, p_adjusted=np.nan,
+                                 targets=fam.targets))
         tested = [r for r in rows if r["primary"] and np.isfinite(r["p"])]
         for r, q in zip(tested, adjust([r["p"] for r in tested], fam.correction)):
             r["p_adjusted"] = q
@@ -374,16 +401,23 @@ def significant(c):
 
 
 def tenfold(c):
-    return np.isfinite(c["lo"]) and c["lo"] >= TARGET_FACTOR
+    """Reports whether a comparison of a family that the targets judge
+    meets the 10x target."""
+    return c.get("targets", True) and np.isfinite(c["lo"]) and c["lo"] >= TARGET_FACTOR
 
 
 def latency_targets(summary, families=FAMILIES):
-    """Returns, per candidate and cell at N0 or N1 with a latency, whether
-    the upper bound of its L p95 is at most TARGET_MS."""
-    out = []
+    """Returns, per candidate of a family that the targets judge and cell at
+    N0 or N1 with a latency, whether the upper bound of its L p95 is at
+    most TARGET_MS."""
+    out, seen = [], set()
     for fam in families:
+        if not fam.targets:
+            continue
         for (series, cell, metric), s in summary.items():
-            if series == fam.candidate and metric == "latency_p95" and cell.net in ("N0", "N1"):
+            if (series == fam.candidate and metric == "latency_p95" and cell.net in ("N0", "N1")
+                    and (series, cell) not in seen):
+                seen.add((series, cell))
                 out.append(dict(series=series, cell=cell, met=np.isfinite(s["hi"]) and s["hi"] <= TARGET_MS, **s))
     return sorted(out, key=lambda t: t["cell"].order())
 
@@ -540,7 +574,7 @@ def bar_figure(path, metric, summary, series, theme):
 
 def factor_figure(path, fam, comparisons, theme):
     """Draws the family's primary factors with their 95% intervals, on a log
-    axis with lines at 1x and 10x."""
+    axis with a line at 1x, and at 10x where the targets judge it."""
     t, dark = THEMES[theme], theme == "dark"
     rows = [c for c in comparisons if c["family"] == fam.name and c["primary"] and np.isfinite(c["factor"])]
     rows.sort(key=lambda c: c["cell"].order())
@@ -554,7 +588,8 @@ def factor_figure(path, fam, comparisons, theme):
     ax.errorbar(est[ok], y[ok], xerr=[est[ok] - lo[ok], hi[ok] - est[ok]], fmt="none", ecolor=color,
                 elinewidth=2, capsize=0)
     ax.scatter(est, y, s=36, color=color, edgecolors=t["surface"], linewidths=1.5, zorder=3)
-    for at, style_ in ((1, "-"), (TARGET_FACTOR, "--")):
+    lines = ((1, "-"), (TARGET_FACTOR, "--")) if fam.targets else ((1, "-"),)
+    for at, style_ in lines:
         ax.axvline(at, color=t["muted"], linewidth=1, linestyle=style_, zorder=1)
         ax.annotate(f"{at}x", (at, 1.0), xycoords=("data", "axes fraction"), xytext=(3, 2),
                     textcoords="offset points", color=t["text2"], fontsize=8)
@@ -637,32 +672,29 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
             continue
         b, a = fam.baseline, fam.candidate
         correction = "Holm" if fam.correction == "holm" else "Benjamini–Hochberg"
-        lines += [
-            f"## {fam.name}: `{b}` to `{a}`",
-            "",
-            f"Primary metrics, {len(primary)} tests, {correction}-corrected at {ALPHA}. The {TARGET_FACTOR}x target"
-            f" is met where the interval's lower bound is at least {TARGET_FACTOR}.",
-            "",
-            f"| Cell | Network | Metric | `{b}` | `{a}` | Factor | p | p ({correction}) | {TARGET_FACTOR}x |",
-            "|---|---|---|---:|---:|---:|---:|---:|:-:|",
-        ]
+        intro = f"Primary metrics, {len(primary)} tests, {correction}-corrected at {ALPHA}."
+        header = f"| Cell | Network | Metric | `{b}` | `{a}` | Factor | p | p ({correction}) |"
+        rule = "|---|---|---|---:|---:|---:|---:|---:|"
+        if fam.targets:
+            intro += (f" The {TARGET_FACTOR}x target is met where the interval's lower bound is at least"
+                      f" {TARGET_FACTOR}.")
+            header += f" {TARGET_FACTOR}x |"
+            rule += ":-:|"
+        lines += [f"## {fam.name}: `{b}` to `{a}`", "", intro, "", header, rule]
         for c in primary:
             sb, sa = summary[(b, c["cell"], c["metric"])], summary[(a, c["cell"], c["metric"])]
             unit = METRICS[c["metric"]].unit
             lines.append(
                 f"| {c['cell'].label()} | {c['cell'].net} | {METRICS[c['metric']].label} ({unit})"
                 f" | {fmt_interval(sb['median'], sb['lo'], sb['hi'])} | {fmt_interval(sa['median'], sa['lo'], sa['hi'])}"
-                f" | {fmt_interval(c['factor'], c['lo'], c['hi'], 'x')} | {fmt_p(c['p'])} | {fmt_p(c['p_adjusted'])}"
-                f" | {'met' if tenfold(c) else 'no'} |"
+                f" | {fmt_interval(c['factor'], c['lo'], c['hi'], 'x')} | {fmt_p(c['p'])} | {fmt_p(c['p_adjusted'])} |"
+                + (f" {'met' if tenfold(c) else 'no'} |" if fam.targets else "")
             )
-        met = sum(tenfold(c) for c in primary)
         sig = sum(significant(c) for c in primary)
-        lines += [
-            "",
-            f"{sig} of {len(primary)} differences are significant after correction; the {TARGET_FACTOR}x target"
-            f" is met in {met} of {len(primary)}.",
-            "",
-        ]
+        outcome = f"{sig} of {len(primary)} differences are significant after correction"
+        if fam.targets:
+            outcome += f"; the {TARGET_FACTOR}x target is met in {sum(tenfold(c) for c in primary)} of {len(primary)}"
+        lines += ["", outcome + ".", ""]
         name = "factors-" + fam.name.lower().replace(" ", "-")
         lines += [picture(name, f"{fam.name}: factors on the primary metrics"), ""]
 

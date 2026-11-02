@@ -52,6 +52,35 @@ func (s series) serves(proto string) bool {
 	return s.protocols == nil || slices.Contains(s.protocols, proto)
 }
 
+// endpoints are where the series reach the stack: occamyd for v0, guacd
+// for the direct series, occamy-v1 for the v1 series, and occamy-v1-gfx
+// for v1-guacd-gfx.
+type endpoints struct{ occamy, guacd, v1, v1GFX string }
+
+// allSeries returns every series that the harness knows, in the order
+// -series lists them, reaching the stack at at. The v1 series show their
+// frames on d.
+func allSeries(at endpoints, d display) []series {
+	all := []series{
+		{Name: "occamy", target: at.occamy, open: openV0(dialOccamy)},
+		{Name: "guacd", target: at.guacd, open: openV0(dialGuacd)},
+	}
+	for _, v := range []struct{ name, target string }{
+		{"v1-native", at.v1},
+		{"v1-native-w2", at.v1},
+		{"v1-native-nogfx", at.v1},
+		{"v1-guacd", at.v1},
+		{"v1-guacd-gfx", at.v1GFX},
+	} {
+		conns := v1Connections[v.name]
+		all = append(all, series{
+			Name: v.name, target: v.target, open: openV1(conns, d, v1Windows[v.name]),
+			protocols: slices.Sorted(maps.Keys(conns)),
+		})
+	}
+	return all
+}
+
 // openV0 opens v0 sessions with dial.
 func openV0(dial func(ctx context.Context, addr string, cred config.JWT) (rawConn, error)) func(context.Context, string, string) (*session, error) {
 	return func(ctx context.Context, addr, proto string) (*session, error) {
@@ -72,7 +101,7 @@ func main() {
 		v1GFXAddr = flag.String("v1-gfx", "localhost:5640", "occamy-v1-gfx address for the v1-guacd-gfx series")
 		scen      = flag.String("scenarios", "all", "comma-separated scenario IDs, or all")
 		nets      = flag.String("net", "N0,N1,N2", "comma-separated network conditions")
-		seriesF   = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd, v1-native, v1-native-nogfx, v1-guacd, v1-guacd-gfx")
+		seriesF   = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd, v1-native, v1-native-w2, v1-native-nogfx, v1-guacd, v1-guacd-gfx")
 		quick     = flag.Bool("quick", false, "fewer samples and shorter scenarios, to check the setup")
 		ackHz     = flag.Float64("ack-hz", 60, "v1: the screen refresh at which a graphical frame is acknowledged, or 0 for at once, a diagnostic; the gate's numbers use 60")
 		runs      = flag.Int("runs", 1, "how many times to run everything; the table shows medians")
@@ -82,29 +111,14 @@ func main() {
 		out       = flag.String("out", "bench-results.json", "JSON output file, saved after each series and network condition")
 		planName  = flag.String("plan", "", "a plan file, such as bench/plans/compare.yaml, instead of -series, -net, -scenarios and -runs")
 		resume    = flag.Bool("resume", false, "continue -out if it exists, a file of the same plan, keeping its complete blocks")
-		maxLoad   = flag.Float64("max-load", 0, "before each series and network condition, wait until the host's 1-minute load is below this; 0 does not wait; set, it overrides the plan file's")
+		maxLoad   = flag.Float64("max-load", 0, "before each result, wait until the host's 1-minute load is below this; 0 does not wait; set, it overrides the plan file's")
 		loadWait  = flag.Duration("load-wait", 2*time.Hour, "how long -max-load waits before the harness saves and exits; set, it overrides the plan file's")
 		debugF    = flag.String("runtime", "", "occamyd debug listeners to read the runtime from, as service=address pairs, such as occamy-v1=localhost:5638")
 	)
 	flag.Parse()
 	log.SetFlags(log.Ltime)
 
-	all := []series{
-		{Name: "occamy", target: *addr, open: openV0(dialOccamy)},
-		{Name: "guacd", target: *guacdAddr, open: openV0(dialGuacd)},
-	}
-	for _, v := range []struct{ name, target string }{
-		{"v1-native", *v1Addr},
-		{"v1-native-nogfx", *v1Addr},
-		{"v1-guacd", *v1Addr},
-		{"v1-guacd-gfx", *v1GFXAddr},
-	} {
-		conns := v1Connections[v.name]
-		all = append(all, series{
-			Name: v.name, target: v.target, open: openV1(conns, newDisplay(*ackHz)),
-			protocols: slices.Sorted(maps.Keys(conns)),
-		})
-	}
+	all := allSeries(endpoints{occamy: *addr, guacd: *guacdAddr, v1: *v1Addr, v1GFX: *v1GFXAddr}, newDisplay(*ackHz))
 	debug, err := parseDebug(*debugF)
 	if err != nil {
 		log.Fatal(err)
@@ -213,9 +227,11 @@ type plan struct {
 // measure runs p, continuing prev, the results of the same plan, if it
 // is not nil. Each run measures every block once, so that a disturbance
 // on the host affects one run of a measurement rather than all of them,
-// in an order of its own (order). Before each block it waits for a quiet
-// host (waitLoad), and after it, it saves. It returns an error, with
-// what it measured, when the host stayed busy or a save failed.
+// in an order of its own (order). Before each result it waits for a
+// quiet host (waitLoad), and after each block, it saves. It returns an
+// error, with what it measured, when the host stayed busy or a save
+// failed; a block that the busy host stopped part-way is measured again
+// whole when the collection resumes (kept).
 func (p plan) measure(ctx context.Context, prev *report) (report, error) {
 	rep := report{
 		Started:    time.Now().UTC(),
@@ -239,18 +255,15 @@ func (p plan) measure(ctx context.Context, prev *report) (report, error) {
 			if done[b.key(run)] {
 				continue
 			}
-			if err := p.waitLoad(ctx); err != nil {
-				return rep, err
-			}
 			log.Printf("run %d of %d, block %d of %d: %s %s %s", run+1, rep.Runs, i+1, len(p.blocks), b.study, b.series.Name, b.net.Name)
-			stopped := p.measureBlock(ctx, &rep, run, b)
+			stopped, err := p.measureBlock(ctx, &rep, run, b)
 			if p.save != nil {
 				if err := p.save(&rep); err != nil {
 					return rep, err
 				}
 			}
-			if stopped {
-				return rep, nil
+			if err != nil || stopped {
+				return rep, err
 			}
 		}
 	}
@@ -258,8 +271,15 @@ func (p plan) measure(ctx context.Context, prev *report) (report, error) {
 }
 
 // measureBlock adds to rep each scenario of b and the first frame of each
-// of their protocols, and reports whether failfast stopped there.
-func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (stopped bool) {
+// of their protocols, each once the host is quiet (waitLoad), and reports
+// whether failfast stopped there. It returns the load gate's error if the
+// host stayed busy before one of them, with those before it in rep.
+//
+// The gate holds each result rather than each block: a block takes
+// minutes, and a scene such as G5 keeps several cores busy, so the load
+// that a block's own results raise would otherwise carry into the
+// results after them unchecked.
+func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (stopped bool, err error) {
 	px, err := startProxy(b.series.target, b.net)
 	if err != nil {
 		log.Fatal(err)
@@ -270,24 +290,30 @@ func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (
 		study: b.study, factor: b.factor, keys: p.keys, connects: p.connects,
 		cpu: newCPUSampler(p.engine, p.project), debug: p.debug,
 	}
-	stop := func(res result) bool {
+	// add adds the result that m measures once the host is quiet, and
+	// reports whether failfast stops the block there.
+	add := func(m func() result) (bool, error) {
+		if err := p.waitLoad(ctx); err != nil {
+			return false, err
+		}
+		res := m()
 		rep.Results = append(rep.Results, res)
-		return p.failfast && res.Error != ""
+		return p.failfast && res.Error != "", nil
 	}
 	for _, sc := range b.scenarios {
-		if stop(r.run(ctx, sc)) {
-			return true
+		if stop, err := add(func() result { return r.run(ctx, sc) }); stop || err != nil {
+			return stop, err
 		}
 	}
 	if !b.connect {
-		return false
+		return false, nil
 	}
 	for _, proto := range protocolsOf(b.scenarios) {
-		if stop(r.connect(ctx, proto)) {
-			return true
+		if stop, err := add(func() result { return r.connect(ctx, proto) }); stop || err != nil {
+			return stop, err
 		}
 	}
-	return false
+	return false, nil
 }
 
 // chooseScenarios returns the scenarios that spec names: comma-separated
@@ -483,6 +509,7 @@ type measurement struct {
 	up, down int64
 	drawn    int64
 	scene    int64
+	shown    int // the scene's frames shown, whose times are not the measured part's
 	decode   int64
 	cpu      map[string]time.Duration
 }
@@ -491,6 +518,7 @@ func (r *runner) measure(s *session) *measurement {
 	m := &measurement{r: r, s: s, cpu: r.cpu.sample()}
 	m.up, m.down = r.proxy.bytes()
 	m.drawn, m.scene, m.decode = s.drawn.Load(), s.sceneFrames.Load(), s.decode.Load()
+	m.shown = s.shown()
 	m.at = time.Now()
 	return m
 }
@@ -502,6 +530,7 @@ func (m *measurement) finish(res *result, end time.Time) {
 	res.BytesUp, res.BytesDown = up-m.up, down-m.down
 	res.Frames = m.s.drawn.Load() - m.drawn
 	res.sceneFrames = m.s.sceneFrames.Load() - m.scene
+	res.sceneShown = m.s.shownSince(m.shown)
 	res.DecodeMS = ms(time.Duration(m.s.decode.Load() - m.decode))
 	if after := m.r.cpu.sample(); after != nil && m.cpu != nil {
 		res.CPUMS = map[string]float64{}
@@ -520,6 +549,15 @@ type percentiles struct {
 	P95 float64 `json:"p95"`
 	P99 float64 `json:"p99"`
 	Max float64 `json:"max"`
+}
+
+// intervals returns the time between each of ts and the one before it.
+func intervals(ts []time.Time) []time.Duration {
+	var d []time.Duration
+	for i := 1; i < len(ts); i++ {
+		d = append(d, ts[i].Sub(ts[i-1]))
+	}
+	return d
 }
 
 // summarize returns nearest-rank percentiles, or nil without samples.
@@ -580,8 +618,13 @@ type result struct {
 	DecodeMS     float64 `json:"client_decode_ms,omitempty"`
 	// SceneFPS is the rate at which the scene animates, which bounds
 	// Frames/Seconds.
-	SceneFPS float64            `json:"scene_fps,omitempty"`
-	CPUMS    map[string]float64 `json:"cpu_ms,omitempty"`
+	SceneFPS float64 `json:"scene_fps,omitempty"`
+	// FrameInterval is a scene's cadence: the time between the first
+	// showings of consecutive frames of the scene, both shown in the
+	// measured part, in either protocol. Frames that never showed widen
+	// it; a cadence of 1/SceneFPS shows every frame evenly.
+	FrameInterval *percentiles       `json:"frame_interval_ms,omitempty"`
+	CPUMS         map[string]float64 `json:"cpu_ms,omitempty"`
 	// Memory, PIDs, Runtime and ClientCPUMS cover the whole scenario,
 	// with its session's start and end: each container's memory and
 	// processes, occamyd's runtime from its debug listener (-runtime),
@@ -594,7 +637,8 @@ type result struct {
 	Unsupported map[string]int `json:"unsupported,omitempty"`
 	Error       string         `json:"error,omitempty"`
 
-	sceneFrames int64 // the stamps counted, until sceneCount moves them
+	sceneFrames int64       // the stamps counted, until sceneCount moves them
+	sceneShown  []time.Time // when each was first shown, for sceneCount
 }
 
 // seriesLabel names r's series in a table, with its study and factor
@@ -614,14 +658,15 @@ func (r *result) seriesLabel() string {
 func (r *result) v1() bool { return strings.HasPrefix(r.Series, "v1-") }
 
 // sceneCount makes a scene's frames the count of its stamps, in both
-// protocols, and keeps the server's own count in ServerFrames. A scene
-// with no stamp to count measured nothing, which is an error, not a
-// frame rate of 0.
+// protocols, keeps the server's own count in ServerFrames, and gives the
+// scene's cadence (FrameInterval). A scene with no stamp to count
+// measured nothing, which is an error, not a frame rate of 0.
 func (r *result) sceneCount() {
 	if r.SceneFPS == 0 {
 		return
 	}
 	r.ServerFrames, r.Frames = r.Frames, r.sceneFrames
+	r.FrameInterval = summarize(intervals(r.sceneShown))
 	if r.Frames == 0 && r.Error == "" {
 		r.Error = fmt.Sprintf("none of the scene's %d frames showed a stamp", r.ServerFrames)
 		log.Printf("  %s", r.Error)
@@ -718,6 +763,7 @@ const (
 	// Numbers that go into notes.
 	colSignIn
 	colIdleGuacdCPU
+	colInterval
 	numCols
 )
 
@@ -737,6 +783,9 @@ func cells(r *result) [numCols]float64 {
 	if r.SignIn != nil {
 		c[colSignIn] = r.SignIn.P50
 	}
+	if r.FrameInterval != nil {
+		c[colInterval] = r.FrameInterval.P95
+	}
 	if r.Completion > 0 {
 		c[colCompletion] = r.Completion
 	}
@@ -746,13 +795,14 @@ func cells(r *result) [numCols]float64 {
 		c[colFPS] = float64(r.Frames) / r.Seconds
 	}
 	if r.CPUMS != nil {
-		native := r.Series == "v1-native" || r.Series == "v1-native-nogfx"
-		switch r.Series {
-		case "v1-native", "v1-native-nogfx": // guacd serves nothing of them
+		// guacd serves nothing of the native series.
+		native := strings.HasPrefix(r.Series, "v1-native")
+		switch {
+		case native:
 			c[colServerCPU] = r.CPUMS["occamy-v1"]
-		case "v1-guacd":
+		case r.Series == "v1-guacd":
 			c[colServerCPU] = r.CPUMS["occamy-v1"] + r.CPUMS["guacd"]
-		case "v1-guacd-gfx":
+		case r.Series == "v1-guacd-gfx":
 			c[colServerCPU] = r.CPUMS["occamy-v1-gfx"] + r.CPUMS["guacd"]
 		default:
 			c[colServerCPU] = r.CPUMS["occamy"] + r.CPUMS["guacd"]
@@ -782,6 +832,8 @@ const (
 	// idleGuacdNote gives guacd's CPU during a v1-native scenario, which
 	// guacd serves nothing of, so its server CPU leaves it out.
 	idleGuacdNote = "guacd %.0f ms CPU, not in server CPU"
+	// intervalNote gives a scene's cadence (result.FrameInterval).
+	intervalNote = "scene frames %.1f ms apart at p95"
 	// displayHeader states, above a table with v1 rows, when its frames
 	// count and how they are acknowledged.
 	displayHeader = "v1 frames count from when Next delivers them applied, less any wait for the reader at a refresh, as v0's from when the client applied them. v1 acknowledges a graphical frame %s, and a terminal's at once.\n"
@@ -835,6 +887,9 @@ func table(results []result) []row {
 		}
 		if fps := rs[0].SceneFPS; fps > 0 {
 			row.notes = append(row.notes, fmt.Sprintf("scene %g fps", fps))
+		}
+		if v := row.cells[colInterval]; !math.IsNaN(v) {
+			row.notes = append(row.notes, fmt.Sprintf(intervalNote, v))
 		}
 		if v := row.cells[colSignIn]; !math.IsNaN(v) {
 			row.notes = append(row.notes, fmt.Sprintf(signInNote, v))

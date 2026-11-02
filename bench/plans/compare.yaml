@@ -4,7 +4,7 @@
 #
 # Every run measures every block (a series under a network condition, in
 # a study) once, in an order drawn from the seed and the run. Before each
-# block the harness waits until the host's 1-minute load is below
+# result the harness waits until the host's 1-minute load is below
 # max_load, for up to load_wait; then it saves and exits, and the same
 # command resumes.
 

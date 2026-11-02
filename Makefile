@@ -127,7 +127,7 @@ bench: build
 # bench-compare collects the comparison benchmark of
 # specs/008-native-architecture/comparison-benchmark.md in one go: the
 # plan in bench/plans/compare.yaml, with occamyd's runtime, into
-# BENCH_OUT, saved after each block. Before each block it waits for a
+# BENCH_OUT, saved after each block. Before each result it waits for a
 # quiet host; if the host stays busy, it saves and exits, and running it
 # again resumes. It takes the variables of bench.
 BENCH_OUT ?= bench-compare.json
@@ -143,6 +143,15 @@ bench-essential:
 	$(MAKE) bench-compare BENCH_PLAN=bench/plans/essential.yaml BENCH_OUT=bench-essential.json
 .PHONY: bench-essential
 
+# bench-realtime-1 collects step 1 of
+# specs/008-native-architecture/realtime-transport.md, v1-native beside
+# v1-native-w2, about two hours of measuring
+# (bench/plans/realtime-1.yaml), as bench-compare does, into
+# bench-realtime-1.json.
+bench-realtime-1:
+	$(MAKE) bench-compare BENCH_PLAN=bench/plans/realtime-1.yaml BENCH_OUT=bench-realtime-1.json
+.PHONY: bench-realtime-1
+
 # bench-report analyses the comparison's results (BENCH_OUT) into tables,
 # tests and figures in BENCH_REPORT with bench/report.py, which uv runs
 # with its own numpy, scipy and matplotlib.
@@ -156,6 +165,12 @@ bench-report:
 bench-essential-report:
 	$(MAKE) bench-report BENCH_OUT=bench-essential.json BENCH_REPORT=docs/benchmarks/essential
 .PHONY: bench-essential-report
+
+# bench-realtime-1-report analyses step 1 of the real-time transport
+# into docs/benchmarks/realtime/1.
+bench-realtime-1-report:
+	$(MAKE) bench-report BENCH_OUT=bench-realtime-1.json BENCH_REPORT=docs/benchmarks/realtime/1
+.PHONY: bench-realtime-1-report
 
 # corpus records the frames the codec measurement works on
 # (bench/testdata/corpus/README.md) from the bench desktop with a terminal

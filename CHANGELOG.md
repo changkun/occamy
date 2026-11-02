@@ -24,9 +24,22 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   instead of 985, a photograph costs 108–122 KiB instead of 2.1–2.2 MiB,
   and a key on a still desktop shows in 4.7–7.3 ms instead of 16–19 at
   p95 ([docs/benchmarks.md](docs/benchmarks.md#the-essential-comparison)).
+- The benchmark measures a scene's cadence as well as its frame rate:
+  when each of its frames was first shown, the share never shown, and
+  the 95th percentile of the interval between those shown
+  ([docs/benchmarks.md](docs/benchmarks.md#what-is-measured)). A
+  `v1-native-w2` series offers the frame window of two frames that every
+  client agreed on before, so that `make bench-realtime-1` measures the
+  window sized from the path against it, on one image in one run, and
+  the analysis compares the two as a family of their own
+  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)).
 
 ### Changed
 
+- The benchmark's load gate holds each result rather than each block of
+  results, so that the load a scene leaves does not carry into the
+  results after it
+  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)).
 - On a long path, frames follow the screen's changes instead of two a
   round trip. The server and clients offer a frame window of 16, and the
   server keeps as many frames unacknowledged as cover the time an

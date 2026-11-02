@@ -1,0 +1,32 @@
+# Step 1 of specs/008-native-architecture/realtime-transport.md, the
+# frame window from the path, measured against the window of two frames
+# that every client agreed on before it: v1-native, whose client offers
+# the default and lets the server size the window, beside v1-native-w2,
+# whose client offers 2, on the same image in the same run. G5, a key
+# during full-screen motion, under N0, N1 and N2, where the window meets
+# the round trip; T1, T2 and G2 under N0 and N2 as guards. make
+# bench-realtime-1 collects it, and make bench-realtime-1-report
+# analyses it.
+#
+# 168 results, about two hours: the essential plan's 6 runs and 100 probe
+# keys a scenario, so that its guacd numbers of the same scenarios sit
+# beside these, and no G7 (connects: 0). Before each result the harness
+# waits until the host's 1-minute load is below max_load, for up to
+# load_wait; then it saves and exits, and the same command resumes.
+
+runs: 6
+seed: 20261102
+max_load: 8
+load_wait: 2h
+keys: 100
+connects: 0
+
+studies:
+  - study: matrix
+    series: [v1-native, v1-native-w2]
+    nets: [N0, N2]
+    scenarios: T1,T2,G2,G5
+  - study: matrix
+    series: [v1-native, v1-native-w2]
+    nets: [N1]
+    scenarios: G5

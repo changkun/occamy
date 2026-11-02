@@ -46,7 +46,7 @@ make bench BENCH_FLAGS="-scenarios T1 -net N1 -series occamy"
 |------|---------|---------|
 | `-scenarios` | `all` | Comma-separated scenario IDs |
 | `-net` | `N0,N1,N2` | Network conditions |
-| `-series` | `occamy,guacd` | `occamy` goes through occamyd; `guacd` connects to guacd directly; `v1-native`, `v1-native-nogfx`, `v1-guacd` and `v1-guacd-gfx` speak protocol v1 ([The v1 series](#the-v1-series)) |
+| `-series` | `occamy,guacd` | `occamy` goes through occamyd; `guacd` connects to guacd directly; `v1-native`, `v1-native-w2`, `v1-native-nogfx`, `v1-guacd` and `v1-guacd-gfx` speak protocol v1 ([The v1 series](#the-v1-series)) |
 | `-runs` | `1` | How many times to run everything; the table shows medians |
 | `-failfast` | off | Stop at the first measurement with an error, and exit non-zero; CI's runs set it |
 | `-quick` | off | A tenth of the samples and a sixth of the durations, to check the setup |
@@ -57,7 +57,7 @@ make bench BENCH_FLAGS="-scenarios T1 -net N1 -series occamy"
 | `-out` | `bench-results.json` | JSON output, saved after each series and network condition |
 | `-plan` | none | A plan file, such as `bench/plans/compare.yaml`, in place of `-series`, `-net`, `-scenarios` and `-runs` ([The comparison](#the-comparison)) |
 | `-resume` | off | Continue `-out`, if it exists and measures the same plan: keep its blocks that are complete and without errors, and measure the rest |
-| `-max-load`, `-load-wait` | `0`, `2h` | Before each series and network condition, wait until the host's 1-minute load is below `-max-load`, for up to `-load-wait`; then save and exit with status 2. Set, they override a plan file's |
+| `-max-load`, `-load-wait` | `0`, `2h` | Before each result, wait until the host's 1-minute load is below `-max-load`, for up to `-load-wait`; then save and exit with status 2. Set, they override a plan file's |
 | `-runtime` | none | occamyd debug listeners, as `service=address` pairs, to read occamyd's runtime from; `make bench BENCH_RUNTIME=1` turns on the v1 services' listeners and passes them |
 
 Server CPU needs podman: its container statistics report cumulative CPU
@@ -78,10 +78,13 @@ designs, in one go: the plan in `bench/plans/compare.yaml`, into
 `bench-compare.json` (`BENCH_OUT`), with occamyd's runtime. It measures in
 **blocks**, a series under a network condition in a study, and every run
 measures every block once, in an order drawn from the plan's seed and the
-run, so that drift on the host favours no series. Before each block it
-waits until the host's 1-minute load is below 8; if the load stays above
-for 2 hours, it saves and exits, and the same command resumes. It saves
-after every block, so an interrupted collection loses one block at most.
+run, so that drift on the host favours no series. Before each result it
+waits until the host's 1-minute load is below 8, so that the load one
+result leaves, as a scene's does, does not carry into the next; if the
+load stays above for 2 hours, it saves and exits, and the same command
+resumes. It saves after every block, so an interrupted collection loses
+one block at most: a block that it left part-way is measured again
+whole.
 
 Every result records, besides what a single run does:
 
@@ -117,16 +120,38 @@ many probe keys a latency scenario presses (200 by default), and
 `connects` how many sessions G7 opens (20), or none at 0. `BENCH_PLAN`
 runs `make bench-compare` with another plan file.
 
+```sh
+make bench-realtime-1
+```
+
+collects step 1 of the
+[real-time transport](../specs/008-native-architecture/realtime-transport.md),
+about two hours of measuring, into `bench-realtime-1.json`: `v1-native`
+beside `v1-native-w2`, which differ only in the frame window their
+client offers ([The v1 series](#the-v1-series)), on G5 over VNC and RDP
+under N0, N1 and N2, and on T1, T2 and G2 under N0 and N2, 6 runs of 100
+probe keys, without G7 (`bench/plans/realtime-1.yaml`).
+
 ### Analysis
 
 ```sh
-make bench-report            # bench-compare.json into docs/benchmarks/comparison/
-make bench-essential-report  # bench-essential.json into docs/benchmarks/essential/
+make bench-report             # bench-compare.json into docs/benchmarks/comparison/
+make bench-essential-report   # bench-essential.json into docs/benchmarks/essential/
+make bench-realtime-1-report  # bench-realtime-1.json into docs/benchmarks/realtime/1/
 ```
 
 analyses the results with `bench/report.py`, which
 [uv](https://docs.astral.sh/uv/) runs with its own numpy, scipy and
-matplotlib, as the spec's Analysis fixed it before any data. It writes:
+matplotlib, as the spec's Analysis fixed it before any data. It compares
+each family of series whose two series are both in the results:
+**Guacamole to Occamy**, `guacd` to `v1-native`, which the 10x and 50 ms
+targets judge, and **Frame window**, `v1-native-w2` to `v1-native`, the
+window of two frames against the window from the path, with the same
+tests and Holm's correction and without targets, since both are
+Occamy's. Besides the frame rate, a scene that stamps its frames (G3 to
+G5) reports the share of them never shown, 1 − frames ÷ (the scene's
+rate × seconds), and the 95th percentile of the interval between those
+shown, as secondary metrics. It writes:
 
 - `results.csv`: one row per run, cell and metric;
 - `summary.csv`: per series, cell and metric, the median of the runs with
@@ -175,6 +200,15 @@ answers each `sync` once the frame is applied, and sends a `nop` every
   of its own, or put several into one, so the JSON keeps its own count
   apart, as `server_frames`. In any other scenario, frames are the
   complete frames that drew.
+- **Cadence.** A frame rate cannot tell frames that arrive evenly from
+  frames that arrive in bursts with stalls between them. So the harness
+  also records when each of a scene's stamps was first shown, at the
+  time its frame counts from, and the JSON gives the time between
+  consecutive ones in the measured part as `frame_interval_ms`: its
+  percentiles in milliseconds, as `latency_ms` gives a latency's. A
+  scene shown whole and evenly at 30 fps has every interval at 33 ms; a
+  frame that never showed doubles one. The table notes the 95th
+  percentile on a scene's row.
 - **Server CPU** is the CPU time of the occamyd and guacd containers
   during the measured part of a scenario. guacd forks a process per
   connection, and the container's CPU time includes it.
@@ -245,11 +279,11 @@ it. The RDP server is xrdp with xorgxrdp, as configured by Debian.
 
 ## The v1 series
 
-Four series measure protocol v1 with the same scenarios, metrics,
+Five series measure protocol v1 with the same scenarios, metrics,
 network conditions and bench desktop as the baseline:
 
 ```sh
-make bench BENCH_FLAGS="-series v1-native,v1-native-nogfx,v1-guacd,v1-guacd-gfx -runs 3"
+make bench BENCH_FLAGS="-series v1-native,v1-native-w2,v1-native-nogfx,v1-guacd,v1-guacd-gfx -runs 3"
 ```
 
 **There are no v1 results yet.** What v1's full run waited for is in:
@@ -264,9 +298,19 @@ smoke run keep the v1 path working until the first full run.
 | Series | Backend | Protocols | RDP's GFX | Connections |
 |---|---|---|---|---|
 | `v1-native` | occamyd's own | SSH, VNC, RDP | on, as shipped | `ssh`, `vnc-native`, `rdp-native` |
+| `v1-native-w2` | occamyd's own | SSH, VNC, RDP | on | `ssh`, `vnc-native`, `rdp-native` |
 | `v1-native-nogfx` | occamyd's own | RDP | off | `rdp-native-nogfx` |
 | `v1-guacd` | the guacd bridge | VNC, RDP | off, as shipped | `vnc-guacd`, `rdp-guacd` |
 | `v1-guacd-gfx` | the guacd bridge | RDP | on | `rdp-guacd-gfx` |
+
+`v1-native-w2` is `v1-native` with a client that offers a frame window
+of 2, where `v1-native`'s offers the client core's default, 16, within
+which the server sizes the window from the path. Two frames is the window every client agreed
+on before the server sized it from the path
+([real-time transport](../specs/008-native-architecture/realtime-transport.md),
+step 1), so the two series measure that step's window against the one
+before it, on one image in one run. Its rows sit beside the verdict
+rather than count for the targets.
 
 The row of what a side ships is the verdict, and the other sits beside
 it, so that rows compare like with like: the table notes which each RDP
@@ -365,8 +409,8 @@ in v1. A v1 session runs as follows:
   v1 rows says so under it.
 - **Server CPU** is that of the `occamy-v1` container or, for
   `v1-guacd-gfx`, of `occamy-v1-gfx`, and guacd's for the two guacd
-  series. guacd serves nothing of the two native series, so its CPU
-  there is left out and given in a note.
+  series. guacd serves nothing of the native series, so its CPU there
+  is left out and given in a note.
 - **G7** starts at the stream's upgrade and ends at the first frame that
   shows known content of the remote, which is what the remote shows
   anyway, so that G7 changes nothing that T1 to T3 or the scenes
@@ -457,7 +501,7 @@ in v1. A v1 session runs as follows:
   verdict's row is not a justified one: decoder work then comes before
   v1.0, and the measurement shows where.
 
-CI runs all four v1 series quickly under N1, after the v0 smoke run, on
+CI runs every v1 series quickly under N1, after the v0 smoke run, on
 the same stack.
 
 ### What to measure again
@@ -979,8 +1023,9 @@ and over RDP 69.6.
 
 **The load gate.** 52 of the 192 results started with the host's load
 above 8. All are in the first four runs, and none at the start of a
-block: the gate holds each block until the load falls below 8, and the
-load rose within it, most often after G5, which keeps several cores
+block: the gate then held each block until the load fell below 8, and
+the load rose within it, most often after G5, which keeps several cores
 busy. Without them, 2–4 runs remain on a side, too few for an exact
 test to reach 5% after the correction, so 11 of the 14 significant
-differences lose significance; their factors move by at most 6%.
+differences lose significance; their factors move by at most 6%. The
+harness now holds each result instead.
