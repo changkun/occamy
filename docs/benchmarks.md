@@ -466,7 +466,10 @@ The stamp, the jitter and G7's end change what some scenarios measure,
 so those baselines below are out of date until they run again, and only
 new numbers compare with v1's. The rule: anything that changes what the
 remote shows, or how a scenario measures it, measures that baseline
-again.
+again. [The essential comparison](#the-essential-comparison) measured
+G2 and G5 again at N0 and N2, as `guacd`, and the [targets](#targets)
+of G2 and G5 come from those numbers; the rest of this list waits for
+the full comparison.
 
 | Scenarios | Measured again | Why |
 |---|---|---|
@@ -743,9 +746,14 @@ counterpart yet.
 each scenario's target at 10x better than the occamy series' baseline
 under the same network condition, at p95 for latencies. Where the
 baseline shows a bound that Occamy cannot beat, the target is that bound
-plus a margin instead. The tables below apply this to the medians above:
-the number before each arrow is the baseline, and the bold one the
-target.
+plus a margin instead. The tables below apply this to the medians above,
+and for G2 and G5 to `guacd`'s medians in
+[the essential comparison](#the-essential-comparison), which measured
+them again with the jitter and the stamp; occamyd adds nothing
+measurable to guacd ([Findings](#findings)). The number before each
+arrow is the baseline, and the bold one the target. G2 and G5 have no
+new baseline at N1 yet, which changes none of their targets there: each
+is the N0 target plus the RTT.
 
 The targets gate the release (owner, 2026-10-31): v1.0 waits until the
 benchmark shows native at least 10x better than guacd. It does not ship
@@ -765,7 +773,7 @@ some targets; this page must justify each such miss.
   update back, plus the time the link takes to carry the target's bytes.
 - **Frame rates** are 95% of the scene's rate, or as many frames of the
   target size as the link carries, whichever is fewer. Where the
-  baseline already does better, as G4 and G5 over VNC do, the target is
+  baseline already does better, as G4 over VNC does, the target is
   a floor not to fall below.
 - **Continuous scenes.** For G3 to G5, bytes and CPU are per delivered
   frame, so that dropping frames does not count as saving them, and the
@@ -785,10 +793,10 @@ some targets; this page must justify each such miss.
 | Scenario | N0 | N1 | N2 | Bound |
 |---|---|---|---|---|
 | T1 typing | 3.1 → **0.3** | 27.8 → **20.3** | 57.2 → **50.3** | the shell's echo, unmeasured |
-| G2 key, VNC | 15.6 → **5.5** | 39.4 → **25.5** | 69.4 → **55.5** | x11vnc: 3.5 ms |
-| G2 key, RDP | 17.6 → **1.8** | 41.5 → **21.8** | 71.7 → **51.8** | xrdp, unmeasured |
-| G5 key under load, VNC | 84.4 → **8.4** | 113 → **28.4** | 154 → **58.4** | x11vnc in the motion scene: 5.6 ms |
-| G5 key under load, RDP | 88.1 → **8.8** | 110 → **28.8** | 167 → **58.8** | xrdp, unmeasured |
+| G2 key, VNC | 16.1 → **5.5** | — → **25.5** | 69.5 → **55.5** | x11vnc: 3.5 ms |
+| G2 key, RDP | 19.0 → **1.9** | — → **21.9** | 72.3 → **51.9** | xrdp, unmeasured |
+| G5 key under load, VNC | 134 → **13.4** | — → **33.4** | 207 → **63.4** | x11vnc in the motion scene: 5.6 ms |
+| G5 key under load, RDP | 120 → **12.0** | — → **32.0** | 197 → **62.0** | xrdp, unmeasured |
 
 **Completion,** in ms:
 
@@ -821,10 +829,10 @@ some targets; this page must justify each such miss.
 | G4 drag, VNC | occamy + guacd CPU ms per frame | 11.1 → **1.1** | 11.2 → **1.1** | 11.8 → **1.1** |
 | G4 drag, RDP | KiB per frame | 40 → **4.0** | 40 → **4.0** | 40 → **4.0** |
 | G4 drag, RDP | occamy + guacd CPU ms per frame | 14.2 → **1.4** | 14.5 → **1.4** | 14.0 → **1.4** |
-| G5 motion, VNC | KiB per frame | 49 → **4.9** | 49 → **4.9** | 46 → **4.9** |
-| G5 motion, VNC | occamy + guacd CPU ms per frame | 40.4 → **4.0** | 41.0 → **4.0** | 39.7 → **4.0** |
-| G5 motion, RDP | KiB per frame | 66 → **6.6** | 66 → **6.6** | 56 → **6.6** |
-| G5 motion, RDP | occamy + guacd CPU ms per frame | 54.9 → **5.5** | 55.1 → **5.5** | 51.5 → **5.5** |
+| G5 motion, VNC | KiB per frame | 50.5 → **5.0** | — → **5.0** | 47.1 → **5.0** |
+| G5 motion, VNC | guacd CPU ms per frame | 52.4 → **5.2** | — → **5.2** | 52.6 → **5.2** |
+| G5 motion, RDP | KiB per frame | 66.2 → **6.6** | — → **6.6** | 51.9 → **6.6** |
+| G5 motion, RDP | guacd CPU ms per frame | 63.8 → **6.4** | — → **6.4** | 58.7 → **6.4** |
 
 **Frame rate,** in frames a second:
 
@@ -834,8 +842,8 @@ some targets; this page must justify each such miss.
 | G3 scroll, RDP | 62.5 | 19.6 → **59** | 17.8 → **59** | 1.5 → **47** |
 | G4 drag, VNC | 60 | 59.7 → **57** | 59.7 → **57** | 48.6 → **57** |
 | G4 drag, RDP | 60 | 24.2 → **57** | 24.5 → **57** | 24.1 → **57** |
-| G5 motion, VNC | 30 | 29.8 → **28** | 29.8 → **28** | 29.6 → **28** |
-| G5 motion, RDP | 30 | 24.8 → **28** | 24.8 → **28** | 24.8 → **28** |
+| G5 motion, VNC | 30 | 25.7 → **28** | — → **28** | 23.4 → **28** |
+| G5 motion, RDP | 30 | 23.5 → **28** | — → **28** | 23.5 → **28** |
 
 **G6's bytes** have one target for the photograph, 139 KiB: 10x below
 the median of the 26 runs in which guacd encoded it at least partly
@@ -848,8 +856,8 @@ seconds, 1–6 bytes a second each way, and occamyd's and guacd's CPU is
 within the spread between runs. The target is to stay there: keepalives
 only, and no CPU the harness can tell from that spread.
 
-**The 50 ms budget.** At N1 the baseline already meets it for T1
-(27.8 ms) and G2 (39.4 ms over VNC, 41.5 ms over RDP), and misses it by
+**The 50 ms budget.** At N1 the baseline of 2026-10-30 met it for T1
+(27.8 ms) and G2 (39.4 ms over VNC, 41.5 ms over RDP), and missed it by
 more than twice for G5 (113 ms over VNC, 110 ms over RDP). Every target
 above meets it at N1.
 
@@ -867,3 +875,112 @@ Four measurements would replace assumptions here: an RDP counterpart of
 server's connect time on its own; the shell's echo over SSH on its own;
 and an image-quality score for G6, so that its bytes compare at equal
 quality.
+
+## The essential comparison
+
+Measured on 2026-11-02 with `make bench-essential`: `guacd` against
+`v1-native`, under N0 and N2, on T1, T2, and G2, G5 and G6 over VNC and
+RDP, 6 runs of 100 probe keys, on an Apple M5 Pro with 18 CPUs and
+podman 6.0.2. guacd is the `guacamole/guacd:1.6.0` image, and occamyd
+was built from `3df7564`, RDP with GFX on as it ships. The collection
+took 2 h 18 min, much of it waiting at the load gate, and all 192
+results succeeded.
+[essential/report.md](./benchmarks/essential/report.md) holds every
+table and figure, and
+[essential/bench-essential.json](./benchmarks/essential/bench-essential.json)
+each run;
+
+```sh
+uv run bench/report.py docs/benchmarks/essential/bench-essential.json -o docs/benchmarks/essential
+```
+
+analyses it again.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/essential/factors-guacamole-to-occamy-dark.svg">
+  <img alt="The factor by which v1-native is better than guacd on each cell's primary metric, with 95% intervals, on a log axis with lines at 1x and 10x" src="benchmarks/essential/factors-guacamole-to-occamy.svg">
+</picture>
+
+14 of the 16 primary differences are significant after Holm's
+correction, each at the smallest p-value 6 runs allow. The two that are
+not are T1 at N0 and at N2: typing is as fast as guacd within the
+spread between runs.
+
+- **Bulk output (T2)** finishes in 18 ms instead of 985 at N0, 56x
+  [30, 66], and in 107 ms instead of 1043 at N2, 9.7x [9.3, 10.2], where
+  the RTT and the link take most of it. occamyd spends 18–21 ms of CPU
+  on it, where guacd spends about 950, and sends 5.7 KiB, or 0.7 at N2,
+  where guacd sends about 108.
+- **The photograph (G6)** costs 108–122 KiB instead of 2.1–2.2 MiB,
+  18–20x. guacd sent it all as PNG in 20 of its 24 runs, and partly
+  lossy, in 1.1–1.4 MiB, in the other 4; against its lossy median of
+  1.4 MiB in the [desktop baseline](#desktop-baseline) the factor is
+  about 11x. It
+  arrives 1.7–2.4x sooner at N0 and 5.6x at N2.
+- **A key on a still desktop (G2)** shows in 4.7 ms instead of 16.1
+  over VNC and in 7.3 ms instead of 19.0 over RDP at N0, 3.4x and 2.6x,
+  and 1.2x at N2, where the RTT is 50 of about 60 ms.
+- **A key during full-screen motion (G5)** shows in 46 ms instead of
+  134 over VNC and in 65 instead of 120 over RDP at N0, 3.0x and 1.9x,
+  and 1.7x at N2. occamyd sends 14 KiB a frame, against guacd's 47–66,
+  and spends 22–27 ms of CPU on a frame, against guacd's 52–64.
+
+### Against the targets
+
+Each cell is `v1-native`'s median with its 95% interval, against the
+[target](#targets). A target is met where the whole interval is on the
+right side of it.
+
+| Scenario | Metric | N0 | Target | N2 | Target |
+|---|---|---|---|---|---|
+| T1 typing | `L` p95 ms | 1.42 [1.28, 4.39] | 0.3, missed | 55.2 [53.4, 55.6] | 50.3, missed |
+| G2 key, VNC | `L` p95 ms | 4.73 [4.45, 7.44] | 5.5, missed | 58.3 [56.4, 58.5] | 55.5, missed |
+| G2 key, RDP | `L` p95 ms | 7.29 [6.70, 9.52] | 1.9, missed | 60.4 [60.3, 64.0] | 51.9, missed |
+| G5 key under load, VNC | `L` p95 ms | 46.1 [40.7, 50.0] | 13.4, missed | 128 [120, 149] | 63.4, missed |
+| G5 key under load, RDP | `L` p95 ms | 64.6 [62.1, 69.6] | 12.0, missed | 118 [116, 139] | 62.0, missed |
+| T2 `seq` | completion ms | 17.9 [16.2, 42.0] | 89.7, **met** | 107 [106, 109] | 143, **met** |
+| T2 `seq` | KiB down | 5.67 [4.21, 6.73] | 8.6, **met** | 0.70 [0.70, 0.70] | 8.2, **met** |
+| T2 `seq` | occamyd CPU ms | 20.5 [19.1, 25.2] | 88, **met** | 18.3 [17.2, 24.3] | 86, **met** |
+| G5 motion, VNC | KiB per frame | 14.2 [14.1, 14.4] | 5.0, missed | 14.9 [14.0, 17.3] | 5.0, missed |
+| G5 motion, RDP | KiB per frame | 14.2 [14.1, 14.3] | 6.6, missed | 14.1 [14.0, 14.4] | 6.6, missed |
+| G5 motion, VNC | occamyd CPU ms per frame | 22.0 [21.8, 23.5] | 5.2, missed | 26.9 [23.2, 35.7] | 5.2, missed |
+| G5 motion, RDP | occamyd CPU ms per frame | 22.3 [22.0, 24.9] | 6.4, missed | 22.1 [21.7, 24.9] | 6.4, missed |
+| G5 motion, VNC | frames/s | 29.2 [28.6, 29.4] | 28, **met** | 20.5 [15.3, 23.8] | 28, missed |
+| G5 motion, RDP | frames/s | 24.4 [23.9, 24.6] | 28, missed | 24.0 [23.2, 24.5] | 28, missed |
+| G6 photo, VNC | completion ms | 86.6 [75.7, 137] | 17.3, missed | 191 [173, 201] | 124, missed |
+| G6 photo, RDP | completion ms | 94.8 [88.8, 98.1] | 13.1, missed | 158 [149, 186] | 120, missed |
+| G6 photo, VNC | KiB down | 122 [122, 122] | 139, **met** | 122 [122, 132] | 139, **met** |
+| G6 photo, RDP | KiB down | 108 [108, 111] | 139, **met** | 110 [108, 115] | 139, **met** |
+
+11 of the 36 targets are met: all of T2's, G6's bytes, and G5's frame
+rate over VNC at N0. No miss is justified yet, so the gate is not met
+and guacd stays:
+
+- **T1, and G2 and G5 over RDP,** have bounds that are not measured: the
+  shell's echo and xrdp's reaction. Until they are, their targets stand.
+  At N0 both series answer a typed key within 1.3–4.4 ms, which leaves
+  little but the shell's echo; at N2 both sit about 5 ms above the RTT.
+- **G5** is Occamy's own: occamyd's encoding, which is not a bound that
+  justifies a miss ([decision 1](../specs/008-native-architecture/benchmark.md#decisions-of-2026-11-01)).
+  It is where the work goes next: 14 KiB and 22–27 ms of CPU a frame,
+  two to five times the targets, and the latency that follows them.
+- **G5's frame rate over RDP** is about 24 frames a second for both
+  series, as it was under every network in the baseline, which points
+  at xrdp's own rate; an RDP counterpart of `bench/vncprobe` would show
+  it. Over VNC at N2, `v1-native` delivers fewer frames than the link
+  allows.
+- **G6's completion** includes x11vnc's and xrdp's time to send the
+  photograph, which is not measured on its own.
+
+**The 50 ms budget,** judged at N0 because the plan has no N1, is met
+for T1 (upper bound 4.39 ms) and G2 (7.44 over VNC, 9.52 over RDP). G5
+misses it: over VNC the upper bound is 50.001 ms, with a median of 46.1,
+and over RDP 69.6.
+
+**The load gate.** 52 of the 192 results started with the host's load
+above 8. All are in the first four runs, and none at the start of a
+block: the gate holds each block until the load falls below 8, and the
+load rose within it, most often after G5, which keeps several cores
+busy. Without them, 2–4 runs remain on a side, too few for an exact
+test to reach 5% after the correction, so 11 of the 14 significant
+differences lose significance; their factors move by at most 6%.

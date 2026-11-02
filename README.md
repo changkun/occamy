@@ -42,6 +42,12 @@ for each remote and its own protocol, and differs in four ways:
   `occamyd`, a static Go binary without C, for Linux, macOS and
   Windows. There is no daemon to run beside it.
 
+Against guacd 1.6, on the same remotes and without network delay,
+Occamy prints 575 KiB of terminal output in 18 ms instead of about a
+second, sends a photograph in about 120 KiB instead of 2 MiB, and shows
+a key press on a still desktop in 5–7 ms instead of 16–19 ms
+([benchmarks](docs/benchmarks.md#the-essential-comparison)).
+
 ## Features
 
 - **Sharing.** Send a link that lets someone watch a session or take

@@ -59,11 +59,13 @@ Exploratory: the p-values are not corrected.
 | G2 rdp | N0 | Client CPU (ms) | 81.3 [77.9, 86.8] | 111 [102, 122] | 0.734x [0.672, 0.792] | 0.0022 |
 | G5 vnc | N0 | Delivered frames per second (frames/s) | 25.7 [25.4, 26.2] | 29.2 [28.6, 29.4] | 1.14x [1.12, 1.15] | 0.0022 |
 | G5 vnc | N0 | Bytes per frame (KiB) | 50.5 [50.2, 51.1] | 14.2 [14.1, 14.4] | 3.55x [3.53, 3.59] | 0.0022 |
+| G5 vnc | N0 | Server CPU per frame (ms) | 52.4 [51.0, 55.8] | 22.0 [21.8, 23.5] | 2.36x [2.24, 2.42] | 0.0022 |
 | G5 vnc | N0 | Server CPU (ms) | 13,716 [13,244, 15,623] | 6,400 [6,212, 6,798] | 2.13x [2.03, 2.30] | 0.0022 |
 | G5 vnc | N0 | Server memory, peak (MiB) | 40.0 [39.7, 41.4] | 51.8 [48.6, 55.2] | 0.777x [0.73, 0.82] | 0.0022 |
 | G5 vnc | N0 | Client CPU (ms) | 5,500 [5,309, 6,286] | 2,433 [2,356, 2,541] | 2.26x [2.18, 2.47] | 0.0022 |
 | G5 rdp | N0 | Delivered frames per second (frames/s) | 23.5 [21.6, 24.3] | 24.4 [23.9, 24.6] | 1.04x [1.01, 1.11] | 0.0087 |
 | G5 rdp | N0 | Bytes per frame (KiB) | 66.2 [65.1, 68.7] | 14.2 [14.1, 14.3] | 4.65x [4.58, 4.79] | 0.0022 |
+| G5 rdp | N0 | Server CPU per frame (ms) | 63.8 [60.2, 71.4] | 22.3 [22.0, 24.9] | 2.83x [2.60, 3.07] | 0.0022 |
 | G5 rdp | N0 | Server CPU (ms) | 15,309 [14,551, 17,343] | 5,439 [5,337, 5,918] | 2.75x [2.59, 2.95] | 0.0022 |
 | G5 rdp | N0 | Server memory, peak (MiB) | 72.0 [61.2, 74.6] | 68.3 [65.3, 69.4] | 1.05x [0.897, 1.09] | 0.3939 |
 | G5 rdp | N0 | Client CPU (ms) | 6,533 [6,085, 7,025] | 2,114 [2,070, 2,163] | 3.07x [2.88, 3.25] | 0.0022 |
@@ -90,11 +92,13 @@ Exploratory: the p-values are not corrected.
 | G2 rdp | N2 | Client CPU (ms) | 101 [96.9, 117] | 123 [111, 136] | 0.836x [0.741, 0.941] | 0.0087 |
 | G5 vnc | N2 | Delivered frames per second (frames/s) | 23.4 [20.6, 24.3] | 20.5 [15.3, 23.8] | 0.869x [0.745, 0.999] | 0.0411 |
 | G5 vnc | N2 | Bytes per frame (KiB) | 47.1 [45.9, 48.4] | 14.9 [14.0, 17.3] | 3.17x [2.72, 3.35] | 0.0022 |
+| G5 vnc | N2 | Server CPU per frame (ms) | 52.6 [50.5, 56.5] | 26.9 [23.2, 35.7] | 1.95x [1.58, 2.20] | 0.0022 |
 | G5 vnc | N2 | Server CPU (ms) | 20,521 [19,714, 22,420] | 5,484 [5,099, 5,848] | 3.74x [3.50, 4.05] | 0.0022 |
 | G5 vnc | N2 | Server memory, peak (MiB) | 40.3 [39.1, 41.3] | 50.5 [46.2, 65.0] | 0.798x [0.635, 0.851] | 0.0022 |
 | G5 vnc | N2 | Client CPU (ms) | 8,133 [7,989, 8,691] | 1,899 [1,856, 1,997] | 4.30x [4.15, 4.49] | 0.0022 |
 | G5 rdp | N2 | Delivered frames per second (frames/s) | 23.5 [22.3, 24.0] | 24.0 [23.2, 24.5] | 1.02x [0.99, 1.04] | 0.1320 |
 | G5 rdp | N2 | Bytes per frame (KiB) | 51.9 [49.5, 55.5] | 14.1 [14.0, 14.4] | 3.65x [3.50, 3.89] | 0.0022 |
+| G5 rdp | N2 | Server CPU per frame (ms) | 58.7 [56.8, 63.9] | 22.1 [21.7, 24.9] | 2.60x [2.35, 2.81] | 0.0022 |
 | G5 rdp | N2 | Server CPU (ms) | 22,306 [20,728, 25,060] | 5,370 [5,276, 5,909] | 4.00x [3.71, 4.50] | 0.0022 |
 | G5 rdp | N2 | Server memory, peak (MiB) | 53.0 [51.9, 60.8] | 67.5 [60.1, 72.1] | 0.802x [0.74, 0.877] | 0.0043 |
 | G5 rdp | N2 | Client CPU (ms) | 9,685 [8,651, 10,862] | 2,137 [2,088, 2,173] | 4.54x [4.09, 5.00] | 0.0022 |
@@ -203,6 +207,13 @@ Without them, these conclusions change, and are fragile:
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="bytes_per_frame-dark.svg">
   <img alt="Bytes per frame" src="bytes_per_frame.svg">
+</picture>
+
+### Server CPU per frame
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="cpu_per_frame-dark.svg">
+  <img alt="Server CPU per frame" src="cpu_per_frame.svg">
 </picture>
 
 ### Server CPU
