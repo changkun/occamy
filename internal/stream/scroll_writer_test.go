@@ -743,7 +743,7 @@ func TestScrollLossyQuality(t *testing.T) {
 		return img
 	}
 	at := func(q int) *pacer.Pacer {
-		return pacer.New(pacer.Config{Window: 1 << 20, MinQuality: q, MaxQuality: q, InitialCap: 1 << 30})
+		return pacer.New(pacer.Config{Window: 1 << 20, FixedWindow: true, MinQuality: q, MaxQuality: q, InitialCap: 1 << 30})
 	}
 	type result struct {
 		psnr                 float64

@@ -274,7 +274,7 @@ func shiftedPhoto(t *testing.T, dy int) *image.RGBA {
 
 // fixedQuality is a pacer at quality q.
 func fixedQuality(q int) *pacer.Pacer {
-	return pacer.New(pacer.Config{Window: 1 << 20, MinQuality: q, MaxQuality: q, InitialCap: 1 << 30})
+	return pacer.New(pacer.Config{Window: 1 << 20, FixedWindow: true, MinQuality: q, MaxQuality: q, InitialCap: 1 << 30})
 }
 
 // refinable returns the tiles the writer would refine now, were they

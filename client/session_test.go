@@ -333,6 +333,64 @@ func TestAcksHoldServer(t *testing.T) {
 	})
 }
 
+// With the window occamy offers, a caller that does not call Next still
+// holds the server back: at most the agreed window and the frame of an
+// input await an ack, and a terminal's at most a window of two, so that
+// bulk output coalesces.
+func TestOfferedWindowHoldsServer(t *testing.T) {
+	offer := stream.Config{Capabilities: protocol.Capabilities{FrameWindow: protocol.MaxFrameWindow}}
+	for _, tc := range []struct {
+		name string
+		b    func() backend.Backend // made inside the bubble
+		max  int
+	}{
+		{"graphical", func() backend.Backend { return backendtest.NewScreen(200, 150, 10*time.Millisecond) }, protocol.MaxFrameWindow + 1},
+		{"terminal", func() backend.Backend { return backendtest.NewTerminal(80, 24, time.Millisecond) }, protocol.DefaultFrameWindow + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				r := newRig(t, tc.b(), client.Options{}, offer)
+				if got := r.cl.Capabilities().FrameWindow; got != protocol.MaxFrameWindow {
+					t.Fatalf("agreed frame window %d, want %d", got, protocol.MaxFrameWindow)
+				}
+				collect(t, r.cl, 100*time.Millisecond)
+				time.Sleep(time.Second)
+				if held := frames(drain(t, r.cl, time.Millisecond)); len(held) == 0 || len(held) > tc.max {
+					t.Errorf("%d frames waiting after a second without Next, want 1 to %d", len(held), tc.max)
+				}
+			})
+		})
+	}
+}
+
+// On a long path, the window the server keeps follows the time an ack
+// takes, so frames follow the motion rather than two a round trip, as a
+// client that offers a window of two gets.
+func TestWindowFollowsLongPath(t *testing.T) {
+	offer := stream.Config{Capabilities: protocol.Capabilities{FrameWindow: protocol.MaxFrameWindow}}
+	rate := func(opts client.Options) float64 {
+		var n int
+		synctest.Test(t, func(t *testing.T) {
+			b := backendtest.NewScreen(200, 150, 5*time.Millisecond)
+			r, err := startRigOn(t, newPipe(25*time.Millisecond), b, opts, offer)
+			if err != nil {
+				t.Fatal(err)
+			}
+			collect(t, r.cl, time.Second)
+			n = len(frames(collect(t, r.cl, 2*time.Second)))
+		})
+		return float64(n) / 2
+	}
+	two, path := rate(client.Options{FrameWindow: 2}), rate(client.Options{})
+	if two > 45 {
+		t.Errorf("window 2 across 50 ms: %.0f frames a second, more than two a round trip", two)
+	}
+	if path < 1.5*two {
+		t.Errorf("path window across 50 ms: %.0f frames a second, window 2 %.0f", path, two)
+	}
+	t.Logf("across 50 ms: window 2 %.0f frames a second, path window %.0f", two, path)
+}
+
 // A slow caller neither blocks input nor deadlocks: the server sends it
 // fewer frames, and every goroutine exits after Close.
 func TestSlowConsumer(t *testing.T) {

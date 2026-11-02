@@ -43,7 +43,7 @@ func (e fixedEncoder) Still(dst, pix []byte, w, h, _, _, hi int) ([]byte, protoc
 // with the encoder as it was before it.
 func newRefineDirect(tb testing.TB, before bool) *direct {
 	d := newDirect(tb, true)
-	d.w.p = pacer.New(pacer.Config{Window: 1 << 20, InitialCap: 1 << 30})
+	d.w.p = pacer.New(pacer.Config{Window: 1 << 20, FixedWindow: true, InitialCap: 1 << 30})
 	if before {
 		d.w.enc = fixedEncoder{encoder.New([]protocol.Codec{protocol.CodecWebP, protocol.CodecDeflate})}
 		d.w.refineDelay = -1
@@ -333,7 +333,7 @@ func TestRefinementWaits(t *testing.T) {
 	w.refineDelay = 0
 	idle := func() {
 		// A pacer with nothing in flight: the harness never acknowledges.
-		w.p = pacer.New(pacer.Config{Window: 1 << 20})
+		w.p = pacer.New(pacer.Config{Window: 1 << 20, FixedWindow: true})
 	}
 	refine := func() (time.Duration, int) {
 		t.Helper()

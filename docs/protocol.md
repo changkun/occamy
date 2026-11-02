@@ -1294,12 +1294,18 @@ screen diff from the screen the client last got to the current one.
 ### The frame window
 
 The server keeps at most `frame_window` frames unacknowledged per
-viewer, 2 unless the handshake agrees otherwise. While the window is
-full, changes accumulate and go out as one frame once a `frame-ack`
-arrives. The client acknowledges every frame once it has shown it;
-an acknowledgement covers every earlier frame too, so it may skip one
-that a later acknowledgement covers. Terminal frames are windowed the
-same way, so bulk output coalesces instead of queueing.
+viewer, 2 unless the handshake agrees otherwise; occamy's server and
+clients offer 16. Within that bound the server keeps as many
+unacknowledged as cover the time an acknowledgement takes, at the rate
+a screen shows frames: 2 on a local link, about 5 across 50 ms. An
+acknowledgement is therefore a measurement rather than a barrier, and on
+a long path frames follow the screen's changes rather than two a round
+trip. While the window is full, changes accumulate and go out as one
+frame once a `frame-ack` arrives. The client acknowledges every frame
+once it has shown it; an acknowledgement covers every earlier frame
+too, so it may skip one that a later acknowledgement covers. A
+terminal's frames are windowed at most 2, whatever was agreed, so bulk
+output coalesces instead of queueing.
 
 The one exception is input: after the server applies an input from a
 viewer, the frame that carries its effect goes out at once, one beyond
@@ -1307,7 +1313,10 @@ the window if the window is full. A viewer therefore never has more than
 `frame_window` + 1 frames unacknowledged, and a client may close with
 `protocol-error` a server that sends more. A client that cannot show
 frames as fast as they come keeps them unacknowledged meanwhile, which
-holds the server back instead of queueing stale frames.
+holds the server back instead of queueing stale frames: by the window,
+by the bytes in flight, which only acknowledgements free, and by the
+decode time each acknowledgement reports, which spaces the server's
+frames.
 
 A client that stops acknowledging altogether is closed instead: the
 server keeps what it last sent each viewer, a terminal's whole screen,
