@@ -14,6 +14,7 @@ import (
 	"image"
 	"io"
 	"net/http"
+	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -205,9 +206,12 @@ type session struct {
 	drawn    atomic.Int64 // frames that drew
 	decode   atomic.Int64 // nanoseconds spent decoding and applying drawing
 	// sceneFrames counts the frames of the scene that the session showed,
-	// by their stamps. The reader alone uses stamp and stamped, the last
-	// stamp it read.
+	// by their stamps, and sceneShown holds when each was first shown, in
+	// that order, under sceneMu. The reader alone uses stamp and stamped,
+	// the last stamp it read.
 	sceneFrames atomic.Int64
+	sceneMu     sync.Mutex
+	sceneShown  []time.Time
 	stamp       uint16
 	stamped     bool
 	done        chan struct{}
@@ -250,16 +254,44 @@ func (s *session) emit(f frame, m *marker) {
 	s.frames <- f
 }
 
-// countStamp counts the frame of the scene that img shows, if it is new.
-// A frame of the server's that drew part of a stamp reads as none, and
-// the next one that completes it counts. It is called from the reader.
-func (s *session) countStamp(img *image.RGBA) {
+// countStamp counts the frame of the scene that img shows, if it is new,
+// as shown at at, when the session's frame that showed it counts from
+// (frame.at). A frame of the server's that drew part of a stamp reads as
+// none, and the next one that completes it counts. It is called from the
+// reader.
+//
+// A v1 frame that arrived while the reader applied the one before counts
+// from its arrival (counted), which may come before the frame before was
+// applied; but no client shows a frame before the one before it, so a
+// scene's frame is first shown no sooner than the frame before it.
+func (s *session) countStamp(img *image.RGBA, at time.Time) {
 	n, ok := probe.ReadStamp(img)
 	if !ok || s.stamped && n == s.stamp {
 		return
 	}
 	s.stamp, s.stamped = n, true
+	s.sceneMu.Lock()
+	if k := len(s.sceneShown); k > 0 && at.Before(s.sceneShown[k-1]) {
+		at = s.sceneShown[k-1]
+	}
+	s.sceneShown = append(s.sceneShown, at)
+	s.sceneMu.Unlock()
 	s.sceneFrames.Add(1)
+}
+
+// shown returns how many of the scene's frames the session has shown.
+func (s *session) shown() int {
+	s.sceneMu.Lock()
+	defer s.sceneMu.Unlock()
+	return len(s.sceneShown)
+}
+
+// shownSince returns when the scene's frames after the first i that the
+// session showed were first shown.
+func (s *session) shownSince(i int) []time.Time {
+	s.sceneMu.Lock()
+	defer s.sceneMu.Unlock()
+	return slices.Clone(s.sceneShown[min(i, len(s.sceneShown)):])
 }
 
 // v0Conn sends a v0 session's input as Guacamole instructions.
@@ -334,7 +366,7 @@ func (s *session) readV0(conn rawConn, display *guacamole.Display) {
 				marked = m.pixels(img, damage)
 			}
 			if damage.Overlaps(probe.StampArea) {
-				s.countStamp(img)
+				s.countStamp(img, now)
 			}
 			s.emit(frame{at: now, damage: damage, marked: marked}, m)
 		case "error":

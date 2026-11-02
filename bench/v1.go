@@ -387,7 +387,7 @@ func (s *session) readV1(c *v1Conn, d display) {
 						marked = m.pixels(img, damage)
 					}
 					if damage.Overlaps(probe.StampArea) {
-						s.countStamp(img)
+						s.countStamp(img, at)
 					}
 				})
 			}

@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net"
@@ -423,18 +424,71 @@ func TestMeasureDeltas(t *testing.T) {
 	echo(1000)
 	s.drawn.Store(5)
 	s.sceneFrames.Store(11)
+	s.sceneShown = []time.Time{s.start, s.start.Add(time.Millisecond)}
 	s.decode.Store(int64(7 * time.Millisecond))
 	m := r.measure(s)
 	echo(40)
 	s.drawn.Add(3)
 	s.sceneFrames.Add(2)
+	later := []time.Time{s.start.Add(40 * time.Millisecond), s.start.Add(70 * time.Millisecond)}
+	s.sceneShown = append(s.sceneShown, later...)
 	s.decode.Add(int64(2 * time.Millisecond))
 	var res result
 	m.finish(&res, m.at.Add(2*time.Second))
-	want := result{Seconds: 2, BytesUp: 40, BytesDown: 40, Frames: 3, sceneFrames: 2, DecodeMS: 2}
+	want := result{Seconds: 2, BytesUp: 40, BytesDown: 40, Frames: 3, sceneFrames: 2, DecodeMS: 2, sceneShown: later}
 	if res.Seconds != want.Seconds || res.BytesUp != want.BytesUp || res.BytesDown != want.BytesDown ||
-		res.Frames != want.Frames || res.sceneFrames != want.sceneFrames || res.DecodeMS != want.DecodeMS {
+		res.Frames != want.Frames || res.sceneFrames != want.sceneFrames || res.DecodeMS != want.DecodeMS ||
+		!slices.Equal(res.sceneShown, want.sceneShown) {
 		t.Errorf("measured %+v, want %+v", res, want)
+	}
+}
+
+// A scene's cadence is the time between the first showings of its
+// consecutive frames; a scenario without a scene, or a scene of one
+// frame, has none.
+func TestFrameInterval(t *testing.T) {
+	t0 := time.Now()
+	at := func(ms ...int) []time.Time {
+		var ts []time.Time
+		for _, m := range ms {
+			ts = append(ts, t0.Add(time.Duration(m)*time.Millisecond))
+		}
+		return ts
+	}
+	// 21 frames: 19 that came after 33 ms, and one after 100 ms, where
+	// two frames of the scene never showed.
+	shown := []int{0}
+	for i := range 19 {
+		shown = append(shown, 33*(i+1))
+	}
+	shown = append(shown, shown[len(shown)-1]+100)
+	r := result{SceneFPS: motionFPS, Frames: 40, sceneFrames: int64(len(shown)), sceneShown: at(shown...)}
+	r.sceneCount()
+	want := percentiles{N: 20, P50: 33, P95: 33, P99: 100, Max: 100}
+	if r.FrameInterval == nil || *r.FrameInterval != want {
+		t.Errorf("frame interval %+v, want %+v", r.FrameInterval, want)
+	}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"frame_interval_ms":{"n":20,"p50":33,"p95":33,"p99":100,"max":100}`) {
+		t.Errorf("JSON %s, want frame_interval_ms", raw)
+	}
+	rows := table([]result{{Scenario: "G5", Protocol: "vnc", Series: "guacd", Net: "N0", Seconds: 1, Frames: 21, SceneFPS: motionFPS, FrameInterval: &want}})
+	if note := fmt.Sprintf(intervalNote, 33.0); !slices.Contains(rows[0].notes, note) {
+		t.Errorf("notes %q, want %q", rows[0].notes, note)
+	}
+	for name, r := range map[string]result{
+		"no scene":     {Frames: 3, sceneFrames: 3, sceneShown: at(0, 33, 66)},
+		"one frame":    {SceneFPS: motionFPS, sceneFrames: 1, sceneShown: at(0)},
+		"none at all":  {SceneFPS: motionFPS},
+		"unknown time": {SceneFPS: motionFPS, sceneFrames: 2},
+	} {
+		r.sceneCount()
+		if r.FrameInterval != nil {
+			t.Errorf("%s: frame interval %+v, want none", name, r.FrameInterval)
+		}
 	}
 }
 

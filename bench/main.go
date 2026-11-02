@@ -497,6 +497,7 @@ type measurement struct {
 	up, down int64
 	drawn    int64
 	scene    int64
+	shown    int // the scene's frames shown, whose times are not the measured part's
 	decode   int64
 	cpu      map[string]time.Duration
 }
@@ -505,6 +506,7 @@ func (r *runner) measure(s *session) *measurement {
 	m := &measurement{r: r, s: s, cpu: r.cpu.sample()}
 	m.up, m.down = r.proxy.bytes()
 	m.drawn, m.scene, m.decode = s.drawn.Load(), s.sceneFrames.Load(), s.decode.Load()
+	m.shown = s.shown()
 	m.at = time.Now()
 	return m
 }
@@ -516,6 +518,7 @@ func (m *measurement) finish(res *result, end time.Time) {
 	res.BytesUp, res.BytesDown = up-m.up, down-m.down
 	res.Frames = m.s.drawn.Load() - m.drawn
 	res.sceneFrames = m.s.sceneFrames.Load() - m.scene
+	res.sceneShown = m.s.shownSince(m.shown)
 	res.DecodeMS = ms(time.Duration(m.s.decode.Load() - m.decode))
 	if after := m.r.cpu.sample(); after != nil && m.cpu != nil {
 		res.CPUMS = map[string]float64{}
@@ -534,6 +537,15 @@ type percentiles struct {
 	P95 float64 `json:"p95"`
 	P99 float64 `json:"p99"`
 	Max float64 `json:"max"`
+}
+
+// intervals returns the time between each of ts and the one before it.
+func intervals(ts []time.Time) []time.Duration {
+	var d []time.Duration
+	for i := 1; i < len(ts); i++ {
+		d = append(d, ts[i].Sub(ts[i-1]))
+	}
+	return d
 }
 
 // summarize returns nearest-rank percentiles, or nil without samples.
@@ -594,8 +606,13 @@ type result struct {
 	DecodeMS     float64 `json:"client_decode_ms,omitempty"`
 	// SceneFPS is the rate at which the scene animates, which bounds
 	// Frames/Seconds.
-	SceneFPS float64            `json:"scene_fps,omitempty"`
-	CPUMS    map[string]float64 `json:"cpu_ms,omitempty"`
+	SceneFPS float64 `json:"scene_fps,omitempty"`
+	// FrameInterval is a scene's cadence: the time between the first
+	// showings of consecutive frames of the scene, both shown in the
+	// measured part, in either protocol. Frames that never showed widen
+	// it; a cadence of 1/SceneFPS shows every frame evenly.
+	FrameInterval *percentiles       `json:"frame_interval_ms,omitempty"`
+	CPUMS         map[string]float64 `json:"cpu_ms,omitempty"`
 	// Memory, PIDs, Runtime and ClientCPUMS cover the whole scenario,
 	// with its session's start and end: each container's memory and
 	// processes, occamyd's runtime from its debug listener (-runtime),
@@ -608,7 +625,8 @@ type result struct {
 	Unsupported map[string]int `json:"unsupported,omitempty"`
 	Error       string         `json:"error,omitempty"`
 
-	sceneFrames int64 // the stamps counted, until sceneCount moves them
+	sceneFrames int64       // the stamps counted, until sceneCount moves them
+	sceneShown  []time.Time // when each was first shown, for sceneCount
 }
 
 // seriesLabel names r's series in a table, with its study and factor
@@ -628,14 +646,15 @@ func (r *result) seriesLabel() string {
 func (r *result) v1() bool { return strings.HasPrefix(r.Series, "v1-") }
 
 // sceneCount makes a scene's frames the count of its stamps, in both
-// protocols, and keeps the server's own count in ServerFrames. A scene
-// with no stamp to count measured nothing, which is an error, not a
-// frame rate of 0.
+// protocols, keeps the server's own count in ServerFrames, and gives the
+// scene's cadence (FrameInterval). A scene with no stamp to count
+// measured nothing, which is an error, not a frame rate of 0.
 func (r *result) sceneCount() {
 	if r.SceneFPS == 0 {
 		return
 	}
 	r.ServerFrames, r.Frames = r.Frames, r.sceneFrames
+	r.FrameInterval = summarize(intervals(r.sceneShown))
 	if r.Frames == 0 && r.Error == "" {
 		r.Error = fmt.Sprintf("none of the scene's %d frames showed a stamp", r.ServerFrames)
 		log.Printf("  %s", r.Error)
@@ -732,6 +751,7 @@ const (
 	// Numbers that go into notes.
 	colSignIn
 	colIdleGuacdCPU
+	colInterval
 	numCols
 )
 
@@ -750,6 +770,9 @@ func cells(r *result) [numCols]float64 {
 	}
 	if r.SignIn != nil {
 		c[colSignIn] = r.SignIn.P50
+	}
+	if r.FrameInterval != nil {
+		c[colInterval] = r.FrameInterval.P95
 	}
 	if r.Completion > 0 {
 		c[colCompletion] = r.Completion
@@ -797,6 +820,8 @@ const (
 	// idleGuacdNote gives guacd's CPU during a v1-native scenario, which
 	// guacd serves nothing of, so its server CPU leaves it out.
 	idleGuacdNote = "guacd %.0f ms CPU, not in server CPU"
+	// intervalNote gives a scene's cadence (result.FrameInterval).
+	intervalNote = "scene frames %.1f ms apart at p95"
 	// displayHeader states, above a table with v1 rows, when its frames
 	// count and how they are acknowledged.
 	displayHeader = "v1 frames count from when Next delivers them applied, less any wait for the reader at a refresh, as v0's from when the client applied them. v1 acknowledges a graphical frame %s, and a terminal's at once.\n"
@@ -850,6 +875,9 @@ func table(results []result) []row {
 		}
 		if fps := rs[0].SceneFPS; fps > 0 {
 			row.notes = append(row.notes, fmt.Sprintf("scene %g fps", fps))
+		}
+		if v := row.cells[colInterval]; !math.IsNaN(v) {
+			row.notes = append(row.notes, fmt.Sprintf(intervalNote, v))
 		}
 		if v := row.cells[colSignIn]; !math.IsNaN(v) {
 			row.notes = append(row.notes, fmt.Sprintf(signInNote, v))

@@ -666,6 +666,10 @@ func TestV1Stamps(t *testing.T) {
 			t.Errorf("after key %c, %d frames of the scene, want %d", c.key, got, c.want)
 		}
 	}
+	// Each was shown once, when the frame that drew it counts from.
+	if shown := s.shownSince(0); len(shown) != 2 || !shown[1].After(shown[0]) || shown[0].Before(s.start) {
+		t.Errorf("the scene's frames shown at %v, want two in order after the start", shown)
+	}
 	if err := s.close(); err != nil {
 		t.Error(err)
 	}
