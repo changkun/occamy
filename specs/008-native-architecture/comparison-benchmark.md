@@ -200,6 +200,7 @@ Every result keeps what [benchmark](benchmark.md) records, and adds:
 | `mem_mib` | Each container's memory at the end, and its peak over samples every 2 s |
 | `runtime` | occamyd's runtime from `/debug/vars` on its debug listener, before and after: goroutines, heap in use, GC cycles and pause time, bytes allocated, open files |
 | `client_cpu_ms` | The harness's own user and system CPU time; it includes the network emulation, which every series pays alike |
+| `frame_interval_ms` | In a scene, the percentiles of the time between the first showings of consecutive stamps in the measured part, added by [realtime-transport](realtime-transport.md), step 1 |
 | `viewers` | Per viewer in the sharing study: role, network, `L` percentiles, frames per second |
 | `breakdown` | Per probe in the breakdown study: `t1 − t0`, `t2 − t1`, `t3 − t2`, `t4 − t3` |
 
@@ -217,14 +218,16 @@ make bench-report             # analyses it into docs/benchmarks/comparison/
   load gate, and per study its series, networks, workloads and factor
   levels. `go run ./bench -plan bench/plans/compare.yaml` runs it; the
   flags of a single run stay as they are.
-- **Load gate.** Before each block the harness waits until the host's
+- **Load gate.** Before each result the harness waits until the host's
   1-minute load is below 8, for up to 2 hours. If it stays above, the
   harness saves what it has and exits; running the command again resumes.
-  Each result records the load, so the analysis can flag blocks whose
-  load rose above the gate during them.
+  Each result records the load, so the analysis can flag results that
+  started above the gate. (The gate was first checked before each block;
+  the essential plan's outcome below moved it.)
 - **Resume.** The harness saves after every block. On start, a results
   file of the same plan is continued: blocks complete without errors are
-  kept, others measured again. A file of another plan is refused.
+  kept, others measured again, a block the gate stopped part-way among
+  them. A file of another plan is refused.
 - **Stack.** `make bench-compare` starts the bench stack as `make bench`
   does. `COMPOSE_PROJECT_NAME`, `OCCAMY_IMAGE` and the port variables put a
   second stack beside another on a shared host.
@@ -358,7 +361,9 @@ and the report in `docs/benchmarks/essential/`.
   to reach 5% after correction, so 11 conclusions are fragile by this
   spec's definition, although their factors move by at most 6%. The
   full plan should check the gate before each result rather than each
-  block.
+  block. Done with [realtime-transport](realtime-transport.md), step 1:
+  the harness checks the gate before each result, with the same bound,
+  wait and resume.
 
 ## Not measured
 
