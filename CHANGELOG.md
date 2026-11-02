@@ -19,9 +19,8 @@ messages never queue behind tiles, while each viewer's queue is paced
 to its own link, so that a keystroke's update is not stuck behind a
 large frame. guacd is still used for telnet, and for a vnc or rdp
 connection that sets `backend: guacd`. A v0 file is served as before,
-under new paths. This is a beta: the benchmark against guacd has not
-run yet, and the API and the protocol may change before 1.0.0, which
-removes guacd and the v0 routes.
+under new paths. This is a beta: the API and the protocol may change
+before 1.0.0, which removes guacd and the v0 routes.
 
 ### Added
 
@@ -124,7 +123,6 @@ removes guacd and the v0 routes.
 - guacd's process for a connection can hang: it did once in 128
   connections on a very busy host. The session fails after 90 seconds
   and says why, but the process keeps running until guacd restarts.
-- No benchmark of v1 has run yet ([docs/benchmarks.md](docs/benchmarks.md)).
 
 ## [0.6.0] - 2026-10-30
 

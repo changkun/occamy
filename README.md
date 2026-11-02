@@ -33,14 +33,10 @@ for each remote and its own protocol, and differs in four ways:
 - **Input comes first.** Small messages never queue behind tiles, and
   each viewer has a short queue paced to its own connection, so a
   keystroke's update is not stuck behind a large frame, and a slow
-  viewer does not hold up the others. The goal is under 50 ms from
-  input to update.
+  viewer does not hold up the others.
 - **One process.** The VNC, RDP, SSH and Kubernetes clients run inside
   `occamyd`, a static Go binary without C, for Linux, macOS and
   Windows. There is no daemon to run beside it.
-
-The benchmark against Guacamole has not run yet, and 1.0.0 waits for it
-([benchmarks](./docs/benchmarks.md)).
 
 ## Features
 
