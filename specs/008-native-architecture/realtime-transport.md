@@ -288,6 +288,47 @@ JSON with its report, and `docs/benchmarks.md` gains a section that
 follows the steps: for each metric, the value at each step with its
 interval, and Guacamole's beside it.
 
+## Implementation notes: step 1
+
+- **Status.** The pacer, the offers and the docs are built (this PR);
+  the harness's part is in its own PR; the measurement follows both.
+- **Pacer.** `Pacer.Window` is `clamp(ceil((srtt + decode) / spacing) +
+  1, 2, Config.Window)` with `spacing = max(Interval(), 1/60 s)`. Before
+  the first ack `srtt` and `decode` are zero, so a viewer starts at 2
+  frames, as before, and grows once a round trip is measured. The
+  reported decode time runs from a frame's arrival to its ack, so it
+  includes the wait for the screen's refresh; the round trip does not.
+  `StartFrame` tests the cap on bytes before the frame limit, so a
+  refusal at both counts as waiting for the path; a refusal at the frame
+  limit alone ends any wait at the cap that was being counted.
+- **`Config.FixedWindow`** keeps `Window` frames from the start. Tests
+  that drive a writer without acks set it with `Window: 1 << 20`, which
+  meant an unlimited window before this step.
+- **Terminals.** `internal/stream.viewerPacer` keeps a terminal viewer's
+  window at most 2 whatever was agreed; the protocol allows it, since the
+  agreed window is a bound, not a promise.
+- **Offers.** `protocol.MaxFrameWindow` (16) is offered by
+  `server/streams.go`, by the Go client when `Options.FrameWindow` is
+  zero, and by the web client when `frameWindow` is unset or zero
+  (`MAX_FRAME_WINDOW`). The web client's backlog bound, three screens of
+  pixels per frame of the window plus two, becomes 216 bytes a pixel at
+  16, capped at 1 GiB; that still holds 17 frames of a 4K screen's raw
+  pixels (about 540 MiB), so a server within the window is never taken
+  for a broken one.
+- **Tests.** `TestWindowFollowsThePath` (the formula),
+  `TestWindowWaitIsNotPathWait` (fails before this step: quality fell to
+  30 from waiting on the window alone), `TestWindowDoesNotSetTheFrameRate`
+  (simulated N2, a scene that changes 60 times a second: 46.5 frames a
+  second with window 2, 69.7 with the path's, the input's p95 27.4 and
+  30.9 ms), client `TestWindowFollowsLongPath` (a 50 ms pipe: 40 frames a
+  second with window 2, 95 with the path's), `TestOfferedWindowHoldsServer`
+  (a caller that stops reading still holds the server back) and
+  `TestViewerPacerWindow`.
+- **Cost seen in simulation.** More frames in flight means the frame
+  after an input can queue behind more bytes at the bottleneck: 3.5 ms
+  more at the 95th percentile in the N2 simulation. The measurement
+  checks it on the real stack.
+
 ## Affects
 
 - Step 1: `internal/pacer`, `internal/stream`, `protocol/handshake.go`,

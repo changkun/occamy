@@ -41,7 +41,7 @@ var setLowWater = stream.SetLowWater
 
 // streamCapabilities are what occamyd offers a stream: the codecs that
 // internal/encoder sends, and an xterm-compatible terminal.
-var streamCapabilities = protocol.Capabilities{Codecs: encoder.Codecs(), Terminal: 1}
+var streamCapabilities = protocol.Capabilities{Codecs: encoder.Codecs(), Terminal: 1, FrameWindow: protocol.MaxFrameWindow}
 
 // newEncoder is a viewer's encoder for the codecs it agreed to, or nil
 // if it sends none of them, which stream.Serve closes with unsupported.

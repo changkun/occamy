@@ -491,6 +491,10 @@ func TestAgreed(t *testing.T) {
 			got.FrameWindow != want.FrameWindow || got.MaxMessageSize != want.MaxMessageSize || got.CacheSlots != want.CacheSlots {
 			t.Errorf("agreed %+v, want %+v", got, want)
 		}
+		// A client offers occamy's frame window unless told another.
+		if h := (client.Options{}).Hello(); h.Capabilities.FrameWindow != protocol.MaxFrameWindow {
+			t.Errorf("offered a frame window of %d by default, want %d", h.Capabilities.FrameWindow, protocol.MaxFrameWindow)
+		}
 		// A client without a cache offers neither the cached codec nor
 		// slots, and agrees to neither, whatever the server states.
 		if h := (client.Options{NoCache: true}).Hello(); h.Capabilities.CacheSlots != 0 || slices.Contains(h.Capabilities.Codecs, protocol.CodecCached) {

@@ -108,9 +108,12 @@ describe('handshake', () => {
   it('takes no frame window above its offer, whatever the server states', async () => {
     const offered = await open({ options: { frameWindow: 2 }, capabilities: { frameWindow: 9 } })
     expect(offered.s.capabilities.frameWindow).toBe(2)
-    // An unstated offer is the default, 2.
+    // An unstated offer is occamy's window, 16, so the server's smaller
+    // one holds.
     const unstated = await open({ capabilities: { frameWindow: 9 } })
-    expect(unstated.s.capabilities.frameWindow).toBe(2)
+    expect(unstated.s.capabilities.frameWindow).toBe(9)
+    const large = await open({ capabilities: { frameWindow: 200 } })
+    expect(large.s.capabilities.frameWindow).toBe(16)
   })
 
   it('takes the defaults for what neither side states', async () => {

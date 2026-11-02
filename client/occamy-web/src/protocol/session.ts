@@ -32,6 +32,7 @@ import {
   Codec,
   DEFAULT_FRAME_WINDOW,
   type Hello,
+  MAX_FRAME_WINDOW,
   type Message,
   Role,
   SessionClass,
@@ -134,7 +135,7 @@ export interface Options {
   maxTextureSize?: number
   /** Device pixels per CSS pixel in hundredths, such as 200; 0 states none (100). It only informs: occamyd does not act on it. */
   pixelRatio?: number
-  /** Unacknowledged frames the client allows; the server's default if 0. */
+  /** Unacknowledged frames the client allows; 16 (MAX_FRAME_WINDOW) if unset or 0. */
   frameWindow?: number
   /** The largest message the client takes, in bytes; 4 MiB by default, and at least 64 KiB. */
   maxMessageSize?: number
@@ -175,7 +176,7 @@ export function helloFor(options: Options, codecs: number[]): Hello {
   caps.maxTextureSize = options.maxTextureSize ?? 0
   caps.terminal = 1
   caps.pixelRatio = options.pixelRatio ?? 0
-  caps.frameWindow = options.frameWindow ?? 0
+  caps.frameWindow = options.frameWindow || MAX_FRAME_WINDOW
   caps.maxMessageSize = options.maxMessageSize ?? 0
   return {
     type: 'hello',
