@@ -7,6 +7,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -98,6 +99,54 @@ func TestEssentialPlan(t *testing.T) {
 	other.keys = 200
 	if err := p.continues(&report{Plan: other.record()}); err == nil {
 		t.Error("results with 200 keys continue a plan of 100")
+	}
+}
+
+// The plan of the real-time transport's step 1 measures v1-native and
+// v1-native-w2 on G5 over VNC and RDP under N0, N1 and N2, and on T1, T2
+// and G2 under N0 and N2: 168 results in 6 runs of 100 keys, without G7.
+func TestRealtime1Plan(t *testing.T) {
+	f, err := readPlanFile("plans/realtime-1.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Runs != 6 || f.Keys != 100 || f.Connects == nil || *f.Connects != 0 || f.MaxLoad != 8 || f.LoadWait != 2*time.Hour {
+		t.Errorf("runs %d, keys %d, connects %v, max_load %g, load_wait %v; want 6, 100, 0, 8 and 2h",
+			f.Runs, f.Keys, f.Connects, f.MaxLoad, f.LoadWait)
+	}
+	blocks, err := studyBlocks(f, testSeries())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells := map[string]bool{}
+	results := 0
+	for _, b := range blocks {
+		if b.connect {
+			t.Errorf("%s measures G7", b)
+		}
+		results += b.results()
+		for _, sc := range b.scenarios {
+			cells[fmt.Sprintf("%s %s %s %s", b.series.Name, sc.ID, sc.Protocol, b.net.Name)] = true
+		}
+	}
+	if results*f.Runs != 168 || len(cells) != 28 {
+		t.Errorf("%d results a run in %d cells, want 28 and 168 in all", results, len(cells))
+	}
+	for _, s := range []string{"v1-native", "v1-native-w2"} {
+		for _, net := range []string{"N0", "N1", "N2"} {
+			for _, proto := range []string{"vnc", "rdp"} {
+				if !cells[fmt.Sprintf("%s G5 %s %s", s, proto, net)] {
+					t.Errorf("no G5 over %s for %s under %s", proto, s, net)
+				}
+			}
+		}
+		for _, net := range []string{"N0", "N2"} {
+			for _, cell := range []string{"T1 ssh", "T2 ssh", "G2 vnc", "G2 rdp"} {
+				if !cells[fmt.Sprintf("%s %s %s", s, cell, net)] {
+					t.Errorf("no %s for %s under %s", cell, s, net)
+				}
+			}
+		}
 	}
 }
 
