@@ -12,6 +12,11 @@ routes carry after the upgrade is protocol v1, described in
 Where this document and the code disagree, the code is right and this
 document has a bug. `go test ./server` checks that every route has a
 section here, and that every section here is a route (`TestAPIDoc`).
+[openapi.yaml](openapi.yaml) describes the same routes in OpenAPI 3.1,
+for tools that generate clients or explore an API; `go test ./server`
+checks its operations against the routes, its schemas against the Go
+types of the bodies, and its error codes against the code's and this
+document's (`TestOpenAPI`).
 
 - [Overview](#overview)
 - [Authentication](#authentication)
