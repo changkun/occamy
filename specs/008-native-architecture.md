@@ -312,6 +312,7 @@ Each beta reruns the benchmark, which also covers #18.
 | 11 | [Native RDP backend](008-native-architecture/native-rdp-backend.md) | The backend over the RDP spike's client; channels, GFX without AVC, the Windows check | session-core, graphics-pipeline, rdp-strategy | large | validated |
 | 12 | [Native Kubernetes backend](008-native-architecture/native-kubernetes-backend.md) | A pod's terminal over the API server's exec channel protocols; credentials, certificate, names | session-core, native-ssh-backend, api-and-server-stack | medium | validated |
 | 13 | [Comparison benchmark](008-native-architecture/comparison-benchmark.md) | Guacamole against Occamy across workloads, networks, viewers and server load, collected in one go and analysed with tests and intervals | benchmark | xlarge | validated |
+| 14 | [Real-time pacing and transport](008-native-architecture/realtime-transport.md) | Frames paced by the path, not by acknowledgements; loss in the benchmark; order-independent tiles over WebTransport; cadence for watchers; a video path for motion; each step measured | protocol-v1, session-core, comparison-benchmark | xlarge | validated |
 
 ```mermaid
 graph LR
@@ -333,6 +334,9 @@ graph LR
   S --> K8S
   SSH --> K8S
   BM --> CMP[13 comparison benchmark]
+  P --> RT[14 real-time pacing and transport]
+  S --> RT
+  CMP --> RT
 ```
 
 **Recommended iteration order:** #10 first, so that the Guacamole
@@ -340,4 +344,5 @@ baseline exists before any encoding or pacing is built. Alongside it, #1,
 #2 and #3, the foundations; the protocol is the longest-lived contract.
 Then #4 and #5. Then #6, #7 and #8. The #9 evaluation spike can run at any
 time alongside; #11 follows it. #12 follows #5, whose terminal path it
-shares.
+shares. #14 follows #13's essential run, one step at a time,
+each measured before the next starts.
