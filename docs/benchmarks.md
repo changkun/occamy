@@ -304,8 +304,8 @@ smoke run keep the v1 path working until the first full run.
 | `v1-guacd-gfx` | the guacd bridge | RDP | on | `rdp-guacd-gfx` |
 
 `v1-native-w2` is `v1-native` with a client that offers a frame window
-of 2, where `v1-native`'s offers the client core's default and leaves
-the window to the server. Two frames is the window every client agreed
+of 2, where `v1-native`'s offers the client core's default, 16, within
+which the server sizes the window from the path. Two frames is the window every client agreed
 on before the server sized it from the path
 ([real-time transport](../specs/008-native-architecture/realtime-transport.md),
 step 1), so the two series measure that step's window against the one

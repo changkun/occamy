@@ -51,8 +51,8 @@ var v1Connections = map[string]map[string]string{
 }
 
 // v1Windows is the frame window that a v1 series' client offers where it
-// is not the client core's default, which a zero in
-// client.Options.FrameWindow leaves to the server. v1-native-w2 offers 2,
+// is not the client core's default, protocol.MaxFrameWindow, which a
+// zero in client.Options.FrameWindow offers. v1-native-w2 offers 2,
 // the window every client agreed on before the server sized it from the
 // path (specs/008-native-architecture/realtime-transport.md, step 1), so
 // that one image and one run measure the window before that step beside

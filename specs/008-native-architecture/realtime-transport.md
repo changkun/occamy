@@ -305,8 +305,8 @@ interval, and Guacamole's beside it.
 
 ## Implementation notes: step 1
 
-- **Status.** The pacer, the offers and the docs are built (this PR);
-  the harness's part is in its own PR; the measurement follows both.
+- **Status.** The pacer, the offers and the docs are built (#180), and
+  the harness (#181); the measurement follows.
 - **Pacer.** `Pacer.Window` is `clamp(ceil((srtt + decode) / spacing) +
   1, 2, Config.Window)` with `spacing = max(Interval(), 1/60 s)`. Before
   the first ack `srtt` and `decode` are zero, so a viewer starts at 2

@@ -1037,12 +1037,12 @@ func TestOpenV1(t *testing.T) {
 			t.Errorf("marked a frame after %v, before the prompt after %v", d, promptAfter)
 		}
 	})
-	// v1-native's client offers the client core's default window, which
-	// the server sizes, and v1-native-w2's offers 2, on the same
-	// connection.
+	// v1-native's client offers the client core's default window,
+	// protocol.MaxFrameWindow, within which the server sizes its own, and
+	// v1-native-w2's offers 2, on the same connection.
 	t.Run("window", func(t *testing.T) {
 		all := allSeries(endpoints{v1: addr}, display{})
-		for name, want := range map[string]uint8{"v1-native": 0, "v1-native-w2": 2} {
+		for name, want := range map[string]uint8{"v1-native": protocol.MaxFrameWindow, "v1-native-w2": 2} {
 			i := slices.IndexFunc(all, func(s series) bool { return s.Name == name })
 			if i < 0 {
 				t.Fatalf("no series %s", name)

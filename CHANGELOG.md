@@ -40,9 +40,6 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   results, so that the load a scene leaves does not carry into the
   results after it
   ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)).
-
-### Changed
-
 - On a long path, frames follow the screen's changes instead of two a
   round trip. The server and clients offer a frame window of 16, and the
   server keeps as many frames unacknowledged as cover the time an
