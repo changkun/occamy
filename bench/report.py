@@ -691,10 +691,10 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
                 + (f" {'met' if tenfold(c) else 'no'} |" if fam.targets else "")
             )
         sig = sum(significant(c) for c in primary)
-        verdict = f"{sig} of {len(primary)} differences are significant after correction"
+        outcome = f"{sig} of {len(primary)} differences are significant after correction"
         if fam.targets:
-            verdict += f"; the {TARGET_FACTOR}x target is met in {sum(tenfold(c) for c in primary)} of {len(primary)}"
-        lines += ["", verdict + ".", ""]
+            outcome += f"; the {TARGET_FACTOR}x target is met in {sum(tenfold(c) for c in primary)} of {len(primary)}"
+        lines += ["", outcome + ".", ""]
         name = "factors-" + fam.name.lower().replace(" ", "-")
         lines += [picture(name, f"{fam.name}: factors on the primary metrics"), ""]
 
