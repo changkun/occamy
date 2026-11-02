@@ -143,6 +143,20 @@ bench-essential:
 	$(MAKE) bench-compare BENCH_PLAN=bench/plans/essential.yaml BENCH_OUT=bench-essential.json
 .PHONY: bench-essential
 
+# bench-report analyses the comparison's results (BENCH_OUT) into tables,
+# tests and figures in BENCH_REPORT with bench/report.py, which uv runs
+# with its own numpy, scipy and matplotlib.
+BENCH_REPORT ?= docs/benchmarks/comparison
+bench-report:
+	uv run bench/report.py $(BENCH_OUT) -o $(BENCH_REPORT)
+.PHONY: bench-report
+
+# bench-essential-report analyses the essential comparison into
+# docs/benchmarks/essential.
+bench-essential-report:
+	$(MAKE) bench-report BENCH_OUT=bench-essential.json BENCH_REPORT=docs/benchmarks/essential
+.PHONY: bench-essential-report
+
 # corpus records the frames the codec measurement works on
 # (bench/testdata/corpus/README.md) from the bench desktop with a terminal
 # and a browser added.

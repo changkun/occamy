@@ -117,6 +117,33 @@ many probe keys a latency scenario presses (200 by default), and
 `connects` how many sessions G7 opens (20), or none at 0. `BENCH_PLAN`
 runs `make bench-compare` with another plan file.
 
+### Analysis
+
+```sh
+make bench-report            # bench-compare.json into docs/benchmarks/comparison/
+make bench-essential-report  # bench-essential.json into docs/benchmarks/essential/
+```
+
+analyses the results with `bench/report.py`, which
+[uv](https://docs.astral.sh/uv/) runs with its own numpy, scipy and
+matplotlib, as the spec's Analysis fixed it before any data. It writes:
+
+- `results.csv`: one row per run, cell and metric;
+- `summary.csv`: per series, cell and metric, the median of the runs with
+  an exact 95% interval from order statistics;
+- `comparisons.csv`: per pair of series, cell and metric, the factor by
+  which the second is better (the Hodges–Lehmann estimate of their ratio,
+  with its exact 95% interval), the exact permutation p-value of the rank
+  sum, and on primary metrics the p-value corrected over the family;
+- `report.md`: the tables, the 10x and 50 ms targets, occamyd's runtime,
+  the conclusions that change without the results measured above the
+  load gate, and the figures: each metric's medians as bars with their
+  intervals, and the factors on a log axis, as SVG in light and dark.
+
+`uv run bench/report.py results.json -o dir` analyses any results file,
+and `uv run bench/report_test.py` tests the analysis on synthetic results
+with known answers.
+
 ## What is measured
 
 The harness is a client. It decodes every image into a framebuffer,

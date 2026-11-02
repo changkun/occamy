@@ -30,3 +30,4 @@
 /bench-results.json
 /bench-compare.json
 /bench-essential.json
+__pycache__/

@@ -273,8 +273,9 @@ numbers.
   95% interval from resampling the runs; between series, the ratio of the
   slopes with its interval. Capacity: the most sessions at which the upper
   bound of `L` p95 stays at most 50 ms.
-- **Sensitivity.** The same analysis without blocks whose load rose above
-  the gate during them; a conclusion that changes is reported as fragile.
+- **Sensitivity.** The same analysis without the results that started
+  with the host's load above the gate; a conclusion that changes is
+  reported as fragile.
 
 ### Figures
 
@@ -299,8 +300,10 @@ In this order, one pull request each, each leaving `make bench` working:
    v0 and v1; T4, T5, G8 to G12.
 3. **Sharing and scale.**
 4. **Breakdown:** the relay, the published ports and the relay connections.
-5. **Analysis:** `go run ./bench -analyze`, `make bench-report`: tables,
-   tests and figures, tested on synthetic results with known answers.
+5. **Analysis:** `bench/report.py`, a Python script that uv runs with
+   numpy, scipy and matplotlib, and `make bench-report`: tables, tests and
+   figures, tested on synthetic results with known answers
+   (`bench/report_test.py`).
 6. **The run and its results:** `docs/benchmarks.md`,
    [benchmark](benchmark.md)'s verdicts, the CHANGELOG, and a sentence in
    the README once there are numbers.
@@ -327,7 +330,8 @@ full plan after it: `bench/plans/essential.yaml`, `make bench-essential`.
 Its single family, `guacd` to `v1-native` on each cell's primary metric,
 is confirmatory and Holm-corrected; secondary metrics get intervals and
 unadjusted p-values. The analysis is a Python script over the results
-(`bench/report.py`), with numpy, scipy and matplotlib.
+(`bench/report.py`), with numpy, scipy and matplotlib;
+`make bench-essential-report` writes it into `docs/benchmarks/essential/`.
 
 ## Not measured
 

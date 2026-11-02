@@ -16,7 +16,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   runtime and the harness's own CPU, and two slower networks, N3 (100 ms,
   5 Mbit/s) and N4 (250 ms, 1 Mbit/s)
   ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)), and
-  `make bench-essential`, an hour's subset of it.
+  `make bench-essential`, an hour's subset of it. `make bench-report`
+  analyses the results into tables, exact tests and figures with 95%
+  intervals ([docs/benchmarks.md](docs/benchmarks.md#analysis)).
 
 ## [1.0.0-beta.1] - 2026-11-02
 
