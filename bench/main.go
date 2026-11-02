@@ -52,6 +52,35 @@ func (s series) serves(proto string) bool {
 	return s.protocols == nil || slices.Contains(s.protocols, proto)
 }
 
+// endpoints are where the series reach the stack: occamyd for v0, guacd
+// for the direct series, occamy-v1 for the v1 series, and occamy-v1-gfx
+// for v1-guacd-gfx.
+type endpoints struct{ occamy, guacd, v1, v1GFX string }
+
+// allSeries returns every series that the harness knows, in the order
+// -series lists them, reaching the stack at at. The v1 series show their
+// frames on d.
+func allSeries(at endpoints, d display) []series {
+	all := []series{
+		{Name: "occamy", target: at.occamy, open: openV0(dialOccamy)},
+		{Name: "guacd", target: at.guacd, open: openV0(dialGuacd)},
+	}
+	for _, v := range []struct{ name, target string }{
+		{"v1-native", at.v1},
+		{"v1-native-w2", at.v1},
+		{"v1-native-nogfx", at.v1},
+		{"v1-guacd", at.v1},
+		{"v1-guacd-gfx", at.v1GFX},
+	} {
+		conns := v1Connections[v.name]
+		all = append(all, series{
+			Name: v.name, target: v.target, open: openV1(conns, d, v1Windows[v.name]),
+			protocols: slices.Sorted(maps.Keys(conns)),
+		})
+	}
+	return all
+}
+
 // openV0 opens v0 sessions with dial.
 func openV0(dial func(ctx context.Context, addr string, cred config.JWT) (rawConn, error)) func(context.Context, string, string) (*session, error) {
 	return func(ctx context.Context, addr, proto string) (*session, error) {
@@ -72,7 +101,7 @@ func main() {
 		v1GFXAddr = flag.String("v1-gfx", "localhost:5640", "occamy-v1-gfx address for the v1-guacd-gfx series")
 		scen      = flag.String("scenarios", "all", "comma-separated scenario IDs, or all")
 		nets      = flag.String("net", "N0,N1,N2", "comma-separated network conditions")
-		seriesF   = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd, v1-native, v1-native-nogfx, v1-guacd, v1-guacd-gfx")
+		seriesF   = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd, v1-native, v1-native-w2, v1-native-nogfx, v1-guacd, v1-guacd-gfx")
 		quick     = flag.Bool("quick", false, "fewer samples and shorter scenarios, to check the setup")
 		ackHz     = flag.Float64("ack-hz", 60, "v1: the screen refresh at which a graphical frame is acknowledged, or 0 for at once, a diagnostic; the gate's numbers use 60")
 		runs      = flag.Int("runs", 1, "how many times to run everything; the table shows medians")
@@ -89,22 +118,7 @@ func main() {
 	flag.Parse()
 	log.SetFlags(log.Ltime)
 
-	all := []series{
-		{Name: "occamy", target: *addr, open: openV0(dialOccamy)},
-		{Name: "guacd", target: *guacdAddr, open: openV0(dialGuacd)},
-	}
-	for _, v := range []struct{ name, target string }{
-		{"v1-native", *v1Addr},
-		{"v1-native-nogfx", *v1Addr},
-		{"v1-guacd", *v1Addr},
-		{"v1-guacd-gfx", *v1GFXAddr},
-	} {
-		conns := v1Connections[v.name]
-		all = append(all, series{
-			Name: v.name, target: v.target, open: openV1(conns, newDisplay(*ackHz)),
-			protocols: slices.Sorted(maps.Keys(conns)),
-		})
-	}
+	all := allSeries(endpoints{occamy: *addr, guacd: *guacdAddr, v1: *v1Addr, v1GFX: *v1GFXAddr}, newDisplay(*ackHz))
 	debug, err := parseDebug(*debugF)
 	if err != nil {
 		log.Fatal(err)
@@ -746,13 +760,14 @@ func cells(r *result) [numCols]float64 {
 		c[colFPS] = float64(r.Frames) / r.Seconds
 	}
 	if r.CPUMS != nil {
-		native := r.Series == "v1-native" || r.Series == "v1-native-nogfx"
-		switch r.Series {
-		case "v1-native", "v1-native-nogfx": // guacd serves nothing of them
+		// guacd serves nothing of the native series.
+		native := strings.HasPrefix(r.Series, "v1-native")
+		switch {
+		case native:
 			c[colServerCPU] = r.CPUMS["occamy-v1"]
-		case "v1-guacd":
+		case r.Series == "v1-guacd":
 			c[colServerCPU] = r.CPUMS["occamy-v1"] + r.CPUMS["guacd"]
-		case "v1-guacd-gfx":
+		case r.Series == "v1-guacd-gfx":
 			c[colServerCPU] = r.CPUMS["occamy-v1-gfx"] + r.CPUMS["guacd"]
 		default:
 			c[colServerCPU] = r.CPUMS["occamy"] + r.CPUMS["guacd"]

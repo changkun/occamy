@@ -212,6 +212,7 @@ func TestGFXRows(t *testing.T) {
 		verdict bool
 	}{
 		"v1-native":       {"GFX on, as shipped: the verdict", `"gfx":true,"verdict":true`, 20, true, true},
+		"v1-native-w2":    {"GFX on, like for like beside the verdict", `"gfx":true`, 20, true, false},
 		"v1-native-nogfx": {"GFX off, like for like beside the verdict", `"gfx":false`, 20, true, false},
 		"v1-guacd":        {"GFX off, as shipped: the verdict", `"gfx":false,"verdict":true`, 320, false, true},
 		"v1-guacd-gfx":    {"GFX on, like for like beside the verdict", `"gfx":true`, 350, false, false},

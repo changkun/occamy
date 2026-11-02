@@ -18,14 +18,27 @@ import (
 	"time"
 )
 
-// testSeries are series by the names of the harness's, serving what they
-// serve, for plans that do not measure.
+// testSeries are the harness's series, serving what they serve, for plans
+// that do not measure.
 func testSeries() []series {
-	return []series{
-		{Name: "occamy"}, {Name: "guacd"}, {Name: "v1-native"},
-		{Name: "v1-native-nogfx", protocols: []string{"rdp"}},
-		{Name: "v1-guacd", protocols: []string{"rdp", "vnc"}},
-		{Name: "v1-guacd-gfx", protocols: []string{"rdp"}},
+	return allSeries(endpoints{}, display{})
+}
+
+// The harness knows every series, each serving its protocols.
+func TestAllSeries(t *testing.T) {
+	want := map[string][]string{
+		"occamy": nil, "guacd": nil,
+		"v1-native": {"rdp", "ssh", "vnc"}, "v1-native-w2": {"rdp", "ssh", "vnc"},
+		"v1-native-nogfx": {"rdp"}, "v1-guacd": {"rdp", "vnc"}, "v1-guacd-gfx": {"rdp"},
+	}
+	all := testSeries()
+	if len(all) != len(want) {
+		t.Errorf("%d series, want %d", len(all), len(want))
+	}
+	for _, s := range all {
+		if protos, ok := want[s.Name]; !ok || !slices.Equal(s.protocols, protos) {
+			t.Errorf("series %s serves %v, want %v", s.Name, s.protocols, protos)
+		}
 	}
 }
 

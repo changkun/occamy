@@ -118,12 +118,25 @@ func TestBenchV1File(t *testing.T) {
 			t.Errorf("series %s: guacd's color-depth %q, want 32", name, d)
 		}
 	}
-	if len(rdpPaths) != 4 {
-		t.Errorf("rdpPaths has %d series, want RDP's four", len(rdpPaths))
+	if len(rdpPaths) != 5 {
+		t.Errorf("rdpPaths has %d series, want RDP's five", len(rdpPaths))
 	}
 	for _, proto := range []string{"ssh", "vnc", "rdp"} {
 		if _, ok := v1Connections["v1-native"][proto]; !ok {
 			t.Errorf("v1-native serves no %s", proto)
+		}
+	}
+	// v1-native-w2 differs from v1-native in its client's window alone.
+	if !maps.Equal(v1Connections["v1-native-w2"], v1Connections["v1-native"]) || rdpPaths["v1-native-w2"].gfx != rdpPaths["v1-native"].gfx {
+		t.Errorf("v1-native-w2 opens %v with GFX %v, want v1-native's %v with GFX %v",
+			v1Connections["v1-native-w2"], rdpPaths["v1-native-w2"].gfx, v1Connections["v1-native"], rdpPaths["v1-native"].gfx)
+	}
+	if rdpPaths["v1-native-w2"].verdict {
+		t.Error("v1-native-w2 counts for the targets, but its window is not what ships")
+	}
+	for name, w := range v1Windows {
+		if _, ok := v1Connections[name]; !ok || w == 0 {
+			t.Errorf("v1Windows gives %s a window of %d, want a v1 series and a window", name, w)
 		}
 	}
 	// The bench desktop's xrdp speaks TLS without NLA, with a certificate
@@ -952,6 +965,16 @@ func TestOpenV1(t *testing.T) {
 		defer srv.Close()
 		_ = stream.Serve(r.Context(), wsEnd{ws}, owner, hello, stream.Config{SessionID: "s2"})
 	})
+	windows := make(chan uint8, 1)
+	mux.HandleFunc("GET /api/v1/connections/vnc-native/stream", func(w http.ResponseWriter, r *http.Request) {
+		hello, err := protocol.DecodeHelloQuery(r.URL.Query().Get(protocol.HelloParameter))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		windows <- hello.Capabilities.FrameWindow
+		http.Error(w, "no remote in this test", http.StatusServiceUnavailable)
+	})
 	mux.HandleFunc("DELETE /api/v1/sessions/{id}", func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "Bearer t" {
 			ended <- r.PathValue("id")
@@ -964,7 +987,7 @@ func TestOpenV1(t *testing.T) {
 	addr := strings.TrimPrefix(srv.URL, "http://")
 
 	t.Run("refused", func(t *testing.T) {
-		if _, err := openV1(map[string]string{"vnc": "refused"}, display{})(context.Background(), addr, "vnc"); err == nil {
+		if _, err := openV1(map[string]string{"vnc": "refused"}, display{}, 0)(context.Background(), addr, "vnc"); err == nil {
 			t.Fatal("a session with no codec opened")
 		}
 		select {
@@ -981,7 +1004,7 @@ func TestOpenV1(t *testing.T) {
 		openTimeout = 200 * time.Millisecond
 		done := make(chan error, 1)
 		go func() {
-			_, err := openV1(map[string]string{"vnc": "hung"}, display{})(context.Background(), addr, "vnc")
+			_, err := openV1(map[string]string{"vnc": "hung"}, display{}, 0)(context.Background(), addr, "vnc")
 			done <- err
 		}()
 		select {
@@ -997,7 +1020,7 @@ func TestOpenV1(t *testing.T) {
 	t.Run("shows", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
-		s, err := openV1(map[string]string{"ssh": "shell"}, display{})(ctx, addr, "ssh")
+		s, err := openV1(map[string]string{"ssh": "shell"}, display{}, 0)(ctx, addr, "ssh")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1008,6 +1031,32 @@ func TestOpenV1(t *testing.T) {
 		}
 		if d := f.at.Sub(s.start); d < promptAfter {
 			t.Errorf("marked a frame after %v, before the prompt after %v", d, promptAfter)
+		}
+	})
+	// v1-native's client offers the client core's default window, which
+	// the server sizes, and v1-native-w2's offers 2, on the same
+	// connection.
+	t.Run("window", func(t *testing.T) {
+		all := allSeries(endpoints{v1: addr}, display{})
+		for name, want := range map[string]uint8{"v1-native": 0, "v1-native-w2": 2} {
+			i := slices.IndexFunc(all, func(s series) bool { return s.Name == name })
+			if i < 0 {
+				t.Fatalf("no series %s", name)
+			}
+			if all[i].target != addr {
+				t.Errorf("%s reaches %q, want occamy-v1's %q", name, all[i].target, addr)
+			}
+			if _, err := all[i].open(context.Background(), addr, "vnc"); err == nil {
+				t.Errorf("%s opened a session that the test refuses", name)
+			}
+			select {
+			case got := <-windows:
+				if got != want {
+					t.Errorf("%s offers a frame window of %d, want %d", name, got, want)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("%s did not ask for a stream", name)
+			}
 		}
 	})
 }
