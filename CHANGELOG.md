@@ -19,6 +19,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   `make bench-essential`, an hour's subset of it. `make bench-report`
   analyses the results into tables, exact tests and figures with 95%
   intervals ([docs/benchmarks.md](docs/benchmarks.md#analysis)).
+- The essential comparison with guacd 1.6, on the same remotes and
+  without network delay: 575 KiB of terminal output finishes in 18 ms
+  instead of 985, a photograph costs 108–122 KiB instead of 2.1–2.2 MiB,
+  and a key on a still desktop shows in 4.7–7.3 ms instead of 16–19 at
+  p95 ([docs/benchmarks.md](docs/benchmarks.md#the-essential-comparison)).
 
 ## [1.0.0-beta.1] - 2026-11-02
 

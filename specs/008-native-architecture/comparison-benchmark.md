@@ -335,6 +335,31 @@ judges it at N1. The analysis is a Python script over the results
 (`bench/report.py`), with numpy, scipy and matplotlib;
 `make bench-essential-report` writes it into `docs/benchmarks/essential/`.
 
+### Outcome of the essential plan
+
+Measured on 2026-11-02, in 2 h 18 min, with all 192 results; the
+numbers, the targets and the verdict are in
+[docs/benchmarks.md](../../docs/benchmarks.md#the-essential-comparison),
+and the report in `docs/benchmarks/essential/`.
+
+- 14 of the 16 primary differences are significant after Holm's
+  correction; T1 is not, at N0 or N2. Against
+  [benchmark](benchmark.md)'s targets, 11 of 36 are met: all of T2's,
+  G6's bytes, and G5's frame rate over VNC at N0. No miss is justified
+  yet, so the v1.0 gate is not met. G5's latency, bytes and CPU per
+  frame are Occamy's own and come first.
+- The run measured G2's and G5's baselines again at N0 and N2, with the
+  jitter and the stamp, and their targets now come from it.
+- G5 now reports CPU per frame as a secondary metric, since its target
+  is one.
+- 52 results started above the load gate, none at the start of a block:
+  the gate is checked between blocks, and the load rose within them,
+  most often after G5. Without them 2–4 runs remain on a side, too few
+  to reach 5% after correction, so 11 conclusions are fragile by this
+  spec's definition, although their factors move by at most 6%. The
+  full plan should check the gate before each result rather than each
+  block.
+
 ## Not measured
 
 - Packet loss, which a userspace proxy over TCP cannot emulate.

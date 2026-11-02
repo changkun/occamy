@@ -85,7 +85,7 @@ SCENARIOS = {
     "G2": ("latency_p95", ["latency_p50"]),
     "G3": ("bytes_per_frame", ["cpu_per_frame", "fps"]),
     "G4": ("bytes_per_frame", ["cpu_per_frame", "fps"]),
-    "G5": ("latency_p95", ["fps", "bytes_per_frame"]),
+    "G5": ("latency_p95", ["fps", "bytes_per_frame", "cpu_per_frame"]),
     "G6": ("bytes_down", ["completion"]),
     "G7": ("first_frame_p95", ["first_frame_p50"]),
     "G8": ("latency_p95", ["latency_p50"]),
@@ -437,7 +437,7 @@ def fmt_interval(v, lo, hi, suffix=""):
 
 def write_csv(path, header, rows):
     with open(path, "w", newline="") as f:
-        w = csv.writer(f)
+        w = csv.writer(f, lineterminator="\n")
         w.writerow(header)
         w.writerows(rows)
 
