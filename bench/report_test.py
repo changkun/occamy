@@ -57,6 +57,33 @@ def synthetic(runs=6, ratio=20.0, load=None):
                 plan=dict(seed=1, max_load=8, keys=100, blocks=[]), results=results)
 
 
+def synthetic_window(runs=6, guacd=False):
+    """Returns results where v1-native-w2 and v1-native type alike on T1 at
+    N0, and on G5 over VNC at N2 v1-native's keys show twice as fast, it
+    shows 27 of the scene's 30 frames a second where v1-native-w2 shows
+    18, and its frames are 40 ms apart at p95 where v1-native-w2's are 90.
+    With guacd, guacd is twenty times slower than v1-native on both."""
+    rng = np.random.default_rng(2)
+    series = [("v1-native-w2", 2.0, 18, 90.0), ("v1-native", 1.0, 27, 40.0)]
+    if guacd:
+        series.append(("guacd", 20.0, 15, 200.0))
+    results = []
+    for run in range(runs):
+        for name, slower, fps, p95 in series:
+            jitter = 1 + rng.uniform(-0.05, 0.05)
+            typed = 2.0 * (20.0 if name == "guacd" else 1.0) * jitter
+            results.append(result(name, "T1", "ssh", "N0", run,
+                                  latency_ms=dict(n=100, p50=typed * 0.8, p95=typed, p99=typed, max=typed)))
+            lat = 60.0 * slower * jitter
+            results.append(result(name, "G5", "vnc", "N2", run, scene_fps=30, seconds=10.0,
+                                  frames=fps * 10, server_frames=300, bytes_down=4_000_000,
+                                  latency_ms=dict(n=100, p50=lat * 0.8, p95=lat, p99=lat, max=lat),
+                                  frame_interval_ms=dict(n=fps * 10 - 1, p50=33.3, p95=p95 * jitter, p99=p95 * 2,
+                                                         max=p95 * 3)))
+    return dict(started="2026-11-02T00:00:00Z", quick=False, runs=runs, host={"cpu": "test"},
+                plan=dict(seed=1, max_load=8, keys=100, blocks=[]), results=results)
+
+
 class Statistics(unittest.TestCase):
     def test_median_interval(self):
         med, lo, hi, cov = report.median_interval([5, 1, 4, 2, 6, 3])
@@ -163,6 +190,73 @@ class Report(unittest.TestCase):
         self.assertIn("4 of the results started with the host's 1-minute load above the gate of 8", md)
         self.assertIn("these conclusions change", md)
         self.assertIn("n 4/4", md)
+
+    def family_comparisons(self, out):
+        with open(out / "comparisons.csv") as f:
+            return {(r["family"], r["scenario"], r["protocol"], r["net"], r["metric"]): r
+                    for r in csv.DictReader(f)}
+
+    def test_scene_metrics(self):
+        # A scene's share of frames never shown, from the frames it showed
+        # in its seconds at its rate, and its cadence at p95; secondary.
+        m = report.metrics_of(result("v1-native", "G5", "vnc", "N2", 0, scene_fps=30, seconds=10.0, frames=240,
+                                     bytes_down=1024, frame_interval_ms=dict(n=239, p50=33.3, p95=50.0, p99=70.0,
+                                                                             max=100.0)))
+        self.assertAlmostEqual(m["scene_missed"], 20.0)
+        self.assertEqual(m["frame_interval_p95"], 50.0)
+        self.assertNotEqual(report.SCENARIOS["G5"][0], "scene_missed")
+        for sc in ("G3", "G4", "G5"):
+            self.assertTrue(set(report.CADENCE) <= set(report.SCENARIOS[sc][1]), sc)
+        # Frames without a scene are no scene's.
+        m = report.metrics_of(result("v1-native", "G6", "vnc", "N0", 0, seconds=1.0, frames=2, bytes_down=1024,
+                                     completion_ms=100.0))
+        self.assertNotIn("scene_missed", m)
+        self.assertNotIn("frame_interval_p95", m)
+
+    def test_window_family(self):
+        # Without guacd: the frame window's family alone, Holm-corrected
+        # over its own two primary tests, without the 10x target.
+        out = self.analyse(synthetic_window())
+        c = self.family_comparisons(out)
+        self.assertFalse(any(k[0] == "Guacamole to Occamy" for k in c))
+        g5 = c[("Frame window", "G5", "vnc", "N2", "latency_p95")]
+        self.assertEqual((g5["baseline"], g5["candidate"], g5["primary"]), ("v1-native-w2", "v1-native", "True"))
+        self.assertAlmostEqual(float(g5["factor"]), 2, delta=0.15)
+        self.assertAlmostEqual(float(g5["p"]), 2 / 924)
+        self.assertAlmostEqual(float(g5["p_adjusted"]), 2 * 2 / 924)
+        missed = c[("Frame window", "G5", "vnc", "N2", "scene_missed")]
+        self.assertAlmostEqual(float(missed["factor"]), 40 / 10)
+        self.assertEqual(missed["p_adjusted"], "nan")
+        interval = c[("Frame window", "G5", "vnc", "N2", "frame_interval_p95")]
+        self.assertAlmostEqual(float(interval["factor"]), 90 / 40, delta=0.2)
+        self.assertGreater(float(c[("Frame window", "T1", "ssh", "N0", "latency_p95")]["p"]), 0.05)
+
+        md = (out / "report.md").read_text()
+        self.assertIn("## Frame window: `v1-native-w2` to `v1-native`", md)
+        self.assertIn("1 of 2 differences are significant after correction.", md)
+        self.assertNotIn("10x", md)
+        self.assertIn("Scene frames never shown (%)", md)
+        self.assertIn("Scene frame interval p95 (ms)", md)
+        self.assertTrue((out / "factors-frame-window.svg").exists())
+        self.assertTrue((out / "factors-frame-window-dark.svg").exists())
+        self.assertFalse((out / "factors-guacamole-to-occamy.svg").exists())
+        self.assertTrue((out / "scene_missed.svg").exists())
+
+    def test_both_families(self):
+        # With guacd too, each family compares its own pair; the targets
+        # judge Guacamole's alone, and list v1-native's latency once.
+        out = self.analyse(synthetic_window(guacd=True))
+        c = self.family_comparisons(out)
+        self.assertAlmostEqual(float(c[("Guacamole to Occamy", "T1", "ssh", "N0", "latency_p95")]["factor"]), 20,
+                               delta=2)
+        self.assertAlmostEqual(float(c[("Frame window", "T1", "ssh", "N0", "latency_p95")]["factor"]), 1, delta=0.1)
+        md = (out / "report.md").read_text()
+        guac, window = md.index("## Guacamole to Occamy"), md.index("## Frame window")
+        self.assertIn("the 10x target is met in 2 of 2", md[guac:window])
+        self.assertNotIn("10x", md[window:md.index("## The 50 ms target")])
+        self.assertEqual(md.count("| `v1-native` | T1 ssh | N0 |"), 1)
+        for name in ("factors-guacamole-to-occamy", "factors-frame-window"):
+            self.assertTrue((out / f"{name}.svg").exists(), name)
 
     def test_svg_is_deterministic(self):
         a = self.analyse(synthetic())
