@@ -185,6 +185,21 @@ exceeds it). What changes is the offers:
 - The report compares `v1-native-w2` to `v1-native` as a family of its
   own, with the same tests and corrections.
 
+*Built.* `v1-native-w2` opens `v1-native`'s connections with
+`client.Options.FrameWindow` 2 (`v1Windows` in `bench/v1.go`). Each
+scene result gives `frame_interval_ms`, the percentiles of the time
+between the first showings of consecutive stamps, measured by the
+reader that both protocols share, so `guacd`'s and `occamy`'s scenes
+have it too. `bench/report.py` takes `scene_missed`, 1 − frames ÷
+(`scene_fps` × seconds) in percent, and `frame_interval_p95` from them,
+as secondary metrics of G3, G4 and G5, and compares the family
+**Frame window**, `v1-native-w2` to `v1-native`, with Holm's correction
+and without the 10x and 50 ms targets, which set Occamy against
+Guacamole. A block that the load gate stops part-way is measured again
+whole on resume. `make bench-realtime-1` collects the plan below and
+`make bench-realtime-1-report` writes its report into
+`docs/benchmarks/realtime/1/`.
+
 **Measurement.** Plan `bench/plans/realtime-1.yaml`, six runs:
 
 | Cells | Networks | Series |
