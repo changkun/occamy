@@ -329,7 +329,9 @@ full plan after it: `bench/plans/essential.yaml`, `make bench-essential`.
 
 Its single family, `guacd` to `v1-native` on each cell's primary metric,
 is confirmatory and Holm-corrected; secondary metrics get intervals and
-unadjusted p-values. The analysis is a Python script over the results
+unadjusted p-values. N1 is not in the plan, so the 50 ms target is
+judged at N0, where it is `v1-native`'s own processing; the full plan
+judges it at N1. The analysis is a Python script over the results
 (`bench/report.py`), with numpy, scipy and matplotlib;
 `make bench-essential-report` writes it into `docs/benchmarks/essential/`.
 

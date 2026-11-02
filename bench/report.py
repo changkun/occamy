@@ -692,7 +692,8 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
         lines += [
             f"## The {TARGET_MS} ms target",
             "",
-            f"Met where the upper bound of the interval of `L` p95 is at most {TARGET_MS} ms.",
+            f"Met where the upper bound of the interval of `L` p95 is at most {TARGET_MS} ms. At N0 that is"
+            " the server's own processing; N1 adds a 20 ms round trip.",
             "",
             "| Series | Cell | Network | `L` p95 (ms) | Met |",
             "|---|---|---|---:|:-:|",
