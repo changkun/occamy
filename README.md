@@ -1,4 +1,6 @@
-<img src="./docs/occamy.png" alt="Occamy" height="150" align="right" />
+<div align="center">
+
+<img src="./docs/occamy.png" alt="" height="150" />
 
 # Occamy
 
@@ -7,6 +9,8 @@
 [![Release](https://img.shields.io/github/v/release/changkun/occamy?sort=semver&include_prereleases)](https://github.com/changkun/occamy/releases)
 [![Go version](https://img.shields.io/github/go-mod/go-version/changkun/occamy)](./go.mod)
 [![License](https://img.shields.io/github/license/changkun/occamy)](./LICENSE)
+
+</div>
 
 Occamy is a remote desktop gateway written in Go. It connects to
 desktops and terminals over VNC, RDP, SSH and Kubernetes, and puts them
