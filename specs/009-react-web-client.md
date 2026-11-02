@@ -18,7 +18,7 @@ affects:
   - docs/
 effort: medium
 created: 2026-10-29
-updated: 2026-11-01
+updated: 2026-11-02
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -741,6 +741,16 @@ Settled on 2026-10-31.
     since its token must not outlive the page's load (fragment.ts), and
     a share link's page forgets an owner's session kept before; a
     viewer that reloads opens the link again.
+  - 2026-11-02: the sign-in page carries Occamy's look, at the owner's
+    request: the page a visitor of the project meets first was a bare
+    card on grey. A panel in the logo's colours, over a grid of tiles,
+    holds the logo, the name and one line of what Occamy is, beside the
+    form or above it on a narrow screen; the accent is the logo's
+    violet, and the connection list's bar shows the logo, with a glyph
+    for a desktop or a terminal on each connection. The logo is bundled
+    with the page, since the Content-Security-Policy takes images from
+    the page's origin only, and system fonts stay, for the same reason.
+    The form keeps its labels and `form.sign-in`, which the tests drive.
   - 2026-11-01: a 1001 with no `close` before it is a lost connection,
     not a shutdown. Firefox fires the WebSocket's close, 1001 with no
     reason, before `pagehide`, so on a reload the core reported occamyd

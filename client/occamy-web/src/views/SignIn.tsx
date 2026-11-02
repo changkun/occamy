@@ -9,6 +9,7 @@
 
 import { type FormEvent, type ReactElement, type ReactNode, useEffect, useEffectEvent, useRef, useState } from 'react'
 
+import logo from '../assets/occamy.png'
 import { type AccessToken, type Api, ApiError, errorMessage } from '../lib/api'
 import { type Pending, saveResume } from '../lib/app'
 import { pageURL } from '../lib/fragment'
@@ -102,9 +103,9 @@ export function SignIn({ api, storage, message, notice, pending, resume, onSigne
 
   const over = onCancel !== undefined
   const form = (
-    <form className={over ? 'sign-in' : 'card sign-in'} onSubmit={(e) => void submit(e)} aria-busy={busy} aria-describedby={error === '' ? undefined : 'sign-in-error'}>
-      {over ? <h2 id="sign-in-title">Sign in again</h2> : <h1>Occamy</h1>}
-      <p className="lead">{over ? 'The session goes on while you sign in.' : 'Sign in to open a remote desktop or terminal.'}</p>
+    <form className="sign-in" onSubmit={(e) => void submit(e)} aria-busy={busy} aria-describedby={error === '' ? undefined : 'sign-in-error'}>
+      {over ? <h2 id="sign-in-title">Sign in again</h2> : <h2>Sign in</h2>}
+      <p className="lead">{over ? 'The session goes on while you sign in.' : 'Open a remote desktop or terminal.'}</p>
       {notice !== '' && (
         <div className="notice">
           <p role="status">{notice}</p>
@@ -146,7 +147,19 @@ export function SignIn({ api, storage, message, notice, pending, resume, onSigne
       )}
     </form>
   )
-  return over ? <Dialog onCancel={onCancel}>{form}</Dialog> : <main className="center">{form}</main>
+  if (over) {
+    return <Dialog onCancel={onCancel}>{form}</Dialog>
+  }
+  return (
+    <main className="welcome">
+      <header className="hero">
+        <img className="logo" src={logo} alt="" width={208} height={194} />
+        <h1>Occamy</h1>
+        <p>Remote desktops and terminals, in your browser.</p>
+      </header>
+      <div className="entry">{form}</div>
+    </main>
+  )
 }
 
 // Dialog shows children as a modal dialog, which keeps the keys and the
