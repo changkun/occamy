@@ -1,0 +1,1116 @@
+# The routes of occamyd for a v1 configuration file, as OpenAPI 3.1.
+# docs/api.md is the reference: it says what each route does and why,
+# and this file says the same in a form that tools read. go test ./server
+# checks this file against the code (TestOpenAPI): its operations against
+# the routes registered on both listeners, its schemas against the Go
+# types of the JSON bodies, and its error codes against the code's.
+openapi: 3.1.0
+info:
+  title: Occamy HTTP API
+  version: "1"
+  summary: Sign-in, connections, sessions, shares and streams of occamyd.
+  description: |
+    The HTTP API of `occamyd`, the Occamy gateway, for a v1 configuration
+    file. [docs/api.md](https://github.com/changkun/occamy/blob/master/docs/api.md)
+    is the reference; where the two disagree, the code is right.
+
+    Conventions of API v1:
+
+    - Every response with a body is one compact JSON value, with
+      `X-Content-Type-Options: nosniff`. A request body must be
+      `Content-Type: application/json`, one JSON value of at most 64 KiB,
+      with no field that the route does not take and no field named
+      twice.
+    - Tokens travel in `Authorization: Bearer`, and on the stream routes
+      in a WebSocket subprotocol too; never in the query string or a
+      cookie.
+    - `occamyd` answers no CORS preflight.
+    - A path at or under `/api/v1` that no route takes answers
+      `404 not_found`, and a route asked with a method it does not take
+      answers `405 method_not_allowed` with `Allow`.
+    - A route that takes `GET` also answers `HEAD`.
+
+    The two stream routes upgrade to a WebSocket that carries protocol
+    v1, described in
+    [docs/protocol.md](https://github.com/changkun/occamy/blob/master/docs/protocol.md).
+    The `/api/v0` routes are served only with `legacy_v0: true` and are
+    removed at 1.0.0. The `/debug` routes are served only on the debug
+    listener.
+  license:
+    name: MIT
+    identifier: MIT
+externalDocs:
+  description: The reference of the routes
+  url: https://github.com/changkun/occamy/blob/master/docs/api.md
+servers:
+  - url: "{scheme}://{host}"
+    description: The public listener, `listen`; https when `occamyd` has `tls` or sits behind a TLS proxy
+    variables:
+      scheme:
+        enum: [https, http]
+        default: https
+      host:
+        default: localhost:5636
+tags:
+  - name: health
+    description: Liveness.
+  - name: sign-in
+    description: Turning credentials into an access token.
+  - name: sessions
+    description: Connections, sessions and shares.
+  - name: streams
+    description: WebSockets that carry a session in protocol v1.
+  - name: web client
+    description: The web client's files.
+  - name: v0
+    description: |
+      The Guacamole-protocol routes, served with `legacy_v0: true` and
+      removed at 1.0.0. Their bodies and errors are v0's, not API v1's.
+  - name: debug
+    description: |
+      expvar and pprof, served only on the debug listener,
+      `debug.address`, which has no authentication.
+
+paths:
+  /healthz:
+    get:
+      tags: [health]
+      operationId: healthz
+      summary: Liveness check
+      security: []
+      responses:
+        "200":
+          description: "`occamyd` answers."
+          headers:
+            Cache-Control: {$ref: "#/components/headers/NoStore"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Health"}
+
+  /api/v1/auth/methods:
+    get:
+      tags: [sign-in]
+      operationId: authMethods
+      summary: How a user can sign in
+      description: |
+        For a sign-in page to show. Password sign-in has no field, since
+        its route is always served. It asks nothing of the OIDC provider.
+      security: []
+      responses:
+        "200":
+          description: The sign-in methods.
+          headers:
+            Cache-Control: {$ref: "#/components/headers/NoStore"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/AuthMethods"}
+
+  /api/v1/auth/token:
+    post:
+      tags: [sign-in]
+      operationId: signIn
+      summary: Sign a static user in
+      description: Without static users, every sign-in fails with `401`.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/TokenRequest"}
+      responses:
+        "200":
+          $ref: "#/components/responses/Token"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: A wrong password or an unknown user, alike.
+          headers:
+            WWW-Authenticate: {$ref: "#/components/headers/BearerChallenge"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/oidc/login:
+    get:
+      tags: [sign-in]
+      operationId: oidcLogin
+      summary: Start an OIDC sign-in
+      description: |
+        A browser navigates here and is sent on to the provider. Served
+        only with `auth.oidc`. It sets the sign-in cookie,
+        `__Secure-occamy_oidc` or `occamy_oidc`, on the path of
+        `auth.oidc.redirect_url`. If the provider cannot be discovered,
+        the browser goes straight back to the return URL with
+        `#error=unavailable`.
+      security: []
+      parameters:
+        - name: return_url
+          in: query
+          description: |
+            One of `auth.oidc.return_urls`, exactly as written there. It
+            may be left out when only one is configured.
+          schema: {type: string, format: uri}
+        - name: code_challenge
+          in: query
+          required: true
+          description: |
+            The S256 challenge of a verifier that the client keeps: the
+            SHA-256 of the verifier in base64url without padding (PKCE,
+            RFC 7636).
+          schema: {type: string, pattern: "^[A-Za-z0-9_-]{43}$"}
+        - name: code_challenge_method
+          in: query
+          schema: {type: string, enum: [S256]}
+      responses:
+        "302":
+          description: |
+            To the provider's authorization endpoint, or back to the
+            return URL with `#error=unavailable`.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+            Cache-Control: {$ref: "#/components/headers/NoStore"}
+            Referrer-Policy: {$ref: "#/components/headers/NoReferrer"}
+            Set-Cookie:
+              description: The sealed sign-in cookie, `HttpOnly`, `SameSite=Lax`, `Max-Age=600`.
+              schema: {type: string}
+        "400":
+          description: |
+            `return_url` is not one of `auth.oidc.return_urls`, is given
+            twice, or is left out while several are configured; or
+            `code_challenge` or `code_challenge_method` is missing, given
+            twice or not S256.
+          headers:
+            Cache-Control: {$ref: "#/components/headers/NoStore"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/auth/oidc/callback:
+    get:
+      tags: [sign-in]
+      operationId: oidcCallback
+      summary: The provider's redirect back
+      description: |
+        At `auth.oidc.redirect_url`; served only with `auth.oidc`. The
+        sign-in cookie ties the answer to the browser that started the
+        sign-in.
+      security: []
+      parameters:
+        - {name: state, in: query, schema: {type: string}}
+        - {name: code, in: query, schema: {type: string}}
+        - {name: error, in: query, schema: {type: string}}
+        - name: iss
+          in: query
+          description: The provider's issuer, when it names itself (RFC 9207).
+          schema: {type: string}
+      responses:
+        "302":
+          description: |
+            To the sign-in's return URL, with the outcome in the fragment:
+            `#code=` and a one-time code for `POST /api/v1/auth/oidc/token`,
+            which works once, for a minute; or `#error=` and an
+            `OIDCError`.
+          headers:
+            Location: {$ref: "#/components/headers/Location"}
+            Cache-Control: {$ref: "#/components/headers/NoStore"}
+            Referrer-Policy: {$ref: "#/components/headers/NoReferrer"}
+        "400":
+          description: |
+            `invalid_state`: no sign-in cookie of this browser matches
+            `state`.
+          headers:
+            Cache-Control: {$ref: "#/components/headers/NoStore"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  /api/v1/auth/oidc/token:
+    post:
+      tags: [sign-in]
+      operationId: oidcToken
+      summary: Exchange an OIDC one-time code
+      description: |
+        Exchanges the one-time code from the callback, with the verifier
+        of the challenge given to `login`, for an access token. Served
+        only with `auth.oidc`. The code is spent on its first try.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CodeRequest"}
+      responses:
+        "200":
+          $ref: "#/components/responses/Token"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: |
+            The code is unknown, used or expired, or the verifier does not
+            match the challenge, alike.
+          headers:
+            WWW-Authenticate: {$ref: "#/components/headers/BearerChallenge"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/connections:
+    get:
+      tags: [sessions]
+      operationId: listConnections
+      summary: The connections the caller may open
+      description: In the order of the configuration file.
+      responses:
+        "200":
+          description: The connections; `[]` if the caller may open none.
+          headers:
+            Cache-Control: {$ref: "#/components/headers/NoStore"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ConnectionList"}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+
+  /api/v1/sessions:
+    post:
+      tags: [sessions]
+      operationId: openSession
+      summary: Open a session
+      description: |
+        Opens a session, owned by the caller, on a connection or, with
+        `allow_adhoc_targets`, on an ad-hoc target. The owner has 60
+        seconds to join its stream. The remote is dialled after this
+        answer; credentials are asked of the owner on the stream.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/OpenSessionRequest"}
+      responses:
+        "201":
+          description: The session.
+          headers:
+            Location:
+              description: "`/api/v1/sessions/{id}`"
+              schema: {type: string}
+            Cache-Control: {$ref: "#/components/headers/NoStore"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/OpenSessionResponse"}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: |
+            `forbidden`: ad-hoc fields while `allow_adhoc_targets` is off,
+            or an ad-hoc target outside `adhoc_allowlist`.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          description: "`limit_exceeded`: the caller owns `limits.sessions_per_user` sessions."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "500":
+          $ref: "#/components/responses/Internal"
+        "503":
+          description: "`limit_exceeded`: `occamyd` runs `limits.sessions` sessions."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+
+  /api/v1/sessions/{id}:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    get:
+      tags: [sessions]
+      operationId: getSession
+      summary: A running session's state, for its owner
+      responses:
+        "200":
+          description: The session's state.
+          headers:
+            Cache-Control: {$ref: "#/components/headers/NoStore"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Session"}
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      tags: [sessions]
+      operationId: closeSession
+      summary: Close a session, for its owner
+      description: |
+        Answers once the session has ended. Every stream of the session
+        gets `close` 4002 `session-closed`.
+      responses:
+        "204":
+          description: The session has ended.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/sessions/{id}/shares:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+    post:
+      tags: [sessions]
+      operationId: shareSession
+      summary: Mint a share of a session, for its owner
+      description: |
+        A share joins the session's stream as a viewer or a read-only
+        viewer until it expires, and dies with its session. The session
+        is checked before the body.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/ShareRequest"}
+      responses:
+        "201":
+          description: The share.
+          headers:
+            Cache-Control: {$ref: "#/components/headers/NoStore"}
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Share"}
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          description: "`limit_exceeded`: the session has `limits.shares_per_session` shares that have not expired."
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/Error"}
+        "500":
+          $ref: "#/components/responses/Internal"
+
+  /api/v1/connections/{id}/stream:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        description: The connection's ID.
+        schema: {type: string}
+      - $ref: "#/components/parameters/Hello"
+    get:
+      tags: [streams]
+      operationId: connectionStream
+      summary: Open a session on a connection and stream it
+      description: |
+        Opens a session on connection `{id}`, owned by the caller, and
+        streams it to the caller as its owner, so that the first frame
+        comes one round trip after the upgrade. Takes an access token
+        only. A refusal after the upgrade is a protocol v1 `close`:
+        4000 for the token, 4001 for no such connection or a limit,
+        1011 for an internal failure.
+      security:
+        - accessToken: []
+        - streamToken: []
+      responses:
+        "101":
+          $ref: "#/components/responses/Upgrade"
+        "400":
+          $ref: "#/components/responses/NoSubprotocol"
+        "426":
+          $ref: "#/components/responses/NotAnUpgrade"
+
+  /api/v1/sessions/{id}/stream:
+    parameters:
+      - $ref: "#/components/parameters/SessionID"
+      - $ref: "#/components/parameters/Hello"
+    get:
+      tags: [streams]
+      operationId: sessionStream
+      summary: Join a running session
+      description: |
+        Joins running session `{id}`: as `owner` with the owner's access
+        token, with a session token's `role`, or with a share's. A token
+        without dots is taken for a share. Within 60 seconds after the
+        session ended, its owner gets the `close` it ended with instead of
+        `welcome`. A refusal after the upgrade is a protocol v1 `close`:
+        4000 for the token, 4001 for no such session, 4007 beyond the
+        viewer limit.
+      security:
+        - accessToken: []
+        - streamToken: []
+      responses:
+        "101":
+          $ref: "#/components/responses/Upgrade"
+        "400":
+          $ref: "#/components/responses/NoSubprotocol"
+        "426":
+          $ref: "#/components/responses/NotAnUpgrade"
+
+  /static/:
+    get:
+      tags: [web client]
+      operationId: webClient
+      summary: The web client
+      description: |
+        The files of the directory that `web_client` names, and the
+        `index.html` of a directory, under `/static/`. Served only with
+        `web_client`. Files under `assets/` are cached for a year, as
+        Vite names them by their content; everything else has
+        `Cache-Control: no-cache`. Every response has a
+        Content-Security-Policy that allows the page's own origin only,
+        and that no other page may frame.
+      security: []
+      responses:
+        "200":
+          description: The file, with the type its extension names.
+          headers:
+            Cache-Control:
+              schema: {type: string, enum: ["public, max-age=31536000, immutable", no-cache]}
+            Content-Security-Policy:
+              schema: {type: string}
+            Referrer-Policy: {$ref: "#/components/headers/NoReferrer"}
+          content:
+            text/html: {}
+            text/javascript: {}
+            text/css: {}
+            application/octet-stream: {}
+        "404":
+          description: |
+            No such file, a directory without an `index.html`, or a
+            symbolic link that leads out of the directory; plain text.
+          content:
+            text/plain: {}
+
+  /api/v0/login:
+    post:
+      tags: [v0]
+      operationId: v0Login
+      summary: Sign a v0 token for a target
+      deprecated: true
+      description: |
+        Signs whatever target it receives, for anyone: neither the
+        connection registry nor `adhoc_allowlist` restricts it. The token
+        is an HS256 JWT that lives an hour and carries the target and its
+        password in readable claims.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/V0LoginRequest"}
+          application/x-www-form-urlencoded:
+            schema: {$ref: "#/components/schemas/V0LoginRequest"}
+          multipart/form-data:
+            schema: {$ref: "#/components/schemas/V0LoginRequest"}
+      responses:
+        "200":
+          description: The token.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/V0Token"}
+        "401":
+          $ref: "#/components/responses/V0Unauthorized"
+
+  /api/v0/connect:
+    get:
+      tags: [v0]
+      operationId: v0Connect
+      summary: A Guacamole connection through guacd
+      deprecated: true
+      description: |
+        A WebSocket with the subprotocol `guacamole` that proxies one
+        Guacamole connection between the client and guacd. Every client
+        whose token carries the same target and credentials shares one
+        session. The WebSocket closes with a Guacamole status code, in
+        decimal, as its reason.
+      security:
+        - v0Token: []
+        - v0TokenQuery: []
+        - v0TokenCookie: []
+      parameters:
+        - {name: width, in: query, schema: {type: integer, minimum: 1, maximum: 8192, default: 1024}}
+        - {name: height, in: query, schema: {type: integer, minimum: 1, maximum: 8192, default: 768}}
+        - {name: dpi, in: query, schema: {type: integer, minimum: 48, maximum: 600, default: 96}}
+        - name: timezone
+          in: query
+          description: An IANA time zone name.
+          schema: {type: string}
+      responses:
+        "101":
+          description: The WebSocket, with the subprotocol `guacamole`.
+        "400":
+          description: A token without `exp`.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/V0Error"}
+        "401":
+          $ref: "#/components/responses/V0Unauthorized"
+        "403":
+          description: An `Origin` that does not name the request's host, an empty one, or a repeated one.
+
+  /debug/vars:
+    servers: &debug
+      - url: http://{address}
+        description: The debug listener, `debug.address`
+        variables:
+          address:
+            default: 127.0.0.1:6060
+    get:
+      tags: [debug]
+      operationId: debugVars
+      summary: Go's expvar
+      security: []
+      responses:
+        "200":
+          description: |
+            `cmdline`, `memstats`, and `occamyd`'s own `goroutines` and
+            `fds`, the open file descriptors, or -1 where it cannot count
+            them.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DebugVars"}
+
+  /debug/pprof/:
+    servers: *debug
+    get:
+      tags: [debug]
+      operationId: pprofIndex
+      summary: pprof's index and the named profiles
+      description: |
+        The index, as HTML, and under it the named profiles, such as
+        `/debug/pprof/heap`: as a profile for `go tool pprof`, or as text
+        with `?debug=1` or `?debug=2`.
+      security: []
+      responses:
+        "200":
+          description: The index or the profile.
+          content:
+            text/html: {}
+            application/octet-stream: {}
+            text/plain: {}
+
+  /debug/pprof/cmdline:
+    servers: *debug
+    get:
+      tags: [debug]
+      operationId: pprofCmdline
+      summary: The command line
+      security: []
+      responses:
+        "200":
+          description: "`occamyd`'s arguments, separated by NUL bytes."
+          content:
+            text/plain: {}
+
+  /debug/pprof/profile:
+    servers: *debug
+    get:
+      tags: [debug]
+      operationId: pprofProfile
+      summary: A CPU profile
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Seconds"
+      responses:
+        "200":
+          description: A CPU profile over `seconds`, 30 by default, for `go tool pprof`.
+          content:
+            application/octet-stream: {}
+
+  /debug/pprof/symbol:
+    servers: *debug
+    get:
+      tags: [debug]
+      operationId: pprofSymbols
+      summary: The number of symbols
+      security: []
+      responses:
+        "200":
+          description: "`num_symbols: 1` when the binary has any."
+          content:
+            text/plain: {}
+    post:
+      tags: [debug]
+      operationId: pprofSymbol
+      summary: Look up program counters
+      security: []
+      requestBody:
+        required: true
+        description: Hexadecimal program counters, separated by `+`.
+        content:
+          text/plain:
+            schema: {type: string}
+      responses:
+        "200":
+          description: Each program counter with its function's name.
+          content:
+            text/plain: {}
+
+  /debug/pprof/trace:
+    servers: *debug
+    get:
+      tags: [debug]
+      operationId: pprofTrace
+      summary: An execution trace
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/Seconds"
+      responses:
+        "200":
+          description: A trace over `seconds`, 1 by default, for `go tool trace`.
+          content:
+            application/octet-stream: {}
+
+security:
+  - accessToken: []
+
+components:
+  securitySchemes:
+    accessToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        In `Authorization: Bearer`: an access token, a JWT signed with
+        EdDSA, from sign-in or a trusted issuer. On
+        `GET /api/v1/sessions/{id}/stream` also a session token or a
+        share.
+    streamToken:
+      type: apiKey
+      in: header
+      name: Sec-WebSocket-Protocol
+      description: |
+        The stream routes' token, as a browser sends it: the subprotocol
+        `occamy.v1.token.` followed by the token in base64url without
+        padding, offered beside `occamy.v1`. It wins over
+        `Authorization`.
+    v0Token:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: A token from `POST /api/v0/login`.
+    v0TokenQuery:
+      type: apiKey
+      in: query
+      name: token
+      description: A token from `POST /api/v0/login`, in the query string.
+    v0TokenCookie:
+      type: apiKey
+      in: cookie
+      name: jwt
+      description: A token from `POST /api/v0/login`, in a cookie.
+
+  parameters:
+    SessionID:
+      name: id
+      in: path
+      required: true
+      description: The session's ID.
+      schema: {$ref: "#/components/schemas/SessionID"}
+    Hello:
+      name: hello
+      in: query
+      required: true
+      description: |
+        The protocol v1 `hello` message, in base64url without padding, at
+        most 2048 bytes before encoding.
+      schema: {type: string, pattern: "^[A-Za-z0-9_-]+$", maxLength: 2731}
+    Seconds:
+      name: seconds
+      in: query
+      schema: {type: integer}
+
+  headers:
+    NoStore:
+      schema: {type: string, enum: [no-store]}
+    NoReferrer:
+      schema: {type: string, enum: [no-referrer]}
+    Location:
+      schema: {type: string, format: uri}
+    BearerChallenge:
+      description: An RFC 6750 challenge, `Bearer realm="occamy"`, with `error="invalid_token"` for a token that fails.
+      schema: {type: string}
+
+  responses:
+    Token:
+      description: An access token.
+      headers:
+        Cache-Control: {$ref: "#/components/headers/NoStore"}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/TokenResponse"}
+    BadRequest:
+      description: "`bad_request`: the body does not decode, or the request is refused for what it says."
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Unauthorized:
+      description: "`unauthorized`, `invalid_token` or `token_expired`: no access token, or one that fails."
+      headers:
+        WWW-Authenticate: {$ref: "#/components/headers/BearerChallenge"}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotFound:
+      description: |
+        `not_found`: no such connection or running session that the
+        caller may see. Another user's is as absent as an unknown one.
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    TooLarge:
+      description: "`too_large`: a body over 64 KiB."
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    UnsupportedMediaType:
+      description: "`unsupported_media_type`: a body that is not `application/json`."
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Internal:
+      description: "`internal`: `occamyd` failed on its own; the cause goes to its log."
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    Upgrade:
+      description: |
+        Switching to a WebSocket with the subprotocol `occamy.v1` alone,
+        without compression, that carries protocol v1 from `welcome` to
+        `close`.
+      headers:
+        Sec-WebSocket-Protocol:
+          schema: {type: string, enum: [occamy.v1]}
+    NoSubprotocol:
+      description: "`bad_request`: the request offers no `occamy.v1` subprotocol; no upgrade."
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/Error"}
+    NotAnUpgrade:
+      description: The request is no valid WebSocket upgrade; the WebSocket library's plain text, or a `400`.
+      content:
+        text/plain: {}
+    V0Unauthorized:
+      description: A missing or invalid token, or a login that does not parse.
+      headers:
+        WWW-Authenticate:
+          schema: {type: string, enum: ["JWT realm=occamy-proxy"]}
+      content:
+        application/json:
+          schema: {$ref: "#/components/schemas/V0Error"}
+
+  schemas:
+    Health:
+      type: object
+      required: [status]
+      properties:
+        status: {type: string, enum: [ok]}
+
+    AuthMethods:
+      type: object
+      required: [oidc]
+      properties:
+        oidc:
+          type: boolean
+          description: Whether `occamyd` has `auth.oidc`, and so serves the three OIDC routes.
+
+    TokenRequest:
+      type: object
+      additionalProperties: false
+      required: [username, password]
+      properties:
+        username: {type: string, minLength: 1}
+        password: {type: string, minLength: 1}
+
+    CodeRequest:
+      type: object
+      additionalProperties: false
+      required: [code, code_verifier]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          description: The one-time code from the callback's fragment.
+        code_verifier:
+          type: string
+          minLength: 1
+          description: The PKCE verifier of the challenge given to `login`, 43 to 128 characters.
+
+    TokenResponse:
+      type: object
+      required: [access_token, token_type, expires_in]
+      properties:
+        access_token:
+          type: string
+          description: "A JWT signed with EdDSA, `kind: access`."
+        token_type: {type: string, enum: [Bearer]}
+        expires_in:
+          type: integer
+          description: The token's lifetime in seconds, `auth.access_token_lifetime`.
+
+    Protocol:
+      type: string
+      enum: [ssh, vnc, rdp, telnet, kubernetes]
+
+    Connection:
+      type: object
+      required: [id, name, protocol]
+      properties:
+        id: {type: string}
+        name:
+          type: string
+          description: The connection's name, which is its ID unless the file gives one.
+        protocol: {$ref: "#/components/schemas/Protocol"}
+
+    ConnectionList:
+      type: object
+      required: [connections, adhoc_targets]
+      properties:
+        connections:
+          type: array
+          items: {$ref: "#/components/schemas/Connection"}
+        adhoc_targets:
+          type: boolean
+          description: Whether `POST /api/v1/sessions` takes ad-hoc targets.
+
+    OpenSessionRequest:
+      description: A connection of the registry, or an ad-hoc target. The request carries no secret.
+      oneOf:
+        - type: object
+          title: Connection
+          additionalProperties: false
+          required: [connection]
+          properties:
+            connection:
+              type: string
+              description: The connection's ID.
+        - type: object
+          title: Ad-hoc target
+          additionalProperties: false
+          required: [protocol, target]
+          properties:
+            protocol:
+              type: string
+              enum: [ssh, vnc, rdp, telnet]
+            target:
+              type: string
+              description: |
+                `host:port`, or a host alone for the protocol's default
+                port. An IPv6 address goes in brackets with a port.
+            username:
+              type: string
+              description: The user name to log in as; without one, the owner is asked if the remote needs one.
+            host_keys:
+              type: array
+              description: |
+                ssh only: the host keys the target may present, public
+                keys in `authorized_keys` format or `SHA256:` fingerprints.
+                An ssh target needs this or `insecure_ignore_host_key`.
+              items: {type: string}
+            insecure_ignore_host_key:
+              type: boolean
+              description: "ssh only: `true` accepts any host key."
+
+    SessionID:
+      type: string
+      description: 22 characters of base64url.
+      pattern: "^[A-Za-z0-9_-]{22}$"
+
+    OpenSessionResponse:
+      type: object
+      required: [id, role, stream_token, expires_in]
+      properties:
+        id: {$ref: "#/components/schemas/SessionID"}
+        role: {type: string, enum: [owner]}
+        stream_token:
+          type: string
+          description: A session token that joins the session's stream as its owner.
+        expires_in:
+          type: integer
+          description: The stream token's lifetime in seconds, 300.
+
+    Session:
+      type: object
+      required: [id, protocol, backend, class, viewers, opened]
+      properties:
+        id: {$ref: "#/components/schemas/SessionID"}
+        connection:
+          type: string
+          description: The connection's ID; absent for an ad-hoc target.
+        protocol: {$ref: "#/components/schemas/Protocol"}
+        backend:
+          type: string
+          enum: [ssh, vnc, rdp, kubernetes, guacd]
+          description: What serves the session, a native backend or the guacd bridge.
+        class:
+          type: string
+          enum: [terminal, graphical]
+          description: Whether the stream carries a terminal or tiles of pixels.
+        size: {$ref: "#/components/schemas/SessionSize"}
+        viewers:
+          type: array
+          description: The viewers connected now, the owner first if connected.
+          items: {$ref: "#/components/schemas/Viewer"}
+        opened:
+          type: string
+          format: date-time
+          description: When the session was opened, in UTC, to the second.
+
+    SessionSize:
+      type: object
+      description: |
+        In character cells for a terminal and in pixels for a graphical
+        session; absent until the remote reports a size.
+      required: [width, height]
+      properties:
+        width: {type: integer, minimum: 1}
+        height: {type: integer, minimum: 1}
+
+    Role:
+      type: string
+      enum: [owner, viewer, read-only]
+
+    Viewer:
+      type: object
+      required: [id, role]
+      properties:
+        id:
+          type: integer
+          description: The viewer's ID, as in `viewer-joined`.
+        role: {$ref: "#/components/schemas/Role"}
+
+    ShareRole:
+      type: string
+      enum: [viewer, read-only]
+
+    ShareRequest:
+      type: object
+      additionalProperties: false
+      required: [role]
+      properties:
+        role: {$ref: "#/components/schemas/ShareRole"}
+        expires_in:
+          type: integer
+          description: The share's lifetime in seconds; absent or 0 is 3600.
+          oneOf:
+            - const: 0
+            - minimum: 60
+              maximum: 43200
+
+    Share:
+      type: object
+      required: [token, role, expires_in]
+      properties:
+        token:
+          type: string
+          description: 32 random bytes in base64url; not a JWT.
+          pattern: "^[A-Za-z0-9_-]{43}$"
+        role: {$ref: "#/components/schemas/ShareRole"}
+        expires_in: {type: integer}
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: {$ref: "#/components/schemas/ErrorBody"}
+
+    ErrorBody:
+      type: object
+      required: [code, message]
+      properties:
+        code: {$ref: "#/components/schemas/ErrorCode"}
+        message:
+          type: string
+          description: For people; may change, and never holds a secret.
+
+    ErrorCode:
+      type: string
+      description: |
+        Stable, and what clients branch on. New codes may be added, but a
+        code never changes its meaning.
+      enum:
+        - bad_request
+        - invalid_state
+        - unauthorized
+        - invalid_token
+        - token_expired
+        - forbidden
+        - not_found
+        - method_not_allowed
+        - too_large
+        - unsupported_media_type
+        - limit_exceeded
+        - internal
+
+    OIDCError:
+      type: string
+      description: |
+        The `error` in the fragment of the return URL after an OIDC
+        sign-in: the provider or `occamyd` refused the user, the provider
+        failed or its answer did not verify, or the provider cannot be
+        reached.
+      enum: [access_denied, sign_in_failed, unavailable]
+
+    V0LoginRequest:
+      type: object
+      required: [protocol, host, password]
+      properties:
+        protocol: {type: string}
+        host: {type: string}
+        username: {type: string}
+        password: {type: string}
+
+    V0Token:
+      type: object
+      required: [code, expire, token]
+      properties:
+        code: {type: integer, enum: [200]}
+        expire: {type: string, format: date-time}
+        token: {type: string}
+
+    V0Error:
+      type: object
+      required: [code, message]
+      properties:
+        code: {type: integer}
+        message: {type: string}
+
+    DebugVars:
+      type: object
+      required: [cmdline, memstats, goroutines, fds]
+      properties:
+        cmdline:
+          type: array
+          items: {type: string}
+        memstats:
+          type: object
+        goroutines: {type: integer}
+        fds: {type: integer}
