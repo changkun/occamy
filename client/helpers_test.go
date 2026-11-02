@@ -209,13 +209,19 @@ func newRig(t *testing.T, b backend.Backend, opts client.Options, cfg stream.Con
 // startRig is newRig that returns New's error.
 func startRig(t *testing.T, b backend.Backend, opts client.Options, cfg stream.Config) (*rig, error) {
 	t.Helper()
+	return startRigOn(t, newPipe(time.Millisecond), b, opts, cfg)
+}
+
+// startRigOn is startRig over p.
+func startRigOn(t *testing.T, p *pipe, b backend.Backend, opts client.Options, cfg stream.Config) (*rig, error) {
+	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	s, owner, err := session.Start(ctx, session.Config{Backend: b, TileSize: 64})
 	if err != nil {
 		cancel()
 		t.Fatal(err)
 	}
-	r := &rig{s: s, owner: owner, pipe: newPipe(time.Millisecond), served: make(chan error, 1)}
+	r := &rig{s: s, owner: owner, pipe: p, served: make(chan error, 1)}
 	if cfg.SessionID == "" {
 		cfg.SessionID = "s1"
 	}

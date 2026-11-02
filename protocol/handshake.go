@@ -23,6 +23,13 @@ const Version = 1
 // sends a viewer unless the handshake agrees on another window.
 const DefaultFrameWindow = 2
 
+// MaxFrameWindow is the frame window that occamy's server and clients
+// offer. It bounds the frames a viewer may have unacknowledged; the
+// server keeps as many unacknowledged as cover the time an
+// acknowledgement takes, so that on a long path the window does not set
+// the frame rate (specs/008-native-architecture/realtime-transport.md).
+const MaxFrameWindow = 16
+
 // HelloParameter is the query parameter of the WebSocket upgrade request
 // that carries the client's hello (see EncodeHelloQuery).
 const HelloParameter = "hello"

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"changkun.de/x/occamy/internal/backend"
+	"changkun.de/x/occamy/internal/pacer"
 	"changkun.de/x/occamy/internal/session"
 	"changkun.de/x/occamy/protocol"
 )
@@ -34,5 +35,22 @@ func TestCloseForFailure(t *testing.T) {
 				t.Errorf("CloseFor = %+v, want %+v", got, want)
 			}
 		})
+	}
+}
+
+// A graphical viewer's pacer keeps the frame window agreed, a terminal's
+// at most two, so that bulk output coalesces as it did.
+func TestViewerPacerWindow(t *testing.T) {
+	agreed := protocol.Capabilities{FrameWindow: protocol.MaxFrameWindow}
+	cfg := pacer.Config{MinQuality: 40}
+	if got := viewerPacer(cfg, agreed, protocol.ClassGraphical); got.Window != protocol.MaxFrameWindow || got.MinQuality != 40 {
+		t.Errorf("graphical: %+v, want window %d and the rest kept", got, protocol.MaxFrameWindow)
+	}
+	if got := viewerPacer(cfg, agreed, protocol.ClassTerminal); got.Window != protocol.DefaultFrameWindow {
+		t.Errorf("terminal: window %d, want %d", got.Window, protocol.DefaultFrameWindow)
+	}
+	agreed.FrameWindow = 1
+	if got := viewerPacer(cfg, agreed, protocol.ClassTerminal); got.Window != 1 {
+		t.Errorf("terminal that agreed to 1: window %d", got.Window)
 	}
 }

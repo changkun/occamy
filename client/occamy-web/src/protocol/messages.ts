@@ -97,6 +97,14 @@ export const CapabilityID = {
 export const DEFAULT_FRAME_WINDOW = 2
 
 /**
+ * The frame window that occamy's clients and server offer. The server keeps
+ * as many frames unacknowledged as cover the time an acknowledgement takes,
+ * at most this many, so that on a long path the window does not set the
+ * frame rate.
+ */
+export const MAX_FRAME_WINDOW = 16
+
+/**
  * Capabilities are what a client offers in hello and what the server
  * agrees to in welcome. A zero value (or an empty list) is not sent and
  * takes the protocol's default.

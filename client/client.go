@@ -51,6 +51,7 @@
 package client
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -201,7 +202,7 @@ type Options struct {
 	// hundredths; zero means 100. It only informs: no server acts on it.
 	PixelRatio uint16
 	// FrameWindow is the number of unacknowledged frames the client
-	// allows; zero means the server's default.
+	// allows; zero offers protocol.MaxFrameWindow.
 	FrameWindow uint8
 	// MaxMessageSize is the largest message the client takes, in bytes;
 	// zero means protocol.DefaultMaxMessageSize, and less than
@@ -248,7 +249,7 @@ func (o Options) Hello() protocol.Hello {
 			MaxTextureSize: o.MaxTextureSize,
 			Terminal:       1,
 			PixelRatio:     o.PixelRatio,
-			FrameWindow:    o.FrameWindow,
+			FrameWindow:    cmp.Or(o.FrameWindow, protocol.MaxFrameWindow),
 			MaxMessageSize: o.MaxMessageSize,
 			CacheSlots:     o.cacheSlots(),
 		},

@@ -30,7 +30,7 @@ type Config struct {
 	// those its encoder sends, encoder.Codecs() by default.
 	Capabilities protocol.Capabilities
 	// Pacer configures the viewer's pacer. Its Window is the agreed frame
-	// window.
+	// window, or a terminal's, at most protocol.DefaultFrameWindow.
 	Pacer pacer.Config
 	// NewEncoder returns the encoder of a viewer that agreed to codecs,
 	// or nil if it sends none of them. If NewEncoder is nil, the viewer's
@@ -236,9 +236,7 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	parent := ctx
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	pc := cfg.Pacer
-	pc.Window = int(agreed.FrameWindow)
-	w := newWriter(c, v, pacer.New(pc), enc, limits, cfg.Logger)
+	w := newWriter(c, v, pacer.New(viewerPacer(cfg.Pacer, agreed, class)), enc, limits, cfg.Logger)
 	if w.fb != nil && !cfg.NoScroll {
 		w.sc = &scroller{}
 	}
@@ -361,4 +359,17 @@ func CloseFor(e session.End) protocol.Close {
 		reason = string(f)
 	}
 	return protocol.Close{Code: code, Reason: reason}
+}
+
+// viewerPacer is the pacer configuration of a viewer of class that agreed
+// to agreed: the frame window agreed, or a terminal's, at most
+// protocol.DefaultFrameWindow, since bulk output coalesces into the frames
+// that a window of two lets through rather than spreading over more frames
+// of less.
+func viewerPacer(pc pacer.Config, agreed protocol.Capabilities, class protocol.Class) pacer.Config {
+	pc.Window = int(agreed.FrameWindow)
+	if class == protocol.ClassTerminal {
+		pc.Window = min(pc.Window, protocol.DefaultFrameWindow)
+	}
+	return pc
 }
