@@ -230,6 +230,15 @@ tiles before the loss measurement: versioned tiles change nothing visible
 over TCP, so the loss measurement decides first whether they and a UDP
 transport are worth building.
 
+No step gates a release (owner, 2026-11-03, after 3a's measurement).
+Each changes the server alone or adds to protocol v1 in the ways its
+versioning allows, through a capability, an ignorable message, a codec
+or a second transport beside WebSocket, so a client that agrees on none
+of them sees no change. Each lands in whichever release is next once it
+is measured and kept, in a beta, in the release candidate, or after the
+candidate freezes the protocol, whose later changes are additive
+([008](../008-native-architecture.md), versioning).
+
 ### Step 1: The window from the path; acknowledgements as feedback
 
 **Protocol.** `frame_window` stays the hard bound that clients enforce
@@ -380,9 +389,9 @@ cost, the wait for a lone lost packet, which 3c outlines.
 
 The owner on 2026-11-03 had no preference between the two, asked what
 the field does, and said to go ahead, with one fallback kept whatever
-the transport. 3a goes first; whether 3b, which brings WebTransport,
-comes before 1.0 ([protocol-v1](protocol-v1.md) decision 6) is decided
-on 3a's measurement.
+the transport. 3a went first. After its measurement the owner decided
+that 3b, which brings WebTransport, gates no release, as no step does
+([Steps](#steps); [protocol-v1](protocol-v1.md) decision 6).
 
 3a and 3b are complements, not alternatives: BBR on TCP removes the
 bound and keeps the wait, and WebTransport through quic-go, whose
@@ -422,7 +431,11 @@ sources.
 
 #### Step 3b: Order-independent tiles over a loss-tolerant transport
 
-Outlined here; specified in full when it starts.
+Outlined here; specified in full when it starts. It adds to protocol v1
+and changes nothing in it: a capability agrees on versioned tiles, and
+WebTransport is a second transport beside WebSocket, which delimits
+each message today, so the new transport delimits them itself, since
+the header carries no length.
 
 - **Versioned tiles.** Each tile update carries the tile's version; the
   client applies it only if it is newer than what it has, so updates may
@@ -639,7 +652,8 @@ interval, and Guacamole's beside it.
 - **Decision.** Loss of 2% adds 3 to 8 round trips to a key during
   motion, more than about one, so step 3 is built: 3a first, and
   whether 3b comes before 1.0 is decided on 3a's measurement (Step 3;
-  [protocol-v1](protocol-v1.md) decision 6).
+  [protocol-v1](protocol-v1.md) decision 6). After 3a, no step gates a
+  release ([Steps](#steps)).
 - **What it tells step 3.** Loss costs two things. Where the scene's
   rate fits under TCP's throughput bound for the loss, about
   1.22 · MSS / (RTT · √p) (N1 with 2%, N2 with 0.5%), the frame rate

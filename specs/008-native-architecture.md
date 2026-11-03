@@ -11,7 +11,7 @@ affects:
   - docs/
 effort: xlarge
 created: 2026-10-29
-updated: 2026-11-01
+updated: 2026-11-03
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -84,6 +84,9 @@ In scope:
 Out of scope for beta: video encoding (H.264 and similar), audio, file
 transfer and SFTP, a recording player, WebTransport, native RDP beyond
 its registration (GFX and Windows), and multi-node deployment.
+WebTransport and a video path for motion are steps of the
+[real-time transport](008-native-architecture/realtime-transport.md),
+which gate no release and land in the next once measured and kept.
 
 Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
 
