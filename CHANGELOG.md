@@ -92,6 +92,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - occamyd spends less CPU on full-screen motion: it counts a moving
   tile's colours only until it knows the tile goes lossy. Over VNC a
   frame of motion takes 17.6 ms of occamyd's CPU instead of 19.5.
+- Full-screen motion takes about half the bandwidth: tiles in motion go
+  at half their width and height to a client that lists the `scaled`
+  codec, as the Go and web clients do, and at full size again once they
+  stop. Over VNC a frame of motion is 8.0 KiB instead of 14.2, and
+  takes 12.7 ms of occamyd's CPU instead of 19.3; over RDP 7.7 KiB
+  instead of 14.1, and 14.6 ms instead of 24.7, at the same frame rate.
 
 ## [1.0.0-beta.1] - 2026-11-02
 

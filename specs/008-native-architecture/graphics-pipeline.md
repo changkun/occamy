@@ -2133,3 +2133,34 @@ bytes and the client's work above the server's CPU.
   dominate. A quarter takes a third of the bytes for detail that shows;
   a factor that adapts to the content or the link waits for a
   measurement on more content than the plasma.
+- **Measured.** On the bench host, three runs of G5 without delay on
+  each image, medians, the branch's client against each server (it
+  offers `scaled`, which the old server leaves out of the agreement):
+
+  | G5, N0 | VNC before | VNC after | RDP before | RDP after |
+  |---|---|---|---|---|
+  | KiB a shown frame | 14.2 | 8.0 | 14.1 | 7.7 |
+  | occamyd's CPU, ms a frame | 19.3 | 12.7 | 24.7 | 14.6 |
+  | Frames shown a second | 29.1 | 28.8 | 24.2 | 24.2 |
+  | The Go client's decoding, ms a frame | 3.8 | 4.3 | 4.3 | 4.2 |
+  | Key latency p50 / p95, ms | 25.4 / 50.5 | 21.1 / 54.7 | 46.5 / 84.0 | 42.0 / 58.5 |
+
+  The bytes fall by 44 and 45%, a little less than the corpus's half;
+  the input's effect and tiles of 16 colours or fewer still go at full
+  size, and how much each accounts for was not counted. The Go client
+  decodes a quarter of the pixels and scales them up on the CPU, 2 ms
+  for a full screen, which over VNC costs half a millisecond a frame
+  more than it saves; a browser scales as it draws the image
+  (`drawImage`), whose cost was not measured here. Latency moves
+  within the runs' spread. The first RDP run after the change was
+  disturbed (23.7 ms of CPU, 22.5 frames a second, a p95 of 141 ms) and
+  is in the medians as it fell.
+- **What the first measurement found.** It showed 13.1 KiB a frame over
+  VNC rather than 8: a count of the codecs the client decoded found
+  about four fifths of the moving pixels at full size. The encode
+  cache's workers made their encoders from the profile's lossless and
+  lossy codecs alone, so their `Scaled` fell back to `Lossy`, and the
+  writers sent those runs from the cache. A worker's encoder of a lossy
+  profile now scales (`TestShareWorkerRunScaled`, which fails without
+  it); a run's key asks for scaled tiles only for a viewer that agreed
+  to them.

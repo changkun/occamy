@@ -141,8 +141,10 @@ six runs per cell:
    bytes or client work is taken, and one that saves only server CPU
    waits. The first design made under it is the scaled codec for tiles
    in motion ([graphics-pipeline](graphics-pipeline.md), Implementation
-   notes: Scaled motion), which halves the bytes of moving tiles and
-   adds a bilinear upscale to the client.
+   notes: Scaled motion), which takes G5's bytes from 14.2 to 8.0 KiB
+   a frame over VNC and from 14.1 to 7.7 over RDP, and occamyd's CPU
+   down with them, for half a millisecond more of the Go client's
+   decoding a frame over VNC, the upscale included.
 
 ## Prior art and coverage
 
