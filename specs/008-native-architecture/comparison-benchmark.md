@@ -39,7 +39,11 @@ The owner set the scope on 2026-11-02:
   removes the bridge and the v0 routes from occamyd, so `occamy`,
   `v1-guacd` and `v1-guacd-gfx` go with them; `guacd` stays as the
   baseline, beside the `v1-native` series. See
-  [008](../008-native-architecture.md), v1.0.0-beta.2 scope.)
+  [008](../008-native-architecture.md), v1.0.0-beta.2 scope. Built:
+  `bench/plans/compare.yaml`'s matrix runs `guacd`, `v1-native` and
+  `v1-native-nogfx` under N0 to N2, and `guacd` and `v1-native` under
+  N3 and N4, 13 pairs of series and network instead of 24; the
+  essential plan, `guacd` against `v1-native`, is unchanged.)
 - **Factors:** workloads (typing, clicking, drawing, scrolling, video and
   more), a ladder of networks from local to very slow, the number of
   viewers and operators on a session, and the number of sessions on a
@@ -318,7 +322,9 @@ In this order, one pull request each, each leaving `make bench` working:
    the README once there are numbers.
 
 The collection takes about 32 hours of a quiet host: about 21 for the
-matrix, 5 for sharing, 5 for scale and 1 for the breakdown.
+matrix, 5 for sharing, 5 for scale and 1 for the breakdown. (Estimated
+with six series; since beta.2 the matrix has 13 of its 24 pairs of
+series and network.)
 
 ## Essential plan
 

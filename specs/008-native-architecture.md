@@ -138,7 +138,9 @@ The owner's plan of 2026-11-03, with the owner's answers the same day:
    series. Telnet is not benchmarked. This supersedes the rule of
    2026-10-31 that deleted a protocol's guacd path only once the
    benchmark showed native 10x better; the 10x rule remains the target
-   of the stable release (Path to pure Go).
+   of the stable release (Path to pure Go). **Built** on 2026-11-03
+   ([api-and-server-stack](008-native-architecture/api-and-server-stack.md),
+   Implementation notes: beta.2, without guacd).
 2. **The real-time work measured and kept so far ships, the rest waits
    for beta.3.** In beta.2: the frame window from the path and BBR
    ([realtime-transport](008-native-architecture/realtime-transport.md),
@@ -165,11 +167,12 @@ drew correctly; the clipboard failed both ways there
 ([native-rdp-backend](008-native-architecture/native-rdp-backend.md)).
 In beta.1 a Windows host could fall back to guacd; in beta.2 the
 release notes and the configuration reference say to set
-`disable_gfx`. ClearCodec and the bitmap cache remain a v1.0 blocker,
+`disable_gfx` (done with item 1). ClearCodec and the bitmap cache remain a v1.0 blocker,
 planned for beta.3.
 
 Two controls existed only through guacd, so they go with it
-(docs/configuration.md lists both as reasons to keep `backend: guacd`):
+(docs/configuration.md listed both as reasons to keep `backend: guacd`;
+it now says that neither is available, and why):
 
 - **Restricting the clipboard** (guacd's `disable-copy` and
   `disable-paste`). The native backends send the server's clipboard to
@@ -181,7 +184,10 @@ Two controls existed only through guacd, so they go with it
   backends record nothing yet. Recording needs a format and a player,
   which is a larger piece, planned for beta.3; until then occamyd
   refuses a connection that still sets guacd's recording parameters,
-  rather than serving it unrecorded.
+  rather than serving it unrecorded. As built, guacd's parameters sat
+  in the file's `guacd.params`, not on a connection, so occamyd refuses
+  the file, naming each recording parameter at its own path, and each
+  clipboard one too, since no file with guacd settings is served.
 
 ## Path to pure Go
 
@@ -267,9 +273,7 @@ flowchart LR
   GW[API v1: auth, registry, sessions] --> SE[Session owner]
   SE --> TB[Terminal backends: SSH, Kubernetes]
   SE --> GB[Graphical backends: VNC, RDP]
-  SE --> BR[guacd bridge]
   GB --> FB[Framebuffer and damage]
-  BR --> FB
   FB --> EN[Tile encoder, per-viewer pacing]
 ```
 
@@ -285,7 +289,8 @@ Principles:
    coalesced updates and never blocks the backend or other viewers.
 4. **Binary, versioned protocol** with capability negotiation.
 5. **Compatibility is an adapter**, not the core: the guacd bridge is a
-   backend like any other.
+   backend like any other. (2026-11-03: beta.2 removes the bridge;
+   guacd remains only as the benchmark's baseline.)
 
 ## Components
 
@@ -302,7 +307,8 @@ Each component is a sub-design (see Design Breakdown):
 - **Graphics pipeline:** framebuffer format, damage tracking, tile
   classification, codecs, and per-viewer quality.
 - **guacd bridge:** runs guacd connections under protocol v1 and defines
-  the parity criteria for replacing it per protocol.
+  the parity criteria for replacing it per protocol. Removed in beta.2,
+  with the v0 routes and telnet.
 - **Native SSH, native VNC:** the first two native backends.
 - **Native Kubernetes backend:** a terminal in a pod through the API
   server's exec stream, the second terminal backend, with no guacd
@@ -342,7 +348,10 @@ Each beta reruns the benchmark, which also covers #18.
 
 - Backend conformance against real servers in the
   [006](006-demo-stack-refresh.md) stack (x11vnc, TigerVNC, OpenSSH,
-  xrdp). The guacd bridge's parity matrix runs there for VNC
+  xrdp). VNC's parity matrix runs there
+  ([native-vnc-backend](008-native-architecture/native-vnc-backend.md),
+  Implementation notes: VNC's parity matrix); before beta.2 it compared
+  the native backend with guacd
   ([guacd-bridge](008-native-architecture/guacd-bridge.md)).
 - Protocol: golden encode/decode tests, and `go test -fuzz` on every
   decoder.

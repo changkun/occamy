@@ -18,7 +18,7 @@ affects:
   - docs/
 effort: medium
 created: 2026-10-29
-updated: 2026-11-02
+updated: 2026-11-03
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -808,11 +808,14 @@ Settled on 2026-10-31.
   - `gosec` flags `os.Stat` on `web_client`'s path as traversal by
     taint (G703); it is the operator's configuration, as elsewhere.
 - **Follow-ups:**
-  - Remove the v0 routes, and with them `client: true`, at v1.0.
+  - Remove the v0 routes, and with them `client: true`, at v1.0. (Done
+    in beta.2, 2026-11-03.)
   - Make `conf.yaml`, which the image and the archives ship, a v1 file,
     and v1 the main path of the README. It needs a writable place for
     the signing key in the distroless image and a first user, which are
-    the owner's to choose.
+    the owner's to choose. (Done in beta.2: a v1 template with the
+    signing key at `/var/lib/occamy/signing.key` and no user, which
+    occamyd refuses until the operator adds one.)
   - A browser job in CI (Playwright with Chromium, Firefox and WebKit)
     against `webinterop` or the demo stack.
   - A choice of sharpness on a HiDPI display, where a remote pixel
@@ -821,4 +824,5 @@ Settled on 2026-10-31.
     alone. `pixel_ratio` is there for it, and RDP's scale factors
     (internal/rdp/dynvc.go) would have to follow.
   - An end-to-end test of the demo's `ssh` connection through
-    `occamy-v1`; `tests/` streams only its VNC connections.
+    `occamy-v1`; `tests/` streams only its VNC connections. (Done in
+    beta.2: `TestE2EV1SSH`.)
