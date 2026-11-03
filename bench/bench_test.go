@@ -118,7 +118,7 @@ func TestShapeArgs(t *testing.T) {
 
 // fakeEngine returns a container engine that records each command line
 // it is given, and the file it records them in; it fails when fail is
-// set.
+// set, and otherwise answers as the link image does when it shapes.
 func fakeEngine(t *testing.T, fail bool) (engine, log string) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake engine is a shell script")
@@ -128,6 +128,8 @@ func fakeEngine(t *testing.T, fail bool) (engine, log string) {
 	script := fmt.Sprintf("#!/bin/sh\necho \"$*\" >> %q\n", log)
 	if fail {
 		script += "echo no such image >&2\nexit 125\n"
+	} else {
+		script += "echo congestion bbr\n"
 	}
 	if err := os.WriteFile(engine, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
@@ -136,8 +138,9 @@ func fakeEngine(t *testing.T, fail bool) (engine, log string) {
 }
 
 // A loss study's block shapes its series' server in the kernel, in the
-// server's network namespace, and clears it afterwards; a collection
-// first clears every server that its loss blocks shape.
+// server's network namespace, reads the congestion control there, and
+// clears it afterwards; a collection first clears every server that its
+// loss blocks shape.
 func TestShape(t *testing.T) {
 	engine, log := fakeEngine(t, false)
 	f := planFile{Runs: 1, Studies: []studyFile{
@@ -152,8 +155,8 @@ func TestShape(t *testing.T) {
 	if err := p.clearLinks(); err != nil {
 		t.Fatal(err)
 	}
-	if err := p.shape(blocks[0].series, &blocks[0].net); err != nil {
-		t.Fatal(err)
+	if cc, err := p.shape(blocks[0].series, &blocks[0].net); err != nil || cc != "bbr" {
+		t.Fatalf("shape: congestion %q, %v, want bbr", cc, err)
 	}
 	got, err := os.ReadFile(log)
 	if err != nil {
@@ -167,8 +170,47 @@ func TestShape(t *testing.T) {
 	}
 
 	p.engine, _ = fakeEngine(t, true)
-	if err := p.shape(blocks[0].series, nil); err == nil || !strings.Contains(err.Error(), "no such image") {
+	if _, err := p.shape(blocks[0].series, nil); err == nil || !strings.Contains(err.Error(), "no such image") {
 		t.Errorf("a failing engine: %v, want its message", err)
+	}
+}
+
+// A result records its server's congestion control where a loss study
+// read it, and nothing elsewhere; the link image names it on a line of
+// its own.
+func TestCongestion(t *testing.T) {
+	r := &runner{series: series{Name: "v1-native-bbr"}, net: netConditions[2], study: "loss", factor: "loss=2%", congestion: "bbr"}
+	raw, err := json.Marshal(r.newResult("G5", "vnc"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"congestion":"bbr"`) {
+		t.Errorf("JSON %s, want the congestion control", raw)
+	}
+	r = &runner{series: series{Name: "v1-native"}, net: netConditions[0]}
+	if raw, _ := json.Marshal(r.newResult("G5", "vnc")); strings.Contains(string(raw), "congestion") {
+		t.Errorf("JSON %s names a congestion control nothing read", raw)
+	}
+	for out, want := range map[string]string{
+		"congestion cubic\n": "cubic", "RTNETLINK answers: File exists\ncongestion bbr\n": "bbr", "": "",
+	} {
+		if got := congestionOf([]byte(out)); got != want {
+			t.Errorf("congestionOf(%q) = %q, want %q", out, got, want)
+		}
+	}
+}
+
+// Each block samples the services of every bench stack and its own
+// server, which only a profile may start, and no other.
+func TestCPUSamplerServices(t *testing.T) {
+	if c := newCPUSampler("podman", "occcmp", "occamy-v1-bbr"); !slices.Equal(c.services, append(slices.Clone(services), "occamy-v1-bbr")) {
+		t.Errorf("services %v, want the stack's and occamy-v1-bbr", c.services)
+	}
+	if c := newCPUSampler("podman", "occcmp", "occamy-v1"); !slices.Equal(c.services, services) {
+		t.Errorf("services %v, want the stack's", c.services)
+	}
+	if newCPUSampler("none", "occcmp", "occamy-v1") != nil {
+		t.Error("a sampler without an engine")
 	}
 }
 
@@ -279,7 +321,7 @@ func TestTableV1(t *testing.T) {
 // what its side ships, in the table and in the JSON, and its server CPU
 // is that of what served it.
 func TestGFXRows(t *testing.T) {
-	cpu := map[string]float64{"occamy-v1": 20, "occamy-v1-gfx": 50, "guacd": 300, "rdp": 4000}
+	cpu := map[string]float64{"occamy-v1": 20, "occamy-v1-gfx": 50, "occamy-v1-bbr": 30, "guacd": 300, "rdp": 4000}
 	for name, want := range map[string]struct {
 		note    string
 		json    string
@@ -289,6 +331,7 @@ func TestGFXRows(t *testing.T) {
 	}{
 		"v1-native":       {"GFX on, as shipped: the verdict", `"gfx":true,"verdict":true`, 20, true, true},
 		"v1-native-w2":    {"GFX on, like for like beside the verdict", `"gfx":true`, 20, true, false},
+		"v1-native-bbr":   {"GFX on, like for like beside the verdict", `"gfx":true`, 30, true, false},
 		"v1-native-nogfx": {"GFX off, like for like beside the verdict", `"gfx":false`, 20, true, false},
 		"v1-guacd":        {"GFX off, as shipped: the verdict", `"gfx":false,"verdict":true`, 320, false, true},
 		"v1-guacd-gfx":    {"GFX on, like for like beside the verdict", `"gfx":true`, 350, false, false},
@@ -722,6 +765,7 @@ func TestCIBench(t *testing.T) {
 	var wf struct {
 		Jobs map[string]struct {
 			TimeoutMinutes int `yaml:"timeout-minutes"`
+			Env            map[string]string
 			Steps          []struct {
 				Name, If, Run string
 			}
@@ -734,9 +778,21 @@ func TestCIBench(t *testing.T) {
 	if m := job.TimeoutMinutes; m <= 0 || m > 30 {
 		t.Errorf("the bench job's timeout-minutes is %d, want 1 to 30", m)
 	}
+	// occamy-v1-bbr, which serves v1-native-bbr, starts with the bbr
+	// profile, on a kernel with BBR loaded before the stack starts.
+	if !slices.Contains(strings.Split(job.Env["COMPOSE_PROFILES"], ","), "bbr") {
+		t.Errorf("the bench job's compose profiles are %q, want bbr", job.Env["COMPOSE_PROFILES"])
+	}
+	loaded := false
 	runs, logs := 0, false
 	for _, s := range job.Steps {
+		if strings.Contains(s.Run, "modprobe tcp_bbr") {
+			loaded = true
+		}
 		if strings.Contains(s.Run, "make bench") || strings.Contains(s.Run, "go run ./bench") {
+			if !loaded {
+				t.Errorf("step %q runs the bench before BBR is loaded", s.Name)
+			}
 			runs++
 			if !strings.Contains(s.Run, " -failfast ") {
 				t.Errorf("step %q runs the bench without -failfast", s.Name)

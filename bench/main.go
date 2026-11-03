@@ -59,9 +59,9 @@ func (s series) serves(proto string) bool {
 }
 
 // endpoints are where the series reach the stack: occamyd for v0, guacd
-// for the direct series, occamy-v1 for the v1 series, and occamy-v1-gfx
-// for v1-guacd-gfx.
-type endpoints struct{ occamy, guacd, v1, v1GFX string }
+// for the direct series, occamy-v1 for the v1 series, occamy-v1-gfx for
+// v1-guacd-gfx, and occamy-v1-bbr for v1-native-bbr.
+type endpoints struct{ occamy, guacd, v1, v1GFX, v1BBR string }
 
 // allSeries returns every series that the harness knows, in the order
 // -series lists them, reaching the stack at at. The v1 series show their
@@ -77,6 +77,7 @@ func allSeries(at endpoints, d display) []series {
 		{"v1-native-nogfx", at.v1, "occamy-v1"},
 		{"v1-guacd", at.v1, "occamy-v1"},
 		{"v1-guacd-gfx", at.v1GFX, "occamy-v1-gfx"},
+		{"v1-native-bbr", at.v1BBR, "occamy-v1-bbr"},
 	} {
 		conns := v1Connections[v.name]
 		all = append(all, series{
@@ -105,9 +106,10 @@ func main() {
 		guacdAddr = flag.String("guacd", "localhost:4822", "guacd address for the direct series")
 		v1Addr    = flag.String("v1", "localhost:5637", "occamy-v1 address for the v1 series")
 		v1GFXAddr = flag.String("v1-gfx", "localhost:5640", "occamy-v1-gfx address for the v1-guacd-gfx series")
+		v1BBRAddr = flag.String("v1-bbr", "localhost:5642", "occamy-v1-bbr address for the v1-native-bbr series")
 		scen      = flag.String("scenarios", "all", "comma-separated scenario IDs, or all")
 		nets      = flag.String("net", "N0,N1,N2", "comma-separated network conditions")
-		seriesF   = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd, v1-native, v1-native-w2, v1-native-nogfx, v1-guacd, v1-guacd-gfx")
+		seriesF   = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd, v1-native, v1-native-w2, v1-native-nogfx, v1-native-bbr, v1-guacd, v1-guacd-gfx")
 		quick     = flag.Bool("quick", false, "fewer samples and shorter scenarios, to check the setup")
 		ackHz     = flag.Float64("ack-hz", 60, "v1: the screen refresh at which a graphical frame is acknowledged, or 0 for at once, a diagnostic; the gate's numbers use 60")
 		runs      = flag.Int("runs", 1, "how many times to run everything; the table shows medians")
@@ -125,7 +127,7 @@ func main() {
 	flag.Parse()
 	log.SetFlags(log.Ltime)
 
-	all := allSeries(endpoints{occamy: *addr, guacd: *guacdAddr, v1: *v1Addr, v1GFX: *v1GFXAddr}, newDisplay(*ackHz))
+	all := allSeries(endpoints{occamy: *addr, guacd: *guacdAddr, v1: *v1Addr, v1GFX: *v1GFXAddr, v1BBR: *v1BBRAddr}, newDisplay(*ackHz))
 	debug, err := parseDebug(*debugF)
 	if err != nil {
 		log.Fatal(err)
@@ -299,13 +301,13 @@ func (p plan) measure(ctx context.Context, prev *report) (report, error) {
 // that a block's own results raise would otherwise carry into the
 // results after them unchecked.
 func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (stopped bool, err error) {
-	carried := b.net
+	carried, congestion := b.net, ""
 	if b.kernel {
-		if err := p.shape(b.series, &b.net); err != nil {
+		if congestion, err = p.shape(b.series, &b.net); err != nil {
 			return false, err
 		}
 		defer func() {
-			if err := p.shape(b.series, nil); err != nil {
+			if _, err := p.shape(b.series, nil); err != nil {
 				log.Print(err)
 			}
 		}()
@@ -319,8 +321,8 @@ func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (
 	defer px.close()
 	r := &runner{
 		series: b.series, net: b.net, proxy: px, quick: p.quick, runIndex: run,
-		study: b.study, factor: b.factor, keys: p.keys, connects: p.connects,
-		cpu: newCPUSampler(p.engine, p.project), debug: p.debug,
+		study: b.study, factor: b.factor, congestion: congestion, keys: p.keys, connects: p.connects,
+		cpu: newCPUSampler(p.engine, p.project, b.series.server), debug: p.debug,
 	}
 	// add adds the result that m measures once the host is quiet, and
 	// reports whether failfast stops the block there.
@@ -349,9 +351,10 @@ func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (
 }
 
 // shape emulates n in the kernel on the client connections of s's server,
-// with the link image's shape in the server's network namespace, or
-// clears what it emulated there when n is nil.
-func (p plan) shape(s series, n *netCondition) error {
+// with the link image's shape in the server's network namespace, and
+// returns the TCP congestion control there, or clears what it emulated
+// when n is nil.
+func (p plan) shape(s series, n *netCondition) (congestion string, err error) {
 	args := []string{
 		"run", "--rm", "--network", "container:" + p.project + "-" + s.server + "-1",
 		"--cap-add", "NET_ADMIN", p.linkImage,
@@ -363,9 +366,23 @@ func (p plan) shape(s series, n *netCondition) error {
 	}
 	out, err := exec.Command(p.engine, args...).CombinedOutput() // #nosec G204 -- engine, project and image come from flags
 	if err != nil {
-		return fmt.Errorf("emulating the link on %s: %w: %s", s.server, err, bytes.TrimSpace(out))
+		return "", fmt.Errorf("emulating the link on %s: %w: %s", s.server, err, bytes.TrimSpace(out))
 	}
-	return nil
+	if n == nil {
+		return "", nil
+	}
+	return congestionOf(out), nil
+}
+
+// congestionOf returns the congestion control that the link image's
+// output names on its line "congestion NAME", or "" if none does.
+func congestionOf(out []byte) string {
+	for line := range strings.Lines(string(out)) {
+		if name, ok := strings.CutPrefix(strings.TrimSpace(line), "congestion "); ok {
+			return name
+		}
+	}
+	return ""
 }
 
 // clearLinks clears the link in the kernel of every server whose series
@@ -377,7 +394,7 @@ func (p plan) clearLinks() error {
 			continue
 		}
 		cleared[b.series.server] = true
-		if err := p.shape(b.series, nil); err != nil {
+		if _, err := p.shape(b.series, nil); err != nil {
 			return err
 		}
 	}
@@ -426,8 +443,10 @@ type runner struct {
 	proxy    *proxy
 	quick    bool
 	runIndex int // which of the runs this is
-	// study and factor are those of the block the runner measures.
-	study, factor string
+	// study and factor are those of the block the runner measures, and
+	// congestion the TCP congestion control of its server, where a loss
+	// study read it.
+	study, factor, congestion string
 	// keys and connects are the plan's (plan); 0 is the default.
 	keys, connects int
 	cpu            *cpuSampler
@@ -484,7 +503,7 @@ func (r *runner) duration(d time.Duration) time.Duration {
 func (r *runner) newResult(id, proto string) *result {
 	res := &result{
 		Scenario: id, Protocol: proto, Series: r.series.Name, Net: r.net.Name, Run: r.runIndex,
-		Study: r.study, Factor: r.factor, At: time.Now().UTC(),
+		Study: r.study, Factor: r.factor, Congestion: r.congestion, At: time.Now().UTC(),
 	}
 	if l, err := loadAverage(); err == nil {
 		res.Load = l
@@ -654,6 +673,9 @@ type result struct {
 	// viewers=4, which the matrix leaves empty.
 	Study  string `json:"study,omitempty"`
 	Factor string `json:"factor,omitempty"`
+	// Congestion is the TCP congestion control of the series' server,
+	// which a loss study reads where it emulates the link, such as cubic.
+	Congestion string `json:"congestion,omitempty"`
 	// At is when the result started, and Load the host's 1-minute load
 	// average then.
 	At   time.Time `json:"at,omitzero"`
@@ -867,7 +889,7 @@ func cells(r *result) [numCols]float64 {
 		native := strings.HasPrefix(r.Series, "v1-native")
 		switch {
 		case native:
-			c[colServerCPU] = r.CPUMS["occamy-v1"]
+			c[colServerCPU] = r.CPUMS[v1Service(r.Series)]
 		case r.Series == "v1-guacd":
 			c[colServerCPU] = r.CPUMS["occamy-v1"] + r.CPUMS["guacd"]
 		case r.Series == "v1-guacd-gfx":
@@ -998,17 +1020,25 @@ func median(vs []float64) float64 {
 
 // cpuSampler reads the CPU time of the stack's containers.
 type cpuSampler struct {
-	engine  string
-	project string
+	engine   string
+	project  string
+	services []string
 }
 
-func newCPUSampler(engine, project string) *cpuSampler {
+// newCPUSampler samples the services of every bench stack and server,
+// which may be one of a profile's that only some stacks start.
+func newCPUSampler(engine, project, server string) *cpuSampler {
 	if engine == "" || engine == "none" {
 		return nil
 	}
-	return &cpuSampler{engine: engine, project: project}
+	svcs := services
+	if server != "" && !slices.Contains(svcs, server) {
+		svcs = append(slices.Clone(svcs), server)
+	}
+	return &cpuSampler{engine: engine, project: project, services: svcs}
 }
 
+// services are those of every bench stack.
 var services = []string{"occamy", "occamy-v1", "occamy-v1-gfx", "guacd", "ssh", "vnc", "rdp"}
 
 // sample returns the cumulative CPU time per compose service, or nil if
@@ -1028,7 +1058,7 @@ func (c *cpuSampler) stats() *containerStats {
 		return nil
 	}
 	args := []string{"stats", "--no-stream", "--format", "json"}
-	for _, svc := range services {
+	for _, svc := range c.services {
 		args = append(args, c.project+"-"+svc+"-1")
 	}
 	out, err := exec.Command(c.engine, args...).Output() // #nosec G204 -- engine and project come from flags
@@ -1066,6 +1096,7 @@ func hostInfo(engine, project string) map[string]string {
 		run("occamy_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-1")
 		run("occamy_v1_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-v1-1")
 		run("occamy_v1_gfx_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-v1-gfx-1")
+		run("occamy_v1_bbr_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-v1-bbr-1")
 		run("guacd_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-guacd-1")
 	}
 	return info

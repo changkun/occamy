@@ -32,7 +32,8 @@ func TestAllSeries(t *testing.T) {
 	want := map[string][]string{
 		"occamy": nil, "guacd": nil,
 		"v1-native": {"rdp", "ssh", "vnc"}, "v1-native-w2": {"rdp", "ssh", "vnc"},
-		"v1-native-nogfx": {"rdp"}, "v1-guacd": {"rdp", "vnc"}, "v1-guacd-gfx": {"rdp"},
+		"v1-native-bbr": {"rdp", "ssh", "vnc"}, "v1-native-nogfx": {"rdp"}, "v1-guacd": {"rdp", "vnc"},
+		"v1-guacd-gfx": {"rdp"},
 	}
 	all := testSeries()
 	if len(all) != len(want) {
@@ -40,6 +41,7 @@ func TestAllSeries(t *testing.T) {
 	}
 	servers := map[string]string{
 		"occamy": "occamy:5636", "guacd": "guacd:4822", "v1-guacd-gfx": "occamy-v1-gfx:5637",
+		"v1-native-bbr": "occamy-v1-bbr:5637",
 	}
 	for _, s := range all {
 		if protos, ok := want[s.Name]; !ok || !slices.Equal(s.protocols, protos) {
@@ -193,6 +195,49 @@ func TestRealtime2Plan(t *testing.T) {
 		t.Errorf("%d results a run in %d cells, want 60 and 360 in all", results, len(cells))
 	}
 	for _, s := range []string{"v1-native", "guacd"} {
+		for _, net := range []string{"N1", "N2"} {
+			for _, loss := range []string{"0", "0.5", "2"} {
+				for _, cell := range []string{"T1 ssh", "G2 vnc", "G2 rdp", "G5 vnc", "G5 rdp"} {
+					if !cells[fmt.Sprintf("%s %s %s loss=%s%%", s, cell, net, loss)] {
+						t.Errorf("no %s for %s under %s with %s%% loss", cell, s, net, loss)
+					}
+				}
+			}
+		}
+	}
+}
+
+// Step 3a's plan measures step 2's loss study with v1-native-bbr in
+// guacd's place, 8 times, so that Holm's correction over its 30 cells
+// can find a difference.
+func TestRealtime3aPlan(t *testing.T) {
+	f, err := readPlanFile("plans/realtime-3a.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Runs != 8 || f.Keys != 100 || f.Connects == nil || *f.Connects != 0 || f.MaxLoad != 8 || f.LoadWait != 2*time.Hour {
+		t.Errorf("runs %d, keys %d, connects %v, max_load %g, load_wait %v; want 8, 100, 0, 8 and 2h",
+			f.Runs, f.Keys, f.Connects, f.MaxLoad, f.LoadWait)
+	}
+	blocks, err := studyBlocks(f, testSeries())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells := map[string]bool{}
+	results := 0
+	for _, b := range blocks {
+		if !b.kernel || b.connect || b.study != "loss" {
+			t.Errorf("%s: kernel %v, connect %v; want a loss study's block in the kernel without G7", b, b.kernel, b.connect)
+		}
+		results += b.results()
+		for _, sc := range b.scenarios {
+			cells[fmt.Sprintf("%s %s %s %s %s", b.series.Name, sc.ID, sc.Protocol, b.net.Name, b.factor)] = true
+		}
+	}
+	if results*f.Runs != 480 || len(cells) != 60 {
+		t.Errorf("%d results a run in %d cells, want 60 and 480 in all", results, len(cells))
+	}
+	for _, s := range []string{"v1-native", "v1-native-bbr"} {
 		for _, net := range []string{"N1", "N2"} {
 			for _, loss := range []string{"0", "0.5", "2"} {
 				for _, cell := range []string{"T1 ssh", "G2 vnc", "G2 rdp", "G5 vnc", "G5 rdp"} {

@@ -84,14 +84,15 @@ def synthetic_window(runs=6, guacd=False):
                 plan=dict(seed=1, max_load=8, keys=100, blocks=[]), results=results)
 
 
-def synthetic_loss(runs=6):
+def synthetic_loss(runs=6, bases=(("guacd", 200.0), ("v1-native", 20.0))):
     """Returns a loss study's results under N1 and N2, where loss adds to
-    each key what ADDED says, and to G5's frame interval twice that; guacd
-    is ten times slower than v1-native without loss."""
+    each key what ADDED says, and to G5's frame interval twice that, and
+    each series' key takes its base in bases without loss: guacd's is ten times
+    v1-native's by default."""
     rng = np.random.default_rng(3)
     results = []
     for run in range(runs):
-        for series, base in (("guacd", 200.0), ("v1-native", 20.0)):
+        for series, base in bases:
             for net in ("N1", "N2"):
                 for loss in (0, 0.5, 2):
                     jitter = 1 + rng.uniform(-0.02, 0.02)
@@ -109,7 +110,8 @@ def synthetic_loss(runs=6):
                 plan=dict(seed=1, max_load=8, keys=100, blocks=[]), results=results)
 
 
-ADDED = {"v1-native": {0: 0.0, 0.5: 5.0, 2: 40.0}, "guacd": {0: 0.0, 0.5: 30.0, 2: 120.0}}
+ADDED = {"v1-native": {0: 0.0, 0.5: 5.0, 2: 40.0}, "guacd": {0: 0.0, 0.5: 30.0, 2: 120.0},
+         "v1-native-bbr": {0: 0.0, 0.5: 5.0, 2: 10.0}}
 
 
 class Statistics(unittest.TestCase):
@@ -196,21 +198,21 @@ class Report(unittest.TestCase):
         c = self.comparisons(out)
         t1 = c[("T1", "ssh", "N0", "latency_p95")]
         self.assertEqual(t1["primary"], "True")
-        self.assertAlmostEqual(float(t1["factor"]), 20, delta=1.5)
+        self.assertAlmostEqual(float(t1["times_better"]), 20, delta=1.5)
         self.assertAlmostEqual(float(t1["p"]), 2 / 924)
         # Three primary tests in the family: Holm multiplies the smallest by 3.
         self.assertAlmostEqual(float(t1["p_adjusted"]), 3 * 2 / 924)
         self.assertGreaterEqual(float(t1["lo"]), 10)
         g6 = c[("G6", "vnc", "N0", "bytes_down")]
-        self.assertAlmostEqual(float(g6["factor"]), 20, delta=1.5)
+        self.assertAlmostEqual(float(g6["times_better"]), 20, delta=1.5)
         t2 = c[("T2", "ssh", "N0", "completion")]
-        self.assertAlmostEqual(float(t2["factor"]), 1, delta=0.1)
+        self.assertAlmostEqual(float(t2["times_better"]), 1, delta=0.1)
         self.assertGreater(float(t2["p"]), 0.05)
         # Secondary metrics are not corrected.
         self.assertEqual(c[("T1", "ssh", "N0", "latency_p50")]["p_adjusted"], "nan")
         # Server CPU and memory are the series' own containers.
-        self.assertAlmostEqual(float(c[("T2", "ssh", "N0", "server_cpu")]["factor"]), 1)
-        self.assertAlmostEqual(float(c[("G6", "vnc", "N0", "server_mem")]["factor"]), 10)
+        self.assertAlmostEqual(float(c[("T2", "ssh", "N0", "server_cpu")]["times_better"]), 1)
+        self.assertAlmostEqual(float(c[("G6", "vnc", "N0", "server_mem")]["times_better"]), 10)
 
         md = (out / "report.md").read_text()
         self.assertIn("2 of 3 differences are significant after correction", md)
@@ -269,14 +271,14 @@ class Report(unittest.TestCase):
         self.assertFalse(any(k[0] == "Guacamole to Occamy" for k in c))
         g5 = c[("Frame window", "G5", "vnc", "N2", "latency_p95")]
         self.assertEqual((g5["baseline"], g5["candidate"], g5["primary"]), ("v1-native-w2", "v1-native", "True"))
-        self.assertAlmostEqual(float(g5["factor"]), 2, delta=0.15)
+        self.assertAlmostEqual(float(g5["times_better"]), 2, delta=0.15)
         self.assertAlmostEqual(float(g5["p"]), 2 / 924)
         self.assertAlmostEqual(float(g5["p_adjusted"]), 2 * 2 / 924)
         missed = c[("Frame window", "G5", "vnc", "N2", "scene_missed")]
-        self.assertAlmostEqual(float(missed["factor"]), 40 / 10)
+        self.assertAlmostEqual(float(missed["times_better"]), 40 / 10)
         self.assertEqual(missed["p_adjusted"], "nan")
         interval = c[("Frame window", "G5", "vnc", "N2", "frame_interval_p95")]
-        self.assertAlmostEqual(float(interval["factor"]), 90 / 40, delta=0.2)
+        self.assertAlmostEqual(float(interval["times_better"]), 90 / 40, delta=0.2)
         self.assertGreater(float(c[("Frame window", "T1", "ssh", "N0", "latency_p95")]["p"]), 0.05)
 
         md = (out / "report.md").read_text()
@@ -295,9 +297,9 @@ class Report(unittest.TestCase):
         # judge Guacamole's alone, and list v1-native's latency once.
         out = self.analyse(synthetic_window(guacd=True))
         c = self.family_comparisons(out)
-        self.assertAlmostEqual(float(c[("Guacamole to Occamy", "T1", "ssh", "N0", "latency_p95")]["factor"]), 20,
+        self.assertAlmostEqual(float(c[("Guacamole to Occamy", "T1", "ssh", "N0", "latency_p95")]["times_better"]), 20,
                                delta=2)
-        self.assertAlmostEqual(float(c[("Frame window", "T1", "ssh", "N0", "latency_p95")]["factor"]), 1, delta=0.1)
+        self.assertAlmostEqual(float(c[("Frame window", "T1", "ssh", "N0", "latency_p95")]["times_better"]), 1, delta=0.1)
         md = (out / "report.md").read_text()
         guac, window = md.index("## Guacamole to Occamy"), md.index("## Frame window")
         self.assertIn("the 10x target is met in 2 of 2", md[guac:window])
@@ -314,7 +316,8 @@ class Report(unittest.TestCase):
         with open(out / "loss.csv") as f:
             loss = {(r["series"], r["scenario"], r["net"], r["loss"], r["metric"]): r for r in csv.DictReader(f)}
         self.assertEqual(sum(r["primary"] == "True" for r in loss.values()), 16)
-        for series, added in ADDED.items():
+        for series in ("guacd", "v1-native"):
+            added = ADDED[series]
             for level in (0.5, 2):
                 c = loss[(series, "G5", "N2", str(float(level)), "latency_p95")]
                 self.assertAlmostEqual(float(c["added"]), added[level], delta=5)
@@ -344,6 +347,31 @@ class Report(unittest.TestCase):
         with open(out / "comparisons.csv") as f:
             primary = [r for r in csv.DictReader(f) if r["family"] == "Guacamole to Occamy" and r["primary"] == "True"]
         self.assertEqual(len(primary), 12)
+
+    def test_congestion_family(self):
+        # v1-native beside v1-native-bbr in a loss study: the family
+        # compares them in each cell, with or without loss, Holm-corrected
+        # over its 12 primary tests, and without the targets; 8 runs reach
+        # significance after the correction where the series differ.
+        out = self.analyse(synthetic_loss(runs=8, bases=(("v1-native", 20.0), ("v1-native-bbr", 20.0))))
+        with open(out / "comparisons.csv") as f:
+            c = {(r["factor"], r["scenario"], r["net"], r["metric"]): r for r in csv.DictReader(f)
+                 if r["family"] == "Congestion control"}
+        self.assertEqual(sum(r["primary"] == "True" for r in c.values()), 12)
+        g5 = c[("loss=2%", "G5", "N2", "latency_p95")]
+        self.assertEqual((g5["baseline"], g5["candidate"]), ("v1-native", "v1-native-bbr"))
+        self.assertAlmostEqual(float(g5["times_better"]), 60 / 30, delta=0.1)
+        self.assertAlmostEqual(float(g5["p"]), 2 / 12870)
+        self.assertLess(float(g5["p_adjusted"]), report.ALPHA)
+        md = (out / "report.md").read_text()
+        self.assertIn("## Congestion control: `v1-native` to `v1-native-bbr`", md)
+        self.assertNotIn("10x", md)
+        self.assertNotIn("the exact test's smallest p", md)
+        self.assertTrue((out / "factors-congestion-control.svg").exists())
+        with open(out / "loss.csv") as f:
+            loss = {(r["series"], r["scenario"], r["net"], r["loss"], r["metric"]): r for r in csv.DictReader(f)}
+        self.assertAlmostEqual(float(loss[("v1-native-bbr", "G5", "N2", "2.0", "latency_p95")]["added"]), 10,
+                               delta=2)
 
     def test_loss_all_failed(self):
         # A loss where every run of a series failed is marked on the

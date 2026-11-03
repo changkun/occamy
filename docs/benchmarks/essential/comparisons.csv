@@ -1,4 +1,4 @@
-family,baseline,candidate,study,factor,scenario,protocol,net,metric,primary,n_baseline,n_candidate,factor,lo,hi,coverage,p,p_adjusted
+family,baseline,candidate,study,factor,scenario,protocol,net,metric,primary,n_baseline,n_candidate,times_better,lo,hi,coverage,p,p_adjusted
 Guacamole to Occamy,guacd,v1-native,matrix,,T1,ssh,N0,latency_p95,True,6,6,1.6843531039280468,0.6554161915621438,1.9602400600150038,0.9588744588744589,0.06493506493506493,0.12987012987012986
 Guacamole to Occamy,guacd,v1-native,matrix,,T1,ssh,N0,latency_p50,False,6,6,1.5322786542346565,1.2905692438402718,1.8683168316831682,0.9588744588744589,0.0021645021645021645,nan
 Guacamole to Occamy,guacd,v1-native,matrix,,T1,ssh,N0,server_mem,False,6,6,2.507730805843993,1.0210608424336969,4.775584795321636,0.9588744588744589,0.025974025974025976,nan

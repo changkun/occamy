@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path"
 	"slices"
 	"strings"
 	"sync"
@@ -118,8 +119,8 @@ func TestBenchV1File(t *testing.T) {
 			t.Errorf("series %s: guacd's color-depth %q, want 32", name, d)
 		}
 	}
-	if len(rdpPaths) != 5 {
-		t.Errorf("rdpPaths has %d series, want RDP's five", len(rdpPaths))
+	if len(rdpPaths) != 6 {
+		t.Errorf("rdpPaths has %d series, want RDP's six", len(rdpPaths))
 	}
 	for _, proto := range []string{"ssh", "vnc", "rdp"} {
 		if _, ok := v1Connections["v1-native"][proto]; !ok {
@@ -133,6 +134,14 @@ func TestBenchV1File(t *testing.T) {
 	}
 	if rdpPaths["v1-native-w2"].verdict {
 		t.Error("v1-native-w2 counts for the targets, but its window is not what ships")
+	}
+	// v1-native-bbr differs from v1-native in its server alone.
+	if !maps.Equal(v1Connections["v1-native-bbr"], v1Connections["v1-native"]) || rdpPaths["v1-native-bbr"].gfx != rdpPaths["v1-native"].gfx {
+		t.Errorf("v1-native-bbr opens %v with GFX %v, want v1-native's %v with GFX %v",
+			v1Connections["v1-native-bbr"], rdpPaths["v1-native-bbr"].gfx, v1Connections["v1-native"], rdpPaths["v1-native"].gfx)
+	}
+	if rdpPaths["v1-native-bbr"].verdict || v1Windows["v1-native-bbr"] != 0 {
+		t.Error("v1-native-bbr counts for the targets or offers another window")
 	}
 	for name, w := range v1Windows {
 		if _, ok := v1Connections[name]; !ok || w == 0 {
@@ -180,6 +189,56 @@ func TestBenchGFXService(t *testing.T) {
 	}
 	if !slices.Contains(services, "occamy-v1-gfx") {
 		t.Error("the harness does not sample occamy-v1-gfx's CPU")
+	}
+}
+
+// occamy-v1-bbr serves occamy-v1's file with BBR as its namespace's
+// congestion control, on the ports the harness and make bench take by
+// default, on the loopback interface only, and starts only with the bbr
+// profile, since a kernel without BBR would fail the whole stack.
+func TestBenchBBRService(t *testing.T) {
+	raw, err := os.ReadFile("../docker/docker-compose.bench.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var compose struct {
+		Services map[string]struct {
+			Ports, Volumes, Profiles []string
+			Sysctls                  map[string]string
+			Tmpfs                    []string
+		}
+	}
+	if err := yaml.Unmarshal(raw, &compose); err != nil {
+		t.Fatal(err)
+	}
+	svc := compose.Services["occamy-v1-bbr"]
+	if want := []string{"127.0.0.1:${OCCAMY_V1_BBR_PORT:-5642}:5637", "127.0.0.1:${OCCAMY_V1_BBR_DEBUG_PORT:-5643}:5638"}; !slices.Equal(svc.Ports, want) {
+		t.Errorf("ports %q, want %q", svc.Ports, want)
+	}
+	if want := []string{"./bench/occamy-v1.yaml:/occamy/v1.yaml:ro"}; !slices.Equal(svc.Volumes, want) {
+		t.Errorf("volumes %q, want %q", svc.Volumes, want)
+	}
+	if cc := svc.Sysctls["net.ipv4.tcp_congestion_control"]; cc != "bbr" || !slices.Equal(svc.Profiles, []string{"bbr"}) {
+		t.Errorf("congestion control %q, profiles %q; want bbr and [bbr]", cc, svc.Profiles)
+	}
+	// The signing key that occamy-v1.yaml names, on a tmpfs.
+	raw, err = os.ReadFile("../docker/bench/occamy-v1.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var file struct {
+		Auth struct {
+			SigningKeyFile string `yaml:"signing_key_file"`
+		} `yaml:"auth"`
+	}
+	if err := yaml.Unmarshal(raw, &file); err != nil {
+		t.Fatal(err)
+	}
+	if dir := path.Dir(file.Auth.SigningKeyFile); !slices.ContainsFunc(svc.Tmpfs, func(m string) bool { return strings.HasPrefix(m, dir+":") }) {
+		t.Errorf("tmpfs %q, want one at %s", svc.Tmpfs, dir)
+	}
+	if v1Service("v1-native-bbr") != "occamy-v1-bbr" || v1Service("v1-native") != "occamy-v1" {
+		t.Errorf("v1-native-bbr is served by %s and v1-native by %s", v1Service("v1-native-bbr"), v1Service("v1-native"))
 	}
 }
 

@@ -173,20 +173,27 @@ jobs:
     # first error, and the stack's logs follow a failure or a timeout.
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The bbr profile starts occamy-v1-bbr, for v1-native-bbr, whose
+    # network namespace takes BBR, which the runner's kernel has as a
+    # module.
+    env:
+      COMPOSE_PROFILES: bbr
     steps:
     - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
       with:
         go-version: stable
+    - name: Load BBR
+      run: sudo modprobe tcp_bbr
     - name: Benchmark smoke run
       run: make bench CONTAINER_ENGINE=docker BENCH_FLAGS="-quick -failfast -net N0,N1 -engine none"
     # The v1 series on the stack that make bench started: native SSH, VNC
-    # and RDP, also with a client that offers a frame window of 2, and VNC
-    # and RDP through guacd, with RDP's graphics pipeline on and off on
-    # both sides. N1 alone, since the run above covers the proxy without
-    # delay.
+    # and RDP, also with a client that offers a frame window of 2 and on a
+    # server whose congestion control is BBR, and VNC and RDP through
+    # guacd, with RDP's graphics pipeline on and off on both sides. N1
+    # alone, since the run above covers the proxy without delay.
     - name: Benchmark smoke run, protocol v1
-      run: go run ./bench -quick -failfast -net N1 -engine none -series v1-native,v1-native-w2,v1-native-nogfx,v1-guacd,v1-guacd-gfx -out bench-v1-results.json
+      run: go run ./bench -quick -failfast -net N1 -engine none -series v1-native,v1-native-w2,v1-native-bbr,v1-native-nogfx,v1-guacd,v1-guacd-gfx -out bench-v1-results.json
     - name: Stack logs
       if: ${{ !success() }}
       working-directory: docker
