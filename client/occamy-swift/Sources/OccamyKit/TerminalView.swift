@@ -138,7 +138,12 @@ public struct TerminalView: NSViewRepresentable {
     }
 
     public func makeNSView(context: Context) -> SwiftTerm.TerminalView {
-        context.coordinator.view
+        let v = context.coordinator.view
+        // The keyboard goes to the terminal from the start.
+        DispatchQueue.main.async {
+            v.window?.makeFirstResponder(v)
+        }
+        return v
     }
 
     public func updateNSView(_ v: SwiftTerm.TerminalView, context: Context) {}
