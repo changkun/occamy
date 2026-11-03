@@ -36,10 +36,10 @@ RUN mkdir -p /licenses/xxh3 /licenses/cpuid \
 RUN mkdir -p /var/lib/occamy
 
 # Stage 3: runtime image, without a shell or C libraries, running as the
-# unprivileged user nonroot, 65532. occamyd writes one file, and only for
-# a v1 file: if auth.signing_key_file does not exist, it creates the
-# signing key there at start, through a temporary file in the same
-# directory, so that directory must exist and be writable by nonroot.
+# unprivileged user nonroot, 65532. occamyd writes one file: if
+# auth.signing_key_file does not exist, it creates the signing key there
+# at start, through a temporary file in the same directory, so that
+# directory must exist and be writable by nonroot.
 # /var/lib/occamy is, and an empty named volume mounted there takes its
 # owner from the image, so a real install's key outlives the container
 # (docs/configuration.md, Sign-in).

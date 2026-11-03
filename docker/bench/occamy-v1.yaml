@@ -4,10 +4,7 @@
 
 # The v1 file of the benchmark stack's occamy-v1 service
 # (docker-compose.bench.yaml), which replaces the demo's: the bench
-# desktop and the demo shell through every backend that API v1 serves
-# them with, for the harness's v1 series (bench/v1.go). SSH has no guacd
-# backend. Every connection names its backend, so that a change of a
-# protocol's default does not move a series to another backend.
+# desktop and the demo shell, for the harness's v1 series (bench/v1.go).
 
 version: 1
 listen: 0.0.0.0:5637
@@ -39,7 +36,7 @@ connections:
   - id: rdp-native
     protocol: rdp
     target: rdp:3389
-    # As the demo's rdp-native: xrdp speaks TLS without NLA, and signs
+    # As the demo's rdp: xrdp speaks TLS without NLA, and signs
     # its certificate itself when the image is built, so there is nothing
     # to pin in advance; occamyd warns of it when it starts.
     security: tls
@@ -47,7 +44,7 @@ connections:
     credentials: {username: occamy, password_env: OCCAMY_BENCH_RDP_PASSWORD}
     allow: {users: [demo]}
   # rdp-native without RDP's graphics pipeline, for v1-native-nogfx: not
-  # what it ships, but what compares with rdp-guacd like for like.
+  # what occamyd ships, but RDP the other way, beside it.
   - id: rdp-native-nogfx
     protocol: rdp
     target: rdp:3389
