@@ -308,7 +308,7 @@ func (w *writer) refineTile(id uint32, t int) (send, ok bool) {
 		// As a run of one still tile.
 		var got int
 		var reached bool
-		codec, got, reached = w.encodeRun(t, 1, w.tiles[0], r, true, q, lo)
+		codec, got, reached = w.encodeRun(t, 1, w.tiles[0], r, true, q, lo, 1)
 		if !exact(codec) {
 			w.msgQuality, w.msgGoal = stillGoal(got, q, reached)
 			if reached && have >= lossyQuality(got) {

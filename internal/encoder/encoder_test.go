@@ -21,6 +21,7 @@ const (
 	deflate = protocol.CodecDeflate
 	pngC    = protocol.CodecPNG
 	jpegC   = protocol.CodecJPEG
+	scaled  = protocol.CodecScaled
 	webpC   = protocol.CodecWebP
 	cached  = protocol.CodecCached
 )
@@ -81,7 +82,7 @@ func TestAgreement(t *testing.T) {
 			t.Errorf("an encoder for %v, want none", codecs)
 		}
 	}
-	if !slices.Equal(Codecs(), []protocol.Codec{webpC, jpegC, deflate, raw, protocol.CodecCached}) {
+	if !slices.Equal(Codecs(), []protocol.Codec{webpC, jpegC, deflate, raw, protocol.CodecCached, scaled}) {
 		t.Errorf("Codecs() = %v", Codecs())
 	}
 }
@@ -183,6 +184,77 @@ func TestLossy(t *testing.T) {
 				t.Errorf("%v at %v: SSIM %.3f at q30 and %.3f at q90", lossy, r, scores[0], scores[1])
 			}
 		}
+	}
+}
+
+// Scaled rectangles carry their lossy codec at half their size, rounded
+// up, and look like the rectangle once scaled up; a viewer that did not
+// agree to scaled tiles, or a factor out of range, gets them as Lossy
+// encodes them.
+func TestScaled(t *testing.T) {
+	motion := loadFrame(t, "motion-0")
+	for _, lossy := range []protocol.Codec{webpC, jpegC} {
+		e := New([]protocol.Codec{lossy, deflate, scaled})
+		if !e.Scales() {
+			t.Fatalf("%v: does not scale", lossy)
+		}
+		for _, r := range []image.Rectangle{
+			image.Rect(0, 0, 64, 64),
+			image.Rect(0, 0, 1024, 64), // a row of 16
+			image.Rect(0, 0, 61, 7),    // an edge tile
+			image.Rect(0, 0, 1, 1),
+		} {
+			pix := pixels(motion, r)
+			b, c := e.Scaled([]byte("prefix"), pix, r.Dx(), r.Dy(), MotionScale, 30)
+			if c != scaled || !bytes.HasPrefix(b, []byte("prefix")) {
+				t.Fatalf("%v at %v: codec %v", lossy, r, c)
+			}
+			sc, err := protocol.ParseScaled(b[len("prefix"):])
+			if err != nil || sc.Factor != MotionScale || sc.Codec != lossy {
+				t.Fatalf("%v at %v: %+v, %v", lossy, r, sc, err)
+			}
+			sw, sh := protocol.ScaledSize(r.Dx(), r.Dy(), MotionScale)
+			if _, err := decode(lossy, sc.Image, sw, sh); err != nil {
+				t.Errorf("%v at %v: the image does not decode at %d×%d: %v", lossy, r, sw, sh, err)
+			}
+			out, err := decode(c, b[len("prefix"):], r.Dx(), r.Dy())
+			if err != nil {
+				t.Fatalf("%v at %v: %v", lossy, r, err)
+			}
+			// The plasma is smooth: at full size, q30 scores about 0.99.
+			src := &image.RGBA{Pix: pix, Stride: 4 * r.Dx(), Rect: image.Rect(0, 0, r.Dx(), r.Dy())}
+			if r.Dy() >= 8 {
+				if s := refSSIM(src, out); s < 0.95 {
+					t.Errorf("%v at %v: SSIM %.3f", lossy, r, s)
+				}
+			}
+		}
+	}
+
+	pix := pixels(motion, image.Rect(0, 0, 64, 64))
+	for name, e := range map[string]*Encoder{
+		"not agreed":    New([]protocol.Codec{webpC, deflate}),
+		"lossless only": New([]protocol.Codec{deflate, scaled}),
+	} {
+		if e.Scales() {
+			t.Errorf("%s: scales", name)
+		}
+		want, wc := e.Lossy(nil, pix, 64, 64, 30)
+		if b, c := e.Scaled(nil, pix, 64, 64, MotionScale, 30); c != wc || !bytes.Equal(b, want) {
+			t.Errorf("%s: Scaled gives %v, want %v as Lossy", name, c, wc)
+		}
+	}
+	e := New([]protocol.Codec{webpC, scaled})
+	for _, f := range []int{1, protocol.MaxScale + 1} {
+		if _, c := e.Scaled(nil, pix, 64, 64, f, 30); c != webpC {
+			t.Errorf("by %d: codec %v, want webp", f, c)
+		}
+	}
+	// What WebP does not hold falls back as Lossy does, once scaled down
+	// it is still too wide.
+	wide := make([]byte, 4*2*16384*2)
+	if b, c := New([]protocol.Codec{webpC, raw, scaled}).Scaled(nil, wide, 2*16384, 2, MotionScale, 30); c != raw || len(b) != len(wide) {
+		t.Errorf("WebP of 32768×2 scaled: %d bytes of %v, want raw", len(b), c)
 	}
 }
 

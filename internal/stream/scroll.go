@@ -70,6 +70,11 @@ const lossless = math.MaxUint8
 // as a copy of exact pixels does.
 const final = lossless - 1
 
+// scaledQuality is the shadow's record of pixels sent scaled down: below
+// every lossy quality, so that refinement sends them again at full size
+// whatever quality it chooses.
+const scaledQuality = 0
+
 // lossyQuality is the shadow's record of the lossy quality q.
 func lossyQuality(q int) uint8 {
 	return uint8(min(max(q, 0), final-1)) // #nosec G115 -- clamped below final

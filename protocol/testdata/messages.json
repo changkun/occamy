@@ -464,6 +464,23 @@
       "hex": "0302000002000000400000004000400006050000000000"
     },
     {
+      "name": "tile scaled",
+      "message": "tile",
+      "type": 515,
+      "from": "server",
+      "fields": {
+        "frame_id": "3",
+        "x": "0",
+        "y": "64",
+        "w": "128",
+        "h": "64",
+        "codec": "7",
+        "slot": "0",
+        "payload": "020552494646"
+      },
+      "hex": "0302000003000000000040008000400007000006000000020552494646"
+    },
+    {
       "name": "copy-rect",
       "message": "copy-rect",
       "type": 516,
@@ -878,7 +895,7 @@
     {
       "name": "tile with an unassigned codec",
       "from": "server",
-      "hex": "030200000100000000000000010001000700000100000001",
+      "hex": "030200000100000000000000010001000800000100000001",
       "error": "invalid"
     },
     {
@@ -913,6 +930,48 @@
       "name": "tile in a slot of more than 4096 pixels",
       "from": "server",
       "hex": "030200000100000000000000410040000301000100000001",
+      "error": "invalid"
+    },
+    {
+      "name": "scaled tile without a factor",
+      "from": "server",
+      "hex": "0302000001000000000000000100010007000000000000",
+      "error": "invalid"
+    },
+    {
+      "name": "scaled tile without a codec",
+      "from": "server",
+      "hex": "030200000100000000000000010001000700000100000002",
+      "error": "invalid"
+    },
+    {
+      "name": "scaled tile by 1",
+      "from": "server",
+      "hex": "03020000010000000000000001000100070000020000000105",
+      "error": "invalid"
+    },
+    {
+      "name": "scaled tile by 5",
+      "from": "server",
+      "hex": "03020000010000000000000001000100070000020000000505",
+      "error": "invalid"
+    },
+    {
+      "name": "scaled tile of deflate",
+      "from": "server",
+      "hex": "03020000010000000000000001000100070000020000000202",
+      "error": "invalid"
+    },
+    {
+      "name": "scaled tile of png",
+      "from": "server",
+      "hex": "03020000010000000000000001000100070000020000000203",
+      "error": "invalid"
+    },
+    {
+      "name": "scaled tile of a scaled tile",
+      "from": "server",
+      "hex": "03020000010000000000000001000100070000020000000207",
       "error": "invalid"
     },
     {
@@ -973,6 +1032,12 @@
       "name": "cursor with the cached codec",
       "from": "server",
       "hex": "0602000000000000020002000600000000",
+      "error": "invalid"
+    },
+    {
+      "name": "cursor with the scaled codec",
+      "from": "server",
+      "hex": "06020000000000000200020007020000000205",
       "error": "invalid"
     },
     {
