@@ -222,17 +222,21 @@ and [api-and-server-stack](api-and-server-stack.md).
 
 ## Verdicts
 
-The essential comparison of 2026-11-02, `guacd` against `v1-native`
-under N0 and N2 on T1, T2, G2, G5 and G6
+The essential comparison of 2026-11-03, `guacd` against `v1-native`
+under N0 and N2 on T1, T2, G2, G5 and G6, on `a4663c16`, the measured
+path of v1.0.0-beta.2
 ([comparison-benchmark](comparison-benchmark.md#outcome-of-the-essential-plan)),
-meets 11 of the 36 targets it covers: T2's completion, bytes and CPU,
-G6's bytes, and G5's frame rate over VNC at N0. Every latency target
-misses, and so do G5's bytes and CPU per frame and G6's completion.
-No miss is justified yet: T1's and RDP's bounds are not measured, and
-G5's are Occamy's own ([decision 1](#decisions-of-2026-11-01)). The
-v1.0 gate is not met, and guacd stays. The 50 ms budget, judged at N0
-in that plan, is met for T1 and G2 and missed for G5.
-`docs/benchmarks.md`, The essential comparison, has each target's row.
+meets 12 of the 36 targets it covers: T2's completion and CPU and its
+bytes at N2, G6's bytes, G2's latency over VNC at N0, and G5's frame
+rate over VNC at N0 and N2. The other latency targets miss, and so do
+G5's bytes and CPU per frame, G6's completion and T2's bytes at N0, by
+0.35 KiB at the median. No miss is justified yet: T1's and RDP's
+bounds are not measured, and G5's are Occamy's own
+([decision 1](#decisions-of-2026-11-01)). The v1.0 gate is not met.
+The 50 ms budget, judged at N0 in that plan, is met for T1 and G2 and
+missed for G5. The run of 2026-11-02, on `3df7564`, six commits after
+v1.0.0-beta.1, met 11. `docs/benchmarks.md`, The essential comparison,
+has each target's row.
 
 ## Components
 

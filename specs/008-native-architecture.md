@@ -153,7 +153,9 @@ The owner's plan of 2026-11-03, with the owner's answers the same day:
    adapts. The essential comparison
    ([comparison-benchmark](008-native-architecture/comparison-benchmark.md))
    runs again on the beta.2 image, `guacd` against `v1-native`, and its
-   numbers are the release's.
+   numbers are the release's. **Measured** on 2026-11-03 on `a4663c16`:
+   12 of the 36 targets met, against 11 before
+   ([benchmark](008-native-architecture/benchmark.md), Verdicts).
 3. **A macOS app** ([010](010-native-swift-client.md)): as simple as
    VNC Viewer, in the style of macOS 26. It is signed and notarized with
    the owner's Apple developer account once it is ready.

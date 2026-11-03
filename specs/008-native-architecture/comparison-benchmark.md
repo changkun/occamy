@@ -377,6 +377,20 @@ and the report in `docs/benchmarks/essential/`.
   the harness checks the gate before each result, with the same bound,
   wait and resume.
 
+Measured again on 2026-11-03 on `a4663c16`, the measured path of
+v1.0.0-beta.2, in 53 min with all 192 results, as [008](../008-native-architecture.md)'s beta.2
+scope asks:
+
+- 14 of the 16 primary differences are significant after correction,
+  T1 again the two that are not, and 12 of 36 targets are met: G2's
+  latency over VNC at N0 and G5's frame rate over VNC at N2 are new, and
+  T2's bytes at N0 now miss, 8.95 KiB [5.64, 9.67] against 8.6, in 31
+  frames a run where the first run sent 20.
+- The harness held a result at the load gate 10 times, for 16 min, and
+  no result started above it, so no conclusion depends on the load.
+- The targets of G2 and G5 stay where the first run set them; this run's
+  `guacd` medians do not move them.
+
 ## Not measured
 
 - Packet loss, which a userspace proxy over TCP cannot emulate. The loss

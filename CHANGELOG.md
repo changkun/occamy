@@ -44,10 +44,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   analyses the results into tables, exact tests and figures with 95%
   intervals ([docs/benchmarks.md](docs/benchmarks.md#analysis)).
 - The essential comparison with guacd 1.6, on the same remotes and
-  without network delay: 575 KiB of terminal output finishes in 18 ms
-  instead of 985, a photograph costs 108–122 KiB instead of 2.1–2.2 MiB,
-  and a key on a still desktop shows in 4.7–7.3 ms instead of 16–19 at
-  p95 ([docs/benchmarks.md](docs/benchmarks.md#the-essential-comparison)).
+  without network delay: 575 KiB of terminal output finishes in 20 ms
+  instead of 930, a photograph costs 108–122 KiB instead of 2.1–2.2 MiB,
+  a key on a still desktop shows in 4.6–8.1 ms instead of 16–21 at p95,
+  and a frame of full-screen motion costs 7.7–8.0 KiB instead of 50–66
+  ([docs/benchmarks.md](docs/benchmarks.md#the-essential-comparison)).
 - The benchmark measures a scene's cadence as well as its frame rate:
   when each of its frames was first shown, the share never shown, and
   the 95th percentile of the interval between those shown
