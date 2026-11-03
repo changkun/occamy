@@ -474,6 +474,13 @@ For beta.2 (2026-11-03):
     times its size pixel for pixel, on an indigo gradient, without
     translucency so that the pixel art stays solid. The bundle had none
     before (found by the owner, 2026-11-04).
+  - A session window learns its `NSWindow` from a view in its
+    background, which reports only the windows it moves into. SwiftUI
+    puts a new such view in the window as it opens and as the session
+    connects again, and the old one leaves after the new one has found
+    the window; when leaving reported nil too, that nil came last, and
+    Full Screen and fitting the window to the remote's screen had no
+    window to act on (found by the owner, 2026-11-04).
   - Tokens, and passwords the user chooses to remember, go to the login
     keychain under `de.changkun.occamy`. occamyd's tokens last 15
     minutes and are not renewed, so with a remembered password the app

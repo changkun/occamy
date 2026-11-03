@@ -510,7 +510,7 @@ struct PromptSheet: View {
 
 /// WindowReader tells the view which window it is in.
 struct WindowReader: NSViewRepresentable {
-    let found: (NSWindow?) -> Void
+    let found: (NSWindow) -> Void
 
     func makeNSView(context: Context) -> Reader {
         let v = Reader()
@@ -521,11 +521,17 @@ struct WindowReader: NSViewRepresentable {
     func updateNSView(_ v: Reader, context: Context) {}
 
     final class Reader: NSView {
-        var found: ((NSWindow?) -> Void)?
+        var found: ((NSWindow) -> Void)?
 
+        // Only a window, never its leaving one: SwiftUI puts a new reader
+        // in the window as it opens and as the session connects again, and
+        // the old one leaves after the new one has found it, so that its
+        // nil, coming last, lost the window.
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            let w = window
+            guard let w = window else {
+                return
+            }
             DispatchQueue.main.async { [found] in found?(w) }
         }
     }
