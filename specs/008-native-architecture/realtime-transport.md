@@ -279,10 +279,11 @@ holds any transport. Each half of the step removes one. 3a needs no
 change to the protocol or the clients, so it goes first, and its
 answer is an input to 3b's transport.
 
-The owner's call (2026-11-03): step 3 goes ahead now, before 1.0,
-built and measured a half at a time, and whatever the transport, one
-fallback is kept. [protocol-v1](protocol-v1.md) decision 6 is revised
-accordingly.
+The owner on 2026-11-03 had no preference between the two, asked what
+the field does, and said to go ahead, with one fallback kept whatever
+the transport. 3a goes first; whether 3b, which brings WebTransport,
+comes before 1.0 ([protocol-v1](protocol-v1.md) decision 6) is decided
+on 3a's measurement.
 
 **What others do** (searched on 2026-11-03):
 
@@ -310,8 +311,9 @@ accordingly.
 - BBR is a sender's choice alone: no client, browser or proxy changes.
   Google moved its internal TCP traffic to it
   ([IETF 110](https://datatracker.ietf.org/meeting/110/materials/slides-110-iccrg-bbr-updates-00.pdf)).
-  Mainline Linux carries BBR v1 as the module `tcp_bbr`; v3 is out of
-  tree. quic-go has CUBIC alone, and its maintainers declined BBR
+  Mainline Linux carried BBR v1 as the module `tcp_bbr`, and v3 out of
+  tree, at the last public word on it
+  ([bbr-dev, March 2025](https://groups.google.com/g/bbr-dev/c/4vwZGw0nxdQ)). quic-go has CUBIC alone, and its maintainers declined BBR
   ([#1888](https://github.com/quic-go/quic-go/pull/1888),
   [#4565](https://github.com/quic-go/quic-go/issues/4565)).
 
@@ -526,9 +528,9 @@ interval, and Guacamole's beside it.
   added at most 5.0 and 12.9 ms at the 95th percentile, but with 2% the
   99th was 236 to 271 ms at either round trip, against 22 to 59.
 - **Decision.** Loss of 2% adds 3 to 8 round trips to a key during
-  motion, more than about one, so step 3 is built. The cost is large,
-  and the owner decided on 2026-11-03 that step 3 comes before 1.0
-  (Step 3; [protocol-v1](protocol-v1.md) decision 6).
+  motion, more than about one, so step 3 is built: 3a first, and
+  whether 3b comes before 1.0 is decided on 3a's measurement (Step 3;
+  [protocol-v1](protocol-v1.md) decision 6).
 - **What it tells step 3.** Loss costs two things. Where the scene's
   rate fits under TCP's throughput bound for the loss, about
   1.22 · MSS / (RTT · √p) (N1 with 2%, N2 with 0.5%), the frame rate
