@@ -183,7 +183,9 @@ public struct API: Sendable {
         var c = URLComponents(url: url("static/"), resolvingAgainstBaseURL: false)!
         var f = URLComponents()
         f.queryItems = [URLQueryItem(name: "join", value: id), URLQueryItem(name: "token", value: share)]
-        c.percentEncodedFragment = f.percentEncodedQuery
+        // The web client reads the fragment with URLSearchParams, to
+        // which a + is a space.
+        c.percentEncodedFragment = f.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         return c.url!
     }
 
