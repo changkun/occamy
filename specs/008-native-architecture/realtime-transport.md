@@ -14,12 +14,13 @@ affects:
   - client/client.go
   - client/occamy-web/src/protocol/
   - bench/
+  - docker/bench/netem/
   - docs/protocol.md
   - docs/benchmarks.md
   - docs/benchmarks/
 effort: xlarge
 created: 2026-11-02
-updated: 2026-11-02
+updated: 2026-11-03
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -219,15 +220,49 @@ cell is significantly worse.
 
 The network emulation (`bench/netem.go`) is a userspace proxy that
 delays and serialises a byte stream; it cannot drop a packet, because
-there is none to drop. Loss needs packet-level emulation: `tc netem` on
-the bench network inside the podman VM, which needs `NET_ADMIN` for the
-container that applies it, and a harness that applies and clears the
-qdisc around each block.
+there is none to drop. Loss needs packet-level emulation: `tc netem`.
+
+**Where the link is.** Delay, bandwidth and loss must act on the same
+TCP connection, the one that loses a packet and then waits for it
+again. On the bench host they cannot be split between the proxy and the
+kernel: podman's port forwarding on macOS (gvproxy) ends the client's
+connection on the Mac and opens another inside the VM, so a loss inside
+the VM on a link the proxy delays would cost a retransmission on a path
+of no delay. A **loss study** therefore emulates the whole link in the
+kernel, in the network namespace of the series' server, and the proxy
+only counts the bytes:
+
+- Packets from the series' port to outside the stack's network pass a
+  `prio` qdisc's band with `netem`: half the RTT, the bandwidth, the
+  loss, and a queue limit of the proxy's twice the bandwidth-delay
+  product in packets of 1500 bytes. Packets from clients to the port
+  are redirected to an `ifb` device with the same `netem` without loss.
+  Only packets to or from the series' port and outside the stack's
+  network are shaped, so a server's backends stay untouched, as do
+  occamyd's connections to guacd's own port and the debug listener.
+- TSO and GSO are off on the server's interface while it shapes, so a
+  loss drops one packet rather than a segment of up to 44.
+- The harness runs the image `occamy-bench-netem` (`docker/bench/netem`)
+  with `--network container:<server>` and `NET_ADMIN` before each block
+  and clears it after, and clears every server it shapes when a
+  collection starts, in case a stopped one left a link shaped. A plan
+  with a loss study and `-engine none` is refused.
+
+**Loss to the client only.** The question is what TCP's in-order
+delivery costs: a frame behind a lost packet waits for its
+retransmission, which a transport without ordering (step 3) would not.
+A key or acknowledgement lost on the way to the server costs a
+retransmission that such a transport would still pay, as its own
+loss recovery, so it would only add noise to the answer. Loss is
+random, at 0%, 0.5% and 2%.
 
 **Measurement.** T1, G2 and G5 over v1-native and guacd at N1 and N2,
-with 0%, 0.5% and 2% loss. The figure of interest is how much key
-latency at the 95th percentile grows with loss: the cost of TCP's
-in-order delivery, which is what a UDP transport would remove.
+with 0%, 0.5% and 2% loss (`bench/plans/realtime-2.yaml`, 6 runs, 360
+results). The control is the same link in the kernel at 0%, not the
+matrix's proxy at N1 and N2: the kernel's link also delays a
+connection's handshake, which the proxy does not. The figure of
+interest is what loss adds to key latency at the 95th percentile, the
+Hodges–Lehmann shift with its exact interval, beside the round trip.
 
 **Decides** whether step 3 is built: if loss of 2% or less adds less than
 about one round trip to key latency at the 95th percentile, step 3 waits
@@ -373,6 +408,34 @@ interval, and Guacamole's beside it.
   frames a second and 213 ms; the path's window under N1, 8.9 and
   466 ms). They widen those cells' intervals; neither cell differs
   otherwise. The gate checks the load before a result, not during one.
+
+## Implementation notes: step 2
+
+- **Status.** The loss study is built; the run waits for the owner's
+  go-ahead.
+- **Built.** `docker/bench/netem` (`shape.sh` and its image); a `loss`
+  study in plan files with a `loss` list, its blocks carrying the loss
+  as their factor (`loss=2%`) and shaped in the kernel
+  (`block.kernel`, `plan.shape`, `plan.clearLinks`); each series names
+  its server and port; `netCondition.Loss` and `shapeArgs`, which share
+  the proxy's queue (`queueBytes`); `make bench-realtime-2` and
+  `bench-realtime-2-report`. `bench/report.py` adds `loss.csv` and a
+  section with the shift each loss adds over the same cell without
+  loss, Holm-corrected over the primary metrics, with figures against
+  the loss; the 10x and 50 ms targets judge no loss cell.
+- **Checked on the bench host.** A request on an open connection to
+  occamy-v1 with N2 shaped took 51 ms, against 1 ms on the unshaped
+  debug port; a new connection took 102 ms, since the handshake inside
+  the VM is shaped too. netem and ifb work in a rootful podman
+  container's namespace with `NET_ADMIN`. A pilot of one block each,
+  not a measurement, v1-native under N2 with 30 keys: at 0% occamy-v1
+  retransmitted no segment and T1's median was 51.5 ms; at 2% it
+  retransmitted 71, and G5 over VNC's key p95 was 464 ms against 118.
+- **Surprises.** gvproxy ends the client's TCP connection on the Mac:
+  the servers see 192.168.127.1, not the harness. A `prio` qdisc's
+  default priomap sends priority 2 to band 3, so the shaping band would
+  have caught unfiltered packets; the priomap sends every priority to
+  band 1.
 
 ## Affects
 

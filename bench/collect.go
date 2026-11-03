@@ -45,12 +45,17 @@ type planFile struct {
 }
 
 // studyFile is a study of a plan file: its series under its network
-// conditions, each measuring its scenarios.
+// conditions, each measuring its scenarios. A matrix study emulates the
+// network with the harness's proxy; a loss study emulates it in the
+// kernel, under each of its losses, the percentage of packets to the
+// client dropped (specs/008-native-architecture/realtime-transport.md,
+// step 2).
 type studyFile struct {
-	Study     string   `yaml:"study"`
-	Series    []string `yaml:"series"`
-	Nets      []string `yaml:"nets"`
-	Scenarios string   `yaml:"scenarios"`
+	Study     string    `yaml:"study"`
+	Series    []string  `yaml:"series"`
+	Nets      []string  `yaml:"nets"`
+	Loss      []float64 `yaml:"loss"`
+	Scenarios string    `yaml:"scenarios"`
 }
 
 // readPlanFile reads a plan file, refusing a field it does not know.
@@ -89,6 +94,10 @@ type block struct {
 	scenarios []scenario // those the series serves
 	// connect says whether the block measures G7 for its protocols.
 	connect bool
+	// kernel says whether the link is emulated in the kernel, on the
+	// series' server (plan.shape), rather than by the proxy, which can
+	// delay and serialize a byte stream but not drop a packet.
+	kernel bool
 }
 
 // blockKey identifies a block of a run, as its results record it.
@@ -161,8 +170,18 @@ func studyBlocks(f planFile, all []series) ([]block, error) {
 	var blocks []block
 	seen := map[blockKey]bool{}
 	for _, st := range f.Studies {
-		if st.Study != "matrix" {
+		switch {
+		case st.Study != "matrix" && st.Study != "loss":
 			return nil, fmt.Errorf("unknown study %q", st.Study)
+		case st.Study == "matrix" && len(st.Loss) > 0:
+			return nil, errors.New("matrix: only a loss study drops packets")
+		case st.Study == "loss" && len(st.Loss) == 0:
+			return nil, errors.New("loss: no loss")
+		}
+		for _, l := range st.Loss {
+			if l < 0 || l >= 100 {
+				return nil, fmt.Errorf("loss: %g%% is no loss", l)
+			}
 		}
 		chosen, err := chooseSeries(all, st.Series)
 		if err != nil {
@@ -180,6 +199,9 @@ func studyBlocks(f planFile, all []series) ([]block, error) {
 		if err != nil {
 			return nil, err
 		}
+		if st.Study == "loss" {
+			bs = lossBlocks(bs, st.Loss)
+		}
 		for _, b := range bs {
 			if seen[b.key(0)] {
 				return nil, fmt.Errorf("%s comes twice", b)
@@ -194,6 +216,19 @@ func studyBlocks(f planFile, all []series) ([]block, error) {
 		}
 	}
 	return blocks, nil
+}
+
+// lossBlocks returns each of bs under each of losses, in the kernel, with
+// the loss its factor.
+func lossBlocks(bs []block, losses []float64) []block {
+	var out []block
+	for _, b := range bs {
+		for _, l := range losses {
+			b.net.Loss, b.factor, b.kernel = l, fmt.Sprintf("loss=%g%%", l), true
+			out = append(out, b)
+		}
+	}
+	return out
 }
 
 // chooseSeries returns the series of all that names names, in that order.

@@ -33,6 +33,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   window sized from the path against it, on one image in one run, and
   the analysis compares the two as a family of their own
   ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)).
+- `make bench-realtime-2` measures what packet loss costs a key while TCP
+  holds back what follows the lost packet: `v1-native` and `guacd` with
+  none, 0.5% and 2% of the packets to the client lost, on a link that
+  the kernel of each server emulates, since the harness's proxy carries
+  a byte stream and cannot drop a packet
+  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)). The report
+  gives what each loss added beside the round trip.
 
 ### Changed
 
