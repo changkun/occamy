@@ -46,6 +46,12 @@ swift-core:
 	lipo -create -output $(CORE_DIR)/liboccamy.a $(CORE_DIR)/arm64/liboccamy.a $(CORE_DIR)/amd64/liboccamy.a
 .PHONY: swift-core
 
+# swift-test tests OccamyKit, whose tests build and run the interop
+# server with go.
+swift-test: swift-core
+	cd $(SWIFT_DIR) && swift test
+.PHONY: swift-test
+
 build:
 	$(CONTAINER_ENGINE) build --label $(BUILD_LABEL) -t $(IMAGE):$(VERSION) -t $(IMAGE):$(IMAGE_TAG) -f docker/Dockerfile .
 .PHONY: build
