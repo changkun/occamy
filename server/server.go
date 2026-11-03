@@ -289,10 +289,10 @@ func newServer(f *config.File) (*server, error) {
 }
 
 // routes returns the public listener's handler: API v1, /healthz and,
-// with web_client, the web client, behind the body limit, the request log and the recovery. The body
-// limit comes first, on net/http's own response writer, which is the
-// only one through which a body over the limit can have net/http close
-// the connection.
+// with web_client, the web client, behind the body limit, the request
+// log and the recovery. The body limit comes first, on net/http's own
+// response writer, which is the only one through which a body over the
+// limit can have net/http close the connection.
 func (s *server) routes() http.Handler {
 	return limitBodies(maxBodyBytes)(logRequests(recovery(apiFallback(s.mux()))))
 }
