@@ -7,6 +7,19 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ## [Unreleased]
 
+## [1.0.0-beta.2] - 2026-11-03
+
+Occamy 1.0.0-beta.2 serves every session itself. guacd, the v0 routes
+with the Guacamole protocol they served, v0 files and telnet are gone,
+and a file that still configures guacd is refused with an error that
+names what to change. Occamy for macOS opens a server's connections in
+native windows. Full-screen motion takes about half the bandwidth and
+two thirds of the CPU it took in beta.1, frames on a long path follow
+the screen's changes instead of two a round trip, and on Linux occamyd
+asks for BBR, so that lost packets slow a session less. A vnc or rdp
+connection can close the clipboard in either direction. This is a beta:
+the API and the protocol may change before 1.0.0.
+
 ### Added
 
 - `auth.oidc.return_urls` takes an app's own scheme, a domain name in
@@ -445,7 +458,8 @@ Development resumed in 2026 after a pause from the end of 2021.
 - First release: a Go proxy that drives libguac through cgo and serves the
   Guacamole protocol over WebSocket with JWT authentication.
 
-[Unreleased]: https://github.com/changkun/occamy/compare/v1.0.0-beta.1...HEAD
+[Unreleased]: https://github.com/changkun/occamy/compare/v1.0.0-beta.2...HEAD
+[1.0.0-beta.2]: https://github.com/changkun/occamy/compare/v1.0.0-beta.1...v1.0.0-beta.2
 [1.0.0-beta.1]: https://github.com/changkun/occamy/compare/v0.6.0...v1.0.0-beta.1
 [0.6.0]: https://github.com/changkun/occamy/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/changkun/occamy/compare/0.4.0...v0.5.0
