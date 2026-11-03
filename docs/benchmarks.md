@@ -196,7 +196,8 @@ Each result of a loss study records the congestion control of its
 server's namespace as `congestion`, read where the link is emulated.
 `make bench-realtime-3a-report` analyses it into
 `docs/benchmarks/realtime/3a`, with the family **Congestion control**,
-`v1-native` to `v1-native-bbr`, beside what each loss added.
+`v1-native` to `v1-native-bbr`, beside what each loss added. Its
+results are in [Step 3a](#step-3a-the-congestion-control).
 
 ### Analysis
 
@@ -1271,12 +1272,11 @@ screen at the 95th percentile, in ms, medians with 95% intervals:
   sees: over either series it adds at most 5.0 ms to typing and 12.9 ms
   [1.2, 40.7] to a key on a still desktop. The keys it touches wait far
   longer: with 2% loss the 99th percentile, the second slowest of 100
-  keys, is 236 to 271 ms over `v1-native` under both N1 and N2, but for
-  122 ms over VNC under N2, against 22 to 59 without loss. Since it is
-  about the same at 20 and 50 ms, a timer sets it rather than the round
-  trip. A likely reason, not measured: when the lost packet is the last
-  one sent, no later packet shows the loss, and Linux retransmits on a
-  timeout of at least 200 ms.
+  keys, is 263 to 273 ms over `v1-native` under N1 in 13 of its 18 runs
+  of these cells, and 354 to 363 under N2 in 8 of 18, against 22 to 59
+  without loss. That is three round trips and 200 ms, the wait for
+  Linux's tail loss probe when the lost packet is the only one in
+  flight, which [step 3a](#step-3a-the-congestion-control) measured.
 - **No difference is significant after Holm's correction, nor could
   one be:** at 6 runs a side the exact test's smallest p is 0.0022, and
   the correction asks the smallest of them to be below 0.05 divided by
@@ -1294,3 +1294,99 @@ above it, each over `v1-native`: G5 over VNC under N2 without loss
 27). They widen those cells' intervals; the
 first is why the shifts over VNC under N2 have intervals that reach
 below zero.
+
+### Step 3a: the congestion control
+
+Measured on 2026-11-03 with `make bench-realtime-3a`: `v1-native`, whose
+server's TCP uses the kernel's default congestion control, CUBIC, beside
+`v1-native-bbr`, whose server's uses BBR, over step 2's link: typing
+(T1), a key on a still desktop (G2) and a key during full-screen motion
+(G5), under N1 (20 ms) and N2 (50 ms), with none, 0.5% and 2% of the
+packets to the client lost at random. Both ran on one image, the one
+step 2 ran, built from `e56b585`, in one run of 8 runs of 100 probe
+keys, on the essential comparison's host. All 480 results succeeded,
+each with the congestion control its series names. The collection took
+2 h 22 min, 29 of them waiting at the load gate.
+[realtime/3a/report.md](./benchmarks/realtime/3a/report.md) holds every
+table and figure, and
+[realtime/3a/bench-realtime-3a.json](./benchmarks/realtime/3a/bench-realtime-3a.json)
+each run;
+
+```sh
+uv run bench/report.py docs/benchmarks/realtime/3a/bench-realtime-3a.json -o docs/benchmarks/realtime/3a
+```
+
+analyses it again.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/realtime/3a/factors-congestion-control-dark.svg">
+  <img alt="The factor by which v1-native-bbr, with BBR, is better than v1-native, with CUBIC, on each cell's key latency at the 95th percentile, with 95% intervals" src="benchmarks/realtime/3a/factors-congestion-control.svg">
+</picture>
+
+A key during full-screen motion (G5), from the key to its effect on
+screen at the 95th percentile, in ms, medians with 95% intervals:
+
+| Network, loss | CUBIC, VNC | BBR, VNC | CUBIC, RDP | BBR, RDP |
+|---|---:|---:|---:|---:|
+| N1, none | 59.3 [55.1, 67.6] | 61.3 [58.0, 74.8] | 80.9 [79.2, 81.6] | 81.7 [79.8, 86.8] |
+| N1, 0.5% | 71.9 [67.3, 264] | 68.6 [65.8, 76.8] | 94.9 [92.4, 96.8] | 89.3 [81.7, 104] |
+| N1, 2% | 124 [99.3, 183] | 79.8 [72.4, 87.2] | 136 [109, 199] | 107 [91.3, 131] |
+| N2, none | 93.7 [89.9, 98.6] | 95.2 [92.7, 106] | 112 [110, 115] | 114 [111, 114] |
+| N2, 0.5% | 192 [125, 205] | 122 [94.8, 132] | 195 [151, 238] | 135 [127, 158] |
+| N2, 2% | 360 [291, 409] | 149 [136, 167] | 471 [396, 682] | 163 [150, 173] |
+
+- **With BBR, loss costs a key during motion about one round trip.** It
+  shows 2.45x [2.29, 2.65] sooner over VNC and 2.97x [2.78, 3.39] over
+  RDP under N2 with 2%, 1.55x [1.27, 1.67] and 1.41x [1.22, 1.60] under
+  N2 with 0.5%, and 1.56x [1.36, 1.84] over VNC under N1 with 2%: the
+  five differences significant after Holm's correction over the 30
+  tests. What 2% adds over the same cell without loss is 17.3 ms
+  [10.3, 21.9] over VNC and 24.2 [17.7, 47.3] over RDP under N1, and
+  52.2 [43.3, 59.4] and 50.0 [38.7, 53.1] under N2, against 64.5, 55.7,
+  266 and 359 with CUBIC. What remains is the wait for a retransmission,
+  which holds back every frame behind the lost packet.
+- **The frame rate holds.** Under N2 with 2%, over VNC the viewer sees
+  27.6 [27.4, 28.9] of the scene's 30 frames a second instead of 16.4
+  [13.9, 19.4], and misses 8% of them instead of 45%; over RDP 24.4
+  [24.1, 24.7] instead of 17.6 [15.4, 18.9], xrdp's own rate without
+  loss. The link carries 398 KiB a second over VNC instead of 240, and
+  346 over RDP instead of 250, about what the scene needs without loss,
+  416 and 348: BBR sets its rate from the path's bandwidth and round
+  trip, so a random loss no longer holds it to TCP's bound of about
+  1.22 · MSS / (RTT · √p). These are secondary metrics, whose p-values
+  are not corrected; the decision rests on the key's latency.
+- **Without loss, and for typing and a key on a still desktop, no
+  difference is significant after the correction**, with factors from
+  0.97 to 1.00 without loss. One cell leans the other way: typing under
+  N1 with 2%, 30.2 ms [21.6, 85.3] with BBR against 21.7 [21.5, 22.0],
+  0.73x, p 0.038 before the correction and 0.87 after it. Four of BBR's
+  8 runs were above 35 ms there and none of CUBIC's, at loads of 2.3 to
+  6.5. A check afterwards, three runs of that cell on each series and
+  not a measurement, did not repeat it: 21.6 ms with BBR against 22.0,
+  as many segments sent a key, about 6.4, and the same recovery, by
+  fast retransmits and loss probes, with no timeout. It is not
+  explained.
+- **The slowest keys wait as long with either.** With 2% loss the 99th
+  percentile of typing and of a key on a still desktop is 264 to 274 ms
+  under N1 in 34 of the 48 runs of these cells, and 354 to 385 under N2
+  in 24 of 48: three round trips and 200 ms. When the lost packet is
+  the only one in flight, no later packet shows its loss, and Linux
+  sends a tail loss probe after twice the smoothed round trip plus the
+  minimum retransmission timeout, 200 ms by default, which allows for a
+  delayed acknowledgement. Each server's namespace counted 124 and 164
+  loss probes over the run, and 6 and 9 timeouts. The congestion control
+  does not set this wait; since Linux 6.15 a process can lower the
+  minimum for a socket, `TCP_RTO_MIN_US`.
+- **CUBIC's numbers repeat step 2's**: G5 under N2 with 2%, 360 ms
+  [291, 409] over VNC against step 2's 379 [350, 430], and 471
+  [396, 682] over RDP against 519 [415, 585].
+- **The cost** is the frames that now get through: occamyd spends 545 ms
+  of CPU a second over VNC under N2 with 2% instead of 401, about what
+  it spends without loss, 565. BBR's namespace retransmitted 3,890
+  segments over the run, CUBIC's 3,666.
+
+**The load gate** held five results, for 28.5 minutes in all, until the
+host's 1-minute load was below 8; it was between 1.9 and 7.9 when each
+result started. Of the 11 that started at 7 or more, one stands out, G5
+over VNC with CUBIC under N1 with 2%, 183 ms, the slowest of its cell's
+8 runs; the cell's median is 124.
