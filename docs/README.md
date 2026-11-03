@@ -6,6 +6,9 @@ The documents, for using and for working on Occamy:
   + TL;DR: From a fresh checkout to the demo stack in a browser: one
     connection of each protocol, sharing, the clipboard, resizing,
     reconnecting, every test suite, and tearing it down.
+- [Occamy for macOS](./macos-app.md)
+  + TL;DR: The Mac app: add a server, open its connections in windows of
+    their own, and what a session window's controls do.
 - [Occamy Architecture](./architecture.md)
   + TL;DR: How `occamyd`, its native backends, the guacd bridge and the
     clients fit together, package by package.

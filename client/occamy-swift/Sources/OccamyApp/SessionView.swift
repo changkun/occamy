@@ -46,6 +46,8 @@ struct SessionView: View {
     @State private var notice: String?
     @State private var answered: Set<String> = []
     @State private var fitted = false
+    /// The session to join again, as its owner, rather than open anew.
+    @State private var rejoin: String?
 
     enum Phase {
         case connecting
@@ -131,7 +133,7 @@ struct SessionView: View {
                     .transition(.opacity)
             }
             if let end = model.ended {
-                ended(end)
+                ended(end, model)
             }
         }
         .animation(.snappy, value: bar)
@@ -239,9 +241,8 @@ struct SessionView: View {
                     .menuIndicator(.hidden)
                     .help("Share the session")
                 }
-                button("Disconnect", "xmark") {
-                    model.close()
-                    dismissWindow()
+                button(model.role.manage ? "End Session" : "Disconnect", "xmark") {
+                    disconnect(model)
                 }
             }
             .buttonStyle(.borderless)
@@ -261,7 +262,7 @@ struct SessionView: View {
         .accessibilityLabel(title)
     }
 
-    private func ended(_ end: End) -> some View {
+    private func ended(_ end: End, _ model: SessionModel) -> some View {
         let e = Ending(end)
         return ContentUnavailableView {
             Label(e.title, systemImage: "bolt.horizontal.circle")
@@ -276,7 +277,11 @@ struct SessionView: View {
             if e.signIn {
                 Button("Sign In…") { signInAgain() }
             } else {
-                Button("Connect Again") { attempt += 1 }
+                Button("Connect Again") {
+                    // The owner's session may run on for its grace.
+                    rejoin = e.rejoin && model.role == .owner ? model.session.sessionID : nil
+                    attempt += 1
+                }
             }
             Button("Close") { dismissWindow() }
         }
@@ -321,7 +326,10 @@ struct SessionView: View {
             let options = Options(name: clientName, width: Int(size.width), height: Int(size.height),
                                   pixelRatio: Double(window?.backingScaleFactor ?? 2))
             let session: Session
-            if let c = request.connection {
+            if let id = rejoin {
+                rejoin = nil
+                session = try await Session.dial(url: server.api.sessionStream(id), token: token, options: options)
+            } else if let c = request.connection {
                 session = try await Session.dial(url: server.api.connectionStream(c.id), token: token, options: options)
             } else if let t = request.target {
                 let opened = try await server.api.open(t, token: token)
@@ -356,6 +364,23 @@ struct SessionView: View {
             store.saveThumbnail(image, server: request.server, connection: c.id)
         }
         model.close()
+    }
+
+    /// disconnect leaves the session and closes the window; the owner
+    /// ends the session for everyone, as the web client's End does.
+    private func disconnect(_ model: SessionModel) {
+        model.close()
+        if model.role.manage, let server {
+            let id = model.session.sessionID
+            Task {
+                // The session ends anyway once the owner's grace runs
+                // out, so a failure here is left at that.
+                if let token = try? await store.accessToken(server) {
+                    try? await server.api.end(session: id, token: token)
+                }
+            }
+        }
+        dismissWindow()
     }
 
     private func signInAgain() {

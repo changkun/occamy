@@ -146,11 +146,11 @@ private func json(_ d: Data?) -> [String: Any] {
             == "ws://localhost:5636/api/v1/sessions/s/stream")
         #expect(api.shareLink(session: "s1", share: "x+y").absoluteString
             == "https://occamy.example/sub/static/#join=s1&token=x%2By")
-        let login = api.oidcLogin(returnURL: URL(string: "occamy://oidc")!, challenge: "c")
+        let login = api.oidcLogin(returnURL: URL(string: "de.changkun.occamy:/oidc")!, challenge: "c")
         let q = URLComponents(url: login, resolvingAgainstBaseURL: false)!
         #expect(q.path == "/sub/api/v1/auth/oidc/login")
         #expect(q.queryItems == [
-            URLQueryItem(name: "return_url", value: "occamy://oidc"),
+            URLQueryItem(name: "return_url", value: "de.changkun.occamy:/oidc"),
             URLQueryItem(name: "code_challenge", value: "c"),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
         ])
@@ -166,11 +166,11 @@ private func json(_ d: Data?) -> [String: Any] {
     }
 
     @Test(arguments: [
-        ("occamy://oidc#code=abc", OIDCOutcome.code("abc")),
-        ("occamy://oidc#error=access_denied", .error("access_denied")),
-        ("occamy://oidc#code=&error=unavailable", .error("unavailable")),
-        ("occamy://oidc", nil),
-        ("occamy://oidc#state=x", nil),
+        ("de.changkun.occamy:/oidc#code=abc", OIDCOutcome.code("abc")),
+        ("de.changkun.occamy:/oidc#error=access_denied", .error("access_denied")),
+        ("de.changkun.occamy:/oidc#code=&error=unavailable", .error("unavailable")),
+        ("de.changkun.occamy:/oidc", nil),
+        ("de.changkun.occamy:/oidc#state=x", nil),
     ])
     func oidcOutcome(url: String, want: OIDCOutcome?) {
         #expect(OIDCOutcome(returnURL: URL(string: url)!) == want)

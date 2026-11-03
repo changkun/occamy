@@ -9,6 +9,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- Occamy for macOS, an app for macOS 26 on Apple silicon and Intel that
+  opens the connections of your `occamyd` servers in windows of their
+  own, as VNC Viewer does: it signs in by password or OIDC, keeps
+  tokens in the Keychain, lists each server's connections with a
+  picture of each, opens ad-hoc addresses such as `vnc://host:5901`, and
+  gives each session a window that scales, goes full screen, shares the
+  clipboard and copies a share link ([docs/macos-app.md](docs/macos-app.md)).
 - `make swift-core` builds the Go client core as `liboccamy.a`, a C
   archive for Apple silicon and Intel with its interface in `occamy.h`,
   which the macOS app links
