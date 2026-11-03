@@ -63,10 +63,9 @@ a key press on a still desktop in 5–7 ms instead of 16–19 ms
 | Protocol | Served by | Notes |
 |----------|-----------|-------|
 | VNC | Occamy | Tested with x11vnc and TigerVNC, VeNCrypt included |
-| RDP | Occamy | Tested with xrdp. For Windows hosts, see [Backends](./docs/configuration.md#backends) |
+| RDP | Occamy | Tested with xrdp. Windows hosts need `disable_gfx: true` for now; see [Backends](./docs/configuration.md#backends) |
 | SSH | Occamy | The terminal is drawn in the browser |
 | Kubernetes | Occamy | A shell in a pod, through the API server |
-| Telnet | [guacd](https://hub.docker.com/r/guacamole/guacd) | Needs a guacd container next to `occamyd` |
 
 Occamy 1.0 is in beta: the API and the protocol may still change before
 1.0.0.

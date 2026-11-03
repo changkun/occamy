@@ -17,44 +17,32 @@ You will be credited in the advisory unless you ask otherwise.
 
 ## Security notes
 
-Occamy is experimental. The authentication model of v0 files, such as
-the `conf.yaml` that the image and the release archives ship, was built
-for a demo and has known gaps, tracked in
-[specs/004-security-hardening.md](specs/004-security-hardening.md). Until
-those are closed, an operator should know the following:
-
-- **Tokens carry the remote credentials.** `/api/v0/login` puts the
-  remote host, username and password into a signed but unencrypted JWT.
-  Anyone holding a token can read them, so treat tokens as secrets.
-- **Tokens travel in URLs.** `/api/v0/connect` takes the token in the
-  WebSocket URL's query, as Guacamole-protocol clients send it, since
-  browsers set no header on a WebSocket. `occamyd` does not log query
-  strings, but a reverse proxy in front of it may; keep them out of its
-  access log.
-- **No TLS.** `occamyd` speaks plain HTTP and WebSocket. Put a
-  TLS-terminating reverse proxy in front of it.
-- **The login endpoint is open.** It signs a token for any host and port
-  without authenticating the caller, which makes `occamyd` a bridge into
-  every network it can reach. Restrict access to it, or run it only on
-  trusted networks.
-- **Change the default secret.** `conf.yaml` ships `jwt_secret: occamy`.
-  Set a random one.
-- **Keep `mode: release`.** `conf.yaml` ships it. A v0 file with no
-  `mode`, or with `mode: debug`, serves `/debug/pprof` on its public
-  listener without a token.
-- **Demo credentials are public.** The servers in `docker/demo/` exist
-  for local testing only.
-
-A v1 file (`version: 1`, [docs/configuration.md](docs/configuration.md))
-addresses the first five unless it sets
-`legacy_v0: true`, which serves the v0 routes and their gaps again. Its
-tokens name a user or a session and carry no remote credentials, and
+A configuration file ([docs/configuration.md](docs/configuration.md))
+holds no secrets: it names the files or environment variables that do.
+Tokens name a user or a session and carry no remote credentials, and
 are signed with an Ed25519 key in `auth.signing_key_file`, created if
-missing, readable by its owner only, not a shared secret; `occamyd` has
+missing, readable by its owner only, not a shared secret. `occamyd` has
 no default user or password, and refuses a file that lets nobody sign
-in; requests and streams take their tokens in headers or
-a WebSocket subprotocol, never in the URL; `tls.cert` and `tls.key`
-turn on TLS; sessions open only on the registry's connections that
-allow the user, or on ad-hoc targets that `adhoc_allowlist` covers once
-`allow_adhoc_targets` is on; and pprof is served only on the debug
-listener, when `debug.address` is set.
+in. Requests and streams take their tokens in headers or a WebSocket
+subprotocol, never in the URL. Sessions open only on the registry's
+connections that allow the user, or on ad-hoc targets that
+`adhoc_allowlist` covers once `allow_adhoc_targets` is on.
+
+An operator should still know the following:
+
+- **TLS.** `tls.cert` and `tls.key` turn on TLS. Without them,
+  `occamyd` speaks plain HTTP and WebSocket: put a TLS-terminating
+  reverse proxy in front of it.
+- **The debug listener has no authentication.** pprof and expvar are
+  served only on it, when `debug.address` is set. Keep it on the
+  loopback interface.
+- **Ad-hoc targets reach into the network.** With `allow_adhoc_targets`,
+  any signed-in user may open a session to whatever `adhoc_allowlist`
+  covers, on the ports it allows. List only the ranges and ports meant.
+- **Demo credentials are public.** The demo user and the servers in
+  `docker/demo/` exist for local testing only.
+
+The 0.x servers' v0 routes, whose tokens carried the remote credentials
+in readable claims and whose login signed a token for any host for
+anyone ([specs/004-security-hardening.md](specs/004-security-hardening.md)),
+were removed in v1.0.0-beta.2.

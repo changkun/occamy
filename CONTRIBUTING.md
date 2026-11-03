@@ -33,14 +33,7 @@ gcc, and `go test ./...` runs the tests without it.
 See the README for a native build. For the web client, `npm run dev` in
 `client/occamy-web` serves it with Vite and proxies `/api` to an
 `occamyd` on `localhost:5637`, or at `OCCAMY_DEV_SERVER`. `bench/codecs`, the codec measurement,
-is a module of its own; run its tests from that directory. The guacd
-bridge's conformance corpus, recorded guacd sessions that `go test`
-replays, is recorded again with `go test -tags record` against the bench
-stack, run as a compose project of its own (`$CONTAINER_ENGINE compose -p
-occamy-record`), as the doc comment of
-`internal/backend/guacd/record_test.go` shows. When a replay fails,
-`OCCAMY_CONFORMANCE_DUMP=<dir> go test -run TestConformance
-./internal/backend/guacd` writes the failing frames there as PNG files.
+is a module of its own; run its tests from that directory.
 
 `go test -tags rdp_integration -timeout 30m ./internal/rdp` builds the
 bench desktop image and starts an xrdp container with Podman
@@ -67,7 +60,7 @@ the spec first, and update it when the change makes it inaccurate.
   passing tests after every commit.
 - Write commit messages as `area: lowercase summary`, where the area is
   the package or directory, for example
-  `guacd: add a handshake client for upstream guacd`. Explain the why in
+  `config: refuse a file without version 1`. Explain the why in
   the body.
 - Add tests for new behaviour, and a regression test for every bug fix.
 - Add a line under `Unreleased` in [CHANGELOG.md](CHANGELOG.md) for any

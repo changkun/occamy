@@ -11,8 +11,7 @@ It covers these steps:
 6. tear it all down.
 
 Run each command from the repository's root unless a step says
-otherwise. A v0 file, which the 0.x servers read, is described in
-[configuration.md](configuration.md#v0-files).
+otherwise.
 
 ## 1. What you need
 
@@ -136,26 +135,20 @@ compose file in a `docker` directory, runs under the same project.
 | Service | On the host | What it is |
 |---------|-------------|------------|
 | `occamy-v1` | `127.0.0.1:5637` | `occamyd` with the v1 file [docker/occamy-v1.yaml](../docker/occamy-v1.yaml): API v1, protocol v1 and the web client |
-| `occamy` | `127.0.0.1:5636` | `occamyd` with the v0 file [docker/occamy.yaml](../docker/occamy.yaml), for clients of the Guacamole protocol. The web client does not use it, and v1.0 removes it |
-| `guacd` | not published | guacd 1.6, for the v0 service and for the v1 connections that set `backend: guacd` |
 | `desktop` | not published | a real desktop, XFCE with Firefox, as the user `occamy`, over TigerVNC and over xrdp, on Debian |
 | `vnc`, `tigervnc`, `ssh`, `rdp` | not published | the demo servers that the tests probe: x11vnc, TigerVNC, OpenSSH and xrdp, on Debian |
 
-The stack publishes both `occamyd` services on the host's loopback
-interface only, since anyone who has read this guide knows the demo
-password. To reach the web client from another machine, publish
+The stack publishes `occamy-v1` on the host's loopback interface
+only, since anyone who has read this guide knows the demo password. To reach the web client from another machine, publish
 `occamy-v1` on every interface with `make run OCCAMY_BIND=0.0.0.0`, or
 on one address of the host's, and only on a network you trust. Set
 `OCCAMY_BIND` on `make`'s command line or export it, since `make run`
-does not read it from `docker/.env`. The v0 service stays on the
-loopback interface whatever `OCCAMY_BIND` says. Its login signs a
-token for any host, with a secret anyone can read in
-[docker/occamy.yaml](../docker/occamy.yaml), so guacd would connect
-wherever a stranger's token pointed. The debug routes, which have no
-authentication, stay on the loopback interface too.
+does not read it from `docker/.env`. The debug listener, which has no
+authentication, stays on the loopback interface whatever `OCCAMY_BIND`
+says.
 
 Open <http://localhost:5637/static/> and sign in as `demo` with the
-password `occamy`. **Connections** lists 25 connections, the two real
+password `occamy`. **Connections** lists 14 connections, the two real
 desktops first, and the bar says you are signed in as demo. The same
 sign-in from the command line returns an access token:
 
@@ -181,7 +174,7 @@ Where things live:
   names the variables in `password_env`, so it holds no password.
 - **The logs**: `(cd docker && podman compose logs -f occamy-v1)`.
   Each session's first line names the connection and the backend that
-  serves it: `user "demo" opened connection "vnc-native" through vnc`.
+  serves it: `user "demo" opened connection "vnc" through vnc`.
 
 ### Next to another stack
 
@@ -191,17 +184,16 @@ on a shared machine, give this stack its own:
 | Variable | Default | What it sets |
 |----------|---------|--------------|
 | `COMPOSE_PROJECT_NAME` | `occamy`, which `docker-compose.yaml` names | the compose project: the names of the containers, the network, the volumes and the demo images |
-| `OCCAMY_PORT` | `5636` | the v0 service's port |
 | `OCCAMY_V1_PORT` | `5637` | `occamy-v1`'s port |
 | `OCCAMY_V1_DEBUG_PORT` | `5638` | `occamy-v1`'s debug listener, when it is on |
-| `OCCAMY_IMAGE` | `occamy:latest` | the image both `occamyd` services run, which `make build` tags |
+| `OCCAMY_IMAGE` | `occamy:latest` | the image `occamy-v1` runs, which `make build` tags |
 
 Export them in the shell. Every `make` target and `podman compose`
 command in this guide then uses them, `make e2e` and `make soak`
 included:
 
 ```
-export COMPOSE_PROJECT_NAME=occamy-try OCCAMY_PORT=15636 OCCAMY_V1_PORT=15637 \
+export COMPOSE_PROJECT_NAME=occamy-try OCCAMY_V1_PORT=15637 \
   OCCAMY_V1_DEBUG_PORT=15638 OCCAMY_IMAGE=occamy-try:latest
 make build
 make run
@@ -226,53 +218,40 @@ by then, so the next one opens at once, even when you have as many as
 `occamyd` allows, 10 by default.
 
 Start with the first two: they are real desktops, which `occamyd`
-reaches with its own VNC and RDP clients, without guacd. The rest are
-the small servers that the tests probe.
+reaches with its own VNC and RDP clients. The rest are the small
+servers that the tests probe.
 
 | Protocol | Connection | What you should see |
 |----------|------------|---------------------|
 | VNC | **Desktop (XFCE) over VNC** (`desktop-vnc`) | A real desktop: XFCE's panel along the top, with **Applications** at its left, and a dock along the bottom with a terminal, the file manager and Firefox, which opens on a page stored on the desktop. It resizes to the window, and the panel and the dock follow. The session runs from the moment the `desktop` service starts, so it shows at once |
 | RDP | **Desktop (XFCE) over RDP** (`desktop-rdp`) | The same desktop, in a session of its own, from xrdp. It resizes the same way. The first connection after the `desktop` service starts creates the X session, so the desktop takes a few seconds to appear, and took 15 seconds at a load of about 35 to 90 |
-| VNC | **x11vnc, native backend** (`vnc-native`) | A black desktop with two xterms and no window manager. The small one at the top left says "Lines typed here reach the clipboard as hex"; it is a probe of the end-to-end tests. The large one has a root shell, `root@…:/#`. x11vnc does not resize its screen, so the page scales the 1024×768 desktop to the window. Keys go to the window under the pointer, as there is no window manager |
-| VNC | **TigerVNC, native backend** (`tigervnc-native`) | The same desktop, served by TigerVNC, which resizes its screen to the window. The page asks for the window's size in CSS pixels, so on a HiDPI display the xterms are as large as on any other, and a little soft, with a remote pixel across two device pixels at a ratio of 2 |
+| VNC | **x11vnc** (`vnc`) | A black desktop with two xterms and no window manager. The small one at the top left says "Lines typed here reach the clipboard as hex"; it is a probe of the end-to-end tests. The large one has a root shell, `root@…:/#`. x11vnc does not resize its screen, so the page scales the 1024×768 desktop to the window. Keys go to the window under the pointer, as there is no window manager |
+| VNC | **TigerVNC** (`tigervnc`) | The same desktop, served by TigerVNC, which resizes its screen to the window. The page asks for the window's size in CSS pixels, so on a HiDPI display the xterms are as large as on any other, and a little soft, with a remote pixel across two device pixels at a ratio of 2 |
 | SSH | **SSH** (`ssh`) | A terminal with Debian's login banner and the prompt `occamy@…:~$`. It fills the window, and its rows and columns follow the window (`stty size` shows them) |
-| RDP | **RDP, native backend** (`rdp-native`) | xrdp's X session: a black desktop with one xterm at the top left and the prompt `occamy@…:~$`. The desktop resizes to the window, in CSS pixels as on TigerVNC. The first connection after the stack or the `rdp` service starts creates the X session, so the xterm takes a few seconds to appear on an idle host, and took 17 seconds at a load of 306; wait for it before you type. Later connections return to the same X session |
-| RDP | **RDP, through guacd** (`rdp-guacd`) | The same X session through guacd. It keeps the size it opened at, and the page scales it |
+| RDP | **RDP** (`rdp`) | xrdp's X session: a black desktop with one xterm at the top left and the prompt `occamy@…:~$`. The desktop resizes to the window, in CSS pixels as on TigerVNC. The first connection after the stack or the `rdp` service starts creates the X session, so the xterm takes a few seconds to appear on an idle host, and took 17 seconds at a load of 306; wait for it before you type. Later connections return to the same X session |
 | Kubernetes | none in the demo stack | A terminal in a pod. See [Kubernetes](#kubernetes) below for a cluster to try it with |
 
 The two desktops are separate sessions of one user, each with its own
 settings and Firefox profile. The RDP session's home is `/home/occamy`
 and the VNC session's is `/home/occamy/vnc`, inside it, since Firefox
-refuses a profile that another session has open. The
-`desktop` service has no guacd connection: to see a desktop through
-guacd, use the connections below.
+refuses a profile that another session has open.
 
 The other VNC connections reach the servers' other screens: no
 password, VeNCrypt, and the German and French keyboard layouts.
 **TigerVNC, asking for the password** opens a form for the password
 first, which is `vncpassword`.
 
-**TigerVNC over VeNCrypt, through guacd (does not work)** always ends
-with "Remote unreachable": guacd 1.6 does not give the X509 credentials
-that its VNC client asks for here. The list keeps it for the parity
-matrix in [section 7](#7-tests-against-the-demo-stack-and-real-servers),
-which shows that. **TigerVNC over VeNCrypt, native backend** is the one
-to open.
-
-The native RDP backend asks for RDP's graphics pipeline (GFX) by
+The RDP backend asks for RDP's graphics pipeline (GFX) by
 default, through which xrdp draws its sessions in RemoteFX
 Progressive. Of GFX, the backend decodes RemoteFX Progressive,
 RemoteFX, planar and uncompressed bitmaps, solid fills and copies;
 from a server that does not open GFX, it decodes plain bitmap updates.
 `disable_gfx: true` on a connection turns GFX off, so that the server
 sends plain bitmap updates
-([configuration.md](configuration.md#backends)). **RDP, through
-guacd** does not use GFX: `occamyd` gives guacd `disable-gfx`, so the
-two RDP connections reach the same xrdp differently, the native one
-through GFX and the other with plain bitmaps. The native RDP backend
-has been tested against xrdp and on a Windows Server 2025 CI runner,
-not on a real Windows deployment; [the guacd
-fallback](#the-guacd-fallback) has what that run showed.
+([configuration.md](configuration.md#backends)). The RDP backend has
+been tested against xrdp and on a Windows Server 2025 CI runner, not on
+a real Windows deployment; [Windows hosts](#windows-hosts) has what that
+run showed.
 
 ### Kubernetes
 
@@ -389,7 +368,7 @@ with Ctrl-C.
 
 ### Sharing
 
-1. Open **x11vnc, native backend**. You are its owner.
+1. Open **x11vnc**. You are its owner.
 2. Click **Share**. Under **Others join**, pick **Read-only: they
    watch**, keep **Link expires after** as it is, and click **Create
    link**, then **Copy link**. The link is the page's address with
@@ -414,8 +393,7 @@ see "The owner left and did not come back in time."
 
 ### Clipboard
 
-On **x11vnc, native backend**, **TigerVNC, native backend** or
-**RDP, native backend**:
+On **x11vnc**, **TigerVNC** or **RDP**:
 
 1. **From the remote to the browser.** With the pointer over the
    remote xterm, type `echo hello from the remote | xclip -selection
@@ -499,21 +477,17 @@ started, wait that long and send it again.
 
 **Resize.** Resize the browser window, or click **Full screen**:
 
-- On **TigerVNC, native backend**, **TigerVNC, through guacd** and
-  **RDP, native backend**, the remote desktop changes size to fill the
-  window.
+- On **TigerVNC** and **RDP**, the remote desktop changes size to fill
+  the window.
 - On **Desktop (XFCE) over VNC** and **over RDP**, it does too, and
   XFCE's panel and dock follow the new size. Over RDP, the screen turns
   black while xrdp redraws it: for 0.1 to 1 second at a load of 25 to
   60, and for several seconds at a load of 85.
 - On **SSH**, the terminal gains or loses rows and columns: run
   `stty size` before and after.
-- **x11vnc, native backend** keeps 1024×768, and the page scales it.
-  x11vnc refuses to resize, and `occamyd` logs `the server prohibits
-  resizing the screen` once and stops asking; the session goes on.
-  **x11vnc, through guacd** keeps that size too.
-- **RDP, through guacd** keeps the size it opened at, and the page
-  scales it.
+- **x11vnc** keeps 1024×768, and the page scales it. x11vnc refuses to
+  resize, and `occamyd` logs `the server prohibits resizing the screen`
+  once and stops asking; the session goes on.
 
 A browser zoom changes the window's size in CSS pixels, so the owner's
 zoom resizes a remote that takes any size, for everyone in the session:
@@ -558,80 +532,29 @@ the end-to-end test that does it against the running stack:
 OCCAMY_E2E_V1_ENDPOINT=localhost:5637 go test -count=1 -v -run 'TestE2EV1RDP/reconnect' ./tests/
 ```
 
-It opens **RDP, native backend**, closes the owner's stream, waits
+It opens **RDP**, closes the owner's stream, waits
 until the session lists no viewer, and opens the session's own stream
 again. It passes when it returns to the same session as its owner.
 
-### The guacd fallback
+### Windows hosts
 
-vnc and rdp connections get `occamyd`'s own clients, its native
-backends, by default. A connection that sets `backend: guacd` goes
-through guacd instead. That is the fallback for a server that the
-native backend cannot serve yet. It is also the baseline that the
-benchmark compares the native backends against. The fallback goes away
-in v1.0, with guacd ([configuration.md](configuration.md#backends)).
-
-**Set `disable_gfx: true` for Windows hosts.** Native RDP has met
-Windows only on a Windows Server 2025 CI runner connecting to itself
-over loopback, not in a real deployment, and
+**Set `disable_gfx: true` for Windows hosts** until `occamyd` takes
+ClearCodec ([configuration.md](configuration.md#backends)). The RDP
+backend has met Windows only on a Windows Server 2025 CI runner
+connecting to itself over loopback, not in a real deployment, and
 [#32](https://github.com/changkun/occamy/issues/32) stays open for
 that. There, it logs on with NLA, and the keyboard and resize work:
 
 - With GFX on, the default, the screen stays nearly black. That server
   drew nearly all of it with ClearCodec and its bitmap cache, which the
-  native backend skips until the third pull request of its GFX phase,
-  a v1.0 blocker. At the first such PDU in a session, `occamyd` logs a
-  warning that names `disable_gfx: true`. With that key on the
-  connection, the server sent plain bitmap updates, and the whole
-  desktop drew correctly. `backend: guacd` is the other way around it,
-  and has not been checked against Windows.
+  backend skips until the third pull request of its GFX phase, a v1.0
+  blocker. At the first such PDU in a session, `occamyd` logs a warning
+  that names `disable_gfx: true`. With that key on the connection, the
+  server sent plain bitmap updates, and the whole desktop drew
+  correctly.
 - The clipboard fails both ways. The suspected cause, that the client
   does not set `CHANNEL_FLAG_SHOW_PROTOCOL` on the channel's chunks, is
   unproven.
-
-To compare the two, open **x11vnc, through guacd** (`vnc-guacd`) and
-**RDP, through guacd** (`rdp-guacd`) next to their native twins. Each
-shows the same desktop. Through guacd, RDP keeps the size it opened
-at. On an idle host, RDP's first frame takes about two seconds through
-guacd instead of a few hundredths of one. VNC's is short either way: a
-third to half a second on x11vnc, and on TigerVNC under a hundredth
-natively and about two hundredths through guacd. A busy host takes
-longer. The log names the backend of each session:
-
-```
-(cd docker && podman compose logs occamy-v1) | grep 'opened connection'
-```
-
-The native ones say `through vnc` or `through rdp`, and the others say
-`through guacd`. To send a connection of your own through guacd, add
-`backend: guacd` to it in `docker/occamy-v1.yaml` and restart
-`occamy-v1`. A connection with `tls` cannot do so, since guacd does not
-check certificates as `tls` asks.
-
-A connection through guacd that has shown nothing 90 seconds after guacd
-accepted it, or after the last answer to a prompt, fails: the page
-leaves "Connecting…" for **Could not connect** and says why. Either the
-remote never answered, or guacd's process for the connection hung, which
-happened once in 128 connections on a very busy host, for reasons not
-known. Open it again. `occamyd` logs an error with guacd's ID for the
-connection:
-
-```
-(cd docker && podman compose logs occamy-v1) | grep 'no first frame'
-```
-
-guacd's process for the connection may still be running. Nothing
-outside the `guacd` container can stop it, and if it has hung, it stays
-there until guacd restarts. That ends every session through guacd:
-
-```
-(cd docker && podman compose restart guacd)
-```
-
-A black screen is not nothing here: guacd's first frame on VNC is sized
-and blank, so a server that finishes ServerInit and then never sends an
-update leaves the page on a black screen, and only the session's idle
-timer ends it.
 
 ## 6. Unit tests, lint and the web client's tests
 
@@ -702,30 +625,27 @@ another engine.
 
 The tests open real sessions to every demo server:
 
-- through the v0 service and guacd;
-- through `occamy-v1`, natively and through guacd, with the Go client
-  of protocol v1;
+- through `occamy-v1`, with the Go client of protocol v1;
 - on `desktop-vnc` and `desktop-rdp`: XFCE draws its panel and
   wallpaper, and the panel follows the screen when it grows
   (`TestDemoDesktop`);
-- on `rdp-native`: the clipboard both ways, a resize, a viewer joined
+- on `rdp`: the clipboard both ways, a resize, a viewer joined
   by a share, the owner's return, and the clipboard again once its
   process in the `rdp` container has been killed;
-- on `vnc-none-native`: x11vnc lives through a request for the
+- on `vnc-none`: x11vnc lives through a request for the
   clipboard from a window that has gone, the bug that used to kill it
   (`TestX11vncClipboardRequestorGone`);
-- the VNC parity matrix, each feature on x11vnc and TigerVNC through
-  both backends, logged as a table;
-- in Chrome, on `tigervnc-native` and `rdp-native`: the web client at
+- the VNC parity matrix, each feature on x11vnc and TigerVNC, logged
+  as a table;
+- in Chrome, on `tigervnc` and `rdp`: the web client at
   device pixel ratios of 2, 1 and 1.5, and in a window of an odd width,
   sizes the remote to the window in CSS pixels, when the session opens
   and when the window changes
   (`TestWebScreen`). It looks for Chrome on the host, or takes its path
   from `OCCAMY_E2E_CHROME`, and is skipped without one, except in CI.
 
-On an idle host, a run takes about four minutes, most of it the parity
-matrix: 257 seconds in CI after the x11vnc test came, the pressure
-test's 15 included. A busy host takes longer. The x11vnc test takes
+On an idle host, a run takes a few minutes, most of it the parity
+matrix. A busy host takes longer. The x11vnc test takes
 about 10 seconds, or up to a minute and a half on an x11vnc just
 started, which ignores clipboard text at first
 ([Clipboard](#clipboard)). The pressure test and the soak are skipped
@@ -741,17 +661,14 @@ listener off` and its debug port answers nothing:
 ```
 make run
 curl -s -m 5 localhost:5638/debug/vars      # fails: nothing serves it
-curl -s -o /dev/null -w '%{http_code}\n' localhost:5636/debug/pprof/    # 404
 ```
 
-With it, `occamy-v1` serves expvar and pprof on port 5638, and the v0
-service serves pprof on its own port, in debug mode
-([docker/occamy-debug.yaml](../docker/occamy-debug.yaml)):
+With it, `occamy-v1` serves expvar and pprof on port 5638:
 
 ```
 make run OCCAMY_DEBUG=1
 curl -s localhost:5638/debug/vars | head -c 200; echo
-curl -s -o /dev/null -w '%{http_code}\n' localhost:5636/debug/pprof/    # 200
+curl -s -o /dev/null -w '%{http_code}\n' localhost:5638/debug/pprof/    # 200
 ```
 
 `make run` without `OCCAMY_DEBUG=1` turns them off again, whatever is
@@ -769,16 +686,17 @@ make e2e OCCAMY_PRESSURE_N=10
 ```
 
 That adds the pressure test to the end-to-end tests. Each of its 10
-rounds opens two sessions to every demo server at once through the v0
-service. Afterwards, `occamyd`'s goroutines must return to their
-number before the storm within a minute.
+rounds opens two sessions to every demo server at once through
+`occamy-v1`, one of which sends garbage once it is welcomed.
+Afterwards, `occamyd`'s goroutines must return to their number before
+the storm within a minute.
 
 ```
 make soak OCCAMY_SOAK_DURATION=5m OCCAMY_SOAK_INTERVAL=10s OCCAMY_SOAK_LIFETIME=2m
 ```
 
 That is a short soak. It runs 8 sessions at a time to
-`tigervnc-native` through `occamy-v1` for 5 minutes, each typing and
+`tigervnc` through `occamy-v1` for 5 minutes, each typing and
 moving the pointer, and replaces each session after 2 minutes. Every
 10 seconds it samples `occamyd`'s goroutines, heap and open files from
 the debug listener. It fails if they keep growing, or if a session
@@ -825,11 +743,9 @@ you start:
 - **`TestMacOS`** needs a Mac with Screen Sharing on; its doc comment,
   in `internal/backend/vnc/ard_integration_test.go`, says how.
 
-The `record` tag (`internal/backend/guacd`) records guacd sessions
-again for the conformance corpus. The `measure` tag (`bench/codecs`)
-measures codecs on recorded frames. Neither is a test to run here;
-[CONTRIBUTING.md](../CONTRIBUTING.md#development) and
-[benchmarks/codecs.md](benchmarks/codecs.md) describe them. The
+The `measure` tag (`bench/codecs`) measures codecs on recorded frames.
+It is not a test to run here;
+[benchmarks/codecs.md](benchmarks/codecs.md) describes it. The
 integration tests take `OCCAMY_CONTAINER_ENGINE=docker` for Docker.
 
 ### Fuzz tests
@@ -920,7 +836,7 @@ rm -f "${TMPDIR:-/tmp}/occamy-webinterop"
 ```
 
 The images that were pulled stay for the next run:
-`docker.io/guacamole/guacd:1.6.0`, `docker.io/rancher/k3s:v1.34.1-k3s1`,
+`docker.io/rancher/k3s:v1.34.1-k3s1`,
 the base images `debian:trixie-slim`, `golang:1.27-trixie`,
 `node:24-trixie-slim` and `gcr.io/distroless/static-debian13:nonroot`.
 So does `occamy-bench-desktop`, or the name you gave it, if you built

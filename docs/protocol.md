@@ -12,9 +12,9 @@ against them by `go test ./protocol`. The codec payloads in
 from occamyd's encoder. A disagreement between this document, the
 package and the vectors is a bug.
 
-Protocol v0, the Guacamole protocol that `occamyd` v0.x speaks, is
-described in [protocol-cn.md](protocol-cn.md). The design and its
-decisions are in
+`occamyd` speaks no other protocol since v1.0.0-beta.2, which removed
+protocol v0, the Guacamole protocol of the 0.x servers. The design and
+its decisions are in
 [specs/008-native-architecture/protocol-v1.md](../specs/008-native-architecture/protocol-v1.md).
 
 - [Overview](#overview)
