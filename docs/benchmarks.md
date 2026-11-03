@@ -136,7 +136,7 @@ probe keys, without G7 (`bench/plans/realtime-1.yaml`).
 make bench-realtime-2
 ```
 
-collects step 2, loss, about four hours of measuring, into
+collects step 2, loss, about three and a half hours of measuring, into
 `bench-realtime-2.json`: `v1-native` and `guacd` on T1, and G2 and G5
 over VNC and RDP, under N1 and N2, each with none, 0.5% and 2% of the
 packets to the client lost, 6 runs of 100 probe keys, without G7
@@ -171,7 +171,8 @@ Its 0% is the control, measured on the same link in the kernel, not
 the matrix's N1 and N2. `make bench-realtime-2-report` analyses it into
 `docs/benchmarks/realtime/2`, with what each loss added to each metric
 over the same cell without loss, the Hodges–Lehmann estimate of the
-shift with its exact 95% interval, beside the round trip.
+shift with its exact 95% interval, beside the round trip. Its results
+are in [Step 2](#step-2-what-loss-costs).
 
 ### Analysis
 
@@ -179,6 +180,7 @@ shift with its exact 95% interval, beside the round trip.
 make bench-report             # bench-compare.json into docs/benchmarks/comparison/
 make bench-essential-report   # bench-essential.json into docs/benchmarks/essential/
 make bench-realtime-1-report  # bench-realtime-1.json into docs/benchmarks/realtime/1/
+make bench-realtime-2-report  # bench-realtime-2.json into docs/benchmarks/realtime/2/
 ```
 
 analyses the results with `bench/report.py`, which
@@ -189,7 +191,10 @@ each family of series whose two series are both in the results:
 targets judge, and **Frame window**, `v1-native-w2` to `v1-native`, the
 window of two frames against the window from the path, with the same
 tests and Holm's correction and without targets, since both are
-Occamy's. Besides the frame rate, a scene that stamps its frames (G3 to
+Occamy's. When the runs are too few for any difference to be
+significant after Holm's correction, because the exact test's smallest
+p times the number of tests is at least 0.05, the report says so.
+Besides the frame rate, a scene that stamps its frames (G3 to
 G5) reports the share of them never shown, 1 − frames ÷ (the scene's
 rate × seconds), and the 95th percentile of the interval between those
 shown, as secondary metrics. It writes:
@@ -1153,3 +1158,110 @@ above it: G5 over VNC with the window of two under N0 (16.8 frames a
 second, 213 ms) and with step 1 under N1 (8.9 frames a second, 466 ms).
 They widen the intervals of those two cells, where neither series
 differs otherwise.
+
+### Step 2: what loss costs
+
+Measured on 2026-11-03 with `make bench-realtime-2`: `v1-native` beside
+`guacd`, typing (T1), a key on a still desktop (G2) and a key during
+full-screen motion (G5), over a link that each server's kernel emulates
+at N1 (20 ms) and N2 (50 ms), with none, 0.5% and 2% of the packets to
+the client lost at random. Both ran on one image, built from `e56b585`,
+in one run of 6 runs of 100 probe keys, on the essential comparison's
+host. 352 of the 360 results succeeded; the 8 that failed are
+Guacamole's, below. The collection took 3 h 25 min, 21 of them waiting
+at the load gate.
+[realtime/2/report.md](./benchmarks/realtime/2/report.md) holds every
+table and figure, and
+[realtime/2/bench-realtime-2.json](./benchmarks/realtime/2/bench-realtime-2.json)
+each run;
+
+```sh
+uv run bench/report.py docs/benchmarks/realtime/2/bench-realtime-2.json -o docs/benchmarks/realtime/2
+```
+
+analyses it again.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/realtime/2/loss-latency_p95-dark.svg">
+  <img alt="A key's latency at the 95th percentile against the loss, for v1-native and guacd in each cell" src="benchmarks/realtime/2/loss-latency_p95.svg">
+</picture>
+
+A key during full-screen motion (G5), from the key to its effect on
+screen at the 95th percentile, in ms, medians with 95% intervals:
+
+| Network, loss | guacd, VNC | v1-native, VNC | guacd, RDP | v1-native, RDP |
+|---|---:|---:|---:|---:|
+| N1, none | 132 [123, 172] | 59.1 [56.3, 93.6] | 121 [117, 130] | 80.6 [80.4, 118] |
+| N1, 0.5% | 164 [152, 184] | 68.7 [63.8, 132] | 165 [153, 1,734] | 96.5 [92.5, 98.0] |
+| N1, 2% | 255 [209, 2,857] | 119 [104, 153] | 2,188 [264, 4,186] | 149 [120, 171] |
+| N2, none | 184 [169, 219] | 98.2 [90.7, 971] | 179 [172, 226] | 113 [111, 114] |
+| N2, 0.5% | 339 [276, 3,942] | 169 [129, 249] | 5,575 [362, 7,941] | 196 [166, 273] |
+| N2, 2% | 7,053, 4 of 6 runs | 379 [350, 430] | none of 6 runs | 519 [415, 585] |
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="benchmarks/realtime/2/loss-fps-dark.svg">
+  <img alt="Frames shown a second during full-screen motion against the loss, for v1-native and guacd" src="benchmarks/realtime/2/loss-fps.svg">
+</picture>
+
+- **Loss of 2% costs a key during motion 3 to 8 round trips** over
+  `v1-native`: the Hodges–Lehmann shift over the same cell without loss
+  is 59.8 ms [44.2, 88.3] over VNC and 64.8 [39.0, 83.3] over RDP under
+  N1, and 271 [-540, 316] over VNC and 407 [304, 471] over RDP under N2.
+  0.5% costs it 10.0 and 15.4 ms under N1, and 60.4 and 83.7 [55.1, 159]
+  under N2. That is more than the round trip that
+  [the spec](../specs/008-native-architecture/realtime-transport.md#step-2-loss-in-the-benchmark)
+  set as the limit, so step 3 is built. Over VNC under N2 the intervals
+  are wide because one run without loss ran while the host's load rose
+  (below).
+- **There are two costs.** TCP's throughput under random loss is bounded
+  at about 1.22 · MSS / (RTT · √p): with segments of 1,448 bytes, 1,225
+  KiB a second under N1 with 0.5%, 612 with 2%, 490 under N2 with 0.5%
+  and 245 with 2%. `v1-native`'s scene needs 350 to 420 KiB a second,
+  under the bound everywhere but N2 with 2%. Where it fits, the frame
+  rate holds, 27.5 to 29.7 frames a second over VNC and 24.1 to 24.4
+  over RDP, and the cost is the wait for a retransmission, which holds
+  back every frame behind the lost packet: up to 3 round trips. Under N2
+  with 2% it does not fit: the link carries 244 KiB a second over VNC
+  and 220 over RDP, at the bound, the server's window lets fewer frames
+  out, 16.8 and 15.6 a second, so that 44% and 48% of the scene's frames
+  are never shown, and a key waits 5 to 8 round trips. Delivery in any
+  order removes the first cost. The second is TCP's congestion control
+  reading a random loss as congestion, and a QUIC connection whose
+  congestion control does the same has the same bound.
+- **Guacamole needs 1,200 to 1,600 KiB a second** for the scene without
+  loss, more than the bound in every cell with loss, and it queues
+  frames behind the link, so a key waits behind them: over RDP under N1
+  with 2%, 6.6 frames a second and a key in 2.2 s; under N2 with 0.5%,
+  0.6 frames a second and 5.6 s.
+  Under N2 with 2%, a key's effect did not show within the harness's
+  10 s in any of 6 runs over RDP, and in 2 of 6 over VNC; the other 4
+  showed 0.5 frames a second and a key in 7.1 s at the 95th percentile,
+  which the 2 failed runs would only raise.
+- **Typing and a key on a still desktop** send a packet or two a key, so
+  2% loss touches about 2 keys in 100, fewer than the 95th percentile
+  sees: over either series it adds at most 5.0 ms to typing and 12.9 ms
+  [1.2, 40.7] to a key on a still desktop. The keys it touches wait far
+  longer: with 2% loss the 99th percentile, the second slowest of 100
+  keys, is 236 to 271 ms over `v1-native` under both N1 and N2, but for
+  122 ms over VNC under N2, against 22 to 59 without loss. Since it is
+  about the same at 20 and 50 ms, a timer sets it rather than the round
+  trip. A likely reason, not measured: when the lost packet is the last
+  one sent, no later packet shows the loss, and Linux retransmits on a
+  timeout of at least 200 ms.
+- **No difference is significant after Holm's correction, nor could
+  one be:** at 6 runs a side the exact test's smallest p is 0.0022, and
+  the correction asks the smallest of them to be below 0.05 divided by
+  the number of tests: 0.0013 for the 39 tests of loss, 0.0017 for the
+  29 of Guacamole against `v1-native`. The decision rests on the shifts
+  and their intervals against the round trip, as the spec set it before
+  the run. A later plan with as many tests takes more runs: at 8 a side
+  the smallest p is 0.00016.
+
+**The load gate** held each result until the host's 1-minute load was
+below 8. Three results started below it and ran while the load rose
+above it, each over `v1-native`: G5 over VNC under N2 without loss
+(971 ms, 10.8 frames a second), G5 over RDP under N1 without loss
+(118 ms against 80) and G2 over RDP under N1 with 0.5% (135 ms against
+27). They widen those cells' intervals; the
+first is why the shifts over VNC under N2 have intervals that reach
+below zero.
