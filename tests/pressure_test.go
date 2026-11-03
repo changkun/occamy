@@ -123,7 +123,7 @@ func successConnect(ctx context.Context, addr, conn, token string) (string, erro
 		}
 		switch ev := ev.(type) {
 		case client.End:
-			return cl.SessionID(), fmt.Errorf("ended: %v %q (%v)", ev.Code, ev.Reason, ev.Err)
+			return cl.SessionID(), endError(ev)
 		case client.Frame:
 			if cl.Class() == protocol.ClassGraphical {
 				return cl.SessionID(), nil
