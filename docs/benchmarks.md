@@ -1051,8 +1051,13 @@ Against the run of 2026-11-02, G5 is where the steps show: a frame of
 motion costs 7.7–8.0 KiB instead of 14.1–14.9, and 12–16 ms of
 occamyd's CPU instead of 22–27, and over VNC at N2 the viewer sees 29.2
 frames a second instead of 20.5, and a key's effect in 93 ms instead of
-128 at p95. The other cells moved within their intervals, apart from
-T2's bytes at N0, below.
+128 at p95. Four other cells of `v1-native` left the intervals of
+2026-11-02. T2's bytes rose, 8.95 KiB instead of 5.67 at N0 and 0.85
+instead of 0.70 at N2, where four runs sent 4 frames instead of 3, see
+below. G6's completion rose over RDP at N0, 158 ms instead of 95, where
+guacd was slow in the same runs, below, and over VNC at N2, 208
+instead of 191, where its runs spread from 160 to 230. A key on a still
+desktop over RDP at N2 showed in 60.0 ms instead of 60.4.
 
 ### Against the targets
 
