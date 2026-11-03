@@ -132,6 +132,9 @@ connections:
     # security: tls or any. Windows needs disable_gfx: true until
     # occamyd decodes ClearCodec, which Windows' graphics pipeline sends.
     disable_gfx: true
+    # Text copied on the workstation stays there; text copied by a
+    # viewer still pastes in. disable_paste closes the other direction.
+    disable_copy: true
     # Windows signs its RDP certificate itself unless given one: pin it,
     # by the fingerprint that openssl x509 -noout -fingerprint -sha256
     # prints.
