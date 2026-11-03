@@ -14,7 +14,7 @@ affects:
   - protocol/
 effort: large
 created: 2026-10-29
-updated: 2026-10-31
+updated: 2026-11-03
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -76,7 +76,8 @@ quickly, in pure Go. That means choosing:
   `copy-rect` when every viewer's last frame contains the source region;
   otherwise it degrades to damage.
 - **Classification per tile: content picks the codec, motion picks the
-  quality.** Count distinct colours with an early exit. Up to 16 colours
+  quality.** Count distinct colours with an early exit: at the 257th, or
+  at the 17th for a moving tile, which goes lossy past 16. Up to 16 colours
   (text, UI, flat gradients) the tile is always lossless. From 17 to 256
   (antialiased text, smooth gradients) it is lossless while still and
   lossy while it moves. Above 256 it is photographic and lossy. A lossy
@@ -2029,3 +2030,37 @@ callback returns, are killed, 6 of 6.
   row, which the search pays on every try; zeroing it is a fifth of a
   worker's time on the browser page. Decoding into a kept buffer needs
   vpx's decoder to take one.
+
+## Implementation notes: Classifying motion
+
+**Status.** Built on 2026-11-03, from a profile of occamyd during G5
+over VNC without delay on the bench host: of 6.37 s of CPU in 10 s,
+encoding WebP took 49%, decoding x11vnc's Tight 27% (zlib's inflate
+1.14 s of it), and counting tiles' colours (`codec.Palette.Build`) 11%.
+
+- **What changed.** A moving tile goes lossy past 16 colours, whatever
+  its count beyond, so `Encoder.Tile` counts a moving tile's colours
+  with `Palette.Exceeds`, which stops at the 17th, and builds the
+  palette only for a tile of 16 or fewer, which goes lossless. The
+  plasma's tiles have 17 to 256 colours, on which `Build` read all
+  4,096 pixels of every tile of every frame. The bytes are unchanged,
+  and the golden tests pass.
+- **Measured.** `BenchmarkTileMotion` classifies the corpus's motion
+  frames' tiles while they move: 2.16 ms a frame on one core before,
+  0.033 after. On the bench host, three runs of G5 without delay each,
+  occamyd's CPU a frame over VNC was 19.5 ms (19.3 to 19.9) before and
+  17.6 (17.4 to 20.0) after, at the same frame rate and bytes; the run
+  at 20.0 showed 27.8 frames a second. Over RDP it was 20.1 and 20.2: a
+  profile of RDP's G5 has the classifier at 0.2%, since RemoteFX's
+  lossy pixels likely exceed 256 colours, where the old count already
+  stopped (not checked).
+- **What remains.** Moving tiles go at the pacer's floor, quality 30,
+  so G5's 14 KiB a frame is WebP's floor at full resolution, and
+  encoding it about 10 ms a frame. Fewer pixels while a tile moves is
+  the lever left for both, which a tile whose payload is smaller than
+  its rectangle needs a capability for: `docs/protocol.md` has a
+  receiver refuse a WebP or JPEG whose size differs. Server-side, vpx's
+  input conversion (`toARGB`, `argbToYUVA` and `alphaFromARGB`, 13% of
+  the profile) could give way to one pass from RGBA to YUV 4:2:0 with
+  libwebp's rounding, which vpx takes as it is, and a faster inflate to
+  part of the Tight decode.
