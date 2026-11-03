@@ -5,7 +5,6 @@
 package config
 
 var (
-	Parse = parse
 	Flags = flags
 	Usage = usage
 )

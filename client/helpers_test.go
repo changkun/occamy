@@ -10,6 +10,7 @@ import (
 	"errors"
 	"image"
 	"image/draw"
+	"image/jpeg"
 	"image/png"
 	"io"
 	"slices"
@@ -341,6 +342,9 @@ func (*pngCodec) Tile(dst, pix []byte, w, h int, _ bool) ([]byte, protocol.Codec
 // Lossy is never asked for, since Tile sends no tile lossy.
 func (*pngCodec) Lossy(dst, _ []byte, _, _, _ int) ([]byte, protocol.Codec) { return dst, 0 }
 
+// Scaled is never asked for either.
+func (*pngCodec) Scaled(dst, _ []byte, _, _, _, _ int) ([]byte, protocol.Codec) { return dst, 0 }
+
 // Still is never asked for either.
 func (*pngCodec) Still(dst, _ []byte, _, _, _, _, _ int) ([]byte, protocol.Codec, int, bool) {
 	return dst, 0, 0, false
@@ -369,6 +373,28 @@ func (c *pngCodec) Decode(dst []byte, w, h int, payload []byte) error {
 	c.mu.Lock()
 	c.decoded++
 	c.mu.Unlock()
+	return nil
+}
+
+// jpegDecoder decodes JPEG with the standard library, checking the size
+// first.
+type jpegDecoder struct{}
+
+func (jpegDecoder) Codec() protocol.Codec { return protocol.CodecJPEG }
+
+func (jpegDecoder) Decode(dst []byte, w, h int, payload []byte) error {
+	cfg, err := jpeg.DecodeConfig(bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	if cfg.Width != w || cfg.Height != h {
+		return errors.New("jpeg of another size")
+	}
+	img, err := jpeg.Decode(bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	draw.Draw(&image.RGBA{Pix: dst, Stride: 4 * w, Rect: img.Bounds()}, img.Bounds(), img, image.Point{}, draw.Src)
 	return nil
 }
 

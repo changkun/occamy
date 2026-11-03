@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"changkun.de/x/occamy/internal/guacamole"
-	"changkun.de/x/occamy/internal/guacd"
+	"changkun.de/x/occamy/bench/internal/guacamole"
+	"changkun.de/x/occamy/bench/internal/guacd"
 )
 
 // fakeGuacd plays guacd's side of the handshake: it answers select with

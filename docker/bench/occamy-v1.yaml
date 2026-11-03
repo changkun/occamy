@@ -4,10 +4,7 @@
 
 # The v1 file of the benchmark stack's occamy-v1 service
 # (docker-compose.bench.yaml), which replaces the demo's: the bench
-# desktop and the demo shell through every backend that API v1 serves
-# them with, for the harness's v1 series (bench/v1.go). SSH has no guacd
-# backend. Every connection names its backend, so that a change of a
-# protocol's default does not move a series to another backend.
+# desktop and the demo shell, for the harness's v1 series (bench/v1.go).
 
 version: 1
 listen: 0.0.0.0:5637
@@ -26,7 +23,6 @@ auth:
 connections:
   - id: ssh
     protocol: ssh
-    backend: native
     target: ssh:22
     # The demo shell's host key changes with its image.
     insecure_ignore_host_key: true
@@ -34,21 +30,13 @@ connections:
     allow: {users: [demo]}
   - id: vnc-native
     protocol: vnc
-    backend: native
-    target: vnc:5900
-    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
-    allow: {users: [demo]}
-  - id: vnc-guacd
-    protocol: vnc
-    backend: guacd
     target: vnc:5900
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
   - id: rdp-native
     protocol: rdp
-    backend: native
     target: rdp:3389
-    # As the demo's rdp-native: xrdp speaks TLS without NLA, and signs
+    # As the demo's rdp: xrdp speaks TLS without NLA, and signs
     # its certificate itself when the image is built, so there is nothing
     # to pin in advance; occamyd warns of it when it starts.
     security: tls
@@ -56,33 +44,15 @@ connections:
     credentials: {username: occamy, password_env: OCCAMY_BENCH_RDP_PASSWORD}
     allow: {users: [demo]}
   # rdp-native without RDP's graphics pipeline, for v1-native-nogfx: not
-  # what it ships, but what compares with rdp-guacd like for like.
+  # what occamyd ships, but RDP the other way, beside it.
   - id: rdp-native-nogfx
     protocol: rdp
-    backend: native
     target: rdp:3389
     security: tls
     tls: {insecure_skip_verify: true}
     disable_gfx: true
     credentials: {username: occamy, password_env: OCCAMY_BENCH_RDP_PASSWORD}
     allow: {users: [demo]}
-  - id: rdp-guacd
-    protocol: rdp
-    backend: guacd
-    target: rdp:3389
-    credentials: {username: occamy, password_env: OCCAMY_BENCH_RDP_PASSWORD}
-    allow: {users: [demo]}
-guacd:
-  address: guacd:4822
-  params:
-    rdp:
-      # As in occamy.yaml, the v0 file. occamyd adds disable-gfx, which the
-      # v0 series' guacd does not get (docs/benchmarks.md).
-      ignore-cert: "true"
-      # With GFX off guacd asks for 16 bits per pixel, and xrdp may keep
-      # an X session, and a scene program, for each depth. native asks for
-      # 32, so every series measures one session at one depth.
-      color-depth: "32"
 limits:
   # The harness ends each session with DELETE, but a run that fails
   # midway may leave some for the owner grace.

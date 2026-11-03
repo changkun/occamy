@@ -15,18 +15,17 @@ make bench
 ```
 
 This builds occamyd's image from the working tree, then builds and starts
-the demo stack with `docker/docker-compose.bench.yaml` on top, which
-publishes guacd on `127.0.0.1:4822`. Then it runs every scenario in both
-v0 series under every network condition, which takes about 50 minutes: 12
-for the terminal and 38 for the desktop. Results go to
+the demo stack with `docker/docker-compose.bench.yaml` on top, which adds
+guacd, published on `127.0.0.1:4822`, for the baseline: occamyd no
+longer uses guacd. Then it runs every scenario in the `guacd` and
+`v1-native` series under every network condition. Results go to
 `bench-results.json`, and a Markdown table goes to standard output. The
-v1 series run on the same stack when `-series` names them; see
+other v1 series run on the same stack when `-series` names them; see
 [The v1 series](#the-v1-series).
 
 On a host shared with another stack, `COMPOSE_PROJECT_NAME`,
-`OCCAMY_PORT`, `OCCAMY_V1_PORT`, `OCCAMY_V1_GFX_PORT`,
-`OCCAMY_V1_CUBIC_PORT`, `GUACD_PORT`, `OCCAMY_V1_DEBUG_PORT`,
-`OCCAMY_V1_GFX_DEBUG_PORT` and `OCCAMY_V1_CUBIC_DEBUG_PORT` start this one
+`OCCAMY_V1_PORT`, `OCCAMY_V1_CUBIC_PORT`, `GUACD_PORT`,
+`OCCAMY_V1_DEBUG_PORT` and `OCCAMY_V1_CUBIC_DEBUG_PORT` start this one
 under its own project name and ports, and `make bench` points the harness
 at them. `OCCAMY_IMAGE` tags occamyd's image under another name, so that
 the build does not retag the image another stack runs.
@@ -40,21 +39,21 @@ does not move it. The JSON keeps every run.
 To pass flags to the harness, use `BENCH_FLAGS`:
 
 ```sh
-make bench BENCH_FLAGS="-scenarios T1 -net N1 -series occamy"
+make bench BENCH_FLAGS="-scenarios T1 -net N1 -series v1-native"
 ```
 
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `-scenarios` | `all` | Comma-separated scenario IDs |
 | `-net` | `N0,N1,N2` | Network conditions |
-| `-series` | `occamy,guacd` | `occamy` goes through occamyd; `guacd` connects to guacd directly; `v1-native`, `v1-native-w2`, `v1-native-cubic`, `v1-native-nogfx`, `v1-guacd` and `v1-guacd-gfx` speak protocol v1 ([The v1 series](#the-v1-series)) |
+| `-series` | `guacd,v1-native` | `guacd` speaks the Guacamole protocol to guacd directly, the baseline; `v1-native`, `v1-native-w2`, `v1-native-cubic` and `v1-native-nogfx` speak protocol v1 to occamyd ([The v1 series](#the-v1-series)) |
 | `-runs` | `1` | How many times to run everything; the table shows medians |
 | `-failfast` | off | Stop at the first measurement with an error, and exit non-zero; CI's runs set it |
 | `-quick` | off | A tenth of the samples and a sixth of the durations, to check the setup |
 | `-ack-hz` | `60` | v1: the screen refresh on whose ticks the harness acknowledges a graphical frame, as a browser does; the gate's numbers use 60, and `0`, which acknowledges at once, is a diagnostic ([The v1 series](#the-v1-series)) |
 | `-engine` | `podman` | Container engine for CPU time, or `none` |
 | `-project` | `occamy` | The stack's compose project, whose containers CPU time is read from |
-| `-addr`, `-v1`, `-v1-gfx`, `-v1-cubic`, `-guacd` | `localhost:5636`, `localhost:5637`, `localhost:5640`, `localhost:5642`, `localhost:4822` | occamyd for v0, occamy-v1 for v1, occamy-v1-gfx for `v1-guacd-gfx`, occamy-v1-cubic for `v1-native-cubic`, and guacd for the direct series |
+| `-v1`, `-v1-cubic`, `-guacd` | `localhost:5637`, `localhost:5642`, `localhost:4822` | occamy-v1 for the v1 series, occamy-v1-cubic for `v1-native-cubic`, and guacd for the `guacd` series |
 | `-out` | `bench-results.json` | JSON output, saved after each series and network condition |
 | `-plan` | none | A plan file, such as `bench/plans/compare.yaml`, in place of `-series`, `-net`, `-scenarios` and `-runs` ([The comparison](#the-comparison)) |
 | `-resume` | off | Continue `-out`, if it exists and measures the same plan: keep its blocks that are complete and without errors, and measure the rest |
@@ -247,10 +246,12 @@ The harness is a client. It decodes every image into a framebuffer,
 answers each `sync` once the frame is applied, and sends a `nop` every
 5 seconds, as the web client does. Each scenario runs on a fresh session.
 
-- **Series.** `occamy` logs in to occamyd and opens its WebSocket, which
-  is the shipped path. `guacd` performs the Guacamole handshake with guacd
-  directly, with the parameters occamyd would send, so the difference
-  between the two is occamyd's cost.
+- **Series.** `guacd` performs the Guacamole handshake with guacd
+  directly, as a Guacamole deployment's web application does, with
+  guacd's defaults and `ignore-cert` for RDP: the baseline. The v1
+  series speak protocol v1 to occamyd ([The v1 series](#the-v1-series)).
+  Results recorded before v1.0.0-beta.2 also have `occamy`, which
+  logged in to occamyd's v0 routes and went through guacd.
 - **Networks.** A proxy inside the harness carries every connection. It
   adds half the RTT in each direction and serializes at the bandwidth,
   with a queue of twice the bandwidth-delay product. It does not emulate
@@ -263,9 +264,9 @@ answers each `sync` once the frame is applied, and sends a `nop` every
   | N1 | 20 ms | 100 Mbit/s |
   | N2 | 50 ms | 20 Mbit/s |
 
-- **Bytes** are the TCP payload through the proxy. In the `occamy` series
-  and the v1 series they include the WebSocket frame headers, which the
-  `guacd` series does not have.
+- **Bytes** are the TCP payload through the proxy. In the v1 series they
+  include the WebSocket frame headers, which the `guacd` series does not
+  have.
 - **Frames.** In an animated scene (G3 to G5), frames are the scene's
   frames that reached the client, in either protocol: each carries a
   numbered stamp (below), and the harness counts the distinct stamps it
@@ -282,9 +283,10 @@ answers each `sync` once the frame is applied, and sends a `nop` every
   scene shown whole and evenly at 30 fps has every interval at 33 ms; a
   frame that never showed doubles one. The table notes the 95th
   percentile on a scene's row.
-- **Server CPU** is the CPU time of the occamyd and guacd containers
-  during the measured part of a scenario. guacd forks a process per
-  connection, and the container's CPU time includes it.
+- **Server CPU** is the CPU time of the container that serves the
+  series during the measured part of a scenario: guacd's for `guacd`,
+  occamyd's for the v1 series. guacd forks a process per connection,
+  and the container's CPU time includes it.
 - **Decode** is the harness's time spent applying drawing and compositing
   frames. A browser decodes natively, so only ratios between series mean
   anything.
@@ -352,11 +354,11 @@ it. The RDP server is xrdp with xorgxrdp, as configured by Debian.
 
 ## The v1 series
 
-Six series measure protocol v1 with the same scenarios, metrics,
+Four series measure protocol v1 with the same scenarios, metrics,
 network conditions and bench desktop as the baseline:
 
 ```sh
-make bench BENCH_FLAGS="-series v1-native,v1-native-w2,v1-native-cubic,v1-native-nogfx,v1-guacd,v1-guacd-gfx -runs 3"
+make bench BENCH_FLAGS="-series v1-native,v1-native-w2,v1-native-cubic,v1-native-nogfx -runs 3"
 ```
 
 Their results so far are in [The essential comparison](#the-essential-comparison)
@@ -365,14 +367,16 @@ and [The real-time steps](#the-real-time-steps). `v1-native` measures
 rdp's default, with RDP's graphics pipeline (GFX), without its
 ClearCodec and cache yet.
 
-| Series | Backend | Protocols | RDP's GFX | Connections |
-|---|---|---|---|---|
-| `v1-native` | occamyd's own | SSH, VNC, RDP | on, as shipped | `ssh`, `vnc-native`, `rdp-native` |
-| `v1-native-w2` | occamyd's own | SSH, VNC, RDP | on | `ssh`, `vnc-native`, `rdp-native` |
-| `v1-native-cubic` | occamyd's own | SSH, VNC, RDP | on | `ssh`, `vnc-native`, `rdp-native` |
-| `v1-native-nogfx` | occamyd's own | RDP | off | `rdp-native-nogfx` |
-| `v1-guacd` | the guacd bridge | VNC, RDP | off, as shipped | `vnc-guacd`, `rdp-guacd` |
-| `v1-guacd-gfx` | the guacd bridge | RDP | on | `rdp-guacd-gfx` |
+| Series | Protocols | RDP's GFX | Connections |
+|---|---|---|---|
+| `v1-native` | SSH, VNC, RDP | on, as shipped | `ssh`, `vnc-native`, `rdp-native` |
+| `v1-native-w2` | SSH, VNC, RDP | on | `ssh`, `vnc-native`, `rdp-native` |
+| `v1-native-cubic` | SSH, VNC, RDP | on | `ssh`, `vnc-native`, `rdp-native` |
+| `v1-native-nogfx` | RDP | off | `rdp-native-nogfx` |
+
+Results recorded before v1.0.0-beta.2 also have `v1-guacd` and
+`v1-guacd-gfx`, which went through occamyd's guacd bridge, with GFX
+off, as the bridge shipped, and on.
 
 `v1-native-w2` is `v1-native` with a client that offers a frame window
 of 2, where `v1-native`'s offers the client core's default, 16, within
@@ -389,17 +393,13 @@ connections and asks for CUBIC, the kernel's usual default, as its TCP
 congestion control, where occamyd asks for BBR (step 3a). Its rows, too,
 sit beside the verdict.
 
-The row of what a side ships is the verdict, and the other sits beside
-it, so that rows compare like with like: the table notes which each RDP
-row is, and the JSON gives `gfx` on every RDP row of a v1 series and
-`verdict` on those that count for the targets. `rdp-guacd-gfx` is in
-`docker/bench/occamy-v1-gfx.yaml`, on a service of its own,
-`occamy-v1-gfx`, since guacd's parameters are global to a v1 file and a
-benchmark is no reason for a setting per connection. The others are in
-`docker/bench/occamy-v1.yaml`.
+The row of what occamyd ships is the verdict, and `v1-native-nogfx`
+sits beside it, so that RDP's rows compare like with like: the table
+notes which each RDP row is, and the JSON gives `gfx` on every RDP row
+of a v1 series and `verdict` on those that count for the targets. The
+connections are in `docker/bench/occamy-v1.yaml`.
 
-`v1-guacd` runs no terminal scenario, since SSH has no guacd backend
-in v1. A v1 session runs as follows:
+A v1 session runs as follows:
 
 - **Client.** The harness drives the Go client core (`client/`) through
   the stack's `occamy-v1` service, whose file
@@ -414,10 +414,11 @@ in v1. A v1 session runs as follows:
   physical key, a USB HID usage on a US layout, as the web client's
   carries `KeyboardEvent.code`, which native RDP sends as a scancode.
 - **Codecs.** It offers what occamy's web client offers when the browser
-  decodes them all: deflate, WebP, JPEG and raw, in that order. The
-  client core decodes tiles in parallel as they arrive, with deflate
-  from `internal/codec`, WebP from `github.com/gen2brain/vpx/webp` and
-  JPEG from `image/jpeg` plugged in, and applies a frame to its
+  decodes them all: deflate, WebP, JPEG, scaled and raw, in that order.
+  The client core decodes tiles in parallel as they arrive, with deflate
+  from `internal/codec`, WebP from `github.com/gen2brain/vpx/webp`,
+  JPEG from `image/jpeg`, and scaled as either of those scaled up
+  bilinearly by `internal/codec` plugged in, and applies a frame to its
   framebuffer when `Next` delivers it.
 - **Frames.** A frame draws if it changed a rectangle. A v1 frame is the
   server's, not the scene's: occamyd ends a frame whenever its window
@@ -440,7 +441,7 @@ in v1. A v1 session runs as follows:
   same: it acknowledges a graphical frame, drawing or not, on the next
   tick of a 60 Hz screen (`-ack-hz`), and a terminal's at once.
   guacamole-common-js answers `sync` as soon as it applied a frame,
-  with no animation frame, and the v0 series do the same. **These
+  with no animation frame, and the `guacd` series does the same. **These
   defaults produce the gate's numbers;** the JSON records them as
   `ack_hz` and `frame_stamp`, and the table's header states them.
   `-ack-hz 0` acknowledges a graphical frame at once as well: a
@@ -480,14 +481,14 @@ in v1. A v1 session runs as follows:
   protocols.
 - **Decode** is the wall time of each tile's decode, summed over the
   client core's decoding goroutines, which run in parallel, or the
-  terminal emulator's time; copying decoded tiles into the framebuffer
-  is not in it. The v0 series' includes compositing, so the column
+  terminal emulator's time; for a scaled tile it includes scaling the
+  image up to the tile's size. Copying decoded tiles into the
+  framebuffer is not in it. The `guacd` series' includes compositing, so the column
   compares v1's series with each other, not v1 with v0, and a table with
   v1 rows says so under it.
 - **Server CPU** is that of the `occamy-v1` container or, for
-  `v1-guacd-gfx`, of `occamy-v1-gfx`, and guacd's for the two guacd
-  series. guacd serves nothing of the native series, so its CPU there
-  is left out and given in a note.
+  `v1-native-cubic`, of `occamy-v1-cubic`. guacd serves nothing of the
+  v1 series, so its CPU there is left out and given in a note.
 - **G7** starts at the stream's upgrade and ends at the first frame that
   shows known content of the remote, which is what the remote shows
   anyway, so that G7 changes nothing that T1 to T3 or the scenes
@@ -505,8 +506,8 @@ in v1. A v1 session runs as follows:
   ends G7. The sign-in before the upgrade checks a bcrypt
   hash and is done once for many sessions, so G7 leaves it out: the
   JSON records it as `sign_in_ms`, and the table notes it on the row.
-  The v0 series' G7 includes its login, which v0 needs for every
-  session.
+  The `guacd` series' G7 includes its handshake, which the Guacamole
+  protocol needs for every session.
 - **The bench desktop restarts xrdp's channel server,** because every
   RDP path of a series shares one X session. xrdp 0.10.1's
   `xrdp-chansrv` can exit as a connection closes, and sesman starts it
@@ -531,25 +532,16 @@ in v1. A v1 session runs as follows:
   the first frame; 10 s for a key's update and for an input to be
   queued; 30 s for T2's end marker. CI's bench job stops at 30 minutes,
   and the harness exits non-zero when a chosen series ran no scenario.
-- **RDP through guacd** (`rdp-guacd`) differs from the baseline in one
-  parameter: occamyd gives guacd `disable-gfx`, because xrdp's colours
-  shifted through RDP's graphics pipeline. The baseline did not set it,
-  and guacd 1.6 then turns the pipeline on, through which xrdp encodes
-  with RemoteFX Progressive
-  ([guacd-bridge](../specs/008-native-architecture/guacd-bridge.md)'s
-  conformance notes). `rdp-guacd-gfx` turns it on again, which the
-  shipped file does not.
 - **Native RDP** (`rdp-native`) reaches the same xrdp with the same
   credentials and size. It sets `security: tls`, since xrdp speaks no
   NLA, and checks no certificate, since xrdp signs its own when the
   image is built; occamyd warns of that at start. It asks for GFX by
   default, so xrdp draws its sessions in RemoteFX Progressive;
   `rdp-native-nogfx` sets `disable_gfx`, and gets plain bitmaps.
-- **Colour depth** is 32 bits per pixel on every path to RDP. That is
-  native RDP's default, and what the baseline's guacd used, since it
-  asks for 32 with GFX on. With GFX off guacd asks for 16 unless told
-  otherwise, and xrdp may keep an X session, and a scene program, for
-  each depth, so the bench files set `color-depth`.
+- **Colour depth** is 32 bits per pixel on every path to RDP: native
+  RDP's default, and what the baseline's guacd asks for with GFX on, as
+  guacd 1.6 has it by default. xrdp may keep an X session, and a scene
+  program, for each depth, so one depth keeps one X session.
 - **Native RDP's decoding rate** holds a session's decoding to about a
   core of the benchmarks' host (an Apple M5 Pro), whatever the server
   sends
@@ -578,8 +570,8 @@ in v1. A v1 session runs as follows:
   verdict's row is not a justified one: decoder work then comes before
   v1.0, and the measurement shows where.
 
-CI runs every v1 series quickly under N1, after the v0 smoke run, on
-the same stack.
+CI runs every v1 series quickly under N1, after the smoke run of
+`guacd` and `v1-native`, on the same stack.
 
 ### What to measure again
 
@@ -602,8 +594,7 @@ the full comparison.
 | T1, T2, T3 | No | The shell shows what it showed: G7 ends on the prompt that was already there, so the stack needs no banner, and T1's keys are not jittered |
 
 The colour depth changes no baseline, since the baseline's guacd already
-drew RDP at 32 bits per pixel. It changes `v1-guacd`, which has no
-published numbers. The [targets](#targets) that come from a baseline in
+drew RDP at 32 bits per pixel. The [targets](#targets) that come from a baseline in
 this list move with its new numbers.
 
 G7 is no scenario of its own: it follows a protocol's chosen scenarios,
@@ -877,9 +868,9 @@ new baseline at N1 yet, which changes none of their targets there: each
 is the N0 target plus the RTT.
 
 The targets gate the release (owner, 2026-10-31): v1.0 waits until the
-benchmark shows native at least 10x better than guacd. It does not ship
-with a guacd fallback for any protocol still short of 10x; release
-candidates may still carry one.
+benchmark shows native at least 10x better than guacd. Since
+v1.0.0-beta.2, occamyd has no guacd fallback for any protocol: guacd runs
+only as the benchmark's baseline.
 
 The gate is each scenario's target as defined here, not a flat 10x
 (owner, 2026-10-31). A scenario may miss 10x only where a documented

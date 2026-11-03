@@ -599,7 +599,7 @@ func TestGFXSkipCharged(t *testing.T) {
 
 // The first PDU or bitmap of a session that the client skips and that
 // leaves the screen without what it draws, as Windows' ClearCodec and
-// bitmap cache, logs a warning that names the ways to turn GFX off, and
+// bitmap cache, logs a warning that names the way to turn GFX off, and
 // the session warns once; AVC, which the client does not offer, and an
 // empty bitmap do not warn.
 func TestGFXSkipWarning(t *testing.T) {
@@ -630,7 +630,7 @@ func TestGFXSkipWarning(t *testing.T) {
 		if n := strings.Count(got, "level=WARN"); n != 1 {
 			t.Errorf("%s: %d warnings, want 1: %s", tc.name, n, got)
 		}
-		for _, want := range []string{"disable_gfx: true", "adhoc_backends: {rdp: guacd}", fmt.Sprintf("skipped=%q", tc.name)} {
+		for _, want := range []string{"disable_gfx: true", "through a connection", fmt.Sprintf("skipped=%q", tc.name)} {
 			if !strings.Contains(got, want) {
 				t.Errorf("%s: the warning %q does not say %q", tc.name, got, want)
 			}

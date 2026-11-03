@@ -10,8 +10,8 @@ The documents, for using and for working on Occamy:
   + TL;DR: The Mac app: add a server, open its connections in windows of
     their own, and what a session window's controls do.
 - [Occamy Architecture](./architecture.md)
-  + TL;DR: How `occamyd`, its native backends, the guacd bridge and the
-    clients fit together, package by package.
+  + TL;DR: How `occamyd`, its backends and the clients fit together,
+    package by package.
 - [HTTP API (v1)](./api.md)
   + TL;DR: Every route a v1 configuration file serves: sign-in, the
     connections and sessions, shares, the stream upgrades, their tokens,
@@ -21,20 +21,18 @@ The documents, for using and for working on Occamy:
   + TL;DR: The wire protocol of Occamy v1: binary messages over one
     WebSocket, a handshake in one round trip, and frames acknowledged
     under a small window. Normative, with golden vectors.
-- [Occamy Protocol (v0)](./protocol-cn.md)
-  + TL;DR: The Guacamole protocol of the v0 routes, in Chinese. v1.0
-    drops it with them.
 - [Configuration](./configuration.md)
   + TL;DR: Every key of the configuration file, its default and how it is
-    validated, and the v0 files of the 0.x servers.
+    validated, and what replaced the keys of guacd and of the 0.x
+    servers' files.
 - [Benchmarks](./benchmarks.md)
   + TL;DR: How Occamy is measured, and the numbers protocol v1 must beat.
 - [Codec measurement](./benchmarks/codecs.md)
   + TL;DR: Which pure-Go codecs, tile size and pixel layout the graphics
     pipeline uses, measured on frames recorded from the bench desktop.
 - [Debugging and measuring](./debugging.md)
-  + TL;DR: Profiling `occamyd` in debug mode, guacd's processes, and the
-    pressure test.
+  + TL;DR: Profiling `occamyd` through its debug listener, and the
+    pressure test and the soak.
 - [Design specs](../specs/README.md)
   + TL;DR: The design of each part, and the work planned.
 

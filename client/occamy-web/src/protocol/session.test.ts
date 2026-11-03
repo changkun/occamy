@@ -392,6 +392,14 @@ describe('frames', () => {
     await failsWith(t, s, 1002, /not agreed/)
   })
 
+  it('closes with protocol-error a scaled tile whose image is of a codec not agreed', async () => {
+    const codecs = [Codec.JPEG, Codec.Scaled, Codec.Raw]
+    const { t, s } = await open({ codecs, capabilities: { codecs } })
+    t.push({ type: 'resize', width: 4, height: 4 })
+    t.push({ type: 'tile', frameId: 1, x: 0, y: 0, w: 2, h: 2, codec: Codec.Scaled, slot: 0, payload: Uint8Array.of(2, Codec.WebP) })
+    await failsWith(t, s, 1002, /scaled tile of codec 5, which was not agreed/)
+  })
+
   it('closes with protocol-error a tile that does not decode', async () => {
     const { t, s } = await open()
     t.push({ type: 'resize', width: 4, height: 4 })

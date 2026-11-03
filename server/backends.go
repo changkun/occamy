@@ -8,20 +8,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
-	"net"
-	"slices"
-	"strings"
 	"sync"
 
 	"changkun.de/x/occamy/internal/backend"
-	bridge "changkun.de/x/occamy/internal/backend/guacd"
 	"changkun.de/x/occamy/internal/backend/kubernetes"
 	"changkun.de/x/occamy/internal/backend/rdp"
 	"changkun.de/x/occamy/internal/backend/ssh"
 	"changkun.de/x/occamy/internal/backend/vnc"
 	"changkun.de/x/occamy/internal/config"
-	"changkun.de/x/occamy/internal/guacd"
 	rdpproto "changkun.de/x/occamy/internal/rdp"
 )
 
@@ -30,10 +24,7 @@ import (
 type target struct {
 	connection string // the registry's ID, empty for an ad-hoc target
 	protocol   string
-	// backend is what serves the target, config.BackendNative or
-	// config.BackendGuacd; empty for the protocol's default.
-	backend string
-	addr    string // host:port to dial
+	addr       string // host:port to dial
 	// name is the host name an ad-hoc target named, which addr holds the
 	// address of; empty otherwise. A certificate names it.
 	name  string
@@ -46,9 +37,9 @@ type target struct {
 	// Remote Desktop authentication.
 	tls config.ConnectionTLS
 	ard bool
-	// security is the security mode of an rdp target on the native
-	// backend, empty for its default, and disableGFX keeps it from
-	// asking for the graphics pipeline.
+	// security is the security mode of an rdp target, empty for its
+	// default, and disableGFX keeps it from asking for the graphics
+	// pipeline.
 	security   string
 	disableGFX bool
 	// kubernetes is the pod of a kubernetes target, whose addr is the
@@ -67,59 +58,25 @@ type screen struct {
 // backendMaker makes the backend of one session.
 type backendMaker struct {
 	// name is the backend as the session's state reports it: ssh, vnc,
-	// rdp, kubernetes or guacd.
+	// rdp or kubernetes.
 	name string
 	make func(t target, s screen) (backend.Backend, error)
 }
 
-// backendKey names a backend of a protocol, config.BackendNative or
-// config.BackendGuacd.
-type backendKey struct{ protocol, backend string }
-
 // backends is the backend factory: the maker of each protocol's
-// sessions on each backend that serves it.
-type backends map[backendKey]backendMaker
+// sessions.
+type backends map[string]backendMaker
 
-// register makes protocol's sessions on backend, the protocol's default
-// if empty, with make, under the name the session's state reports.
-func (b backends) register(protocol, backend, name string, make func(target, screen) (backend.Backend, error)) {
-	b[backendKey{protocol, config.BackendOf(protocol, backend)}] = backendMaker{name: name, make: make}
-}
-
-// lookup returns the maker of protocol's sessions on backend, the
-// protocol's default if empty.
-func (b backends) lookup(protocol, backend string) (backendMaker, bool) {
-	m, ok := b[backendKey{protocol, config.BackendOf(protocol, backend)}]
-	return m, ok
-}
-
-// serves reports whether any backend serves protocol.
-func (b backends) serves(protocol string) bool {
-	for k := range b {
-		if k.protocol == protocol {
-			return true
-		}
+// newBackends returns the factory: occamyd's own SSH, VNC, RDP and
+// Kubernetes backends, each named after its protocol. The RDP sessions
+// share budget, the decoding of the process.
+func newBackends(budget *rdpproto.Budget) backends {
+	return backends{
+		"ssh":        {name: "ssh", make: newSSH},
+		"vnc":        {name: "vnc", make: newVNC},
+		"rdp":        {name: "rdp", make: func(t target, s screen) (backend.Backend, error) { return newRDP(t, s, budget) }},
+		"kubernetes": {name: "kubernetes", make: newKubernetes},
 	}
-	return false
-}
-
-// newBackends returns the factory: the native SSH backend for ssh, the
-// native VNC and RDP backends for vnc and rdp, their default, the
-// native Kubernetes backend for kubernetes, and the guacd bridge at g
-// for telnet, and for vnc and rdp with backend: guacd. kubernetes has
-// no guacd backend
-// (specs/008-native-architecture/native-kubernetes-backend.md). The
-// native RDP sessions share budget, the decoding of the process.
-func newBackends(g config.Guacd, budget *rdpproto.Budget) backends {
-	b := backends{}
-	b.register("ssh", config.BackendNative, "ssh", newSSH)
-	b.register("vnc", config.BackendNative, "vnc", newVNC)
-	b.register("rdp", config.BackendNative, "rdp", func(t target, s screen) (backend.Backend, error) { return newRDP(t, s, budget) })
-	b.register("kubernetes", config.BackendNative, "kubernetes", newKubernetes)
-	for _, p := range []string{"vnc", "rdp", "telnet"} {
-		b.register(p, config.BackendGuacd, "guacd", newBridge(g, p))
-	}
-	return b
 }
 
 // password reads the stored password of c, or returns "" if c stores
@@ -339,72 +296,12 @@ func securitySetting(t target) string {
 	return fmt.Sprintf("security: tls on connection %q", t.connection)
 }
 
-// newBridge returns the maker of protocol's sessions through guacd at g.
-// The guacd parameters are g's for the protocol, with the target, the
-// user name and the stored password over them. RDP gets disable-gfx
-// unless g sets it: through the graphics pipeline, xrdp's codec shifted
-// colours by up to 22 levels before guacd saw them, and the bandwidth
-// the pipeline saves lies between guacd and the remote, not the viewers
-// (guacd-bridge, conformance corpus).
-func newBridge(g config.Guacd, protocol string) func(target, screen) (backend.Backend, error) {
-	return func(t target, s screen) (backend.Backend, error) {
-		cfg, err := bridgeConfig(g, protocol, t, s)
-		if err != nil {
-			return nil, err
-		}
-		return bridge.New(g.Address, cfg, bridge.Options{}), nil
-	}
-}
-
-// loadWarnings returns what occamyd warns of when it loads f.
-//
-// One warning names, per protocol, the guacd.params that no session
-// reads, since the native backends read none of them, and says why in
-// the protocol's terms. That happens when no connection of that
-// protocol goes through guacd, and ad-hoc targets of that protocol
-// either do not go through guacd or take only the display's
-// parameters. A file written for guacd, with disable-copy or
-// recording-path, would otherwise lose them unnoticed when its
-// connections moved to a native default. With legacy_v0, the v0 routes
-// pass every parameter to their sessions, so nothing is unused.
-//
-// Another names each rdp connection that sends the password inside TLS
-// without checking the certificate: security tls or any, which may
-// skip NLA, with tls.insecure_skip_verify.
+// loadWarnings returns what occamyd warns of when it loads f: each rdp
+// connection that sends the password inside TLS without checking the
+// certificate, with security tls or any, which may skip NLA, and
+// tls.insecure_skip_verify.
 func loadWarnings(f *config.File) []string {
 	var warnings []string
-	for _, p := range slices.Sorted(maps.Keys(f.Guacd.Params)) {
-		if f.LegacyV0 || slices.ContainsFunc(f.Connections, func(c config.Connection) bool {
-			return c.Protocol == p && config.BackendOf(p, c.Backend) == config.BackendGuacd
-		}) {
-			continue
-		}
-		adhoc := f.AllowAdhocTargets && config.BackendOf(p, f.AdhocBackends[p]) == config.BackendGuacd
-		var unused []string
-		for _, name := range slices.Sorted(maps.Keys(f.Guacd.Params[p])) {
-			if !adhoc || !adhocParams[name] {
-				unused = append(unused, name)
-			}
-		}
-		if len(unused) == 0 {
-			continue
-		}
-		var why string
-		switch {
-		case p == "ssh":
-			why = "ssh never goes through guacd"
-		case config.DefaultBackend(p) == config.BackendGuacd:
-			why = fmt.Sprintf("no %s connection is configured", p)
-		default:
-			why = fmt.Sprintf("no %s connection sets backend: guacd", p)
-		}
-		if adhoc {
-			why += fmt.Sprintf(", and ad-hoc %s targets take only the display's parameters", p)
-		}
-		warnings = append(warnings, fmt.Sprintf("guacd.params.%s sets %s, which no session reads: %s",
-			p, strings.Join(unused, ", "), why))
-	}
-	// The file allows security on native rdp connections alone.
 	for _, c := range f.Connections {
 		if (c.Security == rdp.SecurityTLS || c.Security == rdp.SecurityAny) && c.TLS.InsecureSkipVerify {
 			warnings = append(warnings, fmt.Sprintf("connection %q: security: %s may send the password inside TLS whose certificate tls.insecure_skip_verify accepts unchecked, so anyone in between can read it; for demos only",
@@ -412,56 +309,6 @@ func loadWarnings(f *config.File) []string {
 		}
 	}
 	return warnings
-}
-
-// adhocParams are the guacd parameters that an ad-hoc target takes from
-// guacd.params: the display's. The others, such as an SFTP host or a
-// gateway, are meant for the configured connections, not for a target
-// that a user chose.
-var adhocParams = map[string]bool{
-	"color-depth":           true,
-	"color-scheme":          true,
-	"cursor":                true,
-	"disable-gfx":           true,
-	"enable-font-smoothing": true,
-	"font-name":             true,
-	"font-size":             true,
-	"resize-method":         true,
-}
-
-// bridgeConfig is the guacd handshake of a session of protocol on t.
-func bridgeConfig(g config.Guacd, protocol string, t target, s screen) (guacd.Config, error) {
-	host, port, err := net.SplitHostPort(t.addr)
-	if err != nil {
-		return guacd.Config{}, err
-	}
-	params := maps.Clone(g.Params[protocol])
-	if params == nil {
-		params = map[string]string{}
-	}
-	if t.connection == "" {
-		maps.DeleteFunc(params, func(name, _ string) bool { return !adhocParams[name] })
-	}
-	params["hostname"], params["port"] = host, port
-	if t.creds.Username != "" {
-		params["username"] = t.creds.Username
-	}
-	pw, err := password(t.creds)
-	if err != nil {
-		return guacd.Config{}, err
-	}
-	if pw != "" {
-		params["password"] = pw
-	}
-	if _, ok := params["disable-gfx"]; protocol == "rdp" && !ok {
-		params["disable-gfx"] = "true"
-	}
-	return guacd.Config{
-		Protocol: protocol,
-		Params:   params,
-		Width:    min(s.width, backend.MaxResizeSide),
-		Height:   min(s.height, backend.MaxResizeSide),
-	}, nil
 }
 
 // askUser is an SSH backend whose user name the owner gives: Run asks

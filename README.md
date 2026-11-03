@@ -32,8 +32,9 @@ for each remote and its own protocol, and differs in four ways:
 - **A desktop travels as binary tiles.** Guacamole's text instructions
   carry each image as base64, a third larger than the image itself.
   Occamy's binary protocol sends only the tiles that changed, each
-  lossless or as WebP or JPEG, sends scrolls as copies, and lets the
-  browser reuse tiles it has seen.
+  lossless or as WebP or JPEG, moving content at half size until it
+  stops, sends scrolls as copies, and lets the browser reuse tiles it
+  has seen.
 - **Input comes first.** Small messages never queue behind tiles, and
   each viewer has a short queue paced to its own connection, so a
   keystroke's update is not stuck behind a large frame, and a slow
@@ -66,10 +67,9 @@ a key press on a still desktop in 5–7 ms instead of 16–19 ms
 | Protocol | Served by | Notes |
 |----------|-----------|-------|
 | VNC | Occamy | Tested with x11vnc and TigerVNC, VeNCrypt included |
-| RDP | Occamy | Tested with xrdp. For Windows hosts, see [Backends](./docs/configuration.md#backends) |
+| RDP | Occamy | Tested with xrdp. Windows hosts need `disable_gfx: true` for now; see [Backends](./docs/configuration.md#backends) |
 | SSH | Occamy | The terminal is drawn in the browser |
 | Kubernetes | Occamy | A shell in a pod, through the API server |
-| Telnet | [guacd](https://hub.docker.com/r/guacamole/guacd) | Needs a guacd container next to `occamyd` |
 
 Occamy 1.0 is in beta: the API and the protocol may still change before
 1.0.0.

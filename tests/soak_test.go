@@ -26,7 +26,7 @@ package tests
 //	OCCAMY_SOAK_SESSIONS     sessions at once
 //	OCCAMY_SOAK_DURATION     how long, 1h by default
 //	OCCAMY_SOAK_CONNECTIONS  the connections that the sessions take in
-//	                         turn, tigervnc-native by default: x11vnc
+//	                         turn, tigervnc by default: x11vnc
 //	                         hangs now and then, and its watchdog's
 //	                         restarts would end sessions
 //	                         (docker/demo/vnc/start.sh)
@@ -101,7 +101,7 @@ const (
 func soakConfigFromEnv() (soakConfig, error) {
 	cfg := soakConfig{
 		duration:    time.Hour,
-		connections: []string{"tigervnc-native"},
+		connections: []string{"tigervnc"},
 		lifetime:    10 * time.Minute,
 		interval:    30 * time.Second,
 		bounds:      map[string]float64{"goroutines": 50, "heap": 32, "fds": 25},
@@ -646,8 +646,8 @@ func TestSoakConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(cfg.connections, []string{"tigervnc-native"}) {
-		t.Errorf("the default connections are %v, want tigervnc-native alone", cfg.connections)
+	if !slices.Equal(cfg.connections, []string{"tigervnc"}) {
+		t.Errorf("the default connections are %v, want tigervnc alone", cfg.connections)
 	}
 	for _, tt := range []struct {
 		duration, warmup, interval string

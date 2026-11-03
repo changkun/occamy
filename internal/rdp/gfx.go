@@ -387,7 +387,7 @@ func (c *Client) gfxCount() {
 		}
 		c.gfxWarned = true
 		c.log.Warn("rdp: the server draws with GFX that the client does not decode yet, so parts of the screen may stay missing or stale; "+
-			"to turn GFX off, set disable_gfx: true on the target's connection, or, for an ad-hoc target, adhoc_backends: {rdp: guacd}",
+			"to turn GFX off, set disable_gfx: true on the target's connection, and reach an ad-hoc target, which cannot set it, through a connection",
 			"addr", c.addr, "skipped", k.name)
 	}
 	g.skips = g.skips[:0]
