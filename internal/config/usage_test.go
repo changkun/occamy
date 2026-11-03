@@ -25,7 +25,7 @@ func TestUsage(t *testing.T) {
 	if strings.Contains(strings.ToLower(out), "guacamole") {
 		t.Errorf("the help describes occamyd as a Guacamole proxy:\n%s", out)
 	}
-	for _, want := range []string{"API v1", "v0", "\n\toccamyd [-conf file]\n", "\n  -conf file\n", `(default "./conf.yaml")`} {
+	for _, want := range []string{"API v1", "version: 1", "\n\toccamyd [-conf file]\n", "\n  -conf file\n", `(default "./conf.yaml")`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the help lacks %q:\n%s", want, out)
 		}

@@ -27,12 +27,9 @@ import (
 )
 
 // TestDemoV1File checks that the demo stack's v1 file loads, with the
-// backends that its connections compare (tests/parity_test.go): ssh
-// on the native SSH backend, vnc-native and rdp-native on their
-// protocols' default, native, and every other connection on the backend
-// it names. It also checks the image's web client, that its user's
-// password is the one docker/occamy-v1.yaml and tests/ give, and that
-// the one connection that cannot work says so in the list.
+// connections that the end-to-end tests open (tests/), the real desktop
+// first. It also checks the image's web client, and that its user's
+// password is the one docker/occamy-v1.yaml and tests/ give.
 func TestDemoV1File(t *testing.T) {
 	raw, err := os.ReadFile("../../docker/occamy-v1.yaml")
 	if err != nil {
@@ -57,38 +54,20 @@ func TestDemoV1File(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	backends := map[string]string{}
+	var ids []string
 	for _, c := range f.Connections {
-		backends[c.ID] = c.Backend
-		// guacd has no X509 credentials to give (parityKnown,
-		// tests/parity_test.go).
-		if strings.HasSuffix(c.Name, " (does not work)") != (c.ID == "tigervnc-plain-guacd") {
-			t.Errorf("connection %s is named %q", c.ID, c.Name)
-		}
+		ids = append(ids, c.ID)
 	}
-	// The real desktop comes first, for a first-time viewer, and through
-	// the native backends: it must not depend on guacd.
-	if len(f.Connections) < 2 || f.Connections[0].ID != "desktop-vnc" || f.Connections[1].ID != "desktop-rdp" {
-		t.Errorf("the connections do not start with desktop-vnc and desktop-rdp: %+v", f.Connections[:min(2, len(f.Connections))])
+	// The real desktop comes first, for a first-time viewer, then the
+	// SSH server, each VNC server's security types and keyboard layouts
+	// (tests/parity_test.go), and the RDP server.
+	want := []string{
+		"desktop-vnc", "desktop-rdp", "ssh",
+		"vnc", "vnc-none", "tigervnc", "tigervnc-prompt", "tigervnc-plain", "tigervnc-none",
+		"vnc-de", "vnc-fr", "tigervnc-de", "tigervnc-fr", "rdp",
 	}
-	// Every connection but ssh, vnc-native and rdp-native names its
-	// backend, so that the comparison does not change with a protocol's
-	// default; vnc-native and rdp-native check the defaults, and ssh has
-	// only the native backend.
-	want := map[string]string{
-		"ssh":        config.BackendNative,
-		"rdp-native": config.BackendNative, "rdp-guacd": config.BackendGuacd,
-		"desktop-vnc": config.BackendNative, "desktop-rdp": config.BackendNative,
-	}
-	for _, id := range []string{"vnc", "vnc-none", "vnc-de", "vnc-fr", "tigervnc", "tigervnc-prompt", "tigervnc-plain", "tigervnc-none", "tigervnc-de", "tigervnc-fr"} {
-		want[id+"-native"] = config.BackendNative
-		want[id+"-guacd"] = config.BackendGuacd
-	}
-	if !maps.Equal(backends, want) {
-		t.Errorf("backends %v, want %v", backends, want)
-	}
-	if n := strings.Count(string(raw), "\n    backend: "); n != len(want)-3 {
-		t.Errorf("%d connections name their backend, want %d: all but ssh, vnc-native and rdp-native", n, len(want)-3)
+	if !slices.Equal(ids, want) {
+		t.Errorf("connections %q, want %q", ids, want)
 	}
 	// The image's build of the web client, where the Dockerfile puts it.
 	if f.WebClient != "client/occamy-web/dist" {
@@ -112,57 +91,14 @@ func TestDemoV1File(t *testing.T) {
 	}
 }
 
-// TestDemoV0Files checks the demo stack's v0 files: occamy.yaml, in
-// release mode, which serves no pprof, and occamy-debug.yaml, which make
-// run OCCAMY_DEBUG=1 mounts in its place for the pressure test, the same
-// but in debug mode.
-func TestDemoV0Files(t *testing.T) {
-	read := func(name string) string {
-		raw, err := os.ReadFile("../../docker/" + name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return string(raw)
-	}
-	release, debug := read("occamy.yaml"), read("occamy-debug.yaml")
-	for _, tt := range []struct {
-		name, raw string
-		debug     bool
-	}{
-		{"occamy.yaml", release, false},
-		{"occamy-debug.yaml", debug, true},
-	} {
-		c, err := config.Parse([]byte(tt.raw))
-		if err != nil {
-			t.Fatalf("%s: %v", tt.name, err)
-		}
-		if c.Debug() != tt.debug {
-			t.Errorf("%s: debug mode %v, want %v", tt.name, c.Debug(), tt.debug)
-		}
-	}
-	// The settings, past the comments on top, but for the mode.
-	settings := func(raw string) string {
-		_, body, _ := strings.Cut(raw, "\n---\n")
-		var lines []string
-		for line := range strings.SplitSeq(body, "\n") {
-			if !strings.HasPrefix(line, "mode:") {
-				lines = append(lines, line)
-			}
-		}
-		return strings.Join(lines, "\n")
-	}
-	if settings(release) != settings(debug) {
-		t.Errorf("occamy-debug.yaml differs from occamy.yaml in more than the mode:\n%s\n---\n%s", settings(release), settings(debug))
-	}
-}
-
-// TestDemoDebugGating checks that the demo stack's debug routes, which
-// have no authentication, are on only after make run OCCAMY_DEBUG=1:
-// off with compose up and no variables, and off with make run from a
-// shell that holds the variables that would turn them on, as a leftover
-// export or docker/.env would. It reads docker-compose.yaml as compose
-// does, with the variables that make run passes it, and checks that the
-// ports of both routes are published on the loopback interface only.
+// TestDemoDebugGating checks that the demo stack's debug listener,
+// which has no authentication, is on only after make run
+// OCCAMY_DEBUG=1: off with compose up and no variables, and off with
+// make run from a shell that holds the variable that would turn it on,
+// as a leftover export or docker/.env would. It reads docker-compose.yaml
+// as compose does, with the variables that make run passes it, and
+// checks that the listener's port is published on the loopback
+// interface only.
 func TestDemoDebugGating(t *testing.T) {
 	raw, err := os.ReadFile("../../docker/docker-compose.yaml")
 	if err != nil {
@@ -171,47 +107,27 @@ func TestDemoDebugGating(t *testing.T) {
 	var compose struct {
 		Services map[string]struct {
 			Ports       []string          `yaml:"ports"`
-			Volumes     []string          `yaml:"volumes"`
 			Environment map[string]string `yaml:"environment"`
 		} `yaml:"services"`
 	}
 	if err := yaml.Unmarshal(raw, &compose); err != nil {
 		t.Fatal(err)
 	}
-	v0, v1 := compose.Services["occamy"], compose.Services["occamy-v1"]
-	// The variables that turn the routes on, as make run OCCAMY_DEBUG=1
-	// sets them.
-	dirty := map[string]string{"OCCAMY_V0_CONF": "occamy-debug.yaml", "OCCAMY_V1_DEBUG_ADDRESS": "0.0.0.0:5638"}
+	v1 := compose.Services["occamy-v1"]
+	// The variable that turns the listener on, as make run OCCAMY_DEBUG=1
+	// sets it.
+	dirty := map[string]string{"OCCAMY_V1_DEBUG_ADDRESS": "0.0.0.0:5638"}
 	for _, tt := range []struct {
 		name string
 		env  func(t *testing.T) map[string]string
 		on   bool
 	}{
 		{"compose up", func(*testing.T) map[string]string { return nil }, false},
-		{"make run from a shell that would turn them on", func(t *testing.T) map[string]string { return makeRunEnv(t, "", dirty) }, false},
+		{"make run from a shell that would turn it on", func(t *testing.T) map[string]string { return makeRunEnv(t, "", dirty) }, false},
 		{"make run OCCAMY_DEBUG=1", func(t *testing.T) map[string]string { return makeRunEnv(t, "1", nil) }, true},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			env := tt.env(t)
-			// The v0 service's file, in debug mode or in release mode.
-			var conf string
-			for _, v := range v0.Volumes {
-				host, target, _ := strings.Cut(composeInterpolate(t, v, env), ":")
-				if strings.HasPrefix(target, "/occamy/conf.yaml") {
-					conf = strings.TrimPrefix(host, "./")
-				}
-			}
-			b, err := os.ReadFile("../../docker/" + conf)
-			if err != nil {
-				t.Fatalf("the v0 service's file: %v", err)
-			}
-			c, err := config.Parse(b)
-			if err != nil {
-				t.Fatalf("%s: %v", conf, err)
-			}
-			if c.Debug() != tt.on {
-				t.Errorf("the v0 service runs %s, in debug mode: %v, want %v", conf, c.Debug(), tt.on)
-			}
 			// occamy-v1's debug listener, from the variable its v1 file
 			// names (TestDemoV1File).
 			address := composeInterpolate(t, v1.Environment["OCCAMY_V1_DEBUG_ADDRESS"], env)
@@ -222,14 +138,6 @@ func TestDemoDebugGating(t *testing.T) {
 				t.Errorf("occamy-v1's debug listener is on %q, not on the port published for it, 5638", address)
 			}
 		})
-	}
-	// Both routes are published on the loopback interface only: all of
-	// the v0 service, which serves pprof on its own port, and occamy-v1's
-	// debug port.
-	for _, p := range v0.Ports {
-		if p := composeInterpolate(t, p, nil); !strings.HasPrefix(p, "127.0.0.1:") {
-			t.Errorf("the v0 service is published on %q, beyond the loopback interface", p)
-		}
 	}
 	published := false
 	for _, p := range v1.Ports {
@@ -244,16 +152,21 @@ func TestDemoDebugGating(t *testing.T) {
 	if !published {
 		t.Errorf("occamy-v1 publishes no port 5638 for its debug listener: %q", v1.Ports)
 	}
+	// The stack publishes occamy-v1 alone.
+	for name, svc := range compose.Services {
+		if name != "occamy-v1" && len(svc.Ports) > 0 {
+			t.Errorf("%s publishes %q", name, svc.Ports)
+		}
+	}
 }
 
 // TestDemoBind checks where the demo stack publishes occamyd. occamy-v1
 // is on the loopback interface, since the demo user's password is
 // public, unless OCCAMY_BIND names another address, from the shell or
 // make's command line. docker/.env cannot widen it under make run or
-// make bench, which pass OCCAMY_BIND either way. The v0 service, whose
-// login signs a token for any host with a public secret, and occamy-v1's
-// debug port, with no authentication, stay on the loopback interface
-// whatever OCCAMY_BIND and OCCAMY_DEBUG say.
+// make bench, which pass OCCAMY_BIND either way. occamy-v1's debug port,
+// with no authentication, stays on the loopback interface whatever
+// OCCAMY_BIND and OCCAMY_DEBUG say.
 func TestDemoBind(t *testing.T) {
 	raw, err := os.ReadFile("../../docker/docker-compose.yaml")
 	if err != nil {
@@ -268,8 +181,8 @@ func TestDemoBind(t *testing.T) {
 		t.Fatal(err)
 	}
 	// published returns the host address of each container port that
-	// occamy and occamy-v1 publish when compose reads env, over dotenv
-	// as docker/.env: the process's variables win over the file's.
+	// occamy-v1 publishes when compose reads env, over dotenv as
+	// docker/.env: the process's variables win over the file's.
 	published := func(t *testing.T, dotenv, env map[string]string) map[string]string {
 		t.Helper()
 		vars := maps.Clone(dotenv)
@@ -278,7 +191,7 @@ func TestDemoBind(t *testing.T) {
 		}
 		maps.Copy(vars, env)
 		got := map[string]string{}
-		for _, name := range []string{"occamy", "occamy-v1"} {
+		for _, name := range []string{"occamy-v1"} {
 			for _, p := range compose.Services[name].Ports {
 				p := composeInterpolate(t, p, vars)
 				parts := strings.Split(p, ":")
@@ -292,7 +205,7 @@ func TestDemoBind(t *testing.T) {
 	}
 	// want is where the ports are published with occamy-v1 on v1.
 	want := func(v1 string) map[string]string {
-		return map[string]string{"occamy:5636": "127.0.0.1", "occamy-v1:5637": v1, "occamy-v1:5638": "127.0.0.1"}
+		return map[string]string{"occamy-v1:5637": v1, "occamy-v1:5638": "127.0.0.1"}
 	}
 	check := func(t *testing.T, dotenv, env map[string]string, v1 string) {
 		t.Helper()
@@ -304,8 +217,7 @@ func TestDemoBind(t *testing.T) {
 	t.Run("compose up", func(t *testing.T) {
 		check(t, nil, nil, "127.0.0.1")
 		// By hand, compose takes OCCAMY_BIND from docker/.env, and still
-		// keeps the v0 service and the debug port on the loopback
-		// interface.
+		// keeps the debug port on the loopback interface.
 		check(t, map[string]string{"OCCAMY_BIND": "0.0.0.0"}, nil, "0.0.0.0")
 	})
 	for _, target := range []string{"run", "bench"} {
@@ -330,19 +242,17 @@ func TestDemoBind(t *testing.T) {
 }
 
 // TestBenchRuntime checks that make bench keeps the v1 debug listeners
-// off, and that make bench-compare turns them on, the v0 service's debug
-// mode still off, and has the harness read occamyd's runtime from their
-// ports while it collects the comparison's plan, resuming its results.
+// off, and that make bench-compare turns them on and has the harness read
+// occamyd's runtime from their ports while it collects the comparison's
+// plan, resuming its results.
 func TestBenchRuntime(t *testing.T) {
 	if env := makeEnv(t, "bench", nil, nil); env["OCCAMY_V1_DEBUG_ADDRESS"] != "" {
 		t.Errorf("make bench: OCCAMY_V1_DEBUG_ADDRESS=%q, want it off", env["OCCAMY_V1_DEBUG_ADDRESS"])
 	}
-	env := makeEnv(t, "bench-compare", nil, nil)
-	if env["OCCAMY_V1_DEBUG_ADDRESS"] != "0.0.0.0:5638" || env["OCCAMY_V0_CONF"] != "occamy.yaml" {
-		t.Errorf("make bench-compare: OCCAMY_V1_DEBUG_ADDRESS=%q and OCCAMY_V0_CONF=%q, want 0.0.0.0:5638 and occamy.yaml",
-			env["OCCAMY_V1_DEBUG_ADDRESS"], env["OCCAMY_V0_CONF"])
+	if env := makeEnv(t, "bench-compare", nil, nil); env["OCCAMY_V1_DEBUG_ADDRESS"] != "0.0.0.0:5638" {
+		t.Errorf("make bench-compare: OCCAMY_V1_DEBUG_ADDRESS=%q, want 0.0.0.0:5638", env["OCCAMY_V1_DEBUG_ADDRESS"])
 	}
-	lines := makeDryRun(t, "bench-compare", []string{"OCCAMY_V1_DEBUG_PORT=6638", "OCCAMY_V1_GFX_DEBUG_PORT=6641"}, nil)
+	lines := makeDryRun(t, "bench-compare", []string{"OCCAMY_V1_DEBUG_PORT=6638", "OCCAMY_V1_CUBIC_DEBUG_PORT=6643"}, nil)
 	// make -n prints the harness's command as the Makefile breaks it.
 	joined := strings.ReplaceAll(strings.Join(lines, "\n"), "\\\n", " ")
 	var harness string
@@ -352,7 +262,7 @@ func TestBenchRuntime(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"-runtime occamy-v1=localhost:6638,occamy-v1-gfx=localhost:6641",
+		"-runtime occamy-v1=localhost:6638,occamy-v1-cubic=localhost:6643",
 		"-plan bench/plans/compare.yaml -resume -out bench-compare.json",
 	} {
 		if !strings.Contains(harness, want) {
@@ -587,15 +497,14 @@ func TestConfigurationExampleRefused(t *testing.T) {
 
 // TestDemoUserStaysInTheDemo checks that nothing but the demo stack's
 // and the benchmark stack's v1 files holds the demo user's password
-// hash, and that the v0 file in the image and the release archives has
-// no users to sign in with: occamyd has no default user or password.
+// hash, and that the file in the image and the release archives has no
+// users to sign in with: occamyd has no default user or password.
 func TestDemoUserStaysInTheDemo(t *testing.T) {
 	// Past the $ signs, which a shell's heredoc would escape.
 	const hash = "DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
 	allowed := map[string]bool{
 		"docker/occamy-v1.yaml":             true,
 		"docker/bench/occamy-v1.yaml":       true,
-		"docker/bench/occamy-v1-gfx.yaml":   true,
 		"docker/bench/occamy-v1-cubic.yaml": true,
 	}
 	found := map[string]bool{}
@@ -644,8 +553,12 @@ func TestDemoUserStaysInTheDemo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(raw, []byte("users:")) || bytes.Contains(raw, []byte("password")) {
-		t.Errorf("conf.yaml, which the image and the archives ship, names users or passwords:\n%s", raw)
+	var shipped config.File
+	if err := yaml.Unmarshal(raw, &shipped); err != nil {
+		t.Fatal(err)
+	}
+	if shipped.Auth.Users != nil || shipped.Auth.OIDC != nil || shipped.Auth.TrustedIssuers != nil {
+		t.Errorf("conf.yaml, which the image and the archives ship, signs someone in: %+v", shipped.Auth)
 	}
 }
 

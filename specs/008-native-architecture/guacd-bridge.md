@@ -7,8 +7,8 @@ depends_on:
   - specs/008-native-architecture/graphics-pipeline.md
   - specs/005-upstream-guacamole/guacd-handshake-client.md
 affects:
-  - internal/backend/guacd/
-  - internal/guacd/
+  - bench/internal/guacd/
+  - bench/internal/guacamole/
 effort: large
 created: 2026-10-29
 updated: 2026-11-03
@@ -25,7 +25,8 @@ benchmark's baseline, the `guacd` series
 ([008](../008-native-architecture.md), v1.0.0-beta.2 scope). The
 deletion gate below no longer decides when a guacd path goes; its 10x
 condition remains the target of v1.0, measured against that baseline.
-What follows records the bridge as built through beta.1.
+What follows records the bridge as built through beta.1, and its
+removal (Implementation notes: removal).
 
 ## Design Problem
 
@@ -1231,3 +1232,22 @@ that guacd was `vnc`'s default, they are corrected below.
   owner deleting it, so the path on which the owner leaves and the
   owner grace runs out, which ends a session from a timer, is not
   exercised.
+
+## Implementation notes: removal
+
+- **Status.** Removed on 2026-11-03, for beta.2
+  ([api-and-server-stack](api-and-server-stack.md), Implementation
+  notes: beta.2, without guacd): `internal/backend/guacd`, with its
+  conformance corpus, is deleted, and `backend: guacd`, the file's
+  `guacd` section and `adhoc_backends` are refused with a message that
+  says what replaced them. `internal/guacamole` and `internal/guacd`
+  moved to `bench/internal/`, for the benchmark's `guacd` series, the
+  only place guacd still runs.
+- **The parity matrix** lost its guacd columns, and with them the guacd
+  twin that let a native cell try again; it is native VNC's matrix now
+  ([native-vnc-backend](native-vnc-backend.md), Implementation notes:
+  VNC's parity matrix). The notes above record it as it was.
+- **The soak** (Implementation notes: VNC's soak) is unchanged but for
+  the connection's name: the demo's `tigervnc-native` is `tigervnc`,
+  and `vnc-native` is `vnc`, since there is no other backend to tell
+  apart.

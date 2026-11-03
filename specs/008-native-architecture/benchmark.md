@@ -15,7 +15,7 @@ affects:
   - go.mod
 effort: large
 created: 2026-10-29
-updated: 2026-11-02
+updated: 2026-11-03
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -92,7 +92,10 @@ v0 series connects to guacd directly, to separate occamyd's proxying cost
 from guacd's own. Four v1 series run them over protocol v1: one with
 occamyd's native backends and one through the guacd bridge for comparison
 within v1, as each ships, and each of the two with RDP's graphics
-pipeline the other way, for RDP alone.
+pipeline the other way, for RDP alone. (2026-11-03: since
+v1.0.0-beta.2, occamyd has no v0 routes and no guacd bridge, so the
+series are `guacd`, straight from guacd, and the v1 series of its own
+backends; Implementation notes: beta.2's series.)
 
 | ID | Protocol | Scenario | Primary metric |
 |----|----------|----------|----------------|
@@ -932,3 +935,21 @@ say what the harness does now.
   - The client core's default decoders (a follow-up of
     [client-core](client-core.md)): once `client` has them, the harness
     uses them instead of its own.
+
+## Implementation notes: beta.2's series
+
+- **What went.** With the bridge and the v0 routes gone from occamyd
+  ([008](../008-native-architecture.md), v1.0.0-beta.2 scope), the
+  harness drops the `occamy` series (v0 through occamyd), `v1-guacd`
+  and `v1-guacd-gfx`, and with them the `-addr` and `-v1-gfx` flags and
+  the bench stack's `occamy` and `occamy-v1-gfx` services.
+- **What stays.** `guacd`, which dials guacd straight with
+  `bench/internal/guacamole` and `bench/internal/guacd`, moved there
+  from `internal/` since occamyd no longer uses them; `v1-native`;
+  `v1-native-w2` and `v1-native-cubic` of
+  [realtime-transport](realtime-transport.md); and `v1-native-nogfx`,
+  RDP without its graphics pipeline. `-series` defaults to
+  `guacd,v1-native`. guacd runs only in the bench stack's overlay,
+  `docker/docker-compose.bench.yaml`.
+- **Recorded results.** The results under `docs/benchmarks/` keep their
+  retired series, and `bench/report.py` still renders them.

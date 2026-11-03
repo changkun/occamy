@@ -41,7 +41,7 @@ func newKubeServer(t *testing.T, opts kubetest.Options) *kubetest.Server {
 // pins.
 func kubeConnection(id string, s *kubetest.Server, creds config.Credentials) config.Connection {
 	return config.Connection{
-		ID: id, Name: id, Protocol: "kubernetes", Backend: config.BackendNative, Target: s.Addr(),
+		ID: id, Name: id, Protocol: "kubernetes", Target: s.Addr(),
 		TLS: config.ConnectionTLS{Pins: []string{s.Fingerprint()}},
 		Kubernetes: config.Kubernetes{
 			Namespace: "web", Pod: "web-0", Container: "app",

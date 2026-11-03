@@ -25,7 +25,7 @@ import (
 func failingServer(t *testing.T) *testServer {
 	t.Helper()
 	ts, _ := sessionServer(t, func(f *config.File) { f.Limits.SessionsPerUser = 100 })
-	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) {
+	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
 		return failing{backendtest.NewTerminal(80, 24, 0)}, nil
 	})
 	return ts
@@ -298,7 +298,7 @@ func TestJoinEndingSessionWaits(t *testing.T) {
 	var once sync.Once
 	release := func() { once.Do(func() { close(h.release) }) }
 	t.Cleanup(release)
-	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) { return h, nil })
+	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) { return h, nil })
 	alice := ts.token(t, "alice", "ops")
 	o := ts.openSession(t, alice, "ops-shell")
 	go ts.s.session(o.ID).s.Close()

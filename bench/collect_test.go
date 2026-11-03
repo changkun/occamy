@@ -30,18 +30,16 @@ func testSeries() []series {
 // server of the stack.
 func TestAllSeries(t *testing.T) {
 	want := map[string][]string{
-		"occamy": nil, "guacd": nil,
+		"guacd":     nil,
 		"v1-native": {"rdp", "ssh", "vnc"}, "v1-native-w2": {"rdp", "ssh", "vnc"},
-		"v1-native-cubic": {"rdp", "ssh", "vnc"}, "v1-native-nogfx": {"rdp"}, "v1-guacd": {"rdp", "vnc"},
-		"v1-guacd-gfx": {"rdp"},
+		"v1-native-cubic": {"rdp", "ssh", "vnc"}, "v1-native-nogfx": {"rdp"},
 	}
 	all := testSeries()
 	if len(all) != len(want) {
 		t.Errorf("%d series, want %d", len(all), len(want))
 	}
 	servers := map[string]string{
-		"occamy": "occamy:5636", "guacd": "guacd:4822", "v1-guacd-gfx": "occamy-v1-gfx:5637",
-		"v1-native-cubic": "occamy-v1-cubic:5637",
+		"guacd": "guacd:4822", "v1-native-cubic": "occamy-v1-cubic:5637",
 	}
 	for _, s := range all {
 		if protos, ok := want[s.Name]; !ok || !slices.Equal(s.protocols, protos) {
@@ -54,9 +52,9 @@ func TestAllSeries(t *testing.T) {
 	}
 }
 
-// The comparison's plan measures what its spec says: all six series
-// under N0 to N2, and the three main ones under N3 and N4, every
-// scenario each serves, 7 times, behind the load gate.
+// The comparison's plan measures what its spec says: all three series
+// under N0 to N2, and the two main ones under N3 and N4, every scenario
+// each serves, 7 times, behind the load gate.
 func TestComparePlan(t *testing.T) {
 	f, err := readPlanFile("plans/compare.yaml")
 	if err != nil {
@@ -69,13 +67,13 @@ func TestComparePlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(blocks) != 6*3+3*2 {
-		t.Errorf("%d blocks, want %d", len(blocks), 6*3+3*2)
+	if len(blocks) != 3*3+2*2 {
+		t.Errorf("%d blocks, want %d", len(blocks), 3*3+2*2)
 	}
 	for _, b := range blocks {
 		switch {
-		case b.series.Name == "v1-guacd" && slices.ContainsFunc(b.scenarios, func(sc scenario) bool { return sc.Protocol == "ssh" }):
-			t.Errorf("%s: v1-guacd has no SSH", b)
+		case b.series.Name == "v1-native-nogfx" && slices.ContainsFunc(b.scenarios, func(sc scenario) bool { return sc.Protocol != "rdp" }):
+			t.Errorf("%s: v1-native-nogfx serves only RDP", b)
 		case b.series.Name == "v1-native" && len(b.scenarios) != len(scenarios):
 			t.Errorf("%s: %d scenarios, want all %d", b, len(b.scenarios), len(scenarios))
 		}
@@ -347,7 +345,7 @@ func TestResume(t *testing.T) {
 	defer func(d time.Duration) { gap = d }(gap)
 	gap = 0
 	var opens atomic.Int64
-	a, b := refusing(t, "occamy", &opens), refusing(t, "guacd", &opens)
+	a, b := refusing(t, "v1-native", &opens), refusing(t, "guacd", &opens)
 	scs := []scenario{{ID: "T1", Protocol: "ssh"}}
 	blocks, err := matrixBlocks("matrix", []series{a, b}, netConditions[:1], scs)
 	if err != nil {
@@ -361,9 +359,9 @@ func TestResume(t *testing.T) {
 		}
 	}
 	prev := &report{Quick: true, Plan: p.record(), Runs: 2, Results: slices.Concat(
-		ok("occamy", 0),    // complete
+		ok("v1-native", 0), // complete
 		ok("guacd", 0)[:1], // incomplete
-		ok("occamy", 1),    // complete
+		ok("v1-native", 1), // complete
 		[]result{{Scenario: "T1", Protocol: "ssh", Series: "guacd", Net: "N0", Run: 1, Study: "matrix", Error: "lost"},
 			{Scenario: "G7", Protocol: "ssh", Series: "guacd", Net: "N0", Run: 1, Study: "matrix"}}, // an error
 	)}
@@ -559,7 +557,7 @@ func TestReadRuntime(t *testing.T) {
 	}))
 	defer srv.Close()
 	addr := strings.TrimPrefix(srv.URL, "http://")
-	r := &runner{debug: map[string]string{"occamy-v1": addr, "occamy-v1-gfx": "127.0.0.1:1"}}
+	r := &runner{debug: map[string]string{"occamy-v1": addr, "occamy-v1-cubic": "127.0.0.1:1"}}
 	o := r.observe(context.Background())
 	var res result
 	o.finish(context.Background(), &res)
@@ -568,10 +566,10 @@ func TestReadRuntime(t *testing.T) {
 	if !ok || got != want {
 		t.Errorf("runtime %+v, want %+v", got, want)
 	}
-	if _, ok := res.Runtime["occamy-v1-gfx"]; ok {
+	if _, ok := res.Runtime["occamy-v1-cubic"]; ok {
 		t.Error("a listener that did not answer has a runtime")
 	}
-	if m, err := parseDebug("occamy-v1=localhost:5638,occamy-v1-gfx=localhost:5641"); err != nil || len(m) != 2 {
+	if m, err := parseDebug("occamy-v1=localhost:5638,occamy-v1-cubic=localhost:5643"); err != nil || len(m) != 2 {
 		t.Errorf("parseDebug: %v, %v", m, err)
 	}
 	if _, err := parseDebug("occamy-v1"); err == nil {

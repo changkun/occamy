@@ -151,12 +151,13 @@ single-node beta.
    with a React client on protocol v1 and API v1, which uses neither.
    (2026-11-03, the owner: removed in beta.2 rather than at v1.0, with
    the Guacamole protocol they serve and guacd;
-   [008](../008-native-architecture.md), v1.0.0-beta.2 scope.)
+   [008](../008-native-architecture.md), v1.0.0-beta.2 scope. Built;
+   Implementation notes: beta.2, without guacd.)
 5. **Configuration:** v1 files carry `version: 1` and reject unknown keys
    (`yaml.Decoder.KnownFields`). A file without `version` is read as v0
    configuration and served through the v0 routes. (2026-11-03: with the
    v0 routes gone in beta.2, occamyd refuses a file without `version`
-   and says to write a v1 file.)
+   and says to write a v1 file. Built: `ErrV0`.)
 6. **Metrics: expvar on the debug listener** for beta. Prometheus can
    come later if someone asks for it.
 7. **TLS:** occamyd terminates TLS when `tls.cert` and `tls.key` are set.
@@ -191,7 +192,10 @@ single-node beta.
     - This does not reach the v0 file. `conf.yaml`, which the image and
       the release archives carry, has no users, and still sets
       `jwt_secret: occamy` and `mode: debug`. That is left for a
-      decision of its own.
+      decision of its own. (Settled in beta.2: with v0 files refused,
+      `conf.yaml` is a v1 template with no users, which occamyd refuses
+      until the operator adds some; Implementation notes: beta.2,
+      without guacd.)
 
 ## Task Breakdown
 
@@ -2139,3 +2143,69 @@ to the VNC backend.
     the native VNC backend's 2^25 pixels; the backend ignores it and
     the server keeps its size. A stream could clamp it to the pixel
     limit with its aspect instead.
+
+## Implementation notes: beta.2, without guacd
+
+- **Status.** Item 1 of [008](../008-native-architecture.md)'s
+  v1.0.0-beta.2 scope is built (2026-11-03): occamyd serves API v1 and
+  protocol v1 only, with one backend per protocol, `ssh`, `vnc`, `rdp`
+  and `kubernetes`. Decisions 4 and 5, and decision 10's `conf.yaml`,
+  are done as annotated above.
+- **What went.**
+  - The guacd bridge (`internal/backend/guacd`, with its conformance
+    corpus), `backend: guacd`, the file's `guacd` section and
+    `adhoc_backends`. `server/backends.go` keys backends by protocol
+    alone, so a session's state names its protocol's backend.
+  - The v0 routes, `/api/v0/login` and `/api/v0/connect`, with
+    `legacy_v0`, their HS256 tokens (`server/jwt.go`), the Guacamole
+    tunnel (`server/routers.go`, `server/session.go`,
+    `server/connection.go`) and `server.RunV0`. `occamy.go` reads a v1
+    file and nothing else.
+  - telnet, as a protocol and as an ad-hoc port.
+  - The reservation of guacd's address in an ad-hoc range: occamyd
+    keeps only its own listeners out of reach.
+  - The demo stack's `occamy` and `guacd` services, and
+    `docker/occamy.yaml` and `docker/occamy-debug.yaml`. The demo's
+    connections lose their `-native` suffix, since there is no other
+    backend to tell apart.
+- **What a file that still has them gets.** A file without
+  `version: 1` is refused with `ErrV0`, which names the v1 format and
+  docs/configuration.md. A v1 file is decoded strictly, as before, and
+  each removed key has its own message, at its own path, saying what
+  replaced it: `guacd`, `adhoc_backends`, `legacy_v0`, a connection's
+  `backend` (with `backend: guacd` told that its protocol is served by
+  occamyd's own backend), and `protocol: telnet`. Under `guacd.params`,
+  each parameter that recorded sessions (`recording-*`,
+  `typescript-*`) or restricted the clipboard (`disable-copy`,
+  `disable-paste`) is reported as well, at its own path, saying that
+  occamyd neither records nor restricts the clipboard yet, so that a
+  file never starts a server that would serve those sessions
+  unrecorded or the clipboard open. `TestParseV1GuacdRemoved` checks
+  the problems, in the file's order; docs/configuration.md shows the
+  output for such a file.
+- **Deviation.** 008 said occamyd would refuse a *connection* that
+  still sets guacd's recording parameters. Those parameters were never
+  a connection's: they sat in the file's `guacd.params`, which applied
+  to every guacd session. The refusal is the file's, per parameter, and
+  covers the clipboard parameters too.
+- **What moved.** `internal/guacamole` and `internal/guacd` are
+  `bench/internal/guacamole` and `bench/internal/guacd`: the bench's
+  `guacd` series dials guacd straight with them, and nothing in
+  occamyd imports them. The debug listener registers net/http/pprof's
+  handlers itself, which it took from the v0 routes' helper before.
+- **Tests.** Deleted with what they tested: the v0 end-to-end test
+  (`tests/e2e_test.go`), the v0 routes' and tokens' tests
+  (`server/routers_test.go`, `server/jwt_test.go`), the bridge's tests
+  and corpus, `TestLegacyV0`, `TestRecoveryV0Routes`,
+  `TestWebClientV0`, `TestBridgeConfig`, `TestDemoV0Files` and
+  `TestVersionV0File`, and RDP's spike step 3 against guacd
+  (`internal/rdp/bytes_integration_test.go`), which `internal/`
+  visibility keeps from `bench/internal/guacd`. Converted: the pressure
+  test runs on protocol v1 and reads occamyd's goroutines from the debug listener, with
+  the demo user allowed 100 sessions; the VNC parity matrix has one
+  column per server ([native-vnc-backend](native-vnc-backend.md),
+  Implementation notes: VNC's parity matrix); the soak, x11vnc and
+  web tests take the renamed connections; `TestRoutesLimitBodies`
+  posts to API v1; `TestCursorFromGuacd` is
+  `TestCursorPremultiplied`; and `TestE2EV1SSH` replaces the v0
+  test's SSH check, which no v1 test had.
