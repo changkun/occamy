@@ -152,6 +152,15 @@ bench-realtime-1:
 	$(MAKE) bench-compare BENCH_PLAN=bench/plans/realtime-1.yaml BENCH_OUT=bench-realtime-1.json
 .PHONY: bench-realtime-1
 
+# bench-realtime-2 collects step 2 of the real-time transport, loss,
+# about four hours of measuring (bench/plans/realtime-2.yaml), as
+# bench-compare does, into bench-realtime-2.json. It builds the image
+# that emulates the link in the kernel (docker/bench/netem) first.
+bench-realtime-2:
+	$(CONTAINER_ENGINE) build -t occamy-bench-netem docker/bench/netem
+	$(MAKE) bench-compare BENCH_PLAN=bench/plans/realtime-2.yaml BENCH_OUT=bench-realtime-2.json
+.PHONY: bench-realtime-2
+
 # bench-report analyses the comparison's results (BENCH_OUT) into tables,
 # tests and figures in BENCH_REPORT with bench/report.py, which uv runs
 # with its own numpy, scipy and matplotlib.
@@ -171,6 +180,12 @@ bench-essential-report:
 bench-realtime-1-report:
 	$(MAKE) bench-report BENCH_OUT=bench-realtime-1.json BENCH_REPORT=docs/benchmarks/realtime/1
 .PHONY: bench-realtime-1-report
+
+# bench-realtime-2-report analyses step 2 of the real-time transport
+# into docs/benchmarks/realtime/2.
+bench-realtime-2-report:
+	$(MAKE) bench-report BENCH_OUT=bench-realtime-2.json BENCH_REPORT=docs/benchmarks/realtime/2
+.PHONY: bench-realtime-2-report
 
 # corpus records the frames the codec measurement works on
 # (bench/testdata/corpus/README.md) from the bench desktop with a terminal

@@ -110,7 +110,9 @@ Details of the new workloads:
 
 N3 and N4 are new. The link emulates delay and throughput as
 [benchmark](benchmark.md) describes, not loss: the harness's proxy carries
-TCP, and loss on TCP shows only as delay.
+TCP, and loss on TCP shows only as delay. A loss study
+([realtime-transport](realtime-transport.md), step 2) emulates the whole
+link in the kernel instead, where a packet can be dropped.
 
 ## Studies
 
@@ -367,7 +369,9 @@ and the report in `docs/benchmarks/essential/`.
 
 ## Not measured
 
-- Packet loss, which a userspace proxy over TCP cannot emulate.
+- Packet loss, which a userspace proxy over TCP cannot emulate. The loss
+  study of [realtime-transport](realtime-transport.md), step 2, measures
+  it on a link in the kernel.
 - A browser's own costs. The harness decodes in Go; a browser decodes
   natively and composites on the GPU. Client CPU compares the series with
   each other, not with a browser.

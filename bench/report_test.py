@@ -84,6 +84,34 @@ def synthetic_window(runs=6, guacd=False):
                 plan=dict(seed=1, max_load=8, keys=100, blocks=[]), results=results)
 
 
+def synthetic_loss(runs=6):
+    """Returns a loss study's results under N1 and N2, where loss adds to
+    each key what ADDED says, and to G5's frame interval twice that; guacd
+    is ten times slower than v1-native without loss."""
+    rng = np.random.default_rng(3)
+    results = []
+    for run in range(runs):
+        for series, base in (("guacd", 200.0), ("v1-native", 20.0)):
+            for net in ("N1", "N2"):
+                for loss in (0, 0.5, 2):
+                    jitter = 1 + rng.uniform(-0.02, 0.02)
+                    lat = base * jitter + ADDED[series][loss]
+                    for scenario, protocol in (("T1", "ssh"), ("G5", "vnc")):
+                        r = result(series, scenario, protocol, net, run,
+                                   latency_ms=dict(n=100, p50=lat * 0.8, p95=lat, p99=lat, max=lat))
+                        r.update(study="loss", factor=f"loss={loss:g}%")
+                        if scenario == "G5":
+                            r.update(scene_fps=30, seconds=10.0, frames=270, bytes_down=4_000_000,
+                                     frame_interval_ms=dict(n=269, p50=33.3, p95=40 + 2 * ADDED[series][loss],
+                                                            p99=90, max=100))
+                        results.append(r)
+    return dict(started="2026-11-03T00:00:00Z", quick=False, runs=runs, host={"cpu": "test"},
+                plan=dict(seed=1, max_load=8, keys=100, blocks=[]), results=results)
+
+
+ADDED = {"v1-native": {0: 0.0, 0.5: 5.0, 2: 40.0}, "guacd": {0: 0.0, 0.5: 30.0, 2: 120.0}}
+
+
 class Statistics(unittest.TestCase):
     def test_median_interval(self):
         med, lo, hi, cov = report.median_interval([5, 1, 4, 2, 6, 3])
@@ -123,6 +151,16 @@ class Statistics(unittest.TestCase):
         # Higher is better: the factor is still above 1 where b is better.
         self.assertAlmostEqual(report.factor(a / 10, a, lower=False)[0], 10, places=6)
         self.assertTrue(math.isnan(report.factor(np.array([0, 1.0]), np.array([1, 1.0]))[0]))
+
+    def test_shift(self):
+        a = np.array([20, 22, 19, 21, 20, 23.0])
+        est, lo, hi, cov = report.shift(a, a + 30)
+        self.assertAlmostEqual(est, 30)
+        self.assertLess(lo, 30)
+        self.assertGreater(hi, 30)
+        self.assertGreaterEqual(cov, 0.95)
+        self.assertAlmostEqual(report.shift(a + 30, a)[0], -30)
+        self.assertTrue(math.isnan(report.shift(a[:3], a[:3])[1]))
 
     def test_holm(self):
         np.testing.assert_allclose(report.holm([0.01, 0.04, 0.03, 0.005]), [0.03, 0.06, 0.06, 0.02])
@@ -257,6 +295,45 @@ class Report(unittest.TestCase):
         self.assertEqual(md.count("| `v1-native` | T1 ssh | N0 |"), 1)
         for name in ("factors-guacamole-to-occamy", "factors-frame-window"):
             self.assertTrue((out / f"{name}.svg").exists(), name)
+
+    def test_loss(self):
+        # What each loss adds over the same cell without it, Holm-corrected
+        # over the 16 primary tests (2 series, 2 networks, 2 losses, T1
+        # and G5), beside the round trip; the targets judge no loss cell.
+        out = self.analyse(synthetic_loss())
+        with open(out / "loss.csv") as f:
+            loss = {(r["series"], r["scenario"], r["net"], r["loss"], r["metric"]): r for r in csv.DictReader(f)}
+        self.assertEqual(sum(r["primary"] == "True" for r in loss.values()), 16)
+        for series, added in ADDED.items():
+            for level in (0.5, 2):
+                c = loss[(series, "G5", "N2", str(float(level)), "latency_p95")]
+                self.assertAlmostEqual(float(c["added"]), added[level], delta=5)
+                self.assertEqual((c["primary"], c["rtt_ms"]), ("True", "50"))
+            interval = loss[(series, "G5", "N2", "2.0", "frame_interval_p95")]
+            self.assertEqual((interval["primary"], interval["p_adjusted"]), ("False", "nan"))
+            self.assertAlmostEqual(float(interval["added"]), 2 * added[2])
+        two = loss[("guacd", "T1", "N1", "2.0", "latency_p95")]
+        self.assertAlmostEqual(float(two["p"]), 2 / 924)
+        self.assertAlmostEqual(float(two["p_adjusted"]), 16 * 2 / 924)
+        self.assertEqual(two["rtt_ms"], "20")
+        self.assertFalse(any(r["loss"] == "0.0" for r in loss.values()))
+
+        md = (out / "report.md").read_text()
+        self.assertIn("## Loss: what it adds", md)
+        self.assertIn("Primary metrics, 16 tests, Holm-corrected", md)
+        self.assertIn("| `guacd` | G5 vnc | N2 | 2% | L p95 (ms) |", md)
+        self.assertIn("| 50 ms |", md)
+        self.assertNotIn("## The 50 ms target", md)
+        self.assertNotIn("10x target is met", md)
+        for name in ("loss-latency_p95", "loss-fps", "loss-frame_interval_p95"):
+            self.assertTrue((out / f"{name}.svg").exists(), name)
+            self.assertTrue((out / f"{name}-dark.svg").exists(), name)
+            self.assertEqual(md.count(f'srcset="{name}-dark.svg"'), 1, name)
+        # guacd against v1-native in each of the 12 cells, with or without
+        # loss.
+        with open(out / "comparisons.csv") as f:
+            primary = [r for r in csv.DictReader(f) if r["family"] == "Guacamole to Occamy" and r["primary"] == "True"]
+        self.assertEqual(len(primary), 12)
 
     def test_svg_is_deterministic(self):
         a = self.analyse(synthetic())

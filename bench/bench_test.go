@@ -13,6 +13,8 @@ import (
 	"math"
 	"net"
 	"os"
+	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -94,6 +96,79 @@ func TestProxyRate(t *testing.T) {
 	want := time.Duration(n * 8 * float64(time.Second) / 20e6)
 	if got := time.Since(start); got < want || got > 2*want+50*time.Millisecond {
 		t.Errorf("500 KiB through 20 Mbit/s took %v, want about %v", got, want)
+	}
+}
+
+// A link in the kernel is the proxy's: half the RTT each way, the
+// bandwidth in kbit/s and the proxy's queue in packets, with the loss.
+func TestShapeArgs(t *testing.T) {
+	for _, c := range []struct {
+		n    netCondition
+		want string
+	}{
+		{netCondition{Name: "N0", Loss: 2}, "5637 0 0 2 44"},
+		{netCondition{Name: "N1", RTT: 20 * time.Millisecond, Mbps: 100}, "5637 10000 100000 0 334"},
+		{netCondition{Name: "N2", RTT: 50 * time.Millisecond, Mbps: 20, Loss: 0.5}, "5637 25000 20000 0.5 167"},
+	} {
+		if got := strings.Join(c.n.shapeArgs(5637), " "); got != c.want {
+			t.Errorf("%s with %g%% loss: shape %s, want %s", c.n.Name, c.n.Loss, got, c.want)
+		}
+	}
+}
+
+// fakeEngine returns a container engine that records each command line
+// it is given, and the file it records them in; it fails when fail is
+// set.
+func fakeEngine(t *testing.T, fail bool) (engine, log string) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake engine is a shell script")
+	}
+	dir := t.TempDir()
+	engine, log = filepath.Join(dir, "engine"), filepath.Join(dir, "log")
+	script := fmt.Sprintf("#!/bin/sh\necho \"$*\" >> %q\n", log)
+	if fail {
+		script += "echo no such image >&2\nexit 125\n"
+	}
+	if err := os.WriteFile(engine, []byte(script), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	return engine, log
+}
+
+// A loss study's block shapes its series' server in the kernel, in the
+// server's network namespace, and clears it afterwards; a collection
+// first clears every server that its loss blocks shape.
+func TestShape(t *testing.T) {
+	engine, log := fakeEngine(t, false)
+	f := planFile{Runs: 1, Studies: []studyFile{
+		{Study: "loss", Series: []string{"v1-native", "v1-native-w2", "guacd"}, Nets: []string{"N2"}, Loss: []float64{2}, Scenarios: "T1"},
+		{Study: "matrix", Series: []string{"occamy"}, Nets: []string{"N0"}, Scenarios: "T1"},
+	}}
+	blocks, err := studyBlocks(f, testSeries())
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := plan{blocks: blocks, engine: engine, project: "occcmp", linkImage: "netem"}
+	if err := p.clearLinks(); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.shape(blocks[0].series, &blocks[0].net); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const run = "run --rm --network container:occcmp-%s-1 --cap-add NET_ADMIN netem %s\n"
+	want := fmt.Sprintf(run, "occamy-v1", "clear") + fmt.Sprintf(run, "guacd", "clear") +
+		fmt.Sprintf(run, "occamy-v1", "5637 25000 20000 2 167")
+	if string(got) != want {
+		t.Errorf("engine ran\n%s\nwant\n%s", got, want)
+	}
+
+	p.engine, _ = fakeEngine(t, true)
+	if err := p.shape(blocks[0].series, nil); err == nil || !strings.Contains(err.Error(), "no such image") {
+		t.Errorf("a failing engine: %v, want its message", err)
 	}
 }
 

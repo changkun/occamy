@@ -1,0 +1,29 @@
+# Step 2 of specs/008-native-architecture/realtime-transport.md, loss:
+# how much a lost packet costs a key while TCP holds back what follows
+# it. v1-native and guacd under N1 and N2, with none, 0.5% and 2% of the
+# packets to the client dropped, on T1, G2 and G5, the keys of typing, of
+# an idle desktop and of full-screen motion. A loss study emulates the
+# whole link, delay and bandwidth too, in the kernel of each series'
+# server, so that the connection that loses a packet is the one that
+# waits out the round trip; its 0% is the control, not the matrix's N1
+# and N2. make bench-realtime-2 collects it, and make
+# bench-realtime-2-report analyses it.
+#
+# 360 results, about four hours: 6 runs and 100 probe keys a scenario,
+# as step 1 had, and no G7 (connects: 0). Before each result the harness
+# waits until the host's 1-minute load is below max_load, for up to
+# load_wait; then it saves and exits, and the same command resumes.
+
+runs: 6
+seed: 20261103
+max_load: 8
+load_wait: 2h
+keys: 100
+connects: 0
+
+studies:
+  - study: loss
+    series: [v1-native, guacd]
+    nets: [N1, N2]
+    loss: [0, 0.5, 2]
+    scenarios: T1,G2,G5

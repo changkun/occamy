@@ -18,6 +18,8 @@ output directory:
   95% interval;
 - comparisons.csv: per comparison, cell and metric, the factor, its 95%
   interval and p-values;
+- loss.csv: in a loss study, per series, cell and metric, what the loss
+  added, its 95% interval and p-values;
 - report.md: the tables, the targets and the figures;
 - the figures, as SVG in light and dark.
 
@@ -122,7 +124,29 @@ NETS = {
     "N3": "N3: 100 ms, 5 Mbit/s",
     "N4": "N4: 250 ms, 1 Mbit/s",
 }
+RTT_MS = {"N0": 0, "N1": 20, "N2": 50, "N3": 100, "N4": 250}
 PROTOCOLS = ["ssh", "vnc", "rdp"]
+
+# The study that drops packets, in the kernel, each block under one loss,
+# its factor (specs/008-native-architecture/realtime-transport.md, step
+# 2). Its cells without loss are its control, and the targets judge none
+# of its cells: they are set without loss.
+LOSS = "loss"
+# The metrics drawn against the loss: a key's latency, and a scene's rate
+# and cadence.
+LOSS_FIGURES = ["latency_p95", "fps", "frame_interval_p95"]
+
+
+def loss_of(cell):
+    """Returns the percentage of packets lost in a loss study's cell, from
+    its factor, such as loss=0.5%."""
+    return float(cell.factor.removeprefix("loss=").removesuffix("%"))
+
+
+def loss_order(cell):
+    """Orders a loss study's cells as Cell.order does, by the loss as a
+    number rather than its factor's text."""
+    return (*cell.order()[:-1], loss_of(cell))
 
 
 @dataclass(frozen=True)
@@ -341,6 +365,21 @@ def factor(a, b, lower=True):
     return est, float(np.exp(d[k - 1])), float(np.exp(d[len(d) - k])), coverage
 
 
+def shift(a, b):
+    """Returns what b adds to a, the Hodges–Lehmann estimate of the shift
+    b - a, with its exact 95% interval from the Mann–Whitney distribution
+    and the interval's coverage."""
+    a, b = np.asarray(a, float), np.asarray(b, float)
+    if len(a) == 0 or len(b) == 0:
+        return np.nan, np.nan, np.nan, np.nan
+    d = np.sort((b[None, :] - a[:, None]).ravel())
+    est = float(np.median(d))
+    k, coverage = mann_whitney_rank(len(a), len(b))
+    if k == 0:
+        return est, np.nan, np.nan, np.nan
+    return est, float(d[k - 1]), float(d[len(d) - k]), coverage
+
+
 def holm(p):
     """Returns Holm's adjustment of p."""
     p = np.asarray(p, float)
@@ -388,12 +427,38 @@ def compare(values, families=FAMILIES):
                 rows.append(dict(family=fam.name, baseline=fam.baseline, candidate=fam.candidate, cell=cell,
                                  metric=metric, primary=metric == primary, n_baseline=len(a), n_candidate=len(b),
                                  factor=est, lo=lo, hi=hi, coverage=cov, p=p, p_adjusted=np.nan,
-                                 targets=fam.targets))
+                                 targets=fam.targets and cell.study != LOSS))
         tested = [r for r in rows if r["primary"] and np.isfinite(r["p"])]
         for r, q in zip(tested, adjust([r["p"] for r in tested], fam.correction)):
             r["p_adjusted"] = q
         out += rows
     return out
+
+
+def compare_loss(values):
+    """Returns, per series and cell of the loss study with loss, what the
+    loss added to each metric over the same cell without it, with Holm's
+    correction over the primary metrics."""
+    rows = []
+    for (series, cell, metric), b in values.items():
+        if cell.study != LOSS or loss_of(cell) == 0:
+            continue
+        base = next((c for (s, c, m) in values if s == series and m == metric and c.study == LOSS
+                     and loss_of(c) == 0 and (c.scenario, c.protocol, c.net) == (cell.scenario, cell.protocol, cell.net)),
+                    None)
+        if base is None:
+            continue
+        a = values[(series, base, metric)]
+        est, lo, hi, cov = shift(a, b)
+        p = rank_sum_p(a, b) if len(a) > 1 and len(b) > 1 else np.nan
+        primary = SCENARIOS.get(cell.scenario, (None, []))[0]
+        rows.append(dict(series=series, cell=cell, metric=metric, primary=metric == primary, n_baseline=len(a),
+                         n_candidate=len(b), shift=est, lo=lo, hi=hi, coverage=cov, p=p, p_adjusted=np.nan))
+    rows.sort(key=lambda r: (*loss_order(r["cell"]), r["series"], list(METRICS).index(r["metric"])))
+    tested = [r for r in rows if r["primary"] and np.isfinite(r["p"])]
+    for r, q in zip(tested, adjust([r["p"] for r in tested], "holm")):
+        r["p_adjusted"] = q
+    return rows
 
 
 def significant(c):
@@ -416,7 +481,7 @@ def latency_targets(summary, families=FAMILIES):
             continue
         for (series, cell, metric), s in summary.items():
             if (series == fam.candidate and metric == "latency_p95" and cell.net in ("N0", "N1")
-                    and (series, cell) not in seen):
+                    and cell.study != LOSS and (series, cell) not in seen):
                 seen.add((series, cell))
                 out.append(dict(series=series, cell=cell, met=np.isfinite(s["hi"]) and s["hi"] <= TARGET_MS, **s))
     return sorted(out, key=lambda t: t["cell"].order())
@@ -483,7 +548,7 @@ def cell_columns(cell):
 CELL_HEADER = ["study", "factor", "scenario", "protocol", "net"]
 
 
-def write_tables(out, rows, summary, comparisons):
+def write_tables(out, rows, summary, comparisons, losses=()):
     write_csv(out / "results.csv", ["series", *CELL_HEADER, "run", "metric", "value", "load_1m", "at"],
               [[r["series"], *cell_columns(r["cell"]), r["run"], r["metric"], r["value"], r["load"], r["at"]]
                for r in sorted(rows, key=lambda r: (r["cell"].order(), r["series"], r["metric"], r["run"]))])
@@ -496,6 +561,13 @@ def write_tables(out, rows, summary, comparisons):
               [[c["family"], c["baseline"], c["candidate"], *cell_columns(c["cell"]), c["metric"], c["primary"],
                 c["n_baseline"], c["n_candidate"], c["factor"], c["lo"], c["hi"], c["coverage"], c["p"],
                 c["p_adjusted"]] for c in comparisons])
+    if losses:
+        write_csv(out / "loss.csv",
+                  ["series", *CELL_HEADER, "loss", "metric", "primary", "n_baseline", "n_candidate", "added", "lo",
+                   "hi", "coverage", "p", "p_adjusted", "rtt_ms"],
+                  [[c["series"], *cell_columns(c["cell"]), loss_of(c["cell"]), c["metric"], c["primary"],
+                    c["n_baseline"], c["n_candidate"], c["shift"], c["lo"], c["hi"], c["coverage"], c["p"],
+                    c["p_adjusted"], RTT_MS.get(c["cell"].net, np.nan)] for c in losses])
 
 
 def style(theme):
@@ -588,7 +660,7 @@ def factor_figure(path, fam, comparisons, theme):
     ax.errorbar(est[ok], y[ok], xerr=[est[ok] - lo[ok], hi[ok] - est[ok]], fmt="none", ecolor=color,
                 elinewidth=2, capsize=0)
     ax.scatter(est, y, s=36, color=color, edgecolors=t["surface"], linewidths=1.5, zorder=3)
-    lines = ((1, "-"), (TARGET_FACTOR, "--")) if fam.targets else ((1, "-"),)
+    lines = ((1, "-"), (TARGET_FACTOR, "--")) if any(c["targets"] for c in rows) else ((1, "-"),)
     for at, style_ in lines:
         ax.axvline(at, color=t["muted"], linewidth=1, linestyle=style_, zorder=1)
         ax.annotate(f"{at}x", (at, 1.0), xycoords=("data", "axes fraction"), xytext=(3, 2),
@@ -604,6 +676,53 @@ def factor_figure(path, fam, comparisons, theme):
     save(fig, path)
 
 
+def loss_figure(path, metric, summary, theme):
+    """Draws, per cell of the loss study, each series' median of metric
+    against the loss, with its 95% interval."""
+    t, dark = THEMES[theme], theme == "dark"
+    cells = [c for (_, c, m) in summary if m == metric and c.study == LOSS]
+    panels = sorted({(c.net, c.scenario, c.protocol) for c in cells},
+                    key=lambda k: next(c.order() for c in cells if (c.net, c.scenario, c.protocol) == k))
+    levels = sorted({loss_of(c) for c in cells})
+    series = [s for s in COLORS if any(k[0] == s and k[1].study == LOSS and k[2] == metric for k in summary)]
+    cols = len({(sc, pr) for _, sc, pr in panels})
+    rows = -(-len(panels) // cols)
+    fig, axes = plt.subplots(rows, cols, figsize=(2.6 * cols + 1.2, 2.4 * rows + 0.6), squeeze=False,
+                             layout="constrained")
+    for ax in axes.flat[len(panels):]:
+        ax.set_visible(False)
+    x = np.arange(len(levels))
+    for ax, (net, sc, pr) in zip(axes.flat, panels):
+        for s in series:
+            v = [summary.get((s, c, metric)) for level in levels
+                 for c in [next((c for c in cells if (c.net, c.scenario, c.protocol) == (net, sc, pr)
+                                 and loss_of(c) == level), None)] if c is not None]
+            if len(v) != len(levels) or any(e is None for e in v):
+                continue
+            med = np.array([e["median"] for e in v])
+            lo = np.array([e["lo"] for e in v])
+            hi = np.array([e["hi"] for e in v])
+            color = COLORS[s][dark]
+            ax.plot(x, med, color=color, linewidth=2, marker="o", markersize=6, markeredgecolor=t["surface"],
+                    markeredgewidth=1.5, label=s, zorder=3)
+            ok = np.isfinite(lo)
+            ax.errorbar(x[ok], med[ok], yerr=[med[ok] - lo[ok], hi[ok] - med[ok]], fmt="none", ecolor=color,
+                        elinewidth=1, capsize=2.5, zorder=2)
+        ax.set_xticks(x, [f"{level:g}%" for level in levels])
+        ax.set_title(f"{sc} {pr} · {NETS.get(net, net)}", color=t["text2"], fontsize=9)
+        ax.set_ylim(bottom=0)
+        ax.grid(axis="x", visible=False)
+    unit = METRICS[metric].unit
+    for ax in axes[:, 0]:
+        ax.set_ylabel(f"{METRICS[metric].label}" + (f" ({unit})" if unit else ""))
+    for ax in axes[-1]:
+        ax.set_xlabel("Packets to the client lost")
+    fig.legend(*axes[0][0].get_legend_handles_labels(), loc="outside right upper")
+    fig.suptitle(f"{METRICS[metric].label} against the loss: median of the runs, with 95% intervals", x=0.0,
+                 ha="left", color=t["text"], fontsize=11)
+    save(fig, path)
+
+
 def draw(out, summary, comparisons, families=FAMILIES):
     """Draws the figures in both themes and returns their names, without
     the theme's suffix, with a caption."""
@@ -616,6 +735,13 @@ def draw(out, summary, comparisons, families=FAMILIES):
             for theme in THEMES:
                 with plt.rc_context(style(theme)):
                     factor_figure(out / f"{name}{'-dark' if theme == 'dark' else ''}.svg", fam, comparisons, theme)
+    for metric in LOSS_FIGURES:
+        if any(m == metric and c.study == LOSS for (_, c, m) in summary):
+            name = f"loss-{metric}"
+            figures.append((name, f"{METRICS[metric].label} against the loss"))
+            for theme in THEMES:
+                with plt.rc_context(style(theme)):
+                    loss_figure(out / f"{name}{'-dark' if theme == 'dark' else ''}.svg", metric, summary, theme)
     for metric in METRICS:
         if any(m == metric for (_, _, m) in summary):
             figures.append((metric, METRICS[metric].label))
@@ -631,8 +757,62 @@ def picture(name, caption):
             f'  <img alt="{caption}" src="{name}.svg">\n</picture>')
 
 
+def loss_lines(losses, summary, figures):
+    """Returns the report's section on what the loss added, if the results
+    have a loss study."""
+    if not losses:
+        return []
+    primary = [c for c in losses if c["primary"]]
+    lines = [
+        "## Loss: what it adds",
+        "",
+        "Per series, what each loss added to a metric over the same cell without loss, both on the link in the"
+        " kernel: the Hodges–Lehmann estimate of the shift, with its exact 95% interval from the Mann–Whitney"
+        f" distribution, beside the condition's round trip. Primary metrics, {len(primary)} tests,"
+        f" Holm-corrected at {ALPHA}.",
+        "",
+        "| Series | Cell | Network | Loss | Metric | Without loss | With loss | Added | Round trip | p | p (Holm) |",
+        "|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|",
+    ]
+
+    def row(c, corrected=True):
+        base = next(k[1] for k in summary if k[0] == c["series"] and k[2] == c["metric"] and k[1].study == LOSS
+                    and loss_of(k[1]) == 0
+                    and (k[1].scenario, k[1].protocol, k[1].net) == (c["cell"].scenario, c["cell"].protocol,
+                                                                       c["cell"].net))
+        sb, sa = summary[(c["series"], base, c["metric"])], summary[(c["series"], c["cell"], c["metric"])]
+        unit = METRICS[c["metric"]].unit
+        cell = c["cell"]
+        out = (f"| `{c['series']}` | {cell.scenario} {cell.protocol} | {cell.net} | {loss_of(cell):g}%"
+               f" | {METRICS[c['metric']].label}" + (f" ({unit})" if unit else "")
+               + f" | {fmt_interval(sb['median'], sb['lo'], sb['hi'])}"
+               f" | {fmt_interval(sa['median'], sa['lo'], sa['hi'])}"
+               f" | {fmt_interval(c['shift'], c['lo'], c['hi'])} | {RTT_MS.get(cell.net, '–')} ms | {fmt_p(c['p'])} |")
+        return out + (f" {fmt_p(c['p_adjusted'])} |" if corrected else "")
+
+    lines += [row(c) for c in primary]
+    sig = sum(significant(c) for c in primary)
+    lines += ["", f"{sig} of {len(primary)} differences are significant after correction.", ""]
+    for name, caption in figures:
+        if name.startswith("loss-"):
+            lines += [picture(name, caption), ""]
+    secondary = [c for c in losses if not c["primary"] and c["metric"] not in RUNTIME]
+    if secondary:
+        lines += [
+            "### Secondary metrics: what the loss adds",
+            "",
+            "Exploratory: the p-values are not corrected.",
+            "",
+            "| Series | Cell | Network | Loss | Metric | Without loss | With loss | Added | Round trip | p |",
+            "|---|---|---|---:|---|---:|---:|---:|---:|---:|",
+        ]
+        lines += [row(c, corrected=False) for c in secondary]
+        lines.append("")
+    return lines
+
+
 def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets, sens, figures,
-                   families=FAMILIES):
+                   families=FAMILIES, losses=()):
     plan = rep.get("plan") or {}
     host = rep.get("host", {})
     gate = plan.get("max_load", 0)
@@ -671,11 +851,13 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
         if not primary:
             continue
         b, a = fam.baseline, fam.candidate
+        # The targets judge the family's cells without a loss study's.
+        judged = any(c["targets"] for c in primary)
         correction = "Holm" if fam.correction == "holm" else "Benjamini–Hochberg"
         intro = f"Primary metrics, {len(primary)} tests, {correction}-corrected at {ALPHA}."
         header = f"| Cell | Network | Metric | `{b}` | `{a}` | Factor | p | p ({correction}) |"
         rule = "|---|---|---|---:|---:|---:|---:|---:|"
-        if fam.targets:
+        if judged:
             intro += (f" The {TARGET_FACTOR}x target is met where the interval's lower bound is at least"
                       f" {TARGET_FACTOR}.")
             header += f" {TARGET_FACTOR}x |"
@@ -688,12 +870,13 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
                 f"| {c['cell'].label()} | {c['cell'].net} | {METRICS[c['metric']].label} ({unit})"
                 f" | {fmt_interval(sb['median'], sb['lo'], sb['hi'])} | {fmt_interval(sa['median'], sa['lo'], sa['hi'])}"
                 f" | {fmt_interval(c['factor'], c['lo'], c['hi'], 'x')} | {fmt_p(c['p'])} | {fmt_p(c['p_adjusted'])} |"
-                + (f" {'met' if tenfold(c) else 'no'} |" if fam.targets else "")
+                + (f" {('met' if tenfold(c) else 'no') if c['targets'] else '–'} |" if judged else "")
             )
         sig = sum(significant(c) for c in primary)
         outcome = f"{sig} of {len(primary)} differences are significant after correction"
-        if fam.targets:
-            outcome += f"; the {TARGET_FACTOR}x target is met in {sum(tenfold(c) for c in primary)} of {len(primary)}"
+        if judged:
+            outcome += (f"; the {TARGET_FACTOR}x target is met in {sum(tenfold(c) for c in primary)} of"
+                        f" {sum(c['targets'] for c in primary)}")
         lines += ["", outcome + ".", ""]
         name = "factors-" + fam.name.lower().replace(" ", "-")
         lines += [picture(name, f"{fam.name}: factors on the primary metrics"), ""]
@@ -719,6 +902,8 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
                     f" | {fmt_interval(c['factor'], c['lo'], c['hi'], 'x')} | {fmt_p(c['p'])} |"
                 )
             lines.append("")
+
+    lines += loss_lines(losses, summary, figures)
 
     if targets:
         lines += [
@@ -781,7 +966,7 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
 
     lines += ["## Figures", ""]
     for name, caption in figures:
-        if name.startswith("factors-"):
+        if name.startswith(("factors-", "loss-")):
             continue
         lines += [f"### {caption}", "", picture(name, caption), ""]
     (out / "report.md").write_text("\n".join(lines))
@@ -802,13 +987,14 @@ def main(argv=None):
     values = index(rows)
     summary = summarise(values)
     comparisons = compare(values)
+    losses = compare_loss(values)
     targets = latency_targets(summary)
     gate = (rep.get("plan") or {}).get("max_load", 0)
     sens = sensitivity(rows, gate, comparisons)
 
-    write_tables(out, rows, summary, comparisons)
+    write_tables(out, rows, summary, comparisons, losses)
     figures = draw(out, summary, comparisons)
-    write_markdown(out, source.name, rep, rows, failed, summary, comparisons, targets, sens, figures)
+    write_markdown(out, source.name, rep, rows, failed, summary, comparisons, targets, sens, figures, losses=losses)
 
     primary = [c for c in comparisons if c["primary"]]
     print(f"{out / 'report.md'}: {len(primary)} primary comparisons, {sum(significant(c) for c in primary)}"

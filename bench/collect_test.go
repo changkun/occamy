@@ -5,6 +5,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -25,7 +26,8 @@ func testSeries() []series {
 	return allSeries(endpoints{}, display{})
 }
 
-// The harness knows every series, each serving its protocols.
+// The harness knows every series, each serving its protocols from a
+// server of the stack.
 func TestAllSeries(t *testing.T) {
 	want := map[string][]string{
 		"occamy": nil, "guacd": nil,
@@ -36,9 +38,16 @@ func TestAllSeries(t *testing.T) {
 	if len(all) != len(want) {
 		t.Errorf("%d series, want %d", len(all), len(want))
 	}
+	servers := map[string]string{
+		"occamy": "occamy:5636", "guacd": "guacd:4822", "v1-guacd-gfx": "occamy-v1-gfx:5637",
+	}
 	for _, s := range all {
 		if protos, ok := want[s.Name]; !ok || !slices.Equal(s.protocols, protos) {
 			t.Errorf("series %s serves %v, want %v", s.Name, s.protocols, protos)
+		}
+		server := cmp.Or(servers[s.Name], "occamy-v1:5637")
+		if got := fmt.Sprintf("%s:%d", s.server, s.port); got != server {
+			t.Errorf("series %s is served by %s, want %s", s.Name, got, server)
 		}
 	}
 }
@@ -150,6 +159,52 @@ func TestRealtime1Plan(t *testing.T) {
 	}
 }
 
+// Step 2's plan measures v1-native and guacd on the keys of T1, G2 and
+// G5 under N1 and N2, each with none, 0.5% and 2% loss, every block on a
+// link in the kernel.
+func TestRealtime2Plan(t *testing.T) {
+	f, err := readPlanFile("plans/realtime-2.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.Runs != 6 || f.Keys != 100 || f.Connects == nil || *f.Connects != 0 || f.MaxLoad != 8 || f.LoadWait != 2*time.Hour {
+		t.Errorf("runs %d, keys %d, connects %v, max_load %g, load_wait %v; want 6, 100, 0, 8 and 2h",
+			f.Runs, f.Keys, f.Connects, f.MaxLoad, f.LoadWait)
+	}
+	blocks, err := studyBlocks(f, testSeries())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cells := map[string]bool{}
+	results := 0
+	for _, b := range blocks {
+		if !b.kernel || b.connect || b.study != "loss" {
+			t.Errorf("%s: kernel %v, connect %v; want a loss study's block in the kernel without G7", b, b.kernel, b.connect)
+		}
+		if want := fmt.Sprintf("loss=%g%%", b.net.Loss); b.factor != want {
+			t.Errorf("%s: factor %q, want %q", b, b.factor, want)
+		}
+		results += b.results()
+		for _, sc := range b.scenarios {
+			cells[fmt.Sprintf("%s %s %s %s %s", b.series.Name, sc.ID, sc.Protocol, b.net.Name, b.factor)] = true
+		}
+	}
+	if results*f.Runs != 360 || len(cells) != 60 {
+		t.Errorf("%d results a run in %d cells, want 60 and 360 in all", results, len(cells))
+	}
+	for _, s := range []string{"v1-native", "guacd"} {
+		for _, net := range []string{"N1", "N2"} {
+			for _, loss := range []string{"0", "0.5", "2"} {
+				for _, cell := range []string{"T1 ssh", "G2 vnc", "G2 rdp", "G5 vnc", "G5 rdp"} {
+					if !cells[fmt.Sprintf("%s %s %s loss=%s%%", s, cell, net, loss)] {
+						t.Errorf("no %s for %s under %s with %s%% loss", cell, s, net, loss)
+					}
+				}
+			}
+		}
+	}
+}
+
 // A plan's keys and connects set how many samples a scenario takes, a
 // tenth of them in a quick run; unset, they are 200 and 20.
 func TestPlanSamples(t *testing.T) {
@@ -168,15 +223,20 @@ func TestPlanSamples(t *testing.T) {
 }
 
 // A plan file with a field the harness does not know, an unknown study,
-// series or network, or a block twice, is refused.
+// series or network, a block twice, or a loss outside a loss study or out
+// of range, is refused.
 func TestPlanFileRefused(t *testing.T) {
 	for name, text := range map[string]string{
-		"field":   "runs: 1\nrun: 2\nstudies: [{study: matrix, series: [guacd], nets: [N0], scenarios: all}]\n",
-		"study":   "runs: 1\nstudies: [{study: soak, series: [guacd], nets: [N0], scenarios: all}]\n",
-		"series":  "runs: 1\nstudies: [{study: matrix, series: [guacamole], nets: [N0], scenarios: all}]\n",
-		"net":     "runs: 1\nstudies: [{study: matrix, series: [guacd], nets: [N9], scenarios: all}]\n",
-		"twice":   "runs: 1\nstudies: [{study: matrix, series: [guacd], nets: [N0, N0], scenarios: all}]\n",
-		"no runs": "studies: [{study: matrix, series: [guacd], nets: [N0], scenarios: all}]\n",
+		"field":       "runs: 1\nrun: 2\nstudies: [{study: matrix, series: [guacd], nets: [N0], scenarios: all}]\n",
+		"study":       "runs: 1\nstudies: [{study: soak, series: [guacd], nets: [N0], scenarios: all}]\n",
+		"series":      "runs: 1\nstudies: [{study: matrix, series: [guacamole], nets: [N0], scenarios: all}]\n",
+		"net":         "runs: 1\nstudies: [{study: matrix, series: [guacd], nets: [N9], scenarios: all}]\n",
+		"twice":       "runs: 1\nstudies: [{study: matrix, series: [guacd], nets: [N0, N0], scenarios: all}]\n",
+		"no runs":     "studies: [{study: matrix, series: [guacd], nets: [N0], scenarios: all}]\n",
+		"matrix loss": "runs: 1\nstudies: [{study: matrix, series: [guacd], nets: [N0], loss: [1], scenarios: all}]\n",
+		"no loss":     "runs: 1\nstudies: [{study: loss, series: [guacd], nets: [N0], scenarios: all}]\n",
+		"all lost":    "runs: 1\nstudies: [{study: loss, series: [guacd], nets: [N0], loss: [100], scenarios: all}]\n",
+		"loss twice":  "runs: 1\nstudies: [{study: loss, series: [guacd], nets: [N0], loss: [1, 1], scenarios: all}]\n",
 	} {
 		file := filepath.Join(t.TempDir(), "plan.yaml")
 		if err := os.WriteFile(file, []byte(text), 0o600); err != nil {

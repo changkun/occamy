@@ -16,6 +16,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -40,6 +41,11 @@ import (
 type series struct {
 	Name   string
 	target string
+	// server is the compose service that the series' client connects to,
+	// and port where it listens inside the stack: where a loss study
+	// emulates the link (plan.shape).
+	server string
+	port   int
 	// open opens a session on proto through the proxy at addr. The
 	// session's start is when the client began to connect.
 	open func(ctx context.Context, addr, proto string) (*session, error)
@@ -62,20 +68,20 @@ type endpoints struct{ occamy, guacd, v1, v1GFX string }
 // frames on d.
 func allSeries(at endpoints, d display) []series {
 	all := []series{
-		{Name: "occamy", target: at.occamy, open: openV0(dialOccamy)},
-		{Name: "guacd", target: at.guacd, open: openV0(dialGuacd)},
+		{Name: "occamy", target: at.occamy, server: "occamy", port: 5636, open: openV0(dialOccamy)},
+		{Name: "guacd", target: at.guacd, server: "guacd", port: 4822, open: openV0(dialGuacd)},
 	}
-	for _, v := range []struct{ name, target string }{
-		{"v1-native", at.v1},
-		{"v1-native-w2", at.v1},
-		{"v1-native-nogfx", at.v1},
-		{"v1-guacd", at.v1},
-		{"v1-guacd-gfx", at.v1GFX},
+	for _, v := range []struct{ name, target, server string }{
+		{"v1-native", at.v1, "occamy-v1"},
+		{"v1-native-w2", at.v1, "occamy-v1"},
+		{"v1-native-nogfx", at.v1, "occamy-v1"},
+		{"v1-guacd", at.v1, "occamy-v1"},
+		{"v1-guacd-gfx", at.v1GFX, "occamy-v1-gfx"},
 	} {
 		conns := v1Connections[v.name]
 		all = append(all, series{
-			Name: v.name, target: v.target, open: openV1(conns, d, v1Windows[v.name]),
-			protocols: slices.Sorted(maps.Keys(conns)),
+			Name: v.name, target: v.target, server: v.server, port: 5637,
+			open: openV1(conns, d, v1Windows[v.name]), protocols: slices.Sorted(maps.Keys(conns)),
 		})
 	}
 	return all
@@ -114,6 +120,7 @@ func main() {
 		maxLoad   = flag.Float64("max-load", 0, "before each result, wait until the host's 1-minute load is below this; 0 does not wait; set, it overrides the plan file's")
 		loadWait  = flag.Duration("load-wait", 2*time.Hour, "how long -max-load waits before the harness saves and exits; set, it overrides the plan file's")
 		debugF    = flag.String("runtime", "", "occamyd debug listeners to read the runtime from, as service=address pairs, such as occamy-v1=localhost:5638")
+		linkImage = flag.String("link-image", "occamy-bench-netem", "the image that emulates a loss study's link in the kernel (docker/bench/netem)")
 	)
 	flag.Parse()
 	log.SetFlags(log.Ltime)
@@ -125,7 +132,7 @@ func main() {
 	}
 	p := plan{
 		quick: *quick, runs: *runs, ackHz: *ackHz, failfast: *failfast,
-		engine: *engine, project: *project, debug: debug,
+		engine: *engine, project: *project, debug: debug, linkImage: *linkImage,
 		maxLoad: *maxLoad, loadWait: *loadWait,
 		save: func(rep *report) error { return writeReport(*out, rep) },
 	}
@@ -154,6 +161,11 @@ func main() {
 		}
 		if !set["load-wait"] {
 			p.loadWait = f.LoadWait
+		}
+		if p.engine == "" || p.engine == "none" {
+			if slices.ContainsFunc(p.blocks, func(b block) bool { return b.kernel }) {
+				log.Fatalf("%s: a loss study emulates the link with the container engine, and -engine is none", *planName)
+			}
 		}
 	} else {
 		chosenSeries, err := chooseSeries(all, strings.Split(*seriesF, ","))
@@ -214,6 +226,9 @@ type plan struct {
 	failfast        bool
 	engine, project string
 	debug           map[string]string // occamyd service: its debug listener
+	// linkImage is the image whose shape emulates a link in the kernel
+	// (docker/bench/netem), for the blocks of a loss study.
+	linkImage string
 	// maxLoad and loadWait are the load gate (waitLoad).
 	maxLoad  float64
 	loadWait time.Duration
@@ -243,6 +258,10 @@ func (p plan) measure(ctx context.Context, prev *report) (report, error) {
 		Plan:       p.record(),
 	}
 	p.runs = rep.Runs
+	// A collection that was stopped may have left a link shaped.
+	if err := p.clearLinks(); err != nil {
+		return rep, err
+	}
 	done := map[blockKey]bool{}
 	if prev != nil {
 		rep.Started, rep.Host = prev.Started, prev.Host
@@ -280,7 +299,20 @@ func (p plan) measure(ctx context.Context, prev *report) (report, error) {
 // that a block's own results raise would otherwise carry into the
 // results after them unchecked.
 func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (stopped bool, err error) {
-	px, err := startProxy(b.series.target, b.net)
+	carried := b.net
+	if b.kernel {
+		if err := p.shape(b.series, &b.net); err != nil {
+			return false, err
+		}
+		defer func() {
+			if err := p.shape(b.series, nil); err != nil {
+				log.Print(err)
+			}
+		}()
+		// The link is the kernel's; the proxy only counts the bytes.
+		carried = netCondition{Name: b.net.Name}
+	}
+	px, err := startProxy(b.series.target, carried)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -314,6 +346,42 @@ func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (
 		}
 	}
 	return false, nil
+}
+
+// shape emulates n in the kernel on the client connections of s's server,
+// with the link image's shape in the server's network namespace, or
+// clears what it emulated there when n is nil.
+func (p plan) shape(s series, n *netCondition) error {
+	args := []string{
+		"run", "--rm", "--network", "container:" + p.project + "-" + s.server + "-1",
+		"--cap-add", "NET_ADMIN", p.linkImage,
+	}
+	if n == nil {
+		args = append(args, "clear")
+	} else {
+		args = append(args, n.shapeArgs(s.port)...)
+	}
+	out, err := exec.Command(p.engine, args...).CombinedOutput() // #nosec G204 -- engine, project and image come from flags
+	if err != nil {
+		return fmt.Errorf("emulating the link on %s: %w: %s", s.server, err, bytes.TrimSpace(out))
+	}
+	return nil
+}
+
+// clearLinks clears the link in the kernel of every server whose series
+// a block of p emulates there.
+func (p plan) clearLinks() error {
+	cleared := map[string]bool{}
+	for _, b := range p.blocks {
+		if !b.kernel || cleared[b.series.server] {
+			continue
+		}
+		cleared[b.series.server] = true
+		if err := p.shape(b.series, nil); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // chooseScenarios returns the scenarios that spec names: comma-separated

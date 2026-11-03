@@ -132,6 +132,47 @@ client offers ([The v1 series](#the-v1-series)), on G5 over VNC and RDP
 under N0, N1 and N2, and on T1, T2 and G2 under N0 and N2, 6 runs of 100
 probe keys, without G7 (`bench/plans/realtime-1.yaml`).
 
+```sh
+make bench-realtime-2
+```
+
+collects step 2, loss, about four hours of measuring, into
+`bench-realtime-2.json`: `v1-native` and `guacd` on T1, and G2 and G5
+over VNC and RDP, under N1 and N2, each with none, 0.5% and 2% of the
+packets to the client lost, 6 runs of 100 probe keys, without G7
+(`bench/plans/realtime-2.yaml`). It is a **loss study**: a proxy carries
+a byte stream, which has no packets to drop, so the study emulates the
+whole link in the kernel instead, with `tc netem` in the network
+namespace of the series' server, which the image `occamy-bench-netem`
+(`docker/bench/netem`) sets up and clears around each block; the target
+builds the image first. Delay, bandwidth and loss act on the one TCP
+connection that loses the packet and waits for it again. On a
+container engine whose port forwarding ends the client's connection,
+as podman's on macOS does, that is the connection inside the engine,
+which the forwarder reads and passes on in order; the proxy, with
+nothing to emulate, only counts the bytes. The link is the proxy's, half
+the RTT each way, the bandwidth and a queue of twice the
+bandwidth-delay product, with these differences:
+
+- **Loss** is random, and on the way to the client only, where the
+  frames are: what a transport without TCP's ordering would save. A
+  key or acknowledgement lost on the way to the server costs a
+  retransmission that such a transport would still pay.
+- **Connections** take a round trip to open, which the proxy does not
+  add; G7, which measures connecting, is not in the plan.
+- **Bytes** are still those the client receives; a retransmitted
+  packet is not counted again.
+- Only the series' own port is shaped, so a server's backends, and
+  occamyd's debug listener, are not. Segmentation offload is off while
+  it shapes, so that a loss drops one packet rather than a whole
+  segment.
+
+Its 0% is the control, measured on the same link in the kernel, not
+the matrix's N1 and N2. `make bench-realtime-2-report` analyses it into
+`docs/benchmarks/realtime/2`, with what each loss added to each metric
+over the same cell without loss, the Hodges–Lehmann estimate of the
+shift with its exact 95% interval, beside the round trip.
+
 ### Analysis
 
 ```sh
@@ -182,7 +223,8 @@ answers each `sync` once the frame is applied, and sends a `nop` every
 - **Networks.** A proxy inside the harness carries every connection. It
   adds half the RTT in each direction and serializes at the bandwidth,
   with a queue of twice the bandwidth-delay product. It does not emulate
-  loss.
+  loss, which a loss study emulates in the kernel instead
+  ([The comparison](#the-comparison)).
 
   | ID | RTT | Bandwidth |
   |----|-----|-----------|

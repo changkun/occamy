@@ -9,17 +9,23 @@ import (
 	"io"
 	"math"
 	"net"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 )
 
 // netCondition is an emulated network: a round-trip time and a bandwidth
-// in each direction.
+// in each direction, and in a loss study the share of packets to the
+// client that it drops.
 type netCondition struct {
 	Name string
 	RTT  time.Duration
 	Mbps float64 // 0 is unlimited
+	// Loss is the percentage of packets to the client dropped at random.
+	// Only a link in the kernel drops any (shapeArgs); the proxy carries
+	// a byte stream, which has no packets.
+	Loss float64
 }
 
 // netConditions are the ladder of specs/008-native-architecture/
@@ -42,10 +48,50 @@ func (n netCondition) slowness() int64 {
 	return int64(math.Ceil(20 / n.Mbps))
 }
 
+// perByte is how long the link takes to serialize a byte, 0 when the
+// bandwidth is unlimited.
+func (n netCondition) perByte() time.Duration {
+	if n.Mbps <= 0 {
+		return 0
+	}
+	return time.Duration(float64(time.Second) * 8 / (n.Mbps * 1e6))
+}
+
+// queueBytes is how many bytes a direction of the link may hold, those it
+// delays included: about twice the bandwidth-delay product, and at least
+// 64 KiB, which is more than one read of the proxy.
+func (n netCondition) queueBytes() int {
+	limit := 64 << 10
+	if perByte := n.perByte(); perByte > 0 {
+		limit = max(limit, int(2*n.RTT/perByte))
+	}
+	return limit
+}
+
+// mtu is the size of the packets a link in the kernel queues.
+const mtu = 1500
+
+// shapeArgs returns the arguments of the link image's shape
+// (docker/bench/netem/shape.sh) that emulate n in the kernel on the
+// client connections to port: half the RTT each way in microseconds, the
+// bandwidth in kbit/s, the loss in percent, and the proxy's queue in
+// packets of the MTU.
+func (n netCondition) shapeArgs(port int) []string {
+	return []string{
+		strconv.Itoa(port),
+		strconv.FormatInt((n.RTT / 2).Microseconds(), 10),
+		strconv.FormatInt(int64(math.Round(n.Mbps*1000)), 10),
+		strconv.FormatFloat(n.Loss, 'f', -1, 64),
+		strconv.Itoa((n.queueBytes() + mtu - 1) / mtu),
+	}
+}
+
 // proxy forwards TCP connections to a target through an emulated link. It
 // delays each direction by half the RTT and serializes it at the
 // bandwidth, with a bounded queue so that a fast sender meets TCP
-// backpressure, as on a real link. It does not emulate loss.
+// backpressure, as on a real link. It does not emulate loss: a loss
+// study emulates the whole link in the kernel instead (shapeArgs), and its
+// proxy only counts the bytes.
 type proxy struct {
 	ln     net.Listener
 	target string
@@ -148,17 +194,8 @@ func (b *budget) close() {
 // link copies src to dst through one direction of the emulated link.
 func (p *proxy) link(dst, src net.Conn, count *atomic.Int64) {
 	delay := p.cond.RTT / 2
-	var perByte time.Duration
-	if p.cond.Mbps > 0 {
-		perByte = time.Duration(float64(time.Second) * 8 / (p.cond.Mbps * 1e6))
-	}
-	// The queue holds about twice the bandwidth-delay product, and at
-	// least 64 KiB, which is more than one read.
-	limit := 64 << 10
-	if perByte > 0 {
-		limit = max(limit, int(2*p.cond.RTT/perByte))
-	}
-	free := newBudget(limit)
+	perByte := p.cond.perByte()
+	free := newBudget(p.cond.queueBytes())
 	queue := make(chan chunk, 1024)
 
 	go func() {
