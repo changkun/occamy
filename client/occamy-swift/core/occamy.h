@@ -24,7 +24,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// A session: a handle the core gives out, valid until occamy_close.
+// A session: a handle the core gives out, valid until occamy_release.
 typedef uintptr_t occamy_session;
 
 // Results.

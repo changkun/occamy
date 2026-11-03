@@ -29,7 +29,7 @@ client:
 .PHONY: client
 
 # The macOS app (client/occamy-swift, specs/010-native-swift-client.md)
-# runs on MACOS_MIN and later. macos-core builds the Go client core's C
+# runs on MACOS_MIN and later. swift-core builds the Go client core's C
 # export layer as liboccamy.a, a universal archive for Apple silicon and
 # Intel, in client/occamy-swift/build/core.
 MACOS_MIN = 26.0
@@ -39,12 +39,12 @@ core-slice = CGO_ENABLED=1 GOOS=darwin GOARCH=$(1) CC="xcrun --sdk macosx clang 
 	CGO_CFLAGS="-O2 -mmacosx-version-min=$(MACOS_MIN)" CGO_LDFLAGS="-mmacosx-version-min=$(MACOS_MIN)" \
 	go build -trimpath -buildmode=c-archive -o $(CORE_DIR)/$(1)/liboccamy.a ./$(SWIFT_DIR)/core
 
-macos-core:
+swift-core:
 	mkdir -p $(CORE_DIR)
 	$(call core-slice,arm64,arm64)
 	$(call core-slice,amd64,x86_64)
 	lipo -create -output $(CORE_DIR)/liboccamy.a $(CORE_DIR)/arm64/liboccamy.a $(CORE_DIR)/amd64/liboccamy.a
-.PHONY: macos-core
+.PHONY: swift-core
 
 build:
 	$(CONTAINER_ENGINE) build --label $(BUILD_LABEL) -t $(IMAGE):$(VERSION) -t $(IMAGE):$(IMAGE_TAG) -f docker/Dockerfile .

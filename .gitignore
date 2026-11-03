@@ -23,7 +23,7 @@
 .vscode
 # occamyd, as make compile builds it
 /occamyd
-# the macOS app's builds (make macos-core, swift build)
+# the macOS app's builds (make swift-core, swift build)
 /client/occamy-swift/build/
 /client/occamy-swift/.build/
 # release builds (goreleaser, scripts/third-party-licenses.sh)
