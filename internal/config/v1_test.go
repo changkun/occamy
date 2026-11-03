@@ -515,6 +515,7 @@ connections:
   - {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {groups: [admins]}}
 `},
 		{"oidc alone signs users in", "version: 1\nauth:\n  signing_key_file: DIR/signing.key\n  oidc: {issuer: 'https://id.example.com', client_id: occamy, redirect_url: 'https://o.example.com/cb'}\n"},
+		{"oidc return urls of a web client and an app", "version: 1\nauth:\n  signing_key_file: DIR/signing.key\n  oidc: {issuer: 'https://id.example.com', client_id: occamy, redirect_url: 'https://o.example.com/cb', return_urls: ['https://o.example.com/static/', 'http://127.0.0.1:5173/', 'de.changkun.occamy:/oidc']}\n"},
 		{"a trusted issuer alone signs users in", "version: 1\nauth:\n  signing_key_file: DIR/signing.key\n  trusted_issuers: [{issuer: gateway, public_key_file: DIR/gateway.pub}]\n"},
 		{"anchors", head + `connections:
   - &base {id: a, protocol: ssh, insecure_ignore_host_key: true, target: a, credentials: {prompt: true}, allow: {groups: [ops]}}
@@ -763,13 +764,19 @@ func TestParseV1Problems(t *testing.T) {
     issuer: https://id.example.com
     client_id: occamy
     redirect_url: https://o.example.com/cb
-    return_urls: ['/app', 'http://o.example.com/', 'https://o.example.com/#/signed-in', 'https://o.example.com/#', 'https://me@o.example.com/']
+    return_urls: ['/app', 'http://o.example.com/', 'https://o.example.com/#/signed-in', 'https://o.example.com/#', 'https://me@o.example.com/', 'occamy:/oidc', 'javascript:alert(1)', 'data:text/html,x', 'file:///tmp/x', 'de.changkun.occamy:/oidc#x', 'de.changkun.occamy://me@oidc']
 `, []want{
 			{"auth.oidc.return_urls[0]", "is not an absolute http or https URL"},
 			{"auth.oidc.return_urls[1]", "needs https; http is accepted only on localhost"},
 			{"auth.oidc.return_urls[2]", "has a fragment"},
 			{"auth.oidc.return_urls[3]", "has a fragment"},
 			{"auth.oidc.return_urls[4]", "has a user name in it"},
+			{"auth.oidc.return_urls[5]", "an app's scheme must be a domain name in reverse"},
+			{"auth.oidc.return_urls[6]", "an app's scheme must be a domain name in reverse"},
+			{"auth.oidc.return_urls[7]", "an app's scheme must be a domain name in reverse"},
+			{"auth.oidc.return_urls[8]", "an app's scheme must be a domain name in reverse"},
+			{"auth.oidc.return_urls[9]", "has a fragment"},
+			{"auth.oidc.return_urls[10]", "has a user name in it"},
 		}},
 		{"oidc known users: groups without groups_claim", `version: 1
 auth:

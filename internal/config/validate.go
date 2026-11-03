@@ -860,14 +860,24 @@ func (c *checker) providerURL(path, s string) {
 }
 
 // returnURL checks a URL that browsers are sent back to after an OIDC
-// sign-in: https except on the loopback interface, with no user name,
-// and no fragment, since occamyd puts the sign-in's code in one.
+// sign-in: https except on the loopback interface, or the scheme of a
+// native app, with no user name, and no fragment, since occamyd puts the
+// sign-in's code in one. An app's scheme must be a domain name in
+// reverse, as RFC 8252 asks: this keeps out the schemes a browser runs or
+// reads itself, such as javascript, data and file. Any app may claim a
+// scheme, but the code is no use without the verifier of the app that
+// started the sign-in.
 func (c *checker) returnURL(path, s string) {
-	if p := SecureURLProblem(s); p != "" {
+	u, err := url.Parse(s)
+	if err == nil && u.Scheme != "" && u.Scheme != "http" && u.Scheme != "https" {
+		if !strings.Contains(u.Scheme, ".") {
+			c.add(path, "%q: an app's scheme must be a domain name in reverse, such as de.changkun.occamy", s)
+			return
+		}
+	} else if p := SecureURLProblem(s); p != "" {
 		c.add(path, "%s", p)
 		return
 	}
-	u, _ := url.Parse(s)
 	switch {
 	case u.User != nil:
 		c.add(path, "%q has a user name in it", s)
