@@ -379,13 +379,12 @@ the transport. 3a goes first; whether 3b, which brings WebTransport,
 comes before 1.0 ([protocol-v1](protocol-v1.md) decision 6) is decided
 on 3a's measurement.
 
+3a and 3b are complements, not alternatives: BBR on TCP removes the
+bound and keeps the wait, and WebTransport through quic-go, whose
+congestion control is CUBIC alone, removes the wait and keeps the bound.
 [Prior art and coverage](#prior-art-and-coverage) has what other
-remote desktops and browsers do, who each option reaches, and the
+remote desktops and browsers do, whom each option reaches, and the
 sources.
-
-So 3a and 3b are complements, not alternatives: BBR on TCP removes the
-bound and keeps the wait, and WebTransport through quic-go removes the
-wait and keeps the bound.
 
 #### Step 3a: The congestion control
 
