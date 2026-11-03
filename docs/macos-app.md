@@ -27,9 +27,10 @@ make swift-dmg    # and a disk image of it beside it
 
 The bundle runs on Apple silicon and Intel, with the hardened runtime.
 Without a Developer ID it is signed ad hoc, so it runs on the Mac that
-built it, while Gatekeeper refuses a copy downloaded on another Mac. To sign it for other
-Macs, name your Developer ID certificate, and to have Apple notarize the
-disk image, the profile that `xcrun notarytool store-credentials` saved:
+built it, while Gatekeeper refuses a copy downloaded on another Mac. To
+sign it for other Macs, name your Developer ID certificate, and to have
+Apple notarize the disk image, the profile that
+`xcrun notarytool store-credentials` saved:
 
 ```sh
 make swift-notarize DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" NOTARY_PROFILE=occamy
