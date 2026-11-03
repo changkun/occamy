@@ -78,14 +78,19 @@ func TestServer(t *testing.T) {
 		if _, err := s.TermInput(ctx, []byte("hi\r")); err != nil {
 			t.Fatal(err)
 		}
-		// The frames are diffs of the screen, which show the echo.
+		// The frames are diffs of the screen, which show the echo. The
+		// first is a snapshot, which already shows it if the terminal
+		// echoed before the server sent its first frame.
 		var out []byte
 		for !bytes.Contains(out, []byte("hi")) {
 			ev, err := s.Next(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if d, ok := ev.(client.TermData); ok {
+			switch d := ev.(type) {
+			case client.TermSnapshot:
+				out = append(out[:0], d.Data...)
+			case client.TermData:
 				out = append(out, d.Data...)
 			}
 		}
