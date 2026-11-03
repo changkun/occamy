@@ -165,6 +165,21 @@ release notes and the configuration reference say to set
 `disable_gfx`. ClearCodec and the bitmap cache remain a v1.0 blocker,
 planned for beta.3.
 
+Two controls existed only through guacd, so they go with it
+(docs/configuration.md lists both as reasons to keep `backend: guacd`):
+
+- **Restricting the clipboard** (guacd's `disable-copy` and
+  `disable-paste`). The native backends send the server's clipboard to
+  every viewer and the owner's and interactive viewers' to the server.
+  A connection key that restricts each direction, enforced by the
+  session core, is small and is planned for beta.2, so that removing
+  guacd removes no security control.
+- **Recording sessions** (guacd's `recording-path`). The native
+  backends record nothing yet. Recording needs a format and a player,
+  which is a larger piece, planned for beta.3; until then occamyd
+  refuses a connection that still sets guacd's recording parameters,
+  rather than serving it unrecorded.
+
 ## Path to pure Go
 
 "Pure Go" means `occamyd` builds with `CGO_ENABLED=0` **and** no protocol
