@@ -49,8 +49,9 @@ Three mechanisms stand between the protocol and that goal today:
    unacknowledged ([protocol-v1](protocol-v1.md) decision 3). On a long
    link the window, not the link, sets how many frames go out.
 2. **TCP delivers in order.** One lost packet holds every later byte of
-   the connection, the frame after an input included, for a round trip or
-   a retransmission timeout.
+   the connection, the frame after an input included, for a round trip,
+   or for two round trips and 200 ms when it was the only packet in
+   flight (step 3a).
 3. **Full-screen motion is encoded tile by tile on the CPU**, at about
    22 ms of server CPU per frame in the essential comparison, more than a
    60 Hz frame allows.
@@ -371,7 +372,8 @@ the bound itself, about 1.22 · MSS / (RTT · √p), below the scene's
 rate, to which a congestion control that reads every loss as congestion
 holds any transport. Each half of the step removes one. 3a needs no
 change to the protocol or the clients, so it goes first, and its
-answer is an input to 3b's transport.
+answer is an input to 3b's transport. 3a's measurement found a third
+cost, the wait for a lone lost packet, which 3c outlines.
 
 The owner on 2026-11-03 had no preference between the two, asked what
 the field does, and said to go ahead, with one fallback kept whatever
@@ -415,7 +417,7 @@ sources.
 
 #### Step 3b: Order-independent tiles over a loss-tolerant transport
 
-Outlined here; specified in full once 3a's numbers exist.
+Outlined here; specified in full when it starts.
 
 - **Versioned tiles.** Each tile update carries the tile's version; the
   client applies it only if it is newer than what it has, so updates may
@@ -432,16 +434,50 @@ Outlined here; specified in full once 3a's numbers exist.
   3a's congestion control, remains the fallback, for networks that block
   UDP and proxies that do not pass WebTransport. On the server, quic-go
   and webtransport-go keep occamyd in pure Go.
-- **Congestion control.** If 3a shows that the bound costs what the
-  pilot suggests, QUIC needs a controller that does not read a random
-  loss as congestion, which quic-go does not offer; how to get one, and
-  how the pacer keeps the cadence even at a lower rate, are part of this
-  step's design. QUIC's probe timeout follows the round trip, where
-  Linux TCP waits at least 200 ms; with 2% loss a key's 99th percentile
-  was 236 to 271 ms at either round trip.
+- **Congestion control.** 3a showed what the bound costs: under N2 with
+  2%, CUBIC let 16 to 18 of the scene's frames a second through, and BBR
+  24 to 28, about the rate without loss. So QUIC needs a controller that does
+  not read a random loss as congestion, which quic-go does not offer;
+  how to get one, and how the pacer keeps the cadence even at a lower
+  rate, are part of this step's design. QUIC's probe timeout is the
+  smoothed round trip, four of its deviations and the peer's largest
+  acknowledgement delay (RFC 9002, section 6.2); Linux TCP's probe for a
+  lone lost packet waits twice the round trip and 200 ms (3a, 3c).
 
 **Measurement.** Step 2's cells over both transports, with 8 runs, so
 that a difference can be significant after Holm's correction.
+
+#### Step 3c: The wait for a lone lost packet
+
+Outlined here; specified in full when it starts. 3a's measurement found
+this cost; 3a does not remove it, and 3b removes it only for clients on
+WebTransport. Like 3a it needs no change to the protocol or the
+clients, so it can go before 3b.
+
+- **Mechanism.** When a lost packet is the only one in flight, no later
+  packet shows its loss, and Linux sends a tail loss probe after twice
+  the smoothed round trip plus the socket's minimum retransmission
+  timeout, 200 ms by default, which allows for a receiver that delays
+  its acknowledgement of a lone segment (`tcp_schedule_loss_probe`).
+  Typing and a key on a still desktop send just such packets: with 2%
+  loss their slowest keys wait three round trips and 200 ms, 264 to
+  274 ms under N1 and 354 to 385 under N2, with BBR as with CUBIC.
+  Since Linux 6.15 an unprivileged process can lower the minimum for a
+  socket, from 2 jiffies to 200 ms (`TCP_RTO_MIN_US`); it also lowers
+  the floor of the retransmission timeout.
+- **Risk.** A receiver that delays its acknowledgement for longer than
+  the new minimum gets a spurious probe, one extra segment, which it
+  acknowledges at once; a spurious timeout costs more. The bench's
+  receiver is gvproxy's user-space stack rather than a browser's
+  operating system, so the measurement counts the probes and spurious
+  timeouts in each namespace without loss as well as with it.
+- **Harness.** A service like `occamy-v1-bbr`, with BBR and a lower
+  `net.ipv4.tcp_rto_min_us`, which is per namespace on the bench host's
+  kernel, beside `v1-native-bbr`.
+- **Kept if** the 99th percentile of T1 and G2 with loss is
+  significantly better, and no cell without loss is significantly
+  worse. Then occamyd sets the minimum on its client connections where
+  the kernel allows it.
 
 ### Step 4: Cadence for watchers
 
@@ -591,7 +627,10 @@ interval, and Guacamole's beside it.
   with 2%; 60.4 and 83.7 [55.1, 159] with 0.5% under N2, 271 and
   407 [304, 471] with 2%. To typing and to a key on a still desktop it
   added at most 5.0 and 12.9 ms at the 95th percentile, but with 2% the
-  99th was 236 to 271 ms at either round trip, against 22 to 59.
+  99th was 263 to 273 ms under N1 in 13 of 18 runs and 354 to 363 under
+  N2 in 8 of 18, against 22 to 59. (These notes first gave 236 to 271
+  at either round trip: medians over runs on either side of the slow
+  keys.)
 - **Decision.** Loss of 2% adds 3 to 8 round trips to a key during
   motion, more than about one, so step 3 is built: 3a first, and
   whether 3b comes before 1.0 is decided on 3a's measurement (Step 3;
@@ -606,10 +645,10 @@ interval, and Guacamole's beside it.
   frames a second out, and 44% and 48% of the scene's frames were
   never shown. That is congestion control reading a random loss as
   congestion, and any transport with a loss-based controller has the
-  same bound; quic-go's is CUBIC, in an internal package. The 99th
-  percentile, the same at 20 and 50 ms, points at a timer: Linux TCP
-  retransmits on a timeout of at least 200 ms, where QUIC's probe
-  timeout follows the round trip (RFC 9002, section 6.2).
+  same bound; quic-go's is CUBIC, in an internal package. The slow keys
+  wait three round trips and 200 ms, Linux's tail loss probe for a lone
+  packet, which step 3a measured; these notes first took it for the
+  retransmission timeout.
 - **Surprises.** gvproxy ends the client's TCP connection on the Mac:
   the servers see 192.168.127.1, not the harness. A `prio` qdisc's
   default priomap sends priority 2 to band 3, so the shaping band would
@@ -626,7 +665,12 @@ interval, and Guacamole's beside it.
 
 ## Implementation notes: step 3a
 
-- **Status.** The harness is built; the measurement is next.
+- **Status.** Measured and kept. Built in #186 (`401193e`) and measured
+  on 2026-11-03 on step 2's image, built from `e56b585`, since the
+  commits between change only the harness:
+  [docs/benchmarks.md](../../docs/benchmarks.md#step-3a-the-congestion-control)
+  and `docs/benchmarks/realtime/3a`. occamyd asking for BBR is the next
+  change.
 - **Built.** The `occamy-v1-bbr` service, behind the compose profile
   `bbr`, with BBR as its namespace's default congestion control and its
   signing key on a tmpfs; the series `v1-native-bbr` and the harness's
@@ -654,10 +698,57 @@ interval, and Guacamole's beside it.
   N2 with 2%: with CUBIC a key showed in 408 ms over VNC and 458 over
   RDP at the 95th percentile, with 13.1 and 19.0 scene frames a second;
   with BBR in 163 and 154 ms, with 28.5 and 25.2.
+- **Measured.** All 480 results, each with its series' congestion
+  control, in 2 h 22 min, 29 of them waiting at the load gate. Key latency
+  at the 95th percentile, BBR against CUBIC, over Holm's correction for
+  30 tests: 5 differences significant, all better, all G5 with loss:
+  2.45x [2.29, 2.65] over VNC and 2.97x [2.78, 3.39] over RDP under N2
+  with 2% (149 ms against 360, 163 against 471), 1.55x and 1.41x under
+  N2 with 0.5%, 1.56x over VNC under N1 with 2%. What 2% adds over no
+  loss, with BBR: 17.3 [10.3, 21.9] and 24.2 [17.7, 47.3] ms under N1,
+  52.2 [43.3, 59.4] and 50.0 [38.7, 53.1] under N2, about a round trip,
+  against 64.5, 55.7, 266 and 359 with CUBIC. Under N2 with 2% the scene
+  keeps 27.6 frames a second over VNC and 24.4 over RDP, against 16.4
+  and 17.6, and the link carries 398 and 346 KiB a second, against 240
+  and 250 (secondary, uncorrected). No cell without loss and no guard
+  is significantly worse; without loss the factors are 0.97 to 1.00.
+  CUBIC's G5 under N2 with 2% repeats step 2's: 360 against 379 over
+  VNC, 471 against 519 over RDP.
+- **Decision.** Kept by the rule set before the run (Step 3a): occamyd
+  asks for BBR on its client connections (`TCP_CONGESTION`) and keeps
+  the kernel's default where it cannot, and the deployment docs say how
+  to load `tcp_bbr`.
+- **Checked after the run.** Typing under N1 with 2% leaned against BBR,
+  30.2 ms [21.6, 85.3] against 21.7 [21.5, 22.0], p 0.038 before the
+  correction and 0.87 after; four of BBR's 8 runs were above 35 ms and
+  none of CUBIC's, at loads from 2.3 to 6.5, so not the host. A
+  diagnostic, three runs of that cell on each series, not a
+  measurement, read each namespace's counters around it: 21.6 ms with
+  BBR against 22.0, about 6.4 segments sent a key on both (1,925 and
+  1,907 for 300 keys), 11 and 13 retransmissions, 3 and 6 loss probes,
+  and no timeout. It did not repeat, and it is not explained.
+- **What it tells 3b.** With BBR, what loss still costs a key during
+  motion is about one round trip at the 95th percentile, the wait
+  behind a lost packet, which 3b's delivery in any order removes; under
+  N2 with 2% that is 149 and 163 ms against 95 and 114 without loss, and
+  the 99th percentile is 170 and 175 against 112 and 125. Step 2's rule
+  built step 3 because loss cost more than about one round trip; it
+  now costs about one. The slowest keys of typing and of a still
+  desktop wait for the tail loss probe, which no congestion control
+  changes (Step 3c).
 - **Surprises.** `comparisons.csv` had two columns named `factor`, the
   study's setting, such as `loss=2%`, and the estimate, so a CSV reader
   kept one of them; the estimate is now `times_better`, and the three
-  reports on disk have the new header.
+  reports on disk have the new header. The 99th percentile of typing
+  and of a still desktop with 2% loss is not a retransmission timeout,
+  as step 2's notes had it: each namespace counted 124 and 164 tail
+  loss probes over the run and 6 and 9 timeouts, and the slow keys take
+  264 to 274 ms under N1 and 354 to 385 under N2, three round trips and
+  200 ms, the probe's wait for a lone packet in Linux
+  (`tcp_schedule_loss_probe`: twice the smoothed round trip, plus the
+  minimum retransmission timeout when one packet is in flight). Step
+  2's "236 to 271 ms at either round trip" was a median over runs on
+  either side of those keys.
 
 ## Affects
 
@@ -667,6 +758,7 @@ interval, and Guacamole's beside it.
   `docs/protocol.md`, `docs/benchmarks.md`.
 - Step 2: `bench/`, `docker/docker-compose.bench.yaml`.
 - Step 3a: `bench/`, `docker/docker-compose.bench.yaml`,
-  `docker/bench/netem`, `.github/workflows/dockerimage.yml`; occamyd's
-  listener if it is kept.
-- Steps 3b to 5 are scoped when they start.
+  `docker/bench/netem`, `.github/workflows/dockerimage.yml`,
+  `docs/benchmarks/realtime/3a`; occamyd's listener and the deployment
+  docs, next.
+- Steps 3b, 3c, 4 and 5 are scoped when they start.

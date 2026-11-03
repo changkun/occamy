@@ -48,7 +48,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   on a service of its own, `occamy-v1-bbr`, which the compose profile
   `bbr` starts on a kernel with BBR loaded, and each result of a loss
   study records its server's congestion control
-  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)).
+  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison);
+  [results](docs/benchmarks.md#step-3a-the-congestion-control)).
 
 ### Changed
 
