@@ -31,10 +31,11 @@ broken out as children.
 The recommendation not to reimplement libguac stands. libguac is shaped
 around Guacamole's drawing-instruction protocol, and a port would carry
 over that protocol's costs (below) without its ecosystem. v1 is a smaller
-core built around two content classes, terminals and pixels. Guacamole is
-kept only as a bridge for protocols that have no native backend yet, as
-an explicit fallback and as the benchmark's baseline, until v1.0 removes
-it.
+core built around two content classes, terminals and pixels. Guacamole
+was kept as a bridge, an explicit fallback and the benchmark's baseline
+through beta.1. From beta.2 occamyd has none of it, and guacd remains
+only as the benchmark's baseline (the owner, 2026-11-03; v1.0.0-beta.2
+scope).
 
 ## Versioning
 
@@ -47,7 +48,9 @@ it.
   v1 changes are additive and negotiated through capabilities. The module
   path stays `changkun.de/x/occamy` (no `/v2` suffix needed for v1).
 - What happens to the v0 routes is decided in
-  [api-and-server-stack](008-native-architecture/api-and-server-stack.md).
+  [api-and-server-stack](008-native-architecture/api-and-server-stack.md):
+  kept behind `legacy_v0` through beta.1, and removed in beta.2 with the
+  Guacamole protocol they serve (the owner, 2026-11-03).
 
 ## v1 beta scope
 
@@ -76,17 +79,23 @@ In scope:
    telnet, which gets no native backend, goes through guacd until guacd
    is removed. Where a native backend exists it is the default,
    and guacd serves that protocol only with an explicit `backend: guacd`.
+   (2026-11-03: beta.2 removes the fallback and telnet; see
+   v1.0.0-beta.2 scope.)
 9. Clients: the web client on protocol v1 ([009](009-react-web-client.md))
    and the Go client core, which the end-to-end tests and the Swift client
    ([010](010-native-swift-client.md)) build on. The Swift client is a
-   preview by rc.1 and does not gate beta.1.
+   preview by rc.1 and does not gate beta.1. (2026-11-03: it is part of
+   beta.2; see v1.0.0-beta.2 scope.)
 
-Out of scope for beta: video encoding (H.264 and similar), audio, file
+Out of scope for beta.1: video encoding (H.264 and similar), audio, file
 transfer and SFTP, a recording player, WebTransport, native RDP beyond
 its registration (GFX and Windows), and multi-node deployment.
 WebTransport and a video path for motion are steps of the
 [real-time transport](008-native-architecture/realtime-transport.md),
 which gate no release and land in the next once measured and kept.
+(2026-11-03: native RDP's GFX shipped in beta.1; session recording with
+a player, WebTransport and the video path are planned for beta.3; see
+v1.0.0-beta.2 scope.)
 
 Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
 
@@ -115,6 +124,64 @@ Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
   every GFX PDU charged, including those applied that do little, and
   every frame the client reads, whatever it does with it.
 - `docs/protocol.md` and the API reference are complete.
+
+## v1.0.0-beta.2 scope
+
+The owner's plan of 2026-11-03, with the owner's answers the same day:
+
+1. **No guacd in the product.** occamyd drops the guacd bridge
+   (`backend: guacd` and `internal/backend/guacd`), the v0 routes with
+   the Guacamole protocol they serve, and telnet, which has no native
+   backend and which nobody uses. The demo stack loses its guacd
+   service. guacd stays only in the benchmark, for the `guacd` series:
+   Guacamole's protocol straight from guacd, against Occamy's native
+   series. Telnet is not benchmarked. This supersedes the rule of
+   2026-10-31 that deleted a protocol's guacd path only once the
+   benchmark showed native 10x better; the 10x rule remains the target
+   of the stable release (Path to pure Go).
+2. **The real-time work measured and kept so far ships, the rest waits
+   for beta.3.** In beta.2: the frame window from the path and BBR
+   ([realtime-transport](008-native-architecture/realtime-transport.md),
+   steps 1 and 3a), the cheaper classification of moving tiles and the
+   scaled codec for tiles in motion
+   ([graphics-pipeline](008-native-architecture/graphics-pipeline.md)).
+   In beta.3: steps 3b (versioned tiles over WebTransport), 3c (the wait
+   for a lone lost packet), 4 (cadence for watchers) and 5 (a video
+   path), prediction below the round trip, and a scale factor that
+   adapts. The essential comparison
+   ([comparison-benchmark](008-native-architecture/comparison-benchmark.md))
+   runs again on the beta.2 image, `guacd` against `v1-native`, and its
+   numbers are the release's.
+3. **A macOS app** ([010](010-native-swift-client.md)): as simple as
+   VNC Viewer, in the style of macOS 26. It is signed and notarized with
+   the owner's Apple developer account once it is ready.
+
+What removing the fallback costs, judged here rather than by the owner:
+native RDP has not met a real Windows host (#32). On a Windows Server
+2025 CI runner its graphics pipeline left the screen nearly black,
+since every bitmap came as ClearCodec, which it does not decode yet, so
+Windows hosts need `disable_gfx: true`, with which the whole desktop
+drew correctly; the clipboard failed both ways there
+([native-rdp-backend](008-native-architecture/native-rdp-backend.md)).
+In beta.1 a Windows host could fall back to guacd; in beta.2 the
+release notes and the configuration reference say to set
+`disable_gfx`. ClearCodec and the bitmap cache remain a v1.0 blocker,
+planned for beta.3.
+
+Two controls existed only through guacd, so they go with it
+(docs/configuration.md lists both as reasons to keep `backend: guacd`):
+
+- **Restricting the clipboard** (guacd's `disable-copy` and
+  `disable-paste`). The native backends send the server's clipboard to
+  every viewer and the owner's and interactive viewers' to the server.
+  A connection key that restricts each direction, enforced by the
+  session core, is small and is planned for beta.2, so that removing
+  guacd removes no security control.
+- **Recording sessions** (guacd's `recording-path`). The native
+  backends record nothing yet. Recording needs a format and a player,
+  which is a larger piece, planned for beta.3; until then occamyd
+  refuses a connection that still sets guacd's recording parameters,
+  rather than serving it unrecorded.
 
 ## Path to pure Go
 
@@ -150,17 +217,23 @@ fallback for any protocol still short of 10x; release candidates may
 still carry one ([benchmark](008-native-architecture/benchmark.md),
 Targets).
 
+The owner's plan of 2026-11-03 removes guacd from occamyd in beta.2,
+for every protocol and whatever the benchmark shows, and telnet with
+it; guacd remains the benchmark's baseline. The 10x rule stays as the
+target of the stable release: v1.0 waits until the benchmark shows
+native at least 10x better than the guacd baseline on each scenario's
+primary metric, or a miss is justified by a bound Occamy does not
+control ([benchmark](008-native-architecture/benchmark.md), Targets).
+
 | Milestone | Delivers | guacd needed for |
 |-----------|----------|------------------|
 | v0.5.0 ([005](005-upstream-guacamole.md), released 2026-10-29) | `occamyd` without cgo; everything through guacd | VNC, SSH, RDP |
-| v1.0.0-beta.1 | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, native VNC as vnc's default, native RDP as rdp's default (not yet checked against Windows), web client on v1 | VNC and RDP only with `backend: guacd` |
-| v1.0.0-beta.2 | Native VNC through the parity gate: VNC's guacd fallback deleted once the benchmark shows native at least 10x better | RDP only with `backend: guacd` |
-| v1.0.0-rc.1 | API and protocol frozen; native RDP with GFX; the Windows check runs once a host is available (#32), as [rdp-strategy](008-native-architecture/rdp-strategy.md) decision 5 says; Swift client preview | nothing by default; any fallback still short of the gate |
-| v1.0.0 | No guacd and no Guacamole protocol, so no telnet; the v0 routes are removed | nothing |
+| v1.0.0-beta.1 (released 2026-11-02) | API v1, protocol v1, session core, graphics pipeline, guacd bridge, native SSH, native VNC as vnc's default, native RDP as rdp's default (not yet checked against Windows), web client on v1 | VNC and RDP only with `backend: guacd`; telnet |
+| v1.0.0-beta.2 | No guacd, no Guacamole protocol, no v0 routes and no telnet in occamyd; real-time steps 1 and 3a and the scaled codec; the essential comparison on its image; the macOS app ([010](010-native-swift-client.md)) | nothing: guacd is the benchmark's baseline only |
+| v1.0.0-beta.3 | Real-time steps 3b, 3c, 4 and 5; native RDP's ClearCodec and bitmap cache | nothing |
+| v1.0.0-rc.1 | API and protocol frozen; the Windows check runs once a host is available (#32), as [rdp-strategy](008-native-architecture/rdp-strategy.md) decision 5 says | nothing |
+| v1.0.0 | The benchmark shows native at least 10x better than the guacd baseline on each scenario's primary metric, or a justified miss | nothing |
 | v1.x | Kerberos, audio and the rest of RDP's later scope per [rdp-strategy](008-native-architecture/rdp-strategy.md) | nothing |
-
-The last column leaves out telnet, which needs guacd for as long as
-guacd is there.
 
 The client side is a separate matter. The Swift app links the Go client
 core through cgo's `c-archive` export ([010](010-native-swift-client.md)).

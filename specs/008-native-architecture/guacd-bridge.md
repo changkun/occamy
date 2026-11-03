@@ -11,12 +11,21 @@ affects:
   - internal/guacd/
 effort: large
 created: 2026-10-29
-updated: 2026-11-01
+updated: 2026-11-03
 author: Changkun Ou
 dispatched_task_id: null
 ---
 
 # guacd bridge and the path to pure Go
+
+**Superseded for the product on 2026-11-03.** The owner's plan for
+beta.2 removes the bridge, `backend: guacd`, the v0 routes and telnet
+from occamyd, whatever the benchmark shows, and keeps guacd only as the
+benchmark's baseline, the `guacd` series
+([008](../008-native-architecture.md), v1.0.0-beta.2 scope). The
+deletion gate below no longer decides when a guacd path goes; its 10x
+condition remains the target of v1.0, measured against that baseline.
+What follows records the bridge as built through beta.1.
 
 ## Design Problem
 

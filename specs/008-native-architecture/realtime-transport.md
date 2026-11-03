@@ -239,6 +239,11 @@ is measured and kept, in a beta, in the release candidate, or after the
 candidate freezes the protocol, whose later changes are additive
 ([008](../008-native-architecture.md), versioning).
 
+The owner's plan for beta.2 (2026-11-03) ships what is measured and
+kept by then, steps 1 and 3a, and moves the unfinished steps, 3b, 3c, 4
+and 5, and prediction below the round trip, to beta.3
+([008](../008-native-architecture.md), v1.0.0-beta.2 scope).
+
 ### Step 1: The window from the path; acknowledgements as feedback
 
 **Protocol.** `frame_window` stays the hard bound that clients enforce
