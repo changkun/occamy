@@ -34,12 +34,6 @@ struct MainView: View {
                 }
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 220)
-            .toolbar {
-                ToolbarItem {
-                    Button("Add Server", systemImage: "plus") { store.signingIn = .init() }
-                        .help("Add an occamyd server")
-                }
-            }
         } detail: {
             if let server = store.server(store.selection) {
                 ConnectionsView(server: server, query: query) { open($0, on: server) }
@@ -51,6 +45,16 @@ struct MainView: View {
                 } actions: {
                     Button("Add Server…") { store.signingIn = .init() }
                 }
+            }
+        }
+        // In the window's toolbar, as remote desktop clients have it, not
+        // in the sidebar's: beside the window's buttons that one has room
+        // for little, and once the sidebar had been hidden and shown it
+        // moved the button into an overflow menu.
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button("Add Server", systemImage: "plus") { store.signingIn = .init() }
+                    .help("Add an occamyd server")
             }
         }
         .searchable(text: $query, placement: .toolbar, prompt: "Search or enter an address")
@@ -204,20 +208,24 @@ struct ConnectionCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            ZStack {
-                Rectangle().fill(.quaternary)
-                if let image {
-                    Image(nsImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                } else {
-                    Image(systemName: symbol(connection.protocol))
-                        .font(.system(size: 40, weight: .light))
-                        .foregroundStyle(.secondary)
+            // The frame sets the card's size and the picture only fills
+            // it, whole, so that every card in a row is as tall whatever
+            // the shape of its remote's screen.
+            Rectangle()
+                .fill(.quaternary)
+                .aspectRatio(16 / 10, contentMode: .fit)
+                .overlay {
+                    if let image {
+                        Image(nsImage: image)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                    } else {
+                        Image(systemName: symbol(connection.protocol))
+                            .font(.system(size: 40, weight: .light))
+                            .foregroundStyle(.secondary)
+                    }
                 }
-            }
-            .aspectRatio(16 / 10, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .strokeBorder(selected ? Color.accentColor : Color.secondary.opacity(0.2), lineWidth: selected ? 3 : 1)

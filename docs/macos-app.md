@@ -38,7 +38,8 @@ make swift-notarize DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" 
 
 ## Adding a server
 
-Choose **File > Add Server…** (⌘N) and enter the server's address, such
+Choose **File > Add Server…** (⌘N), or **+** in the toolbar, and enter
+the server's address, such
 as `occamy.example.com`, which the app reaches over https unless the
 address says `http://`, and your user name and password. The demo stack
 of [Try Occamy](try-it.md) is `http://localhost:5637`, with the user

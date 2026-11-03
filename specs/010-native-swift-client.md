@@ -459,6 +459,15 @@ For beta.2 (2026-11-03):
     `ssh-keyscan` line or a `SHA256:` fingerprint. A card's thumbnail is
     the session's last picture, saved under
     `~/Library/Application Support/Occamy/Thumbnails`.
+  - Add Server is a + in the window's toolbar, beside Refresh and the
+    search field, as remote desktop clients such as Microsoft's Windows
+    App have it, and in the File menu (⌘N). In the sidebar's toolbar,
+    beside the window's buttons, SwiftUI moved it into an overflow menu
+    once the sidebar had been hidden and shown again, and the owner
+    rejected it at the sidebar's foot (2026-11-04).
+  - A card's picture is the remote's whole screen, fitted into a 16:10
+    frame that sets the card's size, so that every card in a row is as
+    tall.
   - Tokens, and passwords the user chooses to remember, go to the login
     keychain under `de.changkun.occamy`. occamyd's tokens last 15
     minutes and are not renewed, so with a remembered password the app
