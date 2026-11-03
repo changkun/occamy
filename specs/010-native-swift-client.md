@@ -125,6 +125,21 @@ Rules:
   and `CGO_CFLAGS` pointing at the matching Xcode SDK through `xcrun`.
 - A `make swift-core` target builds the slices and the package input
   described under Options.
+- As built for beta.2: `make swift-app` builds the `Occamy` product in
+  release for arm64 and x86_64, one `swift build --triple` each, since
+  two `--arch` flags take Xcode's build system, which cannot find
+  SwiftTerm's build plugin; merges them with `lipo` into
+  `build/app/Occamy.app` with `App/Info.plist` (bundle ID
+  `de.changkun.occamy`, the version from `git describe`, macOS 26 the
+  oldest); and signs it with the hardened runtime and no entitlements
+  (`App/Occamy.entitlements`): neither the Go runtime nor SwiftTerm
+  needs an exception. The signature is `DEVELOPER_ID`'s, or ad hoc.
+  `make swift-dmg` puts the bundle in a disk image with a link to
+  Applications, signed with `DEVELOPER_ID` too, and `make
+  swift-notarize`, which refuses to run without `DEVELOPER_ID` and
+  `NOTARY_PROFILE`, submits the image with `xcrun notarytool`, staples
+  the ticket and checks it with `spctl`. The app is not sandboxed: a DMG
+  needs no sandbox.
 
 ### OccamyKit (Swift)
 
@@ -274,9 +289,10 @@ Open:
 ## Acceptance Criteria
 
 - [x] Linking option and first platforms chosen.
-- [ ] `OccamyKit` opens a terminal session and a graphical session
-      against the v1 stack.
-- [ ] CI builds the core archive and the Swift package on macOS.
+- [x] `OccamyKit` opens a terminal session and a graphical session
+      against the v1 stack (2026-11-03, against the demo stack; see
+      Implementation notes: OccamyApp).
+- [x] CI builds the core archive and the Swift package on macOS.
 
 For beta.2 (2026-11-03):
 
@@ -288,8 +304,10 @@ For beta.2 (2026-11-03):
 - [ ] A session window scales, goes full screen, carries the
       clipboard both ways, copies a share link, and answers prompts.
 - [ ] `make` builds the app, and with the owner's Developer ID a
-      notarized DMG.
-- [ ] CI builds the archive, the package and the app, unsigned.
+      notarized DMG. (`make swift-app` and `make swift-dmg` build them,
+      signed ad hoc; notarizing waits for the owner's Developer ID.)
+- [x] CI builds the archive, the package and the app, signed ad hoc,
+      and checks the app's architectures and its oldest macOS.
 
 ## Implementation notes: C export layer
 

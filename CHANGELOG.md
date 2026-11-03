@@ -16,6 +16,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   picture of each, opens ad-hoc addresses such as `vnc://host:5901`, and
   gives each session a window that scales, goes full screen, shares the
   clipboard and copies a share link ([docs/macos-app.md](docs/macos-app.md)).
+  `make swift-app` builds it as a universal `Occamy.app` with the
+  hardened runtime, `make swift-dmg` a disk image of it, and
+  `make swift-notarize` signs both with a Developer ID and has Apple
+  notarize the image
+  ([docs/macos-app.md](docs/macos-app.md#building-it)).
 - `make swift-core` builds the Go client core as `liboccamy.a`, a C
   archive for Apple silicon and Intel with its interface in `occamy.h`,
   which the macOS app links
