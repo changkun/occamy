@@ -648,16 +648,22 @@ func TestDebugListener(t *testing.T) {
 	if !strings.Contains(string(r.body), `"memstats"`) {
 		t.Errorf("/debug/vars: %.200s", r.body)
 	}
-	// occamyd's own: goroutines, and open files where it can count them.
+	// occamyd's own: goroutines, open files where it can count them, and
+	// the congestion control of the public listener's connections where
+	// it can tell.
 	var vars struct {
-		Goroutines *int `json:"goroutines"`
-		FDs        *int `json:"fds"`
+		Goroutines    *int    `json:"goroutines"`
+		FDs           *int    `json:"fds"`
+		TCPCongestion *string `json:"tcp_congestion"`
 	}
-	if err := json.Unmarshal(r.body, &vars); err != nil || vars.Goroutines == nil || vars.FDs == nil {
-		t.Fatalf("/debug/vars without goroutines and fds (%v): %.200s", err, r.body)
+	if err := json.Unmarshal(r.body, &vars); err != nil || vars.Goroutines == nil || vars.FDs == nil || vars.TCPCongestion == nil {
+		t.Fatalf("/debug/vars without goroutines, fds and tcp_congestion (%v): %.200s", err, r.body)
 	}
 	if *vars.Goroutines < 1 {
 		t.Errorf("goroutines = %d", *vars.Goroutines)
+	}
+	if got := *vars.TCPCongestion; (got != "") != (runtime.GOOS == "linux") {
+		t.Errorf("tcp_congestion = %q on %s", got, runtime.GOOS)
 	}
 	switch runtime.GOOS {
 	case "linux", "darwin":

@@ -5,6 +5,7 @@
 package server
 
 import (
+	"cmp"
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
@@ -167,9 +168,12 @@ func (s *server) shutdown() { s.stop() }
 // left the address empty, it says so, so that a misspelt or unexported
 // variable does not pass for a listener that is off on purpose.
 func listen(f *config.File) (ln, dln net.Listener, err error) {
-	if ln, err = net.Listen("tcp", f.Listen); err != nil {
+	cc := cmp.Or(f.CongestionControl, config.DefaultCongestionControl)
+	ln, c, err := listenTCP(f.Listen, cc)
+	if err != nil {
 		return nil, nil, err
 	}
+	c.report(cc)
 	if f.Debug.Address == "" {
 		if f.Debug.AddressFrom != "" {
 			// #nosec G706 -- the operator's configuration, not a client's input.
@@ -442,12 +446,15 @@ func debugMux() *routeMux {
 }
 
 // publishVars adds occamyd's own variables to expvar's, once:
-// goroutines, the number of goroutines, and fds, the open file
-// descriptors, or -1 where occamyd cannot count them. The soak test
-// watches them for growth (tests/soak_test.go).
+// goroutines, the number of goroutines, fds, the open file descriptors,
+// or -1 where occamyd cannot count them, and tcp_congestion, the
+// congestion control of the public listener's connections, or empty
+// where occamyd cannot tell. The soak test watches goroutines and fds
+// for growth (tests/soak_test.go).
 var publishVars = sync.OnceFunc(func() {
 	expvar.Publish("goroutines", expvar.Func(func() any { return runtime.NumGoroutine() }))
 	expvar.Publish("fds", expvar.Func(func() any { return openFiles() }))
+	expvar.Publish("tcp_congestion", &tcpCongestion)
 })
 
 // openFiles counts the process's open file descriptors in /proc/self/fd

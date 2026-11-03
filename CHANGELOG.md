@@ -43,11 +43,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   ([results](docs/benchmarks.md#step-2-what-loss-costs)), and the
   analysis says when the runs are too few for any difference to be
   significant after Holm's correction.
-- `make bench-realtime-3a` measures step 2's loss study with the server's
-  TCP on BBR beside the kernel's default, CUBIC: a `v1-native-bbr` series
-  on a service of its own, `occamy-v1-bbr`, which the compose profile
-  `bbr` starts on a kernel with BBR loaded, and each result of a loss
-  study records its server's congestion control
+- `make bench-realtime-3a` measures step 2's loss study with occamyd's
+  TCP on BBR beside CUBIC: a `v1-native-cubic` series on a service of its
+  own, `occamy-v1-cubic`, whose server asks for CUBIC, and each v1 result
+  read with `-runtime` records the congestion control its server's
+  connections use
   ([docs/benchmarks.md](docs/benchmarks.md#the-comparison);
   [results](docs/benchmarks.md#step-3a-the-congestion-control)).
 
@@ -72,6 +72,17 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   frames a second instead of about 19, and a key's effect in 96 ms
   instead of 119 at the 95th percentile
   ([docs/benchmarks.md](docs/benchmarks.md#step-1-the-frame-window-from-the-path)).
+- On Linux, occamyd asks for BBR as the TCP congestion control of its
+  connections, in place of the kernel's usual default, CUBIC, which
+  takes every lost packet for congestion and slows down. Over VNC with
+  50 ms of delay and 2% of the packets lost, full-screen motion now shows
+  27.6 frames a second instead of 16.4, and a key's effect in 149 ms
+  instead of 360 at the 95th percentile
+  ([docs/benchmarks.md](docs/benchmarks.md#step-3a-the-congestion-control)).
+  BBR needs the kernel's `tcp_bbr` module; without it occamyd keeps the
+  kernel's choice and logs a warning. `congestion_control` in the v1 file
+  names another, or `system` for the kernel's own
+  ([docs/configuration.md](docs/configuration.md#tcp-congestion-control)).
 
 ## [1.0.0-beta.1] - 2026-11-02
 

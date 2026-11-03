@@ -75,6 +75,7 @@ for that stack alone.
 |-----|---------|---------|
 | `version` | required | `1` |
 | `listen` | `:5636` | Address of the public listener, `host:port`: the API, the streams and `/healthz` |
+| `congestion_control` | `bbr` | The TCP congestion control of the public listener's connections, on Linux: a name the kernel knows, such as `bbr` or `cubic`, or `system` for the kernel's own choice. Where the kernel refuses it, `occamyd` keeps the kernel's choice and warns at start. Elsewhere it has no effect. See [TCP congestion control](#tcp-congestion-control) |
 | `tls.cert`, `tls.key` | unset | Certificate and key files, PEM. `occamyd` terminates TLS when both are set; set both or neither. Without them, put a reverse proxy that terminates TLS in front. Read at start, so a renewed certificate needs a restart |
 | `debug.address` | unset (off) | Address of the debug listener: expvar at `/debug/vars` and pprof under `/debug/pprof/`, without authentication. It needs a port of its own: not `listen`'s port on the same host, nor on `localhost` beside `127.0.0.1` or `::1`, nor beside a wildcard host (`:5636`, `0.0.0.0`, `::`), which takes every address. Keep it on the loopback interface; `occamyd` warns at start when it is not |
 | `debug.address_env` | unset | An environment variable holding the debug listener's address, in place of `debug.address`; at most one of the two. The listener stays off while the variable is unset or empty, so that one file serves with the listener and without, and `occamyd` then logs `debug listener off:` with the variable's name at start, so that a misspelt or unexported variable shows. The address is checked as `debug.address` is |
@@ -862,6 +863,8 @@ that:
   parse;
 - `debug.address` does not share a port with `listen` (see the table
   above);
+- `congestion_control` is a name of at most 15 lower-case letters,
+  digits and underscores, as Linux's are;
 - connection IDs, user names and issuer names are unique, and no trusted
   issuer is named `occamy`;
 - each connection's `backend`, and each of `adhoc_backends`, serves its
@@ -939,6 +942,33 @@ warning, and exits with status 0. A
 second SIGINT or SIGTERM in those seconds ends it at once. If the signing key file
 does not exist, `occamyd` creates it and warns: tokens signed with an
 earlier key no longer verify.
+
+### TCP congestion control
+
+On Linux, `occamyd` asks for `congestion_control`, BBR by default, on
+its public listener, and the connections it accepts inherit it. BBR
+sends at the rate it measures the path to carry, where the kernel's
+usual default, CUBIC, cuts its rate at every lost packet. On a link
+that loses packets at random, such as Wi-Fi or a long mobile path, a
+desktop in motion then keeps its frame rate, and a key's effect shows
+sooner ([benchmarks](benchmarks.md#step-3a-the-congestion-control)).
+
+The kernel needs BBR's module loaded. `occamyd` needs no privilege to
+use it then, and in a container it is the host's kernel, or the
+node's, that loads it:
+
+```sh
+sudo modprobe tcp_bbr
+echo tcp_bbr | sudo tee /etc/modules-load.d/tcp_bbr.conf # at every boot
+```
+
+At start `occamyd` logs the congestion control its connections use,
+such as `TCP congestion control: bbr`, and publishes it as
+`tcp_congestion` at `/debug/vars`. If the module is not loaded, it says
+so in a warning and keeps the kernel's choice. `congestion_control:
+system` keeps the kernel's choice without asking, for a host whose
+operator set it, and any other name the kernel allows asks for that
+one.
 
 ## v0 files
 

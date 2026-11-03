@@ -25,9 +25,14 @@ import (
 // Defaults filled in by ParseV1.
 const (
 	DefaultListen              = ":5636"
+	DefaultCongestionControl   = "bbr"
 	DefaultAccessTokenLifetime = 15 * time.Minute
 	DefaultOIDCSubjectClaim    = "sub"
 )
+
+// CongestionSystem, as congestion_control, keeps the kernel's choice of
+// TCP congestion control.
+const CongestionSystem = "system"
 
 // Default limits, filled in by ParseV1 and by Limits.WithDefaults.
 const (
@@ -69,6 +74,12 @@ type File struct {
 	// WebClient is the directory of the built web client, which occamyd
 	// serves under /static/; empty serves none.
 	WebClient string `yaml:"web_client"`
+	// CongestionControl is the TCP congestion control that occamyd asks
+	// for on the public listener, whose connections inherit it, on Linux:
+	// a name the kernel knows, such as bbr or cubic, or CongestionSystem
+	// for the kernel's own choice. ParseV1 fills in
+	// DefaultCongestionControl.
+	CongestionControl string `yaml:"congestion_control"`
 }
 
 // The backends that serve a connection's sessions.

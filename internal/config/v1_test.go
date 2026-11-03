@@ -194,11 +194,12 @@ func TestParseV1Example(t *testing.T) {
 	path := func(name string) string { return filepath.Join(dir, name) }
 	yes := true
 	want := &config.File{
-		Version: 1,
-		Listen:  "0.0.0.0:5636",
-		TLS:     config.TLS{Cert: path("etc/occamy/tls.crt"), Key: path("etc/occamy/tls.key")},
-		Debug:   config.Debug{Address: "localhost:6060"},
-		Origins: []string{"https://occamy.example.com"},
+		Version:           1,
+		Listen:            "0.0.0.0:5636",
+		CongestionControl: "bbr",
+		TLS:               config.TLS{Cert: path("etc/occamy/tls.crt"), Key: path("etc/occamy/tls.key")},
+		Debug:             config.Debug{Address: "localhost:6060"},
+		Origins:           []string{"https://occamy.example.com"},
 		Auth: config.Auth{
 			SigningKeyFile:      path("var/lib/occamy/signing.key"),
 			AccessTokenLifetime: 15 * time.Minute,
@@ -329,6 +330,9 @@ func TestParseV1Defaults(t *testing.T) {
 	}
 	if f.Streams.ViewerTimeout != config.DefaultViewerTimeout {
 		t.Errorf("streams.viewer_timeout = %v, want %v", f.Streams.ViewerTimeout, config.DefaultViewerTimeout)
+	}
+	if f.CongestionControl != config.DefaultCongestionControl {
+		t.Errorf("congestion_control = %q, want %q", f.CongestionControl, config.DefaultCongestionControl)
 	}
 	c := f.Connections[0]
 	if c.Name != "box" || c.Target != "box.internal:22" {
@@ -573,6 +577,8 @@ web_client: client/occamy-web/dist
 `},
 		{"web client", head + "web_client: DIR\n"},
 		{"web client not built yet", head + "web_client: DIR/dist\n"},
+		{"congestion control", head + "congestion_control: cubic\n"},
+		{"the kernel's congestion control", head + "congestion_control: system\n"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -722,6 +728,8 @@ func TestParseV1Problems(t *testing.T) {
 		{"tls missing file", head + "tls: {cert: DIR/missing.crt, key: DIR/tls.key}\n", []want{{"tls.cert", "missing.crt does not exist"}}},
 		{"tls directory", head + "tls: {cert: DIR, key: DIR/tls.key}\n", []want{{"tls.cert", "is a directory"}}},
 		{"web client a file", head + "web_client: DIR/key\n", []want{{"web_client", "key is not a directory"}}},
+		{"congestion control", head + "congestion_control: BBR\n", []want{{"congestion_control", `"BBR" is not the name of a congestion control`}}},
+		{"congestion control too long", head + "congestion_control: abcdefghijklmnop\n", []want{{"congestion_control", "is not the name of a congestion control"}}},
 		{"debug on listen", head + "debug: {address: ':5636'}\n", []want{{"debug.address", `":5636" shares a port with listen ":5636"`}}},
 		{"debug beside a wildcard", head + "listen: ':5636'\ndebug: {address: 127.0.0.1:5636}\n", []want{{"debug.address", "shares a port with listen"}}},
 		{"debug on localhost", head + "listen: 127.0.0.1:5636\ndebug: {address: localhost:5636}\n", []want{{"debug.address", "shares a port with listen"}}},

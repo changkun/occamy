@@ -123,9 +123,10 @@ func parseStats(out []byte, project string) (containerStats, error) {
 // runtimeVars is what occamyd's debug listener publishes at /debug/vars
 // that the harness records.
 type runtimeVars struct {
-	Goroutines int `json:"goroutines"`
-	FDs        int `json:"fds"`
-	Memstats   struct {
+	Goroutines    int    `json:"goroutines"`
+	FDs           int    `json:"fds"`
+	TCPCongestion string `json:"tcp_congestion"`
+	Memstats      struct {
 		HeapInuse    uint64 `json:"HeapInuse"`
 		TotalAlloc   uint64 `json:"TotalAlloc"`
 		NumGC        uint32 `json:"NumGC"`

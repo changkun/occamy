@@ -1,0 +1,50 @@
+# Copyright 2026 Changkun Ou. All rights reserved.
+# Use of this source code is governed by a MIT
+# license that can be found in the LICENSE file.
+
+# The v1 file of the benchmark stack's occamy-v1-cubic service
+# (docker-compose.bench.yaml): occamy-v1's native connections, which
+# v1-native opens, with CUBIC as the TCP congestion control in place of
+# occamyd's default, BBR, for the harness's v1-native-cubic series
+# (specs/008-native-architecture/realtime-transport.md, step 3a). The
+# connections are occamy-v1.yaml's, which a test checks.
+
+version: 1
+listen: 0.0.0.0:5637
+congestion_control: cubic
+# The debug listener, from which make bench-compare reads occamyd's
+# runtime: off unless OCCAMY_V1_DEBUG_ADDRESS is set (Makefile,
+# BENCH_DEBUG), and published on the host's loopback interface only.
+debug:
+  address_env: OCCAMY_V1_DEBUG_ADDRESS
+auth:
+  # On a tmpfs (docker-compose.bench.yaml): nothing outlives a run here.
+  signing_key_file: /run/occamy/signing.key
+  users:
+    # Password occamy, as the demo's.
+    - name: demo
+      password_hash: "$2a$10$DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
+connections:
+  - id: ssh
+    protocol: ssh
+    backend: native
+    target: ssh:22
+    insecure_ignore_host_key: true
+    credentials: {username: occamy, password_env: OCCAMY_BENCH_SSH_PASSWORD}
+    allow: {users: [demo]}
+  - id: vnc-native
+    protocol: vnc
+    backend: native
+    target: vnc:5900
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: rdp-native
+    protocol: rdp
+    backend: native
+    target: rdp:3389
+    security: tls
+    tls: {insecure_skip_verify: true}
+    credentials: {username: occamy, password_env: OCCAMY_BENCH_RDP_PASSWORD}
+    allow: {users: [demo]}
+limits:
+  sessions_per_user: 100

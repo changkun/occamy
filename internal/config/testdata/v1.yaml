@@ -6,6 +6,12 @@ version: 1
 # The public listener: the API, the streams and /healthz. Default :5636.
 listen: 0.0.0.0:5636
 
+# The TCP congestion control of the public listener's connections, on
+# Linux: a name the kernel knows, or system for the kernel's own choice.
+# Default bbr, which keeps a remote desktop's frame rate when a link
+# drops packets; the kernel needs its module, tcp_bbr, loaded.
+congestion_control: bbr
+
 # occamyd terminates TLS when both are set. Leave both out to serve plain
 # HTTP behind a reverse proxy that terminates TLS.
 tls:
