@@ -71,6 +71,32 @@ func (p *Palette) Build(pix []byte, w, h int) bool {
 	return true
 }
 
+// Exceeds reports whether pix, w by h pixels in RGBA order row by row,
+// has more than n distinct colours, alpha included, for n from 0 to
+// MaxColours. It stops at the colour past n, so that a tile with many
+// colours costs only its first few to tell, and leaves p incomplete:
+// Build fills it again.
+func (p *Palette) Exceeds(pix []byte, w, h, n int) bool {
+	p.Colours = p.Colours[:0]
+	p.Index = p.Index[:0]
+	clear(p.used[:])
+	if w*h <= 0 {
+		return false
+	}
+	last := binary.LittleEndian.Uint32(pix) ^ 1
+	for i := 0; i < 4*w*h; i += 4 {
+		c := binary.LittleEndian.Uint32(pix[i:])
+		if c == last {
+			continue
+		}
+		last = c
+		if _, ok := p.lookup(c); !ok || len(p.Colours) > n {
+			return true
+		}
+	}
+	return false
+}
+
 // lookup finds or adds c, and reports false if adding it would make one
 // colour too many.
 func (p *Palette) lookup(c uint32) (uint8, bool) {

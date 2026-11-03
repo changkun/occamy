@@ -83,6 +83,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   kernel's choice and logs a warning. `congestion_control` in the v1 file
   names another, or `system` for the kernel's own
   ([docs/configuration.md](docs/configuration.md#tcp-congestion-control)).
+- occamyd spends less CPU on full-screen motion: it counts a moving
+  tile's colours only until it knows the tile goes lossy. Over VNC a
+  frame of motion takes 17.6 ms of occamyd's CPU instead of 19.5.
 
 ## [1.0.0-beta.1] - 2026-11-02
 
