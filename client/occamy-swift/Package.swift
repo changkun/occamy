@@ -15,6 +15,7 @@ let package = Package(
     platforms: [.macOS("26.0")],
     products: [
         .library(name: "OccamyKit", targets: ["OccamyKit"]),
+        .executable(name: "Occamy", targets: ["OccamyApp"]),
     ],
     dependencies: [
         .package(url: "https://github.com/migueldeicaza/SwiftTerm", from: "1.20.0"),
@@ -32,6 +33,8 @@ let package = Package(
                 .linkedLibrary("resolv"),
             ]
         ),
+        // The app; `make macos-app` bundles it as Occamy.app.
+        .executableTarget(name: "OccamyApp", dependencies: ["OccamyKit"]),
         .testTarget(name: "OccamyKitTests", dependencies: ["OccamyKit"]),
     ]
 )

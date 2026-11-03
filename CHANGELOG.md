@@ -9,6 +9,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- Occamy for macOS, an app for macOS 26 on Apple silicon and Intel that
+  opens the connections of your `occamyd` servers in windows of their
+  own, as VNC Viewer does: it signs in by password or OIDC, keeps
+  tokens in the Keychain, lists each server's connections with a
+  picture of each, opens ad-hoc addresses such as `vnc://host:5901`, and
+  gives each session a window that scales, goes full screen, shares the
+  clipboard and copies a share link ([docs/macos-app.md](docs/macos-app.md)).
 - `disable_copy` and `disable_paste` on a vnc or rdp connection keep
   the remote's clipboard from the viewers, or theirs from the remote,
   as guacd's `disable-copy` and `disable-paste` did
