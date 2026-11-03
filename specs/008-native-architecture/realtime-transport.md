@@ -11,6 +11,8 @@ affects:
   - internal/stream/
   - protocol/
   - server/streams.go
+  - server/congestion.go
+  - internal/config/
   - client/client.go
   - client/occamy-web/src/protocol/
   - bench/
@@ -18,6 +20,7 @@ affects:
   - docs/protocol.md
   - docs/benchmarks.md
   - docs/benchmarks/
+  - docs/configuration.md
 effort: xlarge
 created: 2026-11-02
 updated: 2026-11-03
@@ -393,18 +396,20 @@ sources.
 - **Mechanism.** BBR models the path's bandwidth and round trip and
   sends at that rate, instead of halving its window at each loss. It is
   a property of the server's TCP connections.
-- **Harness.** `v1-native-bbr` opens `v1-native`'s connections on
-  `occamy-v1-bbr`, a service whose network namespace takes BBR as its
-  default congestion control (`net.ipv4.tcp_congestion_control`), and
-  which starts only with the compose profile `bbr`, since a kernel
-  without BBR fails it. The link image prints the namespace's congestion
-  control after it shapes, and each result of a loss study records it as
-  `congestion`. The report compares the family **Congestion control**,
-  `v1-native` to `v1-native-bbr`, with Holm's correction and without the
-  targets.
+- **Harness.** `v1-native` runs occamyd as it ships, which asks for BBR,
+  and `v1-native-cubic` opens the same connections on `occamy-v1-cubic`,
+  whose v1 file asks for CUBIC (`congestion_control: cubic`). Each v1
+  result read with `-runtime` records the congestion control its
+  server's connections use as `congestion`, from occamyd's
+  `tcp_congestion`. The report compares the family **Congestion
+  control**, `v1-native-cubic` to `v1-native`, with Holm's correction and
+  without the targets. The measurement ran before occamyd asked for BBR,
+  with `v1-native` on the kernel's default, CUBIC, beside
+  `v1-native-bbr`, a service whose network namespace took BBR
+  (Implementation notes: step 3a).
 - **Measurement.** Plan `bench/plans/realtime-3a.yaml`: step 2's loss
   study, T1, G2 and G5 under N1 and N2 with none, 0.5% and 2% of the
-  packets lost, with `v1-native-bbr` in `guacd`'s place, 8 runs of 100
+  packets lost, with the CUBIC series in `guacd`'s place, 8 runs of 100
   probe keys: 480 results, about two hours. `make bench-realtime-3a`
   collects it, and `make bench-realtime-3a-report` writes its report
   into `docs/benchmarks/realtime/3a/`.
@@ -471,9 +476,9 @@ clients, so it can go before 3b.
   receiver is gvproxy's user-space stack rather than a browser's
   operating system, so the measurement counts the probes and spurious
   timeouts in each namespace without loss as well as with it.
-- **Harness.** A service like `occamy-v1-bbr`, with BBR and a lower
-  `net.ipv4.tcp_rto_min_us`, which is per namespace on the bench host's
-  kernel, beside `v1-native-bbr`.
+- **Harness.** A service in `occamy-v1-cubic`'s pattern that keeps
+  occamyd's BBR and lowers `net.ipv4.tcp_rto_min_us`, which is per
+  namespace on the bench host's kernel, beside `v1-native`.
 - **Kept if** the 99th percentile of T1 and G2 with loss is
   significantly better, and no cell without loss is significantly
   worse. Then occamyd sets the minimum on its client connections where
@@ -665,13 +670,14 @@ interval, and Guacamole's beside it.
 
 ## Implementation notes: step 3a
 
-- **Status.** Measured and kept. Built in #186 (`401193e`) and measured
-  on 2026-11-03 on step 2's image, built from `e56b585`, since the
-  commits between change only the harness:
+- **Status.** Measured, kept and shipped. Built in #186 (`401193e`) and
+  measured on 2026-11-03 on step 2's image, built from `e56b585`, since
+  the commits between change only the harness, with the results in #187
+  (`6d3586d`):
   [docs/benchmarks.md](../../docs/benchmarks.md#step-3a-the-congestion-control)
-  and `docs/benchmarks/realtime/3a`. occamyd asking for BBR is the next
-  change.
-- **Built.** The `occamy-v1-bbr` service, behind the compose profile
+  and `docs/benchmarks/realtime/3a`. occamyd asks for BBR from #188.
+- **Built for the run** (#186; replaced in #188, Shipped below). The
+  `occamy-v1-bbr` service, behind the compose profile
   `bbr`, with BBR as its namespace's default congestion control and its
   signing key on a tmpfs; the series `v1-native-bbr` and the harness's
   `-v1-bbr` (`OCCAMY_V1_BBR_PORT`, `OCCAMY_V1_BBR_DEBUG_PORT`); the link
@@ -718,6 +724,44 @@ interval, and Guacamole's beside it.
   asks for BBR on its client connections (`TCP_CONGESTION`) and keeps
   the kernel's default where it cannot, and the deployment docs say how
   to load `tcp_bbr`.
+- **Shipped (#188).** occamyd sets `TCP_CONGESTION` on its public
+  listener to the v1 file's `congestion_control`, `bbr` by default, and
+  the connections it accepts inherit it; `system` leaves the kernel's
+  choice. Where the kernel refuses, because the module is not loaded or
+  an unprivileged process may not use the name
+  (`net.ipv4.tcp_allowed_congestion_control`), occamyd keeps the
+  kernel's choice and logs a warning that says which and how to fix it.
+  It logs the congestion control its connections use, and `/debug/vars`
+  gives it as `tcp_congestion`. The docs are
+  [configuration.md](../../docs/configuration.md#tcp-congestion-control).
+  The bench now runs occamyd as it ships: `v1-native` is BBR, and
+  `v1-native-cubic`, on `occamy-v1-cubic`, whose file has `v1-native`'s
+  connections and asks for CUBIC, is the baseline. The compose profile
+  `bbr`, `occamy-v1-bbr`, `-v1-bbr` and the link image's `congestion`
+  line are gone; each v1 result read with `-runtime` records `congestion`
+  from occamyd's `tcp_congestion`, and the harness warns when a server's
+  connections use another than its series stands for. The report keeps
+  the family of 3a's run, `v1-native` to `v1-native-bbr`, beside the new
+  one, `v1-native-cubic` to `v1-native`, so that it still analyses the
+  run on disk. CI loads `tcp_bbr` and runs `v1-native-cubic` beside
+  `v1-native` in its smoke run. On the bench host the rebuilt stack
+  logged `TCP congestion control: bbr` and `cubic`, and a quick run, not
+  a measurement, recorded each series' own.
+- **Decisions in shipping.** A setting, `congestion_control`, rather
+  than BBR alone: an operator whose kernel lacks the module, or who
+  wants the kernel's own, can say so, and the bench's baseline is
+  occamyd's own image with one line of its file changed rather than a
+  namespace's sysctl. Any name is accepted that has the form of one
+  (lower case, digits and underscores, up to the kernel's 15 bytes),
+  since only the kernel knows which it has, and only at listen. The
+  listener rather than each connection: Linux copies a congestion
+  control set on a listener to the connections it accepts
+  (`tcp_ca_openreq_child`), as root and unprivileged, checked on 7.1.3
+  for reno, cubic and bbr. A refusal is a warning, not an error, so a
+  server on a kernel without BBR still serves, as the rule set before
+  the run said. The v0 proxy's listener is left alone, since v0 is the
+  Guacamole path being retired. Elsewhere than Linux occamyd listens as
+  before and reports no congestion control.
 - **Checked after the run.** Typing under N1 with 2% leaned against BBR,
   30.2 ms [21.6, 85.3] against 21.7 [21.5, 22.0], p 0.038 before the
   correction and 0.87 after; four of BBR's 8 runs were above 35 ms and
@@ -758,7 +802,8 @@ interval, and Guacamole's beside it.
   `docs/protocol.md`, `docs/benchmarks.md`.
 - Step 2: `bench/`, `docker/docker-compose.bench.yaml`.
 - Step 3a: `bench/`, `docker/docker-compose.bench.yaml`,
-  `docker/bench/netem`, `.github/workflows/dockerimage.yml`,
-  `docs/benchmarks/realtime/3a`; occamyd's listener and the deployment
-  docs, next.
+  `docker/bench/`, `.github/workflows/dockerimage.yml`,
+  `docs/benchmarks/realtime/3a`; `internal/config`, the public listener
+  in `server/server.go` and `server/congestion*.go`,
+  `docs/configuration.md` and `docs/architecture.md`.
 - Steps 3b, 3c, 4 and 5 are scoped when they start.

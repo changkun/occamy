@@ -25,8 +25,8 @@ v1 series run on the same stack when `-series` names them; see
 
 On a host shared with another stack, `COMPOSE_PROJECT_NAME`,
 `OCCAMY_PORT`, `OCCAMY_V1_PORT`, `OCCAMY_V1_GFX_PORT`,
-`OCCAMY_V1_BBR_PORT`, `GUACD_PORT`, `OCCAMY_V1_DEBUG_PORT`,
-`OCCAMY_V1_GFX_DEBUG_PORT` and `OCCAMY_V1_BBR_DEBUG_PORT` start this one
+`OCCAMY_V1_CUBIC_PORT`, `GUACD_PORT`, `OCCAMY_V1_DEBUG_PORT`,
+`OCCAMY_V1_GFX_DEBUG_PORT` and `OCCAMY_V1_CUBIC_DEBUG_PORT` start this one
 under its own project name and ports, and `make bench` points the harness
 at them. `OCCAMY_IMAGE` tags occamyd's image under another name, so that
 the build does not retag the image another stack runs.
@@ -47,14 +47,14 @@ make bench BENCH_FLAGS="-scenarios T1 -net N1 -series occamy"
 |------|---------|---------|
 | `-scenarios` | `all` | Comma-separated scenario IDs |
 | `-net` | `N0,N1,N2` | Network conditions |
-| `-series` | `occamy,guacd` | `occamy` goes through occamyd; `guacd` connects to guacd directly; `v1-native`, `v1-native-w2`, `v1-native-bbr`, `v1-native-nogfx`, `v1-guacd` and `v1-guacd-gfx` speak protocol v1 ([The v1 series](#the-v1-series)) |
+| `-series` | `occamy,guacd` | `occamy` goes through occamyd; `guacd` connects to guacd directly; `v1-native`, `v1-native-w2`, `v1-native-cubic`, `v1-native-nogfx`, `v1-guacd` and `v1-guacd-gfx` speak protocol v1 ([The v1 series](#the-v1-series)) |
 | `-runs` | `1` | How many times to run everything; the table shows medians |
 | `-failfast` | off | Stop at the first measurement with an error, and exit non-zero; CI's runs set it |
 | `-quick` | off | A tenth of the samples and a sixth of the durations, to check the setup |
 | `-ack-hz` | `60` | v1: the screen refresh on whose ticks the harness acknowledges a graphical frame, as a browser does; the gate's numbers use 60, and `0`, which acknowledges at once, is a diagnostic ([The v1 series](#the-v1-series)) |
 | `-engine` | `podman` | Container engine for CPU time, or `none` |
 | `-project` | `occamy` | The stack's compose project, whose containers CPU time is read from |
-| `-addr`, `-v1`, `-v1-gfx`, `-v1-bbr`, `-guacd` | `localhost:5636`, `localhost:5637`, `localhost:5640`, `localhost:5642`, `localhost:4822` | occamyd for v0, occamy-v1 for v1, occamy-v1-gfx for `v1-guacd-gfx`, occamy-v1-bbr for `v1-native-bbr`, and guacd for the direct series |
+| `-addr`, `-v1`, `-v1-gfx`, `-v1-cubic`, `-guacd` | `localhost:5636`, `localhost:5637`, `localhost:5640`, `localhost:5642`, `localhost:4822` | occamyd for v0, occamy-v1 for v1, occamy-v1-gfx for `v1-guacd-gfx`, occamy-v1-cubic for `v1-native-cubic`, and guacd for the direct series |
 | `-out` | `bench-results.json` | JSON output, saved after each series and network condition |
 | `-plan` | none | A plan file, such as `bench/plans/compare.yaml`, in place of `-series`, `-net`, `-scenarios` and `-runs` ([The comparison](#the-comparison)) |
 | `-resume` | off | Continue `-out`, if it exists and measures the same plan: keep its blocks that are complete and without errors, and measure the rest |
@@ -181,22 +181,22 @@ make bench-realtime-3a
 
 collects step 3a, the congestion control, about two hours of measuring,
 into `bench-realtime-3a.json`: step 2's loss study with
-`v1-native-bbr`, whose server's TCP uses BBR, in `guacd`'s place beside
-`v1-native`, whose server's uses the kernel's default, CUBIC, 8 runs of
-100 probe keys (`bench/plans/realtime-3a.yaml`). It starts the stack
-with the compose profile `bbr`, which adds `occamy-v1-bbr`
-([The v1 series](#the-v1-series)), and the host's kernel must have BBR
-loaded; on podman's virtual machine:
+`v1-native-cubic`, whose server asks for CUBIC, in `guacd`'s place
+beside `v1-native`, whose server asks for BBR, as occamyd does by
+default, 8 runs of 100 probe keys (`bench/plans/realtime-3a.yaml`). The
+host's kernel must have BBR loaded, or `v1-native`'s occamyd keeps the
+kernel's choice and the harness warns; on podman's virtual machine:
 
 ```sh
 podman machine ssh sudo modprobe tcp_bbr
 ```
 
-Each result of a loss study records the congestion control of its
-server's namespace as `congestion`, read where the link is emulated.
+Each v1 result read with `-runtime`, as those of `make bench-compare`
+are, records the congestion control its server's connections use as
+`congestion`, from occamyd's `tcp_congestion`.
 `make bench-realtime-3a-report` analyses it into
 `docs/benchmarks/realtime/3a`, with the family **Congestion control**,
-`v1-native` to `v1-native-bbr`, beside what each loss added. Its
+`v1-native-cubic` to `v1-native`, beside what each loss added. Its
 results are in [Step 3a](#step-3a-the-congestion-control).
 
 ### Analysis
@@ -356,7 +356,7 @@ Six series measure protocol v1 with the same scenarios, metrics,
 network conditions and bench desktop as the baseline:
 
 ```sh
-COMPOSE_PROFILES=bbr make bench BENCH_FLAGS="-series v1-native,v1-native-w2,v1-native-bbr,v1-native-nogfx,v1-guacd,v1-guacd-gfx -runs 3"
+make bench BENCH_FLAGS="-series v1-native,v1-native-w2,v1-native-cubic,v1-native-nogfx,v1-guacd,v1-guacd-gfx -runs 3"
 ```
 
 Their results so far are in [The essential comparison](#the-essential-comparison)
@@ -369,7 +369,7 @@ ClearCodec and cache yet.
 |---|---|---|---|---|
 | `v1-native` | occamyd's own | SSH, VNC, RDP | on, as shipped | `ssh`, `vnc-native`, `rdp-native` |
 | `v1-native-w2` | occamyd's own | SSH, VNC, RDP | on | `ssh`, `vnc-native`, `rdp-native` |
-| `v1-native-bbr` | occamyd's own | SSH, VNC, RDP | on | `ssh`, `vnc-native`, `rdp-native` |
+| `v1-native-cubic` | occamyd's own | SSH, VNC, RDP | on | `ssh`, `vnc-native`, `rdp-native` |
 | `v1-native-nogfx` | occamyd's own | RDP | off | `rdp-native-nogfx` |
 | `v1-guacd` | the guacd bridge | VNC, RDP | off, as shipped | `vnc-guacd`, `rdp-guacd` |
 | `v1-guacd-gfx` | the guacd bridge | RDP | on | `rdp-guacd-gfx` |
@@ -383,11 +383,11 @@ step 1), so the two series measure that step's window against the one
 before it, on one image in one run. Its rows sit beside the verdict
 rather than count for the targets.
 
-`v1-native-bbr` is `v1-native` on another service, `occamy-v1-bbr`,
-with the same file, whose network namespace takes BBR as its TCP
-congestion control instead of the kernel's default, CUBIC (step 3a). It
-starts only with the compose profile `bbr`, since a kernel without BBR
-fails it, and its rows, too, sit beside the verdict.
+`v1-native-cubic` is `v1-native` on another service, `occamy-v1-cubic`,
+whose file, `docker/bench/occamy-v1-cubic.yaml`, has the same
+connections and asks for CUBIC, the kernel's usual default, as its TCP
+congestion control, where occamyd asks for BBR (step 3a). Its rows, too,
+sit beside the verdict.
 
 The row of what a side ships is the verdict, and the other sits beside
 it, so that rows compare like with like: the table notes which each RDP
@@ -1297,16 +1297,20 @@ below zero.
 
 ### Step 3a: the congestion control
 
-Measured on 2026-11-03 with `make bench-realtime-3a`: `v1-native`, whose
-server's TCP uses the kernel's default congestion control, CUBIC, beside
-`v1-native-bbr`, whose server's uses BBR, over step 2's link: typing
+Measured on 2026-11-03 with `make bench-realtime-3a`, before occamyd
+asked for BBR: `v1-native`, whose server's TCP used the kernel's default
+congestion control, CUBIC, beside `v1-native-bbr`, a service whose
+network namespace took BBR, over step 2's link: typing
 (T1), a key on a still desktop (G2) and a key during full-screen motion
 (G5), under N1 (20 ms) and N2 (50 ms), with none, 0.5% and 2% of the
 packets to the client lost at random. Both ran on one image, the one
 step 2 ran, built from `e56b585`, in one run of 8 runs of 100 probe
 keys, on the essential comparison's host. All 480 results succeeded,
 each with the congestion control its series names. The collection took
-2 h 22 min, 29 of them waiting at the load gate.
+2 h 22 min, 29 of them waiting at the load gate. occamyd now asks for
+BBR ([TCP congestion control](configuration.md#tcp-congestion-control)),
+and the target measures the same two as `v1-native-cubic` and
+`v1-native`.
 [realtime/3a/report.md](./benchmarks/realtime/3a/report.md) holds every
 table and figure, and
 [realtime/3a/bench-realtime-3a.json](./benchmarks/realtime/3a/bench-realtime-3a.json)
