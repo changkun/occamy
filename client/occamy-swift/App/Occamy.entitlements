@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The hardened runtime with no exceptions: neither the Go runtime nor
+     SwiftTerm writes executable memory or loads another's libraries.
+     The app is not sandboxed, as a DMG needs no sandbox; the Mac App
+     Store's would (specs/010-native-swift-client.md, Distribution). -->
+<plist version="1.0">
+<dict/>
+</plist>
