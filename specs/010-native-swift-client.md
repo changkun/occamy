@@ -468,6 +468,12 @@ For beta.2 (2026-11-03):
   - A card's picture is the remote's whole screen, fitted into a 16:10
     frame that sets the card's size, so that every card in a row is as
     tall.
+  - The icon is `App/AppIcon.icon`, an Icon Composer file that
+    `make swift-app` compiles with `actool` into `Assets.car` and an
+    `.icns` for older readers: the logo, `docs/occamy.png`, at three
+    times its size pixel for pixel, on an indigo gradient, without
+    translucency so that the pixel art stays solid. The bundle had none
+    before (found by the owner, 2026-11-04).
   - Tokens, and passwords the user chooses to remember, go to the login
     keychain under `de.changkun.occamy`. occamyd's tokens last 15
     minutes and are not renewed, so with a remembered password the app

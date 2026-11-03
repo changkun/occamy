@@ -53,7 +53,9 @@ swift-test: swift-core
 .PHONY: swift-test
 
 # swift-app bundles the app as Occamy.app in client/occamy-swift/build/app,
-# a universal binary, and signs it with the hardened runtime: with
+# a universal binary, with its icon compiled from App/AppIcon.icon, an
+# Icon Composer file of the logo (docs/occamy.png at three times its
+# size, pixel for pixel), and signs it with the hardened runtime: with
 # DEVELOPER_ID, the owner's "Developer ID Application: …" identity in
 # their keychain, or else ad hoc. swift-dmg puts it in a disk image,
 # signed with DEVELOPER_ID too; swift-notarize has Apple notarize the
@@ -76,6 +78,12 @@ swift-app: swift-core
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS
 	lipo -create -output $(APP)/Contents/MacOS/Occamy $(APP_DIR)/arm64/release/Occamy $(APP_DIR)/x86_64/release/Occamy
+	mkdir -p $(APP)/Contents/Resources
+	# actool reads relative paths against $$PWD, which make does not set.
+	xcrun actool $(CURDIR)/$(SWIFT_DIR)/App/AppIcon.icon --compile $(CURDIR)/$(APP)/Contents/Resources \
+		--platform macosx --minimum-deployment-target $(MACOS_MIN) --app-icon AppIcon \
+		--output-partial-info-plist $(CURDIR)/$(APP_DIR)/icon.plist \
+		--output-format human-readable-text --errors --warnings
 	sed -e 's/@VERSION@/$(APP_VERSION)/' -e "s/@BUILD@/$$(git rev-list --count HEAD)/" -e 's/@MACOS_MIN@/$(MACOS_MIN)/' \
 		$(SWIFT_DIR)/App/Info.plist > $(APP)/Contents/Info.plist
 	plutil -lint $(APP)/Contents/Info.plist
