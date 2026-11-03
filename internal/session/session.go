@@ -167,6 +167,10 @@ type Config struct {
 	// MaxViewers is the most viewers the session takes besides its
 	// owner, who can always join; no limit if zero.
 	MaxViewers int
+	// DisableCopy keeps the remote's clipboard from the viewers, and
+	// DisablePaste the viewers' clipboard from the remote, whatever the
+	// backend does with its own.
+	DisableCopy, DisablePaste bool
 	// Logger receives the session's log, slog.Default() if nil.
 	Logger *slog.Logger
 }
@@ -723,12 +727,20 @@ func (s *Session) termWrite(data []byte) {
 }
 
 func (k sink) Clipboard(mime string, data []byte) {
+	if k.s.cfg.DisableCopy {
+		return
+	}
 	c := &Clipboard{MIME: mime, Data: slices.Clone(data)}
 	k.s.broadcast(func(p *Pending) { p.Clipboard = c })
 }
 
 func (k sink) ClipboardStatus(answering bool) {
 	s := k.s
+	if s.cfg.DisablePaste {
+		// No viewer's clipboard reaches the remote, so whether it takes
+		// any is no one's concern.
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.clipQuiet = !answering

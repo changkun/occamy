@@ -59,6 +59,9 @@ frame of full-screen motion in 8 KiB instead of 50–66
 - **Access control.** Users sign in with a password or through OIDC,
   each connection names who may open it, and the credentials for your
   servers stay on the server.
+- **A Mac app.** [Occamy for macOS](docs/macos-app.md) opens your
+  connections in windows of their own, as VNC Viewer does, with the
+  same protocol as the browser.
 
 ## Protocols
 

@@ -42,6 +42,9 @@ type target struct {
 	// pipeline.
 	security   string
 	disableGFX bool
+	// disableCopy and disablePaste close the clipboard of a vnc or rdp
+	// target in each direction.
+	disableCopy, disablePaste bool
 	// kubernetes is the pod of a kubernetes target, whose addr is the
 	// API server's.
 	kubernetes config.Kubernetes
@@ -270,6 +273,10 @@ func rdpConfig(t target) (rdp.Config, error) {
 		Password:   pw,
 		Security:   t.security,
 		DisableGFX: t.disableGFX,
+		// The session closes the clipboard too; the backend then does not
+		// ask the server for what no one may see.
+		DisableCopy:  t.disableCopy,
+		DisablePaste: t.disablePaste,
 		TLS: rdpproto.TLS{
 			ServerName:         t.tls.ServerName,
 			RootCAs:            roots,

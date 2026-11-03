@@ -9,6 +9,21 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- `auth.oidc.return_urls` takes an app's own scheme, a domain name in
+  reverse such as `de.changkun.occamy:/oidc`, so that an app signs in
+  through OIDC as the web client does
+  ([docs/configuration.md](docs/configuration.md#signing-in-through-oidc)).
+- Occamy for macOS, an app for macOS 26 on Apple silicon and Intel that
+  opens the connections of your `occamyd` servers in windows of their
+  own, as VNC Viewer does: it signs in by password or OIDC, keeps
+  tokens in the Keychain, lists each server's connections with a
+  picture of each, opens ad-hoc addresses such as `vnc://host:5901`, and
+  gives each session a window that scales, goes full screen, shares the
+  clipboard and copies a share link ([docs/macos-app.md](docs/macos-app.md)).
+- `disable_copy` and `disable_paste` on a vnc or rdp connection keep
+  the remote's clipboard from the viewers, or theirs from the remote,
+  as guacd's `disable-copy` and `disable-paste` did
+  ([docs/configuration.md](docs/configuration.md#the-connection-registry-connections)).
 - `make swift-core` builds the Go client core as `liboccamy.a`, a C
   archive for Apple silicon and Intel with its interface in `occamy.h`,
   which the macOS app links
@@ -121,8 +136,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   guacd's other `recording-` and `typescript-` parameters) or
   restricted the clipboard (`disable-copy`, `disable-paste`) is refused
   with why, rather than served unrecorded or with the clipboard open:
-  occamyd records no session until a later beta, and has no key yet
-  that restricts the clipboard.
+  occamyd records no session until a later beta, and a connection's
+  `disable_copy` and `disable_paste` restrict the clipboard instead.
 - The v0 routes, `/api/v0/login` and `/api/v0/connect`, the Guacamole
   protocol through guacd, with `legacy_v0`. Clients use API v1 and
   protocol v1.

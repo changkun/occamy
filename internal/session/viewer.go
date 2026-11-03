@@ -117,6 +117,9 @@ func (v *Viewer) Input(seq uint32, ev backend.InputEvent) error {
 			v.s.dropped.Add(1)
 			return nil
 		}
+		if _, ok := ev.(backend.Clipboard); ok && v.s.cfg.DisablePaste {
+			return nil
+		}
 		// The clock is read before the backend sees the input: a tile it
 		// changes in between then counts as after the input, which is
 		// harmless, while reading it afterwards could miss the tile that

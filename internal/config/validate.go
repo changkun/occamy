@@ -366,6 +366,7 @@ func (f *File) validateConnections(c *checker) {
 			c.ard(p+".ard", cn)
 			c.security(p+".security", cn)
 			c.disableGFX(p+".disable_gfx", cn)
+			c.clipboard(p, cn)
 			c.kubernetes(p+".kubernetes", cn)
 		}
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
@@ -608,6 +609,22 @@ func (c *checker) disableGFX(path string, cn *Connection) {
 	}
 }
 
+// clipboard checks a connection's disable_copy and disable_paste, which
+// vnc and rdp have. A terminal's text is drawn by the client, which
+// copies it itself, and a paste reaches the terminal as typing, so
+// neither key could close a terminal's clipboard.
+func (c *checker) clipboard(path string, cn *Connection) {
+	if cn.Protocol == "vnc" || cn.Protocol == "rdp" {
+		return
+	}
+	if cn.DisableCopy {
+		c.add(path+".disable_copy", "only vnc and rdp connections have disable_copy: a terminal's text is drawn by the client, which copies it itself")
+	}
+	if cn.DisablePaste {
+		c.add(path+".disable_paste", "only vnc and rdp connections have disable_paste: a paste reaches a terminal as typing")
+	}
+}
+
 func (c *checker) credentials(path, protocol string, cr Credentials) {
 	var set []string
 	for _, s := range []struct {
@@ -843,14 +860,24 @@ func (c *checker) providerURL(path, s string) {
 }
 
 // returnURL checks a URL that browsers are sent back to after an OIDC
-// sign-in: https except on the loopback interface, with no user name,
-// and no fragment, since occamyd puts the sign-in's code in one.
+// sign-in: https except on the loopback interface, or the scheme of a
+// native app, with no user name, and no fragment, since occamyd puts the
+// sign-in's code in one. An app's scheme must be a domain name in
+// reverse, as RFC 8252 asks: this keeps out the schemes a browser runs or
+// reads itself, such as javascript, data and file. Any app may claim a
+// scheme, but the code is no use without the verifier of the app that
+// started the sign-in.
 func (c *checker) returnURL(path, s string) {
-	if p := SecureURLProblem(s); p != "" {
+	u, err := url.Parse(s)
+	if err == nil && u.Scheme != "" && u.Scheme != "http" && u.Scheme != "https" {
+		if !strings.Contains(u.Scheme, ".") {
+			c.add(path, "%q: an app's scheme must be a domain name in reverse, such as de.changkun.occamy", s)
+			return
+		}
+	} else if p := SecureURLProblem(s); p != "" {
 		c.add(path, "%s", p)
 		return
 	}
-	u, _ := url.Parse(s)
 	switch {
 	case u.User != nil:
 		c.add(path, "%q has a user name in it", s)
