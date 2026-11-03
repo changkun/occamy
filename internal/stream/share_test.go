@@ -322,6 +322,38 @@ func TestShareWorkerPanics(t *testing.T) {
 	}
 }
 
+// A worker makes a run of tiles in motion as the writer of a viewer that
+// agreed to scaled tiles would, scaled down, since the writer sends what
+// it takes from the cache. Its encoder once lacked the scaled codec, so
+// the run went at full size.
+func TestShareWorkerRunScaled(t *testing.T) {
+	p := profile{protocol.CodecDeflate, protocol.CodecWebP}
+	c := newEncodeCache(1 << 20)
+	f := &prefetch{cache: c, p: p, q: 70, lo: 30, scale: encoder.MotionScale, g: grid{tile: 64}}
+	wk := newWorker()
+	r := image.Rect(0, 0, 64, 64)
+	for k := range 2 {
+		pix := wk.tile(k, 64)
+		for i := 0; i < len(pix); i += 4 {
+			x, y := i/4%64+64*k, i/4/64
+			pix[i], pix[i+1], pix[i+2], pix[i+3] = byte(2*x), byte(4*y), byte(x+y), 255
+		}
+	}
+	wk.versions = append(wk.versions[:0], 1, 1)
+	wk.rects[0], wk.rects[1] = r, r.Add(image.Pt(64, 0))
+	f.run(wk, wk.encoder(p), 3, 2, true)
+
+	still, q, lo, scale := runMode(f.q, f.lo, true, false, f.scale)
+	e, mine := c.run(runKey{p, 3, 2, still, q, lo, scale}, []uint64{1, 1})
+	if e == nil || mine {
+		t.Fatal("the worker made no encoding of the run")
+	}
+	<-e.done
+	if !e.ok || e.codec != protocol.CodecScaled {
+		t.Errorf("the worker's run is %v, ok %v; want scaled", e.codec, e.ok)
+	}
+}
+
 // A panic after the cache hands an encoding out and before it is made,
 // as a worker asks for another, gathers a run's pixels, or as a writer
 // hands its rows over, publishes it failed: the next to ask is handed it

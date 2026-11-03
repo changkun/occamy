@@ -183,7 +183,9 @@ type worker struct {
 // newWorker returns a worker with no encoders yet.
 func newWorker() *worker { return &worker{encs: map[profile]*encoder.Encoder{}} }
 
-// encoder returns the worker's encoder of profile p.
+// encoder returns the worker's encoder of profile p. One with a lossy
+// codec also scales: a run's key asks for scaled tiles only for a viewer
+// that agreed to them, so the profile need not say whether it did.
 func (wk *worker) encoder(p profile) *encoder.Encoder {
 	e := wk.encs[p]
 	if e == nil {
@@ -193,6 +195,7 @@ func (wk *worker) encoder(p profile) *encoder.Encoder {
 				codecs = append(codecs, c)
 			}
 		}
+		codecs = append(codecs, protocol.CodecScaled)
 		e = encoder.New(codecs)
 		wk.encs[p] = e
 	}
