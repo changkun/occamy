@@ -9,6 +9,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- `make swift-core` builds the Go client core as `liboccamy.a`, a C
+  archive for Apple silicon and Intel with its interface in `occamy.h`,
+  which the macOS app links
+  ([spec 010](specs/010-native-swift-client.md)).
 - `make bench-compare` collects the comparison of the Guacamole protocol
   with Occamy's in one resumable command: a plan file
   (`bench/plans/compare.yaml`) measured in blocks, in a random order per
