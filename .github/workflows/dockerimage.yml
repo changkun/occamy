@@ -80,7 +80,8 @@ jobs:
   # The macOS app: the Go client core's C export layer, tested in process
   # against the interop server, and built as a universal archive for
   # macOS 26, the oldest the app runs on; then OccamyKit on it, tested
-  # against the interop server too, and built for both architectures.
+  # against the interop server too; then the app, bundled for both
+  # architectures and signed ad hoc, as no Developer ID is at hand here.
   macos:
     runs-on: macos-26
     steps:
@@ -88,17 +89,21 @@ jobs:
     - uses: actions/setup-go@v7
       with:
         go-version: stable
+    - name: Show the toolchain
+      run: xcodebuild -version && xcrun --sdk macosx --show-sdk-version && swift --version
     - name: Test the export layer and its decoders
       run: go test -race ./client/occamy-swift/core/ ./client/decoders/
     - name: Build the core archive
       run: make swift-core
     - name: Test OccamyKit
       run: swift test --package-path client/occamy-swift
-    # Testing built it for Apple silicon. One architecture a build: two
-    # at once take Xcode's build system, which cannot find SwiftTerm's
-    # build plugin.
-    - name: Build OccamyKit for Intel
-      run: swift build --package-path client/occamy-swift --build-tests --triple x86_64-apple-macosx26.0
+    - name: Bundle the app
+      run: make swift-app
+    - name: Check the app's architectures and oldest macOS
+      run: |
+        app=client/occamy-swift/build/app/Occamy.app/Contents/MacOS/Occamy
+        lipo "$app" -verify_arch arm64 && lipo "$app" -verify_arch x86_64
+        test "$(vtool -show-build "$app" | awk '$1 == "minos" { print $2 }' | sort -u)" = 26.0
 
   web:
     runs-on: ubuntu-latest

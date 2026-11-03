@@ -52,6 +52,64 @@ swift-test: swift-core
 	cd $(SWIFT_DIR) && swift test
 .PHONY: swift-test
 
+# swift-app bundles the app as Occamy.app in client/occamy-swift/build/app,
+# a universal binary, and signs it with the hardened runtime: with
+# DEVELOPER_ID, the owner's "Developer ID Application: …" identity in
+# their keychain, or else ad hoc. swift-dmg puts it in a disk image,
+# signed with DEVELOPER_ID too; swift-notarize has Apple notarize the
+# image and staples the ticket to it, with NOTARY_PROFILE, the keychain
+# profile that `xcrun notarytool store-credentials` saved.
+DEVELOPER_ID ?=
+NOTARY_PROFILE ?=
+APP_DIR = $(SWIFT_DIR)/build/app
+APP = $(APP_DIR)/Occamy.app
+APP_VERSION = $(patsubst v%,%,$(VERSION))
+DMG = $(APP_DIR)/Occamy-$(APP_VERSION).dmg
+# One architecture a build: two at once take Xcode's build system, which
+# cannot find SwiftTerm's build plugin.
+app-slice = cd $(SWIFT_DIR) && swift build -c release --product Occamy --triple $(1)-apple-macosx$(MACOS_MIN) \
+	--scratch-path build/app/$(1)
+
+swift-app: swift-core
+	$(call app-slice,arm64)
+	$(call app-slice,x86_64)
+	rm -rf $(APP)
+	mkdir -p $(APP)/Contents/MacOS
+	lipo -create -output $(APP)/Contents/MacOS/Occamy $(APP_DIR)/arm64/release/Occamy $(APP_DIR)/x86_64/release/Occamy
+	sed -e 's/@VERSION@/$(APP_VERSION)/' -e "s/@BUILD@/$$(git rev-list --count HEAD)/" -e 's/@MACOS_MIN@/$(MACOS_MIN)/' \
+		$(SWIFT_DIR)/App/Info.plist > $(APP)/Contents/Info.plist
+	plutil -lint $(APP)/Contents/Info.plist
+	codesign --force --sign "$(or $(DEVELOPER_ID),-)" --options runtime $(if $(DEVELOPER_ID),--timestamp) \
+		--entitlements $(SWIFT_DIR)/App/Occamy.entitlements $(APP)
+	codesign --verify --strict --verbose=2 $(APP)
+.PHONY: swift-app
+
+swift-dmg: swift-app
+	rm -rf $(APP_DIR)/dmg $(DMG)
+	mkdir -p $(APP_DIR)/dmg
+	ditto $(APP) $(APP_DIR)/dmg/Occamy.app
+	ln -s /Applications $(APP_DIR)/dmg/Applications
+	hdiutil create -volname Occamy -srcfolder $(APP_DIR)/dmg -format UDZO -ov $(DMG)
+	rm -rf $(APP_DIR)/dmg
+	$(if $(DEVELOPER_ID),codesign --force --sign "$(DEVELOPER_ID)" --timestamp $(DMG))
+.PHONY: swift-dmg
+
+ifneq ($(filter swift-notarize,$(MAKECMDGOALS)),)
+ifeq ($(DEVELOPER_ID),)
+$(error swift-notarize needs DEVELOPER_ID, a "Developer ID Application: …" identity)
+endif
+ifeq ($(NOTARY_PROFILE),)
+$(error swift-notarize needs NOTARY_PROFILE, a profile of xcrun notarytool store-credentials)
+endif
+endif
+
+swift-notarize: swift-dmg
+	xcrun notarytool submit $(DMG) --keychain-profile "$(NOTARY_PROFILE)" --wait
+	xcrun stapler staple $(DMG)
+	xcrun stapler validate $(DMG)
+	spctl --assess --type open --context context:primary-signature --verbose=2 $(DMG)
+.PHONY: swift-notarize
+
 build:
 	$(CONTAINER_ENGINE) build --label $(BUILD_LABEL) -t $(IMAGE):$(VERSION) -t $(IMAGE):$(IMAGE_TAG) -f docker/Dockerfile .
 .PHONY: build
