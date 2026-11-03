@@ -1,0 +1,70 @@
+<!--
+  Copyright 2026 Changkun Ou. All rights reserved.
+  Use of this source code is governed by a MIT
+  license that can be found in the LICENSE file.
+
+  The mark of the Mac app's icon: the occamy's head, in the logo's
+  colours (docs/occamy.png), drawn large enough to read at 32 pixels,
+  which the logo, pixel art, is not. AppIcon.icon draws it on the
+  logo's deep violet. make swift-app does not render it; after an edit,
+  render it into the icon's layer:
+
+    rsvg-convert -w 1024 -h 1024 App/AppIcon.svg -o App/AppIcon.icon/Assets/occamy.png
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <linearGradient id="body" gradientUnits="userSpaceOnUse" x1="420" y1="330" x2="560" y2="1024">
+      <stop offset="0" stop-color="#41e4c4"/>
+      <stop offset="0.55" stop-color="#2bcddc"/>
+      <stop offset="1" stop-color="#2b81cd"/>
+    </linearGradient>
+    <linearGradient id="belly" gradientUnits="userSpaceOnUse" x1="0" y1="600" x2="0" y2="1024">
+      <stop offset="0" stop-color="#e93dd3"/>
+      <stop offset="1" stop-color="#933dff"/>
+    </linearGradient>
+    <linearGradient id="crestA" x1="1" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#e93dd3"/>
+      <stop offset="1" stop-color="#f06be0"/>
+    </linearGradient>
+    <linearGradient id="crestB" x1="1" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#b93de9"/>
+      <stop offset="1" stop-color="#e93dd3"/>
+    </linearGradient>
+    <linearGradient id="crestC" x1="1" y1="1" x2="0" y2="0">
+      <stop offset="0" stop-color="#7a2be0"/>
+      <stop offset="1" stop-color="#933dff"/>
+    </linearGradient>
+    <linearGradient id="beak" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe9a6"/>
+      <stop offset="1" stop-color="#ead07d"/>
+    </linearGradient>
+    <path id="neck" d="M 226 1024 C 214 820 246 640 330 520 C 400 412 500 340 612 334 C 704 330 774 372 804 432 C 826 474 814 524 772 548 C 702 592 612 602 562 652 C 512 702 502 832 560 1024 Z"/>
+    <clipPath id="inside"><use href="#neck"/></clipPath>
+  </defs>
+  <!-- The crest: three feathers sweeping back from the crown, behind the head. -->
+  <path d="M 320 560 C 250 480 190 430 92 392 C 230 362 360 382 470 438 Z" fill="url(#crestC)"/>
+  <path d="M 410 450 C 340 340 280 262 196 186 C 350 200 490 262 590 362 Z" fill="url(#crestB)"/>
+  <path d="M 548 372 C 512 270 466 176 410 86 C 540 140 650 236 706 356 Z" fill="url(#crestA)"/>
+  <!-- Head and neck, which runs off the bottom edge. -->
+  <use href="#neck" fill="url(#body)"/>
+  <!-- The belly, in the logo's magenta and purple, along the inside of
+       the neck's front edge, with the edges of its scales. -->
+  <g clip-path="url(#inside)">
+    <path d="M 840 520 C 780 570 700 590 700 590 C 650 606 600 616 562 652 C 512 702 502 832 560 1024" fill="none" stroke="url(#belly)" stroke-width="124"/>
+    <g fill="none" stroke="#230154" stroke-opacity="0.35" stroke-width="10" stroke-linecap="round">
+      <path d="M 640 640 L 606 562"/>
+      <path d="M 552 698 L 484 670"/>
+      <path d="M 540 766 L 463 761"/>
+      <path d="M 544 865 L 468 875"/>
+      <path d="M 566 963 L 488 982"/>
+    </g>
+  </g>
+  <!-- Beak, hooked. -->
+  <path d="M 740 398 C 836 388 924 434 954 520 C 964 560 948 604 916 618 C 918 578 894 548 852 536 C 818 528 788 534 752 548 C 716 512 714 440 740 398 Z" fill="url(#beak)"/>
+  <path d="M 768 546 C 812 534 852 538 880 560 C 852 590 800 594 762 576 Z" fill="#d58e01"/>
+  <!-- Brow and eye. -->
+  <path d="M 586 384 C 640 344 706 350 742 388 C 704 374 644 376 598 404 Z" fill="#2d47cd"/>
+  <ellipse cx="662" cy="428" rx="50" ry="44" fill="#ffc201"/>
+  <ellipse cx="676" cy="430" rx="15" ry="34" fill="#230154"/>
+  <circle cx="648" cy="410" r="10" fill="#fff7e2"/>
+</svg>

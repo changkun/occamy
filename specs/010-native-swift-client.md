@@ -470,10 +470,13 @@ For beta.2 (2026-11-03):
     tall.
   - The icon is `App/AppIcon.icon`, an Icon Composer file that
     `make swift-app` compiles with `actool` into `Assets.car` and an
-    `.icns` for older readers: the logo, `docs/occamy.png`, at three
-    times its size pixel for pixel, on an indigo gradient, without
-    translucency so that the pixel art stays solid. The bundle had none
-    before (found by the owner, 2026-11-04).
+    `.icns` for older readers: the occamy's head, crest, beak and
+    belly, filling the tile, in the logo's colours on its deep violet.
+    `App/AppIcon.svg` is its source, rendered by hand into the layer's
+    PNG, so that the build needs no SVG renderer. The bundle had no
+    icon at first, and then the logo, `docs/occamy.png`, whose pixel
+    art was too small to read even in the Dock (both found by the
+    owner, 2026-11-04). The logo stays the project's, in the README.
   - A session window learns its `NSWindow` from a view in its
     background, which reports only the windows it moves into. SwiftUI
     puts a new such view in the window as it opens and as the session
