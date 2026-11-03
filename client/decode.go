@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"changkun.de/x/occamy/internal/codec"
 	"changkun.de/x/occamy/protocol"
 )
 
@@ -49,6 +50,32 @@ func (raw) Decode(dst []byte, w, h int, payload []byte) error {
 		return errors.New("client: raw payload of the wrong size")
 	}
 	copy(dst, payload)
+	return nil
+}
+
+// scaled is the scaled codec: an image of another codec at a fraction of
+// the tile's size, which it decodes by that codec's decoder and scales up
+// by codec.Upscale.
+type scaled struct{ decoders map[protocol.Codec]Decoder }
+
+func (scaled) Codec() protocol.Codec { return protocol.CodecScaled }
+
+func (s scaled) Decode(dst []byte, w, h int, payload []byte) error {
+	sc, err := protocol.ParseScaled(payload)
+	if err != nil {
+		return err
+	}
+	d, ok := s.decoders[sc.Codec]
+	if !ok {
+		return fmt.Errorf("client: a scaled image of codec %v, which the client does not decode", sc.Codec)
+	}
+	f := int(sc.Factor)
+	sw, sh := protocol.ScaledSize(w, h, f)
+	small := make([]byte, 4*sw*sh)
+	if err := d.Decode(small, sw, sh, sc.Image); err != nil {
+		return err
+	}
+	codec.Upscale(dst, w, h, small, f, nil)
 	return nil
 }
 

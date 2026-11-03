@@ -157,6 +157,11 @@ var webpDeflate = protocol.Hello{Visible: true, Capabilities: protocol.Capabilit
 	Codecs: []protocol.Codec{protocol.CodecWebP, protocol.CodecDeflate},
 }}
 
+// webpDeflateScaled is webpDeflate with scaled tiles.
+var webpDeflateScaled = protocol.Hello{Visible: true, Capabilities: protocol.Capabilities{
+	Codecs: []protocol.Codec{protocol.CodecWebP, protocol.CodecDeflate, protocol.CodecScaled},
+}}
+
 // tileScores is the SSIM of each of r's tiles on the client against the
 // server's.
 func tileScores(client, server *image.RGBA, r image.Rectangle) []float64 {
@@ -228,6 +233,87 @@ func TestRefineExact(t *testing.T) {
 			quiet(t, r)
 		})
 	}
+}
+
+// To a viewer that agreed to scaled tiles, tiles in motion go scaled
+// down, and once still go again at full size, until the client's screen
+// is the server's; a viewer of the same session that did not agree gets
+// them at full size, from encodings of their own.
+func TestRefineScaled(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &tapped{Backend: backendtest.NewScreen(512, 256, 0)}
+		r := newRigConfig(t, b, 64, 50e6, time.Millisecond, webpDeflateScaled, Config{})
+		other := r.join(t, 50e6, time.Millisecond, webpDeflate)
+		time.Sleep(500 * time.Millisecond)
+		synctest.Wait()
+		area := image.Rect(64, 64, 320, 192)
+		animate(b, area, time.Second, func(k int) image.Image { return gradient(k) })
+		synctest.Wait()
+		count := func(cl *client, c protocol.Codec) int {
+			cl.mu.Lock()
+			defer cl.mu.Unlock()
+			return cl.codecs[c]
+		}
+		if count(r.cl, protocol.CodecScaled) == 0 {
+			t.Fatal("no tile went scaled while it moved")
+		}
+		if n := count(other, protocol.CodecScaled); n != 0 || count(other, protocol.CodecWebP) == 0 {
+			t.Errorf("the viewer that did not agree got %d scaled tiles, %d WebP", n, count(other, protocol.CodecWebP))
+		}
+		scaled := count(r.cl, protocol.CodecScaled)
+		time.Sleep(DefaultRefineDelay + time.Second)
+		synctest.Wait()
+		for name, cl := range map[string]*client{"scaled": r.cl, "full size": other} {
+			if !bytes.Equal(cl.screen().Pix, serverScreen(r.s).Pix) {
+				t.Errorf("%s: the client's screen is not the server's after refinement", name)
+			}
+		}
+		if n := count(r.cl, protocol.CodecScaled); n != scaled {
+			t.Errorf("%d tiles went scaled once still", n-scaled)
+		}
+		quiet(t, r)
+	})
+}
+
+// smooth is a gradient of thousands of colours moved by k pixels: lossy
+// whether it moves or not, and smooth enough that Still's lowest quality
+// reaches the score on it.
+type smooth int
+
+func (s smooth) ColorModel() color.Model { return color.RGBAModel }
+func (s smooth) Bounds() image.Rectangle { return image.Rect(-1<<20, -1<<20, 1<<20, 1<<20) }
+func (s smooth) At(x, y int) color.Color {
+	x = (x + int(s)) & 511
+	return color.RGBA{uint8(x / 2), uint8(y), uint8((x + y) / 4), 0xff} // #nosec G115 -- small
+}
+
+// Tiles that went scaled go again at full size once still, even where
+// Still's lowest quality, the quality they moved at, reaches the score.
+func TestRefineScaledSmooth(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		b := &tapped{Backend: backendtest.NewScreen(512, 256, 0)}
+		r := newRigConfig(t, b, 64, 50e6, time.Millisecond, webpDeflateScaled, Config{})
+		time.Sleep(500 * time.Millisecond)
+		synctest.Wait()
+		area := image.Rect(64, 64, 320, 192)
+		animate(b, area, time.Second, func(k int) image.Image { return smooth(3 * k) })
+		synctest.Wait()
+		r.cl.mu.Lock()
+		scaled, full := r.cl.codecs[protocol.CodecScaled], r.cl.codecs[protocol.CodecWebP]
+		r.cl.mu.Unlock()
+		if scaled == 0 {
+			t.Fatal("no tile went scaled while it moved")
+		}
+		time.Sleep(DefaultRefineDelay + time.Second)
+		synctest.Wait()
+		r.cl.mu.Lock()
+		refined := r.cl.codecs[protocol.CodecWebP] - full
+		r.cl.mu.Unlock()
+		if refined < 8 {
+			t.Errorf("%d tiles went again at full size, want the 8 that moved", refined)
+		}
+		quiet(t, r)
+	})
 }
 
 // A photograph that moved goes at the pacer's lowest quality, and is

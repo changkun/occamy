@@ -371,8 +371,8 @@ func TestShareHandedOutPanics(t *testing.T) {
 		wk.versions = append(wk.versions[:0], 1, 1)
 		wk.rects[0], wk.rects[1] = r, r.Add(image.Pt(64, 0))
 		panics(t, func() { f.run(wk, wk.encoder(p), 3, 2, false) })
-		still, q, lo := runMode(f.q, f.lo, false, false)
-		if _, mine := c.run(runKey{p, 3, 2, still, q, lo}, []uint64{1, 1}); !mine {
+		still, q, lo, scale := runMode(f.q, f.lo, false, false, f.scale)
+		if _, mine := c.run(runKey{p, 3, 2, still, q, lo, scale}, []uint64{1, 1}); !mine {
 			t.Error("the run's encoding is still being made")
 		}
 	})
@@ -384,8 +384,8 @@ func TestShareHandedOutPanics(t *testing.T) {
 		wk.versions = append(wk.versions[:0], 1, 1)
 		wk.rects[0], wk.rects[1] = r, r.Add(image.Pt(64, 0))
 		panics(t, func() { f.run(wk, wk.encoder(p), 3, 2, false) })
-		still, q, lo := runMode(f.q, f.lo, false, false)
-		if _, mine := c.run(runKey{p, 3, 2, still, q, lo}, []uint64{1, 1}); !mine {
+		still, q, lo, scale := runMode(f.q, f.lo, false, false, f.scale)
+		if _, mine := c.run(runKey{p, 3, 2, still, q, lo, scale}, []uint64{1, 1}); !mine {
 			t.Error("the run's encoding is still being made")
 		}
 	})
@@ -399,8 +399,8 @@ func TestShareHandedOutPanics(t *testing.T) {
 	t.Run("a writer's run, handing its rows over", func(t *testing.T) {
 		w, sh := writer(t)
 		pix := make([]byte, 4*64*64)
-		panics(t, func() { w.encodeRun(0, 1, pix, r, false, 70, 0) })
-		if _, mine := sh.cache.run(runKey{w.prof, 0, 1, false, 70, 0}, []uint64{1}); !mine {
+		panics(t, func() { w.encodeRun(0, 1, pix, r, false, 70, 0, 1) })
+		if _, mine := sh.cache.run(runKey{w.prof, 0, 1, false, 70, 0, 1}, []uint64{1}); !mine {
 			t.Error("the run's encoding is still being made")
 		}
 	})
@@ -505,7 +505,7 @@ func TestShareRunQuality(t *testing.T) {
 	pix := pixels(photo, r.Add(image.Pt(256, 192)))
 	w.runVersion = append(w.runVersion[:0], 1)
 	encode := func(still bool, q, lo int) ([]byte, int) {
-		_, got, _ := w.encodeRun(0, 1, pix, r, still, q, lo)
+		_, got, _ := w.encodeRun(0, 1, pix, r, still, q, lo, 1)
 		return slices.Clone(w.payload), got
 	}
 	low, _ := encode(false, 30, 0)

@@ -278,49 +278,12 @@ func (e *Encoder) Scaled(dst, pix []byte, w, h, factor, quality int) ([]byte, pr
 		return e.Lossy(dst, pix, w, h, quality)
 	}
 	sw, sh := protocol.ScaledSize(w, h, factor)
-	e.small, e.sums = downscale(e.small, e.sums, pix[:4*w*h], w, h, factor)
+	e.small, e.sums = codec.Downscale(e.small, e.sums, pix[:4*w*h], w, h, factor)
 	head := protocol.Scaled{Factor: uint8(factor), Codec: e.lossy}.Append(dst) // #nosec G115 -- factor is checked above
 	if b, ok := e.lossyAt(head, e.small, sw, sh, quality); ok {
 		return b, protocol.CodecScaled
 	}
 	return e.Lossy(dst, pix, w, h, quality)
-}
-
-// downscale puts pix, w by h pixels in RGBA order row by row, scaled down
-// by f into dst, each pixel the mean of the f by f pixels it covers,
-// fewer at the right and bottom edges, and opaque; sums holds a row's
-// sums. It returns dst and sums.
-func downscale(dst []byte, sums []uint32, pix []byte, w, h, f int) ([]byte, []uint32) {
-	sw, sh := protocol.ScaledSize(w, h, f)
-	dst = slices.Grow(dst[:0], 4*sw*sh)[:4*sw*sh]
-	sums = slices.Grow(sums[:0], 3*sw)[:3*sw]
-	for y := range sh {
-		clear(sums)
-		y0, y1 := y*f, min(y*f+f, h)
-		for sy := y0; sy < y1; sy++ {
-			row := pix[4*sy*w : 4*(sy+1)*w]
-			for x := range sw {
-				var r, g, b uint32
-				for i := 4 * x * f; i < 4*min(x*f+f, w); i += 4 {
-					r += uint32(row[i])
-					g += uint32(row[i+1])
-					b += uint32(row[i+2])
-				}
-				sums[3*x] += r
-				sums[3*x+1] += g
-				sums[3*x+2] += b
-			}
-		}
-		out := dst[4*y*sw : 4*(y+1)*sw]
-		for x := range sw {
-			n := uint32((min(x*f+f, w) - x*f) * (y1 - y0)) // #nosec G115 -- at most MaxScale²
-			out[4*x] = byte((sums[3*x] + n/2) / n)
-			out[4*x+1] = byte((sums[3*x+1] + n/2) / n)
-			out[4*x+2] = byte((sums[3*x+2] + n/2) / n)
-			out[4*x+3] = 0xff
-		}
-	}
-	return dst, sums
 }
 
 // lossyAt appends the lossy encoding of pix, opaque, at quality, and
