@@ -94,8 +94,11 @@ jobs:
       run: make swift-core
     - name: Test OccamyKit
       run: swift test --package-path client/occamy-swift
-    - name: Build OccamyKit for Apple silicon and Intel
-      run: swift build --package-path client/occamy-swift --build-tests --arch arm64 --arch x86_64
+    # Testing built it for Apple silicon. One architecture a build: two
+    # at once take Xcode's build system, which cannot find SwiftTerm's
+    # build plugin.
+    - name: Build OccamyKit for Intel
+      run: swift build --package-path client/occamy-swift --build-tests --triple x86_64-apple-macosx26.0
 
   web:
     runs-on: ubuntu-latest
