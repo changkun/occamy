@@ -274,9 +274,14 @@ func TestDecoders(t *testing.T) {
 				t.Errorf("PSNR %.1f dB, want at least %g", p, v.MinPSNR)
 			}
 			// A rectangle other than the payload's is refused before
-			// anything is decoded.
-			if err := d.Decode(make([]byte, 4*(v.Width+1)*v.Height), v.Width+1, v.Height, unhex(v.Payload)); err == nil {
-				t.Errorf("a %d×%d payload decoded into %d×%d", v.Width, v.Height, v.Width+1, v.Height)
+			// anything is decoded: for a scaled image, one that scales
+			// down to another size.
+			w := v.Width + 1
+			if v.Codec == protocol.CodecScaled {
+				w = v.Width + protocol.MaxScale
+			}
+			if err := d.Decode(make([]byte, 4*w*v.Height), w, v.Height, unhex(v.Payload)); err == nil {
+				t.Errorf("a %d×%d payload decoded into %d×%d", v.Width, v.Height, w, v.Height)
 			}
 		})
 		checked++

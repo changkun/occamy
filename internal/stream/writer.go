@@ -142,6 +142,11 @@ type writer struct {
 	refine      []int
 	held        heldTile
 
+	// scale is the factor tiles in motion go scaled down by: 1, or
+	// encoder.MotionScale for a viewer that agreed to scaled tiles,
+	// which refinement sends again at full size once they stop.
+	scale int
+
 	// sc finds scrolls against the screen as the client has it, nil if
 	// scroll detection is off; scrollTime is what it took in the frame
 	// being sent, part of encodeTime.
@@ -234,6 +239,7 @@ func newWriter(c Conn, v *session.Viewer, p *pacer.Pacer, enc Encoder, l protoco
 		poke:   make(chan struct{}, 1),
 
 		refineDelay: DefaultRefineDelay,
+		scale:       1,
 	}
 	return w
 }

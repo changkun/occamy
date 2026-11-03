@@ -36,7 +36,10 @@
 //
 // Tiles of codecs other than raw are decoded as they arrive, in
 // parallel, by decoders the caller plugs in through Options.Decoders;
-// raw tiles need no decoding and are copied when applied. Small state
+// raw tiles need no decoding and are copied when applied. A client that
+// plugs a JPEG or WebP decoder also takes tiles of the scaled codec, an
+// image of either at a fraction of the tile's size, which it decodes by
+// that decoder and scales up itself. Small state
 // that only ever holds its latest value (the title, clipboard and its
 // status, cursor and pointer position) replaces an undelivered event of
 // its kind, so a caller that does not call Next for a while gets the
@@ -193,7 +196,9 @@ type Options struct {
 	// View shows it.
 	Hidden bool
 	// Decoders decode codecs other than raw, in the order of preference
-	// the client offers them in. Raw is built in and offered last.
+	// the client offers them in. Raw is built in and offered last. With
+	// a decoder of JPEG or WebP, the client also offers the scaled codec
+	// after them, built in (Scaled) unless Decoders has one.
 	Decoders []Decoder
 	// MaxTextureSize is the largest tile or cursor side the client
 	// decodes; zero means protocol.DefaultMaxTextureSize.
@@ -256,15 +261,19 @@ func (o Options) Hello() protocol.Hello {
 	}
 }
 
-// codecs are the codecs o offers, in its order of preference, raw last,
-// and then cached, unless the client keeps no tile cache.
+// codecs are the codecs o offers, in its order of preference, then
+// scaled if it decodes JPEG or WebP, raw last, and then cached, unless
+// the client keeps no tile cache.
 func (o Options) codecs() []protocol.Codec {
 	var cs []protocol.Codec
 	for _, d := range o.Decoders {
 		c := d.Codec()
-		if c != 0 && c != protocol.CodecRaw && c != protocol.CodecCached && !slices.Contains(cs, c) {
+		if c != 0 && c != protocol.CodecRaw && c != protocol.CodecCached && c != protocol.CodecScaled && !slices.Contains(cs, c) {
 			cs = append(cs, c)
 		}
+	}
+	if slices.Contains(cs, protocol.CodecJPEG) || slices.Contains(cs, protocol.CodecWebP) {
+		cs = append(cs, protocol.CodecScaled)
 	}
 	cs = append(cs, protocol.CodecRaw)
 	if !o.NoCache {
@@ -455,6 +464,9 @@ func newSession(c Conn, opts Options, w protocol.Welcome) *Session {
 				s.decoders[c] = d
 			}
 		}
+	}
+	if _, ok := s.decoders[protocol.CodecScaled]; !ok {
+		s.decoders[protocol.CodecScaled] = scaled{s.decoders}
 	}
 	s.agreed = s.agree(w.Capabilities)
 	s.limits = s.agreed.Limits()

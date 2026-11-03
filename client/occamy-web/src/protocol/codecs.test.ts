@@ -27,7 +27,7 @@ import {
   withoutExif,
 } from './codecs'
 import { INFLATE_SLICE, LocalDecoder, slicedInflate, streamInflate } from './decode'
-import { Codec } from './messages'
+import { Codec, MAX_SCALE, parseScaled, scaledSize } from './messages'
 import { codecs, fromHex, toHex } from './testing/vectors'
 import { ProtocolError } from './wire'
 
@@ -127,6 +127,23 @@ describe('platform', () => {
   })
 })
 
+describe('offered codecs', () => {
+  it('are deflate and raw without an image decoder', async () => {
+    expect(await new LocalDecoder({ inflate, decodeImage: null }).codecs()).toEqual([Codec.Deflate, Codec.Raw])
+  })
+  it('are WebP, JPEG and scaled images of either with one', async () => {
+    const decodeImage = (_c: number, _p: Uint8Array, w: number, h: number): Promise<Uint8ClampedArray> =>
+      Promise.resolve(new Uint8ClampedArray(4 * w * h))
+    expect(await new LocalDecoder({ inflate, decodeImage }).codecs()).toEqual([
+      Codec.Deflate,
+      Codec.WebP,
+      Codec.JPEG,
+      Codec.Scaled,
+      Codec.Raw,
+    ])
+  })
+})
+
 describe('codec vectors', () => {
   for (const v of codecs.vectors) {
     const payload = fromHex(v.payload)
@@ -153,6 +170,32 @@ describe('codec vectors', () => {
         const d = new LocalDecoder({ inflate, decodeImage: null })
         const got = await d.decode({ codec: v.codec, payload, width: v.width, height: v.height })
         expect(toHex(new Uint8Array(got))).toBe(v.pixels)
+      })
+    } else if (v.codec === Codec.Scaled) {
+      it(`${v.name}: header`, () => {
+        expect(want.length).toBe(4 * v.width * v.height)
+        const sc = parseScaled(payload)
+        const size = scaledSize(v.width, v.height, sc.factor)
+        expect(imageSize(sc.codec, sc.image)).toEqual(size)
+      })
+      it(`${v.name}: scaled up from the image, refused before decoding at another size`, async () => {
+        const sc = parseScaled(payload)
+        const calls: unknown[][] = []
+        const d = new LocalDecoder({
+          inflate,
+          decodeImage: (codec, image, width, height, scaled) => {
+            calls.push([codec, image.length, width, height, scaled])
+            return Promise.resolve(new Uint8ClampedArray(4 * (scaled?.width ?? width) * (scaled?.height ?? height)))
+          },
+        })
+        // A tile that scales down to another size.
+        await rejectsInvalid(d.decode({ codec: v.codec, payload, width: v.width + MAX_SCALE, height: v.height }))
+        expect(calls).toEqual([])
+        await d.decode({ codec: v.codec, payload, width: v.width, height: v.height })
+        const size = scaledSize(v.width, v.height, sc.factor)
+        expect(calls).toEqual([
+          [sc.codec, sc.image.length, size.width, size.height, { factor: sc.factor, width: v.width, height: v.height }],
+        ])
       })
     } else {
       it(`${v.name}: header`, () => {

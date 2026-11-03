@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"changkun.de/x/occamy/internal/codec"
 	"changkun.de/x/occamy/protocol"
 )
 
@@ -49,6 +50,45 @@ func (raw) Decode(dst []byte, w, h int, payload []byte) error {
 		return errors.New("client: raw payload of the wrong size")
 	}
 	copy(dst, payload)
+	return nil
+}
+
+// Scaled returns a Decoder of the scaled codec, an image of JPEG or WebP
+// at a fraction of the tile's size: it decodes the image by the one of
+// decoders of its codec and scales it up bilinearly. A client that plugs
+// a decoder of JPEG or WebP has one built in, of its decoders; a caller
+// plugs its own to wrap it, as one that times its decoders does.
+func Scaled(decoders ...Decoder) Decoder {
+	s := scaled{decoders: map[protocol.Codec]Decoder{}}
+	for _, d := range decoders {
+		if c := d.Codec(); c == protocol.CodecJPEG || c == protocol.CodecWebP {
+			s.decoders[c] = d
+		}
+	}
+	return s
+}
+
+// scaled is the scaled codec, which decodes the image by decoders.
+type scaled struct{ decoders map[protocol.Codec]Decoder }
+
+func (scaled) Codec() protocol.Codec { return protocol.CodecScaled }
+
+func (s scaled) Decode(dst []byte, w, h int, payload []byte) error {
+	sc, err := protocol.ParseScaled(payload)
+	if err != nil {
+		return err
+	}
+	d, ok := s.decoders[sc.Codec]
+	if !ok {
+		return fmt.Errorf("client: a scaled image of codec %v, which the client does not decode", sc.Codec)
+	}
+	f := int(sc.Factor)
+	sw, sh := protocol.ScaledSize(w, h, f)
+	small := make([]byte, 4*sw*sh)
+	if err := d.Decode(small, sw, sh, sc.Image); err != nil {
+		return err
+	}
+	codec.Upscale(dst, w, h, small, f, nil)
 	return nil
 }
 
