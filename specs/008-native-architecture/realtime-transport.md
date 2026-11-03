@@ -56,8 +56,9 @@ Three mechanisms stand between the protocol and that goal today:
    or for two round trips and 200 ms when it was the only packet in
    flight (step 3a).
 3. **Full-screen motion is encoded tile by tile on the CPU**, at about
-   22 ms of server CPU per frame in the essential comparison, more than a
-   60 Hz frame allows.
+   22 ms of server CPU per frame in the essential comparison of
+   2026-11-02, more than a 60 Hz frame allows; 12–16 ms in that of
+   2026-11-03, with tiles in motion at half size.
 
 The spec takes them one step at a time, and measures each step before the
 next.
@@ -528,10 +529,20 @@ clients, so it can go before 3b.
   quality.
 - Lossy quality falls into a few tiers, so that viewers on similar links
   share the encode cache, which is keyed by quality.
+- A terminal's frames start no more often than a screen refreshes, once
+  every 1/60 s (`pacer.Config.MinInterval`, which no viewer sets yet),
+  apart from the frame after an input, which goes out at once as
+  today. Without delay an ack returns within a millisecond, and the
+  window of two lets bulk output out as a frame about every 0.6 ms: the
+  essential comparison of 2026-11-03 sent T2 at N0 in 31 frames of
+  about 290 bytes, 8.95 KiB against a target of 8.6, where a screen
+  shows two or three of them (decided 2026-11-03).
 
 **Measurement.** The viewers study of
 [comparison-benchmark](comparison-benchmark.md), with the interval
-between shown frames and the age of a frame when shown, per role.
+between shown frames and the age of a frame when shown, per role; for
+the terminal's frames, T1 beside T2 under N0 and N2, kept if T2's bytes
+fall and T1 is not significantly worse.
 
 ### Step 5: A video path for full-screen motion
 

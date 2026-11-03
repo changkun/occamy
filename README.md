@@ -44,9 +44,10 @@ for each remote and its own protocol, and differs in four ways:
   Windows. There is no daemon to run beside it.
 
 Against guacd 1.6, on the same remotes and without network delay,
-Occamy prints 575 KiB of terminal output in 18 ms instead of about a
-second, sends a photograph in about 120 KiB instead of 2 MiB, and shows
-a key press on a still desktop in 5–7 ms instead of 16–19 ms
+Occamy prints 575 KiB of terminal output in 20 ms instead of about a
+second, sends a photograph in about 120 KiB instead of 2 MiB, shows a
+key press on a still desktop in 5–8 ms instead of 16–21 ms, and sends a
+frame of full-screen motion in 8 KiB instead of 50–66
 ([benchmarks](docs/benchmarks.md#the-essential-comparison)).
 
 ## Features
