@@ -48,6 +48,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   when the link's bandwidth runs short. Terminals keep a window of 2, so
   bulk output still coalesces, and older clients, which offer no window,
   get 2 as before ([docs/protocol.md](docs/protocol.md#the-frame-window)).
+  Over VNC with 50 ms of delay, full-screen motion now shows all 30
+  frames a second instead of about 19, and a key's effect in 96 ms
+  instead of 119 at the 95th percentile
+  ([docs/benchmarks.md](docs/benchmarks.md#step-1-the-frame-window-from-the-path)).
 
 ## [1.0.0-beta.1] - 2026-11-02
 
