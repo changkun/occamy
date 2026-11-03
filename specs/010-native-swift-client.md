@@ -38,8 +38,11 @@ web client does.
 
 ## Current State
 
-- No Swift code exists. The Gio attempt lives on branches `gio` and
-  `gio-client` (PR #51, closed unmerged).
+- The C export layer exists: `client/occamy-swift/core` builds the Go
+  client core as `liboccamy.a`, universal, with the interface in
+  `occamy.h` (Implementation notes: C export layer). No Swift code is
+  merged yet. The Gio attempt lives on branches `gio` and `gio-client`
+  (PR #51, closed unmerged).
 - The Go client core exists: `changkun.de/x/occamy/client`, designed in
   [client-core](008-native-architecture/client-core.md), a pure-Go
   package with a pull-style event API (`Dial`, then `Session.Next`),
@@ -65,7 +68,9 @@ cgo appears here by design. The export layer is a client artifact.
 
 A `package main` in the main Go module, built with
 `go build -buildmode=c-archive`, which produces `liboccamy.a` and
-`occamy.h`. ABI sketch:
+`occamy.h`. (2026-11-03: settled in a hand-written `occamy.h`; see
+Implementation notes: C export layer. The sketch below is the first
+draft.) ABI sketch:
 
 ```c
 typedef uintptr_t occamy_session;          // runtime/cgo.Handle
@@ -273,7 +278,7 @@ Open:
 
 For beta.2 (2026-11-03):
 
-- [ ] The export layer builds as a universal archive, with Go tests
+- [x] The export layer builds as a universal archive, with Go tests
       that call it in process.
 - [ ] The app signs in by password and by OIDC, lists a server's
       connections, and opens VNC, RDP, SSH and Kubernetes sessions and
@@ -283,3 +288,59 @@ For beta.2 (2026-11-03):
 - [ ] `make` builds the app, and with the owner's Developer ID a
       notarized DMG.
 - [ ] CI builds the archive, the package and the app, unsigned.
+
+## Implementation notes: C export layer
+
+- **What was done:** `client/occamy-swift/core`, a `package main` with
+  `//go:build darwin && cgo` on every file, so Linux, Windows and
+  `CGO_ENABLED=0` builds skip it and occamyd stays cgo-free.
+  `make swift-core` builds `liboccamy.a` for darwin/arm64 and
+  darwin/amd64 with `xcrun --sdk macosx clang`, `-trimpath` and
+  `-mmacosx-version-min=26.0`, and merges them with `lipo` into
+  `client/occamy-swift/build/core`. A program links it with
+  `-framework CoreFoundation -framework Security -lresolv`, what the Go
+  runtime and `net` need.
+- **The ABI** settles the sketch's differences against the `client`
+  package (#192):
+  - `occamy.h` is written by hand rather than taken from cgo's generated
+    header, so that it has `const`, comments and the event struct; the
+    cgo preamble defines `OCCAMY_CGO` to hide its prototypes from cgo,
+    and `TestHeader` runs `go tool cgo -exportheader` and checks that the
+    two declare the same functions with the same types, `const` aside.
+  - A session is a counter in a map, not a `runtime/cgo.Handle`: an
+    unknown or released handle is refused with `OCCAMY_ERR_CLOSED`
+    instead of panicking. `occamy_close` ends the session and keeps the
+    handle, so that `occamy_next` still delivers `END`;
+    `occamy_release` frees it once no call runs.
+  - `occamy_dial` and `occamy_next` take a timeout in milliseconds,
+    negative for none. A failed dial fills `occamy_dial_error`: the
+    server's close code, a message, and the ID of a session the server
+    made and the client refused.
+  - Events are one `occamy_event` struct with the fields each kind uses,
+    every pointer in it `malloc`ed and freed by `occamy_event_free`. The
+    cursor's image is RGBA with straight alpha.
+  - The framebuffer is not locked and handed out: `occamy_framebuffer_read`
+    copies a rectangle into the caller's buffer at its own stride, as of
+    the last `FRAME` delivered, and refuses a buffer whose size is not
+    the screen's. No Go pointer reaches C.
+  - Input takes the client's types (`uint16` pointer coordinates,
+    button bits, `int32` wheel deltas and a mode, a resize of width and
+    height only) and returns the input's sequence number. `occamy_view`
+    and `occamy_prompt_reply` are added.
+  - Results are `OCCAMY_OK`, `OCCAMY_TIMEOUT`, `OCCAMY_ERR`,
+    `OCCAMY_ERR_CLOSED`, `OCCAMY_ERR_READ_ONLY` and
+    `OCCAMY_ERR_NOT_OWNER`; each session keeps the error of its last
+    failed call for `occamy_error`.
+  - The core plugs in `client/decoders`: deflate, WebP and JPEG, checked
+    against `protocol/testdata/codecs.json`. The bench still keeps its
+    own copies of them, which can move to this package once the scaled
+    codec branch, which edits them, has landed.
+- **Tests:** Go tests call every export in process, through a bridge in
+  a non-test cgo file since test files cannot use cgo, against
+  `client/internal/webinterop`, occamyd's stream code in miniature: a
+  graphical session to the end (frames copied out by rectangle until
+  they match the desktop, key, pointer, wheel, text, clipboard echo,
+  resize, prompt and its reply, view), the remote ending, a terminal
+  session, dial errors, bad arguments and released handles. The interop
+  desktop gains a `prompt` command for them. CI's `macos` job, on
+  `macos-26`, runs them with `-race` and builds the archive.
