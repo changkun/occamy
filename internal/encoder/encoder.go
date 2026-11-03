@@ -198,9 +198,13 @@ func (e *Encoder) SetHint(q int) { e.hint = q }
 // merge it with adjacent lossy tiles and encode them with Lossy or Still.
 // A tile goes lossy if it has more than 256 colours, or more than 16 and
 // moving is set: content picks the codec, and motion too for tiles of 17
-// to 256 colours, which are lossless only while still.
+// to 256 colours, which are lossless only while still. A moving tile's
+// colours are counted only as far as 17, which is what tells it.
 func (e *Encoder) Tile(dst, pix []byte, w, h int, moving bool) (b []byte, c protocol.Codec, lossy bool) {
 	if e.lossless == 0 {
+		return dst, 0, true
+	}
+	if moving && e.lossy != 0 && e.pal.Exceeds(pix, w, h, FewColours) {
 		return dst, 0, true
 	}
 	n := codec.Colours(pix, w, h, &e.pal)

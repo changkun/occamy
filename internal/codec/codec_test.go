@@ -10,6 +10,7 @@ import (
 	"errors"
 	"image"
 	"math/rand/v2"
+	"slices"
 	"testing"
 )
 
@@ -86,6 +87,29 @@ func TestColours(t *testing.T) {
 		if got := Colours(pix, 64, 64, &p); got != c.want {
 			t.Errorf("%d colours, alpha %v: counted %d, want %d", c.n, c.alpha, got, c.want)
 		}
+	}
+}
+
+// Exceeds agrees with Colours at every limit, with alpha and without, and
+// Build fills the palette it leaves incomplete.
+func TestExceeds(t *testing.T) {
+	var p, q Palette
+	for _, n := range []int{1, 2, 16, 17, 255, 256, 257, 0} {
+		for _, alpha := range []bool{false, true} {
+			pix := tileWith(64, 64, n, alpha, uint64(n))
+			count := Colours(pix, 64, 64, &q)
+			for _, limit := range []int{0, 1, 15, 16, 17, 255, 256} {
+				if got, want := p.Exceeds(pix, 64, 64, limit), count > limit; got != want {
+					t.Errorf("%d colours, alpha %v: more than %d is %v, want %v", n, alpha, limit, got, want)
+				}
+				if p.Build(pix, 64, 64) != (count <= MaxColours) || count <= MaxColours && !slices.Equal(p.Colours, q.Colours) {
+					t.Fatalf("%d colours, alpha %v: Build after Exceeds(%d) differs", n, alpha, limit)
+				}
+			}
+		}
+	}
+	if p.Exceeds(nil, 0, 0, 0) {
+		t.Error("an empty tile has more than 0 colours")
 	}
 }
 

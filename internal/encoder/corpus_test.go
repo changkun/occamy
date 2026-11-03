@@ -169,6 +169,35 @@ func BenchmarkFrame(b *testing.B) {
 	}
 }
 
+// BenchmarkTileMotion classifies the motion scene's tiles while they
+// move, as the stream writer does on each frame of G5, and reports the
+// time a frame.
+func BenchmarkTileMotion(b *testing.B) {
+	const side = 64
+	type tile struct {
+		pix  []byte
+		w, h int
+	}
+	var frames [][]tile
+	for _, name := range []string{"motion-0", "motion-1"} {
+		img := loadFrame(b, name)
+		var tiles []tile
+		for y := img.Rect.Min.Y; y < img.Rect.Max.Y; y += side {
+			for x := img.Rect.Min.X; x < img.Rect.Max.X; x += side {
+				r := image.Rect(x, y, x+side, y+side).Intersect(img.Rect)
+				tiles = append(tiles, tile{pixels(img, r), r.Dx(), r.Dy()})
+			}
+		}
+		frames = append(frames, tiles)
+	}
+	e := New([]protocol.Codec{webpC, deflate})
+	for i := 0; b.Loop(); i++ {
+		for _, t := range frames[i%len(frames)] {
+			e.Tile(nil, t.pix, t.w, t.h, true)
+		}
+	}
+}
+
 var corpusRuns = flag.Int("corpus.runs", 0, "time every corpus frame this many times on one core and print the medians")
 
 // TestCorpusTimes prints each scene's encode time a frame, the median of
