@@ -125,6 +125,100 @@ six runs per cell:
    conditions, with Guacamole's number beside it.** A step is kept when
    its cells improve and the guard cells do not get worse.
 
+## Prior art and coverage
+
+Searched on 2026-11-03, for step 3, with the owner's two questions:
+which way the field is heading, and whom each option reaches. Each
+claim carries its source; what was looked for and not found is listed
+at the end, so that a later search knows where to start.
+
+### Transports of remote desktops and browser streaming
+
+| Product | Native client | Browser client |
+|---|---|---|
+| Amazon DCV | QUIC over UDP by default since 2024.0, WebSocket over TCP where UDP does not pass; sign-in stays on WebSocket ([client](https://docs.aws.amazon.com/dcv/latest/userguide/using-connecting-win.html), [server](https://docs.aws.amazon.com/en_us/dcv/latest/adminguide/disable-quic.html)) | WebSocket only: "the web browser client doesn't support the QUIC (UDP) transport protocol" ([web client](https://docs.aws.amazon.com/dcv/latest/userguide/using-connecting-browser-connect.html)) |
+| Amazon WorkSpaces (DCV) | UDP first on port 443, TCP when UDP is blocked ([2024-11](https://aws.amazon.com/about-aws/whats-new/2024/11/amazon-workspaces-wsp-desktop-traffic-tcp-udp-port-443)) | not looked at |
+| Citrix HDX | EDT, Citrix's own transport over UDP, TCP when it is unavailable ([adaptive transport](https://docs.citrix.com/en-us/citrix-daas/hdx-transport/adaptive-transport), [EDT](https://docs.citrix.com/en-us/citrix-daas/hdx-transport/adaptive-transport/enlightened-data-transport)) | WebSocket, without EDT, "built upon TCP" ([Citrix, 2020](https://www.citrix.com/blogs/2020/08/06/your-guide-to-implementing-citrix-workspace-app-for-html5/)) |
+| Azure Virtual Desktop | RDP Shortpath, UDP after a TCP start through the gateway ([Shortpath](https://learn.microsoft.com/azure/virtual-desktop/rdp-shortpath)) | not found |
+| Chrome Remote Desktop | | WebRTC; its older protocol is obsolete ([Chromium](https://chromium.googlesource.com/chromium/src/+/f303bc03a281b55dbd066185f79daa61dd8ba8d1/remoting/GEMINI.md)) |
+| GeForce NOW | | WebRTC in Chrome ([XDA](https://www.xda-developers.com/play-nvidia-geforce-now-games-chrome-windows-macos/)) |
+| Neko | | WebRTC, with WebSocket as a fallback for control ([Neko](https://github.com/m1k1o/neko)) |
+| Selkies 2.0 | | WebSocket with WebCodecs by default, one TCP port, no STUN or TURN; WebRTC on request ([2.0.0rc0](https://github.com/selkies-project/selkies/releases/tag/v2.0.0rc0)) |
+| Apache Guacamole | | WebSocket, or an HTTP tunnel: this project's baseline |
+
+- Native clients moved to UDP, each with TCP as the fallback. Their
+  browser clients stayed on TCP.
+- Browser streaming that left TCP went to WebRTC. Selkies went back to
+  WebSocket by default, for reverse proxies and NAT.
+- No remote desktop on WebTransport was found. Media over QUIC, which
+  browsers reach through WebTransport, is for live media: Cloudflare
+  opened a relay network in August 2025
+  ([Cloudflare](https://developers.cloudflare.com/moq)), and an analysis
+  of Chrome's usage counters argues that the talk of a move away from
+  WebRTC is ahead of the numbers
+  ([webrtcHacks](https://webrtchacks.com/is-everyone-switching-to-moq/)).
+
+### Whom each option reaches
+
+**WebTransport** needs every browser, network and proxy on the path:
+
+- Browsers: Chrome and Edge 97, Firefox 114, and Safari 26.4 on macOS
+  and iOS since 2026-03-24, so every engine
+  ([web-features](https://web-platform-dx.github.io/web-features-explorer/features/webtransport/),
+  [WebKit](https://webkit.org/blog/17862/webkit-features-for-safari-26-4/)).
+  WebKit says WebTransport can run over HTTP/2 and TCP where QUIC
+  cannot, with the same API; whether webtransport-go serves that is for
+  3b to check.
+- Networks: some corporate networks block UDP on port 443; no
+  measurement of how many was found.
+- Reverse proxies: none of nginx, Caddy, Traefik or Envoy documents
+  passing WebTransport; a proxy has to understand it
+  ([Caddy](https://github.com/caddyserver/caddy/issues/5421)). A
+  deployment behind one gets the fallback.
+- Server: quic-go and webtransport-go keep occamyd in pure Go. quic-go
+  has CUBIC alone, and its maintainers declined both a plug-in interface
+  for congestion control and a port of BBR
+  ([#776](https://github.com/quic-go/quic-go/issues/776),
+  [#1888](https://github.com/quic-go/quic-go/pull/1888),
+  [#4565](https://github.com/quic-go/quic-go/issues/4565)).
+
+**BBR** needs only the server's kernel; no client, browser, network or
+proxy changes:
+
+- Linux has had it since 4.9, as the module `tcp_bbr`. Mainline
+  carried BBR v1, with v3 out of tree, at the last public word on it
+  ([bbr-dev, March 2025](https://groups.google.com/g/bbr-dev/c/4vwZGw0nxdQ)).
+- An unprivileged process may set `TCP_CONGESTION` only to what
+  `net.ipv4.tcp_allowed_congestion_control` lists, and loading
+  `tcp_bbr` adds `bbr` to it, since BBR is not restricted
+  ([man-pages](https://git.tldp.org/LDP/man-pages/commit/bf561a0fbcfed101aea2d523fe5cd50e90273786),
+  [bbr-dev](https://groups.google.com/g/bbr-dev/c/zxuW4vaBBSg)). A
+  container cannot load a module; the host loads it once.
+- Checked on the bench host's podman VM (Fedora, kernel 7.1.3): the
+  module ships unloaded; after `modprobe tcp_bbr` the kernel's default
+  stays CUBIC and `bbr` is allowed; a container started with
+  `--sysctl net.ipv4.tcp_congestion_control=bbr` reads `bbr` in its
+  namespace, and the server's connections show `bbr` in `ss -tin`.
+- Adoption: Google used BBRv2 for more than 98% of its internal TCP
+  traffic in 2021, and made v2 to lose fewer packets than v1
+  ([IETF 110](https://datatracker.ietf.org/meeting/110/materials/slides-110-iccrg-bbr-updates-00.pdf)).
+  A 2024 measurement study reports BBR's share of the internet falling
+  since 2019 ([NUS](https://events.comp.nus.edu.sg/view/22693)); no
+  firm figure for 2025 was found.
+
+**What follows.** The two remove different costs of loss (Step 3):
+BBR on TCP removes the throughput bound and keeps the wait behind a lost
+packet; WebTransport through quic-go removes the wait and keeps the
+bound. Whatever the transport, one fallback is kept, and with
+WebTransport it will be used, not held in reserve.
+
+**Looked for and not found.** How many networks block UDP on port 443;
+whether Azure Virtual Desktop's web client uses Shortpath; a current
+Citrix document on the HTML5 client (the statement above is from
+2020); BBR's share of internet traffic after 2024; a measure of
+WebTransport's use (one secondary source gave about 0.001% of Chrome's
+page loads, not checked).
+
 ## Steps
 
 The order differs from the first sketch (2026-11-02), which put versioned
@@ -285,37 +379,9 @@ the transport. 3a goes first; whether 3b, which brings WebTransport,
 comes before 1.0 ([protocol-v1](protocol-v1.md) decision 6) is decided
 on 3a's measurement.
 
-**What others do** (searched on 2026-11-03):
-
-- Remote desktop products moved their native clients to UDP: Amazon
-  DCV uses QUIC by default and falls back to WebSocket
-  ([DCV](https://docs.aws.amazon.com/dcv/latest/userguide/using-connecting-win.html)),
-  Citrix has EDT over UDP, and Azure Virtual Desktop RDP Shortpath. Their
-  browser clients stay on WebSocket over TCP: DCV's web client has no QUIC
-  ([DCV, web client](https://docs.aws.amazon.com/dcv/latest/userguide/using-connecting-browser-connect.html)),
-  and Citrix's HTML5 client has no EDT
-  ([Citrix](https://www.citrix.com/blogs/2020/08/06/your-guide-to-implementing-citrix-workspace-app-for-html5/)).
-- In the browser, real-time streaming that left TCP went to WebRTC:
-  Chrome Remote Desktop
-  ([Chromium](https://chromium.googlesource.com/chromium/src/+/f303bc03a281b55dbd066185f79daa61dd8ba8d1/remoting/GEMINI.md)),
-  GeForce NOW's browser client and Neko. Selkies 2.0 went the other way,
-  to WebSocket with WebCodecs by default and WebRTC on request, for
-  reverse proxies and NAT without STUN or TURN
-  ([Selkies](https://github.com/selkies-project/selkies/releases/tag/v2.0.0rc0)).
-  No remote desktop on WebTransport was found.
-- WebTransport is in every engine since Safari 26.4, in March 2026
-  ([web-features](https://web-platform-dx.github.io/web-features-explorer/features/webtransport/)).
-  The network is the gap: some networks block UDP, and no mainstream
-  reverse proxy documents passing WebTransport, so the fallback will be
-  used, not kept in reserve.
-- BBR is a sender's choice alone: no client, browser or proxy changes.
-  Google moved its internal TCP traffic to it
-  ([IETF 110](https://datatracker.ietf.org/meeting/110/materials/slides-110-iccrg-bbr-updates-00.pdf)).
-  Mainline Linux carried BBR v1 as the module `tcp_bbr`, and v3 out of
-  tree, at the last public word on it
-  ([bbr-dev, March 2025](https://groups.google.com/g/bbr-dev/c/4vwZGw0nxdQ)). quic-go has CUBIC alone, and its maintainers declined BBR
-  ([#1888](https://github.com/quic-go/quic-go/pull/1888),
-  [#4565](https://github.com/quic-go/quic-go/issues/4565)).
+[Prior art and coverage](#prior-art-and-coverage) has what other
+remote desktops and browsers do, who each option reaches, and the
+sources.
 
 So 3a and 3b are complements, not alternatives: BBR on TCP removes the
 bound and keeps the wait, and WebTransport through quic-go removes the
