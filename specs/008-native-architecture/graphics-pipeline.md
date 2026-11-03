@@ -12,6 +12,8 @@ affects:
   - internal/encoder/
   - internal/stream/
   - protocol/
+  - client/
+  - client/occamy-web/src/protocol/
 effort: large
 created: 2026-10-29
 updated: 2026-11-03
@@ -220,7 +222,10 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
    larger.) (Built 2026-10-31: a tile in motion goes at the pacer's
    lowest quality, a still photographic one at the lowest quality whose
    SSIM reaches 0.91 on each tile, and refinement raises what motion
-   lowered; see Implementation notes: Refinement.)
+   lowered; see Implementation notes: Refinement.) (Built 2026-11-03:
+   to a client that agrees to the scaled codec, a lossy tile in motion
+   also goes at half its width and height, and refinement sends it again
+   at full size; see Implementation notes: Scaled motion.)
 4. **Scroll and move detection and the client tile cache are in beta,**
    since G3 and G4's targets need them. (Built 2026-10-31: on the
    corpus the tile cache takes a window switched back and forth over
@@ -229,6 +234,10 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
    new each frame; see Implementation notes: Tile cache.)
 5. **No server-side downscaling in beta.** Encoding only the visible
    viewport covers small screens; scaling can come later as a capability.
+   (Amended 2026-11-03: this concerns fitting a session to a smaller
+   screen, which stays out of beta. Tiles in motion are scaled down to
+   save bytes, as the scaled codec (codec 7), a capability as this
+   foresaw; see Implementation notes: Scaled motion.)
 6. **The lossless codec, the tile size and the pixel layout** (questions
    1 to 3 below) are decided by the first task's measurement on recorded
    frames from the bench desktop's scenes, not in advance. Lossless and
@@ -2059,8 +2068,68 @@ encoding WebP took 49%, decoding x11vnc's Tight 27% (zlib's inflate
   encoding it about 10 ms a frame. Fewer pixels while a tile moves is
   the lever left for both, which a tile whose payload is smaller than
   its rectangle needs a capability for: `docs/protocol.md` has a
-  receiver refuse a WebP or JPEG whose size differs. Server-side, vpx's
+  receiver refuse a WebP or JPEG whose size differs. (Built the same
+  day as the scaled codec: Implementation notes: Scaled motion.)
+  Server-side, vpx's
   input conversion (`toARGB`, `argbToYUVA` and `alphaFromARGB`, 13% of
   the profile) could give way to one pass from RGBA to YUV 4:2:0 with
   libwebp's rounding, which vpx takes as it is, and a faster inflate to
   part of the Tight decode.
+
+## Implementation notes: Scaled motion
+
+**Status.** Built on 2026-11-03: the lever that Classifying motion left,
+and the first design made under principle 7 of
+[realtime-transport](realtime-transport.md), which ranks the link's
+bytes and the client's work above the server's CPU.
+
+- **The protocol.** Codec 7, `scaled`: a factor from 2 to 4, the
+  image's codec (`jpeg` or `webp`, agreed), then the image at
+  `⌈w/f⌉ × ⌈h/f⌉`, which the receiver draws scaled up by exactly the
+  factor from the tile's top left (`docs/protocol.md`, The scaled
+  codec). It is additive: a client lists it to receive it, so older
+  clients never do. Cursors cannot use it. Unassigned codecs now start
+  at 8.
+- **A codec rather than a field or a capability.** Wrapping the image's
+  codec keeps the `tile` message as it was, and listing the codec is
+  the agreement. Each tile carries its own factor, so a factor chosen
+  per tile or per viewer later needs no change to the protocol.
+- **The server.** `Encoder.Scaled` takes each pixel of the small image
+  as the mean of the pixels it stands for (`codec.Downscale`, 1.1 ms for
+  a 1024×768 frame at factor 2), then encodes it in the viewer's lossy
+  codec, and falls back to `Lossy` where that fails. A run of tiles in
+  motion goes through it at `encoder.MotionScale`, 2, for a viewer that
+  agreed to the codec; an input's effect goes at full size, since the
+  user is looking at it. The encode cache's run key includes the
+  factor. A scaled tile is recorded at quality 0 (`scaledQuality`),
+  below every lossy quality, so refinement sends it again at full size
+  whatever quality it picks once the tile stops: recorded at its
+  quality 30, a tile whose SSIM search stops at 30 would stay half size,
+  which `TestRefineScaledSmooth` shows. With refinement off no tile is
+  in motion, so none goes scaled.
+- **The clients.** The Go client core lists `scaled` after its own
+  codecs when JPEG or WebP is among them, and decodes it with
+  `client.Scaled`: the image with the plugged decoder, then
+  `codec.Upscale`, bilinear at pixel centres in integers, 2.05 ms for a
+  1024×768 frame at factor 2. The bench plugs it with its timed
+  decoders, so the client's decode time includes the upscale. The web
+  client lists it after JPEG and draws the decoded image on a canvas of
+  the tile's size, smoothed, from its source rectangle of `w/f × h/f`.
+  In headless Chrome its scaled golden vectors reach a PSNR of 34.1 and
+  37.5, against the 31 and 34 they require.
+- **The factor.** 2, fixed. On the plasma of the codec corpus (two
+  motion frames at quality 30, the pacer's floor, WebP runs as G5
+  sends them):
+
+  | Size | KiB a frame | Encode, ms | SSIM |
+  |---|---|---|---|
+  | Full | 13.6 | 8.57 | 0.988 |
+  | Half | 6.9 | 2.58, and 1.1 to scale down | 0.986 |
+  | A third | 6.3 | 1.77 | 0.983 |
+  | A quarter | 4.2 | 0.91 | 0.979 |
+
+  The photograph's SSIM falls from 0.824 to 0.804 at half size, and the
+  dragged window saves less, 17.4 to 14.7 KiB, since its lossless tiles
+  dominate. A quarter takes a third of the bytes for detail that shows;
+  a factor that adapts to the content or the link waits for a
+  measurement on more content than the plasma.

@@ -50,6 +50,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   connections use
   ([docs/benchmarks.md](docs/benchmarks.md#the-comparison);
   [results](docs/benchmarks.md#step-3a-the-congestion-control)).
+- Codec 7, `scaled`, carries a tile as a JPEG or WebP image at a
+  fraction of its width and height, which the client scales up
+  ([docs/protocol.md](docs/protocol.md#the-scaled-codec)). occamyd sends
+  tiles in motion at half size to a client that lists it, and at full
+  size again once they stop. The Go and web clients list it; older
+  clients do not, and get tiles in motion at full size as before.
 
 ### Changed
 

@@ -128,6 +128,21 @@ six runs per cell:
 6. **Each step is measured against the step before, under the same
    conditions, with Guacamole's number beside it.** A step is kept when
    its cells improve and the guard cells do not get worse.
+7. **Spend the server's CPU before the client's or the link's.** The
+   owner's framing (2026-11-03): the targets are there to push the
+   design of the protocol, and of a well-engineered service that
+   optimises latency and bandwidth while preserving real-time control;
+   and the server has more machines to scale out to, while each user's
+   client has a fixed compute capability. What this spec takes from it,
+   decided here rather than by the owner: the bytes on the link, the
+   client's decoding and drawing, and latency rank above the server's
+   CPU. The server CPU targets of [benchmark](benchmark.md) stay, so no
+   target is dropped, but a design that costs the server CPU to save
+   bytes or client work is taken, and one that saves only server CPU
+   waits. The first design made under it is the scaled codec for tiles
+   in motion ([graphics-pipeline](graphics-pipeline.md), Implementation
+   notes: Scaled motion), which halves the bytes of moving tiles and
+   adds a bilinear upscale to the client.
 
 ## Prior art and coverage
 
@@ -527,6 +542,30 @@ in the browser by WebCodecs. Options, decided when the step starts:
   without AVC today).
 - A hardware encoder in a helper process, outside occamyd, for VNC and
   for motion that the backend does not encode.
+- VP8 inter frames from occamyd, at a reduced resolution. Measured on
+  2026-11-03 on the plasma of the codec corpus (two consecutive motion
+  frames, 1024×768, quality 30, `github.com/gen2brain/vpx` v0.2.1's
+  VP8 encoder at its fastest method, on the M5 Pro bench host):
+
+  | Encoding of a frame | KiB | Encode, ms | SSIM |
+  |---|---|---|---|
+  | WebP tiles at full size | 13.6 | 8.6 | 0.988 |
+  | WebP tiles at half size (the scaled codec) | 6.9 | 2.6 | 0.986 |
+  | VP8 key frame of the whole screen | 11.0 | 5.9 | |
+  | VP8 inter frame, full size | 5.0 | 24.3 | 0.989 |
+  | VP8 inter frame, half size | 1.4 | 6.4 | 0.990 |
+
+  An inter frame is 13.6 to 5.0 KiB against the tiles, and 11.0 to 5.0
+  against a key frame, which is what a WebP tile is. Its cost is the
+  motion search, which is fixed per macroblock: an inter frame of an
+  unchanged screen still takes 20.8 ms (0.4 KiB), and four threads take
+  24.1 ms, since the encoder does not split an inter frame. Decoding one
+  in Go took 0.93 ms. At half size it is the smallest by far, but an
+  inter frame depends on the one before it, so it needs the stream
+  ordered and every frame delivered, which the order-independent tiles
+  of step 3b give up; a lost or skipped frame needs a key frame, and a
+  viewer joining needs one too. That is why it waits for this step
+  rather than replacing the scaled codec.
 
 **Measurement.** G4 and G5 at N0 to N2, and a 60 fps scene.
 
