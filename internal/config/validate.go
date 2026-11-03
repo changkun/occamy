@@ -58,6 +58,8 @@ var (
 	idPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 	envPattern    = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	bcryptPattern = regexp.MustCompile(`^\$2[aby]?\$\d\d\$[./A-Za-z0-9]{53}$`)
+	// A congestion control's name, as Linux's TCP_CA_NAME_MAX allows.
+	congestionPattern = regexp.MustCompile(`^[a-z0-9_]{1,15}$`)
 )
 
 // Problem is one problem in a configuration file.
@@ -127,6 +129,12 @@ func (f *File) validate(c *checker) {
 		f.Listen = DefaultListen
 	}
 	c.address("listen", f.Listen, false)
+	if f.CongestionControl == "" {
+		f.CongestionControl = DefaultCongestionControl
+	}
+	if !congestionPattern.MatchString(f.CongestionControl) {
+		c.add("congestion_control", "%q is not the name of a congestion control: give one such as bbr or cubic, or %s for the kernel's choice", f.CongestionControl, CongestionSystem)
+	}
 	switch {
 	case f.TLS.Cert != "" && f.TLS.Key == "":
 		c.add("tls.key", "required when tls.cert is set")
