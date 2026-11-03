@@ -672,14 +672,10 @@ func (k *keys) reject(key, value *yaml.Node, t reflect.Type, path string, fields
 		k.unknown = map[int]bool{}
 	}
 	k.unknown[key.Line] = true
-	switch {
-	case t == reflect.TypeFor[File]() && key.Value == "guacd":
-		k.guacdParams(value, path)
-	case t == reflect.TypeFor[Connection]() && key.Value == "backend" && value.Value == "guacd":
-		k.problems = append(k.problems, Problem{Line: key.Line, Path: path, Message: backendGuacd})
-		return
-	}
 	msg := hints[t][key.Value]
+	if t == reflect.TypeFor[Connection]() && key.Value == "backend" && value.Value == "guacd" {
+		msg = backendGuacd
+	}
 	if msg == "" {
 		msg = "unknown key"
 		if s := suggest(key.Value, fields); s != "" {
@@ -687,6 +683,9 @@ func (k *keys) reject(key, value *yaml.Node, t reflect.Type, path string, fields
 		}
 	}
 	k.problems = append(k.problems, Problem{Line: key.Line, Path: path, Message: msg})
+	if t == reflect.TypeFor[File]() && key.Value == "guacd" {
+		k.guacdParams(value, path)
+	}
 }
 
 // The messages for the controls that only guacd gave, which went with it
