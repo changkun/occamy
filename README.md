@@ -32,8 +32,9 @@ for each remote and its own protocol, and differs in four ways:
 - **A desktop travels as binary tiles.** Guacamole's text instructions
   carry each image as base64, a third larger than the image itself.
   Occamy's binary protocol sends only the tiles that changed, each
-  lossless or as WebP or JPEG, sends scrolls as copies, and lets the
-  browser reuse tiles it has seen.
+  lossless or as WebP or JPEG, moving content at half size until it
+  stops, sends scrolls as copies, and lets the browser reuse tiles it
+  has seen.
 - **Input comes first.** Small messages never queue behind tiles, and
   each viewer has a short queue paced to its own connection, so a
   keystroke's update is not stuck behind a large frame, and a slow

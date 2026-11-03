@@ -135,6 +135,11 @@ type Encoder interface {
 	// returns it with its codec, or with codec 0 if it cannot. pix is
 	// one tile that Tile reported lossy, or several side by side.
 	Lossy(dst, pix []byte, w, h, quality int) ([]byte, protocol.Codec)
+	// Scaled encodes pix as Lossy does, scaled down by factor, from
+	// protocol.MinScale to protocol.MaxScale, as protocol.CodecScaled,
+	// for a viewer that agreed to it; for another, it encodes pix as
+	// Lossy does.
+	Scaled(dst, pix []byte, w, h, factor, quality int) ([]byte, protocol.Codec)
 	// Still encodes pix as Lossy does, for pixels that are not moving,
 	// at the lowest quality from lo to hi at which each of its tiles,
 	// tile pixels wide side by side, looks like pix by the encoder's
@@ -242,6 +247,9 @@ func Serve(ctx context.Context, c Conn, v *session.Viewer, hello protocol.Hello,
 	}
 	if w.fb != nil && slices.Contains(agreed.Codecs, protocol.CodecCached) {
 		w.cache = newTileCache(int(agreed.CacheSlots))
+	}
+	if slices.Contains(agreed.Codecs, protocol.CodecScaled) {
+		w.scale = encoder.MotionScale
 	}
 	switch {
 	case cfg.NoRefine:

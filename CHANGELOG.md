@@ -9,6 +9,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- `make swift-core` builds the Go client core as `liboccamy.a`, a C
+  archive for Apple silicon and Intel with its interface in `occamy.h`,
+  which the macOS app links
+  ([spec 010](specs/010-native-swift-client.md)).
 - `make bench-compare` collects the comparison of the Guacamole protocol
   with Occamy's in one resumable command: a plan file
   (`bench/plans/compare.yaml`) measured in blocks, in a random order per
@@ -50,6 +54,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   connections use
   ([docs/benchmarks.md](docs/benchmarks.md#the-comparison);
   [results](docs/benchmarks.md#step-3a-the-congestion-control)).
+- Codec 7, `scaled`, carries a tile as a JPEG or WebP image at a
+  fraction of its width and height, which the client scales up
+  ([docs/protocol.md](docs/protocol.md#the-scaled-codec)). occamyd sends
+  tiles in motion at half size to a client that lists it, and at full
+  size again once they stop. The Go and web clients list it; older
+  clients do not, and get tiles in motion at full size as before.
 
 ### Changed
 
@@ -86,6 +96,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - occamyd spends less CPU on full-screen motion: it counts a moving
   tile's colours only until it knows the tile goes lossy. Over VNC a
   frame of motion takes 17.6 ms of occamyd's CPU instead of 19.5.
+- Full-screen motion takes about half the bandwidth: tiles in motion go
+  at half their width and height to a client that lists the `scaled`
+  codec, as the Go and web clients do, and at full size again once they
+  stop. Over VNC a frame of motion is 8.0 KiB instead of 14.2, and
+  takes 12.7 ms of occamyd's CPU instead of 19.3; over RDP 7.7 KiB
+  instead of 14.1, and 14.6 ms instead of 24.7, at the same frame rate.
 - The image and the release archives ship a [conf.yaml](conf.yaml) of
   version 1, to fill in with your users and connections; occamyd
   refuses it until it names someone who signs in.

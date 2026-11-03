@@ -42,6 +42,7 @@ import {
   decode,
   emptyCapabilities,
   encode,
+  parseScaled,
 } from './messages'
 import {
   DEFAULT_MAX_MESSAGE_SIZE,
@@ -658,6 +659,14 @@ export class Session {
     this.screen('tile', r)
     if (!this.capabilities.codecs.includes(codec)) {
       throw new ProtocolError('invalid', `a tile of codec ${codec}, which was not agreed`)
+    }
+    if (codec === Codec.Scaled) {
+      // The message's decoding checked the image's factor and codec,
+      // which must also be agreed.
+      const image = parseScaled(payload).codec
+      if (!this.capabilities.codecs.includes(image)) {
+        throw new ProtocolError('invalid', `a scaled tile of codec ${image}, which was not agreed`)
+      }
     }
     const pixels = 4 * r.width * r.height
     if (codec === Codec.Cached) {

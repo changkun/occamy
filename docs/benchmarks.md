@@ -414,10 +414,11 @@ A v1 session runs as follows:
   physical key, a USB HID usage on a US layout, as the web client's
   carries `KeyboardEvent.code`, which native RDP sends as a scancode.
 - **Codecs.** It offers what occamy's web client offers when the browser
-  decodes them all: deflate, WebP, JPEG and raw, in that order. The
-  client core decodes tiles in parallel as they arrive, with deflate
-  from `internal/codec`, WebP from `github.com/gen2brain/vpx/webp` and
-  JPEG from `image/jpeg` plugged in, and applies a frame to its
+  decodes them all: deflate, WebP, JPEG, scaled and raw, in that order.
+  The client core decodes tiles in parallel as they arrive, with deflate
+  from `internal/codec`, WebP from `github.com/gen2brain/vpx/webp`,
+  JPEG from `image/jpeg`, and scaled as either of those scaled up
+  bilinearly by `internal/codec` plugged in, and applies a frame to its
   framebuffer when `Next` delivers it.
 - **Frames.** A frame draws if it changed a rectangle. A v1 frame is the
   server's, not the scene's: occamyd ends a frame whenever its window
@@ -480,8 +481,9 @@ A v1 session runs as follows:
   protocols.
 - **Decode** is the wall time of each tile's decode, summed over the
   client core's decoding goroutines, which run in parallel, or the
-  terminal emulator's time; copying decoded tiles into the framebuffer
-  is not in it. The `guacd` series' includes compositing, so the column
+  terminal emulator's time; for a scaled tile it includes scaling the
+  image up to the tile's size. Copying decoded tiles into the
+  framebuffer is not in it. The `guacd` series' includes compositing, so the column
   compares v1's series with each other, not v1 with v0, and a table with
   v1 rows says so under it.
 - **Server CPU** is that of the `occamy-v1` container or, for

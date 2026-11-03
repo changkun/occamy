@@ -455,6 +455,8 @@ func decoders(spent *atomic.Int64) []client.Decoder {
 		timed{deflateDecoder{}, spent},
 		timed{webpDecoder{}, spent},
 		timed{jpegDecoder{}, spent},
+		// Its image's decoding and its scaling up, timed once.
+		timed{client.Scaled(webpDecoder{}, jpegDecoder{}), spent},
 	}
 }
 

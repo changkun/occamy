@@ -183,7 +183,9 @@ type worker struct {
 // newWorker returns a worker with no encoders yet.
 func newWorker() *worker { return &worker{encs: map[profile]*encoder.Encoder{}} }
 
-// encoder returns the worker's encoder of profile p.
+// encoder returns the worker's encoder of profile p. One with a lossy
+// codec also scales: a run's key asks for scaled tiles only for a viewer
+// that agreed to them, so the profile need not say whether it did.
 func (wk *worker) encoder(p profile) *encoder.Encoder {
 	e := wk.encs[p]
 	if e == nil {
@@ -193,6 +195,7 @@ func (wk *worker) encoder(p profile) *encoder.Encoder {
 				codecs = append(codecs, c)
 			}
 		}
+		codecs = append(codecs, protocol.CodecScaled)
 		e = encoder.New(codecs)
 		wk.encs[p] = e
 	}
@@ -215,27 +218,29 @@ type tileKey struct {
 }
 
 // runKey names the lossy encoding of the run of n tiles from tile: by
-// Still from lo to q, or else by Lossy at q. The entry has the tiles'
-// versions.
+// Still from lo to q, or else by Lossy at q, or by Scaled at q if scale
+// is more than 1. The entry has the tiles' versions.
 type runKey struct {
 	p       profile
 	tile, n int
 	still   bool
 	q, lo   int
+	scale   int
 }
 
 // runMode is how a run of lossy tiles is encoded when the pacer's
-// quality is q and its lowest lo: tiles in motion by Lossy at the lowest
-// quality, an input's effect by Lossy at q, and other tiles by Still
-// from lo to q.
-func runMode(q, lo int, moving, input bool) (still bool, hi, from int) {
+// quality is q and its lowest lo, for a viewer that takes tiles in
+// motion scaled down by scale, 1 if not: tiles in motion at the lowest
+// quality, by Scaled if scale is more than 1 and else by Lossy, an
+// input's effect by Lossy at q, and other tiles by Still from lo to q.
+func runMode(q, lo int, moving, input bool, scale int) (still bool, hi, from, factor int) {
 	switch {
 	case moving:
-		return false, min(q, lo), 0
+		return false, min(q, lo), 0, scale
 	case input:
-		return false, q, 0
+		return false, q, 0, 1
 	}
-	return true, q, lo
+	return true, q, lo, 1
 }
 
 // entry is an encoding in the cache, or one being made. done is closed
@@ -476,14 +481,15 @@ func (w *writer) encodeTile(dst []byte, t, k int, version uint64, r image.Rectan
 
 // encodeRun encodes the run of n tiles from t, whose pixels are pix and
 // make rect and whose versions are w.runVersion, into w.payload, by
-// Still from lo to q or else by Lossy at q: once for all the viewers that
-// share the writer's cache. It returns the codec, and Still's quality and
-// whether it reached the score.
-func (w *writer) encodeRun(t, n int, pix []byte, rect image.Rectangle, still bool, q, lo int) (codec protocol.Codec, got int, reached bool) {
+// Still from lo to q or else by Lossy at q, scaled down by scale if it is
+// more than 1: once for all the viewers that share the writer's cache.
+// It returns the codec, and Still's quality and whether it reached the
+// score.
+func (w *writer) encodeRun(t, n int, pix []byte, rect image.Rectangle, still bool, q, lo, scale int) (codec protocol.Codec, got int, reached bool) {
 	var e *entry
 	if w.sh != nil {
 		var mine bool
-		e, mine = w.sh.cache.run(runKey{w.prof, t, n, still, q, lo}, w.runVersion[:n])
+		e, mine = w.sh.cache.run(runKey{w.prof, t, n, still, q, lo, scale}, w.runVersion[:n])
 		if e != nil && !mine {
 			if <-e.done; e.ok {
 				w.payload = append(w.payload[:0], e.payload...)
@@ -498,6 +504,8 @@ func (w *writer) encodeRun(t, n int, pix []byte, rect image.Rectangle, still boo
 			w.payload, codec, got, reached = w.sh.cache.still(w.prof, own, w.payload[:0], pix, rect.Dx(), rect.Dy(), w.g.tile, lo, q)
 		case still:
 			w.payload, codec, got, reached = w.enc.Still(w.payload[:0], pix, rect.Dx(), rect.Dy(), w.g.tile, lo, q)
+		case scale > 1:
+			w.payload, codec = w.enc.Scaled(w.payload[:0], pix, rect.Dx(), rect.Dy(), scale, q)
 		default:
 			w.payload, codec = w.enc.Lossy(w.payload[:0], pix, rect.Dx(), rect.Dy(), q)
 		}
@@ -526,6 +534,7 @@ type prefetch struct {
 	cache    *encodeCache
 	tc       *tileCache // a copy of the client's tile cache, nil without one
 	q, lo    int        // the pacer's quality and lowest
+	scale    int        // the writer's for tiles in motion
 	maxWidth int
 
 	// ts are the tiles the workers may encode, in the frame's order, of
@@ -563,7 +572,7 @@ func (w *writer) prefetch(order []int) *prefetch {
 	}
 	f := &prefetch{
 		fb: w.fb, g: w.g, p: w.prof, cache: w.sh.cache,
-		q: w.p.Quality(), lo: w.p.MinQuality(), maxWidth: w.maxWidth(),
+		q: w.p.Quality(), lo: w.p.MinQuality(), scale: w.scale, maxWidth: w.maxWidth(),
 		sh: w.sh, most: max(1, w.sh.workers),
 	}
 	if f.tc = w.cache.contents(); f.tc != nil {
@@ -733,8 +742,8 @@ func (f *prefetch) see(key cacheKey, i int) {
 // run encodes the run of n tiles from t, whose pixels and versions the
 // worker holds, into the cache, unless someone else does.
 func (f *prefetch) run(wk *worker, enc *encoder.Encoder, t, n int, moving bool) {
-	still, q, lo := runMode(f.q, f.lo, moving, false)
-	e, mine := f.cache.run(runKey{f.p, t, n, still, q, lo}, wk.versions[:n])
+	still, q, lo, scale := runMode(f.q, f.lo, moving, false, f.scale)
+	e, mine := f.cache.run(runKey{f.p, t, n, still, q, lo, scale}, wk.versions[:n])
 	if !mine {
 		return
 	}
@@ -742,9 +751,12 @@ func (f *prefetch) run(wk *worker, enc *encoder.Encoder, t, n int, moving bool) 
 		f.recruit()
 		rect := wk.rects[0].Union(wk.rects[n-1])
 		wk.pix = assemble(wk.pix, wk.tiles[:n], wk.rects[:n], rect)
-		if still {
+		switch {
+		case still:
 			wk.payload, e.codec, e.quality, e.reached = f.cache.still(f.p, enc, wk.payload[:0], wk.pix, rect.Dx(), rect.Dy(), f.g.tile, lo, q)
-		} else {
+		case scale > 1:
+			wk.payload, e.codec = enc.Scaled(wk.payload[:0], wk.pix, rect.Dx(), rect.Dy(), scale, q)
+		default:
 			wk.payload, e.codec = enc.Lossy(wk.payload[:0], wk.pix, rect.Dx(), rect.Dy(), q)
 		}
 		e.payload = slices.Clone(wk.payload)
