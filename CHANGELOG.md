@@ -39,7 +39,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   the kernel of each server emulates, since the harness's proxy carries
   a byte stream and cannot drop a packet
   ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)). The report
-  gives what each loss added beside the round trip.
+  gives what each loss added beside the round trip
+  ([results](docs/benchmarks.md#step-2-what-loss-costs)), and the
+  analysis says when the runs are too few for any difference to be
+  significant after Holm's correction.
 
 ### Changed
 

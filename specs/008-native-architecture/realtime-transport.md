@@ -287,11 +287,23 @@ Outlined here; specified in full once step 2's numbers exist.
   fallback, for proxies that do not pass QUIC and for browsers without
   WebTransport; Safari's support is checked before relying on it. On the
   server, quic-go and webtransport-go keep occamyd in pure Go.
+- **Congestion control.** Step 2 measured two costs of loss: the wait
+  behind a lost packet, up to 3 round trips where the scene's rate fits
+  under TCP's throughput bound for the loss, which versioned tiles on
+  streams of their own remove; and, under N2 with 2%, the bound itself,
+  below the scene's rate, to which a loss-based controller holds any
+  transport. quic-go's controller is CUBIC, in an internal package.
+  Which controller carries the frames, and how the pacer keeps the
+  cadence even at a lower rate, are part of this step's design. QUIC's
+  probe timeout follows the round trip, where Linux TCP waits at least
+  200 ms; with 2% loss a key's 99th percentile was 236 to 271 ms at
+  either round trip.
 - [protocol-v1](protocol-v1.md) decision 6 puts WebTransport after 1.0.
-  If step 2 shows a large cost, the owner decides whether this step
+  Step 2 showed a large cost, so the owner decides whether this step
   moves before it.
 
-**Measurement.** Step 2's cells over both transports.
+**Measurement.** Step 2's cells over both transports, with 8 runs, so
+that a difference can be significant after Holm's correction.
 
 ### Step 4: Cadence for watchers
 
@@ -411,8 +423,10 @@ interval, and Guacamole's beside it.
 
 ## Implementation notes: step 2
 
-- **Status.** The loss study is built; the run waits for the owner's
-  go-ahead.
+- **Status.** Done. Built in #183 (`853c4a2`) and measured on
+  2026-11-03 from `e56b585`:
+  [docs/benchmarks.md](../../docs/benchmarks.md#step-2-what-loss-costs)
+  and `docs/benchmarks/realtime/2`.
 - **Built.** `docker/bench/netem` (`shape.sh` and its image); a `loss`
   study in plan files with a `loss` list, its blocks carrying the loss
   as their factor (`loss=2%`) and shaped in the kernel
@@ -431,11 +445,46 @@ interval, and Guacamole's beside it.
   not a measurement, v1-native under N2 with 30 keys: at 0% occamy-v1
   retransmitted no segment and T1's median was 51.5 ms; at 2% it
   retransmitted 71, and G5 over VNC's key p95 was 464 ms against 118.
+- **Measured.** 352 of 360 results; the 8 that failed are guacd's G5
+  under N2 with 2%, where a key's effect did not show within 10 s.
+  What loss added to `v1-native`'s key latency at the 95th percentile
+  during full-screen motion (G5), over VNC and over RDP: 10.0 and
+  15.4 ms with 0.5% under N1, 59.8 [44.2, 88.3] and 64.8 [39.0, 83.3]
+  with 2%; 60.4 and 83.7 [55.1, 159] with 0.5% under N2, 271 and
+  407 [304, 471] with 2%. To typing and to a key on a still desktop it
+  added at most 5.0 and 12.9 ms at the 95th percentile, but with 2% the
+  99th was 236 to 271 ms at either round trip, against 22 to 59.
+- **Decision.** Loss of 2% adds 3 to 8 round trips to a key during
+  motion, more than about one, so step 3 is built. The cost is large,
+  so the owner decides whether step 3 comes before 1.0
+  ([protocol-v1](protocol-v1.md) decision 6).
+- **What it tells step 3.** Loss costs two things. Where the scene's
+  rate fits under TCP's throughput bound for the loss, about
+  1.22 · MSS / (RTT · √p) (N1 with 2%, N2 with 0.5%), the frame rate
+  holds and the cost is the wait for a retransmission, up to 3 round
+  trips, which delivery in any order removes. Under N2 with 2% the
+  bound, about 245 KiB a second, is below the scene's 420: the link
+  carried 244 over VNC and 220 over RDP, the window let 16.8 and 15.6
+  frames a second out, and 44% and 48% of the scene's frames were
+  never shown. That is congestion control reading a random loss as
+  congestion, and any transport with a loss-based controller has the
+  same bound; quic-go's is CUBIC, in an internal package. The 99th
+  percentile, the same at 20 and 50 ms, points at a timer: Linux TCP
+  retransmits on a timeout of at least 200 ms, where QUIC's probe
+  timeout follows the round trip (RFC 9002, section 6.2).
 - **Surprises.** gvproxy ends the client's TCP connection on the Mac:
   the servers see 192.168.127.1, not the harness. A `prio` qdisc's
   default priomap sends priority 2 to band 3, so the shaping band would
   have caught unfiltered packets; the priomap sends every priority to
-  band 1.
+  band 1. At 6 runs a side the exact test's smallest p is 0.0022, so
+  Holm's correction over 39 tests could find no difference significant
+  whatever the data; the decision rule never asked it to, and the
+  report now says when the correction is out of reach. A plan with as
+  many tests takes 8 runs or more. guacd queued frames wherever the
+  loss bound was below its 1,200 to 1,600 KiB a second, so each key
+  waited for the one before and its G5 cells took up to 9 minutes;
+  the VNC server's CPU in guacd's G5 under N2 with 2% was 1,079 s,
+  against 32 s without loss, not looked into.
 
 ## Affects
 
