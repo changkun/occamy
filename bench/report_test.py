@@ -162,6 +162,16 @@ class Statistics(unittest.TestCase):
         self.assertAlmostEqual(report.shift(a + 30, a)[0], -30)
         self.assertTrue(math.isnan(report.shift(a[:3], a[:3])[1]))
 
+    def test_out_of_reach(self):
+        # At 6 runs a side the smallest p is 2/924: 23 tests can reach
+        # 0.05 after Holm's correction, 24 cannot.
+        six = dict(n_baseline=6, n_candidate=6)
+        self.assertEqual(report.out_of_reach([six] * 23), "")
+        self.assertIn("smallest p is 0.0022", report.out_of_reach([six] * 24))
+        self.assertIn("over 24 tests none could be", report.out_of_reach([six] * 24))
+        # A cell without runs on one side has no test.
+        self.assertEqual(report.out_of_reach([dict(n_baseline=0, n_candidate=6)] * 30), "")
+
     def test_holm(self):
         np.testing.assert_allclose(report.holm([0.01, 0.04, 0.03, 0.005]), [0.03, 0.06, 0.06, 0.02])
         np.testing.assert_allclose(report.holm([0.5, 0.6]), [1.0, 1.0])
@@ -334,6 +344,23 @@ class Report(unittest.TestCase):
         with open(out / "comparisons.csv") as f:
             primary = [r for r in csv.DictReader(f) if r["family"] == "Guacamole to Occamy" and r["primary"] == "True"]
         self.assertEqual(len(primary), 12)
+
+    def test_loss_all_failed(self):
+        # A loss where every run of a series failed is marked on the
+        # figure, and the series' other losses are still drawn.
+        rep = synthetic_loss()
+        for r in rep["results"]:
+            if (r["series"], r["scenario"], r["net"], r["factor"]) == ("guacd", "G5", "N2", "loss=2%"):
+                r.pop("latency_ms")
+                r["error"] = "probe key 2: context deadline exceeded"
+        out = self.analyse(rep)
+        svg = (out / "loss-latency_p95.svg").read_text()
+        self.assertEqual(svg.count("no run succeeded"), 1)
+        with open(out / "loss.csv") as f:
+            rows = {(r["series"], r["scenario"], r["net"], r["loss"]) for r in csv.DictReader(f)
+                    if r["metric"] == "latency_p95"}
+        self.assertIn(("guacd", "G5", "N2", "0.5"), rows)
+        self.assertNotIn(("guacd", "G5", "N2", "2.0"), rows)
 
     def test_svg_is_deterministic(self):
         a = self.analyse(synthetic())

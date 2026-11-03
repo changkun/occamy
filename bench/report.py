@@ -31,6 +31,7 @@ import argparse
 import csv
 import itertools
 import json
+import math
 import os
 from dataclasses import dataclass
 from functools import cache
@@ -465,6 +466,18 @@ def significant(c):
     return np.isfinite(c["p_adjusted"]) and c["p_adjusted"] < ALPHA
 
 
+def out_of_reach(primary):
+    """Returns why no difference among primary could be significant after
+    Holm's correction, when none could: an exact test's smallest p, two
+    splits of all of them, times the number of tests reaches ALPHA."""
+    least = min((2 / math.comb(c["n_baseline"] + c["n_candidate"], c["n_baseline"])
+                 for c in primary if c["n_baseline"] and c["n_candidate"]), default=None)
+    if least is None or len(primary) * least < ALPHA:
+        return ""
+    return (f" With these runs the exact test's smallest p is {fmt_p(least)}, so after the correction over"
+            f" {len(primary)} tests none could be; the intervals carry the evidence.")
+
+
 def tenfold(c):
     """Reports whether a comparison of a family that the targets judge
     meets the 10x target."""
@@ -678,7 +691,8 @@ def factor_figure(path, fam, comparisons, theme):
 
 def loss_figure(path, metric, summary, theme):
     """Draws, per cell of the loss study, each series' median of metric
-    against the loss, with its 95% interval."""
+    against the loss, with its 95% interval, and marks a loss where none
+    of a series' runs succeeded at the top of the panel."""
     t, dark = THEMES[theme], theme == "dark"
     cells = [c for (_, c, m) in summary if m == metric and c.study == LOSS]
     panels = sorted({(c.net, c.scenario, c.protocol) for c in cells},
@@ -693,16 +707,18 @@ def loss_figure(path, metric, summary, theme):
         ax.set_visible(False)
     x = np.arange(len(levels))
     for ax, (net, sc, pr) in zip(axes.flat, panels):
+        failed = []
         for s in series:
             v = [summary.get((s, c, metric)) for level in levels
                  for c in [next((c for c in cells if (c.net, c.scenario, c.protocol) == (net, sc, pr)
                                  and loss_of(c) == level), None)] if c is not None]
-            if len(v) != len(levels) or any(e is None for e in v):
+            if len(v) != len(levels) or all(e is None for e in v):
                 continue
-            med = np.array([e["median"] for e in v])
-            lo = np.array([e["lo"] for e in v])
-            hi = np.array([e["hi"] for e in v])
+            med = np.array([e["median"] if e else np.nan for e in v])
+            lo = np.array([e["lo"] if e else np.nan for e in v])
+            hi = np.array([e["hi"] if e else np.nan for e in v])
             color = COLORS[s][dark]
+            failed += [(x[i], color) for i, e in enumerate(v) if e is None]
             ax.plot(x, med, color=color, linewidth=2, marker="o", markersize=6, markeredgecolor=t["surface"],
                     markeredgewidth=1.5, label=s, zorder=3)
             ok = np.isfinite(lo)
@@ -711,13 +727,19 @@ def loss_figure(path, metric, summary, theme):
         ax.set_xticks(x, [f"{level:g}%" for level in levels])
         ax.set_title(f"{sc} {pr} · {NETS.get(net, net)}", color=t["text2"], fontsize=9)
         ax.set_ylim(bottom=0)
+        top = ax.get_ylim()[1]
+        for at, color in failed:
+            ax.plot([at], [top], marker="x", markersize=7, markeredgewidth=2, color=color, clip_on=False, zorder=3)
+            ax.annotate("no run succeeded", (at, top), xytext=(0, -12), textcoords="offset points", ha="right" if at else "left",
+                        color=t["text2"], fontsize=7)
         ax.grid(axis="x", visible=False)
     unit = METRICS[metric].unit
     for ax in axes[:, 0]:
         ax.set_ylabel(f"{METRICS[metric].label}" + (f" ({unit})" if unit else ""))
     for ax in axes[-1]:
         ax.set_xlabel("Packets to the client lost")
-    fig.legend(*axes[0][0].get_legend_handles_labels(), loc="outside right upper")
+    # Centred, so that a narrow figure's title does not run into it.
+    fig.legend(*axes[0][0].get_legend_handles_labels(), loc="outside right center")
     fig.suptitle(f"{METRICS[metric].label} against the loss: median of the runs, with 95% intervals", x=0.0,
                  ha="left", color=t["text"], fontsize=11)
     save(fig, path)
@@ -792,7 +814,7 @@ def loss_lines(losses, summary, figures):
 
     lines += [row(c) for c in primary]
     sig = sum(significant(c) for c in primary)
-    lines += ["", f"{sig} of {len(primary)} differences are significant after correction.", ""]
+    lines += ["", f"{sig} of {len(primary)} differences are significant after correction.{out_of_reach(primary)}", ""]
     for name, caption in figures:
         if name.startswith("loss-"):
             lines += [picture(name, caption), ""]
@@ -877,7 +899,7 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
         if judged:
             outcome += (f"; the {TARGET_FACTOR}x target is met in {sum(tenfold(c) for c in primary)} of"
                         f" {sum(c['targets'] for c in primary)}")
-        lines += ["", outcome + ".", ""]
+        lines += ["", outcome + "." + (out_of_reach(primary) if fam.correction == "holm" else ""), ""]
         name = "factors-" + fam.name.lower().replace(" ", "-")
         lines += [picture(name, f"{fam.name}: factors on the primary metrics"), ""]
 
