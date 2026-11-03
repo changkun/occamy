@@ -11,7 +11,7 @@ affects:
   - docs/
 effort: large
 created: 2026-10-29
-updated: 2026-11-01
+updated: 2026-11-03
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -149,9 +149,14 @@ single-node beta.
    behind `legacy_v0: true` and are removed at v1.0. The Vue client kept
    working on them until [009](../009-react-web-client.md) replaced it
    with a React client on protocol v1 and API v1, which uses neither.
+   (2026-11-03, the owner: removed in beta.2 rather than at v1.0, with
+   the Guacamole protocol they serve and guacd;
+   [008](../008-native-architecture.md), v1.0.0-beta.2 scope.)
 5. **Configuration:** v1 files carry `version: 1` and reject unknown keys
    (`yaml.Decoder.KnownFields`). A file without `version` is read as v0
-   configuration and served through the v0 routes.
+   configuration and served through the v0 routes. (2026-11-03: with the
+   v0 routes gone in beta.2, occamyd refuses a file without `version`
+   and says to write a v1 file.)
 6. **Metrics: expvar on the debug listener** for beta. Prometheus can
    come later if someone asks for it.
 7. **TLS:** occamyd terminates TLS when `tls.cert` and `tls.key` are set.
