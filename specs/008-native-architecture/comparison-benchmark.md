@@ -13,7 +13,7 @@ affects:
   - docs/benchmarks/
 effort: xlarge
 created: 2026-11-02
-updated: 2026-11-02
+updated: 2026-11-03
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -35,7 +35,11 @@ The owner set the scope on 2026-11-02:
   `occamy` (Guacamole's protocol, straight from guacd and through occamyd
   v0), `v1-native` (Occamy as shipped), and `v1-guacd`, `v1-native-nogfx`
   and `v1-guacd-gfx`, which separate what the protocol gains from what the
-  backends gain and give like-for-like RDP rows.
+  backends gain and give like-for-like RDP rows. (2026-11-03: beta.2
+  removes the bridge and the v0 routes from occamyd, so `occamy`,
+  `v1-guacd` and `v1-guacd-gfx` go with them; `guacd` stays as the
+  baseline, beside the `v1-native` series. See
+  [008](../008-native-architecture.md), v1.0.0-beta.2 scope.)
 - **Factors:** workloads (typing, clicking, drawing, scrolling, video and
   more), a ladder of networks from local to very slow, the number of
   viewers and operators on a session, and the number of sessions on a
