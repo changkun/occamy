@@ -38,7 +38,7 @@ import (
 // the handshake, and cached, which the server sends for a tile that the
 // client's tile cache holds.
 func Codecs() []protocol.Codec {
-	return []protocol.Codec{protocol.CodecWebP, protocol.CodecJPEG, protocol.CodecDeflate, protocol.CodecRaw, protocol.CodecCached}
+	return []protocol.Codec{protocol.CodecWebP, protocol.CodecJPEG, protocol.CodecDeflate, protocol.CodecRaw, protocol.CodecCached, protocol.CodecScaled}
 }
 
 // Class is a tile's class by its colours, which picks its codec.
@@ -75,6 +75,14 @@ const QualityStep = 3
 
 // firstHint is where an encoder's first search starts.
 const firstHint = 80
+
+// MotionScale is the factor by which tiles in motion go scaled down, to a
+// viewer that agreed to scaled tiles: on the motion scene's plasma, at
+// the pacer's lowest quality, half the bytes of full size, at an SSIM of
+// 0.986 for 0.988, and a third of the encoding time; a factor of 4
+// takes a third of the bytes, at 0.979. A photograph in motion loses
+// more, 0.804 for 0.824, and gets its detail back when it stops.
+const MotionScale = 2
 
 // MaxRun is the most adjacent lossy tiles a writer merges into one
 // rectangle: a row of the 1024-pixel frames that the codec measurement
@@ -116,14 +124,20 @@ type Encoder struct {
 	// webp reports that the viewer decodes WebP, which carries a cursor
 	// exactly when it agreed no lossless codec.
 	webp bool
+	// scales reports that the viewer takes images in the lossy codec
+	// scaled down, as protocol.CodecScaled.
+	scales bool
 
 	pal codec.Palette
 	def codec.Deflater
 	out sliceWriter
 	jo  jpegn.EncodeOptions
 	// pix holds pixels converted before they are encoded: a cursor's to
-	// straight alpha, a lossy rectangle's to opaque.
-	pix []byte
+	// straight alpha, a lossy rectangle's to opaque. small holds a
+	// rectangle scaled down, and sums its sums of a row.
+	pix   []byte
+	small []byte
+	sums  []uint32
 
 	// What Still works in: the encoding tried last and the best that
 	// reached StillSSIM, a JPEG decoded to RGBA, the scorer, and the
@@ -142,6 +156,8 @@ type Encoder struct {
 //   - tiles of up to 256 colours as deflate, or else raw pixels;
 //   - tiles of more as WebP, or else JPEG, or else as tiles of fewer;
 //   - every tile lossy for a viewer that agreed only lossy codecs;
+//   - rectangles that Scaled encodes as scaled, if agreed with a lossy
+//     codec;
 //   - the cursor as deflate, or else raw pixels, or else lossless WebP.
 //
 // The measurement ranks the codecs of each kind, so the viewer's order
@@ -168,6 +184,7 @@ func New(codecs []protocol.Codec) *Encoder {
 	if e.lossless == 0 && e.lossy == 0 {
 		return nil
 	}
+	e.scales = e.lossy != 0 && slices.Contains(codecs, protocol.CodecScaled)
 	return e
 }
 
@@ -176,6 +193,10 @@ func New(codecs []protocol.Codec) *Encoder {
 // far as Tile and Lossy go; Still's choice of quality also depends on the
 // encoder's last.
 func (e *Encoder) Kinds() (lossless, lossy protocol.Codec) { return e.lossless, e.lossy }
+
+// Scales reports whether Scaled sends rectangles scaled down: whether the
+// viewer agreed to scaled tiles and a lossy codec.
+func (e *Encoder) Scales() bool { return e.scales }
 
 // Hint returns the quality Still's last search chose, where its next
 // starts, or 0 before the first.
@@ -242,6 +263,64 @@ func (e *Encoder) Lossy(dst, pix []byte, w, h, quality int) ([]byte, protocol.Co
 		return b, e.lossy
 	}
 	return e.fallback(dst, pix, w, h)
+}
+
+// Scaled appends the encoding of pix, w by h pixels as Lossy takes them,
+// scaled down by factor, from protocol.MinScale to protocol.MaxScale, in
+// the lossy codec at quality to dst, as a protocol.CodecScaled payload,
+// and returns it with that codec. Each pixel of the image is the mean of
+// the factor by factor pixels of pix it covers, fewer at the right and
+// bottom edges, and opaque. For a viewer that does not take scaled
+// images (Scales), another factor, or a rectangle the lossy encoder
+// refuses, it encodes pix as Lossy does.
+func (e *Encoder) Scaled(dst, pix []byte, w, h, factor, quality int) ([]byte, protocol.Codec) {
+	if !e.scales || factor < protocol.MinScale || factor > protocol.MaxScale {
+		return e.Lossy(dst, pix, w, h, quality)
+	}
+	sw, sh := protocol.ScaledSize(w, h, factor)
+	e.small, e.sums = downscale(e.small, e.sums, pix[:4*w*h], w, h, factor)
+	head := protocol.Scaled{Factor: uint8(factor), Codec: e.lossy}.Append(dst) // #nosec G115 -- factor is checked above
+	if b, ok := e.lossyAt(head, e.small, sw, sh, quality); ok {
+		return b, protocol.CodecScaled
+	}
+	return e.Lossy(dst, pix, w, h, quality)
+}
+
+// downscale puts pix, w by h pixels in RGBA order row by row, scaled down
+// by f into dst, each pixel the mean of the f by f pixels it covers,
+// fewer at the right and bottom edges, and opaque; sums holds a row's
+// sums. It returns dst and sums.
+func downscale(dst []byte, sums []uint32, pix []byte, w, h, f int) ([]byte, []uint32) {
+	sw, sh := protocol.ScaledSize(w, h, f)
+	dst = slices.Grow(dst[:0], 4*sw*sh)[:4*sw*sh]
+	sums = slices.Grow(sums[:0], 3*sw)[:3*sw]
+	for y := range sh {
+		clear(sums)
+		y0, y1 := y*f, min(y*f+f, h)
+		for sy := y0; sy < y1; sy++ {
+			row := pix[4*sy*w : 4*(sy+1)*w]
+			for x := range sw {
+				var r, g, b uint32
+				for i := 4 * x * f; i < 4*min(x*f+f, w); i += 4 {
+					r += uint32(row[i])
+					g += uint32(row[i+1])
+					b += uint32(row[i+2])
+				}
+				sums[3*x] += r
+				sums[3*x+1] += g
+				sums[3*x+2] += b
+			}
+		}
+		out := dst[4*y*sw : 4*(y+1)*sw]
+		for x := range sw {
+			n := uint32((min(x*f+f, w) - x*f) * (y1 - y0)) // #nosec G115 -- at most MaxScale²
+			out[4*x] = byte((sums[3*x] + n/2) / n)
+			out[4*x+1] = byte((sums[3*x+1] + n/2) / n)
+			out[4*x+2] = byte((sums[3*x+2] + n/2) / n)
+			out[4*x+3] = 0xff
+		}
+	}
+	return dst, sums
 }
 
 // lossyAt appends the lossy encoding of pix, opaque, at quality, and
