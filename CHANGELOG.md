@@ -46,6 +46,9 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Changed
 
+- The analysis's `comparisons.csv` names the estimate `times_better`.
+  It was `factor`, as was the column of the study's setting, such as
+  `loss=2%`, so a CSV reader kept only one of the two.
 - The benchmark's load gate holds each result rather than each block of
   results, so that the load a scene leaves does not carry into the
   results after it

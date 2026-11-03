@@ -16,8 +16,8 @@ output directory:
 - results.csv: one row per run, cell and metric;
 - summary.csv: per series, cell and metric, the median of the runs and its
   95% interval;
-- comparisons.csv: per comparison, cell and metric, the factor, its 95%
-  interval and p-values;
+- comparisons.csv: per comparison, cell and metric, the factor by which
+  the candidate is better, times_better, its 95% interval and p-values;
 - loss.csv: in a loss study, per series, cell and metric, what the loss
   added, its 95% interval and p-values;
 - report.md: the tables, the targets and the figures;
@@ -570,7 +570,7 @@ def write_tables(out, rows, summary, comparisons, losses=()):
                for (s, c, m), v in sorted(summary.items(), key=lambda kv: (kv[0][1].order(), kv[0][0], kv[0][2]))])
     write_csv(out / "comparisons.csv",
               ["family", "baseline", "candidate", *CELL_HEADER, "metric", "primary", "n_baseline", "n_candidate",
-               "factor", "lo", "hi", "coverage", "p", "p_adjusted"],
+               "times_better", "lo", "hi", "coverage", "p", "p_adjusted"],
               [[c["family"], c["baseline"], c["candidate"], *cell_columns(c["cell"]), c["metric"], c["primary"],
                 c["n_baseline"], c["n_candidate"], c["factor"], c["lo"], c["hi"], c["coverage"], c["p"],
                 c["p_adjusted"]] for c in comparisons])

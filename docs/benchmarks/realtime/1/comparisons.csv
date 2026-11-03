@@ -1,4 +1,4 @@
-family,baseline,candidate,study,factor,scenario,protocol,net,metric,primary,n_baseline,n_candidate,factor,lo,hi,coverage,p,p_adjusted
+family,baseline,candidate,study,factor,scenario,protocol,net,metric,primary,n_baseline,n_candidate,times_better,lo,hi,coverage,p,p_adjusted
 Frame window,v1-native-w2,v1-native,matrix,,T1,ssh,N0,latency_p95,True,6,6,0.9258253635989581,0.7692728266812466,1.1365105008077545,0.9588744588744589,0.6991341991341992,1.0
 Frame window,v1-native-w2,v1-native,matrix,,T1,ssh,N0,latency_p50,False,6,6,0.9565793058774165,0.7503961965134707,1.233,0.9588744588744589,0.5887445887445888,nan
 Frame window,v1-native-w2,v1-native,matrix,,T1,ssh,N0,server_mem,False,6,6,1.0287970167245999,0.9183974437753469,1.1610646387832697,0.9588744588744589,0.9372294372294372,nan
