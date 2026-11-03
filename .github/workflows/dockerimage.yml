@@ -79,7 +79,8 @@ jobs:
 
   # The macOS app: the Go client core's C export layer, tested in process
   # against the interop server, and built as a universal archive for
-  # macOS 26, the oldest the app runs on.
+  # macOS 26, the oldest the app runs on; then OccamyKit on it, tested
+  # against the interop server too, and built for both architectures.
   macos:
     runs-on: macos-26
     steps:
@@ -91,6 +92,13 @@ jobs:
       run: go test -race ./client/occamy-swift/core/ ./client/decoders/
     - name: Build the core archive
       run: make swift-core
+    - name: Test OccamyKit
+      run: swift test --package-path client/occamy-swift
+    # Testing built it for Apple silicon. One architecture a build: two
+    # at once take Xcode's build system, which cannot find SwiftTerm's
+    # build plugin.
+    - name: Build OccamyKit for Intel
+      run: swift build --package-path client/occamy-swift --build-tests --triple x86_64-apple-macosx26.0
 
   web:
     runs-on: ubuntu-latest
