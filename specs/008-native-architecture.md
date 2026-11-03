@@ -179,7 +179,13 @@ it now says that neither is available, and why):
   every viewer and the owner's and interactive viewers' to the server.
   A connection key that restricts each direction, enforced by the
   session core, is small and is planned for beta.2, so that removing
-  guacd removes no security control.
+  guacd removes no security control. As built: `disable_copy` and
+  `disable_paste` on a vnc or rdp connection. The session core drops
+  the remote's clipboard before any viewer sees it, and a viewer's
+  before the backend does, and the RDP backend also leaves the closed
+  direction out of its clipboard channel. ssh and kubernetes
+  connections refuse both keys: the client draws a terminal's text and
+  copies it itself, and a paste reaches a terminal as typing.
 - **Recording sessions** (guacd's `recording-path`). The native
   backends record nothing yet. Recording needs a format and a player,
   which is a larger piece, planned for beta.3; until then occamyd

@@ -258,6 +258,8 @@ func connectionTarget(c *config.Connection) target {
 		ard:                   c.ARD,
 		security:              c.Security,
 		disableGFX:            c.DisableGFX,
+		disableCopy:           c.DisableCopy,
+		disablePaste:          c.DisablePaste,
 		kubernetes:            c.Kubernetes,
 	}
 }
@@ -365,7 +367,10 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 		release()
 		return fail(err)
 	}
-	id, sess, v, err := s.registry.Open(session.Config{Backend: b, OwnerGrace: grace, MaxViewers: s.limits.ViewersPerSession})
+	id, sess, v, err := s.registry.Open(session.Config{
+		Backend: b, OwnerGrace: grace, MaxViewers: s.limits.ViewersPerSession,
+		DisableCopy: t.disableCopy, DisablePaste: t.disablePaste,
+	})
 	if err != nil {
 		release()
 		return fail(err)

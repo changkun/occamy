@@ -254,19 +254,20 @@ func TestNewRDP(t *testing.T) {
 	tls := config.ConnectionTLS{Require: true, ServerName: "desk", CAFile: ca, InsecureSkipVerify: true}
 	cfg, err := rdpConfig(target{
 		connection: "desk", addr: "10.0.0.5:3389", security: rdp.SecurityTLS, disableGFX: true, tls: tls,
+		disableCopy: true, disablePaste: true,
 		creds: config.Credentials{Username: "alice", PasswordEnv: "OCCAMY_TEST_RDP_PASSWORD"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.Addr != "10.0.0.5:3389" || cfg.Username != "alice" || cfg.Password != "pw" || cfg.Security != rdp.SecurityTLS || !cfg.DisableGFX ||
-		cfg.TLS.ServerName != "desk" || cfg.TLS.RootCAs == nil || !cfg.TLS.InsecureSkipVerify || cfg.SecuritySetting != `security: tls on connection "desk"` {
+		!cfg.DisableCopy || !cfg.DisablePaste || cfg.TLS.ServerName != "desk" || cfg.TLS.RootCAs == nil || !cfg.TLS.InsecureSkipVerify || cfg.SecuritySetting != `security: tls on connection "desk"` {
 		t.Errorf("rdpConfig = %+v", cfg)
 	}
 	pins := []string{"SHA256:" + strings.Repeat("A", 43)}
 	cfg, err = rdpConfig(target{addr: "10.0.0.5:3389", creds: config.Credentials{Prompt: true}, tls: config.ConnectionTLS{Pins: pins}})
 	if err != nil || !slices.Equal(cfg.TLS.Pins, pins) || cfg.TLS.RootCAs != nil || cfg.TLS.ServerName != "" || cfg.Security != "" || cfg.DisableGFX ||
-		!strings.Contains(cfg.SecuritySetting, "ad-hoc rdp targets take NLA alone") {
+		cfg.DisableCopy || cfg.DisablePaste || !strings.Contains(cfg.SecuritySetting, "ad-hoc rdp targets take NLA alone") {
 		t.Errorf("pins: %+v %v", cfg, err)
 	}
 	// An ad-hoc target's certificate names the name it was opened by,

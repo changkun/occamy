@@ -339,6 +339,8 @@ the groups of `groups_claim`, not the static user's.
 | `connections[].tls` | system roots | How the target's certificate is checked: a vnc target's when the server offers VeNCrypt, which the VNC backend then always chooses, an rdp target's always, since the RDP backend always runs TLS, and a kubernetes target's API server's. Without `tls`, the certificate must chain to the system's roots and name the target's host, as a browser checks it. Not for ssh. See below |
 | `connections[].security` | `nla` | An rdp connection's security mode, named as Guacamole names them: `nla`, NLA (CredSSP with NTLMv2) over TLS; `nla-ext`, the same with the early user authorization result only; `tls`, TLS without NLA, which sends the password to whichever server passed the certificate check; or `any`, which offers TLS and NLA and lets the server choose. xrdp speaks no NLA, so an xrdp target needs `tls` or `any`. Standard RDP security, without TLS, is never used. Only for rdp. See [backends](#backends) |
 | `connections[].disable_gfx` | `false` | Keep an rdp connection from asking for RDP's graphics pipeline (GFX), so that the server draws with plain bitmap updates. For a server whose GFX codecs `occamyd` does not take yet: **set it for Windows hosts** until `occamyd` takes ClearCodec, which they draw nearly all of their screen in. Only for rdp. See [backends](#backends) |
+| `connections[].disable_copy` | `false` | Keep the remote's clipboard from the session's viewers: text copied on the remote stays there. Only for vnc and rdp: a terminal's text is drawn by the client, which copies it itself |
+| `connections[].disable_paste` | `false` | Keep the viewers' clipboard from the remote: text copied on a viewer's side does not reach the remote's clipboard. A viewer can still type it. Only for vnc and rdp: a paste reaches a terminal as typing |
 | `connections[].ard` | `false` | Allow Apple Remote Desktop authentication, which macOS Screen Sharing needs to log in a user of the Mac. A vnc connection only, and never with a `tls` that requires TLS. Read [the risk](#apple-remote-desktop-ard) first |
 | `connections[].kubernetes` | required for kubernetes | The pod a kubernetes connection opens a terminal in, and what runs there; see [Kubernetes](#kubernetes-pods) |
 | `connections[].credentials` | required | How `occamyd` authenticates to the target; see below |
@@ -513,7 +515,8 @@ A vnc session:
 - asks for screen updates only while a viewer can see the session, and
   asks the server for the owner's size, from the stream's `hello` or a
   later resize, where the server supports ExtendedDesktopSize;
-- carries clipboard text both ways and the server's cursor;
+- carries clipboard text both ways, unless `disable_copy` or
+  `disable_paste` closes a direction, and the server's cursor;
 - ends with `remote-ended` when the server ends the session, and with
   `backend-failed` when it cannot connect or log in, or the server's
   certificate is refused.
@@ -538,7 +541,8 @@ An rdp session:
   session;
 - carries clipboard text both ways through the clipboard channel: the
   server's to every viewer, and the owner's and interactive viewers'
-  to the server, as their other input;
+  to the server, as their other input, unless `disable_copy` or
+  `disable_paste` closes a direction;
 - ends with `remote-ended` when the server ends the session, as when
   the user logs off, and with `backend-failed` when it cannot connect
   or log on, or the server's certificate is refused.
@@ -598,19 +602,21 @@ finds with what replaced it:
   - has `security` for its security mode, NLA by default, in place of
     guacd's `security`: an xrdp target needs `security: tls`;
   - has `disable_gfx` in place of guacd's `disable-gfx`, and asks for
-    the graphics pipeline unless it is set.
+    the graphics pipeline unless it is set;
+  - has `disable_copy` and `disable_paste` in place of guacd's
+    `disable-copy` and `disable-paste`.
 - `legacy_v0`: the v0 routes are gone; clients use API v1 and
   protocol v1.
 - A telnet connection: telnet is gone with guacd, which served it.
 
-Two of guacd's controls have no counterpart in `occamyd` yet: session
+One of guacd's controls has no counterpart in `occamyd` yet: session
 recording, by `recording-path` and guacd's other `recording-` and
-`typescript-` parameters, and the clipboard restriction, by
-`disable-copy` and `disable-paste`. `occamyd` records no session until
-a later beta, and has no key yet that closes the clipboard. A file that
-sets any of these under `guacd.params` is refused with an error that
-says so, for each parameter, rather than served with its sessions
-unrecorded or its clipboard open. A file whose RDP connection went
+`typescript-` parameters. `occamyd` records no session until a later
+beta. A file that sets any of them under `guacd.params` is refused with
+an error that says so, for each parameter, rather than served with its
+sessions unrecorded. guacd's `disable-copy` and `disable-paste` are
+refused too, each with the connection key that replaces it, so that no
+clipboard opens that the file closed. A file whose RDP connection went
 through guacd, with its sessions recorded and copying from them
 disabled, is refused with:
 
@@ -618,12 +624,13 @@ disabled, is refused with:
 config: 4 problems:
 	line 7: guacd: guacd was removed in v1.0.0-beta.2: remove guacd, and occamyd serves ssh, vnc, rdp and kubernetes with its own backends
 	line 10: guacd.params.rdp.recording-path: occamyd records no sessions until a later beta: guacd recorded them, and was removed in v1.0.0-beta.2; occamyd does not serve unrecorded what a file wants recorded, so remove the parameter to serve the sessions unrecorded, or keep v1.0.0-beta.1 until recording returns
-	line 11: guacd.params.rdp.disable-copy: guacd restricted the clipboard, and was removed in v1.0.0-beta.2; occamyd does not open a clipboard that a file closes, so remove the parameter to serve the clipboard both ways, or keep v1.0.0-beta.1 until occamyd restricts it itself
+	line 11: guacd.params.rdp.disable-copy: guacd was removed in v1.0.0-beta.2: set disable_copy: true on each vnc and rdp connection whose clipboard stays with the remote; occamyd does not open a clipboard that a file closes
 	line 15: connections[0].backend: guacd was removed in v1.0.0-beta.2: remove backend, and the connection's protocol is served by occamyd's own backend
 ```
 
-Remove the parameter to serve the sessions without the control, or
-keep v1.0.0-beta.1 until `occamyd` has it.
+Set `disable_copy` or `disable_paste` on the connections in place of
+guacd's parameter. Remove a recording parameter to serve the sessions
+unrecorded, or keep v1.0.0-beta.1 until `occamyd` records them.
 
 #### Apple Remote Desktop: `ard`
 
@@ -814,8 +821,9 @@ that:
 - connection IDs, user names and issuer names are unique, and no trusted
   issuer is named `occamy`;
 - `tls` is set only on vnc, rdp and kubernetes connections; `ard` only
-  on vnc connections and `security` and `disable_gfx` only on rdp
-  connections; `ard` never with a `tls` that requires TLS, and
+  on vnc connections, `security` and `disable_gfx` only on rdp
+  connections, and `disable_copy` and `disable_paste` only on vnc and
+  rdp connections; `ard` never with a `tls` that requires TLS, and
   `security` is `nla`, `nla-ext`, `tls` or `any`;
 - a kubernetes connection names a pod, with Kubernetes's names, and
   either `attach` or a `command`; it authenticates with `token_file`,
