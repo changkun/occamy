@@ -132,6 +132,13 @@ public final class FramebufferNSView: NSView, SessionDisplay {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.releaseAll() }
         })
+        // The keyboard goes to the remote from the start, as the window
+        // has nothing else to type into.
+        DispatchQueue.main.async { [weak self] in
+            if let self, self.window?.firstResponder === self.window || self.window?.firstResponder == nil {
+                self.window?.makeFirstResponder(self)
+            }
+        }
     }
 
     // MARK: - Input

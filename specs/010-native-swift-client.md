@@ -160,7 +160,7 @@ VNC Viewer dials a machine itself.
   of the last session the app showed, kept locally. A field in the
   toolbar searches the connections as one types; Return opens the
   match, or, where the server allows ad-hoc targets
-  (`adhoc_targets`), opens an address such as `vnc://host:5900`,
+  (`allow_adhoc_targets`), opens an address such as `vnc://host:5900`,
   `rdp://host` or `ssh://user@host` as an ad-hoc session, as VNC
   Viewer's address field does. Double-click or Return opens a card.
 - **Signing in.** A server is added by its URL. The app reads
@@ -425,3 +425,54 @@ For beta.2 (2026-11-03):
   that the macOS runner does not have; the app is tried against the
   demo stack. `make swift-test` runs them, and CI's `macos` job too,
   then builds the package and tests for arm64 and x86_64.
+
+## Implementation notes: OccamyApp
+
+- **What was done:** `client/occamy-swift/Sources/OccamyApp`, the
+  `Occamy` executable of the package, in SwiftUI on `OccamyKit`, as App
+  design describes it, and in OccamyKit the parts it needed: `API`, the
+  API v1 client (sign-in by password, OIDC with PKCE, the connection
+  list, ad-hoc sessions, shares, ending a session), `Address`, which
+  reads `vnc://`, `rdp://` and `ssh://` addresses with their default
+  ports, and `Keychain`.
+  - The main window is a `NavigationSplitView` of servers and cards;
+    the search field takes an address where the server allows ad-hoc
+    targets, and an ssh address asks for the host key first, as an
+    `ssh-keyscan` line or a `SHA256:` fingerprint. A card's thumbnail is
+    the session's last picture, saved under
+    `~/Library/Application Support/Occamy/Thumbnails`.
+  - Tokens, and passwords the user chooses to remember, go to the login
+    keychain under `de.changkun.occamy`. occamyd's tokens last 15
+    minutes and are not renewed, so with a remembered password the app
+    signs in again when one runs out, and asks otherwise.
+  - The session window's bar, in Liquid Glass at the top edge: scaling
+    (fit, actual size with scroll bars, or, for the owner, resizing the
+    remote to the window), full screen, Ctrl-Alt-Del, ⌘ shortcuts to the
+    remote, the clipboard, a viewer or read-only link for an hour, and
+    End Session for the owner (Disconnect for a viewer). Closing the
+    window leaves the session to the owner grace. When the session
+    ends, the window says why; Connect Again opens the connection
+    again, or rejoins the same session if only the stream was lost.
+  - Prompts show as a sheet; Save in the Keychain answers the same
+    prompt by itself the next time.
+  - OIDC returns to `de.changkun.occamy:/oidc`, which occamyd accepts in
+    `auth.oidc.return_urls` as a scheme that is a domain name in
+    reverse (#196).
+- **Deviations:** sending ⌘ shortcuts needs no Accessibility permission:
+  the view takes the app's key equivalents, and shortcuts that macOS
+  keeps, such as ⌘-Tab, stay with macOS. A terminal keeps its font
+  size, and the owner's window asks for the grid that fits it, as
+  OccamyKit's `TerminalView` does, rather than scaling the font.
+- **Tested:** `APITests` checks the API client against a stub
+  `URLProtocol` (routes, bodies, errors, the token's expiry, the OIDC
+  login URL and outcome, PKCE against RFC 7636's vector) and
+  `AddressTests` the addresses. On 2026-11-03 a scratch test drove
+  OccamyKit as the app does against the demo stack, built from the
+  beta.2 tree: password sign-in and the connection list; the vnc,
+  vnc-none, tigervnc, desktop-vnc, rdp and desktop-rdp connections to
+  their first picture; a viewer link joined as a viewer; End Session;
+  the ssh terminal's echo; and an ad-hoc `vnc://vnc:5901`. The app
+  launches and opens its main window. Not yet tried: the app's windows
+  by hand (scaling, full screen, the clipboard through the pasteboard,
+  prompts), OIDC against a provider, and a kubernetes connection, for
+  which the demo stack has no cluster.

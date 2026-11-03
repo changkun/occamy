@@ -133,6 +133,12 @@ public struct End: Sendable, Equatable, Error {
     public var reason: String
     /// The client's error that ended the session, if any.
     public var error: String?
+
+    public init(code: Int, reason: String, error: String? = nil) {
+        self.code = code
+        self.reason = reason
+        self.error = error
+    }
 }
 
 /// Pointer buttons.
