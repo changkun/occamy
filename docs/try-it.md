@@ -369,19 +369,19 @@ with Ctrl-C.
 ### Sharing
 
 1. Open **x11vnc**. You are its owner.
-2. Click **Share**. Under **Others join**, pick **Read-only: they
+2. Click **Share**. Under **Others join**, pick **View only: they
    watch**, keep **Link expires after** as it is, and click **Create
    link**, then **Copy link**. The link is the page's address with
    `#join=<session>&token=<share>`.
 3. Open the link in a private window or another browser, so that it
    does not share your sign-in. It joins without a sign-in, and the
-   bar's role says `read-only`. The owner's bar shows **1 other
+   bar's role says `view only`. The owner's bar shows **1 other
    viewer**; click it to list them.
-4. In the read-only window, type and click: nothing reaches the
+4. In the view-only window, type and click: nothing reaches the
    desktop.
-5. In the owner's window, click **Create another**, pick **Viewer:
+5. In the owner's window, click **Create another**, pick **With control:
    they also type, point and use the clipboard**, and open that link
-   too. Its role is `viewer`, and its keys and clicks reach the
+   too. Its role says `with control`, and its keys and clicks reach the
    desktop.
 6. Click **End session** in the owner's window. Both viewers see
    "Session ended" and "The owner ended the session."

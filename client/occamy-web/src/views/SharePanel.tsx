@@ -2,8 +2,9 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-// The share panel: the owner mints a link that joins the session as a
-// viewer or read-only (POST /api/v1/sessions/{id}/shares).
+// The share panel: the owner mints a link that joins the session with
+// control or view only, API v1's viewer and read-only roles
+// (POST /api/v1/sessions/{id}/shares).
 
 import { type FormEvent, type ReactElement, useEffect, useEffectEvent, useId, useRef, useState } from 'react'
 
@@ -52,7 +53,7 @@ export function SharePanel({ api, token, sessionId, request, onClose, onSignIn }
     try {
       const share = await api.share(token, sessionId, r, expiresIn)
       setLink(shareLink(pageURL(location), sessionId, share.token))
-      setStatus(`Anyone with this link can join as ${share.role === 'viewer' ? 'a viewer' : 'read-only'} until it expires or the session ends.`)
+      setStatus(`Anyone with this link can join ${share.role === 'viewer' ? 'with control' : 'view only'} until it expires or the session ends.`)
     } catch (err) {
       if (err instanceof ApiError && err.signedOut) {
         // The panel stays, and the share is created once the owner has
@@ -99,11 +100,11 @@ export function SharePanel({ api, token, sessionId, request, onClose, onSignIn }
         <legend>Others join</legend>
         <label className="choice">
           <input type="radio" name="role" checked={role === 'read-only'} onChange={() => setRole('read-only')} autoFocus />
-          Read-only: they watch
+          View only: they watch
         </label>
         <label className="choice">
           <input type="radio" name="role" checked={role === 'viewer'} onChange={() => setRole('viewer')} />
-          Viewer: they also type, point and use the clipboard
+          With control: they also type, point and use the clipboard
         </label>
       </fieldset>
       <label>

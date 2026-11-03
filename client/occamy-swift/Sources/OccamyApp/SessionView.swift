@@ -233,8 +233,8 @@ struct SessionView: View {
                 .help(model.clipboardEnabled ? "The clipboard is shared" : "The clipboard is not shared")
                 if model.role.manage {
                     Menu {
-                        Button("Copy Viewer Link") { share(.viewer, model) }
-                        Button("Copy Read-Only Link") { share(.readOnly, model) }
+                        Button("Copy Link with Control") { share(.viewer, model) }
+                        Button("Copy View-Only Link") { share(.readOnly, model) }
                     } label: {
                         Image(systemName: "link")
                     }
@@ -409,7 +409,7 @@ struct SessionView: View {
                 let s = try await server.api.share(session: id, role: role, token: token)
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(server.api.shareLink(session: id, share: s.token).absoluteString, forType: .string)
-                flash(role == .viewer ? "Viewer link copied, for an hour" : "Read-only link copied, for an hour")
+                flash(role == .viewer ? "Link with control copied, for an hour" : "View-only link copied, for an hour")
             } catch {
                 flash(error.localizedDescription)
             }

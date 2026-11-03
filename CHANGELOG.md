@@ -136,6 +136,9 @@ the API and the protocol may change before 1.0.0.
   stop. Over VNC a frame of motion is 8.0 KiB instead of 14.2, and
   takes 12.7 ms of occamyd's CPU instead of 19.3; over RDP 7.7 KiB
   instead of 14.1, and 14.6 ms instead of 24.7, at the same frame rate.
+- The web client names a share's roles by what they allow: a link
+  joins **with control**, to type, point and use the clipboard, or
+  **view only**. API v1 still calls them `viewer` and `read-only`.
 - The image and the release archives ship a [conf.yaml](conf.yaml) of
   version 1, to fill in with your users and connections; occamyd
   refuses it until it names someone who signs in.

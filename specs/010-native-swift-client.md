@@ -481,6 +481,10 @@ For beta.2 (2026-11-03):
     the window; when leaving reported nil too, that nil came last, and
     Full Screen and fitting the window to the remote's screen had no
     window to act on (found by the owner, 2026-11-04).
+  - The share menu says what a link allows: Copy Link with Control,
+    to type, point and use the clipboard, and Copy View-Only Link, as
+    the web client's share panel and bar do. API v1 calls the roles
+    `viewer` and `read-only`, and "viewer" read as watching only.
   - Tokens, and passwords the user chooses to remember, go to the login
     keychain under `de.changkun.occamy`. occamyd's tokens last 15
     minutes and are not renewed, so with a remembered password the app
@@ -488,7 +492,7 @@ For beta.2 (2026-11-03):
   - The session window's bar, in Liquid Glass at the top edge: scaling
     (fit, actual size with scroll bars, or, for the owner, resizing the
     remote to the window), full screen, Ctrl-Alt-Del, ⌘ shortcuts to the
-    remote, the clipboard, a viewer or read-only link for an hour, and
+    remote, the clipboard, a link with control or a view-only one for an hour, and
     End Session for the owner (Disconnect for a viewer). Closing the
     window leaves the session to the owner grace. When the session
     ends, the window says why; Connect Again opens the connection

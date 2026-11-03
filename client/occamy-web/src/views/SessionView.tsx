@@ -15,7 +15,7 @@ import { CLIPBOARD_WAITING, type SessionController as Controller, SessionControl
 import { type Ending, endsSession } from '../lib/ending'
 import { type Size, cellGrid, fitSize, pixelRatio, screenSize } from '../lib/layout'
 import { endSession, sessionOwner } from '../lib/owner'
-import { type Abilities, abilities, roleName } from '../lib/roles'
+import { type Abilities, abilities, roleLabel } from '../lib/roles'
 import { type Target, streamToken, streamURL } from '../lib/targets'
 import { ClipboardPanel, TerminalClipboardPanel } from './ClipboardPanel'
 import { PromptDialog } from './PromptDialog'
@@ -293,7 +293,7 @@ export function SessionView({ api, token, target, owner: seed, action, storage, 
         <span className="brand" title={state.title !== '' ? state.title : name}>
           {state.title !== '' ? state.title : name}
         </span>
-        {state.role !== null && <span className="tag">{roleName(state.role)}</span>}
+        {state.role !== null && <span className="tag">{roleLabel(state.role)}</span>}
         <Viewers state={state} />
         <span className="spacer" />
         {state.phase === 'open' && (
@@ -429,7 +429,7 @@ function Viewers({ state }: { state: SessionState }): ReactElement | null {
       <ul>
         {state.viewers.map((v) => (
           <li key={v.id}>
-            {v.name !== '' ? v.name : 'Guest'} <span className="muted">({roleName(v.role)})</span>
+            {v.name !== '' ? v.name : 'Guest'} <span className="muted">({roleLabel(v.role)})</span>
           </li>
         ))}
       </ul>

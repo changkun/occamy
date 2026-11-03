@@ -33,15 +33,18 @@ export function abilities(role: Role): Abilities {
   }
 }
 
-/** roleName names a role as API v1 does. */
-export function roleName(role: Role): string {
+/**
+ * roleLabel names a role by what it allows, as the bar shows it: API v1
+ * calls the one with control viewer, which reads as watching only.
+ */
+export function roleLabel(role: Role): string {
   switch (role) {
     case Role.Owner:
       return 'owner'
     case Role.Viewer:
-      return 'viewer'
+      return 'with control'
     case Role.ReadOnly:
-      return 'read-only'
+      return 'view only'
     default:
       return 'unknown'
   }
