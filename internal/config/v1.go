@@ -240,6 +240,14 @@ type Connection struct {
 	// with bitmap updates. A Windows server needs it until the pipeline
 	// decodes ClearCodec.
 	DisableGFX bool `yaml:"disable_gfx"`
+	// DisableCopy keeps the remote's clipboard from the viewers of a vnc
+	// or rdp connection, and DisablePaste the viewers' clipboard from the
+	// remote, as guacd's disable-copy and disable-paste did. A terminal's
+	// text is drawn by the client, which copies it itself, and a paste
+	// reaches a terminal as typing, so ssh and kubernetes connections
+	// have neither.
+	DisableCopy  bool `yaml:"disable_copy"`
+	DisablePaste bool `yaml:"disable_paste"`
 	// ARD allows Apple Remote Desktop authentication (security type 30)
 	// on a vnc connection, which macOS Screen
 	// Sharing needs to log in a user of the Mac. Its key exchange
@@ -688,14 +696,15 @@ func (k *keys) reject(key, value *yaml.Node, t reflect.Type, path string, fields
 	}
 }
 
-// The messages for the controls that only guacd gave, which went with it
-// in v1.0.0-beta.2. A file that sets them is refused, so that occamyd
-// never serves unrecorded what a file wants recorded, or opens a
-// clipboard that a file closes.
+// The messages for the controls that guacd gave, which went with it in
+// v1.0.0-beta.2. A file that sets them is refused, so that occamyd never
+// serves unrecorded what a file wants recorded, or opens a clipboard
+// that a file closes.
 const (
 	backendGuacd     = "guacd was removed in v1.0.0-beta.2: remove backend, and the connection's protocol is served by occamyd's own backend"
 	recordingRemoved = "occamyd records no sessions until a later beta: guacd recorded them, and was removed in v1.0.0-beta.2; occamyd does not serve unrecorded what a file wants recorded, so remove the parameter to serve the sessions unrecorded, or keep v1.0.0-beta.1 until recording returns"
-	clipboardRemoved = "guacd restricted the clipboard, and was removed in v1.0.0-beta.2; occamyd does not open a clipboard that a file closes, so remove the parameter to serve the clipboard both ways, or keep v1.0.0-beta.1 until occamyd restricts it itself"
+	copyMoved        = "guacd was removed in v1.0.0-beta.2: set disable_copy: true on each vnc and rdp connection whose clipboard stays with the remote; occamyd does not open a clipboard that a file closes"
+	pasteMoved       = "guacd was removed in v1.0.0-beta.2: set disable_paste: true on each vnc and rdp connection whose remote takes no clipboard; occamyd does not open a clipboard that a file closes"
 )
 
 // guacdControls holds guacd's parameters that recorded sessions or
@@ -713,8 +722,8 @@ var guacdControls = map[string]string{
 	"typescript-name":           recordingRemoved,
 	"create-typescript-path":    recordingRemoved,
 	"typescript-write-existing": recordingRemoved,
-	"disable-copy":              clipboardRemoved,
-	"disable-paste":             clipboardRemoved,
+	"disable-copy":              copyMoved,
+	"disable-paste":             pasteMoved,
 }
 
 // guacdParams reports the parameters under the guacd key, value, at

@@ -337,6 +337,58 @@ func TestVNCEndToEnd(t *testing.T) {
 	awaitEnd(t, cl, protocol.CloseRemoteEnded)
 }
 
+// TestVNCClipboardClosed streams a vnc connection that closes the
+// clipboard both ways: the client's clipboard never reaches the server,
+// and the server's never reaches the client.
+func TestVNCClipboardClosed(t *testing.T) {
+	vs := newVNCServer(t, vnctest.Options{Password: "secret"})
+	conn := vncConnection("desk", vs.Addr(), passwordFile(t, "secret"))
+	conn.DisableCopy, conn.DisablePaste = true, true
+	ts, alice := vncTestServer(t, nil, conn)
+	ctx, cancel := context.WithTimeout(context.Background(), vncTimeout)
+	defer cancel()
+
+	cl := ts.streamConnection(t, alice, "desk", client.Options{})
+	c := acceptVNC(t, vs)
+	if _, err := cl.Clipboard(ctx, "text/plain", []byte("from the client")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := cl.Key(ctx, true, 'a', 0); err != nil {
+		t.Fatal(err)
+	}
+	for {
+		m, err := c.Next(ctx)
+		if err != nil {
+			t.Fatalf("waiting for the key: %v", err)
+		}
+		if ct, ok := m.(vnctest.CutText); ok {
+			t.Fatalf("the client's clipboard reached the server: %q", ct.Text)
+		}
+		if _, ok := m.(vnctest.KeyEvent); ok {
+			break
+		}
+	}
+
+	// The server's clipboard, then a frame: the frame arrives, the
+	// clipboard does not.
+	if err := c.CutText("from the server"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Draw(uniform(image.Rect(0, 0, 8, 8), green)); err != nil {
+		t.Fatal(err)
+	}
+	awaitEvent(t, cl, "the frame", func(ev client.Event) bool {
+		if cb, ok := ev.(client.Clipboard); ok {
+			t.Fatalf("the server's clipboard reached the client: %q", cb.Data)
+		}
+		if _, ok := ev.(client.Frame); !ok {
+			return false
+		}
+		img := cl.Screenshot()
+		return img != nil && img.RGBAAt(7, 7) == green
+	})
+}
+
 // TestVNCSessionStream opens a session with POST, then streams it as a
 // hidden owner: nothing is asked of the server until the client shows,
 // and the owner's hello resizes the screen, as the connection stream's

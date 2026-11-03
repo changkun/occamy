@@ -366,6 +366,7 @@ func (f *File) validateConnections(c *checker) {
 			c.ard(p+".ard", cn)
 			c.security(p+".security", cn)
 			c.disableGFX(p+".disable_gfx", cn)
+			c.clipboard(p, cn)
 			c.kubernetes(p+".kubernetes", cn)
 		}
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
@@ -605,6 +606,22 @@ func (c *checker) security(path string, cn *Connection) {
 func (c *checker) disableGFX(path string, cn *Connection) {
 	if cn.DisableGFX && cn.Protocol != "rdp" {
 		c.add(path, "only rdp connections have disable_gfx")
+	}
+}
+
+// clipboard checks a connection's disable_copy and disable_paste, which
+// vnc and rdp have. A terminal's text is drawn by the client, which
+// copies it itself, and a paste reaches the terminal as typing, so
+// neither key could close a terminal's clipboard.
+func (c *checker) clipboard(path string, cn *Connection) {
+	if cn.Protocol == "vnc" || cn.Protocol == "rdp" {
+		return
+	}
+	if cn.DisableCopy {
+		c.add(path+".disable_copy", "only vnc and rdp connections have disable_copy: a terminal's text is drawn by the client, which copies it itself")
+	}
+	if cn.DisablePaste {
+		c.add(path+".disable_paste", "only vnc and rdp connections have disable_paste: a paste reaches a terminal as typing")
 	}
 }
 

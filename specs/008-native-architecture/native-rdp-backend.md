@@ -14,7 +14,7 @@ affects:
   - server/
 effort: large
 created: 2026-10-31
-updated: 2026-11-01
+updated: 2026-11-03
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -1505,6 +1505,9 @@ RDP's guacd path, RDP no longer needs guacd at all.
     but no key of the file sets them, so a connection that needs a
     restriction stays on guacd. It belongs to the API's connection schema
     ([api-and-server-stack](api-and-server-stack.md)), not to RDP.
+    Done in beta.2: a vnc or rdp connection's `disable_copy` and
+    `disable_paste`, enforced by the session core, which also set the
+    backend's `DisableCopy` and `DisablePaste`.
   - Session recording on the native backends, which guacd's
     `recording-path` gives through guacd alone; session-core leaves it
     out of beta (its decision 6).

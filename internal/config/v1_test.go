@@ -221,6 +221,7 @@ func TestParseV1Example(t *testing.T) {
 			{
 				ID: "windows", Name: "Windows workstation", Protocol: "rdp", Target: "10.0.4.20:3389",
 				DisableGFX:  true,
+				DisableCopy: true,
 				TLS:         config.ConnectionTLS{Pins: []string{"3F:A1:07:5C:92:E4:6B:D8:21:0A:F3:8E:57:C6:19:B4:E2:7D:40:95:A8:1C:6F:D3:0B:72:E9:58:34:AC:66:1F"}},
 				Credentials: config.Credentials{Username: "Administrator", PasswordFile: path("run/secrets/windows-password")},
 				Allow:       config.Allow{Groups: []string{"ops"}},
@@ -428,7 +429,8 @@ func TestOverlap(t *testing.T) {
 // refused, each with what became of it. A file that recorded sessions or
 // restricted the clipboard through guacd is refused for that above all,
 // so that occamyd never serves its sessions unrecorded, or with the
-// clipboard open, unasked.
+// clipboard open, unasked; the clipboard's message names the key that
+// closes it now.
 func TestParseV1GuacdRemoved(t *testing.T) {
 	f := head + `legacy_v0: true
 guacd:
@@ -458,9 +460,9 @@ connections:
 		{"guacd", "guacd was removed in v1.0.0-beta.2: remove guacd"},
 		{"guacd.params.rdp.recording-path", "occamyd records no sessions until a later beta"},
 		{"guacd.params.rdp.create-recording-path", "occamyd records no sessions until a later beta"},
-		{"guacd.params.rdp.disable-copy", "occamyd does not open a clipboard that a file closes"},
+		{"guacd.params.rdp.disable-copy", "set disable_copy: true on each vnc and rdp connection"},
 		{"guacd.params.ssh.typescript-path", "occamyd records no sessions until a later beta"},
-		{"guacd.params.ssh.disable-paste", "occamyd does not open a clipboard that a file closes"},
+		{"guacd.params.ssh.disable-paste", "set disable_paste: true on each vnc and rdp connection"},
 		{"adhoc_backends", "remove adhoc_backends"},
 		{"connections[0].backend", "guacd was removed in v1.0.0-beta.2: remove backend"},
 		{"connections[1].backend", "one backend per protocol since v1.0.0-beta.2"},
@@ -898,6 +900,9 @@ connections:
   - {id: h, protocol: rdp, security: any, target: h, tls: {pins: ["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: i, protocol: rdp, disable_gfx: true, target: i, credentials: {prompt: true}, allow: {users: [alice]}}
   - {id: j, protocol: vnc, disable_gfx: true, target: j, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: k, protocol: vnc, disable_copy: true, disable_paste: true, target: k, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: l, protocol: ssh, insecure_ignore_host_key: true, disable_copy: true, disable_paste: true, target: l, credentials: {prompt: true}, allow: {users: [alice]}}
+  - {id: m, protocol: kubernetes, kubernetes: {pod: p}, disable_paste: true, target: m, credentials: {prompt: true}, allow: {users: [alice]}}
 `, []want{
 			{"connections[0].tls.pins[0]", "not a certificate or a SHA-256 fingerprint"},
 			{"connections[1].tls.pins", "set ca_file or pins, not both"},
@@ -905,6 +910,9 @@ connections:
 			{"connections[4].security", `unknown security mode "rdp"`},
 			{"connections[5].security", `unknown security mode "NLA"`},
 			{"connections[9].disable_gfx", "only rdp connections have disable_gfx"},
+			{"connections[11].disable_copy", "only vnc and rdp connections have disable_copy"},
+			{"connections[11].disable_paste", "only vnc and rdp connections have disable_paste"},
+			{"connections[12].disable_paste", "only vnc and rdp connections have disable_paste"},
 		}},
 		{"kubernetes", head + `connections:
   - {id: a, protocol: kubernetes, target: a, kubernetes: {pod: p}, credentials: {prompt: true}, allow: {users: [alice]}}

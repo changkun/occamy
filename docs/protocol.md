@@ -519,7 +519,8 @@ d0 02                    # height: 720
 
 Type 0x0108. The client's clipboard content, for the remote's
 clipboard. Nothing confirms that it arrived; `clipboard-status` says
-when it has waited too long.
+when it has waited too long. On a connection that sets
+`disable_paste`, the server drops it.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -929,7 +930,8 @@ as occamyd sends one in a client's first frame after it was hidden.
 
 ### clipboard (from the server)
 
-Type 0x020a. The remote clipboard's new content.
+Type 0x020a. The remote clipboard's new content. A connection that
+sets `disable_copy` never sends it.
 
 | Field | Type | Meaning |
 |-------|------|---------|
