@@ -41,7 +41,7 @@ import (
 
 // MaxClipboard bounds clipboard text, in bytes of UTF-8, in either
 // direction: the largest message protocol v1 carries by default, as in
-// the VNC backend and the guacd bridge.
+// the VNC backend.
 const MaxClipboard = 4 << 20
 
 // maxCliprdrMessage bounds the CLIPRDR message the client keeps: its

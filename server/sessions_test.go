@@ -535,8 +535,6 @@ func TestLimits(t *testing.T) {
 	ts.stream(t, path, bob, termHello) // the owner, beside a full session
 }
 
-// TestAdhocReserved checks that the server keeps guacd and its own
-// listeners out of an ad-hoc range's reach.
 // classless is a backend of no class, which session.Start refuses, as
 // it would any registry.Open that fails after the backend is made.
 type classless struct{ *backendtest.Terminal }
@@ -648,6 +646,8 @@ func TestConcurrentLimits(t *testing.T) {
 	}
 }
 
+// TestAdhocReserved checks that the server keeps its own listeners out of
+// an ad-hoc range's reach.
 func TestAdhocReserved(t *testing.T) {
 	ts, _ := sessionServer(t, func(f *config.File) {
 		f.AllowAdhocTargets = true

@@ -69,8 +69,7 @@ const (
 	maskBack      = 1 << 7
 )
 
-// Wheel scrolling follows the guacd bridge, which follows
-// guacamole-common-js's Mouse: a line is 18 pixels, each 53 pixels
+// Wheel scrolling follows guacamole-common-js's Mouse: a line is 18 pixels, each 53 pixels
 // scrolled press and release a wheel button once, and what remains after
 // a press is dropped, so that a notch scrolls once whether a browser
 // reports it as 3 lines or 100 pixels.
@@ -82,7 +81,7 @@ const (
 )
 
 // maxClipboard bounds clipboard text in either direction, the largest
-// message protocol v1 carries by default, as in the guacd bridge.
+// message protocol v1 carries by default.
 const maxClipboard = 4 << 20
 
 // appendSetup appends the messages sent after the handshake:
@@ -212,8 +211,8 @@ func (r *run) presses(p []byte, scrolled *int, d int, mode backend.WheelMode, po
 	return p
 }
 
-// textKeysym returns the keysym that types r, as the guacd bridge and
-// guacamole-common-js's Keyboard derive one from a character: Latin-1 as
+// textKeysym returns the keysym that types r, as guacamole-common-js's
+// Keyboard derives one from a character: Latin-1 as
 // it is, other characters as 0x1000000 plus the code point, and C0
 // controls as the keysyms 0xff00 plus the control (BackSpace, Tab,
 // Return, Escape). A line feed types Return, and DEL and the C1 controls
