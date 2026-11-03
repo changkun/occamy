@@ -161,7 +161,7 @@ The demo stack keeps its key at the same path on the volume
 | `auth.oidc.client_id` | required | `occamyd`'s client ID at the provider |
 | `auth.oidc.client_secret_file`, `client_secret_env` | unset | The client secret, from a file of at most 64 KiB or an environment variable; at most one. Neither means a public client |
 | `auth.oidc.redirect_url` | required | `occamyd`'s callback URL as the browser and the provider know it, ending in `/api/v1/auth/oidc/callback` behind any proxy prefix. https, or http on localhost. Its path is also the sign-in cookie's, and with https the cookie is `Secure`, whoever terminates TLS |
-| `auth.oidc.return_urls` | the origin of `redirect_url`, with the path `/` | Where browsers are sent back after a sign-in, with a one-time code or an error in the fragment: your web client's sign-in page. A sign-in names one of them, matched exactly as written. https, or http on localhost, with no user name and no fragment |
+| `auth.oidc.return_urls` | the origin of `redirect_url`, with the path `/` | Where browsers are sent back after a sign-in, with a one-time code or an error in the fragment: your web client's sign-in page, or an app's own scheme, such as `de.changkun.occamy:/oidc` for [Occamy for macOS](macos-app.md). A sign-in names one of them, matched exactly as written. https, http on localhost, or an app's scheme that is a domain name in reverse, with no user name and no fragment |
 | `auth.oidc.scopes` | `[openid, profile, email]` | Scopes to request; must include `openid` |
 | `auth.oidc.subject_claim` | `sub` | The ID token claim that names the user in allow lists: a top-level string claim of up to 255 bytes, of printable characters that show, with no space but U+0020: no control or format characters (zero-width spaces, bidirectional overrides), no other characters that render as nothing (variation selectors, the combining grapheme joiner, Hangul fillers, the blank Braille pattern U+2800). See [user names](#user-names). Pick one that users cannot set themselves, such as `sub` or `email`, never a display name or `preferred_username` where users can edit it, since allow lists grant by this name. With `email`, the token must also say `email_verified: true` |
 | `auth.oidc.groups_claim` | unset | The top-level claim that lists the user's groups, as a list of strings or one string. Only the groups the file names, in `auth.users[].groups` or an `allow.groups`, are kept. Unset, OIDC users have no groups |
@@ -255,6 +255,14 @@ one in. Until `occamyd` answers CORS preflights, serve the web client
 from `occamyd`'s origin: with `web_client`, or through the reverse proxy
 in front of both. The web client that `web_client` serves returns to
 its own URL, `/static/`, which `return_urls` must list.
+
+A native app takes the same steps in a browser window of its own, such
+as macOS's `ASWebAuthenticationSession`, keeps the verifier in memory,
+and returns to a scheme of its own, a domain name in reverse as RFC 8252
+asks. Occamy for macOS returns to `de.changkun.occamy:/oidc`: list it in
+`return_urls` to let the app sign in through OIDC. Another app on the
+same machine may claim the scheme, but the code it would receive signs
+no one in without the verifier.
 
 Errors in the fragment:
 
@@ -884,8 +892,9 @@ that:
   name in an `allow` list is a static user, and every group is a group of
   some static user. With either one configured, users and groups also come
   from token claims, so names the file does not list are accepted;
-- `auth.oidc.return_urls` are https, or http on localhost, with no user
-  name and no fragment, and `auth.oidc.require_known_users` has someone
+- `auth.oidc.return_urls` are https, http on localhost, or an app's
+  scheme that is a domain name in reverse, with no user name and no
+  fragment, and `auth.oidc.require_known_users` has someone
   to admit: a user in an `allow.users`, a group in an `allow.groups`
   with `groups_claim` set, or, with `link_static_users`, a static user.
   Without `link_static_users`, a static user's name in an `allow.users`

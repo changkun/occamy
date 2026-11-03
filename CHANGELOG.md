@@ -9,6 +9,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- `auth.oidc.return_urls` takes an app's own scheme, a domain name in
+  reverse such as `de.changkun.occamy:/oidc`, so that an app signs in
+  through OIDC as the web client does
+  ([docs/configuration.md](docs/configuration.md#signing-in-through-oidc)).
 - `make swift-core` builds the Go client core as `liboccamy.a`, a C
   archive for Apple silicon and Intel with its interface in `occamy.h`,
   which the macOS app links
