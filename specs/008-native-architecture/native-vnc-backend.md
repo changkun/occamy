@@ -10,7 +10,7 @@ affects:
   - internal/keymap/
 effort: large
 created: 2026-10-29
-updated: 2026-11-03
+updated: 2026-11-04
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -1096,11 +1096,22 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
     checks that the backend refuses type 30 without `ARD`; and, given a
     Mac account, logs in and waits for the screen. It skips without
     `OCCAMY_VNC_ARD_ADDR`. It ran against the fake server, not a Mac.
+  - **Against a Mac, on 2026-11-04.** On the development Mac (macOS
+    26.6), with Screen Sharing on and the legacy VNC password off,
+    `TestMacOS` logged `RFB 003.889`, the types 30, 33, 36 and 35, and
+    type 30's group: generator 5, keys of 512 bytes, a prime of 4096
+    bits. A vnc connection with `ard: true`, in an occamyd container on
+    the same Mac, logged in as the Mac's account, with the password
+    typed at the prompt, and showed the screen. Pointer events reached
+    the Mac, where `screensharingd` logged each, but Screen Sharing's
+    agent ignored them ("ignore mouse move") while the Mac's own mouse
+    moved, as it did to point into the session's window, so the Mac
+    could not be controlled from itself.
 - **What was not done.**
-  - **The check against a Mac.** Nothing listened on 127.0.0.1:5900 on
-    the development Mac (macOS 26.6): `netstat` showed no listener on
-    port 5900, and `com.apple.screensharing` was not loaded, so no
-    connection was made, and no system setting was changed to make one.
+  - **The rest of the check against a Mac.** Control from another
+    machine, `TestMacOS`'s own login, and step 4, the offer with the
+    legacy VNC password on. Until 2026-11-04 Screen Sharing was off on
+    the development Mac, and nothing listened on port 5900.
   - **Apple's other types.** Published captures show what macOS
     offers: 30, 33, 36 and 35 from High Sierra (10.13, Tenable's in 2017)
     and from 10.15.6 (Apple's developer forums); 30, 33 and 36 from macOS
