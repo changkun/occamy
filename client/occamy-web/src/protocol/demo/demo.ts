@@ -97,7 +97,7 @@ async function checks(): Promise<Check[]> {
   record('createImageBitmap and a 2D canvas decode images', canvasDecodeImage() !== null)
   const local = new LocalDecoder()
   const offered = await local.codecs()
-  record('the codecs offered', JSON.stringify(offered) === JSON.stringify([Codec.Deflate, Codec.WebP, Codec.JPEG, Codec.Raw]), JSON.stringify(offered))
+  record('the codecs offered', JSON.stringify(offered) === JSON.stringify([Codec.Deflate, Codec.WebP, Codec.JPEG, Codec.Scaled, Codec.Raw]), JSON.stringify(offered))
 
   const decoded = new Map<string, Uint8ClampedArray>()
   for (const v of codecs.vectors) {

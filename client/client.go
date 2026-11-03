@@ -197,8 +197,8 @@ type Options struct {
 	Hidden bool
 	// Decoders decode codecs other than raw, in the order of preference
 	// the client offers them in. Raw is built in and offered last. With
-	// a decoder of JPEG or WebP, the client also offers the scaled codec,
-	// built in, after them.
+	// a decoder of JPEG or WebP, the client also offers the scaled codec
+	// after them, built in (Scaled) unless Decoders has one.
 	Decoders []Decoder
 	// MaxTextureSize is the largest tile or cursor side the client
 	// decodes; zero means protocol.DefaultMaxTextureSize.
@@ -261,7 +261,7 @@ func (o Options) Hello() protocol.Hello {
 	}
 }
 
-// codecs are the codecs o offers, in its order of preference: then
+// codecs are the codecs o offers, in its order of preference, then
 // scaled if it decodes JPEG or WebP, raw last, and then cached, unless
 // the client keeps no tile cache.
 func (o Options) codecs() []protocol.Codec {
@@ -459,13 +459,15 @@ func newSession(c Conn, opts Options, w protocol.Welcome) *Session {
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	for _, d := range opts.Decoders {
-		if c := d.Codec(); c != protocol.CodecRaw && c != protocol.CodecScaled {
+		if c := d.Codec(); c != protocol.CodecRaw {
 			if _, ok := s.decoders[c]; !ok {
 				s.decoders[c] = d
 			}
 		}
 	}
-	s.decoders[protocol.CodecScaled] = scaled{s.decoders}
+	if _, ok := s.decoders[protocol.CodecScaled]; !ok {
+		s.decoders[protocol.CodecScaled] = scaled{s.decoders}
+	}
 	s.agreed = s.agree(w.Capabilities)
 	s.limits = s.agreed.Limits()
 	s.window = int(s.agreed.FrameWindow)

@@ -53,9 +53,22 @@ func (raw) Decode(dst []byte, w, h int, payload []byte) error {
 	return nil
 }
 
-// scaled is the scaled codec: an image of another codec at a fraction of
-// the tile's size, which it decodes by that codec's decoder and scales up
-// by codec.Upscale.
+// Scaled returns a Decoder of the scaled codec, an image of JPEG or WebP
+// at a fraction of the tile's size: it decodes the image by the one of
+// decoders of its codec and scales it up bilinearly. A client that plugs
+// a decoder of JPEG or WebP has one built in, of its decoders; a caller
+// plugs its own to wrap it, as one that times its decoders does.
+func Scaled(decoders ...Decoder) Decoder {
+	s := scaled{decoders: map[protocol.Codec]Decoder{}}
+	for _, d := range decoders {
+		if c := d.Codec(); c == protocol.CodecJPEG || c == protocol.CodecWebP {
+			s.decoders[c] = d
+		}
+	}
+	return s
+}
+
+// scaled is the scaled codec, which decodes the image by decoders.
 type scaled struct{ decoders map[protocol.Codec]Decoder }
 
 func (scaled) Codec() protocol.Codec { return protocol.CodecScaled }
