@@ -87,12 +87,15 @@ In scope:
    preview by rc.1 and does not gate beta.1. (2026-11-03: it is part of
    beta.2; see v1.0.0-beta.2 scope.)
 
-Out of scope for beta: video encoding (H.264 and similar), audio, file
+Out of scope for beta.1: video encoding (H.264 and similar), audio, file
 transfer and SFTP, a recording player, WebTransport, native RDP beyond
 its registration (GFX and Windows), and multi-node deployment.
 WebTransport and a video path for motion are steps of the
 [real-time transport](008-native-architecture/realtime-transport.md),
 which gate no release and land in the next once measured and kept.
+(2026-11-03: native RDP's GFX shipped in beta.1; session recording with
+a player, WebTransport and the video path are planned for beta.3; see
+v1.0.0-beta.2 scope.)
 
 Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
 
