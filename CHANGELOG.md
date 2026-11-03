@@ -9,6 +9,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Added
 
+- `auth.oidc.return_urls` takes an app's own scheme, a domain name in
+  reverse such as `de.changkun.occamy:/oidc`, so that an app signs in
+  through OIDC as the web client does
+  ([docs/configuration.md](docs/configuration.md#signing-in-through-oidc)).
 - Occamy for macOS, an app for macOS 26 on Apple silicon and Intel that
   opens the connections of your `occamyd` servers in windows of their
   own, as VNC Viewer does: it signs in by password or OIDC, keeps

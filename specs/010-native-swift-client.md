@@ -166,8 +166,13 @@ VNC Viewer dials a machine itself.
 - **Signing in.** A server is added by its URL. The app reads
   `GET /api/v1/auth/methods` and offers a password
   (`POST /api/v1/auth/token`) or OIDC through
-  `ASWebAuthenticationSession` with PKCE, whose return URL occamyd must
-  list in `auth.oidc.return_urls`. Tokens are kept in the Keychain,
+  `ASWebAuthenticationSession` with PKCE, whose return URL,
+  `de.changkun.occamy:/oidc`, occamyd must list in
+  `auth.oidc.return_urls`. occamyd accepts an app's scheme there when
+  it is a domain name in reverse (RFC 8252, section 7.1), which keeps
+  out the schemes a browser handles itself, such as `javascript:`; a
+  loopback `http` return would not do, since the code comes back in the
+  fragment, which never reaches a listener. Tokens are kept in the Keychain,
   never in preferences.
 - **A session window.** One per session, titled with the connection's
   name, opening at the remote screen's size within the display. The

@@ -770,6 +770,31 @@ func TestOIDCOpenRedirect(t *testing.T) {
 	}
 }
 
+// TestOIDCAppReturnURL runs a sign-in that returns to a native app's
+// scheme, as Occamy for macOS's does, from login to access token.
+func TestOIDCAppReturnURL(t *testing.T) {
+	const app = "de.changkun.occamy:/oidc"
+	ot := newOIDCTest(t, func(f *config.File) { f.Auth.OIDC.ReturnURLs = []string{testReturnURL, app} })
+	b := newBrowser(t)
+	verifier := oauth2.GenerateVerifier()
+	r := b.get(t, ot.loginURL(app, oauth2.S256ChallengeFromVerifier(verifier)))
+	if r.code != http.StatusFound {
+		t.Fatalf("login: %d %s", r.code, r.body)
+	}
+	cb := b.get(t, ot.toCallback(t, b, r.header.Get("Location")))
+	frag, ok := strings.CutPrefix(cb.header.Get("Location"), app+"#")
+	if cb.code != http.StatusFound || !ok {
+		t.Fatalf("callback: %d to %q, want a redirect to %s", cb.code, cb.header.Get("Location"), app)
+	}
+	v, err := url.ParseQuery(frag)
+	if err != nil || len(v) != 1 || v.Get("code") == "" {
+		t.Fatalf("sent back with %v, want a code alone: %v", v, err)
+	}
+	if r := ot.exchange(t, v.Get("code"), verifier); r.code != http.StatusOK {
+		t.Errorf("exchange: %d %s", r.code, r.body)
+	}
+}
+
 // TestOIDCLoginChallenge checks that login requires the client's S256
 // challenge.
 func TestOIDCLoginChallenge(t *testing.T) {
