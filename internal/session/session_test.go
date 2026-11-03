@@ -417,6 +417,54 @@ func TestClipboardStatus(t *testing.T) {
 	})
 }
 
+// A connection that closes the clipboard keeps the remote's from the
+// viewers, or the viewers' from the remote, whatever the backend does.
+func TestClipboardClosed(t *testing.T) {
+	t.Run("copy", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			b := &scripted{class: backend.Graphical}
+			_, owner := start(t, session.Config{Backend: b, DisableCopy: true})
+			synctest.Wait()
+			owner.Take()
+			b.sink().Clipboard("text/plain", []byte("secret"))
+			if p := owner.Take(); p.Clipboard != nil {
+				t.Errorf("the remote's clipboard reached the owner: %q", p.Clipboard.Data)
+			}
+		})
+	})
+	t.Run("paste", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			screen := backendtest.NewScreen(64, 48, 0)
+			s, owner := start(t, session.Config{Backend: screen, DisablePaste: true})
+			if err := owner.Input(1, backend.Clipboard{MIME: "text/plain", Data: []byte("secret")}); err != nil {
+				t.Fatal(err)
+			}
+			if err := owner.Input(2, backend.Key{Down: true, Keysym: 0x63}); err != nil {
+				t.Fatal(err)
+			}
+			synctest.Wait()
+			if got := screen.Inputs(); len(got) != 1 || got[0].(backend.Key).Keysym != 0x63 {
+				t.Errorf("backend received %v, want only the key", got)
+			}
+			if got := s.DroppedInputs(); got != 0 {
+				t.Errorf("%d inputs counted as a read-only viewer's", got)
+			}
+		})
+	})
+	t.Run("paste status", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			b := &scripted{class: backend.Graphical}
+			_, owner := start(t, session.Config{Backend: b, DisablePaste: true})
+			synctest.Wait()
+			owner.Take()
+			b.sink().ClipboardStatus(false)
+			if p := owner.Take(); p.ClipboardStatus != nil {
+				t.Errorf("the owner learned the status %v of a clipboard that takes nothing from it", *p.ClipboardStatus)
+			}
+		})
+	})
+}
+
 func TestPrompt(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		b := &scripted{class: backend.Graphical}

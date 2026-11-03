@@ -46,33 +46,35 @@ swift-core:
 	lipo -create -output $(CORE_DIR)/liboccamy.a $(CORE_DIR)/arm64/liboccamy.a $(CORE_DIR)/amd64/liboccamy.a
 .PHONY: swift-core
 
+# swift-test tests OccamyKit, whose tests build and run the interop
+# server with go.
+swift-test: swift-core
+	cd $(SWIFT_DIR) && swift test
+.PHONY: swift-test
+
 build:
 	$(CONTAINER_ENGINE) build --label $(BUILD_LABEL) -t $(IMAGE):$(VERSION) -t $(IMAGE):$(IMAGE_TAG) -f docker/Dockerfile .
 .PHONY: build
 
-# DEMO_DEBUG sets the variables of docker-compose.yaml that turn the demo
-# stack's debug routes on, to on with OCCAMY_DEBUG=1 and to off without
-# it, so that the same variables left in the shell or in docker/.env do
-# not turn them on.
-DEMO_DEBUG = OCCAMY_V0_CONF=$(if $(filter 1,$(OCCAMY_DEBUG)),occamy-debug.yaml,occamy.yaml) \
-	OCCAMY_V1_DEBUG_ADDRESS=$(if $(filter 1,$(OCCAMY_DEBUG)),0.0.0.0:5638)
+# DEMO_DEBUG sets the variable of docker-compose.yaml that turns the demo
+# stack's debug listener on, to on with OCCAMY_DEBUG=1 and to off without
+# it, so that the same variable left in the shell or in docker/.env does
+# not turn it on.
+DEMO_DEBUG = OCCAMY_V1_DEBUG_ADDRESS=$(if $(filter 1,$(OCCAMY_DEBUG)),0.0.0.0:5638)
 
 # DEMO_BIND sets OCCAMY_BIND, the address on which docker-compose.yaml
 # publishes occamy-v1's port: the loopback interface, 127.0.0.1, unless
 # OCCAMY_BIND names another, such as 0.0.0.0 for every interface. It is
-# set either way, so that docker/.env cannot widen it unseen. The v0
-# service's port and occamy-v1's debug port stay on the loopback
-# interface whatever OCCAMY_BIND says.
+# set either way, so that docker/.env cannot widen it unseen. occamy-v1's
+# debug port stays on the loopback interface whatever OCCAMY_BIND says.
 DEMO_BIND = OCCAMY_BIND=$(or $(OCCAMY_BIND),127.0.0.1)
 
 # run starts the demo stack, with occamy-v1 published on the loopback
-# interface unless OCCAMY_BIND says otherwise (DEMO_BIND), and the rest
-# on it always. OCCAMY_DEBUG=1 turns on its debug routes,
-# which have no authentication, on the host's loopback interface: the v0
-# service's pprof on OCCAMY_PORT, in debug mode (docker/occamy-debug.yaml),
-# for the pressure test, and occamy-v1's debug listener on
-# OCCAMY_V1_DEBUG_PORT, for make soak. make run without it turns them off
-# again.
+# interface unless OCCAMY_BIND says otherwise (DEMO_BIND).
+# OCCAMY_DEBUG=1 turns on occamy-v1's debug listener, which has no
+# authentication, on the host's loopback interface on
+# OCCAMY_V1_DEBUG_PORT, for make soak and the pressure test. make run
+# without it turns it off again.
 run:
 	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose up -d --build --wait
 .PHONY: run
@@ -82,11 +84,11 @@ stop:
 .PHONY: stop
 
 # e2e runs the end-to-end tests against a stack started with make run,
-# with OCCAMY_DEBUG=1 for the pressure test (OCCAMY_PRESSURE_N):
-# the v0 service's on OCCAMY_E2E_ENDPOINT and occamy-v1's, API v1 with
-# native VNC and RDP next to guacd's, on OCCAMY_E2E_V1_ENDPOINT. Both
-# default to the ports the stack publishes, OCCAMY_PORT and
-# OCCAMY_V1_PORT as docker-compose.yaml takes them. OCCAMY_E2E_COMPOSE
+# with OCCAMY_DEBUG=1 for the pressure test (OCCAMY_PRESSURE_N), through
+# occamy-v1 on OCCAMY_E2E_V1_ENDPOINT, and its debug listener on
+# OCCAMY_E2E_V1_DEBUG. They default to the ports the stack publishes,
+# OCCAMY_V1_PORT and OCCAMY_V1_DEBUG_PORT as docker-compose.yaml takes
+# them. OCCAMY_E2E_COMPOSE
 # is the stack's compose command, with which a test kills a process in
 # the rdp container and reads its log: CONTAINER_ENGINE's by default, so
 # e2e takes the CONTAINER_ENGINE that run took. OCCAMY_E2E_CHROME names
@@ -94,8 +96,8 @@ stop:
 # find one. The VNC parity matrix takes minutes, so the timeout is longer
 # than go test's default.
 e2e:
-	OCCAMY_E2E_ENDPOINT=$(or $(OCCAMY_E2E_ENDPOINT),localhost:$(or $(OCCAMY_PORT),5636)) \
 	OCCAMY_E2E_V1_ENDPOINT=$(or $(OCCAMY_E2E_V1_ENDPOINT),localhost:$(or $(OCCAMY_V1_PORT),5637)) \
+	OCCAMY_E2E_V1_DEBUG=$(or $(OCCAMY_E2E_V1_DEBUG),localhost:$(or $(OCCAMY_V1_DEBUG_PORT),5638)) \
 	OCCAMY_E2E_COMPOSE="$(or $(OCCAMY_E2E_COMPOSE),$(CONTAINER_ENGINE) compose -f $(CURDIR)/docker/docker-compose.yaml)" \
 	go test -v -count=1 -timeout 20m ./tests/
 .PHONY: e2e
@@ -120,9 +122,8 @@ soak:
 # bench builds occamyd's image, starts the benchmark stack and measures
 # it, as described in docs/benchmarks.md. BENCH_FLAGS passes flags to the
 # harness, for example BENCH_FLAGS="-quick -scenarios T1". A second stack
-# on a shared host takes COMPOSE_PROJECT_NAME, OCCAMY_PORT,
-# OCCAMY_V1_PORT, OCCAMY_V1_GFX_PORT, OCCAMY_V1_CUBIC_PORT, GUACD_PORT,
-# OCCAMY_V1_DEBUG_PORT, OCCAMY_V1_GFX_DEBUG_PORT and
+# on a shared host takes COMPOSE_PROJECT_NAME, OCCAMY_V1_PORT,
+# OCCAMY_V1_CUBIC_PORT, GUACD_PORT, OCCAMY_V1_DEBUG_PORT and
 # OCCAMY_V1_CUBIC_DEBUG_PORT, which the harness follows. Its debug routes
 # are off unless OCCAMY_DEBUG=1, as run's are, or BENCH_RUNTIME=1, which
 # turns on the v1 services' debug listeners alone (BENCH_DEBUG), on the
@@ -133,13 +134,12 @@ soak:
 comma := ,
 BENCH_DEBUG = $(if $(filter 1,$(BENCH_RUNTIME)),OCCAMY_V1_DEBUG_ADDRESS=0.0.0.0:5638)
 BENCH_RUNTIME_FLAGS = $(if $(filter 1,$(BENCH_RUNTIME)),-runtime \
-	occamy-v1=localhost:$(or $(OCCAMY_V1_DEBUG_PORT),5638)$(comma)occamy-v1-gfx=localhost:$(or $(OCCAMY_V1_GFX_DEBUG_PORT),5641)$(comma)occamy-v1-cubic=localhost:$(or $(OCCAMY_V1_CUBIC_DEBUG_PORT),5643))
+	occamy-v1=localhost:$(or $(OCCAMY_V1_DEBUG_PORT),5638)$(comma)occamy-v1-cubic=localhost:$(or $(OCCAMY_V1_CUBIC_DEBUG_PORT),5643))
 bench: build
 	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(BENCH_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml rm -f -s desktop
 	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(BENCH_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml up -d --build --wait
 	go run ./bench -engine $(CONTAINER_ENGINE) -project $(or $(COMPOSE_PROJECT_NAME),occamy) \
-		-addr localhost:$(or $(OCCAMY_PORT),5636) -v1 localhost:$(or $(OCCAMY_V1_PORT),5637) \
-		-v1-gfx localhost:$(or $(OCCAMY_V1_GFX_PORT),5640) -v1-cubic localhost:$(or $(OCCAMY_V1_CUBIC_PORT),5642) \
+		-v1 localhost:$(or $(OCCAMY_V1_PORT),5637) -v1-cubic localhost:$(or $(OCCAMY_V1_CUBIC_PORT),5642) \
 		-guacd localhost:$(or $(GUACD_PORT),4822) $(BENCH_RUNTIME_FLAGS) $(BENCH_FLAGS)
 .PHONY: bench
 

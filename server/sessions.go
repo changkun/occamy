@@ -250,7 +250,6 @@ func connectionTarget(c *config.Connection) target {
 	return target{
 		connection:            c.ID,
 		protocol:              c.Protocol,
-		backend:               c.Backend,
 		addr:                  c.Target,
 		creds:                 c.Credentials,
 		hostKeys:              c.HostKeys,
@@ -259,6 +258,8 @@ func connectionTarget(c *config.Connection) target {
 		ard:                   c.ARD,
 		security:              c.Security,
 		disableGFX:            c.DisableGFX,
+		disableCopy:           c.DisableCopy,
+		disablePaste:          c.DisablePaste,
 		kubernetes:            c.Kubernetes,
 	}
 }
@@ -269,7 +270,7 @@ func (s *server) adhocTarget(ctx context.Context, req *openRequest) (target, *re
 	if s.adhoc == nil {
 		return target{}, &requestError{http.StatusForbidden, codeForbidden, "ad-hoc targets are off: name a connection"}
 	}
-	if !s.backends.serves(req.Protocol) {
+	if _, ok := s.backends[req.Protocol]; !ok {
 		return target{}, badRequest("unknown protocol %q", req.Protocol)
 	}
 	if !config.AdhocProtocol(req.Protocol) {
@@ -305,7 +306,6 @@ func (s *server) adhocTarget(ctx context.Context, req *openRequest) (target, *re
 	}
 	t := target{
 		protocol:              req.Protocol,
-		backend:               s.adhocBackends[req.Protocol],
 		addr:                  net.JoinHostPort(dial.String(), port),
 		creds:                 config.Credentials{Username: req.Username, Prompt: true},
 		hostKeys:              req.HostKeys,
@@ -331,9 +331,9 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 		log.Printf("user %q opening %s: %v", owner.String(), what, err)
 		return nil, nil, err
 	}
-	maker, ok := s.backends.lookup(t.protocol, t.backend)
+	maker, ok := s.backends[t.protocol]
 	if !ok {
-		return fail(fmt.Errorf("no backend %q serves %s", config.BackendOf(t.protocol, t.backend), t.protocol))
+		return fail(fmt.Errorf("no backend serves %s", t.protocol))
 	}
 	// The session counts toward the owner's, and occamyd's, from now
 	// until it ends, so that concurrent requests cannot all pass the
@@ -367,7 +367,10 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 		release()
 		return fail(err)
 	}
-	id, sess, v, err := s.registry.Open(session.Config{Backend: b, OwnerGrace: grace, MaxViewers: s.limits.ViewersPerSession})
+	id, sess, v, err := s.registry.Open(session.Config{
+		Backend: b, OwnerGrace: grace, MaxViewers: s.limits.ViewersPerSession,
+		DisableCopy: t.disableCopy, DisablePaste: t.disablePaste,
+	})
 	if err != nil {
 		release()
 		return fail(err)

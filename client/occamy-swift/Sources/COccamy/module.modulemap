@@ -1,0 +1,5 @@
+module COccamy [system] {
+    header "shim.h"
+    link "occamy"
+    export *
+}

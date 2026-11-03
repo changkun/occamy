@@ -11,6 +11,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"image/jpeg"
 	"slices"
 	"testing"
 	"testing/synctest"
@@ -204,6 +205,79 @@ func TestCopyRect(t *testing.T) {
 		}
 	})
 }
+
+// A scaled tile is drawn scaled up over its rectangle, and one whose
+// image's codec was not agreed, or whose image is not the size its
+// rectangle scaled down, ends the session with protocol-error.
+func TestScaledTile(t *testing.T) {
+	// A flat colour, which JPEG keeps within a step.
+	fill := color.RGBA{200, 100, 50, 255}
+	img := image.NewRGBA(image.Rect(0, 0, 3, 2))
+	draw.Draw(img, img.Rect, image.NewUniform(fill), image.Point{}, draw.Src)
+	var b bytes.Buffer
+	if err := jpeg.Encode(&b, img, &jpeg.Options{Quality: 95}); err != nil {
+		t.Fatal(err)
+	}
+	tile := func(codec protocol.Codec, w, h uint16) *protocol.Tile {
+		return &protocol.Tile{FrameID: 1, W: w, H: h, Codec: protocol.CodecScaled,
+			Payload: protocol.Scaled{Factor: 2, Codec: codec, Image: b.Bytes()}.Append(nil)}
+	}
+	w := graphical
+	w.Capabilities.Codecs = []protocol.Codec{protocol.CodecJPEG, protocol.CodecScaled, protocol.CodecRaw}
+	opts := client.Options{Decoders: []client.Decoder{jpegDecoder{}}}
+
+	synctest.Test(t, func(t *testing.T) {
+		sc := newScripted(t, w, opts)
+		// 5 by 3 scaled down by 2 is the image's 3 by 2.
+		sc.frame(1, &protocol.Resize{Width: 6, Height: 4}, tile(protocol.CodecJPEG, 5, 3))
+		for {
+			ev := next(t, sc.cl, time.Second)
+			if ev == nil {
+				t.Fatal("no frame")
+			}
+			if _, ok := ev.(client.Frame); ok {
+				break
+			}
+			if e, ok := ev.(client.End); ok {
+				t.Fatalf("the session ended: %v", e.Err)
+			}
+		}
+		got := sc.cl.Screenshot()
+		for y := range 4 {
+			for x := range 6 {
+				c := got.RGBAAt(x, y)
+				if x >= 5 || y >= 3 {
+					if c != (color.RGBA{}) {
+						t.Errorf("%d,%d outside the tile: %v", x, y, c)
+					}
+					continue
+				}
+				if d := max(diff(c.R, fill.R), diff(c.G, fill.G), diff(c.B, fill.B)); d > 4 || c.A != 255 {
+					t.Errorf("%d,%d: %v, want about %v", x, y, c, fill)
+				}
+			}
+		}
+	})
+	for name, m := range map[string]*protocol.Tile{
+		"a codec not agreed":                          tile(protocol.CodecWebP, 5, 3),
+		"an image narrower than the tile scaled down": tile(protocol.CodecJPEG, 7, 3),
+		"an image wider than the tile scaled down":    tile(protocol.CodecJPEG, 4, 3),
+		"an image taller than the tile scaled down":   tile(protocol.CodecJPEG, 5, 2),
+	} {
+		t.Run(name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				sc := newScripted(t, w, opts)
+				sc.frame(1, &protocol.Resize{Width: 8, Height: 8}, m)
+				e, ok := last(drain(t, sc.cl, time.Second)).(client.End)
+				if !ok || e.Code != protocol.CloseProtocolError {
+					t.Errorf("the session ended with %#v, want protocol-error", e)
+				}
+			})
+		})
+	}
+}
+
+func diff(a, b uint8) int { return max(int(a)-int(b), int(b)-int(a)) }
 
 // The small state reaches the caller in order, the latest value of each
 // kind once, and pings are answered.
@@ -499,6 +573,19 @@ func TestAgreed(t *testing.T) {
 		// slots, and agrees to neither, whatever the server states.
 		if h := (client.Options{NoCache: true}).Hello(); h.Capabilities.CacheSlots != 0 || slices.Contains(h.Capabilities.Codecs, protocol.CodecCached) {
 			t.Errorf("offered %+v without a cache", h.Capabilities)
+		}
+		// A client that decodes JPEG or WebP offers scaled tiles after
+		// them, and one that decodes neither does not.
+		for _, c := range []struct {
+			decoders []client.Decoder
+			want     []protocol.Codec
+		}{
+			{[]client.Decoder{jpegDecoder{}}, []protocol.Codec{protocol.CodecJPEG, protocol.CodecScaled, protocol.CodecRaw}},
+			{[]client.Decoder{&pngCodec{}}, []protocol.Codec{protocol.CodecPNG, protocol.CodecRaw}},
+		} {
+			if got := (client.Options{Decoders: c.decoders, NoCache: true}).Hello().Capabilities.Codecs; !slices.Equal(got, c.want) {
+				t.Errorf("offered %v, want %v", got, c.want)
+			}
 		}
 		w.Capabilities.Codecs = append(w.Capabilities.Codecs, protocol.CodecCached)
 		sc = newScripted(t, w, client.Options{NoCache: true})

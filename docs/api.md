@@ -2,9 +2,8 @@
 
 This document describes every route that `occamyd` serves for a v1
 configuration file: API v1 under `/api/v1`, `/healthz`, the web client
-under `/static/`, the v0 routes that `legacy_v0` keeps, and the debug
-listener. The keys that turn
-routes on and set their limits are described in
+under `/static/`, and the debug listener. The keys that turn routes on
+and set their limits are described in
 [configuration.md](configuration.md); the stream that the two stream
 routes carry after the upgrade is protocol v1, described in
 [protocol.md](protocol.md). The design and its decisions are in
@@ -29,7 +28,6 @@ document's (`TestOpenAPI`).
 - [Shares](#shares)
 - [Streams](#streams)
 - [Web client](#web-client)
-- [v0 routes](#v0-routes)
 - [The debug listener](#the-debug-listener)
 
 ## Overview
@@ -57,8 +55,6 @@ HTTP/1.1 only, with or without TLS: the streams are WebSockets, which
 | [`GET /api/v1/connections/{id}/stream`](#get-apiv1connectionsidstream) | an access token | always |
 | [`GET /api/v1/sessions/{id}/stream`](#get-apiv1sessionsidstream) | an access token, a session token or a share | always |
 | [`GET /static/`](#get-static) | a browser | with `web_client` |
-| [`POST /api/v0/login`](#post-apiv0login) | anyone | with `legacy_v0` |
-| [`GET /api/v0/connect`](#get-apiv0connect) | a v0 token | with `legacy_v0` |
 | [`GET /debug/vars`](#get-debugvars) and `/debug/pprof/` | anyone who reaches the debug listener | with `debug.address`, on that listener only |
 
 API v1's conventions:
@@ -100,8 +96,7 @@ API v1's conventions:
   answers `404 not_found`, and a route asked with a method it does not
   take answers `405 method_not_allowed` with `Allow` listing the methods
   it takes, both in API v1's [error shape](#errors). Elsewhere, such as
-  `/healthz`, `/static/` or `/api/v0/`, Go's `net/http` answers in
-  plain text.
+  `/healthz` or `/static/`, Go's `net/http` answers in plain text.
 
 ## Authentication
 
@@ -213,9 +208,8 @@ return URL, not in a JSON body; they are described under
 Some failures are not API v1's to shape: headers over the limit get
 `net/http`'s plain-text `431`; a stream request that offers `occamy.v1`
 but is no valid WebSocket upgrade gets the WebSocket library's
-plain-text `426` or `400`; a stream refused after the upgrade gets a
-protocol `close` (see [Streams](#streams)); and the v0 routes keep v0's
-bodies.
+plain-text `426` or `400`; and a stream refused after the upgrade gets
+a protocol `close` (see [Streams](#streams)).
 
 ## Limits
 
@@ -247,8 +241,8 @@ Lifetimes:
 own access and stream tokens as well as a trusted issuer's, so such a
 token still works for up to 30 seconds after its `exp`. A client should
 not rely on that time: a token that has passed its `exp` is due for
-renewal, and `401 token_expired` follows within 30 seconds. v0 tokens
-and the OIDC ID tokens that `occamyd` receives get no such allowance.
+renewal, and `401 token_expired` follows within 30 seconds. The OIDC
+ID tokens that `occamyd` receives get no such allowance.
 
 What one user, one session or `occamyd` may hold, set in
 [`limits`](configuration.md#limits-limits):
@@ -465,8 +459,8 @@ file.
 
 Response: `200`, with `Cache-Control: no-store`. Each connection has its
 `id`, its `name`, which is the ID unless the file gives one, and its
-`protocol`: `ssh`, `vnc`, `rdp`, `telnet` or `kubernetes`. Its target,
-credentials, backend and pod are left out. `adhoc_targets` tells whether
+`protocol`: `ssh`, `vnc`, `rdp` or `kubernetes`. Its target,
+credentials and pod are left out. `adhoc_targets` tells whether
 [`POST /api/v1/sessions`](#post-apiv1sessions) takes ad-hoc targets. A
 caller who may open nothing gets `"connections":[]`.
 
@@ -544,9 +538,9 @@ Response: `200`, with `Cache-Control: no-store`.
 |-------|---------|
 | `id` | The session's ID |
 | `connection` | The connection's ID; absent for an ad-hoc target |
-| `protocol` | `ssh`, `vnc`, `rdp`, `telnet` or `kubernetes` |
-| `backend` | What serves the session: `ssh`, `occamyd`'s native SSH backend; `vnc`, its native VNC backend; `rdp`, its native RDP backend; `kubernetes`, its native Kubernetes backend; or `guacd`, the guacd bridge. ssh and kubernetes are always native, and telnet always goes through guacd. vnc and rdp are native by default, and go through guacd only when the connection's `backend` key, or `adhoc_backends` for an ad-hoc target, says `guacd` ([configuration.md](configuration.md#backends)) |
-| `class` | `terminal` (ssh and kubernetes) or `graphical` (the others, telnet through guacd included): whether the stream carries a terminal or tiles of pixels |
+| `protocol` | `ssh`, `vnc`, `rdp` or `kubernetes` |
+| `backend` | What serves the session: `ssh`, `occamyd`'s SSH backend; `vnc`, its VNC backend; `rdp`, its RDP backend; or `kubernetes`, its Kubernetes backend. Each protocol has one backend, its own |
+| `class` | `terminal` (ssh and kubernetes) or `graphical` (vnc and rdp): whether the stream carries a terminal or tiles of pixels |
 | `size` | `width` and `height`, in character cells for a terminal and in pixels for a graphical session; absent until the remote reports a size |
 | `viewers` | The viewers connected now, the owner first if connected, then the others in the order they joined: each one's `id`, as in `viewer-joined`, and `role`, `owner`, `viewer` or `read-only`. Empty, `[]`, while nobody is connected |
 | `opened` | When the session was opened, RFC 3339 in UTC, to the second |
@@ -608,8 +602,8 @@ are described in [configuration.md](configuration.md#ad-hoc-targets).
 
 | Field | Meaning |
 |-------|---------|
-| `protocol` | Required: `ssh`, `vnc`, `rdp` or `telnet`. kubernetes has no ad-hoc targets: its pod and credentials are a connection's |
-| `target` | Required: `host:port`, or a host alone for the protocol's default port (22, 5900, 3389, 23). An IPv6 address goes in brackets with a port, `[fd00::22]:22` |
+| `protocol` | Required: `ssh`, `vnc` or `rdp`. kubernetes has no ad-hoc targets: its pod and credentials are a connection's |
+| `target` | Required: `host:port`, or a host alone for the protocol's default port (22, 5900, 3389). An IPv6 address goes in brackets with a port, `[fd00::22]:22` |
 | `username` | Optional: the user name to log in as. Without one, the owner is asked for it if the remote needs one |
 | `host_keys` | ssh only: the host keys the target may present, as a connection's `host_keys` takes them: public keys in `authorized_keys` format or `SHA256:` fingerprints |
 | `insecure_ignore_host_key` | ssh only: `true` accepts any host key, with a warning in the log. An ssh target needs this or `host_keys`, not both |
@@ -624,20 +618,17 @@ refused with `403 forbidden` when `adhoc_allowlist` does not allow it:
 `occamyd` resolves a host name, within 5 seconds, checks every address
 against the list, and dials the first address it checked; loopback,
 link-local, unspecified and multicast addresses, the clouds' metadata
-services, guacd's address and `occamyd`'s own listeners are refused
-unless an entry is that very address.
+services and `occamyd`'s own listeners are refused unless an entry is
+that very address.
 
-ssh, vnc and rdp targets use the native SSH, VNC and RDP backends, and
-telnet targets go through guacd. vnc and rdp targets go through guacd
-only when `adhoc_backends` says `vnc: guacd` or `rdp: guacd`. A vnc
-target served by the native backend checks the server's certificate,
-if the server offers VeNCrypt, and an rdp target's always, against the
-system's roots and the host name the request gave, or its address if
-it gave an address. An rdp target logs on with NLA alone, so a server
-without NLA, such as xrdp, needs a connection with `security: tls`
-([configuration.md](configuration.md#ad-hoc-targets)). Through guacd, an ad-hoc target gets none of
-`guacd.params` but the display's. A session on an ad-hoc target has no
-`connection` in its state.
+ssh, vnc and rdp targets use `occamyd`'s SSH, VNC and RDP backends. A
+vnc target checks the server's certificate, if the server offers
+VeNCrypt, and an rdp target's always, against the system's roots and
+the host name the request gave, or its address if it gave an address.
+An rdp target logs on with NLA alone, so a server without NLA, such as
+xrdp, needs a connection with `security: tls`
+([configuration.md](configuration.md#ad-hoc-targets)). A session on an
+ad-hoc target has no `connection` in its state.
 
 ## Shares
 
@@ -871,65 +862,6 @@ a plain name or address with an optional port is left out of
 `occamyd` opens the directory for each request: it warns at start when
 the directory has no `index.html`, or does not exist, and serves the
 client once it is built, without a restart.
-
-## v0 routes
-
-With `legacy_v0: true`, a v1 file also serves the v0 routes that
-Guacamole-protocol clients use, under `/api/v0`. It always serves both:
-`POST /api/v0/login` as well as `GET /api/v0/connect`, where a v0 file
-serves the login only with `client: true`. They are removed at v1.0.
-Their bodies and errors are v0's, not API v1's, and neither the
-connection registry nor `allow_adhoc_targets` and `adhoc_allowlist`
-restrict them: the login signs any target for anyone, and `occamyd`
-warns at start. A v0 file with `client: true` serves `/static/` from
-`client/occamy-web/dist` as well, as [`GET /static/`](#get-static)
-describes, but the web client there needs API v1, which only a v1 file
-serves. Protocol v0 is described in [protocol-cn.md](protocol-cn.md),
-and v0 files in [configuration.md](configuration.md#v0-files).
-
-### `POST /api/v0/login`
-
-Signs a token for a target. It takes no token.
-
-Request, as JSON or as a URL-encoded or multipart form, up to 1 MiB:
-`protocol`, `host` and `password` are required, `username` is optional.
-
-```json
-{"protocol":"vnc","host":"desktop.internal:5900","username":"admin","password":"secret"}
-```
-
-Response: `200`, `application/json; charset=utf-8`. The token is an
-HS256 JWT signed with a key made at each start, so it does not survive
-a restart; it lives an hour, and carries the target and its password in
-readable claims.
-
-```json
-{"code":200,"expire":"2026-10-31T10:00:00Z","token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ…"}
-```
-
-A missing field or a body that does not parse answers `401` with
-`WWW-Authenticate: JWT realm=occamy-proxy`:
-
-```json
-{"code":401,"message":"incorrect Username or Password"}
-```
-
-### `GET /api/v0/connect`
-
-A WebSocket, with the subprotocol `guacamole`, that proxies one
-Guacamole connection between the client and guacd. Every client whose
-token carries the same target and credentials shares one session: the
-first creates it, and the others join it.
-
-The token comes from `Authorization: Bearer`, else the query parameter
-`token`, else the cookie `jwt`. A missing or invalid token answers `401`
-with `{"code":401,"message":"…"}` and `WWW-Authenticate: JWT
-realm=occamy-proxy`, and a token without `exp` answers `400`. The query
-parameters `width` and `height` (1 to 8192, 1024 by 768 by default),
-`dpi` (48 to 600, 96 by default) and `timezone` (an IANA name) describe
-the client's display. An `Origin`, if present, must name the request's
-host; an empty or repeated one is refused with `403`. The WebSocket
-closes with a Guacamole status code, in decimal, as its reason.
 
 ## The debug listener
 

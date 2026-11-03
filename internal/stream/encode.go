@@ -170,8 +170,9 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 // rect, into w.payload, and sets the message's quality and goal:
 //
 //   - tiles in motion at the pacer's lowest quality, since motion loses
-//     detail before input loses responsiveness, and refinement raises
-//     them once they stop;
+//     detail before input loses responsiveness, and scaled down to a
+//     viewer that agreed to it, and refinement raises them once they
+//     stop;
 //   - an input's effect at the pacer's quality, without the search,
 //     which would delay it, and refined like tiles that moved;
 //   - other tiles at the lowest quality up to the pacer's whose SSIM
@@ -181,11 +182,14 @@ func (w *writer) encode(id uint32, order []int, i int, input bool) (n int, send,
 //
 // It returns the codec, 0 if none encodes the pixels.
 func (w *writer) lossy(t, n int, rect image.Rectangle, moving, input bool) protocol.Codec {
-	still, q, lo := runMode(w.p.Quality(), w.p.MinQuality(), moving, input)
-	codec, got, reached := w.encodeRun(t, n, w.runPix, rect, still, q, lo)
-	if still {
+	still, q, lo, scale := runMode(w.p.Quality(), w.p.MinQuality(), moving, input, w.scale)
+	codec, got, reached := w.encodeRun(t, n, w.runPix, rect, still, q, lo, scale)
+	switch {
+	case still:
 		w.msgQuality, w.msgGoal = stillGoal(got, q, reached)
-	} else {
+	case codec == protocol.CodecScaled:
+		w.msgQuality, w.msgGoal = scaledQuality, 0
+	default:
 		w.msgQuality, w.msgGoal = lossyQuality(q), 0
 	}
 	if exact(codec) {

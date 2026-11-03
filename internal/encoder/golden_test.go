@@ -36,7 +36,8 @@ const goldenComment = "Occamy protocol v1 codec vectors: payloads of the codecs 
 	"`exact` vector reproduces them byte for byte; one of a lossy vector " +
 	"reaches at least `min_psnr` against them, in decibels over the red, " +
 	"green and blue of every pixel: 10·log10(255² / the mean squared " +
-	"difference). `container` is a deflate payload inflated. A " +
+	"difference); for a scaled vector, once its image is scaled up " +
+	"bilinearly. `container` is a deflate payload inflated. A " +
 	"`handmade` vector is one occamyd does not send, which a decoder " +
 	"takes all the same. Invalid vectors fail to decode."
 
@@ -100,8 +101,9 @@ type codecCase struct {
 	codec   protocol.Codec
 	w, h    int
 	pix     []byte
-	quality int  // for a lossy vector
-	cursor  bool // encoded as a cursor, from pre
+	quality int            // for a lossy vector
+	inner   protocol.Codec // for a scaled one, its image's codec
+	cursor  bool           // encoded as a cursor, from pre
 	pre     []byte
 	// container is a deflate container that the encoder would not
 	// write, which the vector carries instead of its own.
@@ -117,6 +119,8 @@ func goldenCases(t testing.TB) []codecCase {
 	)
 	photo := loadFrame(t, "photo")
 	crop := func(r image.Rectangle) []byte { return pixels(photo, r) }
+	motion := loadFrame(t, "motion-0")
+	plasma := func(r image.Rectangle) []byte { return pixels(motion, r) }
 	pointer := make([]byte, 0, 4*8*8)
 	for i := range 64 {
 		x, y := i%8, i/8
@@ -149,6 +153,9 @@ func goldenCases(t testing.TB) []codecCase {
 		{name: "webp: lossless, a cursor", codec: webpC, w: 8, h: 8, pix: pointer, cursor: true},
 		{name: "jpeg: 24×16", codec: jpegC, w: 24, h: 16, pix: crop(image.Rect(100, 200, 124, 216)), quality: 70},
 		{name: "jpeg: 17×9", codec: jpegC, w: 17, h: 9, pix: crop(image.Rect(511, 300, 528, 309)), quality: 90},
+		// Scaled by MotionScale, as tiles in motion go: the plasma.
+		{name: "scaled: webp, 24×16", codec: scaled, inner: webpC, w: 24, h: 16, pix: plasma(image.Rect(100, 200, 124, 216)), quality: 50},
+		{name: "scaled: jpeg, 37×9", codec: scaled, inner: jpegC, w: 37, h: 9, pix: plasma(image.Rect(301, 77, 338, 86)), quality: 50},
 	}
 	cases = append(cases, atTheCap(),
 		// Containers occamyd does not send, which a decoder takes: one
@@ -216,6 +223,8 @@ func encodeCase(t testing.TB, c codecCase) []byte {
 	case c.cursor:
 		e := New([]protocol.Codec{c.codec})
 		b, got, _ = e.Cursor(nil, c.pre, c.w, c.h)
+	case c.codec == scaled:
+		b, got = New([]protocol.Codec{c.inner, scaled}).Scaled(nil, c.pix, c.w, c.h, MotionScale, c.quality)
 	case c.quality > 0:
 		b, got = New([]protocol.Codec{c.codec}).Lossy(nil, c.pix, c.w, c.h, c.quality)
 	default:

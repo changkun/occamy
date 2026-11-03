@@ -19,8 +19,8 @@ import (
 // when it takes the input from the queue, with what the server's input
 // capability set allows.
 
-// Wheel scaling, as the VNC backend and the guacd bridge scale a scroll
-// into presses of the wheel buttons: a line is 18 pixels and a notch,
+// Wheel scaling, as the VNC backend scales a scroll into presses of the
+// wheel buttons: a line is 18 pixels and a notch,
 // 120 units of an RDP wheel event, 53. One Wheel makes at most
 // maxNotches notches on each axis.
 const (
@@ -190,7 +190,7 @@ const (
 // server takes them, and as its key on a US layout, with Shift where the
 // character needs it, if not. A line feed and the C0 controls with a
 // key, carriage return, tab, backspace and escape, type that key, as the
-// VNC backend and the guacd bridge send them. Other characters type
+// VNC backend sends them. Other characters type
 // nothing.
 func text(evs []rdp.InputEvent, caps capabilities, s string, limit int) ([]rdp.InputEvent, string) {
 	tap := func(sc uint16) {

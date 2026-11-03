@@ -29,9 +29,9 @@ import (
 
 // logRequests logs each request once it has been served: its method,
 // path, status, duration and the client's address. It leaves out the
-// query string, which carries the token to /api/v0/connect, the headers,
-// which carry tokens, and the body, which carries passwords. gin's logger
-// wrote the query string, and with it the token.
+// query string, which may carry a hello or, from an older client, a
+// token, the headers, which carry tokens, and the body, which carries
+// passwords.
 func logRequests(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -76,14 +76,6 @@ func (w *statusWriter) status() int {
 func recovery(next http.Handler) http.Handler {
 	return recoverWith(next, func(w http.ResponseWriter) {
 		writeError(w, http.StatusInternalServerError, codeInternal, "internal server error")
-	})
-}
-
-// recoverV0 answers a v0 route's panic as gin's recovery did: 500 with no
-// body.
-func recoverV0(next http.Handler) http.Handler {
-	return recoverWith(next, func(w http.ResponseWriter) {
-		w.WriteHeader(http.StatusInternalServerError)
 	})
 }
 
@@ -143,8 +135,7 @@ func limitBodies(n int64) func(http.Handler) http.Handler {
 	}
 }
 
-// bearerRealm is the challenge in API v1's WWW-Authenticate header. v0's
-// header keeps gin-jwt's realm, occamy-proxy.
+// bearerRealm is the challenge in API v1's WWW-Authenticate header.
 const bearerRealm = `Bearer realm="occamy"` // #nosec G101 -- a challenge, not a credential
 
 // authenticate admits requests that carry a valid access token in an
@@ -189,7 +180,7 @@ func authenticate(v *auth.Verifier, ids identities) func(http.Handler) http.Hand
 
 // bearerToken returns the token of the request's one Authorization
 // header with the Bearer scheme. The scheme is case-insensitive, as RFC
-// 9110 has it; v0's lookup kept gin-jwt's "Bearer" only.
+// 9110 has it.
 func bearerToken(r *http.Request) (string, bool) {
 	h := r.Header.Values("Authorization")
 	if len(h) != 1 {

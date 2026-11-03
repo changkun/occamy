@@ -10,7 +10,7 @@ affects:
   - internal/keymap/
 effort: large
 created: 2026-10-29
-updated: 2026-11-01
+updated: 2026-11-03
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -1543,4 +1543,78 @@ since [native-rdp-backend](native-rdp-backend.md)'s phase 1.
 - **Follow-ups.**
   - With the error gone, the parity matrix's third try of a guacd cell,
     the watchdog's backoff, and `vnc-native`'s absence from the soak's
-    default could go, once CI runs of the matrix show no X error.
+    default could go, once CI runs of the matrix show no X error. (The
+    guacd cells went with the bridge in v1.0.0-beta.2, and `vnc-native`
+    is `vnc`; Implementation notes: VNC's parity matrix.)
+
+## Implementation notes: VNC's parity matrix
+
+- **Status.** Since v1.0.0-beta.2, occamyd has no guacd bridge, so the
+  parity matrix has no guacd columns: it is the native backend's matrix
+  on the demo's two VNC servers, x11vnc and TigerVNC. Its history, the
+  parity gate it served and the guacd columns it compared with, is in
+  [guacd-bridge](guacd-bridge.md) (Implementation notes: VNC's parity
+  matrix); the matrix below is that one's native columns, which CI
+  gave at every cell's first try before the bridge was removed.
+- **How it runs.** `tests/parity_test.go` (`TestVNCParity`) drives
+  `occamy-v1` in the [006](../006-demo-stack-refresh.md) stack with the
+  Go client core, over API v1 and protocol v1, through a connection for
+  each server, security type and keyboard layout. `make e2e` runs it,
+  so CI's `e2e` job does. The servers' desktops report what reached the
+  server over the session, and the test warms each port before the
+  matrix, as before.
+- **How a cell is judged.** As before, with no guacd twin: a cell
+  expected to fail is listed in `parityKnown` with the reason and a part
+  of the error that only that failure gives, and any other failure
+  fails the test. A cell tries up to three times, and tries again only
+  if it could not reach the desktop, whose screen did not arrive or
+  whose probe did not answer, which is how a hung server looks; any
+  other failure stands. Before, a native cell that could not reach the
+  desktop tried again only if guacd on the same server could not
+  either. `TestParityMatrixDoc` checks that the table below is the one
+  that `parityFeatures` and `parityKnown` give, and `TestParityCell`
+  drives the retries with fake checks.
+- **The matrix.** x11vnc 0.9.17 (libvncserver 0.9.15) and TigerVNC
+  1.15's Xvnc, Debian trixie.
+
+  | Feature | x11vnc | tigervnc |
+  |---|---|---|
+  | auth: None | pass | pass |
+  | auth: VNC Authentication, stored password | pass | pass |
+  | auth: VNC Authentication, asked of the owner | — | pass |
+  | auth: VNC Authentication, wrong answer refused | — | pass |
+  | auth: VeNCrypt X509Plain | — | pass |
+  | screen and input acknowledged | pass | pass |
+  | resize: by the owner's hello | — | pass |
+  | resize: by a request | — | pass |
+  | resize: the server keeps its size | pass | — |
+  | resize: right after opening | pass | pass |
+  | resize: right after opening, before a prompt | — | pass |
+  | pointer: right after opening | pass | pass |
+  | clipboard to the server, Latin-1 | pass | pass |
+  | clipboard to the server, beyond Latin-1 | fail: x11vnc: Latin-1 only | pass |
+  | clipboard both ways, Latin-1 | pass | pass |
+  | clipboard both ways, beyond Latin-1 | fail: x11vnc: Latin-1 only | pass |
+  | cursor | pass | pass |
+  | keyboard: us | pass | pass |
+  | keyboard: de, keysyms and codes | pass | pass |
+  | keyboard: de, keysyms only | pass | pass |
+  | keyboard: fr, keysyms and codes | pass | pass |
+  | keyboard: fr, keysyms only | pass | pass |
+  | keyboard: de client on a us server | pass | pass |
+  | text input | pass | pass |
+  | sharing: a viewer's input | pass | pass |
+  | sharing: a read-only viewer's input dropped | pass | pass |
+  | reconnect: the owner rejoins occamyd's session | pass | pass |
+
+  A dash is a cell not run: x11vnc offers no VeNCrypt and no
+  ExtendedDesktopSize, and the password asked of the owner, which is
+  occamyd's rather than the server's, runs against TigerVNC only.
+  TigerVNC has ExtendedDesktopSize, so it has no row for its absence.
+  RFB's cut text is Latin-1 and x11vnc has no Extended Clipboard, so
+  text beyond Latin-1 reaches it as `? ? ??`.
+- **Follow-up.** The third try of a guacd cell went with the guacd
+  columns. The x11vnc watchdog's backoff, and `vnc`'s absence from the
+  soak's default, could go once CI runs of the matrix show no X error
+  (Implementation notes: x11vnc's X error when a clipboard requestor is
+  gone).

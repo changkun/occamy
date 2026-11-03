@@ -2,17 +2,33 @@
 # Use of this source code is governed by a MIT
 # license that can be found in the LICENSE file.
 
----
-address: 0.0.0.0:5636
-mode: release # options: debug/release/test
+# occamyd's configuration, version 1, as the image and the release
+# archives ship it. docs/configuration.md describes every key.
+#
+# occamyd has no default user, so it refuses to start with this file as
+# it is: list your users under auth.users, or set auth.oidc, and your
+# connections under connections. The image reads /occamy/conf.yaml;
+# mount your own there.
+
+version: 1
+listen: 0.0.0.0:5636
+# The image's build of the web client, served under /static/.
+web_client: client/occamy-web/dist
 auth:
-  jwt_secret: occamy
-  jwt_alg: HS256
-client: true # serve POST /api/v0/login and /static/; the web client there needs a v1 file
-guacd:
-  address: localhost:4822
-  params: # per-protocol defaults, merged under token values (see README)
-    rdp:
-      ignore-cert: "true" # accept self-signed certificates (xrdp, Windows)
-      # domain: EXAMPLE   # Windows domain accounts
-      # security: nla     # unset negotiates, NLA included
+  # occamyd creates its signing key here at start if it does not exist;
+  # in the image, keep /var/lib/occamy on a volume so that tokens survive
+  # a restart.
+  signing_key_file: /var/lib/occamy/signing.key
+  # A user signs in with the password whose bcrypt hash this is, which
+  # docs/configuration.md says how to make:
+  #
+  # users:
+  #   - name: alice
+  #     password_hash: "$2y$10$..."
+connections: []
+  # - id: desktop
+  #   name: Desktop
+  #   protocol: vnc
+  #   target: desktop.example.com:5900
+  #   credentials: {password_file: /run/secrets/vnc-password}
+  #   allow: {users: [alice]}

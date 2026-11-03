@@ -40,8 +40,8 @@ func TestWebScreen(t *testing.T) {
 	addr := endpointV1(t)
 	browser := startChrome(t)
 	for _, c := range []struct{ id, name string }{
-		{"tigervnc-native", "TigerVNC, native backend"},
-		{"rdp-native", "RDP, native backend"},
+		{"tigervnc", "TigerVNC"},
+		{"rdp", "RDP"},
 	} {
 		for _, w := range []struct{ ratio, width, height float64 }{
 			{2, 1280, 800},

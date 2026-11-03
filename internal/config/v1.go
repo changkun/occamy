@@ -59,18 +59,12 @@ type File struct {
 	TLS               TLS          `yaml:"tls"`
 	Debug             Debug        `yaml:"debug"`
 	Origins           []string     `yaml:"origins"`
-	LegacyV0          bool         `yaml:"legacy_v0"`
 	Auth              Auth         `yaml:"auth"`
-	Guacd             Guacd        `yaml:"guacd"`
 	Connections       []Connection `yaml:"connections"`
 	AllowAdhocTargets bool         `yaml:"allow_adhoc_targets"`
 	AdhocAllowlist    []string     `yaml:"adhoc_allowlist"`
-	// AdhocBackends picks the backend of ad-hoc targets by protocol, as a
-	// connection's Backend does; a protocol it leaves out gets
-	// DefaultBackend's. ParseV1 fills in every protocol.
-	AdhocBackends map[string]string `yaml:"adhoc_backends"`
-	Limits        Limits            `yaml:"limits"`
-	Streams       Streams           `yaml:"streams"`
+	Limits            Limits       `yaml:"limits"`
+	Streams           Streams      `yaml:"streams"`
 	// WebClient is the directory of the built web client, which occamyd
 	// serves under /static/; empty serves none.
 	WebClient string `yaml:"web_client"`
@@ -80,58 +74,6 @@ type File struct {
 	// for the kernel's own choice. ParseV1 fills in
 	// DefaultCongestionControl.
 	CongestionControl string `yaml:"congestion_control"`
-}
-
-// The backends that serve a connection's sessions.
-const (
-	// BackendNative is occamyd's own client of the protocol, for ssh,
-	// vnc, rdp and kubernetes.
-	BackendNative = "native"
-	// BackendGuacd is the guacd bridge, for every protocol but ssh and
-	// kubernetes: the only backend of telnet, and the opt-in fallback of
-	// vnc and rdp.
-	BackendGuacd = "guacd"
-)
-
-// DefaultBackend returns the backend that serves protocol's sessions
-// when the configuration does not pick one: native wherever a native
-// backend exists, which is ssh, vnc, rdp and kubernetes, and guacd for
-// telnet, which has none. For vnc and rdp, backend: guacd is an
-// explicit fallback and the benchmark's baseline, kept until the
-// benchmark shows native at least 10x better
-// (specs/008-native-architecture/guacd-bridge.md, Parity gate); ssh and
-// kubernetes have no guacd backend.
-func DefaultBackend(protocol string) string {
-	switch protocol {
-	case "ssh", "vnc", "rdp", "kubernetes":
-		return BackendNative
-	}
-	return BackendGuacd
-}
-
-// BackendOf returns the backend that b names for protocol, or its
-// default if b is empty, as for a File that ParseV1 did not fill in.
-func BackendOf(protocol, b string) string {
-	if b == "" {
-		return DefaultBackend(protocol)
-	}
-	return b
-}
-
-// backendProblem describes why protocol cannot be served by backend b,
-// or returns "" if it can.
-func backendProblem(protocol, b string) string {
-	switch {
-	case b != BackendNative && b != BackendGuacd:
-		return fmt.Sprintf("unknown backend %q: use %s or %s", b, BackendGuacd, BackendNative)
-	case protocol == "ssh" && b == BackendGuacd:
-		return "ssh connections always use occamyd's native SSH backend: leave backend out, or set native"
-	case protocol == "kubernetes" && b == BackendGuacd:
-		return "kubernetes connections always use occamyd's native Kubernetes backend: leave backend out, or set native"
-	case protocol != "ssh" && protocol != "vnc" && protocol != "rdp" && protocol != "kubernetes" && b == BackendNative:
-		return fmt.Sprintf("%s has no native backend: leave backend out, or set guacd", protocol)
-	}
-	return ""
 }
 
 // Streams bounds what occamyd keeps for one viewer.
@@ -277,10 +219,6 @@ type Connection struct {
 	Name     string `yaml:"name"`
 	Protocol string `yaml:"protocol"`
 	Target   string `yaml:"target"`
-	// Backend picks what serves the connection's sessions: BackendGuacd,
-	// the guacd bridge, or BackendNative, occamyd's own client. ParseV1
-	// fills in DefaultBackend's when it is empty.
-	Backend string `yaml:"backend"`
 	// HostKeys are the host keys an ssh target may present, each a public
 	// key in authorized_keys format or a SHA-256 fingerprint as
 	// ssh-keygen -l prints it. An ssh connection has HostKeys or
@@ -290,21 +228,28 @@ type Connection struct {
 	// a warning, for demos.
 	InsecureIgnoreHostKey bool `yaml:"insecure_ignore_host_key"`
 	// TLS is the certificate policy of a vnc target's VeNCrypt or an rdp
-	// target's TLS, which only the native backends check, and of a
-	// kubernetes target's API server. Other protocols have none.
+	// target's TLS, and of a kubernetes target's API server. Other
+	// protocols have none.
 	TLS ConnectionTLS `yaml:"tls"`
-	// Security is the security mode of an rdp connection on the native
-	// backend, named as guacd names them: nla (the default), nla-ext,
-	// tls or any. Through guacd, guacd.params.rdp.security sets it
-	// instead. xrdp speaks no NLA, so an xrdp target needs tls or any.
+	// Security is the security mode of an rdp connection, named as
+	// Guacamole named them: nla (the default), nla-ext, tls or any. xrdp
+	// speaks no NLA, so an xrdp target needs tls or any.
 	Security string `yaml:"security"`
-	// DisableGFX keeps an rdp connection on the native backend from
-	// asking for RDP's graphics pipeline, which it asks for by default,
-	// so that the server draws with bitmap updates. Through guacd,
-	// guacd.params.rdp.disable-gfx sets it instead.
+	// DisableGFX keeps an rdp connection from asking for RDP's graphics
+	// pipeline, which it asks for by default, so that the server draws
+	// with bitmap updates. A Windows server needs it until the pipeline
+	// decodes ClearCodec.
 	DisableGFX bool `yaml:"disable_gfx"`
+	// DisableCopy keeps the remote's clipboard from the viewers of a vnc
+	// or rdp connection, and DisablePaste the viewers' clipboard from the
+	// remote, as guacd's disable-copy and disable-paste did. A terminal's
+	// text is drawn by the client, which copies it itself, and a paste
+	// reaches a terminal as typing, so ssh and kubernetes connections
+	// have neither.
+	DisableCopy  bool `yaml:"disable_copy"`
+	DisablePaste bool `yaml:"disable_paste"`
 	// ARD allows Apple Remote Desktop authentication (security type 30)
-	// on a vnc connection with the native backend, which macOS Screen
+	// on a vnc connection, which macOS Screen
 	// Sharing needs to log in a user of the Mac. Its key exchange
 	// authenticates no server, so that anyone in between reads the
 	// account's username and password; and without a TLS requirement, a
@@ -334,7 +279,8 @@ type Kubernetes struct {
 	// a shell that prefers bash, unless Attach is set.
 	Command []string `yaml:"command"`
 	// Attach connects to the container's main process instead of
-	// running a command, as guacd does without exec-command.
+	// running a command, as Guacamole's kubernetes protocol does without
+	// exec-command.
 	Attach bool `yaml:"attach"`
 	// TTY runs the command in a terminal. ParseV1 fills in true.
 	TTY *bool `yaml:"tty"`
@@ -494,10 +440,10 @@ func readSecret(file, env string) (string, error) {
 }
 
 // Version returns the version of a configuration file: 1 for a file with
-// version: 1, and 0 for a file without a version key, which is read as v0
-// configuration. A version brought in by a merge key (<<) counts. Any
-// other version is an error, and so is a version key in any YAML document
-// but the first, which the v0 decoder would silently skip.
+// version: 1, and 0 for a file without a version key, such as a v0 file,
+// which occamyd no longer reads. A version brought in by a merge key (<<)
+// counts. Any other version is an error, and so is a version key in any
+// YAML document but the first.
 func Version(raw []byte) (int, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	version := 0
@@ -519,7 +465,7 @@ func Version(raw []byte) (int, error) {
 		}
 		var n int
 		if v.Kind != yaml.ScalarNode || v.Tag != "!!int" || v.Decode(&n) != nil || n != 1 {
-			return 0, fmt.Errorf("config: line %d: version %q is not supported: write version: 1, or leave the key out for a v0 file", v.Line, v.Value)
+			return 0, fmt.Errorf("config: line %d: version %q is not supported: write version: 1", v.Line, v.Value)
 		}
 		version = 1
 	}
@@ -581,12 +527,24 @@ func lookupKey(m *yaml.Node, key string, depth int) *yaml.Node {
 	return nil
 }
 
+// ErrV0 is ParseV1's error for a file without a version: a v0 file,
+// whose routes, the Guacamole protocol through guacd, were removed in
+// v1.0.0-beta.2.
+var ErrV0 = errors.New("config: the file has no version: 1; occamyd reads only version 1 files since v1.0.0-beta.2, and serves no v0 file: write a version 1 file, as docs/configuration.md describes")
+
 // ParseV1 decodes a version 1 configuration file, rejecting unknown keys,
 // fills in defaults and validates it. Validation checks the file system
 // and the environment for the files and variables it refers to, without
-// reading any secret. The error, if any, is Problems, listing every
-// problem found.
+// reading any secret. The error, if any, is ErrV0 for a file without a
+// version, the error of Version, or Problems, listing every problem
+// found.
 func ParseV1(raw []byte) (*File, error) {
+	switch v, err := Version(raw); {
+	case err != nil:
+		return nil, err
+	case v == 0:
+		return nil, ErrV0
+	}
 	f := &File{}
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
@@ -679,7 +637,7 @@ func (k *keys) walk(n *yaml.Node, t reflect.Type, path string) {
 			k.record(p, key.Line)
 			ft, ok := fields[key.Value]
 			if !ok {
-				k.reject(key, t, p, fields)
+				k.reject(key, value, t, p, fields)
 				continue
 			}
 			k.walk(value, ft, p)
@@ -716,13 +674,16 @@ func (k *keys) merge(n *yaml.Node, t reflect.Type, path string) {
 	k.walk(n, t, path)
 }
 
-// reject reports a key that t does not have.
-func (k *keys) reject(key *yaml.Node, t reflect.Type, path string, fields map[string]reflect.Type) {
+// reject reports a key that t does not have, with value.
+func (k *keys) reject(key, value *yaml.Node, t reflect.Type, path string, fields map[string]reflect.Type) {
 	if k.unknown == nil {
 		k.unknown = map[int]bool{}
 	}
 	k.unknown[key.Line] = true
 	msg := hints[t][key.Value]
+	if t == reflect.TypeFor[Connection]() && key.Value == "backend" && value.Value == "guacd" {
+		msg = backendGuacd
+	}
 	if msg == "" {
 		msg = "unknown key"
 		if s := suggest(key.Value, fields); s != "" {
@@ -730,6 +691,87 @@ func (k *keys) reject(key *yaml.Node, t reflect.Type, path string, fields map[st
 		}
 	}
 	k.problems = append(k.problems, Problem{Line: key.Line, Path: path, Message: msg})
+	if t == reflect.TypeFor[File]() && key.Value == "guacd" {
+		k.guacdParams(value, path)
+	}
+}
+
+// The messages for the controls that guacd gave, which went with it in
+// v1.0.0-beta.2. A file that sets them is refused, so that occamyd never
+// serves unrecorded what a file wants recorded, or opens a clipboard
+// that a file closes.
+const (
+	backendGuacd     = "guacd was removed in v1.0.0-beta.2: remove backend, and the connection's protocol is served by occamyd's own backend"
+	recordingRemoved = "occamyd records no sessions until a later beta: guacd recorded them, and was removed in v1.0.0-beta.2; occamyd does not serve unrecorded what a file wants recorded, so remove the parameter to serve the sessions unrecorded, or keep v1.0.0-beta.1 until recording returns"
+	copyMoved        = "guacd was removed in v1.0.0-beta.2: set disable_copy: true on each vnc and rdp connection whose clipboard stays with the remote; occamyd does not open a clipboard that a file closes"
+	pasteMoved       = "guacd was removed in v1.0.0-beta.2: set disable_paste: true on each vnc and rdp connection whose remote takes no clipboard; occamyd does not open a clipboard that a file closes"
+)
+
+// guacdControls holds guacd's parameters that recorded sessions or
+// restricted the clipboard, each with its message.
+var guacdControls = map[string]string{
+	"recording-path":            recordingRemoved,
+	"recording-name":            recordingRemoved,
+	"create-recording-path":     recordingRemoved,
+	"recording-exclude-output":  recordingRemoved,
+	"recording-exclude-mouse":   recordingRemoved,
+	"recording-exclude-touch":   recordingRemoved,
+	"recording-include-keys":    recordingRemoved,
+	"recording-write-existing":  recordingRemoved,
+	"typescript-path":           recordingRemoved,
+	"typescript-name":           recordingRemoved,
+	"create-typescript-path":    recordingRemoved,
+	"typescript-write-existing": recordingRemoved,
+	"disable-copy":              copyMoved,
+	"disable-paste":             pasteMoved,
+}
+
+// guacdParams reports the parameters under the guacd key, value, at
+// path: those that recorded sessions or restricted the clipboard each
+// with what became of them, and the rest together, so that a reader
+// learns why occamyd refuses the file and what to change.
+func (k *keys) guacdParams(value *yaml.Node, path string) {
+	params := mapping(value, "params")
+	if params == nil {
+		return
+	}
+	for i := 0; i+1 < len(params.Content); i += 2 {
+		proto, names := params.Content[i], params.Content[i+1]
+		if names.Kind != yaml.MappingNode {
+			continue
+		}
+		for j := 0; j+1 < len(names.Content); j += 2 {
+			name := names.Content[j]
+			msg, ok := guacdControls[name.Value]
+			if !ok {
+				continue
+			}
+			p := joinPath(joinPath(joinPath(path, "params"), proto.Value), name.Value)
+			k.problems = append(k.problems, Problem{Line: name.Line, Path: p, Message: msg})
+		}
+	}
+}
+
+// mapping returns the value of key in the mapping n, if a mapping.
+func mapping(n *yaml.Node, key string) *yaml.Node {
+	for n.Kind == yaml.AliasNode && n.Alias != nil {
+		n = n.Alias
+	}
+	if n.Kind != yaml.MappingNode {
+		return nil
+	}
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		if n.Content[i].Value == key {
+			v := n.Content[i+1]
+			for v.Kind == yaml.AliasNode && v.Alias != nil {
+				v = v.Alias
+			}
+			if v.Kind == yaml.MappingNode {
+				return v
+			}
+		}
+	}
+	return nil
 }
 
 var (
@@ -765,11 +807,18 @@ func (k *keys) typeErrors(c *checker, te *yaml.TypeError) (duplicate bool) {
 }
 
 // hints explain keys that a version 1 file rejects but that a reader may
-// well write: inline secrets, and keys of v0 files.
+// well write: inline secrets, keys of v0 files, and the keys of guacd and
+// the v0 routes, which v1.0.0-beta.2 removed.
 var hints = map[reflect.Type]map[string]string{
 	reflect.TypeFor[File](): {
-		"address": "v1 calls the listen address listen",
-		"mode":    "v1 has no mode; debug.address turns on the debug listener",
+		"address":        "v1 calls the listen address listen",
+		"mode":           "v1 has no mode; debug.address turns on the debug listener",
+		"legacy_v0":      "the v0 routes were removed in v1.0.0-beta.2: clients use API v1 and protocol v1",
+		"guacd":          "guacd was removed in v1.0.0-beta.2: remove guacd, and occamyd serves ssh, vnc, rdp and kubernetes with its own backends",
+		"adhoc_backends": "guacd was removed in v1.0.0-beta.2: remove adhoc_backends, and ad-hoc targets are served by occamyd's own backends",
+	},
+	reflect.TypeFor[Connection](): {
+		"backend": "occamyd has one backend per protocol since v1.0.0-beta.2, which removed guacd: remove backend",
 	},
 	reflect.TypeFor[Auth](): { // #nosec G101 -- messages about keys, not credentials
 		"jwt_secret": "v1 signs tokens with the Ed25519 key in signing_key_file",

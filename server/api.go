@@ -20,7 +20,7 @@ import (
 //	{"error": {"code": "invalid_token", "message": "the access token is not valid"}}
 //
 // code is one of the constants below and is what clients branch on;
-// message is for people and may change. The v0 routes keep gin's bodies.
+// message is for people and may change.
 const (
 	codeBadRequest           = "bad_request"
 	codeUnauthorized         = "unauthorized"       // no credentials, or wrong ones
@@ -49,10 +49,18 @@ func writeError(w http.ResponseWriter, status int, code, message string) {
 }
 
 // respond replies with v as JSON. Bodies are compact and end without a
-// line break, as the v0 routes' are.
+// line break.
 func respond(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("X-Content-Type-Options", "nosniff")
-	writeJSON(w, status, v)
+	b, err := json.Marshal(v)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	h := w.Header()
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_, _ = w.Write(b) // nothing to do for a client that has gone
 }
 
 // maxJSONBody bounds the JSON body of an API v1 request. The largest

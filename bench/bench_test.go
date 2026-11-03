@@ -145,7 +145,7 @@ func TestShape(t *testing.T) {
 	engine, log := fakeEngine(t, false)
 	f := planFile{Runs: 1, Studies: []studyFile{
 		{Study: "loss", Series: []string{"v1-native", "v1-native-w2", "guacd"}, Nets: []string{"N2"}, Loss: []float64{2}, Scenarios: "T1"},
-		{Study: "matrix", Series: []string{"occamy"}, Nets: []string{"N0"}, Scenarios: "T1"},
+		{Study: "matrix", Series: []string{"v1-native-cubic"}, Nets: []string{"N0"}, Scenarios: "T1"},
 	}}
 	blocks, err := studyBlocks(f, testSeries())
 	if err != nil {
@@ -194,7 +194,7 @@ func TestCongestion(t *testing.T) {
 	}{
 		{"v1-native-cubic", "occamy-v1-cubic", "cubic", false},
 		{"v1-native", "occamy-v1", "cubic", true},
-		{"v1-guacd-gfx", "occamy-v1-gfx", "", false},
+		{"guacd", "guacd", "", false},
 	} {
 		logged.Reset()
 		if got := p.congestion(t.Context(), series{Name: tt.series, server: tt.server}); got != tt.want {
@@ -250,12 +250,12 @@ func TestSummarize(t *testing.T) {
 
 func TestTableMedians(t *testing.T) {
 	t1 := func(run int, p95 float64) result {
-		return result{Scenario: "T1", Protocol: "ssh", Series: "occamy", Net: "N0", Run: run,
+		return result{Scenario: "T1", Protocol: "ssh", Series: "guacd", Net: "N0", Run: run,
 			Latency: &percentiles{P50: 2, P95: p95, P99: p95}}
 	}
 	t3 := func(run int, kib int64) result {
-		return result{Scenario: "T3", Protocol: "ssh", Series: "occamy", Net: "N0", Run: run,
-			Seconds: 2, BytesDown: kib << 10, CPUMS: map[string]float64{"occamy": 1, "guacd": 2, "ssh": 5}}
+		return result{Scenario: "T3", Protocol: "ssh", Series: "guacd", Net: "N0", Run: run,
+			Seconds: 2, BytesDown: kib << 10, CPUMS: map[string]float64{"guacd": 3, "ssh": 5}}
 	}
 	broken := t3(2, 0)
 	broken.Seconds, broken.CPUMS, broken.Error = 0, nil, "session ended"
@@ -289,7 +289,7 @@ func TestTableMedians(t *testing.T) {
 // v1-native; and a v1 G7 gives its sign-in, which v0's first frame
 // includes.
 func TestTableV1(t *testing.T) {
-	cpu := map[string]float64{"occamy": 1, "occamy-v1": 20, "guacd": 300, "vnc": 4000}
+	cpu := map[string]float64{"occamy-v1": 20, "guacd": 300, "vnc": 4000}
 	g3 := func(series string, scene int64) result {
 		r := result{Scenario: "G3", Protocol: "vnc", Series: series, Net: "N1",
 			Seconds: 10, Frames: 3800, sceneFrames: scene, SceneFPS: scrollFPS, CPUMS: cpu}
@@ -301,20 +301,20 @@ func TestTableV1(t *testing.T) {
 			FirstFrame: &percentiles{P50: 120}, SignIn: signIn}
 	}
 	rows := table([]result{
-		g3("occamy", 414), g3("v1-native", 594), g3("v1-guacd", 380),
-		g7("occamy", nil), g7("v1-native", &percentiles{P50: 61.5}),
+		g3("guacd", 414), g3("v1-native", 594),
+		g7("guacd", nil), g7("v1-native", &percentiles{P50: 61.5}),
 	})
-	if len(rows) != 5 {
+	if len(rows) != 4 {
 		t.Fatalf("%d rows", len(rows))
 	}
-	v0, native, bridge := rows[0], rows[1], rows[2]
-	for i, want := range []float64{41.4, 59.4, 38} {
+	v0, native := rows[0], rows[1]
+	for i, want := range []float64{41.4, 59.4} {
 		if got := rows[i].cells[colFPS]; got != want {
 			t.Errorf("%s frames a second = %v, want %v", rows[i].first.Series, got, want)
 		}
 	}
-	if got := v0.cells[colServerCPU]; got != 301 {
-		t.Errorf("v0 server CPU = %v, want occamy's and guacd's, 301", got)
+	if got := v0.cells[colServerCPU]; got != 300 {
+		t.Errorf("v0 server CPU = %v, want guacd's, 300", got)
 	}
 	if got := native.cells[colServerCPU]; got != 20 {
 		t.Errorf("v1-native server CPU = %v, want occamy-v1's, 20", got)
@@ -322,17 +322,14 @@ func TestTableV1(t *testing.T) {
 	if !slices.Contains(native.notes, "guacd 300 ms CPU, not in server CPU") {
 		t.Errorf("v1-native notes %q, want guacd's CPU", native.notes)
 	}
-	if got := bridge.cells[colServerCPU]; got != 320 {
-		t.Errorf("v1-guacd server CPU = %v, want occamy-v1's and guacd's, 320", got)
+	if slices.ContainsFunc(v0.notes, func(n string) bool { return strings.HasPrefix(n, "guacd") }) {
+		t.Errorf("v0 notes guacd's CPU apart: %q", v0.notes)
 	}
-	if slices.ContainsFunc(bridge.notes, func(n string) bool { return strings.HasPrefix(n, "guacd") }) {
-		t.Errorf("v1-guacd notes guacd's CPU apart: %q", bridge.notes)
+	if len(rows[2].notes) != 0 {
+		t.Errorf("v0 G7 notes %q", rows[2].notes)
 	}
-	if len(rows[3].notes) != 0 {
-		t.Errorf("v0 G7 notes %q", rows[3].notes)
-	}
-	if !slices.ContainsFunc(rows[4].notes, func(n string) bool { return strings.HasPrefix(n, "sign-in p50 61.5 ms") }) {
-		t.Errorf("v1 G7 notes %q, want its sign-in", rows[4].notes)
+	if !slices.ContainsFunc(rows[3].notes, func(n string) bool { return strings.HasPrefix(n, "sign-in p50 61.5 ms") }) {
+		t.Errorf("v1 G7 notes %q, want its sign-in", rows[3].notes)
 	}
 }
 
@@ -340,7 +337,7 @@ func TestTableV1(t *testing.T) {
 // what its side ships, in the table and in the JSON, and its server CPU
 // is that of what served it.
 func TestGFXRows(t *testing.T) {
-	cpu := map[string]float64{"occamy-v1": 20, "occamy-v1-gfx": 50, "occamy-v1-cubic": 30, "guacd": 300, "rdp": 4000}
+	cpu := map[string]float64{"occamy-v1": 20, "occamy-v1-cubic": 30, "guacd": 300, "rdp": 4000}
 	for name, want := range map[string]struct {
 		note    string
 		json    string
@@ -352,8 +349,6 @@ func TestGFXRows(t *testing.T) {
 		"v1-native-w2":    {"GFX on, like for like beside the verdict", `"gfx":true`, 20, true, false},
 		"v1-native-cubic": {"GFX on, like for like beside the verdict", `"gfx":true`, 30, true, false},
 		"v1-native-nogfx": {"GFX off, like for like beside the verdict", `"gfx":false`, 20, true, false},
-		"v1-guacd":        {"GFX off, as shipped: the verdict", `"gfx":false,"verdict":true`, 320, false, true},
-		"v1-guacd-gfx":    {"GFX on, like for like beside the verdict", `"gfx":true`, 350, false, false},
 	} {
 		r := &runner{series: series{Name: name}, net: netConditions[0]}
 		res := r.newResult("G5", "rdp")
@@ -384,7 +379,7 @@ func TestGFXRows(t *testing.T) {
 // GFX is RDP's and v1's: no other row says anything of it.
 func TestNoGFXRows(t *testing.T) {
 	for _, c := range []struct{ series, proto string }{
-		{"v1-native", "vnc"}, {"v1-native", "ssh"}, {"v1-guacd", "vnc"}, {"occamy", "rdp"}, {"guacd", "rdp"},
+		{"v1-native", "vnc"}, {"v1-native", "ssh"}, {"guacd", "rdp"},
 	} {
 		r := &runner{series: series{Name: c.series}, net: netConditions[0]}
 		res := r.newResult("G5", c.proto)
@@ -403,7 +398,7 @@ func TestNoGFXRows(t *testing.T) {
 
 // A table with v1 rows says what their decode time is.
 func TestMarkdownDecodeNote(t *testing.T) {
-	for series, want := range map[string]bool{"occamy": false, "v1-native": true} {
+	for series, want := range map[string]bool{"guacd": false, "v1-native": true} {
 		var b strings.Builder
 		rep := report{Results: []result{{Scenario: "T3", Protocol: "ssh", Series: series, Net: "N0", Seconds: 1, DecodeMS: 2}}}
 		rep.markdown(&b)
@@ -422,8 +417,8 @@ func TestReportDisplay(t *testing.T) {
 		want   string
 	}{
 		{"v1-native", 60, "acknowledges a graphical frame at the next refresh of a 60 Hz screen (-ack-hz), and a terminal's at once"},
-		{"v1-guacd", 0, "acknowledges a graphical frame at once (-ack-hz 0, a diagnostic"},
-		{"occamy", 60, ""},
+		{"v1-native-w2", 0, "acknowledges a graphical frame at once (-ack-hz 0, a diagnostic"},
+		{"guacd", 60, ""},
 	} {
 		rep := report{AckHz: c.hz, FrameStamp: frameStamp, Results: []result{{Scenario: "T3", Protocol: "vnc", Series: c.series, Net: "N0", Seconds: 1}}}
 		raw, err := json.Marshal(rep)
@@ -642,7 +637,7 @@ func TestRunSceneFrames(t *testing.T) {
 		}
 	}
 	open := func(context.Context, string, string) (*session, error) { return silent(), nil }
-	for _, name := range []string{"occamy", "guacd", "v1-native", "v1-guacd"} {
+	for _, name := range []string{"guacd", "v1-native", "v1-native-nogfx"} {
 		r := testRunner(t, series{Name: name, open: open})
 		res := r.run(context.Background(), scenario{ID: "G3", Protocol: "vnc", run: run(scrollFPS)})
 		if res.Frames != 594 || res.ServerFrames != 3800 {
@@ -763,8 +758,8 @@ func TestProbeLatencyJitter(t *testing.T) {
 // rather than measure nothing.
 func TestMatrixBlocksIdle(t *testing.T) {
 	ssh := []scenario{{ID: "T1", Protocol: "ssh"}}
-	guacd := series{Name: "v1-guacd", protocols: []string{"rdp", "vnc"}}
-	if _, err := matrixBlocks("matrix", []series{{Name: "v1-native"}, guacd}, netConditions[:1], ssh); err == nil {
+	nogfx := series{Name: "v1-native-nogfx", protocols: []string{"rdp"}}
+	if _, err := matrixBlocks("matrix", []series{{Name: "v1-native"}, nogfx}, netConditions[:1], ssh); err == nil {
 		t.Error("a series without a scenario to run: no error")
 	}
 	blocks, err := matrixBlocks("matrix", []series{{Name: "v1-native"}}, netConditions[:2], ssh)

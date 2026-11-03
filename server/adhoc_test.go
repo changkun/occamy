@@ -13,10 +13,10 @@ import (
 	"testing"
 )
 
-// TestAllowlistReserved checks that guacd's address and occamyd's own
-// listeners stay out of a range's reach, at their ports, unless an entry
-// is that very address, and that a listener on no host stands for every
-// address of the host.
+// TestAllowlistReserved checks that reserved addresses, occamyd's own
+// listeners, stay out of a range's reach, at their ports, unless an entry
+// is that very address; that a reserved name is resolved; and that a
+// listener on no host stands for every address of the host.
 func TestAllowlistReserved(t *testing.T) {
 	a, err := newAllowlist([]string{"10.0.0.0/8:1-65535", "[fd00::/8]:1-65535", "10.9.9.10:4822", "*.lab.internal:1-65535"})
 	if err != nil {
@@ -24,7 +24,7 @@ func TestAllowlistReserved(t *testing.T) {
 	}
 	a.lookup = func(_ context.Context, host string) ([]netip.Addr, error) {
 		switch host {
-		case "guacd", "guacd.lab.internal":
+		case "listener", "listener.lab.internal":
 			return []netip.Addr{netip.MustParseAddr("10.9.9.9")}, nil
 		}
 		return nil, errors.New("no such host")
@@ -36,7 +36,7 @@ func TestAllowlistReserved(t *testing.T) {
 		}, nil
 	}
 	t.Cleanup(func() { interfaceAddrs = net.InterfaceAddrs })
-	err = a.reserve(context.Background(), "guacd:4822", "10.9.9.10:4822", ":8443", "[fd00::5]:6060", "nowhere:1")
+	err = a.reserve(context.Background(), "listener:4822", "10.9.9.10:4822", ":8443", "[fd00::5]:6060", "nowhere:1")
 	if err == nil || !strings.Contains(err.Error(), "nowhere") {
 		t.Errorf("reserve: %v, want the name that did not resolve", err)
 	}
@@ -45,11 +45,11 @@ func TestAllowlistReserved(t *testing.T) {
 		port           uint16
 		ok             bool
 	}{
-		{"rdp", "10.9.9.9", 4822, false},           // guacd, by its name
-		{"rdp", "10.9.9.9", 3389, true},            // another port of its host
-		{"rdp", "guacd.lab.internal", 4822, false}, // a listed name that leads to it
-		{"rdp", "10.9.9.10", 4822, true},           // an entry that is the address
-		{"ssh", "10.7.7.7", 8443, false},           // the listener on every address
+		{"rdp", "10.9.9.9", 4822, false},              // a listener, by its name
+		{"rdp", "10.9.9.9", 3389, true},               // another port of its host
+		{"rdp", "listener.lab.internal", 4822, false}, // a listed name that leads to it
+		{"rdp", "10.9.9.10", 4822, true},              // an entry that is the address
+		{"ssh", "10.7.7.7", 8443, false},              // the listener on every address
 		{"ssh", "fd00::7", 8443, false},
 		{"ssh", "10.7.7.7", 22, true},
 		{"ssh", "fd00::5", 6060, false}, // the debug listener
@@ -105,7 +105,7 @@ func TestAllowlist(t *testing.T) {
 		{"vnc", "10.1.2.3", 5901, "10.1.2.3", false},
 		{"vnc", "10.1.2.3", 6000, "", false},
 		{"rdp", "10.1.2.3", 3389, "10.1.2.3", false},
-		{"telnet", "10.1.2.3", 23, "10.1.2.3", false},
+		{"telnet", "10.1.2.3", 23, "", false}, // no protocol of occamyd's
 		{"ssh", "::ffff:10.1.2.3", 22, "10.1.2.3", false},
 		{"ssh", "172.16.5.5", 22, "172.16.5.5", false},
 		{"ssh", "172.32.0.1", 22, "", false},

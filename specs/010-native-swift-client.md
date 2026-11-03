@@ -40,8 +40,10 @@ web client does.
 
 - The C export layer exists: `client/occamy-swift/core` builds the Go
   client core as `liboccamy.a`, universal, with the interface in
-  `occamy.h` (Implementation notes: C export layer). No Swift code is
-  merged yet. The Gio attempt lives on branches `gio` and `gio-client`
+  `occamy.h` (Implementation notes: C export layer).
+- `OccamyKit` exists: sessions, their model, the framebuffer and
+  terminal views and the key mapping (Implementation notes: OccamyKit).
+  The app is still to come. The Gio attempt lives on branches `gio` and `gio-client`
   (PR #51, closed unmerged).
 - The Go client core exists: `changkun.de/x/occamy/client`, designed in
   [client-core](008-native-architecture/client-core.md), a pure-Go
@@ -349,3 +351,77 @@ For beta.2 (2026-11-03):
   session, dial errors, bad arguments and released handles. The interop
   desktop gains a `prompt` command for them. CI's `macos` job, on
   `macos-26`, runs them with `-race` and builds the archive.
+
+## Implementation notes: OccamyKit
+
+- **What was done:** `client/occamy-swift`, a SwiftPM package (tools
+  6.0, macOS 26), with SwiftTerm its one dependency, pinned in
+  `Package.resolved`.
+  - Linking takes option A without the generated `occamy.pc`: the
+    `COccamy` system library target's module map includes `occamy.h`
+    through a shim and links `occamy`, and `OccamyKit` finds
+    `build/core` by an `-L` from `Context.packageDirectory`. Unsafe flags
+    keep the package from being another package's dependency, which
+    the app in the same package does not need; option B's XCFramework
+    lifts that when it comes.
+  - `Session` dials on a thread and pulls events on a thread of its own,
+    as planned, into an `AsyncStream<Event>`. For a graphical session the
+    thread copies each frame's dirty rectangles into `Screen`, the app's
+    copy of the framebuffer, before it yields the frame, since
+    `occamy_framebuffer_read` reads the frame `occamy_next` last
+    delivered. `Screen.image()` copies it into a `CGImage` under its
+    lock, so the view never shows a frame half applied.
+  - Acknowledgement: `occamy_next` acknowledges the last frame as shown,
+    so while a view shows the session (`isPaced`), the thread waits
+    after a frame until the model has presented it, at most a second, as
+    the web client waits for an animation frame. A hidden window is not
+    paced, and gets no frames once `occamy_view` hides it.
+  - Input goes to the core on a serial queue: `send` keeps the order
+    of the calls and never blocks the main thread on the network;
+    `submit` also returns the input's sequence number.
+  - `SessionModel` (`@Observable`, main actor) runs the events as the
+    web client's controller does: the title (or a terminal's own), the
+    owner's prompts, the viewers, the clipboard both ways, with the
+    text both sides last agreed on kept so that an echo is not sent
+    back, the owner's resize requests without repeats, and the end,
+    which `Ending` describes as `ending.ts` does.
+  - `FramebufferNSView` (and `FramebufferView` for SwiftUI) shows the
+    screen in a `CALayer` scaled to fit, nearest-neighbour from one
+    remote pixel to two device pixels. The pointer maps through the
+    picture's frame; scrolling goes in pixels when precise, in lines
+    from a wheel, with the remainder kept. The remote's pointer image
+    becomes the local cursor, scaled with the picture.
+  - Keys: `Keyboard.usages` maps every virtual key code of a Mac
+    keyboard (Carbon's `kVK_`) to its HID usage, 119 keys, from
+    Chromium's table of both; the keysym comes from the key's text, the
+    unmodified text with Control or Command held, and from the key code
+    for keys without text and the keypad. Modifiers come as
+    `flagsChanged`, told apart by the device bits of the flags; Caps
+    Lock's toggle goes as a press. Command is the remote's Super, sent
+    once a key that reaches the view goes with it, or alone when it is
+    released alone, so that Command-W closes the window without
+    pressing Super on the remote; with `sendsShortcuts` the view takes
+    the app's shortcuts too. Keys held when the window loses the
+    keyboard are released. Input methods are not composed locally:
+    keys go by position and the remote's layout and input method
+    decide, as for the web client's ordinary typing; composing through
+    `NSTextInputClient` is not done.
+  - `TerminalDisplay` (and `TerminalView`) runs a terminal session in
+    SwiftTerm: a snapshot resets the emulator before it is written, the
+    remote's grid sets the emulator's, and the owner's window, once it
+    has stayed one size for 300 ms, asks for the grid that fits. A
+    viewer's grid stays the owner's.
+- **Tests:** Swift Testing. The key tables are checked against Carbon's
+  key codes and the backends' HID table in `internal/keymap`. The rest
+  runs against the interop server, which the tests build with `go` and
+  run once, serialized since its desktop records one viewer's input:
+  sessions (a graphical one to the end, the remote ending, a terminal,
+  dial errors), and the views with their model in an off-screen window
+  (the picture the right way up, compared with the remote's screen,
+  pointer and keys through `NSEvent`s, Command-W left to the app,
+  the clipboard both ways without echo, a prompt answered, hiding and
+  showing, and a terminal's echo and grid). The interop server stands
+  in for the demo stack of the Testing Strategy, which needs containers
+  that the macOS runner does not have; the app is tried against the
+  demo stack. `make swift-test` runs them, and CI's `macos` job too,
+  then builds the package and tests for arm64 and x86_64.
