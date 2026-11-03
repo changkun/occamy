@@ -103,9 +103,9 @@ soak:
 # it, as described in docs/benchmarks.md. BENCH_FLAGS passes flags to the
 # harness, for example BENCH_FLAGS="-quick -scenarios T1". A second stack
 # on a shared host takes COMPOSE_PROJECT_NAME, OCCAMY_PORT,
-# OCCAMY_V1_PORT, OCCAMY_V1_GFX_PORT, OCCAMY_V1_BBR_PORT, GUACD_PORT,
+# OCCAMY_V1_PORT, OCCAMY_V1_GFX_PORT, OCCAMY_V1_CUBIC_PORT, GUACD_PORT,
 # OCCAMY_V1_DEBUG_PORT, OCCAMY_V1_GFX_DEBUG_PORT and
-# OCCAMY_V1_BBR_DEBUG_PORT, which the harness follows. Its debug routes
+# OCCAMY_V1_CUBIC_DEBUG_PORT, which the harness follows. Its debug routes
 # are off unless OCCAMY_DEBUG=1, as run's are, or BENCH_RUNTIME=1, which
 # turns on the v1 services' debug listeners alone (BENCH_DEBUG), on the
 # loopback interface, and has the harness read occamyd's runtime there.
@@ -115,13 +115,13 @@ soak:
 comma := ,
 BENCH_DEBUG = $(if $(filter 1,$(BENCH_RUNTIME)),OCCAMY_V1_DEBUG_ADDRESS=0.0.0.0:5638)
 BENCH_RUNTIME_FLAGS = $(if $(filter 1,$(BENCH_RUNTIME)),-runtime \
-	occamy-v1=localhost:$(or $(OCCAMY_V1_DEBUG_PORT),5638)$(comma)occamy-v1-gfx=localhost:$(or $(OCCAMY_V1_GFX_DEBUG_PORT),5641)$(comma)occamy-v1-bbr=localhost:$(or $(OCCAMY_V1_BBR_DEBUG_PORT),5643))
+	occamy-v1=localhost:$(or $(OCCAMY_V1_DEBUG_PORT),5638)$(comma)occamy-v1-gfx=localhost:$(or $(OCCAMY_V1_GFX_DEBUG_PORT),5641)$(comma)occamy-v1-cubic=localhost:$(or $(OCCAMY_V1_CUBIC_DEBUG_PORT),5643))
 bench: build
 	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(BENCH_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml rm -f -s desktop
 	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(BENCH_DEBUG) $(CONTAINER_ENGINE) compose -f docker-compose.yaml -f docker-compose.bench.yaml up -d --build --wait
 	go run ./bench -engine $(CONTAINER_ENGINE) -project $(or $(COMPOSE_PROJECT_NAME),occamy) \
 		-addr localhost:$(or $(OCCAMY_PORT),5636) -v1 localhost:$(or $(OCCAMY_V1_PORT),5637) \
-		-v1-gfx localhost:$(or $(OCCAMY_V1_GFX_PORT),5640) -v1-bbr localhost:$(or $(OCCAMY_V1_BBR_PORT),5642) \
+		-v1-gfx localhost:$(or $(OCCAMY_V1_GFX_PORT),5640) -v1-cubic localhost:$(or $(OCCAMY_V1_CUBIC_PORT),5642) \
 		-guacd localhost:$(or $(GUACD_PORT),4822) $(BENCH_RUNTIME_FLAGS) $(BENCH_FLAGS)
 .PHONY: bench
 
@@ -191,12 +191,11 @@ bench-realtime-2-report:
 # bench-realtime-3a collects step 3a of the real-time transport, the
 # congestion control, about two hours of measuring
 # (bench/plans/realtime-3a.yaml), as bench-realtime-2 does, into
-# bench-realtime-3a.json, with the compose profile bbr, which starts
-# occamy-v1-bbr. The host's kernel must have BBR loaded
-# (docs/benchmarks.md).
+# bench-realtime-3a.json. The host's kernel must have BBR loaded, which
+# occamy-v1's occamyd asks for (docs/benchmarks.md).
 bench-realtime-3a:
 	$(CONTAINER_ENGINE) build -t occamy-bench-netem docker/bench/netem
-	COMPOSE_PROFILES=bbr $(MAKE) bench-compare BENCH_PLAN=bench/plans/realtime-3a.yaml BENCH_OUT=bench-realtime-3a.json
+	$(MAKE) bench-compare BENCH_PLAN=bench/plans/realtime-3a.yaml BENCH_OUT=bench-realtime-3a.json
 .PHONY: bench-realtime-3a
 
 # bench-realtime-3a-report analyses step 3a into

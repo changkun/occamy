@@ -1,6 +1,6 @@
 # Step 3a of specs/008-native-architecture/realtime-transport.md, the
-# congestion control: v1-native, whose server's TCP uses the kernel's
-# default, CUBIC, beside v1-native-bbr, whose server's uses BBR, on the
+# congestion control: v1-native-cubic, whose occamyd asks for CUBIC,
+# beside v1-native, whose occamyd asks for its default, BBR, on the
 # same image in the same run, over step 2's link in the kernel: N1 and
 # N2, with none, 0.5% and 2% of the packets to the client dropped, on
 # T1, G2 and G5, the keys of typing, of an idle desktop and of
@@ -23,7 +23,7 @@ connects: 0
 
 studies:
   - study: loss
-    series: [v1-native, v1-native-bbr]
+    series: [v1-native-cubic, v1-native]
     nets: [N1, N2]
     loss: [0, 0.5, 2]
     scenarios: T1,G2,G5

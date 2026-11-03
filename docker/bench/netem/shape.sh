@@ -16,11 +16,7 @@
 # holds at most LIMIT_PACKETS, the delayed ones included. Packets to and
 # from the stack's own network, such as a server's backends, pass
 # untouched. Segmentation offload is off while it shapes, so that a
-# loss drops one packet rather than a whole segment of them. Having
-# shaped, it prints the namespace's TCP congestion control, which the
-# server's connections use:
-#
-#   congestion cubic
+# loss drops one packet rather than a whole segment of them.
 #
 # Every call clears what an earlier one set first, and clear only that.
 set -eu
@@ -79,5 +75,3 @@ tc qdisc add dev "$dev" handle ffff: ingress
 tc filter add dev "$dev" parent ffff: prio 1 protocol ip u32 match ip src "$local_net" action pass
 tc filter add dev "$dev" parent ffff: prio 2 protocol ip u32 match ip dport "$port" 0xffff \
 	action mirred egress redirect dev "$ifb"
-
-echo "congestion $(cat /proc/sys/net/ipv4/tcp_congestion_control)"

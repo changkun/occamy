@@ -27,6 +27,7 @@ import (
 	"changkun.de/x/occamy/bench/internal/probe"
 	"changkun.de/x/occamy/client"
 	"changkun.de/x/occamy/internal/codec"
+	"changkun.de/x/occamy/internal/config"
 	"changkun.de/x/occamy/internal/terminal"
 	"changkun.de/x/occamy/protocol"
 )
@@ -43,12 +44,12 @@ import (
 // of its own, occamy-v1-gfx, since guacd's parameters are global to a v1
 // file (docker/bench/occamy-v1-gfx.yaml). v1-native-w2 opens
 // v1-native's connections with another frame window (v1Windows), and
-// v1-native-bbr opens them on occamy-v1-bbr, whose TCP congestion control
-// is BBR rather than the kernel's default (v1Services).
+// v1-native-cubic opens them on occamy-v1-cubic, whose occamyd asks for
+// CUBIC rather than its default, BBR (v1Services, v1Congestion).
 var v1Connections = map[string]map[string]string{
 	"v1-native":       {"ssh": "ssh", "vnc": "vnc-native", "rdp": "rdp-native"},
 	"v1-native-w2":    {"ssh": "ssh", "vnc": "vnc-native", "rdp": "rdp-native"},
-	"v1-native-bbr":   {"ssh": "ssh", "vnc": "vnc-native", "rdp": "rdp-native"},
+	"v1-native-cubic": {"ssh": "ssh", "vnc": "vnc-native", "rdp": "rdp-native"},
 	"v1-native-nogfx": {"rdp": "rdp-native-nogfx"},
 	"v1-guacd":        {"vnc": "vnc-guacd", "rdp": "rdp-guacd"},
 	"v1-guacd-gfx":    {"rdp": "rdp-guacd-gfx"},
@@ -65,11 +66,21 @@ var v1Windows = map[string]uint8{"v1-native-w2": 2}
 
 // v1Services names the service that serves a v1 series other than
 // occamy-v1.
-var v1Services = map[string]string{"v1-guacd-gfx": "occamy-v1-gfx", "v1-native-bbr": "occamy-v1-bbr"}
+var v1Services = map[string]string{"v1-guacd-gfx": "occamy-v1-gfx", "v1-native-cubic": "occamy-v1-cubic"}
 
 // v1Service returns the service that serves the v1 series name.
 func v1Service(name string) string {
 	return cmp.Or(v1Services[name], "occamy-v1")
+}
+
+// v1Congestion returns the TCP congestion control that the v1 series
+// name stands for: CUBIC for v1-native-cubic, and occamyd's default,
+// BBR, for the others.
+func v1Congestion(name string) string {
+	if name == "v1-native-cubic" {
+		return "cubic"
+	}
+	return config.DefaultCongestionControl
 }
 
 // rdpPath says how a v1 series reaches RDP: with GFX or not, and whether
@@ -81,7 +92,7 @@ type rdpPath struct{ gfx, verdict bool }
 var rdpPaths = map[string]rdpPath{
 	"v1-native":       {gfx: true, verdict: true},
 	"v1-native-w2":    {gfx: true, verdict: false},
-	"v1-native-bbr":   {gfx: true, verdict: false},
+	"v1-native-cubic": {gfx: true, verdict: false},
 	"v1-native-nogfx": {gfx: false, verdict: false},
 	"v1-guacd":        {gfx: false, verdict: true},
 	"v1-guacd-gfx":    {gfx: true, verdict: false},

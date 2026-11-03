@@ -20,6 +20,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -88,10 +89,14 @@ func benchFile(t *testing.T, name string) (*config.File, map[string]config.Conne
 func TestBenchV1File(t *testing.T) {
 	f, conns := benchFile(t, "occamy-v1.yaml")
 	gfxFile, gfxConns := benchFile(t, "occamy-v1-gfx.yaml")
+	cubicFile, cubicConns := benchFile(t, "occamy-v1-cubic.yaml")
 	for name, byProto := range v1Connections {
 		file, in := f, conns
-		if name == "v1-guacd-gfx" {
+		switch name {
+		case "v1-guacd-gfx":
 			file, in = gfxFile, gfxConns
+		case "v1-native-cubic":
+			file, in = cubicFile, cubicConns
 		}
 		want, _, _ := strings.Cut(strings.TrimPrefix(name, "v1-"), "-")
 		for proto, id := range byProto {
@@ -115,7 +120,7 @@ func TestBenchV1File(t *testing.T) {
 		if gfx != path.gfx {
 			t.Errorf("series %s runs with GFX %v, and rdpPaths says %v", name, gfx, path.gfx)
 		}
-		if d := file.Guacd.Params["rdp"]["color-depth"]; d != "32" {
+		if d := file.Guacd.Params["rdp"]["color-depth"]; want == config.BackendGuacd && d != "32" {
 			t.Errorf("series %s: guacd's color-depth %q, want 32", name, d)
 		}
 	}
@@ -135,13 +140,13 @@ func TestBenchV1File(t *testing.T) {
 	if rdpPaths["v1-native-w2"].verdict {
 		t.Error("v1-native-w2 counts for the targets, but its window is not what ships")
 	}
-	// v1-native-bbr differs from v1-native in its server alone.
-	if !maps.Equal(v1Connections["v1-native-bbr"], v1Connections["v1-native"]) || rdpPaths["v1-native-bbr"].gfx != rdpPaths["v1-native"].gfx {
-		t.Errorf("v1-native-bbr opens %v with GFX %v, want v1-native's %v with GFX %v",
-			v1Connections["v1-native-bbr"], rdpPaths["v1-native-bbr"].gfx, v1Connections["v1-native"], rdpPaths["v1-native"].gfx)
+	// v1-native-cubic differs from v1-native in its server alone.
+	if !maps.Equal(v1Connections["v1-native-cubic"], v1Connections["v1-native"]) || rdpPaths["v1-native-cubic"].gfx != rdpPaths["v1-native"].gfx {
+		t.Errorf("v1-native-cubic opens %v with GFX %v, want v1-native's %v with GFX %v",
+			v1Connections["v1-native-cubic"], rdpPaths["v1-native-cubic"].gfx, v1Connections["v1-native"], rdpPaths["v1-native"].gfx)
 	}
-	if rdpPaths["v1-native-bbr"].verdict || v1Windows["v1-native-bbr"] != 0 {
-		t.Error("v1-native-bbr counts for the targets or offers another window")
+	if rdpPaths["v1-native-cubic"].verdict || v1Windows["v1-native-cubic"] != 0 {
+		t.Error("v1-native-cubic counts for the targets or offers another window")
 	}
 	for name, w := range v1Windows {
 		if _, ok := v1Connections[name]; !ok || w == 0 {
@@ -192,37 +197,32 @@ func TestBenchGFXService(t *testing.T) {
 	}
 }
 
-// occamy-v1-bbr serves occamy-v1's file with BBR as its namespace's
-// congestion control, on the ports the harness and make bench take by
-// default, on the loopback interface only, and starts only with the bbr
-// profile, since a kernel without BBR would fail the whole stack.
-func TestBenchBBRService(t *testing.T) {
+// occamy-v1-cubic serves occamy-v1's connections that v1-native opens,
+// with occamyd asking for CUBIC in place of its default, BBR, on the
+// ports the harness and make bench take by default, on the loopback
+// interface only, with its signing key on a tmpfs.
+func TestBenchCubicService(t *testing.T) {
 	raw, err := os.ReadFile("../docker/docker-compose.bench.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	var compose struct {
 		Services map[string]struct {
-			Ports, Volumes, Profiles []string
-			Sysctls                  map[string]string
-			Tmpfs                    []string
+			Ports, Volumes, Tmpfs []string
 		}
 	}
 	if err := yaml.Unmarshal(raw, &compose); err != nil {
 		t.Fatal(err)
 	}
-	svc := compose.Services["occamy-v1-bbr"]
-	if want := []string{"127.0.0.1:${OCCAMY_V1_BBR_PORT:-5642}:5637", "127.0.0.1:${OCCAMY_V1_BBR_DEBUG_PORT:-5643}:5638"}; !slices.Equal(svc.Ports, want) {
+	svc := compose.Services["occamy-v1-cubic"]
+	if want := []string{"127.0.0.1:${OCCAMY_V1_CUBIC_PORT:-5642}:5637", "127.0.0.1:${OCCAMY_V1_CUBIC_DEBUG_PORT:-5643}:5638"}; !slices.Equal(svc.Ports, want) {
 		t.Errorf("ports %q, want %q", svc.Ports, want)
 	}
-	if want := []string{"./bench/occamy-v1.yaml:/occamy/v1.yaml:ro"}; !slices.Equal(svc.Volumes, want) {
+	if want := []string{"./bench/occamy-v1-cubic.yaml:/occamy/v1.yaml:ro"}; !slices.Equal(svc.Volumes, want) {
 		t.Errorf("volumes %q, want %q", svc.Volumes, want)
 	}
-	if cc := svc.Sysctls["net.ipv4.tcp_congestion_control"]; cc != "bbr" || !slices.Equal(svc.Profiles, []string{"bbr"}) {
-		t.Errorf("congestion control %q, profiles %q; want bbr and [bbr]", cc, svc.Profiles)
-	}
-	// The signing key that occamy-v1.yaml names, on a tmpfs.
-	raw, err = os.ReadFile("../docker/bench/occamy-v1.yaml")
+	// The signing key, read from the file before benchFile moves it.
+	raw, err = os.ReadFile("../docker/bench/occamy-v1-cubic.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -237,8 +237,22 @@ func TestBenchBBRService(t *testing.T) {
 	if dir := path.Dir(file.Auth.SigningKeyFile); !slices.ContainsFunc(svc.Tmpfs, func(m string) bool { return strings.HasPrefix(m, dir+":") }) {
 		t.Errorf("tmpfs %q, want one at %s", svc.Tmpfs, dir)
 	}
-	if v1Service("v1-native-bbr") != "occamy-v1-bbr" || v1Service("v1-native") != "occamy-v1" {
-		t.Errorf("v1-native-bbr is served by %s and v1-native by %s", v1Service("v1-native-bbr"), v1Service("v1-native"))
+
+	cubic, cubicConns := benchFile(t, "occamy-v1-cubic.yaml")
+	native, conns := benchFile(t, "occamy-v1.yaml")
+	if cubic.CongestionControl != "cubic" || native.CongestionControl != config.DefaultCongestionControl {
+		t.Errorf("congestion control %q and occamy-v1's %q, want cubic and %s", cubic.CongestionControl, native.CongestionControl, config.DefaultCongestionControl)
+	}
+	for _, id := range v1Connections["v1-native-cubic"] {
+		if !reflect.DeepEqual(cubicConns[id], conns[id]) {
+			t.Errorf("connection %s is %+v, want occamy-v1's %+v", id, cubicConns[id], conns[id])
+		}
+	}
+	if v1Service("v1-native-cubic") != "occamy-v1-cubic" || v1Service("v1-native") != "occamy-v1" {
+		t.Errorf("v1-native-cubic is served by %s and v1-native by %s", v1Service("v1-native-cubic"), v1Service("v1-native"))
+	}
+	if v1Congestion("v1-native-cubic") != "cubic" || v1Congestion("v1-native") != "bbr" {
+		t.Errorf("v1-native-cubic stands for %s and v1-native for %s", v1Congestion("v1-native-cubic"), v1Congestion("v1-native"))
 	}
 }
 

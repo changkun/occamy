@@ -113,6 +113,7 @@ SERVERS = {
     "occamy": ["occamy", "guacd"],
     "v1-native": ["occamy-v1"],
     "v1-native-w2": ["occamy-v1"],
+    "v1-native-cubic": ["occamy-v1-cubic"],
     "v1-native-bbr": ["occamy-v1-bbr"],
     "v1-native-nogfx": ["occamy-v1"],
     "v1-guacd": ["occamy-v1", "guacd"],
@@ -162,18 +163,27 @@ class Family:
     # another.
     targets: bool = True
 
+    def has(self, c):
+        """Says whether the comparison c is one of the family's: of its name
+        and its two series, since two pairs may share a name."""
+        return (c["family"], c["baseline"], c["candidate"]) == (self.name, self.baseline, self.candidate)
+
 
 # The comparisons, each made where both of its series are in the results.
 # The essential plan has one family, confirmatory; the full plan's (the
 # spec's Analysis, Families) join it when it runs. The frame window
 # compares the window of two frames before step 1 of
 # specs/008-native-architecture/realtime-transport.md with the window
-# from the path after it, and the congestion control the kernel's
-# default, CUBIC, with BBR (step 3a), each on the same image in the same
-# run.
+# from the path after it, and the congestion control CUBIC with BBR
+# (step 3a), each on the same image in the same run. Step 3a ran before
+# occamyd asked for BBR itself, with v1-native on the kernel's default,
+# CUBIC, beside v1-native-bbr, whose network namespace took BBR; since,
+# v1-native-cubic, whose occamyd asks for CUBIC, is the one beside
+# v1-native.
 FAMILIES = [
     Family("Guacamole to Occamy", "guacd", "v1-native", "holm"),
     Family("Frame window", "v1-native-w2", "v1-native", "holm", targets=False),
+    Family("Congestion control", "v1-native-cubic", "v1-native", "holm", targets=False),
     Family("Congestion control", "v1-native", "v1-native-bbr", "holm", targets=False),
 ]
 
@@ -183,9 +193,9 @@ TARGET_MS = 50
 
 # One colour per series wherever it appears, in the validated palette's
 # categorical order (light, dark). v1-native's other setting in a
-# real-time step is violet, the window of two in step 1 and BBR in step
-# 3a, which never share a figure: red, the last slot, is too close to
-# v1-native's orange to tell apart.
+# real-time step is violet, the window of two in step 1 and the other
+# congestion control in step 3a, which never share a figure: red, the
+# last slot, is too close to v1-native's orange to tell apart.
 COLORS = {
     "guacd": ("#2a78d6", "#3987e5"),
     "v1-native": ("#eb6834", "#d95926"),
@@ -194,6 +204,7 @@ COLORS = {
     "v1-guacd-gfx": ("#e87ba4", "#d55181"),
     "v1-native-nogfx": ("#008300", "#008300"),
     "v1-native-w2": ("#6250d6", "#9085e9"),
+    "v1-native-cubic": ("#6250d6", "#9085e9"),
     "v1-native-bbr": ("#6250d6", "#9085e9"),
 }
 THEMES = {
@@ -516,12 +527,16 @@ def sensitivity(rows, gate, comparisons):
         return None, []
     above = {(r["series"], r["cell"], r["run"]) for r in rows if r["load"] > gate}
     kept = [r for r in rows if (r["series"], r["cell"], r["run"]) not in above]
-    again = {(c["family"], c["cell"], c["metric"]): c for c in compare(index(kept)) if c["primary"]}
+
+    def key(c):
+        return c["family"], c["baseline"], c["candidate"], c["cell"], c["metric"]
+
+    again = {key(c): c for c in compare(index(kept)) if c["primary"]}
     changed = []
     for c in comparisons:
         if not c["primary"]:
             continue
-        d = again.get((c["family"], c["cell"], c["metric"]))
+        d = again.get(key(c))
         if d is None or significant(d) != significant(c) or tenfold(d) != tenfold(c):
             changed.append(dict(before=c, after=d))
     return len(above), changed
@@ -669,7 +684,7 @@ def factor_figure(path, fam, comparisons, theme):
     """Draws the family's primary factors with their 95% intervals, on a log
     axis with a line at 1x, and at 10x where the targets judge it."""
     t, dark = THEMES[theme], theme == "dark"
-    rows = [c for c in comparisons if c["family"] == fam.name and c["primary"] and np.isfinite(c["factor"])]
+    rows = [c for c in comparisons if fam.has(c) and c["primary"] and np.isfinite(c["factor"])]
     rows.sort(key=lambda c: c["cell"].order())
     fig, ax = plt.subplots(figsize=(6.4, 0.3 * len(rows) + 1.3), layout="constrained")
     y = np.arange(len(rows))[::-1]
@@ -759,7 +774,7 @@ def draw(out, summary, comparisons, families=FAMILIES):
     series = [s for s in COLORS if any(k[0] == s for k in summary)]
     figures = []
     for fam in families:
-        if any(c["family"] == fam.name and c["primary"] for c in comparisons):
+        if any(fam.has(c) and c["primary"] for c in comparisons):
             name = "factors-" + fam.name.lower().replace(" ", "-")
             figures.append((name, f"{fam.name}: factors on the primary metrics"))
             for theme in THEMES:
@@ -876,7 +891,7 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
         lines.append("")
 
     for fam in families:
-        fam_rows = [c for c in comparisons if c["family"] == fam.name]
+        fam_rows = [c for c in comparisons if fam.has(c)]
         primary = [c for c in fam_rows if c["primary"]]
         if not primary:
             continue

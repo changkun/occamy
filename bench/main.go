@@ -60,8 +60,8 @@ func (s series) serves(proto string) bool {
 
 // endpoints are where the series reach the stack: occamyd for v0, guacd
 // for the direct series, occamy-v1 for the v1 series, occamy-v1-gfx for
-// v1-guacd-gfx, and occamy-v1-bbr for v1-native-bbr.
-type endpoints struct{ occamy, guacd, v1, v1GFX, v1BBR string }
+// v1-guacd-gfx, and occamy-v1-cubic for v1-native-cubic.
+type endpoints struct{ occamy, guacd, v1, v1GFX, v1Cubic string }
 
 // allSeries returns every series that the harness knows, in the order
 // -series lists them, reaching the stack at at. The v1 series show their
@@ -77,7 +77,7 @@ func allSeries(at endpoints, d display) []series {
 		{"v1-native-nogfx", at.v1, "occamy-v1"},
 		{"v1-guacd", at.v1, "occamy-v1"},
 		{"v1-guacd-gfx", at.v1GFX, "occamy-v1-gfx"},
-		{"v1-native-bbr", at.v1BBR, "occamy-v1-bbr"},
+		{"v1-native-cubic", at.v1Cubic, "occamy-v1-cubic"},
 	} {
 		conns := v1Connections[v.name]
 		all = append(all, series{
@@ -102,32 +102,32 @@ func openV0(dial func(ctx context.Context, addr string, cred config.JWT) (rawCon
 
 func main() {
 	var (
-		addr      = flag.String("addr", "localhost:5636", "occamyd address")
-		guacdAddr = flag.String("guacd", "localhost:4822", "guacd address for the direct series")
-		v1Addr    = flag.String("v1", "localhost:5637", "occamy-v1 address for the v1 series")
-		v1GFXAddr = flag.String("v1-gfx", "localhost:5640", "occamy-v1-gfx address for the v1-guacd-gfx series")
-		v1BBRAddr = flag.String("v1-bbr", "localhost:5642", "occamy-v1-bbr address for the v1-native-bbr series")
-		scen      = flag.String("scenarios", "all", "comma-separated scenario IDs, or all")
-		nets      = flag.String("net", "N0,N1,N2", "comma-separated network conditions")
-		seriesF   = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd, v1-native, v1-native-w2, v1-native-nogfx, v1-native-bbr, v1-guacd, v1-guacd-gfx")
-		quick     = flag.Bool("quick", false, "fewer samples and shorter scenarios, to check the setup")
-		ackHz     = flag.Float64("ack-hz", 60, "v1: the screen refresh at which a graphical frame is acknowledged, or 0 for at once, a diagnostic; the gate's numbers use 60")
-		runs      = flag.Int("runs", 1, "how many times to run everything; the table shows medians")
-		failfast  = flag.Bool("failfast", false, "stop at the first measurement with an error")
-		engine    = flag.String("engine", "podman", "container engine for CPU statistics, or none")
-		project   = flag.String("project", "occamy", "compose project of the stack")
-		out       = flag.String("out", "bench-results.json", "JSON output file, saved after each series and network condition")
-		planName  = flag.String("plan", "", "a plan file, such as bench/plans/compare.yaml, instead of -series, -net, -scenarios and -runs")
-		resume    = flag.Bool("resume", false, "continue -out if it exists, a file of the same plan, keeping its complete blocks")
-		maxLoad   = flag.Float64("max-load", 0, "before each result, wait until the host's 1-minute load is below this; 0 does not wait; set, it overrides the plan file's")
-		loadWait  = flag.Duration("load-wait", 2*time.Hour, "how long -max-load waits before the harness saves and exits; set, it overrides the plan file's")
-		debugF    = flag.String("runtime", "", "occamyd debug listeners to read the runtime from, as service=address pairs, such as occamy-v1=localhost:5638")
-		linkImage = flag.String("link-image", "occamy-bench-netem", "the image that emulates a loss study's link in the kernel (docker/bench/netem)")
+		addr        = flag.String("addr", "localhost:5636", "occamyd address")
+		guacdAddr   = flag.String("guacd", "localhost:4822", "guacd address for the direct series")
+		v1Addr      = flag.String("v1", "localhost:5637", "occamy-v1 address for the v1 series")
+		v1GFXAddr   = flag.String("v1-gfx", "localhost:5640", "occamy-v1-gfx address for the v1-guacd-gfx series")
+		v1CubicAddr = flag.String("v1-cubic", "localhost:5642", "occamy-v1-cubic address for the v1-native-cubic series")
+		scen        = flag.String("scenarios", "all", "comma-separated scenario IDs, or all")
+		nets        = flag.String("net", "N0,N1,N2", "comma-separated network conditions")
+		seriesF     = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd, v1-native, v1-native-w2, v1-native-nogfx, v1-native-cubic, v1-guacd, v1-guacd-gfx")
+		quick       = flag.Bool("quick", false, "fewer samples and shorter scenarios, to check the setup")
+		ackHz       = flag.Float64("ack-hz", 60, "v1: the screen refresh at which a graphical frame is acknowledged, or 0 for at once, a diagnostic; the gate's numbers use 60")
+		runs        = flag.Int("runs", 1, "how many times to run everything; the table shows medians")
+		failfast    = flag.Bool("failfast", false, "stop at the first measurement with an error")
+		engine      = flag.String("engine", "podman", "container engine for CPU statistics, or none")
+		project     = flag.String("project", "occamy", "compose project of the stack")
+		out         = flag.String("out", "bench-results.json", "JSON output file, saved after each series and network condition")
+		planName    = flag.String("plan", "", "a plan file, such as bench/plans/compare.yaml, instead of -series, -net, -scenarios and -runs")
+		resume      = flag.Bool("resume", false, "continue -out if it exists, a file of the same plan, keeping its complete blocks")
+		maxLoad     = flag.Float64("max-load", 0, "before each result, wait until the host's 1-minute load is below this; 0 does not wait; set, it overrides the plan file's")
+		loadWait    = flag.Duration("load-wait", 2*time.Hour, "how long -max-load waits before the harness saves and exits; set, it overrides the plan file's")
+		debugF      = flag.String("runtime", "", "occamyd debug listeners to read the runtime from, as service=address pairs, such as occamy-v1=localhost:5638")
+		linkImage   = flag.String("link-image", "occamy-bench-netem", "the image that emulates a loss study's link in the kernel (docker/bench/netem)")
 	)
 	flag.Parse()
 	log.SetFlags(log.Ltime)
 
-	all := allSeries(endpoints{occamy: *addr, guacd: *guacdAddr, v1: *v1Addr, v1GFX: *v1GFXAddr, v1BBR: *v1BBRAddr}, newDisplay(*ackHz))
+	all := allSeries(endpoints{occamy: *addr, guacd: *guacdAddr, v1: *v1Addr, v1GFX: *v1GFXAddr, v1Cubic: *v1CubicAddr}, newDisplay(*ackHz))
 	debug, err := parseDebug(*debugF)
 	if err != nil {
 		log.Fatal(err)
@@ -301,13 +301,13 @@ func (p plan) measure(ctx context.Context, prev *report) (report, error) {
 // that a block's own results raise would otherwise carry into the
 // results after them unchecked.
 func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (stopped bool, err error) {
-	carried, congestion := b.net, ""
+	carried := b.net
 	if b.kernel {
-		if congestion, err = p.shape(b.series, &b.net); err != nil {
+		if err := p.shape(b.series, &b.net); err != nil {
 			return false, err
 		}
 		defer func() {
-			if _, err := p.shape(b.series, nil); err != nil {
+			if err := p.shape(b.series, nil); err != nil {
 				log.Print(err)
 			}
 		}()
@@ -321,7 +321,7 @@ func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (
 	defer px.close()
 	r := &runner{
 		series: b.series, net: b.net, proxy: px, quick: p.quick, runIndex: run,
-		study: b.study, factor: b.factor, congestion: congestion, keys: p.keys, connects: p.connects,
+		study: b.study, factor: b.factor, congestion: p.congestion(ctx, b.series), keys: p.keys, connects: p.connects,
 		cpu: newCPUSampler(p.engine, p.project, b.series.server), debug: p.debug,
 	}
 	// add adds the result that m measures once the host is quiet, and
@@ -351,10 +351,9 @@ func (p plan) measureBlock(ctx context.Context, rep *report, run int, b block) (
 }
 
 // shape emulates n in the kernel on the client connections of s's server,
-// with the link image's shape in the server's network namespace, and
-// returns the TCP congestion control there, or clears what it emulated
-// when n is nil.
-func (p plan) shape(s series, n *netCondition) (congestion string, err error) {
+// with the link image's shape in the server's network namespace, or
+// clears what it emulated when n is nil.
+func (p plan) shape(s series, n *netCondition) error {
 	args := []string{
 		"run", "--rm", "--network", "container:" + p.project + "-" + s.server + "-1",
 		"--cap-add", "NET_ADMIN", p.linkImage,
@@ -366,23 +365,31 @@ func (p plan) shape(s series, n *netCondition) (congestion string, err error) {
 	}
 	out, err := exec.Command(p.engine, args...).CombinedOutput() // #nosec G204 -- engine, project and image come from flags
 	if err != nil {
-		return "", fmt.Errorf("emulating the link on %s: %w: %s", s.server, err, bytes.TrimSpace(out))
+		return fmt.Errorf("emulating the link on %s: %w: %s", s.server, err, bytes.TrimSpace(out))
 	}
-	if n == nil {
-		return "", nil
-	}
-	return congestionOf(out), nil
+	return nil
 }
 
-// congestionOf returns the congestion control that the link image's
-// output names on its line "congestion NAME", or "" if none does.
-func congestionOf(out []byte) string {
-	for line := range strings.Lines(string(out)) {
-		if name, ok := strings.CutPrefix(strings.TrimSpace(line), "congestion "); ok {
-			return name
-		}
+// congestion returns the TCP congestion control that s's server reports
+// for its connections at its debug listener (tcp_congestion), or "" where
+// the harness does not read the server's runtime (-runtime) or the server
+// cannot tell. It warns where the server does not use the one its series
+// stands for, such as an occamyd whose kernel has not loaded BBR, so that
+// a run does not pass that fallback off as what occamyd ships.
+func (p plan) congestion(ctx context.Context, s series) string {
+	addr, ok := p.debug[s.server]
+	if !ok {
+		return ""
 	}
-	return ""
+	v, err := readRuntime(ctx, addr)
+	if err != nil {
+		log.Printf("%s's congestion control: %v", s.server, err)
+		return ""
+	}
+	if want := v1Congestion(s.Name); v.TCPCongestion != "" && v.TCPCongestion != want {
+		log.Printf("warning: %s's connections use %s, not %s, which %s stands for; load tcp_%s in the kernel", s.server, v.TCPCongestion, want, s.Name, want)
+	}
+	return v.TCPCongestion
 }
 
 // clearLinks clears the link in the kernel of every server whose series
@@ -394,7 +401,7 @@ func (p plan) clearLinks() error {
 			continue
 		}
 		cleared[b.series.server] = true
-		if _, err := p.shape(b.series, nil); err != nil {
+		if err := p.shape(b.series, nil); err != nil {
 			return err
 		}
 	}
@@ -444,8 +451,8 @@ type runner struct {
 	quick    bool
 	runIndex int // which of the runs this is
 	// study and factor are those of the block the runner measures, and
-	// congestion the TCP congestion control of its server, where a loss
-	// study read it.
+	// congestion the TCP congestion control of its server's connections,
+	// where the harness reads its runtime.
 	study, factor, congestion string
 	// keys and connects are the plan's (plan); 0 is the default.
 	keys, connects int
@@ -673,8 +680,9 @@ type result struct {
 	// viewers=4, which the matrix leaves empty.
 	Study  string `json:"study,omitempty"`
 	Factor string `json:"factor,omitempty"`
-	// Congestion is the TCP congestion control of the series' server,
-	// which a loss study reads where it emulates the link, such as cubic.
+	// Congestion is the TCP congestion control of the series' server's
+	// connections, such as bbr, which occamyd reports at its debug
+	// listener where the harness reads its runtime (-runtime).
 	Congestion string `json:"congestion,omitempty"`
 	// At is when the result started, and Load the host's 1-minute load
 	// average then.
@@ -1096,7 +1104,7 @@ func hostInfo(engine, project string) map[string]string {
 		run("occamy_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-1")
 		run("occamy_v1_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-v1-1")
 		run("occamy_v1_gfx_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-v1-gfx-1")
-		run("occamy_v1_bbr_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-v1-bbr-1")
+		run("occamy_v1_cubic_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-v1-cubic-1")
 		run("guacd_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-guacd-1")
 	}
 	return info

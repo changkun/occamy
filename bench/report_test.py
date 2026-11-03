@@ -111,7 +111,7 @@ def synthetic_loss(runs=6, bases=(("guacd", 200.0), ("v1-native", 20.0))):
 
 
 ADDED = {"v1-native": {0: 0.0, 0.5: 5.0, 2: 40.0}, "guacd": {0: 0.0, 0.5: 30.0, 2: 120.0},
-         "v1-native-bbr": {0: 0.0, 0.5: 5.0, 2: 10.0}}
+         "v1-native-bbr": {0: 0.0, 0.5: 5.0, 2: 10.0}, "v1-native-cubic": {0: 0.0, 0.5: 5.0, 2: 100.0}}
 
 
 class Statistics(unittest.TestCase):
@@ -349,29 +349,36 @@ class Report(unittest.TestCase):
         self.assertEqual(len(primary), 12)
 
     def test_congestion_family(self):
-        # v1-native beside v1-native-bbr in a loss study: the family
-        # compares them in each cell, with or without loss, Holm-corrected
-        # over its 12 primary tests, and without the targets; 8 runs reach
-        # significance after the correction where the series differ.
-        out = self.analyse(synthetic_loss(runs=8, bases=(("v1-native", 20.0), ("v1-native-bbr", 20.0))))
-        with open(out / "comparisons.csv") as f:
-            c = {(r["factor"], r["scenario"], r["net"], r["metric"]): r for r in csv.DictReader(f)
-                 if r["family"] == "Congestion control"}
-        self.assertEqual(sum(r["primary"] == "True" for r in c.values()), 12)
-        g5 = c[("loss=2%", "G5", "N2", "latency_p95")]
-        self.assertEqual((g5["baseline"], g5["candidate"]), ("v1-native", "v1-native-bbr"))
-        self.assertAlmostEqual(float(g5["times_better"]), 60 / 30, delta=0.1)
-        self.assertAlmostEqual(float(g5["p"]), 2 / 12870)
-        self.assertLess(float(g5["p_adjusted"]), report.ALPHA)
-        md = (out / "report.md").read_text()
-        self.assertIn("## Congestion control: `v1-native` to `v1-native-bbr`", md)
-        self.assertNotIn("10x", md)
-        self.assertNotIn("the exact test's smallest p", md)
-        self.assertTrue((out / "factors-congestion-control.svg").exists())
-        with open(out / "loss.csv") as f:
-            loss = {(r["series"], r["scenario"], r["net"], r["loss"], r["metric"]): r for r in csv.DictReader(f)}
-        self.assertAlmostEqual(float(loss[("v1-native-bbr", "G5", "N2", "2.0", "latency_p95")]["added"]), 10,
-                               delta=2)
+        # CUBIC beside BBR in a loss study: the family compares them in
+        # each cell, with or without loss, Holm-corrected over its 12
+        # primary tests, and without the targets; 8 runs reach
+        # significance after the correction where the series differ. Step
+        # 3a's run had v1-native on CUBIC beside v1-native-bbr; since
+        # occamyd asks for BBR itself, v1-native-cubic is beside v1-native.
+        for cubic, bbr in (("v1-native-cubic", "v1-native"), ("v1-native", "v1-native-bbr")):
+            with self.subTest(cubic=cubic, bbr=bbr):
+                out = self.analyse(synthetic_loss(runs=8, bases=((cubic, 20.0), (bbr, 20.0))))
+                with open(out / "comparisons.csv") as f:
+                    c = {(r["factor"], r["scenario"], r["net"], r["metric"]): r for r in csv.DictReader(f)
+                         if r["family"] == "Congestion control"}
+                self.assertEqual(sum(r["primary"] == "True" for r in c.values()), 12)
+                g5 = c[("loss=2%", "G5", "N2", "latency_p95")]
+                self.assertEqual((g5["baseline"], g5["candidate"]), (cubic, bbr))
+                self.assertAlmostEqual(float(g5["times_better"]), (20 + ADDED[cubic][2]) / (20 + ADDED[bbr][2]),
+                                       delta=0.1)
+                self.assertAlmostEqual(float(g5["p"]), 2 / 12870)
+                self.assertLess(float(g5["p_adjusted"]), report.ALPHA)
+                md = (out / "report.md").read_text()
+                self.assertIn(f"## Congestion control: `{cubic}` to `{bbr}`", md)
+                self.assertEqual(md.count("## Congestion control:"), 1)
+                self.assertNotIn("10x", md)
+                self.assertNotIn("the exact test's smallest p", md)
+                self.assertTrue((out / "factors-congestion-control.svg").exists())
+                with open(out / "loss.csv") as f:
+                    loss = {(r["series"], r["scenario"], r["net"], r["loss"], r["metric"]): r
+                            for r in csv.DictReader(f)}
+                self.assertAlmostEqual(float(loss[(bbr, "G5", "N2", "2.0", "latency_p95")]["added"]),
+                                       ADDED[bbr][2], delta=2)
 
     def test_loss_all_failed(self):
         # A loss where every run of a series failed is marked on the
