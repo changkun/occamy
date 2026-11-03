@@ -33,6 +33,12 @@ each server's access token, and the password if you choose, in your
 login keychain, under `de.changkun.occamy`. **Sign Out** and **Remove
 Server**, in a server's context menu, delete them.
 
+On a server that signs in through OIDC, the sheet offers **Sign In with
+Single Sign-On…**, which opens the provider's page in a browser window
+and comes back to the app at `de.changkun.occamy:/oidc`. The server's
+administrator lists that address in
+[`auth.oidc.return_urls`](configuration.md#signing-in-through-oidc).
+
 ## Opening a connection
 
 The sidebar lists your servers, and a server's connections show as

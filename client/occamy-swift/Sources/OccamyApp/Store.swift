@@ -176,7 +176,7 @@ final class Store {
 
     /// The return URL of the app's OIDC sign-in, which occamyd must list
     /// in auth.oidc.return_urls.
-    static let oidcReturn = URL(string: "occamy://oidc")!
+    static let oidcReturn = URL(string: "de.changkun.occamy:/oidc")!
 
     /// signInOIDC signs in to the server through its OIDC provider, in a
     /// browser sheet over anchor, with PKCE.
