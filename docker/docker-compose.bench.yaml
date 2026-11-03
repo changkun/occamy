@@ -13,6 +13,8 @@
 # other ports, for a second stack on a shared host, as OCCAMY_PORT and
 # OCCAMY_V1_PORT do for occamyd, and OCCAMY_V1_GFX_DEBUG_PORT the debug
 # listener of occamy-v1-gfx, as OCCAMY_V1_DEBUG_PORT does occamy-v1's.
+# OCCAMY_V1_BBR_PORT and OCCAMY_V1_BBR_DEBUG_PORT do the same for
+# occamy-v1-bbr, which starts only with the bbr profile.
 
 services:
   guacd:
@@ -61,6 +63,42 @@ services:
       OCCAMY_V1_DEBUG_ADDRESS: ${OCCAMY_V1_DEBUG_ADDRESS:-}
     depends_on:
       guacd:
+        condition: service_healthy
+      rdp:
+        condition: service_healthy
+
+  occamy-v1-bbr:
+    # occamy-v1 with BBR as the TCP congestion control of its network
+    # namespace, in place of the kernel's default, for v1-native-bbr
+    # (specs/008-native-architecture/realtime-transport.md, step 3a). The
+    # host's kernel must have BBR loaded, so it starts only with the bbr
+    # profile, which make bench-realtime-3a sets. On the loopback
+    # interface only, as occamy-v1-gfx.
+    profiles: [bbr]
+    image: ${OCCAMY_IMAGE:-occamy:latest}
+    command: ["/occamy/occamyd", "-conf", "/occamy/v1.yaml"]
+    sysctls:
+      net.ipv4.tcp_congestion_control: bbr
+    ports:
+      - "127.0.0.1:${OCCAMY_V1_BBR_PORT:-5642}:5637"
+      - "127.0.0.1:${OCCAMY_V1_BBR_DEBUG_PORT:-5643}:5638"
+    volumes:
+      - ./bench/occamy-v1.yaml:/occamy/v1.yaml:ro
+    tmpfs:
+      # The signing key that occamy-v1.yaml names, which occamy-v1 keeps on
+      # its volume, on a tmpfs: nothing outlives a run here.
+      - /var/lib/occamy:mode=1777
+    environment:
+      OCCAMY_BENCH_SSH_PASSWORD: occamy
+      OCCAMY_BENCH_RDP_PASSWORD: occamy
+      OCCAMY_DEMO_VNC_PASSWORD: vncpassword
+      OCCAMY_V1_DEBUG_ADDRESS: ${OCCAMY_V1_DEBUG_ADDRESS:-}
+    depends_on:
+      guacd:
+        condition: service_healthy
+      ssh:
+        condition: service_healthy
+      vnc:
         condition: service_healthy
       rdp:
         condition: service_healthy

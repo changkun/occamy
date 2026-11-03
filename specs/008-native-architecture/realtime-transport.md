@@ -268,9 +268,87 @@ Hodges–Lehmann shift with its exact interval, beside the round trip.
 about one round trip to key latency at the 95th percentile, step 3 waits
 and step 4 comes next.
 
-### Step 3: Order-independent tiles over a loss-tolerant transport
+### Step 3: The two costs of loss
 
-Outlined here; specified in full once step 2's numbers exist.
+Step 2 measured two costs of loss (Implementation notes: step 2): the
+wait behind a lost packet, up to 3 round trips, where the scene's rate
+fits under TCP's throughput bound for the loss; and, under N2 with 2%,
+the bound itself, about 1.22 · MSS / (RTT · √p), below the scene's
+rate, to which a congestion control that reads every loss as congestion
+holds any transport. Each half of the step removes one. 3a needs no
+change to the protocol or the clients, so it goes first, and its
+answer is an input to 3b's transport.
+
+The owner's call (2026-11-03): step 3 goes ahead now, before 1.0,
+built and measured a half at a time, and whatever the transport, one
+fallback is kept. [protocol-v1](protocol-v1.md) decision 6 is revised
+accordingly.
+
+**What others do** (searched on 2026-11-03):
+
+- Remote desktop products moved their native clients to UDP: Amazon
+  DCV uses QUIC by default and falls back to WebSocket
+  ([DCV](https://docs.aws.amazon.com/dcv/latest/userguide/using-connecting-win.html)),
+  Citrix has EDT over UDP, and Azure Virtual Desktop RDP Shortpath. Their
+  browser clients stay on WebSocket over TCP: DCV's web client has no QUIC
+  ([DCV, web client](https://docs.aws.amazon.com/dcv/latest/userguide/using-connecting-browser-connect.html)),
+  and Citrix's HTML5 client has no EDT
+  ([Citrix](https://www.citrix.com/blogs/2020/08/06/your-guide-to-implementing-citrix-workspace-app-for-html5/)).
+- In the browser, real-time streaming that left TCP went to WebRTC:
+  Chrome Remote Desktop
+  ([Chromium](https://chromium.googlesource.com/chromium/src/+/f303bc03a281b55dbd066185f79daa61dd8ba8d1/remoting/GEMINI.md)),
+  GeForce NOW's browser client and Neko. Selkies 2.0 went the other way,
+  to WebSocket with WebCodecs by default and WebRTC on request, for
+  reverse proxies and NAT without STUN or TURN
+  ([Selkies](https://github.com/selkies-project/selkies/releases/tag/v2.0.0rc0)).
+  No remote desktop on WebTransport was found.
+- WebTransport is in every engine since Safari 26.4, in March 2026
+  ([web-features](https://web-platform-dx.github.io/web-features-explorer/features/webtransport/)).
+  The network is the gap: some networks block UDP, and no mainstream
+  reverse proxy documents passing WebTransport, so the fallback will be
+  used, not kept in reserve.
+- BBR is a sender's choice alone: no client, browser or proxy changes.
+  Google moved its internal TCP traffic to it
+  ([IETF 110](https://datatracker.ietf.org/meeting/110/materials/slides-110-iccrg-bbr-updates-00.pdf)).
+  Mainline Linux carries BBR v1 as the module `tcp_bbr`; v3 is out of
+  tree. quic-go has CUBIC alone, and its maintainers declined BBR
+  ([#1888](https://github.com/quic-go/quic-go/pull/1888),
+  [#4565](https://github.com/quic-go/quic-go/issues/4565)).
+
+So 3a and 3b are complements, not alternatives: BBR on TCP removes the
+bound and keeps the wait, and WebTransport through quic-go removes the
+wait and keeps the bound.
+
+#### Step 3a: The congestion control
+
+- **Mechanism.** BBR models the path's bandwidth and round trip and
+  sends at that rate, instead of halving its window at each loss. It is
+  a property of the server's TCP connections.
+- **Harness.** `v1-native-bbr` opens `v1-native`'s connections on
+  `occamy-v1-bbr`, a service whose network namespace takes BBR as its
+  default congestion control (`net.ipv4.tcp_congestion_control`), and
+  which starts only with the compose profile `bbr`, since a kernel
+  without BBR fails it. The link image prints the namespace's congestion
+  control after it shapes, and each result of a loss study records it as
+  `congestion`. The report compares the family **Congestion control**,
+  `v1-native` to `v1-native-bbr`, with Holm's correction and without the
+  targets.
+- **Measurement.** Plan `bench/plans/realtime-3a.yaml`: step 2's loss
+  study, T1, G2 and G5 under N1 and N2 with none, 0.5% and 2% of the
+  packets lost, with `v1-native-bbr` in `guacd`'s place, 8 runs of 100
+  probe keys: 480 results, about two hours. `make bench-realtime-3a`
+  collects it, and `make bench-realtime-3a-report` writes its report
+  into `docs/benchmarks/realtime/3a/`.
+- **Kept if** G5's key latency or frame rate is significantly better in
+  a cell with loss, and no cell without loss and no guard (T1, G2) is
+  significantly worse. Then occamyd asks for BBR on its connections
+  (`TCP_CONGESTION`, which an unprivileged process may set to BBR once
+  the module is loaded), keeps the kernel's default where it cannot,
+  and the deployment docs say how to load the module.
+
+#### Step 3b: Order-independent tiles over a loss-tolerant transport
+
+Outlined here; specified in full once 3a's numbers exist.
 
 - **Versioned tiles.** Each tile update carries the tile's version; the
   client applies it only if it is newer than what it has, so updates may
@@ -283,24 +361,17 @@ Outlined here; specified in full once step 2's numbers exist.
   on a unidirectional stream of their own, reset when a later frame
   overtakes all of them. Streams rather than datagrams, because a tile
   is larger than a datagram. The pacer stays above QUIC's congestion
-  control, for latency rather than throughput. WebSocket remains the
-  fallback, for proxies that do not pass QUIC and for browsers without
-  WebTransport; Safari's support is checked before relying on it. On the
-  server, quic-go and webtransport-go keep occamyd in pure Go.
-- **Congestion control.** Step 2 measured two costs of loss: the wait
-  behind a lost packet, up to 3 round trips where the scene's rate fits
-  under TCP's throughput bound for the loss, which versioned tiles on
-  streams of their own remove; and, under N2 with 2%, the bound itself,
-  below the scene's rate, to which a loss-based controller holds any
-  transport. quic-go's controller is CUBIC, in an internal package.
-  Which controller carries the frames, and how the pacer keeps the
-  cadence even at a lower rate, are part of this step's design. QUIC's
-  probe timeout follows the round trip, where Linux TCP waits at least
-  200 ms; with 2% loss a key's 99th percentile was 236 to 271 ms at
-  either round trip.
-- [protocol-v1](protocol-v1.md) decision 6 puts WebTransport after 1.0.
-  Step 2 showed a large cost, so the owner decides whether this step
-  moves before it.
+  control, for latency rather than throughput. WebSocket over TCP, with
+  3a's congestion control, remains the fallback, for networks that block
+  UDP and proxies that do not pass WebTransport. On the server, quic-go
+  and webtransport-go keep occamyd in pure Go.
+- **Congestion control.** If 3a shows that the bound costs what the
+  pilot suggests, QUIC needs a controller that does not read a random
+  loss as congestion, which quic-go does not offer; how to get one, and
+  how the pacer keeps the cadence even at a lower rate, are part of this
+  step's design. QUIC's probe timeout follows the round trip, where
+  Linux TCP waits at least 200 ms; with 2% loss a key's 99th percentile
+  was 236 to 271 ms at either round trip.
 
 **Measurement.** Step 2's cells over both transports, with 8 runs, so
 that a difference can be significant after Holm's correction.
@@ -456,8 +527,8 @@ interval, and Guacamole's beside it.
   99th was 236 to 271 ms at either round trip, against 22 to 59.
 - **Decision.** Loss of 2% adds 3 to 8 round trips to a key during
   motion, more than about one, so step 3 is built. The cost is large,
-  so the owner decides whether step 3 comes before 1.0
-  ([protocol-v1](protocol-v1.md) decision 6).
+  and the owner decided on 2026-11-03 that step 3 comes before 1.0
+  (Step 3; [protocol-v1](protocol-v1.md) decision 6).
 - **What it tells step 3.** Loss costs two things. Where the scene's
   rate fits under TCP's throughput bound for the loss, about
   1.22 · MSS / (RTT · √p) (N1 with 2%, N2 with 0.5%), the frame rate
@@ -486,6 +557,41 @@ interval, and Guacamole's beside it.
   the VNC server's CPU in guacd's G5 under N2 with 2% was 1,079 s,
   against 32 s without loss, not looked into.
 
+## Implementation notes: step 3a
+
+- **Status.** The harness is built; the measurement is next.
+- **Built.** The `occamy-v1-bbr` service, behind the compose profile
+  `bbr`, with BBR as its namespace's default congestion control and its
+  signing key on a tmpfs; the series `v1-native-bbr` and the harness's
+  `-v1-bbr` (`OCCAMY_V1_BBR_PORT`, `OCCAMY_V1_BBR_DEBUG_PORT`); the link
+  image's `congestion` line and each loss-study result's `congestion`;
+  the report's family **Congestion control**; the plan, `make
+  bench-realtime-3a` and `bench-realtime-3a-report`. CI's bench job
+  loads `tcp_bbr`, starts the profile and runs `v1-native-bbr` in its
+  smoke run.
+- **Decisions.** A service of its own rather than a setting of
+  occamyd's: the experiment changes the kernel's choice and nothing
+  else, on the same image, and a profile keeps a kernel without BBR
+  from failing everyone's bench stack. The CPU sampler adds a block's
+  own server to the services every stack has, since podman's statistics
+  fail a whole request that names a container that does not exist.
+  `v1-native-bbr` is violet, as `v1-native-w2` is: red, the palette's
+  last slot, fails the validator beside `v1-native`'s orange (normal
+  vision ΔE 7.1), and the two never share a figure.
+- **Checked on the bench host.** `tcp_bbr` was loaded in the podman VM
+  on 2026-11-03 (`podman machine ssh sudo modprobe tcp_bbr`); the
+  kernel's default stays CUBIC, and the module stays until the VM
+  restarts. In `occamy-v1-bbr`'s namespace `ss -tin` showed `bbr` on a
+  client connection during a block, with 28 retransmissions under N2
+  with 2%. A pilot, one run of 30 keys and not a measurement, G5 under
+  N2 with 2%: with CUBIC a key showed in 408 ms over VNC and 458 over
+  RDP at the 95th percentile, with 13.1 and 19.0 scene frames a second;
+  with BBR in 163 and 154 ms, with 28.5 and 25.2.
+- **Surprises.** `comparisons.csv` had two columns named `factor`, the
+  study's setting, such as `loss=2%`, and the estimate, so a CSV reader
+  kept one of them; the estimate is now `times_better`, and the three
+  reports on disk have the new header.
+
 ## Affects
 
 - Step 1: `internal/pacer`, `internal/stream`, `protocol/handshake.go`,
@@ -493,4 +599,7 @@ interval, and Guacamole's beside it.
   `client/occamy-web/src/protocol/session.ts`, `bench/`,
   `docs/protocol.md`, `docs/benchmarks.md`.
 - Step 2: `bench/`, `docker/docker-compose.bench.yaml`.
-- Steps 3 to 5 are scoped when they start.
+- Step 3a: `bench/`, `docker/docker-compose.bench.yaml`,
+  `docker/bench/netem`, `.github/workflows/dockerimage.yml`; occamyd's
+  listener if it is kept.
+- Steps 3b to 5 are scoped when they start.

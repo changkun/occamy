@@ -43,6 +43,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   ([results](docs/benchmarks.md#step-2-what-loss-costs)), and the
   analysis says when the runs are too few for any difference to be
   significant after Holm's correction.
+- `make bench-realtime-3a` measures step 2's loss study with the server's
+  TCP on BBR beside the kernel's default, CUBIC: a `v1-native-bbr` series
+  on a service of its own, `occamy-v1-bbr`, which the compose profile
+  `bbr` starts on a kernel with BBR loaded, and each result of a loss
+  study records its server's congestion control
+  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)).
 
 ### Changed
 

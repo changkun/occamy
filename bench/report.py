@@ -113,6 +113,7 @@ SERVERS = {
     "occamy": ["occamy", "guacd"],
     "v1-native": ["occamy-v1"],
     "v1-native-w2": ["occamy-v1"],
+    "v1-native-bbr": ["occamy-v1-bbr"],
     "v1-native-nogfx": ["occamy-v1"],
     "v1-guacd": ["occamy-v1", "guacd"],
     "v1-guacd-gfx": ["occamy-v1-gfx", "guacd"],
@@ -167,10 +168,13 @@ class Family:
 # spec's Analysis, Families) join it when it runs. The frame window
 # compares the window of two frames before step 1 of
 # specs/008-native-architecture/realtime-transport.md with the window
-# from the path after it, on the same image in the same run.
+# from the path after it, and the congestion control the kernel's
+# default, CUBIC, with BBR (step 3a), each on the same image in the same
+# run.
 FAMILIES = [
     Family("Guacamole to Occamy", "guacd", "v1-native", "holm"),
     Family("Frame window", "v1-native-w2", "v1-native", "holm", targets=False),
+    Family("Congestion control", "v1-native", "v1-native-bbr", "holm", targets=False),
 ]
 
 ALPHA = 0.05
@@ -178,7 +182,10 @@ TARGET_FACTOR = 10
 TARGET_MS = 50
 
 # One colour per series wherever it appears, in the validated palette's
-# categorical order (light, dark).
+# categorical order (light, dark). v1-native's other setting in a
+# real-time step is violet, the window of two in step 1 and BBR in step
+# 3a, which never share a figure: red, the last slot, is too close to
+# v1-native's orange to tell apart.
 COLORS = {
     "guacd": ("#2a78d6", "#3987e5"),
     "v1-native": ("#eb6834", "#d95926"),
@@ -187,6 +194,7 @@ COLORS = {
     "v1-guacd-gfx": ("#e87ba4", "#d55181"),
     "v1-native-nogfx": ("#008300", "#008300"),
     "v1-native-w2": ("#6250d6", "#9085e9"),
+    "v1-native-bbr": ("#6250d6", "#9085e9"),
 }
 THEMES = {
     "light": dict(surface="#fcfcfb", text="#0b0b0b", text2="#52514e", muted="#898781", grid="#e1e0d9", axis="#c3c2b7"),

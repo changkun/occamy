@@ -24,8 +24,9 @@ v1 series run on the same stack when `-series` names them; see
 [The v1 series](#the-v1-series).
 
 On a host shared with another stack, `COMPOSE_PROJECT_NAME`,
-`OCCAMY_PORT`, `OCCAMY_V1_PORT`, `OCCAMY_V1_GFX_PORT`, `GUACD_PORT`,
-`OCCAMY_V1_DEBUG_PORT` and `OCCAMY_V1_GFX_DEBUG_PORT` start this one
+`OCCAMY_PORT`, `OCCAMY_V1_PORT`, `OCCAMY_V1_GFX_PORT`,
+`OCCAMY_V1_BBR_PORT`, `GUACD_PORT`, `OCCAMY_V1_DEBUG_PORT`,
+`OCCAMY_V1_GFX_DEBUG_PORT` and `OCCAMY_V1_BBR_DEBUG_PORT` start this one
 under its own project name and ports, and `make bench` points the harness
 at them. `OCCAMY_IMAGE` tags occamyd's image under another name, so that
 the build does not retag the image another stack runs.
@@ -46,14 +47,14 @@ make bench BENCH_FLAGS="-scenarios T1 -net N1 -series occamy"
 |------|---------|---------|
 | `-scenarios` | `all` | Comma-separated scenario IDs |
 | `-net` | `N0,N1,N2` | Network conditions |
-| `-series` | `occamy,guacd` | `occamy` goes through occamyd; `guacd` connects to guacd directly; `v1-native`, `v1-native-w2`, `v1-native-nogfx`, `v1-guacd` and `v1-guacd-gfx` speak protocol v1 ([The v1 series](#the-v1-series)) |
+| `-series` | `occamy,guacd` | `occamy` goes through occamyd; `guacd` connects to guacd directly; `v1-native`, `v1-native-w2`, `v1-native-bbr`, `v1-native-nogfx`, `v1-guacd` and `v1-guacd-gfx` speak protocol v1 ([The v1 series](#the-v1-series)) |
 | `-runs` | `1` | How many times to run everything; the table shows medians |
 | `-failfast` | off | Stop at the first measurement with an error, and exit non-zero; CI's runs set it |
 | `-quick` | off | A tenth of the samples and a sixth of the durations, to check the setup |
 | `-ack-hz` | `60` | v1: the screen refresh on whose ticks the harness acknowledges a graphical frame, as a browser does; the gate's numbers use 60, and `0`, which acknowledges at once, is a diagnostic ([The v1 series](#the-v1-series)) |
 | `-engine` | `podman` | Container engine for CPU time, or `none` |
 | `-project` | `occamy` | The stack's compose project, whose containers CPU time is read from |
-| `-addr`, `-v1`, `-v1-gfx`, `-guacd` | `localhost:5636`, `localhost:5637`, `localhost:5640`, `localhost:4822` | occamyd for v0, occamy-v1 for v1, occamy-v1-gfx for `v1-guacd-gfx`, and guacd for the direct series |
+| `-addr`, `-v1`, `-v1-gfx`, `-v1-bbr`, `-guacd` | `localhost:5636`, `localhost:5637`, `localhost:5640`, `localhost:5642`, `localhost:4822` | occamyd for v0, occamy-v1 for v1, occamy-v1-gfx for `v1-guacd-gfx`, occamy-v1-bbr for `v1-native-bbr`, and guacd for the direct series |
 | `-out` | `bench-results.json` | JSON output, saved after each series and network condition |
 | `-plan` | none | A plan file, such as `bench/plans/compare.yaml`, in place of `-series`, `-net`, `-scenarios` and `-runs` ([The comparison](#the-comparison)) |
 | `-resume` | off | Continue `-out`, if it exists and measures the same plan: keep its blocks that are complete and without errors, and measure the rest |
@@ -173,6 +174,29 @@ the matrix's N1 and N2. `make bench-realtime-2-report` analyses it into
 over the same cell without loss, the Hodges–Lehmann estimate of the
 shift with its exact 95% interval, beside the round trip. Its results
 are in [Step 2](#step-2-what-loss-costs).
+
+```sh
+make bench-realtime-3a
+```
+
+collects step 3a, the congestion control, about two hours of measuring,
+into `bench-realtime-3a.json`: step 2's loss study with
+`v1-native-bbr`, whose server's TCP uses BBR, in `guacd`'s place beside
+`v1-native`, whose server's uses the kernel's default, CUBIC, 8 runs of
+100 probe keys (`bench/plans/realtime-3a.yaml`). It starts the stack
+with the compose profile `bbr`, which adds `occamy-v1-bbr`
+([The v1 series](#the-v1-series)), and the host's kernel must have BBR
+loaded; on podman's virtual machine:
+
+```sh
+podman machine ssh sudo modprobe tcp_bbr
+```
+
+Each result of a loss study records the congestion control of its
+server's namespace as `congestion`, read where the link is emulated.
+`make bench-realtime-3a-report` analyses it into
+`docs/benchmarks/realtime/3a`, with the family **Congestion control**,
+`v1-native` to `v1-native-bbr`, beside what each loss added.
 
 ### Analysis
 
@@ -327,26 +351,24 @@ it. The RDP server is xrdp with xorgxrdp, as configured by Debian.
 
 ## The v1 series
 
-Five series measure protocol v1 with the same scenarios, metrics,
+Six series measure protocol v1 with the same scenarios, metrics,
 network conditions and bench desktop as the baseline:
 
 ```sh
-make bench BENCH_FLAGS="-series v1-native,v1-native-w2,v1-native-nogfx,v1-guacd,v1-guacd-gfx -runs 3"
+COMPOSE_PROFILES=bbr make bench BENCH_FLAGS="-series v1-native,v1-native-w2,v1-native-bbr,v1-native-nogfx,v1-guacd,v1-guacd-gfx -runs 3"
 ```
 
-**There are no v1 results yet.** What v1's full run waited for is in:
-the [graphics pipeline](../specs/008-native-architecture/graphics-pipeline.md)'s
-refinement, tile cache, encode cache and workers, and
+Their results so far are in [The essential comparison](#the-essential-comparison)
+and [The real-time steps](#the-real-time-steps). `v1-native` measures
 [native RDP](../specs/008-native-architecture/native-rdp-backend.md),
-rdp's default, which asks for RDP's graphics pipeline (GFX) without its
-ClearCodec and cache yet; `v1-native` measures it. No series has run in
-full yet, so this page publishes no v1 numbers; the harness and the CI
-smoke run keep the v1 path working until the first full run.
+rdp's default, with RDP's graphics pipeline (GFX), without its
+ClearCodec and cache yet.
 
 | Series | Backend | Protocols | RDP's GFX | Connections |
 |---|---|---|---|---|
 | `v1-native` | occamyd's own | SSH, VNC, RDP | on, as shipped | `ssh`, `vnc-native`, `rdp-native` |
 | `v1-native-w2` | occamyd's own | SSH, VNC, RDP | on | `ssh`, `vnc-native`, `rdp-native` |
+| `v1-native-bbr` | occamyd's own | SSH, VNC, RDP | on | `ssh`, `vnc-native`, `rdp-native` |
 | `v1-native-nogfx` | occamyd's own | RDP | off | `rdp-native-nogfx` |
 | `v1-guacd` | the guacd bridge | VNC, RDP | off, as shipped | `vnc-guacd`, `rdp-guacd` |
 | `v1-guacd-gfx` | the guacd bridge | RDP | on | `rdp-guacd-gfx` |
@@ -359,6 +381,12 @@ on before the server sized it from the path
 step 1), so the two series measure that step's window against the one
 before it, on one image in one run. Its rows sit beside the verdict
 rather than count for the targets.
+
+`v1-native-bbr` is `v1-native` on another service, `occamy-v1-bbr`,
+with the same file, whose network namespace takes BBR as its TCP
+congestion control instead of the kernel's default, CUBIC (step 3a). It
+starts only with the compose profile `bbr`, since a kernel without BBR
+fails it, and its rows, too, sit beside the verdict.
 
 The row of what a side ships is the verdict, and the other sits beside
 it, so that rows compare like with like: the table notes which each RDP

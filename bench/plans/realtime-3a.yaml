@@ -1,0 +1,29 @@
+# Step 3a of specs/008-native-architecture/realtime-transport.md, the
+# congestion control: v1-native, whose server's TCP uses the kernel's
+# default, CUBIC, beside v1-native-bbr, whose server's uses BBR, on the
+# same image in the same run, over step 2's link in the kernel: N1 and
+# N2, with none, 0.5% and 2% of the packets to the client dropped, on
+# T1, G2 and G5, the keys of typing, of an idle desktop and of
+# full-screen motion. make bench-realtime-3a collects it, and make
+# bench-realtime-3a-report analyses it.
+#
+# 480 results, about two hours: 8 runs, so that a difference can be
+# significant after Holm's correction over the 30 cells, which step 2's
+# 6 could not be, 100 probe keys a scenario, as step 2 had, and no G7
+# (connects: 0). Before each result the harness waits until the host's
+# 1-minute load is below max_load, for up to load_wait; then it saves
+# and exits, and the same command resumes.
+
+runs: 8
+seed: 20261103
+max_load: 8
+load_wait: 2h
+keys: 100
+connects: 0
+
+studies:
+  - study: loss
+    series: [v1-native, v1-native-bbr]
+    nets: [N1, N2]
+    loss: [0, 0.5, 2]
+    scenarios: T1,G2,G5
