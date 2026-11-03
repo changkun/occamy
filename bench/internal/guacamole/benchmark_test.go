@@ -14,7 +14,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"changkun.de/x/occamy/internal/guacamole"
+	"changkun.de/x/occamy/bench/internal/guacamole"
 )
 
 // ParseInstructionGuac parses an instruction: 1.a,2.bc,3.def,10.abcdefghij;

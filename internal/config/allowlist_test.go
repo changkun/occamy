@@ -59,8 +59,7 @@ func TestAllowsPort(t *testing.T) {
 		{byDefault, "vnc", 5999, true},
 		{byDefault, "vnc", 6000, false},
 		{byDefault, "rdp", 3389, true},
-		{byDefault, "telnet", 23, true},
-		{byDefault, "telnet", 22, false},
+		{byDefault, "telnet", 23, false}, // no protocol of occamyd's
 		{byDefault, "kubernetes", 443, false},
 		{ssh, "ssh", 2222, true},
 		{ssh, "ssh", 22, false},

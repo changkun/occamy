@@ -171,23 +171,6 @@ func TestWebClientPolicy(t *testing.T) {
 	}
 }
 
-// TestWebClientV0 checks that a v0 file's client: true serves /static/
-// through the same handler, with its headers, though nothing is built
-// where it looks.
-func TestWebClientV0(t *testing.T) {
-	rp := newRouteProxy(t, true, false)
-	r := rp.get(t, "/static/", nil)
-	if r.code != http.StatusNotFound {
-		t.Errorf("GET /static/ of an unbuilt client: %d, want 404", r.code)
-	}
-	if got, want := r.header.Get("Content-Security-Policy"), policyFor(t, rp.srv.URL); got != want {
-		t.Errorf("Content-Security-Policy %q, want %q", got, want)
-	}
-	if got := r.header.Get("X-Content-Type-Options"); got != "nosniff" {
-		t.Errorf("X-Content-Type-Options %q, want nosniff", got)
-	}
-}
-
 // TestWebClientNotBuilt checks that occamyd warns at start when
 // web_client names a directory without a built client, and serves it
 // anyway, so that a client built later is served without a restart, as

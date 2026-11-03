@@ -31,12 +31,10 @@ import (
 	"slices"
 	"strings"
 	"time"
-
-	"changkun.de/x/occamy/internal/config"
 )
 
-// series is a way of reaching a remote: protocol v0 through occamyd or
-// straight to guacd, or protocol v1 through occamyd with one backend
+// series is a way of reaching a remote: Guacamole's protocol, v0,
+// straight from guacd, the baseline, or protocol v1 through occamyd
 // (v1.go).
 type series struct {
 	Name   string
@@ -58,25 +56,22 @@ func (s series) serves(proto string) bool {
 	return s.protocols == nil || slices.Contains(s.protocols, proto)
 }
 
-// endpoints are where the series reach the stack: occamyd for v0, guacd
-// for the direct series, occamy-v1 for the v1 series, occamy-v1-gfx for
-// v1-guacd-gfx, and occamy-v1-cubic for v1-native-cubic.
-type endpoints struct{ occamy, guacd, v1, v1GFX, v1Cubic string }
+// endpoints are where the series reach the stack: guacd for the guacd
+// series, occamy-v1 for the v1 series, and occamy-v1-cubic for
+// v1-native-cubic.
+type endpoints struct{ guacd, v1, v1Cubic string }
 
 // allSeries returns every series that the harness knows, in the order
 // -series lists them, reaching the stack at at. The v1 series show their
 // frames on d.
 func allSeries(at endpoints, d display) []series {
 	all := []series{
-		{Name: "occamy", target: at.occamy, server: "occamy", port: 5636, open: openV0(dialOccamy)},
-		{Name: "guacd", target: at.guacd, server: "guacd", port: 4822, open: openV0(dialGuacd)},
+		{Name: "guacd", target: at.guacd, server: "guacd", port: 4822, open: openGuacd},
 	}
 	for _, v := range []struct{ name, target, server string }{
 		{"v1-native", at.v1, "occamy-v1"},
 		{"v1-native-w2", at.v1, "occamy-v1"},
 		{"v1-native-nogfx", at.v1, "occamy-v1"},
-		{"v1-guacd", at.v1, "occamy-v1"},
-		{"v1-guacd-gfx", at.v1GFX, "occamy-v1-gfx"},
 		{"v1-native-cubic", at.v1Cubic, "occamy-v1-cubic"},
 	} {
 		conns := v1Connections[v.name]
@@ -88,11 +83,16 @@ func allSeries(at endpoints, d display) []series {
 	return all
 }
 
+// openGuacd opens a v0 session on proto straight to guacd at addr.
+func openGuacd(ctx context.Context, addr, proto string) (*session, error) {
+	return openV0(dialGuacd)(ctx, addr, proto)
+}
+
 // openV0 opens v0 sessions with dial.
-func openV0(dial func(ctx context.Context, addr string, cred config.JWT) (rawConn, error)) func(context.Context, string, string) (*session, error) {
+func openV0(dial func(ctx context.Context, addr string, t remote) (rawConn, error)) func(context.Context, string, string) (*session, error) {
 	return func(ctx context.Context, addr, proto string) (*session, error) {
 		start := time.Now()
-		c, err := dial(ctx, addr, credentials[proto])
+		c, err := dial(ctx, addr, remotes[proto])
 		if err != nil {
 			return nil, err
 		}
@@ -102,14 +102,12 @@ func openV0(dial func(ctx context.Context, addr string, cred config.JWT) (rawCon
 
 func main() {
 	var (
-		addr        = flag.String("addr", "localhost:5636", "occamyd address")
-		guacdAddr   = flag.String("guacd", "localhost:4822", "guacd address for the direct series")
+		guacdAddr   = flag.String("guacd", "localhost:4822", "guacd address for the guacd series")
 		v1Addr      = flag.String("v1", "localhost:5637", "occamy-v1 address for the v1 series")
-		v1GFXAddr   = flag.String("v1-gfx", "localhost:5640", "occamy-v1-gfx address for the v1-guacd-gfx series")
 		v1CubicAddr = flag.String("v1-cubic", "localhost:5642", "occamy-v1-cubic address for the v1-native-cubic series")
 		scen        = flag.String("scenarios", "all", "comma-separated scenario IDs, or all")
 		nets        = flag.String("net", "N0,N1,N2", "comma-separated network conditions")
-		seriesF     = flag.String("series", "occamy,guacd", "comma-separated series: occamy, guacd, v1-native, v1-native-w2, v1-native-nogfx, v1-native-cubic, v1-guacd, v1-guacd-gfx")
+		seriesF     = flag.String("series", "guacd,v1-native", "comma-separated series: guacd, v1-native, v1-native-w2, v1-native-nogfx, v1-native-cubic")
 		quick       = flag.Bool("quick", false, "fewer samples and shorter scenarios, to check the setup")
 		ackHz       = flag.Float64("ack-hz", 60, "v1: the screen refresh at which a graphical frame is acknowledged, or 0 for at once, a diagnostic; the gate's numbers use 60")
 		runs        = flag.Int("runs", 1, "how many times to run everything; the table shows medians")
@@ -127,7 +125,7 @@ func main() {
 	flag.Parse()
 	log.SetFlags(log.Ltime)
 
-	all := allSeries(endpoints{occamy: *addr, guacd: *guacdAddr, v1: *v1Addr, v1GFX: *v1GFXAddr, v1Cubic: *v1CubicAddr}, newDisplay(*ackHz))
+	all := allSeries(endpoints{guacd: *guacdAddr, v1: *v1Addr, v1Cubic: *v1CubicAddr}, newDisplay(*ackHz))
 	debug, err := parseDebug(*debugF)
 	if err != nil {
 		log.Fatal(err)
@@ -895,15 +893,10 @@ func cells(r *result) [numCols]float64 {
 	if r.CPUMS != nil {
 		// guacd serves nothing of the native series.
 		native := strings.HasPrefix(r.Series, "v1-native")
-		switch {
-		case native:
+		if native {
 			c[colServerCPU] = r.CPUMS[v1Service(r.Series)]
-		case r.Series == "v1-guacd":
-			c[colServerCPU] = r.CPUMS["occamy-v1"] + r.CPUMS["guacd"]
-		case r.Series == "v1-guacd-gfx":
-			c[colServerCPU] = r.CPUMS["occamy-v1-gfx"] + r.CPUMS["guacd"]
-		default:
-			c[colServerCPU] = r.CPUMS["occamy"] + r.CPUMS["guacd"]
+		} else {
+			c[colServerCPU] = r.CPUMS["guacd"]
 		}
 		c[colRemoteCPU] = r.CPUMS[r.Protocol]
 		if native {
@@ -1047,7 +1040,7 @@ func newCPUSampler(engine, project, server string) *cpuSampler {
 }
 
 // services are those of every bench stack.
-var services = []string{"occamy", "occamy-v1", "occamy-v1-gfx", "guacd", "ssh", "vnc", "rdp"}
+var services = []string{"occamy-v1", "guacd", "ssh", "vnc", "rdp"}
 
 // sample returns the cumulative CPU time per compose service, or nil if
 // the engine does not report it. Only podman reports cumulative CPU time
@@ -1101,9 +1094,7 @@ func hostInfo(engine, project string) map[string]string {
 	}
 	if engine != "" && engine != "none" {
 		run("engine", engine, "--version")
-		run("occamy_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-1")
 		run("occamy_v1_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-v1-1")
-		run("occamy_v1_gfx_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-v1-gfx-1")
 		run("occamy_v1_cubic_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-occamy-v1-cubic-1")
 		run("guacd_image", engine, "inspect", "--format", "{{.ImageName}} {{.Image}}", project+"-guacd-1")
 	}

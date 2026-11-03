@@ -51,7 +51,7 @@ func newVNCServer(t *testing.T, opts vnctest.Options) *vnctest.Server {
 // served by the native backend.
 func vncConnection(id, addr string, creds config.Credentials) config.Connection {
 	return config.Connection{
-		ID: id, Name: id, Protocol: "vnc", Backend: config.BackendNative, Target: addr,
+		ID: id, Name: id, Protocol: "vnc", Target: addr,
 		Credentials: creds, Allow: config.Allow{Users: []string{"alice"}},
 	}
 }
@@ -479,14 +479,13 @@ func TestVNCTLS(t *testing.T) {
 	}
 }
 
-// TestVNCAdhoc opens an ad-hoc vnc target, which adhoc_backends sends
-// to the native backend, and asks its owner for the password.
+// TestVNCAdhoc opens an ad-hoc vnc target, and asks its owner for the
+// password.
 func TestVNCAdhoc(t *testing.T) {
 	vs := newVNCServer(t, vnctest.Options{Password: "secret"})
 	ts, alice := vncTestServer(t, func(f *config.File) {
 		f.AllowAdhocTargets = true
 		f.AdhocAllowlist = []string{"127.0.0.1:1-65535"}
-		f.AdhocBackends = map[string]string{"vnc": config.BackendNative}
 	})
 	r := ts.api(t, http.MethodPost, "/api/v1/sessions", alice, `{"protocol":"vnc","target":"`+vs.Addr()+`"}`)
 	var o openResponse
@@ -530,7 +529,6 @@ func TestVNCAdhocName(t *testing.T) {
 	ts, alice := vncTestServer(t, func(f *config.File) {
 		f.AllowAdhocTargets = true
 		f.AdhocAllowlist = []string{"127.0.0.1:1-65535"}
-		f.AdhocBackends = map[string]string{"vnc": config.BackendNative}
 	})
 	var mu sync.Mutex
 	lookups := map[string]int{}

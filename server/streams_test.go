@@ -628,7 +628,7 @@ func TestShutdownEndsStreams(t *testing.T) {
 		t.Fatal(err)
 	}
 	fb := &fakeBackends{}
-	s.backends.register("fake", "", "fake", fb.make)
+	s.backends.register("fake", "fake", fb.make)
 	ln := localListener(t)
 	stop := serving(t, time.Second, s.publicServer(), ln, nil, nil)
 	ts := &testServer{s: s, srv: nil}
@@ -1009,7 +1009,7 @@ func TestStreamSizeBounds(t *testing.T) {
 	resized(term.Inputs, backend.Resize{Width: terminal.MaxCols, Height: terminal.MaxRows})
 
 	var scr *backendtest.Screen
-	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) {
+	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
 		scr = backendtest.NewScreen(64, 48, 0)
 		return scr, nil
 	})
@@ -1028,7 +1028,7 @@ func TestStreamSizeBounds(t *testing.T) {
 // with unsupported.
 func TestStreamCodecs(t *testing.T) {
 	ts, _ := sessionServer(t, nil)
-	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) {
+	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
 		return backendtest.NewScreen(64, 48, 0), nil
 	})
 	alice := ts.token(t, "alice", "ops")
@@ -1086,7 +1086,7 @@ func (failing) Run(context.Context, backend.Sink) error { return errors.New("con
 // after.
 func TestStreamBackendFails(t *testing.T) {
 	ts, _ := sessionServer(t, nil)
-	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) {
+	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
 		return failing{backendtest.NewTerminal(80, 24, 0)}, nil
 	})
 	alice := ts.token(t, "alice", "ops")
@@ -1112,7 +1112,7 @@ func (panicsOnInput) Input(backend.InputEvent) error { panic("the backend's inpu
 // viewer, and that occamyd goes on serving.
 func TestBackendPanicEndsSession(t *testing.T) {
 	ts, _ := sessionServer(t, nil)
-	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) {
+	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
 		return panicsOnInput{backendtest.NewTerminal(80, 24, 0)}, nil
 	})
 	alice := ts.token(t, "alice", "ops")
