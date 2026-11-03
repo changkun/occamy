@@ -749,6 +749,26 @@ valid becomes invalid.
 00 00 00 00              # payload: length 0
 ```
 
+A [`scaled`](#the-scaled-codec) tile carries its rectangle's pixels at
+a fraction of its size, here a 64×32 WebP image, cut short, for a
+128×64 rectangle:
+
+```hex
+# vector: tile scaled
+03 02 00 00              # header: type 0x0203 (tile), flags 0
+03 00 00 00              # frame_id: 3
+00 00                    # x: 0
+40 00                    # y: 64
+80 00                    # w: 128
+40 00                    # h: 64
+07                       # codec: 7 (scaled)
+00 00                    # slot: 0
+06 00 00 00              # payload: length 6
+02                       # factor: 2
+05                       # codec: 5 (webp)
+52 49 46 46              # image: "RIFF"
+```
+
 ### copy-rect
 
 Type 0x0204. Copies the `w × h` pixels at `src_x, src_y` to `dst_x,
@@ -823,7 +843,7 @@ of 0×0 hides the pointer.
 
 Rules between fields: a hidden cursor (`w` and `h` zero) has a zero hot
 spot, codec 0 and an empty payload. A shown cursor has both `w` and `h`
-non-zero, a codec defined in v1 other than `cached`, its hot spot
+non-zero, a codec defined in v1 other than `cached` and `scaled`, its hot spot
 inside the image, and if it is `raw`, exactly `w × h × 4` bytes.
 
 ```hex
@@ -1113,10 +1133,11 @@ A codec ID is a u8. Codec 0 is not a codec: it appears only in a hidden
 | 1 | `raw` | `w × h × 4` bytes, rows from top to bottom without padding, in RGBA order with straight alpha | Tiles of up to 256 colours, those of 17 or more only while still if the client lists a lossy codec, and cursors, to a client that lists `raw` but not `deflate` |
 | 2 | `deflate` | A raw DEFLATE stream ([RFC 1951](https://www.rfc-editor.org/rfc/rfc1951)) of a [deflate container](#the-deflate-container); browsers inflate it with `DecompressionStream('deflate-raw')` | Tiles of up to 256 colours, those of 17 or more only while still if the client lists a lossy codec, and cursors |
 | 3 | `png` | A PNG file | Nothing |
-| 4 | `jpeg` | A JFIF file, opaque | Tiles of more than 256 colours, and of 17 to 256 in motion, to a client that lists `jpeg` but not `webp` |
-| 5 | `webp` | A WebP file, lossy or lossless, with straight alpha | Tiles of more than 256 colours, and of 17 to 256 in motion, lossy and opaque; cursors, lossless, to a client that lists neither `deflate` nor `raw` |
+| 4 | `jpeg` | A JFIF file, opaque | Tiles of more than 256 colours, and of 17 to 256 in motion, to a client that lists `jpeg` but not `webp`; while they move, as the image of `scaled` to a client that lists it |
+| 5 | `webp` | A WebP file, lossy or lossless, with straight alpha | Tiles of more than 256 colours, and of 17 to 256 in motion, lossy and opaque, and while they move, as the image of `scaled` to a client that lists it; cursors, lossless, to a client that lists neither `deflate` nor `raw` |
 | 6 | `cached` | Empty: the tile is drawn from its cache slot | Tiles whose content a cache slot of the client holds, to a client that lists `cached` and agrees to `cache_slots` |
-| 7 to 0x7F | | Unassigned | |
+| 7 | `scaled` | A [scaled image](#the-scaled-codec): a factor, a codec, `jpeg` or `webp`, and an image of that codec at the rectangle's size divided by the factor | Tiles in motion that would go `jpeg` or `webp`, at half their width and height, to a client that lists `scaled` |
+| 8 to 0x7F | | Unassigned | |
 | 0x80 to 0xFF | | Reserved for a video tier after 1.0 | |
 
 A server sends only agreed codecs. A codec ID is never given to another
@@ -1133,7 +1154,8 @@ library's conversion, which is JPEG's full-range one: what
 returns unless asked for RGBA.
 
 Before it decodes a `jpeg` or `webp` payload, a receiver checks the size
-that its header claims against the message's rectangle, and refuses one
+that its header claims against the message's rectangle, or for the image
+of a `scaled` one, against the rectangle scaled down, and refuses one
 that differs with `protocol-error`: a few bytes of header can claim a
 frame that takes hundreds of megabytes to decode into. In Go, that is
 `DecodeConfig` before `Decode`, or the decoder's own limit on the frame's
@@ -1148,9 +1170,11 @@ cover several tiles side by side, so that the lossy format's headers are
 paid once. A tile in motion, one that changed in each of the last few
 snapshots of the screen occamyd takes, at most ten a second, other than
 as an input's effect, goes at a low quality, and lossy
-if it has 17 to 256 colours; once it has been still for a moment
-(300 ms by default), occamyd sends it again, exact if it has up to 256
-colours and at a higher quality if it has more. Such a frame of
+if it has 17 to 256 colours, and to a client that lists `scaled`, at
+half its width and height as a [`scaled`](#the-scaled-codec) image of
+the lossy codec; once it has been still for a moment (300 ms by
+default), occamyd sends it again, exact if it has up to 256 colours and
+at a higher quality and its full size if it has more. Such a frame of
 refinement is an ordinary frame of `tile` messages, so the client needs
 nothing to take it: a client sees the same tile drawn twice, the second
 time sharper. A tile whose content a slot of the client's
@@ -1241,6 +1265,41 @@ ff ff ff 80              # 0: white at half alpha
 ff 00 00 ff              # 1: red, opaque
 40                       # the row: 0 1, 1 bit each, then 6 bits of padding
 ```
+
+### The scaled codec
+
+The payload of `scaled` is the rectangle's pixels at a fraction of its
+width and height, in another codec:
+
+| Field | Type | Meaning |
+|-------|------|---------|
+| factor | u8 | How many times smaller the image is each way: 2 to 4. |
+| codec | u8 | The image's codec: `jpeg` or `webp`, and agreed. |
+| image | bytes | The rest of the payload: an image of `⌈w / factor⌉ × ⌈h / factor⌉` pixels in that codec. |
+
+Each pixel of the image stands for a square of `factor × factor` pixels
+of the rectangle, from its top left; the squares of the last column and
+row may cross the rectangle's edge. The receiver draws the image scaled
+up by exactly `factor` from the rectangle's top left, and nothing
+outside the rectangle. How it fills the pixels between the image's is
+its choice: occamyd makes each pixel of the image the mean of the
+pixels it stands for, and occamy's clients scale up bilinearly,
+sampling the image at the centre of each pixel of the rectangle. The
+`min_psnr` of a scaled payload in the golden file holds for that.
+
+A receiver refuses, with `protocol-error`, a payload of fewer than two
+bytes, a factor outside 2 to 4, an image codec other than `jpeg` or
+`webp` or one not agreed, and, before it decodes the image, a header
+that claims another size than `⌈w / factor⌉ × ⌈h / factor⌉`. `scaled`
+is for tiles only, and a `scaled` image of a `scaled` image is invalid.
+
+A tile in motion is drawn for a moment, until refinement sends it again
+at its full size once it stops, so it needs less of its detail than a
+still one. Half its width and height is a quarter of its pixels: on the
+plasma of the [codec corpus](benchmarks/codecs.md), it is half
+the bytes of the tile at the same quality, for an SSIM of 0.986 against
+0.988, and a third of the encoding time. A client that does not list
+`scaled` gets its tiles in motion at their full size.
 
 ## Close codes
 

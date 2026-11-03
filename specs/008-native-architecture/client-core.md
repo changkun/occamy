@@ -10,7 +10,7 @@ affects:
   - tests/
 effort: medium
 created: 2026-10-29
-updated: 2026-11-01
+updated: 2026-11-03
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -264,6 +264,13 @@ layer, and any tools.
     0, until the Codecs task adds one. (The graphics pipeline's Tile
     cache task added it on 2026-10-31: the client offers `cached` and
     1024 slots by default, `Options.CacheSlots` and `NoCache`.)
+  - (Added by the graphics pipeline's Scaled motion on 2026-11-03.) The
+    client offers `scaled` after its plugged codecs when JPEG or WebP is
+    among them, and decodes it with `Scaled`, which decodes the image
+    with the plugged decoder of its codec and scales it up bilinearly;
+    `Options.Decoders` may plug its own `scaled`, as the bench does to
+    time it. A scaled tile whose image's codec was not agreed is a
+    protocol error.
 - **Deviations from the proposed shape:**
   - Input methods take a context and return the sequence number and an
     error. `View` is added: the export layer needs visibility and

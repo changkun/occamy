@@ -18,7 +18,7 @@ affects:
   - docs/
 effort: medium
 created: 2026-10-29
-updated: 2026-11-02
+updated: 2026-11-03
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -157,7 +157,11 @@ Settled on 2026-10-31.
     `deflate-raw`, WebP where a 1×1 probe decodes, JPEG where
     `createImageBitmap` exists, raw always, and then `cached`, keeping a
     tile cache of 1024 slots by default (`cacheSlots`; added by the
-    graphics pipeline's Tile cache task on 2026-10-31).
+    graphics pipeline's Tile cache task on 2026-10-31). The Workers'
+    decoder offers deflate, WebP, JPEG, `scaled` and raw, and draws a
+    `scaled` tile's image on a canvas of the tile's size, smoothed, from
+    a source rectangle of the tile's size divided by the factor (added
+    by the graphics pipeline's Scaled motion on 2026-11-03).
   - `Display` waits for an animation frame and presents each frame's
     dirty rectangles to a `Surface` in one task, so the browser never
     paints half a frame; `CanvasSurface` puts them on a canvas or an
@@ -255,7 +259,11 @@ Settled on 2026-10-31.
     47 dB, the canvas holds the framebuffer exactly, and the cursor is
     exact. A real click focuses the canvas, and real key presses reach
     the remote with keysym and usage (q: 0x71 and 0x14; right Shift:
-    0xffe2 and 0xe5). To run them:
+    0xffe2 and 0xe5). (2026-11-03, with the scaled codec: the demo's 57
+    checks pass, the scaled vectors decode at 34.1 and 37.5 dB against
+    31 and 34, Workers decode 22 of 22 as the page does, and a session
+    with `webinterop` agrees on deflate, WebP, JPEG, scaled, raw and
+    cached.) To run them:
 
     ```sh
     go build -o /tmp/webinterop ./client/internal/webinterop

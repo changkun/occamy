@@ -142,6 +142,21 @@ func decodeTile(dst *image.RGBA, c protocol.Codec, payload []byte) error {
 		return in.Decode(dst, payload)
 	case protocol.CodecWebP, protocol.CodecJPEG:
 		m, err = decodeLossy(c, payload, dst.Rect.Dx(), dst.Rect.Dy())
+	case protocol.CodecScaled:
+		sc, err := protocol.ParseScaled(payload)
+		if err != nil {
+			return err
+		}
+		w, h := dst.Rect.Dx(), dst.Rect.Dy()
+		sw, sh := protocol.ScaledSize(w, h, int(sc.Factor))
+		small := image.NewRGBA(image.Rect(0, 0, sw, sh))
+		if err := decodeTile(small, sc.Codec, sc.Image); err != nil {
+			return err
+		}
+		m := image.NewRGBA(image.Rect(0, 0, w, h))
+		codec.Upscale(m.Pix, w, h, small.Pix, int(sc.Factor), nil)
+		draw.Draw(dst, dst.Rect, m, image.Point{}, draw.Src)
+		return nil
 	default:
 		return fmt.Errorf("tile in codec %v", c)
 	}

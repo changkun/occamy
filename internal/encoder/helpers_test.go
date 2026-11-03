@@ -104,6 +104,18 @@ func decode(c protocol.Codec, payload []byte, w, h int) (*image.RGBA, error) {
 		return out, in.Decode(out, payload)
 	case protocol.CodecWebP, protocol.CodecJPEG:
 		m, err = decodeLossy(c, payload, w, h)
+	case protocol.CodecScaled:
+		sc, err := protocol.ParseScaled(payload)
+		if err != nil {
+			return nil, err
+		}
+		f := int(sc.Factor)
+		small, err := decode(sc.Codec, sc.Image, (w+f-1)/f, (h+f-1)/f)
+		if err != nil {
+			return nil, err
+		}
+		codec.Upscale(out.Pix, w, h, small.Pix, f, nil)
+		return out, nil
 	default:
 		return nil, fmt.Errorf("codec %v", c)
 	}

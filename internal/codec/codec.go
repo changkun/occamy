@@ -6,7 +6,8 @@
 // defines itself, both ways: raw pixels (codec 1) and the deflate
 // container (codec 2), as docs/protocol.md describes them under Codecs.
 // It also counts a tile's colours, which is how the graphics pipeline
-// classifies tiles (specs/008-native-architecture/graphics-pipeline.md).
+// classifies tiles (specs/008-native-architecture/graphics-pipeline.md),
+// and scales the images of the scaled codec (codec 7) both ways.
 //
 // The package uses the standard library only, so that a client decodes
 // with it without linking the server's lossy encoders. JPEG and WebP

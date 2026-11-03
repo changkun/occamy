@@ -122,9 +122,14 @@ const (
 	// CodecCached draws the tile stored in a client cache slot and has no
 	// payload. It is only for tiles.
 	CodecCached Codec = 6
+	// CodecScaled is an image in CodecJPEG or CodecWebP at a fraction of
+	// the tile's width and height, which the client scales up to cover
+	// the tile; see Scaled. occamyd sends it for tiles in motion. It is
+	// only for tiles.
+	CodecScaled Codec = 7
 )
 
-func (c Codec) valid() bool { return c >= CodecRaw && c <= CodecCached }
+func (c Codec) valid() bool { return c >= CodecRaw && c <= CodecScaled }
 
 func (c Codec) String() string {
 	switch c {
@@ -140,6 +145,8 @@ func (c Codec) String() string {
 		return "webp"
 	case CodecCached:
 		return "cached"
+	case CodecScaled:
+		return "scaled"
 	}
 	return "Codec(" + strconv.Itoa(int(c)) + ")"
 }

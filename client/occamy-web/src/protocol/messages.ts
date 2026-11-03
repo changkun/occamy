@@ -68,12 +68,54 @@ export type Role = (typeof Role)[keyof typeof Role]
 export const SessionClass = { Terminal: 1, Graphical: 2 } as const
 export type SessionClass = (typeof SessionClass)[keyof typeof SessionClass]
 
-/** The codecs. 7 to 0x7F are unassigned and 0x80 to 0xFF reserved for video. */
-export const Codec = { Raw: 1, Deflate: 2, PNG: 3, JPEG: 4, WebP: 5, Cached: 6 } as const
+/** The codecs. 8 to 0x7F are unassigned and 0x80 to 0xFF reserved for video. */
+export const Codec = { Raw: 1, Deflate: 2, PNG: 3, JPEG: 4, WebP: 5, Cached: 6, Scaled: 7 } as const
 export type Codec = (typeof Codec)[keyof typeof Codec]
 
 export function isCodec(c: number): c is Codec {
-  return c >= Codec.Raw && c <= Codec.Cached
+  return c >= Codec.Raw && c <= Codec.Scaled
+}
+
+/** The factors a scaled tile's image may be scaled up by. */
+export const MIN_SCALE = 2
+export const MAX_SCALE = 4
+
+/**
+ * The payload of a scaled tile: an image of the tile at 1/factor of its
+ * width and height, rounded up (scaledSize), in codec, which the client
+ * scales up by factor, bilinearly, from the tile's top left corner.
+ */
+export interface Scaled {
+  factor: number
+  /** JPEG or WebP, and one the client agreed to. */
+  codec: Codec
+  /** The payload of codec; it views the tile's payload. */
+  image: Uint8Array
+}
+
+/**
+ * parseScaled reads the payload of a scaled tile, and throws invalid if
+ * it has no factor and codec, or a factor or codec that a scaled tile
+ * does not allow; it does not look at the image.
+ */
+export function parseScaled(p: Uint8Array): Scaled {
+  if (p.length < 2) {
+    throw new ProtocolError('invalid', `scaled payload of ${p.length} bytes`)
+  }
+  const factor = p[0]
+  const codec = p[1]
+  if (factor < MIN_SCALE || factor > MAX_SCALE) {
+    throw new ProtocolError('invalid', `scaled by ${factor}`)
+  }
+  if (codec !== Codec.JPEG && codec !== Codec.WebP) {
+    throw new ProtocolError('invalid', `scaled image of codec ${codec}`)
+  }
+  return { factor, codec, image: p.subarray(2) }
+}
+
+/** scaledSize returns the size of the image of a w×h tile scaled by factor: w and h divided by it, rounded up. */
+export function scaledSize(w: number, h: number, factor: number): { width: number; height: number } {
+  return { width: Math.ceil(w / factor), height: Math.ceil(h / factor) }
 }
 
 /** A wheel's unit. */
@@ -523,6 +565,9 @@ function decodeTile(r: Reader, l: Limits): Tile {
   if (codec === Codec.Raw && payload.length !== 4 * w * h) {
     throw new ProtocolError('invalid', `raw ${w}x${h} tile with ${payload.length} bytes`)
   }
+  if (codec === Codec.Scaled) {
+    parseScaled(payload)
+  }
   return { type: 'tile', frameId, x, y, w, h, codec, slot, payload }
 }
 
@@ -547,7 +592,7 @@ function decodeCursor(r: Reader, l: Limits): Cursor {
     }
   } else if (w === 0 || h === 0) {
     throw new ProtocolError('invalid', `cursor of ${w}x${h}`)
-  } else if (!isCodec(codec) || codec === Codec.Cached) {
+  } else if (!isCodec(codec) || codec === Codec.Cached || codec === Codec.Scaled) {
     throw new ProtocolError('invalid', `cursor codec ${codec}`)
   } else if (hotX >= w || hotY >= h) {
     throw new ProtocolError('invalid', `hot spot ${hotX},${hotY} outside a ${w}x${h} cursor`)

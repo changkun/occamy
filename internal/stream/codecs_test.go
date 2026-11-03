@@ -208,6 +208,11 @@ func (e *markEncoder) Lossy(dst, pix []byte, w, h, _ int) ([]byte, protocol.Code
 	return append(dst, pix[:4*w*h]...), protocol.CodecRaw
 }
 
+// Scaled sends what Lossy sends: the viewer did not agree to scaled tiles.
+func (e *markEncoder) Scaled(dst, pix []byte, w, h, _, q int) ([]byte, protocol.Codec) {
+	return e.Lossy(dst, pix, w, h, q)
+}
+
 func (e *markEncoder) Still(dst, pix []byte, w, h, _, _, hi int) ([]byte, protocol.Codec, int, bool) {
 	b, c := e.Lossy(dst, pix, w, h, hi)
 	return b, c, hi, true

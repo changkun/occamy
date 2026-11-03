@@ -18,7 +18,7 @@ import {
   isImageCodec,
   withoutExif,
 } from './codecs'
-import { Codec } from './messages'
+import { Codec, parseScaled, scaledSize } from './messages'
 import { type ErrorKind, ProtocolError } from './wire'
 
 /** A payload to decode: an image of width × height pixels. */
@@ -45,8 +45,25 @@ export interface TileDecoder {
   close(): void
 }
 
-/** decodeImage decodes an image payload whose header was checked to claim width × height. */
-export type DecodeImage = (codec: number, payload: Uint8Array, width: number, height: number) => Promise<Pixels>
+/**
+ * decodeImage decodes an image payload whose header was checked to claim
+ * width × height into its pixels or, if scaled, into scaled's width ×
+ * height, the image scaled up by its factor from the top left.
+ */
+export type DecodeImage = (
+  codec: number,
+  payload: Uint8Array,
+  width: number,
+  height: number,
+  scaled?: ScaledTo,
+) => Promise<Pixels>
+
+/** ScaledTo is the size of a scaled tile, whose image is its factor times smaller, rounded up. */
+export interface ScaledTo {
+  factor: number
+  width: number
+  height: number
+}
 
 /** What a platform offers to decode with; null where it offers nothing. */
 export interface Platform {
@@ -183,7 +200,7 @@ export function canvasDecodeImage(): DecodeImage | null {
   if (ctx === null) {
     return null
   }
-  return async (codec, payload, width, height) => {
+  return async (codec, payload, width, height, scaled) => {
     const blob = new Blob([withoutExif(codec, payload) as Uint8Array<ArrayBuffer>], { type: imageTypes[codec as Codec] })
     let bitmap: ImageBitmap
     try {
@@ -197,14 +214,23 @@ export function canvasDecodeImage(): DecodeImage | null {
       }
       // Drawing and reading back are synchronous, so decodes that wait
       // on createImageBitmap together share the canvas safely.
+      const out = scaled ?? { factor: 1, width, height }
       const canvas = ctx.canvas
-      if (canvas.width !== width || canvas.height !== height) {
-        canvas.width = width
-        canvas.height = height
+      if (canvas.width !== out.width || canvas.height !== out.height) {
+        canvas.width = out.width
+        canvas.height = out.height
       }
       ctx.globalCompositeOperation = 'copy'
-      ctx.drawImage(bitmap, 0, 0)
-      return ctx.getImageData(0, 0, width, height).data
+      if (scaled === undefined) {
+        ctx.drawImage(bitmap, 0, 0)
+      } else {
+        // Bilinear, from the top left: the image scaled up covers the
+        // tile and up to factor - 1 pixels more, which fall off.
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = 'low'
+        ctx.drawImage(bitmap, 0, 0, out.width / out.factor, out.height / out.factor, 0, 0, out.width, out.height)
+      }
+      return ctx.getImageData(0, 0, out.width, out.height).data
     } finally {
       bitmap.close()
     }
@@ -234,7 +260,7 @@ export class LocalDecoder implements TileDecoder {
       if (await this.decodesWebP()) {
         out.push(Codec.WebP)
       }
-      out.push(Codec.JPEG)
+      out.push(Codec.JPEG, Codec.Scaled)
     }
     out.push(Codec.Raw)
     return out
@@ -270,6 +296,16 @@ export class LocalDecoder implements TileDecoder {
       const pixels = await this.platform.decodeImage(codec, payload, width, height)
       if (pixels.length !== 4 * width * height) {
         throw new ProtocolError('invalid', `an image of ${pixels.length} bytes for ${width}x${height}`)
+      }
+      return pixels
+    }
+    if (codec === Codec.Scaled && this.platform.decodeImage !== null) {
+      const s = parseScaled(payload)
+      const size = scaledSize(width, height, s.factor)
+      checkImageSize(s.codec, s.image, size.width, size.height)
+      const pixels = await this.platform.decodeImage(s.codec, s.image, size.width, size.height, { factor: s.factor, width, height })
+      if (pixels.length !== 4 * width * height) {
+        throw new ProtocolError('invalid', `a scaled image of ${pixels.length} bytes for ${width}x${height}`)
       }
       return pixels
     }

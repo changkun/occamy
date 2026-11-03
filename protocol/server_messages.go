@@ -34,7 +34,8 @@ func (m *Resize) Decode(body []byte, _ Limits) error {
 // Decode checks that W and H are at least 1 and at most the maximum
 // texture size, that Slot is within the cache slots, that a tile with a
 // slot covers at most MaxCachedPixels, that a cached tile names a slot
-// and has no payload, and that a raw tile has 4 bytes per pixel.
+// and has no payload, that a raw tile has 4 bytes per pixel, and that a
+// scaled tile's payload is a Scaled.
 type Tile struct {
 	FrameID    uint32
 	X, Y, W, H uint16
@@ -93,6 +94,10 @@ func (m *Tile) Decode(body []byte, l Limits) error {
 	case CodecRaw:
 		if len(m.Payload) != rawSize(m.W, m.H) {
 			d.failf(ErrInvalid, "raw %dx%d tile with %d bytes", m.W, m.H, len(m.Payload))
+		}
+	case CodecScaled:
+		if _, err := ParseScaled(m.Payload); err != nil {
+			d.err = err
 		}
 	}
 	return d.Err()
@@ -201,8 +206,8 @@ func (m *FrameEnd) Decode(body []byte, _ Limits) error {
 //
 // Decode checks that W and H are at most the maximum texture size, that
 // a hidden cursor (W and H zero) has no hot spot, codec or payload, and
-// that a shown one has a codec other than CodecCached, its hot spot
-// inside the image, and 4 bytes per pixel if it is raw.
+// that a shown one has a codec other than CodecCached and CodecScaled,
+// its hot spot inside the image, and 4 bytes per pixel if it is raw.
 type Cursor struct {
 	// HotX and HotY are the hot spot within the image.
 	HotX, HotY uint16
@@ -245,7 +250,7 @@ func (m *Cursor) Decode(body []byte, l Limits) error {
 		}
 	case m.W == 0 || m.H == 0:
 		d.failf(ErrInvalid, "cursor of %dx%d", m.W, m.H)
-	case !m.Codec.valid() || m.Codec == CodecCached:
+	case !m.Codec.valid() || m.Codec == CodecCached || m.Codec == CodecScaled:
 		d.failf(ErrInvalid, "cursor codec %d", m.Codec)
 	case m.HotX >= m.W || m.HotY >= m.H:
 		d.failf(ErrInvalid, "hot spot %d,%d outside a %dx%d cursor", m.HotX, m.HotY, m.W, m.H)
