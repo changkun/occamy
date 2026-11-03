@@ -8,7 +8,6 @@ import (
 	"cmp"
 	"context"
 	"crypto/ed25519"
-	"crypto/rand"
 	"crypto/tls"
 	"errors"
 	"expvar"
@@ -16,6 +15,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"net/netip"
 	"os"
 	"os/signal"
@@ -61,7 +61,6 @@ type server struct {
 	signIn   *staticUsers
 	oidc     *oidcSignIn // nil unless auth.oidc
 	tls      *tls.Config // nil serves plain HTTP
-	v0       *proxy      // nil unless legacy_v0
 	// webClient is the directory of the web client served under
 	// /static/, or empty.
 	webClient string
@@ -70,15 +69,12 @@ type server struct {
 	connections []config.Connection
 	origins     map[string]bool // origins whose pages may open streams, besides occamyd's own
 	adhoc       *allowlist      // nil unless allow_adhoc_targets
-	// adhocBackends picks the backend of ad-hoc targets by protocol; a
-	// protocol it lacks gets its default.
-	adhocBackends map[string]string
-	backends      backends
-	registry      *session.Registry
-	stop          context.CancelFunc // ends every session, at shutdown
-	streamTTL     time.Duration      // of the stream token POST /api/v1/sessions returns
-	limits        config.Limits
-	streamsCfg    config.Streams
+	backends    backends
+	registry    *session.Registry
+	stop        context.CancelFunc // ends every session, at shutdown
+	streamTTL   time.Duration      // of the stream token POST /api/v1/sessions returns
+	limits      config.Limits
+	streamsCfg  config.Streams
 
 	mu sync.Mutex
 	// ownerGrace is how long a session waits for its owner's stream,
@@ -201,8 +197,8 @@ func listen(f *config.File) (ln, dln net.Listener, err error) {
 
 // newServer prepares a v1 file's server: its signing key, created with a
 // warning if the file does not exist, the verifier of occamyd's and the
-// trusted issuers' tokens, the static users, TLS, the v0 routes and the
-// web client, with a warning if it is not built.
+// trusted issuers' tokens, the static users, TLS and the web client,
+// with a warning if it is not built.
 func newServer(f *config.File) (*server, error) {
 	key, created, err := auth.LoadOrCreateKey(f.Auth.SigningKeyFile)
 	if err != nil {
@@ -240,24 +236,23 @@ func newServer(f *config.File) (*server, error) {
 	registry := session.NewRegistry(ctx)
 	registry.MaxShares = limits.SharesPerSession
 	s := &server{
-		verifier:      auth.NewVerifier(auth.Audience, keys),
-		signer:        signer,
-		ids:           newIdentities(f),
-		signIn:        signIn,
-		connections:   f.Connections,
-		origins:       map[string]bool{},
-		backends:      newBackends(f.Guacd, rdpproto.NewBudget(limits.DecodeCores)),
-		adhocBackends: f.AdhocBackends,
-		registry:      registry,
-		stop:          stop,
-		streamTTL:     streamTokenLifetime,
-		limits:        limits,
-		streamsCfg:    f.Streams.WithDefaults(),
-		ownerGrace:    session.DefaultOwnerGrace,
-		sessions:      map[string]*sessionInfo{},
-		ended:         newEndedSessions(limits.Sessions),
-		owned:         map[principal]int{},
-		webClient:     f.WebClient,
+		verifier:    auth.NewVerifier(auth.Audience, keys),
+		signer:      signer,
+		ids:         newIdentities(f),
+		signIn:      signIn,
+		connections: f.Connections,
+		origins:     map[string]bool{},
+		backends:    newBackends(rdpproto.NewBudget(limits.DecodeCores)),
+		registry:    registry,
+		stop:        stop,
+		streamTTL:   streamTokenLifetime,
+		limits:      limits,
+		streamsCfg:  f.Streams.WithDefaults(),
+		ownerGrace:  session.DefaultOwnerGrace,
+		sessions:    map[string]*sessionInfo{},
+		ended:       newEndedSessions(limits.Sessions),
+		owned:       map[principal]int{},
+		webClient:   f.WebClient,
 	}
 	if f.WebClient != "" {
 		if _, err := os.Stat(filepath.Join(f.WebClient, "index.html")); err != nil { // #nosec G703 -- the path comes from the operator's configuration
@@ -272,10 +267,10 @@ func newServer(f *config.File) (*server, error) {
 		if s.adhoc, err = newAllowlist(f.AdhocAllowlist); err != nil {
 			return nil, fmt.Errorf("adhoc_allowlist: %w", err)
 		}
-		// guacd and occamyd's own listeners stay out of a range's reach.
-		if err := s.adhoc.reserve(ctx, f.Guacd.Address, f.Listen, f.Debug.Address); err != nil {
+		// occamyd's own listeners stay out of a range's reach.
+		if err := s.adhoc.reserve(ctx, f.Listen, f.Debug.Address); err != nil {
 			// #nosec G706 -- the operator's configuration, not a client's input.
-			log.Printf("warning: adhoc_allowlist: not every address of guacd and occamyd's listeners is known, so a range may open it: %v", err)
+			log.Printf("warning: adhoc_allowlist: not every address of occamyd's listeners is known, so a range may open it: %v", err)
 		}
 	}
 	if f.TLS.Cert != "" || f.TLS.Key != "" {
@@ -290,37 +285,11 @@ func newServer(f *config.File) (*server, error) {
 			return nil, err
 		}
 	}
-	if f.LegacyV0 {
-		if s.v0, err = newLegacyV0(f.Guacd); err != nil {
-			return nil, err
-		}
-		log.Printf("warning: legacy_v0 serves /api/v0/login, which signs any target for anyone, as v0 did")
-	}
 	return s, nil
 }
 
-// newLegacyV0 returns the v0 routes of a v1 file. A v1 file has no v0
-// secret, and needs none: the routes sign their HS256 tokens with a key
-// made for this process, since only occamyd reads them. The web client
-// under /static and pprof are not served, since a v1 file has no key for
-// the one and serves the other on the debug listener.
-func newLegacyV0(g config.Guacd) (*proxy, error) {
-	tokens, err := newTokens(rand.Text(), "HS256")
-	if err != nil {
-		return nil, err
-	}
-	return &proxy{
-		guacd:    g,
-		tokens:   tokens,
-		legacyV0: true,
-		login:    true,
-		sessions: make(map[string]*Session),
-	}, nil
-}
-
 // routes returns the public listener's handler: API v1, /healthz and,
-// with web_client and legacy_v0, the web client and the v0 routes,
-// behind the body limit, the request log and the recovery. The body
+// with web_client, the web client, behind the body limit, the request log and the recovery. The body
 // limit comes first, on net/http's own response writer, which is the
 // only one through which a body over the limit can have net/http close
 // the connection.
@@ -329,7 +298,7 @@ func (s *server) routes() http.Handler {
 }
 
 // mux returns the public listener's routes: API v1, /healthz and, with
-// web_client and legacy_v0, the web client and the v0 routes.
+// web_client, the web client.
 func (s *server) mux() *routeMux {
 	mux := newRouteMux()
 	mux.HandleFunc("GET /healthz", healthz)
@@ -342,9 +311,6 @@ func (s *server) mux() *routeMux {
 	s.registerStreams(mux)
 	if s.webClient != "" {
 		mux.Handle("GET /static/", webClient(s.webClient))
-	}
-	if s.v0 != nil {
-		s.v0.register(mux)
 	}
 	return mux
 }
@@ -436,12 +402,20 @@ func newDebugServer() *http.Server {
 	}
 }
 
-// debugMux returns the debug listener's routes.
+// debugMux returns the debug listener's routes: expvar, and the
+// net/http/pprof handlers under /debug/pprof, which docs/debugging.md
+// describes how to use. Index also serves the named profiles, such as
+// /debug/pprof/heap.
 func debugMux() *routeMux {
 	publishVars()
 	mux := newRouteMux()
 	mux.Handle("GET /debug/vars", expvar.Handler())
-	profile(func(pattern string, h http.HandlerFunc) { mux.Handle(pattern, h) })
+	mux.HandleFunc("GET /debug/pprof/", pprof.Index)
+	mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("POST /debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
 	return mux
 }
 

@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"changkun.de/x/occamy/internal/guacamole"
+	"changkun.de/x/occamy/bench/internal/guacamole"
 )
 
 // ProtocolVersion is the Guacamole protocol version sent in connect.

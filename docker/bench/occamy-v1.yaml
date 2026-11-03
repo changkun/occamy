@@ -26,7 +26,6 @@ auth:
 connections:
   - id: ssh
     protocol: ssh
-    backend: native
     target: ssh:22
     # The demo shell's host key changes with its image.
     insecure_ignore_host_key: true
@@ -34,19 +33,11 @@ connections:
     allow: {users: [demo]}
   - id: vnc-native
     protocol: vnc
-    backend: native
-    target: vnc:5900
-    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
-    allow: {users: [demo]}
-  - id: vnc-guacd
-    protocol: vnc
-    backend: guacd
     target: vnc:5900
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
   - id: rdp-native
     protocol: rdp
-    backend: native
     target: rdp:3389
     # As the demo's rdp-native: xrdp speaks TLS without NLA, and signs
     # its certificate itself when the image is built, so there is nothing
@@ -59,30 +50,12 @@ connections:
   # what it ships, but what compares with rdp-guacd like for like.
   - id: rdp-native-nogfx
     protocol: rdp
-    backend: native
     target: rdp:3389
     security: tls
     tls: {insecure_skip_verify: true}
     disable_gfx: true
     credentials: {username: occamy, password_env: OCCAMY_BENCH_RDP_PASSWORD}
     allow: {users: [demo]}
-  - id: rdp-guacd
-    protocol: rdp
-    backend: guacd
-    target: rdp:3389
-    credentials: {username: occamy, password_env: OCCAMY_BENCH_RDP_PASSWORD}
-    allow: {users: [demo]}
-guacd:
-  address: guacd:4822
-  params:
-    rdp:
-      # As in occamy.yaml, the v0 file. occamyd adds disable-gfx, which the
-      # v0 series' guacd does not get (docs/benchmarks.md).
-      ignore-cert: "true"
-      # With GFX off guacd asks for 16 bits per pixel, and xrdp may keep
-      # an X session, and a scene program, for each depth. native asks for
-      # 32, so every series measures one session at one depth.
-      color-depth: "32"
 limits:
   # The harness ends each session with DELETE, but a run that fails
   # midway may leave some for the owner grace.

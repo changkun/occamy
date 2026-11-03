@@ -105,7 +105,7 @@ func TestAllowlist(t *testing.T) {
 		{"vnc", "10.1.2.3", 5901, "10.1.2.3", false},
 		{"vnc", "10.1.2.3", 6000, "", false},
 		{"rdp", "10.1.2.3", 3389, "10.1.2.3", false},
-		{"telnet", "10.1.2.3", 23, "10.1.2.3", false},
+		{"telnet", "10.1.2.3", 23, "", false}, // no protocol of occamyd's
 		{"ssh", "::ffff:10.1.2.3", 22, "10.1.2.3", false},
 		{"ssh", "172.16.5.5", 22, "172.16.5.5", false},
 		{"ssh", "172.32.0.1", 22, "", false},

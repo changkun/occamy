@@ -65,7 +65,7 @@ func TestAPIDoc(t *testing.T) {
 }
 
 // registeredRoutes returns the patterns of the public listener's routes,
-// with auth.oidc and legacy_v0 on, and of the debug listener's. newServer
+// with auth.oidc on, and of the debug listener's. newServer
 // does not contact the OIDC provider, so its address need not answer.
 func registeredRoutes(t *testing.T) []string {
 	t.Helper()
@@ -100,13 +100,12 @@ func TestRoutesResolve(t *testing.T) {
 	}
 }
 
-// allRoutesServer is a server with every optional route: OIDC's, the
-// web client's and, with legacy_v0, v0's.
+// allRoutesServer is a server with every optional route: OIDC's and the
+// web client's.
 func allRoutesServer(t *testing.T) *server {
 	t.Helper()
-	captureLog(t) // legacy_v0's and web_client's warnings
+	captureLog(t) // web_client's warning
 	f := testFile(t)
-	f.LegacyV0 = true
 	f.WebClient = t.TempDir()
 	f.Auth.OIDC = &config.OIDC{
 		Issuer:       "http://127.0.0.1:1",
@@ -121,8 +120,8 @@ func allRoutesServer(t *testing.T) *server {
 		t.Fatal(err)
 	}
 	t.Cleanup(s.shutdown)
-	if s.oidc == nil || s.v0 == nil || s.webClient == "" {
-		t.Fatalf("a server without its optional routes: oidc %v, legacy_v0 %v, web_client %q", s.oidc != nil, s.v0 != nil, s.webClient)
+	if s.oidc == nil || s.webClient == "" {
+		t.Fatalf("a server without its optional routes: oidc %v, web_client %q", s.oidc != nil, s.webClient)
 	}
 	return s
 }

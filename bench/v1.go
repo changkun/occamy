@@ -37,22 +37,17 @@ import (
 // docs/api.md does: sign in, open a connection's stream, and end the
 // session with DELETE. The connections are those of the bench stack's
 // occamy-v1 service (docker/bench/occamy-v1.yaml), per series and
-// protocol. SSH has no guacd backend in v1, so v1-guacd serves only the
-// desktop. RDP runs with its graphics pipeline, GFX, and without it on
-// both sides: v1-native-nogfx and v1-guacd-gfx are the other way from
-// what each side ships, and serve only RDP. v1-guacd-gfx is on a service
-// of its own, occamy-v1-gfx, since guacd's parameters are global to a v1
-// file (docker/bench/occamy-v1-gfx.yaml). v1-native-w2 opens
-// v1-native's connections with another frame window (v1Windows), and
-// v1-native-cubic opens them on occamy-v1-cubic, whose occamyd asks for
-// CUBIC rather than its default, BBR (v1Services, v1Congestion).
+// protocol. RDP runs with its graphics pipeline, GFX, as occamyd ships
+// it, and v1-native-nogfx runs it without, the other way, and serves
+// only RDP. v1-native-w2 opens v1-native's connections with another
+// frame window (v1Windows), and v1-native-cubic opens them on
+// occamy-v1-cubic, whose occamyd asks for CUBIC rather than its default,
+// BBR (v1Services, v1Congestion).
 var v1Connections = map[string]map[string]string{
 	"v1-native":       {"ssh": "ssh", "vnc": "vnc-native", "rdp": "rdp-native"},
 	"v1-native-w2":    {"ssh": "ssh", "vnc": "vnc-native", "rdp": "rdp-native"},
 	"v1-native-cubic": {"ssh": "ssh", "vnc": "vnc-native", "rdp": "rdp-native"},
 	"v1-native-nogfx": {"rdp": "rdp-native-nogfx"},
-	"v1-guacd":        {"vnc": "vnc-guacd", "rdp": "rdp-guacd"},
-	"v1-guacd-gfx":    {"rdp": "rdp-guacd-gfx"},
 }
 
 // v1Windows is the frame window that a v1 series' client offers where it
@@ -66,7 +61,7 @@ var v1Windows = map[string]uint8{"v1-native-w2": 2}
 
 // v1Services names the service that serves a v1 series other than
 // occamy-v1.
-var v1Services = map[string]string{"v1-guacd-gfx": "occamy-v1-gfx", "v1-native-cubic": "occamy-v1-cubic"}
+var v1Services = map[string]string{"v1-native-cubic": "occamy-v1-cubic"}
 
 // v1Service returns the service that serves the v1 series name.
 func v1Service(name string) string {
@@ -94,8 +89,6 @@ var rdpPaths = map[string]rdpPath{
 	"v1-native-w2":    {gfx: true, verdict: false},
 	"v1-native-cubic": {gfx: true, verdict: false},
 	"v1-native-nogfx": {gfx: false, verdict: false},
-	"v1-guacd":        {gfx: false, verdict: true},
-	"v1-guacd-gfx":    {gfx: true, verdict: false},
 }
 
 // v1Account is the bench stack's API v1 user.
@@ -224,6 +217,8 @@ func signIn(ctx context.Context, addr string) (string, error) {
 	}
 	return out.AccessToken, nil
 }
+
+var httpClient = &http.Client{Timeout: 10 * time.Second}
 
 // apiV1 sends a request to API v1 and decodes a 2xx answer's JSON into
 // out, unless out is nil.

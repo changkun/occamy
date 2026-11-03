@@ -34,66 +34,44 @@ func TestParityCell(t *testing.T) {
 	garbled := errors.New(`the server took "? ? ??", want "€ ✓ 日本"`)
 	tests := []struct {
 		name   string
-		guacd  bool
 		known  *parityKnownFailure
 		checks []error // what each try of the check returns
-		twins  []error // what each run of the twin returns
 		cell   string
 		fails  bool // whether the cell fails the test
 		pauses int
 	}{
 		{name: "passes", checks: []error{nil}, cell: "pass"},
-		{name: "a native difference stands", checks: []error{differs, nil}, cell: "FAIL: " + differs.Error(), fails: true},
+		{name: "a difference stands", checks: []error{differs, nil}, cell: "FAIL: " + differs.Error(), fails: true},
 		{
-			name:   "native, unavailable, and guacd too: the server's fault",
-			checks: []error{unavailable, nil}, twins: []error{unavailable},
-			cell: "pass (try 2)", pauses: 1,
+			name:   "unavailable: the server's fault",
+			checks: []error{unavailable, nil},
+			cell:   "pass (try 2)", pauses: 1,
 		},
 		{
-			name:   "native, unavailable, but guacd reaches the desktop",
-			checks: []error{unavailable, nil}, twins: []error{nil},
-			cell: "FAIL: " + unavailable.Error(), fails: true,
+			name:   "unavailable at every try",
+			checks: []error{unavailable, unavailable, unavailable, nil},
+			cell:   "FAIL (try 3): " + unavailable.Error(), fails: true, pauses: 2,
 		},
 		{
-			name:   "native, unavailable, but guacd reaches the desktop and fails otherwise",
-			checks: []error{unavailable, nil}, twins: []error{differs},
-			cell: "FAIL: " + unavailable.Error(), fails: true,
-		},
-		{
-			name:   "native, unavailable at every try",
-			checks: []error{unavailable, unavailable, unavailable, nil}, twins: []error{unavailable, unavailable, unavailable},
-			cell: "FAIL (try 3): " + unavailable.Error(), fails: true, pauses: 2,
-		},
-		{
-			name:   "native, unavailable, then a difference",
-			checks: []error{unavailable, differs, nil}, twins: []error{unavailable},
-			cell: "FAIL (try 2): " + differs.Error(), fails: true, pauses: 1,
-		},
-		{name: "guacd tries again after any failure", guacd: true, checks: []error{differs, differs, nil}, cell: "pass (try 3)", pauses: 2},
-		{
-			name: "guacd fails at every try", guacd: true,
-			checks: []error{differs, differs, differs, nil},
-			cell:   "FAIL (try 3): " + differs.Error(), fails: true, pauses: 2,
+			name:   "unavailable, then a difference",
+			checks: []error{unavailable, differs, nil},
+			cell:   "FAIL (try 2): " + differs.Error(), fails: true, pauses: 1,
 		},
 		{name: "fails as listed", known: &latin1, checks: []error{garbled}, cell: "fail: x11vnc: Latin-1 only"},
-		{
-			name: "guacd fails as listed after a server fault", guacd: true, known: &latin1,
-			checks: []error{unavailable, garbled}, cell: "fail: x11vnc: Latin-1 only (try 2)", pauses: 1,
-		},
 		{
 			name: "listed, but fails otherwise", known: &latin1,
 			checks: []error{differs, garbled}, cell: "FAIL: " + differs.Error(), fails: true,
 		},
 		{
-			name: "listed, but unavailable, and guacd too", known: &latin1,
-			checks: []error{unavailable, garbled}, twins: []error{unavailable},
-			cell: "fail: x11vnc: Latin-1 only (try 2)", pauses: 1,
+			name: "listed, but unavailable first", known: &latin1,
+			checks: []error{unavailable, garbled},
+			cell:   "fail: x11vnc: Latin-1 only (try 2)", pauses: 1,
 		},
 		{name: "listed, but passes", known: &latin1, checks: []error{nil}, cell: "pass, listed as failing", fails: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var checks, twins, pauses int
+			var checks, pauses int
 			// What the cell logs, shown only if the test fails, since its
 			// fake failures read as the matrix's own in go test -v.
 			var logged []string
@@ -104,13 +82,9 @@ func TestParityCell(t *testing.T) {
 			}()
 			r := parityCell{
 				known: tt.known,
-				guacd: tt.guacd,
 				check: func() error { checks++; return tt.checks[checks-1] },
 				pause: func() { pauses++ },
 				logf:  func(format string, args ...any) { logged = append(logged, fmt.Sprintf(format, args...)) },
-			}
-			if !tt.guacd {
-				r.twin = func() error { twins++; return tt.twins[twins-1] }
 			}
 			cell, err := r.run()
 			if cell != tt.cell {
@@ -121,12 +95,6 @@ func TestParityCell(t *testing.T) {
 			}
 			if pauses != tt.pauses || checks != tt.pauses+1 {
 				t.Errorf("checked %d times with %d pauses, want %d and %d", checks, pauses, tt.pauses+1, tt.pauses)
-			}
-			if tt.guacd && twins != 0 {
-				t.Errorf("a guacd cell ran a twin %d times", twins)
-			}
-			if !tt.guacd && twins > tt.pauses+1 {
-				t.Errorf("ran the twin %d times for %d pauses", twins, tt.pauses)
 			}
 		})
 	}
@@ -151,12 +119,12 @@ func TestParityKnown(t *testing.T) {
 	}
 }
 
-// TestParityMatrixDoc checks that the matrix in guacd-bridge.md is the
-// one that parityFeatures and parityKnown give, which is what a run of
-// TestVNCParity gives when every cell passes or fails as listed at its
-// first try.
+// TestParityMatrixDoc checks that the matrix in native-vnc-backend.md is
+// the one that parityFeatures and parityKnown give, which is what a run
+// of TestVNCParity gives when every cell passes or fails as listed at
+// its first try.
 func TestParityMatrixDoc(t *testing.T) {
-	const doc = "../specs/008-native-architecture/guacd-bridge.md"
+	const doc = "../specs/008-native-architecture/native-vnc-backend.md"
 	b, err := os.ReadFile(doc)
 	if err != nil {
 		t.Fatal(err)
@@ -302,7 +270,7 @@ func TestParityShowsInput(t *testing.T) {
 		not    []string // parts the error must not have
 	}{
 		{
-			name: "the desktop after the acknowledgement, as through guacd",
+			name: "the desktop after the acknowledgement",
 			script: func(frame func(uint32, ...fill), input func() uint32) {
 				seq := input()
 				frame(seq, fill{screen, black})

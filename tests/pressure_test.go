@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"sync"
@@ -17,37 +18,28 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+
+	"changkun.de/x/occamy/client"
+	"changkun.de/x/occamy/protocol"
 )
 
-func successConnect(url string) error {
-	return session(url, 10*time.Second, "size", "img", "sync")
-}
+// pressureConnections are the demo connections the storm opens: one to
+// each demo server's protocol.
+var pressureConnections = []string{"ssh", "vnc", "rdp"}
 
-func failConnect(url string) error {
-	ws, err := dial(url)
-	if err != nil {
-		return err
-	}
-	defer ws.CloseNow()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if _, _, err := ws.Read(ctx); err != nil {
-		return err
-	}
-	return ws.Write(context.Background(), websocket.MessageText, []byte("bad instruction"))
-}
-
-// TestConnectionPressure opens many concurrent sessions to every demo
-// server, half of which send garbage, and then checks that occamy is
-// still healthy. Individual sessions may fail under the load. occamy must
-// not crash or lock up, its goroutines must return to their number before
-// the storm, and new sessions must work, including one with the storm's
-// own claims. OCCAMY_PRESSURE_N sets the number of rounds, each of which
-// opens two sessions per demo server.
+// TestConnectionPressure opens many concurrent sessions through
+// occamy-v1 to every demo server, half of which send garbage once they
+// are welcomed, and then checks that occamyd is still healthy.
+// Individual sessions may fail under the load. occamyd must not crash
+// or lock up, its goroutines must return to their number before the
+// storm once the sessions are closed, and a new session must work.
+// OCCAMY_PRESSURE_N sets the number of rounds, each of which opens two
+// sessions per demo server.
 //
 // The test is skipped unless OCCAMY_PRESSURE_N is set. CI runs it with
-// OCCAMY_PRESSURE_N=10.
+// OCCAMY_PRESSURE_N=10. It reads occamyd's goroutines from occamy-v1's
+// debug listener, OCCAMY_E2E_V1_DEBUG, which make run OCCAMY_DEBUG=1
+// turns on.
 func TestConnectionPressure(t *testing.T) {
 	v := os.Getenv("OCCAMY_PRESSURE_N")
 	if v == "" {
@@ -57,27 +49,43 @@ func TestConnectionPressure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("bad OCCAMY_PRESSURE_N: %v", err)
 	}
-	addr := endpoint(t)
-	before := goroutines(t, addr)
+	debug := os.Getenv("OCCAMY_E2E_V1_DEBUG")
+	if debug == "" {
+		t.Fatal("OCCAMY_E2E_V1_DEBUG not set: occamy-v1's debug listener, such as localhost:5638, which make run OCCAMY_DEBUG=1 publishes")
+	}
+	addr := endpointV1(t)
+	token, err := signIn(addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := goroutines(t, debug)
 
-	connectors := map[string]func(string) error{"success": successConnect, "fail": failConnect}
+	connectors := map[string]func(ctx context.Context, addr, conn, token string) (string, error){
+		"success": successConnect, "fail": failConnect,
+	}
 	var wg sync.WaitGroup
 	var sessions, failed atomic.Int32
+	var mu sync.Mutex
+	var ids []string
 	start := time.Now()
 	for i := 1; i <= n; i++ {
-		for _, proto := range protocols() {
+		for _, conn := range pressureConnections {
 			for name, connector := range connectors {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					sessions.Add(1)
-					url, err := login(addr, credentials[proto])
-					if err == nil {
-						err = connector(url)
+					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+					defer cancel()
+					id, err := connector(ctx, addr, conn, token)
+					if id != "" {
+						mu.Lock()
+						ids = append(ids, id)
+						mu.Unlock()
 					}
 					if err != nil {
 						failed.Add(1)
-						t.Logf("%s-%s-%d: %v", proto, name, i, err)
+						t.Logf("%s-%s-%d: %v", conn, name, i, err)
 					}
 				}()
 			}
@@ -86,29 +94,79 @@ func TestConnectionPressure(t *testing.T) {
 	wg.Wait()
 	t.Logf("%d sessions in %v, %d failed", sessions.Load(), time.Since(start).Round(time.Millisecond), failed.Load())
 
-	waitGoroutines(t, addr, before)
+	// A session whose owner left waits for the owner grace, so close
+	// them, as a client that is done does. One that has ended already
+	// answers 404, which is of no interest.
+	for _, id := range ids {
+		_ = apiV1(addr, http.MethodDelete, "/api/v1/sessions/"+url.PathEscape(id), token, nil, nil)
+	}
+	waitGoroutines(t, debug, before)
 
-	// A failed connect used to keep its claims stuck until a restart
-	// (specs/003-session-lifecycle-hardening.md, defect 8), so check the
-	// storm's own claims, and then claims it never used. VNC ignores the
-	// username.
-	checkSession(t, addr, credentials["vnc"])
-	fresh := credentials["vnc"]
-	fresh.Username = "after-pressure"
-	checkSession(t, addr, fresh)
+	checkSessionV1(t, addr, "vnc", "vnc")
+}
+
+// pressureOptions are the options of the storm's sessions.
+var pressureOptions = client.Options{Name: "occamy-e2e/1", Width: 1024, Height: 768, Cols: 80, Rows: 24}
+
+// successConnect opens conn and waits for its first frame that draws
+// something, a screen's or a terminal's, and returns the session's ID.
+func successConnect(ctx context.Context, addr, conn, token string) (string, error) {
+	cl, err := client.Dial(ctx, "ws://"+addr+"/api/v1/connections/"+url.PathEscape(conn)+"/stream", token, pressureOptions)
+	if err != nil {
+		return "", err
+	}
+	defer cl.Close()
+	for {
+		ev, err := cl.Next(ctx)
+		if err != nil {
+			return cl.SessionID(), err
+		}
+		switch ev := ev.(type) {
+		case client.End:
+			return cl.SessionID(), fmt.Errorf("ended: %v %q (%v)", ev.Code, ev.Reason, ev.Err)
+		case client.Frame:
+			if cl.Class() == protocol.ClassGraphical {
+				return cl.SessionID(), nil
+			}
+		case client.TermData:
+			return cl.SessionID(), nil
+		}
+	}
+}
+
+// failConnect opens conn, and once welcomed sends a message that is no
+// v1 message, which occamyd must refuse without harm. It returns the
+// session's ID.
+func failConnect(ctx context.Context, addr, conn, token string) (string, error) {
+	q, err := protocol.EncodeHelloQuery(pressureOptions.Hello())
+	if err != nil {
+		return "", err
+	}
+	u := "ws://" + addr + "/api/v1/connections/" + url.PathEscape(conn) + "/stream?" + url.Values{protocol.HelloParameter: {q}}.Encode()
+	ws, _, err := websocket.Dial(ctx, u, &websocket.DialOptions{ //nolint:bodyclose // websocket.Dial closes it
+		Subprotocols: []string{protocol.Subprotocol, protocol.TokenSubprotocol(token)},
+	})
+	if err != nil {
+		return "", fmt.Errorf("dial: %w", err)
+	}
+	defer ws.CloseNow()
+	cl, err := client.New(ctx, parityConn{ws}, pressureOptions)
+	if err != nil {
+		return "", fmt.Errorf("welcome: %w", err)
+	}
+	return cl.SessionID(), ws.Write(ctx, websocket.MessageBinary, []byte("bad message"))
 }
 
 // goroutineSlack is how many goroutines over its baseline occamyd may run
-// once every session has ended. Each session holds three, so a leak in
+// once every session has ended. Each session holds several, so a leak in
 // the storm's sixty or more sessions shows well above it.
 const goroutineSlack = 5
 
-// goroutines returns the number of goroutines occamyd runs, from the pprof
-// routes that the demo stack serves in debug mode, which make run
-// OCCAMY_DEBUG=1 turns on.
-func goroutines(t *testing.T, addr string) int {
+// goroutines returns the number of goroutines occamyd runs, from the
+// debug listener at debug.
+func goroutines(t *testing.T, debug string) int {
 	t.Helper()
-	n, _, err := goroutineProfile(addr)
+	n, _, err := goroutineProfile(debug)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -116,14 +174,14 @@ func goroutines(t *testing.T, addr string) int {
 }
 
 // waitGoroutines waits until occamyd runs no more than goroutineSlack
-// goroutines over baseline. Sessions can take guacd's handshake timeout,
-// 15 s, to end, so it waits up to a minute, and then fails the test with
-// the goroutine profile.
-func waitGoroutines(t *testing.T, addr string, baseline int) {
+// goroutines over baseline. A backend can take its connect timeout to
+// give up on a remote, so it waits up to a minute, and then fails the
+// test with the goroutine profile.
+func waitGoroutines(t *testing.T, debug string, baseline int) {
 	t.Helper()
 	start := time.Now()
 	for {
-		n, profile, err := goroutineProfile(addr)
+		n, profile, err := goroutineProfile(debug)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -139,11 +197,12 @@ func waitGoroutines(t *testing.T, addr string, baseline int) {
 }
 
 // goroutineProfile returns occamyd's goroutine count and its goroutine
-// profile, grouped by stack. Idle keep-alive connections are closed first,
-// since occamyd runs a goroutine for each.
-func goroutineProfile(addr string) (int, string, error) {
+// profile, grouped by stack, from the debug listener at debug. Idle
+// keep-alive connections to the API are closed first, since occamyd runs
+// a goroutine for each.
+func goroutineProfile(debug string) (int, string, error) {
 	httpClient.CloseIdleConnections()
-	resp, err := httpClient.Get("http://" + addr + "/debug/pprof/goroutine?debug=1")
+	resp, err := httpClient.Get("http://" + debug + "/debug/pprof/goroutine?debug=1")
 	if err != nil {
 		return 0, "", fmt.Errorf("goroutine profile: %w", err)
 	}
@@ -153,7 +212,7 @@ func goroutineProfile(addr string) (int, string, error) {
 		return 0, "", fmt.Errorf("goroutine profile: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return 0, "", fmt.Errorf("goroutine profile: %s: occamy is not in debug mode; start the demo stack with make run OCCAMY_DEBUG=1", resp.Status)
+		return 0, "", fmt.Errorf("goroutine profile: %s", resp.Status)
 	}
 	var n int
 	if _, err := fmt.Sscanf(string(b), "goroutine profile: total %d", &n); err != nil {

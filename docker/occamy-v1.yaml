@@ -4,13 +4,10 @@
 
 # The v1 file of the demo stack's occamy-v1 service
 # (docker-compose.yaml), which serves API v1, protocol v1 and the web
-# client on port 5637 next to the v0 service: a real desktop first, over
-# VNC and RDP through occamyd's native backends only, then the demo SSH
-# server, and the demo VNC servers, x11vnc and TigerVNC, and RDP server
-# through occamyd's native backends, their default, and through guacd,
-# the explicit fallback and the benchmark's baseline, side by side, for
-# the guacd bridge's parity gate
-# (specs/008-native-architecture/guacd-bridge.md, Parity gate). The user
+# client on port 5637: a real desktop first, over VNC and RDP, then the
+# demo SSH server, the demo VNC servers, x11vnc and TigerVNC, with each
+# security type and keyboard layout that tests/parity_test.go checks,
+# and the demo RDP server. The user
 # demo signs in with the password occamy, in the web client at
 # http://localhost:5637/static/ or with curl. That user is this demo's
 # alone: occamyd has no default user, and a real install lists its own
@@ -41,20 +38,18 @@ auth:
       password_hash: "$2a$10$DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
 connections:
   # A real desktop, first, for a first look: XFCE with Firefox, a session
-  # of its own for each protocol. Native only, as nothing compares them.
+  # of its own for each protocol.
   - id: desktop-vnc
     name: Desktop (XFCE) over VNC
     protocol: vnc
-    backend: native
     target: desktop:5900
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
   - id: desktop-rdp
     name: Desktop (XFCE) over RDP
     protocol: rdp
-    backend: native
     target: desktop:3389
-    # As for rdp-native: xrdp signs its certificate itself.
+    # As for rdp: xrdp signs its certificate itself.
     security: tls
     tls: {insecure_skip_verify: true}
     credentials: {username: occamy, password_env: OCCAMY_DEMO_RDP_PASSWORD}
@@ -67,167 +62,77 @@ connections:
     insecure_ignore_host_key: true
     credentials: {username: occamy, password_env: OCCAMY_DEMO_SSH_PASSWORD}
     allow: {users: [demo]}
-  # Each VNC server and security type twice, through occamyd's native
-  # backend and through guacd, which tests/parity_test.go compares, and
-  # the RDP server twice. Each names its backend but vnc-native and
-  # rdp-native, which serve their protocols' defaults. The connections
-  # that prompt ask the owner for whatever the server wants, and for
-  # nothing where it wants nothing (None). The de and fr connections
-  # reach screens with the German and French keyboard layouts, for the
-  # matrix's keyboard rows.
-  - id: vnc-native
-    name: x11vnc, native backend
+  # Each VNC server and security type, which tests/parity_test.go
+  # checks, and the RDP server. The connections that prompt ask the
+  # owner for whatever the server wants, and for nothing where it wants
+  # nothing (None). The de and fr connections reach screens with the
+  # German and French keyboard layouts, for the matrix's keyboard rows.
+  - id: vnc
+    name: x11vnc
     protocol: vnc
-    # No backend: native is vnc's default, so this connection serves
-    # the default end to end.
     target: vnc:5900
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
-  - id: vnc-guacd
-    name: x11vnc, through guacd
+  - id: vnc-none
+    name: x11vnc without a password
     protocol: vnc
-    # guacd serves vnc only when a connection asks for it.
-    backend: guacd
-    target: vnc:5900
-    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
-    allow: {users: [demo]}
-  - id: vnc-none-native
-    name: x11vnc without a password, native backend
-    protocol: vnc
-    backend: native
     target: vnc:5901
     credentials: {prompt: true}
     allow: {users: [demo]}
-  - id: vnc-none-guacd
-    name: x11vnc without a password, through guacd
+  - id: tigervnc
+    name: TigerVNC
     protocol: vnc
-    backend: guacd
-    target: vnc:5901
-    credentials: {prompt: true}
-    allow: {users: [demo]}
-  - id: tigervnc-native
-    name: TigerVNC, native backend
-    protocol: vnc
-    backend: native
     target: tigervnc:5900
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
-  - id: tigervnc-guacd
-    name: TigerVNC, through guacd
+  - id: tigervnc-prompt
+    name: TigerVNC, asking for the password
     protocol: vnc
-    backend: guacd
-    target: tigervnc:5900
-    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
-    allow: {users: [demo]}
-  - id: tigervnc-prompt-native
-    name: TigerVNC, asking for the password, native backend
-    protocol: vnc
-    backend: native
     target: tigervnc:5900
     credentials: {prompt: true}
     allow: {users: [demo]}
-  - id: tigervnc-prompt-guacd
-    name: TigerVNC, asking for the password, through guacd
+  - id: tigervnc-plain
+    name: TigerVNC over VeNCrypt
     protocol: vnc
-    backend: guacd
-    target: tigervnc:5900
-    credentials: {prompt: true}
-    allow: {users: [demo]}
-  - id: tigervnc-plain-native
-    name: TigerVNC over VeNCrypt, native backend
-    protocol: vnc
-    backend: native
     target: tigervnc:5901
     # VeNCrypt's Plain, as the user occamy, over TLS with a certificate
     # from the CA that the tigervnc service makes.
     credentials: {username: occamy, password_env: OCCAMY_DEMO_PLAIN_PASSWORD}
     tls: {ca_file: /run/occamy-vnc-ca/ca.pem}
     allow: {users: [demo]}
-  - id: tigervnc-plain-guacd
-    name: TigerVNC over VeNCrypt, through guacd (does not work)
+  - id: tigervnc-none
+    name: TigerVNC without a password
     protocol: vnc
-    backend: guacd
-    target: tigervnc:5901
-    # It never opens: libvncclient asks for X509 credentials, which guacd
-    # 1.6 does not give, and guacd ends the session. The parity matrix
-    # keeps it to show that (parityKnown, tests/parity_test.go). guacd
-    # checks no certificate, so no tls.
-    credentials: {username: occamy, password_env: OCCAMY_DEMO_PLAIN_PASSWORD}
-    allow: {users: [demo]}
-  - id: tigervnc-none-native
-    name: TigerVNC without a password, native backend
-    protocol: vnc
-    backend: native
     target: tigervnc:5902
     credentials: {prompt: true}
     allow: {users: [demo]}
-  - id: tigervnc-none-guacd
-    name: TigerVNC without a password, through guacd
+  - id: vnc-de
+    name: x11vnc with the German layout
     protocol: vnc
-    backend: guacd
-    target: tigervnc:5902
-    credentials: {prompt: true}
-    allow: {users: [demo]}
-  - id: vnc-de-native
-    name: x11vnc with the German layout, native backend
-    protocol: vnc
-    backend: native
     target: vnc:5902
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
-  - id: vnc-de-guacd
-    name: x11vnc with the German layout, through guacd
+  - id: vnc-fr
+    name: x11vnc with the French layout
     protocol: vnc
-    backend: guacd
-    target: vnc:5902
-    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
-    allow: {users: [demo]}
-  - id: vnc-fr-native
-    name: x11vnc with the French layout, native backend
-    protocol: vnc
-    backend: native
     target: vnc:5903
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
-  - id: vnc-fr-guacd
-    name: x11vnc with the French layout, through guacd
+  - id: tigervnc-de
+    name: TigerVNC with the German layout
     protocol: vnc
-    backend: guacd
-    target: vnc:5903
-    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
-    allow: {users: [demo]}
-  - id: tigervnc-de-native
-    name: TigerVNC with the German layout, native backend
-    protocol: vnc
-    backend: native
     target: tigervnc:5903
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
-  - id: tigervnc-de-guacd
-    name: TigerVNC with the German layout, through guacd
+  - id: tigervnc-fr
+    name: TigerVNC with the French layout
     protocol: vnc
-    backend: guacd
-    target: tigervnc:5903
-    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
-    allow: {users: [demo]}
-  - id: tigervnc-fr-native
-    name: TigerVNC with the French layout, native backend
-    protocol: vnc
-    backend: native
     target: tigervnc:5904
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
-  - id: tigervnc-fr-guacd
-    name: TigerVNC with the French layout, through guacd
-    protocol: vnc
-    backend: guacd
-    target: tigervnc:5904
-    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
-    allow: {users: [demo]}
-  - id: rdp-native
-    name: RDP, native backend
+  - id: rdp
+    name: RDP
     protocol: rdp
-    # No backend: native is rdp's default, as for vnc-native.
     target: rdp:3389
     # xrdp speaks TLS without NLA, and signs its certificate itself when
     # the image is built, so there is nothing to pin in advance: for the
@@ -236,16 +141,3 @@ connections:
     tls: {insecure_skip_verify: true}
     credentials: {username: occamy, password_env: OCCAMY_DEMO_RDP_PASSWORD}
     allow: {users: [demo]}
-  - id: rdp-guacd
-    name: RDP, through guacd
-    protocol: rdp
-    # guacd serves rdp only when a connection asks for it.
-    backend: guacd
-    target: rdp:3389
-    credentials: {username: occamy, password_env: OCCAMY_DEMO_RDP_PASSWORD}
-    allow: {users: [demo]}
-guacd:
-  address: guacd:4822
-  params:
-    # For rdp-guacd: accept xrdp's self-signed certificate.
-    rdp: {ignore-cert: "true"}

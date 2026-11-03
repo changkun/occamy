@@ -7,12 +7,13 @@ package encoder
 import (
 	"bytes"
 	"image"
+	"image/color"
+	"image/draw"
 	"math/rand/v2"
 	"slices"
 	"testing"
 
 	"changkun.de/x/occamy/internal/codec"
-	"changkun.de/x/occamy/internal/guacamole"
 	"changkun.de/x/occamy/protocol"
 )
 
@@ -286,24 +287,14 @@ func TestCursorRoundTrip(t *testing.T) {
 	}
 }
 
-// A cursor that guacd draws at half alpha reaches the encoder
-// premultiplied, from the guacd bridge's display, and leaves it with
-// straight alpha: white stays white.
-func TestCursorFromGuacd(t *testing.T) {
-	d := guacamole.NewDisplay()
-	for _, ins := range [][]string{
-		{"size", "-1", "2", "2"},
-		{"rect", "-1", "0", "0", "2", "2"},
-		{"cfill", "14", "-1", "255", "255", "255", "128"},
-		{"cursor", "0", "0", "-1", "0", "0", "2", "2"},
-	} {
-		if err := d.Apply(guacamole.NewInstruction(ins)); err != nil {
-			t.Fatal(ins, err)
-		}
-	}
-	img, _, ok := d.TakeCursor()
-	if !ok || img == nil || img.Rect.Dx() != 2 || img.Rect.Dy() != 2 {
-		t.Fatalf("cursor %v, %v", img, ok)
+// A cursor at half alpha reaches the encoder premultiplied, as an
+// image.RGBA holds it, and leaves it with straight alpha: white stays
+// white.
+func TestCursorPremultiplied(t *testing.T) {
+	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
+	draw.Draw(img, img.Rect, image.NewUniform(color.NRGBA{0xff, 0xff, 0xff, 0x80}), image.Point{}, draw.Src)
+	if got := img.Pix[:4]; !bytes.Equal(got, []byte{0x80, 0x80, 0x80, 0x80}) {
+		t.Fatalf("white at half alpha is % x premultiplied", got)
 	}
 	for _, codecs := range [][]protocol.Codec{{deflate}, {raw}, {webpC}} {
 		e := New(codecs)

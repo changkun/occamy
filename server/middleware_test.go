@@ -74,9 +74,6 @@ func TestRecovery(t *testing.T) {
 	mux.HandleFunc("GET /abort", func(http.ResponseWriter, *http.Request) {
 		panic(http.ErrAbortHandler)
 	})
-	mux.Handle("GET /v0", recoverV0(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		panic("v0")
-	})))
 	mux.HandleFunc("GET /request", func(_ http.ResponseWriter, r *http.Request) {
 		panic(r) // %v would print the query string and the headers
 	})
@@ -121,22 +118,6 @@ func TestRecovery(t *testing.T) {
 	if strings.Contains(logs(), "panic serving \"GET\" \"/abort\"") {
 		t.Errorf("abort was logged as a panic:\n%s", logs())
 	}
-	// A v0 route answers as gin did: 500, no body.
-	if r := do(t, http.MethodGet, srv.URL+"/v0", nil, ""); r.code != http.StatusInternalServerError || len(r.body) != 0 {
-		t.Errorf("v0 panic: %d %q, want 500 without a body", r.code, r.body)
-	}
-}
-
-// TestRecoveryV0Routes checks that the v0 routes recover as gin did on a
-// v0 file's mux.
-func TestRecoveryV0Routes(t *testing.T) {
-	captureLog(t)
-	rp := newRouteProxy(t, true, false)
-	rp.p.tokens.now = nil // login panics on the nil clock
-	r := rp.login(t, "application/json", `{"protocol":"vnc","host":"h:1","password":"p"}`)
-	if r.code != http.StatusInternalServerError || len(r.body) != 0 {
-		t.Errorf("login panic: %d %q, want 500 without a body", r.code, r.body)
-	}
 }
 
 // TestRoutesRecover checks that the v1 routes recover: a panic in the
@@ -159,16 +140,16 @@ func TestRoutesRecover(t *testing.T) {
 
 // TestRoutesLimitBodies checks that the v1 routes bound every body, on
 // net/http's own writer, so that net/http closes the connection after a
-// body over the limit. The v0 login reads up to its own limit, as large
-// as the routes' one.
+// body over the limit.
 func TestRoutesLimitBodies(t *testing.T) {
 	captureLog(t)
-	ts := newTestServer(t, func(f *config.File) { f.LegacyV0 = true })
-	// login posts a form and reports whether the server closes the
+	ts := newTestServer(t, nil)
+	// signIn posts a sign-in and reports whether the server closes the
 	// connection, which the client learns from a Connection: close header
 	// that it takes out of the response's.
-	login := func(body string) (code int, closed bool) {
-		resp, err := http.Post(ts.srv.URL+"/api/v0/login", "application/x-www-form-urlencoded", strings.NewReader(body))
+	signIn := func(password string) (code int, closed bool) {
+		body := `{"username":"alice","password":"` + password + `"}`
+		resp, err := http.Post(ts.srv.URL+"/api/v1/auth/token", "application/json", strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -176,11 +157,11 @@ func TestRoutesLimitBodies(t *testing.T) {
 		_, _ = io.Copy(io.Discard, resp.Body)
 		return resp.StatusCode, resp.Close
 	}
-	if code, closed := login("protocol=vnc&host=h:1&password=" + strings.Repeat("x", maxBodyBytes)); code != http.StatusUnauthorized || !closed {
-		t.Errorf("a body over the limit: %d, closed %v; want 401, closed", code, closed)
+	if code, closed := signIn(strings.Repeat("x", maxBodyBytes)); code != http.StatusRequestEntityTooLarge || !closed {
+		t.Errorf("a body over the limit: %d, closed %v; want 413, closed", code, closed)
 	}
-	if code, closed := login("protocol=vnc&host=h:1&password=x"); code != http.StatusOK || closed {
-		t.Errorf("a body within the limit: %d, closed %v; want 200, open", code, closed)
+	if code, closed := signIn("wrong"); code != http.StatusUnauthorized || closed {
+		t.Errorf("a body within the limit: %d, closed %v; want 401, open", code, closed)
 	}
 }
 

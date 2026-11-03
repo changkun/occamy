@@ -33,103 +33,17 @@ import (
 // fakeHostKey is a host key fingerprint in the form ssh-keygen -l prints.
 const fakeHostKey = "SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"
 
-func TestBackendDefaults(t *testing.T) {
-	b := newBackends(config.Guacd{Address: config.DefaultGuacdAddress}, nil)
+// TestBackends checks that each protocol that occamyd serves has a
+// backend of its own, named after it, and that no other has one.
+func TestBackends(t *testing.T) {
+	b := newBackends(nil)
 	got := map[string]string{}
-	for k, m := range b {
-		got[k.protocol+"/"+k.backend] = m.name
+	for p, m := range b {
+		got[p] = m.name
 	}
-	want := map[string]string{
-		"ssh/native": "ssh",
-		"vnc/native": "vnc", "vnc/guacd": "guacd",
-		"rdp/native": "rdp", "rdp/guacd": "guacd",
-		"telnet/guacd":      "guacd",
-		"kubernetes/native": "kubernetes",
-	}
+	want := map[string]string{"ssh": "ssh", "vnc": "vnc", "rdp": "rdp", "kubernetes": "kubernetes"}
 	if !maps.Equal(got, want) {
 		t.Errorf("backends %v, want %v", got, want)
-	}
-	// An empty backend is the protocol's default: native for vnc and
-	// rdp, with guacd as their explicit fallback.
-	for _, tt := range []struct{ protocol, backend, want string }{
-		{"ssh", "", "ssh"}, {"vnc", "", "vnc"}, {"vnc", "native", "vnc"}, {"vnc", "guacd", "guacd"},
-		{"rdp", "", "rdp"}, {"rdp", "native", "rdp"}, {"rdp", "guacd", "guacd"}, {"telnet", "", "guacd"},
-		{"kubernetes", "", "kubernetes"}, {"kubernetes", "native", "kubernetes"},
-	} {
-		if m, ok := b.lookup(tt.protocol, tt.backend); !ok || m.name != tt.want {
-			t.Errorf("lookup(%q, %q) = %q, %v; want %q", tt.protocol, tt.backend, m.name, ok, tt.want)
-		}
-	}
-	for _, tt := range []struct{ protocol, backend string }{{"ssh", "guacd"}, {"telnet", "native"}, {"kubernetes", "guacd"}, {"spice", ""}} {
-		if m, ok := b.lookup(tt.protocol, tt.backend); ok {
-			t.Errorf("lookup(%q, %q) = %q, want none", tt.protocol, tt.backend, m.name)
-		}
-	}
-	if !b.serves("vnc") || !b.serves("kubernetes") || b.serves("spice") {
-		t.Errorf("serves(vnc) = %v, serves(kubernetes) = %v, serves(spice) = %v", b.serves("vnc"), b.serves("kubernetes"), b.serves("spice"))
-	}
-}
-
-func TestBridgeConfig(t *testing.T) {
-	t.Setenv("OCCAMY_TEST_RDP_PASSWORD", "s3cret")
-	g := config.Guacd{Params: map[string]map[string]string{
-		"rdp":    {"security": "nla", "hostname": "configured"},
-		"telnet": {"disable-gfx": "x"},
-	}}
-	tg := target{
-		connection: "windows",
-		protocol:   "rdp",
-		addr:       "[fd00::5]:3390",
-		creds:      config.Credentials{Username: "carol", PasswordEnv: "OCCAMY_TEST_RDP_PASSWORD"},
-	}
-	cfg, err := bridgeConfig(g, "rdp", tg, screen{width: 1920, height: 99999})
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := map[string]string{
-		"security": "nla", "hostname": "fd00::5", "port": "3390",
-		"username": "carol", "password": "s3cret", "disable-gfx": "true",
-	}
-	if cfg.Protocol != "rdp" || !maps.Equal(cfg.Params, want) || cfg.Width != 1920 || cfg.Height != backend.MaxResizeSide {
-		t.Errorf("config %+v", cfg)
-	}
-	if cfg, err := bridgeConfig(g, "rdp", tg, screen{width: 99999, height: 1080}); err != nil || cfg.Width != backend.MaxResizeSide || cfg.Height != 1080 {
-		t.Errorf("a screen too wide: %dx%d %v, want %dx1080", cfg.Width, cfg.Height, err, backend.MaxResizeSide)
-	}
-	if g.Params["rdp"]["hostname"] != "configured" || len(g.Params["rdp"]) != 2 {
-		t.Errorf("the configured parameters changed: %v", g.Params["rdp"])
-	}
-
-	g.Params["rdp"]["disable-gfx"] = "false"
-	tg.creds = config.Credentials{Prompt: true}
-	cfg, err = bridgeConfig(g, "rdp", tg, screen{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Params["disable-gfx"] != "false" || cfg.Params["password"] != "" || cfg.Params["username"] != "" || cfg.Width != 0 {
-		t.Errorf("config %+v", cfg)
-	}
-
-	cfg, err = bridgeConfig(g, "telnet", target{connection: "c", addr: "10.0.0.1:23"}, screen{})
-	if err != nil || cfg.Params["disable-gfx"] != "x" || len(cfg.Params) != 3 {
-		t.Errorf("telnet: %+v %v", cfg, err)
-	}
-
-	// An ad-hoc target takes the display's parameters alone.
-	g.Params["rdp"]["sftp-hostname"] = "files.internal"
-	g.Params["rdp"]["color-depth"] = "16"
-	cfg, err = bridgeConfig(g, "rdp", target{addr: "10.0.0.1:3389", creds: config.Credentials{Prompt: true}}, screen{})
-	want = map[string]string{"hostname": "10.0.0.1", "port": "3389", "disable-gfx": "false", "color-depth": "16"}
-	if err != nil || !maps.Equal(cfg.Params, want) {
-		t.Errorf("ad-hoc: %+v %v, want %v", cfg, err, want)
-	}
-
-	tg.creds = config.Credentials{PasswordEnv: "OCCAMY_TEST_UNSET"}
-	if _, err := bridgeConfig(g, "rdp", tg, screen{}); err == nil {
-		t.Error("an unset password variable made a backend")
-	}
-	if _, err := newBridge(g, "rdp")(tg, screen{}); err == nil {
-		t.Error("an unset password variable made a backend")
 	}
 }
 
@@ -231,61 +145,14 @@ func TestNewVNC(t *testing.T) {
 	}
 }
 
-// TestLoadWarnings checks the warnings of a file whose guacd.params no
-// session reads, for any protocol, and of an rdp connection that may
+// TestLoadWarnings checks the warning of an rdp connection that may
 // send its password inside TLS that checks no certificate.
 func TestLoadWarnings(t *testing.T) {
-	conn := func(id, protocol, backend string) config.Connection {
-		return config.Connection{ID: id, Protocol: protocol, Backend: backend}
-	}
-	params := map[string]map[string]string{
-		"rdp": {"disable-copy": "true", "recording-path": "/var/rec", "color-depth": "24"},
-		"vnc": {"disable-paste": "true"},
-		"ssh": {},
-	}
 	for _, tt := range []struct {
 		name string
 		f    config.File
 		want []string
 	}{
-		{"native defaults", config.File{
-			Guacd:       config.Guacd{Params: params},
-			Connections: []config.Connection{conn("a", "rdp", ""), conn("b", "vnc", "native"), conn("c", "ssh", "")},
-		}, []string{
-			"guacd.params.rdp sets color-depth, disable-copy, recording-path, which no session reads: no rdp connection sets backend: guacd",
-			"guacd.params.vnc sets disable-paste, which no session reads: no vnc connection sets backend: guacd",
-		}},
-		{"guacd fallbacks", config.File{
-			Guacd:       config.Guacd{Params: params},
-			Connections: []config.Connection{conn("a", "rdp", "guacd"), conn("b", "vnc", "guacd")},
-		}, nil},
-		{"another protocol's fallback", config.File{
-			Guacd:       config.Guacd{Params: params},
-			Connections: []config.Connection{conn("a", "rdp", "native"), conn("b", "vnc", "guacd")},
-		}, []string{"guacd.params.rdp sets color-depth,"}},
-		{"ad-hoc targets through guacd", config.File{
-			Guacd:             config.Guacd{Params: params},
-			AllowAdhocTargets: true,
-			AdhocBackends:     map[string]string{"rdp": "guacd", "vnc": "native"},
-		}, []string{
-			"guacd.params.rdp sets disable-copy, recording-path, which no session reads: no rdp connection sets backend: guacd, and ad-hoc rdp targets take only the display's parameters",
-			"guacd.params.vnc sets disable-paste,",
-		}},
-		{"ad-hoc targets off", config.File{
-			Guacd:         config.Guacd{Params: map[string]map[string]string{"rdp": {"color-depth": "24"}}},
-			AdhocBackends: map[string]string{"rdp": "guacd"},
-		}, []string{"guacd.params.rdp sets color-depth,"}},
-		{"legacy_v0", config.File{Guacd: config.Guacd{Params: params}, LegacyV0: true}, nil},
-		{"each protocol's terms", config.File{
-			Guacd: config.Guacd{Params: map[string]map[string]string{
-				"ssh":    {"font-size": "12"},
-				"telnet": {"terminal-type": "xterm", "color-scheme": "gray-black"},
-			}},
-			AllowAdhocTargets: true,
-		}, []string{
-			"guacd.params.ssh sets font-size, which no session reads: ssh never goes through guacd",
-			"guacd.params.telnet sets terminal-type, which no session reads: no telnet connection is configured, and ad-hoc telnet targets take only the display's parameters",
-		}},
 		{"unchecked TLS", config.File{Connections: []config.Connection{
 			{ID: "tls", Protocol: "rdp", Security: rdp.SecurityTLS, TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
 			{ID: "any", Protocol: "rdp", Security: rdp.SecurityAny, TLS: config.ConnectionTLS{InsecureSkipVerify: true}},
@@ -321,9 +188,9 @@ func TestRDPBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(s.shutdown)
-	m, ok := s.backends.lookup("rdp", "")
+	m, ok := s.backends["rdp"]
 	if !ok {
-		t.Fatal("no native RDP backend")
+		t.Fatal("no RDP backend")
 	}
 	budget := func() *rdpproto.Budget {
 		b, err := m.make(target{addr: "127.0.0.1:3389", creds: config.Credentials{Prompt: true}}, screen{})
