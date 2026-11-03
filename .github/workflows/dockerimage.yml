@@ -77,6 +77,21 @@ jobs:
         CGO_ENABLED: "0"
       run: go build ./...
 
+  # The macOS app: the Go client core's C export layer, tested in process
+  # against the interop server, and built as a universal archive for
+  # macOS 26, the oldest the app runs on.
+  macos:
+    runs-on: macos-26
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version: stable
+    - name: Test the export layer and its decoders
+      run: go test -race ./client/occamy-swift/core/ ./client/decoders/
+    - name: Build the core archive
+      run: make macos-core
+
   web:
     runs-on: ubuntu-latest
     defaults:

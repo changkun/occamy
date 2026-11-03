@@ -210,8 +210,10 @@ const (
 // which goes as a palette; shows the last key pressed in
 // backendtest.Swatch in backendtest.SwatchColor; takes a resize; echoes
 // the clipboard back; and takes text as commands: "bell" rings the bell,
-// "title t" sets the title to t, and "end" ends the session as the
-// remote would.
+// "title t" sets the title to t, "prompt" asks the owner for a user
+// name and a secret password and sets the title to "answered " and the
+// answers joined by commas, and "end" ends the session as the remote
+// would.
 type desk struct {
 	in chan backend.InputEvent
 
@@ -306,6 +308,16 @@ func (d *desk) Run(ctx context.Context, sink backend.Sink) error {
 					sink.Bell()
 				case "title":
 					sink.Title(arg)
+				case "prompt":
+					reply, err := sink.Prompt(ctx, backend.Prompt{
+						Name:        "interop",
+						Instruction: "Log in",
+						Fields:      []backend.PromptField{{Label: "User"}, {Label: "Password", Secret: true}},
+					})
+					if err != nil {
+						return err
+					}
+					sink.Title("answered " + strings.Join(reply.Answers, ","))
 				case "end":
 					return nil
 				}
