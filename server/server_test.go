@@ -67,7 +67,6 @@ func testFile(t *testing.T) *config.File {
 				{Name: "bob", PasswordHash: hashPassword(t, bobPassword, bcrypt.MinCost), Groups: []string{"dev"}},
 			},
 		},
-		Guacd: config.Guacd{Address: config.DefaultGuacdAddress},
 	}
 }
 
@@ -326,17 +325,24 @@ func TestDummyHashCost(t *testing.T) {
 	}
 }
 
-// TestLoadWarningsLogged checks that newServer logs loadWarnings: ssh
-// connections never go through guacd, so guacd.params.ssh is unused.
+// TestLoadWarningsLogged checks that newServer logs loadWarnings: an rdp
+// connection that may send its password inside TLS that checks no
+// certificate.
 func TestLoadWarningsLogged(t *testing.T) {
 	logs := captureLog(t)
 	f := testFile(t)
-	f.Guacd.Params = map[string]map[string]string{"ssh": {"font-size": "12"}}
-	if _, err := newServer(f); err != nil {
+	f.Connections = []config.Connection{{
+		ID: "desk", Name: "desk", Protocol: "rdp", Target: "10.0.0.5:3389", Security: "tls",
+		TLS:         config.ConnectionTLS{InsecureSkipVerify: true},
+		Credentials: config.Credentials{Prompt: true}, Allow: config.Allow{Users: []string{"alice"}},
+	}}
+	s, err := newServer(f)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(logs(), "warning: guacd.params.ssh sets font-size, which no session reads") {
-		t.Errorf("no warning for guacd.params.ssh:\n%s", logs())
+	t.Cleanup(s.shutdown)
+	if !strings.Contains(logs(), `warning: connection "desk": security: tls may send the password inside TLS`) {
+		t.Errorf("no warning for the connection desk:\n%s", logs())
 	}
 }
 
@@ -419,7 +425,7 @@ func TestTrustedIssuers(t *testing.T) {
 // TestNewServerFromV1File starts from a file as ParseV1 reads it.
 func TestNewServerFromV1File(t *testing.T) {
 	dir := t.TempDir()
-	raw := "version: 1\nlisten: 127.0.0.1:0\nlegacy_v0: true\nauth:\n  signing_key_file: " + filepath.Join(dir, "signing.key") +
+	raw := "version: 1\nlisten: 127.0.0.1:0\nauth:\n  signing_key_file: " + filepath.Join(dir, "signing.key") +
 		"\n  access_token_lifetime: 5m\n  users:\n    - {name: alice, password_hash: \"" +
 		hashPassword(t, alicePassword, config.MinBcryptCost) + "\", groups: [ops]}\n"
 	f, err := config.ParseV1([]byte(raw))
@@ -433,40 +439,6 @@ func TestNewServerFromV1File(t *testing.T) {
 	ts := &testServer{s: s, srv: httptest.NewServer(s.routes())}
 	defer ts.srv.Close()
 	checkToken(t, s, ts.signIn(t, "alice", alicePassword), "alice", []string{"ops"}, 5*time.Minute)
-	if s.v0 == nil {
-		t.Error("legacy_v0: true serves no v0 routes")
-	}
-}
-
-// TestLegacyV0 checks that a v1 file serves the v0 routes only with
-// legacy_v0, without the web client and pprof, and with a key of its own.
-func TestLegacyV0(t *testing.T) {
-	off := newTestServer(t, nil)
-	on := newTestServer(t, func(f *config.File) { f.LegacyV0 = true })
-	login := `{"protocol":"vnc","host":"desktop:5900","password":"pw"}`
-	jsonType := http.Header{"Content-Type": {"application/json"}}
-
-	if r := do(t, http.MethodPost, off.srv.URL+"/api/v0/login", jsonType, login); r.code != http.StatusNotFound {
-		t.Errorf("legacy_v0 off: login %d", r.code)
-	}
-	r := do(t, http.MethodPost, on.srv.URL+"/api/v0/login", jsonType, login)
-	if r.code != http.StatusOK || !strings.HasPrefix(string(r.body), `{"code":200,"expire":"`) {
-		t.Fatalf("legacy_v0 on: login %d %s", r.code, r.body)
-	}
-	if r := do(t, http.MethodGet, on.srv.URL+"/api/v0/connect", nil, ""); r.code != http.StatusUnauthorized ||
-		string(r.body) != `{"code":401,"message":"cookie token is empty"}` {
-		t.Errorf("legacy_v0 on: connect without a token: %d %s", r.code, r.body)
-	}
-	for _, path := range []string{"/static/", "/debug/pprof/", "/debug/vars"} {
-		if r := do(t, http.MethodGet, on.srv.URL+path, nil, ""); r.code != http.StatusNotFound {
-			t.Errorf("legacy_v0 on: GET %s: %d", path, r.code)
-		}
-	}
-	// Each process makes its own v0 key.
-	again := newTestServer(t, func(f *config.File) { f.LegacyV0 = true })
-	if string(on.s.v0.tokens.key) == string(again.s.v0.tokens.key) || len(on.s.v0.tokens.key) < 16 {
-		t.Errorf("v0 keys %q and %q", on.s.v0.tokens.key, again.s.v0.tokens.key)
-	}
 }
 
 // testCert returns a self-signed certificate for 127.0.0.1 and a pool
@@ -624,7 +596,7 @@ func TestDebugListener(t *testing.T) {
 	if dln == nil {
 		t.Fatal("no debug listener with debug.address")
 	}
-	ts := newTestServer(t, func(f *config.File) { f.LegacyV0 = true })
+	ts := newTestServer(t, nil)
 	serving(t, time.Second, newPublicServer(ts.s.routes(), nil), ln, newDebugServer(), dln)
 
 	for _, tt := range []struct {

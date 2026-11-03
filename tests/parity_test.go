@@ -4,11 +4,10 @@
 
 package tests
 
-// The guacd bridge's parity matrix for VNC
-// (specs/008-native-architecture/guacd-bridge.md, the parity gate's step
-// 2): each feature on each demo VNC server, x11vnc and TigerVNC, through
-// occamyd's native backend and through guacd, both behind occamy-v1 and
-// driven by the Go client. The servers' desktops
+// The parity matrix for VNC
+// (specs/008-native-architecture/native-vnc-backend.md, Implementation
+// notes: VNC's parity matrix): each feature on each demo VNC server,
+// x11vnc and TigerVNC, through occamy-v1 and driven by the Go client. The servers' desktops
 // (docker/demo/vnc/desktop.sh) report what reached them over the session
 // itself: a line typed into the typing probe comes back on the clipboard
 // as "typed: " and its bytes in hex, clipboard text "owner: …" comes back
@@ -64,21 +63,17 @@ const parityTokenAge = 10 * time.Minute
 
 // errUnavailable marks a check that could not reach the server's
 // desktop: the screen did not arrive, or the desktop's probe did not
-// answer. A server fault looks like this, and so may a backend's.
+// answer. A server fault looks like this, and so may the backend's.
 var errUnavailable = errors.New("the desktop is unavailable")
 
-// A parityColumn of the matrix: a server and a backend.
+// A parityColumn of the matrix: a server.
 type parityColumn struct {
-	server  string // x11vnc or tigervnc
-	backend string // native or guacd
+	server string // x11vnc or tigervnc
 }
 
-var parityColumns = []parityColumn{
-	{"x11vnc", "native"}, {"x11vnc", "guacd"},
-	{"tigervnc", "native"}, {"tigervnc", "guacd"},
-}
+var parityColumns = []parityColumn{{"x11vnc"}, {"tigervnc"}}
 
-func (c parityColumn) String() string { return c.server + "/" + c.backend }
+func (c parityColumn) String() string { return c.server }
 
 // conn returns the ID of the column's connection of a kind in
 // docker/occamy-v1.yaml: "" for VNC Authentication with a stored
@@ -92,15 +87,7 @@ func (c parityColumn) conn(kind string) string {
 	if kind != "" {
 		id += "-" + kind
 	}
-	return id + "-" + c.backend
-}
-
-// state returns the backend that the session's state names.
-func (c parityColumn) state() string {
-	if c.backend == "native" {
-		return "vnc"
-	}
-	return "guacd"
+	return id
 }
 
 // parityPorts holds, for each server, a connection kind for each of its
@@ -140,22 +127,13 @@ const (
 // parityKnown holds the cells expected to fail, by "row|column". A cell
 // that fails without an entry fails the test, and so does one that
 // fails without its entry's want, or passes with an entry, so that the
-// matrix in guacd-bridge.md stays what the suite finds
+// matrix in native-vnc-backend.md stays what the suite finds
 // (TestParityMatrixDoc).
 var parityKnown = map[string]parityKnownFailure{
-	// RFB's cut text is Latin-1. x11vnc has no Extended Clipboard, and
-	// guacd 1.6 does not ask for TigerVNC's, so either way the server
-	// takes and gives "? ? ??".
-	"clipboard to the server, beyond Latin-1|x11vnc/native":  {"x11vnc: Latin-1 only", parityLatin1In},
-	"clipboard to the server, beyond Latin-1|x11vnc/guacd":   {"x11vnc: Latin-1 only", parityLatin1In},
-	"clipboard to the server, beyond Latin-1|tigervnc/guacd": {"guacd: Latin-1 only", parityLatin1In},
-	"clipboard both ways, beyond Latin-1|x11vnc/native":      {"x11vnc: Latin-1 only", parityLatin1Echo},
-	"clipboard both ways, beyond Latin-1|x11vnc/guacd":       {"x11vnc: Latin-1 only", parityLatin1Echo},
-	"clipboard both ways, beyond Latin-1|tigervnc/guacd":     {"guacd: Latin-1 only", parityLatin1Echo},
-	// libvncclient asks for X509 credentials, which guacd 1.6 does not
-	// give ("Unsupported credential type requested"), and guacd ends
-	// the session.
-	"auth: VeNCrypt X509Plain|tigervnc/guacd": {"guacd: no X509 credentials", "backend-failed"},
+	// RFB's cut text is Latin-1, and x11vnc has no Extended Clipboard,
+	// so the server takes and gives "? ? ??".
+	"clipboard to the server, beyond Latin-1|x11vnc": {"x11vnc: Latin-1 only", parityLatin1In},
+	"clipboard both ways, beyond Latin-1|x11vnc":     {"x11vnc: Latin-1 only", parityLatin1Echo},
 }
 
 // TestVNCParity runs the matrix against occamy-v1, column by column,
@@ -182,7 +160,6 @@ func TestVNCParity(t *testing.T) {
 				t.Run(f.name, func(t *testing.T) {
 					start := time.Now()
 					r := parityCell{
-						guacd: c.backend == "guacd",
 						check: func() error { return f.check(p, c) },
 						pause: func() {
 							time.Sleep(parityRetryPause)
@@ -192,10 +169,6 @@ func TestVNCParity(t *testing.T) {
 					}
 					if k, ok := parityKnown[cell]; ok {
 						r.known = &k
-					}
-					if !r.guacd {
-						twin := parityColumn{c.server, "guacd"}
-						r.twin = func() error { return f.check(p, twin) }
 					}
 					var err error
 					cells[cell], err = r.run()
@@ -222,11 +195,8 @@ func TestVNCParity(t *testing.T) {
 type parityCell struct {
 	// known is the cell's entry in parityKnown, or nil.
 	known *parityKnownFailure
-	// guacd says whether the cell's backend is guacd.
-	guacd bool
-	// check runs the cell's check, and twin, of a native cell, the
-	// same check through guacd on the same server.
-	check, twin func() error
+	// check runs the cell's check.
+	check func() error
 	// pause waits before a cell tries again.
 	pause func()
 	logf  func(format string, args ...any)
@@ -237,12 +207,10 @@ type parityCell struct {
 // fails where parityKnown lists no failure, fails without the listed
 // failure's want, or passes where parityKnown lists a failure.
 //
-// A cell tries up to parityTries times in all. guacd is the baseline,
-// so a guacd cell tries again after any failure but the listed one. A
-// native cell tries again only if it could not reach the desktop
-// (errUnavailable), and its twin, run at once, could not either: then
-// the server is at fault. If the twin reaches the desktop, the native
-// failure stands.
+// A cell tries up to parityTries times in all. It tries again only if
+// it could not reach the desktop (errUnavailable), which a server fault
+// explains, such as an x11vnc that hung until its watchdog started it
+// again; any other failure stands.
 func (r parityCell) run() (string, error) {
 	var err error
 	try := 1
@@ -279,23 +247,10 @@ func (r parityCell) isKnown(err error) bool {
 
 // again says whether the cell tries again after err.
 func (r parityCell) again(err error) bool {
-	if r.guacd {
-		r.logf("failed, trying again: %v", err)
-		return true
-	}
 	if !errors.Is(err, errUnavailable) {
 		return false
 	}
-	twinErr := r.twin()
-	switch {
-	case twinErr == nil:
-		r.logf("could not reach the desktop, but guacd did: %v", err)
-		return false
-	case !errors.Is(twinErr, errUnavailable):
-		r.logf("could not reach the desktop, but guacd did, and failed otherwise (%v): %v", twinErr, err)
-		return false
-	}
-	r.logf("could not reach the desktop, and neither could guacd (%v), trying again: %v", twinErr, err)
+	r.logf("could not reach the desktop, trying again: %v", err)
 	return true
 }
 
@@ -407,15 +362,15 @@ func (p *parity) stream(path string, opts client.Options) (*paritySession, error
 	return p.dial(path, tok, opts)
 }
 
-// warm opens a session to each of the server's ports, through the
-// native backend, and repeats a barrier until the desktop's probe
-// answers, within parityWarmTime in all, logging the tries each port
+// warm opens a session to each of the server's ports, and repeats a
+// barrier until the desktop's probe answers, within parityWarmTime in all, logging the tries each port
 // took. A freshly started x11vnc does not answer the first cut text on
-// its port (guacd-bridge.md, Implementation notes: VNC's parity matrix).
+// its port (native-vnc-backend.md, Implementation notes: VNC's parity
+// matrix).
 func (p *parity) warm(logf func(string, ...any), server string) {
 	deadline := time.Now().Add(parityWarmTime)
 	for _, kind := range parityPorts[server] {
-		conn := parityColumn{server, "native"}.conn(kind)
+		conn := parityColumn{server}.conn(kind)
 		for try := 1; ; try++ {
 			n, err := p.echo(conn)
 			if err == nil {
@@ -885,8 +840,8 @@ func (p *parity) connects(c parityColumn, conn string, answers ...string) error 
 	if err != nil {
 		return err
 	}
-	if st.Backend != c.state() {
-		return fmt.Errorf("the session's backend is %q, want %q", st.Backend, c.state())
+	if st.Backend != "vnc" {
+		return fmt.Errorf("the session's backend is %q, want vnc", st.Backend)
 	}
 	return s.expectLine(lowercase("auth"), "auth")
 }
@@ -947,10 +902,9 @@ func checkScreen(p *parity, c parityColumn) error {
 // it says which it did not get.
 //
 // The frame that first acknowledges the input can come before the
-// desktop does. Through guacd, the screen is black until x11vnc's first
-// update, some 40 ms after the first frame, and a frame that draws all
-// of that black shows nothing yet; the desktop follows a few frames
-// later. Only opaque pixels count: pixels not drawn yet are
+// desktop does: the screen can be black until the server's first
+// update, and a frame that draws all of that black shows nothing yet;
+// the desktop follows a few frames later. Only opaque pixels count: pixels not drawn yet are
 // transparent, and a screen of black and undrawn pixels shows nothing
 // either.
 func (s *paritySession) showsInput(timeout time.Duration) error {
@@ -1060,8 +1014,7 @@ func (s *paritySession) restoreSize() {
 
 // checkResizeIgnored asks x11vnc for another size: it has
 // ExtendedDesktopSize, but refuses every SetDesktopSize ("resize
-// prohibited"), and guacd sends none. The screen stays, and the session
-// goes on.
+// prohibited"). The screen stays, and the session goes on.
 func checkResizeIgnored(p *parity, c parityColumn) error {
 	s, closeSession, err := p.open(c.conn(""), client.Options{})
 	if err != nil {
@@ -1087,9 +1040,8 @@ func (s *paritySession) keepsSize() error {
 // resizeEarly asks for another size as soon as the session is open, as
 // the web client does for a window that changed before the first
 // frame: before the remote is up or the owner has answered a prompt.
-// Through guacd that killed the connection, so that the screen never
-// came (guacd-bridge.md,
-// Implementation notes: Input before the remote is up). The session
+// guacd's VNC support, which occamyd used before its own, died of that,
+// so that the screen never came. The session
 // reaches its screen, and then a size as it would after a frame:
 // TigerVNC's as asked, x11vnc's as it was.
 func resizeEarly(kind string, answers ...string) func(p *parity, c parityColumn) error {
@@ -1109,8 +1061,8 @@ func resizeEarly(kind string, answers ...string) func(p *parity, c parityColumn)
 	}
 }
 
-// checkPointerEarly moves the pointer as soon as the session is open.
-// guacd's VNC support crashes on that as it does on an early resize.
+// checkPointerEarly moves the pointer as soon as the session is open,
+// on which guacd's VNC support died as it did on an early resize.
 func checkPointerEarly(p *parity, c parityColumn) error {
 	s, closeSession, err := p.openWith(c.conn(""), client.Options{}, func(s *paritySession) error {
 		return s.send(s.cl.Pointer(context.Background(), 100, 100, 0))

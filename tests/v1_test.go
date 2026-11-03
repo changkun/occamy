@@ -27,20 +27,15 @@ import (
 
 // The demo stack's occamy-v1 service (docker/occamy-v1.yaml): its user,
 // and its connections to the demo VNC and RDP servers with the backend
-// that each session's state should report: the -native connections
-// leave backend out, so they get the native backends, the default, and
-// the -guacd ones set backend: guacd, the fallback and the benchmark's
-// baseline.
+// that each session's state should report.
 const (
 	v1User     = "demo"
 	v1Password = "occamy"
 )
 
 var v1Connections = []struct{ id, backend string }{
-	{"vnc-native", "vnc"},
-	{"vnc-guacd", "guacd"},
-	{"rdp-native", "rdp"},
-	{"rdp-guacd", "guacd"},
+	{"vnc", "vnc"},
+	{"rdp", "rdp"},
 }
 
 // endpointV1 returns the occamy-v1 address from OCCAMY_E2E_V1_ENDPOINT
@@ -111,10 +106,11 @@ func apiV1(addr, method, path, token string, body []byte, out any) error {
 }
 
 // TestE2EV1 streams the demo VNC and RDP servers through occamy-v1 with
-// the Go client, through the native backends and through guacd, twice
-// each: the desktop must arrive, the session's state must name the
-// backend the connection picks, and input must reach the remote without
-// ending the session.
+// the Go client, twice each: the desktop must arrive, the session's
+// state must name the connection's backend, and input must reach the
+// remote without ending the session. A session opened right after one
+// ended used to find occamyd in a bad state, which only the second
+// notices.
 func TestE2EV1(t *testing.T) {
 	addr := endpointV1(t)
 	for _, c := range v1Connections {
@@ -123,6 +119,55 @@ func TestE2EV1(t *testing.T) {
 				checkSessionV1(t, addr, c.id, c.backend)
 			})
 		}
+	}
+}
+
+// TestE2EV1SSH opens the demo SSH server through occamy-v1 twice in a
+// row, since a second SSH session used to fail (#22): the shell must
+// answer a command typed into it.
+func TestE2EV1SSH(t *testing.T) {
+	addr := endpointV1(t)
+	for _, run := range []string{"ssh", "ssh-again"} {
+		t.Run(run, func(t *testing.T) {
+			token, err := signIn(addr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			cl, err := client.Dial(ctx, "ws://"+addr+"/api/v1/connections/ssh/stream", token,
+				client.Options{Name: "occamy-e2e/1", Cols: 80, Rows: 24})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cl.Close()
+			if state := sessionV1(t, addr, token, cl.SessionID()); state.Backend != "ssh" {
+				t.Errorf("the session's backend is %q, want ssh", state.Backend)
+			}
+			// The shell prints its prompt once it runs; what it prints for
+			// the command, not the echo of the command typed, says that it
+			// ran it.
+			var out []byte
+			awaitV1(t, ctx, cl, "the shell", func(ev client.Event) bool {
+				switch ev := ev.(type) {
+				case client.TermSnapshot:
+					return len(ev.Data) > 0
+				case client.TermData:
+					return len(ev.Data) > 0
+				}
+				return false
+			})
+			if _, err := cl.TermInput(ctx, []byte("echo occamy-e2e-$((6*7))\r")); err != nil {
+				t.Fatal(err)
+			}
+			awaitV1(t, ctx, cl, "the command's output", func(ev client.Event) bool {
+				if d, ok := ev.(client.TermData); ok {
+					out = append(out, d.Data...)
+				}
+				return bytes.Contains(out, []byte("occamy-e2e-42"))
+			})
+			closeSessionV1(t, addr, token, cl.SessionID())
+		})
 	}
 }
 
@@ -156,7 +201,7 @@ func TestE2EV1RDP(t *testing.T) {
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), d)
 		t.Cleanup(cancel)
-		cl := openDesktopV1(t, ctx, addr, "/api/v1/connections/rdp-native/stream", token,
+		cl := openDesktopV1(t, ctx, addr, "/api/v1/connections/rdp/stream", token,
 			client.Options{Width: 1024, Height: 768})
 		return ctx, token, cl
 	}

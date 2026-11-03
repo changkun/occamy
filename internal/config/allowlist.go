@@ -36,10 +36,9 @@ func (r PortRange) Contains(port uint16) bool { return r.First <= port && port <
 // allows, by protocol: each protocol's default port, and for vnc the
 // ports of displays 0 to 99.
 var AdhocPorts = map[string]PortRange{
-	"ssh":    {22, 22},
-	"vnc":    {5900, 5999},
-	"rdp":    {3389, 3389},
-	"telnet": {23, 23},
+	"ssh": {22, 22},
+	"vnc": {5900, 5999},
+	"rdp": {3389, 3389},
 }
 
 // AllowsPort reports whether e allows port for protocol.

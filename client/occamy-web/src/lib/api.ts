@@ -249,9 +249,10 @@ export function subjectOf(token: AccessToken): string {
 }
 
 /**
- * errorMessage says what went wrong with a call, for the page. An
- * occamyd that answers sign-in without API v1's error body serves a v0
- * file, whose routes the client does not use.
+ * errorMessage says what went wrong with a call, for the page. A sign-in
+ * answered with a 404 without API v1's error body reached no API v1: an
+ * occamyd before v1.0.0-beta.2 serving a v0 file, or a proxy that does
+ * not pass the API on.
  */
 export function errorMessage(err: unknown): string {
   if (!(err instanceof ApiError)) {

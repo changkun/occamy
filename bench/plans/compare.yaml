@@ -14,13 +14,13 @@ max_load: 8
 load_wait: 2h
 
 studies:
-  # Every workload, single user, on all six paths under N0 to N2.
+  # Every workload, single user, on all three paths under N0 to N2.
   - study: matrix
-    series: [occamy, guacd, v1-native, v1-native-nogfx, v1-guacd, v1-guacd-gfx]
+    series: [guacd, v1-native, v1-native-nogfx]
     nets: [N0, N1, N2]
     scenarios: all
-  # The slow links on the three main paths.
+  # The slow links on the two main paths.
   - study: matrix
-    series: [occamy, guacd, v1-native]
+    series: [guacd, v1-native]
     nets: [N3, N4]
     scenarios: all

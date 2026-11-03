@@ -400,11 +400,11 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
   it('leaves “Connecting…” for what occamyd says went wrong, before the first frame', async () => {
     await render({ action: null }, notFound)
     await until(() => text().includes('Connecting to'))
-    act(() => Welcomed.last?.end(CloseCode.BackendFailed, 'guacd drew nothing'))
+    act(() => Welcomed.last?.end(CloseCode.BackendFailed, 'the remote drew nothing'))
     await settle()
     expect(text()).not.toContain('Connecting to')
     expect(container.querySelector('#end-title')?.textContent).toBe('Could not connect')
-    expect(text()).toContain('guacd drew nothing')
+    expect(text()).toContain('the remote drew nothing')
   })
 
   // The codes occamyd closes a session's streams with once the session

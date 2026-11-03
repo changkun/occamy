@@ -15,9 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"changkun.de/x/occamy/bench/internal/guacamole"
 	"changkun.de/x/occamy/bench/internal/probe"
-	"changkun.de/x/occamy/internal/config"
-	"changkun.de/x/occamy/internal/guacamole"
 	"changkun.de/x/occamy/internal/terminal"
 )
 
@@ -296,7 +295,7 @@ func TestV0FirstFrame(t *testing.T) {
 		t.Run(c.proto, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			open := openV0(func(context.Context, string, config.JWT) (rawConn, error) {
+			open := openV0(func(context.Context, string, remote) (rawConn, error) {
 				return c.script.conn(), nil
 			})
 			s, err := open(ctx, "", c.proto)

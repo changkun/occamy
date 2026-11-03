@@ -68,8 +68,8 @@ describe('describeEnd', () => {
   it('says why a connection failed where occamyd knows, and says it may not have reached the remote otherwise', () => {
     expect(describeEnd(CloseCode.BackendFailed, 'failed', owner)).toMatchObject({ title: 'Remote unreachable', technical: 'backend-failed (4006): failed' })
     expect(describeEnd(CloseCode.BackendFailed, '', owner).title).toBe('Remote unreachable')
-    const e = describeEnd(CloseCode.BackendFailed, 'guacd drew nothing', owner)
-    expect(e).toMatchObject({ title: 'Could not connect', detail: 'guacd drew nothing', rejoin: false })
+    const e = describeEnd(CloseCode.BackendFailed, 'the remote drew nothing', owner)
+    expect(e).toMatchObject({ title: 'Could not connect', detail: 'the remote drew nothing', rejoin: false })
     expect(Array.from(describeEnd(CloseCode.BackendFailed, 'x'.repeat(1 << 20), owner).detail).length).toBeLessThan(300)
   })
 

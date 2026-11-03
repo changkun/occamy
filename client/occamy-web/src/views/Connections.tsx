@@ -17,7 +17,7 @@ export interface ConnectionsProps {
   onSignOut: (message?: string) => void
 }
 
-const protocols: Record<string, string> = { ssh: 'SSH', vnc: 'VNC', rdp: 'RDP', telnet: 'Telnet', kubernetes: 'Kubernetes' }
+const protocols: Record<string, string> = { ssh: 'SSH', vnc: 'VNC', rdp: 'RDP', kubernetes: 'Kubernetes' }
 
 // desktops are the protocols that show a screen; the others a terminal.
 const desktops = new Set(['vnc', 'rdp'])

@@ -38,12 +38,12 @@ const resolveTimeout = 5 * time.Second
 // Loopback, link-local (such as a cloud's metadata service at
 // 169.254.169.254), unspecified and multicast addresses, the other
 // clouds' metadata services, and the addresses and ports that occamyd
-// itself listens on or talks to guacd at are refused whatever range or
-// name leads to them, unless an entry is that very address.
+// itself listens on are refused whatever range or name leads to them,
+// unless an entry is that very address.
 type allowlist struct {
 	entries  []config.AllowEntry
 	ranges   bool                    // whether any entry is a range or an address
-	reserved map[netip.AddrPort]bool // occamyd's own endpoints, and guacd's
+	reserved map[netip.AddrPort]bool // occamyd's own endpoints
 	lookup   func(ctx context.Context, host string) ([]netip.Addr, error)
 }
 
@@ -69,8 +69,8 @@ func newAllowlist(entries []string) (*allowlist, error) {
 // interfaceAddrs lists the host's addresses, a variable for tests.
 var interfaceAddrs = net.InterfaceAddrs
 
-// reserve makes each of addresses, a host and port such as guacd's or
-// occamyd's own listener, special at its port: a range that holds it
+// reserve makes each of addresses, a host and port such as occamyd's own
+// listener, special at its port: a range that holds it
 // opens it only through an entry that is that very address. A name is
 // resolved now, and a listener on no host stands for every address of
 // the host. An address that does not resolve is returned in the error,

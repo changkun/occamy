@@ -95,7 +95,7 @@ func sessionServer(t *testing.T, edit func(*config.File)) (*testServer, *fakeBac
 	for k, m := range ts.s.backends {
 		ts.s.backends[k] = backendMaker{name: m.name, make: fb.make}
 	}
-	ts.s.backends.register("fake", "", "fake", fb.make)
+	ts.s.backends.register("fake", "fake", fb.make)
 	return ts, fb
 }
 
@@ -535,8 +535,6 @@ func TestLimits(t *testing.T) {
 	ts.stream(t, path, bob, termHello) // the owner, beside a full session
 }
 
-// TestAdhocReserved checks that the server keeps guacd and its own
-// listeners out of an ad-hoc range's reach.
 // classless is a backend of no class, which session.Start refuses, as
 // it would any registry.Open that fails after the backend is made.
 type classless struct{ *backendtest.Terminal }
@@ -576,11 +574,11 @@ func TestSessionsCapReleased(t *testing.T) {
 	fb.mu.Lock()
 	fb.fail = nil
 	fb.mu.Unlock()
-	ts.s.backends.register("fake", "", "fake", func(target, screen) (backend.Backend, error) {
+	ts.s.backends.register("fake", "fake", func(target, screen) (backend.Backend, error) {
 		return classless{backendtest.NewTerminal(80, 24, 0)}, nil
 	})
 	failing("a session that could not start")
-	ts.s.backends.register("fake", "", "fake", fb.make)
+	ts.s.backends.register("fake", "fake", fb.make)
 	ts.openSession(t, alice, "ops-shell")
 }
 
@@ -648,11 +646,12 @@ func TestConcurrentLimits(t *testing.T) {
 	}
 }
 
+// TestAdhocReserved checks that the server keeps its own listeners out of
+// an ad-hoc range's reach.
 func TestAdhocReserved(t *testing.T) {
 	ts, _ := sessionServer(t, func(f *config.File) {
 		f.AllowAdhocTargets = true
 		f.AdhocAllowlist = []string{"10.0.0.0/8:1-65535"}
-		f.Guacd.Address = "10.9.9.9:4822"
 		f.Listen = "10.8.8.8:8443"
 		f.Debug.Address = "10.8.8.8:6060"
 	})
@@ -661,7 +660,6 @@ func TestAdhocReserved(t *testing.T) {
 		target string
 		status int
 	}{
-		{"10.9.9.9:4822", http.StatusForbidden},
 		{"10.8.8.8:8443", http.StatusForbidden},
 		{"10.8.8.8:6060", http.StatusForbidden},
 		{"10.9.9.9:3389", http.StatusCreated},
@@ -679,20 +677,21 @@ func TestAdhocReserved(t *testing.T) {
 // target is added here too.
 func TestConnectionTarget(t *testing.T) {
 	c := config.Connection{
-		ID: "mac", Name: "Mac", Protocol: "vnc", Target: "mac.lab.internal:5900", Backend: config.BackendNative,
+		ID: "mac", Name: "Mac", Protocol: "vnc", Target: "mac.lab.internal:5900",
 		HostKeys: []string{fakeHostKey}, InsecureIgnoreHostKey: true,
-		TLS:         config.ConnectionTLS{Require: true, ServerName: "mac", CAFile: "/ca.pem", Pins: []string{"SHA256:pin"}, InsecureSkipVerify: true},
-		ARD:         true,
-		Security:    "tls",
-		DisableGFX:  true,
-		Kubernetes:  config.Kubernetes{Namespace: "web", Pod: "web-0", Container: "app", Command: []string{"sh"}},
-		Credentials: config.Credentials{Username: "studio", PasswordFile: "/password", Prompt: true},
-		Allow:       config.Allow{Users: []string{"alice"}},
+		TLS:          config.ConnectionTLS{Require: true, ServerName: "mac", CAFile: "/ca.pem", Pins: []string{"SHA256:pin"}, InsecureSkipVerify: true},
+		ARD:          true,
+		Security:     "tls",
+		DisableGFX:   true,
+		DisableCopy:  true,
+		DisablePaste: true,
+		Kubernetes:   config.Kubernetes{Namespace: "web", Pod: "web-0", Container: "app", Command: []string{"sh"}},
+		Credentials:  config.Credentials{Username: "studio", PasswordFile: "/password", Prompt: true},
+		Allow:        config.Allow{Users: []string{"alice"}},
 	}
 	want := target{
 		connection:            "mac",
 		protocol:              "vnc",
-		backend:               config.BackendNative,
 		addr:                  "mac.lab.internal:5900",
 		creds:                 c.Credentials,
 		hostKeys:              c.HostKeys,
@@ -701,6 +700,8 @@ func TestConnectionTarget(t *testing.T) {
 		ard:                   true,
 		security:              "tls",
 		disableGFX:            true,
+		disableCopy:           true,
+		disablePaste:          true,
 		kubernetes:            c.Kubernetes,
 	}
 	if got := connectionTarget(&c); !reflect.DeepEqual(got, want) {

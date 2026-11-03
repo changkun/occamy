@@ -75,7 +75,7 @@ func TestX11vncClipboardRequestorGone(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	began := time.Now()
-	cl := openDesktopV1(t, ctx, addr, "/api/v1/connections/vnc-none-native/stream", token,
+	cl := openDesktopV1(t, ctx, addr, "/api/v1/connections/vnc-none/stream", token,
 		client.Options{Width: 1024, Height: 768})
 
 	// A goroutine takes the session's events, which acknowledges its

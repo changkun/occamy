@@ -13,7 +13,7 @@ import (
 	"strconv"
 	"testing"
 
-	"changkun.de/x/occamy/internal/guacamole"
+	"changkun.de/x/occamy/bench/internal/guacamole"
 )
 
 func apply(t *testing.T, d *guacamole.Display, elements ...string) {

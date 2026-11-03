@@ -27,20 +27,17 @@ auth:
 connections:
   - id: ssh
     protocol: ssh
-    backend: native
     target: ssh:22
     insecure_ignore_host_key: true
     credentials: {username: occamy, password_env: OCCAMY_BENCH_SSH_PASSWORD}
     allow: {users: [demo]}
   - id: vnc-native
     protocol: vnc
-    backend: native
     target: vnc:5900
     credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
     allow: {users: [demo]}
   - id: rdp-native
     protocol: rdp
-    backend: native
     target: rdp:3389
     security: tls
     tls: {insecure_skip_verify: true}

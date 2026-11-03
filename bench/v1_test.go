@@ -43,27 +43,12 @@ import (
 
 // benchFile loads a v1 file of the bench stack, as docker-compose.yaml and
 // docker-compose.bench.yaml give it to occamyd, and returns it with its
-// connections by ID. Every connection names its backend, so that a change
-// of a protocol's default backend does not move a series.
+// connections by ID.
 func benchFile(t *testing.T, name string) (*config.File, map[string]config.Connection) {
 	t.Helper()
 	raw, err := os.ReadFile("../docker/bench/" + name)
 	if err != nil {
 		t.Fatal(err)
-	}
-	var named struct {
-		Connections []struct {
-			ID      string `yaml:"id"`
-			Backend string `yaml:"backend"`
-		} `yaml:"connections"`
-	}
-	if err := yaml.Unmarshal(raw, &named); err != nil {
-		t.Fatal(err)
-	}
-	for _, c := range named.Connections {
-		if c.Backend == "" {
-			t.Errorf("%s: connection %q takes its protocol's default backend", name, c.ID)
-		}
 	}
 	dir := t.TempDir() + "/"
 	raw = []byte(strings.NewReplacer("/run/occamy/", dir, "/var/lib/occamy/", dir).Replace(string(raw)))
@@ -82,27 +67,20 @@ func benchFile(t *testing.T, name string) (*config.File, map[string]config.Conne
 }
 
 // The bench stack's v1 files load, have every connection the v1 series
-// open with the protocol and backend the series names, and the user the
-// harness signs in as. A series that serves RDP runs it with GFX as it
-// says, and every path to RDP asks for one colour depth, 32 bits, so that
-// xrdp keeps one X session, as native asks without being told.
+// open with the protocol the series names, and the user the harness signs
+// in as. A series that serves RDP runs it with GFX as it says.
 func TestBenchV1File(t *testing.T) {
 	f, conns := benchFile(t, "occamy-v1.yaml")
-	gfxFile, gfxConns := benchFile(t, "occamy-v1-gfx.yaml")
 	cubicFile, cubicConns := benchFile(t, "occamy-v1-cubic.yaml")
 	for name, byProto := range v1Connections {
-		file, in := f, conns
-		switch name {
-		case "v1-guacd-gfx":
-			file, in = gfxFile, gfxConns
-		case "v1-native-cubic":
-			file, in = cubicFile, cubicConns
+		in := conns
+		if name == "v1-native-cubic" {
+			in = cubicConns
 		}
-		want, _, _ := strings.Cut(strings.TrimPrefix(name, "v1-"), "-")
 		for proto, id := range byProto {
 			c, ok := in[id]
-			if !ok || c.Protocol != proto || c.Backend != want {
-				t.Errorf("series %s, %s: connection %q is %+v, want protocol %s with backend %s", name, proto, id, c, proto, want)
+			if !ok || c.Protocol != proto {
+				t.Errorf("series %s, %s: connection %q is %+v, want protocol %s", name, proto, id, c, proto)
 			}
 		}
 		id, ok := byProto["rdp"]
@@ -113,19 +91,12 @@ func TestBenchV1File(t *testing.T) {
 		if !ok {
 			t.Errorf("series %s serves rdp, and rdpPaths does not say how", name)
 		}
-		gfx := !in[id].DisableGFX
-		if want == config.BackendGuacd {
-			gfx = file.Guacd.Params["rdp"]["disable-gfx"] == "false"
-		}
-		if gfx != path.gfx {
+		if gfx := !in[id].DisableGFX; gfx != path.gfx {
 			t.Errorf("series %s runs with GFX %v, and rdpPaths says %v", name, gfx, path.gfx)
 		}
-		if d := file.Guacd.Params["rdp"]["color-depth"]; want == config.BackendGuacd && d != "32" {
-			t.Errorf("series %s: guacd's color-depth %q, want 32", name, d)
-		}
 	}
-	if len(rdpPaths) != 6 {
-		t.Errorf("rdpPaths has %d series, want RDP's six", len(rdpPaths))
+	if len(rdpPaths) != 4 {
+		t.Errorf("rdpPaths has %d series, want RDP's four", len(rdpPaths))
 	}
 	for _, proto := range []string{"ssh", "vnc", "rdp"} {
 		if _, ok := v1Connections["v1-native"][proto]; !ok {
@@ -160,40 +131,11 @@ func TestBenchV1File(t *testing.T) {
 			t.Errorf("%s has security %q and tls %+v, want tls without a certificate check", series, c.Security, c.TLS)
 		}
 	}
-	for _, file := range []*config.File{f, gfxFile} {
+	for _, file := range []*config.File{f, cubicFile} {
 		if len(file.Auth.Users) != 1 || file.Auth.Users[0].Name != v1Account.name ||
 			bcrypt.CompareHashAndPassword([]byte(file.Auth.Users[0].PasswordHash), []byte(v1Account.secret)) != nil {
 			t.Errorf("users %+v, want %s with the harness's password", file.Auth.Users, v1Account.name)
 		}
-	}
-}
-
-// occamy-v1-gfx serves its own file, on the port the harness and make
-// bench take by default, and only on the loopback interface, since the
-// demo user's password is public; so is its debug listener, which has no
-// authentication, on the port make bench-compare reads it from.
-func TestBenchGFXService(t *testing.T) {
-	raw, err := os.ReadFile("../docker/docker-compose.bench.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var compose struct {
-		Services map[string]struct {
-			Ports, Volumes []string
-		}
-	}
-	if err := yaml.Unmarshal(raw, &compose); err != nil {
-		t.Fatal(err)
-	}
-	svc := compose.Services["occamy-v1-gfx"]
-	if want := []string{"127.0.0.1:${OCCAMY_V1_GFX_PORT:-5640}:5637", "127.0.0.1:${OCCAMY_V1_GFX_DEBUG_PORT:-5641}:5638"}; !slices.Equal(svc.Ports, want) {
-		t.Errorf("ports %q, want %q", svc.Ports, want)
-	}
-	if want := []string{"./bench/occamy-v1-gfx.yaml:/occamy/v1.yaml:ro"}; !slices.Equal(svc.Volumes, want) {
-		t.Errorf("volumes %q, want %q", svc.Volumes, want)
-	}
-	if !slices.Contains(services, "occamy-v1-gfx") {
-		t.Error("the harness does not sample occamy-v1-gfx's CPU")
 	}
 }
 
@@ -332,9 +274,14 @@ func TestDecoders(t *testing.T) {
 				t.Errorf("PSNR %.1f dB, want at least %g", p, v.MinPSNR)
 			}
 			// A rectangle other than the payload's is refused before
-			// anything is decoded.
-			if err := d.Decode(make([]byte, 4*(v.Width+1)*v.Height), v.Width+1, v.Height, unhex(v.Payload)); err == nil {
-				t.Errorf("a %d×%d payload decoded into %d×%d", v.Width, v.Height, v.Width+1, v.Height)
+			// anything is decoded: for a scaled image, one that scales
+			// down to another size.
+			w := v.Width + 1
+			if v.Codec == protocol.CodecScaled {
+				w = v.Width + protocol.MaxScale
+			}
+			if err := d.Decode(make([]byte, 4*w*v.Height), w, v.Height, unhex(v.Payload)); err == nil {
+				t.Errorf("a %d×%d payload decoded into %d×%d", v.Width, v.Height, w, v.Height)
 			}
 		})
 		checked++

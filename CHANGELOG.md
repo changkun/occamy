@@ -21,6 +21,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   `make swift-notarize` signs both with a Developer ID and has Apple
   notarize the image
   ([docs/macos-app.md](docs/macos-app.md#building-it)).
+- `disable_copy` and `disable_paste` on a vnc or rdp connection keep
+  the remote's clipboard from the viewers, or theirs from the remote,
+  as guacd's `disable-copy` and `disable-paste` did
+  ([docs/configuration.md](docs/configuration.md#the-connection-registry-connections)).
 - `make swift-core` builds the Go client core as `liboccamy.a`, a C
   archive for Apple silicon and Intel with its interface in `occamy.h`,
   which the macOS app links
@@ -66,6 +70,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   connections use
   ([docs/benchmarks.md](docs/benchmarks.md#the-comparison);
   [results](docs/benchmarks.md#step-3a-the-congestion-control)).
+- Codec 7, `scaled`, carries a tile as a JPEG or WebP image at a
+  fraction of its width and height, which the client scales up
+  ([docs/protocol.md](docs/protocol.md#the-scaled-codec)). occamyd sends
+  tiles in motion at half size to a client that lists it, and at full
+  size again once they stop. The Go and web clients list it; older
+  clients do not, and get tiles in motion at full size as before.
 
 ### Changed
 
@@ -102,6 +112,53 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - occamyd spends less CPU on full-screen motion: it counts a moving
   tile's colours only until it knows the tile goes lossy. Over VNC a
   frame of motion takes 17.6 ms of occamyd's CPU instead of 19.5.
+- Full-screen motion takes about half the bandwidth: tiles in motion go
+  at half their width and height to a client that lists the `scaled`
+  codec, as the Go and web clients do, and at full size again once they
+  stop. Over VNC a frame of motion is 8.0 KiB instead of 14.2, and
+  takes 12.7 ms of occamyd's CPU instead of 19.3; over RDP 7.7 KiB
+  instead of 14.1, and 14.6 ms instead of 24.7, at the same frame rate.
+- The image and the release archives ship a [conf.yaml](conf.yaml) of
+  version 1, to fill in with your users and connections; occamyd
+  refuses it until it names someone who signs in.
+- The demo stack's connections lose their `-native` suffix, since each
+  protocol has one backend: `vnc-native` is `vnc`, `rdp-native` is
+  `rdp`, and so on. The demo user may own 100 sessions, for the pressure
+  test, which now runs through `occamy-v1`.
+
+### Removed
+
+- guacd, from `occamyd`: every session is served by occamyd's own
+  backend for its protocol. A v1 file with `guacd`, a connection's
+  `backend` or `adhoc_backends` is refused, with what replaced each key
+  ([docs/configuration.md](docs/configuration.md#files-written-for-guacd)).
+  A file whose `guacd.params` recorded sessions (`recording-path` and
+  guacd's other `recording-` and `typescript-` parameters) or
+  restricted the clipboard (`disable-copy`, `disable-paste`) is refused
+  with why, rather than served unrecorded or with the clipboard open:
+  occamyd records no session until a later beta, and a connection's
+  `disable_copy` and `disable_paste` restrict the clipboard instead.
+- The v0 routes, `/api/v0/login` and `/api/v0/connect`, the Guacamole
+  protocol through guacd, with `legacy_v0`. Clients use API v1 and
+  protocol v1.
+- v0 files. A file without `version: 1` is refused with an error that
+  names the v1 format
+  ([docs/configuration.md](docs/configuration.md#v0-files)).
+- telnet, which only guacd served, as a connection's protocol and an
+  ad-hoc target's.
+- The demo stack's `occamy` and `guacd` services. guacd runs only in the
+  bench overlay, for the benchmark's `guacd` series, the baseline.
+- The benchmark's `occamy`, `v1-guacd` and `v1-guacd-gfx` series, their
+  `occamy-v1-gfx` service and the harness's `-addr` and `-v1-gfx` flags.
+  Their recorded results stay in `docs/benchmarks/`.
+
+### Known issues
+
+- Windows RDP hosts need `disable_gfx: true` on their connection until
+  occamyd takes ClearCodec: with GFX, the default, their screen stays
+  nearly black. An ad-hoc rdp target cannot set it, so reach a Windows
+  host through a connection
+  ([docs/configuration.md](docs/configuration.md#backends)).
 
 ## [1.0.0-beta.1] - 2026-11-02
 

@@ -11,23 +11,10 @@ import (
 	"changkun.de/x/occamy/server"
 )
 
-// main serves the configuration file that -conf names: a v1 file
-// (version: 1) through API v1, and a v0 file, without a version, as
-// before.
+// main serves the version 1 configuration file that -conf names through
+// API v1.
 func main() {
-	raw := config.Load()
-	version, err := config.Version(raw)
-	if err != nil {
-		log.Fatal(err)
-	}
-	if version == 0 {
-		if err := config.Init(raw); err != nil {
-			log.Fatalf("failed of parsing config file, error: %v", err)
-		}
-		server.RunV0()
-		return
-	}
-	f, err := config.ParseV1(raw)
+	f, err := config.ParseV1(config.Load())
 	if err != nil {
 		log.Fatal(err)
 	}

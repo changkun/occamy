@@ -210,6 +210,13 @@ func (s *Session) tile(m *protocol.Tile, n int) error {
 		return s.add(o)
 	case protocol.CodecRaw:
 		o.data = m.Payload // the Session's to keep, as Conn says
+	case protocol.CodecScaled:
+		// The message's decoding checked the image's factor and codec,
+		// which must also be agreed.
+		if sc, _ := protocol.ParseScaled(m.Payload); !slices.Contains(s.agreed.Codecs, sc.Codec) {
+			return fmt.Errorf("%w: a scaled tile of codec %v, which was not agreed", protocol.ErrInvalid, sc.Codec)
+		}
+		fallthrough
 	default:
 		o.job = &job{dec: s.decoders[m.Codec], payload: m.Payload, w: r.Dx(), h: r.Dy(), done: make(chan struct{})}
 		o.bytes += 4 * r.Dx() * r.Dy() // the decoded pixels

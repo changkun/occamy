@@ -18,7 +18,7 @@ affects:
   - docs/
 effort: medium
 created: 2026-10-29
-updated: 2026-11-02
+updated: 2026-11-03
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -157,7 +157,11 @@ Settled on 2026-10-31.
     `deflate-raw`, WebP where a 1×1 probe decodes, JPEG where
     `createImageBitmap` exists, raw always, and then `cached`, keeping a
     tile cache of 1024 slots by default (`cacheSlots`; added by the
-    graphics pipeline's Tile cache task on 2026-10-31).
+    graphics pipeline's Tile cache task on 2026-10-31). The Workers'
+    decoder offers deflate, WebP, JPEG, `scaled` and raw, and draws a
+    `scaled` tile's image on a canvas of the tile's size, smoothed, from
+    a source rectangle of the tile's size divided by the factor (added
+    by the graphics pipeline's Scaled motion on 2026-11-03).
   - `Display` waits for an animation frame and presents each frame's
     dirty rectangles to a `Surface` in one task, so the browser never
     paints half a frame; `CanvasSurface` puts them on a canvas or an
@@ -255,7 +259,11 @@ Settled on 2026-10-31.
     47 dB, the canvas holds the framebuffer exactly, and the cursor is
     exact. A real click focuses the canvas, and real key presses reach
     the remote with keysym and usage (q: 0x71 and 0x14; right Shift:
-    0xffe2 and 0xe5). To run them:
+    0xffe2 and 0xe5). (2026-11-03, with the scaled codec: the demo's 57
+    checks pass, the scaled vectors decode at 34.1 and 37.5 dB against
+    31 and 34, Workers decode 22 of 22 as the page does, and a session
+    with `webinterop` agrees on deflate, WebP, JPEG, scaled, raw and
+    cached.) To run them:
 
     ```sh
     go build -o /tmp/webinterop ./client/internal/webinterop
@@ -808,11 +816,14 @@ Settled on 2026-10-31.
   - `gosec` flags `os.Stat` on `web_client`'s path as traversal by
     taint (G703); it is the operator's configuration, as elsewhere.
 - **Follow-ups:**
-  - Remove the v0 routes, and with them `client: true`, at v1.0.
+  - Remove the v0 routes, and with them `client: true`, at v1.0. (Done
+    in beta.2, 2026-11-03.)
   - Make `conf.yaml`, which the image and the archives ship, a v1 file,
     and v1 the main path of the README. It needs a writable place for
     the signing key in the distroless image and a first user, which are
-    the owner's to choose.
+    the owner's to choose. (Done in beta.2: a v1 template with the
+    signing key at `/var/lib/occamy/signing.key` and no user, which
+    occamyd refuses until the operator adds one.)
   - A browser job in CI (Playwright with Chromium, Firefox and WebKit)
     against `webinterop` or the demo stack.
   - A choice of sharpness on a HiDPI display, where a remote pixel
@@ -821,4 +832,5 @@ Settled on 2026-10-31.
     alone. `pixel_ratio` is there for it, and RDP's scale factors
     (internal/rdp/dynvc.go) would have to follow.
   - An end-to-end test of the demo's `ssh` connection through
-    `occamy-v1`; `tests/` streams only its VNC connections.
+    `occamy-v1`; `tests/` streams only its VNC connections. (Done in
+    beta.2: `TestE2EV1SSH`.)

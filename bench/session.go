@@ -5,35 +5,44 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"image"
-	"io"
-	"net/http"
 	"slices"
 	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/coder/websocket"
-
+	"changkun.de/x/occamy/bench/internal/guacamole"
+	"changkun.de/x/occamy/bench/internal/guacd"
 	"changkun.de/x/occamy/bench/internal/probe"
-	"changkun.de/x/occamy/internal/config"
-	"changkun.de/x/occamy/internal/guacamole"
-	"changkun.de/x/occamy/internal/guacd"
 	"changkun.de/x/occamy/internal/terminal"
 )
 
-// Remote desktops in the demo stack, as guacd resolves them.
-var credentials = map[string]config.JWT{
-	"ssh": {Protocol: "ssh", Host: "ssh:22", Username: "occamy", Password: "occamy"},
-	"vnc": {Protocol: "vnc", Host: "vnc:5900", Password: "vncpassword"},
-	"rdp": {Protocol: "rdp", Host: "rdp:3389", Username: "occamy", Password: "occamy"},
+// remote is a remote desktop of the bench stack, as guacd resolves it.
+type remote struct {
+	protocol, host, port, username, password string
+}
+
+// remotes are the bench stack's remotes, by protocol.
+var remotes = map[string]remote{
+	"ssh": {protocol: "ssh", host: "ssh", port: "22", username: "occamy", password: "occamy"},
+	"vnc": {protocol: "vnc", host: "vnc", port: "5900", password: "vncpassword"},
+	"rdp": {protocol: "rdp", host: "rdp", port: "3389", username: "occamy", password: "occamy"},
+}
+
+// params returns guacd's connection parameters for r: its address and
+// credentials, and for RDP ignore-cert, since xrdp signs its certificate
+// itself. RDP gets guacd's default, the graphics pipeline, as Guacamole
+// ships.
+func (r remote) params() map[string]string {
+	p := map[string]string{"hostname": r.host, "port": r.port, "username": r.username, "password": r.password}
+	if r.protocol == "rdp" {
+		p["ignore-cert"] = "true"
+	}
+	return p
 }
 
 // The display every series announces, the web client's default.
@@ -47,41 +56,6 @@ type rawConn interface {
 	writeRaw(b []byte) error
 	close() error
 }
-
-// wsConn is a v0 connection through occamyd's WebSocket. Its I/O runs
-// without a context, since coder/websocket closes the connection when one
-// ends. coder/websocket allows concurrent writes.
-type wsConn struct {
-	ws *websocket.Conn
-	r  *bufio.Reader // the rest of the current message
-}
-
-func (c *wsConn) readRaw() ([]byte, error) {
-	for {
-		if c.r != nil {
-			raw, err := guacamole.ReadRaw(c.r)
-			if err == nil {
-				return raw, nil
-			}
-			if !errors.Is(err, io.EOF) {
-				return nil, err
-			}
-		}
-		_, msg, err := c.ws.Read(context.Background())
-		if err != nil {
-			return nil, err
-		}
-		c.r = bufio.NewReader(bytes.NewReader(msg))
-	}
-}
-
-func (c *wsConn) writeRaw(b []byte) error {
-	return c.ws.Write(context.Background(), websocket.MessageText, b)
-}
-
-// close drops the connection without a close frame, as gorilla/websocket's
-// Close did.
-func (c *wsConn) close() error { return c.ws.CloseNow() }
 
 // guacdConn is a v0 connection straight to guacd.
 type guacdConn struct {
@@ -100,57 +74,10 @@ func (c *guacdConn) writeRaw(b []byte) error {
 
 func (c *guacdConn) close() error { return c.c.Close() }
 
-var httpClient = &http.Client{Timeout: 10 * time.Second}
-
-// dialOccamy logs in to occamyd at addr and opens a session.
-func dialOccamy(ctx context.Context, addr string, cred config.JWT) (rawConn, error) {
-	body, _ := json.Marshal(map[string]string{
-		"protocol": cred.Protocol, "host": cred.Host,
-		"username": cred.Username, "password": cred.Password,
-	})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, "http://"+addr+"/api/v0/login", bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("login: %w", err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("login: %s", resp.Status)
-	}
-	var out struct{ Token string }
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, fmt.Errorf("login: %w", err)
-	}
-	url := fmt.Sprintf("ws://%s/api/v0/connect?token=%s&width=%d&height=%d&dpi=%d",
-		addr, out.Token, width, height, dpi)
-	// ctx bounds the handshake only.
-	ws, _, err := websocket.Dial(ctx, url, &websocket.DialOptions{ //nolint:bodyclose // coder/websocket: the response body need not be closed
-		Subprotocols: []string{"guacamole"},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("connect: %w", err)
-	}
-	// occamyd sends one instruction per message, of up to this size;
-	// coder/websocket's default limit of 32 KiB could cut a session short.
-	ws.SetReadLimit(guacamole.MaxInstructionSize)
-	return &wsConn{ws: ws}, nil
-}
-
-// dialGuacd opens a session straight to guacd at addr, with the
-// parameters occamyd would send.
-func dialGuacd(ctx context.Context, addr string, cred config.JWT) (rawConn, error) {
-	params, err := cred.GuacdParams(map[string]map[string]string{
-		"rdp": {"ignore-cert": "true"}, // as in docker/occamy.yaml
-	})
-	if err != nil {
-		return nil, err
-	}
+// dialGuacd opens a session straight to guacd at addr.
+func dialGuacd(ctx context.Context, addr string, r remote) (rawConn, error) {
 	c, err := guacd.Dial(ctx, addr, guacd.Config{
-		Protocol: cred.Protocol, Params: params,
+		Protocol: r.protocol, Params: r.params(),
 		Width: width, Height: height, DPI: dpi,
 	})
 	if err != nil {

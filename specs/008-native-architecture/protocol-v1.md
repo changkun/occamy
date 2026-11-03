@@ -369,6 +369,10 @@ web client ([009](../009-react-web-client.md)) and the client core
     graphics pipeline's Codecs task fixed the deflate container, with
     forms for alpha, in docs/protocol.md, and the payloads of every
     codec occamyd sends in `protocol/testdata/codecs.json`.)
+    (2026-11-03: codec 7, `scaled`, a JPEG or WebP image at a fraction
+    of the tile's size, for tiles in motion; unassigned now start at 8.
+    It is additive, since a client that does not list it never gets it;
+    see graphics-pipeline, Implementation notes: Scaled motion.)
   - Close codes are WebSocket close statuses, so the `close` message and
     the close frame carry one number: `normal` 1000, `server-shutdown`
     1001, `protocol-error` 1002, `unsupported` 1003, `too-large` 1009,

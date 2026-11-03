@@ -33,9 +33,7 @@ info:
     The two stream routes upgrade to a WebSocket that carries protocol
     v1, described in
     [docs/protocol.md](https://github.com/changkun/occamy/blob/master/docs/protocol.md).
-    The `/api/v0` routes are served only with `legacy_v0: true` and are
-    removed at 1.0.0. The `/debug` routes are served only on the debug
-    listener.
+    The `/debug` routes are served only on the debug listener.
   license:
     name: MIT
     identifier: MIT
@@ -62,10 +60,6 @@ tags:
     description: WebSockets that carry a session in protocol v1.
   - name: web client
     description: The web client's files.
-  - name: v0
-    description: |
-      The Guacamole-protocol routes, served with `legacy_v0: true` and
-      removed at 1.0.0. Their bodies and errors are v0's, not API v1's.
   - name: debug
     description: |
       expvar and pprof, served only on the debug listener,
@@ -509,73 +503,6 @@ paths:
           content:
             text/plain: {}
 
-  /api/v0/login:
-    post:
-      tags: [v0]
-      operationId: v0Login
-      summary: Sign a v0 token for a target
-      deprecated: true
-      description: |
-        Signs whatever target it receives, for anyone: neither the
-        connection registry nor `adhoc_allowlist` restricts it. The token
-        is an HS256 JWT that lives an hour and carries the target and its
-        password in readable claims.
-      security: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/V0LoginRequest"}
-          application/x-www-form-urlencoded:
-            schema: {$ref: "#/components/schemas/V0LoginRequest"}
-          multipart/form-data:
-            schema: {$ref: "#/components/schemas/V0LoginRequest"}
-      responses:
-        "200":
-          description: The token.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/V0Token"}
-        "401":
-          $ref: "#/components/responses/V0Unauthorized"
-
-  /api/v0/connect:
-    get:
-      tags: [v0]
-      operationId: v0Connect
-      summary: A Guacamole connection through guacd
-      deprecated: true
-      description: |
-        A WebSocket with the subprotocol `guacamole` that proxies one
-        Guacamole connection between the client and guacd. Every client
-        whose token carries the same target and credentials shares one
-        session. The WebSocket closes with a Guacamole status code, in
-        decimal, as its reason.
-      security:
-        - v0Token: []
-        - v0TokenQuery: []
-        - v0TokenCookie: []
-      parameters:
-        - {name: width, in: query, schema: {type: integer, minimum: 1, maximum: 8192, default: 1024}}
-        - {name: height, in: query, schema: {type: integer, minimum: 1, maximum: 8192, default: 768}}
-        - {name: dpi, in: query, schema: {type: integer, minimum: 48, maximum: 600, default: 96}}
-        - name: timezone
-          in: query
-          description: An IANA time zone name.
-          schema: {type: string}
-      responses:
-        "101":
-          description: The WebSocket, with the subprotocol `guacamole`.
-        "400":
-          description: A token without `exp`.
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/V0Error"}
-        "401":
-          $ref: "#/components/responses/V0Unauthorized"
-        "403":
-          description: An `Origin` that does not name the request's host, an empty one, or a repeated one.
-
   /debug/vars:
     servers: &debug
       - url: http://{address}
@@ -712,21 +639,6 @@ components:
         `occamy.v1.token.` followed by the token in base64url without
         padding, offered beside `occamy.v1`. It wins over
         `Authorization`.
-    v0Token:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-      description: A token from `POST /api/v0/login`.
-    v0TokenQuery:
-      type: apiKey
-      in: query
-      name: token
-      description: A token from `POST /api/v0/login`, in the query string.
-    v0TokenCookie:
-      type: apiKey
-      in: cookie
-      name: jwt
-      description: A token from `POST /api/v0/login`, in a cookie.
 
   parameters:
     SessionID:
@@ -818,14 +730,6 @@ components:
       description: The request is no valid WebSocket upgrade; the WebSocket library's plain text, or a `400`.
       content:
         text/plain: {}
-    V0Unauthorized:
-      description: A missing or invalid token, or a login that does not parse.
-      headers:
-        WWW-Authenticate:
-          schema: {type: string, enum: ["JWT realm=occamy-proxy"]}
-      content:
-        application/json:
-          schema: {$ref: "#/components/schemas/V0Error"}
 
   schemas:
     Health:
@@ -878,7 +782,7 @@ components:
 
     Protocol:
       type: string
-      enum: [ssh, vnc, rdp, telnet, kubernetes]
+      enum: [ssh, vnc, rdp, kubernetes]
 
     Connection:
       type: object
@@ -919,7 +823,7 @@ components:
           properties:
             protocol:
               type: string
-              enum: [ssh, vnc, rdp, telnet]
+              enum: [ssh, vnc, rdp]
             target:
               type: string
               description: |
@@ -968,8 +872,8 @@ components:
         protocol: {$ref: "#/components/schemas/Protocol"}
         backend:
           type: string
-          enum: [ssh, vnc, rdp, kubernetes, guacd]
-          description: What serves the session, a native backend or the guacd bridge.
+          enum: [ssh, vnc, rdp, kubernetes]
+          description: What serves the session, `occamyd`'s backend for its protocol.
         class:
           type: string
           enum: [terminal, graphical]
@@ -1078,30 +982,6 @@ components:
         failed or its answer did not verify, or the provider cannot be
         reached.
       enum: [access_denied, sign_in_failed, unavailable]
-
-    V0LoginRequest:
-      type: object
-      required: [protocol, host, password]
-      properties:
-        protocol: {type: string}
-        host: {type: string}
-        username: {type: string}
-        password: {type: string}
-
-    V0Token:
-      type: object
-      required: [code, expire, token]
-      properties:
-        code: {type: integer, enum: [200]}
-        expire: {type: string, format: date-time}
-        token: {type: string}
-
-    V0Error:
-      type: object
-      required: [code, message]
-      properties:
-        code: {type: integer}
-        message: {type: string}
 
     DebugVars:
       type: object

@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"maps"
 	"net"
 	"net/netip"
 	"net/url"
@@ -50,9 +49,12 @@ const MinBcryptCost = bcrypt.DefaultCost
 
 // defaultPorts maps each protocol a connection may use to the port that a
 // target without one gets: for kubernetes, the API server's.
-var defaultPorts = map[string]string{"ssh": "22", "vnc": "5900", "rdp": "3389", "telnet": "23", "kubernetes": "443"}
+var defaultPorts = map[string]string{"ssh": "22", "vnc": "5900", "rdp": "3389", "kubernetes": "443"}
 
-const protocolList = "ssh, vnc, rdp, telnet or kubernetes"
+const protocolList = "ssh, vnc, rdp or kubernetes"
+
+// telnetRemoved explains a connection of telnet, which only guacd served.
+const telnetRemoved = "telnet was removed in v1.0.0-beta.2 with guacd, which served it: occamyd serves " + protocolList
 
 var (
 	idPattern     = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
@@ -168,7 +170,6 @@ func (f *File) validate(c *checker) {
 		f.Origins[i] = c.origin(fmt.Sprintf("origins[%d]", i), o)
 	}
 	f.Auth.validate(c)
-	f.validateGuacd(c)
 	f.validateConnections(c)
 	if f.AllowAdhocTargets && len(f.AdhocAllowlist) == 0 {
 		c.add("allow_adhoc_targets", "needs adhoc_allowlist: list the networks and hosts that ad-hoc targets may reach")
@@ -178,7 +179,6 @@ func (f *File) validate(c *checker) {
 			c.add(fmt.Sprintf("adhoc_allowlist[%d]", i), "%v", err)
 		}
 	}
-	f.validateAdhocBackends(c)
 	for _, l := range []struct {
 		path string
 		n    int
@@ -243,11 +243,9 @@ func (a *Auth) validate(c *checker) {
 	}
 
 	// occamyd has no default user, so a file that names no way in would
-	// serve a server nobody can use. legacy_v0 does not count: its login
-	// signs a target for anyone, and signs nobody in to API v1, so a file
-	// for v0 clients alone is refused too and has to name a way in.
+	// serve a server nobody can use.
 	if len(a.Users) == 0 && a.OIDC == nil && len(a.TrustedIssuers) == 0 {
-		c.add("auth", "nobody could sign in to API v1, and occamyd has no default user: list users in auth.users, whose hashes docs/configuration.md says how to make, or set auth.oidc or auth.trusted_issuers; v0 clients of legacy_v0 do not count, as the v0 login signs nobody in to API v1")
+		c.add("auth", "nobody could sign in to API v1, and occamyd has no default user: list users in auth.users, whose hashes docs/configuration.md says how to make, or set auth.oidc or auth.trusted_issuers")
 	}
 
 	users := map[string]int{}
@@ -311,48 +309,6 @@ func shortDuration(d time.Duration) string {
 	return s
 }
 
-func (f *File) validateGuacd(c *checker) {
-	if f.Guacd.Address == "" {
-		f.Guacd.Address = DefaultGuacdAddress
-	}
-	c.address("guacd.address", f.Guacd.Address, true)
-	for _, protocol := range slices.Sorted(maps.Keys(f.Guacd.Params)) {
-		p := "guacd.params." + protocol
-		if _, ok := defaultPorts[protocol]; !ok {
-			c.add(p, "unknown protocol %q: use %s", protocol, protocolList)
-		}
-		if protocol == "kubernetes" {
-			c.add(p, "guacd does not serve kubernetes: occamyd's native backend does, configured on each connection")
-			continue
-		}
-		for _, name := range slices.Sorted(maps.Keys(f.Guacd.Params[protocol])) {
-			switch {
-			case secretParam(name):
-				c.add(p+"."+name, "inline secrets are not allowed, so that the file can be committed: set credentials on each connection, with password_file, password_env, private_key_file or prompt: true")
-			case strings.EqualFold(name, "hostname") || strings.EqualFold(name, "port"):
-				c.add(p+"."+name, "set from each connection's target")
-			}
-		}
-	}
-}
-
-// secretParam reports whether a guacd parameter holds a secret, such as
-// password, sftp-password, gateway-password, passphrase or
-// sftp-private-key, in any case. A name that ends in -regex, such as
-// telnet's password-regex, holds the pattern of a prompt instead.
-func secretParam(name string) bool {
-	name = strings.ToLower(name)
-	if strings.HasSuffix(name, "-regex") {
-		return false
-	}
-	for _, s := range []string{"password", "passphrase", "private-key", "secret"} {
-		if strings.Contains(name, s) {
-			return true
-		}
-	}
-	return false
-}
-
 func (f *File) validateConnections(c *checker) {
 	users, groups := map[string]bool{}, map[string]bool{}
 	for _, u := range f.Auth.Users {
@@ -389,6 +345,8 @@ func (f *File) validateConnections(c *checker) {
 		switch {
 		case cn.Protocol == "":
 			c.add(p+".protocol", "required: %s", protocolList)
+		case cn.Protocol == "telnet":
+			c.add(p+".protocol", "%s", telnetRemoved)
 		case !known:
 			c.add(p+".protocol", "unknown protocol %q: use %s", cn.Protocol, protocolList)
 		}
@@ -403,12 +361,12 @@ func (f *File) validateConnections(c *checker) {
 		}
 		c.credentials(p+".credentials", cn.Protocol, cn.Credentials)
 		if known {
-			c.backend(p, cn)
 			c.hostKeys(p, cn)
 			c.connectionTLS(p+".tls", cn)
 			c.ard(p+".ard", cn)
 			c.security(p+".security", cn)
 			c.disableGFX(p+".disable_gfx", cn)
+			c.clipboard(p, cn)
 			c.kubernetes(p+".kubernetes", cn)
 		}
 		c.allow(p+".allow", cn.Allow, closed, users, groups)
@@ -528,45 +486,6 @@ func (c *checker) hostKeys(path string, cn *Connection) {
 	}
 }
 
-// backend checks a connection's backend, and fills in the protocol's
-// default if it has none.
-func (c *checker) backend(path string, cn *Connection) {
-	if cn.Backend == "" {
-		cn.Backend = DefaultBackend(cn.Protocol)
-		return
-	}
-	if p := backendProblem(cn.Protocol, cn.Backend); p != "" {
-		c.add(path+".backend", "%s", p)
-	}
-}
-
-// validateAdhocBackends checks adhoc_backends, and fills in the default
-// of each protocol it leaves out.
-func (f *File) validateAdhocBackends(c *checker) {
-	for _, protocol := range slices.Sorted(maps.Keys(f.AdhocBackends)) {
-		p := "adhoc_backends." + protocol
-		if _, ok := defaultPorts[protocol]; !ok {
-			c.add(p, "unknown protocol %q: use %s", protocol, protocolList)
-			continue
-		}
-		if !AdhocProtocol(protocol) {
-			c.add(p, "%s has no ad-hoc targets: configure a connection", protocol)
-			continue
-		}
-		if problem := backendProblem(protocol, f.AdhocBackends[protocol]); problem != "" {
-			c.add(p, "%s", problem)
-		}
-	}
-	if f.AdhocBackends == nil {
-		f.AdhocBackends = map[string]string{}
-	}
-	for protocol := range defaultPorts {
-		if f.AdhocBackends[protocol] == "" && AdhocProtocol(protocol) {
-			f.AdhocBackends[protocol] = DefaultBackend(protocol)
-		}
-	}
-}
-
 // AdhocProtocol reports whether an ad-hoc target may use protocol. A
 // kubernetes target is a namespace, a pod and a container on an API
 // server, with credentials that a user would have to bring, so it is a
@@ -580,30 +499,21 @@ func AdhocProtocol(protocol string) bool {
 // connection, or of a kubernetes connection's API server: pins replace
 // the roots that ca_file names, insecure_skip_verify replaces both, as
 // ssh's insecure_ignore_host_key replaces host_keys, and other
-// protocols have no tls. Only the native backends check a vnc or rdp
-// target's certificate, so such a connection through guacd has none
-// either: guacd would not check it as the file says. The native RDP
-// backend and a kubernetes connection always use TLS, so require
-// changes nothing there.
+// protocols have no tls. The RDP backend and a kubernetes connection
+// always use TLS, so require changes nothing there.
 func (c *checker) connectionTLS(path string, cn *Connection) {
 	t := cn.TLS
-	checkPin, name, hint := vnc.CheckPin, "VNC", ""
+	checkPin := vnc.CheckPin
 	switch cn.Protocol {
 	case "vnc":
 	case "rdp":
-		checkPin, name = rdp.CheckPin, "RDP"
-		hint = "; through guacd, guacd.params.rdp's ignore-cert and cert-fingerprints decide"
+		checkPin = rdp.CheckPin
 	case "kubernetes":
-		// Its backend is always native: backendProblem refuses guacd.
-		checkPin, name = kubernetes.CheckPin, ""
+		checkPin = kubernetes.CheckPin
 	default:
 		if t.set() {
 			c.add(path, "only vnc, rdp and kubernetes connections have tls")
 		}
-		return
-	}
-	if t.set() && name != "" && cn.Backend != BackendNative {
-		c.add(path, "only the native %s backend checks the certificate as tls says, and backend: %s would not: leave backend out, or set native%s", name, cn.Backend, hint)
 		return
 	}
 	if t.CAFile != "" && len(t.Pins) > 0 {
@@ -664,31 +574,25 @@ func (c *checker) kubernetes(path string, cn *Connection) {
 	}
 }
 
-// ard checks a connection's ard: only the native VNC backend speaks
-// Apple Remote Desktop authentication, and never while TLS is required,
-// since type 30 has no TLS.
+// ard checks a connection's ard: Apple Remote Desktop authentication
+// is for vnc alone, and never while TLS is required, since type 30 has
+// no TLS.
 func (c *checker) ard(path string, cn *Connection) {
 	switch {
 	case !cn.ARD:
 	case cn.Protocol != "vnc":
 		c.add(path, "only vnc connections have ard")
-	case cn.Backend != BackendNative:
-		c.add(path, "only the native VNC backend speaks Apple Remote Desktop authentication, and backend: %s does not: leave backend out, or set native", cn.Backend)
 	case cn.TLS.required():
 		c.add(path, "Apple Remote Desktop authentication runs without TLS, so it cannot be allowed while tls requires TLS (require, ca_file or pins)")
 	}
 }
 
-// security checks a connection's security mode: only the native RDP
-// backend reads it, since guacd takes its mode from
-// guacd.params.rdp.security.
+// security checks a connection's security mode, which rdp alone has.
 func (c *checker) security(path string, cn *Connection) {
 	switch {
 	case cn.Security == "":
 	case cn.Protocol != "rdp":
 		c.add(path, "only rdp connections have security")
-	case cn.Backend != BackendNative:
-		c.add(path, "only the native RDP backend reads security, and backend: %s does not: leave backend out, or set native; through guacd, guacd.params.rdp.security sets it", cn.Backend)
 	default:
 		switch cn.Security {
 		case rdpb.SecurityNLA, rdpb.SecurityNLAExt, rdpb.SecurityTLS, rdpb.SecurityAny:
@@ -698,16 +602,26 @@ func (c *checker) security(path string, cn *Connection) {
 	}
 }
 
-// disableGFX checks a connection's disable_gfx: only the native RDP
-// backend reads it, since guacd takes it from
-// guacd.params.rdp.disable-gfx.
+// disableGFX checks a connection's disable_gfx, which rdp alone has.
 func (c *checker) disableGFX(path string, cn *Connection) {
-	switch {
-	case !cn.DisableGFX:
-	case cn.Protocol != "rdp":
+	if cn.DisableGFX && cn.Protocol != "rdp" {
 		c.add(path, "only rdp connections have disable_gfx")
-	case cn.Backend != BackendNative:
-		c.add(path, "only the native RDP backend reads disable_gfx, and backend: %s does not: leave backend out, or set native; through guacd, guacd.params.rdp.disable-gfx sets it", cn.Backend)
+	}
+}
+
+// clipboard checks a connection's disable_copy and disable_paste, which
+// vnc and rdp have. A terminal's text is drawn by the client, which
+// copies it itself, and a paste reaches the terminal as typing, so
+// neither key could close a terminal's clipboard.
+func (c *checker) clipboard(path string, cn *Connection) {
+	if cn.Protocol == "vnc" || cn.Protocol == "rdp" {
+		return
+	}
+	if cn.DisableCopy {
+		c.add(path+".disable_copy", "only vnc and rdp connections have disable_copy: a terminal's text is drawn by the client, which copies it itself")
+	}
+	if cn.DisablePaste {
+		c.add(path+".disable_paste", "only vnc and rdp connections have disable_paste: a paste reaches a terminal as typing")
 	}
 }
 
