@@ -46,6 +46,11 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   Deploy adds Windows hosts and Kubernetes, and debugging is organised
   by what users see ([docs/deploy.md](docs/deploy.md#how-a-deployment-fits-together),
   [docs/debugging.md](docs/debugging.md#where-to-look)).
+- The web client and Occamy for macOS pages follow what you do, from
+  signing in to sharing a session and what each ending means, with a
+  screenshot of each of the web client's screens in light and dark
+  ([docs/web-client.md](docs/web-client.md#how-the-web-client-works),
+  [docs/macos-app.md](docs/macos-app.md#how-the-app-works)).
 - The benchmark report calls its estimate the *improvement*: the
   baseline's value divided by the candidate's, so that above 1× the
   candidate is better. The column in `comparisons.csv` that was
@@ -106,7 +111,7 @@ the API and the protocol may change before 1.0.0.
   hardened runtime, `make swift-dmg` a disk image of it, and
   `make swift-notarize` signs both with a Developer ID and has Apple
   notarize the image
-  ([docs/macos-app.md](docs/macos-app.md#building-it)).
+  ([docs/macos-app.md](docs/macos-app.md#build-it-from-source)).
 - `disable_copy` and `disable_paste` on a vnc or rdp connection keep
   the remote's clipboard from the viewers, or theirs from the remote,
   as guacd's `disable-copy` and `disable-paste` did

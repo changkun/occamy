@@ -200,7 +200,7 @@ scales the desktop to fit.
 
 The clipboard depends on the connection, the browser and the remote,
 and the web client's **Clipboard** panel says which of them held the
-text back ([The clipboard](web-client.md#the-clipboard)).
+text back ([Copy and paste](web-client.md#copy-and-paste)).
 
 From the remote to the user:
 
