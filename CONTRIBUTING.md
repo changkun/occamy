@@ -98,6 +98,20 @@ as `-beta.1` when needed. To cut one:
    `SHA256SUMS`, provenance attestations, and the changelog section as
    release notes. It fails if `CHANGELOG.md` has no entries for the
    version.
+4. On a Mac with the Developer ID, build Occamy for macOS from the tag,
+   since its version comes from `git describe`, have Apple notarize it,
+   and add the disk image to the release:
+
+   ```sh
+   git worktree add --detach ../occamy-release vMAJOR.MINOR.PATCH
+   cd ../occamy-release
+   make swift-notarize DEVELOPER_ID="Developer ID Application: …" NOTARY_PROFILE=…
+   gh release upload vMAJOR.MINOR.PATCH client/occamy-swift/build/app/Occamy-MAJOR.MINOR.PATCH.dmg
+   ```
+
+   `NOTARY_PROFILE` names a profile that `xcrun notarytool
+   store-credentials` saved. The disk image is not in `SHA256SUMS`: its
+   Developer ID signature and Apple's notarization vouch for it.
 
 Run the workflow by hand (Actions, Release, Run workflow) for a dry run
 that builds everything and publishes nothing. Pull requests that change

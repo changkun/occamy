@@ -10,7 +10,7 @@ affects:
   - .github/workflows/dockerimage.yml
 effort: large
 created: 2026-10-29
-updated: 2026-11-03
+updated: 2026-11-04
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -286,6 +286,10 @@ Open:
   release. The owner has an Apple developer account and signs once the
   app is ready; the Mac App Store's sandbox would need the app's
   network access and Keychain use reviewed, which can come later.)
+  Decided 2026-11-04: beta.2's disk image, signed with the owner's
+  Developer ID and notarized, is attached to its release. It is built
+  on the tag by hand (CONTRIBUTING.md's release steps), since signing
+  needs the owner's key and the version comes from `git describe`.
 - **Gio:** the `gio` and `gio-client` branches stay.
   [guacd-bridge](008-native-architecture/guacd-bridge.md) may reuse their
   `internal/guac`. (Answered: the bridge reuses `internal/guacamole`,
@@ -308,9 +312,12 @@ For beta.2 (2026-11-03):
       an ad-hoc address, against the demo stack.
 - [ ] A session window scales, goes full screen, carries the
       clipboard both ways, copies a share link, and answers prompts.
-- [ ] `make` builds the app, and with the owner's Developer ID a
-      notarized DMG. (`make swift-app` and `make swift-dmg` build them,
-      signed ad hoc; notarizing waits for the owner's Developer ID.)
+- [x] `make` builds the app, and with the owner's Developer ID a
+      notarized DMG. (2026-11-04: `make swift-notarize` on
+      v1.0.0-beta.2; Apple's notary service accepted it, the ticket is
+      stapled, and Gatekeeper reports "Notarized Developer ID". The
+      pre-release version, `1.0.0-beta.2`, passed as
+      `CFBundleShortVersionString`.)
 - [x] CI builds the archive, the package and the app, signed ad hoc,
       and checks the app's architectures and its oldest macOS.
 

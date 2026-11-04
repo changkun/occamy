@@ -99,7 +99,9 @@ sharing, the clipboard and resizing.
 Each [release](https://github.com/changkun/occamy/releases) publishes a
 multi-arch image, `ghcr.io/changkun/occamy:<version>`, and `occamyd`
 archives for Linux, macOS and Windows on amd64 and arm64, with
-`SHA256SUMS` and build provenance attestations.
+`SHA256SUMS` and build provenance attestations. Occamy for macOS comes
+as a disk image, `Occamy-<version>.dmg`, signed with a Developer ID and
+notarized by Apple ([docs/macos-app.md](docs/macos-app.md#installing-it)).
 
 Write a configuration file that lists your users and your connections:
 

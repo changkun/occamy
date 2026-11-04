@@ -82,7 +82,7 @@ Clients that speak to `occamyd`.
 |------|--------|-------------|
 | [007-native-gio-client.md](007-native-gio-client.md) | Archived | Retired in favour of 010 |
 | [009-react-web-client.md](009-react-web-client.md) | In testing: protocol client core and React shell built, served from a v1 file with `web_client`; the Vue app and `occamy.js` removed; a browser job in CI to come | A React shell on the TypeScript protocol v1 core (`src/protocol`) and API v1, replacing the Vue app and `occamy.js` |
-| [010-native-swift-client.md](010-native-swift-client.md) | In progress; part of beta.2 (2026-11-03): the Go core's C export layer built (#192), and OccamyKit | A SwiftUI app for macOS 26, as simple as VNC Viewer, linking the Go client core as a static library, on protocol v1; signed and notarized |
+| [010-native-swift-client.md](010-native-swift-client.md) | In progress; released in beta.2 (2026-11-04): the Go core's C export layer (#192), OccamyKit (#193), the app (#198, #202), and its bundle, signing and notarization (#199), with a notarized disk image on the release | A SwiftUI app for macOS 26, as simple as VNC Viewer, linking the Go client core as a static library, on protocol v1; signed and notarized |
 
 ## Dependency graph
 
