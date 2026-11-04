@@ -52,7 +52,9 @@ struct SessionView: View {
     enum Phase {
         case connecting
         case open(SessionModel)
-        case failed(String, signIn: Bool)
+        /// failed says why in a sentence, and gives the technical
+        /// detail, if any, for a bug report.
+        case failed(String, technical: String = "", signIn: Bool)
     }
 
     private var server: Server? { store.server(request.server) }
@@ -87,11 +89,17 @@ struct SessionView: View {
         case .connecting:
             ProgressView("Connecting to \(request.name)…")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        case let .failed(message, signIn):
+        case let .failed(message, technical, signIn):
             ContentUnavailableView {
                 Label("Could Not Connect", systemImage: "exclamationmark.triangle")
             } description: {
                 Text(message)
+                if !technical.isEmpty {
+                    Text(technical)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
             } actions: {
                 if signIn {
                     Button("Sign In…") { signInAgain() }
@@ -343,8 +351,15 @@ struct SessionView: View {
         } catch is SignInNeeded {
             phase = .failed("Sign in to \(server.name) again.", signIn: true)
         } catch let e as DialError {
-            let ending = Ending(End(code: e.closeCode, reason: e.closeCode == 0 ? "" : e.message, error: e.message))
-            phase = .failed(e.closeCode == 0 ? e.message : ending.detail, signIn: ending.signIn)
+            if e.closeCode == 0 {
+                // No close code: the server wasn't reached, or the
+                // connection broke before it answered.
+                phase = .failed("Occamy couldn't reach \(server.name). Check your network connection, or try again later.",
+                                technical: e.message, signIn: false)
+            } else {
+                let ending = Ending(End(code: e.closeCode, reason: e.closeReason, error: e.message))
+                phase = .failed(ending.detail, technical: ending.technical, signIn: ending.signIn)
+            }
         } catch let e as APIError {
             phase = .failed(e.localizedDescription, signIn: e.signIn)
         } catch is CancellationError {

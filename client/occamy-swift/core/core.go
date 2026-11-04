@@ -131,6 +131,7 @@ func occamy_dial(url, token *C.char, opts *C.occamy_options, timeoutMS C.int32_t
 			var ce *client.CloseError
 			if errors.As(err, &ce) {
 				cerr.close_code = C.int32_t(ce.Code)
+				cerr.close_reason = cString(ce.Reason)
 			}
 			var re *client.RefusedError
 			if errors.As(err, &re) {
@@ -171,6 +172,7 @@ func occamy_dial_error_free(e *C.occamy_dial_error) {
 	if e == nil {
 		return
 	}
+	C.free(unsafe.Pointer(e.close_reason))
 	C.free(unsafe.Pointer(e.message))
 	C.free(unsafe.Pointer(e.session_id))
 	*e = C.occamy_dial_error{}

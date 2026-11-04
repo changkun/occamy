@@ -51,6 +51,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   a second signal stops occamyd at once` first and `occamyd has
   stopped` last.
 
+### Fixed
+
+- Occamy for macOS says why it couldn't open a session in a sentence,
+  with the technical detail below it, instead of the client library's
+  error. When the server can't reach the remote, the app says so,
+  where it showed `client: closed by the server: backend-failed:
+  failed`: the core now passes the server's close reason on its own.
+- Occamy for macOS treats close code 1011 as the server's internal
+  error, as the web client does, not as a bug in the app.
+
 ## [1.0.0-beta.2] - 2026-11-04
 
 Occamy 1.0.0-beta.2 serves every session itself. guacd, the v0 routes

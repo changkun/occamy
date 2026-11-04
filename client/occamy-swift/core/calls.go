@@ -51,11 +51,12 @@ type goOptions struct {
 type handle = C.occamy_session
 
 type dialResult struct {
-	Handle    handle
-	Result    int
-	CloseCode int
-	Message   string
-	SessionID string
+	Handle      handle
+	Result      int
+	CloseCode   int
+	CloseReason string
+	Message     string
+	SessionID   string
 }
 
 func callDial(url, token string, o *goOptions, timeoutMS int) dialResult {
@@ -82,6 +83,7 @@ func callDial(url, token string, o *goOptions, timeoutMS int) dialResult {
 	r := dialResult{Result: int(occamy_dial(cu, ct, opts, C.int32_t(timeoutMS), out, cerr))}
 	r.Handle = *out
 	r.CloseCode = int(cerr.close_code)
+	r.CloseReason = C.GoString(cerr.close_reason)
 	r.Message = C.GoString(cerr.message)
 	r.SessionID = C.GoString(cerr.session_id)
 	occamy_dial_error_free(cerr)
