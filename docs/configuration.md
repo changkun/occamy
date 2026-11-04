@@ -53,9 +53,7 @@ start `occamyd`: it refuses the placeholder. The `conf.yaml` that the
 image and the release archives ship is a version 1 file like this one,
 with no users or connections, for you to fill in.
 
-The file has three parts, which `occamyd` applies in turn to every
-request: the listener, sign-in in `auth`, and the `connections` that
-users open by their IDs.
+`occamyd` applies the file's three parts in turn to every request:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/configuration-overview-dark.svg">
@@ -76,8 +74,7 @@ use instead.
 `occamyd` reads the file once, when it starts, and nothing reloads it,
 so a change takes a restart, which ends every session. Users stay
 signed in for as long as the signing key stays the same. What the file
-points to is read when it's used, so you can change some of it without
-a restart:
+points to is read when it's used:
 
 | What | When `occamyd` reads it |
 |------|-------------------------|
@@ -849,9 +846,11 @@ between can strip VeNCrypt from the server's offer and capture the VNC
 Authentication response, from which an offline search can recover a
 weak password: reach targets across networks you don't trust through a
 connection whose `tls` requires TLS. An ad-hoc RDP target signs in with
-NLA alone and always asks for GFX, so a server with a self-signed
-certificate, an xrdp server, or a [Windows host](#windows-hosts) needs
-a connection.
+NLA alone. Without a `username` in the request, the user is asked for
+the user name and domain too, and with one, `DOMAIN\user` names the
+domain. It always asks for GFX, so a
+server with a self-signed certificate, an xrdp server, or a
+[Windows host](#windows-hosts) needs a connection.
 
 ### Limit sessions, viewers and shares
 
@@ -990,7 +989,8 @@ load BBR and check which one the connections use.
 | `auth.trusted_issuers` | list of issuers | none | [Third parties whose tokens `occamyd` accepts](#tokens-from-a-trusted-issuer) |
 
 Set at least one of `auth.users`, `auth.oidc` and
-`auth.trusted_issuers`.
+`auth.trusted_issuers`. Without them, nobody could sign in, and
+`occamyd` refuses to start.
 
 #### `auth.users`
 
