@@ -1,13 +1,13 @@
 # Refinement measurement
 
-The [graphics pipeline](../../specs/008-native-architecture/graphics-pipeline.md)
+The [graphics pipeline](../graphics-pipeline.md)
 sends a tile in motion at a low quality, and lossy if it has 17 to 256
 colours. Once the tile has been still for a while, it sends it again at
 its final quality: exact if it has up to 256 colours, and at the quality
 SSIM picks if it has more. A still photographic tile goes at that
 quality at once. This page measures what that saves, what it costs, and
 how it treats input. It uses the frames recorded from the bench desktop
-that the [codec measurement](./codecs.md) used.
+that the [codec measurement](../../../docs/benchmarks/codecs.md) used.
 
 ## The answers
 
@@ -123,7 +123,7 @@ searched in steps of 3 from the pacer's lowest quality to its highest
 
 **The corpus** is the codec measurement's: frames of the bench desktop
 at 1024×768, recorded over VNC by `make corpus` and described in
-[bench/testdata/corpus](../../bench/testdata/corpus/README.md). A scene
+[bench/testdata/corpus](../../../bench/testdata/corpus/README.md). A scene
 is a viewer that has its first frame and is sent each of the others in
 turn:
 
@@ -158,7 +158,7 @@ messages of that are the refinement columns. Their longest encode of one
 message is what an input waits for the writer.
 
 It ran three times on 2026-10-31 from 09:02 to 09:04 UTC, on the Apple
-M5 Pro (18 cores) of the [baselines](../benchmarks.md), with Go 1.27.1
+M5 Pro (18 cores) of the [baselines](../../../docs/benchmarks.md), with Go 1.27.1
 on arm64. The host's load average, logged every 5 seconds in
 [refinement-load.log](./refinement-load.log), stayed between 8.0 and
 12.7 over a minute, from other sessions' tests and a podman VM. Each

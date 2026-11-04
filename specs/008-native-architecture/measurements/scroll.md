@@ -1,10 +1,10 @@
 # Scroll detection measurement
 
-The [graphics pipeline](../../specs/008-native-architecture/graphics-pipeline.md)
+The [graphics pipeline](../graphics-pipeline.md)
 looks for scrolls in what changed and sends a `copy-rect` for them, with
 tiles only for what the copy does not complete. This page measures what
 that saves and what it costs, on the frames recorded from the bench
-desktop that the [codec measurement](./codecs.md) used.
+desktop that the [codec measurement](../../../docs/benchmarks/codecs.md) used.
 
 ## The answers
 
@@ -107,7 +107,7 @@ the copy keeps the better pixels for a twentieth of the bytes.
 
 **The corpus** is the codec measurement's: frames of the bench desktop at
 1024×768, recorded over VNC by `make corpus` and described in
-[bench/testdata/corpus](../../bench/testdata/corpus/README.md). A scene
+[bench/testdata/corpus](../../../bench/testdata/corpus/README.md). A scene
 is a viewer that has its first frame and is sent each of the others in
 turn: the three consecutive updates of the scrolling text; the same with
 the middle one skipped; the three of the dragged window; the two of the
@@ -128,7 +128,7 @@ divided by their number. The bytes are those of the frame's `tile` and
 `copy-rect` messages. Everything runs on one core (`GOMAXPROCS=1`).
 
 It ran three times on 2026-10-31 from 02:03 to 02:06 UTC, on the Apple
-M5 Pro (18 cores) of the [baselines](../benchmarks.md), with Go 1.27.1
+M5 Pro (18 cores) of the [baselines](../../../docs/benchmarks.md), with Go 1.27.1
 on arm64. The host's load average, logged every 5 seconds in
 [scroll-load.log](./scroll-load.log), stayed between 2.9 and 4.5 over a
 minute, with other sessions' work on the host. The table is the median
