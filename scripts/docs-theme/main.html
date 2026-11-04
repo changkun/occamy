@@ -1,0 +1,27 @@
+{#
+  Copyright 2026 Changkun Ou. All rights reserved.
+  Use of this source code is governed by a MIT
+  license that can be found in the LICENSE file.
+
+  The website's colours, the logo's: its deep violet for the header, and
+  its turquoise for accents and, on the dark scheme, links.
+#}
+{% extends "base.html" %}
+{% block styles %}
+  {{ super() }}
+  <style>
+    :root {
+      --md-primary-fg-color: #3b0f86;
+      --md-primary-fg-color--light: #5a2bb0;
+      --md-primary-fg-color--dark: #230154;
+      --md-accent-fg-color: #2ba9dc;
+    }
+    [data-md-color-scheme="default"] {
+      --md-typeset-a-color: #5a2bb0;
+    }
+    [data-md-color-scheme="slate"] {
+      --md-typeset-a-color: #41e4c4;
+      --md-accent-fg-color: #41e4c4;
+    }
+  </style>
+{% endblock %}

@@ -35,3 +35,5 @@
 /bench-essential.json
 /bench-realtime-1.json
 __pycache__/
+# the website, as mkdocs build makes it (mkdocs.yml)
+/_site/

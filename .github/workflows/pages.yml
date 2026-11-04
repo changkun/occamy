@@ -1,0 +1,66 @@
+name: Pages
+
+# The website, https://changkun.github.io/occamy/: the README and docs/,
+# built with MkDocs (mkdocs.yml). A pull request that touches them builds
+# the site with --strict, so a link or an anchor that does not resolve
+# fails it; master publishes it to GitHub Pages.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - README.md
+      - docs/**
+      - mkdocs.yml
+      - scripts/docs_site.py
+      - scripts/docs-requirements.txt
+      - scripts/docs-theme/**
+      - .github/workflows/pages.yml
+  pull_request:
+    paths:
+      - README.md
+      - docs/**
+      - mkdocs.yml
+      - scripts/docs_site.py
+      - scripts/docs-requirements.txt
+      - scripts/docs-theme/**
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v7
+      with:
+        python-version: "3.13"
+    - name: Install MkDocs
+      run: pip install -r scripts/docs-requirements.txt
+    - name: Build the site
+      run: mkdocs build --strict
+    - uses: actions/upload-pages-artifact@v5
+      if: github.event_name != 'pull_request'
+      with:
+        path: _site
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/master'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+    - id: deploy
+      uses: actions/deploy-pages@v5
