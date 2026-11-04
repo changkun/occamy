@@ -60,7 +60,7 @@ the release archives ship is a version 1 file to fill in.
 |-----|---------|---------|
 | `version` | required | Always `1` |
 | `listen` | `:5636` | The address of the API, the streams, the web client and `/healthz`, as `host:port` |
-| `tls.cert`, `tls.key` | unset | A certificate and its key, in PEM. With both, `occamyd` serves HTTPS |
+| `tls.cert`, `tls.key` | unset | A certificate and its key, in PEM, with which `occamyd` serves HTTPS |
 | `web_client` | unset | The directory of the built web client, which `occamyd` serves under `/static/` |
 | `origins` | none | Other origins whose web pages may open streams |
 | `congestion_control` | `bbr` | The TCP congestion control of the listener's connections, on Linux |
@@ -99,10 +99,11 @@ under `/debug/pprof/`, without authentication
 interface, such as `localhost:6060`. `occamyd` warns at start when it is
 not. It needs a port of its own: `occamyd` refuses a debug address that
 could take connections on `listen`'s port. Set `debug.address` or
-`debug.address_env`, not both. With `debug.address_env`, the listener
-stays off while the variable is unset or empty, and `occamyd` logs
-`debug listener off:` with the variable's name, so that one file serves
-with the listener and without it.
+`debug.address_env`, not both. With `debug.address_env`, one file
+serves with the listener and without it, since the listener stays off
+while the variable is unset or empty. `occamyd` then logs
+`debug listener off:` with the variable's name, so that a misspelt or
+unexported variable shows.
 
 ### TCP congestion control
 
@@ -216,6 +217,8 @@ auth:
     groups_claim: groups
 ```
 
+The keys of `auth.oidc`:
+
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `issuer` | required | The provider's issuer URL, exactly as its discovery document names it, trailing slash included |
@@ -230,8 +233,8 @@ auth:
 | `link_static_users` | `false` | Let a user whose name is a static user's sign in as that static user |
 
 `issuer` and `redirect_url` use https, or http on localhost, and so does
-every return URL that is not an app's scheme. When `redirect_url` is https, the sign-in cookie is `Secure`,
-whoever terminates TLS.
+every return URL that is not an app's scheme. When `redirect_url` is
+https, the sign-in cookie is `Secure`, whoever terminates TLS.
 
 **Return URLs.** After a sign-in, `occamyd` sends the browser back to a
 return URL with a one-time code, or an error, in the fragment. A client
@@ -278,9 +281,10 @@ users cannot choose, such as `sub` or a verified `email`.
 
 **The provider.** `occamyd` discovers the provider in the background at
 start, so a provider that is down does not keep `occamyd` from starting.
-OIDC sign-ins then fail, the next sign-in after 10 seconds tries again,
-and static users sign in as usual. Each request to the provider times out
-after 10 seconds. `occamyd` also:
+Until it answers, OIDC sign-ins fail, and static users sign in as usual.
+After a failed discovery, the first sign-in 10 seconds later tries
+again. Each request to the provider times out after 10 seconds.
+`occamyd` also:
 
 - accepts ID tokens signed with RS, ES or PS at 256, 384 or 512 bits, or
   EdDSA, and refuses `none` and HMAC whatever the provider advertises;
@@ -380,9 +384,9 @@ The issuer's tokens are JWTs:
 
 A session token joins only a session that one of the issuer's own users
 opened, or, with `link_static_users`, a static user. An `owner` token
-works only when its `sub` is the session's owner. A trusted issuer may
-not set `uiss`, and
-its session tokens may not carry `idp`: such tokens are refused.
+works only when its `sub` is the session's owner. `occamyd` refuses a
+trusted issuer's token that sets `uiss`, and its session tokens that
+carry `idp`.
 
 A `sub` that equals a static user's name, in any case or Unicode normal
 form, is refused with `invalid_token`, or on a stream with a `close` of
@@ -512,8 +516,8 @@ certificate's fingerprint, ready for `pins`.
 | `disable_paste` | `false` | Keep the viewers' clipboard from the remote: text copied on a viewer's side does not reach it |
 
 A viewer can still type the text. Both keys are for vnc and rdp only.
-In a terminal, the client draws the text
-and copies it itself, and a paste reaches the terminal as typing.
+In a terminal, the client draws the text and copies it itself, and a
+paste reaches the terminal as typing.
 
 ## Backends
 
@@ -785,7 +789,7 @@ not a connection, within `adhoc_allowlist`.
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `allow_adhoc_targets` | `false` | Let signed-in users connect to targets that are not connections |
-| `adhoc_allowlist` | none | Where ad-hoc targets may point, and on which ports. Required with `allow_adhoc_targets` |
+| `adhoc_allowlist` | none | Where ad-hoc targets may point, and on which ports, required with `allow_adhoc_targets` |
 
 An entry of `adhoc_allowlist` is one of these, with an optional `:port`
 or `:first-last` after it:
@@ -832,17 +836,16 @@ names. `occamyd` always asks the user for the credentials.
   `insecure_ignore_host_key: true`, as a connection does.
 - **vnc.** If the server offers VeNCrypt, `occamyd` checks its
   certificate against the system's roots and the name or address the
-  target was given. An
-  ad-hoc target cannot require TLS, though. An attacker in between can
+  target was given. An ad-hoc target cannot require TLS, though. An
+  attacker in between can
   strip VeNCrypt from the server's offer and capture the VNC
   Authentication response, from which an offline search can recover a
   weak password. Reach targets across networks you do not trust through
   a connection whose `tls` requires TLS.
 - **rdp.** `occamyd` checks the certificate against the system's roots
   and the name or address the target was given, and signs in with NLA
-  alone. The user is asked
-  for the password, and for the username and domain when the request
-  has no `username`. A request's `username` of the form `DOMAIN\user`
+  alone. The user is asked for the password, and for the username and
+  domain when the request has no `username`. A request's `username` of the form `DOMAIN\user`
   names the domain. An ad-hoc rdp target always asks for GFX. A server
   with a self-signed certificate, an xrdp server, or a
   [Windows host](#windows-hosts) needs a connection.
@@ -857,9 +860,9 @@ names. `occamyd` always asks the user for the credentials.
 | `limits.shares_per_session` | `100` | Shares of a session that have not expired |
 | `limits.decode_cores` | half of `GOMAXPROCS`, at least 1 | Cores of decoding that all RDP sessions share |
 
-`0` means the default. Each user counts apart, and a trusted issuer's
-users count apart from `occamyd`'s own. `limits.sessions` holds even
-when a trusted issuer names new users without end.
+`0` means the default. A user counts by name and source, so a trusted
+issuer's users count apart from `occamyd`'s own. `limits.sessions` holds
+even when a trusted issuer names new users without end.
 [The HTTP API](api.md#limits) lists the answer at each limit.
 
 **Decoding.** An RDP session may take about a core decoding what its
@@ -914,7 +917,7 @@ auth:
   signing_key_file: /var/lib/occamy/signing.key
   users:
     - name: alice
-      password_hash: "$2y$12$…"
+      password_hash: "$2y$12$…" # a whole hash
 connections:
   - id: desktop
     protocol: vnc
