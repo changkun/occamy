@@ -164,16 +164,16 @@ desktop itself, and a fresh one starts.
 While a session is open, try what the web client does:
 
 - **Share it.** Click **Share**, create a link, and open it in a private
-  window. See [Sharing](web-client.md#sharing).
+  window. See [Share a session](web-client.md#share-a-session).
 - **Copy and paste.** In the desktop's terminal, select some text and
   press Ctrl+Shift+C. Click **Clipboard** to see it. Type other text in
   the box, click **Send**, and press Ctrl+Shift+V in the terminal. See
-  [The clipboard](web-client.md#the-clipboard).
+  [Copy and paste](web-client.md#copy-and-paste).
 - **Resize.** Resize the window, or click **Full screen**. The desktop
   follows, and on **SSH** the terminal gains rows and columns: run
   `stty size` before and after.
 - **Come back.** Reload the page and sign in again within a minute. You
-  return to the same session. See [Leaving and coming back](web-client.md#leaving-and-coming-back).
+  return to the same session. See [Leave and come back](web-client.md#leave-and-come-back).
 
 ## 5. Kubernetes
 
