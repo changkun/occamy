@@ -2,9 +2,8 @@
 
 Occamy is measured against Guacamole on the same remote desktops and
 terminals, over the same emulated networks, on one host. This page
-shows how much sooner Occamy shows what you do and how much less it
-sends, how to read the figures, and how everything was measured, so
-that you can judge the results for your own use.
+shows the results, how to read them, and how they were measured, so
+that you can judge them for your own use.
 
 ## Occamy against Guacamole
 
@@ -21,29 +20,22 @@ round trip and 20 Mbit/s:
 | Key during motion, over VNC and RDP | Presses keys while the whole screen animates at 30 frames a second, as a video or a game would | How long each key's effect takes to show |
 | Full-screen photo, over VNC and RDP | Shows a photograph that fills the screen | How much data the photograph takes to reach the client |
 
-For each key, the latency is the time from the key to the first frame
-on the client that shows its effect. The tables give the *95th
-percentile*: 95 of every 100 keys show at least this soon, so it
-describes the slow keys that you notice, not the typical one.
+A key's *latency* runs to the first frame that shows its effect
+([The metrics](#the-metrics)). The tables give its *95th percentile*:
+95 of every 100 keys show at least this soon, so it describes the slow
+keys that you notice, not the typical one.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/essential/factors-guacamole-to-occamy-dark.svg">
   <img alt="Occamy's improvement over Guacamole in each scenario, on a log axis from 1× to 50×, with 95% intervals, in two panels: no added delay, and 50 ms and 20 Mbit/s. With no delay, typing over SSH is near 1.5×, a key press and a key during motion over VNC and RDP between 2× and 3.5×, the photograph near 20×, and long output near 47×. At 50 ms, typing is near 1×, a key press near 1.2×, a key during motion near 2×, long output near 9×, and the photograph near 20×. A dashed line marks the target of 10×." src="benchmarks/essential/factors-guacamole-to-occamy.svg">
 </picture>
 
-Each dot shows Occamy's *improvement* over Guacamole in one scenario:
-Guacamole's latency, time or data divided by Occamy's. An improvement
-of 3× means that Occamy needs a third of what Guacamole needs. The line
-through each dot is its 95% interval, the range in which the true
-improvement lies with 95% confidence. The axis is logarithmic, so each
-doubling takes the same distance: 1× to 2× is as far as 10× to 20×. Anything to the right of
-the solid line at 1× is better than Guacamole, and the dashed line at
-10× is Occamy's [target](#targets).
-
-Fourteen of the 16 differences are significant: they are too large to
-be chance, even allowing for 16 comparisons at once. The two that
-aren't are typing over SSH, where both servers are fast: they show a
-character within 2.5 ms with no delay, and within 56 ms at 50 ms.
+Each dot shows Occamy's *improvement* over Guacamole in one scenario,
+Guacamole's latency, time or data divided by Occamy's, so that 3×
+means a third of what Guacamole needs. Its line is the 95% interval,
+in which the true improvement lies with 95% confidence. Right of the
+solid line at 1× is better than Guacamole, and the dashed line at 10×
+is Occamy's [target](#targets).
 
 **A key's latency, 95th percentile, in ms**
 
@@ -79,33 +71,31 @@ character within 2.5 ms with no delay, and within 56 ms at 50 ms.
 Each value is the median of 6 runs, with its 95% interval in brackets.
 *p (Holm)* is the probability of a difference at least this large if
 the two servers were the same, corrected for the 16 comparisons with
-Holm's method; below 0.05, the difference is significant. With 6 runs
-a side, the smallest p-value the exact test can give is 0.0022, and
-the correction over 16 tests raises it to 0.0346.
+Holm's method. Below 0.05, a difference is significant, too large to be
+chance, as 14 of the 16 are. The two that aren't are typing over SSH,
+where both servers show a character within 2.5 ms with no delay, and
+within 56 ms at 50 ms. With 6 runs a side, the exact test's smallest
+p-value is 0.0022, which the correction raises to 0.0346.
 
 ### What the results show
 
-- **A key shows sooner.** On a still desktop, a key's effect shows
-  within 4.6 ms over VNC and 8.1 ms over RDP at the 95th percentile,
-  where Guacamole takes 16.4 and 20.6 ms. During full-screen motion it
-  shows within 49 and 67 ms, where Guacamole takes 155 and 150 ms. With
-  a 50 ms round trip the network takes most of the time, and Occamy
-  still shows a key within 58 and 60 ms on a still desktop, compared
-  with 69 and 71 ms, and within 93 and 117 ms during motion, compared
-  with 214 and 226 ms.
-- **Long output finishes at once.** `seq 1 100000` over SSH finishes
-  in 20 ms instead of 930 ms, because Occamy sends the terminal's last
-  screen instead of every line that scrolled past.
-- **A photograph takes a twentieth of the data.** Occamy sends it in
-  108 to 122 KiB instead of 2.1 to 2.2 MiB, because it sends
-  photographs as WebP or JPEG, where Guacamole sent most of this one as
-  PNG.
-- **Motion costs less.** During full-screen motion, Occamy sends 7.7 to
-  8.0 KiB a frame where Guacamole sends 46 to 66 KiB, and its server
-  spends 12 to 16 ms of CPU on a frame where Guacamole's spends 47 to
-  59 ms. Over VNC, you see 29 of the scene's 30 frames a second with
-  Occamy and 25 with Guacamole. Over RDP, both show about 24, the RDP
-  server's own rate.
+- **A key shows sooner,** most during full-screen motion: within 49 ms
+  over VNC and 67 ms over RDP, where Guacamole takes 155 and 150 ms.
+  With a 50 ms round trip, the network takes most of the time.
+- **Long output finishes at once:** in 20 ms instead of 930 ms, because
+  Occamy sends the terminal's last screen instead of every line that
+  scrolled past.
+- **A photograph takes a twentieth of the data:** 108 to 122 KiB
+  instead of 2.1 to 2.2 MiB, because Occamy sends photographs as WebP
+  or JPEG, where Guacamole sent most of this one as PNG.
+- **Motion costs less,** in data and in the server's CPU:
+
+| During full-screen motion | Guacamole | Occamy |
+|---|---:|---:|
+| Data to the client a frame | 46 to 66 KiB | 7.7 to 8.0 KiB |
+| Server CPU a frame | 47 to 59 ms | 12 to 16 ms |
+| Scene frames shown a second over VNC, of 30 | 25 | 29 |
+| Scene frames shown a second over RDP, of 30, at the RDP server's own rate | about 24 | about 24 |
 
 [Codecs](benchmarks/codecs.md) explains how Occamy encodes a frame,
 which is where most of these differences come from.
@@ -115,11 +105,6 @@ which is where most of these differences come from.
   <img alt="Bar charts of a key's latency at the 95th percentile, Guacamole in blue beside Occamy in orange, for typing over SSH and for a key press and a key during motion over VNC and RDP, on a log axis, in two panels: no added delay, and 50 ms and 20 Mbit/s. Occamy's bar is lower in every scenario, most during motion, and the two are close for typing at 50 ms. Each bar is a median with its 95% interval." src="benchmarks/essential/latency_p95.svg">
 </picture>
 
-This figure shows the latencies themselves: each bar is a median of the
-6 runs, with its 95% interval as the whisker, Guacamole's in blue and
-Occamy's in orange. The axis is logarithmic, so the bars of a 2 ms key
-and a 200 ms key fit on one figure.
-
 [The full report](benchmarks/essential/report.md) has every metric with
 its interval and test, the memory and CPU each server used, and a
 figure for each metric. [The results](benchmarks/essential/bench-essential.json)
@@ -128,14 +113,12 @@ hold every run.
 ## On a lossy link
 
 A link that loses packets, such as Wi-Fi or a long mobile path, slows
-a session down in two ways. TCP delivers nothing that came after a lost
-packet until it has sent that packet again, and it slows down as if the
-link were congested. So Occamy's server asks Linux for BBR, a
-congestion control that sets its rate from what the path carries
-rather than from the packets it loses ([configuration](configuration.md)).
+TCP down ([What packet loss costs](#what-packet-loss-costs)). So
+Occamy's server asks Linux for BBR, a congestion control that sets its
+rate from what the path carries rather than from the packets it loses
+([TCP congestion control](deploy.md#tcp-congestion-control)).
 
-This table gives the latency of a key during full-screen motion, at the
-95th percentile, in ms, with medians and 95% intervals:
+**A key during full-screen motion, latency at the 95th percentile, in ms**
 
 | Network and loss | Guacamole, VNC | Occamy, VNC | Guacamole, RDP | Occamy, RDP |
 |---|---:|---:|---:|---:|
@@ -146,22 +129,16 @@ This table gives the latency of a key during full-screen motion, at the
 | 50 ms, 20 Mbit/s, 0.5% lost | 339 [276, 3,942] | 122 [94.8, 132] | 5,575 [362, 7,941] | 135 [127, 158] |
 | 50 ms, 20 Mbit/s, 2% lost | 7,053, in 4 of 6 runs | 149 [136, 167] | not within 10 s in any run | 163 [150, 173] |
 
-With 2% of packets lost at 50 ms, Occamy keeps showing 28 of the
-scene's 30 frames a second over VNC, and a key during motion costs it
-about one more round trip than without loss. Guacamole needs 1.2 to
-1.6 MiB a second for the scene, more than TCP carries at that loss, so
-its frames queue behind the link and a key waits behind them for
-seconds.
-
-Guacamole's columns come from [What packet loss costs](#what-packet-loss-costs)
-and Occamy's from [BBR against CUBIC](#bbr-against-cubic): two runs on
-the same host and image, over the same emulated link.
+Guacamole needs 1.2 to 1.6 MiB a second for the scene, more than TCP
+carries at 50 ms with 2% lost. Guacamole's columns come from
+[What packet loss costs](#what-packet-loss-costs) and Occamy's from
+[BBR against CUBIC](#bbr-against-cubic): two runs on the same host and
+image, over the same emulated link.
 
 ## Measurements behind Occamy's design
 
 Occamy keeps a change to how it paces and carries frames only after
-measuring it against the alternative, under the same conditions. These
-are the measurements behind the current design.
+measuring it against the alternative under the same conditions.
 
 ### The frame window
 
@@ -184,11 +161,10 @@ measured a key during full-screen motion over VNC at 50 ms on
 </picture>
 
 The window was the limit only where the round trip is long and the
-screen changes often. With no delay and at 20 ms, two frames already
-covered the round trip, and nothing changed. Typing, long output and a
-key on a still desktop didn't change either. Over RDP, the server's own
-rate of about 24 frames a second holds, but the frames come more
-evenly: 48 ms apart at the 95th percentile instead of 63.
+screen changes often: with no delay and at 20 ms, two frames already
+covered the round trip. Over RDP, the server's own rate of about 24
+frames a second holds, but the frames come more evenly: 48 ms apart at
+the 95th percentile instead of 63.
 [The full report](benchmarks/realtime/1/report.md) has every metric.
 
 ### What packet loss costs
@@ -204,10 +180,9 @@ congestion control that Linux uses by default.
 
 - **Loss costs a session twice.** A lost packet holds back every frame
   behind it until it's sent again, for up to three round trips. And
-  TCP reads a random loss as congestion: with the congestion control
-  that Linux uses by default, its rate falls to about
-  1.22 · MSS / (RTT · √p). At 50 ms with 2% lost, that's 245 KiB a
-  second, less than the motion scene's 350 to 420. Occamy then showed
+  TCP reads a random loss as congestion: with CUBIC, its rate falls to
+  about 1.22 · MSS / (RTT · √p). At 50 ms with 2% lost, that's 245 KiB
+  a second, less than the motion scene's 350 to 420. Occamy then showed
   only 16 of its 30 frames a second, and a key waited 5 to 8 round
   trips.
 - **Guacamole needs more than the link carries** in every lossy case,
@@ -215,8 +190,8 @@ congestion control that Linux uses by default.
   20 ms with 2% lost, and 5.6 s at 50 ms with 0.5% lost.
 - **Typing and a key on a still desktop** send a packet or two a key,
   so the 95th percentile hardly moves. The few keys whose packet is
-  lost wait three round trips and 200 ms. That's the wait for Linux's
-  tail loss probe, which is the same with any congestion control.
+  lost wait three round trips and 200 ms, for Linux's tail loss probe,
+  whatever the congestion control.
 
 With 6 runs a side, no difference here can be significant after the
 correction over 39 tests, so these conclusions rest on the differences
@@ -232,20 +207,18 @@ The same lossy link, with Occamy's server on CUBIC and on BBR:
   <img alt="The improvement of Occamy with BBR over Occamy with CUBIC on a key's latency, in each scenario, network and loss, on a log axis with 95% intervals. Without loss every dot sits near 1×. With loss, a key during motion improves most, to between 2× and 3× with 2% lost at 50 ms." src="benchmarks/realtime/3a/factors-congestion-control.svg">
 </picture>
 
-- **With BBR, loss costs a key about one round trip.** At 50 ms with 2%
-  lost, a key during motion shows within 149 ms over VNC and 163 ms
-  over RDP, compared with 360 and 471 ms with CUBIC: improvements of
-  2.45× and 2.97×.
-- **The frame rate holds.** At 50 ms with 2% lost, you see 27.6 of the
-  scene's 30 frames a second over VNC instead of 16.4, and 24.4 over
-  RDP, the server's rate without loss.
-- **Without loss, nothing changes,** and neither does typing or a key
-  on a still desktop.
-- **A frame costs the server less CPU:** 19.6 ms over VNC at 50 ms with
-  2% lost, compared with 24.9 ms with CUBIC.
+| At 50 ms with 2% lost | CUBIC | BBR | Improvement |
+|---|---:|---:|---:|
+| A key during motion over VNC, 95th percentile | 360 ms | 149 ms | 2.45× |
+| A key during motion over RDP, 95th percentile | 471 ms | 163 ms | 2.97× |
+| Scene frames shown a second over VNC, of 30 | 16.4 | 27.6 | |
+| Server CPU a frame over VNC | 24.9 ms | 19.6 ms | |
 
-Five of the 30 differences are significant after Holm's correction, all
-of them for a key during motion with loss.
+With BBR, loss costs a key about one round trip, and the frame rate
+holds: over RDP, you see 24.4 frames a second, the server's rate
+without loss. Without loss, nothing changes, and neither does typing
+or a key on a still desktop. Five of the 30 differences are significant
+after Holm's correction, all of them for a key during motion with loss.
 [The full report](benchmarks/realtime/3a/report.md) has every metric.
 
 ## How Occamy is measured
@@ -254,8 +227,8 @@ of them for a key during motion with loss.
 
 `make bench` starts Occamy's demo stack on one host, with a bench
 desktop in place of the demo's VNC and RDP servers, and Guacamole's
-guacd beside `occamyd`. A harness then connects to each server, as its
-own client would, through an emulated network:
+guacd beside `occamyd`. A harness then connects to each server through
+an emulated network:
 
 ```mermaid
 flowchart LR
@@ -264,26 +237,24 @@ flowchart LR
   S <--> R["<b>Remote</b><br/>an SSH server, or the<br/>bench desktop over<br/>VNC or RDP"]
 ```
 
-- **Guacamole.** The harness speaks the Guacamole protocol to guacd, as
-  Guacamole's web application does, with guacd's defaults and
-  `ignore-cert` for RDP. Like guacamole-common-js, it applies each
-  frame, answers its `sync` at once, and sends a `nop` every 5 seconds.
-- **Occamy.** The harness drives the Go client of protocol v1 against
-  `occamyd`. It offers the codecs that the web client offers: deflate,
-  WebP, JPEG, scaled and raw. Like the web client, it acknowledges a
-  desktop's frame at the next refresh of a 60 Hz screen, and a
-  terminal's at once.
+The harness behaves as each server's own client does:
+
+| | Against Guacamole | Against Occamy |
+|---|---|---|
+| It speaks | The Guacamole protocol to guacd, as Guacamole's web application does | Protocol v1 to `occamyd`, through the Go client |
+| With | guacd's defaults, and `ignore-cert` for RDP | The web client's codecs: deflate, WebP, JPEG, scaled and raw |
+| For each frame | It answers the `sync` at once, as guacamole-common-js does, and sends a `nop` every 5 seconds | It acknowledges a desktop's frame at the next refresh of a 60 Hz screen, and a terminal's at once, as the web client does |
 
 Both decode every image into a framebuffer, and each scenario runs on a
 fresh session.
 
 **The bench desktop** (`docker/bench/desktop`) runs a scene program
-(`bench/scene`) with no window manager. It covers the screen with one
-window and draws its content from fixed seeds, so every run sees the
-same pixels. Function keys switch scenes: idle, the probe, a scroll, a
-drag, full-screen motion and a photograph. The VNC server is x11vnc on
-Xvfb, tuned to answer a key in 2.9 ms at the median and 3.5 ms at the
-95th percentile. The RDP server is xrdp with xorgxrdp, as Debian
+(`bench/scene`) with no window manager, which covers the screen with
+one window and draws from fixed seeds, so every run sees the same
+pixels. Function keys switch scenes: idle, the probe, a scroll, a drag,
+full-screen motion and a photograph. The VNC server is x11vnc on Xvfb,
+tuned to answer a key in 2.9 ms at the median and 3.5 ms at the 95th
+percentile, and the RDP server is xrdp with xorgxrdp, as Debian
 configures it. The terminal is 99 × 39 cells, the size of guacd's at
 1024 × 768 pixels.
 
@@ -327,10 +298,9 @@ twice the bandwidth-delay product.
 | N3 | 100 ms | 5 Mbit/s |
 | N4 | 250 ms | 1 Mbit/s |
 
-A proxy carries a byte stream and has no packets to lose, so a study of
-loss emulates the whole link in the kernel instead, with `tc netem` in
-the network namespace of the server under test, and loses packets on
-the way to the client only.
+A proxy has no packets to lose, so a study of loss emulates the whole
+link in the kernel instead, with `tc netem` in the network namespace of
+the server under test, and loses packets on the way to the client only.
 
 ### The metrics
 
@@ -354,11 +324,9 @@ sequenceDiagram
 Each letter paints its swatch in a colour of its own, so the harness
 knows which key a frame answers. In a shell, which draws nothing else
 while it's idle, a typed character's latency ends at the first frame
-after the key. Keys come 100 ms apart on average,
-each moved by up to one 60 Hz period, so that they meet the screen's
-refresh at every phase. Typing's keys stay exactly 100 ms apart.
-
-The other metrics:
+after the key. Keys come 100 ms apart on average, each moved by up to
+one 60 Hz period, so that they meet the screen's refresh at every
+phase. Typing's keys stay exactly 100 ms apart.
 
 | Metric | What it counts |
 |---|---|
@@ -386,29 +354,29 @@ that one result's load doesn't spill into the next.
 
 - the **median** of the runs, with an exact distribution-free 95%
   interval from order statistics;
-- the **improvement** of one server over the other: the other's value
-  divided by its own, or its own divided by the other's for a metric
-  where higher is better, such as frames shown a second. It's the
-  Hodges–Lehmann estimate of that ratio, with its exact 95% interval
-  from the Mann–Whitney distribution;
+- the **improvement** of one server over the other, the other's value
+  divided by its own, inverted for a metric where higher is better,
+  such as frames shown a second: the Hodges–Lehmann estimate of that
+  ratio, with its exact 95% interval from the Mann–Whitney
+  distribution;
 - the **p-value** of the exact two-sided permutation test of the rank
   sum, over every split of the runs.
 
-The primary metrics' p-values are corrected with Holm's method at
-0.05. The other metrics are exploratory, and their p-values aren't
-corrected. The report also says whether any conclusion changes without
-the results that started while the host's load was above the gate.
+Holm's method corrects the primary metrics' p-values at 0.05; the
+other metrics are exploratory, and their p-values aren't corrected.
+The report also says whether any conclusion changes without the
+results that started while the host's load was above the gate.
 
 ### Targets
 
 Occamy's targets for its stable release are an improvement of 10× on
 each scenario's primary metric over Guacamole on the same network, a
-tenth of Guacamole's value, and a key's effect within 50 ms. For a
-latency, the targets apply to the 95th percentile. Where something
-outside Occamy makes a target impossible, such as the network's round
-trip or the remote server's own response time, the target is that
-limit plus a small margin. [The full report](benchmarks/essential/report.md)
-marks each target that Occamy meets.
+tenth of Guacamole's value, and a key's effect within 50 ms at the 95th
+percentile. Where something outside Occamy makes a target impossible,
+such as the network's round trip or the remote server's own response
+time, the target is that limit plus a small margin.
+[The full report](benchmarks/essential/report.md) marks each target
+that Occamy meets.
 
 ## Run the benchmark
 
@@ -429,10 +397,13 @@ to `bench-results.json`, and a table to standard output.
 
 Server CPU needs podman, whose container statistics report CPU time;
 with docker, pass `-engine none`. On a host that runs another stack,
-`COMPOSE_PROJECT_NAME`, `OCCAMY_V1_PORT`, `OCCAMY_V1_CUBIC_PORT`,
-`GUACD_PORT`, `OCCAMY_V1_DEBUG_PORT` and `OCCAMY_V1_CUBIC_DEBUG_PORT`
-start the bench under its own name and ports, and `OCCAMY_IMAGE` names
-the image it builds.
+give the bench its own name, ports and image:
+
+| Variable | What it sets |
+|---|---|
+| `COMPOSE_PROJECT_NAME` | The stack's name |
+| `OCCAMY_V1_PORT`, `OCCAMY_V1_CUBIC_PORT`, `GUACD_PORT`, `OCCAMY_V1_DEBUG_PORT`, `OCCAMY_V1_CUBIC_DEBUG_PORT` | Its ports |
+| `OCCAMY_IMAGE` | The image that it builds |
 
 ### Run a comparison
 
@@ -462,21 +433,18 @@ podman machine ssh sudo modprobe tcp_bbr
 ```
 
 Each plan names the *series* it measures, the servers and settings
-under test:
+under test. Committed results may also hold series that the harness no
+longer runs:
 
 | Series | What it runs |
 |---|---|
 | `guacd` | Guacamole: guacd, through the Guacamole protocol |
-| `v1-native` | Occamy, as it ships |
+| `v1-native` | Occamy, as it ships. In the committed results of the comparison of CUBIC and BBR, Occamy on CUBIC, Linux's default |
 | `v1-native-w2` | Occamy, with a client that offers a window of two frames |
 | `v1-native-cubic` | Occamy on a second service that asks for CUBIC (`docker/bench/occamy-v1-cubic.yaml`) |
 | `v1-native-nogfx` | Occamy over RDP without the graphics pipeline |
-
-Some committed results have series that the harness no longer runs.
-`desktop-baseline.json` and `terminal-baseline.json` have `occamy`,
-Occamy through guacd. In the results of the comparison of CUBIC and
-BBR, `v1-native` is Occamy on CUBIC, Linux's default, and
-`v1-native-bbr` is Occamy with BBR set for its network namespace.
+| `v1-native-bbr` | No longer run. In the committed results of the comparison of CUBIC and BBR, Occamy with BBR set for its network namespace |
+| `occamy` | No longer run. In `desktop-baseline.json` and `terminal-baseline.json`, Occamy through guacd |
 
 ### Make a report
 
