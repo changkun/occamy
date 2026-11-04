@@ -611,7 +611,7 @@ func (w *writer) scroll(ctx context.Context, id uint32, order []int, input bool)
 			w.log.Warn("copy-rect not sent", "err", err)
 			break
 		}
-		if err := w.c.WriteMessage(ctx, w.sbuf); err != nil {
+		if err := w.send(ctx, w.sbuf); err != nil {
 			return copies, done, size, err
 		}
 		// The tiles the copy lands in take the quality and the goal of

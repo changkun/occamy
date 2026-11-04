@@ -214,7 +214,7 @@ func (w *writer) writeFrame(ctx context.Context, m message) error {
 			return err
 		}
 	}
-	if err := w.c.WriteMessage(ctx, w.buf); err != nil {
+	if err := w.send(ctx, w.buf); err != nil {
 		return err
 	}
 	w.p.Wrote(time.Now(), len(w.buf))

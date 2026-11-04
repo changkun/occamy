@@ -87,6 +87,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Fixed
 
+- A session no longer drops when its screen stays still behind a proxy
+  that closes quiet connections, such as nginx after its default
+  `proxy_read_timeout` of a minute. `occamyd` sends a `ping` on a
+  stream that has carried nothing for 25 seconds, and the client's
+  `pong` counts as no input, so the 30-minute idle timeout still
+  applies. The proxy needs no longer timeouts
+  ([docs/protocol.md](docs/protocol.md#ping)).
 - When a session can't connect, everyone in it learns why, such as
   “The remote computer refused the user name or password.” or “The
   server doesn't trust the remote computer's certificate.”, where the

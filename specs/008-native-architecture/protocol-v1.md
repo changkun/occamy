@@ -83,7 +83,11 @@ evolve without breaking old clients.
   the first v1), `bell`, `title`,
   `prompt` (keyboard-interactive or credential request), `viewer-joined`
   (viewer ID, role and name) and `viewer-left`, and `ping`, `pong` and
-  `close` (code and reason), which go either way.
+  `close` (code and reason), which go either way. The server sends
+  `ping` on a stream that has carried nothing for 25 seconds, so that
+  a proxy that closes quiet connections, such as nginx after a minute,
+  keeps a still screen's stream; the client's `pong` counts as no
+  input.
 - **Client to server:** `key` (down or up, keysym, and the physical key as
   a USB HID usage from the keyboard page), `text` (UTF-8, for
   IME), `term-input` (bytes produced by the client's terminal emulator,
