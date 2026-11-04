@@ -37,8 +37,9 @@ Every document, by what you want to do.
 
 - [Benchmarks](./benchmarks.md): Occamy measured against Guacamole, with
   intervals and corrected tests.
-- [Codecs](./benchmarks/codecs.md): which codecs, tile size and pixel
-  layout `occamyd` uses, measured on frames from a real desktop.
+- [Codecs](./benchmarks/codecs.md): how `occamyd` picks each tile's
+  codec, and the measurements on frames from a real desktop behind
+  each choice.
 
 ## Develop
 
