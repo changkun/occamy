@@ -26,6 +26,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   each message, with figures of a message's bytes, a frame of a
   desktop, the frame window, the tile cache, and how `occamyd` picks a
   tile's codec ([docs/protocol.md](docs/protocol.md#how-a-session-works)).
+- Try Occamy, Deploy, and Debugging and monitoring each open with a
+  figure: the demo stack's containers and ports, a deployment's hops
+  and what each needs, and where the log and the listeners come from.
+  Deploy adds Windows hosts and Kubernetes, and debugging is organised
+  by what users see ([docs/deploy.md](docs/deploy.md#how-a-deployment-fits-together),
+  [docs/debugging.md](docs/debugging.md#where-to-look)).
 - The benchmark report calls its estimate the *improvement*: the
   baseline's value divided by the candidate's, so that above 1× the
   candidate is better. The column in `comparisons.csv` that was
