@@ -153,11 +153,12 @@ jobs:
         go-version: stable
     - name: Build the image
       run: make build CONTAINER_ENGINE=docker
-    # OCCAMY_DEBUG=1 serves occamy-v1's debug listener, from which the
-    # pressure test counts occamyd's goroutines, on the loopback
-    # interface.
-    - name: Start the demo stack
-      run: make run CONTAINER_ENGINE=docker OCCAMY_DEBUG=1
+    # E2E=1 serves the end-to-end tests' connections
+    # (docker/docker-compose.e2e.yaml). OCCAMY_DEBUG=1 serves occamy-v1's
+    # debug listener, from which the pressure test counts occamyd's
+    # goroutines, on the loopback interface.
+    - name: Start the end-to-end stack
+      run: make run CONTAINER_ENGINE=docker OCCAMY_DEBUG=1 E2E=1
     - name: Resources before the tests
       working-directory: docker
       run: docker stats --no-stream
@@ -170,10 +171,10 @@ jobs:
     - name: Resources after the tests
       working-directory: docker
       run: docker stats --no-stream
-    - name: Demo stack logs
+    - name: End-to-end stack logs
       if: failure()
       working-directory: docker
-      run: docker compose logs
+      run: docker compose -f docker-compose.yaml -f docker-compose.e2e.yaml logs
 
   bench:
     # A short run of the benchmark harness, to keep it working. Numbers

@@ -25,9 +25,10 @@ import (
 	"changkun.de/x/occamy/protocol"
 )
 
-// The demo stack's occamy-v1 service (docker/occamy-v1.yaml): its user,
-// and its connections to the demo VNC and RDP servers with the backend
-// that each session's state should report.
+// The demo stack's occamy-v1 service, with the end-to-end tests' file
+// (docker/occamy-v1-e2e.yaml): its user, and its connections to the demo
+// VNC and RDP servers with the backend that each session's state should
+// report.
 const (
 	v1User     = "demo"
 	v1Password = "occamy"

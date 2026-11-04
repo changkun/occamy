@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -27,16 +28,82 @@ import (
 )
 
 // TestDemoV1File checks that the demo stack's v1 file loads, with the
-// connections that the end-to-end tests open (tests/), the real desktop
-// first. It also checks the image's web client, and that its user's
-// password is the one docker/occamy-v1.yaml and tests/ give.
+// connections that a first-time user sees, the real desktop first, and
+// that the end-to-end tests' file, which make run E2E=1 serves in its
+// place, is the same file with the connections that the tests open
+// (tests/) after the demo's, and the limit the pressure test needs. It
+// also checks the image's web client, and that its user's password is
+// the one docker/occamy-v1.yaml and tests/ give.
 func TestDemoV1File(t *testing.T) {
-	raw, err := os.ReadFile("../../docker/occamy-v1.yaml")
-	if err != nil {
-		t.Fatal(err)
+	files := newDemoV1Files(t)
+	demo := files.load(t, "occamy-v1.yaml")
+	e2e := files.load(t, "occamy-v1-e2e.yaml")
+	// The real desktop comes first, for a first-time viewer, then the
+	// SSH server.
+	wantDemo := []string{"desktop-vnc", "desktop-rdp", "ssh"}
+	if ids := connectionIDs(demo); !slices.Equal(ids, wantDemo) {
+		t.Errorf("occamy-v1.yaml: connections %q, want %q", ids, wantDemo)
 	}
-	// What the compose service gives it: a volume for the signing key,
-	// the tigervnc service's CA, and the SSH, VNC and RDP passwords.
+	// The tests' file has the demo's, then each VNC server's security
+	// types and keyboard layouts (tests/parity_test.go), and the RDP
+	// server.
+	wantE2E := append(slices.Clone(wantDemo),
+		"vnc", "vnc-none", "tigervnc", "tigervnc-prompt", "tigervnc-plain", "tigervnc-none",
+		"vnc-de", "vnc-fr", "tigervnc-de", "tigervnc-fr", "rdp",
+	)
+	if ids := connectionIDs(e2e); !slices.Equal(ids, wantE2E) {
+		t.Errorf("occamy-v1-e2e.yaml: connections %q, want %q", ids, wantE2E)
+	}
+	// The pressure test opens 60 sessions at once as demo; the demo
+	// keeps the default.
+	if got := demo.Limits.SessionsPerUser; got != config.DefaultSessionsPerUser {
+		t.Errorf("occamy-v1.yaml: sessions_per_user %d, want the default, %d", got, config.DefaultSessionsPerUser)
+	}
+	if got := e2e.Limits.SessionsPerUser; got != 100 {
+		t.Errorf("occamy-v1-e2e.yaml: sessions_per_user %d, want 100 for the pressure test", got)
+	}
+	// Past its own connections and that limit, the tests' file is the
+	// demo's, so that the tests run on what a user of the demo gets.
+	for i, c := range demo.Connections {
+		if i >= len(e2e.Connections) || !reflect.DeepEqual(e2e.Connections[i], c) {
+			t.Errorf("occamy-v1-e2e.yaml's connection %d is not occamy-v1.yaml's %q", i, c.ID)
+		}
+	}
+	rest := *e2e
+	rest.Connections, rest.Limits = demo.Connections, demo.Limits
+	if !reflect.DeepEqual(&rest, demo) {
+		t.Errorf("occamy-v1-e2e.yaml's settings are not occamy-v1.yaml's:\n%+v\nwant\n%+v", rest, *demo)
+	}
+	for name, f := range map[string]*config.File{"occamy-v1.yaml": demo, "occamy-v1-e2e.yaml": e2e} {
+		// The image's build of the web client, where the Dockerfile puts
+		// it.
+		if f.WebClient != "client/occamy-web/dist" {
+			t.Errorf("%s: web_client %q, want the image's client/occamy-web/dist", name, f.WebClient)
+		}
+		if len(f.Auth.Users) != 1 || bcrypt.CompareHashAndPassword([]byte(f.Auth.Users[0].PasswordHash), []byte("occamy")) != nil {
+			t.Errorf("%s: users %+v, want demo with the password occamy", name, f.Auth.Users)
+		}
+		// The debug listener is off but where make run OCCAMY_DEBUG=1
+		// sets OCCAMY_V1_DEBUG_ADDRESS (docker-compose.yaml passes it
+		// on, empty by default).
+		for _, address := range []string{"", "0.0.0.0:5638"} {
+			t.Setenv("OCCAMY_V1_DEBUG_ADDRESS", address)
+			f := files.load(t, name)
+			if f.Debug.Address != address {
+				t.Errorf("%s: with OCCAMY_V1_DEBUG_ADDRESS=%q, the debug listener is on %q", name, address, f.Debug.Address)
+			}
+		}
+	}
+}
+
+// demoV1Files loads the v1 files of docker/ with what the compose
+// service gives occamyd: a volume for the signing key, the tigervnc
+// service's CA, and the SSH, VNC and RDP passwords. The files share the
+// volume and the CA, so that they compare equal.
+type demoV1Files struct{ paths *strings.Replacer }
+
+func newDemoV1Files(t *testing.T) demoV1Files {
+	t.Helper()
 	ca, err := vnctest.SelfSigned("tigervnc")
 	if err != nil {
 		t.Fatal(err)
@@ -45,50 +112,35 @@ func TestDemoV1File(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(caDir, "ca.pem"), ca.PEM, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	raw = []byte(strings.NewReplacer("/var/lib/occamy/", t.TempDir()+"/", "/run/occamy-vnc-ca/", caDir+"/").Replace(string(raw)))
 	t.Setenv("OCCAMY_DEMO_SSH_PASSWORD", "occamy")
 	t.Setenv("OCCAMY_DEMO_VNC_PASSWORD", "vncpassword")
 	t.Setenv("OCCAMY_DEMO_PLAIN_PASSWORD", "plainpassword")
 	t.Setenv("OCCAMY_DEMO_RDP_PASSWORD", "occamy")
-	f, err := config.ParseV1(raw)
+	return demoV1Files{strings.NewReplacer("/var/lib/occamy/", t.TempDir()+"/", "/run/occamy-vnc-ca/", caDir+"/")}
+}
+
+// load loads the file name, with OCCAMY_V1_DEBUG_ADDRESS as the test
+// set it.
+func (d demoV1Files) load(t *testing.T, name string) *config.File {
+	t.Helper()
+	raw, err := os.ReadFile("../../docker/" + name)
 	if err != nil {
 		t.Fatal(err)
 	}
+	f, err := config.ParseV1([]byte(d.paths.Replace(string(raw))))
+	if err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	return f
+}
+
+// connectionIDs returns the IDs of f's connections, in its order.
+func connectionIDs(f *config.File) []string {
 	var ids []string
 	for _, c := range f.Connections {
 		ids = append(ids, c.ID)
 	}
-	// The real desktop comes first, for a first-time viewer, then the
-	// SSH server, each VNC server's security types and keyboard layouts
-	// (tests/parity_test.go), and the RDP server.
-	want := []string{
-		"desktop-vnc", "desktop-rdp", "ssh",
-		"vnc", "vnc-none", "tigervnc", "tigervnc-prompt", "tigervnc-plain", "tigervnc-none",
-		"vnc-de", "vnc-fr", "tigervnc-de", "tigervnc-fr", "rdp",
-	}
-	if !slices.Equal(ids, want) {
-		t.Errorf("connections %q, want %q", ids, want)
-	}
-	// The image's build of the web client, where the Dockerfile puts it.
-	if f.WebClient != "client/occamy-web/dist" {
-		t.Errorf("web_client %q, want the image's client/occamy-web/dist", f.WebClient)
-	}
-	if len(f.Auth.Users) != 1 || bcrypt.CompareHashAndPassword([]byte(f.Auth.Users[0].PasswordHash), []byte("occamy")) != nil {
-		t.Errorf("users %+v, want demo with the password occamy", f.Auth.Users)
-	}
-	// The debug listener is off but where make run OCCAMY_DEBUG=1 sets
-	// OCCAMY_V1_DEBUG_ADDRESS (docker-compose.yaml passes it on, empty
-	// by default).
-	for _, address := range []string{"", "0.0.0.0:5638"} {
-		t.Setenv("OCCAMY_V1_DEBUG_ADDRESS", address)
-		f, err := config.ParseV1(raw)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if f.Debug.Address != address {
-			t.Errorf("with OCCAMY_V1_DEBUG_ADDRESS=%q, the debug listener is on %q", address, f.Debug.Address)
-		}
-	}
+	return ids
 }
 
 // TestDemoDebugGating checks that the demo stack's debug listener,
@@ -275,10 +327,10 @@ func TestBenchRuntime(t *testing.T) {
 // occamy, not the compose file's directory, docker, which other
 // checkouts and other compose files share, and so make clean's compose
 // down: the project that docker-compose.yaml names, which the bench
-// stack keeps, and the one that make bench and the harness read CPU
-// time from. COMPOSE_PROJECT_NAME still names another.
+// and end-to-end stacks keep, and the one that make bench and the
+// harness read CPU time from. COMPOSE_PROJECT_NAME still names another.
 func TestDemoProject(t *testing.T) {
-	for _, file := range []string{"docker-compose.yaml", "docker-compose.bench.yaml"} {
+	for _, file := range []string{"docker-compose.yaml", "docker-compose.bench.yaml", "docker-compose.e2e.yaml"} {
 		raw, err := os.ReadFile("../../docker/" + file)
 		if err != nil {
 			t.Fatal(err)
@@ -461,7 +513,7 @@ func TestSigningKeyHome(t *testing.T) {
 	if _, ok := compose.Volumes[volume]; !ok {
 		t.Errorf("docker-compose.yaml does not declare the volume %s", volume)
 	}
-	for _, name := range []string{"docker/occamy-v1.yaml", "docker/bench/occamy-v1.yaml", "docs/configuration.md"} {
+	for _, name := range []string{"docker/occamy-v1.yaml", "docker/occamy-v1-e2e.yaml", "docker/bench/occamy-v1.yaml", "docs/configuration.md"} {
 		if !strings.Contains(read(name), "signing_key_file: "+key+"\n") {
 			t.Errorf("%s does not keep the signing key at %s", name, key)
 		}
@@ -495,15 +547,16 @@ func TestConfigurationExampleRefused(t *testing.T) {
 	}
 }
 
-// TestDemoUserStaysInTheDemo checks that nothing but the demo stack's
-// and the benchmark stack's v1 files holds the demo user's password
-// hash, and that the file in the image and the release archives has no
+// TestDemoUserStaysInTheDemo checks that nothing but the demo stack's,
+// the end-to-end tests' and the benchmark stack's v1 files holds the
+// demo user's password hash, and that the file in the image and the release archives has no
 // users to sign in with: occamyd has no default user or password.
 func TestDemoUserStaysInTheDemo(t *testing.T) {
 	// Past the $ signs, which a shell's heredoc would escape.
 	const hash = "DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
 	allowed := map[string]bool{
 		"docker/occamy-v1.yaml":             true,
+		"docker/occamy-v1-e2e.yaml":         true,
 		"docker/bench/occamy-v1.yaml":       true,
 		"docker/bench/occamy-v1-cubic.yaml": true,
 	}
@@ -573,6 +626,98 @@ func TestMakeStop(t *testing.T) {
 	}
 }
 
+// TestMakeE2E checks that the end-to-end tests run their compose
+// commands on the stack that make run E2E=1 starts: make e2e names the
+// compose files that make run E2E=1 starts the stack with, in the same
+// order, and make run without E2E=1 names none, for the demo's own,
+// docker-compose.yaml. The tests' file is occamy-v1's v1 file only
+// because the override mounts it where docker-compose.yaml mounts the
+// demo's, which compose then replaces.
+func TestMakeE2E(t *testing.T) {
+	// files returns the files that a compose command names with -f,
+	// by their base names, and the command before them.
+	files := func(t *testing.T, line string) (string, []string) {
+		t.Helper()
+		words := strings.Fields(line)
+		i := slices.Index(words, "compose")
+		if i < 0 {
+			t.Fatalf("%q runs no compose", line)
+		}
+		cmd := strings.Join(words[:i+1], " ")
+		var names []string
+		for i++; i+1 < len(words) && words[i] == "-f"; i += 2 {
+			names = append(names, filepath.Base(words[i+1]))
+		}
+		return cmd, names
+	}
+	composeLine := func(t *testing.T, args ...string) string {
+		t.Helper()
+		for _, line := range makeDryRun(t, "run", args, nil) {
+			if strings.Contains(line, " compose ") {
+				return line
+			}
+		}
+		t.Fatalf("make -n run %s runs no compose", strings.Join(args, " "))
+		return ""
+	}
+	if _, got := files(t, composeLine(t)); len(got) != 0 {
+		t.Errorf("make run names %q, want docker-compose.yaml alone, by default", got)
+	}
+	_, started := files(t, composeLine(t, "E2E=1"))
+	if want := []string{"docker-compose.yaml", "docker-compose.e2e.yaml"}; !slices.Equal(started, want) {
+		t.Errorf("make run E2E=1 names %q, want %q", started, want)
+	}
+	// E2E=1 changes the files alone: the stack is published, and its
+	// debug listener gated, as the demo's (TestDemoBind,
+	// TestDemoDebugGating).
+	for _, debug := range []string{"", "1"} {
+		args := []string{"OCCAMY_DEBUG=" + debug, "OCCAMY_BIND=0.0.0.0"}
+		if got, want := makeEnv(t, "run", append(args, "E2E=1"), nil), makeEnv(t, "run", args, nil); !maps.Equal(got, want) {
+			t.Errorf("make run E2E=1 %s passes %v, want make run's %v", strings.Join(args, " "), got, want)
+		}
+	}
+	// make e2e passes the command in OCCAMY_E2E_COMPOSE, with absolute
+	// paths, since the tests run in tests/.
+	e2e := strings.Join(makeDryRun(t, "e2e", nil, nil), "\n")
+	m := regexp.MustCompile(`OCCAMY_E2E_COMPOSE="([^"]*)"`).FindStringSubmatch(e2e)
+	if m == nil {
+		t.Fatalf("make -n e2e sets no OCCAMY_E2E_COMPOSE: %q", e2e)
+	}
+	for _, word := range strings.Fields(m[1]) {
+		if strings.HasSuffix(word, ".yaml") && !filepath.IsAbs(word) {
+			t.Errorf("make e2e names %s, not an absolute path", word)
+		}
+	}
+	if cmd, got := files(t, m[1]); cmd != "engine compose" || !slices.Equal(got, started) {
+		t.Errorf("make e2e runs %q, want engine compose with the files of make run E2E=1, %q", m[1], started)
+	}
+
+	// The override puts the tests' file at the path where the demo
+	// stack mounts its own, and touches nothing else of occamy-v1's.
+	mounts := func(t *testing.T, file string) []string {
+		t.Helper()
+		raw, err := os.ReadFile("../../docker/" + file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var compose struct {
+			Services map[string]struct {
+				Volumes []string `yaml:"volumes"`
+			} `yaml:"services"`
+		}
+		if err := yaml.Unmarshal(raw, &compose); err != nil {
+			t.Fatal(err)
+		}
+		return compose.Services["occamy-v1"].Volumes
+	}
+	if !slices.Contains(mounts(t, "docker-compose.yaml"), "./occamy-v1.yaml:/occamy/v1.yaml:ro") {
+		t.Errorf("docker-compose.yaml does not mount occamy-v1.yaml at /occamy/v1.yaml: %q", mounts(t, "docker-compose.yaml"))
+	}
+	if got, want := mounts(t, "docker-compose.e2e.yaml"), []string{"./occamy-v1-e2e.yaml:/occamy/v1.yaml:ro"}; !slices.Equal(got, want) {
+		t.Errorf("docker-compose.e2e.yaml mounts %q in occamy-v1, want %q", got, want)
+	}
+}
+
 // TestMakeClean checks that make clean removes Occamy's own containers
 // and images and no other of the engine's, which other projects on the
 // host may share: the demo stack's project through compose, and the
@@ -631,7 +776,7 @@ func makeDryRun(t *testing.T, target string, args []string, shell map[string]str
 	// that the tests set.
 	for _, kv := range os.Environ() {
 		k, _, _ := strings.Cut(kv, "=")
-		if k != "OCCAMY_BIND" && k != "OCCAMY_DEBUG" && k != "OCCAMY_IMAGE" && k != "COMPOSE_PROJECT_NAME" {
+		if k != "OCCAMY_BIND" && k != "OCCAMY_DEBUG" && k != "OCCAMY_IMAGE" && k != "COMPOSE_PROJECT_NAME" && k != "E2E" && k != "OCCAMY_E2E_COMPOSE" {
 			cmd.Env = append(cmd.Env, kv)
 		}
 	}

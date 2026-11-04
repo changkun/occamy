@@ -141,8 +141,16 @@ the API and the protocol may change before 1.0.0.
   refuses it until it names someone who signs in.
 - The demo stack's connections lose their `-native` suffix, since each
   protocol has one backend: `vnc-native` is `vnc`, `rdp-native` is
-  `rdp`, and so on. The demo user may own 100 sessions, for the pressure
-  test, which now runs through `occamy-v1`.
+  `rdp`, and so on. The pressure test now runs through `occamy-v1`.
+- The demo stack lists three connections, the XFCE desktop over VNC and
+  over RDP, and SSH, so that a first look starts with a desktop rather
+  than a list to scroll past. The connections to the bare servers that
+  the end-to-end tests probe, `vnc`, `rdp` and one for each VNC security
+  type and keyboard layout, moved to `docker/occamy-v1-e2e.yaml`, with
+  the 100 sessions a user that the pressure test needs. `make run E2E=1`
+  serves that file in place of the demo's, and `make e2e` and `make
+  soak` run against that stack
+  ([docs/try-it.md](docs/try-it.md#the-test-servers)).
 
 ### Removed
 

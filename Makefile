@@ -127,40 +127,55 @@ DEMO_DEBUG = OCCAMY_V1_DEBUG_ADDRESS=$(if $(filter 1,$(OCCAMY_DEBUG)),0.0.0.0:56
 # debug port stays on the loopback interface whatever OCCAMY_BIND says.
 DEMO_BIND = OCCAMY_BIND=$(or $(OCCAMY_BIND),127.0.0.1)
 
+# E2E_COMPOSE are the compose files of the stack that the end-to-end
+# tests run on: the demo stack's, with docker-compose.e2e.yaml over it,
+# which gives occamy-v1 the tests' v1 file, the demo's connections and
+# those of the servers that the tests probe. make run E2E=1 starts it,
+# and make e2e names the same files for the tests' compose commands.
+# DEMO_COMPOSE is what run passes compose: those files with E2E=1, and
+# none without it, for docker-compose.yaml alone.
+E2E_COMPOSE = docker-compose.yaml docker-compose.e2e.yaml
+DEMO_COMPOSE = $(if $(filter 1,$(E2E)), $(addprefix -f ,$(E2E_COMPOSE)))
+
 # run starts the demo stack, with occamy-v1 published on the loopback
-# interface unless OCCAMY_BIND says otherwise (DEMO_BIND).
-# OCCAMY_DEBUG=1 turns on occamy-v1's debug listener, which has no
-# authentication, on the host's loopback interface on
+# interface unless OCCAMY_BIND says otherwise (DEMO_BIND). E2E=1 starts
+# the end-to-end tests' stack instead (E2E_COMPOSE), for make e2e and
+# make soak. OCCAMY_DEBUG=1 turns on occamy-v1's debug listener, which
+# has no authentication, on the host's loopback interface on
 # OCCAMY_V1_DEBUG_PORT, for make soak and the pressure test. make run
 # without it turns it off again.
 run:
-	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose up -d --build --wait
+	cd docker && $(DEMO_BIND) $(DEMO_DEBUG) $(CONTAINER_ENGINE) compose$(DEMO_COMPOSE) up -d --build --wait
 .PHONY: run
 
+# stop stops the stack that make run started, with E2E=1 or without:
+# compose down acts on the project, and the e2e stack has the demo's
+# services.
 stop:
 	cd docker && $(CONTAINER_ENGINE) compose down --remove-orphans
 .PHONY: stop
 
-# e2e runs the end-to-end tests against a stack started with make run,
-# with OCCAMY_DEBUG=1 for the pressure test (OCCAMY_PRESSURE_N), through
-# occamy-v1 on OCCAMY_E2E_V1_ENDPOINT, and its debug listener on
+# e2e runs the end-to-end tests against a stack started with make run
+# E2E=1, with OCCAMY_DEBUG=1 for the pressure test (OCCAMY_PRESSURE_N),
+# through occamy-v1 on OCCAMY_E2E_V1_ENDPOINT, and its debug listener on
 # OCCAMY_E2E_V1_DEBUG. They default to the ports the stack publishes,
 # OCCAMY_V1_PORT and OCCAMY_V1_DEBUG_PORT as docker-compose.yaml takes
-# them. OCCAMY_E2E_COMPOSE
-# is the stack's compose command, with which a test kills a process in
-# the rdp container and reads its log: CONTAINER_ENGINE's by default, so
-# e2e takes the CONTAINER_ENGINE that run took. OCCAMY_E2E_CHROME names
-# the Chrome that opens the web client, if tests/web_test.go does not
-# find one. The VNC parity matrix takes minutes, so the timeout is longer
-# than go test's default.
+# them. OCCAMY_E2E_COMPOSE is the stack's compose command, with which a
+# test kills a process in the rdp container, reads its log and recreates
+# occamy-v1: CONTAINER_ENGINE's, with the files that make run E2E=1
+# started the stack with (E2E_COMPOSE), by default, so e2e takes the
+# CONTAINER_ENGINE that run took. OCCAMY_E2E_CHROME names the Chrome
+# that opens the web client, if tests/web_test.go does not find one. The
+# VNC parity matrix takes minutes, so the timeout is longer than go
+# test's default.
 e2e:
 	OCCAMY_E2E_V1_ENDPOINT=$(or $(OCCAMY_E2E_V1_ENDPOINT),localhost:$(or $(OCCAMY_V1_PORT),5637)) \
 	OCCAMY_E2E_V1_DEBUG=$(or $(OCCAMY_E2E_V1_DEBUG),localhost:$(or $(OCCAMY_V1_DEBUG_PORT),5638)) \
-	OCCAMY_E2E_COMPOSE="$(or $(OCCAMY_E2E_COMPOSE),$(CONTAINER_ENGINE) compose -f $(CURDIR)/docker/docker-compose.yaml)" \
+	OCCAMY_E2E_COMPOSE="$(or $(OCCAMY_E2E_COMPOSE),$(CONTAINER_ENGINE) compose $(addprefix -f $(CURDIR)/docker/,$(E2E_COMPOSE)))" \
 	go test -v -count=1 -timeout 20m ./tests/
 .PHONY: e2e
 
-# soak runs TestSoak against a stack started with make run
+# soak runs TestSoak against a stack started with make run E2E=1
 # OCCAMY_DEBUG=1: sessions through occamy-v1 for a duration while it
 # samples occamyd's goroutines, heap and open files from occamy-v1's
 # debug listener, on OCCAMY_V1_DEBUG_PORT, and fails if one grows.

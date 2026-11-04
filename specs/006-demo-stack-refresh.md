@@ -12,9 +12,11 @@ affects:
   - .github/workflows/dockerimage.yml
   - Makefile
   - docker/occamy-v1.yaml
+  - docker/occamy-v1-e2e.yaml
+  - docker/docker-compose.e2e.yaml
 effort: medium
 created: 2026-10-29
-updated: 2026-11-01
+updated: 2026-11-04
 author: Changkun Ou
 dispatched_task_id: null
 ---
@@ -433,6 +435,41 @@ first as `desktop-vnc` and `desktop-rdp`.
   over VNC and 6,706 over RDP, on a screen 94% black. So no dark colour
   may cover over half the screen; the commonest covers 21-34% on the
   desktop. A light one may, since Firefox left open makes it 76% white.
+
+## Addendum: the demo lists the connections meant for people
+
+A first-time user of the demo saw 14 connections, 11 of them the
+end-to-end tests' fixtures: the bare X servers with their probe
+xterms, once for each VNC security type and keyboard layout, and
+xrdp's bare session. Added on 2026-11-04, after this spec was complete.
+
+- `docker/occamy-v1.yaml` lists the three connections meant for people,
+  `desktop-vnc`, `desktop-rdp` and `ssh`, and keeps occamyd's default
+  of 10 sessions a user.
+- `docker/occamy-v1-e2e.yaml` is the tests' file: the demo's, with the
+  three repeated, since occamyd reads one file, then `vnc`, `vnc-none`,
+  `tigervnc`, `tigervnc-prompt`, `tigervnc-plain`, `tigervnc-none`,
+  `vnc-de`, `vnc-fr`, `tigervnc-de`, `tigervnc-fr` and `rdp`, and
+  `limits.sessions_per_user: 100` for the pressure test.
+  `TestDemoV1File` checks that the demo's file lists exactly the three,
+  and that the tests' file is the demo's with the fixtures after its
+  three and that limit, so that the two cannot drift.
+- `docker/docker-compose.e2e.yaml` mounts the tests' file at
+  `/occamy/v1.yaml` in place of the demo's, as the bench overlay mounts
+  its own. `make run E2E=1` starts the stack with it, and `make e2e`
+  names both compose files in `OCCAMY_E2E_COMPOSE`:
+  `TestE2ETokenSurvivesRestart` recreates `occamy-v1` through that
+  command, which with the demo's file alone would take the fixtures
+  away in the middle of the run. `make soak` needs the same stack,
+  since its default connection is `tigervnc`. `make stop` is unchanged:
+  `compose down` acts on the project, and the override adds no service.
+  `TestMakeE2E` checks that `make run E2E=1` and `make e2e` name the
+  same files, that `make run` without it names none, and that the
+  override mounts the tests' file where the demo stack mounts its own.
+- CI's `e2e` job starts the stack with `E2E=1` and reads its logs with
+  both files. The services are unchanged: plain `make run` still starts
+  the `vnc`, `tigervnc` and `rdp` servers, and `occamy-v1` still waits
+  for them.
 
 ## Appendix: revival verification harness
 

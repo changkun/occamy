@@ -76,7 +76,7 @@ var parityColumns = []parityColumn{{"x11vnc"}, {"tigervnc"}}
 func (c parityColumn) String() string { return c.server }
 
 // conn returns the ID of the column's connection of a kind in
-// docker/occamy-v1.yaml: "" for VNC Authentication with a stored
+// docker/occamy-v1-e2e.yaml: "" for VNC Authentication with a stored
 // password, or none, prompt or plain, or de or fr for the screen with
 // that keyboard layout.
 func (c parityColumn) conn(kind string) string {

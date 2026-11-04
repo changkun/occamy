@@ -4,11 +4,12 @@
 
 // Package tests runs end-to-end and pressure tests against a running
 // occamyd, normally the demo stack's occamy-v1 service from
-// docker/docker-compose.yaml, which serves API v1 and protocol v1 from
-// docker/occamy-v1.yaml:
+// docker/docker-compose.yaml with docker/docker-compose.e2e.yaml over
+// it, which serves API v1 and protocol v1 from docker/occamy-v1-e2e.yaml,
+// the demo's connections and those of the servers that the tests probe:
 //
 //	make build
-//	make run OCCAMY_DEBUG=1
+//	make run E2E=1 OCCAMY_DEBUG=1
 //	make e2e
 //
 // The tests are skipped unless OCCAMY_E2E_V1_ENDPOINT is set. The
@@ -16,8 +17,9 @@
 // listener, which make run OCCAMY_DEBUG=1 turns on. A test that reaches
 // into the stack's rdp container, to kill its channel server and read
 // its log, also needs OCCAMY_E2E_COMPOSE, the stack's compose command,
-// such as "docker compose -f docker/docker-compose.yaml" with an
-// absolute path. make e2e sets all three. The test of the web client
+// such as "docker compose -f docker/docker-compose.yaml -f
+// docker/docker-compose.e2e.yaml" with absolute paths, the files that
+// started the stack. make e2e sets all three. The test of the web client
 // needs Chrome, which it looks for on the host unless OCCAMY_E2E_CHROME
 // names one; without one it is skipped, and fails in CI.
 package tests

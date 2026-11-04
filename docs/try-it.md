@@ -52,7 +52,7 @@ else's stack. Releases 1.0.3 and older ignore both and name the project
 `docker`, after the directory.
 
 On macOS and Windows, the engine runs in a virtual machine. The stack's
-eight containers fit in a few GiB of memory, but give the machine 8 GiB
+six containers fit in a few GiB of memory, but give the machine 8 GiB
 if anything else runs in it: a machine of 3.7 GiB, filled by another
 project's builds, stopped answering, with `podman ps` hanging for
 minutes and then `ssh: handshake failed: EOF`. `podman machine list`
@@ -136,7 +136,8 @@ compose file in a `docker` directory, runs under the same project.
 |---------|-------------|------------|
 | `occamy-v1` | `127.0.0.1:5637` | `occamyd` with the v1 file [docker/occamy-v1.yaml](../docker/occamy-v1.yaml): API v1, protocol v1 and the web client |
 | `desktop` | not published | a real desktop, XFCE with Firefox, as the user `occamy`, over TigerVNC and over xrdp, on Debian |
-| `vnc`, `tigervnc`, `ssh`, `rdp` | not published | the demo servers that the tests probe: x11vnc, TigerVNC, OpenSSH and xrdp, on Debian |
+| `ssh` | not published | the demo SSH server, OpenSSH, on Debian |
+| `vnc`, `tigervnc`, `rdp` | not published | the servers that the end-to-end tests probe: x11vnc, TigerVNC and xrdp, on Debian ([The test servers](#the-test-servers)) |
 
 The stack publishes `occamy-v1` on the host's loopback interface
 only, since anyone who has read this guide knows the demo password. To reach the web client from another machine, publish
@@ -148,9 +149,10 @@ authentication, stays on the loopback interface whatever `OCCAMY_BIND`
 says.
 
 Open <http://localhost:5637/static/> and sign in as `demo` with the
-password `occamy`. **Connections** lists 14 connections, the two real
-desktops first, and the bar says you are signed in as demo. The same
-sign-in from the command line returns an access token:
+password `occamy`. **Connections** lists three connections, the real
+desktop over VNC and over RDP, and SSH, and the bar says you are signed
+in as demo. The same sign-in from the command line returns an access
+token:
 
 ```
 curl -s localhost:5637/api/v1/auth/token \
@@ -161,7 +163,9 @@ curl -s localhost:5637/api/v1/auth/token \
 Where things live:
 
 - **The configuration** is [docker/occamy-v1.yaml](../docker/occamy-v1.yaml).
-  The container mounts it read-only at `/occamy/v1.yaml`.
+  The container mounts it read-only at `/occamy/v1.yaml`, where `make
+  run E2E=1` mounts the tests' file instead ([The test
+  servers](#the-test-servers)).
   [configuration.md](configuration.md) describes every key. To apply an
   edit, restart the service: `(cd docker && podman compose restart occamy-v1)`.
 - **The signing key** is `/var/lib/occamy/signing.key` in the
@@ -174,7 +178,7 @@ Where things live:
   names the variables in `password_env`, so it holds no password.
 - **The logs**: `(cd docker && podman compose logs -f occamy-v1)`.
   Each session's first line names the connection and the backend that
-  serves it: `user "demo" opened connection "vnc" through vnc`.
+  serves it: `user "demo" opened connection "desktop-vnc" through vnc`.
 
 ### Next to another stack
 
@@ -217,29 +221,20 @@ connection's name if the remote gives none, and your role, `owner`.
 by then, so the next one opens at once, even when you have as many as
 `occamyd` allows, 10 by default.
 
-Start with the first two: they are real desktops, which `occamyd`
-reaches with its own VNC and RDP clients. The rest are the small
-servers that the tests probe.
+The first two are real desktops, which `occamyd` reaches with its own
+VNC and RDP clients, and the third a shell on the demo SSH server.
 
 | Protocol | Connection | What you should see |
 |----------|------------|---------------------|
 | VNC | **Desktop (XFCE) over VNC** (`desktop-vnc`) | A real desktop: XFCE's panel along the top, with **Applications** at its left, and a dock along the bottom with a terminal, the file manager and Firefox, which opens on a page stored on the desktop. It resizes to the window, and the panel and the dock follow. The session runs from the moment the `desktop` service starts, so it shows at once |
 | RDP | **Desktop (XFCE) over RDP** (`desktop-rdp`) | The same desktop, in a session of its own, from xrdp. It resizes the same way. The first connection after the `desktop` service starts creates the X session, so the desktop takes a few seconds to appear, and took 15 seconds at a load of about 35 to 90 |
-| VNC | **x11vnc** (`vnc`) | A black desktop with two xterms and no window manager. The small one at the top left says "Lines typed here reach the clipboard as hex"; it is a probe of the end-to-end tests. The large one has a root shell, `root@…:/#`. x11vnc does not resize its screen, so the page scales the 1024×768 desktop to the window. Keys go to the window under the pointer, as there is no window manager |
-| VNC | **TigerVNC** (`tigervnc`) | The same desktop, served by TigerVNC, which resizes its screen to the window. The page asks for the window's size in CSS pixels, so on a HiDPI display the xterms are as large as on any other, and a little soft, with a remote pixel across two device pixels at a ratio of 2 |
 | SSH | **SSH** (`ssh`) | A terminal with Debian's login banner and the prompt `occamy@…:~$`. It fills the window, and its rows and columns follow the window (`stty size` shows them) |
-| RDP | **RDP** (`rdp`) | xrdp's X session: a black desktop with one xterm at the top left and the prompt `occamy@…:~$`. The desktop resizes to the window, in CSS pixels as on TigerVNC. The first connection after the stack or the `rdp` service starts creates the X session, so the xterm takes a few seconds to appear on an idle host, and took 17 seconds at a load of 306; wait for it before you type. Later connections return to the same X session |
 | Kubernetes | none in the demo stack | A terminal in a pod. See [Kubernetes](#kubernetes) below for a cluster to try it with |
 
 The two desktops are separate sessions of one user, each with its own
 settings and Firefox profile. The RDP session's home is `/home/occamy`
 and the VNC session's is `/home/occamy/vnc`, inside it, since Firefox
 refuses a profile that another session has open.
-
-The other VNC connections reach the servers' other screens: no
-password, VeNCrypt, and the German and French keyboard layouts.
-**TigerVNC, asking for the password** opens a form for the password
-first, which is `vncpassword`.
 
 The RDP backend asks for RDP's graphics pipeline (GFX) by
 default, through which xrdp draws its sessions in RemoteFX
@@ -252,6 +247,28 @@ sends plain bitmap updates
 been tested against xrdp and on a Windows Server 2025 CI runner, not on
 a real Windows deployment; [Windows hosts](#windows-hosts) has what that
 run showed.
+
+### The test servers
+
+`make run E2E=1` starts the same stack with the end-to-end tests' v1
+file, [docker/occamy-v1-e2e.yaml](../docker/occamy-v1-e2e.yaml), in
+place of the demo's
+([docker/docker-compose.e2e.yaml](../docker/docker-compose.e2e.yaml)).
+**Connections** then lists 14 connections: the three above, then the
+small servers that the tests probe, which show bare X desktops rather
+than a desktop to work in. `make run` without `E2E=1` returns to the
+three.
+
+| Protocol | Connection | What you should see |
+|----------|------------|---------------------|
+| VNC | **x11vnc** (`vnc`) | A black desktop with two xterms and no window manager. The small one at the top left says "Lines typed here reach the clipboard as hex"; it is a probe of the end-to-end tests. The large one has a root shell, `root@…:/#`. x11vnc does not resize its screen, so the page scales the 1024×768 desktop to the window. Keys go to the window under the pointer, as there is no window manager |
+| VNC | **TigerVNC** (`tigervnc`) | The same desktop, served by TigerVNC, which resizes its screen to the window. The page asks for the window's size in CSS pixels, so on a HiDPI display the xterms are as large as on any other, and a little soft, with a remote pixel across two device pixels at a ratio of 2 |
+| RDP | **RDP** (`rdp`) | xrdp's X session: a black desktop with one xterm at the top left and the prompt `occamy@…:~$`. The desktop resizes to the window, in CSS pixels as on TigerVNC. The first connection after the stack or the `rdp` service starts creates the X session, so the xterm takes a few seconds to appear on an idle host, and took 17 seconds at a load of 306; wait for it before you type. Later connections return to the same X session |
+
+The other VNC connections reach the servers' other screens: no
+password, VeNCrypt, and the German and French keyboard layouts.
+**TigerVNC, asking for the password** opens a form for the password
+first, which is `vncpassword`.
 
 ### Kubernetes
 
@@ -368,7 +385,7 @@ with Ctrl-C.
 
 ### Sharing
 
-1. Open **x11vnc**. You are its owner.
+1. Open **Desktop (XFCE) over VNC**. You are its owner.
 2. Click **Share**. Under **Others join**, pick **Read-only: they
    watch**, keep **Link expires after** as it is, and click **Create
    link**, then **Copy link**. The link is the page's address with
@@ -393,45 +410,44 @@ see "The owner left and did not come back in time."
 
 ### Clipboard
 
-On **x11vnc**, **TigerVNC** or **RDP**:
+On **Desktop (XFCE) over VNC** or **over RDP**:
 
-1. **From the remote to the browser.** With the pointer over the
-   remote xterm, type `echo hello from the remote | xclip -selection
-   clipboard` there. Click **Clipboard**: the box shows `hello from the
-   remote`, with the newline that `echo` wrote after it. **Copy** puts
-   it on your own clipboard.
+1. **From the remote to the browser.** In the desktop's terminal, run
+   `echo hello from the remote`, select the words it printed and press
+   Ctrl+Shift+C. Click **Clipboard**: the box shows them. **Copy** puts
+   them on your own clipboard.
 2. **From the browser to the remote.** Replace the box's text with
    `hello from the browser` and click **Send**. The panel says "Sent to
-   the remote clipboard." In the remote xterm, type `xclip -o
-   -selection clipboard; echo`, and it prints `hello from the browser`.
+   the remote clipboard." Click the terminal and press Ctrl+Shift+V,
+   and it pastes `hello from the browser`.
    **Paste local** fills the box from your own clipboard where the
    browser allows it. When its window gets the focus, the page also
    sends your clipboard to the remote, if the browser lets it read the
    clipboard without asking.
 
-**Desktop (XFCE) over VNC** and **over RDP** have the clipboard too, but
-no `xclip`. In the terminal, select text and press Ctrl+Shift+C, and
-the **Clipboard** box shows it. Send text from the box, and Ctrl+Shift+V
-pastes it into the terminal. They do not answer the clipboard by
-themselves as the desktops below do.
-
-The VNC desktops also answer the clipboard by themselves: send
-`owner: hi`, and a moment later the box shows `echo: hi`, the remote's
-clipboard. The RDP desktop does the same with `occamy-e2e:hi`, which
-comes back as `echo:occamy-e2e:hi`. Once sent, the box's text counts
-as the remote's, so the next remote clipboard replaces it. Text that
-you type after the send stays when the remote clipboard changes, and
-the panel says "Edited: the remote clipboard holds other text.";
-**Show it** puts the remote's text in the box. Text too large for one
-message is not sent: the panel says "Not sent: the text is too large
-for one message to occamyd. Send less of it.", and the text stays in
-the box as your edit. A read-only viewer sees the remote clipboard but
-cannot send to it.
+Once sent, the box's text counts as the remote's, so the next remote
+clipboard replaces it. Text that you type after the send stays when the
+remote clipboard changes, and the panel says "Edited: the remote
+clipboard holds other text."; **Show it** puts the remote's text in the
+box. Text too large for one message is not sent: the panel says "Not
+sent: the text is too large for one message to occamyd. Send less of
+it.", and the text stays in the box as your edit. A read-only viewer
+sees the remote clipboard but cannot send to it.
 
 A terminal session has no remote clipboard: `ssh` and Kubernetes ignore
 it. On **SSH**, the **Clipboard** panel says so, and points to the
 browser's paste: click the terminal and press ⌘V, or Ctrl+Shift+V, and
 the text goes to the shell.
+
+The test servers of `make run E2E=1` ([The test
+servers](#the-test-servers)) have `xclip` in their xterms: with the
+pointer over one, `echo hello from the remote | xclip -selection
+clipboard` puts text on the remote clipboard, and after a **Send**,
+`xclip -o -selection clipboard; echo` prints it. They also answer the
+clipboard by themselves, which the desktops do not: on **x11vnc** and
+**TigerVNC**, send `owner: hi`, and a moment later the box shows
+`echo: hi`, the remote's clipboard. **RDP** does the same with
+`occamy-e2e:hi`, which comes back as `echo:occamy-e2e:hi`.
 
 On RDP, a server's clipboard is a process of its own, xrdp's
 `xrdp-chansrv`, which starts only after you log on, and may exit while
@@ -443,24 +459,24 @@ panel. Nothing is lost: the text waits, and goes when the server
 answers. At a slow logon screen nothing is wrong, and the word goes once
 you are in. It also goes when you dismiss it.
 
-If that stays, or the RDP desktop's **Clipboard** panel never changes,
-the process has probably gone. The demo image starts it again when the
-next connection opens, and the `rdp` service's log says
+If that stays, or an RDP session's **Clipboard** panel never changes,
+the process has probably gone. The demo images start it again when the
+next connection opens, and the `desktop` or `rdp` service's log says
 `starting xrdp-chansrv again`, so end the session, open it again and
 send the text again, as text still waiting ends with its session. xrdp
 itself starts that process only with an X session, so a server without
 the demo's `reconnectwm.sh` keeps the clipboard silent until you log out
 of that session.
 
-The demo x11vnc used to die now and then of an X error, `BadWindow`,
-which ended its sessions with "Remote unreachable", sometimes right
-after it refused a resize. The resize was not the cause. It was
-x11vnc's own clipboard bug: it answered a request for the clipboard
-from a window that had gone, which the desktop's clipboard probe left
-behind when x11vnc stalled for more than 2 seconds. The demo sets
-`X11VNC_SENDEVENT_SYNC=1`, which makes x11vnc catch that error. A
-watchdog still starts x11vnc again should it die of anything else; the
-sessions on it end, and you open them again.
+The test servers' x11vnc used to die now and then of an X error,
+`BadWindow`, which ended its sessions with "Remote unreachable",
+sometimes right after it refused a resize. The resize was not the
+cause. It was x11vnc's own clipboard bug: it answered a request for the
+clipboard from a window that had gone, which its desktop's clipboard
+probe left behind when x11vnc stalled for more than 2 seconds. Its
+image sets `X11VNC_SENDEVENT_SYNC=1`, which makes x11vnc catch that
+error. A watchdog still starts x11vnc again should it die of anything
+else; the sessions on it end, and you open them again.
 
 The same request used to kill an `xclip` that you ran in the remote
 xterm, which printed `X Error of failed request: BadWindow` there and
@@ -477,15 +493,16 @@ started, wait that long and send it again.
 
 **Resize.** Resize the browser window, or click **Full screen**:
 
-- On **TigerVNC** and **RDP**, the remote desktop changes size to fill
-  the window.
-- On **Desktop (XFCE) over VNC** and **over RDP**, it does too, and
-  XFCE's panel and dock follow the new size. Over RDP, the screen turns
-  black while xrdp redraws it: for 0.1 to 1 second at a load of 25 to
-  60, and for several seconds at a load of 85.
+- On **Desktop (XFCE) over VNC** and **over RDP**, the remote desktop
+  changes size to fill the window, and XFCE's panel and dock follow the
+  new size. Over RDP, the screen turns black while xrdp redraws it: for
+  0.1 to 1 second at a load of 25 to 60, and for several seconds at a
+  load of 85.
 - On **SSH**, the terminal gains or loses rows and columns: run
   `stty size` before and after.
-- **x11vnc** keeps 1024×768, and the page scales it. x11vnc refuses to
+- Of the test servers ([The test servers](#the-test-servers)),
+  **TigerVNC** and **RDP** change size to fill the window too.
+  **x11vnc** keeps 1024×768, and the page scales it. x11vnc refuses to
   resize, and `occamyd` logs `the server prohibits resizing the screen`
   once and stops asking; the session goes on.
 
@@ -526,7 +543,8 @@ joined through a share link loses the share on a reload and needs the
 link again.
 
 To watch an owner leave and come back without breaking a network, run
-the end-to-end test that does it against the running stack:
+the end-to-end test that does it against a stack that `make run E2E=1`
+started:
 
 ```
 OCCAMY_E2E_V1_ENDPOINT=localhost:5637 go test -count=1 -v -run 'TestE2EV1RDP/reconnect' ./tests/
@@ -610,9 +628,16 @@ interop server, and skip everywhere else.
 
 ### End-to-end tests
 
-With the stack from [section 3](#3-start-the-demo-stack) running:
+The tests run on the end-to-end stack: the demo stack of [section
+3](#3-start-the-demo-stack) with
+[docker/docker-compose.e2e.yaml](../docker/docker-compose.e2e.yaml)
+over it, which gives `occamy-v1` the connections of [the test
+servers](#the-test-servers) as well as the demo's. `make run E2E=1`
+starts it, or switches a running demo stack to it, and `make e2e` runs
+its compose commands with the same files:
 
 ```
+make run E2E=1
 make e2e
 ```
 
@@ -678,8 +703,8 @@ left in the shell or in `docker/.env`. `go test -run TestDemoDebugGating
 
 ### Pressure test and soak
 
-Both need the debug routes, so start the stack with
-`make run OCCAMY_DEBUG=1` first.
+Both need the debug routes and the test servers, so start the stack
+with `make run E2E=1 OCCAMY_DEBUG=1` first.
 
 ```
 make e2e OCCAMY_PRESSURE_N=10
@@ -782,8 +807,9 @@ make stop
 ```
 
 `make stop` stops and removes the stack's containers and its network,
-and keeps its volumes. To also remove what `make build` and `make run`
-built and made:
+whether `make run` started it with `E2E=1` or without, and keeps its
+volumes. To also remove what `make build` and `make run` built and
+made:
 
 ```
 make clean

@@ -83,9 +83,12 @@ runtime seldom ends. The current number is the `PIDS` column of
 ## Tests and benchmarks
 
 - `go test -race ./...` runs the unit tests.
-- `make e2e` runs the end-to-end tests against the demo stack
-  (`make build run` first). They open a session to each demo server and
-  check that the remote desktop arrives at the first attempt.
+- `make e2e` runs the end-to-end tests against the demo stack with
+  the tests' connections (`make build`, then `make run E2E=1`, which
+  adds `docker/docker-compose.e2e.yaml` and its v1 file,
+  `docker/occamy-v1-e2e.yaml`). They open a session to each demo
+  server and check that the remote desktop arrives at the first
+  attempt.
   `TestE2EV1RDP` also takes the demo xrdp server's `rdp` through
   the clipboard both ways, which the image's clipboard echo answers, a
   resize, a viewer joined by a share, and the owner leaving and coming
@@ -132,7 +135,8 @@ runtime seldom ends. The current number is the `PIDS` column of
   clipboard went missing, twice, with x11vnc alive, it skips, and logs
   `the clipboard went missing with x11vnc alive` with what it missed.
 - `make soak` runs `TestSoak` against the demo stack's `occamy-v1`,
-  which `make run OCCAMY_DEBUG=1` started with its debug listener:
+  which `make run E2E=1 OCCAMY_DEBUG=1` started with the tests'
+  connections and its debug listener:
   `OCCAMY_SOAK_SESSIONS` sessions, 8 by default, to TigerVNC
   (`OCCAMY_SOAK_CONNECTIONS`, `tigervnc` by
   default, since x11vnc's watchdog restarts would end sessions) for
@@ -155,8 +159,8 @@ runtime seldom ends. The current number is the `PIDS` column of
   `make soak OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h`.
 - `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test, which counts
   `occamyd`'s goroutines from `occamy-v1`'s debug listener, served
-  after `make run OCCAMY_DEBUG=1` (`OCCAMY_E2E_V1_DEBUG`). Each of its N
-  rounds opens two sessions to each demo server at once, through
+  after `make run E2E=1 OCCAMY_DEBUG=1` (`OCCAMY_E2E_V1_DEBUG`). Each
+  of its N rounds opens two sessions to each demo server at once, through
   `occamy-v1`: one that waits for the remote's first frame and one that
   sends garbage once it is welcomed. Sessions may fail under the load.
   The test then closes every session, and `occamyd`'s goroutines must

@@ -19,8 +19,8 @@ client, and Podman or Docker with a compose provider.
 
 ```
 make build      # build the image (CONTAINER_ENGINE=docker on each for Docker)
-make run        # start occamy and the demo servers on localhost:5636 and :5637
-make e2e        # end-to-end tests against the running stack
+make run E2E=1  # start occamyd and the demo servers on localhost:5637, with the tests' connections
+make e2e        # end-to-end tests against that stack
 make stop
 ```
 

@@ -1,0 +1,145 @@
+# Copyright 2026 Changkun Ou. All rights reserved.
+# Use of this source code is governed by a MIT
+# license that can be found in the LICENSE file.
+
+# The v1 file of the end-to-end tests (tests/), which
+# docker-compose.e2e.yaml mounts in place of the demo's, occamy-v1.yaml,
+# under make run E2E=1: the demo's file, with the connections of the
+# servers that the tests probe and the limit the pressure test needs.
+# occamyd reads one file, so this one repeats the demo's settings and
+# its three connections, the real desktop over VNC and RDP and the demo
+# SSH server; internal/config's TestDemoV1File checks that they are the
+# demo's. Then come the demo VNC servers, x11vnc and TigerVNC, with each
+# security type and keyboard layout that tests/parity_test.go checks,
+# and the demo RDP server. The user demo signs in with the password
+# occamy, as in the demo.
+
+version: 1
+listen: 0.0.0.0:5637
+# The image's build of the web client, served under /static/.
+web_client: client/occamy-web/dist
+# The debug listener, as the demo's, for the soak (tests/soak_test.go),
+# which samples occamyd's goroutines, heap and open files from it, and
+# the pressure test (tests/pressure_test.go), which counts its
+# goroutines: off unless make run OCCAMY_DEBUG=1 sets
+# OCCAMY_V1_DEBUG_ADDRESS, which docker-compose.yaml passes on, and then
+# published on the host's loopback interface only.
+debug:
+  address_env: OCCAMY_V1_DEBUG_ADDRESS
+# The pressure test opens 60 sessions at once as demo, past the default
+# of 10 a user.
+limits:
+  sessions_per_user: 100
+auth:
+  # Where a real install keeps it, on a volume (docker-compose.yaml):
+  # occamyd creates the key at start, and tokens survive a restart, which
+  # tests/restart_test.go checks.
+  signing_key_file: /var/lib/occamy/signing.key
+  users:
+    - name: demo
+      password_hash: "$2a$10$DXEVjCzdy7mEP0VBuqhlqunMrnP3lSGh0/kl6yLwA5Rhrl4hLhjPu"
+connections:
+  # The demo's connections, as occamy-v1.yaml lists them: a real desktop,
+  # first, XFCE with Firefox, a session of its own for each protocol.
+  - id: desktop-vnc
+    name: Desktop (XFCE) over VNC
+    protocol: vnc
+    target: desktop:5900
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: desktop-rdp
+    name: Desktop (XFCE) over RDP
+    protocol: rdp
+    target: desktop:3389
+    # xrdp speaks TLS without NLA, and signs its certificate itself when
+    # the image is built, so there is nothing to pin in advance: for the
+    # demo only, and occamyd warns of it when it starts.
+    security: tls
+    tls: {insecure_skip_verify: true}
+    credentials: {username: occamy, password_env: OCCAMY_DEMO_RDP_PASSWORD}
+    allow: {users: [demo]}
+  - id: ssh
+    name: SSH
+    protocol: ssh
+    target: ssh:22
+    # The demo server makes its host keys when it starts.
+    insecure_ignore_host_key: true
+    credentials: {username: occamy, password_env: OCCAMY_DEMO_SSH_PASSWORD}
+    allow: {users: [demo]}
+  # Each VNC server and security type, which tests/parity_test.go
+  # checks, and the RDP server. The connections that prompt ask the
+  # owner for whatever the server wants, and for nothing where it wants
+  # nothing (None). The de and fr connections reach screens with the
+  # German and French keyboard layouts, for the matrix's keyboard rows.
+  - id: vnc
+    name: x11vnc
+    protocol: vnc
+    target: vnc:5900
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: vnc-none
+    name: x11vnc without a password
+    protocol: vnc
+    target: vnc:5901
+    credentials: {prompt: true}
+    allow: {users: [demo]}
+  - id: tigervnc
+    name: TigerVNC
+    protocol: vnc
+    target: tigervnc:5900
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: tigervnc-prompt
+    name: TigerVNC, asking for the password
+    protocol: vnc
+    target: tigervnc:5900
+    credentials: {prompt: true}
+    allow: {users: [demo]}
+  - id: tigervnc-plain
+    name: TigerVNC over VeNCrypt
+    protocol: vnc
+    target: tigervnc:5901
+    # VeNCrypt's Plain, as the user occamy, over TLS with a certificate
+    # from the CA that the tigervnc service makes.
+    credentials: {username: occamy, password_env: OCCAMY_DEMO_PLAIN_PASSWORD}
+    tls: {ca_file: /run/occamy-vnc-ca/ca.pem}
+    allow: {users: [demo]}
+  - id: tigervnc-none
+    name: TigerVNC without a password
+    protocol: vnc
+    target: tigervnc:5902
+    credentials: {prompt: true}
+    allow: {users: [demo]}
+  - id: vnc-de
+    name: x11vnc with the German layout
+    protocol: vnc
+    target: vnc:5902
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: vnc-fr
+    name: x11vnc with the French layout
+    protocol: vnc
+    target: vnc:5903
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: tigervnc-de
+    name: TigerVNC with the German layout
+    protocol: vnc
+    target: tigervnc:5903
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: tigervnc-fr
+    name: TigerVNC with the French layout
+    protocol: vnc
+    target: tigervnc:5904
+    credentials: {password_env: OCCAMY_DEMO_VNC_PASSWORD}
+    allow: {users: [demo]}
+  - id: rdp
+    name: RDP
+    protocol: rdp
+    target: rdp:3389
+    # As for desktop-rdp: xrdp signs its certificate itself.
+    security: tls
+    tls: {insecure_skip_verify: true}
+    credentials: {username: occamy, password_env: OCCAMY_DEMO_RDP_PASSWORD}
+    allow: {users: [demo]}
