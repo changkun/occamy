@@ -9,8 +9,7 @@ privately as described in [SECURITY.md](SECURITY.md).
 Search the existing issues first. A good bug report says which version or
 commit you ran, how you deployed it (image or source), which protocol you
 connected with, what you expected, and what happened, with `occamyd`
-logs. Remove tokens and passwords from the logs: v0 tokens contain the
-remote credentials.
+logs. Remove tokens and passwords from the logs.
 
 ## Development
 
@@ -78,11 +77,10 @@ the spec first, and update it when the change makes it inaccurate.
 - Add tests for new behaviour, and a regression test for every bug fix.
 - Add a line under `Unreleased` in [CHANGELOG.md](CHANGELOG.md) for any
   user-visible change.
-- CI (`go`, `lint`, `build` on macOS and Windows, `web`, `image`,
-  `e2e` and `bench`, and `Pages` when the docs change) must pass before
-  a PR merges. PRs
-  merge with a merge commit, so that the commit hashes cited in specs stay
-  valid.
+- CI (`go`, `lint`, `build` on macOS and Windows, `macos` for the Mac
+  app, `web`, `image`, `e2e` and `bench`, and `Pages` when the docs
+  change) must pass before a PR merges. PRs merge with a merge commit,
+  so that the commit hashes cited in specs stay valid.
 
 ## Releases
 

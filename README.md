@@ -16,7 +16,7 @@ Occamy is a remote desktop gateway written in Go. It connects to
 desktops and terminals over VNC, RDP, SSH and Kubernetes, and puts them
 in your web browser.
 
-![Signing in, opening a Linux desktop over RDP, running top in a terminal, and sharing the session with a read-only viewer, shown in the corner](./docs/demo.webp)
+![Signing in, opening a Linux desktop over RDP, running top in a terminal, and sharing the session with a viewer who can only watch, shown in the corner](./docs/demo.webp)
 
 ## Why Occamy
 
@@ -68,7 +68,7 @@ frame of full-screen motion in 8 KiB instead of 50–66
 | Protocol | Served by | Notes |
 |----------|-----------|-------|
 | VNC | Occamy | Tested with x11vnc and TigerVNC, VeNCrypt included |
-| RDP | Occamy | Tested with xrdp. Windows hosts need `disable_gfx: true` for now; see [Backends](./docs/configuration.md#backends) |
+| RDP | Occamy | Tested with xrdp. Windows hosts need `disable_gfx: true`; see [Backends](./docs/configuration.md#backends) |
 | SSH | Occamy | The terminal is drawn in the browser |
 | Kubernetes | Occamy | A shell in a pod, through the API server |
 
@@ -96,12 +96,14 @@ sharing, the clipboard and resizing.
 
 ## Install
 
-Each [release](https://github.com/changkun/occamy/releases) publishes a
-multi-arch image, `ghcr.io/changkun/occamy:<version>`, and `occamyd`
-archives for Linux, macOS and Windows on amd64 and arm64, with
-`SHA256SUMS` and build provenance attestations. Occamy for macOS comes
-as a disk image, `Occamy-<version>.dmg`, signed with a Developer ID and
-notarized by Apple ([docs/macos-app.md](docs/macos-app.md#installing-it)).
+Each [release](https://github.com/changkun/occamy/releases), tagged like
+`v1.0.0-beta.2`, publishes a multi-arch image,
+`ghcr.io/changkun/occamy:<tag>`, and `occamyd` archives for Linux, macOS
+and Windows on amd64 and arm64, with `SHA256SUMS` and build provenance
+attestations. Occamy for macOS comes as a disk image named for the
+version without its `v`, such as `Occamy-1.0.0-beta.2.dmg`, signed with
+a Developer ID and notarized by Apple
+([docs/macos-app.md](docs/macos-app.md#installing-it)).
 
 Write a configuration file that lists your users and your connections:
 
@@ -132,15 +134,15 @@ podman run -d --name occamy -p 5636:5636 \
     -e WORKSTATION_PASSWORD \
     -v occamy-data:/var/lib/occamy \
     -v ./occamy.yaml:/occamy/v1.yaml:ro \
-    ghcr.io/changkun/occamy:<version> /occamy/occamyd -conf /occamy/v1.yaml
+    ghcr.io/changkun/occamy:<tag> /occamy/occamyd -conf /occamy/v1.yaml
 ```
 
 To check a download against the release:
 
 ```sh
 sha256sum -c SHA256SUMS
-gh attestation verify occamyd-<version>-linux-amd64.tar.gz --repo changkun/occamy
-gh attestation verify oci://ghcr.io/changkun/occamy:<version> --repo changkun/occamy
+gh attestation verify occamyd-<tag>-linux-amd64.tar.gz --repo changkun/occamy
+gh attestation verify oci://ghcr.io/changkun/occamy:<tag> --repo changkun/occamy
 ```
 
 Open http://localhost:5636/static/. `occamyd` speaks plain HTTP unless

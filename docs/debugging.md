@@ -17,10 +17,11 @@ not. It needs a port of its own: `occamyd` refuses a `debug.address` on
 `localhost:5636` beside `127.0.0.1:5636`, or any host beside `:5636`.
 A CPU profile or a trace still running when `occamyd` stops is cut after
 the 5 second drain; a second SIGINT or SIGTERM stops `occamyd` at once.
-`/debug/vars` shows the command line, the runtime's
-memory statistics, the number of goroutines and the open file
-descriptors as JSON. `debug.address_env` names an environment variable
-that holds the address instead, and leaves the listener off while it is
+`/debug/vars` shows the command line, the runtime's memory statistics,
+the number of goroutines, the open file descriptors and the TCP
+congestion control the public listener's connections use, as JSON.
+`debug.address_env` names an environment variable that holds the
+address instead, and leaves the listener off while it is
 unset or empty. The demo stack's `occamy-v1` takes its address from
 `OCCAMY_V1_DEBUG_ADDRESS`, which `make run OCCAMY_DEBUG=1` sets, and then
 serves its debug listener on the host's `localhost:5638`
