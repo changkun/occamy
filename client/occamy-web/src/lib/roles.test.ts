@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { Role } from '../protocol'
-import { abilities, roleName } from './roles'
+import { abilities, roleLabel } from './roles'
 
 describe('abilities', () => {
   it('lets the owner do everything', () => {
@@ -25,8 +25,8 @@ describe('abilities', () => {
   })
 })
 
-describe('roleName', () => {
-  it('names roles as API v1 does', () => {
-    expect([Role.Owner, Role.Viewer, Role.ReadOnly].map(roleName)).toEqual(['owner', 'viewer', 'read-only'])
+describe('roleLabel', () => {
+  it('names roles by what they allow', () => {
+    expect([Role.Owner, Role.Viewer, Role.ReadOnly].map(roleLabel)).toEqual(['owner', 'with control', 'view only'])
   })
 })

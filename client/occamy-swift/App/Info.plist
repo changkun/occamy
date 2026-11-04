@@ -9,6 +9,10 @@
 	<string>Occamy</string>
 	<key>CFBundleExecutable</key>
 	<string>Occamy</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
+	<key>CFBundleIconName</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>de.changkun.occamy</string>
 	<key>CFBundleInfoDictionaryVersion</key>

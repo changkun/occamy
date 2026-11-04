@@ -459,6 +459,35 @@ For beta.2 (2026-11-03):
     `ssh-keyscan` line or a `SHA256:` fingerprint. A card's thumbnail is
     the session's last picture, saved under
     `~/Library/Application Support/Occamy/Thumbnails`.
+  - Add Server is a + in the window's toolbar, beside Refresh and the
+    search field, as remote desktop clients such as Microsoft's Windows
+    App have it, and in the File menu (⌘N). In the sidebar's toolbar,
+    beside the window's buttons, SwiftUI moved it into an overflow menu
+    once the sidebar had been hidden and shown again, and the owner
+    rejected it at the sidebar's foot (2026-11-04).
+  - A card's picture is the remote's whole screen, fitted into a 16:10
+    frame that sets the card's size, so that every card in a row is as
+    tall.
+  - The icon is `App/AppIcon.icon`, an Icon Composer file that
+    `make swift-app` compiles with `actool` into `Assets.car` and an
+    `.icns` for older readers: the occamy's head, crest, beak and
+    belly, filling the tile, in the logo's colours on its deep violet.
+    `App/AppIcon.svg` is its source, rendered by hand into the layer's
+    PNG, so that the build needs no SVG renderer. The bundle had no
+    icon at first, and then the logo, `docs/occamy.png`, whose pixel
+    art was too small to read even in the Dock (both found by the
+    owner, 2026-11-04). The logo stays the project's, in the README.
+  - A session window learns its `NSWindow` from a view in its
+    background, which reports only the windows it moves into. SwiftUI
+    puts a new such view in the window as it opens and as the session
+    connects again, and the old one leaves after the new one has found
+    the window; when leaving reported nil too, that nil came last, and
+    Full Screen and fitting the window to the remote's screen had no
+    window to act on (found by the owner, 2026-11-04).
+  - The share menu says what a link allows: Copy Link with Control,
+    to type, point and use the clipboard, and Copy View-Only Link, as
+    the web client's share panel and bar do. API v1 calls the roles
+    `viewer` and `read-only`, and "viewer" read as watching only.
   - Tokens, and passwords the user chooses to remember, go to the login
     keychain under `de.changkun.occamy`. occamyd's tokens last 15
     minutes and are not renewed, so with a remembered password the app
@@ -466,7 +495,7 @@ For beta.2 (2026-11-03):
   - The session window's bar, in Liquid Glass at the top edge: scaling
     (fit, actual size with scroll bars, or, for the owner, resizing the
     remote to the window), full screen, Ctrl-Alt-Del, ⌘ shortcuts to the
-    remote, the clipboard, a viewer or read-only link for an hour, and
+    remote, the clipboard, a link with control or a view-only one for an hour, and
     End Session for the owner (Disconnect for a viewer). Closing the
     window leaves the session to the owner grace. When the session
     ends, the window says why; Connect Again opens the connection

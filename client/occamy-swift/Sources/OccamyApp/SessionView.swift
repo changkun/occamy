@@ -233,8 +233,8 @@ struct SessionView: View {
                 .help(model.clipboardEnabled ? "The clipboard is shared" : "The clipboard is not shared")
                 if model.role.manage {
                     Menu {
-                        Button("Copy Viewer Link") { share(.viewer, model) }
-                        Button("Copy Read-Only Link") { share(.readOnly, model) }
+                        Button("Copy Link with Control") { share(.viewer, model) }
+                        Button("Copy View-Only Link") { share(.readOnly, model) }
                     } label: {
                         Image(systemName: "link")
                     }
@@ -409,7 +409,7 @@ struct SessionView: View {
                 let s = try await server.api.share(session: id, role: role, token: token)
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(server.api.shareLink(session: id, share: s.token).absoluteString, forType: .string)
-                flash(role == .viewer ? "Viewer link copied, for an hour" : "Read-only link copied, for an hour")
+                flash(role == .viewer ? "Link with control copied, for an hour" : "View-only link copied, for an hour")
             } catch {
                 flash(error.localizedDescription)
             }
@@ -510,7 +510,7 @@ struct PromptSheet: View {
 
 /// WindowReader tells the view which window it is in.
 struct WindowReader: NSViewRepresentable {
-    let found: (NSWindow?) -> Void
+    let found: (NSWindow) -> Void
 
     func makeNSView(context: Context) -> Reader {
         let v = Reader()
@@ -521,11 +521,17 @@ struct WindowReader: NSViewRepresentable {
     func updateNSView(_ v: Reader, context: Context) {}
 
     final class Reader: NSView {
-        var found: ((NSWindow?) -> Void)?
+        var found: ((NSWindow) -> Void)?
 
+        // Only a window, never its leaving one: SwiftUI puts a new reader
+        // in the window as it opens and as the session connects again, and
+        // the old one leaves after the new one has found it, so that its
+        // nil, coming last, lost the window.
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            let w = window
+            guard let w = window else {
+                return
+            }
             DispatchQueue.main.async { [found] in found?(w) }
         }
     }

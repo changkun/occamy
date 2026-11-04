@@ -38,7 +38,8 @@ make swift-notarize DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" 
 
 ## Adding a server
 
-Choose **File > Add Server…** (⌘N) and enter the server's address, such
+Choose **File > Add Server…** (⌘N), or **+** in the toolbar, and enter
+the server's address, such
 as `occamy.example.com`, which the app reaches over https unless the
 address says `http://`, and your user name and password. The demo stack
 of [Try Occamy](try-it.md) is `http://localhost:5637`, with the user
@@ -94,7 +95,7 @@ display. Move the pointer to the window's top edge for its controls:
 | Ctrl-Alt-Del | Send Control-Alt-Delete, which the Mac would not pass on |
 | ⌘ | Send ⌘ shortcuts, such as ⌘Q or ⌘W, to the remote instead of the app |
 | Clipboard | Share the clipboard with the remote, or stop sharing it |
-| Share | Copy a link that lets someone watch the session, or take part in it, in their browser, for an hour |
+| Share | Copy a link that lets someone join the session in their browser for an hour, with control, to type, point and use the clipboard, or view only |
 | End Session | End the session for everyone in it, and close the window |
 
 Text you copy on the Mac reaches the remote when you switch to the
