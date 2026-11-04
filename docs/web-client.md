@@ -98,7 +98,7 @@ else in the session sees the question.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/web-client-prompt-dark.png">
-  <img alt="A dialog over a session that is still connecting, headed The remote computer needs more information, with the line VNC password for localhost:18690, a Password field, and the buttons Continue and End session." src="figures/web-client-prompt.png">
+  <img alt="A dialog over a session that is still connecting, headed The remote computer needs more information, with the line VNC password for desktop:5900, a Password field, and the buttons Continue and End session." src="figures/web-client-prompt.png">
 </picture>
 
 ## Work in a session
@@ -256,7 +256,7 @@ with you, through a link:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/web-client-share-dark.png">
-  <img alt="The share panel, open below the bar's Share button over a desktop session. Under Share this session, Others join offers View only: they watch and With control: they also type, point and use the clipboard, which is chosen. Link expires after is set to 1 hour. The Link field holds a link to the web client that ends in #join= and the share. Below are the buttons Create another, Copy link and Close, and the line Anyone with this link can join and control the session until the link expires or the session ends." src="figures/web-client-share.png">
+  <img alt="The share panel, open below the bar's Share button over a desktop session. Under Share this session, Others join offers View only: they watch and With control: they also type, point and use the clipboard, which is chosen. Link expires after is set to 1 hour. The Link field holds the link https://occamy.example.com/static/#join= followed by the share. Below are the buttons Create another, Copy link and Close, and the line Anyone with this link can join and control the session until the link expires or the session ends." src="figures/web-client-share.png">
 </picture>
 
 The panel then says what the link allows: "Anyone with this link can
