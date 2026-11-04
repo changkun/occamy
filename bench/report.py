@@ -33,7 +33,8 @@ import itertools
 import json
 import math
 import os
-from dataclasses import dataclass
+import textwrap
+from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 
@@ -53,24 +54,30 @@ class Metric:
     label: str
     unit: str
     lower: bool  # whether lower is better
+    short: str = ""  # the label beside a cell's name, where the label is long
+
+    def brief(self):
+        return self.short or self.label
 
 
+# Each metric as a reader names it. Latency is from a key, a click or a
+# move to the first frame that shows its effect.
 METRICS = {
-    "latency_p95": Metric("L p95", "ms", True),
-    "latency_p50": Metric("L p50", "ms", True),
-    "first_frame_p95": Metric("First frame p95", "ms", True),
-    "first_frame_p50": Metric("First frame p50", "ms", True),
-    "completion": Metric("Completion", "ms", True),
-    "bytes_down": Metric("Bytes down", "KiB", True),
-    "rate": Metric("Bytes down per second", "KiB/s", True),
-    "fps": Metric("Delivered frames per second", "frames/s", False),
+    "latency_p95": Metric("Latency, 95th percentile", "ms", True, "latency p95"),
+    "latency_p50": Metric("Latency, median", "ms", True, "latency p50"),
+    "first_frame_p95": Metric("Time to the first frame, 95th percentile", "ms", True, "first frame p95"),
+    "first_frame_p50": Metric("Time to the first frame, median", "ms", True, "first frame p50"),
+    "completion": Metric("Time to complete", "ms", True, "time to complete"),
+    "bytes_down": Metric("Data to the client", "KiB", True, "data"),
+    "rate": Metric("Data to the client per second", "KiB/s", True, "data per second"),
+    "fps": Metric("Frames shown per second", "frames/s", False, "frames per second"),
     "scene_missed": Metric("Scene frames never shown", "%", True),
-    "frame_interval_p95": Metric("Scene frame interval p95", "ms", True),
-    "bytes_per_frame": Metric("Bytes per frame", "KiB", True),
+    "frame_interval_p95": Metric("Gap between frames, 95th percentile", "ms", True, "frame gap p95"),
+    "bytes_per_frame": Metric("Data per frame", "KiB", True),
     "cpu_per_frame": Metric("Server CPU per frame", "ms", True),
-    "server_cpu": Metric("Server CPU", "ms", True),
+    "server_cpu": Metric("Server CPU time", "ms", True),
     "server_mem": Metric("Server memory, peak", "MiB", True),
-    "client_cpu": Metric("Client CPU", "ms", True),
+    "client_cpu": Metric("Client CPU time", "ms", True),
     "occamyd_alloc": Metric("occamyd allocated", "MiB", True),
     "occamyd_gc": Metric("occamyd GC cycles", "", True),
     "occamyd_heap": Metric("occamyd heap in use", "MiB", True),
@@ -102,6 +109,28 @@ SCENARIOS = {
     "G10": ("fps", ["latency_p95", *CADENCE, "bytes_per_frame", "cpu_per_frame"]),
     "G11": ("fps", ["latency_p95", *CADENCE, "bytes_per_frame", "cpu_per_frame"]),
 }
+# Each scenario by what it does, as the figures and tables name it; the
+# code stays beside it in the tables, as the plans and the spec use it.
+SCENARIO_NAMES = {
+    "T1": "Typing",
+    "T2": "Long output",
+    "T3": "top",
+    "T4": "Paging in less",
+    "T5": "Coloured log",
+    "G1": "Still desktop",
+    "G2": "Key press",
+    "G3": "Scrolling text",
+    "G4": "Dragging a window",
+    "G5": "Key during motion",
+    "G6": "Full-screen photo",
+    "G7": "Connecting",
+    "G8": "Click",
+    "G9": "Drawing",
+    "G10": "Video in a window",
+    "G11": "Full-screen video",
+    "G12": "Resizing",
+}
+PROTOCOL_NAMES = {"ssh": "SSH", "vnc": "VNC", "rdp": "RDP"}
 COSTS = ["server_cpu", "server_mem", "client_cpu"]
 RUNTIME = ["occamyd_alloc", "occamyd_gc", "occamyd_heap", "occamyd_goroutines"]
 
@@ -120,12 +149,13 @@ SERVERS = {
     "v1-guacd-gfx": ["occamy-v1-gfx", "guacd"],
 }
 
+# Each network by its round trip and bandwidth.
 NETS = {
-    "N0": "N0: no delay",
-    "N1": "N1: 20 ms, 100 Mbit/s",
-    "N2": "N2: 50 ms, 20 Mbit/s",
-    "N3": "N3: 100 ms, 5 Mbit/s",
-    "N4": "N4: 250 ms, 1 Mbit/s",
+    "N0": "No delay",
+    "N1": "20 ms, 100 Mbit/s",
+    "N2": "50 ms, 20 Mbit/s",
+    "N3": "100 ms, 5 Mbit/s",
+    "N4": "250 ms, 1 Mbit/s",
 }
 RTT_MS = {"N0": 0, "N1": 20, "N2": 50, "N3": 100, "N4": 250}
 PROTOCOLS = ["ssh", "vnc", "rdp"]
@@ -162,6 +192,10 @@ class Family:
     # set Occamy against Guacamole, not one of Occamy's settings against
     # another.
     targets: bool = True
+    # names, (series, name) pairs, names a series in this family where
+    # SERIES_NAMES would mislead, as v1-native in results from before
+    # occamyd asked for BBR, when it ran CUBIC.
+    names: tuple = ()
 
     def has(self, c):
         """Says whether the comparison c is one of the family's: of its name
@@ -183,9 +217,39 @@ class Family:
 FAMILIES = [
     Family("Guacamole to Occamy", "guacd", "v1-native", "holm"),
     Family("Frame window", "v1-native-w2", "v1-native", "holm", targets=False),
-    Family("Congestion control", "v1-native-cubic", "v1-native", "holm", targets=False),
-    Family("Congestion control", "v1-native", "v1-native-bbr", "holm", targets=False),
+    Family("Congestion control", "v1-native-cubic", "v1-native", "holm", targets=False,
+           names=(("v1-native", "Occamy with BBR"),)),
+    Family("Congestion control", "v1-native", "v1-native-bbr", "holm", targets=False,
+           names=(("v1-native", "Occamy with CUBIC"),)),
 ]
+
+# Each series as a reader names it: Guacamole, the baseline, and Occamy
+# with the setting a real-time step varies.
+SERIES_NAMES = {
+    "guacd": "Guacamole",
+    "v1-native": "Occamy",
+    "occamy": "Occamy 0.x",
+    "v1-guacd": "Occamy through guacd",
+    "v1-guacd-gfx": "Occamy through guacd, GFX",
+    "v1-native-nogfx": "Occamy without GFX",
+    "v1-native-w2": "Occamy with a window of two",
+    "v1-native-cubic": "Occamy with CUBIC",
+    "v1-native-bbr": "Occamy with BBR",
+}
+
+
+def net_entry(net):
+    """Names a network in a table: its round trip and bandwidth, then its code."""
+    return f"{NETS[net]} ({net})" if net in NETS else net
+
+
+def series_names(comparisons, families=FAMILIES):
+    """Returns each series' name, as the families in comparisons name it."""
+    names = dict(SERIES_NAMES)
+    for fam in families:
+        if any(fam.has(c) for c in comparisons):
+            names.update(fam.names)
+    return names
 
 ALPHA = 0.05
 TARGET_FACTOR = 10
@@ -282,6 +346,21 @@ class Cell:
         if self.factor:
             s += f" ({self.factor})"
         return s
+
+    def title(self, sep=", ", factor=True, wrap=0):
+        """Names the cell as a reader would: its scenario and protocol, the
+        scenario wrapped at wrap characters if wrap is set."""
+        scenario = SCENARIO_NAMES.get(self.scenario, self.scenario)
+        if wrap:
+            scenario = textwrap.fill(scenario, wrap)
+        s = f"{scenario}{sep}{PROTOCOL_NAMES.get(self.protocol, self.protocol)}"
+        if factor and self.factor:
+            s += f" ({self.factor})"
+        return s
+
+    def entry(self):
+        """Names the cell in a table: its title, then its code."""
+        return f"{self.title()} ({self.scenario})"
 
     def order(self):
         sc = list(SCENARIOS).index(self.scenario) if self.scenario in SCENARIOS else len(SCENARIOS)
@@ -636,14 +715,15 @@ def plain_log_axis(axis, suffix=""):
     axis.set_minor_formatter(ticker.NullFormatter())
 
 
-def bar_figure(path, metric, summary, series, theme):
+def bar_figure(path, metric, summary, series, names, theme):
     """Draws, per network, each cell's median of metric per series as a bar
     with its 95% interval."""
     t, dark = THEMES[theme], theme == "dark"
     cells = sorted({c for (s, c, m) in summary if m == metric and s in series}, key=Cell.order)
     nets = sorted({c.net for c in cells})
-    labels = sorted({c.label() for c in cells}, key=lambda l: next(c.order()[2:] for c in cells if c.label() == l))
-    fig, axes = plt.subplots(1, len(nets), figsize=(max(3.2, 0.9 * len(labels)) * len(nets) + 1.2, 3.6),
+    labels = sorted({c.title("\n", wrap=10) for c in cells},
+                    key=lambda l: next(c.order()[2:] for c in cells if c.title("\n", wrap=10) == l))
+    fig, axes = plt.subplots(1, len(nets), figsize=(max(3.2, 0.95 * len(labels)) * len(nets) + 1.2, 3.8),
                              sharey=True, squeeze=False, layout="constrained")
     values = []
     for ax, net in zip(axes[0], nets):
@@ -653,7 +733,7 @@ def bar_figure(path, metric, summary, series, theme):
             med, lo, hi = [], [], []
             for label in labels:
                 v = next((summary[(s, c, metric)] for c in cells
-                          if c.net == net and c.label() == label and (s, c, metric) in summary), None)
+                          if c.net == net and c.title("\n", wrap=10) == label and (s, c, metric) in summary), None)
                 med.append(v["median"] if v else np.nan)
                 lo.append(v["lo"] if v else np.nan)
                 hi.append(v["hi"] if v else np.nan)
@@ -661,7 +741,7 @@ def bar_figure(path, metric, summary, series, theme):
             values += [v for v in np.concatenate([med, lo, hi]) if np.isfinite(v) and v > 0]
             pos = x + (i - (len(series) - 1) / 2) * width
             ax.bar(pos, med, width, color=COLORS.get(s, ("#898781",) * 2)[dark], edgecolor=t["surface"],
-                   linewidth=1.5, label=s)
+                   linewidth=1.5, label=names.get(s, s))
             ok = np.isfinite(lo)
             ax.errorbar(pos[ok], med[ok], yerr=[med[ok] - lo[ok], hi[ok] - med[ok]], fmt="none",
                         ecolor=t["text"], elinewidth=1, capsize=2.5)
@@ -680,39 +760,55 @@ def bar_figure(path, metric, summary, series, theme):
     save(fig, path)
 
 
-def factor_figure(path, fam, comparisons, theme):
-    """Draws the family's primary factors with their 95% intervals, on a log
-    axis with a line at 1x, and at 10x where the targets judge it."""
+def factor_title(fam, names):
+    """Names what a family compares: its candidate against its baseline."""
+    return f"{names.get(fam.candidate, fam.candidate)} against {names.get(fam.baseline, fam.baseline)}"
+
+
+def factor_figure(path, fam, comparisons, names, theme):
+    """Draws the family's primary factors with their 95% intervals, a panel
+    per network, on a log axis with a line at 1x, and at 10x where the
+    targets judge it."""
     t, dark = THEMES[theme], theme == "dark"
     rows = [c for c in comparisons if fam.has(c) and c["primary"] and np.isfinite(c["factor"])]
     rows.sort(key=lambda c: c["cell"].order())
-    fig, ax = plt.subplots(figsize=(6.4, 0.3 * len(rows) + 1.3), layout="constrained")
-    y = np.arange(len(rows))[::-1]
-    est = np.array([c["factor"] for c in rows])
-    lo = np.array([c["lo"] for c in rows])
-    hi = np.array([c["hi"] for c in rows])
-    ok = np.isfinite(lo)
+    nets = sorted({c["cell"].net for c in rows})
+    counts = [sum(c["cell"].net == net for c in rows) for net in nets]
+    fig, axes = plt.subplots(len(nets), 1, figsize=(6.4, 0.3 * len(rows) + 0.45 * len(nets) + 1.0),
+                             sharex=True, squeeze=False, layout="constrained", gridspec_kw={"height_ratios": counts})
     color = COLORS.get(fam.candidate, ("#898781",) * 2)[dark]
-    ax.errorbar(est[ok], y[ok], xerr=[est[ok] - lo[ok], hi[ok] - est[ok]], fmt="none", ecolor=color,
-                elinewidth=2, capsize=0)
-    ax.scatter(est, y, s=36, color=color, edgecolors=t["surface"], linewidths=1.5, zorder=3)
     lines = ((1, "-"), (TARGET_FACTOR, "--")) if any(c["targets"] for c in rows) else ((1, "-"),)
-    for at, style_ in lines:
-        ax.axvline(at, color=t["muted"], linewidth=1, linestyle=style_, zorder=1)
-        ax.annotate(f"{at}x", (at, 1.0), xycoords=("data", "axes fraction"), xytext=(3, 2),
-                    textcoords="offset points", color=t["text2"], fontsize=8)
-    ax.set_xscale("log")
-    plain_log_axis(ax.xaxis, "x")
-    ax.set_yticks(y, [f"{c['cell'].label()} · {c['cell'].net} · {METRICS[c['metric']].label}" for c in rows])
-    ax.tick_params(axis="y", length=0)
-    ax.grid(axis="y", visible=False)
-    ax.set_xlabel(f"Factor by which {fam.candidate} is better than {fam.baseline} (log scale)")
-    fig.suptitle(f"{fam.name}: primary metrics, with 95% intervals", x=0.0, ha="left", color=t["text"],
-                 fontsize=11)
+    for i, (ax, net) in enumerate(zip(axes[:, 0], nets)):
+        sub = [c for c in rows if c["cell"].net == net]
+        y = np.arange(len(sub))[::-1]
+        est = np.array([c["factor"] for c in sub])
+        lo = np.array([c["lo"] for c in sub])
+        hi = np.array([c["hi"] for c in sub])
+        ok = np.isfinite(lo)
+        ax.errorbar(est[ok], y[ok], xerr=[est[ok] - lo[ok], hi[ok] - est[ok]], fmt="none", ecolor=color,
+                    elinewidth=2, capsize=0)
+        ax.scatter(est, y, s=36, color=color, edgecolors=t["surface"], linewidths=1.5, zorder=3)
+        for at, style_ in lines:
+            ax.axvline(at, color=t["muted"], linewidth=1, linestyle=style_, zorder=1)
+            if i == 0:
+                ax.annotate(f"{at}x", (at, 1.0), xycoords=("data", "axes fraction"), xytext=(3, 2),
+                            textcoords="offset points", color=t["text2"], fontsize=8)
+        ax.set_yticks(y, [f"{c['cell'].title()} · {METRICS[c['metric']].brief()}" for c in sub])
+        ax.set_ylim(-0.6, len(sub) - 0.4)
+        # The first panel's title clears the 1x and 10x marks above it.
+        ax.set_title(NETS.get(net, net), color=t["text2"], pad=16 if i == 0 else 6)
+        ax.tick_params(axis="y", length=0)
+        ax.grid(axis="y", visible=False)
+    axes[0][0].set_xscale("log")
+    plain_log_axis(axes[0][0].xaxis, "x")
+    axes[-1][0].set_xlabel(f"How many times better {names.get(fam.candidate, fam.candidate)} is than"
+                           f" {names.get(fam.baseline, fam.baseline)} (log scale)")
+    fig.suptitle(f"{factor_title(fam, names)}: primary metrics, with 95% intervals", x=0.0, ha="left",
+                 color=t["text"], fontsize=11)
     save(fig, path)
 
 
-def loss_figure(path, metric, summary, theme):
+def loss_figure(path, metric, summary, names, theme):
     """Draws, per cell of the loss study, each series' median of metric
     against the loss, with its 95% interval, and marks a loss where none
     of a series' runs succeeded at the top of the panel."""
@@ -743,12 +839,13 @@ def loss_figure(path, metric, summary, theme):
             color = COLORS[s][dark]
             failed += [(x[i], color) for i, e in enumerate(v) if e is None]
             ax.plot(x, med, color=color, linewidth=2, marker="o", markersize=6, markeredgecolor=t["surface"],
-                    markeredgewidth=1.5, label=s, zorder=3)
+                    markeredgewidth=1.5, label=names.get(s, s), zorder=3)
             ok = np.isfinite(lo)
             ax.errorbar(x[ok], med[ok], yerr=[med[ok] - lo[ok], hi[ok] - med[ok]], fmt="none", ecolor=color,
                         elinewidth=1, capsize=2.5, zorder=2)
         ax.set_xticks(x, [f"{level:g}%" for level in levels])
-        ax.set_title(f"{sc} {pr} · {NETS.get(net, net)}", color=t["text2"], fontsize=9)
+        ax.set_title(f"{SCENARIO_NAMES.get(sc, sc)}, {PROTOCOL_NAMES.get(pr, pr)} · {NETS.get(net, net)}",
+                     color=t["text2"], fontsize=9)
         ax.set_ylim(bottom=0)
         top = ax.get_ylim()[1]
         for at, color in failed:
@@ -772,28 +869,33 @@ def draw(out, summary, comparisons, families=FAMILIES):
     """Draws the figures in both themes and returns their names, without
     the theme's suffix, with a caption."""
     series = [s for s in COLORS if any(k[0] == s for k in summary)]
+    names = series_names(comparisons, families)
     figures = []
     for fam in families:
         if any(fam.has(c) and c["primary"] for c in comparisons):
             name = "factors-" + fam.name.lower().replace(" ", "-")
-            figures.append((name, f"{fam.name}: factors on the primary metrics"))
+            figures.append((name, f"How many times better {names.get(fam.candidate, fam.candidate)} is than"
+                                  f" {names.get(fam.baseline, fam.baseline)} on each scenario's primary metric,"
+                                  " with 95% intervals"))
             for theme in THEMES:
                 with plt.rc_context(style(theme)):
-                    factor_figure(out / f"{name}{'-dark' if theme == 'dark' else ''}.svg", fam, comparisons, theme)
+                    factor_figure(out / f"{name}{'-dark' if theme == 'dark' else ''}.svg", fam, comparisons, names,
+                                  theme)
     for metric in LOSS_FIGURES:
         if any(m == metric and c.study == LOSS for (_, c, m) in summary):
             name = f"loss-{metric}"
             figures.append((name, f"{METRICS[metric].label} against the loss"))
             for theme in THEMES:
                 with plt.rc_context(style(theme)):
-                    loss_figure(out / f"{name}{'-dark' if theme == 'dark' else ''}.svg", metric, summary, theme)
+                    loss_figure(out / f"{name}{'-dark' if theme == 'dark' else ''}.svg", metric, summary, names,
+                                theme)
     for metric in METRICS:
         if any(m == metric for (_, _, m) in summary):
             figures.append((metric, METRICS[metric].label))
             for theme in THEMES:
                 with plt.rc_context(style(theme)):
                     bar_figure(out / f"{metric}{'-dark' if theme == 'dark' else ''}.svg", metric, summary, series,
-                               theme)
+                               names, theme)
     return figures
 
 
@@ -802,7 +904,7 @@ def picture(name, caption):
             f'  <img alt="{caption}" src="{name}.svg">\n</picture>')
 
 
-def loss_lines(losses, summary, figures):
+def loss_lines(losses, summary, figures, names=SERIES_NAMES):
     """Returns the report's section on what the loss added, if the results
     have a loss study."""
     if not losses:
@@ -816,7 +918,7 @@ def loss_lines(losses, summary, figures):
         f" distribution, beside the condition's round trip. Primary metrics, {len(primary)} tests,"
         f" Holm-corrected at {ALPHA}.",
         "",
-        "| Series | Cell | Network | Loss | Metric | Without loss | With loss | Added | Round trip | p | p (Holm) |",
+        "| Series | Scenario | Network | Loss | Metric | Without loss | With loss | Added | Round trip | p | p (Holm) |",
         "|---|---|---|---:|---|---:|---:|---:|---:|---:|---:|",
     ]
 
@@ -828,7 +930,9 @@ def loss_lines(losses, summary, figures):
         sb, sa = summary[(c["series"], base, c["metric"])], summary[(c["series"], c["cell"], c["metric"])]
         unit = METRICS[c["metric"]].unit
         cell = c["cell"]
-        out = (f"| `{c['series']}` | {cell.scenario} {cell.protocol} | {cell.net} | {loss_of(cell):g}%"
+        out = (f"| {names.get(c['series'], c['series'])} | {cell.title(factor=False)} ({cell.scenario})"
+               f" | {net_entry(cell.net)}"
+               f" | {loss_of(cell):g}%"
                f" | {METRICS[c['metric']].label}" + (f" ({unit})" if unit else "")
                + f" | {fmt_interval(sb['median'], sb['lo'], sb['hi'])}"
                f" | {fmt_interval(sa['median'], sa['lo'], sa['hi'])}"
@@ -848,7 +952,7 @@ def loss_lines(losses, summary, figures):
             "",
             "Exploratory: the p-values are not corrected.",
             "",
-            "| Series | Cell | Network | Loss | Metric | Without loss | With loss | Added | Round trip | p |",
+            "| Series | Scenario | Network | Loss | Metric | Without loss | With loss | Added | Round trip | p |",
             "|---|---|---|---:|---|---:|---:|---:|---:|---:|",
         ]
         lines += [row(c, corrected=False) for c in secondary]
@@ -862,11 +966,14 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
     host = rep.get("host", {})
     gate = plan.get("max_load", 0)
     spec = os.path.relpath(SPEC, out.resolve())
+    names = series_names(comparisons, families)
+    present = [fam for fam in families if any(fam.has(c) and c["primary"] for c in comparisons)]
+    title = "; ".join(dict.fromkeys(factor_title(fam, names) for fam in present)) or "Benchmark results"
     lines = [
-        f"# Comparison results: {source}",
+        f"# {title}",
         "",
-        "Generated by `bench/report.py`; the analysis is fixed in "
-        f"[the comparison benchmark's spec]({spec}), Analysis.",
+        f"The results in `{source}`, analysed by `bench/report.py` as"
+        f" [the comparison benchmark's spec]({spec}) fixed before any data.",
         "",
         f"- Collected from {rep.get('started', '?')}"
         + (f", resumed at {', '.join(rep['resumed'])}" if rep.get("resumed") else "")
@@ -900,19 +1007,22 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
         judged = any(c["targets"] for c in primary)
         correction = "Holm" if fam.correction == "holm" else "Benjamini–Hochberg"
         intro = f"Primary metrics, {len(primary)} tests, {correction}-corrected at {ALPHA}."
-        header = f"| Cell | Network | Metric | `{b}` | `{a}` | Factor | p | p ({correction}) |"
+        header = (f"| Scenario | Network | Metric | {names.get(b, b)} | {names.get(a, a)} | Factor | p"
+                  f" | p ({correction}) |")
         rule = "|---|---|---|---:|---:|---:|---:|---:|"
         if judged:
             intro += (f" The {TARGET_FACTOR}x target is met where the interval's lower bound is at least"
                       f" {TARGET_FACTOR}.")
             header += f" {TARGET_FACTOR}x |"
             rule += ":-:|"
-        lines += [f"## {fam.name}: `{b}` to `{a}`", "", intro, "", header, rule]
+        intro = (f"{names.get(a, a)} (`{a}`) against {names.get(b, b)} (`{b}`): a factor above 1 means"
+                 f" {names.get(a, a)} is better. " + intro)
+        lines += [f"## {fam.name}", "", intro, "", header, rule]
         for c in primary:
             sb, sa = summary[(b, c["cell"], c["metric"])], summary[(a, c["cell"], c["metric"])]
             unit = METRICS[c["metric"]].unit
             lines.append(
-                f"| {c['cell'].label()} | {c['cell'].net} | {METRICS[c['metric']].label} ({unit})"
+                f"| {c['cell'].entry()} | {net_entry(c['cell'].net)} | {METRICS[c['metric']].label} ({unit})"
                 f" | {fmt_interval(sb['median'], sb['lo'], sb['hi'])} | {fmt_interval(sa['median'], sa['lo'], sa['hi'])}"
                 f" | {fmt_interval(c['factor'], c['lo'], c['hi'], 'x')} | {fmt_p(c['p'])} | {fmt_p(c['p_adjusted'])} |"
                 + (f" {('met' if tenfold(c) else 'no') if c['targets'] else '–'} |" if judged else "")
@@ -924,23 +1034,24 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
                         f" {sum(c['targets'] for c in primary)}")
         lines += ["", outcome + "." + (out_of_reach(primary) if fam.correction == "holm" else ""), ""]
         name = "factors-" + fam.name.lower().replace(" ", "-")
-        lines += [picture(name, f"{fam.name}: factors on the primary metrics"), ""]
+        lines += [picture(name, f"How many times better {names.get(a, a)} is than {names.get(b, b)} on each"
+                                " scenario's primary metric, with 95% intervals"), ""]
 
         secondary = [c for c in fam_rows if not c["primary"] and c["metric"] not in RUNTIME]
         if secondary:
             lines += [
-                f"### Secondary metrics: `{b}` to `{a}`",
+                f"### {fam.name}: secondary metrics",
                 "",
                 "Exploratory: the p-values are not corrected.",
                 "",
-                f"| Cell | Network | Metric | `{b}` | `{a}` | Factor | p |",
+                f"| Scenario | Network | Metric | {names.get(b, b)} | {names.get(a, a)} | Factor | p |",
                 "|---|---|---|---:|---:|---:|---:|",
             ]
             for c in secondary:
                 sb, sa = summary[(b, c["cell"], c["metric"])], summary[(a, c["cell"], c["metric"])]
                 unit = METRICS[c["metric"]].unit
                 lines.append(
-                    f"| {c['cell'].label()} | {c['cell'].net} | {METRICS[c['metric']].label}"
+                    f"| {c['cell'].entry()} | {net_entry(c['cell'].net)} | {METRICS[c['metric']].label}"
                     + (f" ({unit})" if unit else "")
                     + f" | {fmt_interval(sb['median'], sb['lo'], sb['hi'])}"
                     f" | {fmt_interval(sa['median'], sa['lo'], sa['hi'])}"
@@ -948,20 +1059,20 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
                 )
             lines.append("")
 
-    lines += loss_lines(losses, summary, figures)
+    lines += loss_lines(losses, summary, figures, names)
 
     if targets:
         lines += [
             f"## The {TARGET_MS} ms target",
             "",
-            f"Met where the upper bound of the interval of `L` p95 is at most {TARGET_MS} ms. At N0 that is"
-            " the server's own processing; N1 adds a 20 ms round trip.",
+            f"Met where the upper bound of the interval of the latency's 95th percentile is at most {TARGET_MS} ms."
+            " With no delay that is the server's own processing; 20 ms, 100 Mbit/s adds a 20 ms round trip.",
             "",
-            "| Series | Cell | Network | `L` p95 (ms) | Met |",
+            "| Series | Scenario | Network | Latency p95 (ms) | Met |",
             "|---|---|---|---:|:-:|",
         ]
         for t in targets:
-            lines.append(f"| `{t['series']}` | {t['cell'].label()} | {t['cell'].net}"
+            lines.append(f"| {names.get(t['series'], t['series'])} | {t['cell'].entry()} | {net_entry(t['cell'].net)}"
                          f" | {fmt_interval(t['median'], t['lo'], t['hi'])} | {'met' if t['met'] else 'no'} |")
         lines.append("")
 
@@ -973,12 +1084,13 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
             "Per result, the median of the runs: bytes allocated and GC cycles during it, and the heap in use and"
             " goroutines at its end.",
             "",
-            "| Series | Cell | Network | Allocated (MiB) | GC cycles | Heap (MiB) | Goroutines |",
+            "| Series | Scenario | Network | Allocated (MiB) | GC cycles | Heap (MiB) | Goroutines |",
             "|---|---|---|---:|---:|---:|---:|",
         ]
         for s, c in runtime:
             v = [summary.get((s, c, m), {}).get("median", np.nan) for m in RUNTIME]
-            lines.append(f"| `{s}` | {c.label()} | {c.net} | " + " | ".join(fmt(x) for x in v) + " |")
+            lines.append(f"| {names.get(s, s)} | {c.entry()} | {net_entry(c.net)} | "
+                         + " | ".join(fmt(x) for x in v) + " |")
         lines.append("")
 
     above, changed = sens
@@ -993,7 +1105,7 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
             lines += [
                 "Without them, these conclusions change, and are fragile:",
                 "",
-                "| Family | Cell | Network | Metric | Before | After |",
+                "| Family | Scenario | Network | Metric | Before | After |",
                 "|---|---|---|---|---|---|",
             ]
             for ch in changed:
@@ -1005,7 +1117,8 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
                     return (f"{fmt(x['factor'])}x, p ({x['family']}) {fmt_p(x['p_adjusted'])},"
                             f" n {x['n_baseline']}/{x['n_candidate']}")
 
-                lines.append(f"| {c['family']} | {c['cell'].label()} | {c['cell'].net} | {METRICS[c['metric']].label}"
+                lines.append(f"| {c['family']} | {c['cell'].entry()} | {net_entry(c['cell'].net)}"
+                             f" | {METRICS[c['metric']].label}"
                              f" | {verdict(c)} | {verdict(d)} |")
             lines.append("")
 

@@ -215,6 +215,13 @@ class Report(unittest.TestCase):
         self.assertAlmostEqual(float(c[("G6", "vnc", "N0", "server_mem")]["times_better"]), 10)
 
         md = (out / "report.md").read_text()
+        # Named as a reader knows them, with the codes the plans use beside.
+        self.assertIn("# Occamy against Guacamole\n", md)
+        self.assertIn("| Scenario | Network | Metric | Guacamole | Occamy | Factor |", md)
+        self.assertIn("| Typing, SSH (T1) | No delay (N0) | Latency, 95th percentile (ms) |", md)
+        svg = (out / "factors-guacamole-to-occamy.svg").read_text()
+        self.assertIn("How many times better Occamy is than Guacamole", svg)
+        self.assertIn("Typing, SSH", svg)
         self.assertIn("2 of 3 differences are significant after correction", md)
         self.assertIn("the 10x target is met in 2 of 3", md)
         self.assertIn("no conclusion on a primary metric changes", md)
@@ -282,11 +289,12 @@ class Report(unittest.TestCase):
         self.assertGreater(float(c[("Frame window", "T1", "ssh", "N0", "latency_p95")]["p"]), 0.05)
 
         md = (out / "report.md").read_text()
-        self.assertIn("## Frame window: `v1-native-w2` to `v1-native`", md)
+        self.assertIn("## Frame window\n", md)
+        self.assertIn("Occamy (`v1-native`) against Occamy with a window of two (`v1-native-w2`)", md)
         self.assertIn("1 of 2 differences are significant after correction.", md)
         self.assertNotIn("10x", md)
         self.assertIn("Scene frames never shown (%)", md)
-        self.assertIn("Scene frame interval p95 (ms)", md)
+        self.assertIn("Gap between frames, 95th percentile (ms)", md)
         self.assertTrue((out / "factors-frame-window.svg").exists())
         self.assertTrue((out / "factors-frame-window-dark.svg").exists())
         self.assertFalse((out / "factors-guacamole-to-occamy.svg").exists())
@@ -304,7 +312,7 @@ class Report(unittest.TestCase):
         guac, window = md.index("## Guacamole to Occamy"), md.index("## Frame window")
         self.assertIn("the 10x target is met in 2 of 2", md[guac:window])
         self.assertNotIn("10x", md[window:md.index("## The 50 ms target")])
-        self.assertEqual(md.count("| `v1-native` | T1 ssh | N0 |"), 1)
+        self.assertEqual(md.count("| Occamy | Typing, SSH (T1) | No delay (N0) |"), 1)
         for name in ("factors-guacamole-to-occamy", "factors-frame-window"):
             self.assertTrue((out / f"{name}.svg").exists(), name)
 
@@ -334,7 +342,8 @@ class Report(unittest.TestCase):
         md = (out / "report.md").read_text()
         self.assertIn("## Loss: what it adds", md)
         self.assertIn("Primary metrics, 16 tests, Holm-corrected", md)
-        self.assertIn("| `guacd` | G5 vnc | N2 | 2% | L p95 (ms) |", md)
+        self.assertIn("| Guacamole | Key during motion, VNC (G5) | 50 ms, 20 Mbit/s (N2) | 2% |"
+                      " Latency, 95th percentile (ms) |", md)
         self.assertIn("| 50 ms |", md)
         self.assertNotIn("## The 50 ms target", md)
         self.assertNotIn("10x target is met", md)
@@ -369,8 +378,8 @@ class Report(unittest.TestCase):
                 self.assertAlmostEqual(float(g5["p"]), 2 / 12870)
                 self.assertLess(float(g5["p_adjusted"]), report.ALPHA)
                 md = (out / "report.md").read_text()
-                self.assertIn(f"## Congestion control: `{cubic}` to `{bbr}`", md)
-                self.assertEqual(md.count("## Congestion control:"), 1)
+                self.assertEqual(md.count("\n## Congestion control\n"), 1)
+                self.assertIn(f"Occamy with BBR (`{bbr}`) against Occamy with CUBIC (`{cubic}`)", md)
                 self.assertNotIn("10x", md)
                 self.assertNotIn("the exact test's smallest p", md)
                 self.assertTrue((out / "factors-congestion-control.svg").exists())
