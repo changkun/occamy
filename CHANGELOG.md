@@ -34,6 +34,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   client does, gives every route an example to run with curl, and
   lists the viewer timeout among the lifetimes
   ([docs/api.md](docs/api.md#how-the-api-works)).
+- The configuration page starts from a working file and a figure of how
+  a request passes through it, shows how to add each kind of
+  connection, set up sign-in, rotate keys, put Occamy behind a proxy
+  and limit what users can do, and ends with a reference that gives
+  every key's type and default
+  ([docs/configuration.md](docs/configuration.md#how-the-configuration-works)).
 - The benchmark report calls its estimate the *improvement*: the
   baseline's value divided by the candidate's, so that above 1× the
   candidate is better. The column in `comparisons.csv` that was
@@ -242,7 +248,7 @@ the API and the protocol may change before 1.0.0.
   occamyd takes ClearCodec: with GFX, the default, their screen stays
   nearly black. An ad-hoc rdp target cannot set it, so reach a Windows
   host through a connection
-  ([docs/configuration.md](docs/configuration.md#backends)).
+  ([docs/configuration.md](docs/configuration.md#windows-hosts)).
 
 ## [1.0.0-beta.1] - 2026-11-02
 
@@ -311,13 +317,13 @@ before 1.0.0, which removes guacd and the v0 routes.
   `-conf` with a v1 file. A v1 file needs `auth.signing_key_file`: keep
   it at `/var/lib/occamy/signing.key` on a volume, or everyone signs in
   again after a new container
-  ([docs/configuration.md](docs/configuration.md#sign-in-auth)).
+  ([docs/configuration.md](docs/configuration.md#the-signing-key)).
 - The web client needs a v1 file with `web_client`. A v0 file's
   `client: true` still serves `/static/`, but the client cannot sign in.
 - In a v1 file, vnc and rdp use the native backends unless `backend:
   guacd`. They read no `guacd.params`, check certificates against the
   system's roots, `tls.ca_file` or `tls.pins`, and RDP asks for NLA
-  ([docs/configuration.md](docs/configuration.md#backends)).
+  ([docs/configuration.md](docs/configuration.md#add-a-connection)).
 - The demo stack's compose project is `occamy`, not `docker`. Remove a
   0.6.0 stack once, before `make run`: `(cd docker && podman compose -p
   docker down --remove-orphans --volumes --rmi local)`, or `docker

@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="810" height="500" viewBox="0 0 810 500">
+<rect width="810" height="500" fill="#1a1a19"/>
+<rect x="22" y="46" width="124" height="122" rx="8" fill="#898781" stroke="none" stroke-width="1" fill-opacity="0.06"/>
+<rect x="22" y="46" width="124" height="122" rx="8" fill="none" stroke="#898781" stroke-width="1.5"/>
+<text x="34" y="70" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="650" fill="#f0efec" text-anchor="start">A user</text>
+<text x="34" y="94" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">web client, or</text>
+<text x="34" y="110" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">Occamy for macOS</text>
+<rect x="168" y="46" width="144" height="122" rx="8" fill="#3987e5" stroke="none" stroke-width="1" fill-opacity="0.1"/>
+<rect x="168" y="46" width="144" height="122" rx="8" fill="none" stroke="#3987e5" stroke-width="1.5"/>
+<text x="180" y="70" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="650" fill="#f0efec" text-anchor="start">Take the request</text>
+<text x="180" y="94" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">listen</text>
+<text x="180" y="110" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">tls</text>
+<text x="180" y="126" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">origins</text>
+<text x="180" y="142" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">web_client</text>
+<rect x="334" y="46" width="144" height="122" rx="8" fill="#9085e9" stroke="none" stroke-width="1" fill-opacity="0.1"/>
+<rect x="334" y="46" width="144" height="122" rx="8" fill="none" stroke="#9085e9" stroke-width="1.5"/>
+<text x="346" y="70" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="650" fill="#f0efec" text-anchor="start">Sign the user in</text>
+<text x="346" y="94" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">auth:</text>
+<text x="360" y="110" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">users</text>
+<text x="360" y="126" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">oidc</text>
+<text x="360" y="142" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">trusted_issuers</text>
+<text x="360" y="158" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">signing_key_file</text>
+<rect x="500" y="46" width="144" height="122" rx="8" fill="#199e70" stroke="none" stroke-width="1" fill-opacity="0.1"/>
+<rect x="500" y="46" width="144" height="122" rx="8" fill="none" stroke="#199e70" stroke-width="1.5"/>
+<text x="512" y="70" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="650" fill="#f0efec" text-anchor="start">Open a connection</text>
+<text x="512" y="94" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">connections:</text>
+<text x="526" y="110" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">- target</text>
+<text x="540" y="126" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">allow</text>
+<text x="540" y="142" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">credentials</text>
+<rect x="666" y="46" width="124" height="122" rx="8" fill="#898781" stroke="none" stroke-width="1" fill-opacity="0.06"/>
+<rect x="666" y="46" width="124" height="122" rx="8" fill="none" stroke="#898781" stroke-width="1.5"/>
+<text x="678" y="70" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="650" fill="#f0efec" text-anchor="start">The remote</text>
+<text x="678" y="94" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">SSH, VNC or RDP</text>
+<text x="678" y="110" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">server, or a</text>
+<text x="678" y="126" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">Kubernetes pod</text>
+<text x="678" y="144" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#898781" text-anchor="start">checked with</text>
+<text x="678" y="159" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#898781" text-anchor="start">host_keys, tls</text>
+<line x1="149" y1="107.0" x2="158.0" y2="107.0" stroke="#c3c2b7" stroke-width="1.6"/>
+<path d="M 165.0 107.0 L 158.0 110.8 L 158.0 103.2 Z" fill="#c3c2b7"/>
+<line x1="315" y1="107.0" x2="324.0" y2="107.0" stroke="#c3c2b7" stroke-width="1.6"/>
+<path d="M 331.0 107.0 L 324.0 110.8 L 324.0 103.2 Z" fill="#c3c2b7"/>
+<line x1="481" y1="107.0" x2="490.0" y2="107.0" stroke="#c3c2b7" stroke-width="1.6"/>
+<path d="M 497.0 107.0 L 490.0 110.8 L 490.0 103.2 Z" fill="#c3c2b7"/>
+<line x1="647" y1="107.0" x2="656.0" y2="107.0" stroke="#c3c2b7" stroke-width="1.6"/>
+<path d="M 663.0 107.0 L 656.0 110.8 L 656.0 103.2 Z" fill="#c3c2b7"/>
+<line x1="168" y1="32" x2="644" y2="32" stroke="#898781" stroke-width="1"/>
+<line x1="168" y1="32" x2="168" y2="40" stroke="#898781" stroke-width="1"/>
+<line x1="644" y1="32" x2="644" y2="40" stroke="#898781" stroke-width="1"/>
+<text x="406.0" y="24" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="middle">occamyd, as occamy.yaml configures it</text>
+<line x1="151.0" y1="194" x2="659.0" y2="194" stroke="#d95926" stroke-width="1.6"/>
+<line x1="151.0" y1="194" x2="151.0" y2="216" stroke="#d95926" stroke-width="1.6"/>
+<line x1="405.0" y1="194" x2="405.0" y2="216" stroke="#d95926" stroke-width="1.6"/>
+<line x1="659.0" y1="194" x2="659.0" y2="216" stroke="#d95926" stroke-width="1.6"/>
+<line x1="572.0" y1="194" x2="572.0" y2="177.0" stroke="#d95926" stroke-width="1.6"/>
+<path d="M 572.0 170.0 L 575.9 177.0 L 568.1 177.0 Z" fill="#d95926"/>
+<text x="159.0" y="187" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#d95926" text-anchor="start">credentials names exactly one source</text>
+<rect x="33.0" y="216" width="236" height="92" rx="8" fill="#d95926" stroke="none" stroke-width="1" fill-opacity="0.09"/>
+<rect x="33.0" y="216" width="236" height="92" rx="8" fill="none" stroke="#d95926" stroke-width="1.5"/>
+<text x="45.0" y="238" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="650" fill="#f0efec" text-anchor="start">A file on disk</text>
+<text x="45.0" y="258" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">password_file</text>
+<text x="45.0" y="273" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">private_key_file, token_file</text>
+<text x="45.0" y="296" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#898781" text-anchor="start">read as each session starts</text>
+<rect x="287.0" y="216" width="236" height="92" rx="8" fill="#d95926" stroke="none" stroke-width="1" fill-opacity="0.09"/>
+<rect x="287.0" y="216" width="236" height="92" rx="8" fill="none" stroke="#d95926" stroke-width="1.5"/>
+<text x="299.0" y="238" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="650" fill="#f0efec" text-anchor="start">An environment variable</text>
+<text x="299.0" y="258" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">password_env, token_env</text>
+<text x="299.0" y="296" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#898781" text-anchor="start">fixed when occamyd starts</text>
+<rect x="541.0" y="216" width="236" height="92" rx="8" fill="#d95926" stroke="none" stroke-width="1" fill-opacity="0.09"/>
+<rect x="541.0" y="216" width="236" height="92" rx="8" fill="none" stroke="#d95926" stroke-width="1.5"/>
+<text x="553.0" y="238" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="650" fill="#f0efec" text-anchor="start">The session's owner</text>
+<text x="553.0" y="258" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">prompt: true</text>
+<text x="553.0" y="296" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#898781" text-anchor="start">asked as each session starts, never kept</text>
+<text x="22" y="348" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="650" fill="#f0efec" text-anchor="start">When occamyd reads what</text>
+<line x1="30" y1="430" x2="783.0" y2="430.0" stroke="#898781" stroke-width="1.2"/>
+<path d="M 790.0 430.0 L 783.0 433.9 L 783.0 426.1 Z" fill="#898781"/>
+<text x="790" y="422" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="end">time</text>
+<line x1="60" y1="360" x2="60" y2="430" stroke="#f0efec" stroke-width="2"/>
+<circle cx="60" cy="430" r="4.5" fill="#f0efec"/>
+<line x1="700" y1="360" x2="700" y2="430" stroke="#f0efec" stroke-width="2"/>
+<circle cx="700" cy="430" r="4.5" fill="#f0efec"/>
+<rect x="250" y="374" width="450" height="9" rx="4" fill="#199e70" stroke="none" stroke-width="1" fill-opacity="0.35"/>
+<rect x="250" y="374" width="450" height="9" rx="4" fill="none" stroke="#199e70" stroke-width="1.2"/>
+<circle cx="250" cy="378.5" r="5" fill="#d95926"/>
+<rect x="330" y="390" width="230" height="9" rx="4" fill="#199e70" stroke="none" stroke-width="1" fill-opacity="0.35"/>
+<rect x="330" y="390" width="230" height="9" rx="4" fill="none" stroke="#199e70" stroke-width="1.2"/>
+<circle cx="330" cy="394.5" r="5" fill="#d95926"/>
+<rect x="420" y="406" width="280" height="9" rx="4" fill="#199e70" stroke="none" stroke-width="1" fill-opacity="0.35"/>
+<rect x="420" y="406" width="280" height="9" rx="4" fill="none" stroke="#199e70" stroke-width="1.2"/>
+<circle cx="420" cy="410.5" r="5" fill="#d95926"/>
+<line x1="620" y1="366" x2="620" y2="430" stroke="#898781" stroke-width="1" stroke-dasharray="3 3"/>
+<path d="M 620 424 L 626 430 L 620 436 L 614 430 Z" fill="#1a1a19" stroke="#c3c2b7" stroke-width="1.5"/>
+<text x="612" y="364" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="end">You edit occamy.yaml: nothing changes yet</text>
+<text x="54" y="452" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="650" fill="#f0efec" text-anchor="start">occamyd starts</text>
+<text x="54" y="467" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">It reads occamy.yaml, tls, the signing</text>
+<text x="54" y="482" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">key and the trusted issuers' keys.</text>
+<text x="440" y="452" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="650" fill="#f0efec" text-anchor="middle">Sessions</text>
+<text x="440" y="467" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="middle">Each reads its secret (orange)</text>
+<text x="440" y="482" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="middle">as it starts.</text>
+<text x="788" y="452" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="650" fill="#f0efec" text-anchor="end">Restart</text>
+<text x="788" y="467" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="end">occamyd reads the edited</text>
+<text x="788" y="482" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="end">file; every session ends.</text>
+</svg>

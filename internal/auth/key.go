@@ -97,7 +97,7 @@ func KeyAccessError(path string, err error) error {
 	dir := filepath.Dir(path)
 	return fmt.Errorf("auth: signing key %s: occamyd runs as uid %d, which may not use %s: %w; "+
 		"that directory, or in a container what is mounted on it, must belong to uid %d: "+
-		"docs/configuration.md has the step for a host, Docker and podman, under Sign-in",
+		"docs/configuration.md has the step for a host, Docker and podman, under The signing key",
 		path, uid, dir, err, uid)
 }
 

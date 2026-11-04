@@ -224,7 +224,7 @@ stops at start:
 | It says | What to do |
 |---------|------------|
 | `cannot open given config file` | Check the path. `-conf` names the file, `./conf.yaml` by default |
-| `auth: signing key …: occamyd runs as uid 65532, which may not use …` | Give the key's directory, or the volume mounted on it, to that user. [Configuration](configuration.md#sign-in-auth) has the step for a host, Docker and podman |
+| `auth: signing key …: occamyd runs as uid 65532, which may not use …` | Give the key's directory, or the volume mounted on it, to that user. [Configuration](configuration.md#the-signing-key) has the step for a host, Docker and podman |
 | `listen tcp :5636: bind: address already in use` | Another process has the port. Stop it, or change `listen` |
 | `tls: …` | `tls.cert` or `tls.key` does not load. Check that the two files are PEM and belong together |
 
