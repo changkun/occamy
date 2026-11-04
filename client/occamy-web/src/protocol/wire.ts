@@ -2,7 +2,7 @@
 // Use of this source code is governed by a MIT
 // license that can be found in the LICENSE file.
 
-// The framing of Occamy protocol v1 (docs/protocol.md, Framing): a
+// The framing of Occamy protocol v1 (docs/protocol.md, Message layout): a
 // 4-byte header of two little-endian u16, the type and the flags, then
 // fixed-size fields and length-prefixed variable ones. Reader checks
 // each field as it reads it and throws at the first failure, so the

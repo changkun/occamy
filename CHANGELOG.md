@@ -22,6 +22,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   benchmarks page opens with Occamy against Guacamole, in figures and
   tables with 95% intervals and corrected tests
   ([docs/benchmarks.md](docs/benchmarks.md#occamy-against-guacamole)).
+- The protocol page explains how a session works before it specifies
+  each message, with figures of a message's bytes, a frame of a
+  desktop, the frame window, the tile cache, and how `occamyd` picks a
+  tile's codec ([docs/protocol.md](docs/protocol.md#how-a-session-works)).
 - The benchmark report calls its estimate the *improvement*: the
   baseline's value divided by the candidate's, so that above 1× the
   candidate is better. The column in `comparisons.csv` that was
