@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="472.468281pt" height="771.59952pt" viewBox="0 0 472.468281 771.59952" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="472.19976pt" height="771.59952pt" viewBox="0 0 472.19976 771.59952" xmlns="http://www.w3.org/2000/svg" version="1.1">
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
@@ -21,8 +21,8 @@
  <g id="figure_1">
   <g id="patch_1">
    <path d="M 0 771.59952 
-L 472.468281 771.59952 
-L 472.468281 0 
+L 472.19976 771.59952 
+L 472.19976 0 
 L 0 0 
 z
 " style="fill: #1a1a19"/>
@@ -412,7 +412,7 @@ z
     </g>
    </g>
    <g id="text_16">
-    <text style="font-size: 8px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #c3c2b7" x="296.138664" y="49.53548" transform="rotate(-0 296.138664 49.53548)">1x</text>
+    <text style="font-size: 8px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #c3c2b7" x="296.138664" y="49.53548" transform="rotate(-0 296.138664 49.53548)">1×</text>
    </g>
    <g id="text_17">
     <text style="font-size: 10px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #c3c2b7" x="215.315709" y="35.53548" transform="rotate(-0 215.315709 35.53548)">20 ms, 100 Mbit/s</text>
@@ -440,7 +440,7 @@ L 221.24268 416.588535
       </g>
      </g>
      <g id="text_18">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="221.24268" y="747.99752" transform="rotate(-0 221.24268 747.99752)">0.2x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="221.24268" y="747.99752" transform="rotate(-0 221.24268 747.99752)">0.2×</text>
      </g>
     </g>
     <g id="xtick_23">
@@ -455,7 +455,7 @@ L 262.174749 416.588535
       </g>
      </g>
      <g id="text_19">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="262.174749" y="747.99752" transform="rotate(-0 262.174749 747.99752)">0.5x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="262.174749" y="747.99752" transform="rotate(-0 262.174749 747.99752)">0.5×</text>
      </g>
     </g>
     <g id="xtick_24">
@@ -470,7 +470,7 @@ L 293.138664 416.588535
       </g>
      </g>
      <g id="text_20">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="293.138664" y="747.99752" transform="rotate(-0 293.138664 747.99752)">1x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="293.138664" y="747.99752" transform="rotate(-0 293.138664 747.99752)">1×</text>
      </g>
     </g>
     <g id="xtick_25">
@@ -485,7 +485,7 @@ L 324.102578 416.588535
       </g>
      </g>
      <g id="text_21">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="324.102578" y="747.99752" transform="rotate(-0 324.102578 747.99752)">2x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="324.102578" y="747.99752" transform="rotate(-0 324.102578 747.99752)">2×</text>
      </g>
     </g>
     <g id="xtick_26">
@@ -500,7 +500,7 @@ L 365.034647 416.588535
       </g>
      </g>
      <g id="text_22">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="365.034647" y="747.99752" transform="rotate(-0 365.034647 747.99752)">5x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="365.034647" y="747.99752" transform="rotate(-0 365.034647 747.99752)">5×</text>
      </g>
     </g>
     <g id="xtick_27">
@@ -515,7 +515,7 @@ L 395.998561 416.588535
       </g>
      </g>
      <g id="text_23">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="395.998561" y="747.99752" transform="rotate(-0 395.998561 747.99752)">10x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="395.998561" y="747.99752" transform="rotate(-0 395.998561 747.99752)">10×</text>
      </g>
     </g>
     <g id="xtick_28">
@@ -530,7 +530,7 @@ L 426.962476 416.588535
       </g>
      </g>
      <g id="text_24">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="426.962476" y="747.99752" transform="rotate(-0 426.962476 747.99752)">20x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="426.962476" y="747.99752" transform="rotate(-0 426.962476 747.99752)">20×</text>
      </g>
     </g>
     <g id="xtick_29">
@@ -632,7 +632,7 @@ L 426.962476 416.588535
      </g>
     </g>
     <g id="text_25">
-     <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="340.157734" y="762.48252" transform="rotate(-0 340.157734 762.48252)">How many times better Occamy is than Guacamole (log scale)</text>
+     <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="340.157734" y="762.48252" transform="rotate(-0 340.157734 762.48252)">Improvement of Occamy over Guacamole (log scale)</text>
     </g>
    </g>
    <g id="matplotlib.axis_4">
@@ -798,7 +798,7 @@ L 464.99976 732.42952
    </g>
   </g>
   <g id="text_41">
-   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #f0efec" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Occamy against Guacamole: primary metrics, with 95% intervals</text>
+   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #f0efec" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Occamy against Guacamole: improvement on each primary metric, with 95% intervals</text>
   </g>
  </g>
  <defs>

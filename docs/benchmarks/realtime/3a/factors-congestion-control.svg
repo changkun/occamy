@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="511.126797pt" height="793.19952pt" viewBox="0 0 511.126797 793.19952" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="531.494531pt" height="793.19952pt" viewBox="0 0 531.494531 793.19952" xmlns="http://www.w3.org/2000/svg" version="1.1">
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
@@ -21,8 +21,8 @@
  <g id="figure_1">
   <g id="patch_1">
    <path d="M 0 793.19952 
-L 511.126797 793.19952 
-L 511.126797 0 
+L 531.494531 793.19952 
+L 531.494531 0 
 L 0 0 
 z
 " style="fill: #fcfcfb"/>
@@ -308,7 +308,7 @@ z
     </g>
    </g>
    <g id="text_16">
-    <text style="font-size: 8px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #52514e" x="321.668952" y="49.53548" transform="rotate(-0 321.668952 49.53548)">1x</text>
+    <text style="font-size: 8px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #52514e" x="321.668952" y="49.53548" transform="rotate(-0 321.668952 49.53548)">1×</text>
    </g>
    <g id="text_17">
     <text style="font-size: 10px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #52514e" x="215.315709" y="35.53548" transform="rotate(-0 215.315709 35.53548)">20 ms, 100 Mbit/s</text>
@@ -336,7 +336,7 @@ L 242.006519 416.2165
       </g>
      </g>
      <g id="text_18">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="242.006519" y="769.59752" transform="rotate(-0 242.006519 769.59752)">0.5x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="242.006519" y="769.59752" transform="rotate(-0 242.006519 769.59752)">0.5×</text>
      </g>
     </g>
     <g id="xtick_11">
@@ -351,7 +351,7 @@ L 318.668952 416.2165
       </g>
      </g>
      <g id="text_19">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="318.668952" y="769.59752" transform="rotate(-0 318.668952 769.59752)">1x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="318.668952" y="769.59752" transform="rotate(-0 318.668952 769.59752)">1×</text>
      </g>
     </g>
     <g id="xtick_12">
@@ -366,7 +366,7 @@ L 395.331385 416.2165
       </g>
      </g>
      <g id="text_20">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="395.331385" y="769.59752" transform="rotate(-0 395.331385 769.59752)">2x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="395.331385" y="769.59752" transform="rotate(-0 395.331385 769.59752)">2×</text>
      </g>
     </g>
     <g id="xtick_13">
@@ -412,7 +412,7 @@ L 395.331385 416.2165
      </g>
     </g>
     <g id="text_21">
-     <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="340.157734" y="784.08252" transform="rotate(-0 340.157734 784.08252)">How many times better Occamy with BBR is than Occamy with CUBIC (log scale)</text>
+     <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="340.157734" y="784.08252" transform="rotate(-0 340.157734 784.08252)">Improvement of Occamy with BBR over Occamy with CUBIC (log scale)</text>
     </g>
    </g>
    <g id="matplotlib.axis_4">
@@ -588,7 +588,7 @@ L 464.99976 754.02952
    </g>
   </g>
   <g id="text_38">
-   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0b0b0b" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Occamy with BBR against Occamy with CUBIC: primary metrics, with 95% intervals</text>
+   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0b0b0b" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Occamy with BBR against Occamy with CUBIC: improvement on each primary metric, with 95% intervals</text>
   </g>
  </g>
  <defs>

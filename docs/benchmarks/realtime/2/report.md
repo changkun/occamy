@@ -6,7 +6,7 @@ The results in `bench-realtime-2.json`, analysed by `bench/report.py` as [the co
 - 6 runs, seed 20261103, 100 probe keys a scenario per run; load gate 8.
 - 352 results analysed, 8 failed.
 
-Values are the median of the runs, with an exact distribution-free 95% interval from order statistics. A factor is the Hodges–Lehmann estimate of the ratio of the two series, oriented so that above 1 means the second is better, with its exact 95% interval from the Mann–Whitney distribution. p is the exact two-sided permutation test of the rank sum over every split of the runs.
+Values are the median of the runs, with an exact distribution-free 95% interval from order statistics. An improvement is the baseline's value divided by the candidate's, or the candidate's divided by the baseline's for a metric where higher is better, such as frames shown a second, so that above 1× the candidate is better: 3× is a third of the latency, or three times the frames. It is the Hodges–Lehmann estimate of that ratio, with its exact 95% interval from the Mann–Whitney distribution. p is the exact two-sided permutation test of the rank sum over every split of the runs.
 
 ## Failed results
 
@@ -23,195 +23,195 @@ Values are the median of the runs, with an exact distribution-free 95% interval 
 
 ## Guacamole to Occamy
 
-Occamy (`v1-native`) against Guacamole (`guacd`): a factor above 1 means Occamy is better. Primary metrics, 29 tests, Holm-corrected at 0.05.
+The improvement of Occamy (`v1-native`) over Guacamole (`guacd`): above 1×, Occamy is better. Primary metrics, 29 tests, Holm-corrected at 0.05.
 
-| Scenario | Network | Metric | Guacamole | Occamy | Factor | p | p (Holm) |
+| Scenario | Network | Metric | Guacamole | Occamy | Improvement | p | p (Holm) |
 |---|---|---|---:|---:|---:|---:|---:|
-| Typing, SSH (loss=0%) (T1) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 22.2 [22.2, 22.4] | 21.4 [21.3, 21.6] | 1.04x [1.03, 1.05] | 0.0022 | 0.0628 |
-| Typing, SSH (loss=0.5%) (T1) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 22.4 [22.0, 22.8] | 21.6 [21.4, 22.8] | 1.04x [1.00, 1.06] | 0.0411 | 0.4113 |
-| Typing, SSH (loss=2%) (T1) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 27.3 [22.3, 31.9] | 22.2 [21.5, 24.4] | 1.18x [0.998, 1.46] | 0.0649 | 0.5844 |
-| Key press, VNC (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 35.9 [35.7, 36.4] | 24.4 [24.4, 24.6] | 1.47x [1.46, 1.48] | 0.0022 | 0.0628 |
-| Key press, VNC (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 35.6 [35.5, 36.1] | 24.5 [24.4, 26.4] | 1.45x [1.37, 1.47] | 0.0022 | 0.0628 |
-| Key press, VNC (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 35.8 [35.6, 37.4] | 25.2 [24.4, 52.4] | 1.43x [0.703, 1.47] | 0.3939 | 1.0000 |
-| Key press, RDP (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 38.5 [38.2, 38.7] | 27.3 [26.4, 32.4] | 1.41x [1.19, 1.46] | 0.0022 | 0.0628 |
-| Key press, RDP (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 38.6 [38.0, 39.9] | 27.3 [26.4, 135] | 1.41x [0.295, 1.46] | 0.0649 | 0.5844 |
-| Key press, RDP (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 39.9 [38.1, 44.9] | 42.3 [27.7, 73.1] | 0.982x [0.615, 1.41] | 0.9372 | 1.0000 |
-| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 132 [123, 172] | 59.1 [56.3, 93.6] | 2.23x [1.84, 2.42] | 0.0022 | 0.0628 |
-| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 164 [152, 184] | 68.7 [63.8, 132] | 2.35x [1.40, 2.67] | 0.0022 | 0.0628 |
-| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 255 [209, 2,857] | 119 [104, 153] | 2.16x [1.69, 18.6] | 0.0022 | 0.0628 |
-| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 121 [117, 130] | 80.6 [80.4, 118] | 1.50x [1.10, 1.57] | 0.0043 | 0.0628 |
-| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 165 [153, 1,734] | 96.5 [92.5, 98.0] | 1.73x [1.60, 17.7] | 0.0022 | 0.0628 |
-| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 2,188 [264, 4,186] | 149 [120, 171] | 7.85x [1.82, 28.5] | 0.0022 | 0.0628 |
-| Typing, SSH (loss=0%) (T1) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 52.6 [52.3, 55.5] | 51.7 [51.5, 52.0] | 1.02x [1.01, 1.07] | 0.0022 | 0.0628 |
-| Typing, SSH (loss=0.5%) (T1) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 52.5 [52.4, 53.2] | 51.6 [51.5, 52.0] | 1.02x [1.01, 1.03] | 0.0022 | 0.0628 |
-| Typing, SSH (loss=2%) (T1) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 52.7 [52.4, 55.7] | 52.7 [51.7, 117] | 1.00x [0.475, 1.02] | 0.9372 | 1.0000 |
-| Key press, VNC (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 66.0 [65.7, 71.5] | 54.6 [54.4, 56.1] | 1.21x [1.20, 1.27] | 0.0022 | 0.0628 |
-| Key press, VNC (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 66.1 [65.7, 71.6] | 54.5 [54.4, 101] | 1.21x [0.71, 1.27] | 0.0649 | 0.5844 |
-| Key press, VNC (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 66.2 [66.1, 66.5] | 54.9 [54.4, 118] | 1.21x [0.563, 1.22] | 0.0649 | 0.5844 |
-| Key press, RDP (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 69.0 [68.3, 71.4] | 56.8 [56.7, 58.7] | 1.21x [1.20, 1.22] | 0.0022 | 0.0628 |
-| Key press, RDP (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 68.8 [68.0, 69.9] | 57.2 [56.5, 59.4] | 1.20x [1.16, 1.22] | 0.0022 | 0.0628 |
-| Key press, RDP (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 77.6 [67.7, 81.0] | 57.9 [56.9, 123] | 1.21x [0.658, 1.39] | 0.1320 | 0.5844 |
-| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 184 [169, 219] | 98.2 [90.7, 971] | 1.92x [0.226, 2.27] | 0.0649 | 0.5844 |
-| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 339 [276, 3,942] | 169 [129, 249] | 2.18x [1.43, 22.5] | 0.0022 | 0.0628 |
-| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 7,053 | 379 [350, 430] | 18.0x [14.5, 22.5] | 0.0095 | 0.1048 |
-| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 179 [172, 226] | 113 [111, 114] | 1.59x [1.55, 1.98] | 0.0022 | 0.0628 |
-| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 5,575 [362, 7,941] | 196 [166, 273] | 27.1x [2.18, 36.3] | 0.0022 | 0.0628 |
+| Typing, SSH (loss=0%) (T1) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 22.2 [22.2, 22.4] | 21.4 [21.3, 21.6] | 1.04× [1.03, 1.05] | 0.0022 | 0.0628 |
+| Typing, SSH (loss=0.5%) (T1) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 22.4 [22.0, 22.8] | 21.6 [21.4, 22.8] | 1.04× [1.00, 1.06] | 0.0411 | 0.4113 |
+| Typing, SSH (loss=2%) (T1) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 27.3 [22.3, 31.9] | 22.2 [21.5, 24.4] | 1.18× [0.998, 1.46] | 0.0649 | 0.5844 |
+| Key press, VNC (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 35.9 [35.7, 36.4] | 24.4 [24.4, 24.6] | 1.47× [1.46, 1.48] | 0.0022 | 0.0628 |
+| Key press, VNC (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 35.6 [35.5, 36.1] | 24.5 [24.4, 26.4] | 1.45× [1.37, 1.47] | 0.0022 | 0.0628 |
+| Key press, VNC (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 35.8 [35.6, 37.4] | 25.2 [24.4, 52.4] | 1.43× [0.703, 1.47] | 0.3939 | 1.0000 |
+| Key press, RDP (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 38.5 [38.2, 38.7] | 27.3 [26.4, 32.4] | 1.41× [1.19, 1.46] | 0.0022 | 0.0628 |
+| Key press, RDP (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 38.6 [38.0, 39.9] | 27.3 [26.4, 135] | 1.41× [0.295, 1.46] | 0.0649 | 0.5844 |
+| Key press, RDP (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 39.9 [38.1, 44.9] | 42.3 [27.7, 73.1] | 0.982× [0.615, 1.41] | 0.9372 | 1.0000 |
+| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 132 [123, 172] | 59.1 [56.3, 93.6] | 2.23× [1.84, 2.42] | 0.0022 | 0.0628 |
+| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 164 [152, 184] | 68.7 [63.8, 132] | 2.35× [1.40, 2.67] | 0.0022 | 0.0628 |
+| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 255 [209, 2,857] | 119 [104, 153] | 2.16× [1.69, 18.6] | 0.0022 | 0.0628 |
+| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 121 [117, 130] | 80.6 [80.4, 118] | 1.50× [1.10, 1.57] | 0.0043 | 0.0628 |
+| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 165 [153, 1,734] | 96.5 [92.5, 98.0] | 1.73× [1.60, 17.7] | 0.0022 | 0.0628 |
+| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Latency, 95th percentile (ms) | 2,188 [264, 4,186] | 149 [120, 171] | 7.85× [1.82, 28.5] | 0.0022 | 0.0628 |
+| Typing, SSH (loss=0%) (T1) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 52.6 [52.3, 55.5] | 51.7 [51.5, 52.0] | 1.02× [1.01, 1.07] | 0.0022 | 0.0628 |
+| Typing, SSH (loss=0.5%) (T1) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 52.5 [52.4, 53.2] | 51.6 [51.5, 52.0] | 1.02× [1.01, 1.03] | 0.0022 | 0.0628 |
+| Typing, SSH (loss=2%) (T1) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 52.7 [52.4, 55.7] | 52.7 [51.7, 117] | 1.00× [0.475, 1.02] | 0.9372 | 1.0000 |
+| Key press, VNC (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 66.0 [65.7, 71.5] | 54.6 [54.4, 56.1] | 1.21× [1.20, 1.27] | 0.0022 | 0.0628 |
+| Key press, VNC (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 66.1 [65.7, 71.6] | 54.5 [54.4, 101] | 1.21× [0.71, 1.27] | 0.0649 | 0.5844 |
+| Key press, VNC (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 66.2 [66.1, 66.5] | 54.9 [54.4, 118] | 1.21× [0.563, 1.22] | 0.0649 | 0.5844 |
+| Key press, RDP (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 69.0 [68.3, 71.4] | 56.8 [56.7, 58.7] | 1.21× [1.20, 1.22] | 0.0022 | 0.0628 |
+| Key press, RDP (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 68.8 [68.0, 69.9] | 57.2 [56.5, 59.4] | 1.20× [1.16, 1.22] | 0.0022 | 0.0628 |
+| Key press, RDP (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 77.6 [67.7, 81.0] | 57.9 [56.9, 123] | 1.21× [0.658, 1.39] | 0.1320 | 0.5844 |
+| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 184 [169, 219] | 98.2 [90.7, 971] | 1.92× [0.226, 2.27] | 0.0649 | 0.5844 |
+| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 339 [276, 3,942] | 169 [129, 249] | 2.18× [1.43, 22.5] | 0.0022 | 0.0628 |
+| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 7,053 | 379 [350, 430] | 18.0× [14.5, 22.5] | 0.0095 | 0.1048 |
+| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 179 [172, 226] | 113 [111, 114] | 1.59× [1.55, 1.98] | 0.0022 | 0.0628 |
+| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Latency, 95th percentile (ms) | 5,575 [362, 7,941] | 196 [166, 273] | 27.1× [2.18, 36.3] | 0.0022 | 0.0628 |
 
 0 of 29 differences are significant after correction. With these runs the exact test's smallest p is 0.0022, so after the correction over 29 tests none could be; the intervals carry the evidence.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="factors-guacamole-to-occamy-dark.svg">
-  <img alt="How many times better Occamy is than Guacamole on each scenario's primary metric, with 95% intervals" src="factors-guacamole-to-occamy.svg">
+  <img alt="The improvement of Occamy over Guacamole on each scenario's primary metric, with 95% intervals" src="factors-guacamole-to-occamy.svg">
 </picture>
 
 ### Guacamole to Occamy: secondary metrics
 
 Exploratory: the p-values are not corrected.
 
-| Scenario | Network | Metric | Guacamole | Occamy | Factor | p |
+| Scenario | Network | Metric | Guacamole | Occamy | Improvement | p |
 |---|---|---|---:|---:|---:|---:|
-| Typing, SSH (loss=0%) (T1) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 21.8 [21.6, 21.9] | 21.1 [21.0, 21.1] | 1.04x [1.03, 1.04] | 0.0022 |
-| Typing, SSH (loss=0%) (T1) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 93.2 [42.0, 147] | 67.3 [16.3, 78.5] | 1.67x [0.609, 6.05] | 0.1797 |
-| Typing, SSH (loss=0%) (T1) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 58.3 [52.3, 64.7] | 51.1 [43.8, 55.1] | 1.18x [1.03, 1.30] | 0.0043 |
-| Typing, SSH (loss=0.5%) (T1) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 21.7 [21.5, 21.9] | 21.1 [21.0, 21.4] | 1.03x [1.02, 1.04] | 0.0022 |
-| Typing, SSH (loss=0.5%) (T1) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 95.0 [39.7, 124] | 71.0 [18.5, 73.2] | 1.59x [0.587, 2.18] | 0.2403 |
-| Typing, SSH (loss=0.5%) (T1) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 56.0 [53.2, 59.0] | 47.3 [43.8, 63.6] | 1.20x [0.928, 1.29] | 0.0649 |
-| Typing, SSH (loss=2%) (T1) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 21.8 [21.7, 21.9] | 21.1 [21.0, 21.2] | 1.03x [1.03, 1.04] | 0.0022 |
-| Typing, SSH (loss=2%) (T1) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 94.8 [42.0, 148] | 68.6 [10.8, 75.2] | 1.99x [0.575, 3.89] | 0.6667 |
-| Typing, SSH (loss=2%) (T1) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 58.9 [54.1, 67.3] | 50.4 [45.6, 57.1] | 1.17x [1.04, 1.29] | 0.0260 |
-| Key press, VNC (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 34.8 [34.7, 35.0] | 23.8 [23.7, 23.9] | 1.46x [1.46, 1.47] | 0.0022 |
-| Key press, VNC (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 85.9 [50.5, 123] | 70.6 [23.4, 78.5] | 1.65x [0.68, 4.88] | 0.3939 |
-| Key press, VNC (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 63.2 [58.2, 517] | 63.4 [52.5, 64.9] | 1.10x [0.948, 7.95] | 0.4848 |
-| Key press, VNC (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 34.7 [34.7, 34.8] | 23.7 [23.7, 24.1] | 1.46x [1.44, 1.47] | 0.0022 |
-| Key press, VNC (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 86.3 [30.9, 123] | 71.5 [25.6, 73.8] | 1.66x [0.667, 2.17] | 0.6991 |
-| Key press, VNC (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 64.6 [60.6, 69.1] | 57.9 [53.2, 74.0] | 1.12x [0.934, 1.20] | 0.0649 |
-| Key press, VNC (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 34.7 [34.7, 34.9] | 23.7 [23.6, 23.8] | 1.47x [1.46, 1.47] | 0.0022 |
-| Key press, VNC (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 86.4 [50.0, 123] | 68.5 [17.6, 78.8] | 1.61x [0.689, 2.84] | 0.3939 |
-| Key press, VNC (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 59.8 [58.5, 68.5] | 59.3 [52.7, 60.5] | 1.03x [0.987, 1.15] | 0.3095 |
-| Key press, RDP (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 37.1 [37.0, 37.3] | 25.9 [25.8, 26.2] | 1.43x [1.42, 1.44] | 0.0022 |
-| Key press, RDP (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 110 [72.0, 145] | 52.7 [49.3, 68.7] | 1.80x [1.36, 2.89] | 0.0022 |
-| Key press, RDP (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 68.6 [64.0, 454] | 66.6 [59.7, 210] | 1.05x [0.884, 2.16] | 0.6991 |
-| Key press, RDP (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 37.1 [37.0, 37.2] | 25.9 [25.9, 33.6] | 1.43x [1.11, 1.43] | 0.0022 |
-| Key press, RDP (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 108 [71.5, 145] | 52.8 [47.5, 54.1] | 2.01x [1.35, 2.89] | 0.0022 |
-| Key press, RDP (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 68.5 [66.4, 482] | 63.2 [57.5, 87.6] | 1.10x [1.01, 5.50] | 0.0411 |
-| Key press, RDP (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 37.1 [37.0, 37.2] | 25.9 [25.9, 26.0] | 1.43x [1.43, 1.44] | 0.0022 |
-| Key press, RDP (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 99.0 [71.6, 144] | 55.2 [49.0, 60.8] | 1.75x [1.27, 2.65] | 0.0022 |
-| Key press, RDP (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 66.4 [65.0, 70.7] | 64.0 [58.5, 212] | 1.04x [0.334, 1.12] | 0.0649 |
-| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Frames shown per second (frames/s) | 27.2 [24.4, 28.1] | 29.8 [28.1, 30.2] | 1.09x [1.06, 1.15] | 0.0043 |
-| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Scene frames never shown (%) | 9.17 [6.24, 18.6] | 0.829 [-0.502, 6.25] | –x | 0.0043 |
-| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Gap between frames, 95th percentile (ms) | 59.6 [55.5, 75.3] | 48.0 [47.2, 52.3] | 1.23x [1.15, 1.44] | 0.0022 |
-| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Data per frame (KiB) | 49.8 [49.0, 51.2] | 14.2 [14.1, 14.4] | 3.51x [3.46, 3.57] | 0.0022 |
-| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU per frame (ms) | 46.1 [45.4, 51.0] | 19.2 [18.8, 20.5] | 2.41x [2.30, 2.51] | 0.0022 |
-| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU time (ms) | 12,714 [12,449, 14,333] | 5,674 [5,635, 5,854] | 2.24x [2.19, 2.45] | 0.0022 |
-| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 86.4 [50.2, 123] | 70.3 [53.3, 76.2] | 1.24x [0.682, 2.19] | 1.0000 |
-| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 5,019 [4,945, 5,650] | 2,121 [2,104, 2,227] | 2.35x [2.26, 2.54] | 0.0022 |
-| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Frames shown per second (frames/s) | 24.4 [23.2, 25.7] | 29.7 [26.5, 29.8] | 1.21x [1.14, 1.25] | 0.0022 |
-| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Scene frames never shown (%) | 18.7 [14.3, 22.6] | 0.941 [0.546, 11.8] | 19.9x [1.92, 32.6] | 0.0022 |
-| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Gap between frames, 95th percentile (ms) | 74.6 [69.4, 83.3] | 58.5 [54.6, 71.7] | 1.28x [1.14, 1.41] | 0.0087 |
-| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Data per frame (KiB) | 44.3 [40.6, 47.8] | 14.2 [14.1, 14.3] | 3.11x [2.87, 3.35] | 0.0022 |
-| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU per frame (ms) | 45.5 [44.6, 46.4] | 19.1 [18.9, 27.0] | 2.39x [1.72, 2.43] | 0.0022 |
-| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU time (ms) | 12,549 [12,276, 12,943] | 5,643 [5,607, 7,191] | 2.21x [1.80, 2.25] | 0.0022 |
-| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 86.5 [44.1, 123] | 66.1 [51.3, 73.3] | 1.29x [0.694, 2.24] | 1.0000 |
-| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 5,055 [4,971, 5,186] | 2,148 [2,076, 2,289] | 2.35x [2.26, 2.42] | 0.0022 |
-| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Frames shown per second (frames/s) | 16.1 [1.08, 16.6] | 27.8 [27.0, 28.6] | 1.73x [1.67, 25.1] | 0.0022 |
-| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Scene frames never shown (%) | 46.4 [44.7, 96.4] | 7.45 [4.82, 9.89] | 9.15x [5.49, 12.8] | 0.0022 |
-| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Gap between frames, 95th percentile (ms) | 121 [108, 1,553] | 67.7 [62.8, 72.4] | 1.80x [1.62, 21.5] | 0.0022 |
-| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Data per frame (KiB) | 32.9 [31.5, 551] | 14.3 [14.1, 14.4] | 2.31x [2.20, 38.3] | 0.0022 |
-| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU per frame (ms) | 49.4 [48.6, 336] | 19.5 [19.1, 20.8] | 2.54x [2.47, 16.1] | 0.0022 |
-| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU time (ms) | 12,714 [12,293, 67,251] | 5,486 [5,340, 5,789] | 2.32x [2.23, 11.6] | 0.0022 |
-| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 86.6 [50.3, 123] | 58.6 [49.5, 78.3] | 1.27x [0.751, 2.44] | 0.2403 |
-| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 4,933 [4,719, 7,602] | 2,044 [1,904, 2,283] | 2.45x [2.28, 3.33] | 0.0022 |
-| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Frames shown per second (frames/s) | 24.3 [24.0, 24.6] | 24.4 [23.6, 24.9] | 1.01x [0.984, 1.02] | 0.6991 |
-| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Scene frames never shown (%) | 18.8 [18.1, 20.0] | 18.7 [17.1, 21.3] | 1.02x [0.939, 1.10] | 0.6991 |
-| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Gap between frames, 95th percentile (ms) | 48.7 [46.3, 53.8] | 43.5 [41.5, 69.5] | 1.11x [0.774, 1.17] | 0.0931 |
-| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Data per frame (KiB) | 66.2 [66.1, 67.2] | 14.2 [14.0, 14.3] | 4.70x [4.63, 4.76] | 0.0022 |
-| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU per frame (ms) | 55.4 [54.6, 56.1] | 19.9 [19.3, 25.7] | 2.77x [2.19, 2.84] | 0.0022 |
-| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU time (ms) | 13,451 [13,357, 13,635] | 4,834 [4,789, 6,214] | 2.78x [2.19, 2.83] | 0.0022 |
-| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 107 [64.4, 141] | 73.1 [67.7, 77.4] | 1.40x [0.909, 2.01] | 0.6991 |
-| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 5,776 [5,583, 5,838] | 1,775 [1,679, 1,807] | 3.25x [3.17, 3.37] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Frames shown per second (frames/s) | 22.3 [4.58, 22.9] | 24.3 [24.1, 24.6] | 1.09x [1.06, 5.26] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Scene frames never shown (%) | 25.7 [23.5, 84.7] | 18.9 [18.1, 19.7] | 1.35x [1.23, 4.30] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Gap between frames, 95th percentile (ms) | 82.2 [73.5, 877] | 59.3 [55.9, 59.6] | 1.39x [1.29, 14.7] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Data per frame (KiB) | 50.1 [47.1, 300] | 14.2 [14.1, 14.3] | 3.52x [3.33, 20.9] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU per frame (ms) | 51.1 [50.7, 185] | 20.0 [19.7, 20.3] | 2.56x [2.52, 9.09] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU time (ms) | 14,467 [13,887, 48,582] | 4,833 [4,794, 4,938] | 2.98x [2.89, 9.84] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 106 [62.8, 144] | 72.0 [67.9, 78.2] | 1.38x [0.907, 2.04] | 0.5887 |
-| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 6,487 [6,232, 9,133] | 1,807 [1,739, 1,833] | 3.59x [3.46, 4.98] | 0.0022 |
-| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Frames shown per second (frames/s) | 6.64 [0.591, 14.4] | 24.4 [24.0, 24.8] | 8.78x [1.70, 40.7] | 0.0022 |
-| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Scene frames never shown (%) | 77.9 [52.0, 98.0] | 18.7 [17.2, 20.0] | 4.06x [2.75, 5.49] | 0.0022 |
-| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Gap between frames, 95th percentile (ms) | 1,211 [131, 2,426] | 64.8 [62.2, 72.1] | 9.09x [2.07, 38.1] | 0.0022 |
-| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Data per frame (KiB) | 537 [33.8, 1,055] | 14.1 [14.1, 14.2] | 13.6x [2.40, 74.4] | 0.0022 |
-| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU per frame (ms) | 378 [54.4, 721] | 19.8 [19.7, 19.9] | 10.0x [2.76, 36.3] | 0.0022 |
-| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU time (ms) | 76,455 [13,653, 142,099] | 4,899 [4,865, 4,979] | 9.05x [2.81, 29.0] | 0.0022 |
-| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 103 [63.8, 143] | 73.7 [65.2, 81.4] | 1.35x [0.888, 1.99] | 0.5887 |
-| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 8,835 [5,608, 12,098] | 1,839 [1,812, 1,898] | 4.49x [3.05, 6.56] | 0.0022 |
-| Typing, SSH (loss=0%) (T1) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 52.0 [52.0, 52.2] | 51.2 [51.1, 51.3] | 1.02x [1.01, 1.02] | 0.0022 |
-| Typing, SSH (loss=0%) (T1) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 95.0 [42.0, 124] | 65.1 [12.7, 70.2] | 1.64x [1.08, 3.30] | 0.0411 |
-| Typing, SSH (loss=0%) (T1) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 57.4 [51.4, 67.0] | 50.6 [46.1, 59.3] | 1.14x [0.995, 1.30] | 0.0931 |
-| Typing, SSH (loss=0.5%) (T1) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 52.1 [52.0, 52.3] | 51.1 [51.1, 51.5] | 1.02x [1.02, 1.02] | 0.0022 |
-| Typing, SSH (loss=0.5%) (T1) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 95.0 [41.8, 148] | 68.3 [15.2, 81.2] | 1.63x [0.648, 2.76] | 0.3095 |
-| Typing, SSH (loss=0.5%) (T1) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 63.1 [56.2, 68.2] | 48.3 [42.1, 59.1] | 1.29x [1.11, 1.43] | 0.0087 |
-| Typing, SSH (loss=2%) (T1) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 52.0 [51.9, 52.2] | 51.1 [51.0, 51.4] | 1.02x [1.02, 1.02] | 0.0022 |
-| Typing, SSH (loss=2%) (T1) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 112 [75.9, 148] | 68.4 [7.14, 70.8] | 2.13x [1.09, 10.6] | 0.0022 |
-| Typing, SSH (loss=2%) (T1) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 56.2 [50.2, 65.2] | 46.2 [45.1, 50.9] | 1.20x [1.10, 1.37] | 0.0043 |
-| Key press, VNC (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 65.1 [64.9, 65.5] | 53.9 [53.8, 54.0] | 1.21x [1.20, 1.22] | 0.0022 |
-| Key press, VNC (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 86.5 [50.0, 123] | 67.4 [18.8, 73.2] | 1.69x [0.707, 2.65] | 0.6991 |
-| Key press, VNC (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 65.5 [59.6, 73.3] | 60.9 [58.2, 67.2] | 1.07x [0.964, 1.20] | 0.3095 |
-| Key press, VNC (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 65.1 [64.8, 65.9] | 53.8 [53.7, 55.3] | 1.21x [1.19, 1.21] | 0.0022 |
-| Key press, VNC (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 86.9 [50.3, 123] | 60.2 [21.5, 82.2] | 1.71x [0.708, 4.70] | 0.1797 |
-| Key press, VNC (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 60.8 [59.1, 77.5] | 59.1 [57.3, 75.6] | 1.03x [0.984, 1.19] | 0.1320 |
-| Key press, VNC (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 65.1 [65.0, 65.5] | 53.8 [53.8, 54.1] | 1.21x [1.21, 1.21] | 0.0022 |
-| Key press, VNC (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 86.5 [50.0, 123] | 70.3 [13.8, 73.4] | 1.71x [0.699, 4.82] | 0.3680 |
-| Key press, VNC (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 63.5 [57.4, 76.6] | 57.9 [53.6, 72.0] | 1.09x [0.925, 1.21] | 0.0931 |
-| Key press, RDP (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 67.2 [67.1, 67.9] | 56.1 [56.0, 56.5] | 1.20x [1.19, 1.21] | 0.0022 |
-| Key press, RDP (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 109 [71.6, 146] | 51.4 [30.4, 53.9] | 2.53x [1.39, 3.11] | 0.0022 |
-| Key press, RDP (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 72.5 [68.0, 395] | 64.9 [61.4, 86.8] | 1.12x [0.956, 4.55] | 0.1320 |
-| Key press, RDP (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 67.2 [67.1, 67.4] | 56.0 [55.9, 56.7] | 1.20x [1.19, 1.20] | 0.0022 |
-| Key press, RDP (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 111 [71.9, 145] | 52.7 [49.4, 56.2] | 2.01x [1.35, 2.86] | 0.0022 |
-| Key press, RDP (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 67.4 [63.4, 388] | 64.5 [58.0, 82.8] | 1.08x [0.947, 4.69] | 0.3095 |
-| Key press, RDP (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 67.2 [67.1, 67.3] | 56.0 [56.0, 56.2] | 1.20x [1.20, 1.20] | 0.0022 |
-| Key press, RDP (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 98.3 [52.6, 144] | 51.7 [47.1, 55.5] | 1.85x [1.12, 2.84] | 0.0152 |
-| Key press, RDP (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 63.9 [61.1, 71.4] | 61.1 [59.3, 62.7] | 1.05x [1.00, 1.14] | 0.0411 |
-| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Frames shown per second (frames/s) | 26.0 [22.8, 26.8] | 29.7 [10.8, 30.1] | 1.14x [0.475, 1.24] | 0.0649 |
-| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Scene frames never shown (%) | 13.3 [10.6, 24.1] | 1.15 [-0.418, 63.9] | –x | 0.0649 |
-| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Gap between frames, 95th percentile (ms) | 66.6 [60.6, 76.0] | 49.4 [47.2, 386] | 1.32x [0.197, 1.49] | 0.0649 |
-| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Data per frame (KiB) | 46.1 [46.0, 47.5] | 14.2 [14.1, 19.9] | 3.26x [2.39, 3.31] | 0.0022 |
-| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU per frame (ms) | 45.4 [44.5, 52.1] | 19.3 [18.7, 36.2] | 2.36x [1.44, 2.60] | 0.0022 |
-| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU time (ms) | 16,652 [16,255, 19,031] | 5,752 [5,634, 8,653] | 2.89x [2.20, 3.24] | 0.0022 |
-| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 85.7 [49.1, 121] | 67.1 [48.5, 73.2] | 1.31x [0.707, 2.37] | 0.6991 |
-| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 6,779 [6,482, 7,940] | 2,236 [2,076, 2,412] | 3.06x [2.89, 3.51] | 0.0022 |
-| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Frames shown per second (frames/s) | 13.8 [1.85, 20.2] | 27.5 [25.4, 29.0] | 2.01x [1.44, 13.7] | 0.0022 |
-| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Scene frames never shown (%) | 54.2 [32.8, 93.8] | 8.40 [3.32, 15.3] | 6.74x [3.74, 16.0] | 0.0022 |
-| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Gap between frames, 95th percentile (ms) | 154 [104, 1,395] | 73.6 [71.3, 83.3] | 2.08x [1.46, 17.9] | 0.0022 |
-| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Data per frame (KiB) | 39.0 [33.9, 297] | 14.2 [14.1, 14.8] | 2.69x [2.40, 20.0] | 0.0022 |
-| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU per frame (ms) | 53.3 [47.8, 204] | 19.6 [19.0, 23.6] | 2.72x [2.44, 8.66] | 0.0022 |
-| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU time (ms) | 16,420 [16,051, 67,404] | 6,300 [5,761, 6,864] | 2.72x [2.41, 9.82] | 0.0022 |
-| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 86.3 [49.1, 122] | 62.2 [51.9, 81.5] | 1.21x [0.699, 2.31] | 1.0000 |
-| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 6,435 [5,793, 9,911] | 2,302 [2,243, 2,474] | 2.77x [2.54, 4.01] | 0.0022 |
-| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Frames shown per second (frames/s) | 0.534 | 16.8 [15.5, 17.8] | 31.6x [24.9, 40.2] | 0.0095 |
-| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Scene frames never shown (%) | 98.2 | 44.1 [40.8, 48.3] | 2.23x [2.04, 2.40] | 0.0095 |
-| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Gap between frames, 95th percentile (ms) | 3,270 | 150 [138, 154] | 22.1x [20.0, 23.9] | 0.0095 |
-| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Data per frame (KiB) | 473 | 14.6 [14.4, 15.4] | 31.3x [26.8, 38.4] | 0.0095 |
-| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU per frame (ms) | 597 | 24.1 [23.6, 25.4] | 24.0x [19.6, 29.7] | 0.0095 |
-| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU time (ms) | 146,271 | 8,630 [8,275, 9,358] | 16.7x [15.4, 17.9] | 0.0095 |
-| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 85.2 | 67.2 [45.3, 72.0] | 1.35x [0.701, 2.13] | 0.7619 |
-| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 9,987 | 2,614 [2,487, 2,810] | 3.75x [3.26, 4.46] | 0.0095 |
-| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Frames shown per second (frames/s) | 24.2 [23.4, 24.5] | 24.4 [24.0, 24.7] | 1.01x [0.991, 1.03] | 0.1320 |
-| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Scene frames never shown (%) | 19.3 [18.3, 21.9] | 18.6 [17.7, 20.2] | 1.06x [0.961, 1.14] | 0.1320 |
-| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Gap between frames, 95th percentile (ms) | 59.6 [54.6, 70.3] | 45.0 [42.3, 54.2] | 1.30x [1.11, 1.42] | 0.0022 |
-| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Data per frame (KiB) | 53.9 [50.8, 54.6] | 14.2 [14.1, 14.4] | 3.78x [3.60, 3.84] | 0.0022 |
-| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU per frame (ms) | 52.1 [50.7, 59.5] | 20.0 [19.8, 21.4] | 2.61x [2.51, 2.78] | 0.0022 |
-| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU time (ms) | 18,280 [17,675, 22,684] | 4,890 [4,836, 5,224] | 3.73x [3.61, 4.34] | 0.0022 |
-| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 99.6 [60.6, 136] | 69.5 [67.5, 76.2] | 1.30x [0.878, 1.96] | 1.0000 |
-| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 7,918 [7,445, 10,045] | 1,912 [1,867, 2,028] | 4.14x [3.91, 4.95] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Frames shown per second (frames/s) | 0.601 [0.521, 11.8] | 24.1 [22.5, 24.4] | 39.1x [2.06, 44.2] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Scene frames never shown (%) | 98.0 [60.5, 98.3] | 19.6 [18.8, 25.1] | 4.82x [3.22, 5.11] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Gap between frames, 95th percentile (ms) | 2,918 [167, 3,020] | 82.6 [73.8, 89.6] | 33.9x [2.27, 37.3] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Data per frame (KiB) | 923 [34.8, 1,050] | 14.2 [14.1, 14.3] | 64.8x [2.48, 74.0] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU per frame (ms) | 703 [58.4, 769] | 20.3 [19.8, 21.2] | 34.3x [2.95, 37.6] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU time (ms) | 149,871 [16,176, 217,332] | 5,945 [5,312, 6,555] | 25.1x [3.05, 33.2] | 0.0022 |
-| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 100 [60.7, 134] | 73.0 [68.3, 78.8] | 1.30x [0.844, 1.89] | 0.8182 |
-| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 12,898 [6,038, 19,024] | 2,212 [1,951, 2,389] | 5.83x [3.10, 7.96] | 0.0022 |
+| Typing, SSH (loss=0%) (T1) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 21.8 [21.6, 21.9] | 21.1 [21.0, 21.1] | 1.04× [1.03, 1.04] | 0.0022 |
+| Typing, SSH (loss=0%) (T1) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 93.2 [42.0, 147] | 67.3 [16.3, 78.5] | 1.67× [0.609, 6.05] | 0.1797 |
+| Typing, SSH (loss=0%) (T1) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 58.3 [52.3, 64.7] | 51.1 [43.8, 55.1] | 1.18× [1.03, 1.30] | 0.0043 |
+| Typing, SSH (loss=0.5%) (T1) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 21.7 [21.5, 21.9] | 21.1 [21.0, 21.4] | 1.03× [1.02, 1.04] | 0.0022 |
+| Typing, SSH (loss=0.5%) (T1) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 95.0 [39.7, 124] | 71.0 [18.5, 73.2] | 1.59× [0.587, 2.18] | 0.2403 |
+| Typing, SSH (loss=0.5%) (T1) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 56.0 [53.2, 59.0] | 47.3 [43.8, 63.6] | 1.20× [0.928, 1.29] | 0.0649 |
+| Typing, SSH (loss=2%) (T1) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 21.8 [21.7, 21.9] | 21.1 [21.0, 21.2] | 1.03× [1.03, 1.04] | 0.0022 |
+| Typing, SSH (loss=2%) (T1) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 94.8 [42.0, 148] | 68.6 [10.8, 75.2] | 1.99× [0.575, 3.89] | 0.6667 |
+| Typing, SSH (loss=2%) (T1) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 58.9 [54.1, 67.3] | 50.4 [45.6, 57.1] | 1.17× [1.04, 1.29] | 0.0260 |
+| Key press, VNC (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 34.8 [34.7, 35.0] | 23.8 [23.7, 23.9] | 1.46× [1.46, 1.47] | 0.0022 |
+| Key press, VNC (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 85.9 [50.5, 123] | 70.6 [23.4, 78.5] | 1.65× [0.68, 4.88] | 0.3939 |
+| Key press, VNC (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 63.2 [58.2, 517] | 63.4 [52.5, 64.9] | 1.10× [0.948, 7.95] | 0.4848 |
+| Key press, VNC (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 34.7 [34.7, 34.8] | 23.7 [23.7, 24.1] | 1.46× [1.44, 1.47] | 0.0022 |
+| Key press, VNC (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 86.3 [30.9, 123] | 71.5 [25.6, 73.8] | 1.66× [0.667, 2.17] | 0.6991 |
+| Key press, VNC (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 64.6 [60.6, 69.1] | 57.9 [53.2, 74.0] | 1.12× [0.934, 1.20] | 0.0649 |
+| Key press, VNC (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 34.7 [34.7, 34.9] | 23.7 [23.6, 23.8] | 1.47× [1.46, 1.47] | 0.0022 |
+| Key press, VNC (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 86.4 [50.0, 123] | 68.5 [17.6, 78.8] | 1.61× [0.689, 2.84] | 0.3939 |
+| Key press, VNC (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 59.8 [58.5, 68.5] | 59.3 [52.7, 60.5] | 1.03× [0.987, 1.15] | 0.3095 |
+| Key press, RDP (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 37.1 [37.0, 37.3] | 25.9 [25.8, 26.2] | 1.43× [1.42, 1.44] | 0.0022 |
+| Key press, RDP (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 110 [72.0, 145] | 52.7 [49.3, 68.7] | 1.80× [1.36, 2.89] | 0.0022 |
+| Key press, RDP (loss=0%) (G2) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 68.6 [64.0, 454] | 66.6 [59.7, 210] | 1.05× [0.884, 2.16] | 0.6991 |
+| Key press, RDP (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 37.1 [37.0, 37.2] | 25.9 [25.9, 33.6] | 1.43× [1.11, 1.43] | 0.0022 |
+| Key press, RDP (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 108 [71.5, 145] | 52.8 [47.5, 54.1] | 2.01× [1.35, 2.89] | 0.0022 |
+| Key press, RDP (loss=0.5%) (G2) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 68.5 [66.4, 482] | 63.2 [57.5, 87.6] | 1.10× [1.01, 5.50] | 0.0411 |
+| Key press, RDP (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Latency, median (ms) | 37.1 [37.0, 37.2] | 25.9 [25.9, 26.0] | 1.43× [1.43, 1.44] | 0.0022 |
+| Key press, RDP (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 99.0 [71.6, 144] | 55.2 [49.0, 60.8] | 1.75× [1.27, 2.65] | 0.0022 |
+| Key press, RDP (loss=2%) (G2) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 66.4 [65.0, 70.7] | 64.0 [58.5, 212] | 1.04× [0.334, 1.12] | 0.0649 |
+| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Frames shown per second (frames/s) | 27.2 [24.4, 28.1] | 29.8 [28.1, 30.2] | 1.09× [1.06, 1.15] | 0.0043 |
+| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Scene frames never shown (%) | 9.17 [6.24, 18.6] | 0.829 [-0.502, 6.25] | –× | 0.0043 |
+| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Gap between frames, 95th percentile (ms) | 59.6 [55.5, 75.3] | 48.0 [47.2, 52.3] | 1.23× [1.15, 1.44] | 0.0022 |
+| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Data per frame (KiB) | 49.8 [49.0, 51.2] | 14.2 [14.1, 14.4] | 3.51× [3.46, 3.57] | 0.0022 |
+| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU per frame (ms) | 46.1 [45.4, 51.0] | 19.2 [18.8, 20.5] | 2.41× [2.30, 2.51] | 0.0022 |
+| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU time (ms) | 12,714 [12,449, 14,333] | 5,674 [5,635, 5,854] | 2.24× [2.19, 2.45] | 0.0022 |
+| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 86.4 [50.2, 123] | 70.3 [53.3, 76.2] | 1.24× [0.682, 2.19] | 1.0000 |
+| Key during motion, VNC (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 5,019 [4,945, 5,650] | 2,121 [2,104, 2,227] | 2.35× [2.26, 2.54] | 0.0022 |
+| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Frames shown per second (frames/s) | 24.4 [23.2, 25.7] | 29.7 [26.5, 29.8] | 1.21× [1.14, 1.25] | 0.0022 |
+| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Scene frames never shown (%) | 18.7 [14.3, 22.6] | 0.941 [0.546, 11.8] | 19.9× [1.92, 32.6] | 0.0022 |
+| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Gap between frames, 95th percentile (ms) | 74.6 [69.4, 83.3] | 58.5 [54.6, 71.7] | 1.28× [1.14, 1.41] | 0.0087 |
+| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Data per frame (KiB) | 44.3 [40.6, 47.8] | 14.2 [14.1, 14.3] | 3.11× [2.87, 3.35] | 0.0022 |
+| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU per frame (ms) | 45.5 [44.6, 46.4] | 19.1 [18.9, 27.0] | 2.39× [1.72, 2.43] | 0.0022 |
+| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU time (ms) | 12,549 [12,276, 12,943] | 5,643 [5,607, 7,191] | 2.21× [1.80, 2.25] | 0.0022 |
+| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 86.5 [44.1, 123] | 66.1 [51.3, 73.3] | 1.29× [0.694, 2.24] | 1.0000 |
+| Key during motion, VNC (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 5,055 [4,971, 5,186] | 2,148 [2,076, 2,289] | 2.35× [2.26, 2.42] | 0.0022 |
+| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Frames shown per second (frames/s) | 16.1 [1.08, 16.6] | 27.8 [27.0, 28.6] | 1.73× [1.67, 25.1] | 0.0022 |
+| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Scene frames never shown (%) | 46.4 [44.7, 96.4] | 7.45 [4.82, 9.89] | 9.15× [5.49, 12.8] | 0.0022 |
+| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Gap between frames, 95th percentile (ms) | 121 [108, 1,553] | 67.7 [62.8, 72.4] | 1.80× [1.62, 21.5] | 0.0022 |
+| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Data per frame (KiB) | 32.9 [31.5, 551] | 14.3 [14.1, 14.4] | 2.31× [2.20, 38.3] | 0.0022 |
+| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU per frame (ms) | 49.4 [48.6, 336] | 19.5 [19.1, 20.8] | 2.54× [2.47, 16.1] | 0.0022 |
+| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU time (ms) | 12,714 [12,293, 67,251] | 5,486 [5,340, 5,789] | 2.32× [2.23, 11.6] | 0.0022 |
+| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 86.6 [50.3, 123] | 58.6 [49.5, 78.3] | 1.27× [0.751, 2.44] | 0.2403 |
+| Key during motion, VNC (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 4,933 [4,719, 7,602] | 2,044 [1,904, 2,283] | 2.45× [2.28, 3.33] | 0.0022 |
+| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Frames shown per second (frames/s) | 24.3 [24.0, 24.6] | 24.4 [23.6, 24.9] | 1.01× [0.984, 1.02] | 0.6991 |
+| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Scene frames never shown (%) | 18.8 [18.1, 20.0] | 18.7 [17.1, 21.3] | 1.02× [0.939, 1.10] | 0.6991 |
+| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Gap between frames, 95th percentile (ms) | 48.7 [46.3, 53.8] | 43.5 [41.5, 69.5] | 1.11× [0.774, 1.17] | 0.0931 |
+| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Data per frame (KiB) | 66.2 [66.1, 67.2] | 14.2 [14.0, 14.3] | 4.70× [4.63, 4.76] | 0.0022 |
+| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU per frame (ms) | 55.4 [54.6, 56.1] | 19.9 [19.3, 25.7] | 2.77× [2.19, 2.84] | 0.0022 |
+| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU time (ms) | 13,451 [13,357, 13,635] | 4,834 [4,789, 6,214] | 2.78× [2.19, 2.83] | 0.0022 |
+| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 107 [64.4, 141] | 73.1 [67.7, 77.4] | 1.40× [0.909, 2.01] | 0.6991 |
+| Key during motion, RDP (loss=0%) (G5) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 5,776 [5,583, 5,838] | 1,775 [1,679, 1,807] | 3.25× [3.17, 3.37] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Frames shown per second (frames/s) | 22.3 [4.58, 22.9] | 24.3 [24.1, 24.6] | 1.09× [1.06, 5.26] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Scene frames never shown (%) | 25.7 [23.5, 84.7] | 18.9 [18.1, 19.7] | 1.35× [1.23, 4.30] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Gap between frames, 95th percentile (ms) | 82.2 [73.5, 877] | 59.3 [55.9, 59.6] | 1.39× [1.29, 14.7] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Data per frame (KiB) | 50.1 [47.1, 300] | 14.2 [14.1, 14.3] | 3.52× [3.33, 20.9] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU per frame (ms) | 51.1 [50.7, 185] | 20.0 [19.7, 20.3] | 2.56× [2.52, 9.09] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU time (ms) | 14,467 [13,887, 48,582] | 4,833 [4,794, 4,938] | 2.98× [2.89, 9.84] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 106 [62.8, 144] | 72.0 [67.9, 78.2] | 1.38× [0.907, 2.04] | 0.5887 |
+| Key during motion, RDP (loss=0.5%) (G5) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 6,487 [6,232, 9,133] | 1,807 [1,739, 1,833] | 3.59× [3.46, 4.98] | 0.0022 |
+| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Frames shown per second (frames/s) | 6.64 [0.591, 14.4] | 24.4 [24.0, 24.8] | 8.78× [1.70, 40.7] | 0.0022 |
+| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Scene frames never shown (%) | 77.9 [52.0, 98.0] | 18.7 [17.2, 20.0] | 4.06× [2.75, 5.49] | 0.0022 |
+| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Gap between frames, 95th percentile (ms) | 1,211 [131, 2,426] | 64.8 [62.2, 72.1] | 9.09× [2.07, 38.1] | 0.0022 |
+| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Data per frame (KiB) | 537 [33.8, 1,055] | 14.1 [14.1, 14.2] | 13.6× [2.40, 74.4] | 0.0022 |
+| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU per frame (ms) | 378 [54.4, 721] | 19.8 [19.7, 19.9] | 10.0× [2.76, 36.3] | 0.0022 |
+| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Server CPU time (ms) | 76,455 [13,653, 142,099] | 4,899 [4,865, 4,979] | 9.05× [2.81, 29.0] | 0.0022 |
+| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Server memory, peak (MiB) | 103 [63.8, 143] | 73.7 [65.2, 81.4] | 1.35× [0.888, 1.99] | 0.5887 |
+| Key during motion, RDP (loss=2%) (G5) | 20 ms, 100 Mbit/s (N1) | Client CPU time (ms) | 8,835 [5,608, 12,098] | 1,839 [1,812, 1,898] | 4.49× [3.05, 6.56] | 0.0022 |
+| Typing, SSH (loss=0%) (T1) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 52.0 [52.0, 52.2] | 51.2 [51.1, 51.3] | 1.02× [1.01, 1.02] | 0.0022 |
+| Typing, SSH (loss=0%) (T1) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 95.0 [42.0, 124] | 65.1 [12.7, 70.2] | 1.64× [1.08, 3.30] | 0.0411 |
+| Typing, SSH (loss=0%) (T1) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 57.4 [51.4, 67.0] | 50.6 [46.1, 59.3] | 1.14× [0.995, 1.30] | 0.0931 |
+| Typing, SSH (loss=0.5%) (T1) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 52.1 [52.0, 52.3] | 51.1 [51.1, 51.5] | 1.02× [1.02, 1.02] | 0.0022 |
+| Typing, SSH (loss=0.5%) (T1) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 95.0 [41.8, 148] | 68.3 [15.2, 81.2] | 1.63× [0.648, 2.76] | 0.3095 |
+| Typing, SSH (loss=0.5%) (T1) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 63.1 [56.2, 68.2] | 48.3 [42.1, 59.1] | 1.29× [1.11, 1.43] | 0.0087 |
+| Typing, SSH (loss=2%) (T1) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 52.0 [51.9, 52.2] | 51.1 [51.0, 51.4] | 1.02× [1.02, 1.02] | 0.0022 |
+| Typing, SSH (loss=2%) (T1) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 112 [75.9, 148] | 68.4 [7.14, 70.8] | 2.13× [1.09, 10.6] | 0.0022 |
+| Typing, SSH (loss=2%) (T1) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 56.2 [50.2, 65.2] | 46.2 [45.1, 50.9] | 1.20× [1.10, 1.37] | 0.0043 |
+| Key press, VNC (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 65.1 [64.9, 65.5] | 53.9 [53.8, 54.0] | 1.21× [1.20, 1.22] | 0.0022 |
+| Key press, VNC (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 86.5 [50.0, 123] | 67.4 [18.8, 73.2] | 1.69× [0.707, 2.65] | 0.6991 |
+| Key press, VNC (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 65.5 [59.6, 73.3] | 60.9 [58.2, 67.2] | 1.07× [0.964, 1.20] | 0.3095 |
+| Key press, VNC (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 65.1 [64.8, 65.9] | 53.8 [53.7, 55.3] | 1.21× [1.19, 1.21] | 0.0022 |
+| Key press, VNC (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 86.9 [50.3, 123] | 60.2 [21.5, 82.2] | 1.71× [0.708, 4.70] | 0.1797 |
+| Key press, VNC (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 60.8 [59.1, 77.5] | 59.1 [57.3, 75.6] | 1.03× [0.984, 1.19] | 0.1320 |
+| Key press, VNC (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 65.1 [65.0, 65.5] | 53.8 [53.8, 54.1] | 1.21× [1.21, 1.21] | 0.0022 |
+| Key press, VNC (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 86.5 [50.0, 123] | 70.3 [13.8, 73.4] | 1.71× [0.699, 4.82] | 0.3680 |
+| Key press, VNC (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 63.5 [57.4, 76.6] | 57.9 [53.6, 72.0] | 1.09× [0.925, 1.21] | 0.0931 |
+| Key press, RDP (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 67.2 [67.1, 67.9] | 56.1 [56.0, 56.5] | 1.20× [1.19, 1.21] | 0.0022 |
+| Key press, RDP (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 109 [71.6, 146] | 51.4 [30.4, 53.9] | 2.53× [1.39, 3.11] | 0.0022 |
+| Key press, RDP (loss=0%) (G2) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 72.5 [68.0, 395] | 64.9 [61.4, 86.8] | 1.12× [0.956, 4.55] | 0.1320 |
+| Key press, RDP (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 67.2 [67.1, 67.4] | 56.0 [55.9, 56.7] | 1.20× [1.19, 1.20] | 0.0022 |
+| Key press, RDP (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 111 [71.9, 145] | 52.7 [49.4, 56.2] | 2.01× [1.35, 2.86] | 0.0022 |
+| Key press, RDP (loss=0.5%) (G2) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 67.4 [63.4, 388] | 64.5 [58.0, 82.8] | 1.08× [0.947, 4.69] | 0.3095 |
+| Key press, RDP (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Latency, median (ms) | 67.2 [67.1, 67.3] | 56.0 [56.0, 56.2] | 1.20× [1.20, 1.20] | 0.0022 |
+| Key press, RDP (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 98.3 [52.6, 144] | 51.7 [47.1, 55.5] | 1.85× [1.12, 2.84] | 0.0152 |
+| Key press, RDP (loss=2%) (G2) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 63.9 [61.1, 71.4] | 61.1 [59.3, 62.7] | 1.05× [1.00, 1.14] | 0.0411 |
+| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Frames shown per second (frames/s) | 26.0 [22.8, 26.8] | 29.7 [10.8, 30.1] | 1.14× [0.475, 1.24] | 0.0649 |
+| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Scene frames never shown (%) | 13.3 [10.6, 24.1] | 1.15 [-0.418, 63.9] | –× | 0.0649 |
+| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Gap between frames, 95th percentile (ms) | 66.6 [60.6, 76.0] | 49.4 [47.2, 386] | 1.32× [0.197, 1.49] | 0.0649 |
+| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Data per frame (KiB) | 46.1 [46.0, 47.5] | 14.2 [14.1, 19.9] | 3.26× [2.39, 3.31] | 0.0022 |
+| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU per frame (ms) | 45.4 [44.5, 52.1] | 19.3 [18.7, 36.2] | 2.36× [1.44, 2.60] | 0.0022 |
+| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU time (ms) | 16,652 [16,255, 19,031] | 5,752 [5,634, 8,653] | 2.89× [2.20, 3.24] | 0.0022 |
+| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 85.7 [49.1, 121] | 67.1 [48.5, 73.2] | 1.31× [0.707, 2.37] | 0.6991 |
+| Key during motion, VNC (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 6,779 [6,482, 7,940] | 2,236 [2,076, 2,412] | 3.06× [2.89, 3.51] | 0.0022 |
+| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Frames shown per second (frames/s) | 13.8 [1.85, 20.2] | 27.5 [25.4, 29.0] | 2.01× [1.44, 13.7] | 0.0022 |
+| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Scene frames never shown (%) | 54.2 [32.8, 93.8] | 8.40 [3.32, 15.3] | 6.74× [3.74, 16.0] | 0.0022 |
+| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Gap between frames, 95th percentile (ms) | 154 [104, 1,395] | 73.6 [71.3, 83.3] | 2.08× [1.46, 17.9] | 0.0022 |
+| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Data per frame (KiB) | 39.0 [33.9, 297] | 14.2 [14.1, 14.8] | 2.69× [2.40, 20.0] | 0.0022 |
+| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU per frame (ms) | 53.3 [47.8, 204] | 19.6 [19.0, 23.6] | 2.72× [2.44, 8.66] | 0.0022 |
+| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU time (ms) | 16,420 [16,051, 67,404] | 6,300 [5,761, 6,864] | 2.72× [2.41, 9.82] | 0.0022 |
+| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 86.3 [49.1, 122] | 62.2 [51.9, 81.5] | 1.21× [0.699, 2.31] | 1.0000 |
+| Key during motion, VNC (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 6,435 [5,793, 9,911] | 2,302 [2,243, 2,474] | 2.77× [2.54, 4.01] | 0.0022 |
+| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Frames shown per second (frames/s) | 0.534 | 16.8 [15.5, 17.8] | 31.6× [24.9, 40.2] | 0.0095 |
+| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Scene frames never shown (%) | 98.2 | 44.1 [40.8, 48.3] | 2.23× [2.04, 2.40] | 0.0095 |
+| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Gap between frames, 95th percentile (ms) | 3,270 | 150 [138, 154] | 22.1× [20.0, 23.9] | 0.0095 |
+| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Data per frame (KiB) | 473 | 14.6 [14.4, 15.4] | 31.3× [26.8, 38.4] | 0.0095 |
+| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU per frame (ms) | 597 | 24.1 [23.6, 25.4] | 24.0× [19.6, 29.7] | 0.0095 |
+| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU time (ms) | 146,271 | 8,630 [8,275, 9,358] | 16.7× [15.4, 17.9] | 0.0095 |
+| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 85.2 | 67.2 [45.3, 72.0] | 1.35× [0.701, 2.13] | 0.7619 |
+| Key during motion, VNC (loss=2%) (G5) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 9,987 | 2,614 [2,487, 2,810] | 3.75× [3.26, 4.46] | 0.0095 |
+| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Frames shown per second (frames/s) | 24.2 [23.4, 24.5] | 24.4 [24.0, 24.7] | 1.01× [0.991, 1.03] | 0.1320 |
+| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Scene frames never shown (%) | 19.3 [18.3, 21.9] | 18.6 [17.7, 20.2] | 1.06× [0.961, 1.14] | 0.1320 |
+| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Gap between frames, 95th percentile (ms) | 59.6 [54.6, 70.3] | 45.0 [42.3, 54.2] | 1.30× [1.11, 1.42] | 0.0022 |
+| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Data per frame (KiB) | 53.9 [50.8, 54.6] | 14.2 [14.1, 14.4] | 3.78× [3.60, 3.84] | 0.0022 |
+| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU per frame (ms) | 52.1 [50.7, 59.5] | 20.0 [19.8, 21.4] | 2.61× [2.51, 2.78] | 0.0022 |
+| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU time (ms) | 18,280 [17,675, 22,684] | 4,890 [4,836, 5,224] | 3.73× [3.61, 4.34] | 0.0022 |
+| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 99.6 [60.6, 136] | 69.5 [67.5, 76.2] | 1.30× [0.878, 1.96] | 1.0000 |
+| Key during motion, RDP (loss=0%) (G5) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 7,918 [7,445, 10,045] | 1,912 [1,867, 2,028] | 4.14× [3.91, 4.95] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Frames shown per second (frames/s) | 0.601 [0.521, 11.8] | 24.1 [22.5, 24.4] | 39.1× [2.06, 44.2] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Scene frames never shown (%) | 98.0 [60.5, 98.3] | 19.6 [18.8, 25.1] | 4.82× [3.22, 5.11] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Gap between frames, 95th percentile (ms) | 2,918 [167, 3,020] | 82.6 [73.8, 89.6] | 33.9× [2.27, 37.3] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Data per frame (KiB) | 923 [34.8, 1,050] | 14.2 [14.1, 14.3] | 64.8× [2.48, 74.0] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU per frame (ms) | 703 [58.4, 769] | 20.3 [19.8, 21.2] | 34.3× [2.95, 37.6] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Server CPU time (ms) | 149,871 [16,176, 217,332] | 5,945 [5,312, 6,555] | 25.1× [3.05, 33.2] | 0.0022 |
+| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Server memory, peak (MiB) | 100 [60.7, 134] | 73.0 [68.3, 78.8] | 1.30× [0.844, 1.89] | 0.8182 |
+| Key during motion, RDP (loss=0.5%) (G5) | 50 ms, 20 Mbit/s (N2) | Client CPU time (ms) | 12,898 [6,038, 19,024] | 2,212 [1,951, 2,389] | 5.83× [3.10, 7.96] | 0.0022 |
 
 ## Loss: what it adds
 

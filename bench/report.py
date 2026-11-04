@@ -16,8 +16,8 @@ output directory:
 - results.csv: one row per run, cell and metric;
 - summary.csv: per series, cell and metric, the median of the runs and its
   95% interval;
-- comparisons.csv: per comparison, cell and metric, the factor by which
-  the candidate is better, times_better, its 95% interval and p-values;
+- comparisons.csv: per comparison, cell and metric, the candidate's
+  improvement over the baseline, its 95% interval and p-values;
 - loss.csv: in a loss study, per series, cell and metric, what the loss
   added, its 95% interval and p-values;
 - report.md: the tables, the targets and the figures;
@@ -672,7 +672,7 @@ def write_tables(out, rows, summary, comparisons, losses=()):
                for (s, c, m), v in sorted(summary.items(), key=lambda kv: (kv[0][1].order(), kv[0][0], kv[0][2]))])
     write_csv(out / "comparisons.csv",
               ["family", "baseline", "candidate", *CELL_HEADER, "metric", "primary", "n_baseline", "n_candidate",
-               "times_better", "lo", "hi", "coverage", "p", "p_adjusted"],
+               "improvement", "lo", "hi", "coverage", "p", "p_adjusted"],
               [[c["family"], c["baseline"], c["candidate"], *cell_columns(c["cell"]), c["metric"], c["primary"],
                 c["n_baseline"], c["n_candidate"], c["factor"], c["lo"], c["hi"], c["coverage"], c["p"],
                 c["p_adjusted"]] for c in comparisons])
@@ -791,7 +791,7 @@ def factor_figure(path, fam, comparisons, names, theme):
         for at, style_ in lines:
             ax.axvline(at, color=t["muted"], linewidth=1, linestyle=style_, zorder=1)
             if i == 0:
-                ax.annotate(f"{at}x", (at, 1.0), xycoords=("data", "axes fraction"), xytext=(3, 2),
+                ax.annotate(f"{at}×", (at, 1.0), xycoords=("data", "axes fraction"), xytext=(3, 2),
                             textcoords="offset points", color=t["text2"], fontsize=8)
         ax.set_yticks(y, [f"{c['cell'].title()} · {METRICS[c['metric']].brief()}" for c in sub])
         ax.set_ylim(-0.6, len(sub) - 0.4)
@@ -800,10 +800,11 @@ def factor_figure(path, fam, comparisons, names, theme):
         ax.tick_params(axis="y", length=0)
         ax.grid(axis="y", visible=False)
     axes[0][0].set_xscale("log")
-    plain_log_axis(axes[0][0].xaxis, "x")
-    axes[-1][0].set_xlabel(f"How many times better {names.get(fam.candidate, fam.candidate)} is than"
+    plain_log_axis(axes[0][0].xaxis, "×")
+    axes[-1][0].set_xlabel(f"Improvement of {names.get(fam.candidate, fam.candidate)} over"
                            f" {names.get(fam.baseline, fam.baseline)} (log scale)")
-    fig.suptitle(f"{factor_title(fam, names)}: primary metrics, with 95% intervals", x=0.0, ha="left",
+    fig.suptitle(f"{factor_title(fam, names)}: improvement on each primary metric, with 95% intervals", x=0.0,
+                 ha="left",
                  color=t["text"], fontsize=11)
     save(fig, path)
 
@@ -874,7 +875,7 @@ def draw(out, summary, comparisons, families=FAMILIES):
     for fam in families:
         if any(fam.has(c) and c["primary"] for c in comparisons):
             name = "factors-" + fam.name.lower().replace(" ", "-")
-            figures.append((name, f"How many times better {names.get(fam.candidate, fam.candidate)} is than"
+            figures.append((name, f"The improvement of {names.get(fam.candidate, fam.candidate)} over"
                                   f" {names.get(fam.baseline, fam.baseline)} on each scenario's primary metric,"
                                   " with 95% intervals"))
             for theme in THEMES:
@@ -985,8 +986,10 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
         f"- {len({(r['series'], r['cell'], r['run']) for r in rows})} results analysed, {len(failed)} failed.",
         "",
         "Values are the median of the runs, with an exact distribution-free 95% interval from order statistics."
-        " A factor is the Hodges–Lehmann estimate of the ratio of the two series, oriented so that above 1 means"
-        " the second is better, with its exact 95% interval from the Mann–Whitney distribution. p is the exact"
+        " An improvement is the baseline's value divided by the candidate's, or the candidate's divided by the"
+        " baseline's for a metric where higher is better, such as frames shown a second, so that above 1× the"
+        " candidate is better: 3× is a third of the latency, or three times the frames. It is the Hodges–Lehmann"
+        " estimate of that ratio, with its exact 95% interval from the Mann–Whitney distribution. p is the exact"
         " two-sided permutation test of the rank sum over every split of the runs.",
         "",
     ]
@@ -1007,15 +1010,15 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
         judged = any(c["targets"] for c in primary)
         correction = "Holm" if fam.correction == "holm" else "Benjamini–Hochberg"
         intro = f"Primary metrics, {len(primary)} tests, {correction}-corrected at {ALPHA}."
-        header = (f"| Scenario | Network | Metric | {names.get(b, b)} | {names.get(a, a)} | Factor | p"
+        header = (f"| Scenario | Network | Metric | {names.get(b, b)} | {names.get(a, a)} | Improvement | p"
                   f" | p ({correction}) |")
         rule = "|---|---|---|---:|---:|---:|---:|---:|"
         if judged:
-            intro += (f" The {TARGET_FACTOR}x target is met where the interval's lower bound is at least"
-                      f" {TARGET_FACTOR}.")
-            header += f" {TARGET_FACTOR}x |"
+            intro += (f" The target is an improvement of {TARGET_FACTOR}×, met where the interval's lower bound"
+                      f" is at least {TARGET_FACTOR}×.")
+            header += " Target |"
             rule += ":-:|"
-        intro = (f"{names.get(a, a)} (`{a}`) against {names.get(b, b)} (`{b}`): a factor above 1 means"
+        intro = (f"The improvement of {names.get(a, a)} (`{a}`) over {names.get(b, b)} (`{b}`): above 1×,"
                  f" {names.get(a, a)} is better. " + intro)
         lines += [f"## {fam.name}", "", intro, "", header, rule]
         for c in primary:
@@ -1024,17 +1027,17 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
             lines.append(
                 f"| {c['cell'].entry()} | {net_entry(c['cell'].net)} | {METRICS[c['metric']].label} ({unit})"
                 f" | {fmt_interval(sb['median'], sb['lo'], sb['hi'])} | {fmt_interval(sa['median'], sa['lo'], sa['hi'])}"
-                f" | {fmt_interval(c['factor'], c['lo'], c['hi'], 'x')} | {fmt_p(c['p'])} | {fmt_p(c['p_adjusted'])} |"
+                f" | {fmt_interval(c['factor'], c['lo'], c['hi'], '×')} | {fmt_p(c['p'])} | {fmt_p(c['p_adjusted'])} |"
                 + (f" {('met' if tenfold(c) else 'no') if c['targets'] else '–'} |" if judged else "")
             )
         sig = sum(significant(c) for c in primary)
         outcome = f"{sig} of {len(primary)} differences are significant after correction"
         if judged:
-            outcome += (f"; the {TARGET_FACTOR}x target is met in {sum(tenfold(c) for c in primary)} of"
+            outcome += (f"; the target of {TARGET_FACTOR}× is met in {sum(tenfold(c) for c in primary)} of"
                         f" {sum(c['targets'] for c in primary)}")
         lines += ["", outcome + "." + (out_of_reach(primary) if fam.correction == "holm" else ""), ""]
         name = "factors-" + fam.name.lower().replace(" ", "-")
-        lines += [picture(name, f"How many times better {names.get(a, a)} is than {names.get(b, b)} on each"
+        lines += [picture(name, f"The improvement of {names.get(a, a)} over {names.get(b, b)} on each"
                                 " scenario's primary metric, with 95% intervals"), ""]
 
         secondary = [c for c in fam_rows if not c["primary"] and c["metric"] not in RUNTIME]
@@ -1044,7 +1047,7 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
                 "",
                 "Exploratory: the p-values are not corrected.",
                 "",
-                f"| Scenario | Network | Metric | {names.get(b, b)} | {names.get(a, a)} | Factor | p |",
+                f"| Scenario | Network | Metric | {names.get(b, b)} | {names.get(a, a)} | Improvement | p |",
                 "|---|---|---|---:|---:|---:|---:|",
             ]
             for c in secondary:
@@ -1055,7 +1058,7 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
                     + (f" ({unit})" if unit else "")
                     + f" | {fmt_interval(sb['median'], sb['lo'], sb['hi'])}"
                     f" | {fmt_interval(sa['median'], sa['lo'], sa['hi'])}"
-                    f" | {fmt_interval(c['factor'], c['lo'], c['hi'], 'x')} | {fmt_p(c['p'])} |"
+                    f" | {fmt_interval(c['factor'], c['lo'], c['hi'], '×')} | {fmt_p(c['p'])} |"
                 )
             lines.append("")
 
@@ -1114,7 +1117,7 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
                 def verdict(x):
                     if x is None:
                         return "not testable"
-                    return (f"{fmt(x['factor'])}x, p ({x['family']}) {fmt_p(x['p_adjusted'])},"
+                    return (f"{fmt(x['factor'])}×, p ({x['family']}) {fmt_p(x['p_adjusted'])},"
                             f" n {x['n_baseline']}/{x['n_candidate']}")
 
                 lines.append(f"| {c['family']} | {c['cell'].entry()} | {net_entry(c['cell'].net)}"
@@ -1156,7 +1159,8 @@ def main(argv=None):
 
     primary = [c for c in comparisons if c["primary"]]
     print(f"{out / 'report.md'}: {len(primary)} primary comparisons, {sum(significant(c) for c in primary)}"
-          f" significant, {sum(tenfold(c) for c in primary)} at {TARGET_FACTOR}x; {len(failed)} failed results")
+          f" significant, {sum(tenfold(c) for c in primary)} meet the {TARGET_FACTOR}× target; {len(failed)}"
+          " failed results")
 
 
 if __name__ == "__main__":

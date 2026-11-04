@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="485.003594pt" height="479.99952pt" viewBox="0 0 485.003594 479.99952" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="529.040156pt" height="479.99952pt" viewBox="0 0 529.040156 479.99952" xmlns="http://www.w3.org/2000/svg" version="1.1">
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
@@ -21,8 +21,8 @@
  <g id="figure_1">
   <g id="patch_1">
    <path d="M 0 479.99952 
-L 485.003594 479.99952 
-L 485.003594 0 
+L 529.040156 479.99952 
+L 529.040156 0 
 L 0 0 
 z
 " style="fill: #1a1a19"/>
@@ -244,7 +244,7 @@ z
     </g>
    </g>
    <g id="text_7">
-    <text style="font-size: 8px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #c3c2b7" x="332.704964" y="49.53548" transform="rotate(-0 332.704964 49.53548)">1x</text>
+    <text style="font-size: 8px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #c3c2b7" x="332.704964" y="49.53548" transform="rotate(-0 332.704964 49.53548)">1×</text>
    </g>
    <g id="text_8">
     <text style="font-size: 10px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #c3c2b7" x="165.077427" y="35.53548" transform="rotate(-0 165.077427 35.53548)">No delay</text>
@@ -429,7 +429,7 @@ L 194.307562 295.435343
       </g>
      </g>
      <g id="text_12">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="194.307562" y="456.39752" transform="rotate(-0 194.307562 456.39752)">0.2x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="194.307562" y="456.39752" transform="rotate(-0 194.307562 456.39752)">0.2×</text>
      </g>
     </g>
     <g id="xtick_26">
@@ -444,7 +444,7 @@ L 271.392477 295.435343
       </g>
      </g>
      <g id="text_13">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="271.392477" y="456.39752" transform="rotate(-0 271.392477 456.39752)">0.5x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="271.392477" y="456.39752" transform="rotate(-0 271.392477 456.39752)">0.5×</text>
      </g>
     </g>
     <g id="xtick_27">
@@ -459,7 +459,7 @@ L 329.704964 295.435343
       </g>
      </g>
      <g id="text_14">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="329.704964" y="456.39752" transform="rotate(-0 329.704964 456.39752)">1x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="329.704964" y="456.39752" transform="rotate(-0 329.704964 456.39752)">1×</text>
      </g>
     </g>
     <g id="xtick_28">
@@ -474,7 +474,7 @@ L 388.01745 295.435343
       </g>
      </g>
      <g id="text_15">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="388.01745" y="456.39752" transform="rotate(-0 388.01745 456.39752)">2x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="388.01745" y="456.39752" transform="rotate(-0 388.01745 456.39752)">2×</text>
      </g>
     </g>
     <g id="xtick_29">
@@ -534,7 +534,7 @@ L 388.01745 295.435343
      </g>
     </g>
     <g id="text_16">
-     <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="315.038594" y="470.88252" transform="rotate(-0 315.038594 470.88252)">How many times better Occamy is than Occamy with a window of two (log scale)</text>
+     <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="315.038594" y="470.88252" transform="rotate(-0 315.038594 470.88252)">Improvement of Occamy over Occamy with a window of two (log scale)</text>
     </g>
    </g>
    <g id="matplotlib.axis_6">
@@ -620,7 +620,7 @@ L 464.99976 440.82952
    </g>
   </g>
   <g id="text_24">
-   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #f0efec" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Occamy against Occamy with a window of two: primary metrics, with 95% intervals</text>
+   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #f0efec" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Occamy against Occamy with a window of two: improvement on each primary metric, with 95% intervals</text>
   </g>
  </g>
  <defs>
