@@ -877,13 +877,17 @@ as the public listener's are. How to read the profiles is in
 ### `GET /debug/vars`
 
 Go's expvar: a JSON object with `cmdline`, `occamyd`'s command line,
-`memstats`, the runtime's memory statistics, and two variables of
-`occamyd`'s own: `goroutines`, the number of goroutines, and `fds`, the
-file descriptors it has open, counted in `/proc/self/fd` on Linux or
-`/dev/fd` on macOS, or -1 where it cannot count them. Abbreviated:
+`memstats`, the runtime's memory statistics, and three variables of
+`occamyd`'s own: `goroutines`, the number of goroutines; `fds`, the file
+descriptors it has open, counted in `/proc/self/fd` on Linux or
+`/dev/fd` on macOS, or -1 where it cannot count them; and
+`tcp_congestion`, the TCP congestion control the public listener's
+connections use, or empty where `occamyd` cannot tell
+([configuration.md](configuration.md#tcp-congestion-control)).
+Abbreviated:
 
 ```json
-{"cmdline":["occamyd","-conf","/etc/occamy/conf.yaml"],"fds":14,"goroutines":23,"memstats":{"Alloc":4194304,"HeapInuse":6291456,"NumGC":12}}
+{"cmdline":["occamyd","-conf","/etc/occamy/conf.yaml"],"fds":14,"goroutines":23,"memstats":{"Alloc":4194304,"HeapInuse":6291456,"NumGC":12},"tcp_congestion":"bbr"}
 ```
 
 ### `GET /debug/pprof/`

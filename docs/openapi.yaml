@@ -518,9 +518,10 @@ paths:
       responses:
         "200":
           description: |
-            `cmdline`, `memstats`, and `occamyd`'s own `goroutines` and
+            `cmdline`, `memstats`, and `occamyd`'s own `goroutines`;
             `fds`, the open file descriptors, or -1 where it cannot count
-            them.
+            them; and `tcp_congestion`, the TCP congestion control of the
+            public listener's connections, or empty where it cannot tell.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/DebugVars"}
@@ -985,7 +986,7 @@ components:
 
     DebugVars:
       type: object
-      required: [cmdline, memstats, goroutines, fds]
+      required: [cmdline, memstats, goroutines, fds, tcp_congestion]
       properties:
         cmdline:
           type: array
@@ -994,3 +995,4 @@ components:
           type: object
         goroutines: {type: integer}
         fds: {type: integer}
+        tcp_congestion: {type: string}

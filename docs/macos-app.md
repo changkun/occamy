@@ -8,11 +8,11 @@ on Apple silicon and Intel.
 
 ## Installing it
 
-Download `Occamy-<version>.dmg` from the
-[releases](https://github.com/changkun/occamy/releases), open it, and
-drag Occamy to Applications. The app is signed with a Developer ID and
-notarized by Apple, so Gatekeeper opens it; macOS asks once whether to
-open an app downloaded from the internet.
+Download `Occamy-<version>.dmg`, such as `Occamy-1.0.0-beta.2.dmg`,
+from the [releases](https://github.com/changkun/occamy/releases), open
+it, and drag Occamy to Applications. The app is signed with a Developer
+ID and notarized by Apple, so Gatekeeper opens it; macOS asks once
+whether to open an app downloaded from the internet.
 
 ## Building it
 

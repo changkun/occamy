@@ -36,9 +36,9 @@ its decisions are in
 
 A client opens a WebSocket to `occamyd` and gets one session over it: a
 terminal or a graphical desktop that the server reaches through a
-backend (SSH, VNC, RDP). The client sends input. The server sends
-frames: tiles of pixels for a graphical session, escape sequences that
-update the client's terminal for a terminal session. Each frame ends
+backend (SSH, VNC, RDP, Kubernetes). The client sends input. The server
+sends frames: tiles of pixels for a graphical session, escape sequences
+that update the client's terminal for a terminal session. Each frame ends
 with `frame-end`, which the client acknowledges with `frame-ack`, and
 the server keeps only a few frames unacknowledged, so a slow client
 gets fewer frames rather than a queue of stale ones.

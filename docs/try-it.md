@@ -864,7 +864,7 @@ rm -f "${TMPDIR:-/tmp}/occamy-webinterop"
 The images that were pulled stay for the next run:
 `docker.io/rancher/k3s:v1.34.1-k3s1`,
 the base images `debian:trixie-slim`, `golang:1.27-trixie`,
-`node:24-trixie-slim` and `gcr.io/distroless/static-debian13:nonroot`.
+`node:26-trixie-slim` and `gcr.io/distroless/static-debian13:nonroot`.
 So does `occamy-bench-desktop`, or the name you gave it, if you built
 it for `TestBenchDesktop`. `podman rmi` removes them.
 

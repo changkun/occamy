@@ -945,5 +945,5 @@ A v0 file's keys, in a v1 file:
 | `mode: debug` | `debug.address`, the debug listener, apart from the public one |
 | `auth.jwt_secret`, `auth.jwt_alg` | `auth.signing_key_file`: `occamyd` signs its tokens with an Ed25519 key, and users sign in as `auth` says |
 | `client` | `web_client` |
-| `guacd` | none: `occamyd` serves ssh, vnc and rdp itself |
+| `guacd` | none: `occamyd` serves ssh, vnc, rdp and kubernetes itself |
 | a v0 token's target | a connection in `connections`, or with `allow_adhoc_targets`, an ad-hoc target |

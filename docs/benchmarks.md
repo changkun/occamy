@@ -59,6 +59,7 @@ make bench BENCH_FLAGS="-scenarios T1 -net N1 -series v1-native"
 | `-resume` | off | Continue `-out`, if it exists and measures the same plan: keep its blocks that are complete and without errors, and measure the rest |
 | `-max-load`, `-load-wait` | `0`, `2h` | Before each result, wait until the host's 1-minute load is below `-max-load`, for up to `-load-wait`; then save and exit with status 2. Set, they override a plan file's |
 | `-runtime` | none | occamyd debug listeners, as `service=address` pairs, to read occamyd's runtime from; `make bench BENCH_RUNTIME=1` turns on the v1 services' listeners and passes them |
+| `-link-image` | `occamy-bench-netem` | The image that emulates a loss study's link in the kernel (`docker/bench/netem`) ([The comparison](#the-comparison)) |
 
 Server CPU needs podman: its container statistics report cumulative CPU
 time, and docker's do not. With docker, pass `-engine none`. CI runs a
@@ -205,6 +206,7 @@ make bench-report             # bench-compare.json into docs/benchmarks/comparis
 make bench-essential-report   # bench-essential.json into docs/benchmarks/essential/
 make bench-realtime-1-report  # bench-realtime-1.json into docs/benchmarks/realtime/1/
 make bench-realtime-2-report  # bench-realtime-2.json into docs/benchmarks/realtime/2/
+make bench-realtime-3a-report # bench-realtime-3a.json into docs/benchmarks/realtime/3a/
 ```
 
 analyses the results with `bench/report.py`, which
@@ -212,12 +214,15 @@ analyses the results with `bench/report.py`, which
 matplotlib, as the spec's Analysis fixed it before any data. It compares
 each family of series whose two series are both in the results:
 **Guacamole to Occamy**, `guacd` to `v1-native`, which the 10x and 50 ms
-targets judge, and **Frame window**, `v1-native-w2` to `v1-native`, the
-window of two frames against the window from the path, with the same
-tests and Holm's correction and without targets, since both are
-Occamy's. When the runs are too few for any difference to be
-significant after Holm's correction, because the exact test's smallest
-p times the number of tests is at least 0.05, the report says so.
+targets judge; **Frame window**, `v1-native-w2` to `v1-native`, the
+window of two frames against the window from the path; and **Congestion
+control**, `v1-native-cubic` to `v1-native`, CUBIC against BBR, or in
+results from before `occamyd` asked for BBR, `v1-native` to
+`v1-native-bbr`. The last two have the same tests and Holm's correction
+and no targets, since both of their series are Occamy's. When the runs
+are too few for any difference to be significant after Holm's
+correction, because the exact test's smallest p times the number of
+tests is at least 0.05, the report says so.
 Besides the frame rate, a scene that stamps its frames (G3 to
 G5) reports the share of them never shown, 1 − frames ÷ (the scene's
 rate × seconds), and the 95th percentile of the interval between those
@@ -244,7 +249,8 @@ with known answers.
 
 The harness is a client. It decodes every image into a framebuffer,
 answers each `sync` once the frame is applied, and sends a `nop` every
-5 seconds, as the web client does. Each scenario runs on a fresh session.
+5 seconds, as guacamole-common-js does. Each scenario runs on a fresh
+session.
 
 - **Series.** `guacd` performs the Guacamole handshake with guacd
   directly, as a Guacamole deployment's web application does, with
@@ -364,8 +370,8 @@ make bench BENCH_FLAGS="-series v1-native,v1-native-w2,v1-native-cubic,v1-native
 Their results so far are in [The essential comparison](#the-essential-comparison)
 and [The real-time steps](#the-real-time-steps). `v1-native` measures
 [native RDP](../specs/008-native-architecture/native-rdp-backend.md),
-rdp's default, with RDP's graphics pipeline (GFX), without its
-ClearCodec and cache yet.
+occamyd's RDP backend, with RDP's graphics pipeline (GFX) on as it
+ships, without its ClearCodec and cache yet.
 
 | Series | Protocols | RDP's GFX | Connections |
 |---|---|---|---|
@@ -433,13 +439,15 @@ A v1 session runs as follows:
   screen yet: a browser shows either client's canvas at the display's
   next refresh, which both pay alike and the 50 ms budget allows for.
 - **Acknowledgement.** occamyd paces its frames by the client's
-  acknowledgements, with two frames in flight. occamy's web client
-  presents a graphical frame at the browser's next animation frame and
-  acknowledges it then, by asking for the next event (`Display.run` in
-  `client/occamy-web/src/protocol/display.ts`); a terminal's frame it
-  acknowledges without waiting for a refresh. The harness does the
-  same: it acknowledges a graphical frame, drawing or not, on the next
-  tick of a 60 Hz screen (`-ack-hz`), and a terminal's at once.
+  acknowledgements. A desktop has as many frames in flight as cover an
+  acknowledgement's round trip, two on a local link; a terminal has two.
+  occamy's web client presents a graphical frame at the browser's next
+  animation frame and acknowledges it then, by asking for the next event
+  (`Display.run` in `client/occamy-web/src/protocol/display.ts`); a
+  terminal's frame it acknowledges without waiting for a refresh. The
+  harness does the same: it acknowledges a graphical frame, drawing or
+  not, on the next tick of a 60 Hz screen (`-ack-hz`), and a terminal's
+  at once.
   guacamole-common-js answers `sync` as soon as it applied a frame,
   with no animation frame, and the `guacd` series does the same. **These
   defaults produce the gate's numbers;** the JSON records them as
@@ -452,9 +460,9 @@ A v1 session runs as follows:
     counts as if the reader had been there, from `Frame.Ready` and the
     time `Next` took to apply it, as v0's reader and the web client's
     decoder take a frame as it comes. But a frame that occamyd holds
-    while two are unacknowledged goes out at the tick that acknowledges
-    one, up to 16.7 ms later than at once. That happens in moving
-    scenes, and when a change reaches the client in several frames, as
+    while its window is unacknowledged goes out at the tick that
+    acknowledges one, up to 16.7 ms later than at once. That happens in
+    moving scenes, and when a change reaches the client in several frames, as
     the native VNC backend's updates do. The ticks keep one phase for
     the whole process, and the probe's jittered keys meet them at every
     phase, so what the cadence adds is in each run's percentiles.
