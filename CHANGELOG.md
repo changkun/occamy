@@ -67,7 +67,7 @@ the API and the protocol may change before 1.0.0.
   instead of 930, a photograph costs 108–122 KiB instead of 2.1–2.2 MiB,
   a key on a still desktop shows in 4.6–8.1 ms instead of 16–21 at p95,
   and a frame of full-screen motion costs 7.7–8.0 KiB instead of 50–66
-  ([docs/benchmarks.md](docs/benchmarks.md#the-essential-comparison)).
+  ([docs/benchmarks.md](docs/benchmarks.md#occamy-against-guacamole)).
 - The benchmark measures a scene's cadence as well as its frame rate:
   when each of its frames was first shown, the share never shown, and
   the 95th percentile of the interval between those shown

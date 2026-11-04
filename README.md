@@ -48,7 +48,7 @@ Occamy prints 575 KiB of terminal output in 20 ms instead of about a
 second, sends a photograph in about 120 KiB instead of 2 MiB, shows a
 key press on a still desktop in 5–8 ms instead of 16–21 ms, and sends a
 frame of full-screen motion in 8 KiB instead of 50–66
-([benchmarks](docs/benchmarks.md#the-essential-comparison)).
+([benchmarks](docs/benchmarks.md#occamy-against-guacamole)).
 
 ## Features
 
