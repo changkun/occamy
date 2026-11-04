@@ -58,11 +58,10 @@ review.
 ## Writing the docs
 
 The docs are for the people who try, deploy, use and build on Occamy.
-Write them to the standard of Apple's developer documentation and the
-Claude platform docs: a reader who arrives from a search should
-understand what a page is for in its first two sentences, see how the
-thing works in a figure, and find each detail where they expect it.
-[The protocol page](docs/protocol.md) shows the standard applied.
+A reader who arrives from a search should understand what a page is for
+in its first two sentences, see how the thing works in a figure, and
+find each detail where they expect it.
+[The protocol page](docs/protocol.md) is an example.
 
 - **Write in complete, natural sentences.** Address the reader as
   "you", use the present tense and the active voice, and connect ideas
