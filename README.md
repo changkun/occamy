@@ -21,10 +21,11 @@ network allows.
 
 ![Signing in, opening a Linux desktop over RDP, running top in a terminal, and sharing the session with a viewer who can only watch, shown in the corner](./docs/demo.webp)
 
-Measured against Guacamole on the same remotes, a key press over VNC
-shows in 4.6 ms instead of 16.4 ms, long output over SSH finishes in
-20 ms instead of 930 ms, and a full-screen photograph takes 122 KiB
-instead of 2.2 MiB ([benchmarks](./docs/benchmarks.md)).
+Measured against Guacamole on the same remotes, with no added network
+delay, a key press over VNC shows in 4.6 ms instead of 16.4 ms, long
+output over SSH finishes in 20 ms instead of 930 ms, and a full-screen
+photograph takes 122 KiB instead of 2.2 MiB
+([benchmarks](./docs/benchmarks.md)).
 
 ## What you can connect to
 
