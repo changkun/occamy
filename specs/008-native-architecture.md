@@ -127,7 +127,7 @@ Release gate for `v1.0.0-beta.1`, once the beta.1 items below are in:
 
 ## v1.0.0-beta.2 scope
 
-The owner's plan of 2026-11-03, with the owner's answers the same day:
+The plan of 2026-11-03:
 
 1. **No guacd in the product.** occamyd drops the guacd bridge
    (`backend: guacd` and `internal/backend/guacd`), the v0 routes with
@@ -231,7 +231,7 @@ fallback for any protocol still short of 10x; release candidates may
 still carry one ([benchmark](008-native-architecture/benchmark.md),
 Targets).
 
-The owner's plan of 2026-11-03 removes guacd from occamyd in beta.2,
+The beta.2 plan of 2026-11-03 removes guacd from occamyd in beta.2,
 for every protocol and whatever the benchmark shows, and telnet with
 it; guacd remains the benchmark's baseline. The 10x rule stays as the
 target of the stable release: v1.0 waits until the benchmark shows

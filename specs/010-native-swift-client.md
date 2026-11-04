@@ -24,7 +24,7 @@ Go client core as a static library. Go does the protocol, decoding and
 session logic, shared with the server and the tests. Swift does the UI,
 input, rendering and platform integration. It replaces the Gio client
 ([007](007-native-gio-client.md), archived). It was first planned as a
-preview by `v1.0.0-rc.1`; the owner's plan of 2026-11-03 makes it part
+preview by `v1.0.0-rc.1`; the plan of 2026-11-03 makes it part
 of `v1.0.0-beta.2` ([008](008-native-architecture.md), v1.0.0-beta.2
 scope): an app as simple as VNC Viewer, which does the job, in the
 style of macOS 26.
@@ -261,7 +261,7 @@ Settled on 2026-10-29.
   an interim Guacamole client.
 - **Platforms:** macOS 14 and later first, for the Observation framework.
   iPadOS follows once the core ships as an XCFramework. (2026-11-03:
-  macOS 26 and later, since the owner asked for macOS 26's style, whose
+  macOS 26 and later, for macOS 26's style, whose
   Liquid Glass exists only from 26, and two looks would double the
   work. A universal binary, Apple silicon and Intel, since macOS 26
   still runs on Intel Macs.)

@@ -904,7 +904,7 @@ say what the harness does now.
     ([the harness for the v1 run](#implementation-notes-the-harness-for-the-v1-run)),
     with the prompt that the shell shows anyway as its known line. G7's
     baselines are measured again.
-  - ~~Owner question: whether the v1.0 gate of 10x over guacd is a flat
+  - ~~Open question: whether the v1.0 gate of 10x over guacd is a flat
     10x or each target as defined.~~ Answered on 2026-10-31: each
     target as defined, a miss of 10x only where a documented bound
     outside Occamy makes it impossible ([Targets](#targets)).

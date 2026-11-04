@@ -40,7 +40,7 @@ under every network condition. The binary protocol of
 Guacamole protocol. This spec takes the next layer: how frames are paced,
 acknowledged and carried.
 
-The owner's question (2026-11-02): can the protocol behave more like a UDP
+The question this spec answers: can the protocol behave more like a UDP
 stream, where acknowledgements are feedback rather than a barrier, frames
 go out without waiting for them, possibly arriving out of order, and the
 client reorders and renders them adaptively, so that real-time control,
@@ -130,14 +130,11 @@ six runs per cell:
    conditions, with Guacamole's number beside it.** A step is kept when
    its cells improve and the guard cells do not get worse.
 7. **Spend the server's CPU before the client's or the link's.** The
-   owner's framing (2026-11-03): the targets are there to push the
-   design of the protocol, and of a well-engineered service that
-   optimises latency and bandwidth while preserving real-time control;
-   and the server has more machines to scale out to, while each user's
-   client has a fixed compute capability. What this spec takes from it,
-   decided here rather than by the owner: the bytes on the link, the
-   client's decoding and drawing, and latency rank above the server's
-   CPU. The server CPU targets of [benchmark](benchmark.md) stay, so no
+   targets exist to steer the protocol toward less delay and fewer
+   bytes without losing real-time control. A deployment can add
+   servers, but each user's client has the compute it has. So the bytes
+   on the link, the client's decoding and drawing, and latency rank
+   above the server's CPU. The server CPU targets of [benchmark](benchmark.md) stay, so no
    target is dropped, but a design that costs the server CPU to save
    bytes or client work is taken, and one that saves only server CPU
    waits. The first design made under it is the scaled codec for tiles
@@ -257,7 +254,7 @@ is measured and kept, in a beta, in the release candidate, or after the
 candidate freezes the protocol, whose later changes are additive
 ([008](../008-native-architecture.md), versioning).
 
-The owner's plan for beta.2 (2026-11-03) ships what is measured and
+The plan for beta.2 (2026-11-03) ships what is measured and
 kept by then, steps 1 and 3a, and moves the unfinished steps, 3b, 3c, 4
 and 5, and prediction below the round trip, to beta.3
 ([008](../008-native-architecture.md), v1.0.0-beta.2 scope).

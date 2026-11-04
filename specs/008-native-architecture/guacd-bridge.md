@@ -18,7 +18,7 @@ dispatched_task_id: null
 
 # guacd bridge and the path to pure Go
 
-**Superseded for the product on 2026-11-03.** The owner's plan for
+**Superseded for the product on 2026-11-03.** The plan for
 beta.2 removes the bridge, `backend: guacd`, the v0 routes and telnet
 from occamyd, whatever the benchmark shows, and keeps guacd only as the
 benchmark's baseline, the `guacd` series
