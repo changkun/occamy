@@ -1,52 +1,49 @@
-# Occamy Manual
+# All documents
 
-Every document, by what you want to do.
+Every page of Occamy's documentation, grouped as the website's menu is,
+with what each one helps you do.
 
 ## Get started
 
-- [Try Occamy](./try-it.md): run the demo stack on your machine and open
-  a desktop over VNC and RDP and a shell over SSH in the browser.
-- [Deploy](./deploy.md): run `occamyd` for your users, with a
-  configuration of your own.
+- [Try Occamy](./try-it.md): run the demo on your machine, and open a
+  desktop over VNC and RDP, a shell over SSH, and a Kubernetes pod in
+  your browser.
+- [Deploy](./deploy.md): run `occamyd` for your users, with your own
+  configuration, a signing key and TLS.
 
 ## Use
 
-- [The web client](./web-client.md): sessions, roles, sharing, the
-  clipboard, resizing, and what each message means.
-- [Occamy for macOS](./macos-app.md): install the Mac app, add a server,
-  and open its connections in windows of their own.
+- [The web client](./web-client.md): sign in, open a session, share it,
+  copy and paste, resize it, and understand why a session ended.
+- [Occamy for macOS](./macos-app.md): install the Mac app, add a
+  server, and open its connections in windows of their own.
 
 ## Operate
 
-- [Configuration](./configuration.md): every key of the configuration
-  file, its default, and how it is checked.
-- [Debugging and monitoring](./debugging.md): the health check, the log,
-  common problems, and profiling `occamyd`.
+- [Configuration](./configuration.md): look up any key of the
+  configuration file, its default, and what `occamyd` refuses.
+- [Debugging and monitoring](./debugging.md): check `occamyd`'s health,
+  read its log, solve common problems, and profile it.
 
 ## Reference
 
-- [HTTP API](./api.md): sign-in, connections, sessions, shares and
-  streams, for writing a client. [openapi.yaml](./openapi.yaml) has
-  the same routes in OpenAPI 3.1.
-- [Protocol](./protocol.md): the wire protocol between `occamyd` and its
-  clients, with test vectors.
-- [Architecture](./architecture.md): how `occamyd`, its backends and the
-  clients fit together.
+- [HTTP API](./api.md): sign in, list connections, and open, join and
+  share sessions from a client of your own. [openapi.yaml](./openapi.yaml)
+  describes the same routes in OpenAPI 3.1.
+- [Protocol](./protocol.md): implement the wire protocol that carries a
+  session between a client and `occamyd`, with test vectors.
+- [Architecture](./architecture.md): learn how `occamyd` is built, and
+  how a key press and a frame travel through it.
 
 ## Performance
 
-- [Benchmarks](./benchmarks.md): Occamy measured against Guacamole, with
-  intervals and corrected tests.
-- [Codecs](./benchmarks/codecs.md): which codecs, tile size and pixel
-  layout `occamyd` uses, measured on frames from a real desktop.
+- [Benchmarks](./benchmarks.md): see how Occamy compares with Guacamole
+  on the same remotes and networks, and run the comparison yourself.
+- [Codecs](./benchmarks/codecs.md): see why `occamyd` uses the codecs,
+  tile size and pixel layout it does, measured on frames from a real
+  desktop.
 
 ## Develop
 
-- [Development](./development.md): build from source and run every test
-  suite.
-- [Design specs](../specs/README.md): how each part was designed, and
-  the work planned.
-
-## License
-
-[Occamy](https://github.com/changkun/occamy) | [MIT](../LICENSE) &copy; 2019-2026 [Ou Changkun](https://changkun.de)
+- [Development](./development.md): build Occamy from source, run each
+  of its test suites, preview this website, and cut a release.
