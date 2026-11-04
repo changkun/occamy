@@ -5,8 +5,11 @@
 package session_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -14,6 +17,34 @@ import (
 	"changkun.de/x/occamy/internal/backend/backendtest"
 	"changkun.de/x/occamy/internal/session"
 )
+
+// TestRegistryLogsSessionID checks that a session's own lines, such as
+// the one it logs as it ends, carry its ID, which the server's lines
+// about it carry too.
+func TestRegistryLogsSessionID(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var buf bytes.Buffer
+		log := slog.New(slog.NewTextHandler(&buf, nil))
+		r := session.NewRegistry(ctx)
+		id, s, _, err := r.Open(session.Config{Backend: backendtest.NewScreen(64, 48, 0), Logger: log})
+		if err != nil {
+			t.Fatal(err)
+		}
+		s.Close()
+		<-s.Done()
+		ended := ""
+		for line := range strings.Lines(buf.String()) {
+			if strings.Contains(line, "session ended") {
+				ended = line
+			}
+		}
+		if !strings.Contains(ended, "session="+id) {
+			t.Errorf("the session ended line %q does not carry session=%s", ended, id)
+		}
+	})
+}
 
 func TestRegistry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {

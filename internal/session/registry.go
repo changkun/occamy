@@ -11,6 +11,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -65,9 +66,14 @@ func NewRegistry(ctx context.Context) *Registry {
 }
 
 // Open starts a session and returns its ID, the session and the owner's
-// viewer.
+// viewer. Each line the session logs carries its ID as session=, so that
+// an operator can match it with the server's lines about the session.
 func (r *Registry) Open(cfg Config) (id string, s *Session, owner *Viewer, err error) {
 	id = randomID(16)
+	if cfg.Logger == nil {
+		cfg.Logger = slog.Default()
+	}
+	cfg.Logger = cfg.Logger.With("session", id)
 	s, owner, err = Start(r.ctx, cfg)
 	if err != nil {
 		return "", nil, nil, err

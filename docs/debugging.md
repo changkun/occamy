@@ -38,7 +38,7 @@ and time, the source file and line, and `occamy:`.
 2026/11/04 10:15:40 signin.go:131: occamy: user "alice" signed in, idp local
 2026/11/04 10:15:40 middleware.go:41: occamy: "POST" "/api/v1/auth/token" 200 61.234ms 10.0.0.7:51544
 2026/11/04 10:15:41 sessions.go:406: occamy: session kX2v9QeT0bLmR4sWzN8yPg: user "alice" opened connection "build-box" through ssh
-2026/11/04 10:42:13 session.go:483: occamy: INFO session ended reason=closed err=<nil>
+2026/11/04 10:42:13 session.go:483: occamy: INFO session ended session=kX2v9QeT0bLmR4sWzN8yPg reason=closed err=<nil>
 ```
 
 Some lines carry a level, `INFO`, `WARN` or `ERROR`, after `occamy:`,
@@ -61,7 +61,7 @@ the level cannot be changed.
 | `user "alice" opening connection "build-box": …` | A session could not open, with the reason |
 | `session <id>: shared with role viewer for 1h0m0s` | The owner made a share link |
 | `session <id>: closed by its owner` | The owner ended the session |
-| `INFO session ended reason=… err=…` | A session ended, for the reason below |
+| `INFO session ended session=… reason=… err=…` | A session ended, for the reason below. `session=` is the ID that the session's opening line names |
 | `stream refused from 10.0.0.7:51544: origin not allowed` | A stream was refused before it joined a session |
 | `INFO viewer dropped viewer=2 err=…` | A viewer acknowledged no frame for `streams.viewer_timeout`, 30 s by default, and `occamyd` disconnected it |
 | `INFO client closed code=… reason=…` | A client closed its stream because of a fault |
@@ -246,7 +246,7 @@ Each starts with `warning:`.
 
 ### A session fails
 
-When a session fails, its `session ended reason=failed` line carries the
+When a session fails, its `session ended … reason=failed` line carries the
 error. Some errors name the setting that fixes them:
 
 | The error says | What to do |
