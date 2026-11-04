@@ -293,8 +293,8 @@ image.
 
 ### Scenarios
 
-The plans, the reports and the harness's flags name each scenario by a
-code:
+The plans, the harness's flags and the results files name each scenario
+by a code:
 
 | Code | Name | Protocols | What happens | Primary metric |
 |---|---|---|---|---|

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
   "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="470.989375pt" height="397.19952pt" viewBox="0 0 470.989375 397.19952" xmlns="http://www.w3.org/2000/svg" version="1.1">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="492.386094pt" height="397.19952pt" viewBox="0 0 492.386094 397.19952" xmlns="http://www.w3.org/2000/svg" version="1.1">
  <metadata>
   <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
    <cc:Work>
@@ -21,8 +21,8 @@
  <g id="figure_1">
   <g id="patch_1">
    <path d="M 0 397.19952 
-L 470.989375 397.19952 
-L 470.989375 0 
+L 492.386094 397.19952 
+L 492.386094 0 
 L 0 0 
 z
 " style="fill: #1a1a19"/>
@@ -992,32 +992,32 @@ L 3.5 3.5
    </g>
   </g>
   <g id="text_49">
-   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #f0efec" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Gap between frames, 95th percentile against the loss: median of the runs, with 95% intervals</text>
+   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #f0efec" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Gap between frames, 95th percentile against packets lost: median of the runs, with 95% intervals</text>
   </g>
   <g id="legend_1">
    <g id="line2d_92">
-    <path d="M 391.679688 191.28276 
-L 400.679688 191.28276 
-L 409.679688 191.28276 
+    <path d="M 413.076406 191.28276 
+L 422.076406 191.28276 
+L 431.076406 191.28276 
 " style="fill: none; stroke: #3987e5; stroke-width: 2; stroke-linecap: square"/>
     <g>
-     <use xlink:href="#mb369b6c8c3" x="400.679688" y="191.28276" style="fill: #3987e5; stroke: #1a1a19; stroke-width: 1.5"/>
+     <use xlink:href="#mb369b6c8c3" x="422.076406" y="191.28276" style="fill: #3987e5; stroke: #1a1a19; stroke-width: 1.5"/>
     </g>
    </g>
    <g id="text_50">
-    <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #f0efec" x="416.879687" y="194.43276" transform="rotate(-0 416.879687 194.43276)">Guacamole</text>
+    <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #f0efec" x="438.276406" y="194.43276" transform="rotate(-0 438.276406 194.43276)">Guacamole</text>
    </g>
    <g id="line2d_93">
-    <path d="M 391.679688 206.26776 
-L 400.679688 206.26776 
-L 409.679688 206.26776 
+    <path d="M 413.076406 206.26776 
+L 422.076406 206.26776 
+L 431.076406 206.26776 
 " style="fill: none; stroke: #d95926; stroke-width: 2; stroke-linecap: square"/>
     <g>
-     <use xlink:href="#mf81dccd385" x="400.679688" y="206.26776" style="fill: #d95926; stroke: #1a1a19; stroke-width: 1.5"/>
+     <use xlink:href="#mf81dccd385" x="422.076406" y="206.26776" style="fill: #d95926; stroke: #1a1a19; stroke-width: 1.5"/>
     </g>
    </g>
    <g id="text_51">
-    <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #f0efec" x="416.879687" y="209.41776" transform="rotate(-0 416.879687 209.41776)">Occamy</text>
+    <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #f0efec" x="438.276406" y="209.41776" transform="rotate(-0 438.276406 209.41776)">Occamy</text>
    </g>
   </g>
  </g>
