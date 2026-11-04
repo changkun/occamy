@@ -760,8 +760,8 @@ export class Session {
     this.open = null
     f.id = id
     f.lastSeq = lastSeq
-    // Microseconds since the session started; a server that sends more
-    // than 2⁵³ loses precision, not order.
+    // Microseconds since the server began to serve this connection; a
+    // server that sends more than 2⁵³ loses precision, not order.
     f.serverTime = Number(serverTime)
     f.arrived = this.now()
     f.area = Math.max(f.area, this.wireW * this.wireH)

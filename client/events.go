@@ -33,8 +33,8 @@ type Frame struct {
 	// input's effect may show only in a later frame when the remote end
 	// answers late, as a remote shell's echo does.
 	LastSeq uint32
-	// ServerTime is when the server read the frame's content, since the
-	// session started.
+	// ServerTime is when the server read the frame's content, since it
+	// began to serve this connection.
 	ServerTime time.Duration
 	// Dirty are the rectangles a graphical frame changed.
 	Dirty []image.Rectangle

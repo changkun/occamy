@@ -174,7 +174,7 @@ type FrameEnd struct {
 	// and grow by one for each frame.
 	FrameID uint32
 	// ServerTime is when the server read the frame's content, in
-	// microseconds since the session started.
+	// microseconds since it began to serve this connection.
 	ServerTime uint64
 	// LastSeq is the sequence number of the last input from this client
 	// that the frame reflects, or 0 if none.
