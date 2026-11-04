@@ -1,42 +1,160 @@
-# Debugging and measuring
+# Debugging and monitoring
 
-This page covers how to look inside a running `occamyd`, and the tests
-that measure it under load.
-[benchmarks.md](./benchmarks.md) covers the protocol benchmark.
+This page shows how to watch a running `occamyd` and find out what went
+wrong. It covers the health check, the log, the debug listener and its
+profiles, and the problems you are most likely to meet.
+
+## The health check
+
+`occamyd` answers `GET /healthz` on its public listener while it runs.
+The check takes no token.
+
+```sh
+curl -s http://localhost:5636/healthz    # {"status":"ok"}
+```
+
+It is a liveness check. It tells you that `occamyd` serves requests, not
+that the remote machines can be reached. The image has no shell, so
+probe it from outside, as a Kubernetes probe does:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 5636
+```
+
+When `occamyd` terminates TLS, add `scheme: HTTPS`. Each check adds a
+request line to the log.
+
+## The log
+
+`occamyd` writes its log to standard error. In a container,
+`podman logs` or `docker logs` shows it. Each line starts with the date
+and time, the source file and line, and `occamy:`.
+
+```
+2026/11/04 10:15:02 server.go:135: occamy: serving API v1 at http://[::]:5636
+2026/11/04 10:15:40 signin.go:131: occamy: user "alice" signed in, idp local
+2026/11/04 10:15:40 middleware.go:41: occamy: "POST" "/api/v1/auth/token" 200 61.234ms 10.0.0.7:51544
+2026/11/04 10:15:41 sessions.go:406: occamy: session kX2v9QeT0bLmR4sWzN8yPg: user "alice" opened connection "build-box" through ssh
+2026/11/04 10:42:13 session.go:483: occamy: INFO session ended reason=closed err=<nil>
+```
+
+Some lines carry a level, `INFO`, `WARN` or `ERROR`, after `occamy:`,
+and their details as `key=value`. `occamyd` writes no debug lines, and
+the level cannot be changed.
+
+### What the lines say
+
+| Line | When |
+|------|------|
+| `serving API v1 at http://[::]:5636` | At start, with the public listener's address |
+| `serving expvar and pprof at http://127.0.0.1:6060/debug/` | At start, when the debug listener is on |
+| `TCP congestion control: bbr` | At start, on Linux |
+| `OIDC provider https://idp.example.com discovered` | With OIDC, once the provider has answered |
+| `"GET" "/api/v1/connections" 200 1.234ms 10.0.0.7:51544` | After each request: method, path, status, duration and the client's address |
+| `user "alice" signed in, idp local` | A sign-in with a password. Through OIDC, the line ends `idp oidc` |
+| `sign-in failed from 10.0.0.7:51544` | A wrong user name or password |
+| `OIDC sign-in failed from 10.0.0.7:51544: …` | An OIDC sign-in failed, with the reason |
+| `session <id>: user "alice" opened connection "build-box" through rdp` | A session opened. An ad-hoc target shows as `ad-hoc target "vnc://10.0.0.5:5900"` |
+| `user "alice" opening connection "build-box": …` | A session could not open, with the reason |
+| `session <id>: shared with role viewer for 1h0m0s` | The owner made a share link |
+| `session <id>: closed by its owner` | The owner ended the session |
+| `INFO session ended reason=… err=…` | A session ended, for the reason below |
+| `stream refused from 10.0.0.7:51544: origin not allowed` | A stream was refused before it joined a session |
+| `INFO viewer dropped viewer=2 err=…` | A viewer acknowledged no frame for `streams.viewer_timeout`, 30 s by default, and `occamyd` disconnected it |
+| `INFO client closed code=… reason=…` | A client closed its stream because of a fault |
+
+The request line never holds the query string, the headers or the body,
+so tokens and passwords stay out of the log. A failed sign-in does not
+log the user name either, since people type passwords into it. The
+client's address is the one `occamyd` sees, which behind a reverse proxy
+is the proxy's. A stream's request line appears when the stream ends,
+with the whole time it was open.
+
+A session ends for one of these reasons:
+
+| `reason=` | Why |
+|-----------|-----|
+| `closed` | The owner ended it |
+| `owner left` | The owner left and did not come back within a minute |
+| `idle` | Nobody gave input for 30 minutes |
+| `remote ended` | The remote ended it, as when its user logs out |
+| `failed` | The backend could not connect, or lost the remote. `err=` says why |
+| `shutdown` | `occamyd` is stopping |
+| `internal error` | `occamyd` failed on its own. An `ERROR session panicked` line before it has the stack |
+
+When `occamyd` stops on SIGINT or SIGTERM, it logs
+`received terminated; another one stops occamyd at once` and
+`shutting down: draining requests for up to 5s`, then
+`occamy is down, good bye!`. A request still running after the drain,
+such as a long CPU profile, is cut with a warning.
 
 ## The debug listener
 
-`occamyd` serves pprof under `/debug/pprof/`
-and expvar under `/debug/vars` only on the debug listener, at
-`debug.address`, and opens that listener only when the key is set
-([configuration](./configuration.md)). The public listener never serves
-them. The listener has no authentication, so keep it on the loopback
-interface, such as `localhost:6060`; `occamyd` warns at start when it is
-not. It needs a port of its own: `occamyd` refuses a `debug.address` on
-`listen`'s port where the two could take the same connections, such as
-`localhost:5636` beside `127.0.0.1:5636`, or any host beside `:5636`.
-A CPU profile or a trace still running when `occamyd` stops is cut after
-the 5 second drain; a second SIGINT or SIGTERM stops `occamyd` at once.
-`/debug/vars` shows the command line, the runtime's memory statistics,
-the number of goroutines, the open file descriptors and the TCP
-congestion control the public listener's connections use, as JSON.
-`debug.address_env` names an environment variable that holds the
-address instead, and leaves the listener off while it is
-unset or empty. The demo stack's `occamy-v1` takes its address from
-`OCCAMY_V1_DEBUG_ADDRESS`, which `make run OCCAMY_DEBUG=1` sets, and then
-serves its debug listener on the host's `localhost:5638`
-(`OCCAMY_V1_DEBUG_PORT`), for the soak and the pressure test. The
-stack's other services can reach it while it is on; `make run` without
-`OCCAMY_DEBUG=1` turns it off again. `make run` and `make bench` set
-`OCCAMY_V1_DEBUG_ADDRESS` either way, so that the same variable left in
-the shell or in `docker/.env` does not turn the listener on; `compose
-up` run by hand reads it from there, and without it leaves the listener
-off.
+`occamyd` can serve Go's runtime statistics and profiles on a second
+listener. Turn it on with `debug.address` in the configuration:
+
+```yaml
+debug:
+  address: localhost:6060
+```
+
+At start `occamyd` logs
+`serving expvar and pprof at http://127.0.0.1:6060/debug/`. Without
+`debug.address`, these routes are served nowhere. The public listener
+never serves them.
+
+The debug listener has no authentication, so keep it on the loopback
+interface. `occamyd` warns at start when it is not. Give it a port of
+its own. `occamyd` refuses a `debug.address` on `listen`'s port when the
+two could take the same connections: the same host, `localhost` beside
+`127.0.0.1` or `::1`, or either one on every address, such as `:5636`.
+
+To turn the listener on without editing the file, name an environment
+variable that holds the address instead:
+
+```yaml
+debug:
+  address_env: OCCAMY_DEBUG_ADDRESS
+```
+
+While the variable is unset or empty, the listener stays off, and
+`occamyd` logs `debug listener off:` with the variable's name.
+
+In a container, a published port reaches the container's own address,
+not its loopback interface. Listen on `0.0.0.0:6060` there, and publish
+the port on the host's loopback interface only, as in
+`-p 127.0.0.1:6060:6060`. The warning at start is then expected. In
+Kubernetes, keep `localhost:6060` and reach it with
+`kubectl port-forward`.
+
+The demo stack of [Try Occamy](try-it.md) serves its debug listener at
+`localhost:5638` after `make run OCCAMY_DEBUG=1`.
+
+### `/debug/vars`
+
+`/debug/vars` returns one JSON object:
+
+| Field | What it holds |
+|-------|---------------|
+| `cmdline` | `occamyd`'s command line |
+| `memstats` | Go's memory statistics, such as `HeapInuse`, `Sys` and `NumGC` |
+| `goroutines` | The number of goroutines |
+| `fds` | The open file descriptors on Linux and macOS, or -1 where `occamyd` cannot count them |
+| `tcp_congestion` | The TCP congestion control of the public listener's connections, such as `bbr`, or empty where `occamyd` cannot tell, as off Linux |
+
+To watch the numbers that matter most:
+
+```sh
+curl -s localhost:6060/debug/vars | jq '{goroutines, fds, tcp_congestion, heap: .memstats.HeapInuse}'
+```
 
 ## Profiling occamyd
 
-The examples use the demo stack's debug listener, `localhost:5638`,
-which serves them after `make run OCCAMY_DEBUG=1`.
+The debug listener serves Go's profiles under `/debug/pprof/`.
+The [HTTP API](api.md#the-debug-listener) lists each route.
 
 | Route | What it shows |
 |-------|---------------|
@@ -44,132 +162,124 @@ which serves them after `make run OCCAMY_DEBUG=1`.
 | `/debug/pprof/goroutine` | Every goroutine and its stack |
 | `/debug/pprof/heap` | Memory in use, by allocation site |
 | `/debug/pprof/allocs` | Every allocation since start |
-| `/debug/pprof/profile` | CPU, sampled for `seconds` (default 30) |
-| `/debug/pprof/trace` | An execution trace, for `seconds` (default 1) |
+| `/debug/pprof/profile` | CPU, sampled for `seconds` (30 by default) |
+| `/debug/pprof/trace` | An execution trace, for `seconds` (1 by default) |
 | `/debug/pprof/threadcreate` | The stacks that created OS threads |
-| `/debug/pprof/block`, `/debug/pprof/mutex` | Blocking and lock contention; empty, since `occamyd` does not turn them on |
+| `/debug/pprof/block`, `/debug/pprof/mutex` | Blocking and lock contention. Both are empty, since `occamyd` does not record them |
 
-Goroutines:
+### Goroutines
 
 ```sh
 # The first line is the total, then one entry for each distinct stack.
-curl -s 'localhost:5638/debug/pprof/goroutine?debug=1' | head -1
+curl -s 'localhost:6060/debug/pprof/goroutine?debug=1' | head -1
 # Every goroutine with its full stack and how long it has waited.
-curl -s 'localhost:5638/debug/pprof/goroutine?debug=2'
+curl -s 'localhost:6060/debug/pprof/goroutine?debug=2'
 ```
 
 An idle `occamyd` runs a handful of goroutines. Each session adds
-several, for its backend and for each viewer's stream, and each idle
+several, for its backend and for each viewer's stream. Each idle
 keep-alive HTTP connection adds one. Once every session has ended, the
-count is back where it was.
+count is back where it was. A count that keeps growing is a leak.
+`?debug=1` groups the goroutines by stack, so the stack that grows is
+the one to look at.
 
-CPU and memory:
+### CPU and memory
 
 ```sh
 # Sample the CPU for 30 s while sessions run, then open pprof's web UI.
-go tool pprof -http=:8080 'http://localhost:5638/debug/pprof/profile?seconds=30'
+go tool pprof -http=:8080 'http://localhost:6060/debug/pprof/profile?seconds=30'
 # Memory in use now.
-go tool pprof -http=:8080 http://localhost:5638/debug/pprof/heap
-# A 5 s execution trace: scheduling, network waits and GC.
-curl -o trace.out 'localhost:5638/debug/pprof/trace?seconds=5'
+go tool pprof -http=:8080 http://localhost:6060/debug/pprof/heap
+# A 5 s execution trace: scheduling, network waits and garbage collection.
+curl -o trace.out 'localhost:6060/debug/pprof/trace?seconds=5'
 go tool trace trace.out
 ```
 
+### Threads
+
 Go runs goroutines on a small pool of OS threads, so the number of
 threads does not follow the number of sessions. The total in
-`threadcreate?debug=1` counts the threads created since start, which the
-runtime seldom ends. The current number is the `PIDS` column of
-`podman stats` for the `occamy-v1` container.
+`threadcreate?debug=1` counts the threads created since start, and the
+runtime seldom ends one. For the number running now, look at the
+process. On Linux, `grep Threads /proc/$(pidof occamyd)/status` shows
+it. In a container, the `PIDS` column of `podman stats` or
+`docker stats` does.
+
+## Common problems
+
+### occamyd does not start
+
+`occamyd` checks the whole configuration before it serves. It stops
+with every problem it found, each with its line and key:
+
+```
+config: 2 problems:
+	line 7: conections: unknown key, did you mean connections?
+	line 31: debug.address: "localhost:5636" shares a port with listen ":5636": give the debug listener a port of its own, since whatever reaches the one could reach the other
+```
+
+[Configuration](configuration.md) describes each key. Other reasons it
+stops at start:
+
+| It says | What to do |
+|---------|------------|
+| `cannot open given config file` | Check the path. `-conf` names the file, `./conf.yaml` by default |
+| `auth: signing key …: occamyd runs as uid 65532, which may not use …` | Give the key's directory, or the volume mounted on it, to that user. [Configuration](configuration.md#sign-in-auth) has the step for a host, Docker and podman |
+| `listen tcp :5636: bind: address already in use` | Another process has the port. Stop it, or change `listen` |
+| `tls: …` | `tls.cert` or `tls.key` does not load. Check that the two files are PEM and belong together |
+
+### Warnings at start
+
+Each starts with `warning:`.
+
+| Warning | What to do |
+|---------|------------|
+| `created a new signing key in …; tokens signed with any earlier key no longer verify` | Expected at the first start. On a server that ran before, the key's volume is missing, and everyone has to sign in again. Keep the key on a persistent volume |
+| `the debug listener on … serves profiles and the command line without authentication beyond the loopback interface` | Move `debug.address` to `localhost`. In a container, publish the port on the host's loopback interface only, and the warning is expected |
+| `congestion_control bbr: the kernel has not loaded it: load its module, tcp_bbr; connections use cubic` | Load the module, with `sudo modprobe tcp_bbr`, on the host or the node. See [TCP congestion control](configuration.md#tcp-congestion-control) |
+| `congestion_control bbr: the kernel allows it only to privileged processes: …` | Add it to the `net.ipv4.tcp_allowed_congestion_control` sysctl |
+| `web_client: …; /static/ serves no web client until it is built there (make client)` | Build the web client into that directory, or point `web_client` at the `dist` directory of its release archive |
+| `the static users' password hashes have different bcrypt costs, …` | Hash every user's password at the cost the warning names. Otherwise how long a sign-in takes tells which users exist |
+| `connection "…": security: tls may send the password inside TLS whose certificate tls.insecure_skip_verify accepts unchecked, …` | Pin the server's certificate with `tls.pins` in place of `insecure_skip_verify` |
+| `OIDC discovery at … failed, retried on the next sign-in after 10s: …` | `occamyd` cannot reach the provider, and OIDC sign-ins fail until it can. Check `auth.oidc.issuer` and the network to it |
+| `adhoc_allowlist: not every address of occamyd's listeners is known, so a range may open it: …` | `occamyd` could not resolve the host of `listen` or `debug.address`, so an ad-hoc target in a range of `adhoc_allowlist` may reach `occamyd` itself. Use IP addresses there, or keep them out of the ranges |
+
+### A session fails
+
+When a session fails, its `session ended reason=failed` line carries the
+error. Some errors name the setting that fixes them:
+
+| The error says | What to do |
+|----------------|------------|
+| `the server's certificate "…" (SHA-256 AB:CD:…) is not trusted` | Add the fingerprint to the connection's `tls.pins`, or give the issuing CA in `tls.ca_file` |
+| `set ard: true on connection "…" to allow it` | The Mac offers only Apple Remote Desktop sign-in. Read [the risk](configuration.md#apple-remote-desktop-ard) before you set `ard: true` |
+| `allow TLS with security: tls on connection "…"` | The RDP server speaks no NLA, as xrdp does. Set `security: tls`, and pin its certificate |
+
+A session that could not open at all logs `user "…" opening …:` with
+the reason. `too many sessions open` means the user already owns
+`limits.sessions_per_user` sessions. `occamyd runs as many sessions as
+it takes` means `limits.sessions` is reached.
+
+### Warnings during a session
+
+| Warning | What it means |
+|---------|---------------|
+| `WARN ssh: accepting an unverified host key` | The connection sets `insecure_ignore_host_key`, or the user accepted any host key for an ad-hoc target. Pin the logged fingerprint in `host_keys` |
+| `WARN vnc: accepting an unverified certificate`, and the same for rdp and kubernetes | The connection sets `tls.insecure_skip_verify`. Pin the logged fingerprint in `tls.pins` |
+| `WARN vnc: logged in with Apple Remote Desktop authentication, …` | The session runs unencrypted, as `ard: true` allows |
+| `WARN rdp: the server draws with GFX that the client does not decode yet, …` | Parts of the screen may stay missing or stale, as on a Windows server. Set `disable_gfx: true` on the connection |
+| `WARN rdp: the server's clipboard has not taken the owner's text, …` | The RDP server's clipboard does not answer. The text waits until it does |
+| `WARN vnc: the server prohibits resizing the screen; …` | The VNC server keeps its own screen size |
+
+### Streams refused
+
+`stream refused from …:` names the reason. `origin not allowed` means
+the web page that opened the stream is not on `occamyd`'s origin. Behind
+a reverse proxy that rewrites the `Host` header, list the page's origin
+in `origins`. `unsupported protocol version` means the client speaks a
+version of the protocol that `occamyd` does not, so update the client.
 
 ## Tests and benchmarks
 
-- `go test -race ./...` runs the unit tests.
-- `make e2e` runs the end-to-end tests against the demo stack with
-  the tests' connections (`make build`, then `make run E2E=1`, which
-  adds `docker/docker-compose.e2e.yaml` and its v1 file,
-  `docker/occamy-v1-e2e.yaml`). They open a session to each demo
-  server and check that the remote desktop arrives at the first
-  attempt.
-  `TestE2EV1RDP` also takes the demo xrdp server's `rdp` through
-  the clipboard both ways, which the image's clipboard echo answers, a
-  resize, a viewer joined by a share, and the owner leaving and coming
-  back. If the clipboard check times out, look in the rdp server's log
-  for `error in trans_connect chan`. That line means xrdp found no
-  channel server for the session's display, the process that carries
-  the clipboard. The image's `reconnectwm.sh` starts one again on the
-  next connection, and logs `starting xrdp-chansrv again` when it does.
-  The user may have more than one X session, each with a channel server
-  of its own, so a channel server that runs does not mean that the
-  session has one: `session is available on display` in the log says
-  which display a connection attached to. `make e2e` checks that
-  restart too: it kills the channel server in the rdp container, through
-  the stack's compose command in `OCCAMY_E2E_COMPOSE`, then checks the
-  clipboard again. That command runs `CONTAINER_ENGINE`, `podman` by
-  default, so give `make e2e` the `CONTAINER_ENGINE` that `make run`
-  took, as CI gives both `docker`.
-  `TestVNCParity`, among them, runs the VNC backend's parity matrix:
-  each feature on x11vnc and TigerVNC. The demo desktops report what reached the server
-  over the session itself: a probe puts each line typed at the top left
-  on the clipboard in hex, and another echoes clipboard text that starts
-  `owner: ` as `echo: `. The test first warms each server port, since a
-  freshly started x11vnc drops the first clipboard text on its port, and
-  logs how many tries each port took. It logs the matrix as a Markdown
-  table, and writes it to the file `OCCAMY_PARITY_MATRIX` names. A cell
-  expected to fail is listed in `parityKnown`, with the reason and a
-  part of the error that only that failure gives. Any other failure
-  fails the test, and so does a listed cell that fails differently or
-  passes. A cell tries up to three times, again 15 s later, only when
-  it cannot reach the desktop, and any other failure stands. A cell
-  that settles at a later try shows the try, as in `pass (try 2)`.
-  `TestParityMatrixDoc`, which needs no stack, checks that the matrix
-  in the VNC backend's spec is the one
-  `parityFeatures` and `parityKnown` give. The demo x11vnc runs under a
-  watchdog, which logs each restart as `[<port>] watchdog: …`, after
-  the X error that caused it, if any (`podman compose logs vnc`).
-  `X11VNC_SENDEVENT_SYNC` keeps x11vnc from dying of the X error it
-  used to meet most, `Xerror: major_opcode: 18 … error_code: 3`, a
-  clipboard request from a window that had gone
-  (`TestX11vncClipboardRequestorGone` makes one, through the stack's
-  compose, as `make e2e` runs it). That test fails if x11vnc died: the
-  session ended, another process serves port 5901, or the log tells of
-  an X error x11vnc did not trap or of its watchdog. If only the
-  clipboard went missing, twice, with x11vnc alive, it skips, and logs
-  `the clipboard went missing with x11vnc alive` with what it missed.
-- `make soak` runs `TestSoak` against the demo stack's `occamy-v1`,
-  which `make run E2E=1 OCCAMY_DEBUG=1` started with the tests'
-  connections and its debug listener:
-  `OCCAMY_SOAK_SESSIONS` sessions, 8 by default, to TigerVNC
-  (`OCCAMY_SOAK_CONNECTIONS`, `tigervnc` by
-  default, since x11vnc's watchdog restarts would end sessions) for
-  `OCCAMY_SOAK_DURATION`, 1 hour by default. Each session moves the
-  pointer, below the typing probe, and types every 2 s, asks its desktop for a terminal that scrolls for 2 s
-  once a minute, and closes after `OCCAMY_SOAK_LIFETIME`, 10 minutes by
-  default, for another to open; every other session has a read-only
-  viewer. Every 30 s the test samples `occamyd`'s goroutines, live heap
-  (after a collection) and open files from the debug listener, trying a
-  failed sample twice more, with the host's load average, and logs
-  them, and writes them as CSV to the file `OCCAMY_SOAK_OUT` names.
-  After a warm-up of a tenth of the run, it fails if the median of a
-  metric's last quarter of samples exceeds the first quarter's by more
-  than its bound, whatever the quarters between do
-  (`OCCAMY_SOAK_BOUNDS`, `goroutines=50,heap=32,fds=25` by default, the
-  heap in MiB), if a metric stays above its start by more than the
-  bound a minute after the last session closed, if fewer than twelve
-  samples follow the warm-up, or if a session fails. `tests/soak_test.go` lists the
-  variables. The full soak is
-  `make soak OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h`.
-- `make e2e OCCAMY_PRESSURE_N=10` adds the pressure test, which counts
-  `occamyd`'s goroutines from `occamy-v1`'s debug listener, served
-  after `make run E2E=1 OCCAMY_DEBUG=1` (`OCCAMY_E2E_V1_DEBUG`). Each
-  of its N rounds opens two sessions to each demo server at once, through
-  `occamy-v1`: one that waits for the remote's first frame and one that
-  sends garbage once it is welcomed. Sessions may fail under the load.
-  The test then closes every session, and `occamyd`'s goroutines must
-  return to their number before the storm within a minute, or the test
-  fails and prints the goroutine profile. Then a new session must
-  work.
-- `make bench` runs the protocol benchmark, described in
-  [benchmarks.md](./benchmarks.md).
-
-CI runs the unit tests with `-race`, and the end-to-end and pressure
-tests with 10 rounds. It prints `docker stats` before and after them.
+The pressure test and the soak read the debug listener to check that
+`occamyd` does not leak. [Development](development.md) describes them.
