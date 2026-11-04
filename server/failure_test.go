@@ -47,6 +47,10 @@ func TestExplain(t *testing.T) {
 	}{
 		{"vnc password", fmt.Errorf("%w: %q", vnc.ErrAuthFailed, "bad password"), failAuth},
 		{"rdp password", fmt.Errorf("%w: %w", rdp.ErrAuthFailed, errors.New("logon failure")), failAuth},
+		{"ssh credentials", fmt.Errorf("ssh: connect to h:22: %w: %w", ssh.ErrAuthFailed, errors.New("ssh: handshake failed")), failSSHAuth},
+		{"vnc apple remote desktop", fmt.Errorf("%w: the server offers [30]; set ard: true to allow it", vnc.ErrNoSecurityType), failNoMethod},
+		{"rdp standard security", fmt.Errorf("rdp: %w; allow TLS with security: tls", &rdpproto.ProtocolError{Selected: 0, Offered: 2}), failNoMethod},
+		{"rdp negotiation", fmt.Errorf("rdp: %w", &rdpproto.NegotiationError{Code: 5}), failNoMethod},
 		{"vnc certificate", fmt.Errorf("vnc: %w", &vnc.CertificateError{Subject: "CN=mac", Err: errors.New("unknown authority")}), failCertificate},
 		{"rdp certificate", fmt.Errorf("rdp: %w", &rdpproto.CertificateError{Subject: "CN=win", Err: errors.New("unknown authority")}), failCertificate},
 		{"kubernetes certificate", fmt.Errorf("kubernetes: %w", &kubernetes.CertificateError{Subject: "CN=k8s", Err: errors.New("unknown authority")}), failCertificate},

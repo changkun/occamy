@@ -24,6 +24,8 @@ import (
 // names no address, fingerprint or user: the log has those.
 const (
 	failAuth        backend.Failure = "The remote computer refused the user name or password."
+	failSSHAuth     backend.Failure = "The remote computer refused the user name, password or key."
+	failNoMethod    backend.Failure = "The remote computer offers no sign-in method that the server accepts."
 	failCertificate backend.Failure = "The server doesn't trust the remote computer's certificate."
 	failHostKey     backend.Failure = "The server doesn't trust the remote computer's host key."
 	failRefused     backend.Failure = "The remote computer refused the connection."
@@ -53,8 +55,9 @@ func (e *explainedError) Error() string   { return e.err.Error() }
 func (e *explainedError) Unwrap() []error { return []error{e.why, e.err} }
 
 // explain returns err with why the backend could not connect, if err
-// says so: the remote refused the credentials or its certificate or
-// host key is not trusted, or dialing it failed. Any other error,
+// says so: the remote refused the credentials or offers no sign-in that
+// occamyd takes, its certificate or host key is not trusted, or dialing
+// it failed. Any other error,
 // including one of a connection that failed after it was made, is
 // returned as it is, and its viewers are told only "failed".
 func explain(err error) error {
@@ -75,6 +78,8 @@ func cause(err error) backend.Failure {
 		rdpCert  *rdpproto.CertificateError
 		kubeCert *kubernetes.CertificateError
 		hostKey  *ssh.HostKeyError
+		rdpNeg   *rdpproto.NegotiationError
+		rdpProto *rdpproto.ProtocolError
 		status   *kubernetes.StatusError
 		op       *net.OpError
 		dns      *net.DNSError
@@ -82,6 +87,12 @@ func cause(err error) backend.Failure {
 	switch {
 	case errors.Is(err, vnc.ErrAuthFailed), errors.Is(err, rdp.ErrAuthFailed):
 		return failAuth
+	case errors.Is(err, ssh.ErrAuthFailed):
+		return failSSHAuth
+	case errors.Is(err, vnc.ErrNoSecurityType), errors.As(err, &rdpNeg), errors.As(err, &rdpProto):
+		// Such as a Mac that offers only Apple Remote Desktop's sign-in,
+		// or xrdp, which needs security: tls. The log says which.
+		return failNoMethod
 	case errors.As(err, &vncCert), errors.As(err, &rdpCert), errors.As(err, &kubeCert):
 		return failCertificate
 	case errors.As(err, &hostKey):

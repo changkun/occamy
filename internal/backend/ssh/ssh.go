@@ -57,6 +57,10 @@ var (
 	// ErrInputFull is returned by Input when its queue is full, as when
 	// the remote has stopped reading its input.
 	ErrInputFull = errors.New("ssh: input queue full")
+	// ErrAuthFailed is wrapped by Run's error when the server refused
+	// every way the backend tried to sign in: the password, the keys or
+	// the answers.
+	ErrAuthFailed = errors.New("ssh: authentication failed")
 )
 
 // Config describes an SSH connection.
@@ -337,6 +341,9 @@ func (b *Backend) connect(ctx context.Context, sink backend.Sink, r *run) error 
 
 	conn, chans, reqs, err := gossh.NewClientConn(nc, b.addr, b.clientConfig(ctx, sink, r))
 	if err != nil {
+		if refused(err) {
+			err = fmt.Errorf("%w: %w", ErrAuthFailed, err)
+		}
 		return failure(ctx, fmt.Errorf("connect to %s: %w", b.addr, err))
 	}
 	// The client rejects channels that the server opens, such as agent or
@@ -453,6 +460,13 @@ func (b *Backend) exitResult(ctx context.Context, err error) error {
 
 // failure returns ctx's error if ctx is done, since closing the
 // connection then made the step fail, and err otherwise.
+// refused reports whether err is x/crypto/ssh's for a server that took
+// none of the methods the client tried, an error it doesn't type.
+// TestAuthRefused fails if a new version words it otherwise.
+func refused(err error) bool {
+	return strings.Contains(err.Error(), "ssh: unable to authenticate")
+}
+
 func failure(ctx context.Context, err error) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
