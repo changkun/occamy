@@ -5,7 +5,8 @@
 # Bench link: shape.sh, which emulates a link in the kernel on the client
 # connections of a server of the bench stack. The harness runs it in that
 # server's network namespace, with NET_ADMIN, around each block of a loss
-# study (docs/benchmarks.md, Loss). make bench-realtime-2 builds it.
+# study (docs/benchmarks.md, On a lossy link). make bench-realtime-2 and
+# make bench-realtime-3a build it.
 
 FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \

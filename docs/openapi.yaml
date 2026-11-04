@@ -176,9 +176,10 @@ paths:
         "400":
           description: |
             `return_url` is not one of `auth.oidc.return_urls`, is given
-            twice, or is left out while several are configured; or
-            `code_challenge` or `code_challenge_method` is missing, given
-            twice or not S256.
+            twice, or is left out while several are configured;
+            `code_challenge` is missing, given twice or not an S256
+            challenge; or `code_challenge_method` is given twice or is
+            not S256.
           headers:
             Cache-Control: {$ref: "#/components/headers/NoStore"}
           content:

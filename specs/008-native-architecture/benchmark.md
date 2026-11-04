@@ -199,8 +199,9 @@ not start it: the owner's go-ahead still does that.
    the jitter, G3 and G4 for the stamp, G5 for both, and G7 for its end.
    The rule behind that: anything that changes what the remote shows,
    or how a scenario measures it, measures that baseline again.
-   `docs/benchmarks.md`, What to measure again, states the full list
-   and why, along with what is not measured again.
+   `docs/benchmarks.md`, What to measure again, stated the full list
+   and why, along with what was not measured again, until the page was
+   rewritten to lead with the results (its history has it).
 4. **Colour depth: 32 bits per pixel on both sides.** That is native's
    default and what rdp-strategy's table measured, and mismatched
    depths may make xrdp keep a second X session, with a second scene
@@ -477,8 +478,8 @@ from the v1 series, which waits for [client-core](client-core.md).
 **Status:** the harness does what the decisions of 2026-11-01 settled
 for the run, and no series has run with it: a `-quick` smoke proved that
 it works and nothing else. The owner's go-ahead starts the series.
-`docs/benchmarks.md`, What to measure again, lists the baselines that
-are out of date until then.
+`docs/benchmarks.md`, What to measure again, listed the baselines that
+were out of date until then (the page's history has it).
 
 - **What was done:**
   - *The frame stamp.* The scene stamps each frame of the scroll, the

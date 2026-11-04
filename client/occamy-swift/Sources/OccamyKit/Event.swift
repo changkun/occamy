@@ -45,7 +45,8 @@ public struct Frame: Sendable, Equatable {
     /// The last input of this client that the server applied before the
     /// frame, by its sequence number, or 0.
     public var lastSeq: UInt32
-    /// When the server read the frame, since the session started.
+    /// When the server read the frame, since it began to serve this
+    /// connection.
     public var serverTime: Duration
     /// The rectangles a graphical frame changed, in pixels; empty for a
     /// terminal's.

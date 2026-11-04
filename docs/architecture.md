@@ -1,95 +1,146 @@
-# Occamy Architecture
+# Architecture
 
-Figure 1 illustrates the architecture of a Guacamole application. It needs a
-Guacamole Servlet (a Java web application) for authentication and for tunneling the
-protocol to the browser, and `guacd` as a second proxy that connects to the remote
-desktop servers, with one process per connection.
+Occamy is one Go program, `occamyd`, between your users and the machines
+they reach. It signs users in, connects to each remote desktop or shell
+with a client of its own for that protocol, and streams the session to
+the web client or the macOS app over a WebSocket.
 
-```
-|-- Browser --|-------- Guacamole Server -----------|--- Intranet ---|
-
-                                                     +---- RDP server
-UserA --------+                                      |
-              +------ Guacamole Servlet --- guacd ---+---- VNC server
-UserB --------+                                      |
-                                                     +---- Others
-```
-
-_Figure 1: Guacamole Architecture_
-
-Occamy replaces both the Guacamole Servlet and guacd with a single Go
-binary, `occamyd`, as shown in Figure 2. It signs users in through API
-v1, reaches the remote desktops and shells itself, with a backend of
-its own for each protocol (SSH, VNC, RDP and Kubernetes), and streams
-each session to the browser in protocol v1 over WebSocket: a terminal
-as text, and a desktop as tiles of pixels.
-[specs/008](../specs/008-native-architecture.md) describes the design.
-Occamy 0.x put a Go proxy in front of guacd, which reached the remotes;
-v1.0.0-beta.2 removed guacd and the Guacamole protocol.
-
-```
-|-- Browser --|----- Occamy Server -----|--- Intranet ---|
-
-                                        +---- RDP server
-UserA --------+                         |
-              +------ occamyd ----------+---- VNC server
-UserB --------+                         |
-                                        +---- SSH server
+```mermaid
+flowchart LR
+  clients["Web client<br>Occamy for macOS"]
+  subgraph server [occamyd]
+    api[HTTP API v1]
+    sessions[Sessions]
+    backends[Backends]
+  end
+  remotes["SSH, VNC and RDP servers<br>Kubernetes pods"]
+  clients -- "sign in, list, share" --> api
+  clients <-- "protocol v1 over WebSocket" --> sessions
+  api --> sessions
+  sessions <--> backends
+  backends <--> remotes
 ```
 
-_Figure 2: Occamy Architecture_
+One `occamyd` serves the API, the web client and every session. There
+is nothing else to run.
 
-A session goes through these steps ([api.md](api.md),
-[protocol.md](protocol.md)):
+## A session
 
-1. The client signs in, with a password at `POST /api/v1/auth/token` or
-   through OIDC, and receives an access token.
-2. It opens a connection's stream, `GET /api/v1/connections/{id}/stream`:
-   a WebSocket that carries protocol v1, with the token in a
-   subprotocol.
-3. `occamyd` checks that the connection admits the user, and opens a
-   session, whose backend dials the remote with the connection's
-   credentials and asks the owner, on the stream, for what the file
-   does not store.
-4. The backend draws into the session's framebuffer, or feeds its
-   terminal, and each viewer's stream sends that viewer what it has not
-   seen yet, at the pace its link allows. Others join through a share.
-   The session ends when its owner ends it, when the remote does, or
-   when the owner has been gone longer than its grace.
+```mermaid
+sequenceDiagram
+  participant C as Client
+  participant O as occamyd
+  participant R as Remote
+  C->>O: POST /api/v1/auth/token
+  O-->>C: access token
+  C->>O: GET /api/v1/connections/{id}/stream
+  O->>R: connect with the connection's credentials
+  O-->>C: welcome
+  loop every frame
+    R->>O: screen updates or terminal output
+    O-->>C: tiles or terminal data, then frame-end
+    C->>O: frame-ack
+  end
+  C->>O: keys, pointer, text
+  O->>R: input
+```
+
+1. **Sign in.** The client signs in with a password or through OIDC, and
+   gets an access token ([HTTP API](api.md#sign-in)).
+2. **Open the stream.** The client opens a connection's stream, a
+   WebSocket that carries [protocol v1](protocol.md). `occamyd` checks
+   that the connection admits the user.
+3. **Connect.** The session's backend connects to the remote with the
+   credentials the configuration names. When the configuration lacks one,
+   such as a password, `occamyd` asks the user on the stream.
+4. **Stream.** The remote's screen or terminal flows to the client one
+   frame at a time. The client acknowledges each frame, and `occamyd`
+   sends no faster than those acknowledgements return.
+5. **Share.** The owner can hand out a link that lets others join, with
+   control or view only. Each viewer gets the stream at its own pace.
+6. **End.** The session ends when its owner ends it, when the remote
+   does, when the owner has been away for a minute, or after 30 minutes
+   without input.
+
+## How a desktop reaches a viewer
+
+A backend draws the remote's screen into the session's framebuffer, a
+grid of tiles. Each tile carries the version in which it last changed.
+For each viewer, `occamyd` then:
+
+- sends only the tiles that viewer has not seen yet;
+- sends a region that moved, such as a scrolled page, as a copy of
+  pixels the viewer already shows;
+- sends a tile the viewer has cached by its slot, not its pixels;
+- encodes the rest by content: few colours losslessly, photographs as
+  WebP or JPEG, and tiles in motion at a lower quality, refined once
+  they stop;
+- paces frames by the viewer's acknowledgements, with as many in flight
+  as cover the round trip, and adapts the quality to the bandwidth.
+
+A terminal session works the same way with text. A headless terminal
+emulator keeps the screen, and each viewer gets the changes it has not
+seen.
 
 ## Components
 
-Each package names the spec it implements.
+Each directory is a Go package unless it says otherwise.
 
-| Path | Role |
-|------|------|
-| [protocol/](../protocol) | Protocol v1, a public package: framing, the handshake (hello in the upgrade query, the token in a subprotocol, capabilities and their agreement), every message with its encoding and decoding, close codes, size limits, golden vectors; described in [protocol.md](protocol.md) ([protocol-v1](../specs/008-native-architecture/protocol-v1.md)) |
-| [internal/backend/](../internal/backend) | The interface every backend implements (SSH, VNC, RDP and Kubernetes), its input events and prompts, and scripted fakes for tests ([session-core](../specs/008-native-architecture/session-core.md)) |
-| [internal/pacer/](../internal/pacer) | Per-viewer pacing: the frame window sized from the time an ack takes, the frame after an input sent at once, bytes in flight held near the bandwidth-delay product, and quality that adapts ([session-core](../specs/008-native-architecture/session-core.md)) |
-| [internal/framebuffer/](../internal/framebuffer) | A session's screen in tiles, versioned from one counter, so each viewer is sent only the tiles it has not seen ([graphics-pipeline](../specs/008-native-architecture/graphics-pipeline.md)) |
-| [server/](../server) | The v1 server on a `net/http` ServeMux: middleware for the request log, recovery, body limits and access tokens; API v1's JSON errors; `/healthz`, `GET /api/v1/auth/methods` and `POST /api/v1/auth/token`; sign-in through OIDC (authorization code with PKCE on x/oauth2, ID tokens checked by go-oidc, state in a sealed cookie, and a one-time code that the browser's client exchanges for an access token); the connections and sessions of API v1 on the session registry, with the backend factory (SSH, VNC, RDP and Kubernetes, one backend for each protocol) and the ad-hoc allowlist; the streams, WebSocket upgrades checked for `Origin` and token and handed to `internal/stream`; TLS, the public listener's TCP congestion control, BBR by default on Linux, graceful shutdown that ends sessions and their streams, and expvar and pprof on the debug listener. Every route, with its tokens, replies and errors, is described in [api.md](api.md) and, for tools, in [openapi.yaml](openapi.yaml), which `TestOpenAPI` checks against the code ([api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md)) |
-| [internal/auth/](../internal/auth) | Tokens of API v1: Ed25519 JWTs for access (a user and groups) and for sessions (a session and a role), from occamyd or a trusted issuer ([api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md)) |
-| [internal/config/](../internal/config) | Version 1 configuration files: sign-in, the connection registry with credential references, TLS and the debug listener, decoded strictly and validated as a whole ([configuration](./configuration.md), [api-and-server-stack](../specs/008-native-architecture/api-and-server-stack.md)) |
-| [internal/session/](../internal/session) | The session core: one goroutine per session runs a backend, applies input by role, closes the clipboard in the directions a connection asks, keeps each viewer's small state as latest values, and a registry holds sessions and share tokens ([session-core](../specs/008-native-architecture/session-core.md)) |
-| [internal/backend/ssh/](../internal/backend/ssh) | The native SSH backend: a pure-Go client that verifies pinned host keys, logs in with key files or a password and asks the owner for what they cannot answer, and feeds a shell's PTY output to the session's terminal ([native-ssh-backend](../specs/008-native-architecture/native-ssh-backend.md)) |
-| [internal/backend/kubernetes/](../internal/backend/kubernetes) | The native Kubernetes backend: runs a command in a pod's container, or attaches to it, through the API server's `pods/exec` over the `v5.channel.k8s.io` WebSocket subprotocol, falling back to `v4.channel.k8s.io`, with no client-go; checks the API server's certificate against the system's roots, a private CA or pins before it sends a bearer token, which it never logs; validates the pod's names so that none reaches another path; feeds the command's output to the session's terminal and sends resizes on the resize channel; `kubetest` is a fake API server for tests ([native-kubernetes-backend](../specs/008-native-architecture/native-kubernetes-backend.md)) |
-| [internal/backend/vnc/](../internal/backend/vnc) | The native VNC backend: a pure-Go RFB client that logs in with None, VNC Authentication, VeNCrypt's X.509 subtypes with the server's certificate checked against the system's roots, a private CA or pins, or, only where a connection's `ard: true` allows it, Apple Remote Desktop authentication for macOS Screen Sharing, whose key exchange authenticates no server, asking the owner for credentials it lacks; asks for screen updates only while a viewer can see, by continuous updates where the server offers them; draws Tight (lossless, and sequential JPEG if a server sends it), ZRLE, Hextile, Raw and CopyRect rectangles, resizes and the cursor into the session's framebuffer; resizes the remote screen with ExtendedDesktopSize; and sends physical key codes and UTF-8 clipboard text where the server takes them ([native-vnc-backend](../specs/008-native-architecture/native-vnc-backend.md)) |
-| [internal/terminal/](../internal/terminal) | The headless terminal emulator of a terminal session: immutable, versioned screen snapshots that share unchanged rows and carry each row's version, and the diffs that bring each viewer's terminal up to date ([native-ssh-backend](../specs/008-native-architecture/native-ssh-backend.md)) |
-| [client/](../client) | The Go client of protocol v1, a public package: the handshake over a WebSocket, a client framebuffer with dirty rectangles and parallel decoding, a tile cache of 1024 slots by default, terminal bytes passed through, input numbered for latency, and events pulled with `Next`, for tests, tools and the Swift client's export layer ([client-core](../specs/008-native-architecture/client-core.md)) |
-| [client/decoders/](../client/decoders) | The client core's decoders of the codecs occamyd sends, in pure Go, to plug into `client.Options.Decoders`: deflate through `internal/codec`, WebP through `gen2brain/vpx/webp`, which reads VP8's limited-range colours as a browser does, and JPEG through the standard library, each checking the size a payload claims before it decodes ([client-core](../specs/008-native-architecture/client-core.md)) |
-| [client/occamy-swift/core/](../client/occamy-swift/core) | The C export layer of the Go client core for the macOS app, built with `-buildmode=c-archive` as `liboccamy.a` (`make swift-core`, universal for Apple silicon and Intel): sessions as handles, events pulled with `occamy_next`, the framebuffer copied out by rectangle so that no Go pointer reaches C, and the interface in `occamy.h`. cgo stays on the client's side: occamyd builds with `CGO_ENABLED=0` ([010](../specs/010-native-swift-client.md)) |
-| [client/occamy-swift/](../client/occamy-swift) | The macOS app's SwiftPM package on the Go core: `COccamy`, a system library over `occamy.h` and `liboccamy.a`, and `OccamyKit`. Its `Session` pulls the core's events on a thread of its own into an `AsyncStream`, copying each frame's dirty rectangles into its `Screen` first, and sends input in order on a serial queue; `SessionModel` runs the events on the main actor as the web client's controller does; `FramebufferView` shows a graphical session in a `CALayer` and `TerminalView` a terminal in SwiftTerm; `Keyboard` maps AppKit's key codes to HID usages and keysyms; `API` signs in to API v1, by password or OIDC with PKCE, lists connections and opens, shares and ends sessions; `Address` reads an ad-hoc address such as `vnc://host:5901`; `Keychain` keeps tokens and passwords. `App/` holds the bundle's `Info.plist` and entitlements, which `make swift-app` uses. A shown frame is acknowledged once presented. Its tests run against the interop server (`make swift-test`) ([010](../specs/010-native-swift-client.md)) |
-| [client/occamy-swift/Sources/OccamyApp/](../client/occamy-swift/Sources/OccamyApp) | Occamy for macOS, in SwiftUI on `OccamyKit`: a window that lists servers in a sidebar and their connections as cards with a picture of each as last left, a search field that also opens ad-hoc addresses, a sign-in sheet, and one window per session with its controls in a bar at the top edge: scaling, full screen, Control-Alt-Delete, ⌘ shortcuts for the remote, the clipboard, a share link and ending the session ([docs/macos-app.md](macos-app.md), [010](../specs/010-native-swift-client.md)) |
-| [client/occamy-web/src/protocol/](../client/occamy-web/src/protocol) | The browser's client of protocol v1, TypeScript without a framework: the handshake over a WebSocket, tiles decoded in Workers (deflate through `DecompressionStream`, WebP and JPEG through `createImageBitmap`, `scaled` images drawn up to their tile's size on a canvas), whole frames presented to a canvas, a tile cache of 1024 slots by default, keyboard input as keysyms with USB HID usages, pointer, wheel and close codes; the web client's shell runs on it. `client/internal/webinterop` serves `internal/stream` to its interop test ([009](../specs/009-react-web-client.md)) |
-| [internal/stream/](../internal/stream) | A viewer's connection: welcome, the reader of its input and view, and the writer that sends small state ahead of frames, tiles in the codecs the viewer agreed to or terminal screen diffs, and an input's effect ahead of motion, at the pace its pacer allows ([session-core](../specs/008-native-architecture/session-core.md)); the writer keeps a shadow of the screen its client shows, and sends what that client already has elsewhere, scrolled up or down, as `copy-rect`, found by row hashes and checked pixel for pixel, and keeps a heat per tile: tiles in motion go at the pacer's lowest quality, at half size as `scaled` to a viewer that agreed to it, and once still for the refine delay are refined in background frames, exact up to 256 colours and at the quality SSIM picks above; and it mirrors its client's tile cache, by xxh3-128 hashes of the tiles each slot holds under a secret seed of its own, so that a tile the client has stored goes as `cached`; the viewers of a session share its encode cache, where each encoding of a tile, or of a run of tiles at a quality, is made once for all of them, and its workers, which encode a frame's rows ahead of the writers ([graphics-pipeline](../specs/008-native-architecture/graphics-pipeline.md)) |
-| [internal/codec/](../internal/codec) | Payloads of the lossless codecs, both ways, with the standard library only: raw pixels, palettes, and the deflate container, whose decoder refuses malformed payloads and inflates at most one byte past the rectangle's longest container; and the scaling of `scaled` images, down by the mean and up bilinearly ([graphics-pipeline](../specs/008-native-architecture/graphics-pipeline.md)) |
-| [internal/encoder/](../internal/encoder) | A viewer's tile encoder: counts each tile's colours, a moving one's only as far as 17, then encodes it in deflate when it has up to 256 (16 while it moves) and in lossy WebP or JPEG when it has more, scaled down for `scaled` while it moves, a still one at the lowest quality whose SSIM reaches 0.91 on each tile, found by a search that starts where the last ended and gallops when that is far, and its cursor losslessly with straight alpha, in the best of the codecs the viewer agreed to ([graphics-pipeline](../specs/008-native-architecture/graphics-pipeline.md)) |
-| [internal/rdp/](../internal/rdp) | The RDP spike's pure-Go client: TLS with the VNC backend's certificate policy, NLA (CredSSP with its own NTLMv2; xrdp has no NLA, and it has logged on only to a Windows Server 2025 CI runner over loopback), the connection sequence, bitmap updates in interleaved RLE and planar drawn into a backend's sink within bounds on size and on the rate of decoding, keyboard and mouse input, batched, static virtual channels with the clipboard's (CLIPRDR) for text, and dynamic virtual channels (DRDYNVC) with Display Control, through which it asks the server to resize the desktop, and, when asked (`Config.GFX`), the graphics pipeline (GFX): ZGFX, surfaces composed onto the desktop, solid fills, copies within and between surfaces, uncompressed, planar, RemoteFX and RemoteFX Progressive bitmaps, and frame acknowledgements; ClearCodec and the cache are not implemented yet; `rdptest` is a fake server for tests, which accepts NLA through CredSSP of its own and builds GFX messages with a ZGFX compressor and a RemoteFX encoder of its own ([rdp-strategy](../specs/008-native-architecture/rdp-strategy.md)) |
-| [internal/backend/rdp/](../internal/backend/rdp) | The native RDP backend on `internal/rdp`: connects with NLA by default, or TLS, asking the owner for the credentials NLA needs that the configuration lacks; asks for the graphics pipeline unless the connection sets `disable_gfx`; draws bitmap updates, the graphics pipeline's surfaces and the server's pointer into the session's framebuffer; sends keys by physical code, text as Unicode keyboard events, and the pointer and wheels from a bounded queue; copies and pastes clipboard text through the clipboard channel unless the configuration disables a direction, and tells the viewers when text has waited a minute for the server's clipboard, which it goes on holding; asks the server through Display Control for the size a viewer resizes to; and tells the server to suppress its output while nobody can see. rdp's backend in occamyd, tested against xrdp and `rdptest`, and tried on a Windows Server 2025 CI runner, not a real Windows deployment ([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)) |
-| [internal/keymap/](../internal/keymap) | The USB HID to scan code set 1 table that the VNC backend's physical key codes and the RDP client's scancodes share ([native-rdp-backend](../specs/008-native-architecture/native-rdp-backend.md)) |
-| [client/occamy-web/](../client/occamy-web) | The web client: a React shell (`src/views`, with the session logic in `src/lib`, free of React) on the protocol v1 client core in `src/protocol`, which it imports through the core's index alone. It signs in through API v1 (a password, or OIDC with PKCE), lists the connections, and streams a session: a graphical one on a canvas, a terminal one in xterm.js ([009](../specs/009-react-web-client.md)) |
-| [bench/](../bench) | Benchmark harness: scenarios, emulated networks, and the measurements in [benchmarks.md](./benchmarks.md); its guacd series speaks the Guacamole protocol to guacd straight, with the client in `bench/internal/guacamole` and `bench/internal/guacd`, the baseline that Occamy is measured against |
+**The server**
 
-## License
+| Path | What it does |
+|------|--------------|
+| [server/](../server) | The HTTP server: API v1, sign-in, the streams' WebSocket upgrades, TLS and the debug listener |
+| [internal/auth/](../internal/auth) | Access and session tokens: Ed25519 JWTs, from `occamyd` or a trusted issuer |
+| [internal/config/](../internal/config) | Reads the configuration file and validates it as a whole |
 
-[Occamy](https://github.com/changkun/occamy) | [MIT](../LICENSE) &copy; 2019 [Ou Changkun](https://changkun.de)
+**Sessions and streaming**
+
+| Path | What it does |
+|------|--------------|
+| [internal/session/](../internal/session) | Runs each session: its backend, its viewers' input by role, its shares |
+| [internal/framebuffer/](../internal/framebuffer) | A desktop's screen as versioned tiles |
+| [internal/terminal/](../internal/terminal) | The headless terminal emulator of a terminal session |
+| [internal/stream/](../internal/stream) | One viewer's connection: reads its input, writes its frames |
+| [internal/encoder/](../internal/encoder) | Chooses each tile's codec and quality |
+| [internal/codec/](../internal/codec) | The lossless codecs, and the scaling of tiles in motion |
+| [internal/pacer/](../internal/pacer) | Paces a viewer's frames and sets their quality |
+| [protocol/](../protocol) | Protocol v1's messages, handshake and framing, as a public package |
+
+**Backends**
+
+| Path | What it does |
+|------|--------------|
+| [internal/backend/](../internal/backend) | The interface every backend implements |
+| [internal/backend/ssh/](../internal/backend/ssh) | SSH: a shell in the session's terminal |
+| [internal/backend/vnc/](../internal/backend/vnc) | VNC, with VeNCrypt and Apple Remote Desktop sign-in |
+| [internal/backend/rdp/](../internal/backend/rdp) | RDP, on the client in [internal/rdp/](../internal/rdp): NLA, the graphics pipeline, the clipboard and resizing |
+| [internal/backend/kubernetes/](../internal/backend/kubernetes) | A command in a pod's container, through the Kubernetes API server |
+| [internal/keymap/](../internal/keymap) | The key code table that VNC and RDP share |
+
+**Clients**
+
+| Path | What it does |
+|------|--------------|
+| [client/occamy-web/](../client/occamy-web) | The web client, in TypeScript and React |
+| [client/](../client) | The Go client of protocol v1, a public package, for tools, tests and the macOS app |
+| [client/decoders/](../client/decoders) | The Go client's decoders of the codecs `occamyd` sends |
+| [client/occamy-swift/](../client/occamy-swift) | Occamy for macOS, in SwiftUI, on the Go client built as a C library |
+
+**Tools**
+
+| Path | What it does |
+|------|--------------|
+| [bench/](../bench) | The benchmark harness, with Guacamole as the baseline ([Benchmarks](benchmarks.md)) |
+| [tests/](../tests) | End-to-end, pressure and soak tests ([Development](development.md)) |
+
+## Design
+
+The design of each part, with the options weighed and the decisions
+made, is in the specs:
+
+- [The native architecture](../specs/008-native-architecture.md):
+  `occamyd`, its protocol, backends and streaming;
+- [The web client](../specs/009-react-web-client.md);
+- [Occamy for macOS](../specs/010-native-swift-client.md);
+- [every spec](../specs/README.md).

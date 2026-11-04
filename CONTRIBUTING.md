@@ -13,51 +13,59 @@ logs. Remove tokens and passwords from the logs.
 
 ## Development
 
-You need Go 1.26.4 or later, Node.js 22.13+, 24 or 26+ for the web
-client, and Podman or Docker with a compose provider.
+[docs/development.md](./docs/development.md) describes what you need,
+building, and every test suite, with the command of each. The checks
+that CI runs on a pull request:
 
-```
-make build      # build the image (CONTAINER_ENGINE=docker on each for Docker)
-make run E2E=1  # start occamyd and the demo servers on localhost:5637, with the tests' connections
-make e2e        # end-to-end tests against that stack
+```sh
+go test -race ./...   # the unit tests
+make lint             # golangci-lint v2, with .golangci.yml
+make build            # the image, then the end-to-end tests against it:
+make run E2E=1
+make e2e
 make stop
 ```
 
-`go test -race ./...` runs the unit tests, as CI does; the end-to-end
-tests in `tests/` skip unless `make e2e` points them at a running stack.
-[docs/try-it.md](./docs/try-it.md) walks through the demo stack and
-every test suite, with the command of each. Building needs no C
-toolchain; on Linux and Windows, `-race` needs a C compiler, such as
-gcc, and `go test ./...` runs the tests without it.
-See the README for a native build. For the web client, `npm run dev` in
-`client/occamy-web` serves it with Vite and proxies `/api` to an
-`occamyd` on `localhost:5637`, or at `OCCAMY_DEV_SERVER`. `bench/codecs`, the codec measurement,
-is a module of its own; run its tests from that directory.
-
-`go test -tags rdp_integration -timeout 30m ./internal/rdp` builds the
-bench desktop image and starts an xrdp container with Podman
-(`OCCAMY_CONTAINER_ENGINE=docker` for Docker) to test the RDP client
-against; `internal/rdp/integration_test.go` describes its settings.
-The same tag on `./internal/backend/rdp` tests the RDP backend against
-its own container; `internal/backend/rdp/integration_test.go` describes
-its settings.
-
-`make lint` runs golangci-lint v2 with the linters and formatters in
-`.golangci.yml`, as CI does. Code must be `gofmt`ed, with imports grouped
-by `goimports`.
+Code must be `gofmt`ed, with imports grouped by `goimports`.
 
 The README and `docs/` are also the website,
-<https://changkun.github.io/occamy/>, which MkDocs builds
-([mkdocs.yml](mkdocs.yml)). To preview it:
+<https://changkun.github.io/occamy/>.
+[Development](./docs/development.md#the-website) shows how to preview
+it. The `Pages` workflow builds it with `--strict` for a pull request
+that touches them, so a link or an anchor that does not resolve fails
+it.
 
-```sh
-python3 -m venv .venv && .venv/bin/pip install -r scripts/docs-requirements.txt
-.venv/bin/mkdocs serve
-```
+## Writing the docs
 
-The `Pages` workflow builds it with `--strict` for a pull request that
-touches them, so a link or an anchor that does not resolve fails it, and
-publishes it from `master`.
+The docs are for people who try, deploy, use and build on Occamy. Specs
+record how it was designed. Keep the two apart:
+
+- **One page, one job.** Open with what the page lets the reader do. Put
+  the common case first and the exceptions after it.
+- **Say what Occamy does now.** History, removed features and plans
+  belong in [CHANGELOG.md](CHANGELOG.md) and the specs. Leave out "not
+  yet", "for now" and "since v1.0.0-beta.2". The one exception is the
+  Upgrading section of the configuration page.
+- **Short sentences, one idea each.** When a sentence chains clauses
+  with colons and semicolons, split it. Use a numbered list for steps and
+  a table for keys and values. Keep each cell to a phrase or a sentence.
+- **Use the reader's names:** Occamy, Guacamole, the web client, the
+  95th percentile of a key's latency. Package paths and test names belong
+  on the Architecture and Development pages. Scenario codes and series
+  names belong in the benchmark's method.
+- **Link specs from reference pages only.** A user page does not link
+  into `specs/`. The API, protocol and architecture pages end with a
+  Design section that does.
+- **Show it.** Give an example the reader can run as written. Draw a
+  structure as a figure in Mermaid, which both GitHub and the website
+  render. A measurement is a figure or table from `bench/report.py`,
+  with its intervals.
+- **Check every claim against the code.** Some tests read the docs.
+  `TestAPIDoc`, `TestOpenAPI` and the web client's `ending.test.ts` read
+  `api.md`. `TestDocExamples` and the web client's `errors.test.ts` read
+  `protocol.md`.
+  `TestConfigurationExampleRefused` reads `configuration.md`'s first
+  example.
 
 ## Design specs
 

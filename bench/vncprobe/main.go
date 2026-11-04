@@ -5,7 +5,8 @@
 // Command vncprobe measures how long the bench desktop's VNC server takes
 // from a key to the update that shows it, with no guacd and no network in
 // between, and how many updates a second it sends. It is the remote
-// server's share of the desktop numbers in docs/benchmarks.md. Run it
+// server's share of a key's latency in docs/benchmarks.md, under The
+// setup. Run it
 // inside the VNC container:
 //
 //	GOOS=linux GOARCH=arm64 go build -o vncprobe ./bench/vncprobe

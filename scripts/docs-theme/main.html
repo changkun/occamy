@@ -23,5 +23,30 @@
       --md-typeset-a-color: #41e4c4;
       --md-accent-fg-color: #41e4c4;
     }
+    /* The repository's facts show GitHub's latest release, which skips
+       prereleases, so they would name an old version: show the stars
+       and forks only. */
+    .md-source__fact--version {
+      display: none;
+    }
+    /* Titles in the text's colour and weight, not light grey. */
+    .md-typeset h1 {
+      color: var(--md-default-fg-color);
+      font-weight: 700;
+    }
+    .md-typeset h2 {
+      font-weight: 600;
+    }
+    /* Room for the measurement tables on a wide screen. */
+    .md-grid {
+      max-width: 72rem;
+    }
+    /* A figure and its caption, as a measurement page shows them. */
+    .md-typeset figure img {
+      max-width: 100%;
+    }
+    .md-typeset figcaption {
+      max-width: 40rem;
+    }
   </style>
 {% endblock %}

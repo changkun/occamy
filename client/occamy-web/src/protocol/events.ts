@@ -41,7 +41,7 @@ export interface FrameEvent {
    * effect of no later input.
    */
   lastSeq: number
-  /** When the server read the frame's content, in microseconds since the session started. */
+  /** When the server read the frame's content, in microseconds since it began to serve this connection. */
   serverTime: number
   dirty: Rect[]
 }

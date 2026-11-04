@@ -12,6 +12,19 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - A website, <https://changkun.github.io/occamy/>: the README and the
   documents in `docs/`, with search, built by MkDocs and published from
   `master` by the `Pages` workflow ([CONTRIBUTING.md](CONTRIBUTING.md#development)).
+- Pages for deploying `occamyd` ([docs/deploy.md](docs/deploy.md)), using
+  the web client ([docs/web-client.md](docs/web-client.md)), and building
+  and testing Occamy ([docs/development.md](docs/development.md)).
+
+### Changed
+
+- The documents are rewritten for their readers, one job a page. The
+  benchmarks page opens with Occamy against Guacamole, in figures and
+  tables with 95% intervals and corrected tests
+  ([docs/benchmarks.md](docs/benchmarks.md#occamy-against-guacamole)).
+- Each line a session logs, such as `session ended`, carries the
+  session's ID as `session=`, as the line that opened it does
+  ([docs/debugging.md](docs/debugging.md#the-log)).
 
 ## [1.0.0-beta.2] - 2026-11-04
 
@@ -47,7 +60,7 @@ the API and the protocol may change before 1.0.0.
 - `disable_copy` and `disable_paste` on a vnc or rdp connection keep
   the remote's clipboard from the viewers, or theirs from the remote,
   as guacd's `disable-copy` and `disable-paste` did
-  ([docs/configuration.md](docs/configuration.md#the-connection-registry-connections)).
+  ([docs/configuration.md](docs/configuration.md#connections-connections)).
 - `make swift-core` builds the Go client core as `liboccamy.a`, a C
   archive for Apple silicon and Intel with its interface in `occamy.h`,
   which the macOS app links
@@ -67,7 +80,7 @@ the API and the protocol may change before 1.0.0.
   instead of 930, a photograph costs 108–122 KiB instead of 2.1–2.2 MiB,
   a key on a still desktop shows in 4.6–8.1 ms instead of 16–21 at p95,
   and a frame of full-screen motion costs 7.7–8.0 KiB instead of 50–66
-  ([docs/benchmarks.md](docs/benchmarks.md#the-essential-comparison)).
+  ([docs/benchmarks.md](docs/benchmarks.md#occamy-against-guacamole)).
 - The benchmark measures a scene's cadence as well as its frame rate:
   when each of its frames was first shown, the share never shown, and
   the 95th percentile of the interval between those shown
@@ -159,7 +172,7 @@ the API and the protocol may change before 1.0.0.
   the 100 sessions a user that the pressure test needs. `make run E2E=1`
   serves that file in place of the demo's, and `make e2e` and `make
   soak` run against that stack
-  ([docs/try-it.md](docs/try-it.md#the-test-servers)).
+  ([docs/development.md](docs/development.md#the-test-servers)).
 
 ### Removed
 

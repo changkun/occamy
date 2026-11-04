@@ -1,160 +1,103 @@
 # Try Occamy
 
-This guide takes a fresh checkout of `master` to a running Occamy v1.
-It covers these steps:
+This page takes a fresh checkout to Occamy running on your machine. You
+build its image, start the demo stack, open a remote desktop over VNC
+and over RDP and a shell over SSH in the browser, and tear it all down.
+An optional step adds a Kubernetes pod.
 
-1. build `occamyd` and the web client;
-2. start the demo stack;
-3. open one connection of each protocol in the browser;
-4. try sharing, the clipboard, resizing and reconnecting;
-5. run every test suite;
-6. tear it all down.
-
-Run each command from the repository's root unless a step says
-otherwise.
+Run each command from the repository's root.
 
 ## 1. What you need
 
-| What | Version | For |
-|------|---------|-----|
-| [Go](https://go.dev/dl/) | 1.26.4 or later, as `go.mod` says | `occamyd` and the Go tests. `occamyd` builds with `CGO_ENABLED=0`, without a C toolchain |
-| A C compiler, such as gcc | | Linux and Windows only: Go's race detector, `-race`, which [section 6](#6-unit-tests-lint-and-the-web-clients-tests) uses. macOS needs none |
-| [Podman](https://podman.io) with a compose provider, or Docker with Compose v2 | | the image, the demo stack and the integration tests |
-| [Node.js](https://nodejs.org) with npm | 22.13 or later on 22, 24, or 26 and later: not 23 or 25, which vitest leaves out | the web client and its tests |
-| `make`, `git`, `curl` | | |
-| [golangci-lint](https://golangci-lint.run) | v2; CI runs v2.15.0 | `make lint` only |
-| A browser | | the web client |
+| What | For |
+|------|-----|
+| [Podman](https://podman.io) with a compose provider, or Docker with Compose v2 | Building the image and running the demo stack |
+| `make`, `git` and `curl` | The commands on this page |
+| A browser | The web client |
+| [Go](https://go.dev/dl/) 1.26.4 or later, and [Node.js](https://nodejs.org) 22.13 or later on 22, 24, or 26 and later | The Kubernetes step only |
 
-`make` runs `podman` unless `CONTAINER_ENGINE` names another engine:
+`make` runs Podman. For Docker, export `CONTAINER_ENGINE` once, so that
+every `make` command uses the same engine:
 
-```
-make build CONTAINER_ENGINE=docker    # for one command
-export CONTAINER_ENGINE=docker        # for every make command in this shell
+```sh
+export CONTAINER_ENGINE=docker
 ```
 
-Give every `make` command the same engine, which exporting it does.
-`make e2e` in particular reaches into the demo stack's `rdp` and `vnc`
-containers through the compose of the engine that `make run` started
-them with.
+The commands on this page say `podman`. With Docker, write `docker` in
+its place.
 
-The integration tests in [section 7](#integration-tests) read
-`OCCAMY_CONTAINER_ENGINE` instead. The commands in this guide say
-`podman`; with Docker, write `docker` in its place. `podman compose`
-hands its work to a compose provider, docker-compose or podman-compose,
-which must be installed; `podman compose version` names the one it
-found. If it names podman-compose, the Python one, check
-`podman-compose --version` first: it must be 1.4.0 or later to name
-the project as this guide says. Releases 1.0.6 to 1.3.0 ignore
-`COMPOSE_PROJECT_NAME` and take the name `occamy` from the compose
-file: under them, `make stop` and `make clean` act on the project
-`occamy` whatever you set, and on a shared host that may be someone
-else's stack. Releases 1.0.3 and older ignore both and name the project
-`docker`, after the directory.
+`podman compose` hands its work to a compose provider, docker-compose or
+podman-compose. `podman compose version` names the one it found. If it
+names podman-compose, it must be 1.4.0 or later. Older releases name the
+compose project differently, so `make stop` and `make clean` could act
+on another stack.
 
-On macOS and Windows, the engine runs in a virtual machine. The stack's
-six containers fit in a few GiB of memory, but give the machine 8 GiB
-if anything else runs in it: a machine of 3.7 GiB, filled by another
-project's builds, stopped answering, with `podman ps` hanging for
-minutes and then `ssh: handshake failed: EOF`. `podman machine list`
-shows its memory. Raising it restarts the machine, which ends every
-container in it, so on a shared host ask first:
+On macOS and Windows, the engine runs containers in a virtual machine.
+Give it 8 GiB of memory if anything else runs in it, and several GiB of
+free disk: the `desktop` image alone is about 1 GB. `podman machine
+list` shows its memory, and these commands raise it:
 
-```
+```sh
 podman machine stop
 podman machine set --memory 8192
 podman machine start
 ```
 
-`podman machine stop` can return while the machine still shuts down;
-if `podman machine set` waits, wait for it. The machine's disk fills
-with images, and a build and the stack need several GiB free: the
-`desktop` image alone is about 1 GB. `podman system df` shows what
-images and volumes take, and [Tear down](#8-tear-down) says what
-removes them.
-
-Of the demo servers, `desktop` takes the most memory. It uses about
-130 MB with its VNC session idle, and about 300 MB once an RDP
-connection has started a second session. Firefox, the file manager, a
-text editor and a terminal add about 0.7 GB to a session, so with both
-sessions in use it reached 1.5 GB.
+This restarts the machine, which stops every container in it. On a
+machine that others share, ask them first.
 
 Check what you have:
 
-```
-go version
+```sh
 podman version
 podman compose version
-node --version
 ```
 
 ## 2. Build
 
-On a host that others share, read [Next to another
-stack](#next-to-another-stack) first: unless `OCCAMY_IMAGE` names
-another image, `make build` overwrites `occamy:latest`, which another
-stack may be running.
-
-```
-make compile    # ./occamyd: CGO_ENABLED=0 go build -trimpath
-make client     # the web client: npm ci and npm run build, into client/occamy-web/dist
-make build      # the image occamy:latest, which the demo stack runs
+```sh
+make build
 ```
 
-`make build` builds `occamyd` and the web client again, in stages of
-its own ([docker/Dockerfile](../docker/Dockerfile)), so the demo stack
-needs only the image. `./occamyd` and `client/occamy-web/dist` are for
-running `occamyd` outside a container, as [the Kubernetes
-step](#kubernetes) does. `./occamyd -h` lists its one flag, `-conf`, the
-configuration file, `./conf.yaml` by default.
+This builds the image `occamy:latest`, which the demo stack runs.
+`occamyd` and the web client are built inside the image, so the host
+needs no Go or Node.js.
+
+On a machine that others share, read [Next to another
+stack](#next-to-another-stack) first. `make build` replaces
+`occamy:latest`, which another stack may be running.
 
 ## 3. Start the demo stack
 
-```
+```sh
 make run
 ```
 
-`make run` builds the demo servers' images, which takes several
-minutes the first time. It then starts the stack in
-[docker/docker-compose.yaml](../docker/docker-compose.yaml) and returns
-once every service is healthy. Run `make build` before it: the stack
-runs the image that `make build` makes. Its compose project is
-`occamy`, so its containers are named `occamy-<service>-1`. A stack
-that an older checkout started runs under the project `docker`
-instead, on the same ports. If that stack is yours, remove it once,
-with its `docker_tigervnc-ca` volume and the `docker-*` images it
-built:
+The first run builds the demo servers' images, which takes several
+minutes. `make run` returns once every service is healthy. The stack is
+the compose project `occamy`, defined in
+[docker/docker-compose.yaml](../docker/docker-compose.yaml), so its
+containers are named `occamy-<service>-1`.
 
-```
-(cd docker && podman compose -p docker down --remove-orphans --volumes --rmi local)
-```
+| Service | What it is |
+|---------|------------|
+| `occamy-v1` | `occamyd`, on `127.0.0.1:5637` |
+| `desktop` | A desktop to work in: XFCE with Firefox, over VNC and over RDP |
+| `ssh` | An OpenSSH server |
+| `vnc`, `tigervnc`, `rdp` | Small servers for the [end-to-end tests](development.md#end-to-end-tests) |
 
-With Docker, use `docker compose` in place of `podman compose`. Do this
-only if that stack is yours: any other checkout's stack, or another
-compose file in a `docker` directory, runs under the same project.
-
-| Service | On the host | What it is |
-|---------|-------------|------------|
-| `occamy-v1` | `127.0.0.1:5637` | `occamyd` with the v1 file [docker/occamy-v1.yaml](../docker/occamy-v1.yaml): API v1, protocol v1 and the web client |
-| `desktop` | not published | a real desktop, XFCE with Firefox, as the user `occamy`, over TigerVNC and over xrdp, on Debian |
-| `ssh` | not published | the demo SSH server, OpenSSH, on Debian |
-| `vnc`, `tigervnc`, `rdp` | not published | the servers that the end-to-end tests probe: x11vnc, TigerVNC and xrdp, on Debian ([The test servers](#the-test-servers)) |
-
-The stack publishes `occamy-v1` on the host's loopback interface
-only, since anyone who has read this guide knows the demo password. To reach the web client from another machine, publish
-`occamy-v1` on every interface with `make run OCCAMY_BIND=0.0.0.0`, or
-on one address of the host's, and only on a network you trust. Set
-`OCCAMY_BIND` on `make`'s command line or export it, since `make run`
-does not read it from `docker/.env`. The debug listener, which has no
-authentication, stays on the loopback interface whatever `OCCAMY_BIND`
-says.
+Only `occamy-v1` is published, and only on the loopback interface,
+since anyone who has read this page knows the demo password. To reach it
+from another machine on a network you trust, start the stack with
+`make run OCCAMY_BIND=0.0.0.0`. Give `OCCAMY_BIND` on `make`'s command
+line or export it: `make run` ignores it in `docker/.env`.
 
 Open <http://localhost:5637/static/> and sign in as `demo` with the
-password `occamy`. **Connections** lists three connections, the real
-desktop over VNC and over RDP, and SSH, and the bar says you are signed
-in as demo. The same sign-in from the command line returns an access
-token:
+password `occamy`. **Connections** lists three connections.
 
-```
+The same sign-in from the command line returns an access token:
+
+```sh
 curl -s localhost:5637/api/v1/auth/token \
   -H 'Content-Type: application/json' \
   -d '{"username":"demo","password":"occamy"}'
@@ -162,719 +105,247 @@ curl -s localhost:5637/api/v1/auth/token \
 
 Where things live:
 
-- **The configuration** is [docker/occamy-v1.yaml](../docker/occamy-v1.yaml).
-  The container mounts it read-only at `/occamy/v1.yaml`, where `make
-  run E2E=1` mounts the tests' file instead ([The test
-  servers](#the-test-servers)).
-  [configuration.md](configuration.md) describes every key. To apply an
-  edit, restart the service: `(cd docker && podman compose restart occamy-v1)`.
-- **The signing key** is `/var/lib/occamy/signing.key` in the
-  container, on the volume `occamy-v1-data`, where a real install keeps
-  it too. `occamyd` creates it on first start, so tokens survive a
-  restart of `occamy-v1`, which still ends every session. `make stop`
-  keeps the volume, and `make clean` removes it.
-- **The demo servers' passwords** are in the environment that
-  `docker-compose.yaml` gives `occamy-v1` (`OCCAMY_DEMO_*`). The v1 file
-  names the variables in `password_env`, so it holds no password.
-- **The logs**: `(cd docker && podman compose logs -f occamy-v1)`.
-  Each session's first line names the connection and the backend that
-  serves it: `user "demo" opened connection "desktop-vnc" through vnc`.
+- **The configuration** is
+  [docker/occamy-v1.yaml](../docker/occamy-v1.yaml).
+  [Configuration](configuration.md) describes every key. After an edit,
+  restart the service:
+  `(cd docker && podman compose restart occamy-v1)`. A restart ends
+  every session.
+- **The demo servers' passwords** are environment variables of
+  `occamy-v1` in `docker-compose.yaml`, named `OCCAMY_DEMO_*`. The
+  configuration names them in `password_env` and holds no password.
+- **The signing key** is on the volume `occamy-v1-data`. `occamyd`
+  creates it on first start, so access tokens survive a restart.
+- **The log**: `(cd docker && podman compose logs -f occamy-v1)`. Each
+  session starts with a line such as
+  `user "demo" opened connection "desktop-vnc" through vnc`.
 
 ### Next to another stack
 
-On a host where another stack already uses the ports or the names, as
-on a shared machine, give this stack its own:
+On a machine where another stack already uses the ports or the names,
+give this one its own:
 
 | Variable | Default | What it sets |
 |----------|---------|--------------|
-| `COMPOSE_PROJECT_NAME` | `occamy`, which `docker-compose.yaml` names | the compose project: the names of the containers, the network, the volumes and the demo images |
-| `OCCAMY_V1_PORT` | `5637` | `occamy-v1`'s port |
-| `OCCAMY_V1_DEBUG_PORT` | `5638` | `occamy-v1`'s debug listener, when it is on |
-| `OCCAMY_IMAGE` | `occamy:latest` | the image `occamy-v1` runs, which `make build` tags |
+| `COMPOSE_PROJECT_NAME` | `occamy` | The compose project, which names the containers, network, volumes and demo images |
+| `OCCAMY_V1_PORT` | `5637` | The port of `occamy-v1` |
+| `OCCAMY_V1_DEBUG_PORT` | `5638` | The port of its debug listener, when it is on |
+| `OCCAMY_IMAGE` | `occamy:latest` | The image that `make build` tags and `occamy-v1` runs |
 
-Export them in the shell. Every `make` target and `podman compose`
-command in this guide then uses them, `make e2e` and `make soak`
-included:
+Export them, and every `make` and `podman compose` command uses them:
 
-```
+```sh
 export COMPOSE_PROJECT_NAME=occamy-try OCCAMY_V1_PORT=15637 \
   OCCAMY_V1_DEBUG_PORT=15638 OCCAMY_IMAGE=occamy-try:latest
 make build
 make run
 ```
 
-`make build` then tags `occamy-try:latest` and `occamy-try:<version>`,
-and leaves `occamy:latest` alone. It reads the shell, not `docker/.env`,
-so export `OCCAMY_IMAGE`; `IMAGE=` on its command line names another
-image.
+`make build` then tags `occamy-try:latest` and leaves `occamy:latest`
+alone. The web client is at <http://localhost:15637/static/>. Change the
+port in the `curl` command to match.
 
-The web client is then at <http://localhost:15637/static/>. Replace the
-ports in this guide's URLs, its `curl` commands and the
-`OCCAMY_E2E_V1_ENDPOINT` of its reconnect test to match.
+## 4. Open one connection of each protocol
 
-## 4. One connection per protocol
+Open each connection from **Connections**. **End session** in the bar
+ends it and returns to the list.
 
-Open each connection from **Connections**. The session's bar shows the
-remote's title, such as a terminal's or a desktop's name, or the
-connection's name if the remote gives none, and your role, `owner`.
-**End session** closes it and returns to the list. The session is gone
-by then, so the next one opens at once, even when you have as many as
-`occamyd` allows, 10 by default.
+| Connection | Protocol | What you should see |
+|------------|----------|---------------------|
+| **Desktop (XFCE) over VNC** | VNC | An XFCE desktop, with a panel along the top and a dock with a terminal, a file manager and Firefox. It resizes to fill the window |
+| **Desktop (XFCE) over RDP** | RDP | The same desktop, in a session of its own. The first connection after the stack starts creates that session, so it takes a few seconds to appear |
+| **SSH** | SSH | A terminal with Debian's login banner and the prompt `occamy@…:~$` |
+| none in the demo stack | Kubernetes | A terminal in a pod: see [step 5](#5-kubernetes) |
 
-The first two are real desktops, which `occamyd` reaches with its own
-VNC and RDP clients, and the third a shell on the demo SSH server.
+The desktops outlive their sessions. Open one again and the windows you
+left are still there. **Log Out** in the desktop's menu ends the
+desktop itself, and a fresh one starts.
 
-| Protocol | Connection | What you should see |
-|----------|------------|---------------------|
-| VNC | **Desktop (XFCE) over VNC** (`desktop-vnc`) | A real desktop: XFCE's panel along the top, with **Applications** at its left, and a dock along the bottom with a terminal, the file manager and Firefox, which opens on a page stored on the desktop. It resizes to the window, and the panel and the dock follow. The session runs from the moment the `desktop` service starts, so it shows at once |
-| RDP | **Desktop (XFCE) over RDP** (`desktop-rdp`) | The same desktop, in a session of its own, from xrdp. It resizes the same way. The first connection after the `desktop` service starts creates the X session, so the desktop takes a few seconds to appear, and took 15 seconds at a load of about 35 to 90 |
-| SSH | **SSH** (`ssh`) | A terminal with Debian's login banner and the prompt `occamy@…:~$`. It fills the window, and its rows and columns follow the window (`stty size` shows them) |
-| Kubernetes | none in the demo stack | A terminal in a pod. See [Kubernetes](#kubernetes) below for a cluster to try it with |
+While a session is open, try what the web client does:
 
-The two desktops are separate sessions of one user, each with its own
-settings and Firefox profile. The RDP session's home is `/home/occamy`
-and the VNC session's is `/home/occamy/vnc`, inside it, since Firefox
-refuses a profile that another session has open.
+- **Share it.** Click **Share**, create a link, and open it in a private
+  window. See [Sharing](web-client.md#sharing).
+- **Copy and paste.** In the desktop's terminal, select some text and
+  press Ctrl+Shift+C. Click **Clipboard** to see it. Type other text in
+  the box, click **Send**, and press Ctrl+Shift+V in the terminal. See
+  [The clipboard](web-client.md#the-clipboard).
+- **Resize.** Resize the window, or click **Full screen**. The desktop
+  follows, and on **SSH** the terminal gains rows and columns: run
+  `stty size` before and after.
+- **Come back.** Reload the page and sign in again within a minute. You
+  return to the same session. See [Leaving and coming back](web-client.md#leaving-and-coming-back).
 
-The RDP backend asks for RDP's graphics pipeline (GFX) by
-default, through which xrdp draws its sessions in RemoteFX
-Progressive. Of GFX, the backend decodes RemoteFX Progressive,
-RemoteFX, planar and uncompressed bitmaps, solid fills and copies;
-from a server that does not open GFX, it decodes plain bitmap updates.
-`disable_gfx: true` on a connection turns GFX off, so that the server
-sends plain bitmap updates
-([configuration.md](configuration.md#backends)). The RDP backend has
-been tested against xrdp and on a Windows Server 2025 CI runner, not on
-a real Windows deployment; [Windows hosts](#windows-hosts) has what that
-run showed.
-
-### The test servers
-
-`make run E2E=1` starts the same stack with the end-to-end tests' v1
-file, [docker/occamy-v1-e2e.yaml](../docker/occamy-v1-e2e.yaml), in
-place of the demo's
-([docker/docker-compose.e2e.yaml](../docker/docker-compose.e2e.yaml)).
-**Connections** then lists 14 connections: the three above, then the
-small servers that the tests probe, which show bare X desktops rather
-than a desktop to work in. `make run` without `E2E=1` returns to the
-three.
-
-| Protocol | Connection | What you should see |
-|----------|------------|---------------------|
-| VNC | **x11vnc** (`vnc`) | A black desktop with two xterms and no window manager. The small one at the top left says "Lines typed here reach the clipboard as hex"; it is a probe of the end-to-end tests. The large one has a root shell, `root@…:/#`. x11vnc does not resize its screen, so the page scales the 1024×768 desktop to the window. Keys go to the window under the pointer, as there is no window manager |
-| VNC | **TigerVNC** (`tigervnc`) | The same desktop, served by TigerVNC, which resizes its screen to the window. The page asks for the window's size in CSS pixels, so on a HiDPI display the xterms are as large as on any other, and a little soft, with a remote pixel across two device pixels at a ratio of 2 |
-| RDP | **RDP** (`rdp`) | xrdp's X session: a black desktop with one xterm at the top left and the prompt `occamy@…:~$`. The desktop resizes to the window, in CSS pixels as on TigerVNC. The first connection after the stack or the `rdp` service starts creates the X session, so the xterm takes a few seconds to appear on an idle host, and took 17 seconds at a load of 306; wait for it before you type. Later connections return to the same X session |
-
-The other VNC connections reach the servers' other screens: no
-password, VeNCrypt, and the German and French keyboard layouts.
-**TigerVNC, asking for the password** opens a form for the password
-first, which is `vncpassword`.
-
-### Kubernetes
+## 5. Kubernetes
 
 The demo stack has no cluster. This step starts one, k3s in a
 container, with a busybox pod and a ServiceAccount that may only exec
-into it. It then runs `./occamyd` from [section 2](#2-build) on
-`localhost:5639` with a v1 file of its own. The k3s container is
-privileged and needs the network to pull busybox. It is the setup of
-the backend's integration test. On a shared host, as in [Next to
-another stack](#next-to-another-stack), give the container a name of
-its own in place of `occamy-k3s` in every command of this step and of
-[Tear down](#8-tear-down), and other ports if something already
-listens on 16443 or 5639.
+into it. It then runs `occamyd` on the host, on `localhost:5639`, with
+a configuration of its own. The k3s container is privileged and pulls
+busybox from the network.
+
+On a machine that others share, give the container a name of your own
+in place of `occamy-k3s`, here and in [Tear down](#6-tear-down), and
+other ports if 16443 or 5639 are taken.
+
+1. Build `occamyd` and the web client on the host:
+
+    ```sh
+    make compile    # ./occamyd
+    make client     # the web client, in client/occamy-web/dist
+    ```
+
+2. Start k3s and wait for its API server:
+
+    ```sh
+    K8S=$(mktemp -d)
+    podman run -d --name occamy-k3s --privileged -p 127.0.0.1:16443:6443 \
+      docker.io/rancher/k3s:v1.34.1-k3s1 server \
+      --disable=traefik --disable=metrics-server --disable=servicelb --tls-san=127.0.0.1
+    for i in $(seq 60); do podman exec occamy-k3s kubectl get --raw /readyz && break; sleep 2; false; done ||
+      echo 'k3s is not ready: stop here'
+    ```
+
+    The loop prints errors while k3s starts, and `ok` once it is ready,
+    usually within half a minute. After about two minutes it gives up
+    and prints `k3s is not ready: stop here`. `podman logs occamy-k3s`
+    then says why.
+
+3. Add the namespace, the pod, the ServiceAccount `occamy`, and a Role
+   that lets it exec into the namespace's pods and do nothing else. The
+   loop retries the first `apply`, which may fail while the cluster
+   starts:
+
+    ```sh
+    cat > "$K8S/manifest.yaml" <<'EOF'
+    apiVersion: v1
+    kind: Namespace
+    metadata: {name: occamy-try}
+    ---
+    apiVersion: v1
+    kind: ServiceAccount
+    metadata: {name: occamy, namespace: occamy-try}
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: Role
+    metadata: {name: occamy-exec, namespace: occamy-try}
+    rules:
+      - apiGroups: [""]
+        resources: [pods/exec, pods/attach]
+        verbs: [get, create]
+    ---
+    apiVersion: rbac.authorization.k8s.io/v1
+    kind: RoleBinding
+    metadata: {name: occamy-exec, namespace: occamy-try}
+    roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: occamy-exec}
+    subjects: [{kind: ServiceAccount, name: occamy, namespace: occamy-try}]
+    ---
+    apiVersion: v1
+    kind: Pod
+    metadata: {name: shell, namespace: occamy-try}
+    spec:
+      terminationGracePeriodSeconds: 0
+      containers:
+        - name: box
+          image: docker.io/library/busybox:1.37
+          command: [sleep, "86400"]
+    EOF
+    for i in $(seq 30); do podman exec -i occamy-k3s kubectl apply -f - < "$K8S/manifest.yaml" && break; sleep 2; false; done &&
+      podman exec occamy-k3s kubectl -n occamy-try wait --for=condition=Ready pod/shell --timeout=300s
+    ```
+
+4. `occamyd` takes no kubeconfig. Give it the cluster's CA, a token of
+   the ServiceAccount, and a configuration, then start it:
+
+    ```sh
+    podman exec occamy-k3s kubectl config view --raw \
+      -o 'jsonpath={.clusters[0].cluster.certificate-authority-data}' | base64 -d > "$K8S/ca.pem"
+    podman exec occamy-k3s kubectl -n occamy-try create token occamy --duration=1h > "$K8S/token"
+    DEMO_HASH=$(sed -n 's/.*password_hash: "\(.*\)"/\1/p' docker/occamy-v1.yaml)
+    cat > "$K8S/occamy.yaml" <<EOF
+    version: 1
+    listen: 127.0.0.1:5639
+    web_client: client/occamy-web/dist
+    auth:
+      signing_key_file: $K8S/signing.key
+      users:
+        - name: demo
+          password_hash: "$DEMO_HASH"
+    connections:
+      - id: k3s-shell
+        name: busybox in k3s
+        protocol: kubernetes
+        target: 127.0.0.1:16443
+        kubernetes: {namespace: occamy-try, pod: shell}
+        tls: {ca_file: $K8S/ca.pem}
+        credentials: {token_file: $K8S/token}
+        allow: {users: [demo]}
+    EOF
+    ./occamyd -conf "$K8S/occamy.yaml"
+    ```
 
-```
-K8S=$(mktemp -d)
-podman run -d --name occamy-k3s --privileged -p 127.0.0.1:16443:6443 \
-  docker.io/rancher/k3s:v1.34.1-k3s1 server \
-  --disable=traefik --disable=metrics-server --disable=servicelb --tls-san=127.0.0.1
-for i in $(seq 60); do podman exec occamy-k3s kubectl get --raw /readyz && break; sleep 2; false; done ||
-  echo 'k3s is not ready: stop here'
-```
+    `occamyd` logs `serving API v1 at http://127.0.0.1:5639` and keeps
+    running.
 
-The loop prints errors while k3s starts, and `ok` once its API server
-is ready, usually within half a minute. It gives up after about two
-minutes and prints `k3s is not ready: stop here`; the steps below need
-the cluster, and `podman logs occamy-k3s` says why it did not start.
-Then add the pod,
-the ServiceAccount `occamy`, and a Role that lets it exec into pods of
-the namespace and nothing else. `pods/exec` and `pods/attach` take
-`get` and `create`, as [configuration.md](configuration.md#kubernetes-pods)
-says. The first `apply` may fail while the cluster starts, so the loop
-tries again, for up to a minute, and the `wait` runs only once it has
-applied:
+5. Open <http://localhost:5639/static/>, sign in as `demo` with the
+   password `occamy`, and open **busybox in k3s**. Busybox has no bash,
+   so `occamyd` runs `sh`, and you see BusyBox's prompt, `/ #`.
+   `hostname` prints `shell`, the pod's name.
 
-```
-cat > "$K8S/manifest.yaml" <<'EOF'
-apiVersion: v1
-kind: Namespace
-metadata: {name: occamy-try}
----
-apiVersion: v1
-kind: ServiceAccount
-metadata: {name: occamy, namespace: occamy-try}
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata: {name: occamy-exec, namespace: occamy-try}
-rules:
-  - apiGroups: [""]
-    resources: [pods/exec, pods/attach]
-    verbs: [get, create]
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata: {name: occamy-exec, namespace: occamy-try}
-roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: occamy-exec}
-subjects: [{kind: ServiceAccount, name: occamy, namespace: occamy-try}]
----
-apiVersion: v1
-kind: Pod
-metadata: {name: shell, namespace: occamy-try}
-spec:
-  terminationGracePeriodSeconds: 0
-  containers:
-    - name: box
-      image: docker.io/library/busybox:1.37
-      command: [sleep, "86400"]
-EOF
-for i in $(seq 30); do podman exec -i occamy-k3s kubectl apply -f - < "$K8S/manifest.yaml" && break; sleep 2; false; done &&
-  podman exec occamy-k3s kubectl -n occamy-try wait --for=condition=Ready pod/shell --timeout=300s
-```
+The token lasts an hour. A new one in `$K8S/token` serves the next
+session. Stop `occamyd` with Ctrl-C.
+[Kubernetes pods](configuration.md#kubernetes-pods) describes the
+connection's keys and the permissions it needs.
 
-`occamyd` takes no kubeconfig. Give it the cluster's CA, a token of the
-ServiceAccount, and a v1 file:
+## 6. Tear down
 
-```
-podman exec occamy-k3s kubectl config view --raw \
-  -o 'jsonpath={.clusters[0].cluster.certificate-authority-data}' | base64 -d > "$K8S/ca.pem"
-podman exec occamy-k3s kubectl -n occamy-try create token occamy --duration=1h > "$K8S/token"
-DEMO_HASH=$(sed -n 's/.*password_hash: "\(.*\)"/\1/p' docker/occamy-v1.yaml)
-cat > "$K8S/occamy.yaml" <<EOF
-version: 1
-listen: 127.0.0.1:5639
-web_client: client/occamy-web/dist
-auth:
-  signing_key_file: $K8S/signing.key
-  users:
-    - name: demo
-      password_hash: "$DEMO_HASH"
-connections:
-  - id: k3s-shell
-    name: busybox in k3s
-    protocol: kubernetes
-    target: 127.0.0.1:16443
-    kubernetes: {namespace: occamy-try, pod: shell}
-    tls: {ca_file: $K8S/ca.pem}
-    credentials: {token_file: $K8S/token}
-    allow: {users: [demo]}
-EOF
-./occamyd -conf "$K8S/occamy.yaml"
-```
-
-`occamyd` creates the signing key in `$K8S`, logs `serving API v1 at
-http://127.0.0.1:5639` and keeps running. In a browser, open
-<http://localhost:5639/static/>, sign in as `demo` with the password
-`occamy`, and open **busybox in k3s**. Busybox has no bash, so
-`occamyd` runs `sh`, and you should see BusyBox's prompt, `/ #`.
-`hostname` prints `shell`, the pod's name. The token expires after an
-hour; a new one in `$K8S/token` serves the next session. Stop `occamyd`
-with Ctrl-C.
-
-## 5. Features
-
-### Sharing
-
-1. Open **Desktop (XFCE) over VNC**. You are its owner.
-2. Click **Share**. Under **Others join**, pick **View only: they
-   watch**, keep **Link expires after** as it is, and click **Create
-   link**, then **Copy link**. The link is the page's address with
-   `#join=<session>&token=<share>`.
-3. Open the link in a private window or another browser, so that it
-   does not share your sign-in. It joins without a sign-in, and the
-   bar's role says `view only`. The owner's bar shows **1 other
-   viewer**; click it to list them.
-4. In the view-only window, type and click: nothing reaches the
-   desktop.
-5. In the owner's window, click **Create another**, pick **With control:
-   they also type, point and use the clipboard**, and open that link
-   too. Its role says `with control`, and its keys and clicks reach the
-   desktop.
-6. Click **End session** in the owner's window. Both viewers see
-   "Session ended" and "The owner ended the session."
-
-When the owner closes the tab instead of ending the session,
-`occamyd` keeps the session for 60 seconds, the owner's grace. The
-viewers keep watching. If the owner does not come back in time, they
-see "The owner left and did not come back in time."
-
-### Clipboard
-
-On **Desktop (XFCE) over VNC** or **over RDP**:
-
-1. **From the remote to the browser.** In the desktop's terminal, run
-   `echo hello from the remote`, select the words it printed and press
-   Ctrl+Shift+C. Click **Clipboard**: the box shows them. **Copy** puts
-   them on your own clipboard.
-2. **From the browser to the remote.** Replace the box's text with
-   `hello from the browser` and click **Send**. The panel says "Sent to
-   the remote clipboard." Click the terminal and press Ctrl+Shift+V,
-   and it pastes `hello from the browser`.
-   **Paste local** fills the box from your own clipboard where the
-   browser allows it. When its window gets the focus, the page also
-   sends your clipboard to the remote, if the browser lets it read the
-   clipboard without asking.
-
-Once sent, the box's text counts as the remote's, so the next remote
-clipboard replaces it. Text that you type after the send stays when the
-remote clipboard changes, and the panel says "Edited: the remote
-clipboard holds other text."; **Show it** puts the remote's text in the
-box. Text too large for one message is not sent: the panel says "Not
-sent: the text is too large for one message to occamyd. Send less of
-it.", and the text stays in the box as your edit. Someone who joined
-view only sees the remote clipboard but cannot send to it.
-
-A terminal session has no remote clipboard: `ssh` and Kubernetes ignore
-it. On **SSH**, the **Clipboard** panel says so, and points to the
-browser's paste: click the terminal and press ⌘V, or Ctrl+Shift+V, and
-the text goes to the shell.
-
-The test servers of `make run E2E=1` ([The test
-servers](#the-test-servers)) have `xclip` in their xterms: with the
-pointer over one, `echo hello from the remote | xclip -selection
-clipboard` puts text on the remote clipboard, and after a **Send**,
-`xclip -o -selection clipboard; echo` prints it. They also answer the
-clipboard by themselves, which the desktops do not: on **x11vnc** and
-**TigerVNC**, send `owner: hi`, and a moment later the box shows
-`echo: hi`, the remote's clipboard. **RDP** does the same with
-`occamy-e2e:hi`, which comes back as `echo:occamy-e2e:hi`.
-
-On RDP, a server's clipboard is a process of its own, xrdp's
-`xrdp-chansrv`, which starts only after you log on, and may exit while
-the session goes on. xrdp's does that when a connection closes within
-moments of opening. If the server has not taken text you sent after a
-minute, the page says "The remote hasn't taken the clipboard yet. Your
-text will go when it does." over the desktop and in the **Clipboard**
-panel. Nothing is lost: the text waits, and goes when the server
-answers. At a slow logon screen nothing is wrong, and the word goes once
-you are in. It also goes when you dismiss it.
-
-If that stays, or an RDP session's **Clipboard** panel never changes,
-the process has probably gone. The demo images start it again when the
-next connection opens, and the `desktop` or `rdp` service's log says
-`starting xrdp-chansrv again`, so end the session, open it again and
-send the text again, as text still waiting ends with its session. xrdp
-itself starts that process only with an X session, so a server without
-the demo's `reconnectwm.sh` keeps the clipboard silent until you log out
-of that session.
-
-The test servers' x11vnc used to die now and then of an X error,
-`BadWindow`, which ended its sessions with "Remote unreachable",
-sometimes right after it refused a resize. The resize was not the
-cause. It was x11vnc's own clipboard bug: it answered a request for the
-clipboard from a window that had gone, which its desktop's clipboard
-probe left behind when x11vnc stalled for more than 2 seconds. Its
-image sets `X11VNC_SENDEVENT_SYNC=1`, which makes x11vnc catch that
-error. A watchdog still starts x11vnc again should it die of anything
-else; the sessions on it end, and you open them again.
-
-The same request used to kill an `xclip` that you ran in the remote
-xterm, which printed `X Error of failed request: BadWindow` there and
-took the remote clipboard with it. The probe now waits 30 seconds
-rather than 2, so only an `xclip` that stalls for that long can meet
-it. If it does, run the `xclip` again.
-
-A freshly started x11vnc ignores clipboard text from the browser until
-its latest client has been connected for 45 seconds, and takes it from
-then on. If nothing arrives on an x11vnc desktop soon after the stack
-started, wait that long and send it again.
-
-### Resize and reconnect
-
-**Resize.** Resize the browser window, or click **Full screen**:
-
-- On **Desktop (XFCE) over VNC** and **over RDP**, the remote desktop
-  changes size to fill the window, and XFCE's panel and dock follow the
-  new size. Over RDP, the screen turns black while xrdp redraws it: for
-  0.1 to 1 second at a load of 25 to 60, and for several seconds at a
-  load of 85.
-- On **SSH**, the terminal gains or loses rows and columns: run
-  `stty size` before and after.
-- Of the test servers ([The test servers](#the-test-servers)),
-  **TigerVNC** and **RDP** change size to fill the window too.
-  **x11vnc** keeps 1024×768, and the page scales it. x11vnc refuses to
-  resize, and `occamyd` logs `the server prohibits resizing the screen`
-  once and stops asking; the session goes on.
-
-A browser zoom changes the window's size in CSS pixels, so the owner's
-zoom resizes a remote that takes any size, for everyone in the session:
-at 25%, a 1280×800 window asks for 5120×3152, and the remote's programs
-look a quarter of their size. A viewer's zoom only scales the view.
-
-Only the owner's window sets the size. A viewer sees the owner's
-screen scaled to its own window.
-
-**Reconnect.** A session outlives the owner's connection to `occamyd`.
-When the page loses its connection while the session runs on, it says
-"Connection lost" and offers **Join again**. The owner then has 60
-seconds to come back to the same session, with the remote's state as
-it was. A newer connection of the owner takes the session over from
-an older one. The older page then says "Opened elsewhere" and offers
-**Join again** to take it back. If the session has ended by the time
-the owner comes back, and it ended less than a minute before, the page
-says how, as its viewers saw it: for example "The owner ended the
-session.", "The owner left and did not come back in time." or "Remote
-unreachable". Later than that, it says "Access refused".
-
-The real desktops outlive Occamy's sessions as well. **End session**
-ends the session in `occamyd`, but open **Desktop (XFCE) over VNC** or
-**over RDP** again, and the windows you left are still there, at the
-size of your window. **Log Out** in the desktop's menu does end it: the
-VNC session starts afresh by itself, and the next RDP connection
-creates a new one.
-
-**Reload.** The page keeps its sign-in in memory only, so reloading the
-owner's page asks for a sign-in again, with the notice "Sign in again
-to return to <the connection's name>." and a **Go to the connections
-instead** button. Sign in within the 60 seconds, and the page rejoins
-the same session, or says how it ended, as above. Signing out forgets
-the session, so the next sign-in goes to the connections. A viewer who
-joined through a share link loses the share on a reload and needs the
-link again.
-
-To watch an owner leave and come back without breaking a network, run
-the end-to-end test that does it against a stack that `make run E2E=1`
-started:
-
-```
-OCCAMY_E2E_V1_ENDPOINT=localhost:5637 go test -count=1 -v -run 'TestE2EV1RDP/reconnect' ./tests/
-```
-
-It opens **RDP**, closes the owner's stream, waits
-until the session lists no viewer, and opens the session's own stream
-again. It passes when it returns to the same session as its owner.
-
-### Windows hosts
-
-**Set `disable_gfx: true` for Windows hosts** until `occamyd` takes
-ClearCodec ([configuration.md](configuration.md#backends)). The RDP
-backend has met Windows only on a Windows Server 2025 CI runner
-connecting to itself over loopback, not in a real deployment, and
-[#32](https://github.com/changkun/occamy/issues/32) stays open for
-that. There, it logs on with NLA, and the keyboard and resize work:
-
-- With GFX on, the default, the screen stays nearly black. That server
-  drew nearly all of it with ClearCodec and its bitmap cache, which the
-  backend skips until the third pull request of its GFX phase, a v1.0
-  blocker. At the first such PDU in a session, `occamyd` logs a warning
-  that names `disable_gfx: true`. With that key on the connection, the
-  server sent plain bitmap updates, and the whole desktop drew
-  correctly.
-- The clipboard fails both ways. The suspected cause, that the client
-  does not set `CHANNEL_FLAG_SHOW_PROTOCOL` on the channel's chunks, is
-  unproven.
-
-## 6. Unit tests, lint and the web client's tests
-
-```
-go test -race ./...
-```
-
-The unit tests need no stack and no container engine. They take a few
-minutes with the race detector. On Linux and Windows the race detector
-needs cgo and a C compiler, as in [section 1](#1-what-you-need);
-without one, `go test -race` stops with `-race requires cgo` or `C
-compiler "gcc" not found`, and `go test ./...` runs the same tests
-without it.
-
-```
-golangci-lint version    # must say version 2
-make lint
-```
-
-`make lint` runs golangci-lint with [.golangci.yml](../.golangci.yml),
-and again on the codec measurement in `bench/codecs` with its `measure`
-build tag. golangci-lint v1 cannot read the configuration. CI runs
-v2.15.0 ([dockerimage.yml](../.github/workflows/dockerimage.yml)), and
-has a pass that `make lint` leaves out, on the RDP integration tests,
-which build only under their tag:
-
-```
-golangci-lint run --build-tags=rdp_integration ./internal/rdp/... ./internal/backend/rdp/...
-```
-
-The web client's tests run in `client/occamy-web`, as CI's web job
-runs them. The interop test runs the TypeScript client against
-`occamyd`'s stream code, served by `client/internal/webinterop` and
-built with the race detector. It is skipped unless
-`OCCAMY_INTEROP_SERVER` names the server. Without a C compiler on Linux
-or Windows, leave `-race` out of the `go build`:
-
-```
-go build -race -o "${TMPDIR:-/tmp}/occamy-webinterop" ./client/internal/webinterop
-cd client/occamy-web
-npm ci
-npm run lint
-npm run typecheck
-OCCAMY_INTEROP_SERVER="${TMPDIR:-/tmp}/occamy-webinterop" GORACE=halt_on_error=1 npm test
-npm run build
-cd ../..
-```
-
-`npm test` reports two tests skipped. They fail a CI run that lacks the
-interop server, and skip everywhere else.
-
-## 7. Tests against the demo stack and real servers
-
-### End-to-end tests
-
-The tests run on the end-to-end stack: the demo stack of [section
-3](#3-start-the-demo-stack) with
-[docker/docker-compose.e2e.yaml](../docker/docker-compose.e2e.yaml)
-over it, which gives `occamy-v1` the connections of [the test
-servers](#the-test-servers) as well as the demo's. `make run E2E=1`
-starts it, or switches a running demo stack to it, and `make e2e` runs
-its compose commands with the same files:
-
-```
-make run E2E=1
-make e2e
-```
-
-Run it with the engine that `make run` used, as in [section
-1](#1-what-you-need): with Docker, `make e2e CONTAINER_ENGINE=docker`,
-unless you exported it. Two tests kill the clipboard process in the
-`rdp` container through that engine's compose, and another stops
-x11vnc in the `vnc` container for a moment, so they fail with
-another engine.
-
-The tests open real sessions to every demo server:
-
-- through `occamy-v1`, with the Go client of protocol v1;
-- on `desktop-vnc` and `desktop-rdp`: XFCE draws its panel and
-  wallpaper, and the panel follows the screen when it grows
-  (`TestDemoDesktop`);
-- on `rdp`: the clipboard both ways, a resize, a viewer joined
-  by a share, the owner's return, and the clipboard again once its
-  process in the `rdp` container has been killed;
-- on `vnc-none`: x11vnc lives through a request for the
-  clipboard from a window that has gone, the bug that used to kill it
-  (`TestX11vncClipboardRequestorGone`);
-- the VNC parity matrix, each feature on x11vnc and TigerVNC, logged
-  as a table;
-- in Chrome, on `tigervnc` and `rdp`: the web client at
-  device pixel ratios of 2, 1 and 1.5, and in a window of an odd width,
-  sizes the remote to the window in CSS pixels, when the session opens
-  and when the window changes
-  (`TestWebScreen`). It looks for Chrome on the host, or takes its path
-  from `OCCAMY_E2E_CHROME`, and is skipped without one, except in CI.
-
-On an idle host, a run takes a few minutes, most of it the parity
-matrix. A busy host takes longer. The x11vnc test takes
-about 10 seconds, or up to a minute and a half on an x11vnc just
-started, which ignores clipboard text at first
-([Clipboard](#clipboard)). The pressure test and the soak are skipped
-unless their variables are set (below).
-
-### Debug routes
-
-The stack's debug routes have no authentication, so they are off
-unless `make run` gets `OCCAMY_DEBUG=1`, and then they are on the
-host's loopback interface only. Without it, `occamy-v1` logs `debug
-listener off` and its debug port answers nothing:
-
-```
-make run
-curl -s -m 5 localhost:5638/debug/vars      # fails: nothing serves it
-```
-
-With it, `occamy-v1` serves expvar and pprof on port 5638:
-
-```
-make run OCCAMY_DEBUG=1
-curl -s localhost:5638/debug/vars | head -c 200; echo
-curl -s -o /dev/null -w '%{http_code}\n' localhost:5638/debug/pprof/    # 200
-```
-
-`make run` without `OCCAMY_DEBUG=1` turns them off again, whatever is
-left in the shell or in `docker/.env`. `go test -run TestDemoDebugGating
-./internal/config` checks that the demo files gate them this way.
-[debugging.md](debugging.md) covers profiling `occamyd` through them.
-
-### Pressure test and soak
-
-Both need the debug routes and the test servers, so start the stack
-with `make run E2E=1 OCCAMY_DEBUG=1` first.
-
-```
-make e2e OCCAMY_PRESSURE_N=10
-```
-
-That adds the pressure test to the end-to-end tests. Each of its 10
-rounds opens two sessions to every demo server at once through
-`occamy-v1`, one of which sends garbage once it is welcomed.
-Afterwards, `occamyd`'s goroutines must return to their number before
-the storm within a minute.
-
-```
-make soak OCCAMY_SOAK_DURATION=5m OCCAMY_SOAK_INTERVAL=10s OCCAMY_SOAK_LIFETIME=2m
-```
-
-That is a short soak. It runs 8 sessions at a time to
-`tigervnc` through `occamy-v1` for 5 minutes, each typing and
-moving the pointer, and replaces each session after 2 minutes. Every
-10 seconds it samples `occamyd`'s goroutines, heap and open files from
-the debug listener. It fails if they keep growing, or if a session
-fails. Plain `make soak` runs for an hour, and the full soak is `make
-soak OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h`.
-[debugging.md](debugging.md#tests-and-benchmarks) lists its settings.
-
-### Integration tests
-
-These run the backends against real servers in containers of their
-own. Build tags keep them out of `go test ./...`. Each container, with
-its anonymous volumes, and each image a run builds are the run's own,
-and the run removes them when it ends. They need no demo stack.
-Building an image can take longer than `go test`'s default 10 minutes,
-hence `-timeout`.
-
-| Tag | Command | Against |
-|-----|---------|---------|
-| `rdp_integration` | `go test -tags rdp_integration -run Integration -timeout 30m ./internal/rdp` | the RDP client, against xrdp in the bench desktop image |
-| `rdp_integration` | `go test -tags rdp_integration -run Integration -timeout 30m ./internal/backend/rdp` | the RDP backend, against the same |
-| `kubernetes_integration` | `go test -tags kubernetes_integration -run Integration -timeout 15m ./internal/backend/kubernetes` | the Kubernetes backend, against k3s, as in [the Kubernetes step](#kubernetes) |
-| `integration` | `go test -tags integration -run TestTigerVNC -timeout 30m ./internal/backend/vnc` | the VNC backend over VeNCrypt, against the demo TigerVNC image |
-
-The `integration` tag has three more tests, which need a server that
-you start:
-
-- **`TestBenchDesktop`** runs the VNC backend against x11vnc on the
-  bench desktop:
-
-  ```
-  podman build -t occamy-bench-desktop -f docker/bench/desktop/Dockerfile .
-  podman run -d --rm --name occamy-vnc-test -p 127.0.0.1:15900:5900 occamy-bench-desktop vnc
-  OCCAMY_VNC_ADDR=127.0.0.1:15900 go test -tags integration -run TestBenchDesktop ./internal/backend/vnc
-  podman rm -f occamy-vnc-test
-  ```
-
-  On a shared host, give the image, the container and the port names
-  of your own in place of `occamy-bench-desktop`, `occamy-vnc-test` and
-  15900, as for [the Kubernetes step](#kubernetes): another session
-  may have built an `occamy-bench-desktop` of its own.
-
-- **`TestEncodings`** takes the same `OCCAMY_VNC_ADDR` and asks for one
-  encoding at a time.
-- **`TestMacOS`** needs a Mac with Screen Sharing on; its doc comment,
-  in `internal/backend/vnc/ard_integration_test.go`, says how.
-
-The `measure` tag (`bench/codecs`) measures codecs on recorded frames.
-It is not a test to run here;
-[benchmarks/codecs.md](benchmarks/codecs.md) describes it. The
-integration tests take `OCCAMY_CONTAINER_ENGINE=docker` for Docker.
-
-### Fuzz tests
-
-The parsers of everything that comes over a network have fuzz
-targets. `go test -list '^Fuzz' ./...` lists them by package. `go
-test` runs one target at a time, so fuzz each for a while like this:
-
-```
-go test -run '^$' -fuzz '^FuzzSession$' -fuzztime 30s -parallel 4 ./client
-```
-
-`-parallel 4` keeps the fuzzer to four workers, which leaves the
-machine usable. CI fuzzes them all every night
-([fuzz.yml](../.github/workflows/fuzz.yml)). To do the same here, 30
-seconds each, which takes about 20 minutes:
-
-```
-for pkg in $(go list ./...); do
-  for target in $(go test -list '^Fuzz' "$pkg" | grep '^Fuzz'); do
-    go test -run '^$' -fuzz "^$target\$" -fuzztime 30s -parallel 4 "$pkg" || break 2
-  done
-done
-```
-
-A failure writes its input to the package's
-`testdata/fuzz/<target>/`, where plain `go test` replays it from then
-on.
-
-## 8. Tear down
-
-```
+```sh
 make stop
 ```
 
-`make stop` stops and removes the stack's containers and its network,
-whether `make run` started it with `E2E=1` or without, and keeps its
-volumes. To also remove what `make build` and `make run` built and
-made:
+`make stop` removes the stack's containers and network, and keeps its
+volumes and images. To remove those too, and the image of `make build`:
 
-```
+```sh
 make clean
 podman rmi occamy:latest "occamy:$(git describe --always --tags)"
 ```
 
-`make clean` removes nothing that is not Occamy's. It runs `compose
-down` with `--volumes --rmi local` for the stack's project, `occamy`
-unless `COMPOSE_PROJECT_NAME` names another, which removes the demo
-servers' images and the volumes of TigerVNC's CA and the signing key. It
-then prunes the images of earlier `make build` runs that a later build
-left untagged, which `make build` labels. Every checkout's build has
-that label, so the prune takes the untagged images of any Occamy stack
-on this engine: Occamy's, but on a shared host not always yours. The
-tagged image of `make build` stays, so `podman rmi` removes it.
+`make clean` removes the stack's volumes and the demo servers' images.
+It also removes the untagged images that earlier `make build` runs left
+behind. It finds those by a label that every checkout's build carries,
+so on a shared engine it also removes other Occamy stacks' untagged
+images.
 
-With the variables of [Next to another stack](#next-to-another-stack),
-keep them exported for `make stop` and `make clean`, and name your
-image instead: `podman rmi occamy-try:latest "occamy-try:$(git describe
---always --tags)"`.
+On a shared machine, skip `make clean` and remove your own by name
+after `make stop`. With the variables of [Next to another
+stack](#next-to-another-stack) still exported:
 
-To leave other stacks' images alone on a shared host, skip `make clean`
-and remove yours by name once `make stop` has run:
-
-```
+```sh
 podman rmi occamy-try:latest "occamy-try:$(git describe --always --tags)"
 podman rmi occamy-try-vnc occamy-try-tigervnc occamy-try-ssh occamy-try-rdp occamy-try-desktop
 podman volume rm occamy-try_tigervnc-ca occamy-try_occamy-v1-data
 ```
 
 If you followed the Kubernetes step, stop `occamyd` with Ctrl-C, then
-remove the cluster and its files:
+remove the cluster, with its volumes, and what the step built:
 
-```
+```sh
 podman rm -f -v occamy-k3s
 rm -r "$K8S"
-```
-
-`-v` also removes the four anonymous volumes that the k3s image
-declares, which `podman rm` would leave behind.
-
-Remove what the build left in the checkout, and the interop server of
-[section 6](#6-unit-tests-lint-and-the-web-clients-tests) in the
-temporary directory:
-
-```
 rm occamyd
 rm -r client/occamy-web/dist client/occamy-web/node_modules
-rm -f "${TMPDIR:-/tmp}/occamy-webinterop"
 ```
 
-The images that were pulled stay for the next run:
-`docker.io/rancher/k3s:v1.34.1-k3s1`,
-the base images `debian:trixie-slim`, `golang:1.27-trixie`,
-`node:26-trixie-slim` and `gcr.io/distroless/static-debian13:nonroot`.
-So does `occamy-bench-desktop`, or the name you gave it, if you built
-it for `TestBenchDesktop`. `podman rmi` removes them.
+The images that the builds pulled stay for the next run:
+`debian:trixie-slim`, `golang:1.27-trixie`, `node:26-trixie-slim`,
+`gcr.io/distroless/static-debian13:nonroot` and, after the Kubernetes
+step, `docker.io/rancher/k3s:v1.34.1-k3s1`. `podman rmi` removes them.
 
-Podman also keeps the build stages of every image it built, as
-untagged images that it uses as its build cache: those of `make
-build`, of the demo servers' images and of the integration tests'
-images, a gigabyte or so each. `make clean` leaves them, since nothing
-marks them as Occamy's. `podman images -f dangling=true` lists them,
-and `podman image prune` removes them, with every other untagged image
-of the engine, so run it only if no one else's images are on it.
-Docker keeps its build cache apart from its images. `docker builder
-prune` removes it, everyone's on that engine, so run it only if no one
-else builds on it.
+Podman also keeps every build's intermediate stages as untagged images,
+its build cache, about a gigabyte for each image. `make clean` leaves
+them, since nothing marks them as Occamy's.
+`podman images -f dangling=true` lists them. `podman image prune`
+removes them along with every other untagged image of the engine, so
+run it only if no one else uses that engine. Docker keeps its build
+cache apart: `docker builder prune` removes it, for everyone on that
+engine.

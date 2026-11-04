@@ -354,7 +354,7 @@ judges it at N1. The analysis is a Python script over the results
 
 Measured on 2026-11-02, in 2 h 18 min, with all 192 results; the
 numbers, the targets and the verdict are in
-[docs/benchmarks.md](../../docs/benchmarks.md#the-essential-comparison),
+[docs/benchmarks.md](../../docs/benchmarks.md#occamy-against-guacamole),
 and the report in `docs/benchmarks/essential/`.
 
 - 14 of the 16 primary differences are significant after Holm's

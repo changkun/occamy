@@ -12,6 +12,11 @@ as the home page. So the hooks
 - point each link that resolves inside docs/ at that page or file of
   the site, and each one that leaves docs/, such as specs/ or LICENSE,
   at the repository on GitHub.
+
+MkDocs resolves a Markdown link from the page's file, but leaves raw
+HTML alone, and the browser resolves it from the page's URL, which is a
+directory: docs/benchmarks.md is served at benchmarks/. So an HTML src,
+srcset or href is written relative to the page's URL instead.
 """
 
 import os
@@ -23,8 +28,8 @@ from mkdocs.structure.files import File
 REPO = "https://github.com/changkun/occamy"
 BRANCH = "master"
 
-# A Markdown link or image target, or an HTML src or href.
-LINK = re.compile(r'(\]\()([^)\s]+)(\))|((?:src|href)=")([^"]+)(")')
+# A Markdown link or image target, or an HTML src, srcset or href.
+LINK = re.compile(r'(\]\()([^)\s]+)(\))|((?:src|srcset|href)=")([^"]+)(")')
 
 
 def _root(config):
@@ -58,7 +63,10 @@ def on_page_markdown(markdown, page, config, files):
     else:
         base = posixpath.join(docs, posixpath.dirname(src))
 
-    def rewrite(target):
+    # The directory of the page's URL, relative to the site's root.
+    url_dir = page.url if page.url.endswith("/") else posixpath.dirname(page.url)
+
+    def rewrite(target, html=False):
         if re.match(r"^[a-z][a-z0-9+.-]*:", target, re.I) or target.startswith(("#", "/")):
             return target
         path, sep, anchor = target.partition("#")
@@ -69,14 +77,49 @@ def on_page_markdown(markdown, page, config, files):
             inside = posixpath.relpath(resolved, docs)
             if inside == "README.md":
                 inside = "manual.md"
-            here = posixpath.dirname(src)
-            return posixpath.relpath(inside, here or ".") + sep + anchor
+            if not html:
+                here = posixpath.dirname(src)
+                return posixpath.relpath(inside, here or ".") + sep + anchor
+            if inside.endswith(".md"):
+                inside = "" if inside == "index.md" else inside[: -len(".md")] + "/"
+            rel = posixpath.relpath(inside or ".", url_dir or ".")
+            if inside.endswith("/") and rel != ".":
+                rel += "/"
+            return ("./" if rel == "." else rel) + sep + anchor
         kind = "tree" if os.path.isdir(os.path.join(root, resolved)) else "blob"
         return f"{REPO}/{kind}/{BRANCH}/{resolved}" + sep + anchor
 
     def replace(m):
         if m.group(1):
             return m.group(1) + rewrite(m.group(2)) + m.group(3)
-        return m.group(4) + rewrite(m.group(5)) + m.group(6)
+        attr, value = m.group(4), m.group(5)
+        if attr == 'srcset="':
+            # Each candidate is a URL and an optional descriptor.
+            value = ", ".join(
+                " ".join([rewrite(parts[0], html=True)] + parts[1:])
+                for parts in (c.split() for c in value.split(","))
+                if parts
+            )
+        else:
+            value = rewrite(value, html=True)
+        return attr + value + m.group(6)
 
-    return LINK.sub(replace, markdown)
+    return PICTURE.sub(_light_dark, LINK.sub(replace, markdown))
+
+
+# A figure in a light and a dark version, as GitHub shows it: the
+# system's colour scheme picks one.
+PICTURE = re.compile(
+    r'<picture>\s*<source media="\(prefers-color-scheme: dark\)" srcset="([^"]+)">\s*'
+    r'<img alt="([^"]*)" src="([^"]+)">\s*</picture>'
+)
+
+
+def _light_dark(m):
+    # The site has a toggle of its own, so show the version of its
+    # scheme instead, with Material's #only-light and #only-dark.
+    dark, alt, light = m.group(1), m.group(2), m.group(3)
+    return (
+        f'<img alt="{alt}" src="{light}#only-light">'
+        f'<img alt="{alt}" src="{dark}#only-dark">'
+    )
