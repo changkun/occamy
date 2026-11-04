@@ -15,7 +15,7 @@ its configuration names. Your users reach it in a browser or in
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/deploy-topology-dark.svg">
-  <img alt="A deployment. The web client in a browser and Occamy for macOS reach a TLS proxy, Caddy or nginx, over HTTPS on port 443. On the same server, the proxy reaches occamyd over HTTP/1.1 with the Upgrade header, on 127.0.0.1:5636. occamyd keeps conf.yaml, which it reads at start, signing.key on a volume, and an optional debug listener on localhost:6060. It connects to an identity provider for OIDC, optionally, and to each remote: a VNC server on port 5900, an RDP host on port 3389 with TLS, an SSH server on port 22, and a Kubernetes API server on port 443 or 6443." src="figures/deploy-topology.svg">
+  <img alt="A deployment. The web client in a browser and Occamy for macOS reach a TLS proxy, Caddy or nginx, over HTTPS on port 443. On the same server, the proxy reaches occamyd over HTTP/1.1 with the Upgrade header, on 127.0.0.1:5636. occamyd keeps occamy.yaml, which it reads at start, signing.key on a volume, and an optional debug listener on localhost:6060. It connects to an identity provider for OIDC, optionally, and to each remote: a VNC server on port 5900, an RDP host on port 3389 with TLS, an SSH server on port 22, and a Kubernetes API server on port 443 or 6443." src="figures/deploy-topology.svg">
 </picture>
 
 `occamyd` keeps two files: its configuration, which it reads when it

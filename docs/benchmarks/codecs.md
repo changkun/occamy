@@ -12,7 +12,7 @@ each in the cheapest form that still shows the screen as it is. It asks
 four questions of every tile that changed, in this order:
 
 ```mermaid
-flowchart TD
+flowchart LR
   A([A tile<br/>changed]) --> B{Moved by<br/>a scroll?}
   B -- Yes --> C[copy-rect]
   B -- No --> D{In the client's<br/>tile cache?}

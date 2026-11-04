@@ -1219,13 +1219,13 @@ After the upgrade, the stream follows [Protocol](protocol.md), from
 `welcome` and the first frame to `close`:
 
 ```mermaid
-flowchart TD
-  R[A stream request] --> S{Does it offer occamy.v1?}
-  S -- No --> H[400 bad_request, with no upgrade]
-  S -- Yes --> U[101 Switching Protocols]
-  U --> C{Do Origin, the token, the hello and the route let it in?}
-  C -- No --> X[close, with a code and a reason]
-  C -- Yes --> W[welcome, then the first frame]
+flowchart LR
+  R["A stream<br/>request"] --> S{"Offers<br/>occamy.v1?"}
+  S -- no --> H["400 bad_request,<br/>no upgrade"]
+  S -- yes --> U["101 Switching<br/>Protocols"]
+  U --> C{"Origin, token,<br/>hello and route<br/>let it in?"}
+  C -- no --> X["close, with a<br/>code and a reason"]
+  C -- yes --> W["welcome, then<br/>the first frame"]
 ```
 
 ### The upgrade request

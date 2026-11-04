@@ -201,18 +201,15 @@ wants and the file doesn't store, such as a password, a user name or a
 one-time code:
 
 ```mermaid
-flowchart TD
-  start(["A session starts"]) --> source{"What does credentials name?"}
-  source -- "A file" --> file["occamyd reads the file"]
-  source -- "An environment variable" --> env["occamyd reads the variable"]
-  source -- "prompt: true" --> none["occamyd has nothing stored"]
-  file --> signin["occamyd signs in to the remote"]
-  env --> signin
+flowchart LR
+  start(["A session<br/>starts"]) -- "a file or<br/>a variable" --> read["occamyd reads<br/>the secret"]
+  start -- "prompt: true" --> none["Nothing<br/>is stored"]
+  read --> signin["occamyd signs in<br/>to the remote"]
   none --> signin
-  signin -- "The remote asks for something not stored" --> ask["occamyd asks the session's owner"]
+  signin -- "it asks for<br/>more" --> ask["The owner<br/>answers"]
   ask --> signin
-  signin -- "Accepted" --> runs(["The session runs"])
-  signin -- "Refused" --> fails(["The session ends with backend-failed"])
+  signin -- "accepted" --> runs(["The session<br/>runs"])
+  signin -- "refused" --> fails(["The session ends,<br/>and says why"])
 ```
 
 Use `prompt: true` also for a remote that needs no credentials. The
@@ -979,12 +976,12 @@ A connection's `allow` lists the users, and the groups, who may open
 it:
 
 ```mermaid
-flowchart TD
-  user["A signed-in user, with a name and groups"] --> name{"Does allow.users list<br>the user's name exactly?"}
-  name -- Yes --> open(["The user sees the connection and may open it"])
-  name -- No --> group{"Does allow.groups list<br>one of the user's groups?"}
-  group -- Yes --> open
-  group -- No --> absent(["occamyd treats the connection as if it didn't exist"])
+flowchart LR
+  user["A signed-in<br/>user"] --> name{"In<br/>allow.users?"}
+  name -- no --> group{"A group in<br/>allow.groups?"}
+  name -- yes --> open(["Sees the connection<br/>and may open it"])
+  group -- yes --> open
+  group -- no --> absent(["The connection is<br/>hidden, as if it<br/>didn't exist"])
 ```
 
 A user's groups depend on how they signed in:
@@ -1024,15 +1021,15 @@ An entry without ports allows the protocol's own: 22 for SSH, 5900 to
 5999 for VNC, and 3389 for RDP. `occamyd` checks a target like this:
 
 ```mermaid
-flowchart TD
-  ask["A user names a protocol,<br>a host and a port"] --> resolve["occamyd resolves a host name<br>to its addresses"]
-  resolve --> listed{"Does an entry allow<br>the host, on this port?"}
-  listed -- Yes --> special{"Is any address loopback, link-local,<br>unspecified, multicast, a metadata<br>service or occamyd's own listener?"}
-  listed -- No --> ranges{"Does a range or address<br>hold every address, on this port?"}
-  ranges -- Yes --> special
-  ranges -- No --> refused(["Refused"])
-  special -- "Yes, and no entry is that address" --> refused
-  special -- No --> dial(["occamyd connects to the address it checked,<br>and asks the user for credentials"])
+flowchart LR
+  ask["A protocol,<br/>a host and<br/>a port"] --> each["Each of the<br/>host's addresses"]
+  each --> allowed{"Allowed by<br/>an entry?"}
+  allowed -- no --> refused(["Refused"])
+  allowed -- yes --> special{"A special<br/>address?"}
+  special -- no --> dial(["occamyd connects,<br/>and asks for<br/>credentials"])
+  special -- yes --> exact{"An entry is that<br/>very address?"}
+  exact -- yes --> dial
+  exact -- no --> refused
 ```
 
 A host name is allowed when an entry names it, or when it ends in a

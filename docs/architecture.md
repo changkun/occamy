@@ -17,20 +17,20 @@ that carries the session over [protocol v1](protocol.md).
 
 ```mermaid
 flowchart LR
-  client["Client<br>the web client or<br>Occamy for macOS"]
+  client["Client"]
   subgraph occamyd
-    http["HTTP server<br>sign-in and the API"]
-    stream["Stream<br>one for each viewer"]
-    session["Session<br>one for each<br>connection opened"]
-    backend["Backend<br>VNC, RDP, SSH<br>or Kubernetes"]
+    http["HTTP server"]
+    stream["Stream<br>per viewer"]
+    session["Session"]
+    backend["Backend"]
   end
-  remote["Remote<br>a computer or a pod"]
-  client -- "HTTP API" --> http
-  http -- "upgrades to a WebSocket" --> stream
-  client <-- "protocol v1:<br>input and frames" --> stream
+  remote["Remote"]
+  client -- "API" --> http
+  http -- "upgrade" --> stream
+  client <-- "protocol v1" --> stream
   stream <--> session
   session <--> backend
-  backend <-- "the remote's<br>own protocol" --> remote
+  backend <-- "VNC, RDP, SSH<br>or Kubernetes" --> remote
 ```
 
 A session owns the remote's screen: a *framebuffer* of pixels for a
@@ -134,13 +134,12 @@ stateDiagram-v2
   direction LR
   state "Owner present" as present
   state "Owner away" as away
-  [*] --> present: a stream to a connection
-  [*] --> away: POST /api/v1/sessions
-  away --> present: the owner's stream joins
-  present --> away: the owner's stream closes
-  away --> Ended: 60 seconds pass
-  present --> Ended: another reason
-  away --> Ended: another reason
+  [*] --> present: opened by a stream
+  [*] --> away: opened by the API
+  present --> away: the owner leaves
+  away --> present: the owner returns
+  away --> Ended: 60 s pass
+  present --> Ended: a reason below
   Ended --> [*]
 ```
 

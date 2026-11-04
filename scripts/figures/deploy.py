@@ -83,7 +83,7 @@ def topology(t):
     box(s, 432, 128, 162, 122, c["occamy"], "occamyd", ["`listen:", "`127.0.0.1:5636", "sessions live", "in its memory"])
     # What occamyd keeps beside it.
     s.line(513, 250, 513, 266, c["occamy"], 1.2)
-    chip(s, 432, 266, 162, c["occamy"], "conf.yaml", "read at start")
+    chip(s, 432, 266, 162, c["occamy"], "occamy.yaml", "read at start")
     chip(s, 432, 298, 162, c["occamy"], "signing.key", "on a volume")
     chip(s, 432, 330, 162, c["private"], "localhost:6060", "debug", dash="4 3")
 
