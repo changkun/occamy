@@ -91,8 +91,8 @@
 <path d="M 620 424 L 626 430 L 620 436 L 614 430 Z" fill="#fcfcfb" stroke="#52514e" stroke-width="1.5"/>
 <text x="612" y="364" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="end">You edit occamy.yaml: nothing changes yet</text>
 <text x="54" y="452" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="650" fill="#0b0b0b" text-anchor="start">occamyd starts</text>
-<text x="54" y="467" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start">It reads occamy.yaml, tls, the signing</text>
-<text x="54" y="482" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start">key and the trusted issuers' keys.</text>
+<text x="54" y="467" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start">It reads occamy.yaml and the signing key,</text>
+<text x="54" y="482" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start">and tls and issuers' keys as they change.</text>
 <text x="440" y="452" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="650" fill="#0b0b0b" text-anchor="middle">Sessions</text>
 <text x="440" y="467" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="middle">Each reads its secret (orange)</text>
 <text x="440" y="482" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="middle">as it starts.</text>

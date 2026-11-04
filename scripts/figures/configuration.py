@@ -101,7 +101,8 @@ def overview(t):
             s.text(x + 12, top + 42 + j * 15, line, 11.5, t["text2"], family=MONO)
         s.text(x + 12, top + CH - 12, note, 11.5, t["muted"])
 
-    # When occamyd reads what: the file once at start, a session's
+    # When occamyd reads what: the file once at start, its certificate
+    # and the issuers' keys at start and as they change, a session's
     # secret as it starts, and a changed file only at a restart.
     s.text(22, 348, "When occamyd reads what", 12.5, weight=650)
     axis, start, restart = 430, 60, 700
@@ -127,7 +128,7 @@ def overview(t):
             s.text(x, axis + 22 + i * 15, line, 11.5 if i else 12, t["text2"] if i else t["text"],
                    weight=400 if i else 650, anchor=anchor)
 
-    label(start - 6, ["occamyd starts", "It reads occamy.yaml, tls, the signing", "key and the trusted issuers' keys."],
+    label(start - 6, ["occamyd starts", "It reads occamy.yaml and the signing key,", "and tls and issuers' keys as they change."],
           "start")
     label(440, ["Sessions", "Each reads its secret (orange)", "as it starts."], "middle")
     label(restart + 88, ["Restart", "occamyd reads the edited", "file; every session ends."], "end")
