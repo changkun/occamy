@@ -159,7 +159,7 @@ the API and the protocol may change before 1.0.0.
   the 100 sessions a user that the pressure test needs. `make run E2E=1`
   serves that file in place of the demo's, and `make e2e` and `make
   soak` run against that stack
-  ([docs/try-it.md](docs/try-it.md#the-test-servers)).
+  ([docs/development.md](docs/development.md#the-test-servers)).
 
 ### Removed
 

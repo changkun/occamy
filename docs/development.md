@@ -15,6 +15,7 @@ otherwise.
 | [Node.js](https://nodejs.org) with npm | 22.13 or later on 22, 24, or 26 and later | The web client |
 | [golangci-lint](https://golangci-lint.run) | v2 (CI runs v2.15.0) | `make lint` |
 | Chrome | | One end-to-end test, which skips without it |
+| Xcode | 26 or later | Occamy for macOS |
 
 `make` runs Podman unless `CONTAINER_ENGINE` names another engine. Give
 every `make` command the same engine, which exporting it does:
@@ -46,8 +47,7 @@ and `occamy:<version>`, where the version is `git describe`'s.
 client's directory, such as `client/occamy-web/dist`
 ([Configuration](configuration.md)).
 
-[Occamy for macOS](macos-app.md#building-it) describes building the
-Mac app.
+[Occamy for macOS](#occamy-for-macos), below, covers the Mac app.
 
 ## The web client
 
@@ -173,8 +173,12 @@ matrix. To run one test, such as the owner's return:
 OCCAMY_E2E_V1_ENDPOINT=localhost:5637 go test -count=1 -v -run 'TestE2EV1RDP/reconnect' ./tests/
 ```
 
-[Debugging](debugging.md#tests-and-benchmarks) says what to look for
-when one fails.
+When one fails, the services' logs usually say why, such as
+`(cd docker && podman compose logs rdp)`. If the RDP clipboard check
+times out and the `rdp` log shows `error in trans_connect chan`, xrdp
+found no channel server, the process that carries the clipboard, for
+the session's display. The image starts one again on the next
+connection, and logs `starting xrdp-chansrv again`.
 
 ### The test servers
 
@@ -259,8 +263,12 @@ seconds. Plain `make soak` runs for an hour, and the full soak is:
 make soak OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h
 ```
 
-[Debugging](debugging.md#tests-and-benchmarks) lists the soak's
-settings and its bounds, and `tests/soak_test.go` describes them.
+After a warm-up of a tenth of the run, the soak fails if the median of
+a figure's last quarter of samples exceeds its first quarter's by more
+than its bound, if a figure is not back within its bound of where it
+started a minute after the last session closed, or if a session fails.
+`OCCAMY_SOAK_BOUNDS` sets the bounds, `goroutines=50,heap=32,fds=25` by
+default, the heap in MiB. `tests/soak_test.go` lists every variable.
 
 ## Integration tests
 
@@ -327,6 +335,29 @@ done
 
 A failure writes its input to the package's `testdata/fuzz/<target>/`,
 where plain `go test` replays it from then on.
+
+## Occamy for macOS
+
+The Mac app runs on macOS 26 or later. It links the Go client as a C
+archive, which `make swift-core` builds, for Apple silicon and Intel:
+
+```sh
+make swift-core
+swift run --package-path client/occamy-swift Occamy    # run it from source
+make swift-test    # its tests, which also start the interop server
+make swift-app     # client/occamy-swift/build/app/Occamy.app
+make swift-dmg     # and a disk image of it beside it
+```
+
+The app has the hardened runtime. Without a Developer ID it is signed
+ad hoc: it runs on the Mac that built it, and Gatekeeper refuses a copy
+downloaded on another Mac. To sign it for other Macs, name your
+Developer ID certificate. To have Apple notarize the disk image too,
+name the profile that `xcrun notarytool store-credentials` saved:
+
+```sh
+make swift-notarize DEVELOPER_ID="Developer ID Application: Your Name (TEAMID)" NOTARY_PROFILE=occamy
+```
 
 ## The website
 

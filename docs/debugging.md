@@ -282,4 +282,5 @@ version of the protocol that `occamyd` does not, so update the client.
 ## Tests and benchmarks
 
 The pressure test and the soak read the debug listener to check that
-`occamyd` does not leak. [Development](development.md) describes them.
+`occamyd` does not leak.
+[Development](development.md#pressure-test-and-soak) describes them.

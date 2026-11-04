@@ -13,51 +13,27 @@ logs. Remove tokens and passwords from the logs.
 
 ## Development
 
-You need Go 1.26.4 or later, Node.js 22.13+, 24 or 26+ for the web
-client, and Podman or Docker with a compose provider.
+[docs/development.md](./docs/development.md) describes what you need,
+building, and every test suite, with the command of each. The checks
+that CI runs on a pull request:
 
-```
-make build      # build the image (CONTAINER_ENGINE=docker on each for Docker)
-make run E2E=1  # start occamyd and the demo servers on localhost:5637, with the tests' connections
-make e2e        # end-to-end tests against that stack
+```sh
+go test -race ./...   # the unit tests
+make lint             # golangci-lint v2, with .golangci.yml
+make build            # the image, then the end-to-end tests against it:
+make run E2E=1
+make e2e
 make stop
 ```
 
-`go test -race ./...` runs the unit tests, as CI does; the end-to-end
-tests in `tests/` skip unless `make e2e` points them at a running stack.
-[docs/try-it.md](./docs/try-it.md) walks through the demo stack and
-every test suite, with the command of each. Building needs no C
-toolchain; on Linux and Windows, `-race` needs a C compiler, such as
-gcc, and `go test ./...` runs the tests without it.
-See the README for a native build. For the web client, `npm run dev` in
-`client/occamy-web` serves it with Vite and proxies `/api` to an
-`occamyd` on `localhost:5637`, or at `OCCAMY_DEV_SERVER`. `bench/codecs`, the codec measurement,
-is a module of its own; run its tests from that directory.
-
-`go test -tags rdp_integration -timeout 30m ./internal/rdp` builds the
-bench desktop image and starts an xrdp container with Podman
-(`OCCAMY_CONTAINER_ENGINE=docker` for Docker) to test the RDP client
-against; `internal/rdp/integration_test.go` describes its settings.
-The same tag on `./internal/backend/rdp` tests the RDP backend against
-its own container; `internal/backend/rdp/integration_test.go` describes
-its settings.
-
-`make lint` runs golangci-lint v2 with the linters and formatters in
-`.golangci.yml`, as CI does. Code must be `gofmt`ed, with imports grouped
-by `goimports`.
+Code must be `gofmt`ed, with imports grouped by `goimports`.
 
 The README and `docs/` are also the website,
-<https://changkun.github.io/occamy/>, which MkDocs builds
-([mkdocs.yml](mkdocs.yml)). To preview it:
-
-```sh
-python3 -m venv .venv && .venv/bin/pip install -r scripts/docs-requirements.txt
-.venv/bin/mkdocs serve
-```
-
-The `Pages` workflow builds it with `--strict` for a pull request that
-touches them, so a link or an anchor that does not resolve fails it, and
-publishes it from `master`.
+<https://changkun.github.io/occamy/>.
+[Development](./docs/development.md#the-website) shows how to preview
+it. The `Pages` workflow builds it with `--strict` for a pull request
+that touches them, so a link or an anchor that does not resolve fails
+it.
 
 ## Writing the docs
 

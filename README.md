@@ -91,8 +91,9 @@ Open http://localhost:5637/static/ and sign in as `demo` with the
 password `occamy`. `make stop` stops the stack. With Docker, add
 `CONTAINER_ENGINE=docker` to each `make` command.
 
-[docs/try-it.md](./docs/try-it.md) takes you through every connection,
-sharing, the clipboard and resizing.
+[Try Occamy](./docs/try-it.md) takes you through each protocol, and
+[the web client](./docs/web-client.md) through sharing, the clipboard
+and resizing.
 
 ## Install
 
@@ -156,17 +157,23 @@ limits and TLS.
 The documents are also a website, <https://changkun.github.io/occamy/>.
 
 - [Try Occamy](./docs/try-it.md): the demo stack, step by step.
+- [Deploy](./docs/deploy.md): run `occamyd` for your users.
+- [The web client](./docs/web-client.md): sessions, sharing, the
+  clipboard and resizing in the browser.
+- [Occamy for macOS](./docs/macos-app.md): the Mac app.
 - [Configuration](./docs/configuration.md): every key of the
   configuration file.
-- [Occamy for macOS](./docs/macos-app.md): the Mac app.
+- [Debugging and monitoring](./docs/debugging.md): the health check,
+  the log and profiling.
 - [HTTP API](./docs/api.md): sign-in, connections, sessions and shares,
   also as [OpenAPI](./docs/openapi.yaml).
 - [Protocol](./docs/protocol.md): the wire protocol between `occamyd`
   and its clients.
 - [Architecture](./docs/architecture.md): how the pieces fit together.
-- [Debugging](./docs/debugging.md): profiling and measuring `occamyd`.
-- [Benchmarks](./docs/benchmarks.md): how Occamy is measured against
-  Guacamole, and the results.
+- [Benchmarks](./docs/benchmarks.md): Occamy measured against
+  Guacamole.
+- [Development](./docs/development.md): building from source and every
+  test suite.
 
 ## Build from source
 
@@ -180,7 +187,7 @@ go test ./...
 ```
 
 [CONTRIBUTING.md](./CONTRIBUTING.md) describes how to send a change, and
-[docs/try-it.md](./docs/try-it.md) every test suite.
+[Development](./docs/development.md) every test suite.
 
 ## Contributing
 

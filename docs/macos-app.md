@@ -215,5 +215,5 @@ make swift-app    # client/occamy-swift/build/app/Occamy.app
 
 Without a Developer ID, the app is signed ad hoc. It runs on the Mac
 that built it, but Gatekeeper refuses a copy downloaded on another Mac.
-[Development](development.md) covers running it from source, its tests,
-and signing it for other Macs.
+[Development](development.md#occamy-for-macos) covers running it from
+source, its tests, and signing it for other Macs.
