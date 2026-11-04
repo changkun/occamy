@@ -24,22 +24,22 @@ func Load() []byte {
 	flag.Parse()
 	raw, err := os.ReadFile(*loc)
 	if err != nil {
-		log.Fatalf("cannot open given config file, error: %v", err)
+		log.Fatalf("cannot read the configuration file: %v; name another with -conf", err)
 	}
 	return raw
 }
 
 // flags defines occamyd's flags on fs and returns -conf's value.
 func flags(fs *flag.FlagSet) *string {
-	return fs.String("conf", "./conf.yaml", "the configuration `file`, version 1")
+	return fs.String("conf", "./conf.yaml", "read the configuration from `file`, which must set version: 1")
 }
 
 // usage writes occamyd's help to w: what it does, how to run it, and
 // the flags of fs.
 func usage(w io.Writer, fs *flag.FlagSet) {
-	fmt.Fprint(w, `occamyd is Occamy's remote desktop server. It serves the connections
-that its configuration file (version: 1) lists through API v1, protocol
-v1 and the web client.
+	fmt.Fprint(w, `occamyd is Occamy's remote desktop server. It serves the remote desktops
+and terminals that its configuration file lists to the web client,
+Occamy for macOS and other clients of API v1 and protocol v1.
 
 Usage:
 

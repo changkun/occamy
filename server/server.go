@@ -123,7 +123,7 @@ func Run(f *config.File) error {
 			// Stop listening before the drain, so that a second signal
 			// gets Go's default handling and ends occamyd at once.
 			signal.Stop(sig)
-			log.Printf("received %v; another one stops occamyd at once", s)
+			log.Printf("received %v: shutting down; a second signal stops occamyd at once", s)
 			cancel()
 		case <-ctx.Done():
 		}
@@ -142,7 +142,7 @@ func Run(f *config.File) error {
 	if !s.streams.wait(drainTimeout) {
 		log.Printf("warning: streams still open after a further %v were cut", drainTimeout)
 	}
-	log.Println("occamy is down, good bye!")
+	log.Println("occamyd has stopped")
 	return err
 }
 

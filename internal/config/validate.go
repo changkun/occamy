@@ -245,7 +245,7 @@ func (a *Auth) validate(c *checker) {
 	// occamyd has no default user, so a file that names no way in would
 	// serve a server nobody can use.
 	if len(a.Users) == 0 && a.OIDC == nil && len(a.TrustedIssuers) == 0 {
-		c.add("auth", "nobody could sign in to API v1, and occamyd has no default user: list users in auth.users, whose hashes docs/configuration.md says how to make, or set auth.oidc or auth.trusted_issuers")
+		c.add("auth", "nobody could sign in to API v1, and occamyd has no default user: list users in auth.users (docs/configuration.md shows how to hash their passwords), or set auth.oidc or auth.trusted_issuers")
 	}
 
 	users := map[string]int{}
