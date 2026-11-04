@@ -51,6 +51,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   screenshot of each of the web client's screens in light and dark
   ([docs/web-client.md](docs/web-client.md#how-the-web-client-works),
   [docs/macos-app.md](docs/macos-app.md#how-the-app-works)).
+- The codecs page explains how `occamyd` picks each tile's codec, and
+  what each step saves, before the measurements behind each choice
+  ([docs/benchmarks/codecs.md](docs/benchmarks/codecs.md)). The records
+  of how scroll detection, the tile cache, refinement and the encode
+  workers were measured are now beside the graphics pipeline's spec.
+- Each benchmark report names its scenarios and networks as the
+  benchmarks page does, with their codes kept in the CSV files, and
+  says how to read its values before its tables.
 - The benchmark report calls its estimate the *improvement*: the
   baseline's value divided by the candidate's, so that above 1× the
   candidate is better. The column in `comparisons.csv` that was
@@ -126,7 +134,7 @@ the API and the protocol may change before 1.0.0.
   run, behind a load gate, with each container's memory, occamyd's
   runtime and the harness's own CPU, and two slower networks, N3 (100 ms,
   5 Mbit/s) and N4 (250 ms, 1 Mbit/s)
-  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)), and
+  ([docs/benchmarks.md](docs/benchmarks.md#run-a-comparison)), and
   `make bench-essential`, an hour's subset of it. `make bench-report`
   analyses the results into tables, exact tests and figures with 95%
   intervals ([docs/benchmarks.md](docs/benchmarks.md#analysis)).
@@ -139,20 +147,20 @@ the API and the protocol may change before 1.0.0.
 - The benchmark measures a scene's cadence as well as its frame rate:
   when each of its frames was first shown, the share never shown, and
   the 95th percentile of the interval between those shown
-  ([docs/benchmarks.md](docs/benchmarks.md#what-is-measured)). A
+  ([docs/benchmarks.md](docs/benchmarks.md#how-occamy-is-measured)). A
   `v1-native-w2` series offers the frame window of two frames that every
   client agreed on before, so that `make bench-realtime-1` measures the
   window sized from the path against it, on one image in one run, and
   the analysis compares the two as a family of their own
-  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)).
+  ([docs/benchmarks.md](docs/benchmarks.md#run-a-comparison)).
 - `make bench-realtime-2` measures what packet loss costs a key while TCP
   holds back what follows the lost packet: `v1-native` and `guacd` with
   none, 0.5% and 2% of the packets to the client lost, on a link that
   the kernel of each server emulates, since the harness's proxy carries
   a byte stream and cannot drop a packet
-  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)). The report
+  ([docs/benchmarks.md](docs/benchmarks.md#run-a-comparison)). The report
   gives what each loss added beside the round trip
-  ([results](docs/benchmarks.md#step-2-what-loss-costs)), and the
+  ([results](docs/benchmarks.md#what-packet-loss-costs)), and the
   analysis says when the runs are too few for any difference to be
   significant after Holm's correction.
 - `make bench-realtime-3a` measures step 2's loss study with occamyd's
@@ -160,8 +168,8 @@ the API and the protocol may change before 1.0.0.
   own, `occamy-v1-cubic`, whose server asks for CUBIC, and each v1 result
   read with `-runtime` records the congestion control its server's
   connections use
-  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison);
-  [results](docs/benchmarks.md#step-3a-the-congestion-control)).
+  ([docs/benchmarks.md](docs/benchmarks.md#run-a-comparison);
+  [results](docs/benchmarks.md#bbr-against-cubic)).
 - Codec 7, `scaled`, carries a tile as a JPEG or WebP image at a
   fraction of its width and height, which the client scales up
   ([docs/protocol.md](docs/protocol.md#the-scaled-codec)). occamyd sends
@@ -177,7 +185,7 @@ the API and the protocol may change before 1.0.0.
 - The benchmark's load gate holds each result rather than each block of
   results, so that the load a scene leaves does not carry into the
   results after it
-  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)).
+  ([docs/benchmarks.md](docs/benchmarks.md#run-a-comparison)).
 - On a long path, frames follow the screen's changes instead of two a
   round trip. The server and clients offer a frame window of 16, and the
   server keeps as many frames unacknowledged as cover the time an
@@ -189,14 +197,14 @@ the API and the protocol may change before 1.0.0.
   Over VNC with 50 ms of delay, full-screen motion now shows all 30
   frames a second instead of about 19, and a key's effect in 96 ms
   instead of 119 at the 95th percentile
-  ([docs/benchmarks.md](docs/benchmarks.md#step-1-the-frame-window-from-the-path)).
+  ([docs/benchmarks.md](docs/benchmarks.md#the-frame-window)).
 - On Linux, occamyd asks for BBR as the TCP congestion control of its
   connections, in place of the kernel's usual default, CUBIC, which
   takes every lost packet for congestion and slows down. Over VNC with
   50 ms of delay and 2% of the packets lost, full-screen motion now shows
   27.6 frames a second instead of 16.4, and a key's effect in 149 ms
   instead of 360 at the 95th percentile
-  ([docs/benchmarks.md](docs/benchmarks.md#step-3a-the-congestion-control)).
+  ([docs/benchmarks.md](docs/benchmarks.md#bbr-against-cubic)).
   BBR needs the kernel's `tcp_bbr` module; without it occamyd keeps the
   kernel's choice and logs a warning. `congestion_control` in the v1 file
   names another, or `system` for the kernel's own

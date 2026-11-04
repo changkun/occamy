@@ -1,6 +1,6 @@
 # Encode cache measurement
 
-The [graphics pipeline](../../specs/008-native-architecture/graphics-pipeline.md)
+The [graphics pipeline](../graphics-pipeline.md)
 gives each session an encode cache and workers. The viewers of a
 session share the cache: each encoding of a tile, or of a run of lossy
 tiles at a quality, is made once, by whichever viewer or worker asks
@@ -152,7 +152,7 @@ host's other sessions their cores.
 **The corpus and scenes** are the [tile cache measurement](./tile-cache.md)'s:
 frames of the bench desktop at 1024×768, recorded over VNC by `make
 corpus` and described in
-[bench/testdata/corpus](../../bench/testdata/corpus/README.md), and
+[bench/testdata/corpus](../../../bench/testdata/corpus/README.md), and
 the refinement measurement's scenes with the three switched windows.
 
 **The run.** `go test ./internal/stream -run TestShareTimes -v
@@ -177,7 +177,7 @@ and each cell is the median of its rounds, so that the host's load fell
 on each alike.
 
 It ran on 2026-10-31 from 16:03 to 16:05 UTC, on the Apple M5 Pro (18
-cores) of the [baselines](../benchmarks.md), with Go 1.27.1 on arm64
+cores) of the [baselines](../../../docs/benchmarks.md), with Go 1.27.1 on arm64
 and GOMAXPROCS 18. The host's load average, logged every 5 seconds in
 [encode-cache-load.log](./encode-cache-load.log), stayed between 8.2
 and 10.7 over a minute, from other sessions' builds and browser tests;

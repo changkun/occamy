@@ -1,13 +1,13 @@
 # Tile cache measurement
 
-The [graphics pipeline](../../specs/008-native-architecture/graphics-pipeline.md)
+The [graphics pipeline](../graphics-pipeline.md)
 gives each client a cache of tiles in numbered slots, and the server a
 mirror of each client's slots. A tile sent alone and exact names the
 slot used least recently, and the client keeps its pixels there. When a
 tile's content is in a slot again, the server sends a `cached` tile of
 that slot: 23 bytes instead of the pixels. This page measures what that
 saves and what it costs. It uses the frames recorded from the bench
-desktop that the [codec measurement](./codecs.md) and the
+desktop that the [codec measurement](../../../docs/benchmarks/codecs.md) and the
 [refinement measurement](./refinement.md) used.
 
 ## The answers
@@ -95,7 +95,7 @@ scenes whose bytes do not change keep their latency.
 
 **The corpus** is the codec measurement's: frames of the bench desktop
 at 1024×768, recorded over VNC by `make corpus` and described in
-[bench/testdata/corpus](../../bench/testdata/corpus/README.md). The
+[bench/testdata/corpus](../../../bench/testdata/corpus/README.md). The
 scenes are the refinement measurement's, and three more:
 
 - switch, browser; switch, terminal; switch, photo: the idle desktop,
@@ -115,7 +115,7 @@ refinement columns are what the writer sends once the scene has been
 still for the refine delay.
 
 It ran three times on 2026-10-31 from 10:05 to 10:07 UTC, on the Apple
-M5 Pro (18 cores) of the [baselines](../benchmarks.md), with Go 1.27.1
+M5 Pro (18 cores) of the [baselines](../../../docs/benchmarks.md), with Go 1.27.1
 on arm64. The host's load average, logged every 5 seconds in
 [tile-cache-load.log](./tile-cache-load.log), stayed between 10.3 and
 14.8 over a minute, from other sessions' tests and a podman VM. Each

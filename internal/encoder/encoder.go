@@ -63,9 +63,10 @@ const FewColours = 16
 // StillSSIM is the SSIM, on luma as the codec measurement scores it,
 // that Still's quality reaches on each tile of a still rectangle. On the
 // corpus's photograph, rows of WebP reach it at quality 87 (median) in
-// 121.5 KiB, under G6's 139 (docs/benchmarks/refinement.md); 0.92 takes
-// 141.9 KiB, 0.95 is beyond quality 90, the pacer's highest, on two
-// fifths of its tiles, and the guacd baseline's JPEG at quality 70
+// 121.5 KiB, under G6's 139
+// (specs/008-native-architecture/measurements/refinement.md); 0.92
+// takes 141.9 KiB, 0.95 is beyond quality 90, the pacer's highest, on
+// two fifths of its tiles, and the guacd baseline's JPEG at quality 70
 // scores 0.871 over the whole photograph.
 const StillSSIM = 0.91
 

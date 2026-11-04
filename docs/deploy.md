@@ -477,7 +477,7 @@ rate it measures the path to carry, whereas the kernel's usual default,
 CUBIC, cuts its rate at every lost packet. On a link that loses
 packets, such as Wi-Fi or a long mobile path, a desktop in motion then
 keeps its frame rate, and a key's effect shows sooner
-([Benchmarks](benchmarks.md#step-3a-the-congestion-control)).
+([Benchmarks](benchmarks.md#bbr-against-cubic)).
 
 The kernel needs BBR's module loaded, and then `occamyd` needs no
 privilege to use it. In a container, it's the host's kernel, or the

@@ -877,7 +877,7 @@ set it.
   occamyd links `internal/stream`, both are listed there.
 
 **Measurements.** Results, method and load are in
-[docs/benchmarks/scroll.md](../../docs/benchmarks/scroll.md). The
+[measurements/scroll.md](measurements/scroll.md). The
 figures are medians, on one core of the bench host, under a load average
 of 2.9 to 4.5:
 
@@ -1175,7 +1175,7 @@ it was before, from `go test ./internal/stream -run TestRefineCorpus`
 (bytes, checked) and `-run TestRefineTimes -refine.runs 15` (one core,
 the median of three runs under a load average of 8 to 13 on 18 cores).
 The full tables and the method are in
-[docs/benchmarks/refinement.md](../../docs/benchmarks/refinement.md).
+[measurements/refinement.md](measurements/refinement.md).
 
 | Scene | KiB a frame: before · after | encode ms a frame: before · after | refinement once still: KiB · messages |
 |---|---|---|---|
@@ -1471,7 +1471,7 @@ to the codec and to slots gets a mirror; any other is served as before.
   slot it would have drawn from is not made the one used last.
 
 **Measurements** (on the codec measurement's corpus;
-[docs/benchmarks/tile-cache.md](../../docs/benchmarks/tile-cache.md)
+[measurements/tile-cache.md](measurements/tile-cache.md)
 has the method and every scene):
 
 | Scene | KiB a frame: without · with | cached tiles a frame | encode ms a frame: without · with |
@@ -1792,7 +1792,7 @@ chose, so that every scene sends the same bytes as before.
 **Measurements.** The corpus's scenes sent to 1, 2 and 4 viewers of
 a session, before this task and with the defaults, at a load of 8 to
 11: the median of nine rounds, in milliseconds a frame, wall · CPU
-([docs/benchmarks/encode-cache.md](../../docs/benchmarks/encode-cache.md)).
+([measurements/encode-cache.md](measurements/encode-cache.md)).
 
 | Scene | 1 viewer: before · now | 4 viewers: before · now |
 |---|---|---|

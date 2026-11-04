@@ -2160,7 +2160,7 @@ L 898.003229 325.907082
    </g>
   </g>
   <g id="text_103">
-   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0b0b0b" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Latency, 95th percentile against the loss: median of the runs, with 95% intervals</text>
+   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0b0b0b" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Latency, 95th percentile against packets lost: median of the runs, with 95% intervals</text>
   </g>
   <g id="legend_1">
    <g id="line2d_201">

@@ -39,9 +39,9 @@ with what each one helps you do.
 
 - [Benchmarks](./benchmarks.md): see how Occamy compares with Guacamole
   on the same remotes and networks, and run the comparison yourself.
-- [Codecs](./benchmarks/codecs.md): see why `occamyd` uses the codecs,
-  tile size and pixel layout it does, measured on frames from a real
-  desktop.
+- [Codecs](./benchmarks/codecs.md): see how `occamyd` picks each tile's
+  codec, and the measurements on frames from a real desktop behind each
+  choice.
 
 ## Develop
 
