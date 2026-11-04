@@ -9,13 +9,10 @@ why a session ended.
 
 The Occamy server, `occamyd`, serves the web client under `/static/`,
 such as `https://occamy.example.com/static/`, when its configuration
-sets `web_client` ([Configuration](configuration.md)). You sign in, and
-the page lists the *connections* that are open to you: each is a remote
-computer, reached over VNC, RDP, SSH or Kubernetes, that the server's
-configuration names. When you open a connection, the server starts a
-*session* on it. The session runs on the server, not in your browser
-tab. The page shows the session's screen and sends it your keys, your
-pointer and your clipboard.
+sets `web_client` ([Configuration](configuration.md)). The page lists
+the *connections* that are open to you, each a remote computer reached
+over VNC, RDP, SSH or Kubernetes. Opening one starts a *session* on the
+server, which the page shows and sends your input to.
 
 ```mermaid
 flowchart LR
@@ -27,14 +24,11 @@ flowchart LR
   session <-- "VNC, RDP, SSH<br/>or Kubernetes" --> remote["The remote computer"]
 ```
 
-Because the session lives on the server, it doesn't end when your page
-does. You are the session's *owner*, since you opened it, and you can
-close the tab and come back to it within a minute. You can also let
-others into it through a *share link*, so that they watch your screen
-or work in it with you.
-
-The quickest way to try the web client is the demo stack in
-[Try Occamy](try-it.md).
+The session runs on the server, not in your browser tab, so it outlives
+your page by a minute ([Leave and come back](#leave-and-come-back)).
+You are the *owner* of the sessions you open, and you can let others
+into one through a *share link*. To try the web client, start the demo
+stack of [Try Occamy](try-it.md).
 
 ## Sign in
 
@@ -47,54 +41,45 @@ Open the web client's address, enter your **User name** and
 </picture>
 
 When the server signs users in through an identity provider, the page
-also offers **Sign in with single sign-on**, which takes you to the
-provider and back. Single sign-on needs the page to be served over
-HTTPS. If it fails, the page says why; [Messages](#single-sign-on)
-lists what each message means.
+also offers **Sign in with single sign-on**, which works only over
+HTTPS. If it fails, the page says why ([Messages](#single-sign-on)).
 
-Your sign-in lasts as long as the page, so a new tab or a reload asks
-you to sign in again. **Sign out**, at the top right of the
-connections, signs you out at once.
-
-A sign-in is good for 15 minutes, unless the server's configuration
-sets another length. A session that you opened keeps running after
-your sign-in expires. When you next do something that needs the
-sign-in, such as sharing, the page asks you to **Sign in again** over
-the session, and says "Your session keeps running while you sign in."
-Sign in, and the page carries on with what you asked for; click
-**Cancel** to return to the session instead.
+Your sign-in lasts as long as the page: a new tab or a reload asks you
+to sign in again, and **Sign out**, at the top right of the
+connections, ends it at once. It also expires after 15 minutes by
+default, while your sessions keep running. When you next do something
+that needs it, such as sharing, the page asks you to **Sign in again**
+over the session, and then carries on. **Cancel** returns you to the
+session instead.
 
 ## Open a connection
 
-After you sign in, **Connections** lists the connections that are open
-to you. Each shows its name, its protocol, and its ID when the ID
-differs from the name. A screen icon marks a desktop, and a prompt
-icon marks a terminal. **Refresh** loads the list again.
+**Connections** lists each connection that is open to you by name and
+protocol, with its ID when that differs from the name. A screen icon
+marks a desktop, and a prompt icon a terminal. **Refresh** loads the
+list again.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/web-client-connections-dark.png">
   <img alt="The connections page, signed in as alice. Three connections are listed: Build box over SSH with a terminal icon, and Design desktop over VNC and Lab desktop over RDP, each with a screen icon. Each row shows the connection's ID on the right. A Refresh button is above the list, and Sign out is at the top right." src="figures/web-client-connections.png">
 </picture>
 
-Click a connection to open a session on it. The page says
-**Connecting to** the connection's name, with **Cancel**, until the
-remote's screen arrives. A VNC or RDP connection shows a desktop, and
-an SSH or Kubernetes connection shows a terminal.
+Click a connection to open a session on it: a desktop over VNC or RDP,
+or a terminal over SSH or Kubernetes. Until the remote's screen
+arrives, the page says **Connecting to** and the connection's name,
+with **Cancel**. You can own 10 sessions at once by default.
 
-You can own 10 sessions at once, unless the server's configuration
-allows another number. If the list is empty, the page says "No
-connections are available to you. Ask the server’s administrator to
-give you access to one." The server's configuration names the users
-and groups that each connection admits.
+If no connection admits you, the page says "No connections are
+available to you. Ask the server’s administrator to give you access to
+one."
 
 ### Answer the remote's questions
 
 When a connection's configuration holds no password or user name for
-the remote computer, the server asks you, the owner, for it. A dialog
-headed "The remote computer needs more information" shows the remote's
-question, and the session waits until you answer. Fill in the fields
-and click **Continue**, or click **End session** to give up. Nobody
-else in the session sees the question.
+the remote, the server asks you, the owner, in a dialog headed "The
+remote computer needs more information", which nobody else sees. Fill
+in the fields and click **Continue**, or click **End session** to give
+up; the session waits until you do.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/web-client-prompt-dark.png">
@@ -103,9 +88,8 @@ else in the session sees the question.
 
 ## Work in a session
 
-A desktop session shows the remote's screen under a bar of controls.
-The page draws the remote's pointer, and a bell from the remote
-flashes the screen.
+A desktop session shows the remote's screen and pointer under a bar of
+controls, and a bell from the remote flashes the screen.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/web-client-desktop-dark.png">
@@ -119,8 +103,6 @@ A terminal session shows the remote's terminal under the same bar.
   <img alt="A terminal session. The bar shows the title occamy@build-box: ~, the role owner, and the buttons Clipboard, Share, Full screen and End session. Below it, the terminal shows a login message and the output of two commands." src="figures/web-client-terminal.png">
 </picture>
 
-The bar holds these items:
-
 | Item | What it does |
 |------|--------------|
 | The title | The remote's title, such as a terminal's, or else the connection's name. The browser tab shows it too |
@@ -129,13 +111,11 @@ The bar holds these items:
 | **Clipboard** | Opens the clipboard panel, as [Copy and paste](#copy-and-paste) describes |
 | **Share** | Opens the share panel, for the owner, as [Share a session](#share-a-session) describes |
 | **Full screen** | Gives the session the whole screen. Click it again to leave |
-| **End session** | Ends the session for everyone, for the owner |
+| **End session** | Ends the session for everyone, for the owner, and returns you to the connections. Everyone else sees "Session ended" |
 | **Leave** | Leaves the session, for everyone else. The session goes on without you |
 
-**End session** ends the session on the server and returns you to the
-connections, and everyone else in it sees "Session ended". If the
-server can't end it, the page says **Not ended for everyone** and why,
-and offers **Try again**.
+If the server can't end the session, the page says **Not ended for
+everyone** and why, and offers **Try again**.
 
 While the browser tab is hidden, the server sends it nothing, and the
 screen catches up when you return to it. If an RDP desktop of a Windows
@@ -144,9 +124,7 @@ host stays nearly black, its connection needs `disable_gfx: true`
 
 ### Roles
 
-Whoever opens a session owns it. Others join it through a share link,
-either with control or view only, and what each of them can do follows
-from their role:
+Others join a session through a share link, with control or view only:
 
 | | Owner | With control | View only |
 |---|:---:|:---:|:---:|
@@ -159,12 +137,10 @@ from their role:
 
 ## Use the keyboard and pointer
 
-Click the remote's screen to give it the keyboard. While the screen has
-the focus, every key goes to the remote, Tab included, and so do the
-pointer, right clicks and the wheel. To leave the screen, press
-Control, Alt and Shift together, which moves the focus to the bar. Keys
-that you still hold when the browser window loses the focus are
-released on the remote, so no key stays down there.
+Click the remote's screen to give it the keyboard. Every key then goes
+to the remote, Tab included, and so do the pointer, right clicks and
+the wheel. Keys that you still hold when the browser window loses the
+focus are released on the remote.
 
 | Keys | What they do |
 |------|--------------|
@@ -173,14 +149,11 @@ released on the remote, so no key stays down there.
 | ⌘V on a Mac, or Ctrl+Shift+V | Paste into a terminal session, through the browser |
 | ⌘C on a Mac | Copy the text selected in a terminal session |
 
-Each key that you press carries both the character that your keyboard
-layout gives it and the physical key. RDP servers, and VNC servers that
-ask for physical keys, apply their own layout to the physical key.
-Other VNC servers take the character. Text from an input method, such
-as Japanese, goes to the remote once you have composed it.
-
-A terminal takes keys as any terminal does. Click it to give it the
-keyboard.
+Each key carries both the character that your keyboard layout gives it
+and the physical key. RDP servers, and VNC servers that ask for
+physical keys, apply their own layout to the physical key, and other
+VNC servers take the character. Text from an input method, such as
+Japanese, goes to the remote once you have composed it.
 
 ## Copy and paste
 
@@ -192,14 +165,13 @@ itself:
   role lets you type. A view-only viewer's clipboard is left alone,
   so that someone else's copy never replaces yours.
 - **To the remote.** When the browser window gets the focus, the page
-  sends your clipboard to the remote, if the browser already lets the
-  page read the clipboard. The page never asks for that permission.
-  Chrome and Edge grant it once you allow it, for example when
-  **Paste local** asks. Firefox and Safari never grant it, so use the
-  clipboard panel there.
+  sends your clipboard to the remote, if the browser already lets it
+  read the clipboard; the page never asks. Chrome and Edge let it once
+  you allow it, as when **Paste local** asks. Firefox and Safari never
+  do, so use the clipboard panel there.
 
-**Clipboard** in the bar opens the clipboard panel. Its box holds the
-text of the remote's clipboard, and you can edit it before you send it.
+**Clipboard** in the bar opens the clipboard panel, whose box holds the
+remote's clipboard text for you to edit and send.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/web-client-clipboard-dark.png">
@@ -213,42 +185,32 @@ text of the remote's clipboard, and you can edit it before you send it.
 | **Copy** | Puts the box's text on your clipboard |
 | **Close** | Closes the panel, as Escape does |
 
-Text that you type in the box stays when the remote's clipboard
-changes. The panel then says "Edited: the remote clipboard holds other
-text.", and **Show it** brings back the remote's text. A view-only
-viewer can copy the text, but can't send it. After each action, the
-panel says what became of it; [Messages](#clipboard) lists each
-message.
+A view-only viewer can copy the text, but can't send it. After each
+action, the panel says what became of it ([Messages](#clipboard)).
 
-Sometimes the remote doesn't take the text you send for a while. The
-panel then says "The remote computer hasn’t accepted your clipboard
-text yet. It will be sent when the remote is ready.", and the same
-notice shows over the desktop, with **Dismiss**. At an RDP logon screen
-this is expected, and the text goes once you have logged on. If the
-notice stays after that, the remote's clipboard service has probably
-stopped, and opening the session again may start it. Text that is still
-waiting ends with its session, so send it again in the new one.
+When the remote doesn't take your text for a while, the panel and a
+notice over the desktop, with **Dismiss**, say so. The text waits until
+the remote takes it or the session ends. At an RDP logon screen, it
+waits until you log on
+([The clipboard doesn't arrive](debugging.md#the-clipboard-doesnt-arrive)).
 
-A terminal session has no remote clipboard, so its panel says so, and
-you copy and paste through the browser instead. To put text into a
-terminal, click the terminal and use your browser's paste: ⌘V on a
-Mac, or Ctrl+Shift+V. To copy from a terminal, select the text with the
-pointer, then press ⌘C on a Mac, or right-click the selection and
-choose **Copy**. Ctrl+C goes to the remote, where it interrupts the
-program that runs.
+A terminal session has no remote clipboard, as its panel says, so you
+copy and paste through the browser, with the keys in
+[Use the keyboard and pointer](#use-the-keyboard-and-pointer), or with
+**Copy** in the right-click menu of a selection. Ctrl+C goes to the
+remote, where it interrupts the program that runs.
 
-A connection's configuration can close the clipboard in either
-direction, or in both ([Configuration](configuration.md)).
+A connection's configuration can close the clipboard either way
+([Close the clipboard](configuration.md#close-the-clipboard)).
 
 ## Share a session
 
-As the owner, you can let others watch your session, or work in it
-with you, through a link:
+As the owner, you let others into your session through a link:
 
-1. Click **Share** in the bar. The panel **Share this session** opens.
-2. Under **Others join**, choose **View only: they watch** or **With
-   control: they also type, point and use the clipboard**. View only
-   is chosen at first.
+1. Click **Share** in the bar to open **Share this session**.
+2. Under **Others join**, choose **View only: they watch**, which is
+   chosen at first, or **With control: they also type, point and use
+   the clipboard**.
 3. Under **Link expires after**, choose 10 minutes, 1 hour, 4 hours or
    12 hours. The default is 1 hour.
 4. Click **Create link**, then **Copy link**, and send the link to the
@@ -259,18 +221,12 @@ with you, through a link:
   <img alt="The share panel, open below the bar's Share button over a desktop session. Under Share this session, Others join offers View only: they watch and With control: they also type, point and use the clipboard, which is chosen. Link expires after is set to 1 hour. The Link field holds the link https://occamy.example.com/static/#join= followed by the share. Below are the buttons Create another, Copy link and Close, and the line Anyone with this link can join and control the session until the link expires or the session ends." src="figures/web-client-share.png">
 </picture>
 
-The panel then says what the link allows: "Anyone with this link can
-watch the session until the link expires or the session ends.", or,
-with control, "Anyone with this link can join and control the session
-until the link expires or the session ends." **Copy link** says
-"Copied." once the link is on your clipboard. If the browser doesn't
-let the page copy to the clipboard, the panel says so: select the link
-in the **Link** field and copy it yourself. **Create another** makes a
-new link with the choices that the panel now shows. A session can have
-100 links that haven't expired, unless the server's configuration
-allows another number.
+The panel then says what the link allows. If the browser doesn't let
+the page copy the link, select it in the **Link** field and copy it
+yourself. **Create another** makes a new link with the choices that
+the panel shows.
 
-Whoever opens the link joins the session at once, without signing in.
+Whoever opens the link joins at once, without signing in.
 Their bar shows their role, and the title "Shared session" until the
 remote sends a title of its own. Your bar shows **1 other viewer**,
 which lists them as Guest:
@@ -282,47 +238,37 @@ which lists them as Guest:
 
 A link works this way:
 
-- Anyone who has the link can join, as often as the session takes
-  viewers, until the link expires. When a link expires, the people who
-  joined with it stay in the session.
+- Anyone who has it can join until it expires, and those who joined
+  stay in the session after that.
 - Every link ends with its session. You can't withdraw a single link,
   so end the session to end them all.
 - The link carries the share after `#`, which the browser sends to no
   server. The page removes it from the address bar as it loads, so a
   viewer who reloads the page needs the link again.
-
-A session takes 50 viewers besides its owner, unless the server's
-configuration allows another number. The demo stack is an easy place
-to try sharing: open a link in a private window
-([Try Occamy](try-it.md#4-open-one-connection-of-each-protocol)).
+- By default, a session takes 50 viewers besides its owner, and 100
+  links that haven't expired.
 
 ## Resize the remote
 
-The owner's window sets the remote's size. When you resize the window
-or click **Full screen**, the page asks the remote for the new size
-once the window stops changing:
+The owner's window sets the remote's size. Once you stop resizing the
+window, or click **Full screen**, the page asks the remote for the new
+size: a desktop that can change its size fills the window, one that
+can't is scaled to fit and keeps its shape, and a terminal gains or
+loses rows and columns. Everyone else sees the owner's screen scaled to
+their own window.
 
-- A desktop that can change its size does so, to fill the window.
-- A desktop that can't change its size is scaled to fit the window,
-  and keeps its shape.
-- A terminal gains or loses rows and columns.
-- Everyone else in the session sees the owner's screen scaled to their
-  own window.
-
-The page asks for the window's size in CSS pixels, so programs on the
-remote look as large on a high-density display as on any other. A
-browser zoom changes the window's size in CSS pixels, so the owner's
-zoom resizes the remote for everyone: at 50%, the remote gets twice the
-width and height, and its programs look half as large. For everyone
-else, zoom only scales their view.
+The page asks for the size in CSS pixels, so programs on the remote
+look as large on a high-density display as on any other, and the
+owner's browser zoom resizes the remote for everyone: at 50%, the
+remote gets twice the width and height, and its programs look half as
+large. Anyone else's zoom only scales their view.
 
 ## Leave and come back
 
-A session outlives its owner's page by a minute. If you close the tab
-or lose the network, the session runs on, and others in it keep
-watching. Come back within 60 seconds, and you return to the session as
-you left it. Otherwise the session ends, and the others see "The owner
-left and didn’t come back in time."
+If you close the tab or lose the network, the session runs on as you
+left it, and the others keep watching. If you don't come back within
+60 seconds, it ends, and the others see "The owner left and didn’t come
+back in time."
 
 ```mermaid
 stateDiagram-v2
@@ -335,24 +281,14 @@ stateDiagram-v2
   Ended --> [*]
 ```
 
-There are three ways back:
-
-- **After a lost connection.** When the page loses the server, it says
-  "Connection lost" and offers **Join again**.
-- **After a reload.** A reload asks you to sign in again, saying "Sign
-  in again to return to" and the connection's name. Sign in within the
-  minute, and the page joins the session again. **Go to the connections
-  instead** skips the session. When you sign out, the page forgets it.
-- **From another tab.** If a newer page of yours joins the session,
-  such as a duplicated tab, it takes the session over. The older page
-  says "Opened elsewhere", and **Join again** there brings the session
-  back to it.
+| How you left | How you come back |
+|--------------|-------------------|
+| The page lost the server | The page says "Connection lost". Click **Join again** |
+| You reloaded the page | The page asks you to sign in again, saying "Sign in again to return to" and the connection's name. Sign in within the minute to rejoin, or click **Go to the connections instead**. When you sign out, the page forgets the session |
+| A newer page of yours joined, such as a duplicated tab | The newer page takes the session over, and the older one says "Opened elsewhere". **Join again** there brings the session back to it |
 
 If the session ended while you were away, less than a minute before,
 the page says how it ended. After that, it says "Access refused".
-
-A session that nobody gives input to for 30 minutes ends, whoever is
-watching it.
 
 ## When a session ends
 
@@ -364,8 +300,8 @@ When a session ends, the page says why, and what you can do next.
   <img alt="A card over the terminal, headed Session ended, with the line The remote computer ended the session, for example because its user logged out. Details is open and shows remote-ended (4005): remote ended. A Back to connections button is at the bottom." src="figures/web-client-ended.png">
 </picture>
 
-**Back to connections** returns to the list. Someone who joined by a
-link gets **Close** instead. The heading says what happened:
+**Back to connections** returns to the list, or **Close** for someone
+who joined by a link. The heading says what happened:
 
 | Heading | What it means |
 |---------|---------------|
@@ -409,6 +345,7 @@ The clipboard panel says what became of each action:
 |---------|---------------|
 | Sent to the remote clipboard. | The text went to the remote |
 | Copied. | The box's text is on your clipboard |
+| Edited: the remote clipboard holds other text. | The remote's clipboard changed after you edited the box, and your text stays. **Show it** brings back the remote's text |
 | The text wasn’t sent because it’s too large. Send a shorter part of it. | The text stays in the box, so you can send part of it |
 | The text wasn’t sent: *and a reason* | The server or the page refused the text, for the reason given |
 | The remote computer hasn’t accepted your clipboard text yet. It will be sent when the remote is ready. | The remote hasn't answered for a while. The text waits, and goes when the remote takes it |
