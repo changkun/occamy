@@ -1165,7 +1165,7 @@ An ad-hoc target is these fields of the request's body:
 | Field | Meaning |
 |-------|---------|
 | `protocol` | Required. `ssh`, `vnc` or `rdp`. A kubernetes session needs a connection, which names its pod and credentials |
-| `target` | Required. `host:port`, or a host alone for the protocol's default port: 22, 5900 or 3389. An IPv6 address goes in brackets with a port, such as `[fd00::22]:22` |
+| `target` | Required. `host:port`, or a host alone for the protocol's default port: 22, 5900 or 3389. An IPv6 address alone takes the protocol's port too, such as `fd00::22`, and goes in brackets with a port, such as `[fd00::22]:2222` |
 | `username` | Optional. The user name to log in as. Without one, the owner is asked for it if the remote needs one |
 | `host_keys` | ssh only. The host keys that the target may present, as a connection's `host_keys` takes them: public keys in `authorized_keys` format, or `SHA256:` fingerprints |
 | `insecure_ignore_host_key` | ssh only. `true` accepts any host key, with a warning in the log |

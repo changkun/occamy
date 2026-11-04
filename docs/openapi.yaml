@@ -830,7 +830,9 @@ components:
               type: string
               description: |
                 `host:port`, or a host alone for the protocol's default
-                port. An IPv6 address goes in brackets with a port.
+                port. An IPv6 address alone, such as `fd00::22`, takes that
+                port too, and goes in brackets with a port, such as
+                `[fd00::22]:2222`.
             username:
               type: string
               description: The user name to log in as; without one, the owner is asked if the remote needs one.

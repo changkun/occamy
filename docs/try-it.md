@@ -206,9 +206,9 @@ with a configuration of its own:
 
 ```mermaid
 flowchart LR
-  B["Browser"] -- "localhost:5639" --> O["occamyd,<br/>on your computer"]
-  O -- "HTTPS to 127.0.0.1:16443,<br/>with the ServiceAccount's token" --> K["k3s's API server,<br/>in the container occamy-k3s"]
-  K -- "exec" --> P["The pod shell,<br/>in the namespace occamy-try"]
+  B["Browser"] -- "localhost:5639" --> O["occamyd<br/>on your computer"]
+  O -- "HTTPS to port 16443<br/>and a ServiceAccount token" --> K["k3s API server<br/>container occamy-k3s"]
+  K -- "exec" --> P["Shell in the pod<br/>namespace occamy-try"]
 ```
 
 The k3s container is privileged, and it pulls busybox from the network.
