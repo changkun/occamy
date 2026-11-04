@@ -288,7 +288,7 @@ Open:
   network access and Keychain use reviewed, which can come later.)
   Decided 2026-11-04: beta.2's disk image, signed with the owner's
   Developer ID and notarized, is attached to its release. It is built
-  on the tag by hand (CONTRIBUTING.md's release steps), since signing
+  on the tag by hand (docs/development.md, Cut a release), since signing
   needs the owner's key and the version comes from `git describe`.
 - **Gio:** the `gio` and `gio-client` branches stay.
   [guacd-bridge](008-native-architecture/guacd-bridge.md) may reuse their

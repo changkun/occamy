@@ -11,7 +11,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 - A website, <https://changkun.github.io/occamy/>: the README and the
   documents in `docs/`, with search, built by MkDocs and published from
-  `master` by the `Pages` workflow ([CONTRIBUTING.md](CONTRIBUTING.md#development)).
+  `master` by the `Pages` workflow
+  ([docs/development.md](docs/development.md#preview-the-website)).
 - Pages for deploying `occamyd` ([docs/deploy.md](docs/deploy.md)), using
   the web client ([docs/web-client.md](docs/web-client.md)), and building
   and testing Occamy ([docs/development.md](docs/development.md)).
