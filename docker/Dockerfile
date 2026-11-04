@@ -42,7 +42,7 @@ RUN mkdir -p /var/lib/occamy
 # directory must exist and be writable by nonroot.
 # /var/lib/occamy is, and an empty named volume mounted there takes its
 # owner from the image, so a real install's key outlives the container
-# (docs/configuration.md, Sign-in).
+# (docs/configuration.md, The signing key).
 FROM gcr.io/distroless/static-debian13:nonroot
 COPY --from=build --chown=65532:65532 /var/lib/occamy /var/lib/occamy
 WORKDIR /occamy
