@@ -181,8 +181,9 @@ connections:
 The `target` is the remote's `host:port`, or its host alone for the
 protocol's usual port: 22 for SSH, 5900 for VNC, 3389 for RDP, and 443
 for a Kubernetes API server. An IPv6 address alone takes that port too,
-such as `fd00::22`; with a port, it goes in brackets, as
-`[fd00::22]:2222`.
+such as `fd00::22`. With a port, it goes in brackets, and then in
+quotes, since YAML reads a value that starts with `[` as a list:
+`target: "[fd00::22]:2222"`.
 
 Each protocol adds keys of its own, which the sections below describe,
 and a key on a connection of another protocol is an error. A session
@@ -968,8 +969,9 @@ in `tls.cert` and `tls.key` instead
 Occamy has no administrator role. What a user may do follows from the
 file: the connections whose allow lists admit them, ad-hoc targets if
 you allow them, and limits on how much each user can hold. Within a
-session, its owner decides who else joins: the owner can share it, as a
-viewer who can type or as a read-only viewer ([HTTP API](api.md#shares)).
+session, its owner decides who else joins, by sharing it: others join
+as viewers who can type, or as read-only viewers
+([HTTP API](api.md#shares)).
 
 ### Who may open a connection
 
@@ -1016,6 +1018,8 @@ adhoc_allowlist:
 An entry is a CIDR range, an IP address, a host name, or `*.` and a
 domain, with an optional `:port` or `:first-last` after it. An IPv6
 range or address with ports goes in brackets, such as `[fd00::/8]:22`.
+Put an entry that starts with `*` or `[` in quotes, as the example
+does, since YAML would read it as something else.
 An entry without ports allows the protocol's own: 22 for SSH, 5900 to
 5999 for VNC, and 3389 for RDP. `occamyd` checks a target like this:
 
@@ -1287,11 +1291,11 @@ Each entry of `connections` is a remote that users may open:
 | `id` | string | required | A unique ID of 1 to 64 lower-case letters, digits, `.`, `_` and `-`, starting with a letter or digit |
 | `name` | string | the ID | The name that users see |
 | `protocol` | string | required | `ssh`, `vnc`, `rdp` or `kubernetes` |
-| `target` | string | required | `host:port`, or a host alone for the protocol's port: 22, 5900, 3389 or 443. Example: `[fd00::22]:2222` |
+| `target` | string | required | `host:port`, or a host alone for the protocol's port: 22, 5900, 3389 or 443. Example: `"[fd00::22]:2222"`, in quotes |
 | `credentials` | mapping | required | [How `occamyd` signs in](#credentials-keys) to the target |
 | `allow.users` | list of strings | none | The users who may open the connection, by exact name |
 | `allow.groups` | list of strings | none | The groups whose users may open the connection. `allow` needs at least one user or group |
-| `host_keys` | list of strings | required for ssh | SSH only. The [host keys](#ssh) that `occamyd` accepts from the server |
+| `host_keys` | list of strings | required for ssh, unless `insecure_ignore_host_key` | SSH only. The [host keys](#ssh) that `occamyd` accepts from the server |
 | `insecure_ignore_host_key` | boolean | `false` | SSH only. Accept any host key instead, for demos, and log its fingerprint as a warning |
 | `tls` | mapping | the system's roots | VNC, RDP and Kubernetes only. [How `occamyd` checks the remote's certificate](#tls-keys) |
 | `ard` | boolean | `false` | VNC only. Allow [Apple Remote Desktop](#apple-remote-desktop-ard) authentication |
@@ -1364,8 +1368,8 @@ Each entry of `adhoc_allowlist` is one of these, with an optional
 | A CIDR range | `10.0.0.0/8`, `10.0.0.0/8:22` |
 | An IP address | `10.0.4.20:3389` |
 | A host name | `build.internal` |
-| `*.` and a domain | `*.lab.internal:5900-5910` |
-| An IPv6 range or address, in brackets with ports | `[fd00::/8]:22` |
+| `*.` and a domain, in quotes | `"*.lab.internal:5900-5910"` |
+| An IPv6 range or address, in brackets with ports, in quotes | `"[fd00::/8]:22"` |
 
 ### Limits: `limits`
 
