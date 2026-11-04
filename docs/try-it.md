@@ -8,12 +8,9 @@ command when you're done.
 ## What the demo stack runs
 
 The demo stack is a set of containers that compose starts from
-[docker/docker-compose.yaml](../docker/docker-compose.yaml). One of
-them, `occamy-v1`, runs `occamyd` and serves the web client. It's the
-only container your browser reaches. The others stand in for the
-computers your users would connect to, and `occamyd` reaches them by
-their service names on the stack's own network, as it would reach hosts
-on yours.
+[docker/docker-compose.yaml](../docker/docker-compose.yaml). Your
+browser reaches only `occamy-v1`, which runs `occamyd`. The others
+stand in for the computers your users would connect to.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/try-it-stack-dark.svg">
@@ -28,9 +25,9 @@ on yours.
 | `vnc`, `tigervnc`, `rdp` | Small servers for the [end-to-end tests](development.md#end-to-end-tests) | None |
 
 `occamy-v1` is published on the loopback interface only, because
-anyone who has read this page knows the demo password. Its second port,
-5638, is the debug listener, which stays off unless you ask for it
-([Debugging and monitoring](debugging.md)).
+anyone who has read this page knows the demo password. Its
+[debug listener](debugging.md#the-debug-listener) stays off unless you
+ask for it.
 
 ## Before you begin
 
@@ -43,9 +40,7 @@ You need these on your computer:
 | A browser | The web client |
 | [Go](https://go.dev/dl/) 1.26.4 or later, and [Node.js](https://nodejs.org) 22.13 or later on 22, 24, or 26 and later | The Kubernetes step only |
 
-The image builds `occamyd` and the web client inside it, so you need Go
-and Node.js only to run `occamyd` on your computer in the Kubernetes
-step. Check what you have:
+Check what you have:
 
 ```sh
 podman version
@@ -53,18 +48,17 @@ podman compose version
 ```
 
 `make` runs Podman. To use Docker instead, export `CONTAINER_ENGINE`
-once, so that every `make` command uses the same engine, and write
-`docker` wherever this page says `podman`:
+once, for every `make` command, and write `docker` wherever this page
+says `podman`:
 
 ```sh
 export CONTAINER_ENGINE=docker
 ```
 
-`podman compose` hands its work to a compose provider, docker-compose
-or podman-compose, and `podman compose version` names the one it
-found. If it's podman-compose, it must be 1.4.0 or later, because older
-releases name the compose project differently, so that `make stop` and
-`make clean` could act on another stack.
+If `podman compose version` names podman-compose as its provider, it
+must be 1.4.0 or later, because older releases name the compose project
+differently, so that `make stop` and `make clean` could act on another
+stack.
 
 On macOS and Windows, the engine runs containers in a virtual machine.
 Give it 8 GiB of memory if anything else runs in it, and several GiB of
@@ -77,7 +71,7 @@ podman machine set --memory 8192
 podman machine start
 ```
 
-This restarts the machine, which stops every container in it, so on a
+This restarts the machine and stops every container in it, so on a
 machine that others share, ask them first.
 
 ## 1. Build the image
@@ -86,11 +80,10 @@ machine that others share, ask them first.
 make build
 ```
 
-This builds the image `occamy:latest`, which the demo stack runs.
-
-On a machine that others share, read [Next to another
-stack](#next-to-another-stack) first, because `make build` replaces
-`occamy:latest`, which another stack may be running.
+This builds the image `occamy:latest`, which the demo stack runs. On a
+machine that others share, read
+[Next to another stack](#next-to-another-stack) first, since another
+stack may be running `occamy:latest`.
 
 ## 2. Start the demo stack
 
@@ -147,8 +140,7 @@ curl -s localhost:5637/api/v1/auth/token \
   -d '{"username":"demo","password":"occamy"}'
 ```
 
-The stack keeps everything you might want to look at or change in four
-places:
+The stack keeps what you might look at or change here:
 
 | What | Where |
 |------|-------|
@@ -184,25 +176,18 @@ desktop itself, and a fresh one starts.
 
 While a session is open, try what the web client does:
 
-- **Share it.** Click **Share**, create a link, and open it in a private
-  window ([Share a session](web-client.md#share-a-session)).
-- **Copy and paste.** In the desktop's terminal, select some text and
-  press Ctrl+Shift+C, then click **Clipboard** to see it. Type other
-  text in the box, click **Send**, and press Ctrl+Shift+V in the
-  terminal ([Copy and paste](web-client.md#copy-and-paste)).
-- **Resize.** Resize the window, or click **Full screen**. The desktop
-  follows, and in **SSH** the terminal gains rows and columns: run
-  `stty size` before and after.
-- **Come back.** Reload the page and sign in again within a minute, and
-  you return to the same session ([Leave and come
-  back](web-client.md#leave-and-come-back)).
+| Try | How |
+|-----|-----|
+| [Share it](web-client.md#share-a-session) | Click **Share**, create a link, and open it in a private window |
+| [Copy and paste](web-client.md#copy-and-paste) | In the desktop's terminal, select some text and press Ctrl+Shift+C, then click **Clipboard** to see it. Type other text in the box, click **Send**, and press Ctrl+Shift+V in the terminal |
+| Resize | Resize the window, or click **Full screen**. The desktop follows, and in **SSH** the terminal gains rows and columns: run `stty size` before and after |
+| [Come back](web-client.md#leave-and-come-back) | Reload the page and sign in again within a minute, and you return to the same session |
 
 ## 5. Open a shell in a Kubernetes pod
 
-The demo stack has no cluster, so this step starts one: k3s in a
-container, with a busybox pod and a ServiceAccount that may only exec
-into it. It then runs `occamyd` on your computer, on `localhost:5639`,
-with a configuration of its own:
+The demo stack has no cluster, so this step starts one, k3s in a
+container with a busybox pod, and runs `occamyd` on your computer with
+a configuration of its own:
 
 ```mermaid
 flowchart LR
@@ -211,7 +196,7 @@ flowchart LR
   K -- "exec" --> P["Shell in the pod<br/>namespace occamy-try"]
 ```
 
-The k3s container is privileged, and it pulls busybox from the network.
+The k3s container is privileged, and pulls busybox from the network.
 On a machine that others share, give the container a name of your own
 in place of `occamy-k3s`, here and in [Tear down](#6-tear-down), and
 other ports if 16443 or 5639 are taken.
@@ -320,9 +305,8 @@ other ports if 16443 or 5639 are taken.
    so `occamyd` runs `sh`, and you see BusyBox's prompt, `/ #`.
    `hostname` prints `shell`, the pod's name.
 
-The token lasts an hour. `occamyd` reads the token file as each session
-starts, so a new token in `$K8S/token` serves the next session. Stop
-`occamyd` with Ctrl-C. [Kubernetes pods](configuration.md#kubernetes-pods)
+The token lasts an hour, and a new token in `$K8S/token` serves the
+next session. [Kubernetes pods](configuration.md#kubernetes-pods)
 describes the connection's keys and the permissions it needs.
 
 ## 6. Tear down
@@ -371,11 +355,10 @@ The base images that the builds pulled stay for the next run:
 `gcr.io/distroless/static-debian13:nonroot` and, after the Kubernetes
 step, `docker.io/rancher/k3s:v1.34.1-k3s1`. `podman rmi` removes them.
 
-Podman also keeps the intermediate stages of every build as untagged
-images, about a gigabyte for each image, as its build cache. `make
-clean` leaves them, since nothing marks them as Occamy's, and
-`podman images -f dangling=true` lists them. `podman image prune`
-removes them along with every other untagged image of the engine, so
-run it only if no one else uses that engine. Docker keeps its build
-cache apart, and `docker builder prune` removes it for everyone on that
-engine.
+Podman also keeps every build's intermediate stages as untagged images,
+about a gigabyte for each image, which `make clean` leaves, since
+nothing marks them as Occamy's; `podman images -f dangling=true` lists
+them. `podman image prune` removes them with every other untagged image
+of the engine, and `docker builder prune` removes Docker's build cache
+for everyone on its engine, so run either only if no one else uses
+that engine.
