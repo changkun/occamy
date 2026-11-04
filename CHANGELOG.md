@@ -74,7 +74,7 @@ the API and the protocol may change before 1.0.0.
   hardened runtime, `make swift-dmg` a disk image of it, and
   `make swift-notarize` signs both with a Developer ID and has Apple
   notarize the image
-  ([docs/macos-app.md](docs/macos-app.md#building-it)).
+  ([docs/macos-app.md](docs/macos-app.md#build-it-from-source)).
 - `disable_copy` and `disable_paste` on a vnc or rdp connection keep
   the remote's clipboard from the viewers, or theirs from the remote,
   as guacd's `disable-copy` and `disable-paste` did

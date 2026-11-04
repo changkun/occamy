@@ -102,7 +102,7 @@ the image `ghcr.io/changkun/occamy:<tag>`, `occamyd` archives for Linux,
 macOS and Windows on amd64 and arm64, and the web client, with
 `SHA256SUMS` and build provenance attestations. Occamy for macOS comes
 as a disk image, signed with a Developer ID and notarized by Apple
-([docs/macos-app.md](./docs/macos-app.md#installing-it)).
+([docs/macos-app.md](./docs/macos-app.md#install-the-app)).
 
 [Deploy](./docs/deploy.md) takes you from a release to an Occamy that
 your users reach over HTTPS: the configuration file, password hashes,
