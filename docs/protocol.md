@@ -43,8 +43,8 @@ that together update the client's screen, such as tiles of pixels for a
 desktop or escape sequences for a terminal, and it always ends with
 `frame-end`. The client draws the frame, shows it, and acknowledges it
 with `frame-ack`. Because the server keeps only a few frames
-unacknowledged, a slow client or a slow network receives fewer, fresher
-frames instead of a growing queue of old ones. Each `frame-end` also
+unacknowledged, a slow client, or one on a slow network, receives fewer
+and fresher frames instead of a growing queue of old ones. Each `frame-end` also
 names the last input that the frame reflects, so the client can measure
 exactly how long an input takes to show on the screen.
 
@@ -295,7 +295,7 @@ frame.
 
 This is a frame of a desktop. `occamyd` divides the screen into tiles of
 64 pixels and sends only what changed since the last frame, each part in
-the cheapest way that the client can take:
+the cheapest form that the client accepts:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/protocol-frame-dark.svg">

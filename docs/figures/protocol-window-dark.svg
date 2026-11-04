@@ -6,25 +6,25 @@
 <rect x="504" y="14" width="112" height="30" rx="6" fill="#2c2c2a" stroke="#4a4a46" stroke-width="1"/>
 <text x="560" y="34" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="middle">Client</text>
 <line x1="560" y1="44" x2="560" y2="530" stroke="#4a4a46" stroke-width="1.5"/>
-<path d="M 40 70 L 40 510" stroke="#898781" stroke-width="1" marker-end="url(#arrow)"/>
-<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/></marker></defs>
+<defs><marker id="head-frame" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#3987e5"/></marker><marker id="head-ack" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#898781"/></marker><marker id="head-key" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#d95926"/></marker></defs>
+<path d="M 40 70 L 40 510" stroke="#898781" stroke-width="1" marker-end="url(#head-ack)"/>
 <text x="52" y="506" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="start">time</text>
-<line x1="190" y1="84" x2="560" y2="176" stroke="#3987e5" stroke-width="1.8" marker-end="url(#arrow)"/>
+<line x1="190" y1="84" x2="560" y2="176" stroke="#3987e5" stroke-width="1.8" marker-end="url(#head-frame)"/>
 <text x="345.4" y="122.64" transform="rotate(14.0 345.4 122.64) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#f0efec" text-anchor="middle" paint-order="stroke" stroke="#1a1a19" stroke-width="4">frame 1</text>
-<line x1="190" y1="114" x2="560" y2="206" stroke="#3987e5" stroke-width="1.8" marker-end="url(#arrow)"/>
+<line x1="190" y1="114" x2="560" y2="206" stroke="#3987e5" stroke-width="1.8" marker-end="url(#head-frame)"/>
 <text x="345.4" y="152.64" transform="rotate(14.0 345.4 152.64) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#f0efec" text-anchor="middle" paint-order="stroke" stroke="#1a1a19" stroke-width="4">frame 2</text>
-<line x1="560" y1="190" x2="190" y2="282" stroke="#898781" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+<line x1="560" y1="190" x2="190" y2="282" stroke="#898781" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#head-ack)"/>
 <text x="330.6" y="247.04" transform="rotate(-14.0 330.6 247.04) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#f0efec" text-anchor="middle" paint-order="stroke" stroke="#1a1a19" stroke-width="4">frame-ack 1</text>
-<line x1="560" y1="220" x2="190" y2="312" stroke="#898781" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+<line x1="560" y1="220" x2="190" y2="312" stroke="#898781" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#head-ack)"/>
 <text x="271.4" y="291.76" transform="rotate(-14.0 271.4 291.76) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#f0efec" text-anchor="middle" paint-order="stroke" stroke="#1a1a19" stroke-width="4">frame-ack 2</text>
-<line x1="190" y1="282" x2="560" y2="374" stroke="#3987e5" stroke-width="1.8" marker-end="url(#arrow)"/>
+<line x1="190" y1="282" x2="560" y2="374" stroke="#3987e5" stroke-width="1.8" marker-end="url(#head-frame)"/>
 <text x="419.4" y="339.04" transform="rotate(14.0 419.4 339.04) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#f0efec" text-anchor="middle" paint-order="stroke" stroke="#1a1a19" stroke-width="4">frame 3</text>
-<line x1="190" y1="312" x2="560" y2="404" stroke="#3987e5" stroke-width="1.8" marker-end="url(#arrow)"/>
+<line x1="190" y1="312" x2="560" y2="404" stroke="#3987e5" stroke-width="1.8" marker-end="url(#head-frame)"/>
 <text x="449.0" y="376.4" transform="rotate(14.0 449.0 376.4) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#f0efec" text-anchor="middle" paint-order="stroke" stroke="#1a1a19" stroke-width="4">frame 4</text>
 <rect x="181" y="114" width="18" height="358" rx="4" fill="#3987e5" stroke="none" stroke-width="1" fill-opacity="0.14"/>
-<line x1="560" y1="246" x2="190" y2="338" stroke="#d95926" stroke-width="2.2" marker-end="url(#arrow)"/>
+<line x1="560" y1="246" x2="190" y2="338" stroke="#d95926" stroke-width="2.2" marker-end="url(#head-key)"/>
 <text x="478.6" y="266.24" transform="rotate(-14.0 478.6 266.24) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#f0efec" text-anchor="middle" paint-order="stroke" stroke="#1a1a19" stroke-width="4">key, seq 42</text>
-<line x1="190" y1="346" x2="560" y2="438" stroke="#d95926" stroke-width="2.2" marker-end="url(#arrow)"/>
+<line x1="190" y1="346" x2="560" y2="438" stroke="#d95926" stroke-width="2.2" marker-end="url(#head-key)"/>
 <text x="375.0" y="392.0" transform="rotate(14.0 375.0 392.0) translate(0 15)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#f0efec" text-anchor="middle" paint-order="stroke" stroke="#1a1a19" stroke-width="4">frame 5, last_seq 42</text>
 <text x="172" y="130" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="end">Window full:</text>
 <text x="172" y="146" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="end">changes wait</text>

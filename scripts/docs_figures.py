@@ -241,16 +241,22 @@ def window(t):
         s.rect(x - 56, 14, 112, 30, fill=t["window"], stroke=t["grid"], rx=6)
         s.text(x, 34, name, 13, weight=600, anchor="middle")
         s.line(x, 44, x, 530, t["grid"], 1.5)
-    s.add(f'<path d="M 40 70 L 40 510" stroke="{t["muted"]}" stroke-width="1" marker-end="url(#arrow)"/>')
-    s.add(f'<defs><marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" '
-          f'orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/></marker></defs>')
+    # An arrowhead for each ink, since not every renderer fills one
+    # with its line's colour (context-stroke).
+    frame_ink, ack_ink, key_ink = t["lossless"], t["muted"], t["lossy"]
+    heads = {frame_ink: "head-frame", ack_ink: "head-ack", key_ink: "head-key"}
+    s.add("<defs>" + "".join(
+        f'<marker id="{name}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" '
+        f'orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="{ink}"/></marker>'
+        for ink, name in heads.items()) + "</defs>")
+    s.add(f'<path d="M 40 70 L 40 510" stroke="{t["muted"]}" stroke-width="1" marker-end="url(#head-ack)"/>')
     s.text(52, 506, "time", 11, t["muted"])
 
     def msg(x1, y1, x2, label, ink, sw=1.8, dash=None, side=-1, at=0.5):
         y2 = y1 + D
         extra = f' stroke-dasharray="{dash}"' if dash else ""
         s.add(f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" stroke="{ink}" stroke-width="{sw}"{extra} '
-              f'marker-end="url(#arrow)"/>')
+              f'marker-end="url(#{heads[ink]})"/>')
         # The label sits along the line, a little above it.
         import math
         ang = math.degrees(math.atan2(y2 - y1, x2 - x1))
@@ -264,7 +270,6 @@ def window(t):
               f'paint-order="stroke" stroke="{t["surface"]}" stroke-width="4">{esc(label)}</text>')
         return y2
 
-    frame_ink, ack_ink, key_ink = t["lossless"], t["muted"], t["lossy"]
     # Frames 1 and 2 fill the window; changes wait until frame 1's ack.
     msg(SX, TOP + 20, CX, "frame 1", frame_ink, at=0.42)
     msg(SX, TOP + 50, CX, "frame 2", frame_ink, at=0.42)
