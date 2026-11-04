@@ -78,7 +78,7 @@ Occamy 1.0 is in beta: the API and the protocol may still change before
 ## Try it
 
 You need Podman or Docker with compose, and `make`. The demo stack runs
-Occamy with a demo server of each protocol and an XFCE desktop:
+Occamy with an XFCE desktop, over VNC and RDP, and an SSH server:
 
 ```sh
 git clone https://github.com/changkun/occamy.git

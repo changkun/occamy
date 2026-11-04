@@ -13,10 +13,11 @@ package tests
 // its debug listener. It fails if any of them grows past a bound after
 // the warm-up (soakGrowth), or does not come back near where it started
 // once every session has closed, and if sessions fail. It is skipped
-// unless OCCAMY_SOAK_SESSIONS is set; make soak sets the rest, against a
-// stack whose debug listeners make run OCCAMY_DEBUG=1 turned on:
+// unless OCCAMY_SOAK_SESSIONS is set; make soak sets the rest, against
+// the end-to-end tests' stack, whose debug listeners make run
+// OCCAMY_DEBUG=1 turned on:
 //
-//	make run OCCAMY_DEBUG=1
+//	make run E2E=1 OCCAMY_DEBUG=1
 //	make soak OCCAMY_SOAK_SESSIONS=8 OCCAMY_SOAK_DURATION=30m
 //
 // Decision 4's full soak is OCCAMY_SOAK_SESSIONS=20 OCCAMY_SOAK_DURATION=8h.

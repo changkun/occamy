@@ -1,0 +1,17 @@
+# End-to-end stack: the demo stack, with occamy-v1 serving the end-to-end
+# tests' v1 file (occamy-v1-e2e.yaml) in place of the demo's: the demo's
+# connections, and those of the servers that the tests probe. The
+# services are the demo's, under the same project.
+#
+#   make run E2E=1
+#   make e2e
+#
+# make e2e runs the tests' compose commands with both files, as make run
+# E2E=1 started the stack, so that a test that recreates occamy-v1 keeps
+# this file. make stop stops it as it stops the demo stack.
+
+services:
+  occamy-v1:
+    volumes:
+      # Replaces the demo's v1 file, which is mounted at the same path.
+      - ./occamy-v1-e2e.yaml:/occamy/v1.yaml:ro
