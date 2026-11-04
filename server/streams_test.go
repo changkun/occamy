@@ -689,9 +689,9 @@ func TestShutdownEndsStreams(t *testing.T) {
 	if !s.streams.wait(5 * time.Second) {
 		t.Error("the stream did not end")
 	}
-	if n := s.registry.Len(); n != 0 {
-		t.Errorf("%d sessions after the shutdown", n)
-	}
+	// A session tells its viewers it ended before the registry drops it,
+	// so the stream can end first.
+	waitFor(t, "the registry to drop the session", func() bool { return s.registry.Len() == 0 })
 }
 
 // streamLowWaterDefault is setLowWater as the package sets it.
