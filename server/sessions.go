@@ -373,7 +373,7 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 		return fail(err)
 	}
 	id, sess, v, err := s.registry.Open(session.Config{
-		ID: id, Backend: b, OwnerGrace: grace, MaxViewers: s.limits.ViewersPerSession,
+		ID: id, Backend: explained{b}, OwnerGrace: grace, MaxViewers: s.limits.ViewersPerSession,
 		DisableCopy: t.disableCopy, DisablePaste: t.disablePaste,
 	})
 	if err != nil {

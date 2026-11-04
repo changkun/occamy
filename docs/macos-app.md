@@ -244,8 +244,8 @@ minute for you. **Close** closes the window.
 |-----------------|---------------|
 | Connection lost | The connection to the server failed. The session may still run |
 | Disconnected: too slow | The server heard nothing from the app for its viewer timeout, 30 seconds unless its configuration sets another: the network stalled, or the app couldn't keep up |
-| Remote unreachable | The server couldn't connect to the remote, or lost its connection to it |
-| Could not connect | The server couldn't open the session, for the reason shown, such as a remote that refused the sign-in |
+| Could not connect | The server couldn't connect to the remote, for the reason shown, such as “The remote computer refused the user name or password.” |
+| Remote unreachable | The server lost its connection to the remote, or couldn't connect to it for a reason that only its log shows |
 | Session ended | The session was ended elsewhere, you didn't come back to it in time, or the remote ended it, as when its user logs out. The window says which. It also says "Session ended" when the server ran into an internal error, or ended the session for a reason the app doesn't know |
 | Ended for inactivity | Nobody in the session typed or used the pointer for 30 minutes |
 | Signed out | The sign-in ran out. Click **Sign In…** |

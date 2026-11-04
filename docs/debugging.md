@@ -18,10 +18,11 @@ until you turn it on, serves the Go runtime's numbers and profiles.
   <img alt="Where to look at a running occamyd. On its host, or in its pod, occamyd serves two listeners and writes one log. Users and probes reach the public listener on port 5636 from the network, for GET /healthz, the API, the streams and the web client. The debug listener on localhost:6060 is reached only from the host, by you with curl, go tool pprof or kubectl port-forward. The log goes to standard error, where podman logs, journalctl or kubectl logs show it." src="figures/debugging-sources.svg">
 </picture>
 
-Start with the log. When a session fails, the web client says little,
-such as **Remote unreachable**, because the full error can name hosts
-and addresses that a viewer shouldn't see. The log says why. Read it
-where your `occamyd` runs:
+Start with the log. When a session can't connect, the web client says
+why in a sentence, such as “The remote computer refused the
+connection.”, but never names a host, an address or a fingerprint,
+because everyone in the session reads it. The log has the whole error.
+Read it where your `occamyd` runs:
 
 ```sh
 podman logs occamy             # the container of Deploy
@@ -100,10 +101,16 @@ Find the page's message in the first column, then the line in the log:
 
 | The page says | The log says | What it means |
 |---------------|--------------|---------------|
-| **Remote unreachable** | `session ended … reason=failed err="vnc: dial tcp 10.0.4.20:5900: connect: connection refused"` | Nothing answers at the connection's `target` from `occamyd`'s host. Check the address, the port, and the firewalls between them |
-| **Remote unreachable** | `the server's certificate "…" (SHA-256 3F:A1:…) is not trusted` | The remote's certificate doesn't chain to a CA that `occamyd` trusts. Add the logged fingerprint to the connection's `tls.pins`, or give the issuing CA in `tls.ca_file` ([Check a remote's certificate](configuration.md#check-a-remotes-certificate)) |
-| **Remote unreachable** | `host key ssh-ed25519 SHA256:… is not pinned` | The SSH server's host key isn't in the connection's `host_keys`. Check that it's the key you expect, then add it |
-| **Remote unreachable** | `vnc: authentication failed`, `rdp: authentication failed`, or for SSH `unable to authenticate` | The remote refused the credentials. Check the connection's `credentials`, and the file or variable that holds the password |
+| **Could not connect**: “The remote computer refused the connection.” | `session ended … reason=failed err="vnc: dial tcp 10.0.4.20:5900: connect: connection refused"` | Nothing listens at the connection's `target`. Check the address and the port, and that the remote's server runs |
+| **Could not connect**: “The remote computer didn't answer in time.” | `dial tcp 10.0.4.20:5900: i/o timeout` | A firewall between `occamyd` and the remote drops the connection, or the remote is off |
+| **Could not connect**: “The server couldn't look up the remote computer's name.” | `dial tcp: lookup build-box.lab: no such host` | The `target`'s host name doesn't resolve where `occamyd` runs, which in a container is the container's DNS |
+| **Could not connect**: “The server has no route to the remote computer.” | `connect: no route to host` | `occamyd`'s host has no route to the remote's network |
+| **Could not connect**: “The server doesn't trust the remote computer's certificate.” | `the server's certificate "…" (SHA-256 3F:A1:…) is not trusted` | The remote's certificate doesn't chain to a CA that `occamyd` trusts. Add the logged fingerprint to the connection's `tls.pins`, or give the issuing CA in `tls.ca_file` ([Check a remote's certificate](configuration.md#check-a-remotes-certificate)) |
+| **Could not connect**: “The server doesn't trust the remote computer's host key.” | `host key ssh-ed25519 SHA256:… is not pinned` | The SSH server's host key isn't in the connection's `host_keys`. Check that it's the key you expect, then add it |
+| **Could not connect**: “The remote computer refused the user name or password.” | `vnc: authentication failed` or `rdp: authentication failed` | Check the connection's `credentials`, and the file or variable that holds the password |
+| **Remote unreachable** | `ssh: … unable to authenticate` | The SSH server refused the credentials. Check the connection's `credentials`, or its private key |
+| **Could not connect**: “The Kubernetes API server refused the credentials.” | `kubernetes: the API server refused the stream with 401` | The connection's token is wrong or has expired |
+| **Could not connect**: “The Kubernetes API server refused to open a shell in the pod.” | `kubernetes: the API server refused the stream with 403` | The token's role doesn't allow `create` on `pods/exec` in the pod's namespace |
 | **Remote unreachable** | `set ard: true on connection "…" to allow it` | A Mac offers only Apple Remote Desktop's sign-in. Read [the risk](configuration.md#apple-remote-desktop-ard) before you set `ard: true` |
 | **Remote unreachable** | `allow TLS with security: tls on connection "…"` | The RDP server speaks no NLA, as xrdp doesn't. Set `security: tls`, and pin its certificate ([xrdp](configuration.md#xrdp)) |
 | **Access refused** | `user "…" opening connection "…": too many sessions open` | The user already owns `limits.sessions_per_user` sessions |

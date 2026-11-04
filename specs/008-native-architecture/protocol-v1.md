@@ -391,9 +391,14 @@ web client ([009](../009-react-web-client.md)) and the client core
     map onto the codes from 4002 and onto 1001.) A close's reason is the
     end reason's name, since a backend's error may name what a viewer
     must not see, unless the error is a `backend.Failure`, whose text
-    is written for viewers; the guacd bridge's first-frame limit is the
-    only one so far. A client takes the reason as text either way, so
-    this changed nothing on the wire but the text (2026-11-01).
+    is written for viewers. A client takes the reason as text either
+    way, so this changed nothing on the wire but the text (2026-11-01).
+    The server wraps every backend so that a session that could not
+    connect says why in a fixed sentence: the remote refused the
+    password, its certificate or host key is not trusted, or dialing it
+    was refused, timed out, found no name or no route; any other error,
+    and one after the connection was made, stays `failed`
+    (`server/failure.go`, 2026-11-04).
   - Since that review, too: a viewer that leaves a frame
     unacknowledged for the server's viewer timeout gets `too-slow`,
     hidden or not, so a hidden client acknowledges the frames it was

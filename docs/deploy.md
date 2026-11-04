@@ -333,7 +333,8 @@ pinned.
 
 3. Open the connection once. Windows signs its RDP certificate itself
    unless you give it one, so `occamyd` refuses it, and the web client
-   says **Remote unreachable**. The log line that ends the session
+   says **Could not connect**: “The server doesn't trust the remote
+   computer's certificate.” The log line that ends the session
    names the certificate and its SHA-256 fingerprint, as in
    `the server's certificate "CN=WS-0420" (SHA-256 3F:A1:07:…) is not trusted`.
 

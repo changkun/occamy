@@ -371,8 +371,8 @@ link gets **Close** instead. The heading says what happened:
 |---------|---------------|
 | Session ended | The owner ended the session, the owner left and didn't come back in time, the remote ended it, as when its user logs out, or the server ran into an internal error |
 | Ended for inactivity | Nobody gave input for 30 minutes |
-| Remote unreachable | The server couldn't connect to the remote, or lost its connection to it |
-| Could not connect | The server couldn't open the session, and the card says why |
+| Could not connect | The server couldn't connect to the remote, and the card says why, such as “The remote computer refused the user name or password.” |
+| Remote unreachable | The server lost its connection to the remote, or couldn't connect to it for a reason that only its log shows |
 | Connection lost | The page lost its connection to the server. **Join again** returns to the session if it's still running |
 | Disconnected: too slow | The server heard nothing from the page for 30 seconds, or for the viewer timeout that its configuration sets: the network stalled, or the page couldn't keep up. **Join again** returns to the session |
 | Disconnected | The session was closed for another reason, which **Details** shows |

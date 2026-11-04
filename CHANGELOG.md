@@ -81,6 +81,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Fixed
 
+- When a session can't connect, everyone in it learns why, such as
+  “The remote computer refused the user name or password.” or “The
+  server doesn't trust the remote computer's certificate.”, where the
+  web client and the Mac app said **Remote unreachable** for every
+  cause. The sentence names no host, address or fingerprint; the log
+  keeps the whole error
+  ([docs/debugging.md](docs/debugging.md#where-to-look)).
 - Occamy for macOS says why it couldn't open a session in a sentence,
   with the technical detail below it, instead of the client library's
   error. When the server can't reach the remote, the app says so,
