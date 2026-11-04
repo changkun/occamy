@@ -47,6 +47,19 @@ its settings.
 `.golangci.yml`, as CI does. Code must be `gofmt`ed, with imports grouped
 by `goimports`.
 
+The README and `docs/` are also the website,
+<https://changkun.github.io/occamy/>, which MkDocs builds
+([mkdocs.yml](mkdocs.yml)). To preview it:
+
+```sh
+python3 -m venv .venv && .venv/bin/pip install -r scripts/docs-requirements.txt
+.venv/bin/mkdocs serve
+```
+
+The `Pages` workflow builds it with `--strict` for a pull request that
+touches them, so a link or an anchor that does not resolve fails it, and
+publishes it from `master`.
+
 ## Design specs
 
 Larger changes start as a design spec in [specs/](specs/README.md). A spec
@@ -66,7 +79,8 @@ the spec first, and update it when the change makes it inaccurate.
 - Add a line under `Unreleased` in [CHANGELOG.md](CHANGELOG.md) for any
   user-visible change.
 - CI (`go`, `lint`, `build` on macOS and Windows, `web`, `image`,
-  `e2e` and `bench`) must pass before a PR merges. PRs
+  `e2e` and `bench`, and `Pages` when the docs change) must pass before
+  a PR merges. PRs
   merge with a merge commit, so that the commit hashes cited in specs stay
   valid.
 

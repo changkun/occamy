@@ -7,6 +7,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ## [Unreleased]
 
+### Added
+
+- A website, <https://changkun.github.io/occamy/>: the README and the
+  documents in `docs/`, with search, built by MkDocs and published from
+  `master` by the `Pages` workflow ([CONTRIBUTING.md](CONTRIBUTING.md#development)).
+
 ## [1.0.0-beta.2] - 2026-11-04
 
 Occamy 1.0.0-beta.2 serves every session itself. guacd, the v0 routes

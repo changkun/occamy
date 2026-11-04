@@ -151,15 +151,20 @@ limits and TLS.
 
 ## Documentation
 
+The documents are also a website, <https://changkun.github.io/occamy/>.
+
 - [Try Occamy](./docs/try-it.md): the demo stack, step by step.
 - [Configuration](./docs/configuration.md): every key of the
   configuration file.
+- [Occamy for macOS](./docs/macos-app.md): the Mac app.
 - [HTTP API](./docs/api.md): sign-in, connections, sessions and shares,
   also as [OpenAPI](./docs/openapi.yaml).
 - [Protocol](./docs/protocol.md): the wire protocol between `occamyd`
   and its clients.
 - [Architecture](./docs/architecture.md): how the pieces fit together.
 - [Debugging](./docs/debugging.md): profiling and measuring `occamyd`.
+- [Benchmarks](./docs/benchmarks.md): how Occamy is measured against
+  Guacamole, and the results.
 
 ## Build from source
 

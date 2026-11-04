@@ -1,0 +1,4 @@
+# The website's builder (mkdocs.yml), for .github/workflows/pages.yml and
+# a local preview.
+mkdocs==1.6.1
+mkdocs-material==9.7.7

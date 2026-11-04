@@ -1,0 +1,88 @@
+# Copyright 2026 Changkun Ou. All rights reserved.
+# Use of this source code is governed by a MIT
+# license that can be found in the LICENSE file.
+
+# The website, https://changkun.github.io/occamy/: the README as its
+# home page and docs/ as the rest, built by .github/workflows/pages.yml.
+# scripts/docs_site.py makes the home page from the README and points
+# links that leave docs/ to the repository. To preview it:
+#
+#	python3 -m venv .venv && .venv/bin/pip install -r scripts/docs-requirements.txt
+#	.venv/bin/mkdocs serve
+
+site_name: Occamy
+site_description: A remote desktop gateway in Go, for VNC, RDP, SSH and Kubernetes, in the browser and on the Mac.
+site_url: https://changkun.github.io/occamy/
+repo_url: https://github.com/changkun/occamy
+repo_name: changkun/occamy
+edit_uri: edit/master/docs/
+copyright: Copyright &copy; 2019-2026 Ou Changkun, MIT license
+
+docs_dir: docs
+site_dir: _site
+hooks:
+  - scripts/docs_site.py
+
+theme:
+  name: material
+  custom_dir: scripts/docs-theme
+  logo: occamy.png
+  favicon: occamy.png
+  palette:
+    # Light or dark as the system is, in the logo's violet and
+    # turquoise (scripts/docs-theme/main.html).
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Light mode
+  features:
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - Home: index.md
+  - Using Occamy:
+      - Try Occamy: try-it.md
+      - Configuration: configuration.md
+      - Occamy for macOS: macos-app.md
+      - Debugging and measuring: debugging.md
+  - Reference:
+      - HTTP API (v1): api.md
+      - Occamy Protocol (v1): protocol.md
+      - Architecture: architecture.md
+  - Measurements:
+      - Benchmarks: benchmarks.md
+      - Codec measurement: benchmarks/codecs.md
+  - All documents: manual.md
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - admonition
+  - attr_list
+  - md_in_html
+  - tables
+  - footnotes
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+# A link or an anchor that does not resolve fails the build, which CI
+# runs with --strict.
+validation:
+  omitted_files: info
+  absolute_links: info
+  unrecognized_links: warn
+  anchors: warn
