@@ -185,7 +185,7 @@ L 199.637176 47.674507
      </g>
     </g>
     <g id="text_11">
-     <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="18.76824" y="110.43162" transform="rotate(-90 18.76824 110.43162)">Frames shown per second (frames/s)</text>
+     <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="18.76824" y="110.43162" transform="rotate(-90 18.76824 110.43162)">Frames shown a second (frames/s)</text>
     </g>
    </g>
    <g id="LineCollection_1">
@@ -670,7 +670,7 @@ L 199.637176 225.427624
      </g>
     </g>
     <g id="text_34">
-     <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="18.76824" y="288.18138" transform="rotate(-90 18.76824 288.18138)">Frames shown per second (frames/s)</text>
+     <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #c3c2b7" x="18.76824" y="288.18138" transform="rotate(-90 18.76824 288.18138)">Frames shown a second (frames/s)</text>
     </g>
    </g>
    <g id="LineCollection_5">
@@ -977,7 +977,7 @@ L 3.5 3.5
    </g>
   </g>
   <g id="text_48">
-   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #f0efec" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Frames shown per second against the loss: median of the runs, with 95% intervals</text>
+   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #f0efec" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Frames shown a second against packets lost: median of the runs, with 95% intervals</text>
   </g>
   <g id="legend_1">
    <g id="line2d_90">

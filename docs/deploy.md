@@ -1,9 +1,39 @@
 # Deploy
 
-This page takes you from a release to an Occamy that your users reach
-over HTTPS. You run one program, `occamyd`, from the image or from a
-release archive. It needs a configuration file and a place to keep its
-signing key. Nothing else runs beside it.
+Run Occamy for your team: `occamyd` on a server of yours, behind a
+proxy that serves it over HTTPS, connected to the computers your users
+work on. This page takes you from a release to that setup, and covers
+Windows hosts and Kubernetes.
+
+## How a deployment fits together
+
+A deployment is one program, `occamyd`, which serves the web client,
+the [HTTP API](api.md) and the WebSocket streams that carry sessions,
+and connects to each remote computer itself:
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="figures/deploy-topology-dark.svg">
+  <img alt="A deployment. The web client in a browser and Occamy for macOS reach a TLS proxy, Caddy or nginx, over HTTPS on port 443. On the same server, the proxy reaches occamyd over HTTP/1.1 with the Upgrade header, on 127.0.0.1:5636. occamyd keeps occamy.yaml, which it reads at start, signing.key on a volume, and an optional debug listener on localhost:6060. It connects to an identity provider for OIDC, optionally, and to each remote: a VNC server on port 5900, an RDP host on port 3389 with TLS, an SSH server on port 22, and a Kubernetes API server on port 443 or 6443." src="figures/deploy-topology.svg">
+</picture>
+
+Sessions live in `occamyd`'s memory, so a restart ends them, while the
+signing key on its volume keeps your users signed in. There's no
+database and no other service.
+
+### What each hop needs
+
+| Hop | What it carries | What it needs |
+|-----|-----------------|---------------|
+| Users to the proxy | HTTPS on port 443: the web client, the API, and each session's WebSocket | A certificate that your users' devices trust, and nothing on the way that blocks WebSocket upgrades |
+| The proxy to `occamyd` | HTTP/1.1, to port 5636 unless `listen` says otherwise | The `Upgrade` and `Connection` headers passed on, the `Host` header passed through, an idle timeout longer than 25 seconds, and Occamy at the root of its host name |
+| `occamyd` to the remotes | VNC on port 5900, RDP on 3389, SSH on 22, and HTTPS to Kubernetes API servers on 443 or 6443 | Outgoing connections from `occamyd`'s host, and each remote's certificate or host key, pinned or signed by a CA that you name |
+| `occamyd` to your identity provider | HTTPS, when users sign in through OIDC | Outgoing connections to the provider |
+
+A stream that has nothing else to send carries a `ping` every 25
+seconds, so a still screen keeps its connection through a proxy that
+closes quiet connections, such as nginx after a minute. A proxy that
+limits how long a connection lasts still ends sessions early
+([Sessions drop after the same time](debugging.md#sessions-drop-after-the-same-time)).
 
 ## Get Occamy
 
@@ -16,23 +46,19 @@ Each [release](https://github.com/changkun/occamy/releases) publishes:
 | The web client | `occamy-web-<tag>.tar.gz` | The built web client, in `occamy-web-<tag>/dist` |
 | Checksums | `SHA256SUMS` | The SHA-256 of each archive |
 
-The tag keeps its `v`, such as `v1.0.0-beta.2`. Use the image wherever
-you run containers, since it holds everything. Use the archives to run
-`occamyd` as a service of the host.
+The tag keeps its `v`, as in `v1.0.0-beta.2`. Use the image wherever
+you run containers, and the archives to run `occamyd` as a service of
+the host. The release also has Occamy for macOS, for your users.
 
-To check a download, run these in the directory you downloaded to:
+To check a download, run these beside it.
+`gh attestation verify` checks that the repository's release workflow
+built the file or the image:
 
 ```sh
 sha256sum -c --ignore-missing SHA256SUMS
 gh attestation verify occamyd-v1.0.0-beta.2-linux-amd64.tar.gz --repo changkun/occamy
 gh attestation verify oci://ghcr.io/changkun/occamy:v1.0.0-beta.2 --repo changkun/occamy
 ```
-
-`gh attestation verify` checks that the repository's release workflow
-built the file or the image.
-
-The release also has [Occamy for macOS](macos-app.md), an app for your
-users that opens their connections in windows of their own.
 
 ## Write the configuration
 
@@ -57,48 +83,36 @@ connections:
     allow: {users: [alice]}
 ```
 
-`web_client` is where the image keeps the web client. The file holds no
-secrets: the workstation's password comes from the environment variable
-`WORKSTATION_PASSWORD`. [Configuration](configuration.md) describes
-every key, and each protocol's own.
+The workstation's password comes from the environment variable
+`WORKSTATION_PASSWORD`, so the file holds no secret.
+[Configuration](configuration.md) describes every key.
 
-## Make password hashes
+### Make password hashes
 
-The file holds a bcrypt hash of each user's password. Make it with
-`htpasswd`:
+Make each user's `password_hash` with `htpasswd`, at the same cost for
+every user, and put the line it prints in double quotes, as
+[Add users with passwords](configuration.md#add-users-with-passwords)
+describes:
 
 ```sh
 htpasswd -nbBC 12 "" 'the password' | cut -d: -f2
 ```
 
-Put the line it prints, which starts with `$2y$12$`, in double quotes as
-the user's `password_hash`. `htpasswd` comes with Apache's tools:
-`apache2-utils` on Debian and Ubuntu, `httpd-tools` on Fedora and RHEL,
-and macOS has it. Give every user the same cost, the `12` after `-C`.
-
 To sign users in through your identity provider instead, see
 [Sign in through OIDC](#sign-in-through-oidc).
 
-## Keep the signing key
+### Keep the signing key
 
-`occamyd` signs the tokens it gives users with a key that it creates on
-first start, at `auth.signing_key_file`. Keep that file on a volume.
+Keep `auth.signing_key_file`, the key that `occamyd` creates to sign
+users' tokens, on a volume, so that tokens stay valid when you restart
+`occamyd` or move to a new image.
 
-- The image runs as the user `nonroot`, uid 65532, and its
-  `/var/lib/occamy` belongs to that user. An empty named volume mounted
-  there takes the same owner, so `-v occamy-data:/var/lib/occamy` needs
-  nothing else.
-- With the volume, tokens stay valid across restarts and new images.
-  Without it, a new container makes a new key, and everyone signs in
-  again.
-- At start, the warning `created a new signing key` is expected the
-  first time. On a server that has run before, it means the volume is
-  missing.
-
-If `occamyd` stops at start because it may not use the key, give the
-directory to the uid that the error names.
-[The signing key](configuration.md#the-signing-key) has the command for
-a host directory, Docker and Podman.
+The image runs as the user `nonroot`, uid 65532, and its
+`/var/lib/occamy` belongs to that user. An empty named volume mounted
+there takes the same owner, so `-v occamy-data:/var/lib/occamy` needs
+nothing else. If `occamyd` stops at start because it may not use the
+key, give the directory to the uid that the error names, as
+[The signing key](configuration.md#the-signing-key) shows.
 
 ## Run the container
 
@@ -113,28 +127,18 @@ podman run -d --name occamy -p 5636:5636 \
 With Docker, write `docker` in place of `podman`. Open
 <http://localhost:5636/static/> and sign in as `alice`.
 
-- The image reads `/occamy/conf.yaml`, so the command needs no
-  arguments.
-- `-e WORKSTATION_PASSWORD` passes the variable from your shell.
-  `occamyd` refuses to start while a variable that the file names is
-  unset or empty.
-- Mount every file that the configuration names, such as a
-  `password_file` or a TLS key, and make it readable by uid 65532.
-- On a host with SELinux, such as Fedora, add `Z` to a bind mount's
-  options, as in `:ro,Z`, so that the container may read it.
-- `occamyd` speaks plain HTTP here. Put TLS in front before users reach
-  it across a network, as the next section shows.
+`-e WORKSTATION_PASSWORD` passes the variable on from your shell. Mount
+every other file that the configuration names, such as a
+`password_file` or a TLS key, and make it readable by uid 65532. On a
+host with SELinux, such as Fedora, add `Z` to a bind mount's options,
+as in `:ro,Z`, so that the container may read it.
 
-`podman logs occamy` shows `occamyd`'s log: what it serves, its
-warnings, and one line per request, with the method, path, status,
-duration and peer. It never logs a request's query string, headers or
-body.
-
-`podman stop occamy` sends `SIGTERM`. `occamyd` stops accepting
-connections and ends every session, which tells each viewer that the
-server is shutting down. It exits within 10 seconds, inside the time
-that `podman stop` and `docker stop` allow. Sessions end at a restart,
-and tokens stay valid.
+`occamyd` speaks plain HTTP here until you
+[serve it over TLS](#serve-it-over-tls). `podman logs occamy`
+shows [its log](debugging.md#the-log). `podman stop occamy` ends every
+session, telling each viewer that the server is shutting down, and
+`occamyd` exits within 10 seconds, inside the time that `podman stop`
+and `docker stop` allow.
 
 ## Run the binary
 
@@ -187,24 +191,27 @@ On macOS and Windows, run `occamyd` the same way, with
 
 ## Serve it over TLS
 
-`occamyd` speaks plain HTTP unless the configuration sets `tls`. Before
-users reach it across a network, put TLS in front of it: a reverse
-proxy, or `occamyd`'s own.
+Before users reach `occamyd` across a network, put TLS in front of it:
+a reverse proxy, or `occamyd`'s own.
 
-### Behind a reverse proxy
+A proxy does what [What each hop needs](#what-each-hop-needs) lists,
+since the web client loads `/static/` and calls `/api/v1/` on its own
+origin, and `occamyd` accepts a page's stream only from that origin. If
+your proxy rewrites `Host`, list the address your users open in
+[`origins`](configuration.md#server).
 
-The proxy must:
+Let only the proxy reach `occamyd`. On the same host, set
+`listen: 127.0.0.1:5636`, or publish the container's port on the
+loopback interface alone, with `-p 127.0.0.1:5636:5636`. `occamyd`
+doesn't read `X-Forwarded-For`, so its log then names the proxy as each
+request's peer. Each `occamyd` keeps its sessions, shares and OIDC
+sign-ins to itself, so a proxy in front of several needs sticky
+sessions.
 
-- forward WebSocket upgrades, which carry every session;
-- pass the `Host` header through, or else list the address that users
-  open in [`origins`](configuration.md#server);
-- keep a quiet WebSocket open for as long as a session lasts, since a
-  stream carries nothing while the screen is still and nobody types;
-- serve Occamy at the root of its host name, since the web client loads
-  `/static/` and calls `/api/v1/` on its own origin.
+### Behind Caddy
 
-[Caddy](https://caddyserver.com/) does all of it by default, and gets a
-certificate for the name itself:
+[Caddy](https://caddyserver.com/) forwards WebSockets and keeps them
+open with its defaults, and gets a certificate for the name itself:
 
 ```
 occamy.example.com {
@@ -213,7 +220,10 @@ occamy.example.com {
 }
 ```
 
-With nginx:
+### Behind nginx
+
+nginx needs to be told to speak HTTP/1.1 to `occamyd` and to pass on
+the upgrade:
 
 ```nginx
 map $http_upgrade $connection_upgrade {
@@ -236,17 +246,9 @@ server {
         proxy_set_header Host $http_host;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
-        proxy_read_timeout 1h;
-        proxy_send_timeout 1h;
     }
 }
 ```
-
-Let only the proxy reach `occamyd`. On the same host, set
-`listen: 127.0.0.1:5636`, or publish the container's port on the
-loopback interface alone, with `-p 127.0.0.1:5636:5636`. `occamyd`'s log
-then names the proxy as each request's peer, since it does not read
-`X-Forwarded-For`.
 
 ### TLS in occamyd
 
@@ -260,75 +262,185 @@ tls:
 ```
 
 Mount the directory with `-v /etc/occamy/tls:/etc/occamy/tls:ro`, and
-make both files readable by uid 65532. `occamyd` takes TLS 1.2 and
-later. It reads the files at start, so restart it after you renew the
-certificate.
+make both files readable by uid 65532. `occamyd` reads the files again
+at the first connection after either changes, so a renewed certificate
+takes effect without a restart, which would end every session. If the
+new files don't load, such as while only one of them has changed,
+`occamyd` keeps the certificate it has and warns in the log.
+
+## Connect Windows hosts
+
+A Windows host needs Remote Desktop turned on, a connection that turns
+off RDP's graphics pipeline, and its certificate pinned.
+
+1. On the Windows host, turn on Remote Desktop in **Settings** >
+   **System** > **Remote Desktop**, and leave **Require devices to use
+   Network Level Authentication to connect** on. Windows Home can't be
+   a Remote Desktop host. Let `occamyd`'s host reach port 3389, which
+   Windows opens in its firewall when you turn Remote Desktop on.
+
+2. Add a connection with `disable_gfx: true`:
+
+    ```yaml
+      - id: windows
+        name: Windows workstation
+        protocol: rdp
+        target: 10.0.4.20
+        disable_gfx: true
+        credentials: {username: 'CORP\alice', password_file: /run/secrets/windows-password}
+        allow: {users: [alice]}
+    ```
+
+    [Windows hosts](configuration.md#windows-hosts) says why Windows
+    needs `disable_gfx`, and [RDP](configuration.md#rdp) how a
+    `DOMAIN\user` signs in.
+
+3. Open the connection once. Windows signs its RDP certificate itself
+   unless you give it one, so `occamyd` refuses it, and the web client
+   says **Could not connect**: “The server doesn't trust the remote
+   computer's certificate.” The log line that ends the session
+   names the certificate and its SHA-256 fingerprint, as in
+   `the server's certificate "CN=WS-0420" (SHA-256 3F:A1:07:…) is not trusted`.
+
+4. Pin that fingerprint on the connection, restart `occamyd`, and open
+   the connection again:
+
+    ```yaml
+        tls: {pins: ["3F:A1:07:5C:92:E4:6B:D8:21:0A:F3:8E:57:C6:19:B4:E2:7D:40:95:A8:1C:6F:D3:0B:72:E9:58:34:AC:66:1F"]}
+    ```
+
+## Kubernetes
+
+`occamyd` can open shells in your cluster's pods, and it can run in a
+cluster itself.
+
+### Open shells in pods
+
+A kubernetes connection opens a terminal in a pod, as `kubectl exec -it`
+does. In place of a kubeconfig, give `occamyd` the API server's
+address, its CA, and the token of a ServiceAccount that may exec into
+the pods:
+
+```sh
+kubectl -n web create serviceaccount occamy
+kubectl -n web create role occamy-exec --verb=get,create --resource=pods/exec
+kubectl -n web create rolebinding occamy-exec --role=occamy-exec --serviceaccount=web:occamy
+kubectl -n web create token occamy --duration=24h > /etc/occamy/k8s-token
+kubectl config view --raw --minify \
+  -o 'jsonpath={.clusters[0].cluster.certificate-authority-data}' | base64 -d > /etc/occamy/k8s-ca.crt
+```
+
+```yaml
+  - id: web-shell
+    name: web-0
+    protocol: kubernetes
+    target: k8s.internal:6443
+    kubernetes: {namespace: web, pod: web-0}
+    tls: {ca_file: /etc/occamy/k8s-ca.crt}
+    credentials: {token_file: /etc/occamy/k8s-token}
+    allow: {users: [alice]}
+```
+
+A token that you renew in the file serves the next session.
+[Kubernetes pods](configuration.md#kubernetes-pods) describes the
+connection's keys, a token that doesn't expire, and the permissions in
+full.
+
+When `occamyd` runs in the same cluster, bind the Role to its own pod's
+ServiceAccount instead, and point the connection at the token, which
+Kubernetes renews, and the CA that it mounts into every pod:
+
+```yaml
+    target: kubernetes.default.svc
+    tls: {ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt}
+    credentials: {token_file: /var/run/secrets/kubernetes.io/serviceaccount/token}
+```
+
+### Run occamyd in a cluster
+
+These parts of a Deployment are particular to Occamy:
+
+```yaml
+spec:
+  replicas: 1
+  strategy: {type: Recreate}
+  template:
+    spec:
+      securityContext: {fsGroup: 65532}
+      containers:
+        - name: occamyd
+          image: ghcr.io/changkun/occamy:v1.0.0-beta.2
+          ports: [{containerPort: 5636}]
+          volumeMounts:
+            - {name: config, mountPath: /occamy/conf.yaml, subPath: conf.yaml}
+            - {name: data, mountPath: /var/lib/occamy}
+          livenessProbe:
+            httpGet: {path: /healthz, port: 5636}
+```
+
+- **One replica**, since every request about a session must reach the
+  `occamyd` that runs it. `Recreate` stops the old pod, and with it the
+  sessions, before the new one starts.
+- **The signing key on a volume.** Mount a PersistentVolumeClaim at
+  `/var/lib/occamy`. `fsGroup: 65532` lets the image's user write to
+  it.
+- **The configuration from a ConfigMap** at `/occamy/conf.yaml`, and
+  passwords from a Secret, as environment variables or files.
+- **The ingress or Gateway** does what a proxy must
+  ([What each hop needs](#what-each-hop-needs)).
+- **The debug listener**, if you turn it on, stays on `localhost:6060`,
+  where `kubectl port-forward` reaches it
+  ([The debug listener](debugging.md#the-debug-listener)).
 
 ## Check its health
 
-`GET /healthz` answers `200` with `{"status":"ok"}` while `occamyd`
-runs. It needs no token, and says only that `occamyd` answers.
+`GET /healthz` answers `200` while `occamyd` serves requests. Check it
+from outside the container, which has no shell and no `curl`, as
+[The health check](debugging.md#the-health-check) describes:
 
 ```sh
 curl -fsS http://localhost:5636/healthz
 ```
 
-The image has no shell and no `curl`, so check it from outside the
-container, such as from a load balancer or a Kubernetes probe:
-
-```yaml
-livenessProbe:
-  httpGet: {path: /healthz, port: 5636}
-```
-
-Add `scheme: HTTPS` when `occamyd` serves TLS itself.
-[Debugging and monitoring](debugging.md) describes the debug listener,
-with `occamyd`'s counters and profiles.
-
 ## Sign in through OIDC
 
 To sign users in through your identity provider, add `auth.oidc` as
 [Signing in through OIDC](configuration.md#signing-in-through-oidc)
-describes. Two of its keys depend on where users reach Occamy:
+describes. Two of its keys depend on the address where users reach
+Occamy:
 
 - `redirect_url` is the callback as browsers reach it, such as
   `https://occamy.example.com/api/v1/auth/oidc/callback`.
 - `return_urls` must list the web client,
-  `https://occamy.example.com/static/`. The default, the origin with the
-  path `/`, is not the web client.
+  `https://occamy.example.com/static/`, which the default doesn't.
 
 ## TCP congestion control
 
-On Linux, `occamyd` asks for BBR on its connections. BBR sends at the
-rate it measures the path to carry, where the kernel's usual default,
-CUBIC, cuts its rate at every lost packet. On a link that loses
-packets, such as Wi-Fi or a long mobile path, a desktop in motion then
-keeps its frame rate, and a key's effect shows sooner
-([Benchmarks](benchmarks.md#step-3a-the-congestion-control)).
+On Linux, `occamyd` asks for BBR on its connections, which keeps a
+desktop's frame rate on a link that loses packets, such as Wi-Fi, where
+the kernel's usual CUBIC cuts its rate at every lost packet
+([Benchmarks](benchmarks.md#bbr-against-cubic)).
 
-The kernel needs BBR's module loaded. `occamyd` needs no privilege to
-use it then. In a container, it is the host's kernel, or the node's,
-that loads it:
+The kernel needs BBR's module loaded, and then `occamyd` needs no
+privilege to use it. In a container, it's the host's kernel, or the
+node's, that loads it:
 
 ```sh
 sudo modprobe tcp_bbr
 echo tcp_bbr | sudo tee /etc/modules-load.d/tcp_bbr.conf   # at every boot
 ```
 
-At start, `occamyd` logs the congestion control its connections use,
-such as `TCP congestion control: bbr`, and publishes it as
-`tcp_congestion` at the debug listener's `/debug/vars`. Without the
-module, it warns and keeps the kernel's choice:
+When it starts, `occamyd` logs the congestion control that its
+connections use, such as `TCP congestion control: bbr`. Without the
+module, it warns and keeps the kernel's choice, as
+[Warnings at start](debugging.md#warnings-at-start) lists:
 
 ```
 warning: congestion_control bbr: the kernel has not loaded it: load its module, tcp_bbr; connections use cubic
 ```
 
-Another congestion control may be one that the kernel allows only to
-privileged processes. The warning then says to add it to
-`net.ipv4.tcp_allowed_congestion_control`. To keep the host's own
-choice, set `congestion_control: system`
-([Configuration](configuration.md#tcp-congestion-control)).
+To keep the host's own choice, set
+[`congestion_control: system`](configuration.md#tcp-congestion-control).
 
 ## Upgrade
 
@@ -350,6 +462,3 @@ choice, set `congestion_control: system`
 3. If `occamyd` refuses the file, its errors name each key to change.
    [Upgrading](configuration.md#upgrading) lists what changed between
    versions.
-
-Sessions end at the restart. The key on the volume keeps users' tokens
-valid.

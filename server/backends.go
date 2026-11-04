@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 
 	"changkun.de/x/occamy/internal/backend"
@@ -48,6 +49,9 @@ type target struct {
 	// kubernetes is the pod of a kubernetes target, whose addr is the
 	// API server's.
 	kubernetes config.Kubernetes
+	// log receives the backend's lines, such as its warnings, and
+	// carries the session's ID; nil means slog.Default().
+	log *slog.Logger
 }
 
 // screen is the size that the owner's hello asks for: pixels for a
@@ -99,6 +103,7 @@ func password(c config.Credentials) (string, error) {
 // connection may have, the owner is asked for one first.
 func newSSH(t target, s screen) (backend.Backend, error) {
 	cfg := ssh.Config{
+		Logger:                t.log,
 		Addr:                  t.addr,
 		User:                  t.creds.Username,
 		HostKeys:              t.hostKeys,
@@ -151,6 +156,7 @@ func vncConfig(t target) (vnc.Config, error) {
 		return vnc.Config{}, fmt.Errorf("reading the CA file: %w", err)
 	}
 	cfg := vnc.Config{
+		Logger:     t.log,
 		Addr:       t.addr,
 		Username:   t.creds.Username,
 		Password:   pw,
@@ -193,6 +199,7 @@ func kubernetesConfig(t target) (kubernetes.Config, error) {
 	}
 	k := t.kubernetes
 	cfg := kubernetes.Config{
+		Logger:      t.log,
 		Addr:        t.addr,
 		Namespace:   k.Namespace,
 		Pod:         k.Pod,
@@ -268,6 +275,7 @@ func rdpConfig(t target) (rdp.Config, error) {
 		return rdp.Config{}, fmt.Errorf("reading the CA file: %w", err)
 	}
 	cfg := rdp.Config{
+		Logger:     t.log,
 		Addr:       t.addr,
 		Username:   t.creds.Username,
 		Password:   pw,

@@ -123,7 +123,7 @@ func Run(f *config.File) error {
 			// Stop listening before the drain, so that a second signal
 			// gets Go's default handling and ends occamyd at once.
 			signal.Stop(sig)
-			log.Printf("received %v; another one stops occamyd at once", s)
+			log.Printf("received %v: shutting down; a second signal stops occamyd at once", s)
 			cancel()
 		case <-ctx.Done():
 		}
@@ -142,7 +142,7 @@ func Run(f *config.File) error {
 	if !s.streams.wait(drainTimeout) {
 		log.Printf("warning: streams still open after a further %v were cut", drainTimeout)
 	}
-	log.Println("occamy is down, good bye!")
+	log.Println("occamyd has stopped")
 	return err
 }
 
@@ -216,15 +216,29 @@ func newServer(f *config.File) (*server, error) {
 	if !ok {
 		return nil, errors.New("auth: the signing key has no Ed25519 public key")
 	}
-	keys := map[string]ed25519.PublicKey{auth.Issuer: pub}
+	issuers := map[string]*reloaded[ed25519.PublicKey]{}
 	for _, ti := range f.Auth.TrustedIssuers {
-		if _, ok := keys[ti.Issuer]; ok {
+		if _, ok := issuers[ti.Issuer]; ok || ti.Issuer == auth.Issuer {
 			// ParseV1 rejects both; a File built another way could slip.
 			return nil, fmt.Errorf("auth.trusted_issuers: %q is occamyd's own issuer or listed twice", ti.Issuer)
 		}
-		if keys[ti.Issuer], err = auth.LoadPublicKey(ti.PublicKeyFile); err != nil {
+		path := ti.PublicKeyFile
+		k, err := newReloaded(fmt.Sprintf("auth.trusted_issuers: the key of %q", ti.Issuer),
+			func() (ed25519.PublicKey, error) { return auth.LoadPublicKey(path) }, path)
+		if err != nil {
 			return nil, err
 		}
+		issuers[ti.Issuer] = k
+	}
+	keys := func(issuer string) (ed25519.PublicKey, bool) {
+		if issuer == auth.Issuer {
+			return pub, true
+		}
+		k, ok := issuers[issuer]
+		if !ok {
+			return nil, false
+		}
+		return k.get(), true
 	}
 	signer := auth.NewSigner(key, auth.Issuer, auth.Audience)
 	signIn, err := newStaticUsers(f.Auth.Users, signer, f.Auth.AccessTokenLifetime)
@@ -236,7 +250,7 @@ func newServer(f *config.File) (*server, error) {
 	registry := session.NewRegistry(ctx)
 	registry.MaxShares = limits.SharesPerSession
 	s := &server{
-		verifier:    auth.NewVerifier(auth.Audience, keys),
+		verifier:    auth.NewVerifierFunc(auth.Audience, keys),
 		signer:      signer,
 		ids:         newIdentities(f),
 		signIn:      signIn,
@@ -274,11 +288,19 @@ func newServer(f *config.File) (*server, error) {
 		}
 	}
 	if f.TLS.Cert != "" || f.TLS.Key != "" {
-		cert, err := tls.LoadX509KeyPair(f.TLS.Cert, f.TLS.Key)
+		cert, err := newReloaded("tls: the certificate", func() (*tls.Certificate, error) {
+			c, err := tls.LoadX509KeyPair(f.TLS.Cert, f.TLS.Key)
+			return &c, err
+		}, f.TLS.Cert, f.TLS.Key)
 		if err != nil {
 			return nil, fmt.Errorf("tls: %w", err)
 		}
-		s.tls = &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}}
+		s.tls = &tls.Config{
+			MinVersion: tls.VersionTLS12,
+			GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
+				return cert.get(), nil
+			},
+		}
 	}
 	if f.Auth.OIDC != nil {
 		if s.oidc, err = newOIDC(f, signer, s.tls != nil); err != nil {

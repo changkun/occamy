@@ -134,7 +134,7 @@ describe('start', () => {
   it('says why an OIDC sign-in failed', () => {
     expect(start({ kind: 'oidc-error', error: 'access_denied' }, api().api, storage())).toEqual({
       kind: 'oidc-error',
-      message: 'The identity provider or occamyd refused this user.',
+      message: 'Your identity provider or the server didn’t allow this account to sign in.',
     })
   })
 })

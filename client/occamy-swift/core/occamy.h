@@ -63,6 +63,7 @@ typedef struct {
 // Why occamy_dial failed.
 typedef struct {
   int32_t close_code; // the server's close code if it closed the connection, such as 4000 unauthorized; else 0
+  char *close_reason; // the server's reason if it closed the connection, such as "failed"; else NULL
   char *message;      // for people and logs
   char *session_id;   // the session the server made and the client refused, which the caller may end; or NULL
 } occamy_dial_error;

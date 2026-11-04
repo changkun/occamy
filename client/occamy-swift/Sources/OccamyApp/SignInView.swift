@@ -44,7 +44,7 @@ struct SignInView: View {
                     .textContentType(.password)
                 Toggle("Remember the password in the Keychain", isOn: $remember)
             } footer: {
-                Text("occamyd's sign-ins last minutes; with the password remembered, the app signs in again by itself.")
+                Text("A sign-in expires after a short time. With the password remembered, the app signs in again on its own.")
                     .foregroundStyle(.secondary)
             }
             if oidc {

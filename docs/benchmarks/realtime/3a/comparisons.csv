@@ -1,4 +1,4 @@
-family,baseline,candidate,study,factor,scenario,protocol,net,metric,primary,n_baseline,n_candidate,times_better,lo,hi,coverage,p,p_adjusted
+family,baseline,candidate,study,factor,scenario,protocol,net,metric,primary,n_baseline,n_candidate,improvement,lo,hi,coverage,p,p_adjusted
 Congestion control,v1-native,v1-native-bbr,loss,loss=0%,T1,ssh,N1,latency_p95,True,8,8,1.000606704311288,0.9965688320118701,1.0057693202438003,0.9501165501165502,0.5928515928515928,1.0
 Congestion control,v1-native,v1-native-bbr,loss,loss=0%,T1,ssh,N1,latency_p50,False,8,8,0.9962099722565707,0.9938376943496398,1.0005215494760797,0.9501165501165502,0.09992229992229992,nan
 Congestion control,v1-native,v1-native-bbr,loss,loss=0%,T1,ssh,N1,server_mem,False,8,8,1.021866367146646,0.6819672131147542,3.375579598145286,0.9501165501165502,0.7002331002331003,nan

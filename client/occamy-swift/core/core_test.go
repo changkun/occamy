@@ -375,8 +375,13 @@ func TestDialErrors(t *testing.T) {
 	if r.Result != resErr || r.CloseCode != int(protocol.CloseUnauthorized) || r.Message == "" {
 		t.Errorf("a wrong token: %+v", r)
 	}
+	// The app tells an end from the server's reason, which must come
+	// alone, not inside the client's error.
+	if r.CloseReason == "" || strings.Contains(r.CloseReason, "client:") || !strings.Contains(r.Message, r.CloseReason) {
+		t.Errorf("a wrong token's close reason: %+v", r)
+	}
 	r = callDial("ws://127.0.0.1:1/nothing", token, nil, 10_000)
-	if r.Result != resErr || r.CloseCode != 0 || !strings.Contains(r.Message, "dial") {
+	if r.Result != resErr || r.CloseCode != 0 || r.CloseReason != "" || !strings.Contains(r.Message, "dial") {
 		t.Errorf("nothing listening: %+v", r)
 	}
 	if r := callDialNil(); r.Result != resErr || r.Message == "" {

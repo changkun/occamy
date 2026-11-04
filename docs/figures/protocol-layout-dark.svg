@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="768" height="262" viewBox="0 0 768 262">
+<rect width="768" height="262" fill="#1a1a19"/>
+<path d="M 26 38 L 26 30 L 182 30 L 182 38" fill="none" stroke="#c3c2b7" stroke-width="1.5"/>
+<text x="104.0" y="23" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#f0efec" text-anchor="middle">Header, 4 bytes</text>
+<path d="M 186 38 L 186 30 L 742 30 L 742 38" fill="none" stroke="#c3c2b7" stroke-width="1.5"/>
+<text x="464.0" y="23" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#f0efec" text-anchor="middle">Body: the fields of text, in order</text>
+<text x="64.0" y="68" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="600" fill="#f0efec" text-anchor="middle">type</text>
+<text x="64.0" y="83" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#c3c2b7" text-anchor="middle">u16</text>
+<rect x="25" y="92" width="38" height="34" rx="3" fill="#9085e9" stroke="#9085e9" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="44.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">03</text>
+<rect x="65" y="92" width="38" height="34" rx="3" fill="#9085e9" stroke="#9085e9" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="84.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">01</text>
+<text x="27" y="142" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#898781" text-anchor="start">0</text>
+<text x="64.0" y="164" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#f0efec" text-anchor="middle">0x0103: text</text>
+<text x="144.0" y="68" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="600" fill="#f0efec" text-anchor="middle">flags</text>
+<text x="144.0" y="83" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#c3c2b7" text-anchor="middle">u16</text>
+<rect x="105" y="92" width="38" height="34" rx="3" fill="#9085e9" stroke="#9085e9" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="124.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">00</text>
+<rect x="145" y="92" width="38" height="34" rx="3" fill="#9085e9" stroke="#9085e9" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="164.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">00</text>
+<text x="107" y="142" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#898781" text-anchor="start">2</text>
+<text x="144.0" y="164" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#f0efec" text-anchor="middle">0</text>
+<text x="264.0" y="68" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="600" fill="#f0efec" text-anchor="middle">seq</text>
+<text x="264.0" y="83" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#c3c2b7" text-anchor="middle">u32</text>
+<rect x="185" y="92" width="38" height="34" rx="3" fill="#3987e5" stroke="#3987e5" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="204.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">03</text>
+<rect x="225" y="92" width="38" height="34" rx="3" fill="#3987e5" stroke="#3987e5" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="244.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">00</text>
+<rect x="265" y="92" width="38" height="34" rx="3" fill="#3987e5" stroke="#3987e5" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="284.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">00</text>
+<rect x="305" y="92" width="38" height="34" rx="3" fill="#3987e5" stroke="#3987e5" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="324.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">00</text>
+<text x="187" y="142" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#898781" text-anchor="start">4</text>
+<text x="264.0" y="164" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#f0efec" text-anchor="middle">3</text>
+<text x="424.0" y="68" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="600" fill="#f0efec" text-anchor="middle">length</text>
+<text x="424.0" y="83" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#c3c2b7" text-anchor="middle">u32</text>
+<rect x="345" y="92" width="38" height="34" rx="3" fill="#199e70" stroke="#199e70" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="364.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">06</text>
+<rect x="385" y="92" width="38" height="34" rx="3" fill="#199e70" stroke="#199e70" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="404.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">00</text>
+<rect x="425" y="92" width="38" height="34" rx="3" fill="#199e70" stroke="#199e70" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="444.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">00</text>
+<rect x="465" y="92" width="38" height="34" rx="3" fill="#199e70" stroke="#199e70" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="484.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">00</text>
+<text x="347" y="142" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#898781" text-anchor="start">8</text>
+<text x="424.0" y="164" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#f0efec" text-anchor="middle">6 bytes follow</text>
+<text x="624.0" y="68" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="600" fill="#f0efec" text-anchor="middle">text</text>
+<text x="624.0" y="83" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#c3c2b7" text-anchor="middle">UTF-8</text>
+<rect x="505" y="92" width="38" height="34" rx="3" fill="#199e70" stroke="#199e70" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="524.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">e6</text>
+<rect x="545" y="92" width="38" height="34" rx="3" fill="#199e70" stroke="#199e70" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="564.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">97</text>
+<rect x="585" y="92" width="38" height="34" rx="3" fill="#199e70" stroke="#199e70" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="604.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">a5</text>
+<rect x="625" y="92" width="38" height="34" rx="3" fill="#199e70" stroke="#199e70" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="644.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">e6</text>
+<rect x="665" y="92" width="38" height="34" rx="3" fill="#199e70" stroke="#199e70" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="684.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">9c</text>
+<rect x="705" y="92" width="38" height="34" rx="3" fill="#199e70" stroke="#199e70" stroke-width="1.2" fill-opacity="0.16"/>
+<text x="724.0" y="114" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="500" fill="#f0efec" text-anchor="middle">ac</text>
+<text x="507" y="142" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#898781" text-anchor="start">12</text>
+<text x="624.0" y="164" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#f0efec" text-anchor="middle">日本</text>
+<text x="741" y="142" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#898781" text-anchor="end">17</text>
+<rect x="24" y="202" width="12" height="12" rx="2" fill="#9085e9" stroke="#9085e9" stroke-width="1" fill-opacity="0.3"/>
+<text x="42" y="212" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">The header</text>
+<rect x="164" y="202" width="12" height="12" rx="2" fill="#3987e5" stroke="#3987e5" stroke-width="1" fill-opacity="0.3"/>
+<text x="182" y="212" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">A fixed-size field</text>
+<rect x="334" y="202" width="12" height="12" rx="2" fill="#199e70" stroke="#199e70" stroke-width="1" fill-opacity="0.3"/>
+<text x="352" y="212" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">A variable-size field: its length, then its bytes</text>
+<text x="24" y="240" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">Integers are little-endian, so 03 01 is 0x0103. The small numbers are byte offsets.</text>
+</svg>

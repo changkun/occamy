@@ -41,7 +41,7 @@ const DefaultEncodeCacheBytes = 32 << 20
 // there are fewer than four, none on one. On the corpus, four or nine
 // sent a photograph sooner, but a browser page no sooner and text
 // within the runs' spread, for more CPU time
-// (docs/benchmarks/encode-cache.md).
+// (specs/008-native-architecture/measurements/encode-cache.md).
 func DefaultEncodeWorkers() int { return min(2, runtime.GOMAXPROCS(0)/2) }
 
 // profile is what an encoder of internal/encoder sends tiles in, its

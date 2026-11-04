@@ -66,7 +66,7 @@ export function SignIn({ api, storage, message, notice, pending, resume, onSigne
       (err: unknown) => {
         if (live) {
           setBusy(false)
-          setError(err instanceof ApiError && err.code === 'unauthorized' ? 'The sign-in took too long or was used already. Sign in again.' : errorMessage(err))
+          setError(err instanceof ApiError && err.code === 'unauthorized' ? 'The sign-in took too long, or it was already used. Sign in again.' : errorMessage(err))
         }
       },
     )
@@ -93,7 +93,7 @@ export function SignIn({ api, storage, message, notice, pending, resume, onSigne
     try {
       const verifier = newVerifier()
       if (!saveVerifier(storage, verifier) || !saveResume(storage, resume)) {
-        throw new Error('This browser keeps no session storage for the page, which single sign-on needs.')
+        throw new Error('Single sign-on needs session storage, which your browser doesn’t allow for this page.')
       }
       location.assign(loginURL(pageURL(location), await challengeOf(verifier)))
     } catch (err) {
@@ -105,7 +105,7 @@ export function SignIn({ api, storage, message, notice, pending, resume, onSigne
   const form = (
     <form className="sign-in" onSubmit={(e) => void submit(e)} aria-busy={busy} aria-describedby={error === '' ? undefined : 'sign-in-error'}>
       {over ? <h2 id="sign-in-title">Sign in again</h2> : <h2>Sign in</h2>}
-      <p className="lead">{over ? 'The session goes on while you sign in.' : 'Open a remote desktop or terminal.'}</p>
+      <p className="lead">{over ? 'Your session keeps running while you sign in.' : 'Open a remote desktop or terminal.'}</p>
       {notice !== '' && (
         <div className="notice">
           <p role="status">{notice}</p>

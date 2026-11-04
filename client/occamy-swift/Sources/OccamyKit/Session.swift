@@ -40,6 +40,9 @@ public struct DialError: Error, Sendable, LocalizedError {
     /// The server's close code if it closed the connection, such as 4000
     /// for a token it refused; else 0.
     public var closeCode: Int
+    /// The server's reason if it closed the connection, such as
+    /// "failed" for close code 4006; else empty.
+    public var closeReason: String = ""
     public var message: String
     /// The session the server made and the client refused, which the
     /// caller may end through API v1.
@@ -127,8 +130,8 @@ public final class Session: @unchecked Sendable {
             occamy_dial(url.absoluteString, token, opts, ms, &out, &err)
         }
         guard res == OCCAMY_OK else {
-            throw DialError(closeCode: Int(err.close_code), message: string(err.message) ?? "occamy: dial failed",
-                            sessionID: string(err.session_id))
+            throw DialError(closeCode: Int(err.close_code), closeReason: string(err.close_reason) ?? "",
+                            message: string(err.message) ?? "occamy: dial failed", sessionID: string(err.session_id))
         }
         handle = out
         var info = occamy_session_info()

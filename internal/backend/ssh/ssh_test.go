@@ -314,6 +314,32 @@ func TestKeyboardInteractiveUnanswered(t *testing.T) {
 	}
 }
 
+// A server that refuses the password or the key fails Run with
+// ErrAuthFailed, which tells it from a server that can't be reached.
+func TestAuthRefused(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		opts serverOptions
+		cfg  func(*testing.T, *ssh.Config)
+	}{
+		{"password", serverOptions{password: "hunter2"}, func(_ *testing.T, c *ssh.Config) { c.Password = "wrong" }},
+		{"key", serverOptions{clientKey: newSigner(t, newEd25519(t)).PublicKey()}, func(t *testing.T, c *ssh.Config) {
+			c.KeyFiles = []string{writeKeyFile(t, newEd25519(t), "")}
+		}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			checkGoroutines(t)
+			srv := newServer(t, tt.opts)
+			cfg := ssh.Config{Addr: srv.addr, User: "alice", HostKeys: pin(srv)}
+			tt.cfg(t, &cfg)
+			err := start(t, newBackend(t, cfg), &backendtest.Sink{}).wait(t)
+			if !errors.Is(err, ssh.ErrAuthFailed) {
+				t.Errorf("Run = %v, want ssh.ErrAuthFailed", err)
+			}
+		})
+	}
+}
+
 func TestKeyboardInteractivePassword(t *testing.T) {
 	hidden := []question{{prompt: "Password: ", echo: false, answer: "hunter2"}}
 	for _, tt := range []struct {

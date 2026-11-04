@@ -49,7 +49,7 @@ export function base64url(bytes: Uint8Array): string {
 /** challengeOf returns the S256 challenge of a verifier: its SHA-256 in base64url. */
 export async function challengeOf(verifier: string): Promise<string> {
   if (globalThis.crypto?.subtle === undefined) {
-    throw new Error('this page is not a secure context, so it cannot sign in through OIDC: serve occamyd over https')
+    throw new Error('Single sign-on works only on a page served over HTTPS. Ask the server’s administrator to serve Occamy over HTTPS.')
   }
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
   return base64url(new Uint8Array(digest))
@@ -86,12 +86,12 @@ export function takeVerifier(storage: Storage | undefined): string | null {
 export function oidcErrorMessage(code: string): string {
   switch (code) {
     case 'access_denied':
-      return 'The identity provider or occamyd refused this user.'
+      return 'Your identity provider or the server didn’t allow this account to sign in.'
     case 'sign_in_failed':
-      return 'The identity provider failed, or its answer did not verify.'
+      return 'The identity provider reported an error, or its response couldn’t be verified. Try again.'
     case 'unavailable':
-      return 'The identity provider cannot be reached right now. Try again later.'
+      return 'The identity provider can’t be reached right now. Try again later.'
     default:
-      return 'The sign-in failed.'
+      return 'The sign-in failed. Try again.'
   }
 }

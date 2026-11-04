@@ -47,6 +47,13 @@ const maxPings = 16
 // reading would otherwise hold the stream open.
 const closeTimeout = time.Second
 
+// keepalive is how long a stream may go without a message before the
+// writer sends a ping. A proxy drops a connection that carries nothing
+// for a while, such as nginx after its proxy_read_timeout of 60 seconds
+// or a cloud load balancer after its idle timeout, and a still screen or
+// a quiet terminal sends nothing.
+const keepalive = 25 * time.Second
+
 // writer sends a viewer the session's state. Its run loop owns the
 // pacer and what was sent; the reader shares only acks, the latest ping
 // and wake-ups.
@@ -60,6 +67,11 @@ type writer struct {
 	limits protocol.Limits
 	log    *slog.Logger
 	start  time.Time
+
+	// lastSent is when the last message went to the client, and nonce
+	// the last keepalive ping's.
+	lastSent time.Time
+	nonce    uint32
 
 	acks  *acks
 	poke  chan struct{} // holds a token when the reader has news
@@ -236,7 +248,9 @@ func newWriter(c Conn, v *session.Viewer, p *pacer.Pacer, enc Encoder, l protoco
 		log:    log,
 		start:  time.Now(),
 		acks:   newAcks(),
-		poke:   make(chan struct{}, 1),
+
+		lastSent: time.Now(), // the welcome
+		poke:     make(chan struct{}, 1),
 
 		refineDelay: DefaultRefineDelay,
 		scale:       1,
@@ -266,7 +280,25 @@ func (w *writer) write(ctx context.Context, m message) error {
 		w.log.Warn("message dropped", "type", m.Type(), "err", err)
 		return nil
 	}
-	return w.c.WriteMessage(ctx, w.sbuf)
+	return w.send(ctx, w.sbuf)
+}
+
+// send sends p to the client.
+func (w *writer) send(ctx context.Context, p []byte) error {
+	err := w.c.WriteMessage(ctx, p)
+	w.lastSent = time.Now()
+	return err
+}
+
+// ping sends a ping, so that a stream with nothing else to send still
+// carries a message each keepalive. The client answers with a pong,
+// which counts as no input.
+func (w *writer) ping(ctx context.Context) error {
+	w.nonce++
+	return w.write(ctx, protocol.Ping{
+		Nonce: w.nonce,
+		Time:  uint64(time.Since(w.start).Microseconds()), // #nosec G115 -- durations since the start are positive
+	})
 }
 
 // run sends frames until the session ends or ctx is done.
@@ -482,7 +514,7 @@ func (w *writer) sendFrame(ctx context.Context, order []int, input bool) error {
 					return err
 				}
 			}
-			if err := w.c.WriteMessage(ctx, w.buf); err != nil {
+			if err := w.send(ctx, w.buf); err != nil {
 				return err
 			}
 			w.p.Wrote(time.Now(), len(w.buf))
@@ -797,14 +829,19 @@ func (w *writer) stallLeft() (time.Duration, bool) {
 
 // wait blocks until there is news: small state, the reader's, an ack, a
 // change on changed, or d passing if positive. It returns ErrStalled
-// once frames have waited for an ack for the stall timeout.
+// once frames have waited for an ack for the stall timeout. A wait that
+// would leave the stream quiet for the keepalive sends a ping instead,
+// and returns.
 func (w *writer) wait(ctx context.Context, changed <-chan struct{}, d time.Duration) error {
-	var timer <-chan time.Time
-	if d > 0 {
-		t := time.NewTimer(d)
-		defer t.Stop()
-		timer = t.C
+	quiet := keepalive - time.Since(w.lastSent)
+	if quiet <= 0 {
+		return w.ping(ctx)
 	}
+	if d <= 0 || quiet < d {
+		d = quiet
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
 	var stall <-chan time.Time
 	if left, ok := w.stallLeft(); ok {
 		if left <= 0 {
@@ -825,7 +862,7 @@ func (w *writer) wait(ctx context.Context, changed <-chan struct{}, d time.Durat
 		return w.small(ctx)
 	case <-w.acks.wake:
 	case <-changed:
-	case <-timer:
+	case <-t.C:
 	}
 	return nil
 }

@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="452" viewBox="0 0 760 452">
+<rect width="760" height="452" fill="#fcfcfb"/>
+<defs><marker id="head-client" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2a78d6"/></marker><marker id="head-occamy" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#6250d6"/></marker><marker id="head-remote" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#1baf7a"/></marker><marker id="head-private" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#eb6834"/></marker><marker id="head-infra" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#898781"/></marker></defs>
+<rect x="206" y="40" width="538" height="360" rx="12" fill="none" stroke="#c3c2b7" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="222" y="64" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#52514e" text-anchor="start">The demo stack: the compose project occamy</text>
+<rect x="16" y="122" width="134" height="72" rx="8" fill="#2a78d6" stroke="#2a78d6" stroke-width="1.5" fill-opacity="0.13"/>
+<text x="28" y="144" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="start">Browser</text>
+<text x="28" y="163" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start">the web client</text>
+<rect x="16" y="256" width="134" height="72" rx="8" fill="#eb6834" stroke="#eb6834" stroke-width="1.5" stroke-dasharray="4 3" fill-opacity="0.07"/>
+<text x="28" y="278" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="start">Your shell</text>
+<text x="28" y="297" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start">curl, go tool</text>
+<text x="28" y="314" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start">pprof</text>
+<rect x="250" y="110" width="172" height="218" rx="8" fill="#6250d6" stroke="#6250d6" stroke-width="1.5" fill-opacity="0.13"/>
+<text x="262" y="132" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="start">occamy-v1</text>
+<text x="262" y="151" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start">occamyd and</text>
+<text x="262" y="168" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start">the web client</text>
+<text x="262" y="185" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start"></text>
+<text x="262" y="202" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#52514e" text-anchor="start">docker/</text>
+<text x="262" y="219" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#52514e" text-anchor="start">occamy-v1.yaml</text>
+<line x1="336" y1="328" x2="336" y2="344" stroke="#6250d6" stroke-width="1.2"/>
+<rect x="250" y="344" width="172" height="26" rx="5" fill="#6250d6" stroke="#6250d6" stroke-width="1" fill-opacity="0.07"/>
+<text x="260" y="361" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#0b0b0b" text-anchor="start">occamy-v1-data</text>
+<text x="413" y="361" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#52514e" text-anchor="end">signing key</text>
+<line x1="150" y1="158" x2="248" y2="158" stroke="#2a78d6" stroke-width="1.6" marker-end="url(#head-client)"/>
+<text x="199" y="150" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="500" fill="#0b0b0b" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">127.0.0.1:5637</text>
+<line x1="150" y1="292" x2="248" y2="292" stroke="#eb6834" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#head-private)"/>
+<text x="199" y="284" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="500" fill="#0b0b0b" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">127.0.0.1:5638</text>
+<text x="199" y="310" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="10.5" font-weight="500" fill="#52514e" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">OCCAMY_DEBUG=1</text>
+<rect x="528" y="104" width="200" height="116" rx="8" fill="#1baf7a" stroke="#1baf7a" stroke-width="1.5" fill-opacity="0.13"/>
+<text x="540" y="126" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="start">desktop</text>
+<text x="540" y="145" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start">XFCE with Firefox</text>
+<text x="540" y="162" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start">a session for each port</text>
+<text x="540" y="179" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#52514e" text-anchor="start">:5900 VNC, :3389 RDP</text>
+<rect x="528" y="234" width="200" height="76" rx="8" fill="#1baf7a" stroke="#1baf7a" stroke-width="1.5" fill-opacity="0.13"/>
+<text x="540" y="256" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="start">ssh</text>
+<text x="540" y="275" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start">an OpenSSH server</text>
+<text x="540" y="292" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#52514e" text-anchor="start">:22</text>
+<line x1="422" y1="150" x2="526" y2="150" stroke="#1baf7a" stroke-width="1.6" marker-end="url(#head-remote)"/>
+<text x="474" y="142" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="500" fill="#0b0b0b" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">desktop:5900</text>
+<line x1="422" y1="190" x2="526" y2="190" stroke="#1baf7a" stroke-width="1.6" marker-end="url(#head-remote)"/>
+<text x="474" y="182" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="500" fill="#0b0b0b" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">desktop:3389</text>
+<line x1="422" y1="271" x2="526" y2="271" stroke="#1baf7a" stroke-width="1.6" marker-end="url(#head-remote)"/>
+<text x="474" y="263" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="500" fill="#0b0b0b" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">ssh:22</text>
+<rect x="448" y="322" width="280" height="62" rx="8" fill="none" stroke="#898781" stroke-width="1.2" stroke-dasharray="4 3"/>
+<text x="460" y="342" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#52514e" text-anchor="start">For the end-to-end tests only</text>
+<rect x="460" y="350" width="64" height="26" rx="5" fill="#898781" stroke="#898781" stroke-width="1" fill-opacity="0.07"/>
+<text x="470" y="367" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#0b0b0b" text-anchor="start">vnc</text>
+<rect x="532" y="350" width="104" height="26" rx="5" fill="#898781" stroke="#898781" stroke-width="1" fill-opacity="0.07"/>
+<text x="542" y="367" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#0b0b0b" text-anchor="start">tigervnc</text>
+<rect x="644" y="350" width="72" height="26" rx="5" fill="#898781" stroke="#898781" stroke-width="1" fill-opacity="0.07"/>
+<text x="654" y="367" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#0b0b0b" text-anchor="start">rdp</text>
+<text x="16" y="436" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#52514e" text-anchor="start">Only occamy-v1 is published, on the loopback interface. Inside the stack, the containers reach each other by service name.</text>
+</svg>

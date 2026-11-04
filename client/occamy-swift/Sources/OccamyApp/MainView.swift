@@ -41,7 +41,7 @@ struct MainView: View {
                 ContentUnavailableView {
                     Label("No Server", systemImage: "server.rack")
                 } description: {
-                    Text("Add an occamyd server to see the connections it offers you.")
+                    Text("Add an Occamy server to see the connections it offers you.")
                 } actions: {
                     Button("Add Server…") { store.signingIn = .init() }
                 }
@@ -54,7 +54,7 @@ struct MainView: View {
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Button("Add Server", systemImage: "plus") { store.signingIn = .init() }
-                    .help("Add an occamyd server")
+                    .help("Add an Occamy server")
             }
         }
         .searchable(text: $query, placement: .toolbar, prompt: "Search or enter an address")
@@ -69,7 +69,7 @@ struct MainView: View {
                 }
             }
         }
-        .alert("Cannot Open", isPresented: Binding { problem != nil } set: { if !$0 { problem = nil } }) {
+        .alert("Cannot Open Address", isPresented: Binding { problem != nil } set: { if !$0 { problem = nil } }) {
             Button("OK") { problem = nil }
         } message: {
             Text(problem ?? "")
@@ -88,7 +88,7 @@ struct MainView: View {
         }
         if let target = AdHocTarget(address: query) {
             guard store.connections[server.id]?.adhocTargets == true else {
-                problem = "\(server.name) does not open addresses of its own choosing, only its connections."
+                problem = "\(server.name) opens only the connections it lists, not addresses you enter."
                 return
             }
             if target.protocol == "ssh" {
@@ -131,7 +131,7 @@ struct ConnectionsView: View {
                 if shown.isEmpty {
                     if query.isEmpty {
                         ContentUnavailableView("No Connections", systemImage: "rectangle.on.rectangle.slash",
-                                               description: Text("\(server.name) offers you no connections."))
+                                               description: Text("\(server.name) has no connections available to you."))
                     } else if AdHocTarget(address: query) != nil {
                         ContentUnavailableView("Open \(query)", systemImage: "arrow.right.circle",
                                                description: Text("Press Return to open the address."))
@@ -162,7 +162,7 @@ struct ConnectionsView: View {
             }
         }
         .navigationTitle(server.name)
-        .navigationSubtitle(store.connections[server.id]?.adhocTargets == true ? "Takes addresses: vnc://, rdp://, ssh://" : "")
+        .navigationSubtitle(store.connections[server.id]?.adhocTargets == true ? "Opens vnc://, rdp:// and ssh:// addresses" : "")
         .task(id: server.id) { await store.refresh(server) }
         .toolbar {
             ToolbarItem {
@@ -262,7 +262,7 @@ struct HostKeyView: View {
             } header: {
                 Text("How should \(target.target) prove who it is?")
             } footer: {
-                Text("Without a host key, a machine in the middle could pose as the server. `ssh-keyscan` or the server's administrator gives its key.")
+                Text("Without a host key, a machine in the middle could pose as the server. Get the key with `ssh-keyscan`, or ask the server's administrator for it.")
                     .foregroundStyle(.secondary)
             }
         }

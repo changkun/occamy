@@ -65,11 +65,15 @@ func NewRegistry(ctx context.Context) *Registry {
 	}
 }
 
-// Open starts a session and returns its ID, the session and the owner's
-// viewer. Each line the session logs carries its ID as session=, so that
-// an operator can match it with the server's lines about the session.
+// Open starts a session and returns its ID, cfg.ID or a new one, the
+// session and the owner's viewer. Each line the session logs carries its
+// ID as session=, so that an operator can match it with the server's
+// lines about the session.
 func (r *Registry) Open(cfg Config) (id string, s *Session, owner *Viewer, err error) {
-	id = randomID(16)
+	id = cfg.ID
+	if id == "" {
+		id = NewID()
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
@@ -179,6 +183,11 @@ func (r *Registry) remove(id string) {
 		delete(r.shares, k)
 	}
 	delete(r.byID, id)
+}
+
+// NewID returns a new session ID: 16 random bytes in unpadded base64url.
+func NewID() string {
+	return randomID(16)
 }
 
 // randomID returns n random bytes in unpadded base64url.

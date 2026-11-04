@@ -97,6 +97,43 @@ private func json(_ d: Data?) -> [String: Any] {
         }
     }
 
+    /// The errors the app shows say what happened in sentences of its
+    /// own where it knows the code, as the web client's do, while message
+    /// keeps the server's words for the codes a call does not explain.
+    @Test func descriptions() async {
+        let api = Mock.api("https://descriptions.test/") { r, _ in
+            switch r.url?.path() {
+            case "/api/v1/auth/token":
+                (401, #"{"error":{"code":"unauthorized","message":"wrong user name or password"}}"#)
+            case "/api/v1/connections":
+                (401, #"{"error":{"code":"token_expired","message":"the access token has expired"}}"#)
+            default:
+                (404, #"{"error":{"code":"not_found","message":"no such session"}}"#)
+            }
+        }
+        do {
+            _ = try await api.signIn(username: "demo", password: "nope")
+            Issue.record("a wrong password passed")
+        } catch {
+            #expect(error.localizedDescription == "The user name or password is wrong.")
+        }
+        do {
+            _ = try await api.connections(token: "old")
+            Issue.record("an expired token passed")
+        } catch let e as APIError {
+            #expect(e.message == "the access token has expired")
+            #expect(e.localizedDescription == "Your sign-in has expired. Sign in again.")
+        } catch {
+            Issue.record("\(error)")
+        }
+        do {
+            _ = try await api.share(session: "gone", role: .viewer, token: "t")
+            Issue.record("a share of no session passed")
+        } catch {
+            #expect(error.localizedDescription == "The session has ended, or it isn't yours.")
+        }
+    }
+
     @Test func connections() async throws {
         let api = Mock.api("https://connections.test") { r, _ in
             guard r.value(forHTTPHeaderField: "Authorization") == "Bearer t" else {

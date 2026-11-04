@@ -904,7 +904,7 @@ say what the harness does now.
     ([the harness for the v1 run](#implementation-notes-the-harness-for-the-v1-run)),
     with the prompt that the shell shows anyway as its known line. G7's
     baselines are measured again.
-  - ~~Owner question: whether the v1.0 gate of 10x over guacd is a flat
+  - ~~Open question: whether the v1.0 gate of 10x over guacd is a flat
     10x or each target as defined.~~ Answered on 2026-10-31: each
     target as defined, a miss of 10x only where a documented bound
     outside Occamy makes it impossible ([Targets](#targets)).
@@ -957,4 +957,6 @@ say what the harness does now.
   `guacd,v1-native`. guacd runs only in the bench stack's overlay,
   `docker/docker-compose.bench.yaml`.
 - **Recorded results.** The results under `docs/benchmarks/` keep their
-  retired series, and `bench/report.py` still renders them.
+  retired series, and `bench/report.py` still renders them. The tables
+  that `docs/benchmarks.md` showed before beta.2, measured through
+  guacd, are in that page's history.

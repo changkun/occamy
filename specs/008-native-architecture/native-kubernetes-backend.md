@@ -107,7 +107,7 @@ registration). Four things need deciding:
 
 ## No Kubernetes SDK, and what that leaves out
 
-The owner asked why there is no client-go. The backend makes one
+The backend makes one
 request: pod exec (or attach), upgraded to a WebSocket whose messages
 carry a one-byte channel prefix. `coder/websocket` is already a
 dependency, and the framing is small enough to fuzz whole. client-go

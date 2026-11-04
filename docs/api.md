@@ -1,171 +1,329 @@
 # HTTP API v1
 
-This page is the reference for writing a client of `occamyd`. A client
-signs a user in, lists the connections the user may open, opens or
-joins a session, and shares it. The JSON routes live under `/api/v1`.
-A session itself streams over a WebSocket that carries
-[protocol v1](protocol.md).
+The HTTP API of `occamyd` signs users in, opens remote sessions, shares
+them, and streams each one to the people who watch it. This page
+explains how its parts fit together, walks through what a client does,
+and specifies every route, so that you can write a client or automate
+Occamy.
 
-`occamyd` serves the API on `listen` (`:5636` by default). It speaks
-HTTPS when `tls.cert` and `tls.key` are set, and plain HTTP otherwise,
-for a reverse proxy that terminates TLS. It speaks HTTP/1.1 only,
-because it upgrades the streams from HTTP/1.1.
-[configuration.md](configuration.md) describes the keys that turn
-routes on and set their limits. [openapi.yaml](openapi.yaml) describes
-the same routes in OpenAPI 3.1, for tools that generate clients.
+## How the API works
 
-| Route | Token | Served |
-|-------|-------|--------|
-| [`GET /healthz`](#get-healthz) | none | always |
-| [`GET /api/v1/auth/methods`](#get-apiv1authmethods) | none | always |
-| [`POST /api/v1/auth/token`](#post-apiv1authtoken) | none | always |
-| [`GET /api/v1/auth/oidc/login`](#get-apiv1authoidclogin) | none, from a browser | with `auth.oidc` |
-| [`GET /api/v1/auth/oidc/callback`](#get-apiv1authoidccallback) | none, from the provider through the browser | with `auth.oidc` |
-| [`POST /api/v1/auth/oidc/token`](#post-apiv1authoidctoken) | none | with `auth.oidc` |
-| [`GET /api/v1/connections`](#get-apiv1connections) | access token | always |
-| [`POST /api/v1/sessions`](#post-apiv1sessions) | access token | always |
-| [`GET /api/v1/sessions/{id}`](#get-apiv1sessionsid) | the owner's access token | always |
-| [`DELETE /api/v1/sessions/{id}`](#delete-apiv1sessionsid) | the owner's access token | always |
-| [`POST /api/v1/sessions/{id}/shares`](#post-apiv1sessionsidshares) | the owner's access token | always |
-| [`GET /api/v1/connections/{id}/stream`](#get-apiv1connectionsidstream) | access token | always |
-| [`GET /api/v1/sessions/{id}/stream`](#get-apiv1sessionsidstream) | access token, session token or share | always |
-| [`GET /static/`](#get-static) | none, from a browser | with `web_client` |
-| [`GET /debug/vars`](#get-debugvars) and `/debug/pprof/` | none | with `debug.address`, on that listener only |
+A *connection* is a remote computer that the configuration file lists,
+with the users and groups who may open it. Opening one starts a
+*session*, a live connection to the remote inside `occamyd` that
+several people can watch at once. The user who opens it is its
+*owner*. Others join as *viewers*, who type and point as the owner
+does, or as *read-only viewers*, who only watch. The owner invites them
+with a *share*, a token that joins one session in one role.
 
-## A typical client
+The routes under `/api/v1` speak JSON, except the two *stream* routes,
+WebSockets that carry a session in [protocol v1](protocol.md).
+Everyone who watches a session, the owner included, has a stream of
+their own.
+
+Every route that reaches connections or sessions takes one of three
+kinds of token, which decides what it opens. This is how they come into
+play, from signing in to a guest joining:
 
 ```mermaid
 sequenceDiagram
-  participant C as Client
+  participant C as Your client
   participant O as occamyd
-  participant V as Viewer
-  C->>O: POST /api/v1/auth/token
-  O-->>C: access token
-  C->>O: GET /api/v1/connections
-  O-->>C: the connections the user may open
-  C->>O: GET /api/v1/connections/{id}/stream
-  O-->>C: welcome with the session's ID, then frames
-  C->>O: POST /api/v1/sessions/{id}/shares
-  O-->>C: share
-  C-->>V: the share, by any means
-  V->>O: GET /api/v1/sessions/{id}/stream
-  O-->>V: welcome, then frames
-  C->>O: DELETE /api/v1/sessions/{id}
-  O-->>V: close 4002 session-closed
+  participant G as A guest
+  C->>O: POST /api/v1/auth/token, with a user name and password
+  O-->>C: An access token, for 15 minutes
+  C->>O: POST /api/v1/sessions, with the access token
+  O-->>C: The session's ID, and a session token for 5 minutes
+  C->>O: GET /api/v1/sessions/{id}/stream, with the session token
+  O-->>C: welcome as the owner, then the screen
+  C->>O: POST /api/v1/sessions/{id}/shares, with the access token
+  O-->>C: A share, for an hour
+  C-->>G: The share, by any means
+  G->>O: GET /api/v1/sessions/{id}/stream, with the share
+  O-->>G: welcome as a read-only viewer, then the screen
 ```
 
-1. **Sign in.** Post a user name and password, or sign in through
-   [OIDC](#sign-in). Keep the access token:
+| Token | What it is | How you get one | Lifetime | What it opens |
+|-------|------------|-----------------|----------|---------------|
+| Access token | A JWT with `kind: access` that names a user and the user's groups | [`POST /api/v1/auth/token`](#post-apiv1authtoken), [`POST /api/v1/auth/oidc/token`](#post-apiv1authoidctoken), or a trusted issuer | `auth.access_token_lifetime`, 15 minutes by default. Up to 12 hours from a trusted issuer | The JSON routes, as its user. A connection's stream. The stream of a session that its user owns, as the owner |
+| Session token | A JWT with `kind: session`, for one session (`sid`) and one `role` | The `stream_token` of [`POST /api/v1/sessions`](#post-apiv1sessions), or a trusted issuer | 300 seconds. Up to 12 hours from a trusted issuer | The stream of the session in its `sid`, in its role: `owner`, `viewer` or `read-only` |
+| Share | 43 random characters, not a JWT | [`POST /api/v1/sessions/{id}/shares`](#post-apiv1sessionsidshares) | 60 to 43200 seconds, an hour by default, and never past its session's end | The stream of its session, as `viewer` or `read-only` |
+
+`occamyd` serves the API on its `listen` address, `:5636` by default,
+in HTTP/1.1 only, since the streams upgrade from it. It speaks HTTPS
+when `tls.cert` and `tls.key` are set. [Routes](#routes) lists every
+route, and [openapi.yaml](openapi.yaml) describes them in OpenAPI 3.1,
+for tools that generate clients.
+
+## The life of a session
+
+A session runs on its own from the moment it opens, whoever is
+watching, and a viewer who leaves never ends it. When the owner's
+stream ends for any reason, such as a laptop that changes networks, the
+session and its other viewers carry on for the *owner grace*, 60
+seconds, and an owner who comes back within it finds the session as
+they left it.
+
+```mermaid
+stateDiagram-v2
+  state "Owner connected" as owner_connected
+  state "Owner away" as owner_away
+  state "Ended" as session_ended
+  [*] --> owner_connected: Opened by a connection's stream
+  [*] --> owner_away: Opened by POST /api/v1/sessions
+  owner_connected --> owner_away: The owner's stream ends
+  owner_away --> owner_connected: The owner's stream joins
+  owner_connected --> session_ended: Any end in the table below
+  owner_away --> session_ended: 60 s without the owner, or any end in the table below
+  session_ended --> [*]: 60 s later, occamyd forgets it
+```
+
+However a session opens, `occamyd` connects to the remote at once, and
+asks the owner on the stream for any credentials that the
+configuration file doesn't hold. A session ends in one of these ways.
+Every stream of it then receives `close` with the
+[close code](protocol.md#close-codes) that says why, and every share of
+it stops working:
+
+| The session ends when | Its streams receive |
+|-----------------------|---------------------|
+| The owner closes it with [`DELETE /api/v1/sessions/{id}`](#delete-apiv1sessionsid) | 4002 `session-closed` |
+| The owner stays away for longer than the owner grace, 60 seconds | 4003 `owner-left` |
+| Nobody gives input for 30 minutes. Input from a read-only viewer doesn't count, since `occamyd` drops it | 4004 `idle` |
+| The remote ends the session, such as a shell that exits | 4005 `remote-ended` |
+| The connection to the remote fails, or can't be made | 4006 `backend-failed` |
+| `occamyd` shuts down | 1001 `server-shutdown` |
+| `occamyd` fails on its own | 1011 `internal-error` |
+
+A single viewer's stream can also end while the session runs on: a
+viewer that falls behind for the *viewer timeout* receives `close` 4008
+`too-slow`, and the owner's older stream is closed when a newer one
+[takes over](#get-apiv1sessionsidstream). [Lifetimes](#lifetimes) gives
+each of these times.
+
+For the 60 seconds after a session ends,
+[its owner's stream](#get-apiv1sessionsidstream) receives the `close`
+that the session ended with, so a client learns why even when the
+remote failed before the stream arrived.
+
+## What a client does
+
+These tasks use `curl` and `jq` in a POSIX shell, with `occamyd`'s
+address in `OCCAMY`:
+
+```sh
+OCCAMY=https://occamy.example
+```
+
+### Sign in with a password
+
+Post a static user's name and password to
+[`POST /api/v1/auth/token`](#post-apiv1authtoken), and keep the access
+token in `TOKEN`, which the rest of the examples send:
+
+```sh
+TOKEN=$(curl -s "$OCCAMY/api/v1/auth/token" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"correct horse battery staple"}' |
+  jq -r .access_token)
+```
+
+`occamyd` issues no refresh tokens, so sign in again when the access
+token [expires](#lifetimes). A sign-in page asks
+[`GET /api/v1/auth/methods`](#get-apiv1authmethods) whether `occamyd`
+also offers OIDC.
+
+### Sign in through OIDC
+
+With `auth.oidc`, users sign in at an OpenID Connect provider instead,
+and the client ends with the same access token as from a password. The
+client proves with PKCE (RFC 7636) that it started the sign-in, so a
+code that leaks from the browser is useless to anyone else:
+
+```mermaid
+sequenceDiagram
+  participant B as Your client, in a browser
+  participant O as occamyd
+  participant P as OIDC provider
+  Note over B: Makes a PKCE verifier and keeps it
+  B->>O: GET /api/v1/auth/oidc/login, with the verifier's challenge and a return URL
+  O-->>B: 302 to the provider, and the sign-in cookie
+  B->>P: The user signs in
+  P-->>B: 302 to occamyd's callback, with the provider's code
+  B->>O: GET /api/v1/auth/oidc/callback, with the cookie
+  O->>P: Exchanges the provider's code for an ID token
+  O-->>B: 302 to the return URL, with a one-time code in the fragment
+  B->>O: POST /api/v1/auth/oidc/token, with the one-time code and the verifier
+  O-->>B: An access token
+```
+
+1. Make a PKCE verifier, keep it, and compute its S256 challenge:
 
     ```sh
-    OCCAMY=https://occamy.example
-    TOKEN=$(curl -s "$OCCAMY/api/v1/auth/token" \
+    VERIFIER=$(openssl rand 32 | openssl base64 -A | tr '+/' '-_' | tr -d '=')
+    CHALLENGE=$(printf %s "$VERIFIER" | openssl dgst -sha256 -binary |
+      openssl base64 -A | tr '+/' '-_' | tr -d '=')
+    ```
+
+2. Send the browser to
+   [`GET /api/v1/auth/oidc/login`](#get-apiv1authoidclogin) with the
+   challenge and the URL that it should return to.
+3. The user signs in at the provider. The browser comes back to the
+   return URL with `#code=…`, or `#error=…`, in the fragment, which
+   never reaches a server.
+4. Post the one-time code from the fragment, here in `CODE`, and the
+   verifier to
+   [`POST /api/v1/auth/oidc/token`](#post-apiv1authoidctoken):
+
+    ```sh
+    TOKEN=$(curl -s "$OCCAMY/api/v1/auth/oidc/token" \
       -H 'Content-Type: application/json' \
-      -d '{"username":"alice","password":"correct horse battery staple"}' |
+      -d "{\"code\":\"$CODE\",\"code_verifier\":\"$VERIFIER\"}" |
       jq -r .access_token)
     ```
 
-2. **List the connections** the user may open:
+[Configuration](configuration.md#signing-in-through-oidc) describes how
+to set OIDC up.
 
-    ```sh
-    curl -s "$OCCAMY/api/v1/connections" -H "Authorization: Bearer $TOKEN"
-    ```
+### Open a session
 
-3. **Open a stream.** Open a connection's stream, a WebSocket that opens
-   a session and streams it in one request
-   ([Streams](#streams)). Its first message, `welcome`, carries the
-   session's ID. A client that wants the ID before the stream calls
-   [`POST /api/v1/sessions`](#post-apiv1sessions) first.
-4. **Share.** With the session's ID in `SESSION`, the owner mints a
-   [share](#shares) and hands it to someone, who joins the session's
-   stream with it:
+List the connections that the user may open:
 
-    ```sh
-    curl -s "$OCCAMY/api/v1/sessions/$SESSION/shares" \
-      -H "Authorization: Bearer $TOKEN" \
-      -H 'Content-Type: application/json' \
-      -d '{"role":"read-only","expires_in":600}'
-    ```
+```sh
+curl -s "$OCCAMY/api/v1/connections" -H "Authorization: Bearer $TOKEN"
+```
 
-5. **End.** The owner closes the session with
-   [`DELETE /api/v1/sessions/{id}`](#delete-apiv1sessionsid), or
-   leaves it to end on its own ([Limits](#limits)).
+Then open a session in one of two ways:
 
-The access token lasts 15 minutes by default, and `occamyd` issues no
-refresh tokens. When it expires, sign in again. A stream that has
-joined keeps running.
+| You want | Open |
+|----------|------|
+| The first frame as soon as possible | [A connection's stream](#get-apiv1connectionsidstream). It opens the session and streams it in one request, and its first message, `welcome`, carries the session's ID |
+| The session's ID before its stream | [`POST /api/v1/sessions`](#post-apiv1sessions), then [the session's stream](#get-apiv1sessionsidstream) within 60 seconds |
 
-## Conventions
+The second way keeps the session's ID in `SESSION`:
 
-- **JSON in and out.** A response with a body is one compact JSON value,
-  with no line break at its end. It has `Content-Type:
+```sh
+SESSION=$(curl -s "$OCCAMY/api/v1/sessions" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"connection":"build-box"}' |
+  jq -r .id)
+```
+
+The response also carries a stream token, which opens the session's
+stream as its owner for 5 minutes, as the owner's access token does.
+
+Either way, the client then opens a [stream](#streams), speaks
+[protocol v1](protocol.md) on it, and answers the
+[`prompt`](protocol.md#prompt) messages in which `occamyd` asks the
+owner for credentials.
+
+### Share a session
+
+The owner mints a share with a role and a lifetime, and hands it to
+someone by any means, such as a chat message:
+
+```sh
+SHARE=$(curl -s "$OCCAMY/api/v1/sessions/$SESSION/shares" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"role":"read-only","expires_in":600}' |
+  jq -r .token)
+```
+
+The holder opens [the session's stream](#get-apiv1sessionsidstream)
+with the share as its token.
+
+> [!IMPORTANT]
+> A single share can't be revoked. To stop every share of a session,
+> close the session.
+
+### Come back to a session
+
+When the owner's stream drops, open
+[the session's stream](#get-apiv1sessionsidstream) again within the
+owner grace, with an access token or the stream token while it lasts.
+The new stream takes over from the old one at once, or, if the session
+has ended, receives the `close` that it ended with in place of
+`welcome`.
+
+### Check on a session and close it
+
+The owner reads the session's state, such as who is watching, with
+[`GET /api/v1/sessions/{id}`](#get-apiv1sessionsid):
+
+```sh
+curl -s "$OCCAMY/api/v1/sessions/$SESSION" -H "Authorization: Bearer $TOKEN"
+```
+
+The owner closes it for everyone with
+[`DELETE /api/v1/sessions/{id}`](#delete-apiv1sessionsid), or leaves
+it to end on its own:
+
+```sh
+curl -s -X DELETE "$OCCAMY/api/v1/sessions/$SESSION" -H "Authorization: Bearer $TOKEN"
+```
+
+## Requests and responses
+
+Every route of API v1 follows these rules:
+
+- **JSON in and out.** A response with a body holds one compact JSON
+  value without a final line break, with `Content-Type:
   application/json; charset=utf-8` and `X-Content-Type-Options:
-  nosniff`.
-- **Strict request bodies.** A request body must have `Content-Type:
-  application/json`, or the route answers `415 unsupported_media_type`.
-  Parameters such as `charset` are ignored. A body over 64 KiB gets
-  `413 too_large`.
-- **Bodies that decode.** A body must hold exactly one JSON value. It may
-  name only the fields the route takes, in their exact case, each once,
-  at any depth, and each of the right type. Objects and arrays nest at
-  most 32 deep. Any other body gets `400 bad_request`. So
-  `{"Connection":"x"}` and `{"username":"a","username":"b"}` are
-  refused. This keeps a proxy that reads the body from seeing another
-  request than `occamyd` does.
-- **Tokens never in a URL.** Routes read a token from the
-  `Authorization` header, and the stream routes from a WebSocket
-  subprotocol too. They never read one from the query string or a
-  cookie, which proxies, logs and browser histories keep. The request
-  log names each request's method, path, status, duration and peer
-  address, never its query string, headers or body.
+  nosniff`. A request body needs `Content-Type: application/json`, with
+  any parameters, or gets `415 unsupported_media_type`, and one over
+  64 KiB gets `413 too_large`.
+- **Bodies that decode exactly.** A body holds one JSON value that
+  names only the route's fields, in their exact case, each once and of
+  the right type, at any depth, nested at most 32 deep. Any other body,
+  such as `{"Connection":"x"}` or `{"username":"a","username":"b"}`,
+  gets `400 bad_request`, so a proxy that reads the body sees the
+  request that `occamyd` sees.
+- **Tokens never in a URL.** The routes read a token from
+  `Authorization`, and the stream routes from a WebSocket subprotocol
+  too, never from the query string or a cookie, which proxies, logs and
+  browser histories keep.
 - **No caching.** A response that carries a token or a session's state
-  has `Cache-Control: no-store`. Each route below says so where it
-  applies.
-- **No CORS.** `occamyd` answers no preflight. A web page that calls the
-  JSON routes must come from `occamyd`'s origin, such as through the
-  same reverse proxy. Pages of the origins in `origins` may open
-  streams. Requiring the JSON type also keeps a cross-site HTML form
-  from posting to the API.
-- **Unknown routes.** A path at or under `/api/v1` that no route takes
-  answers `404 not_found`. A route asked with a method it does not take
-  answers `405 method_not_allowed`, with `Allow` listing the methods it
-  takes. Both use the [error shape](#errors). Outside `/api/v1`, such as
-  `/healthz` or `/static/`, the same cases answer in plain text.
+  has `Cache-Control: no-store`.
+- **No CORS.** `occamyd` answers no preflight, so a page that calls the
+  JSON routes must come from `occamyd`'s own origin, such as through the
+  same reverse proxy, and since the routes require the JSON type, a
+  cross-site HTML form can't post to them.
+- **Unknown routes.** Under `/api/v1`, a path that no route takes
+  answers `404 not_found`, and a method that a route doesn't take
+  answers `405 method_not_allowed` with `Allow`, both in the
+  [error shape](#errors). Outside it, as at `/healthz` or `/static/`,
+  they answer in plain text.
 - **`HEAD`.** A route that takes `GET` also answers `HEAD`.
 
 ## Authentication
 
-### Tokens
+### Token claims
 
-`occamyd` takes three kinds of token.
+Access tokens and session tokens are JWTs signed with Ed25519 (`alg:
+EdDSA`): `occamyd`'s own with its signing key, and a trusted issuer's
+with the issuer's key. They carry these claims, of which
+[Configuration](configuration.md#tokens-from-a-trusted-issuer) lists
+those that a trusted issuer must set:
 
-| Token | What it is | Comes from | Lifetime |
-|-------|------------|------------|----------|
-| Access token | A JWT with `kind: access` | [`POST /api/v1/auth/token`](#post-apiv1authtoken), [`POST /api/v1/auth/oidc/token`](#post-apiv1authoidctoken), or a trusted issuer | `auth.access_token_lifetime`, 15 minutes by default. Up to 12 hours from a trusted issuer |
-| Session token | A JWT with `kind: session`, for one session (`sid`) and one `role` | The `stream_token` of [`POST /api/v1/sessions`](#post-apiv1sessions), or a trusted issuer | 300 seconds. Up to 12 hours from a trusted issuer |
-| Share | 43 random characters, not a JWT | [`POST /api/v1/sessions/{id}/shares`](#post-apiv1sessionsidshares) | 60 to 43200 seconds, an hour by default, and never past its session's end |
-
-What each one opens:
-
-| Token | Opens |
+| Claim | Holds |
 |-------|-------|
-| Access token | The JSON routes, as its user. A connection's stream. The stream of a session its user owns, as the owner |
-| Session token | The stream of the session in its `sid`, with its `role`: `owner`, `viewer` or `read-only` |
-| Share | The stream of its session, as `viewer` or `read-only` |
-
-Access tokens and session tokens are JWTs signed with Ed25519
-(`alg: EdDSA`). `occamyd` signs its own with its signing key
-(`iss: occamy`), and a trusted issuer signs with its own key. Every
-one names `aud: occamy` and a user in `sub`. Each carries `iat` and
-`exp`, at most 12 hours apart, and its kind in `kind`, so that one kind
-is never taken for the other. [configuration.md](configuration.md#tokens-from-a-trusted-issuer)
-lists the claims a trusted issuer must set.
+| `iss` | `occamy` in `occamyd`'s own tokens, or the trusted issuer's name |
+| `aud` | `occamy` |
+| `sub` | The user |
+| `iat`, `exp` | When the token was issued and when it expires, at most 12 hours apart |
+| `kind` | `access` or `session`, so that one kind is never taken for the other |
+| `groups` | An access token's groups |
+| `idp` | In an access token from `occamyd`, where the user signed in: `local` with a password, or `oidc` through the OIDC provider |
+| `sid` | A session token's session ID |
+| `role` | A session token's role |
 
 ### Sending a token
 
 | Route | Takes | Sent in |
 |-------|-------|---------|
-| `GET /healthz`, the sign-in routes | nothing | |
+| `GET /healthz`, `GET /api/v1/auth/methods`, the sign-in routes | nothing | |
 | `GET /api/v1/connections`, `POST /api/v1/sessions`, `GET` and `DELETE /api/v1/sessions/{id}`, `POST /api/v1/sessions/{id}/shares` | an access token | `Authorization: Bearer` |
 | `GET /api/v1/connections/{id}/stream` | an access token | the `occamy.v1.token.` subprotocol, or `Authorization: Bearer` |
 | `GET /api/v1/sessions/{id}/stream` | the owner's access token, a session token for the session, or a share of it | the `occamy.v1.token.` subprotocol, or `Authorization: Bearer` |
@@ -184,107 +342,86 @@ its token.
 
 ### Roles
 
-A stream joins a session in one of three roles. The web client names
-them by what they allow.
+The web client names each role by what it allows:
 
 | Role | The web client says | May |
 |------|---------------------|-----|
-| `owner` | owner | Send input, and answer `prompt`s for credentials. Its `hello` sizes the session. Only the owner reads, shares and closes the session through the API |
+| `owner` | owner | Send input, and answer `prompt` messages for credentials. The owner's `hello` sizes the session. Only the owner reads, shares and closes the session through the API |
 | `viewer` | with control | Send [input](protocol.md#input-messages), as the owner does |
 | `read-only` | view only | Watch. `occamyd` drops its input |
 
-The owner is the user who opened the session. There is no
-administrator role.
+The owner is the user who opened the session. There is no administrator
+role.
 
 ### Users
 
-A user is a `sub` from one issuer. For `occamyd`'s own users, where they
-signed in counts too: `idp: local` for a static user, `idp: oidc` for an
-OIDC user. So `carol` from a trusted issuer and `occamyd`'s own
-`carol` are two users, and neither owns the other's sessions.
-
-A static user's name always means the static user. An OIDC sign-in, or
-a trusted issuer, with `link_static_users` that names exactly a static
-user acts as that static user.
-
-A connection's `allow.users` and `allow.groups` match names whichever
-issuer signed the token. A trusted issuer's `groups` count only for the
-groups in its `allowed_groups`.
-[configuration.md](configuration.md#signing-in-through-oidc) gives the
+A user is a `sub` from one issuer, and for `occamyd`'s own users, from
+one `idp`, so `carol` from a trusted issuer and `occamyd`'s own `carol`
+are two users, and neither owns the other's sessions. A static user's
+name always means the static user, whom an OIDC sign-in or a trusted
+issuer acts as only with `link_static_users` and the exact name. Allow
+lists match names whichever issuer signed the token, and a trusted
+issuer's `groups` count only for its `allowed_groups`.
+[Configuration](configuration.md#signing-in-through-oidc) gives the
 rules in full.
 
 ### When a token fails
 
-A JSON route answers every failure with `401`, an RFC 6750 challenge in
-`WWW-Authenticate`, and never repeats the token.
+A JSON route answers every failure of a token with `401` and an RFC 6750
+challenge in `WWW-Authenticate`, and never repeats the token:
 
 | Request | `code` | `WWW-Authenticate` |
 |---------|--------|--------------------|
 | No `Authorization` header, more than one, another scheme, or an empty token | `unauthorized` | `Bearer realm="occamy"` |
-| A token past its `exp` and the [clock skew allowed](#limits) | `token_expired` | `Bearer realm="occamy", error="invalid_token"` |
-| Any other token that fails (below) | `invalid_token` | `Bearer realm="occamy", error="invalid_token"` |
-
-A token is `invalid_token` when it:
-
-- is malformed, or its signature does not verify;
-- comes from an unknown issuer, or names another audience;
-- is signed with an algorithm other than EdDSA;
-- has no `iat`, or lives longer than 12 hours;
-- is a session token;
-- names a `sub` that is not a usable user name;
-- names a static user's name from a source not linked to the static
-  users.
+| A token past its `exp` and the [clock skew allowed](#lifetimes) | `token_expired` | `Bearer realm="occamy", error="invalid_token"` |
+| A token that is malformed or whose signature doesn't verify; from an unknown issuer or for another audience; signed with an algorithm other than EdDSA; without `iat`, or living longer than 12 hours; a session token; whose `sub` isn't a usable user name; or whose `sub` is a static user's name, from a source that isn't linked to the static users | `invalid_token` | `Bearer realm="occamy", error="invalid_token"` |
 
 A route checks the token before the body, so a request without a valid
 token gets `401` whatever its body holds. A token that expires ends no
-stream that has joined. Only the session's end does.
+stream that has joined: only the session's end does.
 
 ## Errors
 
-API v1 answers every error with one shape:
+API v1 answers every error with the same shape:
 
 ```json
 {"error":{"code":"invalid_token","message":"the access token is not valid"}}
 ```
 
-Clients branch on `code`. It is stable: new codes may be added, but a
-code never changes its meaning. `message` is for people. It may change,
-and it never holds a secret.
+Branch on `code`, which never changes its meaning, though new codes may
+appear. `message` is for people: it may change, and never holds a
+secret.
 
 | `code` | Status | When |
 |--------|--------|------|
-| `bad_request` | 400 | The body does not [decode](#conventions), or the route refuses what it says. Also a stream request without the `occamy.v1` subprotocol |
-| `invalid_state` | 400 | The OIDC callback matches no sign-in this browser started in the last 10 minutes |
+| `bad_request` | 400 | The body doesn't [decode](#requests-and-responses), or the route refuses what it says. Also a stream request without the `occamy.v1` subprotocol |
+| `invalid_state` | 400 | The OIDC callback matches no sign-in that this browser started in the last 10 minutes |
 | `unauthorized` | 401 | No access token, or wrong credentials at sign-in |
 | `invalid_token` | 401 | A token that fails verification, or whose user `occamyd` refuses |
 | `token_expired` | 401 | A token past its expiry and the clock skew allowed |
 | `forbidden` | 403 | An ad-hoc target while ad-hoc targets are off, or one outside `adhoc_allowlist` |
-| `not_found` | 404 | No such route, connection or session, or [one the caller may not see](#connections-and-sessions) |
-| `method_not_allowed` | 405 | The route does not take the method. `Allow` lists those it takes |
+| `not_found` | 404 | No such route, connection or session, or [one that the caller may not see](#connections-and-sessions) |
+| `method_not_allowed` | 405 | The route doesn't take the method. `Allow` lists those it takes |
 | `too_large` | 413 | A JSON body over 64 KiB |
-| `unsupported_media_type` | 415 | A body that is not `application/json` |
+| `unsupported_media_type` | 415 | A body that isn't `application/json` |
 | `limit_exceeded` | 429 | The caller holds as much as `limits` allows: `sessions_per_user` sessions, or `shares_per_session` shares of the session |
 | `limit_exceeded` | 503 | `occamyd` runs `limits.sessions` sessions, whoever owns them. Try again later |
-| `internal` | 500 | `occamyd` failed on its own, such as on a password file it cannot read. The cause goes to its log, not to the client |
+| `internal` | 500 | `occamyd` failed on its own, such as on a password file that it can't read. The cause goes to its log, not to the client |
 | `access_denied` | 302 | OIDC sign-in: the provider or `occamyd` refused the user |
-| `sign_in_failed` | 302 | OIDC sign-in: the provider failed, or its answer did not verify |
-| `unavailable` | 302 | OIDC sign-in: the provider cannot be reached, or too many sign-ins wait |
+| `sign_in_failed` | 302 | OIDC sign-in: the provider failed, or its answer didn't verify |
+| `unavailable` | 302 | OIDC sign-in: the provider can't be reached, or too many sign-ins wait |
 
 The last three reach the client as `#error=…` in the fragment of its
-return URL, not in a JSON body
-([`GET /api/v1/auth/oidc/callback`](#get-apiv1authoidccallback)).
+return URL ([the callback](#get-apiv1authoidccallback)), not in a JSON
+body.
 
-Some failures do not use this shape:
-
-- Request headers over 64 KiB get a plain-text `431`.
-- A stream request that offers `occamy.v1` but is no valid WebSocket
-  upgrade gets the WebSocket library's plain-text `426` or `400`.
-- A stream refused after the upgrade gets a protocol v1 `close`
-  ([Refusals](#refusals)).
+Oversized request headers and a stream request that isn't a valid
+WebSocket upgrade get plain text, and a stream refused after the
+upgrade gets a protocol v1 `close` ([Refusals](#refusals)).
 
 ## Limits
 
-Requests:
+### Requests
 
 | What | Limit | Beyond it |
 |------|-------|-----------|
@@ -297,7 +434,7 @@ Requests:
 | A stream's `hello` | 2048 bytes, at most 2731 characters of base64url | `close` 1009 `too-large` |
 | A stream's messages, until the route has let the client in | 64 KiB | WebSocket close 1009 |
 
-Lifetimes:
+### Lifetimes
 
 | What | Lifetime |
 |------|----------|
@@ -307,30 +444,58 @@ Lifetimes:
 | A share | `expires_in`: 60 to 43200 seconds, 3600 by default. It ends with its session |
 | An OIDC sign-in, from `login` to the callback | 10 minutes |
 | An OIDC one-time code, from the callback to the exchange | 1 minute, and one try |
-| The owner grace: how long a session waits for its owner's stream, after `POST /api/v1/sessions` or after the owner leaves | 60 seconds. Then the session ends with `owner-left` (4003) |
-| A session without input | 30 minutes. Then the session ends with `idle` (4004). No key sets it |
+| The owner grace: how long a session waits for its owner's stream, after `POST /api/v1/sessions` or after the owner leaves | 60 seconds. Then the session ends with `owner-left` (4003). No key sets it |
+| A session without input from the owner or a viewer | 30 minutes. Then the session ends with `idle` (4004). No key sets it |
+| A viewer that leaves its frames unacknowledged, or a write to it blocked | `streams.viewer_timeout`: 30 seconds by default, at least 1 second. Then its stream ends with `too-slow` (4008), and the session runs on |
+| An ended session, for its owner's stream | 60 seconds after the end, for at most `limits.sessions` ended sessions and at least 1024, the oldest forgotten first, so that sessions whose remotes fail can't grow them without bound |
+| The owner's older stream, when a newer one takes over | 5 seconds to leave. Then the newer one is refused |
+| A refused stream's closing handshake | 1 second. Then the connection is dropped |
 
-`occamyd` allows 30 seconds of clock skew on every token of API v1:
-its own access and stream tokens, and a trusted issuer's. So a token
-still works for up to 30 seconds after its `exp`. A client should not
-rely on that: renew a token once its `exp` has passed, since
-`401 token_expired` follows within 30 seconds. The ID tokens that
-`occamyd` receives from an OIDC provider get no such allowance on their
-expiry.
+`occamyd` allows 30 seconds of clock skew on every token of API v1, its
+own and a trusted issuer's, so a token works for up to 30 seconds past
+its `exp`. Don't rely on that: renew a token once its `exp` has passed,
+since `401 token_expired` follows within 30 seconds. An OIDC provider's
+ID tokens get no such allowance.
 
-What one user, one session or `occamyd` may hold, set in
-[`limits`](configuration.md#limits-limits):
+### What users and sessions may hold
+
+These keys of [`limits`](configuration.md#limits-limits) bound what a
+user, a session and `occamyd` may hold:
 
 | Key | Default | Beyond it |
 |-----|---------|-----------|
 | `limits.sessions` | 1000 | `POST /api/v1/sessions` answers `503 limit_exceeded`. A connection's stream gets `close` 4001 `forbidden` |
 | `limits.sessions_per_user` | 10 | `POST /api/v1/sessions` answers `429 limit_exceeded`. A connection's stream gets `close` 4001 `forbidden` |
 | `limits.viewers_per_session` | 50, besides the owner, who can always join | A session's stream gets `close` 4007 `viewer-limit` |
-| `limits.shares_per_session` | 100 that have not expired | `POST /api/v1/sessions/{id}/shares` answers `429 limit_exceeded` |
+| `limits.shares_per_session` | 100 that haven't expired | `POST /api/v1/sessions/{id}/shares` answers `429 limit_exceeded` |
 
 A session counts toward its owner's limit and `occamyd`'s from the
-moment it opens until it ends, so concurrent requests cannot all pass a
-limit. Neither sign-in nor opening sessions is rate limited.
+moment it opens until it ends, so concurrent requests can't all slip
+past a limit. Neither sign-in nor opening sessions is rate limited.
+
+## Routes
+
+The examples of the routes use the variables that
+[What a client does](#what-a-client-does) sets, such as `OCCAMY` and
+`TOKEN`.
+
+| Route | What it does | Who may call it | Served |
+|-------|--------------|-----------------|--------|
+| [`GET /healthz`](#get-healthz) | Reports that `occamyd` is up | Anyone | Always |
+| [`GET /api/v1/auth/methods`](#get-apiv1authmethods) | Says how users can sign in | Anyone | Always |
+| [`POST /api/v1/auth/token`](#post-apiv1authtoken) | Signs a static user in with a password | Anyone | Always |
+| [`GET /api/v1/auth/oidc/login`](#get-apiv1authoidclogin) | Starts an OIDC sign-in | A browser | With `auth.oidc` |
+| [`GET /api/v1/auth/oidc/callback`](#get-apiv1authoidccallback) | Takes the browser back from the provider | The provider, through the browser | With `auth.oidc` |
+| [`POST /api/v1/auth/oidc/token`](#post-apiv1authoidctoken) | Exchanges an OIDC sign-in's one-time code for an access token | Anyone | With `auth.oidc` |
+| [`GET /api/v1/connections`](#get-apiv1connections) | Lists the connections that the user may open | Any user, with an access token | Always |
+| [`POST /api/v1/sessions`](#post-apiv1sessions) | Opens a session | Any user, with an access token | Always |
+| [`GET /api/v1/sessions/{id}`](#get-apiv1sessionsid) | Returns a session's state | The owner, with an access token | Always |
+| [`DELETE /api/v1/sessions/{id}`](#delete-apiv1sessionsid) | Closes a session | The owner, with an access token | Always |
+| [`POST /api/v1/sessions/{id}/shares`](#post-apiv1sessionsidshares) | Mints a share of a session | The owner, with an access token | Always |
+| [`GET /api/v1/connections/{id}/stream`](#get-apiv1connectionsidstream) | Opens a session and streams it | Any user, with an access token | Always |
+| [`GET /api/v1/sessions/{id}/stream`](#get-apiv1sessionsidstream) | Joins a running session | The owner with an access token, or anyone with a session token or a share | Always |
+| [`GET /static/`](#get-static) | Serves the web client | A browser | With `web_client` |
+| [`GET /debug/vars`](#get-debugvars) and `/debug/pprof/` | Serve expvar and pprof | Anyone who reaches the debug listener | With `debug.address`, on that listener only |
 
 ## Health
 
@@ -338,7 +503,9 @@ limit. Neither sign-in nor opening sessions is rate limited.
 
 Reports that `occamyd` is up.
 
-**Request.** No token.
+**Who may call it.** Anyone. It takes no token.
+
+**Request.** No body.
 
 **Response.** `200`, with `Cache-Control: no-store`:
 
@@ -346,33 +513,32 @@ Reports that `occamyd` is up.
 {"status":"ok"}
 ```
 
+**Errors.** None.
+
+**Example.**
+
+```sh
+curl -s "$OCCAMY/healthz"
+```
+
 ## Sign-in
 
-Sign-in turns a user's credentials into an access token. Static users
-sign in with a password at
-[`POST /api/v1/auth/token`](#post-apiv1authtoken). With `auth.oidc`,
-users sign in at an OpenID Connect provider instead:
-
-1. The client makes a PKCE verifier (RFC 7636) and keeps it.
-2. It sends the browser to
-   [`GET /api/v1/auth/oidc/login`](#get-apiv1authoidclogin) with the
-   verifier's S256 challenge and a return URL.
-3. The user signs in at the provider. The browser comes back to the
-   return URL with `#code=…`, or `#error=…`, in the fragment.
-4. The client posts the code and its verifier to
-   [`POST /api/v1/auth/oidc/token`](#post-apiv1authoidctoken), and gets
-   an access token.
-
-Both ways answer with the same token response, in the shape of OAuth
-2.0's (RFC 6749, section 5.1). A trusted issuer's access tokens need no
-sign-in. [configuration.md](configuration.md#signing-in-through-oidc)
-describes how to set OIDC up.
+With `auth.oidc`, users sign in at an OpenID Connect provider through
+the three OIDC routes, in the order that
+[Sign in through OIDC](#sign-in-through-oidc) shows; without it, those
+routes answer `404 not_found`. They answer with the same token response
+as a password sign-in, in the shape of OAuth 2.0's (RFC 6749, section
+5.1). A trusted issuer's access tokens need no sign-in.
 
 ### `GET /api/v1/auth/methods`
 
-Says how a user can sign in, for a sign-in page to show.
+Says how users can sign in, so that a sign-in page shows the right
+choices.
 
-**Request.** No token. It asks nothing of the OIDC provider.
+**Who may call it.** Anyone. It takes no token, and it asks nothing of
+the OIDC provider.
+
+**Request.** No body.
 
 **Response.** `200`, with `Cache-Control: no-store`:
 
@@ -386,11 +552,21 @@ Says how a user can sign in, for a sign-in page to show.
 
 Password sign-in has no field, since its route is always served.
 
+**Errors.** None.
+
+**Example.**
+
+```sh
+curl -s "$OCCAMY/api/v1/auth/methods"
+```
+
 ### `POST /api/v1/auth/token`
 
-Signs a static user in with a password.
+Signs a static user in with a password, and returns an access token.
 
-**Request.** No token. The body:
+**Who may call it.** Anyone. It takes no token.
+
+**Request.** The body names the user and the password:
 
 ```json
 {"username":"alice","password":"correct horse battery staple"}
@@ -402,33 +578,44 @@ Signs a static user in with a password.
 {"access_token":"eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJ…","token_type":"Bearer","expires_in":900}
 ```
 
-`expires_in` is the token's lifetime in seconds,
-`auth.access_token_lifetime`. The access token names the user in `sub`,
-the user's groups in `groups`, and `idp: local`.
+| Field | Meaning |
+|-------|---------|
+| `access_token` | The access token. It names the user in `sub`, the user's groups in `groups`, and `idp: local` |
+| `token_type` | Always `Bearer` |
+| `expires_in` | The token's lifetime in seconds, `auth.access_token_lifetime` |
 
 **Errors.**
 
 | Status | `code` | When |
 |--------|--------|------|
-| 400 | `bad_request` | `username` or `password` is missing or empty, or the body does not decode |
+| 400 | `bad_request` | `username` or `password` is missing or empty, or the body doesn't decode |
 | 401 | `unauthorized` | A wrong password or an unknown user, alike. With `WWW-Authenticate: Bearer realm="occamy"` |
 | 413 | `too_large` | A body over 64 KiB |
-| 415 | `unsupported_media_type` | A body that is not `application/json` |
-| 500 | `internal` | The token could not be signed |
+| 415 | `unsupported_media_type` | A body that isn't `application/json` |
+| 500 | `internal` | The token couldn't be signed |
+
+**Example.**
+
+```sh
+curl -s "$OCCAMY/api/v1/auth/token" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"alice","password":"correct horse battery staple"}'
+```
 
 **Notes.** Without static users, every sign-in fails with `401`. An
-unknown user takes as long as a known one: `occamyd` compares the
-password with a hash at the users' highest bcrypt cost. The log names
-the peer address, never the user name, since people type passwords into
-it.
+unknown user takes as long as a known one, because `occamyd` compares
+the password with a hash at the users' highest bcrypt cost either way.
+The log names a failed sign-in's address but never its user name, which
+sometimes holds a password typed into the wrong field.
 
 ### `GET /api/v1/auth/oidc/login`
 
-Starts an OIDC sign-in. A browser navigates here and is sent on to the
-provider.
+Starts an OIDC sign-in: a browser navigates here, and `occamyd` sends
+it on to the provider.
 
-**Request.** No token. Served only with `auth.oidc`. Without it, the
-route answers `404 not_found`. The query:
+**Who may call it.** A browser, without a token, with `auth.oidc`.
+
+**Request.** The query:
 
 | Parameter | Meaning |
 |-----------|---------|
@@ -443,52 +630,52 @@ GET /api/v1/auth/oidc/login?return_url=https%3A%2F%2Foccamy.example%2F&code_chal
 ```
 
 **Response.** `302 Found` to the provider's authorization endpoint,
-with `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. The
-redirect asks for the authorization code flow, with `occamyd`'s own
-PKCE challenge, a state and a nonce.
+with `Cache-Control: no-store` and `Referrer-Policy: no-referrer`, for
+the authorization code flow with `occamyd`'s own PKCE challenge, a
+state and a nonce. The response sets the sign-in cookie, which ties the
+callback to this browser, and which a second sign-in in the same
+browser replaces:
 
-The response also sets the sign-in cookie, which ties the callback to
-this browser:
+| Cookie | Value |
+|--------|-------|
+| Name | `__Secure-occamy_oidc` when it's `Secure`, and `occamy_oidc` otherwise |
+| Attributes | `HttpOnly`, `SameSite=Lax` and `Max-Age=600`, on the path of `auth.oidc.redirect_url`. `Secure` when `redirect_url` is https or `occamyd` terminates TLS |
+| Content | The state, the nonce, `occamyd`'s verifier, the return URL and the client's challenge, sealed with AES-256-GCM under a key that `occamyd` makes when it starts, so the browser can neither read nor alter them |
 
-- It is named `__Secure-occamy_oidc` when it is `Secure`, and
-  `occamy_oidc` otherwise.
-- It is `HttpOnly`, `SameSite=Lax` and `Max-Age=600`, on the path of
-  `auth.oidc.redirect_url`.
-- It is `Secure` when `redirect_url` is https or `occamyd` terminates
-  TLS.
-- It holds the state, the nonce, `occamyd`'s verifier, the return URL
-  and the client's challenge. They are sealed with AES-256-GCM under a
-  key that `occamyd` makes when it starts, so the browser can neither
-  read nor alter them.
+If `occamyd` can't discover the provider, it sends the browser straight
+back to the return URL with `#error=unavailable`, and sets no cookie.
 
-A second sign-in in the same browser replaces the first. If the
-provider cannot be discovered, the browser goes straight back to the
-return URL with `#error=unavailable`, and no cookie is set.
-
-**Errors.** Each comes with `Cache-Control: no-store`, and sets nothing.
+**Errors.** Each comes with `Cache-Control: no-store`, and sets
+nothing.
 
 | Status | `code` | When |
 |--------|--------|------|
-| 400 | `bad_request` | The query is not valid (below) |
-| 500 | `internal` | The cookie could not be sealed |
+| 400 | `bad_request` | `return_url` isn't one of `auth.oidc.return_urls`, is given twice, or is left out while several are configured. `code_challenge` is missing, given twice, or not an S256 challenge. `code_challenge_method` is given twice, or isn't `S256` |
+| 500 | `internal` | The cookie couldn't be sealed |
 
-The query is not valid when:
+**Example.** This prints where `occamyd` sends the browser, for the
+challenge that [Sign in through OIDC](#sign-in-through-oidc) computes
+and the return URL `$OCCAMY/`, the default of `auth.oidc.return_urls`
+when `redirect_url` is on the same origin:
 
-- `return_url` is not one of `auth.oidc.return_urls`, is given twice,
-  or is left out while several are configured;
-- `code_challenge` is missing, given twice, or not an S256 challenge;
-- `code_challenge_method` is given twice, or is not `S256`.
+```sh
+curl -s -o /dev/null -w '%{redirect_url}\n' -G "$OCCAMY/api/v1/auth/oidc/login" \
+  --data-urlencode "return_url=$OCCAMY/" \
+  --data-urlencode "code_challenge=$CHALLENGE"
+```
 
 ### `GET /api/v1/auth/oidc/callback`
 
-Where the provider sends the browser back once the user has signed in.
-Its URL is `auth.oidc.redirect_url`.
+Takes the browser back from the provider once the user has signed in,
+and on to the return URL with a one-time code. Its URL is
+`auth.oidc.redirect_url`.
 
-**Request.** No token: the sign-in cookie from `login` ties the request
-to the browser that started the sign-in. Served only with
-`auth.oidc`. Without it, the route answers `404 not_found`. The query
-is what the provider sends: `state` and `code`, or `error`, and `iss`
-when the provider names itself (RFC 9207).
+**Who may call it.** The provider, through the browser that started the
+sign-in, with `auth.oidc`. It takes no token: the sign-in cookie ties
+the request to that browser.
+
+**Request.** The query is what the provider sends: `state` and `code`,
+or `error`, and `iss` when the provider names itself (RFC 9207).
 
 **Response.** Once `state` matches the browser's sign-in cookie,
 `302 Found` to the sign-in's return URL, with `Cache-Control: no-store`
@@ -501,65 +688,51 @@ Location: https://occamy.example/#code=JX2E7OZK6V3QWBTLDM4PNRYH5A
 
 The one-time code works once, for a minute, and only with the verifier
 of the challenge given to `login`, at
-[`POST /api/v1/auth/oidc/token`](#post-apiv1authoidctoken). A user has
-at most three codes waiting. A fourth sign-in drops the oldest.
+[the token route](#post-apiv1authoidctoken). A user has at most three
+codes waiting, so a fourth sign-in drops the oldest.
 
 If the sign-in failed, the fragment holds `#error=` and one of these:
 
 | `error` | When |
 |---------|------|
-| `access_denied` | The provider or `occamyd` refused the user |
-| `sign_in_failed` | The provider failed, or its answer did not verify |
-| `unavailable` | The provider cannot be reached, or 4096 one-time codes wait to be exchanged |
-
-`occamyd` refuses the user with `access_denied` when:
-
-- the provider answered `error=access_denied`;
-- the `subject_claim` is missing or not a usable user name;
-- the `subject_claim` is `email`, and the provider has not verified the
-  address;
-- the name is a static user's, and `link_static_users` is off;
-- `require_known_users` does not admit the user.
-
-The sign-in fails with `sign_in_failed` when:
-
-- the provider answered with another error, or with no code;
-- `iss` names another issuer, or is missing from a provider that says
-  it sends one;
-- the code exchange failed, or brought no ID token;
-- the ID token's issuer, audience, authorized party, expiry, algorithm,
-  signature or nonce does not verify;
-- the `groups_claim` is neither a list of strings nor a string;
-- `occamyd` cannot read its client secret.
+| `access_denied` | The provider answered `error=access_denied`. The `subject_claim` is missing or isn't a usable user name. The `subject_claim` is `email`, and the provider hasn't verified the address. The name is a static user's, and `link_static_users` is off. `require_known_users` doesn't admit the user |
+| `sign_in_failed` | The provider answered with another error, or with no code. `iss` names another issuer, or is missing from a provider that says it sends one. The code exchange failed, or brought no ID token. The ID token's issuer, audience, authorized party, expiry, algorithm, signature or nonce doesn't verify. The `groups_claim` is neither a list of strings nor a string. `occamyd` can't read its client secret |
+| `unavailable` | The provider can't be reached, or 4096 one-time codes wait to be exchanged |
 
 **Errors.**
 
 | Status | `code` | When |
 |--------|--------|------|
-| 400 | `invalid_state` | No sign-in cookie of this browser matches `state` (below). With `Cache-Control: no-store`, since no return URL can be trusted yet |
+| 400 | `invalid_state` | No sign-in cookie of this browser matches `state`: the sign-in started in another browser, took longer than 10 minutes, outlived a restart of `occamyd`, or was replaced by a later `login`. With `Cache-Control: no-store`, since no return URL can be trusted yet |
 
-`state` matches no cookie when the sign-in started in another browser,
-took longer than 10 minutes, outlived a restart of `occamyd`, or was
-replaced by a later `login`.
+**Example.** You don't call the callback yourself, since the provider
+sends the browser there. Without the browser's sign-in cookie, it
+answers `invalid_state`:
+
+```sh
+curl -s "$OCCAMY/api/v1/auth/oidc/callback?state=x&code=y"
+```
 
 **Notes.** The callback clears the sign-in cookie when `state` matches
 it, or when the browser holds no sign-in in progress.
 
 ### `POST /api/v1/auth/oidc/token`
 
-Exchanges the one-time code from the callback, with the verifier of
-the challenge given to `login`, for an access token.
+Exchanges the one-time code from the callback, with the verifier of the
+challenge given to `login`, for an access token.
 
-**Request.** No token. Served only with `auth.oidc`. Without it, the
-route answers `404 not_found`. The body, with RFC 7636's example
-verifier:
+**Who may call it.** Anyone who holds the code and the verifier, with
+`auth.oidc`. It takes no token.
+
+**Request.** The body holds the code and the verifier, here RFC 7636's
+example verifier:
 
 ```json
 {"code":"JX2E7OZK6V3QWBTLDM4PNRYH5A","code_verifier":"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk"}
 ```
 
-**Response.** `200`, with `Cache-Control: no-store`, as from
-[`POST /api/v1/auth/token`](#post-apiv1authtoken):
+**Response.** `200`, with `Cache-Control: no-store`, in the shape of
+[a password sign-in's](#post-apiv1authtoken):
 
 ```json
 {"access_token":"eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJ…","token_type":"Bearer","expires_in":900}
@@ -572,42 +745,43 @@ The access token names the user from `subject_claim`, the groups from
 
 | Status | `code` | When |
 |--------|--------|------|
-| 400 | `bad_request` | `code` or `code_verifier` is missing or empty, or the body does not decode |
-| 401 | `unauthorized` | The code or the verifier is wrong (below). With `WWW-Authenticate: Bearer realm="occamy"` |
+| 400 | `bad_request` | `code` or `code_verifier` is missing or empty, or the body doesn't decode |
+| 401 | `unauthorized` | Alike for a code that is unknown, used or expired, and a verifier that isn't 43 to 128 characters of PKCE's alphabet or doesn't match the challenge. With `WWW-Authenticate: Bearer realm="occamy"` |
 | 413 | `too_large` | A body over 64 KiB |
-| 415 | `unsupported_media_type` | A body that is not `application/json` |
-| 500 | `internal` | The token could not be signed |
+| 415 | `unsupported_media_type` | A body that isn't `application/json` |
+| 500 | `internal` | The token couldn't be signed |
 
-The route answers `401` alike when the code is unknown, used or
-expired, or when the verifier is not 43 to 128 characters of PKCE's
-alphabet or does not match the challenge. The code is spent on its
-first try, right or wrong.
+The first try spends the code, right or wrong.
+
+**Example.** With the one-time code from the return URL's fragment in
+`CODE`, and the verifier that the challenge came from in `VERIFIER`:
+
+```sh
+curl -s "$OCCAMY/api/v1/auth/oidc/token" \
+  -H 'Content-Type: application/json' \
+  -d "{\"code\":\"$CODE\",\"code_verifier\":\"$VERIFIER\"}"
+```
 
 ## Connections and sessions
 
-A connection is an entry of the configuration file's registry. A
-session is a running connection to a remote, which its owner opened and
-others may join. Only the owner reads, shares and closes a session.
-
-These routes treat what the caller may not see as absent, so that IDs
-cannot be probed:
+These routes take an access token, and treat what the caller may not
+see as absent, so that nobody can probe for IDs:
 
 - A connection whose `allow` names neither the caller nor one of the
   caller's groups answers `404 not_found`, as an unknown one does.
-- Another user's session answers `404 not_found` on `GET`, `DELETE` and
+- Another user's session answers `404 not_found` to `GET`, `DELETE` and
   shares, as an ended one does.
 
 The stream routes answer both with `close` 4001 `forbidden`.
 
-Every route here takes an access token in `Authorization: Bearer`, and
-answers `401` without a valid one ([When a token fails](#when-a-token-fails)).
-
 ### `GET /api/v1/connections`
 
-Lists the connections the caller may open, in the order of the
+Lists the connections that the caller may open, in the order of the
 configuration file.
 
-**Request.** An access token.
+**Who may call it.** Any user, with an access token.
+
+**Request.** No body.
 
 **Response.** `200`, with `Cache-Control: no-store`:
 
@@ -617,33 +791,38 @@ configuration file.
 
 | Field | Meaning |
 |-------|---------|
-| `connections` | The connections the caller may open, `[]` if none |
+| `connections` | The connections that the caller may open, `[]` if none |
 | `connections[].id` | The connection's ID |
 | `connections[].name` | Its name, which is the ID unless the file gives one |
 | `connections[].protocol` | `ssh`, `vnc`, `rdp` or `kubernetes` |
 | `adhoc_targets` | Whether [`POST /api/v1/sessions`](#post-apiv1sessions) takes [ad-hoc targets](#ad-hoc-targets) |
 
-A connection's target, credentials and pod are left out.
+The list leaves out each connection's target, credentials and pod.
 
 **Errors.** Only the `401`s of a token that fails.
+
+**Example.**
+
+```sh
+curl -s "$OCCAMY/api/v1/connections" -H "Authorization: Bearer $TOKEN"
+```
 
 ### `POST /api/v1/sessions`
 
 Opens a session owned by the caller, on a connection or on an
-[ad-hoc target](#ad-hoc-targets). A client that wants the first frame
-at once opens
-[`GET /api/v1/connections/{id}/stream`](#get-apiv1connectionsidstream)
-instead. This route is for a client that wants the session's ID before
-its stream.
+[ad-hoc target](#ad-hoc-targets), and returns its ID before any stream.
 
-**Request.** An access token. The body names a connection:
+**Who may call it.** Any user, with an access token: for a connection,
+one whose `allow` names the user or one of the user's groups.
+
+**Request.** The body names a connection:
 
 ```json
 {"connection":"build-box"}
 ```
 
-Or, with `allow_adhoc_targets`, an ad-hoc target, with the fields of
-[Ad-hoc targets](#ad-hoc-targets):
+Or, with `allow_adhoc_targets`, an ad-hoc target, with the fields that
+[Ad-hoc targets](#ad-hoc-targets) lists:
 
 ```json
 {"protocol":"ssh","target":"10.0.0.5","username":"deploy","host_keys":["SHA256:UtDMff7ThPohflGs6UL1iuiyvVrazbxQT9x0OtzIV7U"]}
@@ -667,36 +846,41 @@ and `Cache-Control: no-store`:
 
 | Status | `code` | When |
 |--------|--------|------|
-| 400 | `bad_request` | Both a connection and ad-hoc fields, or neither. An ad-hoc target that is not valid ([Ad-hoc targets](#ad-hoc-targets)). A body that does not decode, such as one with a `password` field |
+| 400 | `bad_request` | Both a connection and ad-hoc fields, or neither. An ad-hoc target that isn't valid ([Ad-hoc targets](#ad-hoc-targets)). A body that doesn't decode, such as one with a `password` field |
 | 401 | `unauthorized`, `invalid_token`, `token_expired` | No valid access token |
 | 403 | `forbidden` | Ad-hoc fields while `allow_adhoc_targets` is off, or an ad-hoc target outside `adhoc_allowlist` |
 | 404 | `not_found` | No connection of that ID that the caller may open |
 | 413 | `too_large` | A body over 64 KiB |
-| 415 | `unsupported_media_type` | A body that is not `application/json` |
+| 415 | `unsupported_media_type` | A body that isn't `application/json` |
 | 429 | `limit_exceeded` | The caller owns `limits.sessions_per_user` sessions. Close one first |
 | 503 | `limit_exceeded` | `occamyd` runs `limits.sessions` sessions |
-| 500 | `internal` | `occamyd` failed for a cause of its own, such as a password or key file it cannot read. The log names the user, the target and the cause |
+| 500 | `internal` | `occamyd` failed for a cause of its own, such as a password or key file that it can't read. The log names the user, the target and the cause |
+
+**Example.**
+
+```sh
+curl -s "$OCCAMY/api/v1/sessions" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"connection":"build-box"}'
+```
 
 **Notes.**
 
-- The session starts at once. Its owner has the owner grace, 60
-  seconds, to open
-  [`GET /api/v1/sessions/{id}/stream`](#get-apiv1sessionsidstream)
-  with the stream token or the owner's access token. Otherwise the
-  session ends with `owner-left`.
-- `occamyd` dials the remote after this answer. A target that cannot be
+- The owner opens [the session's stream](#get-apiv1sessionsidstream)
+  within the owner grace, with the stream token or their access token,
+  and the owner's `hello` then sizes the session.
+- `occamyd` dials the remote after this answer. A target that can't be
   reached ends the session, and its stream gets `close` 4006
   `backend-failed`, even when the session ended before the stream came.
-- `occamyd` asks the owner on that stream, as `prompt` messages
-  ([protocol.md](protocol.md#prompt)), for the credentials the
-  connection prompts for, and for all of an ad-hoc target's.
-- The owner's `hello` sizes the session when the stream joins.
 
 ### `GET /api/v1/sessions/{id}`
 
-Returns the state of a running session, for its owner.
+Returns a running session's state.
 
-**Request.** The owner's access token.
+**Who may call it.** The session's owner, with an access token.
+
+**Request.** No body.
 
 **Response.** `200`, with `Cache-Control: no-store`:
 
@@ -710,33 +894,42 @@ Returns the state of a running session, for its owner.
 | `connection` | The connection's ID. Absent for an ad-hoc target |
 | `protocol` | `ssh`, `vnc`, `rdp` or `kubernetes` |
 | `backend` | The `occamyd` backend that serves the session. Each protocol has its own, of the same name |
-| `class` | `terminal` for ssh and kubernetes, `graphical` for vnc and rdp: whether the stream carries a terminal or tiles of pixels |
-| `size` | `width` and `height`: character cells for a terminal, pixels for a graphical session. Absent until the remote reports a size |
+| `class` | `terminal` for ssh and kubernetes, and `graphical` for vnc and rdp: whether the stream carries a terminal or tiles of pixels |
+| `size` | `width` and `height`: character cells for a terminal, and pixels for a graphical session. Absent until the remote reports a size |
 | `viewers` | The viewers connected now: the owner first if connected, then the others in the order they joined. `[]` while nobody is connected |
 | `viewers[].id` | The viewer's ID, as in `viewer-joined` |
 | `viewers[].role` | `owner`, `viewer` or `read-only` |
 | `opened` | When the session was opened, RFC 3339 in UTC, to the second |
 
+A viewer who joined by a share has no user name, so the state lists
+them by role alone.
+
 **Errors.**
 
 | Status | `code` | When |
 |--------|--------|------|
 | 401 | `unauthorized`, `invalid_token`, `token_expired` | No valid access token |
 | 404 | `not_found` | No running session of that ID that the caller owns |
+
+**Example.**
+
+```sh
+curl -s "$OCCAMY/api/v1/sessions/$SESSION" -H "Authorization: Bearer $TOKEN"
+```
 
 ### `DELETE /api/v1/sessions/{id}`
 
-Closes a session, for its owner.
+Closes a session for everyone in it.
 
-**Request.** The owner's access token. No body.
+**Who may call it.** The session's owner, with an access token.
+
+**Request.** No body.
 
 **Response.** `204 No Content`, once the session has ended and
 `occamyd` has let it go. Every stream of the session gets `close` 4002
-`session-closed`, whatever tokens and shares are still valid.
-
-After the answer, a `GET`, `DELETE` or share of the session gets `404`.
-The session no longer counts toward `limits.sessions_per_user` or
-`limits.sessions`, so its owner may open another at once.
+`session-closed`, whatever tokens and shares are still valid, and the
+session no longer counts toward `limits`, so its owner may open another
+at once.
 
 **Errors.**
 
@@ -745,12 +938,20 @@ The session no longer counts toward `limits.sessions_per_user` or
 | 401 | `unauthorized`, `invalid_token`, `token_expired` | No valid access token |
 | 404 | `not_found` | No running session of that ID that the caller owns |
 
+**Example.**
+
+```sh
+curl -s -X DELETE "$OCCAMY/api/v1/sessions/$SESSION" -H "Authorization: Bearer $TOKEN"
+```
+
 ### `POST /api/v1/sessions/{id}/shares`
 
-Mints a [share](#shares) of a session, for its owner: a token that
-joins the session's stream as a viewer or a read-only viewer.
+Mints a share: a token that joins the session's stream as a viewer or a
+read-only viewer, for someone without an account.
 
-**Request.** The owner's access token. The body:
+**Who may call it.** The session's owner, with an access token.
+
+**Request.** The body:
 
 ```json
 {"role":"read-only","expires_in":600}
@@ -758,7 +959,7 @@ joins the session's stream as a viewer or a read-only viewer.
 
 | Field | Meaning |
 |-------|---------|
-| `role` | Required. `viewer` or `read-only` |
+| `role` | Required. `viewer` or `read-only`. A share is never `owner` |
 | `expires_in` | Optional. The share's lifetime in seconds, from 60 to 43200. Absent or 0 is 3600 |
 
 **Response.** `201 Created`, with `Cache-Control: no-store`:
@@ -777,122 +978,101 @@ joins the session's stream as a viewer or a read-only viewer.
 
 | Status | `code` | When |
 |--------|--------|------|
-| 400 | `bad_request` | `role` is not `viewer` or `read-only`, `expires_in` lies outside 60 to 43200, or the body does not decode |
+| 400 | `bad_request` | `role` isn't `viewer` or `read-only`, `expires_in` lies outside 60 to 43200, or the body doesn't decode |
 | 401 | `unauthorized`, `invalid_token`, `token_expired` | No valid access token |
 | 404 | `not_found` | No running session of that ID that the caller owns. Checked before the body |
 | 413 | `too_large` | A body over 64 KiB |
-| 415 | `unsupported_media_type` | A body that is not `application/json` |
-| 429 | `limit_exceeded` | The session has `limits.shares_per_session` shares that have not expired |
-| 500 | `internal` | The share could not be minted |
+| 415 | `unsupported_media_type` | A body that isn't `application/json` |
+| 429 | `limit_exceeded` | The session has `limits.shares_per_session` shares that haven't expired |
+| 500 | `internal` | The share couldn't be minted |
+
+**Example.**
+
+```sh
+curl -s "$OCCAMY/api/v1/sessions/$SESSION/shares" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"role":"read-only","expires_in":600}'
+```
+
+**Notes.** A share is 32 random bytes in base64url: 43 characters with
+no dots. It isn't a JWT, and it carries no claims. `occamyd` keeps only
+its SHA-256 hash, in memory, so shares don't survive a restart, and a
+share that one `occamyd` minted opens nothing on another.
+
+A share opens only [the stream](#get-apiv1sessionsidstream) of the
+session it was minted for, as many times as the session's viewer limit
+allows. Once it expires, the next stream that offers it is refused with
+`close` 4000 `unauthorized`, but the streams that have joined keep
+running. Shares end with their session, however it ends, and every
+stream that joined by one ends with the session's close code.
 
 ## Ad-hoc targets
 
 With `allow_adhoc_targets: true`, any signed-in user may open a session
-on a target that is not in the registry. Only
-[`POST /api/v1/sessions`](#post-apiv1sessions) takes one, and
-`GET /api/v1/connections` then says `"adhoc_targets":true`.
-[configuration.md](configuration.md#ad-hoc-targets) describes the keys.
+on a target that isn't in the configuration file, through
+[`POST /api/v1/sessions`](#post-apiv1sessions) only, and
+`GET /api/v1/connections` says `"adhoc_targets":true`.
+[Configuration](configuration.md#ad-hoc-targets) describes the keys.
+The target is these fields of the request's body:
 
 | Field | Meaning |
 |-------|---------|
 | `protocol` | Required. `ssh`, `vnc` or `rdp`. A kubernetes session needs a connection, which names its pod and credentials |
-| `target` | Required. `host:port`, or a host alone for the protocol's default port: 22, 5900 or 3389. An IPv6 address goes in brackets with a port, such as `[fd00::22]:22` |
+| `target` | Required. `host:port`, or a host alone for the protocol's default port: 22, 5900 or 3389. An IPv6 address alone takes the protocol's port too, such as `fd00::22`, and goes in brackets with a port, such as `[fd00::22]:2222` |
 | `username` | Optional. The user name to log in as. Without one, the owner is asked for it if the remote needs one |
-| `host_keys` | ssh only. The host keys the target may present, as a connection's `host_keys` takes them: public keys in `authorized_keys` format, or `SHA256:` fingerprints |
+| `host_keys` | ssh only. The host keys that the target may present, as a connection's `host_keys` takes them: public keys in `authorized_keys` format, or `SHA256:` fingerprints |
 | `insecure_ignore_host_key` | ssh only. `true` accepts any host key, with a warning in the log |
 
 The request carries no secret, and the target takes none from the
-configuration file. `occamyd` asks the owner for its credentials on the
-session's stream, and does not keep them.
+configuration file: `occamyd` asks the owner for its credentials on the
+session's stream, and doesn't keep them. It refuses a target like this:
 
-`occamyd` refuses the target with `400 bad_request` when:
+| Answer | When |
+|--------|------|
+| `400 bad_request` | The protocol is unknown, or is `kubernetes`. The target doesn't parse. An ssh target has neither or both of `host_keys` and `insecure_ignore_host_key`. A host key doesn't parse. A vnc or rdp target has host key fields |
+| `403 forbidden` | `adhoc_allowlist` doesn't allow it. Loopback, link-local, unspecified and multicast addresses, the clouds' metadata services, and `occamyd`'s own listeners are refused unless an entry is that very address |
 
-- the protocol is unknown, or is `kubernetes`;
-- the target does not parse;
-- an ssh target has neither or both of `host_keys` and
-  `insecure_ignore_host_key`;
-- a host key does not parse;
-- a vnc or rdp target has host key fields.
+`occamyd` resolves a host name within 5 seconds, checks every address
+against the list, and dials the first address that it checked.
 
-It refuses the target with `403 forbidden` when `adhoc_allowlist` does
-not allow it. `occamyd` resolves a host name within 5 seconds, checks
-every address against the list, and dials the first address it
-checked. These addresses are refused unless an entry is that very
-address:
-
-- loopback, link-local, unspecified and multicast addresses;
-- the clouds' metadata services;
-- `occamyd`'s own listeners.
-
-An ad-hoc target uses `occamyd`'s SSH, VNC or RDP backend. A vnc target
-checks the server's certificate if the server offers VeNCrypt, and an
-rdp target always does. Both check it against the system's roots and
-the host name the request gave, or its address if it gave an address.
-An rdp target logs on with NLA alone, so a server without NLA, such as
-xrdp, needs a connection with `security: tls`. A session on an ad-hoc
-target has no `connection` in its state.
-
-## Shares
-
-A share lets someone without an account of their own watch a session,
-or type into it.
-
-- **Minting.** The owner calls
-  [`POST /api/v1/sessions/{id}/shares`](#post-apiv1sessionsidshares)
-  with a role, `viewer` or `read-only`, and a lifetime. A share is
-  never `owner`.
-- **What it is.** 32 random bytes in base64url: 43 characters with no
-  dots. It is not a JWT, and carries no claims. `occamyd` keeps only its
-  SHA-256 hash, in memory. So shares do not survive a restart, and a
-  share minted by one `occamyd` opens nothing on another.
-- **Joining.** The holder opens
-  [`GET /api/v1/sessions/{id}/stream`](#get-apiv1sessionsidstream) of
-  the same session with the share as its token, as any token is sent
-  there. A share opens only the session it was minted for. It joins as
-  many times as the session's viewer limit allows, until it expires. A
-  viewer that joined by a share has no user name. The session's state
-  lists it by role.
-- **Expiry.** An expired share is refused at the upgrade with `close`
-  4000 `unauthorized`. Expiry ends no stream that has joined.
-- **The session's end.** Shares end with their session, however it
-  ends: closed by its owner, the owner not back within the grace, idle,
-  ended by the remote, failed, or `occamyd` shut down. Every stream that
-  joined by a share then ends with the session's close code.
-- **Revoking.** A single share cannot be revoked. Closing the session
-  ends them all.
+A vnc target checks the server's certificate if the server offers
+VeNCrypt, and an rdp target always does, against the system's roots and
+the host name or address that the request gave. An rdp target logs on
+with NLA alone, so a server without NLA, such as xrdp, needs a
+connection with `security: tls`.
 
 ## Streams
 
-A stream is a WebSocket that carries one session in protocol v1. There
-are two stream routes:
+A stream is a WebSocket that carries one session in
+[protocol v1](protocol.md). [A connection's
+stream](#get-apiv1connectionsidstream) opens a new session and streams
+it in one request, and [a session's stream](#get-apiv1sessionsidstream)
+joins a running session. Both take the token, `Origin` and `hello` in
+the same way, and refuse a request after the upgrade, with protocol
+v1's `close`, because a browser can't read the HTTP status of a refused
+upgrade:
 
-- [A connection's stream](#get-apiv1connectionsidstream) opens a new
-  session and streams it, in one request.
-- [A session's stream](#get-apiv1sessionsidstream) joins a running
-  session.
-
-Both take the token, `Origin` and `hello` the same way. Both answer a
-refusal after the upgrade with protocol v1's `close`, because a browser
-cannot read the HTTP status of a refused upgrade. After the upgrade,
-the stream follows [protocol.md](protocol.md), from `welcome` and the
-first frame to `close`.
+```mermaid
+flowchart LR
+  R["A stream<br/>request"] --> S{"Offers<br/>occamy.v1?"}
+  S -- no --> H["400 bad_request,<br/>no upgrade"]
+  S -- yes --> U["101 Switching<br/>Protocols"]
+  U --> C{"Origin, token,<br/>hello and route<br/>let it in?"}
+  C -- no --> X["close, with a<br/>code and a reason"]
+  C -- yes --> W["welcome, then<br/>the first frame"]
+```
 
 ### The upgrade request
 
-A stream request is a WebSocket upgrade: a `GET` with `Upgrade:
-websocket` that offers the subprotocol `occamy.v1` in
-`Sec-WebSocket-Protocol`. It carries:
-
-- **The token.** A browser offers the subprotocol `occamy.v1.token.`,
-  followed by the token in base64url without padding, beside
-  `occamy.v1`. A native client may instead offer `occamy.v1` alone and
-  send `Authorization: Bearer`. A token in the subprotocol wins over the
-  header: a bad one is refused even beside a good header. A token in the
-  query string is ignored.
-- **The `hello`.** The query parameter `hello` holds the whole `hello`
-  message in base64url without padding, at most 2048 bytes before
-  encoding ([protocol.md](protocol.md#the-upgrade-request)).
-- **`Origin`**, which a browser adds (below).
+A stream request is a WebSocket upgrade that offers the subprotocol
+`occamy.v1`, and carries the `hello` and the token as
+[the protocol](protocol.md#the-upgrade-request) describes: the `hello`
+in the query parameter `hello`, and the token in the subprotocol
+`occamy.v1.token.`, or, from a native client, in
+`Authorization: Bearer`. A token in the subprotocol wins over the
+header, so a bad one is refused even beside a good header, and a token
+in the query string is ignored. This is a browser's request:
 
 ```http
 GET /api/v1/connections/build-box/stream?hello=AQEAAAEAgAc4BAAAAAABDgAAAG9jY2FteS13ZWIvMS4wBQABAAUAAAACBAMBBgIAAgAAAAAQAwABAAAAAQQAAgAAAMgABQACAAAAAAQ HTTP/1.1
@@ -909,54 +1089,65 @@ The response is `101 Switching Protocols`, with
 `Sec-WebSocket-Protocol: occamy.v1` alone and no compression.
 
 `occamyd` takes a request without `Origin` on its token alone, since it
-comes from no browser. A request with `Origin` is taken only if it has
+comes from no browser, and a request with `Origin` only if it has
 exactly one, `http` or `https` with a host, and either:
 
 - its host is the request's `Host`, and its scheme is `https` when
   `occamyd` terminates TLS; or
 - its `scheme://host[:port]` is in `origins`.
 
-`null`, an empty `Origin` and a repeated one are refused. Behind a proxy
-that rewrites `Host`, list `occamyd`'s own origin in `origins`.
+`occamyd` refuses `null`, an empty `Origin` and a repeated one. Behind
+a proxy that rewrites `Host`, list `occamyd`'s own origin in `origins`.
+
+The stream examples send that request's `hello`:
+
+```sh
+HELLO=AQEAAAEAgAc4BAAAAAABDgAAAG9jY2FteS13ZWIvMS4wBQABAAUAAAACBAMBBgIAAgAAAAAQAwABAAAAAQQAAgAAAMgABQACAAAAAAQ
+```
+
+curl doesn't decode the WebSocket, so the examples print the stream's
+first bytes in hexadecimal and stop after two seconds. They show
+`welcome`, with the session's ID, or a refusal's `close`, with its
+reason as text.
 
 ### Refusals
 
 `occamyd` checks a stream request in this order: the subprotocol, then
-`Origin`, the token's presence and the `hello`. Then it upgrades, and
-the route verifies the token and opens or joins the session. Only the
-first two rows answer in HTTP. The others answer after the upgrade.
+`Origin`, whether a token is present, and the `hello`. Then it
+upgrades, and the route verifies the token and opens or joins the
+session. Only the first two rows answer in HTTP.
 
 | Check | Answer |
 |-------|--------|
 | The request offers no `occamy.v1` | `400 bad_request`, as JSON, with no upgrade |
-| The request is no valid WebSocket upgrade | The WebSocket library's `426` or `400`, plain text |
+| The request isn't a valid WebSocket upgrade | The WebSocket library's `426` or `400`, as plain text |
 | `Origin` | `close` 4001 `forbidden`, "origin not allowed" |
 | No token | `close` 4000 `unauthorized`, "a token is required" |
-| More than one token subprotocol, an empty one, or one that is not base64url | `close` 4000 `unauthorized`, "invalid token subprotocol" |
-| No `hello`, or one that does not decode | `close` 1002 `protocol-error`, "invalid hello" |
+| More than one token subprotocol, an empty one, or one that isn't base64url | `close` 4000 `unauthorized`, "invalid token subprotocol" |
+| No `hello`, or one that doesn't decode | `close` 1002 `protocol-error`, "invalid hello" |
 | A `hello` over 2048 bytes | `close` 1009 `too-large`, "invalid hello" |
 | A `hello` of another protocol version | `close` 1003 `unsupported`, "unsupported protocol version" |
 | A token that fails verification | `close` 4000 `unauthorized`, with "token expired", "invalid token", or "the token's subject is a static user's name" |
 
-Each route's own refusals follow in its section. A refused stream gets
-the upgrade, then `close` with the code and a reason, then a WebSocket
-close with the same code. A client that does not complete the closing
-handshake within a second is dropped. Until the route has let a client
-in, `occamyd` reads no message over 64 KiB.
-[protocol.md](protocol.md#close-codes) lists the close codes.
+A refused stream gets the upgrade, then `close` with the code and a
+reason, then a WebSocket close with the same code, and `occamyd` drops
+a client that doesn't complete the closing handshake within a second.
+Each route's own refusals follow in its section, and
+[Protocol](protocol.md#close-codes) lists the close codes.
 
 ### `GET /api/v1/connections/{id}/stream`
 
 Opens a session on connection `{id}`, owned by the caller, and streams
-it to the caller as its owner. `occamyd` sends `welcome` and the first
-frame right after the upgrade, without waiting for a message from the
-client.
+it to the caller, with `welcome` and the first frame right after the
+upgrade.
+
+**Who may call it.** A user whom the connection's `allow` names, by name
+or by group, with an access token.
 
 **Request.** A [stream upgrade](#the-upgrade-request) with an access
-token whose user the connection's `allow` names, by name or group. A
-session token or a share is refused. The owner's `hello` sizes the
-session: a terminal's columns and rows, or a desktop's pixels where the
-backend can ask the remote for them.
+token. The owner's `hello` sizes the session: a terminal's columns and
+rows, or a desktop's pixels where the backend can ask the remote for
+them.
 
 **Response.** `101 Switching Protocols`, then protocol v1. The
 session's ID is in `welcome`.
@@ -965,30 +1156,38 @@ session's ID is in `welcome`.
 
 | Refusal | `close` |
 |---------|---------|
-| A session token, a share, or any token that is not a valid access token | 4000 `unauthorized` |
+| A session token, a share, or any token that isn't a valid access token | 4000 `unauthorized` |
 | No connection `{id}` that the caller may open | 4001 `forbidden`, "no such connection" |
 | The caller owns `limits.sessions_per_user` sessions | 4001 `forbidden`, "too many sessions open" |
 | `occamyd` runs `limits.sessions` sessions | 4001 `forbidden`, "occamyd runs as many sessions as it takes" |
-| `occamyd` could not open the session, for a cause of its own | 1011 `internal-error` |
+| `occamyd` couldn't open the session, for a cause of its own | 1011 `internal-error` |
+
+**Example.**
+
+```sh
+curl -s --http1.1 --max-time 2 \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  -H 'Sec-WebSocket-Protocol: occamy.v1' -H "Authorization: Bearer $TOKEN" \
+  "$OCCAMY/api/v1/connections/build-box/stream?hello=$HELLO" | xxd | head -n 4
+```
 
 **Notes.**
 
-- A remote that fails at once can end the session before `welcome`,
-  such as one whose certificate is not the pinned one, or a Kubernetes
-  API server that refuses the exec. The stream then gets `close` 4006
-  `backend-failed` without `welcome`: the same `close` it would have had
-  after `welcome` ([protocol.md](protocol.md#the-response)).
-- Once the stream has joined, the session is like one that
-  `POST /api/v1/sessions` opened. Its owner may leave and come back
-  within the owner grace through
-  [`GET /api/v1/sessions/{id}/stream`](#get-apiv1sessionsidstream), with
-  an access token. The owner may read, share and close it through the
-  session routes.
+- A remote that fails at once, such as a Kubernetes API server that
+  refuses the exec, can end the session before `welcome`, and the
+  stream then gets `close` 4006 `backend-failed` in its place
+  ([Protocol](protocol.md#the-response)).
+- Once joined, the session is like one that `POST /api/v1/sessions`
+  opened: its owner may [rejoin](#get-apiv1sessionsidstream), read,
+  share and close it.
 
 ### `GET /api/v1/sessions/{id}/stream`
 
-Joins running session `{id}`. If the session ended within the owner
-grace, it tells the owner how it ended.
+Joins running session `{id}`, or tells its owner how it ended.
+
+**Who may call it.** The session's owner with an access token, and
+anyone with a session token or a share of the session, in its role.
 
 **Request.** A [stream upgrade](#the-upgrade-request) with one of these
 tokens:
@@ -999,14 +1198,14 @@ tokens:
 | A session token whose `sid` is `{id}`: the stream token, or a trusted issuer's | Its `role`. `owner` only if its user is the session's owner |
 | A share of `{id}` | The share's role, `viewer` or `read-only` |
 
-A token without dots is taken for a share. Any other is taken for a
-JWT: an access token, or else a session token. A trusted issuer's
+`occamyd` takes a token without dots for a share, and any other token
+for a JWT: an access token, or else a session token. A trusted issuer's
 session token, of any role, joins only a session that one of the
-issuer's own users owns. With the issuer's `link_static_users`, it may
-also join a static user's.
+issuer's own users owns, or, with the issuer's `link_static_users`, a
+static user's.
 
 **Response.** `101 Switching Protocols`, then protocol v1. The owner's
-`hello` resizes the session. A viewer's resizes nothing.
+`hello` resizes the session, and a viewer's resizes nothing.
 
 **Errors.** Besides the [refusals](#refusals) of every stream:
 
@@ -1014,36 +1213,38 @@ also join a static user's.
 |---------|---------|
 | A share that is unknown, expired, of another session, or whose session has ended | 4000 `unauthorized`, "invalid token" |
 | A JWT that fails verification | 4000 `unauthorized` |
-| No running session `{id}`, and no ended one whose owner this is (below) | 4001 `forbidden`, "no such session" |
+| No running session `{id}`, and no ended one whose owner this is, as described below | 4001 `forbidden`, "no such session" |
 | A session token for another session, or from an issuer that may not join this one | 4001 `forbidden`, "no such session" |
 | An access token or `owner` session token of anyone but the owner | 4001 `forbidden`, "no such session" |
 | A `viewer` or `read-only` session token of a session that has ended | 4001 `forbidden`, "no such session" |
-| The owner's older stream did not leave within 5 seconds of a newer one | 4001 `forbidden`, "the owner is connected already" |
+| The owner's older stream didn't leave within 5 seconds of a newer one | 4001 `forbidden`, "the owner is connected already" |
 | A viewer beyond `limits.viewers_per_session` | 4007 `viewer-limit` |
+
+**Example.** This joins with the share from
+[Share a session](#share-a-session), in `SHARE`:
+
+```sh
+curl -s --http1.1 --max-time 2 \
+  -H 'Connection: Upgrade' -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' \
+  -H 'Sec-WebSocket-Protocol: occamy.v1' -H "Authorization: Bearer $SHARE" \
+  "$OCCAMY/api/v1/sessions/$SESSION/stream?hello=$HELLO" | xxd | head -n 4
+```
 
 **Notes.**
 
-- **After the session ends.** For the owner grace, 60 seconds, after a
-  session ends, its owner's stream gets the `close` the session ended
-  with instead of `welcome`. Examples are 4006 `backend-failed` for a
-  remote that failed before the stream came, as after
-  [`POST /api/v1/sessions`](#post-apiv1sessions), and 4002
-  `session-closed` after
-  [`DELETE /api/v1/sessions/{id}`](#delete-apiv1sessionsid). The owner
-  must use an access token or an `owner` session token. Anyone else
-  gets the refusal for a session that never existed, so nobody else
+- **After the session ends.** For 60 seconds, the owner's stream, with
+  an access token or an `owner` session token, gets the `close` that the
+  session ended with in place of `welcome`, such as 4006
+  `backend-failed` for a remote that failed before the stream came.
+  Anyone else, and an owner whose ended session `occamyd` has
+  [forgotten](#lifetimes), gets "no such session", so nobody else
   learns whether a session existed or how it ended.
-- **Ended sessions kept.** `occamyd` keeps the owner and the `close` of
-  as many ended sessions as `limits.sessions`, and at least 1024. It
-  forgets the oldest first, so a client that opens sessions whose
-  remotes fail cannot grow them. An owner whose session was forgotten
-  gets "no such session" too.
 - **Takeover.** A newer stream of the owner takes over from an older
-  one, which gets `close` 1000 `normal` with "the owner connected again".
-  Otherwise a connection that died without `occamyd` noticing would keep
-  the owner out of their own session. The reason is fixed, so a client
-  can tell a takeover from its own close. The web client says the
-  session was opened elsewhere, and offers to join it again.
+  one, which gets `close` 1000 `normal` with "the owner connected again",
+  so that a connection that died without `occamyd` noticing can't keep
+  the owner out. The reason is fixed, so a client can tell a takeover
+  from its own close.
 
 ## Web client
 
@@ -1052,14 +1253,15 @@ also join a static user's.
 Serves the web client from the directory that `web_client` names, as
 `make client` builds it in `client/occamy-web/dist`.
 
-**Request.** No token. The page signs in through API v1 on this origin,
-since `occamyd` answers no CORS preflight. Served only with
-`web_client`. Without it, `/static/` is a plain-text `404`.
+**Who may call it.** A browser, without a token. Served only with
+`web_client`; without it, `/static/` is a plain-text `404`.
 `GET /static` redirects here.
 
-**Response.** The file under the directory, with the type its
-extension names, or the `index.html` of a directory. Every response has
-these headers:
+**Request.** No body.
+
+**Response.** The file under the directory, with the type that its
+extension names, or the `index.html` of a directory, with these
+headers:
 
 | Header | Value |
 |--------|-------|
@@ -1068,12 +1270,10 @@ these headers:
 | `Content-Security-Policy` | The policy below |
 | `Referrer-Policy` | `no-referrer` |
 
-The files in `assets/` are named by a hash of their content, so a new
-build names new files. The page itself is revalidated on every load, so
-a page of an earlier build never asks for scripts that a newer build
-replaced.
-
-The Content-Security-Policy, for a request to `host`:
+The files in `assets/` are named by a hash of their content, and the
+browser revalidates the page itself on every load, so a page of an
+earlier build never asks for scripts that a newer build replaced. The
+Content-Security-Policy, for a request to `host`, is this:
 
 ```text
 default-src 'self'; script-src 'self'; worker-src 'self';
@@ -1084,41 +1284,52 @@ base-uri 'none'; form-action 'self'; frame-ancestors 'none'
 
 It allows what the page does, and nothing more:
 
-- The page runs its own scripts, and the Worker that decodes tiles.
-- It calls API v1 and opens streams on its own origin. `ws://host` and
-  `wss://host` name it for browsers that do not count WebSockets as
-  `'self'`.
-- It shows the remote's pointer as a `data:` image.
-- It takes inline styles, since the terminal emulator, xterm.js, adds
-  `<style>` elements for its theme and cell size. React sets style
-  attributes through the CSSOM, which the policy does not govern.
-- No other page may frame it, so none can lay itself over a remote
-  desktop and take its clicks.
+| Directive | Allows |
+|-----------|--------|
+| `script-src`, `worker-src` | The page's own scripts, and the Worker that decodes tiles |
+| `connect-src` | API v1 and streams on the page's own origin. `ws://host` and `wss://host` name that origin for browsers that don't count WebSockets as `'self'` |
+| `img-src` | The remote's pointer, as a `data:` image |
+| `style-src` | Inline styles, since xterm.js adds `<style>` elements for its theme and cell size. React sets style attributes through the CSSOM, which the policy doesn't govern |
+| `frame-ancestors` | No page, so none can lay itself over a remote desktop and take its clicks |
 
-A `Host` that is not a plain name or address, with an optional port, is
-left out of `connect-src`, so a request cannot add to the policy.
+`occamyd` leaves a `Host` that isn't a plain name or address, with an
+optional port, out of `connect-src`, so a request can't add to the
+policy.
 
 **Errors.** A plain-text `404` for anything else: a missing file, a
 directory without an `index.html`, which is never listed, and a
-symbolic link that leads out of the directory, which is not followed.
-A link within the directory is followed.
+symbolic link that leads out of the directory, which isn't followed,
+unlike one within it.
+
+**Example.** This prints the headers of the page:
+
+```sh
+curl -sI "$OCCAMY/static/"
+```
 
 **Notes.** `occamyd` opens the directory for each request. It warns at
-start when the directory does not exist or has no `index.html`, and
-serves the client once it is built there, without a restart.
+start when the directory doesn't exist or has no `index.html`, and
+serves the client once it's built there, without a restart.
 
 ## The debug listener
 
-With `debug.address` set, `occamyd` opens a second listener that
-serves expvar and pprof, and nothing else. Without it, these routes are
-served nowhere. The public listener never serves them.
+With `debug.address` set, `occamyd` opens a second listener that serves
+expvar and pprof, and nothing else. The public listener never serves
+them.
 
-The debug listener has no authentication, TLS, body limit or write
-timeout, since a CPU profile takes as long as asked. Keep it on the
-loopback interface. `occamyd` warns at start when it is not. Its
-requests are logged as the public listener's are.
-[debugging.md](debugging.md#profiling-occamyd) shows how to read the
-profiles.
+> [!WARNING]
+> The debug listener has no authentication, TLS, body limit or write
+> timeout, since a CPU profile takes as long as asked. Keep it on the
+> loopback interface. `occamyd` warns at start when it isn't.
+
+Its requests are logged as the public listener's are, and its routes
+take no token: anyone who can reach the listener may call them.
+[Debugging](debugging.md#profiling-occamyd) shows how to read the
+profiles. The examples assume `debug.address: localhost:6060`:
+
+```sh
+DEBUG=http://localhost:6060
+```
 
 ### `GET /debug/vars`
 
@@ -1133,8 +1344,14 @@ Returns Go's expvar, a JSON object, abbreviated here:
 | `cmdline` | `occamyd`'s command line |
 | `memstats` | The Go runtime's memory statistics |
 | `goroutines` | The number of goroutines |
-| `fds` | The file descriptors open, counted in `/proc/self/fd` on Linux or `/dev/fd` on macOS. -1 where `occamyd` cannot count them |
-| `tcp_congestion` | The TCP congestion control of the public listener's connections ([configuration.md](configuration.md#tcp-congestion-control)). Empty where `occamyd` cannot tell |
+| `fds` | The file descriptors open, counted in `/proc/self/fd` on Linux or `/dev/fd` on macOS. -1 where `occamyd` can't count them |
+| `tcp_congestion` | The TCP congestion control of the public listener's connections ([Configuration](configuration.md#tcp-congestion-control)). Empty where `occamyd` can't tell |
+
+**Example.**
+
+```sh
+curl -s "$DEBUG/debug/vars" | jq '{goroutines, fds}'
+```
 
 ### `GET /debug/pprof/`
 
@@ -1144,35 +1361,76 @@ and `/debug/pprof/threadcreate`. Each comes as a profile for
 `go tool pprof`, or as text with `?debug=1` or `?debug=2`.
 `/debug/pprof` without the slash redirects here.
 
+**Example.** This prints the goroutines, grouped by stack:
+
+```sh
+curl -s "$DEBUG/debug/pprof/goroutine?debug=1"
+```
+
 ### `GET /debug/pprof/cmdline`
 
 Returns `occamyd`'s command line as plain text, its arguments separated
 by NUL bytes.
+
+**Example.**
+
+```sh
+curl -s "$DEBUG/debug/pprof/cmdline" | tr '\0' ' '
+```
 
 ### `GET /debug/pprof/profile`
 
 Returns a CPU profile over `seconds` seconds, 30 by default, for
 `go tool pprof`.
 
+**Example.** This samples the CPU for 10 seconds, and prints the
+functions that took the most of it:
+
+```sh
+curl -s -o cpu.pprof "$DEBUG/debug/pprof/profile?seconds=10"
+go tool pprof -top cpu.pprof
+```
+
 ### `GET /debug/pprof/symbol`
 
-Returns the number of symbols the binary has, as plain text:
+Returns the number of symbols that the binary has, as plain text:
 `num_symbols: 1` when it has any.
+
+**Example.**
+
+```sh
+curl -s "$DEBUG/debug/pprof/symbol"
+```
 
 ### `POST /debug/pprof/symbol`
 
-Looks up the program counters in the body, hexadecimal and separated by
-`+`, and answers each with its function's name, as `go tool pprof` asks
-for them.
+Looks up the program counters in the body, in hexadecimal and separated
+by `+`, and answers each with its function's name, as `go tool pprof`
+asks for them.
+
+**Example.** This looks up the first program counter of a goroutine
+profile:
+
+```sh
+PC=$(curl -s "$DEBUG/debug/pprof/goroutine?debug=1" | awk '/^#/ {print $2; exit}')
+curl -s -d "$PC" "$DEBUG/debug/pprof/symbol"
+```
 
 ### `GET /debug/pprof/trace`
 
 Returns an execution trace over `seconds` seconds, 1 by default, for
 `go tool trace`.
 
+**Example.**
+
+```sh
+curl -s -o trace.out "$DEBUG/debug/pprof/trace?seconds=5"
+go tool trace trace.out
+```
+
 ## Design
 
 [The API and server stack](../specs/008-native-architecture/api-and-server-stack.md)
 records how the API was designed: the options weighed and the decisions
-made, such as tokens out of URLs, refusals as `close` after the upgrade,
-and absent rather than forbidden.
+made, such as tokens out of URLs, refusals as `close` after the
+upgrade, and absent rather than forbidden.

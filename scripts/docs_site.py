@@ -11,7 +11,9 @@ as the home page. So the hooks
 - make index.md from README.md, and manual.md from docs/README.md;
 - point each link that resolves inside docs/ at that page or file of
   the site, and each one that leaves docs/, such as specs/ or LICENSE,
-  at the repository on GitHub.
+  at the repository on GitHub;
+- show each of GitHub's alerts, such as "> [!NOTE]", as the admonition
+  of Material that matches it.
 
 MkDocs resolves a Markdown link from the page's file, but leaves raw
 HTML alone, and the browser resolves it from the page's URL, which is a
@@ -104,7 +106,28 @@ def on_page_markdown(markdown, page, config, files):
             value = rewrite(value, html=True)
         return attr + value + m.group(6)
 
-    return PICTURE.sub(_light_dark, LINK.sub(replace, markdown))
+    return ALERT.sub(_admonition, PICTURE.sub(_light_dark, LINK.sub(replace, markdown)))
+
+
+# One of GitHub's alerts: a blockquote whose first line is its kind.
+ALERT = re.compile(r"^> \[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION)\][ \t]*\n((?:>[^\n]*(?:\n|$))+)", re.M)
+
+# Material's admonition for each kind, and its title where Material's
+# own would differ from GitHub's.
+ADMONITION = {
+    "NOTE": ("note", None),
+    "TIP": ("tip", None),
+    "IMPORTANT": ("info", "Important"),
+    "WARNING": ("warning", None),
+    "CAUTION": ("danger", "Caution"),
+}
+
+
+def _admonition(m):
+    kind, title = ADMONITION[m.group(1)]
+    body = [line[2:] if line.startswith("> ") else line[1:] for line in m.group(2).rstrip("\n").split("\n")]
+    head = f'!!! {kind}' + (f' "{title}"' if title else "")
+    return head + "\n\n" + "\n".join(("    " + line) if line else "" for line in body) + "\n"
 
 
 # A figure in a light and a dark version, as GitHub shows it: the

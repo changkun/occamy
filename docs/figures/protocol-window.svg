@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="780" height="560" viewBox="0 0 780 560">
+<rect width="780" height="560" fill="#fcfcfb"/>
+<rect x="134" y="14" width="112" height="30" rx="6" fill="#ffffff" stroke="#c3c2b7" stroke-width="1"/>
+<text x="190" y="34" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="middle">occamyd</text>
+<line x1="190" y1="44" x2="190" y2="530" stroke="#c3c2b7" stroke-width="1.5"/>
+<rect x="504" y="14" width="112" height="30" rx="6" fill="#ffffff" stroke="#c3c2b7" stroke-width="1"/>
+<text x="560" y="34" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#0b0b0b" text-anchor="middle">Client</text>
+<line x1="560" y1="44" x2="560" y2="530" stroke="#c3c2b7" stroke-width="1.5"/>
+<defs><marker id="head-frame" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#2a78d6"/></marker><marker id="head-ack" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#898781"/></marker><marker id="head-key" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#eb6834"/></marker></defs>
+<path d="M 40 70 L 40 510" stroke="#898781" stroke-width="1" marker-end="url(#head-ack)"/>
+<text x="52" y="506" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11" font-weight="400" fill="#898781" text-anchor="start">time</text>
+<line x1="190" y1="84" x2="560" y2="176" stroke="#2a78d6" stroke-width="1.8" marker-end="url(#head-frame)"/>
+<text x="345.4" y="122.64" transform="rotate(14.0 345.4 122.64) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#0b0b0b" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">frame 1</text>
+<line x1="190" y1="114" x2="560" y2="206" stroke="#2a78d6" stroke-width="1.8" marker-end="url(#head-frame)"/>
+<text x="345.4" y="152.64" transform="rotate(14.0 345.4 152.64) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#0b0b0b" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">frame 2</text>
+<line x1="560" y1="190" x2="190" y2="282" stroke="#898781" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#head-ack)"/>
+<text x="330.6" y="247.04" transform="rotate(-14.0 330.6 247.04) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#0b0b0b" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">frame-ack 1</text>
+<line x1="560" y1="220" x2="190" y2="312" stroke="#898781" stroke-width="1.8" stroke-dasharray="5 4" marker-end="url(#head-ack)"/>
+<text x="271.4" y="291.76" transform="rotate(-14.0 271.4 291.76) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#0b0b0b" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">frame-ack 2</text>
+<line x1="190" y1="282" x2="560" y2="374" stroke="#2a78d6" stroke-width="1.8" marker-end="url(#head-frame)"/>
+<text x="419.4" y="339.04" transform="rotate(14.0 419.4 339.04) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#0b0b0b" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">frame 3</text>
+<line x1="190" y1="312" x2="560" y2="404" stroke="#2a78d6" stroke-width="1.8" marker-end="url(#head-frame)"/>
+<text x="449.0" y="376.4" transform="rotate(14.0 449.0 376.4) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#0b0b0b" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">frame 4</text>
+<rect x="181" y="114" width="18" height="358" rx="4" fill="#2a78d6" stroke="none" stroke-width="1" fill-opacity="0.14"/>
+<line x1="560" y1="246" x2="190" y2="338" stroke="#eb6834" stroke-width="2.2" marker-end="url(#head-key)"/>
+<text x="478.6" y="266.24" transform="rotate(-14.0 478.6 266.24) translate(0 -6)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#0b0b0b" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">key, seq 42</text>
+<line x1="190" y1="346" x2="560" y2="438" stroke="#eb6834" stroke-width="2.2" marker-end="url(#head-key)"/>
+<text x="375.0" y="392.0" transform="rotate(14.0 375.0 392.0) translate(0 15)" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="500" fill="#0b0b0b" text-anchor="middle" paint-order="stroke" stroke="#fcfcfb" stroke-width="4">frame 5, last_seq 42</text>
+<text x="172" y="130" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#52514e" text-anchor="end">Window full:</text>
+<text x="172" y="146" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#52514e" text-anchor="end">changes wait</text>
+<text x="172" y="286" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#52514e" text-anchor="end">They go as one</text>
+<text x="172" y="302" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#52514e" text-anchor="end">frame on the ack</text>
+<text x="172" y="344" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#52514e" text-anchor="end">The key's frame goes</text>
+<text x="172" y="360" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#52514e" text-anchor="end">at once, one beyond</text>
+<text x="172" y="376" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#52514e" text-anchor="end">the full window</text>
+<path d="M 574 246 L 582 246 L 582 442 L 574 442" fill="none" stroke="#eb6834" stroke-width="1.5"/>
+<text x="590" y="336.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#52514e" text-anchor="start">The key's latency, which</text>
+<text x="590" y="352.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#52514e" text-anchor="start">last_seq lets the client</text>
+<text x="590" y="368.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#52514e" text-anchor="start">measure exactly</text>
+<text x="24" y="548" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#52514e" text-anchor="start">A window of 2 frames on a path whose one-way delay is longer than the time between frames. Shaded: the window is full.</text>
+</svg>

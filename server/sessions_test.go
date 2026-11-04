@@ -673,8 +673,8 @@ func TestAdhocReserved(t *testing.T) {
 // TestConnectionTarget checks that a session on a connection of the
 // registry gets every setting of the connection that a backend reads.
 // The connection sets them all, and the target it wants sets every field
-// but name, which only an ad-hoc target has, so that a field added to
-// target is added here too.
+// but name, which only an ad-hoc target has, and log, which the session
+// sets, so that a field added to target is added here too.
 func TestConnectionTarget(t *testing.T) {
 	c := config.Connection{
 		ID: "mac", Name: "Mac", Protocol: "vnc", Target: "mac.lab.internal:5900",
@@ -709,7 +709,7 @@ func TestConnectionTarget(t *testing.T) {
 	}
 	v := reflect.ValueOf(want)
 	for i := range v.NumField() {
-		if name := v.Type().Field(i).Name; name != "name" && v.Field(i).IsZero() {
+		if name := v.Type().Field(i).Name; name != "name" && name != "log" && v.Field(i).IsZero() {
 			t.Errorf("the test sets no target.%s", name)
 		}
 	}

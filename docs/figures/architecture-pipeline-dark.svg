@@ -1,0 +1,182 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="566" viewBox="0 0 940 566">
+<rect width="940" height="566" fill="#1a1a19"/>
+<defs><marker id="arch-head-ink" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#f0efec"/></marker><marker id="arch-head-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#898781"/></marker></defs>
+<rect x="24" y="24" width="120" height="48" rx="6" fill="#2c2c2a" stroke="#4a4a46" stroke-width="1.2"/>
+<text x="84.0" y="45.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="middle">Remote</text>
+<text x="84.0" y="62.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="middle">VNC or RDP server</text>
+<rect x="24" y="112" width="120" height="48" rx="6" fill="#2c2c2a" stroke="#4a4a46" stroke-width="1.2"/>
+<text x="84.0" y="133.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="middle">Backend</text>
+<text x="84.0" y="150.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="middle">decodes updates</text>
+<path d="M 84 72 L 84 108" fill="none" stroke="#f0efec" stroke-width="1.6" marker-end="url(#arch-head-ink)"/>
+<text x="92" y="94" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">updates</text>
+<text x="196" y="28" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#f0efec" text-anchor="start">The framebuffer's versions</text>
+<rect x="196" y="40" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="211.0" y="59.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="226" y="40" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="241.0" y="59.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="256" y="40" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="271.0" y="59.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="286" y="40" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="301.0" y="59.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="316" y="40" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="331.0" y="59.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="346" y="40" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="361.0" y="59.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="196" y="70" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="211.0" y="89.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="226" y="70" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="241.0" y="89.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">27</text>
+<rect x="256" y="70" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="271.0" y="89.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">27</text>
+<rect x="286" y="70" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="301.0" y="89.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="316" y="70" width="30" height="30" rx="0" fill="#2c2c2a" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="331.0" y="89.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="600" fill="#f0efec" text-anchor="middle">38</text>
+<rect x="346" y="70" width="30" height="30" rx="0" fill="#2c2c2a" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="361.0" y="89.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="600" fill="#f0efec" text-anchor="middle">38</text>
+<rect x="196" y="100" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="211.0" y="119.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="226" y="100" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="241.0" y="119.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">27</text>
+<rect x="256" y="100" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="271.0" y="119.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">27</text>
+<rect x="286" y="100" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="301.0" y="119.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="316" y="100" width="30" height="30" rx="0" fill="#2c2c2a" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="331.0" y="119.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="600" fill="#f0efec" text-anchor="middle">38</text>
+<rect x="346" y="100" width="30" height="30" rx="0" fill="#2c2c2a" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="361.0" y="119.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="600" fill="#f0efec" text-anchor="middle">38</text>
+<rect x="196" y="130" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="211.0" y="149.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="226" y="130" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="241.0" y="149.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="256" y="130" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="271.0" y="149.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="286" y="130" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="301.0" y="149.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="316" y="130" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="331.0" y="149.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="346" y="130" width="30" height="30" rx="0" fill="#2c2c2a" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="361.0" y="149.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="600" fill="#f0efec" text-anchor="middle">44</text>
+<rect x="317.5" y="71.5" width="27" height="27" rx="2" fill="none" stroke="#f0efec" stroke-width="2"/>
+<rect x="347.5" y="71.5" width="27" height="27" rx="2" fill="none" stroke="#f0efec" stroke-width="2"/>
+<rect x="317.5" y="101.5" width="27" height="27" rx="2" fill="none" stroke="#f0efec" stroke-width="2"/>
+<rect x="347.5" y="101.5" width="27" height="27" rx="2" fill="none" stroke="#f0efec" stroke-width="2"/>
+<rect x="347.5" y="131.5" width="27" height="27" rx="2" fill="none" stroke="#f0efec" stroke-width="2"/>
+<text x="444" y="28" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#f0efec" text-anchor="start">What viewer A was sent</text>
+<rect x="444" y="40" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="459.0" y="59.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="474" y="40" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="489.0" y="59.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="504" y="40" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="519.0" y="59.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="534" y="40" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="549.0" y="59.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="564" y="40" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="579.0" y="59.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="594" y="40" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="609.0" y="59.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="444" y="70" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="459.0" y="89.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="474" y="70" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="489.0" y="89.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">27</text>
+<rect x="504" y="70" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="519.0" y="89.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">27</text>
+<rect x="534" y="70" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="549.0" y="89.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="564" y="70" width="30" height="30" rx="0" fill="#2c2c2a" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="579.0" y="89.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="600" fill="#f0efec" text-anchor="middle">30</text>
+<rect x="594" y="70" width="30" height="30" rx="0" fill="#2c2c2a" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="609.0" y="89.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="600" fill="#f0efec" text-anchor="middle">30</text>
+<rect x="444" y="100" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="459.0" y="119.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="474" y="100" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="489.0" y="119.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">27</text>
+<rect x="504" y="100" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="519.0" y="119.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">27</text>
+<rect x="534" y="100" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="549.0" y="119.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="564" y="100" width="30" height="30" rx="0" fill="#2c2c2a" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="579.0" y="119.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="600" fill="#f0efec" text-anchor="middle">30</text>
+<rect x="594" y="100" width="30" height="30" rx="0" fill="#2c2c2a" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="609.0" y="119.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="600" fill="#f0efec" text-anchor="middle">30</text>
+<rect x="444" y="130" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="459.0" y="149.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="474" y="130" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="489.0" y="149.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="504" y="130" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="519.0" y="149.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="534" y="130" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="549.0" y="149.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="564" y="130" width="30" height="30" rx="0" fill="#232322" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="579.0" y="149.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#898781" text-anchor="middle">12</text>
+<rect x="594" y="130" width="30" height="30" rx="0" fill="#2c2c2a" stroke="#4a4a46" stroke-width="0.8"/>
+<text x="609.0" y="149.0" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="600" fill="#f0efec" text-anchor="middle">12</text>
+<rect x="565.5" y="71.5" width="27" height="27" rx="2" fill="none" stroke="#f0efec" stroke-width="2"/>
+<rect x="595.5" y="71.5" width="27" height="27" rx="2" fill="none" stroke="#f0efec" stroke-width="2"/>
+<rect x="565.5" y="101.5" width="27" height="27" rx="2" fill="none" stroke="#f0efec" stroke-width="2"/>
+<rect x="595.5" y="101.5" width="27" height="27" rx="2" fill="none" stroke="#f0efec" stroke-width="2"/>
+<rect x="595.5" y="131.5" width="27" height="27" rx="2" fill="none" stroke="#f0efec" stroke-width="2"/>
+<path d="M 144 136 L 190 136" fill="none" stroke="#f0efec" stroke-width="1.6" marker-end="url(#arch-head-ink)"/>
+<text x="150" y="128" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">draws</text>
+<text x="410.0" y="105" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#c3c2b7" text-anchor="middle">vs</text>
+<text x="660" y="50" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">Each change gives a tile the next</text>
+<text x="660" y="67" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">version of one counter for the screen.</text>
+<text x="660" y="101" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">The outlined tiles are newer than</text>
+<text x="660" y="118" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">what A has, so they are A's dirty tiles.</text>
+<line x1="628" y1="145.0" x2="654" y2="145.0" stroke="#c3c2b7" stroke-width="1"/>
+<text x="660" y="142.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">A key that A pressed drew this one,</text>
+<text x="660" y="158.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">so it goes first, in a frame of its own.</text>
+<rect x="16" y="214" width="712" height="164" rx="10" fill="none" stroke="#4a4a46" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="174" y="236" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="start">Viewer A's writer</text>
+<text x="296" y="236" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">one for each viewer, on a goroutine of its own</text>
+<path d="M 410.0 166 L 410.0 194 L 91 194 L 91 258" fill="none" stroke="#f0efec" stroke-width="1.6" marker-end="url(#arch-head-ink)"/>
+<rect x="32" y="262" width="118" height="52" rx="6" fill="#2c2c2a" stroke="#4a4a46" stroke-width="1.2"/>
+<text x="91.0" y="293.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="middle">Dirty tiles</text>
+<text x="91.0" y="334" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" fill="#c3c2b7" text-anchor="middle" xml:space="preserve"><tspan>Newer than A has,</tspan></text>
+<text x="91.0" y="350" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" fill="#c3c2b7" text-anchor="middle" xml:space="preserve"><tspan>an input's first</tspan></text>
+<rect x="174" y="262" width="118" height="52" rx="6" fill="#2c2c2a" stroke="#9085e9" stroke-width="2"/>
+<text x="233.0" y="293.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="middle">Scrolls</text>
+<text x="233.0" y="334" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" fill="#c3c2b7" text-anchor="middle" xml:space="preserve"><tspan>Rows A has, moved:</tspan></text>
+<text x="233.0" y="350" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" fill="#c3c2b7" text-anchor="middle" xml:space="preserve"><tspan fill="#9085e9" font-weight="600" font-family="'SF Mono', Menlo, Consolas, monospace">copy-rect</tspan></text>
+<rect x="316" y="262" width="118" height="52" rx="6" fill="#2c2c2a" stroke="#199e70" stroke-width="2"/>
+<text x="375.0" y="293.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="middle">Tile cache</text>
+<text x="375.0" y="334" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" fill="#c3c2b7" text-anchor="middle" xml:space="preserve"><tspan>Tiles A holds:</tspan></text>
+<text x="375.0" y="350" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" fill="#c3c2b7" text-anchor="middle" xml:space="preserve"><tspan fill="#199e70" font-weight="600" font-family="'SF Mono', Menlo, Consolas, monospace">tile, cached</tspan></text>
+<rect x="458" y="262" width="118" height="52" rx="6" fill="#2c2c2a" stroke="#4a4a46" stroke-width="1.2"/>
+<text x="517.0" y="293.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="middle">Encoder</text>
+<text x="517.0" y="334" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" fill="#c3c2b7" text-anchor="middle" xml:space="preserve"><tspan fill="#3987e5" font-weight="600" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif">Exact</tspan><tspan>, or </tspan><tspan fill="#d95926" font-weight="600" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif">lossy</tspan></text>
+<text x="517.0" y="350" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" fill="#c3c2b7" text-anchor="middle" xml:space="preserve"><tspan>in runs of tiles</tspan></text>
+<rect x="600" y="262" width="118" height="52" rx="6" fill="#2c2c2a" stroke="#4a4a46" stroke-width="1.2"/>
+<text x="659.0" y="293.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="middle">Pacer</text>
+<text x="659.0" y="334" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" fill="#c3c2b7" text-anchor="middle" xml:space="preserve"><tspan>At A's rate, a few</tspan></text>
+<text x="659.0" y="350" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" fill="#c3c2b7" text-anchor="middle" xml:space="preserve"><tspan>frames in flight</tspan></text>
+<path d="M 150 288.0 L 170 288.0" fill="none" stroke="#f0efec" stroke-width="1.6" marker-end="url(#arch-head-ink)"/>
+<path d="M 292 288.0 L 312 288.0" fill="none" stroke="#f0efec" stroke-width="1.6" marker-end="url(#arch-head-ink)"/>
+<path d="M 434 288.0 L 454 288.0" fill="none" stroke="#f0efec" stroke-width="1.6" marker-end="url(#arch-head-ink)"/>
+<path d="M 576 288.0 L 596 288.0" fill="none" stroke="#f0efec" stroke-width="1.6" marker-end="url(#arch-head-ink)"/>
+<rect x="466" y="305" width="49.0" height="4" rx="2" fill="#3987e5" stroke="none" stroke-width="1"/>
+<rect x="519.0" y="305" width="49.0" height="4" rx="2" fill="#d95926" stroke="none" stroke-width="1"/>
+<rect x="816" y="248" width="108" height="80" rx="6" fill="#2c2c2a" stroke="#4a4a46" stroke-width="1.2"/>
+<text x="870.0" y="268" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="middle">Client A</text>
+<text x="870.0" y="288" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="middle">decodes, and</text>
+<text x="870.0" y="304" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="middle">shows the frame</text>
+<text x="870.0" y="320" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="middle">at frame-end</text>
+<path d="M 718 278 L 812 278" fill="none" stroke="#f0efec" stroke-width="1.6" marker-end="url(#arch-head-ink)"/>
+<text x="767.0" y="272" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="500" fill="#f0efec" text-anchor="middle">frame</text>
+<path d="M 816 302 L 722 302" fill="none" stroke="#898781" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arch-head-muted)"/>
+<text x="767.0" y="320" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="500" fill="#898781" text-anchor="middle">frame-ack</text>
+<rect x="397.0" y="400" width="240" height="48" rx="6" fill="#2c2c2a" stroke="#4a4a46" stroke-width="1.2"/>
+<text x="517.0" y="421.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="middle">Encode cache and workers</text>
+<text x="517.0" y="438.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="middle">each encoding made once, for every viewer</text>
+<line x1="517.0" y1="358" x2="517.0" y2="400" stroke="#4a4a46" stroke-width="1.4" stroke-dasharray="3 3"/>
+<rect x="16" y="472" width="712" height="48" rx="10" fill="none" stroke="#4a4a46" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="32" y="501" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="start">Viewer B's writer</text>
+<text x="156" y="501" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">the same stages, against what B was sent, at B's pace</text>
+<line x1="517.0" y1="448" x2="517.0" y2="472" stroke="#4a4a46" stroke-width="1.4" stroke-dasharray="3 3"/>
+<rect x="816" y="472" width="108" height="48" rx="6" fill="#2c2c2a" stroke="#4a4a46" stroke-width="1.2"/>
+<text x="870.0" y="501.0" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="middle">Client B</text>
+<path d="M 728 490 L 812 490" fill="none" stroke="#f0efec" stroke-width="1.6" marker-end="url(#arch-head-ink)"/>
+<path d="M 816 506 L 732 506" fill="none" stroke="#898781" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#arch-head-muted)"/>
+<text x="16" y="556" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">The framebuffer is the session's. What each viewer was sent, its writer and its pace are the viewer's own.</text>
+</svg>

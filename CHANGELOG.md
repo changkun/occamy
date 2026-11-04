@@ -11,7 +11,8 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 - A website, <https://changkun.github.io/occamy/>: the README and the
   documents in `docs/`, with search, built by MkDocs and published from
-  `master` by the `Pages` workflow ([CONTRIBUTING.md](CONTRIBUTING.md#development)).
+  `master` by the `Pages` workflow
+  ([docs/development.md](docs/development.md#preview-the-website)).
 - Pages for deploying `occamyd` ([docs/deploy.md](docs/deploy.md)), using
   the web client ([docs/web-client.md](docs/web-client.md)), and building
   and testing Occamy ([docs/development.md](docs/development.md)).
@@ -22,9 +23,98 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   benchmarks page opens with Occamy against Guacamole, in figures and
   tables with 95% intervals and corrected tests
   ([docs/benchmarks.md](docs/benchmarks.md#occamy-against-guacamole)).
-- Each line a session logs, such as `session ended`, carries the
-  session's ID as `session=`, as the line that opened it does
+- The protocol page explains how a session works before it specifies
+  each message, with figures of a message's bytes, a frame of a
+  desktop, the frame window, the tile cache, and how `occamyd` picks a
+  tile's codec ([docs/protocol.md](docs/protocol.md#how-a-session-works)).
+- The HTTP API page explains connections, sessions and the three kinds
+  of token before it specifies the routes, with figures of the tokens
+  from sign-in to a guest who joins, of a session's states, of an OIDC
+  sign-in, and of how a stream is refused. It walks through what a
+  client does, gives every route an example to run with curl, and
+  lists the viewer timeout among the lifetimes
+  ([docs/api.md](docs/api.md#how-the-api-works)).
+- The configuration page starts from a working file and a figure of how
+  a request passes through it, shows how to add each kind of
+  connection, set up sign-in, rotate keys, put Occamy behind a proxy
+  and limit what users can do, and ends with a reference that gives
+  every key's type and default
+  ([docs/configuration.md](docs/configuration.md#how-the-configuration-works)).
+- Try Occamy, Deploy, and Debugging and monitoring each open with a
+  figure: the demo stack's containers and ports, a deployment's hops
+  and what each needs, and where the log and the listeners come from.
+  Deploy adds Windows hosts and Kubernetes, and debugging is organised
+  by what users see ([docs/deploy.md](docs/deploy.md#how-a-deployment-fits-together),
+  [docs/debugging.md](docs/debugging.md#where-to-look)).
+- The web client and Occamy for macOS pages follow what you do, from
+  signing in to sharing a session and what each ending means, with a
+  screenshot of each of the web client's screens in light and dark
+  ([docs/web-client.md](docs/web-client.md#how-the-web-client-works),
+  [docs/macos-app.md](docs/macos-app.md#how-the-app-works)).
+- The README says what Occamy is and points each reader to their page.
+  The architecture page follows a key press to the frame that shows it,
+  with a figure of each viewer's writer, and the development page is
+  organised by task, from building and testing to cutting a release
+  ([docs/architecture.md](docs/architecture.md#how-occamyd-works),
+  [docs/development.md](docs/development.md#cut-a-release)).
+- The codecs page explains how `occamyd` picks each tile's codec, and
+  what each step saves, before the measurements behind each choice
+  ([docs/benchmarks/codecs.md](docs/benchmarks/codecs.md)). The records
+  of how scroll detection, the tile cache, refinement and the encode
+  workers were measured are now beside the graphics pipeline's spec.
+- Each benchmark report names its scenarios and networks as the
+  benchmarks page does, with their codes kept in the CSV files, and
+  says how to read its values before its tables.
+- The benchmark report calls its estimate the *improvement*: the
+  baseline's value divided by the candidate's, so that above 1× the
+  candidate is better. The column in `comparisons.csv` that was
+  `times_better` is now `improvement`.
+- Every line `occamyd` logs about a session carries the session's ID:
+  the session's own, such as `session ended`, its viewers' streams',
+  such as `viewer dropped`, and its backend's, such as `WARN vnc: …`,
+  as `session=`, as the line that opened it does
   ([docs/debugging.md](docs/debugging.md#the-log)).
+- The web client and Occamy for macOS say what happened and what you
+  can do in complete sentences, such as when a session ends, a sign-in
+  fails or no connection is open to you, and call `occamyd` "the
+  server". The Mac app shows its own sentence for a wrong password or
+  an expired sign-in instead of the API's message.
+- `occamyd -h` says whom `occamyd` serves. A configuration file that
+  can't be read stops it with `cannot read the configuration file`.
+  When a signal stops it, it logs `received terminated: shutting down;
+  a second signal stops occamyd at once` first and `occamyd has
+  stopped` last.
+
+### Fixed
+
+- A renewed certificate takes effect without a restart, which ended
+  every session: `occamyd` reads `tls.cert` and `tls.key` again at the
+  first handshake after either file changes. A trusted issuer's
+  rotated `public_key_file` takes effect at the next token the same
+  way. A file that doesn't load leaves the one before it in use, with
+  a warning in the log
+  ([docs/configuration.md](docs/configuration.md#when-a-change-takes-effect)).
+- A session no longer drops when its screen stays still behind a proxy
+  that closes quiet connections, such as nginx after its default
+  `proxy_read_timeout` of a minute. `occamyd` sends a `ping` on a
+  stream that has carried nothing for 25 seconds, and the client's
+  `pong` counts as no input, so the 30-minute idle timeout still
+  applies. The proxy needs no longer timeouts
+  ([docs/protocol.md](docs/protocol.md#ping)).
+- When a session can't connect, everyone in it learns why, such as
+  “The remote computer refused the user name or password.” or “The
+  server doesn't trust the remote computer's certificate.”, where the
+  web client and the Mac app said **Remote unreachable** for every
+  cause. The sentence names no host, address or fingerprint; the log
+  keeps the whole error
+  ([docs/debugging.md](docs/debugging.md#where-to-look)).
+- Occamy for macOS says why it couldn't open a session in a sentence,
+  with the technical detail below it, instead of the client library's
+  error. When the server can't reach the remote, the app says so,
+  where it showed `client: closed by the server: backend-failed:
+  failed`: the core now passes the server's close reason on its own.
+- Occamy for macOS treats close code 1011 as the server's internal
+  error, as the web client does, not as a bug in the app.
 
 ## [1.0.0-beta.2] - 2026-11-04
 
@@ -56,7 +146,7 @@ the API and the protocol may change before 1.0.0.
   hardened runtime, `make swift-dmg` a disk image of it, and
   `make swift-notarize` signs both with a Developer ID and has Apple
   notarize the image
-  ([docs/macos-app.md](docs/macos-app.md#building-it)).
+  ([docs/macos-app.md](docs/macos-app.md#build-it-from-source)).
 - `disable_copy` and `disable_paste` on a vnc or rdp connection keep
   the remote's clipboard from the viewers, or theirs from the remote,
   as guacd's `disable-copy` and `disable-paste` did
@@ -71,7 +161,7 @@ the API and the protocol may change before 1.0.0.
   run, behind a load gate, with each container's memory, occamyd's
   runtime and the harness's own CPU, and two slower networks, N3 (100 ms,
   5 Mbit/s) and N4 (250 ms, 1 Mbit/s)
-  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)), and
+  ([docs/benchmarks.md](docs/benchmarks.md#run-a-comparison)), and
   `make bench-essential`, an hour's subset of it. `make bench-report`
   analyses the results into tables, exact tests and figures with 95%
   intervals ([docs/benchmarks.md](docs/benchmarks.md#analysis)).
@@ -84,20 +174,20 @@ the API and the protocol may change before 1.0.0.
 - The benchmark measures a scene's cadence as well as its frame rate:
   when each of its frames was first shown, the share never shown, and
   the 95th percentile of the interval between those shown
-  ([docs/benchmarks.md](docs/benchmarks.md#what-is-measured)). A
+  ([docs/benchmarks.md](docs/benchmarks.md#how-occamy-is-measured)). A
   `v1-native-w2` series offers the frame window of two frames that every
   client agreed on before, so that `make bench-realtime-1` measures the
   window sized from the path against it, on one image in one run, and
   the analysis compares the two as a family of their own
-  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)).
+  ([docs/benchmarks.md](docs/benchmarks.md#run-a-comparison)).
 - `make bench-realtime-2` measures what packet loss costs a key while TCP
   holds back what follows the lost packet: `v1-native` and `guacd` with
   none, 0.5% and 2% of the packets to the client lost, on a link that
   the kernel of each server emulates, since the harness's proxy carries
   a byte stream and cannot drop a packet
-  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)). The report
+  ([docs/benchmarks.md](docs/benchmarks.md#run-a-comparison)). The report
   gives what each loss added beside the round trip
-  ([results](docs/benchmarks.md#step-2-what-loss-costs)), and the
+  ([results](docs/benchmarks.md#what-packet-loss-costs)), and the
   analysis says when the runs are too few for any difference to be
   significant after Holm's correction.
 - `make bench-realtime-3a` measures step 2's loss study with occamyd's
@@ -105,8 +195,8 @@ the API and the protocol may change before 1.0.0.
   own, `occamy-v1-cubic`, whose server asks for CUBIC, and each v1 result
   read with `-runtime` records the congestion control its server's
   connections use
-  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison);
-  [results](docs/benchmarks.md#step-3a-the-congestion-control)).
+  ([docs/benchmarks.md](docs/benchmarks.md#run-a-comparison);
+  [results](docs/benchmarks.md#bbr-against-cubic)).
 - Codec 7, `scaled`, carries a tile as a JPEG or WebP image at a
   fraction of its width and height, which the client scales up
   ([docs/protocol.md](docs/protocol.md#the-scaled-codec)). occamyd sends
@@ -122,7 +212,7 @@ the API and the protocol may change before 1.0.0.
 - The benchmark's load gate holds each result rather than each block of
   results, so that the load a scene leaves does not carry into the
   results after it
-  ([docs/benchmarks.md](docs/benchmarks.md#the-comparison)).
+  ([docs/benchmarks.md](docs/benchmarks.md#run-a-comparison)).
 - On a long path, frames follow the screen's changes instead of two a
   round trip. The server and clients offer a frame window of 16, and the
   server keeps as many frames unacknowledged as cover the time an
@@ -134,14 +224,14 @@ the API and the protocol may change before 1.0.0.
   Over VNC with 50 ms of delay, full-screen motion now shows all 30
   frames a second instead of about 19, and a key's effect in 96 ms
   instead of 119 at the 95th percentile
-  ([docs/benchmarks.md](docs/benchmarks.md#step-1-the-frame-window-from-the-path)).
+  ([docs/benchmarks.md](docs/benchmarks.md#the-frame-window)).
 - On Linux, occamyd asks for BBR as the TCP congestion control of its
   connections, in place of the kernel's usual default, CUBIC, which
   takes every lost packet for congestion and slows down. Over VNC with
   50 ms of delay and 2% of the packets lost, full-screen motion now shows
   27.6 frames a second instead of 16.4, and a key's effect in 149 ms
   instead of 360 at the 95th percentile
-  ([docs/benchmarks.md](docs/benchmarks.md#step-3a-the-congestion-control)).
+  ([docs/benchmarks.md](docs/benchmarks.md#bbr-against-cubic)).
   BBR needs the kernel's `tcp_bbr` module; without it occamyd keeps the
   kernel's choice and logs a warning. `congestion_control` in the v1 file
   names another, or `system` for the kernel's own
@@ -206,7 +296,7 @@ the API and the protocol may change before 1.0.0.
   occamyd takes ClearCodec: with GFX, the default, their screen stays
   nearly black. An ad-hoc rdp target cannot set it, so reach a Windows
   host through a connection
-  ([docs/configuration.md](docs/configuration.md#backends)).
+  ([docs/configuration.md](docs/configuration.md#windows-hosts)).
 
 ## [1.0.0-beta.1] - 2026-11-02
 
@@ -275,13 +365,13 @@ before 1.0.0, which removes guacd and the v0 routes.
   `-conf` with a v1 file. A v1 file needs `auth.signing_key_file`: keep
   it at `/var/lib/occamy/signing.key` on a volume, or everyone signs in
   again after a new container
-  ([docs/configuration.md](docs/configuration.md#sign-in-auth)).
+  ([docs/configuration.md](docs/configuration.md#the-signing-key)).
 - The web client needs a v1 file with `web_client`. A v0 file's
   `client: true` still serves `/static/`, but the client cannot sign in.
 - In a v1 file, vnc and rdp use the native backends unless `backend:
   guacd`. They read no `guacd.params`, check certificates against the
   system's roots, `tls.ca_file` or `tls.pins`, and RDP asks for NLA
-  ([docs/configuration.md](docs/configuration.md#backends)).
+  ([docs/configuration.md](docs/configuration.md#add-a-connection)).
 - The demo stack's compose project is `occamy`, not `docker`. Remove a
   0.6.0 stack once, before `make run`: `(cd docker && podman compose -p
   docker down --remove-orphans --volumes --rmi local)`, or `docker

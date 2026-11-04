@@ -197,7 +197,7 @@ final class Store {
         case let .error(e):
             throw APIError(status: 0, code: e, message: OIDCOutcome.message(e))
         case nil:
-            throw APIError(status: 0, code: "bad_response", message: "The sign-in came back without a code.")
+            throw APIError(status: 0, code: "bad_response", message: "The sign-in finished without a code from the server. Try again.")
         }
     }
 
@@ -229,7 +229,7 @@ final class Store {
         } catch let e as APIError where e.signIn {
             setToken(nil, for: server)
             connections[server.id] = nil
-            problems[server.id] = e.message
+            problems[server.id] = e.localizedDescription
         } catch is SignInNeeded {
             problems[server.id] = nil
         } catch {
@@ -265,7 +265,7 @@ final class WebSignIn: NSObject, ASWebAuthenticationPresentationContextProviding
             s.prefersEphemeralWebBrowserSession = false
             session = s
             if !s.start() {
-                c.resume(throwing: APIError(status: 0, code: "unavailable", message: "The sign-in could not start."))
+                c.resume(throwing: APIError(status: 0, code: "unavailable", message: "The sign-in couldn't start. Try again."))
             }
         }
     }

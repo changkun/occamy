@@ -243,7 +243,7 @@ func (w *writer) refineFrame(ctx context.Context) error {
 			w.held.quality, w.held.goal = w.msgQuality, w.msgGoal
 			break
 		}
-		if err := w.c.WriteMessage(ctx, w.buf); err != nil {
+		if err := w.send(ctx, w.buf); err != nil {
 			return err
 		}
 		w.p.Wrote(time.Now(), len(w.buf))

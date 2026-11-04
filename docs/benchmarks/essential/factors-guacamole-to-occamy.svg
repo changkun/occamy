@@ -307,10 +307,10 @@ z
     </g>
    </g>
    <g id="text_9">
-    <text style="font-size: 8px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #52514e" x="181.794339" y="49.53548" transform="rotate(-0 181.794339 49.53548)">1x</text>
+    <text style="font-size: 8px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #52514e" x="181.794339" y="49.53548" transform="rotate(-0 181.794339 49.53548)">1×</text>
    </g>
    <g id="text_10">
-    <text style="font-size: 8px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #52514e" x="337.94204" y="49.53548" transform="rotate(-0 337.94204 49.53548)">10x</text>
+    <text style="font-size: 8px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #52514e" x="337.94204" y="49.53548" transform="rotate(-0 337.94204 49.53548)">10×, the target</text>
    </g>
    <g id="text_11">
     <text style="font-size: 10px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #52514e" x="165.077427" y="35.53548" transform="rotate(-0 165.077427 35.53548)">No delay</text>
@@ -338,7 +338,7 @@ L 178.794339 264.09274
       </g>
      </g>
      <g id="text_12">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="178.794339" y="467.19752" transform="rotate(-0 178.794339 467.19752)">1x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="178.794339" y="467.19752" transform="rotate(-0 178.794339 467.19752)">1×</text>
      </g>
     </g>
     <g id="xtick_18">
@@ -353,7 +353,7 @@ L 225.799481 264.09274
       </g>
      </g>
      <g id="text_13">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="225.799481" y="467.19752" transform="rotate(-0 225.799481 467.19752)">2x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="225.799481" y="467.19752" transform="rotate(-0 225.799481 467.19752)">2×</text>
      </g>
     </g>
     <g id="xtick_19">
@@ -368,7 +368,7 @@ L 287.936898 264.09274
       </g>
      </g>
      <g id="text_14">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="287.936898" y="467.19752" transform="rotate(-0 287.936898 467.19752)">5x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="287.936898" y="467.19752" transform="rotate(-0 287.936898 467.19752)">5×</text>
      </g>
     </g>
     <g id="xtick_20">
@@ -383,7 +383,7 @@ L 334.94204 264.09274
       </g>
      </g>
      <g id="text_15">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="334.94204" y="467.19752" transform="rotate(-0 334.94204 467.19752)">10x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="334.94204" y="467.19752" transform="rotate(-0 334.94204 467.19752)">10×</text>
      </g>
     </g>
     <g id="xtick_21">
@@ -398,7 +398,7 @@ L 381.947182 264.09274
       </g>
      </g>
      <g id="text_16">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="381.947182" y="467.19752" transform="rotate(-0 381.947182 467.19752)">20x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="381.947182" y="467.19752" transform="rotate(-0 381.947182 467.19752)">20×</text>
      </g>
     </g>
     <g id="xtick_22">
@@ -413,7 +413,7 @@ L 444.084599 264.09274
       </g>
      </g>
      <g id="text_17">
-      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="444.084599" y="467.19752" transform="rotate(-0 444.084599 467.19752)">50x</text>
+      <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="444.084599" y="467.19752" transform="rotate(-0 444.084599 467.19752)">50×</text>
      </g>
     </g>
     <g id="xtick_23">
@@ -487,7 +487,7 @@ L 444.084599 264.09274
      </g>
     </g>
     <g id="text_18">
-     <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="315.038594" y="481.68252" transform="rotate(-0 315.038594 481.68252)">How many times better Occamy is than Guacamole (log scale)</text>
+     <text style="font-size: 9px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #52514e" x="315.038594" y="481.68252" transform="rotate(-0 315.038594 481.68252)">Improvement of Occamy over Guacamole (log scale)</text>
     </g>
    </g>
    <g id="matplotlib.axis_4">
@@ -598,7 +598,7 @@ L 464.99976 451.62952
    </g>
   </g>
   <g id="text_28">
-   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0b0b0b" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Occamy against Guacamole: primary metrics, with 95% intervals</text>
+   <text style="font-size: 11px; font-family: 'Inter', 'Helvetica Neue', 'Arial', 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0b0b0b" x="7.2" y="17.672" transform="rotate(-0 7.2 17.672)">Occamy against Guacamole: improvement on each primary metric, with 95% intervals</text>
   </g>
  </g>
  <defs>

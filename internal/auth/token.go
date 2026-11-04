@@ -198,7 +198,7 @@ func (s *Signer) sign(c *Claims, ttl time.Duration) (string, error) {
 // Verifier checks tokens from occamyd and from trusted issuers.
 type Verifier struct {
 	audience    string
-	keys        map[string]ed25519.PublicKey
+	keys        func(issuer string) (ed25519.PublicKey, bool)
 	leeway      time.Duration
 	maxLifetime time.Duration
 	now         func() time.Time
@@ -208,6 +208,16 @@ type Verifier struct {
 // issuers in keys, each with its public key. occamyd's own issuer and key
 // belong in keys too.
 func NewVerifier(audience string, keys map[string]ed25519.PublicKey) *Verifier {
+	return NewVerifierFunc(audience, func(issuer string) (ed25519.PublicKey, bool) {
+		k, ok := keys[issuer]
+		return k, ok
+	})
+}
+
+// NewVerifierFunc is NewVerifier with each issuer's public key from
+// keys, which reports false for an issuer it doesn't trust. It is asked
+// at each token, so a key can change while the verifier runs.
+func NewVerifierFunc(audience string, keys func(issuer string) (ed25519.PublicKey, bool)) *Verifier {
 	return &Verifier{
 		audience:    audience,
 		keys:        keys,
@@ -269,7 +279,7 @@ func (v *Verifier) key(t *jwt.Token) (any, error) {
 	if !ok {
 		return nil, ErrClaims
 	}
-	key, ok := v.keys[c.Issuer]
+	key, ok := v.keys(c.Issuer)
 	if !ok {
 		return nil, ErrUnknownIssuer
 	}

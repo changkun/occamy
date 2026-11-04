@@ -173,6 +173,10 @@ type Config struct {
 	DisableCopy, DisablePaste bool
 	// Logger receives the session's log, slog.Default() if nil.
 	Logger *slog.Logger
+	// ID is the session's ID in a Registry, which Registry.Open draws
+	// with NewID if it is empty. A caller that logs about the session
+	// before it opens, as of its backend, draws the ID first.
+	ID string
 }
 
 // DefaultOwnerGrace is the owner grace of a Config that sets none.

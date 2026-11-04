@@ -40,6 +40,7 @@ type client struct {
 	mu      sync.Mutex
 	img     *image.RGBA
 	types   []protocol.Type
+	at      []time.Duration // when each of types arrived
 	frames  []frameRecord
 	titles  []timedTitle
 	close   *protocol.Close
@@ -52,6 +53,7 @@ type client struct {
 	// clipStatus holds the clipboard-status messages received.
 	clipStatus []bool
 	pongs      []uint32
+	pings      []uint32 // the server's, which the client answers
 	// errs holds messages the client could not decode, which a client
 	// answers by closing the connection.
 	errs []error
@@ -200,7 +202,9 @@ func (cl *client) run(ctx context.Context) {
 			continue
 		}
 		cl.types = append(cl.types, m.Type())
+		cl.at = append(cl.at, time.Since(cl.start))
 		var ackID uint32
+		var pong *protocol.Pong
 		switch m := m.(type) {
 		case *protocol.Welcome:
 			cl.welcome = m
@@ -274,6 +278,9 @@ func (cl *client) run(ctx context.Context) {
 			cl.clipStatus = append(cl.clipStatus, m.Answering)
 		case *protocol.Pong:
 			cl.pongs = append(cl.pongs, m.Nonce)
+		case *protocol.Ping:
+			cl.pings = append(cl.pings, m.Nonce)
+			pong = (*protocol.Pong)(m)
 		case *protocol.Title:
 			cl.titles = append(cl.titles, timedTitle{m.Title, time.Since(cl.start), cl.tiles})
 		case *protocol.Close:
@@ -284,6 +291,9 @@ func (cl *client) run(ctx context.Context) {
 		cl.mu.Unlock()
 		if ackID != 0 && !noAcks {
 			_ = cl.c.WriteMessage(ctx, protocol.FrameAck{FrameID: ackID, DecodeTime: 500}.Append(nil))
+		}
+		if pong != nil {
+			_ = cl.c.WriteMessage(ctx, pong.Append(nil))
 		}
 	}
 }

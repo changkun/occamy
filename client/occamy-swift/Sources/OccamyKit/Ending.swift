@@ -29,31 +29,35 @@ public struct Ending: Sendable, Equatable {
             detail = "The session was closed."
         case 1001:
             title = "Server shut down"
-            detail = "occamyd is shutting down, which ends its sessions. Try again once it is back."
-        case 1002, 1003, 1009, 1011:
+            detail = "The server is shutting down, which ends every session on it. Try again once it's back."
+        case 1002, 1003, 1009:
             title = "Protocol error"
-            detail = "This is a bug in occamyd or in this app."
+            detail = "The server or this app sent something the other couldn't handle. This is a bug in the server or in this app."
+        case 1011:
+            // internal-error: the server failed, as the web client's
+            // closeKind has it, not the protocol.
+            detail = "The server ran into an internal error."
         case 4000:
             if shared {
                 title = "Link not valid"
                 detail = "This share link has expired, or its session has ended. Ask the owner for a new one."
             } else {
                 title = "Signed out"
-                detail = "Your sign-in has expired or is not valid. Sign in again."
+                detail = "Your sign-in has expired or isn't valid. Sign in again."
                 signIn = true
             }
         case 4001:
             title = "Access refused"
-            detail = "occamyd refused this stream: the connection or session is not open to you, the session has ended, or you have as many sessions as it allows."
+            detail = "The server didn't let you join. The connection or session may not be open to you, the session may have ended, or you may already have as many sessions as the server allows."
         case 4002:
             detail = "The owner ended the session."
         case 4003:
-            detail = "The owner left and did not come back in time."
+            detail = "The owner left and didn't come back in time."
         case 4004:
             title = "Ended for inactivity"
-            detail = "Nobody gave input for the session's idle timeout, so occamyd ended it."
+            detail = "Nobody used the session for longer than the server allows, so the server ended it."
         case 4005:
-            detail = "The remote computer ended the session, as when its user logs out."
+            detail = "The remote computer ended the session, for example because its user logged out."
         case 4006:
             // occamyd's reason is the word "failed" unless it knows the
             // cause.
@@ -62,21 +66,21 @@ public struct Ending: Sendable, Equatable {
                 detail = reason
             } else {
                 title = "Remote unreachable"
-                detail = "occamyd could not connect to the remote computer, or lost the connection to it."
+                detail = "The server couldn't connect to the remote computer, or lost its connection to it."
             }
         case 4007:
             title = "Session full"
-            detail = "The session has as many viewers as occamyd allows. Try again later."
+            detail = "The session already has as many viewers as the server allows. Try again later."
         case 4008:
             title = "Disconnected: too slow"
-            detail = "occamyd heard nothing from this app for its viewer timeout: the network stalled, or the app could not keep up."
+            detail = "The server heard nothing from this app for too long. The network may have stalled, or the app couldn't keep up."
             rejoin = true
         case 0:
             title = "Connection lost"
-            detail = "The connection to occamyd failed. The session may still run: join it again."
+            detail = "The connection to the server failed. The session may still be running, so connect again to return to it."
             rejoin = true
         default:
-            break
+            detail = "The server ended the session."
         }
     }
 }
