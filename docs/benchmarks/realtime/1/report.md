@@ -6,10 +6,10 @@ The comparison benchmark's results in `bench-realtime-1.json`, as `bench/report.
 ## The run
 
 - Started at 2026-11-02T21:56:08.578958Z, on Apple M5 Pro (18 CPUs, darwin), with podman version 6.0.2.
-- 6 runs with seed 20261102, and 100 keys timed in each scenario of each run.
+- 6 runs with seed 20261102; each scenario that measures a key's latency timed 100 keys a run.
 - Before each result, the harness waited until the host's 1-minute load average was below 8.
 - 168 results analysed, and 0 failed.
-- The results files name Occamy with a window of two `v1-native-w2` and Occamy `v1-native`.
+- The series are Occamy with a window of two and Occamy; [Run a comparison](../../../benchmarks.md#run-a-comparison) gives each one's name in the results files.
 
 ## How to read this report
 

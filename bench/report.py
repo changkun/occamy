@@ -939,7 +939,7 @@ def loss_lines(losses, summary, figures, names=SERIES_NAMES):
         return []
     primary = [c for c in losses if c["primary"]]
     lines = [
-        "## What packet loss adds",
+        "## What packet loss adds to the primary metrics",
         "",
         "For each series, what losing a share of the packets to the client added to a metric, over the same"
         " scenario and network without loss. Both are measured on a link emulated in the kernel. *Added* is the"
@@ -976,7 +976,7 @@ def loss_lines(losses, summary, figures, names=SERIES_NAMES):
     secondary = [c for c in losses if not c["primary"] and c["metric"] not in RUNTIME]
     if secondary:
         lines += [
-            "### What loss adds to the secondary metrics",
+            "## What packet loss adds to the secondary metrics",
             "",
             "The other metrics that each scenario records. They're exploratory, and their p-values aren't"
             " corrected.",
@@ -1026,11 +1026,13 @@ def write_markdown(out, source, rep, rows, failed, summary, comparisons, targets
         f" {host.get('engine', '?')}.",
         f"- {rep.get('runs', '?')} runs with seed {plan.get('seed', '?')}"
         + (", in quick mode" if rep.get("quick") else "")
-        + f", and {f'{keys} keys' if keys else 'the default number of keys'} timed in each scenario of each run.",
+        + f"; each scenario that measures a key's latency timed"
+        f" {f'{keys} keys' if keys else 'the default number of keys'} a run.",
         (f"- Before each result, the harness waited until the host's 1-minute load average was below {gate}."
          if gate else "- The harness didn't wait for the host's load before each result."),
         f"- {results} results analysed, and {len(failed)} failed.",
-        "- The results files name " + and_list(f"{names.get(s, s)} `{s}`" for s in series) + ".",
+        f"- The series are {and_list(names.get(s, s) for s in series)};"
+        f" [Run a comparison]({docs}#run-a-comparison) gives each one's name in the results files.",
         "",
         "## How to read this report",
         "",

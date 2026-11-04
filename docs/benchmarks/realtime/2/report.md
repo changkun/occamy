@@ -6,10 +6,10 @@ The comparison benchmark's results in `bench-realtime-2.json`, as `bench/report.
 ## The run
 
 - Started at 2026-11-03T00:42:45.33314Z, on Apple M5 Pro (18 CPUs, darwin), with podman version 6.0.2.
-- 6 runs with seed 20261103, and 100 keys timed in each scenario of each run.
+- 6 runs with seed 20261103; each scenario that measures a key's latency timed 100 keys a run.
 - Before each result, the harness waited until the host's 1-minute load average was below 8.
 - 352 results analysed, and 8 failed.
-- The results files name Guacamole `guacd` and Occamy `v1-native`.
+- The series are Guacamole and Occamy; [Run a comparison](../../../benchmarks.md#run-a-comparison) gives each one's name in the results files.
 
 ## How to read this report
 
@@ -226,7 +226,7 @@ The other metrics that each scenario records, for Guacamole and Occamy. They're 
 | Key during motion, RDP, 0.5% lost | 50 ms, 20 Mbit/s | Server memory, peak (MiB) | 100 [60.7, 134] | 73.0 [68.3, 78.8] | 1.30× [0.844, 1.89] | 0.8182 |
 | Key during motion, RDP, 0.5% lost | 50 ms, 20 Mbit/s | Client CPU time (ms) | 12,898 [6,038, 19,024] | 2,212 [1,951, 2,389] | 5.83× [3.10, 7.96] | 0.0022 |
 
-## What packet loss adds
+## What packet loss adds to the primary metrics
 
 For each series, what losing a share of the packets to the client added to a metric, over the same scenario and network without loss. Both are measured on a link emulated in the kernel. *Added* is the Hodges–Lehmann estimate of the difference, in the metric's unit, with its exact 95% interval from the Mann–Whitney distribution; the network's round trip is beside it, for scale. The table has each scenario's primary metric, and Holm's correction is over its 39 tests.
 
@@ -289,7 +289,7 @@ For each series, what losing a share of the packets to the client added to a met
   <img alt="Gap between frames, 95th percentile against the share of packets lost: each series' median of the runs, with its 95% interval, in a panel for each scenario and network" src="loss-frame_interval_p95.svg">
 </picture>
 
-### What loss adds to the secondary metrics
+## What packet loss adds to the secondary metrics
 
 The other metrics that each scenario records. They're exploratory, and their p-values aren't corrected.
 

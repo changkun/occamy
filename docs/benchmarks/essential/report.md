@@ -6,10 +6,10 @@ The comparison benchmark's results in `bench-essential.json`, as `bench/report.p
 ## The run
 
 - Started at 2026-11-03T20:47:56.02838Z, on Apple M5 Pro (18 CPUs, darwin), with podman version 6.0.2.
-- 6 runs with seed 20261102, and 100 keys timed in each scenario of each run.
+- 6 runs with seed 20261102; each scenario that measures a key's latency timed 100 keys a run.
 - Before each result, the harness waited until the host's 1-minute load average was below 8.
 - 192 results analysed, and 0 failed.
-- The results files name Guacamole `guacd` and Occamy `v1-native`.
+- The series are Guacamole and Occamy; [Run a comparison](../../benchmarks.md#run-a-comparison) gives each one's name in the results files.
 
 ## How to read this report
 
