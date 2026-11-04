@@ -1,39 +1,45 @@
-# Codec measurement
+# Codecs
 
-The [graphics pipeline](../../specs/008-native-architecture/graphics-pipeline.md)
-left its codecs, its tile size and its pixel layout to a measurement on
-recorded frames. This page is that measurement: what was compared, on
-what, and what it decided. Every table here is an excerpt of
-[codecs-tables.md](./codecs-tables.md), which the measurement writes, and
-[codecs.json](./codecs.json) holds the sums behind it.
+`occamyd` sends a desktop as tiles of 64 × 64 pixels, and encodes each
+tile by what it shows. This page says which codec each tile gets, and
+the measurement behind each choice, on frames recorded from a real
+desktop.
 
-## The answers
+## What occamyd sends
 
-| Question | Answer | The numbers that decide it |
-|----------|--------|----------------------------|
-| 1. Lossless codec | **A: palette or raw pixels with deflate**, `compress/flate` at level 1 | 2.1 to 2.5 times smaller than PNG on the desktop, the bitmap terminal and the dragged window, 1.3 times on scrolled text and 5 to 10 % on antialiased text, in two fifths to all of PNG's encode time; 12 bytes for a solid tile against PNG's 88. PNG is 3 % smaller only on the plasma's gradients. Lossless WebP is 27 to 35 % smaller on antialiased text but 9 to 21 times slower; QOI is 1.4 to 3.9 times larger |
-| 2. Tile size | **64** | A key costs 0.1 to 1.7 KiB at 64 and 0.2 to 2.9 KiB at 128, a scrolled line 4.6 against 8.7 KiB (G3's target is 7.1), and at 128 the browser page sends 42 % of its area lossy instead of 6 %. Full frames cost more at 64: 1.5 to 2.2 times on the desktop, the terminals, the browser and the drag |
-| 3. Pixel layout | **A: RGBA** | x11vnc sends RGBX on request, pixel for pixel the same as its own BGRX; every Go encoder takes `image.RGBA`; a swizzle would cost 3.3 µs a tile, two fifths of what encoding a tile of 3 to 16 colours takes |
-| Lossy codec | **WebP (`gen2brain/vpx/webp`, method 0)**, with JPEG (`gen2brain/jpegn`) for viewers that list only JPEG | At equal SSIM, 0.35 to 0.54 of JPEG's bytes on 64-pixel tiles (the photograph at 0.90: 110 against 233 KiB) and 0.65 on 128-pixel ones, with 53 bytes of fixed cost a tile against JPEG's 656; at that SSIM it takes about twice `image/jpeg`'s encode time and 6.5 to 7 times `jpegn`'s |
+| A tile with | Still | In motion |
+|---|---|---|
+| Up to 16 colours | Palette or raw pixels, with deflate | The same |
+| 17 to 256 colours | Palette or raw pixels, with deflate | WebP at a low quality, then exact once still |
+| More than 256 colours | WebP | WebP at a low quality, then sharper once still |
 
-The measurement also found two things the spec had not planned for:
+A client that lists JPEG but not WebP gets JPEG. Pixels are in RGBA
+order throughout. [The protocol](../protocol.md#what-occamyd-sends)
+gives the rules in full.
 
-- **Colour count alone sends the motion scene lossless.** The plasma has
-  at most 256 colours in every tile, so the spec's classification sends
-  G5's frames as palette and deflate: 388 KiB a frame, eight times
-  guacd's 49. Lossy WebP sends the same tiles in 26 KiB at an SSIM of
-  0.989. On antialiased text, also 17 to 256 colours, lossy saves only a
-  fifth to two fifths and blurs it. So a tile of 17 to 256 colours
-  should go lossy while it moves and be refined to exact pixels once it
-  stops; tiles of up to 16 colours stay lossless, where they are 5 to 10
-  times smaller than lossy.
-- **Lossy tiles cost their headers.** A JPEG carries about 650 bytes of
-  tables, so 192 tiles of the motion scene at JPEG quality 30 take
-  137 KiB, against 33 KiB as 12 rows of 16 tiles and 26 KiB as one image.
-  WebP's fixed cost is 53 bytes, and its tiles take 26 KiB against 14 as
-  rows. Encoding a frame's adjacent lossy tiles as one rectangle keeps
-  64-pixel tiles for damage and classification without paying for them
-  in lossy headers.
+## Why
+
+| Choice | Against | What decided it |
+|---|---|---|
+| Palette with deflate, at level 1 | PNG, QOI, lossless WebP | 2.1 to 2.5 times smaller than PNG on the desktop, a terminal's bitmap font and a dragged window, in at most PNG's encode time |
+| Tiles of 64 pixels | 128 pixels | A key costs 0.1 to 1.7 KiB instead of 0.2 to 2.9, and a scrolled line 4.6 KiB instead of 8.7 |
+| RGBA | BGRX | Every Go encoder and the browser take RGBA, and x11vnc sends it when asked |
+| WebP for photographs | JPEG | A third to a half of JPEG's bytes at the same quality, for about twice `image/jpeg`'s encode time |
+| WebP for 17 to 256 colours in motion | Lossless | 15 times smaller on full-screen motion, at an SSIM of 0.989 |
+| Lossy tiles side by side as one image | One image a tile | A JPEG tile carries about 650 bytes of headers, and a WebP tile 53 |
+
+Two findings changed the design that the measurement set out to check:
+
+- **Colour count alone would send motion lossless.** A full-screen
+  animation drawn from 256 colours goes as palette and deflate in
+  388 KiB a frame, and as lossy WebP in 26 KiB. On antialiased text,
+  also 17 to 256 colours, lossy saves only a fifth to two fifths and
+  blurs it. So those tiles go lossy only while they move.
+- **Lossy tiles pay for their headers.** 192 JPEG tiles of a frame take
+  137 KiB, 12 rows of 16 tiles 33 KiB, and one image 26 KiB. So
+  `occamyd` sends lossy tiles side by side as one image.
+
+The sections below give the numbers.
 
 ## How it was measured
 
@@ -52,7 +58,7 @@ tile's times are the median of its five, and a table sums those medians.
 Lossless results are checked against the original pixels; none differed.
 SSIM is luma SSIM (BT.601 weights, 8×8 windows, the usual constants),
 averaged over tiles. It ran on 2026-10-30 from 19:31 to 19:35 UTC, on
-the Apple M5 Pro (18 cores) of the [baselines](../benchmarks.md), with Go
+the Apple M5 Pro (18 cores) of [the benchmarks](../benchmarks.md), with Go
 1.27.1 on arm64 and `GOMAXPROCS=1`, so that every time is one core's,
 including the libraries that would otherwise spread one image over
 several. The measurement logs the host's load average every 30 seconds
@@ -99,7 +105,7 @@ which counts colours with an early exit at 257 and takes 6 to 14 µs a
 64-pixel tile, 1.2 to 2.7 ms a frame; that time is reported apart and is
 not in the encode times of `pal+*` and `png*`.
 
-**The classes** are those of the spec's classification, split finer for
+**The classes** are those of the encoder's classification, split finer for
 the report. Tiles at 64 pixels:
 
 | Scene | Frames | 1 colour | 2 | 3–16 | 17–256 | over 256 |
@@ -146,14 +152,12 @@ lossless, at 64 pixels: KiB a frame · encode ms a frame.
   smaller at best speed, which makes the class of 17 to 256 colours as a
   whole 2 % smaller as PNG (3.28 bits a pixel against 3.35). Those tiles
   go lossy while they move and are sent lossless only once still, as
-  refinement; a second lossless codec for 3 % there is not worth it in
-  beta. Above 256 colours PNG is 30 % smaller (13.6 bits a pixel
+  refinement, and 3 % there is not worth a second lossless codec. Above 256 colours PNG is 30 % smaller (13.6 bits a pixel
   against 19.3), but the pipeline does not send those tiles lossless.
 - **Level 1 is enough.** Level 6 saves 3 to 6 % on screen content at 1.3
   times the encode time; only the plasma gains 18 %, and under motion it
   goes lossy anyway (below). `klauspost/compress/flate` writes the same
-  bytes at level 1 and encodes text a fifth faster; it is a later
-  optimization, not a reason for a dependency now. zstd is larger at
+  bytes at level 1 and encodes text a fifth faster, which is not worth a dependency. zstd is larger at
   level 1 and at most 3 % smaller at level 3, and browsers would need a
   decoder for it.
 - **Lossless WebP** is the smallest on antialiased text, 27 to 35 % below
@@ -201,12 +205,12 @@ tiles a change touches, sent whole, in the same mix:
 | A scrolled line, after a copy-rect of 13 rows | 15 · 4.6 | 8 · 8.7 |
 | The dragged window, one update | 35 · 12.0–12.3 | 12 · 10.5–10.7 |
 
-G3's target is 7.1 KiB a frame: met at 64, missed at 128. The browser's
-key tile has 257 colours at 128, so it goes lossy, as text, until
-refinement; at 64 it is lossless. With JPEG from `jpegn` for the lossy
+The browser's key tile has 257 colours at 128, so it goes lossy, as
+text, until refinement. At 64 it is lossless. With JPEG from `jpegn` for the lossy
 tiles, the key costs 4.4 KiB at 128 and the drag 36 KiB at 64 against
 23, since JPEG pays its headers per tile. The drag is measured without
-move detection, which G4 (3.9 KiB a frame) needs anyway.
+move detection, which sends a moved window as a copy of pixels the
+viewer already shows.
 
 Larger tiles also mix more content, so more of the screen crosses 256
 colours and goes lossy: 42 % of the browser page's area at 128 against
@@ -224,9 +228,8 @@ measured here.
   with SetPixelFormat, and the capture checked that the photograph came
   identically in that order and in x11vnc's own blue-first order. The
   native VNC backend asks for that order and makes the padding opaque
-  alpha, so it never swizzles. The guacd bridge decodes PNG, JPEG and
-  WebP in Go, which produce RGBA. A native RDP backend would receive
-  blue-first bitmaps and swizzle once as it draws.
+  alpha, so it never swizzles. The RDP client decodes each bitmap into
+  RGBA as it draws it.
 - **The encoders.** `image/png`, `image/jpeg`, `jpegn` and both WebP
   libraries take `image.RGBA` (or `NRGBA`). With BGRX, every lossy and
   PNG encode would first swizzle: 3.3 µs a 64-pixel tile and 12.7 at
@@ -315,9 +318,9 @@ from `jpegn` is 6.5 to 7 times cheaper at equal SSIM), or browsers' WebP
 decoding proving slower than JPEG on low-end clients, which this
 measurement does not cover.
 
-## Motion, and G5's bytes
+## Motion
 
-The plasma of G5 has 17 to 256 colours in every tile, so classification
+The full-screen motion, a plasma, has 17 to 256 colours in every tile, so classification
 by colour count sends it lossless. Lossy, by class, at 64 pixels: bits a
 pixel and SSIM.
 
@@ -331,22 +334,23 @@ pixel and SSIM.
 
 Lossy is 15 times smaller than lossless on the plasma, a fifth to two
 fifths smaller on antialiased text at a visible loss, and 5 to 10 times
-larger on two-colour text. Hence the rule the spec now has: while a tile
+larger on two-colour text. Hence the rule `occamyd` follows: while a tile
 moves, 17 to 256 colours go lossy like photographs, and refinement makes
-them exact once still; up to 16 colours are always lossless.
+them exact once still. Up to 16 colours are always lossless.
 
-**G5's target.** [docs/benchmarks.md](../benchmarks.md#targets) sets
-4.9 KiB a frame, 10 times below guacd's 49. Pure-Go codecs do not reach
-it on this scene: the best measured is WebP at quality 30, 11 KiB as
-one image and 14 KiB as rows of tiles, at an SSIM of 0.989. JPEG from
-`jpegn` at quality 50, the same SSIM, takes 32 and 38 KiB. The spec's
-notes propose 14 KiB a frame as G5's target, with the evidence; the
-targets table is not changed here.
+**What full-screen motion costs.** The best measured is WebP at quality
+30: 11 KiB a frame as one image and 14 KiB as rows of tiles, at an SSIM
+of 0.989. JPEG from `jpegn` at the same SSIM takes 32 and 38 KiB. With
+tiles in motion sent at half their size, Occamy sends 7.7 to 8.0 KiB a
+frame of the benchmark's full-screen motion, against Guacamole's 46 to
+66 ([Benchmarks](../benchmarks.md#occamy-against-guacamole)).
 
-**G6's target** of 139 KiB stands at equal SSIM. On the photograph's
-64-pixel tiles, JPEG at quality 70 scores 0.871 and takes 175 KiB, over
-the target; WebP reaches the same SSIM at about quality 78 in about
-75 KiB. As rows of tiles, JPEG takes 70 KiB and WebP about 62.
+**What a photograph costs.** On the photograph's 64-pixel tiles, JPEG
+at quality 70 scores an SSIM of 0.871 and takes 175 KiB. WebP reaches
+the same SSIM at about quality 78, in about 75 KiB. As rows of tiles,
+JPEG takes 70 KiB and WebP about 62. In the benchmark, Occamy sends a
+full-screen photograph in 108 to 122 KiB, against Guacamole's 2.1 to
+2.2 MiB.
 
 ## Limits
 
