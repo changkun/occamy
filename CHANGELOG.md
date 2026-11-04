@@ -87,6 +87,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ### Fixed
 
+- A renewed certificate takes effect without a restart, which ended
+  every session: `occamyd` reads `tls.cert` and `tls.key` again at the
+  first handshake after either file changes. A trusted issuer's
+  rotated `public_key_file` takes effect at the next token the same
+  way. A file that doesn't load leaves the one before it in use, with
+  a warning in the log
+  ([docs/configuration.md](docs/configuration.md#rotate-other-secrets)).
 - A session no longer drops when its screen stays still behind a proxy
   that closes quiet connections, such as nginx after its default
   `proxy_read_timeout` of a minute. `occamyd` sends a `ping` on a

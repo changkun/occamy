@@ -691,9 +691,13 @@ place for fixes that ship on v0 before beta.
     the hook needs a way in, such as a `server` field (all done;
     `server.publicServer` registers the hook).
   - Document: `docs/api.md` for `/healthz`, the token endpoint and the
-    error shape above; certificate reload (today a restart) and the
-    HTTP/1.1 decision in the TLS section (done: docs/api.md, and the
-    `tls.cert` row of docs/configuration.md).
+    error shape above; certificate reload and the HTTP/1.1 decision in
+    the TLS section (done: docs/api.md, and the `tls.cert` row of
+    docs/configuration.md). Certificate reload was a restart until
+    2026-11-04; `server/reload.go` now reads `tls.cert` and `tls.key`
+    again at the first handshake after either file changes, and a
+    trusted issuer's `public_key_file` at the first token after it
+    changes.
 
 ## Implementation notes: Sessions
 
