@@ -26,6 +26,13 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   each message, with figures of a message's bytes, a frame of a
   desktop, the frame window, the tile cache, and how `occamyd` picks a
   tile's codec ([docs/protocol.md](docs/protocol.md#how-a-session-works)).
+- The HTTP API page explains connections, sessions and the three kinds
+  of token before it specifies the routes, with figures of the tokens
+  from sign-in to a guest who joins, of a session's states, of an OIDC
+  sign-in, and of how a stream is refused. It walks through what a
+  client does, gives every route an example to run with curl, and
+  lists the viewer timeout among the lifetimes
+  ([docs/api.md](docs/api.md#how-the-api-works)).
 - The benchmark report calls its estimate the *improvement*: the
   baseline's value divided by the candidate's, so that above 1× the
   candidate is better. The column in `comparisons.csv` that was
