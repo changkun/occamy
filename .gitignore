@@ -37,3 +37,5 @@
 __pycache__/
 # the website, as mkdocs build makes it (mkdocs.yml)
 /_site/
+# the website's builder, as docs/development.md installs it
+/.venv/
