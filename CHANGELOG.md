@@ -26,6 +26,14 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   each message, with figures of a message's bytes, a frame of a
   desktop, the frame window, the tile cache, and how `occamyd` picks a
   tile's codec ([docs/protocol.md](docs/protocol.md#how-a-session-works)).
+- The codecs page explains how `occamyd` picks each tile's codec, and
+  what each step saves, before the measurements behind each choice
+  ([docs/benchmarks/codecs.md](docs/benchmarks/codecs.md)). The records
+  of how scroll detection, the tile cache, refinement and the encode
+  workers were measured are now beside the graphics pipeline's spec.
+- Each benchmark report names its scenarios and networks as the
+  benchmarks page does, with their codes kept in the CSV files, and
+  says how to read its values before its tables.
 - The benchmark report calls its estimate the *improvement*: the
   baseline's value divided by the candidate's, so that above 1× the
   candidate is better. The column in `comparisons.csv` that was
