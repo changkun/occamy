@@ -1,17 +1,14 @@
 # Debugging and monitoring
 
 Find out why a session failed, and keep an eye on a running `occamyd`.
-This page starts from what you or your users see, says where to look
-and what it means, and ends with a reference to the log and the debug
-listener.
+This page starts from what you or your users see, and ends with a
+reference to the log and the debug listener.
 
 ## Where to look
 
-`occamyd` tells you about itself in three places. Its *log* has a line
-for each request, for each session that opens and ends, and for each
-warning. The *health check*, `/healthz` on the public listener, says
-whether `occamyd` serves requests. The *debug listener*, which is off
-until you turn it on, serves the Go runtime's numbers and profiles.
+`occamyd` tells you about itself in three places: its *log*, the
+*health check* at `/healthz`, and the *debug listener*, which serves
+the Go runtime's numbers and profiles once you turn it on.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/debugging-sources-dark.svg">
@@ -21,8 +18,8 @@ until you turn it on, serves the Go runtime's numbers and profiles.
 Start with the log. When a session can't connect, the web client says
 why in a sentence, such as “The remote computer refused the
 connection.”, but never names a host, an address or a fingerprint,
-because everyone in the session reads it. The log has the whole error.
-Read it where your `occamyd` runs:
+because everyone in the session reads it. The log has the whole error,
+where your `occamyd` runs:
 
 ```sh
 podman logs occamy             # the container of Deploy
@@ -61,20 +58,17 @@ other reasons that `occamyd` stops at start:
 ## Users can't sign in
 
 A wrong user name or password logs `sign-in failed from` the client's
-address. The line leaves out the user name, because people sometimes
-type a password into it.
+address, without the user name, since people sometimes type a password
+into it. Through OIDC, a failed sign-in logs `OIDC sign-in failed from`
+the client's address with the reason, and the web client shows the
+error code that
+[Signing in through OIDC](configuration.md#signing-in-through-oidc)
+explains.
 
-If everyone has to sign in again after a restart, look for
-`warning: created a new signing key` at start. It's expected the first
-time `occamyd` starts, but on a server that has run before, it means
-that the key's volume is missing, so that the tokens `occamyd` gave out
-no longer verify ([Keep the signing key](deploy.md#keep-the-signing-key)).
-
-Through OIDC, a failed sign-in logs `OIDC sign-in failed from` the
-client's address with the reason, and a provider that can't be reached
-logs `warning: OIDC discovery at … failed`. The web client shows the
-error code that [Signing in through
-OIDC](configuration.md#signing-in-through-oidc) explains.
+If everyone has to sign in again after a restart, or OIDC sign-ins
+fail at once, look for `created a new signing key` or
+`OIDC discovery at … failed` in the
+[warnings at start](#warnings-at-start).
 
 ## The session ends at once
 
@@ -122,27 +116,25 @@ Find the page's message in the first column, then the line in the log:
 ## The session drops after a quiet minute
 
 If users see **Connection lost** whenever the screen stays still for a
-while, a proxy between them and `occamyd` closes quiet connections. A
-stream carries nothing while the screen is still and nobody types, so
-the proxy takes it for idle. Each stream's request line appears when
-the stream ends, with how long it was open, and these all end after
-about the same time, such as nginx's default of a minute:
+while, a proxy between them and `occamyd` closes quiet connections,
+since a stream carries nothing while the screen is still and nobody
+types. The streams' request lines, which appear as each stream ends,
+then all show about the same duration, such as nginx's default of a
+minute:
 
 ```
 2026/11/04 10:16:41 middleware.go:41: occamy: "GET" "/api/v1/connections/desktop/stream" 101 1m0.004s 127.0.0.1:41818
 ```
 
-Raise the proxy's timeouts above 30 minutes, the time after which a
-session without input ends anyway ([What each hop
-needs](deploy.md#what-each-hop-needs)). **Join again** returns the
-owner to the session within a minute. After that, the session ends, and
-the log says `reason="owner left"`.
+Raise the proxy's timeouts above 30 minutes
+([What each hop needs](deploy.md#what-each-hop-needs)). **Join again**
+returns the owner to the session within a minute; after that, the
+session ends with `reason="owner left"`.
 
 ## Disconnected: too slow
 
 `occamyd` disconnects a viewer that acknowledges no frame, or takes
-none of what it's sent, for `streams.viewer_timeout`, 30 seconds by
-default, and logs:
+none of what it's sent, for `streams.viewer_timeout`, and logs:
 
 ```
 INFO viewer dropped viewer=2 err="stream: the viewer stopped taking frames: no frame acknowledged for 30s"
@@ -156,32 +148,17 @@ stall for longer, raise `streams.viewer_timeout`
 ## Typing feels slow
 
 `occamyd` logs nothing for a slow session, so look at what a key goes
-through. A key's effect crosses two hops twice: from the user to
-`occamyd` and on to the remote, then back as the remote's new screen.
-Its time is the round trip of each hop, plus the time the remote takes
-to draw and `occamyd` takes to encode.
+through: the round trip from the user to `occamyd` and on to the
+remote, plus the time the remote takes to draw and `occamyd` takes to
+encode.
 
-- **Compare an SSH session with a desktop.** A terminal has little to
-  draw. If it's slow too, the network is; if only the desktop is, look
-  at the remote and at `occamyd`'s CPU.
-- **Put `occamyd` near the remotes**, and the proxy near `occamyd`. A
-  proxy in another region adds its round trip to every key.
-- **Check the congestion control.** On a link that loses packets, such
-  as Wi-Fi, BBR keeps a desktop's frame rate where CUBIC cuts it. The
-  start of the log says `TCP congestion control: bbr`, and so does
-  `tcp_congestion` in [`/debug/vars`](#debugvars). A warning that the
-  kernel hasn't loaded BBR means it hasn't
-  ([TCP congestion control](deploy.md#tcp-congestion-control)).
-- **Check `occamyd`'s CPU**, with `podman stats` or `top`. If it's
-  busy, a [CPU profile](#cpu-and-memory) shows where. RDP sessions share
-  `limits.decode_cores`, half the cores by default, so many RDP
-  desktops in motion can wait for their share
-  ([Limits](configuration.md#limits-limits)).
-- **Run `occamyd` on Linux or macOS.** There, `occamyd` limits the bytes
-  that the kernel keeps queued on each stream, so that a key's frame
-  doesn't wait behind data the viewer will never need. Windows has no
-  such limit. If the kernel refuses it, the log says
-  `stream from …: setting TCP_NOTSENT_LOWAT:` with the error.
+| Check | What it tells you |
+|-------|-------------------|
+| An SSH session beside a desktop | A terminal has little to draw. If it's slow too, the network is; if only the desktop is, look at the remote and at `occamyd`'s CPU |
+| Where `occamyd` and the proxy run | Put `occamyd` near the remotes, and the proxy near `occamyd`. A proxy in another region adds its round trip to every key |
+| `TCP congestion control: bbr` at the start of the log, or `tcp_congestion` in [`/debug/vars`](#debugvars) | Whether the connections use BBR, which keeps a desktop's frame rate on a link that loses packets ([TCP congestion control](deploy.md#tcp-congestion-control)) |
+| `occamyd`'s CPU, in `podman stats` or `top` | If it's busy, a [CPU profile](#cpu-and-memory) shows where. Many RDP desktops in motion can wait for their share of `limits.decode_cores` ([Limits](configuration.md#limits-limits)) |
+| The system that `occamyd` runs on | On Linux and macOS, `occamyd` limits the bytes that the kernel keeps queued on each stream, so that a key's frame doesn't wait behind data the viewer will never need; Windows has no such limit. If the kernel refuses it, the log says `stream from …: setting TCP_NOTSENT_LOWAT:` with the error |
 
 [Benchmarks](benchmarks.md) shows how long keys take to show through
 Occamy and through Guacamole on the same paths.
@@ -189,14 +166,14 @@ Occamy and through Guacamole on the same paths.
 ## The screen is black, or parts are missing
 
 A Windows desktop over RDP that stays nearly black needs
-`disable_gfx: true` on its connection. `occamyd` warns of it at the
-first part of the screen that it can't draw:
+`disable_gfx: true` on its connection
+([Connect Windows hosts](deploy.md#connect-windows-hosts)). `occamyd`
+warns of it at the first part of the screen that it can't draw:
 
 ```
 WARN rdp: the server draws with GFX that the client does not decode yet, so parts of the screen may stay missing or stale; to turn GFX off, set disable_gfx: true on the target's connection, and reach an ad-hoc target, which cannot set it, through a connection session=… addr=10.0.4.20:3389 skipped=…
 ```
 
-[Connect Windows hosts](deploy.md#connect-windows-hosts) sets it up.
 A desktop that doesn't fill the window is a VNC server that keeps its
 own size, which `occamyd` logs as
 `WARN vnc: the server prohibits resizing the screen` or
@@ -205,39 +182,17 @@ scales the desktop to fit.
 
 ## The clipboard doesn't arrive
 
-The clipboard depends on the connection, the browser and the remote,
-and the web client's **Clipboard** panel says which of them held the
-text back ([Copy and paste](web-client.md#copy-and-paste)).
+The web client's **Clipboard** panel says whether the connection, the
+browser or the remote held the text back, as
+[Copy and paste](web-client.md#copy-and-paste) describes for users. These
+are the cases that the configuration or the remote causes:
 
-From the remote to the user:
-
-- The page takes the remote's text only while it has the focus, and
-  only for a role that may type. A view-only viewer's clipboard is left
-  alone.
-- A connection with `disable_copy` never sends it
-  ([Close the clipboard](configuration.md#close-the-clipboard)).
-- A terminal, over SSH or Kubernetes, has no remote clipboard. Select
-  the text in the terminal, and copy it with the browser.
-- A VNC server's text beyond 4 MiB is cut to 4 MiB, and the log says
-  `WARN vnc: cut text truncated` or
-  `WARN vnc: extended clipboard text truncated`.
-
-From the user to the remote:
-
-- Firefox and Safari never let the page read the clipboard by itself.
-  Paste into the **Clipboard** panel there, and click **Send**.
-- A view-only viewer can't send, and a connection with `disable_paste`
-  drops the text.
-- An RDP server takes clipboard text only once a user has logged on,
-  because it runs its clipboard in a process that starts at logon.
-  Until then, the text waits, the panel says "The
-  remote hasn't taken the clipboard yet", and after a minute the log
-  says `WARN rdp: the server's clipboard has not taken the owner's text, which waits for it`.
-  If the message stays after logon, the remote's clipboard process has
-  probably stopped, and opening the session again may start it.
-- A VNC server that doesn't speak the Extended Clipboard extension, as
-  x11vnc doesn't, takes Latin-1 only, so other characters, such as 日本,
-  arrive as `?`. TigerVNC takes UTF-8.
+| What happens | The log says | Why |
+|--------------|--------------|-----|
+| Text never leaves the remote, or never reaches it | Nothing | The connection sets `disable_copy` or `disable_paste` ([Close the clipboard](configuration.md#close-the-clipboard)) |
+| A VNC server's long text arrives cut | `WARN vnc: cut text truncated` or `WARN vnc: extended clipboard text truncated` | `occamyd` cuts a VNC server's text to 4 MiB |
+| Text sent to an RDP server waits | `WARN rdp: the server's clipboard has not taken the owner's text, which waits for it`, after a minute | The server runs its clipboard in a process that starts when a user logs on, so the text waits until then. If it still waits after logon, that process has probably stopped, and opening the session again may start it |
+| Characters such as 日本 arrive on a VNC server as `?` | Nothing | The server doesn't speak the Extended Clipboard extension, as x11vnc doesn't, and takes Latin-1 only. TigerVNC takes UTF-8 |
 
 ## Memory or goroutines keep growing
 
@@ -249,14 +204,12 @@ curl -s localhost:6060/debug/vars | jq '{goroutines, fds, heap: .memstats.HeapIn
 ```
 
 An idle `occamyd` runs a handful of goroutines. Each session adds
-several, for its backend and for each viewer's stream, and each idle
+several, for its backend and each viewer's stream, and each idle
 keep-alive connection adds one. Once every session has ended, the count
-is back where it was, so a count that keeps growing is a leak.
-[Goroutines](#goroutines) shows which stack grows.
-
-Memory follows the screens that viewers hold: each visible viewer
-keeps the screen it was last sent until it acknowledges a newer one
-([Streams](configuration.md#streams-streams)).
+is back where it was, so a count that keeps growing is a leak, and
+[Goroutines](#goroutines) shows which stack grows. Memory follows the
+screens that viewers hold
+([Limit the memory that viewers hold](configuration.md#limit-the-memory-that-viewers-hold)).
 
 ## The log
 
@@ -288,14 +241,12 @@ Each line has the same parts:
 | Message | `session ended` | What happened |
 | Details | `session=… reason=failed err="…"` | `key=value` pairs, with a value in quotes when it has spaces |
 
-`occamyd` writes no debug lines, and you can't change the level.
-
-Every line about a session carries its ID, so you can follow one
-session by searching the log for it. The lines about what a user did
-with the session, such as `opened` and `shared`, start
-`session <id>:`. The lines of the session itself, of its viewers'
-streams and of its connection to the remote, such as `session ended`,
-`viewer dropped` and `WARN vnc: …`, carry `session=<id>`.
+`occamyd` writes no debug lines, and you can't change the level. The
+lines about what a user did with a session, such as `opened` and
+`shared`, start `session <id>:`, and the lines of the session itself,
+its viewers' streams and its connection to the remote, such as
+`session ended`, `viewer dropped` and `WARN vnc: …`, carry
+`session=<id>`.
 
 ### What the lines say
 
@@ -375,16 +326,16 @@ open 5 seconds after that.
 
 ## The health check
 
-`occamyd` answers `GET /healthz` on its public listener while it
-serves requests. The check takes no token:
+`occamyd` answers `GET /healthz` on its public listener, without a
+token, while it serves requests:
 
 ```sh
 curl -s http://localhost:5636/healthz    # {"status":"ok"}
 ```
 
-It tells you that `occamyd` serves requests, not that the remotes can
-be reached. The image has no shell, so probe it from outside, as a
-Kubernetes probe does:
+It says nothing about whether the remotes can be reached. The image has
+no shell and no `curl`, so probe it from outside, from a load balancer
+or as a Kubernetes probe does:
 
 ```yaml
 livenessProbe:
@@ -398,33 +349,23 @@ a request line to the log.
 
 ## The debug listener
 
-`occamyd` can serve Go's runtime statistics and profiles on a second
-listener, which you turn on with `debug.address` in the configuration:
+`occamyd` serves Go's runtime statistics and profiles on a second
+listener, on a port of its own, which you turn on with `debug.address`:
 
 ```yaml
 debug:
   address: localhost:6060
 ```
 
-At start, `occamyd` then logs
-`serving expvar and pprof at http://127.0.0.1:6060/debug/`. Without
-`debug.address`, these routes are served nowhere, and the public
-listener never serves them.
-
 > [!IMPORTANT]
 > The debug listener has no authentication, and its profiles and
 > command line describe your server. Keep it on the loopback interface;
 > `occamyd` warns at start when it isn't.
 
-Give the debug listener a port of its own. `occamyd` refuses a
-`debug.address` on `listen`'s port when the two could take the same
-connections: on the same host, `localhost` beside `127.0.0.1` or
-`::1`, or either one on every address, such as `:5636`.
-
 To turn the listener on without editing the file, name an environment
-variable that holds the address instead. While the variable is unset
-or empty, the listener stays off, and `occamyd` logs
-`debug listener off:` with the variable's name:
+variable that holds the address instead, which leaves the listener off
+while it's unset or empty. [The debug listener's
+keys](configuration.md#server) give the rules for both:
 
 ```yaml
 debug:
@@ -432,13 +373,12 @@ debug:
 ```
 
 In a container, a published port reaches the container's own address,
-not its loopback interface. Listen on `0.0.0.0:6060` there, and publish
-the port on the host's loopback interface only, as in
-`-p 127.0.0.1:6060:6060`; the warning at start is then expected. In
-Kubernetes, keep `localhost:6060`, and reach it with
-`kubectl port-forward`. The demo stack of [Try Occamy](try-it.md)
-serves its debug listener at `localhost:5638` after
-`make run OCCAMY_DEBUG=1`.
+not its loopback interface, so listen on `0.0.0.0:6060` there, and
+publish the port on the host's loopback interface only, as in
+`-p 127.0.0.1:6060:6060`. In Kubernetes, keep `localhost:6060`, and
+reach it with `kubectl port-forward`. The demo stack of
+[Try Occamy](try-it.md) serves its debug listener at `localhost:5638`
+after `make run OCCAMY_DEBUG=1`.
 
 ### `/debug/vars`
 
@@ -501,12 +441,11 @@ go tool trace trace.out
 ### Threads
 
 Go runs goroutines on a small pool of OS threads, so the number of
-threads doesn't follow the number of sessions. The total in
-`threadcreate?debug=1` counts the threads created since start, and the
-runtime seldom ends one. For the number running now, look at the
-process: on Linux, `grep Threads /proc/$(pidof occamyd)/status` shows
-it, and in a container, the `PIDS` column of `podman stats` or
-`docker stats` does.
+threads doesn't follow the number of sessions. `threadcreate?debug=1`
+counts the threads created since start, which the runtime seldom ends.
+For the number running now, run
+`grep Threads /proc/$(pidof occamyd)/status` on Linux, or read the
+`PIDS` column of `podman stats` or `docker stats`.
 
 The pressure test and the soak read the debug listener to check that
 `occamyd` doesn't leak, as [Development](development.md#pressure-test-and-soak)
