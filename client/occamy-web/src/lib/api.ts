@@ -159,9 +159,9 @@ export class Api {
       text = await res.text()
     } catch (err) {
       if (signal.aborted || (err instanceof Error && err.name === 'TimeoutError')) {
-        throw new ApiError(0, 'timeout', 'occamyd did not answer in time.')
+        throw new ApiError(0, 'timeout', 'The server didn’t respond in time.')
       }
-      throw new ApiError(0, 'network', 'occamyd cannot be reached.')
+      throw new ApiError(0, 'network', 'The server can’t be reached.')
     }
     let json: unknown = null
     if (text !== '') {
@@ -181,7 +181,7 @@ export class Api {
     if (err !== null && typeof err.code === 'string') {
       throw new ApiError(res.status, err.code, typeof err.message === 'string' ? err.message : err.code)
     }
-    throw new ApiError(res.status, 'http', `occamyd answered ${res.status}${res.statusText === '' ? '' : ` ${res.statusText}`}.`)
+    throw new ApiError(res.status, 'http', `The server returned an unexpected response (HTTP ${res.status}${res.statusText === '' ? '' : ` ${res.statusText}`}).`)
   }
 }
 
@@ -194,7 +194,7 @@ function isConnection(v: unknown): v is Connection {
 }
 
 function badResponse(): ApiError {
-  return new ApiError(0, 'bad_response', 'occamyd answered with something the client does not understand.')
+  return new ApiError(0, 'bad_response', 'The server sent a response that the web client doesn’t understand.')
 }
 
 /**
@@ -259,7 +259,7 @@ export function errorMessage(err: unknown): string {
     return err instanceof Error ? err.message : String(err)
   }
   if (err.code === 'http' && err.status === 404) {
-    return 'occamyd does not serve API v1 here. The web client needs a configuration file with version: 1.'
+    return 'This server doesn’t provide the API that the web client needs. Ask the server’s administrator to check its configuration and any proxy in front of it.'
   }
   switch (err.code) {
     case 'unauthorized':
@@ -268,9 +268,11 @@ export function errorMessage(err: unknown): string {
     case 'invalid_token':
       return 'Your sign-in has expired. Sign in again.'
     case 'limit_exceeded':
-      return err.status === 503 ? 'occamyd runs as many sessions as it allows. Try again later.' : 'You have as many sessions or shares as occamyd allows. Close one first.'
+      return err.status === 503
+        ? 'The server is already running as many sessions as it allows. Try again later.'
+        : 'You’ve reached the server’s limit on sessions or share links. End a session, or wait for a link to expire, and try again.'
     case 'not_found':
-      return 'The session has ended, or is not yours.'
+      return 'The session has ended, or it isn’t yours.'
     default:
       return err.message
   }

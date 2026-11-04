@@ -91,14 +91,14 @@ describe('endSession for the user who opened the session', () => {
       const { options: o } = options(answer)
       const got = await endSession(o)
       expect(got.kind).toBe('failed')
-      expect(got.kind === 'failed' && got.message).toMatch(/not ended for everyone.*minute of grace/)
+      expect(got.kind === 'failed' && got.message).toMatch(/wasn’t ended for everyone.*up to a minute/)
     }
   })
 
   it('tells the owner when occamyd does not answer in time, rather than waiting on it', async () => {
     const { log, options: o } = options(hung, {}, 20)
     const got = await endSession(o)
-    expect(got).toEqual({ kind: 'failed', message: 'The session was not ended for everyone: occamyd did not answer in time. Its viewers stay until your minute of grace runs out.' })
+    expect(got).toEqual({ kind: 'failed', message: 'The session wasn’t ended for everyone. The server didn’t respond in time. The others in it can stay for up to a minute, until the session ends on its own.' })
     expect(log).toEqual(['close', 'DELETE /api/v1/sessions/mZ3k'])
   })
 
@@ -121,10 +121,10 @@ describe('endSession that occamyd decides on', () => {
   // What End is taken for, as the token's user and whether it resumed,
   // and what the user is told when occamyd does not find the session.
   const cases: [string, Partial<EndOptions>, RegExp][] = [
-    ['another user', { token: mallory }, /^You are signed in as mallory, but demo opened this session, so it was not ended for everyone\. Sign in as demo to end it\.$/],
-    ['a token it cannot read', { token: { token: 'eyJ.opaque', expires: now + 600_000 } }, /^occamyd has no session of yours to end: it has ended, or someone else opened it\.$/],
-    ['an End that resumed', { resumed: true }, /^occamyd has no session of yours to end, signed in as demo: it has ended, or someone else opened it\.$/],
-    ['a session view that did not know its owner', { owner: null }, /^occamyd has no session of yours to end, signed in as demo:/],
+    ['another user', { token: mallory }, /^You’re signed in as mallory, but demo opened this session, so it wasn’t ended for everyone\. Sign in as demo to end it\.$/],
+    ['a token it cannot read', { token: { token: 'eyJ.opaque', expires: now + 600_000 } }, /^The server has no session of yours to end\. It has already ended, or someone else opened it\.$/],
+    ['an End that resumed', { resumed: true }, /^You’re signed in as demo, and the server has no session of yours to end\. It has already ended, or someone else opened it\.$/],
+    ['a session view that did not know its owner', { owner: null }, /^You’re signed in as demo, and the server has no session of yours to end\./],
   ]
 
   it('keeps the stream open, and says whose the session is, when occamyd does not find it', async () => {
@@ -156,7 +156,7 @@ describe('endSession that occamyd decides on', () => {
       const failed = options(answer, { resumed: true }, timeout)
       const got = await endSession(failed.options)
       expect(got.kind).toBe('failed')
-      expect(got.kind === 'failed' && got.message).toMatch(/^The session was not ended for everyone: .* It runs on, with its viewers\.$/)
+      expect(got.kind === 'failed' && got.message).toMatch(/^The session wasn’t ended for everyone\. .* It’s still running, with everyone in it\.$/)
       expect(failed.log).toEqual(['DELETE /api/v1/sessions/mZ3k'])
     }
   })
@@ -190,7 +190,7 @@ describe('an End that resumed after a sign-in', () => {
   it('ends alice’s session once alice signs in, after bob was told it is not his', async () => {
     const asBob = options(occamyd('alice'), { owner: alice, token: token('bob', 'oidc', now + 600_000), resumed: true })
     const told = await endSession(asBob.options)
-    expect(told).toEqual({ kind: 'not-owner', message: 'You are signed in as bob, but alice opened this session, so it was not ended for everyone. Sign in as alice to end it.' })
+    expect(told).toEqual({ kind: 'not-owner', message: 'You’re signed in as bob, but alice opened this session, so it wasn’t ended for everyone. Sign in as alice to end it.' })
     expect(asBob.log).toEqual(['DELETE /api/v1/sessions/mZ3k'])
     const asAlice = options(occamyd('alice'), { owner: alice, token: token('alice', 'local', now + 600_000), resumed: true })
     expect(await endSession(asAlice.options)).toEqual({ kind: 'ended' })
@@ -203,7 +203,7 @@ describe('an End that resumed after a sign-in', () => {
     const { log, options: o } = options(error(404, 'not_found'), { owner: alice, token: token('bob', 'oidc', now + 600_000), resumed: true, streaming: () => false })
     expect(await endSession(o)).toEqual({
       kind: 'not-owner',
-      message: 'You are signed in as bob, and occamyd did not end this session: it has ended already, or alice opened it. Sign in as alice to end it if it runs on.',
+      message: 'You’re signed in as bob, and the server didn’t end this session. It has already ended, or alice opened it. If it’s still running, sign in as alice to end it.',
     })
     expect(log).toEqual(['DELETE /api/v1/sessions/mZ3k'])
   })

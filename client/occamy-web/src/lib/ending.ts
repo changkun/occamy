@@ -74,7 +74,7 @@ export function describeEnd(code: number, reason: string, ctx: EndContext): Endi
         return {
           ...e,
           title: 'Opened elsewhere',
-          detail: 'You opened this session in another window or tab, which took it over. It runs on there; join it here to take it back.',
+          detail: 'You opened this session in another window or tab, which took it over. It’s still running there. Join it again to bring it back to this page.',
           technical: reason,
           rejoin: ctx.sessionId !== '',
         }
@@ -83,24 +83,24 @@ export function describeEnd(code: number, reason: string, ctx: EndContext): Endi
     case CloseCode.SessionClosed:
       return { ...e, title: 'Session ended', detail: 'The owner ended the session.' }
     case CloseCode.OwnerLeft:
-      return { ...e, title: 'Session ended', detail: 'The owner left and did not come back in time.' }
+      return { ...e, title: 'Session ended', detail: 'The owner left and didn’t come back in time.' }
     case CloseCode.RemoteEnded:
-      return { ...e, title: 'Session ended', detail: 'The remote computer ended the session, as when its user logs out.' }
+      return { ...e, title: 'Session ended', detail: 'The remote computer ended the session, for example because its user logged out.' }
     case CloseCode.Unauthorized:
       return ctx.shared
         ? { ...e, title: 'Link not valid', detail: 'This share link has expired, or its session has ended. Ask the owner for a new one.' }
-        : { ...e, title: 'Signed out', detail: 'Your sign-in has expired or is not valid. Sign in again.', signIn: true }
+        : { ...e, title: 'Signed out', detail: 'Your sign-in has expired or isn’t valid. Sign in again.', signIn: true }
     case CloseCode.Forbidden:
-      return { ...e, title: 'Access refused', detail: 'occamyd refused this stream: the connection or session is not open to you, the session has ended, or you have as many sessions as it allows.' }
+      return { ...e, title: 'Access refused', detail: 'The server didn’t let you join. The connection or session may not be open to you, the session may have ended, or you may already have as many sessions as the server allows.' }
     case CloseCode.Idle:
-      return { ...e, title: 'Ended for inactivity', detail: 'Nobody gave input for the session’s idle timeout, so occamyd ended it.' }
+      return { ...e, title: 'Ended for inactivity', detail: 'Nobody used the session for longer than the server allows, so the server ended it.' }
     case CloseCode.ViewerLimit:
-      return { ...e, title: 'Session full', detail: 'The session has as many viewers as occamyd allows. Try again later.' }
+      return { ...e, title: 'Session full', detail: 'The session already has as many viewers as the server allows. Try again later.' }
     case CloseCode.TooSlow:
       return {
         ...e,
         title: 'Disconnected: too slow',
-        detail: 'occamyd heard nothing from this page for its viewer timeout, 30 seconds by default: the network stalled, or the page could not keep up.',
+        detail: 'The server heard nothing from this page for too long. The network may have stalled, or the page couldn’t keep up.',
         rejoin: ctx.sessionId !== '',
       }
     case CloseCode.BackendFailed:
@@ -109,9 +109,9 @@ export function describeEnd(code: number, reason: string, ctx: EndContext): Endi
       if (reason !== '' && reason !== 'failed') {
         return { ...e, title: 'Could not connect', detail: clip(reason, MAX_LABEL) }
       }
-      return { ...e, title: 'Remote unreachable', detail: 'occamyd could not connect to the remote computer, or lost the connection to it.' }
+      return { ...e, title: 'Remote unreachable', detail: 'The server couldn’t connect to the remote computer, or lost its connection to it.' }
     case CloseCode.ServerShutdown:
-      return { ...e, title: 'Server shut down', detail: 'occamyd is shutting down, which ends its sessions. Try again once it is back.' }
+      return { ...e, title: 'Server shut down', detail: 'The server is shutting down, which ends every session on it. Try again once it’s back.' }
     default:
       break
   }
@@ -122,11 +122,11 @@ export function describeEnd(code: number, reason: string, ctx: EndContext): Endi
       return {
         ...e,
         title: 'Connection lost',
-        detail: ctx.sessionId === '' ? 'The connection to occamyd failed.' : 'The connection to occamyd failed. The session may still run: join it again.',
+        detail: ctx.sessionId === '' ? 'The connection to the server failed.' : 'The connection to the server failed. The session may still be running, so join it again to return to it.',
         rejoin: ctx.sessionId !== '',
       }
     case 'protocol':
-      return { ...e, title: 'Protocol error', detail: `${closeDescription(code)} This is a bug in occamyd or in this client.` }
+      return { ...e, title: 'Protocol error', detail: `${closeDescription(code)} This is a bug in the server or in the web client. Report it with the details below.` }
     default:
       return { ...e, title: 'Session ended' }
   }
@@ -145,7 +145,7 @@ export function describeFailure(err: unknown, ctx: EndContext): Ending | null {
     return describeEnd(err.code, err.reason, ctx)
   }
   if (err instanceof ConnectionError) {
-    return { ...describeEnd(0, '', ctx), detail: 'occamyd cannot be reached.', rejoin: false }
+    return { ...describeEnd(0, '', ctx), detail: 'The server can’t be reached. Check your network connection, or try again later.', rejoin: false }
   }
   if (err instanceof ProtocolError) {
     return describeEnd(err.kind === 'unsupported' ? CloseCode.Unsupported : CloseCode.ProtocolError, err.message, ctx)

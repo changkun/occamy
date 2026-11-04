@@ -46,10 +46,10 @@ interface CloseInfo {
 const closeInfo: Record<number, CloseInfo> = {
   [CloseCode.Normal]: { name: 'normal', kind: 'done', description: 'The connection did its work.' },
   [CloseCode.ServerShutdown]: { name: 'server-shutdown', kind: 'server', description: 'The server is shutting down.' },
-  [CloseCode.ProtocolError]: { name: 'protocol-error', kind: 'protocol', description: 'A peer broke the protocol.' },
-  [CloseCode.Unsupported]: { name: 'unsupported', kind: 'protocol', description: 'A peer sent what the other does not support, or the client cannot show the session.' },
+  [CloseCode.ProtocolError]: { name: 'protocol-error', kind: 'protocol', description: 'The server or the client sent a message that breaks the protocol.' },
+  [CloseCode.Unsupported]: { name: 'unsupported', kind: 'protocol', description: 'The server or the client sent something the other doesn’t support, or the client can’t show the session.' },
   [CloseCode.TooLarge]: { name: 'too-large', kind: 'protocol', description: 'A message, tile or cursor was too large.' },
-  [CloseCode.InternalError]: { name: 'internal-error', kind: 'server', description: 'The server failed on its own.' },
+  [CloseCode.InternalError]: { name: 'internal-error', kind: 'server', description: 'The server ran into an internal error.' },
   [CloseCode.Unauthorized]: { name: 'unauthorized', kind: 'auth', description: 'The token is missing, invalid or expired.' },
   [CloseCode.Forbidden]: { name: 'forbidden', kind: 'auth', description: 'The token does not grant access, or the origin is not allowed.' },
   [CloseCode.SessionClosed]: { name: 'session-closed', kind: 'done', description: 'The owner closed the session.' },

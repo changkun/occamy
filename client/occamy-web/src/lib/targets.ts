@@ -75,7 +75,7 @@ export function start(fragment: Fragment, api: Api, storage: Storage | undefined
     case 'oidc-code':
       if (verifier === null) {
         api.oidcToken(fragment.code, newVerifier()).catch(() => undefined)
-        return { kind: 'oidc-error', message: 'That sign-in was not started in this tab, so it was not used. Sign in here.' }
+        return { kind: 'oidc-error', message: 'That sign-in didn’t start in this tab, so it wasn’t used. Sign in again here.' }
       }
       return { kind: 'oidc', token: api.oidcToken(fragment.code, verifier), resume }
     default: {

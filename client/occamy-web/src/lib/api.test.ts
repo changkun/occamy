@@ -69,7 +69,7 @@ describe('signIn', () => {
     const { api } = scripted(() => new Response('404 page not found\n', { status: 404, statusText: 'Not Found' }))
     const err = await api.signIn('alice', 'x').catch((e: unknown) => e)
     expect(err).toMatchObject({ status: 404, code: 'http' })
-    expect(errorMessage(err)).toMatch(/version: 1/)
+    expect(errorMessage(err)).toMatch(/API that the web client needs.*administrator/)
   })
 
   it('refuses a success it cannot read', async () => {
@@ -177,8 +177,8 @@ describe('the time limit', () => {
   it('gives up on occamyd when it does not answer in time', async () => {
     const api = new Api(hung, () => 1_000_000, 20)
     const err = await api.connections(token).catch((e: unknown) => e)
-    expect(err).toMatchObject({ status: 0, code: 'timeout', message: 'occamyd did not answer in time.', signedOut: false })
-    expect(errorMessage(err)).toBe('occamyd did not answer in time.')
+    expect(err).toMatchObject({ status: 0, code: 'timeout', message: 'The server didn’t respond in time.', signedOut: false })
+    expect(errorMessage(err)).toBe('The server didn’t respond in time.')
     await expect(api.endSession(token, 's')).rejects.toMatchObject({ code: 'timeout' })
     await expect(api.signIn('a', 'b')).rejects.toMatchObject({ code: 'timeout' })
     expect(await api.oidcAvailable()).toBe(false)

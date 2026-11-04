@@ -96,13 +96,13 @@ export async function endSession(o: EndOptions): Promise<EndOutcome> {
     if (err instanceof ApiError && err.signedOut) {
       // A stream closed already: the owner is told so, in case the
       // sign-in is cancelled.
-      return { kind: 'sign-in', message: 'occamyd no longer takes your sign-in. Sign in again to end the session for everyone.', closed: opener }
+      return { kind: 'sign-in', message: 'The server no longer accepts your sign-in. Sign in again to end the session for everyone.', closed: opener }
     }
     return {
       kind: 'failed',
       message: opener
-        ? `The session was not ended for everyone: ${errorMessage(err)} Its viewers stay until your minute of grace runs out.`
-        : `The session was not ended for everyone: ${errorMessage(err)} It runs on, with its viewers.`,
+        ? `The session wasn’t ended for everyone. ${errorMessage(err)} The others in it can stay for up to a minute, until the session ends on its own.`
+        : `The session wasn’t ended for everyone. ${errorMessage(err)} It’s still running, with everyone in it.`,
     }
   }
   if (!opener) {
@@ -117,13 +117,13 @@ export async function endSession(o: EndOptions): Promise<EndOutcome> {
 // for one not known.
 function notOwner(owner: Identity | null, user: Identity | null, streaming: boolean): string {
   if (owner === null || user === null || sameIdentity(owner, user)) {
-    const who = user === null ? '' : `, signed in as ${clip(user.subject, MAX_LABEL)}`
-    return `occamyd has no session of yours to end${who}: it has ended, or someone else opened it.`
+    const who = user === null ? 'The server' : `You’re signed in as ${clip(user.subject, MAX_LABEL)}, and the server`
+    return `${who} has no session of yours to end. It has already ended, or someone else opened it.`
   }
   const name = clip(owner.subject, MAX_LABEL)
   const you = clip(user.subject, MAX_LABEL)
   if (!streaming) {
-    return `You are signed in as ${you}, and occamyd did not end this session: it has ended already, or ${name} opened it. Sign in as ${name} to end it if it runs on.`
+    return `You’re signed in as ${you}, and the server didn’t end this session. It has already ended, or ${name} opened it. If it’s still running, sign in as ${name} to end it.`
   }
-  return `You are signed in as ${you}, but ${name} opened this session, so it was not ended for everyone. Sign in as ${name} to end it.`
+  return `You’re signed in as ${you}, but ${name} opened this session, so it wasn’t ended for everyone. Sign in as ${name} to end it.`
 }

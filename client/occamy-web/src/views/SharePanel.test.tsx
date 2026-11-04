@@ -89,7 +89,7 @@ describe('SharePanel', () => {
     let signIns = 0
     await render(api, { seq: 1, role: 'viewer', expiresIn: 3600 }, () => void signIns++)
     expect(sent).toEqual(['POST /api/v1/sessions/mZ3k/shares'])
-    expect(container.textContent).toContain('The session has ended, or is not yours.')
+    expect(container.textContent).toContain('The session has ended, or it isn’t yours.')
     expect(container.querySelector('input[readonly]')).toBeNull()
     expect(signIns).toBe(0)
   })

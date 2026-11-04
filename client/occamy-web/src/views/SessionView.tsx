@@ -216,7 +216,7 @@ export function SessionView({ api, token, target, owner: seed, action, storage, 
         if (outcome.closed) {
           // Should the owner cancel the sign-in, the closed stream's
           // view still says the session runs on.
-          setProblem({ title: NOT_ENDED, detail: 'The session was not ended for everyone: your sign-in has expired. Its viewers stay until your minute of grace runs out.', signIn: false, resumed })
+          setProblem({ title: NOT_ENDED, detail: 'Your sign-in has expired, so the session wasn’t ended for everyone. The others in it can stay for up to a minute, until the session ends on its own.', signIn: false, resumed })
         }
         signInFor(outcome.message, { kind: 'end' })
         return
@@ -488,7 +488,9 @@ function Desktop({ controller, state, can, box, label }: DesktopProps): ReactEle
         style={{ width: `${fit.width}px`, height: `${fit.height}px`, cursor }}
       />
       <p id="screen-keys" className="sr-only">
-        {can.input ? 'Keys, pointer and wheel go to the remote while it has focus. Press Control, Alt and Shift together to return to the toolbar.' : 'Read-only: you watch, and your input goes nowhere.'}
+        {can.input
+          ? 'While the remote screen has focus, your keyboard, pointer and scroll wheel control the remote computer. Press Control, Alt and Shift together to return to the toolbar.'
+          : 'You can only watch this session. Your keyboard and pointer don’t reach the remote computer.'}
       </p>
     </>
   )
