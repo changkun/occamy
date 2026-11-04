@@ -48,24 +48,31 @@ theme:
   features:
     - navigation.sections
     - navigation.top
+    - navigation.footer
     - search.suggest
     - search.highlight
     - content.code.copy
 
 nav:
   - Home: index.md
-  - Using Occamy:
+  - Get started:
       - Try Occamy: try-it.md
-      - Configuration: configuration.md
+      - Deploy: deploy.md
+  - Use:
+      - The web client: web-client.md
       - Occamy for macOS: macos-app.md
-      - Debugging and measuring: debugging.md
+  - Operate:
+      - Configuration: configuration.md
+      - Debugging and monitoring: debugging.md
   - Reference:
-      - HTTP API (v1): api.md
-      - Occamy Protocol (v1): protocol.md
+      - HTTP API: api.md
+      - Protocol: protocol.md
       - Architecture: architecture.md
-  - Measurements:
+  - Performance:
       - Benchmarks: benchmarks.md
-      - Codec measurement: benchmarks/codecs.md
+      - Codecs: benchmarks/codecs.md
+  - Develop:
+      - Development: development.md
   - All documents: manual.md
 
 markdown_extensions:
@@ -77,7 +84,12 @@ markdown_extensions:
   - tables
   - footnotes
   - pymdownx.highlight
-  - pymdownx.superfences
+  # Diagrams in Mermaid, which GitHub renders too.
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
 
 # A link or an anchor that does not resolve fails the build, which CI
 # runs with --strict.
