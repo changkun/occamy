@@ -7,7 +7,7 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 
 ## [Unreleased]
 
-## [1.0.0-beta.2] - 2026-11-03
+## [1.0.0-beta.2] - 2026-11-04
 
 Occamy 1.0.0-beta.2 serves every session itself. guacd, the v0 routes
 with the Guacamole protocol they served, v0 files and telnet are gone,
