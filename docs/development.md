@@ -347,7 +347,8 @@ npm run dev
 
 The dev server passes `/api` and its WebSockets on to the `occamyd` at
 `http://localhost:5637`, or at the URL in `OCCAMY_DEV_SERVER`. Open the
-address that it prints, and sign in as `demo`, password `occamy`.
+address that it prints, and sign in as `demo` with the password
+`occamy`.
 
 ## Turn on the debug listener
 
