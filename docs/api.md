@@ -85,8 +85,8 @@ stateDiagram-v2
   [*] --> owner_away: Opened by POST /api/v1/sessions
   owner_connected --> owner_away: The owner's stream ends
   owner_away --> owner_connected: The owner's stream joins
-  owner_connected --> session_ended: Closed, idle, or the remote ends or fails
-  owner_away --> session_ended: 60 s without the owner, or closed, idle, or the remote ends or fails
+  owner_connected --> session_ended: Any end in the table below
+  owner_away --> session_ended: 60 s without the owner, or any end in the table below
   session_ended --> [*]: 60 s later, occamyd forgets it
 ```
 
@@ -744,7 +744,10 @@ The query isn't valid when:
 - `code_challenge` is missing, given twice, or not an S256 challenge;
 - `code_challenge_method` is given twice, or isn't `S256`.
 
-**Example.** This prints where `occamyd` sends the browser:
+**Example.** This prints where `occamyd` sends the browser, for the
+challenge that [Sign in through OIDC](#sign-in-through-oidc) computes
+and the return URL `$OCCAMY/`. That's the default of
+`auth.oidc.return_urls` when `redirect_url` is on the same origin:
 
 ```sh
 curl -s -o /dev/null -w '%{redirect_url}\n' -G "$OCCAMY/api/v1/auth/oidc/login" \
@@ -1316,8 +1319,9 @@ it to the caller as its owner. `occamyd` sends `welcome` and the first
 frame right after the upgrade, without waiting for a message from the
 client.
 
-**Who may call it.** A user whose access token the connection's `allow`
-names, by name or by group. A session token or a share is refused.
+**Who may call it.** A user whom the connection's `allow` names, by name
+or by group, with an access token. A session token or a share is
+refused.
 
 **Request.** A [stream upgrade](#the-upgrade-request) with an access
 token. The owner's `hello` sizes the session: a terminal's columns and
