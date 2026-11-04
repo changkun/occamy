@@ -383,7 +383,10 @@ Type 0x0001, sent by either side.
 | time | u64 | The sender's clock in microseconds, from an epoch of its choice, echoed in the `pong`. |
 
 The receiver answers at once with a `pong` that carries the same nonce
-and time, and the `pong` never waits behind tiles.
+and time, and the `pong` never waits behind tiles. `occamyd` sends a
+`ping` on a stream that has carried nothing for 25 seconds, so that a
+proxy that closes quiet connections keeps it open. The client's `pong`
+counts as no input toward the idle timeout.
 
 ```hex
 # vector: ping
