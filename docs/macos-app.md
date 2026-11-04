@@ -18,12 +18,7 @@ in a window of its own.
 
 ```mermaid
 flowchart LR
-  subgraph app["Occamy for macOS"]
-    main["The main window<br/>servers and connections"]
-    window["A session window"]
-  end
-  main -- "open a connection" --> window
-  window <-- "your input,<br/>the screen" --> session
+  window["A session window<br/>of Occamy for macOS"] <-- "your input,<br/>the screen" --> session
   subgraph server["The Occamy server"]
     session["The session"]
   end
