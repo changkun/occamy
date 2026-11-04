@@ -77,7 +77,21 @@ public struct APIError: Error, Sendable, Equatable, LocalizedError {
         self.message = message
     }
 
-    public var errorDescription: String? { message }
+    /// errorDescription says what went wrong for people, as the web
+    /// client's errorMessage does: a sentence of the app's for the codes
+    /// it knows, and the server's message otherwise.
+    public var errorDescription: String? {
+        switch (status, code) {
+        case (401, "token_expired"), (401, "invalid_token"):
+            "Your sign-in has expired. Sign in again."
+        case (503, "limit_exceeded"):
+            "The server is already running as many sessions as it allows. Try again later."
+        case (429, "limit_exceeded"):
+            "You've reached the server's limit on sessions or share links. End a session, or wait for a link to expire, and try again."
+        default:
+            message
+        }
+    }
 
     /// Whether the access token is the trouble: signing in again helps.
     public var signIn: Bool { status == 401 }
@@ -103,8 +117,10 @@ public struct API: Sendable {
 
     /// signIn signs a static user in with a password (POST /api/v1/auth/token).
     public func signIn(username: String, password: String) async throws -> AccessToken {
-        try await call("POST", "api/v1/auth/token", body: ["username": username, "password": password],
-                       as: TokenResponse.self).accessToken
+        try await explained("unauthorized", "The user name or password is wrong.") {
+            try await call("POST", "api/v1/auth/token", body: ["username": username, "password": password],
+                           as: TokenResponse.self).accessToken
+        }
     }
 
     /// oidcLogin is where a browser starts an OIDC sign-in that returns
@@ -123,8 +139,10 @@ public struct API: Sendable {
     /// oidcToken exchanges an OIDC sign-in's one-time code and its
     /// verifier for an access token (POST /api/v1/auth/oidc/token).
     public func oidcToken(code: String, verifier: String) async throws -> AccessToken {
-        try await call("POST", "api/v1/auth/oidc/token", body: ["code": code, "code_verifier": verifier],
-                       as: TokenResponse.self).accessToken
+        try await explained("unauthorized", "The sign-in took too long, or it was already used. Sign in again.") {
+            try await call("POST", "api/v1/auth/oidc/token", body: ["code": code, "code_verifier": verifier],
+                           as: TokenResponse.self).accessToken
+        }
     }
 
     /// connections lists the connections the user may open.
@@ -155,8 +173,10 @@ public struct API: Sendable {
             var role: String
             var expires_in: Int
         }
-        let m = try await call("POST", "api/v1/sessions/\(escape(id))/shares", token: token,
-                               body: Request(role: role.rawValue, expires_in: expiresIn), as: Minted.self)
+        let m = try await explained("not_found", "The session has ended, or it isn't yours.") {
+            try await call("POST", "api/v1/sessions/\(escape(id))/shares", token: token,
+                           body: Request(role: role.rawValue, expires_in: expiresIn), as: Minted.self)
+        }
         return Share(token: m.token, role: Share.Role(rawValue: m.role) ?? role, expiresIn: m.expires_in)
     }
 
@@ -226,7 +246,19 @@ public struct API: Sendable {
         do {
             return try JSONDecoder().decode(T.self, from: data)
         } catch {
-            throw APIError(status: 200, code: "bad_response", message: "occamyd answered in a way this app does not understand.")
+            throw APIError(status: 200, code: "bad_response", message: "The server sent a response that this app doesn't understand.")
+        }
+    }
+
+    /// explained runs f, and gives an APIError of code the app's text in
+    /// place of the server's message, which a route's caller can put
+    /// better, knowing what it asked for.
+    private func explained<T>(_ code: String, _ text: String, _ f: () async throws -> T) async throws -> T {
+        do {
+            return try await f()
+        } catch var e as APIError where e.code == code {
+            e.message = text
+            throw e
         }
     }
 
@@ -255,7 +287,7 @@ public struct API: Sendable {
             if let e = try? JSONDecoder().decode(Body.self, from: data) {
                 throw APIError(status: status, code: e.error.code, message: e.error.message)
             }
-            throw APIError(status: status, code: "http_\(status)", message: "occamyd answered \(status).")
+            throw APIError(status: status, code: "http_\(status)", message: "The server returned an unexpected response (HTTP \(status)).")
         }
         return data
     }
@@ -313,10 +345,10 @@ public enum OIDCOutcome: Sendable, Equatable {
     /// message describes an error for people, as the web client does.
     public static func message(_ error: String) -> String {
         switch error {
-        case "access_denied": "The sign-in provider or occamyd refused this account."
-        case "sign_in_failed": "The sign-in provider failed, or its answer could not be checked."
-        case "unavailable": "The sign-in provider cannot be reached. Try again later."
-        default: "The sign-in failed (\(error))."
+        case "access_denied": "Your sign-in provider or the server didn't allow this account to sign in."
+        case "sign_in_failed": "The sign-in provider reported an error, or its response couldn't be verified. Try again."
+        case "unavailable": "The sign-in provider can't be reached right now. Try again later."
+        default: "The sign-in failed. Try again."
         }
     }
 }

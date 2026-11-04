@@ -224,13 +224,13 @@ struct SessionView: View {
                         Image(systemName: "command")
                     }
                     .toggleStyle(.button)
-                    .help(sendsShortcuts ? "⌘ shortcuts go to the remote" : "⌘ shortcuts stay with the app")
+                    .help(sendsShortcuts ? "⌘ shortcuts go to the remote computer" : "⌘ shortcuts stay on this Mac")
                 }
                 Toggle(isOn: Binding { model.clipboardEnabled } set: { model.clipboardEnabled = $0 }) {
                     Image(systemName: model.clipboardEnabled ? "list.clipboard" : "clipboard")
                 }
                 .toggleStyle(.button)
-                .help(model.clipboardEnabled ? "The clipboard is shared" : "The clipboard is not shared")
+                .help(model.clipboardEnabled ? "Clipboard sharing is on" : "Clipboard sharing is off")
                 if model.role.manage {
                     Menu {
                         Button("Copy Link with Control") { share(.viewer, model) }
@@ -344,9 +344,9 @@ struct SessionView: View {
             phase = .failed("Sign in to \(server.name) again.", signIn: true)
         } catch let e as DialError {
             let ending = Ending(End(code: e.closeCode, reason: e.closeCode == 0 ? "" : e.message, error: e.message))
-            phase = .failed(e.closeCode == 0 ? e.message : "\(ending.title): \(ending.detail)", signIn: ending.signIn)
+            phase = .failed(e.closeCode == 0 ? e.message : ending.detail, signIn: ending.signIn)
         } catch let e as APIError {
-            phase = .failed(e.message, signIn: e.signIn)
+            phase = .failed(e.localizedDescription, signIn: e.signIn)
         } catch is CancellationError {
         } catch {
             phase = .failed(error.localizedDescription, signIn: false)
@@ -409,7 +409,7 @@ struct SessionView: View {
                 let s = try await server.api.share(session: id, role: role, token: token)
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(server.api.shareLink(session: id, share: s.token).absoluteString, forType: .string)
-                flash(role == .viewer ? "Link with control copied, for an hour" : "View-only link copied, for an hour")
+                flash(role == .viewer ? "Link with control copied. It works for an hour." : "View-only link copied. It works for an hour.")
             } catch {
                 flash(error.localizedDescription)
             }
@@ -476,14 +476,14 @@ struct PromptSheet: View {
                     Toggle("Save in the Keychain", isOn: $save)
                 }
             } header: {
-                Text(prompt.name.isEmpty ? "The remote asks" : String(prompt.name.prefix(200)))
+                Text(prompt.name.isEmpty ? "The remote computer needs more information" : String(prompt.name.prefix(200)))
             } footer: {
                 if !prompt.instruction.isEmpty {
                     Text(String(prompt.instruction.prefix(1000)))
                         .foregroundStyle(.secondary)
                 }
                 if saved {
-                    Text("The saved answer was not taken; it is replaced if you save again.")
+                    Text("The saved answer didn't work. Save a new one to replace it.")
                         .foregroundStyle(.secondary)
                 }
             }
