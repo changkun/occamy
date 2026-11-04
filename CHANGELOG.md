@@ -60,7 +60,7 @@ the API and the protocol may change before 1.0.0.
 - `disable_copy` and `disable_paste` on a vnc or rdp connection keep
   the remote's clipboard from the viewers, or theirs from the remote,
   as guacd's `disable-copy` and `disable-paste` did
-  ([docs/configuration.md](docs/configuration.md#the-connection-registry-connections)).
+  ([docs/configuration.md](docs/configuration.md#connections-connections)).
 - `make swift-core` builds the Go client core as `liboccamy.a`, a C
   archive for Apple silicon and Intel with its interface in `occamy.h`,
   which the macOS app links

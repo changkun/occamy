@@ -81,7 +81,7 @@ A bell from the remote flashes the screen. While the tab is hidden,
 `occamyd` sends it nothing, and the screen catches up when you return.
 
 An RDP desktop of a Windows host that stays nearly black needs
-`disable_gfx: true` on its connection ([Backends](configuration.md#backends)).
+`disable_gfx: true` on its connection ([Windows hosts](configuration.md#windows-hosts)).
 
 ## Roles
 

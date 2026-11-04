@@ -68,7 +68,7 @@ frame of full-screen motion in 8 KiB instead of 50–66
 | Protocol | Served by | Notes |
 |----------|-----------|-------|
 | VNC | Occamy | Tested with x11vnc and TigerVNC, VeNCrypt included |
-| RDP | Occamy | Tested with xrdp. Windows hosts need `disable_gfx: true`; see [Backends](./docs/configuration.md#backends) |
+| RDP | Occamy | Tested with xrdp. Windows hosts need `disable_gfx: true`; see [Windows hosts](./docs/configuration.md#windows-hosts) |
 | SSH | Occamy | The terminal is drawn in the browser |
 | Kubernetes | Occamy | A shell in a pod, through the API server |
 
@@ -97,60 +97,17 @@ and resizing.
 
 ## Install
 
-Each [release](https://github.com/changkun/occamy/releases), tagged like
-`v1.0.0-beta.2`, publishes a multi-arch image,
-`ghcr.io/changkun/occamy:<tag>`, and `occamyd` archives for Linux, macOS
-and Windows on amd64 and arm64, with `SHA256SUMS` and build provenance
-attestations. Occamy for macOS comes as a disk image named for the
-version without its `v`, such as `Occamy-1.0.0-beta.2.dmg`, signed with
-a Developer ID and notarized by Apple
-([docs/macos-app.md](docs/macos-app.md#installing-it)).
+Each [release](https://github.com/changkun/occamy/releases) publishes
+the image `ghcr.io/changkun/occamy:<tag>`, `occamyd` archives for Linux,
+macOS and Windows on amd64 and arm64, and the web client, with
+`SHA256SUMS` and build provenance attestations. Occamy for macOS comes
+as a disk image, signed with a Developer ID and notarized by Apple
+([docs/macos-app.md](./docs/macos-app.md#installing-it)).
 
-Write a configuration file that lists your users and your connections:
-
-```yaml
-version: 1
-listen: 0.0.0.0:5636
-web_client: client/occamy-web/dist
-auth:
-  signing_key_file: /var/lib/occamy/signing.key
-  users:
-    - name: alice
-      password_hash: "<output of the htpasswd line below>"
-connections:
-  - id: workstation
-    name: Workstation
-    protocol: vnc
-    target: workstation.example.com:5900
-    credentials: {password_env: WORKSTATION_PASSWORD}
-    allow: {users: [alice]}
-```
-
-Make the password hash with
-`htpasswd -nbBC 12 "" 'the password' | cut -d: -f2`, then run the image
-with the file and a volume for the signing key:
-
-```sh
-podman run -d --name occamy -p 5636:5636 \
-    -e WORKSTATION_PASSWORD \
-    -v occamy-data:/var/lib/occamy \
-    -v ./occamy.yaml:/occamy/v1.yaml:ro \
-    ghcr.io/changkun/occamy:<tag> /occamy/occamyd -conf /occamy/v1.yaml
-```
-
-To check a download against the release:
-
-```sh
-sha256sum -c SHA256SUMS
-gh attestation verify occamyd-<tag>-linux-amd64.tar.gz --repo changkun/occamy
-gh attestation verify oci://ghcr.io/changkun/occamy:<tag> --repo changkun/occamy
-```
-
-Open http://localhost:5636/static/. `occamyd` speaks plain HTTP unless
-the file sets `tls`, so put it behind a TLS proxy or give it a
-certificate before you expose it. [docs/configuration.md](./docs/configuration.md)
-covers every key: OIDC, groups, SSH host keys, Kubernetes, sharing,
-limits and TLS.
+[Deploy](./docs/deploy.md) takes you from a release to an Occamy that
+your users reach over HTTPS: the configuration file, password hashes,
+the signing key, the container or a service of the host, and TLS.
+[Configuration](./docs/configuration.md) describes every key.
 
 ## Documentation
 
