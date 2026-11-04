@@ -375,9 +375,9 @@ so a link or an anchor that does not resolve fails the build. It
 publishes the site from `master`.
 
 The figures that aren't measurements or Mermaid diagrams, such as the
-protocol page's byte layout, are SVGs that a script draws, in a light
-and a dark version. After you change one in the script, draw them all
-again:
+protocol page's byte layout, are SVGs in a light and a dark version, drawn by a module of
+`scripts/figures/` named after the page. After you change one, draw
+them all again:
 
 ```sh
 python3 scripts/docs_figures.py

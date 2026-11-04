@@ -62,8 +62,9 @@ thing works in a figure, and find each detail where they expect it.
   every screen a screenshot, in light and dark. Draw sequences and
   flowcharts in Mermaid, which GitHub and the website both render. Draw
   what Mermaid can't, such as a byte layout or a screen of tiles, as a
-  pair of SVGs from [`scripts/docs_figures.py`](scripts/docs_figures.py),
-  shown with `<picture>` as the benchmark figures are. Give every
+  pair of SVGs from a module of [`scripts/figures/`](scripts/figures)
+  named after the page, shown with `<picture>` as the benchmark figures
+  are. Give every
   procedure an example that the reader can run as written. If a section
   runs for more than a screen without a figure, a table or an example,
   ask what you could show instead.
