@@ -51,6 +51,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   screenshot of each of the web client's screens in light and dark
   ([docs/web-client.md](docs/web-client.md#how-the-web-client-works),
   [docs/macos-app.md](docs/macos-app.md#how-the-app-works)).
+- The README says what Occamy is and points each reader to their page.
+  The architecture page follows a key press to the frame that shows it,
+  with a figure of each viewer's writer, and the development page is
+  organised by task, from building and testing to cutting a release
+  ([docs/architecture.md](docs/architecture.md#how-occamyd-works),
+  [docs/development.md](docs/development.md#cut-a-release)).
 - The codecs page explains how `occamyd` picks each tile's codec, and
   what each step saves, before the measurements behind each choice
   ([docs/benchmarks/codecs.md](docs/benchmarks/codecs.md)). The records
