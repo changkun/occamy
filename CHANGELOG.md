@@ -12,6 +12,19 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - A website, <https://changkun.github.io/occamy/>: the README and the
   documents in `docs/`, with search, built by MkDocs and published from
   `master` by the `Pages` workflow ([CONTRIBUTING.md](CONTRIBUTING.md#development)).
+- Pages for deploying `occamyd` ([docs/deploy.md](docs/deploy.md)), using
+  the web client ([docs/web-client.md](docs/web-client.md)), and building
+  and testing Occamy ([docs/development.md](docs/development.md)).
+
+### Changed
+
+- The documents are rewritten for their readers, one job a page. The
+  benchmarks page opens with Occamy against Guacamole, in figures and
+  tables with 95% intervals and corrected tests
+  ([docs/benchmarks.md](docs/benchmarks.md#occamy-against-guacamole)).
+- Each line a session logs, such as `session ended`, carries the
+  session's ID as `session=`, as the line that opened it does
+  ([docs/debugging.md](docs/debugging.md#the-log)).
 
 ## [1.0.0-beta.2] - 2026-11-04
 
