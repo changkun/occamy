@@ -40,6 +40,12 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   and limit what users can do, and ends with a reference that gives
   every key's type and default
   ([docs/configuration.md](docs/configuration.md#how-the-configuration-works)).
+- Try Occamy, Deploy, and Debugging and monitoring each open with a
+  figure: the demo stack's containers and ports, a deployment's hops
+  and what each needs, and where the log and the listeners come from.
+  Deploy adds Windows hosts and Kubernetes, and debugging is organised
+  by what users see ([docs/deploy.md](docs/deploy.md#how-a-deployment-fits-together),
+  [docs/debugging.md](docs/debugging.md#where-to-look)).
 - The benchmark report calls its estimate the *improvement*: the
   baseline's value divided by the candidate's, so that above 1× the
   candidate is better. The column in `comparisons.csv` that was

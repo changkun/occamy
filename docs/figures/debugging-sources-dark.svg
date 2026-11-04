@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="396" viewBox="0 0 760 396">
+<rect width="760" height="396" fill="#1a1a19"/>
+<defs><marker id="head-client" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#3987e5"/></marker><marker id="head-occamy" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#9085e9"/></marker><marker id="head-remote" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#199e70"/></marker><marker id="head-private" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#d95926"/></marker><marker id="head-infra" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#898781"/></marker></defs>
+<rect x="16" y="36" width="536" height="318" rx="12" fill="none" stroke="#4a4a46" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="32" y="60" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#c3c2b7" text-anchor="start">The host, or occamyd's pod</text>
+<rect x="150" y="86" width="190" height="116" rx="8" fill="#9085e9" stroke="#9085e9" stroke-width="1.5" fill-opacity="0.13"/>
+<text x="162" y="108" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="start">occamyd</text>
+<text x="162" y="127" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">serves two listeners</text>
+<text x="162" y="144" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">and writes one log</text>
+<rect x="340" y="98" width="168" height="30" rx="5" fill="#3987e5" stroke="#3987e5" stroke-width="1.5" fill-opacity="0.16"/>
+<text x="352" y="118" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="600" fill="#f0efec" text-anchor="start">:5636</text>
+<text x="498" y="118" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#c3c2b7" text-anchor="end">public</text>
+<rect x="340" y="156" width="168" height="30" rx="5" fill="#d95926" stroke="#d95926" stroke-width="1.5" stroke-dasharray="4 3" fill-opacity="0.16"/>
+<text x="352" y="176" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="600" fill="#f0efec" text-anchor="start">localhost:6060</text>
+<text x="498" y="176" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="400" fill="#c3c2b7" text-anchor="end">debug</text>
+<rect x="590" y="70" width="156" height="92" rx="8" fill="#3987e5" stroke="#3987e5" stroke-width="1.5" fill-opacity="0.13"/>
+<text x="602" y="92" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="start">Users, probes</text>
+<text x="602" y="111" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c3c2b7" text-anchor="start">GET /healthz</text>
+<text x="602" y="128" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">the API, streams</text>
+<text x="602" y="145" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">and web client</text>
+<line x1="588" y1="113" x2="510" y2="113" stroke="#3987e5" stroke-width="1.6" marker-end="url(#head-client)"/>
+<rect x="330" y="232" width="206" height="100" rx="8" fill="#898781" stroke="#898781" stroke-width="1.5" fill-opacity="0.13"/>
+<text x="342" y="254" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="start">You, on the host</text>
+<text x="342" y="273" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c3c2b7" text-anchor="start">curl /debug/vars</text>
+<text x="342" y="290" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c3c2b7" text-anchor="start">go tool pprof</text>
+<text x="342" y="307" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#c3c2b7" text-anchor="start">or kubectl port-forward</text>
+<line x1="400" y1="232" x2="400" y2="188" stroke="#d95926" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#head-private)"/>
+<rect x="36" y="232" width="250" height="100" rx="8" fill="#9085e9" stroke="#9085e9" stroke-width="1.5" fill-opacity="0.06"/>
+<text x="48" y="254" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="13" font-weight="600" fill="#f0efec" text-anchor="start">The log</text>
+<text x="48" y="273" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c3c2b7" text-anchor="start">podman logs occamy</text>
+<text x="48" y="290" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c3c2b7" text-anchor="start">journalctl -u occamy</text>
+<text x="48" y="307" font-family="'SF Mono', Menlo, Consolas, monospace" font-size="11" font-weight="400" fill="#c3c2b7" text-anchor="start">kubectl logs</text>
+<line x1="210" y1="202" x2="210" y2="230" stroke="#9085e9" stroke-width="1.6" marker-end="url(#head-occamy)"/>
+<text x="222" y="220" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="10.5" font-weight="500" fill="#c3c2b7" text-anchor="start" paint-order="stroke" stroke="#1a1a19" stroke-width="4">standard error</text>
+<text x="16" y="382" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#c3c2b7" text-anchor="start">Users and probes reach the public listener. The debug listener stays on the loopback interface, so only someone on the host can read it.</text>
+</svg>

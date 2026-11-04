@@ -929,7 +929,7 @@ flowchart LR
   occamyd --> remotes["Remote computers"]
 ```
 
-[Deploy](deploy.md#behind-a-reverse-proxy) has the proxy's own
+[Deploy](deploy.md#serve-it-over-tls) has the proxy's own
 configuration, for Caddy and nginx. In `occamyd`'s file, set these:
 
 ```yaml
@@ -971,7 +971,7 @@ file: the connections whose allow lists admit them, ad-hoc targets if
 you allow them, and limits on how much each user can hold. Within a
 session, its owner decides who else joins, by sharing it: others join
 as viewers who can type, or as read-only viewers
-([HTTP API](api.md#shares)).
+([HTTP API](api.md#share-a-session)).
 
 ### Who may open a connection
 
