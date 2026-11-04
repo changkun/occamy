@@ -160,8 +160,8 @@ anyone else a [refusal](api.md#get-apiv1sessionsidstream).
 ## Message layout
 
 Every message is a 4-byte [header](#header) and then the message's
-fields, in the order that its section of this page lists them, with no
-names, tags, or padding between them. Fixed-size fields come first, and
+fields, in the order that its section lists them, with no names, tags,
+or padding between them. Fixed-size fields come first, and
 variable-size fields last.
 
 This is the `text` message that sends 日本 as the client's third input,
@@ -996,7 +996,7 @@ Type 0x0204, sent by the server as part of a [frame](#frames).
 | w | u16 | The width of both. |
 | h | u16 | The height of both. |
 
-It copies from the screen as the messages before it left it. Both
+It copies the source as the screen is after the messages before it. Both
 rectangles lie within the screen. They may overlap, as they do in a
 scroll, and the destination then gets the source's pixels as they were
 before the copy.
@@ -1513,7 +1513,7 @@ A receiver bounds what it inflates:
 
 - The longest container of a rectangle is `max(1 + 4wh, 1026 + wh)`
   bytes: raw pixels with alpha, or 256 colours with alpha and a byte an
-  index, the longer for up to 341 pixels.
+  index, which is the longer for up to 341 pixels.
 - A receiver that inflates as it reads stops one byte past that cap, at
   the byte that shows the container is too long, so it never holds
   more, whatever the payload inflates to.
