@@ -441,18 +441,15 @@ its fields in order, its rules, and an example from the golden vectors.
 
 Asks the other peer for a `pong`, to measure the round trip.
 
-Type 0x0001, from either peer.
+Type 0x0001, sent by either side.
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | nonce | u32 | Any value, echoed in the `pong`. |
 | time | u64 | The sender's clock in microseconds, from an epoch of its choice, echoed in the `pong`. |
 
-Rules:
-
-- The receiver answers at once with a `pong` that carries the same
-  nonce and time.
-- A `pong` never waits behind tiles.
+The receiver answers at once with a `pong` that carries the same nonce
+and time, and the `pong` never waits behind tiles.
 
 ```hex
 # vector: ping
@@ -465,17 +462,15 @@ Rules:
 
 Answers a `ping`.
 
-Type 0x0002, from either peer.
+Type 0x0002, sent by either side.
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | nonce | u32 | The `ping`'s nonce. |
 | time | u64 | The `ping`'s time. |
 
-Rules:
-
-- The round trip is the `ping` sender's clock, when the `pong` arrives,
-  minus `time`.
+The sender of the `ping` measures the round trip as its own clock when
+the `pong` arrives, minus `time`.
 
 ```hex
 # vector: pong
@@ -488,36 +483,36 @@ Rules:
 
 Ends the connection, with a code and a reason.
 
-Type 0x0003, from either peer.
+Type 0x0003, sent by either side.
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | code | u16 | A [close code](#close-codes). |
 | reason | string | Why, for people and logs. |
 
-Rules:
+After `close`, the sender sends nothing more: it closes the WebSocket
+with the same code as its status, and the receiver closes too. The
+reason never holds a secret and, where possible, fits in a WebSocket
+close frame, which holds 123 bytes.
 
-- After `close`, the sender sends nothing more. It closes the WebSocket
-  with the same code as its status, and the receiver closes too.
-- A browser may close a WebSocket only with 1000 or with a code from
-  3000 to 4999. A browser client that sends another code, such as
-  `protocol-error`, closes the WebSocket with 1000. A native client
-  closes with the code itself.
-- The reason never holds a secret. Where possible, it fits a WebSocket
-  close frame, which holds 123 bytes.
-- The server takes the code from the `close` message. The close frame
-  that follows, with 1000 or the same code, changes nothing.
-- The server takes a close frame without `close` before it as the
-  client leaving. A browser sends 1001 this way when its page goes
-  away, as on navigating or reloading. The server does not take that
-  1001 as `server-shutdown`.
-- The server always sends `close` before it closes with
-  `server-shutdown`. So a client takes a 1001 without `close` before it
-  as a lost connection, not as the session's end. Firefox reports its
-  own page going away to the page this way, before `pagehide`, and a
-  proxy that goes away may send one too.
-- A receiver that does not know a code treats it as an error described
-  by the reason.
+A browser may close a WebSocket only with 1000 or with a code from 3000
+to 4999. A browser client that sends another code, such as
+`protocol-error`, therefore closes the WebSocket with 1000, and a native
+client closes with the code itself. The server takes the code from the
+`close` message, so the close frame that follows, with 1000 or the same
+code, changes nothing.
+
+The server takes a close frame without a `close` before it as the
+client leaving. A browser sends 1001 this way when its page goes away,
+as on navigating or reloading, and the server doesn't take that 1001 as
+`server-shutdown`. The server, for its part, always sends `close` before
+it closes with `server-shutdown`. A client therefore takes a 1001
+without `close` before it as a lost connection, not as the end of the
+session. Firefox reports its own page going away to the page this way,
+before `pagehide`, and a proxy that goes away may send one too.
+
+A receiver that doesn't know a code treats it as an error that the
+reason describes.
 
 ```hex
 # vector: close unauthorized
@@ -534,8 +529,8 @@ a0 0f                    # code: 4000 (unauthorized)
 
 Opens a session.
 
-Type 0x0101, from the client. It travels only in the upgrade request's
-`hello` parameter ([Handshake](#handshake)), and is at most 2048 bytes.
+Type 0x0101, sent by the client, and only in the upgrade request's
+`hello` parameter ([Handshake](#handshake)). It is at most 2048 bytes.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -548,19 +543,17 @@ Type 0x0101, from the client. It travels only in the upgrade request's
 | name | string | The client and its version, such as `occamy-web/1.0`. |
 | capabilities | capabilities | What the client offers; see [Capabilities](#capabilities). |
 
-Rules:
+`version` comes first, so that any later version of the protocol can
+read it before the rest, whose layout may change. A server refuses
+another version with `unsupported` without reading further.
 
-- `version` comes first, so that any later version of the protocol can
-  read it before the rest, whose layout may change.
-- A server refuses another version with `unsupported`, without reading
-  further.
-- The client does not know yet whether the session is a terminal or a
-  desktop. It states both sizes, and the server uses the one that fits.
-- The client's viewport starts as the whole screen.
-- `occamyd` bounds the size it asks the remote for, as it bounds a
-  [`resize-request`](#resize-request).
-- The web client asks for its window's size in CSS pixels, so that a
-  remote pixel is a CSS pixel at any device pixel ratio.
+The client doesn't know yet whether the session is a terminal or a
+desktop, so it states both sizes, and the server uses the one that
+fits. The client's viewport starts as the whole screen. `occamyd` bounds
+the size it asks the remote for, as it bounds a
+[`resize-request`](#resize-request). The web client asks for its
+window's size in CSS pixels, so that a remote pixel is a CSS pixel at
+any device pixel ratio.
 
 ```hex
 # vector: hello from a web client
@@ -598,22 +591,21 @@ c8 00                    # pixel_ratio: 200
 the client's `clipboard` are input. Each starts with a sequence number,
 `seq`.
 
-Rules:
+The client numbers its input messages from 1, adding one for each.
+After 2³²−1, the next number is 1. 0 is never an input's number, so a
+`last_seq` of 0 always means none. Because [`frame-end`](#frame-end)
+reports the last input that a frame reflects, the client can measure
+exactly the time from an input to its effect.
 
-- The client numbers its input messages from 1, one more for each.
-- After 2³²−1, the next number is 1. 0 is never an input's number, so a
-  `last_seq` of 0 always means none.
-- [`frame-end`](#frame-end) reports the last input a frame reflects, so
-  the client can measure the time from an input to its effect exactly.
-- The server applies input in the order it arrives.
-- The server drops input from read-only viewers, and input the session
-  cannot take, such as `term-input` to a graphical session.
+The server applies input in the order it arrives. It drops input from
+read-only viewers, and input that the session can't take, such as
+`term-input` to a graphical session.
 
 ### key
 
 Reports a key press or release.
 
-Type 0x0102, from the client. It is input.
+Type 0x0102, sent by the client as [input](#input-messages).
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -622,14 +614,11 @@ Type 0x0102, from the client. It is input.
 | keysym | u32 | The X11 keysym the key produced, or 0 if it produced none the client can name. |
 | code | u16 | The physical key as a USB HID usage from the keyboard page (0x07), or 0 if the client does not know it. |
 
-Rules:
-
-- A release carries the keysym of its press.
-- A key with keysym 0, such as a dead key in a browser, reaches the
-  remote only through `code`. A backend that takes keysyms alone drops
-  it.
-- A client translates `KeyboardEvent.code` or `NSEvent.keyCode` to
-  `code` with a table.
+A release carries the keysym of its press. A key that produces no
+keysym the client can name, such as a dead key in a browser, has keysym
+0 and reaches the remote only through `code`, so a backend that takes
+keysyms alone drops it. A client translates `KeyboardEvent.code` or
+`NSEvent.keyCode` to `code` with a table.
 
 ```hex
 # vector: key down a
@@ -645,16 +634,14 @@ Rules:
 Sends text that an input method composed, such as a word typed through
 an IME.
 
-Type 0x0103, from the client. It is input.
+Type 0x0103, sent by the client as [input](#input-messages).
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | seq | u32 | The input's sequence number. |
 | text | string | The text. |
 
-Rules:
-
-- Ordinary typing goes as `key`, not as `text`.
+Ordinary typing goes as [`key`](#key), not as `text`.
 
 ```hex
 # vector: text
@@ -669,17 +656,15 @@ e6 97 a5 e6 9c ac        # "日本"
 Sends the bytes that the client's terminal emulator produced, such as
 xterm.js's `onData`.
 
-Type 0x0104, from the client. It is input.
+Type 0x0104, sent by the client as [input](#input-messages).
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | seq | u32 | The input's sequence number. |
 | data | bytes | The bytes. |
 
-Rules:
-
-- In a terminal session, the server writes the bytes to the remote's
-  input.
+In a terminal session, the server writes the bytes to the remote's
+input.
 
 ```hex
 # vector: term-input
@@ -694,7 +679,7 @@ Rules:
 Reports the pointer's position on the remote screen and the buttons
 held.
 
-Type 0x0105, from the client. It is input.
+Type 0x0105, sent by the client as [input](#input-messages).
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -703,10 +688,8 @@ Type 0x0105, from the client. It is input.
 | y | u16 | The row, in pixels. |
 | buttons | u8 | The buttons held: bit 0 left, 1 middle, 2 right, 3 back, 4 forward. |
 
-Rules:
-
-- Bits 5 to 7 of `buttons` are reserved. Senders leave them zero, and
-  receivers ignore them.
+Bits 5 to 7 of `buttons` are reserved: senders leave them zero, and
+receivers ignore them.
 
 ```hex
 # vector: pointer
@@ -721,18 +704,14 @@ Rules:
 
 Reports a scroll.
 
-Type 0x0106, from the client. It is input.
+Type 0x0106, sent by the client as [input](#input-messages).
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | seq | u32 | The input's sequence number. |
 | dx | i32 | The horizontal delta. Positive scrolls right. |
 | dy | i32 | The vertical delta. Positive scrolls down. |
-| mode | u8 | The unit of the deltas: 0 pixels, 1 lines. |
-
-Rules:
-
-- Other values of `mode` are invalid.
+| mode | u8 | The unit of the deltas: 0 pixels, 1 lines. Other values are invalid. |
 
 ```hex
 # vector: wheel by lines
@@ -748,7 +727,7 @@ fd ff ff ff              # dy: -3
 Asks the remote to change the screen's size, such as when the client's
 window changes.
 
-Type 0x0107, from the client. It is input.
+Type 0x0107, sent by the client as [input](#input-messages).
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -756,15 +735,12 @@ Type 0x0107, from the client. It is input.
 | width | u16 | The width, in pixels for a graphical session and in character cells for a terminal. |
 | height | u16 | The height, likewise. |
 
-Rules:
-
-- The remote may refuse, or pick another size. [`resize`](#resize)
-  reports what it did.
-- `occamyd` asks a remote for at most 8192 pixels a side, or for at
-  most 1000 columns and 500 rows. It takes a larger request, or a
-  larger size in `hello`, as that bound.
-- A backend may have tighter limits. The VNC backend asks for no screen
-  of more than 2²⁵ pixels, so it ignores a request for 8192 × 8192.
+The remote may refuse, or pick another size, and
+[`resize`](#resize) reports what it did. `occamyd` asks a remote for at
+most 8192 pixels a side, or for at most 1000 columns and 500 rows, and
+takes a larger request, or a larger size in `hello`, as that bound. A
+backend may have tighter limits: the VNC backend asks for no screen of
+more than 2²⁵ pixels, so it ignores a request for 8192 × 8192.
 
 ```hex
 # vector: resize-request
@@ -778,7 +754,7 @@ d0 02                    # height: 720
 
 Sends the client's clipboard content, for the remote's clipboard.
 
-Type 0x0108, from the client. It is input.
+Type 0x0108, sent by the client as [input](#input-messages).
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -786,12 +762,9 @@ Type 0x0108, from the client. It is input.
 | mime | string | The MIME type, such as `text/plain;charset=utf-8`. |
 | data | bytes | The content. |
 
-Rules:
-
-- Nothing confirms that it arrived.
-  [`clipboard-status`](#clipboard-status) says when it has waited too
-  long.
-- On a connection that sets `disable_paste`, the server drops it.
+Nothing confirms that the content arrived;
+[`clipboard-status`](#clipboard-status) says when it has waited too
+long. On a connection that sets `disable_paste`, the server drops it.
 
 ```hex
 # vector: clipboard from the client
@@ -809,7 +782,7 @@ Rules:
 
 Reports what the client shows, whenever that changes.
 
-Type 0x0109, from the client. It is not input, and has no sequence
+Type 0x0109, sent by the client. It isn't input, so it has no sequence
 number.
 
 | Field | Type | Meaning |
@@ -820,12 +793,10 @@ number.
 | w | u16 | Its width. |
 | h | u16 | Its height. |
 
-Rules:
-
-- A zero `w` or `h` means the whole screen.
-- A hidden client gets no frames. When it becomes visible again, it
-  gets one frame of the current screen, never a backlog.
-- Tiles outside the viewport wait until they come into view.
+A zero `w` or `h` means the whole screen. A hidden client gets no
+frames, and when it becomes visible again, it gets one frame of the
+current screen, never a backlog. Tiles outside the viewport wait until
+they come into view.
 
 ```hex
 # vector: view of a viewport
@@ -842,30 +813,26 @@ c8 00                    # y: 200
 Acknowledges that the client has shown a frame, and every frame before
 it.
 
-Type 0x010a, from the client.
+Type 0x010a, sent by the client.
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | frame_id | u32 | The frame's ID, from its `frame-end`. |
 | decode_time | u32 | How long the client took to decode and draw the frame, in microseconds: from its `frame-end` arriving to this acknowledgement, including any wait for the frame to be shown. |
 
-Rules:
+The client acknowledges a frame once it is shown, not when it arrives.
+A client that hands frames to a renderer acknowledges one when the
+renderer is done with it and asks for the next. An acknowledgement
+covers every earlier frame, so a client may skip one that a later
+acknowledgement covers, as when two wait to be sent and only the newer
+goes. A client shouldn't hold an acknowledgement back once its frame is
+shown, because the server measures round trips from acknowledgements
+and holds frames back by them.
 
-- The client acknowledges a frame once it is shown, not when it
-  arrives. A client that hands frames to a renderer acknowledges one
-  when the renderer is done with it and asks for the next.
-- An acknowledgement covers every earlier frame. So a client may skip
-  one that a later acknowledgement covers, as when two wait to be sent
-  and only the newer goes.
-- A client should not hold an acknowledgement back once its frame is
-  shown. The server measures round trips from acknowledgements, and
-  holds frames back by them.
-- The server takes `decode_time` out of the round trip, and spaces its
-  frames by it.
-- The server ignores an acknowledgement of a frame that is not awaiting
-  one.
-
-See [Frames and flow control](#frames-and-flow-control).
+The server takes `decode_time` out of the round trip, and spaces its
+frames by it. It ignores an acknowledgement of a frame that isn't
+awaiting one. [Frames and flow control](#frames-and-flow-control)
+explains how acknowledgements pace the server.
 
 ```hex
 # vector: frame-ack
@@ -878,19 +845,17 @@ e2 04 00 00              # decode_time: 1250
 
 Answers a [`prompt`](#prompt).
 
-Type 0x010b, from the client.
+Type 0x010b, sent by the client.
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | id | u32 | The prompt's ID. |
 | answers | list of string | One answer per field of the prompt, in order. |
 
-Rules:
-
-- Only the owner sends it, at most once per prompt. The server ignores
-  a reply from any other viewer.
-- The server ignores a reply to a prompt that is no longer open.
-- Answers may be secrets, such as passwords. Neither peer logs them.
+Only the owner sends it, at most once per prompt. The server ignores a
+reply from any other viewer, and a reply to a prompt that is no longer
+open. Answers may be secrets, such as passwords, so neither side logs
+them.
 
 ```hex
 # vector: prompt-reply
@@ -907,7 +872,7 @@ Rules:
 
 Answers `hello`, as the server's first message on the WebSocket.
 
-Type 0x0201, from the server.
+Type 0x0201, sent by the server.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -917,10 +882,8 @@ Type 0x0201, from the server.
 | session_id | string | The session's ID, for joining and sharing it. |
 | capabilities | capabilities | The agreed capabilities. |
 
-Rules:
-
-- Both peers use the agreed capabilities from `welcome` on.
-- The session's first frame follows `welcome`.
+Both sides use the agreed capabilities from `welcome` on, and the
+session's first frame follows it.
 
 ```hex
 # vector: welcome
@@ -959,17 +922,15 @@ c8 00                    # pixel_ratio: 200
 Reports the remote screen's size, and starts a frame that redraws the
 whole screen.
 
-Type 0x0202, from the server. It is part of a frame.
+Type 0x0202, sent by the server as part of a [frame](#frames).
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | width | u16 | The width, in pixels for a graphical session and in character cells for a terminal. |
 | height | u16 | The height, likewise. |
 
-Rules:
-
-- The screen's content is undefined until the frame that `resize`
-  starts has redrawn it.
+The screen's content is undefined until the frame that `resize` starts
+has redrawn it.
 
 ```hex
 # vector: resize
@@ -982,7 +943,7 @@ Rules:
 
 Draws pixels in a rectangle of the screen.
 
-Type 0x0203, from the server. It is part of a frame.
+Type 0x0203, sent by the server as part of a [frame](#frames).
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -995,7 +956,7 @@ Type 0x0203, from the server. It is part of a frame.
 | slot | u16 | The client cache slot to store the decoded tile in, from 1 to the agreed cache slots, or 0 to store nothing. For `cached`, the slot to draw. |
 | payload | bytes | The encoded pixels. Empty for `cached`. |
 
-Rules between fields:
+A tile's fields must agree with each other:
 
 - A tile with a slot other than 0 covers at most 4096 pixels (`w × h`).
 - A `cached` tile has a slot other than 0 and an empty payload.
@@ -1003,10 +964,9 @@ Rules between fields:
 - A `scaled` tile's payload starts with a valid factor and codec
   ([The scaled codec](#the-scaled-codec)).
 
-Rules against the session:
-
-- The rectangle lies within the screen.
-- A `cached` tile names a slot that holds a tile of size `w × h`.
+It must also agree with the session: its rectangle lies within the
+screen, and a `cached` tile names a slot that holds a tile of size
+`w × h`.
 
 The server keeps each tile message small, so that any other message
 waits behind at most one tile.
@@ -1103,7 +1063,7 @@ a fraction of its size. Here it is a 64×32 WebP image, cut short, for a
 Copies a rectangle of the screen to another place on it, as when the
 remote scrolls or moves a window.
 
-Type 0x0204, from the server. It is part of a frame.
+Type 0x0204, sent by the server as part of a [frame](#frames).
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1115,17 +1075,15 @@ Type 0x0204, from the server. It is part of a frame.
 | w | u16 | The width of both. |
 | h | u16 | The height of both. |
 
-Rules:
+It copies the `w × h` pixels at `src_x, src_y` to `dst_x, dst_y`, as
+the screen is after the messages before it. Both rectangles lie within
+the screen. They may overlap, as they do in a scroll, and the
+destination then gets the source's pixels as they were before the copy.
 
-- It copies the `w × h` pixels at `src_x, src_y` to `dst_x, dst_y`, as
-  the screen is after the messages before it.
-- Both rectangles lie within the screen.
-- The rectangles may overlap, as they do in a scroll. The destination
-  gets the source's pixels as they were before the copy.
-- A copy moves the pixels the client has. For a lossy tile, these are
-  what its decoder produced. So a client must apply every `tile` and
-  `copy-rect` of every frame it receives, in order. It must not drop
-  any, not even those of a frame it will not show.
+A copy moves the pixels that the client has, which for a lossy tile are
+what its decoder produced. A client must therefore apply every `tile`
+and `copy-rect` of every frame it receives, in order, and must not drop
+any, not even those of a frame it won't show.
 
 `occamyd` sends `copy-rect` for changed content that the client already
 shows elsewhere, scrolled up or down. It sends the copies before the
@@ -1147,7 +1105,7 @@ tiles they were found among.
 
 Closes a frame.
 
-Type 0x0205, from the server.
+Type 0x0205, sent by the server.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1155,15 +1113,13 @@ Type 0x0205, from the server.
 | server_time | u64 | When the server read the frame's content, in microseconds since the server began to serve this connection. |
 | last_seq | u32 | The sequence number of the last input from this client that the server applied before it finished reading the frame's content, or 0 if none. |
 
-Rules:
+The client shows what the frame's messages drew, then acknowledges the
+frame with [`frame-ack`](#frame-ack). Frame IDs start at 1 on each
+connection and grow by one for each frame, wrapping from 2³²−1 to 0.
 
-- The client shows what the frame's messages drew, then acknowledges
-  the frame with [`frame-ack`](#frame-ack).
-- Frame IDs start at 1 on each connection, and grow by one for each
-  frame. They wrap from 2³²−1 to 0.
-- A frame never shows the effect of an input after `last_seq`.
-- An input's effect may show only in a later frame, when the remote
-  answers late, as a remote shell's echo does.
+A frame never shows the effect of an input after `last_seq`. An input's
+effect may show only in a later frame, though, when the remote answers
+late, as a remote shell's echo does.
 
 ```hex
 # vector: frame-end
@@ -1178,7 +1134,7 @@ Rules:
 Sets the pointer's image. The client draws it itself at the local
 pointer, so pointer motion needs no round trip.
 
-Type 0x0206, from the server.
+Type 0x0206, sent by the server.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1189,15 +1145,11 @@ Type 0x0206, from the server.
 | codec | u8 | The image's [codec](#codecs). |
 | payload | bytes | The encoded image. |
 
-Rules between fields:
-
-- A cursor of 0×0 hides the pointer. It has a zero hot spot, codec 0
-  and an empty payload.
-- A shown cursor has both `w` and `h` non-zero.
-- A shown cursor has a codec defined in v1 other than `cached` and
-  `scaled`.
-- A shown cursor's hot spot lies inside the image.
-- A `raw` cursor's payload is exactly `w × h × 4` bytes.
+A hidden pointer is a cursor of 0×0, with a zero hot spot, codec 0 and
+an empty payload. A shown cursor has a non-zero width and height, a
+codec defined in v1 other than `cached` and `scaled`, and a hot spot
+inside the image. A `raw` cursor's payload is exactly `w × h × 4`
+bytes.
 
 `occamyd` sends no cursor larger than the client's maximum texture size,
 or in no codec the client lists. The client then keeps its own pointer.
@@ -1231,7 +1183,7 @@ or in no codec the client lists. The client then keeps its own pointer.
 Reports that the remote moved the pointer, as when an application warps
 it.
 
-Type 0x0207, from the server.
+Type 0x0207, sent by the server.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1249,21 +1201,18 @@ c8 00                    # y: 200
 
 Turns the client's terminal screen into the server's.
 
-Type 0x0208, from the server. It is part of a frame.
+Type 0x0208, sent by the server as part of a [frame](#frames).
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | data | bytes | Escape sequences for an xterm-compatible terminal. |
 
-Rules:
-
-- The server keeps the terminal's screen. Once per frame, it sends what
-  changed since the screen it last sent this client. Under bulk output,
-  intermediate screens are skipped.
-- Lines that scroll off the top go as scrolled lines, so the client's
-  scrollback fills.
-- A frame's data larger than the maximum message size goes in several
-  `term-data` messages. The client feeds them to its terminal in order.
+The server keeps the terminal's screen, and once per frame it sends
+what changed since the screen it last sent this client, so under bulk
+output, intermediate screens are skipped. Lines that scroll off the top
+go as scrolled lines, so the client's scrollback fills. A frame's data
+larger than the maximum message size goes in several `term-data`
+messages, which the client feeds to its terminal in order.
 
 ```hex
 # vector: term-data
@@ -1276,22 +1225,18 @@ Rules:
 
 Replaces the client's terminal.
 
-Type 0x0209, from the server. It is part of a frame.
+Type 0x0209, sent by the server as part of a [frame](#frames).
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | data | bytes | Escape sequences for an xterm-compatible terminal. |
 
-Rules:
-
-- The client resets its terminal and feeds it the data. The data
-  reproduces the server's screen, cursor, attributes, modes and
-  alternate screen.
-- A client gets one in its first frame, and may get another in any
-  frame. `occamyd` sends one in a client's first frame after it was
-  hidden.
-- A snapshot larger than the maximum message size continues in
-  `term-data` messages of the same frame.
+The client resets its terminal and feeds it the data, which reproduces
+the server's screen, cursor, attributes, modes and alternate screen. A
+client gets one in its first frame and may get another in any frame;
+`occamyd` sends one in a client's first frame after it was hidden. A
+snapshot larger than the maximum message size continues in `term-data`
+messages of the same frame.
 
 ```hex
 # vector: term-snapshot
@@ -1305,20 +1250,17 @@ Rules:
 
 Sends the remote clipboard's new content.
 
-Type 0x020a, from the server.
+Type 0x020a, sent by the server.
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | mime | string | The MIME type. |
 | data | bytes | The content. |
 
-Rules:
-
-- A connection that sets `disable_copy` never sends it.
-- `occamyd` sends it when the remote's clipboard changes. A client that
-  joins later gets nothing until the next change.
-- `occamyd` drops a clipboard that is larger than the client's maximum
-  message size.
+`occamyd` sends it when the remote's clipboard changes, so a client
+that joins later gets nothing until the next change. It drops a
+clipboard that is larger than the client's maximum message size, and a
+connection that sets `disable_copy` never sends it.
 
 ```hex
 # vector: clipboard from the server
@@ -1335,7 +1277,7 @@ Rules:
 
 Rings the bell.
 
-Type 0x020b, from the server. It has no fields.
+Type 0x020b, sent by the server. It has no fields.
 
 ```hex
 # vector: bell
@@ -1346,7 +1288,7 @@ Type 0x020b, from the server. It has no fields.
 
 Sets the remote's desktop or window title.
 
-Type 0x020c, from the server.
+Type 0x020c, sent by the server.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1365,7 +1307,7 @@ Type 0x020c, from the server.
 Asks the owner for answers, such as for an SSH keyboard-interactive
 challenge or a password that the connection lacks.
 
-Type 0x020d, from the server.
+Type 0x020d, sent by the server.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1381,11 +1323,9 @@ Each field:
 | label | string | The question, such as `Password: `. |
 | secret | bool | True if the answer is not echoed, such as a password. |
 
-Rules:
-
-- Only the owner gets it. The owner answers with a
-  [`prompt-reply`](#prompt-reply) of the same ID.
-- An owner who reconnects gets the prompts still open.
+Only the owner gets it, and the owner answers with a
+[`prompt-reply`](#prompt-reply) of the same ID. An owner who reconnects
+gets the prompts that are still open.
 
 ```hex
 # vector: prompt
@@ -1405,7 +1345,7 @@ Rules:
 
 Reports a viewer in the session.
 
-Type 0x020e, from the server.
+Type 0x020e, sent by the server.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1413,10 +1353,8 @@ Type 0x020e, from the server.
 | role | u8 | 1 owner, 2 viewer, 3 read-only. Other values are invalid. |
 | name | string | The viewer's user name, or empty. `occamyd` sends it empty. |
 
-Rules:
-
-- The server sends it to every client when a viewer joins.
-- A client that joins gets one for each viewer already there.
+The server sends it to every client when a viewer joins, and a client
+that joins gets one for each viewer already there.
 
 ```hex
 # vector: viewer-joined
@@ -1431,16 +1369,14 @@ Rules:
 
 Reports that a viewer left.
 
-Type 0x020f, from the server.
+Type 0x020f, sent by the server.
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | viewer_id | u32 | The viewer's ID. |
 
-Rules:
-
-- When the owner leaves, the session waits a grace period for the owner
-  to return. If the owner does not, the session ends with `owner-left`.
+When the owner leaves, the session waits a grace period for the owner
+to return, and ends with `owner-left` if the owner doesn't.
 
 ```hex
 # vector: viewer-left
@@ -1452,34 +1388,31 @@ Rules:
 
 Says whether the remote's clipboard is taking text.
 
-Type 0x0210, from the server. It is ignorable, with flags 1.
+Type 0x0210, sent by the server. It is ignorable: its flags are 1.
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | answering | bool | False if the remote has not taken text sent for its clipboard, which is still waiting. True once it answers again. |
 
-Rules:
+It reports a state, and changes nothing about the text. Each time text
+has waited for the backend's bound without an answer, the server sends
+false to every client; for RDP, the bound is a minute. The text goes on
+waiting, and goes when the remote answers, so a client must not tell
+its user that the text was lost, and need not send it again. Nothing
+may even be wrong: a remote still at its logon screen looks the same as
+one whose clipboard process has gone. A client should therefore say
+that the text is waiting, not that something failed.
 
-- It reports a state, and changes nothing about the text.
-- The server sends false to every client each time text has waited for
-  the backend's bound with no answer. For RDP, the bound is a minute.
-- The text goes on waiting, and goes when the remote answers. So a
-  client must not tell its user that the text was lost, and need not
-  send it again.
-- Nothing may be wrong. A remote still at its logon screen looks the
-  same as one whose clipboard process has gone. So a client should say
-  that the text is waiting, not that something failed.
-- A client that joins while the remote has not answered gets false too,
-  for text it had no part in. A client that sent no text has nothing to
-  tell its user.
-- The server sends true once it hears from the remote's clipboard
-  again.
-- No message says that text arrived. No message means only that nothing
-  has waited too long yet.
-- Only the latest value matters. A client may keep the newest
-  undelivered one, and a false followed at once by a true may reach a
-  client as the true alone.
-- A client that skips this message loses nothing. It only goes untold.
+A client that joins while the remote hasn't answered gets false too,
+for text it had no part in, and a client that sent no text has nothing
+to tell its user. The server sends true once it hears from the remote's
+clipboard again. No message says that text arrived: no false means only
+that nothing has waited too long yet.
+
+Only the latest value matters. A client may keep only the newest value
+it hasn't delivered, so a false followed at once by a true may reach a
+client as the true alone. A client that skips this message loses
+nothing; its user only goes untold.
 
 Only the RDP backend sends it. An RDP server runs the clipboard in a
 process of its own, which starts after the user logs on and can stop
@@ -1500,23 +1433,25 @@ never sends it.
 
 ## Capabilities
 
-Capabilities are what a client offers in `hello`, and what the server
-agrees to in `welcome`. On the wire they are a list of entries:
+*Capabilities* are what a client offers in `hello`, and what the server
+agrees to in `welcome`. They let the two sides agree on codecs, limits
+and features without a new protocol version. On the wire, they are a
+list of entries:
 
 | Field | Type | Meaning |
 |-------|------|---------|
 | id | u16 | The capability's ID. ID 0 is reserved. |
 | value | bytes | Its value, encoded as the next table says. |
 
-Rules:
+Entries come in ascending order of ID, each ID at most once. A
+capability that is zero, or an empty list, isn't sent, and one that
+isn't sent takes its default. A receiver refuses entries out of order,
+and a known capability whose value is zero or of another size, so that
+each set of capabilities has exactly one encoding. It ignores entries
+whose IDs it doesn't know.
 
-- Entries come in ascending order of ID, each ID at most once.
-- A capability that is zero, or an empty list, is not sent. A
-  capability that is not sent takes its default.
-- A receiver refuses entries out of order, and a known capability whose
-  value is zero or of another size. So each set of capabilities has one
-  encoding.
-- A receiver ignores entries whose IDs it does not know.
+Each capability has a default, and a rule for the value both sides
+agree on:
 
 | ID | Name | Value | Default | Agreed value |
 |----|------|-------|---------|--------------|
@@ -1528,13 +1463,11 @@ Rules:
 | 6 | `frame_window` | u8: unacknowledged frames per viewer | 2 | The smaller of the two, an unstated one counting as the default |
 | 7 | `max_message_size` | u32: the largest message in bytes, header included, for both directions. At least 65536; a receiver refuses less. | 4194304 (4 MiB) | The smaller of the two, an unstated one counting as the default |
 
-Rules for `welcome`:
-
-- The server always states `frame_window` and `max_message_size`.
-- The agreed set drops entries with unknown IDs.
-- A graphical session with no agreed codec, or a terminal session with
-  no agreed terminal level, gets `close` with `unsupported` in place of
-  `welcome`.
+In `welcome`, the server always states `frame_window` and
+`max_message_size`, and the agreed set drops entries with unknown IDs.
+A graphical session with no agreed codec, or a terminal session with no
+agreed terminal level, gets `close` with `unsupported` in place of
+`welcome`.
 
 `occamyd` offers the codecs it sends ([Codecs](#codecs)), terminal level
 1, 1024 cache slots and a frame window of 16. It states no maximum
@@ -1557,18 +1490,19 @@ A codec ID is a u8. Codec 0 is not a codec: it appears only in a hidden
 | 8 to 0x7F | | Unassigned |
 | 0x80 to 0xFF | | Reserved |
 
-Rules:
+A server sends only agreed codecs, and a codec ID is never given to
+another encoding.
 
-- A server sends only agreed codecs.
-- A codec ID is never given to another encoding.
-- Before it decodes a `jpeg` or `webp` payload, a receiver checks the
-  size that its header claims against the message's rectangle. For the
-  image of a `scaled` tile, it checks against the rectangle scaled
-  down. It refuses a size that differs with `protocol-error`.
-- The check matters because a few bytes of header can claim a frame
-  that takes hundreds of megabytes to decode into. In Go, call
-  `DecodeConfig` before `Decode`, or use the decoder's own limit on the
-  frame's size where it has one.
+Before it decodes a `jpeg` or `webp` payload, a receiver checks the size
+that the payload's header claims against the message's rectangle, or,
+for the image of a `scaled` tile, against the rectangle scaled down. It
+refuses a size that differs with `protocol-error`.
+
+> [!IMPORTANT]
+> Check the size before you decode. A few bytes of header can claim an
+> image that takes hundreds of megabytes to decode into. In Go, call
+> `DecodeConfig` before `Decode`, or use the decoder's own limit on the
+> image's size where it has one.
 
 ### What occamyd sends
 
@@ -1660,7 +1594,7 @@ container's first byte, the form, says how the pixels follow:
 | 2 | palette | alpha | A palette of 4-byte colours, then indices |
 | 3 | raw | alpha | 4 bytes a pixel |
 
-Layout:
+The container is laid out as follows:
 
 - An opaque colour or pixel is red, green and blue, and its alpha is
   255. One with alpha is red, green, blue and straight alpha, as `raw`
@@ -1749,28 +1683,24 @@ width and height, in another codec. A tile in motion shows only until
 | codec | u8 | The image's codec: `jpeg` or `webp`, and agreed. |
 | image | bytes | The rest of the payload: an image of `⌈w / factor⌉ × ⌈h / factor⌉` pixels in that codec. |
 
-Rules:
+Each pixel of the image stands for a square of `factor × factor`
+pixels of the rectangle, from its top left; the squares of the last
+column and row may cross the rectangle's edge. The receiver draws the
+image scaled up by exactly `factor`, from the rectangle's top left, and
+draws nothing outside the rectangle. How it fills the pixels between
+the image's is its choice. `occamyd` makes each pixel of the image the
+mean of the pixels it stands for, and Occamy's clients scale up
+bilinearly, sampling the image at the centre of each pixel of the
+rectangle; the `min_psnr` of a scaled payload in the golden payloads
+holds for that.
 
-- Each pixel of the image stands for a square of `factor × factor`
-  pixels of the rectangle, from its top left. The squares of the last
-  column and row may cross the rectangle's edge.
-- The receiver draws the image scaled up by exactly `factor`, from the
-  rectangle's top left. It draws nothing outside the rectangle.
-- How it fills the pixels between the image's is its choice. `occamyd`
-  makes each pixel of the image the mean of the pixels it stands for.
-  Occamy's clients scale up bilinearly, sampling the image at the
-  centre of each pixel of the rectangle. The `min_psnr` of a scaled
-  payload in the golden payloads holds for that.
-- A receiver refuses with `protocol-error` a payload of fewer than two
-  bytes, a factor outside 2 to 4, or an image codec other than `jpeg`
-  or `webp`, or not agreed.
-- Before it decodes the image, a receiver refuses with `protocol-error`
-  a header that claims a size other than
-  `⌈w / factor⌉ × ⌈h / factor⌉`.
-- `scaled` is for tiles only. A `scaled` image of a `scaled` image is
-  invalid.
-- A client that does not list `scaled` gets its tiles in motion at
-  their full size.
+A receiver refuses with `protocol-error` a payload of fewer than two
+bytes, a factor outside 2 to 4, or an image codec other than `jpeg` or
+`webp`, or one not agreed. Before it decodes the image, it also refuses
+a header that claims a size other than `⌈w / factor⌉ × ⌈h / factor⌉`.
+`scaled` is for tiles only, so a `scaled` image of a `scaled` image is
+invalid. A client that doesn't list `scaled` gets its tiles in motion
+at their full size.
 
 ## Close codes
 
@@ -1800,31 +1730,27 @@ own, such as on its read limit, then uses the right code.
 | 4007 | `viewer-limit` | The session has as many viewers as it allows. |
 | 4008 | `too-slow` | The viewer acknowledged no frame, or took no message, for the server's viewer timeout. |
 
-Rules:
-
-- A receiver treats a code it does not know as an error described by
-  the reason.
-- A code is never given another meaning.
+A receiver treats a code it doesn't know as an error that the reason
+describes, and a code is never given another meaning.
 
 ## Versioning
 
-- The major version lives in the subprotocol's name, `occamy.v1`, and in
-  the first field of `hello`.
-- Minor versions evolve through capabilities and ignorable messages. A
-  peer sends a new message only once a capability agrees on it, or
-  marks it ignorable.
-- A flag that changes how a body reads is agreed as a capability first.
-- Type numbers, capability IDs, codec IDs and close codes are never
-  reused.
-- The golden vectors are part of the protocol. An implementation passes
-  every vector in
-  [`protocol/testdata/framing.json`](../protocol/testdata/framing.json)
-  and
-  [`protocol/testdata/messages.json`](../protocol/testdata/messages.json),
-  both ways, and fails every invalid vector with the named error.
-- A client decodes every vector in
-  [`protocol/testdata/codecs.json`](../protocol/testdata/codecs.json) of
-  the codecs it lists, and refuses every invalid one.
+The major version lives in the subprotocol's name, `occamy.v1`, and in
+the first field of `hello`. Minor versions evolve through capabilities
+and ignorable messages: a side sends a new message only once a
+capability agrees on it, or it marks the message ignorable, and a flag
+that changes how a body reads is agreed as a capability first. Type
+numbers, capability IDs, codec IDs and close codes are never reused.
+
+The golden vectors are part of the protocol. An implementation passes
+every vector in
+[`protocol/testdata/framing.json`](../protocol/testdata/framing.json)
+and
+[`protocol/testdata/messages.json`](../protocol/testdata/messages.json),
+both ways, and fails every invalid vector with the named error. A client
+decodes every vector in
+[`protocol/testdata/codecs.json`](../protocol/testdata/codecs.json) for
+the codecs it lists, and refuses every invalid one.
 
 ## Design
 
