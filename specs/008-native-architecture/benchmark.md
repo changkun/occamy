@@ -957,4 +957,6 @@ say what the harness does now.
   `guacd,v1-native`. guacd runs only in the bench stack's overlay,
   `docker/docker-compose.bench.yaml`.
 - **Recorded results.** The results under `docs/benchmarks/` keep their
-  retired series, and `bench/report.py` still renders them.
+  retired series, and `bench/report.py` still renders them. The tables
+  that `docs/benchmarks.md` showed before beta.2, measured through
+  guacd, are in that page's history.

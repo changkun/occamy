@@ -674,7 +674,7 @@ interval, and Guacamole's beside it.
 
 - **Status.** Done. Built in #183 (`853c4a2`) and measured on
   2026-11-03 from `e56b585`:
-  [docs/benchmarks.md](../../docs/benchmarks.md#step-2-what-loss-costs)
+  [docs/benchmarks.md](../../docs/benchmarks.md#what-packet-loss-costs)
   and `docs/benchmarks/realtime/2`.
 - **Built.** `docker/bench/netem` (`shape.sh` and its image); a `loss`
   study in plan files with a `loss` list, its blocks carrying the loss
@@ -745,7 +745,7 @@ interval, and Guacamole's beside it.
   measured on 2026-11-03 on step 2's image, built from `e56b585`, since
   the commits between change only the harness, with the results in #187
   (`6d3586d`):
-  [docs/benchmarks.md](../../docs/benchmarks.md#step-3a-the-congestion-control)
+  [docs/benchmarks.md](../../docs/benchmarks.md#bbr-against-cubic)
   and `docs/benchmarks/realtime/3a`. occamyd asks for BBR from #188.
 - **Built for the run** (#186; replaced in #188, Shipped below). The
   `occamy-v1-bbr` service, behind the compose profile
