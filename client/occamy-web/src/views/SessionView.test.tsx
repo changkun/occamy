@@ -315,7 +315,7 @@ describe('SessionView', () => {
     let answer: Answer = hung
     const r = await render({}, (signal) => answer(signal), 20)
     await until(() => text().includes('Not ended for everyone'))
-    expect(text()).toContain('occamyd did not answer in time. It runs on, with its viewers.')
+    expect(text()).toContain('The server didn’t respond in time. It’s still running, with everyone in it.')
     expect(text()).not.toContain('Ending the session for everyone…')
     // The next End takes no notice of the timeout, so it still waits
     // however late this looks.
@@ -329,7 +329,7 @@ describe('SessionView', () => {
     // The view opened for alice's End, after bob signed in. Its stream is
     // not open, so the session may have ended.
     const r = await render({ token: accessToken('bob', 'oidc'), owner: alice }, occamyd('alice'))
-    const message = 'You are signed in as bob, and occamyd did not end this session: it has ended already, or alice opened it. Sign in as alice to end it if it runs on.'
+    const message = 'You’re signed in as bob, and the server didn’t end this session. It has already ended, or alice opened it. If it’s still running, sign in as alice to end it.'
     expect(text()).toContain(message)
     expect(r.left).toBe(0)
     expect(button('Try again')).toBeUndefined()
@@ -361,7 +361,7 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
     expect(r.signIns[0][1]).toMatchObject({ then: { kind: 'end' }, here: true, owner: alice })
     // bob signs in over the view: occamyd refuses him, and the stream runs on.
     await r.rerender({ token: accessToken('bob'), action: end(1) })
-    const message = 'You are signed in as bob, but alice opened this session, so it was not ended for everyone. Sign in as alice to end it.'
+    const message = 'You’re signed in as bob, but alice opened this session, so it wasn’t ended for everyone. Sign in as alice to end it.'
     expect(text()).toContain(message)
     expect(Welcomed.last?.closed).toBe(false)
     act(() => button('Sign in')?.click())
@@ -376,12 +376,12 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
   it('tries an End that resumed again as occamyd decides on, as it was', async () => {
     let answer: Answer = failed
     const r = await render({ token: accessToken('alice'), owner: null }, (signal, init) => answer(signal, init))
-    expect(text()).toContain('It runs on, with its viewers.')
+    expect(text()).toContain('It’s still running, with everyone in it.')
     // A 404 now says the session is not alice's, rather than ended.
     answer = notFound
     act(() => button('Try again')?.click())
     await settle()
-    expect(text()).toContain('occamyd has no session of yours to end, signed in as alice')
+    expect(text()).toContain('You’re signed in as alice, and the server has no session of yours to end.')
     expect(r.left).toBe(0)
     expect(Welcomed.last?.closed).toBe(false)
   })
@@ -441,7 +441,7 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
   it.each(sessionEnds)('replaces what End said with close %i, once the session ended', async (code) => {
     const r = await render({ token: accessToken('alice'), owner: null, action: null }, notFound)
     await r.rerender({ token: accessToken('bob'), action: end(1) })
-    expect(text()).toContain('You are signed in as bob, but alice opened this session, so it was not ended for everyone.')
+    expect(text()).toContain('You’re signed in as bob, but alice opened this session, so it wasn’t ended for everyone.')
     act(() => Welcomed.last?.end(code))
     await settle()
     expect(text()).not.toContain('Not ended for everyone')
@@ -455,7 +455,7 @@ describe('SessionView of a stream welcomed as the owner’s', () => {
     })
     await r.rerender({ token: accessToken('bob'), action: end(1) })
     // With no stream open, the session may have ended too.
-    await until(() => text().includes('You are signed in as bob, and occamyd did not end this session: it has ended already, or alice opened it.'))
+    await until(() => text().includes('You’re signed in as bob, and the server didn’t end this session. It has already ended, or alice opened it.'))
     expect(r.left).toBe(0)
   })
 
@@ -590,7 +590,7 @@ describe('The clipboard panel of a stream welcomed as the owner’s', () => {
 
   it('says text waits for the remote, until the remote answers', async () => {
     const notice = (): Element | null => container.querySelector('.notice[role=alert]')
-    const waiting = "The remote hasn't taken the clipboard yet. Your text will go when it does."
+    const waiting = 'The remote computer hasn’t accepted your clipboard text yet. It will be sent when the remote is ready.'
     await render({ token: accessToken('demo'), action: null }, ended)
     act(() => remote('first'))
     await settle()
@@ -649,7 +649,7 @@ describe('The clipboard panel of a stream welcomed as the owner’s', () => {
     act(() => type('more than eight'))
     act(() => button('Send')?.click())
     expect(s.clipboards).toEqual([])
-    expect(status()).toBe('Not sent: the text is too large for one message to occamyd. Send less of it.')
+    expect(status()).toBe('The text wasn’t sent because it’s too large. Send a shorter part of it.')
     expect(box()?.value).toBe('more than eight')
     expect(text()).toContain(edited)
 
@@ -725,7 +725,7 @@ describe('The clipboard panel of a terminal session', () => {
 
   it('does not point a role that cannot type to paste', async () => {
     await opened(Role.ReadOnly)
-    expect(text()).toContain('A terminal session has no remote clipboard, and your role cannot type into it.')
+    expect(text()).toContain('A terminal session has no remote clipboard, and your role can’t type into it.')
     expect(text()).not.toContain('paste')
   })
 

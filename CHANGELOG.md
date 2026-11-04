@@ -40,6 +40,16 @@ Releases before 0.5.0 were tagged without the `v` prefix.
 - Each line a session logs, such as `session ended`, carries the
   session's ID as `session=`, as the line that opened it does
   ([docs/debugging.md](docs/debugging.md#the-log)).
+- The web client and Occamy for macOS say what happened and what you
+  can do in complete sentences, such as when a session ends, a sign-in
+  fails or no connection is open to you, and call `occamyd` "the
+  server". The Mac app shows its own sentence for a wrong password or
+  an expired sign-in instead of the API's message.
+- `occamyd -h` says whom `occamyd` serves. A configuration file that
+  can't be read stops it with `cannot read the configuration file`.
+  When a signal stops it, it logs `received terminated: shutting down;
+  a second signal stops occamyd at once` first and `occamyd has
+  stopped` last.
 
 ## [1.0.0-beta.2] - 2026-11-04
 

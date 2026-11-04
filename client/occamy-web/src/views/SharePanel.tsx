@@ -53,7 +53,7 @@ export function SharePanel({ api, token, sessionId, request, onClose, onSignIn }
     try {
       const share = await api.share(token, sessionId, r, expiresIn)
       setLink(shareLink(pageURL(location), sessionId, share.token))
-      setStatus(`Anyone with this link can join ${share.role === 'viewer' ? 'with control' : 'view only'} until it expires or the session ends.`)
+      setStatus(`Anyone with this link can ${share.role === 'viewer' ? 'join and control the session' : 'watch the session'} until the link expires or the session ends.`)
     } catch (err) {
       if (err instanceof ApiError && err.signedOut) {
         // The panel stays, and the share is created once the owner has
@@ -89,7 +89,7 @@ export function SharePanel({ api, token, sessionId, request, onClose, onSignIn }
       await copyText(link)
       setStatus('Copied.')
     } catch {
-      setStatus('The browser did not let the page write the clipboard. Select the link and copy it instead.')
+      setStatus('Your browser didn’t let the page copy to the clipboard. Select the link and copy it yourself.')
     }
   }
 

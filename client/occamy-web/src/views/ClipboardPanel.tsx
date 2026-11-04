@@ -53,7 +53,7 @@ export function ClipboardPanel({ controller, remote, draft: text, waiting, can, 
     try {
       edit(await pasteLocalClipboard())
     } catch {
-      say('The browser did not let the page read the clipboard. Paste into the box instead.')
+      say('Your browser didn’t let the page read the clipboard. Paste into the box yourself instead.')
     }
   }
   const copy = async (): Promise<void> => {
@@ -61,7 +61,7 @@ export function ClipboardPanel({ controller, remote, draft: text, waiting, can, 
       await copyText(text)
       say('Copied.')
     } catch {
-      say('The browser did not let the page write the clipboard. Select the text and copy it instead.')
+      say('Your browser didn’t let the page copy to the clipboard. Select the text and copy it yourself.')
     }
   }
 
@@ -69,7 +69,9 @@ export function ClipboardPanel({ controller, remote, draft: text, waiting, can, 
     <form className="panel" aria-labelledby={`${id}-title`} onSubmit={send} onKeyDown={(e) => e.key === 'Escape' && onClose()}>
       <h2 id={`${id}-title`}>Clipboard</h2>
       <p className="muted">
-        {can.clipboard ? 'The remote clipboard. Edit it and send, or copy it.' : 'The remote clipboard, to copy. Your role cannot change it.'}
+        {can.clipboard
+          ? 'This is the remote computer’s clipboard. Edit the text and send it, or copy it.'
+          : 'This is the remote computer’s clipboard. You can copy its text, but your role can’t change it.'}
       </p>
       <textarea
         aria-label="Clipboard text"
@@ -129,8 +131,8 @@ export function TerminalClipboardPanel({ can, onClose }: TerminalClipboardPanelP
       <h2 id={`${id}-title`}>Clipboard</h2>
       <p className="muted">
         {can.input
-          ? 'A terminal session has no remote clipboard. To put text into it, click the terminal and use your browser’s paste: ⌘V, or Ctrl+Shift+V.'
-          : 'A terminal session has no remote clipboard, and your role cannot type into it.'}
+          ? 'A terminal session has no remote clipboard. To paste text into the terminal, click it and use your browser’s paste: ⌘V, or Ctrl+Shift+V.'
+          : 'A terminal session has no remote clipboard, and your role can’t type into it.'}
       </p>
       <div className="actions">
         <button type="button" autoFocus onClick={onClose}>
@@ -147,10 +149,10 @@ function sent(r: ClipboardSend): string {
     case 'sent':
       return 'Sent to the remote clipboard.'
     case 'not-open':
-      return 'The remote clipboard is not open to you.'
+      return 'The remote clipboard isn’t available to you.'
     case 'failed':
       return r.error instanceof ProtocolError && r.error.kind === 'too-large'
-        ? 'Not sent: the text is too large for one message to occamyd. Send less of it.'
-        : `Not sent: ${clip(r.error.message, MAX_LABEL)}`
+        ? 'The text wasn’t sent because it’s too large. Send a shorter part of it.'
+        : `The text wasn’t sent: ${clip(r.error.message, MAX_LABEL)}`
   }
 }

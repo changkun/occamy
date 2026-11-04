@@ -103,7 +103,7 @@ export function Connections({ api, token, onOpen, onSignOut }: ConnectionsProps)
         )}
         {list === null && error === '' && <p className="muted">Loading…</p>}
         {list !== null && list.length === 0 && (
-          <p className="muted">No connection is open to you. occamyd lists connections under connections in its configuration, each with the users and groups it allows.</p>
+          <p className="muted">No connections are available to you. Ask the server’s administrator to give you access to one.</p>
         )}
         {list !== null && list.length > 0 && (
           <ul className="connections">

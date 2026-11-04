@@ -49,7 +49,7 @@ export function PromptDialog({ prompt, onAnswer, onEnd }: PromptDialogProps): Re
       onCancel={(e) => e.preventDefault()}
     >
       <form onSubmit={submit}>
-        <h2 id={`${id}-title`}>{title !== '' ? title : 'The remote asks'}</h2>
+        <h2 id={`${id}-title`}>{title !== '' ? title : 'The remote computer needs more information'}</h2>
         {instruction !== '' && (
           <p id={`${id}-instruction`} className="instruction">
             {instruction}

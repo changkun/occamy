@@ -96,7 +96,7 @@ export interface SessionState {
 export type ClipboardSend = { kind: 'sent' } | { kind: 'not-open' } | { kind: 'failed'; error: Error }
 
 /** What the page says while clipboardWaiting holds. */
-export const CLIPBOARD_WAITING = "The remote hasn't taken the clipboard yet. Your text will go when it does."
+export const CLIPBOARD_WAITING = 'The remote computer hasn’t accepted your clipboard text yet. It will be sent when the remote is ready.'
 
 /** What a stream asks the remote for in its hello. */
 export interface HelloSize {
