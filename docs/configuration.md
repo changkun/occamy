@@ -57,7 +57,7 @@ with no users or connections, for you to fill in.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/configuration-overview-dark.svg">
-  <img alt="A request's path from left to right. A user, in the web client or Occamy for macOS, reaches occamyd, which takes the request with listen, tls, origins and web_client; signs the user in with auth's users, oidc or trusted_issuers and the signing key; and opens a connection by its target, allow list and credentials, to the remote, an SSH, VNC or RDP server or a Kubernetes pod, which it checks with host_keys or tls. Below, the connection's credentials name exactly one source: a file on disk, such as password_file, private_key_file or token_file, which occamyd reads as each session starts; an environment variable, such as password_env or token_env, which is fixed when occamyd starts; or the session's owner, with prompt: true, who is asked as each session starts and whose answers are never kept. At the bottom, a timeline: when occamyd starts, it reads occamy.yaml, tls, the signing key and the trusted issuers' keys. Each session reads its secret as it starts. An edit to occamy.yaml changes nothing until a restart, which reads the edited file and ends every session." src="figures/configuration-overview.svg">
+  <img alt="A request's path from left to right. A user, in the web client or Occamy for macOS, reaches occamyd, which takes the request with listen, tls, origins and web_client; signs the user in with auth's users, oidc or trusted_issuers and the signing key; and opens a connection by its target, allow list and credentials, to the remote, an SSH, VNC or RDP server or a Kubernetes pod, which it checks with host_keys or tls. Below, the connection's credentials name exactly one source: a file on disk, such as password_file, private_key_file or token_file, which occamyd reads as each session starts; an environment variable, such as password_env or token_env, which is fixed when occamyd starts; or the session's owner, with prompt: true, who is asked as each session starts and whose answers are never kept. At the bottom, a timeline: when occamyd starts, it reads occamy.yaml and the signing key, and it reads tls and the trusted issuers' keys then and again whenever they change. Each session reads its secret as it starts. An edit to occamy.yaml changes nothing until a restart, which reads the edited file and ends every session." src="figures/configuration-overview.svg">
 </picture>
 
 ### Where secrets come from
@@ -78,12 +78,17 @@ points to is read when it's used:
 
 | What | When `occamyd` reads it |
 |------|-------------------------|
-| The file itself, `tls.cert` and `tls.key`, and the signing key | When it starts |
-| A trusted issuer's `public_key_file` | When it starts. From then on, tokens signed with its old key are refused |
+| The file itself and the signing key | When it starts |
+| `tls.cert` and `tls.key` | When it starts, and again at the first connection after either changes. Connections already open keep the certificate they began with |
+| A trusted issuer's `public_key_file` | When it starts, and again at the first token after it changes. From then on, tokens signed with its old key are refused |
 | Environment variables, such as `password_env`, `token_env` and `auth.oidc.client_secret_env` | When it starts, since a process's environment doesn't change once it runs |
 | A connection's files: `password_file`, `private_key_file`, `token_file`, `client_cert_file`, `client_key_file` and `tls.ca_file` | As each session on the connection starts. Running sessions continue with what they read |
 | `auth.oidc.client_secret_file` | At each OIDC sign-in |
 | The web client's files, in `web_client` | At each request, so a new build is served at once |
+
+If a changed `tls.cert`, `tls.key` or `public_key_file` doesn't load,
+`occamyd` keeps what it had and warns
+([Warnings during a session](debugging.md#warnings-during-a-session)).
 
 ### How occamyd checks the file
 

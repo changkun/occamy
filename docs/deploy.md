@@ -25,14 +25,15 @@ database and no other service.
 | Hop | What it carries | What it needs |
 |-----|-----------------|---------------|
 | Users to the proxy | HTTPS on port 443: the web client, the API, and each session's WebSocket | A certificate that your users' devices trust, and nothing on the way that blocks WebSocket upgrades |
-| The proxy to `occamyd` | HTTP/1.1, to port 5636 unless `listen` says otherwise | The `Upgrade` and `Connection` headers passed on, the `Host` header passed through, timeouts longer than 30 minutes, and Occamy at the root of its host name |
+| The proxy to `occamyd` | HTTP/1.1, to port 5636 unless `listen` says otherwise | The `Upgrade` and `Connection` headers passed on, the `Host` header passed through, an idle timeout longer than 25 seconds, and Occamy at the root of its host name |
 | `occamyd` to the remotes | VNC on port 5900, RDP on 3389, SSH on 22, and HTTPS to Kubernetes API servers on 443 or 6443 | Outgoing connections from `occamyd`'s host, and each remote's certificate or host key, pinned or signed by a CA that you name |
 | `occamyd` to your identity provider | HTTPS, when users sign in through OIDC | Outgoing connections to the provider |
 
-A stream carries nothing while the remote's screen is still and nobody
-types, so a proxy that closes a quiet connection before a session ends
-for lack of input disconnects its viewers
-([The session drops after a quiet minute](debugging.md#the-session-drops-after-a-quiet-minute)).
+A stream that has nothing else to send carries a `ping` every 25
+seconds, so a still screen keeps its connection through a proxy that
+closes quiet connections, such as nginx after a minute. A proxy that
+limits how long a connection lasts still ends sessions early
+([Sessions drop after the same time](debugging.md#sessions-drop-after-the-same-time)).
 
 ## Get Occamy
 
@@ -221,9 +222,8 @@ occamy.example.com {
 
 ### Behind nginx
 
-nginx needs to be told to speak HTTP/1.1 to `occamyd`, to pass on the
-upgrade, and to wait longer than its default of a minute on a quiet
-connection:
+nginx needs to be told to speak HTTP/1.1 to `occamyd` and to pass on
+the upgrade:
 
 ```nginx
 map $http_upgrade $connection_upgrade {
@@ -246,8 +246,6 @@ server {
         proxy_set_header Host $http_host;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection $connection_upgrade;
-        proxy_read_timeout 1h;
-        proxy_send_timeout 1h;
     }
 }
 ```
@@ -264,8 +262,11 @@ tls:
 ```
 
 Mount the directory with `-v /etc/occamy/tls:/etc/occamy/tls:ro`, and
-make both files readable by uid 65532. `occamyd` reads the files when
-it starts, so restart it after you renew the certificate.
+make both files readable by uid 65532. `occamyd` reads the files again
+at the first connection after either changes, so a renewed certificate
+takes effect without a restart, which would end every session. If the
+new files don't load, such as while only one of them has changed,
+`occamyd` keeps the certificate it has and warns in the log.
 
 ## Connect Windows hosts
 

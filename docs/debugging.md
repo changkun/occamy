@@ -102,31 +102,34 @@ Find the page's message in the first column, then the line in the log:
 | **Could not connect**: “The server doesn't trust the remote computer's certificate.” | `the server's certificate "…" (SHA-256 3F:A1:…) is not trusted` | The remote's certificate doesn't chain to a CA that `occamyd` trusts. Add the logged fingerprint to the connection's `tls.pins`, or give the issuing CA in `tls.ca_file` ([Check a remote's certificate](configuration.md#check-a-remotes-certificate)) |
 | **Could not connect**: “The server doesn't trust the remote computer's host key.” | `host key ssh-ed25519 SHA256:… is not pinned` | The SSH server's host key isn't in the connection's `host_keys`. Check that it's the key you expect, then add it |
 | **Could not connect**: “The remote computer refused the user name or password.” | `vnc: authentication failed` or `rdp: authentication failed` | Check the connection's `credentials`, and the file or variable that holds the password |
-| **Remote unreachable** | `ssh: … unable to authenticate` | The SSH server refused the credentials. Check the connection's `credentials`, or its private key |
+| **Could not connect**: “The remote computer refused the user name, password or key.” | `ssh: … authentication failed: … unable to authenticate` | The SSH server refused the credentials. Check the connection's `credentials`, or its private key |
 | **Could not connect**: “The Kubernetes API server refused the credentials.” | `kubernetes: the API server refused the stream with 401` | The connection's token is wrong or has expired |
 | **Could not connect**: “The Kubernetes API server refused to open a shell in the pod.” | `kubernetes: the API server refused the stream with 403` | The token's role doesn't allow `create` on `pods/exec` in the pod's namespace |
-| **Remote unreachable** | `set ard: true on connection "…" to allow it` | A Mac offers only Apple Remote Desktop's sign-in. Read [the risk](configuration.md#apple-remote-desktop-ard) before you set `ard: true` |
-| **Remote unreachable** | `allow TLS with security: tls on connection "…"` | The RDP server speaks no NLA, as xrdp doesn't. Set `security: tls`, and pin its certificate ([xrdp](configuration.md#xrdp)) |
+| **Could not connect**: “The remote computer offers no sign-in method that the server accepts.” | `set ard: true on connection "…" to allow it` | A Mac offers only Apple Remote Desktop's sign-in. Read [the risk](configuration.md#apple-remote-desktop-ard) before you set `ard: true` |
+| **Could not connect**: “The remote computer offers no sign-in method that the server accepts.” | `allow TLS with security: tls on connection "…"` | The RDP server speaks no NLA, as xrdp doesn't. Set `security: tls`, and pin its certificate ([xrdp](configuration.md#xrdp)) |
 | **Access refused** | `user "…" opening connection "…": too many sessions open` | The user already owns `limits.sessions_per_user` sessions |
 | **Access refused** | `user "…" opening connection "…": occamyd runs as many sessions as it takes` | `occamyd` runs `limits.sessions` sessions ([Limits](configuration.md#limits-limits)) |
 | **Access refused** | `stream refused from …: origin not allowed` | The page that opened the stream isn't on `occamyd`'s origin, as when a proxy rewrites the `Host` header. List the page's origin in [`origins`](configuration.md#server) |
 | **Session ended**, with `the session could not be opened` under **Details** | `user "…" opening connection "…":` and the cause | `occamyd` failed on its own, such as when it can't read a password file |
 | **Connection lost**, saying that `occamyd` can't be reached | `"GET" "/api/v1/connections/…/stream" 426` | The proxy doesn't pass the WebSocket upgrade on. If no such line appears at all, the proxy answered by itself ([Serve it over TLS](deploy.md#serve-it-over-tls)) |
 
-## The session drops after a quiet minute
+## Sessions drop after the same time
 
-If users see **Connection lost** whenever the screen stays still for a
-while, a proxy between them and `occamyd` closes quiet connections,
-since a stream carries nothing while the screen is still and nobody
-types. The streams' request lines, which appear as each stream ends,
-then all show about the same duration, such as nginx's default of a
-minute:
+A stream that has nothing else to send carries a `ping` every 25
+seconds, so a proxy that closes quiet connections after a minute, as
+nginx does by default, keeps a still session. If users still see
+**Connection lost** after about the same time in every session, a proxy
+between them and `occamyd` limits how long a connection lasts, or
+closes connections that are quiet for less than 25 seconds. The
+streams' request lines, which appear as each stream ends, then all show
+that duration:
 
 ```
-2026/11/04 10:16:41 middleware.go:41: occamy: "GET" "/api/v1/connections/desktop/stream" 101 1m0.004s 127.0.0.1:41818
+2026/11/04 10:16:41 middleware.go:41: occamy: "GET" "/api/v1/connections/desktop/stream" 101 10m0.004s 127.0.0.1:41818
 ```
 
-Raise the proxy's timeouts above 30 minutes
+Raise the proxy's limit above 30 minutes, the time after which a
+session without input ends anyway
 ([What each hop needs](deploy.md#what-each-hop-needs)). **Join again**
 returns the owner to the session within a minute; after that, the
 session ends with `reason="owner left"`.
@@ -323,6 +326,8 @@ open 5 seconds after that.
 | `WARN rdp: the server draws with GFX that the client does not decode yet, …` | Parts of the screen may stay missing or stale, as on a Windows host. Set `disable_gfx: true` on the connection |
 | `WARN rdp: the server's clipboard has not taken the owner's text, …` | The RDP server's clipboard doesn't answer. The text waits until it does |
 | `WARN vnc: the server prohibits resizing the screen; …` | The VNC server keeps its own screen size |
+| `WARN tls: the certificate changed but doesn't load; keeping the one before` | `tls.cert` or `tls.key` changed, and the pair doesn't load, as while a renewal has replaced one file and not yet the other. `occamyd` serves the certificate it had, and tries again when either file changes. `INFO tls: the certificate reloaded` follows once the pair loads |
+| `WARN auth.trusted_issuers: the key of "…" changed but doesn't load; keeping the one before` | The issuer's `public_key_file` changed, and doesn't hold an Ed25519 public key in PKIX PEM. Tokens are checked with the key from before |
 
 ## The health check
 
