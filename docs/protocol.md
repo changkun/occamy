@@ -1584,7 +1584,7 @@ width and height, in another codec. A tile in motion shows only until
 
 | Field | Type | Meaning |
 |-------|------|---------|
-| factor | u8 | How many times smaller the image is each way: 2 to 4. |
+| factor | u8 | What the rectangle's width and height are divided by to give the image's: 2 to 4. |
 | codec | u8 | The image's codec: `jpeg` or `webp`, and agreed. |
 | image | bytes | The rest of the payload: an image of `⌈w / factor⌉ × ⌈h / factor⌉` pixels in that codec. |
 

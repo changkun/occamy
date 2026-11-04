@@ -33,8 +33,8 @@ def result(series, scenario, protocol, net, run, load=1.0, **fields):
 
 
 def synthetic(runs=6, ratio=20.0, load=None):
-    """Returns results where v1-native is ratio times better than guacd on
-    T1's latency and G6's bytes, and the same on T2's completion."""
+    """Returns results where guacd's T1 latency and G6 bytes are ratio
+    times v1-native's, and T2's completion is the same for both."""
     rng = np.random.default_rng(1)
     results = []
     for run in range(runs):
@@ -62,7 +62,7 @@ def synthetic_window(runs=6, guacd=False):
     N0, and on G5 over VNC at N2 v1-native's keys show twice as fast, it
     shows 27 of the scene's 30 frames a second where v1-native-w2 shows
     18, and its frames are 40 ms apart at p95 where v1-native-w2's are 90.
-    With guacd, guacd is twenty times slower than v1-native on both."""
+    With guacd, guacd's values are twenty times v1-native's on both."""
     rng = np.random.default_rng(2)
     series = [("v1-native-w2", 2.0, 18, 90.0), ("v1-native", 1.0, 27, 40.0)]
     if guacd:

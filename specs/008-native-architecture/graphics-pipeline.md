@@ -247,14 +247,14 @@ Settled on 2026-10-30. Items 1 and 2 were the owner's calls.
    [docs/benchmarks/codecs.md](../../docs/benchmarks/codecs.md).)
 7. **Lossless is palette or raw pixels with deflate** (option A), with
    `compress/flate` at level 1, as codec 2 (`deflate`). On the tiles the
-   pipeline sends lossless it is 2.1 to 2.5 times smaller than PNG on
+   pipeline sends lossless it is 40 to 48 % of PNG's size on
    the desktop, the bitmap terminal and the dragged window, and 5 to 10
    % smaller on antialiased text, at two fifths to all of PNG's encode
    time, with 12 bytes for a solid tile against 88. Level 6 saves 3 to 6
-   % at 1.3 times the time. Lossless WebP is 27 to 35 % smaller on
-   antialiased text but 9 to 21 times slower, so it is left for
-   refinement, after its own measurement; QOI is 1.4 to 3.9 times
-   larger.
+   % for 30 % more time. Lossless WebP is 27 to 35 % smaller on
+   antialiased text but takes 38 to 95 ms a frame where A takes about 4,
+   so it is left for refinement, after its own measurement; QOI's output
+   is 1.4 to 3.9 times the size of A's.
 8. **Tiles are 64 pixels, and lossy tiles are merged into rectangles.**
    At 64 a key costs 0.1 to 1.7 KiB against 0.2 to 2.9 at 128, a
    scrolled line after a copy 4.6 KiB against 8.7 (G3's target is 7.1),
@@ -380,8 +380,8 @@ tiles of 17 to 256 colours.
   eight times guacd's baseline, because its plasma draws from 256
   colours.
 - A JPEG's tables cost about 650 bytes a tile, so lossy tiles are
-  merged into rectangles. Full frames still cost 1.5 to 2.2 times more
-  at 64 than at 128 on most screen content, from the per-tile palette
+  merged into rectangles. Full frames still cost 1.5 to 2.2 times as much
+  at 64 as at 128 on most screen content, from the per-tile palette
   and deflate context; the first version of these notes put that on the
   lossy headers, which review corrected.
 - Lossless WebP from `gen2brain/vpx` at method 0 is unusable on

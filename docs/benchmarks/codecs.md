@@ -21,11 +21,11 @@ gives the rules in full.
 
 | Choice | Against | What decided it |
 |---|---|---|
-| Palette with deflate, at level 1 | PNG, QOI, lossless WebP | 2.1 to 2.5 times smaller than PNG on the desktop, a terminal's bitmap font and a dragged window, in at most PNG's encode time |
+| Palette with deflate, at level 1 | PNG, QOI, lossless WebP | 40 to 48 % of PNG's size on the desktop, a terminal's bitmap font and a dragged window, in no more than PNG's encode time |
 | Tiles of 64 pixels | 128 pixels | A key costs 0.1 to 1.7 KiB instead of 0.2 to 2.9, and a scrolled line 4.6 KiB instead of 8.7 |
 | RGBA | BGRX | Every Go encoder and the browser take RGBA, and x11vnc sends it when asked |
 | WebP for photographs | JPEG | A third to a half of JPEG's bytes at the same quality, for about twice `image/jpeg`'s encode time |
-| WebP for 17 to 256 colours in motion | Lossless | 15 times smaller on full-screen motion, at an SSIM of 0.989 |
+| WebP for 17 to 256 colours in motion | Lossless | A fifteenth of lossless's size on full-screen motion, at an SSIM of 0.989 |
 | Lossy tiles side by side as one image | One image a tile | A JPEG tile carries about 650 bytes of headers, and a WebP tile 53 |
 
 Two findings changed the design that the measurement set out to check:
@@ -140,9 +140,10 @@ lossless, at 64 pixels: KiB a frame · encode ms a frame.
 | webpll-dt4 | 18.8 · 31.5 | 21.5 · 27.2 | 75.0 · 38.4 | 89.7 · 40.2 | 15.4 · 25.7 | 59.2 · 25.3 | 288.0 · 70.1 |
 | webpll-vpx4 | 18.6 · 53.4 | 21.1 · 45.2 | 68.2 · 79.8 | 82.0 · 94.7 | 15.2 · 43.7 | 57.4 · 39.7 | 252.9 · 119.4 |
 
-- **A beats PNG** on screen content: 2.5 times smaller on the desktop,
-  2.1 on the bitmap terminal, 2.5 on the drag's wallpaper, 1.3 on the
-  scroll's bitmap text, 1.1 and 1.05 on antialiased text. Its fixed cost
+- **A is smaller than PNG on screen content.** It needs 40 % of PNG's
+  bytes on the desktop and on the drag's wallpaper, 48 % on the bitmap
+  terminal, 77 % on the scroll's bitmap text, and 91 % and 95 % on
+  antialiased text. Its fixed cost
   is 12 bytes a solid tile against 88, and it encodes in two fifths of
   PNG's time on simple tiles and about the same on text. Go decodes A in
   a quarter to two thirds of PNG's time on tiles of up to 16 colours and
@@ -154,20 +155,21 @@ lossless, at 64 pixels: KiB a frame · encode ms a frame.
   go lossy while they move and are sent lossless only once still, as
   refinement, and 3 % there is not worth a second lossless codec. Above 256 colours PNG is 30 % smaller (13.6 bits a pixel
   against 19.3), but the pipeline does not send those tiles lossless.
-- **Level 1 is enough.** Level 6 saves 3 to 6 % on screen content at 1.3
-  times the encode time; only the plasma gains 18 %, and under motion it
+- **Level 1 is enough.** Level 6 saves 3 to 6 % on screen content for
+  30 % more encode time; only the plasma gains 18 %, and under motion it
   goes lossy anyway (below). `klauspost/compress/flate` writes the same
   bytes at level 1 and encodes text a fifth faster, which is not worth a dependency. zstd is larger at
   level 1 and at most 3 % smaller at level 3, and browsers would need a
   decoder for it.
 - **Lossless WebP** is the smallest on antialiased text, 27 to 35 % below
-  A, but at 38 to 95 ms a frame there against 4, 9 to 21 times slower:
-  too slow for interactive updates on one core. It remains a candidate
+  A, but it takes 38 to 95 ms a frame there, where A takes about 4 ms.
+  That is too slow for interactive updates on one core. It remains a candidate
   for refining still text, where time matters less; that needs a
   measurement of its own. Method 0 of `gen2brain/vpx` is unusable on
   gradients: 168 KiB for the desktop against 19 at method 4.
-- **QOI** is the fastest and 1.4 to 3.9 times larger, 3.9 times on the
-  scrolling text, and browsers need a decoder in JavaScript.
+- **QOI** is the fastest, but its output is 1.4 to 3.9 times the size of
+  A's, the most on the scrolling text, and browsers would need a decoder
+  written in JavaScript.
 
 ## 2. The tile size
 
@@ -314,7 +316,8 @@ SSIM and encode ms a frame.
 So lossy tiles are WebP from `gen2brain/vpx/webp` at method 0, and a
 viewer that lists JPEG but not WebP gets JPEG from `jpegn`. What would
 flip it: CPU becoming the limit before bandwidth on the server (JPEG
-from `jpegn` is 6.5 to 7 times cheaper at equal SSIM), or browsers' WebP
+from `jpegn` takes about a seventh of WebP's encode time at the same
+SSIM), or browsers' WebP
 decoding proving slower than JPEG on low-end clients, which this
 measurement does not cover.
 
@@ -332,9 +335,9 @@ pixel and SSIM.
 | scroll, 2 colours | 0.60 · 1 | 2.76 · 0.992 | 3.32 · 0.997 | 5.17 · 0.976 |
 | terminal, 2 colours | 0.23 · 1 | 1.98 · 0.994 | 2.31 · 0.997 | 4.02 · 0.973 |
 
-Lossy is 15 times smaller than lossless on the plasma, a fifth to two
-fifths smaller on antialiased text at a visible loss, and 5 to 10 times
-larger on two-colour text. Hence the rule `occamyd` follows: while a tile
+On the plasma, lossy output is a fifteenth of the size of lossless. On
+antialiased text it is a fifth to two fifths smaller, at a visible loss,
+and on two-colour text it is 5 to 10 times the size of lossless. Hence the rule `occamyd` follows: while a tile
 moves, 17 to 256 colours go lossy like photographs, and refinement makes
 them exact once still. Up to 16 colours are always lossless.
 

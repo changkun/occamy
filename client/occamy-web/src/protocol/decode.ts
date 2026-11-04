@@ -58,7 +58,7 @@ export type DecodeImage = (
   scaled?: ScaledTo,
 ) => Promise<Pixels>
 
-/** ScaledTo is the size of a scaled tile, whose image is its factor times smaller, rounded up. */
+/** ScaledTo is the size of a scaled tile, whose image's width and height are the tile's divided by its factor, rounded up. */
 export interface ScaledTo {
   factor: number
   width: number

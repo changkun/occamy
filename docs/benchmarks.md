@@ -16,44 +16,47 @@ image. [How it is measured](#what-is-measured) follows the results.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/essential/factors-guacamole-to-occamy-dark.svg">
-  <img alt="How many times better Occamy is than Guacamole on each scenario's primary metric, with 95% intervals, with no delay and at 50 ms and 20 Mbit/s" src="benchmarks/essential/factors-guacamole-to-occamy.svg">
+  <img alt="Occamy's improvement over Guacamole on each scenario's primary metric, with 95% intervals, with no added delay and at 50 ms and 20 Mbit/s" src="benchmarks/essential/factors-guacamole-to-occamy.svg">
 </picture>
 
-Each dot is how many times better Occamy is on one scenario's primary
-metric, and its line is the 95% interval. Right of 1x, Occamy is better.
-14 of the 16 differences are significant after Holm's correction. The
-two that are not are typing over SSH, which is as fast with either.
+Each dot shows Occamy's *improvement* over Guacamole on one scenario's
+primary metric: Guacamole's latency, time, or data divided by Occamy's.
+An improvement of 3× means that Occamy needs a third of what Guacamole
+needs. The line through each dot is the 95% interval, and anything to
+the right of 1× is better than Guacamole. Fourteen of the 16
+differences are significant after Holm's correction. The two that are
+not are typing over SSH, where both are equally fast.
 
 **A key's latency, 95th percentile, in ms**
 
-| Scenario | Network | Guacamole | Occamy | Occamy better by | p (Holm) |
+| Scenario | Network | Guacamole | Occamy | Improvement | p (Holm) |
 |---|---|---:|---:|---:|---:|
-| Typing, SSH | No delay | 2.48 [2.20, 5.39] | 1.73 [1.41, 2.63] | 1.49x [1.18, 2.21] | 0.0519 |
-| Typing, SSH | 50 ms, 20 Mbit/s | 55.4 [54.3, 55.8] | 54.5 [53.4, 55.1] | 1.02x [0.999, 1.03] | 0.0649 |
-| Key press, VNC | No delay | 16.4 [15.7, 17.0] | 4.64 [4.28, 5.31] | 3.49x [3.21, 3.73] | 0.0346 |
-| Key press, VNC | 50 ms, 20 Mbit/s | 69.4 [67.5, 73.3] | 57.5 [56.4, 59.0] | 1.21x [1.18, 1.24] | 0.0346 |
-| Key press, RDP | No delay | 20.6 [19.3, 22.4] | 8.10 [6.92, 12.3] | 2.55x [1.82, 2.98] | 0.0346 |
-| Key press, RDP | 50 ms, 20 Mbit/s | 71.4 [70.2, 72.6] | 60.0 [59.3, 60.7] | 1.19x [1.18, 1.21] | 0.0346 |
-| Key during motion, VNC | No delay | 155 [132, 165] | 49.0 [39.6, 54.3] | 3.13x [2.71, 3.87] | 0.0346 |
-| Key during motion, VNC | 50 ms, 20 Mbit/s | 214 [182, 229] | 93.2 [91.1, 113] | 2.19x [1.97, 2.47] | 0.0346 |
-| Key during motion, RDP | No delay | 150 [135, 191] | 66.8 [57.9, 92.3] | 2.27x [1.83, 2.76] | 0.0346 |
-| Key during motion, RDP | 50 ms, 20 Mbit/s | 226 [201, 240] | 117 [111, 126] | 1.91x [1.70, 2.05] | 0.0346 |
+| Typing, SSH | No delay | 2.48 [2.20, 5.39] | 1.73 [1.41, 2.63] | 1.49× [1.18, 2.21] | 0.0519 |
+| Typing, SSH | 50 ms, 20 Mbit/s | 55.4 [54.3, 55.8] | 54.5 [53.4, 55.1] | 1.02× [0.999, 1.03] | 0.0649 |
+| Key press, VNC | No delay | 16.4 [15.7, 17.0] | 4.64 [4.28, 5.31] | 3.49× [3.21, 3.73] | 0.0346 |
+| Key press, VNC | 50 ms, 20 Mbit/s | 69.4 [67.5, 73.3] | 57.5 [56.4, 59.0] | 1.21× [1.18, 1.24] | 0.0346 |
+| Key press, RDP | No delay | 20.6 [19.3, 22.4] | 8.10 [6.92, 12.3] | 2.55× [1.82, 2.98] | 0.0346 |
+| Key press, RDP | 50 ms, 20 Mbit/s | 71.4 [70.2, 72.6] | 60.0 [59.3, 60.7] | 1.19× [1.18, 1.21] | 0.0346 |
+| Key during motion, VNC | No delay | 155 [132, 165] | 49.0 [39.6, 54.3] | 3.13× [2.71, 3.87] | 0.0346 |
+| Key during motion, VNC | 50 ms, 20 Mbit/s | 214 [182, 229] | 93.2 [91.1, 113] | 2.19× [1.97, 2.47] | 0.0346 |
+| Key during motion, RDP | No delay | 150 [135, 191] | 66.8 [57.9, 92.3] | 2.27× [1.83, 2.76] | 0.0346 |
+| Key during motion, RDP | 50 ms, 20 Mbit/s | 226 [201, 240] | 117 [111, 126] | 1.91× [1.70, 2.05] | 0.0346 |
 
 **Long output over SSH, time until it has all shown, in ms**
 
-| Network | Guacamole | Occamy | Occamy better by | p (Holm) |
+| Network | Guacamole | Occamy | Improvement | p (Holm) |
 |---|---:|---:|---:|---:|
-| No delay | 930 [864, 978] | 19.7 [16.6, 48.6] | 46.8x [20.1, 55.7] | 0.0346 |
-| 50 ms, 20 Mbit/s | 951 [917, 1,316] | 107 [105, 109] | 8.89x [8.54, 12.1] | 0.0346 |
+| No delay | 930 [864, 978] | 19.7 [16.6, 48.6] | 46.8× [20.1, 55.7] | 0.0346 |
+| 50 ms, 20 Mbit/s | 951 [917, 1,316] | 107 [105, 109] | 8.89× [8.54, 12.1] | 0.0346 |
 
 **A full-screen photo, data to the client, in KiB**
 
-| Protocol | Network | Guacamole | Occamy | Occamy better by | p (Holm) |
+| Protocol | Network | Guacamole | Occamy | Improvement | p (Holm) |
 |---|---|---:|---:|---:|---:|
-| VNC | No delay | 2,235 [1,497, 2,235] | 122 [122, 122] | 18.3x [12.3, 18.3] | 0.0346 |
-| VNC | 50 ms, 20 Mbit/s | 2,235 [1,441, 2,235] | 122 [122, 122] | 18.3x [11.8, 18.3] | 0.0346 |
-| RDP | No delay | 2,175 [1,379, 2,175] | 108 [108, 115] | 20.1x [12.7, 20.1] | 0.0346 |
-| RDP | 50 ms, 20 Mbit/s | 2,175 [1,169, 2,175] | 108 [108, 111] | 20.1x [10.8, 20.1] | 0.0346 |
+| VNC | No delay | 2,235 [1,497, 2,235] | 122 [122, 122] | 18.3× [12.3, 18.3] | 0.0346 |
+| VNC | 50 ms, 20 Mbit/s | 2,235 [1,441, 2,235] | 122 [122, 122] | 18.3× [11.8, 18.3] | 0.0346 |
+| RDP | No delay | 2,175 [1,379, 2,175] | 108 [108, 115] | 20.1× [12.7, 20.1] | 0.0346 |
+| RDP | 50 ms, 20 Mbit/s | 2,175 [1,169, 2,175] | 108 [108, 111] | 20.1× [10.8, 20.1] | 0.0346 |
 
 Each value is the median of 6 runs with its 95% interval. With 6 runs a
 side, the smallest p-value the exact test can give is 0.0022, and Holm's
@@ -64,9 +67,10 @@ What the tables show:
 - **A key shows sooner.** On a still desktop, a key's effect shows in
   4.6 ms over VNC and 8.1 ms over RDP at the 95th percentile, against
   16.4 and 20.6 with Guacamole. During full-screen motion it shows in 49
-  and 67 ms, against 155 and 150. At 50 ms of round trip the round trip
-  takes most of it, and Occamy stays 1.2x faster on a still desktop and
-  about 2x faster during motion.
+  and 67 ms, against 155 and 150. With a 50 ms round trip, the network
+  accounts for most of the time, yet Occamy still shows a key in 58 and
+  60 ms on a still desktop, compared with 69 and 71, and in 93 and
+  117 ms during motion, compared with 214 and 226.
 - **Long output finishes at once.** `seq 1 100000` over SSH finishes in
   20 ms instead of 930. Occamy sends the terminal's last screen, not
   every line that scrolled past.
@@ -137,7 +141,7 @@ intervals:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/realtime/1/factors-frame-window-dark.svg">
-  <img alt="How many times better Occamy with the window from the path is than with a window of two, on each scenario's primary metric, with 95% intervals" src="benchmarks/realtime/1/factors-frame-window.svg">
+  <img alt="The improvement of Occamy with the window from the path over a window of two, on each scenario's primary metric, with 95% intervals" src="benchmarks/realtime/1/factors-frame-window.svg">
 </picture>
 
 The window was the limit only where the round trip is long and the
@@ -184,12 +188,13 @@ beside BBR.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="benchmarks/realtime/3a/factors-congestion-control-dark.svg">
-  <img alt="How many times better Occamy with BBR is than Occamy with CUBIC on a key's latency, in each scenario, network and loss, with 95% intervals" src="benchmarks/realtime/3a/factors-congestion-control.svg">
+  <img alt="The improvement of Occamy with BBR over Occamy with CUBIC on a key's latency, in each scenario, network and loss, with 95% intervals" src="benchmarks/realtime/3a/factors-congestion-control.svg">
 </picture>
 
 - **With BBR, loss costs a key about one round trip.** At 50 ms with 2%
-  lost, a key during motion shows 2.45x sooner over VNC and 2.97x sooner
-  over RDP than with CUBIC: 149 ms against 360, and 163 against 471.
+  lost, a key during motion shows in 149 ms over VNC and 163 ms over
+  RDP, compared with 360 and 471 ms with CUBIC: improvements of 2.45×
+  and 2.97×.
 - **The frame rate holds.** At 50 ms with 2% lost, the viewer sees 27.6
   of the scene's 30 frames a second over VNC instead of 16.4, and 24.4
   over RDP, the server's rate without loss.
@@ -306,9 +311,11 @@ result's load does not spill into the next.
 
 - the **median** of the runs, with an exact distribution-free 95%
   interval from order statistics;
-- the **factor**, how many times better one series is than the other:
-  the Hodges–Lehmann estimate of their ratio, with its exact 95%
-  interval from the Mann–Whitney distribution;
+- the **improvement** of one series over the other: the other's value
+  divided by its own, or its own divided by the other's for a metric
+  where higher is better, such as frames shown a second. It is the
+  Hodges–Lehmann estimate of that ratio, with its exact 95% interval
+  from the Mann–Whitney distribution;
 - the **p-value** of the exact two-sided permutation test of the rank
   sum, over every split of the runs.
 
@@ -320,15 +327,15 @@ that started above the load gate.
 
 ## Targets
 
-For Occamy's stable release, each scenario's primary metric is to be
-10x better than Guacamole's under the same network, at the 95th
-percentile for a latency, and a key's effect is to show within 50 ms.
-Where a bound outside Occamy, such as the round trip or the remote
-server's own time, makes 10x impossible, the target is that bound plus a
-margin.
+For Occamy's stable release, each scenario's primary metric should be a
+tenth of Guacamole's on the same network, an improvement of 10×. For a
+latency, this applies to the 95th percentile. A key's effect should also
+show within 50 ms. Where something outside Occamy makes that impossible,
+such as the network's round trip or the remote server's own response
+time, the target is that limit plus a small margin.
 [The benchmark's spec](../specs/008-native-architecture/benchmark.md#targets)
 sets each target, and [the full report](benchmarks/essential/report.md)
-marks each one it meets.
+marks the ones Occamy meets.
 
 ## Running the benchmark
 

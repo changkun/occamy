@@ -22,6 +22,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   benchmarks page opens with Occamy against Guacamole, in figures and
   tables with 95% intervals and corrected tests
   ([docs/benchmarks.md](docs/benchmarks.md#occamy-against-guacamole)).
+- The benchmark report calls its estimate the *improvement*: the
+  baseline's value divided by the candidate's, so that above 1× the
+  candidate is better. The column in `comparisons.csv` that was
+  `times_better` is now `improvement`.
 - Each line a session logs, such as `session ended`, carries the
   session's ID as `session=`, as the line that opened it does
   ([docs/debugging.md](docs/debugging.md#the-log)).
