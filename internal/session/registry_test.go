@@ -46,6 +46,31 @@ func TestRegistryLogsSessionID(t *testing.T) {
 	})
 }
 
+// TestRegistryOpenWithID checks that a session opens with the ID its
+// caller drew, as the server does to log its backend's lines with it.
+func TestRegistryOpenWithID(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		r := session.NewRegistry(ctx)
+		want := session.NewID()
+		id, s, _, err := r.Open(session.Config{ID: want, Backend: backendtest.NewScreen(64, 48, 0)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		if id != want {
+			t.Errorf("opened %q, want the ID drawn, %q", id, want)
+		}
+		if got, err := r.Get(want); err != nil || got != s {
+			t.Errorf("Get(%q) = %v, %v; want the session", want, got, err)
+		}
+		if other := session.NewID(); other == want || len(other) != len(want) {
+			t.Errorf("NewID drew %q after %q", other, want)
+		}
+	})
+}
+
 func TestRegistry(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())

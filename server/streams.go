@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -440,6 +441,7 @@ func (s *server) serve(ctx context.Context, c *wsConn, info *sessionInfo, v *ses
 	c.ws.SetReadLimit(int64(protocol.Agree(hello.Capabilities, streamCapabilities).Limits().MaxMessageSize))
 	err := serveStream(ctx, c, v, hello, stream.Config{
 		SessionID:     info.id,
+		Logger:        slog.Default().With("session", info.id),
 		Capabilities:  streamCapabilities,
 		NewEncoder:    newEncoder,
 		ViewerTimeout: s.streamsCfg.ViewerTimeout,

@@ -50,8 +50,10 @@ Releases before 0.5.0 were tagged without the `v` prefix.
   baseline's value divided by the candidate's, so that above 1× the
   candidate is better. The column in `comparisons.csv` that was
   `times_better` is now `improvement`.
-- Each line a session logs, such as `session ended`, carries the
-  session's ID as `session=`, as the line that opened it does
+- Every line `occamyd` logs about a session carries the session's ID:
+  the session's own, such as `session ended`, its viewers' streams',
+  such as `viewer dropped`, and its backend's, such as `WARN vnc: …`,
+  as `session=`, as the line that opened it does
   ([docs/debugging.md](docs/debugging.md#the-log)).
 - The web client and Occamy for macOS say what happened and what you
   can do in complete sentences, such as when a session ends, a sign-in

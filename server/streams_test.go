@@ -421,6 +421,35 @@ func TestSessionStream(t *testing.T) {
 	}
 }
 
+// TestSessionLinesCarryID checks that what a session's backend and its
+// streams log carries the session's ID, as the session's own lines do,
+// so that an operator finds every line about a session by its ID.
+func TestSessionLinesCarryID(t *testing.T) {
+	logs := captureLog(t)
+	ts, fb := sessionServer(t, nil)
+	alice := ts.token(t, "alice", "ops")
+	o := ts.openSession(t, alice, "ops-shell")
+	tg, _, _ := fb.last()
+	if tg.log == nil {
+		t.Fatal("the backend has no logger of the session's")
+	}
+	tg.log.Warn("fake: a backend's warning")
+	c := ts.stream(t, "/api/v1/sessions/"+o.ID+"/stream", o.StreamToken, termHello)
+	// Only a close over a fault is logged, as a tile the client cannot
+	// decode is.
+	c.send(t, protocol.Close{Code: protocol.CloseProtocolError, Reason: "a tile does not decode"})
+	waitFor(t, "the stream's client closed line", func() bool { return strings.Contains(logs(), "client closed") })
+	ts.api(t, http.MethodDelete, "/api/v1/sessions/"+o.ID, alice, "")
+	waitFor(t, "the session ended line", func() bool { return strings.Contains(logs(), "session ended") })
+	for _, msg := range []string{"fake: a backend's warning", "client closed", "session ended"} {
+		for line := range strings.Lines(logs()) {
+			if strings.Contains(line, msg) && !strings.Contains(line, "session="+o.ID) {
+				t.Errorf("%q does not carry session=%s", strings.TrimSpace(line), o.ID)
+			}
+		}
+	}
+}
+
 // TestOwnerTakeover checks that the owner's newer stream ends the older:
 // it may be on a connection that died unnoticed.
 func TestOwnerTakeover(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/netip"
@@ -362,13 +363,17 @@ func (s *server) open(t target, owner principal, sz screen) (*sessionInfo, *sess
 		s.running--
 		s.mu.Unlock()
 	}
+	// The ID comes first, so that the backend's lines carry it as the
+	// session's do.
+	id := session.NewID()
+	t.log = slog.Default().With("session", id)
 	b, err := maker.make(t, sz)
 	if err != nil {
 		release()
 		return fail(err)
 	}
 	id, sess, v, err := s.registry.Open(session.Config{
-		Backend: b, OwnerGrace: grace, MaxViewers: s.limits.ViewersPerSession,
+		ID: id, Backend: b, OwnerGrace: grace, MaxViewers: s.limits.ViewersPerSession,
 		DisableCopy: t.disableCopy, DisablePaste: t.disablePaste,
 	})
 	if err != nil {

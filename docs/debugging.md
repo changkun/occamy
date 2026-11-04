@@ -186,7 +186,7 @@ A Windows desktop over RDP that stays nearly black needs
 first part of the screen that it can't draw:
 
 ```
-WARN rdp: the server draws with GFX that the client does not decode yet, so parts of the screen may stay missing or stale; to turn GFX off, set disable_gfx: true on the target's connection, and reach an ad-hoc target, which cannot set it, through a connection addr=10.0.4.20:3389 skipped=…
+WARN rdp: the server draws with GFX that the client does not decode yet, so parts of the screen may stay missing or stale; to turn GFX off, set disable_gfx: true on the target's connection, and reach an ad-hoc target, which cannot set it, through a connection session=… addr=10.0.4.20:3389 skipped=…
 ```
 
 [Connect Windows hosts](deploy.md#connect-windows-hosts) sets it up.
@@ -283,12 +283,12 @@ Each line has the same parts:
 
 `occamyd` writes no debug lines, and you can't change the level.
 
-Lines about a session name it in one of two ways. The lines of the
-session's own life, such as `opened`, `shared` and `session ended`,
-carry its ID, as `session <id>:` or `session=<id>`. Warnings from a
-backend, such as `WARN vnc: …`, and a viewer's lines, `viewer dropped`
-and `client closed`, don't: match them to a session by the remote's
-`addr=` and the time.
+Every line about a session carries its ID, so you can follow one
+session by searching the log for it. The lines about what a user did
+with the session, such as `opened` and `shared`, start
+`session <id>:`. The lines of the session itself, of its viewers'
+streams and of its connection to the remote, such as `session ended`,
+`viewer dropped` and `WARN vnc: …`, carry `session=<id>`.
 
 ### What the lines say
 
@@ -310,10 +310,10 @@ and `client closed`, don't: match them to a session by the remote's
 | `INFO session ended session=<id> reason=… err=…` | A session ended, for one of the reasons below |
 | `stream refused from 10.0.0.7:51544: origin not allowed` | A stream was refused before it joined a session. The other reasons are `invalid hello` and `unsupported protocol version` |
 | `session <id>: viewer 2: the stream ended: …` | A viewer's stream failed while the session runs on |
-| `INFO viewer dropped viewer=2 err=…` | A viewer acknowledged no frame for `streams.viewer_timeout`, and `occamyd` disconnected it |
-| `INFO client closed code=… reason=…` | A client closed its stream because of a fault, such as a tile it couldn't decode |
-| `INFO rdp: the server ended the session addr=… reason=…` | An RDP server ended the session, with its reason |
-| `ERROR session panicked` | `occamyd` failed on its own. The line has the stack, for a bug report |
+| `INFO viewer dropped session=<id> viewer=2 err=…` | A viewer acknowledged no frame for `streams.viewer_timeout`, and `occamyd` disconnected it |
+| `INFO client closed session=<id> code=… reason=…` | A client closed its stream because of a fault, such as a tile it couldn't decode |
+| `INFO rdp: the server ended the session session=<id> addr=… reason=…` | An RDP server ended the session, with its reason |
+| `ERROR session panicked session=<id>` | `occamyd` failed on its own. The line has the stack, for a bug report |
 
 The request line never holds the query string, the headers or the body,
 so tokens and passwords stay out of the log. The client's address is
