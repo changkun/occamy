@@ -2,16 +2,14 @@
 
 Occamy protocol v1 carries a remote session between a client and
 `occamyd` over a WebSocket: your input goes to the remote computer, and
-its screen comes back. The web client and Occamy for macOS speak it.
-This page specifies it in full, so that you can write a client of your
-own.
+its screen comes back. The web client and Occamy for macOS speak it, and
+this page specifies it so that you can write a client of your own.
 
 ## How a session works
 
-A session starts after a single round trip. The client opens a
-WebSocket to `occamyd` and puts its `hello` message in the upgrade
-request. `occamyd` answers with `welcome` and then the whole screen,
-without waiting for anything more from the client.
+A session starts after a single round trip: the client puts its `hello`
+message in the WebSocket's upgrade request, and `occamyd` answers with
+`welcome` and then the whole screen.
 
 ```mermaid
 sequenceDiagram
@@ -30,79 +28,58 @@ sequenceDiagram
   O-->>C: close, with a close code
 ```
 
-From then on, the two sides exchange *messages*. Each message is one
-binary WebSocket message: a 4-byte header that names the message's
-type, followed by its fields.
+The client sends numbered *input*: keys, pointer moves, scrolls, text
+from an input method, and clipboard content. The server sends the
+screen in *frames* of tiles or terminal output, each acknowledged once
+shown, and keeps only a few unacknowledged, so a slow client receives
+fewer and fresher frames instead of a queue of old ones. Each frame
+names the last input it reflects, so the client can measure how long an
+input takes to show.
 
-The client sends *input*: keys, pointer moves, scrolls, text from an
-input method, and clipboard content. It numbers its inputs in the order
-it sends them.
-
-The server sends the screen in *frames*. A frame is a run of messages
-that together update the client's screen, such as tiles of pixels for a
-desktop or escape sequences for a terminal, and it always ends with
-`frame-end`. The client draws the frame, shows it, and acknowledges it
-with `frame-ack`. Because the server keeps only a few frames
-unacknowledged, a slow client, or one on a slow network, receives fewer
-and fresher frames instead of a growing queue of old ones. Each `frame-end` also
-names the last input that the frame reflects, so the client can measure
-exactly how long an input takes to show on the screen.
-
-Several clients can share a session. The client that opens it is its
-*owner*. Other clients join as *viewers*, who can send input, or as
-*read-only viewers*, who can't. A session ends when the owner closes it,
-when the remote ends it, or when a timeout expires, and the server then
-sends `close` with a [close code](#close-codes) that says why.
-
-The rest of this page follows the order in which a client meets each
-part: the [transport](#transport) and the [handshake](#handshake), the
-[message layout](#message-layout), [frames and flow
-control](#frames-and-flow-control), each [message](#message-types), and
-the [codecs](#codecs) that carry pixels.
+Several clients can share a session: the client that opens it is its
+*owner*, and others join as *viewers*, who can send input, or as
+*read-only viewers*, who can't. When the session ends, the server sends
+`close` with a [close code](#close-codes) that says why.
 
 ## Transport
 
 The protocol runs over a WebSocket
 ([RFC 6455](https://www.rfc-editor.org/rfc/rfc6455)) with the
-subprotocol `occamy.v1`. Use TLS everywhere except in tests.
+subprotocol `occamy.v1`. Use TLS everywhere except in tests. A
+connection carries one session.
 
-Each protocol message is exactly one binary WebSocket message. The
-WebSocket marks where each message ends, so the protocol needs no
-length of its own. A text message isn't allowed, and its receiver closes
-the connection with `unsupported`. A connection carries one session.
-WebSocket extensions such as `permessage-deflate` may compress the
-connection, but they don't change the messages.
+Each message is exactly one binary WebSocket message, and the WebSocket
+marks where it ends, so the protocol needs no length of its own. The
+receiver of a text message closes the connection with `unsupported`.
+Extensions such as `permessage-deflate` may compress the connection
+without changing the messages.
 
 ## Handshake
 
-The handshake takes one round trip. The client's `hello` travels in the
-upgrade request, and the server sends `welcome` and the session's first
-frame right after `101 Switching Protocols`.
-
 ### The upgrade request
 
-To open a session on a connection, or to join a running session, the
-client opens a WebSocket on the matching route of the
-[HTTP API](api.md#streams). It adds two things to the request:
+To open a session on a connection, or to join a running one, the client
+opens a WebSocket on the matching [stream route](api.md#streams), and
+adds two things to the request:
 
 - **The query parameter `hello`.** It holds the whole `hello` message,
   header included, in base64url without padding
   ([RFC 4648, section 5](https://www.rfc-editor.org/rfc/rfc4648#section-5)).
   A `hello` is at most 2048 bytes, so the parameter is at most 2731
-  characters, which keeps the request line well within the 8 KiB that
-  common proxies allow.
+  characters, well within the 8 KiB request line that common proxies
+  allow.
 - **The header `Sec-WebSocket-Protocol`.** It offers two subprotocols:
-  `occamy.v1`, and `occamy.v1.token.` followed by the token in base64url
-  without padding. The token is an access token, a session token, or a
-  share.
+  `occamy.v1`, and `occamy.v1.token.` followed by the token, which is an
+  access token, a session token or a share, in base64url without
+  padding.
 
 > [!IMPORTANT]
 > Never put the token in the URL, because proxies and servers log URLs.
 > A native client can send `Authorization: Bearer <token>` instead and
 > offer `occamy.v1` alone. The `hello` carries no secret.
 
-This is the upgrade request of a web client. Its `hello` is the vector
-`hello from a web client`, and its token is
+This web client's upgrade request carries the vector
+`hello from a web client` and the token
 `eyJhbGciOiJFZERTQSJ9.eyJzdWIiOiJhbGljZSJ9.c2ln`:
 
 ```text
@@ -116,11 +93,11 @@ Sec-WebSocket-Protocol: occamy.v1, occamy.v1.token.ZXlKaGJHY2lPaUpGWkVSVFFTSjkuZ
 Origin: https://occamy.example
 ```
 
-The server decodes the `hello` parameter strictly, so that each `hello`
-has exactly one encoding. It refuses characters outside the base64url
-alphabet, including `=` and line breaks, and it refuses non-zero
-trailing bits. It checks the parameter's length against the 2048-byte
-limit before it decodes anything.
+The server decodes `hello` strictly, so that each `hello` has exactly
+one encoding. It checks the parameter's length against the 2048-byte
+limit before it decodes anything, and it refuses characters outside the
+base64url alphabet, including `=` and line breaks, and non-zero
+trailing bits.
 
 The server finds the token among the offered subprotocols, which can
 arrive in several header lines, each a comma-separated list. It refuses
@@ -132,24 +109,18 @@ that isn't base64url, and it never logs a token.
 The server checks `Origin`, finds the token, and decodes `hello`. It
 answers `101 Switching Protocols` with `Sec-WebSocket-Protocol:
 occamy.v1` alone. Then it authenticates the token, opens or joins the
-session, and sends, without waiting:
-
-1. `welcome`, with the viewer's ID and role, the session's class and
-   ID, and the agreed [capabilities](#capabilities);
-2. the first frame: `resize`, then the whole screen as `tile` messages
-   or as `term-snapshot`, then `frame-end`.
-
-Messages outside frames can arrive before the first frame and among its
-messages. A client that joins a running session receives `viewer-joined`
-for each viewer already there, and the current `title`. In a graphical
-session, it also receives the current `cursor` and `cursor-move`.
+session, and sends, without waiting, [`welcome`](#welcome) and the first
+frame: `resize`, then the whole screen as `tile` messages or as
+`term-snapshot`, then `frame-end`. A client that joins a running session
+also receives `viewer-joined` for each viewer already there and the
+current `title`, and in a graphical session the current `cursor` and
+`cursor-move`.
 
 Both sides keep to these rules:
 
 - The client sends nothing until it has received `welcome`.
-- From `welcome` on, both sides use the agreed limits: the maximum
-  message size, the maximum texture size, and the number of cache
-  slots.
+- From `welcome` on, both sides use the agreed
+  [capabilities](#capabilities).
 - Until the server has let a client in, it reads no message larger than
   65536 bytes, the smallest maximum message size.
 - A `hello` sent as a WebSocket message is a protocol error, and so is a
@@ -157,11 +128,10 @@ Both sides keep to these rules:
 
 #### Refusals
 
-If the request doesn't offer `occamy.v1`, the server refuses the upgrade
-with an HTTP error, since it can't speak to the client at all. It makes
-every other refusal after the upgrade, because a browser can't read the
-HTTP status of a refused upgrade: the server completes the upgrade,
-sends `close`, and closes the WebSocket with the same code.
+The server refuses a request that doesn't offer `occamy.v1` with an
+HTTP error. It makes every other refusal after the upgrade, because a
+browser can't read the HTTP status of a refused upgrade: it completes
+the upgrade and sends `close`.
 
 | Refused | Close code |
 |---------|------------|
@@ -177,26 +147,22 @@ connection dropped.
 
 #### A session that ends before welcome
 
-A session can end before the server sends `welcome`, for example when
-its backend fails at once because the remote can't be reached, its
-certificate is refused, or it refuses the credentials. The server then
-sends `close` with the session's end, such as `backend-failed`, in place
-of `welcome`. It's the same `close`, with the same code and reason, that
-the client would otherwise have received just after `welcome`. Which of
-the two the client receives is a race, so a client must take a `close`
-before `welcome` as the end of the session it asked for.
-
-If the owner of a session that has ended opens a stream to it within the
-owner grace period, the owner receives that `close` too. Anyone else
-receives a refusal ([HTTP API](api.md#get-apiv1sessionsidstream)).
+A session can end before the server sends `welcome`, as when its backend
+fails at once: the remote can't be reached, its certificate is refused,
+or it refuses the credentials. The server then sends, in place
+of `welcome`, the `close` that the client would otherwise have received
+just after it, such as `backend-failed`. Which of the two comes is a
+race, so a client must take a `close` before `welcome` as the end of
+the session it asked for. An owner who opens a stream to the ended
+session within the owner grace period receives that `close` too, and
+anyone else a [refusal](api.md#get-apiv1sessionsidstream).
 
 ## Message layout
 
-Every message begins with a 4-byte header of two little-endian u16
-values: the message's type and its flags. The message's fields follow
-the header in the order that its section of this page lists them, with
-no names, tags, or padding between them. Fixed-size fields come first,
-and variable-size fields last.
+Every message is a 4-byte [header](#header) and then the message's
+fields, in the order that its section lists them, with no names, tags,
+or padding between them. Fixed-size fields come first, and
+variable-size fields last.
 
 This is the `text` message that sends 日本 as the client's third input,
 byte by byte:
@@ -205,9 +171,6 @@ byte by byte:
   <source media="(prefers-color-scheme: dark)" srcset="figures/protocol-layout-dark.svg">
   <img alt="The 18 bytes of a text message. Bytes 0 to 3 are the header: the type, 03 01, which is 0x0103 or text, and the flags, 00 00. The body follows: seq, a u32 of 3; length, a u32 of 6; and the six bytes of 日本 in UTF-8." src="figures/protocol-layout.svg">
 </picture>
-
-The first four bytes are the header. `seq` is a fixed-size u32, and the
-text is a string: a u32 length, then that many bytes of UTF-8.
 
 ### Header
 
@@ -245,10 +208,10 @@ lowercase.
 
 ### Decoding
 
-A receiver reads a message's fields in order and checks each one as it
-reads it. Then it checks that no bytes are left over, and last, it
-checks the rules between fields that the message's section lists. It
-closes the connection at the first failure, with this code:
+A receiver reads a message's fields in order, checking each as it reads
+it, then checks that no bytes are left over, and last, checks the rules
+between fields that the message's section lists. It closes the
+connection at the first failure, with this code:
 
 | Failure | Close code |
 |---------|------------|
@@ -261,27 +224,24 @@ closes the connection at the first failure, with this code:
 
 A receiver checks every size before it allocates memory for it:
 
-- the message's size, against the maximum message size;
-- each length, against the bytes left;
-- each list's count times the size of its smallest element, against
-  the bytes left;
-- a tile's width and height, against the maximum texture size, before
-  it decodes the payload.
+| Size | Checked against |
+|------|-----------------|
+| The message's size | The maximum message size |
+| Each length | The bytes left |
+| Each list's count times the size of its smallest element | The bytes left |
+| A tile's width and height, before the payload is decoded | The maximum texture size |
 
 A receiver that uses a WebSocket library sets the library's read limit
 to the maximum message size. A browser's WebSocket has no read limit,
 so a browser client checks each message's size as it arrives, before it
-decodes anything. That bounds what the client decodes, but not what the
-browser buffers.
+decodes anything; that bounds what the client decodes, but not what the
+browser buffers. A receiver may keep byte fields as views into the
+message instead of copying them.
 
-A receiver may keep byte fields as views into the message instead of
-copying them.
-
-These checks need no state beyond the agreed limits. A receiver also
-checks each message against the session, as the message's section
-describes: a rectangle must lie within the screen, a cached tile must
-come from a slot that holds one, and a frame ID must match its frame. A
-message that fails one of these checks is a protocol error too.
+These checks need only the agreed limits. A message that fails a check
+against the session, which its section describes, such as a rectangle
+outside the screen or a frame ID that doesn't match its frame, is a
+protocol error too.
 
 ## Frames and flow control
 
@@ -293,38 +253,28 @@ A *frame* is a run of the server's `resize`, `tile`, `copy-rect`,
 order and shows the result at `frame-end`, so the user never sees half a
 frame.
 
-This is a frame of a desktop. `occamyd` divides the screen into tiles of
-64 pixels and sends only what changed since the last frame, each part in
-the cheapest form that the client accepts:
+In a frame of a desktop, `occamyd` sends only the tiles of 64 pixels
+that changed since the last frame, each in the cheapest form that the
+client accepts ([What occamyd sends](#what-occamyd-sends)):
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/protocol-frame-dark.svg">
   <img alt="A screen of 8 by 5 tiles. A text window on the left has scrolled up a line, which a copy-rect message moves on the client; the new line of text at the bottom goes as three exact deflate tiles. A video on the right goes as two lossy WebP messages, each of three tiles side by side. An icon the client has seen before goes as a cached tile from slot 5. Below, the frame's eight messages are listed in order, ending with frame-end." src="figures/protocol-frame.svg">
 </picture>
 
-[What occamyd sends](#what-occamyd-sends) explains how it picks each
-tile's codec.
-
-Every other message from the server is outside frames: `cursor`,
-`cursor-move`, `clipboard`, `clipboard-status`, `bell`, `title`,
-`prompt`, `viewer-joined`, `viewer-left`, `ping`, `pong` and `close`.
-Such a message can arrive between any two messages, including between
-the tiles of a frame. The server never queues it behind tiles; it waits
-at most for the tile it is writing.
+The server's other messages are outside frames, and can arrive between
+any two messages, even between the tiles of a frame.
 
 A frame carries the current content of what changed, not a history of
-changes. A client that receives fewer frames therefore loses nothing,
-because the newest frame holds the effect of every input. In a terminal
-session, a frame is the difference between the screen that the client
-last received and the current one.
+changes, so a client that receives fewer frames loses nothing: the
+newest frame holds the effect of every input.
 
 ### The frame window
 
-The server keeps at most `frame_window` frames unacknowledged for each
-viewer. The default is 2, and `occamyd` and Occamy's clients offer 16.
-
-On a long path, several frames are in flight at once. This is a window
-of 2 frames on such a path:
+The server keeps at most [`frame_window`](#capabilities) frames
+unacknowledged for each viewer, and `occamyd` and Occamy's clients offer
+16. On a long path, several frames are in flight at once, as in this
+window of 2:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="figures/protocol-window-dark.svg">
@@ -332,57 +282,44 @@ of 2 frames on such a path:
 </picture>
 
 Within that bound, the server keeps as many frames unacknowledged as
-cover the time an acknowledgement takes, at the rate at which a screen
-shows frames: 2 on a local link, and about 5 across 50 ms. An
-acknowledgement is therefore a measurement, not a barrier. On a long
-path, frames follow the screen's changes instead of arriving two per
-round trip. While the window is full, changes accumulate, and they go
-out as one frame once a `frame-ack` arrives. A terminal's window is at
-most 2 frames, whatever was agreed, so that bulk output coalesces
-instead of queueing.
+cover an acknowledgement's round trip at the screen's frame rate: 2 on a
+local link, and about 5 across 50 ms. While the window is full, changes accumulate, and they go out as one
+frame once a `frame-ack` arrives. A terminal's window is at most 2
+frames, whatever was agreed, so that bulk output coalesces instead of
+queueing.
 
-The client acknowledges every frame once it has shown it. An
-acknowledgement covers every earlier frame too, so the client may skip
-one that a later acknowledgement covers.
-
-Input is the one exception to the window. Once the server has applied
-an input from a viewer, the frame that carries the input's effect goes
-out at once, even if that puts it one beyond a full window. A viewer
-therefore never has more than `frame_window` + 1 frames unacknowledged,
-and a client may close a server that sends more with `protocol-error`.
+Input is the one exception to the window. Once the server has applied a
+viewer's input, the frame that carries its effect goes out at once, even
+one beyond a full window. A viewer therefore never has more than
+`frame_window` + 1 frames unacknowledged, and a client may close a
+server that sends more with `protocol-error`.
 
 #### Slow and stalled clients
 
 A client that can't show frames as fast as they arrive leaves them
-unacknowledged in the meantime. That holds the server back, instead of
-queueing stale frames, in three ways:
+unacknowledged, which holds the server back instead of queueing stale
+frames: by the frame window, by the bytes in flight that only
+acknowledgements free, and by the decode time that each acknowledgement
+reports.
 
-1. by the frame window;
-2. by the bytes in flight, which only acknowledgements free;
-3. by the decode time that each acknowledgement reports, which spaces
-   the server's frames.
+The server keeps what it last sent each viewer, such as a terminal's
+whole screen, until the viewer acknowledges something newer. A viewer
+that leaves a frame unacknowledged, or takes no message, for the
+server's viewer timeout receives `close` with `too-slow`, hidden or not.
+`occamyd`'s viewer timeout is 30 seconds unless you configure another.
 
-A client that stops acknowledging altogether is closed. The server keeps
-what it last sent each viewer, such as a terminal's whole screen, until
-the viewer acknowledges something newer. A viewer that leaves a frame
-unacknowledged for the server's viewer timeout, or that takes no message
-for that long, receives `close` with `too-slow`, whether it's hidden or
-not. `occamyd`'s viewer timeout is 30 seconds unless you configure
-another.
-
-A hidden client receives no new frames, but it must still acknowledge
-the frames it was already sent as they arrive, since it shows none of
-them. A browser tab in the background, for example, still receives its
-messages even though it no longer draws.
+A hidden client receives no new frames, but must still acknowledge
+those it was already sent as they arrive, since it shows none of them:
+a browser tab in the background still receives messages though it no
+longer draws.
 
 ### Bytes in flight
 
 Besides the frame window, the server paces each viewer's writes at the
-delivery rate that the viewer's `frame-ack` messages measure. It caps
+delivery rate that its `frame-ack` messages measure. It caps
 its bytes in flight near the bandwidth-delay product, and it backs off
-when round trips grow above their minimum. Because a tile is small, the
-frame after an input waits behind little more than the tile being
-written. These details belong to `occamyd`, not to the protocol.
+when round trips grow above their minimum. These details belong to
+`occamyd`, not to the protocol.
 
 ## Message types
 
@@ -397,7 +334,7 @@ message was sent the wrong way:
 | 0x0300 to 0xFFFF | Unassigned |
 
 A receiver treats a message meant for the other direction as an unknown
-type. A type number is never given to another message.
+type.
 
 | Type | Name | From | Purpose |
 |------|------|------|---------|
@@ -431,9 +368,6 @@ type. A type number is never given to another message.
 | 0x020e | [`viewer-joined`](#viewer-joined) | server | A viewer in the session |
 | 0x020f | [`viewer-left`](#viewer-left) | server | A viewer that left |
 | 0x0210 | [`clipboard-status`](#clipboard-status) | server | Whether the remote's clipboard is taking text |
-
-Each message's section below gives its purpose, its type and direction,
-its fields in order, its rules, and an example from the golden vectors.
 
 ## Messages in both directions
 
@@ -496,20 +430,19 @@ reason never holds a secret and, where possible, fits in a WebSocket
 close frame, which holds 123 bytes.
 
 A browser may close a WebSocket only with 1000 or with a code from 3000
-to 4999. A browser client that sends another code, such as
-`protocol-error`, therefore closes the WebSocket with 1000, and a native
-client closes with the code itself. The server takes the code from the
-`close` message, so the close frame that follows, with 1000 or the same
-code, changes nothing.
+to 4999, so a browser client that sends another code, such as
+`protocol-error`, closes the WebSocket with 1000, and a native client
+closes with the code itself. The server takes the code from the `close`
+message, so the close frame that follows changes nothing.
 
 The server takes a close frame without a `close` before it as the
-client leaving. A browser sends 1001 this way when its page goes away,
-as on navigating or reloading, and the server doesn't take that 1001 as
-`server-shutdown`. The server, for its part, always sends `close` before
-it closes with `server-shutdown`. A client therefore takes a 1001
-without `close` before it as a lost connection, not as the end of the
-session. Firefox reports its own page going away to the page this way,
-before `pagehide`, and a proxy that goes away may send one too.
+client leaving, such as the 1001 that a browser sends when its page goes
+away on navigating or reloading, and not as `server-shutdown`. The
+server always sends `close` before it closes with `server-shutdown`, so
+a client takes a 1001 without `close` before it as a lost connection,
+not as the end of the session. Firefox reports its own page going away
+to the page this way, before `pagehide`, and a proxy that goes away may
+send one too.
 
 A receiver that doesn't know a code treats it as an error that the
 reason describes.
@@ -544,14 +477,14 @@ Type 0x0101, sent by the client, and only in the upgrade request's
 | capabilities | capabilities | What the client offers; see [Capabilities](#capabilities). |
 
 `version` comes first, so that any later version of the protocol can
-read it before the rest, whose layout may change. A server refuses
-another version with `unsupported` without reading further.
+read it before the rest, whose layout may change, and a server refuses
+another version without reading further.
 
 The client doesn't know yet whether the session is a terminal or a
 desktop, so it states both sizes, and the server uses the one that
-fits. The client's viewport starts as the whole screen. `occamyd` bounds
-the size it asks the remote for, as it bounds a
-[`resize-request`](#resize-request). The web client asks for its
+fits, which `occamyd` bounds as it bounds a
+[`resize-request`](#resize-request). The client's
+viewport starts as the whole screen. The web client asks for its
 window's size in CSS pixels, so that a remote pixel is a CSS pixel at
 any device pixel ratio.
 
@@ -593,9 +526,7 @@ the client's `clipboard` are input. Each starts with a sequence number,
 
 The client numbers its input messages from 1, adding one for each.
 After 2³²−1, the next number is 1. 0 is never an input's number, so a
-`last_seq` of 0 always means none. Because [`frame-end`](#frame-end)
-reports the last input that a frame reflects, the client can measure
-exactly the time from an input to its effect.
+[`last_seq`](#frame-end) of 0 always means none.
 
 The server applies input in the order it arrives. It drops input from
 read-only viewers, and input that the session can't take, such as
@@ -614,10 +545,9 @@ Type 0x0102, sent by the client as [input](#input-messages).
 | keysym | u32 | The X11 keysym the key produced, or 0 if it produced none the client can name. |
 | code | u16 | The physical key as a USB HID usage from the keyboard page (0x07), or 0 if the client does not know it. |
 
-A release carries the keysym of its press. A key that produces no
-keysym the client can name, such as a dead key in a browser, has keysym
-0 and reaches the remote only through `code`, so a backend that takes
-keysyms alone drops it. A client translates `KeyboardEvent.code` or
+A release carries the keysym of its press. A key with keysym 0, such as
+a dead key in a browser, reaches the remote only through `code`, so a
+backend that takes keysyms alone drops it. A client translates `KeyboardEvent.code` or
 `NSEvent.keyCode` to `code` with a table.
 
 ```hex
@@ -735,12 +665,12 @@ Type 0x0107, sent by the client as [input](#input-messages).
 | width | u16 | The width, in pixels for a graphical session and in character cells for a terminal. |
 | height | u16 | The height, likewise. |
 
-The remote may refuse, or pick another size, and
-[`resize`](#resize) reports what it did. `occamyd` asks a remote for at
-most 8192 pixels a side, or for at most 1000 columns and 500 rows, and
-takes a larger request, or a larger size in `hello`, as that bound. A
-backend may have tighter limits: the VNC backend asks for no screen of
-more than 2²⁵ pixels, so it ignores a request for 8192 × 8192.
+The remote may refuse, or pick another size, and [`resize`](#resize)
+reports what it did. `occamyd` asks a remote for at most 8192 pixels a
+side, or 1000 columns and 500 rows, and takes a larger request, or a
+larger size in `hello`, as that bound. A backend may have tighter
+limits: the VNC backend asks for no screen of more than 2²⁵ pixels, so
+it ignores a request for 8192 × 8192.
 
 ```hex
 # vector: resize-request
@@ -782,8 +712,7 @@ long. On a connection that sets `disable_paste`, the server drops it.
 
 Reports what the client shows, whenever that changes.
 
-Type 0x0109, sent by the client. It isn't input, so it has no sequence
-number.
+Type 0x0109, sent by the client.
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -820,19 +749,18 @@ Type 0x010a, sent by the client.
 | frame_id | u32 | The frame's ID, from its `frame-end`. |
 | decode_time | u32 | How long the client took to decode and draw the frame, in microseconds: from its `frame-end` arriving to this acknowledgement, including any wait for the frame to be shown. |
 
-The client acknowledges a frame once it is shown, not when it arrives.
-A client that hands frames to a renderer acknowledges one when the
-renderer is done with it and asks for the next. An acknowledgement
-covers every earlier frame, so a client may skip one that a later
-acknowledgement covers, as when two wait to be sent and only the newer
-goes. A client shouldn't hold an acknowledgement back once its frame is
-shown, because the server measures round trips from acknowledgements
-and holds frames back by them.
+The client acknowledges a frame once it is shown, not when it arrives,
+and doesn't hold the acknowledgement back after that, because the
+server measures round trips from acknowledgements and holds frames back
+by them. A client that hands frames to a renderer acknowledges one when
+the renderer is done with it and asks for the next. A client may skip
+an acknowledgement that a later one covers, as when two wait to be sent
+and only the newer goes.
 
-The server takes `decode_time` out of the round trip, and spaces its
-frames by it. It ignores an acknowledgement of a frame that isn't
-awaiting one. [Frames and flow control](#frames-and-flow-control)
-explains how acknowledgements pace the server.
+The server takes `decode_time` out of the round trip and spaces its
+frames by it, as [Frames and flow control](#frames-and-flow-control)
+describes. It ignores an acknowledgement of a frame that isn't awaiting
+one.
 
 ```hex
 # vector: frame-ack
@@ -881,9 +809,6 @@ Type 0x0201, sent by the server.
 | class | u8 | 1 terminal, 2 graphical. Other values are invalid. |
 | session_id | string | The session's ID, for joining and sharing it. |
 | capabilities | capabilities | The agreed capabilities. |
-
-Both sides use the agreed capabilities from `welcome` on, and the
-session's first frame follows it.
 
 ```hex
 # vector: welcome
@@ -974,9 +899,7 @@ waits behind at most one tile.
 #### The tile cache
 
 A client keeps decoded tiles in numbered *slots*, so that the server can
-draw a tile again without sending its pixels. A tile message that names
-a slot stores the tile there, and a later `cached` tile with the same
-slot draws it:
+draw a tile again without sending its pixels:
 
 ```mermaid
 sequenceDiagram
@@ -992,12 +915,11 @@ sequenceDiagram
 
 The client and the server keep to these rules:
 
-- A tile that names a slot is stored in it as the client reads the
-  message, as the tile's decoded pixels. It replaces what the slot
-  held.
-- The slot holds the tile from then on, whatever becomes of its frame.
-  A `cached` tile later in the same frame draws it, and so does one
-  after a `resize` that dropped the frame.
+- A tile that names a slot replaces what the slot held with the tile's
+  decoded pixels as the client reads the message, and the slot holds
+  them from then on, whatever becomes of the frame: a `cached` tile
+  later in the same frame draws them, and so does one after a `resize`
+  that dropped the frame.
 - The client keeps its slots across resizes, and while it is hidden.
 - A client bounds its cache at the agreed `cache_slots` times 16 KiB of
   pixels: 16 MiB for the 1024 slots that `occamyd` offers.
@@ -1038,9 +960,8 @@ content made to collide cannot choose the slot a tile is drawn from.
 00 00 00 00              # payload: length 0
 ```
 
-A [`scaled`](#the-scaled-codec) tile carries its rectangle's pixels at
-a fraction of its size. Here it is a 64×32 WebP image, cut short, for a
-128×64 rectangle:
+This [`scaled`](#the-scaled-codec) tile carries a 64×32 WebP image, cut
+short, for a 128×64 rectangle:
 
 ```hex
 # vector: tile scaled
@@ -1075,15 +996,15 @@ Type 0x0204, sent by the server as part of a [frame](#frames).
 | w | u16 | The width of both. |
 | h | u16 | The height of both. |
 
-It copies the `w × h` pixels at `src_x, src_y` to `dst_x, dst_y`, as
-the screen is after the messages before it. Both rectangles lie within
-the screen. They may overlap, as they do in a scroll, and the
-destination then gets the source's pixels as they were before the copy.
+It copies the source as the screen is after the messages before it. Both
+rectangles lie within the screen. They may overlap, as they do in a
+scroll, and the destination then gets the source's pixels as they were
+before the copy.
 
 A copy moves the pixels that the client has, which for a lossy tile are
 what its decoder produced. A client must therefore apply every `tile`
-and `copy-rect` of every frame it receives, in order, and must not drop
-any, not even those of a frame it won't show.
+and `copy-rect` of every frame it receives, in order, even those of a
+frame it won't show.
 
 `occamyd` sends `copy-rect` for changed content that the client already
 shows elsewhere, scrolled up or down. It sends the copies before the
@@ -1113,9 +1034,8 @@ Type 0x0205, sent by the server.
 | server_time | u64 | When the server read the frame's content, in microseconds since the server began to serve this connection. |
 | last_seq | u32 | The sequence number of the last input from this client that the server applied before it finished reading the frame's content, or 0 if none. |
 
-The client shows what the frame's messages drew, then acknowledges the
-frame with [`frame-ack`](#frame-ack). Frame IDs start at 1 on each
-connection and grow by one for each frame, wrapping from 2³²−1 to 0.
+Frame IDs start at 1 on each connection and grow by one for each frame,
+wrapping from 2³²−1 to 0.
 
 A frame never shows the effect of an input after `last_seq`. An input's
 effect may show only in a later frame, though, when the remote answers
@@ -1375,9 +1295,6 @@ Type 0x020f, sent by the server.
 |-------|------|---------|
 | viewer_id | u32 | The viewer's ID. |
 
-When the owner leaves, the session waits a grace period for the owner
-to return, and ends with `owner-left` if the owner doesn't.
-
 ```hex
 # vector: viewer-left
 0f 02 00 00              # header: type 0x020f (viewer-left), flags 0
@@ -1394,29 +1311,25 @@ Type 0x0210, sent by the server. It is ignorable: its flags are 1.
 |-------|------|---------|
 | answering | bool | False if the remote has not taken text sent for its clipboard, which is still waiting. True once it answers again. |
 
-It reports a state, and changes nothing about the text. Each time text
-has waited for the backend's bound without an answer, the server sends
-false to every client; for RDP, the bound is a minute. The text goes on
-waiting, and goes when the remote answers, so a client must not tell
-its user that the text was lost, and need not send it again. Nothing
-may even be wrong: a remote still at its logon screen looks the same as
-one whose clipboard process has gone. A client should therefore say
-that the text is waiting, not that something failed.
+Each time text has waited for the backend's bound without an answer, a
+minute for RDP, the server sends false to every client. The text goes
+on waiting, and goes when the remote answers, so a client says that it
+is waiting, not that it was lost or that something failed, and need not
+send it again. Nothing may even be wrong: a remote still at its logon
+screen looks the same as one whose clipboard process has gone.
 
 A client that joins while the remote hasn't answered gets false too,
 for text it had no part in, and a client that sent no text has nothing
-to tell its user. The server sends true once it hears from the remote's
-clipboard again. No message says that text arrived: no false means only
-that nothing has waited too long yet.
+to tell its user. No message says that text arrived: no false means
+only that nothing has waited too long yet.
 
 Only the latest value matters. A client may keep only the newest value
 it hasn't delivered, so a false followed at once by a true may reach a
-client as the true alone. A client that skips this message loses
-nothing; its user only goes untold.
+client as the true alone.
 
-Only the RDP backend sends it. An RDP server runs the clipboard in a
-process of its own, which starts after the user logs on and can stop
-while the session goes on. A connection that sets `disable_paste`
+Only the RDP backend sends it, because an RDP server runs the clipboard
+in a process of its own, which starts after the user logs on and can
+stop while the session goes on. A connection that sets `disable_paste`
 never sends it.
 
 ```hex
@@ -1433,10 +1346,9 @@ never sends it.
 
 ## Capabilities
 
-*Capabilities* are what a client offers in `hello`, and what the server
-agrees to in `welcome`. They let the two sides agree on codecs, limits
-and features without a new protocol version. On the wire, they are a
-list of entries:
+*Capabilities* are the codecs, limits and features that a client offers
+in `hello` and the server agrees to in `welcome`. On the wire, they are
+a list of entries:
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1449,9 +1361,6 @@ isn't sent takes its default. A receiver refuses entries out of order,
 and a known capability whose value is zero or of another size, so that
 each set of capabilities has exactly one encoding. It ignores entries
 whose IDs it doesn't know.
-
-Each capability has a default, and a rule for the value both sides
-agree on:
 
 | ID | Name | Value | Default | Agreed value |
 |----|------|-------|---------|--------------|
@@ -1490,30 +1399,28 @@ A codec ID is a u8. Codec 0 is not a codec: it appears only in a hidden
 | 8 to 0x7F | | Unassigned |
 | 0x80 to 0xFF | | Reserved |
 
-A server sends only agreed codecs, and a codec ID is never given to
-another encoding.
-
-Before it decodes a `jpeg` or `webp` payload, a receiver checks the size
-that the payload's header claims against the message's rectangle, or,
-for the image of a `scaled` tile, against the rectangle scaled down. It
-refuses a size that differs with `protocol-error`.
+A server sends only agreed codecs.
 
 > [!IMPORTANT]
-> Check the size before you decode. A few bytes of header can claim an
-> image that takes hundreds of megabytes to decode into. In Go, call
-> `DecodeConfig` before `Decode`, or use the decoder's own limit on the
-> image's size where it has one.
+> Before you decode a `jpeg` or `webp` payload, check the size that its
+> header claims against the message's rectangle, or, for a `scaled`
+> tile's image, [the rectangle scaled down](#the-scaled-codec), and
+> refuse a size that differs with `protocol-error`. A few bytes of
+> header can claim an image that takes hundreds of megabytes to decode
+> into. In Go, call `DecodeConfig` before `Decode`, or use the
+> decoder's own limit on the image's size where it has one.
 
 ### What occamyd sends
 
-`occamyd` sends each tile in the best codec of its kind that the client
-lists, whatever order the client lists them in:
+`occamyd` sends each tile and cursor in the best codec of its kind that
+the client lists, whatever order the client lists them in, and never
+sends `png`:
 
-- A lossless tile goes as `deflate`, or as `raw` to a client that lists
-  `raw` but not `deflate`.
-- A lossy tile goes as `webp`, or as `jpeg` to a client that lists
-  `jpeg` but not `webp`.
-- `occamyd` never sends `png`.
+| Kind | Codec |
+|------|-------|
+| Lossless | `deflate`, or `raw` to a client that lists `raw` but not `deflate` |
+| Lossy | `webp`, or `jpeg` to a client that lists `jpeg` but not `webp` |
+| A cursor, always lossless | `deflate`, `raw`, or lossless `webp` to a client that lists neither, with straight alpha in every codec. JPEG has no alpha, so a client that lists only `jpeg` gets no `cursor` and draws its own pointer |
 
 It picks the kind from the tile's colours and from whether the tile is
 in motion:
@@ -1533,42 +1440,33 @@ flowchart LR
   H -. Still for 300 ms .-> J[Sent again, sharper]
 ```
 
-A tile whose content a slot of the client's [tile cache](#the-tile-cache)
-holds goes as `cached`, whatever its codec would be, and is then exact.
-
 A tile is *in motion* when it changed in each of the last few snapshots
-of the screen, other than as the effect of an input. `occamyd` takes at
+of the screen, other than as the effect of an input; `occamyd` takes at
 most ten snapshots a second. A lossy tile in motion goes at a low
-quality, and at half its width and height, as a
-[`scaled`](#the-scaled-codec) image, to a client that lists `scaled`.
+quality, and to a client that lists `scaled`, at half its width and
+height as a [`scaled`](#the-scaled-codec) image.
 
-Once a tile in motion has been still for a moment, 300 ms by default,
-`occamyd` sends it again, as the dotted step of the chart shows: exactly
-if it has up to 256 colours, and at a higher quality and its full size
-if it has more. These are ordinary frames of `tile` messages, so a
-client needs nothing to take them: it sees the same tile drawn twice,
-the second time sharper.
+Once a tile in motion has been still for 300 ms by default, `occamyd`
+sends it again: exactly if it has up to 256 colours, and at a higher
+quality and its full size if it has more. These are ordinary `tile`
+messages: the client draws the tile a second time, sharper.
 
-A few more rules complete the choice:
+Other rules complete the choice:
 
 - A client that lists no lossy codec gets every tile lossless, and one
   that lists no lossless codec gets every tile lossy.
 - A lossy tile message may cover several tiles side by side, so that the
   lossy format's headers are paid only once.
 - The screen is opaque, and `occamyd` encodes lossy tiles without alpha.
-- A cursor always goes lossless: as `deflate`, as `raw`, or as lossless
-  `webp` to a client that lists neither. Its alpha is straight in every
-  codec. JPEG has no alpha, so a client that lists only `jpeg` gets no
-  `cursor` and draws its own pointer.
 
 The [codec measurements](benchmarks/codecs.md) show how each choice
 performs.
 
 ### The golden payloads
 
-[`protocol/testdata/codecs.json`](../protocol/testdata/codecs.json)
-holds a payload of each codec `occamyd` sends, with the pixels it
-encodes. It also holds `deflate` payloads that a receiver must refuse.
+[`codecs.json`](../protocol/testdata/codecs.json) holds a payload of
+each codec `occamyd` sends, with the pixels it encodes, and `deflate`
+payloads that a receiver must refuse.
 
 - A lossy payload's `min_psnr` is 3 dB below what libwebp reaches for
   WebP, and so what a browser reaches, or what Go's `image/jpeg`
@@ -1583,9 +1481,9 @@ encodes. It also holds `deflate` payloads that a receiver must refuse.
 
 ### The deflate container
 
-The payload of `deflate` inflates to a container of the rectangle's
-pixels. The message gives the rectangle's size, `w` and `h`. The
-container's first byte, the form, says how the pixels follow:
+A `deflate` payload inflates to a container of the `w × h` pixels of
+the message's rectangle. Its first byte, the form, says how the pixels
+follow:
 
 | Form | Bit 0 | Bit 1 | Content |
 |------|-------|-------|---------|
@@ -1594,23 +1492,14 @@ container's first byte, the form, says how the pixels follow:
 | 2 | palette | alpha | A palette of 4-byte colours, then indices |
 | 3 | raw | alpha | 4 bytes a pixel |
 
-The container is laid out as follows:
+Its parts are laid out as follows:
 
-- An opaque colour or pixel is red, green and blue, and its alpha is
-  255. One with alpha is red, green, blue and straight alpha, as `raw`
-  carries.
-- A palette is a u8 that holds the number of colours minus one, so 1 to
-  256 colours, then the colours.
-- With two or more colours, each pixel's index into them follows, row
-  by row from the top. Indices are packed at 1, 2, 4 or 8 bits, for up
-  to 2, 4, 16 or 256 colours. The first pixel of a byte is in its most
-  significant bits.
-- Each row starts on a byte. A sender writes the bits that pad a row's
-  last byte as zero, and a receiver ignores them.
-- A palette of one colour has no indices: every pixel is that colour.
-- A palette may hold colours that no pixel uses, and a colour more than
-  once.
-- Raw pixels are `w × h` pixels, row by row from the top.
+| Part | Layout |
+|------|--------|
+| A colour or pixel | Red, green and blue. An opaque one has an alpha of 255, and one with alpha adds straight alpha, as `raw` carries. |
+| A palette | A u8 that holds the number of colours minus one, so 1 to 256 colours, then the colours. It may hold colours that no pixel uses, and a colour more than once. |
+| Indices | With two or more colours, each pixel's index into the palette, row by row from the top, packed at 1, 2, 4 or 8 bits for up to 2, 4, 16 or 256 colours. The first pixel of a byte is in its most significant bits. Each row starts on a byte: a sender writes the bits that pad a row's last byte as zero, and a receiver ignores them. A palette of one colour has no indices: every pixel is that colour. |
+| Raw pixels | `w × h` pixels, row by row from the top. |
 
 A receiver refuses with `protocol-error`:
 
@@ -1624,28 +1513,26 @@ A receiver bounds what it inflates:
 
 - The longest container of a rectangle is `max(1 + 4wh, 1026 + wh)`
   bytes: raw pixels with alpha, or 256 colours with alpha and a byte an
-  index. The second is the longer for a rectangle of up to 341 pixels.
+  index, which is the longer for up to 341 pixels.
 - A receiver that inflates as it reads stops one byte past that cap, at
-  the byte that shows the container is too long. It never needs to hold
+  the byte that shows the container is too long, so it never holds
   more, whatever the payload inflates to.
 - An inflater that yields its output in chunks, such as a browser's
   `DecompressionStream`, may have inflated more than it yielded when the
-  receiver stops it. Chrome inflates all the input it was given at
-  once. So give it the payload a slice at a time, when it asks for
-  more. The web client gives it 1 KiB slices, which inflate to at most
-  about 1 MiB each.
+  receiver stops it, and Chrome inflates all the input it was given at
+  once. So give it the payload a slice at a time, when it asks for more:
+  the web client gives it 1 KiB slices, which inflate to at most about
+  1 MiB each.
 - Such an inflater reports trailing bytes, and a stream without its
-  final block, only at the end of its output. So a receiver reads it to
+  final block, only at the end of its output, so a receiver reads it to
   the end before it takes the container.
-- The golden payloads include one that inflates to 1 MiB of zeros. A
-  receiver that inflates it whole and then refuses it passes that
-  vector too, so the vector alone does not show that a receiver keeps
-  to the cap.
+- One golden payload inflates to 1 MiB of zeros. A receiver that
+  inflates it whole and then refuses it passes too, so the vector alone
+  doesn't show that a receiver keeps to the cap.
 
-A sender may use any form for any pixels. `occamyd` sends a palette when
-the pixels have at most 256 colours, alpha included. It uses the forms
-with alpha only when a pixel is not opaque, which happens only for
-cursors, since the screen is opaque.
+A sender may use any form for any pixels. `occamyd` sends a palette for
+pixels of at most 256 colours, alpha included, and a form with alpha
+only when a pixel isn't opaque, which happens only in cursors.
 
 A tile of 3 × 2 pixels in three colours, its container before deflate:
 
@@ -1673,9 +1560,8 @@ ff 00 00 ff              # 1: red, opaque
 
 ### The scaled codec
 
-The payload of `scaled` is the rectangle's pixels at a fraction of its
-width and height, in another codec. A tile in motion shows only until
-`occamyd` sends it again at full size, so it needs less detail.
+A `scaled` payload carries the rectangle's pixels at a fraction of its
+width and height, in another codec:
 
 | Field | Type | Meaning |
 |-------|------|---------|
@@ -1695,22 +1581,17 @@ rectangle; the `min_psnr` of a scaled payload in the golden payloads
 holds for that.
 
 A receiver refuses with `protocol-error` a payload of fewer than two
-bytes, a factor outside 2 to 4, or an image codec other than `jpeg` or
-`webp`, or one not agreed. Before it decodes the image, it also refuses
-a header that claims a size other than `⌈w / factor⌉ × ⌈h / factor⌉`.
-`scaled` is for tiles only, so a `scaled` image of a `scaled` image is
-invalid. A client that doesn't list `scaled` gets its tiles in motion
-at their full size.
+bytes, a factor outside 2 to 4, an image codec other than `jpeg` or
+`webp` or one not agreed, and, before it decodes the image, a header
+that claims a size other than `⌈w / factor⌉ × ⌈h / factor⌉`.
 
 ## Close codes
 
-Close codes are WebSocket close status codes. A peer that sends `close`
-closes the WebSocket with the same code, so a client that sees only the
-close frame still knows why. A browser client is the exception. It
-closes with 1000 in place of the codes below 3000 other than 1000, which
-browsers refuse ([close](#close)). Where WebSocket defines a fitting
-status, the code is that status. A WebSocket library that closes on its
-own, such as on its read limit, then uses the right code.
+Close codes are WebSocket close status codes, and a peer closes the
+WebSocket with the code of its `close`, except as [close](#close)
+describes for a browser. Where WebSocket defines a fitting status, the
+code is that status, so a WebSocket library that closes on its own,
+such as on its read limit, uses the right code.
 
 | Code | Name | Meaning |
 |------|------|---------|
@@ -1730,9 +1611,6 @@ own, such as on its read limit, then uses the right code.
 | 4007 | `viewer-limit` | The session has as many viewers as it allows. |
 | 4008 | `too-slow` | The viewer acknowledged no frame, or took no message, for the server's viewer timeout. |
 
-A receiver treats a code it doesn't know as an error that the reason
-describes, and a code is never given another meaning.
-
 ## Versioning
 
 The major version lives in the subprotocol's name, `occamy.v1`, and in
@@ -1743,29 +1621,25 @@ that changes how a body reads is agreed as a capability first. Type
 numbers, capability IDs, codec IDs and close codes are never reused.
 
 The golden vectors are part of the protocol. An implementation passes
-every vector in
-[`protocol/testdata/framing.json`](../protocol/testdata/framing.json)
-and
-[`protocol/testdata/messages.json`](../protocol/testdata/messages.json),
-both ways, and fails every invalid vector with the named error. A client
-decodes every vector in
-[`protocol/testdata/codecs.json`](../protocol/testdata/codecs.json) for
-the codecs it lists, and refuses every invalid one.
+every vector in [`framing.json`](../protocol/testdata/framing.json) and
+[`messages.json`](../protocol/testdata/messages.json), both ways, and
+fails every invalid vector with the named error. A client decodes every
+vector in [`codecs.json`](../protocol/testdata/codecs.json) for the
+codecs it lists, and refuses every invalid one.
 
 ## Design
 
-- The Go package [`changkun.de/x/occamy/protocol`](../protocol) is the
-  protocol's reference implementation. It generates the golden vectors,
-  and every example on this page is checked against them. A
-  disagreement between this page, the package and the vectors is a bug.
-- [Protocol v1](../specs/008-native-architecture/protocol-v1.md) records
-  the protocol's design: the options weighed and the decisions made.
-- [The API and server stack](../specs/008-native-architecture/api-and-server-stack.md)
-  covers the stream routes and the handshake on the server.
-- [The session core](../specs/008-native-architecture/session-core.md)
-  covers the time from input to display, and how the server paces each
-  viewer.
-- [The real-time transport](../specs/008-native-architecture/realtime-transport.md)
-  covers the frame window on long paths.
-- [The graphics pipeline](../specs/008-native-architecture/graphics-pipeline.md)
-  covers the codecs, the tile cache and scaled tiles.
+The Go package [`changkun.de/x/occamy/protocol`](../protocol) is the
+protocol's reference implementation. It generates the golden vectors,
+and every example on this page is checked against them, so a
+disagreement between this page, the package and the vectors is a bug.
+These specs record the design, with the options weighed and the
+decisions made:
+
+| Part | Spec |
+|------|------|
+| The protocol | [Protocol v1](../specs/008-native-architecture/protocol-v1.md) |
+| The stream routes and the handshake on the server | [The API and server stack](../specs/008-native-architecture/api-and-server-stack.md) |
+| The time from input to display, and how the server paces each viewer | [The session core](../specs/008-native-architecture/session-core.md) |
+| The frame window on long paths | [The real-time transport](../specs/008-native-architecture/realtime-transport.md) |
+| The codecs, the tile cache and scaled tiles | [The graphics pipeline](../specs/008-native-architecture/graphics-pipeline.md) |
