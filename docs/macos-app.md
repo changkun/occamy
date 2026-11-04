@@ -6,9 +6,17 @@ and one window per session. It speaks protocol v1 to `occamyd`, through
 the same Go client core as the tests, and runs on macOS 26 and later,
 on Apple silicon and Intel.
 
+## Installing it
+
+Download `Occamy-<version>.dmg` from the
+[releases](https://github.com/changkun/occamy/releases), open it, and
+drag Occamy to Applications. The app is signed with a Developer ID and
+notarized by Apple, so Gatekeeper opens it; macOS asks once whether to
+open an app downloaded from the internet.
+
 ## Building it
 
-You need Xcode 26 or later and Go, as [Try Occamy](try-it.md#1-what-you-need)
+To build it yourself, you need Xcode 26 or later and Go, as [Try Occamy](try-it.md#1-what-you-need)
 says. From the repository's root:
 
 ```sh
