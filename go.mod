@@ -6,16 +6,16 @@ require (
 	github.com/coder/websocket v1.8.15
 	github.com/coreos/go-oidc/v3 v3.21.0
 	github.com/gen2brain/jpegn v0.6.2
-	github.com/gen2brain/vpx v0.2.1
+	github.com/gen2brain/vpx v0.2.2
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/jezek/xgb v1.3.1
 	github.com/zeebo/xxh3 v1.1.0
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/crypto v0.58.0
-	golang.org/x/image v0.47.0
-	golang.org/x/oauth2 v0.37.0
-	golang.org/x/sys v0.49.0
-	golang.org/x/text v0.43.0
+	golang.org/x/image v0.48.0
+	golang.org/x/oauth2 v0.38.0
+	golang.org/x/sys v0.50.0
+	golang.org/x/text v0.44.0
 )
 
 require (
